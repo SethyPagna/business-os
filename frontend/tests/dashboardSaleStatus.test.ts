@@ -25,8 +25,10 @@ assert.equal(normalizeDashboardSaleStatus(undefined), 'completed', 'missing lega
 
 const dashboard = readFileSync(new URL('../src/components/dashboard/Dashboard.tsx', import.meta.url), 'utf8')
 assert.match(dashboard, /getDashboardSaleStatusLabel\(status, t\)/, 'dashboard labels use the runtime status helper')
-assert.match(dashboard, /formatStatus\(sale\.sale_status\)/, 'recent-sale rows read the API sale_status field')
-assert.match(dashboard, /getDashboardSaleStatusTone\(sale\.sale_status\)/, 'recent-sale tone reads the same API field')
-assert.doesNotMatch(dashboard, /getDashboardSaleStatusTone\(sale\.sale_status\)[^}]*\}\s*>\s*<[^>]+Icon/, 'recent-sale status badges stay text-only')
+// Since the corner-tag model the chip is the PAYMENT state: the API's stored
+// sale_status read through status_before_return (utils/saleTags.ts).
+assert.match(dashboard, /formatStatus\(saleChipStatus\(sale\)\)/, 'recent-sale rows print the payment-state chip resolved from the API sale_status')
+assert.match(dashboard, /getDashboardSaleStatusTone\(saleChipStatus\(sale\)\)/, 'recent-sale tone reads the same resolved status')
+assert.doesNotMatch(dashboard, /getDashboardSaleStatusTone\(saleChipStatus\(sale\)\)[^}]*\}\s*>\s*<[^>]+Icon/, 'recent-sale status badges stay text-only')
 
 console.log('PASS dashboard sale status presentation')

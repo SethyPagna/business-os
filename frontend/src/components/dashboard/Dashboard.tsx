@@ -30,6 +30,8 @@ import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import DollarSign from 'lucide-react/dist/esm/icons/dollar-sign.js'
 import FileText from 'lucide-react/dist/esm/icons/file-text.js'
 import { getDashboardSaleStatusLabel, getDashboardSaleStatusTone } from './dashboardSaleStatus.ts'
+import SaleTagRibbon from '../sales/SaleTagRibbon.tsx'
+import { saleChipStatus } from '../../utils/saleTags.ts'
 import { finishDashboardStockAlertRequest, invalidateDashboardStockAlertRequest } from './dashboardStockAlertRequests.ts'
 import { dashboardRangeQuery, dashboardRangeLabel, type DashboardRangeQuery } from './dashboardRange.ts'
 
@@ -124,6 +126,8 @@ interface DashboardSale {
   receipt_number?: string
   created_at?: string
   sale_status?: string
+  // What the sale was before a return moved it: the chip shows this, the ribbon shows the return (utils/saleTags.ts).
+  status_before_return?: string | null
   branch_name?: string
   customer_name?: string
   cashier_name?: string
@@ -606,9 +610,10 @@ function RecentSalesCard({ summary, t, translateOr, fmtUSD, fmtKHR, formatStatus
       <div className="border-b border-gray-100 px-3 py-2.5 sm:px-4 dark:border-gray-700"><h2 className="font-semibold text-gray-900 dark:text-white">{t('sales') || 'Sales'}</h2></div>
       <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>
         {!sales.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : sales.map((sale) => (
-          <button key={sale.id} type="button" className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4" onClick={() => onOpenSale(sale)}>
-            <div className="min-w-0"><p className="detail-scroll-text text-sm font-medium text-gray-700 dark:text-gray-300">{sale.receipt_number}</p><p className="detail-scroll-text text-xs text-gray-400">{compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name || t('walk_in') || 'General']).join(' | ')}</p></div>
-            <div className="shrink-0 text-right"><div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div><div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getDashboardSaleStatusTone(sale.sale_status)}`}>{formatStatus(sale.sale_status)}</div></div>
+          <button key={sale.id} type="button" className="relative flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4" onClick={() => onOpenSale(sale)}>
+            <SaleTagRibbon sale={sale} t={t} />
+            <div className="min-w-0"><p className="detail-scroll-text relative text-sm font-medium text-gray-700 dark:text-gray-300">{sale.receipt_number}</p><p className="detail-scroll-text text-xs text-gray-400">{compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name || t('walk_in') || 'General']).join(' | ')}</p></div>
+            <div className="shrink-0 text-right"><div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div><div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getDashboardSaleStatusTone(saleChipStatus(sale))}`}>{formatStatus(saleChipStatus(sale))}</div></div>
           </button>
         ))}
       </div>
@@ -2512,19 +2517,20 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
             <button
               key={`recent-sale-${sale.id}`}
               type="button"
-              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
+              className="relative flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
               onClick={() => setRecentSaleDetail(sale)}
             >
+              <SaleTagRibbon sale={sale} t={t} />
               <div className="min-w-0">
-                <div className="detail-scroll-text text-sm font-semibold text-gray-800 dark:text-gray-100">{sale.receipt_number || `#${sale.id}`}</div>
+                <div className="detail-scroll-text relative text-sm font-semibold text-gray-800 dark:text-gray-100">{sale.receipt_number || `#${sale.id}`}</div>
                 <div className="detail-scroll-text text-xs text-gray-400">
                   {compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name || t('walk_in') || 'General']).join(' | ')}
                 </div>
               </div>
               <div className="shrink-0 text-right">
                 <div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div>
-                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getDashboardSaleStatusTone(sale.sale_status)}`}>
-                  {formatSaleStatus(sale.sale_status)}
+                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getDashboardSaleStatusTone(saleChipStatus(sale))}`}>
+                  {formatSaleStatus(saleChipStatus(sale))}
                 </div>
               </div>
             </button>
@@ -2687,7 +2693,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
             <div className="modal-scroll grid grid-cols-2 gap-2 p-4">
               {([
                 { label: t('date') || 'Date', value: fmtTime(recentSaleDetail.created_at) },
-                { label: t('status') || 'Status', value: formatSaleStatus(recentSaleDetail.sale_status) },
+                { label: t('status') || 'Status', value: formatSaleStatus(saleChipStatus(recentSaleDetail)) },
                 { label: t('total') || 'Total', value: fmtUSD(recentSaleDetail.total_usd || recentSaleDetail.total || 0) },
                 { label: 'KHR', value: fmtKHR(recentSaleDetail.total_khr || 0) },
                 { label: t('branch') || 'Branch', value: recentSaleDetail.branch_name || '--' },

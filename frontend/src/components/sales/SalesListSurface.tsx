@@ -1,6 +1,8 @@
 import { Fragment, Children, isValidElement, useEffect, type ReactNode, type ComponentProps, type RefObject } from 'react'
 import Printer from 'lucide-react/dist/esm/icons/printer.js'
 import StatusBadge from './StatusBadge.tsx'
+import SaleTagRibbon from './SaleTagRibbon.tsx'
+import { saleChipStatus } from '../../utils/saleTags.ts'
 import { consumeLongPressClick, createLongPressHandlers, type LongPressState } from '../../utils/longPress.ts'
 import ColumnChooser from '../shared/ColumnChooser.tsx'
 import DayGroupHeader from '../shared/DayGroupHeader.tsx'
@@ -42,6 +44,8 @@ interface SaleRecord {
   receipt_number?: string
   created_at?: string
   sale_status?: string
+  // What the sale was before a return moved it: the chip shows this, the ribbon shows the return (utils/saleTags.ts).
+  status_before_return?: string | null
   cashier_name?: string
   payment_method?: string
   total_usd?: number
@@ -312,7 +316,8 @@ export default function SalesListSurface({
                               onClick={selectionModeActive ? handleRowClick : undefined}
                               {...(selectionModeActive ? {} : longPress)}
                             >
-                              <td className={`${selectCellPad} py-1.5`} onClick={(event) => event.stopPropagation()}>
+                              <td className={`${selectCellPad} relative py-1.5`} onClick={(event) => event.stopPropagation()}>
+                                <SaleTagRibbon sale={sale} t={t} />
                                 {selectionModeActive ? (
                                 <input
                                   type="checkbox"
@@ -324,7 +329,7 @@ export default function SalesListSurface({
                                 ) : null}
                               </td>
                               <td className="max-w-[11rem] px-3 py-1.5">
-                                <button type="button" className="block max-w-full detail-scroll-text font-mono font-semibold text-blue-600 hover:underline dark:text-blue-400" title={sale.receipt_number} onClick={(event) => { event.stopPropagation(); setDetailSale(sale) }}>{sale.receipt_number}</button>
+                                <button type="button" className="relative block max-w-full detail-scroll-text font-mono font-semibold text-blue-600 hover:underline dark:text-blue-400" title={sale.receipt_number} onClick={(event) => { event.stopPropagation(); setDetailSale(sale) }}>{sale.receipt_number}</button>
                               </td>
                               <td className="whitespace-nowrap px-3 py-1.5 text-[11px] text-gray-500">{fmtTime(sale.created_at)}</td>
                               <td className="px-3 py-1.5">
@@ -336,7 +341,7 @@ export default function SalesListSurface({
                                   {sale.customer_phone?.trim() ? <div className="detail-scroll-text text-xs text-gray-400"><EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo}>{sale.customer_phone}</EntityLink></div> : null}
                                 </div>
                               </td>
-                              <td className="px-3 py-1.5"><StatusBadge status={status} t={t} /></td>
+                              <td className="px-3 py-1.5"><StatusBadge status={saleChipStatus(sale)} t={t} /></td>
                               {cols.isVisible('cashier') ? <td className="hidden px-3 py-1.5 text-gray-700 dark:text-gray-300 lg:table-cell">{sale.cashier_name || 'N/A'}</td> : null}
                               <td className="px-3 py-1.5">{sale.payment_method ? <EntityLink page="settings" anchor="hub:settings:settings" navigate={navigateTo}><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{sale.payment_method}</span></EntityLink> : <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">N/A</span>}</td>
                               {cols.isVisible('branch') ? <td className="hidden px-3 py-1.5 text-[11px] text-gray-500 md:table-cell">{branchLabel ? <EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{branchLabel}</EntityLink> : 'N/A'}</td> : null}
@@ -474,13 +479,14 @@ export default function SalesListSurface({
                     return (
                       <div
                         key={sale.id}
-                        className={`card cursor-pointer select-none p-3 active:bg-blue-50 dark:active:bg-blue-900/10 ${cardSelected ? 'ring-1 ring-blue-300 bg-blue-50/60 dark:ring-blue-700 dark:bg-blue-900/20' : ''}`}
+                        className={`card relative cursor-pointer select-none p-3 active:bg-blue-50 dark:active:bg-blue-900/10 ${cardSelected ? 'ring-1 ring-blue-300 bg-blue-50/60 dark:ring-blue-700 dark:bg-blue-900/20' : ''}`}
                         onClick={selectionModeActive ? handleCardClick : undefined}
                         {...(selectionModeActive ? {} : cardLongPress)}
                       >
+                        <SaleTagRibbon sale={sale} t={t} />
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 flex-1">
-                            <div data-sales-card-primary-meta="" className="mb-1 flex min-w-0 flex-nowrap items-center gap-x-1.5 overflow-x-auto overscroll-x-contain whitespace-nowrap text-xs text-gray-400 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                            <div data-sales-card-primary-meta="" className="relative mb-1 flex min-w-0 flex-nowrap items-center gap-x-1.5 overflow-x-auto overscroll-x-contain whitespace-nowrap text-xs text-gray-400 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                               {selectionModeActive ? (
                               <input
                                 type="checkbox"
@@ -526,7 +532,7 @@ export default function SalesListSurface({
                                 still shrink inside the flex-nowrap row). */}
                             <div data-sales-card-status-meta="" className="mt-1 flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto overscroll-x-contain whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                               {branchLabel ? <span className="shrink-0" aria-label={`${t('branch') || 'Branch'}: ${branchLabel}`}><EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{branchLabel}</EntityLink></span> : null}
-                              <span className="shrink-0"><StatusBadge status={status} t={t} /></span>
+                              <span className="shrink-0"><StatusBadge status={saleChipStatus(sale)} t={t} /></span>
                               {sale.payment_method ? <EntityLink page="settings" anchor="hub:settings:settings" navigate={navigateTo} className="shrink-0 whitespace-nowrap"><span className="badge-blue shrink-0 whitespace-nowrap text-xs">{sale.payment_method}</span></EntityLink> : <span className="badge-blue shrink-0 whitespace-nowrap text-xs">N/A</span>}
                               <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{items.length} {t('items')}</span>
                             </div>

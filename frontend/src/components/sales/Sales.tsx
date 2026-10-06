@@ -18,6 +18,7 @@ import { loadSortSpec, saveSortSpec, type SortField, type SortSpec } from '../..
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { ALL_STATUSES, getStatusBadgeLabel as getStatusLabel } from './StatusBadge'
+import { RETURN_STATUSES as RETURN_TAG_STATUSES } from '../../utils/saleTags.ts'
 import type { SaleCancelPayload } from './CancelSaleModal'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
@@ -2484,19 +2485,29 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
     { label: translateOr('export_detailed_sales_report', 'Detailed sales report', 'របាយការណ៍លម្អិតការលក់'), onClick: () => setShowExport(true), color: 'green' },
   ].filter(Boolean) as Array<PortalMenuItem | null | false>) : [], [canExportSales, exportVisibleSales, filtered, handleExportSelected, stripRange.startDate, stripRange.endDate, selectedSales.length, statusFilter, t, translateOr])
 
+  const statusFilterOption = useCallback((status: string) => ({
+    id: status,
+    label: getStatusLabel(status, t),
+    active: isMultiActive(statusFilter, status),
+    onClick: () => setStatusFilter(toggleMultiValue(statusFilter, status)),
+  }), [statusFilter, t])
+
   const salesFilterSections = useMemo(() => ([
     {
       id: 'status',
       label: t('status') || 'Status',
       options: [
         { id: 'all', label: t('all_statuses') || 'All statuses', active: statusFilter === 'all', onClick: () => setStatusFilter('all') },
-        ...ALL_STATUSES.map((status) => ({
-          id: status,
-          label: getStatusLabel(status, t),
-          active: isMultiActive(statusFilter, status),
-          onClick: () => setStatusFilter(toggleMultiValue(statusFilter, status)),
-        })),
+        ...ALL_STATUSES.filter((status) => !RETURN_TAG_STATUSES.includes(status)).map(statusFilterOption),
       ],
+    },
+    // Partial return / Returned are TAGS now (the ribbon on the card), not a
+    // sale's status chip -- same stored statuses and the same status filter
+    // underneath, offered under their own heading (utils/saleTags.ts).
+    {
+      id: 'tag',
+      label: t('tag_label') || 'Tag',
+      options: ALL_STATUSES.filter((status) => RETURN_TAG_STATUSES.includes(status)).map(statusFilterOption),
     },
     isAdmin ? {
       id: 'user',
@@ -2535,7 +2546,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
     // above the search bar (StatsRangeRow → stripRange) is the single date
     // scope now and drives the list directly, so a second date control here
     // would just be a way to disagree with it (user, Aug 31).
-  ].filter(Boolean)), [isAdmin, salesSortSpec, statusFilter, t, translateOr, userFilter, userOptions])
+  ].filter(Boolean)), [isAdmin, salesSortSpec, statusFilter, statusFilterOption, t, translateOr, userFilter, userOptions])
 
   const activeSalesFilterCount = useMemo(
     () => countActiveFlags([statusFilter !== 'all', userFilter !== 'all', !(salesSortSpec.field === 'date' && salesSortSpec.direction === 'desc')]),

@@ -65,7 +65,7 @@ const salesListSurface = readFileSync(new URL('../src/components/sales/SalesList
 const scrollUtilityClasses = 'flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto overscroll-x-contain whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
 assert.match(
   salesListSurface,
-  /data-sales-card-primary-meta="" className="mb-1 flex min-w-0 flex-nowrap items-center gap-x-1\.5 overflow-x-auto overscroll-x-contain whitespace-nowrap[\s\S]{0,80}\[&::-webkit-scrollbar\]:hidden"/,
+  /data-sales-card-primary-meta="" className="(?:relative )?mb-1 flex min-w-0 flex-nowrap items-center gap-x-1\.5 overflow-x-auto overscroll-x-contain whitespace-nowrap[\s\S]{0,80}\[&::-webkit-scrollbar\]:hidden"/,
   'the first mobile sale card meta row scrolls horizontally',
 )
 assert.match(

@@ -5,6 +5,8 @@ import PaginationControls, { DEFAULT_PAGE_SIZE } from '../shared/PaginationContr
 import { fmtDateTime24 } from '../../utils/formatters'
 import CopyableId from '../shared/CopyableId.tsx'
 import StatusBadge from '../sales/StatusBadge.tsx'
+import SaleTagRibbon from '../sales/SaleTagRibbon.tsx'
+import { saleChipStatus } from '../../utils/saleTags.ts'
 import { getCustomerSalesReport } from '../../api/salesTransport.ts'
 
 // X4 (Part 395): the customer leg of the per-contact drills -- purchase
@@ -43,6 +45,8 @@ interface CustomerSaleRow {
   created_at: string
   branch_name: string | null
   status: string
+  // What the sale was before a return moved it: the chip shows this, the ribbon shows the return.
+  status_before_return?: string | null
   total_usd: number
 }
 
@@ -197,12 +201,13 @@ export default function CustomerPurchasesReportModal({ customerId, customerName,
                     <tbody>
                       {sales.map((sale) => (
                         <tr key={sale.id} className="border-t border-gray-100 dark:border-gray-800">
-                          <td className="px-3 py-2 leading-6 text-gray-800 dark:text-gray-100">
-                            <CopyableId value={sale.receipt_number || '--'} copyLabel={tr(t, 'copy', 'Copy')} copiedLabel={tr(t, 'copied', 'Copied')} valueClassName="text-xs leading-6" />
+                          <td className="relative px-3 py-2 leading-6 text-gray-800 dark:text-gray-100">
+                            <SaleTagRibbon sale={sale} t={(key) => t(key) || key} />
+                            <CopyableId value={sale.receipt_number || '--'} copyLabel={tr(t, 'copy', 'Copy')} copiedLabel={tr(t, 'copied', 'Copied')} valueClassName="relative text-xs leading-6" />
                           </td>
                           <td className="px-3 py-2 leading-6 text-gray-500">{fmtDateTime24(sale.created_at)}</td>
                           <td className="px-3 py-2 leading-6 text-gray-500">{sale.branch_name || '--'}</td>
-                          <td className="px-3 py-2 leading-6"><StatusBadge status={sale.status} t={(key) => t(key) || key} /></td>
+                          <td className="px-3 py-2 leading-6"><StatusBadge status={saleChipStatus(sale)} t={(key) => t(key) || key} /></td>
                           <td className="px-3 py-2 text-right leading-6 font-semibold text-gray-900 dark:text-white">{money(sale.total_usd)}</td>
                         </tr>
                       ))}
@@ -211,15 +216,16 @@ export default function CustomerPurchasesReportModal({ customerId, customerName,
                 </div>
                 <div className="space-y-2 md:hidden">
                   {sales.map((sale) => (
-                    <div key={sale.id} className="rounded-xl border border-gray-200 px-3 py-2 dark:border-gray-700">
+                    <div key={sale.id} className="relative rounded-xl border border-gray-200 px-3 py-2 dark:border-gray-700">
+                      <SaleTagRibbon sale={sale} t={(key) => t(key) || key} />
                       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                        <CopyableId value={sale.receipt_number || '--'} copyLabel={tr(t, 'copy', 'Copy')} copiedLabel={tr(t, 'copied', 'Copied')} valueClassName="min-w-0 flex-1 text-sm leading-6 text-gray-900 dark:text-white" />
+                        <CopyableId value={sale.receipt_number || '--'} copyLabel={tr(t, 'copy', 'Copy')} copiedLabel={tr(t, 'copied', 'Copied')} valueClassName="relative min-w-0 flex-1 text-sm leading-6 text-gray-900 dark:text-white" />
                         <span className="text-sm font-semibold leading-6 tabular-nums text-gray-900 dark:text-white">{money(sale.total_usd)}</span>
                       </div>
                       <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                         <span className="text-xs leading-5 text-gray-400">{fmtDateTime24(sale.created_at)}</span>
                         <span className="text-xs leading-5 text-gray-400">{sale.branch_name || '--'}</span>
-                        <span className="ml-auto"><StatusBadge status={sale.status} t={(key) => t(key) || key} /></span>
+                        <span className="ml-auto"><StatusBadge status={saleChipStatus(sale)} t={(key) => t(key) || key} /></span>
                       </div>
                     </div>
                   ))}

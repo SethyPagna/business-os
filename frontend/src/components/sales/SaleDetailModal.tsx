@@ -42,6 +42,8 @@ import { SaleCopyValue as EntityLink } from './SalesListSurface.tsx'
 import { DetailRow, DetailRowGroup, MoneyRow } from '../shared/DetailRows.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
 import StatusBadge, { getStatusBadgeLabel as getStatusLabel } from './StatusBadge.tsx'
+import SaleTagRibbon from './SaleTagRibbon.tsx'
+import { saleChipStatus, saleReturnLoweredDebt } from '../../utils/saleTags.ts'
 import {
   mergeStagedAddLine,
   stagedAddLineKey,
@@ -140,6 +142,8 @@ interface SaleDetail {
   created_at?: string | Date | null
   updated_at?: string | null
   sale_status?: string | null
+  // What the sale was before a return moved it; the chip shows this and the ribbon the return (utils/saleTags.ts).
+  status_before_return?: string | null
   customer_membership_number?: string | null
   customer_is_anonymous?: number | boolean | null
   items?: SaleLineItem[] | string | null
@@ -1370,6 +1374,7 @@ export default function SaleDetailModal({
   if (!sale) return null
 
   const currentStatus = sale.sale_status || 'completed'
+  const chipStatus = saleChipStatus(sale)
   // The Return action reuses the Returns section's own guards rather than
   // inventing new ones -- see utils/saleReturnGuard.ts, shared with the
   // receipt view so the two surfaces never disagree. The reason is stated up
@@ -1759,7 +1764,8 @@ export default function SaleDetailModal({
             full date/time beneath the receipt and the labelled Sale rows.
             CopyableId can still wrap a long id instead of clipping it or
             replacing the accessible copy control with a hidden gesture. */}
-        <div data-sale-detail-header="" className="flex flex-shrink-0 items-start justify-between gap-2 border-b border-gray-200 p-3 dark:border-gray-700 sm:p-4">
+        <div data-sale-detail-header="" className="relative flex flex-shrink-0 items-start justify-between gap-2 border-b border-gray-200 p-3 dark:border-gray-700 sm:p-4">
+          <SaleTagRibbon sale={sale} t={t} />
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-start gap-2">
               <div data-sale-detail-primary-meta="" className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-gray-400">
@@ -1767,14 +1773,15 @@ export default function SaleDetailModal({
                   value={sale.receipt_number || ''}
                   copyLabel={translateOr('copy_receipt_number', 'Copy receipt number', 'ចម្លងលេខវិក្កយបត្រ')}
                   copiedLabel={t('copied') || 'Copied'}
-                  className="!w-auto max-w-full flex-none sm:min-w-0 sm:flex-1"
+                  className="relative !w-auto max-w-full flex-none sm:min-w-0 sm:flex-1"
                   valueClassName="font-mono text-sm font-bold text-gray-900 dark:text-white sm:text-base"
                 />
               </div>
-              <StatusBadge status={currentStatus} t={t} />
+              <StatusBadge status={chipStatus} t={t} />
             </div>
             <div data-sale-detail-secondary-meta="" className="mt-1 flex min-w-0 items-center gap-2 overflow-x-auto whitespace-nowrap text-xs text-gray-500">
               <span>{fmtTime(sale.created_at)}</span>
+              {saleReturnLoweredDebt(sale) ? <span>{t('sale_tag_debt_lowered') || 'Debt lowered'}</span> : null}
               {sale.cashier_name ? <span aria-label={`${t('cashier') || 'Cashier'}: ${sale.cashier_name}`}>{sale.cashier_name}</span> : null}
               {sale.branch_name ? <span aria-label={`${t('branch') || 'Branch'}: ${sale.branch_name}`}>{sale.branch_name}</span> : null}
             </div>
@@ -1878,7 +1885,7 @@ export default function SaleDetailModal({
                   </DetailRow>
                 )}
                 <div className="hidden sm:block"><DetailRow label={t('branch') || 'Branch'}>{sale.branch_name ? <EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{sale.branch_name}</EntityLink> : null}</DetailRow></div>
-                <DetailRow label={t('status') || 'Status'} value={getStatusLabel(currentStatus, t)} />
+                <DetailRow label={t('status') || 'Status'} value={getStatusLabel(chipStatus, t)} />
                 {sale.source_return_id ? (
                   <DetailRow label={translateOr('replacement_for_return', 'Replacement for return', 'ការលក់ជំនួសសម្រាប់ការបង្វិលត្រឡប់')} value={`#${sale.source_return_id}`} mono />
                 ) : null}
