@@ -16,6 +16,8 @@ const actual = new Set(['businessMaintenanceGuard','offlineSaleOwnership','acqui
   'moneyPrecision','saleMoneyPrecision','saleItemPricing','promotionRules','productMergeLineage','saleMutationHeaderQuote',
   'anonymousCustomer',
   'receiptNumber','clientTimestamp',
+  // N15: POST /sales checks the quoted exchange rate against Settings.
+  'saleExchangeRateBand',
   // N21: routes/sales.ts resolves the display address through this kernel on
   // every write. A stub makes contactDisplayAddress undefined and the route
   // 500s, so it is loaded for real -- it has no imports of its own.

@@ -4221,6 +4221,7 @@
   "receipt_language_title": "Receipt Language",
   "receipt_number": "Receipt #",
   "receipt_number_conflict": "Another sale took this receipt number at the same moment. Nothing was recorded. Try the sale again.",
+  "exchange_rate_out_of_range": "The exchange rate on this sale is too far from the rate in Settings. Refresh the till and ring the sale again. Nothing was recorded.",
   "sale_discount_exceeds_price": "A fixed discount cannot be larger than the item price. Lower the discount or raise the price.",
   "sale_discount_exceeds_subtotal": "The sale discount cannot be larger than the subtotal. Lower the discount.",
   "receipt_or_sale_id": "Receipt Number or Sale ID",

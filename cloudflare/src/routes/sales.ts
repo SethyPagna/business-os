@@ -145,6 +145,7 @@ import { quoteSaleMutationHeader, compareSaleHeaderQuote, SaleHeaderQuoteError }
 import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/nativeSaleChange'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
+import { EXCHANGE_RATE_OUT_OF_RANGE_CODE, EXCHANGE_RATE_OUT_OF_RANGE_MESSAGE, saleExchangeRateWithinBand } from '../lib/saleExchangeRateBand'
 import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { formatSaleStatusTelegramLines, formatSaleTelegramLines, sendTelegramEvent } from '../lib/telegram'
@@ -845,8 +846,12 @@ app.post('/', async (c) => {
     `SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate')`,
   ).all<{ key: string; value: string }>()
   const rateSettings = Object.fromEntries(rateSettingRows.map((row) => [row.key, row.value]))
-  const exchangeRate = Number(body.exchange_rate) > 0 ? Number(body.exchange_rate)
-    : Number(rateSettings.exchange_rate) > 0 ? Number(rateSettings.exchange_rate) : 4100
+  const settingsExchangeRate = Number(rateSettings.exchange_rate) > 0 ? Number(rateSettings.exchange_rate) : 4100
+  const exchangeRate = Number(body.exchange_rate) > 0 ? Number(body.exchange_rate) : settingsExchangeRate
+  // N15: the quoted rate must sit near the Settings rate (lib/saleExchangeRateBand.ts).
+  if (!saleExchangeRateWithinBand(exchangeRate, settingsExchangeRate)) {
+    return c.json({ error: EXCHANGE_RATE_OUT_OF_RANGE_MESSAGE, code: EXCHANGE_RATE_OUT_OF_RANGE_CODE }, 409)
+  }
   const changeExchangeRateSetting = rateSettings.change_exchange_rate
   let customer: { id: number; name: string | null; membership_number: string | null; is_anonymous: number } | null = null
   if (body.customer_id) {

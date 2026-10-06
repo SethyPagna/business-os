@@ -44,6 +44,8 @@ const actual = new Set(['businessDateWindow', 'continuousReadWindow', 'businessM
   'conflictControl', 'searchMatch', 'financialPrecision', 'paymentMethodRegistry',
   'paymentSettlement', 'saleSettlementAction', 'saleLineAddition', 'saleAmendments',
   'nativeSaleChange', 'receiptNumber', 'clientTimestamp', 'branchRoleGuards', 'branchRoles',
+  // N15: POST /sales checks the quoted exchange rate against Settings.
+  'saleExchangeRateBand',
   'contactOptions', 'saleCreationSnapshot', 'saleRecordEvents', 'saleRecords', 'anonymousCustomer',
   'moneyPrecision', 'saleMoneyPrecision', 'saleItemPricing', 'promotionRules',
   'productMergeLineage', 'saleMutationHeaderQuote', 'reportMoneyPrecision',
