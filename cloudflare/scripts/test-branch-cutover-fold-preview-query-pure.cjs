@@ -27,6 +27,12 @@ async function main() {
     const lf = source.replace(/\r\n/g, '\n')
     assert.equal(guard.guardSql(lf).sql, sql); assert.equal(guard.guardSql(lf.replace(/\n/g, '\r\n')).sql, sql)
     assert.ok(sql.length <= guard.MAX_SQL_CHARS)
+    // D1 refuses any LIKE/GLOB pattern over 50 bytes ("LIKE or GLOB pattern too complex", found on local workerd D1)
+    const patterns = [...sql.matchAll(/\b(?:GLOB|LIKE)\s+'((?:[^']|'')*)'/gi)].map(m => m[1])
+    assert.ok(patterns.length >= 5)
+    for (const p of patterns) assert.ok(Buffer.byteLength(p) <= 50, 'pattern over 50 bytes: ' + p)
+    // no per-row sub-query re-scans: the lot pipeline is materialized once (51 s -> ~0.1 s at production scale)
+    assert.match(sql, /qty AS MATERIALIZED/); assert.match(sql, /f AS MATERIALIZED/)
   })
 
   await check('preview counts before begin equal the fold stage of the real run on the production-shaped fixture', async () => {

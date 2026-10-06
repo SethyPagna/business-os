@@ -27,6 +27,7 @@
 --                          received_at formats of the positive lots
 --   received_next_day_in_cambodia  timestamps at 17:00 UTC or later, whose
 --                          Cambodia business day is the next date
+-- D1 refuses a LIKE/GLOB pattern over 50 bytes ("pattern too complex"); every pattern here is shorter.
 -- Business day = UTC+7; a date-only value is the day as stored; a timestamp
 -- without a zone is UTC. Supplier = supplier_id, else lower(trim(name)).
 -- The fold stage also keeps apart a blend whose average rounds to $0.0000
@@ -34,32 +35,32 @@
 -- cloudflare/scripts/test-branch-cutover-fold-preview-query-pure.cjs
 -- ops:min-rows 1
 -- ops:max-rows 1
-WITH br AS (
+WITH br AS MATERIALIZED (
   SELECT
     (SELECT MIN(id) FROM branches WHERE is_active = 1 AND COALESCE(canonical_key, lower(trim(name))) = 'shop') AS src,
     (SELECT MIN(id) FROM branches WHERE is_active = 1 AND COALESCE(canonical_key, lower(trim(name))) = 'warehouse') AS tgt,
     (SELECT COUNT(*) FROM branches WHERE is_active = 1 AND COALESCE(canonical_key, lower(trim(name))) = 'shop') AS n_src,
     (SELECT COUNT(*) FROM branches WHERE is_active = 1 AND COALESCE(canonical_key, lower(trim(name))) = 'warehouse') AS n_tgt
-), moving AS (
-  SELECT s.product_id AS p FROM branch_stock s, br WHERE s.branch_id = br.src AND s.quantity > 0
-), lq AS (
-  SELECT b.id, b.variant_product_id AS p, b.received_at, b.expiry_date, b.unit_cost_usd AS cost,
+), qty AS MATERIALIZED (
+  -- one row per positive lot at either branch: two index range reads, no per-row sub-query
+  SELECT s.batch_id,
+    SUM(CASE WHEN s.branch_id = br.src THEN s.quantity ELSE 0 END) AS sq,
+    SUM(CASE WHEN s.branch_id = br.tgt THEN s.quantity ELSE 0 END) AS tq
+  FROM br JOIN branch_batch_stock s ON s.branch_id IN (br.src, br.tgt) AND s.quantity > 0
+  GROUP BY s.batch_id
+), l1 AS MATERIALIZED (
+  -- the positive lots of moving products (stock at the Shop), with their fold keys
+  SELECT b.id, b.variant_product_id AS p, b.unit_cost_usd AS cost, b.received_at,
     CASE WHEN typeof(b.supplier_id) IN ('integer', 'real') AND b.supplier_id = CAST(b.supplier_id AS INTEGER) THEN 'id:' || CAST(b.supplier_id AS INTEGER)
       WHEN trim(COALESCE(b.supplier_name, '')) <> '' THEN 'name:' || lower(trim(b.supplier_name)) ELSE '' END AS sk,
-    COALESCE((SELECT s.quantity FROM branch_batch_stock s WHERE s.batch_id = b.id AND s.branch_id = br.src), 0) AS sq,
-    COALESCE((SELECT s.quantity FROM branch_batch_stock s WHERE s.batch_id = b.id AND s.branch_id = br.tgt), 0) AS tq
-  FROM product_batches b, br
-  WHERE b.variant_product_id IN (SELECT p FROM moving)
-    AND b.id IN (SELECT batch_id FROM branch_batch_stock WHERE branch_id IN (br.src, br.tgt) AND quantity > 0)
-), l1 AS (
-  SELECT id, p, sk, cost, received_at,
-    CASE WHEN trim(received_at) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' THEN trim(received_at)
-      WHEN trim(received_at) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*' THEN date(trim(received_at), '+7 hours') END AS day,
-    quote(expiry_date) AS ek,
-    CASE WHEN typeof(cost) IN ('integer', 'real') AND cost > 0 THEN 'recorded' WHEN cost = 0 THEN 'zero' ELSE 'unknown' END AS cc,
-    CASE WHEN tq > 0 THEN 1 ELSE 0 END AS prior,
-    CASE WHEN tq = 0 AND sq > 0 THEN 1 ELSE 0 END AS arrival
-  FROM lq WHERE sq + tq > 0
+    CASE WHEN trim(b.received_at) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' THEN trim(b.received_at)
+      WHEN trim(b.received_at) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*' THEN date(trim(b.received_at), '+7 hours') END AS day,
+    quote(b.expiry_date) AS ek,
+    CASE WHEN typeof(b.unit_cost_usd) IN ('integer', 'real') AND b.unit_cost_usd > 0 THEN 'recorded' WHEN b.unit_cost_usd = 0 THEN 'zero' ELSE 'unknown' END AS cc,
+    CASE WHEN qty.tq > 0 THEN 1 ELSE 0 END AS prior,
+    CASE WHEN qty.tq = 0 AND qty.sq > 0 THEN 1 ELSE 0 END AS arrival
+  FROM br JOIN qty JOIN product_batches b ON b.id = qty.batch_id
+    JOIN branch_stock ms ON ms.product_id = b.variant_product_id AND ms.branch_id = br.src AND ms.quantity > 0
 ), l2 AS (
   SELECT l1.*,
     CASE WHEN sk = '' AND MIN(NULLIF(sk, '')) OVER (PARTITION BY p, day, ek) = MAX(NULLIF(sk, '')) OVER (PARTITION BY p, day, ek)
@@ -92,41 +93,55 @@ WITH br AS (
     MIN(CASE WHEN member = 1 AND cc = 'recorded' THEN cost END) OVER (PARTITION BY p, day, ek, ps, pc) AS min_cost,
     MAX(CASE WHEN member = 1 AND cc = 'recorded' THEN cost END) OVER (PARTITION BY p, day, ek, ps, pc) AS max_cost
   FROM l5
-), f AS (
+), f AS MATERIALIZED (
   SELECT l6.*, CASE WHEN has_arrival = 1 AND survivor IS NOT NULL AND n_member >= 2 THEN 1 ELSE 0 END AS folds
   FROM l6
-), pos AS (
-  SELECT l1.p, l1.received_at FROM l1
+), fa AS (
+  -- one pass over the classified lots
+  SELECT
+    COALESCE(SUM(CASE WHEN folds = 1 AND id = survivor THEN 1 ELSE 0 END), 0) AS same_date_merges,
+    COALESCE(SUM(CASE WHEN folds = 1 AND member = 1 AND id <> survivor THEN 1 ELSE 0 END), 0) AS folded_lots,
+    COALESCE(SUM(CASE WHEN arrival = 1 AND c_e < c_day THEN 1 ELSE 0 END), 0) AS expiry_splits,
+    COALESCE(SUM(CASE WHEN arrival = 1 AND c_e = c_day AND c_s < c_e THEN 1 ELSE 0 END), 0) AS supplier_splits,
+    COALESCE(SUM(CASE WHEN folds = 1 AND id = survivor AND ps <> '' AND n_empty > 0 THEN 1 ELSE 0 END), 0) AS empty_supplier_merges,
+    COALESCE(SUM(CASE WHEN folds = 1 AND id = survivor AND pc = 'recorded' AND n_uncosted > 0 THEN 1 ELSE 0 END), 0) AS uncosted_merges,
+    COALESCE(SUM(CASE WHEN folds = 1 AND id = survivor AND pc = 'none' AND n_zero > 0 AND n_unknown > 0 THEN 1 ELSE 0 END), 0) AS free_unknown_merges,
+    COALESCE(SUM(CASE WHEN folds = 1 AND id = survivor AND ((pc = 'recorded' AND (cc <> 'recorded' OR min_cost <> max_cost))
+      OR (pc = 'none' AND cc = 'zero' AND n_unknown > 0)) THEN 1 ELSE 0 END), 0) AS cost_blend_folds
+  FROM f
+), la AS (
+  -- one pass over the positive lots of moving products
+  SELECT
+    COALESCE(SUM(arrival), 0) AS arriving_lots,
+    COALESCE(SUM(CASE WHEN trim(received_at) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' THEN 1 ELSE 0 END), 0) AS received_date_only,
+    COALESCE(SUM(CASE WHEN received_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*Z' THEN 1 ELSE 0 END), 0) AS received_utc_z,
+    COALESCE(SUM(CASE WHEN (substr(received_at, 1, 11) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T' AND substr(received_at, -1) <> 'Z'
+      AND (instr(substr(received_at, 12), '+') > 0 OR instr(substr(received_at, 12), '-') > 0)) THEN 1 ELSE 0 END), 0) AS received_zoned,
+    COALESCE(SUM(CASE WHEN received_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] *' THEN 1 ELSE 0 END), 0) AS received_space_time,
+    COALESCE(SUM(CASE WHEN received_at IS NOT NULL
+      AND NOT trim(received_at) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+      AND NOT received_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*Z'
+      AND NOT (substr(received_at, 1, 11) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T' AND substr(received_at, -1) <> 'Z'
+      AND (instr(substr(received_at, 12), '+') > 0 OR instr(substr(received_at, 12), '-') > 0))
+      AND NOT received_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] *' THEN 1 ELSE 0 END), 0) AS received_other,
+    COALESCE(SUM(CASE WHEN received_at IS NULL THEN 1 ELSE 0 END), 0) AS received_null,
+    COALESCE(SUM(CASE WHEN length(trim(received_at)) > 10
+      AND date(trim(received_at), '+7 hours') <> substr(trim(received_at), 1, 10) THEN 1 ELSE 0 END), 0) AS received_next_day_in_cambodia
+  FROM l1
 )
 SELECT
-  CASE WHEN (SELECT n_src FROM br) = 1 AND (SELECT n_tgt FROM br) = 1 THEN 1 ELSE 0 END AS branches_ok,
-  (SELECT COUNT(*) FROM moving) AS moving_products,
-  (SELECT COUNT(*) FROM l1 WHERE arrival = 1) AS arriving_lots,
-  (SELECT COUNT(*) FROM f WHERE folds = 1 AND id = survivor) AS same_date_merges,
-  (SELECT COUNT(*) FROM f WHERE folds = 1 AND member = 1 AND id <> survivor) AS folded_lots,
-  (SELECT COUNT(*) FROM f WHERE arrival = 1 AND c_e < c_day) AS expiry_splits,
-  (SELECT COUNT(*) FROM f WHERE arrival = 1 AND c_e = c_day AND c_s < c_e) AS supplier_splits,
-  (SELECT COUNT(*) FROM f WHERE folds = 1 AND id = survivor AND ps <> '' AND n_empty > 0) AS empty_supplier_merges,
-  (SELECT COUNT(*) FROM f WHERE folds = 1 AND id = survivor AND pc = 'recorded' AND n_uncosted > 0) AS uncosted_merges,
-  (SELECT COUNT(*) FROM f WHERE folds = 1 AND id = survivor AND pc = 'none' AND n_zero > 0 AND n_unknown > 0) AS free_unknown_merges,
-  (SELECT COUNT(*) FROM f WHERE folds = 1 AND id = survivor AND ((pc = 'recorded' AND (cc <> 'recorded' OR min_cost <> max_cost))
-    OR (pc = 'none' AND cc = 'zero' AND n_unknown > 0))) AS cost_blend_folds,
-  (SELECT COUNT(*) FROM branch_stock, br WHERE branch_id IN (br.src, br.tgt) AND quantity <> CAST(quantity AS INTEGER))
-    + (SELECT COUNT(*) FROM branch_batch_stock, br WHERE branch_id IN (br.src, br.tgt) AND quantity <> CAST(quantity AS INTEGER)) AS fractional_rows,
-  (SELECT COUNT(*) FROM branch_stock s JOIN br ON s.branch_id = br.src JOIN branch_stock t ON t.product_id = s.product_id AND t.branch_id = br.tgt
-    WHERE s.quantity > 0 AND CAST(printf('%.12f', s.quantity + t.quantity) AS REAL) <> s.quantity + t.quantity)
-    + (SELECT COUNT(*) FROM branch_batch_stock s JOIN br ON s.branch_id = br.src JOIN branch_batch_stock t ON t.batch_id = s.batch_id AND t.branch_id = br.tgt
-    WHERE s.quantity > 0 AND CAST(printf('%.12f', s.quantity + t.quantity) AS REAL) <> s.quantity + t.quantity) AS inexact_pairs,
-  (SELECT COALESCE(MAX(n), 0) FROM (SELECT COUNT(*) AS n FROM pos GROUP BY p)) AS max_lots_per_product,
-  (SELECT COUNT(*) FROM pos WHERE trim(received_at) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]') AS received_date_only,
-  (SELECT COUNT(*) FROM pos WHERE received_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*Z') AS received_utc_z,
-  (SELECT COUNT(*) FROM pos WHERE received_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*[+-][0-9][0-9]*') AS received_zoned,
-  (SELECT COUNT(*) FROM pos WHERE received_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] *') AS received_space_time,
-  (SELECT COUNT(*) FROM pos WHERE received_at IS NOT NULL
-    AND NOT trim(received_at) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
-    AND NOT received_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*Z'
-    AND NOT received_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*[+-][0-9][0-9]*'
-    AND NOT received_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] *') AS received_other,
-  (SELECT COUNT(*) FROM pos WHERE received_at IS NULL) AS received_null,
-  (SELECT COUNT(*) FROM pos WHERE length(trim(received_at)) > 10
-    AND date(trim(received_at), '+7 hours') <> substr(trim(received_at), 1, 10)) AS received_next_day_in_cambodia
+  CASE WHEN br.n_src = 1 AND br.n_tgt = 1 THEN 1 ELSE 0 END AS branches_ok,
+  (SELECT COUNT(*) FROM branch_stock s WHERE s.branch_id = br.src AND s.quantity > 0) AS moving_products,
+  la.arriving_lots,
+  fa.same_date_merges, fa.folded_lots, fa.expiry_splits, fa.supplier_splits, fa.empty_supplier_merges,
+  fa.uncosted_merges, fa.free_unknown_merges, fa.cost_blend_folds,
+  (SELECT COUNT(*) FROM branch_stock s WHERE s.branch_id IN (br.src, br.tgt) AND s.quantity <> CAST(s.quantity AS INTEGER))
+    + (SELECT COUNT(*) FROM branch_batch_stock s WHERE s.branch_id IN (br.src, br.tgt) AND s.quantity <> CAST(s.quantity AS INTEGER)) AS fractional_rows,
+  (SELECT COUNT(*) FROM branch_stock s JOIN branch_stock t ON t.product_id = s.product_id AND t.branch_id = br.tgt
+    WHERE s.branch_id = br.src AND s.quantity > 0 AND CAST(printf('%.12f', s.quantity + t.quantity) AS REAL) <> s.quantity + t.quantity)
+    + (SELECT COUNT(*) FROM branch_batch_stock s JOIN branch_batch_stock t ON t.batch_id = s.batch_id AND t.branch_id = br.tgt
+    WHERE s.branch_id = br.src AND s.quantity > 0 AND CAST(printf('%.12f', s.quantity + t.quantity) AS REAL) <> s.quantity + t.quantity) AS inexact_pairs,
+  (SELECT COALESCE(MAX(n), 0) FROM (SELECT COUNT(*) AS n FROM l1 GROUP BY p)) AS max_lots_per_product,
+  la.received_date_only, la.received_utc_z, la.received_zoned, la.received_space_time, la.received_other, la.received_null,
+  la.received_next_day_in_cambodia
+FROM br, fa, la
