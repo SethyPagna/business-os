@@ -25,8 +25,10 @@
 --   maintenance_flag       the maintenance flag is still present
 --   orphans                lot rows without a batch, stock rows without a product, receipts
 --                          without a member, transfers since begin that no run receipt made
--- Cost: index range reads at the two branches, the run's receipts by request id prefix, one pass
--- over product_batches. D1 refuses a LIKE/GLOB pattern over 50 bytes; there is none.
+-- Cost: index range reads at the two branches (the run's movements and transfers from begin
+-- on), the run's receipts by request id prefix, and one sequential pass over the big label
+-- tables (inventory_movements, sales, product_batches). D1 refuses a LIKE/GLOB pattern over 50
+-- bytes; there is none. At full production scale on workerd D1: about 0.4x the fold preview.
 -- Paired test: cloudflare/scripts/test-branch-cutover-post-checks-native.cjs
 -- ops:min-rows 1
 -- ops:max-rows 1
@@ -96,15 +98,15 @@ SELECT
   (SELECT count(*) FROM fl JOIN product_batches b ON b.id = fl.id WHERE fl.recost = 1 AND b.unit_cost_usd IS NOT fl.ca) AS fold_costs_off,
   (SELECT count(*) FROM product_batches b WHERE b.updated_at >= op.began_t AND julianday(b.updated_at) >= julianday(op.began_t)
     AND NOT EXISTS (SELECT 1 FROM fl WHERE fl.id = b.id AND fl.recost = 1)) AS batches_changed_off,
-  (SELECT count(*) FROM sales x WHERE x.branch_id IN (op.src, op.tgt) AND (x.branch_name IS NULL OR (x.branch_name NOT IN (op.src_name, op.tgt_name) AND trim(x.branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '')))
+  (SELECT count(*) FROM sales x WHERE +x.branch_id IN (op.src, op.tgt) AND (x.branch_name IS NULL OR (x.branch_name NOT IN (op.src_name, op.tgt_name) AND trim(x.branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '')))
     + (SELECT count(*) FROM returns x WHERE x.branch_id IN (op.src, op.tgt) AND (x.branch_name IS NULL OR (x.branch_name NOT IN (op.src_name, op.tgt_name) AND trim(x.branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '')))
-    + (SELECT count(*) FROM inventory_movements x WHERE x.branch_id IN (op.src, op.tgt) AND (x.branch_name IS NULL OR (x.branch_name NOT IN (op.src_name, op.tgt_name) AND trim(x.branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '')))
+    + (SELECT count(*) FROM inventory_movements x WHERE +x.branch_id IN (op.src, op.tgt) AND (x.branch_name IS NULL OR (x.branch_name NOT IN (op.src_name, op.tgt_name) AND trim(x.branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '')))
     + (SELECT count(*) FROM stock_row_moves x WHERE x.branch_id IN (op.src, op.tgt) AND (x.branch_name IS NULL OR (x.branch_name NOT IN (op.src_name, op.tgt_name) AND trim(x.branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '')))
     + (SELECT count(*) FROM stock_session_members x WHERE x.branch_id IN (op.src, op.tgt) AND (x.branch_name IS NULL OR (x.branch_name NOT IN (op.src_name, op.tgt_name) AND trim(x.branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '')))
     + (SELECT count(*) FROM stock_transfers x WHERE x.from_branch_id IN (op.src, op.tgt) AND (x.from_branch_name IS NULL OR (x.from_branch_name NOT IN (op.src_name, op.tgt_name) AND trim(x.from_branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '')))
     + (SELECT count(*) FROM stock_transfers x WHERE x.to_branch_id IN (op.src, op.tgt) AND (x.to_branch_name IS NULL OR (x.to_branch_name NOT IN (op.src_name, op.tgt_name) AND trim(x.to_branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '')))
     + (SELECT count(*) FROM fees x WHERE x.branch_id IN (op.src, op.tgt) AND (x.branch_name IS NULL OR (x.branch_name NOT IN (op.src_name, op.tgt_name) AND trim(x.branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '')))
-    + (SELECT count(*) FROM product_batches x WHERE x.received_branch_id IN (op.src, op.tgt) AND (x.received_branch_name IS NULL OR (x.received_branch_name NOT IN (op.src_name, op.tgt_name) AND trim(x.received_branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '')))
+    + (SELECT count(*) FROM product_batches x WHERE +x.received_branch_id IN (op.src, op.tgt) AND (x.received_branch_name IS NULL OR (x.received_branch_name NOT IN (op.src_name, op.tgt_name) AND trim(x.received_branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '')))
     + (SELECT count(*) FROM shift_sessions x WHERE x.branch_id IN (op.src, op.tgt) AND (x.branch_name IS NULL OR (x.branch_name NOT IN (op.src_name, op.tgt_name) AND trim(x.branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = ''))) AS blank_labels,
   (SELECT CASE WHEN count(*) = 1 THEN 0 ELSE 1 END FROM branches WHERE is_active = 1)
     + (SELECT count(*) FROM (SELECT 1 FROM one) WHERE NOT EXISTS (SELECT 1 FROM branches WHERE id = op.tgt AND is_active = 1 AND is_default = 1

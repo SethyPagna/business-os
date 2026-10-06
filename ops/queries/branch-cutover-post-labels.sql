@@ -8,7 +8,9 @@
 -- while any other label that changed - or vanished - changes its column. Blank labels left after
 -- the run are counted by branch-cutover-post-checks.sql. Checksums are position-weighted sums mod
 -- 2^31-1 over each label's length and first 4 / last 3 characters (not cryptographic).
--- Cost: one scan of each table; D1 refuses a LIKE/GLOB pattern over 50 bytes; there is none.
+-- Cost: one pass over each table; inventory_movements, sales and product_batches are read
+-- sequentially (unary +): through the branch index the same rows cost about 6x as much on D1.
+-- D1 refuses a LIKE/GLOB pattern over 50 bytes; there is none.
 -- Paired test: cloudflare/scripts/test-branch-cutover-post-checks-native.cjs
 -- ops:min-rows 1
 -- ops:max-rows 1
@@ -25,7 +27,7 @@ SELECT
       OR x.branch_name = CASE x.branch_id WHEN op.src THEN op.src_name ELSE op.tgt_name END OR trim(x.branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '' THEN 0 ELSE CASE WHEN x.branch_name IS NULL THEN 1 ELSE length(x.branch_name) * 1000003 + coalesce(unicode(x.branch_name), 0) * 3 + coalesce(unicode(substr(x.branch_name, 2, 1)), 0) * 5
       + coalesce(unicode(substr(x.branch_name, 3, 1)), 0) * 7 + coalesce(unicode(substr(x.branch_name, 4, 1)), 0) * 11 + coalesce(unicode(substr(x.branch_name, -1, 1)), 0) * 13
       + coalesce(unicode(substr(x.branch_name, -2, 1)), 0) * 17 + coalesce(unicode(substr(x.branch_name, -3, 1)), 0) * 19 END END) % 2147483647) + 2147483647) % 2147483647) % 2147483647)), 0) % 2147483647
-    FROM op, sales x WHERE x.branch_id IN (op.src, op.tgt)) AS sales,
+    FROM op, sales x WHERE +x.branch_id IN (op.src, op.tgt)) AS sales,
   (SELECT COALESCE(SUM((((((x.id * 16 + 1) % 2147483647) + 2147483647) % 2147483647 * 48271 % 2147483647 + 1) * ((((CASE WHEN x.branch_name IS NULL
       OR x.branch_name = CASE x.branch_id WHEN op.src THEN op.src_name ELSE op.tgt_name END OR trim(x.branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '' THEN 0 ELSE CASE WHEN x.branch_name IS NULL THEN 1 ELSE length(x.branch_name) * 1000003 + coalesce(unicode(x.branch_name), 0) * 3 + coalesce(unicode(substr(x.branch_name, 2, 1)), 0) * 5
       + coalesce(unicode(substr(x.branch_name, 3, 1)), 0) * 7 + coalesce(unicode(substr(x.branch_name, 4, 1)), 0) * 11 + coalesce(unicode(substr(x.branch_name, -1, 1)), 0) * 13
@@ -35,7 +37,7 @@ SELECT
       OR x.branch_name = CASE x.branch_id WHEN op.src THEN op.src_name ELSE op.tgt_name END OR trim(x.branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '' THEN 0 ELSE CASE WHEN x.branch_name IS NULL THEN 1 ELSE length(x.branch_name) * 1000003 + coalesce(unicode(x.branch_name), 0) * 3 + coalesce(unicode(substr(x.branch_name, 2, 1)), 0) * 5
       + coalesce(unicode(substr(x.branch_name, 3, 1)), 0) * 7 + coalesce(unicode(substr(x.branch_name, 4, 1)), 0) * 11 + coalesce(unicode(substr(x.branch_name, -1, 1)), 0) * 13
       + coalesce(unicode(substr(x.branch_name, -2, 1)), 0) * 17 + coalesce(unicode(substr(x.branch_name, -3, 1)), 0) * 19 END END) % 2147483647) + 2147483647) % 2147483647) % 2147483647)), 0) % 2147483647
-    FROM op, inventory_movements x WHERE x.branch_id IN (op.src, op.tgt)
+    FROM op, inventory_movements x WHERE +x.branch_id IN (op.src, op.tgt)
       AND (x.created_at < op.began_t OR x.created_at IS NULL OR julianday(x.created_at) IS NULL OR julianday(x.created_at) < julianday(op.began_t))) AS inventory_movements,
   (SELECT COALESCE(SUM((((((x.id * 16 + 3) % 2147483647) + 2147483647) % 2147483647 * 48271 % 2147483647 + 1) * ((((CASE WHEN x.branch_name IS NULL
       OR x.branch_name = CASE x.branch_id WHEN op.src THEN op.src_name ELSE op.tgt_name END OR trim(x.branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '' THEN 0 ELSE CASE WHEN x.branch_name IS NULL THEN 1 ELSE length(x.branch_name) * 1000003 + coalesce(unicode(x.branch_name), 0) * 3 + coalesce(unicode(substr(x.branch_name, 2, 1)), 0) * 5
@@ -68,7 +70,7 @@ SELECT
       OR x.received_branch_name = CASE x.received_branch_id WHEN op.src THEN op.src_name ELSE op.tgt_name END OR trim(x.received_branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '' THEN 0 ELSE CASE WHEN x.received_branch_name IS NULL THEN 1 ELSE length(x.received_branch_name) * 1000003 + coalesce(unicode(x.received_branch_name), 0) * 3 + coalesce(unicode(substr(x.received_branch_name, 2, 1)), 0) * 5
       + coalesce(unicode(substr(x.received_branch_name, 3, 1)), 0) * 7 + coalesce(unicode(substr(x.received_branch_name, 4, 1)), 0) * 11 + coalesce(unicode(substr(x.received_branch_name, -1, 1)), 0) * 13
       + coalesce(unicode(substr(x.received_branch_name, -2, 1)), 0) * 17 + coalesce(unicode(substr(x.received_branch_name, -3, 1)), 0) * 19 END END) % 2147483647) + 2147483647) % 2147483647) % 2147483647)), 0) % 2147483647
-    FROM op, product_batches x WHERE x.received_branch_id IN (op.src, op.tgt)) AS product_batches,
+    FROM op, product_batches x WHERE +x.received_branch_id IN (op.src, op.tgt)) AS product_batches,
   (SELECT COALESCE(SUM((((((x.id * 16 + 9) % 2147483647) + 2147483647) % 2147483647 * 48271 % 2147483647 + 1) * ((((CASE WHEN x.branch_name IS NULL
       OR x.branch_name = CASE x.branch_id WHEN op.src THEN op.src_name ELSE op.tgt_name END OR trim(x.branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '' THEN 0 ELSE CASE WHEN x.branch_name IS NULL THEN 1 ELSE length(x.branch_name) * 1000003 + coalesce(unicode(x.branch_name), 0) * 3 + coalesce(unicode(substr(x.branch_name, 2, 1)), 0) * 5
       + coalesce(unicode(substr(x.branch_name, 3, 1)), 0) * 7 + coalesce(unicode(substr(x.branch_name, 4, 1)), 0) * 11 + coalesce(unicode(substr(x.branch_name, -1, 1)), 0) * 13

@@ -64,6 +64,18 @@ async function main() {
     assert.equal(before.no_completed_run, 1); assert.ok(before.source_stock > 0 && before.source_lots > 0)
   })
 
+  await check('the big label tables are read in one sequential pass, never row by row through the branch index (6x on D1)', () => {
+    for (const name of ['branch-cutover-post-labels', 'branch-cutover-post-checks']) {
+      const plan = w.raw.prepare('EXPLAIN QUERY PLAN ' + q[name]).all().map(r => r.detail)
+      for (const index of ['idx_inventory_movements_branch_created_pg (branch_id=?)', 'idx_sales_branch_created (branch_id=?)']) {
+        assert.ok(!plan.some(d => d.endsWith(index)), name + ' reads through ' + index)
+      }
+      assert.ok(plan.filter(d => /^SCAN x$/.test(d)).length >= 3, name + ' ' + plan.join(' | '))
+    }
+    // the run's own movements are still found through the index range from begin
+    assert.ok(w.raw.prepare('EXPLAIN QUERY PLAN ' + q['branch-cutover-post-checks']).all().some(r => /idx_inventory_movements_branch_created_pg \(branch_id=\? AND created_at>\?\)/.test(r.detail)))
+  })
+
   await check('P7 and P10 compare equal once the recorded folds are put back (stock and labels)', () => {
     for (const part of ['stock', 'labels']) {
       const result = compareCutoverPost(p7[part], p10[part])
