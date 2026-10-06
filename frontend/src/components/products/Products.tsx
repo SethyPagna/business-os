@@ -2747,8 +2747,10 @@ function ProductsFullEditor() {
         // Redo takes exactly that again -- never "back to the snapshot" (which
         // erased deliveries received since) nor "whatever is there now".
         const recorded = removed
+        const { recordedRemovalEffect } = await loadProductWriteHelpers()
         actionHistory.pushAction({
           label: `Set ${done} product${done === 1 ? '' : 's'} out of stock`,
+          stockEffect: recordedRemovalEffect(recorded, stockEffectNames()),
           undo: () => replayRecordedRemovals(recorded, 'undo', 'Undo out-of-stock action'),
           redo: () => replayRecordedRemovals(recorded, 'redo', 'Redo out-of-stock action'),
         })
@@ -2763,6 +2765,12 @@ function ProductsFullEditor() {
       setBulkActionBusy(false)
     }
   }
+
+  // REVERT-SET: the names the History confirm prints next to each recorded quantity.
+  const stockEffectNames = () => ({
+    product: (id: number) => String(productsById.get(id)?.name || `#${id}`),
+    branch: (id: number) => String(branchesById.get(String(id))?.name || `#${id}`),
+  })
 
   const handleBulkChangeBranch = async (branchId: EntityId) => {
     if (!selectedVisibleIds.length || !branchId || bulkActionBusy) return
@@ -2793,8 +2801,10 @@ function ProductsFullEditor() {
         // REVERT-SET: Undo transfers exactly the moved units back; Redo moves
         // exactly those again -- a transfer both ways, never add/remove
         // corrections back to the snapshot's per-branch figures.
+        const { recordedTransferEffect } = await loadProductWriteHelpers()
         actionHistory.pushAction({
           label: `Move ${done} product${done === 1 ? '' : 's'} to ${branch.name}`,
+          stockEffect: recordedTransferEffect(transfers, stockEffectNames()),
           undo: () => replayRecordedTransfers(transfers, 'undo', 'Undo branch move'),
           redo: () => replayRecordedTransfers(transfers, 'redo', 'Redo bulk branch change'),
         })

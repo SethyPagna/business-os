@@ -282,6 +282,9 @@ async function main() {
     const control = await historyRequest(f, 'GET', `/movements/${movementId}/revert-preview`)
     assert.equal(control.status, 200, JSON.stringify(control.json))
     assert.equal(control.json.revert.kind, 'stock_session')
+    // REVERT-SET: the session Revert confirm lists what the whole session takes off, by lot and branch.
+    assert.deepEqual(control.json.historyEffect.lines.map((l) => [l.productId, l.change, Boolean(l.receivedAt)]), [[2, -4, true]])
+    assert.deepEqual(control.json.historyEffect.branches.map((b) => b.after - b.before), [-4])
     assert.equal((await mergePair(f, 1, 2)).status, 200)
     const closed = await historyRequest(f, 'GET', `/movements/${movementId}/revert-preview`)
     assert.equal(closed.status, 409, JSON.stringify(closed.json))

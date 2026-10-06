@@ -1,8 +1,13 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import HistoryIcon from 'lucide-react/dist/esm/icons/history.js'
 import AppSelect from './AppSelect'
 import LazyPortalMenu from './LazyPortalMenu'
-import { fmtDateTime24 } from '../../utils/formatters'
+import { fmtDate, fmtDateTime24 } from '../../utils/formatters'
+// ConfirmDialog, not the useConfirmDialog hook: the hook lives in its own
+// chunk that imports app-shared back, and this bar is in app-shared -- a
+// static chunk cycle (ops/scripts/frontend/verify-built-startup.mjs).
+import ConfirmDialog, { type ConfirmReviewItem } from './ConfirmDialog'
+import type { LocalStockEffect } from '../../utils/actionHistory.ts'
 
 type Translate = (key: string, fallback: string) => string
 
@@ -36,6 +41,8 @@ type HistoryItem = {
   // recorded only, and History says why instead of leaving a dead Undo.
   last_error?: string | null
   undo_payload?: Record<string, unknown>
+  // REVERT-SET: a client entry's recorded stock change (Products' out-of-stock, branch move).
+  stockEffect?: LocalStockEffect
   created_by_name?: string
   created_at?: string
 }
@@ -193,6 +200,28 @@ export default function ActionHistoryBar({
   const [open, setOpen] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [effectError, setEffectError] = useState('')
+  type StockConfirm = { title: string; message?: string; items: ConfirmReviewItem[]; confirmLabel: string; resolve: (confirmed: boolean) => void }
+  const [stockConfirm, setStockConfirm] = useState<StockConfirm | null>(null)
+  const stockConfirmRef = useRef<StockConfirm | null>(null)
+  const settleStockConfirm = (confirmed: boolean) => {
+    const current = stockConfirmRef.current
+    stockConfirmRef.current = null
+    setStockConfirm(null)
+    current?.resolve(confirmed)
+  }
+  // Escape answers no (as useConfirmDialog does); an unmount answers no too.
+  useEffect(() => {
+    if (!stockConfirm) return undefined
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      event.preventDefault()
+      settleStockConfirm(false)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [stockConfirm])
+  useEffect(() => () => { stockConfirmRef.current?.resolve(false); stockConfirmRef.current = null }, [])
   if (!history) return null
 
   const T: Translate = (key, fallback) => {
@@ -224,6 +253,54 @@ export default function ActionHistoryBar({
   // undo/redo/recorded, most recent first -- just enough to answer "what
   // happened lately" without opening the full interactive panel.
   const previewLabels = [...undoItems, ...redoItems, ...recordedItems.map((item) => item.label).filter((label): label is string => !!label)].slice(0, 3)
+
+  // REVERT-SET (lead, 6 Oct 2026: "the Revert confirmation must always say
+  // exactly what it will add/remove, by lot/branch, on every surface that
+  // offers Revert or Undo"). Before a stock Undo/Redo runs, the confirm lists
+  // the record's own change -- "−27 · received 02/09/2026 · Shop" and
+  // "Shop: 60 → 33" -- read fresh from the Worker (a server record) or from
+  // the entry (a client one). A record that moves no stock runs as before.
+  // When the change cannot be read nothing runs: the operator is never asked
+  // to confirm a stock move whose size the dialog could not state.
+  const confirmStockEffect = async (direction: 'undo' | 'redo', item: HistoryItem | undefined, serverId: string | number | null | undefined): Promise<boolean> => {
+    setEffectError('')
+    let summary: { lines: NonNullable<HistoryItem['stockEffect']>['undo']; branches?: { productName?: string | null; branchName?: string | null; before: number; after: number }[]; more?: number } | null = null
+    try {
+      const local = item?.stockEffect?.[direction]
+      if (local) summary = { lines: local }
+      else if (serverId != null && serverId !== '') {
+        const api = await import('../../api/actionHistoryTransport.ts')
+        const applier = String(item?.undo_payload?.applier || '')
+        if (applier && !api.STOCK_EFFECT_APPLIERS.includes(applier)) return true
+        summary = (await api.getActionHistoryEffect(serverId, direction))?.effect ?? null
+      }
+    } catch {
+      setEffectError(T('history_effect_read_failed', 'Could not read what this changes in stock. Nothing was changed.'))
+      return false
+    }
+    if (!summary || (!summary.lines.length && !summary.branches?.length)) return true
+    const { historyEffectItems } = await import('../../utils/stockRevertPreview.ts')
+    const items = historyEffectItems(summary, T, fmtDate)
+    return new Promise<boolean>((resolve) => {
+      stockConfirmRef.current?.resolve(false)
+      const next: StockConfirm = {
+        title: direction === 'undo' ? T('history_effect_undo_title', 'Undo this stock change?') : T('history_effect_redo_title', 'Redo this stock change?'),
+        message: item?.label,
+        items,
+        confirmLabel: direction === 'undo' ? T('undo', 'Undo') : T('redo', 'Redo'),
+        resolve,
+      }
+      stockConfirmRef.current = next
+      setStockConfirm(next)
+    })
+  }
+  const runLocal = (direction: 'undo' | 'redo', item?: HistoryItem) => void (async () => {
+    if (!(await confirmStockEffect(direction, item, item?.serverId))) return
+    if (direction === 'undo') history.undo(item?.id)
+    else history.redo(item?.id)
+  })()
+  const lastUndoItem = (history.undoItems || []).at(-1)
+  const lastRedoItem = (history.redoItems || []).at(-1)
 
   const clearPreviewTimer = () => {
     if (previewTimerRef.current) {
@@ -284,7 +361,7 @@ export default function ActionHistoryBar({
                 <button
                   type="button"
                   className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                  onClick={() => history.undo()}
+                  onClick={() => { closeMenu(); runLocal('undo', lastUndoItem) }}
                   disabled={!history.canUndo}
                   title={history.lastUndoLabel ? `${T('undo', 'Undo')} ${history.lastUndoLabel}` : T('undo', 'Undo')}
                 >
@@ -293,7 +370,7 @@ export default function ActionHistoryBar({
                 <button
                   type="button"
                   className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                  onClick={() => history.redo()}
+                  onClick={() => { closeMenu(); runLocal('redo', lastRedoItem) }}
                   disabled={!history.canRedo}
                   title={history.lastRedoLabel ? `${T('redo', 'Redo')} ${history.lastRedoLabel}` : T('redo', 'Redo')}
                 >
@@ -330,7 +407,7 @@ export default function ActionHistoryBar({
                 type="button"
                 className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-slate-800"
                 disabled={!!history.busy}
-                onClick={() => { closeMenu(); history.undo(item.id) }}
+                onClick={() => { closeMenu(); runLocal('undo', item) }}
               >
                 <span className="min-w-0 detail-scroll-text text-slate-700 dark:text-slate-200" title={item.label}>{item.label}</span>
                 <span className="rounded-full bg-blue-100 px-2 py-0.5 font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{T('undo', 'Undo')}</span>
@@ -342,7 +419,7 @@ export default function ActionHistoryBar({
                 type="button"
                 className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-slate-800"
                 disabled={!!history.busy}
-                onClick={() => { closeMenu(); history.redo(item.id) }}
+                onClick={() => { closeMenu(); runLocal('redo', item) }}
               >
                 <span className="min-w-0 detail-scroll-text text-slate-700 dark:text-slate-200" title={item.label}>{item.label}</span>
                 <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">{T('redo', 'Redo')}</span>
@@ -371,7 +448,10 @@ export default function ActionHistoryBar({
                     type="button"
                     className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-slate-800"
                     disabled={!!history.busy || (typeof navigator !== 'undefined' && navigator.onLine === false)}
-                    onClick={() => { closeMenu(); runServer!(item.id!, doneLabel) }}
+                    onClick={() => {
+                      closeMenu()
+                      void confirmStockEffect(direction, item, item.id).then((confirmed) => { if (confirmed) runServer!(item.id!, doneLabel) })
+                    }}
                   >
                     <span className="min-w-0 whitespace-normal break-words text-slate-700 dark:text-slate-200" title={displayLabel}>{displayLabel}</span>
                     <span className={direction === 'redo'
@@ -407,6 +487,26 @@ export default function ActionHistoryBar({
         )}
       />
 
+      {effectError ? (
+        <div role="alert" className={`absolute ${menuPosition} top-full z-40 mt-2 w-[min(16rem,calc(100vw-2rem))] rounded-xl border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700 shadow-lg dark:border-rose-900 dark:bg-rose-950 dark:text-rose-200`}>
+          {effectError}
+          <button type="button" className="ml-2 underline" onClick={() => setEffectError('')}>{T('close', 'Close')}</button>
+        </div>
+      ) : null}
+      {stockConfirm ? (
+        <ConfirmDialog
+          title={stockConfirm.title}
+          message={stockConfirm.message}
+          items={stockConfirm.items}
+          confirmLabel={stockConfirm.confirmLabel}
+          cancelLabel={T('cancel', 'Cancel')}
+          layer="nested"
+          keyboard
+          t={(key: string, fallback?: string) => T(key, fallback ?? key)}
+          onConfirm={() => settleStockConfirm(true)}
+          onClose={() => settleStockConfirm(false)}
+        />
+      ) : null}
       {previewOpen && !open ? (
         <div className={`pointer-events-none absolute ${menuPosition} top-full z-40 mt-2 w-[min(16rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 bg-white p-2 text-xs text-slate-600 shadow-lg dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300`}>
           {previewLabels.length ? (

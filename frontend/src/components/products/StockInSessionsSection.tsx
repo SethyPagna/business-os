@@ -10,7 +10,7 @@ import MessageSquare from 'lucide-react/dist/esm/icons/message-square.js'
 import { getStockInSessionLines, getStockInSessions, getStockLedger } from '../../api/productReadTransport.ts'
 import { editStockInLine, revertStockMovement } from '../../api/inventoryWriteTransport.ts'
 import { stockRevertErrorText } from '../../utils/stockRevertError.ts'
-import { laterSetsWarning } from '../../utils/stockRevertPreview.ts'
+import { historyEffectItems, laterSetsWarning } from '../../utils/stockRevertPreview.ts'
 import type { LaterOpenSet } from '../../api/actionHistoryTransport.ts'
 import { STOCK_IN_LINE_FOCUS_EVENT, stockInSessionKeyForReceipt, stockRefusalInfo, takeStockInLineFocus, type StockRefusalInfo } from '../../utils/stockRefusal.ts'
 import StockRefusalLine from '../shared/StockRefusalLine.tsx'
@@ -591,6 +591,18 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
         : []),
       // The line's own quantity, before -> after the reversal.
       { label: tr('quantity', 'Quantity'), value: change(`+${units}`, '0') },
+      // REVERT-SET (lead, 6 Oct 2026): exactly what comes off, by received
+      // date and branch -- every line of a session, not only its total.
+      ...historyEffectItems({
+        lines: rows.slice(0, 12).map((row) => ({
+          productName: current.kind === 'line' ? null : row.product_name,
+          branchName: row.branch_name || session.branchName || null,
+          receivedAt: row.batch_received_at || null,
+          lotCode: row.batch_lot_code || null,
+          change: -Math.abs(Number(row.quantity) || 0),
+        })),
+        more: Math.max(0, rows.length - 12),
+      }, tr, fmtDate),
       ...(warning ? [{ label: tr('movement_type_stock_set', 'Set stock'), value: warning }] : []),
     ]
   }

@@ -4,9 +4,9 @@ import { useApp } from '../../AppContext'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { getStockLedger, getStockLedgerMovementBalance } from '../../api/productReadTransport.ts'
 import { revertStockMovement, editStockMovementReason } from '../../api/inventoryWriteTransport.ts'
-import { getStockMovementRevertPreview, undoActionHistory, redoActionHistory, type LaterOpenSet, type StockMovementRevertPreview, type StockRevertEffect } from '../../api/actionHistoryTransport.ts'
+import { getStockMovementRevertPreview, undoActionHistory, redoActionHistory, type LaterOpenSet, type StockMovementRevertPreview, type StockRevertEffect, type HistoryStockEffect } from '../../api/actionHistoryTransport.ts'
 import { stockRevertErrorText } from '../../utils/stockRevertError.ts'
-import { laterSetLabel, laterSetsWarningFrame, revertEffectLine } from '../../utils/stockRevertPreview.ts'
+import { historyEffectItems, laterSetLabel, laterSetsWarningFrame, revertEffectLine } from '../../utils/stockRevertPreview.ts'
 import {
   STOCK_IN_SESSIONS_ANCHOR, STOCK_RECORD_FOCUS_EVENT, queueStockInLineFocus, stockInCorrectionLineId, stockRefusalInfo, takeStockRecordFocus,
   type StockRefusalInfo,
@@ -300,7 +300,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const [confirmRevert, setConfirmRevert] = useState(false)
   // REVERT-SET: the server's decision plus what it will do (effect) and the
   // later Sets it leaves applied, cleared together by every reset below.
-  const [revertPreview, setRevertPreview] = useState<(StockMovementRevertPreview & { effect: StockRevertEffect | null; laterSets: LaterOpenSet[] }) | null>(null)
+  const [revertPreview, setRevertPreview] = useState<(StockMovementRevertPreview & { effect: StockRevertEffect | null; historyEffect: HistoryStockEffect | null; laterSets: LaterOpenSet[] }) | null>(null)
   // RET-D: WHY a Revert was refused and WHERE the blocking record is (utils/stockRefusal.ts).
   const [revertRefusal, setRevertRefusal] = useState<StockRefusalInfo | null>(null)
   const detailEpochRef = useRef(0)
@@ -618,7 +618,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
           || !(preview.operationId || preview.historyId)))) {
         throw new Error(tr(t, 'revert_failed', 'Revert failed'))
       }
-      setRevertPreview({ ...preview, effect: response.effect ?? null, laterSets: Array.isArray(response.laterSets) ? response.laterSets : [] })
+      setRevertPreview({ ...preview, effect: response.effect ?? null, historyEffect: response.historyEffect ?? null, laterSets: Array.isArray(response.laterSets) ? response.laterSets : [] })
       setConfirmRevert(true)
     } catch (error) {
       if (isCurrent()) {
@@ -1439,6 +1439,14 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                       {revertPreview?.effect ? (
                         <span data-revert-effect="true" className="w-full min-w-0 break-words font-semibold text-gray-700 dark:text-gray-200">
                           {revertEffectLine(revertPreview.effect, (key, fallback) => tr(t, key, fallback), fmtDate)}
+                        </span>
+                      ) : null}
+                      {/* REVERT-SET: a session Revert undoes every line -- each one, by received date and branch. */}
+                      {!revertPreview?.effect && revertPreview?.historyEffect ? (
+                        <span data-revert-effect="true" className="w-full min-w-0 break-words font-semibold text-gray-700 dark:text-gray-200">
+                          {historyEffectItems(revertPreview.historyEffect, (key, fallback) => tr(t, key, fallback), fmtDate).map((item, index) => (
+                            <span key={index} className="block">{item.label} {item.value}</span>
+                          ))}
                         </span>
                       ) : null}
                       {revertPreview?.laterSets.length ? (

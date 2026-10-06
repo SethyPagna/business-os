@@ -240,6 +240,27 @@ export function recordedTransferReplay(transfers: readonly RecordedStockTransfer
       : { ...entry })
 }
 
+type EffectNames = { product: (id: number) => string; branch: (id: number) => string }
+type EffectLine = { productName: string; branchName: string; change: number }
+
+/** What the History confirm states for recorded removals: Undo adds each back, Redo takes it again. */
+export function recordedRemovalEffect(removals: readonly RecordedStockRemoval[], names: EffectNames): { undo: EffectLine[]; redo: EffectLine[] } {
+  const lines = (direction: 'undo' | 'redo') => recordedRemovalReplay(removals, direction).map((write) => ({
+    productName: names.product(write.productId), branchName: names.branch(write.branchId),
+    change: write.type === 'add' ? write.quantity : -write.quantity,
+  }))
+  return { undo: lines('undo'), redo: lines('redo') }
+}
+
+/** What the History confirm states for recorded transfers: each move is -n at its source and +n at its destination. */
+export function recordedTransferEffect(transfers: readonly RecordedStockTransfer[], names: EffectNames): { undo: EffectLine[]; redo: EffectLine[] } {
+  const lines = (direction: 'undo' | 'redo') => recordedTransferReplay(transfers, direction).flatMap((move) => [
+    { productName: names.product(move.productId), branchName: names.branch(move.fromBranchId), change: -move.quantity },
+    { productName: names.product(move.productId), branchName: names.branch(move.toBranchId), change: move.quantity },
+  ])
+  return { undo: lines('undo'), redo: lines('redo') }
+}
+
 export function buildProductClearStockAdjustments(product: ProductRecord = {}): ClearStockAdjustment[] {
   const unitCostUsd = product?.purchase_price_usd || product?.cost_price_usd || 0
   const unitCostKhr = product?.purchase_price_khr || product?.cost_price_khr || 0

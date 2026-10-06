@@ -48,3 +48,33 @@ export function laterSetsWarningFrame(tr: Tr): { before: string; after: string }
   const [before, after = ''] = tr('revert_later_sets', LATER_SETS_FALLBACK).split('{sets}')
   return { before, after }
 }
+
+// ---- History Undo/Redo confirm (lead, 6 Oct 2026: "the Revert confirmation
+// must always say exactly what it will add/remove, by lot/branch, on every
+// surface that offers Revert or Undo"). One shape for a server record's
+// effect (GET /api/action-history/:id/effect) and a client entry's recorded
+// change (Products' out-of-stock and branch move), so every History surface
+// reads the same: "−27 · received 02/09/2026 · Shop" then "Shop: 60 → 33".
+
+export type EffectLine = { productName?: string | null; branchName?: string | null; receivedAt?: string | null; lotCode?: string | null; change: number }
+export type EffectBranch = { productName?: string | null; branchName?: string | null; before: number; after: number }
+export type EffectSummary = { lines: readonly EffectLine[]; branches?: readonly EffectBranch[]; more?: number }
+export type EffectReviewItem = { label: string; value: string }
+
+export function historyEffectItems(effect: EffectSummary, tr: Tr, formatDate: FormatDate): EffectReviewItem[] {
+  const products = new Set([...effect.lines, ...(effect.branches || [])].map((row) => row.productName || ''))
+  const named = products.size > 1
+  const branch = (name: string | null | undefined) => name || tr('revert_this_branch', 'this branch')
+  const items: EffectReviewItem[] = effect.lines.map((line) => {
+    const lot = line.receivedAt ? tr('history_effect_received', 'received {date}').replace('{date}', formatDate(line.receivedAt)) : line.lotCode || ''
+    return {
+      label: signedQuantity(line.change),
+      value: [named ? line.productName || '' : '', lot, branch(line.branchName)].filter(Boolean).join(' · '),
+    }
+  })
+  if (effect.more && effect.more > 0) items.push({ label: '…', value: tr('history_effect_more', '{count} more lines').replace('{count}', String(effect.more)) })
+  for (const row of effect.branches || []) {
+    items.push({ label: [named ? row.productName || '' : '', branch(row.branchName)].filter(Boolean).join(' · '), value: `${row.before} → ${row.after}` })
+  }
+  return items
+}

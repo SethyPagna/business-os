@@ -29,7 +29,9 @@ function loadBar(): React.ComponentType<AnyProps> {
     }
     if (id.includes('AppSelect')) return { __esModule: true, default: () => null }
     if (id.includes('history.js')) return { __esModule: true, default: () => null }
-    if (id.includes('formatters')) return { fmtDateTime24: (value: unknown) => String(value ?? '') }
+    if (id.includes('formatters')) return { fmtDate: (value: unknown) => String(value ?? ''), fmtDateTime24: (value: unknown) => String(value ?? '') }
+    // REVERT-SET: the stock Undo/Redo confirm (its own test: historyStockEffectConfirm.test.ts).
+    if (id.includes('ConfirmDialog')) return { __esModule: true, default: () => null }
     return nodeRequire(id)
   }
   new Function('require', 'module', 'exports', compiled)(shim, mod, mod.exports)

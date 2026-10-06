@@ -58,7 +58,7 @@ assert.equal(translateMovementRowType({ movement_type: 'remove', reference_id: '
 const stockChanges = readFileSync(new URL('../src/components/products/StockChangeSection.tsx', import.meta.url), 'utf8')
 assert.match(stockChanges, /data-revert-effect="true"[\s\S]{0,200}revertEffectLine\(revertPreview\.effect/)
 assert.match(stockChanges, /data-revert-later-sets="true"[\s\S]{0,900}openMovementById\(set\.movementId\)/, 'each later Set links to its own row')
-assert.match(stockChanges, /effect: response\.effect \?\? null, laterSets: Array\.isArray\(response\.laterSets\)/)
+assert.match(stockChanges, /effect: response\.effect \?\? null, historyEffect: response\.historyEffect \?\? null, laterSets: Array\.isArray\(response\.laterSets\)/)
 const sessions = readFileSync(new URL('../src/components/products/StockInSessionsSection.tsx', import.meta.url), 'utf8')
 assert.match(sessions, /laterSetsWarning\(laterSets, tr, fmtDate\)/)
 assert.match(sessions, /row\.later_open_sets \?\? \[\]/)

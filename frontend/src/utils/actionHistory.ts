@@ -14,6 +14,9 @@ type ActionDirection = 'undo' | 'redo'
 type ActionHistoryId = string | number
 type HistoryAction = () => unknown | Promise<unknown>
 type NotifyFn = (message: string, type?: string) => void
+/** REVERT-SET: what a client entry's Undo/Redo moves, recorded when it ran -- the History confirm states it. */
+export type LocalStockEffectLine = { productName?: string | null; branchName?: string | null; receivedAt?: string | null; change: number }
+export type LocalStockEffect = { undo: LocalStockEffectLine[]; redo: LocalStockEffectLine[] }
 
 type ActionHistoryUser = {
   id?: unknown
@@ -36,6 +39,7 @@ type ActionHistoryInput = {
   // second write. If `refresh` is provided it is called INSTEAD of the closure
   // to re-pull the page's data; without it, the closure runs as before.
   refresh?: HistoryAction
+  stockEffect?: LocalStockEffect
   serverId?: unknown
   server_id?: unknown
   scope?: unknown
@@ -54,6 +58,7 @@ type ActionHistoryEntry = {
   undo?: HistoryAction
   redo?: HistoryAction
   refresh?: HistoryAction
+  stockEffect?: LocalStockEffect
   serverId: ActionHistoryId | null
   scope: string
   entity: unknown | null
@@ -164,6 +169,7 @@ function normalizeEntry(entry: ActionHistoryInput = {}, index = 0): ActionHistor
     undo: entry.undo,
     redo: entry.redo,
     refresh: entry.refresh,
+    ...(entry.stockEffect ? { stockEffect: entry.stockEffect } : {}),
     serverId: normalizeActionHistoryId(entry.serverId || entry.server_id),
     scope: String(entry.scope || 'global'),
     entity: entry.entity || null,

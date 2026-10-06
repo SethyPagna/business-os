@@ -38,10 +38,27 @@ export type LaterOpenSet = {
 
 // Confirmation must use a fresh server decision, never a cached generation.
 export function getStockMovementRevertPreview(id: number): Promise<{
-  success: true; revert: StockMovementRevertPreview; effect?: StockRevertEffect | null; laterSets?: LaterOpenSet[]
+  success: true; revert: StockMovementRevertPreview; effect?: StockRevertEffect | null; historyEffect?: HistoryStockEffect | null; laterSets?: LaterOpenSet[]
 }> {
   return apiFetch('GET', `/api/action-history/movements/${id}/revert-preview`)
     .catch((error: unknown) => localizeReplayRefusal(error, 'undo'))
+}
+
+// REVERT-SET (Worker GET /api/action-history/:id/effect): what a History
+// Undo/Redo of a stock record adds or removes, read from the record itself.
+export type HistoryEffectLine = {
+  productId: number; productName: string | null; branchId: number; branchName: string | null
+  batchId: number | null; receivedAt: string | null; lotCode: string | null; change: number
+}
+export type HistoryEffectBranch = { productId: number; productName: string | null; branchId: number; branchName: string | null; before: number; after: number }
+export type HistoryStockEffect = { applier: string; direction: 'undo' | 'redo'; lines: HistoryEffectLine[]; branches: HistoryEffectBranch[]; more: number }
+
+/** The Worker's stock appliers whose Undo/Redo the History confirm spells out (mirrors STOCK_EFFECT_APPLIERS). */
+export const STOCK_EFFECT_APPLIERS: readonly string[] = ['stock.quantity_set', 'stock.session_line_edit', 'stock.session', 'stock.transfer', 'product.remove']
+
+// Fresh every time: the branch totals are today's, and a cached read could name yesterday's.
+export function getActionHistoryEffect(id: string | number, direction: 'undo' | 'redo'): Promise<{ success: true; effect: HistoryStockEffect | null }> {
+  return apiFetch('GET', `/api/action-history/${encodeURIComponent(String(id))}/effect?direction=${direction}`)
 }
 
 export function getActionHistoryDetails(id: string | number, offset = 0): Promise<unknown> {

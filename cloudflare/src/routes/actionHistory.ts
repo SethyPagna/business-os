@@ -244,9 +244,11 @@ app.get('/movements/:id/revert-preview', async (c) => {
     }
     // REVERT-SET: what the confirm must say -- the exact change, and any later
     // Set on the same product and branch that this Revert leaves applied.
-    const { laterOpenSets, revertEffect } = await import('../lib/stockRevertEffect')
-    const [effect, later] = await Promise.all([revertEffect(db, id, revert), laterOpenSets(db, [id])])
-    return c.json({ success: true, revert, effect, laterSets: later.get(id) ?? [] })
+    const { historyStockEffect, laterOpenSets, revertEffect } = await import('../lib/stockRevertEffect')
+    // A session Revert undoes every line of the session: its confirm lists them all, by lot and branch.
+    const [effect, later, historyEffect] = await Promise.all([revertEffect(db, id, revert), laterOpenSets(db, [id]),
+      history && revert.kind === 'stock_session' ? historyStockEffect(db, { id: Number(history.id), status: history.status == null ? null : String(history.status), undo_payload: history.undo_payload ?? null, redo_payload: history.redo_payload ?? null }, revert.direction) : null])
+    return c.json({ success: true, revert, effect, historyEffect, laterSets: later.get(id) ?? [] })
   } catch (error) {
     const status = error instanceof StockMovementReplayError ? error.status : 500
     return c.json({ success: false, error: error instanceof Error ? error.message : 'Unable to preview this stock action.',
