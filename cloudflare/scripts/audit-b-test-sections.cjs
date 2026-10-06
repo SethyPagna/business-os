@@ -633,3 +633,43 @@ section('audit-b-lot-duplicates: the same business day written three ways, at on
   await plant('a positive lot with no received date can never merge', (w) => { w.product(10, 'Product 10'); w.receive(10, SHOP, 3, { received: null }) }, { positive_lots_without_day: 1 })
   await plant('a positive lot with garbage received_at', (w) => { w.product(10, 'Product 10'); w.receive(10, SHOP, 3, { received: 'yesterday' }) }, { positive_lots_without_day: 1 })
 })
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 14. audit-b-lot-cost-vs-receipts
+// ---------------------------------------------------------------------------------------------------------------------
+section('audit-b-lot-cost-vs-receipts: a receipt row whose unit x quantity is not its total, or whose cost was lost from the lot, fires; an edited lot cost is sized only', async () => {
+  const Q = 'audit-b-lot-cost-vs-receipts'
+  const plant = (label, mutate, expected) => planted(Q, label, mutate, expected, { base: activeWorld })
+  const w0 = activeWorld()
+  const clean = (await run(w0, Q)).rows[0]
+  assert.equal(clean.lots_with_receipts > 5, true)
+  assert.equal(clean.lots_cost_differs_from_all_receipts, 0)
+  w0.raw.close()
+  await plant('a receipt whose total is not unit x quantity', (w) => w.run("UPDATE inventory_movements SET total_cost_usd=999 WHERE id=(SELECT MIN(id) FROM inventory_movements WHERE movement_type='add' AND unit_cost_usd>0)"), { add_movements_total_mismatch: 1 })
+  await plant('a lot whose cost was erased although its receipt recorded one', (w) => w.run('UPDATE product_batches SET unit_cost_usd=NULL WHERE id=?', w.named.L7), { add_movements_cost_without_lot_cost: 2 })  // lot 7 holds its receipt and the Revert's re-add
+  const edit = await plant('a lot cost edited away from every receipt is info', (w) => w.run('UPDATE product_batches SET unit_cost_usd=50 WHERE id=?', w.named.L3), {})
+  assert.equal(edit.rows[0].lots_cost_differs_from_all_receipts, 1)
+  const none = await plant('a costed lot with no receipt movement is info', (w) => w.run("DELETE FROM inventory_movements WHERE batch_id=? AND movement_type='add'", w.named.L3), {})
+  assert.equal(none.rows[0].lots_costed_without_receipts, 1)
+})
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 15. audit-b-lot-date-shapes
+// ---------------------------------------------------------------------------------------------------------------------
+section('audit-b-lot-date-shapes: an unparseable or future received date and an unreadable or too-early expiry each fire; expired stock is sized', async () => {
+  const Q = 'audit-b-lot-date-shapes'
+  const plant = (label, mutate, expected) => planted(Q, label, mutate, expected, { base: activeWorld })
+  const w0 = activeWorld()
+  const clean = (await run(w0, Q)).rows[0]
+  assert.deepEqual([clean.lots_with_expiry, clean.expired_lots_with_stock], [1, 0])
+  w0.raw.close()
+  await plant('a lot with no received date', (w) => w.run('UPDATE product_batches SET received_at=NULL WHERE id=?', w.named.L2), { lots_received_unparseable: 1 })
+  await plant('a lot with a received date that is text', (w) => w.run("UPDATE product_batches SET received_at='yesterday' WHERE id=?", w.named.L2), { lots_received_unparseable: 1 })
+  await plant('a received date in the far future', (w) => w.run("UPDATE product_batches SET received_at='2099-01-01' WHERE id=?", w.named.L2), { lots_received_in_future: 1 })
+  await plant('an expiry that is not a date', (w) => w.run("UPDATE product_batches SET expiry_date='soon' WHERE id=?", w.named.L2), { lots_expiry_unparseable: 1 })
+  await plant('an expiry before the received day', (w) => w.run("UPDATE product_batches SET expiry_date='2026-01-01' WHERE id=?", w.named.L2), { lots_expiry_before_received: 1 })
+  await plant('an ISO timestamp expiry is read by its date part', (w) => w.run("UPDATE product_batches SET expiry_date='2027-08-06T00:00:00Z' WHERE id=?", w.named.L3), {})
+  const exp = await plant('expired stock is sized, not flagged', (w) => w.run("UPDATE product_batches SET expiry_date='2026-08-20' WHERE id=?", w.named.L3), {})
+  assert.deepEqual([exp.rows[0].expired_lots_with_stock, exp.rows[0].expired_units_on_hand], [1, 28])
+  await plant('an inactive lot is not read', (w) => w.run("UPDATE product_batches SET received_at=NULL, is_active=0 WHERE id=?", w.named.L5), {})
+})
