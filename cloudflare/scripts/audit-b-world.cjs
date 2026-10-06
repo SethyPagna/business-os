@@ -226,6 +226,78 @@ class World {
     return { receipt, history, op }
   }
 
+  /**
+   * A scoped lot-level Set (lib/stockLotAdjustment.ts): operation row + history + forward movement 'stock-set:<op>:0' (+ Undo counter and Redo forward).
+   * undone: apply the Undo generation too (generation 1, 'reversed'); redone: and the Redo (generation 2, 'applied').
+   */
+  scopedSet(product, branch, lot, target, { undone = false, redone = false } = {}) {
+    this.nextSet = (this.nextSet || 0) + 1
+    const op = 'set-' + this.nextSet
+    const lotQ = () => this.get('SELECT quantity q FROM branch_batch_stock WHERE batch_id=? AND branch_id=?', lot, branch).q
+    const branchQ = () => this.get('SELECT quantity q FROM branch_stock WHERE product_id=? AND branch_id=?', product, branch).q
+    const before = { productId: product, branchId: branch, batchId: lot, lotQuantity: lotQ(), branchQuantity: branchQ(), lotExists: 1, branchExists: 1 }
+    const delta = target - before.lotQuantity
+    const after = { ...before, lotQuantity: target, branchQuantity: Math.max(0, before.branchQuantity + delta) }
+    const payload = (generation) => JSON.stringify({ applier: 'stock.quantity_set', operation_id: op, generation })
+    const history = Number(this.run("INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload,created_by_id,created_by_name) VALUES('inventory','stock_quantity_set',?,?,1,'undoable',?,?,7,'operator')", String(product), 'Set', payload(0), payload(0)).lastInsertRowid)
+    this.run(`INSERT INTO stock_lot_adjustment_operations(id,actor_id,request_id,request_json,request_digest,response_json,before_json,after_json,revision_json,history_id)
+      VALUES(?,7,?,?,?,'{}',?,?,'{}',?)`, op, op, JSON.stringify({ productId: product, branchId: branch, batchId: lot, quantity: target, setScope: 'lot', reason: 'count' }), 'digest', JSON.stringify(before), JSON.stringify(after), history)
+    const apply = (state) => {
+      this.run('UPDATE branch_batch_stock SET quantity=? WHERE batch_id=? AND branch_id=?', state.lotQuantity, lot, branch)
+      const bdelta = state.branchQuantity - branchQ()
+      this.run('UPDATE branch_stock SET quantity=? WHERE product_id=? AND branch_id=?', state.branchQuantity, product, branch)
+      this.run('UPDATE products SET stock_quantity=COALESCE(stock_quantity,0)+? WHERE id=?', bdelta, product)
+    }
+    apply(after)
+    const forward = (gen) => this.movement({ product, branch, type: delta > 0 ? 'adjustment' : 'remove', quantity: Math.abs(delta), reason: 'count (Set received date to ' + target + ')', reference: 'stock-set:' + op + ':' + gen, batch: lot })
+    const f0 = forward(0)
+    let generation = 0
+    const mark = (state, status) => {
+      this.run('UPDATE stock_lot_adjustment_operations SET generation=?, state=? WHERE id=?', generation, state, op)
+      this.run('UPDATE action_history SET status=?, undo_payload=?, redo_payload=? WHERE id=?', status, payload(generation), payload(generation), history)
+    }
+    const out = { op, history, forward: [f0], counter: [] }
+    if (undone || redone) {
+      apply(before)
+      out.counter.push(this.movement({ product, branch, type: delta > 0 ? 'remove' : 'adjustment', quantity: Math.abs(delta), reason: 'Undo: count', reference: 'revert:' + f0, batch: lot }))
+      generation = 1
+      mark('reversed', 'redoable')
+    }
+    if (redone) {
+      apply(after)
+      out.forward.push(forward(2))
+      generation = 2
+      mark('applied', 'undoable')
+    }
+    return out
+  }
+
+  /**
+   * A stock-in session with one received line (stock_session_operations + undo_snapshots + history + member + receipt movement).
+   * undone: the Undo generation too (a negative 'remove' movement per member, snapshot reversed, history redoable).
+   */
+  stockSession(product, branch, quantity, { received = '2026-08-15', cost = 2.5, undone = false } = {}) {
+    this.nextSession = (this.nextSession || 0) + 1
+    const op = 'ses-' + this.nextSession
+    const snapshot = Number(this.run("INSERT INTO undo_snapshots(kind,status,payload_json) VALUES('stock.session','applied',?)", JSON.stringify({ products: [product], lots: [] })).lastInsertRowid)
+    const payload = (generation) => JSON.stringify({ applier: 'stock.session', snapshot_id: snapshot, operation_id: op, generation })
+    const history = Number(this.run("INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload,created_by_id,created_by_name) VALUES('global','stock_session',?,?,1,'undoable',?,?,7,'operator')", op, '1 stock-in line', payload(0), payload(0)).lastInsertRowid)
+    this.run("INSERT INTO stock_session_operations(id,actor_id,request_id,mode,request_json,snapshot_id,history_id) VALUES(?,7,?,'stock_in','{}',?,?)", op, op, snapshot, history)
+    const rowid = this.get('SELECT rowid AS r FROM stock_session_operations WHERE id=?', op).r
+    const { lot, movement } = this.receive(product, branch, quantity, { received, cost })
+    this.run('UPDATE inventory_movements SET reference_id=?, reason=? WHERE id=?', rowid, 'Stock-in session ' + op, movement)
+    this.run("INSERT INTO stock_session_members(operation_id,line_id,command_kind,product_id,product_created,branch_id,batch_id,movement_id,quantity,unit_cost_usd) VALUES(?,'l1','receive',?,0,?,?,?,?,?)", op, product, branch, lot, movement, quantity, cost)
+    const out = { op, rowid, snapshot, history, lot, movement, undo: null }
+    if (undone) {
+      this.bump({ product, branch, lot, delta: -quantity })
+      out.undo = this.movement({ product, branch, type: 'remove', quantity: -quantity, reason: 'Stock session ' + op + ' undo generation 1', reference: rowid, batch: lot })
+      this.run('UPDATE stock_session_operations SET generation=1 WHERE id=?', op)
+      this.run("UPDATE undo_snapshots SET status='reversed' WHERE id=?", snapshot)
+      this.run("UPDATE action_history SET status='redoable', undo_payload=?, redo_payload=? WHERE id=?", payload(1), payload(1), history)
+    }
+    return out
+  }
+
   /** Revert a plain stock movement: counter movement with the same magnitude, opposite direction. */
   revert(movementId) {
     const m = this.get('SELECT * FROM inventory_movements WHERE id=?', movementId)
@@ -278,6 +350,7 @@ function cleanWorld() {
  */
 function activeWorld() {
   const w = cleanWorld()
+  w.product(9, 'Product 9')
   const lot = (product) => w.get('SELECT MIN(id) AS id FROM product_batches WHERE variant_product_id=?', product).id
   const L2 = lot(2), L3 = lot(3), L5 = lot(5), L7 = lot(7)
   w.named = { L1: lot(1), L2, L3, L5, L7 }
@@ -310,10 +383,20 @@ function activeWorld() {
   w.named.undoneTransfer = w.operationTransfer(3, WAREHOUSE, SHOP, 2, { lot: L3, undone: true })
   w.named.added = w.receive(7, SHOP, 4, { lot: L7 }).movement
   w.named.revert = w.revert(w.named.added)
-  // a manual cost entry on product 4 after its first lot: the first lot's units count at 8, the later lot at its own 9
+  // a manual cost entry on product 4 after its first lot: the first lot's units count at 8, the later lot at its own 9. The entry itself fires no
+  // trigger (the route recomputes); the scoped Sets below change lot stock, which fires the 0195 trigger and re-derives the figure.
   const first4 = lot(4)
   w.costEntry(4, 8, first4)
-  w.run('UPDATE products SET cost_price_usd=8.4, purchase_price_usd=8.4 WHERE id=4')
+  const lots4 = w.all('SELECT id FROM product_batches WHERE variant_product_id=4 ORDER BY id').map((r) => r.id)
+  w.named.sets = {
+    down: w.scopedSet(4, SHOP, lots4[0], 5),
+    undone: w.scopedSet(4, SHOP, lots4[1], 6, { undone: true }),
+    redone: w.scopedSet(6, SHOP, L6, 0, { redone: true }),
+  }
+  w.named.sessions = {
+    live: w.stockSession(9, SHOP, 6),
+    undone: w.stockSession(9, SHOP, 2, { received: '2026-08-16', undone: true }),
+  }
   return w
 }
 

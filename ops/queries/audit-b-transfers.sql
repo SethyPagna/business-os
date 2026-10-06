@@ -78,10 +78,11 @@ WITH leg AS MATERIALIZED (
   SELECT r.id, r.operation_id, r.generation, r.replay_state, r.provenance_version, r.action_history_id, r.status,
     (SELECT COUNT(*) FROM transfer_operation_members m WHERE m.receipt_id = r.id) AS members,
     h.id AS hid, h.status AS hstatus,
-    CASE WHEN json_valid(h.undo_payload) AND json_valid(h.redo_payload)
-      AND json_extract(h.undo_payload, '$.applier') = 'stock.transfer' AND json_extract(h.redo_payload, '$.applier') = 'stock.transfer'
-      AND json_extract(h.undo_payload, '$.operation_id') = r.operation_id AND json_extract(h.redo_payload, '$.operation_id') = r.operation_id
-      AND json_extract(h.undo_payload, '$.generation') = r.generation AND json_extract(h.redo_payload, '$.generation') = r.generation THEN 1 ELSE 0 END AS payload_ok
+    CASE WHEN json_valid(h.undo_payload) = 1 AND json_valid(h.redo_payload) = 1 THEN
+      CASE WHEN json_extract(h.undo_payload, '$.applier') = 'stock.transfer' AND json_extract(h.redo_payload, '$.applier') = 'stock.transfer'
+        AND json_extract(h.undo_payload, '$.operation_id') = r.operation_id AND json_extract(h.redo_payload, '$.operation_id') = r.operation_id
+        AND json_extract(h.undo_payload, '$.generation') = r.generation AND json_extract(h.redo_payload, '$.generation') = r.generation THEN 1 ELSE 0 END
+      ELSE 0 END AS payload_ok
   FROM transfer_operation_receipts r
   LEFT JOIN action_history h ON h.id = r.action_history_id
 )

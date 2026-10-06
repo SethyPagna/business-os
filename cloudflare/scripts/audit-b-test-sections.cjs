@@ -407,3 +407,112 @@ section('audit-b-returns-restock: restock / damaged / none / cancel / edit / rep
     w.run("INSERT INTO return_items(return_id,product_id,quantity,return_to_stock,stock_action,branch_id) VALUES(60,2,1,1,'restock',?)", SHOP)
   }, {})
 })
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 9. audit-b-revert-linkage
+// ---------------------------------------------------------------------------------------------------------------------
+section('audit-b-revert-linkage: a Revert must name an existing original and invert exactly its delta; the Set undo and revert-of-revert shapes are legal', async () => {
+  const Q = 'audit-b-revert-linkage'
+  const plant = (label, mutate, expected) => planted(Q, label, mutate, expected, { base: activeWorld })
+  const w0 = activeWorld()
+  const clean = (await run(w0, Q)).rows[0]
+  assert.deepEqual([clean.reverts, clean.reverts_of_reverts], [3, 0], 'one stock Revert and the Undo counters of two scoped Sets')
+  assert.deepEqual(Object.values(JSON.parse(clean.first_ids)).filter((v) => v !== null), [])
+  w0.raw.close()
+  const rev = (w) => w.named.revert
+  const orig = (w) => w.named.added
+
+  await plant('a reference that is not exactly revert:<integer>', (w) => w.run("UPDATE inventory_movements SET reference_id='revert:abc' WHERE id=?", rev(w)), { revert_reference_malformed: 1 })
+  await plant('a reference with a leading zero', (w) => w.run("UPDATE inventory_movements SET reference_id='revert:0'||? WHERE id=?", String(orig(w)), rev(w)), { revert_reference_malformed: 1 })
+  await plant('an original that was deleted', (w) => w.run('DELETE FROM inventory_movements WHERE id=?', orig(w)), { revert_original_missing: 1 })
+  await plant('a Revert written before its original', (w) => {
+    const next = w.get('SELECT MAX(id)+1 AS n FROM inventory_movements').n
+    w.movement({ product: 7, branch: SHOP, type: 'remove', quantity: 1, reason: 'plant', reference: 'revert:' + (next + 1), batch: w.named.L7 })
+    w.movement({ product: 7, branch: SHOP, type: 'add', quantity: 1, reason: 'plant', batch: w.named.L7 })
+  }, { revert_id_precedes_original: 1 })
+  await plant('a Revert at another branch', (w) => w.run('UPDATE inventory_movements SET branch_id=? WHERE id=?', WAREHOUSE, rev(w)), { revert_wrong_product_or_branch: 1 })
+  await plant('a Revert of 3 for an original of 4 (does not invert its delta)', (w) => w.run('UPDATE inventory_movements SET quantity=3 WHERE id=?', rev(w)), { revert_quantity_not_inverse: 1 })
+  await plant('a Revert that moves stock the same way as its original', (w) => w.run("UPDATE inventory_movements SET movement_type='add' WHERE id=?", rev(w)), { revert_direction_not_inverse: 1 })
+  await plant('a Revert that lost the original\'s lot', (w) => w.run('UPDATE inventory_movements SET batch_id=NULL WHERE id=?', rev(w)), { revert_lot_differs: 1 })
+  await plant('a Revert of a sale movement', (w) => {
+    const sale = w.get("SELECT id, quantity FROM inventory_movements WHERE movement_type='sale' ORDER BY id LIMIT 1")
+    w.movement({ product: 2, branch: SHOP, type: 'add', quantity: Math.abs(sale.quantity), reason: 'plant', reference: 'revert:' + sale.id, batch: w.named.L2 })
+  }, { revert_of_unrevertible_type: 1 })
+  await plant('an original reverted twice', (w) => w.movement({ product: 7, branch: SHOP, type: 'remove', quantity: 4, reason: 'plant', reference: 'revert:' + orig(w), batch: w.named.L7 }), { originals_reverted_more_than_once: 1 })
+  // legal shapes
+  await plant('undo of the downward half of a scoped Set: forward remove, counter adjustment', (w) => {
+    const forward = w.movement({ product: 3, branch: WAREHOUSE, type: 'remove', quantity: 2, reason: 'Set to 26', reference: 'stock-set:op-9:0', batch: w.named.L3 })
+    w.movement({ product: 3, branch: WAREHOUSE, type: 'adjustment', quantity: 2, reason: 'Undo: Set to 26', reference: 'revert:' + forward, batch: w.named.L3 })
+  }, {})
+  await plant('undo of a TAGGED scoped Set: forward damage_out (the hold), counter adjustment', (w) => {
+    const forward = w.movement({ product: 3, branch: WAREHOUSE, type: 'damage_out', quantity: 2, reason: 'Set to 26', reference: 'stock-set:op-9:0', batch: w.named.L3 })
+    w.movement({ product: 3, branch: WAREHOUSE, type: 'adjustment', quantity: 2, reason: 'Undo: Set to 26', reference: 'revert:' + forward, batch: w.named.L3 })
+  }, {})
+  const rr = await plant('a Revert of a Revert is legal (the revert of the remove is an add)', (w) => w.movement({ product: 7, branch: SHOP, type: 'add', quantity: 4, reason: 'plant', reference: 'revert:' + rev(w), batch: w.named.L7 }), {})
+  assert.deepEqual([rr.rows[0].reverts, rr.rows[0].reverts_of_reverts], [4, 1])
+  let revertId = null
+  const names = await plant('the first_ids object names the offending Revert', (w) => { revertId = rev(w); w.run('UPDATE inventory_movements SET quantity=3 WHERE id=?', revertId) }, { revert_quantity_not_inverse: 1 })
+  assert.equal(JSON.parse(names.rows[0].first_ids).quantity, revertId)
+})
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 10. audit-b-set-and-session-undo
+// ---------------------------------------------------------------------------------------------------------------------
+section('audit-b-set-and-session-undo: Set generations, Reverts of a Set, stock-in sessions and their history each fire their own column', async () => {
+  const Q = 'audit-b-set-and-session-undo'
+  const plant = (label, mutate, expected) => planted(Q, label, mutate, expected, { base: activeWorld })
+  const S = (w) => w.named.sets
+  const T = (w) => w.named.sessions
+  const w0 = activeWorld()
+  const clean = (await run(w0, Q)).rows[0]
+  assert.deepEqual([clean.set_operations, clean.set_operations_reversed, clean.line_edit_operations, clean.stock_sessions, clean.stock_session_members_total, clean.stock_sessions_reversed], [3, 1, 0, 2, 2, 1])
+  assert.deepEqual([clean.set_branch_delta_differs, clean.open_history_rows, clean.open_history_without_applier, clean.open_history_without_applier_by_entity], [0, 7, 0, '{}'])
+  assert.deepEqual(Object.values(JSON.parse(clean.first_ids)).filter((v) => v !== null), [])
+  w0.raw.close()
+
+  // scoped Set generations (G = 0 applied, 1 reversed, 2 applied again)
+  await plant('state reversed at an even generation (and a history that still says undoable)', (w) => w.run("UPDATE stock_lot_adjustment_operations SET state='reversed' WHERE id=?", S(w).down.op), { set_state_generation_mismatch: 1, operation_history_mismatch: 1 })
+  await plant('a Set whose forward movement is gone', (w) => w.run('DELETE FROM inventory_movements WHERE id=?', S(w).down.forward[0]), { set_forward_rows_mismatch: 1 })
+  await plant('a redone Set that lost its generation-2 forward row', (w) => w.run('DELETE FROM inventory_movements WHERE id=?', S(w).redone.forward[1]), { set_forward_rows_mismatch: 1 })
+  await plant('a forward movement of another size than the delta', (w) => w.run('UPDATE inventory_movements SET quantity=3 WHERE id=?', S(w).down.forward[0]), { set_forward_quantity_mismatch: 1 })
+  await plant('a forward movement at another branch', (w) => w.run('UPDATE inventory_movements SET branch_id=? WHERE id=?', WAREHOUSE, S(w).down.forward[0]), { set_forward_scope_mismatch: 1 })
+  await plant('a downward Set recorded as an adjustment (up)', (w) => w.run("UPDATE inventory_movements SET movement_type='adjustment' WHERE id=?", S(w).down.forward[0]), { set_forward_direction_mismatch: 1 })
+  await plant('an undone Set whose counter movement is gone', (w) => w.run('DELETE FROM inventory_movements WHERE id=?', S(w).undone.counter[0]), { set_counter_rows_mismatch: 1 })
+  await plant('a counter that inverts 1 of the 2 units (the SK-II shape)', (w) => w.run('UPDATE inventory_movements SET quantity=1 WHERE id=?', S(w).undone.counter[0]), { set_counter_quantity_mismatch: 1 })
+  await plant('an operation with no history row', (w) => w.run('UPDATE stock_lot_adjustment_operations SET history_id=NULL WHERE id=?', S(w).down.op), { operation_history_missing: 1, open_history_without_operation: 1 })
+  await plant('an empty undo payload (Undo would report success and do nothing)', (w) => w.run("UPDATE action_history SET undo_payload='{}' WHERE id=?", S(w).down.history), { operation_history_mismatch: 1 })
+  await plant('a payload that names another generation', (w) => w.run("UPDATE action_history SET redo_payload=json_set(redo_payload,'$.generation',4) WHERE id=?", S(w).redone.history), { operation_history_mismatch: 1 })
+  await plant('a payload that is not JSON at all', (w) => w.run("UPDATE action_history SET undo_payload='not json' WHERE id=?", S(w).down.history), { operation_history_mismatch: 1 })
+  const editPayload = JSON.stringify({ applier: 'stock.session_line_edit', operation_id: 'edit-1', generation: 0 })
+  const addLineEdit = (payload) => (w) => {
+    const h = Number(w.run("INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload) VALUES('inventory','stock_in_line_edit','2','Edit',1,'undoable',?,?)", payload, payload).lastInsertRowid)
+    w.run("INSERT INTO stock_lot_adjustment_operations(id,actor_id,request_id,request_json,request_digest,response_json,before_json,after_json,revision_json,history_id) VALUES('edit-1',7,'edit-1','{}','d','{}','{}','{}','{}',?)", h)
+  }
+  await plant('a line-edit operation with the right applier is clean', addLineEdit(editPayload), {})
+  const le = await plant('a line-edit operation with an empty payload', addLineEdit('{}'), { operation_history_mismatch: 1 })
+  assert.equal(le.rows[0].line_edit_operations, 1)
+  const info = await plant('a lot-scope Set whose branch delta differs from the lot delta is info (the Part-77 floor)', (w) => w.run("UPDATE stock_lot_adjustment_operations SET after_json=json_set(after_json,'$.branchQuantity',json_extract(after_json,'$.branchQuantity')+3) WHERE id=?", S(w).down.op), {})
+  assert.equal(info.rows[0].set_branch_delta_differs, 1)
+
+  // stock-in sessions
+  await plant('a session whose members are gone', (w) => w.run('DELETE FROM stock_session_members WHERE operation_id=?', T(w).live.op), { session_ops_without_members: 1 })
+  await plant('a member with no receipt movement id', (w) => w.run('UPDATE stock_session_members SET movement_id=NULL WHERE operation_id=?', T(w).live.op), { session_member_movement_missing: 1 })
+  await plant('a member whose receipt movement was deleted', (w) => w.run('DELETE FROM inventory_movements WHERE id=?', T(w).live.movement), { session_member_movement_missing: 1 })
+  await plant('a receipt movement of another size than its member', (w) => w.run('UPDATE inventory_movements SET quantity=5 WHERE id=?', T(w).live.movement), { session_member_movement_mismatch: 1 })
+  await plant('a receipt movement not stamped with its operation', (w) => w.run('UPDATE inventory_movements SET reference_id=NULL WHERE id=?', T(w).live.movement), { session_member_movement_mismatch: 1 })
+  await plant('a member whose lot belongs to another product', (w) => w.run('UPDATE stock_session_members SET batch_id=? WHERE operation_id=?', w.named.L3, T(w).live.op), { session_member_lot_other_product: 1, session_member_movement_mismatch: 1 })
+  await plant('an undone session whose undo rows are missing', (w) => w.run('DELETE FROM inventory_movements WHERE id=?', T(w).undone.undo), { session_generation_rows_mismatch: 1 })
+  await plant('a session whose undo snapshot is empty', (w) => w.run("UPDATE undo_snapshots SET payload_json='{}' WHERE id=?", T(w).live.snapshot), { session_snapshot_unusable: 1 })
+  await plant('a session whose snapshot is gone', (w) => w.run('DELETE FROM undo_snapshots WHERE id=?', T(w).live.snapshot), { session_snapshot_unusable: 1 })
+  await plant('a session snapshot in the wrong state for its generation', (w) => w.run("UPDATE undo_snapshots SET status='reversed' WHERE id=?", T(w).live.snapshot), { session_snapshot_unusable: 1 })
+  await plant('a session whose history payload is empty', (w) => w.run("UPDATE action_history SET undo_payload='{}' WHERE id=?", T(w).live.history), { session_history_mismatch: 1 })
+  await plant('a session whose history status contradicts its generation', (w) => w.run("UPDATE action_history SET status='undoable' WHERE id=?", T(w).undone.history), { session_history_mismatch: 1 })
+  await plant('a session with no history row', (w) => w.run('UPDATE stock_session_operations SET history_id=NULL WHERE id=?', T(w).live.op), { session_history_mismatch: 1, open_history_without_operation: 1 })
+  // open history
+  await plant('an open stock-session history row no operation points at', (w) => {
+    const payload = JSON.stringify({ applier: 'stock.session', operation_id: 'ghost', snapshot_id: 1, generation: 0 })
+    w.run("INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload) VALUES('global','stock_session','ghost','Ghost',1,'undoable',?,?)", payload, payload)
+  }, { open_history_without_operation: 1 })
+  const noApplier = await plant('open history of another family with no applier is info (client-side undo)', (w) => w.run("INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload) VALUES('sales','sale','1','Edit',1,'undoable','{}','{}')"), {})
+  assert.deepEqual([noApplier.rows[0].open_history_without_applier, noApplier.rows[0].open_history_without_applier_by_entity], [1, '{"sale":1}'])
+})
