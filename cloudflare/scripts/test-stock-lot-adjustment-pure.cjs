@@ -62,6 +62,7 @@ const app = new Hono()
 app.route('/api/inventory', load('routes/inventory.ts').default)
 app.route('/api/batches', load('routes/batches.ts').default)
 app.route('/api/action-history', load('routes/actionHistory.ts').default)
+app.route('/api/products', load('routes/products.ts').default)
 const losses = load('lib/removalLosses.ts')
 const ledger = load('lib/stockLedgerQuery.ts')
 const backup = load('lib/backup.ts')
@@ -271,14 +272,29 @@ async function main() {
     assert.equal(forward.movement_type, 'adjustment'); assert.equal(forward.quantity, 27); assert.equal(forward.batch_id, 20)
     assert.equal(f.sql.prepare('SELECT reason FROM inventory_movements WHERE id=?').get(forward.id).reason,
       'wrong stock (Set received 2026-09-02 from 3 to 30)', 'the row names the lot and both quantities')
+    // The delivery's Revert says what it does and that the Set stays applied --
+    // on Stock Changes (preview) and on the Stock-in Sessions line alike.
+    const addPreview = await send(f, 'GET', '/api/action-history/movements/48026/revert-preview')
+    assert.equal(addPreview.status, 200, JSON.stringify(addPreview.json))
+    assert.equal(addPreview.json.revert.kind, 'movement')
+    assert.deepEqual(addPreview.json.effect, {
+      quantity: -30, batchId: 21, receivedAt: '2026-09-29', lotCode: '09292026', branchId: 1, branchName: 'Shop', branchBefore: 60, branchAfter: 30,
+    })
+    assert.deepEqual(addPreview.json.laterSets.map((s) => [s.movementId, s.quantity, s.receivedAt]), [[forward.id, 27, '2026-09-02']])
+    const lines = await send(f, 'GET', '/api/products/stock-in-session-lines?key=session:1790667050013')
+    assert.equal(lines.status, 200, JSON.stringify(lines.json))
+    assert.deepEqual(lines.json.rows.map((row) => [row.id, (row.later_open_sets || []).map((s) => s.movementId)]), [[48026, [forward.id]]])
     // The Stock Changes Revert on the Set row resolves THIS Set, not the delivery.
     const preview = await send(f, 'GET', `/api/action-history/movements/${forward.id}/revert-preview`)
     assert.equal(preview.status, 200, JSON.stringify(preview.json))
     assert.equal(preview.json.revert.kind, 'stock_set'); assert.equal(preview.json.revert.direction, 'undo')
     assert.equal(preview.json.revert.historyId, set.json.action_history_id)
+    assert.deepEqual([preview.json.effect.quantity, preview.json.effect.batchId, preview.json.effect.branchBefore, preview.json.effect.branchAfter],
+      [-27, 20, 60, 33], 'the Set row previews -27 on its own lot')
     const res = await undo(f, set.json.action_history_id, 0)
     assert.equal(res.status, 200, JSON.stringify(res.json))
     assert.deepEqual(lots(f), { old: 3, delivery: 30, branch: 33, product: 33, cost: 6.8182 }, '33, not 30')
+    assert.deepEqual((await send(f, 'GET', '/api/action-history/movements/48026/revert-preview')).json.laterSets, [], 'an undone Set no longer warns')
     assert.deepEqual(delivery(f), { received_quantity: 30, received_cost_usd: 210, is_active: 1 }, 'the delivery stays a purchase')
     const counter = movements(f).at(-1)
     assert.equal(counter.movement_type, 'remove'); assert.equal(counter.quantity, 27); assert.equal(counter.batch_id, 20)
