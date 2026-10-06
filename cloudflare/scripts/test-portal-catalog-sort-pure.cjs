@@ -76,6 +76,7 @@ const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const portalRoute = loadReal('routes/portal.ts', {
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
+  '../lib/membershipRedemption': loadReal('lib/membershipRedemption.ts', { './moneyPrecision': loadReal('lib/moneyPrecision.ts') }),
   '../lib/requestBodyGuard': loadReal('lib/requestBodyGuard.ts'),
   '../lib/db': { getDb: () => db },
   // Real, pure -- its chunking is what keeps these reads inside D1's

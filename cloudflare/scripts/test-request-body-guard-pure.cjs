@@ -143,6 +143,7 @@ async function main() {
     '../lib/portalImagePrivacy': portalImagePrivacy,
     '../lib/safeLinkUrl': load('lib/safeLinkUrl.ts'),
     '../lib/portalText': load('lib/portalText.ts'),
+    '../lib/membershipRedemption': load('lib/membershipRedemption.ts', { './moneyPrecision': load('lib/moneyPrecision.ts') }),
     '../lib/portalSession': {
       createPortalSession: async () => ({ token: '', expiresAt: '' }),
       setPortalCookie: () => {}, clearPortalCookie: () => {}, revokePortalSession: async () => {},

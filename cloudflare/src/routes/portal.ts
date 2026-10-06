@@ -30,6 +30,7 @@ import { canonicalizePhone } from '../lib/phone'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { customerIsProfileSql } from '../lib/anonymousCustomer'
+import { redeemValueUsdPerUnit } from '../lib/membershipRedemption'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -328,8 +329,11 @@ function normalizeUrl(value: unknown): string {
 // Ported from backend/src/routes/portal.ts. `redeemPoints` fallback of 100
 // matches the legacy default; the KHR value is kept in 1000-increments,
 // matching how KHR cash denominations actually work.
-function normalizeRedeemValueUsd(value: unknown, fallback = 1): number {
-  return Math.max(0, Math.round(toNumber(value, fallback)))
+// The USD value per unit is read exactly as POST /api/sales books it
+// (lib/membershipRedemption.ts, four decimals; owner ruling 6 Oct 2026). A
+// value no redemption can be booked at shows as 0 rather than a guess.
+function normalizeRedeemValueUsd(value: unknown): number {
+  return redeemValueUsdPerUnit(value) ?? 0
 }
 
 function normalizeRedeemValueKhr(value: unknown, fallback = 4100): number {
@@ -631,7 +635,7 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     pointsPerUsd,
     pointsPerKhr: toNumber(settings.customer_portal_points_per_khr, derivedPointsPerKhr),
     redeemPoints: Math.max(1, Math.floor(toNumber(settings.customer_portal_redeem_points, 100))),
-    redeemValueUsd: normalizeRedeemValueUsd(settings.customer_portal_redeem_value_usd, 1),
+    redeemValueUsd: normalizeRedeemValueUsd(settings.customer_portal_redeem_value_usd),
     redeemValueKhr: normalizeRedeemValueKhr(settings.customer_portal_redeem_value_khr, exchangeRate),
     membershipInfoText: settings.customer_portal_membership_info_text
       || 'Membership points are reviewed and applied by staff during checkout. Redemption uses whole units only.',

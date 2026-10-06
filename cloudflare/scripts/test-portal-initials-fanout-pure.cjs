@@ -82,6 +82,7 @@ const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const portalRoute = loadReal('routes/portal.ts', {
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
+  '../lib/membershipRedemption': loadReal('lib/membershipRedemption.ts', { './moneyPrecision': loadReal('lib/moneyPrecision.ts') }),
   '../lib/requestBodyGuard': loadReal('lib/requestBodyGuard.ts'),
   '../lib/db': { getDb: () => flakyDb },
   '../lib/sqlBinding': loadReal('lib/sqlBinding.ts'),

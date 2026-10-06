@@ -33,6 +33,7 @@ const portal = load('routes/portal.ts', {
   '../lib/anonymousCustomer': anonymousCustomer,
   '../lib/safeLinkUrl': load('lib/safeLinkUrl.ts'),
   '../lib/portalText': load('lib/portalText.ts'),
+  '../lib/membershipRedemption': load('lib/membershipRedemption.ts', { './moneyPrecision': load('lib/moneyPrecision.ts') }),
 })
 const permissionsModule = load('lib/permissions.ts')
 const contactDependencies = {

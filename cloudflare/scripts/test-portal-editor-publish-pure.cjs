@@ -59,6 +59,7 @@ const loadPortal = (portalTextModule) => load('routes/portal.ts', {
   '../lib/requestBodyGuard': { SMALL_BODY_BYTES: 65536, PORTAL_SCREENSHOT_BODY_BYTES: 1 },
   '../lib/safeLinkUrl': load('lib/safeLinkUrl.ts'),
   '../lib/portalText': portalTextModule,
+  '../lib/membershipRedemption': load('lib/membershipRedemption.ts', { './moneyPrecision': load('lib/moneyPrecision.ts') }),
   '../lib/sqlBinding': load('lib/sqlBinding.ts'),
   '../lib/familyPagination': load('lib/familyPagination.ts'),
   '../lib/promotionRulesSql': { loadActivePromotionRules: async () => [], productPromotedSql: () => '0' },
