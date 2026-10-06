@@ -191,6 +191,10 @@ const LABELS = {
   to: { en: 'To', km: 'ទៅ' },
   totalMoved: { en: 'Total moved', km: 'បានផ្ទេរសរុប', localizeValue: true },
   note: { en: 'Note', km: 'កំណត់ចំណាំ' },
+  // A product edit by a non-admin (owner, 5 Oct 2026): "Changed: name, category".
+  // A merge of duplicate products: "Merged: <the product folded in>".
+  merged: { en: 'Merged', km: 'បញ្ចូលគ្នា' },
+  changed: { en: 'Changed', km: 'បានផ្លាស់ប្ដូរ' },
 
   // --- returns ---
   ret: { en: 'RET', km: 'លេខប្រគល់មកវិញ' },
@@ -371,6 +375,8 @@ const HEADINGS = {
   // row under it; the change itself is the `statusUpdated` row now.
   '🧾 Invoice': 'វិក្កយបត្រ',
   '💸 Fee recorded': 'បានកត់ត្រាចំណាយ',
+  '🔀 Products merged': 'បញ្ចូលគ្នាផលិតផល',
+  '✏️ Product edited': 'បានកែព័ត៌មានផលិតផល',
   '📥 Stock in': 'ស្តុកចូល',
   '📤 Stock out': 'ស្តុកចេញ',
   '🔁 Stock transferred': 'បានផ្ទេរស្តុក',

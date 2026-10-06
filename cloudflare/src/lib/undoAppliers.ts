@@ -207,6 +207,11 @@ export interface MergeReversal {
   keeperNameNormalizedBefore?: string | null
   /** The Resolve grid's keeper choice (N1/N4); a redo passes it back to the fold. */
   keeperChoice?: ProductMergeKeeperChoice
+  /**
+   * True when a Resolve choice set a USD price different from the merge rule (owner, 5 Oct 2026: that is a
+   * product edit). Automatic merges never set it. Snapshots written before the rule lack it and replay as before.
+   */
+  priceOverridden?: boolean
   /** Optional exact keeper catalog before-image for reviewed v2 merges. */
   keeperCatalogBefore?: {
     category: string | null
@@ -300,6 +305,8 @@ export const PRODUCT_MERGE_GROUP_CHILD_KIND = 'product.merge.group.child'
 const PRODUCT_MERGE_APPLIER_KINDS = new Set(['product.merge', 'product.merge.bulk', PRODUCT_MERGE_GROUP_ACTION_KIND])
 
 function mergeChoicePermissionError(reversal: MergeReversal, user: SessionUser | null | undefined): string | null {
+  if (reversal.priceOverridden === true
+    && (!user || getActionTier(user, 'products', 'edit') !== 'full' || getActionTier(user, 'products', 'price') === 'none')) return 'product_edit_permission_required'
   const choice = reversal.keeperChoice
   if (!choice) return null
   const needsProductEdit = choice.requiresProductEdit === true

@@ -66,7 +66,8 @@ async function main() {
     }
   }
   await check('source-only choices remain undoable and redoable for a merge-only owner', async () => {
-    const history = await merged({ name: { source_id: M1 }, category: { source_id: M1 }, selling_price_usd: { source_id: M1 } })
+    // The price pick stays on the survivor's own: taking another record's price needs Edit product (5 Oct 2026).
+    const history = await merged({ name: { source_id: M1 }, category: { source_id: M1 }, selling_price_usd: { source_id: KEEP } })
     const mergedValues = keeperColumns()
     await replay(history, 'undo', demoted)
     await replay(history, 'redo', demoted)

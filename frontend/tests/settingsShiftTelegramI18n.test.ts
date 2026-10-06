@@ -106,6 +106,9 @@ const telegramKeys = [
   'telegram_cat_fees_desc',
   'telegram_cat_stock_in_desc',
   'telegram_cat_stock_out_desc',
+  // Owner, 5 Oct 2026 (evening): the on/off switch for the product edit and merge alerts (telegram_products_enabled).
+  'telegram_cat_products',
+  'telegram_cat_products_desc',
   'telegram_sending_test',
   'telegram_send_test',
   'telegram_sending_summary',

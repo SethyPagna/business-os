@@ -33,7 +33,9 @@ check(
   'handler denies without the shared effective detail read grant',
   /if \(!canReadProductDetail\(user\)\)[\s\S]*return c\.json\(\s*\{\s*error:[\s\S]*\},\s*403\s*\)/.test(handler),
 )
-check('the shared gate honors Products or Inventory effective view', /function canReadProductDetail\(user: SessionUser\): boolean \{\s*return getActionTier\(user, 'products', 'view'\) !== 'none' \|\| getActionTier\(user, 'inventory', 'view'\) !== 'none'/.test(src))
+// Owner, 5 Oct 2026 (evening): the Products grant also needs the products:history action (off for the Employee default,
+// who sees only the main Products page); an Inventory view grant stays its own way in.
+check('the shared gate honors Products view with the history action, or Inventory effective view', /function canReadProductDetail\(user: SessionUser\): boolean \{\s*const productsRead = getActionTier\(user, 'products', 'view'\) !== 'none' && getActionTier\(user, 'products', 'history'\) !== 'none'\s*return productsRead \|\| getActionTier\(user, 'inventory', 'view'\) !== 'none'/.test(src))
 check('the gate sits before the productId is parsed', handler.indexOf('!canReadProductDetail(user)') >= 0 && handler.indexOf('!canReadProductDetail(user)') < handler.indexOf('Number(c.req.param'))
 
 console.log(`\nALL ${passed} CHECKS PASSED`)

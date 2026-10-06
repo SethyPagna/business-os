@@ -1,6 +1,7 @@
 import { useApp } from '../../AppContext'
 import { canViewAcquisitionCosts, canEditAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import type { PermissionUser } from '../../utils/permissions.ts'
+import { canOverrideMergePrice } from '../../utils/productMergePriceAccess.ts'
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
@@ -296,6 +297,8 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
   const canViewCosts = canViewAcquisitionCosts(user)
   const canEditCosts = canEditAcquisitionCosts(user)
   const canEditProducts = can ? can('products', 'edit') : false
+  // Owner, 5 Oct 2026: the merge rule picks the highest price; choosing another needs Edit product at FULL tier + the price action.
+  const canOverridePrices = canOverrideMergePrice(user)
   const [loading, setLoading] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [search, setSearch] = useState('')
@@ -397,10 +400,11 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
     canViewCosts,
     canEditCosts,
     canEditProducts,
+    canOverridePrices,
     canMerge: () => canMergeRef.current,
     onWritten: () => setMergingId(clusterKey(resolving.cluster)),
     imageDisplay: (path) => <ProductImg src={path} alt="" className="h-10 w-10 rounded-lg object-cover" />,
-  }) : null), [resolving, t, canViewCosts, canEditCosts, canEditProducts])
+  }) : null), [resolving, t, canViewCosts, canEditCosts, canEditProducts, canOverridePrices])
   const resolveName = useMemo(() => {
     const first = resolving ? [...resolving.cluster.products].sort((a, b) => Number(a.id) - Number(b.id))[0] : null
     return first ? String(first.name || '').trim() || `#${first.id}` : ''

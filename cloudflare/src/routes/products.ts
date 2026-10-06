@@ -32,7 +32,9 @@ import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail } from
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { buildAtomicMergeHistoryStatements, closeStockSessionsStatements, readOpenStockSessions, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition, type ProductMergeKeeperChoice } from '../lib/undoAppliers'
 import { INVALID_RESOLVE_CHOICES_CODE, KEEPER_CHOICE_BEFORE_SQL, MERGE_APPLIED_PROBE_SQL, ProductResolveChoiceError, RESOLVE_EDIT_PERMISSION_CODE, keeperChoiceBefore, keeperChoiceStatements, mergeFailedBody, parseProductResolveChoices, resolveChoicesTypeValues, resolveChoiceValues, type ProductResolveChoices, type ResolveChoiceValues } from '../lib/productResolveChoices'
-import { createProductMergeClusterPlan, MERGE_COST_FIELDS, MERGE_PRICE_FIELDS, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergeSourceUnmovedAssertion, MERGE_CONFLICT_RETRY, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
+import { createProductMergeClusterPlan, isMergePriceEditError, MERGE_COST_FIELDS, MERGE_PRICE_EDIT_CODE, MERGE_PRICE_EDIT_MESSAGE, MERGE_PRICE_FIELDS, mergePriceEditError, mergePriceOverrides, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergeSourceUnmovedAssertion, MERGE_CONFLICT_RETRY, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
+import { sendTelegramEvent } from '../lib/telegram'
+import { PRODUCT_EDIT_ALERT_HEADING, PRODUCT_MERGE_ALERT_HEADING, formatProductEditAlertLines, formatProductMergeAlertLines, productEditAlertFields } from '../lib/productEditAlert'
 import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedSql, costEntryActorParams, typedCostEntriesBeforeWriteSql, typedCostEntryBeforeWriteStatement } from '../lib/catalogCostRecompute'
 import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, productMergeSourceExtent, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
 import type { ProductMergeCaseSnapshot, ProductMergeLotSnapshot } from '../lib/productMergeSnapshot'
@@ -148,8 +150,40 @@ app.use('*', acquisitionCostResponses)
 // not a lib middleware: the body is read here only for the two plain-JSON merge
 // POSTs. The bulk preview/finalize handlers meter the raw stream themselves
 // (admitRequestBody), which a body already consumed here would break.
+// Owner, 5 Oct 2026 (evening): a product edit or merge by someone who is not an administrator is announced on
+// Telegram (bilingual, Alerts topic, the telegram_products_enabled switch). Never blocks or fails the request.
+function announceProductAlert(c: { env: Env; executionCtx: { waitUntil(promise: Promise<unknown>): void } }, user: SessionUser | null | undefined, heading: string, lines: string[]): void {
+  if (!user || isAdminControlUser(user)) return
+  c.executionCtx.waitUntil(Promise.resolve(sendTelegramEvent(c.env, { type: 'products', heading, lines }))
+    .catch((error) => console.error('[telegram] product alert failed', error)))
+}
 const MERGE_ROUTE_PATH = /\/(?:merge-duplicates|possible-duplicates\/merge)(?:\/|$|-)/
 const MERGE_JSON_BODY_PATH = /\/(?:merge-duplicates|possible-duplicates\/merge)$/
+// The committing merge endpoints. Preview, review and finalize requests never reach it, a refused or replayed
+// request sends nothing, and a response that made no progress sends nothing.
+const MERGE_ALERT_PAIR_PATH = /\/possible-duplicates\/merge$/
+const MERGE_ALERT_BULK_PATH = /\/(?:merge-duplicates|possible-duplicates\/merge-batch)$/
+app.use('*', async (c, next) => {
+  await next()
+  const user = c.get('user')
+  if (c.req.method !== 'POST' || !user || isAdminControlUser(user) || c.res.status >= 300) return
+  const pair = MERGE_ALERT_PAIR_PATH.test(c.req.path)
+  if (!pair && !MERGE_ALERT_BULK_PATH.test(c.req.path)) return
+  try {
+    const body = await c.res.clone().json().catch(() => null) as Record<string, unknown> | null
+    if (!body || body.success === false || body.replayed === true || body.madeProgress === false) return
+    let kept: string | null = null
+    let merged: string | null = null
+    if (pair && Number.isSafeInteger(Number(body.keptId)) && Number.isSafeInteger(Number(body.mergedId))) {
+      const names = await getDb(c.env).prepare('SELECT id, name FROM products WHERE id IN (@a, @b)').all<{ id: number; name: string | null }>({ a: Number(body.keptId), b: Number(body.mergedId) })
+      kept = names.find((row) => Number(row.id) === Number(body.keptId))?.name ?? null
+      merged = names.find((row) => Number(row.id) === Number(body.mergedId))?.name ?? null
+    }
+    announceProductAlert(c, user, PRODUCT_MERGE_ALERT_HEADING, formatProductMergeAlertLines({ kept, merged, by: actorSnapshot(user) }))
+  } catch (error) {
+    console.error('[telegram] product merge alert failed', error)
+  }
+})
 app.use('*', async (c, next) => {
   const folds = c.req.method === 'PUT' && /\/\d+$/.test(c.req.path)
   const watched = MERGE_ROUTE_PATH.test(c.req.path) || folds
@@ -1444,8 +1478,13 @@ app.get('/:id/detail-report', async (c) => {
 // /detail-report above: a products OR inventory grant. Both are READ-ONLY and
 // product-scoped, and their filters mirror /detail-report's own aggregates so
 // the drilled numbers can never disagree with the row that opened them.
+// Owner, 5 Oct 2026 (evening): an Employee sees ONLY the main Products page (information and images). Everything
+// below the list is a sub-page: the Stock Changes ledger, Stock-in Sessions and a product's sales / supplier / merge
+// history. The products route to read them needs the products:history action (off for the Employee default, and a
+// manual override can only narrow it); an Inventory view grant remains its own way in.
 function canReadProductDetail(user: SessionUser): boolean {
-  return getActionTier(user, 'products', 'view') !== 'none' || getActionTier(user, 'inventory', 'view') !== 'none'
+  const productsRead = getActionTier(user, 'products', 'view') !== 'none' && getActionTier(user, 'products', 'history') !== 'none'
+  return productsRead || getActionTier(user, 'inventory', 'view') !== 'none'
 }
 
 // Individual sales of this product within ONE day or month (the period a row on
@@ -1788,10 +1827,24 @@ app.get('/stock-ledger/:id/balance', async (c) => {
 // column, so leaving it in this allow-list would have let a bulk price
 // adjustment write real money into a column nothing reads -- silently doing
 // nothing while reporting "changed N products".
+const PRODUCT_DEFAULT_PRICE_FIELDS = ['selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr'] as const
+function productPriceChanged(plan: { before?: Record<string, unknown> | null; after?: Record<string, unknown> } | null | undefined): boolean {
+  if (!plan?.after) return false
+  return PRODUCT_DEFAULT_PRICE_FIELDS.some((field) => Object.prototype.hasOwnProperty.call(plan.after!, field)
+    && roundMoney4(Number(plan.after![field]) || 0) !== roundMoney4(Number(plan.before?.[field]) || 0))
+}
 const BULK_PRICE_FIELDS = new Set(['selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr', 'cost_price_usd', 'cost_price_khr'])
 app.post('/bulk-price-adjust', async (c) => {
   const user = c.get('user')
-  if (getPermissionTier(user, 'products') !== 'full') {
+  // A catalog-wide price change is a product edit (Edit product) AND a catalog-wide
+  // cascade, which the sibling POST /rename-brand and /lookups/replace gate on the
+  // Full manage_lookups action. Owner, 5 Oct 2026: the Employee default is product
+  // information edits and images only, so it must not reach this route; before this
+  // the tier alone decided it and any Full Products role could reprice everything.
+  if (getPermissionTier(user, 'products') !== 'full'
+    || getActionTier(user, 'products', 'edit') !== 'full'
+    || getActionTier(user, 'products', 'price') === 'none'
+    || getActionTier(user, 'products', 'manage_lookups') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = await c.req.json<{
@@ -2255,6 +2308,12 @@ app.put('/:id', async (c) => {
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error
   }
+  // Owner, 5 Oct 2026: the DEFAULT selling and wholesale price is its own action (products:price, off for
+  // Employee, who adjust a price per sale in the POS cart). The editor posts the whole row, so only a price
+  // that actually differs from the stored one counts; cost keeps its own gate above.
+  if (getActionTier(user, 'products', 'price') === 'none' && productPriceChanged(readProductMoneyPlan(body))) {
+    return c.json({ error: 'You do not have permission to change product prices', code: 'product_price_edit_required' }, 403)
+  }
   const imageLimitError = await validateImageGalleryPayload(c.env, user, body, id)
   if (imageLimitError) {
     return c.json({
@@ -2266,10 +2325,12 @@ app.put('/:id', async (c) => {
   }
   const submittedImageFields = Object.prototype.hasOwnProperty.call(body, 'image_path')
     || Object.prototype.hasOwnProperty.call(body, 'image_gallery')
+  let productImagesChanged = false
   if (submittedImageFields) {
     const currentImageState = await loadProductImageState(c.env, id)
     if (!currentImageState) return c.json({ error: 'Product not found' }, 404)
     const changesImages = await productImageFieldsChangedResolved(getDb(c.env), body, currentImageState)
+    productImagesChanged = changesImages
     if (imagePermissionDenied(user, changesImages, isImageOnlyEdit)) {
       return c.json({ error: 'You do not have permission to perform this action' }, 403)
     }
@@ -2398,6 +2459,8 @@ app.put('/:id', async (c) => {
           }
         }
         const item = await db.prepare('SELECT * FROM products WHERE id = @id').get({ id: duplicate.id })
+        // The edit renamed this row onto an existing identity and folded it in: that is a merge, announced as one.
+        announceProductAlert(c, user, PRODUCT_MERGE_ALERT_HEADING, formatProductMergeAlertLines({ kept: String(duplicate.name || ''), merged: String(dupRow.name || ''), by: actorSnapshot(user) }))
         c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
         c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: duplicate.id }))
         return c.json({ item, product: item, id: duplicate.id, merged_into: duplicate.id, success: true, foldResult: { quantityMoved: foldResult.quantityMoved, batchesMoved: foldResult.batchesMoved } })
@@ -2523,6 +2586,14 @@ app.put('/:id', async (c) => {
   })
   if (productFieldChange) {
     await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'product', id, null, productFieldChange)
+  }
+  // Owner, 5 Oct 2026: every product edit by someone who is not an administrator leaves the Record above AND
+  // sends this alert (bilingual, Alerts topic). The alert never blocks or fails the edit.
+  if (!isAdminControlUser(user) && (productFieldChange || productImagesChanged)) {
+    const alertFields = productEditAlertFields(Object.keys(productFieldChange?.after || {}), productImagesChanged)
+    if (alertFields.length) {
+      announceProductAlert(c, user, PRODUCT_EDIT_ALERT_HEADING, formatProductEditAlertLines({ product: String((item as Record<string, unknown>).name || ''), changed: alertFields, by: actorSnapshot(user) }))
+    }
   }
   if (renamedProductName && renamedProductIds.length) {
     await syncLinkedProductNameSnapshots(c.env, renamedProductIds, renamedProductName)
@@ -2724,7 +2795,11 @@ app.post('/bulk-delete-jobs/:id/cancel', async (c) => {
 
 app.post('/variant', async (c) => {
   const user = c.get('user')
-  if (!hasPermission(user, 'products')) {
+  // Add variant creates a product row. The old check read the section grant alone, so a
+  // role with Products Full and "Add variant" switched off (the Employee default, owner
+  // 5 Oct 2026) could still create products here; the action tier honours the override
+  // and is identical to the section grant when no override exists.
+  if (getActionTier(user, 'products', 'variant') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
@@ -3674,6 +3749,16 @@ export async function foldDuplicateProductInto(
   ] as Array<[string, number]>)
     .map(([field, to]) => ({ field, from: Number((canonicalBefore as Record<string, number | null> | null)?.[field]) || 0, to: Number(to) || 0 }))
     .filter((change) => roundMoney4(change.from) !== roundMoney4(change.to))
+  // Owner, 5 Oct 2026: an automatic merge never needs a permission (the highest selling and wholesale
+  // price win, see mergePriceOverrides). Only a Resolve choice that sets a USD price different from that
+  // rule is a product edit. Decided BEFORE any statement is built or run, so a refusal writes nothing.
+  const priceOverrides = mergePriceOverrides({
+    selling_price_usd: mergedPricing.selling_price_usd ?? canonicalBefore?.selling_price_usd ?? 0,
+    wholesale_price_usd: mergedPricing.wholesale_price_usd ?? canonicalBefore?.wholesale_price_usd ?? 0,
+  }, choiceFields as Record<string, unknown> | undefined)
+  if (priceOverrides.length && (getActionTier(user, 'products', 'edit') !== 'full' || getActionTier(user, 'products', 'price') === 'none')) {
+    throw mergePriceEditError()
+  }
   const dupBatchRows = snapshot.duplicateBatchRows
   // Images were the one thing this merge silently threw away: branch_stock,
   // inventory_movements and product_batches were all carried over, but the
@@ -4130,6 +4215,8 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
     ...(displacedBarcode !== null ? { dupBarcodeBefore: dupPricing.barcode ?? null } : {}),
     ...(keeperChoice ? { keeperChoice } : {}),
     ...choiceBefore,
+    // Replay (undo or redo) of a merge whose price was chosen by hand needs the same grant.
+    ...(priceOverrides.length ? { priceOverridden: true } : {}),
     ...(keeperChoice?.economics ? { fullBatchMetadataFingerprint: true } : {}),
     ...(atomicHistory?.reviewedCatalogBefore ? { keeperCatalogBefore: atomicHistory.reviewedCatalogBefore } : {}),
     keeperPricingBefore: {
@@ -8903,6 +8990,7 @@ app.post('/possible-duplicates/merge', async (c) => {
     if (/merge_state_conflict|merge_identity_conflict/.test(String(error))) {
       return c.json({ success: false, code: 'merge_state_conflict', error: 'One of these products changed while the merge was being prepared. Refresh and try again.' }, 409)
     }
+    if (isMergePriceEditError(error)) return c.json({ success: false, code: MERGE_PRICE_EDIT_CODE, error: MERGE_PRICE_EDIT_MESSAGE }, 403)
     const refusal = mergeFoldRefusal(error)
     if (refusal) return c.json({ success: false, ...refusal }, 409)
     if (/merge_numeric_invalid:/.test(String(error))) {
@@ -9289,7 +9377,8 @@ function buildLookupUsageEntries(
 // admin screen (shows how many products reference each value before you
 // bulk-rename or delete one) -- had no Cloudflare route at all before this.
 app.get('/lookups/usage', async (c) => {
-  if (getActionTier(c.get('user'), 'products', 'view') !== 'full') {
+  // Only the Manage brands / categories / units modals read this, so it needs the same action as changing them.
+  if (getActionTier(c.get('user'), 'products', 'view') !== 'full' || getActionTier(c.get('user'), 'products', 'manage_lookups') !== 'full') {
     return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'products' }, 403)
   }
   try {

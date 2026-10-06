@@ -325,11 +325,22 @@ async function main() {
     assert.equal(dump(), before)
   })
 
-  await check('ROUTE: the same user may pick among the reviewed records\' values, and a user with Edit product may type', async () => {
+  // Owner, 5 Oct 2026 (evening): the merge rule gives the HIGHEST price; only a price other than the rule needs Edit product
+  // (test-merge-price-rule-native.cjs). Picking the record that already holds the highest price is the rule, not an override.
+  await check('ROUTE: the same user may pick among the reviewed records\' values (prices on the rule\'s highest), and a user with Edit product may type', async () => {
     fresh()
     state.user = MERGER
+    const highest = (field) => FIXTURE.rows.filter((row) => FIXTURE.groupIds.includes(row.id)).reduce((best, row) => Number(row[field]) > Number(best[field]) ? row : best).id
+    const lowest = (field) => FIXTURE.rows.filter((row) => FIXTURE.groupIds.includes(row.id)).reduce((best, row) => Number(row[field]) < Number(best[field]) ? row : best).id
+    assert.notEqual(highest('selling_price_usd'), lowest('selling_price_usd'), 'the fixture prices differ, so the rule is distinguishable from another pick')
+    const lowPick = await reviewGroup('picks-lower-price', { selling_price_usd: { source_id: lowest('selling_price_usd') } })
+    const beforeLow = dump()
+    const refusedLow = await merge(lowPick.body(M1))
+    assert.equal(refusedLow.status, 403, 'a pick of a lower price is an override: ' + JSON.stringify(refusedLow.body))
+    assert.equal(refusedLow.body.code, 'product_edit_permission_required')
+    assert.equal(dump(), beforeLow)
     const picks = { name: { source_id: M1 }, barcode: { source_id: M1 }, brand: { source_id: M1 }, category: { source_id: M2 }, unit: { source_id: M2 },
-      selling_price_usd: { source_id: M1 }, wholesale_price_usd: { source_id: M2 } }
+      selling_price_usd: { source_id: highest('selling_price_usd') }, wholesale_price_usd: { source_id: highest('wholesale_price_usd') } }
     const group = await reviewGroup('picks-only', picks)
     const done = await merge(group.body(M1))
     assert.equal(done.status, 200, JSON.stringify(done.body))

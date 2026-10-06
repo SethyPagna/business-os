@@ -108,11 +108,13 @@ await runTest('destinations retain section permission gates and never expose uns
   assert.deepEqual(ids('inventory', { inventory: 'full' }), [])
 
   // Products' four sections are the compact navigation's only route into
-  // them (N7). Two are gated on a per-ACTION grant inside the page (Stock-in
-  // Sessions on inventory:adjust, Duplicates on products:merge_duplicates),
-  // so getHubDestinations must be able to see actions -- a caller that
-  // cannot answer for actions gets the two ungated sections rather than a
-  // tile the page would then refuse to render.
+  // them (N7). Three are gated on a per-ACTION grant inside the page (Stock
+  // Changes on products:history, Stock-in Sessions on products:history plus
+  // inventory:adjust, Duplicates on products:merge_duplicates; owner, 5 Oct
+  // 2026 evening: an Employee sees only the main Products page), so
+  // getHubDestinations must be able to see actions -- a caller that cannot
+  // answer for actions gets the one ungated section rather than a tile the
+  // page would then refuse to render.
   const withActions = (tiers: Record<string, string>, actions: string[]) => ({
     ...restricted(tiers),
     can: (permissionKey: string, actionKey: string) => actionKey === 'view'
@@ -120,15 +122,16 @@ await runTest('destinations retain section permission gates and never expose uns
       : actions.includes(`${permissionKey}:${actionKey}`),
   })
   const actionIds = (tiers: Record<string, string>, actions: string[]) => getHubDestinations('products', withActions(tiers, actions)).map((item) => item.id)
-  assert.deepEqual(ids('products', { products: 'full', inventory: 'full' }), ['products', 'stock_changes'], 'action-gated sections stay hidden from a caller with no per-action grant')
-  assert.deepEqual(actionIds({ products: 'full', inventory: 'full' }, ['inventory:adjust', 'products:merge_duplicates']), ['products', 'stock_changes', 'stock_in_sessions', 'duplicates'])
-  assert.deepEqual(actionIds({ products: 'full' }, ['products:merge_duplicates']), ['products', 'stock_changes', 'duplicates'])
+  assert.deepEqual(ids('products', { products: 'full', inventory: 'full' }), ['products'], 'action-gated sections stay hidden from a caller with no per-action grant')
+  assert.deepEqual(actionIds({ products: 'full', inventory: 'full' }, ['products:history', 'inventory:adjust', 'products:merge_duplicates']), ['products', 'stock_changes', 'stock_in_sessions', 'duplicates'])
+  assert.deepEqual(actionIds({ products: 'full' }, ['products:history', 'products:merge_duplicates']), ['products', 'stock_changes', 'duplicates'])
+  assert.deepEqual(actionIds({ products: 'full', inventory: 'full' }, ['inventory:adjust']), ['products'], 'without products:history neither ledger section is offered')
   assert.deepEqual(actionIds({ inventory: 'full' }, ['inventory:adjust']), [])
   assert.deepEqual(actionIds({}, []), [])
-  assert.deepEqual(actionIds({ products: 'full', inventory: 'full' }, ['products:deny_view', 'inventory:adjust', 'products:merge_duplicates']), [])
+  assert.deepEqual(actionIds({ products: 'full', inventory: 'full' }, ['products:deny_view', 'products:history', 'inventory:adjust', 'products:merge_duplicates']), [])
   assert.deepEqual(getHubDestinations('contacts', withActions({ contacts: 'full' }, ['contacts:deny_view'])), [])
   assert.deepEqual(
-    getHubDestinations('products', withActions({ products: 'full', inventory: 'full' }, ['inventory:adjust', 'products:merge_duplicates'])).map((item) => item.key),
+    getHubDestinations('products', withActions({ products: 'full', inventory: 'full' }, ['products:history', 'inventory:adjust', 'products:merge_duplicates'])).map((item) => item.key),
     ['products', 'stock_change_ledger', 'stock_in_sessions', 'product_duplicates_section'],
     'the sheet labels the sections with the keys the page already ships in both packs',
   )

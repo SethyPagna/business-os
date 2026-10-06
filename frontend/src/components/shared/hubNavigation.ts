@@ -48,8 +48,10 @@ export function getHubDestinations(page: string, access: HubAccess): HubDestinat
     // canAdjustInventoryStock = can('inventory', 'adjust') and
     // canMergeDuplicates = can('products', 'merge_duplicates').
     ['products', 'products', 'Products', can('products')],
-    ['stock_changes', 'stock_change_ledger', 'Stock Changes', can('products')],
-    ['stock_in_sessions', 'stock_in_sessions', 'Stock-in Sessions', can('products') && act('inventory', 'adjust')],
+    // Owner, 5 Oct 2026 (evening): an Employee sees only the main Products page, so both ledger sections also
+    // need the products:history action (the Worker's stock-ledger / stock-in-sessions reads need the same).
+    ['stock_changes', 'stock_change_ledger', 'Stock Changes', can('products') && act('products', 'history')],
+    ['stock_in_sessions', 'stock_in_sessions', 'Stock-in Sessions', can('products') && act('products', 'history') && act('inventory', 'adjust')],
     ['duplicates', 'product_duplicates_section', 'Conflicts', can('products') && act('products', 'merge_duplicates')],
   ] : page === 'review' ? [
     ['review', 'review_queue', 'Review queue', can('review')],

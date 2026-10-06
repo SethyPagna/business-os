@@ -147,6 +147,8 @@ function loadProductsRoute(d1) {
     '../lib/sqlBinding': realSqlBinding,
     '../lib/productMerge': realProductMerge,
     '../lib/productMergeSnapshot': realProductMergeSnapshot,
+    // The fold refuses a price copy without Edit product (5 Oct 2026); these fixtures are the reviewer who may.
+    '../lib/permissions': { getActionTier: (_user, _section, action) => (action === 'edit' ? 'full' : undefined) },
   })
   return { mod, adapter, undoAppliers: realUndoAppliers, MERGE_REPARENT_TABLES: realUndoAppliers.MERGE_REPARENT_TABLES }
 }

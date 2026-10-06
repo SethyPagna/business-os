@@ -2246,6 +2246,9 @@ export default function Settings() {
                 ['telegram_fees_enabled', t('fees') || 'Expenses', t('telegram_cat_fees_desc') || 'New expense: type, amount, date, label, and note'],
                 ['telegram_stock_in_enabled', t('stock_in') || 'Stock in', t('telegram_cat_stock_in_desc') || 'Product, quantity, branch, reason, and received date'],
                 ['telegram_stock_out_enabled', t('stock_out') || 'Stock out', t('telegram_cat_stock_out_desc') || 'Product, quantity, branch, and reason'],
+                // Owner, 5 Oct 2026 (evening): an edit or a merge of a product by anyone who is not an administrator is
+                // announced unless this is off. Same unset-means-on default; the form only carries the key once it is toggled.
+                ['telegram_products_enabled', t('telegram_cat_products') || 'Product edits and merges', t('telegram_cat_products_desc') || 'Product, what changed, and who did it, for edits and merges by staff who are not administrators'],
                 // T10: the Worker reads this key (lib/telegram.ts getTelegramConfig)
                 // with the same unset-means-on default as the switches above.
                 ['telegram_shift_overview_enabled', t('telegram_reports_overview') || 'Reports overview', t('telegram_reports_overview_desc') || "One minute after a shift closes: that day's overview for the shift's branch"],
