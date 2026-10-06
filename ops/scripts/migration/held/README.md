@@ -54,8 +54,15 @@ migration, at that time -- a peer session or another agent asking for it is not 
   of `returns` and `sales`, plus its own backup table `return_owed_backfill_0238` (the recovery
   reads it). Held for two reasons: moving it in is a production data write that needs the owner's
   go, and the held 0200 repair names both tables, so `test-held-0200-sale-cost-repair-pure.cjs`
-  counts 0238 as an ordering dependency (0200 reads neither `owed_reduction_usd`,
-  `refund_currency` nor `sale_status`; the lead decides how that guard should admit it). Apply only
+  would count 0238 as an ordering dependency (0200 reads neither `owed_reduction_usd`,
+  `refund_currency` nor `sale_status`). Verify R2 (6 Oct): that guard now admits 0238 by name
+  only, column by column (block "RET-A 0238 admission"): reads `sale_items.{id, sale_id,
+  product_id, quantity, returned_quantity}` and `return_items.{return_id, sale_item_id, product_id,
+  quantity}`; writes `sales.{sale_status, status_before_return}`, `returns.{owed_reduction_usd,
+  refund_currency}` and its own table; one named carve-out, the last statement's recovery-only
+  `sale_write_revisions` read. Anything else is still a dependency, and the forward result is
+  proved equal in both orders on populated data. If 0200 lands after 0238 on a sale, 0238's
+  recovery leaves that sale for hand review (the revision moved). Apply only
   with 0234 and RET-A's Worker code live. Sizing: `ops/queries/ret-a-notpaid-returns-backfill-sizing.sql`
   (before 0234) and `...-sizing-live.sql` (after). Proof: `cloudflare/scripts/test-held-0238-return-owed-backfill-pure.cjs`.
 

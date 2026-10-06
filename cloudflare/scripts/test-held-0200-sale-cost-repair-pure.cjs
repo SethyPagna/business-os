@@ -342,6 +342,25 @@ check('recovery: the header statements restore both cost columns byte-identical;
   assert.equal(again.raw.prepare('SELECT cost_price_usd c FROM sale_items WHERE id = ?').get(again.ids.s1.lineId).c, 11.8333, 'the rest is restored')
 })
 
+// UPDATE <table> SET <assignments> WHERE ...: the SET clause up to the first
+// WHERE at parenthesis depth 0 (a lazy regex stops at a WHERE inside a
+// subquery and never sees the assignments after it -- RET-A verify R2: an
+// assignment after "(SELECT ... WHERE ...)" slipped past both rules below).
+function updateTarget(statement) {
+  const head = /^UPDATE (\w+) SET /i.exec(statement)
+  if (!head) return null
+  let depth = 0, quote = ''
+  for (let i = head[0].length; i < statement.length; i++) {
+    const ch = statement[i]
+    if (quote) { if (ch === quote) quote = ''; continue }
+    if (ch === "'" || ch === '"') { quote = ch; continue }
+    if (ch === '(') depth++
+    else if (ch === ')') depth--
+    else if (depth === 0 && /^ WHERE /i.test(statement.slice(i, i + 7))) return [statement, head[1], statement.slice(head[0].length, i)]
+  }
+  return null
+}
+
 // SQL with every comment outside a string literal blanked. Literals are kept
 // whole, so a '--' inside a quoted value cannot hide the statement after it.
 const sqlCode = (text) => text.replace(/('(?:[^']|'')*')|--[^\n]*|\/\*[\s\S]*?\*\//g, (comment, literal) => literal ?? ' ')
@@ -500,7 +519,7 @@ const flagColumnsUnread = (text, repairText, context) => {
       own.add(name)
     } else if ((match = /^(?:INSERT (?:OR IGNORE )?INTO|DELETE FROM) (\w+)\b/i.exec(statement))) {
       if (!own.has(match[1].toLowerCase())) return false
-    } else if ((match = /^UPDATE (\w+) SET (.+?) WHERE /i.exec(statement))) {
+    } else if ((match = updateTarget(statement))) {
       const table = match[1].toLowerCase()
       if (own.has(table)) continue
       const allowed = FLAG_ONLY_COLUMNS[table]
@@ -517,6 +536,108 @@ const flagColumnsUnread = (text, repairText, context) => {
   return flagged > 0
 }
 // ---- RET-B 0235 rule (end) --------------------------------------------------
+
+// ---- RET-A 0238 admission (begin) -------------------------------------------
+// NOT a generic loosening of the rules above (RET-A verify R2 section 4). The
+// held 0238 backfill (ops/scripts/migration/held/0238_return_owed_backfill.sql)
+// names sale_items, return_items and sale_write_revisions, which the repair
+// writes (the last through the 0120 trigger), so every rule above rejects it
+// by design. It is admitted by NAME, column by column, and nothing else is:
+//   READS   sale_items.{id, sale_id, product_id, quantity, returned_quantity}
+//           return_items.{return_id, sale_item_id, product_id, quantity}
+//           -- the repair writes only the cost_price_usd of those two tables.
+//   WRITES  sales.{sale_status, status_before_return}
+//           returns.{owed_reduction_usd, refund_currency}
+//           and its own new table return_owed_backfill_0238
+//           -- none of which the repair reads or writes.
+//   CARVE-OUT (recovery only) the backfill's LAST statement snapshots each
+//           touched sale's sale_write_revisions revision into its own table.
+//           Only the 0238 recovery compares it: a 0200 cost write landing on
+//           that sale after the backfill bumps the revision, and recovery then
+//           leaves the sale for hand review (the safe direction). The forward
+//           result -- statuses, owed reductions, currencies, costs -- is the
+//           same in both orders (proved on populated data below).
+const HELD_0238_NAME = '0238_return_owed_backfill.sql'
+const HELD_0238_OWN = 'return_owed_backfill_0238'
+const HELD_0238_READS = Object.freeze({
+  sale_items: Object.freeze(['id', 'sale_id', 'product_id', 'quantity', 'returned_quantity']),
+  return_items: Object.freeze(['return_id', 'sale_item_id', 'product_id', 'quantity']),
+})
+const HELD_0238_WRITES = Object.freeze({
+  sales: Object.freeze(['sale_status', 'status_before_return']),
+  returns: Object.freeze(['owed_reduction_usd', 'refund_currency']),
+})
+const HELD_0238_RECOVERY_READ = /^UPDATE return_owed_backfill_0238 SET sale_revision = COALESCE\(\(SELECT w\.revision FROM sale_write_revisions w WHERE w\.sale_id = return_owed_backfill_0238\.sale_id\), 0\) WHERE sale_revision IS NULL$/i
+const SQL_WORDS = new Set(['where', 'on', 'join', 'left', 'inner', 'cross', 'group', 'order', 'limit', 'union', 'as', 'using', 'natural', 'not', 'indexed'])
+
+// Every reference to an allowlisted-read table goes through an alias bound to
+// that table alone, and every column it reads through the alias is listed. A
+// bare column of those tables outside the list, a star read, or the table
+// named without an alias is refused.
+function held0238ReadsListed(statement, itemColumns) {
+  const aliases = new Map()
+  for (const match of statement.matchAll(/\b(sale_items|return_items)\b(?: (\w+))?/gi)) {
+    const table = match[1].toLowerCase(), alias = (match[2] || '').toLowerCase()
+    if (!alias || SQL_WORDS.has(alias)) return false
+    if (aliases.has(alias) && aliases.get(alias) !== table) return false
+    aliases.set(alias, table)
+  }
+  for (const [alias, table] of aliases) {
+    for (const bound of statement.matchAll(new RegExp(`\\b(\\w+) ${alias}\\b(?!\\.)`, 'gi'))) {
+      const word = bound[1].toLowerCase()
+      if (['from', 'join', 'select', 'and', 'or', 'by', 'then', 'else', 'when', 'case'].includes(word)) continue
+      if (word !== table) return false
+    }
+    for (const used of statement.matchAll(new RegExp(`\\b${alias}\\.(\\w+|\\*)`, 'gi'))) {
+      if (!HELD_0238_READS[table].includes(used[1].toLowerCase())) return false
+    }
+  }
+  if (aliases.size) {
+    const listed = new Set(Object.values(HELD_0238_READS).flat())
+    for (const bare of statement.matchAll(/(?<![.\w])(\w+)\b(?!\s*\()/g)) {
+      const word = bare[1].toLowerCase()
+      if (itemColumns.has(word) && !listed.has(word)) return false
+    }
+    if (/\bSELECT \* FROM (?:sale_items|return_items)\b/i.test(statement)) return false
+  }
+  return true
+}
+
+function admitHeld0238(name, text, repairText, context) {
+  if (name !== HELD_0238_NAME) return false
+  if (!(context?.priorTables instanceof Set) || !(context?.indirectWrites instanceof Set) || !(context?.itemColumns instanceof Set)) return false
+  const statements = splitStatements(sqlCode(text)).map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean)
+  let created = 0, filled = 0, recovery = 0
+  const written = new Set()
+  for (const statement of statements) {
+    if (HELD_0238_RECOVERY_READ.test(statement)) { recovery++; continue }
+    for (const table of context.indirectWrites) {
+      if (!(table in HELD_0238_READS) && new RegExp(`\\b${table}\\b`, 'i').test(statement)) return false
+    }
+    if (!held0238ReadsListed(statement, context.itemColumns)) return false
+    let match
+    if ((match = /^CREATE TABLE IF NOT EXISTS (\w+) \(/i.exec(statement))) {
+      if (match[1].toLowerCase() !== HELD_0238_OWN || context.priorTables.has(HELD_0238_OWN) || created) return false
+      created++
+    } else if (/^WITH RECURSIVE /i.test(statement)) {
+      const modifying = [...statement.matchAll(/\b(INSERT|UPDATE|DELETE|REPLACE)\b/gi)]
+      if (modifying.length !== 1 || !new RegExp(`\\bINSERT OR IGNORE INTO ${HELD_0238_OWN} \\(`, 'i').test(statement)) return false
+      filled++
+    } else if ((match = updateTarget(statement))) {
+      const table = match[1].toLowerCase()
+      const allowed = HELD_0238_WRITES[table]
+      if (!allowed) return false
+      for (const assignment of setAssignments(match[2])) {
+        const target = /^(\w+)\s*=/.exec(assignment)
+        // ...and never a column the repair itself names.
+        if (!target || ROWID_OR_KEY.test(target[1]) || !allowed.includes(target[1].toLowerCase()) || namedIn(repairText)(target[1])) return false
+      }
+      written.add(table)
+    } else return false
+  }
+  return created === 1 && filled === 1 && recovery === 1 && written.size === 2
+}
+// ---- RET-A 0238 admission (end) ---------------------------------------------
 
 function completeState(raw) {
   const quote = name => `"${name.replaceAll('"', '""')}"`
@@ -613,7 +734,10 @@ check('held: outside deploy chain, after dependencies including0195; independent
   const flagContext = flagOnlyContext(chain, chainText, migrationText)
   const flagOnly = chain.filter(file => flagColumnsUnread(chainText(file), migrationText, { priorTables: flagContext.priorTables.get(file), indirectWrites: flagContext.indirectWrites }))
   // ---- RET-B 0235 call (end) ----
-  const dependencies = chain.filter((f) => !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && touched.some(namedIn(chainText(f))))
+  // ---- RET-A 0238 call: the held backfill, admitted by name and column only.
+  const itemColumns = new Set(['sale_items', 'return_items'].flatMap((t) => fresh.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name.toLowerCase())))
+  const admitted0238 = chain.filter((f) => admitHeld0238(f, chainText(f), migrationText, { priorTables: flagContext.priorTables.get(f), indirectWrites: flagContext.indirectWrites, itemColumns }))
+  const dependencies = chain.filter((f) => !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !admitted0238.includes(f) && touched.some(namedIn(chainText(f))))
   assert.ok(['sale_items', 'return_items', 'catalog_cost_repair_0195_backup'].every((t) => touched.includes(t)), 'control: the scan sees the two tables it writes and the 0195 backup it reads')
   assert.ok(dependencies.includes('0195_catalog_cost_on_hand.sql'), 'control: the scan finds 0195')
   assert.ok(indexOnly('-- x\nCREATE INDEX IF NOT EXISTS i ON sale_items(id);\nCREATE UNIQUE INDEX j ON sale_items(id);'), 'control: an index-only file is skipped')
@@ -661,6 +785,8 @@ check('held: outside deploy chain, after dependencies including0195; independent
     markOnly('sales', 'stock_skipped = 1, (rowid) = (rowid + 1000000)'),
     markOnly('sales', '(stock_skipped, rowid) = (1, rowid + 1000000)'),
     markOnly('sales', "notes = 'x'"),
+    // RET-A verify R2: an assignment hidden after a subquery's WHERE.
+    markOnly('sales', 'stock_skipped = (SELECT 1 FROM zz_mark z WHERE z.id = sales.id), branch_id = 2'),
     markOnly('sales', 'stock_skipped = 1').replace('UPDATE sales', 'UPDATE OR REPLACE sales'),
     // RET-B-VERIFY round 2 (B2b)
     'CREATE TABLE IF NOT EXISTS sale_write_revisions (sale_id INTEGER PRIMARY KEY, revision INTEGER);\nUPDATE sale_write_revisions SET revision = 0 WHERE sale_id > 0;\nUPDATE sales SET stock_skipped = 1 WHERE id = 1;',
@@ -687,6 +813,76 @@ check('held: outside deploy chain, after dependencies including0195; independent
   assert.deepEqual(schema(byNumber), schema(fresh), `before or after ${later.join(', ') || 'no later file'}: the same schema`)
   assert.throws(() => openDb(loadAll({ through: 194 })).db.exec(migrationText), /catalog_cost_repair_0195_backup/, 'without 0195 it refuses to run')
   assertPopulatedOrders(chain, chainText, mixed)
+})
+
+check('RET-A 0238 admission: the held backfill is admitted by name and column, anything else is still a dependency, and both orders give one forward result', () => {
+  const chain = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()
+  const chainText = (f) => fs.readFileSync(path.join(migrationsDir, f), 'utf8')
+  const text0238 = fs.readFileSync(path.join(heldDir, HELD_0238_NAME), 'utf8')
+  const fresh = openDb(chain.map(chainText)).db
+  const flagContext = flagOnlyContext(chain, chainText, migrationText)
+  const itemColumns = new Set(['sale_items', 'return_items'].flatMap((t) => fresh.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name.toLowerCase())))
+  const context = { priorTables: flagContext.finalTables, indirectWrites: flagContext.indirectWrites, itemColumns }
+  assert.ok(namedIn(text0238)('sale_items') && namedIn(text0238)('sale_write_revisions'), 'control: 0238 names tables the repair writes')
+  assert.equal(flagColumnsUnread(text0238, migrationText, context), false, 'control: the generic mark-only rule still rejects 0238')
+  assert.ok(admitHeld0238(HELD_0238_NAME, text0238, migrationText, context), 'the held 0238 backfill is admitted by its explicit allowlist')
+  assert.equal(admitHeld0238(HELD_0238_NAME, text0238, `${migrationText}
+-- sale_status
+SELECT sale_status FROM sales;`, context), false, 'control: a listed write the repair reads is refused')
+  assert.equal(admitHeld0238('0239_anything.sql', text0238, migrationText, context), false, 'the allowlist is for 0238 by name, not for any file with this shape')
+  assert.equal(admitHeld0238(HELD_0238_NAME, text0238, migrationText), false, 'without the chain context nothing is admitted (fail closed)')
+  // Mutate the EXECUTED statement: the last occurrence (the header comments
+  // quote some of these fragments, and a mutant inside a comment changes nothing).
+  const sub = (from, to) => {
+    // Comments blanked at their own length, so offsets match the file text.
+    const at = text0238.replace(/('(?:[^']|'')*')|--[^\n]*|\/\*[\s\S]*?\*\//g, (whole, literal) => literal ?? whole.replace(/[^\n]/g, ' ')).lastIndexOf(from)
+    assert.ok(at >= 0, `control: the mutant anchor is in executed SQL: ${from}`)
+    const wrong = text0238.slice(0, at) + to + text0238.slice(at + from.length)
+    assert.notDeepEqual(splitStatements(sqlCode(wrong)), splitStatements(sqlCode(text0238)), `control: the mutant changes executed SQL: ${from}`)
+    return wrong
+  }
+  for (const [label, wrong] of [
+    ['a read of the repaired cost', sub('ri.quantity > 0', 'ri.quantity > 0 AND ri.cost_price_usd > 0')],
+    ['a read of an unlisted sale_items column', sub('si.returned_quantity > 0))', 'si.returned_quantity > 0 AND si.total_usd > 0))')],
+    ['a bare unlisted column', sub('WHERE si.sale_id IN (SELECT sale_id FROM plan)', 'WHERE si.sale_id IN (SELECT sale_id FROM plan) AND cost_price_usd > 0')],
+    ['a star read of sale_items', sub('FROM sale_items si WHERE si.sale_id IN (SELECT sale_id FROM plan)', 'FROM sale_items si WHERE si.sale_id IN (SELECT sale_id FROM plan) AND EXISTS (SELECT * FROM sale_items)')],
+    ['an alias rebound to another table', sub('FROM return_items ri JOIN cust x', 'FROM return_items ri JOIN cust x JOIN sales ri2 ON 1 JOIN sales si ON 1')],
+    ['a write of an unlisted sales column', sub('refund_currency = \'USD\'', "refund_currency = 'USD', total_refund_usd = total_refund_usd")],
+    ['a write of the repaired table', `${text0238}\nUPDATE sale_items SET quantity = quantity WHERE id = 0;`],
+    ['a write of a key', sub('SET sale_status = (', 'SET sale_id = 1, sale_status = (')],
+    ['a revision read outside the carve-out', sub('WHERE r.refund_currency IS NULL', 'WHERE r.refund_currency IS NULL AND EXISTS (SELECT 1 FROM sale_write_revisions)')],
+    ['the carve-out moved into another statement', `${text0238}\nUPDATE sales SET sale_status = sale_status WHERE id IN (SELECT sale_id FROM sale_write_revisions);`],
+    ['an extra statement elsewhere', `${text0238}\nINSERT INTO audit_logs (action) VALUES ('x');`],
+    ['a delete slipped in before a listed write', text0238.replace(/^UPDATE returns\b/m, 'DELETE FROM sale_items WHERE 0;\nUPDATE returns')],
+    ['a second data change inside the plan statement', sub('INSERT OR IGNORE INTO return_owed_backfill_0238 (', 'INSERT OR IGNORE INTO return_owed_backfill_0238 (return_id) SELECT 1 WHERE 0;\nUPDATE sales SET sale_status = sale_status WHERE 0;\nINSERT OR IGNORE INTO return_owed_backfill_0238 (')],
+  ]) assert.equal(admitHeld0238(HELD_0238_NAME, wrong, migrationText, context), false, `still refused: ${label}`)
+
+  // Both orders on populated data: s1 sold Not Paid with its pre-0234 return
+  // RT1, whose copied line cost the repair rewrites. Forward results agree;
+  // only the recovery revision snapshot differs (the carve-out).
+  const { raw, ids } = seed()
+  raw.limits.exprDepth = 100
+  raw.function('current_timestamp', () => '2026-10-06 10:00:00')
+  try {
+    for (const file of chain.filter((file) => Number(file.slice(0, 4)) > 195)) raw.exec(chainText(file))
+    raw.prepare("UPDATE sales SET sale_status = 'awaiting_payment', amount_paid_usd = 0, amount_paid_khr = 0, exchange_rate = 4000, total_usd = 20 WHERE id = ?").run(ids.s1.saleId)
+    const forward = () => ({
+      sales: raw.prepare('SELECT id, sale_status, status_before_return FROM sales ORDER BY id').all(),
+      returns: raw.prepare('SELECT id, owed_reduction_usd, refund_currency FROM returns ORDER BY id').all(),
+      saleCosts: raw.prepare('SELECT id, cost_price_usd FROM sale_items ORDER BY id').all(),
+      returnCosts: raw.prepare('SELECT id, cost_price_usd FROM return_items ORDER BY id').all(),
+      backfill: raw.prepare('SELECT return_id, sale_id, owed_reduction_usd, prior_sale_status, new_sale_status FROM return_owed_backfill_0238 ORDER BY return_id').all(),
+      repaired: raw.prepare('SELECT sale_item_id, new_cost_price_usd FROM sale_cost_repair_0200 ORDER BY sale_item_id').all(),
+    })
+    const run = (order) => {
+      raw.exec('SAVEPOINT order_0238')
+      try { for (const sql of order) raw.exec(sql); return forward() } finally { raw.exec('ROLLBACK TO order_0238; RELEASE order_0238') }
+    }
+    const repairFirst = run([migrationText, text0238]), backfillFirst = run([text0238, migrationText])
+    assert.ok(repairFirst.backfill.some((row) => row.sale_id === ids.s1.saleId), 'control: 0238 really backfilled s1 in this proof')
+    assert.ok(repairFirst.repaired.length > 0, 'control: 0200 really repaired costs in this proof')
+    assert.deepEqual(backfillFirst, repairFirst, 'statuses, owed reductions, currencies and costs are the same in both orders')
+  } finally { raw.close() }
 })
 
 check('owner-run audit: every header command is --command (never --file); the cut statements are the audit verbatim and run', () => {
