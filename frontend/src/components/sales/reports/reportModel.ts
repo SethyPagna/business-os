@@ -356,6 +356,8 @@ export function formatSignedPct(p: number | null | undefined): string {
 
 export interface ReportTotals {
   tx_count: number
+  /** RET-A: riel the refunds actually paid out (a memo on the Refunds line); absent from an older Worker. */
+  refund_paid_khr?: number
   gross_sales_usd: number
   store_discount_usd: number
   membership_discount_usd: number
@@ -471,6 +473,8 @@ export function normalizeTotals(raw: unknown): ReportTotals | null {
   // Its own presence signal, NOT the cost one: the server can send cost and
   // profit while withholding the removal block, because the two answer
   // different questions about different windows.
+  // RET-A: presence-signalled too -- an older Worker does not send it.
+  if (typeof r.refund_paid_khr === 'number') out.refund_paid_khr = Math.round(num(r.refund_paid_khr))
   if (typeof r.removal_loss_usd === 'number') {
     out.removal_loss_usd = round2(num(r.removal_loss_usd))
     out.removal_loss_qty = num(r.removal_loss_qty)
@@ -530,6 +534,9 @@ export function sumTotals(rows: ReportTotals[]): ReportTotals {
   // the removal block would make the summed loss quietly short, so the absence
   // propagates instead of being filled with a zero nobody measured.
   const allLosses = rows.length > 0 && rows.every((r) => hasRemovalLosses(r))
+  // RET-A riel paid out: the same all-or-nothing rule.
+  const allRiel = rows.length > 0 && rows.every((r) => typeof r.refund_paid_khr === 'number')
+  let rielPaid = 0
   let removalLoss = 0
   let removalQty = 0
   let removalUnvalued = 0
@@ -539,6 +546,7 @@ export function sumTotals(rows: ReportTotals[]): ReportTotals {
       ;(out as unknown as Record<string, number>)[k] += num(r[k])
     }
     if (allNetSales) netSales += num(r.net_sales_usd)
+    if (allRiel) rielPaid += num(r.refund_paid_khr)
     if (allProfit) {
       cost += num(r.cost_usd)
       profit += num(r.profit_usd)
@@ -557,6 +565,7 @@ export function sumTotals(rows: ReportTotals[]): ReportTotals {
   }
   out.avg_order_usd = out.tx_count > 0 ? round2(out.revenue_usd / out.tx_count) : 0
   if (allNetSales) out.net_sales_usd = round2(netSales)
+  if (allRiel) out.refund_paid_khr = Math.round(rielPaid)
   if (allProfit) {
     out.cost_usd = round2(cost)
     out.profit_usd = round2(profit)
@@ -795,7 +804,7 @@ export function buildIncomeStatement(input: StatementInput): StatementLine[] {
   if (floor.usd !== 0) lines.push(floor)
   lines.push(
     line('net_sales', 'rpt_net_sales', 'Net sales', 'total', 'revenue'),
-    line('refunds', 'refunds', 'Refunds', 'sub', 'revenue'),
+    line('refunds', 'refunds', 'Refunds', 'sub', 'revenue', undefined, refundRielNote(sales)),
   )
   const revenueRounding = line('revenue_rounding', 'rpt_rounding', 'Rounding', 'add', 'revenue', ['rpt_hint_rounding', 'Each figure above is rounded to the cent on its own, so the chain can land a cent from the total. Shown rather than absorbed into a line.'])
   if (revenueRounding.usd !== 0) lines.push(revenueRounding)
@@ -860,6 +869,16 @@ type LineFactory = (key: string, labelKey: string, fallback: string, kind: State
  * cost snapshot reports COGS of exactly 0, which reads as free goods; the
  * count is already on the wire for precisely this.
  */
+/**
+ * RET-A (owner 29 Sep: refunds record the currency they were paid in, reports
+ * add a riel row): the riel the refunds actually paid out, under the Refunds
+ * line. The dollar figure already counts them; this names the riel that left.
+ */
+function refundRielNote(t: ReportTotals): StatementNote | undefined {
+  const khr = Math.round(num(t.refund_paid_khr))
+  return khr > 0 ? { key: 'rpt_note_refund_riel', fallback: 'paid out in riel: {total}៛', total: khr } : undefined
+}
+
 function cogsNote(t: ReportTotals): StatementNote | undefined {
   const missing = num(t.cost_missing_snapshot_lines)
   if (missing <= 0) return undefined

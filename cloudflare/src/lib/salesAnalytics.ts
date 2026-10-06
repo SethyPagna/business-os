@@ -393,6 +393,10 @@ export interface SalesTotals {
   // INSIDE revenue_usd (clause 4 of the scoping rule) and isolated here so the
   // unpaid part is visible; never add the two together.
   pending_revenue_usd: number
+  // RET-A (owner 29 Sep: reports add a riel row): the riel the window's
+  // refunds actually paid out, never a converted equivalent. A memo beside
+  // refund_usd (which already counts them in dollars), never added to it.
+  refund_paid_khr: number
   // Secondary cash figure: collected sale value, tax, and customer-paid
   // delivery, less refunds paid out. Awaiting-payment credit stays out even
   // though it is inside revenue/profit. Never the headline.
@@ -451,7 +455,7 @@ export function emptySalesTotals(): SalesTotals {
     returned_cost_usd: 0, returned_cost_shortfall_usd: 0,
     unvalued_tx_count: 0, unvalued_cost_usd: 0, net_sales_usd: 0,
     refund_usd: 0, refund_charged_usd: 0, refund_excess_usd: 0,
-    revenue_usd: 0, pending_revenue_usd: 0, collected_total_usd: 0, cost_usd: 0, profit_usd: 0, avg_order_usd: 0,
+    revenue_usd: 0, pending_revenue_usd: 0, refund_paid_khr: 0, collected_total_usd: 0, cost_usd: 0, profit_usd: 0, avg_order_usd: 0,
   }
 }
 
@@ -1147,7 +1151,16 @@ async function readSalesReportPass(
       ${itemColumn('total_usd','0')},si.cost_price_usd,${itemColumn('product_discount_usd','0')},${itemColumn('manual_discount_usd','0')}
     FROM sale_items si NOT INDEXED CROSS JOIN sales s ON s.id=si.sale_id WHERE ${primary.sql}`)
   // RET-A LH-16: the debt each return lowered (0234); a pre-0234 database has none.
-  const returnOwed = returnColumns.has('owed_reduction_usd') ? ',r.owed_reduction_usd' : ''
+  // RET-A riel row: the riel a refund paid out -- its cash share of the riel
+  // figure when it was paid in riel -- the same arithmetic as the shift
+  // drawer's REFUND_DRAWER_KHR_SQL (lib/shiftReconciliation.ts, which imports
+  // this module, so it is restated here and held to it by a parity test).
+  const returnOwed = returnColumns.has('owed_reduction_usd')
+    ? `,r.owed_reduction_usd${returnColumns.has('refund_currency') && returnColumns.has('total_refund_khr')
+      ? `,CASE WHEN r.refund_currency='KHR' AND COALESCE(r.total_refund_usd,0)>0
+        THEN ROUND(COALESCE(r.total_refund_khr,0)*(COALESCE(r.total_refund_usd,0)-COALESCE(r.owed_reduction_usd,0))/r.total_refund_usd) ELSE 0 END AS refund_paid_khr`
+      : ''}`
+    : ''
   const returns = await reportKeysetRows(db, `SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope${returnPrecision}${returnOwed}
     FROM returns r CROSS JOIN sales s ON s.id=r.sale_id WHERE r.sale_id IS NOT NULL
       AND COALESCE(r.status,'completed')<>'cancelled' AND COALESCE(r.return_scope,'customer')='customer'
@@ -1241,13 +1254,13 @@ type ReportExactKey = typeof REPORT_EXACT_KEYS[number]
 type ReportExactBucket = {
   money: Record<ReportExactKey, ReportExactDecimal>
   tx: number; pendingTx: number; deliveryActualCount: number; deliverySaleCount: number
-  cancelledTx: number; unvaluedTx: number; missingCostLines: number
+  cancelledTx: number; unvaluedTx: number; missingCostLines: number; refundPaidKhr: number
 }
 
 function reportBucket(): ReportExactBucket {
   return {
     money: Object.fromEntries(REPORT_EXACT_KEYS.map((key) => [key, ReportExactDecimal.zero()])) as Record<ReportExactKey, ReportExactDecimal>,
-    tx: 0, pendingTx: 0, deliveryActualCount: 0, deliverySaleCount: 0, cancelledTx: 0, unvaluedTx: 0, missingCostLines: 0,
+    tx: 0, pendingTx: 0, deliveryActualCount: 0, deliverySaleCount: 0, cancelledTx: 0, unvaluedTx: 0, missingCostLines: 0, refundPaidKhr: 0,
   }
 }
 function reportAdd(bucket: ReportExactBucket, key: ReportExactKey, value: ReportExactDecimal): void {
@@ -1315,6 +1328,8 @@ type ReportSaleFacts = {
   refundExcess: ReportExactDecimal
   delivery: ReportExactDecimal; deliveryActual: ReportExactDecimal; cost: ReportExactDecimal; returnedCost: ReportExactDecimal
   itemDiscount: ReportExactDecimal; unvaluedCost: ReportExactDecimal; missingCostLines: number
+  /** RET-A: riel the sale's active refunds paid out (snapshot refund_paid_khr). */
+  refundPaidKhr: number
 }
 
 type V1RefundLine = { row: ReportScalarRow; snapshot: CustomerReturnRefundSnapshotV1 }
@@ -1396,6 +1411,7 @@ function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
     const awaiting = reportAwaiting(sale, returns.get(Number(sale.id)) || [])
     const adjustment = reportHeaderAdjustment(sale, version)
     let refundPaid = ReportExactDecimal.zero()
+    let refundPaidKhr = 0
     let legacyRefundPaid = ReportExactDecimal.zero()
     let returnedCost = ReportExactDecimal.zero()
     let missingCostLines = 0
@@ -1414,6 +1430,7 @@ function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
         reportMoney(returned, 'rounding_adjustment_usd', returnVersion, false)
       }
       refundPaid = refundPaid.add(payout)
+      refundPaidKhr += Number(returned.refund_paid_khr) || 0
       if (returnVersion === 0) legacyRefundPaid = legacyRefundPaid.add(payout)
       for (const line of returnItems.get(Number(returned.id)) || []) {
         const quantity = ReportExactDecimal.quantity(line.quantity as string | number)
@@ -1447,7 +1464,7 @@ function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
     const deliveryActual = Number(sale.delivery_has_linked_fee) !== 0
       ? ReportExactDecimal.zero() : reportMoney(sale, 'delivery_actual_cost_usd', version)
     return { sale, version, recognized, awaiting, valued, net, adjustment, refund, refundPaid, refundExcess, delivery, deliveryActual,
-      cost, returnedCost, itemDiscount, unvaluedCost, missingCostLines }
+      cost, returnedCost, itemDiscount, unvaluedCost, missingCostLines, refundPaidKhr }
   })
 }
 
@@ -1498,6 +1515,7 @@ function aggregateReportSnapshot(
     reportAdd(bucket, 'recognizedDeliveryCost', fact.deliveryActual)
     reportAdd(bucket, 'refund', fact.refund); reportAdd(bucket, 'refundCharged', fact.refundPaid)
     reportAdd(bucket, 'refundExcess', fact.refundExcess); reportAdd(bucket, 'cost', fact.cost)
+    bucket.refundPaidKhr += fact.refundPaidKhr
     reportAdd(bucket, 'returnedCost', fact.valued ? fact.returnedCost : ReportExactDecimal.zero())
     reportAdd(bucket, 'itemDiscount', fact.itemDiscount); reportAdd(bucket, 'unvaluedCost', fact.unvaluedCost)
     if (!fact.valued) bucket.unvaluedTx += 1
@@ -1578,6 +1596,7 @@ function exactReportTotals(bucket: ReportExactBucket, snapshot: SalesReportSnaps
     refund_excess_usd: m.refundExcess.toNumber(),
     revenue_usd: revenue.toNumber(),
     pending_revenue_usd: m.pendingRevenue.toNumber(),
+    refund_paid_khr: bucket.refundPaidKhr,
     collected_total_usd: m.collected.toNumber(),
     cost_usd: netCost.toNumber(),
     profit_usd: profit.toNumber(),
@@ -1911,6 +1930,7 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
     refund_excess_usd: round2(num(level.refund_excess_usd)),
     revenue_usd: round2(revenueUsd),
     pending_revenue_usd: round2(pendingRevenueUsd),
+    refund_paid_khr: Math.round(num(level.refund_paid_khr)),
     collected_total_usd: round2(collectedTotalUsd),
     cost_usd: round2(netCostUsd),
     profit_usd: round2(profitUsd),
