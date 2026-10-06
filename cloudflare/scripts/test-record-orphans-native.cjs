@@ -330,7 +330,9 @@ async function workerBundle() {
           broadcastHub: 'export const broadcast=async()=>{}',
           telegram: `export const sendReturnTelegramEvent=async()=>{};export const sendReturnStatusTelegramEvents=async()=>{};export const sendTelegramEvent=async()=>{};
             export const sendSaleTelegramEvent=async()=>{};export const formatSaleTelegramLines=()=>[];export const formatSaleStatusTelegramLines=()=>[];
-            export const telegramMoney=()=>''`,
+            export const telegramMoney=()=>''
+            // N2 (SEC-SALES): routes/sales.ts reads the shift policy from routes/shifts.ts.
+            export const scheduleTelegramShiftOverview=async()=>{};export const sendTelegramShiftReport=async()=>{}`,
         }
         builder.onResolve({ filter: /(?:lib\/(?:auth|audit|cache|telegram)|durable-objects\/broadcastHub)$/ },
           args => ({ path: args.path.split('/').pop(), namespace: 'orphan-fixture' }))
