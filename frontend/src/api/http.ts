@@ -20,8 +20,10 @@ import {
   getSyncServerUrl,
   getSyncToken,
 } from './httpState.ts'
-import { restateBranchRefusal, restateRedirectDeclined } from './branchRefusalLanguage.ts'
-import { BRANCH_REDIRECT_DECLINED_CODE, BRANCH_REDIRECT_HEADER, askBranchRedirect, branchRedirectRequestOf, hasBranchRedirectHandler } from './branchRedirect.ts'
+// The disabled-branch redirect and the Khmer refusal restatement load on the refusal path only, so the storefront's
+// catalog closure (which shares this module) does not carry them.
+const BRANCH_REDIRECT_HEADER = 'X-Branch-Redirect'
+const BRANCH_REDIRECT_CODES: ReadonlySet<string> = new Set(['branch_redirect_required', 'branch_redirect_target_invalid'])
 
 export {
   getSyncServerUrl,
@@ -860,16 +862,19 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
     return await apiFetchOnce(method, path, body, timeoutMs, options)
   } catch (error) {
     const verb = String(method || 'GET').toUpperCase()
-    const request = verb === 'GET' || verb === 'HEAD' || verb === 'OPTIONS' ? null : branchRedirectRequestOf(error)
-    if (!request || !hasBranchRedirectHandler()) throw error
-    const target = await askBranchRedirect(request)
+    const refusedCode = String((error as { code?: unknown } | null)?.code || '')
+    if (verb === 'GET' || verb === 'HEAD' || verb === 'OPTIONS' || !BRANCH_REDIRECT_CODES.has(refusedCode)) throw error
+    const redirectModule = await import('./branchRedirect.ts')
+    const request = redirectModule.branchRedirectRequestOf(error)
+    if (!request || !redirectModule.hasBranchRedirectHandler()) throw error
+    const target = await redirectModule.askBranchRedirect(request)
     if (target === null) {
       const declined = new Error(`Nothing was changed. ${request.detail.addressed_branch_name || ''} is disabled.`) as ApiRuntimeError
       declined.status = 409
-      declined.code = BRANCH_REDIRECT_DECLINED_CODE
+      declined.code = redirectModule.BRANCH_REDIRECT_DECLINED_CODE
       declined.redirect = request.detail
       declined.userCancelled = true
-      throw await restateRedirectDeclined(declined, request.detail.addressed_branch_name || '')
+      throw await (await import('./branchRefusalLanguage.ts')).restateRedirectDeclined(declined, request.detail.addressed_branch_name || '')
     }
     return apiFetch(method, path, body, timeoutMs, { ...options, skipWriteDedupe: true, branchRedirect: target })
   }
@@ -1010,7 +1015,9 @@ async function apiFetchOnce(method: unknown, path: string, body?: unknown, timeo
         dispatchPasswordChangeRequired(path, requestSequence)
       }
       // A branch-rule refusal is restated in the UI language by its code (api/branchRefusalLanguage.ts).
-      if (apiError) await restateBranchRefusal(apiError)
+      if (apiError && typeof document !== 'undefined' && String(document.documentElement?.getAttribute('lang') || '').trim().toLowerCase().startsWith('km')) {
+        await (await import('./branchRefusalLanguage.ts')).restateBranchRefusal(apiError)
+      }
       throw apiError || new Error(msg || `HTTP ${res.status}`)
     }
     const result = await res.json()
