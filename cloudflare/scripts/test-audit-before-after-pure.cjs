@@ -359,7 +359,7 @@ async function feesRoute() {
     '../lib/reviewGate': { maybeQueueForReview: async () => null },
     '../lib/businessDateWindow': { businessToday: () => '2026-09-11' },
     '../lib/telegram': { sendTelegramEvent: async () => {}, telegramMoney: () => '$2.50' },
-    '../lib/branchRoles': { branchCanSell: () => true },
+    '../lib/branchRoles': loadReal(workerSrc('lib/branchRoles.ts')),
     '../lib/batchCode': { normalizeTypedDate: (value) => String(value || '').slice(0, 10) || null },
     '../lib/actorSnapshot': loadReal(workerSrc('lib/actorSnapshot.ts')),
     '../lib/feeOperationReceipt': loadReal(workerSrc('lib/feeOperationReceipt.ts')),

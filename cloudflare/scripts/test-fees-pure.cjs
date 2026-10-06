@@ -155,10 +155,12 @@ check('fees route delegates app-entered dates to the shared typed-date kernel', 
 
 check('manual expenses require an active exact Shop and linked expenses derive the branch from a real sale', () => {
   assert.match(source, /if \(requestedBranchId == null\) throw new Error\('BRANCH_REQUIRED'\)/)
-  assert.match(source, /Number\(branch\.is_active \?\? 0\) !== 1 \|\| !branchCanSell\(branch\.name\)/)
-  assert.match(source, /FROM sales s LEFT JOIN branches b ON b\.id=s\.branch_id/)
-  assert.match(source, /requestedBranchId !== saleBranchId\) throw new Error\('SALE_BRANCH_MISMATCH'\)/)
-  assert.match(source, /return \{ saleId, branchId: saleBranchId \}/)
+  assert.match(source, /!branchCanSellNow\(branch\)/, 'a manual expense needs an ACTIVE branch with the shop ROLE, never the display name')
+  assert.match(source, /retiredWithSuccessor/, 'only an UNCHANGED old expense at a retired branch with a selling successor stays editable')
+  assert.match(source, /branchCanSell\(saleBranch\) \? resolveSellingSuccessor\(rows, saleBranchId\) : null/, 'a linked sale is booked to its branch while active and to the active selling successor once retired')
+  assert.match(source, /SELECT s\.id, s\.branch_id/)
+  assert.match(source, /requestedBranchId !== saleBranchId && requestedBranchId !== effectBranchId\) throw new Error\('SALE_BRANCH_MISMATCH'\)/)
+  assert.match(source, /\{ saleId, branchId: saleBranchId \}/)
   assert.equal((source.match(/await resolveFeeLink\(/g) || []).length, 2, 'create and edit must enforce the same link contract')
 })
 

@@ -46,8 +46,11 @@ raw.exec(`
   CREATE TABLE branches (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
-    is_active INTEGER NOT NULL
+    is_active INTEGER NOT NULL,
+    role TEXT,
+    successor_branch_id INTEGER
   );
+  CREATE TABLE sale_bulk_guards (id INTEGER PRIMARY KEY, guard_value INTEGER NOT NULL CHECK(guard_value = 1));
   CREATE TABLE sales (
     id INTEGER PRIMARY KEY,
     branch_id INTEGER,
@@ -127,7 +130,10 @@ const route = loadReal('routes/fees.ts', {
     sendTelegramEvent: async (...args) => { telegrams.push(args) },
     telegramMoney: () => '$2.50',
   },
-  '../lib/branchRoles': { branchCanSell: (name) => name === 'Shop' },
+  // The real role helpers: "selling" is a branch ROLE (name only as the pre-0229 fallback), so the cutover
+  // scenarios below can rename and retire branches.
+  '../lib/branchRoles': loadReal('lib/branchRoles.ts'),
+  '../lib/branchEffect': loadReal('lib/branchEffect.ts', { './branchRoles': loadReal('lib/branchRoles.ts'), './sqlBinding': loadReal('lib/sqlBinding.ts') }),
   '../lib/batchCode': { normalizeTypedDate: (value) => String(value || '').slice(0, 10) || null },
   '../lib/actorSnapshot': actorSnapshot,
   '../lib/feeOperationReceipt': feeOperationReceipt,
@@ -304,6 +310,43 @@ async function main() {
   assert.deepEqual(racers.map(result => result.status).sort(), [200, 201])
   assert.deepEqual(racers[0].body, racers[1].body)
   assert.deepEqual(counts(), { fees: beforeRace.fees + 1, receipts: beforeRace.receipts + 1, audits: beforeRace.audits + 1 })
+  // ---- CUTOVER-LC G-G: the expense guard follows the branch ROLE, and an old Shop sale still takes an expense ----
+  // Before: both Shop rows above are plain names (NULL role) and already behaved as before. Now consolidate:
+  // branch 2 becomes "LC Store" (role shop), branch 3 (which holds sale 11) is retired as "Old Shop" -> LC Store.
+  raw.exec("UPDATE branches SET name='LC Store', role='shop' WHERE id=2");
+  raw.exec("UPDATE branches SET name='Old Shop', role='shop', is_active=0, successor_branch_id=2 WHERE id=3");
+  raw.exec("INSERT INTO branches(id,name,is_active,role) VALUES(4,'Stock room',1,'warehouse'),(5,'Lost Shop',0,'shop')");
+  raw.exec("INSERT INTO sales(id,branch_id,receipt_number) VALUES(12,5,'SALE-12'),(13,4,'SALE-13')");
+  const feeBody = (id, extra) => ({ ...normalBody, client_request_id: id, label: id, ...extra })
+  const lcStoreFee = await create(feeBody('fee-cut-lc-store-0001', { branch_id: 2 }))
+  assert.equal(lcStoreFee.status, 201, 'a selling branch named LC Store takes an expense (the old name test refused it): ' + JSON.stringify(lcStoreFee.body))
+  const oldShopSaleFee = await create(feeBody('fee-cut-old-sale-0001', { sale_id: 11, branch_id: 3 }))
+  assert.equal(oldShopSaleFee.status, 201, 'an expense on an old Shop sale is accepted after the cutover: ' + JSON.stringify(oldShopSaleFee.body))
+  // The cash leaves the LC Store drawer and Old Shop has none: the expense is BOOKED to the active successor (the sale link
+  // keeps the Shop provenance). The reader's shift reconciliation filters fees by the shift's branch.
+  assert.deepEqual({ branch_id: oldShopSaleFee.body.fee.branch_id, sale_id: oldShopSaleFee.body.fee.sale_id },
+    { branch_id: 2, sale_id: 11 }, 'booked to LC Store, linked to the old Shop sale')
+  assert.equal(raw.prepare('SELECT branch_name FROM fees WHERE id=?').get(oldShopSaleFee.body.fee.id).branch_name, 'LC Store')
+  const successorSaleFee = await create(feeBody('fee-cut-old-sale-successor-0001', { sale_id: 11, branch_id: 2 }))
+  assert.equal(successorSaleFee.status, 201, 'a client that already names the successor is accepted too: ' + JSON.stringify(successorSaleFee.body))
+  assert.equal(successorSaleFee.body.fee.branch_id, 2)
+  const replayed = await create(feeBody('fee-cut-old-sale-0001', { sale_id: 11, branch_id: 3 }))
+  assert.deepEqual(replayed.body, oldShopSaleFee.body, 'the same request id replays the recorded expense')
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM fees WHERE label='fee-cut-old-sale-0001'").get().n, 1, 'and books it once')
+  const beforeUnlinked = raw.prepare('SELECT COUNT(*) n FROM fees').get().n
+  raw.exec("UPDATE branches SET successor_branch_id=NULL WHERE id=3")
+  assert.equal((await create(feeBody('fee-cut-old-sale-orphaned-0001', { sale_id: 11, branch_id: 3 }))).status, 400, 'once the retired branch has no selling successor the expense refuses')
+  assert.equal(raw.prepare('SELECT COUNT(*) n FROM fees').get().n, beforeUnlinked, 'and writes nothing')
+  raw.exec("UPDATE branches SET successor_branch_id=2 WHERE id=3")
+  const oldShopDirect = await create(feeBody('fee-cut-old-direct-0001', { branch_id: 3 }))
+  assert.equal(oldShopDirect.status, 400, 'a NEW expense cannot be recorded at the retired branch itself')
+  assert.equal((await create(feeBody('fee-cut-old-sale-mismatch-0001', { sale_id: 11, branch_id: 4 }))).status, 400, 'the sale branch (or its successor) and the expense branch must still agree')
+  assert.equal((await create(feeBody('fee-cut-warehouse-0001', { branch_id: 4 }))).status, 400, 'a warehouse-role branch never takes an expense')
+  assert.equal((await create(feeBody('fee-cut-warehouse-sale-0001', { sale_id: 13, branch_id: 4 }))).status, 400, 'nor through a sale at it')
+  assert.equal((await create(feeBody('fee-cut-orphan-sale-0001', { sale_id: 12, branch_id: 5 }))).status, 400, 'a retired branch with no successor cannot carry one')
+  // Wrong implementation: the name-literal test the route used before, over these same rows.
+  const byName = (row) => String(row.name).trim().toLowerCase() === 'shop'
+  assert.equal(byName(raw.prepare('SELECT * FROM branches WHERE id=2').get()), false, 'control: by name LC Store is not a Shop, so the old guard refused every post-cutover expense')
   raw.close()
   console.log('PASS fee route accepts explicit null courier, replays exactly, conflicts changed data, rejects malformed/nonexistent ids, and writes once')
 }

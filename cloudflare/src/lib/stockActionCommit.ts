@@ -40,6 +40,13 @@ export function unifiedStockReceiptRefusal(
   }))
 }
 
+// Provenance of a sheet that addressed a retired branch: the stock was recorded
+// at its successor, and the movement says so (nothing is relabelled).
+function addressedSuffix(addressedName: string | null | undefined, recordedName: string): string {
+  const addressed = String(addressedName || '').trim()
+  return addressed ? ` (addressed to ${addressed}, recorded at ${recordedName})` : ''
+}
+
 export interface UnifiedStockAddInput {
   jobId: string
   rowNumber: number
@@ -47,6 +54,8 @@ export interface UnifiedStockAddInput {
   productName: string
   branchId: number
   branchName: string
+  /** The label the sheet addressed ("Shop") when its stock was routed to a successor branch. */
+  addressedBranchName?: string | null
   quantity: number
   date: string
   batchLabel?: string | null
@@ -88,6 +97,8 @@ export interface UnifiedStockSaleLine {
   productName: string
   branchId: number
   branchName: string
+  /** The label the sheet addressed ("Shop") when its stock was routed to a successor branch. */
+  addressedBranchName?: string | null
   quantity: number
   sellingPriceUsd: number
   costPriceUsd?: number | null
@@ -313,7 +324,7 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
     // The declaration is stamped into the words, not just the zero -- the
     // same appendReceiptNotes routes/batches.ts:218 uses for the interactive
     // wire, so a $0.00 accepted receipt reads as free goods on this wire too.
-    reason: appendReceiptNotes(`Unified stock import ${jobId}, row ${rowNumber}`, freeGoods ? [FREE_GOODS_REASON_NOTE] : []),
+    reason: appendReceiptNotes(`Unified stock import ${jobId}, row ${rowNumber}${addressedSuffix(input.addressedBranchName, branchName)}`, freeGoods ? [FREE_GOODS_REASON_NOTE] : []),
   }
 
   await db.batch([
@@ -538,13 +549,14 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
   // parameter ceiling.
   const branchIds = [...new Set(lines.map((line) => line.branchId))]
   const branchParams = Object.fromEntries(branchIds.map((branchId, index) => [`branchId${index}`, branchId]))
+  // role: a sale line is allowed by the branch ROLE (LC Store sells); the name is only a label.
   const branchRows = await db.prepare(`
-    SELECT id, name FROM branches
+    SELECT id, name, role, is_active FROM branches
     WHERE id IN (${branchIds.map((_, index) => `@branchId${index}`).join(', ')})
-  `).all<{ id: number; name: string | null }>(branchParams)
+  `).all<{ id: number; name: string | null; role: string | null; is_active: number | null }>(branchParams)
   if (branchRows.length !== branchIds.length) throw new Error('Sale branch does not exist')
   const unsellableBranch = firstUnsellableBranch(branchRows)
-  if (unsellableBranch) throw new Error(WAREHOUSE_NOT_SELLABLE_ERROR)
+  if (unsellableBranch || branchRows.some((branch) => Number(branch.is_active ?? 1) !== 1)) throw new Error(WAREHOUSE_NOT_SELLABLE_ERROR)
   const branchNameById = new Map(branchRows.map((branch) => [Number(branch.id), String(branch.name || '').trim()]))
   for (const line of lines) line.branchName = branchNameById.get(line.branchId) || line.branchName
 
@@ -784,7 +796,7 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
       params: {
         ...common, ...line, costPriceUsd,
         totalCostUsd: multiplyMoney4(costPriceUsd, line.quantity),
-        reason: `Unified stock import ${jobId}, group ${saleGroupKey}, row ${line.rowNumber}`,
+        reason: `Unified stock import ${jobId}, group ${saleGroupKey}, row ${line.rowNumber}${addressedSuffix(line.addressedBranchName, line.branchName)}`,
         soldAt,
         // Full coverage required: a single allocation that covers only part
         // of the line (rest drawn from legacy unlotted stock) must not

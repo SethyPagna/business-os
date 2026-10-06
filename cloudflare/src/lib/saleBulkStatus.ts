@@ -8,7 +8,9 @@ import { addImportedReturnedQuantities, allocateReturnedQuantities, guardSaleSta
 import { bumpVersion } from './cache';
 import { broadcast } from '../durable-objects/broadcastHub';
 import { actorSnapshot } from './actorSnapshot';
-import { branchCanSell } from './branchRoles';
+import { branchCanSell, resolveSellingSuccessor } from './branchRoles';
+import { BranchEffectResolver, BranchRetiredDamagedError, BranchRetiredNoSuccessorError, branchEffectGuardPredicate, readBranchDirectory, redirectStockItems } from './branchEffect';
+import { sellingBranchConditionSql } from './branchRoleGuards';
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents';
 import type { SaleRecordChange, SaleRecordValueState } from './saleRecords';
 import { statusChangeNeedsPayment } from './saleStatusResolution';
@@ -38,6 +40,10 @@ type StockDelta = {
     costUsd: number;
     costKhr: number;
     sale: number;
+    // Present only when the line's branch was retired and the movement landed at its successor (older
+    // snapshots simply lack it): the branch the stock really moved at, and the label the sale was made under.
+    branchName?: string | null;
+    addressed?: string | null;
 };
 type BatchDelta = {
     batch: number;
@@ -246,7 +252,8 @@ function stockStatements(member: Member, sign: number, user: SessionUser, stamp:
                 out[out.length - 1] = { sql: 'UPDATE branch_stock SET quantity=quantity+@q WHERE product_id=@product AND branch_id=@branch', params: p };
             out.push({ sql: 'UPDATE products SET stock_quantity=stock_quantity+@q, updated_at=@stamp WHERE id=@product', params: p });
         }
-        out.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id) VALUES(@product,@name,@branch,@type,@q,@usd,@khr,@reason,@sale,@uid,@uname,@batch)`, params: { ...p, name: move.name, type: move.lot ? (q > 0 ? 'damage_in' : 'damage_out') : (q > 0 ? 'return' : 'sale'), usd: move.costUsd, khr: move.costKhr, reason: `${sign < 0 ? 'Undo' : 'Apply'} grouped sale status`, sale: member.id, uid: user.id, uname: actorSnapshot(user), batch: move.batch } });
+        const labelled = !!move.addressed;
+        out.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id${labelled ? ',branch_name,addressed_branch_name' : ''},movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id) VALUES(@product,@name,@branch${labelled ? ',@branchName,@addressed' : ''},@type,@q,@usd,@khr,@reason,@sale,@uid,@uname,@batch)`, params: { ...p, ...(labelled ? { branchName: move.branchName ?? null, addressed: move.addressed } : {}), name: move.name, type: move.lot ? (q > 0 ? 'damage_in' : 'damage_out') : (q > 0 ? 'return' : 'sale'), usd: move.costUsd, khr: move.costKhr, reason: `${sign < 0 ? 'Undo' : 'Apply'} grouped sale status`, sale: member.id, uid: user.id, uname: actorSnapshot(user), batch: move.batch } });
     }
     for (const move of member.batches) {
         const p = { ...move, q: move.quantity * sign, stamp };
@@ -322,7 +329,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
     // The money columns feed only the S4-41 check below; the revision guard
     // every changed member carries makes the batch refuse if they move before
     // it commits.
-    const sales = await rowsIn<Row>(db, ids, m => `SELECT s.id,s.receipt_number,s.branch_id,b.name AS branch_name,b.is_active AS branch_active,s.sale_status,s.updated_at,s.stock_skipped,s.notes,s.cancel_reason,s.cancel_note,s.cancelled_at,s.cancelled_by_name,s.status_before_cancel,s.cancel_fee_id,s.total_usd,s.amount_paid_usd,s.amount_paid_khr,s.exchange_rate,s.money_precision_version,s.calculated_total_usd,COALESCE(v.revision,0) AS write_revision,${saleMovementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN branches b ON b.id=s.branch_id LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id IN (${m})`);
+    const sales = await rowsIn<Row>(db, ids, m => `SELECT s.id,s.receipt_number,s.branch_id,b.name AS branch_name,s.branch_name AS sale_branch_label,b.role AS branch_role,b.is_active AS branch_active,s.sale_status,s.updated_at,s.stock_skipped,s.notes,s.cancel_reason,s.cancel_note,s.cancelled_at,s.cancelled_by_name,s.status_before_cancel,s.cancel_fee_id,s.total_usd,s.amount_paid_usd,s.amount_paid_khr,s.exchange_rate,s.money_precision_version,s.calculated_total_usd,COALESCE(v.revision,0) AS write_revision,${saleMovementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN branches b ON b.id=s.branch_id LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id IN (${m})`);
     const sourceMatchedIds: number[] = [], unpaid: Row[] = [];
     for (const expected of request.items) {
         const sale = sales.find(s => s.id === expected.id);
@@ -359,6 +366,9 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
         throw new SaleBulkError('Select fewer return records (maximum 300).', 400);
     const fees = await rowsIn<Row>(db, sales.filter(s => sourceMatchedIds.includes(Number(s.id))).map(s => Number(s.cancel_fee_id)).filter(Boolean), m => `SELECT * FROM fees WHERE id IN (${m})`);
     const stamp = new Date().toISOString(), operationId = crypto.randomUUID(), members: Member[] = [], guards: StockStatement[] = [];
+    // A line recorded at a retired branch (Old Shop -> LC Store) moves its stock at the active successor; the
+    // directory is read once for the whole group and every redirect is re-proved inside the commit batch.
+    const resolver = new BranchEffectResolver(await readBranchDirectory(db));
     for (const expected of request.items) {
         const sale = sales.find(s => s.id === expected.id);
         if (!sale)
@@ -379,11 +389,23 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
         const itemCancel = expected.cancel;
         const createsCancellationFee = changed && request.target_status === 'cancelled' && !!itemCancel
             && (Number(itemCancel.fee_usd) > 0 || Number(itemCancel.fee_khr) > 0);
+        // Where the expense is booked: the sale's branch while it is active, its ACTIVE selling successor once retired.
+        let feeLanding: { id: number; name: string | null } | null = null;
         if (createsCancellationFee) {
             const branchId = Number(sale.branch_id);
-            if (!Number.isSafeInteger(branchId) || branchId <= 0 || Number(sale.branch_active ?? 0) !== 1 || !branchCanSell(sale.branch_name))
+            // The expense keeps the branch the sale was recorded at: a selling branch that is active, or one
+            // retired (Old Shop) whose active successor sells.
+            const feeBranch = resolver.directory.find(row => Number(row.id) === branchId);
+            const feeBranchActive = !!feeBranch && Number(feeBranch.is_active ?? 1) === 1;
+            const feeSuccessor = feeBranch && !feeBranchActive ? resolveSellingSuccessor(resolver.directory, branchId) : null;
+            if (!Number.isSafeInteger(branchId) || branchId <= 0 || !feeBranch || !branchCanSell(feeBranch) || (!feeBranchActive && !feeSuccessor))
                 throw new SaleBulkError('Cancellation expenses require a sale recorded at the active Shop.', 400);
-            guards.push(bulkAssertion("EXISTS(SELECT 1 FROM sales s JOIN branches b ON b.id=s.branch_id WHERE s.id=@id AND s.branch_id=@branch AND b.is_active=1 AND lower(trim(b.name))='shop')", { id: expected.id, branch: branchId }));
+            if (feeSuccessor)
+                feeLanding = { id: feeSuccessor.effectBranchId, name: resolver.directory.find(row => Number(row.id) === feeSuccessor.effectBranchId)?.name ?? null };
+            if (feeBranchActive)
+                guards.push(bulkAssertion("EXISTS(SELECT 1 FROM sales s JOIN branches b ON b.id=s.branch_id WHERE s.id=@id AND s.branch_id=@branch AND " + sellingBranchConditionSql('b') + ")", { id: expected.id, branch: branchId }));
+            else
+                guards.push(bulkAssertion(branchEffectGuardPredicate('@effects'), { effects: JSON.stringify([{ addressed: branchId, effect: feeSuccessor!.effectBranchId, sells: 1 }]) }));
         }
         const cancelReason = itemCancel?.reason || request.cancel_reason;
         const cancelNote = itemCancel?.note || request.cancel_note;
@@ -403,12 +425,25 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
         // RET-B F4: imported return-status lines (sale_items.returned_quantity), as the single route.
         addImportedReturnedQuantities(itemReturned, own as Array<Item & { returned_quantity?: unknown }>);
         const returned = allocateReturnedQuantities(own, itemReturned, productReturned);
-        for (const item of own) {
+        for (const item of own)
             item.allocations = allocations.filter(a => a.sale_item_id === item.id);
+        const skipped = (changed && !!request.skip_stock) || Number(sale.stock_skipped) === 1;
+        try {
+            await redirectStockItems(db, resolver, own, {
+                moves: item => changed && !skipped && !!item.product_id && !!item.branch_id
+                    && heldQuantity(old, item.quantity, returned.get(item.id) || 0) !== heldQuantity(request.target_status, item.quantity, returned.get(item.id) || 0),
+                saleBranchId: Number(sale.branch_id) || null, saleLabel: typeof sale.sale_branch_label === 'string' && sale.sale_branch_label ? sale.sale_branch_label : null,
+            });
+        }
+        catch (error) {
+            if (error instanceof BranchRetiredNoSuccessorError || error instanceof BranchRetiredDamagedError)
+                throw new SaleBulkError(error.message, 409, { code: error.code, sale_ids: [expected.id] });
+            throw error;
+        }
+        for (const item of own) {
             if (allocations.some(a => a.sale_item_id === item.id && a.branch_id != null && Number(a.branch_id) !== item.branch_id))
                 fail('Sale allocation belongs to a different branch.');
         }
-        const skipped = (changed && !!request.skip_stock) || Number(sale.stock_skipped) === 1;
         const member: Member = { id: expected.id, receipt: String(sale.receipt_number || expected.id), before, after, changed, skipped, items: own, returned: [...returned], stock: [], batches: [], allocations: [], fee: null, createdFee: null };
         if (createsCancellationFee && itemCancel) {
             const random = crypto.getRandomValues(new Uint32Array(2));
@@ -424,10 +459,9 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
                 amount_khr: Math.max(0, Math.round(Number(itemCancel.fee_khr) || 0)),
                 fee_date: stamp.slice(0, 10),
                 sale_id: expected.id,
-                branch_id: sale.branch_id ?? null,
-                // The fee's own label, written once (fees.branch_name, 0236). The sale row's
-                // branch is active here (the selling guard below), so its name is the current one.
-                branch_name: sale.branch_name ?? null,
+                branch_id: feeLanding ? feeLanding.id : sale.branch_id ?? null,
+                // The fee's own label, written once (fees.branch_name, 0236): the name of the branch it is booked to.
+                branch_name: feeLanding ? feeLanding.name : sale.branch_name ?? null,
                 delivery_contact_id: null,
                 notes: String(itemCancel.fee_note || '').trim() || `Fee lost to cancellation (${cancelReason})`,
                 created_by: user.id,
@@ -448,7 +482,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
         for (const statement of plan.statements) {
             const p = statement.params;
             if (statement.sql.startsWith('INSERT INTO inventory_movements'))
-                member.stock.push({ product: Number(p.product_id), branch: Number(p.branch_id), quantity: Number(p.quantity), batch: p.batch_id ? Number(p.batch_id) : null, lot: null, name: p.product_name as string | null, costUsd: Number(p.unit_cost_usd), costKhr: Number(p.unit_cost_khr), sale: expected.id });
+                member.stock.push({ product: Number(p.product_id), branch: Number(p.branch_id), quantity: Number(p.quantity), batch: p.batch_id ? Number(p.batch_id) : null, lot: null, name: p.product_name as string | null, costUsd: Number(p.unit_cost_usd), costKhr: Number(p.unit_cost_khr), sale: expected.id, ...(p.addressed_branch_name ? { branchName: (p.branch_name as string | null) ?? null, addressed: String(p.addressed_branch_name) } : {}) });
             if (statement.sql.startsWith('UPDATE branch_batch_stock') || statement.sql.startsWith('INSERT INTO branch_batch_stock')) {
                 const item = own.find(i => i.batch_id === p.batchId || i.allocations?.some(a => a.batch_id === p.batchId))!;
                 member.batches.push({ batch: Number(p.batchId), branch: Number(p.branchId), product: Number(item.product_id), quantity: Number(p.quantity) * (statement.sql.startsWith('UPDATE') ? -1 : 1) });
@@ -484,6 +518,9 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
     const snapshot: Snapshot = { version: 1, operationId, members };
     const changedIds = members.filter(m => m.changed).map(m => m.id), unchangedIds = members.filter(m => !m.changed).map(m => m.id);
     const receipt = { operationId, changedIds, unchangedIds, changedCount: changedIds.length, unchangedCount: unchangedIds.length, currentReplayGeneration: 0, items: members.map(m => ({ id: m.id, receipt_number: m.receipt, before: m.before.sale_status, after: m.after.sale_status, changed: m.changed, reason: m.changed ? 'changed' : (request.source_status !== undefined && m.before.sale_status !== request.source_status ? 'source_mismatch' : 'already_target'), stock_skipped: m.skipped })) };
+    const effectGuards = resolver.guards();
+    if (effectGuards.length)
+        guards.push(bulkAssertion(branchEffectGuardPredicate('@effects'), { effects: JSON.stringify(effectGuards) }));
     const statements: StockStatement[] = [...guards, { sql: 'INSERT INTO sale_bulk_operations(id,actor_id,request_id,request_json,receipt_json) VALUES(@id,@actor,@request,@canonical,@receipt)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical, receipt: JSON.stringify(receipt) } }];
     for (const m of members)
         statements.push(...memberStatements(m, 1, user, stamp));

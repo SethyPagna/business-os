@@ -34,6 +34,8 @@ import { parseCsvRows } from '../../../utils/csvImport.ts'
 import {
   TARGET_FIELDS,
   autoMapHeaders,
+  combinedCountRows,
+  combinedRowsLabel,
 } from './datedStockReconciliationMapping.ts'
 import {
   resolveDatedStockCountRows as apiResolveRows,
@@ -93,6 +95,7 @@ interface ResolvedRow {
   productId: number
   branchId: number
   count: number
+  mergedRowNumbers?: number[]
   priceConflict?: PriceConflict
 }
 
@@ -487,6 +490,20 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
               {T('dated_count_branches_created', 'branches created')}
             </div>
           </div>
+
+          {combinedCountRows(resolved).length > 0 ? (
+            <div>
+              <p className="mb-2 text-xs font-semibold text-slate-500 dark:text-slate-400">{T('dated_count_rows_combined', 'Rows counted together')}</p>
+              <div className="space-y-1.5">
+                {combinedCountRows(resolved).map((row) => (
+                  <div key={row.rowNumber} className="rounded-lg border border-slate-200 p-2.5 text-xs text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                    {T('dated_count_rows_combined_line', 'Rows {rows} are added into one count of {count} for the same branch.')
+                      .replace('{rows}', combinedRowsLabel(row)).replace('{count}', String(row.count))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           {resolved.filter((row) => row.priceConflict).length > 0 ? (
             <div>

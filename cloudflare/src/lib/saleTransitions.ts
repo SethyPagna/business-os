@@ -92,6 +92,10 @@ export type TransitionItem = {
   // Absent/empty = fall back to the single-lot batch_id behavior (old
   // sales whose allocation insert failed, or callers that did not fetch).
   allocations?: SaleItemAllocation[]
+  // Set only when the line was recorded at a branch that has since been retired and its stock effect was
+  // redirected to the active successor (branch_id above is then the successor). The movement rows this
+  // transition writes name the branch the stock really moved at and the label the sale was made under.
+  effect?: { branchName: string | null; addressedName: string | null }
 }
 
 // Returns recorded against a sale reference either a specific sale_item
@@ -370,12 +374,13 @@ export function planSaleStockTransition(input: {
         })
       }
       statements.push({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-              VALUES (@product_id, @product_name, @branch_id, 'sale', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${item.effect ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+              VALUES (@product_id, @product_name, @branch_id${item.effect ? ', @branch_name, @addressed_branch_name' : ''}, 'sale', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
         params: {
           product_id: item.product_id,
           product_name: item.product_name,
           branch_id: item.branch_id,
+          ...(item.effect ? { branch_name: item.effect.branchName, addressed_branch_name: item.effect.addressedName } : {}),
           quantity: -delta,
           // 0084: attributable only when one lot covered the whole delta.
           batch_id: touchedLots.length === 1 && touchedLots[0].quantity === delta ? touchedLots[0].batchId : null,
@@ -440,12 +445,13 @@ export function planSaleStockTransition(input: {
       // carries the cancellation ("add stock back with a note, never undo
       // the original movements").
       statements.push({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-              VALUES (@product_id, @product_name, @branch_id, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${item.effect ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+              VALUES (@product_id, @product_name, @branch_id${item.effect ? ', @branch_name, @addressed_branch_name' : ''}, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
         params: {
           product_id: item.product_id,
           product_name: item.product_name,
           branch_id: item.branch_id,
+          ...(item.effect ? { branch_name: item.effect.branchName, addressed_branch_name: item.effect.addressedName } : {}),
           quantity: restore,
           // 0084: attributable only when one lot received the whole restore.
           batch_id: restoredLots.length === 1 && restoredLots[0].quantity === restore ? restoredLots[0].batchId : null,

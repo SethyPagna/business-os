@@ -23,7 +23,7 @@ const actual = new Set(['businessMaintenanceGuard','offlineSaleOwnership','acqui
   // The selling-branch guard and the two canonical branch roles it reads:
   // real modules, so POST /sales here rejects a warehouse line exactly as
   // the Worker does rather than silently resolving to an empty stub.
-  'branchRoleGuards','branchRoles',
+  'branchRoleGuards','branchRoles','branchEffect',
   // Shared per-isolate PRAGMA table_info() memoization sales.ts's
   // saleMoneySchemaReady/readStripMoneyRows now delegate to; no imports of
   // its own, so it is loaded for real rather than stubbed.

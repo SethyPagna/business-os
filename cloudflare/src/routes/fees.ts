@@ -20,7 +20,8 @@ import { assertRequiredUpdatedAtMatch, EXPECTED_UPDATED_AT_REQUIRED, getExpected
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { businessToday } from '../lib/businessDateWindow'
 import { sendTelegramEvent, telegramMoney } from '../lib/telegram'
-import { branchCanSell } from '../lib/branchRoles'
+import { branchCanSell, branchCanSellNow, resolveSellingSuccessor } from '../lib/branchRoles'
+import { effectGuardStatement } from '../lib/branchEffect'
 import { normalizeTypedDate } from '../lib/batchCode'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { nativeChangeAmounts, type DecimalInput } from '../lib/moneyPrecision'
@@ -165,12 +166,16 @@ async function requireDeliveryContact(db: ReturnType<typeof getDb>, value: unkno
   return id
 }
 
-type FeeLink = { saleId: number | null; branchId: number }
+// `redirect` is set only when the expense is booked to the ACTIVE successor of the retired branch its sale was made
+// at (Old Shop -> LC Store): the in-batch guard re-proves that chain at commit.
+type FeeLink = { saleId: number | null; branchId: number; redirect?: { addressed: number; effect: number } }
 
 async function resolveFeeLink(
   db: ReturnType<typeof getDb>,
   saleValue: unknown,
   branchValue: unknown,
+  // An EDIT passes the branch the expense is already booked to: leaving it unchanged never re-asks "is it active".
+  existingBranchId: number | null = null,
 ): Promise<FeeLink> {
   const saleId = optionalPositiveId(saleValue)
   const requestedBranchId = optionalPositiveId(branchValue)
@@ -181,25 +186,51 @@ async function resolveFeeLink(
     throw new Error('INVALID_BRANCH')
   }
 
+  // Selling is a branch ROLE, never the display name: after the branch
+  // consolidation the only selling branch is called "LC Store".
+  const branchRows = () => db.prepare('SELECT id,name,role,is_active,successor_branch_id FROM branches')
+    .all<{ id: number; name: string | null; role: string | null; is_active: number | null; successor_branch_id: number | null }>()
+
   if (saleId != null) {
     const sale = await db.prepare(`
-      SELECT s.id, s.branch_id, b.name AS branch_name, b.is_active AS branch_active
-      FROM sales s LEFT JOIN branches b ON b.id=s.branch_id
+      SELECT s.id, s.branch_id
+      FROM sales s
       WHERE s.id=@saleId
-    `).get<{ id: number; branch_id: number | null; branch_name: string | null; branch_active: number | null }>({ saleId })
+    `).get<{ id: number; branch_id: number | null }>({ saleId })
     const saleBranchId = Number(sale?.branch_id)
-    if (!sale || !Number.isSafeInteger(saleBranchId) || saleBranchId <= 0
-      || Number(sale.branch_active ?? 0) !== 1 || !branchCanSell(sale.branch_name)) {
-      throw new Error('INVALID_SALE')
+    if (!sale || !Number.isSafeInteger(saleBranchId) || saleBranchId <= 0) throw new Error('INVALID_SALE')
+    // An expense is cash that leaves a drawer. It is booked to the branch the
+    // sale was recorded at while that branch is active, and to its ACTIVE
+    // selling successor once it is retired (an old Shop sale after the
+    // cutover): Old Shop has no drawer, so an expense booked there would leave
+    // the LC Store drawer reading short. The sale link keeps the provenance.
+    // An edit that leaves the branch unchanged keeps it. While both branches
+    // are active the successor IS the sale's branch, exactly the old test.
+    const rows = await branchRows()
+    const saleBranch = rows.find((row) => Number(row.id) === saleBranchId)
+    const landing = saleBranch && branchCanSell(saleBranch) ? resolveSellingSuccessor(rows, saleBranchId) : null
+    if (!saleBranch || !landing) throw new Error('INVALID_SALE')
+    const effectBranchId = landing.effectBranchId
+    if (requestedBranchId != null && requestedBranchId !== saleBranchId && requestedBranchId !== effectBranchId) throw new Error('SALE_BRANCH_MISMATCH')
+    if (existingBranchId != null && requestedBranchId === existingBranchId && (existingBranchId === saleBranchId || existingBranchId === effectBranchId)) {
+      return { saleId, branchId: existingBranchId }
     }
-    if (requestedBranchId != null && requestedBranchId !== saleBranchId) throw new Error('SALE_BRANCH_MISMATCH')
-    return { saleId, branchId: saleBranchId }
+    return effectBranchId === saleBranchId
+      ? { saleId, branchId: saleBranchId }
+      : { saleId, branchId: effectBranchId, redirect: { addressed: saleBranchId, effect: effectBranchId } }
   }
 
   if (requestedBranchId == null) throw new Error('BRANCH_REQUIRED')
-  const branch = await db.prepare('SELECT id,name,is_active FROM branches WHERE id=@id')
-    .get<{ id: number; name: string | null; is_active: number | null }>({ id: requestedBranchId })
-  if (!branch || Number(branch.is_active ?? 0) !== 1 || !branchCanSell(branch.name)) throw new Error('INVALID_BRANCH')
+  const branch = await db.prepare('SELECT id,name,role,is_active FROM branches WHERE id=@id')
+    .get<{ id: number; name: string | null; role: string | null; is_active: number | null }>({ id: requestedBranchId })
+  if (!branch) throw new Error('INVALID_BRANCH')
+  if (!branchCanSellNow(branch)) {
+    // History stays editable: an old expense booked to a branch that has since been retired (Old Shop, with an active
+    // selling successor) may be edited WITHOUT moving it. Only a NEW expense, or one moved there, must use an active
+    // selling branch.
+    const retiredWithSuccessor = Number(branch.is_active ?? 1) !== 1 && branchCanSell(branch) && !!resolveSellingSuccessor(await branchRows(), requestedBranchId)
+    if (!(existingBranchId != null && requestedBranchId === existingBranchId && retiredWithSuccessor)) throw new Error('INVALID_BRANCH')
+  }
   return { saleId: null, branchId: requestedBranchId }
 }
 
@@ -588,8 +619,9 @@ app.post('/', async (c) => {
 
   let saleId: number | null
   let branchId: number
+  let feeRedirect: FeeLink['redirect']
   try {
-    ({ saleId, branchId } = await resolveFeeLink(db, requestedSaleId, requestedBranchId))
+    ({ saleId, branchId, redirect: feeRedirect } = await resolveFeeLink(db, requestedSaleId, requestedBranchId))
   } catch (error) {
     const code = (error as Error).message
     if (code === 'SALE_BRANCH_MISMATCH') return c.json({ error: 'The linked sale and expense must use the same Shop branch.' }, 400)
@@ -606,7 +638,9 @@ app.post('/', async (c) => {
   const actorName = actorSnapshot(user)
   const receiptId = crypto.randomUUID()
   try {
+    const feeEffectGuard = feeRedirect ? effectGuardStatement([{ ...feeRedirect, sells: 1 }]) : null
     await db.batch([
+      ...(feeEffectGuard ? [feeEffectGuard, { sql: 'DELETE FROM sale_bulk_guards', params: {} }] : []),
       {
         sql: `INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, branch_name, delivery_contact_id, notes, created_by, created_by_name, created_at, updated_at)
           VALUES (@feeType, @label, @amountUsd, @amountKhr, @feeDate, @saleId, @branchId, (SELECT name FROM branches WHERE id = @branchId), @deliveryContactId, @notes, @createdBy, @createdByName, @now, @now)`,
@@ -713,6 +747,7 @@ app.put('/:id', async (c) => {
       db,
       body.sale_id !== undefined ? body.sale_id : existing.sale_id,
       body.branch_id !== undefined ? body.branch_id : existing.branch_id,
+      existing.branch_id,
     ))
   } catch (error) {
     const code = (error as Error).message

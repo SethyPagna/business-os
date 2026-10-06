@@ -162,6 +162,26 @@ async function main() {
     const w = world(); w.stats.before = raw => raw.exec("UPDATE users SET permissions='{}' WHERE id=7")
     await assert.rejects(begin(w)); assert.equal(w.raw.prepare('SELECT count(*) n FROM branch_cutovers').get().n, 0); assert.equal(w.raw.prepare("SELECT count(*) n FROM system_flags WHERE key='maintenance'").get().n, 0); w.raw.close()
   })
+  // CUTOVER-LC: nothing may silently close a shift. The admission refuses to start while ANY shift is open (at the
+  // source or anywhere else), is atomic with the hold, and ordinary writes (opening a shift) are gated while it runs.
+  const shiftRow = (id, branch, closed, cancelled) => `INSERT INTO shift_sessions(id,shift_code,user_id,branch_id,business_date,opened_at,closed_at,cancelled_at,cancelled_by_user_id,cancel_reason)
+    VALUES(${id},'SH${id}',7,${branch},date('2026-01-01','+${id} day'),'2026-10-05 08:00:00',${closed},${cancelled},${cancelled === 'NULL' ? 'NULL' : 7},${cancelled === 'NULL' ? 'NULL' : "'entered in error'"})`
+  await check('an open shift refuses the cutover start (source or other branch) and leaves no hold; closed and cancelled shifts do not', async () => {
+    for (const branch of [2, 1]) {
+      const w = world(); w.raw.exec(shiftRow(500 + branch, branch, 'NULL', 'NULL'))
+      await assert.rejects(begin(w))
+      assert.equal(w.raw.prepare('SELECT count(*) n FROM branch_cutovers').get().n, 0, 'no journal row')
+      assert.equal(w.raw.prepare("SELECT count(*) n FROM system_flags WHERE key='maintenance'").get().n, 0, 'no maintenance hold')
+      assert.equal(w.raw.prepare('SELECT count(*) n FROM shift_sessions WHERE closed_at IS NULL AND cancelled_at IS NULL').get().n, 1, 'the shift is untouched, never closed on the way')
+      w.raw.close()
+    }
+    const done = world(); done.raw.exec(shiftRow(510, 2, "'2026-10-05 20:00:00'", 'NULL') + ';' + shiftRow(511, 2, 'NULL', "'2026-10-05 09:00:00'"))
+    assert.equal((await begin(done)).replayed === true, false); done.raw.close()
+  })
+  await check('a shift opened between the read and the admission batch rolls the start back', async () => {
+    const w = world(); w.stats.before = raw => raw.exec(shiftRow(520, 2, 'NULL', 'NULL')); await assert.rejects(begin(w))
+    assert.equal(w.raw.prepare('SELECT count(*) n FROM branch_cutovers').get().n, 0); assert.equal(w.raw.prepare("SELECT count(*) n FROM system_flags WHERE key='maintenance'").get().n, 0); w.raw.close()
+  })
   await check('lost admission acknowledgement proves retained row without another write', async () => {
     const w = world(); w.stats.after = () => { throw Error('network lost after commit') }; const result = await begin(w)
     assert.equal(result.replayed, true); assert.equal(w.stats.batches, 1); w.raw.close()

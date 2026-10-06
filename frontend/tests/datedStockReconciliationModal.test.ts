@@ -3,6 +3,8 @@ import {
   normalizeHeaderForMatch,
   autoMapHeaders,
   TARGET_FIELDS,
+  combinedCountRows,
+  combinedRowsLabel,
 } from '../src/components/products/import/datedStockReconciliationMapping.ts'
 import { normalizeToIsoDate } from '../src/utils/batchCode.ts'
 
@@ -122,6 +124,21 @@ console.log('PASS normalizeHeaderForMatch collapses case/punctuation/whitespace 
   assert.equal(old.includes('mm/dd/yyyy'), false, 'control: the old hint named no order')
   assert.equal(/any common date format/i.test(old), true, 'control: the old hint is what the pattern catches')
   console.log('PASS the Count date hint names the month-first order its own parser uses')
+}
+
+// The branch consolidation folds the old sheet's shop and warehouse rows of one product and date into ONE count (their
+// absolute counts are summed on the server). The review screen must name every sheet row involved -- including the folded
+// ones -- and only for the rows that were actually folded.
+{
+  const rows = [
+    { rowNumber: 1, count: 5 },
+    { rowNumber: 3, count: 9, mergedRowNumbers: [7, 2] },
+    { rowNumber: 4, count: 2, mergedRowNumbers: [] },
+  ]
+  assert.deepEqual(combinedCountRows(rows).map((row) => row.rowNumber), [3], 'only a row with folded rows is listed')
+  assert.equal(combinedRowsLabel(rows[1]), '2 + 3 + 7', 'every sheet row involved is named, in sheet order')
+  assert.deepEqual(combinedCountRows([{ rowNumber: 1, count: 5 }]), [], 'nothing folded, nothing to say')
+  console.log('PASS the review screen names every sheet row folded into a combined count, and only those')
 }
 
 console.log('datedStockReconciliationModal tests passed')

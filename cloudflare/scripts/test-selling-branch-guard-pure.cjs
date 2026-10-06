@@ -180,17 +180,17 @@ const inventorySource = read('src/routes/inventory.ts')
 const transferOperationSource = read('src/lib/transferOperation.ts')
 
 runTest('every path that writes a sale line asks the guard first', () => {
-  // Checkout, add-items-to-a-sale, and a replaced-in product: three writers,
-  // three checks. Counting them is what catches a fourth writer being added
-  // later without one.
-  assert.equal((salesSource.match(/firstUnsellableBranch\(/g) || []).length, 3)
+  // Checkout, add-items-to-a-sale, the same call again where the add-items branch retired (Old Shop) is
+  // told apart from a warehouse, and the amendment header: four checks. Counting them is what catches a
+  // writer being added later without one.
+  assert.equal((salesSource.match(/firstUnsellableBranch\(/g) || []).length, 4)
   assert.equal((returnsSource.match(/branchCanSell\(/g) || []).length, 1)
   assert.match(salesSource, /SHOP_ONLY_SALE_ERROR \}, 400\)/)
   assert.match(salesSource, /from '\.\.\/lib\/branchRoleGuards'/)
   assert.match(returnsSource, /WAREHOUSE_NOT_SELLABLE_ERROR \}, 400\)/)
   assert.match(returnsSource, /from '\.\.\/lib\/branchRoleGuards'/)
-  assert.match(returnsSource, /!branchCanSell\(branch\.name\)/)
-  assert.match(salesImportSource, /!branchCanSell\(saleBranch\.name\)/)
+  assert.match(returnsSource, /!branchCanSell\(branchRow\)/, 'the role row, never the display name')
+  assert.match(salesImportSource, /!branchCanSell\(saleBranch\)/, 'the role row, never the display name')
   assert.match(salesImportSource, /throw new Error\(WAREHOUSE_NOT_SELLABLE_ERROR\)/)
 })
 
@@ -200,7 +200,9 @@ runTest('sale writers require one real active Shop header and identical line bra
   assert.match(salesSource, /addedBranchRows\.length !== addedBranchIds\.length/)
   assert.match(salesSource, /Number\(line\.branch_id\) !== saleHeaderBranchId/)
   assert.match(salesSource, /branchId !== saleHeaderBranchId/)
-  assert.match(salesSource, /COALESCE\(is_active,1\)=1/)
+  // An amendment header must be active, or retired with an ACTIVE selling successor (never merely inactive).
+  assert.match(salesSource, /Number\(amendmentBranch\.is_active \?\? 1\) !== 1/)
+  assert.match(salesSource, /resolveSellingSuccessor\(branchResolver\.directory, cancellationBranchId\)/)
   assert.match(salesSource, /firstUnsellableBranch\(\[amendmentBranch\]\)/)
   assert.match(salesSource, /branchCanSell\(cancellationBranch\)/, 'automatic cancellation expenses inherit a verified Shop sale link')
   assert.match(returnsSource, /replacementInputs\.some\(\(line\) => Number\(line\.branch_id \|\| branchId\) !== branchId\)/)

@@ -556,6 +556,8 @@
   "dated_count_reading": "កំពុងអានឯកសារ...",
   "dated_count_resolve_failed": "មិនអាចវិភាគឯកសារនេះបានទេ។",
   "dated_count_row": "ជួរដេក",
+  "dated_count_rows_combined": "ជួរដេកដែលរាប់បូកបញ្ចូលគ្នា",
+  "dated_count_rows_combined_line": "ជួរដេក {rows} ត្រូវបានបូកបញ្ចូលគ្នាជាការរាប់តែមួយចំនួន {count} សម្រាប់សាខាតែមួយ។",
   "dated_count_rows_detected": "រកឃើញ {n} ជួរដេក",
   "dated_count_rows_needing_a_decision": "ជួរដេកដែលត្រូវការការសម្រេចចិត្ត",
   "dated_count_rows_skipped_as_errors": "ជួរដេក {n} មិនអាចអនុវត្តបាន ហើយត្រូវបានរំលងជាកំហុស។",

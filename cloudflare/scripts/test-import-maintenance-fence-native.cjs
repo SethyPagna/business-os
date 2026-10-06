@@ -90,7 +90,7 @@ async function main() {
       created_by_id INTEGER,created_by_name TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP,started_at TEXT,finished_at TEXT)`).run()
     await db.prepare('CREATE TABLE products(id INTEGER PRIMARY KEY,name TEXT,name_normalized TEXT,barcode TEXT,unit TEXT,selling_price_usd REAL,wholesale_price_usd REAL,cost_price_usd REAL,cost_price_khr REAL,purchase_price_usd REAL,purchase_price_khr REAL,stock_quantity REAL,is_active INTEGER,client_request_id TEXT UNIQUE,created_at TEXT,updated_at TEXT)').run()
-    await db.prepare('CREATE TABLE branches(id INTEGER PRIMARY KEY,name TEXT,is_active INTEGER)').run()
+    await db.prepare('CREATE TABLE branches(id INTEGER PRIMARY KEY,name TEXT,is_active INTEGER,role TEXT,canonical_key TEXT,successor_branch_id INTEGER,is_default INTEGER)').run()
     await db.prepare('CREATE TABLE branch_stock(product_id INTEGER,branch_id INTEGER,quantity REAL,UNIQUE(product_id,branch_id))').run()
     await db.prepare(`CREATE TABLE product_batches(id INTEGER PRIMARY KEY AUTOINCREMENT,variant_product_id INTEGER,
       batch_key TEXT,lot_code TEXT,received_at TEXT,is_active INTEGER,notes TEXT,batch_number INTEGER,
@@ -110,7 +110,7 @@ async function main() {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,applied_at TEXT,PRIMARY KEY(job_id,action_key))`).run()
     await db.prepare('CREATE TABLE effects(id TEXT PRIMARY KEY)').run()
     await staging.prepare('CREATE TABLE import_job_rows(id INTEGER PRIMARY KEY,job_id TEXT)').run()
-    await db.prepare("INSERT INTO branches VALUES(1,'Shop',1)").run()
+    await db.prepare("INSERT INTO branches(id,name,is_active) VALUES(1,'Shop',1)").run()
     await db.prepare("INSERT INTO import_jobs(id,status,updated_at) VALUES('job-1','failed',CURRENT_TIMESTAMP)").run()
     const call = async mode => {
       const response = await mf.dispatchFetch('http://local.test', { method: 'POST', body: JSON.stringify({ mode }) })
