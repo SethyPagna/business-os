@@ -2983,9 +2983,10 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       await replayStockLotSet(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)
     },
   },
-  // N6 stock-in line edit (lib/stockInLineEdit.ts): same exact-snapshot
-  // replay contract as the scoped Set above; a cost edit also needs the
-  // cost-entry permission, checked inside the replay.
+  // N6 stock-in line edit (lib/stockInLineEdit.ts): same delta replay
+  // contract as the scoped Set above (the recorded change, refused only when
+  // the units it needs are gone); a cost edit also needs the cost-entry
+  // permission, checked inside the replay.
   'stock.session_line_edit': {
     permission: 'inventory', action: 'adjust',
     run: async (payload, ctx) => {

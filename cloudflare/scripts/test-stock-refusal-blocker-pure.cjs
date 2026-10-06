@@ -242,20 +242,23 @@ async function main() {
     const res = await edit(f, movementId, { quantity: 12, expected_quantity: 10, expected_batch_id: batchId })
     assert.equal(res.status, 200, JSON.stringify(res.json))
     const history = f.sql.prepare('SELECT history_id id FROM stock_lot_adjustment_operations WHERE id=?').get(res.json.operation_id).id
-    const sold = sell(f, batchId, 3, '20261004-130000')
+    // REVERT-SET: the undo takes back exactly the +2, so only a sale that took
+    // those units refuses it (12 - 11 = 1 left, 2 needed).
+    const sold = sell(f, batchId, 11, '20261004-130000')
     const before = snapshot(f)
     const refused = await send(f, 'POST', `/api/action-history/${history}/undo`, { expected_generation: 0, require_applied: true })
     assert.equal(refused.status, 409, JSON.stringify(refused.json))
     assert.equal(refused.json.reason, 'consumed')
+    assert.deepEqual([refused.json.code, refused.json.params], ['revert_insufficient_lot_stock', { available: 1, needed: 2 }])
     assert.equal(refused.json.blocker.kind, 'sale'); assert.equal(refused.json.blocker.movement_id, sold.movement)
     assert.deepEqual(refused.json.destination, { kind: 'movement', movement_id: sold.movement })
     // History records the attempt's error; stock and lots are untouched.
     const stockOnly = (s) => JSON.parse(s).filter((_, i) => i !== 6)
     assert.deepEqual(stockOnly(snapshot(f)), stockOnly(before))
     // Reversal path still exact once the sale is out of the way (cancelled + restocked).
-    f.sql.prepare('UPDATE branch_batch_stock SET quantity=quantity+3 WHERE batch_id=? AND branch_id=1').run(batchId)
-    f.sql.prepare('UPDATE branch_stock SET quantity=quantity+3 WHERE product_id=1 AND branch_id=1').run()
-    f.sql.prepare('UPDATE products SET stock_quantity=stock_quantity+3 WHERE id=1').run()
+    f.sql.prepare('UPDATE branch_batch_stock SET quantity=quantity+11 WHERE batch_id=? AND branch_id=1').run(batchId)
+    f.sql.prepare('UPDATE branch_stock SET quantity=quantity+11 WHERE product_id=1 AND branch_id=1').run()
+    f.sql.prepare('UPDATE products SET stock_quantity=stock_quantity+11 WHERE id=1').run()
     const undone = await send(f, 'POST', `/api/action-history/${history}/undo`, { expected_generation: 0, require_applied: true })
     assert.equal(undone.status, 200, JSON.stringify(undone.json))
     assert.deepEqual(ledgers(f, batchId), { branch: 10, product: 10, lotsAtBranch: 10, lotEverywhere: 10, received: 10, receivedCost: 20, lots: 1 })

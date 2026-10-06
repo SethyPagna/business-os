@@ -50,13 +50,22 @@
 // ordinaryBusinessBatch guarded on the exact preimage of every row it writes,
 // so it lands completely or not at all.
 //
-// UNDO / REDO (`stock.session_line_edit`): guarded on the CURRENT state
-// equalling the snapshot it reverses from (a sale, transfer, count or a later
-// edit in between refuses 409 and changes nothing), writes the other snapshot,
-// posts the counter-rows of the generation under the NEXT generation's
-// reference (so the line fold follows), restores the catalog cost only when it
-// still holds the value this edit left, and advances the generation in the
-// same batch so a stale history row can never apply twice.
+// UNDO / REDO (`stock.session_line_edit`, REVERT-SET 6 Oct 2026): moves
+// exactly the change this generation recorded, as DELTAS on today's rows --
+// each lot's stock and received quantity/cost by the edit's own change, the
+// branch and product by -d / +d -- never back to a saved snapshot. A sale,
+// transfer or count since then does not refuse it; it is refused (409, coded,
+// nothing written) only when
+//   - a later sale/transfer took units the inverse must take back
+//     (revert_insufficient_lot_stock / _branch_stock, the record named),
+//   - a LATER edit of the same line is still applied (undo that one first),
+//   - the line's session was undone (redo the session first),
+//   - a cost / supplier / date the edit changed was changed again, or another
+//     delivery has since joined that received date (stock_changed).
+// It posts the counter-rows of the generation under the NEXT generation's
+// reference (so the line fold follows), re-derives the catalog cost, and
+// advances the generation in the same batch so a stale history row can never
+// apply twice.
 import type { D1Compat } from './db'
 import { getDb } from './db'
 import type { Env } from '../index'
@@ -713,7 +722,128 @@ export async function notifyStockInLineEdit(env: Env): Promise<void> {
 
 export class StockInLineEditReplayError extends Error {
   // `refusal` (RET-D): the blocking record, passed through by the History route.
-  constructor(message: string, readonly statusCode = 409, readonly refusal: StockRefusalDetails | null = null) { super(message) }
+  // `code`/`params`: the Stock Changes refusal code and the numbers its
+  // sentence names (frontend utils/stockRevertError.ts), so Undo and Revert read the same.
+  constructor(message: string, readonly statusCode = 409, readonly refusal: StockRefusalDetails | null = null,
+    readonly code?: string, readonly params?: Record<string, string | number>) { super(message) }
+}
+
+const LOT_FIELDS = [
+  ['receivedAt', 'received_at'], ['lotCode', 'lot_code'], ['unitCostUsd', 'unit_cost_usd'],
+  ['supplierId', 'supplier_id'], ['supplierName', 'supplier_name'],
+] as const
+
+type LotDelta = {
+  role: 'source' | 'target'
+  id: number
+  from: LotState
+  to: LotState
+  stockChange: number
+  /** Attribute columns this edit changed on the lot: [column, from, to]. */
+  fields: Array<[string, unknown, unknown]>
+  rq: { change: number } | { set: number | null } | null
+  rc: { change: number } | { set: number | null } | null
+}
+
+function numericMove(from: number | null, to: number | null, money: boolean): LotDelta['rq'] {
+  if (from == null && to == null) return null
+  if (from == null || to == null) return { set: to }
+  const change = money ? subtractMoney4(to, from) : to - from
+  return Math.abs(change) < EPSILON ? null : { change }
+}
+
+function lotDelta(from: LotState, to: LotState, id: number): LotDelta {
+  const fields: Array<[string, unknown, unknown]> = []
+  for (const [key, column] of LOT_FIELDS) {
+    const a = from[key]
+    const b = to[key]
+    const same = key === 'unitCostUsd' ? sameMoney(a as number | null, b as number | null) : a === b
+    if (!same) fields.push([column, a, b])
+  }
+  return {
+    role: to.role, id, from, to, stockChange: to.stock - from.stock, fields,
+    rq: numericMove(from.receivedQuantity, to.receivedQuantity, false),
+    rc: numericMove(from.receivedCostUsd, to.receivedCostUsd, true),
+  }
+}
+
+// REVERT-SET (owner, 6 Oct 2026: "Revert should fully revert, never leaves a
+// stock effect behind"). One generation's inverse, as DELTAS on today's rows:
+// each lot's stock, received quantity and received cost move by exactly what
+// the edit moved them; branch_stock and products by the line's change. A sale,
+// transfer or count since the edit never refuses it -- only a shortage of the
+// units the inverse must take back (named, with the record that took them).
+// The attributes the edit changed (cost, supplier, date) are pinned to the
+// value the edit left and restored, and refused if another delivery has since
+// joined the received date (re-pricing it would re-price that delivery too).
+function deltaGuards(input: {
+  deltas: LotDelta[]; productId: number; branchId: number; branchChange: number
+  rootMovementId: number; ownFirstId: number; range: { lo: string; hi: string }
+}): Statement[] {
+  const out: Statement[] = [guard(`COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@product AND branch_id=@branch),0)+@change>=0`,
+    { product: input.productId, branch: input.branchId, change: input.branchChange })]
+  for (const lot of input.deltas) {
+    const params: Row = { id: lot.id, product: input.productId, branch: input.branchId, change: lot.stockChange }
+    const pins = lot.fields.map(([column, value], index) => { params[`f${index}`] = value; return `AND ${column} IS @f${index}` })
+    for (const [name, move] of [['rq', lot.rq], ['rc', lot.rc]] as const) {
+      if (move && 'set' in move) {
+        params[name] = (name === 'rq' ? lot.from.receivedQuantity : lot.from.receivedCostUsd)
+        pins.push(`AND ${name === 'rq' ? 'received_quantity' : 'received_cost_usd'} IS @${name}`)
+      }
+    }
+    out.push(guard(`EXISTS(SELECT 1 FROM product_batches WHERE id=@id AND variant_product_id=@product ${pins.join(' ')})
+      AND COALESCE((SELECT quantity FROM branch_batch_stock WHERE batch_id=@id AND branch_id=@branch),0)+@change>=0`, params))
+    if (lot.fields.length) {
+      out.push(guard(`NOT EXISTS(SELECT 1 FROM inventory_movements x WHERE x.batch_id=@id AND x.movement_type IN ('add','stock_in')
+          AND x.quantity > 0 AND x.id > @since AND x.id <> @root AND NOT (x.reference_id >= @lo AND x.reference_id < @hi)
+          AND NOT EXISTS(SELECT 1 FROM inventory_movements r WHERE r.reference_id='revert:' || CAST(x.id AS TEXT)))`,
+      { id: lot.id, since: input.ownFirstId, root: input.rootMovementId, ...input.range }))
+    }
+  }
+  return out
+}
+
+function deltaWrites(input: { deltas: LotDelta[]; productId: number; branchId: number; branchChange: number; productDelta: number }): Statement[] {
+  const first: Statement[] = []
+  const lotRows: Statement[] = []
+  const decreases: Statement[] = []
+  const increases: Statement[] = []
+  const last: Statement[] = []
+  for (const lot of input.deltas) {
+    const base = { id: lot.id, branch: input.branchId, change: lot.stockChange }
+    // Migration 0154: positive lot stock needs an active lot -- activate first, deactivate last.
+    if (lot.to.isActive === 1 && lot.from.isActive !== 1) first.push({ sql: 'UPDATE product_batches SET is_active=1 WHERE id=@id', params: base })
+    const sets: string[] = []
+    const params: Row = { id: lot.id }
+    lot.fields.forEach(([column, , value], index) => { sets.push(`${column}=@t${index}`); params[`t${index}`] = value })
+    if (lot.rq) {
+      if ('set' in lot.rq) { sets.push('received_quantity=@rqTo'); params.rqTo = lot.rq.set }
+      else { sets.push('received_quantity=MAX(0,COALESCE(received_quantity,0)+@rqChange)'); params.rqChange = lot.rq.change }
+    }
+    if (lot.rc) {
+      if ('set' in lot.rc) { sets.push('received_cost_usd=@rcTo'); params.rcTo = lot.rc.set }
+      else { sets.push('received_cost_usd=MAX(0,ROUND(COALESCE(received_cost_usd,0)+@rcChange,4))'); params.rcChange = lot.rc.change }
+    }
+    if (sets.length) lotRows.push({ sql: `UPDATE product_batches SET ${sets.join(',')},updated_at=CURRENT_TIMESTAMP WHERE id=@id`, params })
+    if (lot.stockChange < 0) decreases.push({ sql: 'UPDATE branch_batch_stock SET quantity=quantity+@change,updated_at=CURRENT_TIMESTAMP WHERE batch_id=@id AND branch_id=@branch', params: base })
+    if (lot.stockChange > 0) increases.push({ sql: `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(@id,@branch,@change)
+      ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=quantity+excluded.quantity,updated_at=CURRENT_TIMESTAMP`, params: base })
+    // An emptied lot goes inactive only when it holds nothing anywhere and was never received otherwise.
+    if (lot.to.isActive === 0 && lot.from.isActive === 1) last.push({ sql: `UPDATE product_batches SET is_active=0 WHERE id=@id
+      AND COALESCE(received_quantity,0)<=0 AND NOT EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=@id AND quantity>0)`, params: base })
+  }
+  const branchParams = { product: input.productId, branch: input.branchId, change: input.branchChange, productDelta: input.productDelta }
+  const branch: Statement[] = input.branchChange > 0
+    ? [{ sql: `INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(@product,@branch,@change)
+        ON CONFLICT(product_id,branch_id) DO UPDATE SET quantity=quantity+excluded.quantity`, params: branchParams }]
+    : input.branchChange < 0
+      ? [{ sql: 'UPDATE branch_stock SET quantity=quantity+@change WHERE product_id=@product AND branch_id=@branch', params: branchParams }]
+      : []
+  return [
+    ...first, ...lotRows, ...decreases, ...increases, ...branch,
+    { sql: 'UPDATE products SET stock_quantity=COALESCE(stock_quantity,0)+@productDelta, updated_at=CURRENT_TIMESTAMP WHERE id=@product AND @productDelta<>0', params: branchParams },
+    ...last,
+  ]
 }
 
 /** Server-side undo/redo of one line-edit generation. */
@@ -770,12 +900,67 @@ export async function replayStockInLineEdit(
   }
   const lineFrom = direction === 'undo' ? revision.lineAfter : revision.lineBefore
   const lineTo = direction === 'undo' ? revision.lineBefore : revision.lineAfter
+  // REVERT-SET: the recorded change, inverted (undo) or re-applied (redo) as deltas.
+  const deltas = to.lots.map((toLot) => {
+    const fromLot = from.lots.find((lot) => lot.role === toLot.role) as LotState
+    return lotDelta(fromLot, toLot, Number(toLot.id ?? fromLot.id))
+  })
+  const branchChange = to.branchQty - from.branchQty
+  const ownPrefix = `${STOCK_IN_EDIT_REFERENCE_PREFIX}${revision.rootMovementId}:${row.id}:`
+  const ownRange = { lo: ownPrefix, hi: `${ownPrefix.slice(0, -1)};` }
+  const [own, root, laterEdit] = await Promise.all([
+    db.prepare('SELECT MIN(id) AS first, MAX(id) AS last FROM inventory_movements WHERE reference_id >= @lo AND reference_id < @hi')
+      .get<{ first: number | null; last: number | null }>(ownRange),
+    db.prepare('SELECT reference_id FROM inventory_movements WHERE id=@id').get<{ reference_id: unknown }>({ id: revision.rootMovementId }),
+    db.prepare(`SELECT 1 AS hit FROM stock_lot_adjustment_operations WHERE id<>@operation AND state='applied' AND history_id > @history
+      AND json_extract(request_json,'$.kind')='stock_in_line_edit' AND json_extract(request_json,'$.movementId')=@root LIMIT 1`)
+      .get<{ hit: number }>({ operation: row.id, history: historyId, root: revision.rootMovementId }),
+  ])
+  const ownFirstId = Number(own?.first) || revision.rootMovementId
+  const ownLastId = Number(own?.last) || revision.rootMovementId
+  if (laterEdit) {
+    throw new StockInLineEditReplayError('This stock-in line was edited again after this change. Undo that later edit first. Nothing was changed.', 409, null, 'revert_stock_in_line_edited')
+  }
+  const sessionRowid = /^\d+$/.test(String(root?.reference_id ?? '')) ? Number(root?.reference_id) : null
+  const SESSION_UNDONE = `EXISTS(SELECT 1 FROM stock_session_operations so WHERE so.rowid=@rowid AND so.generation % 2 = 1
+    AND EXISTS(SELECT 1 FROM stock_session_members sm WHERE sm.movement_id=@root))`
+  if (sessionRowid != null && await db.prepare(`SELECT ${SESSION_UNDONE} AS hit`).get<{ hit: number }>({ rowid: sessionRowid, root: revision.rootMovementId }).then((r) => Number(r?.hit) === 1)) {
+    throw new StockInLineEditReplayError('This line belongs to a stock-in session that was undone. Redo the session first. Nothing was changed.', 409, null, 'revert_session_undone')
+  }
+  // Read first for a clean, named answer; the guards below are what enforce it.
+  const branchNow = Number((await db.prepare('SELECT quantity FROM branch_stock WHERE product_id=@product AND branch_id=@branch')
+    .get<{ quantity: number }>({ product: revision.productId, branch: revision.branchId }))?.quantity) || 0
+  for (const lot of deltas) {
+    const lotRow = await db.prepare(`SELECT variant_product_id AS product, COALESCE((SELECT quantity FROM branch_batch_stock WHERE batch_id=@id AND branch_id=@branch),0) AS qty
+      FROM product_batches WHERE id=@id`).get<{ product: number; qty: number }>({ id: lot.id, branch: revision.branchId })
+    if (!lotRow || Number(lotRow.product) !== revision.productId) {
+      throw new StockInLineEditReplayError('This received date now belongs to another product (the products were merged), so it cannot be reversed here. Nothing was changed.', 409, null, 'revert_lot_moved')
+    }
+    if (Number(lotRow.qty) + lot.stockChange < 0) {
+      throw new StockInLineEditReplayError(
+        `Cannot ${direction}: only ${Number(lotRow.qty)} left under this received date at ${facts?.branch_name || 'this branch'}, ${-lot.stockChange} needed. Nothing was changed.`,
+        409, await findConsumingBlocker(db, { productId: revision.productId, branchId: revision.branchId, batchId: lot.id, afterMovementId: ownLastId }),
+        'revert_insufficient_lot_stock', { available: Number(lotRow.qty), needed: -lot.stockChange },
+      )
+    }
+  }
+  if (branchNow + branchChange < 0) {
+    throw new StockInLineEditReplayError(
+      `Cannot ${direction}: only ${branchNow} in stock at ${facts?.branch_name || 'this branch'}, ${-branchChange} needed. Nothing was changed.`,
+      409, await findConsumingBlocker(db, { productId: revision.productId, branchId: revision.branchId, batchId: null, afterMovementId: ownLastId }),
+      'revert_insufficient_branch_stock', { available: branchNow, needed: -branchChange, branch: String(facts?.branch_name ?? '') },
+    )
+  }
   const statements: Statement[] = [
     guard(`EXISTS(SELECT 1 FROM stock_lot_adjustment_operations o JOIN action_history h ON h.id=o.history_id
       WHERE o.id=@operation AND h.id=@history AND o.generation=@generation AND o.state=@oldState AND h.status=@oldStatus
       AND json_extract(h.undo_payload,'$.operation_id')=@operation AND json_extract(h.undo_payload,'$.generation')=@generation)`, params),
-    ...stateGuard(from, false),
-    ...stateWrites(to, productDelta),
+    guard(`NOT EXISTS(SELECT 1 FROM stock_lot_adjustment_operations WHERE id<>@operation AND state='applied' AND history_id > @history
+      AND json_extract(request_json,'$.kind')='stock_in_line_edit' AND json_extract(request_json,'$.movementId')=@root)`,
+    { operation: row.id, history: historyId, root: revision.rootMovementId }),
+    ...(sessionRowid != null ? [guard(`NOT ${SESSION_UNDONE}`, { rowid: sessionRowid, root: revision.rootMovementId })] : []),
+    ...deltaGuards({ deltas, productId: revision.productId, branchId: revision.branchId, branchChange, rootMovementId: revision.rootMovementId, ownFirstId, range: stockInEditRange(revision.rootMovementId) }),
+    ...deltaWrites({ deltas, productId: revision.productId, branchId: revision.branchId, branchChange, productDelta }),
     // U-cost (supervisor decision, 2026-09-25): the catalog cost is re-derived
     // from the lots this replay just restored, never written back from the
     // snapshot -- a lot that sold out since the edit must not count again.
@@ -804,16 +989,16 @@ export async function replayStockInLineEdit(
     const current = await db.prepare('SELECT generation,state FROM stock_lot_adjustment_operations WHERE id=@operation').get<OperationRow>({ operation: row.id })
     if (current?.generation === next && current.state === target) return
     if (isMaintenanceError(error)) throw new StockInLineEditReplayError('Maintenance is in progress. Nothing was changed.', 503)
-    // RET-D: name the change this exact-snapshot replay collided with -- the
-    // newest movement of the product at the branch since this operation's
-    // own rows (another edit of the line counts; its own rows do not).
-    const ownPrefix = `${STOCK_IN_EDIT_REFERENCE_PREFIX}${revision.rootMovementId}:${row.id}:`
-    const own = await db.prepare('SELECT MAX(id) AS id FROM inventory_movements WHERE reference_id >= @lo AND reference_id < @hi')
-      .get<{ id: number | null }>({ lo: ownPrefix, hi: `${ownPrefix.slice(0, -1)};` }).catch(() => null)
+    // A guard tripped after the reads above: something landed in between.
+    // RET-D: name the newest change of the product at the branch since this
+    // operation's own rows (another edit of the line counts; its own rows do not).
     const refusal = await findLaterChangeBlocker(db, {
       pairs: [{ productId: revision.productId, branchId: revision.branchId }],
-      afterMovementId: Number(own?.id) || revision.rootMovementId,
+      afterMovementId: ownLastId,
     })
-    throw new StockInLineEditReplayError('Stock changed after this line edit (a sale, transfer, count or a later edit). Nothing was changed.', 409, refusal)
+    const lotChanged = deltas.some((lot) => lot.fields.length > 0)
+    throw new StockInLineEditReplayError(lotChanged
+      ? 'The received date of this line changed after this edit (its cost, supplier or date was edited again, or another delivery now shares it), or the stock moved while saving. Nothing was changed.'
+      : 'The stock changed while this was being saved. Nothing was changed; refresh and try again.', 409, refusal, 'stock_changed')
   }
 }
