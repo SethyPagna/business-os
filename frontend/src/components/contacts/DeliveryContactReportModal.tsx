@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { fmtDate } from '../../utils/formatters.ts'
 import Modal from '../shared/Modal'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
@@ -126,7 +127,7 @@ export default function DeliveryContactReportModal({ contactId, contactName, t, 
           <>
             <div className="grid grid-cols-2 gap-2">
               {stat(tr(t, 'deliveries', 'Deliveries'), String(row.deliveries),
-                row.last_delivery_at ? `${tr(t, 'last_delivery', 'Last')}: ${String(row.last_delivery_at).slice(0, 10)}` : undefined)}
+                row.last_delivery_at ? `${tr(t, 'last_delivery', 'Last')}: ${fmtDate(row.last_delivery_at)}` : undefined)}
               {stat(tr(t, 'delivery_charged', 'Delivery fee charged'), money(row.charged_fee_usd))}
               {stat(tr(t, 'delivery_absorbed', 'Absorbed by store'), money(row.absorbed_fee_usd))}
               {stat(
@@ -137,7 +138,7 @@ export default function DeliveryContactReportModal({ contactId, contactName, t, 
               {stat(
                 tr(t, 'linked_delivery_expenses', 'Linked expenses'),
                 expenseMoney(row.linked_expense_usd, row.linked_expense_khr),
-                `${row.linked_expense_count} ${tr(t, 'expense_rows', 'expense rows')}${row.last_expense_at ? ` · ${tr(t, 'last_delivery', 'Last')}: ${String(row.last_expense_at).slice(0, 10)}` : ''}`,
+                `${row.linked_expense_count} ${tr(t, 'expense_rows', 'expense rows')}${row.last_expense_at ? ` · ${tr(t, 'last_delivery', 'Last')}: ${fmtDate(row.last_expense_at)}` : ''}`,
               )}
             </div>
             <div className={`rounded-xl border px-3 py-2 text-sm font-semibold ${row.margin_usd < 0

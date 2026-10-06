@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { fmtDateOnly } from '../../utils/formatters.ts'
 import { supplierDisplay } from '../../utils/supplierDisplay.ts'
 import { createPortal } from 'react-dom'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
@@ -879,7 +880,7 @@ export default function ProductDetailSheet({
             <div className="flex gap-3">
               <span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('product_expiry_date') || 'Expiry date'}</span>
               <span className={`font-bold ${expiryInfo?.status === 'expired' ? 'text-red-600' : expiryInfo?.status === 'expiring' ? 'text-yellow-600' : 'text-gray-800 dark:text-gray-200'}`}>
-                {product.expiry_date}
+                {fmtDateOnly(product.expiry_date)}
                 {expiryInfo?.status === 'expired' ? ` (${t('expired') || 'Expired'})` : null}
                 {expiryInfo?.status === 'expiring' ? ` (${t('expiring_soon') || 'Expiring soon'})` : null}
               </span>
@@ -949,7 +950,7 @@ export default function ProductDetailSheet({
                   </div>
                   {effectiveVariant.expiry_date ? (
                     <div className={`mb-2 text-[11px] font-medium ${effectiveVariantExpiry?.status === 'expired' ? 'text-red-600' : effectiveVariantExpiry?.status === 'expiring' ? 'text-yellow-600' : 'text-gray-400'}`}>
-                      {t('product_expiry_date') || 'Expiry date'}: {effectiveVariant.expiry_date}
+                      {t('product_expiry_date') || 'Expiry date'}: {fmtDateOnly(effectiveVariant.expiry_date)}
                       {effectiveVariantExpiry?.status === 'expired' ? ` (${t('expired') || 'Expired'})` : null}
                       {effectiveVariantExpiry?.status === 'expiring' ? ` (${t('expiring_soon') || 'Expiring soon'})` : null}
                     </div>
@@ -1011,7 +1012,7 @@ export default function ProductDetailSheet({
                                   onClick={() => chooseBatch(batch)}
                                 >
                                   <span className="font-mono">{formatBatchLabel(batch, batchWord)}</span>
-                                  {batch.expiry_date ? <span className="ml-1 text-[10px] font-normal opacity-75">{posCopy('exp', 'ផុត')} {batch.expiry_date}</span> : null}
+                                  {batch.expiry_date ? <span className="ml-1 text-[10px] font-normal opacity-75">{posCopy('exp', 'ផុត')} {fmtDateOnly(batch.expiry_date)}</span> : null}
                                   <span className="ml-1 text-[10px] font-normal opacity-75">({batch.quantity} {effectiveVariant.unit})</span>
                                 </button>
                               )
@@ -1119,7 +1120,7 @@ export default function ProductDetailSheet({
                             onClick={() => chooseBatch(batch)}
                           >
                             <span className="font-mono">{formatBatchLabel(batch, batchWord)}</span>
-                            {batch.expiry_date ? <span className="ml-1 text-[10px] font-normal opacity-75">{posCopy('exp', 'ផុត')} {batch.expiry_date}</span> : null}
+                            {batch.expiry_date ? <span className="ml-1 text-[10px] font-normal opacity-75">{posCopy('exp', 'ផុត')} {fmtDateOnly(batch.expiry_date)}</span> : null}
                             <span className="ml-1 text-[10px] font-normal opacity-75">({batch.quantity} {product.unit})</span>
                           </button>
                         )

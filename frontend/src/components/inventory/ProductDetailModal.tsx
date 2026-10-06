@@ -1,4 +1,5 @@
 import { useApp } from '../../AppContext'
+import { fmtDateOnly } from '../../utils/formatters.ts'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import ProductNameRail from '../shared/ProductNameRail'
 import History from 'lucide-react/dist/esm/icons/history.js'
@@ -376,7 +377,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                       <span className="font-semibold text-amber-700 dark:text-amber-200">{batchDisplayLabel({ id: batch.id ?? batch.batch_id ?? `b-${index}`, lot_code: batch.lot_code ?? null, received_at: (batch.received_at as string) ?? null, batch_number: (batch.batch_number as number) ?? null }, T('batch', 'Received date'))}</span>
                       <span className="text-sm font-medium text-gray-900 dark:text-white">{batch.quantity} {p.unit}</span>
                     </div>
-                    <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-300">{batch.expiry_date || T('no_expiry', 'No expiry')}</div>
+                    <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-300">{batch.expiry_date ? fmtDateOnly(batch.expiry_date) : T('no_expiry', 'No expiry')}</div>
                   </div>
                 ))}
                 {batchPreview.extraCount ? (

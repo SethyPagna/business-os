@@ -1,4 +1,5 @@
 import ProductNameRail from '../shared/ProductNameRail'
+import { fmtDateOnly } from '../../utils/formatters.ts'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
@@ -1622,7 +1623,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                           >
                             <span className="font-mono">{batchDisplayLabel({ id: batch.id, lot_code: (batch.lot_code as string) ?? null, received_at: (batch.received_at as string) ?? null, batch_number: (batch.batch_number as number) ?? null }, t('batch') || 'Received date')}</span>
                             <span className="text-xs text-gray-500 dark:text-gray-400">
-                              {batch.expiry_date ? `${t('expires') || 'exp'} ${batch.expiry_date} · ` : ''}
+                              {batch.expiry_date ? `${t('expires') || 'exp'} ${fmtDateOnly(batch.expiry_date)} · ` : ''}
                               {batch.quantity} {selectedProduct.unit}
                             </span>
                           </button>

@@ -2509,7 +2509,7 @@ export default function SaleDetailModal({
                   {outstandingUsd > 0 && currentStatus !== 'cancelled' ? (
                     <MoneyRow
                       label={translateOr('outstanding_balance', 'Outstanding (on credit)', 'នៅជំពាក់')}
-                      note={sale.credit_due_date ? `· ${translateOr('due', 'due', 'កំណត់')} ${String(sale.credit_due_date).slice(0, 10)}` : null}
+                      note={sale.credit_due_date ? `· ${translateOr('due', 'due', 'កំណត់')} ${fmtDateOnly(sale.credit_due_date)}` : null}
                       tone="due"
                       amount={fmtUSD(outstandingUsd)}
                     />

@@ -53,7 +53,7 @@ import ExportMenu from '../shared/ExportMenu.tsx'
 import SectionExportAction from '../shared/SectionExportAction.tsx'
 import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
 import { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker'
-import { fmtClock24 } from '../../utils/formatters.ts'
+import { fmtClock24, fmtDateOnly, fmtDateTime24 } from '../../utils/formatters.ts'
 import { columnsFromRows } from '../../utils/exportOptions.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
@@ -156,14 +156,10 @@ export async function performExpenseDelete(operation: ExpenseDeleteOperation): P
 }
 
 
+// A fee_date is a stored DATE: the shared fmtDateOnly reads it literally (the
+// hand-rolled copy that stood here built a device-local Date from it).
 function formatFeeDate(value: string | null | undefined): string {
-  if (!value) return '--'
-  const date = new Date(`${value}T00:00:00`)
-  if (Number.isNaN(date.getTime())) return String(value)
-  // dd/mm/yyyy, day-first (Sep 4 2026).
-  const dd = String(date.getDate()).padStart(2, '0')
-  const mm = String(date.getMonth() + 1).padStart(2, '0')
-  return `${dd}/${mm}/${date.getFullYear()}`
+  return value ? fmtDateOnly(value) : '--'
 }
 
 export function groupFeesByDate(rows: readonly FeeRecord[]): Array<{ date: string; rows: FeeRecord[] }> {
@@ -191,7 +187,9 @@ const EMPTY_RESULT: FeeListResult = { fees: [], total: 0, limit: DEFAULT_PAGE_SI
 
 export function buildFeeExportRows(rows: FeeRecord[], feeTypeLabel: (type: string) => string): Array<Record<string, unknown>> {
   return rows.map((fee) => ({
-    date: fee.fee_date || '',
+    // Human-facing export: the same dd/mm/yyyy and business-time shapes the
+    // screen shows, so a printed expense list does not disagree with the page.
+    date: fee.fee_date ? fmtDateOnly(fee.fee_date) : '',
     type: feeTypeLabel(fee.fee_type),
     label: fee.label || '',
     amount_usd: Number(fee.amount_usd) || 0,
@@ -200,7 +198,7 @@ export function buildFeeExportRows(rows: FeeRecord[], feeTypeLabel: (type: strin
     branch: fee.branch_name || '',
     notes: fee.notes || '',
     created_by: fee.created_by_name || '',
-    created_at: fee.created_at || '',
+    created_at: fee.created_at ? fmtDateTime24(fee.created_at) : '',
   }))
 }
 
@@ -604,7 +602,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         message: tr('delete_fee_confirm', 'Delete this expense record? This cannot be undone.'),
         items: [
           { label: tr('fee_label', 'Label'), value: fee.label || `#${fee.id}` },
-          { label: tr('fee_date', 'Date'), value: fee.fee_date },
+          { label: tr('fee_date', 'Date'), value: formatFeeDate(fee.fee_date) },
           { label: tr('amount', 'Amount'), value: fmtUSD(fee.amount_usd) },
         ],
         confirmLabel: tr('delete', 'Delete'),

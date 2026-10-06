@@ -1,4 +1,6 @@
 import ProductNameRail from '../../shared/ProductNameRail'
+import { fmtDateOnly } from '../../../utils/formatters.ts'
+import { daysUntilBusinessDate } from '../../../utils/dateHelpers.ts'
 import { useApp } from '../../../AppContext'
 import { canViewAcquisitionCosts } from '../../../utils/acquisitionCostAccess.ts'
 import type { PermissionUser } from '../../../utils/permissions.ts'
@@ -120,8 +122,6 @@ type PriceCellProps = {
   children: ReactNode
 }
 
-const MS_PER_DAY = 86400000
-
 export default function ProductDetailModal({
   p,
   unitMap,
@@ -176,7 +176,7 @@ export default function ProductDetailModal({
   const primaryImage = gallery[0] || ''
   const unitColor = p.unit ? unitMap?.[p.unit]?.color || '' : ''
   const expiryDate = String(p.expiry_date || '').trim()
-  const expiryDaysLeft = expiryDate ? Math.ceil((new Date(`${expiryDate}T00:00:00`).getTime() - Date.now()) / MS_PER_DAY) : null
+  const expiryDaysLeft = expiryDate ? daysUntilBusinessDate(expiryDate) : null
   // includeEmpty: true -- every product gets a "day added" batch at
   // creation (seedInitialBatchForNewProduct) that legitimately starts at 0
   // stock; the full detail view is the one place that should still count it.
@@ -296,7 +296,7 @@ export default function ProductDetailModal({
                   {expiryDate ? (
                     <Row label={T('product_expiry_date', 'Expiry')}>
                       <span className={expiryDaysLeft != null && expiryDaysLeft < 0 ? 'text-red-600 dark:text-red-300' : 'text-amber-600 dark:text-amber-300'}>
-                        {expiryDate}
+                        {fmtDateOnly(expiryDate)}
                         {expiryDaysLeft != null ? (
                           <span className="ml-2 text-xs">
                             {expiryDaysLeft < 0

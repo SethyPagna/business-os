@@ -11,6 +11,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
+import { fmtDateOnly, fmtDateTime24 } from '../src/utils/formatters.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const clientSource = fs.readFileSync(path.join(here, '..', 'src', 'components', 'fees', 'FeeForm.tsx'), 'utf8')
@@ -96,16 +97,17 @@ check('Expenses export covers visible, filtered-all, and all-record scopes with 
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText
   const exportModule: { exports: { buildFeeExportRows?: (rows: unknown[], label: (type: string) => string) => Array<Record<string, unknown>> } } = { exports: {} }
-  new Function('exports', 'module', transpiled)(exportModule.exports, exportModule)
+  new Function('exports', 'module', 'fmtDateOnly', 'fmtDateTime24', transpiled)(exportModule.exports, exportModule, fmtDateOnly, fmtDateTime24)
   const rows = exportModule.exports.buildFeeExportRows!([{
     fee_date: '2026-09-01', fee_type: 'delivery', label: 'Grab', amount_usd: 2.5,
     amount_khr: 0, sale_receipt_number: 'R-7', branch_name: 'Shop', notes: 'Courier',
     created_by_name: 'Dara', created_at: '2026-09-01T02:00:00Z',
   }], (type) => type.toUpperCase())
   assert.deepStrictEqual(rows, [{
-    date: '2026-09-01', type: 'DELIVERY', label: 'Grab', amount_usd: 2.5,
+    // dd/mm/yyyy and business time (02:00Z is 09:00 in Phnom Penh), the same shapes the page prints.
+    date: '01/09/2026', type: 'DELIVERY', label: 'Grab', amount_usd: 2.5,
     amount_khr: 0, sale_receipt: 'R-7', branch: 'Shop', notes: 'Courier',
-    created_by: 'Dara', created_at: '2026-09-01T02:00:00Z',
+    created_by: 'Dara', created_at: '01/09/2026 09:00',
   }])
   assert.match(feesTransportSource, /export async function getAllFeesForExport/)
   assert.match(feesTransportSource, /const PAGE = 500/)
