@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { fmtDateTime24 } from '../../utils/formatters.ts'
+import { fmtDateTime24OrRaw } from '../../utils/formatters.ts'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import ClipboardCheck from 'lucide-react/dist/esm/icons/clipboard-check.js'
 import XCircle from 'lucide-react/dist/esm/icons/x-circle.js'
@@ -67,12 +67,9 @@ const REVIEW_MUTATION_TIMEOUT_MS = 12000
 type StatusFilter = PendingActionStatus | 'all'
 
 function formatDateTime(value: string | null | undefined): string {
-  if (!value) return '--'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return String(value)
-  // Shared dd/mm/yyyy 24-hour formatter -- the old en-US call without
-  // hour12:false rendered 12-hour AM/PM (Part-77 finding).
-  return fmtDateTime24(date)
+  // The raw stamp goes straight to the shared formatter (see FilesPage): a
+  // pre-built new Date(value) read a timezone-less stamp as device-local time.
+  return fmtDateTime24OrRaw(value, { empty: '--' })
 }
 
 function formatPayload(row: PendingActionRow): string {

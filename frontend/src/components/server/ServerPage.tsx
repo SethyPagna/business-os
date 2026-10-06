@@ -19,7 +19,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { fmtTimezoneLabel } from '../../utils/formatters.ts'
+import { fmtClock24, fmtTimezoneLabel } from '../../utils/formatters.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from '../../api/actorReadScope.ts'
 import { captureOfflineSaleOwner, offlineSaleOwnersMatch, type OfflineSaleOwner } from '../../api/offlineQueueOwnership.ts'
@@ -669,7 +669,7 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
               <p className="py-4 text-center text-xs text-gray-400">No pending offline actions.</p>
             ) : pendingSync.items.map((item) => (
               <div key={item._seq} className="flex items-center gap-2 border-b border-gray-50 py-1 text-xs dark:border-gray-700/30">
-                <span className="w-16 flex-shrink-0 font-mono text-gray-400">{item.created_at?.slice(11, 19) || '--:--:--'}</span>
+                <span className="w-16 flex-shrink-0 font-mono text-gray-400">{item.created_at ? fmtClock24(item.created_at) : '--:--'}</span>
                 <span className={`flex-shrink-0 rounded px-1 ${item.status === 'failed' ? 'bg-red-100 text-red-700' : item.status === 'syncing' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'}`}>
                   {item.status}
                 </span>
@@ -677,8 +677,8 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
                   {item.channel}
                   {item.entity_name ? ` - ${item.entity_name}` : ''}
                 </span>
-                {item.updated_at ? <span className="hidden text-gray-400 sm:inline">updated {item.updated_at.slice(11, 19)}</span> : null}
-                {item.retry_at ? <span className="hidden text-amber-600 sm:inline">retry {item.retry_at.slice(11, 19)}</span> : null}
+                {item.updated_at ? <span className="hidden text-gray-400 sm:inline">updated {fmtClock24(item.updated_at)}</span> : null}
+                {item.retry_at ? <span className="hidden text-amber-600 sm:inline">retry {fmtClock24(item.retry_at)}</span> : null}
                 {item.retry_count ? <span className="text-gray-400">retry {item.retry_count}</span> : null}
                 {item.error ? <span className="truncate text-red-500">{item.error}</span> : null}
               </div>

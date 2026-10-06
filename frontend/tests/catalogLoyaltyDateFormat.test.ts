@@ -3,8 +3,9 @@
 // `date.toLocaleString()` -- no locale, no timeZone -- so they printed the
 // VIEWER's locale (dd/mm, 12-hour) and the viewer's timezone instead of the
 // app-wide en-US mm/dd/yyyy 24-hour Phnom Penh format. Each now routes through
-// the canonical fmtTime. This is a source lock: it fails if any of the three
-// helpers goes back to a bare toLocaleString() date, or drops the fmtTime wire.
+// the canonical instant formatter (fmtDateTime24, via fmtDateTime24OrRaw). This
+// is a source lock: it fails if any of the three helpers goes back to a bare
+// toLocaleString() date, or drops the shared-formatter wire.
 //
 // (Number formatting like price.toLocaleString('en-US', { ... }) is fine and
 // intentionally untouched -- the check targets the argument-less date call.)
@@ -42,7 +43,7 @@ const FILES_WITH_A_DATE_HELPER = [
 const FILES = [...FILES_WITH_A_DATE_HELPER, 'src/components/catalog/PublicCatalogPage.tsx']
 
 for (const file of FILES) {
-  await runTest(`${file} formats dates through fmtTime, never a bare toLocaleString()`, () => {
+  await runTest(`${file} formats dates through the shared instant formatter, never a bare toLocaleString()`, () => {
     const src = readFrontend(file)
     // The exact buggy call: a Date formatted with no locale/timezone args.
     assert.doesNotMatch(
@@ -51,8 +52,8 @@ for (const file of FILES) {
       'a bare date.toLocaleString() reintroduces the viewer-locale (dd/mm, 12h) date bug',
     )
     if (!FILES_WITH_A_DATE_HELPER.includes(file)) return
-    assert.match(src, /import \{ fmtTime \} from '\.\.\/\.\.\/utils\/formatters\.ts'/)
-    assert.match(src, /:\s*fmtTime\(raw\)/, 'the date helper must delegate to fmtTime')
+    assert.match(src, /import \{ fmtDateTime24OrRaw \} from '\.\.\/\.\.\/utils\/formatters\.ts'/)
+    assert.match(src, /return fmtDateTime24OrRaw\(value as string/, 'the date helper must delegate to the shared formatter')
   })
 }
 

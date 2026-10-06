@@ -25,7 +25,7 @@ import { getDirtyWork, hasDirtyWork, type DirtyWorkEntry } from './utils/dirtyWo
 import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
 import { effectivePermissions, type PermissionTier } from './utils/permissions.ts'
 import { normalizePriceValue } from './utils/pricing.ts'
-import { fmtDayFirst } from './utils/formatters.ts'
+import { fmtDateTime24 } from './utils/formatters.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
 import { normalizeSettingsWriteOptions } from './utils/settingsWriteOptions.ts'
@@ -199,7 +199,7 @@ type AppContextValue = {
   exchangeRate: number
   fmtKHR: (value: unknown) => string
   fmtUSD: (value: unknown) => string
-  formatDateTime: (value: unknown, options?: Intl.DateTimeFormatOptions) => string
+  formatDateTime: (value: unknown) => string
   formatPrice: (usd: unknown, khr?: unknown) => string
   getPermissions: () => Record<string, boolean>
   getPermissionTier: (key: string) => PermissionTier
@@ -602,12 +602,6 @@ function clearOauthCallbackResult() {
 
 function mergeSettingsWithDeviceOverrides(baseSettings: AppSettings = {}): AppSettings {
   return { ...baseSettings, ...readDeviceSettings() }
-}
-
-function normalizeDateInput(value: unknown): Date | null {
-  if (!value) return null
-  const date = value instanceof Date ? value : new Date(String(value))
-  return Number.isNaN(date?.getTime?.()) ? null : date
 }
 
 function buildRuntimeDescriptorFromBootstrap(payload: BootstrapPayload = {}) {
@@ -2683,22 +2677,13 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   }, [displayCurrency, fmtUSD, fmtKHR, exchangeRate])
   const usdToKhr = useCallback((usd: unknown): number => normalizePriceValue(usd || 0) * exchangeRate, [exchangeRate])
   const khrToUsd = useCallback((khr: unknown): number => normalizePriceValue(khr || 0) / exchangeRate, [exchangeRate])
-  const formatDateTime = useCallback((value: unknown, options: Intl.DateTimeFormatOptions = {}): string => {
-    const date = normalizeDateInput(value)
-    if (!date) return '--'
-    const resolved: Intl.DateTimeFormatOptions = {
-      hour12: false,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      timeZone: displayTimezone,
-      ...options,
-    }
-    return fmtDayFirst(date, resolved)
-  }, [displayTimezone])
+  // The canonical instant (dd/mm/yyyy HH:mm, business time) plus seconds. Its
+  // only consumer is the Server page's client-vs-server clock probe, where
+  // seconds are the point. It used to take free Intl options, so a caller
+  // could print any shape it liked; now there is one.
+  const formatDateTime = useCallback((value: unknown): string => {
+    return value ? fmtDateTime24(value as string | number | Date, { seconds: true }) : '--'
+  }, [])
 
   const canWriteToServer = !!syncUrl && !syncServerUnreachable && !isActorSessionQuarantined()
 

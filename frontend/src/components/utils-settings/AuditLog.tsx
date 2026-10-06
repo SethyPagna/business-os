@@ -46,7 +46,7 @@ import {
   type AuditViewState,
 } from '../../utils/auditLogView.ts'
 import AuditFieldDiffLine from './AuditFieldDiffLine.tsx'
-import { fmtDayFirst, fmtTimezoneLabel } from '../../utils/formatters.ts'
+import { fmtClock24, fmtDateTime24OrRaw, fmtTimezoneLabel } from '../../utils/formatters.ts'
 import { BUSINESS_TIME_ZONE } from '../../constants.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
 // N13: the Audit Log answers the same "who did this, and why" as the stock
@@ -173,26 +173,12 @@ function toIso(raw: unknown): string | null {
   return `${value}Z`
 }
 
+// The canonical instant shape plus ":ss". Seconds are kept HERE on purpose --
+// the audit log is the forensic record, and two actions inside one minute are
+// ordered by their seconds -- but it is the same dd/mm/yyyy HH:mm:ss business
+// time every other screen writes (as dd/mm/yyyy HH:mm), not a private format.
 function formatDateTime(raw: unknown): string {
-  const iso = toIso(raw)
-  if (!iso) return HISTORY_EMPTY
-  const fallback = String(raw)
-  try {
-    const date = new Date(iso)
-    if (Number.isNaN(date.getTime())) return fallback
-    return fmtDayFirst(date, {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-      timeZone: BUSINESS_TIME_ZONE,
-    })
-  } catch {
-    return fallback
-  }
+  return fmtDateTime24OrRaw(raw as string, { seconds: true, empty: HISTORY_EMPTY })
 }
 
 function formatLogTime(log: AuditLogRow): string {
@@ -318,11 +304,10 @@ function formatDayHeader(dayKey: string): string {
 }
 
 function formatRowClock(log: AuditLogRow): string {
-  const iso = toIso(log.client_time || log.created_at)
-  if (!iso) return HISTORY_EMPTY
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return HISTORY_EMPTY
-  return fmtDayFirst(date, { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: BUSINESS_TIME_ZONE })
+  const raw = log.client_time || log.created_at
+  if (!raw) return HISTORY_EMPTY
+  const shown = fmtClock24(raw)
+  return shown === '—' ? HISTORY_EMPTY : shown
 }
 
 const AUDIT_TIME_LABELS: Record<AuditTimePreset, [string, string]> = {

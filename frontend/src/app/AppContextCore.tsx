@@ -25,7 +25,7 @@ export type AppContextCoreValue = {
   exchangeRate: number
   fmtKHR: (value: unknown) => string
   fmtUSD: (value: unknown) => string
-  formatDateTime: (value: unknown, options?: Intl.DateTimeFormatOptions) => string
+  formatDateTime: (value: unknown) => string
   formatPrice: (usd: unknown, khr?: unknown) => string
   getPermissions: () => Record<string, boolean>
   hasPermission: (key: string) => boolean

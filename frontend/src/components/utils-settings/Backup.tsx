@@ -2,7 +2,7 @@ import { Suspense, memo, useCallback, useEffect, useMemo, useRef, useState } fro
 import type { ButtonHTMLAttributes, ComponentType, ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { startVisibleInterval, visibleTimeout } from '../../utils/visibilityPolling.ts'
-import { fmtDateTime24, fmtDayFirst } from '../../utils/formatters.ts'
+import { fmtDateTime24, fmtDateTime24OrRaw } from '../../utils/formatters.ts'
 import ArchiveRestore from 'lucide-react/dist/esm/icons/archive-restore.js'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import Cloud from 'lucide-react/dist/esm/icons/cloud.js'
@@ -745,20 +745,11 @@ function useCopy(t: TranslateFn): CopyFn {
   }, [t])
 }
 
+// Business time like every sibling list. This used to call fmtDayFirst with no
+// timeZone, so the backup list printed the DEVICE wall clock -- a till set to
+// another zone showed different backup times from the office PC.
 function formatDateTime(raw: unknown): string {
-  if (!raw) return '--'
-  const rawValue = String(raw)
-  const value = rawValue.includes('T') || rawValue.endsWith('Z') ? rawValue : `${rawValue.replace(' ', 'T')}Z`
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return rawValue
-  return fmtDayFirst(date, {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
+  return fmtDateTime24OrRaw(raw as string, { empty: '--' })
 }
 
 function yieldToBrowser(): Promise<void> {

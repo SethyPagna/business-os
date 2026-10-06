@@ -1,6 +1,6 @@
 import type { ChangeEvent, ComponentProps, ComponentType, ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import { fmtDateTime24 } from '../../utils/formatters.ts'
+import { fmtDateTime24OrRaw } from '../../utils/formatters.ts'
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CheckSquare from 'lucide-react/dist/esm/icons/check-square.js'
 import Copy from 'lucide-react/dist/esm/icons/copy.js'
@@ -587,13 +587,10 @@ function AssetCardSkeleton() {
 }
 
 function formatDateTime(value: string | number | Date | null | undefined): string {
-  if (!value) return '-'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return String(value)
-  // dd/mm/yyyy + 24-hour Phnom Penh via the shared formatter -- the viewer-
-  // locale Intl form rendered dd/mm + 12-hour on non-US devices (Part-77
-  // finding, cross-surface date rule).
-  return fmtDateTime24(date)
+  // The raw value goes straight to the shared formatter. This used to build
+  // new Date(value) first, which reads a SQLite "YYYY-MM-DD HH:MM:SS" stamp
+  // as DEVICE-local time, so the instant was already wrong before formatting.
+  return fmtDateTime24OrRaw(value, { empty: '-' })
 }
 
 function formatFileSize(bytes: number | string | null | undefined): string {

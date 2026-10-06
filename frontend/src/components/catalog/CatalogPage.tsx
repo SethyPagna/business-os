@@ -3,7 +3,7 @@ import type { ClipboardEvent, Dispatch, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { fuzzyTextMatches, matchesSearchTermGroups, sortBySearchRelevance } from '../../utils/searchMatch.ts'
-import { fmtTime } from '../../utils/formatters.ts'
+import { fmtDateTime24OrRaw } from '../../utils/formatters.ts'
 import { settingsSaveNormalisedKeys } from '../../utils/settingsSave.ts'
 import { deriveTelegramLink } from '../../utils/socialLinks.ts'
 import { canWriteSettingKey } from '../../utils/portalPermissions.ts'
@@ -976,15 +976,10 @@ function productMatchesRecommendedSearch(product: CatalogProduct, searchTerm: un
 
 /** Format date/time strings robustly for public and editor views. */
 function formatDateTime(value: unknown): string {
-  if (!value) return '-'
-  const raw = String(value)
-  const date = new Date(raw.includes('T') ? raw : `${raw}Z`)
-  // dd/mm/yyyy + 24-hour in Phnom Penh business time (day-first since Sep 4
-  // 2026). A bare toLocaleString() rendered the VIEWER's locale and timezone,
-  // which is the actual defect regardless of which order the app has chosen:
-  // a wrong locale swaps day and month without failing. The app pins one
-  // numeric format everywhere via fmtTime; this was one of the few strays.
-  return Number.isNaN(date.getTime()) ? String(value) : fmtTime(raw)
+  // dd/mm/yyyy HH:mm in Phnom Penh business time via the one shared instant
+  // formatter. A bare toLocaleString() rendered the viewer's locale and
+  // timezone, which is the defect regardless of which order the app chose.
+  return fmtDateTime24OrRaw(value as string, { empty: '-' })
 }
 
 /** Render product price text according to selected portal display mode. */

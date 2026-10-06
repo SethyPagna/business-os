@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { BUSINESS_TIME_ZONE } from '../src/constants.ts'
-import { fmtDayFirst, fmtTimezoneLabel } from '../src/utils/formatters.ts'
+import { fmtClock24, fmtDateTime24OrRaw, fmtTimezoneLabel } from '../src/utils/formatters.ts'
 
 const source = readFileSync(new URL('../src/components/utils-settings/AuditLog.tsx', import.meta.url), 'utf8')
 const ast = ts.createSourceFile('AuditLog.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
@@ -21,9 +21,9 @@ function fn(name: string): string {
 }
 const HISTORY_EMPTY = '—'
 const names = ['toIso', 'formatDateTime', 'formatLogTime', 'formatRowClock', 'logDayKey', 'auditTimezoneLabel']
-const api = new Function('fmtDayFirst', 'fmtTimezoneLabel', 'BUSINESS_TIME_ZONE', 'HISTORY_EMPTY',
+const api = new Function('fmtClock24', 'fmtDateTime24OrRaw', 'fmtTimezoneLabel', 'BUSINESS_TIME_ZONE', 'HISTORY_EMPTY',
   `${names.map(fn).join('\n')}; return { ${names.join(', ')} }`,
-)(fmtDayFirst, fmtTimezoneLabel, BUSINESS_TIME_ZONE, HISTORY_EMPTY)
+)(fmtClock24, fmtDateTime24OrRaw, fmtTimezoneLabel, BUSINESS_TIME_ZONE, HISTORY_EMPTY)
 
 // 2026-09-24 18:30:05 UTC = 25/09 01:30:05 Phnom Penh = 24/09 11:30:05 Los Angeles.
 const serverRow = { created_at: '2026-09-24 18:30:05', device_tz: null }
@@ -31,7 +31,7 @@ const deviceRow = { client_time: '2026-09-24T18:30:05Z', device_tz: 'America/Los
 const bangkokRow = { client_time: '2026-09-24T18:30:05+00:00', device_tz: 'Asia/Bangkok' }
 
 for (const row of [serverRow, deviceRow, bangkokRow]) {
-  assert.equal(api.formatLogTime(row), '25/09/2026, 01:30:05', 'full time is Phnom Penh wall clock')
+  assert.equal(api.formatLogTime(row), '25/09/2026 01:30:05', 'full time is Phnom Penh wall clock, the canonical shape plus seconds (no comma)')
   assert.equal(api.formatRowClock(row), '01:30', 'row clock is Phnom Penh wall clock')
   assert.equal(api.logDayKey(row), '2026-09-25', 'the day a row is filed under is the Phnom Penh day, not the device day (24 Sep in Los Angeles)')
   assert.equal(api.auditTimezoneLabel(row), 'Asia/Phnom_Penh', `label names the business zone (device_tz=${row.device_tz})`)

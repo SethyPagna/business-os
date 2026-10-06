@@ -21,7 +21,7 @@ import { createClientRequestId } from '../../api/requestIds.ts'
 import { identityForIntent, withWriteTimeout, type IntentIdentityRef } from '../../utils/writeIntent.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { settingsSaveSucceeded } from '../../utils/settingsSave.ts'
-import { fmtTime } from '../../utils/formatters.ts'
+import { fmtDateTime24OrRaw } from '../../utils/formatters.ts'
 import { getCustomerPointSummaries } from '../../api/contactsTransport.ts'
 import { awardCustomerPoints } from '../../api/contactWriteTransport.ts'
 
@@ -289,12 +289,8 @@ function normalizeLoyaltySection(value: string): LoyaltySection {
 }
 
 function formatReviewDateTime(value: unknown): string {
-  if (!value) return '-'
-  const raw = String(value)
-  const date = new Date(raw.includes('T') ? raw : `${raw}Z`)
-  // dd/mm/yyyy + 24-hour in Phnom Penh business time (fmtTime). A bare
-  // toLocaleString() rendered the viewer's locale + timezone (dd/mm, 12-hour).
-  return Number.isNaN(date.getTime()) ? String(value) : fmtTime(raw)
+  // dd/mm/yyyy HH:mm in Phnom Penh business time -- the one shared instant formatter.
+  return fmtDateTime24OrRaw(value as string, { empty: '-' })
 }
 
 async function fetchPortalReviewItems(): Promise<unknown> {
