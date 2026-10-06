@@ -45,7 +45,7 @@ async function main() {
   const params = {
     page: '2', pageSize: '100', query: 'cream', q: 'lotion', brand: 'Brand A',
     category: 'Skin', branchId: '1,1', branch_id: '2', stockState: 'out', initial: 'C', promo: 'promoted',
-    productId: '7',
+    productId: '7', view: 'category', sort: 'price_asc',
   }
   for (const [key, value] of Object.entries(params)) {
     const changed = await get(search + '?' + new URLSearchParams({ [key]: value }))
@@ -109,6 +109,6 @@ async function main() {
   }
   assert.equal(dbCalls, 0)
   assert.equal(versionReads, 15)
-  console.log('PASS portal caching: all five actual handlers, eleven consumed parameters, first-value semantics, cache reuse, host/path/version/generation isolation, no D1 hit gate')
+  console.log('PASS portal caching: all five actual handlers, every consumed parameter (incl. view and sort), first-value semantics, cache reuse, host/path/version/generation isolation, no D1 hit gate')
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

@@ -727,6 +727,62 @@ function portalVisibleProductFilter(showOutOfStockProducts: boolean): string {
 // last) -- the per-FAMILY twin of the row order below, fed to the shared
 // familyPagination helper as family_sort_value.
 const PORTAL_BRAND_SORT_KEY_SQL = "CASE WHEN trim(COALESCE(p.brand, '')) = '' THEN '1' ELSE '0' END || lower(trim(COALESCE(p.brand, '')))"
+const PORTAL_CATEGORY_SORT_KEY_SQL = "CASE WHEN trim(COALESCE(p.category, '')) = '' THEN '1' ELSE '0' END || lower(trim(COALESCE(p.category, '')))"
+// A card shows its name group's HIGHEST-priced row, and familyPagination takes
+// MAX of this per family, so a price sort orders by the number on the card.
+const PORTAL_PRICE_SORT_SQL = 'COALESCE(p.selling_price_usd, 0)'
+
+// PUBLIC-FILTER-MENU (owner, 5 Oct): "put view + sort in the filter menu;
+// default by brand, user can switch." The storefront's View (how the grid is
+// grouped) and Sort (the order inside each group) arrive as the `view` and
+// `sort` query params of the search endpoint.
+//
+// Both are ALLOWLISTS. A value outside them -- a stale bookmark, a hand-edited
+// URL, an injection attempt -- is not an error and is never echoed into SQL:
+// it falls back to the default. The ORDER BY text below is picked from fixed
+// strings by the parsed key, so no request value ever reaches a query. The
+// frontend mirrors these two lists in components/catalog/portalBrowse.ts;
+// tests/portalBrowse.test.ts reads this file and fails if they drift.
+export const PORTAL_BROWSE_VIEWS = ['brand', 'category', 'all'] as const
+export const PORTAL_BROWSE_SORTS = ['featured', 'name_asc', 'name_desc', 'price_asc', 'price_desc'] as const
+export type PortalBrowseView = typeof PORTAL_BROWSE_VIEWS[number]
+export type PortalBrowseSort = typeof PORTAL_BROWSE_SORTS[number]
+export const DEFAULT_PORTAL_BROWSE_VIEW: PortalBrowseView = 'brand'
+export const DEFAULT_PORTAL_BROWSE_SORT: PortalBrowseSort = 'featured'
+
+// A price sort over a store that hides its prices would leak the price order
+// through the grid, so it is treated as an unknown sort there.
+export function parsePortalBrowse(query: Record<string, string | undefined>, allowPriceSort = true): { view: PortalBrowseView; sort: PortalBrowseSort } {
+  const view = String(query.view ?? '').trim().toLowerCase()
+  const sort = String(query.sort ?? '').trim().toLowerCase()
+  const knownSort = (PORTAL_BROWSE_SORTS as readonly string[]).includes(sort) ? sort as PortalBrowseSort : DEFAULT_PORTAL_BROWSE_SORT
+  return {
+    view: (PORTAL_BROWSE_VIEWS as readonly string[]).includes(view) ? view as PortalBrowseView : DEFAULT_PORTAL_BROWSE_VIEW,
+    sort: !allowPriceSort && knownSort.startsWith('price_') ? DEFAULT_PORTAL_BROWSE_SORT : knownSort,
+  }
+}
+
+// What the paginator needs for one (view, sort): the per-row group key (null =
+// no grouping), the per-row price key (null = unused), the family ORDER BY
+// tail, and whether search relevance still leads. `featured` is the original
+// storefront order -- promotions first, then the group, then name -- and keeps
+// relevance ahead of it while a search term is typed. Any explicit sort is the
+// shopper's own instruction and outranks relevance and the promoted block.
+export function buildPortalBrowseOrder(view: PortalBrowseView, sort: PortalBrowseSort) {
+  const groupSortSql = view === 'brand' ? PORTAL_BRAND_SORT_KEY_SQL : view === 'category' ? PORTAL_CATEGORY_SORT_KEY_SQL : null
+  const priceSort = sort === 'price_asc' || sort === 'price_desc'
+  const tail = [
+    groupSortSql ? 'family_sort_value ASC' : '',
+    sort === 'price_asc' ? 'family_num_sort ASC' : sort === 'price_desc' ? 'family_num_sort DESC' : '',
+    sort === 'name_desc' ? 'family_name DESC' : 'family_name ASC',
+  ].filter(Boolean).join(', ')
+  return {
+    groupSortSql,
+    numericSortSql: priceSort ? PORTAL_PRICE_SORT_SQL : null,
+    tail,
+    relevanceLeads: sort === 'featured',
+  }
+}
 
 
 // SECURITY BOUNDARY (public storefront payload). This helper is the LAST
@@ -983,7 +1039,7 @@ const PORTAL_CATALOG_TTL_SECONDS = 30
 
 const PORTAL_SEARCH_CACHE_PARAMS = [
   'page', 'pageSize', 'query', 'q', 'brand', 'category', 'branchId', 'branch_id',
-  'stockState', 'initial', 'promo', 'productId',
+  'stockState', 'initial', 'promo', 'productId', 'view', 'sort',
 ] as const
 
 // Consume Hono's SAME parsed first-value query object as the producer. Keep
@@ -2311,12 +2367,14 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   // showStockStatus/showOutOfStockProducts for the same settings used to
   // drive the editor toggles and the badge/pill display.
   const stockSettingsRows = await db.prepare(
-    `SELECT key, value FROM settings WHERE key IN ('customer_portal_show_stock_status', 'customer_portal_show_out_of_stock_products')`
+    `SELECT key, value FROM settings WHERE key IN ('customer_portal_show_stock_status', 'customer_portal_show_out_of_stock_products', 'customer_portal_show_prices')`
   ).all<{ key: string; value: string }>()
   const stockSettings: Record<string, string> = {}
   for (const row of stockSettingsRows || []) stockSettings[row.key] = row.value
   const allowStockStateFilter = normalizeBoolean(stockSettings.customer_portal_show_stock_status, true)
   const showOutOfStockProducts = normalizeBoolean(stockSettings.customer_portal_show_out_of_stock_products, true)
+  const browse = parsePortalBrowse(query, normalizeBoolean(stockSettings.customer_portal_show_prices, true))
+  const browseOrder = buildPortalBrowseOrder(browse.view, browse.sort)
 
   const filters = buildPortalProductFilters(query, allowStockStateFilter, showOutOfStockProducts)
   const { where, joins, params } = filters
@@ -2425,17 +2483,21 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
     params,
     page,
     pageSize,
-    familyOrderSql: buildFamilyRelevanceOrderSql('family_sort_value ASC, family_name ASC', {
-      hasTier: Boolean(filters.matchTierSql),
-      hasRank: Boolean(filters.matchRankSql),
-      promotedFirst: true,
+    // View + sort (see parsePortalBrowse). The default pair is byte-for-byte
+    // the order this endpoint always had; an explicit sort drops the relevance
+    // and promoted keys so it is a real sort rather than a tiebreak.
+    familyOrderSql: buildFamilyRelevanceOrderSql(browseOrder.tail, {
+      hasTier: browseOrder.relevanceLeads && Boolean(filters.matchTierSql),
+      hasRank: browseOrder.relevanceLeads && Boolean(filters.matchRankSql),
+      promotedFirst: browseOrder.relevanceLeads,
     }),
     intraFamilyOrderSql: 'lower(name) ASC, id ASC',
     matchRankSql: filters.matchRankSql,
     rankCteSql: filters.rankCteSql,
     matchTierSql: filters.matchTierSql,
     promotedRankSql: searchPromotedRankSql,
-    familySortValueSql: PORTAL_BRAND_SORT_KEY_SQL,
+    familySortValueSql: browseOrder.groupSortSql ?? undefined,
+    familyNumericSortSql: browseOrder.numericSortSql ?? undefined,
   })
   let items = paged.items
   let total = paged.total
@@ -2547,6 +2609,9 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
     pageSize,
     totalPages: Math.max(1, Math.ceil(total / pageSize)),
     initials: initials || [],
+    // The view/sort actually applied, so a fallback from an unknown value is
+    // visible to the caller instead of silent.
+    browse,
     // G1: the storefront prices/badges with the SAME kernel POS charges
     // with (frontend/src/utils/promotionRules.ts, hand-synced mirror of
     // lib/promotionRules.ts) -- the active rule set rides the catalog

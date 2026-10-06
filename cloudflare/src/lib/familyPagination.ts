@@ -130,6 +130,13 @@ export interface FamilyPaginationOptions {
   // for brand-first browsing (blank brands keyed to sort last). Same
   // additive pattern as matchRankSql/promotedRankSql.
   familySortValueSql?: string
+  // Optional per-row NUMERIC sort-key expression (referencing `p.` columns);
+  // each family exposes MAX over its rows as the aggregate
+  // `family_num_sort` for use in `familyOrderSql`. MAX because the storefront
+  // card for a name group shows its highest-priced row, so a price sort must
+  // order by the number the shopper actually sees. Same additive pattern as
+  // familySortValueSql: omitted = identical query shape as before.
+  familyNumericSortSql?: string
   // Opt-in fix for "a family matches by one row's field (e.g. one
   // variant's barcode) but its sibling rows -- different branch, price,
   // barcode -- silently never came back at all", reported against POS's
@@ -164,7 +171,7 @@ export interface FamilyPaginationResult<T> {
   totalPages: number
 }
 
-function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSql' | 'whereSql' | 'matchRankSql' | 'rankCteSql' | 'matchTierSql' | 'familyMemberBaseWhereSql' | 'promotedRankSql' | 'familySortValueSql'>) {
+function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSql' | 'whereSql' | 'matchRankSql' | 'rankCteSql' | 'matchTierSql' | 'familyMemberBaseWhereSql' | 'promotedRankSql' | 'familySortValueSql' | 'familyNumericSortSql'>) {
   const matchRankSelect = opts.matchRankSql ? `, (${opts.matchRankSql}) AS __match_rank` : ''
   const matchRankAgg = opts.matchRankSql ? ', MIN(__match_rank) AS match_rank' : ''
   const matchTierSelect = opts.matchTierSql ? `, (${opts.matchTierSql}) AS __match_tier` : ''
@@ -173,6 +180,8 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
   const promotedAgg = opts.promotedRankSql ? ', MAX(__promoted) AS family_promoted' : ''
   const sortValueSelect = opts.familySortValueSql ? `, (${opts.familySortValueSql}) AS __family_sort` : ''
   const sortValueAgg = opts.familySortValueSql ? ', MIN(__family_sort) AS family_sort_value' : ''
+  const numericSortSelect = opts.familyNumericSortSql ? `, (${opts.familyNumericSortSql}) AS __family_num` : ''
+  const numericSortAgg = opts.familyNumericSortSql ? ', MAX(__family_num) AS family_num_sort' : ''
   // family_members is only built (and only joined against, see below) when
   // familyMemberBaseWhereSql is actually passed -- omitted entirely for any
   // caller that hasn't opted in, so this stays a no-op for them (same CTEs,
@@ -194,7 +203,7 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
       SELECT ${opts.selectColumns},
              ${FAMILY_ROOT_KEY_SQL} AS __family_root_id,
              lower(trim(COALESCE(parent.name, p.name))) AS __family_name,
-             p.created_at AS __created_at${matchRankSelect}${matchTierSelect}${promotedSelect}${sortValueSelect}
+             p.created_at AS __created_at${matchRankSelect}${matchTierSelect}${promotedSelect}${sortValueSelect}${numericSortSelect}
       FROM products p
       LEFT JOIN products parent ON parent.id = p.parent_id
       ${opts.joinSql}
@@ -203,7 +212,7 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
     families AS (
       SELECT __family_root_id AS family_root_id,
              MIN(__family_name) AS family_name,
-             MAX(__created_at) AS latest_created_at${matchRankAgg}${matchTierAgg}${promotedAgg}${sortValueAgg}
+             MAX(__created_at) AS latest_created_at${matchRankAgg}${matchTierAgg}${promotedAgg}${sortValueAgg}${numericSortAgg}
       FROM matched
       GROUP BY __family_root_id
     )${familyMembersCte}
@@ -220,7 +229,7 @@ export async function paginateProductFamilies<T = Record<string, unknown>>(
   // tier and promotion expressions in made the count evaluate a correlated
   // lookup per matched row for nothing (G37: 1,500 ranked ids rescanned
   // their own id list per row there, while the page statement indexed it).
-  const countCtes = buildCtes({ ...opts, matchRankSql: undefined, matchTierSql: undefined, promotedRankSql: undefined, familySortValueSql: undefined })
+  const countCtes = buildCtes({ ...opts, matchRankSql: undefined, matchTierSql: undefined, promotedRankSql: undefined, familySortValueSql: undefined, familyNumericSortSql: undefined })
   const offset = (page - 1) * pageSize
   // See familyMemberBaseWhereSql's own comment: opted-in callers get every
   // active row of a qualifying family (not just the ones that individually
@@ -271,7 +280,7 @@ export async function paginateProductFamilies<T = Record<string, unknown>>(
   const rawRows = (pageResult?.results ?? []) as Record<string, unknown>[]
 
   const cleaned = (Array.isArray(rawRows) ? rawRows : []).map((row) => {
-    const { __family_root_id, __family_name, __created_at, __match_rank, __match_tier, __promoted, __family_sort, ...rest } = row
+    const { __family_root_id, __family_name, __created_at, __match_rank, __match_tier, __promoted, __family_sort, __family_num, ...rest } = row
     return rest as unknown as T
   })
 

@@ -193,7 +193,9 @@ check('every grouped picker preserves the server order while a term is active', 
     ['Products page', '../src/components/products/Products.tsx', /preserveInputOrder: searchTerms\.length > 0/],
     ['Branches per-branch stock', '../src/components/branches/Branches.tsx', /preserveInputOrder: Boolean\(getBranchStockQuery\(branch\.id\)\)/],
     ['Transfer bulk picker', '../src/components/branches/TransferModal.tsx', /preserveInputOrder: Boolean\(debouncedSearch\.trim\(\)\)/],
-    ['storefront search', '../src/components/catalog/PublicCatalogPage.tsx', /mergePortalCatalogProducts\(data\.items, Boolean\(/],
+    // The storefront keeps the server's order for every response: relevance while a term is
+    // typed, otherwise the brand-first order or the shopper's View/Sort (PUBLIC-FILTER-MENU).
+    ['storefront search', '../src/components/catalog/PublicCatalogPage.tsx', /mergePortalCatalogProducts\(data\.items, true\)/],
   ]
   for (const [label, file, pattern] of cases) {
     assert.match(read(file), pattern, `${label} must not re-sort a ranked search response`)
