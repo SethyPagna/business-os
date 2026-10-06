@@ -2,21 +2,34 @@ import { Hono } from 'hono'
 import type { Env } from '../index'
 import { getDb } from '../lib/db'
 import { chunkForBinding } from '../lib/sqlBinding'
-import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
+import { loadLowStockConfig, type LowStockConfig } from '../lib/lowStockSettings'
+import { STOCK_ALERT_WINDOW_DAYS, stockAlertFeedSql, type StockAlertFeedRow } from '../lib/saleStockAlerts'
 import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { getActionTier, hasPermission, hasAnyPermission, isAdminControlUser } from '../lib/permissions'
 
 // Ported from backend/src/routes/notifications.ts. Note what this actually
-// is: there is no persisted "notifications" table with read/unread state --
-// `/summary` computes a live signal each call (inventory low-stock/expiry,
-// sales awaiting payment/delivery, loyalty threshold reached, pending portal
-// submissions, system/drive-sync health) from real business data, gated by
-// per-user permission and admin-configured on/off toggles. The Cloudflare
-// version of this endpoint was previously a hardcoded stub
-// (`{unread:0, items:[]}`), which is why notification badges/counts could
-// look stale or just permanently "off" regardless of real inventory/sales
-// state.
+// is: there is no persisted read/unread state -- `/summary` computes a live
+// signal each call (stock alerts, expiry, sales awaiting payment/delivery,
+// loyalty threshold reached, pending portal submissions, system/drive-sync
+// health) from real business data, gated by per-user permission and
+// admin-configured on/off toggles. The Cloudflare version of this endpoint
+// was previously a hardcoded stub (`{unread:0, items:[]}`), which is why
+// notification badges/counts could look stale or just permanently "off"
+// regardless of real inventory/sales state.
+//
+// The one exception to "live signal" is STOCK (NOTIF-V2, owner 6 Oct 2026):
+// those rows are SALE EVENTS read from `stock_alert_events` (migration 0239,
+// written by lib/saleStockAlerts.ts inside the sale's own batch), not a
+// standing list of every product under its threshold -- that list is the
+// Dashboard's Low stock / Out of stock cards, which the bell links to.
+//
+// Every item is deliberately one short line: a `label` (the thing), a
+// structured meta (`metaKey` + `metaParams`, rendered from the language
+// packs by the panel; `meta` is only the English fallback for a client that
+// has not reloaded) and an optional `at` timestamp the panel formats. The
+// link target of each `kind` is resolved on the client
+// (frontend/src/utils/notificationTargets.ts) from the ids carried here.
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
 
@@ -56,15 +69,6 @@ const NOTIFICATION_SETTING_KEYS = [
 ]
 const SUMMARY_SEPARATOR = ' - '
 
-// dd/mm/yyyy for user-facing date text -- the whole app shows this format
-// by request (Aug 25 numeric-everywhere, day-first since Sep 4 2026). Pure
-// string reorder, no Date parsing (a bare date parses as UTC midnight and
-// can shift a day).
-function formatDateDmy(value: unknown): string {
-  const match = String(value ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/)
-  return match ? `${match[3]}/${match[2]}/${match[1]}` : String(value ?? '')
-}
-
 function normalizeBoolean(value: unknown, fallback = true): boolean {
   if (value === undefined || value === null || value === '') return fallback
   const normalized = String(value).trim().toLowerCase()
@@ -100,12 +104,20 @@ type NotificationItem = {
   // change without breaking a client that has not reloaded.
   metaKey?: string
   metaParams?: Record<string, unknown>
+  /** Raw DB timestamp (UTC) the panel shows as dd/mm/yyyy HH:mm. Omitted when the row has no moment of its own. */
+  at?: string
   kind: string
   pageId: string
   // Optional sub-page target within pageId, e.g. 'devices' for the Users
   // page's Devices tab. Frontend-only concern (NotificationCenter passes
   // it through to navigateTo) -- omit when the page has no sub-tabs.
   anchor?: string
+  /** Sale this row is about: the panel opens that sale's detail. */
+  saleId?: number
+  /** Finished import job this row is about: the panel opens its report. */
+  importJobId?: string
+  /** Text the destination list is searched for (a product, a supplier): lands on that record, not just the list. */
+  search?: string
 }
 
 type NotificationSection = {
@@ -175,12 +187,12 @@ async function loadPreferences(env: Env) {
 // leak across users: the cached value is the same for everyone who is allowed
 // to ask for it.
 export const NOTIFICATION_SECTION_CACHE_TTL_SECONDS = 45
-// Rows the summary carries per inventory section. The panel pages client-side
-// and reaches the rest through GET /summary/items; the headline count is exact
-// either way.
-export const INVENTORY_PREVIEW_ITEMS = 50
-// What the full list was capped at before the preview existed.
-export const INVENTORY_FULL_ITEMS = 5000
+// Stock events the summary carries. The panel shows these and reaches the rest
+// through GET /summary/items; the headline count is exact either way. Ten rows
+// is what keeps the bell short after a busy afternoon of sales.
+export const STOCK_ALERT_PREVIEW_ITEMS = 10
+// What "load more" returns at most -- the whole window of a very busy shop.
+export const STOCK_ALERT_FULL_ITEMS = 100
 
 type NotificationContext = { env: Env; req: { url: string; raw: Request }; executionCtx: { waitUntil(promise: Promise<unknown>): void } }
 
@@ -208,77 +220,67 @@ function sectionCacheFor(c: NotificationContext): SectionCache {
   }
 }
 
-function lowStockCacheInput(config: LowStockConfig): string {
-  return `${config.enabled ? 1 : 0}:${config.mode}:${config.threshold}`
+function lowStockCacheInput(config: LowStockConfig, includeSale: boolean): string {
+  // includeSale is part of the key because the receipt number a stock row names
+  // is sales data: the cached rows must never reach someone without sales:view.
+  return `${config.enabled ? 1 : 0}:${config.mode}:${config.threshold}:${includeSale ? 1 : 0}:${STOCK_ALERT_WINDOW_DAYS}`
 }
 
-// `itemLimit` is how many rows come back (the section's `count` is always the
-// exact size). The totals ride on the same single pass as window aggregates, so
-// asking for 50 rows reads the catalog once, exactly as asking for 5,000 did --
-// it just stops shipping 4,950 rows nobody scrolled to.
-async function buildInventorySection(env: Env, config: LowStockConfig, itemLimit: number): Promise<NotificationSection | null> {
+// Same instant the SQL window compares against: SQLite's CURRENT_TIMESTAMP text, UTC.
+function sqliteUtcDaysAgo(days: number): string {
+  return new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 19).replace('T', ' ')
+}
+
+// The stock section: one row per product family a SALE carried into low stock
+// or out of stock lately (lib/saleStockAlerts.ts), newest crossing first with
+// out-of-stock ahead of low. A family drops out as soon as it is no longer in
+// the state its event announced (restocked, or since worse), so the bell never
+// repeats the Dashboard's standing Low stock / Out of stock lists -- it points
+// at them. `itemLimit` is how many rows come back; the counts are exact
+// window aggregates over every row that passed the filter.
+async function buildStockAlertSection(env: Env, config: LowStockConfig, itemLimit: number, includeSale: boolean): Promise<NotificationSection | null> {
   const db = getDb(env)
-  const lowThresholdSql = lowStockThresholdSql(config, 'low_stock_threshold')
-  // The OR is what keeps OUT-OF-STOCK alive when the owner switches the
-  // low-quantity alert off. With the alert off the low fragment is -1, and
-  // this one query fetches BOTH tiers -- so a single `qty <= low` filter
-  // would have silently taken the out-of-stock rows down with the low ones,
-  // which is not what a low-QUANTITY switch means.
-  // Out-of-stock rows list first (then fewest-in-stock first), the same order
-  // the two-array split of the old ORDER BY stock_quantity produced.
-  const rows = await db.prepare(`
-    SELECT id, name, stock_quantity,
-      CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) THEN 1 ELSE 0 END AS is_out,
-      SUM(CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) THEN 1 ELSE 0 END) OVER () AS out_total,
-      COUNT(*) OVER () AS flagged_total
-    FROM products
-    WHERE is_active = 1
-      AND (COALESCE(stock_quantity, 0) <= ${lowThresholdSql}
-           OR COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0))
-    ORDER BY is_out DESC, stock_quantity ASC, name ASC, id ASC
-    LIMIT @itemLimit
-  `).all<{ id: number; name: string; stock_quantity: number; is_out: number; out_total: number; flagged_total: number }>({ itemLimit })
+  const rows = await db.prepare(stockAlertFeedSql(config))
+    .all<StockAlertFeedRow>({ since: sqliteUtcDaysAgo(STOCK_ALERT_WINDOW_DAYS), limit: itemLimit })
   if (!rows.length) return null
 
   const outCount = Number(rows[0].out_total || 0)
-  const lowCount = Math.max(0, Number(rows[0].flagged_total || 0) - outCount)
-  const count = outCount + lowCount
+  const count = Number(rows[0].matched_total || 0)
+  const lowCount = Math.max(0, count - outCount)
 
-  // anchor: 'product-<id>' -- lets Inventory.tsx scroll to and briefly
-  // highlight this exact row once it lands on the page, instead of just
-  // dropping the person on the page with a broad stock-state filter (see
-  // Inventory.tsx's `#product-` hash handling). pageId stays 'inventory'
-  // either way so a click still works even if the row can't be located
-  // (e.g. it was restocked between the notification firing and the click).
-  const items: NotificationItem[] = rows.map((product) => (Number(product.is_out) === 1
-    ? {
-        id: `out-${product.id}`,
-        tone: 'danger' as const,
-        label: product.name,
-        meta: 'Out of stock',
-        kind: 'inventory_out_of_stock',
-        pageId: 'inventory',
-        anchor: `product-${product.id}`,
-      }
-    : {
-        id: `low-${product.id}`,
-        tone: 'warning' as const,
-        label: product.name,
-        meta: `Low stock (${Number(product.stock_quantity || 0)})`,
-        kind: 'inventory_low_stock',
-        pageId: 'inventory',
-        anchor: `product-${product.id}`,
-      }))
+  // The link lands on the Dashboard's matching card (anchor 'out-of-stock' /
+  // 'low-stock', consumed by Dashboard.tsx); the client falls back to the
+  // Branches products list for someone who cannot open the Dashboard.
+  const items: NotificationItem[] = rows.map((row) => {
+    const out = row.alert_state === 'out'
+    const quantity = Number(row.total_now ?? row.quantity_after ?? 0)
+    const receipt = includeSale ? row.receipt_number : null
+    return {
+      id: `stock-${row.id}`,
+      tone: out ? 'danger' as const : 'warning' as const,
+      label: row.product_name || `#${row.product_id}`,
+      meta: out ? 'Out of stock' : `Low stock (${quantity})`,
+      metaKey: out ? 'notification_stock_out' : 'notification_stock_low',
+      metaParams: { quantity, receipt: receipt || '', branch: row.branch_name || '' },
+      at: row.created_at,
+      kind: out ? 'inventory_out_of_stock' : 'inventory_low_stock',
+      pageId: 'dashboard',
+      anchor: out ? 'out-of-stock' : 'low-stock',
+      ...(includeSale && row.sale_id ? { saleId: Number(row.sale_id) } : {}),
+    }
+  })
 
   return {
     id: 'inventory',
     label: 'Inventory',
-    pageId: 'inventory',
+    pageId: 'dashboard',
     count,
     summary: joinSummary([
       outCount ? `${outCount} out of stock` : null,
       lowCount ? `${lowCount} low stock` : null,
     ]),
+    summaryKey: 'notification_inventory_summary',
+    summaryParams: { outCount, lowCount },
     items,
     ...(items.length < count ? { itemsTotal: count, truncated: true } : {}),
     enabledKey: 'notifications_inventory_enabled',
@@ -304,15 +306,17 @@ async function buildExpirySection(env: Env, days: number): Promise<NotificationS
   const items: NotificationItem[] = rows.map((product) => {
     const daysLeft = Number(product.days_until_expiry || 0)
     if (daysLeft < 0) expiredCount += 1
+    const days = Math.abs(daysLeft)
     return {
       id: `expiry-${product.id}`,
       label: product.name,
-      meta: daysLeft < 0
-        ? `Expired ${Math.abs(daysLeft)} day${Math.abs(daysLeft) === 1 ? '' : 's'} ago`
-        : `Expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`,
+      meta: daysLeft < 0 ? `Expired ${days}d ago` : `Expires in ${days}d`,
+      metaKey: daysLeft < 0 ? 'notification_product_expired' : 'notification_product_expiring',
+      metaParams: { days, expiryDate: product.expiry_date || '' },
       kind: daysLeft < 0 ? 'product_expired' : 'product_expiring',
       tone: daysLeft < 0 ? 'danger' as const : 'warning' as const,
       pageId: 'products',
+      search: product.name,
     }
   })
   const expiringCount = rows.length - expiredCount
@@ -360,16 +364,19 @@ async function buildSupplierCreditSection(env: Env, days: number): Promise<Notif
   const items: NotificationItem[] = rows.map((row) => {
     const daysLeft = Number(row.days_until_due || 0)
     if (daysLeft < 0) overdueCount += 1
-    const who = row.supplier_name || 'supplier'
+    const days = Math.abs(daysLeft)
     return {
       id: `supplier-credit-${row.id}`,
-      label: `${who} — ${row.product_name}${row.lot_code ? ` (${row.lot_code})` : ''}`,
-      meta: daysLeft < 0
-        ? `Overdue ${Math.abs(daysLeft)} day${Math.abs(daysLeft) === 1 ? '' : 's'} — due ${formatDateDmy(row.credit_due_date)}`
-        : `Due in ${daysLeft} day${daysLeft === 1 ? '' : 's'} (${formatDateDmy(row.credit_due_date)})`,
+      label: row.product_name,
+      meta: daysLeft < 0 ? `Overdue ${days}d` : `Due in ${days}d`,
+      metaKey: daysLeft < 0 ? 'notification_credit_overdue' : 'notification_credit_due',
+      metaParams: { days, supplier: row.supplier_name || '', dueDate: row.credit_due_date || '' },
       kind: daysLeft < 0 ? 'supplier_credit_overdue' : 'supplier_credit_due',
       tone: daysLeft < 0 ? 'danger' as const : 'warning' as const,
-      pageId: 'inventory',
+      // Contacts > Suppliers (the retired 'inventory' page id had no route).
+      pageId: 'contacts',
+      anchor: 'hub:contacts:suppliers',
+      ...(row.supplier_name ? { search: row.supplier_name } : {}),
     }
   })
   const dueSoonCount = rows.length - overdueCount
@@ -377,7 +384,7 @@ async function buildSupplierCreditSection(env: Env, days: number): Promise<Notif
   return {
     id: 'supplier_credit',
     label: 'Supplier credit',
-    pageId: 'inventory',
+    pageId: 'contacts',
     count: rows.length,
     summary: joinSummary([
       overdueCount ? `${overdueCount} overdue` : null,
@@ -392,15 +399,15 @@ async function buildSalesSection(env: Env): Promise<NotificationSection | null> 
   const db = getDb(env)
   const [awaitingPayment, awaitingDelivery] = await Promise.all([
     db.prepare(`
-      SELECT id, receipt_number, total_usd FROM sales
+      SELECT id, receipt_number, total_usd, created_at FROM sales
       WHERE sale_status = 'awaiting_payment'
       ORDER BY created_at DESC LIMIT 50
-    `).all<{ id: number; receipt_number: string; total_usd: number }>(),
+    `).all<{ id: number; receipt_number: string; total_usd: number; created_at: string }>(),
     db.prepare(`
-      SELECT id, receipt_number, total_usd FROM sales
+      SELECT id, receipt_number, total_usd, created_at FROM sales
       WHERE sale_status = 'awaiting_delivery'
       ORDER BY created_at DESC LIMIT 50
-    `).all<{ id: number; receipt_number: string; total_usd: number }>(),
+    `).all<{ id: number; receipt_number: string; total_usd: number; created_at: string }>(),
   ])
   if (!awaitingPayment.length && !awaitingDelivery.length) return null
 
@@ -412,8 +419,10 @@ async function buildSalesSection(env: Env): Promise<NotificationSection | null> 
       meta: `Awaiting payment${SUMMARY_SEPARATOR}$${Number(sale.total_usd || 0).toFixed(2)}`,
       metaKey: 'notification_sales_awaiting_payment',
       metaParams: { totalUsd: Number(sale.total_usd || 0).toFixed(2) },
+      at: sale.created_at,
       kind: 'sales_awaiting_payment',
       pageId: 'sales',
+      saleId: Number(sale.id),
     })),
     ...awaitingDelivery.map((sale) => ({
       id: `delivery-${sale.id}`,
@@ -422,8 +431,10 @@ async function buildSalesSection(env: Env): Promise<NotificationSection | null> 
       meta: `Awaiting delivery${SUMMARY_SEPARATOR}$${Number(sale.total_usd || 0).toFixed(2)}`,
       metaKey: 'notification_sales_awaiting_delivery',
       metaParams: { totalUsd: Number(sale.total_usd || 0).toFixed(2) },
+      at: sale.created_at,
       kind: 'sales_awaiting_delivery',
       pageId: 'sales',
+      saleId: Number(sale.id),
     })),
   ]
 
@@ -515,7 +526,7 @@ async function buildLoyaltySection(env: Env, threshold: number): Promise<Notific
   return {
     id: 'loyalty',
     label: 'Loyalty',
-    pageId: 'loyalty_points',
+    pageId: 'promotions',
     count: matches.length,
     summary: `${matches.length} customer${matches.length === 1 ? '' : 's'} reached ${threshold}+ points`,
     items: matches.slice(0, 50).map((customer) => ({
@@ -523,8 +534,12 @@ async function buildLoyaltySection(env: Env, threshold: number): Promise<Notific
       tone: 'success' as const,
       label: customer.name,
       meta: `${customer.balance} points`,
+      metaKey: 'notification_loyalty_points_balance',
+      metaParams: { balance: customer.balance },
       kind: 'loyalty_points_balance',
-      pageId: 'loyalty_points',
+      pageId: 'promotions',
+      anchor: 'hub:promotions:loyalty',
+      search: customer.name,
     })),
     enabledKey: 'notifications_loyalty_enabled',
   }
@@ -577,9 +592,13 @@ async function buildImportsSection(env: Env, user: SessionUser): Promise<Notific
       id: `import-${job.id}`,
       tone: job.status === 'completed_with_errors' ? 'danger' as const : 'warning' as const,
       label: `${String(job.type || 'products').replaceAll('_', ' ')} import`,
-      meta: `${job.warning_count} warning${job.warning_count === 1 ? '' : 's'}${SUMMARY_SEPARATOR}review before trusting the result`,
+      meta: `${job.warning_count} warning${job.warning_count === 1 ? '' : 's'}`,
+      metaKey: 'notification_import_warnings',
+      metaParams: { count: Number(job.warning_count) || 0 },
+      at: job.finished_at || job.created_at,
       kind: 'import_warnings',
       pageId: 'dashboard',
+      importJobId: String(job.id),
     })),
   }
 }
@@ -587,11 +606,11 @@ async function buildImportsSection(env: Env, user: SessionUser): Promise<Notific
 async function buildPortalSection(env: Env): Promise<NotificationSection | null> {
   const db = getDb(env)
   const rows = await db.prepare(`
-    SELECT id, customer_name, membership_number, platform
+    SELECT id, customer_name, membership_number, platform, created_at
     FROM customer_share_submissions
     WHERE status = 'pending'
     ORDER BY created_at DESC LIMIT 50
-  `).all<{ id: number; customer_name: string; membership_number: string; platform: string }>()
+  `).all<{ id: number; customer_name: string; membership_number: string; platform: string; created_at: string }>()
   if (!rows.length) return null
 
   return {
@@ -605,6 +624,9 @@ async function buildPortalSection(env: Env): Promise<NotificationSection | null>
       tone: 'info' as const,
       label: entry.customer_name || entry.membership_number || `Submission #${entry.id}`,
       meta: entry.platform ? `Pending review${SUMMARY_SEPARATOR}${entry.platform}` : 'Pending review',
+      metaKey: 'notification_portal_pending_review',
+      metaParams: { platform: entry.platform || '' },
+      at: entry.created_at,
       kind: 'portal_pending_review',
       pageId: 'catalog',
     })),
@@ -626,23 +648,28 @@ function buildSystemSection(driveSyncEnabled: boolean, driveSyncConnected: boole
     ? {
         id: 'system-drive-sync',
         tone: 'warning' as const,
-        label: 'Google Drive backup is NOT connected',
-        meta: 'Only the R2 copies exist. Open Backup settings and connect Google Drive to start the off-site mirror (keeps the last 10).',
+        label: 'Google Drive backup',
+        meta: 'Not connected',
+        metaKey: 'notification_drive_not_connected',
         kind: 'system_drive_sync_connect',
-        pageId: 'backup',
+        // The retired 'backup' page id had no route: Backup is a Settings section.
+        pageId: 'settings',
+        anchor: 'hub:settings:backup',
       }
     : {
         id: 'system-drive-sync',
         tone: 'warning' as const,
-        label: 'Google Drive sync is turned off',
-        meta: 'Drive is connected but sync is disabled -- no new backups are mirrored off-site.',
+        label: 'Google Drive backup',
+        meta: 'Sync is off',
+        metaKey: 'notification_drive_sync_off',
         kind: 'system_drive_sync_disabled',
-        pageId: 'backup',
+        pageId: 'settings',
+        anchor: 'hub:settings:backup',
       }
   return {
     id: 'system',
     label: 'System',
-    pageId: 'backup',
+    pageId: 'settings',
     count: 1,
     summary: 'Google Drive backup needs attention',
     items: [item],
@@ -685,12 +712,16 @@ async function buildDeviceApprovalSection(env: Env): Promise<NotificationSection
       id: `device-country-${entry.id}`,
       tone: 'warning' as const,
       label: parsed.deviceName || `Device for user #${entry.user_id ?? '?'}`,
-      meta: `Sign-in moved from ${parsed.previousCountry || 'an unknown country'} to ${parsed.newCountry || 'an unknown country'}${SUMMARY_SEPARATOR}already-approved device`,
+      meta: `${parsed.previousCountry || '?'} -> ${parsed.newCountry || '?'}`,
+      metaKey: 'notification_device_new_country',
+      metaParams: { from: parsed.previousCountry || '?', to: parsed.newCountry || '?' },
+      at: entry.created_at,
       kind: 'security_device_new_country',
       // Device history lives on the Users > Devices tab (DeviceApprovals.tsx),
-      // not Settings -- there is nothing about devices on the Settings page.
-      pageId: 'users',
-      anchor: 'devices',
+      // a section of the Settings hub since E4 (the retired 'users' page id had
+      // no route); the panel queues the Devices tab for Users.tsx.
+      pageId: 'settings',
+      anchor: 'hub:settings:users',
     }
   })
 
@@ -702,9 +733,9 @@ async function buildDeviceApprovalSection(env: Env): Promise<NotificationSection
       meta: `Sign-in for ${entry.username}${SUMMARY_SEPARATOR}awaiting admin approval`,
       kind: 'security_device_pending',
       // Same reasoning as countryItems above: the approve/decline controls
-      // are on Users > Devices (DeviceApprovals.tsx), not Settings.
-      pageId: 'users',
-      anchor: 'devices',
+      // are on Users > Devices (DeviceApprovals.tsx).
+      pageId: 'settings',
+      anchor: 'hub:settings:users',
     })),
     ...countryItems,
   ]
@@ -714,7 +745,7 @@ async function buildDeviceApprovalSection(env: Env): Promise<NotificationSection
     label: 'Security',
     // Section-level fallback pageId, used when an individual item doesn't
     // set its own -- keep this in sync with the items above.
-    pageId: 'users',
+    pageId: 'settings',
     count: items.length,
     summary: rows.length && countryItems.length
       ? `${rows.length} device${rows.length === 1 ? '' : 's'} waiting for approval, ${countryItems.length} new-country sign-in${countryItems.length === 1 ? '' : 's'}`
@@ -725,6 +756,19 @@ async function buildDeviceApprovalSection(env: Env): Promise<NotificationSection
   }
 }
 
+// Stock rows tell the shop what is running out: anyone who can see stock
+// numbers somewhere (the Dashboard's Low stock / Out of stock cards, or the
+// Branches products list the panel falls back to) may have them.
+function canSeeStockAlerts(user: SessionUser): boolean {
+  return hasPermission(user, 'dashboard') || hasPermission(user, 'inventory')
+}
+
+// The sales READ rule (reports.ts, sales.ts canReadSales): a view-only user
+// sees receipts, a full user whose sales:view was switched off does not.
+function canReadSales(user: SessionUser): boolean {
+  return getActionTier(user, 'sales', 'view') !== 'none'
+}
+
 app.get('/summary', async (c) => {
   const user = c.get('user')
   // The loyalty switch is a cache-key input only; it is not part of the public preferences object.
@@ -733,10 +777,11 @@ app.get('/summary', async (c) => {
   const cachedSection = sectionCacheFor(c)
 
   const tasks: Array<Promise<NotificationSection | null>> = []
-  if (preferences.inventoryEnabled && hasPermission(user, 'inventory')) {
+  if (preferences.inventoryEnabled && canSeeStockAlerts(user)) {
     const lowStockConfig = await loadLowStockConfig(c.env)
-    tasks.push(cachedSection('inventory', ['products', 'stock', 'settings'], lowStockCacheInput(lowStockConfig),
-      () => buildInventorySection(c.env, lowStockConfig, INVENTORY_PREVIEW_ITEMS)))
+    const includeSale = canReadSales(user)
+    tasks.push(cachedSection('inventory', ['products', 'stock', 'settings'], lowStockCacheInput(lowStockConfig, includeSale),
+      () => buildStockAlertSection(c.env, lowStockConfig, STOCK_ALERT_PREVIEW_ITEMS, includeSale)))
   }
   if (preferences.expiryEnabled && hasPermission(user, 'products')) {
     tasks.push(cachedSection('expiry', ['products', 'settings'], String(preferences.expiryDays),
@@ -744,7 +789,7 @@ app.get('/summary', async (c) => {
   }
   // The section lists receipt numbers and totals, so it follows the sales READ rule (reports.ts, sales.ts canReadSales):
   // a view-only user sees it, a full user whose sales:view was switched off does not.
-  if (preferences.salesEnabled && getActionTier(user, 'sales', 'view') !== 'none') tasks.push(buildSalesSection(c.env))
+  if (preferences.salesEnabled && canReadSales(user)) tasks.push(buildSalesSection(c.env))
   if (preferences.loyaltyEnabled && hasPermission(user, 'contacts')) {
     tasks.push(cachedSection('loyalty', ['sales', 'returns', 'customers', 'settings'], `${preferences.loyaltyThreshold}:${loyaltyPointsEnabled ? 1 : 0}`,
       () => buildLoyaltySection(c.env, preferences.loyaltyThreshold)))
@@ -797,18 +842,20 @@ app.get('/summary', async (c) => {
   })
 })
 
-// The full inventory list behind the panel's "show all". Not part of /summary so
-// the poll that runs on every sync broadcast and tab focus stays small; the panel
-// asks for this once, on request, and keeps re-asking only while it stays expanded.
+// The rest of the stock events behind the panel's "load more". Not part of
+// /summary so the poll that runs on every sync broadcast and tab focus stays
+// small; the panel asks for this once, on request, and keeps re-asking only
+// while it stays expanded.
 app.get('/summary/items', async (c) => {
   const user = c.get('user')
   if (String(c.req.query('section') || '') !== 'inventory') return c.json({ error: 'Unknown notification section' }, 404)
-  if (!hasPermission(user, 'inventory')) return c.json({ error: 'Forbidden' }, 403)
+  if (!canSeeStockAlerts(user)) return c.json({ error: 'Forbidden' }, 403)
   const { inventoryEnabled } = await loadPreferences(c.env)
   if (!inventoryEnabled) return c.json({ id: 'inventory', count: 0, items: [] })
   const lowStockConfig = await loadLowStockConfig(c.env)
-  const section = await sectionCacheFor(c)('inventory-full', ['products', 'stock', 'settings'], lowStockCacheInput(lowStockConfig),
-    () => buildInventorySection(c.env, lowStockConfig, INVENTORY_FULL_ITEMS))
+  const includeSale = canReadSales(user)
+  const section = await sectionCacheFor(c)('inventory-full', ['products', 'stock', 'settings'], lowStockCacheInput(lowStockConfig, includeSale),
+    () => buildStockAlertSection(c.env, lowStockConfig, STOCK_ALERT_FULL_ITEMS, includeSale))
   return c.json({ id: 'inventory', count: section?.count ?? 0, items: section?.items ?? [] })
 })
 

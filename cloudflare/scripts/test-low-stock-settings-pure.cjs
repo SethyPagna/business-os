@@ -333,7 +333,9 @@ async function main() {
     ['routes/inventory.ts', "Inventory's stockState=low filter"],
     ['routes/products.ts', "Products' stockState=low/healthy filters"],
     ['routes/branches.ts', "Branches' per-branch stockState filter"],
-    ['routes/notifications.ts', 'the notification bell'],
+    // NOTIF-V2: the bell no longer lists products under a threshold; its sale-event
+    // statement and its feed classify with the same fragment, in this module.
+    ['lib/saleStockAlerts.ts', 'the notification bell (sale events and their feed)'],
   ]
 
   await check('every server low-stock reader goes through the shared rule', () => {
@@ -401,9 +403,12 @@ async function main() {
         `${relPath}'s healthy clause must state the out-of-stock term, not imply it from low >= out`,
       )
     }
-    // The bell and the bot fetch BOTH tiers in one query, so each needs the OR
-    // that keeps out-of-stock alive when the low-quantity alert is off.
-    for (const relPath of ['routes/notifications.ts', 'lib/telegram.ts']) {
+    // The bot fetches BOTH tiers in one query, so it needs the OR that keeps
+    // out-of-stock alive when the low-quantity alert is off. (The bell no longer
+    // lists products under a threshold; its sale events rank healthy/low/out, and
+    // "alerts off keeps out-of-stock" is proved on real SQLite by
+    // test-sale-stock-alert-crossing-pure.cjs.)
+    for (const relPath of ['lib/telegram.ts']) {
       assert.match(
         readCf(relPath),
         /OR COALESCE\(stock_quantity, 0\) <= COALESCE\(out_of_stock_threshold, 0\)/,
