@@ -1,4 +1,4 @@
--- DATA-AUDIT lane B (stock & cost), query 2 of 13: negative, missing or non-numeric quantities and costs, anywhere.
+-- DATA-AUDIT lane B (stock & cost), query 2 of 16: negative, missing or non-numeric quantities and costs, anywhere.
 -- Owner ask 7 Oct 2026: "compare all the backend data for any inconsistencies or logic that isn't consistent".
 --
 -- branch_stock.quantity and branch_batch_stock.quantity carry CHECK (quantity >= 0), but a CHECK lets NULL through and
@@ -32,9 +32,11 @@
 --   movements_zero_quantity                         movements that moved 0 (a stock-in line edit to the same figure writes one)
 --   movements_without_product_or_branch             movements with no product or no branch (cannot be replayed per pair)
 --   first_ids                                       json object: the lowest offending id per table family, ids only
+-- Needs migration: 0074 (damaged_stock_lots); production has applied them (a missing table makes the statement fail loudly, never report 0).
 -- Measured cost: one pass over each of products, branch_stock, branch_batch_stock, product_batches, sale_items,
 -- sale_item_batch_allocations, return_items, return_item_batch_allocations, stock_transfers, stock_row_moves,
 -- damaged_stock_lots and inventory_movements; no joins. See the scale test output (test-audit-b-scale-workerd.cjs).
+-- Measured at production scale (workerd D1, 107 ms best of 5 on an idle host, 221k rows read; fixture = 6 Oct 2026 inventory, test-audit-b-scale-workerd.cjs; a loaded host runs 2-3x slower).
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero products_stock_negative,products_stock_text,branch_stock_negative,branch_stock_not_number,lot_stock_negative,lot_stock_not_number,lots_received_quantity_negative,lots_cost_negative,lots_cost_not_number,sale_items_quantity_not_positive,sale_items_returned_out_of_range,sale_allocations_not_positive,sale_allocations_released_out_of_range,return_items_quantity_not_positive,return_allocations_not_positive,transfers_quantity_not_positive,transfers_same_branch,transfers_branch_missing,damaged_lots_out_of_range,movements_quantity_not_number,movements_sign_flipped

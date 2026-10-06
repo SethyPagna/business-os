@@ -1,4 +1,4 @@
--- DATA-AUDIT lane B (stock & cost), query 3 of 14: replay the movement ledger against current branch stock.
+-- DATA-AUDIT lane B (stock & cost), query 3 of 16: replay the movement ledger against current branch stock.
 -- Owner ask 7 Oct 2026: "compare all the backend data for any inconsistencies or logic that isn't consistent".
 --
 -- For every (product, branch) pair that has movements, the net stock effect of its inventory_movements is summed with the
@@ -34,6 +34,7 @@
 --   examples_opening_negative       up to 5 [product_id, branch_id, opening, stock, net], the most negative first
 -- Measured cost: one pass and one GROUP BY over inventory_movements (an index-less sort), then one probe per pair into
 -- branch_stock; see the scale test output (test-audit-b-scale-workerd.cjs).
+-- Measured at production scale (workerd D1, 156 ms best of 5 on an idle host, 220k rows read; fixture = 6 Oct 2026 inventory, test-audit-b-scale-workerd.cjs; a loaded host runs 2-3x slower).
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero replay_pairs_opening_negative

@@ -1,4 +1,4 @@
--- DATA-AUDIT lane B (stock & cost), query 5 of 14: branch transfers -- paired legs, receipts, members and history.
+-- DATA-AUDIT lane B (stock & cost), query 5 of 16: branch transfers -- paired legs, receipts, members and history.
 -- Owner ask 7 Oct 2026: "compare all the backend data for any inconsistencies or logic that isn't consistent".
 --
 -- One transfer is written in ONE batch (lib/transferOperation.ts transferEffectStatements): a stock_transfers row per member
@@ -31,9 +31,11 @@
 --   transfer_unbalanced_units        |out - in| summed over the unbalanced events
 --   receipts_reversed                receipts currently undone
 --   first_ids                        json object: the lowest offending id per column family (an event reports its first leg id)
+-- Needs migration: 0148 (transfer_operation_receipts / members) and 0151; production has applied them (a missing table makes the statement fail loudly, never report 0).
 -- Measured cost: one pass over inventory_movements keeping only the two transfer types (a few hundred rows survive), then
 -- small nested loops over those rows, stock_transfers, transfer_operation_receipts / members and action_history; see the
 -- scale test output (test-audit-b-scale-workerd.cjs).
+-- Measured at production scale (workerd D1, 15 ms best of 5 on an idle host, 63k rows read; fixture = 6 Oct 2026 inventory, test-audit-b-scale-workerd.cjs; a loaded host runs 2-3x slower).
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero transfer_events_unbalanced,transfer_rows_without_out_leg,transfer_rows_quantity_mismatch,out_legs_without_transfer_row,receipts_without_members,members_without_receipt,member_split_mismatch,transfer_rows_receipt_missing,receipt_state_generation_mismatch,receipt_generation_rows_mismatch,history_row_missing,history_state_mismatch,history_payload_mismatch

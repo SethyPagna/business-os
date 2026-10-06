@@ -1,4 +1,4 @@
--- DATA-AUDIT lane B (stock & cost), query 11 of 15: the stored catalog cost against the cost recomputed from the lots on hand.
+-- DATA-AUDIT lane B (stock & cost), query 11 of 16: the stored catalog cost against the cost recomputed from the lots on hand.
 -- Owner ask 7 Oct 2026: "compare all the backend data for any inconsistencies or logic that isn't consistent".
 --
 -- Owner ruling 25 Sep 2026 (migration 0195, lib/catalogCostRecompute.ts CATALOG_COST_DERIVE_SQL): products.cost_price_usd (mirrored into
@@ -25,8 +25,10 @@
 --   purchase_cost_differs       products whose purchase_price_usd differs from cost_price_usd (the mirror the triggers keep)
 --   manual_entries / overridden_products   product_cost_entries rows / products whose latest entry still re-prices on-hand stock
 --   examples                    up to 5 [product_id, stored, derived, on_hand_units], the largest gap first
+-- Needs migration: 0195 (catalog cost triggers) and 0177 (product_cost_entries); production has applied them (a missing table makes the statement fail loudly, never report 0).
 -- Measured cost: one pass each over branch_batch_stock (positive rows), product_batches and products with set-based joins; see the scale test output
 -- (test-audit-b-scale-workerd.cjs).
+-- Measured at production scale (workerd D1, 73 ms best of 5 on an idle host, 274k rows read; fixture = 6 Oct 2026 inventory, test-audit-b-scale-workerd.cjs; a loaded host runs 2-3x slower).
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero catalog_cost_drift

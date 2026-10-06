@@ -1,4 +1,4 @@
--- DATA-AUDIT lane B (stock & cost), query 7 of 14: sales that are outside the stock ledger (sales.stock_skipped) must never have moved stock.
+-- DATA-AUDIT lane B (stock & cost), query 7 of 16: sales that are outside the stock ledger (sales.stock_skipped) must never have moved stock.
 -- Owner ask 7 Oct 2026: "compare all the backend data for any inconsistencies or logic that isn't consistent".
 --
 -- Rule (lib/saleTransitions.ts planSaleStockTransition, migrations 0114 and 0235): a sale with stock_skipped = 1 was never in the
@@ -24,8 +24,10 @@
 --   import_unmarked_cancelled      unmarked import sales that are cancelled
 --   import_unmarked_cancel_restock_units  units a cancel handed back on unmarked import sales (phantom stock; forensics-f4 moved_net_units)
 --   examples                       up to 5 [sale_id, movement_id, type, quantity] of the offending rows, lowest sale first
+-- Needs migration: 0114 (sales.stock_skipped); production has applied them (a missing table makes the statement fail loudly, never report 0).
 -- Measured cost: the partial index on stock_skipped = 1 and the (reference_id, movement_type, id) index make it a few hundred reads; the import
 -- prefix is a range read on the unique client_request_id index; see the scale test output (test-audit-b-scale-workerd.cjs).
+-- Measured at production scale (workerd D1, 34 ms best of 5 on an idle host, 162k rows read; fixture = 6 Oct 2026 inventory, test-audit-b-scale-workerd.cjs; a loaded host runs 2-3x slower).
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero skipped_sale_movement_rows,skipped_sale_allocations_held

@@ -1,4 +1,4 @@
--- DATA-AUDIT lane B (stock & cost), query 13 of 15: lots at ONE branch that the owner's date-only merge rule says are the same lot.
+-- DATA-AUDIT lane B (stock & cost), query 13 of 16: lots at ONE branch that the owner's date-only merge rule says are the same lot.
 -- Owner ask 7 Oct 2026: "compare all the backend data for any inconsistencies or logic that isn't consistent".
 --
 -- Owner rulings 3-4 Sep and 6 Oct 2026 (product-child-row-model, branch-consolidation): a lot is identified by its RECEIVED DATE -- the business day (UTC+7),
@@ -25,6 +25,7 @@
 --   examples                         up to 5 [product_id, branch_id, day, lot ids (json), units], the largest first
 -- Measured cost: one pass over the positive branch_batch_stock rows joined to their lots, the business-day text evaluated once per row, one GROUP BY; see the scale
 -- test output (test-audit-b-scale-workerd.cjs).
+-- Measured at production scale (workerd D1, 23 ms best of 5 on an idle host, 52k rows read; fixture = 6 Oct 2026 inventory, test-audit-b-scale-workerd.cjs; a loaded host runs 2-3x slower).
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero duplicate_lot_groups,positive_lots_without_day

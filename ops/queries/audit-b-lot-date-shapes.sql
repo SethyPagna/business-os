@@ -1,4 +1,4 @@
--- DATA-AUDIT lane B (stock & cost), query 15 of 15: received-date and expiry-date sanity of the lots.
+-- DATA-AUDIT lane B (stock & cost), query 15 of 16: received-date and expiry-date sanity of the lots.
 -- Owner ask 7 Oct 2026: "compare all the backend data for any inconsistencies or logic that isn't consistent".
 --
 -- Owner rule (lot identity 29 Aug; cutover 6 Oct): a lot is identified by its received DATE (the business day, UTC+7), whatever text stored it, and an expiry date keeps
@@ -21,6 +21,7 @@
 --   examples                      up to 5 [lot_id, product_id, received_at, expiry_date, kind] over the zero-expected kinds, lowest lot id first
 -- Measured cost: one pass over product_batches (day text evaluated once per row) and one over positive branch_batch_stock; see the scale test output
 -- (test-audit-b-scale-workerd.cjs).
+-- Measured at production scale (workerd D1, 59 ms best of 5 on an idle host, 328k rows read; fixture = 6 Oct 2026 inventory, test-audit-b-scale-workerd.cjs; a loaded host runs 2-3x slower).
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero lots_received_unparseable,lots_expiry_unparseable,lots_expiry_before_received,lots_received_in_future

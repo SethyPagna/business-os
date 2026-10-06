@@ -1,4 +1,4 @@
--- DATA-AUDIT lane B (stock & cost), query 8 of 14: customer-return stock effects against the return lines.
+-- DATA-AUDIT lane B (stock & cost), query 8 of 16: customer-return stock effects against the return lines.
 -- Owner ask 7 Oct 2026: "compare all the backend data for any inconsistencies or logic that isn't consistent".
 --
 -- Rules (lib/returnsStock.ts, routes/returns.ts, lib/returnBulkAction.ts; owner rulings 14-15 Sep and 29 Sep):
@@ -30,8 +30,10 @@
 --   restock_lines_without_allocation  restock lines with no lot row (a legacy single-lot line, or a restock that missed its lot ledger)
 --   mismatch_first_return_at / _last_return_at   returns.created_at range over the groups counted above (the era)
 --   examples                   up to 5 [return_id, product_id, branch_id, status, restock_units, restock_net, damaged_units, damage_net], the largest gap first
+-- Needs migration: 0074 (damaged_stock_lots), 0106 (return replacement sales); production has applied them (a missing table makes the statement fail loudly, never report 0).
 -- Measured cost: one grouped pass over return_items (a few hundred to a few thousand rows) and, per group, index probes on reference_id into
 -- inventory_movements; see the scale test output (test-audit-b-scale-workerd.cjs).
+-- Measured at production scale (workerd D1, 6 ms best of 5 on an idle host, 19k rows read; fixture = 6 Oct 2026 inventory, test-audit-b-scale-workerd.cjs; a loaded host runs 2-3x slower).
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero restock_short,restock_excess,cancelled_return_still_in,cancelled_return_over_reversed,damage_movement_mismatch,damaged_lot_mismatch,replacement_mismatch,allocation_sum_mismatch,allocation_lot_other_product

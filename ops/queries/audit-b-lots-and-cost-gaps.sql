@@ -1,4 +1,4 @@
--- DATA-AUDIT lane B (stock & cost), query 12 of 15: lots, products and cost entries that point at each other wrongly, and the stock that has no recorded cost.
+-- DATA-AUDIT lane B (stock & cost), query 12 of 16: lots, products and cost entries that point at each other wrongly, and the stock that has no recorded cost.
 -- Owner ask 7 Oct 2026: "compare all the backend data for any inconsistencies or logic that isn't consistent".
 --
 -- Owner rules: batch identity (29 Aug) -- stock keeps its lot AND branch identity end to end; cost 25 Sep -- the catalog cost is the on-hand weighted cost over
@@ -26,8 +26,10 @@
 --   cost_entries / cost_entries_not_positive   manual cost entries / those with a NULL or non-positive cost
 --   overridden_lots_cost_differs      lots a manual entry re-prices (id at or below the baseline, holding stock) whose own cost differs from the entry's
 --   examples_inactive_product_lots    up to 5 [lot_id, product_id, units], the largest first
+-- Needs migration: 0177 (product_cost_entries); production has applied them (a missing table makes the statement fail loudly, never report 0).
 -- Measured cost: one pass over product_batches with primary-key probes into products and suppliers, one over positive branch_batch_stock, branch_stock and
 -- product_cost_entries; see the scale test output (test-audit-b-scale-workerd.cjs).
+-- Measured at production scale (workerd D1, 75 ms best of 5 on an idle host, 268k rows read; fixture = 6 Oct 2026 inventory, test-audit-b-scale-workerd.cjs; a loaded host runs 2-3x slower).
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero stock_lots_of_inactive_products,inactive_products_with_stock,lots_supplier_missing,cost_entries_orphan_product
@@ -56,31 +58,44 @@ WITH pos AS MATERIALIZED (
   SELECT e.id, e.product_id, e.cost_usd, e.baseline_batch_id
   FROM product_cost_entries e
   JOIN (SELECT product_id, MAX(id) AS mid FROM product_cost_entries GROUP BY product_id) m ON m.mid = e.id
+), la AS MATERIALIZED (
+  SELECT
+    COALESCE(SUM(CASE WHEN pid IS NOT NULL AND active = 0 AND q > 0 THEN 1 ELSE 0 END), 0) AS stock_lots_of_inactive_products,
+    COALESCE(SUM(no_supplier_row), 0) AS lots_supplier_missing,
+    COUNT(*) AS lots_total,
+    COALESCE(SUM(CASE WHEN q > 0 THEN 1 ELSE 0 END), 0) AS lots_with_stock,
+    COALESCE(SUM(CASE WHEN q > 0 AND cc = 'recorded' THEN 1 ELSE 0 END), 0) AS stock_lots_recorded_cost,
+    COALESCE(SUM(CASE WHEN q > 0 AND cc = 'zero' THEN 1 ELSE 0 END), 0) AS stock_lots_zero_cost,
+    COALESCE(SUM(CASE WHEN q > 0 AND cc = 'unknown' THEN 1 ELSE 0 END), 0) AS stock_lots_unknown_cost,
+    COALESCE(SUM(CASE WHEN cc = 'zero' THEN q END), 0) AS stock_units_zero_cost,
+    COALESCE(SUM(CASE WHEN cc = 'unknown' THEN q END), 0) AS stock_units_unknown_cost,
+    COALESCE(SUM(CASE WHEN q > 0 AND no_supplier = 1 THEN 1 ELSE 0 END), 0) AS stock_lots_without_supplier,
+    COALESCE(SUM(CASE WHEN received_quantity IS NOT NULL AND q > received_quantity + 0.000001 THEN 1 ELSE 0 END), 0) AS lots_stock_exceeds_received,
+    COALESCE(SUM(CASE WHEN received_quantity IS NOT NULL AND q > received_quantity + 0.000001 THEN q - received_quantity END), 0) AS units_stock_exceeds_received,
+    COALESCE(SUM(CASE WHEN unit_cost_usd IS NOT NULL AND received_cost_usd IS NOT NULL AND received_quantity IS NOT NULL
+      AND ABS(unit_cost_usd * received_quantity - received_cost_usd) > 0.01 THEN 1 ELSE 0 END), 0) AS lots_received_cost_drift
+  FROM lt
+), pa AS MATERIALIZED (
+  SELECT
+    COALESCE(SUM(CASE WHEN lots = 0 THEN 1 ELSE 0 END), 0) AS products_stock_without_any_lot,
+    COALESCE(SUM(CASE WHEN lots = 0 THEN stock END), 0) AS units_stock_without_any_lot,
+    COALESCE(SUM(CASE WHEN costed_stock_lots = 0 THEN 1 ELSE 0 END), 0) AS products_stock_without_costed_lot,
+    COALESCE(SUM(CASE WHEN COALESCE(cost, 0) = 0 THEN 1 ELSE 0 END), 0) AS products_cost_zero_with_stock
+  FROM px
 )
 SELECT
-  (SELECT COUNT(*) FROM lt WHERE pid IS NOT NULL AND active = 0 AND q > 0) AS stock_lots_of_inactive_products,
+  la.stock_lots_of_inactive_products,
   (SELECT COUNT(*) FROM products p JOIN bs ON bs.product_id = p.id WHERE COALESCE(p.is_active, 0) <> 1) AS inactive_products_with_stock,
-  (SELECT COALESCE(SUM(no_supplier_row), 0) FROM lt) AS lots_supplier_missing,
+  la.lots_supplier_missing,
   (SELECT COUNT(*) FROM product_cost_entries e WHERE NOT EXISTS (SELECT 1 FROM products p WHERE p.id = e.product_id)) AS cost_entries_orphan_product,
-  (SELECT COUNT(*) FROM lt) AS lots_total,
-  (SELECT COUNT(*) FROM lt WHERE q > 0) AS lots_with_stock,
-  (SELECT COUNT(*) FROM lt WHERE q > 0 AND cc = 'recorded') AS stock_lots_recorded_cost,
-  (SELECT COUNT(*) FROM lt WHERE q > 0 AND cc = 'zero') AS stock_lots_zero_cost,
-  (SELECT COUNT(*) FROM lt WHERE q > 0 AND cc = 'unknown') AS stock_lots_unknown_cost,
-  (SELECT COALESCE(SUM(q), 0) FROM lt WHERE cc = 'zero') AS stock_units_zero_cost,
-  (SELECT COALESCE(SUM(q), 0) FROM lt WHERE cc = 'unknown') AS stock_units_unknown_cost,
-  (SELECT COUNT(*) FROM lt WHERE q > 0 AND no_supplier = 1) AS stock_lots_without_supplier,
-  (SELECT COUNT(*) FROM px WHERE lots = 0) AS products_stock_without_any_lot,
-  (SELECT COALESCE(SUM(stock), 0) FROM px WHERE lots = 0) AS units_stock_without_any_lot,
-  (SELECT COUNT(*) FROM px WHERE costed_stock_lots = 0) AS products_stock_without_costed_lot,
-  (SELECT COUNT(*) FROM px WHERE COALESCE(cost, 0) = 0) AS products_cost_zero_with_stock,
-  (SELECT COUNT(*) FROM lt WHERE received_quantity IS NOT NULL AND q > received_quantity + 0.000001) AS lots_stock_exceeds_received,
-  (SELECT COALESCE(SUM(q - received_quantity), 0) FROM lt WHERE received_quantity IS NOT NULL AND q > received_quantity + 0.000001) AS units_stock_exceeds_received,
-  (SELECT COUNT(*) FROM lt WHERE unit_cost_usd IS NOT NULL AND received_cost_usd IS NOT NULL AND received_quantity IS NOT NULL
-    AND ABS(unit_cost_usd * received_quantity - received_cost_usd) > 0.01) AS lots_received_cost_drift,
+  la.lots_total, la.lots_with_stock, la.stock_lots_recorded_cost, la.stock_lots_zero_cost, la.stock_lots_unknown_cost,
+  la.stock_units_zero_cost, la.stock_units_unknown_cost, la.stock_lots_without_supplier,
+  pa.products_stock_without_any_lot, pa.units_stock_without_any_lot, pa.products_stock_without_costed_lot, pa.products_cost_zero_with_stock,
+  la.lots_stock_exceeds_received, la.units_stock_exceeds_received, la.lots_received_cost_drift,
   (SELECT COUNT(*) FROM product_cost_entries) AS cost_entries,
   (SELECT COUNT(*) FROM product_cost_entries WHERE cost_usd IS NULL OR cost_usd <= 0) AS cost_entries_not_positive,
   (SELECT COUNT(*) FROM lt JOIN ce ON ce.product_id = lt.product_id AND lt.id <= ce.baseline_batch_id
     WHERE lt.q > 0 AND ce.cost_usd > 0 AND (lt.unit_cost_usd IS NULL OR ABS(lt.unit_cost_usd - ce.cost_usd) > 0.00001)) AS overridden_lots_cost_differs,
   (SELECT COALESCE(json_group_array(json_array(id, product_id, q)), '[]')
     FROM (SELECT id, product_id, q FROM lt WHERE pid IS NOT NULL AND active = 0 AND q > 0 ORDER BY q DESC, id LIMIT 5)) AS examples_inactive_product_lots
+FROM la, pa

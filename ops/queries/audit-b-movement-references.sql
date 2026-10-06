@@ -1,4 +1,4 @@
--- DATA-AUDIT lane B (stock & cost), query 4 of 14: does every inventory_movements row point at things that exist?
+-- DATA-AUDIT lane B (stock & cost), query 4 of 16: does every inventory_movements row point at things that exist?
 -- Owner ask 7 Oct 2026: "compare all the backend data for any inconsistencies or logic that isn't consistent".
 --
 -- Owner rule (conflict-resolution-moves-all-links, 31 Aug): a merge or conflict resolution MOVES every linked record onto
@@ -18,14 +18,14 @@
 --   movements_lot_missing           batch_id names a lot (product_batches row) that no longer exists
 --   movements_lot_other_product     batch_id names a lot of ANOTHER product than the movement's
 --   sale_movements_sale_missing     a 'sale' movement whose sale does not exist
---   sale_movements_line_missing     a 'sale' movement whose sale has no line for the movement's product
+--   sale_movements_line_missing     a 'sale' movement whose sale has no line for the movement's product at the movement's branch (a deduction at a branch the sale never sold from)
 --   return_family_return_missing    a return-family movement (list above) whose return does not exist
 --   ambiguous_reference_unowned     a 'return' / 'damage_in' / 'damage_out' movement with a numeric reference_id that is neither
 --                                   a return nor a sale holding the movement's product (the ledger shows it with no receipt)
 --   first_ids                       json object: the lowest offending movement id per column, ids only
--- Measured cost: one pass over inventory_movements with a primary-key probe per row for the product, the lot, the sale and the
--- return (the probes are skipped when the column is NULL or the type does not apply); see the scale test output
--- (test-audit-b-scale-workerd.cjs).
+-- Measured cost: one pass over inventory_movements with primary-key probes into products, product_batches, sales and returns, and a point lookup in the covering
+-- sale_items index (product, branch, sale) for the sale / return family; no GROUP BY (a grouping of the movement log costs ~400 ms at production scale).
+-- Measured at production scale (workerd D1, 189 ms best of 5 on an idle host, 399k rows read; fixture = 6 Oct 2026 inventory, test-audit-b-scale-workerd.cjs; a loaded host runs 2-3x slower).
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero movements_product_missing,movements_branch_missing,movements_lot_missing,movements_lot_other_product,sale_movements_sale_missing,sale_movements_line_missing,return_family_return_missing,ambiguous_reference_unowned
@@ -37,12 +37,12 @@ WITH m AS MATERIALIZED (
     CASE WHEN pb.id IS NOT NULL AND pb.variant_product_id IS NOT m.product_id THEN 1 ELSE 0 END AS other_lot,
     CASE WHEN m.movement_type = 'sale' AND typeof(m.reference_id) IN ('integer', 'real') AND s.id IS NULL THEN 1 ELSE 0 END AS no_sale,
     CASE WHEN m.movement_type = 'sale' AND s.id IS NOT NULL
-      AND NOT EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = s.id AND si.product_id = m.product_id) THEN 1 ELSE 0 END AS no_line,
+      AND NOT EXISTS (SELECT 1 FROM sale_items si WHERE si.product_id = m.product_id AND si.branch_id IS m.branch_id AND si.sale_id = s.id) THEN 1 ELSE 0 END AS no_line,
     CASE WHEN m.movement_type IN ('return_reversal', 'replacement_out', 'damage_reversal', 'supplier_return', 'supplier_return_reversal')
       AND typeof(m.reference_id) IN ('integer', 'real') AND r.id IS NULL THEN 1 ELSE 0 END AS no_return,
     CASE WHEN m.movement_type IN ('return', 'damage_in', 'damage_out') AND typeof(m.reference_id) IN ('integer', 'real')
       AND NOT EXISTS (SELECT 1 FROM return_items ri WHERE ri.return_id = m.reference_id AND ri.product_id = m.product_id)
-      AND NOT EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = m.reference_id AND si.product_id = m.product_id) THEN 1 ELSE 0 END AS unowned
+      AND NOT EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = m.reference_id AND +si.product_id = m.product_id) THEN 1 ELSE 0 END AS unowned
   FROM inventory_movements m
   LEFT JOIN products p ON p.id = m.product_id
   LEFT JOIN product_batches pb ON pb.id = m.batch_id

@@ -1,4 +1,4 @@
--- DATA-AUDIT lane B (stock & cost), query 10 of 14: scoped Set operations and stock-in sessions against their movements, snapshots and history.
+-- DATA-AUDIT lane B (stock & cost), query 10 of 16: scoped Set operations and stock-in sessions against their movements, snapshots and history.
 -- Owner ask 7 Oct 2026: "compare all the backend data for any inconsistencies or logic that isn't consistent".
 --
 -- Rule (system prompt "Undo must actually reverse"; lib/stockLotAdjustment.ts, lib/stockSession.ts, lib/stockInLineEdit.ts): every action that records an
@@ -41,8 +41,10 @@
 --   open_history_without_applier       of them, with no server applier in the undo payload (undone by the client, never by the server)
 --   open_history_without_applier_by_entity   json object entity -> count, the ten largest
 --   first_ids                          json object: the lowest offending operation id / history id per column family
+-- Needs migration: 0097 (undo_snapshots), 0124 (stock_session_*), 0193 (stock_lot_adjustment_operations); production has applied them (a missing table makes the statement fail loudly, never report 0).
 -- Measured cost: a range read per operation row on the reference_id index (a few hundred rows), index probes per session member, and one pass over
 -- action_history; see the scale test output (test-audit-b-scale-workerd.cjs).
+-- Measured at production scale (workerd D1, 13 ms best of 5 on an idle host, 50k rows read; fixture = 6 Oct 2026 inventory, test-audit-b-scale-workerd.cjs; a loaded host runs 2-3x slower).
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero set_state_generation_mismatch,set_forward_rows_mismatch,set_forward_quantity_mismatch,set_forward_scope_mismatch,set_forward_direction_mismatch,set_counter_rows_mismatch,set_counter_quantity_mismatch,operation_history_missing,operation_history_mismatch,session_ops_without_members,session_member_movement_missing,session_member_movement_mismatch,session_member_lot_other_product,session_generation_rows_mismatch,session_snapshot_unusable,session_history_mismatch,open_history_without_operation

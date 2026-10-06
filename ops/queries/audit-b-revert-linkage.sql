@@ -1,4 +1,4 @@
--- DATA-AUDIT lane B (stock & cost), query 9 of 14: every Revert is linked to its source and inverts exactly its recorded delta.
+-- DATA-AUDIT lane B (stock & cost), query 9 of 16: every Revert is linked to its source and inverts exactly its recorded delta.
 -- Owner ask 7 Oct 2026: "compare all the backend data for any inconsistencies or logic that isn't consistent".
 --
 -- Owner rule (30 Sep / 5 Oct, memory owner-answers): a Revert is an official COMPENSATING record -- its own labelled row linked both ways
@@ -26,6 +26,7 @@
 --   first_ids                        json object: the lowest offending Revert id per column family, ids only
 -- Needs only inventory_movements. Measured cost: a range read of the (reference_id, movement_type, id) index over the 'revert:' prefix (a few thousand
 -- rows) and one primary-key probe each; see the scale test output (test-audit-b-scale-workerd.cjs).
+-- Measured at production scale (workerd D1, 0 ms best of 5 on an idle host, 6 rows read; fixture = 6 Oct 2026 inventory, test-audit-b-scale-workerd.cjs; a loaded host runs 2-3x slower).
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero revert_reference_malformed,revert_original_missing,revert_id_precedes_original,revert_wrong_product_or_branch,revert_quantity_not_inverse,revert_direction_not_inverse,revert_lot_differs,revert_of_unrevertible_type,originals_reverted_more_than_once

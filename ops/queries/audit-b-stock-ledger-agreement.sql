@@ -1,4 +1,4 @@
--- DATA-AUDIT lane B (stock & cost), query 1 of 13: do the stock ledgers agree, and do their rows point at things that exist?
+-- DATA-AUDIT lane B (stock & cost), query 1 of 16: do the stock ledgers agree, and do their rows point at things that exist?
 -- Owner ask 7 Oct 2026: "compare all the backend data for any inconsistencies or logic that isn't consistent".
 --
 -- Stock is recorded in three places (memory two-stock-ledgers-diverge): products.stock_quantity (the all-branch
@@ -32,6 +32,7 @@
 --   example_*                          the lowest orphan id of each kind (a product id, a lot id, a lot id), NULL when none
 -- Measured cost: see the header of test-audit-b-scale-workerd.cjs output (one pass over branch_stock, branch_batch_stock
 -- and product_batches; no per-row sub-query).
+-- Measured at production scale (workerd D1, 102 ms best of 5 on an idle host, 384k rows read; fixture = 6 Oct 2026 inventory, test-audit-b-scale-workerd.cjs; a loaded host runs 2-3x slower).
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero branch_stock_orphan_product,branch_stock_orphan_branch,lot_stock_orphan_lot,lot_stock_orphan_branch,lots_orphan_product,stock_at_inactive_branch,positive_stock_in_inactive_lot,active_stock_without_branch_row,rollup_negative
@@ -66,23 +67,38 @@ WITH bl AS MATERIALIZED (
   FROM products p LEFT JOIN sums m ON m.product_id = p.id
 ), lp AS (
   SELECT COUNT(*) AS n, MIN(pb.id) AS ex FROM product_batches pb LEFT JOIN products p ON p.id = pb.variant_product_id WHERE p.id IS NULL
+), bla AS MATERIALIZED (
+  SELECT COALESCE(SUM(no_lot), 0) AS no_lot, COALESCE(SUM(no_branch), 0) AS no_branch, COALESCE(SUM(at_inactive_branch), 0) AS at_inactive_branch,
+    COALESCE(SUM(positive_inactive), 0) AS positive_inactive, MIN(ex_lot) AS ex_lot
+  FROM bl
+), bsa AS MATERIALIZED (
+  SELECT COALESCE(SUM(CASE WHEN pid IS NULL THEN 1 ELSE 0 END), 0) AS orphan_product, COALESCE(SUM(no_branch), 0) AS no_branch,
+    COALESCE(SUM(at_inactive_branch), 0) AS at_inactive_branch, MIN(CASE WHEN pid IS NULL THEN product_id END) AS ex_product
+  FROM bsx
+), ra AS MATERIALIZED (
+  SELECT COALESCE(SUM(CASE WHEN is_active = 1 AND ABS(q - s) > 0.000001 THEN 1 ELSE 0 END), 0) AS drift_active,
+    COALESCE(SUM(CASE WHEN COALESCE(is_active, 0) <> 1 AND ABS(q - s) > 0.000001 THEN 1 ELSE 0 END), 0) AS drift_inactive,
+    COALESCE(SUM(CASE WHEN is_active = 1 AND q > 0.000001 AND has_rows IS NULL THEN 1 ELSE 0 END), 0) AS active_no_row,
+    COALESCE(SUM(CASE WHEN q < -0.000001 THEN 1 ELSE 0 END), 0) AS negative
+  FROM roll
 )
 SELECT
   (SELECT COUNT(*) FROM fork) AS tracked_pairs_branch_exceeds_lots,
   (SELECT COUNT(*) FROM fork WHERE lot_q <= 0.000001) AS tracked_pairs_till_shows_zero,
   (SELECT COALESCE(SUM(shelf - lot_q), 0) FROM fork) AS tracked_units_hidden_from_till,
-  (SELECT COUNT(*) FROM roll WHERE is_active = 1 AND ABS(q - s) > 0.000001) AS rollup_drift_active,
-  (SELECT COUNT(*) FROM roll WHERE COALESCE(is_active, 0) <> 1 AND ABS(q - s) > 0.000001) AS rollup_drift_inactive,
-  (SELECT COUNT(*) FROM bsx WHERE pid IS NULL) AS branch_stock_orphan_product,
-  (SELECT COALESCE(SUM(no_branch), 0) FROM bsx) AS branch_stock_orphan_branch,
-  (SELECT COALESCE(SUM(no_lot), 0) FROM bl) AS lot_stock_orphan_lot,
-  (SELECT COALESCE(SUM(no_branch), 0) FROM bl) AS lot_stock_orphan_branch,
+  ra.drift_active AS rollup_drift_active,
+  ra.drift_inactive AS rollup_drift_inactive,
+  bsa.orphan_product AS branch_stock_orphan_product,
+  bsa.no_branch AS branch_stock_orphan_branch,
+  bla.no_lot AS lot_stock_orphan_lot,
+  bla.no_branch AS lot_stock_orphan_branch,
   (SELECT n FROM lp) AS lots_orphan_product,
-  (SELECT COALESCE(SUM(at_inactive_branch), 0) FROM bsx) + (SELECT COALESCE(SUM(at_inactive_branch), 0) FROM bl) AS stock_at_inactive_branch,
-  (SELECT COALESCE(SUM(positive_inactive), 0) FROM bl) AS positive_stock_in_inactive_lot,
-  (SELECT COUNT(*) FROM roll WHERE is_active = 1 AND q > 0.000001 AND has_rows IS NULL) AS active_stock_without_branch_row,
-  (SELECT COUNT(*) FROM roll WHERE q < -0.000001) AS rollup_negative,
+  bsa.at_inactive_branch + bla.at_inactive_branch AS stock_at_inactive_branch,
+  bla.positive_inactive AS positive_stock_in_inactive_lot,
+  ra.active_no_row AS active_stock_without_branch_row,
+  ra.negative AS rollup_negative,
   (SELECT COALESCE(json_group_array(json_array(product_id, branch_id, shelf, lot_q)), '[]') FROM (SELECT product_id, branch_id, shelf, lot_q FROM fork ORDER BY shelf - lot_q DESC, product_id LIMIT 5)) AS examples_till_fork,
-  (SELECT MIN(product_id) FROM bsx WHERE pid IS NULL) AS example_branch_stock_orphan_product,
-  (SELECT MIN(ex_lot) FROM bl) AS example_lot_stock_orphan_lot,
+  bsa.ex_product AS example_branch_stock_orphan_product,
+  bla.ex_lot AS example_lot_stock_orphan_lot,
   (SELECT ex FROM lp) AS example_lots_orphan_product
+FROM ra, bsa, bla

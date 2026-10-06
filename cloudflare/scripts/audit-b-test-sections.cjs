@@ -268,9 +268,10 @@ section('audit-b-sale-deductions: every status transition table row fires its ow
   await plant('awaiting_delivery sale that took 3 for a 1-unit line', (w) => w.run('UPDATE inventory_movements SET quantity=-3 WHERE id=?', saleMovement(w, S(w).awaitingDelivery)), { deducted_over_deducted: 1 })
   await plant('cancelled sale whose restock row is missing (units still out)', (w) => w.run('DELETE FROM inventory_movements WHERE id=?', restoreMovement(w, S(w).toCancel)), { cancelled_still_out: 1 })
   await plant('cancelled sale restored twice (phantom stock)', (w) => w.movement({ product: 2, branch: SHOP, type: 'return', quantity: 4, reason: 'Sale cancelled (mistake)', reference: S(w).toCancel.id, batch: w.named.L2 }), { cancelled_over_restored: 1 })
-  await plant('lot allocation that released 1 unit of a held sale', (w) => w.run('UPDATE sale_item_batch_allocations SET released_quantity=1 WHERE sale_item_id=?', S(w).completed.itemIds[0]), { allocation_outstanding_mismatch: 1 })
-  await plant('status flipped to cancelled with no restock (movement AND allocation still say out)', (w) => w.run("UPDATE sales SET sale_status='cancelled' WHERE id=?", S(w).completed.id), { cancelled_still_out: 1, allocation_outstanding_mismatch: 1 })
-  await plant('sale line deleted but its units never given back', (w) => w.run('DELETE FROM sale_items WHERE id=?', S(w).completed.itemIds[0]), { deducted_over_deducted: 1 })
+  await plant('status flipped to cancelled with no restock (the movement still says out)', (w) => w.run("UPDATE sales SET sale_status='cancelled' WHERE id=?", S(w).completed.id), { cancelled_still_out: 1 })
+  // lines come from sale_items, so a deducted movement whose line is gone is audit-b-movement-references.sql's (sale_movements_line_missing), not this query's
+  await plant('sale line deleted but its units never given back (this query reads lines; the reference audit flags the orphan movement)', (w) => w.run('DELETE FROM sale_items WHERE id=?', S(w).completed.itemIds[0]), {})
+  await planted('audit-b-movement-references', 'the same orphan movement', (w) => w.run('DELETE FROM sale_items WHERE id=?', S(w).completed.itemIds[0]), { sale_movements_line_missing: 1 }, { base: activeWorld })
   // legitimate shapes
   await plant('a line removed WITH its restock row is balanced', (w) => {
     w.run('DELETE FROM sale_items WHERE id=?', S(w).completed.itemIds[0])
@@ -304,7 +305,7 @@ section('audit-b-sale-deductions: every status transition table row fires its ow
     w.run('UPDATE sale_item_batch_allocations SET released_quantity=? WHERE sale_item_id=?', restored, sale.itemIds[0])
   }
   await plant('cancel after a 2-unit return restores only the other 3 (q - returned)', cancelAfterReturn(3), {})
-  await plant('cancel after a 2-unit return that restores all 5 phantoms 2 units', cancelAfterReturn(5), { cancelled_over_restored: 1, allocation_outstanding_mismatch: 1 })
+  await plant('cancel after a 2-unit return that restores all 5 phantoms 2 units', cancelAfterReturn(5), { cancelled_over_restored: 1 })
   // the era columns and the example list name the offender
   const era = await plant('examples and era', (w) => w.run('UPDATE inventory_movements SET quantity=-1 WHERE id=?', saleMovement(w, S(w).completed)), { deducted_under_deducted: 1 })
   assert.deepEqual(JSON.parse(era.rows[0].examples_system), [[1, 2, SHOP, 'completed', 3, 1]])
@@ -667,9 +668,34 @@ section('audit-b-lot-date-shapes: an unparseable or future received date and an 
   await plant('a lot with a received date that is text', (w) => w.run("UPDATE product_batches SET received_at='yesterday' WHERE id=?", w.named.L2), { lots_received_unparseable: 1 })
   await plant('a received date in the far future', (w) => w.run("UPDATE product_batches SET received_at='2099-01-01' WHERE id=?", w.named.L2), { lots_received_in_future: 1 })
   await plant('an expiry that is not a date', (w) => w.run("UPDATE product_batches SET expiry_date='soon' WHERE id=?", w.named.L2), { lots_expiry_unparseable: 1 })
-  await plant('an expiry before the received day', (w) => w.run("UPDATE product_batches SET expiry_date='2026-01-01' WHERE id=?", w.named.L2), { lots_expiry_before_received: 1 })
+  const early = await plant('an expiry before the received day', (w) => w.run("UPDATE product_batches SET expiry_date='2026-01-01' WHERE id=?", w.named.L2), { lots_expiry_before_received: 1 })
+  assert.deepEqual(JSON.parse(early.rows[0].examples).map((e) => [e[2], e[3], e[4]]), [['2026-08-05', '2026-01-01', 'expiry_before_received']])
   await plant('an ISO timestamp expiry is read by its date part', (w) => w.run("UPDATE product_batches SET expiry_date='2027-08-06T00:00:00Z' WHERE id=?", w.named.L3), {})
   const exp = await plant('expired stock is sized, not flagged', (w) => w.run("UPDATE product_batches SET expiry_date='2026-08-20' WHERE id=?", w.named.L3), {})
   assert.deepEqual([exp.rows[0].expired_lots_with_stock, exp.rows[0].expired_units_on_hand], [1, 28])
   await plant('an inactive lot is not read', (w) => w.run("UPDATE product_batches SET received_at=NULL, is_active=0 WHERE id=?", w.named.L5), {})
+})
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 16. audit-b-sale-allocations
+// ---------------------------------------------------------------------------------------------------------------------
+section('audit-b-sale-allocations: a held item that released units, a cancelled line that kept or over-released units each fire; legacy, skipped and damaged lines stay quiet', async () => {
+  const Q = 'audit-b-sale-allocations'
+  const plant = (label, mutate, expected) => planted(Q, label, mutate, expected, { base: activeWorld })
+  const w0 = activeWorld()
+  const clean = (await run(w0, Q)).rows[0]
+  assert.equal(clean.items_with_allocations > 4, true)
+  assert.equal(clean.cancelled_lines_with_allocations, 1)
+  assert.equal(clean.examples, '[]')
+  w0.raw.close()
+  const S = (w) => w.named.sales
+  const held = await plant('a held item whose allocation released 1 unit', (w) => w.run('UPDATE sale_item_batch_allocations SET released_quantity=1 WHERE sale_item_id=?', S(w).completed.itemIds[0]), { allocation_held_items_mismatch: 1 })
+  assert.deepEqual(JSON.parse(held.rows[0].examples).map((e) => e.slice(2)), [[3, 2]])
+  await plant('a held item whose allocation drew another quantity', (w) => w.run('UPDATE sale_item_batch_allocations SET quantity=9 WHERE sale_item_id=?', S(w).awaitingPayment.itemIds[0]), { allocation_held_items_mismatch: 1 })
+  await plant('a cancelled sale whose allocation was never released', (w) => w.run('UPDATE sale_item_batch_allocations SET released_quantity=0 WHERE sale_item_id=?', S(w).toCancel.itemIds[0]), { allocation_cancelled_lines_mismatch: 1 })
+  await plant('a held sale flipped to cancelled with its allocation still out', (w) => w.run("UPDATE sales SET sale_status='cancelled' WHERE id=?", S(w).completed.id), { allocation_cancelled_lines_mismatch: 1 })
+  await plant('an item with no allocation rows at all is legacy, not a defect', (w) => w.run('DELETE FROM sale_item_batch_allocations WHERE sale_item_id=?', S(w).completed.itemIds[0]), {})
+  await plant('allocations still held on a stock-skipped sale belong to the skipped-sales audit', (w) => w.run('UPDATE sale_item_batch_allocations SET released_quantity=1 WHERE sale_item_id=?', S(w).imported.itemIds[0]), {})
+  await plant('a replacement sale is left to the returns audit', (w) => w.run('UPDATE sales SET source_return_id=1 WHERE id=?', S(w).completed.id), {})
+  await plant('a damaged-lot line is not a branch line', (w) => { w.run('UPDATE sale_items SET damaged_lot_id=1 WHERE id=?', S(w).completed.itemIds[0]); w.run('UPDATE sale_item_batch_allocations SET released_quantity=1 WHERE sale_item_id=?', S(w).completed.itemIds[0]) }, {})
 })

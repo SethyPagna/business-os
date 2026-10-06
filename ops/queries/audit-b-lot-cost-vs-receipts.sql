@@ -1,4 +1,4 @@
--- DATA-AUDIT lane B (stock & cost), query 14 of 15: the cost a lot carries against the cost its receipt movements recorded.
+-- DATA-AUDIT lane B (stock & cost), query 14 of 16: the cost a lot carries against the cost its receipt movements recorded.
 -- Owner ask 7 Oct 2026: "compare all the backend data for any inconsistencies or logic that isn't consistent".
 --
 -- Owner rule (cost, 25 Sep 2026; cutover lots 6 Oct): the cost of a lot is the cost it was RECEIVED at (an 'add' movement with unit_cost_usd and batch_id), until a
@@ -19,35 +19,41 @@
 --   add_movements_zero_cost            'add' movements on a lot recorded at exactly 0
 --   examples                           up to 5 [lot_id, product_id, lot_cost, newest_receipt_cost], the largest gap first
 -- Measured cost: one pass over the add movements that name a lot and one over product_batches; see the scale test output (test-audit-b-scale-workerd.cjs).
+-- Measured at production scale (workerd D1, 121 ms best of 5 on an idle host, 161k rows read; fixture = 6 Oct 2026 inventory, test-audit-b-scale-workerd.cjs; a loaded host runs 2-3x slower).
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero add_movements_total_mismatch,add_movements_cost_without_lot_cost
 WITH rc AS MATERIALIZED (
-  SELECT batch_id,
+  SELECT m.batch_id AS batch_id,
     COUNT(*) AS n,
-    SUM(CASE WHEN typeof(unit_cost_usd) IN ('integer', 'real') AND unit_cost_usd > 0 THEN 1 ELSE 0 END) AS costed,
-    SUM(CASE WHEN typeof(unit_cost_usd) IN ('integer', 'real') AND unit_cost_usd > 0 AND ABS(unit_cost_usd - COALESCE((SELECT unit_cost_usd FROM product_batches b WHERE b.id = batch_id), -1)) <= 0.00001 THEN 1 ELSE 0 END) AS matching,
-    MAX(CASE WHEN typeof(unit_cost_usd) IN ('integer', 'real') AND unit_cost_usd > 0 THEN unit_cost_usd END) AS max_cost,
-    SUM(CASE WHEN unit_cost_usd = 0 THEN 1 ELSE 0 END) AS zero_cost,
-    SUM(CASE WHEN unit_cost_usd IS NOT NULL AND total_cost_usd IS NOT NULL AND ABS(unit_cost_usd * quantity - total_cost_usd) > 0.01 THEN 1 ELSE 0 END) AS bad_total
-  FROM inventory_movements
-  WHERE movement_type = 'add' AND batch_id IS NOT NULL
-  GROUP BY batch_id
+    COALESCE(SUM(CASE WHEN typeof(m.unit_cost_usd) IN ('integer', 'real') AND m.unit_cost_usd > 0 THEN 1 ELSE 0 END), 0) AS costed,
+    COALESCE(SUM(CASE WHEN typeof(m.unit_cost_usd) IN ('integer', 'real') AND m.unit_cost_usd > 0 AND ABS(m.unit_cost_usd - COALESCE(b.unit_cost_usd, -1)) <= 0.00001 THEN 1 ELSE 0 END), 0) AS matching,
+    MAX(CASE WHEN typeof(m.unit_cost_usd) IN ('integer', 'real') AND m.unit_cost_usd > 0 THEN m.unit_cost_usd END) AS max_cost,
+    COALESCE(SUM(CASE WHEN m.unit_cost_usd = 0 THEN 1 ELSE 0 END), 0) AS zero_cost,
+    COALESCE(SUM(CASE WHEN m.unit_cost_usd IS NOT NULL AND m.total_cost_usd IS NOT NULL AND ABS(m.unit_cost_usd * m.quantity - m.total_cost_usd) > 0.01 THEN 1 ELSE 0 END), 0) AS bad_total
+  FROM inventory_movements m
+  LEFT JOIN product_batches b ON b.id = m.batch_id
+  WHERE m.movement_type = 'add' AND m.batch_id IS NOT NULL
+  GROUP BY m.batch_id
 ), lt AS MATERIALIZED (
-  SELECT b.id, b.variant_product_id AS p, b.unit_cost_usd AS cost, rc.n, rc.costed, rc.matching, rc.max_cost, rc.zero_cost, rc.bad_total,
+  SELECT b.id, b.variant_product_id AS p, b.unit_cost_usd AS cost, (typeof(b.unit_cost_usd) IN ('integer', 'real') AND b.unit_cost_usd > 0) AS rc_cost, rc.n, rc.costed, rc.matching, rc.max_cost, rc.zero_cost, rc.bad_total,
     COALESCE((SELECT SUM(quantity) FROM branch_batch_stock s WHERE s.batch_id = b.id AND s.quantity > 0), 0) AS q
   FROM product_batches b
   LEFT JOIN rc ON rc.batch_id = b.id
+), ag AS MATERIALIZED (
+  SELECT
+    COALESCE(SUM(bad_total), 0) AS add_movements_total_mismatch,
+    COALESCE(SUM(CASE WHEN cost IS NULL THEN costed END), 0) AS add_movements_cost_without_lot_cost,
+    COALESCE(SUM(CASE WHEN n > 0 THEN 1 ELSE 0 END), 0) AS lots_with_receipts,
+    COALESCE(SUM(CASE WHEN rc_cost = 1 AND costed > 0 AND matching = 0 THEN 1 ELSE 0 END), 0) AS lots_cost_differs_from_all_receipts,
+    COALESCE(SUM(CASE WHEN rc_cost = 1 AND costed > 0 AND matching = 0 THEN q END), 0) AS lots_cost_differs_units,
+    COALESCE(SUM(CASE WHEN rc_cost = 1 AND n IS NULL THEN 1 ELSE 0 END), 0) AS lots_costed_without_receipts,
+    COALESCE(SUM(CASE WHEN rc_cost = 1 AND n > 0 AND costed = 0 THEN 1 ELSE 0 END), 0) AS lots_receipts_without_cost,
+    COALESCE(SUM(zero_cost), 0) AS add_movements_zero_cost
+  FROM lt
 )
-SELECT
-  (SELECT COALESCE(SUM(bad_total), 0) FROM lt) AS add_movements_total_mismatch,
-  (SELECT COALESCE(SUM(costed), 0) FROM lt WHERE cost IS NULL) AS add_movements_cost_without_lot_cost,
-  (SELECT COUNT(*) FROM lt WHERE n > 0) AS lots_with_receipts,
-  (SELECT COUNT(*) FROM lt WHERE typeof(cost) IN ('integer', 'real') AND cost > 0 AND costed > 0 AND matching = 0) AS lots_cost_differs_from_all_receipts,
-  (SELECT COALESCE(SUM(q), 0) FROM lt WHERE typeof(cost) IN ('integer', 'real') AND cost > 0 AND costed > 0 AND matching = 0) AS lots_cost_differs_units,
-  (SELECT COUNT(*) FROM lt WHERE typeof(cost) IN ('integer', 'real') AND cost > 0 AND n IS NULL) AS lots_costed_without_receipts,
-  (SELECT COUNT(*) FROM lt WHERE typeof(cost) IN ('integer', 'real') AND cost > 0 AND n > 0 AND costed = 0) AS lots_receipts_without_cost,
-  (SELECT COALESCE(SUM(zero_cost), 0) FROM lt) AS add_movements_zero_cost,
+SELECT ag.*,
   (SELECT COALESCE(json_group_array(json_array(id, p, cost, max_cost)), '[]')
-    FROM (SELECT id, p, cost, max_cost FROM lt WHERE typeof(cost) IN ('integer', 'real') AND cost > 0 AND costed > 0 AND matching = 0
+    FROM (SELECT id, p, cost, max_cost FROM lt WHERE rc_cost = 1 AND costed > 0 AND matching = 0
       ORDER BY ABS(cost - max_cost) DESC, id LIMIT 5)) AS examples
+FROM ag
