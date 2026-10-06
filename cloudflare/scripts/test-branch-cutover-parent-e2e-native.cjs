@@ -269,7 +269,7 @@ function labelOf(row) {
 }
 
 /** The driver: status read, one invocation, independent invariants. Faults keyed by '<label>#<occurrence>'. */
-async function drive(w, { faults = {}, base, requestId = 'cutover_night_001', pageSize, maxTurns = 4000, timings } = {}) {
+async function drive(w, { faults = {}, base, requestId = 'cutover_night_001', pageSize, maxTurns = 4000, timings, onStep } = {}) {
   const seen = {}; let turns = 0
   const plan = await w.m.parent.inspectBranchCutover(w.db, ACTOR, 1, IDS, PARENT_BUDGET)
   assert.deepEqual(plan.capabilities, [])
@@ -311,6 +311,7 @@ async function drive(w, { faults = {}, base, requestId = 'cutover_night_001', pa
     }
     if (fault === 'kill') w.reload()
     if (base) invariants(w.raw, base, label + '#' + seen[label])
+    if (onStep) await onStep(label, w)
   }
 }
 

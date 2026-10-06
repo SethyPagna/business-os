@@ -10,7 +10,8 @@
 //   - the ops fold preview (as guarded and run by the Ops task) is under the same bounds and equals the run;
 //   - 7429 resets injected on real D1 reads and batches at several stages leave the run resumable;
 //   - the received-date census (ops) is under the same bounds, and D1's own date()/GLOB/trim() compute the
-//     business day exactly as the run's JS does (owner 6 Oct: slash dates are dates, month-first).
+//     business day exactly as the run's JS does (owner 6 Oct: slash dates are dates, month-first);
+//   - the runbook P7 / P10 post-checks are under the same bounds, all 0, and P7 = P10 once the folds are put back.
 // It prints the slowest statement per stage (CUTOVER_SCALE=1 is the report's timings table).
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -39,6 +40,10 @@ async function main() {
   const guard = await import(pathToFileURL(path.join(root, 'ops/scripts/ops-sql-guard.mjs')).href)
   const preview = guard.guardSql(fs.readFileSync(path.join(root, 'ops/queries/cutover-fold-preview.sql'), 'utf8')).sql
   const census = guard.guardSql(fs.readFileSync(path.join(root, 'ops/queries/received-date-format-census.sql'), 'utf8')).sql
+  // runbook P7 / P10 post-checks (G12-CUTOVER-READINESS.md 3.4)
+  const POST = ['stock', 'labels', 'checks']
+  const post = Object.fromEntries(POST.map(name => [name, guard.guardSql(fs.readFileSync(path.join(root, 'ops/queries/branch-cutover-post-' + name + '.sql'), 'utf8')).sql]))
+  const p7 = {}
   const { mf, call } = await harness.start()
   let checks = 0
   const check = async (name, fn) => { await fn(); checks++; console.log('PASS ' + name) }
@@ -82,7 +87,12 @@ async function main() {
     await check('the whole cutover runs on workerd D1 at scale, every statement bounded, with 7429 resets injected on real reads and batches', async () => {
       const faults = { 'capture#5': { on: 'read', at: 1 }, 'capture#9': { on: 'batch', at: 0 }, 'child#3': { on: 'batch', at: 0 }, 'child#7': { on: 'read', at: 2 },
         'fold#2': { on: 'batch', at: 0 }, 'reconcile#3': { on: 'read', at: 1 }, 'finalize#1': { on: 'batch', at: 0 } }
-      run = await harness.drive(call, { faults })
+      run = await harness.drive(call, { faults, onTurn: async (label, response) => {
+        // P7: the comparable half read right after begin, under the fence
+        if (label === 'begin' && !response.error && !p7.stock) for (const name of ['stock', 'labels']) {
+          const result = await call({ op: 'query', sql: post[name] }); assert.ok(result.rows && result.rows.length === 1, name + ' P7 ' + JSON.stringify(result).slice(0, 300)); p7[name] = result
+        }
+      } })
       assert.deepEqual(run.fired.sort(), Object.keys(faults).sort())
       // each injected reset surfaced once, as the 7429 itself or as an unconfirmed outcome caused by it, and the next call resumed
       assert.equal(run.faultErrors.length, Object.keys(faults).length)
@@ -111,6 +121,27 @@ async function main() {
       assert.equal(expected.moving_products, terminal.committedChildren)
       const left = (await call({ op: 'query', sql: 'SELECT (SELECT count(*) FROM branch_stock WHERE branch_id=2 AND quantity<>0) + (SELECT count(*) FROM branch_batch_stock WHERE branch_id=2 AND quantity<>0) AS n' })).rows[0].n
       assert.equal(left, 0)
+    })
+    await check('runbook P10 post-checks at scale: bounded on D1, every check 0, P7 = P10 once the recorded folds are put back', async () => {
+      const { compareCutoverPost } = await import(pathToFileURL(path.join(root, 'ops/scripts/branch-cutover-post-compare.mjs')).href)
+      assert.ok(p7.stock && p7.labels, 'P7 was read right after begin')
+      const now = {}
+      for (const name of POST) {
+        const result = await call({ op: 'query', sql: post[name] })
+        assert.ok(result.rows && result.rows.length === 1, name + ' ' + JSON.stringify(result).slice(0, 300))
+        console.log('POST ' + JSON.stringify({ name, ms: result.meta.duration, rowsRead: result.meta.rows_read, p7: p7[name]?.meta }))
+        for (const meta of [result.meta, p7[name]?.meta].filter(Boolean)) {
+          assert.ok(meta.duration <= STATEMENT_MS, name + ' ms ' + meta.duration)
+          assert.ok(meta.rows_read <= ROWS_PER_SCALE * SCALE, name + ' rows ' + meta.rows_read)
+        }
+        now[name] = { query: name, sql: post[name], rows: result.rows }
+      }
+      assert.deepEqual(Object.entries(now.checks.rows[0]).filter(([, v]) => v !== 0), [])
+      for (const name of ['stock', 'labels']) {
+        const result = compareCutoverPost({ query: name, sql: post[name], rows: p7[name].rows }, now[name])
+        assert.ok(result.ok, name + ' ' + JSON.stringify(result.columns.filter(c => !c.ok)))
+      }
+      assert.ok(now.stock.rows[0].info_folds > 0)
     })
   } finally { await mf.dispose() }
   console.log(`${checks} branch cutover scale (workerd D1) checks passed`)
