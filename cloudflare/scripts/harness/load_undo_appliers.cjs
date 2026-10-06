@@ -119,7 +119,9 @@ function loadUndoAppliers(d1, { audit = async () => {}, realSaleModules = false,
     return dependency.exports
   }
   for (const name of ['branchWrites', 'customerGenderRestoration', 'saleMoneyPrecision', 'productMergeLineage',
-    'promotionRules', 'saleItemPricing', 'catalogCostRecompute', 'actorSnapshot', 'productMerge']) {
+    'promotionRules', 'saleItemPricing', 'catalogCostRecompute', 'actorSnapshot', 'productMerge',
+    // NOTIF-V2: the add-items redo plans a stock_alert_events statement (real modules; './db' is the stub above).
+    'lowStockSettings', 'familyPagination', 'saleStockAlerts']) {
     stubs[`./${name}`] = loadDependency(path.join(LIB_DIR, `${name}.ts`))
   }
   // A test that drives the sale add-items replay asks for the real line planner
@@ -133,7 +135,11 @@ function loadUndoAppliers(d1, { audit = async () => {}, realSaleModules = false,
   const mod = { exports: {} }
   try {
     new Function('exports', 'require', 'module', '__filename', '__dirname', transpile(path.join(LIB_DIR, 'undoAppliers.ts'), ts.ScriptTarget.ES2020))(
-      mod.exports, require, mod, path.join(LIB_DIR, 'undoAppliers.ts'), LIB_DIR,
+      // A stub-aware require: the module's on-demand imports (NOTIF-V2 planRedoStockAlert) run after the load-time
+      // Module._load patch below is gone, and must still see the same stubs / real preloads.
+      mod.exports, (request) => (MONEY_PRECISION_REQUESTS.includes(request) ? moneyPrecision
+        : Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : require(request)),
+      mod, path.join(LIB_DIR, 'undoAppliers.ts'), LIB_DIR,
     )
   } finally {
     Module._load = original

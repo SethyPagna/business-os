@@ -184,6 +184,7 @@ const EXCLUDED = new Map([
   ['import_auto_merges.product_id', 'provenance: records which id an import folded'],
   ['import_auto_merges.merged_into_product_id', 'provenance: records which id an import folded into'],
   ['sale_amendments.product_id', 'SNAPSHOT, declared as such in migration 0115'],
+  ['stock_alert_events.product_id', 'NOTIF-V2 bell history: which product a past sale took low / out of stock (name snapshot, 30-day retention); the discarded row is deactivated, never deleted'],
   ['sale_not_paid_repair_0173.product_id', 'provenance: repair receipt of migration 0173 (before-values per line)'],
   ['catalog_cost_recompute_0175.product_id', 'provenance: repair receipt of migration 0175 (cost before/after per product)'],
   ['catalog_cost_repair_0195_backup.product_id', 'provenance: backup of migration 0195 (cost before/after per product; its recovery key)'],

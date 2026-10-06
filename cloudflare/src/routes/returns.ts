@@ -7,7 +7,7 @@ import { selectInChunks } from '../lib/sqlBinding'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, changedFields } from '../lib/audit'
-import { sendReturnStatusTelegramEvents, sendReturnTelegramEvent, sendTelegramEvent, formatSaleTelegramLines } from '../lib/telegram'
+import { sendPendingStockAlerts, sendReturnStatusTelegramEvents, sendReturnTelegramEvent, sendTelegramEvent, formatSaleTelegramLines } from '../lib/telegram'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -31,6 +31,8 @@ import { loadReturnRecords } from '../lib/returnRecords'
 import { WAREHOUSE_NOT_SELLABLE_ERROR } from '../lib/branchRoleGuards'
 import { branchCanSell } from '../lib/branchRoles'
 import type { Env } from '../index'
+import { loadLowStockConfig } from '../lib/lowStockSettings'
+import { planSaleStockAlertStatement } from '../lib/saleStockAlerts'
 import { actorId, actorSnapshot } from '../lib/actorSnapshot'
 import { buildSaleCreationSnapshot } from '../lib/saleCreationSnapshot'
 // N21: sales.customer_address holds the DISPLAY address; the replacement sale
@@ -50,6 +52,16 @@ import {
 import { canonicalMoney4, SaleMoneyContractError } from '../lib/saleMoneyPrecision'
 import { ProductMergeLineageError, resolveProductMergeLineage } from '../lib/productMergeLineage'
 import { TAGGED_DISPOSAL_MOVEMENT_TYPE } from '../lib/stockCondition'
+
+// NOTIF-V2: announce the stock crossing an exchange's replacement sale recorded, after the return has committed.
+// Never rejects: nothing about Telegram may fail a return that already committed.
+async function announceStockAlerts(env: Env): Promise<void> {
+  try {
+    await sendPendingStockAlerts(env)
+  } catch (error) {
+    console.warn('Stock alert Telegram message was not sent:', (error as Error)?.message || error)
+  }
+}
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -2082,6 +2094,18 @@ app.post('/', async (c) => {
   }
 
   let saleAllocationCount = 0
+  // NOTIF-V2: an exchange hands the customer a REPLACEMENT SALE (a completed sale row with receipt and lines), so the units it
+  // takes can carry a family into low / out of stock like any sale. The alert goes ahead of the replacement stock statements
+  // (it reads the rollup after this return's own restock, which is already queued) and names that replacement sale by its
+  // write key, which the sale INSERT above has already queued. A plain return that restocks never records one.
+  if (replacementLines.length) {
+    const exchangeAlert = planSaleStockAlertStatement({
+      lines: replacementLines.map((line) => ({ product_id: line.productId, branch_id: line.branchId, quantity: line.quantity })),
+      lowStock: await loadLowStockConfig(c.env),
+      sale: { saleWriteKey: replacementClientRequestId },
+    })
+    if (exchangeAlert) statements.push(exchangeAlert)
+  }
   for (const [index, line] of replacementLines.entries()) {
     const replacementPlan = planReplacementStock({
       ...line, returnIdSql: returnIdExpression, returnNumber,
@@ -2291,6 +2315,7 @@ app.post('/', async (c) => {
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(bumpVersions(c.env, ['products', 'returns', 'sales']))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'create', id: response.id }))
+  if (replacementLines.length) c.executionCtx.waitUntil(announceStockAlerts(c.env))
   c.executionCtx.waitUntil(sendReturnTelegramEvent(c.env, response.id, {
     kind: 'customer', returnNumber, receiptNumber: body.receipt_number || saleMeta?.receipt_number || null,
     party: body.customer_name || saleMeta?.customer_name || null, branch: branchName, reason,

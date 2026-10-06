@@ -499,6 +499,12 @@ export function productNameSnapshotStatements(productId: number, productName: st
 //     a data migration (before-values and applied flags per product id); the
 //     same provenance rule as stock_row_moves: they say what was repaired, they
 //     are not a live link.
+//   stock_alert_events.product_id -- NOTIF-V2 bell history, not a live link: the row
+//     says which product a past SALE took low or out of stock, next to a
+//     product_name snapshot and the family's name key, and is pruned after 30 days.
+//     A merge only deactivates the discarded row (it stays, so the id never
+//     dangles) and the bell navigates by sale id / product name, so repointing it
+//     would rewrite what the sale announced and bloat the merge's undo snapshot.
 //   sale_amendments.product_id -- a SNAPSHOT, not a link. 0115:73 says so in
 //     the schema itself ("product_id/product_name are snapshotted here and not
 //     looked up"), so the amendment must keep naming the row the amendment was
@@ -1355,6 +1361,19 @@ function salePrecisionLedgerFields(value: Record<string,unknown>): Record<string
     .filter(key => Object.prototype.hasOwnProperty.call(value,key)).map(key => [key,value[key]]))
 }
 
+// NOTIF-V2: the stock-alert statement for a redo that re-takes added sale units (null when it takes none). The two
+// modules load on demand: only a redo that really deducts needs them, so every other replay (and every harness that
+// loads this file with a hand-written module map) is untouched.
+async function planRedoStockAlert(
+  env: Env,
+  deductions: Array<{ product_id: number; branch_id: number | null; quantity: number }>,
+  saleId: number,
+): Promise<{ sql: string; params: Record<string, unknown> } | null> {
+  if (!deductions.length) return null
+  const [{ loadLowStockConfig }, { planSaleStockAlertStatement }] = await Promise.all([import('./lowStockSettings'), import('./saleStockAlerts')])
+  return planSaleStockAlertStatement({ lines: deductions, lowStock: await loadLowStockConfig(env), sale: { saleId } })
+}
+
 async function replayAtomicSaleAddItems(
   db: ReturnType<typeof getDb>,
   reversal: AtomicSaleAddItemsReversal,
@@ -1515,6 +1534,10 @@ async function replayAtomicSaleAddItems(
     })
     const redoGroupId = crypto.randomUUID()
     statements.push(...planUnlottedSaleLineGuards(plan.lines))
+    // NOTIF-V2: a redo takes the added units out again, so it can carry a family into low / out of stock exactly as the
+    // original add did (an undo gives units back and records nothing). Ahead of the plan's stock statements.
+    const redoStockAlert = await planRedoStockAlert(ctx.env, plan.deductions, saleId)
+    if (redoStockAlert) statements.push(redoStockAlert)
     const ordinalByStatement = new Map(plan.saleItemStatementIndexByLine.map((statementIndex, ordinal) => [statementIndex, ordinal]))
     for (const [statementIndex, statement] of plan.statements.entries()) {
       statements.push(statement)
@@ -3186,10 +3209,13 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         // never explains.
         const redoGroupId = crypto.randomUUID()
         const residualGuards = planUnlottedSaleLineGuards(plan.lines)
+        // NOTIF-V2: see the atomic redo above. Part of `leading`, so the saleItem statement indexes below stay exact.
+        const legacyRedoAlert = await planRedoStockAlert(ctx.env, plan.deductions, saleId)
         const leading = [
           saleGuard,
           { sql: 'DELETE FROM sale_bulk_guards', params: {} },
           ...residualGuards,
+          ...(legacyRedoAlert ? [legacyRedoAlert] : []),
         ]
         const results = await db.batch([
           ...leading,

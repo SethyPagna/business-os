@@ -39,7 +39,7 @@ async function workerBundle() {
         audit: 'export const audit=async()=>{};export const changedFields=()=>null;export const auditChangeColumns=()=>({old_value:null,new_value:null});export const isSecretShapedAuditKey=()=>false',
         cache: 'export const bumpVersion=async()=>{};export const bumpVersions=async()=>{};',
         broadcastHub: 'export const broadcast=async()=>{}',
-        telegram: `export const sendReturnTelegramEvent=async()=>{};export const sendReturnStatusTelegramEvents=async()=>{};export const sendTelegramEvent=async()=>{};
+        telegram: `export const sendReturnTelegramEvent=async()=>{};export const sendReturnStatusTelegramEvents=async()=>{};export const sendTelegramEvent=async()=>{};export const sendPendingStockAlerts=async()=>0;
           export const formatSaleTelegramLines=()=>[];export const formatSaleStatusTelegramLines=()=>[]`,
       }
       b.onResolve({ filter: /(?:lib\/(?:auth|audit|cache|telegram)|durable-objects\/broadcastHub)$/ }, args => ({

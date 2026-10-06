@@ -485,6 +485,11 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         // never turn an applied undo into an error.
         const stockBump = import('../lib/cache').then(({ bumpVersion }) => bumpVersion(c.env, 'stock')).catch(() => {})
         try { c.executionCtx.waitUntil(stockBump) } catch { void stockBump }
+        // NOTIF-V2: a redo of added sale items takes stock out again and may have recorded a crossing.
+        if (direction === 'redo' && applier.name === SALE_ADD_ITEMS_ACTION_KIND) {
+          const stockAlerts = announceStockAlerts(c.env)
+          try { c.executionCtx.waitUntil(stockAlerts) } catch { void stockAlerts }
+        }
       } catch (error) {
         if (!serverManagedReplay) await db.prepare('UPDATE action_history SET last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
           .run({ last_error: (error as Error)?.message || `Failed to ${direction}`, id: existing.id })
