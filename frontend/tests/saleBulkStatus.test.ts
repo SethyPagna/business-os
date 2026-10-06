@@ -16,6 +16,8 @@ let calls: Record<string,unknown>[] = [], notices: string[] = [], selection: unk
 let statusPrompt: unknown
 const frozen = {current:[] as unknown[]}
 const context = {
+  // N9 (SEC-SALES): the handler also asks whether an un-cancel may delete a lost-fee expense.
+  canRemoveCancelFee:true, cancelFeeRefusalKey:()=>null,
   selectedSales:selected, canBulkSales:true, canChangeSaleStatus:true, bulkStatusInFlightRef:{current:false}, bulkStatusSelectionRef:frozen, bulkStatusSaving:'',
   beginSingleAction:()=>true, finishSingleAction:()=>{}, setCancelPrompt:()=>{}, setStatusPrompt:(value:unknown)=>{statusPrompt=value},
   translateOr:(_key:string,fallback:string)=>fallback, getStatusLabel:(value:string)=>value, transitionMovesStock:()=>false, t:()=>'', setBulkStatusSaving:()=>{},

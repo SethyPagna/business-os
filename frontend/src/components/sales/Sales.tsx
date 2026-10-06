@@ -1336,10 +1336,11 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       // S4-41: the Worker will not give a Not Paid sale that still owes money a
       // paid status without a payment. The payment form always sends one, so this
       // is an Undo or Redo (or its retry) asking for it: say why, in the shop's language.
+      // N9: a lost-fee refusal (Expenses rights or the sale-total cap), in the shop's language.
       const feeRefusal = cancelFeeRefusalKey(problem.code)
+      if (feeRefusal) { notify(t(feeRefusal), 'error'); return false }
       notify(problem.code === 'insufficient_payment_for_status'
         ? translateOr('sale_settlement_full_required', 'The full sale balance must be covered before completing it.')
-        : feeRefusal ? t(feeRefusal)
         : `Failed to update status: ${getErrorMessage(error, String(error || 'Unknown error'))}`, 'error')
       return false
     } finally {
@@ -2212,7 +2213,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
     // filter that excludes cancelled sales leaves them untouched.
     if (!retryRequest && nextStatus !== 'cancelled' && !canRemoveCancelFee && (!sourceStatus || sourceStatus === 'cancelled')
       && scopeSales.some((sale) => String(sale.sale_status || '') === 'cancelled' && Number(sale.cancel_fee_id || 0) > 0)) {
-      notify(t('uncancel_requires_expense_delete'), 'error')
+      notify(translateOr('uncancel_requires_expense_delete', "Un-cancelling removes this sale's lost-fee expense, and your role cannot delete expenses. Ask an administrator."), 'error')
       return
     }
     if ((!retryRequest && !selectedSales.length) || !beginSingleAction(bulkStatusInFlightRef, { blocked: !!bulkStatusSaving })) return
@@ -2296,10 +2297,11 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
         savePendingBulkRequest(null)
         void loadSales(true)
       }
+      // N9: a lost-fee refusal (Expenses rights or the sale-total cap), in the shop's language.
       const feeRefusal = cancelFeeRefusalKey((error as { code?: string } | null)?.code)
+      if (feeRefusal) { notify(t(feeRefusal), 'error'); return }
       notify(unpaid
         ? translateOr('sale_settlement_full_required', 'The full sale balance must be covered before completing it.')
-        : feeRefusal ? t(feeRefusal)
         : getErrorMessage(error, translateOr('update_failed', 'Unable to update the selected sales.')), 'error')
     } finally {
       finishSingleAction(bulkStatusInFlightRef)
