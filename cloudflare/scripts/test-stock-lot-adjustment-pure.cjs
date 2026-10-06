@@ -322,21 +322,44 @@ async function main() {
     assert.equal(movements(f).at(-1).quantity, 27)
   })
 
-  await check('screenshot repair in the app: Revert the Revert, then Undo the Set -> 33 on the right lots, delivery a purchase again', async () => {
+  // Owner ruling, 6 Oct 2026 22:50: "restore the delivery, and also revert
+  // the +27 ... current 3 + 27, revert +27 -> back to 3, then minus 3 -> 0 left
+  // in that slot ... cost price, loss etc. only counts the 3. Revert should
+  // fully revert, never leaves a stock effect behind." Each step is the app's
+  // own action on the live build (4ab47676 -- run with STOCK_LOT_TEST_ROOT).
+  await check('screenshot repair in the app (owner ruling): Revert the Revert, Undo the Set, Remove the 3 -> delivery 30, 02/09 lot 0, loss only the 3', async () => {
     const f = screenshotSeeded()
     const set = await send(f, 'POST', '/api/inventory/adjust', setOld('ss-set-0000003'))
+    const forward = movements(f).at(-1)
     await ledgerRevert(f, 48026)
     const wrong = movements(f).at(-1)
     assert.equal(wrong.reference_id, 'revert:48026')
+    assert.deepEqual(lots(f), { old: 30, delivery: 0, branch: 30, product: 30, cost: 5 }, 'production state of 1 Oct')
+    // Step 1: Stock Changes -> the Revert row (#48197 in production) -> Revert.
     const back = await ledgerRevert(f, wrong.id)
     assert.equal(back.status, 200, JSON.stringify(back.json))
     assert.deepEqual(lots(f), { old: 30, delivery: 30, branch: 60, product: 60, cost: 6 })
     assert.deepEqual(delivery(f), { received_quantity: 30, received_cost_usd: 210, is_active: 1 })
+    // Step 2: Stock Changes -> the Set row (#48034) -> Revert, which runs the Set's History Undo.
     assert.equal((await undo(f, set.json.action_history_id, 0)).status, 200)
     assert.deepEqual(lots(f), { old: 3, delivery: 30, branch: 33, product: 33, cost: 6.8182 })
     assert.deepEqual(delivery(f), { received_quantity: 30, received_cost_usd: 210, is_active: 1 })
     const dated = f.sql.prepare('SELECT supplier_name, payment_status FROM product_batches WHERE id=21').get()
     assert.deepEqual(dated, { supplier_name: 'Dane japan', payment_status: 'paid' }, 'supplier attribution kept through both')
+    assert.deepEqual(loss(f), { removal_loss_usd: 0, removal_loss_qty: 0, removal_loss_unvalued_rows: 0 }, 'no Revert and no Undo is a loss')
+    // Step 3: Remove Stock -> received date 02/09 -> 3, with a reason.
+    const removed = await send(f, 'POST', '/api/inventory/adjust', { type: 'remove', productId: 1, branchId: 1, batchId: 20, quantity: 3, reason: 'Not on the shelf (stock count)', client_request_id: 'ss-remove-000003' })
+    assert.equal(removed.status, 200, JSON.stringify(removed.json))
+    assert.deepEqual(lots(f), { old: 0, delivery: 30, branch: 30, product: 30, cost: 7 }, 'only the delivery is on hand, at its own cost')
+    assert.deepEqual(delivery(f), { received_quantity: 30, received_cost_usd: 210, is_active: 1 })
+    const last = movements(f).at(-1)
+    assert.deepEqual([last.movement_type, last.quantity, last.batch_id, last.reference_id], ['remove', 3, 20, null])
+    // Fixture lot cost is 5 (production: 7 -> $21). A Remove from the wrong lot would read 3 x 7 here.
+    assert.deepEqual(loss(f), { removal_loss_usd: 15, removal_loss_qty: 3, removal_loss_unvalued_rows: 0 }, 'only the 3 count as a loss, at their lot cost')
+    // Every Revert is its own row, linked to the row it reverses; nothing was rewritten.
+    const refs = f.sql.prepare("SELECT reference_id r FROM inventory_movements WHERE reference_id LIKE 'revert:%' ORDER BY id").all().map((row) => row.r)
+    assert.deepEqual(refs, ['revert:48026', `revert:${wrong.id}`, `revert:${forward.id}`])
+    assert.equal(movements(f).length, 6, 'the delivery, the Set, its wrong Revert, the Revert of that, the Set Undo and the Remove')
   })
 
   await check('a Set whose forward row already has a Revert is never reversed a second time', async () => {

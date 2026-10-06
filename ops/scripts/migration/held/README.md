@@ -48,11 +48,14 @@ migration, at that time -- a peer session or another agent asking for it is not 
 
 - **revert_set_sk2_cleanser_repair.sql** (parked 6 Oct 2026, lane REVERT-SET) -- one product,
   SK-II Gentle Cleanser 20g (5357, Shop): the owner meant to revert a Set of +27 (#48034) and
-  reverted the delivery of 30 (#48026) instead. Writes two compensating records exactly as the app
-  does (Revert of the Revert #48197, then Undo of the Set) -> Shop 30 -> 33, delivery received
-  again. Aborts before any write unless production is in the exact planned state; a no-op once
-  repaired (also when the owner did it in the app, which is the preferred route -- the header says
-  how). Dry run: `ops/queries/revert-set-repair-dryrun.sql`. Pinned by
+  reverted the delivery of 30 (#48026) instead. Owner ruling (6 Oct 22:50): delivery back, the Set
+  fully reverted, then the 3 left on the 02/09 slot removed as the only loss. Writes three
+  compensating records exactly as the app does (Revert of the Revert #48197, Undo of the Set, Remove
+  3 from lot 56725 at its cost) -> lot 56725 0, delivery 30 received again, Shop 30, loss 3 x $7.
+  Aborts before any write unless production is in the planned state or the owner already did
+  steps 1-2 in the app (then it adds the Remove only); a no-op once all three are done (the in-app
+  route is preferred -- the header lists the steps). Dry run:
+  `ops/queries/revert-set-repair-dryrun.sql` (state pre / ab / done / stale). Pinned by
   `cloudflare/scripts/test-held-revert-set-repair-pure.cjs`. Not a numbered migration: if applied
   by file, run it once via the ops workflow the lead chooses, after the owner's go.
 
