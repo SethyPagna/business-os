@@ -518,6 +518,92 @@ const flagColumnsUnread = (text, repairText, context) => {
 }
 // ---- RET-B 0235 rule (end) --------------------------------------------------
 
+// ---- BEGIN cutover lane LA (0229): bounded identity-backfill class ----------
+// Explicit allowlist, no inference from what the repair happens to name: the
+// only data write admitted is UPDATE branches assigning 'shop' / 'warehouse'
+// to role and/or canonical_key (each column at most once, plain UPDATE, WHERE
+// required). Everything else in the file must be a helper table it creates,
+// fills (INSERT INTO <helper>) and drops itself. The held repair touches
+// branches only through its abort sentinel INSERT INTO branches(name) SELECT
+// NULL (0200 lines 677-690), which depends on name NOT NULL alone. rowid / oid
+// / _rowid_ / id renumbering, any other column, any other table, OR-conflict
+// clauses, quoted or schema-qualified names, triggers, indexes and views are
+// all outside the shape (RET-B-VERIFY B2 attack family). Trigger effects of
+// the UPDATE itself are covered by the populated both-orders run.
+const IDENTITY_BACKFILL_UPDATE = /^UPDATE branches SET ((?:role|canonical_key) = '(?:shop|warehouse)'(?:, (?:role|canonical_key) = '(?:shop|warehouse)')?) WHERE \S/
+const identityBackfillUnread = (text, repairText, schemaTables) => {
+  const statements = sqlCode(text).split(';').map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean)
+  const helpers = new Set(), dropped = new Set()
+  let updates = 0
+  for (const statement of statements) {
+    let match
+    if ((match = /^CREATE TABLE ([a-z_][a-z0-9_]*) \(/.exec(statement))) {
+      const name = match[1]
+      if (schemaTables.has(name) || helpers.has(name) || namedIn(repairText)(name)) return false
+      helpers.add(name)
+    } else if ((match = /^INSERT INTO ([a-z_][a-z0-9_]*) /.exec(statement))) {
+      if (!helpers.has(match[1]) || dropped.has(match[1])) return false
+    } else if ((match = IDENTITY_BACKFILL_UPDATE.exec(statement))) {
+      const columns = match[1].split(', ').map((pair) => pair.split(' = ')[0])
+      if (new Set(columns).size !== columns.length || columns.some((column) => namedIn(repairText)(column))) return false
+      updates++
+    } else if ((match = /^DROP TABLE ([a-z_][a-z0-9_]*)$/.exec(statement))) {
+      if (!helpers.has(match[1]) || dropped.has(match[1])) return false
+      dropped.add(match[1])
+    } else return false
+  }
+  return updates > 0 && dropped.size === helpers.size
+}
+function assertIdentityBackfillStatic(backfills, chainText, repairText, schemaTables) {
+  assert.ok(backfills.length > 0, 'control: the bounded-backfill scan proves at least one later file independent')
+  for (const sql of ["UPDATE branches SET role = 'shop' WHERE id = 1;", "UPDATE branches SET role = 'warehouse', canonical_key = 'warehouse' WHERE id = 1;"]) {
+    assert.ok(identityBackfillUnread(sql, repairText, schemaTables), `control: allowlisted shape accepted: ${sql}`)
+  }
+  const attacks = [
+    "UPDATE branches SET rowid = '9' WHERE id = 1;", "UPDATE branches SET oid = '9' WHERE id = 1;",
+    "UPDATE branches SET _rowid_ = '9' WHERE id = 1;", "UPDATE branches SET id = '9' WHERE id = 1;",
+    'UPDATE branches SET rowid = rowid + 1000000 WHERE id = 1;', "UPDATE sales SET oid = '1000007' WHERE id = 7;",
+    'UPDATE sales SET rowid = rowid + 1000000 WHERE id IN (SELECT id FROM sales);', "UPDATE sale_items SET _rowid_ = '1' WHERE id = 2;",
+    "UPDATE product_batches SET rowid = '5' WHERE id = 1;", "UPDATE branches SET successor_branch_id = '1' WHERE id = 2;",
+    "UPDATE branches SET is_active = '0' WHERE id = 2;", "UPDATE branches SET name = 'shop' WHERE id = 2;",
+    "UPDATE users SET role = 'shop' WHERE id = 1;", "UPDATE sales SET search_normalized = 'x' WHERE id = 1;",
+    "UPDATE branches SET role = 'shop', role = 'warehouse' WHERE id = 1;", "UPDATE branches SET role = 'x' WHERE id = 1;",
+    "UPDATE branches SET role = 'shop', rowid = '9' WHERE id = 1;", "UPDATE OR REPLACE branches SET canonical_key = 'shop' WHERE id = 1;",
+    "UPDATE \"branches\" SET \"rowid\" = '9' WHERE id = 1;", "UPDATE main.branches SET role = 'shop' WHERE id = 1;",
+    "UPDATE branches SET role = 'shop';", "UPDATE sale_items SET cost_price_usd = '1' WHERE id = 1;",
+    "INSERT INTO branches (name) SELECT 'x' WHERE 1;", 'DELETE FROM branches WHERE id = 3;',
+    'UPDATE branches SET role = name WHERE id = 1;', 'UPDATE sale_items SET cost_price_usd=123 WHERE id=1;',
+  ]
+  for (const attack of attacks) {
+    assert.equal(identityBackfillUnread(attack, repairText, schemaTables), false, `control: rejected standalone: ${attack}`)
+    for (const file of backfills) assert.equal(identityBackfillUnread(`${chainText(file)}\n${attack}`, repairText, schemaTables), false, `control: rejected appended to ${file}: ${attack}`)
+  }
+  for (const file of backfills) {
+    const original = chainText(file)
+    for (const wrong of [
+      `${original}\nCREATE TRIGGER wrong_ignore BEFORE INSERT ON branches WHEN NEW.name IS NULL BEGIN SELECT RAISE(IGNORE); END;`,
+      `${original}\nCREATE TABLE zz_kept_helper (v);`,
+      `${original}\nINSERT INTO sale_items (id) SELECT 1 WHERE 0;`,
+      `${original}\nCREATE INDEX zz_index ON branches(role);`,
+    ]) assert.equal(identityBackfillUnread(wrong, repairText, schemaTables), false, `control: unsafe SQL appended to ${file} remains a dependency`)
+    assert.ok(identityBackfillUnread(`-- header: UPDATE sales SET rowid = rowid + 1000000;\n${original}`, repairText, schemaTables), `control: a comment header leaves ${file} a bounded backfill`)
+  }
+}
+function assertIdentityBackfillPopulated(backfills, chainText, run, ids) {
+  for (const file of backfills) {
+    const original = chainText(file)
+    const dml = `${original}\nUPDATE sale_items SET cost_price_usd=123 WHERE id=${ids.s0.lineId};`
+    const ignore = `${original}\nCREATE TRIGGER wrong_ignore BEFORE INSERT ON branches WHEN NEW.name IS NULL BEGIN SELECT RAISE(IGNORE); END;`
+    const oldField = `${original}\nCREATE TRIGGER wrong_old_field BEFORE UPDATE OF cost_price_usd ON sale_items WHEN OLD.cost_price_usd IS NOT NULL AND NEW.cost_price_usd IS NOT OLD.cost_price_usd BEGIN SELECT RAISE(ABORT, 'wrong_old_field'); END;`
+    const renumber = `${original}\nUPDATE sales SET rowid = rowid + 1000000 WHERE id IN (SELECT id FROM sales);`
+    assert.notDeepEqual(run(true, new Map([[file, dml]]), false).state, run(false, new Map([[file, dml]]), false).state, `${file}: later data mutation is order-dependent`)
+    assert.notDeepEqual(run(true, new Map([[file, renumber]]), false).repaired, run(false, new Map([[file, renumber]]), false).repaired, `${file}: the B2 rowid renumber really changes the repair, so its static rejection is load-bearing`)
+    assert.throws(() => run(true, new Map([[file, ignore]])), /Missing expected exception/, `${file}: INSERT-ignore control must lose the sentinel`)
+    assert.throws(() => run(false, new Map([[file, oldField]])), /wrong_old_field/, `${file}: old-field update guard must affect the repair`)
+  }
+}
+// ---- END cutover lane LA (0229) ----------------------------------------------
+
 function completeState(raw) {
   const quote = name => `"${name.replaceAll('"', '""')}"`
   const schema = raw.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').all()
@@ -533,7 +619,7 @@ function completeState(raw) {
   return { schema, tables }
 }
 
-function assertPopulatedOrders(chain, chainText, mixed) {
+function assertPopulatedOrders(chain, chainText, mixed, backfills = []) {
   const { raw, ids } = seed()
   raw.limits.exprDepth = 100
   raw.function('current_timestamp', () => '2026-10-03 10:00:00')
@@ -588,6 +674,7 @@ function assertPopulatedOrders(chain, chainText, mixed) {
       assert.throws(() => run(true, new Map([[file, ignore]])), /Missing expected exception/, 'INSERT-ignore control must lose the sentinel')
       assert.throws(() => run(false, new Map([[file, oldField]])), /wrong_old_field/, 'old-field update guard must affect the repair')
     }
+    assertIdentityBackfillPopulated(backfills, chainText, run, ids) // cutover lane LA (0229)
   } finally { raw.close() }
 }
 
@@ -613,7 +700,9 @@ check('held: outside deploy chain, after dependencies including0195; independent
   const flagContext = flagOnlyContext(chain, chainText, migrationText)
   const flagOnly = chain.filter(file => flagColumnsUnread(chainText(file), migrationText, { priorTables: flagContext.priorTables.get(file), indirectWrites: flagContext.indirectWrites }))
   // ---- RET-B 0235 call (end) ----
-  const dependencies = chain.filter((f) => !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && touched.some(namedIn(chainText(f))))
+  const schemaTables = new Set(tables.map((t) => t.toLowerCase()))
+  const backfills = chain.filter(file => identityBackfillUnread(chainText(file), migrationText, schemaTables))
+  const dependencies = chain.filter((f) => !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && touched.some(namedIn(chainText(f))))
   assert.ok(['sale_items', 'return_items', 'catalog_cost_repair_0195_backup'].every((t) => touched.includes(t)), 'control: the scan sees the two tables it writes and the 0195 backup it reads')
   assert.ok(dependencies.includes('0195_catalog_cost_on_hand.sql'), 'control: the scan finds 0195')
   assert.ok(indexOnly('-- x\nCREATE INDEX IF NOT EXISTS i ON sale_items(id);\nCREATE UNIQUE INDEX j ON sale_items(id);'), 'control: an index-only file is skipped')
@@ -671,6 +760,7 @@ check('held: outside deploy chain, after dependencies including0195; independent
     assert.ok(mixedAdditiveUnread(`-- header: UPDATE sale_items SET cost_price_usd = 1;\n/* DROP TABLE sale_items; */\n${chainText(file)}`, migrationText), `control: a comment header leaves ${file} independent`)
     assert.ok(!mixedAdditiveUnread(`${chainText(file)}\n-- trailing note\nUPDATE sale_items SET cost_price_usd = 1;`, migrationText), `control: a real statement after a comment in ${file} is still a dependency`)
   }
+  assertIdentityBackfillStatic(backfills, chainText, migrationText, schemaTables) // cutover lane LA (0229)
   const later = chain.filter((f) => movedIn.indexOf(f) > movedIn.indexOf(heldName))
   assert.deepEqual(later.filter((f) => dependencies.includes(f)), [],
     `these chain files sort after ${heldName} yet touch a table it reads or writes (${touched.join(', ')}). ` +
@@ -686,7 +776,7 @@ check('held: outside deploy chain, after dependencies including0195; independent
   const schema = (db) => db.prepare('SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name').all()
   assert.deepEqual(schema(byNumber), schema(fresh), `before or after ${later.join(', ') || 'no later file'}: the same schema`)
   assert.throws(() => openDb(loadAll({ through: 194 })).db.exec(migrationText), /catalog_cost_repair_0195_backup/, 'without 0195 it refuses to run')
-  assertPopulatedOrders(chain, chainText, mixed)
+  assertPopulatedOrders(chain, chainText, mixed, backfills)
 })
 
 check('owner-run audit: every header command is --command (never --file); the cut statements are the audit verbatim and run', () => {

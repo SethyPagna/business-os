@@ -1,0 +1,53 @@
+-- BRANCH-HISTORY-LABELS (2): the per-row branch labels 0226 did not add.
+--
+-- Adds four nullable TEXT columns with no default:
+--   fees.branch_name                          the fee's branch name at event time
+--   product_batches.received_branch_name      the receiving branch name of a lot
+--   inventory_movements.addressed_branch_name the branch a stored record named
+--                                             when the stock effect landed on
+--                                             its active successor
+--   returns.addressed_branch_name             the same, for a return of a sale
+--                                             recorded at a retired branch
+-- Names end in _name, never _branch_id, so the cutover capture registry keeps
+-- exactly its 32 scalar branch references. No data rewritten and no backfill:
+-- every existing row reads NULL, which every reader already treats as "no
+-- label" (no Worker in this release names these columns). The cutover
+-- snapshot pass, not this file, fills blanks before the rename.
+-- Already present and NOT re-added here: stock_transfers.from_branch_name,
+-- stock_transfers.to_branch_name, stock_session_members.branch_name (0226);
+-- inventory_movements.branch_name, returns.branch_name (0001);
+-- shift_sessions.branch_name (0116).
+--
+-- Pre-assert:  SELECT COUNT(*) FROM pragma_table_info('fees')
+--                WHERE name = 'branch_name'                  -- expected 0
+--              SELECT COUNT(*) FROM pragma_table_info('product_batches')
+--                WHERE name = 'received_branch_name'         -- expected 0
+--              SELECT COUNT(*) FROM pragma_table_info('inventory_movements')
+--                WHERE name = 'addressed_branch_name'        -- expected 0
+--              SELECT COUNT(*) FROM pragma_table_info('returns')
+--                WHERE name = 'addressed_branch_name'        -- expected 0
+--              SELECT COUNT(*) FROM fees, product_batches, inventory_movements
+--                and returns, one query each (record all four)
+-- Post-assert: the same four pragma queries                  -- expected 1 each
+--              all four row counts unchanged
+--              SELECT COUNT(*) FROM fees WHERE branch_name IS NOT NULL
+--                and the same for the other three new columns -- expected 0
+-- Deploy order: EITHER. No Worker in this release reads or writes these
+--              columns. Readers that SELECT f.* and then alias b.name AS
+--              branch_name (routes/fees.ts list and detail) still return the
+--              live name: D1 maps a row with Object.fromEntries, so the later
+--              alias wins over the new NULL fees.branch_name. A later Worker
+--              that writes the columns needs this file first.
+-- Recovery:    roll back any Worker that writes these columns first, then
+--              ALTER TABLE fees DROP COLUMN branch_name;
+--              ALTER TABLE product_batches DROP COLUMN received_branch_name;
+--              ALTER TABLE inventory_movements DROP COLUMN addressed_branch_name;
+--              ALTER TABLE returns DROP COLUMN addressed_branch_name;
+--              No index, trigger or view names these columns. Loses only the
+--              labels recorded since; amounts, quantities and links are
+--              unaffected.
+
+ALTER TABLE fees ADD COLUMN branch_name TEXT;
+ALTER TABLE product_batches ADD COLUMN received_branch_name TEXT;
+ALTER TABLE inventory_movements ADD COLUMN addressed_branch_name TEXT;
+ALTER TABLE returns ADD COLUMN addressed_branch_name TEXT;

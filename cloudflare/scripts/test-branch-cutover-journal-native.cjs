@@ -239,12 +239,17 @@ async function main() {
     await assert.rejects(journal.abortEffectFreeBranchCutoverJournal(w.db, proof(row), 0, 'corrupt refusal'))
     w.raw.close()
   })
-  await check('empty manifest reaches verifying without planned child or fake receipt; ready/completion mutators absent', async () => {
+  await check('empty manifest reaches verifying without planned child or fake receipt; ready/completion refuse a pre-v3 manifest', async () => {
     const w = world(); let row = await start(w); row = await seal(w, row)
     assert.equal(row.phase, 'snapshots')
     row = await journal.finishBranchCutoverSnapshots(w.db, proof(row), row.revision)
     assert.equal(row.phase, 'verifying'); assert.equal(row.next_sequence, 0); assert.equal(row.planned_child_json, null)
-    assert.equal(journal.completeBranchCutoverJournal, undefined); assert.equal(journal.commitBranchCutoverChild, undefined)
+    assert.equal(journal.commitBranchCutoverChild, undefined)
+    const revision = row.revision
+    await assert.rejects(journal.markBranchCutoverReady(w.db, proof(row), row.revision), /journal_conflict/)
+    await assert.rejects(journal.finishBranchCutoverMoving(w.db, proof(row), row.revision), /journal_conflict/)
+    await assert.rejects(journal.completeBranchCutoverJournal(w.db, proof(row), row.revision, JSON.stringify({ version: 1, kind: 'completed', operationId: row.operation_id })), /journal_conflict/)
+    assert.equal(w.raw.prepare('SELECT revision FROM branch_cutovers').get().revision, revision)
     await assert.rejects(journal.sealBranchCutoverChild(w.db, proof(row), row.revision, '{}')); w.raw.close()
   })
   await check('nonempty manifest seals one deterministic child and cannot advance or abort effects by assertion', async () => {

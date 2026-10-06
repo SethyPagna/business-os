@@ -18,7 +18,7 @@ async function main() {
   await check('all registered capture streams and page guards execute at function arity100', async () => {
     const w = world(); w.raw.limits.functionArg = 100
     const schema = await w.capture.readCutoverCaptureSchema(w.db)
-    const tables = [...new Set([...w.capture.BRANCH_SCALAR_REFERENCES.map(v => v[0]), 'products', ...w.capture.UNCLASSIFIED_JSON_FAMILIES])].sort().filter(t => t !== 'branch_cutovers' && !w.capture.UNCLASSIFIED_JSON_FAMILIES.includes(t))
+    const tables = w.capture.CAPTURE_STREAMS.filter(t => t !== 'history_open')
     assert.equal(schema.columns.sales.length, 68); assert.equal(tables.length, 28)
     for (const [index, table] of tables.entries()) {
       const cursor = { ...w.capture.initialCaptureCursor(), index }, reads = w.stats.reads
@@ -35,7 +35,7 @@ async function main() {
     const text = 'ខ្មែរ "quoted" \\ path\nnext'
     w.raw.prepare('UPDATE sales SET arity_text=?,arity_integer=9223372036854775807,arity_real=?,arity_null=NULL WHERE id=20').run(text, 1.0000000000000002)
     const schema = await w.capture.readCutoverCaptureSchema(w.db)
-    const tables = [...new Set([...w.capture.BRANCH_SCALAR_REFERENCES.map(v => v[0]), 'products', ...w.capture.UNCLASSIFIED_JSON_FAMILIES])].sort().filter(t => t !== 'branch_cutovers' && !w.capture.UNCLASSIFIED_JSON_FAMILIES.includes(t))
+    const tables = w.capture.CAPTURE_STREAMS.filter(t => t !== 'history_open')
     const cursor = { ...w.capture.initialCaptureCursor(), index: tables.indexOf('sales') }
     const encoded = Object.fromEntries(schema.columns.sales.map(field => {
       const quoted = '"' + field.replaceAll('"', '""') + '"'
@@ -64,7 +64,7 @@ async function main() {
         const { native } = lossy
         assert.equal(native.raw, value); assert.notEqual(Number(native.encoded), native.raw)
         const schema = await w.capture.readCutoverCaptureSchema(w.db)
-        const tables = [...new Set([...w.capture.BRANCH_SCALAR_REFERENCES.map(v => v[0]), 'products', ...w.capture.UNCLASSIFIED_JSON_FAMILIES])].sort().filter(t => t !== 'branch_cutovers' && !w.capture.UNCLASSIFIED_JSON_FAMILIES.includes(t))
+        const tables = w.capture.CAPTURE_STREAMS.filter(t => t !== 'history_open')
         const cursor = { ...w.capture.initialCaptureCursor(), index: tables.indexOf('product_batches') }, batches = w.stats.batches
         await assert.rejects(w.capture.readCutoverCapturePage(w.db, schema, { sourceBranchId: 2, targetBranchId: 1 }, cursor, '0'.repeat(64), 1, { 1: 'Warehouse', 2: 'Shop' }, false), e => e.code === 'branch_cutover_parent_capability')
         assert.equal(lossy.calls(), 1)
@@ -78,7 +78,7 @@ async function main() {
     const w = world(); stock(w)
     w.raw.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,received_branch_id,unit_cost_usd) VALUES(102,10,'lot102',2,4); ALTER TABLE product_batches ADD COLUMN precision_integer; UPDATE product_batches SET precision_integer=9223372036854775807")
     const schema = await w.capture.readCutoverCaptureSchema(w.db)
-    const tables = [...new Set([...w.capture.BRANCH_SCALAR_REFERENCES.map(v => v[0]), 'products', ...w.capture.UNCLASSIFIED_JSON_FAMILIES])].sort().filter(t => t !== 'branch_cutovers' && !w.capture.UNCLASSIFIED_JSON_FAMILIES.includes(t))
+    const tables = w.capture.CAPTURE_STREAMS.filter(t => t !== 'history_open')
     const cursor = { ...w.capture.initialCaptureCursor(), index: tables.indexOf('product_batches') }
     const realKey = 'r' + schema.columns.product_batches.indexOf('unit_cost_usd'), integerKey = 'r' + schema.columns.product_batches.indexOf('precision_integer')
     const originalPrepare = w.db.prepare.bind(w.db)
@@ -150,7 +150,7 @@ async function main() {
   await check('precision adjacent REAL read-to-batch mutation rolls back its entire checkpoint', async () => {
     const w = world(); stock(w)
     w.raw.prepare('UPDATE product_batches SET unit_cost_usd=? WHERE id=101').run(1.0000000000000002)
-    const tables = [...new Set([...w.capture.BRANCH_SCALAR_REFERENCES.map(v => v[0]), 'products', ...w.capture.UNCLASSIFIED_JSON_FAMILIES])].sort().filter(t => t !== 'branch_cutovers' && !w.capture.UNCLASSIFIED_JSON_FAMILIES.includes(t))
+    const tables = w.capture.CAPTURE_STREAMS.filter(t => t !== 'history_open')
     let { row } = await begin(w)
     while (w.capture.parseCaptureCursor(row.capture_cursor_json).index !== tables.indexOf('product_batches')) row = (await step(w, row)).row
     const prior = w.raw.prepare('SELECT * FROM branch_cutovers').get()
@@ -164,7 +164,7 @@ async function main() {
   await check('typed scalar roots distinguish null integer REAL text and adjacent full-width integers', async () => {
     const w = world(); stock(w); w.raw.exec('ALTER TABLE products ADD COLUMN precision_scalar')
     const schema = await w.capture.readCutoverCaptureSchema(w.db)
-    const tables = [...new Set([...w.capture.BRANCH_SCALAR_REFERENCES.map(v => v[0]), 'products', ...w.capture.UNCLASSIFIED_JSON_FAMILIES])].sort().filter(t => t !== 'branch_cutovers' && !w.capture.UNCLASSIFIED_JSON_FAMILIES.includes(t))
+    const tables = w.capture.CAPTURE_STREAMS.filter(t => t !== 'history_open')
     const cursor = { ...w.capture.initialCaptureCursor(), index: tables.indexOf('products') }
     const page = () => w.capture.readCutoverCapturePage(w.db, schema, { sourceBranchId: 2, targetBranchId: 1 }, cursor, '0'.repeat(64), 1, { 1: 'Warehouse', 2: 'Shop' }, false)
     const roots = []
@@ -231,9 +231,9 @@ async function main() {
     const w = world(); stock(w)
     w.raw.prepare('UPDATE branch_stock SET quantity=? WHERE branch_id=2').run(1e-13)
     w.raw.prepare('UPDATE branch_batch_stock SET quantity=? WHERE branch_id=2').run(1e-13)
-    const row = (await begin(w)).row
-    await assert.rejects(until(w, row, 'snapshots'), e => e.code === 'branch_cutover_parent_capability')
-    assert.equal(w.raw.prepare('SELECT phase FROM branch_cutovers').get().phase, 'capturing'); w.raw.close()
+    // below the twelfth place: refused at begin since E3 (it used to refuse only during capture), so no journal row exists
+    await assert.rejects(begin(w), e => e.code === 'branch_cutover_parent_capability' && e.capability === 'unsupported_stock_state:inexact')
+    assert.equal(w.raw.prepare('SELECT count(*) n FROM branch_cutovers').get().n, 0); w.raw.close()
   })
   await check('canonical capture digest independent of page size with exact fractional lot metadata', async () => {
     const roots = []
@@ -253,7 +253,8 @@ async function main() {
       INSERT INTO inventory_movements(id,branch_id,branch_name,quantity) VALUES(20,1,NULL,0);
       INSERT INTO stock_row_moves(id,source_product_id,destination_product_id,branch_id,quantity) VALUES(20,10,11,2,0);
       INSERT INTO stock_transfers(id,from_branch_id,to_branch_id,quantity) VALUES(20,2,1,0)`)
-    const before = hash(['products', 'product_batches', 'branch_stock', 'branch_batch_stock'].map(t => w.raw.prepare('SELECT * FROM '+t+' ORDER BY rowid').all()))
+    const before = hash(['products', 'product_batches', 'branch_stock', 'branch_batch_stock'].map(t => w.raw.prepare('SELECT * FROM '+t+' ORDER BY rowid').all().map(r => { const { received_branch_name, ...rest } = r; return rest })))
+    assert.equal(w.raw.prepare('SELECT received_branch_name FROM product_batches WHERE id=101').get().received_branch_name, null)
     const priorRevision = w.raw.prepare('SELECT revision FROM sale_write_revisions WHERE sale_id=20').get().revision
     const row = await until(w, (await begin(w)).row, 'moving')
     assert.equal(row.capture_digest, row.snapshot_digest)
@@ -264,13 +265,15 @@ async function main() {
     assert.equal(w.raw.prepare('SELECT branch_name FROM stock_row_moves WHERE id=20').get().branch_name, 'Shop')
     assert.equal(w.raw.prepare('SELECT branch_name FROM inventory_movements WHERE id=20').get().branch_name, 'Warehouse')
     assert.deepEqual({ ...w.raw.prepare('SELECT from_branch_name,to_branch_name FROM stock_transfers WHERE id=20').get() }, { from_branch_name: 'Shop', to_branch_name: 'Warehouse' })
-    assert.equal(hash(['products', 'product_batches', 'branch_stock', 'branch_batch_stock'].map(t => w.raw.prepare('SELECT * FROM '+t+' ORDER BY rowid').all())), before); w.raw.close()
+    assert.equal(hash(['products', 'product_batches', 'branch_stock', 'branch_batch_stock'].map(t => w.raw.prepare('SELECT * FROM '+t+' ORDER BY rowid').all().map(r => { const { received_branch_name, ...rest } = r; return rest }))), before)
+    // registry v3 snapshot map: the lot's receiving-branch label is filled with the event-time name, nothing else moves
+    assert.equal(w.raw.prepare('SELECT received_branch_name FROM product_batches WHERE id=101').get().received_branch_name, 'Shop'); w.raw.close()
   })
   await check('changed page after read refuses checkpoint and leaves no label partial write', async () => {
     const w = world(); w.raw.exec("INSERT INTO sales(id,branch_id,branch_name) VALUES(20,2,NULL)")
     let row = await until(w, (await begin(w)).row, 'snapshots')
     const schema = await w.capture.readCutoverCaptureSchema(w.db)
-    const tables = [...new Set([...w.capture.BRANCH_SCALAR_REFERENCES.map(v => v[0]), 'products', ...w.capture.UNCLASSIFIED_JSON_FAMILIES])].sort().filter(t => t !== 'branch_cutovers' && !w.capture.UNCLASSIFIED_JSON_FAMILIES.includes(t))
+    const tables = w.capture.CAPTURE_STREAMS.filter(t => t !== 'history_open')
     const index = tables.indexOf('sales'); assert.ok(schema.columns.sales.includes('branch_name'))
     while (JSON.parse(row.snapshot_cursor_json === '{}' ? '{"index":0}' : row.snapshot_cursor_json).index !== index) row = (await step(w, row)).row
     w.stats.before = raw => raw.exec("UPDATE sales SET notes='competitor' WHERE id=20")
@@ -282,17 +285,27 @@ async function main() {
     w.raw.exec("UPDATE product_batches SET received_at='2026-01-03 01:00:00' WHERE id=101")
     await assert.rejects(until(w, row, 'moving')); assert.equal(w.raw.prepare('SELECT phase FROM branch_cutovers').get().phase, 'snapshots'); w.raw.close()
   })
-  await check('unclassified historical payloads and last moment inserts cannot produce verified emptiness', async () => {
-    for (const race of [false, true]) {
-      const w = world(); let row = (await begin(w)).row
-      if (!race) w.raw.exec("INSERT INTO action_history(label) VALUES('Legacy undo')")
-      row = await until(w, row, 'snapshots')
-      if (!race) {
-        const batches = w.stats.batches
-        await assert.rejects(step(w, row), e => e.code === 'branch_cutover_parent_capability')
-        assert.equal(w.stats.batches, batches); assert.equal(w.raw.prepare('SELECT snapshot_records n FROM branch_cutovers').get().n, 0)
-        w.raw.close(); continue
-      }
+  await check('registry v3: plain history passes, an unknown applier refuses, and last moment family inserts cannot complete snapshots', async () => {
+    {
+      const w = world(); w.raw.exec("INSERT INTO action_history(label) VALUES('Legacy undo'); INSERT INTO undo_snapshots(kind,payload_json) VALUES('x','{}'); INSERT INTO pending_actions(section,action_type,entity_type,status) VALUES('s','a','e','rejected')")
+      const row = await until(w, (await begin(w)).row, 'verifying')
+      const manifest = JSON.parse(row.manifest_json)
+      assert.deepEqual(manifest.history, { open: 0, leave: 0, close: 0, maxId: 0, byApplier: {}, digest: '' })
+      assert.equal(manifest.families.undo_snapshots, '1:1'); assert.equal(manifest.families.pending_actions, '1:1'); assert.equal(manifest.families.actionHistoryMax, 1)
+      w.raw.close()
+    }
+    {
+      const w = world(); w.raw.exec(`INSERT INTO action_history(label,undo_payload,redo_payload) VALUES('Future applier','{"applier":"future.kind"}','{"applier":"future.kind"}')`)
+      const plan = await w.parent.inspectBranchCutover(w.db, { id: 7, organization_id: 1, is_active: 1 }, 1, { sourceBranchId: 2, targetBranchId: 1 }, { tier: 'paid', alreadyUsed: 0, remainingReads: 0, retryQueries: 0, completionQueries: 0, safetyQueries: 0, extraAtomicStatements: 0 })
+      assert.ok(plan.capabilities.some(c => c.code === 'history_applier_unclassified' && c.detail === 'future.kind'))
+      let row = (await begin(w)).row
+      await assert.rejects(until(w, row, 'snapshots'), e => e.code === 'branch_cutover_parent_capability' && /history_applier_unclassified:future.kind/.test(e.message))
+      assert.equal(w.raw.prepare('SELECT phase FROM branch_cutovers').get().phase, 'capturing'); w.raw.close()
+    }
+    for (const insert of ["INSERT INTO action_history(label) VALUES('Concurrent undo')", "INSERT INTO undo_snapshots(kind,payload_json) VALUES('x','{}')",
+      "INSERT INTO stock_session_operations(id,actor_id,request_id,mode,request_json) VALUES('op',7,'req','add','{}')",
+      "INSERT INTO pending_actions(section,action_type,entity_type,status) VALUES('s','a','e','open')"]) {
+      const w = world(); let row = await until(w, (await begin(w)).row, 'snapshots')
       while (true) {
         const cursor = w.capture.parseCaptureCursor(row.snapshot_cursor_json)
         const schema = await w.capture.readCutoverCaptureSchema(w.db)
@@ -300,8 +313,10 @@ async function main() {
         if (page.done && page.records === 0) break
         row = (await step(w, row)).row
       }
-      if (race) w.stats.before = raw => raw.exec("INSERT INTO action_history(label) VALUES('Concurrent undo')")
-      await assert.rejects(step(w, row)); assert.equal(w.raw.prepare('SELECT phase FROM branch_cutovers').get().phase, 'snapshots'); w.raw.close()
+      const revision = row.revision
+      w.stats.before = raw => raw.exec(insert)
+      await assert.rejects(step(w, row)); const saved = w.raw.prepare('SELECT phase,revision FROM branch_cutovers').get()
+      assert.equal(saved.phase, 'snapshots', insert); assert.equal(saved.revision, revision); w.raw.close()
     }
   })
   await check('lost page acknowledgement returns exact committed cursor; old request revision performs no second batch', async () => {
@@ -334,6 +349,36 @@ async function main() {
       let { row } = await begin(w); await assert.rejects(until(w, row, 'snapshots'), e => e.code === 'branch_cutover_parent_capability')
       assert.equal(w.raw.prepare('SELECT phase FROM branch_cutovers').get().phase, 'capturing'); w.raw.close()
     }
+  })
+  await check('T5.2 every stream page and the next-product plan read in rowid/index order with no temp B-tree sort', async () => {
+    const w = world(); stock(w)
+    for (const table of w.capture.CAPTURE_STREAMS.filter(t => t !== 'history_open')) {
+      const plan = w.raw.prepare('EXPLAIN QUERY PLAN SELECT rowid ' + w.capture.capturePageFromSql(table)).all({ source: 2, target: 1, after: 0, limit: 256 }).map(r => r.detail)
+      assert.ok(!plan.some(d => /TEMP B-TREE/.test(d)), table + ': ' + plan.join(' / '))
+      assert.ok(plan.some(d => new RegExp('^SCAN (main\.)?"?' + table + '"?( |$)').test(d) || /USING INTEGER PRIMARY KEY/.test(d)), table + ': ' + plan.join(' / '))
+    }
+    const next = w.raw.prepare('EXPLAIN QUERY PLAN ' + w.parent.NEXT_SOURCE_PRODUCT_SQL).all({ source: 2, last: 0 }).map(r => r.detail).join(' / ')
+    assert.match(next, /idx_branch_stock_product_branch_unique/); assert.doesNotMatch(next, /TEMP B-TREE/)
+    w.raw.close()
+  })
+  await check('T5.3 a page over the byte cap halves its row limit, still reads every row once, and keeps the canonical digest', async () => {
+    const roots = []
+    for (const size of [256, 7]) {
+      const w = world(); const base = w.raw.prepare('SELECT coalesce(max(id),0) id FROM fees').get().id
+      for (let i = 1; i <= 300; i++) w.raw.prepare("INSERT INTO fees(id,branch_id,notes,fee_date,created_at,updated_at) VALUES(?,2,?,'2026-10-03','2026-10-03','2026-10-03')").run(base + i, 'x'.repeat(2000))
+      const schema = await w.capture.readCutoverCaptureSchema(w.db)
+      let cursor = { ...w.capture.initialCaptureCursor(), index: w.capture.CAPTURE_STREAMS.indexOf('fees') }, digest = '0'.repeat(64), rows = 0, pages = 0, largest = 0
+      while (cursor.index === w.capture.CAPTURE_STREAMS.indexOf('fees')) {
+        const page = await w.capture.readCutoverCapturePage(w.db, schema, { sourceBranchId: 2, targetBranchId: 1 }, cursor, digest, size, { 1: 'Warehouse', 2: 'Shop' }, false)
+        largest = Math.max(largest, page.cursor.rows - cursor.rows); rows += page.cursor.rows - cursor.rows; cursor = page.cursor; digest = page.digest; pages++
+        await w.db.batch(page.statements)
+      }
+      assert.equal(rows, 300); if (size === 256) assert.ok(largest < 256 && largest >= 64, String(largest))
+      roots.push(digest); w.raw.close()
+    }
+    assert.equal(roots[0], roots[1])
+    const w = world(); await assert.rejects(w.capture.readCutoverCapturePage(w.db, await w.capture.readCutoverCaptureSchema(w.db), { sourceBranchId: 2, targetBranchId: 1 }, w.capture.initialCaptureCursor(), '0'.repeat(64), 257, {}, false), e => e.code === 'branch_cutover_parent_capability')
+    w.raw.close()
   })
   assert.ok(checks > 0, 'test filter must select a group')
   console.log(`${checks} branch cutover capture native groups passed`)

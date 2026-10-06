@@ -67,6 +67,9 @@ const NAMED_COMPANIONS = {
   // chain without and with it, pins both plans, identical rows, idempotency,
   // the documented recovery and LF-only.
   228: 'test-dashboard-stock-overview-pure.cjs',
+  // Cutover lane LA: the identity backfill and the remaining history labels.
+  229: 'test-branch-identity-backfill-native.cjs',
+  236: 'test-branch-label-columns-native.cjs',
   // 0237 creates shift_close_figures, the figures a shift closed on. Its
   // companion applies the real chain, proves the header's pre/post assertions,
   // idempotency, immutability outside restore and the documented recovery,
