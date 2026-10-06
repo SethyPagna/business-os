@@ -70,12 +70,27 @@ const ADMIN_URL = 'https://admin.example.com'
 
 const posts = []
 let failNext = false
+// A send that has started but not finished: the test holds Telegram's answer open to prove what a SECOND drain does
+// while the first is mid-send (the interleaving a lone synchronous sqlite shim would otherwise hide).
+let gate = null
+let inFlight = 0
 globalThis.fetch = async (url, init) => {
   assert.ok(String(url).startsWith('https://api.telegram.org/botSYNTHETIC-TOKEN/sendMessage'), `unexpected fetch ${url}`)
-  if (failNext) { failNext = false; return { ok: false, status: 500, text: async () => 'boom' } }
-  posts.push(JSON.parse(init.body))
-  return { ok: true, status: 200, text: async () => '' }
+  inFlight += 1
+  try {
+    if (gate) await gate.promise
+    if (failNext) { failNext = false; return { ok: false, status: 500, text: async () => 'boom' } }
+    posts.push(JSON.parse(init.body))
+    return { ok: true, status: 200, text: async () => '' }
+  } finally { inFlight -= 1 }
 }
+function holdTelegram() {
+  let release
+  const promise = new Promise((resolve) => { release = resolve })
+  gate = { promise, release: () => { gate = null; release() } }
+  return gate
+}
+const tick = () => new Promise((resolve) => setImmediate(resolve))
 
 let passed = 0
 const check = (name, cond, detail) => { assert.ok(cond, detail ? `${name}\n${detail}` : name); passed += 1; console.log(`PASS ${name}`) }
@@ -162,6 +177,94 @@ async function main() {
   check('Khmer mode is Khmer only', /ជូនដំណឹងស្តុក/.test(km) && /អស់ស្តុក/.test(km) && !/Stock alert|OUT/.test(km), km)
   check('no admin URL configured: the message simply has no link line', !/https?:/.test(telegram.formatStockAlertTelegramMessage([{ id: 1, product_name: 'X', alert_state: 'low', quantity_after: 1 }], 'en', '')))
 
+  // --- two drains at the SAME moment, the first still mid-send -----------------------------------------------
+  {
+    const c = shop(CHAT_A, ALERTS_A)
+    event(c, 'out', 'Held One', 0)
+    const mark = posts.length
+    const held = holdTelegram()
+    const first = telegram.sendPendingStockAlerts(c)
+    while (inFlight === 0) await tick() // drain 1 has claimed its row and its message is on the wire
+    check('drain 1 has claimed the crossing and is mid-send', inFlight === 1 && unsent(c) === 0)
+    const second = await telegram.sendPendingStockAlerts(c)
+    check('a drain that starts while another is mid-send finds nothing to claim and sends nothing', second === 0 && inFlight === 1 && posts.length === mark)
+    event(c, 'low', 'Arrived Meanwhile', 3)
+    const third = telegram.sendPendingStockAlerts(c)
+    while (inFlight < 2) await tick()
+    held.release()
+    const results = await Promise.all([first, third])
+    check('a crossing that arrives mid-send goes out in its OWN message; the first is not repeated',
+      results[0] === 1 && results[1] === 1 && posts.length === mark + 2
+        && posts[mark].text.includes('Held One') && !posts[mark].text.includes('Arrived Meanwhile')
+        && posts[mark + 1].text.includes('Arrived Meanwhile') && !posts[mark + 1].text.includes('Held One'), JSON.stringify(posts.slice(mark)))
+    check('every row was announced exactly once', unsent(c) === 0)
+  }
+
+  // --- a failed send while another drain runs: nothing lost, nothing doubled ----------------------------------
+  {
+    const c = shop(CHAT_A, ALERTS_A)
+    event(c, 'out', 'Flaky One', 0)
+    const mark = posts.length
+    const held = holdTelegram()
+    failNext = true
+    const first = telegram.sendPendingStockAlerts(c).then(() => null, (error) => error)
+    while (inFlight === 0) await tick()
+    event(c, 'low', 'Healthy Two', 2)
+    const concurrent = telegram.sendPendingStockAlerts(c) // claims only Healthy Two; its send waits on the same gate
+    while (inFlight < 2) await tick()
+    held.release()
+    const [failure, ok] = await Promise.all([first, concurrent])
+    check('the refused drain reports the Telegram error; the concurrent drain still sent its own row', failure && /rejected/i.test(String(failure.message)) && ok === 1 && posts.length === mark + 1 && posts[mark].text.includes('Healthy Two'))
+    check('the refused row was released (not the other drain\'s), so it is the only row left to retry', unsent(c) === 1 && c.DB.raw.prepare("SELECT product_name FROM stock_alert_events WHERE telegram_sent_at IS NULL").get().product_name === 'Flaky One')
+    check('the next drain retries it exactly once', await telegram.sendPendingStockAlerts(c) === 1 && posts.length === mark + 2 && posts[mark + 1].text.includes('Flaky One') && !posts[mark + 1].text.includes('Healthy Two'))
+    check('and a further drain has nothing left', await telegram.sendPendingStockAlerts(c) === 0 && posts.length === mark + 2)
+  }
+
+  // --- the retry window ----------------------------------------------------------------------------------------
+  {
+    const c = shop(CHAT_A, ALERTS_A)
+    const mark = posts.length
+    const recent = c.DB.raw.prepare("SELECT datetime('now', '-90 minutes') AS t").get().t
+    const stale = c.DB.raw.prepare("SELECT datetime('now', '-3 hours') AS t").get().t
+    event(c, 'out', 'Ninety Minutes Ago', 0, { createdAt: recent })
+    event(c, 'out', 'Three Hours Ago', 0, { createdAt: stale })
+    failNext = true
+    let refused = null
+    try { await telegram.sendPendingStockAlerts(c) } catch (error) { refused = error }
+    check('a refused send leaves the in-window crossing unannounced', refused !== null && unsent(c) === 2)
+    const retried = await telegram.sendPendingStockAlerts(c)
+    check('it is retried while the crossing is inside the two-hour window; one older than the window is never sent',
+      retried === 1 && posts.length === mark + 1 && posts[mark].text.includes('Ninety Minutes Ago') && !posts[mark].text.includes('Three Hours Ago'))
+    check('a refusal that outlives the window is dropped, not retried forever', (() => {
+      c.DB.raw.prepare("UPDATE stock_alert_events SET telegram_sent_at = NULL, created_at = datetime('now', '-121 minutes') WHERE product_name = 'Ninety Minutes Ago'").run()
+      return true
+    })() && await telegram.sendPendingStockAlerts(c) === 0 && posts.length === mark + 1)
+  }
+
+  // --- organizations never read or send each other's rows ------------------------------------------------------
+  {
+    const orgA = shop(CHAT_A, ALERTS_A)
+    const orgB = shop(CHAT_B, ALERTS_B)
+    const orgC = shop('', 0) // an organization with no chat configured
+    event(orgA, 'out', 'Org A Cream', 0)
+    event(orgB, 'low', 'Org B Toner', 2)
+    event(orgC, 'out', 'Org C Soap', 0)
+    const mark = posts.length
+    const held = holdTelegram()
+    const runs = [telegram.sendPendingStockAlerts(orgA), telegram.sendPendingStockAlerts(orgB), telegram.sendPendingStockAlerts(orgC)]
+    while (inFlight < 2) await tick()
+    held.release()
+    const counts = await Promise.all(runs)
+    const sent = posts.slice(mark)
+    const forA = sent.find((post) => post.chat_id === CHAT_A)
+    const forB = sent.find((post) => post.chat_id === CHAT_B)
+    check('three organizations drained at once: each configured one sent exactly its own message to its own chat and topic',
+      counts.join() === '1,1,0' && sent.length === 2
+        && forA.message_thread_id === ALERTS_A && forA.text.includes('Org A Cream') && !/Org B|Org C/.test(forA.text)
+        && forB.message_thread_id === ALERTS_B && forB.text.includes('Org B Toner') && !/Org A|Org C/.test(forB.text), JSON.stringify(sent))
+    check('an organization with no chat configured sends nothing and keeps its row for when it is configured', unsent(orgC) === 1 && unsent(orgA) === 0 && unsent(orgB) === 0)
+  }
+
   // --- structure: after the commit, never in the batch, nothing hard-coded ----------------------------------
   const sales = fs.readFileSync(path.join(root, 'src/routes/sales.ts'), 'utf8')
   const calls = [...sales.matchAll(/announceStockAlerts\(c\.env\)/g)]
@@ -174,6 +277,10 @@ async function main() {
   const history = fs.readFileSync(path.join(root, 'src/routes/actionHistory.ts'), 'utf8')
   check('a redo / undo of a grouped status change announces its crossings too (after the replay committed)',
     /BULK_STATUS_KIND\s*\?\s*Promise\.all\(\[notifyBulkStatus\(c\.env\), announceStockAlerts\(c\.env\)\]\)/.test(history) && /async function announceStockAlerts[\s\S]*?catch/.test(history))
+  const returnsRoute = fs.readFileSync(path.join(root, 'src/routes/returns.ts'), 'utf8')
+  check('a return exchange announces its replacement-sale crossing after the return committed, only when there is a replacement',
+    /if \(replacementLines\.length\) c\.executionCtx\.waitUntil\(announceStockAlerts\(c\.env\)\)/.test(returnsRoute) && returnsRoute.indexOf('announceStockAlerts(c.env)') > returnsRoute.indexOf('await db.batch([...statements, ordinaryBusinessMaintenanceGuard])'))
+  check('a redo of added sale items announces after the replay committed (history route)', /direction === 'redo' && applier\.name === SALE_ADD_ITEMS_ACTION_KIND[\s\S]{0,200}announceStockAlerts\(c\.env\)/.test(history))
   const batchLib = fs.readFileSync(path.join(root, 'src/lib/saleStockAlerts.ts'), 'utf8')
   const bulkLib = fs.readFileSync(path.join(root, 'src/lib/saleBulkStatus.ts'), 'utf8')
   check('the in-batch planner and the bulk applier never import Telegram', !/telegram/i.test(batchLib.replace(/\/\/.*$/gm, '')) && !/from '\.\/telegram'/.test(bulkLib))
