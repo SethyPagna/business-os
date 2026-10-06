@@ -26,9 +26,16 @@ export const STOCK_REVERT_ERRORS: Record<string, readonly [key: string, fallback
   movement_not_found: ['revert_err_movement_not_found', 'This change no longer exists. Refresh and try again.'],
 }
 
+// REVERT-SET: refusals only a History Undo/Redo of a stock record returns
+// (lib/stockSession.ts) -- the ledger Revert never does, so they stay out of
+// the map above, which mirrors stockRevert.ts's RevertRefusalCode exactly.
+export const STOCK_REPLAY_ONLY_ERRORS: Record<string, readonly [key: string, fallback: string]> = {
+  revert_session_line_reverted: ['revert_err_session_line_reverted', 'A line of this stock-in session was reverted on its own in Stock Changes, so the session cannot be undone or redone as a whole. Revert that Revert first, or revert the other lines one by one. Nothing was changed.'],
+}
+
 export function stockRevertErrorText(error: unknown, tr: (key: string, fallback: string) => string): string {
   const source = (error && typeof error === 'object' ? error : {}) as Record<string, unknown>
-  const entry = STOCK_REVERT_ERRORS[String(source.code || '')]
+  const entry = STOCK_REVERT_ERRORS[String(source.code || '')] ?? STOCK_REPLAY_ONLY_ERRORS[String(source.code || '')]
   if (entry) {
     const params = (source.params && typeof source.params === 'object' ? source.params : {}) as Record<string, unknown>
     return tr(entry[0], entry[1]).replace(/\{(\w+)\}/g, (_, name: string) => {

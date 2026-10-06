@@ -5287,6 +5287,7 @@
   "revert_err_forbidden": "Reverting a stock change needs Full Access to Inventory.",
   "revert_err_movement_not_found": "This change no longer exists. Refresh and try again.",
   "revert_err_session_undone": "This row belongs to a stock-in session that was undone, so its stock is already taken back. Redo that session from Stock-in Sessions first. Nothing was changed.",
+  "revert_err_session_line_reverted": "A line of this stock-in session was reverted on its own in Stock Changes, so the session cannot be undone or redone as a whole. Revert that Revert first, or revert the other lines one by one. Nothing was changed.",
   "revert_err_from_merge": "This change came from merging duplicate products. Undo the merge from History instead. Nothing was changed.",
   "revert_this_branch": "this branch",
   "movement_reverted_chip": "Reverted",

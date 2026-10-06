@@ -69,4 +69,23 @@ assert.match(records, /linkTo\(revertedById, tr\('movement_reverted_by_link'/)
 assert.match(records, /namesNoRecord = revertsId != null \|\| isStockSetMovement\(row\.reference_id\)/, 'a Revert or Set row never shows its raw token as the Source')
 assert.match(records, /const source = namesNoRecord \? receipt : receipt \|\|/)
 
+// A History Undo/Redo of a stock record refused with a Stock Changes code reads
+// as the Revert of the same row would -- in Khmer too, numbers filled -- and
+// the replay-only codes the Worker returns (lib/stockSession.ts) are mapped.
+const { STOCK_REVERT_ERRORS, STOCK_REPLAY_ONLY_ERRORS, stockRevertErrorText } = await import('../src/utils/stockRevertError.ts')
+const transport = readFileSync(new URL('../src/api/actionHistoryTransport.ts', import.meta.url), 'utf8')
+assert.match(transport, /STOCK_REPLAY_ONLY_ERRORS, stockRevertErrorText \} = await import\('\.\.\/utils\/stockRevertError\.ts'\)/)
+const session = readFileSync(new URL('../../cloudflare/src/lib/stockSession.ts', import.meta.url), 'utf8')
+for (const code of Object.keys(STOCK_REPLAY_ONLY_ERRORS)) {
+  assert.ok(session.includes(`'${code}'`), `the Worker returns ${code}`)
+  assert.ok(!(code in STOCK_REVERT_ERRORS), `${code} is replay-only`)
+  for (const lang of ['en', 'km']) assert.ok(String(packs[lang][STOCK_REPLAY_ONLY_ERRORS[code][0]] || '').trim(), `${lang} pack has ${code}`)
+}
+for (const code of ['revert_insufficient_lot_stock', 'revert_insufficient_branch_stock', 'revert_stock_in_line_edited', 'revert_session_undone', 'revert_lot_moved', 'stock_changed']) {
+  assert.ok(code in STOCK_REVERT_ERRORS, `${code} (returned by the Set, line-edit and session replays) is mapped`)
+}
+const kmText = stockRevertErrorText({ code: 'revert_insufficient_lot_stock', params: { available: 1, needed: 2 } }, km)
+assert.ok(kmText.includes('1') && kmText.includes('2') && !/\{\w+\}/.test(kmText) && !/Cannot/.test(kmText), kmText)
+assert.equal(stockRevertErrorText({ code: 'revert_session_line_reverted' }, en), packs.en.revert_err_session_line_reverted)
+
 console.log('stockRevertPreview.test: OK')

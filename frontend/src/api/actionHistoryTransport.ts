@@ -118,12 +118,26 @@ async function localizeReplayRefusal(error: unknown, direction: 'undo' | 'redo')
   const keys = refusal && refusal.status === 409 && typeof refusal.code === 'string' && Object.prototype.hasOwnProperty.call(REPLAY_REFUSAL_KEYS, refusal.code)
     ? REPLAY_REFUSAL_KEYS[refusal.code]
     : null
-  if (refusal && keys) {
+  // REVERT-SET: a stock Undo/Redo refused with a Stock Changes code (the units
+  // it needs were taken, a line was reverted or edited, the lot moved) reads
+  // exactly as the Revert of the same row would, numbers included.
+  const stockCode = refusal && refusal.status === 409 && typeof refusal.code === 'string' && !keys ? refusal.code : null
+  if (refusal && (keys || stockCode)) {
     try {
       const language = typeof document !== 'undefined' ? String(document.documentElement?.getAttribute('lang') || '').trim().toLowerCase() : ''
       const pack = (language.startsWith('km') ? (await import('../lang/km.json')).default : (await import('../lang/en.json')).default) as Record<string, unknown>
-      const value = pack[keys[direction]]
-      if (typeof value === 'string' && value.trim()) refusal.message = value
+      if (keys) {
+        const value = pack[keys[direction]]
+        if (typeof value === 'string' && value.trim()) refusal.message = value
+      } else {
+        const { STOCK_REVERT_ERRORS, STOCK_REPLAY_ONLY_ERRORS, stockRevertErrorText } = await import('../utils/stockRevertError.ts')
+        if (stockCode && (Object.prototype.hasOwnProperty.call(STOCK_REVERT_ERRORS, stockCode) || Object.prototype.hasOwnProperty.call(STOCK_REPLAY_ONLY_ERRORS, stockCode))) {
+          refusal.message = stockRevertErrorText(refusal, (key, fallback) => {
+            const value = pack[key]
+            return typeof value === 'string' && value.trim() ? value : fallback
+          })
+        }
+      }
     } catch {
       // Keep the server's English.
     }
