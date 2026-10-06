@@ -251,6 +251,7 @@ const feesRoute = loadReal('routes/fees.ts', {
   '../lib/feeOperationReceipt': feeOperationReceiptKernel,
   '../lib/reviewGate': reviewGate,
   '../lib/branchRoles': branchRoles,
+  '../lib/branchEffect': loadReal('lib/branchEffect.ts', { './branchRoles': branchRoles, './sqlBinding': loadReal('lib/sqlBinding.ts') }),
   // fee_date is a TYPED date now, read day-first through the shared kernel,
   // so routes/fees.ts imports batchCode.ts too -- the same real transpiled
   // module loaded above, not a stub, so the order under test is the real one.
