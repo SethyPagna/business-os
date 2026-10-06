@@ -269,7 +269,8 @@ runTest('a replacement is recorded as an ordinary sale, not a settlement', () =>
   assert.match(routeSource, /details: subtotalUsd > 0 \? \[\{ method: replacementPaymentMethod, amount_usd: subtotalUsd, amount_khr: 0 \}\] : \[\] \}/)
   // ...and on a sale that carries a debt it follows that sale (RET-A verifier P1):
   // paid only from the refund's cash, the rest owed (test-return-exchange-debt-native).
-  assert.match(routeSource, /splitReplacementPayment\(\{ carriesDebt: replacementFollowsDebt, cashUsd: refundSplit\.cashUsd, replacementUsd: subtotalUsd \}\)/)
+  // RET-A verify R2: through the one settlement the Return screen preview shares (settleReplacementTender).
+  assert.match(routeSource, /settleReplacementTender\(\{ carriesDebt: replacementFollowsDebt, cashUsd: refundSplit\.cashUsd, replacementUsd: subtotalUsd,/)
   assert.match(routeSource, /amount_paid_usd: replacementTotals\.amountPaidUsd, amount_paid_khr: replacementTotals\.amountPaidKhr,/)
   // ...on a real payment method, defaulting to a real one
   assert.match(routeSource, /const DEFAULT_REPLACEMENT_PAYMENT_METHOD = 'Cash'/)
