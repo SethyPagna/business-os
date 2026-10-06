@@ -160,7 +160,6 @@ const RULES: Rule[] = [
       { file: 'frontend/src/components/catalog/portalLanguagePacks.ts', text: 'Leang Cosmetics/Leang Beauty', why: 'the Khmer copy of those two notices' },
       { file: 'frontend/src/components/catalog/portalLanguagePacks.ts', text: 'Leang Beauty', why: 'the Khmer copy of those two notices' },
       { file: 'frontend/src/components/catalog/portalContentI18n.ts', text: "'Leang Beauty',", why: 'do-not-translate list, so the old name is never machine-translated' },
-      { file: 'cloudflare/src/lib/portalAccounts.ts', text: 'bought from Leang Cosmetics/Leang Beauty', why: 'the Worker copy of the sign-up reminder' },
     ],
   },
   {

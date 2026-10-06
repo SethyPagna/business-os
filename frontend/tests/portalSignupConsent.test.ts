@@ -140,16 +140,21 @@ test('the browser rule and the Worker rule are the same rule', () => {
   assert.match(workerAccounts, /consentGiven\(input\.consent\)/, 'the Worker does not check consent')
   assert.match(workerAccounts, /code: 'consent_required'/, 'the Worker has no consent_required refusal')
   assert.match(workerRoute, /consent: body\.consent/, 'the signup route never forwards consent')
-  // Refused BEFORE any customer lookup, so the endpoint cannot double as a
-  // phone-existence oracle for a caller who never consents.
+  // Refused BEFORE any database access, so the endpoint cannot double as an
+  // existence oracle (or write anything) for a caller who never consents.
+  // G38 P1 removed the customer claim path (claimAccount) from sign-up, so the
+  // body now ends at the next top-level function, whatever it is called.
   const bodyStart = workerAccounts.indexOf('export async function signupPortalAccount')
-  const bodyEnd = workerAccounts.indexOf('async function claimAccount', bodyStart)
+  const nextFunction = workerAccounts.slice(bodyStart + 1).search(/\n(?:export )?(?:async )?function /)
+  const bodyEnd = nextFunction < 0 ? -1 : bodyStart + 1 + nextFunction
   assert.ok(bodyStart > 0 && bodyEnd > bodyStart, 'signupPortalAccount moved; re-anchor this check')
   const body = workerAccounts.slice(bodyStart, bodyEnd)
   const gate = body.indexOf("code: 'consent_required'")
-  const firstLookup = body.search(/db\.prepare\(|findCustomerByCanonicalPhone\(/)
+  const firstDbAccess = body.search(/getDb\(|db\.prepare\(|db\.batch\(|portalAccountsHaveConsentColumns\(/)
   assert.ok(gate > 0, 'signupPortalAccount does not refuse without consent')
-  assert.ok(firstLookup > gate, 'consent must be checked before any customer lookup')
+  assert.ok(firstDbAccess > gate, 'consent must be checked before any database access')
+  // And sign-up never reads the customer directory at all (G38 P1).
+  assert.doesNotMatch(body, /FROM customers|findCustomerByCanonicalPhone\(/, 'sign-up must not look up customers')
 })
 
 test('the recorded consent version is the version of the text the visitor saw', () => {
