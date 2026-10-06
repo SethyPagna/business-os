@@ -38,12 +38,33 @@
 #                 files, as a settings input that puts them back. The settings
 #                 input is read from the run's event payload, never from an
 #                 expression, so no topic id reaches the log.
+#   d1-physical-export
+#                 a read-only copy of EVERY physical table of the production
+#                 D1 database (d1_migrations included; FTS5 virtual tables,
+#                 their shadow tables, sqlite_* and _cf_* internals left out),
+#                 for a local rehearsal on a real data copy. Pages by rowid
+#                 keyset (never OFFSET); each statement is one SELECT built by
+#                 ops/scripts/ops-d1-physical-lib.mjs and passed through the
+#                 same guard as d1-export. Writes encrypted per-table JSONL
+#                 chunks plus one encrypted manifest (table, rows, columns,
+#                 sha256 per table and chunk) and nothing else. Runs only from
+#                 refs/heads/main (the job's if, and the script re-checks).
+#                 Credentials never leave D1: session, one-time-code and
+#                 lock-out tables are exported without rows, password / OTP /
+#                 API-key / token columns and sensitive settings values are
+#                 replaced in the SELECT itself (manifest.redactions). Chunk
+#                 files are padded to one fixed size. The artifact is kept ONE
+#                 day: it still holds personal data. Rebuild it with
+#                 ops/scripts/latest-data/load-d1-physical-export.mjs.
+#                 Not a point-in-time snapshot (D1 has none across statements):
+#                 run it with trading closed; tables that gained rows meanwhile
+#                 are listed in the manifest.
 #
 # THIS REPOSITORY IS PUBLIC, and so are its Actions logs, job summaries and
 # artifacts. The log and summary carry counts, byte totals, pass/fail and
 # commit ids only. Everything else is encrypted on the runner for the owner's
 # key (ops/keys/ops-export-public.pem) and uploaded as *.enc.json, kept 3
-# days. Decrypt on the owner's machine:
+# days (d1-physical-export: 1 day). Decrypt on the owner's machine:
 #   node ops/scripts/ops-decrypt.mjs <file>.enc.json <private-key-file> <out>.json
 #
 # Shares the production-deploy concurrency group with Deploy and Deploy
@@ -63,6 +84,7 @@ on:
           - r2-apac-copy
           - secret-names
           - settings-upsert
+          - d1-physical-export
       mode:
         description: r2-apac-copy only. Before the switch - copy (mirrors; its prune deletes only DESTINATION keys the old bucket lacks) or verify-only (compares, writes nothing). After the switch - topup (copies missing or older objects; never overwrites newer, never prunes or deletes). No mode writes or deletes the old bucket.
         required: true
@@ -364,4 +386,62 @@ jobs:
           name: ops-settings-upsert
           path: ${{ runner.temp }}/ops-out/*.enc.json
           retention-days: 3
+          if-no-files-found: ignore
+
+  d1-physical-export:
+    name: d1-physical-export
+    needs: gate
+    if: inputs.task == 'd1-physical-export' && github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    environment: production
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check the confirm word
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if (-not [string]::Equals($env:CONFIRM, 'd1-physical-export', [System.StringComparison]::Ordinal)) {
+            Write-Output '::error::Type d1-physical-export in the confirm box to run this job.'
+            exit 1
+          }
+
+      - name: Check out
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: cloudflare/package-lock.json
+
+      - name: Install packages (cloudflare)
+        working-directory: cloudflare
+        run: npm ci --no-audit --no-fund
+
+      # Logs only the verdict, fixed problem codes, Cloudflare error codes and
+      # the encrypted files' count and bytes; tables, rows and counts go into
+      # the encrypted manifest. The step stops 30 minutes before the job so the
+      # upload below still runs after a timeout.
+      - name: Export every physical table (read-only keyset pages, encrypted on the runner)
+        timeout-minutes: 120
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPS_OUT_DIR: ${{ runner.temp }}/ops-out
+        run: node ops/scripts/ops-d1-physical-export.mjs
+
+      - name: Upload the encrypted files
+        if: always() && steps.checkout.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ops-d1-physical-export
+          path: ${{ runner.temp }}/ops-out/*.enc.json
+          retention-days: 1
           if-no-files-found: ignore

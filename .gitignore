@@ -74,3 +74,9 @@ frontend/.lane-api-port
 d1-snapshot-*/
 *.snapshot.sqlite
 snapshot.sqlite
+
+# Local databases rebuilt from production exports (personal data): never commit
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
