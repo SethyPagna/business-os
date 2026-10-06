@@ -1751,7 +1751,7 @@ app.get('/stock-ledger', async (c) => {
   // (ignoring the view chip) so the split is always visible inline. This is
   // what replaced the old "Adjustments" bucket and the Stats expander.
   const summaryRow = await db.prepare(ledger.summarySql).get<{
-    in_count: number; out_count: number; in_qty: number; out_qty: number; total: number
+    in_count: number; out_count: number; in_qty: number; out_qty: number; revert_count: number; total: number
   }>(ledger.params)
 
   return c.json({
@@ -1760,12 +1760,13 @@ app.get('/stock-ledger', async (c) => {
     page,
     pageSize,
     totalPages: Math.max(1, Math.ceil(total / pageSize)),
-    view: ['all', 'in', 'out'].includes(String(query.view || '')) ? String(query.view) : 'all',
+    view: ['all', 'in', 'out', 'reverts'].includes(String(query.view || '')) ? String(query.view) : 'all',
     summary: {
       inCount: Number(summaryRow?.in_count || 0),
       outCount: Number(summaryRow?.out_count || 0),
       inQty: Number(summaryRow?.in_qty || 0),
       outQty: Number(summaryRow?.out_qty || 0),
+      revertCount: Number(summaryRow?.revert_count || 0),
       total: Number(summaryRow?.total || 0),
     },
   })

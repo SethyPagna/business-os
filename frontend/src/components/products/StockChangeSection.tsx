@@ -139,6 +139,8 @@ type LedgerRow = {
   // 1 while the chain's latest Revert undoes this row; a Revert that was itself
   // reverted puts it back in the reports (owner, 1 Oct 2026).
   reverted_now?: number | null
+  // REVERT-SET: when this row's Revert was written -- the chip names the day when it is another one.
+  reverted_by_at?: string | null
 }
 
 // The row as the list and the detail show it: a Revert's reason loses the
@@ -152,6 +154,8 @@ type LedgerSummary = {
   outCount: number
   inQty: number
   outQty: number
+  // REVERT-SET: Revert rows, session Undo/Redo rows and reverted rows in this scope.
+  revertCount?: number
   total: number
 }
 
@@ -164,7 +168,7 @@ type LedgerResponse = {
 
 // Part 553: two columns only. The old 'adjustments' view was removed (its
 // rows fold into In); 'all' shows everything.
-type LedgerView = 'all' | 'in' | 'out'
+type LedgerView = 'all' | 'in' | 'out' | 'reverts'
 
 type Translate = (key: string) => string
 
@@ -787,8 +791,13 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const revertTag = (row: LedgerRow) => {
     const reverts = revertsMovementId(row)
     // A Revert that was itself reverted shows both: what it reverts and that it is undone now.
+    // REVERT-SET (owner, 6 Oct 2026): a row reverted on another day says which day.
+    const revertedDay = row.reverted_by_at ? fmtDate(row.reverted_by_at) : ''
+    const chipText = revertedDay && revertedDay !== fmtDate(row.created_at)
+      ? tr(t, 'movement_reverted_on_chip', 'Reverted {date}').replace('{date}', revertedDay)
+      : tr(t, 'movement_reverted_chip', 'Reverted')
     const chip = Number(row.reverted_now)
-      ? <span data-revert-tag="reverted" className="shrink-0 rounded bg-gray-100 px-1 text-[10px] font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300">{tr(t, 'movement_reverted_chip', 'Reverted')}</span>
+      ? <span data-revert-tag="reverted" className="shrink-0 rounded bg-gray-100 px-1 text-[10px] font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300">{chipText}</span>
       : null
     if (reverts == null) return chip
     return <><span data-revert-tag="reverts" className="shrink-0 font-normal opacity-80">#{reverts}</span>{chip}</>
@@ -1169,6 +1178,23 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       <div className="flex flex-wrap items-center gap-1.5">
         {stat('in', summary.inCount, summary.inQty)}
         {stat('out', summary.outCount, summary.outQty)}
+        {/* REVERT-SET (owner, 6 Oct 2026: the Revert was not findable from
+            the main page): every Revert in this range and every row in it
+            reverted on any day, one tap away. Hidden when there are none. */}
+        {Number(summary.revertCount) > 0 || view === 'reverts' ? (
+          <button
+            type="button"
+            data-stock-reverts-filter="true"
+            onClick={() => setView(view === 'reverts' ? 'all' : 'reverts')}
+            aria-pressed={view === 'reverts'}
+            title={tr(t, 'stock_reverts_filter_hint', 'Reverts made in this range, and rows in it that were reverted on any day')}
+            className={`inline-flex items-center gap-1 rounded-lg bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700 transition dark:bg-gray-800 dark:text-gray-200 ${view === 'reverts' ? 'ring-2 ring-inset ring-gray-400 dark:ring-gray-500' : 'hover:brightness-95'}`}
+          >
+            <RotateCcw className="h-3 w-3" aria-hidden="true" />
+            <span className="tabular-nums">{Number(summary.revertCount) || 0}</span>
+            <span className="font-normal opacity-80">{tr(t, 'stock_reverts_filter', 'Reverts')}</span>
+          </button>
+        ) : null}
       </div>
 
       {loadError ? (

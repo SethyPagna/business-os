@@ -46,7 +46,7 @@ export const LEDGER_OUT_TYPES = [
 // 'set' correction lost its direction at write time (batches.ts stores
 // Math.abs(delta)), so the ledger can only show the increase its stored
 // magnitude implies -- that write-path sign loss is flagged separately.
-export type StockLedgerView = 'all' | 'in' | 'out'
+export type StockLedgerView = 'all' | 'in' | 'out' | 'reverts'
 
 export type StockLedgerFilters = {
   view?: StockLedgerView
@@ -124,6 +124,25 @@ export function sessionReplaySql(movement: string): string {
       WHERE so.rowid = ${movement}.reference_id AND so.generation > 0
         AND ${movement}.id > (SELECT MAX(sm.movement_id) FROM stock_session_members sm WHERE sm.operation_id = so.id))
     AND NOT EXISTS (SELECT 1 FROM stock_session_members sm WHERE sm.movement_id = ${movement}.id) THEN 1 ELSE 0 END`
+}
+
+/**
+ * REVERT-SET (owner, 6 Oct 2026, on the main Stock Changes page: make reverts
+ * discoverable). 1 for a row that is a Revert ('revert:<id>'), a session
+ * Undo/Redo row, or a row that was reverted -- whenever that Revert was
+ * written. The "Reverts" view and its count use it, so a day's page shows a
+ * row reverted a week later, and a Revert made today of last month's row.
+ * reference_id is a range seek on idx 0104 (reference_id, movement_type, id).
+ */
+export function revertInvolvedSql(movement: string): string {
+  return `(${movement}.reference_id >= 'revert:' AND ${movement}.reference_id < 'revert;'
+    OR EXISTS (SELECT 1 FROM inventory_movements rv WHERE rv.reference_id = 'revert:' || CAST(${movement}.id AS TEXT))
+    OR ${sessionReplaySql(movement)} = 1)`
+}
+
+/** When the Revert of this row was written (null when never reverted) -- the list says so when it is another day. */
+export function revertedByAtSql(movement: string): string {
+  return `(SELECT rv.created_at FROM inventory_movements rv WHERE rv.reference_id = 'revert:' || CAST(${movement}.id AS TEXT) ORDER BY rv.id LIMIT 1)`
 }
 
 /** A movement's quantity with the direction its type implies (see LEDGER_OUT_TYPES). */
@@ -422,12 +441,14 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
   // (so merge carry-ins and legacy adjustments fold into In), 'out' is the
   // outflow types. Any other value (including the retired 'adjustments')
   // falls through to 'all'.
-  const view: StockLedgerView = filters.view === 'in' || filters.view === 'out' ? filters.view : 'all'
+  const view: StockLedgerView = filters.view === 'in' || filters.view === 'out' || filters.view === 'reverts' ? filters.view : 'all'
   const viewPredicate = view === 'in'
     ? `m.movement_type NOT IN (${OUT_LIST})`
     : view === 'out'
       ? `m.movement_type IN (${OUT_LIST})`
-      : ''
+      : view === 'reverts'
+        ? revertInvolvedSql('m')
+        : ''
   const whereClauses = viewPredicate ? [...base, viewPredicate] : base
   const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : ''
 
@@ -492,7 +513,7 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
       m.unit_cost_usd, m.unit_cost_khr, m.total_cost_usd, m.total_cost_khr,
       m.reason, m.reference_id, ${movementActorNameSql('m')} AS user_name, m.created_at,
       ${revertsMovementIdSql('m')} AS reverts_movement_id, ${revertedByMovementIdSql('m')} AS reverted_by_movement_id,
-      ${revertChainOpenSql('m')} AS reverted_now, ${sessionReplaySql('m')} AS session_replay,
+      ${revertChainOpenSql('m')} AS reverted_now, ${sessionReplaySql('m')} AS session_replay, ${revertedByAtSql('m')} AS reverted_by_at,
       ${movementReferenceSelectSql('m')},
       m.batch_id, b.lot_code AS batch_lot_code, b.received_at AS batch_received_at,
       b.supplier_id AS batch_supplier_id, b.supplier_name AS batch_supplier_name,
@@ -524,6 +545,7 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
       SUM(CASE WHEN m.movement_type IN (${OUT_LIST}) THEN 1 ELSE 0 END) AS out_count,
       SUM(CASE WHEN m.movement_type IN (${OUT_LIST}) THEN 0 ELSE ABS(COALESCE(m.quantity, 0)) END) AS in_qty,
       SUM(CASE WHEN m.movement_type IN (${OUT_LIST}) THEN ABS(COALESCE(m.quantity, 0)) ELSE 0 END) AS out_qty,
+      SUM(CASE WHEN ${revertInvolvedSql('m')} THEN 1 ELSE 0 END) AS revert_count,
       COUNT(*) AS total${LEDGER_FROM}
     ${baseWhereSql}
   `

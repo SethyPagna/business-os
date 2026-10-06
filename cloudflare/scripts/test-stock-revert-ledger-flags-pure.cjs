@@ -56,6 +56,27 @@ async function main() {
     assert.equal(f.sql.prepare(one.countSql).get(one.params).total, 1)
     console.log('PASS a Revert link reads exactly its row by id')
 
+    // REVERT-SET (owner, 6 Oct 2026, main Stock Changes page): reverts are
+    // discoverable from any day. A "Reverts" view lists the Revert rows and
+    // every row that was reverted, whenever the Revert was written; its count
+    // rides the summary, and a reverted row carries when its Revert happened.
+    const unrelated = Number(f.sql.prepare(`INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,reason,created_at)
+      VALUES(1,1,'remove',1,'Unrelated count','2026-09-15 04:00:00')`).run().lastInsertRowid)
+    const day = ledger.buildStockLedgerQuery({ productId: 1, startDate: '2026-09-15', endDate: '2026-09-15', view: 'reverts' })
+    const dayRows = f.sql.prepare(day.rowsSql).all({ ...day.params, limit: 50, offset: 0 })
+    assert.deepEqual(dayRows.map((row) => row.id), [receipt], 'the day of the receipt: the receipt reverted on another day, not the unrelated row')
+    assert.equal(dayRows[0].reverted_by_at, byId(first).created_at, 'the row says when its Revert was written')
+    assert.notEqual(String(dayRows[0].reverted_by_at).slice(0, 10), '2026-09-15', 'and that is another day')
+    const daySummary = f.sql.prepare(day.summarySql).get(day.params)
+    assert.deepEqual([daySummary.revert_count, daySummary.total], [1, 2], 'the count covers the day without the view chip: 1 of 2 rows')
+    const all = ledger.buildStockLedgerQuery({ productId: 1, view: 'reverts' })
+    assert.deepEqual(f.sql.prepare(all.rowsSql).all({ ...all.params, limit: 50, offset: 0 }).map((row) => row.id).sort((a, b) => a - b), [receipt, first, second])
+    assert.equal(f.sql.prepare(all.countSql).get(all.params).total, 3)
+    const plain = ledger.buildStockLedgerQuery({ productId: 1, view: 'all' })
+    assert.equal(f.sql.prepare(plain.countSql).get(plain.params).total, 4, 'All still lists every row')
+    assert.equal(f.sql.prepare(plain.rowsSql).all({ ...plain.params, limit: 50, offset: 0 }).find((row) => row.id === unrelated).reverted_by_at, null)
+    console.log('PASS the Reverts view finds a row reverted on another day and the Reverts made of rows outside the range')
+
     const list = sessions.buildStockInSessionListQuery('')
     const groups = f.sql.prepare(list.groupedSql).all(list.params)
     assert.deepEqual(groups.map((g) => [g.session_key, g.line_count, g.reverted_line_count, g.quantity]), [['session:777', 1, 0, 10]],
