@@ -24,6 +24,7 @@ import { ROLE_PRESETS } from './rolePresetDefaults'
 import { isAdminControlUser, normalizePermissionState, type PermissionValue } from '../../utils/permissions.ts'
 import { useIsPageActive } from '../shared/pageActivity'
 import { APP_NAVIGATION_EVENT } from '../../app/pathRouting.ts'
+import { takeQueuedFocus, USERS_FOCUS_EVENT, USERS_FOCUS_KEY } from '../../utils/notificationFocus.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
@@ -573,21 +574,26 @@ export default function Users() {
   }
   const isCurrentAccount = (targetUser: UserRecord): boolean => Number(targetUser.id) === Number(currentUser?.id)
 
-  // Device-approval notifications navigate here with anchor 'devices' (see
-  // routes/notifications.ts's buildDeviceApprovalSection and
-  // AppContext.tsx's navigateTo). Users.tsx can already be mounted when
-  // that navigation happens (pages stay mounted across switches), so a
-  // one-time mount check isn't enough -- listen for the navigation event
-  // too. window.location.hash is already updated by the time this fires,
-  // since navigateTo() pushes the URL before dispatching the event.
+  // Device notifications land here on the Devices tab. Users is a section of
+  // the Settings hub, whose own anchor ('hub:settings:users') owns the URL
+  // hash, so the tab arrives as a queued hand-off the notification panel leaves
+  // (utils/notificationFocus.ts); the old '#devices' hash is still honoured for
+  // a bookmark. Users.tsx can already be mounted when the navigation happens
+  // (pages stay mounted across switches), so a one-time mount check isn't
+  // enough -- listen for the navigation and the focus events too.
   useEffect(() => {
     if (!canManage) return
     const applyHashTab = () => {
       if (window.location.hash === '#devices') setTab('devices')
+      if (takeQueuedFocus<{ tab?: string }>(USERS_FOCUS_KEY)?.tab === 'devices') setTab('devices')
     }
     applyHashTab()
     window.addEventListener(APP_NAVIGATION_EVENT, applyHashTab)
-    return () => window.removeEventListener(APP_NAVIGATION_EVENT, applyHashTab)
+    window.addEventListener(USERS_FOCUS_EVENT, applyHashTab)
+    return () => {
+      window.removeEventListener(APP_NAVIGATION_EVENT, applyHashTab)
+      window.removeEventListener(USERS_FOCUS_EVENT, applyHashTab)
+    }
   }, [canManage])
 
   const syncChannelName = String(syncChannel?.channel || '')

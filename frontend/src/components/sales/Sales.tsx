@@ -6,6 +6,7 @@ import Download from 'lucide-react/dist/esm/icons/download.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { fmtClock24 } from '../../utils/formatters'
+import { SALE_FOCUS_EVENT, SALE_FOCUS_KEY, takeQueuedFocus } from '../../utils/notificationFocus.ts'
 import { buildEquation, revenueTerms, profitTerms, isRevenueCountedSale, saleListRevenueUsd, saleListCreditUsd } from '../../utils/statsFormulas'
 import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
 import type { SaleAmendmentRow } from '../../utils/saleAmendments.ts'
@@ -1728,6 +1729,21 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       setSelectedSale((current) => current && Number(current.id) === numericId ? fresh : current)
     })
   }, [readAuthoritativeSale])
+
+  // A notification about one sale (Not Paid, awaiting delivery, the sale that took a product to
+  // low stock) opens that sale's detail: the panel queues { saleId } and navigates here
+  // (utils/notificationFocus.ts). A section that is already mounted hears the event; one that
+  // mounts after the navigation finds the queued value.
+  useEffect(() => {
+    const openQueuedSale = () => {
+      const saleId = Number(takeQueuedFocus<{ saleId?: unknown }>(SALE_FOCUS_KEY)?.saleId)
+      if (!Number.isSafeInteger(saleId) || saleId <= 0) return
+      void readAuthoritativeSale(saleId).then((sale) => { if (sale && aliveRef.current) openSaleDetail(sale) })
+    }
+    openQueuedSale()
+    window.addEventListener(SALE_FOCUS_EVENT, openQueuedSale)
+    return () => window.removeEventListener(SALE_FOCUS_EVENT, openQueuedSale)
+  }, [openSaleDetail, readAuthoritativeSale])
 
   useEffect(() => {
     const validIds = new Set<number>(filteredIds)

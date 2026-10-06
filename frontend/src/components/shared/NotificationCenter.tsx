@@ -21,6 +21,11 @@ import {
 import { getNotificationSummary as getNotificationSummaryRequest } from '../../api/notificationSummary.ts'
 import { getNotificationSectionItems as getNotificationSectionItemsRequest } from '../../api/notificationSummary.ts'
 import { unseenTailCount, type SeenTail } from '../../utils/notificationTail.ts'
+import { fmtDateOnly, fmtDateTime24 } from '../../utils/formatters.ts'
+import { resolveNotificationTarget } from '../../utils/notificationTargets.ts'
+import { queueNotificationFocus } from '../../utils/notificationFocus.ts'
+import { groupNotificationItems, NOTIFICATION_GROUP_MIN, type NotificationRow } from '../../utils/notificationGroups.ts'
+import { NOTIFICATION_KIND_ICON, NOTIFICATION_KIND_LABEL } from './notificationKinds.ts'
 import { listImportJobs as listImportJobsRequest } from '../../api/importJobsTransport.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
@@ -55,9 +60,15 @@ type NotificationItem = {
   tone?: Tone
   pageId?: string
   anchor?: string
-  // Set on the client-composed "Imports" section only (see importJobsSection
-  // below) -- when present, clicking the item opens that job's Import
-  // Report modal directly instead of navigating to a page, since a
+  // Raw DB timestamp the row shows as dd/mm/yyyy HH:mm (fmtDateTime24).
+  at?: string
+  // The sale this row is about: the click opens that sale's detail.
+  saleId?: number
+  // The text the destination list is searched for (a product, a supplier).
+  search?: string
+  // Set on the client-composed "Recent imports" section and on the Worker's
+  // import-warning rows -- when present, clicking the item opens that job's
+  // Import Report modal directly instead of navigating to a page, since a
   // finished import doesn't live on any one page the way the rest of
   // this center's items do.
   importJobId?: string
@@ -116,6 +127,7 @@ type NotificationSummary = {
 }
 
 type AppContextValue = {
+  canAccessPage: (pageId: string) => boolean
   navigateTo: (pageId: string, anchor?: string) => void
   notify: (message: string, tone?: 'error' | 'info' | 'success' | 'warning') => void
   saveSettings: (settings: Record<string, string>) => Promise<unknown>
@@ -208,10 +220,13 @@ const SECTION_LABEL_KEYS: Record<string, LabelTuple> = {
   loyalty: ['loyalty_points', 'Loyalty', 'ពិន្ទុស្មោះត្រង់'],
   portal: ['customer_portal', 'Website Editor', 'កម្មវិធីកែសម្រួលគេហទំព័រ'],
   system: ['system', 'System', 'ប្រព័ន្ធ'],
-  imports: ['notification_imports', 'Imports', 'ការនាំចូល'],
+  imports: ['imports', 'Imports', 'ការនាំចូល'],
 }
 
 SECTION_LABEL_KEYS.expiry = ['notification_expiry_title', 'Product expiry', 'ផុតកំណត់ផលិតផល']
+SECTION_LABEL_KEYS.supplier_credit = ['notification_supplier_credit_title', 'Not Yet Paid · suppliers', 'មិនទាន់បង់ · អ្នកផ្គត់ផ្គង់']
+SECTION_LABEL_KEYS.security = ['security', 'Security', 'សុវត្ថិភាព']
+SECTION_LABEL_KEYS.import_jobs = ['recent_imports', 'Recent imports', 'ការនាំចូលថ្មីៗ']
 
 const TONE_LABEL_KEYS: Record<Tone, LabelTuple> = {
   danger: ['status_danger', 'Danger', 'បន្ទាន់'],
@@ -226,6 +241,7 @@ const salesSummaryCopy = ({ awaitingPaymentCount, awaitingDeliveryCount }: CopyP
 ].filter(Boolean).join(' • ')
 
 const SECTION_SUMMARY_COPY: Record<string, LocalizedCopy> = {
+  // The stock section's count line: how many products SALES took out of / down in stock lately.
   notification_inventory_summary: {
     en: ({ outCount, lowCount }) => [outCount ? `${outCount} out of stock` : null, lowCount ? `${lowCount} low stock` : null].filter(Boolean).join(' • '),
     km: ({ outCount, lowCount }) => [outCount ? `${outCount} អស់ស្តុក` : null, lowCount ? `${lowCount} ស្តុកទាប` : null].filter(Boolean).join(' • '),
@@ -259,14 +275,52 @@ SECTION_SUMMARY_COPY.notification_expiry_summary = {
   km: ({ expiredCount, expiringCount, days }) => [expiredCount ? `${expiredCount} ផុតកំណត់` : null, expiringCount ? `${expiringCount} នឹងផុតកំណត់ក្នុង ${days} ថ្ងៃ` : null].filter(Boolean).join(' • '),
 }
 
+// A language-pack word with an English fallback, for the copy below that is composed from pack
+// words (so one function serves both languages, as the sales rows do).
+const packWord = (t: TranslateFn | undefined, key: string, fallback: string): string => {
+  const value = t?.(key)
+  return value && value !== key ? value : fallback
+}
+const fillSlots = (template: string, params: CopyParams): string => (
+  Object.entries(params).reduce((message, [name, value]) => message.replaceAll(`{${name}}`, String(value)), template)
+)
+const joinMeta = (...parts: unknown[]): string => parts.map((part) => String(part ?? '').trim()).filter(Boolean).join(' • ')
+
+// One short line per stock row: what happened, then what a sale left behind. The time is appended by
+// the panel for every row that carries one, so it is not repeated here.
+const stockMeta = (state: 'out' | 'low'): LocalizedCopy['en'] => ({ quantity, receipt, branch }, t) => joinMeta(
+  state === 'out' ? packWord(t, 'out_of_stock', 'Out of Stock') : packWord(t, 'low_stock', 'Low Stock'),
+  state === 'low' ? fillSlots(packWord(t, 'notification_left', '{count} left'), { count: quantity }) : '',
+  receipt,
+  branch,
+)
+const creditMeta = (key: 'notification_credit_overdue' | 'notification_credit_due'): LocalizedCopy['en'] => ({ days, supplier, dueDate }, t) => joinMeta(
+  fillSlots(key === 'notification_credit_overdue' ? packWord(t, 'notification_credit_overdue', 'Overdue {days}d') : packWord(t, 'notification_credit_due', 'Due in {days}d'), { days }),
+  supplier,
+  dueDate ? fmtDateOnly(dueDate) : '',
+)
+
 const ITEM_META_COPY: Record<string, LocalizedCopy> = {
-  notification_inventory_out_of_stock: {
-    en: () => 'Out of stock',
-    km: () => 'អស់ស្តុក',
+  notification_stock_out: { en: stockMeta('out'), km: stockMeta('out') },
+  notification_stock_low: { en: stockMeta('low'), km: stockMeta('low') },
+  notification_credit_overdue: { en: creditMeta('notification_credit_overdue'), km: creditMeta('notification_credit_overdue') },
+  notification_credit_due: { en: creditMeta('notification_credit_due'), km: creditMeta('notification_credit_due') },
+  notification_import_warnings: {
+    en: ({ count }, t) => `${count} ${packWord(t, 'warnings_short', 'warnings')}`,
+    km: ({ count }, t) => `${count} ${packWord(t, 'warnings_short', 'warnings')}`,
   },
-  notification_inventory_low_stock: {
-    en: ({ quantity }) => `Low stock (${quantity})`,
-    km: ({ quantity }) => `ស្តុកទាប (${quantity})`,
+  notification_drive_not_connected: {
+    en: (_params, t) => packWord(t, 'not_connected', 'Not connected'),
+    km: (_params, t) => packWord(t, 'not_connected', 'Not connected'),
+  },
+  notification_drive_sync_off: {
+    en: (_params, t) => packWord(t, 'notification_drive_sync_off', 'Sync is off'),
+    km: (_params, t) => packWord(t, 'notification_drive_sync_off', 'Sync is off'),
+  },
+  // The country names are data; only the arrow is ours.
+  notification_device_new_country: {
+    en: ({ from, to }) => `${from} → ${to}`,
+    km: ({ from, to }) => `${from} → ${to}`,
   },
   // Sep 23 2026: a third hand-written copy of the sale-status words lived
   // here and had drifted too ("Awaiting payment" / "រង់ចាំបង់ប្រាក់"). Both
@@ -284,27 +338,20 @@ const ITEM_META_COPY: Record<string, LocalizedCopy> = {
     en: ({ balance }) => `${balance} points`,
     km: ({ balance }) => `${balance} ពិន្ទុ`,
   },
+  // The row's title is the customer; the meta is just where the submission came from.
   notification_portal_pending_review: {
-    en: () => 'Pending review',
-    km: () => 'កំពុងរង់ចាំពិនិត្យ',
-  },
-  notification_portal_pending_review_platform: {
-    en: ({ platform }) => `Pending review • ${platform}`,
-    km: ({ platform }) => `កំពុងរង់ចាំពិនិត្យ • ${platform}`,
-  },
-  notification_system_drive_sync_reconnect: {
-    en: () => 'Reconnect Google Drive to resume sync',
-    km: () => 'ភ្ជាប់ Google Drive ឡើងវិញដើម្បីបន្ត sync',
+    en: ({ platform }, t) => joinMeta(packWord(t, 'sharePending', 'Pending review'), platform),
+    km: ({ platform }, t) => joinMeta(packWord(t, 'sharePending', 'Pending review'), platform),
   },
 }
 
 ITEM_META_COPY.notification_product_expired = {
-  en: ({ days, expiryDate }) => `Expired ${days} day${Number(days) === 1 ? '' : 's'} ago • ${expiryDate}`,
-  km: ({ days, expiryDate }) => `ផុតកំណត់ ${days} ថ្ងៃមុន • ${expiryDate}`,
+  en: ({ days, expiryDate }) => `Expired ${days} day${Number(days) === 1 ? '' : 's'} ago • ${fmtDateOnly(expiryDate)}`,
+  km: ({ days, expiryDate }) => `ផុតកំណត់ ${days} ថ្ងៃមុន • ${fmtDateOnly(expiryDate)}`,
 }
 ITEM_META_COPY.notification_product_expiring = {
-  en: ({ days, expiryDate }) => `Expires in ${days} day${Number(days) === 1 ? '' : 's'} • ${expiryDate}`,
-  km: ({ days, expiryDate }) => `នឹងផុតកំណត់ក្នុង ${days} ថ្ងៃ • ${expiryDate}`,
+  en: ({ days, expiryDate }) => `Expires in ${days} day${Number(days) === 1 ? '' : 's'} • ${fmtDateOnly(expiryDate)}`,
+  km: ({ days, expiryDate }) => `នឹងផុតកំណត់ក្នុង ${days} ថ្ងៃ • ${fmtDateOnly(expiryDate)}`,
 }
 
 function preferenceValue(key: string | undefined, settings: Record<string, unknown> = {}, fallback = true): boolean {
@@ -424,23 +471,50 @@ function matchesVisibilityMode(mode: VisibilityMode): boolean {
   return true
 }
 
-function NotificationSeverityIcon({ tone = 'info', label }: NotificationSeverityIconProps) {
+// "Expired 2 • Expiring soon 5": the kinds a section's rows contain, counted and named in the active language.
+function kindName(kind: string, tr: (key: string, en: string, km?: string) => string, t: TranslateFn): string {
+  if (kind === 'sales_awaiting_payment') return getStatusBadgeLabel('awaiting_payment', t)
+  if (kind === 'sales_awaiting_delivery') return getStatusBadgeLabel('awaiting_delivery', t)
+  const label = NOTIFICATION_KIND_LABEL[kind]
+  return label ? tr(...label) : ''
+}
+
+function summarizeKinds(items: NotificationItem[], tr: (key: string, en: string, km?: string) => string, t: TranslateFn): string {
+  const counts = new Map<string, number>()
+  for (const item of items) counts.set(String(item.kind || ''), (counts.get(String(item.kind || '')) || 0) + 1)
+  // One kind is just the section's own title and count repeated; the line earns its row only
+  // when it tells two kinds apart.
+  if (counts.size < 2) return ''
+  return [...counts]
+    .map(([kind, count]) => {
+      const name = kindName(kind, tr, t)
+      return name ? `${name} ${count}` : ''
+    })
+    .filter(Boolean)
+    .join(' • ')
+}
+
+const TONE_RANK: Record<Tone, number> = { danger: 3, warning: 2, info: 1, success: 0 }
+
+// The kind's own glyph in the tone's coloured bubble. A kind with no glyph keeps the tone's mark.
+function NotificationKindIcon({ kind, tone = 'info', label }: NotificationSeverityIconProps & { kind?: string }) {
   const safeTone = TONE_ICON_COMPONENT[tone] ? tone : 'info'
-  const ToneIcon = TONE_ICON_COMPONENT[safeTone]
+  const KindIcon = (kind && NOTIFICATION_KIND_ICON[kind]) || TONE_ICON_COMPONENT[safeTone]
   return (
     <span
       data-notification-severity-icon={safeTone}
-      className={`mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full ring-1 ring-inset ${TONE_CLASS[safeTone]} ${TONE_ICON_RING_CLASS[safeTone]}`}
+      data-notification-kind={kind || undefined}
+      className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full ring-1 ring-inset ${TONE_CLASS[safeTone]} ${TONE_ICON_RING_CLASS[safeTone]}`}
       title={label}
       aria-label={label}
     >
-      <ToneIcon className="h-3.5 w-3.5 stroke-[2.4]" aria-hidden="true" />
+      <KindIcon className="h-3.5 w-3.5 stroke-[2.2]" aria-hidden="true" />
     </span>
   )
 }
 
 export default function NotificationCenter({ compact = false, openRequestId = 0, visibility = 'always' }: NotificationCenterProps) {
-  const { navigateTo, notify, saveSettings, settings, t } = useApp()
+  const { canAccessPage, navigateTo, notify, saveSettings, settings, t } = useApp()
   const { syncChannel } = useSync()
   const isKhmer = /[\u1780-\u17FF]/.test(t?.('cancel') || '')
   const tr = useCallback((key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
@@ -464,6 +538,8 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   const [notificationSearch, setNotificationSearch] = useState('')
   const [itemLimit, setItemLimit] = useState(20)
   const [sectionPages, setSectionPages] = useState<Record<string, number>>({})
+  // Folded groups the person has opened, by "<section>:<kind>". A group starts folded.
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
   const [visibilityActive, setVisibilityActive] = useState(() => matchesVisibilityMode(visibility))
   const [seenSecurityIds, setSeenSecurityIds] = useState<Set<string>>(() => (
     typeof window === 'undefined' ? new Set() : readSeenSecurityIds()
@@ -671,7 +747,9 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
           }
         })
         setImportJobsSection({
-          id: 'imports',
+          // Not 'imports': the Worker's import-warning section owns that id, and two sections
+          // sharing one id shared one React key and one collapsed flag.
+          id: 'import_jobs',
           label: tr('recent_imports', 'Recent imports', 'ការនាំចូលថ្មីៗ'),
           items,
         })
@@ -739,16 +817,25 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
       const displayLabel = SECTION_LABEL_KEYS[section.id]
         ? tr(...SECTION_LABEL_KEYS[section.id])
         : (section.label || '')
+      // A structured summary is translated by key; otherwise it is composed from the rows' kinds in
+      // the active language ("Expired 2 • Expiring soon 5"), and only when there is more than one
+      // kind to tell apart. The Worker's own English sentence is the fallback only for a partial
+      // preview whose rows cannot be counted here.
       const displaySummary = section.summaryKey
         ? renderStructuredCopy(section.summaryKey, section.summaryParams, section.summary || '')
-        : (section.summary || '')
+        : (section.truncated || !Array.isArray(section.items)
+          ? (section.summary || '')
+          : summarizeKinds(section.items, tr, t))
       const sectionItems = fullSectionItems[section.id] || section.items
       const decoratedItems: DecoratedNotificationItem[] = Array.isArray(sectionItems)
         ? sectionItems.map((item) => ({
           ...item,
-          displayMeta: item.metaKey
-            ? renderStructuredCopy(item.metaKey, item.metaParams, item.meta || '')
-            : (item.meta || ''),
+          displayMeta: joinMeta(
+            item.metaKey
+              ? renderStructuredCopy(item.metaKey, item.metaParams, item.meta || '')
+              : (item.meta || ''),
+            item.at ? fmtDateTime24(item.at) : '',
+          ),
         }))
         : []
       const filteredItems = decoratedItems.filter((item) => {
@@ -787,7 +874,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
       }
     }).filter((section) => section.filteredItemCount > 0 || (toneFilter === 'all' && !normalizedNotificationSearch))
       .sort((a, b) => (a.id === 'security' ? -1 : b.id === 'security' ? 1 : 0))
-  ), [fullSectionItems, importJobsSection, itemLimit, normalizedNotificationSearch, renderStructuredCopy, sectionPages, settings, summary.sections, toneFilter, tr])
+  ), [fullSectionItems, importJobsSection, itemLimit, normalizedNotificationSearch, renderStructuredCopy, sectionPages, settings, summary.sections, t, toneFilter, tr])
 
   // Silent indicator: a pending device approve/reject/revoke request (or a
   // new-country sign-in on an already-approved device) that this admin's
@@ -959,6 +1046,78 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     void loadSummary(true)
   }, [loadSummary, openRequestId, visibilityActive])
 
+  // One row's click: mark it read, go to where it lives, close the panel. Where it lives is decided
+  // by resolveNotificationTarget (utils/notificationTargets.ts); a page this person cannot open says
+  // so instead of closing the panel on nothing.
+  const openItem = (item: DecoratedNotificationItem, section: EffectiveNotificationSection) => {
+    const target = resolveNotificationTarget(item, section.pageId, canAccessPage)
+    if (target.importJobId) {
+      setReportJobId(target.importJobId)
+    } else {
+      if (!canAccessPage(target.page)) {
+        notify(tr('no_permission', 'No Permission', 'គ្មានការអនុញ្ញាត'), 'warning')
+        return
+      }
+      queueNotificationFocus(target.focus)
+      navigateTo(target.page, target.anchor)
+    }
+    setSeenAlertTimes((current) => {
+      const next = { ...current, [item.id]: Date.now() }
+      writeSeenAlertTimes(next)
+      return next
+    })
+    setOpen(false)
+  }
+
+  const renderItemRow = (item: DecoratedNotificationItem, section: EffectiveNotificationSection, nested = false) => {
+    const itemTone = item.tone || 'info'
+    const toneLabel = TONE_LABEL_KEYS[itemTone] ? tr(...TONE_LABEL_KEYS[itemTone]) : itemTone
+    return (
+      <button
+        key={item.id}
+        type="button"
+        onClick={() => openItem(item, section)}
+        data-notification-row={item.kind || 'item'}
+        className={`flex w-full items-center gap-2 rounded-lg py-1 text-left transition hover:bg-slate-100 dark:hover:bg-slate-800 ${nested ? 'pl-6 pr-1.5' : 'px-1.5'}`}
+      >
+        <NotificationKindIcon kind={item.kind} tone={itemTone} label={toneLabel} />
+        <span className="min-w-0 flex-1">
+          <span className="detail-scroll-text text-[13px] font-medium leading-[1.5] text-slate-800 dark:text-slate-100">{item.label}</span>
+          {item.displayMeta ? <span className="detail-scroll-text text-[11px] leading-[1.5] text-slate-500 dark:text-slate-400">{item.displayMeta}</span> : null}
+        </span>
+        <ExternalLink className="h-3.5 w-3.5 flex-shrink-0 text-slate-300" aria-hidden="true" />
+      </button>
+    )
+  }
+
+  const renderGroup = (section: EffectiveNotificationSection, row: Extract<NotificationRow<DecoratedNotificationItem>, { type: 'group' }>) => {
+    const key = `${section.id}:${row.key}`
+    const expanded = !!openGroups[key]
+    const tone = row.items.reduce<Tone>((worst, item) => (TONE_RANK[item.tone || 'info'] > TONE_RANK[worst] ? (item.tone || 'info') : worst), 'success')
+    const name = kindName(row.kind, tr, t)
+    return (
+      <div key={key}>
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setOpenGroups((current) => ({ ...current, [key]: !expanded }))}
+          data-notification-group={row.kind}
+          className="flex w-full items-center gap-2 rounded-lg px-1.5 py-1 text-left transition hover:bg-slate-100 dark:hover:bg-slate-800"
+        >
+          <NotificationKindIcon kind={row.kind} tone={tone} label={name} />
+          <span className="min-w-0 flex-1 text-[13px] font-medium leading-[1.5] text-slate-800 dark:text-slate-100">
+            <span className="detail-scroll-text">{name} · {row.items.length}</span>
+          </span>
+          <ChevronDown className={`h-3.5 w-3.5 flex-shrink-0 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`} aria-hidden="true" />
+        </button>
+        {expanded ? <div className="space-y-0.5">{row.items.map((item) => renderItemRow(item, section, true))}</div> : null}
+      </div>
+    )
+  }
+
+  // While someone is searching or filtering by tone they want every match in view, not folded away.
+  const groupingMin = normalizedNotificationSearch || toneFilter !== 'all' ? Number.POSITIVE_INFINITY : NOTIFICATION_GROUP_MIN
+
   if (!visibilityActive) return null
 
   return (
@@ -1123,7 +1282,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
                             <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">{section.displayLabel || section.label}</div>
                             <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isCollapsed ? '' : 'rotate-180'}`} />
                           </div>
-                          <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{section.displaySummary}</div>
+                          {section.displaySummary ? <div className="detail-scroll-text mt-0.5 text-xs leading-[1.5] text-slate-500 dark:text-slate-400">{section.displaySummary}</div> : null}
                         </div>
                       </button>
                       {section.enabledKey ? (
@@ -1140,39 +1299,13 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
                     </div>
 
                     {!isCollapsed && section.items?.length ? (
-                      <div className="border-t border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900/60">
-                        <div className="space-y-2">
-                          {section.items.map((item) => (
-                            <button
-                              key={item.id}
-                              type="button"
-                              onClick={() => {
-                                if (item.kind === 'import_job' && item.importJobId) {
-                                  setReportJobId(item.importJobId)
-                                  setOpen(false)
-                                  return
-                                }
-                                navigateTo(item.pageId || section.pageId || 'dashboard', item.anchor)
-                                setOpen(false)
-                              }}
-                              className="flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left transition hover:bg-slate-100 dark:hover:bg-slate-800"
-                            >
-                              {(() => {
-                                const itemTone = item.tone || 'info'
-                                const label = TONE_LABEL_KEYS[itemTone] ? tr(...TONE_LABEL_KEYS[itemTone]) : itemTone
-                                return (
-                                  <NotificationSeverityIcon tone={itemTone} label={label} />
-                                )
-                              })()}
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate text-sm font-medium text-slate-800 dark:text-slate-100">{item.label}</span>
-                                <span className="block text-xs text-slate-500 dark:text-slate-400">{item.displayMeta}</span>
-                              </span>
-                              <ExternalLink className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-slate-300" />
-                            </button>
+                      <div className="border-t border-slate-200 bg-white px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900/60">
+                        <div className="space-y-0.5">
+                          {groupNotificationItems(section.items, groupingMin).map((row) => (
+                            row.type === 'group' ? renderGroup(section, row) : renderItemRow(row.item, section)
                           ))}
                         </div>
-                        <div className="mt-2 flex justify-center"><PaginationControls compact rangeAsPageSize page={section.page} pageSize={itemLimit} totalItems={section.filteredItemCount} label={tr('notifications', 'notifications', 'ការជូនដំណឹង')} t={(key) => tr(key, key, key)} onPageChange={(nextPage) => setSectionPages((current) => ({ ...current, [section.id]: nextPage }))} /></div>
+                        {section.totalPages > 1 ? <div className="mt-2 flex justify-center"><PaginationControls compact rangeAsPageSize page={section.page} pageSize={itemLimit} totalItems={section.filteredItemCount} label={tr('notifications', 'notifications', 'ការជូនដំណឹង')} t={(key) => tr(key, key, key)} onPageChange={(nextPage) => setSectionPages((current) => ({ ...current, [section.id]: nextPage }))} /></div> : null}
                         {section.truncated && !fullSectionItems[section.id] && section.unloadedCount > 0 ? (
                           <div className="mt-2 flex justify-center">
                             <button

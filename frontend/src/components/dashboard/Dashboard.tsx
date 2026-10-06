@@ -19,6 +19,8 @@ import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
 import type { DateTimeRange } from '../shared/DateTimeRangePicker'
 import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import { useIsPageActive } from '../shared/pageActivity'
+import { APP_NAVIGATION_EVENT } from '../../app/pathRouting.ts'
+import { DASHBOARD_LOW_STOCK_ANCHOR, DASHBOARD_OUT_OF_STOCK_ANCHOR } from '../../utils/notificationTargets.ts'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
 import { getAnalytics, getDashboard, getDashboardInsightList, getDashboardStartup, getDashboardStockAlerts, normalizeDashboardGrossMetrics, type DashboardInsightKind, type DashboardStockAlertState } from '../../api/dashboardTransport.ts'
@@ -883,6 +885,10 @@ export default function Dashboard() {
   // where every group renders together). Defaults to the overview group so a
   // phone opens on the chart + recent sales rather than an empty pane.
   const [mobileSection, setMobileSection] = useState<DashboardMobileSection>('overview')
+  // The Low stock / Out of stock card a notification just sent the person to (flashes briefly).
+  const [focusedStockCard, setFocusedStockCard] = useState<'low' | 'out' | null>(null)
+  const lowStockCardRef = useRef<HTMLDivElement | null>(null)
+  const outOfStockCardRef = useRef<HTMLDivElement | null>(null)
   const summaryRequestRef = useRef(0)
   const analyticsRequestRef = useRef(0)
   const startupRequestRef = useRef(0)
@@ -939,6 +945,43 @@ export default function Dashboard() {
     // open the Products chip; Inventory consumes it exactly as before).
     navigateTo('branches')
   }, [navigateTo])
+
+  // A stock notification links here with anchor 'low-stock' / 'out-of-stock'
+  // (utils/notificationTargets.ts): bring that card into view and flash it. The
+  // Dashboard is often already mounted and hidden when the link is followed, so
+  // the navigation event is heard as well as the hash a cold load arrives with.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    let reveal = 0
+    let clear = 0
+    const focusCard = (anchor: unknown) => {
+      const name = String(anchor || '').replace(/^#/, '')
+      const state = name === DASHBOARD_LOW_STOCK_ANCHOR ? 'low' : name === DASHBOARD_OUT_OF_STOCK_ANCHOR ? 'out' : null
+      if (!state) return
+      // The phone layout shows one group of cards at a time; these two live in the stock group.
+      setMobileSection('inventory')
+      window.clearTimeout(reveal)
+      window.clearTimeout(clear)
+      // Let the page become visible (and the group unhide) before measuring where the card is.
+      reveal = window.setTimeout(() => {
+        const card = state === 'low' ? lowStockCardRef.current : outOfStockCardRef.current
+        card?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        setFocusedStockCard(state)
+        clear = window.setTimeout(() => setFocusedStockCard(null), 2600)
+      }, 250)
+    }
+    const onNavigate = (event: Event) => {
+      const detail = (event as CustomEvent<{ page?: string; anchor?: string | null }>).detail
+      if (detail?.page === 'dashboard') focusCard(detail.anchor)
+    }
+    window.addEventListener(APP_NAVIGATION_EVENT, onNavigate)
+    focusCard(window.location.hash)
+    return () => {
+      window.removeEventListener(APP_NAVIGATION_EVENT, onNavigate)
+      window.clearTimeout(reveal)
+      window.clearTimeout(clear)
+    }
+  }, [])
 
   const getCurrentDashboardRange = useCallback(() => {
     return { ...rangeQuery, granularity: 'day' as DashboardGranularity }
@@ -2326,7 +2369,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
         <ExpiryAlertsCard summary={summary} translateOr={translateOr} onOpen={openExpiryDetail} onViewMore={() => { setExpiryAlertsListOpen(true); void loadInsightList('expiring_products') }} />
 
         {/* Low Stock */}
-        <div className="card flex flex-col">
+        <div ref={lowStockCardRef} id="dashboard-low-stock" className={`card flex flex-col transition-shadow ${focusedStockCard === 'low' ? 'ring-2 ring-amber-400' : ''}`}>
           <div className="px-3 py-2.5 sm:px-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
             <h2 className="font-semibold text-gray-900 dark:text-white">{t('low_stock_items')}</h2>
             {lowStockCount > 0 && (
@@ -2371,7 +2414,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
         </div>
 
         {/* Out Of Stock */}
-        <div className="card flex flex-col">
+        <div ref={outOfStockCardRef} id="dashboard-out-of-stock" className={`card flex flex-col transition-shadow ${focusedStockCard === 'out' ? 'ring-2 ring-red-400' : ''}`}>
           <div className="p-3 sm:p-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
             <h2 className="font-semibold text-gray-900 dark:text-white">{t('out_of_stock') || 'Out of stock'}</h2>
             {outOfStockCount > 0 && (
