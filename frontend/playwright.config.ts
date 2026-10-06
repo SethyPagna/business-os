@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
 import { defineConfig, devices } from '@playwright/test'
 
 /**
@@ -32,7 +34,23 @@ import { defineConfig, devices } from '@playwright/test'
  * admin.leangbeauty.com vs leangbeauty.com.
  */
 
-export const E2E_PORT = Number(process.env.E2E_PORT || 4318)
+/**
+ * One port PER CHECKOUT, not one shared 4318. Several sessions work this
+ * repository at once, each in its own worktree with its own `dist`; the fixture
+ * server serves the dist beside it. With a shared port and
+ * `reuseExistingServer`, a run in lane B silently talked to the server lane A
+ * had left on 4318 and so tested lane A's build (found 6 Oct 2026: screenshots
+ * of the wrong build). The default is derived from this directory so a
+ * worktree always gets the same, distinct port (4400-4999); E2E_PORT overrides
+ * it, and 4318 stays the fixture server's own default for a standalone run.
+ */
+function defaultLanePort(): number {
+  const here = fileURLToPath(new URL('.', import.meta.url)).toLowerCase()
+  const digest = createHash('sha256').update(here).digest()
+  return 4400 + (digest.readUInt16BE(0) % 600)
+}
+
+export const E2E_PORT = Number(process.env.E2E_PORT || defaultLanePort())
 /** The admin shell: an "admin hostname" per src/app/pathRouting.ts. */
 export const ADMIN_ORIGIN = `http://127.0.0.1:${E2E_PORT}`
 /** The customer storefront: a non-admin hostname, so "/" mounts PublicCatalogRoot. */
@@ -154,7 +172,11 @@ export default defineConfig({
         // module graph. Reusing an existing dist is the fast path locally.
         command: 'node e2e/server/fixtureServer.mjs',
         url: `${ADMIN_ORIGIN}/__e2e/state`,
-        reuseExistingServer: !process.env.CI,
+        // Reuse only when asked (E2E_REUSE=1): a server that is already up may be
+        // another checkout's build. The port above is per checkout, so a leftover
+        // server on it is this lane's own stale one, and a fresh start is correct.
+        reuseExistingServer: process.env.E2E_REUSE === '1',
+        env: { E2E_PORT: String(E2E_PORT) },
         timeout: 60_000,
         stdout: 'ignore',
         stderr: 'pipe',

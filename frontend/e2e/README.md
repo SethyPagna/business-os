@@ -71,8 +71,13 @@ writes nothing heavy.
 `e2e/*.spec.ts`. `e2e/server/fixtureServer.mjs` serves the real `frontend/dist`
 plus committed `/api` fixtures on two loopback origins:
 
-- `http://127.0.0.1:4318` → the **admin** shell
-- `http://127.0.0.2:4318` → the customer **storefront**
+- `http://127.0.0.1:<port>` → the **admin** shell
+- `http://127.0.0.2:<port>` → the customer **storefront**
+
+`<port>` is per checkout (4400-4999, derived from the worktree path in
+`playwright.config.ts`), not a shared 4318: a run never talks to another
+session's server, and so never tests another session's `dist`. Set `E2E_PORT` to
+pick one; set `E2E_REUSE=1` to reuse a server you started yourself.
 
 Two origins because `src/app/pathRouting.ts` routes `/` by HOSTNAME, exactly as
 `admin.leangbeauty.com` and `leangbeauty.com` do in production.

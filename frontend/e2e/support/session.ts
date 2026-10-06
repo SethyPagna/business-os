@@ -16,7 +16,11 @@ import { ADMIN_ORIGIN } from './harness'
 
 /** The accounts the fixture server knows (e2e/server/fixtureServer.mjs SESSION_USERS). */
 export const E2E_ACCOUNTS = {
-  admin: { username: 'admin', id: 1, name: 'E2E Admin' },
+  // `username` is what is TYPED (the fixture server's login key); `storedUsername`
+  // is what the app then holds, because the fixture admin session
+  // (e2e/fixtures/admin-session.json) names its user e2e_admin. The cashiers
+  // override the username, so for them the two are the same.
+  admin: { username: 'admin', storedUsername: 'e2e_admin', id: 1, name: 'E2E Admin' },
   cashierA: { username: 'cashier_a', id: 11, name: 'Cashier A' },
   cashierB: { username: 'cashier_b', id: 12, name: 'Cashier B' },
 } as const
@@ -217,6 +221,7 @@ export async function signIn(page: Page, account: E2EAccount, password = 'e2e-pa
   }
   await expect(page.locator(USERNAME_FIELD)).toBeVisible()
   await submitLogin(page, account, password)
+  const storedUsername = 'storedUsername' in account ? account.storedUsername : account.username
   // The shell paints before the account is resolved, so wait for the IDENTITY
   // as well -- otherwise a spec that switches users can assert against the
   // previous one.
@@ -234,8 +239,8 @@ export async function signIn(page: Page, account: E2EAccount, password = 'e2e-pa
         return raw ? String((JSON.parse(raw) as { username?: string }).username || '') : ''
       } catch { return '' }
     }),
-    { message: `the app must have ${account.username} as its signed-in user`, timeout: 30_000 },
-  ).toBe(account.username)
+    { message: `the app must have ${storedUsername} as its signed-in user`, timeout: 30_000 },
+  ).toBe(storedUsername)
 }
 
 /**
