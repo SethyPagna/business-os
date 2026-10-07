@@ -87,6 +87,8 @@ export function isBranchCutoverRetryable(error: unknown): boolean {
   }
   return false
 }
+/** An error this code raised before or instead of a D1 round trip (a coded refusal or a failed parent check): the outcome is known, it is not retryable. */
+const isLocalRefusal = (cause: unknown): boolean => cause instanceof BranchCutoverCapabilityError || (cause instanceof Error && cause.message === 'branch_cutover_parent_conflict')
 function requireParent(condition: unknown): asserts condition { if (!condition) throw new Error('branch_cutover_parent_conflict') }
 function refuse(capability: string): never { throw new BranchCutoverCapabilityError(capability) }
 function checkStatement(sql: string, params?: Record<string, unknown> | unknown[]): void {
@@ -97,7 +99,12 @@ function checkStatement(sql: string, params?: Record<string, unknown> | unknown[
 function metered(db: D1Compat, budget: TransferInvocationBudget): D1Compat {
   requireParent(budget.extraAtomicStatements === 0)
   let attempts = 0; let batches = 0
-  const chargeRead = () => { assertTransferStatementsFit({ ...budget, remainingReads: budget.remainingReads + attempts }, 2); attempts += 2 }
+  // A budget overrun is deterministic and local (nothing was sent): a coded refusal, never an unknown outcome to retry.
+  const fit = (extraReads: number, statements: number) => {
+    try { assertTransferStatementsFit({ ...budget, remainingReads: budget.remainingReads + extraReads }, statements) }
+    catch { throw new BranchCutoverCapabilityError('parent_invocation_budget_exceeded') }
+  }
+  const chargeRead = () => { fit(attempts, 2); attempts += 2 }
   return new Proxy(db, { get(target, key, receiver) {
     if (key === 'prepare') return (sql: string) => {
       checkStatement(sql)
@@ -107,7 +114,7 @@ function metered(db: D1Compat, budget: TransferInvocationBudget): D1Compat {
     }
     if (key === 'batchOnce') return async (statements: CutoverStatement[]) => {
       requireParent(batches++ === 0)
-      assertTransferStatementsFit({ ...budget, remainingReads: budget.remainingReads + attempts + 12 }, statements.length)
+      fit(attempts + 12, statements.length)
       statements.forEach(s => checkStatement(s.sql, s.params))
       requireParent(statements.reduce((n, s) => n + cutoverBytes(s.sql) + cutoverBytes(JSON.stringify(s.params || {})), 0) <= 1048576)
       return target.batchOnce(statements)
@@ -215,6 +222,7 @@ async function commit(db: D1Compat, row: BranchCutoverJournalRow, before: Cutove
   const final = cutoverAssert(`EXISTS(SELECT 1 FROM branch_cutovers WHERE operation_id=@operation AND revision=@revision+1)`, { operation: row.operation_id, revision: row.revision })
   try { const saved = await perform(compose(db, before, [final])); return { row: saved, replayed: false, next: next(saved) } }
   catch (cause) {
+    if (isLocalRefusal(cause)) throw cause
     try {
       const saved = await readBranchCutoverJournal(db, proof(row))
       requireParent(saved.revision === row.revision + 1 && accept(saved))
@@ -288,6 +296,7 @@ export async function beginBranchCutover(db: D1Compat, actor: Principal, organiz
   const final = cutoverAssert(`EXISTS(SELECT 1 FROM branch_cutovers WHERE operation_id=@operation AND begin_request_id=@request AND phase='capturing' AND revision=0 AND intent_json=@intent)`, { operation: operationId, request: input.requestId, intent: intentJson })
   try { return await beginBranchCutoverJournal(compose(db, [...guardsFor(current, schema, state), stockGuard(input), admission], [final]), begin) }
   catch (cause) {
+    if (isLocalRefusal(cause)) throw cause
     try { const row = await readBranchCutoverJournal(db, begin); requireParent(row.intent_json === intentJson && row.begin_request_id === input.requestId); return { row, replayed: true } } catch { }
     throw new BranchCutoverParentOutcomeUnknown(cause)
   }

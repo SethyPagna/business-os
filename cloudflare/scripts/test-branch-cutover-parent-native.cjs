@@ -253,6 +253,25 @@ async function main() {
       expectedSourceJson: plan.sourcePreimageJson, expectedTargetJson: plan.targetPreimageJson }, { ...budget, alreadyUsed: 966 }))
     assert.equal(stopped.stats.batches, 0); stopped.raw.close()
   })
+  await check('REHEARSAL F2: an invocation-budget overrun is a coded refusal that is never retryable and never wrapped as an unknown outcome', async () => {
+    const w = world(); const p = await inspect(w)
+    const input = { ...identity, ...names, requestId: 'budget_request_f2', controlIncarnation: '00000000-0000-4000-8000-000000000099',
+      expectedSourceJson: p.sourcePreimageJson, expectedTargetJson: p.targetPreimageJson, expectedSchemaDigest: p.schemaDigest }
+    const row = (await w.parent.beginBranchCutover(w.db, actor, 1, input, budget)).row
+    // a read that does not fit (before the batch) and a batch that does not fit (inside the commit) are both the same refusal
+    for (const alreadyUsed of [999, 990, 985]) {
+      const failure = await w.parent.continueBranchCutover(w.db, actor, 1, { operationId: row.operation_id, expectedRevision: row.revision, pageSize: 8 }, { ...budget, alreadyUsed }).catch(error => error)
+      if (!(failure instanceof Error)) continue
+      assert.equal(failure.capability, 'parent_invocation_budget_exceeded', 'alreadyUsed ' + alreadyUsed + ': ' + failure.message)
+      assert.equal(w.parent.isBranchCutoverRetryable(failure), false, 'a deterministic overrun is not retried 25 times blind')
+      assert.ok(!(failure instanceof w.parent.BranchCutoverParentOutcomeUnknown))
+    }
+    const failed = await w.parent.continueBranchCutover(w.db, actor, 1, { operationId: row.operation_id, expectedRevision: row.revision, pageSize: 8 }, { ...budget, alreadyUsed: 999 }).catch(error => error)
+    assert.equal(failed.capability, 'parent_invocation_budget_exceeded')
+    assert.equal(w.raw.prepare('SELECT revision FROM branch_cutovers').get().revision, row.revision, 'nothing was written')
+    assert.equal(w.parent.isBranchCutoverRetryable(new Error('D1_ERROR: D1 DB is overloaded')), true, 'a transient D1 refusal stays retryable')
+    w.raw.close()
+  })
   assert.ok(checks > 0, 'test filter must select a group')
   console.log(`${checks} branch cutover parent native groups passed`)
 }

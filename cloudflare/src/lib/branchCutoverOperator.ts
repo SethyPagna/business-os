@@ -26,7 +26,7 @@ export const BRANCH_CUTOVER_DEFAULT_IDENTITY: CutoverIdentity = Object.freeze({ 
 const MIN_TOKEN_LENGTH = 32
 const MAX_BODY_BYTES = 16384
 const INCARNATION_FLAG = 'branch_cutover_control_incarnation'
-const PARENT_BUDGET: TransferInvocationBudget = { tier: 'free', alreadyUsed: 0, remainingReads: 0, retryQueries: 0, completionQueries: 0, safetyQueries: 0, extraAtomicStatements: 0 }
+const PARENT_BUDGET: TransferInvocationBudget = { tier: 'paid', alreadyUsed: 0, remainingReads: 0, retryQueries: 0, completionQueries: 0, safetyQueries: 0, extraAtomicStatements: 0 }
 // The certified child needs the Paid subrequest allowance (E2): the cutover runs while production is on Paid.
 const CHILD_BUDGET: TransferInvocationBudget = { ...PARENT_BUDGET, tier: 'paid' }
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
