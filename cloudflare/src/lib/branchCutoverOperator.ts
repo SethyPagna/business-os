@@ -2,6 +2,8 @@ import { getDb, type D1Compat } from './db'
 import type { SessionUser } from './auth'
 import { hasPermission } from './permissions'
 import { BranchCutoverCapabilityError, type CutoverIdentity } from './branchCutoverCapture'
+import type { ParentHooks } from './branchCutoverParent'
+import type { Env } from '../index'
 import { BRANCH_CUTOVER_FINAL_NAMES, beginBranchCutover, continueBranchCutover, inspectBranchCutover, isBranchCutoverRetryable } from './branchCutoverParent'
 import { executePlannedBranchCutoverChild } from './branchCutoverChild'
 import { abortEffectFreeBranchCutoverJournal, type BranchCutoverJournalRow, type BranchCutoverOwnership } from './branchCutoverJournal'
@@ -160,7 +162,23 @@ async function runBegin(db: D1Compat, body: Record<string, unknown>): Promise<Op
   return summary(begun.row, requestId, begun.replayed)
 }
 
-async function runStep(db: D1Compat, body: Record<string, unknown>, action: 'resume' | 'finalize'): Promise<OperatorOutcome> {
+/**
+ * The merge an inactive product holding stock goes through (owner ruling 7 Oct 2026): routes/products.ts foldDuplicateProductInto, the one
+ * merge path (lots, branch rows, cost and allocations move; audit, movement and undo records), then the twin's cached stock_quantity is
+ * recomputed from the ledgers like every merge caller does. Loaded on demand: only a run that has such a product ever pays for it.
+ */
+function inactiveProductHooks(env: { DB: D1Database }): ParentHooks {
+  return { foldInactiveProduct: async (user, dup, keeper) => {
+    const { foldDuplicateProductInto } = await import('../routes/products')
+    const db = getDb(env)
+    const branches = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
+    await foldDuplicateProductInto(env as unknown as Env, db, user, { id: keeper.id, name: keeper.name }, { id: dup.id, name: dup.name, image_path: dup.image_path },
+      new Map(branches.map(branch => [branch.id, branch.name])), 'branch cutover: inactive product holding stock', 'merge', undefined, { operationId: crypto.randomUUID() })
+    await db.prepare('UPDATE products SET stock_quantity=COALESCE((SELECT SUM(quantity) FROM branch_stock WHERE product_id=@id),0) WHERE id=@id').run({ id: keeper.id })
+  } }
+}
+
+async function runStep(db: D1Compat, body: Record<string, unknown>, action: 'resume' | 'finalize', env: { DB: D1Database }): Promise<OperatorOutcome> {
   const context = await stepContext(db, body)
   if (isOutcome(context)) return context
   const { row, actor, requestId, expected } = context
@@ -170,7 +188,7 @@ async function runStep(db: D1Compat, body: Record<string, unknown>, action: 'res
   const organizationId = actor.organization_id as number
   const done = row.phase === 'moving' && row.planned_child_json !== null
     ? (await executePlannedBranchCutoverChild(db, actor, proofOf(row), { sequence: row.next_sequence, childJson: row.planned_child_json }, CHILD_BUDGET, organizationId)).row
-    : (await continueBranchCutover(db, actor, organizationId, { operationId: row.operation_id, expectedRevision: expected }, PARENT_BUDGET)).row
+    : (await continueBranchCutover(db, actor, organizationId, { operationId: row.operation_id, expectedRevision: expected }, PARENT_BUDGET, inactiveProductHooks(env))).row
   return summary(done, requestId, false)
 }
 
@@ -209,7 +227,7 @@ export async function runBranchCutoverOperatorAction(env: { DB: D1Database; PLAN
     if (action === 'begin') return await runBegin(db, body)
     if (action === 'status') return await runStatus(db, body)
     if (action === 'abort') return await runAbort(db, body)
-    return await runStep(db, body, action)
+    return await runStep(db, body, action, env)
   } catch (error) { return failure(error) }
 }
 

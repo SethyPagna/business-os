@@ -196,7 +196,6 @@ async function main() {
   await check('unclassified new scalar schema and unsupported stock refuse before admission', async () => {
     for (const mutation of ["CREATE TABLE future_reference(id INTEGER PRIMARY KEY,branch_id INTEGER)",
       "INSERT INTO rfid_tags(epc_id,product_id,branch_id,status) VALUES('tag',1,2,'active')",
-      "INSERT INTO damaged_stock_lots(product_id,branch_id,quantity_remaining) VALUES(1,2,1)",
       "INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,2,1)"]) {
       const w = world(); w.raw.exec(mutation); assert.ok((await inspect(w)).capabilities.length)
       await assert.rejects(begin(w), e => e.code === 'branch_cutover_parent_capability'); assert.equal(w.stats.batches, 0); w.raw.close()
@@ -245,12 +244,12 @@ async function main() {
     const w = world(); const p = await inspect(w); const input = { ...identity, ...names, requestId: 'budget_request_001', controlIncarnation: '00000000-0000-4000-8000-000000000099',
       expectedSourceJson: p.sourcePreimageJson, expectedTargetJson: p.targetPreimageJson, expectedSchemaDigest: p.schemaDigest }
     const beforeReads = w.stats.reads; w.stats.retryReads = true; w.stats.after = () => { throw Error('lost acknowledgement') }
-    const result = await w.parent.beginBranchCutover(w.db, actor, 1, input, { ...budget, alreadyUsed: 965 })
-    assert.equal(result.replayed, true); assert.equal(w.stats.batches, 1); assert.equal(w.stats.reads - beforeReads, 16)
+    const result = await w.parent.beginBranchCutover(w.db, actor, 1, input, { ...budget, alreadyUsed: 963 })
+    assert.equal(result.replayed, true); assert.equal(w.stats.batches, 1); assert.equal(w.stats.reads - beforeReads, 18)
     assert.equal(w.stats.statements, 11); assert.ok(w.stats.reads - beforeReads + w.stats.statements <= 35); w.raw.close()
     const stopped = world(); const plan = await inspect(stopped)
     await assert.rejects(stopped.parent.beginBranchCutover(stopped.db, actor, 1, { ...input, expectedSchemaDigest: plan.schemaDigest,
-      expectedSourceJson: plan.sourcePreimageJson, expectedTargetJson: plan.targetPreimageJson }, { ...budget, alreadyUsed: 966 }))
+      expectedSourceJson: plan.sourcePreimageJson, expectedTargetJson: plan.targetPreimageJson }, { ...budget, alreadyUsed: 964 }))
     assert.equal(stopped.stats.batches, 0); stopped.raw.close()
   })
   await check('REHEARSAL F2: an invocation-budget overrun is a coded refusal that is never retryable and never wrapped as an unknown outcome', async () => {

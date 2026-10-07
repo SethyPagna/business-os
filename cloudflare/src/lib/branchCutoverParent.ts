@@ -3,6 +3,7 @@ import type { SessionUser } from './auth'
 import { localDateExpr, localDateOf } from './businessDateWindow'
 import { weightedMeanMoney4 } from './moneyPrecision'
 import { getActionTier, hasPermission } from './permissions'
+import { INACTIVE_STOCKED_ANYWHERE_SQL, applyInactiveStockPlan, inactiveStockPlanIsEmpty, readInactiveStockPlan, type InactiveStockRow } from './branchCutoverInactiveStock'
 import { assertTransferStatementsFit, type TransferInvocationBudget } from './transferRunBudget'
 import { beginBranchCutoverJournal, checkpointBranchCutoverJournal, completeBranchCutoverJournal, finishBranchCutoverMoving,
   finishBranchCutoverSnapshots, markBranchCutoverReady, readBranchCutoverJournal, sealBranchCutoverChild, sealBranchCutoverManifest,
@@ -37,13 +38,15 @@ const actorSql = `SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.pe
 // Lots-versus-stock comparisons of REAL sums carry the same 1e-9 tolerance as the reconcile and the child, since
 // sum(0.1, 0.2) > 0.3 in REAL arithmetic although the decimals are equal.
 const inexactSql = (value: string) => `CAST(printf('%.12f',${value}) AS REAL)<>${value}`
+// Owner rulings 7 Oct 2026: damaged-tagged units (damaged_stock_lots, held OUT of the sellable ledgers) are carried, not refused (finalize
+// re-points the held lots). An inactive product holding stock is dealt with before the first capture page (lib/branchCutoverInactiveStock.ts:
+// folded into its one active twin, cache drift recomputed, anything else refused with the product listed); it is never reactivated.
 const unsupportedStockSql = `SELECT
-  EXISTS(SELECT 1 FROM damaged_stock_lots WHERE branch_id=@source AND quantity_remaining<>0) AS damaged,
   EXISTS(SELECT 1 FROM rfid_tags WHERE branch_id=@source AND status='active') AS rfid,
   EXISTS(SELECT 1 FROM branch_stock s LEFT JOIN products p ON p.id=s.product_id WHERE s.branch_id IN (@source,@target)
-    AND (s.quantity IS NULL OR s.quantity<0 OR s.quantity<>0 AND (p.id IS NULL OR p.is_active IS NOT 1))) AS stock,
+    AND (s.quantity IS NULL OR s.quantity<0 OR s.quantity<>0 AND p.id IS NULL)) AS stock,
   EXISTS(SELECT 1 FROM branch_batch_stock s LEFT JOIN product_batches b ON b.id=s.batch_id LEFT JOIN products p ON p.id=b.variant_product_id
-    WHERE s.branch_id IN (@source,@target) AND (s.quantity IS NULL OR s.quantity<0 OR s.quantity<>0 AND (b.id IS NULL OR b.is_active IS NOT 1 OR p.id IS NULL OR p.is_active IS NOT 1))) AS lots,
+    WHERE s.branch_id IN (@source,@target) AND (s.quantity IS NULL OR s.quantity<0 OR s.quantity<>0 AND (b.id IS NULL OR b.is_active IS NOT 1 OR p.id IS NULL))) AS lots,
   EXISTS(SELECT 1 FROM branch_batch_stock s JOIN product_batches b ON b.id=s.batch_id WHERE s.branch_id IN (@source,@target)
     GROUP BY s.branch_id,b.variant_product_id HAVING sum(s.quantity)>coalesce((SELECT quantity FROM branch_stock WHERE branch_id=s.branch_id AND product_id=b.variant_product_id),0)+1e-9) AS lotExcess,
   EXISTS(SELECT 1 FROM branch_stock WHERE branch_id IN (@source,@target) AND quantity IS NOT NULL AND ${inexactSql('quantity')})
@@ -61,8 +64,8 @@ async function stockCapabilities(db: D1Compat, identity: CutoverIdentity) {
 // seal, snapshot finish, moving finish, ready, finalize), not on every page:
 // the fence blocks every writer in between, and the per-product proofs and the
 // final ledger reconciliation catch any drift (design §5 plan B, Free reads).
-function stockGuard(identity: CutoverIdentity): CutoverStatement {
-  return cutoverAssert(`EXISTS(SELECT 1 FROM (${unsupportedStockSql}) WHERE damaged=0 AND rfid=0 AND stock=0 AND lots=0 AND lotExcess=0 AND inexact=0)`,
+function stockGuard(identity: CutoverIdentity, prepared = true): CutoverStatement {
+  return cutoverAssert(`EXISTS(SELECT 1 FROM (${unsupportedStockSql}) WHERE rfid=0 AND stock=0 AND lots=0 AND lotExcess=0 AND inexact=0)${prepared ? ` AND NOT ${INACTIVE_STOCKED_ANYWHERE_SQL}` : ''}`,
     { source: identity.sourceBranchId, target: identity.targetBranchId })
 }
 const sourceEmptySql = `NOT EXISTS(SELECT 1 FROM branch_stock WHERE branch_id=@source AND quantity<>0)
@@ -255,8 +258,10 @@ export async function inspectBranchCutover(db: D1Compat, actor: Principal, organ
     (SELECT count(*) FROM damaged_stock_lots WHERE branch_id=@source AND quantity_remaining<>0) AS damaged,
     (SELECT count(*) FROM rfid_tags WHERE branch_id=@source AND status='active') AS rfid`).get<Record<string, number>>({ source: identity.sourceBranchId })
   capabilities.push(...await stockCapabilities(db, identity))
+  const inactiveStock = await readInactiveStockPlan(db)
+  for (const item of inactiveStock.refuse) capabilities.push({ code: 'inactive_stock_without_twin', detail: item.id + ':' + item.reason })
   return { sourcePreimageJson: JSON.stringify(state.source), targetPreimageJson: JSON.stringify(state.target), schemaDigest: schema.digest,
-    registryDigest: await captureRegistryDigest(), scalarReferences: BRANCH_SCALAR_REFERENCES, capabilities, families, history, stock,
+    registryDigest: await captureRegistryDigest(), scalarReferences: BRANCH_SCALAR_REFERENCES, capabilities, families, history, stock, inactiveStock,
     coverage: 'registry-v3-capture', historicalReplayCertified: true, activationReady: capabilities.length === 0 }
 }
 
@@ -270,7 +275,9 @@ export async function beginBranchCutover(db: D1Compat, actor: Principal, organiz
   db = metered(db, budget); const current = await principal(db, actor, organizationId); const state = await branches(db, input)
   const schema = await readCutoverCaptureSchema(db); requireSchema(schema)
   const unsupported = await stockCapabilities(db, input)
-  if (unsupported.length) throw new BranchCutoverCapabilityError(unsupported.map(v => v.code + ':' + v.detail).join(';'))
+  const inactivePlan = await readInactiveStockPlan(db)
+  const unresolved = inactivePlan.refuse.map(item => ({ code: 'inactive_stock_without_twin', detail: item.id + ':' + item.reason }))
+  if (unsupported.length || unresolved.length) throw new BranchCutoverCapabilityError([...unsupported, ...unresolved].map(v => v.code + ':' + v.detail).join(';'))
   requireParent(schema.digest === input.expectedSchemaDigest && JSON.stringify(state.source) === input.expectedSourceJson && JSON.stringify(state.target) === input.expectedTargetJson)
   const intent: ParentIntent = { action: 'retire', parentVersion: 2, sourceBranchId: input.sourceBranchId, targetBranchId: input.targetBranchId,
     registryDigest: await captureRegistryDigest(), schemaDigest: schema.digest, retiredName: input.retiredName, successorName: input.successorName }
@@ -294,7 +301,7 @@ export async function beginBranchCutover(db: D1Compat, actor: Principal, organiz
     AND (SELECT count(*) FROM branches WHERE is_active=1 AND ((id=@source AND canonical_key='shop') OR (id=@target AND canonical_key='warehouse')))=2`,
   { source: input.sourceBranchId, target: input.targetBranchId })
   const final = cutoverAssert(`EXISTS(SELECT 1 FROM branch_cutovers WHERE operation_id=@operation AND begin_request_id=@request AND phase='capturing' AND revision=0 AND intent_json=@intent)`, { operation: operationId, request: input.requestId, intent: intentJson })
-  try { return await beginBranchCutoverJournal(compose(db, [...guardsFor(current, schema, state), stockGuard(input), admission], [final]), begin) }
+  try { return await beginBranchCutoverJournal(compose(db, [...guardsFor(current, schema, state), stockGuard(input, false), admission], [final]), begin) }
   catch (cause) {
     if (isLocalRefusal(cause)) throw cause
     try { const row = await readBranchCutoverJournal(db, begin); requireParent(row.intent_json === intentJson && row.begin_request_id === input.requestId); return { row, replayed: true } } catch { }
@@ -304,14 +311,15 @@ export async function beginBranchCutover(db: D1Compat, actor: Principal, organiz
 
 /** Advances the operation by exactly one durable step (at most one batch). Re-entrant by revision CAS. */
 export async function continueBranchCutover(db: D1Compat, actor: Principal, organizationId: number,
-  input: { operationId: string; expectedRevision: number; pageSize?: number }, budget: TransferInvocationBudget): Promise<Step> {
+  input: { operationId: string; expectedRevision: number; pageSize?: number }, budget: TransferInvocationBudget, hooks: ParentHooks = {}): Promise<Step> {
+  const rawDb = db
   db = metered(db, budget); const current = await principal(db, actor, organizationId)
   const { row, intent } = await readIntent(db, current, organizationId, input.operationId)
   requireParent(Number.isSafeInteger(input.expectedRevision) && input.expectedRevision >= 0)
   if (row.revision > input.expectedRevision) return { row, replayed: true, next: nextFor(row) }
   requireParent(row.revision === input.expectedRevision && row.phase !== 'aborted')
   if (row.phase === 'completed') return { row, replayed: true, next: { kind: 'completed' } }
-  if (row.phase === 'capturing' || row.phase === 'snapshots') return captureStep(db, current, row, intent, input.pageSize ?? CAPTURE_PAGE_CAP)
+  if (row.phase === 'capturing' || row.phase === 'snapshots') return captureStep(db, current, row, intent, input.pageSize ?? CAPTURE_PAGE_CAP, rawDb, hooks)
   if (row.phase === 'moving') return movingStep(db, current, row, intent)
   if (row.phase === 'verifying') return verifyStep(db, current, row, intent)
   return finalizeStep(db, current, row, intent)
@@ -323,11 +331,24 @@ function manifestOf(row: BranchCutoverJournalRow): Record<string, any> {
   return manifest
 }
 
-async function captureStep(db: D1Compat, current: SessionUser, row: BranchCutoverJournalRow, intent: ParentIntent, pageSize: number): Promise<Step> {
+/** What the Worker injects so lib code never imports a route: the product merge (routes/products.ts foldDuplicateProductInto). */
+export type ParentHooks = { foldInactiveProduct?: (user: SessionUser, dup: InactiveStockRow, keeper: { id: number; name: string | null }) => Promise<void> }
+async function captureStep(db: D1Compat, current: SessionUser, row: BranchCutoverJournalRow, intent: ParentIntent, pageSize: number, rawDb: D1Compat, hooks: ParentHooks): Promise<Step> {
   const schema = await readCutoverCaptureSchema(db); requireSameContract('schema', intent.schemaDigest, schema.digest); requireSchema(schema)
   const state = await branches(db, intent); requireParent(JSON.stringify(state.source) === row.source_preimage_json && JSON.stringify(state.target) === row.target_preimage_json)
   const stage = row.phase === 'capturing' ? 'capture' : 'snapshot'
   const cursor = parseCaptureCursor(row[`${stage}_cursor_json`]); const priorDigest = row[`${stage}_digest`]
+  // The first capture page: inactive products holding stock are resolved BEFORE anything is read, so the capture, the manifest baseline and
+  // the end state describe the same stock. Idempotent by state (a retry after a crash re-reads the census and finds only what is left).
+  if (stage === 'capture' && cursor.index === 0 && cursor.key === 0 && row.capture_records === 0) {
+    const plan = await readInactiveStockPlan(db)
+    if (plan.refuse.length) refuse(plan.refuse.map(item => 'inactive_stock_without_twin:' + item.id + ':' + item.reason).join(';'))
+    if (!inactiveStockPlanIsEmpty(plan)) {
+      if (plan.fold.length && !hooks.foldInactiveProduct) refuse('inactive_stock_fold_unavailable')
+      await applyInactiveStockPlan(rawDb, plan, { operationId: row.operation_id, actorId: current.id, actorName: current.username ?? null },
+        (dup, keeper) => hooks.foldInactiveProduct!(current, dup, keeper))
+    }
+  }
   let families: FamilyState
   if (cursor.families) families = familiesFromText(cursor.families)
   else if (stage === 'snapshot') families = familiesFromManifest(manifestOf(row).families)
@@ -770,6 +791,9 @@ async function finalizeStep(db: D1Compat, current: SessionUser, row: BranchCutov
       AND (${CLOSURE_AUDIT_COUNT_SQL})=@closures`,
     { ...ids, maxId: Number(manifest.families.actionHistoryMax), moveMarker: UNDO_CLOSED_BRANCH_CUTOVER_MOVE, retiredMarker: UNDO_CLOSED_BRANCH_RETIRED,
       children: row.committed_children, retired: manifest.history.close, closures: manifest.history.close + row.committed_children, operation: row.operation_id }),
+    // Held (damaged-tagged) units are not in branch_stock / branch_batch_stock, so the child transfers never see them: they follow the
+    // branch here, keeping their tag, quantity, cost, batch and return link. Only the owning branch changes.
+    { sql: `UPDATE damaged_stock_lots SET branch_id=@target,updated_at=@now WHERE branch_id=@source AND quantity_remaining<>0`, params: { ...ids, now } },
     { sql: `UPDATE branches SET name=@retiredName,is_active=0,is_default=0,successor_branch_id=@target,updated_at=@now WHERE id=@source AND canonical_key='shop' AND is_active=1`,
       params: { ...ids, retiredName: intent.retiredName, now } },
     { sql: `UPDATE branches SET name=@successorName,is_active=1,is_default=1,role='shop',updated_at=@now WHERE id=@target AND canonical_key='warehouse' AND is_active=1`,
@@ -780,6 +804,7 @@ async function finalizeStep(db: D1Compat, current: SessionUser, row: BranchCutov
     { sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id) VALUES(@actor,@actorName,@action,@entity,@operation,@details,'branch_cutovers',@operation)`,
       params: { actor: current.id, actorName: current.username ?? null, action: BRANCH_CUTOVER_COMPLETED_AUDIT_ACTION, entity: BRANCH_CUTOVER_SUMMARY_ENTITY, operation: row.operation_id, details: terminalJson } },
     cutoverAssert(`(SELECT count(*) FROM branches WHERE is_active=1)=1
+      AND NOT EXISTS(SELECT 1 FROM damaged_stock_lots WHERE branch_id=@source AND quantity_remaining<>0)
       AND EXISTS(SELECT 1 FROM branches WHERE id=@target AND is_active=1 AND is_default=1 AND role='shop' AND canonical_key='warehouse' AND name=@successorName AND successor_branch_id IS NULL)
       AND EXISTS(SELECT 1 FROM branches WHERE id=@source AND is_active=0 AND is_default=0 AND role='shop' AND canonical_key='shop' AND name=@retiredName AND successor_branch_id=@target)
       AND (SELECT count(*) FROM action_history WHERE entity=@entity AND entity_id=@operation)=1`,

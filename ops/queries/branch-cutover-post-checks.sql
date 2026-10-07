@@ -23,6 +23,7 @@
 --                          default / role shop / key warehouse / the intent's name, Old Shop
 --                          inactive / successor / key shop / the intent's name / notes kept
 --   maintenance_flag       the maintenance flag is still present
+--   inactive_with_stock    inactive products holding stock on any of the four ledgers (cache, branch rows, lots, held units): the run folds them into their active twin first
 --   orphans                lot rows without a batch, stock rows without a product, receipts
 --                          without a member, transfers since begin that no run receipt made
 -- Cost: index range reads at the two branches (the run's movements and transfers from begin
@@ -115,6 +116,10 @@ SELECT
       AND successor_branch_id = op.tgt AND canonical_key = 'shop' AND name = json_extract(op.intent, '$.retiredName')
       AND notes IS json_extract(op.src_pre, '$.notes'))) AS directory_off,
   (SELECT count(*) FROM system_flags WHERE key = 'maintenance') AS maintenance_flag,
+  (SELECT count(*) FROM products p WHERE p.is_active IS NOT 1 AND (COALESCE(p.stock_quantity, 0) <> 0
+    OR EXISTS (SELECT 1 FROM branch_stock s WHERE s.product_id = p.id AND s.quantity <> 0)
+    OR EXISTS (SELECT 1 FROM product_batches b CROSS JOIN branch_batch_stock s ON s.batch_id = b.id WHERE b.variant_product_id = p.id AND s.quantity <> 0)
+    OR EXISTS (SELECT 1 FROM damaged_stock_lots d WHERE d.product_id = p.id AND d.quantity_remaining <> 0))) AS inactive_with_stock,
   (SELECT count(*) FROM branch_batch_stock s WHERE s.branch_id IN (op.src, op.tgt) AND NOT EXISTS (SELECT 1 FROM product_batches b WHERE b.id = s.batch_id))
     + (SELECT count(*) FROM branch_stock x WHERE x.branch_id IN (op.src, op.tgt) AND NOT EXISTS (SELECT 1 FROM products p WHERE p.id = x.product_id))
     + (SELECT count(*) FROM rc WHERE NOT EXISTS (SELECT 1 FROM transfer_operation_members m WHERE m.receipt_id = rc.id))
