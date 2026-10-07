@@ -37,6 +37,7 @@ Delete both after the cutover completes; the endpoint is dark without the Worker
 | P3 | `inspect` (blocking capability codes) and the named refusals of `start` | none open |
 | P4 | `bookmark` (Time Travel bookmark, encrypted) plus `d1-physical-export` | both recorded |
 | P5 | `d1-export` `branch-cutover-inventory`, `branch-identity-precheck`, `cutover-fold-preview` | informational, anomalies 0, `inexact_pairs` 0 |
+| P5b | `repair-sk2-check`, then `repair-sk2`, `actor_user_id` = 5 (SK2-REPAIR, owner 7 Oct 2026: product 5357 at Shop, `lib/sk2CleanserRepair.ts`) | check: state `pre` (or `done` on a re-run); repair: state `done`. A re-run writes nothing. Any other state refuses with nothing written: stop and re-plan |
 | P6 | `start` (takes a fresh bookmark first, then inspect, then begin) | phase capturing, revision 0; note the operation id |
 | P7 | `d1-export` `branch-cutover-inventory` immediately after `start` (read under the fence) | equals the sealed manifest |
 | P8 | `resume-until-ready` with `operation_id` (blank = the one unfinished operation) | phase ready; re-run the same inputs after any stop |

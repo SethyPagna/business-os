@@ -140,7 +140,7 @@ async function main() {
     const w = newWorld(2)
     const h = harness(w, app)
     const before = stockText(w)
-    for (const action of ['inspect', 'begin', 'resume', 'status', 'abort', 'finalize']) {
+    for (const action of ['inspect', 'begin', 'resume', 'status', 'abort', 'finalize', 'repair-sk2']) {
       assert.deepEqual(await harness(w, app, { configured: null }).raw(action, body({ actorUserId: ACTOR_USER })), { status: 404, json: { ok: false, code: 'not_found' } }, action + ' dark')
       assert.equal((await harness(w, app, { configured: 'short-secret' }).raw(action, body({}))).status, 404, action + ' dark when the secret is too short')
       for (const header of [null, '', 'x', TOKEN.slice(0, -1), TOKEN + 'x', TOKEN.toUpperCase(), 'cutover-operator-test-token-0123456789abcdeg']) {

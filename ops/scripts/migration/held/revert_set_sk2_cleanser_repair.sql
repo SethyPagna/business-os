@@ -1,5 +1,10 @@
 -- REVERT-SET repair (6 Oct 2026): SK-II Gentle Cleanser 20g (product 5357, Shop = branch 2).
 --
+-- SUPERSEDED 7 Oct 2026 (owner: "i want you to do it for me. with the cut over. backend."): the repair runs
+-- through the cutover operator, action repair-sk2 (cloudflare/src/lib/sk2CleanserRepair.ts; Ops modes
+-- repair-sk2-check then repair-sk2, actor 5, just before start). Same three records and end state, one
+-- atomic D1 batch, no extra table. Do NOT also apply this file; it stays only as the reviewed reference.
+--
 -- ============================== HELD =====================================
 -- Kept in ops/scripts/migration/held/, OUTSIDE cloudflare/migrations, so no
 -- deploy applies it. Applying it is the owner's decision (production write).

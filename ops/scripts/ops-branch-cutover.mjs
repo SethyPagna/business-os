@@ -4,7 +4,10 @@
 // ops/scripts/branch-cutover-loop.mjs, one durable step per request, and never touches D1 directly. Only `bookmark`
 // (and `start`, which captures one first) call wrangler: `wrangler d1 time-travel info`, which reads and changes nothing.
 //
-//   OPS_CUTOVER_MODE  inspect | bookmark | start | resume-until-ready | status | abort | finalize
+//   OPS_CUTOVER_MODE  inspect | bookmark | repair-sk2-check | repair-sk2 | start | resume-until-ready | status | abort | finalize
+//                     repair-sk2-check / repair-sk2 (SK2-REPAIR, owner 7 Oct 2026): the one-off product 5357 repair
+//                     (cloudflare/src/lib/sk2CleanserRepair.ts), read-only check then apply, just before start. Acts as
+//                     OPS_ACTOR_USER_ID, which must be 5. Idempotent: a re-run answers done and writes nothing.
 //   OPS_OPERATION_ID  the operation to continue (blank: the one unfinished operation, found by `status`)
 //   OPS_APPROVED_FOLDS    owner-approved folds of inactive stocked products (dup:keeper,...), used by inspect and start
 //   OPS_ACTOR_USER_ID the administrator the run acts as (inspect, start); every later step uses the journal's actor
@@ -27,7 +30,9 @@ import {
   CAPABILITY_CODES, NEXT_STATES, OPERATION_PHASES, abortCutover, createClient, finalizeCutover, inspectCutover, parseApprovedFoldsText, readStatus, resumeUntilReady, startCutover,
 } from './branch-cutover-loop.mjs'
 
-export const MODES = Object.freeze(['inspect', 'bookmark', 'start', 'resume-until-ready', 'status', 'abort', 'finalize'])
+export const MODES = Object.freeze(['inspect', 'bookmark', 'repair-sk2-check', 'repair-sk2', 'start', 'resume-until-ready', 'status', 'abort', 'finalize'])
+// The repair's states (lib/sk2CleanserRepair.ts): pre and ab can be applied, done is the end state, stale refuses.
+export const SK2_STATES = Object.freeze(['pre', 'ab', 'done', 'stale'])
 export const DEFAULT_BASE_URL = 'https://admin.leangbeauty.com'
 export const ALLOWED_HOSTS = Object.freeze(['admin.leangbeauty.com', 'leangbeauty.com'])
 export const DATABASE = 'business-os'
@@ -88,7 +93,7 @@ export async function captureBookmark() {
 }
 
 // The one place a value of this script becomes a public-log word: a mode, a journal phase, a next state, a capability code or an operation id.
-const PUBLIC_VALUES = new Set([...MODES, ...OPERATION_PHASES, ...NEXT_STATES, ...CAPABILITY_CODES.map((code) => code.replaceAll('_', '-')), 'other'])
+const PUBLIC_VALUES = new Set([...MODES, ...SK2_STATES, ...OPERATION_PHASES, ...NEXT_STATES, ...CAPABILITY_CODES.map((code) => code.replaceAll('_', '-')), 'other'])
 const OPERATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 export function vetted(value) {
   const text = String(value)
@@ -126,6 +131,14 @@ export async function executeMode(mode, { client, env, now = Date.now, bookmark 
   } else if (mode === 'bookmark') {
     out.bookmark = await bookmark()
     say('time travel bookmark: {result} (in the encrypted file)', { result: 'PASS' })
+  } else if (mode === 'repair-sk2-check' || mode === 'repair-sk2') {
+    needActor()
+    const response = await client.call('repair-sk2', { actorUserId, dryRun: mode === 'repair-sk2-check' })
+    const state = SK2_STATES.includes(response.state) ? response.state : 'other'
+    out.repair = response
+    say('repair-sk2: state {state}, applied {applied}', { state: vetted(state), applied: response.applied === true })
+    if (mode === 'repair-sk2-check' && !['pre', 'ab', 'done'].includes(state)) throw Object.assign(new OpsError('repair-sk2-stale', 'The rows are not in a state the repair can apply.'), { partial: out })
+    if (mode === 'repair-sk2' && state !== 'done') throw Object.assign(new OpsError('repair-sk2-not-done', 'The repair did not reach its end state.'), { partial: out })
   } else if (mode === 'start') {
     needActor()
     out.bookmark = await bookmark()

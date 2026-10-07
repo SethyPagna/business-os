@@ -9,6 +9,7 @@ import { BRANCH_CUTOVER_FINAL_NAMES, beginBranchCutover, continueBranchCutover, 
 import { executePlannedBranchCutoverChild } from './branchCutoverChild'
 import { abortEffectFreeBranchCutoverJournal, type BranchCutoverJournalRow, type BranchCutoverOwnership } from './branchCutoverJournal'
 import type { TransferInvocationBudget } from './transferRunBudget'
+import { runSk2Repair } from './sk2CleanserRepair'
 
 /**
  * Production operator path for the Shop -> LC Store consolidation (lane CUTOVER-RUNNER).
@@ -22,7 +23,8 @@ import type { TransferInvocationBudget } from './transferRunBudget'
  * Responses carry only the operation id, phase, revision and counters, or a fixed refusal code. No row, name or
  * amount is ever returned except by `inspect`, whose result the ops runner writes to an encrypted report only.
  */
-export const BRANCH_CUTOVER_OPERATOR_ACTIONS = ['inspect', 'begin', 'resume', 'status', 'abort', 'finalize'] as const
+// 'repair-sk2' (SK2-REPAIR, owner 7 Oct 2026): the one-off product 5357 repair, run just before begin -- lib/sk2CleanserRepair.ts.
+export const BRANCH_CUTOVER_OPERATOR_ACTIONS = ['inspect', 'begin', 'resume', 'status', 'abort', 'finalize', 'repair-sk2'] as const
 export type BranchCutoverOperatorAction = typeof BRANCH_CUTOVER_OPERATOR_ACTIONS[number]
 export const BRANCH_CUTOVER_OPERATOR_TOKEN_HEADER = 'x-cutover-operator-token'
 export const BRANCH_CUTOVER_DEFAULT_IDENTITY: CutoverIdentity = Object.freeze({ sourceBranchId: 2, targetBranchId: 1 })
@@ -214,6 +216,18 @@ async function runStatus(db: D1Compat, body: Record<string, unknown>): Promise<O
   return row ? summary(row, null, false) : refused('unknown_operation')
 }
 
+/**
+ * SK2-REPAIR: runs before begin. The acting user must pass the same grant check as the cutover's; once any cutover has
+ * begun (a journal row that is not aborted) the repair is refused -- the Shop rows it asserts are being moved.
+ */
+async function runRepairSk2(db: D1Compat, body: Record<string, unknown>): Promise<OperatorOutcome> {
+  const actor = await loadActor(db, body.actorUserId)
+  if (!actor) return refused('actor_not_permitted')
+  const begun = await db.prepare("SELECT operation_id FROM branch_cutovers WHERE phase <> 'aborted' LIMIT 1").get<{ operation_id: string }>()
+  if (begun) return refused('cutover_already_begun')
+  return await runSk2Repair(db, body)
+}
+
 /** Executes one operator action. Never throws: every failure is a fixed code (retryable ones are 503). */
 /**
  * The consolidation moves every Shop row in many batches: on the free plan's per-invocation limits it cannot finish, so begin
@@ -231,6 +245,7 @@ export async function runBranchCutoverOperatorAction(env: { DB: D1Database; PLAN
     if (action === 'begin') return await runBegin(db, body)
     if (action === 'status') return await runStatus(db, body)
     if (action === 'abort') return await runAbort(db, body)
+    if (action === 'repair-sk2') return await runRepairSk2(db, body)
     return await runStep(db, body, action, env)
   } catch (error) { return failure(error) }
 }
