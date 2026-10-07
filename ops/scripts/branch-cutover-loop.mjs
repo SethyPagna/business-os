@@ -94,16 +94,27 @@ export function inspectVerdict(inspect) {
   return { ready: Boolean(inspect && inspect.activationReady === true && capabilities.length === 0), capabilityCodes: codes }
 }
 
-export async function inspectCutover(client, { actorUserId }) {
-  const response = await client.call('inspect', { actorUserId })
+/** "7091:1529,8000:8001" -> [{dup:7091,keeper:1529},...]. Anything else is refused here, before a call is made. */
+export function parseApprovedFoldsText(text) {
+  const value = String(text ?? '').trim()
+  if (!value) return []
+  return value.split(',').map((part) => {
+    const match = /^\s*(\d{1,12})\s*:\s*(\d{1,12})\s*$/.exec(part)
+    if (!match) throw new OpsError('approved-folds-invalid', 'approved_folds must look like 7091:1529,8000:8001.')
+    return { dup: Number(match[1]), keeper: Number(match[2]) }
+  })
+}
+
+export async function inspectCutover(client, { actorUserId, approvedFolds = [] }) {
+  const response = await client.call('inspect', { actorUserId, ...(approvedFolds.length ? { approvedFolds } : {}) })
   return { inspect: response.inspect, verdict: inspectVerdict(response.inspect) }
 }
 
 /** P6: inspect, then begin with the values inspect returned; the begin request id is fixed by the caller so a re-run replays. */
-export async function startCutover(client, { actorUserId, requestId }) {
-  const { inspect, verdict } = await inspectCutover(client, { actorUserId })
+export async function startCutover(client, { actorUserId, requestId, approvedFolds = [] }) {
+  const { inspect, verdict } = await inspectCutover(client, { actorUserId, approvedFolds })
   if (!verdict.ready) throw new OpsError('inspect-not-ready', 'Inspect reports capabilities that block a cutover.', { capabilities: inspect.capabilities })
-  const state = phaseOf(await client.call('begin', { actorUserId, requestId, expectedSourceJson: inspect.sourcePreimageJson,
+  const state = phaseOf(await client.call('begin', { actorUserId, requestId, ...(approvedFolds.length ? { approvedFolds } : {}), expectedSourceJson: inspect.sourcePreimageJson,
     expectedTargetJson: inspect.targetPreimageJson, expectedSchemaDigest: inspect.schemaDigest }))
   return { inspect, state }
 }

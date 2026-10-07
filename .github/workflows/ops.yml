@@ -149,6 +149,11 @@ on:
         required: false
         default: ''
         type: string
+      approved_folds:
+        description: 'branch-cutover only - owner-approved folds of an inactive product that holds stock into its active twin, as dup:keeper product ids separated by commas (for example 7091:1529). Leave empty for none. Only used by inspect and start.'
+        required: false
+        default: ''
+        type: string
       confirm:
         description: Type the task name again, exactly, to confirm
         required: true
@@ -477,6 +482,7 @@ jobs:
           OPS_CUTOVER_MODE: ${{ inputs.cutover_mode }}
           OPS_OPERATION_ID: ${{ inputs.operation_id }}
           OPS_ACTOR_USER_ID: ${{ inputs.actor_user_id }}
+          OPS_APPROVED_FOLDS: ${{ inputs.approved_folds }}
           OPS_CUTOVER_BUDGET_MINUTES: '300'
           WRANGLER_WRITE_LOGS: 'false'
           OPS_OUT_DIR: ${{ runner.temp }}/ops-out

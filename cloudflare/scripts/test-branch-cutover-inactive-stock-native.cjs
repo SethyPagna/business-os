@@ -33,9 +33,9 @@ async function check(name, run) { await run(); console.log('PASS ' + name); chec
       INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(900,1,2)`)
     return { f, one }
   }
-  const fold = (f) => async (dup, keeper) => {
+  const fold = (f) => async (dup, keeper, approved) => {
     await products.foldDuplicateProductInto({ DB: f.route }, f.route, actor, { id: keeper.id, name: keeper.name }, { id: dup.id, name: dup.name, image_path: dup.image_path },
-      new Map([[1, 'Shop']]), 'branch cutover: inactive product holding stock', 'merge', undefined, { operationId: crypto.randomUUID() })
+      new Map([[1, 'Shop']]), 'branch cutover: inactive product holding stock', 'merge', undefined, { operationId: crypto.randomUUID() }, approved ? { follows: true } : undefined)
     f.raw.prepare('UPDATE products SET stock_quantity=COALESCE((SELECT SUM(quantity) FROM branch_stock WHERE product_id=@id),0) WHERE id=@id').run({ id: keeper.id })
   }
 
@@ -83,6 +83,65 @@ async function check(name, run) { await run(); console.log('PASS ' + name); chec
     const plan = await inactive.readInactiveStockPlan(f.route)
     assert.deepEqual(plan.refuse.map(r => [r.id, r.reason]), [[40, 'no_active_twin'], [41, 'several_active_twins']])
     assert.deepEqual(plan.fold.map(i => i.dup.id), [30])
+  })
+
+  // The production pair (rehearsal, 7 Oct 2026): the exact-identity rule cannot match them (a hyphen), the owner approved the fold.
+  const realPair = () => {
+    const { f, one } = world()
+    f.raw.exec(`INSERT INTO products(id,name,sku,barcode,stock_quantity,selling_price_usd,cost_price_usd,is_active) VALUES
+        (7091,'Colourpop Shadow Stix-Angel Vibes','CP-OLD',NULL,2,6,3,0),(1529,'Colourpop Shadow Stix Angel Vibes','CP-NEW','0',0,6,3,1);
+      INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(7091,1,2);
+      INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,unit_cost_usd,received_branch_id,received_quantity,is_active,batch_number)
+        VALUES(58916,7091,'cp-lot','CPL','2026-09-02',3,1,2,1,58916);
+      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(58916,1,2)`)
+    f.raw.prepare('DELETE FROM branch_stock WHERE product_id=30').run([]); f.raw.prepare('DELETE FROM branch_batch_stock WHERE batch_id=900').run([])
+    f.raw.prepare('UPDATE products SET stock_quantity=0 WHERE id=30').run([])
+    return { f, one }
+  }
+  await check('7091 -> 1529 without the approval is refused (exact identity does not match); the auto rules are not loosened', async () => {
+    const { f } = realPair()
+    const plan = await inactive.readInactiveStockPlan(f.route)
+    assert.deepEqual(plan.refuse.map(r => [r.id, r.reason]), [[7091, 'no_active_twin']])
+    assert.deepEqual(plan.fold, [])
+  })
+  await check('7091 -> 1529 with the owner approval is folded through the same merge, with its audit row; 7091 stays inactive with 0 everywhere', async () => {
+    const { f, one } = realPair()
+    const approved = inactive.parseApprovedFolds([{ dup: 7091, keeper: 1529 }])
+    const plan = await inactive.readInactiveStockPlan(f.route, approved)
+    assert.deepEqual(plan.refuse, [])
+    assert.deepEqual(plan.fold.map(i => [i.dup.id, i.keeper.id, i.approved]), [[7091, 1529, true]])
+    await inactive.applyInactiveStockPlan(f.route, plan, { operationId: 'op-approved', actorId: 7, actorName: 'operator' }, fold(f))
+    assert.equal(one('SELECT is_active a FROM products WHERE id=7091').a, 0)
+    assert.equal(one('SELECT COALESCE(SUM(quantity),0) q FROM branch_stock WHERE product_id=7091').q, 0)
+    assert.equal(one('SELECT quantity q FROM branch_stock WHERE product_id=1529 AND branch_id=1').q, 2)
+    assert.equal(one('SELECT variant_product_id v FROM product_batches WHERE id=58916').v, 1529)
+    assert.equal(one('SELECT stock_quantity q FROM products WHERE id=1529').q, 2)
+    const audit = one("SELECT details FROM audit_logs WHERE action='branch_cutover_approved_fold'")
+    assert.deepEqual([JSON.parse(audit.details).note, JSON.parse(audit.details).dup, JSON.parse(audit.details).keeper, JSON.parse(audit.details).operationId], ['owner-approved fold 7 Oct 2026', 7091, 1529, 'op-approved'])
+  })
+  await check('an approval is validated, never trusted: a different real barcode, a different name, an inactive or group keeper, a dup with no stock, and a conflicting exact twin are all refused', async () => {
+    const { f } = realPair()
+    f.raw.exec(`INSERT INTO products(id,name,sku,barcode,stock_quantity,cost_price_usd,is_active,is_group) VALUES
+      (7100,'Real Barcode Lip','RB-OLD','8801234567890',1,1,0,0),(7101,'Real Barcode Lip','RB-DIFF','8809999999999',0,1,1,0),(7102,'Real-Barcode Lip','RB-SAME','8801234567890',0,1,1,0),
+      (7103,'Other Name','ON','8801234567890',0,1,1,0),(7104,'Real Barcode Lip','RB-INACTIVE','8801234567890',0,1,0,0),(7105,'Real Barcode Lip','RB-GROUP','8801234567890',0,1,1,1),
+      (7106,'Exact Twin','ET-OLD','5551234567',1,1,0,0),(7107,'Exact Twin','ET-NEW','5551234567',0,1,1,0),(7108,'Exact-Twin','ET-OTHER','5551234567',0,1,1,0);
+      INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(7100,1,1),(7106,1,1)`)
+    const reasons = async (pairs) => (await inactive.readInactiveStockPlan(f.route, inactive.parseApprovedFolds(pairs))).refuse.filter(r => ![7106, 30, 7091].includes(r.id)).map(r => [r.id, r.reason])
+    assert.deepEqual(await reasons([{ dup: 7100, keeper: 7101 }]), [[7100, 'approved_barcode_differs']])
+    assert.deepEqual(await reasons([{ dup: 7100, keeper: 7103 }]), [[7100, 'approved_name_differs']])
+    assert.deepEqual(await reasons([{ dup: 7100, keeper: 7104 }]), [[7100, 'approved_keeper_not_active']])
+    assert.deepEqual(await reasons([{ dup: 7100, keeper: 7105 }]), [[7100, 'approved_keeper_is_group']])
+    assert.deepEqual(await reasons([{ dup: 7100, keeper: 999999 }]), [[7100, 'approved_keeper_missing']])
+    assert.deepEqual(await reasons([{ dup: 7100, keeper: 7102 }]), [], 'the same barcode and the same words fold (punctuation only differs)')
+    assert.deepEqual((await reasons([{ dup: 5, keeper: 7102 }])).filter(r => r[0] === 5), [[5, 'approved_dup_not_inactive_with_stock']], 'a dup that is not an inactive stocked product')
+    const conflict = (await inactive.readInactiveStockPlan(f.route, [{ dup: 7106, keeper: 7108 }])).refuse.find(r => r.id === 7106)
+    assert.equal(conflict && conflict.reason, 'approved_keeper_conflicts_with_exact_twin', 'an approval cannot redirect a product that has an exact twin')
+    const same = await inactive.readInactiveStockPlan(f.route, [{ dup: 7106, keeper: 7107 }])
+    assert.deepEqual(same.fold.filter(i => i.dup.id === 7106).map(i => [i.keeper.id, i.approved]), [[7107, undefined]], 'approving the exact twin changes nothing: it stays an automatic fold')
+    for (const bad of [[{ dup: 1, keeper: 1 }], [{ dup: 'a', keeper: 2 }], [{ dup: 1, keeper: 2 }, { dup: 1, keeper: 3 }], 'x', Array.from({ length: 51 }, (_, i) => ({ dup: i + 1, keeper: i + 100 }))]) {
+      assert.throws(() => inactive.parseApprovedFolds(bad), error => error.capability === 'approved_folds_invalid')
+    }
+    assert.deepEqual(inactive.parseApprovedFolds(undefined), [])
   })
 
   console.log(`${checks} branch cutover inactive-stock native checks passed`)

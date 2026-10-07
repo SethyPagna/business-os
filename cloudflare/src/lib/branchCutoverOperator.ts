@@ -3,6 +3,7 @@ import type { SessionUser } from './auth'
 import { hasPermission } from './permissions'
 import { BranchCutoverCapabilityError, type CutoverIdentity } from './branchCutoverCapture'
 import type { ParentHooks } from './branchCutoverParent'
+import { parseApprovedFolds } from './branchCutoverInactiveStock'
 import type { Env } from '../index'
 import { BRANCH_CUTOVER_FINAL_NAMES, beginBranchCutover, continueBranchCutover, inspectBranchCutover, isBranchCutoverRetryable } from './branchCutoverParent'
 import { executePlannedBranchCutoverChild } from './branchCutoverChild'
@@ -125,7 +126,7 @@ async function ensureIncarnation(db: D1Compat): Promise<string> {
 async function runInspect(db: D1Compat, body: Record<string, unknown>): Promise<OperatorOutcome> {
   const identity = identityOf(body), actor = await loadActor(db, body.actorUserId)
   if (!identity || !actor) return refused('actor_not_permitted')
-  const inspect = await inspectBranchCutover(db, actor, actor.organization_id as number, identity, PARENT_BUDGET)
+  const inspect = await inspectBranchCutover(db, actor, actor.organization_id as number, identity, PARENT_BUDGET, parseApprovedFolds(body.approvedFolds))
   return reply(200, { ok: true, inspect })
 }
 
@@ -157,7 +158,7 @@ async function runBegin(db: D1Compat, body: Record<string, unknown>): Promise<Op
   const blockers = existing ? [] : await admissionBlockers(db)
   if (blockers.length) return refused(blockers[0], blockers.join(','))
   const controlIncarnation = await ensureIncarnation(db)
-  const begun = await beginBranchCutover(db, actor, actor.organization_id as number, { ...identity, ...BRANCH_CUTOVER_FINAL_NAMES, requestId, controlIncarnation,
+  const begun = await beginBranchCutover(db, actor, actor.organization_id as number, { ...identity, ...BRANCH_CUTOVER_FINAL_NAMES, requestId, controlIncarnation, approvedFolds: parseApprovedFolds(body.approvedFolds),
     expectedSourceJson, expectedTargetJson, expectedSchemaDigest }, PARENT_BUDGET)
   return summary(begun.row, requestId, begun.replayed)
 }
@@ -168,12 +169,15 @@ async function runBegin(db: D1Compat, body: Record<string, unknown>): Promise<Op
  * recomputed from the ledgers like every merge caller does. Loaded on demand: only a run that has such a product ever pays for it.
  */
 function inactiveProductHooks(env: { DB: D1Database }): ParentHooks {
-  return { foldInactiveProduct: async (user, dup, keeper) => {
+  return { foldInactiveProduct: async (user, dup, keeper, approved) => {
     const { foldDuplicateProductInto } = await import('../routes/products')
     const db = getDb(env)
     const branches = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
     await foldDuplicateProductInto(env as unknown as Env, db, user, { id: keeper.id, name: keeper.name }, { id: dup.id, name: dup.name, image_path: dup.image_path },
-      new Map(branches.map(branch => [branch.id, branch.name])), 'branch cutover: inactive product holding stock', 'merge', undefined, { operationId: crypto.randomUUID() })
+      new Map(branches.map(branch => [branch.id, branch.name])), 'branch cutover: inactive product holding stock', 'merge', undefined, { operationId: crypto.randomUUID() },
+      // An owner-approved pair is not an exact identity: the merge's own identity guard is told the pair was confirmed (Keep merge: the keeper's
+      // name and barcode stay). The pair was validated server-side by approvedFoldProblem before it got here.
+      approved ? { follows: true } : undefined)
     await db.prepare('UPDATE products SET stock_quantity=COALESCE((SELECT SUM(quantity) FROM branch_stock WHERE product_id=@id),0) WHERE id=@id').run({ id: keeper.id })
   } }
 }

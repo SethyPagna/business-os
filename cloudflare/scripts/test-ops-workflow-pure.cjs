@@ -309,7 +309,7 @@ const TASK_STEPS = {
     ...PRELUDE,
     scriptStep('node ops/scripts/ops-branch-cutover.mjs', {
       ...CUTOVER_TOKEN_ENV, OPS_CUTOVER_MODE: '${{ inputs.cutover_mode }}', OPS_OPERATION_ID: '${{ inputs.operation_id }}',
-      OPS_ACTOR_USER_ID: '${{ inputs.actor_user_id }}', OPS_CUTOVER_BUDGET_MINUTES: '300', WRANGLER_WRITE_LOGS: 'false',
+      OPS_ACTOR_USER_ID: '${{ inputs.actor_user_id }}', OPS_APPROVED_FOLDS: '${{ inputs.approved_folds }}', OPS_CUTOVER_BUDGET_MINUTES: '300', WRANGLER_WRITE_LOGS: 'false',
     }, { stepTimeout: true, secrets: Object.keys(CUTOVER_TOKEN_ENV) }),
     { kind: 'upload' },
   ],
@@ -490,11 +490,11 @@ async function main() {
 
   await check('ops.yml: the task choices are the task jobs; confirm is required and has no default', () => {
     const inputs = WF.on.workflow_dispatch.inputs
-    assert.deepStrictEqual(Object.keys(inputs).sort(), ['actor_user_id', 'apply', 'confirm', 'cutover_mode', 'mode', 'operation_id', 'query', 'settings', 'task'])
+    assert.deepStrictEqual(Object.keys(inputs).sort(), ['actor_user_id', 'apply', 'approved_folds', 'confirm', 'cutover_mode', 'mode', 'operation_id', 'query', 'settings', 'task'])
     assert.strictEqual(inputs.cutover_mode.type, 'choice')
     assert.deepStrictEqual(inputs.cutover_mode.options, cutover.MODES, 'the workflow offers exactly the modes the script runs, in runbook order')
     assert.strictEqual(inputs.cutover_mode.default, 'inspect', 'the default mode only reads')
-    for (const name of ['operation_id', 'actor_user_id']) {
+    for (const name of ['operation_id', 'actor_user_id', 'approved_folds']) {
       assert.strictEqual(inputs[name].type, 'string')
       assert.strictEqual(inputs[name].default, '')
     }
@@ -688,7 +688,7 @@ async function main() {
   await check('ops.yml: nothing is interpolated into a shell script, and every expression is on the allowlist', () => {
     const allowed = new Set([
       '${{ inputs.task }}', '${{ inputs.confirm }}', '${{ inputs.query }}', '${{ inputs.mode }}', '${{ inputs.apply }}',
-      '${{ inputs.cutover_mode }}', '${{ inputs.operation_id }}', '${{ inputs.actor_user_id }}', CUTOVER_TOKEN_ENV.BRANCH_CUTOVER_OPERATOR_TOKEN,
+      '${{ inputs.cutover_mode }}', '${{ inputs.operation_id }}', '${{ inputs.actor_user_id }}', '${{ inputs.approved_folds }}', CUTOVER_TOKEN_ENV.BRANCH_CUTOVER_OPERATOR_TOKEN,
       SECRET_ENV.CLOUDFLARE_API_TOKEN, SECRET_ENV.CLOUDFLARE_ACCOUNT_ID, OUT_DIR, UPLOAD_PATH,
     ])
     for (const [where, value] of strings(WF)) {
@@ -706,6 +706,7 @@ async function main() {
     assert.deepStrictEqual(where('${{ inputs.cutover_mode }}'), ['jobs.branch-cutover.steps.N.env.OPS_CUTOVER_MODE'])
     assert.deepStrictEqual(where('${{ inputs.operation_id }}'), ['jobs.branch-cutover.steps.N.env.OPS_OPERATION_ID'])
     assert.deepStrictEqual(where('${{ inputs.actor_user_id }}'), ['jobs.branch-cutover.steps.N.env.OPS_ACTOR_USER_ID'])
+    assert.deepStrictEqual(where('${{ inputs.approved_folds }}'), ['jobs.branch-cutover.steps.N.env.OPS_APPROVED_FOLDS'])
     assert.deepStrictEqual(where(CUTOVER_TOKEN_ENV.BRANCH_CUTOVER_OPERATOR_TOKEN), ['jobs.branch-cutover.steps.N.env.BRANCH_CUTOVER_OPERATOR_TOKEN'], 'the operator token reaches one step only')
     // The topic ids never pass through an expression or a step env (whose
     // values the public log prints): the script reads the event payload file.

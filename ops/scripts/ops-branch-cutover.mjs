@@ -6,6 +6,7 @@
 //
 //   OPS_CUTOVER_MODE  inspect | bookmark | start | resume-until-ready | status | abort | finalize
 //   OPS_OPERATION_ID  the operation to continue (blank: the one unfinished operation, found by `status`)
+//   OPS_APPROVED_FOLDS    owner-approved folds of inactive stocked products (dup:keeper,...), used by inspect and start
 //   OPS_ACTOR_USER_ID the administrator the run acts as (inspect, start); every later step uses the journal's actor
 //   OPS_OUT_DIR       where branch-cutover-<mode>-<run>.enc.json is written
 //   BRANCH_CUTOVER_OPERATOR_TOKEN  the shared secret the Worker also holds
@@ -23,7 +24,7 @@ import {
   say, summary, truncate, writeEncryptedReport,
 } from './ops-common.mjs'
 import {
-  CAPABILITY_CODES, NEXT_STATES, OPERATION_PHASES, abortCutover, createClient, finalizeCutover, inspectCutover, readStatus, resumeUntilReady, startCutover,
+  CAPABILITY_CODES, NEXT_STATES, OPERATION_PHASES, abortCutover, createClient, finalizeCutover, inspectCutover, parseApprovedFoldsText, readStatus, resumeUntilReady, startCutover,
 } from './branch-cutover-loop.mjs'
 
 export const MODES = Object.freeze(['inspect', 'bookmark', 'start', 'resume-until-ready', 'status', 'abort', 'finalize'])
@@ -109,13 +110,14 @@ function progressPrinter() {
 export async function executeMode(mode, { client, env, now = Date.now, bookmark = captureBookmark, run = runId() }) {
   const operationId = String(env.OPS_OPERATION_ID || '').trim()
   const actorUserId = Number(env.OPS_ACTOR_USER_ID)
+  const approvedFolds = parseApprovedFoldsText(env.OPS_APPROVED_FOLDS)
   const needActor = () => {
     if (!Number.isSafeInteger(actorUserId) || actorUserId < 1) throw new OpsError('actor-user-missing', 'OPS_ACTOR_USER_ID must be a user id.')
   }
   const out = { mode }
   if (mode === 'inspect') {
     needActor()
-    const { inspect, verdict } = await inspectCutover(client, { actorUserId })
+    const { inspect, verdict } = await inspectCutover(client, { actorUserId, approvedFolds })
     out.inspect = inspect
     out.ready = verdict.ready
     say('inspect: {result}', { result: verdict.ready ? 'PASS' : 'FAIL' })
@@ -128,7 +130,7 @@ export async function executeMode(mode, { client, env, now = Date.now, bookmark 
     needActor()
     out.bookmark = await bookmark()
     say('time travel bookmark: {result} (in the encrypted file)', { result: 'PASS' })
-    const started = await startCutover(client, { actorUserId, requestId: beginRequestId(run) })
+    const started = await startCutover(client, { actorUserId, requestId: beginRequestId(run), approvedFolds })
     out.inspect = started.inspect
     out.state = started.state
     say('operation {operation}: phase {phase}, revision {revision}, replayed {replayed}', { operation: vetted(started.state.operationId), phase: phaseToken(started.state), revision: started.state.revision, replayed: started.state.replayed === true })

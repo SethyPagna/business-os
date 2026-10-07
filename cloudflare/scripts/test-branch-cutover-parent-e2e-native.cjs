@@ -521,7 +521,7 @@ async function main() {
         (7001,1,'Held at Shop',2,101,5,2,2,'held','damaged','remove',1.5),(7002,1,'Disposed at Shop',2,101,6,1,0,'disposed','damaged','return',1.5)`)
   }
   // The real merge is exercised against the real fold in test-product-merge-lineage-native.cjs; this driver only needs the SAME effect on the ledgers.
-  const stubFold = (raw) => async (user, dup, keeper) => {
+  const stubFold = (raw) => async (user, dup, keeper, approved) => {
     for (const sql of ['UPDATE branch_stock SET product_id=@k WHERE product_id=@d', 'UPDATE product_batches SET variant_product_id=@k WHERE variant_product_id=@d',
       'UPDATE damaged_stock_lots SET product_id=@k WHERE product_id=@d',
       'UPDATE products SET stock_quantity=COALESCE((SELECT SUM(quantity) FROM branch_stock WHERE product_id=products.id),0) WHERE id IN (@k,@d)']) raw.prepare(sql).run({ k: keeper.id, d: dup.id })
@@ -574,6 +574,33 @@ async function main() {
       assert.equal(w.raw.prepare('SELECT count(*) n FROM branch_cutovers').get().n, 0, label + ': no journal row')
       w.raw.close()
     }
+  })
+  await check('F3 owner-approved fold (7091 -> 1529): inspect lists it as refused without the approval; with it begin seals the list into the intent and every later step reads it from the journal', async () => {
+    const w = world({ generatedProducts: 4 })
+    w.raw.exec(`INSERT INTO products(id,name,sku,barcode,is_active,stock_quantity,cost_price_usd,created_at,updated_at) VALUES
+        (7091,'Colourpop Shadow Stix-Angel Vibes','CP-OLD',NULL,0,2,3,'2026-01-01','2026-01-01'),(1529,'Colourpop Shadow Stix Angel Vibes','CP-NEW','0',1,0,3,'2026-01-01','2026-01-01');
+      INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(7091,1,2)`)
+    const calls = []
+    w.hooks = { foldInactiveProduct: async (user, dup, keeper, approved) => { calls.push([dup.id, keeper.id, approved]); await stubFold(w.raw)(user, dup, keeper) } }
+    const bare = await w.m.parent.inspectBranchCutover(w.db, ACTOR, 1, IDS, PARENT_BUDGET)
+    assert.deepEqual(bare.capabilities.map(c => [c.code, c.detail]), [['inactive_stock_without_twin', '7091:no_active_twin']])
+    const approvedFolds = [{ dup: 7091, keeper: 1529 }]
+    const plan = await w.m.parent.inspectBranchCutover(w.db, ACTOR, 1, IDS, PARENT_BUDGET, approvedFolds)
+    assert.deepEqual(plan.capabilities, [])
+    assert.deepEqual(plan.inactiveStock.fold.map(i => [i.dup.id, i.keeper.id, i.approved]), [[7091, 1529, true]])
+    const begin = { ...IDS, ...NAMES, requestId: 'f3_approved_fold', controlIncarnation: INCARNATION,
+      expectedSourceJson: plan.sourcePreimageJson, expectedTargetJson: plan.targetPreimageJson, expectedSchemaDigest: plan.schemaDigest }
+    await assert.rejects(w.m.parent.beginBranchCutover(w.db, ACTOR, 1, begin, PARENT_BUDGET), e => /inactive_stock_without_twin/.test(e.capability), 'begin without the approval is refused')
+    assert.equal(w.raw.prepare('SELECT count(*) n FROM branch_cutovers').get().n, 0)
+    let { row } = await w.m.parent.beginBranchCutover(w.db, ACTOR, 1, { ...begin, approvedFolds }, PARENT_BUDGET)
+    assert.deepEqual(JSON.parse(row.intent_json).approvedFolds, approvedFolds, 'sealed into the intent')
+    // a later step carries no list of its own: it reads the sealed one
+    row = (await w.m.parent.continueBranchCutover(w.db, ACTOR, 1, { operationId: row.operation_id, expectedRevision: row.revision, pageSize: 16 }, PARENT_BUDGET, w.hooks)).row
+    assert.deepEqual(calls, [[7091, 1529, true]])
+    assert.equal(w.raw.prepare('SELECT quantity FROM branch_stock WHERE product_id=1529 AND branch_id=1').get().quantity, 2)
+    assert.equal(w.raw.prepare('SELECT is_active FROM products WHERE id=7091').get().is_active, 0)
+    assert.equal(w.raw.prepare("SELECT count(*) n FROM audit_logs WHERE action='branch_cutover_approved_fold' AND details LIKE '%owner-approved fold 7 Oct 2026%'").get().n, 1)
+    w.raw.close()
   })
   await check('F3 without the merge hook a plan that needs a fold refuses before anything is read (the Worker always supplies it)', async () => {
     const w = world({ generatedProducts: 4 }); seedF3(w.raw)

@@ -1,5 +1,7 @@
 import type { D1Compat } from './db'
 import { productsShareExactIdentity } from './productIdentity'
+import { barcodeIdentityMatches, normalizeProductFuzzyName } from './productDetailRule'
+import { BranchCutoverCapabilityError } from './branchCutoverCapture'
 
 /**
  * Owner rulings 7 Oct 2026 (rehearsal F3): there is no such thing as disabled stock, and an inactive product is never reactivated.
@@ -15,10 +17,27 @@ import { productsShareExactIdentity } from './productIdentity'
  */
 export type InactiveStockRow = { id: number; name: string | null; barcode: string | null; image_path: string | null
   cache: number; branch: number; lots: number; damaged: number }
+/** An owner-approved fold (7 Oct 2026): a pair the exact-identity rule cannot match (7091 "Stix-Angel Vibes" -> 1529 "Stix Angel Vibes"). */
+export type ApprovedFold = { dup: number; keeper: number }
+export const APPROVED_FOLD_NOTE = 'owner-approved fold 7 Oct 2026'
 export type InactiveStockPlan = {
   cacheOnly: InactiveStockRow[]
-  fold: Array<{ dup: InactiveStockRow; keeper: { id: number; name: string | null; barcode: string | null } }>
-  refuse: Array<{ id: number; name: string | null; reason: 'no_active_twin' | 'several_active_twins' }>
+  fold: Array<{ dup: InactiveStockRow; keeper: { id: number; name: string | null; barcode: string | null }; approved?: true }>
+  refuse: Array<{ id: number; name: string | null; reason: string }>
+}
+/** The operator's list, validated for shape only (at most 50 distinct dup ids, each pair two different positive integers). */
+export function parseApprovedFolds(value: unknown): ApprovedFold[] {
+  if (value === undefined || value === null) return []
+  const bad = () => new BranchCutoverCapabilityError('approved_folds_invalid')
+  if (!Array.isArray(value) || value.length > 50) throw bad()
+  const seen = new Set<number>()
+  return value.map(item => {
+    const pair = item as { dup?: unknown; keeper?: unknown } | null
+    if (!pair || typeof pair !== 'object' || !Number.isSafeInteger(pair.dup) || !Number.isSafeInteger(pair.keeper) || Number(pair.dup) < 1 || Number(pair.keeper) < 1
+      || pair.dup === pair.keeper || seen.has(Number(pair.dup))) throw bad()
+    seen.add(Number(pair.dup))
+    return { dup: Number(pair.dup), keeper: Number(pair.keeper) }
+  })
 }
 export const INACTIVE_STOCK_CENSUS_SQL = `SELECT p.id,p.name,p.barcode,p.image_path,COALESCE(p.stock_quantity,0) AS cache,
     COALESCE((SELECT SUM(quantity) FROM branch_stock WHERE product_id=p.id),0) AS branch,
@@ -36,16 +55,43 @@ export const INACTIVE_STOCKED_ANYWHERE_SQL = `EXISTS(SELECT 1 FROM products p WH
     OR EXISTS(SELECT 1 FROM damaged_stock_lots d WHERE d.product_id=p.id AND d.quantity_remaining<>0)))`
 const hasRealStock = (row: InactiveStockRow): boolean => Number(row.branch) !== 0 || Number(row.lots) !== 0 || Number(row.damaged) !== 0
 
-export async function readInactiveStockPlan(db: D1Compat): Promise<InactiveStockPlan> {
+/**
+ * Why an approved pair is not acceptable, or null. The approval never loosens matching: it only names the pair, and the pair must still be the
+ * same product by every rule that is safe to check -- the barcodes must not be two different real barcodes, and the fuzzy name key (case,
+ * accents, punctuation, word order and duplicate words ignored) must be equal. The fuzzy key is never used to FIND a twin, only to confirm one.
+ */
+export function approvedFoldProblem(dup: { name: string | null; barcode: string | null },
+  keeper: { id: number; name: string | null; barcode: string | null; is_active?: number; is_group?: number } | undefined): string | null {
+  if (!keeper) return 'approved_keeper_missing'
+  if (keeper.is_active !== 1) return 'approved_keeper_not_active'
+  if (keeper.is_group) return 'approved_keeper_is_group'
+  if (!barcodeIdentityMatches(dup.barcode, keeper.barcode)) return 'approved_barcode_differs'
+  const dupKey = normalizeProductFuzzyName(dup.name)
+  if (!dupKey || dupKey !== normalizeProductFuzzyName(keeper.name)) return 'approved_name_differs'
+  return null
+}
+
+export async function readInactiveStockPlan(db: D1Compat, approved: ApprovedFold[] = []): Promise<InactiveStockPlan> {
   const rows = await db.prepare(INACTIVE_STOCK_CENSUS_SQL).all<InactiveStockRow>({})
   const plan: InactiveStockPlan = { cacheOnly: [], fold: [], refuse: [] }
+  const approvalFor = new Map(approved.map(item => [item.dup, item.keeper]))
+  const stocked = new Set(rows.filter(hasRealStock).map(row => Number(row.id)))
+  for (const item of approved) if (!stocked.has(item.dup)) plan.refuse.push({ id: item.dup, name: null, reason: 'approved_dup_not_inactive_with_stock' })
   if (!rows.length) return plan
-  const active = await db.prepare('SELECT id,name,barcode FROM products WHERE is_active=1 AND COALESCE(is_group,0)=0').all<{ id: number; name: string | null; barcode: string | null }>({})
+  const active = await db.prepare('SELECT id,name,barcode,is_active,COALESCE(is_group,0) AS is_group FROM products WHERE is_active=1 AND COALESCE(is_group,0)=0').all<{ id: number; name: string | null; barcode: string | null; is_active: number; is_group: number }>({})
   for (const row of rows) {
     if (!hasRealStock(row)) { plan.cacheOnly.push(row); continue }
     const twins = active.filter(candidate => candidate.id !== row.id && productsShareExactIdentity(row, candidate))
-    if (twins.length === 1) plan.fold.push({ dup: row, keeper: twins[0] })
-    else plan.refuse.push({ id: row.id, name: row.name, reason: twins.length === 0 ? 'no_active_twin' : 'several_active_twins' })
+    const approvedKeeperId = approvalFor.get(Number(row.id))
+    if (twins.length === 1) {
+      if (approvedKeeperId !== undefined && approvedKeeperId !== twins[0].id) plan.refuse.push({ id: row.id, name: row.name, reason: 'approved_keeper_conflicts_with_exact_twin' })
+      else plan.fold.push({ dup: row, keeper: twins[0] })
+    } else if (approvedKeeperId !== undefined) {
+      const keeper = (await db.prepare('SELECT id,name,barcode,is_active,COALESCE(is_group,0) AS is_group FROM products WHERE id=@id').get<{ id: number; name: string | null; barcode: string | null; is_active: number; is_group: number }>({ id: approvedKeeperId })) ?? undefined
+      const problem = twins.length > 1 ? 'several_active_twins' : approvedFoldProblem(row, keeper)
+      if (problem) plan.refuse.push({ id: row.id, name: row.name, reason: problem })
+      else plan.fold.push({ dup: row, keeper: keeper!, approved: true })
+    } else plan.refuse.push({ id: row.id, name: row.name, reason: twins.length === 0 ? 'no_active_twin' : 'several_active_twins' })
   }
   return plan
 }
@@ -60,8 +106,13 @@ export type InactiveStockContext = { operationId: string; actorId: number; actor
  * naming the run, so the step is journaled even though each fold is its own atomic batch with its own undo record.
  */
 export async function applyInactiveStockPlan(db: D1Compat, plan: InactiveStockPlan, context: InactiveStockContext,
-  fold: (dup: InactiveStockRow, keeper: { id: number; name: string | null }) => Promise<void>): Promise<void> {
-  for (const item of plan.fold) await fold(item.dup, item.keeper)
+  fold: (dup: InactiveStockRow, keeper: { id: number; name: string | null }, approved: boolean) => Promise<void>): Promise<void> {
+  for (const item of plan.fold) {
+    await fold(item.dup, item.keeper, item.approved === true)
+    if (item.approved) await db.prepare(`INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id)
+      VALUES(@actor,@actorName,'branch_cutover_approved_fold','product',@keeper,@details,'products',@keeper)`).run({ actor: context.actorId, actorName: context.actorName, keeper: item.keeper.id,
+      details: JSON.stringify({ operationId: context.operationId, note: APPROVED_FOLD_NOTE, dup: item.dup.id, dupName: item.dup.name, keeper: item.keeper.id, keeperName: item.keeper.name }) })
+  }
   for (const row of plan.cacheOnly) {
     const statements = [
       { sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id)
