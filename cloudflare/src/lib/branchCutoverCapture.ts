@@ -9,6 +9,9 @@ export type CaptureCursor = {
   sourceQuantityText: string; sourceLotQuantityText: string; movingProducts: number
   targetQuantityText: string; targetLotQuantityText: string; stockHash: string; lotHash: string
   history: HistoryTally; families: string
+  /** The row limit that last worked for the stream table in progress (0 = none yet): a page that was too big once is too big
+   *  on every later invocation, so the halving is remembered instead of repeated (and re-charged) each time. Reset per table. */
+  pageLimit: number
 }
 export class BranchCutoverCapabilityError extends Error {
   readonly code = 'branch_cutover_parent_capability'
@@ -112,7 +115,7 @@ export function capturePageFromSql(table: string): string {
 }
 export function initialCaptureCursor(): CaptureCursor {
   return { index: 0, key: 0, rows: 0, sourceQuantityText: '0', sourceLotQuantityText: '0', movingProducts: 0,
-    targetQuantityText: '0', targetLotQuantityText: '0', stockHash: '0', lotHash: '0', history: emptyHistoryTally(), families: '' }
+    targetQuantityText: '0', targetLotQuantityText: '0', stockHash: '0', lotHash: '0', history: emptyHistoryTally(), families: '', pageLimit: 0 }
 }
 const cursorKeys = Object.keys(initialCaptureCursor()).sort().join(',')
 export function parseCaptureCursor(text: string): CaptureCursor {
@@ -120,6 +123,7 @@ export function parseCaptureCursor(text: string): CaptureCursor {
   const cursor = JSON.parse(text) as CaptureCursor
   if (Object.keys(cursor).sort().join(',') !== cursorKeys
     || ![cursor.index, cursor.key, cursor.rows, cursor.movingProducts].every(n => Number.isSafeInteger(n) && n >= 0)
+    || !Number.isSafeInteger(cursor.pageLimit) || cursor.pageLimit < 0 || cursor.pageLimit > CAPTURE_PAGE_CAP
     || cursor.index > CAPTURE_STREAMS.length || typeof cursor.families !== 'string' || cursor.families.length > 512
     || !/^[0-9a-f]{1,32}$/.test(cursor.stockHash) || !/^[0-9a-f]{1,32}$/.test(cursor.lotHash)) throw new BranchCutoverCapabilityError('capture_cursor_invalid')
   const history = cursor.history
@@ -212,6 +216,8 @@ function capturedScalar(value: unknown, rawReal: unknown): string | number | nul
   throw new BranchCutoverCapabilityError('capture_scalar_unsupported')
 }
 type PageResult = { cursor: CaptureCursor; digest: string; records: number; statements: CutoverStatement[]; done: boolean }
+/** SQLITE_TOOBIG as D1 and a local SQLite word it ("string or blob too big", "string too long"). */
+export const isStringTooBig = (error: unknown): boolean => /too big|SQLITE_TOOBIG|string too long|string or blob/i.test(String((error as { message?: unknown } | null)?.message ?? error))
 /** Reads one bounded page. A page over the byte cap halves its row limit and re-reads (never splits silently). */
 export async function readCutoverCapturePage(db: D1Compat, schema: CaptureSchema, identity: CutoverIdentity, cursor: CaptureCursor,
   digest: string, pageSize: number, names: Record<number, string>, materialize: boolean): Promise<PageResult> {
@@ -242,9 +248,18 @@ export async function readCutoverCapturePage(db: D1Compat, schema: CaptureSchema
     const invalid = await db.prepare(`SELECT count(*) AS n FROM ${quote(table)} WHERE (${predicate(table)}) AND rowid<=0`).get<{ n: number }>(base)
     if (invalid?.n) throw new BranchCutoverCapabilityError('capture_nonpositive_rowid:' + table)
   }
-  let limit = pageSize; let page: Array<Record<string, unknown>>
+  const startLimit = cursor.pageLimit > 0 ? Math.min(pageSize, cursor.pageLimit) : pageSize
+  let limit = startLimit; let page: Array<Record<string, unknown>>
   for (;;) {
-    page = await db.prepare(sidecarSql).all<Record<string, unknown>>({ ...base, limit })
+    try { page = await db.prepare(sidecarSql).all<Record<string, unknown>>({ ...base, limit }) } catch (error) {
+      // SQLite refuses to BUILD a string over its limit (D1: 2 MB): json_group_array over wide rows throws before any result
+      // exists, so it is a page-size signal like an oversized result, not a failure.
+      if (isStringTooBig(error)) {
+        if (limit === 1) throw new BranchCutoverCapabilityError('capture_row_too_big')
+        limit = Math.ceil(limit / 2); continue
+      }
+      throw error
+    }
     const header = page[0]
     if (header && typeof header.value === 'string' && cutoverBytes(JSON.stringify(page)) <= PAGE_BYTES) break
     if (limit === 1) throw new BranchCutoverCapabilityError('capture_page_bytes_exceeded')
@@ -255,7 +270,7 @@ export async function readCutoverCapturePage(db: D1Compat, schema: CaptureSchema
   const rows = JSON.parse(header.value) as Array<[number, string]>
   if (header.row_kind !== 0 || header.k !== null || columns.some((_, index) => header[`r${index}`] !== null)
     || page.length !== rows.length + 1 || rows.length > limit) throw new BranchCutoverCapabilityError('capture_scalar_sidecar_invalid')
-  const next: CaptureCursor = { ...cursor }; const statements = [cutoverAssert(`(${fingerprintSql})=@fingerprint`, { ...params, fingerprint: header.value }),
+  const next: CaptureCursor = { ...cursor, pageLimit: limit < pageSize ? limit : 0 }; const statements = [cutoverAssert(`(${fingerprintSql})=@fingerprint`, { ...params, fingerprint: header.value }),
     cutoverAssert(`NOT EXISTS(SELECT 1 FROM ${quote(table)} WHERE (${predicate(table)}) AND rowid<=0)`, params)]
   const { sourceBranchId: source, targetBranchId: target } = identity
   for (const [rowIndex, [key, raw]] of rows.entries()) {
@@ -291,7 +306,7 @@ export async function readCutoverCapturePage(db: D1Compat, schema: CaptureSchema
     params: { ...params, blankCharacters, sourceName: names[source], targetName: names[target], keys: JSON.stringify(rows.map(([key]) => key)) },
   })
   let records = rows.length
-  if (rows.length < limit) { digest = await cutoverDigest(JSON.stringify([digest, table, 'end'])); next.index++; next.key = 0; records++ }
+  if (rows.length < limit) { digest = await cutoverDigest(JSON.stringify([digest, table, 'end'])); next.index++; next.key = 0; next.pageLimit = 0; records++ }
   return { cursor: next, digest, records, statements, done: next.index === CAPTURE_STREAMS.length }
 }
 async function readHistoryPage(db: D1Compat, identity: CutoverIdentity, cursor: CaptureCursor, digest: string, pageSize: number): Promise<PageResult> {

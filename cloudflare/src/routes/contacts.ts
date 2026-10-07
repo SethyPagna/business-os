@@ -71,6 +71,29 @@ import {
   isAnonymousCustomer,
 } from '../lib/anonymousCustomer'
 
+// Historical label (owner rule: old records are never relabelled): the row's own branch-name snapshot
+// when it has a non-blank one, else the live directory name. The SAME expression as
+// branchHistoryNameSql in lib/stockInSessionsQuery.ts; test-cutover-ld-historical-readers-native.cjs pins every copy.
+const branchHistoryNameSql = (snapshot: string, fallback: string): string =>
+  `CASE WHEN trim(COALESCE(${snapshot},''),char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279))<>'' THEN ${snapshot} ELSE ${fallback} END`
+
+// `json_group_array(DISTINCT json_array(branch_id, label))` -> [{ id, name }], dropping the NULL element a
+// group of unlabelled lots contributes. Malformed text yields no labels rather than an error.
+function parseBranchLabels(value: unknown): Array<{ id: number; name: string | null }> {
+  if (typeof value !== 'string' || !value) return []
+  let parsed: unknown
+  try { parsed = JSON.parse(value) } catch { return [] }
+  if (!Array.isArray(parsed)) return []
+  const labels: Array<{ id: number; name: string | null }> = []
+  for (const entry of parsed) {
+    if (!Array.isArray(entry)) continue
+    const id = Number(entry[0])
+    const name = typeof entry[1] === 'string' ? entry[1] : null
+    if (Number.isSafeInteger(id) && id > 0 && !labels.some((label) => label.id === id && label.name === name)) labels.push({ id, name })
+  }
+  return labels
+}
+
 // Customers, suppliers, and delivery contacts, ported from
 // backend/src/routes/contacts.ts. This never had a real route on Cloudflare
 // at all -- routes/compat.ts only returned an empty list for GET, so every
@@ -2375,7 +2398,7 @@ app.get('/suppliers/:id/purchases', async (c) => {
 const STOCK_IN_REPORT_SOURCE = `
   SELECT pb.id, pb.variant_product_id, pb.batch_number, pb.lot_code, pb.received_at,
          pb.received_quantity, pb.unit_cost_usd, pb.received_cost_usd, pb.payment_status, pb.credit_due_date,
-         pb.received_branch_id,
+         pb.received_branch_id, pb.received_branch_name,
          CASE
            WHEN s.id IS NOT NULL THEN 'id:' || s.id
            WHEN trim(COALESCE(pb.supplier_name, '')) <> '' THEN 'name:' || lower(trim(pb.supplier_name))
@@ -2436,7 +2459,7 @@ app.get('/suppliers/reports/stock-in-invoices', async (c) => {
     supplier_key: string; supplier_name: string | null; received_day: string
     line_count: number; units_received: number; lines_without_qty: number
     cost_usd: number; lines_without_cost: number; credit_lines: number
-    branch_ids: string | null
+    branch_ids: string | null; branch_labels: string | null
   }
   const invoices = await db.prepare(`
     SELECT t.supplier_key, MAX(t.supplier_display) AS supplier_name, t.received_day,
@@ -2446,7 +2469,11 @@ app.get('/suppliers/reports/stock-in-invoices', async (c) => {
            SUM(COALESCE(t.received_cost_usd, 0)) AS cost_usd,
            SUM(CASE WHEN t.received_cost_usd IS NULL THEN 1 ELSE 0 END) AS lines_without_cost,
            SUM(CASE WHEN t.payment_status = 'credit' THEN 1 ELSE 0 END) AS credit_lines,
-           GROUP_CONCAT(DISTINCT t.received_branch_id) AS branch_ids
+           GROUP_CONCAT(DISTINCT t.received_branch_id) AS branch_ids,
+           -- [[id, name]] as the lots recorded it: a lot received at Shop keeps saying Shop
+           -- after that branch is retired (its live directory name is only the fallback).
+           json_group_array(DISTINCT CASE WHEN t.received_branch_id IS NOT NULL THEN json_array(t.received_branch_id,
+             ${branchHistoryNameSql('t.received_branch_name', '(SELECT name FROM branches WHERE id = t.received_branch_id)')}) END) AS branch_labels
     FROM (${STOCK_IN_REPORT_SOURCE}) t
     ${where}
     GROUP BY t.supplier_key, t.received_day
@@ -2492,7 +2519,9 @@ app.get('/suppliers/reports/stock-in-invoices', async (c) => {
   }
 
   const [branches, supplierOptions] = await Promise.all([
-    db.prepare('SELECT id, name FROM branches WHERE is_active = 1 ORDER BY id ASC').all<{ id: number; name: string | null }>(),
+    // Retired branches stay in the filter, flagged is_active = 0: old lots name them, and a filter that dropped
+    // them could not reach those invoices (the branches table is a handful of rows, no scan).
+    db.prepare('SELECT id, name, is_active FROM branches ORDER BY is_active DESC, id ASC').all<{ id: number; name: string | null; is_active: number | null }>(),
     db.prepare(`
       SELECT t.supplier_key AS key, MAX(t.supplier_display) AS name
       FROM (${STOCK_IN_REPORT_SOURCE}) t
@@ -2504,7 +2533,7 @@ app.get('/suppliers/reports/stock-in-invoices', async (c) => {
 
   const round2 = (value: unknown): number => Math.round((Number(value) || 0) * 100) / 100
   return c.json({
-    invoices: invoices.map((row) => ({ ...row, cost_usd: round2(row.cost_usd) })),
+    invoices: invoices.map(({ branch_labels, ...row }) => ({ ...row, cost_usd: round2(row.cost_usd), branch_labels: parseBranchLabels(branch_labels) })),
     totals: {
       invoices: Number(countRow?.total) || 0,
       lines: Number(totalsRow?.line_count) || 0,
@@ -2556,7 +2585,7 @@ app.get('/suppliers/reports/stock-in-invoice-lines', async (c) => {
     db.prepare(`
       SELECT t.id, t.batch_number, t.lot_code, t.received_at, t.received_quantity,
              t.unit_cost_usd, t.received_cost_usd, t.payment_status, t.credit_due_date, t.received_branch_id,
-             b.name AS received_branch_name,
+             ${branchHistoryNameSql('t.received_branch_name', 'b.name')} AS received_branch_name,
              p.id AS product_id, p.name AS product_name, p.barcode, p.unit,
              COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = t.id), 0) AS remaining_quantity
       FROM (${STOCK_IN_REPORT_SOURCE}) t

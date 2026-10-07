@@ -32,6 +32,8 @@ async function main() {
     await db.prepare("CREATE TABLE import_job_files(id INTEGER PRIMARY KEY,job_id TEXT,kind TEXT,original_name TEXT,status TEXT DEFAULT 'stored')").run()
     await db.prepare('CREATE TABLE dispatch_probe(job_id TEXT,kind TEXT)').run()
     await db.prepare('CREATE TABLE audit_probe(id INTEGER PRIMARY KEY)').run()
+    // CUTOVER-LR: approve/retry read the branch directory (are any rows addressed to a disabled branch?).
+    await db.prepare('CREATE TABLE branches(id INTEGER PRIMARY KEY,name TEXT,role TEXT,is_active INTEGER DEFAULT 1,successor_branch_id INTEGER)').run()
     for (const [id, status] of [['start','pending'],['approve','awaiting_review'],['retry','failed']]) {
       await db.prepare("INSERT INTO import_jobs(id,type,status,phase,policy_json,summary_json) VALUES(?,'inventory',?,?,'{}','{}')")
         .bind(id,status,status).run()

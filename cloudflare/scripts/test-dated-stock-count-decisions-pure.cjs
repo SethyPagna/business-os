@@ -83,6 +83,9 @@ const relMap = {
   './importBranchAuthority': () => loadReal('lib/importBranchAuthority.ts'),
   './importBranchAuthority.ts': () => loadReal('lib/importBranchAuthority.ts'),
   './branchRoles': () => loadReal('lib/branchRoles.ts'),
+  // CUTOVER-LR: the import authority answers a disabled branch through the branch-effect kernel.
+  './branchEffect': () => loadReal('lib/branchEffect.ts'),
+  './sqlBinding': () => loadReal('lib/sqlBinding.ts'),
   './branchRoles.ts': () => loadReal('lib/branchRoles.ts'),
 }
 const originalCompile = Module.prototype._compile

@@ -29,6 +29,7 @@ import { MOVEMENT_RETURN_REFERENCE_TYPES, movementReferenceKindSql } from './mov
 import { STOCK_RECEIPT_MOVEMENT_TYPES, isStockInEditReference, stockInEditRange } from './stockInSessionsQuery'
 import { STOCK_CONDITION_TAGS, isDamagedLotReference, taggedReasonText } from './stockCondition'
 import { findConsumingBlocker, type StockRefusalDetails } from './stockRefusalBlocker'
+import { addressedStatements, landingLotId, requestBranchEffect, type RedirectTarget } from './branchRedirectWrite'
 
 const OUT_TYPES = new Set<string>(LEDGER_OUT_TYPES)
 const RECEIPT_TYPES = new Set<string>(STOCK_RECEIPT_MOVEMENT_TYPES)
@@ -318,10 +319,13 @@ export async function revertRootMovement(
 // and insert the counter-movement, in ONE db.batch. Returns a
 // discriminated result rather than throwing, so the route can map it straight
 // to a status/JSON; a CHECK failure inside the batch becomes stock_changed.
-export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, actor: RevertActor): Promise<RevertResult> {
+// `redirectTarget` (X-Branch-Redirect): a row recorded at a branch that has since been disabled is reverted at
+// the active branch the operator confirmed, and the counter-movement keeps the disabled branch as its addressed
+// label. Without it such a revert throws the branch_redirect_required refusal (lib/branchEffect.ts).
+export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, actor: RevertActor, redirectTarget: RedirectTarget = null): Promise<RevertResult> {
   const productId = Number(m.product_id) || 0
-  const branchId = Number(m.branch_id) || 0
-  if (!productId || !branchId) {
+  const recordedBranchId = Number(m.branch_id) || 0
+  if (!productId || !recordedBranchId) {
     return refuse(400, 'revert_not_tied', 'This movement is not tied to a product and branch, so it cannot be reverted here.')
   }
   // P3-L6. A movement that moved units into or out of a TAGGED held row is
@@ -409,8 +413,15 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     }
   }
 
+  const landing = await requestBranchEffect(db, recordedBranchId, redirectTarget)
+  const branchId = landing.effectBranchId
+  const branchLabel = landing.redirected ? landing.effectName : m.branch_name
+  const lotAt = async (id: number): Promise<number> => Number(await landingLotId(db, landing, id))
+  // Stock moves on the lot as it exists at the landing branch; the purchase figures stay on the lot that was received.
+  const landingShares = async (shares: LotShare[]): Promise<Array<LotShare & { receivedBatchId: number }>> =>
+    Promise.all(shares.map(async (share) => ({ ...share, batchId: await lotAt(share.batchId), receivedBatchId: share.batchId })))
   const { revertType, magnitude } = plan
-  const batchId = m.batch_id != null ? Number(m.batch_id) : null
+  const batchId = m.batch_id != null ? await lotAt(Number(m.batch_id)) : null
   const root = await revertRootMovement(db, m)
   if (!root) return refuse(409, 'revert_lineage_unresolved', 'Cannot revert: the original stock action cannot be identified safely. Nothing was changed.')
   // A chain takes its purchase nature from its root: receipt -> un-receive ->
@@ -426,7 +437,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   if (revertType === 'remove') {
     const current = await branchQty(db, productId, branchId)
     if (magnitude > current) {
-      return withBlocker(db, refuse(400, 'revert_insufficient_branch_stock', `Cannot revert: only ${current} in stock at ${m.branch_name || 'this branch'}, ${magnitude} needed.`, { available: current, needed: magnitude, branch: m.branch_name || '' }), { productId, branchId, batchId: null, afterMovementId: Number(m.id) })
+      return withBlocker(db, refuse(400, 'revert_insufficient_branch_stock', `Cannot revert: only ${current} in stock at ${branchLabel || 'this branch'}, ${magnitude} needed.`, { available: current, needed: magnitude, branch: branchLabel || '' }), { productId, branchId, batchId: null, afterMovementId: Number(m.id) })
     }
     if (batchId != null) {
       // Strict (unclamped) lot + branch decrement in the same batch as the
@@ -445,7 +456,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
       usedBatchId = batchId
       // Un-purchase: the lot loses this receipt's units and money; supplier
       // and payment state stay on the row for the Revert of this Revert.
-      if (purchaseSide) statements.push(...planUnreceiveBatchStock({ batchId, quantity: magnitude, totalCostUsd: receiptCostUsd }))
+      if (purchaseSide) statements.push(...planUnreceiveBatchStock({ batchId: Number(m.batch_id), quantity: magnitude, totalCostUsd: receiptCostUsd }))
     } else {
       // No lot stamp: the count's own lot shares come back off those lots;
       // every other unit (a pre-0084 receipt, an aggregate-only add) was
@@ -453,7 +464,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
       // none. Taking it from a dated lot would guess, and could drain another
       // supplier's delivery; when the undated stock is short the revert is
       // refused whole.
-      const shares = await rootLotShares(db, root.id)
+      const shares = await landingShares(await rootLotShares(db, root.id))
       if (shares.some((share) => share.productId !== productId)) return refuse(400, 'revert_lot_moved', MERGED_LOT_REFUSAL)
       for (const share of shares) {
         const lot = await db.prepare('SELECT COALESCE(quantity, 0) AS available FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = @branchId')
@@ -467,12 +478,12 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
       if (magnitude - fromLots > undated) {
         const available = Math.max(0, undated)
         const needed = magnitude - fromLots
-        return refuse(400, 'revert_no_received_date', `Cannot revert: this change was saved without a received date and only ${available} of the ${needed} units at ${m.branch_name || 'this branch'} are held without one. Nothing was changed. Use Remove stock and choose the received date instead.`, { available, needed, branch: m.branch_name || '' })
+        return refuse(400, 'revert_no_received_date', `Cannot revert: this change was saved without a received date and only ${available} of the ${needed} units at ${branchLabel || 'this branch'} are held without one. Nothing was changed. Use Remove stock and choose the received date instead.`, { available, needed, branch: branchLabel || '' })
       }
       statements.push(...aggregateDeltaStatements(productId, branchId, -magnitude), undatedStockGuard(productId, branchId))
       // A count increase was received onto its lots: un-receive each share
       // (after the stock writes, so an emptied lot is seen as empty).
-      if (purchaseSide) for (const share of shares) statements.push(...planUnreceiveBatchStock({ batchId: share.batchId, quantity: share.quantity, totalCostUsd: null }))
+      if (purchaseSide) for (const share of shares) statements.push(...planUnreceiveBatchStock({ batchId: share.receivedBatchId, quantity: share.quantity, totalCostUsd: null }))
       usedBatchId = shares.length === 1 && shares[0].quantity === magnitude ? shares[0].batchId : null
     }
   } else if (batchId != null && purchaseSide) {
@@ -520,7 +531,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     // and 8, count to 0, revert -> lots 4 / 8, not branch 12 / lots 0), and a
     // count increase is received on them again; what no lot held stays
     // branch-only, as the original left it.
-    const shares = await rootLotShares(db, root.id)
+    const shares = await landingShares(await rootLotShares(db, root.id))
     if (shares.some((share) => share.productId !== productId)) return refuse(400, 'revert_lot_moved', MERGED_LOT_REFUSAL)
     for (const share of shares) {
       statements.push(...restoreBatchStockStatements(share.batchId, branchId, share.quantity))
@@ -528,7 +539,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
         statements.push({
           sql: `UPDATE product_batches SET received_quantity = CASE WHEN received_quantity IS NULL THEN NULL ELSE received_quantity + @quantity END,
                   updated_at = CURRENT_TIMESTAMP WHERE id = @batchId`,
-          params: { batchId: share.batchId, quantity: share.quantity },
+          params: { batchId: share.receivedBatchId, quantity: share.quantity },
         })
       }
     }
@@ -550,7 +561,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
       productId,
       productName: m.product_name,
       branchId,
-      branchName: m.branch_name,
+      branchName: branchLabel,
       movementType: revertType,
       quantity: magnitude,
       // A revert is a compensating record for this exact historical movement.
@@ -568,12 +579,12 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     },
   })
   try {
-    await db.batch([
+    await db.batch(addressedStatements(landing, [
       { sql: ALREADY_REVERTED_GUARD, params: { ref: counterRef, movementId: Number(m.id) } },
       receiptRowGuard(m),
       ...statements,
       { sql: 'DELETE FROM stock_session_guards', params: {} },
-    ])
+    ]))
   } catch (err) {
     // Nothing was written. Tell the loser of a race apart from a stock
     // change by reading what the winner committed.

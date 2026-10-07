@@ -169,6 +169,8 @@ function actualDetailCallback(name: string, input: Record<string, unknown>) {
   if (!['stageLineUpdate', 'stageRemoval', 'stageReplacement', 'stageDeliveryFeeAmendment', 'stageActualDeliveryCostAmendment', 'stageDeliveryAddition', 'submitAddItems'].includes(name)) return rawDetailCallback(name, input)
   const sale = input.sale as Record<string, unknown>
   const env: Record<string, any> = {
+    // CUTOVER-LR: a sale at an active branch (the disabled-branch redirect of SaleDetailModal is not in play here).
+    saleBranchDisabled: false, stockRedirectFields: () => ({}),
     ...input,
     sale: { id: 17, updated_at: '2026-10-04T00:00:00.000Z', ...sale },
     savedExchangeRate: input.savedExchangeRate ?? Number(sale.exchange_rate),

@@ -15,8 +15,31 @@ export type StockMovementRevertPreview = {
   lineCount: number
 }
 
+// REVERT-SET (Worker lib/stockRevertEffect.ts): the exact change a confirmed
+// Revert makes, and the Sets still applied after the row that it leaves alone.
+export type StockRevertEffect = {
+  quantity: number
+  batchId: number | null
+  receivedAt: string | null
+  lotCode: string | null
+  branchId: number
+  branchName: string | null
+  branchBefore: number
+  branchAfter: number
+}
+
+export type LaterOpenSet = {
+  movementId: number
+  quantity: number
+  batchId: number | null
+  receivedAt: string | null
+  createdAt: string | null
+}
+
 // Confirmation must use a fresh server decision, never a cached generation.
-export function getStockMovementRevertPreview(id: number): Promise<{ success: true; revert: StockMovementRevertPreview }> {
+export function getStockMovementRevertPreview(id: number): Promise<{
+  success: true; revert: StockMovementRevertPreview; effect?: StockRevertEffect | null; laterSets?: LaterOpenSet[]
+}> {
   return apiFetch('GET', `/api/action-history/movements/${id}/revert-preview`)
     .catch((error: unknown) => localizeReplayRefusal(error, 'undo'))
 }
@@ -86,6 +109,9 @@ const REPLAY_REFUSAL_KEYS: Readonly<Record<string, { undo: string; redo: string 
   undo_preview_limit: { undo: 'movement_revert_history_required', redo: 'movement_revert_history_required' },
   undo_needs_original_tab: { undo: 'undo_refused_needs_original_tab', redo: 'redo_refused_needs_original_tab' },
   undo_closed_products_merged: { undo: 'undo_refused_closed_by_merge', redo: 'redo_refused_closed_by_merge' },
+  undo_closed_branch_retired: { undo: 'undo_refused_closed_branch_retired', redo: 'redo_refused_closed_branch_retired' },
+  undo_closed_branch_cutover_move: { undo: 'undo_refused_closed_branch_cutover_move', redo: 'redo_refused_closed_branch_cutover_move' },
+  undo_closed_branch_cutover_product_moved: { undo: 'undo_refused_closed_branch_cutover_product_moved', redo: 'redo_refused_closed_branch_cutover_product_moved' },
   merge_conflict_retry: { undo: 'undo_refused_merge_conflict_retry', redo: 'redo_refused_merge_conflict_retry' },
   undo_refused: { undo: 'undo_refused_generic', redo: 'redo_refused_generic' },
 }
@@ -95,12 +121,26 @@ async function localizeReplayRefusal(error: unknown, direction: 'undo' | 'redo')
   const keys = refusal && refusal.status === 409 && typeof refusal.code === 'string' && Object.prototype.hasOwnProperty.call(REPLAY_REFUSAL_KEYS, refusal.code)
     ? REPLAY_REFUSAL_KEYS[refusal.code]
     : null
-  if (refusal && keys) {
+  // REVERT-SET: a stock Undo/Redo refused with a Stock Changes code (the units
+  // it needs were taken, a line was reverted or edited, the lot moved) reads
+  // exactly as the Revert of the same row would, numbers included.
+  const stockCode = refusal && refusal.status === 409 && typeof refusal.code === 'string' && !keys ? refusal.code : null
+  if (refusal && (keys || stockCode)) {
     try {
       const language = typeof document !== 'undefined' ? String(document.documentElement?.getAttribute('lang') || '').trim().toLowerCase() : ''
       const pack = (language.startsWith('km') ? (await import('../lang/km.json')).default : (await import('../lang/en.json')).default) as Record<string, unknown>
-      const value = pack[keys[direction]]
-      if (typeof value === 'string' && value.trim()) refusal.message = value
+      if (keys) {
+        const value = pack[keys[direction]]
+        if (typeof value === 'string' && value.trim()) refusal.message = value
+      } else {
+        const { STOCK_REVERT_ERRORS, STOCK_REPLAY_ONLY_ERRORS, stockRevertErrorText } = await import('../utils/stockRevertError.ts')
+        if (stockCode && (Object.prototype.hasOwnProperty.call(STOCK_REVERT_ERRORS, stockCode) || Object.prototype.hasOwnProperty.call(STOCK_REPLAY_ONLY_ERRORS, stockCode))) {
+          refusal.message = stockRevertErrorText(refusal, (key, fallback) => {
+            const value = pack[key]
+            return typeof value === 'string' && value.trim() ? value : fallback
+          })
+        }
+      }
     } catch {
       // Keep the server's English.
     }

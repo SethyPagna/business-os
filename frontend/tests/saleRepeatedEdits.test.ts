@@ -40,6 +40,8 @@ function fixture() {
     parseDeliveryAmountUsd, deliveryAmountChanged, DELIVERY_AMOUNT_ERROR_KEYS: {}, actualCostText: '2.50',
     addLines: [{ productId: 22, quantity: 1, branchId: 1, batchId: 72, batchLabel: 'Original date', unitPriceUsd: 3, name: 'Added' }],
     addedSubtotalUsd: 3, addHasStockError: false, addHeaderQuote: { total_usd: 12.5 },
+    // CUTOVER-LR: the sale's branch is active here, so nothing is redirected.
+    saleBranchDisabled: false, stockRedirectFields: () => ({}),
     stagedLinePricingIntent: (line: any, rate: number) => ({ pricing_quote: { total_usd: line.unitPriceUsd * line.quantity, total_khr: line.unitPriceUsd * line.quantity * rate } }),
   }
   for (const name of ['AmendSaving', 'AmendLineId', 'ReplaceLineId', 'FeeEditing', 'ActualCostEditing', 'DeliveryAdding', 'DeliveryContact', 'DeliverySearch', 'AmendQtyText', 'AmendPriceText', 'AmendDiscountText', 'AmendDiscountType', 'AmendReloadToken', 'AddSaving', 'AddConfirmOpen', 'AddLines', 'AmendMutationError', 'AddMutationError']) {

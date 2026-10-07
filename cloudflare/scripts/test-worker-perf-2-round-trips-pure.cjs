@@ -42,7 +42,9 @@ check('inventory.ts /adjust: product + branchId resolve in one Promise.all', () 
   const adjustBlock = sliceBetween(inventorySource, "app.post('/adjust'", "app.post('/dated-stock-count/resolve'", 'inventory.ts /adjust')
   assert.match(
     adjustBlock,
-    /const \[product, branchId\] = await Promise\.all\(\[/,
+    // CUTOVER-LR: the resolved id is the ADDRESSED branch now (a disabled one lands at the confirmed active branch
+    // in the one directory read that replaced the branch SELECT) -- still one fan-out, still 2 RTTs worst case.
+    /const \[product, addressedBranchId\] = await Promise\.all\(\[/,
     'product SELECT and branchId resolution must be fanned out together, not two sequential awaits',
   )
   assert.match(

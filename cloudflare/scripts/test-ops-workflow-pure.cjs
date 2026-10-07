@@ -240,12 +240,13 @@ function strings(node, at = [], out = []) {
 
 // ------------------------------------------------------ what ops.yml must be
 
-const TASKS = ['d1-export', 'r2-apac-copy', 'secret-names', 'settings-upsert', 'd1-physical-export']
+const CUTOVER_TOKEN_ENV = { BRANCH_CUTOVER_OPERATOR_TOKEN: '${{ secrets.BRANCH_CUTOVER_OPERATOR_TOKEN }}' }
+const TASKS = ['d1-export', 'r2-apac-copy', 'secret-names', 'settings-upsert', 'branch-cutover', 'd1-physical-export']
 const OUT_DIR = '${{ runner.temp }}/ops-out'
 const UPLOAD_PATH = '${{ runner.temp }}/ops-out/*.enc.json'
-// The only job allowed to run from any ref other than main is none: d1-physical-export reads production wholesale, so it
-// runs only from refs/heads/main (its job `if`, repeated by the script).
-const MAIN_ONLY = new Set(['d1-physical-export'])
+// The only job allowed to run from any ref other than main is none: d1-physical-export reads production wholesale and
+// branch-cutover moves stock, so both run only from refs/heads/main (their job `if`, repeated by the script).
+const MAIN_ONLY = new Set(['branch-cutover', 'd1-physical-export'])
 const jobCondition = (task) => (MAIN_ONLY.has(task) ? `inputs.task == '${task}' && github.ref == 'refs/heads/main'` : `inputs.task == '${task}'`)
 const AFTER_CHECKOUT = "always() && steps.checkout.outcome == 'success'"
 const SECRET_ENV = {
@@ -303,6 +304,15 @@ const TASK_STEPS = {
     scriptStep('node ops/scripts/ops-settings-upsert.mjs', { OPS_APPLY: '${{ inputs.apply }}' }),
     { kind: 'upload' },
   ],
+  // One mode per run. The operator token is the only secret beyond the Cloudflare pair, and the job runs only from main.
+  'branch-cutover': [
+    ...PRELUDE,
+    scriptStep('node ops/scripts/ops-branch-cutover.mjs', {
+      ...CUTOVER_TOKEN_ENV, OPS_CUTOVER_MODE: '${{ inputs.cutover_mode }}', OPS_OPERATION_ID: '${{ inputs.operation_id }}',
+      OPS_ACTOR_USER_ID: '${{ inputs.actor_user_id }}', OPS_APPROVED_FOLDS: '${{ inputs.approved_folds }}', OPS_CUTOVER_BUDGET_MINUTES: '300', WRANGLER_WRITE_LOGS: 'false',
+    }, { stepTimeout: true, secrets: Object.keys(CUTOVER_TOKEN_ENV) }),
+    { kind: 'upload' },
+  ],
   // Personal data in the artifact: the only job whose upload is kept one day, not three. The export step stops
   // 30 minutes before the job (stepTimeout) so the upload still runs after a timeout.
   'd1-physical-export': [
@@ -313,7 +323,7 @@ const TASK_STEPS = {
 }
 
 // The scripts the workflow runs, and everything they import.
-const ENTRY_SCRIPTS = ['ops/scripts/ops-d1-export.mjs', 'ops/scripts/ops-r2.mjs', 'ops/scripts/ops-secret-names.mjs', 'ops/scripts/ops-settings-upsert.mjs', 'ops/scripts/ops-d1-physical-export.mjs']
+const ENTRY_SCRIPTS = ['ops/scripts/ops-d1-export.mjs', 'ops/scripts/ops-r2.mjs', 'ops/scripts/ops-secret-names.mjs', 'ops/scripts/ops-settings-upsert.mjs', 'ops/scripts/ops-branch-cutover.mjs', 'ops/scripts/ops-d1-physical-export.mjs']
 const RUNNER_SCRIPTS = [
   'ops/scripts/ops-common.mjs',
   'ops/scripts/ops-crypto.mjs',
@@ -325,6 +335,8 @@ const RUNNER_SCRIPTS = [
   'ops/scripts/ops-r2-lib.mjs',
   'ops/scripts/ops-secret-names.mjs',
   'ops/scripts/ops-settings-upsert.mjs',
+  'ops/scripts/ops-branch-cutover.mjs',
+  'ops/scripts/branch-cutover-loop.mjs',
 ]
 const WORKER_SCRIPTS = ['ops/r2-copy-worker/src/index.mjs', 'ops/r2-copy-worker/src/core.mjs']
 const BUILTINS = new Set(['node:crypto', 'node:fs', 'node:path', 'node:os', 'node:child_process', 'node:url'])
@@ -437,6 +449,7 @@ async function main() {
   const driver = await load('ops', 'scripts', 'ops-r2.mjs')
   const lib = await load('ops', 'scripts', 'ops-r2-lib.mjs')
   const secretNames = await load('ops', 'scripts', 'ops-secret-names.mjs')
+  const cutover = await load('ops', 'scripts', 'ops-branch-cutover.mjs')
 
   const WF_TEXT = read('.github', 'workflows', 'ops.yml')
   let WF = null
@@ -477,7 +490,14 @@ async function main() {
 
   await check('ops.yml: the task choices are the task jobs; confirm is required and has no default', () => {
     const inputs = WF.on.workflow_dispatch.inputs
-    assert.deepStrictEqual(Object.keys(inputs).sort(), ['apply', 'confirm', 'mode', 'query', 'settings', 'task'])
+    assert.deepStrictEqual(Object.keys(inputs).sort(), ['actor_user_id', 'apply', 'approved_folds', 'confirm', 'cutover_mode', 'mode', 'operation_id', 'query', 'settings', 'task'])
+    assert.strictEqual(inputs.cutover_mode.type, 'choice')
+    assert.deepStrictEqual(inputs.cutover_mode.options, cutover.MODES, 'the workflow offers exactly the modes the script runs, in runbook order')
+    assert.strictEqual(inputs.cutover_mode.default, 'inspect', 'the default mode only reads')
+    for (const name of ['operation_id', 'actor_user_id', 'approved_folds']) {
+      assert.strictEqual(inputs[name].type, 'string')
+      assert.strictEqual(inputs[name].default, '')
+    }
     assert.deepStrictEqual(Object.keys(WF.jobs), ['gate', ...TASKS])
     assert.strictEqual(inputs.task.type, 'choice')
     assert.strictEqual(inputs.task.required, 'true')
@@ -651,7 +671,7 @@ async function main() {
     for (const [n, line] of WF_TEXT.split('\n').entries()) {
       if (/^\s*#/.test(line)) continue
       if (/secrets/.test(line)) {
-        assert.ok(/^\s+(CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID): \$\{\{ secrets\.\1 \}\}$/.test(line), `line ${n + 1}: secrets only as env, named after themselves: ${line.trim()}`)
+        assert.ok(/^\s+(CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID|BRANCH_CUTOVER_OPERATOR_TOKEN): \$\{\{ secrets\.\1 \}\}$/.test(line), `line ${n + 1}: secrets only as env, named after themselves: ${line.trim()}`)
       }
       assert.ok(!/github\.token|GITHUB_TOKEN|ACTIONS_(STEP|RUNNER)_DEBUG|Set-PSDebug|set -x|DebugPreference|VerbosePreference|add-mask|GITHUB_ENV|GITHUB_OUTPUT|GITHUB_PATH|toJSON/i.test(line), `line ${n + 1}: ${line.trim()}`)
     }
@@ -659,7 +679,7 @@ async function main() {
     const expected = []
     for (const task of TASKS) {
       WF.jobs[task].steps.forEach((step, n) => {
-        if (TASK_STEPS[task][n].kind === 'script') for (const name of Object.keys(SECRET_ENV)) expected.push(`jobs.${task}.steps.${n}.env.${name}`)
+        if (TASK_STEPS[task][n].kind === 'script') for (const name of [...Object.keys(SECRET_ENV), ...(TASK_STEPS[task][n].secrets || [])]) expected.push(`jobs.${task}.steps.${n}.env.${name}`)
       })
     }
     assert.deepStrictEqual(found, expected.sort())
@@ -668,6 +688,7 @@ async function main() {
   await check('ops.yml: nothing is interpolated into a shell script, and every expression is on the allowlist', () => {
     const allowed = new Set([
       '${{ inputs.task }}', '${{ inputs.confirm }}', '${{ inputs.query }}', '${{ inputs.mode }}', '${{ inputs.apply }}',
+      '${{ inputs.cutover_mode }}', '${{ inputs.operation_id }}', '${{ inputs.actor_user_id }}', '${{ inputs.approved_folds }}', CUTOVER_TOKEN_ENV.BRANCH_CUTOVER_OPERATOR_TOKEN,
       SECRET_ENV.CLOUDFLARE_API_TOKEN, SECRET_ENV.CLOUDFLARE_ACCOUNT_ID, OUT_DIR, UPLOAD_PATH,
     ])
     for (const [where, value] of strings(WF)) {
@@ -682,6 +703,11 @@ async function main() {
     assert.deepStrictEqual(where('${{ inputs.query }}'), ['jobs.d1-export.steps.N.env.OPS_QUERY'])
     assert.deepStrictEqual(where('${{ inputs.mode }}'), ['jobs.r2-apac-copy.steps.N.env.OPS_R2_MODE', 'jobs.r2-apac-copy.steps.N.env.OPS_R2_MODE'])
     assert.deepStrictEqual(where('${{ inputs.apply }}'), ['jobs.settings-upsert.steps.N.env.OPS_APPLY'])
+    assert.deepStrictEqual(where('${{ inputs.cutover_mode }}'), ['jobs.branch-cutover.steps.N.env.OPS_CUTOVER_MODE'])
+    assert.deepStrictEqual(where('${{ inputs.operation_id }}'), ['jobs.branch-cutover.steps.N.env.OPS_OPERATION_ID'])
+    assert.deepStrictEqual(where('${{ inputs.actor_user_id }}'), ['jobs.branch-cutover.steps.N.env.OPS_ACTOR_USER_ID'])
+    assert.deepStrictEqual(where('${{ inputs.approved_folds }}'), ['jobs.branch-cutover.steps.N.env.OPS_APPROVED_FOLDS'])
+    assert.deepStrictEqual(where(CUTOVER_TOKEN_ENV.BRANCH_CUTOVER_OPERATOR_TOKEN), ['jobs.branch-cutover.steps.N.env.BRANCH_CUTOVER_OPERATOR_TOKEN'], 'the operator token reaches one step only')
     // The topic ids never pass through an expression or a step env (whose
     // values the public log prints): the script reads the event payload file.
     assert.deepStrictEqual(strings(WF).filter(([, v]) => /inputs\.settings|github\.event|OPS_SETTINGS/.test(v)).map(([w]) => w), [])
@@ -769,6 +795,7 @@ async function main() {
     const tokens = []
     for (const [file, text] of Object.entries(code)) for (const m of text.matchAll(/publicToken\(((?:[^()]|\([^()]*\))*)\)/g)) tokens.push(`${file}: ${m[1]}`)
     assert.deepStrictEqual(tokens.sort(), [
+      'ops/scripts/ops-branch-cutover.mjs: text',
       'ops/scripts/ops-common.mjs: value',
       'ops/scripts/ops-d1-export.mjs: codesText(errorCodes)',
       'ops/scripts/ops-d1-export.mjs: name',
@@ -822,6 +849,7 @@ async function main() {
     }
     assert.strictEqual(count(code['ops/scripts/ops-common.mjs'], /export function runWrangler\(args, /g), 1)
     assert.deepStrictEqual(calls.sort(), [
+      "ops/scripts/ops-branch-cutover.mjs: ['d1', 'time-travel', 'info', DATABASE, '--json']",
       'ops/scripts/ops-d1-export.mjs: wranglerArgs(query.sql)',
       'ops/scripts/ops-d1-physical-export.mjs: wranglerArgs(canonical)',
       "ops/scripts/ops-r2.mjs: ['deploy', ...config]",
@@ -927,7 +955,7 @@ async function main() {
         required.set(file, [...(required.get(file) || []), m[1].slice(1, -1)])
       }
     }
-    assert.deepStrictEqual([...dotted].sort(), ['CLOUDFLARE_API_TOKEN', 'GITHUB_EVENT_PATH', 'GITHUB_REF', 'GITHUB_RUN_ID', 'GITHUB_SHA', 'GITHUB_STEP_SUMMARY', 'OPS_R2_MODE'])
+    assert.deepStrictEqual([...dotted].sort(), ['CLOUDFLARE_API_TOKEN', 'GITHUB_EVENT_PATH', 'GITHUB_REF', 'GITHUB_RUN_ID', 'GITHUB_SHA', 'GITHUB_STEP_SUMMARY', 'OPS_CUTOVER_BASE_URL', 'OPS_R2_MODE'])
     assert.strictEqual(indexed, 1, 'process.env[name] only in requireEnv')
     assert.strictEqual(spread, 1, 'the environment is passed on only to wrangler')
     // Every step gives its script what the script requires.

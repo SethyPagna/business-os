@@ -20,6 +20,10 @@ import {
   getSyncServerUrl,
   getSyncToken,
 } from './httpState.ts'
+// The disabled-branch redirect and the Khmer refusal restatement load on the refusal path only, so the storefront's
+// catalog closure (which shares this module) does not carry them.
+const BRANCH_REDIRECT_HEADER = 'X-Branch-Redirect'
+const BRANCH_REDIRECT_CODES: ReadonlySet<string> = new Set(['branch_redirect_required', 'branch_redirect_target_invalid'])
 
 export {
   getSyncServerUrl,
@@ -46,7 +50,9 @@ type InflightWrite = { promise: Promise<any>; startedAt: number }
 // existing route() caller, only the ones that opt into a searchGroup.
 type RouteFn<T = any> = (signal?: AbortSignal) => T | Promise<T>
 const ACTOR_RECOVERY_READ = Symbol('actor-recovery-read')
-type ApiFetchOptions = { skipWriteDedupe?: boolean; signal?: AbortSignal; actorRecovery?: symbol; signoutRecovery?: string }
+// `branchRedirect`: the active branch the operator confirmed for a change addressed to a disabled branch, sent as
+// X-Branch-Redirect (api/branchRedirect.ts). Set by apiFetch's own retry, or by a caller that asked up front.
+type ApiFetchOptions = { skipWriteDedupe?: boolean; signal?: AbortSignal; actorRecovery?: symbol; signoutRecovery?: string; branchRedirect?: number }
 
 /** The sole quarantine exception: no shared route cache, local fallback,
  * embedded bootstrap, mutation or general private-read bypass. */
@@ -417,6 +423,8 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   // can offer to SELECT the existing contact instead of dead-ending on the
   // 409 -- see routes/contacts.ts's duplicateErrorResponse.
   error.duplicate = parsed?.duplicate || null
+  // A change addressed to a disabled branch: the branch, its successor and the active targets (api/branchRedirect.ts).
+  error.redirect = parsed?.redirect && typeof parsed.redirect === 'object' && !Array.isArray(parsed.redirect) ? parsed.redirect : null
   // Carry the per-branch/per-lot breakdown a 400 stock_choice_required returns,
   // so the caller can open the merge/remove dialog with the real numbers
   // instead of a bare error toast -- see routes/products.ts's merge guard.
@@ -843,7 +851,36 @@ export function __resetApiHealthForTests(): void {
 // HTTP helpers ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 export const WRITE_REQUEST_TIMEOUT_MS = 45_000
 
+/**
+ * One request; a write refused because it is addressed to a disabled branch asks the operator where it should go
+ * (the float and confirm of components/shared/BranchRedirectHost.tsx) and sends the SAME request again with the
+ * confirmed branch. Back answers with a branch_redirect_declined error and nothing is written. Nothing else changes:
+ * before the branch consolidation no Worker sends that refusal.
+ */
 export async function apiFetch(method: unknown, path: string, body?: unknown, timeoutMs?: number, options: ApiFetchOptions = {}): Promise<any> {
+  try {
+    return await apiFetchOnce(method, path, body, timeoutMs, options)
+  } catch (error) {
+    const verb = String(method || 'GET').toUpperCase()
+    const refusedCode = String((error as { code?: unknown } | null)?.code || '')
+    if (verb === 'GET' || verb === 'HEAD' || verb === 'OPTIONS' || !BRANCH_REDIRECT_CODES.has(refusedCode)) throw error
+    const redirectModule = await import('./branchRedirect.ts')
+    const request = redirectModule.branchRedirectRequestOf(error)
+    if (!request || !redirectModule.hasBranchRedirectHandler()) throw error
+    const target = await redirectModule.askBranchRedirect(request)
+    if (target === null) {
+      const declined = new Error(`Nothing was changed. ${request.detail.addressed_branch_name || ''} is disabled.`) as ApiRuntimeError
+      declined.status = 409
+      declined.code = redirectModule.BRANCH_REDIRECT_DECLINED_CODE
+      declined.redirect = request.detail
+      declined.userCancelled = true
+      throw await (await import('./branchRefusalLanguage.ts')).restateRedirectDeclined(declined, request.detail.addressed_branch_name || '')
+    }
+    return apiFetch(method, path, body, timeoutMs, { ...options, skipWriteDedupe: true, branchRedirect: target })
+  }
+}
+
+async function apiFetchOnce(method: unknown, path: string, body?: unknown, timeoutMs?: number, options: ApiFetchOptions = {}): Promise<any> {
   const readScope = ['GET', 'HEAD'].includes(String(method || 'GET').toUpperCase()) ? captureActorReadScope() : null
   const sideEffectScope = readScope || captureActorReadScope()
   const signoutProbe = !!options.signoutRecovery && method === 'GET' && path === '/api/sync/owner'
@@ -883,6 +920,7 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
     if (!base) throw new Error('Sync server URL is not configured.')
     const headers: Record<string, string> = { 'Content-Type': 'application/json', 'bypass-tunnel-reminder': 'true', ...getClientMetaHeaders() }
     if (syncToken) headers['x-sync-token'] = syncToken
+    if (options.branchRedirect) headers[BRANCH_REDIRECT_HEADER] = String(options.branchRedirect)
 
   const ctrl  = new AbortController()
   let timedOut = false
@@ -975,6 +1013,10 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
       }
       if (res.status === 403 && parsed?.code === PASSWORD_CHANGE_REQUIRED_CODE && !recoveryRead && isActorReadScopeCurrent(sideEffectScope, false)) {
         dispatchPasswordChangeRequired(path, requestSequence)
+      }
+      // A branch-rule refusal is restated in the UI language by its code (api/branchRefusalLanguage.ts).
+      if (apiError && typeof document !== 'undefined' && String(document.documentElement?.getAttribute('lang') || '').trim().toLowerCase().startsWith('km')) {
+        await (await import('./branchRefusalLanguage.ts')).restateBranchRefusal(apiError)
       }
       throw apiError || new Error(msg || `HTTP ${res.status}`)
     }

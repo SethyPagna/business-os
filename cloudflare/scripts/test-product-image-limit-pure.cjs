@@ -39,6 +39,7 @@ function load(relativePath, stubs = {}) {
 const media = load('lib/media.ts')
 const productWrites = load('lib/productWrites.ts', {
   './receivingBranch': load('lib/receivingBranch.ts'),
+  './branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   './businessMaintenanceGuard': load('lib/businessMaintenanceGuard.ts'),
   './pendingActions': load('lib/pendingActions.ts', { './db': { getDb: () => { throw new Error('No DB in gallery validation') } } }),
   './audit': load('lib/audit.ts', { './db': { getDb: () => { throw new Error('No DB in gallery validation') } } }),

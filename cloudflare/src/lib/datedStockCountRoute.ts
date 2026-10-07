@@ -16,7 +16,12 @@
 import type { D1Compat } from './db'
 import { buildInClause, chunkForBinding, selectInChunks } from './sqlBinding'
 import { normalizeToIsoDate } from './batchCode'
-import { validateCanonicalImportBranchIds } from './importBranchAuthority'
+import { importBranchRedirectGuards, validateCanonicalImportBranchIds } from './importBranchAuthority'
+import {
+  BranchRedirectTargetInvalidError, branchEffectRefusal, branchRedirectDetail, readBranchDirectory, resolveBranchEffect,
+  type BranchRedirectDetail,
+} from './branchEffect'
+import { branchRole } from './branchRoles'
 import {
   computeDatedStockCountPlan,
   DATED_STOCK_COUNT_REASON,
@@ -121,6 +126,9 @@ export interface ParsedDatedCountEntry {
   productId: number
   branchId: number
   count: number
+  // CUTOVER-LR provenance a /resolve row carried: the disabled branch the sheet addressed, when `branchId` is the
+  // landing the operator confirmed there. Kept only while that branch is still disabled.
+  addressedBranchId?: number
 }
 
 export function parseDatedStockCountEntries(body: Record<string, unknown>): { entries: ParsedDatedCountEntry[] } | { error: string } {
@@ -141,7 +149,10 @@ export function parseDatedStockCountEntries(body: Record<string, unknown>): { en
     if (!Number.isFinite(productId) || productId <= 0) return { error: `Row ${i + 1}: invalid or missing productId` }
     if (!Number.isFinite(branchId) || branchId <= 0) return { error: `Row ${i + 1}: invalid or missing branchId` }
     if (!Number.isFinite(count) || count < 0) return { error: `Row ${i + 1}: count must be a non-negative number` }
-    entries.push({ date, productId, branchId, count })
+    const addressedBranchId = Number.parseInt(String(row.addressedBranchId ?? ''), 10)
+    entries.push(Number.isSafeInteger(addressedBranchId) && addressedBranchId > 0
+      ? { date, productId, branchId, count, addressedBranchId }
+      : { date, productId, branchId, count })
   }
   return { entries }
 }
@@ -152,10 +163,61 @@ export function parseDatedStockCountEntries(body: Record<string, unknown>): { en
 // client-supplied strings (the client only ever sends ids), same as every
 // other write endpoint in this app resolves productId to a real row
 // before acting on it.
+export type DatedStockCountPlanRefusal = { error: string; status: 400 | 404 } | { error: string; status: 409; code: string; redirect?: BranchRedirectDetail }
+
+type RedirectedEntries = { entries: ParsedDatedCountEntry[]; addressedNames: Map<number, string>; guards: Array<{ addressed: number; effect: number; sells?: boolean }> }
+
+// CUTOVER-LR (owner ruling 6 Oct 2026): an entry naming a disabled branch lands only on the active branch the
+// request confirmed (X-Branch-Redirect); without one, or with one that cannot take it, the whole request is refused
+// (409) and nothing is planned. An entry naming an active branch with a /resolve row's addressedBranchId keeps that
+// provenance while the addressed branch is still disabled. While every branch is active this returns the entries
+// untouched and the target is never read.
+async function redirectDatedCountEntries(db: D1Compat, entries: ParsedDatedCountEntry[], target: number | null): Promise<RedirectedEntries | { refusal: { error: string; code: string; redirect?: BranchRedirectDetail } }> {
+  const directory = await readBranchDirectory(db)
+  const retired = new Set(directory.filter((row) => Number(row.is_active ?? 1) !== 1).map((row) => Number(row.id)))
+  const addressedNames = new Map<number, string>()
+  if (!retired.size) return { entries, addressedNames, guards: [] }
+  const guards: RedirectedEntries['guards'] = []
+  const out: ParsedDatedCountEntry[] = []
+  try {
+    for (const entry of entries) {
+      if (retired.has(entry.branchId)) {
+        const effect = resolveBranchEffect(directory, entry.branchId, { target })
+        const landing = directory.find((row) => Number(row.id) === effect.effectBranchId)
+        if (!landing || branchRole(landing) === 'other') {
+          const detail = branchRedirectDetail(directory, entry.branchId, { requestedTargetId: target })
+          if (detail) throw new BranchRedirectTargetInvalidError(detail)
+        }
+        addressedNames.set(entry.branchId, effect.addressedName ?? '')
+        guards.push({ addressed: entry.branchId, effect: effect.effectBranchId })
+        out.push({ date: entry.date, productId: entry.productId, branchId: effect.effectBranchId, count: entry.count, addressedBranchId: entry.branchId })
+        continue
+      }
+      if (entry.addressedBranchId != null && retired.has(entry.addressedBranchId)) {
+        const addressed = directory.find((row) => Number(row.id) === entry.addressedBranchId)
+        addressedNames.set(entry.addressedBranchId, addressed?.name ?? '')
+        guards.push({ addressed: entry.addressedBranchId, effect: entry.branchId })
+        out.push(entry)
+        continue
+      }
+      out.push({ date: entry.date, productId: entry.productId, branchId: entry.branchId, count: entry.count })
+    }
+  } catch (error) {
+    const refusal = branchEffectRefusal(error)
+    if (refusal) return { refusal }
+    throw error
+  }
+  return { entries: out, addressedNames, guards }
+}
+
 export async function buildDatedStockCountPlan(
   db: D1Compat,
-  entries: ParsedDatedCountEntry[],
-): Promise<{ plan: StockCountPlan } | { error: string; status: 400 | 404 }> {
+  requestedEntries: ParsedDatedCountEntry[],
+  options: { redirectTarget?: number | null } = {},
+): Promise<{ plan: StockCountPlan } | DatedStockCountPlanRefusal> {
+  const redirected = await redirectDatedCountEntries(db, requestedEntries, options.redirectTarget ?? null)
+  if ('refusal' in redirected) return { ...redirected.refusal, status: 409 }
+  const entries = redirected.entries
   const productIds = [...new Set(entries.map((e) => e.productId))]
   const branchIds = [...new Set(entries.map((e) => e.branchId))]
   // D1 refuses any statement with more than 100 bound parameters, and a
@@ -191,6 +253,8 @@ export async function buildDatedStockCountPlan(
     branchId: e.branchId,
     branchName: branchById.get(e.branchId) as string,
     count: e.count,
+    ...(e.addressedBranchId != null && redirected.addressedNames.has(e.addressedBranchId)
+      ? { addressedBranchName: redirected.addressedNames.get(e.addressedBranchId) || null } : {}),
   }))
 
   // Prior runs of THIS import mechanism, for the same product+branch pairs
@@ -360,5 +424,7 @@ export async function buildDatedStockCountPlan(
   placeStrayLotActions(strayLotActions, existingBatches)
 
   const plan = computeDatedStockCountPlan(datedEntries, existingCountMovements, currentStock, existingBatches)
+  const branchRedirects = importBranchRedirectGuards(redirected.guards)
+  if (branchRedirects.length) plan.branchRedirects = branchRedirects
   return { plan }
 }

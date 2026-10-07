@@ -26,7 +26,7 @@ import {
   type PendingFeeCreate,
 } from '../../api/feesTransport.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
-import { branchCanSell } from '../../utils/branchRoles.ts'
+import { branchCanSell, branchCanSellNow, branchIsActive, resolveSellingSuccessor } from '../../utils/branchRoles.ts'
 
 // Add/edit form for a single fee record.
 //
@@ -76,7 +76,24 @@ export const FEE_TYPE_OPTIONS: { value: FeeType; labelKey: string; fallback: str
   { value: 'other', labelKey: 'fee_type_other', fallback: 'Other' },
 ]
 
-export type FeeBranchOption = { id: number | string; name: string | null; is_active?: boolean }
+export type FeeBranchOption = {
+  id: number | string
+  name: string | null
+  is_active?: boolean
+  role?: string | null
+  successor_branch_id?: number | string | null
+}
+
+// A sale may carry an expense when the branch it was recorded at sells (by
+// ROLE -- the display name is only a label) and is active, or is retired with
+// an active selling successor (Old Shop -> LC Store). When the branch list could
+// not be read nothing is filtered: the Worker is the authority and refuses.
+export function feeSaleBranchCanCarryExpense(rows: FeeBranchOption[], saleBranchId: number | string | null | undefined): boolean {
+  if (saleBranchId == null) return false
+  if (!rows.length) return true
+  const row = rows.find((candidate) => Number(candidate.id) === Number(saleBranchId))
+  return !!row && branchCanSell(row) && resolveSellingSuccessor(rows, row.id) !== null
+}
 
 // Labels are reusable tags, not prose -- the same 6-word/60-char cap the
 // server enforces (routes/fees.ts's normalizeFeeLabel), clamped live here
@@ -275,6 +292,9 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
   }, [draftKey, form])
   const [touched, setTouched] = useState(false)
   const [branches, setBranches] = useState<FeeBranchOption[]>([])
+  // Every branch the directory returned, retired ones included (a sale at Old Shop still links).
+  const allBranchesRef = useRef<FeeBranchOption[]>([])
+  const [directory, setDirectory] = useState<FeeBranchOption[]>([])
   // Saved labels from the server (every distinct label ever used, with its
   // dominant fee type) -- the page-derived `labelSuggestions` prop stays as
   // the instant seed / offline fallback until this arrives.
@@ -340,7 +360,7 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
         .then((result) => {
           if (saleSearchSeq.current !== seq) return
           const rows = (Array.isArray(result) ? result : (result as { sales?: unknown[] })?.sales || []) as SaleSearchRow[]
-          setSaleResults(rows.filter((sale) => sale.branch_id != null && branchCanSell(sale.branch_name)))
+          setSaleResults(rows.filter((sale) => feeSaleBranchCanCarryExpense(allBranchesRef.current, sale.branch_id)))
         })
         .catch(() => { if (saleSearchSeq.current === seq) setSaleResults([]) })
         .finally(() => { if (saleSearchSeq.current === seq) setSaleSearching(false) })
@@ -370,8 +390,10 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
       .then((mod) => mod.getBranches())
       .then((rows) => {
         if (cancelled) return
-        const shops = ((rows || []) as FeeBranchOption[])
-          .filter((row) => row.is_active !== false && branchCanSell(row.name))
+        const directory = (rows || []) as FeeBranchOption[]
+        const shops = directory.filter((row) => branchCanSellNow(row))
+        allBranchesRef.current = directory
+        setDirectory(directory)
         setBranches(shops)
         if (!fee && shops.length === 1) {
           setForm((current) => current.branch_id ? current : { ...current, branch_id: String(shops[0].id) })
@@ -380,7 +402,7 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
       .catch(() => {
         // The Worker remains the authority and refuses a save without the
         // active Shop. Keep the form open if the lookup fails.
-        if (!cancelled) setBranches([])
+        if (!cancelled) { setBranches([]); allBranchesRef.current = [] }
       })
     return () => { cancelled = true }
   }, [])
@@ -398,7 +420,15 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
   const dateInvalid = !form.fee_date.trim()
 
   const branchOptions = (() => {
-    const options = branches.map((b) => ({ value: String(b.id), label: b.name || String(b.id) }))
+    const options: Array<{ value: string; label: string; disabled?: boolean }> = branches.map((b) => ({ value: String(b.id), label: b.name || String(b.id) }))
+    // CUTOVER-LR: an expense of an old Shop sale (or an expense recorded there) shows its disabled branch greyed, never
+    // as a choice; saving asks where it goes instead (the redirect float, api/branchRedirect.ts).
+    const current = form.branch_id && !branches.some((b) => String(b.id) === form.branch_id)
+      ? directory.find((b) => String(b.id) === form.branch_id) : undefined
+    if (current && !branchIsActive(current)) {
+      const name = current.name || String(current.id)
+      options.push({ value: String(current.id), label: (t('branch_redirect_disabled_option') || '{branch} (disabled)').split('{branch}').join(name), disabled: true })
+    }
     return [{ value: '', label: t('select_branch') || 'Select Shop' }, ...options]
   })()
 

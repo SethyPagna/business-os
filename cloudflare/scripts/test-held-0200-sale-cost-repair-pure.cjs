@@ -604,6 +604,62 @@ function assertIdentityBackfillPopulated(backfills, chainText, run, ids) {
 }
 // ---- END cutover lane LA (0229) ----------------------------------------------
 
+// ---- BEGIN cutover lane LD (0240): revision-trigger recreation class --------------
+// Explicit allowlist, no inference from what the repair happens to name. The one admitted shape is the
+// stock-session revision trigger on product_batches recreated with a narrower UPDATE OF column list: the
+// file is exactly DROP TRIGGER IF EXISTS stock_revision_product_batches_update followed by CREATE TRIGGER
+// of that name, AFTER UPDATE OF <plain column names> ON product_batches, the maintenance-restore WHEN clause
+// and the two INSERT ... ON CONFLICT DO UPDATE statements into stock_session_revisions, verbatim. No data
+// write, no other table, no other trigger, no RAISE. The held repair only READS product_batches (it never
+// updates it, so the trigger cannot fire inside it) and never names stock_session_revisions; the checks
+// below prove both against the repair text, and the populated both-orders run covers the trigger's effect.
+const REVISION_TRIGGER_BODY = [
+  "INSERT INTO stock_session_revisions(entity_type, entity_key, revision) SELECT 'batch', entity_key, 1 FROM (SELECT CAST(OLD.id AS TEXT) entity_key UNION SELECT CAST(NEW.id AS TEXT)) WHERE 1 ON CONFLICT(entity_type, entity_key) DO UPDATE SET revision = revision + 1;",
+  "INSERT INTO stock_session_revisions(entity_type, entity_key, revision) SELECT 'batch_identity', entity_key, 1 FROM ( SELECT CAST(OLD.variant_product_id AS TEXT) || ':' || OLD.batch_key entity_key UNION SELECT CAST(NEW.variant_product_id AS TEXT) || ':' || NEW.batch_key ) WHERE 1 ON CONFLICT(entity_type, entity_key) DO UPDATE SET revision = revision + 1;",
+].join(' ')
+const REVISION_TRIGGER_WHEN = "WHEN NOT EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance' AND json_extract(value, '$.mode') = 'restore')"
+const escapeRegExp = (text) => text.split('').map((ch) => ('.*+?^$|(){}[]' + String.fromCharCode(92)).includes(ch) ? String.fromCharCode(92) + ch : ch).join('')
+const REVISION_TRIGGER_SHAPE = new RegExp('^DROP TRIGGER IF EXISTS stock_revision_product_batches_update; '
+  + 'CREATE TRIGGER stock_revision_product_batches_update AFTER UPDATE OF ((?:[a-z_][a-z0-9_]*, )*[a-z_][a-z0-9_]*) ON product_batches '
+  + escapeRegExp(REVISION_TRIGGER_WHEN) + ' BEGIN '
+  + escapeRegExp(REVISION_TRIGGER_BODY) + ' END;$')
+const revisionTriggerUnread = (text, repairText) => {
+  const code = sqlCode(text).replace(/\s+/g, ' ').trim()
+  const repairCode = sqlCode(repairText)
+  return REVISION_TRIGGER_SHAPE.test(code)
+    && !/\bUPDATE\s+(?:OR\s+\w+\s+)?product_batches\b/i.test(repairCode)
+    && !/\bstock_session_revisions\b/i.test(repairCode)
+}
+function assertRevisionTriggerStatic(files, chainText, repairText) {
+  assert.ok(files.length > 0, 'control: the revision-trigger scan proves at least one later file independent')
+  for (const file of files) {
+    const original = chainText(file)
+    assert.ok(revisionTriggerUnread('-- header: UPDATE sales SET rowid = rowid + 1000000;\n' + original, repairText), 'control: a comment header leaves ' + file + ' a bounded trigger recreation')
+    const body = original.slice(original.indexOf('DROP TRIGGER IF EXISTS'))
+    const wrong = [
+      ['an extra data write after it', body + "\nUPDATE sale_items SET cost_price_usd = 1 WHERE id = 1;"],
+      ['an extra trigger', body + '\nCREATE TRIGGER zz_other AFTER UPDATE ON product_batches BEGIN SELECT 1; END;'],
+      ['a second table in the body', body.replace(/ON CONFLICT\(entity_type, entity_key\) DO UPDATE SET revision = revision \+ 1;\nEND;/, "ON CONFLICT(entity_type, entity_key) DO UPDATE SET revision = revision + 1;\n  UPDATE sale_items SET cost_price_usd = 0;\nEND;")],
+      ['a RAISE body', body.replace('BEGIN', "BEGIN SELECT RAISE(ABORT, 'x');")],
+      ['the WHEN clause dropped', body.replace(/WHEN NOT EXISTS[^\n]*\n/, '')],
+      ['another trigger name', body.replace(/CREATE TRIGGER stock_revision_product_batches_update/, 'CREATE TRIGGER stock_revision_product_batches_insert')],
+      ['another table', body.replace(/ON\s+product_batches\s+WHEN/, 'ON sale_items WHEN')],
+      ['BEFORE instead of AFTER', body.replace('AFTER UPDATE OF', 'BEFORE UPDATE OF')],
+      ['a quoted column list', body.replace('batch_key,', '"batch_key",')],
+      ['a different revision increment', body.replace('revision = revision + 1;\n  INSERT', 'revision = revision + 2;\n  INSERT')],
+    ]
+    for (const [name, text] of wrong) {
+      assert.notEqual(text, body, 'control: the mutation changed the text (' + name + ')')
+      assert.equal(revisionTriggerUnread(text, repairText), false, 'control: ' + name + ' remains a dependency')
+    }
+  }
+  // The independence argument itself: a repair that updated product_batches or named the revision table would not qualify.
+  const [file] = files
+  assert.equal(revisionTriggerUnread(chainText(file), repairText + '\nUPDATE product_batches SET notes = NULL WHERE id = 0;'), false, 'control: a repair that writes product_batches loses the exemption')
+  assert.equal(revisionTriggerUnread(chainText(file), repairText + '\nSELECT * FROM stock_session_revisions;'), false, 'control: a repair that reads the revision table loses the exemption')
+}
+// ---- END cutover lane LD (0240) ---------------------------------------------
+
 function completeState(raw) {
   const quote = name => `"${name.replaceAll('"', '""')}"`
   const schema = raw.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').all()
@@ -619,7 +675,7 @@ function completeState(raw) {
   return { schema, tables }
 }
 
-function assertPopulatedOrders(chain, chainText, mixed, backfills = []) {
+function assertPopulatedOrders(chain, chainText, mixed, backfills = [], revisionTriggers = []) {
   const { raw, ids } = seed()
   raw.limits.exprDepth = 100
   raw.function('current_timestamp', () => '2026-10-03 10:00:00')
@@ -675,6 +731,7 @@ function assertPopulatedOrders(chain, chainText, mixed, backfills = []) {
       assert.throws(() => run(false, new Map([[file, oldField]])), /wrong_old_field/, 'old-field update guard must affect the repair')
     }
     assertIdentityBackfillPopulated(backfills, chainText, run, ids) // cutover lane LA (0229)
+    assertIdentityBackfillPopulated(revisionTriggers, chainText, run, ids) // cutover lane LD (0240): the same appended-SQL proofs
   } finally { raw.close() }
 }
 
@@ -702,7 +759,8 @@ check('held: outside deploy chain, after dependencies including0195; independent
   // ---- RET-B 0235 call (end) ----
   const schemaTables = new Set(tables.map((t) => t.toLowerCase()))
   const backfills = chain.filter(file => identityBackfillUnread(chainText(file), migrationText, schemaTables))
-  const dependencies = chain.filter((f) => !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && touched.some(namedIn(chainText(f))))
+  const revisionTriggers = chain.filter(file => revisionTriggerUnread(chainText(file), migrationText))
+  const dependencies = chain.filter((f) => !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && !revisionTriggers.includes(f) && touched.some(namedIn(chainText(f))))
   assert.ok(['sale_items', 'return_items', 'catalog_cost_repair_0195_backup'].every((t) => touched.includes(t)), 'control: the scan sees the two tables it writes and the 0195 backup it reads')
   assert.ok(dependencies.includes('0195_catalog_cost_on_hand.sql'), 'control: the scan finds 0195')
   assert.ok(indexOnly('-- x\nCREATE INDEX IF NOT EXISTS i ON sale_items(id);\nCREATE UNIQUE INDEX j ON sale_items(id);'), 'control: an index-only file is skipped')
@@ -761,6 +819,7 @@ check('held: outside deploy chain, after dependencies including0195; independent
     assert.ok(!mixedAdditiveUnread(`${chainText(file)}\n-- trailing note\nUPDATE sale_items SET cost_price_usd = 1;`, migrationText), `control: a real statement after a comment in ${file} is still a dependency`)
   }
   assertIdentityBackfillStatic(backfills, chainText, migrationText, schemaTables) // cutover lane LA (0229)
+  assertRevisionTriggerStatic(revisionTriggers, chainText, migrationText) // cutover lane LD (0240)
   const later = chain.filter((f) => movedIn.indexOf(f) > movedIn.indexOf(heldName))
   assert.deepEqual(later.filter((f) => dependencies.includes(f)), [],
     `these chain files sort after ${heldName} yet touch a table it reads or writes (${touched.join(', ')}). ` +
@@ -776,7 +835,7 @@ check('held: outside deploy chain, after dependencies including0195; independent
   const schema = (db) => db.prepare('SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name').all()
   assert.deepEqual(schema(byNumber), schema(fresh), `before or after ${later.join(', ') || 'no later file'}: the same schema`)
   assert.throws(() => openDb(loadAll({ through: 194 })).db.exec(migrationText), /catalog_cost_repair_0195_backup/, 'without 0195 it refuses to run')
-  assertPopulatedOrders(chain, chainText, mixed, backfills)
+  assertPopulatedOrders(chain, chainText, mixed, backfills, revisionTriggers)
 })
 
 check('owner-run audit: every header command is --command (never --file); the cut statements are the audit verbatim and run', () => {

@@ -1,6 +1,7 @@
 import { calculateProductDiscount } from '../../../utils/pricing.ts'
 import { promotionBadgeForProduct, evaluatePromotionPricing, type PromotionRule } from '../../../utils/promotionRules.ts'
 import { DEFAULT_LOW_STOCK_CONFIG, resolveStockTier, type LowStockConfig } from '../../../utils/lowStockSettings.ts'
+import { branchStockLinesWorthShowing } from '../../../utils/branchScope.ts'
 
 type StockStatus = 'out_of_stock' | 'low_stock' | 'in_stock'
 
@@ -17,6 +18,7 @@ interface BranchRecord {
 interface BranchStockRecord {
   branch_id?: unknown
   branch_name?: unknown
+  branch_active?: unknown
   quantity?: unknown
 }
 
@@ -132,13 +134,17 @@ export function buildProductBranchSummaryLabel(product: ProductRecord, branchNam
   // there at all, disappeared. Keep every branch row (including 0s) so
   // both branches are always named, sorted with the highest quantity
   // first, same as before.
-  const rows = (product?.branch_stock || [])
+  const sortedRows = (product?.branch_stock || [])
     .sort((a, b) => toNumber(b.quantity) - toNumber(a.quantity))
   // A product with no branch_stock rows at all (missing data, not just
   // zero stock) has nothing to name here -- show an explicit "0" so it
   // reads the same as any other out-of-stock product rather than looking
   // like missing data.
-  if (!rows.length) return '0'
+  if (!sortedRows.length) return '0'
+  // With one active branch its line repeats the product quantity (see
+  // branchScope.ts): nothing left to name.
+  const rows = branchStockLinesWorthShowing(sortedRows)
+  if (!rows.length) return ''
   const nameFor = (entry: BranchStockRecord): unknown => (
     entry.branch_name || branchNameById.get(String(entry.branch_id)) || entry.branch_id
   )

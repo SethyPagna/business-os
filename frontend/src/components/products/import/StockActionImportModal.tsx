@@ -250,8 +250,8 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
             <div className="mb-1 text-sm font-medium text-gray-700 dark:text-gray-300">{tr('stock_import_mode', 'How to read the numbers', 'របៀបអានលេខ')}</div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {([
-                ['direct', tr('stock_import_mode_direct', 'Direct — the number IS the change', 'ផ្ទាល់ — លេខគឺជាការផ្លាស់ប្តូរ'), tr('stock_import_mode_direct_help', 'shop/warehouse are how much to add or sell; the action column says which.', 'shop/warehouse គឺជាចំនួនត្រូវបន្ថែម ឬលក់។')],
-                ['reconcile', tr('stock_import_mode_reconcile', 'Reconcile — the number is the total count', 'ផ្ទៀងផ្ទាត់ — លេខគឺជាចំនួនសរុប'), tr('stock_import_mode_reconcile_help', 'shop/warehouse are the counted total on that date; the system computes the delta.', 'shop/warehouse គឺជាចំនួនសរុបនៅថ្ងៃនោះ។')],
+                ['direct', tr('stock_import_mode_direct', 'Direct — the number IS the change', 'ផ្ទាល់ — លេខគឺជាការផ្លាស់ប្តូរ'), tr('stock_import_mode_direct_help', 'shop/warehouse/store are how much to add or sell; the action column says which.', 'shop/warehouse/store គឺជាចំនួនត្រូវបន្ថែម ឬលក់។')],
+                ['reconcile', tr('stock_import_mode_reconcile', 'Reconcile — the number is the total count', 'ផ្ទៀងផ្ទាត់ — លេខគឺជាចំនួនសរុប'), tr('stock_import_mode_reconcile_help', 'shop/warehouse/store are the counted total on that date; the system computes the delta.', 'shop/warehouse/store គឺជាចំនួនសរុបនៅថ្ងៃនោះ។')],
               ] as const).map(([value, label, help]) => (
                 <ProductImportOptionCard
                   key={value}

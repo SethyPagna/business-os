@@ -52,7 +52,7 @@ const REAL = new Set([
   'stockReceiptGate',
   'productDescriptionSections', 'productBatches', 'salesStatus', 'contactOptions',
   'importImageMatch', 'searchMatch',
-  'branchRoles', 'branchRoleGuards',
+  'branchRoles', 'branchRoleGuards', 'importBranchAuthority', 'branchEffect',
   'actorSnapshot', 'saleCreationSnapshot',
   'moneyPrecision', 'saleMoneyPrecision',
   // planTier carries the per-tier unit/row/concurrency ceilings the apply
@@ -137,7 +137,8 @@ function makeDb() {
       stock_quantity REAL DEFAULT 0, is_active INTEGER DEFAULT 1, client_request_id TEXT,
       created_at TEXT, updated_at TEXT);
     CREATE UNIQUE INDEX ux_products_crid ON products(client_request_id) WHERE client_request_id IS NOT NULL;
-    CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER DEFAULT 1);
+    CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER DEFAULT 1, role TEXT, canonical_key TEXT,
+      successor_branch_id INTEGER, is_default INTEGER DEFAULT 0);
     -- The supplier column on an add row is match-only (migration 0062): the
     -- engine looks the as-entered name up here and keeps the text with a NULL
     -- id when it matches nothing. Every add row carries a supplier now that the
@@ -146,7 +147,7 @@ function makeDb() {
     CREATE TABLE branch_stock (product_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0, UNIQUE(product_id, branch_id));
     CREATE TABLE product_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, variant_product_id INTEGER,
       batch_key TEXT, lot_code TEXT, expiry_date TEXT, received_at TEXT, is_active INTEGER DEFAULT 1,
-      notes TEXT, batch_number INTEGER, supplier_id INTEGER, supplier_name TEXT, unit_cost_usd REAL, payment_status TEXT, credit_due_date TEXT, received_quantity REAL, received_branch_id INTEGER, received_cost_usd REAL, created_at TEXT, updated_at TEXT);
+      notes TEXT, batch_number INTEGER, supplier_id INTEGER, supplier_name TEXT, unit_cost_usd REAL, payment_status TEXT, credit_due_date TEXT, received_quantity REAL, received_branch_id INTEGER, received_branch_name TEXT, received_cost_usd REAL, created_at TEXT, updated_at TEXT);
     CREATE TABLE branch_batch_stock (batch_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0,
       updated_at TEXT, UNIQUE(batch_id, branch_id));
     CREATE TABLE sales (id INTEGER PRIMARY KEY AUTOINCREMENT, receipt_number TEXT, client_request_id TEXT UNIQUE,

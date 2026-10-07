@@ -14,6 +14,8 @@ import type { ContinuousRange } from '../../utils/continuousRangeParams.ts'
 // for anything before 07:00 Bangkok).
 import { fmtDate } from '../../utils/formatters'
 import { getSupplierApInvoices } from '../../api/contactReadTransport.ts'
+import { apInvoiceBranchOptions, apInvoiceRecordedBranchLabel } from '../../utils/apInvoiceBranches.ts'
+import { useBranchRows } from '../../utils/useBranchRows.ts'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import InvoiceLedgerSummary from './InvoiceLedgerSummary.tsx'
 import InvoiceDetailFloat from './InvoiceDetailFloat.tsx'
@@ -172,9 +174,12 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
     setDetail(null)
   }
 
-  const branchLabel = (value: string): string => (
-    value === 'warehouse' ? tr('warehouse', 'Warehouse') : tr('shop', 'Shop')
-  )
+  // The filter follows the live branch rows (API values stay the legacy literals,
+  // mapped by canonical_key); each invoice keeps the origin it was recorded with.
+  const branchRows = useBranchRows()
+  const apBranchLabels = { shop: tr('shop', 'Shop'), warehouse: tr('warehouse', 'Warehouse'), inactive: tr('inactive', 'Inactive') }
+  const branchFilterOptions = apInvoiceBranchOptions(branchRows, apBranchLabels)
+  const branchLabel = (value: string): string => apInvoiceRecordedBranchLabel(value, apBranchLabels)
 
   const changeRange = (range: ContinuousRange) => {
     try { invoiceRangeParams(range) } catch {
@@ -237,8 +242,7 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
           className="min-w-[9rem]"
           options={[
             { value: 'all', label: tr('all_branches', 'All Branches') },
-            { value: 'warehouse', label: tr('warehouse', 'Warehouse') },
-            { value: 'shop', label: tr('shop', 'Shop') },
+            ...branchFilterOptions,
           ]}
         />
         {/* P11-13: a search box that also lists its options -- typing

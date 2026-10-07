@@ -132,6 +132,18 @@ const branchRolesModuleObj = { exports: {} }
 new Function('exports', 'require', 'module', '__filename', '__dirname', branchRolesOutputText)(
   branchRolesModuleObj.exports, require, branchRolesModuleObj, branchRolesSourcePath, path.dirname(branchRolesSourcePath),
 )
+// CUTOVER-LR: the import authority (and the redirect gate) answer a retired branch through the branch-effect
+// kernel -- the real module, so the classifier tests see the real pending/confirmed redirect.
+const branchEffectSourcePath = path.join(__dirname, '..', 'src', 'lib', 'branchEffect.ts')
+const branchEffectModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', ts.transpileModule(fs.readFileSync(branchEffectSourcePath, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'branchEffect.ts',
+}).outputText)(
+  branchEffectModuleObj.exports,
+  (request) => request === './branchRoles' ? branchRolesModuleObj.exports : request === './sqlBinding' ? earlySqlBindingModuleObj.exports : require(request),
+  branchEffectModuleObj, branchEffectSourcePath, path.dirname(branchEffectSourcePath),
+)
 const importBranchAuthoritySourcePath = path.join(__dirname, '..', 'src', 'lib', 'importBranchAuthority.ts')
 const { outputText: importBranchAuthorityOutputText } = ts.transpileModule(fs.readFileSync(importBranchAuthoritySourcePath, 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
@@ -140,7 +152,7 @@ const { outputText: importBranchAuthorityOutputText } = ts.transpileModule(fs.re
 const importBranchAuthorityModuleObj = { exports: {} }
 new Function('exports', 'require', 'module', '__filename', '__dirname', importBranchAuthorityOutputText)(
   importBranchAuthorityModuleObj.exports,
-  (request) => request === './branchRoles' ? branchRolesModuleObj.exports : require(request),
+  (request) => request === './branchRoles' ? branchRolesModuleObj.exports : request === './branchEffect' ? branchEffectModuleObj.exports : require(request),
   importBranchAuthorityModuleObj,
   importBranchAuthoritySourcePath,
   path.dirname(importBranchAuthoritySourcePath),
@@ -379,6 +391,7 @@ Module._load = function patchedLoad(request, parent, isMain) {
   }
   if (request === './branchRoles') return branchRolesModuleObj.exports
   if (request === './importBranchAuthority') return importBranchAuthorityModuleObj.exports
+  if (request === './branchEffect') return branchEffectModuleObj.exports
   if (request === './branchRoleGuards') return branchRoleGuardsModuleObj.exports
   if (request === './productBatches') {
     return productBatchesModuleObj.exports // real module -- sales-import apply path actually calls into it
@@ -855,7 +868,7 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   const newProductBlockEnd = source.indexOf("} else if (job.type === 'customers'", newProductBlockStart)
   const block = source.slice(newProductBlockStart, newProductBlockEnd)
 
-  assert.ok(/SELECT id, name, is_default, is_active FROM branches WHERE is_active = 1/.test(source), 'runImportApply should fetch active branch identities before deciding which canonical branches need a 0 row seeded')
+  assert.ok(/SELECT \$\{IMPORT_BRANCH_COLUMNS_SQL\} FROM branches WHERE is_active = 1/.test(source), 'runImportApply should fetch active branch identities before deciding which canonical branches need a 0 row seeded')
   assert.ok(/productSeedBranchIds = \[\.\.\.index\.byRole\.values\(\)\]/.test(source), 'zero-row seeding is limited to one unambiguous active Shop/Warehouse identity, never an arbitrary legacy branch')
 
   const chosenBranchInsertIdx = block.indexOf('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, @qty)')

@@ -63,6 +63,7 @@ function loadProductWrites(db) {
         return new Set((Array.isArray(rows) ? rows : rows.results || []).map((row) => row.name))
       },
     }
+    if (request === './branchRedirectWrite') return require('./harness/branch_redirect_write.cjs')
     if (request === '../index') return {}
     return originalLoad.call(this, request, parent, isMain)
   }

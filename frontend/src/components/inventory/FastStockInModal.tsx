@@ -70,6 +70,7 @@ import { convertLegacyStockDraft, type LegacyStockDraft } from '../../utils/lega
 import { discardStockAdjustDraft, stockAdjustDraftKey } from '../../utils/stockAdjustDraft.ts'
 import StockSessionHeader, { StockSessionSteps, STOCK_MODE_KEYS } from '../stock-session/StockSessionHeader.tsx'
 import StockSessionSharedDetails from '../stock-session/StockSessionSharedDetails.tsx'
+import { labelInactiveChoices } from '../../utils/branchScope.ts'
 import StockSessionLineEntry from '../stock-session/StockSessionLineEntry.tsx'
 import StockSessionItems from '../stock-session/StockSessionItems.tsx'
 import StockSessionPaymentStep from '../stock-session/StockSessionPaymentStep.tsx'
@@ -1198,7 +1199,7 @@ export default function FastStockInModal({
                 supplierInvalid={invalidField === 'supplier' || (supplierRefused && !supplier.supplierName.trim())}
                 branchId={branchId}
                 onBranch={changeBranch}
-                branchOptions={mode === 'add' ? receivingBranchOptions : branchOptions}
+                branchOptions={mode === 'add' ? receivingBranchOptions : labelInactiveChoices(branchOptions, receivingBranchOptions, tr('inactive', 'Inactive'))}
                 branchInvalid={destinationInvalid}
                 submissionLocked={detailsLocked}
                 submissionMessage={stockFailureText({ code: submissionLockCode }, tr, '')}

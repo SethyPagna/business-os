@@ -5,6 +5,7 @@
 
 import type { D1Compat } from './db'
 import { buildInClause, chunkForBinding } from './sqlBinding'
+import { IMPORT_BRANCH_COLUMNS_SQL, importBranchRedirectTarget, indexCanonicalImportBranches, type CanonicalImportBranchRow } from './importBranchAuthority'
 import { normalizeSearchText } from './searchMatch'
 import { identityBarcodeClassKey, identityBarcodeKeySql } from './productIdentity'
 import {
@@ -20,7 +21,7 @@ export type StockActionImportResult = {
   identifier: string | null
   existingId: number | null
   message: string | null
-  warnings?: Array<{ kind: 'stock_action_conflict'; message: string }>
+  warnings?: Array<{ kind: 'stock_action_conflict' | 'other'; message: string }>
   changes: Record<string, { from: unknown; to: unknown }>
   data: Record<string, unknown>
 }
@@ -102,7 +103,13 @@ function resultFromResolved(row: UnifiedStockResolvedRow): StockActionImportResu
     identifier: row.identifier || null,
     existingId: row.productId,
     message: messages.length ? messages.join(' ') : null,
-    warnings: row.conflicts.map((message) => ({ kind: 'stock_action_conflict', message })),
+    warnings: [
+      ...row.conflicts.map((message) => ({ kind: 'stock_action_conflict' as const, message })),
+      // Columns that landed on one branch, shown before anything is saved
+      // (informational: kind 'other' is not one of the serious kinds).
+      // code + params let the review screen restate the note in the UI language; message is the English fallback.
+      ...(row.branchNotes || []).map((message, index) => ({ kind: 'other' as const, message, ...(row.branchNoteDetails?.[index] ?? {}) })),
+    ],
     changes: {},
     data: row as unknown as Record<string, unknown>,
   }
@@ -114,14 +121,17 @@ export async function classifyUnifiedStockActions(
   policyJson?: string | null,
 ): Promise<StockActionImportResult[]> {
   const products = await readCatalogProducts(db, rows)
+  // Every branch row (retired ones too): a sheet column names an identity
+  // (shop / warehouse / store) that may now live on a successor branch.
   const branches = await db.prepare(`
-    SELECT id, name FROM branches
-    WHERE is_active = 1 AND LOWER(TRIM(name)) IN ('shop', 'warehouse')
+    SELECT ${IMPORT_BRANCH_COLUMNS_SQL} FROM branches
     ORDER BY id ASC
-  `).all<{ id: number; name: string }>()
+  `).all<CanonicalImportBranchRow>()
 
   const productIds = products.map((product) => Number(product.id)).filter((id) => Number.isFinite(id) && id > 0)
-  const branchIds = branches.map((branch) => Number(branch.id)).filter((id) => Number.isFinite(id) && id > 0)
+  // Stock is read for the ACTIVE canonical branches only (at most two).
+  const branchIds = [...indexCanonicalImportBranches(branches).byRole.values()].flat()
+    .map((branch) => Number(branch.id)).filter((id) => Number.isFinite(id) && id > 0)
   const currentStock: Array<{ productId: number; branchId: number; quantity: number }> = []
   if (productIds.length && branchIds.length) {
     // branchIds contains at most two values. Reserve both of those bindings
@@ -138,6 +148,9 @@ export async function classifyUnifiedStockActions(
     }
   }
 
-  return resolveUnifiedStockImportRows(rows, getUnifiedStockMode(policyJson), products, branches, currentStock)
+  // A column addressed to a retired branch lands only on the branch the operator confirmed when the job was
+  // approved (CUTOVER-LR); until then the successor is a preview and apply refuses the row.
+  return resolveUnifiedStockImportRows(rows, getUnifiedStockMode(policyJson), products, branches, currentStock,
+    { redirectTarget: importBranchRedirectTarget(policyJson) })
     .map(resultFromResolved)
 }

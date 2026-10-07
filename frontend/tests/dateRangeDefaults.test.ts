@@ -182,7 +182,7 @@ for (const [file, stateName] of pages) {
 // Evaluate the actual first request expressions with the selected production
 // state. URL serialization proves All time drops both bounds in list APIs.
 const common = { search: '', debouncedSearch: '', typeFilter: 'all', scope: 'customer', branchFilter: '',
-  page: 1, pageSize: 20, exportPage: 1, exportPageSize: 500, transferPage: 1, transferPageSize: 20, transferFromFilter: 'all', transferToFilter: 'all',
+  page: 1, pageSize: 20, exportPage: 1, exportPageSize: 500, transferPage: 1, transferPageSize: 20, transferFromFilter: 'all', transferToFilter: 'all', showConsolidationTransfers: false,
   deferredSearch: '', searchMode: 'auto', productsPage: 1, productsPageSize: 20 }
 
 // Secondary list/report surfaces execute the same Today policy on first

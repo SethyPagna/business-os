@@ -53,6 +53,12 @@ interface BranchRecord {
   [key: string]: unknown
 }
 
+interface BranchStockAdjustment {
+  branchId: number
+  type: StockAdjustmentType
+  quantity: number
+}
+
 interface ClearStockAdjustment {
   branchId: number
   quantity: number
@@ -223,6 +229,61 @@ export async function restoreProductSnapshotFields(snapshots: ProductRecord[] = 
   const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
   if (failure) throw (failure.reason || new Error('Failed to restore products'))
   return results.reduce((sum, result) => sum + (result.status === 'fulfilled' ? result.value : 0), 0)
+}
+
+export function buildProductBranchStockAdjustments(snapshot: ProductRecord = {}, currentProduct: ProductRecord = {}): BranchStockAdjustment[] {
+  const targetMap = new Map<number, number>()
+  for (const entry of snapshot?.branch_stock || []) {
+    const branchId = Number(entry?.branch_id || 0)
+    if (!Number.isFinite(branchId) || branchId <= 0) continue
+    targetMap.set(branchId, toFiniteNumber(entry?.quantity, 0))
+  }
+
+  const currentMap = new Map<number, number>()
+  for (const entry of currentProduct?.branch_stock || []) {
+    const branchId = Number(entry?.branch_id || 0)
+    if (!Number.isFinite(branchId) || branchId <= 0) continue
+    currentMap.set(branchId, toFiniteNumber(entry?.quantity, 0))
+  }
+
+  const branchIds = [...new Set([...targetMap.keys(), ...currentMap.keys()])]
+  return branchIds
+    .map((branchId): BranchStockAdjustment | null => {
+      const targetQty = toFiniteNumber(targetMap.get(branchId), 0)
+      const currentQty = toFiniteNumber(currentMap.get(branchId), 0)
+      if (targetQty === currentQty) return null
+      return {
+        branchId,
+        type: targetQty > currentQty ? 'add' : 'remove',
+        quantity: Math.abs(targetQty - currentQty),
+      }
+    })
+    .filter((entry): entry is BranchStockAdjustment => entry !== null)
+}
+
+// REVERT-SET (owner, 6 Oct 2026: "Revert should fully revert, never leaves a
+// stock effect behind"). A History Undo/Redo of a stock action moves exactly
+// the quantities that action recorded -- never "back to the snapshot", which
+// re-added every unit sold in between (snapshot - current) and zeroed every
+// delivery received in between. These are the recorded effects and their
+// exact inverses; the Worker refuses a removal the branch can no longer cover.
+export type RecordedStockRemoval = { productId: number; branchId: number; quantity: number }
+export type RecordedStockTransfer = { productId: number; fromBranchId: number; toBranchId: number; quantity: number }
+
+/** The stock writes that undo (put back) or redo (take again) recorded removals. */
+export function recordedRemovalReplay(removals: readonly RecordedStockRemoval[], direction: 'undo' | 'redo') {
+  return removals
+    .filter((entry) => entry.productId > 0 && entry.branchId > 0 && entry.quantity > 0)
+    .map((entry) => ({ ...entry, type: direction === 'undo' ? 'add' as const : 'remove' as const }))
+}
+
+/** The transfers that undo (move back) or redo (move again) recorded transfers. */
+export function recordedTransferReplay(transfers: readonly RecordedStockTransfer[], direction: 'undo' | 'redo'): RecordedStockTransfer[] {
+  return transfers
+    .filter((entry) => entry.productId > 0 && entry.fromBranchId > 0 && entry.toBranchId > 0 && entry.quantity > 0)
+    .map((entry) => direction === 'undo'
+      ? { productId: entry.productId, fromBranchId: entry.toBranchId, toBranchId: entry.fromBranchId, quantity: entry.quantity }
+      : { ...entry })
 }
 
 export function buildProductClearStockAdjustments(product: ProductRecord = {}): ClearStockAdjustment[] {

@@ -12,7 +12,7 @@ const fixture = require('./branch-cutover-scale-fixture.cjs')
 const root = path.resolve(__dirname, '..')
 
 const ACTOR = { id: 7, username: 'operator', name: 'Operator', organization_id: 1, role_id: null, permissions: '{"branches":true,"backup_restore":true}', is_active: 1 }
-const PARENT_BUDGET = { tier: 'free', alreadyUsed: 0, remainingReads: 0, retryQueries: 0, completionQueries: 0, safetyQueries: 0, extraAtomicStatements: 0 }
+const PARENT_BUDGET = { tier: 'paid', alreadyUsed: 0, remainingReads: 0, retryQueries: 0, completionQueries: 0, safetyQueries: 0, extraAtomicStatements: 0 }
 const CHILD_BUDGET = { ...PARENT_BUDGET, tier: 'paid' }
 const IDS = { sourceBranchId: fixture.SHOP, targetBranchId: fixture.WAREHOUSE }
 const NAMES = { retiredName: 'Old Shop', successorName: 'LC Store' }

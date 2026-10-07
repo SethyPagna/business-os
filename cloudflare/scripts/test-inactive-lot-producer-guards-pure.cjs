@@ -88,6 +88,7 @@ const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './perm
 const receivingBranch = loadReal('lib/receivingBranch.ts')
 const batchRoute = loadReal('routes/batches.ts', {
   '../lib/receivingBranch': receivingBranch,
+  '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'),
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/db': { getDb: () => routeFixture.db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', { id: 1, name: 'Tester', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }); return next() } },
@@ -124,6 +125,7 @@ const stockLotAdjustment = loadReal('lib/stockLotAdjustment.ts', {
   './actorSnapshot': { actorSnapshot: () => 'Tester' },
   './businessMaintenanceGuard': loadReal('lib/businessMaintenanceGuard.ts'),
   './receivingBranch': receivingBranch,
+  './branchRedirectWrite': require('./harness/branch_redirect_write.cjs'),
   './movementCostSnapshot': loadReal('lib/movementCostSnapshot.ts'),
   './damagedLotActions': { planHoldAsTagged: () => { throw new Error('not used') } },
   './stockReason': loadReal('lib/stockReason.ts'),
@@ -163,6 +165,8 @@ const stockActionCommit = loadReal('lib/stockActionCommit.ts', {
   './searchMatch': searchMatch,
   './stockReceiptGate': stockReceiptGate,
   './branchRoleGuards': branchRoleGuards,
+  // CUTOVER-LR import sub-lane: stockActionCommit now guards redirected rows with branchEffect (real module + deps).
+  './branchEffect': loadReal('lib/branchEffect.ts', { './branchRoles': loadReal('lib/branchRoles.ts'), './sqlBinding': loadReal('lib/sqlBinding.ts') }),
   './saleCreationSnapshot': saleCreationSnapshot,
   './productBatches': loadReal('lib/productBatches.ts', {
     './batchCode': batchCode,

@@ -203,6 +203,7 @@ const branchRoleGuards = loadReal('lib/branchRoleGuards.ts', { './branchRoles': 
 const schemaProbeReal = loadReal('lib/schemaProbe.ts')
 const productWrites = loadReal('lib/productWrites.ts', { './schemaProbe': schemaProbeReal,
   './receivingBranch': loadReal('lib/receivingBranch.ts'),
+  './branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   './businessMaintenanceGuard': loadReal('lib/businessMaintenanceGuard.ts'),
   './pendingActions': pendingActions,
   './audit': realAudit,
@@ -241,6 +242,8 @@ const reviewApply = loadReal('lib/reviewApply.ts', {
 })
 
 const feesRoute = loadReal('routes/fees.ts', {
+  // CUTOVER-LR: fees.ts resolves a disabled-branch redirect through the real branchEffect module.
+  '../lib/branchEffect': loadReal('lib/branchEffect.ts', { './branchRoles': branchRoles, './sqlBinding': loadReal('lib/sqlBinding.ts') }),
   '../lib/moneyPrecision': loadReal('lib/moneyPrecision.ts'),
   ...dbStub,
   ...auditStub,
@@ -251,6 +254,7 @@ const feesRoute = loadReal('routes/fees.ts', {
   '../lib/feeOperationReceipt': feeOperationReceiptKernel,
   '../lib/reviewGate': reviewGate,
   '../lib/branchRoles': branchRoles,
+  '../lib/branchEffect': loadReal('lib/branchEffect.ts', { './branchRoles': branchRoles, './sqlBinding': loadReal('lib/sqlBinding.ts') }),
   // fee_date is a TYPED date now, read day-first through the shared kernel,
   // so routes/fees.ts imports batchCode.ts too -- the same real transpiled
   // module loaded above, not a stub, so the order under test is the real one.
@@ -266,6 +270,7 @@ const feesRoute = loadReal('routes/fees.ts', {
 })
 
 const reviewQueueRoute = loadReal('routes/reviewQueue.ts', {
+  '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   ...dbStub,
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/productWrites': productWrites,

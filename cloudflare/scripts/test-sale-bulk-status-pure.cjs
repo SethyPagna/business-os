@@ -9,7 +9,7 @@ const root = path.join(__dirname, '..')
 const recordContract = JSON.parse(fs.readFileSync(path.join(root, '..', 'outputs', 'takeover-20260908', 'f74-sales-records-backend-contract.json'), 'utf8'))
 let user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
 const cache = new Map()
-const actual = new Set(['acquisitionCostAccess','actorSnapshot','businessDateWindow','businessMaintenanceGuard','movementBranchName','db','permissions','saleBulkStatus','saleBulkUpdate','saleRecordEvents','saleTransitions','saleTotals','sqlBinding','productBatches','batchCode','salesStatus','saleStatusResolution','financialPrecision','undoAppliers','branchWrites','branchRoles','branchRoleGuards','conflictControl','searchMatch'])
+const actual = new Set(['acquisitionCostAccess','actorSnapshot','businessDateWindow','businessMaintenanceGuard','movementBranchName','db','permissions','saleBulkStatus','saleBulkUpdate','saleRecordEvents','saleTransitions','saleTotals','sqlBinding','productBatches','batchCode','salesStatus','saleStatusResolution','financialPrecision','undoAppliers','branchWrites','branchRoles','branchRoleGuards','branchEffect','conflictControl','searchMatch'])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
   const mod = { exports: {} }; cache.set(rel,mod)
@@ -257,6 +257,33 @@ async function run() {
   assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM fees').get().n,racedShopFeeCount)
   assert.equal(f.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status,'awaiting_payment')
   console.log('PASS bulk cancellation expenses require an unchanged active Shop sale link before and inside the atomic batch')
+
+  // CUTOVER-LC G-G: the guard is the branch ROLE. After the consolidation the selling branch is "LC Store" (role shop);
+  // a rename is a label change, a role change is an identity change.
+  const lcFeeRequest=(f,id)=>{const r=request(f,'cancelled',id);delete r.cancel_reason;r.items[0].cancel={reason:'mistake',fee_usd:1};return r}
+  f=fixture();seed(f,1)
+  f.sql.exec("UPDATE branches SET name='LC Store', role='shop' WHERE id=1")
+  const lcFeeBefore=f.sql.prepare('SELECT COUNT(*) n FROM fees').get().n
+  const lcOk=await f.call(sales,'/bulk-status',lcFeeRequest(f,'request-lc-store-fee'))
+  assert.equal(lcOk.status,200,'a renamed selling branch takes the cancellation expense: '+JSON.stringify(lcOk))
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM fees').get().n,lcFeeBefore+1)
+  f=fixture();seed(f,1)
+  f.sql.exec("UPDATE branches SET name='LC Store', role='shop' WHERE id=1")
+  f.barrier(()=>f.sql.prepare("UPDATE branches SET name='Leang Cosmetics' WHERE id=1").run())
+  const lcRenamedRace=await f.call(sales,'/bulk-status',lcFeeRequest(f,'request-lc-store-rename-race'))
+  assert.equal(lcRenamedRace.status,200,'renaming the selling branch inside the race window is not an identity change: '+JSON.stringify(lcRenamedRace))
+  f=fixture();seed(f,1)
+  f.sql.exec("UPDATE branches SET name='LC Store', role='shop' WHERE id=1")
+  const lcRaceCount=f.sql.prepare('SELECT COUNT(*) n FROM fees').get().n
+  f.barrier(()=>f.sql.prepare("UPDATE branches SET is_active=0 WHERE id=1").run())
+  const lcRetiredRace=await f.call(sales,'/bulk-status',lcFeeRequest(f,'request-lc-store-retire-race'))
+  assert.notEqual(lcRetiredRace.status,200,'the in-batch guard still refuses when the selling branch is retired before the commit')
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM fees').get().n,lcRaceCount)
+  f=fixture();seed(f,1)
+  f.sql.exec("UPDATE branches SET name='Shop', role='warehouse' WHERE id=1")
+  const nameOnly=await f.call(sales,'/bulk-status',lcFeeRequest(f,'request-shop-named-warehouse-role'))
+  assert.equal(nameOnly.status,400,'a branch NAMED Shop whose role is warehouse is a warehouse: the role outranks the name')
+  console.log('PASS bulk cancellation expense guard follows the branch role, before and inside the atomic batch')
 
   f=fixture();seed(f,1)
   const beforeSingleFee=snapshot(f)

@@ -144,8 +144,17 @@ async function main() {
     (f) => f.sql.prepare('UPDATE branch_stock SET quantity=quantity-1 WHERE product_id=1 AND branch_id=1').run())
   await refuses('a real lot-ledger change on a session lot still refuses',
     (f) => f.sql.prepare('UPDATE branch_batch_stock SET quantity=quantity-1 WHERE branch_id=1 AND batch_id=(SELECT id FROM product_batches WHERE variant_product_id=2)').run())
-  await refuses('a product row edit still refuses (product revision kept)',
-    (f) => f.sql.prepare("UPDATE products SET name='Serum v2' WHERE id=1").run())
+  // REVERT-SET (afe4fce07): the session's stock moves as its own delta, so a rename of a session product (no stock
+  // effect) no longer closes Undo; it is carried and the stock still reverses exactly.
+  await check('a product row edit no longer blocks Undo (stock moves by the session delta)', async () => {
+    const f = fixture(); seed(f)
+    const receipt = await api.commitStockSession(f.env, user, request('hotfix-product-edit-001'))
+    f.sql.exec(MIGRATION_0229)
+    f.sql.prepare("UPDATE products SET name='Serum v2' WHERE id=1").run()
+    await replay(api, f, receipt, 'undo', 0)
+    assert.deepEqual(ledgers(f), REVERSED)
+    assert.equal(f.sql.prepare('SELECT name FROM products WHERE id=1').get().name, 'Serum v2', 'the edit is kept')
+  })
   await refuses('a deactivated branch still refuses',
     (f) => f.sql.prepare('UPDATE branches SET is_active=0, is_default=0 WHERE id=1').run())
 

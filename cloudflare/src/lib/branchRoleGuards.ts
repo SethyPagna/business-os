@@ -25,7 +25,21 @@ export const BRANCH_NOT_SELLABLE_ERROR = 'Sales can only be recorded at a sellin
 export const WAREHOUSE_NOT_SELLABLE_ERROR = BRANCH_NOT_SELLABLE_ERROR
 // The code the three transfer routes already send with this message.
 export const TRANSFER_DIRECTION_CODE = 'transfer_direction_invalid'
-export const TRANSFER_DIRECTION_ERROR = 'Transfers move stock only between the two operating branches.'
+// True while Shop and Warehouse are both active and after the cutover leaves one active branch (where no transfer
+// exists to refuse): it names the two ROLES a transfer needs, never the branch names.
+export const TRANSFER_DIRECTION_ERROR = 'Transfers move stock only between a selling branch and a storage branch.'
+// The sale writers (POST /sales, add items, amendments, cancel with a fee) refuse a header or line branch that is not an
+// active selling branch with BRANCH_NOT_SELLABLE_ERROR + code, and a header/line branch disagreement with this pair.
+// Each sentence is the English of the pack key named after its code.
+export const SALE_BRANCH_MISMATCH_CODE = 'sale_branch_mismatch'
+export const SALE_BRANCH_MISMATCH_ERROR = 'The sale and all of its lines must use the same branch.'
+// Two more POST /sales refusals that named "the Shop". Same rule: the English is the pack key named after the code.
+export const SALE_IDENTITY_CONFLICT_CODE = 'sale_identity_conflict'
+export const SALE_IDENTITY_CONFLICT_ERROR = 'The branch or received date changed while this sale was being recorded. Refresh the sale and pick the current received date before trying again.'
+export const UNRECORDED_STOCK_LINE_CODE = 'unrecorded_stock_line_invalid'
+export const UNRECORDED_STOCK_LINE_ERROR = 'Stock without a received date must be a regular sale line with a branch.'
+// The expense writers' counterparts (POST /fees, PATCH /fees/:id) live in routes/fees.ts, which tests load with its imports
+// wired by name.
 
 export type BranchNameRow = { id: number; name: string | null; role?: unknown }
 

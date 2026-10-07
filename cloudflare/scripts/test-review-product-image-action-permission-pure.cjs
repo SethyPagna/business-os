@@ -53,6 +53,7 @@ const realProductWrites = loadTs('lib/productWrites.ts', {
   './catalogCostRecompute': loadTs('lib/catalogCostRecompute.ts', { './moneyPrecision': loadTs('lib/moneyPrecision.ts') }),
   './db': dbLib,
   './receivingBranch': loadTs('lib/receivingBranch.ts'),
+  './branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   './businessMaintenanceGuard': loadTs('lib/businessMaintenanceGuard.ts'),
   './pendingActions': loadTs('lib/pendingActions.ts', { './db': dbLib }),
   './audit': loadTs('lib/audit.ts', { './db': dbLib }),

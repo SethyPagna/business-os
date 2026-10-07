@@ -1,5 +1,5 @@
 import { lotCodeAsDate } from '../../utils/batchLabel.ts'
-import { isStockInCorrectionRow, revertsMovementId } from '../../utils/stockMovementDetail.ts'
+import { isStockInCorrectionRow, isStockSetMovement, revertsMovementId } from '../../utils/stockMovementDetail.ts'
 
 type MovementRecord = Record<string, unknown>
 
@@ -125,8 +125,16 @@ function describeMovementType(type: unknown): string {
 // the app (they're only ever emitted by the same-product multi-row-merge
 // write path) so those two get their own small dedicated keys instead.
 /** A recorded row's type: a Revert reads "Revert" whichever way it moved stock. */
-export function translateMovementRowType(row: { movement_type?: unknown; reference_id?: unknown; reverts_movement_id?: unknown }, t?: (key: string) => string | undefined): string {
+export function translateMovementRowType(row: { movement_type?: unknown; reference_id?: unknown; reverts_movement_id?: unknown; session_replay?: unknown }, t?: (key: string) => string | undefined): string {
   if (revertsMovementId(row) != null) return (typeof t === 'function' ? t('revert') : undefined) || 'Revert'
+  // REVERT-SET: a stock-in session's History Undo takes its lines back (a
+  // 'remove') and its Redo puts them back (an 'add'); the Worker flags those
+  // rows from immutable facts (stockLedgerQuery.ts sessionReplaySql).
+  if (Number(row.session_replay) === 1) {
+    return row.movement_type === 'remove'
+      ? (typeof t === 'function' ? t('movement_type_session_undo') : undefined) || 'Session undo'
+      : (typeof t === 'function' ? t('movement_type_session_redo') : undefined) || 'Session redo'
+  }
   // RET-D (owner, 5 Oct 2026): editing a stock-in line's quantity is a
   // correction of the receipt, not a removal. Its delta rows (stamped
   // `stock-in-edit:<line>:...` by cloudflare/src/lib/stockInLineEdit.ts) are
@@ -134,6 +142,11 @@ export function translateMovementRowType(row: { movement_type?: unknown; referen
   // instead of "Remove Stock" / "Add Stock". Read-side, so every saved row
   // reads right with no backfill.
   if (isStockInCorrectionRow(row)) return (typeof t === 'function' ? t('movement_type_stock_in_correction') : undefined) || 'Stock-in correction'
+  // REVERT-SET (owner, 6 Oct 2026): a scoped Set is written as an 'adjustment'
+  // (up) or a 'remove' (down), so it read "Adjustment" and the owner could not
+  // tell which row was the Set. Its forward rows carry `stock-set:` (Worker
+  // lib/stockLotAdjustment.ts); its Undo is a Revert and reads so above.
+  if (isStockSetMovement(row.reference_id)) return (typeof t === 'function' ? t('movement_type_stock_set') : undefined) || 'Set stock'
   return translateMovementType(row.movement_type, t)
 }
 

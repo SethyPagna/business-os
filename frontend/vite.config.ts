@@ -692,6 +692,17 @@ function manualChunks(id: string): string | undefined {
       return 'api-http-core'
     }
     if (normalized.endsWith('/src/api/httpState.ts')) return 'api-http-state'
+    // Loaded by http.ts on a refusal only (dynamic import) and statically by the redirect float: its own chunk, so the
+    // storefront's catalog closure never carries the disabled-branch redirect or its Khmer restatement.
+    if (normalized.endsWith('/src/api/branchRedirect.ts') || normalized.endsWith('/src/api/branchRefusalLanguage.ts')
+      || normalized.endsWith('/src/components/shared/useBranchRedirectQueue.ts')) return 'branch-redirect'
+    if (normalized.endsWith('/src/components/shared/BranchRedirectHost.tsx')) return 'branch-redirect-host'
+    // The branch-rule refusal localizer (its message tables are large) is wanted by the operator screens only, never by the
+    // storefront catalog closure that shares app-api-methods.
+    if (normalized.endsWith('/src/api/branchRuleErrors.ts') || normalized.endsWith('/src/api/transferRunRefusal.ts')) return 'branch-rule-errors'
+    // branchRoles.ts is imported by branchRedirect.ts and by shared UI: left alone, rollup parks it in 'branch-redirect', which the catalog
+    // closure would then load through app-shared. Pin it with its other consumers.
+    if (normalized.endsWith('/src/utils/branchRoles.ts')) return 'app-shared'
     // unresolvedSignout.ts / offlineQueueOwnership.ts (the sign-out fence
     // shared by HTTP and actor scope) are pinned to 'actor-read-scope' in
     // build/chunkBoundaries.ts, never to the broad method registry.

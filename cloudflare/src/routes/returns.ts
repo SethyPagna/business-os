@@ -30,6 +30,10 @@ import { loadReturnRecords } from '../lib/returnRecords'
 // carry one -- the same rule, and the same message, POST /sales enforces.
 import { WAREHOUSE_NOT_SELLABLE_ERROR } from '../lib/branchRoleGuards'
 import { branchCanSell } from '../lib/branchRoles'
+import {
+  BRANCH_EFFECT_COLUMNS_SQL, BranchEffectResolver, BranchRetiredNoSuccessorError, branchEffectGuardPredicate, branchEffectGuards, branchEffectRefusal, branchHasNoActiveTarget, branchRedirectTarget,
+  effectGuardStatement, foldedLotSurvivors, readBranchDirectory, resolveBranchEffect, type BranchEffect, type BranchEffectRow,
+} from '../lib/branchEffect'
 import type { Env } from '../index'
 import { actorId, actorSnapshot } from '../lib/actorSnapshot'
 import { buildSaleCreationSnapshot } from '../lib/saleCreationSnapshot'
@@ -1212,7 +1216,7 @@ app.post('/bulk', async (c) => {
     // slow original, or that original itself -- gets the stored receipt with
     // wrote=false, so one write is announced once (R-telegram E1). A read made
     // here before the write could not tell; see applyReturnBulkActionOutcome.
-    const { receipt: result, wrote } = await applyReturnBulkActionOutcome(c.env, user, body)
+    const { receipt: result, wrote } = await applyReturnBulkActionOutcome(c.env, user, body, branchRedirectTarget(c))
     c.executionCtx.waitUntil(notifyReturnBulkAction(c.env))
     // Telegram: a return cancelled or restored (owner, 27 Sep 2026). Only the
     // status field, only the rows that actually moved.
@@ -1225,7 +1229,7 @@ app.post('/bulk', async (c) => {
   } catch (error) {
     // A coded refusal's params (return_restore_over_capacity's product and
     // counts) go with it, so the till's restated sentence keeps them.
-    if (error instanceof ReturnBulkError) return c.json({ error: error.message, code: error.code || (error.statusCode === 409 ? 'write_conflict' : 'invalid_bulk_action'), ...(error.params ? { params: error.params } : {}) }, error.statusCode)
+    if (error instanceof ReturnBulkError) return c.json({ error: error.message, code: error.code || (error.statusCode === 409 ? 'write_conflict' : 'invalid_bulk_action'), ...(error.params ? { params: error.params } : {}), ...(error.extra || {}) }, error.statusCode)
     throw error
   }
 })
@@ -1421,7 +1425,7 @@ app.post('/', async (c) => {
 
   const reason = String(canonicalIntent.reason)
   let returnItems = body.items
-  const replacementInputs = Array.isArray(body.replacement_items) ? body.replacement_items : []
+  const replacementInputsRaw = Array.isArray(body.replacement_items) ? body.replacement_items : []
   if (!isMoneyV1) {
     try {
       await assertReturnableItems(db, requestedSaleId, body.items)
@@ -1521,15 +1525,61 @@ app.post('/', async (c) => {
   }
   const beforeSaleStatus = saleMeta ? String(saleMeta.sale_status || 'completed') : null
 
-  const branchId = Number(body.branch_id || saleMeta?.branch_id || replacementInputs[0]?.branch_id) || null
-  let branch: { id: number; name: string | null; is_active: number | null } | null = null
-  if (branchId) {
-    branch = await db.prepare('SELECT id,name,is_active FROM branches WHERE id=? LIMIT 1')
-      .get<{ id: number; name: string | null; is_active: number | null }>([branchId]) || null
+  // Where the stock (and the refund) of this return lands. A sale recorded at a
+  // branch that has since been retired (Old Shop) keeps its branch id and its
+  // label, but the units and the refund go to the ACTIVE branch the operator
+  // confirmed (X-Branch-Redirect; refused with branch_redirect_required until
+  // then) and every new row says so; while every branch is active this is the
+  // identity (nothing below changes).
+  const recordedBranchId = Number(body.branch_id || saleMeta?.branch_id || replacementInputsRaw[0]?.branch_id) || null
+  const branchDirectory = await db.prepare(`SELECT ${BRANCH_EFFECT_COLUMNS_SQL} FROM branches`).all<BranchEffectRow>()
+  const redirectTarget = branchRedirectTarget(c)
+  let headerEffect: BranchEffect | null = null
+  const itemEffects: Array<BranchEffect | null> = []
+  let replacementInputs = replacementInputsRaw
+  const movesStock = replacementInputsRaw.length > 0 || returnItems.some((item) => normalizeStockAction(item) !== 'none')
+  try {
+    try {
+      headerEffect = recordedBranchId ? resolveBranchEffect(branchDirectory, recordedBranchId, { sells: replacementInputsRaw.length > 0, target: redirectTarget }) : null
+    } catch (error) {
+      // A return that moves no stock has nothing to strand on a retired branch no active branch could take. One that
+      // pays a refund still asks where the cash leaves (branch_redirect_required) while an active branch exists.
+      if (!branchHasNoActiveTarget(error) || movesStock) throw error
+    }
+    for (const item of returnItems) {
+      const recordedItemBranch = Number(item.branch_id || recordedBranchId) || null
+      try {
+        itemEffects.push(recordedItemBranch ? resolveBranchEffect(branchDirectory, recordedItemBranch, { target: redirectTarget }) : null)
+      } catch (error) {
+        // A line that moves no stock (stock_action none) has nothing to strand, so it never blocks.
+        if (!(error instanceof BranchRetiredNoSuccessorError) || normalizeStockAction(item) !== 'none') throw error
+        itemEffects.push(null)
+      }
+    }
+    if (replacementInputsRaw.length) {
+      replacementInputs = replacementInputsRaw.map((line) => {
+        const effect = resolveBranchEffect(branchDirectory, line.branch_id || recordedBranchId, { sells: true, target: redirectTarget })
+        return effect.redirected ? { ...line, branch_id: effect.effectBranchId } : line
+      })
+    }
+  } catch (error) {
+    const refusal = branchEffectRefusal(error)
+    if (refusal) return c.json(refusal, 409)
+    throw error
   }
+  returnItems = returnItems.map((item, index) => itemEffects[index]?.redirected ? { ...item, branch_id: itemEffects[index]!.effectBranchId } : item)
+  const branchId = headerEffect?.redirected ? headerEffect.effectBranchId : recordedBranchId
+  const branchRow = branchId ? branchDirectory.find((row) => Number(row.id) === branchId) ?? null : null
+  const branch: { id: number; name: string | null; is_active: number | null } | null = branchRow
+    ? { id: Number(branchRow.id), name: branchRow.name, is_active: branchRow.is_active == null ? null : Number(branchRow.is_active) }
+    : null
+  // The label the sale was made under ("Shop", written when it was made), not the retired branch's name today.
+  const addressedLabel = (effect: BranchEffect): string | null =>
+    (saleMeta && Number(saleMeta.branch_id) === effect.addressedBranchId && saleMeta.branch_name) || effect.addressedName
+  const addressedBranchName = headerEffect?.redirected ? addressedLabel(headerEffect) : null
   let branchName = branch?.name || saleMeta?.branch_name || null
   if (replacementInputs.length) {
-    if (!branch || Number(branch.is_active || 0) !== 1 || !branchCanSell(branch.name)
+    if (!branch || Number(branch.is_active || 0) !== 1 || !branchCanSell(branchRow)
       || replacementInputs.some((line) => Number(line.branch_id || branchId) !== branchId)) {
       return c.json({ error: WAREHOUSE_NOT_SELLABLE_ERROR }, 400)
     }
@@ -1629,6 +1679,32 @@ app.post('/', async (c) => {
       return c.json({ error: error.message, code: error.code, product_id: productId }, 400)
     }
     returnLotPlans.push({ splits: plan.splits, plainQuantity: plan.plainQuantity })
+  }
+
+  // A return redirected to the successor gives its units back to the lot that is
+  // there NOW: a lot the consolidation folded into another (same product, same
+  // received date) is restocked as that survivor, never as the folded id.
+  const lotSurvivors = new Map<string, number>()
+  const redirectedEffectIds = [...new Set(itemEffects.filter((effect) => effect?.redirected).map((effect) => effect!.effectBranchId))]
+  for (const effectId of redirectedEffectIds) {
+    const wanted = returnItems.flatMap((item, index) => itemEffects[index]?.effectBranchId === effectId && itemEffects[index]?.redirected
+      ? [...returnLotPlans[index].splits.map((split) => split.batchId), ...(item.sale_item_id ? [saleItemBatchInfo.get(Number(item.sale_item_id))?.batch_id ?? 0] : [])]
+      : [])
+    for (const [folded, survivor] of await foldedLotSurvivors(db, effectId, wanted)) lotSurvivors.set(`${effectId}:${folded}`, survivor)
+  }
+  const effectiveBatchId = (index: number, batchId: number | null): number | null => {
+    const effect = itemEffects[index]
+    return batchId != null && effect?.redirected ? lotSurvivors.get(`${effect.effectBranchId}:${batchId}`) ?? batchId : batchId
+  }
+  if (lotSurvivors.size) {
+    for (const [index, plan] of returnLotPlans.entries()) {
+      const merged = new Map<number, number>()
+      for (const split of plan.splits) {
+        const batchId = effectiveBatchId(index, split.batchId)!
+        merged.set(batchId, (merged.get(batchId) || 0) + split.quantity)
+      }
+      returnLotPlans[index] = { splits: [...merged].map(([batchId, quantity]) => ({ batchId, quantity })), plainQuantity: plan.plainQuantity }
+    }
   }
 
   type LotTake = { batchId: number; lotCode: string | null; expiryDate: string | null; quantity: number }
@@ -1831,11 +1907,15 @@ app.post('/', async (c) => {
     batch_stock: batchSnapshots,
   }
   const guardJson = JSON.stringify(guardState)
+  // Every redirected pair is re-proved inside the commit: the landing branch is still active with no successor
+  // of its own and the addressed branch still points at it.
+  const effectGuards = branchEffectGuards([headerEffect, ...itemEffects].filter((effect): effect is BranchEffect => !!effect), replacementInputs.length > 0)
   const commonGuardParams = {
     guardJson, receiptId, actorId: authenticatedActorId, requestId: clientRequestId,
     requestDigest, returnNumber, replacementClientRequestId,
     replacementReceiptNumber,
     customerReturnAuthorityJson: customerReturnV1Plan?.authority_json ?? null,
+    ...(effectGuards.length ? { effectsJson: JSON.stringify(effectGuards) } : {}),
     ...(customerReturnV1Plan?.lineage.params ?? {}),
   }
   const precondition = `
@@ -1888,7 +1968,7 @@ app.post('/', async (c) => {
           AND COALESCE(pb.expiry_date,'')=json_extract(j.value,'$.expiry_date')
           AND COALESCE(bbs.quantity,0)=json_extract(j.value,'$.before')))
     AND (@customerReturnAuthorityJson IS NULL OR ((${customerReturnAuthorityPredicate()})
-      AND (${customerReturnV1Plan?.lineage.condition ?? '1=1'})))
+      AND (${customerReturnV1Plan?.lineage.condition ?? '1=1'})))${effectGuards.length ? ` AND ${branchEffectGuardPredicate('@effectsJson')}` : ''}
   `
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
     returnCreateGuardStatement(operationId, 'precondition', precondition, commonGuardParams),
@@ -1900,12 +1980,12 @@ app.post('/', async (c) => {
       return_number,client_request_id,sale_id,receipt_number,cashier_id,cashier_name,
       customer_id,customer_name,branch_id,branch_name,return_scope,reason,return_type,
       notes,total_refund_usd,total_refund_khr,exchange_rate,status,search_normalized,
-      money_precision_version,calculated_refund_usd,rounding_adjustment_usd
+      money_precision_version,calculated_refund_usd,rounding_adjustment_usd${addressedBranchName ? ',addressed_branch_name' : ''}
     ) VALUES(
       @return_number,@returnClientRequestId,@sale_id,@receipt_number,@cashier_id,@cashier_name,
       @customer_id,@customer_name,@branch_id,@branch_name,'customer',@reason,@return_type,
       @notes,@total_refund_usd,@total_refund_khr,@exchange_rate,'completed',@search_normalized,
-      @money_precision_version,@calculated_refund_usd,@rounding_adjustment_usd
+      @money_precision_version,@calculated_refund_usd,@rounding_adjustment_usd${addressedBranchName ? ',@addressed_branch_name' : ''}
     )`,
     params: {
       return_number: returnNumber, returnClientRequestId: clientRequestId, sale_id: requestedSaleId,
@@ -1914,6 +1994,9 @@ app.post('/', async (c) => {
       customer_id: body.customer_id || saleMeta?.customer_id || null,
       customer_name: body.customer_name || saleMeta?.customer_name || null,
       branch_id: branchId, branch_name: branchName, reason,
+      // The branch the sale was made at, when the stock went to its successor: the sale keeps its own
+      // branch_id and label; this return records where the units really went AND what it was addressed to.
+      ...(addressedBranchName ? { addressed_branch_name: addressedBranchName } : {}),
       return_type: String(canonicalIntent.return_type), notes: canonicalIntent.notes,
       total_refund_usd: totalRefundUsd, total_refund_khr: totalRefundKhr,
       exchange_rate: customerReturnV1Plan
@@ -2009,7 +2092,7 @@ app.post('/', async (c) => {
       if (fallbackReceive) statements.push(...fallbackReceive.statements.map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
       touchedProducts.add(productId)
     }
-    const originalBatchId = item.sale_item_id ? saleItemBatchInfo.get(Number(item.sale_item_id))?.batch_id ?? null : null
+    const originalBatchId = effectiveBatchId(index, item.sale_item_id ? saleItemBatchInfo.get(Number(item.sale_item_id))?.batch_id ?? null : null)
     if (stockAction === 'damaged' && productId && itemBranchId) {
       // Already 400'd above (resolveDamagedReturnChoice) if this were invalid.
       const choice = resolveDamagedReturnChoice(item)
@@ -2068,13 +2151,17 @@ app.post('/', async (c) => {
       returnAllocationCount += 1
     }
     if (stockAction === 'restock' && productId && itemBranchId) {
+      // Stock that went to the successor of the branch the sale was made at: the movement names the branch it
+      // really landed on and the label it was addressed to (the sale itself is never relabelled).
+      const redirect = itemEffects[index]?.redirected ? itemEffects[index] : null
       statements.push({
-        sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id)
-          VALUES(@product_id,@product_name,@branch_id,'return',@quantity,@unit_cost_usd,@unit_cost_khr,@reason,${returnIdExpression},@user_id,@user_name,${recordedBatchSql})`,
+        sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id${redirect ? ',branch_name,addressed_branch_name' : ''},movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id)
+          VALUES(@product_id,@product_name,@branch_id${redirect ? ',@branch_name,@addressed_branch_name' : ''},'return',@quantity,@unit_cost_usd,@unit_cost_khr,@reason,${returnIdExpression},@user_id,@user_name,${recordedBatchSql})`,
         params: {
           returnClientRequestId: clientRequestId, product_id: productId, product_name: productName, branch_id: itemBranchId,
+          ...(redirect ? { branch_name: redirect.effectName, addressed_branch_name: addressedLabel(redirect) } : {}),
           quantity, unit_cost_usd: unitCostUsd, unit_cost_khr: unitCostKhr,
-          reason: `Return: ${reason}`, user_id: authenticatedActorId, user_name: actorSnapshot(user), batch_id: recordedBatchId, ...fallbackParams,
+          reason: `Return: ${reason}${redirect ? ` (sale at ${addressedLabel(redirect)})` : ''}`, user_id: authenticatedActorId, user_name: actorSnapshot(user), batch_id: recordedBatchId, ...fallbackParams,
         },
       })
       movementCount += 1
@@ -2166,6 +2253,7 @@ app.post('/', async (c) => {
     sale_id: requestedSaleId, return_number: returnNumber,
     return_items: returnItems.length, replacement_items: replacementLines.length,
     event_recorded: eventBytes > 0,
+    ...(addressedBranchName ? { branch_id: branchId, addressed_branch_id: headerEffect!.addressedBranchId, addressed_branch_name: addressedBranchName } : {}),
   })
   statements.push({
     sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
@@ -2346,6 +2434,29 @@ app.post('/supplier', async (c) => {
     ? String(body.settlement).toLowerCase()
     : 'refund'
 
+  // A supplier return addressed to a branch that has since been retired (Old Shop -> LC Store, a till or a
+  // client that still holds the old id) takes its units out of the ACTIVE branch the operator confirmed
+  // (X-Branch-Redirect; branch_redirect_required until then) and records both the branch the stock really left
+  // and the label it was addressed to. While every branch is active nothing is redirected and nothing changes.
+  const supplierResolver = new BranchEffectResolver(await readBranchDirectory(db), branchRedirectTarget(c))
+  const supplierLandingEffects = new Map<number, BranchEffect>()
+  let supplierAddressedName: string | null = null
+  try {
+    const headerEffect = body.branch_id ? supplierResolver.effect(body.branch_id) : null
+    if (headerEffect?.redirected) { supplierAddressedName = headerEffect.addressedName; body.branch_id = headerEffect.effectBranchId; supplierLandingEffects.set(headerEffect.effectBranchId, headerEffect) }
+    body.items = body.items.map((item) => {
+      const recorded = Number(item.branch_id || body.branch_id) || null
+      const effect = recorded ? supplierResolver.effect(recorded) : null
+      if (!effect?.redirected) return item
+      supplierLandingEffects.set(effect.effectBranchId, effect)
+      return { ...item, branch_id: effect.effectBranchId }
+    })
+  } catch (error) {
+    const refusal = branchEffectRefusal(error)
+    if (refusal) return c.json(refusal, 409)
+    throw error
+  }
+
   // Stock check first (plain read, before any writes -- same shape as
   // sales.ts's POST /).
   for (const item of body.items) {
@@ -2393,12 +2504,13 @@ app.post('/supplier', async (c) => {
       return_number, client_request_id, cashier_id, cashier_name, branch_id, branch_name,
       return_scope, reason, return_type, notes, total_refund_usd, total_refund_khr, exchange_rate,
       supplier_id, supplier_name, supplier_settlement, supplier_compensation_usd, supplier_compensation_khr,
-      supplier_loss_usd, supplier_loss_khr, status, search_normalized
+      supplier_loss_usd, supplier_loss_khr, status, search_normalized${supplierAddressedName ? ', addressed_branch_name' : ''}
     ) VALUES (@return_number, @client_request_id, @cashier_id, @cashier_name, @branch_id, @branch_name,
       @return_scope, @reason, 'supplier_return', @notes, 0, 0, @exchange_rate,
       @supplier_id, @supplier_name, @settlement, @supplier_compensation_usd, @supplier_compensation_khr,
-      @supplier_loss_usd, @supplier_loss_khr, 'completed', @search_normalized)
+      @supplier_loss_usd, @supplier_loss_khr, 'completed', @search_normalized${supplierAddressedName ? ', @addressed_branch_name' : ''})
   `, params: {
+    ...(supplierAddressedName ? { addressed_branch_name: supplierAddressedName } : {}),
     return_number: returnNumber,
     client_request_id: supplierWriteKey,
     cashier_id: user?.id ?? null,
@@ -2436,7 +2548,9 @@ app.post('/supplier', async (c) => {
 
   let returnId = 0
   try {
-    const statements: Array<{ sql: string; params: Record<string, unknown> }> = [returnHeaderStatement]
+    const supplierEffectGuard = effectGuardStatement(supplierResolver.guards())
+    const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
+      ...(supplierEffectGuard ? [supplierEffectGuard, { sql: 'DELETE FROM sale_bulk_guards', params: {} }] : []), returnHeaderStatement]
     const touchedProductIds = new Set<number>()
     const supplierPerItemBatchSplits: ReturnBatchSplit[][] = []
     // Draw the deducted units out of the product's active lots FIFO, same as a
@@ -2533,13 +2647,15 @@ app.post('/supplier', async (c) => {
         quantity: take.quantity,
         saleItemId: null,
       })))
+      const supplierLanding = itemBranchId ? supplierLandingEffects.get(Number(itemBranchId)) : undefined
       statements.push({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-              VALUES (@product_id, @product_name, @branch_id, 'supplier_return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, ${returnIdExpression}, @user_id, @user_name, @batch_id)`,
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${supplierLanding ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+              VALUES (@product_id, @product_name, @branch_id${supplierLanding ? ', @branch_name, @addressed_branch_name' : ''}, 'supplier_return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, ${returnIdExpression}, @user_id, @user_name, @batch_id)`,
         params: {
           product_id: item.product_id,
           product_name: safeProductName,
           branch_id: itemBranchId,
+          ...(supplierLanding ? { branch_name: supplierLanding.effectName, addressed_branch_name: supplierLanding.addressedName } : {}),
           quantity: -qty,
           unit_cost_usd: unitCostUsd,
           unit_cost_khr: unitCostKhr,
@@ -2770,6 +2886,49 @@ app.patch('/:id', async (c) => {
     return c.json({ error: (error as Error).message }, 400)
   }
 
+  // A return recorded at a branch that has since been retired (Old Shop -> LC Store) is edited at the ACTIVE
+  // branch the operator confirmed (X-Branch-Redirect; branch_redirect_required until then): its previous restock
+  // is reversed there, in the lot that exists there now, and the edited lines are restocked there. The return
+  // keeps its own branch and label; its rewritten lines and the movement rows name where the stock really moved.
+  // While every branch is active nothing is redirected and nothing changes.
+  const editResolver = new BranchEffectResolver(await readBranchDirectory(db), branchRedirectTarget(c))
+  const existingLineEffects: Array<BranchEffect | null> = []
+  const editEffectByBranch = new Map<number, BranchEffect>()
+  try {
+    for (const item of existingItems) {
+      existingLineEffects.push(item.return_to_stock && item.product_id && item.branch_id ? editResolver.effect(item.branch_id) : null)
+    }
+    newItems = newItems.map((item) => {
+      const recorded = Number(item.branch_id || existing.branch_id) || null
+      const effect = recorded ? editResolver.effect(recorded) : null
+      return effect?.redirected ? { ...item, branch_id: effect.effectBranchId } : item
+    })
+    for (const effect of existingLineEffects) if (effect?.redirected) editEffectByBranch.set(effect.effectBranchId, effect)
+    for (const recorded of [existing.branch_id, ...existingItems.map((item) => item.branch_id)]) {
+      const effect = recorded ? editResolver.effect(recorded) : null
+      if (effect?.redirected) editEffectByBranch.set(effect.effectBranchId, effect)
+    }
+    // CUTOVER-LR: an edit may name a NEW header branch (body.branch_id). A disabled branch is never a new target: it
+    // is redirected like every other write (branch_redirect_required until the operator confirms an active branch),
+    // and the confirmed branch is what the header records. Keeping the return's own branch is not a new target.
+    const requestedHeader = Number(body.branch_id) || null
+    if (requestedHeader && requestedHeader !== Number(existing.branch_id)) {
+      const headerEffect = editResolver.effect(requestedHeader)
+      if (headerEffect?.redirected) body.branch_id = headerEffect.effectBranchId
+    }
+  } catch (error) {
+    const refusal = branchEffectRefusal(error)
+    if (refusal) return c.json(refusal, 409)
+    throw error
+  }
+  const editAddressedLabel = (effect: BranchEffect): string | null =>
+    (Number(existing.branch_id) === effect.addressedBranchId && existing.branch_name) || effect.addressedName
+  // newItems already carry the landing branch id; the label is that of the branch the return was made under.
+  const editLabelFor = (landingBranchId: number | null): { branchName: string | null; addressedName: string | null } | null => {
+    const effect = landingBranchId ? editEffectByBranch.get(landingBranchId) : null
+    return effect ? { branchName: effect.effectName, addressedName: editAddressedLabel(effect) } : null
+  }
+
   const branchName = body.branch_id
     ? (await db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([body.branch_id]))?.name || null
     : existing.branch_name
@@ -2853,6 +3012,30 @@ app.patch('/:id', async (c) => {
       return c.json({ error: error.message, code: error.code, product_id: productId }, 400)
     }
     editLotPlans.push({ splits: plan.splits, plainQuantity: plan.plainQuantity })
+  }
+  // The units go back into the lot that exists at the branch NOW: a lot the branch consolidation folded into
+  // another (same product, same received date) restocks as its survivor, never as the folded id.
+  const editFoldedByBranch = new Map<number, number[]>()
+  newItems.forEach((item, index) => {
+    const lineBranch = Number(item.branch_id || existing.branch_id) || 0
+    if (lineBranch && editLotPlans[index]?.splits.length) editFoldedByBranch.set(lineBranch, [...(editFoldedByBranch.get(lineBranch) || []), ...editLotPlans[index].splits.map((split) => split.batchId)])
+  })
+  const editSurvivors = new Map<number, Map<number, number>>()
+  for (const [lineBranch, batchIds] of editFoldedByBranch) {
+    const found = await foldedLotSurvivors(db, lineBranch, batchIds)
+    if (found.size) editSurvivors.set(lineBranch, found)
+  }
+  if (editSurvivors.size) {
+    for (const [index, plan] of editLotPlans.entries()) {
+      const survivors = editSurvivors.get(Number(newItems[index].branch_id || existing.branch_id) || 0)
+      if (!survivors || !plan.splits.length) continue
+      const merged = new Map<number, number>()
+      for (const split of plan.splits) {
+        const batchId = survivors.get(split.batchId) ?? split.batchId
+        merged.set(batchId, (merged.get(batchId) || 0) + split.quantity)
+      }
+      editLotPlans[index] = { splits: [...merged].map(([batchId, quantity]) => ({ batchId, quantity })), plainQuantity: plan.plainQuantity }
+    }
   }
 
   let projectedSaleStatus: string | null = null
@@ -2951,11 +3134,24 @@ app.patch('/:id', async (c) => {
   // consumed/merged lot stock fails closed instead of taking unrelated units.
   const existingItemIds = existingItems.map((it) => Number(it.id)).filter((n) => Number.isFinite(n) && n > 0)
   const existingReturnAllocations = await fetchReturnItemBatchAllocations(db, existingItemIds)
-  for (const item of existingItems) {
+  // Lots the consolidation folded: the reversal takes the units out of the lot that exists NOW.
+  const reversalSurvivors = new Map<number, Map<number, number>>()
+  for (const [index, effect] of existingLineEffects.entries()) {
+    if (!effect?.redirected) continue
+    const item = existingItems[index]
+    const wanted = [...(existingReturnAllocations.get(Number(item.id)) || []).map((alloc) => Number(alloc.batch_id)), ...(item.batch_id != null ? [Number(item.batch_id)] : [])]
+    const found = await foldedLotSurvivors(db, effect.effectBranchId, wanted)
+    const merged = reversalSurvivors.get(effect.effectBranchId) || new Map<number, number>()
+    for (const [folded, survivor] of found) merged.set(folded, survivor)
+    reversalSurvivors.set(effect.effectBranchId, merged)
+  }
+  for (const [itemIndex, item] of existingItems.entries()) {
     if (!item.return_to_stock || !item.product_id || !item.branch_id) continue
     touchedProductIds.add(item.product_id)
     const productId = item.product_id
-    const branchIdForItem = item.branch_id
+    const reversalEffect = existingLineEffects[itemIndex]?.redirected ? existingLineEffects[itemIndex] : null
+    const branchIdForItem = reversalEffect ? reversalEffect.effectBranchId : item.branch_id
+    const survivorOf = (batchId: number): number => reversalEffect ? reversalSurvivors.get(reversalEffect.effectBranchId)?.get(Number(batchId)) ?? batchId : batchId
     let plainRemainder = Number(item.quantity) || 0
     // 0084: which lots this reversal actually drew from -- the movement row
     // stamps a batch_id only when ONE lot covered the whole quantity.
@@ -2965,22 +3161,24 @@ app.patch('/:id', async (c) => {
       for (const alloc of recordedAllocs) {
         const give = Math.min(alloc.quantity, plainRemainder)
         if (give <= 0) continue
+          const reversalBatchId = survivorOf(alloc.batch_id)
           statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
             WHERE pb.id=@batchId AND pb.variant_product_id=@productId AND bbs.branch_id=@branchId AND bbs.quantity>=@quantity)`,
-            { batchId: alloc.batch_id, productId, branchId: branchIdForItem, quantity: give }))
-          statements.push(...planRemoveStockFromBatch({ batchId: alloc.batch_id, productId, branchId: branchIdForItem, quantity: give }).statements
+            { batchId: reversalBatchId, productId, branchId: branchIdForItem, quantity: give }))
+          statements.push(...planRemoveStockFromBatch({ batchId: reversalBatchId, productId, branchId: branchIdForItem, quantity: give }).statements
             .map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
-          reversalLots.push({ batchId: alloc.batch_id, quantity: give })
+          reversalLots.push({ batchId: reversalBatchId, quantity: give })
           plainRemainder -= give
       }
     } else if (item.batch_id != null) {
       // Legacy return (no recorded split): reverse its single recorded lot.
+        const legacyBatchId = survivorOf(item.batch_id)
         statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
           WHERE pb.id=@batchId AND pb.variant_product_id=@productId AND bbs.branch_id=@branchId AND bbs.quantity>=@quantity)`,
-          { batchId: item.batch_id, productId, branchId: branchIdForItem, quantity: plainRemainder }))
-        statements.push(...planRemoveStockFromBatch({ batchId: item.batch_id, productId, branchId: branchIdForItem, quantity: plainRemainder }).statements
+          { batchId: legacyBatchId, productId, branchId: branchIdForItem, quantity: plainRemainder }))
+        statements.push(...planRemoveStockFromBatch({ batchId: legacyBatchId, productId, branchId: branchIdForItem, quantity: plainRemainder }).statements
           .map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
-        reversalLots.push({ batchId: item.batch_id, quantity: plainRemainder })
+        reversalLots.push({ batchId: legacyBatchId, quantity: plainRemainder })
         plainRemainder = 0
     }
     if (plainRemainder > 0) {
@@ -2994,12 +3192,13 @@ app.patch('/:id', async (c) => {
       })
     }
     statements.push({
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-            VALUES (@product_id, @product_name, @branch_id, 'return_reversal', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
+      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${reversalEffect ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+            VALUES (@product_id, @product_name, @branch_id${reversalEffect ? ', @branch_name, @addressed_branch_name' : ''}, 'return_reversal', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
       params: {
         product_id: productId,
         product_name: item.product_name,
         branch_id: branchIdForItem,
+        ...(reversalEffect ? { branch_name: reversalEffect.effectName, addressed_branch_name: editAddressedLabel(reversalEffect) } : {}),
         quantity: -(Number(item.quantity) || 0),
         unit_cost_usd: item.cost_price_usd ?? null,
         unit_cost_khr: item.cost_price_khr ?? null,
@@ -3126,13 +3325,15 @@ app.patch('/:id', async (c) => {
         branch_id: itemBranchId, quantity: plan.plainQuantity, ...fallbackParams },
     })
     if (returnToStock && item.product_id && itemBranchId) {
+      const editRestockLabel = editLabelFor(Number(itemBranchId) || null)
       statements.push({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-              VALUES (@product_id, @product_name, @branch_id, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, ${recordedBatchSql})`,
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${editRestockLabel ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+              VALUES (@product_id, @product_name, @branch_id${editRestockLabel ? ', @branch_name, @addressed_branch_name' : ''}, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, ${recordedBatchSql})`,
         params: {
           product_id: item.product_id,
           product_name: item.product_name || null,
           branch_id: itemBranchId,
+          ...(editRestockLabel ? { branch_name: editRestockLabel.branchName, addressed_branch_name: editRestockLabel.addressedName } : {}),
           quantity,
           unit_cost_usd: item.cost_price_usd ?? null,
           unit_cost_khr: item.cost_price_khr ?? null,
@@ -3193,6 +3394,7 @@ app.patch('/:id', async (c) => {
             ) THEN 1 ELSE 0 END`,
       params: { id: returnId, revision: expectedReturnRevision },
     },
+    ...(editResolver.guards().length ? [effectGuardStatement(editResolver.guards())!] : []),
   )
   let eventBytes = 0
   if (linkedSale) {

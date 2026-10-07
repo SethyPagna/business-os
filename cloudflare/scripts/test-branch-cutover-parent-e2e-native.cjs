@@ -81,7 +81,7 @@ function modules(control) {
 
 const D1_CPU_RESET = 'D1_ERROR: D1 DB exceeded its CPU time limit and was reset. [code: 7429]'
 const ACTOR = { id: 7, username: 'operator', name: 'Operator', organization_id: 1, role_id: null, permissions: '{"branches":true,"backup_restore":true}', is_active: 1 }
-const PARENT_BUDGET = { tier: 'free', alreadyUsed: 0, remainingReads: 0, retryQueries: 0, completionQueries: 0, safetyQueries: 0, extraAtomicStatements: 0 }
+const PARENT_BUDGET = { tier: 'paid', alreadyUsed: 0, remainingReads: 0, retryQueries: 0, completionQueries: 0, safetyQueries: 0, extraAtomicStatements: 0 }
 const CHILD_BUDGET = { ...PARENT_BUDGET, tier: 'paid' }
 const IDS = { sourceBranchId: 2, targetBranchId: 1 }
 const NAMES = { retiredName: 'Old Shop', successorName: 'LC Store' }
@@ -233,18 +233,21 @@ const dateKey = (value) => {
   return Number.isNaN(ms) ? 'none:' : new Date(ms + 7 * 3600000).toISOString().slice(0, 10)
 }
 const near = (a, b) => Math.abs(a - b) <= 1e-9
+// Products folded into a twin by the run (test-side only): their stock is counted under the twin, before and after.
+let FOLD_MAP = new Map()
+const mapped = (id) => FOLD_MAP.get(id) ?? id
 function snapshot(raw) {
   const product = new Map(), group = new Map(), lotRows = new Map(), untracked = new Map(), value = new Map()
   for (const r of raw.prepare('SELECT product_id,branch_id,quantity FROM branch_stock WHERE branch_id IN (1,2)').all()) {
-    product.set(r.product_id, (product.get(r.product_id) || 0) + r.quantity)
-    untracked.set(r.product_id, (untracked.get(r.product_id) || 0) + r.quantity)
+    product.set(mapped(r.product_id), (product.get(mapped(r.product_id)) || 0) + r.quantity)
+    untracked.set(mapped(r.product_id), (untracked.get(mapped(r.product_id)) || 0) + r.quantity)
   }
   for (const r of raw.prepare(`SELECT b.id,b.variant_product_id p,b.received_at,b.expiry_date,b.unit_cost_usd c,s.branch_id,s.quantity FROM branch_batch_stock s JOIN product_batches b ON b.id=s.batch_id WHERE s.branch_id IN (1,2)`).all()) {
-    const key = r.p + '|' + (r.received_at === null ? 'none:' + r.id : dateKey(r.received_at)) + '|' + r.expiry_date
+    const key = mapped(r.p) + '|' + (r.received_at === null ? 'none:' + r.id : dateKey(r.received_at)) + '|' + r.expiry_date
     group.set(key, (group.get(key) || 0) + r.quantity)
     lotRows.set(r.id + '@' + r.branch_id, r.quantity)
-    untracked.set(r.p, (untracked.get(r.p) || 0) - r.quantity)
-    if (r.c > 0) value.set(r.p, (value.get(r.p) || 0) + r.quantity * r.c)
+    untracked.set(mapped(r.p), (untracked.get(mapped(r.p)) || 0) - r.quantity)
+    if (r.c > 0) value.set(mapped(r.p), (value.get(mapped(r.p)) || 0) + r.quantity * r.c)
   }
   return { product, group, lotRows, untracked, value }
 }
@@ -269,7 +272,7 @@ function labelOf(row) {
 }
 
 /** The driver: status read, one invocation, independent invariants. Faults keyed by '<label>#<occurrence>'. */
-async function drive(w, { faults = {}, base, requestId = 'cutover_night_001', pageSize, maxTurns = 4000, timings } = {}) {
+async function drive(w, { faults = {}, base, requestId = 'cutover_night_001', pageSize, maxTurns = 4000, timings, onStep } = {}) {
   const seen = {}; let turns = 0
   const plan = await w.m.parent.inspectBranchCutover(w.db, ACTOR, 1, IDS, PARENT_BUDGET)
   assert.deepEqual(plan.capabilities, [])
@@ -290,7 +293,7 @@ async function drive(w, { faults = {}, base, requestId = 'cutover_night_001', pa
       if (!row) await w.m.parent.beginBranchCutover(w.db, ACTOR, 1, { ...IDS, ...NAMES, requestId, controlIncarnation: INCARNATION,
         expectedSourceJson: plan.sourcePreimageJson, expectedTargetJson: plan.targetPreimageJson, expectedSchemaDigest: plan.schemaDigest }, PARENT_BUDGET)
       else if (label === 'child') await w.m.child.executePlannedBranchCutoverChild(w.db, ACTOR, ownership(row), { sequence: row.next_sequence, childJson: row.planned_child_json }, CHILD_BUDGET, 1)
-      else await w.m.parent.continueBranchCutover(w.db, ACTOR, 1, { operationId: row.operation_id, expectedRevision: row.revision, pageSize }, PARENT_BUDGET)
+      else await w.m.parent.continueBranchCutover(w.db, ACTOR, 1, { operationId: row.operation_id, expectedRevision: row.revision, pageSize }, PARENT_BUDGET, w.hooks)
     } catch (error) {
       if (!fault) throw error
       // A 7429 surfaces once (D1Compat never replays a CPU-limit reset) and is retryable: a read throws it as is, a
@@ -311,12 +314,15 @@ async function drive(w, { faults = {}, base, requestId = 'cutover_night_001', pa
     }
     if (fault === 'kill') w.reload()
     if (base) invariants(w.raw, base, label + '#' + seen[label])
+    if (onStep) await onStep(label, w)
   }
 }
 
 function round(n) { return Math.round(n * 1e9) / 1e9 }
-async function scenario({ control, duplicate = false, faults = {}, generatedProducts = 28, timings, pageSize = 16 } = {}) {
+async function scenario({ control, duplicate = false, faults = {}, generatedProducts = 28, timings, pageSize = 16, seed, hooks } = {}) {
   const w = world({ control, duplicate, generatedProducts })
+  if (seed) seed(w.raw)
+  if (hooks) w.hooks = hooks(w.raw)
   const base = snapshot(w.raw)
   const before = {
     batches: w.raw.prepare('SELECT * FROM product_batches ORDER BY id').all(),
@@ -333,7 +339,7 @@ async function scenario({ control, duplicate = false, faults = {}, generatedProd
     const plan = await w.m.parent.inspectBranchCutover(w.db, ACTOR, 1, IDS, PARENT_BUDGET)
     let { row } = await w.m.parent.beginBranchCutover(w.db, ACTOR, 1, { ...IDS, ...NAMES, requestId: 'rehearsal_attempt_01', controlIncarnation: INCARNATION,
       expectedSourceJson: plan.sourcePreimageJson, expectedTargetJson: plan.targetPreimageJson, expectedSchemaDigest: plan.schemaDigest }, PARENT_BUDGET)
-    for (let i = 0; i < 3; i++) row = (await w.m.parent.continueBranchCutover(w.db, ACTOR, 1, { operationId: row.operation_id, expectedRevision: row.revision, pageSize: 4 }, PARENT_BUDGET)).row
+    for (let i = 0; i < 3; i++) row = (await w.m.parent.continueBranchCutover(w.db, ACTOR, 1, { operationId: row.operation_id, expectedRevision: row.revision, pageSize: 4 }, PARENT_BUDGET, w.hooks)).row
     row = await w.m.journal.abortEffectFreeBranchCutoverJournal(w.db, ownership(row), row.revision, 'operator stopped the rehearsal')
     assert.equal(row.phase, 'aborted'); assert.equal(w.raw.prepare("SELECT count(*) n FROM system_flags WHERE key='maintenance'").get().n, 0)
   }
@@ -497,6 +503,140 @@ async function main() {
     console.log('E2E METRICS ' + JSON.stringify({ products: run.w.products.length, lots: run.w.lots.length, children: run.final.committed_children, folds: folds.length,
       duplicatesRefused: run.w.stats.duplicatesRefused, revision: run.final.revision }))
     run.w.raw.close()
+  })
+  // Owner rulings 7 Oct 2026 (rehearsal F3): damaged-tagged units follow the branch with their tag; an inactive product holding stock is never
+  // reactivated: with exactly one active twin it is folded into it before the first capture page, with none (or several) admission refuses
+  // and lists it, and a product whose only "stock" is the cached products.stock_quantity has the cache recomputed from the ledgers.
+  const twinSeed = (id, name, barcode, active, cache) => `INSERT INTO products(id,name,sku,barcode,is_active,stock_quantity,cost_price_usd,created_at,updated_at) VALUES(${id},'${name}','SKU${id}','${barcode}',${active},${cache},1,'2026-01-01','2026-01-01');`
+  const seedF3 = (raw) => {
+    raw.exec(twinSeed(9001, 'Inactive at Shop', '9000000000011', 0, 3) + twinSeed(9011, 'Inactive at Shop', '9000000000011', 1, 0)
+      + twinSeed(9002, 'Inactive at Warehouse', '9000000000028', 0, 2) + twinSeed(9012, 'Inactive at Warehouse', '9000000000028', 1, 0)
+      + twinSeed(9003, 'Cache drift only', '9000000000035', 0, 8) + twinSeed(9013, 'Cache drift only', '9000000000035', 1, 12)
+      + twinSeed(9005, 'Inactive and empty', '9000000000059', 0, 0)
+      + `INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(9001,2,3),(9002,1,2);
+      INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,unit_cost_usd,received_branch_id,received_quantity,is_active,batch_number,created_at,updated_at) VALUES
+        (9101,9001,'lot-9101','L9101','2026-08-01',1,2,3,1,9101,'2026-01-01','2026-01-01'),(9102,9002,'lot-9102','L9102','2026-08-01',1,1,2,1,9102,'2026-01-01','2026-01-01');
+      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity,created_at,updated_at) VALUES(9101,2,3,'2026-01-01','2026-01-01'),(9102,1,2,'2026-01-01','2026-01-01');
+      INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,batch_id,return_id,quantity,quantity_remaining,reason,condition_tag,source,unit_cost_usd) VALUES
+        (7001,1,'Held at Shop',2,101,5,2,2,'held','damaged','remove',1.5),(7002,1,'Disposed at Shop',2,101,6,1,0,'disposed','damaged','return',1.5)`)
+  }
+  // The real merge is exercised against the real fold in test-product-merge-lineage-native.cjs; this driver only needs the SAME effect on the ledgers.
+  const stubFold = (raw) => async (user, dup, keeper, approved) => {
+    for (const sql of ['UPDATE branch_stock SET product_id=@k WHERE product_id=@d', 'UPDATE product_batches SET variant_product_id=@k WHERE variant_product_id=@d',
+      'UPDATE damaged_stock_lots SET product_id=@k WHERE product_id=@d',
+      'UPDATE products SET stock_quantity=COALESCE((SELECT SUM(quantity) FROM branch_stock WHERE product_id=products.id),0) WHERE id IN (@k,@d)']) raw.prepare(sql).run({ k: keeper.id, d: dup.id })
+    raw.prepare("INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details) VALUES(7,'operator','merge','product',?,?)").run(keeper.id, JSON.stringify({ merged: dup.id }))
+  }
+  const foldMapOf = new Map([[9001, 9011], [9002, 9012]])
+  await check('F3 damaged units follow the branch; an inactive product with one active twin is folded into it (never reactivated); cache drift is recomputed; untouched otherwise', async () => {
+    FOLD_MAP = foldMapOf
+    try {
+      const run = await scenario({ seed: seedF3, hooks: (raw) => ({ foldInactiveProduct: stubFold(raw) }) })
+      for (const lot of run.before.batches) lot.variant_product_id = mapped(lot.variant_product_id) // the fold re-points the lot: the only identity change allowed
+      for (const row of run.before.stock) row.product_id = mapped(row.product_id)
+      verifyEndState(run)
+      const raw = run.w.raw
+      assert.deepEqual(raw.prepare('SELECT id,is_active FROM products WHERE id IN (9001,9002,9003,9005,9011,9012,9013) ORDER BY id').all().map(r => [r.id, r.is_active]),
+        [[9001, 0], [9002, 0], [9003, 0], [9005, 0], [9011, 1], [9012, 1], [9013, 1]], 'no product was reactivated')
+      assert.equal(raw.prepare('SELECT quantity FROM branch_stock WHERE product_id=9011 AND branch_id=1').get().quantity, 3, 'the Shop stock of the inactive product moved to its twin at LC Store')
+      assert.equal(raw.prepare('SELECT quantity FROM branch_stock WHERE product_id=9012 AND branch_id=1').get().quantity, 2, 'the Warehouse stock moved to its twin and stayed')
+      assert.equal(raw.prepare('SELECT count(*) n FROM branch_stock WHERE product_id IN (9001,9002) AND quantity<>0').get().n, 0, 'inactive products end with 0 stock')
+      assert.equal(raw.prepare('SELECT variant_product_id v FROM product_batches WHERE id=9101').get().v, 9011, 'the lot moved with the stock')
+      assert.deepEqual([raw.prepare('SELECT stock_quantity q FROM products WHERE id=9003').get().q, raw.prepare('SELECT stock_quantity q FROM products WHERE id=9013').get().q], [0, 12],
+        'the drifted cache is recomputed to the ledgers (0); its active twin is untouched')
+      const cache = raw.prepare("SELECT entity_id,details FROM audit_logs WHERE action='recompute_stock_cache'").all()
+      assert.deepEqual(cache.map(r => Number(r.entity_id)), [9003])
+      assert.deepEqual([JSON.parse(cache[0].details).before.stock_quantity, JSON.parse(cache[0].details).after.stock_quantity, JSON.parse(cache[0].details).operationId], [8, 0, raw.prepare("SELECT operation_id FROM branch_cutovers WHERE phase='aborted'").get().operation_id]) // done by the first attempt (the scenario aborts one before the real run): an abort does not undo it, and the second run finds nothing left to do
+      assert.equal(raw.prepare("SELECT count(*) n FROM audit_logs WHERE action='branch_cutover_inactive_stock'").get().n, 1, 'one summary row names the run')
+      assert.equal(raw.prepare('SELECT stock_quantity q FROM products WHERE id=9005').get().q, 0, 'an inactive product with no stock is not touched')
+      assert.equal(raw.prepare("SELECT count(*) n FROM audit_logs WHERE entity='product' AND entity_id=9005").get().n, 0)
+      const held = raw.prepare('SELECT * FROM damaged_stock_lots ORDER BY id').all().map(r => ({ ...r }))
+      assert.deepEqual(held.map(r => [r.id, r.branch_id, r.quantity_remaining, r.condition_tag, r.return_id, r.batch_id, r.unit_cost_usd, r.source]),
+        [[7001, 1, 2, 'damaged', 5, 101, 1.5, 'remove'], [7002, 2, 0, 'damaged', 6, 101, 1.5, 'return']], 'the held lot moved with its tag, cost and return link; the disposed one is history')
+      assert.equal(raw.prepare(`SELECT count(*) n FROM products p WHERE p.is_active IS NOT 1 AND (COALESCE(p.stock_quantity,0)<>0
+        OR EXISTS(SELECT 1 FROM branch_stock s WHERE s.product_id=p.id AND s.quantity<>0)
+        OR EXISTS(SELECT 1 FROM product_batches b CROSS JOIN branch_batch_stock s ON s.batch_id=b.id WHERE b.variant_product_id=p.id AND s.quantity<>0)
+        OR EXISTS(SELECT 1 FROM damaged_stock_lots d WHERE d.product_id=p.id AND d.quantity_remaining<>0))`).get().n, 0, 'post-check inactive_with_stock = 0 across all four ledgers')
+      raw.close()
+    } finally { FOLD_MAP = new Map() }
+  })
+  await check('F3 an inactive product holding stock with no active twin, or with several, is refused at admission and listed; nothing is written', async () => {
+    for (const [label, extra] of [['no twin', twinSeed(9021, 'Lonely inactive', '9000000000216', 0, 4) + 'INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(9021,2,4);'],
+      ['two twins', twinSeed(9031, 'Doubled inactive', '9000000000314', 0, 4) + twinSeed(9032, 'Doubled inactive', '9000000000314', 1, 0) + twinSeed(9033, 'Doubled inactive', '9000000000314', 1, 0)
+        + 'INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(9031,1,4);']]) {
+      const w = world({ generatedProducts: 4 }); w.raw.exec(extra)
+      const plan = await w.m.parent.inspectBranchCutover(w.db, ACTOR, 1, IDS, PARENT_BUDGET)
+      assert.deepEqual(plan.capabilities.map(c => c.code), ['inactive_stock_without_twin'], label)
+      assert.match(plan.capabilities[0].detail, label === 'no twin' ? /^9021:no_active_twin$/ : /^9031:several_active_twins$/)
+      await assert.rejects(w.m.parent.beginBranchCutover(w.db, ACTOR, 1, { ...IDS, ...NAMES, requestId: 'f3_refuse_' + label.replace(/\W/g, ''), controlIncarnation: INCARNATION,
+        expectedSourceJson: plan.sourcePreimageJson, expectedTargetJson: plan.targetPreimageJson, expectedSchemaDigest: plan.schemaDigest }, PARENT_BUDGET),
+      e => e.code === 'branch_cutover_parent_capability' && /inactive_stock_without_twin/.test(e.capability), label)
+      assert.equal(w.raw.prepare('SELECT count(*) n FROM branch_cutovers').get().n, 0, label + ': no journal row')
+      w.raw.close()
+    }
+  })
+  await check('F3 owner-approved fold (7091 -> 1529): inspect lists it as refused without the approval; with it begin seals the list into the intent and every later step reads it from the journal', async () => {
+    const w = world({ generatedProducts: 4 })
+    w.raw.exec(`INSERT INTO products(id,name,sku,barcode,is_active,stock_quantity,cost_price_usd,created_at,updated_at) VALUES
+        (7091,'Colourpop Shadow Stix-Angel Vibes','CP-OLD',NULL,0,2,3,'2026-01-01','2026-01-01'),(1529,'Colourpop Shadow Stix Angel Vibes','CP-NEW','0',1,0,3,'2026-01-01','2026-01-01');
+      INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(7091,1,2)`)
+    const calls = []
+    w.hooks = { foldInactiveProduct: async (user, dup, keeper, approved) => { calls.push([dup.id, keeper.id, approved]); await stubFold(w.raw)(user, dup, keeper) } }
+    const bare = await w.m.parent.inspectBranchCutover(w.db, ACTOR, 1, IDS, PARENT_BUDGET)
+    assert.deepEqual(bare.capabilities.map(c => [c.code, c.detail]), [['inactive_stock_without_twin', '7091:no_active_twin']])
+    const approvedFolds = [{ dup: 7091, keeper: 1529 }]
+    const plan = await w.m.parent.inspectBranchCutover(w.db, ACTOR, 1, IDS, PARENT_BUDGET, approvedFolds)
+    assert.deepEqual(plan.capabilities, [])
+    assert.deepEqual(plan.inactiveStock.fold.map(i => [i.dup.id, i.keeper.id, i.approved]), [[7091, 1529, true]])
+    const begin = { ...IDS, ...NAMES, requestId: 'f3_approved_fold', controlIncarnation: INCARNATION,
+      expectedSourceJson: plan.sourcePreimageJson, expectedTargetJson: plan.targetPreimageJson, expectedSchemaDigest: plan.schemaDigest }
+    await assert.rejects(w.m.parent.beginBranchCutover(w.db, ACTOR, 1, begin, PARENT_BUDGET), e => /inactive_stock_without_twin/.test(e.capability), 'begin without the approval is refused')
+    assert.equal(w.raw.prepare('SELECT count(*) n FROM branch_cutovers').get().n, 0)
+    let { row } = await w.m.parent.beginBranchCutover(w.db, ACTOR, 1, { ...begin, approvedFolds }, PARENT_BUDGET)
+    assert.deepEqual(JSON.parse(row.intent_json).approvedFolds, approvedFolds, 'sealed into the intent')
+    // a later step carries no list of its own: it reads the sealed one
+    row = (await w.m.parent.continueBranchCutover(w.db, ACTOR, 1, { operationId: row.operation_id, expectedRevision: row.revision, pageSize: 16 }, PARENT_BUDGET, w.hooks)).row
+    assert.deepEqual(calls, [[7091, 1529, true]])
+    assert.equal(w.raw.prepare('SELECT quantity FROM branch_stock WHERE product_id=1529 AND branch_id=1').get().quantity, 2)
+    assert.equal(w.raw.prepare('SELECT is_active FROM products WHERE id=7091').get().is_active, 0)
+    assert.equal(w.raw.prepare("SELECT count(*) n FROM audit_logs WHERE action='branch_cutover_approved_fold' AND details LIKE '%owner-approved fold 7 Oct 2026%'").get().n, 1)
+    w.raw.close()
+  })
+  await check('F1 an approved fold survives a crash between the merge and the next save: the resume (continue) and a replayed begin both proceed, folding nothing twice', async () => {
+    const w = world({ generatedProducts: 4 })
+    w.raw.exec(`INSERT INTO products(id,name,sku,barcode,is_active,stock_quantity,cost_price_usd,created_at,updated_at) VALUES
+        (7091,'Colourpop Shadow Stix-Angel Vibes','CP-OLD',NULL,0,2,3,'2026-01-01','2026-01-01'),(1529,'Colourpop Shadow Stix Angel Vibes','CP-NEW','0',1,0,3,'2026-01-01','2026-01-01');
+      INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(7091,1,2)`)
+    let folds = 0, dieAfterFold = true
+    const hooks = { foldInactiveProduct: async (user, dup, keeper, approved) => { await stubFold(w.raw)(user, dup, keeper, approved); folds++; if (dieAfterFold) { dieAfterFold = false; throw new Error('isolate died after the fold') } } }
+    const approvedFolds = [{ dup: 7091, keeper: 1529 }]
+    const plan = await w.m.parent.inspectBranchCutover(w.db, ACTOR, 1, IDS, PARENT_BUDGET, approvedFolds)
+    const begin = { ...IDS, ...NAMES, requestId: 'f1_crash_resume', controlIncarnation: INCARNATION, approvedFolds,
+      expectedSourceJson: plan.sourcePreimageJson, expectedTargetJson: plan.targetPreimageJson, expectedSchemaDigest: plan.schemaDigest }
+    const { row } = await w.m.parent.beginBranchCutover(w.db, ACTOR, 1, begin, PARENT_BUDGET)
+    await assert.rejects(w.m.parent.prepareInactiveStock(w.db, ACTOR, row.operation_id, approvedFolds, hooks), /isolate died/)
+    assert.equal(w.raw.prepare('SELECT quantity FROM branch_stock WHERE product_id=1529 AND branch_id=1').get().quantity, 2, 'the fold committed')
+    // a replayed begin (the runner retries the same request id) is not refused for a pair that is already done
+    const replay = await w.m.parent.beginBranchCutover(w.db, ACTOR, 1, begin, PARENT_BUDGET)
+    assert.equal(replay.replayed, true)
+    // the resume: the first capture page re-plans and finds the pair done
+    const next = await w.m.parent.continueBranchCutover(w.db, ACTOR, 1, { operationId: row.operation_id, expectedRevision: row.revision, pageSize: 16 }, PARENT_BUDGET, hooks)
+    assert.equal(next.row.revision, row.revision + 1)
+    assert.equal(folds, 1, 'folded exactly once')
+    w.raw.close()
+  })
+  await check('F3 without the merge hook a plan that needs a fold refuses before anything is read (the Worker always supplies it)', async () => {
+    const w = world({ generatedProducts: 4 }); seedF3(w.raw)
+    const plan = await w.m.parent.inspectBranchCutover(w.db, ACTOR, 1, IDS, PARENT_BUDGET)
+    assert.equal(plan.capabilities.length, 0)
+    assert.deepEqual(plan.inactiveStock.fold.map(i => [i.dup.id, i.keeper.id]), [[9001, 9011], [9002, 9012]])
+    assert.deepEqual(plan.inactiveStock.cacheOnly.map(r => r.id), [9003])
+    const { row } = await w.m.parent.beginBranchCutover(w.db, ACTOR, 1, { ...IDS, ...NAMES, requestId: 'f3_nohook', controlIncarnation: INCARNATION,
+      expectedSourceJson: plan.sourcePreimageJson, expectedTargetJson: plan.targetPreimageJson, expectedSchemaDigest: plan.schemaDigest }, PARENT_BUDGET)
+    await assert.rejects(w.m.parent.continueBranchCutover(w.db, ACTOR, 1, { operationId: row.operation_id, expectedRevision: row.revision, pageSize: 8 }, PARENT_BUDGET),
+      e => /inactive_stock_fold_unavailable/.test(e.capability))
+    assert.equal(w.raw.prepare('SELECT quantity FROM branch_stock WHERE product_id=9001 AND branch_id=2').get().quantity, 3, 'nothing moved')
+    w.raw.close()
   })
   await check('a fault-free run reaches the identical end state (faults change nothing but the journal revision)', async () => {
     const clean = await scenario({})

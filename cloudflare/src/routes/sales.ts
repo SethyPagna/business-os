@@ -33,8 +33,15 @@ import { mergePaymentMethods, parseConfiguredMethods, saleMethodsUsed } from '..
 import { planSaleSettlement, SettlementValidationError } from '../lib/paymentSettlement'
 // Sales are Shop-only. The same predicate runs in the UI and here where an
 // offline replay, direct API caller, or stale client cannot bypass it.
-import { firstUnsellableBranch, sellingBranchConditionSql, sellingBranchGuardStatement } from '../lib/branchRoleGuards'
+import {
+  BRANCH_NOT_SELLABLE_CODE, BRANCH_NOT_SELLABLE_ERROR, SALE_BRANCH_MISMATCH_CODE, SALE_BRANCH_MISMATCH_ERROR,
+  SALE_IDENTITY_CONFLICT_CODE, SALE_IDENTITY_CONFLICT_ERROR, UNRECORDED_STOCK_LINE_CODE, UNRECORDED_STOCK_LINE_ERROR,
+  firstUnsellableBranch, sellingBranchConditionSql, sellingBranchGuardStatement,
+} from '../lib/branchRoleGuards'
 import { branchCanSell } from '../lib/branchRoles'
+import {
+  BranchEffectResolver, branchEffectRefusal, branchRedirectTarget, effectGuardStatement, foldedLotSurvivors, readBranchDirectory, redirectSaleLine, redirectStockItems,
+} from '../lib/branchEffect'
 import {
   SALE_SETTLEMENT_ACTION_KIND,
   buildSaleSettlementAfterState,
@@ -155,8 +162,18 @@ import type { Env } from '../index'
 import { actorId, actorSnapshot } from '../lib/actorSnapshot'
 import { ANONYMOUS_CUSTOMER_ERROR_CODE, ANONYMOUS_CUSTOMER_MUTATION_ERROR, isAnonymousCustomer } from '../lib/anonymousCustomer'
 
+// Historical label (owner rule: old records are never relabelled): the row's own branch-name snapshot
+// when it has a non-blank one, else the live directory name. The SAME expression as
+// branchHistoryNameSql in lib/stockInSessionsQuery.ts; test-cutover-ld-historical-readers-native.cjs pins every copy.
+const branchHistoryNameSql = (snapshot: string, fallback: string): string =>
+  `CASE WHEN trim(COALESCE(${snapshot},''),char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279))<>'' THEN ${snapshot} ELSE ${fallback} END`
+
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
-const SHOP_ONLY_SALE_ERROR = 'Sales can only be recorded at the Shop. Transfer Warehouse stock to the Shop first.'
+// Every sale writer's refusal of a branch that is not an active selling branch. Role-neutral (no Shop/Warehouse: the
+// branches are Old Shop and LC Store after the cutover) and coded, so the client restates it from the pack key
+// branch_not_sellable. The English is that key's, word for word.
+const NOT_SELLING_BRANCH_BODY = { error: BRANCH_NOT_SELLABLE_ERROR, code: BRANCH_NOT_SELLABLE_CODE } as const
+const SALE_BRANCH_MISMATCH_BODY = { error: SALE_BRANCH_MISMATCH_ERROR, code: SALE_BRANCH_MISMATCH_CODE } as const
 // POST / re-mints a receipt number this many times after losing an in-batch
 // receipt race before answering receipt_number_conflict. Each retry re-runs
 // the whole atomic batch, so the bound caps the write cost of a burst.
@@ -579,7 +596,7 @@ app.post('/', async (c) => {
   // ---- 1. Normalize + validate input shape (no DB access yet) ----
   const saleHeaderBranchId = Number(body.branch_id)
   if (!Number.isSafeInteger(saleHeaderBranchId) || saleHeaderBranchId <= 0) {
-    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+    return c.json(NOT_SELLING_BRANCH_BODY, 400)
   }
   const normalized: NormalizedItem[] = []
   for (let index = 0; index < body.items.length; index += 1) {
@@ -597,7 +614,7 @@ app.post('/', async (c) => {
     }
     const lineBranchId = Number(item.branch_id ?? saleHeaderBranchId)
     if (!Number.isSafeInteger(lineBranchId) || lineBranchId <= 0 || lineBranchId !== saleHeaderBranchId) {
-      return c.json({ error: 'The sale header and every line must use the same Shop branch.' }, 400)
+      return c.json(SALE_BRANCH_MISMATCH_BODY, 400)
     }
     normalized.push({
       ...item,
@@ -617,7 +634,7 @@ app.post('/', async (c) => {
   if (saleBranchRows.length !== saleBranchIds.length
     || saleBranchRows.some((branch) => Number(branch.is_active ?? 1) !== 1)
     || firstUnsellableBranch(saleBranchRows)) {
-    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+    return c.json(NOT_SELLING_BRANCH_BODY, 400)
   }
 
   // ---- 2. Read current prices + stock (plain reads, before any writes) ----
@@ -691,7 +708,7 @@ app.post('/', async (c) => {
   const requestedUnlottedByKey = new Map<string, { productId: number; branchId: number; quantity: number }>()
   for (const item of normalized) {
     if (!item.unlotted_stock) continue
-    if (item.batch_id || item.damaged_lot_id || !item.branch_id) return c.json({ error: 'Unrecorded stock must be a regular Shop sale line.' }, 400)
+    if (item.batch_id || item.damaged_lot_id || !item.branch_id) return c.json({ error: UNRECORDED_STOCK_LINE_ERROR, code: UNRECORDED_STOCK_LINE_CODE }, 400)
     const key = `${item.product_id}:${item.branch_id}`
     const requested = requestedUnlottedByKey.get(key)
     requestedUnlottedByKey.set(key, requested
@@ -1783,8 +1800,8 @@ app.post('/', async (c) => {
       }
       if (/NOT NULL constraint failed:\s*(?:sale_items\.sale_id|sale_item_batch_allocations\.sale_item_id)/i.test(message)) {
         return c.json({
-          error: 'The Shop or batch changed while this sale was being recorded. Refresh the sale and pick the current batch before trying again.',
-          code: 'sale_identity_conflict',
+          error: SALE_IDENTITY_CONFLICT_ERROR,
+          code: SALE_IDENTITY_CONFLICT_CODE,
         }, 409)
       }
       // A CHECK(quantity >= 0) failure means a concurrent sale consumed the
@@ -1912,7 +1929,7 @@ type SaleItemRow = {
 
 app.post('/bulk-status', async (c) => {
   try {
-    const result = await applySaleBulkStatus(c.env, c.get('user'), await c.req.json())
+    const result = await applySaleBulkStatus(c.env, c.get('user'), await c.req.json(), branchRedirectTarget(c))
     c.executionCtx.waitUntil(notifyBulkStatus(c.env))
     return c.json(result)
   } catch (error) {
@@ -2273,6 +2290,25 @@ app.patch('/:id/status', async (c) => {
       if (list && list.length) (item as SaleItemRow & { allocations?: SaleItemAllocation[] }).allocations = list
     }
   }
+  // A line recorded at a branch that has since been retired (Old Shop -> LC Store) moves its stock at the
+  // ACTIVE successor, in the lot that exists there now; the sale and its lines keep their own branch. While
+  // every branch is active nothing is redirected and nothing below changes.
+  const branchResolver = new BranchEffectResolver(await readBranchDirectory(db), branchRedirectTarget(c))
+  try {
+    await redirectStockItems(db, branchResolver, items as Array<SaleItemRow & { allocations?: SaleItemAllocation[]; effect?: { branchName: string | null; addressedName: string | null } }>, {
+      moves: (item) => {
+        if (skipStock || !item.product_id || !item.branch_id) return false
+        const returned = Math.max(0, Number(returnedByItem.get(item.id)) || 0)
+        return heldQuantity(saleStatus, item.quantity, returned) !== heldQuantity(oldStatus, item.quantity, returned)
+      },
+      saleBranchId: Number(sale.branch_id) || null,
+      saleLabel: typeof sale.branch_name === 'string' ? sale.branch_name : null,
+    })
+  } catch (error) {
+    const refusal = branchEffectRefusal(error)
+    if (refusal) return c.json(refusal, 409)
+    throw error
+  }
   const damagedTransitionOps: Array<{ lotId: number; productId: number; productName: string | null; branchId: number | null; delta: number }> = []
   let skippedDamagedUnits = 0
   for (const item of items) {
@@ -2505,25 +2541,41 @@ app.patch('/:id/status', async (c) => {
   if (saleStatus === 'cancelled' && (cancelFeeUsd > 0 || cancelFeeKhr > 0)) {
     const cancellationBranchId = Number(sale.branch_id)
     if (!Number.isSafeInteger(cancellationBranchId) || cancellationBranchId <= 0) {
-      return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+      return c.json(NOT_SELLING_BRANCH_BODY, 400)
     }
-    const cancellationBranch = await db.prepare(
-      'SELECT id,name,role FROM branches WHERE id=@id AND COALESCE(is_active,1)=1 LIMIT 1',
-    ).get<{ id: number; name: string | null; role: unknown }>({ id: cancellationBranchId })
+    // The expense is cash that leaves a drawer, and Old Shop has no drawer: it is booked to the branch the sale
+    // was recorded at while that branch is active, and to the ACTIVE selling branch the operator confirmed
+    // (X-Branch-Redirect) once it is retired (the sale itself, linked by sale_id, keeps its own branch and label).
+    const cancellationBranch = branchResolver.directory.find((row) => Number(row.id) === cancellationBranchId)
+    const cancellationBranchActive = !!cancellationBranch && Number(cancellationBranch.is_active ?? 1) === 1
     if (!cancellationBranch || !branchCanSell(cancellationBranch)) {
-      return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+      return c.json(NOT_SELLING_BRANCH_BODY, 400)
     }
-    statements.push(sellingBranchGuardStatement(cancellationBranchId))
+    let cancellationFeeBranchId = cancellationBranchId
+    if (!cancellationBranchActive) {
+      try {
+        cancellationFeeBranchId = branchResolver.effect(cancellationBranchId, { sells: true })!.effectBranchId
+      } catch (error) {
+        const refusal = branchEffectRefusal(error)
+        if (refusal) return c.json(refusal, 409)
+        throw error
+      }
+    }
+    if (cancellationBranchActive) statements.push(sellingBranchGuardStatement(cancellationBranchId))
+    else {
+      const retiredFeeGuard = effectGuardStatement([{ addressed: cancellationBranchId, effect: cancellationFeeBranchId, sells: 1 }])
+      if (retiredFeeGuard) statements.push(retiredFeeGuard)
+    }
     statements.push({
-      sql: `INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, notes, created_by, created_by_name)
-            VALUES ('expense', @label, @amount_usd, @amount_khr, @fee_date, @sale_id, @branch_id, @notes, @created_by, @created_by_name)`,
+      sql: `INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, branch_name, notes, created_by, created_by_name)
+            VALUES ('expense', @label, @amount_usd, @amount_khr, @fee_date, @sale_id, @branch_id, (SELECT name FROM branches WHERE id = @branch_id), @notes, @created_by, @created_by_name)`,
       params: {
         label: `Cancelled sale ${sale.receipt_number || id} -- lost fee`,
         fee_date: businessToday(Date.parse(mutationStamp)),
         amount_usd: cancelFeeUsd,
         amount_khr: cancelFeeKhr,
         sale_id: Number(id),
-        branch_id: cancellationBranchId,
+        branch_id: cancellationFeeBranchId,
         notes: cancelFeeNote || `Fee lost to cancellation (${cancelReasonLabel(cancelReason!)})`,
         created_by: user?.id ?? null,
         created_by_name: actorSnapshot(user),
@@ -2591,6 +2643,8 @@ app.patch('/:id/status', async (c) => {
     })
   }
   statements.push(...settlementLineStatements)
+  const effectGuard = effectGuardStatement(branchResolver.guards())
+  if (effectGuard) statements.push(effectGuard)
   statements.push(...plan.statements)
 
   // A provisional restore can be spent by another request before a status
@@ -3237,7 +3291,7 @@ app.post('/:id/items', async (c) => {
   }> = []
   const saleHeaderBranchId = Number(sale.branch_id)
   if (!Number.isSafeInteger(saleHeaderBranchId) || saleHeaderBranchId <= 0) {
-    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+    return c.json(NOT_SELLING_BRANCH_BODY, 400)
   }
   for (let index = 0; index < rawItems.length; index += 1) {
     const item = rawItems[index] || {}
@@ -3258,7 +3312,7 @@ app.post('/:id/items', async (c) => {
     const rawPrice = Number(item.applied_price_usd)
     const lineBranchId = Number(item.branch_id ?? saleHeaderBranchId)
     if (!Number.isSafeInteger(lineBranchId) || lineBranchId <= 0 || lineBranchId !== saleHeaderBranchId) {
-      return c.json({ error: 'The sale header and every added line must use the same Shop branch.' }, 400)
+      return c.json(SALE_BRANCH_MISMATCH_BODY, 400)
     }
     requested.push({
       productId,
@@ -3283,10 +3337,40 @@ app.post('/:id/items', async (c) => {
   const addedBranchRows = await selectInChunks(addedBranchIds, 0, (chunk) => db
     .prepare(`SELECT id, name, role, is_active FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
     .all<{ id: number; name: string | null; role: unknown; is_active: number | null }>(chunk))
-  if (addedBranchRows.length !== addedBranchIds.length
+  // A sale made at a branch that has since been retired (Old Shop -> LC Store) takes new goods only at the active
+  // selling branch the operator confirmed (X-Branch-Redirect): the sale and its new lines keep the sale's branch,
+  // the units come off the confirmed branch, and the movement names both. Without a confirmed branch the request
+  // is refused with branch_redirect_required, carrying the successor. Nothing is written before that.
+  let additionEffect: { effectBranchId: number; branchName: string | null; addressedName: string | null } | null = null
+  let additionResolver: BranchEffectResolver | null = null
+  if (addedBranchRows.length === addedBranchIds.length && !firstUnsellableBranch(addedBranchRows)
+    && addedBranchRows.some((branch) => Number(branch.is_active ?? 1) !== 1)) {
+    additionResolver = new BranchEffectResolver(await readBranchDirectory(db), branchRedirectTarget(c))
+    try {
+      const effect = additionResolver.effect(saleHeaderBranchId, { sells: true })
+      if (effect?.redirected) {
+        const saleLabel = (sale as Record<string, unknown>).branch_name
+        additionEffect = { effectBranchId: effect.effectBranchId, branchName: effect.effectName, addressedName: typeof saleLabel === 'string' && saleLabel ? saleLabel : effect.addressedName }
+      }
+    } catch (error) {
+      const refusal = branchEffectRefusal(error)
+      if (refusal) return c.json(refusal, 409)
+      throw error
+    }
+  }
+  if (!additionEffect && (addedBranchRows.length !== addedBranchIds.length
     || addedBranchRows.some((branch) => Number(branch.is_active ?? 1) !== 1)
-    || firstUnsellableBranch(addedBranchRows)) {
-    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+    || firstUnsellableBranch(addedBranchRows))) {
+    return c.json(NOT_SELLING_BRANCH_BODY, 400)
+  }
+  if (additionEffect) {
+    // A lot picked from the sale's branch is the lot that holds it at the confirmed branch now (a lot the
+    // consolidation folded is its survivor).
+    const survivors = await foldedLotSurvivors(db, additionEffect.effectBranchId, requested.map((item) => Number(item.batchId)).filter((id) => id > 0))
+    for (const item of requested) {
+      item.branchId = additionEffect.effectBranchId
+      if (item.batchId) item.batchId = survivors.get(Number(item.batchId)) ?? item.batchId
+    }
   }
 
   // ---- Current prices/costs, chunked for D1's parameter ceiling ----
@@ -3360,6 +3444,7 @@ app.post('/:id/items', async (c) => {
       batchLabel: item.batchLabel,
       batchExpiryDate: item.batchExpiryDate,
       unlottedStock: item.unlottedStock,
+      ...(additionEffect ? { recordedBranchId: saleHeaderBranchId, effect: { branchName: additionEffect.branchName, addressedName: additionEffect.addressedName } } : {}),
     }
   })
   const explicitBatchResolution = resolveExplicitSaleLineBatches(candidateLines, lotsByKey)
@@ -3585,7 +3670,9 @@ app.post('/:id/items', async (c) => {
     const atomicStatements: StatementList = [
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
-      sellingBranchGuardStatement(saleHeaderBranchId),
+      // A redirected addition re-proves inside the commit that the confirmed branch still sells and the sale's
+      // branch is still retired; otherwise the sale's own branch must still be an active selling branch.
+      ...(additionEffect ? [sellingBranchGuardStatement(additionEffect.effectBranchId), effectGuardStatement(additionResolver!.guards())!] : [sellingBranchGuardStatement(saleHeaderBranchId)]),
       amendmentSettingsGuard(moneySettings),
       saleRevisionGuard(saleId, Number(sale.write_revision)),
       precisionBasket.guard,
@@ -4028,15 +4115,23 @@ app.post('/:id/amendments', async (c) => {
 
   const saleHeaderBranchId = Number(sale.branch_id)
   if (!Number.isSafeInteger(saleHeaderBranchId) || saleHeaderBranchId <= 0) {
-    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+    return c.json(NOT_SELLING_BRANCH_BODY, 400)
   }
-  const amendmentBranch = await db.prepare('SELECT id, name, role, is_active FROM branches WHERE id = ?')
-    .get<{ id: number; name: string | null; role: unknown; is_active: number | null }>([saleHeaderBranchId])
-  if (!amendmentBranch
-    || Number(amendmentBranch.is_active ?? 1) !== 1
-    || firstUnsellableBranch([amendmentBranch])) {
-    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+  // A sale made at a branch that has since been retired (Old Shop -> LC Store) can still be corrected. Its money
+  // amendments (delivery) move no stock and are unchanged; a line change moves its units at the ACTIVE selling
+  // branch the operator confirmed (X-Branch-Redirect), resolved where the line is read below. A branch that is
+  // active behaves exactly as before.
+  const branchResolver = new BranchEffectResolver(await readBranchDirectory(db), branchRedirectTarget(c))
+  const amendmentBranch = branchResolver.directory.find((row) => Number(row.id) === saleHeaderBranchId)
+  if (!amendmentBranch || firstUnsellableBranch([amendmentBranch])) {
+    return c.json(NOT_SELLING_BRANCH_BODY, 400)
   }
+  const headerRetired = Number(amendmentBranch.is_active ?? 1) !== 1
+  // The header's in-batch guard: the selling branch is still active, or the retired one is still retired (a line
+  // change that was redirected adds the redirect's own guard to its batch).
+  const headerBranchGuard = headerRetired
+    ? { sql: 'INSERT INTO sale_bulk_guards(guard_value) SELECT CASE WHEN EXISTS(SELECT 1 FROM branches WHERE id=@retiredSaleBranchId AND is_active=0) THEN 1 ELSE 0 END', params: { retiredSaleBranchId: saleHeaderBranchId } }
+    : sellingBranchGuardStatement(saleHeaderBranchId)
 
   try {
     assertUpdatedAtMatch('sale', sale, getExpectedUpdatedAt(body))
@@ -4212,7 +4307,7 @@ app.post('/:id/amendments', async (c) => {
       await db.batch([
         { sql: 'DELETE FROM sale_mutation_guards', params: {} },
         { sql: 'DELETE FROM sale_bulk_guards', params: {} },
-        sellingBranchGuardStatement(saleHeaderBranchId),
+        headerBranchGuard,
         amendmentSettingsGuard(moneySettings),
         contactReferenceGuard,
         saleRevisionGuard(saleId, Number(sale.write_revision)),
@@ -4323,7 +4418,7 @@ app.post('/:id/amendments', async (c) => {
       await db.batch([
         { sql: 'DELETE FROM sale_mutation_guards', params: {} },
         { sql: 'DELETE FROM sale_bulk_guards', params: {} },
-        sellingBranchGuardStatement(saleHeaderBranchId),
+        headerBranchGuard,
         amendmentSettingsGuard(moneySettings),
         saleRevisionGuard(saleId, Number(sale.write_revision)),
         ...(precisionBasket?[precisionBasket.guard]:[]),
@@ -4454,7 +4549,7 @@ app.post('/:id/amendments', async (c) => {
       await db.batch([
         { sql: 'DELETE FROM sale_mutation_guards', params: {} },
         { sql: 'DELETE FROM sale_bulk_guards', params: {} },
-        sellingBranchGuardStatement(saleHeaderBranchId),
+        headerBranchGuard,
         amendmentSettingsGuard(moneySettings),
         saleRevisionGuard(saleId, Number(sale.write_revision)),
         precisionBasket!.guard,
@@ -4526,7 +4621,7 @@ app.post('/:id/amendments', async (c) => {
   `).get<{ id: number; product_id: number | null; product_name: string | null; quantity: number; applied_price_usd: number; applied_price_khr: number; cost_price_usd: number; cost_price_khr: number; branch_id: number | null; base_price_usd?: number; base_price_khr?: number; product_discount_usd?: number; product_discount_khr?: number; manual_discount_type?: string | null; manual_discount_value?: number; manual_discount_usd?: number; manual_discount_khr?: number; price_mode?: string | null; total_usd?: number; total_khr?: number }>([lineId, saleId])
   if (!line) return c.json({ error: 'That line is not on this sale.' }, 404)
   if (Number(line.branch_id) !== saleHeaderBranchId) {
-    return c.json({ error: 'The sale header and every amended line must use the same Shop branch.' }, 400)
+    return c.json(SALE_BRANCH_MISMATCH_BODY, 400)
   }
 
   // Draw order (id ASC) -- the decrease walk relies on it to hand units back
@@ -4535,6 +4630,31 @@ app.post('/:id/amendments', async (c) => {
     SELECT id, batch_id, branch_id, quantity, released_quantity
     FROM sale_item_batch_allocations WHERE sale_item_id = ? ORDER BY id ASC
   `).all<LineAllocation>([lineId])
+  // A sale at a retired branch: units that come back, and units newly taken (an increase or a replacement), move
+  // at the active selling branch the operator confirmed, in the lots that exist there now; the stored line keeps the
+  // sale's branch. A change that moves no units (a price-only edit) needs no redirect.
+  const storedAllocationBranches = allocations.map((allocation) => allocation.branch_id)
+  if (headerRetired) {
+    const changesUnits = kind !== 'line_updated' || (body.quantity !== undefined && Number(body.quantity) !== Number(line.quantity))
+    if (changesUnits) {
+      const saleBranchLabel = (sale as Record<string, unknown>).branch_name
+      try {
+        await redirectSaleLine(db, branchResolver, line as Parameters<typeof redirectSaleLine>[2], allocations, {
+          saleBranchId: saleHeaderBranchId, saleLabel: typeof saleBranchLabel === 'string' ? saleBranchLabel : null,
+        })
+      } catch (error) {
+        const refusal = branchEffectRefusal(error)
+        if (refusal) return c.json(refusal, 409)
+        throw error
+      }
+    }
+  }
+  const lineEffect = (line as { effect?: { branchName: string | null; addressedName: string | null } }).effect ?? null
+  // Units newly taken at the confirmed branch extend only allocation rows recorded there; a row taken at the retired
+  // branch keeps its own provenance and the new take gets its own row at the confirmed branch.
+  const increaseAllocations = lineEffect
+    ? allocations.filter((_, index) => Number(storedAllocationBranches[index]) === Number(line.branch_id))
+    : allocations
 
   const statements: StatementList = []
   const ledgerEntries: Array<Parameters<typeof amendmentEntryStatement>[0]> = []
@@ -4568,7 +4688,7 @@ app.post('/:id/amendments', async (c) => {
       const workingLine={...line,applied_price_usd:Number(historical.row.applied_price_usd)}
       const quantityPlan=delta>0?planLineQuantityIncrease({moneyPrecisionVersion:1,saleId,sale,line:workingLine,addedQuantity:delta,
         lots:line.branch_id?(await readFifoLotAvailabilityForCart(db,[{productId:Number(line.product_id),branchId:line.branch_id}])).get(`${line.product_id}:${line.branch_id}`)||[]:[],
-        exchangeRate,userId:user?.id??null,userName:actorSnapshot(user),existingAllocations:allocations})
+        exchangeRate,userId:user?.id??null,userName:actorSnapshot(user),existingAllocations:increaseAllocations})
         :planLineQuantityDecrease({moneyPrecisionVersion:1,saleId,sale,line:workingLine,removedQuantity:-delta,allocations,exchangeRate,
           reason:`Quantity changed on sale #${saleId}`,userId:user?.id??null,userName:actorSnapshot(user)})
       statements.push(...quantityPlan.statements);unitsMoved+=quantityPlan.unitsMoved
@@ -4645,7 +4765,7 @@ app.post('/:id/amendments', async (c) => {
         quantityPlan = planLineQuantityIncrease({
           moneyPrecisionVersion: 1,
           saleId, sale, line: workingLine, addedQuantity: quantityDelta, lots, exchangeRate,
-          userId: user?.id ?? null, userName: actorSnapshot(user), existingAllocations: allocations,
+          userId: user?.id ?? null, userName: actorSnapshot(user), existingAllocations: increaseAllocations,
         })
       } else {
         const removed = Math.abs(quantityDelta)
@@ -4703,7 +4823,7 @@ app.post('/:id/amendments', async (c) => {
     const plan = planLineQuantityIncrease({
       moneyPrecisionVersion: 1,
       saleId, sale, line, addedQuantity: requested, lots, exchangeRate,
-      userId: user?.id ?? null, userName: actorSnapshot(user), existingAllocations: allocations,
+      userId: user?.id ?? null, userName: actorSnapshot(user), existingAllocations: increaseAllocations,
     })
     statements.push(...plan.statements)
     subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,plan.subtotalDeltaUsd])
@@ -4765,7 +4885,7 @@ app.post('/:id/amendments', async (c) => {
 
     const branchId = Number(replacement.branch_id ?? saleHeaderBranchId)
     if (!Number.isSafeInteger(branchId) || branchId <= 0 || branchId !== saleHeaderBranchId) {
-      return c.json({ error: 'The sale header and replacement line must use the same Shop branch.' }, 400)
+      return c.json(SALE_BRANCH_MISMATCH_BODY, 400)
     }
     if (!replacement.client_line_key || !['selling','wholesale','manual'].includes(replacement.pricing_source || ''))
       throw new SaleMoneyContractError('money_precision_pricing_intent_required')
@@ -4788,8 +4908,11 @@ app.post('/:id/amendments', async (c) => {
     const replacementJson=serializeSaleItemPricing(replacementPool,replacementQuantities,replacement.client_line_key,{version:1,lines:[{line_key:replacement.client_line_key,amount:replacementPricing.total_usd}],discount_usd:0,membership_discount_usd:0,tax_usd:0})
     const unitPriceUsd = replacementPricing.applied_price_usd
 
-    const lotsByKey = branchId
-      ? await readFifoLotAvailabilityForCart(db, [{ productId, branchId }])
+    // A replacement on a sale at a retired branch draws its units at the confirmed branch the replaced line was
+    // redirected to; the new line is stored under the sale's branch.
+    const stockBranchId = lineEffect ? Number(line.branch_id) : branchId
+    const lotsByKey = stockBranchId
+      ? await readFifoLotAvailabilityForCart(db, [{ productId, branchId: stockBranchId }])
       : new Map()
     // The replacement line is planned by S4-24b's own addition kernel --
     // called, not re-implemented -- so a replaced-in product draws its lots by
@@ -4806,14 +4929,15 @@ app.post('/:id/amendments', async (c) => {
     const plannedLines = allocateNewSaleLines([{
       moneyPrecisionVersion: 1,
       pricingSnapshotJson:replacementJson,
-      productId, productName: product.name || `product #${productId}`, quantity, branchId,
+      productId, productName: product.name || `product #${productId}`, quantity, branchId: stockBranchId,
       unitPriceUsd, costPriceUsd: product.cost_price_usd == null ? null : newSaleMoney4(product.cost_price_usd), costPriceKhr: product.cost_price_khr == null ? null : newSaleMoney4(product.cost_price_khr),
       batchId: null, batchLabel: null, batchExpiryDate: null,
+      ...(lineEffect ? { recordedBranchId: branchId, effect: lineEffect } : {}),
     }], lotsByKey, saleStatus, !movesStock)
 
-    if (movesStock && branchId) {
+    if (movesStock && stockBranchId) {
       const have = await db.prepare('SELECT quantity FROM branch_stock WHERE branch_id = ? AND product_id = ?')
-        .get<{ quantity: number }>([branchId, productId])
+        .get<{ quantity: number }>([stockBranchId, productId])
       if (quantity > (Number(have?.quantity) || 0)) {
         return c.json({ error: `Insufficient stock for ${product.name}: requested ${quantity}, available ${Number(have?.quantity) || 0}` }, 409)
       }
@@ -4943,7 +5067,8 @@ app.post('/:id/amendments', async (c) => {
     await db.batch([
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
-      sellingBranchGuardStatement(saleHeaderBranchId),
+      headerBranchGuard,
+      ...(lineEffect ? [effectGuardStatement(branchResolver.guards())!] : []),
       amendmentSettingsGuard(moneySettings),
       saleRevisionGuard(saleId, Number(sale.write_revision)),
       precisionBasket!.guard,
@@ -5675,7 +5800,7 @@ app.get('/', async (c) => {
     const [itemsBySale, refundsBySale, recordsBySale] = await Promise.all([
       (async () => {
         const itemRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
-      SELECT si.*, b.name AS branch_name, p.barcode AS barcode, p.category AS category,
+      SELECT si.*, ${branchHistoryNameSql('CASE WHEN si.branch_id IS ss.branch_id THEN ss.branch_name END', 'b.name')} AS branch_name, p.barcode AS barcode, p.category AS category,
         p.unit AS unit, p.supplier AS supplier,
         -- A single received date is factual only for an explicit lot or a
         -- fully allocated single-lot line. Keep multi-lot lines unsummarized;
@@ -5705,6 +5830,7 @@ app.get('/', async (c) => {
         (SELECT COUNT(*) FROM sale_item_batch_allocations sia
           WHERE sia.sale_item_id = si.id AND sia.quantity > COALESCE(sia.released_quantity, 0)) AS lot_allocation_count
       FROM sale_items si
+      LEFT JOIN sales ss ON ss.id = si.sale_id
       LEFT JOIN branches b ON b.id = si.branch_id
       LEFT JOIN products p ON p.id = si.product_id
       LEFT JOIN product_batches pb ON pb.id = si.batch_id AND pb.variant_product_id = si.product_id

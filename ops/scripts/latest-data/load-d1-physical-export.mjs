@@ -218,6 +218,44 @@ export function tableDigest(db, table) {
   return { rows, sha256: rows ? hash.digest('hex') : EMPTY_SHA256 }
 }
 
+// A REAL literal as quote() prints it: a digit run with a fraction or an exponent (an integer literal has neither).
+const REAL_LITERAL = /^-?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?$/
+const INTEGER_LITERAL = /^-?\d+$/
+// quote() prints a REAL differently on D1 (shortest round-trip, 159.60000000000002) and in a local SQLite build
+// (1.596000000000000228e+02). Both parse to the same double, so a REAL is compared as a number, everything else as text.
+export function quotedEqual(a, b) {
+  if (a === b) return true
+  if (typeof a !== 'string' || typeof b !== 'string') return false
+  if (INTEGER_LITERAL.test(a) || INTEGER_LITERAL.test(b)) return false
+  return REAL_LITERAL.test(a) && REAL_LITERAL.test(b) && Object.is(Number(a), Number(b))
+}
+
+// The table-hash fallback, used only when the byte hash differs: every rebuilt row against the exported row, REALs by value.
+export function tableMatchesNumerically(db, inputDir, privateKey, manifest, table) {
+  const exported = []
+  const chain = crypto.createHash('sha256')
+  for (const chunk of table.chunks) {
+    const read = readChunk(inputDir, privateKey, manifest, table, chunk)
+    chain.update(read.text)
+    for (const row of read.rows) exported.push(row)
+  }
+  // The exported text must itself be the manifest's table hash: a wrong manifest hash is never excused by a numeric match.
+  if (chain.digest('hex') !== (table.chunks.length ? table.sha256 : EMPTY_SHA256)) return false
+  let index = 0
+  let afterRid = null
+  for (;;) {
+    const page = db.prepare(pageSql({ table: table.name, columns: table.columns, rid: table.ridColumn, afterRid, limit: LIMITS.pageRowsMax })).all()
+    for (const row of page) {
+      const want = exported[index++]
+      if (!want || want.rid !== row.r) return false
+      for (let i = 0; i < table.columns.length; i += 1) if (!quotedEqual(want.values[i], row[`c${i}`])) return false
+    }
+    if (page.length < LIMITS.pageRowsMax) break
+    afterRid = page[page.length - 1].r
+  }
+  return index === exported.length
+}
+
 function localObjects(db, type) {
   return db.prepare('SELECT name, sql FROM sqlite_master WHERE type = ? AND sql IS NOT NULL ORDER BY rowid').all(type)
 }
@@ -321,7 +359,11 @@ export function buildDatabase({ manifest, inputDir, privateKey, outPath, schemaM
       problems.push(`${table.name}: cannot be re-read (${err.message})`)
       continue
     }
-    const ok = digest.rows === table.rows && digest.sha256 === table.sha256
+    let ok = digest.rows === table.rows && digest.sha256 === table.sha256
+    if (!ok && digest.rows === table.rows) {
+      try { ok = tableMatchesNumerically(db, inputDir, privateKey, manifest, table) } catch { ok = false }
+      if (ok) warnings.push(`${table.name}: the byte hash differs only in REAL formatting; every value is equal as a number`)
+    }
     checks.tables.push({ name: table.name, rows: digest.rows, expected: table.rows, ok })
     if (!ok) problems.push(`${table.name}: rebuilt table has ${digest.rows} rows / ${digest.sha256.slice(0, 12)}, the manifest says ${table.rows} / ${table.sha256.slice(0, 12)}`)
   }

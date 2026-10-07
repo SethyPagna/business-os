@@ -12,7 +12,7 @@
 // which cannot tell you that a flat product's stock reads 0 while its
 // branch_stock says 28.
 import { sortBatchesForPicker } from './posCore.ts'
-import { branchRole, branchCanSellNow, type BranchRole } from '../../utils/branchRoles.ts'
+import { branchRole, branchCanSellNow, branchIsActive, type BranchRole } from '../../utils/branchRoles.ts'
 
 export type BranchStockRow = {
   branch_id?: string | number | null
@@ -417,7 +417,10 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
     // role falls back to the name (pre-backfill behaviour, unchanged).
     const identity = { name, role: branchIdentities.get(id)?.role ?? null, is_active: branchIdentities.get(id)?.is_active }
     const role = branchRole(identity)
-    const sellable = intent !== 'sell' || branchCanSellNow(identity)
+    // A disabled branch (Old Shop after the consolidation) is never a new target, for any intent: greyed, not hidden,
+    // so its count stays visible. Selling also needs the shop role.
+    const active = branchIsActive(identity)
+    const sellable = intent !== 'sell' ? active : branchCanSellNow(identity)
     return {
       id,
       name,
@@ -430,7 +433,7 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
       groupQuantity: branchGroupTotals.get(id) || 0,
       role,
       selectable: sellable,
-      blockedMessageKey: sellable ? null : 'branch_not_sellable',
+      blockedMessageKey: sellable ? null : !active ? 'branch_redirect_title' : 'branch_not_sellable',
     }
   })
 

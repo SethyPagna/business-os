@@ -39,7 +39,12 @@ const productDetailRule = loadCompiled('productDetailRule.ts', {})
 const batchCode = loadCompiled('batchCode.ts', {})
 const importNumbers = loadCompiled('importNumbers.ts', {})
 const resolver = loadCompiled('stockActionResolver.ts', {})
+const branchRoles = loadCompiled('branchRoles.ts', {})
+// CUTOVER-LR: the authority answers a retired branch through the branch-effect kernel.
+const branchEffect = loadCompiled('branchEffect.ts', { './branchRoles': branchRoles, './sqlBinding': loadCompiled('sqlBinding.ts', {}) })
+const importBranchAuthority = loadCompiled('importBranchAuthority.ts', { './branchRoles': branchRoles, './branchEffect': branchEffect })
 const subject = loadCompiled('stockActionImport.ts', {
+  './importBranchAuthority': importBranchAuthority,
   './batchCode': batchCode,
   './importNumbers': importNumbers,
   './stockActionResolver': resolver,
@@ -47,7 +52,7 @@ const subject = loadCompiled('stockActionImport.ts', {
 })
 
 assert.deepStrictEqual(subject.UNIFIED_STOCK_COLUMNS, [
-  'name', 'barcode', 'shop', 'warehouse', 'date', 'action',
+  'name', 'barcode', 'shop', 'warehouse', 'store', 'date', 'action',
   'selling_price', 'wholesale_price', 'cost_price', 'batch',
   // supplier is OPTIONAL (migration 0062): blank/absent keeps the original
   // ten-column contract importable, present attributes the batch.
@@ -167,6 +172,58 @@ assert.strictEqual(zeroPlaceholder.productId, 10, 'an all-zero placeholder barco
 assert.strictEqual(zeroPlaceholder.identityKey, 'product:10')
 assert.deepStrictEqual(zeroPlaceholder.conflicts, [])
 
+// ---- CUTOVER-LC G-G: columns name an identity (shop / warehouse / store), not a display name -----
+// After the consolidation LC Store (role shop, canonical_key warehouse) is the only active branch and Old Shop
+// (retired, successor LC Store) is where "shop" now points. Old sheets keep working: shop + warehouse both land
+// on LC Store, an Add adds them up, and a Set (reconcile) is the SUM of the given columns as the branch total.
+const lcAfter = [
+  { id: 1, name: 'LC Store', role: 'shop', canonical_key: 'warehouse', is_active: 1, is_default: 1, successor_branch_id: null },
+  { id: 2, name: 'Old Shop', role: 'shop', canonical_key: 'shop', is_active: 0, is_default: 0, successor_branch_id: 1 },
+]
+const lcStock = [{ productId: 10, branchId: 1, quantity: 12 }]
+const afterAdd = subject.resolveUnifiedStockImportRows([
+  { _rowNumber: 2, name: 'Serum', barcode: 'ABC', shop: '2', warehouse: '3', date: '08/27/2026', action: 'add' },
+], 'direct', products, lcAfter, lcStock)[0]
+assert.deepStrictEqual(afterAdd.errors, [])
+assert.deepStrictEqual(afterAdd.plan.branchActions, [{ branchId: 1, direction: 'add', quantity: 5 }], 'shop 2 + warehouse 3 are ONE Add of 5 to LC Store')
+assert.deepStrictEqual(afterAdd.branchRefs.map((ref) => [ref.slot, ref.branchId, ref.branchName, ref.addressedName || null, ref.pending]),
+  [['shop', 1, 'LC Store', 'Shop', false], ['warehouse', 1, 'LC Store', null, false]], 'the shop column keeps its provenance label; nothing is pending')
+assert.deepStrictEqual(afterAdd.branchNotes, ['Shop 2 + Warehouse 3 -> LC Store 5'], 'the preview says what the columns became')
+// CUTOVER-LR: that shop column is a PREVIEW until the operator confirms its landing (the apply refuses a pending
+// column); confirmed, the same plan stands and the column carries the retired branch it addressed.
+assert.deepStrictEqual(afterAdd.branchRefs.map((ref) => [ref.slot, ref.addressedBranchId ?? null, ref.redirectPending ?? false]),
+  [['shop', 2, true], ['warehouse', null, false]], 'no confirmed target: the shop column is pending, addressed to Old Shop')
+const afterConfirmed = subject.resolveUnifiedStockImportRows([
+  { _rowNumber: 2, name: 'Serum', barcode: 'ABC', shop: '2', warehouse: '3', date: '08/27/2026', action: 'add' },
+], 'direct', products, lcAfter, lcStock, { redirectTarget: 1 })[0]
+assert.deepStrictEqual(afterConfirmed.plan.branchActions, [{ branchId: 1, direction: 'add', quantity: 5 }], 'the confirmed landing keeps the same plan')
+assert.deepStrictEqual(afterConfirmed.branchRefs.map((ref) => [ref.slot, ref.branchId, ref.addressedName || null, ref.addressedBranchId ?? null, ref.redirectPending ?? false]),
+  [['shop', 1, 'Shop', 2, false], ['warehouse', 1, null, null, false]], 'confirmed: addressed to Shop, nothing pending')
+assert.throws(() => subject.resolveUnifiedStockImportRows([
+  { _rowNumber: 2, name: 'Serum', barcode: 'ABC', shop: '2', date: '08/27/2026', action: 'add' },
+], 'direct', products, lcAfter, lcStock, { redirectTarget: 2 }), (error) => error.code === 'branch_redirect_target_invalid', 'the disabled branch is not a landing')
+const afterSet = subject.resolveUnifiedStockImportRows([
+  { _rowNumber: 2, name: 'Serum', barcode: 'ABC', shop: '10', warehouse: '5', date: '2026-08-27', action: '' },
+], 'reconcile', products, lcAfter, lcStock)[0]
+assert.deepStrictEqual(afterSet.plan.branchActions, [{ branchId: 1, direction: 'add', quantity: 3 }], 'Set = shop 10 + warehouse 5 = 15 against 12 on hand: add 3 (last-column-wins would remove 7, first-wins remove 2)')
+assert.ok(!afterSet.conflicts.some((message) => /both adds and sells/.test(message)), 'one branch cannot both add and sell')
+const afterStore = subject.resolveUnifiedStockImportRows([
+  { _rowNumber: 2, name: 'Serum', barcode: 'ABC', store: '4', date: '08/27/2026', action: 'add' },
+], 'direct', products, lcAfter, lcStock)[0]
+assert.deepStrictEqual(afterStore.plan.branchActions, [{ branchId: 1, direction: 'add', quantity: 4 }])
+assert.strictEqual(afterStore.branchRefs[0].addressedName, undefined, 'the store column reaches the branch directly')
+const beforeStore = subject.resolveUnifiedStockImportRows([
+  { _rowNumber: 2, name: 'Serum', barcode: 'ABC', store: '4', date: '08/27/2026', action: 'add' },
+], 'direct', products, branches, current)[0]
+assert.deepStrictEqual(beforeStore.plan.branchActions, [{ branchId: 1, direction: 'add', quantity: 4 }], 'before the cutover store = the one selling branch (Shop)')
+const noQuantity = subject.resolveUnifiedStockImportRows([{ name: 'Serum', barcode: 'ABC', date: '08/27/2026', action: 'add' }], 'direct', products, lcAfter, lcStock)[0]
+assert.ok(noQuantity.errors.some((message) => /shop, warehouse or store quantity/.test(message)))
+// Wrong implementation: the name-literal slot lookup the module used before. Over the post-cutover rows it finds
+// nothing for either column, so every row would be a pending "create branch" with a negative id.
+const byNameSlot = (slot) => new Map(lcAfter.map((branch) => [branch.name.trim().toLowerCase(), branch])).get(slot) || null
+assert.strictEqual(byNameSlot('shop'), null, 'control: by name, neither column finds LC Store')
+assert.strictEqual(byNameSlot('warehouse'), null)
+
 console.log('PASS unified stock import parses, matches, resolves branches/current stock, preserves every row, and flags ambiguity')
 
 const sqlBinding = loadCompiled('sqlBinding.ts', {})
@@ -177,6 +234,7 @@ const productIdentity = loadCompiled('productIdentity.ts', { './db': {}, './sqlB
 const catalog = loadCompiled('stockActionCatalog.ts', {
   './db': {},
   './sqlBinding': sqlBinding,
+  './importBranchAuthority': importBranchAuthority,
   './searchMatch': searchMatch,
   './productIdentity': productIdentity,
   './stockActionImport': subject,

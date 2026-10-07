@@ -18,6 +18,7 @@ import { persistClientImageVariants } from '../lib/imageVariantStore'
 import { sanitizeMediaList } from '../lib/media'
 import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { attachBeforeQty, buildStockLedgerQuery, loadMovementStockBalances, movementBalanceFields, type MovementStockBalance, type StockLedgerView } from '../lib/stockLedgerQuery'
+import { laterOpenSets, type LaterOpenSet } from '../lib/stockRevertEffect'
 import { buildStockInSessionListQuery, parseStockInSessionKey, stockInSessionLineParams, stockInSessionLinesSql, STOCK_RECEIPT_TYPE_SQL } from '../lib/stockInSessionsQuery'
 import { getProductSalesBreakdown } from '../lib/salesAnalytics'
 import { localRangeClockError, localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
@@ -233,6 +234,7 @@ import {
   normalizeMultiValue, validateProductImageGallery, validatePreservedProductImageGallery, ProductImageLimitError,
 } from '../lib/productWrites'
 import { actorSnapshot, actorId } from '../lib/actorSnapshot'
+import { branchRedirectTarget } from '../lib/branchRedirectWrite'
 import { createProductWithInitialStock, productCreateDestination, productCreateErrorResponse, prepareProductMoneyWrite, readProductMoneyPlan, ProductMoneyWriteError, PRODUCT_MONEY_PLAN, PRODUCT_MONEY_VERSION } from '../lib/productWrites'
 export {
   PRODUCT_SKIP_KEYS, nowIso, tableColumns, clampNegativeStockQuantity,
@@ -1725,12 +1727,22 @@ app.get('/stock-in-session-lines', async (c) => {
     balances = new Map()
     activeBranchCount = null
   }
+  // REVERT-SET: the Sets still applied after each line on its product and
+  // branch, which that line's Revert leaves in place -- ONE statement for every
+  // line. null when the lookup fails (not checked), never a guessed [].
+  let laterSets: Map<number, LaterOpenSet[]> | null = null
+  try {
+    laterSets = await laterOpenSets(db, rows.slice(0, 2000).map((row) => Number(row.id)))
+  } catch {
+    laterSets = null
+  }
   rows = rows.map((row) => {
     const balance = balances.get(Number(row.id))
     return {
       ...row,
       batch_receipt_session_count: receiptCounts.get(Number(row.batch_id)) ?? 0,
       ...movementBalanceFields(balance),
+      later_open_sets: laterSets ? laterSets.get(Number(row.id)) ?? [] : null,
     }
   })
   const truncated = exceededLineLimit || rows.length > 2000
@@ -2082,7 +2094,7 @@ app.post('/', async (c) => {
   // merges such rows, so manual create must not mint a silent twin the
   // import path would never allow. Same name with a DIFFERENT REAL barcode
   // stays a legitimate child row and passes through untouched.
-  try { await productCreateDestination(c.env, body) } catch (error) {
+  try { await productCreateDestination(c.env, body, () => branchRedirectTarget(c)) } catch (error) {
     const response = productCreateErrorResponse(error)
     if (response) return c.json(response.body, response.status)
     throw error
@@ -2142,7 +2154,7 @@ app.post('/', async (c) => {
   if (normalizedBrands !== undefined) body.brands = normalizedBrands
 
   let created
-  try { created = await createProductWithInitialStock(c.env, body, { name, is_active: body.is_active == null ? 1 : body.is_active }, imageLimitForUser(user)) } catch (error) {
+  try { created = await createProductWithInitialStock(c.env, body, { name, is_active: body.is_active == null ? 1 : body.is_active }, imageLimitForUser(user), undefined, () => branchRedirectTarget(c)) } catch (error) {
     const response = productCreateErrorResponse(error)
     if (response) return c.json(response.body, response.status)
     throw error
@@ -2841,7 +2853,7 @@ app.post('/variant', async (c) => {
   }
   if (!changesImages) omitUnchangedProductImageFields(body)
   let created
-  try { created = await createProductWithInitialStock(c.env, body, { name, is_active: 1 }, imageLimitForUser(user)) } catch (error) {
+  try { created = await createProductWithInitialStock(c.env, body, { name, is_active: 1 }, imageLimitForUser(user), undefined, () => branchRedirectTarget(c)) } catch (error) {
     const response = productCreateErrorResponse(error)
     if (response) return c.json(response.body, response.status)
     throw error

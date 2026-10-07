@@ -57,7 +57,7 @@ async function branchScenario(tab: string, authority: Authority, onRead?: (read:
     branchExportAuthorityRef: { current: authority }, branchExportInFlightRef: inFlight,
     setBranchExportLoading: () => {}, tab,
     branchApi: { getTransfers: (query: any) => { transferQueries.push(query); return readPage(query.page) } },
-    branchDateRange: range, continuousRangeParams, transferFromFilter: 'all', transferToFilter: 'all',
+    branchDateRange: range, continuousRangeParams, transferFromFilter: 'all', transferToFilter: 'all', showConsolidationTransfers: false,
     isTransferRecord: (row: any) => !!row.id, formatTransferDate: () => '', historyExportField: (value: unknown) => value || '',
     notify: (message: string) => notices.push(message), tr: (_key: string, fallback: string) => fallback,
     setExportDialog: (result: unknown) => published.push(result),

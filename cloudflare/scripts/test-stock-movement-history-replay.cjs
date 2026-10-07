@@ -52,6 +52,20 @@ async function main() {
     assert.deepEqual([counterPreview.body.revert.direction, counterPreview.body.revert.expectedGeneration], ['redo', 1])
     assert.equal((await replay(f, counterPreview.body.revert)).status, 200)
     assert.deepEqual(f.sql.prepare('SELECT stock_quantity FROM products ORDER BY id').all(), [{ stock_quantity: 5 }, { stock_quantity: 3 }])
+    // REVERT-SET: the ledger names the session's Undo/Redo rows from immutable
+    // facts (reference = replayed session rowid, written after its lines), and
+    // never the receipt lines themselves or an edited reason.
+    const ledgerQuery = loadStockSession('lib/stockLedgerQuery.ts').buildStockLedgerQuery({})
+    const ledgerRows = f.sql.prepare(ledgerQuery.rowsSql).all({ ...ledgerQuery.params, limit: 50, offset: 0 })
+    const replayFlag = Object.fromEntries(ledgerRows.map((row) => [row.id, [row.movement_type, row.session_replay]]))
+    for (const item of receipt.items) assert.deepEqual(replayFlag[item.movementId], ['add', 0], 'a receipt line is not a replay')
+    const replayRows = ledgerRows.filter((row) => row.session_replay === 1).map((row) => row.movement_type).sort()
+    assert.deepEqual(replayRows, ['add', 'add', 'remove', 'remove'], 'undo (remove) and redo (add) of both lines are named')
+    f.sql.prepare('INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,reference_id,reason) VALUES(1,1,?,1,?,?)')
+      .run('adjustment', String(f.sql.prepare('SELECT rowid r FROM stock_session_operations').get().r), 'sale-linked correction')
+    const collision = f.sql.prepare(ledgerQuery.rowsSql).all({ ...ledgerQuery.params, limit: 1, offset: 0 })[0]
+    assert.equal(collision.session_replay, 0, 'a non-add/remove row that shares the rowid is never named a replay')
+    f.sql.prepare('DELETE FROM inventory_movements WHERE id=?').run(collision.id)
     assert.equal((await preview(f, firstMovement)).status, 409)
     const afterRedo = state(f)
     assert.equal((await replay(f, p)).status, 409)
@@ -134,12 +148,19 @@ async function main() {
     assert.equal((await replay(s, redo)).status, 200)
     assert.deepEqual(state(s), afterRedo)
     assert.equal((await preview(s, movement)).status, 409)
+    // REVERT-SET (6 Oct 2026): a replay moves the recorded delta, so only a
+    // change that took the units it needs refuses it -- whole, with no write.
     const latest = s.sql.prepare('SELECT id FROM inventory_movements ORDER BY id DESC LIMIT 1').get().id
     const newer = (await preview(s, latest)).body.revert
+    assert.equal((await replay(s, newer)).status, 200)
+    assert.equal(s.sql.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=? AND branch_id=1').get(batchId).quantity, 5)
+    const newest = s.sql.prepare('SELECT id FROM inventory_movements ORDER BY id DESC LIMIT 1').get().id
+    const again = (await preview(s, newest)).body.revert
+    assert.deepEqual([again.direction, again.expectedGeneration], ['redo', 3])
     s.sql.prepare('UPDATE branch_batch_stock SET quantity=1 WHERE batch_id=? AND branch_id=1').run(batchId)
     const changed = state(s)
-    assert.equal((await replay(s, newer)).status, 409)
-    assert.deepEqual(state(s), changed, 'intervening stock change keeps all history guards')
+    assert.equal((await replay(s, again)).status, 409)
+    assert.deepEqual(state(s), changed, 'a change that took the units the replay needs refuses it with no write')
     console.log('PASS Set forward/counter previews share History undo/redo and refuse stale or changed stock without writes')
   } finally { s.sql.close() }
 

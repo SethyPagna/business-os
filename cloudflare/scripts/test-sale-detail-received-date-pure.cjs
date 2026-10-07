@@ -11,7 +11,12 @@ const marker = 'const itemRows = await selectInChunks(saleIds'
 const begin = source.indexOf('`', source.indexOf(marker)) + 1
 const end = source.indexOf('`).all<', begin)
 assert.ok(begin > 0 && end > begin)
+// The sale-line branch label is snapshot-first (CUTOVER-LD): expand the inlined helper the way TypeScript would.
+const helper = /const branchHistoryNameSql = \(snapshot: string, fallback: string\): string =>\r?\n\s*`([^`]*)`/.exec(source)
+assert.ok(helper, 'routes/sales.ts carries the snapshot-first expression')
 const query = source.slice(begin, end).replace("${chunk.map(() => '?').join(',')}", '?')
+  .replace(/\$\{branchHistoryNameSql\('([^']*)', '([^']*)'\)\}/g, (_, snapshot, fallback) => helper[1].replaceAll('${snapshot}', snapshot).replaceAll('${fallback}', fallback))
+assert.doesNotMatch(query, /\$\{/, 'every template expression was expanded')
 assert.match(query, /AS batch_received_at/)
 const db = new Database(':memory:')
 for (const migration of loadAll()) db.exec(migration)

@@ -39,14 +39,30 @@
 // from this table's UNIQUE(actor_id, request_id); a different body under the
 // same id is refused 409.
 //
-// UNDO / REDO (`stock.quantity_set`). Each replay is guarded on the CURRENT
-// L, B (and H for a tagged Set) equalling the snapshot it reverses from --
-// an intervening sale, transfer, count or disposal refuses the replay 409 and
-// changes nothing. Undo posts the counter-movement stamped
-// `revert:<forward movement id>` (so removalLosses.ts drops the undone loss,
-// and the undo of an upward Set is not itself a loss); redo posts a fresh
-// forward movement under the next generation's reference. The generation is
-// advanced in the same batch, so a stale history row can never apply twice.
+// UNDO / REDO (`stock.quantity_set`). A Set is recorded as a DELTA: d = L' - L
+// on the lot and e = B' - B on the branch (e = d except under the lot-scope
+// floor). Undo moves exactly -d / -e and redo exactly +d / +e (owner, 6 Oct
+// 2026: "set 3 to 30 adds 27; reverting it must deduct the 27" -- never
+// restore an absolute target, which would also undo every later sale,
+// receipt or revert on the branch):
+//
+//   undo   L -= d   B -= e   P -= e    refused whole when L - d < 0 or B - e < 0
+//   redo   L += d   B += e   P += e    refused whole when L + d < 0 or B + e < 0
+//   tagged undo also takes |d| back out of THIS generation's held row and is
+//   refused unless that row still holds exactly |d| (not disposed of).
+//
+// Later changes on the same branch (a sale of another lot, a receipt, a
+// revert) no longer block the replay; only a lot or branch that cannot cover
+// the delta does -- the same rule the Stock Changes ledger Revert applies to an
+// Add or Remove (lib/stockRevert.ts). Nothing is ever applied partially.
+// Undo posts the counter-movement stamped `revert:<forward movement id>` (so
+// removalLosses.ts drops the undone loss, and the undo of an upward Set is not
+// itself a loss) and is refused when that forward row already has a Revert;
+// redo posts a fresh forward movement under the next generation's reference.
+// The generation is advanced in the same batch, so a stale history row can
+// never apply twice. Like before, a historical inverse may put stock back on
+// a branch deactivated since (test-stock-lot-receiving-native.cjs); the branch
+// consolidation closes its own entries before any replay runs.
 //
 // Migration 0193 not applied: the Set still applies with the same guards and
 // movements, but records no operation row and no history row (no undo).
@@ -65,7 +81,11 @@ import type { StockConditionTag } from './stockCondition'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
-import { findLaterChangeBlocker, type StockRefusalDetails } from './stockRefusalBlocker'
+import { findConsumingBlocker, findLaterChangeBlocker, type StockRefusalDetails } from './stockRefusalBlocker'
+import {
+  UNDO_CLOSED_BRANCH_RETIRED_CODE, UNDO_CLOSED_BRANCH_RETIRED_MESSAGE, addressedStatements, branchEffectRefusal, branchRedirectGuardRefusal,
+  isBranchRedirectGuardError, landingLotId, requestBranchEffect, type BranchEffect, type RedirectTarget,
+} from './branchRedirectWrite'
 
 export const STOCK_LOT_SET_KIND = 'stock.quantity_set'
 export const STOCK_SET_REFERENCE_PREFIX = 'stock-set:'
@@ -198,6 +218,39 @@ function quantityStatements(from: Snapshot, to: Snapshot): Statement[] {
   ]
 }
 
+// Undo / redo of a recorded Set: move the lot and the branch by exactly the
+// recorded change. Guarded first (the lot still belongs to the product and
+// neither ledger would go below 0), so a concurrent sale aborts the batch.
+// A negative change is a plain UPDATE: branch_stock / branch_batch_stock carry
+// CHECK(quantity >= 0), which an UPSERT's negative candidate row would trip.
+function deltaStatements(at: Snapshot, lotChange: number, branchChange: number): Statement[] {
+  const params = { product: at.productId, branch: at.branchId, batch: at.batchId, lotChange, branchChange }
+  const statements: Statement[] = [guard(`EXISTS(SELECT 1 FROM product_batches WHERE id=@batch AND variant_product_id=@product)
+      AND COALESCE((SELECT quantity FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch),0)+@lotChange>=0
+      AND COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@product AND branch_id=@branch),0)+@branchChange>=0`, params)]
+  if (lotChange > 0) {
+    // 0154: positive lot stock needs an active lot. Activate first.
+    statements.push(
+      { sql: `UPDATE product_batches SET is_active=1, updated_at=datetime('now') WHERE id=@batch AND is_active IS NOT 1`, params },
+      { sql: `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(@batch,@branch,@lotChange)
+        ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=quantity+excluded.quantity, updated_at=datetime('now')`, params },
+    )
+  } else if (lotChange < 0) {
+    statements.push({ sql: `UPDATE branch_batch_stock SET quantity=quantity+@lotChange, updated_at=datetime('now')
+      WHERE batch_id=@batch AND branch_id=@branch`, params })
+  }
+  if (branchChange > 0) {
+    statements.push({ sql: `INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(@product,@branch,@branchChange)
+      ON CONFLICT(product_id,branch_id) DO UPDATE SET quantity=quantity+excluded.quantity`, params })
+  } else if (branchChange < 0) {
+    statements.push({ sql: 'UPDATE branch_stock SET quantity=quantity+@branchChange WHERE product_id=@product AND branch_id=@branch', params })
+  }
+  if (branchChange !== 0) {
+    statements.push({ sql: 'UPDATE products SET stock_quantity=COALESCE(stock_quantity,0)+@branchChange, updated_at=CURRENT_TIMESTAMP WHERE id=@product', params })
+  }
+  return statements
+}
+
 function movementCost(effect: Effect): MovementCostPair {
   const quantity = Math.abs(effect.lotDelta)
   return resolveMovementCostSnapshot({ quantity, components: [{ quantity, unitCostUsd: effect.unitCostUsd }] })
@@ -271,8 +324,14 @@ function describe(request: StockLotSetRequest, productName: string, receivedAt: 
     : `Set ${productName} branch total to ${request.quantity} (received ${lot})`
 }
 
-function setNote(request: StockLotSetRequest): string {
-  return request.setScope === 'lot' ? `Set received date to ${request.quantity}` : `Set to ${request.quantity}`
+// The movement's own words for what the Set did, lot first: "Set received
+// 2026-09-02 from 3 to 30". The old "Set received date to 30" read as a change
+// of DATE and hid that the Set moved one lot by 27 (owner report, 6 Oct 2026).
+function setNote(request: StockLotSetRequest, before: Snapshot, after: Snapshot, receivedAt: string | null): string {
+  const lot = receivedAt ? String(receivedAt).slice(0, 10) : `#${request.batchId}`
+  return request.setScope === 'lot'
+    ? `Set received ${lot} from ${before.lotQuantity} to ${after.lotQuantity}`
+    : `Set branch total from ${before.branchQuantity} to ${after.branchQuantity}, received ${lot}`
 }
 
 async function digest(text: string): Promise<string> {
@@ -290,6 +349,9 @@ export async function applyStockLotSet(
   requestId: string | null,
   request: StockLotSetRequest,
   markWritten: () => Promise<void> = async () => {},
+  // X-Branch-Redirect: a Set addressed to a branch that has since been disabled is applied at the active branch the
+  // operator confirmed (on the lot as it exists there); without it the Set is refused branch_redirect_required.
+  redirectTarget: RedirectTarget = null,
 ): Promise<StockLotSetResult> {
   if (getActionTier(user, 'inventory', 'adjust') !== 'full') {
     return { status: 403, body: { error: 'Stock adjustments require Full Access to Inventory.' } }
@@ -314,6 +376,15 @@ export async function applyStockLotSet(
     const existing = await previous()
     if (existing) return replay(existing)
   }
+  let landing: BranchEffect
+  try {
+    landing = await requestBranchEffect(db, request.branchId, redirectTarget)
+  } catch (error) {
+    const refusal = branchEffectRefusal(error)
+    if (refusal) return { status: 409, body: refusal }
+    throw error
+  }
+  if (landing.redirected) request = { ...request, branchId: landing.effectBranchId, batchId: Number(await landingLotId(db, landing, request.batchId)) }
 
   const facts = await db.prepare(`SELECT
       (SELECT name FROM products WHERE id=@product) AS product_name,
@@ -360,7 +431,7 @@ export async function applyStockLotSet(
 
   const effect: Effect = {
     productName: facts.product_name, branchName: facts.branch_name, unitCostUsd: facts.unit_cost_usd ?? null,
-    lotDelta, tag: request.conditionTag, reason: `${request.reason} (${setNote(request)})`,
+    lotDelta, tag: request.conditionTag, reason: `${request.reason} (${setNote(request, before, after, facts.received_at)})`,
   }
   try { movementCost(effect) } catch { return { status: 400, body: { error: 'Movement cost is out of range' } } }
   const operationId = crypto.randomUUID()
@@ -393,7 +464,7 @@ export async function applyStockLotSet(
   ]
   await markWritten()
   try {
-    await ordinaryBusinessBatch(db, statements)
+    await ordinaryBusinessBatch(db, addressedStatements(landing, statements))
   } catch (error) {
     if (recordOperation && requestId) {
       const concurrent = await previous()
@@ -401,6 +472,7 @@ export async function applyStockLotSet(
     }
     if (isMaintenanceError(error)) return MAINTENANCE_RESPONSE
     if (isReceivingBranchError(error)) return { status: 409, body: RECEIVING_BRANCH_INACTIVE }
+    if (isBranchRedirectGuardError(error)) return { status: 409, body: await branchRedirectGuardRefusal(db, landing.addressedBranchId, redirectTarget) }
     return conflict('Stock changed while saving. No correction was applied; refresh and try again.')
   }
   if (!recordOperation) return { status: 200, body: response }
@@ -420,10 +492,17 @@ export class StockLotSetReplayError extends Error {
   readonly statusCode: number
   // RET-D: the blocking record, passed through by the History route.
   readonly refusal: StockRefusalDetails | null
-  constructor(message: string, statusCode = 409, refusal: StockRefusalDetails | null = null) {
+  // The Stock Changes refusal code and the numbers its sentence names
+  // (frontend utils/stockRevertError.ts), so Undo and Revert read the same.
+  readonly code: string | undefined
+  readonly params: Record<string, string | number> | undefined
+  // CUTOVER-LR: a branch-effect refusal passes its code as the third argument.
+  constructor(message: string, statusCode = 409, refusalOrCode: StockRefusalDetails | string | null = null, code?: string, params?: Record<string, string | number>) {
     super(message)
     this.statusCode = statusCode
-    this.refusal = refusal
+    this.refusal = typeof refusalOrCode === 'object' ? refusalOrCode : null
+    this.code = typeof refusalOrCode === 'string' ? refusalOrCode : code
+    this.params = params
   }
 }
 
@@ -456,20 +535,54 @@ export async function replayStockLotSet(
   const before = JSON.parse(row.before_json) as Snapshot
   const after = JSON.parse(row.after_json) as Snapshot
   const revision = JSON.parse(row.revision_json || '{}') as { heldLotId?: number; unitCostUsd?: number | null }
-  const from = direction === 'undo' ? after : before
-  const to = direction === 'undo' ? before : after
   const facts = await db.prepare(`SELECT (SELECT name FROM products WHERE id=@product) AS product_name,
-      (SELECT name FROM branches WHERE id=@branch) AS branch_name`)
-    .get<{ product_name: string | null; branch_name: string | null }>({ product: before.productId, branch: before.branchId })
+      (SELECT name FROM branches WHERE id=@branch) AS branch_name, (SELECT is_active FROM branches WHERE id=@branch) AS branch_active,
+      (SELECT received_at FROM product_batches WHERE id=@batch) AS received_at,
+      COALESCE((SELECT quantity FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch),0) AS lot_quantity,
+      COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@product AND branch_id=@branch),0) AS branch_quantity,
+      (SELECT id FROM inventory_movements WHERE reference_id=@forward ORDER BY id DESC LIMIT 1) AS forward_id`)
+    .get<{ product_name: string | null; branch_name: string | null; branch_active: number | null; received_at: string | null
+      lot_quantity: number; branch_quantity: number; forward_id: number | null }>({
+      product: before.productId, branch: before.branchId, batch: before.batchId, forward: stockSetReference(row.id, expected),
+    })
+  // An Undo cannot carry a confirmed redirect: a Set at a branch that has since been disabled stays closed.
+  if (Number(facts?.branch_active ?? 1) !== 1) throw new StockLotSetReplayError(UNDO_CLOSED_BRANCH_RETIRED_MESSAGE, 409, UNDO_CLOSED_BRANCH_RETIRED_CODE)
   const lotDelta = after.lotQuantity - before.lotQuantity
+  const branchDelta = after.branchQuantity - before.branchQuantity
+  const sign = direction === 'undo' ? -1 : 1
+  const lotChange = sign * lotDelta
+  const branchChange = sign * branchDelta
   const tagged = lotDelta < 0 && !!request.conditionTag
   const effect: Effect = {
     productName: facts?.product_name || `#${before.productId}`, branchName: facts?.branch_name ?? null,
     unitCostUsd: revision.unitCostUsd ?? null, lotDelta, tag: request.conditionTag,
-    reason: `${direction === 'undo' ? 'Undo' : 'Redo'}: ${request.reason} (${setNote(request)})`,
+    reason: `${direction === 'undo' ? 'Undo' : 'Redo'}: ${request.reason} (${setNote(request, before, after, facts?.received_at ?? null)})`,
   }
   if (direction === 'undo' && tagged && !(Number(revision.heldLotId) > 0)) {
     throw new StockLotSetReplayError('The held row of this correction is unknown, so it cannot be reversed exactly.')
+  }
+  // Read first for a clean answer; deltaStatements' guard is what enforces it.
+  const lotNow = Number(facts?.lot_quantity) || 0
+  const branchNow = Number(facts?.branch_quantity) || 0
+  if (lotNow + lotChange < 0) {
+    throw new StockLotSetReplayError(
+      `Cannot ${direction}: only ${lotNow} left under this received date at ${effect.branchName || 'this branch'}, ${-lotChange} needed. Nothing was changed.`,
+      409,
+      await findConsumingBlocker(db, { productId: before.productId, branchId: before.branchId, batchId: before.batchId, afterMovementId: Number(facts?.forward_id) || 0 }),
+      'revert_insufficient_lot_stock', { available: lotNow, needed: -lotChange },
+    )
+  }
+  if (branchNow + branchChange < 0) {
+    throw new StockLotSetReplayError(
+      `Cannot ${direction}: only ${branchNow} in stock at ${effect.branchName || 'this branch'}, ${-branchChange} needed. Nothing was changed.`,
+      409,
+      await findConsumingBlocker(db, { productId: before.productId, branchId: before.branchId, batchId: null, afterMovementId: Number(facts?.forward_id) || 0 }),
+      'revert_insufficient_branch_stock', { available: branchNow, needed: -branchChange, branch: effect.branchName || '' },
+    )
+  }
+  if (direction === 'undo' && Number(facts?.forward_id) > 0) {
+    const reverted = await db.prepare('SELECT id FROM inventory_movements WHERE reference_id=@ref LIMIT 1').get<{ id: number }>({ ref: `revert:${facts?.forward_id}` })
+    if (reverted) throw new StockLotSetReplayError('This change was already reverted. Nothing was changed.', 409, null, 'already_reverted')
   }
   const params = {
     operation: row.id, history: historyId, generation: expected, next, target, oldState,
@@ -480,24 +593,26 @@ export async function replayStockLotSet(
     guard(`EXISTS(SELECT 1 FROM stock_lot_adjustment_operations o JOIN action_history h ON h.id=o.history_id
       WHERE o.id=@operation AND h.id=@history AND o.generation=@generation AND o.state=@oldState AND h.status=@oldStatus
       AND json_extract(h.undo_payload,'$.operation_id')=@operation AND json_extract(h.undo_payload,'$.generation')=@generation)`, params),
-    stateGuard(from),
   ]
   if (direction === 'undo') {
     // The counter-movement names the forward row it reverses: removalLosses.ts
     // then stops counting an undone loss, and does not count this row either.
-    statements.push(guard('EXISTS(SELECT 1 FROM inventory_movements WHERE reference_id=@forward)', params))
+    // A forward row that already has a Revert (a ledger Revert written before
+    // the ledger refused Set rows) is never reversed a second time.
+    statements.push(guard(`EXISTS(SELECT 1 FROM inventory_movements WHERE reference_id=@forward)
+      AND NOT EXISTS(SELECT 1 FROM inventory_movements WHERE reference_id='revert:' || (SELECT id FROM inventory_movements WHERE reference_id=@forward ORDER BY id DESC LIMIT 1))`, params))
     if (tagged) {
       statements.push(guard('(SELECT quantity_remaining FROM damaged_stock_lots WHERE id=@heldLotId)=@held', params))
       statements.push({ sql: 'UPDATE damaged_stock_lots SET quantity_remaining=quantity_remaining-@held, updated_at=CURRENT_TIMESTAMP WHERE id=@heldLotId AND quantity_remaining>=@held', params })
     }
-    statements.push(...quantityStatements(from, to))
+    statements.push(...deltaStatements(before, lotChange, branchChange))
     statements.push(movementStatement({
       snapshot: before, effect, user, movementType: lotDelta > 0 ? 'remove' : 'adjustment', reason: effect.reason,
       referenceSql: "'revert:' || (SELECT id FROM inventory_movements WHERE reference_id=@forward ORDER BY id DESC LIMIT 1)",
       extra: { forward: params.forward },
     }))
   } else {
-    statements.push(...quantityStatements(from, to))
+    statements.push(...deltaStatements(before, lotChange, branchChange))
     statements.push(...forwardMovementStatements(before, effect, user, stockSetReference(row.id, next), row.id))
   }
   statements.push(
@@ -511,7 +626,7 @@ export async function replayStockLotSet(
     const current = await db.prepare('SELECT generation,state FROM stock_lot_adjustment_operations WHERE id=@operation').get<OperationRow>({ operation: row.id })
     if (current?.generation === next && current.state === target) return
     if (isMaintenanceError(error)) throw new StockLotSetReplayError('Maintenance is in progress. Nothing was changed.', 503)
-    // RET-D: name the change this exact-snapshot replay collided with -- the
+    // RET-D: name the change this replay collided with (a concurrent write) -- the
     // newest movement of the product at the branch after this correction's own
     // rows (its stock-set:<operation>:<generation> rows and their Reverts).
     const prefix = `${STOCK_SET_REFERENCE_PREFIX}${row.id}:`
@@ -521,6 +636,6 @@ export async function replayStockLotSet(
     const refusal = Number(own?.id) > 0
       ? await findLaterChangeBlocker(db, { pairs: [{ productId: before.productId, branchId: before.branchId }], afterMovementId: Number(own?.id) })
       : null
-    throw new StockLotSetReplayError('Stock changed after this correction (a sale, transfer, count or tagged-row action). Nothing was changed.', 409, refusal)
+    throw new StockLotSetReplayError('The stock changed while this was being saved. Nothing was changed; refresh and try again.', 409, refusal, 'stock_changed')
   }
 }

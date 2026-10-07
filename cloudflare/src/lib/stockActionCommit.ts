@@ -8,6 +8,7 @@ import type { ActorLike } from './actorSnapshot'
 import { buildSaleCreationSnapshot } from './saleCreationSnapshot'
 import { catalogCostRecomputeStatement } from './catalogCostRecompute'
 import { resolveReceiptLotTarget, type ReceiptLotCandidate } from './productBatches'
+import { BRANCH_REDIRECT_REQUIRED_ERROR, BRANCH_REDIRECT_TARGET_INVALID_ERROR, branchEffectGuardPredicate } from './branchEffect'
 
 /**
  * The FOURTH receipt wire (N14-D).
@@ -40,6 +41,31 @@ export function unifiedStockReceiptRefusal(
   }))
 }
 
+// Provenance of a sheet that addressed a retired branch: the stock was recorded
+// at its successor, and the movement says so (nothing is relabelled).
+function addressedSuffix(addressedName: string | null | undefined, recordedName: string): string {
+  const addressed = String(addressedName || '').trim()
+  return addressed ? ` (addressed to ${addressed}, recorded at ${recordedName})` : ''
+}
+
+// CUTOVER-LR in-batch refusals. A bad JSON path aborts the whole batch with its own name in the message (the
+// receivingBranch idiom), so the writer can answer with the coded English instead of a bare SQLite error.
+const LANDING_INACTIVE_PATH = '$[import_branch_landing_inactive]'
+const REDIRECT_CHANGED_PATH = '$[import_branch_redirect_changed]'
+
+function positiveId(value: unknown): number | null {
+  const id = Number(value)
+  return Number.isSafeInteger(id) && id > 0 ? id : null
+}
+
+/** A batch the branch guards above aborted wrote nothing: rethrown as the coded English. Any other failure as it was. */
+function rethrowBranchGuardFailure(error: unknown): never {
+  const message = error instanceof Error ? error.message : String(error)
+  if (message.includes('import_branch_redirect_changed')) throw new Error(BRANCH_REDIRECT_TARGET_INVALID_ERROR)
+  if (message.includes('import_branch_landing_inactive')) throw new Error(BRANCH_REDIRECT_REQUIRED_ERROR)
+  throw error
+}
+
 export interface UnifiedStockAddInput {
   jobId: string
   rowNumber: number
@@ -47,6 +73,13 @@ export interface UnifiedStockAddInput {
   productName: string
   branchId: number
   branchName: string
+  /** The label the sheet addressed ("Shop") when its stock was routed to a successor branch. */
+  addressedBranchName?: string | null
+  /**
+   * The retired branch that column addressed, when the operator confirmed `branchId` as its landing (CUTOVER-LR).
+   * The batch re-proves the pair and the movement records the addressed label in addressed_branch_name.
+   */
+  addressedBranchId?: number | null
   quantity: number
   date: string
   batchLabel?: string | null
@@ -88,6 +121,10 @@ export interface UnifiedStockSaleLine {
   productName: string
   branchId: number
   branchName: string
+  /** The label the sheet addressed ("Shop") when its stock was routed to a successor branch. */
+  addressedBranchName?: string | null
+  /** The retired branch the line addressed, when the operator confirmed `branchId` as its landing (CUTOVER-LR). */
+  addressedBranchId?: number | null
   quantity: number
   sellingPriceUsd: number
   costPriceUsd?: number | null
@@ -247,6 +284,8 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
   if (!branchName) throw new Error('Branch name is required')
 
   const actionKey = `row:${rowNumber}:add:branch:${branchId}`
+  // Set only for a column addressed to a retired branch whose landing the operator confirmed (CUTOVER-LR).
+  const redirect = positiveId(input.addressedBranchId)
   const { lotCode, receivedAt } = batchIdentity(input.date, input.batchLabel)
   // Read the override baseline with the journal. The next read resolves the
   // price-compatible lot and its supplier, never a date-only pooled receipt.
@@ -313,7 +352,8 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
     // The declaration is stamped into the words, not just the zero -- the
     // same appendReceiptNotes routes/batches.ts:218 uses for the interactive
     // wire, so a $0.00 accepted receipt reads as free goods on this wire too.
-    reason: appendReceiptNotes(`Unified stock import ${jobId}, row ${rowNumber}`, freeGoods ? [FREE_GOODS_REASON_NOTE] : []),
+    reason: appendReceiptNotes(`Unified stock import ${jobId}, row ${rowNumber}${addressedSuffix(input.addressedBranchName, branchName)}`, freeGoods ? [FREE_GOODS_REASON_NOTE] : []),
+    ...(redirect ? { addressedBranchName: String(input.addressedBranchName || '').trim() || null } : {}),
   }
 
   await db.batch([
@@ -337,11 +377,26 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
       params,
     },
     {
+      // The landing branch is still active and was never retired into another (CUTOVER-LR): the pre-read above
+      // resolved it, and a branch disabled before this batch must not receive stock nobody can sell. A sealed
+      // redelivery (no pending journal row) is a no-op either way.
+      sql: `SELECT CASE WHEN NOT (${guard}) OR EXISTS (SELECT 1 FROM branches
+          WHERE id = @branchId AND COALESCE(is_active, 1) = 1 AND successor_branch_id IS NULL)
+        THEN 1 ELSE json_extract('[1]', '${LANDING_INACTIVE_PATH}') END AS landing_branch_guard`,
+      params,
+    },
+    ...(redirect ? [{
+      // The confirmed redirect: the addressed branch is still retired and the landing still takes stock.
+      sql: `SELECT CASE WHEN NOT (${guard}) OR (${branchEffectGuardPredicate('@branchRedirectGuardsJson')})
+        THEN 1 ELSE json_extract('[1]', '${REDIRECT_CHANGED_PATH}') END AS branch_redirect_guard`,
+      params: { ...params, branchRedirectGuardsJson: JSON.stringify([{ addressed: redirect, effect: branchId, sells: 0 }]) },
+    }] : []),
+    {
       sql: `INSERT OR IGNORE INTO product_batches
-              (variant_product_id, batch_key, lot_code, received_at, is_active, notes, batch_number, supplier_id, supplier_name, unit_cost_usd, received_branch_id)
+              (variant_product_id, batch_key, lot_code, received_at, is_active, notes, batch_number, supplier_id, supplier_name, unit_cost_usd, received_branch_id, received_branch_name)
             SELECT @productId, @batchKey, @lotCode, @receivedAt, 1, @reason,
               (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id=@productId),
-              @supplierId, @supplierName, @costPriceUsd, @branchId
+              @supplierId, @supplierName, @costPriceUsd, @branchId, (SELECT name FROM branches WHERE id=@branchId)
             WHERE ${guard}`,
       params,
     },
@@ -379,7 +434,8 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
       // instead of borrowing a sibling receipt's price.
       sql: `UPDATE product_batches SET received_quantity = COALESCE(received_quantity, 0) + @quantity,
               received_cost_usd = ROUND(COALESCE(received_cost_usd, 0) + COALESCE(@totalCostUsd, 0), 4),
-              received_branch_id = CASE WHEN received_quantity = 0 THEN @branchId ELSE COALESCE(received_branch_id, @branchId) END
+              received_branch_id = CASE WHEN received_quantity = 0 THEN @branchId ELSE COALESCE(received_branch_id, @branchId) END,
+              received_branch_name = CASE WHEN received_quantity = 0 OR received_branch_id IS NULL THEN (SELECT name FROM branches WHERE id=@branchId) ELSE received_branch_name END
             WHERE variant_product_id = @productId AND batch_key = @batchKey AND ${guard}`,
       params,
     },
@@ -414,9 +470,9 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
       // 0084: the add just created/topped exactly one lot (keyed
       // productId+batchKey above), so the movement records it.
       sql: `INSERT INTO inventory_movements
-              (product_id, product_name, branch_id, branch_name, movement_type, quantity,
+              (product_id, product_name, branch_id, branch_name${redirect ? ', addressed_branch_name' : ''}, movement_type, quantity,
                unit_cost_usd, total_cost_usd, reason, created_at, batch_id)
-            SELECT @productId, @productName, @branchId, @branchName, 'add', @quantity,
+            SELECT @productId, @productName, @branchId, @branchName${redirect ? ', @addressedBranchName' : ''}, 'add', @quantity,
               @costPriceUsd,
               @totalCostUsd,
               @reason, @receivedAt,
@@ -434,7 +490,7 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
             WHERE job_id = @jobId AND action_key = @actionKey AND status = 'pending'`,
       params,
     },
-  ])
+  ]).catch(rethrowBranchGuardFailure)
 
   // No post-commit verify read: db.batch is atomic and its final statement
   // flips this row's status to 'applied', and the pre-read above already
@@ -537,13 +593,14 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
   // parameter ceiling.
   const branchIds = [...new Set(lines.map((line) => line.branchId))]
   const branchParams = Object.fromEntries(branchIds.map((branchId, index) => [`branchId${index}`, branchId]))
+  // role: a sale line is allowed by the branch ROLE (LC Store sells); the name is only a label.
   const branchRows = await db.prepare(`
-    SELECT id, name FROM branches
+    SELECT id, name, role, is_active FROM branches
     WHERE id IN (${branchIds.map((_, index) => `@branchId${index}`).join(', ')})
-  `).all<{ id: number; name: string | null }>(branchParams)
+  `).all<{ id: number; name: string | null; role: string | null; is_active: number | null }>(branchParams)
   if (branchRows.length !== branchIds.length) throw new Error('Sale branch does not exist')
   const unsellableBranch = firstUnsellableBranch(branchRows)
-  if (unsellableBranch) throw new Error(WAREHOUSE_NOT_SELLABLE_ERROR)
+  if (unsellableBranch || branchRows.some((branch) => Number(branch.is_active ?? 1) !== 1)) throw new Error(WAREHOUSE_NOT_SELLABLE_ERROR)
   const branchNameById = new Map(branchRows.map((branch) => [Number(branch.id), String(branch.name || '').trim()]))
   for (const line of lines) line.branchName = branchNameById.get(line.branchId) || line.branchName
 
@@ -633,6 +690,22 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
                 WHERE product_id = @productId AND branch_id = @branchId), 0) >= @quantity THEN 1 ELSE 0 END
             WHERE ${guard}`,
       params: { ...common, guardKey, ...aggregate },
+    })
+  }
+  // CUTOVER-LR: every line addressed to a retired branch whose landing the operator confirmed re-proves that pair in
+  // this batch (addressed still retired, landing still active and selling). Absent while every branch is active.
+  const redirectGuards = new Map<string, { addressed: number; effect: number; sells: 1 }>()
+  for (const line of lines) {
+    const addressed = positiveId(line.addressedBranchId)
+    if (addressed) redirectGuards.set(`${addressed}>${line.branchId}`, { addressed, effect: line.branchId, sells: 1 })
+  }
+  if (redirectGuards.size) {
+    statements.push({
+      sql: `INSERT INTO import_stock_action_guards (job_id, action_key, guard_key, guard_value)
+            SELECT @jobId, @actionKey, 'branch-redirect',
+              CASE WHEN (${branchEffectGuardPredicate('@branchRedirectGuardsJson')}) THEN 1 ELSE 0 END
+            WHERE ${guard}`,
+      params: { ...common, branchRedirectGuardsJson: JSON.stringify([...redirectGuards.values()]) },
     })
   }
   const batchGuardTotals = new Map<string, { batchId: number; branchId: number; quantity: number }>()
@@ -768,22 +841,23 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
         params: { ...common, ...allocation, branchId: line.branchId },
       })
     }
+    const lineRedirected = positiveId(line.addressedBranchId) != null
     statements.push({
       // 0084: single-lot lines stamp their lot; a line allocated across
       // several lots stays NULL (the per-lot detail is in
       // sale_item_batch_allocations), blank-honest.
       sql: `INSERT INTO inventory_movements (
-              product_id, product_name, branch_id, branch_name, movement_type,
+              product_id, product_name, branch_id, branch_name${lineRedirected ? ', addressed_branch_name' : ''}, movement_type,
               quantity, unit_cost_usd, total_cost_usd, reason, reference_id, created_at, batch_id
             )
-            SELECT @productId, @productName, @branchId, @branchName, 'sale',
+            SELECT @productId, @productName, @branchId, @branchName${lineRedirected ? ', @addressedBranchName' : ''}, 'sale',
               -@quantity, @costPriceUsd, @totalCostUsd, @reason,
               (SELECT id FROM sales WHERE client_request_id = @clientRequestId AND client_request_id <> ''), @soldAt, @movementBatchId
             WHERE ${guard}`,
       params: {
         ...common, ...line, costPriceUsd,
         totalCostUsd: multiplyMoney4(costPriceUsd, line.quantity),
-        reason: `Unified stock import ${jobId}, group ${saleGroupKey}, row ${line.rowNumber}`,
+        reason: `Unified stock import ${jobId}, group ${saleGroupKey}, row ${line.rowNumber}${addressedSuffix(line.addressedBranchName, line.branchName)}`,
         soldAt,
         // Full coverage required: a single allocation that covers only part
         // of the line (rest drawn from legacy unlotted stock) must not

@@ -105,7 +105,8 @@ const feeRoute = loadReal('routes/fees.ts', {
   '../lib/reviewGate': { maybeQueueForReview: async () => null },
   '../lib/businessDateWindow': { businessToday: () => '2026-09-08' },
   '../lib/telegram': { sendTelegramEvent: async () => {}, telegramMoney: () => '' },
-  '../lib/branchRoles': { branchCanSell: () => true },
+  '../lib/branchRoles': loadReal('lib/branchRoles.ts'),
+  '../lib/branchEffect': loadReal('lib/branchEffect.ts', { './branchRoles': loadReal('lib/branchRoles.ts'), './sqlBinding': loadReal('lib/sqlBinding.ts') }),
   '../lib/batchCode': { normalizeTypedDate: (value) => String(value || '').slice(0, 10) || null },
   '../index': {},
 })
@@ -123,6 +124,7 @@ function reset() {
       fee_date TEXT NOT NULL,
       sale_id INTEGER,
       branch_id INTEGER,
+      branch_name TEXT,
       delivery_contact_id INTEGER,
       notes TEXT,
       created_by INTEGER,
@@ -133,7 +135,9 @@ function reset() {
     CREATE TABLE branches (
       id INTEGER PRIMARY KEY,
       name TEXT NOT NULL,
-      is_active INTEGER NOT NULL
+      is_active INTEGER NOT NULL,
+      role TEXT,
+      successor_branch_id INTEGER
     );
     INSERT INTO branches (id, name, is_active) VALUES (2, 'Shop', 1);
     INSERT INTO fees (
@@ -182,6 +186,25 @@ async function main() {
     assert.equal(result.status, 200)
     assert.equal(result.body.fee.amount_usd, 1.2345)
     assert.equal(result.body.fee.amount_khr, 21)
+  })
+  await check('CUTOVER-LD: an edit keeps the label the fee was recorded under after the rename; a branch change re-stamps it', async () => {
+    // The consolidation's end state: branch 2 retired as "Old Shop" (role shop, successor LC Store), LC Store the selling branch.
+    sqlite.exec("UPDATE fees SET branch_name='Shop' WHERE id=1; INSERT INTO branches (id, name, is_active, role) VALUES (3, 'LC Store', 1, 'shop'); UPDATE branches SET name='Old Shop', role='shop', is_active=0, successor_branch_id=3 WHERE id=2")
+    let result = await update({ label: 'renamed label', expectedUpdatedAt: row().updated_at })
+    assert.equal(result.status, 200, JSON.stringify(result.body))
+    assert.equal(sqlite.prepare('SELECT branch_name FROM fees WHERE id=1').get().branch_name, 'Shop', 'same branch: the recorded label stays')
+    result = await update({ label: 'renamed label', branch_id: 2, expectedUpdatedAt: row().updated_at })
+    assert.equal(result.status, 200, JSON.stringify(result.body))
+    assert.equal(sqlite.prepare('SELECT branch_name FROM fees WHERE id=1').get().branch_name, 'Shop', 'same branch id sent again: still the recorded label')
+    result = await update({ label: 'moved', branch_id: 3, expectedUpdatedAt: row().updated_at })
+    assert.equal(result.status, 200, JSON.stringify(result.body))
+    assert.equal(sqlite.prepare('SELECT branch_name FROM fees WHERE id=1').get().branch_name, 'LC Store', 'a different branch: stamped with that branch\'s name now')
+    // History edits stay allowed, but nothing may be MOVED onto the retired branch.
+    result = await update({ label: 'back to the retired branch', branch_id: 2, expectedUpdatedAt: row().updated_at })
+    assert.equal(result.status, 409, 'moving an expense onto Old Shop is a new booking addressed to a disabled branch, so it asks for the redirect (CUTOVER-LR)')
+    assert.equal(result.body.code, 'branch_redirect_required')
+    assert.equal(result.body.redirect.successor_branch_id, 3)
+    assert.equal(sqlite.prepare('SELECT branch_id FROM fees WHERE id=1').get().branch_id, 3, 'and changes nothing')
   })
   await check('v1 malformed supplied money and unknown versions produce no writes', async () => {
     const before = row()
@@ -276,7 +299,7 @@ async function main() {
   })
 
   await check('N13: a legacy row whose updated_at is NULL stays editable by stating null, and the next edit needs the new version', async () => {
-    sqlite.exec(`DROP TABLE fees; CREATE TABLE fees (id INTEGER PRIMARY KEY, fee_type TEXT NOT NULL, label TEXT, amount_usd REAL NOT NULL, amount_khr REAL NOT NULL, fee_date TEXT NOT NULL, sale_id INTEGER, branch_id INTEGER, delivery_contact_id INTEGER, notes TEXT, created_by INTEGER, created_by_name TEXT, created_at TEXT NOT NULL, updated_at TEXT);
+    sqlite.exec(`DROP TABLE fees; CREATE TABLE fees (id INTEGER PRIMARY KEY, fee_type TEXT NOT NULL, label TEXT, amount_usd REAL NOT NULL, amount_khr REAL NOT NULL, fee_date TEXT NOT NULL, sale_id INTEGER, branch_id INTEGER, branch_name TEXT, delivery_contact_id INTEGER, notes TEXT, created_by INTEGER, created_by_name TEXT, created_at TEXT NOT NULL, updated_at TEXT);
       INSERT INTO fees (id, fee_type, label, amount_usd, amount_khr, fee_date, branch_id, created_at, updated_at) VALUES (1, 'expense', 'legacy', 10, 0, '2026-09-08', 2, '2026-09-01T00:00:00.000Z', NULL);`)
     assert.equal((await update({ label: 'no version' })).status, 400)
     const first = await update({ label: 'edited legacy', expectedUpdatedAt: null })
@@ -308,7 +331,7 @@ async function main() {
   // The legacy row (updated_at NULL, edited by stating null) has no stamp for the predicate to
   // compare against, so `updated_at IS NULL` is the whole guard. Pin that it still lets exactly
   // one of two edits through.
-  const legacyRow = () => sqlite.exec(`DROP TABLE fees; CREATE TABLE fees (id INTEGER PRIMARY KEY, fee_type TEXT NOT NULL, label TEXT, amount_usd REAL NOT NULL, amount_khr REAL NOT NULL, fee_date TEXT NOT NULL, sale_id INTEGER, branch_id INTEGER, delivery_contact_id INTEGER, notes TEXT, created_by INTEGER, created_by_name TEXT, created_at TEXT NOT NULL, updated_at TEXT);
+  const legacyRow = () => sqlite.exec(`DROP TABLE fees; CREATE TABLE fees (id INTEGER PRIMARY KEY, fee_type TEXT NOT NULL, label TEXT, amount_usd REAL NOT NULL, amount_khr REAL NOT NULL, fee_date TEXT NOT NULL, sale_id INTEGER, branch_id INTEGER, branch_name TEXT, delivery_contact_id INTEGER, notes TEXT, created_by INTEGER, created_by_name TEXT, created_at TEXT NOT NULL, updated_at TEXT);
     INSERT INTO fees (id, fee_type, label, amount_usd, amount_khr, fee_date, branch_id, created_at, updated_at) VALUES (1, 'expense', 'legacy', 10, 0, '2026-09-08', 2, '2026-09-01T00:00:00.000Z', NULL);`)
 
   await check('N13: two concurrent edits of a NULL-version legacy row -- exactly one wins, the other is refused', async () => {

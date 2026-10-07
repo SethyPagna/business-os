@@ -29,6 +29,9 @@ const relMap = {
   './db.ts': () => ({}),
   './branchRoles': () => loadReal('lib/branchRoles.ts'),
   './branchRoles.ts': () => loadReal('lib/branchRoles.ts'),
+  // CUTOVER-LR: the import authority answers a retired branch through the branch-effect kernel.
+  './branchEffect': () => loadReal('lib/branchEffect.ts'),
+  './sqlBinding': () => loadReal('lib/sqlBinding.ts'),
 }
 const originalCompile = Module.prototype._compile
 Module.prototype._compile = function (content, filename) {
@@ -53,6 +56,7 @@ function loadReal(relPath) {
 const {
   indexCanonicalImportBranches,
   resolveCanonicalImportBranch,
+  resolveImportBranchRequest,
   validateCanonicalImportBranchIds,
   withCanonicalImportBranchWriteGuard,
 } = loadReal('lib/importBranchAuthority.ts')
@@ -139,6 +143,86 @@ async function main() {
       { sql: "INSERT INTO products (name, is_active) VALUES ('Batch write two', 1)" },
     ]), /overflow|constraint|canonical/i)
     assert.strictEqual(sqlite.prepare("SELECT COUNT(*) AS n FROM products WHERE name LIKE 'Batch write %'").get().n, 0, 'the guard and all writes share one rollback boundary')
+  }
+
+  // ---- CUTOVER-LC G-G: the sheet's branch word is an IDENTITY, never a display name -------------
+  const BEFORE = [
+    { id: 1, name: 'Warehouse', role: null, canonical_key: null, is_active: 1, is_default: 1 },
+    { id: 2, name: 'Shop', role: null, canonical_key: null, is_active: 1, is_default: 0 },
+  ]
+  // After the consolidation: Warehouse renamed LC Store and given role shop (canonical_key stays warehouse);
+  // Shop retired as Old Shop with LC Store as successor. The names are labels and no longer say shop/warehouse.
+  const AFTER = [
+    { id: 1, name: 'LC Store', role: 'shop', canonical_key: 'warehouse', is_active: 1, is_default: 1, successor_branch_id: null },
+    { id: 2, name: 'Old Shop', role: 'shop', canonical_key: 'shop', is_active: 0, is_default: 0, successor_branch_id: 1 },
+  ]
+  const ask = (rows, word) => {
+    const found = resolveImportBranchRequest(indexCanonicalImportBranches(rows), word)
+    return found ? { id: found.branch.id, addressed: found.addressedName } : null
+  }
+  // Before: today's sheets, byte-for-byte the old answers (no provenance label, nothing redirected).
+  assert.deepStrictEqual(ask(BEFORE, 'shop'), { id: 2, addressed: null })
+  assert.deepStrictEqual(ask(BEFORE, 'Warehouse'), { id: 1, addressed: null })
+  assert.deepStrictEqual(ask(BEFORE, ''), { id: 1, addressed: null }, 'blank = the one default')
+  assert.deepStrictEqual(ask(BEFORE, 'store'), { id: 2, addressed: null }, 'store = the one selling branch (the role-shop one)')
+  // After: old sheets keep working. shop AND warehouse both land on LC Store; shop keeps its provenance.
+  assert.deepStrictEqual(ask(AFTER, 'warehouse'), { id: 1, addressed: null }, 'warehouse is LC Store itself (canonical_key), not a lookup by name')
+  assert.deepStrictEqual(ask(AFTER, 'shop'), { id: 1, addressed: 'Shop' }, 'shop routes to the successor and remembers it was addressed to Shop')
+  assert.deepStrictEqual(ask(AFTER, 'store'), { id: 1, addressed: null })
+  assert.deepStrictEqual(ask(AFTER, 'LC Store'), { id: 1, addressed: null }, 'an exact active name still resolves')
+  assert.deepStrictEqual(ask(AFTER, ''), { id: 1, addressed: null })
+  assert.strictEqual(ask(AFTER, 'Old Shop'), null, 'a retired branch is never named directly; it is reached through the shop word')
+  // CUTOVER-LR (owner ruling 6 Oct 2026): that successor is only the PREVIEW until the operator confirms where a row
+  // addressed to the disabled Shop goes. The pending flag is what every writer refuses; a confirmed target is where
+  // the row lands (still addressed to Shop); a target that cannot take it is the coded refusal.
+  const full = (rows, word, options) => resolveImportBranchRequest(indexCanonicalImportBranches(rows), word, options)
+  const preview = full(AFTER, 'shop')
+  assert.deepStrictEqual([preview.branch.id, preview.addressedBranchId, preview.redirectPending], [1, 2, true], 'no target: the successor is a pending preview addressed to Old Shop')
+  const confirmed = full(AFTER, 'shop', { redirectTarget: 1 })
+  assert.deepStrictEqual([confirmed.branch.id, confirmed.addressedName, confirmed.addressedBranchId, confirmed.redirectPending], [1, 'Shop', 2, undefined], 'a confirmed target lands the row there, addressed to Shop')
+  assert.throws(() => full(AFTER, 'shop', { redirectTarget: 2 }), (error) => error.code === 'branch_redirect_target_invalid' && error.redirect.successor_branch_id === 1, 'the disabled branch itself is not a target')
+  assert.throws(() => full(AFTER, 'shop', { redirectTarget: 99 }), (error) => error.code === 'branch_redirect_target_invalid', 'an unknown branch is not a target')
+  for (const word of ['warehouse', 'store', 'LC Store', '']) {
+    assert.deepStrictEqual(Object.keys(full(AFTER, word, { redirectTarget: 99 })).sort(), ['addressedName', 'branch'], `${word || 'blank'} reaches an active branch: the target is never read and nothing is marked`)
+  }
+  assert.deepStrictEqual(Object.keys(full(BEFORE, 'shop', { redirectTarget: 99 })).sort(), ['addressedName', 'branch'], 'before the cutover the answer has exactly its old shape, whatever the request names')
+  // Refusals: ambiguity, a retired branch with no successor, and a retired chain that ends nowhere.
+  assert.strictEqual(ask([...AFTER, { id: 3, name: 'Second', role: 'shop', canonical_key: 'warehouse', is_active: 1, is_default: 0 }], 'warehouse'), null, 'two active branches carrying one identity refuse')
+  // A stray retired legacy row called "Shop" (no identity, no successor) must not turn the shop word ambiguous once
+  // identities are stored; before they are stored the name still counts (the control below).
+  const stray = { id: 3, name: 'Shop', role: null, canonical_key: null, is_active: 0, is_default: 0, successor_branch_id: null }
+  assert.deepStrictEqual(ask([...AFTER, stray], 'shop'), { id: 1, addressed: 'Shop' }, 'a legacy row without a canonical_key is not an identity candidate')
+  assert.deepStrictEqual(ask([...AFTER, { ...stray, is_active: 1 }], 'shop'), { id: 1, addressed: 'Shop' }, 'nor is an ACTIVE one: identity, never the display name')
+  assert.strictEqual(ask([{ id: 1, name: 'Warehouse', is_active: 1, is_default: 1 }, stray], 'shop'), null, 'control: with no identity stored anywhere the legacy name rule is unchanged (a retired Shop with no successor still refuses)')
+  assert.strictEqual(ask([AFTER[0], { ...AFTER[1], successor_branch_id: null }], 'shop'), null, 'a retired Shop with no successor cannot receive stock')
+  assert.strictEqual(ask([{ ...AFTER[0], is_active: 0 }, AFTER[1]], 'shop'), null, 'a successor that is itself inactive refuses')
+  // Wrong implementation: the name-literal lookup the engine used before. It cannot answer the post-cutover sheet,
+  // so this fixture would have caught it.
+  const byName = (rows, word) => rows.filter((r) => r.is_active === 1 && r.name.trim().toLowerCase() === word).length === 1
+  assert.strictEqual(byName(BEFORE, 'shop'), true, 'control: the name lookup is right before the cutover')
+  assert.strictEqual(byName(AFTER, 'warehouse'), false, 'control: and wrong after it (LC Store is not named warehouse)')
+  assert.strictEqual(byName(AFTER, 'shop'), false, 'control: and cannot route shop to the successor')
+
+  // The in-batch guard follows the role as well: a renamed LC Store (role shop) is a valid import target, and a
+  // second active branch with the same role between preview and commit still rolls the batch back.
+  for (const rows of [BEFORE, AFTER]) {
+    const { sqlite, db, setBeforeBatch } = freshDb()
+    sqlite.prepare('DELETE FROM branches').run()
+    for (const row of rows) {
+      sqlite.prepare('INSERT INTO branches (id, name, role, canonical_key, is_active, is_default, successor_branch_id) VALUES (?,?,?,?,?,?,?)')
+        .run([row.id, row.name, row.role ?? null, row.canonical_key ?? null, row.is_active, row.is_default, row.successor_branch_id ?? null])
+    }
+    const target = rows.find((r) => r.is_active === 1 && r.is_default === 1).id
+    assert.strictEqual(await validateCanonicalImportBranchIds(db, [target]), null, 'the guard accepts the renamed selling branch by role')
+    const guarded = withCanonicalImportBranchWriteGuard(db, [target])
+    await guarded.prepare("INSERT INTO products (name, is_active) VALUES ('Role guard ok', 1)").run()
+    assert.strictEqual(sqlite.prepare("SELECT COUNT(*) AS n FROM products WHERE name = 'Role guard ok'").get().n, 1)
+    if (rows === AFTER) {
+      assert.match(String(await validateCanonicalImportBranchIds(db, [2])), /inactive/, 'the retired Old Shop is not a write target')
+      setBeforeBatch((database) => database.prepare("INSERT INTO branches (id, name, role, is_active, is_default) VALUES (9, 'Another till', 'shop', 1, 0)").run())
+      await assert.rejects(() => guarded.prepare("INSERT INTO products (name, is_active) VALUES ('Role guard rolled back', 1)").run(), /overflow|constraint|canonical|branch/i)
+      assert.strictEqual(sqlite.prepare("SELECT COUNT(*) AS n FROM products WHERE name = 'Role guard rolled back'").get().n, 0)
+    }
   }
 
   console.log('PASS canonical import branch analysis and same-batch write authority under real SQLite')

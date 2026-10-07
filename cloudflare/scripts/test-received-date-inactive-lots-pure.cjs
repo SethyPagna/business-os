@@ -24,6 +24,8 @@ const additions = load('saleLineAddition.ts')
 const migrationsDir = path.resolve(__dirname, '../migrations')
 const db = openDb(fs.readdirSync(migrationsDir).filter((file) => file.endsWith('.sql') && file < '0154')
   .sort().map((file) => fs.readFileSync(path.join(migrationsDir, file), 'utf8')))
+// The receive planner stamps the lot's branch label (0236, applied after this historical schema).
+db.exec('ALTER TABLE product_batches ADD COLUMN received_branch_name TEXT')
 db.exec("INSERT INTO branches(id,name,is_active) VALUES(1,'Shop',1),(2,'Warehouse',1); INSERT INTO products(id,name,stock_quantity) VALUES(1,'A',0)")
 const receive = (branchId, quantity, receivedDate) => db.batch(batches.planReceiveBatchStock({ productId: 1, branchId, quantity, receivedDate }).statements)
 const plan = (quantity, extra = {}) => batches.planReconcileBranchSnapshot({ productId: 1, branchId: 1, quantity, receivedDate: '10/09/2026', ...extra })

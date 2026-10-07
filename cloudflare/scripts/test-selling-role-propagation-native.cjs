@@ -116,7 +116,12 @@ async function main() {
       f.raw.exec('PRAGMA ignore_check_constraints=OFF')
       const before = fingerprint(f)
       const result = kind === 'create' ? await h.postSale(f.route, h.request(`refuse-${mutation}`)) : await send(f, kind, sale, `refuse-${mutation}`)
-      assert.equal(result.status, 400, responseInfo(result)); assert.equal(fingerprint(f), before)
+      // CUTOVER-LR: a write on an EXISTING sale whose branch is inactive with no active successor is a coded 409
+      // (branch_retired_no_successor); a brand-new sale still fails role validation with 400. Neither writes anything.
+      const retiredNoSuccessor = mutation === 'inactive' && kind !== 'create'
+      assert.equal(result.status, retiredNoSuccessor ? 409 : 400, responseInfo(result))
+      if (retiredNoSuccessor) assert.equal(result.body.code, 'branch_retired_no_successor', responseInfo(result))
+      assert.equal(fingerprint(f), before)
       f.raw.db.close()
     })
     for (const mutation of ['role', 'activity']) await check(`${kind}: ${mutation} race after preflight rolls back all effects`, async () => {

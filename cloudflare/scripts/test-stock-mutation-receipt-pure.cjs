@@ -132,6 +132,7 @@ const inventoryMod = loadReal('routes/inventory.ts', {
   '../durable-objects/broadcastHub': broadcastStub,
   '../lib/productBatches': productBatchesMod,
   '../lib/receivingBranch': receivingBranchMod,
+  '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   '../lib/batchCode': batchCodeMod,
   '../lib/stockReceiptGate': stockReceiptGateMod,
   '../lib/productIdentity': productIdentityMod,
@@ -151,6 +152,7 @@ const batchesMod = loadReal('routes/batches.ts', {
   '../lib/cache': cacheStub,
   '../lib/productBatches': productBatchesMod,
   '../lib/receivingBranch': receivingBranchMod,
+  '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   '../lib/batchCode': batchCodeMod,
   '../lib/stockReceiptGate': stockReceiptGateMod,
   '../lib/stockReason': stockReasonMod,
@@ -535,7 +537,8 @@ async function run() {
   //    or the ordinary fix-and-retry loop would be broken by the fix.
   {
     const db = freshDb()
-    const c = makeContext(faultyDb(db, 'SELECT id, name FROM branches'))
+    // CUTOVER-LR: the kernel's branch read is now the one directory read that also resolves a disabled-branch redirect.
+    const c = makeContext(faultyDb(db, 'SELECT id, name, role, is_active, successor_branch_id FROM branches'))
     let threw = false
     try { await runAdjustAction(c, addBody('stockline_77777777-beef')) } catch { threw = true }
     assert.equal(threw, true, 'the kernel died before writing')
@@ -556,7 +559,7 @@ async function run() {
     // A crash mid-kernel, BEFORE any write, whose release never ran: exactly
     // the row a killed isolate leaves behind. Same body as the retry below,
     // so this is a stale claim and not a conflict.
-    const crashedCtx = makeContext(noReleaseDb(faultyDb(db, 'SELECT id, name FROM branches')))
+    const crashedCtx = makeContext(noReleaseDb(faultyDb(db, 'SELECT id, name, role, is_active, successor_branch_id FROM branches')))
     let crashed = false
     try { await runAdjustAction(crashedCtx, addBody('stockline_88888888-stale')) } catch { crashed = true }
     assert.equal(crashed, true, 'the first attempt died mid-kernel')

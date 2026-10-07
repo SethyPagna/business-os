@@ -44,6 +44,8 @@ const env = { DB }
 const real = new Set(['acquisitionCostAccess', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db', 'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe', 'receivingBranch', 'businessMaintenanceGuard', 'media', 'audit', 'permissions', 'productImagePermission', 'importImageMatch'])
 const unavailable = name => new Proxy(function () {}, { get: (_target, property) => unavailable(`${name}.${String(property)}`), apply: () => { throw new Error(`Unexpected fixture dependency: ${name}`) }, construct: () => { throw new Error(`Unexpected fixture dependency: ${name}`) } })
 const services = {
+  // CUTOVER-LR: the real disabled-branch redirect helper (with its branchEffect/branchRoles/sqlBinding deps).
+  branchRedirectWrite: require('./harness/branch_redirect_write.cjs'),
   undoAppliers: { registerMergeFold: () => {}, registerProductMergeGroupRedo: () => {}, MERGE_REPARENT_TABLES: [] },
   auth: { requireAuth: async (c, next) => { c.set('user', c.env.TEST_USER); await next() } },
   cache: { bumpVersion: async () => {}, bumpVersions: async () => {} },
@@ -88,9 +90,12 @@ async function run(){
  raw.exec("INSERT INTO users(id,username,name,password,permissions) VALUES(1,'admin','Admin','fixture','{\"all\":true}'),(2,'requester','Requester','fixture','{\"products\":\"review\"}')")
  for (const url of ['/', '/variant']) for(const branch_id of [1,'2x',0,-1,1.5,[2],[],{},true]) {
   const before=snapshot(),res=await request(products,'POST',url,{name:`Inactive ${url} ${branch_id}`,branch_id,stock_quantity:5})
-  assert.equal(res.status,409,JSON.stringify(res));assert.equal(res.body.code,'receiving_branch_inactive');assert.equal(snapshot(),before)
+  // CUTOVER-LR (owner ruling 6 Oct 2026): the DISABLED Old Shop (1) now asks which active branch the opening stock
+  // lands at (branch_redirect_required, nothing written); malformed ids keep receiving_branch_inactive. The redirected
+  // create itself is proven in test-cutover-lr-product-create-pure.cjs.
+  assert.equal(res.status,409,JSON.stringify(res));assert.equal(res.body.code,branch_id===1?'branch_redirect_required':'receiving_branch_inactive');assert.equal(snapshot(),before)
  }
- pass('actual direct and variant handlers refuse inactive/malformed destinations without writes')
+ pass('actual direct and variant handlers refuse disabled (redirect required) and malformed destinations without writes')
  const started=new Date().toISOString().slice(0,10)
  let res=await request(products,'POST','/',{name:'Atomic direct',branch_id:2,stock_quantity:5,cost_price_usd:1.2345,client_request_id:'untrusted',id:9000,image_gallery:['https://example.invalid/a','https://example.invalid/b']})
  assert.equal(res.status,200,JSON.stringify(res));const id=res.body.id
@@ -134,8 +139,9 @@ async function run(){
  res=await request(reviews,'POST',`/${pending}/approve`,{});assert.equal(res.status,409);assert.equal(count('products'),beforeCount+1)
  pass('actual queued approval commits product/lot/audit/status together; second approval preserves existing409')
  pending=await queue('Queue inactive');raw.exec('UPDATE branches SET is_active=0 WHERE id=2');let expected=snapshot()
- res=await request(reviews,'POST',`/${pending}/approve`,{});assert.equal(res.status,409,JSON.stringify(res));assert.equal(res.body.code,'receiving_branch_inactive');assert.equal(snapshot(),expected);raw.exec('UPDATE branches SET is_active=1 WHERE id=2')
- pass('queued approval refuses destination retired after queue without losing pending history')
+ // CUTOVER-LR: the destination disabled after queueing (another branch still active) asks for redirect at approval.
+ res=await request(reviews,'POST',`/${pending}/approve`,{});assert.equal(res.status,409,JSON.stringify(res));assert.equal(res.body.code,'branch_redirect_required');assert.equal(snapshot(),expected);raw.exec('UPDATE branches SET is_active=1 WHERE id=2')
+ pass('queued approval refuses (redirect required) a destination disabled after queue without losing pending history')
  for(const mutation of ['payload','status']) {
   pending=await queue(`Queue raced ${mutation}`)
   beforeBatch=()=>{if(mutation==='payload')raw.prepare("UPDATE pending_actions SET payload_json=? WHERE id=?").run(JSON.stringify({name:'Changed request',stock_quantity:99}),pending);else raw.prepare("UPDATE pending_actions SET status='rejected' WHERE id=?").run(pending);expected=snapshot()}
@@ -172,7 +178,8 @@ async function run(){
  res=await request(products,'POST','/',directReplay);assert.equal(res.status,200,JSON.stringify(res));assert.equal(res.body.folded_into,directOriginal)
  assert.equal(raw.prepare("SELECT COUNT(*) n FROM audit_logs WHERE entity='product' AND entity_id=? AND action='fold'").get(directOriginal).n,1)
  raw.exec('UPDATE branches SET is_active=0 WHERE id=2')
- res=await request(products,'POST','/',directReplay);assert.equal(res.status,409);assert.equal(res.body.code,'receiving_branch_inactive')
+ // CUTOVER-LR: disabled destination with another active branch -> redirect required, not a flat inactive refusal.
+ res=await request(products,'POST','/',directReplay);assert.equal(res.status,409);assert.equal(res.body.code,'branch_redirect_required')
  raw.exec('UPDATE branches SET is_active=1 WHERE id=2')
  res=await request(products,'POST','/',{...directReplay,name:'Changed intent same direct key'});assert.equal(res.status,200,JSON.stringify(res));assert.notEqual(res.body.id,directOriginal)
  pass('direct repeated key performs identity fold, refuses retired destination, and accepts changed intent: NOT receipt replay')

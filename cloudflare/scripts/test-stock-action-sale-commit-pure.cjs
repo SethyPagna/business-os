@@ -35,6 +35,8 @@ const subject = compile('stockActionCommit.ts', {
   './searchMatch': searchMatch,
   './stockReceiptGate': stockReceiptGate,
   './branchRoleGuards': branchRoleGuards,
+  // CUTOVER-LR: the add/sale writers re-prove a confirmed branch redirect in-batch with the kernel's predicate.
+  './branchEffect': compile('branchEffect.ts', { './branchRoles': branchRoles, './sqlBinding': compile('sqlBinding.ts'), './db': {} }),
   './saleCreationSnapshot': saleCreationSnapshot,
   // P10-4: not exercised (this file only drives applyUnifiedStockSale), but
   // the module-level import must still resolve.
@@ -46,7 +48,8 @@ function setup() {
   sqlite.exec(`
     CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, stock_quantity REAL DEFAULT 0,
       cost_price_usd REAL DEFAULT 0, updated_at TEXT);
-    CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER DEFAULT 1);
+    CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER DEFAULT 1, role TEXT, canonical_key TEXT,
+      successor_branch_id INTEGER, is_default INTEGER DEFAULT 0);
     CREATE TABLE branch_stock (product_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0,
       UNIQUE(product_id, branch_id));
     CREATE TABLE product_batches (id INTEGER PRIMARY KEY, variant_product_id INTEGER,

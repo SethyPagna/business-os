@@ -4,8 +4,9 @@ import { useApp } from '../../AppContext'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { getStockLedger, getStockLedgerMovementBalance } from '../../api/productReadTransport.ts'
 import { revertStockMovement, editStockMovementReason } from '../../api/inventoryWriteTransport.ts'
-import { getStockMovementRevertPreview, undoActionHistory, redoActionHistory, type StockMovementRevertPreview } from '../../api/actionHistoryTransport.ts'
+import { getStockMovementRevertPreview, undoActionHistory, redoActionHistory, type LaterOpenSet, type StockMovementRevertPreview, type StockRevertEffect } from '../../api/actionHistoryTransport.ts'
 import { stockRevertErrorText } from '../../utils/stockRevertError.ts'
+import { laterSetLabel, laterSetsWarningFrame, revertEffectLine } from '../../utils/stockRevertPreview.ts'
 import {
   STOCK_IN_SESSIONS_ANCHOR, STOCK_RECORD_FOCUS_EVENT, queueStockInLineFocus, stockInCorrectionLineId, stockRefusalInfo, takeStockRecordFocus,
   type StockRefusalInfo,
@@ -41,6 +42,7 @@ import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
+import TriangleAlert from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import {
@@ -57,6 +59,7 @@ import { scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { stockSessionHasItems } from '../../utils/stockSessionBusy.ts'
 import { fmtDate, fmtClock24, fmtDateTime24 } from '../../utils/formatters'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
+import { branchHistoryLabel } from '../../utils/branchScope.ts'
 import { buildHistoryRowModel, formatHistoryReference, historyExportField } from '../../utils/historyRowModel.ts'
 import {
   isRevertibleStockMovement,
@@ -296,7 +299,9 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const revertInFlightRef = useRef(false)
   const [editingReason, setEditingReason] = useState<string | null>(null)
   const [confirmRevert, setConfirmRevert] = useState(false)
-  const [revertPreview, setRevertPreview] = useState<StockMovementRevertPreview | null>(null)
+  // REVERT-SET: the server's decision plus what it will do (effect) and the
+  // later Sets it leaves applied, cleared together by every reset below.
+  const [revertPreview, setRevertPreview] = useState<(StockMovementRevertPreview & { effect: StockRevertEffect | null; laterSets: LaterOpenSet[] }) | null>(null)
   // RET-D: WHY a Revert was refused and WHERE the blocking record is (utils/stockRefusal.ts).
   const [revertRefusal, setRevertRefusal] = useState<StockRefusalInfo | null>(null)
   const detailEpochRef = useRef(0)
@@ -614,7 +619,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
           || !(preview.operationId || preview.historyId)))) {
         throw new Error(tr(t, 'revert_failed', 'Revert failed'))
       }
-      setRevertPreview(preview)
+      setRevertPreview({ ...preview, effect: response.effect ?? null, laterSets: Array.isArray(response.laterSets) ? response.laterSets : [] })
       setConfirmRevert(true)
     } catch (error) {
       if (isCurrent()) {
@@ -734,7 +739,8 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
         label: tr(t, 'branch', 'Branch'),
         options: [
           { id: '', label: tr(t, 'all', 'All'), active: !branchId, onClick: () => setBranchId(0) },
-          ...branches.map((branch) => ({ id: branch.id, label: branch.name, active: branchId === branch.id, onClick: () => setBranchId(branch.id) })),
+          // History filter: the retired branch stays selectable, labelled.
+          ...branches.map((branch) => ({ id: branch.id, label: branchHistoryLabel({ name: branch.name, is_active: branch.isActive }, tr(t, 'inactive', 'Inactive')), active: branchId === branch.id, onClick: () => setBranchId(branch.id) })),
         ],
       })
     }
@@ -1083,7 +1089,8 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     ? tr(t, 'confirm_revert', 'Revert this change?')
     : tr(t, `movement_revert_${revertPreview.kind}_${revertPreview.direction}`,
       `${revertPreview.direction === 'redo' ? 'Redo' : 'Undo'} the entire ${revertPreview.kind === 'stock_set' ? 'stock correction' : 'stock session'} {action} ({count} lines)?`)
-      .replace('{action}', String(revertPreview.operationId || revertPreview.historyId))
+      // The History label names what is undone ("Set Serum received 2026-09-02 to 30"), not an operation id.
+      .replace('{action}', String(revertPreview.label || revertPreview.operationId || revertPreview.historyId))
       .replace('{count}', String(revertPreview.lineCount))
 
   return (
@@ -1431,6 +1438,28 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                   {detailCanRevert && confirmRevert ? (
                     <span className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-2 text-xs">
                       <span className="w-full min-w-0 break-words text-gray-500 dark:text-gray-400">{revertScopeText}</span>
+                      {revertPreview?.effect ? (
+                        <span data-revert-effect="true" className="w-full min-w-0 break-words font-semibold text-gray-700 dark:text-gray-200">
+                          {revertEffectLine(revertPreview.effect, (key, fallback) => tr(t, key, fallback), fmtDate)}
+                        </span>
+                      ) : null}
+                      {revertPreview?.laterSets.length ? (
+                        <span data-revert-later-sets="true" className="flex w-full min-w-0 items-start gap-1 break-words text-amber-700 dark:text-amber-300">
+                          <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                          <span className="min-w-0">
+                            {laterSetsWarningFrame((key, fallback) => tr(t, key, fallback)).before}
+                            {revertPreview.laterSets.map((set, index) => (
+                              <span key={set.movementId}>
+                                {index > 0 ? ', ' : ''}
+                                <button type="button" className="font-semibold underline underline-offset-2" onClick={() => void openMovementById(set.movementId)}>
+                                  {laterSetLabel(set, fmtDate)}
+                                </button>
+                              </span>
+                            ))}
+                            {laterSetsWarningFrame((key, fallback) => tr(t, key, fallback)).after}
+                          </span>
+                        </span>
+                      ) : null}
                       <button
                         type="button"
                         disabled={rowBusy}

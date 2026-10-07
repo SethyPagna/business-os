@@ -220,7 +220,12 @@ async function assertNativeD1TriggerMetadata() {
     f.raw.prepare("UPDATE branches SET name='Warehouse' WHERE id=1").run()
     const refused = await postSale(f.route, request('warehouse-refused'))
     assert.equal(refused.status, 400, JSON.stringify(refused.body))
-    assert.match(refused.body.error, /Shop/)
+    // The refusal used to say "Sales can only be recorded at the Shop. Transfer Warehouse stock to the Shop first.", which
+    // is wrong once Shop is Old Shop and Warehouse is LC Store (and reached Khmer screens in English). It is now the coded,
+    // role-neutral sentence of the pack key branch_not_sellable, true before and after the cutover.
+    assert.equal(refused.body.code, 'branch_not_sellable')
+    assert.equal(refused.body.error, 'Sales can only be recorded at a selling branch.')
+    assert.doesNotMatch(refused.body.error, /Shop|Warehouse/)
     assert.equal(f.raw.prepare('SELECT COUNT(*) AS n FROM sales').get().n, 0)
     console.log('PASS branch-role guard still rejects Warehouse creation before writes')
   }

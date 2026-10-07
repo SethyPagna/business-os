@@ -8,7 +8,9 @@ import { hasPermission, hasAnyPermission, isActionBlocked, getActionTier } from 
 import { audit } from '../lib/audit'
 import { sanitizeOriginalFileName, buildUniqueStoredName, getMediaType } from '../lib/fileAssets'
 import { classifyImportUpload, validateUploadedBuffer, EMBEDDED_MARKUP_MESSAGE, MISMATCHED_UPLOAD_MESSAGE, UNSUPPORTED_IMAGE_MESSAGE, UNSUPPORTED_UPLOAD_MESSAGE } from '../lib/uploadSecurity'
-import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, summarizeImportWarnings, countRowsWithWarningKinds, runD1BatchInChunks, IMPORT_FILE_SKIPPED_ERROR_CODE, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportRowResult, type RowAction } from '../lib/importEngine'
+import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, summarizeImportWarnings, countRowsWithWarningKinds, runD1BatchInChunks, importBranchRedirectGate, IMPORT_FILE_SKIPPED_ERROR_CODE, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportBranchRedirectGate, type ImportRowResult, type RowAction } from '../lib/importEngine'
+import { IMPORT_BRANCH_REDIRECT_POLICY_KEY } from '../lib/importBranchAuthority'
+import { branchRedirectTarget } from '../lib/branchEffect'
 import { readCentralDirectory, extractZipEntry, ZipFormatError, type ZipEntry } from '../lib/zipReader'
 import { MAX_IMAGES_PER_PRODUCT, buildImageDisplayName } from '../lib/importImageMatch'
 import { bumpVersion } from '../lib/cache'
@@ -295,6 +297,26 @@ function safeJsonParse<T>(text: string | null | undefined, fallback: T): T {
   }
 }
 
+// CUTOVER-LR: the policy keys only the server writes -- the landing branch the operator confirmed for rows addressed
+// to a disabled branch, who confirmed it and when. A client-supplied policy never carries them.
+const BRANCH_REDIRECT_POLICY_KEYS = [IMPORT_BRANCH_REDIRECT_POLICY_KEY, 'branch_redirect_addressed_id', 'branch_redirect_confirmed_by', 'branch_redirect_confirmed_at'] as const
+
+/**
+ * Records the gate's answer on the policy the approve/retry request persists: the confirmed landing when the rows
+ * address a disabled branch, and no stale landing when they no longer do (the keys are absent while every branch
+ * is active, so the policy is then exactly what it was).
+ */
+function applyBranchRedirectToPolicy(c: any, policy: Record<string, any>, gate: Exclude<ImportBranchRedirectGate, { refusal: unknown }>): void {
+  if (gate.target == null) {
+    for (const key of BRANCH_REDIRECT_POLICY_KEYS) if (key in policy) delete policy[key]
+    return
+  }
+  policy[IMPORT_BRANCH_REDIRECT_POLICY_KEY] = gate.target
+  policy.branch_redirect_addressed_id = gate.addressedBranchId
+  policy.branch_redirect_confirmed_by = c.get('user')?.id ?? null
+  policy.branch_redirect_confirmed_at = new Date().toISOString()
+}
+
 async function auditImportEvent(c: any, action: string, jobId: string, before: Record<string, unknown> | null, after: Record<string, unknown> | null, extra: Record<string, unknown> = {}) {
   const user = c.get('user')
   await audit(c.env, user?.id ?? null, actorSnapshot(user), action, 'import_job', jobId, {
@@ -475,12 +497,17 @@ app.post('/', async (c) => {
 
   const id = crypto.randomUUID()
   const db = await getImportFencedDb(c.env)
+  // The confirmed redirect landing is recorded only by /approve and /retry, from the operator's own confirmation.
+  const requestedPolicy = body?.policy || {}
+  if (requestedPolicy && typeof requestedPolicy === 'object') {
+    for (const key of BRANCH_REDIRECT_POLICY_KEYS) if (key in requestedPolicy) delete (requestedPolicy as Record<string, unknown>)[key]
+  }
   await db.prepare(`
     INSERT INTO import_jobs (id, type, status, phase, queue_driver, policy_json, created_by_id, created_by_name)
     VALUES (@id, @type, 'pending', 'created', 'cloudflare-queues', @policy_json, @created_by_id, @created_by_name)
   `).run({
     id, type,
-    policy_json: JSON.stringify(body?.policy || {}),
+    policy_json: JSON.stringify(requestedPolicy),
     created_by_id: user?.id ?? null,
     created_by_name: actorSnapshot(user),
   })
@@ -1499,8 +1526,13 @@ app.post('/:id/approve', async (c) => {
   }
 
   const db = await getImportFencedDb(c.env)
+  // CUTOVER-LR: rows addressed to a disabled branch go nowhere until this request names the active branch the
+  // operator confirmed (X-Branch-Redirect). Refused before anything is written or queued.
+  const branchRedirect = await importBranchRedirectGate(getDb(c.env), { id, type: String(job.type || '') }, branchRedirectTarget(c))
+  if ('refusal' in branchRedirect) return c.json({ success: false, ...branchRedirect.refusal }, 409)
   policy.apply_authorized_by_id = c.get('user')?.id ?? null
   policy.apply_authorized_at = new Date().toISOString()
+  applyBranchRedirectToPolicy(c, policy, branchRedirect)
   if (job.type === 'stock_actions') {
     policy.stock_action_conflicts_confirmed = requiresStockConfirmation
     policy.stock_action_confirmed_by = c.get('user')?.id ?? null
@@ -1647,8 +1679,12 @@ app.post('/:id/retry', async (c) => {
   if (mode === 'apply') {
     const imageDenied = await requireChangedProductImportImageAction(c as any, job)
     if (imageDenied) return imageDenied
+    // A re-apply is a fresh confirmation point (CUTOVER-LR): the same gate as /approve, before anything is queued.
+    const branchRedirect = await importBranchRedirectGate(getDb(c.env), { id, type: String(job.type || '') }, branchRedirectTarget(c))
+    if ('refusal' in branchRedirect) return c.json({ success: false, ...branchRedirect.refusal }, 409)
     policy.apply_authorized_by_id = c.get('user')?.id ?? null
     policy.apply_authorized_at = new Date().toISOString()
+    applyBranchRedirectToPolicy(c, policy, branchRedirect)
   }
   await db.prepare(`
     UPDATE import_jobs SET status = 'queued', phase = 'queued', cancel_requested = 0,

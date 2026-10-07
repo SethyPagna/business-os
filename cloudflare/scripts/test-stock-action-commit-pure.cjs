@@ -38,6 +38,8 @@ const subject = compile('stockActionCommit.ts', {
   './searchMatch': searchMatch,
   './stockReceiptGate': stockReceiptGate,
   './branchRoleGuards': branchRoleGuards,
+  // CUTOVER-LR: the add/sale writers re-prove a confirmed branch redirect in-batch with the kernel's predicate.
+  './branchEffect': compile('branchEffect.ts', { './branchRoles': branchRoles, './sqlBinding': compile('sqlBinding.ts'), './db': {} }),
   './saleCreationSnapshot': saleCreationSnapshot,
   // P10-4: the unified-import add writer re-derives products.cost_price_usd
   // from the DISTINCT non-zero active-lot costs after every applied add --
@@ -56,11 +58,11 @@ function setup() {
       selling_price_usd REAL DEFAULT 0, wholesale_price_usd REAL DEFAULT 0, cost_price_usd REAL DEFAULT 0, cost_price_khr REAL DEFAULT 0,
       purchase_price_usd REAL DEFAULT 0, purchase_price_khr REAL DEFAULT 0,
       is_active INTEGER DEFAULT 1, client_request_id TEXT UNIQUE, created_at TEXT, updated_at TEXT);
-    CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER DEFAULT 1);
+    CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER DEFAULT 1, role TEXT, successor_branch_id INTEGER);
     CREATE TABLE branch_stock (product_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0,
       UNIQUE(product_id, branch_id));
     CREATE TABLE product_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, variant_product_id INTEGER,
-      batch_key TEXT, lot_code TEXT, received_at TEXT, is_active INTEGER, notes TEXT, batch_number INTEGER, supplier_id INTEGER, supplier_name TEXT, unit_cost_usd REAL, payment_status TEXT, credit_due_date TEXT, received_quantity REAL, received_branch_id INTEGER, received_cost_usd REAL,
+      batch_key TEXT, lot_code TEXT, received_at TEXT, is_active INTEGER, notes TEXT, batch_number INTEGER, supplier_id INTEGER, supplier_name TEXT, unit_cost_usd REAL, payment_status TEXT, credit_due_date TEXT, received_quantity REAL, received_branch_id INTEGER, received_branch_name TEXT, received_cost_usd REAL,
       UNIQUE(variant_product_id, batch_key), UNIQUE(variant_product_id, batch_number));
     CREATE TABLE branch_batch_stock (batch_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0,
       updated_at TEXT, UNIQUE(batch_id, branch_id));

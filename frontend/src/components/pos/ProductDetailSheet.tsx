@@ -21,6 +21,7 @@ import { branchStockQuantity, deriveProductSheetState, type SheetIntent, type Sh
 import ProductImage from './ProductImage'
 import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
+import { branchStepMatters } from '../../utils/branchScope.ts'
 
 type ProductGroupMeta = {
   groupKind?: string
@@ -457,7 +458,11 @@ export default function ProductDetailSheet({
   // Step numbers are counted, not hardcoded. The option step disappears in
   // merged mode, and a lot step still labelled "3." under a lone "1. Branch"
   // reads as a step the cashier somehow skipped.
-  const branchStepShown = branchOptions.length > 0
+  // One branch that can sell is no choice: the sheet already resolves to it, so
+  // the Branch step and the "Name: qty" summary would only repeat the Stock row.
+  // A lone branch that CANNOT sell keeps the step so its notice still shows.
+  const branchChoiceMatters = branchStepMatters(branchOptions)
+  const branchStepShown = branchChoiceMatters
   const optionStepShown = !mergeRowsIntoLotList
   const optionStepNumber = branchStepShown ? 2 : 1
   const lotStepNumber = (branchStepShown ? 1 : 0) + (optionStepShown ? 1 : 0) + 1
@@ -745,7 +750,12 @@ export default function ProductDetailSheet({
                 // able to see that the units are sitting in the warehouse,
                 // and be told what to do about it. Admins included -- this
                 // is a business rule, not a permission.
-                if (blocked) { setBranchNotice(warehouseBlockedMessage); return }
+                if (blocked) {
+                  setBranchNotice(branch.blockedMessageKey === 'branch_redirect_title'
+                    ? (t('branch_redirect_title') || '{branch} is disabled').split('{branch}').join(branch.name)
+                    : warehouseBlockedMessage)
+                  return
+                }
                 setBranchNotice('')
                 setSelectedBranchId(branch.id)
                 setSelectedVariantId(null)
@@ -860,7 +870,7 @@ export default function ProductDetailSheet({
               units were at the other branch or nowhere. This used to render
               only for a standalone product that was already at zero, i.e.
               it disappeared exactly when the cashier could act on it. */}
-          {branchOptions.length ? (
+          {branchChoiceMatters ? (
             <div className="flex gap-3"><span className="w-24 flex-shrink-0" /><span className="text-xs text-gray-400">{sheetState.branchSummary}</span></div>
           ) : null}
           {/* The two ledgers disagreeing, said out loud. branch_stock holds

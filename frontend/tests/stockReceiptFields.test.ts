@@ -304,7 +304,9 @@ runTest('nothing invents a receipt cost any more', () => {
   // F2 (5 Oct 2026): the Products-page snapshot restore, its last client
   // caller, no longer writes stock at all -- so it sends no correction either.
   const products = source('components/products/Products.tsx')
-  assert.doesNotMatch(products, /attribution: 'correction'/, 'no Products-page Undo may post a stock correction')
+  // REVERT-SET: the one exemption is replaying the action's own recorded removal (replayRecordedRemovals).
+  const outsideReplay = products.replace(/const replayRecordedRemovals = useCallback[\s\S]*?\n  \}, \[load, runProductStockMutation/, '')
+  assert.doesNotMatch(outsideReplay, /attribution: 'correction'/, 'no Products-page Undo may post a stock correction outside the recorded replay')
   // (Inventory.tsx's adjust undo, the other correction, went with its adjust half.)
 })
 

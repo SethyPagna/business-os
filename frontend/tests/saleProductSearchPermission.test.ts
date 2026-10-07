@@ -45,7 +45,7 @@ for (const [name, addAllowed, amendAllowed] of [
   let scheduledSearches = 0
   const env: Record<string, unknown> = {
     [gateName]: allowed, detailScope: 'disposable-actor:sale1', detailScopeRef: { current: 'disposable-actor:sale1' },
-    detailAliveRef: { current: true }, addSearchSeqRef: { current: 0 }, sale: { branch_id: 2 }, addQuery: 'powder',
+    detailAliveRef: { current: true }, addSearchSeqRef: { current: 0 }, sale: { branch_id: 2 }, stockBranchId: 2, addQuery: 'powder',
     trackedBatchReloadKey: 0, SALE_DETAIL_PRODUCT_PAGE_SIZE,
     searchProducts: async (params: Record<string, unknown>) => { reads.push(params); return { items: [{ id: 7 }], page: params.page, pageSize: 8, total: 9, totalPages: 2 } },
     normalizeSaleProductSearchPage, mergeSaleProductSearchCandidates,

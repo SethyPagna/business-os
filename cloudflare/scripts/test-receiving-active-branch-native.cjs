@@ -110,6 +110,7 @@ const authStub = { requireAuth: async (c, next) => { await next() } }
 const inventoryMod = loadReal('routes/inventory.ts', {
   '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   '../lib/receivingBranch': receivingBranchMod,
+  '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'),
   '../lib/acquisitionCostAccess': acquisitionMod,
   '../lib/catalogCostRecompute': costMod,
   '../lib/schemaProbe': schemaMod,
@@ -135,6 +136,7 @@ const inventoryMod = loadReal('routes/inventory.ts', {
 
 const batchesMod = loadReal('routes/batches.ts', {
   '../lib/receivingBranch': receivingBranchMod,
+  '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'),
   '../lib/acquisitionCostAccess': acquisitionMod,
   '../lib/catalogCostRecompute': costMod,
   '../lib/schemaProbe': schemaMod,
@@ -192,6 +194,7 @@ function makeContext(db, user) {
   currentDb = db
   return {
     env: { DB: {} },
+    req: { header: () => undefined }, // CUTOVER-LR: a disabled branch reads X-Branch-Redirect (absent here)
     executionCtx: { waitUntil: (p) => { Promise.resolve(p).catch(() => {}) } },
     get(key) { return key === 'user' ? currentUser : undefined },
     set(key, value) { if (key === 'user') currentUser = value },
@@ -211,10 +214,15 @@ const receiveBody = { product_id:1, branch_id:1, quantity:5, unit_cost_usd:2, su
 const adjustBody = { productId:1, branchId:1, type:'add', quantity:5, unitCostUsd:2, supplierName:'Acme', paymentStatus:'paid', reason:'delivery', receivedDate:'01/10/2026' }
 const tables = ['products','branch_stock','product_batches','branch_batch_stock','inventory_movements']
 function snapshot(db) { return Object.fromEntries(tables.map(t => [t, db.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()])) }
-async function refusal(response) {
+// CUTOVER-LR (owner ruling 6 Oct 2026): a DISABLED branch (id 1 here, while Warehouse 2 stays active) is no longer a
+// flat receiving_branch_inactive -- the write asks which active branch it should land at (branch_redirect_required)
+// and changes nothing until the operator confirms. Unknown/invalid ids and an in-batch race keep
+// receiving_branch_inactive. The redirected landing itself is proven in test-cutover-lr-*-pure.cjs.
+const REDIRECT_REQUIRED = 'branch_redirect_required'
+async function refusal(response, code = 'receiving_branch_inactive') {
   const body = await response.json()
   assert.equal(response.status,409,JSON.stringify(body))
-  assert.equal(body.code,'receiving_branch_inactive')
+  assert.equal(body.code,code)
 }
 async function successful(response) {
   const body = await response.json()
@@ -235,10 +243,11 @@ function race(db) {
 }
 async function run() {
   if (process.argv.includes('--wrong-preflight')) {
+    // CUTOVER-LR: an unknown branch (99) is the case only the preflight catches; a disabled one is refused earlier by the
+    // redirect contract, which would mask this negative control.
     const db=freshDb(), c=makeContext(db,ADMIN_USER)
-    db.raw.exec('UPDATE branches SET is_active=0 WHERE id=1')
     const before=snapshot(db)
-    await refusal(await runAdjustAction(c,{...adjustBody,unlockPricing:true,pricing:{barcode:'PREFLIGHT-NEGATIVE',cost_usd:3}}))
+    await refusal(await runAdjustAction(c,{...adjustBody,branchId:99,unlockPricing:true,pricing:{barcode:'PREFLIGHT-NEGATIVE',cost_usd:3}}))
     assert.deepEqual(snapshot(db),before,'preflight must stop zero-stock sibling creation before the receiving batch')
     return
   }
@@ -253,7 +262,7 @@ async function run() {
     const db=freshDb()
     db.raw.exec('UPDATE branches SET is_active=0 WHERE id=1')
     const before=snapshot(db)
-    await refusal(await batchesMod.runReceiveBatchAction(makeContext(db,ADMIN_USER),{...receiveBody,branch_id:branchId}))
+    await refusal(await batchesMod.runReceiveBatchAction(makeContext(db,ADMIN_USER),{...receiveBody,branch_id:branchId}), branchId===1 ? REDIRECT_REQUIRED : undefined)
     assert.deepEqual(snapshot(db),before)
   }
   console.log('PASS receive refuses inactive, missing and invalid explicit destinations without business writes')
@@ -261,7 +270,7 @@ async function run() {
     const db=freshDb()
     db.raw.exec('UPDATE branches SET is_active=0 WHERE id=1')
     const before=snapshot(db)
-    await refusal(await runAdjustAction(makeContext(db,ADMIN_USER),{...body,ordinaryReceiving:false,historicalReceiptReplay:true}))
+    await refusal(await runAdjustAction(makeContext(db,ADMIN_USER),{...body,ordinaryReceiving:false,historicalReceiptReplay:true}), body.branchId===1 ? REDIRECT_REQUIRED : undefined)
     assert.deepEqual(snapshot(db),before)
   }
   console.log('PASS adjust, positive legacy Set and new barcode preflight refuse; body flags cannot bypass')
@@ -312,7 +321,7 @@ async function run() {
     db.raw.exec('UPDATE branches SET is_active=0 WHERE id=1')
     const before=snapshot(db)
     const results=await runStockInCommit(c,[{key:'r',wire:'receive',body:receiveBody},{key:'a',wire:'adjust',body:{...adjustBody,client_request_id:'commit_line_a_00001'}}])
-    assert.deepEqual(results.map(x=>[x.ok,x.code]),[[false,'receiving_branch_inactive'],[false,'receiving_branch_inactive']])
+    assert.deepEqual(results.map(x=>[x.ok,x.code]),[[false,REDIRECT_REQUIRED],[false,REDIRECT_REQUIRED]])
     assert.deepEqual(snapshot(db),before)
     db.raw.exec('UPDATE branches SET is_active=1 WHERE id=1')
     const good=await runStockInCommit(c,[{key:'r',wire:'receive',body:receiveBody},{key:'a',wire:'adjust',body:{...adjustBody,client_request_id:'commit_line_a_00001'}}])
@@ -335,6 +344,13 @@ async function run() {
     assert.ok(movement)
     db.raw.exec('UPDATE branches SET is_active=0 WHERE id=1')
     const revert=loadReal('lib/stockRevert.ts',{'./productBatches':productBatchesMod,'./moneyPrecision':moneyMod,'./stockCondition':stockConditionMod})
+    // CUTOVER-LR: a revert whose stock would land at a disabled branch now asks for the active landing branch
+    // (branch_redirect_required, nothing written); the redirected revert is proven in test-cutover-lr-tagged-revert-pure.cjs.
+    // The inverse-chain money coverage below still runs at the recorded branch once it is active again.
+    const frozen=snapshot(db)
+    await assert.rejects(revert.applyMovementRevert(db,movement,{userId:1,userName:'Admin'}),e=>e.code===REDIRECT_REQUIRED)
+    assert.deepEqual(snapshot(db),frozen)
+    db.raw.exec('UPDATE branches SET is_active=1 WHERE id=1')
     const result=await revert.applyMovementRevert(db,movement,{userId:1,userName:'Admin'})
     assert.equal(result.ok,true,JSON.stringify(result))
     assert.equal(branchStock(db,1),5)
@@ -350,7 +366,7 @@ async function run() {
     assert.equal(lot.received_cost_usd,10)
     assert.equal(lot.supplier_name,'Acme')
   }
-  console.log('PASS actual historical removal and receipt inverse chains restore retired-branch stock and money')
+  console.log('PASS revert into a disabled branch asks for redirect; historical removal and receipt inverse chains restore stock and money')
   {
     const db=freshDb(), before=snapshot(db)
     db.raw.exec('UPDATE branches SET is_active=0 WHERE id=1')

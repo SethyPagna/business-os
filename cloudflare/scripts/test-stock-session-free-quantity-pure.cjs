@@ -88,6 +88,7 @@ let auditCalls = []
 const auditStub = { audit: async (...args) => { auditCalls.push(args) }, changedFields: realAudit.changedFields }
 const shared = {
   '../lib/receivingBranch': loadReal('lib/receivingBranch.ts'),
+  '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   '../lib/db': dbOverride,
   '../lib/auth': { requireAuth: async (_c, next) => { await next() } },
   '../lib/audit': auditStub,
@@ -114,9 +115,10 @@ const inventoryMod = loadReal('routes/inventory.ts', {
 })
 const batchesMod = loadReal('routes/batches.ts', shared)
 
-function freshDb(migrations = loadAll()) {
+function freshDb(migrations = loadAll(), extraSql = '') {
   schemaProbeMod.__resetSchemaProbeCacheForTests()
   const rawDb = openDb(migrations)
+  if (extraSql) rawDb.exec(extraSql)
   rawDb.exec(`
     INSERT INTO branches(id, name, is_default, is_active) VALUES(1, 'Shop', 1, 1);
     INSERT INTO products(id, name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, stock_quantity, is_active)
@@ -237,7 +239,9 @@ async function run() {
     const freeMigration = files.find((f) => /_inventory_movements_free_quantity\.sql$/.test(f))
     assert.ok(freeMigration, 'the append-only migration exists')
     const before = Number(freeMigration.slice(0, 4)) - 1
-    const db = freshDb(loadAll({ through: before }))
+    // The receive planner stamps the lot's branch label (0236, a later migration than the one this test withholds),
+    // and the kernel's one branch read resolves a disabled-branch redirect from 0223's columns (CUTOVER-LR).
+    const db = freshDb(loadAll({ through: before }), 'ALTER TABLE product_batches ADD COLUMN received_branch_name TEXT; ALTER TABLE branches ADD COLUMN role TEXT; ALTER TABLE branches ADD COLUMN successor_branch_id INTEGER')
     const { status, json } = await adjust(db, { quantity: 10, unitCostUsd: 3.5, freeQuantity: 2 })
     assert.equal(status, 200, JSON.stringify(json))
     assert.equal(stock(db), 12)

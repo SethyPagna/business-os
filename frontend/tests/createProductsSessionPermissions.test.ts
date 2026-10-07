@@ -87,7 +87,7 @@ function assertReviewCreatePaths(modal: string, appliers: string, writers: strin
     && item.expression.arguments.slice(0, 3).map(value => ts.isStringLiteral(value) ? value.text : '').join('/') === 'products/create/product')
   assert.ok(registration)
   const registered = registration.getText(applierAst)
-  assert.match(registered, /await createProductWithInitialStock\(env, body,[\s\S]*?\{ row, reviewer: \{ reviewedBy: reviewer\.id, reviewedByName: reviewer\.name \} \}\)/)
+  assert.match(registered, /await createProductWithInitialStock\(env, body,[\s\S]*?\{ row, reviewer: \{ reviewedBy: reviewer\.id, reviewedByName: reviewer\.name \} \}(?:, reviewer\.redirectTarget \?\? null)?\)/)
   assert.match(registered, /return \{ pendingActionMarkedAtomically: true \}/)
   const writerAst = ts.createSourceFile('productWrites.ts', writers, ts.ScriptTarget.Latest, true)
   const functionText = (name: string) => {
@@ -97,15 +97,15 @@ function assertReviewCreatePaths(modal: string, appliers: string, writers: strin
   }
   assert.match(functionText('productCreateDestination'), /const rawQuantity = body\.stock_quantity \?\? 0/)
   const writer = functionText('createProductWithInitialStock')
-  assert.match(writer, /const \{ branchId, quantity \} = await productCreateDestination\(env, body\)/)
+  assert.match(writer, /const \{ branchId, quantity(?:, landing)? \} = await productCreateDestination\(env, body(?:, redirectTarget)?\)/)
   assert.match(writer, /planInsertRow\('products',[\s\S]*?stock_quantity: quantity, client_request_id: key/)
   for (const table of ['branch_stock', 'product_batches', 'branch_batch_stock']) {
     const insert = writer.indexOf('INSERT INTO ' + table + '(')
-    assert.ok(insert > 0 && insert < writer.indexOf('await db.batchOnce(statements)'), table)
+    assert.ok(insert > 0 && insert < writer.indexOf('await db.batchOnce(addressedStatements(landing, statements))'), table)
   }
   assert.match(writer, /if \(approval\) \{\s*statements\.push\(\.\.\.pendingActionApprovalStatements\(approval\.row, approval\.reviewer\)\)/)
   assert.match(writer, /statements\.push\(receivingBranchAssertion\(branchId\)\)/)
-  assert.equal((writer.match(/await db\.batchOnce\(statements\)/g) || []).length, 1)
+  assert.equal((writer.match(/await db\.batchOnce\(addressedStatements\(landing, statements\)\)/g) || []).length, 1)
 }
 assertReviewCreatePaths(floatSource, applierSource, writerSource)
 for (const [before, after] of [

@@ -1407,11 +1407,11 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       return
     }
     if (!branchCanTransferBetween(fromBranch, toBranch)) {
-      notify(tr('transfer_branches_pair_only', 'Transfers move stock only between the two operating branches.'), 'error')
+      notify(tr('transfer_branches_pair_only', 'Transfers move stock only between a selling branch and a storage branch.'), 'error')
       return
     }
     if (branches.filter((branch) => branchCanBeTransferSource(branch)).length !== 2) {
-      notify(tr('transfer_branches_pair_only', 'Transfers move stock only between the two operating branches.'), 'error')
+      notify(tr('transfer_branches_pair_only', 'Transfers move stock only between a selling branch and a storage branch.'), 'error')
       return
     }
     const confirmation = tr(

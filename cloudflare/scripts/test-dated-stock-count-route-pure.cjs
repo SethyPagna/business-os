@@ -80,6 +80,8 @@ const relMap = {
   './importBranchAuthority': () => loadReal('lib/importBranchAuthority.ts'),
   './importBranchAuthority.ts': () => loadReal('lib/importBranchAuthority.ts'),
   './branchRoles': () => loadReal('lib/branchRoles.ts'),
+  // CUTOVER-LR: the import authority answers a disabled branch through the branch-effect kernel.
+  './branchEffect': () => loadReal('lib/branchEffect.ts'),
   './branchRoles.ts': () => loadReal('lib/branchRoles.ts'),
 }
 const originalCompile = Module.prototype._compile
@@ -184,7 +186,6 @@ async function main() {
 
   for (const scenario of [
     { name: 'non-canonical', mutate: (rawDb) => rawDb.prepare("UPDATE branches SET name = 'Main' WHERE id = 1").run() },
-    { name: 'inactive', mutate: (rawDb) => rawDb.prepare('UPDATE branches SET is_active = 0 WHERE id = 1').run() },
     { name: 'ambiguous', mutate: (rawDb) => rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (3, ' shop ', 1, 0)").run() },
   ]) {
     await testAsync(`buildDatedStockCountPlan rejects a ${scenario.name} submitted branch identity`, async () => {
@@ -197,6 +198,21 @@ async function main() {
       assert.match(built.error, /canonical|ambiguous|inactive/i)
     })
   }
+
+  // CUTOVER-LR pin change: an entry naming a DISABLED branch is no longer the uncoded 400 "missing, inactive,
+  // non-canonical, or ambiguous". It is the coded 409 the client turns into the redirect float: the disabled
+  // branch, its successor (none here) and the active branches the count may go to. Nothing is planned.
+  await testAsync('buildDatedStockCountPlan refuses an entry addressed to a disabled branch with the coded redirect (409)', async () => {
+    const { rawDb, db } = freshDb()
+    seed(rawDb)
+    rawDb.prepare('UPDATE branches SET is_active = 0 WHERE id = 1').run()
+    const built = await buildDatedStockCountPlan(db, [{ date: '2026-08-16', productId: 1, branchId: 1, count: 5 }])
+    assert.ok('error' in built)
+    assert.strictEqual(built.status, 409)
+    assert.strictEqual(built.code, 'branch_redirect_required')
+    assert.deepStrictEqual(built.redirect.targets.map((target) => target.id), [2])
+    assert.strictEqual(built.redirect.addressed_branch_id, 1)
+  })
 
   await testAsync('buildDatedStockCountPlan finds and reconstructs baseline from a PRIOR run\'s own movement (rerun idempotency), ignoring an unrelated movement on the same row', async () => {
     const { rawDb, db } = freshDb()

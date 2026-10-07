@@ -4,7 +4,7 @@ import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getActionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
-import { SALE_ADD_ITEMS_ACTION_KIND, isUndoClosedByMerge, UNDO_CLOSED_BY_MERGE_CODE, UNDO_CLOSED_BY_MERGE_MESSAGE, PRODUCT_MERGE_GROUP_ACTION_KIND, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayChangesProductImages, mergeReplayChoicePermissionError, replayRefusalCode, UNDO_HISTORY_STALE_CODE, UNDO_NEEDS_ORIGINAL_TAB_CODE, type UndoApplierOutcome } from '../lib/undoAppliers'
+import { SALE_ADD_ITEMS_ACTION_KIND, branchCutoverClosureRefusal, isUndoClosedByMerge, UNDO_CLOSED_BY_MERGE_CODE, UNDO_CLOSED_BY_MERGE_MESSAGE, PRODUCT_MERGE_GROUP_ACTION_KIND, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayChangesProductImages, mergeReplayChoicePermissionError, replayRefusalCode, UNDO_HISTORY_STALE_CODE, UNDO_NEEDS_ORIGINAL_TAB_CODE, type UndoApplierOutcome } from '../lib/undoAppliers'
 import { CUSTOMER_GENDER_RESTORATION_KIND, canRestoreCustomerGender, notifyCustomerGenderRestoration } from '../lib/customerGenderRestoration'
 import { PRODUCT_REMOVE_ACTION_KIND } from '../lib/productDelete'
 import type { Env } from '../index'
@@ -190,6 +190,10 @@ async function mapRow(row: ActionHistoryRow, user: SessionUser, env: Env) {
   }
 }
 
+// lib/branchCutoverHistory.ts UNDO_CLOSED_BRANCH_CUTOVER_MOVE, kept as a literal here so this list needs no new import;
+// test-cutover-ld-historical-readers-native.cjs pins the two equal.
+const CUTOVER_MOVE_MARKER = 'undo_closed:branch_cutover_move'
+
 app.get('/', async (c) => {
   const user = c.get('user')
   try {
@@ -197,6 +201,12 @@ app.get('/', async (c) => {
     const limit = normalizeLimit(c.req.query('limit'))
     const includeAll = ['1', 'true', 'yes'].includes(String(c.req.query('all') || '').trim().toLowerCase())
     const userIdFilter = String(c.req.query('userId') || '').trim()
+    // The ~3,400 closed entries of the branch consolidation (undo_closed:branch_cutover_move) are hidden from the
+    // default list: closing bumps their updated_at, so without this they would fill the newest-20 window of the
+    // branches scope. They stay in audit, the stock card and Stock Changes, and `?include_cutover=1` lists them.
+    const includeCutover = ['1', 'true', 'yes'].includes(String(c.req.query('include_cutover') || '').trim().toLowerCase())
+    const cutoverFilter = includeCutover ? '' : ' AND last_error IS NOT @cutover_move'
+    const cutoverParams = includeCutover ? {} : { cutover_move: CUTOVER_MOVE_MARKER }
     if (userIdFilter && !isAdminControlUser(user)) {
       return c.json({ success: false, error: 'Administrator access required for action user filters.' }, 403)
     }
@@ -206,20 +216,20 @@ app.get('/', async (c) => {
     if (canReadAllHistory(user, includeAll)) {
       if (userIdFilter) {
         rows = await db.prepare(`
-          SELECT * FROM action_history WHERE scope = @scope AND created_by_id = @user_id
+          SELECT * FROM action_history WHERE scope = @scope AND created_by_id = @user_id${cutoverFilter}
           ORDER BY updated_at DESC, id DESC LIMIT @limit
-        `).all<ActionHistoryRow>({ scope, user_id: Number.parseInt(userIdFilter, 10) || userIdFilter, limit })
+        `).all<ActionHistoryRow>({ scope, user_id: Number.parseInt(userIdFilter, 10) || userIdFilter, ...cutoverParams, limit })
       } else {
         rows = await db.prepare(`
-          SELECT * FROM action_history WHERE scope = @scope
+          SELECT * FROM action_history WHERE scope = @scope${cutoverFilter}
           ORDER BY updated_at DESC, id DESC LIMIT @limit
-        `).all<ActionHistoryRow>({ scope, limit })
+        `).all<ActionHistoryRow>({ scope, ...cutoverParams, limit })
       }
     } else {
       rows = await db.prepare(`
-        SELECT * FROM action_history WHERE scope = @scope AND created_by_id = @user_id
+        SELECT * FROM action_history WHERE scope = @scope AND created_by_id = @user_id${cutoverFilter}
         ORDER BY updated_at DESC, id DESC LIMIT @limit
-      `).all<ActionHistoryRow>({ scope, user_id: user?.id || 0, limit })
+      `).all<ActionHistoryRow>({ scope, user_id: user?.id || 0, ...cutoverParams, limit })
     }
     return c.json({ success: true, items: await Promise.all(rows.map((row) => mapRow(row, user, c.env))) })
   } catch (error) {
@@ -236,12 +246,17 @@ app.get('/movements/:id/revert-preview', async (c) => {
   if (!Number.isSafeInteger(id) || id <= 0) return c.json({ success: false, error: 'Invalid movement id.' }, 400)
   const { StockMovementReplayError, stockMovementRevertPreview } = await import('../lib/stockMovementReplay')
   try {
-    const { revert, history } = await stockMovementRevertPreview(getDb(c.env), id)
+    const db = getDb(c.env)
+    const { revert, history } = await stockMovementRevertPreview(db, id)
     if (history && (!canOperateHistoryRow(user, history)
       || !canUseNamedAppliers(user, [parseJson(history.undo_payload), parseJson(history.redo_payload)]))) {
       return c.json({ success: false, error: 'You do not have permission to perform this action.' }, 403)
     }
-    return c.json({ success: true, revert })
+    // REVERT-SET: what the confirm must say -- the exact change, and any later
+    // Set on the same product and branch that this Revert leaves applied.
+    const { laterOpenSets, revertEffect } = await import('../lib/stockRevertEffect')
+    const [effect, later] = await Promise.all([revertEffect(db, id, revert), laterOpenSets(db, [id])])
+    return c.json({ success: true, revert, effect, laterSets: later.get(id) ?? [] })
   } catch (error) {
     const status = error instanceof StockMovementReplayError ? error.status : 500
     return c.json({ success: false, error: error instanceof Error ? error.message : 'Unable to preview this stock action.',
@@ -404,6 +419,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     if (isUndoClosedByMerge(existing)) {
       return c.json({ success: false, error: UNDO_CLOSED_BY_MERGE_MESSAGE, code: UNDO_CLOSED_BY_MERGE_CODE }, 409)
     }
+    const branchClosure = branchCutoverClosureRefusal(existing)
+    if (branchClosure) return c.json({ success: false, error: branchClosure.message, code: branchClosure.code }, 409)
     if (!Number(existing.reversible || 0)) {
       return c.json({ success: false, error: 'This action is recorded only and cannot be reversed' }, 400)
     }
@@ -488,7 +505,10 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         // through, so the refusal can say WHY and link WHERE.
         const blocking = status === 409 ? (error as { refusal?: unknown })?.refusal : null
         const blockingFields = blocking && typeof blocking === 'object' && !Array.isArray(blocking) ? blocking as Record<string, unknown> : {}
-        return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action`, ...blockingFields, ...(refusalCode ? { code: refusalCode } : {}), ...(saleCustomerReplay && isLoyaltyAssignmentError(error) ? { code: LOYALTY_REASSIGNMENT_CODE } : {}) }, status)
+        // The numbers a coded refusal's sentence names ("only 3 left, 27 needed").
+        const refusalParams = status === 409 ? (error as { params?: unknown })?.params : null
+        const paramFields = refusalParams && typeof refusalParams === 'object' && !Array.isArray(refusalParams) ? { params: refusalParams } : {}
+        return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action`, ...blockingFields, ...paramFields, ...(refusalCode ? { code: refusalCode } : {}), ...(saleCustomerReplay && isLoyaltyAssignmentError(error) ? { code: LOYALTY_REASSIGNMENT_CODE } : {}) }, status)
       }
     }
 

@@ -356,7 +356,7 @@ test('Part 552: report headers keep exactly four controls; hub tabs fit; branch 
   assert.match(frame, /actions=\{menuAction \? <span className="reports-frame-menu">\{menuAction\}<\/span> : undefined\}/, 'the fourth header control is only the report overflow menu')
   assert.match(frame, /secondaryActions \? <div className="reports-frame-secondary-actions">\{secondaryActions\}<\/div> : null/, 'mode and history controls remain on the secondary rail')
   // The branch select rides the shared control row's filters slot, not its own line.
-  assert.ok(/const filterSelects = \([\s\S]{0,120}branches\.length \? <AppSelect/.test(hub), 'the branch select is part of the control-row filters')
+  assert.ok(/const filterSelects = \([\s\S]{0,120}showsBranchHistoryFilter\(branchRows\) \? <AppSelect/.test(hub), 'the branch select is part of the control-row filters')
   // Part 586: the selects no longer sit inline on wide screens at all -- they
   // are in the one filter menu at every width (user: "the various options
   // into filtermenu"), which is what gave the search box back its room. The

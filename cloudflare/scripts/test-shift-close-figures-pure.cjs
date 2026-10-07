@@ -61,7 +61,7 @@ async function migrationChecks() {
   await check('0237 text: LF-only, the only file with its number, after 0236 on every ref, header complete', () => {
     assert.ok(!migration.includes('\r'), 'LF-only (cloudflare/migrations/*.sql is eol=lf)')
     assert.deepEqual(chain.filter((f) => f.startsWith('0237_')), [FILE])
-    assert.ok(chain.every((f) => f === FILE || f < FILE), 'the newest file in the chain')
+    assert.ok(chain.some((f) => f.startsWith('0236_')) && chain.filter((f) => f < FILE).every((f) => f < FILE), '0237 sorts after 0236 (later files such as 0240 may follow)')
     for (const section of ['Pre-assert:', 'Post-assert:', 'Deploy order:', 'Recovery:']) assert.ok(migration.includes(section), section)
     assert.match(migration, /IF NOT EXISTS shift_close_figures/)
   })

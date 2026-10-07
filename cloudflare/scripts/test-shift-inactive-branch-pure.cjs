@@ -71,7 +71,7 @@ function database() {
   const migration = (file) => db.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
   migration('0116_shift_sessions.sql')
   db.exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT);
-    CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT NOT NULL, is_active INTEGER DEFAULT 1, successor_branch_id INTEGER);
+    CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT NOT NULL, role TEXT, is_active INTEGER DEFAULT 1, successor_branch_id INTEGER);
     CREATE TABLE audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,user_name TEXT,action TEXT,
       entity TEXT,entity_id TEXT,details TEXT,table_name TEXT,record_id TEXT,old_value TEXT,new_value TEXT,
       device_name TEXT,device_tz TEXT,client_time TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP)`)
@@ -94,6 +94,7 @@ function database() {
 
 function route(sqlite, source, getUser) {
   const loaded = loadText(ROUTE_PATH, source, {
+    '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR: shift open may land at the redirect target
     '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
     '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
     '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
@@ -199,8 +200,11 @@ async function main() {
     const fx = database()
     const call = route(fx.db, ROUTE_SOURCE, () => CASHIER)
     const refused = await call('POST', '/open', { branch_id: 1, opening_float_usd: 5, opening_float_khr: 0 })
-    assert.equal(refused.status, 400, 'opening on the retired branch is refused')
-    assert.match(refused.body.error, /inactive/i)
+    // CUTOVER-LR: a new drawer addressed to a disabled branch is never opened silently; the answer is the coded redirect
+    // question (409), or the no-active-branch refusal when nothing can take it. Either way nothing is written.
+    assert.equal(refused.status, 409, 'opening on the retired branch is refused')
+    assert.ok(['branch_redirect_required', 'branch_retired_no_successor'].includes(refused.body.code), JSON.stringify(refused.body))
+    assert.match(refused.body.error, /disabled|inactive/i)
     assert.equal(fx.db.prepare("SELECT COUNT(*) n FROM shift_sessions WHERE branch_id=1 AND business_date=date('now','+7 hours')").get().n, 0, 'and writes nothing')
     const opened = await call('POST', '/open', { branch_id: 2, opening_float_usd: 5, opening_float_khr: 0 })
     assert.equal(opened.status, 201, 'the active branch opens')

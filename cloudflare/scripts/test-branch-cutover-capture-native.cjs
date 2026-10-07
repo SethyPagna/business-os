@@ -380,6 +380,41 @@ async function main() {
     const w = world(); await assert.rejects(w.capture.readCutoverCapturePage(w.db, await w.capture.readCutoverCaptureSchema(w.db), { sourceBranchId: 2, targetBranchId: 1 }, w.capture.initialCaptureCursor(), '0'.repeat(64), 257, {}, false), e => e.code === 'branch_cutover_parent_capability')
     w.raw.close()
   })
+  await check('REHEARSAL F1: rows with ~21.5 KB pricing_snapshot_json overflow the SQLite string limit; the page halves, the working size is remembered, and a single row over the limit is a coded refusal', async () => {
+    const w = world()
+    const insert = w.raw.prepare('INSERT INTO sale_items(id,sale_id,product_id,quantity,branch_id,pricing_snapshot_json) VALUES(?,?,?,?,?,?)')
+    const big = JSON.stringify({ pad: 'x'.repeat(21500) })
+    for (let id = 1; id <= 40; id++) insert.run(id, 1, 10, 1, 2, big)
+    const schema = await w.capture.readCutoverCaptureSchema(w.db)
+    const tables = w.capture.CAPTURE_STREAMS.filter(t => t !== 'history_open')
+    const identity = { sourceBranchId: 2, targetBranchId: 1 }, names = { 1: 'Warehouse', 2: 'Shop' }
+    const drain = async (limitBytes) => {
+      w.raw.limits.length = limitBytes
+      let cursor = { ...w.capture.initialCaptureCursor(), index: tables.indexOf('sale_items') }, digest = '0'.repeat(64), pages = [], keys = 0
+      for (let turn = 0; turn < 80 && cursor.index === tables.indexOf('sale_items'); turn++) {
+        const reads = w.stats.reads
+        const page = await w.capture.readCutoverCapturePage(w.db, schema, identity, cursor, digest, 256, names, false)
+        pages.push({ reads: w.stats.reads - reads, records: page.records, pageLimit: page.cursor.pageLimit })
+        await w.db.batch(page.statements)
+        cursor = page.cursor; digest = page.digest; keys += page.records
+      }
+      return { cursor, digest, pages, keys }
+    }
+    const unlimited = await drain(1_000_000_000)
+    const limited = await drain(200_000)
+    assert.equal(limited.digest, unlimited.digest, 'the same rows, the same digest, whatever the page size')
+    assert.equal(limited.cursor.rows, 40)
+    const halved = limited.pages[0]
+    assert.ok(halved.reads > 1 && halved.pageLimit > 0 && halved.pageLimit < 40, 'the first page halved: ' + JSON.stringify(halved))
+    for (const later of limited.pages.slice(1)) assert.equal(later.reads, 1, 'a later invocation reads once at the remembered size, no repeated halving: ' + JSON.stringify(later))
+    assert.equal(limited.cursor.pageLimit, 0, 'the remembered size is per table: it resets when the table ends')
+    // a row alone over the limit cannot be paged: a coded refusal, not an uncoded error
+    w.raw.limits.length = 20_000
+    await assert.rejects(w.capture.readCutoverCapturePage(w.db, schema, identity, { ...w.capture.initialCaptureCursor(), index: tables.indexOf('sale_items') }, '0'.repeat(64), 256, names, false),
+      error => error.capability === 'capture_row_too_big')
+    w.raw.limits.length = 1_000_000_000
+    w.raw.close()
+  })
   assert.ok(checks > 0, 'test filter must select a group')
   console.log(`${checks} branch cutover capture native groups passed`)
 }

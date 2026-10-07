@@ -210,6 +210,20 @@ async function main() {
     }
   })
 
+  await check('quotedEqual: a REAL compares as a number (D1 and local SQLite print it differently); text, integers and different doubles do not', () => {
+    const eq = loader.quotedEqual
+    assert.equal(eq('159.60000000000002', '1.596000000000000228e+02'), true, 'the rehearsal case: same double, two spellings')
+    assert.equal(eq('0.1', '1.000000000000000055e-01'), true)
+    assert.equal(eq('5.0', '5.0e+00'), true)
+    assert.equal(eq('159.6', '159.60000000000002'), false, 'two different doubles')
+    assert.equal(eq('5', '5.0'), false, 'an integer is never a REAL')
+    assert.equal(eq("'1.5'", "'1.50'"), false, 'text is compared as text')
+    assert.equal(eq('NULL', "'NULL'"), false)
+    assert.equal(eq("X'0A'", "X'0a'"), false, 'a blob literal is compared as written')
+    assert.equal(eq('abc', 'abc'), true)
+    assert.equal(eq(1.5, '1.5'), false)
+  })
+
   await check('every table of the migrated schema is classified: nothing skipped, no WITHOUT ROWID, no generated column, FTS and shadows excluded', () => {
     const db = new DatabaseSync(':memory:')
     db.exec('PRAGMA foreign_keys = OFF;')

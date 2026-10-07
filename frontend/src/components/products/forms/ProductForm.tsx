@@ -40,6 +40,7 @@ import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES, MAX_PRODUCT_GALLERY_IMAGES } from '..
 import { effectivePermissions, isAdminControlUser } from '../../../utils/permissions.ts'
 import { canChangeProductPrices } from '../../../utils/productMergePriceAccess.ts'
 import { canViewAcquisitionCosts, canEditAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../../../utils/acquisitionCostAccess.ts'
+import { branchChoiceSettled } from '../../../utils/branchScope.ts'
 
 const importBarcodeScannerModal = () => import('../scanning/BarcodeScannerModal')
 const BarcodeScannerModal = lazyRetry(importBarcodeScannerModal, 'product-form-barcode-scanner-modal')
@@ -763,6 +764,10 @@ export default function ProductForm({
       : tr('suggestions_no_match', 'No match — type to add a new one.', 'រកមិនឃើញ — សូមវាយបញ្ចូលថ្មី។')
   }
 
+  // One branch to put initial stock in, and it is the one chosen (the form
+  // preselects it): nothing to ask. A stale draft naming another branch keeps
+  // the picker so it can be re-chosen.
+  const initialBranchSettled = branchChoiceSettled(branches.map((branch) => branch.id), form.branch_id || defaultBranchId)
   const initialBranchOptions = useMemo<AppSelectOption[]>(() => {
     const currentBranchId = form.branch_id ? String(form.branch_id) : ''
     const options = branches.map((branch) => ({
@@ -1938,7 +1943,7 @@ export default function ProductForm({
                 </p>
               ) : null}
             </div>
-            {isCreateMode && branches.length > 0 ? (
+            {isCreateMode && branches.length > 0 && !initialBranchSettled ? (
               <div className="min-w-0 lg:col-span-2">
                 <label htmlFor="product-initial-branch" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('assign_initial_branch', 'Assign Initial Stock to Branch *', 'កំណត់ស្តុកដំបូងទៅសាខា *')}</label>
                 <AppSelect
@@ -2031,7 +2036,7 @@ export default function ProductForm({
             </> : null}
           </div>
 
-          {activeTab === 'stock' && isEditMode && branches.length > 0 ? (
+          {activeTab === 'stock' && isEditMode && branches.length > 1 ? (
             <div>
               <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">{tr('branch', 'Branch', 'សាខា')}</p>
               <div className="space-y-2">

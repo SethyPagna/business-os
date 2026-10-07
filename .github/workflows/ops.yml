@@ -38,6 +38,22 @@
 #                 files, as a settings input that puts them back. The settings
 #                 input is read from the run's event payload, never from an
 #                 expression, so no topic id reaches the log.
+#   branch-cutover
+#                 the Shop -> LC Store consolidation, driven through the Worker's own
+#                 token-gated endpoint (/api/internal/branch-cutover/*, switched on by the
+#                 Worker secret BRANCH_CUTOVER_OPERATOR_TOKEN, which this job also holds as an
+#                 environment secret of the same name). cutover_mode, one per run, in
+#                 runbook order: inspect (reads only), bookmark (a D1 Time Travel
+#                 bookmark, reads only), start (bookmark, inspect, then begin; the fence
+#                 is held from here), resume-until-ready (one durable step per request,
+#                 retrying the SAME request after a timeout, a 429, a 5xx or a D1 7429; it
+#                 stops on the first refusal and after the time budget, and the same
+#                 operation resumes on the next run), status, abort (legal only before the
+#                 first child commits) and finalize (once; a repeat only reads). Runs only
+#                 from refs/heads/main (the job's if, and the script re-checks). The public
+#                 log carries the mode, the operation id, phase names, revision and step
+#                 counts, PASS or FAIL and fixed refusal codes. What the Worker returned is
+#                 only in the encrypted file.
 #   d1-physical-export
 #                 a read-only copy of EVERY physical table of the production
 #                 D1 database (d1_migrations included; FTS5 virtual tables,
@@ -84,6 +100,7 @@ on:
           - r2-apac-copy
           - secret-names
           - settings-upsert
+          - branch-cutover
           - d1-physical-export
       mode:
         description: r2-apac-copy only. Before the switch - copy (mirrors; its prune deletes only DESTINATION keys the old bucket lacks) or verify-only (compares, writes nothing). After the switch - topup (copies missing or older objects; never overwrites newer, never prunes or deletes). No mode writes or deletes the old bucket.
@@ -109,6 +126,36 @@ on:
         required: true
         default: false
         type: boolean
+      cutover_mode:
+        description: branch-cutover only - inspect, bookmark, repair-sk2-check, repair-sk2 (actor 5), start, resume-until-ready, status, abort or finalize. Run them in that order on the night.
+        required: true
+        default: inspect
+        type: choice
+        options:
+          - inspect
+          - bookmark
+          - repair-sk2-check
+          - repair-sk2
+          - start
+          - resume-until-ready
+          - status
+          - abort
+          - finalize
+      operation_id:
+        description: branch-cutover only - the operation to continue (printed by start). Leave empty to use the one unfinished operation.
+        required: false
+        default: ''
+        type: string
+      actor_user_id:
+        description: branch-cutover only - the id of the administrator the run acts as (inspect and start). Later steps use the actor recorded in the journal.
+        required: false
+        default: ''
+        type: string
+      approved_folds:
+        description: 'branch-cutover only - owner-approved folds of an inactive product that holds stock into its active twin, as dup:keeper product ids separated by commas (for example 7091:1529). Leave empty for none. Only used by inspect and start.'
+        required: false
+        default: ''
+        type: string
       confirm:
         description: Type the task name again, exactly, to confirm
         required: true
@@ -384,6 +431,70 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ops-settings-upsert
+          path: ${{ runner.temp }}/ops-out/*.enc.json
+          retention-days: 3
+          if-no-files-found: ignore
+
+  branch-cutover:
+    name: branch-cutover
+    needs: gate
+    if: inputs.task == 'branch-cutover' && github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    environment: production
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check the confirm word
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if (-not [string]::Equals($env:CONFIRM, 'branch-cutover', [System.StringComparison]::Ordinal)) {
+            Write-Output '::error::Type branch-cutover in the confirm box to run this job.'
+            exit 1
+          }
+
+      - name: Check out
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: cloudflare/package-lock.json
+
+      - name: Install packages (cloudflare)
+        working-directory: cloudflare
+        run: npm ci --no-audit --no-fund
+
+      # One mode per run. The step stops 30 minutes before the job so the upload
+      # below still runs; resume-until-ready ends itself earlier, at its own
+      # 300 minute budget, and the next run resumes the same operation.
+      - name: Run the cutover mode (token-gated endpoint, encrypted report)
+        timeout-minutes: 330
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BRANCH_CUTOVER_OPERATOR_TOKEN: ${{ secrets.BRANCH_CUTOVER_OPERATOR_TOKEN }}
+          OPS_CUTOVER_MODE: ${{ inputs.cutover_mode }}
+          OPS_OPERATION_ID: ${{ inputs.operation_id }}
+          OPS_ACTOR_USER_ID: ${{ inputs.actor_user_id }}
+          OPS_APPROVED_FOLDS: ${{ inputs.approved_folds }}
+          OPS_CUTOVER_BUDGET_MINUTES: '300'
+          WRANGLER_WRITE_LOGS: 'false'
+          OPS_OUT_DIR: ${{ runner.temp }}/ops-out
+        run: node ops/scripts/ops-branch-cutover.mjs
+
+      - name: Upload the encrypted files
+        if: always() && steps.checkout.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ops-branch-cutover
           path: ${{ runner.temp }}/ops-out/*.enc.json
           retention-days: 3
           if-no-files-found: ignore

@@ -141,14 +141,28 @@ export function reportExportAllowed(
   return exportable.sales
 }
 
-export function visibleReportViews(perm: ReportPermissions): ReportViewDef[] {
-  return REPORT_VIEWS.filter((v) => viewAllowed(v, perm))
+/**
+ * What the business's data (not the person's permissions) leaves worth showing.
+ * `branchComparison: false` is a business with a single branch row in total:
+ * a report that compares branches would have exactly one line. Omitted (or
+ * true) keeps every view, which is today's behaviour while two branches exist.
+ */
+export interface ReportScope {
+  branchComparison?: boolean
+}
+
+function viewInScope(def: ReportViewDef, scope?: ReportScope): boolean {
+  return !(def.id === 'branches' && scope?.branchComparison === false)
+}
+
+export function visibleReportViews(perm: ReportPermissions, scope?: ReportScope): ReportViewDef[] {
+  return REPORT_VIEWS.filter((v) => viewAllowed(v, perm) && viewInScope(v, scope))
 }
 
 /** The stored/last view if still allowed, else the first allowed one (null when nothing is readable). */
-export function resolveReportView(stored: unknown, perm: ReportPermissions): ReportViewId | null {
-  if (isReportViewId(stored) && viewAllowed(getReportView(stored), perm)) return stored
-  const first = visibleReportViews(perm)[0]
+export function resolveReportView(stored: unknown, perm: ReportPermissions, scope?: ReportScope): ReportViewId | null {
+  if (isReportViewId(stored) && viewAllowed(getReportView(stored), perm) && viewInScope(getReportView(stored), scope)) return stored
+  const first = visibleReportViews(perm, scope)[0]
   return first ? first.id : null
 }
 

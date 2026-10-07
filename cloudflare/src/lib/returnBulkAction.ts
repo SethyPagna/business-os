@@ -10,6 +10,10 @@ import { validateCustomerReturnRestorationCohortV1, validateCustomerReturnRestor
   type CustomerReturnRestorationV1 } from './customerReturnEntitlement'
 import { subtractDecimalSum } from './moneyPrecision'
 import { assertReturnCreateCapacity, ReturnCapacityError, type ReturnCapacityParams } from './returnCreateAction'
+import {
+  BRANCH_RETIRED_DAMAGED_CODE, BRANCH_RETIRED_DAMAGED_ERROR, BranchEffectResolver, BranchRetiredNoSuccessorError,
+  branchEffectGuardPredicate, foldedLotSurvivors, readBranchDirectory,
+} from './branchEffect'
 
 export const RETURN_BULK_ACTION_KIND = 'return.fields.bulk'
 export const RETURN_BULK_LIMIT = 25
@@ -75,6 +79,11 @@ type StockDelta = {
   costUsd: number
   costKhr: number
   movementType: string
+  // Present only when the line was recorded at a branch that has since been retired and the stock moved at its
+  // active successor (branchId is then the successor; older snapshots simply lack these): the branch the stock
+  // really moved at, and the label the return was made under.
+  branchName?: string | null
+  addressed?: string | null
 }
 
 type Member = {
@@ -101,13 +110,14 @@ type Snapshot = { version: 1; operationId: string; field: ReturnField; members: 
 // names (the product and counts of return_restore_over_capacity), forwarded
 // so the restated sentence keeps them.
 export class ReturnBulkError extends Error {
-  constructor(message: string, readonly statusCode: 400 | 403 | 409 = 409, readonly code?: string, readonly params?: ReturnCapacityParams) {
+  // `extra` rides next to error/code in the route's JSON (the redirect a client must confirm).
+  constructor(message: string, readonly statusCode: 400 | 403 | 409 = 409, readonly code?: string, readonly params?: ReturnCapacityParams, readonly extra?: Record<string, unknown>) {
     super(message)
   }
 }
 
-function fail(message: string, status: 400 | 403 | 409 = 409, code?: string, params?: ReturnCapacityParams): never {
-  throw new ReturnBulkError(message, status, code, params)
+function fail(message: string, status: 400 | 403 | 409 = 409, code?: string, params?: ReturnCapacityParams, extra?: Record<string, unknown>): never {
+  throw new ReturnBulkError(message, status, code, params, extra)
 }
 
 function normalize(value: unknown, fallback = ''): string {
@@ -230,12 +240,13 @@ function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, s
       }
     }
     out.push({
-      sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id)
-            VALUES(@product,@name,@branch,@type,@quantity,@usd,@khr,@reason,@returnId,@userId,@userName,@batch)`,
+      sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id${delta.addressed ? ',branch_name,addressed_branch_name' : ''},movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id)
+            VALUES(@product,@name,@branch${delta.addressed ? ',@branchName,@addressed' : ''},@type,@quantity,@usd,@khr,@reason,@returnId,@userId,@userName,@batch)`,
       params: {
         product: delta.productId,
         name: delta.productName,
         branch: delta.branchId,
+        ...(delta.addressed ? { branchName: delta.branchName ?? null, addressed: delta.addressed } : {}),
         type: delta.damagedLotId ? (quantity > 0 ? 'damage_in' : 'damage_reversal') : statusMovementType(member.scope, quantity),
         quantity,
         usd: delta.costUsd,
@@ -482,7 +493,7 @@ async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'bef
     saleStatuses: exactStatuses }
 }
 
-async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ members: Member[]; guards: Statement[] }> {
+async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: number | null = null): Promise<{ members: Member[]; guards: Statement[] }> {
   const ids = request.items.map((item) => item.id)
   const returns = await rowsForIds<Row>(db, ids, (marks) => `SELECT r.*,COALESCE(v.revision,0) AS write_revision,${movementFingerprint('r.id')} AS movement_fingerprint FROM returns r LEFT JOIN return_write_revisions v ON v.return_id=r.id WHERE r.id IN (${marks})`)
   const matchingIds = request.items.flatMap((expected) => {
@@ -511,6 +522,11 @@ async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ membe
 
   const members: Member[] = []
   const guards: Statement[] = []
+  // A line recorded at a branch that has since been retired (Old Shop -> LC Store) moves its stock at the active
+  // branch the operator confirmed (X-Branch-Redirect; branch_redirect_required until then), in the lot that exists
+  // there now; the return keeps its own branch and label. While every branch is active nothing is redirected and
+  // nothing below changes.
+  const resolver = new BranchEffectResolver(await readBranchDirectory(db), redirectTarget)
   for (const expected of request.items) {
     const row = returns.find((candidate) => Number(candidate.id) === expected.id)
     if (!row) {
@@ -566,20 +582,35 @@ async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ membe
       member.updateSale = !!linkedSale && !parentCancelled
       const ownItems = items.filter((item) => item.return_id === expected.id)
       const handledDamagedGroups = new Set<string>()
+      const memberStockStart = member.stock.length
+      const landings = new Map<number, { effectName: string | null; label: string | null }>()
       for (const item of ownItems) {
         const quantity = Number(item.quantity) || 0
         if (!(quantity > 0)) continue
         const productId = Number(item.product_id) || 0
-        const branchId = Number(item.branch_id || row.branch_id) || 0
-        if (!productId || !branchId) fail(`Return ${expected.id} has a stock-moving line without a product or branch.`, 400)
+        const recordedBranchId = Number(item.branch_id || row.branch_id) || 0
+        if (!productId || !recordedBranchId) fail(`Return ${expected.id} has a stock-moving line without a product or branch.`, 400)
         const stockAction = normalize(item.stock_action, Number(item.return_to_stock) === 1 ? 'restock' : 'none')
         if (scope === 'customer' && stockAction === 'none') continue
+        let landing: ReturnType<BranchEffectResolver['effect']> = null
+        try { landing = resolver.effect(recordedBranchId) } catch (error) {
+          if (error instanceof BranchRetiredNoSuccessorError) fail(error.message, 409, error.code, undefined, error.redirect ? { redirect: error.redirect } : undefined)
+          throw error
+        }
+        // The branch the stock moves at; `recordedBranchId` stays the one the rows were written under.
+        const branchId = landing?.redirected ? landing.effectBranchId : recordedBranchId
+        if (landing?.redirected) {
+          // Held (damaged) units still at the retired branch refuse; units the cutover moved to the successor are found at the landing branch below.
+          if (scope === 'customer' && stockAction === 'damaged' && !damaged.some((lot) => Number(lot.return_id) === expected.id && Number(lot.product_id) === productId && Number(lot.branch_id) === branchId)) fail(BRANCH_RETIRED_DAMAGED_ERROR, 409, BRANCH_RETIRED_DAMAGED_CODE)
+          const ownLabel = Number(row.branch_id) === landing.addressedBranchId && typeof row.branch_name === 'string' && row.branch_name ? row.branch_name : null
+          landings.set(branchId, { effectName: landing.effectName, label: ownLabel ?? landing.addressedName ?? landing.effectName })
+        }
         if (scope === 'customer' && stockAction === 'damaged') {
           const damagedGroup = `${productId}:${branchId}`
           if (handledDamagedGroups.has(damagedGroup)) continue
           handledDamagedGroups.add(damagedGroup)
           const groupedItems = ownItems.filter((candidate) => Number(candidate.product_id) === productId
-            && Number(candidate.branch_id || row.branch_id) === branchId
+            && (resolver.effectId(Number(candidate.branch_id || row.branch_id)) ?? Number(candidate.branch_id || row.branch_id)) === branchId
             && normalize(candidate.stock_action, Number(candidate.return_to_stock) === 1 ? 'restock' : 'none') === 'damaged')
           const lots = damaged.filter((lot) => Number(lot.return_id) === expected.id && Number(lot.product_id) === productId && Number(lot.branch_id) === branchId)
           if (!lots.length) fail(`Return ${expected.id} has no damaged-stock provenance and cannot change status safely.`, 400)
@@ -600,7 +631,7 @@ async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ membe
           const allocated = ownAllocations.reduce((sum, allocation) => sum + Number(allocation.quantity || 0), 0)
           if (Math.abs(allocated - quantity) > 0.000001) fail(`Return ${expected.id} has incomplete received-date provenance.`, 400)
           for (const allocation of ownAllocations) {
-            if (Number(allocation.branch_id) !== branchId) fail(`Return ${expected.id} has a lot allocation for a different branch.`, 400)
+            if (Number(allocation.branch_id) !== recordedBranchId) fail(`Return ${expected.id} has a lot allocation for a different branch.`, 400)
             member.stock.push({ productId, productName: item.product_name, branchId, batchId: Number(allocation.batch_id), damagedLotId: null, quantity: (scope === 'customer' ? (cancelling ? -1 : 1) : (cancelling ? 1 : -1)) * Number(allocation.quantity), costUsd: Number(item.cost_price_usd) || 0, costKhr: Number(item.cost_price_khr) || 0, movementType: '' })
           }
         } else if (item.batch_id) {
@@ -611,9 +642,20 @@ async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ membe
           member.stock.push({ productId, productName: item.product_name, branchId, batchId: null, damagedLotId: null, quantity: (scope === 'customer' ? (cancelling ? -1 : 1) : (cancelling ? 1 : -1)) * quantity, costUsd: Number(item.cost_price_usd) || 0, costKhr: Number(item.cost_price_khr) || 0, movementType: '' })
         }
       }
+      for (const [landingBranchId, { effectName, label }] of landings) {
+        const own = member.stock.slice(memberStockStart).filter((delta) => delta.branchId === landingBranchId)
+        const folded = await foldedLotSurvivors(db, landingBranchId, own.filter((delta) => delta.batchId).map((delta) => Number(delta.batchId)))
+        for (const delta of own) {
+          if (delta.batchId) delta.batchId = folded.get(Number(delta.batchId)) ?? delta.batchId
+          delta.branchName = effectName
+          delta.addressed = label ?? effectName ?? 'retired branch'
+        }
+      }
     }
     members.push(member)
   }
+  const effectGuards = resolver.guards()
+  if (effectGuards.length) guards.push(guard(branchEffectGuardPredicate('@effects'), { effects: JSON.stringify(effectGuards) }))
   return { members, guards }
 }
 
@@ -624,8 +666,8 @@ export async function notifyReturnBulkAction(env: Env): Promise<void> {
   ])
 }
 
-export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Row): Promise<Row> {
-  return (await applyReturnBulkActionOutcome(env, user, raw)).receipt
+export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Row, redirectTarget: number | null = null): Promise<Row> {
+  return (await applyReturnBulkActionOutcome(env, user, raw, redirectTarget)).receipt
 }
 
 /**
@@ -640,7 +682,7 @@ export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Ro
  */
 export type ReturnBulkOutcome = { receipt: Row; wrote: boolean }
 
-export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, raw: Row): Promise<ReturnBulkOutcome> {
+export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, raw: Row, redirectTarget: number | null = null): Promise<ReturnBulkOutcome> {
   permission(user)
   const request = parseRequest(raw)
   const db = getDb(env)
@@ -650,7 +692,7 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
     if (previous.request_json !== canonical) fail('Request id was already used with different data.')
     return { receipt: JSON.parse(String(previous.receipt_json)) as Row, wrote: false }
   }
-  const { members, guards } = await buildMembers(db, request)
+  const { members, guards } = await buildMembers(db, request, redirectTarget)
   const entitlement = await v1EntitlementGuards(db, members, 'after')
   guards.push(...entitlement.guards)
   const operationId = crypto.randomUUID()

@@ -7,6 +7,7 @@ import AppSelect from '../shared/AppSelect.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import { useSupplierSuggestions, type SupplierChoice } from '../shared/SupplierPickerField.tsx'
+import { branchChoiceSettled } from '../../utils/branchScope.ts'
 
 type Translate = (key: string, fallbackEn?: string, fallbackKm?: string) => string
 type IconType = ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' }>
@@ -132,6 +133,11 @@ export default function StockSessionSharedDetails({
   const dateLabel = tr('received_date', 'Received date')
   const shownBranches = branchId && !branchOptions.some(option => String(option.value) === branchId)
     ? [{ value: branchId, label: `${branchLabel} #${branchId}`, disabled: true }, ...branchOptions] : branchOptions
+  // One branch to receive into and it is already chosen: show where the stock
+  // goes as a plain label instead of a picker with a single entry. A stale
+  // draft (a branch no longer offered) keeps the real picker and its alert so
+  // the person can choose again.
+  const soleBranch = !branchInvalid && branchChoiceSettled(branchOptions.map((option) => option.value), branchId) ? branchOptions[0] : null
   return (
     <fieldset className="min-w-0 rounded-xl border border-gray-200 px-2 pb-2 dark:border-gray-700" data-stock-session-shared>
       <legend className="px-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{tr('applies_to_every_line', 'Applies to every line')}</legend>
@@ -151,18 +157,27 @@ export default function StockSessionSharedDetails({
           />
         </IconField>
         <CompactSupplierField value={supplier} onChange={onSupplier} tr={tr} disabled={disabled} invalid={supplierInvalid} />
-        <IconField icon={Store} title={branchLabel}>
-          <AppSelect
-            value={branchId}
-            onChange={onBranch}
-            ariaLabel={branchLabel}
-            disabled={disabled}
-            className="w-full"
-            buttonClassName={`h-10 w-full pl-8 pr-2 text-sm ${branchInvalid ? INVALID_RING : ''}`}
-            optionClassName="text-sm"
-            options={shownBranches}
-          />
-        </IconField>
+        {soleBranch ? (
+          <IconField icon={Store} title={`${branchLabel}: ${soleBranch.label}`}>
+            <div role="group" aria-label={`${branchLabel}: ${soleBranch.label}`} data-stock-session-sole-branch className="input flex h-10 w-full min-w-0 cursor-default items-center pl-8 pr-2 text-sm">
+              {/* A name scrolls, never ellipses (noEllipsisOnNames); the class carries the Khmer line-height floor. */}
+              <span className="detail-scroll-text">{soleBranch.label}</span>
+            </div>
+          </IconField>
+        ) : (
+          <IconField icon={Store} title={branchLabel}>
+            <AppSelect
+              value={branchId}
+              onChange={onBranch}
+              ariaLabel={branchLabel}
+              disabled={disabled}
+              className="w-full"
+              buttonClassName={`h-10 w-full pl-8 pr-2 text-sm ${branchInvalid ? INVALID_RING : ''}`}
+              optionClassName="text-sm"
+              options={shownBranches}
+            />
+          </IconField>
+        )}
         <IconField icon={CalendarDays} title={dateLabel}>
           <DateEntryInput
             className="h-10 w-full pl-8 text-sm"

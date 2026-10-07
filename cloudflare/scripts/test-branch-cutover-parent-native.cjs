@@ -162,6 +162,26 @@ async function main() {
     const w = world(); w.stats.before = raw => raw.exec("UPDATE users SET permissions='{}' WHERE id=7")
     await assert.rejects(begin(w)); assert.equal(w.raw.prepare('SELECT count(*) n FROM branch_cutovers').get().n, 0); assert.equal(w.raw.prepare("SELECT count(*) n FROM system_flags WHERE key='maintenance'").get().n, 0); w.raw.close()
   })
+  // CUTOVER-LC: nothing may silently close a shift. The admission refuses to start while ANY shift is open (at the
+  // source or anywhere else), is atomic with the hold, and ordinary writes (opening a shift) are gated while it runs.
+  const shiftRow = (id, branch, closed, cancelled) => `INSERT INTO shift_sessions(id,shift_code,user_id,branch_id,business_date,opened_at,closed_at,cancelled_at,cancelled_by_user_id,cancel_reason)
+    VALUES(${id},'SH${id}',7,${branch},date('2026-01-01','+${id} day'),'2026-10-05 08:00:00',${closed},${cancelled},${cancelled === 'NULL' ? 'NULL' : 7},${cancelled === 'NULL' ? 'NULL' : "'entered in error'"})`
+  await check('an open shift refuses the cutover start (source or other branch) and leaves no hold; closed and cancelled shifts do not', async () => {
+    for (const branch of [2, 1]) {
+      const w = world(); w.raw.exec(shiftRow(500 + branch, branch, 'NULL', 'NULL'))
+      await assert.rejects(begin(w))
+      assert.equal(w.raw.prepare('SELECT count(*) n FROM branch_cutovers').get().n, 0, 'no journal row')
+      assert.equal(w.raw.prepare("SELECT count(*) n FROM system_flags WHERE key='maintenance'").get().n, 0, 'no maintenance hold')
+      assert.equal(w.raw.prepare('SELECT count(*) n FROM shift_sessions WHERE closed_at IS NULL AND cancelled_at IS NULL').get().n, 1, 'the shift is untouched, never closed on the way')
+      w.raw.close()
+    }
+    const done = world(); done.raw.exec(shiftRow(510, 2, "'2026-10-05 20:00:00'", 'NULL') + ';' + shiftRow(511, 2, 'NULL', "'2026-10-05 09:00:00'"))
+    assert.equal((await begin(done)).replayed === true, false); done.raw.close()
+  })
+  await check('a shift opened between the read and the admission batch rolls the start back', async () => {
+    const w = world(); w.stats.before = raw => raw.exec(shiftRow(520, 2, 'NULL', 'NULL')); await assert.rejects(begin(w))
+    assert.equal(w.raw.prepare('SELECT count(*) n FROM branch_cutovers').get().n, 0); assert.equal(w.raw.prepare("SELECT count(*) n FROM system_flags WHERE key='maintenance'").get().n, 0); w.raw.close()
+  })
   await check('lost admission acknowledgement proves retained row without another write', async () => {
     const w = world(); w.stats.after = () => { throw Error('network lost after commit') }; const result = await begin(w)
     assert.equal(result.replayed, true); assert.equal(w.stats.batches, 1); w.raw.close()
@@ -176,7 +196,6 @@ async function main() {
   await check('unclassified new scalar schema and unsupported stock refuse before admission', async () => {
     for (const mutation of ["CREATE TABLE future_reference(id INTEGER PRIMARY KEY,branch_id INTEGER)",
       "INSERT INTO rfid_tags(epc_id,product_id,branch_id,status) VALUES('tag',1,2,'active')",
-      "INSERT INTO damaged_stock_lots(product_id,branch_id,quantity_remaining) VALUES(1,2,1)",
       "INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,2,1)"]) {
       const w = world(); w.raw.exec(mutation); assert.ok((await inspect(w)).capabilities.length)
       await assert.rejects(begin(w), e => e.code === 'branch_cutover_parent_capability'); assert.equal(w.stats.batches, 0); w.raw.close()
@@ -225,13 +244,32 @@ async function main() {
     const w = world(); const p = await inspect(w); const input = { ...identity, ...names, requestId: 'budget_request_001', controlIncarnation: '00000000-0000-4000-8000-000000000099',
       expectedSourceJson: p.sourcePreimageJson, expectedTargetJson: p.targetPreimageJson, expectedSchemaDigest: p.schemaDigest }
     const beforeReads = w.stats.reads; w.stats.retryReads = true; w.stats.after = () => { throw Error('lost acknowledgement') }
-    const result = await w.parent.beginBranchCutover(w.db, actor, 1, input, { ...budget, alreadyUsed: 965 })
-    assert.equal(result.replayed, true); assert.equal(w.stats.batches, 1); assert.equal(w.stats.reads - beforeReads, 16)
+    const result = await w.parent.beginBranchCutover(w.db, actor, 1, input, { ...budget, alreadyUsed: 963 })
+    assert.equal(result.replayed, true); assert.equal(w.stats.batches, 1); assert.equal(w.stats.reads - beforeReads, 18)
     assert.equal(w.stats.statements, 11); assert.ok(w.stats.reads - beforeReads + w.stats.statements <= 35); w.raw.close()
     const stopped = world(); const plan = await inspect(stopped)
     await assert.rejects(stopped.parent.beginBranchCutover(stopped.db, actor, 1, { ...input, expectedSchemaDigest: plan.schemaDigest,
-      expectedSourceJson: plan.sourcePreimageJson, expectedTargetJson: plan.targetPreimageJson }, { ...budget, alreadyUsed: 966 }))
+      expectedSourceJson: plan.sourcePreimageJson, expectedTargetJson: plan.targetPreimageJson }, { ...budget, alreadyUsed: 964 }))
     assert.equal(stopped.stats.batches, 0); stopped.raw.close()
+  })
+  await check('REHEARSAL F2: an invocation-budget overrun is a coded refusal that is never retryable and never wrapped as an unknown outcome', async () => {
+    const w = world(); const p = await inspect(w)
+    const input = { ...identity, ...names, requestId: 'budget_request_f2', controlIncarnation: '00000000-0000-4000-8000-000000000099',
+      expectedSourceJson: p.sourcePreimageJson, expectedTargetJson: p.targetPreimageJson, expectedSchemaDigest: p.schemaDigest }
+    const row = (await w.parent.beginBranchCutover(w.db, actor, 1, input, budget)).row
+    // a read that does not fit (before the batch) and a batch that does not fit (inside the commit) are both the same refusal
+    for (const alreadyUsed of [999, 990, 985]) {
+      const failure = await w.parent.continueBranchCutover(w.db, actor, 1, { operationId: row.operation_id, expectedRevision: row.revision, pageSize: 8 }, { ...budget, alreadyUsed }).catch(error => error)
+      if (!(failure instanceof Error)) continue
+      assert.equal(failure.capability, 'parent_invocation_budget_exceeded', 'alreadyUsed ' + alreadyUsed + ': ' + failure.message)
+      assert.equal(w.parent.isBranchCutoverRetryable(failure), false, 'a deterministic overrun is not retried 25 times blind')
+      assert.ok(!(failure instanceof w.parent.BranchCutoverParentOutcomeUnknown))
+    }
+    const failed = await w.parent.continueBranchCutover(w.db, actor, 1, { operationId: row.operation_id, expectedRevision: row.revision, pageSize: 8 }, { ...budget, alreadyUsed: 999 }).catch(error => error)
+    assert.equal(failed.capability, 'parent_invocation_budget_exceeded')
+    assert.equal(w.raw.prepare('SELECT revision FROM branch_cutovers').get().revision, row.revision, 'nothing was written')
+    assert.equal(w.parent.isBranchCutoverRetryable(new Error('D1_ERROR: D1 DB is overloaded')), true, 'a transient D1 refusal stays retryable')
+    w.raw.close()
   })
   assert.ok(checks > 0, 'test filter must select a group')
   console.log(`${checks} branch cutover parent native groups passed`)

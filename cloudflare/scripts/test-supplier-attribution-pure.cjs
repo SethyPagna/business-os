@@ -158,6 +158,7 @@ const damagedLotActions = loadReal('lib/damagedLotActions.ts', {
 })
 const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/receivingBranch': loadReal('lib/receivingBranch.ts'),
+  '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   '../lib/stockCondition': stockCondition,
   '../lib/damagedLotActions': damagedLotActions,
@@ -254,6 +255,7 @@ const app = inventoryRoute.default
 
 const batchesRoute = loadReal('routes/batches.ts', {
   '../lib/receivingBranch': loadReal('lib/receivingBranch.ts'),
+  '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/moneyPrecision': moneyPrecision,
   '../lib/actorSnapshot': actorSnapshotKernel,

@@ -20,14 +20,16 @@ export const BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> 
   ['This branch edit can no longer be verified. Refresh Branches and submit a new edit.', 'branch_edit_conflict'],
   ['Branch review is not ready. Refresh after the update and try again.', 'branch_review_schema_required'],
   ['Sales can only be recorded at a selling branch.', 'branch_not_sellable'],
-  ['Transfers move stock only between the two operating branches.', 'transfer_branches_pair_only'],
-  // Keep the previous one-way response localized while an older cached
-  // Worker or queued offline response is still in flight.
-  ['Transfers move stock from Warehouse to Shop.', 'transfer_source_warehouse_only'],
-  [
-    'Stock transfer is unavailable because the branch setup must contain exactly one active Shop and one active Warehouse. Ask an administrator to repair the branch records before trying again.',
-    'canonical_branch_configuration_invalid',
-  ],
+  ['Transfers move stock only between a selling branch and a storage branch.', 'transfer_branches_pair_only'],
+  ['Stock transfer is unavailable because the branch setup does not have a selling branch and a storage branch that are both active. Ask an administrator to check the branch records before trying again.', 'canonical_branch_configuration_invalid'],
+  // The sale and expense writers' branch refusals (cloudflare/src/lib/branchRoleGuards.ts): role-neutral, true before and
+  // after the cutover, each the English of the pack key named after its code.
+  ['The sale and all of its lines must use the same branch.', 'sale_branch_mismatch'],
+  ['The branch or received date changed while this sale was being recorded. Refresh the sale and pick the current received date before trying again.', 'sale_identity_conflict'],
+  ['Stock without a received date must be a regular sale line with a branch.', 'unrecorded_stock_line_invalid'],
+  ['Every expense must use an active selling branch.', 'fee_branch_invalid'],
+  ['Choose an existing sale recorded at a selling branch.', 'fee_sale_invalid'],
+  ['The linked sale and expense must use the same branch.', 'fee_sale_branch_mismatch'],
   // TRANSFER_REFUSALS in cloudflare/src/lib/transferOperation.ts: what the
   // three transfer routes answer when the planner or the batch's guards refuse.
   ['The products or stock in this transfer changed while it was being saved. Nothing was moved. Refresh and try again.', 'transfer_stock_changed'],
@@ -36,23 +38,51 @@ export const BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> 
   ['Maintenance is in progress. No stock was transferred; try again shortly.', 'transfer_maintenance_active'],
 ]
 
-// The pre-rename sentences, which name Shop and Warehouse. A Worker still in
-// flight (or a queued response) sends these; they map onto the neutral keys so
-// the operator reads the same role-neutral text in either language.
+// The pre-rename and pre-consolidation sentences, which name Shop and Warehouse or the old "two operating branches". A
+// Worker still in flight (or a queued response) sends these; they map onto the neutral keys so the operator reads the
+// same role-neutral text in either language, and none of them has to equal a pack text.
 export const LEGACY_BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> = [
   ['Only allow Shop sale. Please transfer to Shop first.', 'branch_not_sellable'],
+  ['Sales can only be recorded at the Shop. Transfer Warehouse stock to the Shop first.', 'branch_not_sellable'],
   ['Transfers move stock only between Shop and Warehouse.', 'transfer_branches_pair_only'],
+  ['Transfers move stock only between the two operating branches.', 'transfer_branches_pair_only'],
+  ['Transfers move stock from Warehouse to Shop.', 'transfer_branches_pair_only'],
+  ['Stock transfer is unavailable because the branch setup must contain exactly one active Shop and one active Warehouse. Ask an administrator to repair the branch records before trying again.', 'canonical_branch_configuration_invalid'],
+  ['The sale header and every line must use the same Shop branch.', 'sale_branch_mismatch'],
+  ['The sale header and every added line must use the same Shop branch.', 'sale_branch_mismatch'],
+  ['The sale header and every amended line must use the same Shop branch.', 'sale_branch_mismatch'],
+  ['The sale header and replacement line must use the same Shop branch.', 'sale_branch_mismatch'],
+  ['The Shop or batch changed while this sale was being recorded. Refresh the sale and pick the current batch before trying again.', 'sale_identity_conflict'],
+  ['Unrecorded stock must be a regular Shop sale line.', 'unrecorded_stock_line_invalid'],
+  ['Every expense must use the active Shop branch.', 'fee_branch_invalid'],
+  ['Choose an existing sale recorded at the Shop.', 'fee_sale_invalid'],
+  ['The linked sale and expense must use the same Shop branch.', 'fee_sale_branch_mismatch'],
+  // CANONICAL_BRANCH_IDENTITY_ERROR (409, code canonical_branch_identity_locked) is still this sentence: the Worker's
+  // constant is pinned by test-undo-appliers-pure.cjs. The pack text it maps to is role-neutral (the branches are Old
+  // Shop and LC Store after the cutover) and is what the operator reads; the code maps there first.
+  ['Branches are fixed to Shop and Warehouse. You can edit their details, but you cannot add, rename, deactivate, or delete a branch.', 'canonical_branch_identity_locked'],
 ]
 
 export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   branch_edit_conflict: 'branch_edit_conflict',
   branch_review_schema_required: 'branch_review_schema_required',
   canonical_branch_configuration_invalid: 'canonical_branch_configuration_invalid',
+  canonical_branch_identity_locked: 'canonical_branch_identity_locked',
   branch_not_sellable: 'branch_not_sellable',
   transfer_direction_invalid: 'transfer_branches_pair_only',
   transfer_stock_changed: 'transfer_stock_changed',
   transfer_selected_lot_short: 'transfer_selected_lot_short',
   transfer_too_many_lots: 'transfer_too_many_lots',
+  sale_branch_mismatch: 'sale_branch_mismatch',
+  sale_identity_conflict: 'sale_identity_conflict',
+  unrecorded_stock_line_invalid: 'unrecorded_stock_line_invalid',
+  fee_branch_invalid: 'fee_branch_invalid',
+  fee_sale_invalid: 'fee_sale_invalid',
+  fee_sale_branch_mismatch: 'fee_sale_branch_mismatch',
+  branch_redirect_required: 'branch_redirect_required',
+  branch_redirect_target_invalid: 'branch_redirect_target_invalid',
+  branch_retired_no_successor: 'branch_retired_no_successor',
+  branch_retired_damaged_stock: 'branch_retired_damaged_stock',
 }
 
 type BranchRuleErrorLike = {
