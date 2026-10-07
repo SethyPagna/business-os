@@ -315,6 +315,38 @@ async function amend(world, w, body, redirect = null) {
   }
   console.log('PASS single status: a retired branch with no successor refuses before any write, a damaged line refuses, a no-stock transition is not blocked')
 
+  // ---------------------------------------------------------------- F4: held units the cutover moved to LC Store
+  {
+    const held = async (branch) => {
+      const w = await build('after')
+      w.db.prepare("INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,quantity,quantity_remaining,reason) VALUES(7,10,'Powder',?,2,0,'damaged')").run([branch])
+      w.db.prepare('UPDATE sale_items SET damaged_lot_id=7 WHERE id=?').run([w.lineId])
+      return w
+    }
+    const lot = (w) => ({ ...w.db.prepare('SELECT branch_id b, quantity_remaining q FROM damaged_stock_lots WHERE id=7').get() })
+    // a held unit still at Old Shop keeps refusing (single and grouped)
+    const stuck = await held(1)
+    const stuckSingle = await setStatus(fresh.sales, stuck, cancelBody('held-stuck-1'), stuck.saleId, 2)
+    assert.equal(stuckSingle.status, 409, JSON.stringify(stuckSingle.body)); assert.equal(stuckSingle.body.code, 'branch_retired_damaged_stock')
+    const stuckBulk = await call(fresh.sales, stuck.route, 'POST', '/bulk-status', bulkBody(stuck, 'cancelled', 'held-stuck-bulk'), 2)
+    assert.equal(stuckBulk.status, 409, JSON.stringify(stuckBulk.body)); assert.equal(stuckBulk.body.code, 'branch_retired_damaged_stock')
+    assert.deepEqual(lot(stuck), { b: 1, q: 0 })
+    // the same unit moved to LC Store by the cutover: the single status change succeeds and lands at LC Store
+    const moved = await held(2)
+    const atOldBefore = moved.db.prepare('SELECT COUNT(*) n FROM inventory_movements WHERE branch_id=1').get().n
+    const single = await setStatus(fresh.sales, moved, cancelBody('held-moved-1'), moved.saleId, 2)
+    assert.equal(single.status, 200, JSON.stringify(single.body))
+    assert.deepEqual(lot(moved), { b: 2, q: 2 }, 'the held unit comes back at LC Store')
+    assert.equal(moved.db.prepare('SELECT COUNT(*) n FROM inventory_movements WHERE branch_id=1').get().n, atOldBefore, 'no new movement at Old Shop')
+    assert.ok(moved.db.prepare('SELECT COUNT(*) n FROM inventory_movements WHERE branch_id=2').get().n >= 1, 'the movement is at LC Store')
+    // and the grouped change
+    const bulk = await held(2)
+    const grouped = await call(fresh.sales, bulk.route, 'POST', '/bulk-status', bulkBody(bulk, 'cancelled', 'held-moved-bulk'), 2)
+    assert.equal(grouped.status, 200, JSON.stringify(grouped.body))
+    assert.deepEqual(lot(bulk), { b: 2, q: 2 }, 'grouped: the held unit comes back at LC Store')
+  }
+  console.log('PASS held units: moved to LC Store they follow the sale status change (single and grouped); still at Old Shop they refuse')
+
   // ---------------------------------------------------------------- single status: cancellation expense
   {
     const w = await build('after')

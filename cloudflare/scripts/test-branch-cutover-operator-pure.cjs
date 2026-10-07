@@ -176,6 +176,10 @@ async function main() {
       await assert.rejects(script.executeMode('inspect', { client: make(), env: {} }), error => error.code === 'actor-user-missing')
       await assert.rejects(script.executeMode('nonsense', { client: make(), env }), error => error.code === 'unknown-mode')
       await assert.rejects(script.executeMode('resume-until-ready', { client: make(), env: { ...env, OPS_CUTOVER_BUDGET_MINUTES: '9999' } }), error => error.code === 'bad-time-budget')
+      // F3: approved_folds is parsed only by inspect and start; a typo cannot break status, abort, resume or finalize
+      const typo = { ...env, OPS_APPROVED_FOLDS: '7091-1529' }
+      for (const mode of ['status', 'abort', 'resume-until-ready', 'finalize']) await script.executeMode(mode, { client: make(), env: typo })
+      for (const mode of ['inspect', 'start']) await assert.rejects(script.executeMode(mode, { client: make(), env: typo, bookmark: async () => ({ bookmark: 'x' }) }), error => error.code === 'approved-folds-invalid', mode)
       assert.throws(() => script.vetted(hostile), error => error.code === 'unsafe-public-value')
       assert.throws(() => script.vetted('Alice'), error => error.code === 'unsafe-public-value')
     } finally { process.stdout.write = original }

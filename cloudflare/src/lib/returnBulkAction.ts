@@ -600,8 +600,8 @@ async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: 
         // The branch the stock moves at; `recordedBranchId` stays the one the rows were written under.
         const branchId = landing?.redirected ? landing.effectBranchId : recordedBranchId
         if (landing?.redirected) {
-          // Held (damaged) units belong to the branch they were created at and are never moved by a consolidation.
-          if (scope === 'customer' && stockAction === 'damaged') fail(BRANCH_RETIRED_DAMAGED_ERROR, 409, BRANCH_RETIRED_DAMAGED_CODE)
+          // Held (damaged) units still at the retired branch refuse; units the cutover moved to the successor are found at the landing branch below.
+          if (scope === 'customer' && stockAction === 'damaged' && !damaged.some((lot) => Number(lot.return_id) === expected.id && Number(lot.product_id) === productId && Number(lot.branch_id) === branchId)) fail(BRANCH_RETIRED_DAMAGED_ERROR, 409, BRANCH_RETIRED_DAMAGED_CODE)
           const ownLabel = Number(row.branch_id) === landing.addressedBranchId && typeof row.branch_name === 'string' && row.branch_name ? row.branch_name : null
           landings.set(branchId, { effectName: landing.effectName, label: ownLabel ?? landing.addressedName ?? landing.effectName })
         }
@@ -610,7 +610,7 @@ async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: 
           if (handledDamagedGroups.has(damagedGroup)) continue
           handledDamagedGroups.add(damagedGroup)
           const groupedItems = ownItems.filter((candidate) => Number(candidate.product_id) === productId
-            && Number(candidate.branch_id || row.branch_id) === branchId
+            && (resolver.effectId(Number(candidate.branch_id || row.branch_id)) ?? Number(candidate.branch_id || row.branch_id)) === branchId
             && normalize(candidate.stock_action, Number(candidate.return_to_stock) === 1 ? 'restock' : 'none') === 'damaged')
           const lots = damaged.filter((lot) => Number(lot.return_id) === expected.id && Number(lot.product_id) === productId && Number(lot.branch_id) === branchId)
           if (!lots.length) fail(`Return ${expected.id} has no damaged-stock provenance and cannot change status safely.`, 400)

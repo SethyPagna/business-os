@@ -211,6 +211,22 @@ async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${na
     await refused(fresh, damaged, request(damaged, 'completed', 'cancelled', 'damaged-1'), 409, 'branch_retired_damaged_stock', 1)
   })
 
+  await check('F4 a held unit the cutover moved to LC Store: cancelling and restoring the old Shop damaged return succeeds and lands at LC Store; a held unit still at Old Shop keeps refusing', async () => {
+    const lotAt = (f, branch) => f.sql.prepare("INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,return_id,quantity,quantity_remaining,reason) VALUES(1,1,'A',?,10,2,2,'damaged')").run(branch)
+    const stillThere = fixture('after', { damaged: true }); lotAt(stillThere, 2)
+    await refused(fresh, stillThere, request(stillThere, 'completed', 'cancelled', 'held-old'), 409, 'branch_retired_damaged_stock', 1)
+    assert.equal(stillThere.sql.prepare('SELECT quantity_remaining q FROM damaged_stock_lots WHERE id=1').get().q, 2, 'nothing written')
+    const moved = fixture('after', { damaged: true }); lotAt(moved, 1)
+    const cancelled = await fresh.applyReturnBulkActionOutcome(moved.env, admin, request(moved, 'completed', 'cancelled', 'held-cancel'), 1)
+    assert.equal(cancelled.wrote, true)
+    assert.deepEqual({ ...moved.sql.prepare('SELECT branch_id b, quantity_remaining q FROM damaged_stock_lots WHERE id=1').get() }, { b: 1, q: 0 }, 'the held unit is consumed at LC Store')
+    assert.ok(moved.sql.prepare("SELECT COUNT(*) n FROM inventory_movements WHERE branch_id=1 AND product_id=1").get().n >= 1, 'the movement is at LC Store')
+    assert.equal(moved.sql.prepare("SELECT COUNT(*) n FROM inventory_movements WHERE branch_id=2").get().n, 0, 'nothing at Old Shop')
+    const back = await fresh.applyReturnBulkActionOutcome(moved.env, admin, request(moved, 'cancelled', 'completed', 'held-restore'), 1)
+    assert.equal(back.wrote, true)
+    assert.equal(moved.sql.prepare('SELECT quantity_remaining q FROM damaged_stock_lots WHERE id=1').get().q, 2, 'restore gives the held unit back at LC Store')
+  })
+
   await check('INERT while both branches are active: the grouped action writes the exact statements and ledgers the old kernel wrote', async () => {
     for (const [name, run] of [
       ['cancel', async (kernel, f) => kernel.applyReturnBulkActionOutcome(f.env, admin, request(f, 'completed', 'cancelled', 'inert-cancel'))],

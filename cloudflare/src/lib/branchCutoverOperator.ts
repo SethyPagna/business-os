@@ -2,7 +2,7 @@ import { getDb, type D1Compat } from './db'
 import type { SessionUser } from './auth'
 import { hasPermission } from './permissions'
 import { BranchCutoverCapabilityError, type CutoverIdentity } from './branchCutoverCapture'
-import type { ParentHooks } from './branchCutoverParent'
+import { prepareInactiveStock, type ParentHooks } from './branchCutoverParent'
 import { parseApprovedFolds } from './branchCutoverInactiveStock'
 import type { Env } from '../index'
 import { BRANCH_CUTOVER_FINAL_NAMES, beginBranchCutover, continueBranchCutover, inspectBranchCutover, isBranchCutoverRetryable } from './branchCutoverParent'
@@ -150,7 +150,7 @@ async function admissionBlockers(db: D1Compat): Promise<string[]> {
   return blockers
 }
 
-async function runBegin(db: D1Compat, body: Record<string, unknown>): Promise<OperatorOutcome> {
+async function runBegin(db: D1Compat, body: Record<string, unknown>, env: { DB: D1Database }): Promise<OperatorOutcome> {
   const identity = identityOf(body), actor = await loadActor(db, body.actorUserId)
   if (!identity || !actor) return refused('actor_not_permitted')
   const { requestId, expectedSourceJson, expectedTargetJson, expectedSchemaDigest } = body
@@ -162,6 +162,10 @@ async function runBegin(db: D1Compat, body: Record<string, unknown>): Promise<Op
   const controlIncarnation = await ensureIncarnation(db)
   const begun = await beginBranchCutover(db, actor, actor.organization_id as number, { ...identity, ...BRANCH_CUTOVER_FINAL_NAMES, requestId, controlIncarnation, approvedFolds: parseApprovedFolds(body.approvedFolds),
     expectedSourceJson, expectedTargetJson, expectedSchemaDigest }, PARENT_BUDGET)
+  // Owner rulings 7 Oct 2026: inactive products holding stock are folded into their twin (or their cache recomputed) as part of begin, under the fence
+  // begin just took, so the P7 reads are taken on the prepared stock. A replayed begin runs it again (idempotent); a refusal here leaves the held
+  // run for the operator to abort or fix and resume (the first capture page re-checks).
+  await prepareInactiveStock(db, actor, begun.row.operation_id, parseApprovedFolds(body.approvedFolds), inactiveProductHooks(env))
   return summary(begun.row, requestId, begun.replayed)
 }
 
@@ -242,7 +246,7 @@ export async function runBranchCutoverOperatorAction(env: { DB: D1Database; PLAN
   try {
     const db = getDb(env)
     if (action === 'inspect') return await runInspect(db, body)
-    if (action === 'begin') return await runBegin(db, body)
+    if (action === 'begin') return await runBegin(db, body, env)
     if (action === 'status') return await runStatus(db, body)
     if (action === 'abort') return await runAbort(db, body)
     if (action === 'repair-sk2') return await runRepairSk2(db, body)

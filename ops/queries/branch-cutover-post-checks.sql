@@ -17,7 +17,8 @@
 --   fold_lots_off          fold audit "after" quantities <> LC Store lot quantities now
 --   fold_costs_off         re-costed survivors whose unit_cost_usd <> the recorded cost after
 --   batches_changed_off    product_batches rows updated since begin that are not a re-costed
---                          survivor (lot identity, item 4; the comparable half checks content)
+--                          survivor and not a lot re-pointed by this run's inactive-product fold
+--                          (its audit row names the lots) (lot identity, item 4; the comparable half checks content)
 --   blank_labels           blank history labels on rows of the two branches (item 9)
 --   directory_off          failed directory conditions (item 10): one active branch, LC Store
 --                          default / role shop / key warehouse / the intent's name, Old Shop
@@ -53,6 +54,10 @@ WITH one AS (SELECT 1 AS x), op AS MATERIALIZED (
     json_extract(f.d, '$.unitCostUsdBefore') AS cb, json_extract(f.d, '$.unitCostUsdAfter') AS ca,
     CAST(json_extract(f.d, '$.after[' || b.key || '][0]') AS INTEGER) AS id_after
   FROM fold f, json_each(f.d, '$.before') b
+), ifold AS MATERIALIZED (
+  -- the lots this run's inactive-product folds re-pointed (exact and owner-approved): the run's own audit rows name them, nothing broader excuses a lot
+  SELECT CAST(j.value AS INTEGER) AS id FROM op JOIN audit_logs a ON a.action IN ('branch_cutover_inactive_fold', 'branch_cutover_approved_fold')
+    AND json_extract(a.details, '$.operationId') = op.id, json_each(a.details, '$.batchIds') j
 ), rc AS MATERIALIZED (
   SELECT r.id, r.status FROM op JOIN transfer_operation_receipts r
     ON substr(r.request_id, 1, length('bc_' || op.id || '_')) = 'bc_' || op.id || '_'
@@ -98,7 +103,8 @@ SELECT
   (SELECT count(*) FROM fl LEFT JOIN branch_batch_stock s ON s.batch_id = fl.id_after AND s.branch_id = op.tgt WHERE s.quantity IS NOT fl.qa) AS fold_lots_off,
   (SELECT count(*) FROM fl JOIN product_batches b ON b.id = fl.id WHERE fl.recost = 1 AND b.unit_cost_usd IS NOT fl.ca) AS fold_costs_off,
   (SELECT count(*) FROM product_batches b WHERE b.updated_at >= op.began_t AND julianday(b.updated_at) >= julianday(op.began)
-    AND NOT EXISTS (SELECT 1 FROM fl WHERE fl.id = b.id AND fl.recost = 1)) AS batches_changed_off,
+    AND NOT EXISTS (SELECT 1 FROM fl WHERE fl.id = b.id AND fl.recost = 1)
+    AND NOT EXISTS (SELECT 1 FROM ifold WHERE ifold.id = b.id)) AS batches_changed_off,
   (SELECT count(*) FROM sales x WHERE +x.branch_id IN (op.src, op.tgt) AND (x.branch_name IS NULL OR (x.branch_name NOT IN (op.src_name, op.tgt_name) AND trim(x.branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '')))
     + (SELECT count(*) FROM returns x WHERE x.branch_id IN (op.src, op.tgt) AND (x.branch_name IS NULL OR (x.branch_name NOT IN (op.src_name, op.tgt_name) AND trim(x.branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '')))
     + (SELECT count(*) FROM inventory_movements x WHERE +x.branch_id IN (op.src, op.tgt) AND (x.branch_name IS NULL OR (x.branch_name NOT IN (op.src_name, op.tgt_name) AND trim(x.branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '')))

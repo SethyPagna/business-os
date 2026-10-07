@@ -352,10 +352,20 @@ export function effectGuardStatement(guards: readonly BranchEffectGuard[]): { sq
   }
 }
 
+/**
+ * The ids of the damaged (held) lots that currently sit at `branchId`. A cutover re-points held units to the successor (LC Store); a line recorded
+ * at the retired branch may follow its lot there. A lot still at the retired branch is not in the answer, so it keeps refusing.
+ */
+export async function heldLotsAtBranch(db: D1Compat, branchId: number, lotIds: readonly number[]): Promise<Set<number>> {
+  const ids = [...new Set(lotIds.map(Number))].filter((id) => Number.isSafeInteger(id) && id > 0)
+  const rows = await selectInChunks(ids, 1, (chunk) => db.prepare(`SELECT id FROM damaged_stock_lots WHERE branch_id=? AND id IN (${chunk.map(() => '?').join(',')})`).all<{ id: number }>([branchId, ...chunk]))
+  return new Set(rows.map((row) => Number(row.id)))
+}
+
 export const BRANCH_RETIRED_DAMAGED_CODE = 'branch_retired_damaged_stock'
 export const BRANCH_RETIRED_DAMAGED_ERROR = 'This record has damaged-stock units at a retired branch. They cannot be moved or recreated there. Nothing was changed.'
 
-/** A damaged (held) lot belongs to the branch it was created at and is never moved by a consolidation. */
+/** A damaged (held) lot that is still at the retired branch cannot be moved or recreated there (the cutover moves held units to the successor, see heldLotsAtBranch). */
 export class BranchRetiredDamagedError extends Error {
   readonly code = BRANCH_RETIRED_DAMAGED_CODE
   readonly statusCode = 409
@@ -395,9 +405,14 @@ export async function redirectStockItems<T extends RedirectableStockItem>(
     if (!item.branch_id || !options.moves(item)) continue
     const effect = resolver.effect(item.branch_id, { sells: options.sells !== false })
     if (!effect?.redirected) continue
-    if (item.damaged_lot_id) throw new BranchRetiredDamagedError()
     redirected.push({ item, effect })
   }
+  // A held (damaged) line follows its lot to the successor when the lot lives there (moved by the cutover); otherwise it refuses as before.
+  const heldByEffect = new Map<number, number[]>()
+  for (const { item, effect } of redirected) if (item.damaged_lot_id) heldByEffect.set(effect.effectBranchId, [...(heldByEffect.get(effect.effectBranchId) || []), Number(item.damaged_lot_id)])
+  const held = new Map<number, Set<number>>()
+  for (const [effectId, lotIds] of heldByEffect) held.set(effectId, await heldLotsAtBranch(db, effectId, lotIds))
+  for (const { item, effect } of redirected) if (item.damaged_lot_id && !held.get(effect.effectBranchId)?.has(Number(item.damaged_lot_id))) throw new BranchRetiredDamagedError()
   if (!redirected.length) return
   const byEffect = new Map<number, number[]>()
   for (const { item, effect } of redirected) {

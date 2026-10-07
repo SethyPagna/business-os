@@ -34,11 +34,11 @@ Delete both after the cutover completes; the endpoint is dark without the Worker
 | (day before) reachability, capabilities, schema/registry digests | `cutover_mode` inspect | `actor_user_id` = administrator id |
 | P1 | task `d1-export`, query `deploy-trading-check` | open_today = 0 |
 | P2 | `d1-export` `migrations-applied`; deploy provenance | exact |
-| P3 | `inspect` (blocking capability codes) and the named refusals of `start` | none open |
+| P3 | `inspect` with `approved_folds` = `7091:1529` (blocking capability codes, the inactive-stock plan and the named refusals of `start`) | none open; the approved pair is listed as a fold, nothing refused |
 | P4 | `bookmark` (Time Travel bookmark, encrypted) plus `d1-physical-export` | both recorded |
 | P5 | `d1-export` `branch-cutover-inventory`, `branch-identity-precheck`, `cutover-fold-preview` | informational, anomalies 0, `inexact_pairs` 0 |
 | P5b | `repair-sk2-check`, then `repair-sk2`, `actor_user_id` = 5 (SK2-REPAIR, owner 7 Oct 2026: product 5357 at Shop, `lib/sk2CleanserRepair.ts`) | check: state `pre` (or `done` on a re-run); repair: state `done`. A re-run writes nothing. Any other state refuses with nothing written: stop and re-plan |
-| P6 | `start` (takes a fresh bookmark first, then inspect, then begin) | phase capturing, revision 0; note the operation id |
+| P6 | `start` with the same `approved_folds` = `7091:1529` (takes a fresh bookmark first, then inspect, then begin; begin folds the approved and exact-twin inactive stock under the fence). Only `inspect` and `start` read `approved_folds`; `resume-until-ready` uses the list sealed in the run. A fold is a committed product merge with its own undo (Products history), so `abort` ends the fence and does not undo it; the run's record is the `branch_cutover_approved_fold` / `branch_cutover_inactive_fold` audit rows. A re-run after a crash is idempotent | phase capturing, revision 0; note the operation id |
 | P7 | `d1-export` `branch-cutover-inventory` immediately after `start` (read under the fence) | equals the sealed manifest |
 | P8 | `resume-until-ready` with `operation_id` (blank = the one unfinished operation) | phase ready; re-run the same inputs after any stop |
 | P9 | `finalize` | phase completed |

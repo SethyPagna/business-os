@@ -602,6 +602,29 @@ async function main() {
     assert.equal(w.raw.prepare("SELECT count(*) n FROM audit_logs WHERE action='branch_cutover_approved_fold' AND details LIKE '%owner-approved fold 7 Oct 2026%'").get().n, 1)
     w.raw.close()
   })
+  await check('F1 an approved fold survives a crash between the merge and the next save: the resume (continue) and a replayed begin both proceed, folding nothing twice', async () => {
+    const w = world({ generatedProducts: 4 })
+    w.raw.exec(`INSERT INTO products(id,name,sku,barcode,is_active,stock_quantity,cost_price_usd,created_at,updated_at) VALUES
+        (7091,'Colourpop Shadow Stix-Angel Vibes','CP-OLD',NULL,0,2,3,'2026-01-01','2026-01-01'),(1529,'Colourpop Shadow Stix Angel Vibes','CP-NEW','0',1,0,3,'2026-01-01','2026-01-01');
+      INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(7091,1,2)`)
+    let folds = 0, dieAfterFold = true
+    const hooks = { foldInactiveProduct: async (user, dup, keeper, approved) => { await stubFold(w.raw)(user, dup, keeper, approved); folds++; if (dieAfterFold) { dieAfterFold = false; throw new Error('isolate died after the fold') } } }
+    const approvedFolds = [{ dup: 7091, keeper: 1529 }]
+    const plan = await w.m.parent.inspectBranchCutover(w.db, ACTOR, 1, IDS, PARENT_BUDGET, approvedFolds)
+    const begin = { ...IDS, ...NAMES, requestId: 'f1_crash_resume', controlIncarnation: INCARNATION, approvedFolds,
+      expectedSourceJson: plan.sourcePreimageJson, expectedTargetJson: plan.targetPreimageJson, expectedSchemaDigest: plan.schemaDigest }
+    const { row } = await w.m.parent.beginBranchCutover(w.db, ACTOR, 1, begin, PARENT_BUDGET)
+    await assert.rejects(w.m.parent.prepareInactiveStock(w.db, ACTOR, row.operation_id, approvedFolds, hooks), /isolate died/)
+    assert.equal(w.raw.prepare('SELECT quantity FROM branch_stock WHERE product_id=1529 AND branch_id=1').get().quantity, 2, 'the fold committed')
+    // a replayed begin (the runner retries the same request id) is not refused for a pair that is already done
+    const replay = await w.m.parent.beginBranchCutover(w.db, ACTOR, 1, begin, PARENT_BUDGET)
+    assert.equal(replay.replayed, true)
+    // the resume: the first capture page re-plans and finds the pair done
+    const next = await w.m.parent.continueBranchCutover(w.db, ACTOR, 1, { operationId: row.operation_id, expectedRevision: row.revision, pageSize: 16 }, PARENT_BUDGET, hooks)
+    assert.equal(next.row.revision, row.revision + 1)
+    assert.equal(folds, 1, 'folded exactly once')
+    w.raw.close()
+  })
   await check('F3 without the merge hook a plan that needs a fold refuses before anything is read (the Worker always supplies it)', async () => {
     const w = world({ generatedProducts: 4 }); seedF3(w.raw)
     const plan = await w.m.parent.inspectBranchCutover(w.db, ACTOR, 1, IDS, PARENT_BUDGET)

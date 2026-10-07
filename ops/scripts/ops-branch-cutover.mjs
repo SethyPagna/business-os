@@ -115,14 +115,15 @@ function progressPrinter() {
 export async function executeMode(mode, { client, env, now = Date.now, bookmark = captureBookmark, run = runId() }) {
   const operationId = String(env.OPS_OPERATION_ID || '').trim()
   const actorUserId = Number(env.OPS_ACTOR_USER_ID)
-  const approvedFolds = parseApprovedFoldsText(env.OPS_APPROVED_FOLDS)
+  // Parsed only by the modes that use it, so a typo in the input cannot break status, abort, resume or finalize (the sealed list is in the run).
+  const approvedFoldsInput = () => parseApprovedFoldsText(env.OPS_APPROVED_FOLDS)
   const needActor = () => {
     if (!Number.isSafeInteger(actorUserId) || actorUserId < 1) throw new OpsError('actor-user-missing', 'OPS_ACTOR_USER_ID must be a user id.')
   }
   const out = { mode }
   if (mode === 'inspect') {
     needActor()
-    const { inspect, verdict } = await inspectCutover(client, { actorUserId, approvedFolds })
+    const { inspect, verdict } = await inspectCutover(client, { actorUserId, approvedFolds: approvedFoldsInput() })
     out.inspect = inspect
     out.ready = verdict.ready
     say('inspect: {result}', { result: verdict.ready ? 'PASS' : 'FAIL' })
@@ -141,6 +142,7 @@ export async function executeMode(mode, { client, env, now = Date.now, bookmark 
     if (mode === 'repair-sk2' && state !== 'done') throw Object.assign(new OpsError('repair-sk2-not-done', 'The repair did not reach its end state.'), { partial: out })
   } else if (mode === 'start') {
     needActor()
+    const approvedFolds = approvedFoldsInput()
     out.bookmark = await bookmark()
     say('time travel bookmark: {result} (in the encrypted file)', { result: 'PASS' })
     const started = await startCutover(client, { actorUserId, requestId: beginRequestId(run), approvedFolds })

@@ -16,7 +16,7 @@ import { BranchCutoverCapabilityError } from './branchCutoverCapture'
  *     ledgers (0) with one audit row.
  */
 export type InactiveStockRow = { id: number; name: string | null; barcode: string | null; image_path: string | null
-  cache: number; branch: number; lots: number; damaged: number }
+  cache: number; branch: number; lots: number; damaged: number; is_group?: number }
 /** An owner-approved fold (7 Oct 2026): a pair the exact-identity rule cannot match (7091 "Stix-Angel Vibes" -> 1529 "Stix Angel Vibes"). */
 export type ApprovedFold = { dup: number; keeper: number }
 export const APPROVED_FOLD_NOTE = 'owner-approved fold 7 Oct 2026'
@@ -39,11 +39,11 @@ export function parseApprovedFolds(value: unknown): ApprovedFold[] {
     return { dup: Number(pair.dup), keeper: Number(pair.keeper) }
   })
 }
-export const INACTIVE_STOCK_CENSUS_SQL = `SELECT p.id,p.name,p.barcode,p.image_path,COALESCE(p.stock_quantity,0) AS cache,
+export const INACTIVE_STOCK_CENSUS_SQL = `SELECT p.id,p.name,p.barcode,p.image_path,COALESCE(p.is_group,0) AS is_group,COALESCE(p.stock_quantity,0) AS cache,
     COALESCE((SELECT SUM(quantity) FROM branch_stock WHERE product_id=p.id),0) AS branch,
     COALESCE((SELECT SUM(s.quantity) FROM product_batches b CROSS JOIN branch_batch_stock s ON s.batch_id=b.id WHERE b.variant_product_id=p.id),0) AS lots,
     COALESCE((SELECT SUM(quantity_remaining) FROM damaged_stock_lots WHERE product_id=p.id),0) AS damaged
-  FROM products p WHERE p.is_active IS NOT 1 AND COALESCE(p.is_group,0)=0 AND (COALESCE(p.stock_quantity,0)<>0
+  FROM products p WHERE p.is_active IS NOT 1 AND (COALESCE(p.stock_quantity,0)<>0
     OR EXISTS(SELECT 1 FROM branch_stock s WHERE s.product_id=p.id AND s.quantity<>0)
     OR EXISTS(SELECT 1 FROM product_batches b CROSS JOIN branch_batch_stock s ON s.batch_id=b.id WHERE b.variant_product_id=p.id AND s.quantity<>0)
     OR EXISTS(SELECT 1 FROM damaged_stock_lots d WHERE d.product_id=p.id AND d.quantity_remaining<>0))
@@ -71,15 +71,33 @@ export function approvedFoldProblem(dup: { name: string | null; barcode: string 
   return null
 }
 
-export async function readInactiveStockPlan(db: D1Compat, approved: ApprovedFold[] = []): Promise<InactiveStockPlan> {
+/**
+ * An approved pair already done by THIS run: its run-keyed audit row exists (written before the fold, see applyInactiveStockPlan) and the dup
+ * no longer holds stock. A crash between the fold's commit and the capture page's save re-plans on resume; without this the resume would
+ * refuse a pair whose work is finished.
+ */
+export async function approvedFoldAlreadyDone(db: D1Compat, operationId: string, item: ApprovedFold): Promise<boolean> {
+  const row = await db.prepare(`SELECT 1 AS done FROM audit_logs WHERE action=@action AND entity='product' AND entity_id=@keeper
+    AND json_extract(details,'$.operationId')=@operation AND json_extract(details,'$.dup')=@dup LIMIT 1`)
+    .get<{ done: number }>({ action: BRANCH_CUTOVER_APPROVED_FOLD_ACTION, keeper: item.keeper, operation: operationId, dup: item.dup })
+  return Boolean(row)
+}
+
+export async function readInactiveStockPlan(db: D1Compat, approved: ApprovedFold[] = [], operationId: string | null = null): Promise<InactiveStockPlan> {
   const rows = await db.prepare(INACTIVE_STOCK_CENSUS_SQL).all<InactiveStockRow>({})
   const plan: InactiveStockPlan = { cacheOnly: [], fold: [], refuse: [] }
   const approvalFor = new Map(approved.map(item => [item.dup, item.keeper]))
   const stocked = new Set(rows.filter(hasRealStock).map(row => Number(row.id)))
-  for (const item of approved) if (!stocked.has(item.dup)) plan.refuse.push({ id: item.dup, name: null, reason: 'approved_dup_not_inactive_with_stock' })
+  for (const item of approved) {
+    if (stocked.has(item.dup)) continue
+    if (operationId && await approvedFoldAlreadyDone(db, operationId, item)) continue
+    plan.refuse.push({ id: item.dup, name: null, reason: 'approved_dup_not_inactive_with_stock' })
+  }
   if (!rows.length) return plan
   const active = await db.prepare('SELECT id,name,barcode,is_active,COALESCE(is_group,0) AS is_group FROM products WHERE is_active=1 AND COALESCE(is_group,0)=0').all<{ id: number; name: string | null; barcode: string | null; is_active: number; is_group: number }>({})
   for (const row of rows) {
+    // The guard (INACTIVE_STOCKED_ANYWHERE_SQL) counts an inactive group too, so the census must see it: a group is never folded or recomputed here.
+    if (Number(row.is_group) === 1) { plan.refuse.push({ id: row.id, name: row.name, reason: 'inactive_group_product_holds_stock' }); continue }
     if (!hasRealStock(row)) { plan.cacheOnly.push(row); continue }
     const twins = active.filter(candidate => candidate.id !== row.id && productsShareExactIdentity(row, candidate))
     const approvedKeeperId = approvalFor.get(Number(row.id))
@@ -97,6 +115,8 @@ export async function readInactiveStockPlan(db: D1Compat, approved: ApprovedFold
 }
 export const inactiveStockPlanIsEmpty = (plan: InactiveStockPlan): boolean => !plan.cacheOnly.length && !plan.fold.length && !plan.refuse.length
 
+export const BRANCH_CUTOVER_APPROVED_FOLD_ACTION = 'branch_cutover_approved_fold'
+export const BRANCH_CUTOVER_INACTIVE_FOLD_ACTION = 'branch_cutover_inactive_fold'
 export const BRANCH_CUTOVER_PREPARE_AUDIT_ACTION = 'branch_cutover_inactive_stock'
 export const BRANCH_CUTOVER_CACHE_AUDIT_ACTION = 'recompute_stock_cache'
 export type InactiveStockContext = { operationId: string; actorId: number; actorName: string | null }
@@ -108,10 +128,18 @@ export type InactiveStockContext = { operationId: string; actorId: number; actor
 export async function applyInactiveStockPlan(db: D1Compat, plan: InactiveStockPlan, context: InactiveStockContext,
   fold: (dup: InactiveStockRow, keeper: { id: number; name: string | null }, approved: boolean) => Promise<void>): Promise<void> {
   for (const item of plan.fold) {
+    // The run's record of this fold is written BEFORE the merge (idempotent per run + pair): a crash after the merge commits but before the
+    // next save then resumes as "already done" (approvedFoldAlreadyDone), and the post-check excuses exactly the lots this record names.
+    const lots = await db.prepare('SELECT id FROM product_batches WHERE variant_product_id=@dup ORDER BY id').all<{ id: number }>({ dup: item.dup.id })
+    const action = item.approved ? BRANCH_CUTOVER_APPROVED_FOLD_ACTION : BRANCH_CUTOVER_INACTIVE_FOLD_ACTION
+    await db.prepare(`INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id)
+      SELECT @actor,@actorName,@action,'product',@keeper,@details,'products',@keeper
+      WHERE NOT EXISTS(SELECT 1 FROM audit_logs WHERE action=@action AND entity='product' AND entity_id=@keeper
+        AND json_extract(details,'$.operationId')=@operation AND json_extract(details,'$.dup')=@dup)`).run({ actor: context.actorId, actorName: context.actorName, action, keeper: item.keeper.id,
+      operation: context.operationId, dup: item.dup.id,
+      details: JSON.stringify({ operationId: context.operationId, ...(item.approved ? { note: APPROVED_FOLD_NOTE } : {}), dup: item.dup.id, dupName: item.dup.name, keeper: item.keeper.id,
+        keeperName: item.keeper.name, batchIds: lots.map(lot => Number(lot.id)) }) })
     await fold(item.dup, item.keeper, item.approved === true)
-    if (item.approved) await db.prepare(`INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id)
-      VALUES(@actor,@actorName,'branch_cutover_approved_fold','product',@keeper,@details,'products',@keeper)`).run({ actor: context.actorId, actorName: context.actorName, keeper: item.keeper.id,
-      details: JSON.stringify({ operationId: context.operationId, note: APPROVED_FOLD_NOTE, dup: item.dup.id, dupName: item.dup.name, keeper: item.keeper.id, keeperName: item.keeper.name }) })
   }
   for (const row of plan.cacheOnly) {
     const statements = [

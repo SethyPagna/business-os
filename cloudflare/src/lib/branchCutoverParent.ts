@@ -281,7 +281,7 @@ export async function beginBranchCutover(db: D1Compat, actor: Principal, organiz
   const approvedFolds = parseApprovedFolds(input.approvedFolds ?? [])
   const inactivePlan = await readInactiveStockPlan(db, approvedFolds)
   const unresolved = inactivePlan.refuse.map(item => ({ code: 'inactive_stock_without_twin', detail: item.id + ':' + item.reason }))
-  if (unsupported.length || unresolved.length) throw new BranchCutoverCapabilityError([...unsupported, ...unresolved].map(v => v.code + ':' + v.detail).join(';'))
+  if (unsupported.length) throw new BranchCutoverCapabilityError(unsupported.map(v => v.code + ':' + v.detail).join(';'))
   requireParent(schema.digest === input.expectedSchemaDigest && JSON.stringify(state.source) === input.expectedSourceJson && JSON.stringify(state.target) === input.expectedTargetJson)
   const intent: ParentIntent = { action: 'retire', parentVersion: 2, sourceBranchId: input.sourceBranchId, targetBranchId: input.targetBranchId,
     registryDigest: await captureRegistryDigest(), schemaDigest: schema.digest, retiredName: input.retiredName, successorName: input.successorName,
@@ -293,6 +293,8 @@ export async function beginBranchCutover(db: D1Compat, actor: Principal, organiz
       && existing.intent_json === intentJson && existing.source_preimage_json === input.expectedSourceJson && existing.target_preimage_json === input.expectedTargetJson)
     return { row: await readBranchCutoverJournal(db, proof(existing)), replayed: true }
   }
+  // Only a NEW run is refused for an unresolved inactive product: a replayed begin (the same request id) finds its pairs already folded by itself.
+  if (unresolved.length) throw new BranchCutoverCapabilityError(unresolved.map(v => v.code + ':' + v.detail).join(';'))
   const operationId = crypto.randomUUID(), token = crypto.randomUUID()
   const begin = { operationId, token, actorId: current.id, organizationId: String(organizationId), controlIncarnation: input.controlIncarnation,
     beginRequestId: input.requestId, sourceBranchId: input.sourceBranchId, targetBranchId: input.targetBranchId, intentJson,
@@ -338,21 +340,32 @@ function manifestOf(row: BranchCutoverJournalRow): Record<string, any> {
 
 /** What the Worker injects so lib code never imports a route: the product merge (routes/products.ts foldDuplicateProductInto). */
 export type ParentHooks = { foldInactiveProduct?: (user: SessionUser, dup: InactiveStockRow, keeper: { id: number; name: string | null }, approved: boolean) => Promise<void> }
+/**
+ * Resolves the inactive products that hold stock BEFORE anything is captured, so the capture, the manifest baseline, the P7 reads and the
+ * end state all describe the same stock (lib/branchCutoverInactiveStock.ts). Idempotent by state and by this run's audit rows, so a crash
+ * between a fold's commit and the next save resumes instead of refusing.
+ *
+ * A committed fold is a committed product merge with its own undo record (Products history, "Merge"): an abort before the first child ends the
+ * run's fence and stops, it does not undo folds. The run's record of them is the 'branch_cutover_approved_fold' / 'branch_cutover_inactive_fold'
+ * audit rows (run id, dup, keeper, the lots re-pointed); the runbook says so (P6).
+ */
+export async function prepareInactiveStock(db: D1Compat, current: { id: number; username?: string | null }, operationId: string, approvedFolds: ApprovedFold[], hooks: ParentHooks & { user?: SessionUser }): Promise<void> {
+  const plan = await readInactiveStockPlan(db, approvedFolds, operationId)
+  if (plan.refuse.length) refuse(plan.refuse.map(item => 'inactive_stock_without_twin:' + item.id + ':' + item.reason).join(';'))
+  if (inactiveStockPlanIsEmpty(plan)) return
+  if (plan.fold.length && !hooks.foldInactiveProduct) refuse('inactive_stock_fold_unavailable')
+  await applyInactiveStockPlan(db, plan, { operationId, actorId: current.id, actorName: current.username ?? null },
+    (dup, keeper, approved) => hooks.foldInactiveProduct!(current as SessionUser, dup, keeper, approved))
+}
 async function captureStep(db: D1Compat, current: SessionUser, row: BranchCutoverJournalRow, intent: ParentIntent, pageSize: number, rawDb: D1Compat, hooks: ParentHooks): Promise<Step> {
   const schema = await readCutoverCaptureSchema(db); requireSameContract('schema', intent.schemaDigest, schema.digest); requireSchema(schema)
   const state = await branches(db, intent); requireParent(JSON.stringify(state.source) === row.source_preimage_json && JSON.stringify(state.target) === row.target_preimage_json)
   const stage = row.phase === 'capturing' ? 'capture' : 'snapshot'
   const cursor = parseCaptureCursor(row[`${stage}_cursor_json`]); const priorDigest = row[`${stage}_digest`]
-  // The first capture page: inactive products holding stock are resolved BEFORE anything is read, so the capture, the manifest baseline and
-  // the end state describe the same stock. Idempotent by state (a retry after a crash re-reads the census and finds only what is left).
+  // The first capture page re-checks the preparation (inactive products holding stock). The operator already ran it inside the begin call, so
+  // P7 and every later read see the prepared stock; this is the safety net for a begin whose preparation was cut short (idempotent by state).
   if (stage === 'capture' && cursor.index === 0 && cursor.key === 0 && row.capture_records === 0) {
-    const plan = await readInactiveStockPlan(db, intent.approvedFolds ?? [])
-    if (plan.refuse.length) refuse(plan.refuse.map(item => 'inactive_stock_without_twin:' + item.id + ':' + item.reason).join(';'))
-    if (!inactiveStockPlanIsEmpty(plan)) {
-      if (plan.fold.length && !hooks.foldInactiveProduct) refuse('inactive_stock_fold_unavailable')
-      await applyInactiveStockPlan(rawDb, plan, { operationId: row.operation_id, actorId: current.id, actorName: current.username ?? null },
-        (dup, keeper, approved) => hooks.foldInactiveProduct!(current, dup, keeper, approved))
-    }
+    await prepareInactiveStock(rawDb, current, row.operation_id, intent.approvedFolds ?? [], hooks)
   }
   let families: FamilyState
   if (cursor.families) families = familiesFromText(cursor.families)

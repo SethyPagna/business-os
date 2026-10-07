@@ -144,5 +144,92 @@ async function check(name, run) { await run(); console.log('PASS ' + name); chec
     assert.deepEqual(inactive.parseApprovedFolds(undefined), [])
   })
 
+  // ---- F1: an approved pair is idempotent across a crash (REAL fold) -------------------------------------------------------------------------
+  await check('F1 crash after the fold commits but before the capture page is saved: the resume treats the approved pair as done instead of refusing', async () => {
+    const { f, one } = realPair()
+    const approved = inactive.parseApprovedFolds([{ dup: 7091, keeper: 1529 }])
+    const plan = await inactive.readInactiveStockPlan(f.route, approved, 'op-crash')
+    let folds = 0
+    // the process dies right after the merge committed: the capture save never happens
+    await assert.rejects(inactive.applyInactiveStockPlan(f.route, plan, { operationId: 'op-crash', actorId: 7, actorName: 'operator' },
+      async (dup, keeper, isApproved) => { await fold(f)(dup, keeper, isApproved); folds++; throw new Error('isolate died after the fold') }), /isolate died/)
+    assert.equal(folds, 1)
+    assert.equal(one('SELECT quantity q FROM branch_stock WHERE product_id=1529 AND branch_id=1').q, 2, 'the merge really committed')
+    // the old behaviour (no run id): refused with approved_dup_not_inactive_with_stock -- the defect
+    assert.deepEqual((await inactive.readInactiveStockPlan(f.route, approved)).refuse.map(r => r.reason), ['approved_dup_not_inactive_with_stock'])
+    // the resume: this run's audit row says it is done
+    const resumed = await inactive.readInactiveStockPlan(f.route, approved, 'op-crash')
+    assert.deepEqual([resumed.refuse, resumed.fold], [[], []])
+    assert.equal(one("SELECT count(*) n FROM audit_logs WHERE action='branch_cutover_approved_fold'").n, 1)
+    // another run's approval is NOT satisfied by this run's record
+    assert.deepEqual((await inactive.readInactiveStockPlan(f.route, approved, 'op-other')).refuse.map(r => r.reason), ['approved_dup_not_inactive_with_stock'])
+  })
+  await check('F1 crash after the audit row but before the merge: the resume folds once, the audit row is not duplicated', async () => {
+    const { f, one } = realPair()
+    const approved = inactive.parseApprovedFolds([{ dup: 7091, keeper: 1529 }])
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const plan = await inactive.readInactiveStockPlan(f.route, approved, 'op-early')
+      assert.equal(plan.fold.length, 1)
+      if (attempt === 0) await assert.rejects(inactive.applyInactiveStockPlan(f.route, plan, { operationId: 'op-early', actorId: 7, actorName: 'operator' }, async () => { throw new Error('died before the merge') }), /died before/)
+      else await inactive.applyInactiveStockPlan(f.route, plan, { operationId: 'op-early', actorId: 7, actorName: 'operator' }, fold(f))
+    }
+    assert.equal(one("SELECT count(*) n FROM audit_logs WHERE action='branch_cutover_approved_fold'").n, 1)
+    assert.equal(one('SELECT quantity q FROM branch_stock WHERE product_id=1529 AND branch_id=1').q, 2)
+  })
+  await check('F1 the exact-twin control resumes too (its dup simply has no stock any more)', async () => {
+    const { f } = world()
+    const plan = await inactive.readInactiveStockPlan(f.route, [], 'op-exact')
+    await inactive.applyInactiveStockPlan(f.route, plan, { operationId: 'op-exact', actorId: 7, actorName: 'operator' }, fold(f))
+    const resumed = await inactive.readInactiveStockPlan(f.route, [], 'op-exact')
+    assert.deepEqual([resumed.refuse.length, resumed.fold.length], [0, 0])
+  })
+
+  // ---- F2: the post-check excuses exactly the lots this run's folds re-pointed (REAL fold) -------------------------------------------------------
+  const postChecks = fs.readFileSync(path.join(__dirname, '..', '..', 'ops', 'queries', 'branch-cutover-post-checks.sql'), 'utf8')
+  const batchesChangedOff = (f) => {
+    const row = f.raw.prepare(postChecks).get([])
+    return row ? row.batches_changed_off : null
+  }
+  await check('F2 batches_changed_off: the lot a real exact fold and a real approved fold re-pointed is excused; an unrelated changed lot and a fold without its run record are not', async () => {
+    for (const mode of ['approved', 'exact']) {
+      const { f } = mode === 'approved' ? realPair() : world()
+      f.raw.exec("UPDATE product_batches SET updated_at='2020-01-01 00:00:00'")
+      f.raw.exec("INSERT INTO branches(id,name,is_active) SELECT 1,'W',1 WHERE NOT EXISTS(SELECT 1 FROM branches WHERE id=1)")
+      f.raw.exec("INSERT INTO users(id,username,password,name,organization_id,permissions,is_active) SELECT 7,'operator','x','Op',1,'{}',1 WHERE NOT EXISTS(SELECT 1 FROM users WHERE id=7)")
+      f.raw.prepare(`INSERT INTO branch_cutovers(operation_id,begin_request_id,actor_id,organization_id,control_incarnation,maintenance_token,source_branch_id,target_branch_id,intent_json,intent_digest,
+        source_preimage_json,target_preimage_json,maintenance_flag_json,capture_digest,snapshot_digest,verification_digest,created_at,updated_at)
+        VALUES('00000000-0000-4000-8000-0000000000aa','req-post-1',7,'1','00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002',2,1,'{}',?,'{"id":2,"name":"Shop"}','{"id":1,"name":"LC"}','{}',?,?,?,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')`)
+        .run(['a'.repeat(64), 'b'.repeat(64), 'b'.repeat(64), 'b'.repeat(64)])
+      const approved = mode === 'approved' ? inactive.parseApprovedFolds([{ dup: 7091, keeper: 1529 }]) : []
+      const plan = await inactive.readInactiveStockPlan(f.route, approved, '00000000-0000-4000-8000-0000000000aa')
+      await inactive.applyInactiveStockPlan(f.route, plan, { operationId: '00000000-0000-4000-8000-0000000000aa', actorId: 7, actorName: 'operator' }, fold(f))
+      const moved = mode === 'approved' ? 58916 : 900
+      assert.ok(f.raw.prepare('SELECT updated_at u FROM product_batches WHERE id=?').get([moved]).u > '2026-01-01', mode + ': the real fold touched the lot')
+      assert.equal(batchesChangedOff(f), 0, mode + ': excused through the run record')
+      const audits = f.raw.prepare("SELECT id,details FROM audit_logs WHERE action IN ('branch_cutover_inactive_fold','branch_cutover_approved_fold')").all([])
+      assert.equal(audits.length, 1); assert.deepEqual(JSON.parse(audits[0].details).batchIds, [moved])
+      // control: the same fold with no run record is what the check must still catch
+      f.raw.prepare('DELETE FROM audit_logs WHERE id=?').run([audits[0].id])
+      assert.equal(batchesChangedOff(f), 1, mode + ': without the record the re-pointed lot reads 1')
+      f.raw.prepare("INSERT INTO audit_logs(action,entity,entity_id,details) VALUES('branch_cutover_inactive_fold','product',1,?)").run([JSON.stringify({ operationId: 'op-someone-else', batchIds: [moved] })])
+      assert.equal(batchesChangedOff(f), 1, mode + ': a record of another run excuses nothing')
+      f.raw.prepare("INSERT INTO audit_logs(action,entity,entity_id,details) VALUES('branch_cutover_inactive_fold','product',1,?)").run([JSON.stringify({ operationId: '00000000-0000-4000-8000-0000000000aa', batchIds: [moved] })])
+      assert.equal(batchesChangedOff(f), 0)
+      // tamper: an unrelated lot changed since begin is still caught
+      const other = f.raw.prepare('SELECT id FROM product_batches WHERE id<>? ORDER BY id LIMIT 1').get([moved]).id
+      f.raw.prepare("UPDATE product_batches SET updated_at=datetime('now') WHERE id=?").run([other])
+      assert.equal(batchesChangedOff(f), 1, mode + ': an unrelated changed lot still reads 1')
+    }
+  })
+
+  // ---- F5: groups --------------------------------------------------------------------------------------------------------------------------
+  await check('F5 an inactive group product holding stock is listed and refused (the guard counts it, so the census must too)', async () => {
+    const { f } = world()
+    f.raw.exec("INSERT INTO products(id,name,sku,stock_quantity,cost_price_usd,is_active,is_group) VALUES(50,'A group','GRP',5,1,0,1)")
+    const plan = await inactive.readInactiveStockPlan(f.route)
+    assert.deepEqual(plan.refuse.filter(r => r.id === 50).map(r => r.reason), ['inactive_group_product_holds_stock'])
+    assert.equal(f.raw.prepare(`SELECT ${inactive.INACTIVE_STOCKED_ANYWHERE_SQL} AS g`).get().g, 1, 'the guard sees the same product')
+  })
+
   console.log(`${checks} branch cutover inactive-stock native checks passed`)
 })().catch(error => { console.error(error); process.exitCode = 1 })
