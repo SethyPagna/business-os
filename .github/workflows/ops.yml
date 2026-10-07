@@ -127,13 +127,15 @@ on:
         default: false
         type: boolean
       cutover_mode:
-        description: branch-cutover only - inspect, bookmark, start, resume-until-ready, status, abort or finalize. Run them in that order on the night.
+        description: branch-cutover only - inspect, bookmark, repair-sk2-check, repair-sk2 (actor 5), start, resume-until-ready, status, abort or finalize. Run them in that order on the night.
         required: true
         default: inspect
         type: choice
         options:
           - inspect
           - bookmark
+          - repair-sk2-check
+          - repair-sk2
           - start
           - resume-until-ready
           - status

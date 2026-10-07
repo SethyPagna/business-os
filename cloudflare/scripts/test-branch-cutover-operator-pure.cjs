@@ -159,6 +159,7 @@ async function main() {
       const respond = (action) => {
         if (action === 'inspect') return { ok: true, inspect: { activationReady: true, capabilities: [], sourcePreimageJson: hostile, targetPreimageJson: hostile, schemaDigest: 'a'.repeat(64) } }
         if (action === 'begin') return state({ phase: 'capturing', revision: 0, next: 'continue' })
+        if (action === 'repair-sk2') return { ok: true, state: 'done', applied: false, replayed: true, before: hostile }
         if (action === 'status') return state()
         if (action === 'resume') return state({ revision: 10, phase: 'ready' })
         if (action === 'abort') return state({ phase: 'aborted', next: 'aborted', revision: 10 })
@@ -182,7 +183,7 @@ async function main() {
     assert.ok(text.length > 0)
     for (const secret of [TOKEN, hostile, 'Alice', 'Shop Street', 'a'.repeat(64), '00000085']) assert.equal(text.includes(secret), false, 'printed ' + secret)
     for (const line of text.trim().split('\n')) {
-      assert.match(line, /^(inspect: (PASS|FAIL)|blocking capability: [a-z-]+|time travel bookmark: PASS \(in the encrypted file\)|operation [0-9a-f-]{36}: phase [a-z]+, revision \d+(, replayed (yes|no)|, next [a-z]+|, steps this run \d+)?|step \d+: phase [a-z]+, revision \d+)$/, line)
+      assert.match(line, /^(inspect: (PASS|FAIL)|blocking capability: [a-z-]+|time travel bookmark: PASS \(in the encrypted file\)|operation [0-9a-f-]{36}: phase [a-z]+, revision \d+(, replayed (yes|no)|, next [a-z]+|, steps this run \d+)?|step \d+: phase [a-z]+, revision \d+|repair-sk2: state (pre|ab|done|stale|other), applied (yes|no))$/, line)
     }
     assert.equal(common.formatPublic('x {a}', { a: 'PASS' }), 'x PASS')
   })
