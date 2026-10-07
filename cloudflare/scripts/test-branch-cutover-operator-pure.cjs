@@ -136,7 +136,7 @@ async function main() {
     assert.equal(calls[0][0], 'https://admin.leangbeauty.com/api/internal/branch-cutover/status'); assert.equal(calls[0][1].headers['x-cutover-operator-token'], TOKEN)
     assert.equal(calls[0][1].redirect, 'error'); assert.equal(calls[0][1].body, '{"a":1}'); assert.equal(JSON.stringify(calls[0][1]).includes(TOKEN), true, 'the header carries it')
     const html = script.makeSend({ origin: 'https://admin.leangbeauty.com', token: TOKEN, fetchImpl: async () => ({ status: 403, text: async () => '<html>blocked</html>' }) })
-    assert.deepEqual(await html('status', '{}'), { status: 403, json: null })
+    assert.deepEqual(await html('status', '{}'), { status: 403, json: { _diag: { httpStatus: 403, cfMitigated: null, nonJson: '<html>blocked</html>' } } })
     assert.equal(script.beginRequestId('123456'), 'cutover_begin_123456'); assert.equal(script.beginRequestId('x y'), 'cutover_begin_local')
     assert.match(script.beginRequestId('99'), /^[A-Za-z0-9_-]{8,120}$/)
   })

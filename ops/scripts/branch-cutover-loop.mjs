@@ -34,7 +34,7 @@ const backoffMs = (attempt) => Math.min(15000, 500 * 2 ** Math.min(attempt - 1, 
 export class CutoverRefusal extends OpsError {
   constructor(json) {
     const code = json && typeof json.refusal === 'string' && REFUSAL.test(json.refusal) ? json.refusal : 'refused'
-    super(`refused-${code.replaceAll('_', '-')}`.slice(0, 64), `The endpoint refused: ${code}`, { detail: json && json.detail })
+    super(`refused-${code.replaceAll('_', '-')}`.slice(0, 64), `The endpoint refused: ${code}`, { detail: json && json.detail, httpCode: json && typeof json.code === 'string' ? json.code.slice(0, 64) : null, http: json && json._diag ? json._diag : null })
   }
 }
 

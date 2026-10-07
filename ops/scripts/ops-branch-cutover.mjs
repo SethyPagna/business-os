@@ -62,9 +62,13 @@ export function makeSend({ origin, token, fetchImpl = fetch, timeoutMs = REQUEST
         method: 'POST', redirect: 'error', signal: controller.signal, body: text,
         headers: { 'content-type': 'application/json', 'x-cutover-operator-token': token, 'user-agent': 'business-os-ops' },
       })
+      const raw = await response.text()
       let json = null
-      try { json = JSON.parse(await response.text()) } catch { /* a proxy page: the status decides */ }
-      return { status: response.status, json }
+      try { json = JSON.parse(raw) } catch { /* a proxy page: the status decides */ }
+      // Refusal diagnostics (encrypted report only): HTTP status, Cloudflare's mitigation header, the start of a non-JSON page.
+      if (response.status === 200 && json && typeof json === 'object') return { status: response.status, json }
+      const diag = { httpStatus: response.status, cfMitigated: (response.headers && response.headers.get('cf-mitigated')) || null, nonJson: json === null ? raw.slice(0, 160) : null }
+      return { status: response.status, json: json && typeof json === 'object' ? { ...json, _diag: diag } : { _diag: diag } }
     } finally { clearTimeout(timer) }
   }
 }
