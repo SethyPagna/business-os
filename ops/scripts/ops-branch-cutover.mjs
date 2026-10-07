@@ -8,6 +8,7 @@
 //                     repair-sk2-check / repair-sk2 (SK2-REPAIR, owner 7 Oct 2026): the one-off product 5357 repair
 //                     (cloudflare/src/lib/sk2CleanserRepair.ts), read-only check then apply, just before start. Acts as
 //                     OPS_ACTOR_USER_ID, which must be 5. Idempotent: a re-run answers done and writes nothing.
+//                     The public log prints only the state and whether it applied; the repair's figures (before/after rows) go only to the encrypted report.
 //   OPS_OPERATION_ID  the operation to continue (blank: the one unfinished operation, found by `status`)
 //   OPS_APPROVED_FOLDS    owner-approved folds of inactive stocked products (dup:keeper,...), used by inspect and start
 //   OPS_ACTOR_USER_ID the administrator the run acts as (inspect, start); every later step uses the journal's actor
