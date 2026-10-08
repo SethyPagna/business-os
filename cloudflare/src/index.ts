@@ -488,14 +488,15 @@ app.use('/api/*', async (c, next) => {
 })
 
 // T10 fallback drain (lib/telegram.ts, "HOW IT IS SCHEDULED"): a shift
-// overview whose queue send was unavailable is sent by the next API request
-// after it falls due. After the response, off its path, and at most once per
-// 20 s per isolate, so it costs one indexed read at that rate and nothing on
-// the request itself. The 6-hourly cron is the backstop for a quiet shop.
+// overview whose queue send was unavailable is sent by the next API read
+// after it falls due. Background work shares the invocation's D1 allowance,
+// so writes keep their budget for committing stock and recording receipts.
+// The 6-hourly cron is the backstop for a quiet shop.
 const SHIFT_OVERVIEW_DRAIN_INTERVAL_MS = 20_000
 let lastShiftOverviewDrainMs = 0
 app.use('/api/*', async (c, next) => {
   await next()
+  if (c.req.method !== 'GET') return
   const now = Date.now()
   if (now - lastShiftOverviewDrainMs < SHIFT_OVERVIEW_DRAIN_INTERVAL_MS) return
   lastShiftOverviewDrainMs = now
