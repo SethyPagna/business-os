@@ -29,7 +29,7 @@ const rawDb = openDb(loadAll())
 const db = {
   prepare(sql) {
     const stmt = rawDb.prepare(sql)
-    return {
+    const statementApi = {
       get: (params) => stmt.get(params),
       all: (params) => stmt.all(params) ?? [],
       run: (params) => {
@@ -37,18 +37,17 @@ const db = {
         return { changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) }
       },
     }
+    statementApi.getOnce = statementApi.get
+    statementApi.allOnce = statementApi.all
+    return statementApi
   },
   async batch(items) {
-    const results = []
-    for (const item of items) {
-      const stmt = rawDb.prepare(item.sql)
-      const r = stmt.run(item.params || {})
-      results.push({ changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) })
-    }
-    return results
+    const results = await rawDb.batch(items)
+    return results.map(r => ({ changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) }))
   },
   async transaction(fn) { return fn(this) },
 }
+db.batchOnce = items => db.batch(items)
 const fakeEnv = { DB: db }
 
 function loadReal(relPath, requireOverrides = {}) {
@@ -113,6 +112,7 @@ const returnCreateActionKernel = loadReal('lib/returnCreateAction.ts', {
   './customerReturnEntitlement': customerReturnEntitlement,
 })
 const returnsRoute = loadReal('routes/returns.ts', {
+  '../lib/planTier': loadReal('lib/planTier.ts'),
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/returnCostAccess': loadReal('lib/returnCostAccess.ts'),
   '../lib/branchRoles': branchRolesKernel,

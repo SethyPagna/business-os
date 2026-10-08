@@ -48,9 +48,9 @@ let beforeLineageCoherenceHook = null
 const db = {
   prepare(sql) {
     const stmt = rawDb.prepare(sql)
-    return {
+    const statementApi = {
       get: (params) => {
-        if (failNextReturnCreateReceiptRead && /FROM return_create_receipts/i.test(sql)) {
+        if (failNextReturnCreateReceiptRead && /(?:FROM|JOIN) return_create_receipts/i.test(sql)) {
           failNextReturnCreateReceiptRead = false
           throw new Error('simulated postcommit receipt read failure')
         }
@@ -67,6 +67,9 @@ const db = {
         return { changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) }
       },
     }
+    statementApi.getOnce = statementApi.get
+    statementApi.allOnce = statementApi.all
+    return statementApi
   },
   async batch(items) {
     if (beforeOrdinaryWrite && items.some((item) => item.sql.includes('ordinary_business_maintenance_guard'))) {
@@ -110,6 +113,7 @@ const db = {
   },
   async transaction(fn) { return fn(this) },
 }
+db.batchOnce = items => db.batch(items)
 const fakeEnv = { DB: db }
 
 function transpile(relPath) {
@@ -200,6 +204,7 @@ const saleBulkStatusKernel = {
   }),
 }
 const returnsRoute = loadReal('routes/returns.ts', {
+  '../lib/planTier': loadReal('lib/planTier.ts'),
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/returnCostAccess': loadReal('lib/returnCostAccess.ts'),
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRolesKernel }),
