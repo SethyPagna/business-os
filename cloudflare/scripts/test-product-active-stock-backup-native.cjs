@@ -25,6 +25,7 @@ function fixture() {
     INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(11,991,5);
     INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}');`)
   let deletes = 0
+  let writes = 0
   const DB = {
     prepare(sql) {
       const st = raw.prepare(sql); let params = []
@@ -32,7 +33,7 @@ function fixture() {
         bind(...values) { params = values; return api },
         async first() { return st.get(...params) || null },
         async all() { return { results: st.all(...params) } },
-        async run() { if (/^DELETE/.test(sql)) deletes++; const r = st.run(...params); return { success: true, meta: { changes: Number(r.changes) } } },
+        async run() { writes++; if (/^DELETE/.test(sql)) deletes++; const r = st.run(...params); return { success: true, meta: { changes: Number(r.changes) } } },
       }; return api
     },
     async batch(items) {
@@ -47,13 +48,13 @@ function fixture() {
     r2: { assets: [], copiedKeys: [] }, summary: {} })
   const snapshot = () => JSON.stringify(tables.map(name => [name, raw.prepare(`SELECT * FROM "${name}" ORDER BY rowid`).all()]))
   const env = doc => {
-    const text = JSON.stringify(doc); const etag = createHash('sha256').update(text).digest('hex')
+    const text = typeof doc === 'string' ? doc : JSON.stringify(doc); const etag = createHash('sha256').update(text).digest('hex')
     return { DB, ASSETS: { async get(key) {
       if (!key.endsWith('/fixture.json')) return null
       return { key, etag, version: 'fixture', size: Buffer.byteLength(text), body: new Blob([text]).stream() }
     } } }
   }
-  return { raw, document, snapshot, env, deletes: () => deletes }
+  return { raw, document, snapshot, env, deletes: () => deletes, writes: () => writes }
 }
 async function main() {
   {
@@ -75,8 +76,48 @@ async function main() {
     if (ledger === 'damaged') doc.tables.damaged_stock_lots.rows.push({ id: 90, product_id: 11, quantity_remaining: 5 })
     const before = f.snapshot()
     await assert.rejects(() => backup.restoreCloudflareBackup(f.env(doc), 'fixture.json'), /product_has_stock/)
-    assert.equal(f.snapshot(), before); assert.equal(f.deletes(), 0)
+    assert.equal(f.snapshot(), before); assert.equal(f.deletes(), 0); assert.equal(f.writes(), 0)
     console.log(`PASS invalid ${ledger}-only inactive backup refuses before every write`)
+  }
+  for (const ledger of ['branch', 'lot']) {
+    const f = fixture(); const doc = f.document()
+    doc.tables.products.rows[0].is_active = 0; doc.tables.products.rows[0].stock_quantity = 0
+    doc.tables.branch_stock.rows[0].quantity = ledger === 'branch' ? 5 : 0
+    if (ledger === 'lot') {
+      doc.tables.product_batches.rows.push({ id: 90, variant_product_id: 11, batch_key: 'probe', is_active: 1, received_at: '2026-10-01' })
+      doc.tables.branch_batch_stock.rows.push({ id: 90, batch_id: 90, branch_id: 991, quantity: 5 })
+    }
+    const child = ledger === 'branch' ? 'branch_stock' : 'branch_batch_stock'
+    doc.tables = { [child]: doc.tables[child], ...Object.fromEntries(Object.entries(doc.tables).filter(([name]) => name !== child)) }
+    const before = f.snapshot()
+    await assert.rejects(() => backup.restoreCloudflareBackup(f.env(doc), 'fixture.json'), /dependency order/)
+    assert.equal(f.snapshot(), before); assert.equal(f.deletes(), 0); assert.equal(f.writes(), 0)
+    console.log(`PASS ${child} before inactive product/batch refuses before writes through source-order validation`)
+  }
+  for (const duplicate of ['products', 'product_batches']) {
+    const f = fixture(); const doc = f.document()
+    doc.tables.products.rows[0].is_active = 0; doc.tables.products.rows[0].stock_quantity = 0
+    if (duplicate === 'product_batches') {
+      doc.tables.branch_stock.rows[0].quantity = 0
+      doc.tables.product_batches.rows.push({ id: 90, variant_product_id: 11, batch_key: 'probe', is_active: 1, received_at: '2026-10-01' })
+      doc.tables.branch_batch_stock.rows.push({ id: 90, batch_id: 90, branch_id: 991, quantity: 5 })
+    }
+    const laterRows = JSON.stringify(doc.tables[duplicate])
+    doc.tables[duplicate].rows = []
+    const text = JSON.stringify(doc).replace('},"r2":', `,"${duplicate}":${laterRows}},"r2":`)
+    const before = f.snapshot()
+    await assert.rejects(() => backup.restoreCloudflareBackup(f.env(text), 'fixture.json'), /dependency order/)
+    assert.ok(f.snapshot() === before, 'reordered duplicate stock header must preserve complete live snapshot'); assert.equal(f.deletes(), 0); assert.equal(f.writes(), 0)
+    console.log(`PASS duplicate late ${duplicate} block cannot bypass prewrite admission`)
+  }
+  {
+    const f = fixture(); const doc = f.document()
+    const emptyProducts = JSON.stringify({ ...doc.tables.products, rows: [] })
+    const text = JSON.stringify(doc).replace('"products":', `"products":${emptyProducts},"products":`)
+    await backup.restoreCloudflareBackup(f.env(text), 'fixture.json')
+    assert.equal(f.raw.prepare('SELECT stock_quantity FROM products WHERE id=11').get().stock_quantity, 5)
+    assert.equal(f.raw.prepare('SELECT quantity FROM branch_stock WHERE product_id=11').get().quantity, 5)
+    console.log('PASS valid adjacent duplicate stock blocks preserve supported streaming restore')
   }
   {
     const f = fixture(); const doc = f.document(); const before = f.snapshot()

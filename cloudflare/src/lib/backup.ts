@@ -1448,9 +1448,18 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   const documentTables = new Set<string>()
   let pass1Summary: BackupPayload['summary'] | null = null
   const admitStockRow = restoreStockAdmission()
+  const stockTableOrder = ['products', 'product_batches', 'branch_stock', 'branch_batch_stock', 'damaged_stock_lots']
+  let lastStockTableIndex = -1
   const validatedSource = await openPinnedBackupSource(env, key)
   try {
     for await (const ev of streamBackupEvents(validatedSource.body)) {
+      if (ev.type === 'table') {
+        const index = stockTableOrder.indexOf(ev.table)
+        if (index >= 0) {
+          if (index < lastStockTableIndex) throw new Error('Cannot restore this backup: stock tables are not in dependency order. No database rows have been changed.')
+          lastStockTableIndex = index
+        }
+      }
       if (ev.type === 'row') admitStockRow(ev.table, ev.row)
       // Custom metadata is backed up, but cannot authorize dropping an
       // arbitrary system table during a later factory reset. Check ALL rows
