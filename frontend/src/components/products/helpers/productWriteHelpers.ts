@@ -178,7 +178,6 @@ export function buildProductWritePayload(snapshot: ProductRecord = {}, user: Use
     custom_fields: snapshot.custom_fields || {},
     image_gallery: gallery,
     image_path: gallery[0] || null,
-    is_active: snapshot.is_active ? 1 : 0,
     is_group: snapshot.parent_id ? 0 : (snapshot.is_group ? 1 : 0),
     parent_id: snapshot.parent_id ? Number(snapshot.parent_id) : null,
     userId: user.id,

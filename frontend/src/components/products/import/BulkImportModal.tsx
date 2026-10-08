@@ -1202,7 +1202,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
   // importEngine.ts's productImportMode==='replace_columns' block --
   // added Part 320/321). 'replace_all': this file becomes the complete
   // current catalog -- matched rows still update in place, but every
-  // active product this import doesn't touch gets soft-deactivated at the
+  // omitted product holding no stock is removed at the
   // end (importEngine.ts's replace_all block; not a hard delete, so old
   // sales/movement history stays intact, same as the existing single-
   // product delete). See the mode picker in the products upload card
@@ -1911,11 +1911,11 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     // The picker's inline warning covers the "why", this covers "are you
     // sure, right now, with this specific file" -- same pattern as the
     // existing cancel/delete-job confirms above, just red instead of the
-    // neutral copy those use since this one can deactivate products.
+    // neutral copy those use since this one can remove products.
     if (mode === 'products' && importMode === 'replace_all') {
       const confirmed = await askToConfirm({
         title: T('csv_mode_replace_title', 'Replace entire catalog'),
-        message: T('confirm_replace_all_import', 'Replace mode: every active product not in this file will be deactivated once this import finishes. Continue?'),
+        message: T('confirm_replace_all_import', 'Products omitted from this file will be removed only if they hold no stock. If any omitted product holds stock, the removal step is refused; imported rows already saved remain. Continue?'),
         items: importFileReviewItems(totalCount),
         confirmLabel: T('continue', 'Continue'),
         cancelLabel: T('cancel', 'Cancel'),
@@ -2783,11 +2783,10 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
               product (and every unmatched row's create-or-not behavior)
               untouched. 'replace_all' treats this file as the complete,
               current catalog: matched rows still update in place, but
-              every active product the file doesn't mention gets
-              soft-deactivated once the whole run finishes
+              omitted products holding no stock are removed once the run finishes
               (cloudflare/src/lib/importEngine.ts's replace_all block --
               not a hard delete, so sales/stock history referencing those
-              products stays intact and they can be reactivated later).
+              products stays intact).
               Kept as explicit tap targets rather than a dropdown so a
               destructive option can't be picked by accident while
               scrolling past it, and each mode's own warning/column
@@ -2844,7 +2843,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
                   dangerous
                   icon={RefreshCw}
                   title={T('csv_mode_replace_title', 'Replace entire catalog')}
-                  description={T('csv_mode_replace_hint', 'This file becomes the complete catalog. Matched products update in place and every active product absent from the file is deactivated.')}
+                  description={T('csv_mode_replace_hint', 'This file becomes the complete catalog. Matched products update in place; omitted products with no stock are removed. Stock blocks the removal step.')}
                   onClick={() => setImportMode('replace_all')}
                 />
               ) : null}
@@ -2910,7 +2909,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
               <p className="mt-3 flex items-start gap-2 rounded-lg border border-red-200 bg-red-100/60 p-2 text-xs text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 <span>
-                  {T('csv_mode_replace_warning', 'Every currently active product not present in this file will be deactivated (hidden from POS/catalog, not deleted -- its sales and stock history are kept and it can be reactivated later). Products this file does match are updated in place, same as merge mode. Double-check this is the complete, current catalog before importing.')}
+                  {T('csv_mode_replace_warning', 'Omitted products are removed only when every omitted product has zero stock. If any holds stock, the removal step is refused; imported rows already saved remain. Matched products update in place. Sales and stock history are kept. Check that this is the complete catalog before importing.')}
                 </span>
               </p>
             ) : null}
@@ -2942,7 +2941,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
             {showColumnsInfo ? (
               <div className="mt-3 space-y-3 rounded-lg border border-blue-200 bg-white/70 p-3 text-xs leading-relaxed text-slate-700 dark:border-blue-900/40 dark:bg-slate-900/40 dark:text-slate-200">
                 <p className="font-mono leading-relaxed">
-                  {T('csv_template_columns', 'name*, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr, stock_quantity, low_stock_threshold, batch(dd/mm/yyyy), expiry_date, expiry_alert_days, branch, supplier, parent_id, is_group, image_filename_1..5, image_filenames, is_active')}
+                  {T('csv_template_columns', 'name*, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr, stock_quantity, low_stock_threshold, batch(dd/mm/yyyy), expiry_date, expiry_alert_days, branch, supplier, parent_id, is_group, image_filename_1..5, image_filenames')}
                 </p>
                 <p><strong>{T('csv_info_required_label', 'Required')}:</strong> {T('csv_info_required', 'only name (marked with *) has to be filled in -- every other column can be left blank.')}</p>
                 <p><strong>{T('csv_info_pricing_label', 'Pricing')}:</strong> {T('csv_info_pricing', 'selling/wholesale/cost prices each have a USD and a KHR column -- fill in whichever currency you use, the other can stay blank.')}</p>

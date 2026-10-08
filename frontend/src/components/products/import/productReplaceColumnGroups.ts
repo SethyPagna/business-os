@@ -32,7 +32,6 @@ export const REPLACE_COLUMN_GROUPS: ReplaceColumnGroup[] = [
   { key: 'thresholds', label: 'Stock thresholds', hint: 'Low stock / out of stock alert levels', columns: ['low_stock_threshold', 'out_of_stock_threshold'] },
   { key: 'discount', label: 'Discount', hint: 'Promotion settings and badge', columns: ['discount_enabled', 'discount_type', 'discount_percent', 'discount_amount_usd', 'discount_amount_khr', 'discount_label', 'discount_badge_color', 'discount_starts_at', 'discount_ends_at'] },
   { key: 'expiry', label: 'Expiry', hint: '', columns: ['expiry_date', 'expiry_alert_days'] },
-  { key: 'status', label: 'Active status', hint: '', columns: ['is_active'] },
   { key: 'image', label: 'Image', hint: 'Main product image only', columns: ['image_path'] },
 ]
 
@@ -50,7 +49,7 @@ export const BACKEND_PRODUCT_REPLACE_COLUMNS = [
   'low_stock_threshold', 'out_of_stock_threshold',
   'discount_enabled', 'discount_type', 'discount_percent', 'discount_amount_usd', 'discount_amount_khr',
   'discount_label', 'discount_badge_color', 'discount_starts_at', 'discount_ends_at',
-  'expiry_date', 'expiry_alert_days', 'is_active', 'image_path',
+  'expiry_date', 'expiry_alert_days', 'image_path',
 ]
 
 export function flattenReplaceColumnGroups(selectedKeys: Set<string> | string[]): string[] {

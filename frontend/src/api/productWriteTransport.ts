@@ -272,6 +272,7 @@ export async function createProduct(payload: ProductPayload = {}, assertCurrent?
   const check = () => { assertActorReadScope(scope, false); assertCurrent?.() }
   check()
   const body = ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'product')
+  delete body.is_active
   const result = await route(
     'products:create',
     () => { check(); return apiFetch('POST', '/api/products', body) },
@@ -287,6 +288,7 @@ export async function updateProduct(id: string | number, payload: ProductPayload
   const check = () => { assertActorReadScope(scope, false); assertCurrent?.() }
   check()
   const body = { ...getDevicePayload(), ...(payload || {}) }
+  delete body.is_active
   const result = await route(
     'products:update',
     () => { check(); return apiFetch('PUT', `/api/products/${encodeId(id)}`, body) },
@@ -344,9 +346,11 @@ export async function cancelBulkDeleteJob(jobId: string): Promise<void> {
 }
 
 export function createProductVariant(payload: ProductPayload = {}): Promise<unknown> {
+  const body = { ...payload }
+  delete body.is_active
   return route(
     'products:create',
-    () => apiFetch('POST', '/api/products/variant', payload),
+    () => apiFetch('POST', '/api/products/variant', body),
     null,
     true,
   )

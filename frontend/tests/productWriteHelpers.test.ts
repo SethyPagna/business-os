@@ -50,7 +50,7 @@ assert.deepEqual(basePayload.image_gallery, ['/uploads/a.png', '/uploads/b.png']
 assert.equal(basePayload.image_path, '/uploads/a.png')
 assert.equal(basePayload.low_stock_threshold, 5)
 assert.equal(basePayload.out_of_stock_threshold, 0)
-assert.equal(basePayload.is_active, 1)
+assert.equal(Object.hasOwn(basePayload, 'is_active'), false)
 assert.equal(basePayload.is_group, 1)
 assert.equal(basePayload.parent_id, null)
 assert.equal(basePayload.userId, 7)

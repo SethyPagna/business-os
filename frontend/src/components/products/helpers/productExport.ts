@@ -26,7 +26,6 @@ interface ProductRecord {
   discount_type?: unknown
   image_gallery?: unknown[]
   image_path?: unknown
-  is_active?: unknown
   is_group?: unknown
   low_stock_threshold?: unknown
   name?: unknown
@@ -54,11 +53,11 @@ export type ExportFieldGroup = 'basic' | 'pricing' | 'discount' | 'stock' | 'sup
 // Column membership per group, used to build an optional field picker
 // (ExportFieldsModal.tsx) so users aren't forced to export every column
 // every time. Name/SKU/Barcode/Category/Brand/Unit/Description/Created_At/
-// Active/Is_Group/Parent_ID live in 'basic' and stay in the export even if
+// Is_Group/Parent_ID live in 'basic' and stay in the export even if
 // a caller narrows the group set to something that would otherwise leave no
 // usable identifying columns -- see ALWAYS_INCLUDED_COLUMNS below.
 export const EXPORT_FIELD_GROUPS: Array<{ key: ExportFieldGroup; columns: string[] }> = [
-  { key: 'basic', columns: ['Name', 'SKU', 'Barcode', 'Category', 'Brand', 'Unit', 'Description', 'Created_At', 'Active', 'Is_Group', 'Parent_ID'] },
+  { key: 'basic', columns: ['Name', 'SKU', 'Barcode', 'Category', 'Brand', 'Unit', 'Description', 'Created_At', 'Is_Group', 'Parent_ID'] },
   // 'pricing' used to list Special_Price_USD/KHR, which the row builder below
   // NEVER emitted -- it emitted VIP_Price_USD/KHR. Because the group filter
   // intersects the emitted keys against allowedColumns, that mismatch silently
@@ -187,7 +186,6 @@ export function buildProductExportRows(products: ProductRecord[] = [], options: 
       }))),
       Parent_ID: String(product.parent_id || ''),
       Is_Group: product.is_group ? 'Yes' : 'No',
-      Active: product.is_active ? 'Yes' : 'No',
     }
     if (options.canViewCosts === false || product.cost_price_usd == null) delete row.Cost_Price_USD
     if (options.canViewCosts === false || product.cost_price_khr == null) delete row.Cost_Price_KHR

@@ -63,10 +63,8 @@ await runTest('flattenReplaceColumnGroups expands selected group keys to their c
 })
 
 await runTest('flattenReplaceColumnGroups accepts a plain array of keys too', () => {
-  // Output order follows REPLACE_COLUMN_GROUPS' own array order (expiry
-  // comes before status there), not the order keys were passed in.
   const result = flattenReplaceColumnGroups(['status', 'expiry'])
-  assert.deepStrictEqual(result, ['expiry_date', 'expiry_alert_days', 'is_active'])
+  assert.deepStrictEqual(result, ['expiry_date', 'expiry_alert_days'])
 })
 
 await runTest('flattenReplaceColumnGroups returns empty for no selected keys', () => {

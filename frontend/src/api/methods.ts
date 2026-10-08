@@ -1311,7 +1311,6 @@ export function downloadImportTemplate(type) {
     'parent_id','is_group',
     'image_filename_1','image_filename_2','image_filename_3','image_filename_4','image_filename_5',
     'image_filenames',
-    'is_active'
   ], 'products-template.csv', {
     name: 'Iced Coffee', sku: 'BEV-001', barcode: '', category: 'Beverages', brand: '', unit: 'cup',
     description: '', selling_price_usd: '2.50', selling_price_khr: '',
@@ -1346,7 +1345,6 @@ export function downloadImportTemplate(type) {
     image_filename_1: 'Iced Coffee_1.jpg', image_filename_2: '', image_filename_3: '',
     image_filename_4: '', image_filename_5: '',
     image_filenames: '',
-    is_active: '1',
   })
 }
 
