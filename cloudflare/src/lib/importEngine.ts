@@ -4013,8 +4013,17 @@ function summarizeImageMatch(match: Awaited<ReturnType<typeof computeImportImage
 // Chunk-state plumbing shared by runImportAnalyze/runImportApply -- see
 // migration 0011_import_job_chunking.sql's header for the overall design.
 
+type ProductFinalizeState = {
+  phase: 'replace' | 'reconcile' | 'unify' | 'notify' | 'settle'
+  product: number
+  branch: number
+  deactivated: number
+  reconciled: number
+  unified: number
+  pendingHash?: string
+}
 type ImportChunkState = {
-  genericApply?: { window: number }
+  genericApply?: { window: number; finalize?: ProductFinalizeState }
   // Populated once, on a phase run's first chunk, for job.type==='products'
   // only -- computeImportImageMatch is a full-file, cross-row computation
   // (see importImageMatch.ts's matchImagesToProducts, worst-case
@@ -4977,9 +4986,9 @@ export async function markJobFailed(db: D1Compat, jobId: string, message: string
 // carries one value. Runs on the LAST chunk only, so cross-window groups
 // (rows of one name split across chunks) are all present in the table by
 // the time it looks.
-export async function unifyTouchedProductGroups(db: D1Compat, cutoff: string): Promise<number> {
+export async function unifyTouchedProductGroups(db: D1Compat, cutoff: string, context?: ProductFinalizeContext): Promise<number> {
   const products = await db
-    .prepare(`SELECT id, name, category, brand, updated_at FROM products WHERE is_active = 1`)
+    .prepare(`SELECT id, name, category, brand, updated_at FROM products WHERE is_active = 1 ORDER BY id`)
     .all<{ id: number; name: string | null; category: string | null; brand: string | null; updated_at: string | null }>()
   const groups = new Map<string, typeof products>()
   for (const product of products) {
@@ -5040,7 +5049,27 @@ export async function unifyTouchedProductGroups(db: D1Compat, cutoff: string): P
       params: { updates: json },
     })
   }
-  if (groupedUpdates.length) await db.batch(groupedUpdates)
+  if (context) {
+    const prior = context.state.genericApply!.finalize!
+    const snapshot = JSON.stringify(products)
+    const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(snapshot))))
+      .map(byte => byte.toString(16).padStart(2, '0')).join('')
+    if (groupedUpdates.length && !prior.pendingHash) {
+      await commitProductFinalization(db, context, { ...prior, pendingHash: digest }, [], false)
+      return 0
+    }
+    if (prior.pendingHash && prior.pendingHash !== digest) throw new Error('import_catalog_changed: Product groups changed after planning. Earlier import effects remain applied; group metadata was not changed.')
+    const guard: ImportStatement = {
+      sql: `SELECT CASE WHEN (SELECT COUNT(*) FROM products WHERE is_active=1)=json_array_length(@snapshot)
+        AND NOT EXISTS(SELECT 1 FROM json_each(@snapshot) s LEFT JOIN products p ON p.id=json_extract(s.value,'$.id')
+          WHERE p.id IS NULL OR p.is_active IS NOT 1 OR p.name IS NOT json_extract(s.value,'$.name')
+          OR p.category IS NOT json_extract(s.value,'$.category') OR p.brand IS NOT json_extract(s.value,'$.brand')
+          OR p.updated_at IS NOT json_extract(s.value,'$.updated_at'))
+        THEN 1 ELSE json_extract('[1]','$[import_catalog_changed]') END`, params: { snapshot },
+    }
+    await commitProductFinalization(db, context, { ...prior, pendingHash: undefined,
+      phase: 'notify', unified: changedGroups }, groupedUpdates.length ? [guard, ...groupedUpdates] : [], false)
+  } else if (groupedUpdates.length) await db.batch(groupedUpdates)
   return changedGroups
 }
 
@@ -5064,7 +5093,7 @@ type DuplicateProductSnapshotGroup = {
 // modes whose stock semantics are a full snapshot. New products also have their
 // opening import lot brought to the same grouped quantity, preserving the
 // branch_stock = active branch_batch_stock invariant from the first import.
-export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId: string): Promise<number> {
+export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId: string, context?: ProductFinalizeContext): Promise<number> {
   const groups = await db.staging.prepare(`
     WITH normalized AS MATERIALIZED (
       SELECT
@@ -5092,13 +5121,51 @@ export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId:
     WHERE product_id IS NOT NULL AND branch_id IS NOT NULL
     GROUP BY product_id, branch_id
     HAVING COUNT(*) > 1
-  `).all<DuplicateProductSnapshotGroup>({ id: jobId })
+      ${context ? 'AND (product_id>@product OR (product_id=@product AND branch_id>@branch))' : ''}
+    ORDER BY product_id,branch_id ${context ? 'LIMIT 1' : ''}
+  `).all<DuplicateProductSnapshotGroup>({ id: jobId,
+    ...(context ? { product: context.state.genericApply!.finalize!.product, branch: context.state.genericApply!.finalize!.branch } : {}) })
 
-  if (!groups.length) return 0
+  if (!groups.length) {
+    if (context) await commitProductFinalization(db, context,
+      { ...context.state.genericApply!.finalize!, phase: 'unify' }, [], false)
+    return 0
+  }
   const branchIds = groups.map((group) => Number(group.branch_id))
   const branchAuthorityError = await validateCanonicalImportBranchIds(db, branchIds)
   if (branchAuthorityError) throw new Error(branchAuthorityError)
   const guardedDb = withCanonicalImportBranchWriteGuard(db, branchIds)
+
+  if (context) {
+    const group = groups[0]
+    const params = { productId: Number(group.product_id), branchId: Number(group.branch_id) }
+    const preimageSql = `SELECT json_object('product',(SELECT json_object('stock',stock_quantity,'active',is_active,
+      'usd',cost_price_usd,'khr',cost_price_khr,'updated',updated_at) FROM products WHERE id=@productId),
+      'branch',(SELECT quantity FROM branch_stock WHERE product_id=@productId AND branch_id=@branchId),
+      'lots',(SELECT json_group_array(json_object('id',id,'key',batch_key,'active',is_active,'date',received_at,
+        'cost',unit_cost_usd,'quantity',(SELECT quantity FROM branch_batch_stock WHERE batch_id=pb.id AND branch_id=@branchId)))
+        FROM (SELECT * FROM product_batches WHERE variant_product_id=@productId ORDER BY id) pb)) AS snapshot`
+    const preimage = await db.prepare(preimageSql).get<{ snapshot: string }>(params)
+    const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',
+      new TextEncoder().encode(JSON.stringify([group, preimage!.snapshot])))))
+      .map(byte => byte.toString(16).padStart(2, '0')).join('')
+    const prior = context.state.genericApply!.finalize!
+    if (!prior.pendingHash) {
+      await commitProductFinalization(db, context, { ...prior, pendingHash: digest }, [], false)
+      return 0
+    }
+    if (prior.pendingHash !== digest) throw new Error('import_snapshot_changed: Stock changed after this import snapshot was planned. Earlier groups remain applied; this group was not changed.')
+    const next = { ...prior, pendingHash: undefined, product: params.productId,
+      branch: params.branchId, reconciled: context.state.genericApply!.finalize!.reconciled + 1 }
+    await commitProductFinalization(guardedDb, context, next, [
+      { sql: `SELECT CASE WHEN (${preimageSql})=@snapshot THEN 1 ELSE json_extract('[1]','$[import_snapshot_changed]') END`,
+        params: { ...params, snapshot: preimage!.snapshot } },
+      ...(Number(group.expected_quantity) > 0 ? [productStockGuardStatement([params.productId], 'active')] : []),
+      ...planReconcileBranchSnapshot({ ...params, quantity: Number(group.expected_quantity), receivedDate: group.received_date })
+        .map(statement => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })),
+    ], true)
+    return 1
+  }
 
   // Duplicate snapshot rows use the same atomic lot/branch reconciliation
   // as an ordinary matched row, including products that predate this job.
@@ -5933,13 +6000,56 @@ export class ProductReplacementIncompleteError extends Error {
   }
 }
 
+type ProductFinalizeContext = { jobId: string; leaseToken: string; state: ImportChunkState }
+type ImportStatement = { sql: string; params: Record<string, unknown> }
+
+async function commitProductFinalization(
+  db: D1Compat, context: ProductFinalizeContext, next: ProductFinalizeState,
+  statements: ImportStatement[], stock: boolean, countField?: 'deactivated',
+): Promise<void> {
+  const before = context.state.genericApply!.finalize
+  const params = { id: context.jobId, leaseToken: context.leaseToken,
+    before: JSON.stringify(before ?? null), after: JSON.stringify(next) }
+  const guard: ImportStatement = {
+    sql: `INSERT INTO import_stock_action_guards(job_id,action_key,guard_key,guard_value)
+      SELECT @id,@action,@key,CASE WHEN EXISTS(SELECT 1 FROM import_jobs
+        WHERE id=@id AND lease_token=@leaseToken AND lease_expires_at>@now AND cancel_requested=0
+        AND COALESCE(json_extract(chunk_state_json,'$.genericApply.finalize'),'null')=json(@before))
+        THEN 1 ELSE json_extract('[1]','$[import_lease_changed]') END`,
+    params: { ...params, action: `generic_finalize:${context.state.startedAtMs}`,
+      key: before ? `${before.phase}:${before.product}:${before.branch}:${before.pendingHash ?? 'plan'}` : 'start', now: new Date().toISOString() },
+  }
+  const checkpoint: ImportStatement = {
+    sql: `UPDATE import_jobs SET chunk_state_json=json_set(chunk_state_json,'$.genericApply.finalize',
+      ${countField ? "json_set(json(@after),'$.deactivated',changes())" : 'json(@after)'}),updated_at=CURRENT_TIMESTAMP
+      WHERE id=@id AND lease_token=@leaseToken`, params,
+  }
+  try {
+    const result = stock
+      ? await executeStockTransaction(db, [guard, ...statements, checkpoint], 'once')
+      : await db.batchOnce([guard, ...statements, checkpoint])
+    if (countField) next[countField] = Number(result[statements.length]?.meta?.changes || 0)
+  } catch (error) {
+    if (error instanceof StockQueryBudgetDeferred || error instanceof StockTransactionUnavailableError
+      || isImportMaintenanceFenceError(error) || String((error as Error)?.message).includes('$[import_lease_changed]')) throw error
+    const receipt = await db.prepare(`SELECT json_extract(chunk_state_json,'$.genericApply.finalize') AS result
+      FROM import_jobs WHERE id=@id`).get<{ result: string | null }>({ id: context.jobId })
+    const committed: ProductFinalizeState | null = receipt?.result ? JSON.parse(receipt.result) : null
+    if (!committed || committed.phase !== next.phase || committed.product !== next.product
+      || committed.branch !== next.branch || committed.reconciled !== next.reconciled
+      || committed.unified !== next.unified || committed.pendingHash !== next.pendingHash) throw new StockTransactionOutcomeUnknownError()
+    Object.assign(next, committed)
+  }
+  context.state.genericApply!.finalize = next
+}
+
 export async function finalizeProductReplacement(db: D1Compat, cutoff: string,
-  context: { jobId?: string; actor?: { id: number | null; name: string | null } } = {},
+  context: { jobId?: string; actor?: { id: number | null; name: string | null }; finalize?: ProductFinalizeContext } = {},
 ): Promise<number> {
   const candidates = `p.is_active=1 AND (p.updated_at IS NULL OR p.updated_at < @cutoff)`
   const params = { cutoff, jobId: context.jobId ?? null, actorId: context.actor?.id ?? null, actorName: context.actor?.name ?? null }
   try {
-    const result = await executeStockTransaction(db, [
+    const statements = [
       { sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products p WHERE ${candidates} AND ${productHasStockSql()})
           THEN json_extract('[]','$[product_has_stock]') ELSE 1 END`, params: { cutoff } },
       { sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
@@ -5949,7 +6059,13 @@ export async function finalizeProductReplacement(db: D1Compat, cutoff: string,
           FROM products p WHERE ${candidates}`, params },
       { sql: `UPDATE products SET is_active=0,updated_at=CURRENT_TIMESTAMP
           WHERE is_active=1 AND (updated_at IS NULL OR updated_at < @cutoff)`, params: { cutoff } },
-    ], 'retry')
+    ]
+    if (context.finalize) {
+      const prior = context.finalize.state.genericApply!.finalize!
+      await commitProductFinalization(db, context.finalize, { ...prior, phase: 'reconcile' }, statements, true, 'deactivated')
+      return context.finalize.state.genericApply!.finalize!.deactivated
+    }
+    const result = await executeStockTransaction(db, statements, 'retry')
     return Number(result[2]?.meta?.changes || 0)
   } catch (error) { throw productStockGuardError(error) || error }
 }
@@ -7134,38 +7250,44 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // semantics "not part of the new file's data" and "not acted on" are
     // the same thing; there's no separate "explicitly keep this out of
     // the replace" signal today.
-    let deactivatedCount = 0
-    if (job.type === 'products' && getProductImportMode(job.policy_json) === 'replace_all') {
-      // Rows are already committed. Save their cursor before the final phase:
-      // a refused replacement retries only this phase, never stock receipts.
-      await saveChunkState(db, jobId, cursor, state)
-      replacementFinalizing = true
-      const refusedRows = await db.staging.prepare(`SELECT COUNT(*) AS n FROM import_job_rows
-        WHERE job_id=@id AND phase='apply' AND action='error'`).get<{ n: number }>({ id: jobId })
-      if (Number(refusedRows?.n || 0) > 0) throw new ProductReplacementIncompleteError()
-      deactivatedCount = await finalizeProductReplacement(db, jobRow.started_at || nowIso, { jobId, actor: importCostActor })
+    const finalContext: ProductFinalizeContext | undefined = job.type === 'products' ? { jobId, leaseToken, state } : undefined
+    const continueFinalization = async () => {
+      budget.reserve = 2 + httpTail
+      await dispatchImportWork(env, { jobId, kind: 'apply' }, { freshInvocation: true })
+      return { applied: 0, failed: 0 }
     }
-
-    // Full product snapshots can contain multiple source rows that resolve to
-    // one product+branch. The row writer is intentionally last-write-wins for
-    // an ordinary single-row replacement; at the true end of a multi-row job,
-    // aggregate only those duplicate snapshot groups so no source quantity is
-    // silently erased. Explicit add/override modes are excluded inside the
-    // helper because they are movements, not snapshot counts.
-    let aggregatedSnapshotGroupCount = 0
-    if (job.type === 'products' && (productImportMode === 'merge' || productImportMode === 'replace_all')) {
-      aggregatedSnapshotGroupCount = await reconcileDuplicateProductSnapshotRows(db, jobId)
-      sw.lap('aggregateProductSnapshotMs')
+    if (finalContext) {
+      budget.reserve = 1 + 2 + httpTail // receipt recovery, lease, HTTP tail
+      const progress = state.genericApply!.finalize
+      if (!progress) {
+        await commitProductFinalization(db, finalContext, { phase: 'replace', product: 0,
+          branch: 0, deactivated: 0, reconciled: 0, unified: 0 }, [], false)
+        return continueFinalization()
+      }
+      if (progress.phase === 'replace') {
+        if (productImportMode === 'replace_all') {
+          replacementFinalizing = true
+          const refusedRows = await db.staging.prepare(`SELECT COUNT(*) AS n FROM import_job_rows
+            WHERE job_id=@id AND phase='apply' AND action='error'`).get<{ n: number }>({ id: jobId })
+          if (Number(refusedRows?.n || 0) > 0) throw new ProductReplacementIncompleteError()
+          await finalizeProductReplacement(db, jobRow.started_at || nowIso, { jobId, actor: importCostActor, finalize: finalContext })
+        } else await commitProductFinalization(db, finalContext, { ...progress, phase: 'reconcile' }, [], false)
+        return continueFinalization()
+      }
+      if (progress.phase === 'reconcile') {
+        if (productImportMode === 'merge' || productImportMode === 'replace_all') {
+          await reconcileDuplicateProductSnapshotRows(db, jobId, finalContext)
+        } else await commitProductFinalization(db, finalContext, { ...progress, phase: 'unify' }, [], false)
+        return continueFinalization()
+      }
+      if (progress.phase === 'unify') {
+        await unifyTouchedProductGroups(db, jobRow.started_at || nowIso, finalContext)
+        return continueFinalization()
+      }
     }
-
-    // D6b group unification -- see unifyTouchedProductGroups. After the
-    // replace_all deactivation on purpose: a deactivated row is no longer
-    // part of any group and must not vote on its group's category/brand.
-    let unifiedGroupCount = 0
-    if (job.type === 'products') {
-      unifiedGroupCount = await unifyTouchedProductGroups(db, jobRow.started_at || nowIso)
-    }
-
+    const deactivatedCount = state.genericApply!.finalize?.deactivated ?? 0
+    const aggregatedSnapshotGroupCount = state.genericApply!.finalize?.reconciled ?? 0
+    const unifiedGroupCount = state.genericApply!.finalize?.unified ?? 0
     // Last chunk: cache invalidation + broadcast, once, now that every
     // chunk has committed.
     //
@@ -7190,7 +7312,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       suppliers: 'suppliers',
       delivery_contacts: 'deliveryContacts',
     }
-    if (job.type === 'products' || job.type === 'inventory' || job.type === 'sales') {
+    if ((job.type === 'products' && state.genericApply!.finalize!.phase === 'notify') || job.type === 'inventory' || job.type === 'sales') {
       // No ExecutionContext available here -- await directly rather than
       // waitUntil. This runs inside queue.ts's queue consumer, not an HTTP
       // response path, so there's no early-return race to avoid.
@@ -7203,6 +7325,10 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       await broadcast(env, job.type === 'sales' ? 'sales' : job.type === 'inventory' ? 'inventory' : 'products', { action: 'import', jobId }).catch(() => {})
     } else if (CONTACT_IMPORT_CHANNEL[job.type]) {
       await broadcast(env, CONTACT_IMPORT_CHANNEL[job.type], { action: 'import', jobId }).catch(() => {})
+    }
+    if (finalContext && state.genericApply!.finalize!.phase === 'notify') {
+      await commitProductFinalization(db, finalContext, { ...state.genericApply!.finalize!, phase: 'settle' }, [], false)
+      return continueFinalization()
     }
     sw.lap('cacheInvalidateMs')
 
