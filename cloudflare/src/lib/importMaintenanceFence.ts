@@ -32,7 +32,10 @@ export function isImportMaintenanceFenceError(error: unknown): error is ImportMa
 export async function getImportFencedDb(env: { DB: D1Database; IMPORT_DB?: D1Database }): Promise<D1Compat> {
   const db = getDb(env)
   const table = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'system_flags'").get<{ name: string }>()
-  if (!table) return db
+  if (!table) {
+    Object.defineProperty(db, 'importWriteFenceStatements', { value: 0, configurable: true })
+    return db
+  }
   const fenced = withImportMaintenanceWriteFence(db)
   if (db.staging === db) fenced.staging = fenced
   return fenced
@@ -40,6 +43,7 @@ export async function getImportFencedDb(env: { DB: D1Database; IMPORT_DB?: D1Dat
 
 export function withImportMaintenanceWriteFence(db: D1Compat): D1Compat {
   const fenced = Object.create(db) as D1Compat
+  Object.defineProperty(fenced, 'importWriteFenceStatements', { value: 1 })
   const execute = async (statements: Statement[], once: boolean) => {
     try {
       const results = await (once ? db.batchOnce([maintenanceGuard, ...statements]) : db.batch([maintenanceGuard, ...statements]))
