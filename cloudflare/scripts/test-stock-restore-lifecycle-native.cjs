@@ -10,13 +10,19 @@ async function main() {
     import { beginMaintenance, updateMaintenance, endMaintenance, getMaintenance, restoreStockAuthority } from './src/lib/maintenance.ts';
     import { executeRawStockTransaction, executeRawRestoreStockTransaction, executeStockTransaction } from './src/lib/stockTransaction.ts';
     import { D1Compat } from './src/lib/db.ts';
-    import { BACKUP_TABLES, restoreCloudflareBackup } from './src/lib/backup.ts';
+    import { BACKUP_TABLES, SALE_REPLAY_RESTORE_BUNDLE, restoreCloudflareBackup } from './src/lib/backup.ts';
+    import { applyDatedStockCountDecisions } from './src/lib/datedStockCountDecisions.ts';
     import { guardSaleRecordReset, resetDeleteStatements } from './src/routes/system.ts';
     export default { async fetch(request,env) {
       const input=await request.json();
       let attempts=0;globalThis[Symbol.for('business-os.request-metrics.v1')]={rawD1Start(n){attempts+=n;},d1Start(n){attempts+=n;},d1Call(){}};
       try {
         if(input.mode==='tables')return Response.json(BACKUP_TABLES);
+        if(input.mode==='bundle')return Response.json(SALE_REPLAY_RESTORE_BUNDLE);
+        if(input.mode==='decision')return Response.json(await applyDatedStockCountDecisions(new D1Compat(env.DB),[],[],[],{
+          actorId:1001,actorName:'Fixture administrator',requestId:'reset-retry-proof',
+          owner:{version:1,actor_id:1001,organization_id:1,authority:'http://local.test',runtime:'cloudflare-workers'},budget:{limit:50,used:()=>attempts}
+        }));
         if(input.mode==='begin')return Response.json(await beginMaintenance(env,{backupKey:input.source,startedBy:'admin'}));
         if(input.mode==='update'){await updateMaintenance(env,input.token,{phase:'inserting',rowsDone:10});return Response.json(await getMaintenance(env));}
         if(input.mode==='end')return Response.json(await endMaintenance(env,input.token,input.options));
@@ -31,7 +37,9 @@ async function main() {
         }
         if(input.mode==='reset'){
           const tables=input.empty?[]:['damaged_stock_lots','branch_batch_stock','branch_stock','product_batches','products'];
-          return Response.json(await executeStockTransaction(new D1Compat(env.DB),guardSaleRecordReset(resetDeleteStatements(tables),input.actor),'once'));
+          const statements=resetDeleteStatements(tables);
+          if(input.rollback)statements.push({sql:"SELECT json_extract('[1]','$[late_reset_failure]')"});
+          return Response.json(await executeStockTransaction(new D1Compat(env.DB),guardSaleRecordReset(statements,input.actor),'once'));
         }
         if(input.mode==='restore'){
           await env.ASSETS.put(input.source,JSON.stringify(input.document));
@@ -61,10 +69,16 @@ async function main() {
       db.prepare('INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining) VALUES(1001,1001,1,1001,3,3)')
     ])
     await db.batch(split(fs.readFileSync(path.join(dir,'0243_stock_schema_epoch.sql'),'utf8')).map(sql=>db.prepare(sql)))
+    await db.batch(split(fs.readFileSync(path.join(dir,'0244_dated_count_decision_receipts.sql'),'utf8')).map(sql=>db.prepare(sql)))
+    await db.prepare(`INSERT INTO dated_count_decision_receipts(actor_id,request_id,request_json,result_json,total_rows)
+      VALUES(1001,'reset-retry-proof','{}','{"resolved":[],"skipped":[],"errors":[],"productsCreated":[]}',0)`).run()
     const call=async input=>{const response=await mf.dispatchFetch('http://local.test',{method:'POST',body:JSON.stringify(input)});return {status:response.status,data:await response.json()}}
     const zero=async()=>assert.equal(await db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").first('n'),0)
     const source='backups/cloudflare/legacy-proof.json'
     const tables=(await call({mode:'tables'})).data
+    assert.ok(tables.includes('dated_count_decision_receipts'),'full backups preserve retry identity')
+    assert.ok((await call({mode:'bundle'})).data.includes('dated_count_decision_receipts'),'scoped product/sales backups preserve retry identity')
+    const receiptBefore=await db.prepare("SELECT * FROM dated_count_decision_receipts WHERE request_id='reset-retry-proof'").first()
     const document={format:'business-os-cloudflare-backup',formatVersion:1,createdAt:'2026-09-20T00:00:00Z',source:'manual',runtime:'cloudflare-workers',tables:{},r2:{assets:[],copiedKeys:[]},summary:{schemaMigration:null}}
     for(const table of tables){
       const exists=await db.prepare("SELECT 1 ok FROM sqlite_master WHERE type='table' AND name=?").bind(table).first()
@@ -116,9 +130,22 @@ async function main() {
     assert.equal((await call({mode:'begin',source})).status,409)
     assert.equal(await db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").first('n'),1)
     await db.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'").run()
+    assert.equal((await call({mode:'reset',actor:1001,rollback:true})).status,409)
+    assert.deepEqual(await db.prepare("SELECT * FROM dated_count_decision_receipts WHERE request_id='reset-retry-proof'").first(),receiptBefore,'late reset failure rolls back receipt invalidation')
+    await zero()
+    let invalidatedAt
     for(const empty of [true,false]){
       assert.equal((await call({mode:'reset',empty,actor:1002})).status,409)
+      if(empty)assert.deepEqual(await db.prepare("SELECT * FROM dated_count_decision_receipts WHERE request_id='reset-retry-proof'").first(),receiptBefore,'refused actor cannot invalidate saved intent')
       const reset=await call({mode:'reset',empty,actor:1001});assert.equal(reset.status,200,JSON.stringify(reset))
+      const receipt=await db.prepare("SELECT * FROM dated_count_decision_receipts WHERE request_id='reset-retry-proof'").first()
+      assert.ok(receipt.invalidated_at,'reset preserves a tombstone instead of deleting the retry key')
+      assert.equal(receipt.request_json,receiptBefore.request_json)
+      assert.equal(receipt.result_json,receiptBefore.result_json)
+      if(invalidatedAt)assert.equal(receipt.invalidated_at,invalidatedAt,'repeated reset preserves original invalidation')
+      invalidatedAt=receipt.invalidated_at
+      const replay=await call({mode:'decision'})
+      assert.equal(replay.status,409);assert.equal(replay.data.code,'dated_decision_reset_conflict')
       await zero()
       assert.equal(await db.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").first('value'),'legacy-separate-pool-v1')
       assert.equal(await db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key LIKE '%reset_guard'").first('n'),0)
@@ -129,7 +156,8 @@ async function main() {
     assert.equal(await db.prepare("SELECT value FROM system_flags WHERE key='stock_schema_receipt_boundary'").first('value'),'0')
     assert.equal(await db.prepare('SELECT quantity FROM branch_stock WHERE product_id=1001').first('quantity'),7)
     assert.equal(await db.prepare('SELECT quantity_remaining FROM damaged_stock_lots WHERE id=1001').first('quantity_remaining'),3)
-    console.log('PASS actual0243 lifecycle: epoch/lease admission, ordinary refusal, owned token/source/epoch/rollback/lost ACK/clear race/metrics, progress/clear, empty/nonempty reset owner guards, complete streamed legacy backup S7/D3 preserved, zero permits')
+    assert.deepEqual(await db.prepare("SELECT * FROM dated_count_decision_receipts WHERE request_id='reset-retry-proof'").first(),receiptBefore,'restore returns exact saved retry identity with its catalog')
+    console.log('PASS actual0243/0244 lifecycle: epoch/lease admission, ordinary refusal, owned token/source/epoch/rollback/lost ACK/clear race/metrics, reset actor/rollback/tombstone replay, exact receipt and legacy S7/D3 restore, zero permits')
   }finally{await mf.dispose()}
 }
 main().catch(error=>{console.error(error);process.exitCode=1})

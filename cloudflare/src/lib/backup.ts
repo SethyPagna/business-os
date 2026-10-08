@@ -179,6 +179,7 @@ export const BACKUP_TABLES = [
   'fee_operation_receipts',
   'loyalty_point_adjustments',
   'inventory_movements',
+  'dated_count_decision_receipts',
   'stock_transfers',
   'stock_row_moves',
   'import_jobs',
@@ -1184,6 +1185,7 @@ export type RestoreProgress = { phase: 'deleting' | 'inserting' | 'assets'; tabl
 export const SALE_REPLAY_RESTORE_BUNDLE = [
   'pending_actions', 'branches', 'suppliers', 'file_assets', 'product_images',
   'products', 'product_batches', 'branch_stock', 'branch_batch_stock', 'damaged_stock_lots',
+  'dated_count_decision_receipts',
   'sales', 'sale_items', 'sale_item_batch_allocations', 'returns', 'return_items',
   'return_item_batch_allocations', 'fees', 'fee_operation_receipts', 'inventory_movements', 'action_history',
   'stock_lot_adjustment_operations',

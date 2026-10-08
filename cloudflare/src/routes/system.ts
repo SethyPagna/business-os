@@ -81,6 +81,9 @@ function guardSaleRecordReset(statements: ResetStatement[], actorId: number): Re
             ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP`,
       params: { key: SALE_NOT_PAID_STOCK_RECOVERY_RESET_GUARD_KEY, token },
     },
+    // Retain request identities so a stale browser retry cannot recreate reset products.
+    { sql: `UPDATE dated_count_decision_receipts
+      SET invalidated_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE invalidated_at IS NULL` },
     ...statements,
     {
       sql: `DELETE FROM system_flags
