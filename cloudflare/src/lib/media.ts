@@ -11,11 +11,11 @@ function normalizeUploadPublicPath(value: unknown): string {
   const raw = String(value || '').trim()
   if (!raw) return ''
   if (raw.startsWith('/uploads/')) {
-    const [cleanPath] = raw.split(/[?#]/)
+    const [cleanPath] = raw.split('?')
     return cleanPath || raw
   }
   if (raw.startsWith('uploads/')) {
-    const [cleanPath] = raw.split(/[?#]/)
+    const [cleanPath] = raw.split('?')
     return cleanPath ? `/${cleanPath}` : `/${raw}`
   }
   return raw

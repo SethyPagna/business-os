@@ -231,11 +231,14 @@ async function request(state, pathName, method, body) {
 async function main() {
   assert.equal(imagePermission.productImageFieldsChanged({
     image_path: '/uploads/one.png?v=12',
-    image_gallery: ['/uploads/one.png?v=12', '/uploads/two.png#cache'],
+    image_gallery: ['/uploads/one.png?v=12', '/uploads/two.png?v=12#cache'],
   }, {
     image_path: '/uploads/one.png',
     image_gallery: ['/uploads/one.png', '/uploads/two.png'],
   }), false, 'cache suffixes do not turn an unchanged image into a mutation')
+  assert.equal(imagePermission.productImageFieldsChanged({
+    image_path: '/uploads/two.png#cache',
+  }, { image_path: '/uploads/two.png' }), true, 'bare hash is part of a distinct raw upload identity')
   assert.equal(imagePermission.productImageFieldsChanged({ image_gallery: ['/uploads/two.png', '/uploads/one.png'] }, {
     image_path: '/uploads/one.png', image_gallery: ['/uploads/one.png', '/uploads/two.png'],
   }), true, 'gallery order is part of the image state')
