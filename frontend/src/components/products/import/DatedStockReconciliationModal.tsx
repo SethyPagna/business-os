@@ -1,4 +1,4 @@
-import { loadDatedDecisionIntent, prepareDatedDecisionIntent, saveDatedDecisionIntent, type DatedDecisionIntent } from '../../../api/inventoryWriteTransport.ts'
+import { loadDatedDecisionIntent, prepareDatedDecisionIntent, saveDatedDecisionIntent, retireResetDatedDecisionIntent, type DatedDecisionIntent } from '../../../api/inventoryWriteTransport.ts'
 // Frontend review UI for the dated stock-reconciliation import -- the two
 // pieces progress.md's own "Not done -- still open" list has flagged since
 // Part 290/291: (1) the CSV/XLSX column-mapping step and (2) the
@@ -322,10 +322,33 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
   })
 
   const decisionIntent = useRef<DatedDecisionIntent | null>(null)
-  const [savedDecision, setSavedDecision] = useState<DatedDecisionIntent | null>(() => {
-    try { return loadDatedDecisionIntent() } catch { return null }
+  const [decisionRecovery] = useState(() => {
+    try { return { intent: loadDatedDecisionIntent(), error: '' } }
+    catch (failure) { return { intent: null, error: datedStockCountApplyErrorText(failure, T) } }
   })
+  const [savedDecision, setSavedDecision] = useState<DatedDecisionIntent | null>(decisionRecovery.intent)
+  const [decisionStorageError, setDecisionStorageError] = useState(decisionRecovery.error)
   const [decisionProgress, setDecisionProgress] = useState<{ next: number; total: number } | null>(null)
+
+  function handleDecisionFailure(failure: unknown): void {
+    if (failure && typeof failure === 'object' && (failure as { code?: unknown }).code === 'dated_decision_reset_conflict' && decisionIntent.current) {
+      try {
+        retireResetDatedDecisionIntent(decisionIntent.current, failure)
+        decisionIntent.current = null
+        setSavedDecision(null)
+        setDecisionProgress(null)
+        restartUpload()
+        setError(datedStockCountApplyErrorText(failure, T))
+        return
+      } catch (retirementFailure) {
+        setError(datedStockCountApplyErrorText(retirementFailure, T))
+      }
+    } else {
+      const code = failure && typeof failure === 'object' ? (failure as { code?: unknown }).code : null
+      setError(datedStockCountApplyErrorText(code ? failure : { code: 'dated_decision_outcome_unknown' }, T))
+    }
+    setStep('review')
+  }
 
   async function runApplyDecisions(resume = false): Promise<void> {
     if (!resume && !reviewComplete) return
@@ -348,18 +371,21 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
           })),
       ]
       const intent = { resolved, unresolved, decisions: decisionList }
-      decisionIntent.current = resume ? loadDatedDecisionIntent() : prepareDatedDecisionIntent(intent)
-      if (!decisionIntent.current) throw new Error('No saved decisions are available for this account and server.')
+      const pending = decisionIntent.current || savedDecision
+      if (!resume && pending && !pending.completed && pending.canonical !== JSON.stringify(intent)) throw Object.assign(new Error('Different pending choices'), { code: 'dated_decision_pending_choices' })
+      decisionIntent.current = pending && !pending.completed ? pending : resume ? loadDatedDecisionIntent() : prepareDatedDecisionIntent(intent)
+      if (!decisionIntent.current) throw Object.assign(new Error('No saved decisions'), { code: 'dated_decision_missing' })
       saveDatedDecisionIntent(decisionIntent.current)
       setSavedDecision(decisionIntent.current)
-      type DecisionResponse = { success?: boolean; error?: string; complete?: boolean; next?: number; total?: number; resolved?: ResolvedRow[]; errors?: { rowNumber: number; error: string }[] }
+      setDecisionStorageError('')
+      type DecisionResponse = { success?: boolean; error?: string; code?: string; complete?: boolean; next?: number; total?: number; resolved?: ResolvedRow[]; errors?: { rowNumber: number; error: string }[] }
       let result: DecisionResponse | null = null
       let previous = -1
       do {
         result = await apiApplyDecisions(decisionIntent.current.body) as DecisionResponse | null
         if (!result || result.success === false) break
         setDecisionProgress({ next: result.next ?? 0, total: result.total ?? 0 })
-        if (result.complete === false && (result.next ?? 0) <= previous) throw new Error('Saved decisions need another retry to continue. Keep the same request.')
+        if (result.complete === false && (result.next ?? 0) <= previous) throw Object.assign(new Error('Saved progress needs retry'), { code: 'dated_decision_retry_pending' })
         previous = result.next ?? 0
       } while (result.complete === false)
       if (result?.success !== false && result) {
@@ -368,8 +394,7 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
         setSavedDecision(decisionIntent.current)
       }
       if (!result || result.success === false) {
-        setError(result?.error || T('dated_count_apply_decisions_failed', 'Could not apply those decisions.'))
-        setStep('review')
+        handleDecisionFailure(result)
         return
       }
       setCombinedResolved(result.resolved || [])
@@ -389,8 +414,7 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
       setPlan(previewResult.plan)
       setStep('plan')
     } catch (e) {
-      setError(e instanceof Error ? e.message : T('dated_count_apply_decisions_failed', 'Could not apply those decisions.'))
-      setStep('review')
+      handleDecisionFailure(e)
     } finally {
       setWorking(false)
     }
@@ -424,11 +448,11 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
 
   return (
     <Modal title={T('dated_stock_reconciliation_title', 'Dated Stock Reconciliation')} onClose={onClose} size="lg" draggable unsavedChanges={{ dirty: Boolean(csvText) }}>
-      {decisionProgress && step === 'applying_decisions' ? <p className="mb-3 text-xs" role="status">{decisionProgress.next} / {decisionProgress.total}</p> : null}
-      {error ? (
+      {decisionProgress && step === 'applying_decisions' ? <p className="mb-3 text-xs" role="status">{T('dated_decision_progress', 'Saved decisions: {next} / {total}').replace('{next}', String(decisionProgress.next)).replace('{total}', String(decisionProgress.total))}</p> : null}
+      {error || decisionStorageError ? (
         <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{error}</span>
+          <span>{error || decisionStorageError}</span>
         </div>
       ) : null}
 
@@ -488,7 +512,7 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
       ) : null}
 
       {savedDecision && !savedDecision.completed && !working ? (
-        <button type="button" onClick={() => void runApplyDecisions(true)} className="rounded-lg border px-3 py-2 text-sm">Resume saved decisions</button>
+        <button type="button" onClick={() => void runApplyDecisions(true)} className="inline-flex min-h-[40px] max-w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm"><ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" /><span className="min-w-0 break-words">{T('dated_decision_resume', 'Resume saved decisions')}</span></button>
       ) : null}
 
       {step === 'resolving' || step === 'applying_decisions' || step === 'applying' ? (

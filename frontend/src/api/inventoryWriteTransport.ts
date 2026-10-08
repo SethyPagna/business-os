@@ -8,32 +8,62 @@ import { executeTransferRun, type RecoverableTransferRun } from './transferRunRe
 import { receiveBatchWireBody, type ReceiveBatchPayload } from './batchesTransport.ts'
 
 export type DatedDecisionIntent = { canonical: string; body: Record<string, unknown>; completed: boolean }
+function datedIntentError(code: string): Error {
+  return Object.assign(new Error(code), { code })
+}
 function datedIntentKey(): string {
-  const owner = stampOfflineSaleOwner({}).offline_owner
-  return `dated-decision-intent:v1:${JSON.stringify(owner)}`
+  try {
+    const owner = stampOfflineSaleOwner({}).offline_owner
+    return `dated-decision-intent:v1:${JSON.stringify(owner)}`
+  } catch { throw datedIntentError('dated_decision_owner_mismatch') }
+}
+function validateDatedIntent(saved: DatedDecisionIntent): void {
+  if (!saved || typeof saved.canonical !== 'string' || typeof saved.completed !== 'boolean' || !saved.body || typeof saved.body.client_request_id !== 'string' || !/^[A-Za-z0-9_-]{8,120}$/.test(saved.body.client_request_id) || !saved.body.offline_owner) throw datedIntentError('dated_decision_storage_unreadable')
+  try { stampOfflineSaleOwner(saved.body) } catch { throw datedIntentError('dated_decision_owner_mismatch') }
 }
 export function loadDatedDecisionIntent(): DatedDecisionIntent | null {
-  const raw = window.localStorage.getItem(datedIntentKey())
+  const key = datedIntentKey()
+  let raw: string | null
+  try { raw = window.localStorage.getItem(key) } catch { throw datedIntentError('dated_decision_storage_unreadable') }
   if (!raw) return null
-  const saved = JSON.parse(raw) as DatedDecisionIntent
-  if (typeof saved.canonical !== 'string' || typeof saved.completed !== 'boolean' || !saved.body || typeof saved.body.client_request_id !== 'string') throw new Error('Saved decisions cannot be read. Keep browser storage and check their history.')
-  stampOfflineSaleOwner(saved.body)
+  let saved: DatedDecisionIntent
+  try { saved = JSON.parse(raw) as DatedDecisionIntent } catch { throw datedIntentError('dated_decision_storage_unreadable') }
+  validateDatedIntent(saved)
   return saved
 }
-export function saveDatedDecisionIntent(intent: DatedDecisionIntent): void {
-  stampOfflineSaleOwner(intent.body)
+export function saveDatedDecisionIntent(intent: DatedDecisionIntent, replaceCompleted = false): void {
+  validateDatedIntent(intent)
   const key = datedIntentKey()
   const raw = JSON.stringify(intent)
-  window.localStorage.setItem(key, raw)
-  if (window.localStorage.getItem(key) !== raw) throw new Error('Could not save the decision identity. Keep this window open and retry before submitting.')
+  try {
+    const saved = loadDatedDecisionIntent()
+    if (saved && (saved.canonical !== intent.canonical || JSON.stringify(saved.body) !== JSON.stringify(intent.body)) && !(replaceCompleted && saved.completed)) throw datedIntentError('dated_decision_pending_choices')
+    window.localStorage.setItem(key, raw)
+    if (window.localStorage.getItem(key) !== raw) throw new Error('Storage verification failed')
+  } catch (failure) {
+    if (failure && typeof failure === 'object' && 'code' in failure) throw failure
+    throw datedIntentError('dated_decision_storage_save_failed')
+  }
+}
+export function retireResetDatedDecisionIntent(intent: DatedDecisionIntent, failure: unknown): void {
+  if (!failure || typeof failure !== 'object' || (failure as { code?: unknown }).code !== 'dated_decision_reset_conflict') throw datedIntentError('dated_decision_retirement_failed')
+  validateDatedIntent(intent)
+  const key = datedIntentKey()
+  const expected = JSON.stringify(intent)
+  try {
+    const saved = loadDatedDecisionIntent()
+    if (!saved || JSON.stringify(saved) !== expected || window.localStorage.getItem(key) !== expected) throw new Error('Saved identity changed')
+    window.localStorage.removeItem(key)
+    if (window.localStorage.getItem(key) !== null) throw new Error('Storage removal failed')
+  } catch { throw datedIntentError('dated_decision_retirement_failed') }
 }
 export function prepareDatedDecisionIntent(payload: Record<string, unknown>): DatedDecisionIntent {
   const canonical = JSON.stringify(payload)
   const saved = loadDatedDecisionIntent()
-  if (saved && saved.canonical !== canonical && !saved.completed) throw new Error('Resume the saved decisions before submitting different choices.')
+  if (saved && saved.canonical !== canonical && !saved.completed) throw datedIntentError('dated_decision_pending_choices')
   if (saved && saved.canonical === canonical) return saved
   const intent = { canonical, body: JSON.parse(JSON.stringify(ensureClientRequestId(stampOfflineSaleOwner(payload), 'dated-decision'))), completed: false }
-  saveDatedDecisionIntent(intent)
+  saveDatedDecisionIntent(intent, true)
   return intent
 }
 

@@ -38,10 +38,11 @@ runTest('an uncoded failure keeps the server message; nothing at all falls back 
   assert.equal(datedStockCountApplyErrorText(null, trFrom(packs.km)), packs.km.dated_count_apply_failed)
 })
 
-runTest('every mapped code is one the Worker apply route actually returns', () => {
-  const route = fs.readFileSync(path.join(root, '..', 'cloudflare', 'src', 'routes', 'inventory.ts'), 'utf8')
+runTest('every mapped code is produced by the server or local recovery', () => {
+  const route = fs.readFileSync(path.join(root, '..', 'cloudflare', 'src', 'routes', 'inventory.ts'), 'utf8') + fs.readFileSync(path.join(root, '..', 'cloudflare', 'src', 'lib', 'datedStockCountDecisions.ts'), 'utf8')
+  const local = read('src/api/inventoryWriteTransport.ts') + read('src/components/products/import/DatedStockReconciliationModal.tsx')
   for (const code of Object.keys(DATED_STOCK_COUNT_APPLY_ERRORS)) {
-    assert.ok(route.includes(`code: '${code}' }, 409)`), `routes/inventory.ts returns 409 ${code}`)
+    assert.ok(route.includes(`'${code}'`) || local.includes(`'${code}'`), `server or saved-intent recovery produces ${code}`)
   }
 })
 
@@ -59,6 +60,19 @@ runTest('the dated stock count modal routes both apply failure paths through the
   assert.ok(apply.includes('await apiApply('), 'found runApply')
   assert.equal(apply.split('datedStockCountApplyErrorText(').length - 1, 2, 'returned failure and thrown failure both mapped')
   assert.ok(!/e instanceof Error \? e\.message/.test(apply), 'no raw server sentence in the apply path')
+})
+
+runTest('count conflicts acknowledge uncertain prior writes and every recovery code uses actual EN/KM packs', () => {
+  assert.ok(!packs.en.dated_count_apply_conflict.includes('Nothing was changed'))
+  assert.ok(packs.en.dated_count_apply_conflict.includes('may have been saved'))
+  for (const code of Object.keys(DATED_STOCK_COUNT_APPLY_ERRORS)) {
+    const [key] = DATED_STOCK_COUNT_APPLY_ERRORS[code]
+    for (const lang of ['en', 'km']) {
+      assert.equal(datedStockCountApplyErrorText({ code, error: 'Raw English' }, trFrom(packs[lang])), packs[lang][key])
+      assert.equal(datedStockCountApplyErrorText(Object.assign(new Error('Raw English'), { code }), trFrom(packs[lang])), packs[lang][key])
+    }
+    assert.notEqual(packs.en[key], packs.km[key])
+  }
 })
 
 if (failed) { console.error(`${failed} failed`); process.exit(1) }
