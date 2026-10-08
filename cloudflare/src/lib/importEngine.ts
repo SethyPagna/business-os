@@ -4014,7 +4014,7 @@ function summarizeImageMatch(match: Awaited<ReturnType<typeof computeImportImage
 // migration 0011_import_job_chunking.sql's header for the overall design.
 
 type ProductFinalizeState = {
-  phase: 'replace' | 'reconcile' | 'unify' | 'notify' | 'settle'
+  phase: 'replace' | 'reconcile' | 'unify' | 'notify' | 'settle' | 'done'
   product: number
   branch: number
   deactivated: number
@@ -5058,7 +5058,7 @@ export async function unifyTouchedProductGroups(db: D1Compat, cutoff: string, co
       await commitProductFinalization(db, context, { ...prior, pendingHash: digest }, [], false)
       return 0
     }
-    if (prior.pendingHash && prior.pendingHash !== digest) throw new Error('import_catalog_changed: Product groups changed after planning. Earlier import effects remain applied; group metadata was not changed.')
+    if (prior.pendingHash && prior.pendingHash !== digest) throw new ProductImportFinalizationConflictError()
     const guard: ImportStatement = {
       sql: `SELECT CASE WHEN (SELECT COUNT(*) FROM products WHERE is_active=1)=json_array_length(@snapshot)
         AND NOT EXISTS(SELECT 1 FROM json_each(@snapshot) s LEFT JOIN products p ON p.id=json_extract(s.value,'$.id')
@@ -5140,12 +5140,21 @@ export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId:
     const group = groups[0]
     const params = { productId: Number(group.product_id), branchId: Number(group.branch_id) }
     const preimageSql = `SELECT json_object('product',(SELECT json_object('stock',stock_quantity,'active',is_active,
-      'usd',cost_price_usd,'khr',cost_price_khr,'updated',updated_at) FROM products WHERE id=@productId),
-      'branch',(SELECT quantity FROM branch_stock WHERE product_id=@productId AND branch_id=@branchId),
-      'lots',(SELECT json_group_array(json_object('id',id,'key',batch_key,'active',is_active,'date',received_at,
-        'cost',unit_cost_usd,'quantity',(SELECT quantity FROM branch_batch_stock WHERE batch_id=pb.id AND branch_id=@branchId)))
-        FROM (SELECT * FROM product_batches WHERE variant_product_id=@productId ORDER BY id) pb)) AS snapshot`
+      'usd',cost_price_usd,'khr',cost_price_khr,'sellingUsd',selling_price_usd,'sellingKhr',selling_price_khr,
+      'updated',updated_at) FROM products WHERE id=@productId),
+      'branches',(SELECT json_group_array(json_object('branch',branch_id,'quantity',quantity))
+        FROM (SELECT * FROM branch_stock WHERE product_id=@productId ORDER BY branch_id)),
+      'lots',(SELECT json_group_array(json_object('id',id,'product',variant_product_id,'key',batch_key,
+        'lot',lot_code,'expiry',expiry_date,'active',is_active,'date',received_at,'notes',notes,'synthetic',synthetic,
+        'created',created_at,'updated',updated_at,'number',batch_number,'supplier',supplier_id,'supplierName',supplier_name,
+        'payment',payment_status,'creditDue',credit_due_date,'cost',unit_cost_usd,'received',received_quantity,
+        'receivedCost',received_cost_usd,'receivedBranch',received_branch_id,'receivedBranchName',received_branch_name))
+        FROM (SELECT * FROM product_batches WHERE variant_product_id=@productId ORDER BY id)),
+      'lotStock',(SELECT json_group_array(json_object('id',id,'lot',batch_id,'branch',branch_id,'quantity',quantity,
+        'created',created_at,'updated',updated_at)) FROM (SELECT * FROM branch_batch_stock
+        WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=@productId) ORDER BY id))) AS snapshot`
     const preimage = await db.prepare(preimageSql).get<{ snapshot: string }>(params)
+    if (new TextEncoder().encode(preimage!.snapshot).length > 1_000_000) throw new Error('Product snapshot finalization exceeds the bounded preimage payload; review this import before retrying.')
     const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',
       new TextEncoder().encode(JSON.stringify([group, preimage!.snapshot])))))
       .map(byte => byte.toString(16).padStart(2, '0')).join('')
@@ -5154,7 +5163,7 @@ export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId:
       await commitProductFinalization(db, context, { ...prior, pendingHash: digest }, [], false)
       return 0
     }
-    if (prior.pendingHash !== digest) throw new Error('import_snapshot_changed: Stock changed after this import snapshot was planned. Earlier groups remain applied; this group was not changed.')
+    if (prior.pendingHash !== digest) throw new ProductImportFinalizationConflictError()
     const next = { ...prior, pendingHash: undefined, product: params.productId,
       branch: params.branchId, reconciled: context.state.genericApply!.finalize!.reconciled + 1 }
     await commitProductFinalization(guardedDb, context, next, [
@@ -5191,6 +5200,7 @@ export async function finalizeImportApply(
   deactivatedCount: number,
   unifiedGroupCount = 0,
   aggregatedSnapshotGroupCount = 0,
+  context?: ProductFinalizeContext,
 ): Promise<{ applied: number; failed: number }> {
   const finalCounts = await db.staging.prepare(`SELECT action, COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'apply' GROUP BY action`)
     .all<{ action: RowAction; n: number }>({ id: jobId })
@@ -5208,12 +5218,6 @@ export async function finalizeImportApply(
     `SELECT COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'apply' AND action != 'error' AND json_extract(result_json, '$.message') IS NOT NULL`,
   ).get<{ n: number }>({ id: jobId })
   const warnedApply = warnedApplyRow?.n || 0
-  await db.prepare(`
-    UPDATE import_jobs SET status = @status, phase = @status,
-      processed_rows = @processed, failed_rows = @failed, warning_count = @warned, finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-    WHERE id = @id
-  `).run({ id: jobId, status: finalStatus, processed: totalApplied, failed: totalFailed, warned: warnedApply })
-
   const existing = await db.prepare(`SELECT summary_json FROM import_jobs WHERE id = @id`).get<{ summary_json: string | null }>({ id: jobId })
   let summary: Record<string, unknown> = {}
   try { summary = existing?.summary_json ? JSON.parse(existing.summary_json) : {} } catch { summary = {} }
@@ -5236,11 +5240,20 @@ export async function finalizeImportApply(
       queueLatencyMs: queueLatencyMs ?? null,
     },
   }
-  await db.prepare(`UPDATE import_jobs SET summary_json = @summary WHERE id = @id`).run({ id: jobId, summary: JSON.stringify(summary) })
   // S-uploads: the job is finished; its temporary CSV/ZIP goes now
   // (lib/importIncomingFiles.ts). Best-effort -- the scheduled sweep
   // retries anything this misses.
   await purgeImportIncomingFiles(env, db, jobId)
+  const terminal = {
+    sql: `UPDATE import_jobs SET status=@status,phase=@status,processed_rows=@processed,
+      failed_rows=@failed,warning_count=@warned,finished_at=CURRENT_TIMESTAMP,
+      updated_at=CURRENT_TIMESTAMP,summary_json=@summary WHERE id=@id`,
+    params: { id: jobId, status: finalStatus, processed: totalApplied, failed: totalFailed,
+      warned: warnedApply, summary: JSON.stringify(summary) },
+  }
+  if (context) await commitProductFinalization(db, context,
+    { ...context.state.genericApply!.finalize!, phase: 'done' }, [terminal], false)
+  else await db.prepare(terminal.sql).run(terminal.params)
   return { applied: totalApplied, failed: totalFailed }
 }
 
@@ -6000,8 +6013,16 @@ export class ProductReplacementIncompleteError extends Error {
   }
 }
 
-type ProductFinalizeContext = { jobId: string; leaseToken: string; state: ImportChunkState }
+type ProductFinalizeContext = { jobId: string; leaseToken: string; state: ImportChunkState; queued: boolean }
 type ImportStatement = { sql: string; params: Record<string, unknown> }
+class ProductImportFinalizationConflictError extends Error {
+  readonly code = 'product_import_finalization_changed'
+  readonly status = 409
+  constructor() {
+    super('Stock or product groups changed after this import was planned. Earlier groups remain applied. This group was not changed; review the current stock and start a corrected import.')
+    this.name = 'ProductImportFinalizationConflictError'
+  }
+}
 
 async function commitProductFinalization(
   db: D1Compat, context: ProductFinalizeContext, next: ProductFinalizeState,
@@ -6009,19 +6030,23 @@ async function commitProductFinalization(
 ): Promise<void> {
   const before = context.state.genericApply!.finalize
   const params = { id: context.jobId, leaseToken: context.leaseToken,
-    before: JSON.stringify(before ?? null), after: JSON.stringify(next) }
+    before: JSON.stringify(before ?? null), after: JSON.stringify(next), done: next.phase === 'done' ? 1 : 0,
+    status: context.queued ? 'applying' : 'approved', phase: context.queued ? 'applying' : 'apply_deferred' }
   const guard: ImportStatement = {
     sql: `INSERT INTO import_stock_action_guards(job_id,action_key,guard_key,guard_value)
       SELECT @id,@action,@key,CASE WHEN EXISTS(SELECT 1 FROM import_jobs
         WHERE id=@id AND lease_token=@leaseToken AND lease_expires_at>@now AND cancel_requested=0
+        AND json_extract(chunk_state_json,'$.startedAtMs') IS @run
         AND COALESCE(json_extract(chunk_state_json,'$.genericApply.finalize'),'null')=json(@before))
         THEN 1 ELSE json_extract('[1]','$[import_lease_changed]') END`,
-    params: { ...params, action: `generic_finalize:${context.state.startedAtMs}`,
+    params: { ...params, run: context.state.startedAtMs, action: `generic_finalize:${context.state.startedAtMs}`,
       key: before ? `${before.phase}:${before.product}:${before.branch}:${before.pendingHash ?? 'plan'}` : 'start', now: new Date().toISOString() },
   }
   const checkpoint: ImportStatement = {
     sql: `UPDATE import_jobs SET chunk_state_json=json_set(chunk_state_json,'$.genericApply.finalize',
-      ${countField ? "json_set(json(@after),'$.deactivated',changes())" : 'json(@after)'}),updated_at=CURRENT_TIMESTAMP
+      ${countField ? "json_set(json(@after),'$.deactivated',changes())" : 'json(@after)'}),
+      status=CASE WHEN @done=1 THEN status ELSE @status END,
+      phase=CASE WHEN @done=1 THEN phase ELSE @phase END,updated_at=CURRENT_TIMESTAMP
       WHERE id=@id AND lease_token=@leaseToken`, params,
   }
   try {
@@ -6030,6 +6055,9 @@ async function commitProductFinalization(
       : await db.batchOnce([guard, ...statements, checkpoint])
     if (countField) next[countField] = Number(result[statements.length]?.meta?.changes || 0)
   } catch (error) {
+    const stockRefusal = productStockGuardError(error)
+    if (stockRefusal) throw stockRefusal
+    if (/import_(?:snapshot|catalog)_changed/.test(String((error as Error)?.message))) throw new ProductImportFinalizationConflictError()
     if (error instanceof StockQueryBudgetDeferred || error instanceof StockTransactionUnavailableError
       || isImportMaintenanceFenceError(error) || String((error as Error)?.message).includes('$[import_lease_changed]')) throw error
     const receipt = await db.prepare(`SELECT json_extract(chunk_state_json,'$.genericApply.finalize') AS result
@@ -7250,7 +7278,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // semantics "not part of the new file's data" and "not acted on" are
     // the same thing; there's no separate "explicitly keep this out of
     // the replace" signal today.
-    const finalContext: ProductFinalizeContext | undefined = job.type === 'products' ? { jobId, leaseToken, state } : undefined
+    const finalContext: ProductFinalizeContext | undefined = job.type === 'products' ? { jobId, leaseToken, state, queued: Boolean(env.IMPORT_QUEUE) } : undefined
     const continueFinalization = async () => {
       budget.reserve = 2 + httpTail
       await dispatchImportWork(env, { jobId, kind: 'apply' }, { freshInvocation: true })
@@ -7337,7 +7365,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // EVERY chunk (not just this last one) -- see runImportAnalyze's
     // finalize step for the same reasoning. Shared so the dedicated
     // stock-actions apply path can never disagree with this one.
-    const outcome = await finalizeImportApply(env, db, jobId, totalUnits, state.startedAtMs, sw.marks, queueLatencyMs, deactivatedCount, unifiedGroupCount, aggregatedSnapshotGroupCount)
+    const outcome = await finalizeImportApply(env, db, jobId, totalUnits, state.startedAtMs, sw.marks, queueLatencyMs, deactivatedCount, unifiedGroupCount, aggregatedSnapshotGroupCount, finalContext)
     console.log('[import-timing] apply done', jobId, outcome)
     return outcome
   } catch (error) {
@@ -7365,7 +7393,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     if (generic && String((error as Error)?.message).includes('$[import_lease_changed]')) throw new StockTransactionOutcomeUnknownError()
     const stockError = productStockGuardError(error)
     const refusalCode = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
-    const savedRefusal = ['stock_import_unit_over_tier_budget', 'stock_import_reconcile_over_tier_budget', 'import_queue_required'].includes(refusalCode)
+    const savedRefusal = ['stock_import_unit_over_tier_budget', 'stock_import_reconcile_over_tier_budget', 'import_queue_required', 'product_import_finalization_changed'].includes(refusalCode)
       ? refusalCode + ': ' + (error as Error).message : null
     await markJobFailed(db, jobId, stockError ? `${stockError.code}: ${stockError.message}` : savedRefusal || (error as Error).message || 'Apply failed', generic ? leaseToken : undefined)
     const replacementError = stockError || (error instanceof ProductReplacementIncompleteError ? error : null)

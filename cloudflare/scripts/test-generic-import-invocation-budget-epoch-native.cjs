@@ -3,15 +3,20 @@ const helper=path.join(__dirname,'test-branch-transfer-request-budget-epoch-nati
 let source=fs.readFileSync(helper,'utf8').split('const zero=')[0]
 source=source.replaceAll('0, 100, 1','0, 10000, 1').replaceAll('VALUES(1, 1, 100)','VALUES(1, 1, 10000)').replaceAll('VALUES(?,1,?,100,200)','VALUES(?,1,?,10000,200)').replaceAll('lots === 1 ? 100 : 1','lots === 1 ? 10000 : 1')
 source=source.replace('export { ensureCoreDataInvariants }',"export {classifyProducts,classifySales,classifyInventory} from './src/lib/importEngine.ts';export {getDb} from './src/lib/db.ts';export { ensureCoreDataInvariants }").replace('return {...f,call,','return {worker,...f,call,')
+source=source.replace('function fixture(lots = 1)', 'function fixture(lots = 1, seed)')
+  .replace('  })\r\n}', '    seed?.(sql)\r\n  })\r\n}').replace('  })\n}', '    seed?.(sql)\n  })\n}')
+  .replace('const f=fixture(options.lots || 1)', 'const f=fixture(options.lots || 1, options.seed)')
+  .replace('return {worker,...f,call,', 'return {worker,...f,call,measured(){return {physical,metered}},')
+source=source.replace('export {classifyProducts', "export {executeStockTransaction} from './src/lib/stockTransaction.ts';export {classifyProducts")
 const {bundleWorker,world}=new Function('require','__dirname','module',source+';return {bundleWorker,world}')(require,__dirname,module)
-async function scenario(make,{tier,n,inline=false,fault,staleAuth=false,type='inventory',inventoryAction='remove',cacheFailure=false,tailRetries=false,httpTailRetries=false,claimAck=false,cancel=false,files=false,materialize=false,wrongEpoch=false,saleStatus='completed'}) {
+async function scenario(make,{tier,n,inline=false,fault,staleAuth=false,type='inventory',inventoryAction='remove',cacheFailure=false,tailRetries=false,httpTailRetries=false,claimAck=false,cancel=false,files=false,materialize=false,wrongEpoch=false,saleStatus='completed',productMode='fill_blank'}) {
   const f=await world(make,tier,{staleAuth,cacheFailure,tailRetries}),cap=tier==='free'?50:1000,id=`generic-${tier}-${n}-${inline}-${fault||'normal'}-${staleAuth}`
   f.env.ASSETS={list:async()=>({objects:[],truncated:false}),delete:async()=>{}};if(files)f.sql.prepare("INSERT INTO import_job_files(job_id,kind,original_name,stored_path)VALUES(?,'csv','proof.csv',?)").run(id,'imports/'+id+'/incoming/proof.csv')
   const pending=[];if(!inline)f.env.IMPORT_QUEUE={send:async body=>pending.push({body,attempts:1})}
-  f.sql.prepare("INSERT INTO import_jobs(id,type,status,policy_json,materialize_done)VALUES(?,?,'awaiting_review',?,1)").run(id,type,JSON.stringify(type==='inventory'?{inventory_action:inventoryAction}:{import_mode:'fill_blank'}))
+  f.sql.prepare("INSERT INTO import_jobs(id,type,status,policy_json,materialize_done)VALUES(?,?,'awaiting_review',?,1)").run(id,type,JSON.stringify(type==='inventory'?{inventory_action:inventoryAction}:{import_mode:productMode}))
   const rows=Array.from({length:n},(_,i)=>({_rowNumber:i+2,barcode:'SER-1',name:'Serum',quantity:'1',branch:'Shop',unit_cost_usd:'2',date:'2026-09-05',description:'import proof',receipt_number:'receipt-'+i,sale_date:'2026-09-05 12:00',sale_status:saleStatus}))
   for(let i=0;i<n;i++)f.sql.prepare('INSERT INTO import_job_source_rows(job_id,sequence,row_number,data_json)VALUES(?,?,?,?)').run(id,i,i+2,JSON.stringify(rows[i]))
-  const analyzed=type==='inventory'?await f.worker.classifyInventory(f.worker.getDb(f.env),rows,inventoryAction,{}):type==='products'?await f.worker.classifyProducts(f.worker.getDb(f.env),rows,id,JSON.stringify({import_mode:'fill_blank'})):await f.worker.classifySales(f.worker.getDb(f.env),rows,{})
+  const analyzed=type==='inventory'?await f.worker.classifyInventory(f.worker.getDb(f.env),rows,inventoryAction,{}):type==='products'?await f.worker.classifyProducts(f.worker.getDb(f.env),rows,id,JSON.stringify({import_mode:productMode})):await f.worker.classifySales(f.worker.getDb(f.env),rows,{})
   assert.ok(analyzed.every(x=>x.action==='create'||x.action==='update'))
   for(const x of analyzed)f.sql.prepare("INSERT INTO import_job_rows(job_id,phase,row_number,action,identifier,result_json)VALUES(?,'analyze',?,?,?,?)").run(id,x.rowNumber,x.action,x.identifier,JSON.stringify(x))
   let count=0,sqls=[],faulted=false,phase='',stockAttempts=0,afterStock=false,tailFaults=new Set(),claimFaulted=false
@@ -62,4 +67,5 @@ async function main(){
     console.log('generic actual invocation proof PASS '+cases.length+' scenarios')
   }finally{globalThis.fetch=saved}
 }
-main().catch(e=>{console.error(e);process.exitCode=1})
+module.exports={bundleWorker,world,scenario}
+if(require.main===module)main().catch(e=>{console.error(e);process.exitCode=1})

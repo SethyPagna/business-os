@@ -1691,10 +1691,14 @@ app.post('/:id/retry', async (c) => {
   }
   await db.prepare(`
     UPDATE import_jobs SET status = 'queued', phase = 'queued', cancel_requested = 0,
-      processed_rows = 0, failed_rows = 0, last_error = NULL,
+      processed_rows = CASE WHEN @continuation=1 AND json_type(CASE WHEN json_valid(chunk_state_json)
+        THEN chunk_state_json ELSE '{}' END,'$.genericApply')='object' THEN processed_rows ELSE 0 END,
+      failed_rows = CASE WHEN @continuation=1 AND json_type(CASE WHEN json_valid(chunk_state_json)
+        THEN chunk_state_json ELSE '{}' END,'$.genericApply')='object' THEN failed_rows ELSE 0 END,
+      last_error = NULL,
       policy_json = COALESCE(@policy, policy_json), updated_at = CURRENT_TIMESTAMP
     WHERE id = @id
-  `).run({ id, policy: mode === 'apply' ? JSON.stringify(policy) : null })
+  `).run({ id, continuation: mode === 'apply' ? 1 : 0, policy: mode === 'apply' ? JSON.stringify(policy) : null })
   await dispatchImportWork(c.env, { jobId: id, kind: mode })
   const queued = await getJob(c.env, id)
   await auditImportEvent(c, 'import_job_retry', id, job, queued || null, { source: 'api', mode })
