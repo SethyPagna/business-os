@@ -46,7 +46,7 @@ async function seed(db) {
     { name: 'Rose Serum', barcode: '333', price: 14, qty: 5, active: 1 },
     { name: 'Rain Cream', barcode: '444', price: 20, qty: 3, active: 1 },
     { name: 'Amber Oil', barcode: '555', price: 30, qty: 0, active: 1 },
-    { name: 'Retired Balm', barcode: '666', price: 9, qty: 4, active: 0 },
+    { name: 'Retired Balm', barcode: '666', price: 9, qty: 0, active: 0 },
   ]
   for (const row of rows) {
     await db.prepare(`

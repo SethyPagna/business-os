@@ -33,7 +33,10 @@ async function run(options = {}, implementation = current) {
   const prepare = env.DB.prepare.bind(env.DB)
   env.DB.prepare = sql => {
     const stmt = prepare(sql)
-    if (sql.startsWith('DELETE ')) { const exec = stmt.run; stmt.run = async () => { deletes++; return exec() } }
+    if (sql.startsWith('DELETE ')) {
+      const exec = stmt.run; stmt.run = async () => { deletes++; return exec() }
+      const batchExec = stmt._exec; stmt._exec = () => { deletes++; return batchExec() }
+    }
     return stmt
   }
   const get = env.ASSETS.get.bind(env.ASSETS)
