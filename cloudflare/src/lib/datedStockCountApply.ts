@@ -17,8 +17,8 @@ import { productStockGuardStatement, productStockGuardError, assertProductsActiv
 //      movements this importer recorded is still exactly what the plan saw
 //      (a concurrent apply of the same file, or a ledger revert since
 //      preview, fails the batch -- nothing is written);
-//   2. the superseded rows and their provenance deleted -- in the same
-//      batch that reverses their effect below, never without it;
+//   2. counters appended for superseded rows; originals and provenance
+//      remain immutable while the same batch reverses their effect below;
 //   3. every lot's ONE net change: minus the superseded movements' lot
 //      effects (their recorded provenance, migration 0035), plus this
 //      run's own lot actions, plus the plan's settlement moves
@@ -54,7 +54,6 @@ import { productStockGuardStatement, productStockGuardError, assertProductsActiv
 // clamped the lot reversal at zero but not the aggregate one, so a sale
 // from the count's own lot left sum(lots) above branch_stock for good.
 import type { D1Compat } from './db'
-import { buildInClause, chunkForBinding } from './sqlBinding'
 import { DATED_STOCK_COUNT_REASON, type StockCountPlan, type StockCountPlanMovement, type PlannedBatchAction } from './datedStockCountImport'
 import {
   planReceiveBatchStock, planUnreceiveBatchStock, prepareReceiptLotTarget, type StockWriteStatement,
@@ -117,6 +116,7 @@ function lotIdSql(ref: LotRef, paramPrefix: string, params: Record<string, unkno
 
 export interface ApplyDatedStockCountPlanResult {
   movementsDeleted: number
+  movementsCompensated: number
   movementsApplied: number
   batchTrackedGroups: number
   plainGroups: number
@@ -186,7 +186,7 @@ export async function applyDatedStockCountPlan(
   }
 
   // 2. Reverse the superseded movements -- aggregate and lots by the same
-  // full amounts -- and delete them. A prior receipt (+) comes back off its
+  // full amounts -- and append a counter for each immutable original. A prior receipt (+) comes back off its
   // lot and out of the lot's received units; a prior drain (-) goes back
   // onto its lot.
   const unreceive: StockWriteStatement[] = []
@@ -201,15 +201,28 @@ export async function applyDatedStockCountPlan(
       if (quantity > 0) unreceive.push(...planUnreceiveBatchStock({ batchId: action.receivedBatchId ?? action.batchId, quantity, totalCostUsd: null }))
     }
   }
-  if (plan.movementsToDelete.length) {
-    // D1 has no array bind and a 100-parameter limit per statement.
-    for (const chunk of chunkForBinding(plan.movementsToDelete)) {
-      const { sql, params } = buildInClause('id', chunk)
-      // No FK cascade (migration 0035's own comment) -- this importer owns
-      // both tables and deletes a superseded movement's provenance itself.
-      statements.push({ sql: `DELETE FROM dated_stock_count_batch_actions WHERE movement_id IN (${sql})`, params })
-      statements.push({ sql: `DELETE FROM inventory_movements WHERE id IN (${sql})`, params })
-    }
+  for (const prior of plan.supersededMovements) {
+    usesSessionGuards = true
+    statements.push({
+      sql: `INSERT INTO stock_session_guards (guard_value)
+            SELECT CASE WHEN EXISTS (SELECT 1 FROM inventory_movements m WHERE m.id=@id
+              AND m.product_id=@productId AND m.branch_id=@branchId AND m.reason=@reason
+              AND (CASE WHEN m.movement_type='remove' THEN -m.quantity ELSE m.quantity END)=@signedQuantity)
+              AND NOT EXISTS (SELECT 1 FROM inventory_movements WHERE reference_id='revert:' || @id)
+              THEN 1 ELSE 0 END`,
+      params: { id: prior.id, productId: prior.productId, branchId: prior.branchId, reason: DATED_STOCK_COUNT_REASON, signedQuantity: prior.signedQuantity },
+    })
+    statements.push({
+      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, addressed_branch_name,
+              movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr,
+              free_quantity, reason, reference_id, user_id, user_name, created_at, batch_id)
+            SELECT product_id, product_name, branch_id, branch_name, addressed_branch_name,
+              CASE WHEN movement_type='remove' THEN 'add' ELSE 'remove' END, quantity,
+              unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, free_quantity,
+              'Revert of #' || id || ': ' || reason, 'revert:' || id, @userId, @userName, CURRENT_TIMESTAMP, batch_id
+            FROM inventory_movements WHERE id=@id`,
+      params: { id: prior.id, userId: actor.userId, userName: actor.userName },
+    })
   }
 
   // 3. This run's lot actions, then the settlement. A lot this run creates
@@ -390,7 +403,8 @@ export async function applyDatedStockCountPlan(
   for (const entry of netByGroup.values()) if (entry.lots) lotGroups += 1
   const movementGroups = new Set(plan.movementsToCreate.map((m) => groupKey(m.productId, m.branchId)))
   return {
-    movementsDeleted: plan.movementsToDelete.length,
+    movementsDeleted: 0,
+    movementsCompensated: plan.supersededMovements.length,
     movementsApplied: plan.movementsToCreate.length,
     batchTrackedGroups: lotGroups,
     plainGroups: [...movementGroups].filter((key) => !netByGroup.get(key)?.lots).length,

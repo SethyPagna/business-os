@@ -614,10 +614,9 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
 // repo's existing idiom): 0 when a counter-movement for this row already
 // exists, or when the row itself is gone, which aborts the whole batch before
 // any stock moves. The second half is FX-stock F3: a dated stock count
-// re-apply reverses and DELETES its own superseded movement in one batch; a
+// re-apply reverses its own superseded movement with an appended counter; a
 // revert that read that row just before would otherwise compensate a
-// movement that no longer exists (the stock moved twice, and a revert:<id>
-// row points at nothing). The caller reports it as stock_changed.
+// movement already compensated (or historically deleted), moving stock twice. The caller reports it as stock_changed.
 const ALREADY_REVERTED_GUARD = `INSERT INTO stock_session_guards (guard_value)
   SELECT CASE WHEN EXISTS (SELECT 1 FROM inventory_movements WHERE reference_id = @ref)
     OR NOT EXISTS (SELECT 1 FROM inventory_movements WHERE id = @movementId) THEN 0 ELSE 1 END`
