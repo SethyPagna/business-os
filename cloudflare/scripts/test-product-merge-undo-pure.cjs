@@ -569,12 +569,12 @@ async function run() {
 
   await check('products.ts fold re-parents sale_items + inventory_movements and captures their ids', async () => {
     // The batched snapshot must still be driven by MERGE_REPARENT_TABLES (the
-    // one list undoAppliers.ts and the fold share), and the route may only
-    // replay the exact ids returned by that snapshot.
+    // one list undoAppliers.ts and the fold share); captured ids drive undo,
+    // while the guarded forward transaction re-parents the discarded product.
     assert.match(productsSrc, /UPDATE \$\{table\} SET \$\{column\} = @canonicalId WHERE \$\{column\} = @dupId/)
     assert.match(productsSrc, /readProductMergeCaseSnapshot\(db, canonicalId, dup\.id, MERGE_REPARENT_TABLES\)/)
     assert.match(productsSrc, /const reparentedByTable = snapshot\.reparentedByTable/)
-    assert.match(productsSrc, /for \(const \{ table, column, ids \} of reparentedByTable\)/)
+    assert.match(productsSrc, /for \(const \{ table, column(?:, ids)? \} of reparentedByTable\)/)
     assert.match(snapshotSrc, /\.\.\.reparentTables\.map\(\(\{ table, column \}, index\) =>/)
     assert.match(snapshotSrc, /sql: `SELECT id FROM \$\{table\} WHERE \$\{column\} = @id`/)
     assert.match(appliersSrc, /\{ table: 'sale_items', column: 'product_id' \}/)

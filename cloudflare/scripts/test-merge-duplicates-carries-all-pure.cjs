@@ -130,8 +130,19 @@ check('the merge carries the discarded row\'s RETURNS, not just its sales', () =
   }
   assert.ok(/readProductMergeCaseSnapshot\(db, canonicalId, dup\.id, MERGE_REPARENT_TABLES\)/.test(mergeBlock),
     'the fold must pass the ONE shared reparent list into the batched snapshot helper')
-  assert.ok(/for \(const \{ table, column, ids \} of reparentedByTable\)/.test(mergeBlock),
-    'the fold must write every link captured by the shared reparent snapshot')
+  const start = mergeBlock.indexOf('const reparentedByTable = snapshot.reparentedByTable')
+  const end = mergeBlock.indexOf('// Keep the denormalized', start)
+  assert.ok(start >= 0 && end > start, 'the shared reparent planner is present')
+  const plan = new Function('snapshot', 'canonicalId', 'dup', 'statements', mergeBlock.slice(start, end))
+  const reparentedByTable = ['sale_items', 'return_items', 'return_replacement_items'].map((table, index) => ({
+    table, column: 'product_id', ids: [10 + index, 20 + index],
+  }))
+  const statements = []
+  plan({ reparentedByTable }, 7, { id: 9 }, statements)
+  assert.deepEqual(statements, reparentedByTable.map(({ table, column }) => ({
+    sql: `UPDATE ${table} SET ${column} = @canonicalId WHERE ${column} = @dupId`,
+    params: { canonicalId: 7, dupId: 9 },
+  })), 'sale links alone are insufficient; both kinds of return must follow the discarded product')
   assert.ok(/reparentedByTable,/.test(routeSrc), 'undo cannot put back a link the reversal never recorded')
 })
 
