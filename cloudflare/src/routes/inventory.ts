@@ -1,4 +1,5 @@
-import type { RequestMetrics } from '../lib/requestMetrics'
+import { currentRequestMetrics, type RequestMetrics } from '../lib/requestMetrics'
+import { canonicalOfflineSaleOwner, offlineSaleOwnerError } from '../lib/offlineSaleOwnership'
 import { getPlanLimits } from '../lib/planTier'
 import { productStockGuardError, productHasStockSql, productStockGuardStatement, assertProductsActive } from '../lib/productStockGuard'
 import { requireReceivingBranch, receivingBranchAssertion, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from '../lib/receivingBranch'
@@ -46,7 +47,7 @@ import { hasColumn } from '../lib/schemaProbe'
 import { parseDatedStockCountEntries, buildDatedStockCountPlan } from '../lib/datedStockCountRoute'
 import { applyDatedStockCountPlan, DatedStockCountConflictError } from '../lib/datedStockCountApply'
 import { parseRawDatedCountRows, resolveDatedStockCountRows } from '../lib/datedStockCountResolve'
-import { applyDatedStockCountDecisions, type DatedCountDecision } from '../lib/datedStockCountDecisions'
+import { applyDatedStockCountDecisions, DatedDecisionRequestError, type DatedCountDecision } from '../lib/datedStockCountDecisions'
 import { formatStockChangeTelegramLines, formatTransferTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import { TRANSFER_DIRECTION_ERROR, transferDirectionError } from '../lib/branchRoleGuards'
 import { catalogCostRecomputeIfChangedStatement } from '../lib/catalogCostRecompute'
@@ -2708,15 +2709,22 @@ app.post('/dated-stock-count/resolve/apply-decisions', async (c) => {
   const decisionsIn = Array.isArray(body.decisions) ? body.decisions : []
   if (!resolvedIn || !unresolvedIn) return c.json({ success: false, error: 'resolved and unresolved (from a prior /resolve call) are both required' }, 400)
 
+  const owner = canonicalOfflineSaleOwner(user, c.req.url)
+  if (offlineSaleOwnerError(body.offline_owner, owner)) return c.json({ success: false, code: 'dated_decision_owner_mismatch', error: 'Keep the original dated decisions and retry from their original account and server.' }, 409)
   const db = getDb(c.env)
-  const result = await applyDatedStockCountDecisions(db, resolvedIn as any, unresolvedIn as any, decisionsIn as DatedCountDecision[])
-
-  if (result.productsCreated.length) {
-    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'dated_stock_count_resolve_products_created', 'inventory', null, { productsCreated: result.productsCreated })
-    c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
+  let local = 0
+  const used = () => currentRequestMetrics()?.invocation.attemptedStatements ?? local
+  try {
+    const result = await applyDatedStockCountDecisions(db, resolvedIn as any, unresolvedIn as any, decisionsIn as DatedCountDecision[], {
+      actorId: user.id, actorName: actorSnapshot(user), requestId: body.client_request_id, owner,
+      budget: { limit: getPlanLimits(c.env).d1QueriesPerInvocation, used, charge: n => { local += n } },
+    })
+    if (!result.replayed && result.productsCreated.length) c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
+    return c.json({ success: true, ...result })
+  } catch (error) {
+    if (error instanceof DatedDecisionRequestError) return c.json({ success: false, error: error.message, code: error.code }, error.status)
+    throw error
   }
-
-  return c.json({ success: true, ...result })
 })
 
 app.post('/dated-stock-count/preview', async (c) => {
