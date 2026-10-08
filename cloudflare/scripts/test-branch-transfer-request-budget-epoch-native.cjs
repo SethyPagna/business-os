@@ -6,21 +6,18 @@ const root = path.resolve(__dirname, '..')
 function fixture(lots = 1) {
   const original = path.join(__dirname, 'test-stock-session-atomic.cjs')
   let source = fs.readFileSync(original, 'utf8').replaceAll('\r\n', '\n')
-  source = source.replace("name.endsWith('.sql')).sort()", "name.endsWith('.sql') && Number(name.slice(0,4))<243).sort()")
   source = source.replace("VALUES(1, 'Serum', 'SER-1', 2, 0, 0, 1)", "VALUES(1, 'Serum', 'SER-1', 2, 0, 100, 1)").replace('VALUES(1, 1, 0)', 'VALUES(1, 1, 100)')
-  source = source.replace('  let failAfterMetadata = false', `
-    sql.exec("INSERT INTO branches(id,name,is_default,is_active)VALUES(2,'Warehouse',0,1)")
-    for(let id=1;id<=${lots};id++) {
-      sql.prepare('INSERT INTO product_batches(id,variant_product_id,batch_key,received_quantity,received_cost_usd)VALUES(?,1,?,100,200)').run(id,'20260905-'+id)
-      sql.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)VALUES(?,1,?)').run(id,${lots === 1 ? 100 : 1})
-    }
-    sql.exec(fs.readFileSync(path.join(root,'migrations','0243_stock_schema_epoch.sql'),'utf8'))
-    let failAfterMetadata = false`)
   source = source.replace('    let result\n    try { result = sqliteD1Call', `    if(sql.prepare(statement.text).reader) return {results:sqliteD1Call(sql.prepare(statement.text),'all',statement.params),meta:{changes:0}}
     let result
     try { result = sqliteD1Call`)
   const m = new Module(original, module); m.filename = original; m.paths = module.paths; m._compile(source, original)
-  return m.exports.fixture()
+  return m.exports.fixture(sql => {
+    sql.exec("INSERT INTO branches(id,name,is_default,is_active) VALUES(2,'Warehouse',0,1)")
+    for(let id=1;id<=lots;id++) {
+      sql.prepare('INSERT INTO product_batches(id,variant_product_id,batch_key,received_quantity,received_cost_usd) VALUES(?,1,?,100,200)').run(id,'20260905-'+id)
+      sql.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,?)').run(id,lots===1?100:1)
+    }
+  })
 }
 async function bundleWorker() {
   const result = await build({stdin:{resolveDir:root,loader:'ts',contents:`import worker from './src/index.ts';export { ensureCoreDataInvariants } from './src/lib/coreDataInvariants.ts';export default worker;`},bundle:true,write:false,format:'cjs',platform:'node',target:'es2022',packages:'external',define:{__WORKER_BUILD_REVISION__:JSON.stringify('branch-budget-proof'),__WORKER_BUILD_HASH__:JSON.stringify('full-0243'),__WORKER_BUILT_AT__:JSON.stringify('2026-10-09T00:00:00Z')},plugins:[{name:'isolated-runtime',setup(b){

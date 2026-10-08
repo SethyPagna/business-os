@@ -5,10 +5,6 @@ const Module = require('node:module')
 const original = path.join(__dirname, 'test-stock-session-atomic.cjs')
 let source = fs.readFileSync(original, 'utf8').replaceAll('\r\n','\n')
 source = source.replace("if (name.endsWith('/productStockGuard')) return productStockGuard", '')
-source = source.replace("name.endsWith('.sql')).sort()", "name.endsWith('.sql') && Number(name.slice(0,4)) < 243).sort()")
-source = source.replace('  let failAfterMetadata = false', `  sql.exec("INSERT INTO branches(id,name,is_default,is_active) VALUES(2,'Warehouse',0,1); INSERT INTO products(id,name,stock_quantity,is_active) VALUES(2,'Missing coverage',7,1)")
-  sql.exec(fs.readFileSync(path.join(root,'migrations','0243_stock_schema_epoch.sql'),'utf8'))
-  let failAfterMetadata = false`)
 source = source.replace('mutate(sql)\n      }\n      const result = runBatch', 'await mutate(sql)\n      }\n      const result = runBatch')
 source = source.replace("['routes/inventory.ts', 'routes/actionHistory.ts', 'routes/batches.ts']", "['routes/inventory.ts', 'routes/actionHistory.ts', 'routes/batches.ts', 'routes/branches.ts']")
 source = source.replace("if (name === './cache' || name === '../lib/cache')", "if ((name === './cache' || name === '../lib/cache') && normalized !== 'routes/branches.ts')")
@@ -17,7 +13,8 @@ const harness = new Module(original, module)
 harness.filename = original
 harness.paths = module.paths
 harness._compile(source, original)
-const {fixture,loadStockSession,user,receiveRequest} = harness.exports
+const {fixture: baseFixture,loadStockSession,user,receiveRequest} = harness.exports
+const fixture = () => baseFixture(sql => sql.exec("INSERT INTO branches(id,name,is_default,is_active) VALUES(2,'Warehouse',0,1); INSERT INTO products(id,name,stock_quantity,is_active) VALUES(2,'Missing coverage',7,1)"))
 let attempted=0
 const hook={d1Start(n){attempted+=n},d1Call(){}}
 globalThis[Symbol.for('business-os.request-metrics.v1')]=hook
