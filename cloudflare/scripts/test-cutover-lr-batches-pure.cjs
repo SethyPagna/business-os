@@ -35,7 +35,7 @@ async function main() {
       W.assertComposedWrites(capNew, capOld, dbNew)
       if (capNew.flat().some(s => /UPDATE products SET\s+cost_price_usd/.test(s.sql))) {
         for (const [label, pattern] of [
-          ['missing atomic receipt', /UPDATE stock_mutation_receipts SET written=1/],
+          ['missing atomic receipt', /UPDATE stock_mutation_receipts SET written=1|DO UPDATE SET written=excluded\.written/],
           ['missing movement', /INSERT INTO inventory_movements/],
           ['missing cost', /UPDATE products SET\s+cost_price_usd/],
           ['missing business guard', /INSERT INTO stock_session_guards/],

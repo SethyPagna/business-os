@@ -197,11 +197,12 @@ function assertComposedWrites(current, previous, db) {
   assert.deepEqual(batch.filter(guard), writes.filter(guard), 'mandatory business guards share the physical stock transaction')
   const completion = writes.find(s => /UPDATE stock_mutation_receipts SET response_status/.test(s.sql))
   if (!completion) return
-  const marks = batch.filter(s => /UPDATE stock_mutation_receipts SET written=1/.test(s.sql))
+  const writeMark = s => /UPDATE stock_mutation_receipts SET written=1|INSERT INTO stock_mutation_receipts[\s\S]*DO UPDATE SET written=excluded\.written/.test(s.sql)
+  const marks = batch.filter(writeMark)
   if (!marks.length) {
     const unchangedGroups = rows => rows.map(group => group.filter(s => !receipt(s))).filter(group => group.length)
     assert.equal(normalised(unchangedGroups(current)), normalised(unchangedGroups(previous)), 'legacy explicit-lot path retains its existing transaction grouping')
-    assert.ok(writes.some(s => /UPDATE stock_mutation_receipts SET written=1/.test(s.sql)))
+    assert.ok(writes.some(writeMark))
     return
   }
   assert.equal(marks.length, 1, 'required written receipt shares the stock transaction')
