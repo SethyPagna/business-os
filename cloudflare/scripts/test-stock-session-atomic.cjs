@@ -70,7 +70,14 @@ function fixture(seedBeforeFence = () => {}) {
   const wrap = (text, params = []) => ({
     text, params,
     async first() { return sqliteD1Call(sql.prepare(text), 'get', params) || null },
-    async all() { return { results: sqliteD1Call(sql.prepare(text), 'all', params) } },
+    async all() {
+      if (beforeRevisionRead && /^SELECT entity_type,entity_key,revision FROM stock_session_revisions/.test(text)) {
+        const mutate = beforeRevisionRead
+        beforeRevisionRead = null
+        await mutate(sql)
+      }
+      return { results: sqliteD1Call(sql.prepare(text), 'all', params) }
+    },
     async run() {
       const result = sqliteD1Call(sql.prepare(text), 'run', params)
       return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
@@ -93,11 +100,6 @@ function fixture(seedBeforeFence = () => {}) {
   }))()
   const envDb = {
     prepare(text) {
-      if (beforeRevisionRead && /^SELECT entity_type,entity_key,revision FROM stock_session_revisions/.test(text)) {
-        const mutate = beforeRevisionRead
-        beforeRevisionRead = null
-        mutate(sql)
-      }
       const bare = wrap(text)
       return {
         ...bare,
@@ -148,15 +150,22 @@ function receiveRequest(requestId = 'stock-request-001', quantity = 5) {
 }
 
 function seedDistinctProducts(f, count) {
+  const { STOCK_SCHEMA_EPOCH } = loadStockSession('lib/stockTransaction.ts')
+  assert.equal(f.sql.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get().value, STOCK_SCHEMA_EPOCH)
   const insertProduct = f.sql.prepare(`
     INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active)
     VALUES(?,?,?,?,0,0,1)
   `)
   const insertStock = f.sql.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,0)')
-  for (let id = 2; id <= count; id += 1) {
-    insertProduct.run(id, `Session item ${id}`, `SESSION-${id}`, 2)
-    insertStock.run(id)
-  }
+  f.sql.transaction(() => {
+    f.sql.prepare("INSERT INTO system_flags(key,value) VALUES('stock_transaction_permit',?)").run(STOCK_SCHEMA_EPOCH)
+    for (let id = 2; id <= count; id += 1) {
+      insertProduct.run(id, `Session item ${id}`, `SESSION-${id}`, 2)
+      insertStock.run(id)
+    }
+    f.sql.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'")
+  })()
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
 }
 
 function zeroCreateRequest(requestId = 'zero-create-request-001', name = 'Catalog only cream') {
@@ -201,6 +210,15 @@ async function check(name, run) {
 }
 
 async function main() {
+  await check('current epoch fixture still refuses unowned stock writers and rolls failed seed permits back', async () => {
+    const f = fixture(), before = receiptState(f.sql)
+    assert.throws(() => f.sql.exec('UPDATE branch_stock SET quantity=1 WHERE product_id=1'), /stock_transaction_required/)
+    assert.deepEqual(receiptState(f.sql), before)
+    seedDistinctProducts(f, 2)
+    assert.throws(() => seedDistinctProducts(f, 2), /UNIQUE/)
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    f.sql.close()
+  })
   await check('actual movements parser rejects a missing continuous partner', async () => {
     const f = fixture()
     const app = loadStockSession('routes/inventory.ts').default
@@ -209,6 +227,8 @@ async function main() {
     assert.deepEqual(await response.json(), { error: 'createdFrom and createdTo must be provided together' })
   })
   const { commitStockSession, replayStockSession, StockSessionError } = loadStockSession()
+  const { executeStockTransaction } = loadStockSession('lib/stockTransaction.ts')
+  const { getDb } = loadStockSession('lib/db.ts')
   await check('cost entry defaults denied independently of inventory and products grants', async () => {
     const f = fixture()
     const before = f.sql.serialize()
@@ -334,7 +354,7 @@ async function main() {
   ]) {
     await check(`${label} between snapshot and revision capture rejects without durable session rows`, async () => {
       const f = fixture()
-      f.beforeRevisionCapture((sql) => sql.exec(mutation))
+      f.beforeRevisionCapture(() => executeStockTransaction(getDb(f.env), mutation.split(';').map(sql => ({ sql })), 'once'))
       await assert.rejects(() => commitStockSession(f.env, user, receiveRequest()),
         (error) => error instanceof StockSessionError && error.code === 'stale_state')
       const state = receiptState(f.sql)
@@ -698,15 +718,16 @@ async function main() {
   await check('non-first packed revision guard rejects an ABA stock race and rolls back every business row', async () => {
     const f = fixture()
     const originalBatch = f.env.DB.batch.bind(f.env.DB)
+    const concurrentDb = getDb({ DB: { prepare: f.env.DB.prepare.bind(f.env.DB), batch: originalBatch } })
     f.env.DB.batch = async statements => {
       const packed = statements.find(statement => statement.text.startsWith('INSERT INTO stock_session_guards(guard_value) ') && statement.text.includes('UNION ALL'))
       assert.ok(packed && packed.text.indexOf('branch_stock') > packed.text.indexOf('UNION ALL'), 'the failing branch-stock guard follows a valid maintenance guard in the same statement')
       return originalBatch(statements)
     }
-    f.beforeCommit((sql) => {
-      sql.prepare('UPDATE branch_stock SET quantity=1 WHERE product_id=1 AND branch_id=1').run()
-      sql.prepare('UPDATE branch_stock SET quantity=0 WHERE product_id=1 AND branch_id=1').run()
-    })
+    f.beforeCommit(() => executeStockTransaction(concurrentDb, [
+      { sql: 'UPDATE branch_stock SET quantity=1 WHERE product_id=1 AND branch_id=1' },
+      { sql: 'UPDATE branch_stock SET quantity=0 WHERE product_id=1 AND branch_id=1' },
+    ], 'once'))
     await assert.rejects(
       () => commitStockSession(f.env, user, receiveRequest('stock-request-aba')),
       (error) => error instanceof StockSessionError && error.statusCode === 409 && error.code === 'stale_state',
