@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // FX-undo2 item 1 (R-undo C5/C12): an undo/redo the Worker refuses in order
 // to protect newer data must say so with a stable machine code in its 409
 // body, so the client can restate the refusal in the operator's language
@@ -90,6 +91,7 @@ function loadHistoryRoute(db, undoAppliers) {
   }).outputText
   const mod = { exports: {} }
   const localRequire = (request) => {
+    if (request.endsWith('/productStockGuard')) return productStockGuard
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
     if (request.startsWith('.')) throw new Error(`routes/actionHistory.ts imports ${request}, which this test does not provide`)
     return require(request)

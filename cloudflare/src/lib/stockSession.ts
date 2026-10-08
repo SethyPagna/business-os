@@ -1,4 +1,4 @@
-import { productStockGuardError, productStockGuardStatement } from './productStockGuard'
+import { productStockGuardError, productStockGuardStatement, ProductStockGuardError } from './productStockGuard'
 import { getDb, type D1Compat } from './db'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
@@ -716,7 +716,8 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
 
   for (const id of receiveIds) {
     const product = receiveProducts.get(id)
-    if (!product || Number(product.is_active) !== 1) fail(`Product ${id} was not found or is inactive.`, 404, 'product_not_found')
+    if (!product) fail(`Product ${id} was not found.`, 404, 'product_not_found')
+    if (Number(product.is_active) !== 1) throw new ProductStockGuardError([id])
   }
   for (const id of branchIds) {
     const branch = branchMap.get(id)

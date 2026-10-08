@@ -1524,8 +1524,8 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
     async (markWritten, atomicMark) => {
       try { return await runAdjustActionKernel(c, body, markWritten, atomicMark) }
       catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+        const stockGuard = productStockGuardError(error)
+        if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         if (isReceivingBranchError(error)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
         const refusal = branchEffectRefusal(error)
         if (refusal) return c.json(refusal, 409)
@@ -1598,10 +1598,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   let unitCostUsd: number | null = null
   if (body.unitCostUsd != null) {
     try { unitCostUsd = explicitReceiptMoney4(body.unitCostUsd, 'Unit cost') }
-    catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409);
-    return c.json({ error: error instanceof Error ? error.message : 'Invalid unit cost' }, 400) }
+    catch (error) { return c.json({ error: error instanceof Error ? error.message : 'Invalid unit cost' }, 400) }
   }
   const paymentStatus = body.paymentStatus === 'paid' || body.paymentStatus === 'credit' ? body.paymentStatus : null
   const creditDueDate = body.creditDueDate != null ? String(body.creditDueDate).trim() || null : null
@@ -1839,8 +1836,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       explicitCostUsd = pricing.cost_usd != null ? explicitReceiptMoney4(pricing.cost_usd, 'USD cost') : null
       explicitCostKhr = pricing.cost_khr != null ? explicitReceiptMoney4(pricing.cost_khr, 'KHR cost') : null
     } catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+      const stockGuard = productStockGuardError(error)
+      if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       return c.json({ error: error instanceof Error ? error.message : 'Invalid pricing cost' }, 400)
     }
     // The discounted tier arrives as wholesale_price_usd/khr only. The retired
@@ -1910,8 +1907,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         }
       })
     } catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+      const stockGuard = productStockGuardError(error)
+      if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       if (error instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
       throw error
     }
@@ -2285,8 +2282,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       lotCode = received.lotCode
       }
     } catch (err) {
-    const stockGuard = productStockGuardError(err)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+      const stockGuard = productStockGuardError(err)
+      if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       if (isReceivingBranchError(err)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
       if (isBranchRedirectGuardError(err)) throw err
       return c.json({ error: err instanceof Error ? err.message : 'Failed to receive stock' }, 400)
@@ -2311,8 +2308,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         await removeStockFromBatch(db, { batchId: batchIdRequested, productId: targetProductId, branchId, quantity })
         removedBatchQuantities = [{ batchId: batchIdRequested, quantity }]
       } catch (err) {
-    const stockGuard = productStockGuardError(err)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+        const stockGuard = productStockGuardError(err)
+        if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         if (err instanceof InsufficientBatchStockError) return c.json({ error: err.message }, 400)
         return c.json({ error: err instanceof Error ? err.message : 'Failed to remove stock' }, 400)
       }
@@ -2353,8 +2350,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
           ...(conditionTag ? holdRemovedStatements(conditionTag) : [movementRowStatement()]),
         ]))
       } catch (err) {
-    const stockGuard = productStockGuardError(err)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+        const stockGuard = productStockGuardError(err)
+        if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         if (err instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
         if (isBranchRedirectGuardError(err)) throw err
         if (isStockRemovalConflict(err)) return c.json(STOCK_REMOVAL_CONFLICT, 409)
@@ -2414,8 +2411,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         await applyStockDelta(c.env, targetProductId, branchId, -Math.abs(delta))
       }
     } catch (err) {
-    const stockGuard = productStockGuardError(err)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+      const stockGuard = productStockGuardError(err)
+      if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       if (err instanceof InsufficientBatchStockError) return c.json({ error: err.message }, 400)
       if (isStockRemovalConflict(err)) return c.json(STOCK_REMOVAL_CONFLICT, 409)
       return c.json({ error: err instanceof Error ? err.message : 'Failed to hold received stock as tagged' }, 400)
@@ -3122,8 +3119,8 @@ async function runTaggedLotAction(c: InventoryContext, action: 'dispose' | 'rest
     (value, status) => c.json(value as never, status as never),
     async (_markWritten, atomicMark) => {
       try { return await runTaggedLotActionKernel(c, action, body, atomicMark) } catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+        const stockGuard = productStockGuardError(error)
+        if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         const refusal = branchEffectRefusal(error)
         if (refusal) return c.json(refusal, 409)
         throw error

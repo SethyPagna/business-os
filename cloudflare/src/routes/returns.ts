@@ -813,10 +813,7 @@ app.get('/', async (c) => {
   const limit = Math.min(1000, Math.max(1, Number.parseInt(String(query.limit || '500'), 10) || 500))
 
   let range: ReturnType<typeof returnRangePredicate>
-  try { range = returnRangePredicate(query, 'r.created_at') } catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409);
-    return c.json({ error: (error as Error).message }, 400) }
+  try { range = returnRangePredicate(query, 'r.created_at') } catch (error) { return c.json({ error: (error as Error).message }, 400) }
   const where: string[] = [range.sql]
   const params: Record<string, unknown> = { limit, ...range.params }
   if (query.saleId) { where.push('r.sale_id = @saleId'); params.saleId = query.saleId }
@@ -1048,10 +1045,7 @@ app.get('/report', async (c) => {
   const startDate = String(query.startDate || '').trim()
   const endDate = String(query.endDate || '').trim()
   let range: ReturnType<typeof returnRangePredicate>
-  try { range = returnRangePredicate(query, 'created_at') } catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409);
-    return c.json({ error: (error as Error).message }, 400) }
+  try { range = returnRangePredicate(query, 'created_at') } catch (error) { return c.json({ error: (error as Error).message }, 400) }
   // scope=supplier reports return-to-supplier cases (compensation / business
   // loss) with the SAME response shape -- customer rows simply carry zero in
   // the supplier money columns and vice versa, so one reader serves both the
@@ -1431,8 +1425,8 @@ app.post('/', async (c) => {
           code: 'customer_return_quote_stale', action: 'review_required' }, 409)
       }
     } catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+      const stockGuard = productStockGuardError(error)
+      if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       if (error instanceof SaleMoneyContractError) {
         return c.json({ error: error.message, code: error.message, action: 'review_required' }, 409)
       }
@@ -1447,8 +1441,8 @@ app.post('/', async (c) => {
     try {
       await assertReturnableItems(db, requestedSaleId, body.items)
     } catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+      const stockGuard = productStockGuardError(error)
+      if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       return c.json({ error: (error as Error).message }, 400)
     }
   }
@@ -1510,8 +1504,8 @@ app.post('/', async (c) => {
       try {
         assertReturnCreateCapacity(soldLines, committedReturnLines, returnItems)
       } catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+        const stockGuard = productStockGuardError(error)
+        if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         return c.json({ error: (error as Error).message }, 400)
       }
     }
@@ -1538,8 +1532,8 @@ app.post('/', async (c) => {
       try {
         projectedStatus = projectedSaleStatusForReturnCreateV1(soldLines, committedReturnLines, returnItems, saleMeta.status_before_return)
       } catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+        const stockGuard = productStockGuardError(error)
+        if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         return c.json({ error: (error as Error).message, code: 'customer_return_quote_stale', action: 'review_required' }, 409)
       }
     } else {
@@ -1565,8 +1559,8 @@ app.post('/', async (c) => {
     try {
       headerEffect = recordedBranchId ? resolveBranchEffect(branchDirectory, recordedBranchId, { sells: replacementInputsRaw.length > 0, target: redirectTarget }) : null
     } catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+      const stockGuard = productStockGuardError(error)
+      if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       // A return that moves no stock has nothing to strand on a retired branch no active branch could take. One that
       // pays a refund still asks where the cash leaves (branch_redirect_required) while an active branch exists.
       if (!branchHasNoActiveTarget(error) || movesStock) throw error
@@ -1576,8 +1570,8 @@ app.post('/', async (c) => {
       try {
         itemEffects.push(recordedItemBranch ? resolveBranchEffect(branchDirectory, recordedItemBranch, { target: redirectTarget }) : null)
       } catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+        const stockGuard = productStockGuardError(error)
+        if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         // A line that moves no stock (stock_action none) has nothing to strand, so it never blocks.
         if (!(error instanceof BranchRetiredNoSuccessorError) || normalizeStockAction(item) !== 'none') throw error
         itemEffects.push(null)
@@ -2904,8 +2898,8 @@ app.patch('/:id', async (c) => {
         return { ...item, ...costs }
       })
     } catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+      const stockGuard = productStockGuardError(error)
+      if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       return c.json({ error: (error as Error).message, code: 'return_cost_source_review_required' }, 409)
     }
   }
@@ -3107,8 +3101,8 @@ app.patch('/:id', async (c) => {
     try {
       assertReturnCreateCapacity(soldLines, siblingLines, proposedLines)
     } catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+      const stockGuard = productStockGuardError(error)
+      if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       return c.json({ error: (error as Error).message }, 400)
     }
     projectedSaleStatus = projectedSaleStatusForReturnEdit(
@@ -3508,7 +3502,9 @@ app.patch('/:id', async (c) => {
   await db.batch(statements)
 
   } catch (error) {
+
     const stockGuard = productStockGuardError(error)
+
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     // All lot, branch, return-item and receipt writes share db.batch; a
     // conflict/storage failure rolls them all back before retry inspection.

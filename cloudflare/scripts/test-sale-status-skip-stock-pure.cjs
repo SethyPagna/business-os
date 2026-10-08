@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // S4-2: the admin-only "Don't touch stock" option on a sale status change.
 //
 // THE INCIDENT THIS EXISTS FOR. The 2026-09-02 reconciliation rewrote every
@@ -42,7 +43,7 @@ function compile(file, stubs = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText
   const moduleObj = { exports: {} }
-  const localRequire = (request) => Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : require(request)
+  const localRequire = (request) => request.endsWith('/productStockGuard') ? productStockGuard : Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : require(request)
   new Function('exports', 'require', 'module', output)(moduleObj.exports, localRequire, moduleObj)
   return moduleObj.exports
 }

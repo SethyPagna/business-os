@@ -1,4 +1,4 @@
-import { productStockGuardError } from '../lib/productStockGuard'
+import { productStockGuardError, productStockGuardStatement } from '../lib/productStockGuard'
 import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, canViewAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -915,8 +915,8 @@ app.post('/', async (c) => {
     try {
       redemptionGuard = await preparePointsRedemption(db, customer.id, membershipPointsRedeemed)
     } catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+      const stockGuard = productStockGuardError(error)
+      if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       if (error instanceof SaleBulkError) return c.json({ error: error.message, code: 'loyalty_redemption_conflict' }, error.statusCode)
       throw error
     }
@@ -1745,8 +1745,8 @@ app.post('/', async (c) => {
         await db.batch(statements)
         break
       } catch (batchError) {
-    const stockGuard = productStockGuardError(batchError)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+        const stockGuard = productStockGuardError(batchError)
+        if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         const ownSale = await db.prepare(`SELECT 1 AS hit FROM sales
           WHERE client_request_id=@sale_write_key AND client_request_id<>'' LIMIT 1`)
           .get({ sale_write_key: saleWriteKey })
@@ -2468,8 +2468,8 @@ app.patch('/:id/status', async (c) => {
         changeExchangeRateRaw: settingMap.change_exchange_rate,
       })
     } catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+      const stockGuard = productStockGuardError(error)
+      if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       if (error instanceof SettlementValidationError) return c.json({ error: error.message, code: error.code }, error.statusCode)
       throw error
     }
@@ -2581,8 +2581,8 @@ app.patch('/:id/status', async (c) => {
       try {
         cancellationFeeBranchId = branchResolver.effect(cancellationBranchId, { sells: true })!.effectBranchId
       } catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+        const stockGuard = productStockGuardError(error)
+        if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         const refusal = branchEffectRefusal(error)
         if (refusal) return c.json(refusal, 409)
         throw error
@@ -2680,6 +2680,7 @@ app.patch('/:id/status', async (c) => {
   // and quantity bounds. Any failure rolls back the entire transition.
   for (const op of damagedTransitionOps) {
     const lotParams = { lot: op.lotId, product: op.productId, branch: op.branchId, q: -op.delta }
+    if (lotParams.q > 0) statements.unshift(productStockGuardStatement([op.productId], 'active'))
     statements.push(bulkAssertion(
       'EXISTS(SELECT 1 FROM damaged_stock_lots WHERE id=@lot AND product_id=@product AND branch_id IS @branch AND quantity_remaining+@q BETWEEN 0 AND quantity)',
       lotParams,
@@ -3390,8 +3391,8 @@ app.post('/:id/items', async (c) => {
         additionEffect = { effectBranchId: effect.effectBranchId, branchName: effect.effectName, addressedName: typeof saleLabel === 'string' && saleLabel ? saleLabel : effect.addressedName }
       }
     } catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+      const stockGuard = productStockGuardError(error)
+      if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       const refusal = branchEffectRefusal(error)
       if (refusal) return c.json(refusal, 409)
       throw error
@@ -4393,8 +4394,8 @@ app.post('/:id/amendments', async (c) => {
         ordinaryBusinessMaintenanceGuard,
       ])
     } catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+      const stockGuard = productStockGuardError(error)
+      if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       const retry = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
         WHERE actor_id=@actor AND mutation_kind='amendment' AND request_id=@request`)
         .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: amendmentRequestId })
@@ -4502,8 +4503,8 @@ app.post('/:id/amendments', async (c) => {
         ordinaryBusinessMaintenanceGuard,
       ])
     } catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+      const stockGuard = productStockGuardError(error)
+      if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       const retry = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
         WHERE actor_id=@actor AND mutation_kind='amendment' AND request_id=@request`)
         .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: amendmentRequestId })
@@ -4639,8 +4640,8 @@ app.post('/:id/amendments', async (c) => {
         ordinaryBusinessMaintenanceGuard,
       ])
     } catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+      const stockGuard = productStockGuardError(error)
+      if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       const retry = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
         WHERE actor_id=@actor AND mutation_kind='amendment' AND request_id=@request`)
         .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: amendmentRequestId })
@@ -4694,8 +4695,8 @@ app.post('/:id/amendments', async (c) => {
           saleBranchId: saleHeaderBranchId, saleLabel: typeof saleBranchLabel === 'string' ? saleBranchLabel : null,
         })
       } catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+        const stockGuard = productStockGuardError(error)
+        if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         const refusal = branchEffectRefusal(error)
         if (refusal) return c.json(refusal, 409)
         throw error

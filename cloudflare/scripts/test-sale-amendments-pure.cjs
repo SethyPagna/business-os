@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // Amending a recorded sale as an append-only ledger (S4-30,
 // lib/saleAmendments.ts + migration 0115).
 //
@@ -55,7 +56,7 @@ function compile(file, stubs = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText
   const moduleObj = { exports: {} }
-  const localRequire = (request) => Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : require(request)
+  const localRequire = (request) => request.endsWith('/productStockGuard') ? productStockGuard : Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : require(request)
   new Function('exports', 'require', 'module', output)(moduleObj.exports, localRequire, moduleObj)
   return moduleObj.exports
 }
@@ -169,9 +170,9 @@ const MIGRATION_0133 = fs.readFileSync(
 function setup() {
   const sqlite = new Database(':memory:')
   sqlite.exec(`
-    CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, stock_quantity REAL DEFAULT 0, updated_at TEXT);
+    CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, stock_quantity REAL DEFAULT 0, is_active INTEGER DEFAULT 1, updated_at TEXT);
     CREATE TABLE branch_stock (product_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0 CHECK(quantity >= 0), UNIQUE(product_id, branch_id));
-    CREATE TABLE product_batches (id INTEGER PRIMARY KEY, is_active INTEGER DEFAULT 1, updated_at TEXT);
+    CREATE TABLE product_batches (id INTEGER PRIMARY KEY, variant_product_id INTEGER DEFAULT 1, is_active INTEGER DEFAULT 1, updated_at TEXT);
     INSERT INTO product_batches(id) VALUES(501),(502);
     CREATE TABLE branch_batch_stock (batch_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0 CHECK(quantity >= 0), updated_at TEXT, UNIQUE(batch_id, branch_id));
     CREATE TABLE sale_item_batch_allocations (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_item_id INTEGER, batch_id INTEGER,

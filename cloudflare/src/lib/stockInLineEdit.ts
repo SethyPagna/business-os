@@ -305,8 +305,9 @@ function stateGuard(state: EditState, targetAbsent: boolean): Statement[] {
 // Absolute writes are exact because stateGuard pinned the preimage in the same
 // transaction. Order respects migration 0154 (positive lot stock needs an
 // active lot): activate, move stock, then deactivate.
-function stateWrites(to: EditState, productDelta: number): Statement[] {
-  const out: Statement[] = productDelta > 0 ? [productStockGuardStatement([to.productId], 'active')] : []
+function stateWrites(to: EditState, productDelta: number, from: EditState): Statement[] {
+  const receivesStock = productDelta > 0 || to.lots.some(lot => lot.stock > (from.lots.find(previous => previous.id === lot.id)?.stock ?? 0))
+  const out: Statement[] = receivesStock ? [productStockGuardStatement([to.productId], 'active')] : []
   const lotParams = (lot: LotState) => ({
     product: to.productId, branch: to.branchId, lotId: lot.id, lotKey: lot.batchKey,
     isActive: lot.isActive, receivedAt: lot.receivedAt, lotCode: lot.lotCode, rq: lot.receivedQuantity, rc: lot.receivedCostUsd,
@@ -695,7 +696,7 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
       sql: "UPDATE stock_lot_adjustment_operations SET revision_json=json_set(revision_json,'$.targetLotId',(SELECT id FROM product_batches WHERE variant_product_id=@product AND batch_key=@targetKey)) WHERE id=@operation",
       params: opParams,
     }] : []),
-    ...stateWrites(after, d),
+    ...stateWrites(after, d, before),
     catalogCostRecomputeStatement(productId),
     { sql: `UPDATE stock_lot_adjustment_operations SET revision_json=json_set(revision_json,'$.productCostAfter',
         json_object('cost',(SELECT cost_price_usd FROM products WHERE id=@product),'purchase',(SELECT purchase_price_usd FROM products WHERE id=@product))) WHERE id=@operation`, params: opParams },

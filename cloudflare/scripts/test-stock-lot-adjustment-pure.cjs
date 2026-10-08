@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // Scoped "Set quantity" (owner, 17 Sep; confirmed 24 Sep: "Set Quantity:
 // offer selected received-date lot or branch total; selected lot is the
 // default") -- the companion for cloudflare/migrations/0193_stock_lot_
@@ -41,6 +42,7 @@ function loadModules() {
     const mod = { exports: {} }
     cache.set(normalized, mod)
     const req = (name) => {
+    if (name.endsWith('/productStockGuard')) return productStockGuard
       if (name === '../lib/auth' || name === './auth') return {
         requireAuth: async (c, next) => { c.set('user', c.req.header('x-test-user') ? JSON.parse(c.req.header('x-test-user')) : user); await next() },
       }

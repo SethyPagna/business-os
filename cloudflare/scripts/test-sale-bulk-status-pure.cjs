@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // Actual Hono routes + actual D1 adapter + real SQLite transactions. No SQL mocks.
 const fs = require('node:fs')
@@ -16,6 +17,7 @@ function load(rel) {
   const source = fs.readFileSync(path.join(root,'src',rel),'utf8')
   const output = ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText
   const req = name => {
+    if (name.endsWith('/productStockGuard')) return productStockGuard
     if (name==='hono') return require(name)
     if (name.endsWith('/auth')) return { requireAuth: async(c,next)=>{c.set('user',user);return next()} }
     if (name.endsWith('/cache')) return {bumpVersion:async()=>{},bumpVersions:async()=>{},getVersionWithFallback:async()=>0}

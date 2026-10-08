@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // K2 (Part 410, 11.12/11.13): lib/returnsStock.ts against a REAL sqlite
 // database with the REAL migrations (0074's damaged_stock_lots /
 // return_replacement_items / stock_action land via load_migrations), plus
@@ -37,6 +38,7 @@ function loadReal(relPath, requireOverrides = {}) {
   })
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request.endsWith('/productStockGuard')) return productStockGuard
     if (['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request)) return moneyPrecision
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)

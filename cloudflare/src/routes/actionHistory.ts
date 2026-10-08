@@ -501,8 +501,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         const stockBump = import('../lib/cache').then(({ bumpVersion }) => bumpVersion(c.env, 'stock')).catch(() => {})
         try { c.executionCtx.waitUntil(stockBump) } catch { void stockBump }
       } catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+        const stockGuard = productStockGuardError(error)
+        if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         if (!serverManagedReplay) await db.prepare('UPDATE action_history SET last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
           .run({ last_error: (error as Error)?.message || `Failed to ${direction}`, id: existing.id })
         const code = Number((error as Error & { statusCode?: number })?.statusCode) // Preserve statusCode 409 as a conflict.

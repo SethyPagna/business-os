@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // N6 (owner, 23 Sep 2026): "Stock-in sessions editable (today only add or
 // delete)." Companion for lib/stockInLineEdit.ts, the ONE writer behind
 // POST /api/inventory/stock-in-lines/:movementId/edit, and for the line fold
@@ -33,6 +34,7 @@ function loadModules() {
     const mod = { exports: {} }
     cache.set(normalized, mod)
     const req = (name) => {
+    if (name.endsWith('/productStockGuard')) return productStockGuard
       if (name === '../lib/auth' || name === './auth') return {
         requireAuth: async (c, next) => { c.set('user', c.req.header('x-test-user') ? JSON.parse(c.req.header('x-test-user')) : user); await next() },
       }

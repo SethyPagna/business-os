@@ -61,6 +61,7 @@ function loadUndoAppliers(d1, { audit = async () => {}, realSaleModules = false,
     batch: (stmts) => d1.batch(stmts),
   }
   const stubs = {
+    './productStockGuard': require('./product_stock_guard.cjs'),
     '../index': {},
     './auth': {},
     './db': { getDb: () => dbAdapter, toDbBool: realToDbBool() },

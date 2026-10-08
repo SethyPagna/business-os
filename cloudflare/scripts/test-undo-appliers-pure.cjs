@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // Real-SQLite (not mocked) test of the server-side undo/redo applier slice
 // (K1) -- lib/undoAppliers.ts's 'branch.update' applier and the shared write it
 // replays through, lib/branchWrites.ts's branchUpdateStatements. Same rigor as
@@ -38,7 +39,7 @@ function transpile(relPath) {
 
 function loadModule(relPath, requireShim) {
   const module = { exports: {} }
-  new Function('exports', 'require', 'module', transpile(relPath))(module.exports, (request) => ['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request) ? moneyPrecision : requireShim(request), module)
+  new Function('exports', 'require', 'module', transpile(relPath))(module.exports, (request) => request.endsWith('/productStockGuard') ? productStockGuard : ['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request) ? moneyPrecision : requireShim(request), module)
   return module.exports
 }
 

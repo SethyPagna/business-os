@@ -584,6 +584,11 @@ export async function restoreDamagedLot(db: D1Compat, input: {
   lotId: number
   quantity: number
 }): Promise<boolean> {
+  if (input.quantity > 0) {
+    const lot = await db.prepare('SELECT product_id,quantity,quantity_remaining FROM damaged_stock_lots WHERE id=@id')
+      .get<{ product_id: number; quantity: number; quantity_remaining: number }>({ id: input.lotId })
+    if (lot && Number(lot.quantity_remaining) < Number(lot.quantity)) await assertProductsActive(db, [Number(lot.product_id)])
+  }
   const result = await db.prepare(`
     UPDATE damaged_stock_lots
     SET quantity_remaining = MIN(quantity, quantity_remaining + @quantity), updated_at = datetime('now')

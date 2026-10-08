@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // P3-L6 contract: TAGGED (held, non-sellable) stock -- the owner's "keep in
 // group with tag or remove entirely" choice, "Restock with tag", and the two
 // row actions that lead back out of the held state.
@@ -86,6 +87,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const { sourcePath, outputText } = transpile(relPath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request.endsWith('/productStockGuard')) return productStockGuard
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }
@@ -382,7 +384,7 @@ async function req(method, url, body, targetApp = app) {
 
 function seed() {
   rawDb.exec(`DELETE FROM damaged_stock_lots; DELETE FROM branch_batch_stock; DELETE FROM product_batches;
-    DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches; DELETE FROM inventory_movements;
+    DELETE FROM branch_stock; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches; DELETE FROM inventory_movements;
     DELETE FROM suppliers; DELETE FROM action_history;`)
   rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run()
   rawDb.prepare("INSERT INTO products (id, name, barcode, is_active, stock_quantity, cost_price_usd, cost_price_khr) VALUES (1, 'Widget', 'B123', 1, 0, 3, 12000)").run()
@@ -790,133 +792,38 @@ const ADD = (extra) => ({
   // ignores them leaves an OPEN held lot pointing at a deleted product: units
   // nobody can see, sell, dispose of or restore, and that undo cannot bring
   // back either.
-  await check('deleting a product takes its held lot with it, and undo gives it back whole', async () => {
+  await check('stocked product removal refuses without changing sellable or tagged stock', async () => {
     seed()
-    rawDb.exec('DELETE FROM undo_snapshots; DELETE FROM product_remove_operations; DELETE FROM pending_actions; DELETE FROM audit_logs;')
     assert.equal((await req('POST', '/adjust', ADD())).status, 200)
     assert.equal((await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 4, reason: 'dropped', branchId: 1, conditionTag: 'broken' })).status, 200)
-    assert.deepEqual(sellable(), { product: 6, branch: 6 })
-    const before = heldLots()
-    assert.equal(before.length, 1)
-    assert.equal(Number(before[0].quantity_remaining), 4)
-    assert.equal(before[0].condition_tag, 'broken')
-    const writeOffsBefore = movements('write_off').length
-
-    // --- the plan carries the held lot -------------------------------------
+    const before = { sellable: sellable(), lots: heldLots(), movements: movements('write_off') }
     const plan = await productDelete.prepareProductRemovePlan(db, 1, 'discontinued')
-    assert.equal(plan.damaged_lots.length, 1)
-    assert.equal(Number(plan.damaged_lots[0].quantity_remaining), 4)
-    assert.equal(plan.damaged_lots[0].condition_tag, 'broken')
-    const planDigest = await productDelete.productRemovePlanDigest(plan)
-
-    // --- apply --------------------------------------------------------------
-    await db.batch(productDelete.productRemoveApplyStatements({
+    await assert.rejects(db.batch(productDelete.productRemoveApplyStatements({
       plan, operationId: 'op-tagged-1', source: 'direct', requestId: 'req-tagged-1',
-      user: FAKE_USER, transitionStamp: '2026-09-14T10:00:00.000Z', planDigest,
-    }))
-    assert.equal(Number(rawDb.prepare('SELECT is_active FROM products WHERE id = 1').get({}).is_active), 0)
-    assert.deepEqual(sellable(), { product: 0, branch: 0 })
-    // The held row is kept at zero, exactly as branch_stock and
-    // branch_batch_stock are -- that is what makes the undo an exact restore.
-    const during = heldLots()
-    assert.equal(during.length, 1)
-    assert.equal(Number(during[0].quantity_remaining), 0)
-    assert.equal(during[0].condition_tag, 'broken')
-    // Nothing is left open against a product that no longer exists.
-    assert.equal(Number(rawDb.prepare(`SELECT COUNT(*) AS c FROM damaged_stock_lots d
-      JOIN products p ON p.id = d.product_id WHERE d.quantity_remaining > 0 AND p.is_active = 0`).get({}).c), 0)
-    // P3-losses-writeoff (Sep 15 2026), owner ruling: "if remove directly it
-    // also counts toward losses. as cost price no selling price means loss."
-    // Deleting the product destroys the held units exactly as finally as
-    // disposing the tagged row would, so it books TWO write-offs now: the 6
-    // sellable units (unchanged) AND the 4 held units, at the lot's own
-    // stamped cost -- this used to book only the first, silently destroying
-    // the held units' value with no loss ever recorded for them.
-    const writeOffs = movements('write_off').slice(writeOffsBefore)
-    assert.equal(writeOffs.length, 2)
-    assert.deepEqual(writeOffs.map((row) => Number(row.quantity)).sort((a, b) => a - b), [4, 6])
-    const heldWriteOff = writeOffs.find((row) => Number(row.quantity) === 4)
-    assert.equal(Number(heldWriteOff.unit_cost_usd), 2, 'valued at the lot cost stamped when it was held, not a guess')
-    assert.equal(Number(heldWriteOff.total_cost_usd), 8)
-    // Both rows share ONE reference marker for this apply -- so a single undo
-    // counter excludes both from removalLosses.ts together (see
-    // productRemoveWriteOffReferenceId in lib/productDelete.ts).
-    const sellableWriteOff = writeOffs.find((row) => Number(row.quantity) === 6)
-    assert.equal(sellableWriteOff.reference_id, heldWriteOff.reference_id)
-    assert.equal(sellableWriteOff.reference_id, 'product_remove:op-tagged-1:0')
-
-    // --- undo, replayed server-side from the snapshot alone -----------------
-    const operation = rawDb.prepare("SELECT * FROM product_remove_operations WHERE operation_id = 'op-tagged-1'").get({})
-    assert.equal(operation.status, 'undo_ready')
-    const snapshot = productDelete.parseProductRemoveSnapshot(
-      JSON.parse(rawDb.prepare('SELECT payload_json FROM undo_snapshots WHERE id = @id').get({ id: operation.undo_snapshot_id }).payload_json),
-    )
-    // lib/undoAppliers.ts re-derives this digest before it replays anything.
-    // Carrying a new field in the plan must not desync it.
-    assert.equal(await productDelete.productRemovePlanDigest(snapshot.plan), operation.plan_digest)
-    await db.batch(productDelete.productRemoveReplayStatements({
-      snapshot, operation, direction: 'undo', historyId: Number(operation.action_history_id), expectedGeneration: 0,
-      user: FAKE_USER, transitionStamp: '2026-09-14T11:00:00.000Z', transitionRequestId: 'undo-1',
-    }))
-    const after = heldLots()
-    assert.equal(after.length, 1)
-    assert.equal(Number(after[0].quantity_remaining), 4)
-    assert.equal(after[0].condition_tag, 'broken')
-    assert.equal(after[0].id, before[0].id)
-    assert.deepEqual(sellable(), { product: 6, branch: 6 })
-    // Restored all the way to the surface the owner sees.
-    const listed = await req('GET', '/tagged-lots?productIds=1')
-    assert.deepEqual(listed.json.items.map((item) => [item.condition_tag, item.quantity]), [['broken', 4]])
-
-    // The undo wrote ONE 'add' counter for the held units too (mirroring the
-    // one it already wrote for sellable), both stamped 'revert:' + the shared
-    // marker -- proof removalLosses.ts's exclusion (reference_id-keyed, since
-    // this operation writes more than one row per generation) actually
-    // matches, not just that the number "looks right".
-    const undoCounters = movements('add').filter((row) => row.reference_id === 'revert:product_remove:op-tagged-1:0')
-    assert.deepEqual(undoCounters.map((row) => Number(row.quantity)).sort((a, b) => a - b), [4, 6])
-
-    // --- redo: re-drains with FRESH rows, a new generation, a new marker ----
-    await db.batch(productDelete.productRemoveReplayStatements({
-      snapshot, operation: { ...operation, status: 'reversed', generation: 1 }, direction: 'redo',
-      historyId: Number(operation.action_history_id), expectedGeneration: 1,
-      user: FAKE_USER, transitionStamp: '2026-09-14T12:00:00.000Z', transitionRequestId: 'redo-1',
-    }))
-    const redoWriteOffs = movements('write_off').slice(writeOffsBefore + 2)
-    assert.equal(redoWriteOffs.length, 2, 'redo books a fresh write_off pair, not a reuse of the undone ones')
-    assert.deepEqual(redoWriteOffs.map((row) => Number(row.quantity)).sort((a, b) => a - b), [4, 6])
-    assert.equal(redoWriteOffs[0].reference_id, 'product_remove:op-tagged-1:2', 'tagged at the NEW generation, not the original')
-    assert.deepEqual(sellable(), { product: 0, branch: 0 })
-    assert.equal(Number(heldLots()[0].quantity_remaining), 0)
+      user: FAKE_USER, transitionStamp: '2026-09-14T10:00:00.000Z',
+      planDigest: await productDelete.productRemovePlanDigest(plan),
+    })), /product_has_stock/)
+    assert.equal(Number(rawDb.prepare('SELECT is_active FROM products WHERE id=1').get({}).is_active), 1)
+    assert.deepEqual({ sellable: sellable(), lots: heldLots(), movements: movements('write_off') }, before)
+    assert.equal(rawDb.prepare("SELECT COUNT(*) AS c FROM product_remove_operations WHERE operation_id='op-tagged-1'").get({}).c, 0)
   })
 
-  await check('a removal plan written before held lots existed still applies, and still leaves them alone', async () => {
+  await check('a historical plan without tagged lots cannot be applied as a new stocked removal', async () => {
     seed()
-    rawDb.exec('DELETE FROM undo_snapshots; DELETE FROM product_remove_operations; DELETE FROM pending_actions; DELETE FROM audit_logs;')
     assert.equal((await req('POST', '/adjust', ADD())).status, 200)
     assert.equal((await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 4, reason: 'dropped', branchId: 1, conditionTag: 'broken' })).status, 200)
-
-    // A plan saved before P3-L6 has no damaged_lots key at all. Reading that
-    // as "absent" rather than "empty" is the whole point: an empty set would
-    // make the exact-set guard demand this product have NO held lots, and the
-    // apply would zero rows the snapshot cannot restore.
     const fresh = await productDelete.prepareProductRemovePlan(db, 1, 'discontinued')
     const legacy = { ...fresh }
     delete legacy.damaged_lots
     assert.deepEqual(productDelete.parseProductRemovePlan(legacy), legacy)
-    const guards = productDelete.productRemoveGraphGuards(legacy, 'source')
-    assert.equal(guards.filter((statement) => /damaged_stock_lots/.test(statement.sql)).length, 0)
-
-    await db.batch(productDelete.productRemoveApplyStatements({
+    assert.equal(productDelete.productRemoveGraphGuards(legacy, 'source').filter((statement) => /damaged_stock_lots/.test(statement.sql)).length, 0)
+    const before = { sellable: sellable(), lots: heldLots() }
+    await assert.rejects(db.batch(productDelete.productRemoveApplyStatements({
       plan: legacy, operationId: 'op-legacy-1', source: 'direct', requestId: 'req-legacy-1',
       user: FAKE_USER, transitionStamp: '2026-09-14T12:00:00.000Z',
       planDigest: await productDelete.productRemovePlanDigest(legacy),
-    }))
-    // It behaves exactly as it did before this change: sellable stock gone,
-    // the held lot untouched (orphaned, as it always was). Silently draining
-    // it would be worse -- undo could never put it back.
-    assert.deepEqual(sellable(), { product: 0, branch: 0 })
-    assert.equal(Number(heldLots()[0].quantity_remaining), 4)
+    })), /product_has_stock/)
+    assert.deepEqual({ sellable: sellable(), lots: heldLots() }, before)
   })
 
   // N13: Restore / Dispose is the other 'adjust'-class stock writer; like POST /adjust it refuses a

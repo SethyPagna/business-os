@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // Real SQLite regressions for POST /api/inventory/sessions' commit kernel.
 // These fixtures began red against the legacy receive path: batch metadata
@@ -22,6 +23,7 @@ function loadStockSession(entry = 'lib/stockSession.ts', actor = user) {
     const mod = { exports: {} }
     cache.set(normalized, mod)
     const req = (name) => {
+    if (name.endsWith('/productStockGuard')) return productStockGuard
       if (['routes/inventory.ts', 'routes/actionHistory.ts', 'routes/batches.ts'].includes(normalized) && name === '../lib/auth') return {
         requireAuth: async (c, next) => { c.set('user', actor); await next() },
       }

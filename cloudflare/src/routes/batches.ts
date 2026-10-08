@@ -230,8 +230,8 @@ export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody
     async (markWritten) => {
       try { return await runReceiveBatchActionKernel(c, body, markWritten) }
       catch (error) {
-    const stockGuard = productStockGuardError(error)
-    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+        const stockGuard = productStockGuardError(error)
+        if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         if (isReceivingBranchError(error)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
         const refusal = branchEffectRefusal(error)
         if (refusal) return c.json(refusal, 409)
