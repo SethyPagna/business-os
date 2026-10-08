@@ -5001,9 +5001,8 @@ export async function unifyTouchedProductGroups(db: D1Compat, cutoff: string): P
     const json = JSON.stringify(updates)
     if (new TextEncoder().encode(json).length > 1_000_000) throw new Error('Product group finalization exceeds the bounded update payload; split this import.')
     groupedUpdates.push({
-      sql: `UPDATE products SET ${field}=(SELECT json_extract(value,'$.value') FROM json_each(@updates)
-        WHERE json_extract(value,'$.id')=products.id),updated_at=CURRENT_TIMESTAMP
-        WHERE id IN (SELECT json_extract(value,'$.id') FROM json_each(@updates))`,
+      sql: `UPDATE products SET ${field}=json_extract(u.value,'$.value'),updated_at=CURRENT_TIMESTAMP
+        FROM json_each(@updates) AS u WHERE products.id=json_extract(u.value,'$.id')`,
       params: { updates: json },
     })
   }
@@ -5396,19 +5395,35 @@ function stockQueryBudgetDb(db: D1Compat, limit: number, factoryQueries = 0): Bu
     }
     result.prepare = ((sql: string) => {
       const prepared = source.prepare(sql)
+      const read = (method: 'getOnce' | 'allOnce', params?: Parameters<typeof prepared.get>[0]) => {
+        charge(1)
+        const once = prepared[method]
+        if (once) return once.call(prepared, params)
+        if ((source as BudgetDb).importWriteFenceStatements != null) throw new Error('Budgeted import adapter requires single-attempt reads')
+        return method === 'getOnce' ? prepared.get(params) : prepared.all(params)
+      }
       return {
-        get: (params?: Parameters<typeof prepared.get>[0]) => { charge(1); return prepared.get(params) },
-        all: (params?: Parameters<typeof prepared.all>[0]) => { charge(1); return prepared.all(params) },
-        run: (params?: Parameters<typeof prepared.run>[0]) => { charge(1 + ((source as BudgetDb).importWriteFenceStatements ?? 0)); return prepared.run(params) },
+        get: (params?: Parameters<typeof prepared.get>[0]) => read('getOnce', params),
+        all: (params?: Parameters<typeof prepared.all>[0]) => read('allOnce', params),
+        getOnce: (params?: Parameters<typeof prepared.get>[0]) => read('getOnce', params),
+        allOnce: (params?: Parameters<typeof prepared.all>[0]) => read('allOnce', params),
+        run: async (params?: Parameters<typeof prepared.run>[0]) => {
+          const results = await execute([{ sql, params }])
+          const result = results[0] as D1Result & { changes?: number; lastInsertRowid?: number }
+          return { changes: result.meta?.changes ?? result.changes ?? 0,
+            lastInsertRowid: Number(result.meta?.last_row_id ?? result.lastInsertRowid ?? 0) }
+        },
       }
     }) as D1Compat['prepare']
-    const execute = (statements: Parameters<D1Compat['batch']>[0], once: boolean) => {
+    const execute = (statements: Parameters<D1Compat['batch']>[0]) => {
       charge(statements.length + ((source as BudgetDb).importWriteFenceStatements ?? 0))
       if (statements.some(statement => /(?:UPDATE|INSERT INTO|INSERT OR IGNORE INTO)\s+(?:branch_stock|branch_batch_stock|products|sales)\b/i.test(statement.sql))) budget.physicalBatches++
-      return once ? source.batchOnce(statements) : source.batch(statements)
+      if (source.batchOnce) return source.batchOnce(statements)
+      if ((source as BudgetDb).importWriteFenceStatements != null) throw new Error('Budgeted import adapter requires single-attempt batches')
+      return source.batch(statements)
     }
-    result.batch = statements => execute(statements, false)
-    result.batchOnce = statements => execute(statements, true)
+    result.batch = statements => execute(statements)
+    result.batchOnce = statements => execute(statements)
     return result
   }
   const result = wrap(db)
@@ -6056,6 +6071,9 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // state or composes any catalog, stock, sales, or image write.
     const authority = await assertCurrentImportApplyAuthority(env, job, db)
     const importCostActor = { id: actorId(authority.actor), name: actorSnapshot(authority.actor) }
+    if (job.type === 'stock_actions' && !env.IMPORT_QUEUE) {
+      throw Object.assign(new Error('Stock action imports require the import queue. Restore the queue binding, then retry this job. Saved stock actions will not be applied again.'), { code: 'import_queue_required' })
+    }
     if (jobRow.status !== 'applying') {
       // Reclaim 'applying' status on every entry that isn't already an
       // in-progress continuation -- see runImportAnalyze's identical block
