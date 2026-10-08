@@ -1,3 +1,4 @@
+import { localizeBranchRuleError } from '../../../api/branchRuleErrors.ts'
 import { Suspense, useMemo, useRef, useState } from 'react'
 import type { ComponentType } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
@@ -2545,7 +2546,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
           </div>
           {currentJob.last_error || currentJob.error ? (
             <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
-              <span className="font-semibold">Backend error:</span> {currentJob.last_error || currentJob.error}
+              <span className="font-semibold">{t?.('error') || 'Error'}:</span> {localizeBranchRuleError(currentJob.last_error || currentJob.error, key => t?.(key))}
             </div>
           ) : null}
           {loading ? (

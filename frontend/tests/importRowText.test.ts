@@ -3,6 +3,19 @@ import fs from 'node:fs'
 import { importRowDetailText, importRowMessageText, importWarningText } from '../src/components/imports/importRowText.ts'
 import { localizeBranchRuleError } from '../src/api/branchRuleErrors.ts'
 const km = JSON.parse(fs.readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8'))
+const en = JSON.parse(fs.readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8'))
+const conflictCode = 'product_import_finalization_changed'
+for (const pack of [en, km]) {
+  assert.ok(pack[conflictCode], 'finalization conflict has a translated recovery message')
+  const t = (key: string, fallback: string) => pack[key] || fallback
+  const saved = `${conflictCode}: Worker detail from a persisted job`
+  assert.equal(importRowDetailText({ code: conflictCode, message: 'Original English' }, t), pack[conflictCode])
+  assert.equal(importRowMessageText(saved, t), pack[conflictCode])
+  assert.equal(localizeBranchRuleError(saved, key => pack[key]), pack[conflictCode])
+  for (const original of ['product_import_finalization_changed_extra: original detail', 'vendor_unknown: original detail']) {
+    assert.equal(importRowMessageText(original, t), original)
+  }
+}
 const translate = (key: string, fallback: string) => km[key] || fallback
 const codes = ['stock_session_query_budget_exceeded', 'customer_return_over_plan_budget', 'stock_import_unit_over_tier_budget', 'stock_import_reconcile_over_tier_budget', 'import_queue_required']
 for (const code of codes) {

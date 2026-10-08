@@ -1,4 +1,5 @@
 {
+  "product_import_finalization_changed": "Stock or product groups changed after this import was planned. Earlier groups remain applied. This group was not changed; review the current stock and start a corrected import.",
   "stock_session_query_budget_exceeded": "This stock change is too large for the current plan. Use fewer products or received dates, then try again.",
   "customer_return_over_plan_budget": "This return is too large for the current plan. Return fewer items or received dates, then try again.",
   "stock_import_unit_over_tier_budget": "This stock action is too large for the current plan. Use fewer items or received dates, then try again.",

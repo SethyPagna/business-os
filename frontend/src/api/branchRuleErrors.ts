@@ -17,6 +17,7 @@
 // pinned against en.json by frontend/tests/productSheetState.test.ts and
 // against the Worker's constants by Cloudflare's branch guard tests.
 export const BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> = [
+  ['Stock or product groups changed after this import was planned. Earlier groups remain applied. This group was not changed; review the current stock and start a corrected import.', 'product_import_finalization_changed'],
   ["This stock change is too large for the current plan. Use fewer products or received dates, then try again.", 'stock_session_query_budget_exceeded'],
   ["This return is too large for the current plan. Return fewer items or received dates, then try again.", 'customer_return_over_plan_budget'],
   ["This stock action is too large for the current plan. Use fewer items or received dates, then try again.", 'stock_import_unit_over_tier_budget'],
@@ -81,6 +82,7 @@ export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   stock_import_unit_over_tier_budget: 'stock_import_unit_over_tier_budget',
   stock_import_reconcile_over_tier_budget: 'stock_import_reconcile_over_tier_budget',
   import_queue_required: 'import_queue_required',
+  product_import_finalization_changed: 'product_import_finalization_changed',
   bulk_delete_queue_unavailable: 'bulk_delete_queue_unavailable',
   bulk_delete_queue_resume_required: 'bulk_delete_queue_resume_required',
   product_has_stock: 'product_has_stock',
