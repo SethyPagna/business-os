@@ -2,7 +2,7 @@
 // remove) and POST /api/inventory/fast-stock-in/commit addressed to a disabled branch. The REAL routes run against
 // SQLite with every migration (scripts/harness/cutover_lr_world.cjs).
 //
-//   before  both branches active: byte-identical write statements and ledgers vs the eb5dd0ba3 oracle.
+//   before  both branches active: unchanged business statements and ledgers vs the eb5dd0ba3 oracle.
 //   after   Old Shop (2) disabled, successor LC Store (1): no header -> 409 branch_redirect_required, a target that is
 //           the disabled branch or unknown -> 409 branch_redirect_target_invalid, nothing written; with the confirmed
 //           target the effect lands at LC Store in branch_stock AND branch_batch_stock, every movement row says
@@ -22,8 +22,43 @@ const add = (branchId, extra = {}) => ({ productId: 10, branchId, type: 'add', q
 const remove = (branchId, extra = {}) => ({ productId: 10, branchId, type: 'remove', quantity: 3, reason: 'broken jar', ...extra })
 const scopedSet = (branchId, extra = {}) => ({ productId: 10, branchId, type: 'set', setScope: 'lot', batchId: 500, quantity: 12, reason: 'count', ...extra })
 
+
+function assertComposedWrites(current, previous, db) {
+  const receipt = (s) => /stock_mutation_receipts/.test(s.sql)
+  const movement = (s) => /INSERT INTO inventory_movements/.test(s.sql)
+  const cost = (s) => /UPDATE products SET\s+cost_price_usd/.test(s.sql)
+  const physical = (s) => /(?:INSERT INTO|UPDATE) branch_(?:batch_)?stock/.test(s.sql)
+  const writes = current.flat(), oldWrites = previous.flat()
+  const business = (rows) => rows.filter(s => !receipt(s) && !movement(s) && !cost(s))
+  assert.equal(W.normalised(business(writes)), W.normalised(business(oldWrites)), 'same ordered business guards, stock metadata, quantities and history statements')
+  assert.equal(W.normalised(writes.filter(cost)), W.normalised(oldWrites.filter(cost)), 'same catalog cost expression and bindings')
+  assert.equal(writes.filter(movement).length, oldWrites.filter(movement).length, 'same movement count; complete movement values are compared in the ledger')
+  const completion = writes.find(s => /UPDATE stock_mutation_receipts SET response_status/.test(s.sql))
+  if (!completion) return
+  const batch = current.find(rows => rows.some(physical))
+  assert.ok(batch, 'stock effects are captured in a transaction')
+  const marks = batch.filter(s => /UPDATE stock_mutation_receipts SET written=1/.test(s.sql))
+  if (!marks.length) {
+    const unchangedGroups = rows => rows.map(group => group.filter(s => !receipt(s))).filter(group => group.length)
+    assert.equal(W.normalised(unchangedGroups(current)), W.normalised(unchangedGroups(previous)), 'legacy explicit-lot path retains its existing transaction grouping')
+    assert.ok(writes.some(s => /UPDATE stock_mutation_receipts SET written=1/.test(s.sql)))
+    return
+  }
+  assert.equal(marks.length, 1, 'required written receipt shares the stock transaction')
+  assert.ok(batch.some(movement), 'movement shares the stock transaction')
+  if (writes.some(cost)) {
+    assert.ok(batch.some(cost), 'catalog cost shares the intake transaction')
+    assert.ok(batch.findIndex(movement) < batch.findIndex(cost), 'intake history precedes derived catalog cost')
+  }
+  assert.ok(current.indexOf(batch) < current.findIndex(rows => rows.includes(completion)), 'receipt completion follows the atomic stock transaction')
+  const rows = db.prepare('SELECT written,completed_at,response_status FROM stock_mutation_receipts').all()
+  assert.equal(rows.length, 1)
+  assert.deepEqual([rows[0].written, rows[0].response_status], [1, 200])
+  assert.ok(rows[0].completed_at, 'receipt is durably completed')
+}
+
 async function main() {
-  await W.check('before: every adjust kind writes byte-identical statements and ledgers to the eb5dd0ba3 oracle', async () => {
+  await W.check('before: every adjust kind preserves business statements and ledgers with atomic receipts to the eb5dd0ba3 oracle', async () => {
     const bodies = [
       add(2), remove(2), remove(2, { batchId: 500 }), { productId: 10, branchId: 2, type: 'set', quantity: 6, reason: 'count' },
       scopedSet(2, { quantity: 4 }), remove(2, { quantity: 1, conditionTag: 'broken' }), add(1, { productId: 20 }),
@@ -36,7 +71,21 @@ async function main() {
       assert.equal(a.status, 200, JSON.stringify(a.body))
       assert.equal(W.normalised({ status: a.status, body: a.body }), W.normalised({ status: b.status, body: b.body }), `${JSON.stringify(body)}: same answer`)
       assert.ok(capNew.length > 0)
-      assert.equal(W.normalised(capNew), W.normalised(capOld), `${JSON.stringify(body)}: same write statements (a header is never read for an active branch)`)
+      assertComposedWrites(capNew, capOld, dbNew)
+      if (capNew.flat().some(s => /UPDATE products SET\s+cost_price_usd/.test(s.sql))) {
+        for (const [label, pattern] of [
+          ['missing atomic receipt', /UPDATE stock_mutation_receipts SET written=1/],
+          ['missing movement', /INSERT INTO inventory_movements/],
+          ['missing cost', /UPDATE products SET\s+cost_price_usd/],
+          ['missing business guard', /INSERT INTO stock_session_guards/],
+        ]) {
+          const mutant = capNew.map(rows => rows.filter(s => !pattern.test(s.sql)))
+          assert.throws(() => assertComposedWrites(mutant, capOld, dbNew), undefined, label)
+        }
+        const separated = capNew.map(rows => rows.filter(s => !/UPDATE products SET\s+cost_price_usd/.test(s.sql)))
+        separated.push(capNew.flat().filter(s => /UPDATE products SET\s+cost_price_usd/.test(s.sql)))
+        assert.throws(() => assertComposedWrites(separated, capOld, dbNew), undefined, 'cost outside stock transaction')
+      }
       assert.equal(W.normalised(W.ledger(dbNew)), W.normalised(W.ledger(dbOld)), `${JSON.stringify(body)}: same ledgers`)
     }
   })

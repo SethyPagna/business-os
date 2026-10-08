@@ -134,15 +134,24 @@ async function main() {
 
   // ---- Wire 4: POST /api/batches ----
   await check('POST /api/batches: Khmer 501 bytes and a reason at the cap pass the length guard, one over is refused', async () => {
-    const batchesFixture = fixture()
-    const batches = httpDriver('routes/batches.ts', batchesFixture)
-    const receive = (reason) => batches('/', 'POST', {
-      product_id: 1, branch_id: 1, quantity: 1, unit_cost_usd: 2, supplier_name: 'Fixture Supplier', reason,
+    const W = require('./harness/cutover_lr_world.cjs')
+    const db = W.build('before')
+    const batches = W.makeWorld(null).load('routes/batches.ts').default
+    let receiveSeq = 0
+    const receive = (reason) => W.call(batches, db, 'POST', '/', {
+      client_request_id: 'reason_cap_receive_' + (++receiveSeq),
+      product_id: 10, branch_id: 2, quantity: 1, unit_cost_usd: 2,
+      supplier_id: 5, supplier_name: 'Acme', reason,
     })
-    for (const [label, reason] of [['Khmer', KHMER], ['at cap', AT_CAP]]) {
-      assert.equal(await refusedForLength(await receive(reason)), false, `${label} must not be refused as too long`)
+    for (const [label, reason] of [['normal', 'delivery'], ['Khmer', KHMER], ['at cap', AT_CAP]]) {
+      const result = await receive(reason)
+      assert.equal(result.status, 200, label + ': ' + JSON.stringify(result.body))
+      assert.equal(db.prepare('SELECT reason FROM inventory_movements ORDER BY id DESC LIMIT 1').get().reason, reason)
     }
-    assert.equal(await refusedForLength(await receive(OVER_CAP)), true)
+    const before = W.ledger(db)
+    const refusal = await receive(OVER_CAP)
+    assert.deepEqual([refusal.status, refusal.body.code], [400, 'reason_too_long'])
+    assert.equal(W.ledger(db), before, 'over-cap reason writes no business effects')
   })
 
   if (failed > 0) {
