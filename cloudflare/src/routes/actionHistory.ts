@@ -1,3 +1,4 @@
+import { productStockGuardError } from '../lib/productStockGuard'
 import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, hasAcquisitionCostInput, projectAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
@@ -233,6 +234,8 @@ app.get('/', async (c) => {
     }
     return c.json({ success: true, items: await Promise.all(rows.map((row) => mapRow(row, user, c.env))) })
   } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     return c.json({ success: false, error: (error as Error)?.message || 'Failed to load action history' }, 500)
   }
 })
@@ -258,6 +261,8 @@ app.get('/movements/:id/revert-preview', async (c) => {
     const [effect, later] = await Promise.all([revertEffect(db, id, revert), laterOpenSets(db, [id])])
     return c.json({ success: true, revert, effect, laterSets: later.get(id) ?? [] })
   } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     const status = error instanceof StockMovementReplayError ? error.status : 500
     return c.json({ success: false, error: error instanceof Error ? error.message : 'Unable to preview this stock action.',
       ...(status === 409 ? { code: replayRefusalCode(error) } : {}) }, status)
@@ -365,6 +370,8 @@ app.post('/', async (c) => {
     })
     return c.json({ success: true, id: result.lastInsertRowid })
   } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     return c.json({ success: false, error: (error as Error)?.message || 'Failed to record action history' }, 500)
   }
 })
@@ -397,6 +404,8 @@ app.patch('/:id', async (c) => {
     }
     return c.json({ success: true })
   } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     return c.json({ success: false, error: (error as Error)?.message || 'Failed to update action history' }, 500)
   }
 })
@@ -492,6 +501,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         const stockBump = import('../lib/cache').then(({ bumpVersion }) => bumpVersion(c.env, 'stock')).catch(() => {})
         try { c.executionCtx.waitUntil(stockBump) } catch { void stockBump }
       } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         if (!serverManagedReplay) await db.prepare('UPDATE action_history SET last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
           .run({ last_error: (error as Error)?.message || `Failed to ${direction}`, id: existing.id })
         const code = Number((error as Error & { statusCode?: number })?.statusCode) // Preserve statusCode 409 as a conflict.
@@ -568,6 +579,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
       payload,
     }, user))
   } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} action history` }, 500)
   }
 }

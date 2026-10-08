@@ -1,3 +1,4 @@
+import { productStockGuardError } from './productStockGuard'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
 // Type-only on purpose: dozens of test loaders stub this module's relative
@@ -1606,6 +1607,10 @@ async function replayAtomicSaleAddItems(
   try {
     await db.batch(statements)
   } catch (error) {
+    const activeGuard = productStockGuardError(error)
+
+    if (activeGuard) throw activeGuard
+
     if (/constraint|guard_value/i.test(String(error))) {
       throw new UndoConflictError('This sale or added-items receipt changed. Nothing was reversed.', UNDO_RECORD_CHANGED_CODE)
     }
@@ -2968,6 +2973,8 @@ async function replayProductRemove(payload: Record<string, unknown>, ctx: UndoAp
     await db.batch(productRemoveReplayStatements({ snapshot, operation, direction: ctx.direction,
       historyId: Number(ctx.historyId), expectedGeneration, user: ctx.user, transitionStamp, transitionRequestId }))
   } catch (error) {
+    const activeGuard = productStockGuardError(error)
+    if (activeGuard) throw activeGuard
     if (/malformed JSON|product_remove_.*guard|constraint/i.test(String(error))) {
       throw new UndoConflictError('This removed product changed concurrently. Nothing was replayed.', UNDO_RECORD_CHANGED_CODE)
     }

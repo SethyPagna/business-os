@@ -1,3 +1,4 @@
+import { productStockGuardStatement, assertProductsActive } from './productStockGuard'
 // K2 (Part 410, 11.12/11.13): the kernel for the NEW return stock semantics
 // -- the three-way per-item chooser and Replace. The locked design notes
 // this implements (progress.md "Returns/replacements" + "Damaged stock"):
@@ -276,6 +277,7 @@ export async function createDamagedLot(db: D1Compat, input: {
   userId: number | string | null
   userName: string | null
 }): Promise<void> {
+  await assertProductsActive(db, [input.productId])
   const statement = createDamagedLotStatement({ ...input, returnIdSql: '@return_id' })
   await db.prepare(statement.sql).run({ ...(statement.params as Record<string, unknown>), return_id: input.returnId })
 }
@@ -335,6 +337,7 @@ export function planDamagedReturnLine(input: {
   const quantity = Number(input.quantity)
   if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Damaged quantity must be positive')
   const statements: StockWriteStatement[] = [
+    productStockGuardStatement([input.productId], 'active'),
     createDamagedLotStatement({
       productId: input.productId,
       productName: input.productName,

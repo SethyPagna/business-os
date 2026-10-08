@@ -1,3 +1,4 @@
+import { productStockGuardStatement, productStockGuardError } from './productStockGuard'
 // Part 553: reverting a Stock Change ledger row. A revert is a COMPENSATING
 // counter-movement -- it posts the opposite stock effect and records a new
 // movement row (reason "Revert of #N", reference_id "revert:N"); nothing is
@@ -580,6 +581,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   })
   try {
     await db.batch(addressedStatements(landing, [
+      ...(revertType === 'add' ? [productStockGuardStatement([productId], 'active')] : []),
       { sql: ALREADY_REVERTED_GUARD, params: { ref: counterRef, movementId: Number(m.id) } },
       receiptRowGuard(m),
       ...statements,
@@ -590,6 +592,10 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     // change by reading what the winner committed.
     if (await revertExists(db, counterRef)) return ALREADY_REVERTED
     const message = err instanceof Error ? err.message : String(err)
+    const activeGuard = productStockGuardError(err)
+
+    if (activeGuard) throw activeGuard
+
     if (/CHECK constraint failed/i.test(message)) {
       // The in-batch receipt guard: an Edit or a session Undo landed after the
       // reads above. Say which, instead of a generic "stock changed".

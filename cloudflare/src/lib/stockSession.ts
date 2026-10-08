@@ -1,3 +1,4 @@
+import { productStockGuardError, productStockGuardStatement } from './productStockGuard'
 import { getDb, type D1Compat } from './db'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
@@ -905,6 +906,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     revisions: Object.fromEntries(revisions),
   }
   const statements: StockWriteStatement[] = [
+    productStockGuardStatement(request.items.filter(line => line.quantity > 0 && line.product_id != null).map(line => Number(line.product_id)), 'active'),
     assertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')"),
   ]
   for (const landing of new Map([...landings.values()].map((effect) => [`${effect.addressedBranchId}>${effect.effectBranchId}`, effect])).values()) {
@@ -1128,6 +1130,10 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
       if (retry.request_json !== canonical) fail('client_request_id was already used with different data.', 409, 'idempotency_conflict')
       return parseStoredReceipt(retry, true)
     }
+    const activeGuard = productStockGuardError(error)
+
+    if (activeGuard) throw activeGuard
+
     if (/constraint/i.test(String(error))) fail('Product, branch, received date, stock, or asset state changed. Nothing was applied; refresh and retry.', 409, 'stale_state')
     const landing = landings.values().next().value
     if (landing && isBranchRedirectGuardError(error)) {
@@ -1475,6 +1481,7 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
         }
         if (key === 'products') {
           const change = sign * (num(row.stock_quantity) - num(original?.stock_quantity))
+          if (change > 1e-9 && !created) statements.unshift(productStockGuardStatement([Number(row.id)], 'active'))
           if (Math.abs(change) > 1e-9) { sets.push('stock_quantity=COALESCE(stock_quantity,0)+@change'); params.change = change }
         } else {
           const rq = sign * (num(row.received_quantity) - num(original?.received_quantity))
@@ -1562,6 +1569,10 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
   try { await db.batch(statements) } catch (error) {
     const saved = await db.prepare('SELECT o.generation,h.status FROM stock_session_operations o JOIN action_history h ON h.id=o.history_id WHERE o.id=@id').get<Row>({ id: op.id })
     if (saved?.generation === generation + 1 && saved.status === targetStatus) return
+    const activeGuard = productStockGuardError(error)
+
+    if (activeGuard) throw activeGuard
+
     if (/constraint/i.test(String(error))) {
       if (await movedByBranchCutover(db, String(op.id))) fail(BRANCH_CUTOVER_PRODUCT_MOVED_MESSAGE, 409, BRANCH_CUTOVER_PRODUCT_MOVED_CODE)
       // RET-D: name the newest stock change on one of the session's product +

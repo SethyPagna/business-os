@@ -1,3 +1,4 @@
+import { productStockGuardError } from './productStockGuard'
 import { getDb, type D1Compat } from './db'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
@@ -262,6 +263,8 @@ export type TransferRefusal = { status: 409 | 503; body: { error: string; code: 
  * receipt first: a same-key request that won the race is a replay. */
 export function transferRefusal(error: unknown): TransferRefusal | null {
   if (error instanceof TransferConflictError) return { status: 409, body: { error: error.message, code: error.code } }
+  const activeGuard = productStockGuardError(error)
+  if (activeGuard) return { status: 409, body: { error: activeGuard.message, code: activeGuard.code } }
   const message = error instanceof Error ? error.message : String(error ?? '')
   // House convention (stockLotAdjustment, stockInLineEdit): 503, retry later.
   if (/ordinary_business_maintenance_active/.test(message)) return { status: 503, body: { error: TRANSFER_REFUSALS.transfer_maintenance_active, code: 'maintenance_active' } }
@@ -284,6 +287,8 @@ export function transferEffectStatements(operation: string, reverse: boolean, ge
   const sourceLots = `SELECT from_product,from_branch,from_batch,SUM(take_quantity) AS quantity FROM (${allocations}) GROUP BY from_product,from_branch,from_batch`
   const params = { operation, generation, reason, actor: user.id, name: actorSnapshot(user) }
   return [
+    { sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM (${members}) m JOIN products p ON p.id=m.to_product
+        WHERE m.quantity>0 AND p.is_active IS NOT 1) THEN json_extract('[]','$[product_has_stock]') ELSE 1 END`, params },
     assert(`NOT EXISTS(SELECT 1 FROM (${members}) m WHERE
       COALESCE((SELECT ${productSnapshotSql} FROM products WHERE id=m.from_product)=json_remove(m.from_snapshot,'$.untracked_cost_snapshot'),0)=0
       OR COALESCE((SELECT ${productSnapshotSql} FROM products WHERE id=m.to_product)=json_remove(m.to_snapshot,'$.untracked_cost_snapshot'),0)=0
@@ -371,9 +376,11 @@ export async function replayTransferOperation(env: Env, user: SessionUser, direc
     { sql: `UPDATE action_history SET status=@status,last_error=NULL,updated_at=CURRENT_TIMESTAMP,undo_payload=json_set(undo_payload,'$.generation',@next),redo_payload=json_set(redo_payload,'$.generation',@next) WHERE id=@history`, params },
     { sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details) VALUES(@actor,@name,@action,'stock_transfer',@operation,@details)`, params: { actor: user.id, name: actorSnapshot(user), action: `action_${direction}`, operation: payload.operation_id, details: JSON.stringify({ operation_id: payload.operation_id, history_id: historyId, generation: generation+1 }) } },
   ]
-  try { await db.batch(statements) } catch {
+  try { await db.batch(statements) } catch (error) {
     const current = await db.prepare(`SELECT generation,replay_state FROM transfer_operation_receipts WHERE operation_id=@operation`).get<{ generation: number; replay_state: string }>({ operation: payload.operation_id })
     if (current?.generation === generation+1 && current.replay_state === target) return
+    const activeGuard = productStockGuardError(error)
+    if (activeGuard) throw activeGuard
     throw new TransferConflictError('The exact transferred stock or product changed. Refresh and check its history.')
   }
 }

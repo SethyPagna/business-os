@@ -1,3 +1,4 @@
+import { productStockGuardStatement } from './productStockGuard'
 // The sale lifecycle transition kernel (Part 383 R3) -- one place that
 // decides, for ANY old->new sale_status pair, exactly how much stock moves
 // and which transitions are even legal. routes/sales.ts's PATCH /:id/status
@@ -397,6 +398,7 @@ export function planSaleStockTransition(input: {
       // status holding nothing) -- completed -> awaiting_payment no longer
       // restores, because an unpaid order still holds its units.
       const restore = -delta
+      statements.unshift(productStockGuardStatement([Number(item.product_id)], 'active'))
       restoredUnits += restore
       statements.push({
         sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, @quantity)

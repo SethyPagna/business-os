@@ -1,3 +1,4 @@
+import { productStockGuardStatement, productStockGuardError } from './productStockGuard'
 // N6 (owner, 23 Sep 2026): "Stock-in sessions editable (today only add or
 // delete)." The ONE writer that edits a saved stock-in line in place:
 //
@@ -305,7 +306,7 @@ function stateGuard(state: EditState, targetAbsent: boolean): Statement[] {
 // transaction. Order respects migration 0154 (positive lot stock needs an
 // active lot): activate, move stock, then deactivate.
 function stateWrites(to: EditState, productDelta: number): Statement[] {
-  const out: Statement[] = []
+  const out: Statement[] = productDelta > 0 ? [productStockGuardStatement([to.productId], 'active')] : []
   const lotParams = (lot: LotState) => ({
     product: to.productId, branch: to.branchId, lotId: lot.id, lotKey: lot.batchKey,
     isActive: lot.isActive, receivedAt: lot.receivedAt, lotCode: lot.lotCode, rq: lot.receivedQuantity, rc: lot.receivedCostUsd,
@@ -715,6 +716,8 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
   } catch (error) {
     const concurrent = await previous()
     if (concurrent) return replay(concurrent)
+    const activeGuard = productStockGuardError(error)
+    if (activeGuard) throw activeGuard
     if (isMaintenanceError(error)) return { status: 503, body: { error: 'Maintenance is in progress. Nothing was changed; try again shortly.', code: 'maintenance_active' } }
     if (landing && isBranchRedirectGuardError(error)) return { status: 409, body: await branchRedirectGuardRefusal(db, landing.addressedBranchId, redirectTarget) }
     if (/constraint/i.test(String(error))) return { status: 409, body: { error: 'Stock changed while saving. Nothing was changed; reopen the session and try again.', code: 'stale_state' } }
@@ -850,6 +853,9 @@ function deltaWrites(input: { deltas: LotDelta[]; productId: number; branchId: n
     // An emptied lot goes inactive only when it holds nothing anywhere and was never received otherwise.
     if (lot.to.isActive === 0 && lot.from.isActive === 1) last.push({ sql: `UPDATE product_batches SET is_active=0 WHERE id=@id
       AND COALESCE(received_quantity,0)<=0 AND NOT EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=@id AND quantity>0)`, params: base })
+  }
+  if (input.productDelta > 0 || input.branchChange > 0 || input.deltas.some(lot => lot.stockChange > 0)) {
+    first.unshift(productStockGuardStatement([input.productId], 'active'))
   }
   const branchParams = { product: input.productId, branch: input.branchId, change: input.branchChange, productDelta: input.productDelta }
   const branch: Statement[] = input.branchChange > 0
@@ -1010,6 +1016,8 @@ export async function replayStockInLineEdit(
   } catch (error) {
     const current = await db.prepare('SELECT generation,state FROM stock_lot_adjustment_operations WHERE id=@operation').get<OperationRow>({ operation: row.id })
     if (current?.generation === next && current.state === target) return
+    const activeGuard = productStockGuardError(error)
+    if (activeGuard) throw activeGuard
     if (isMaintenanceError(error)) throw new StockInLineEditReplayError('Maintenance is in progress. Nothing was changed.', 503)
     // A guard tripped after the reads above: something landed in between.
     // RET-D: name the newest change of the product at the branch since this

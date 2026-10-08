@@ -1,3 +1,4 @@
+import { productStockGuardError, productStockGuardStatement } from './productStockGuard'
 import type { D1Compat } from './db'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from './receiptNumber'
 import { RETURN_STATUSES } from './salesStatus'
@@ -458,6 +459,9 @@ export async function applyHistoricalSaleImport(
     // The same object the receipt-race retry rewrites the reason on, so the label rides on it rather than a copy.
     if (redirected) stockParams.addressed_branch_name = addressedBranchName
     returnStockParams.push(stockParams)
+    const activeGuard = productStockGuardStatement([Number(item.product_id)], 'active')
+    statements.unshift({ sql: activeGuard.sql.replace('AND p.is_active IS NOT 1', `AND p.is_active IS NOT 1 AND ${writeGuard}`),
+      params: { ...activeGuard.params, ...common } })
     statements.push({
       sql: `UPDATE products SET stock_quantity = stock_quantity + @returned_quantity, updated_at = @updated_at
             WHERE id = @product_id AND ${writeGuard}`,
@@ -508,6 +512,8 @@ export async function applyHistoricalSaleImport(
       await db.batch(statements)
       break
     } catch (batchError) {
+      const activeGuard = productStockGuardError(batchError)
+      if (activeGuard) throw activeGuard
       const ownSale = await db.prepare(`SELECT 1 AS hit FROM sales
         WHERE client_request_id = @client_request_id AND client_request_id <> '' LIMIT 1`)
         .get({ client_request_id: clientRequestId })

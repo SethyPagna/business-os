@@ -1,3 +1,4 @@
+import { productStockGuardStatement } from './productStockGuard'
 // Amending a sale that already exists, as an APPEND-ONLY LEDGER (S4-30).
 //
 // The shop owner's ask, in their own words: "sometimes we make a sale, but we
@@ -669,6 +670,7 @@ export function planLineQuantityDecrease(input: {
   const totalReturned = unitsReturnedToShelf + (movesStock ? remaining : 0)
 
   if (line.branch_id && totalReturned > 0) {
+    statements.unshift(productStockGuardStatement([Number(line.product_id)], 'active'))
     statements.push({
       sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, @quantity)
             ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity + @quantity`,

@@ -1,3 +1,4 @@
+import { productStockGuardStatement, productStockGuardError } from './productStockGuard'
 import { getDb, type D1Compat } from './db';
 import type { Env } from '../index';
 import type { SessionUser } from './auth';
@@ -240,6 +241,7 @@ function stockStatements(member: Member, sign: number, user: SessionUser, stamp:
     for (const move of member.stock) {
         const q = move.quantity * sign;
         const p = { product: move.product, branch: move.branch, q, lot: move.lot, stamp };
+        if (q > 0) out.unshift(productStockGuardStatement([Number(move.product)], 'active'));
         if (move.lot) {
             out.push(bulkAssertion('EXISTS(SELECT 1 FROM damaged_stock_lots WHERE id=@lot AND product_id=@product AND branch_id IS @branch AND quantity_remaining+@q BETWEEN 0 AND quantity)', p));
             out.push({ sql: 'UPDATE damaged_stock_lots SET quantity_remaining=quantity_remaining+@q, updated_at=@stamp WHERE id=@lot', params: p });
@@ -554,6 +556,10 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
         const retry = await db.prepare('SELECT request_json,receipt_json FROM sale_bulk_operations WHERE actor_id=@actor AND request_id=@request').get<Row>({ actor: user.id, request: request.client_request_id });
         if (retry?.request_json === canonical)
             return JSON.parse(String(retry.receipt_json));
+        const activeGuard = productStockGuardError(error)
+
+        if (activeGuard) throw activeGuard
+
         if (/constraint/i.test(String(error)))
             fail('Sale or stock changed. The entire group was rejected; refresh before retrying.');
         throw error;
@@ -606,6 +612,10 @@ export async function replaySaleBulkStatus(env: Env, user: SessionUser, directio
         await db.batch(statements);
     }
     catch (error) {
+        const activeGuard = productStockGuardError(error)
+
+        if (activeGuard) throw activeGuard
+
         if (/constraint/i.test(String(error)))
             fail('A sale, its stock, or this replay changed. Nothing in the group was applied.');
         throw error;

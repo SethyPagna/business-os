@@ -1,3 +1,4 @@
+import { productStockGuardStatement, productStockGuardError } from './productStockGuard'
 // The ONE lot-level "Set quantity" writer (owner, 17 Sep; confirmed 24 Sep:
 // "Set Quantity: offer selected received-date lot or branch total; selected
 // lot is the default"). Two entry points share it and nothing else sets a
@@ -206,6 +207,7 @@ function quantityStatements(from: Snapshot, to: Snapshot): Statement[] {
     productDelta: to.branchQuantity - from.branchQuantity,
   }
   return [
+    ...(to.lotQuantity > from.lotQuantity || to.branchQuantity > from.branchQuantity ? [productStockGuardStatement([to.productId], 'active')] : []),
     // 0154: positive lot stock needs an active lot. Activate first.
     ...(to.lotQuantity > 0 ? [{ sql: `UPDATE product_batches SET is_active=1, updated_at=datetime('now') WHERE id=@batch AND is_active IS NOT 1`, params }] : []),
     { sql: `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) SELECT @batch,@branch,@lot WHERE @lotExists=1
@@ -228,6 +230,7 @@ function deltaStatements(at: Snapshot, lotChange: number, branchChange: number):
   const statements: Statement[] = [guard(`EXISTS(SELECT 1 FROM product_batches WHERE id=@batch AND variant_product_id=@product)
       AND COALESCE((SELECT quantity FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch),0)+@lotChange>=0
       AND COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@product AND branch_id=@branch),0)+@branchChange>=0`, params)]
+  if (lotChange > 0 || branchChange > 0) statements.unshift(productStockGuardStatement([at.productId], 'active'))
   if (lotChange > 0) {
     // 0154: positive lot stock needs an active lot. Activate first.
     statements.push(
@@ -470,6 +473,8 @@ export async function applyStockLotSet(
       const concurrent = await previous()
       if (concurrent) return replay(concurrent)
     }
+    const activeGuard = productStockGuardError(error)
+    if (activeGuard) throw activeGuard
     if (isMaintenanceError(error)) return MAINTENANCE_RESPONSE
     if (isReceivingBranchError(error)) return { status: 409, body: RECEIVING_BRANCH_INACTIVE }
     if (isBranchRedirectGuardError(error)) return { status: 409, body: await branchRedirectGuardRefusal(db, landing.addressedBranchId, redirectTarget) }
@@ -625,6 +630,8 @@ export async function replayStockLotSet(
   } catch (error) {
     const current = await db.prepare('SELECT generation,state FROM stock_lot_adjustment_operations WHERE id=@operation').get<OperationRow>({ operation: row.id })
     if (current?.generation === next && current.state === target) return
+    const activeGuard = productStockGuardError(error)
+    if (activeGuard) throw activeGuard
     if (isMaintenanceError(error)) throw new StockLotSetReplayError('Maintenance is in progress. Nothing was changed.', 503)
     // RET-D: name the change this replay collided with (a concurrent write) -- the
     // newest movement of the product at the branch after this correction's own

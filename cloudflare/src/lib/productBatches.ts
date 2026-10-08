@@ -385,6 +385,8 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
     receivedAt,
     params,
     statements: [
+      { sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products WHERE id=${productIdSql} AND is_active IS NOT 1)
+          THEN json_extract('[]','$[product_has_stock]') ELSE 1 END`, params },
       ...(reservedBatchId !== undefined ? [{
         sql: `INSERT INTO stock_session_guards(guard_value) SELECT CASE WHEN NOT EXISTS(
           SELECT 1 FROM product_batches WHERE id=@reservedBatchId) THEN 1 ELSE 0 END`, params,
@@ -975,6 +977,8 @@ export function incrementBatchStockStatement(batchId: number, branchId: number, 
 export function restoreBatchStockStatements(batchId: number, branchId: number, quantity: number): Array<{ sql: string; params: Record<string, unknown> }> {
   if (!Number.isFinite(quantity) || quantity <= 0) return []
   return [
+    { sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_batches pb JOIN products p ON p.id=pb.variant_product_id
+        WHERE pb.id=@batchId AND p.is_active IS NOT 1) THEN json_extract('[]','$[product_has_stock]') ELSE 1 END`, params: { batchId } },
     {
       sql: `UPDATE product_batches SET is_active = 1, updated_at = datetime('now') WHERE id = @batchId AND is_active IS NOT 1`,
       params: { batchId },

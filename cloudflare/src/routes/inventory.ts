@@ -1,3 +1,4 @@
+import { productStockGuardError, productHasStockSql, productStockGuardStatement } from '../lib/productStockGuard'
 import { requireReceivingBranch, receivingBranchAssertion, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from '../lib/receivingBranch'
 import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
@@ -154,6 +155,8 @@ app.post('/sessions', async (c) => {
     if (!receipt.replayed) c.executionCtx.waitUntil(stockSession.notifyStockSession(c.env, receipt))
     return c.json(receipt)
   } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     if (error instanceof stockSession.StockSessionError) {
       return c.json({ error: error.message, code: error.code, ...(error.details || {}) }, error.statusCode)
     }
@@ -337,7 +340,7 @@ export async function attachInventoryProductMetrics(
 }
 
 function appendInventoryProductFilters(query: InventoryFilterQuery, lowStock: LowStockConfig) {
-  const where = ['p.is_active = 1']
+  const where = [`(p.is_active = 1 OR ${productHasStockSql('p')})`]
   const params: Record<string, unknown> = {}
   const joins: string[] = []
 
@@ -656,6 +659,8 @@ app.get('/products/search', async (c) => {
     parseContinuousReadWindow(c.req.query())
     return c.json(await searchProductsPayload(c.env, c.req.query()))
   } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     if (error instanceof RangeError) return c.json({ error: error.message }, 400)
     throw error
   }
@@ -663,6 +668,8 @@ app.get('/products/search', async (c) => {
 
 app.get('/bootstrap', async (c) => {
   try { parseContinuousReadWindow(c.req.query()) } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     if (error instanceof RangeError) return c.json({ error: error.message }, 400)
     throw error
   }
@@ -677,7 +684,7 @@ app.get('/bootstrap', async (c) => {
       db,
       lowStock: await loadLowStockConfig(c.env),
       joinSql: '',
-      whereSql: 'WHERE p.is_active = 1',
+      whereSql: `WHERE (p.is_active = 1 OR ${productHasStockSql('p')})`,
       params: {},
       qtyExpr: 'COALESCE(p.stock_quantity, 0)',
     }),
@@ -689,10 +696,10 @@ app.get('/bootstrap', async (c) => {
       ${movementActorNameSql('inventory_movements')} AS ${RESOLVED_ACTOR_NAME_COLUMN},
       ${movementReferenceSelectSql('inventory_movements')}
       FROM inventory_movements ORDER BY created_at DESC, id DESC LIMIT 50`).all<Record<string, unknown>>({}),
-    db.prepare("SELECT DISTINCT trim(brand) AS value FROM products WHERE is_active = 1 AND trim(COALESCE(brand, '')) <> '' ORDER BY lower(trim(brand)) ASC").all<{ value: string }>({}),
+    db.prepare(`SELECT DISTINCT trim(brand) AS value FROM products p WHERE (p.is_active = 1 OR ${productHasStockSql('p')}) AND trim(COALESCE(brand, '')) <> '' ORDER BY lower(trim(brand)) ASC`).all<{ value: string }>({}),
     // Previously missing -- same gap as getInventoryProductMetadata's own
     // brands-only query, just this route's separate first-load copy of it.
-    db.prepare("SELECT DISTINCT trim(category) AS value FROM products WHERE is_active = 1 AND trim(COALESCE(category, '')) <> '' ORDER BY lower(trim(category)) ASC").all<{ value: string }>({}),
+    db.prepare(`SELECT DISTINCT trim(category) AS value FROM products p WHERE (p.is_active = 1 OR ${productHasStockSql('p')}) AND trim(COALESCE(category, '')) <> '' ORDER BY lower(trim(category)) ASC`).all<{ value: string }>({}),
     // Previously missing -- Inventory.tsx's products-only load path reads
     // `bootstrapResult.branches` (its adjust modal's branch prefill, and
     // through that D4b's mandatory-batch section, hangs off it), but this
@@ -779,7 +786,7 @@ app.get('/summary', async (c) => {
       ) bsj ON bsj.product_id = p.id
       -- One financial join, one implementation (lib/productSalesLedger.ts).
       LEFT JOIN (${buildProductSalesLedgerSql({ branchScoped: true })}) fin ON fin.product_id = p.id
-      WHERE p.is_active = 1
+      WHERE (p.is_active = 1 OR ${productHasStockSql('p')})
       ORDER BY lower(p.name) ASC
     `).all<Record<string, unknown>>({ branchId })
     // Same normalization as the no-branchId path below: this used to omit
@@ -831,7 +838,7 @@ app.get('/summary', async (c) => {
     ) bsj ON bsj.product_id = p.id
     -- One financial join, one implementation (lib/productSalesLedger.ts).
     LEFT JOIN (${buildProductSalesLedgerSql()}) fin ON fin.product_id = p.id
-    WHERE p.is_active = 1
+    WHERE (p.is_active = 1 OR ${productHasStockSql('p')})
     ORDER BY lower(p.name) ASC
   `).all<Record<string, unknown>>({})
 
@@ -961,6 +968,8 @@ app.get('/movements', async (c) => {
   const query = c.req.query()
   let continuousWindow
   try { continuousWindow = parseContinuousReadWindow(query) } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     return c.json({ error: (error as Error).message }, 400)
   }
   const page = clampInt(query.page, 1, 1, 100000)
@@ -1470,6 +1479,7 @@ async function applyStockDelta(env: Env, productId: number, branchId: number, de
     return
   }
   await db.batch([
+    ...(delta > 0 ? [productStockGuardStatement([productId], 'active')] : []),
     ...(ordinaryReceiving ? [receivingBranchAssertion(branchId)] : []),
     {
       sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @delta)
@@ -1514,6 +1524,8 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
     async (markWritten, atomicMark) => {
       try { return await runAdjustActionKernel(c, body, markWritten, atomicMark) }
       catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         if (isReceivingBranchError(error)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
         const refusal = branchEffectRefusal(error)
         if (refusal) return c.json(refusal, 409)
@@ -1586,7 +1598,10 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   let unitCostUsd: number | null = null
   if (body.unitCostUsd != null) {
     try { unitCostUsd = explicitReceiptMoney4(body.unitCostUsd, 'Unit cost') }
-    catch (error) { return c.json({ error: error instanceof Error ? error.message : 'Invalid unit cost' }, 400) }
+    catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409);
+    return c.json({ error: error instanceof Error ? error.message : 'Invalid unit cost' }, 400) }
   }
   const paymentStatus = body.paymentStatus === 'paid' || body.paymentStatus === 'credit' ? body.paymentStatus : null
   const creditDueDate = body.creditDueDate != null ? String(body.creditDueDate).trim() || null : null
@@ -1824,6 +1839,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       explicitCostUsd = pricing.cost_usd != null ? explicitReceiptMoney4(pricing.cost_usd, 'USD cost') : null
       explicitCostKhr = pricing.cost_khr != null ? explicitReceiptMoney4(pricing.cost_khr, 'KHR cost') : null
     } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       return c.json({ error: error instanceof Error ? error.message : 'Invalid pricing cost' }, 400)
     }
     // The discounted tier arrives as wholesale_price_usd/khr only. The retired
@@ -1893,6 +1910,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         }
       })
     } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       if (error instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
       throw error
     }
@@ -2044,6 +2063,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     })
   }
   } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     if (error instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
     throw error
   }
@@ -2264,6 +2285,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       lotCode = received.lotCode
       }
     } catch (err) {
+    const stockGuard = productStockGuardError(err)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       if (isReceivingBranchError(err)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
       if (isBranchRedirectGuardError(err)) throw err
       return c.json({ error: err instanceof Error ? err.message : 'Failed to receive stock' }, 400)
@@ -2288,6 +2311,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         await removeStockFromBatch(db, { batchId: batchIdRequested, productId: targetProductId, branchId, quantity })
         removedBatchQuantities = [{ batchId: batchIdRequested, quantity }]
       } catch (err) {
+    const stockGuard = productStockGuardError(err)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         if (err instanceof InsufficientBatchStockError) return c.json({ error: err.message }, 400)
         return c.json({ error: err instanceof Error ? err.message : 'Failed to remove stock' }, 400)
       }
@@ -2328,6 +2353,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
           ...(conditionTag ? holdRemovedStatements(conditionTag) : [movementRowStatement()]),
         ]))
       } catch (err) {
+    const stockGuard = productStockGuardError(err)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         if (err instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
         if (isBranchRedirectGuardError(err)) throw err
         if (isStockRemovalConflict(err)) return c.json(STOCK_REMOVAL_CONFLICT, 409)
@@ -2387,6 +2414,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         await applyStockDelta(c.env, targetProductId, branchId, -Math.abs(delta))
       }
     } catch (err) {
+    const stockGuard = productStockGuardError(err)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       if (err instanceof InsufficientBatchStockError) return c.json({ error: err.message }, 400)
       if (isStockRemovalConflict(err)) return c.json(STOCK_REMOVAL_CONFLICT, 409)
       return c.json({ error: err instanceof Error ? err.message : 'Failed to hold received stock as tagged' }, 400)
@@ -2526,6 +2555,8 @@ app.post('/dated-stock-count/resolve', async (c) => {
   try {
     resolution = await resolveDatedStockCountRows(getDb(c.env), parsed.rows, { redirectTarget: branchRedirectTarget(c) })
   } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     const refusal = branchEffectRefusal(error)
     if (refusal) return c.json(refusal, 409)
     throw error
@@ -2586,6 +2617,8 @@ app.post('/dated-stock-count/preview', async (c) => {
   try {
     built = await buildDatedStockCountPlan(getDb(c.env), parsed.entries, { redirectTarget: branchRedirectTarget(c) })
   } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     const refusal = branchEffectRefusal(error)
     if (refusal) return c.json(refusal, 409)
     throw error
@@ -2609,6 +2642,8 @@ app.post('/dated-stock-count/apply', async (c) => {
   try {
     built = await buildDatedStockCountPlan(db, parsed.entries, { redirectTarget: branchRedirectTarget(c) })
   } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     const refusal = branchEffectRefusal(error)
     if (refusal) return c.json(refusal, 409)
     throw error
@@ -2622,6 +2657,8 @@ app.post('/dated-stock-count/apply', async (c) => {
   try {
     result = await applyDatedStockCountPlan(db, built.plan, { userId: user?.id ?? null, userName: actorSnapshot(user) })
   } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     if (error instanceof DatedStockCountConflictError) return c.json({ success: false, error: error.message, code: 'dated_stock_count_conflict' }, 409)
     throw error
   }
@@ -2712,6 +2749,8 @@ app.post('/transfer', async (c) => {
   try {
     canonicalTransferPair = resolveCanonicalTransferPair(canonicalTransferRows)
   } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     if (error instanceof CanonicalBranchConfigurationError) {
       return c.json({ error: CANONICAL_BRANCH_CONFIGURATION_ERROR, code: CANONICAL_BRANCH_CONFIGURATION_CODE }, 409)
     }
@@ -2748,6 +2787,8 @@ app.post('/transfer', async (c) => {
     allocationSummaries = planned
     await ordinaryBusinessBatch(db, statements)
   } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     const retryReceipt = await findTransferReceipt(db, user.id, clientRequestId)
     if (retryReceipt) {
       if (retryReceipt.request_digest !== requestDigest || retryReceipt.request_json !== requestJson) {
@@ -2860,6 +2901,8 @@ app.post('/move-row', async (c) => {
     ;({ landing, branch } = await requestBranchLanding(db, addressedBranchId, () => branchRedirectTarget(c)))
     await requireReceivingBranch(db, landing.effectBranchId)
   } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     if (isReceivingBranchError(error)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
     const refusal = branchEffectRefusal(error)
     if (refusal) return c.json(refusal, 409)
@@ -2898,6 +2941,8 @@ app.post('/move-row', async (c) => {
       receiptLotTarget: await prepareReceiptLotTarget(db, { productId: destinationProductId }),
     })
   } catch (err) {
+    const stockGuard = productStockGuardError(err)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     return c.json({ error: err instanceof Error ? err.message : 'Failed to move stock' }, 400)
   }
   try {
@@ -2922,6 +2967,8 @@ app.post('/move-row', async (c) => {
       },
     ]))
   } catch (err) {
+    const stockGuard = productStockGuardError(err)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     if (isReceivingBranchError(err)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
     if (isBranchRedirectGuardError(err)) return c.json(await branchRedirectGuardRefusal(db, addressedBranchId, () => branchRedirectTarget(c)), 409)
     if (isStockRemovalConflict(err)) {
@@ -2963,6 +3010,8 @@ app.post('/movements/:id/revert', async (c) => {
   try {
     result = await applyMovementRevert(db, mv, { userId: user?.id ?? null, userName: actorSnapshot(user) }, () => branchRedirectTarget(c))
   } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     const refusal = branchEffectRefusal(error)
     if (refusal) return c.json(refusal, 409)
     if (isBranchRedirectGuardError(error)) return c.json(await branchRedirectGuardRefusal(db, Number(mv.branch_id), () => branchRedirectTarget(c)), 409)
@@ -3073,6 +3122,8 @@ async function runTaggedLotAction(c: InventoryContext, action: 'dispose' | 'rest
     (value, status) => c.json(value as never, status as never),
     async (_markWritten, atomicMark) => {
       try { return await runTaggedLotActionKernel(c, action, body, atomicMark) } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         const refusal = branchEffectRefusal(error)
         if (refusal) return c.json(refusal, 409)
         throw error
@@ -3134,6 +3185,8 @@ async function runTaggedLotActionKernel(c: InventoryContext, action: 'dispose' |
       ...(action === 'dispose' ? planDisposeTagged(change) : planRestoreTagged(change)),
     ]))
   } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     if (error instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
     if (isBranchRedirectGuardError(error)) return c.json(await branchRedirectGuardRefusal(db, branchId, () => branchRedirectTarget(c)), 409)
     // The in-batch held-lot guard refused: a concurrent sale or action took

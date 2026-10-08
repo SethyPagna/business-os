@@ -1,3 +1,4 @@
+import { productStockGuardError } from '../lib/productStockGuard'
 import { requireReceivingBranch, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from '../lib/receivingBranch'
 import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, canEditAcquisitionCosts, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
@@ -229,6 +230,8 @@ export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody
     async (markWritten) => {
       try { return await runReceiveBatchActionKernel(c, body, markWritten) }
       catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         if (isReceivingBranchError(error)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
         const refusal = branchEffectRefusal(error)
         if (refusal) return c.json(refusal, 409)
@@ -397,6 +400,8 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
       }]),
     })
   } catch (err) {
+    const stockGuard = productStockGuardError(err)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     // The explicit-lot pick can fail validation ("Selected batch does not
     // belong to this product") -- a caller mistake, not a server fault, so
     // it answers 400 exactly as /inventory/adjust's batch path does.
@@ -461,6 +466,8 @@ app.patch('/:id', async (c) => {
   try {
     assertUpdatedAtMatch('batch', existing, getExpectedUpdatedAt(body as Record<string, unknown>))
   } catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     if (error instanceof WriteConflictError) {
       const { body: conflictBody, status } = writeConflictResponse(error)
       return c.json(conflictBody, status)

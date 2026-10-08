@@ -1,3 +1,4 @@
+import { productStockGuardStatement } from './productStockGuard'
 // Adding a line to a sale that already exists (S4-24b).
 //
 // The Sales page could change a sale's status, its customer and its
@@ -780,6 +781,7 @@ export function planSaleLineRemoval(input: {
 
   for (const line of input.lines) {
     if (line.branchId && line.heldUnits > 0) {
+      statements.unshift(productStockGuardStatement([Number(line.productId)], 'active'))
       restoredUnits += line.heldUnits
       const restoredLots: Array<{ batchId: number; quantity: number }> = []
       for (let index = line.takes.length - 1; index >= 0; index -= 1) {

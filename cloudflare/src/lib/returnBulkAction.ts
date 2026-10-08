@@ -1,3 +1,4 @@
+import { productStockGuardStatement, productStockGuardError } from './productStockGuard'
 import { getDb, type D1Compat } from './db'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
@@ -214,6 +215,7 @@ function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, s
       quantity,
       stamp,
     }
+    if (quantity > 0) out.unshift(productStockGuardStatement([Number(delta.productId)], 'active'))
     if (delta.damagedLotId) {
       out.push(guard('EXISTS(SELECT 1 FROM damaged_stock_lots WHERE id=@lot AND return_id=@returnId AND product_id=@product AND branch_id IS @branch AND (batch_id IS NULL OR EXISTS(SELECT 1 FROM product_batches WHERE id=damaged_stock_lots.batch_id AND variant_product_id=@product)) AND quantity_remaining+@quantity BETWEEN 0 AND quantity)', { ...params, returnId: member.id }))
       out.push({ sql: 'UPDATE damaged_stock_lots SET quantity_remaining=quantity_remaining+@quantity, updated_at=@stamp WHERE id=@lot', params })
@@ -759,6 +761,10 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
       // Any other receipt was written by a concurrent call with the same id.
       return { receipt: stored, wrote: stored.operationId === operationId }
     }
+    const activeGuard = productStockGuardError(error)
+
+    if (activeGuard) throw activeGuard
+
     if (/constraint/i.test(String(error))) fail('A return or its stock changed. Nothing in the group was applied.')
     throw error
   }
@@ -801,6 +807,10 @@ export async function replayReturnBulkAction(env: Env, user: SessionUser, direct
   try {
     await db.batch(statements)
   } catch (error) {
+    const activeGuard = productStockGuardError(error)
+
+    if (activeGuard) throw activeGuard
+
     if (/constraint/i.test(String(error))) fail('A return, its stock, or this replay changed. Nothing in the group was applied.')
     throw error
   }
