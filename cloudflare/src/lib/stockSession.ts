@@ -636,6 +636,8 @@ function revisionAssertion(type: string, key: string, predicate: string, params:
 
 // Consecutive CHECK guard rows share one statement without dropping predicates or crossing writes.
 function packSessionAssertions(statements: StockWriteStatement[]): StockWriteStatement[] {
+  // Workerd D1 permits five compound SELECT terms, unlike desktop SQLite's 500.
+  const maxCompoundTerms = 5
   const prefix = 'INSERT INTO stock_session_guards(guard_value) '
   const packed: StockWriteStatement[] = []
   let selects: string[] = []
@@ -650,7 +652,7 @@ function packSessionAssertions(statements: StockWriteStatement[]): StockWriteSta
       flush(); packed.push(statement); continue
     }
     const count = bindCount(statement)
-    if (bindings + count > D1_MAX_BOUND_PARAMS) flush()
+    if (bindings + count > D1_MAX_BOUND_PARAMS || selects.length === maxCompoundTerms) flush()
     const keyPrefix = `g${selects.length}_`
     selects.push(statement.sql.slice(prefix.length).replace(/@(\w+)/g, (_, key: string) => `@${keyPrefix}${key}`))
     for (const [key, value] of Object.entries(statement.params || {})) params[keyPrefix + key] = value
