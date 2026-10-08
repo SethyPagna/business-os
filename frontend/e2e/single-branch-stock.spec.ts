@@ -8,9 +8,11 @@ for (const language of ['en', 'km']) test(`Products retains sole active branch d
   const pageErrors: string[] = []
   page.on('pageerror', error => pageErrors.push(error.message))
   const original = JSON.parse(readFileSync(new URL('./fixtures/admin-products.json', import.meta.url), 'utf8'))
-  const branches = [{ id: 1, name: 'Current Shop', is_active: 1, is_default: 1 }, { id: 2, name: 'Old Shop', is_active: 0 }]
+  const branchName = language === 'km' ? 'Current Shop សាខាលក់ថ្មីជិតផ្សារទីក្រុង' : 'Current Shop'
+  const branchSummary = `${branchName}: 12`
+  const branches = [{ id: 1, name: branchName, is_active: 1, is_default: 1 }, { id: 2, name: 'Old Shop', is_active: 0 }]
   const product = { ...original.items[0], stock_quantity: 12, branch_stock: [
-    { branch_id: 1, branch_name: 'Current Shop', branch_active: 1, quantity: 12 },
+    { branch_id: 1, branch_name: branchName, branch_active: 1, quantity: 12 },
     { branch_id: 2, branch_name: 'Old Shop', branch_active: 0, quantity: 0 },
   ] }
   await page.route(/\/api\/auth\/(?:bootstrap|me|login)(?:\?|$)/, async route => {
@@ -28,9 +30,9 @@ for (const language of ['en', 'km']) test(`Products retains sole active branch d
   await page.goto(`${ADMIN_ORIGIN}/products`)
   const visibleBranch = (page.viewportSize()?.width || 0) < 768
     ? page.locator('[data-product-branch-summary]')
-    : page.getByText('Current Shop: 12', { exact: true }).first()
+    : page.getByText(branchSummary, { exact: true }).first()
   await expect(visibleBranch).toBeVisible()
-  await expect(visibleBranch).toContainText('Current Shop: 12')
+  await expect(visibleBranch).toContainText(branchSummary)
   await expect(page.getByText('Old Shop: 0', { exact: true })).toHaveCount(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.screenshot({ path: testInfo.outputPath(`single-branch-${language}.png`), fullPage: true })
