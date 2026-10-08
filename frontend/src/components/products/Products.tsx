@@ -7,6 +7,7 @@ import { canViewAcquisitionCosts, canEditAcquisitionCosts, omitUnauthorizedCatal
 import { Suspense, memo, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { ReactNode, MouseEvent as ReactMouseEvent } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { ensureClientRequestId } from '../../api/requestIds.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import MoreVertical from 'lucide-react/dist/esm/icons/more-vertical.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
@@ -1816,6 +1817,8 @@ function ProductsFullEditor() {
   const pendingLoadRef = useRef<{ silent: boolean } | null>(null)
   const latestLoadRef = useRef<((silent?: boolean) => Promise<void>) | null>(null)
   const productSaveInFlightRef = useRef(false)
+  const catalogPricePendingRef = useRef(new Map<string, { payload: Record<string, unknown>; count: number }>())
+  const catalogPriceInFlightRef = useRef(false)
   // Preserve the initiating form authority across uploads, lazy imports and
   // refreshes. The revision detects change-away-and-back, without coupling a
   // legitimate save to ordinary product-cache invalidation.
@@ -4376,7 +4379,7 @@ function ProductsFullEditor() {
   // UPDATEs) with a preview count fetched first so the confirm can say the
   // real number -- and it says plainly that this scope has no undo.
   const runBulkPriceAdjustAllProducts = useCallback(async () => {
-    if (bulkActionBusy) return
+    if (bulkActionBusy || catalogPriceInFlightRef.current) return
     const amount = Number(bulkEditForm.adjust_amount)
     if (!Number.isFinite(amount) || amount <= 0) {
       notify(tr('bulk_price_amount_required', 'Enter a positive amount first'), 'warning')
@@ -4395,11 +4398,17 @@ function ProductsFullEditor() {
     }
     const direction = bulkEditForm.adjust_direction === 'decrease' ? 'decrease' as const : 'increase' as const
     const payload = { direction, amount, fields, skip_zero: !!bulkEditForm.adjust_skip_zero }
+    const scope = captureActorReadScope('products')
+    const intentKey = JSON.stringify([scope.authority, payload])
+    const pending = catalogPricePendingRef.current.get(intentKey)
+    catalogPriceInFlightRef.current = true
     setBulkActionBusy(true)
     try {
       const { bulkPriceAdjustAllProducts } = await import('../../api/productWriteTransport.ts')
-      const preview = await bulkPriceAdjustAllProducts({ ...payload, preview: true })
-      const count = Number(preview?.count) || 0
+      assertActorReadScope(scope, false)
+      // An uncertain apply keeps its exact request and original review count. A fresh preview could hide a committed decrease.
+      const count = pending?.count ?? (Number((await bulkPriceAdjustAllProducts({ ...payload, preview: true }))?.count) || 0)
+      assertActorReadScope(scope, false)
       if (count === 0) {
         notify(tr('bulk_price_no_change', 'Nothing to change with those settings'), 'warning')
         return
@@ -4417,13 +4426,19 @@ function ProductsFullEditor() {
         confirmLabel: verb,
         danger: true,
       }))) return
-      const result = await bulkPriceAdjustAllProducts(payload)
-      if (result?.success === false || result?.error) throw new Error(String(result?.error || 'Bulk adjustment failed'))
-      notify(`${tr('bulk_price_all_done', 'Adjusted prices across the catalog')}: ${Number(result?.changed) || count}`)
+      assertActorReadScope(scope, false)
+      const request = pending?.payload ?? ensureClientRequestId(payload, 'price_adjust')
+      catalogPricePendingRef.current.set(intentKey, { payload: request, count })
+      const result = await bulkPriceAdjustAllProducts(request as typeof payload & { client_request_id: string })
+      assertActorReadScope(scope, false)
+      if (result?.success !== true || result?.error) throw new Error(String(result?.error || 'Bulk adjustment failed'))
+      catalogPricePendingRef.current.delete(intentKey)
+      notify(`${tr('bulk_price_all_done', 'Adjusted prices across the catalog')}: ${Number(result?.changed ?? count)}`)
       await load(true)
     } catch (error) {
       notify(getErrorMessage(error, 'Bulk adjustment failed'), 'error')
     } finally {
+      catalogPriceInFlightRef.current = false
       setBulkActionBusy(false)
     }
   }, [askToConfirm, bulkActionBusy, bulkEditForm, bulkFieldLabel, khrSymbol, notify, tr, load, usdSymbol])

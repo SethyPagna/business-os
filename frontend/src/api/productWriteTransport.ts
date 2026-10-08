@@ -644,8 +644,10 @@ export function bulkPriceAdjustAllProducts(payload: {
   fields: string[]
   skip_zero: boolean
   preview?: boolean
-}): Promise<{ count?: number; success?: boolean; changed?: number; error?: string }> {
-  const request = () => apiFetch('POST', '/api/products/bulk-price-adjust', { ...payload, ...getDevicePayload() }) as Promise<{ count?: number; success?: boolean; changed?: number; error?: string }>
+  client_request_id?: string
+}): Promise<{ count?: number; success?: boolean; changed?: number; replayed?: boolean; error?: string }> {
+  const stamped = payload.preview ? payload : ensureClientRequestId(payload, 'price_adjust')
+  const request = () => apiFetch('POST', '/api/products/bulk-price-adjust', { ...stamped, ...getDevicePayload() }) as Promise<{ count?: number; success?: boolean; changed?: number; error?: string }>
   if (payload.preview) return request()
   return route('products:bulkPriceAdjustAll', request, null, true).then((result) => {
     cacheInvalidate('products')
