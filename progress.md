@@ -1,4 +1,4 @@
-## 08/10/2026 — stock transaction and storage fallback checkpoint
+## 09/10/2026 — stock transaction and storage fallback checkpoint
 
 Production is verified on Paid at `8b0e2c4cf608c3f6f3dbcad1d1a2ff8fa7ee1240`: the product-stock/image, mobile-menu and PWA-restart checkpoints are deployed, with live provenance and postflight checks complete. The earlier immediate/open-shift exception is consumed. This candidate combines the subsequent stock transaction repairs and service-worker storage fallback; it is not deployed.
 
@@ -6,7 +6,11 @@ Stock intake now keeps physical quantities, condition records, movement history 
 
 Independent full-request testing exposed a Paid multi-line retry schedule exceeding the configured budget. The repaired schedule saves 22 lines and defers two within 970 statements; resubmission saves the remaining lines exactly once and replay adds no stock. Native rollback, missing-receipt, lost-acknowledgment and cold/warm Free controls pass. The stored representation of damaged stock is still the legacy separate pool: counted/sellable damaged tags remain a distinct unfinished slice.
 
-The service worker treats rejected optional cache access as a miss and uses the original network request. Retained-cache failures are isolated, healthy immutable hits keep zero network requests, and a failed cache write does not discard a usable response. API/media exclusions, document validation and stale-asset defenses remain. Its own full gate and fresh Astra review passed; the combined candidate still needs its exact-SHA gate and fresh review before normal evening/closed-shift Paid deployment.
+The service worker treats rejected optional cache access as a miss and uses the original network request. Retained-cache failures are isolated, healthy immutable hits keep zero network requests, and a failed cache write does not discard a usable response. API/media exclusions, document validation and stale-asset defenses remain. Its own full gate and fresh Astra review passed; the combined candidate still needs its exact-SHA gate and fresh review before Paid deployment.
+
+The first combined full gate passed 835 of 842 Worker tests and all 751 frontend tests. The seven failures exposed obsolete test request IDs, dependency loaders, transaction-layout expectations and a native adapter that discarded `RETURNING` rows. Corrections preserve business ledger and rollback assertions, share one transaction-boundary assertion, and add misplaced-guard, same-request retry and replay controls. The injected correction abort now verifies the conservative uncertain-result response while proving no stock, cost or history changes and a safe original-ID retry. Runtime source is unchanged by these fixture repairs; a new full gate and fresh Astra review remain required.
+
+The owner's current release cadence permits at most one night deployment after 20:00 Cambodia once the shift is closed, and one morning deployment at 07:00 Cambodia regardless of shift status. Both require a verified changed candidate, the full gate, fresh Astra review and postflight checks. The successful 08/10 night release already consumed that window; no extra ad hoc release is scheduled.
 
 Composition validation covers stock result/deferred-continuation consumers, storage fallback and dirty-work/PWA recovery alongside package types, EN/KM keys, production build and existing startup budgets. Physical iOS/Android camera, HEIC, keyboard and installed-PWA lifecycle checks are not certified. Remaining owner UI, account draft server-authority isolation, damaged conversion and parked lanes stay open. Dated notes below are historical snapshots.
 
