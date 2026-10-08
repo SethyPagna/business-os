@@ -131,6 +131,7 @@ const dbOverride = { getDb: () => currentDb }
 // of other modules loaded the same way below).
 // ---------------------------------------------------------------------------
 const moneyMod = loadReal('lib/moneyPrecision.ts')
+const catalogCostMod = loadReal('lib/catalogCostRecompute.ts', { './moneyPrecision': moneyMod })
 const batchCodeMod = loadReal('lib/batchCode.ts')
 const sqlBindingMod = loadReal('lib/sqlBinding.ts')
 const stockConditionMod = loadReal('lib/stockCondition.ts')
@@ -168,6 +169,7 @@ const broadcastStub = { broadcast: async () => {} }
 const authStub = { requireAuth: async (c, next) => { await next() } }
 
 const inventoryMod = loadReal('routes/inventory.ts', {
+  '../lib/catalogCostRecompute': catalogCostMod,
   '../lib/receivingBranch': receivingBranchMod,
   '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'),
   '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
@@ -190,6 +192,7 @@ const inventoryMod = loadReal('routes/inventory.ts', {
 })
 
 const batchesMod = loadReal('routes/batches.ts', {
+  '../lib/catalogCostRecompute': catalogCostMod,
   '../lib/receivingBranch': receivingBranchMod,
   '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'),
   '../lib/db': dbOverride,
@@ -277,6 +280,7 @@ async function run() {
     const c = makeContext(db, ADMIN_USER)
     const lines = [
       { key: 'a', wire: 'receive', body: {
+        client_request_id: 'fastline-a-receive-0001',
         product_id: 1, branch_id: 1, quantity: 5, unit_cost_usd: 2, supplier_name: 'Acme', payment_status: 'paid',
       } },
       // N13: an adjust-wire line carries a client_request_id (the stock session always mints one per line).
@@ -354,7 +358,7 @@ async function run() {
     for (let i = 1; i <= 30; i += 1) {
       rawDb.exec(`INSERT INTO products(id, name, barcode, cost_price_usd, cost_price_khr, stock_quantity, is_active) VALUES(${i}, 'P${i}', 'B${i}', 1, 0, 0, 1);`)
       rawDb.exec(`INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(${i}, 1, 0);`)
-      lines.push({ key: `p${i}`, wire: 'receive', body: { product_id: i, branch_id: 1, quantity: 1, unit_cost_usd: 1, supplier_name: 'Acme', payment_status: 'paid' } })
+      lines.push({ key: `p${i}`, wire: 'receive', body: { client_request_id: `paid-receive-${i}-0001`, product_id: i, branch_id: 1, quantity: 1, unit_cost_usd: 1, supplier_name: 'Acme', payment_status: 'paid' } })
     }
     const db = wrapFlat(rawDb)
     // Paid (PLAN_TIER unset) attempts stockInLinesPerRequest lines per
@@ -381,8 +385,8 @@ async function run() {
     c.env = { DB: {}, PLAN_TIER: 'free' }
     const cap = planTierMod.PLAN_LIMITS_BY_TIER.free.stockInLinesPerRequest
     const lines = [
-      { key: 'a', wire: 'receive', body: { product_id: 1, branch_id: 1, quantity: 5, unit_cost_usd: 2, supplier_name: 'Acme', payment_status: 'paid' } },
-      { key: 'b', wire: 'receive', body: { product_id: 2, branch_id: 1, quantity: 4, unit_cost_usd: 3, supplier_name: 'Acme', payment_status: 'paid' } },
+      { key: 'a', wire: 'receive', body: { client_request_id: 'free-receive-a-0001', product_id: 1, branch_id: 1, quantity: 5, unit_cost_usd: 2, supplier_name: 'Acme', payment_status: 'paid' } },
+      { key: 'b', wire: 'receive', body: { client_request_id: 'free-receive-b-0001', product_id: 2, branch_id: 1, quantity: 4, unit_cost_usd: 3, supplier_name: 'Acme', payment_status: 'paid' } },
     ]
     assert.ok(cap < lines.length, 'the Free cap is below this two-line session')
     auditCalls = []

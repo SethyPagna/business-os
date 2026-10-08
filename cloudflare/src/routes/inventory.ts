@@ -1503,13 +1503,9 @@ async function applyStockDelta(env: Env, productId: number, branchId: number, de
 // body only, no logic changed. The route registration right below is now a
 // three-line wrapper: parse the body, call this, done. Exported for that one
 // other caller; nothing else should import it (use POST /adjust).
-// Per-line idempotency (migration 0192). The kernel body is unchanged and
-// lives in runAdjustActionKernel below; this wrapper only claims the
-// client_request_id the caller sent, returns the ORIGINAL response when the
-// same id comes back, and releases the claim when the kernel refuses -- so a
-// retry after a lost response cannot post the delta twice. A body with no
-// client_request_id, or a database where 0192 is not applied yet, takes the
-// pre-0192 path byte for byte (lib/stockMutationReceipt.ts).
+// Required durable per-line idempotency. Replays return the original result;
+// rolled-back attempts release their unwritten claim. An unavailable receipt
+// store refuses before any stock write.
 export async function runAdjustAction(c: InventoryContext, body: Record<string, unknown>): Promise<Response> {
   // Refusals that need no database run BEFORE the receipt claim, so a denied or
   // malformed request never opens a connection (the claim is a D1 round trip).

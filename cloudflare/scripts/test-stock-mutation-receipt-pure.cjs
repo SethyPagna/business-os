@@ -94,6 +94,7 @@ let currentDb = null
 const dbOverride = { getDb: () => currentDb }
 
 const moneyMod = loadReal('lib/moneyPrecision.ts')
+const catalogCostMod = loadReal('lib/catalogCostRecompute.ts', { './moneyPrecision': moneyMod })
 const batchCodeMod = loadReal('lib/batchCode.ts')
 const sqlBindingMod = loadReal('lib/sqlBinding.ts')
 const stockConditionMod = loadReal('lib/stockCondition.ts')
@@ -122,6 +123,7 @@ const broadcastStub = { broadcast: async () => {} }
 const authStub = { requireAuth: async (c, next) => { await next() } }
 
 const inventoryMod = loadReal('routes/inventory.ts', {
+  '../lib/catalogCostRecompute': catalogCostMod,
   '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   '../lib/db': dbOverride,
   '../lib/auth': authStub,
@@ -144,6 +146,7 @@ const inventoryMod = loadReal('routes/inventory.ts', {
 })
 
 const batchesMod = loadReal('routes/batches.ts', {
+  '../lib/catalogCostRecompute': catalogCostMod,
   '../lib/db': dbOverride,
   '../lib/auth': authStub,
   '../lib/audit': auditStub,
@@ -455,18 +458,23 @@ async function run() {
     console.log('PASS a whole re-sent fast stock-in session is a no-op')
   }
 
-  // 8) Schema fallback. 0192 is append-only and is applied by the owner, not
-  //    by the deploy, so the Worker must run on a database that does not have
-  //    the table yet -- with the exact pre-0192 behaviour, never a refusal.
+  // Required intake receipts fail closed; unrelated legacy wrapper callers
+  // retain their opt-in compatibility path.
   {
     const db = freshDb()
     db.raw.exec('DROP TABLE stock_mutation_receipts;')
     receiptMod.resetStockMutationReceiptSchemaProbe()
     const c = makeContext(db)
     const first = await runAdjustAction(c, addBody('stockline_99999999-9999'))
-    assert.equal(first.status, 200, 'a stock write is never refused for a missing receipt table')
-    assert.equal(branchStock(db), 5, 'and applies normally')
-    console.log('PASS a database without migration 0192 keeps writing stock')
+    assert.equal(first.status, 503)
+    assert.equal((await jsonOf(first)).code, 'stock_receipt_unavailable')
+    assert.equal(branchStock(db), 0, 'required receipt refusal precedes physical writes')
+    let legacyRan = false
+    const legacy = await receiptMod.withStockMutationReceipt(() => db, 1, 'adjust', addBody('legacy_schema_fallback_0001'), c.json,
+      async () => { legacyRan = true; return c.json({ success: true }) })
+    assert.equal(legacy.status, 200)
+    assert.equal(legacyRan, true)
+    console.log('PASS missing required receipt schema refuses stock; legacy wrapper compatibility remains opt-in')
   }
 
   // E3 -- THE PROBE MUST NOT LATCH OFF. An isolate that probed while 0192 was
@@ -477,18 +485,18 @@ async function run() {
     const db = freshDb()
     db.raw.exec('DROP TABLE stock_mutation_receipts;')
     receiptMod.resetStockMutationReceiptSchemaProbe()
-    await runAdjustAction(makeContext(db), addBody('stockline_cccc0000-probe'))
-    assert.equal(branchStock(db), 5, 'the unprotected write still lands')
+    assert.equal((await runAdjustAction(makeContext(db), addBody('stockline_cccc0000-probe'))).status, 503)
+    assert.equal(branchStock(db), 0, 'the unprotected write is refused')
 
     // The owner applies 0192. No deploy, no isolate restart.
     db.raw.exec(migration0192Sql())
     const after = await runAdjustAction(makeContext(db), addBody('stockline_dddd0000-probe'))
     assert.equal(after.status, 200, 'the next line still writes')
-    assert.equal(branchStock(db), 10, 'and applies')
+    assert.equal(branchStock(db), 5, 'and applies')
     assert.equal(receiptCount(db), 1, 'THE FIX: protection resumed without recycling the isolate')
     const repeat = await runAdjustAction(makeContext(db), addBody('stockline_dddd0000-probe'))
     assert.equal((await jsonOf(repeat)).replayed, true, 'and the very next repeat is deduped')
-    assert.equal(branchStock(db), 10, 'THE FIX: stock stays at 10 -- before this it went to 15')
+    assert.equal(branchStock(db), 5, 'the identified receipt applies once after schema becomes available')
     console.log('PASS the schema probe re-checks after a miss')
   }
 
@@ -517,10 +525,9 @@ async function run() {
   //    second time -- the guard looked green and the shelf was still wrong.
   {
     const db = freshDb()
-    const c = makeContext(faultyDb(db, 'INSERT INTO inventory_movements'))
-    let threw = false
-    try { await runAdjustAction(c, addBody('stockline_77777777-dead')) } catch { threw = true }
-    assert.equal(threw, true, 'the kernel really did die after its write')
+    const c = makeContext(faultyDb(db, 'SELECT id, batch_number, lot_code'))
+    const refused = await runAdjustAction(c, addBody('stockline_77777777-dead'))
+    assert.equal(refused.status, 400, 'post-commit lot read failed')
     assert.equal(branchStock(db), 5, 'and the stock write really did land')
     const stranded = receiptRow(db)
     assert.equal(Number(stranded.written), 1, 'the receipt records that stock moved')
@@ -530,7 +537,8 @@ async function run() {
     assert.equal(retry.status, 409, 'THE FIX: the retry is refused, not re-applied')
     assert.equal((await jsonOf(retry)).code, 'stock_request_partially_applied', 'and names what happened')
     assert.equal(branchStock(db), 5, 'THE FIX: stock stays at 5 -- before this it went to 10')
-    console.log('PASS a kernel that wrote stock and then failed refuses the retry')
+    assert.equal(movementCount(db), 1, 'physical and movement committed together; the completion outcome is incomplete')
+    console.log('PASS committed intake with failed post-commit result read refuses unsafe retry')
   }
 
   // CONTROL for the case above. A failure BEFORE the write must still release,
@@ -584,7 +592,7 @@ async function run() {
   //    whole point of the written flag.
   {
     const db = freshDb()
-    const c = makeContext(faultyDb(db, 'INSERT INTO inventory_movements'))
+    const c = makeContext(faultyDb(db, 'SELECT id, batch_number, lot_code'))
     try { await runAdjustAction(c, addBody('stockline_88888888-wrote')) } catch { /* expected */ }
     assert.equal(branchStock(db), 5, 'stock moved before the crash')
     // A crash so hard the completion never ran, then left to go stale.
@@ -594,7 +602,7 @@ async function run() {
     assert.equal(retry.status, 409, 'CONTROL: a stale claim that wrote is NOT re-claimed')
     assert.equal((await jsonOf(retry)).code, 'stock_request_partially_applied', 'it is reported as partially applied')
     assert.equal(branchStock(db), 5, 'CONTROL: stock unchanged')
-    assert.equal(movementCount(db), 0, 'CONTROL: and no movement was ever written')
+    assert.equal(movementCount(db), 1, 'CONTROL: the committed intake movement stays intact')
     console.log('PASS a stale claim that already wrote stock is never re-claimed (control)')
   }
 
@@ -623,10 +631,10 @@ async function run() {
     const db = freshDb()
     const c = makeContext(faultyDb(db, 'INSERT INTO stock_mutation_receipts'))
     const answer = await runAdjustAction(c, addBody('stockline_bbbb0000-race'))
-    assert.equal(answer.status, 409, 'THE FIX: a vanished race answers 409, not 500')
-    assert.equal((await jsonOf(answer)).code, 'stock_request_in_flight', 'with a code the UI can translate')
+    assert.equal(answer.status, 503, 'a failed claim without a durable row is temporarily unavailable')
+    assert.equal((await jsonOf(answer)).code, 'stock_receipt_unavailable', 'with a truthful retryable code the UI can translate')
     assert.equal(branchStock(db), 0, 'and moves no stock')
-    console.log('PASS a lost claim race answers a clean 409')
+    console.log('PASS a failed required claim refuses before writes with a retryable 503')
   }
 
   console.log('\nAll stock mutation receipt assertions passed')

@@ -110,7 +110,7 @@ function ctx(env, body) {
     env, get: () => actor,
     req: { json: async () => body },
     executionCtx: { waitUntil: () => {} },
-    json(payload, status) { if (status) statusCode = status; return { payload, status: statusCode } },
+    json(payload, status) { if (status) statusCode = status; return new Response(JSON.stringify(payload), { status: statusCode, headers: { 'content-type': 'application/json' } }) },
   }
 }
 
@@ -132,7 +132,7 @@ async function main() {
     const before = f.sql.prepare('SELECT COUNT(*) c FROM products').get().c
     const result = await route.runReceiveBatchAction(ctx(f.env, {
       product_id: 999, branch_id: 1, quantity: 3, unit_cost_usd: 4, supplier_name: 'Bong Long', received_date: '2026-09-17',
-    }), { product_id: 999, branch_id: 1, quantity: 3, unit_cost_usd: 4, supplier_name: 'Bong Long', received_date: '2026-09-17' })
+    }), { client_request_id: 'identity-missing-product-0001', product_id: 999, branch_id: 1, quantity: 3, unit_cost_usd: 4, supplier_name: 'Bong Long', received_date: '2026-09-17' })
     assert.equal(result.status, 404)
     assert.equal(f.sql.prepare('SELECT COUNT(*) c FROM products').get().c, before, 'no row was created for the unresolvable id')
   })
@@ -141,6 +141,7 @@ async function main() {
     const f = fixture()
     const before = f.sql.prepare('SELECT barcode, name FROM products WHERE id=1').get()
     const result = await route.runReceiveBatchAction(ctx(f.env, {}), {
+      client_request_id: 'identity-existing-product-0001',
       product_id: 1, branch_id: 1, quantity: 2, unit_cost_usd: 6, supplier_name: 'Bong Long', received_date: '2026-09-17',
     })
     assert.equal(result.status, 200)

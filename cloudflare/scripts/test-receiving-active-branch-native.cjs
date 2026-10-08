@@ -211,7 +211,7 @@ function branchStock(db, productId) {
 }
 
 
-const receiveBody = { product_id:1, branch_id:1, quantity:5, unit_cost_usd:2, supplier_name:'Acme', payment_status:'paid', received_date:'01/10/2026' }
+const receiveBody = { client_request_id:'active-branch-receive-0001', product_id:1, branch_id:1, quantity:5, unit_cost_usd:2, supplier_name:'Acme', payment_status:'paid', received_date:'01/10/2026' }
 const adjustBody = { productId:1, branchId:1, type:'add', quantity:5, unitCostUsd:2, supplierName:'Acme', paymentStatus:'paid', reason:'delivery', receivedDate:'01/10/2026' }
 const tables = ['products','branch_stock','product_batches','branch_batch_stock','inventory_movements']
 function snapshot(db) { return Object.fromEntries(tables.map(t => [t, db.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()])) }
@@ -387,13 +387,12 @@ async function run() {
     assert.equal(result[0].code,'receiving_branch_inactive')
     assert.deepEqual(snapshot(db),before)
     const stored=db.prepare('SELECT written,response_status FROM stock_mutation_receipts WHERE request_id=@id').get({id:body.client_request_id})
-    assert.equal(stored.written,1)
-    assert.equal(stored.response_status,409)
+    assert.equal(stored,undefined,'rolled-back physical transaction releases its unwritten claim')
     const retried=await runStockInCommit(c,[{wire:'receive',body}])
-    assert.equal(retried[0].code,'stock_request_partially_applied')
+    assert.equal(retried[0].code,'branch_redirect_required','same ID retries against the current admission facts')
     assert.deepEqual(snapshot(db),before)
   }
-  console.log('PASS aggregate race refuses; existing conservative receipt marker survives and retry reports partial, not success')
+  console.log('PASS aggregate race rolls back receipt marker; same ID remains retryable without a false partial claim')
   assert.equal(receivingBranchMod.isReceivingBranchError(new Error('bad JSON path: unknown')),false)
   assert.equal(receivingBranchMod.isReceivingBranchError(new Error('transport lost')),false)
   console.log('PASS unrelated errors are not misclassified as inactive destinations')

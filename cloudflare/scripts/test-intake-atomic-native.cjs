@@ -186,6 +186,21 @@ async function main() {
     assert.ok(attempts <= 50, `actual attempted statements with tails ${attempts}`)
     budgets.push({ mode, tier: 'free', actualEffects: true, attempts })
   })
+  for (const variant of ['new-free-price', 'unlock-match', 'unlock-sibling']) await check(`cold Free tagged intake ${variant} keeps optional paths within 50 attempts`, async () => {
+    const f = await setup('add-tagged', user, true)
+    f.env.PLAN_TIER = 'free'
+    const request = { ...f.body, batchId: 'new', freeQuantity: 2,
+      ...(variant === 'new-free-price' ? { sellingPriceUsd: 5 } : {
+        unlockPricing: true, pricing: { cost_usd: 2, selling_price_usd: 5, barcode: variant === 'unlock-match' ? 'SER-1' : 'DIFFERENT-1' },
+      }) }
+    let attempts = 0
+    globalThis[Symbol.for('business-os.request-metrics.v1')] = { d1Start(n) { attempts += n }, d1Call() {} }
+    let result
+    try { result = await f.send(request) } finally { delete globalThis[Symbol.for('business-os.request-metrics.v1')] }
+    assert.equal(result.status, 200, JSON.stringify(result))
+    assert.ok(attempts <= 50, `actual attempted statements with optional fields ${attempts}`)
+    budgets.push({ variant, tier: 'free', actualEffects: true, attempts })
+  })
   await check('zero quantity and scoped Set stale quantities retain their guards', async () => {
     const f = await setup('correction')
     const before = f.state()

@@ -136,7 +136,8 @@ function ctx(db, user = ADMIN) {
 }
 const call = async (fn, db, body) => { const res = await fn(ctx(db), body); return { status: res.status, json: await res.json() } }
 const adjust = (db, body) => call(inventoryMod.runAdjustAction, db, { productId: 1, branchId: 1, type: 'add', reason: 'New arrival', supplierName: 'Bong Long', paymentStatus: 'paid', ...body })
-const receive = (db, body) => call(batchesMod.runReceiveBatchAction, db, { product_id: 1, branch_id: 1, reason: 'New arrival', supplier_name: 'Bong Long', payment_status: 'paid', ...body })
+let receiveSequence = 0
+const receive = (db, body) => call(batchesMod.runReceiveBatchAction, db, { client_request_id: `supplier-receive-${++receiveSequence}-0001`, product_id: 1, branch_id: 1, reason: 'New arrival', supplier_name: 'Bong Long', payment_status: 'paid', ...body })
 const stock = (db) => db.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity
 const lots = (db) => db.prepare('SELECT unit_cost_usd, received_quantity, received_cost_usd FROM product_batches WHERE variant_product_id = 1 ORDER BY id').all()
 const movements = (db) => db.prepare("SELECT quantity, unit_cost_usd, total_cost_usd, free_quantity, reason FROM inventory_movements WHERE product_id = 1 ORDER BY id").all()
@@ -166,7 +167,7 @@ const nothingWritten = (db, label) => {
 }
 // 10 at $3.50 + 2 free and 6 at $12.09 (paid, free units excluded) = $107.54.
 const sessionLines = (paymentStatus = 'paid') => [
-  { key: 'a', wire: 'receive', body: { product_id: 1, branch_id: 1, quantity: 10, free_quantity: 2, unit_cost_usd: 3.5, supplier_name: 'Bong Long', payment_status: paymentStatus, credit_due_date: '2026-10-15', reason: 'New arrival' } },
+  { key: 'a', wire: 'receive', body: { client_request_id: 'supplier-session-a-0001', product_id: 1, branch_id: 1, quantity: 10, free_quantity: 2, unit_cost_usd: 3.5, supplier_name: 'Bong Long', payment_status: paymentStatus, credit_due_date: '2026-10-15', reason: 'New arrival' } },
   { key: 'b', wire: 'adjust', body: { client_request_id: 'sessline_b_00000001', productId: 1, branchId: 1, type: 'add', quantity: 6, unitCostUsd: 12.09, supplierName: 'Bong Long', paymentStatus: 'paid', reason: 'New arrival' } },
   { key: 'c', wire: 'adjust', body: { client_request_id: 'sessline_c_00000001', productId: 1, branchId: 1, type: 'remove', quantity: 1, reason: 'Damaged' } },
 ]

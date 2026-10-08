@@ -672,6 +672,7 @@ async function main() {
   await check('D4b: POST /api/batches with an explicit batch_id tops up that exact lot and keeps its received_at', async () => {
     seed()
     const first = await req('POST', '/', {
+      client_request_id: 'dated-receive-new-0001',
       product_id: 1, branch_id: 1, quantity: 6, received_date: '2025-02-10',
       // POST /api/batches is a receipt wire, so it now states who the goods
       // came from and what they cost (lib/stockReceiptGate.ts).
@@ -681,6 +682,7 @@ async function main() {
     const lot = batchRows()[0]
     assert.strictEqual(lot.received_at, '2025-02-10')
     const topUp = await req('POST', '/', {
+      client_request_id: 'dated-receive-topup-0001',
       // The named lot already carries 'Fixture Supplier', so the supplier half
       // is answered by the lot; the cost half never is.
       product_id: 1, branch_id: 1, quantity: 4, batch_id: lot.id, received_date: '2026-08-01', unit_cost_usd: 2,
@@ -699,6 +701,7 @@ async function main() {
     const foreign = batchRows()[0]
     const aggBefore = rawDb.prepare('SELECT stock_quantity FROM products WHERE id = 2').get().stock_quantity
     const { status } = await req('POST', '/', {
+      client_request_id: 'dated-receive-mismatch-0001',
       product_id: 2, branch_id: 1, quantity: 3, batch_id: foreign.id,
     }, batchesApp)
     assert.strictEqual(status, 400, 'a caller mistake answers 400, not an unhandled 500')

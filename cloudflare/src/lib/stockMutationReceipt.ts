@@ -20,22 +20,16 @@ import type { StockWriteStatement } from './productBatches'
 // (transfer_operation_receipts); this is the same contract for the per-line
 // kernels.
 //
-// WHY A CLAIM AND NOT ONE ATOMIC BATCH. The transfer route can fold its
-// receipt insert into the single db.batch() that moves the stock, so a replay
-// aborts the whole transaction on the UNIQUE index. Neither kernel here is one
-// transaction: runAdjustAction alone runs a correction batch, a receive batch,
-// a removal, a standalone movement insert and a tagged-hold batch in sequence.
-// Folding a receipt into "the" write is therefore not available without
-// restructuring both kernels (which is exactly what the Milestone A
-// stock-session kernel in lib/stockSession.ts did for the session wire).
-// So this claims the request id FIRST, on the UNIQUE (actor_id, request_id)
-// index, and completes it with the response afterwards.
+// Reserve the request id FIRST on UNIQUE(actor_id, request_id), then save
+// the response afterwards. Intake now places its physical, condition,
+// movement and written marker in one single-attempt batch. Legacy callers
+// that still span separate writes retain markWritten and partial recovery.
 //
 // THE WRITTEN FLAG is what makes that honest. A kernel can write stock and
 // then still fail afterwards -- "Received stock batch was not found after
-// commit" answers 400 with the lot already topped up; recomputeCatalogCost
-// runs after the receipt and outside its try; a tagged restock can be refused
-// after its receipt landed. Releasing the claim there would let the retry
+// commit" answers 400 with the lot already topped up. Response completion
+// can fail even when all physical effects committed together. Releasing the
+// claim there would let the retry
 // apply the delta a second time, which is the whole defect this file exists
 // to stop. So the wrapper hands the kernel a markWritten() that it calls
 // immediately before its first stock-mutating statement:
@@ -55,7 +49,8 @@ import type { StockWriteStatement } from './productBatches'
 //         -> 'in_flight' : claimed under 120s ago and still running -> 409
 //         -> 'partial'   : wrote stock and did not finish -> 409
 //         -> 'invalid'   : an id was sent but is not a usable one -> 400
-//         -> 'disabled'  : migration 0192 not applied here -> pre-0192 path
+//         -> 'disabled'  : missing receipt schema; required intake refuses,
+//                          other legacy callers retain their compatibility path
 //
 // STALE CLAIMS. A crash between the claim and the completion used to strand
 // the id in 'in_flight' FOREVER, and the operator had no way back: the line
@@ -104,6 +99,7 @@ export type StockMutationAtomicMark = {
   statement(): StockWriteStatement | null
   /** Call once that batch has committed. */
   committed(): void
+  /** Execute a full statement plan once with this marker, then confirm commit. */
   execute?(db: D1Compat, statements: StockWriteStatement[]): Promise<void>
 }
 
