@@ -1,3 +1,13 @@
+## 08/10/2026 — PWA restart protection — composed checkpoint
+
+Snapshot at 13:01 UTC: the stock/image release `6d9ea0b5f9e934c49171b7874db3e19b957e05fd` is deployed on Paid and its live provenance and postflight checks pass. Mobile menu checkpoint `1cb7b746e4c65a8ff5df2735f7bd3fb66dc7a43b` passed its full gate (837 Worker and 749 frontend files, first attempts) and fresh Astra review with exceptions, and is on main. Its separate deployment awaits the normal evening and fresh closed-shift checks; the earlier immediate/open-shift exception is consumed.
+
+This next checkpoint composes PWA restart protection onto that reviewed mobile source. Optional browser update and cache-clear waits have deadlines, worker listeners are cleaned up, and both Restart controls share one pending action. New edits made during a wait refuse activation/navigation at the relevant boundary. A refused loading recovery restores retryability and returns the original loading error instead of waiting for a reload that will not happen. Existing notices and language keys are reused.
+
+The isolated repair passed 22 behavioral tests and four mounted Chromium/WebKit English/Khmer groups covering 12 browser scenarios, 14 neighboring files, both packages' typechecks, i18n and an exact-commit build. Independent refutation passed 29 schedules against both revisions with 129 candidate assertions. On this composition, 23 targeted files and frontend/application, service-worker and Worker typechecks pass. The permanent test uses Chromium by default and explicitly adds WebKit with `PWA_RESTART_WEBKIT=1`, matching CI's browser installation. The composed production build, full-SHA GitHub gate and fresh Astra review remain release prerequisites.
+
+Physical phones and installed PWA lifecycle behavior remain untested. CacheStorage network fallback, server-authority draft isolation, damaged counted/sellable tags, remaining owner UI and parked lanes remain open. The sections below are dated historical checkpoints and do not supersede this status.
+
 ## 08/10/2026 — shared menu keyboard follow-up — local checkpoint
 
 Snapshot at 11:44 UTC: the prior stock/image checkpoint `6d9ea0b5f9e934c49171b7874db3e19b957e05fd` passed Gate 37760285585 (837 Worker and 748 frontend files) and fresh Astra review with documented exceptions. Paid deployment 37766560219 is running its own safety suite; publication has not been verified in this snapshot. Its one-time immediate/open-shift exception applies only to that release.
