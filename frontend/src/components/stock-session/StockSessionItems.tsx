@@ -14,11 +14,6 @@ const DOT: Record<StockSessionLine['status'], string> = {
 
 const ICON_BUTTON = 'flex h-8 w-8 shrink-0 items-center justify-center rounded-md disabled:opacity-50'
 
-function shortDate(label: string): string {
-  const match = /^(\d{2}\/\d{2})\/\d{4}$/.exec(label.trim())
-  return match ? match[1] : label
-}
-
 /**
  * The session's lines (spec 3.5): one row each, tap to edit, trash to remove.
  * An Add item's free units are its own row underneath (owner, 30 Sep), opened
@@ -79,7 +74,7 @@ export default function StockSessionItems({
                       </span>
                       <span className="ml-auto whitespace-nowrap text-xs tabular-nums text-gray-500 dark:text-gray-400">
                         <span className={`font-semibold ${tone}`}>{amount}</span>
-                        {line.batchLabel ? ` · ${shortDate(line.batchLabel)}` : ''}
+                        {line.batchLabel ? ` · ${line.batchLabel}` : ''}
                         {cost ? ` · ${cost}` : ''}
                       </span>
                     </span>

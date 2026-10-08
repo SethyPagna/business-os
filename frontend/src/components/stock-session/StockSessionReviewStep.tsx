@@ -2,11 +2,6 @@ import type { StockLineReview } from '../../utils/stockSessionDraft.ts'
 
 type Translate = (key: string, fallbackEn?: string, fallbackKm?: string) => string
 
-function shortDate(label: string): string {
-  const match = /^(\d{2}\/\d{2})\/\d{4}$/.exec(label.trim())
-  return match ? match[1] : label
-}
-
 function Change({ label, before, after }: { label: string; before: string; after: string }) {
   return (
     <span className="whitespace-nowrap">
@@ -41,7 +36,7 @@ export default function StockSessionReviewStep({ tr, usdSymbol, canViewCosts, su
       <ul className="divide-y divide-gray-100 rounded-xl border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
         {reviews.map((review) => {
           const lot = review.lotBefore != null && review.lotAfter != null
-            ? <Change label={shortDate(review.lotLabel)} before={String(review.lotBefore)} after={String(review.lotAfter)} />
+            ? <Change label={review.lotLabel} before={String(review.lotBefore)} after={String(review.lotAfter)} />
             : null
           const stock = <Change label={stockLabel} before={String(review.stockBefore)} after={String(review.stockAfter)} />
           return (
