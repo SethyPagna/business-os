@@ -26,6 +26,8 @@ export { getImportFencedDb, withImportMaintenanceWriteFence, isImportMaintenance
 export interface D1CompatPreparedStatement {
   get<T = Record<string, unknown>>(params?: BindParams): Promise<T | undefined>
   all<T = Record<string, unknown>>(params?: BindParams): Promise<T[]>
+  getOnce?<T = Record<string, unknown>>(params?: BindParams): Promise<T | undefined>
+  allOnce?<T = Record<string, unknown>>(params?: BindParams): Promise<T[]>
   run(params?: BindParams): Promise<{ changes: number; lastInsertRowid: number }>
 }
 
@@ -174,6 +176,16 @@ class D1CompatStatement {
 
   async all<T = Record<string, unknown>>(params?: BindParams): Promise<T[]> {
     const result = await metered(() => this.bound(params).all<T>(), metaOf)
+    return result.results ?? []
+  }
+
+  async getOnce<T = Record<string, unknown>>(params?: BindParams): Promise<T | undefined> {
+    const result = await timedAttempt(() => this.bound(params).all<T>(), metaOf)()
+    return result.results?.[0] ?? undefined
+  }
+
+  async allOnce<T = Record<string, unknown>>(params?: BindParams): Promise<T[]> {
+    const result = await timedAttempt(() => this.bound(params).all<T>(), metaOf)()
     return result.results ?? []
   }
 
