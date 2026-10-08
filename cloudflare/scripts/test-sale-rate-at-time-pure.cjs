@@ -72,9 +72,19 @@ function fixture() {
     async batch(statements) {
       sql.exec('BEGIN IMMEDIATE')
       try {
-        const results = statements.map(({ text, values }) => /^\s*(SELECT|WITH)\b/i.test(text)
-          ? { results: sql.prepare(text).all(...values), meta: { changes: 0 } }
-          : meta(sql.prepare(text).run(...values)))
+        const results = statements.map(({ text, values }) => {
+          const prepared = sql.prepare(text)
+          if (/^\s*(SELECT|WITH)\b/i.test(text)) {
+            return { results: prepared.all(...values), meta: { changes: 0 } }
+          }
+          if (prepared.columns().length > 0) {
+            const before = sql.prepare('SELECT total_changes() AS n').get().n
+            const rows = prepared.all(...values)
+            const writeMeta = sql.prepare('SELECT total_changes() - ? AS changes, last_insert_rowid() AS last_row_id').get(before)
+            return { results: rows, meta: writeMeta }
+          }
+          return meta(prepared.run(...values))
+        })
         sql.exec('COMMIT')
         return results
       } catch (error) {

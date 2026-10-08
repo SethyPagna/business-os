@@ -108,8 +108,9 @@ const db = {
     if (failReturnCreatePostcommitRead && items.some((item) => /INSERT INTO return_create_receipts/i.test(item.sql))) {
       failReturnCreatePostcommitRead = false
       failNextReturnCreateReceiptRead = true
+      throw new Error('simulated lost committed return batch response')
     }
-    return results.map((r) => ({ changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) }))
+    return results.map((r) => ({ ...r, changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) }))
   },
   async transaction(fn) { return fn(this) },
 }

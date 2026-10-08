@@ -109,7 +109,7 @@ const db = {
       failReturnCreatePostcommitRead = false
       failNextReturnCreateReceiptRead = true
     }
-    return results.map((r) => ({ changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) }))
+    return results.map((r) => ({ ...r, changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) }))
   },
   async transaction(fn) { return fn(this) },
 }
@@ -419,7 +419,13 @@ const returnBody = (extra = {}) => ({
 
 // Statement capture normalised for comparison: ids and clocks differ per run.
 function normalised(batches) {
-  const text = JSON.stringify(batches)
+  const writes = batches.map(batch => batch.map(statement => ({
+    ...statement,
+    sql: /^INSERT INTO return_create_receipts\(/.test(statement.sql)
+      ? statement.sql.replace(/ RETURNING return_id,sale_id,request_digest,response_json$/, '')
+      : statement.sql,
+  })))
+  const text = JSON.stringify(writes)
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<uuid>')
     .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g, '<ts>')
     .replace(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/g, '<ts>')
@@ -446,6 +452,8 @@ async function successorChecks() {
   await check('INERT while both branches are active: the new route writes the exact statements the old one wrote', async () => {
     const fresh = await runWith(returnsRoute.default, returnBody(), 'before', 1)
     const old = await runWith(oracleRoute.default, returnBody(), 'before', 1)
+    assert.strictEqual(fresh.response.status, 200, JSON.stringify(fresh.response.json))
+    assert.strictEqual(old.response.status, 200, JSON.stringify(old.response.json))
     assert.strictEqual(fresh.response.status, 200, JSON.stringify(fresh.response.json))
     assert.strictEqual(old.response.status, 200, JSON.stringify(old.response.json))
     const freshText = normalised(fresh.captured)
