@@ -221,9 +221,12 @@ async function main() {
       let result = await refused(app, route, body(route, `race_${tag(app, route)}`, [{ productId: 1, quantity: 2 }]), 409, 'transfer_stock_changed',
         () => sql().exec(`UPDATE branch_stock SET quantity=0 WHERE product_id=1 AND branch_id=${S}`))
       assert.equal(result.body.error, TRANSFER_REFUSALS.transfer_stock_changed)
-      // The planner refuses a product that is no longer active.
-      h.fresh(1, S)
+      // Recreate a historical removed-stock product before0242, then test the guarded planner.
+      h.fresh(1, S, '0242')
       sql().exec('UPDATE products SET is_active=0 WHERE id=1')
+      for (const migrationFile of fs.readdirSync(path.join(__dirname, '../migrations')).filter(file => file.endsWith('.sql') && file >= '0242').sort()) {
+        sql().exec(fs.readFileSync(path.join(__dirname, '../migrations', migrationFile), 'utf8'))
+      }
       result = await refused(app, route, body(route, `inactive_${tag(app, route)}`, [{ productId: 1, quantity: 2 }]), 409, 'transfer_stock_changed')
       assert.equal(result.body.error, TRANSFER_REFUSALS.transfer_stock_changed)
       // Maintenance arriving after admission: the house 503, never a 500.

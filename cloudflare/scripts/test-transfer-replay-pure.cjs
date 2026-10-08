@@ -101,9 +101,10 @@ async function main() {
   await check('product/lot delete, deactivate, reparent and member rewrites fail closed',async()=>{
     await forward()
     const before=snapshot()
+    //0242 now refuses stocked product removal before the older provenance trigger.
     const mutations = [
-      ['DELETE FROM products WHERE id=1', /provenance|immutable/],
-      ['UPDATE products SET is_active=0 WHERE id=1', /provenance|immutable/],
+      ['DELETE FROM products WHERE id=1', /product_has_stock/],
+      ['UPDATE products SET is_active=0 WHERE id=1', /product_has_stock/],
       // 0155's stocked-parent invariant runs before the older 0151
       // provenance guard. Either invariant is an intentional fail-closed
       // denial; neither may change the replay snapshot.
