@@ -81,8 +81,8 @@ for (const [file, units] of Object.entries(ROUTE_PENDING)) for (const unit of un
 // PENDING: request-path awaits outside this lane's scope, named so they are
 //   not forgotten. Remove an entry once its function is fixed.
 const QUEUE_ONLY = {
-  'bulkDeleteEngine.ts': ['runBulkDeleteJob'],
-  'importEngine.ts': ['applyStockActionsSinglePass', 'applyStockActionsContinuation', 'runImportApply'],
+  'bulkDeleteEngine.ts': ['runBulkDeleteJob', 'runProductDeleteChunk'],
+  'importEngine.ts': ['applyStockActionsContinuation', 'runImportApply'],
 }
 const NOTIFIERS = {
   'customerGenderRestoration.ts': ['notifyCustomerGenderRestoration'],
