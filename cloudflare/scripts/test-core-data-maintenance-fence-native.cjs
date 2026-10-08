@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -10,18 +11,18 @@ function load(name, dependencies = {}) {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true,
   } }).outputText
   const module = { exports: {} }
-  new Function('require', 'module', 'exports', output)(request => {
+  new Function('require', 'module', 'exports', output)(withProductStockGuard(request => {
     assert.ok(Object.hasOwn(dependencies, request), `unexpected import ${request}`)
     return dependencies[request]
-  }, module, module.exports)
+  }), module, module.exports)
   return module.exports
 }
 const dbModule = load('db', { './importMaintenanceFence': {} })
-function world() {
+function world({ through } = {}) {
   const raw = new DatabaseSync(':memory:')
   raw.limits.exprDepth = 100
   raw.exec('PRAGMA foreign_keys=OFF')
-  for (const sql of loadAll()) raw.exec(sql)
+  for (const sql of loadAll({ through })) raw.exec(sql)
   const control = { beforeRun: null, stockAttempts: 0 }
   function prepared(sql, values = []) {
     const args = () => /\?\d/.test(sql) ? [Object.fromEntries(values.map((value, index) => [String(index + 1), value]))] : values
@@ -43,9 +44,11 @@ function world() {
   return { raw, control, core, env: { DB: { prepare: prepared }, BUSINESS_OS_ADMIN_PASSWORD: 'synthetic-test-password' } }
 }
 async function seeded() {
-  const w = world()
+  const w = world({ through: 241 })
   await w.core.ensureCoreDataInvariants(w.env)
   w.raw.exec("INSERT INTO products(id,name,is_active,stock_quantity) VALUES(100,'Missing active',1,7),(101,'Inactive',0,9),(102,'Covered',1,2); INSERT INTO branch_stock(product_id,branch_id,quantity) SELECT 102,id,2 FROM branches WHERE is_default=1")
+  // Seed the historical removed-stock anomaly before installing its write guard.
+  for (const sql of loadAll().slice(loadAll({ through: 241 }).length)) w.raw.exec(sql)
   w.control.stockAttempts = 0
   return w
 }

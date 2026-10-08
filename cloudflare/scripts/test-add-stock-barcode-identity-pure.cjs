@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Regression lock: an Add Stock at a NEW COST must never fork a second
 // product row carrying the SAME BARCODE.
 //
@@ -83,7 +84,7 @@ function loadReal(relPath, requireOverrides = {}) {
   }
   const moduleObj = { exports: {} }
   new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
-    moduleObj.exports, require, moduleObj, sourcePath, path.dirname(sourcePath),
+    moduleObj.exports, withProductStockGuard(require), moduleObj, sourcePath, path.dirname(sourcePath),
   )
   Module._load = originalLoad
   return moduleObj.exports
@@ -300,7 +301,7 @@ const BARCODE = '075609215322'
 const nameKeyOf = (value) => String(value).trim().replace(/\s+/g, ' ').toLowerCase()
 
 function seed() {
-  rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches; DELETE FROM inventory_movements;')
+  rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM damaged_stock_lots; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches; DELETE FROM inventory_movements;')
   rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (2, 'Shop', 1, 1)").run()
   rawDb.prepare('INSERT INTO products (id, name, name_key, barcode, is_active, is_group, stock_quantity, cost_price_usd, purchase_price_usd, selling_price_usd) VALUES (4758, @name, @nameKey, @barcode, 1, 0, 0, 17.0, 17.0, 22.0)')
     .run({ name: NAME, nameKey: nameKeyOf(NAME), barcode: BARCODE })

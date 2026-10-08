@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Actual mounted sales/history routes, production permission/assignment logic,
 // and native D1 transactions. Reuse the existing complete schema fixture only.
 const fs = require('node:fs')
@@ -9,10 +10,10 @@ async function main() {
   let source = fs.readFileSync(path.join(__dirname, 'test-sale-bulk-update-pure.cjs'), 'utf8')
     .replace("const actual = new Set(['saleStatusResolution',", "const actual = new Set(['saleCustomerAssignmentGuard',")
     .replace(/run\(\)\.catch[\s\S]*$/, '')
-  const { sales, history, fixture, setUser, load } = new Function('require', '__dirname', source + '\nreturn {sales,history,fixture,load,setUser:value=>{user=value}};')(require, __dirname)
+  const { sales, history, fixture, setUser, load } = new Function('require', '__dirname', source + '\nreturn {sales,history,fixture,load,setUser:value=>{user=value}};')(withProductStockGuard(require), __dirname)
   const contacts = load('routes/contacts.ts').default
   const createSource=fs.readFileSync(path.join(__dirname,'test-sale-create-atomic-pure.cjs'),'utf8').split(';(async () => {')[0]
-  const createHarness=new Function('require','__dirname',createSource+';return {postSale,request};')(require,__dirname)
+  const createHarness=new Function('require','__dirname',createSource+';return {postSale,request};')(withProductStockGuard(require),__dirname)
   const f = fixture()
   f.sql.exec("INSERT INTO users(id,username,name,password) VALUES(1,'employee','Employee','test')")
   const required = new Set(['sales','returns','sale_items','return_items','customers','users','roles','branches','settings','promotion_rules','inventory_movements','sale_write_revisions','sale_bulk_guards','sale_bulk_operations','sale_bulk_members','sale_record_events','undo_snapshots','action_history','audit_logs','system_flags','customer_receivables','loyalty_point_adjustments','customer_share_submissions'])

@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // D4 (11.28) regression test: manual historical batches through the ONE
 // shared stock-add path. POST /inventory/adjust now accepts an optional
 // `receivedDate`, and it must flow into lib/productBatches.ts's
@@ -77,7 +78,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const moduleObj = { exports: {} }
   try {
     new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
-      moduleObj.exports, require, moduleObj, sourcePath, path.dirname(sourcePath),
+      moduleObj.exports, withProductStockGuard(require), moduleObj, sourcePath, path.dirname(sourcePath),
     )
   } catch (error) {
     error.message = `${error.message} (while loading ${relPath})`
@@ -346,7 +347,7 @@ async function check(name, fn) {
 }
 
 function seed() {
-  rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches; DELETE FROM inventory_movements;')
+  rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM damaged_stock_lots; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches; DELETE FROM inventory_movements;')
   rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run()
   rawDb.prepare("INSERT INTO products (id, name, barcode, is_active, stock_quantity, cost_price_usd, cost_price_khr) VALUES (1, 'Widget', 'B123', 1, 0, 10, 40000)").run()
 }

@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // D1b: the Stock-In Invoice report -- proven against the REAL migrations
 // (0070 applies on top of the full chain) and the REAL writers
 // (productBatches.receiveBatchStock, stockActionCommit.applyUnifiedStockAdd
@@ -31,7 +32,7 @@ function compile(file, stubs = {}) {
   }).outputText
   const moduleObj = { exports: {} }
   const localRequire = (request) => Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : require(request)
-  new Function('exports', 'require', 'module', output)(moduleObj.exports, localRequire, moduleObj)
+  new Function('exports', 'require', 'module', output)(moduleObj.exports, withProductStockGuard(localRequire), moduleObj)
   return moduleObj.exports
 }
 

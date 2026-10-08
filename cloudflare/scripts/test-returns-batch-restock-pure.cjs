@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Regression test for the batch-aware restock fix in routes/returns.ts
 // (POST / and PATCH /:id): a customer return whose item has a resolvable
 // sale_item_id must restock into the EXACT product_batches lot that
@@ -21,7 +22,7 @@ const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
-const rawDb = openDb(loadAll())
+let rawDb = openDb(loadAll())
 function deactivatePre0154LegacyLot(batchId) {
   const deactivate = () => rawDb.prepare('UPDATE product_batches SET is_active=0 WHERE id=?').run([batchId])
   assert.throws(deactivate, /Cannot deactivate a received lot/, 'current schema rejects positive-lot deactivation')
@@ -130,7 +131,7 @@ function loadReal(relPath, requireOverrides = {}) {
   }
   const moduleObj = { exports: {} }
   new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
-    moduleObj.exports, require, moduleObj, sourcePath, path.dirname(sourcePath),
+    moduleObj.exports, withProductStockGuard(require), moduleObj, sourcePath, path.dirname(sourcePath),
   )
   Module._load = originalLoad
   return moduleObj.exports
@@ -279,7 +280,7 @@ function seed() {
     DELETE FROM sale_record_events; DELETE FROM return_mutation_receipts; DELETE FROM return_create_receipts; DELETE FROM return_create_guards;
     DELETE FROM system_flags WHERE key='sale_record_events_reset_guard';
     DELETE FROM return_bulk_guards; DELETE FROM sale_bulk_guards;
-    DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches; DELETE FROM sale_items; DELETE FROM sale_item_batch_allocations; DELETE FROM sales; DELETE FROM customers; DELETE FROM returns; DELETE FROM return_items; DELETE FROM return_item_batch_allocations; DELETE FROM inventory_movements; DELETE FROM damaged_stock_lots; DELETE FROM return_replacement_items;`)
+    DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM damaged_stock_lots; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches; DELETE FROM sale_items; DELETE FROM sale_item_batch_allocations; DELETE FROM sales; DELETE FROM customers; DELETE FROM returns; DELETE FROM return_items; DELETE FROM return_item_batch_allocations; DELETE FROM inventory_movements; DELETE FROM damaged_stock_lots; DELETE FROM return_replacement_items;`)
   rawDb.prepare('INSERT INTO branches (id, name, is_active, is_default) VALUES (1, \'Shop\', 1, 1)').run()
   rawDb.prepare('INSERT INTO branches (id, name, is_active, is_default) VALUES (2, \'Warehouse\', 1, 0)').run()
   rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (1, 'Widget', 1, 0)").run()
@@ -1845,11 +1846,15 @@ async function main() {
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_guards').get().n, 0)
   })
 
-  await check('replacement create refuses inactive products and inactive explicit lots before every write', async () => {
+  await check('replacement create refuses historical removed products and inactive explicit lots before every write', async () => {
+    // Recreate the legacy anomaly before its guard migration; test the route with every guard installed.
+    rawDb.db.close()
+    rawDb = openDb(loadAll({ through: 241 }))
     seed()
     rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run()
     rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,2)').run()
     rawDb.prepare('UPDATE products SET stock_quantity=2,is_active=0 WHERE id=2').run()
+    for (const sql of loadAll().slice(loadAll({ through: 241 }).length)) rawDb.exec(sql)
     const inactiveProduct = await reqExact('POST', '/', {
       client_request_id: 'return-create-inactive-product', return_number: 'RET-INACTIVE-PRODUCT', sale_id: 1,
       reason: 'Exchange', items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],

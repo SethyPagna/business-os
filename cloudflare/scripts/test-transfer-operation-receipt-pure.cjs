@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Real Hono handlers, permission policy, receipt/stock/lot helpers and SQLite.
 // Only session acquisition, duplicate-product resolution and notifications are mocked.
 const assert = require('node:assert/strict')
@@ -35,7 +36,7 @@ function load(relative) {
   const code = ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src', relative), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText
-  new Function('exports', 'require', 'module', code)(module.exports, (id) => {
+  new Function('exports', 'require', 'module', code)(module.exports, withProductStockGuard((id) => {
     if (id === 'hono') return require('hono')
     const name = id.split('/').at(-1)
     if (name === 'db') return { ...load('lib/db.ts'), getDb: wrapDb }
@@ -53,7 +54,7 @@ function load(relative) {
     if (name === 'telegram') return { formatTransferTelegramLines: () => [], sendTelegramEvent: async () => {} }
     // Unrelated routes are registered but never called by these tests.
     return new Proxy({}, { get: (_target, property) => () => { throw new Error(`Unexpected dependency ${id}.${String(property)}`) } })
-  }, module)
+  }), module)
   modules.set(relative, module.exports)
   return module.exports
 }

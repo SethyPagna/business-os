@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // SCAN1 L2 (STK-C, STK-D, the /move-row variant of OV-3): every stock REMOVAL
 // that spans the lot ledger and the aggregate is ONE D1 batch, strict, and
 // guarded -- or it does not happen at all.
@@ -94,7 +95,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const moduleObj = { exports: {} }
   try {
     new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
-      moduleObj.exports, require, moduleObj, sourcePath, path.dirname(sourcePath),
+      moduleObj.exports, withProductStockGuard(require), moduleObj, sourcePath, path.dirname(sourcePath),
     )
   } catch (error) {
     error.message = `${error.message} (while loading ${relPath})`
@@ -342,7 +343,7 @@ async function req(method, url, body) {
 const LOT_ID = 10
 function seedStock({ lot = 0, unlotted = 0 } = {}) {
   rawDb.exec(`DELETE FROM damaged_stock_lots; DELETE FROM branch_batch_stock; DELETE FROM product_batches;
-    DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches; DELETE FROM inventory_movements;
+    DELETE FROM branch_stock; DELETE FROM damaged_stock_lots; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches; DELETE FROM inventory_movements;
     DELETE FROM stock_mutation_receipts; DELETE FROM action_history;`)
   rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run({})
   rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, stock_quantity, cost_price_usd, cost_price_khr)

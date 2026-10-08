@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // CUTOVER-LC item 4: returns of a sale made at a branch that has since been
 // retired (Shop -> "Old Shop", successor "LC Store").
 //
@@ -133,7 +134,7 @@ function loadReal(relPath, requireOverrides = {}, sourceText = null) {
   }
   const moduleObj = { exports: {} }
   new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
-    moduleObj.exports, require, moduleObj, sourcePath, path.dirname(sourcePath),
+    moduleObj.exports, withProductStockGuard(require), moduleObj, sourcePath, path.dirname(sourcePath),
   )
   Module._load = originalLoad
   return moduleObj.exports
@@ -289,7 +290,7 @@ function seed() {
     DELETE FROM sale_record_events; DELETE FROM return_mutation_receipts; DELETE FROM return_create_receipts; DELETE FROM return_create_guards;
     DELETE FROM system_flags WHERE key='sale_record_events_reset_guard';
     DELETE FROM return_bulk_guards; DELETE FROM sale_bulk_guards;
-    DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches; DELETE FROM sale_items; DELETE FROM sale_item_batch_allocations; DELETE FROM sales; DELETE FROM customers; DELETE FROM returns; DELETE FROM return_items; DELETE FROM return_item_batch_allocations; DELETE FROM inventory_movements; DELETE FROM damaged_stock_lots; DELETE FROM return_replacement_items;`)
+    DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM damaged_stock_lots; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches; DELETE FROM sale_items; DELETE FROM sale_item_batch_allocations; DELETE FROM sales; DELETE FROM customers; DELETE FROM returns; DELETE FROM return_items; DELETE FROM return_item_batch_allocations; DELETE FROM inventory_movements; DELETE FROM damaged_stock_lots; DELETE FROM return_replacement_items;`)
   rawDb.prepare('INSERT INTO branches (id, name, is_active, is_default) VALUES (1, \'Shop\', 1, 1)').run()
   rawDb.prepare('INSERT INTO branches (id, name, is_active, is_default) VALUES (2, \'Warehouse\', 1, 0)').run()
   rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (1, 'Widget', 1, 0)").run()

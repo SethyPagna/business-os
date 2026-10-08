@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Part 578 item 2b: reload-durable UNDO/REDO of a duplicate-product merge.
 //
 // The merge (routes/products.ts foldDuplicateProductInto) folds a duplicate
@@ -37,7 +38,7 @@ function loadActualDependency(file) {
   const actualRequire = (request) => request.startsWith('.')
     ? loadActualDependency(path.resolve(path.dirname(file), request + '.ts'))
     : require(request)
-  new Function('exports', 'require', 'module', output)(mod.exports, actualRequire, mod)
+  new Function('exports', 'require', 'module', output)(mod.exports, withProductStockGuard(actualRequire), mod)
   actualDependencyCache.set(file, mod.exports)
   return mod.exports
 }
@@ -61,7 +62,7 @@ function loadRealActorSnapshot() {
     fileName: 'actorSnapshot.ts',
   })
   const mod = { exports: {} }
-  new Function('exports', 'require', 'module', outputText)(mod.exports, require, mod)
+  new Function('exports', 'require', 'module', outputText)(mod.exports, withProductStockGuard(require), mod)
   actorSnapshotCache = mod.exports
   return actorSnapshotCache
 }
@@ -74,7 +75,7 @@ function loadRealProductMerge() {
   })
   const mod = { exports: {} }
   new Function('exports', 'require', 'module', outputText)(mod.exports,
-    (name) => name === './moneyPrecision' ? require(path.join(LIB_DIR, 'moneyPrecision.ts')) : require(name), mod)
+    withProductStockGuard((name) => name === './moneyPrecision' ? require(path.join(LIB_DIR, 'moneyPrecision.ts')) : require(name)), mod)
   productMergeCache = mod.exports
   return productMergeCache
 }
@@ -183,7 +184,7 @@ function loadUndoAppliers(d1) {
   const mod = { exports: {} }
   try {
     new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
-      mod.exports, require, mod, path.join(LIB_DIR, 'undoAppliers.ts'), LIB_DIR,
+      mod.exports, withProductStockGuard(require), mod, path.join(LIB_DIR, 'undoAppliers.ts'), LIB_DIR,
     )
   } finally {
     Module._load = original
@@ -238,7 +239,6 @@ async function foldForward(d1, keeper, dup, branchNameById, mergeContext) {
   }
   stmts.push({ sql: 'DELETE FROM product_images WHERE product_id = @id', params: { id: dup.id } })
   stmts.push({ sql: `UPDATE products SET image_path = COALESCE(NULLIF(image_path, ''), @dupImagePath), updated_at = CURRENT_TIMESTAMP WHERE id = @canonicalId AND @dupImagePath IS NOT NULL AND @dupImagePath != ''`, params: { canonicalId, dupImagePath: dup.image_path ?? null } })
-  stmts.push({ sql: 'UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dup.id } })
 
   const repointedBatches = []
   const foldedBatches = []
@@ -270,6 +270,9 @@ async function foldForward(d1, keeper, dup, branchNameById, mergeContext) {
   stmts.push({ sql: 'UPDATE sale_items SET product_id = @canonicalId WHERE product_id = @dupId', params: { canonicalId, dupId: dup.id } })
   stmts.push({ sql: 'UPDATE inventory_movements SET product_id = @canonicalId WHERE product_id = @dupId', params: { canonicalId, dupId: dup.id } })
 
+  // Complete the physical fold before retiring the source catalog membership.
+  stmts.push({ sql: 'UPDATE products SET stock_quantity=0 WHERE id=@id', params: { id: dup.id } })
+  stmts.push({ sql: 'UPDATE products SET is_active=0, updated_at=CURRENT_TIMESTAMP WHERE id=@id', params: { id: dup.id } })
   await d1.batch(stmts)
 
   const adjustmentMovementIds = d1.db.prepare(`SELECT id FROM inventory_movements WHERE product_id = ? AND movement_type = 'adjustment' AND reason LIKE ?`).all(canonicalId, `%(#${dup.id}) into this product%`).map((r) => Number(r.id))

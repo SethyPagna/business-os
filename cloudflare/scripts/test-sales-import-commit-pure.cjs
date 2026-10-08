@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')
@@ -11,7 +12,7 @@ function compileLib(name, localRequire) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText
   const moduleObj = { exports: {} }
-  new Function('exports', 'require', 'module', output)(moduleObj.exports, localRequire, moduleObj)
+  new Function('exports', 'require', 'module', output)(moduleObj.exports, withProductStockGuard(localRequire), moduleObj)
   return moduleObj.exports
 }
 

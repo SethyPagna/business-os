@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Part 578 item 3: reload-durable UNDO/REDO of a supplier backfill.
 //
 // Supplier attribution lives on the lot (product_batches.supplier_id/_name,
@@ -49,13 +50,13 @@ function loadUndoAppliers(d1) {
     fileName: 'actorSnapshot.ts',
   })
   const actorModule = { exports: {} }
-  new Function('exports', 'require', 'module', actorOut)(actorModule.exports, require, actorModule)
+  new Function('exports', 'require', 'module', actorOut)(actorModule.exports, withProductStockGuard(require), actorModule)
   const { outputText: productMergeOut } = ts.transpileModule(fs.readFileSync(path.join(LIB_DIR, 'productMerge.ts'), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
     fileName: 'productMerge.ts',
   })
   const productMergeModule = { exports: {} }
-  new Function('exports', 'require', 'module', productMergeOut)(productMergeModule.exports, (request) => request === './moneyPrecision' ? moneyPrecision : require(request), productMergeModule)
+  new Function('exports', 'require', 'module', productMergeOut)(productMergeModule.exports, withProductStockGuard((request) => request === './moneyPrecision' ? moneyPrecision : require(request)), productMergeModule)
   const stubs = {
     './actorSnapshot': actorModule.exports,
     './productMerge': productMergeModule.exports,
@@ -134,7 +135,7 @@ function loadUndoAppliers(d1) {
       }
       return require(request)
     }
-    new Function('exports', 'require', 'module', outputText)(dependency.exports, dependencyRequire, dependency)
+    new Function('exports', 'require', 'module', outputText)(dependency.exports, withProductStockGuard(dependencyRequire), dependency)
     return dependency.exports
   }
   stubs['./customerGenderRestoration'] = loadDependency(path.join(LIB_DIR, 'customerGenderRestoration.ts'))
@@ -156,7 +157,7 @@ function loadUndoAppliers(d1) {
   const mod = { exports: {} }
   try {
     new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
-      mod.exports, require, mod, path.join(LIB_DIR, 'undoAppliers.ts'), LIB_DIR,
+      mod.exports, withProductStockGuard(require), mod, path.join(LIB_DIR, 'undoAppliers.ts'), LIB_DIR,
     )
   } finally {
     Module._load = original

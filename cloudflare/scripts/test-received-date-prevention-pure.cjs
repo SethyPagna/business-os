@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,8 +15,8 @@ function load(file) {
   const output = ts.transpileModule(fs.readFileSync(absolute, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText
-  new Function('exports', 'require', 'module', output)(mod.exports, (request) => request.startsWith('.')
-    ? load(path.resolve(path.dirname(absolute), `${request}.ts`)) : require(request), mod)
+  new Function('exports', 'require', 'module', output)(mod.exports, withProductStockGuard((request) => request.startsWith('.')
+    ? load(path.resolve(path.dirname(absolute), `${request}.ts`)) : require(request)), mod)
   return mod.exports
 }
 const batches = load('productBatches.ts')
@@ -67,9 +68,9 @@ async function main() {
   const compiled = ts.transpileModule(declaration.getText(engineAst), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const exports = {}
   const authority = load('importBranchAuthority.ts')
-  new Function('exports', 'planReconcileBranchSnapshot', 'validateCanonicalImportBranchIds', 'withCanonicalImportBranchWriteGuard', 'runD1BatchGroupsInChunks', compiled)(
+  new Function('exports', 'planReconcileBranchSnapshot', 'validateCanonicalImportBranchIds', 'withCanonicalImportBranchWriteGuard', 'runD1BatchGroupsInChunks', 'productStockGuardStatement', compiled)(
     exports, batches.planReconcileBranchSnapshot, authority.validateCanonicalImportBranchIds, authority.withCanonicalImportBranchWriteGuard,
-    async (database, groups) => { for (const group of groups) await database.batch(group) })
+    async (database, groups) => { for (const group of groups) await database.batch(group) }, require('./harness/product_stock_guard.cjs').productStockGuardStatement)
   for (const [row, quantity] of [[1, 4], [2, 5]]) db.prepare(`INSERT INTO import_job_rows(job_id,phase,row_number,action,result_json) VALUES('snapshot-test','apply',@row,'update',@json)`)
     .run({ row, json: JSON.stringify({ existingId: 1, data: { branch_id: 1, stock_quantity: quantity, received_date: '2026-09-10' } }) })
   assert.equal(await exports.reconcileDuplicateProductSnapshotRows(db, 'snapshot-test'), 1)

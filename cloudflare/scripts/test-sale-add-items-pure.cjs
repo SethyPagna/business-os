@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Adding products to an EXISTING sale (S4-24b, lib/saleLineAddition.ts).
 //
 // This is stock-correctness code, so every case here is driven against a
@@ -47,7 +48,7 @@ function compile(file, stubs = {}) {
   }).outputText
   const moduleObj = { exports: {} }
   const localRequire = (request) => Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : require(request)
-  new Function('exports', 'require', 'module', output)(moduleObj.exports, localRequire, moduleObj)
+  new Function('exports', 'require', 'module', output)(moduleObj.exports, withProductStockGuard(localRequire), moduleObj)
   return moduleObj.exports
 }
 
@@ -104,9 +105,10 @@ const {
 function setup() {
   const sqlite = new Database(':memory:')
   sqlite.exec(`
-    CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, stock_quantity REAL DEFAULT 0, updated_at TEXT);
+    CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER NOT NULL DEFAULT 1, stock_quantity REAL DEFAULT 0, updated_at TEXT);
     CREATE TABLE branch_stock (product_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0 CHECK(quantity >= 0), UNIQUE(product_id, branch_id));
-    CREATE TABLE product_batches (id INTEGER PRIMARY KEY, is_active INTEGER DEFAULT 1, updated_at TEXT);
+    CREATE TABLE damaged_stock_lots (product_id INTEGER, quantity_remaining REAL DEFAULT 0);
+    CREATE TABLE product_batches (id INTEGER PRIMARY KEY, variant_product_id INTEGER NOT NULL DEFAULT 10, is_active INTEGER DEFAULT 1, updated_at TEXT);
     INSERT INTO product_batches(id) VALUES(501),(502);
     CREATE TABLE branch_batch_stock (batch_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0 CHECK(quantity >= 0), updated_at TEXT, UNIQUE(batch_id, branch_id));
     CREATE TABLE sale_item_batch_allocations (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_item_id INTEGER, batch_id INTEGER,

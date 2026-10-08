@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Regression test for POST /finalize-migration (routes/system.ts) -- the
 // in-app version of the old-system import runbook's last hand-run steps
 // (Downloads/businessos-migration-aug28/IMPORT-MANIFEST.md, Steps 4d + 4e),
@@ -45,7 +46,7 @@ function loadReal(relPath, requireOverrides = {}) {
   }
   const moduleObj = { exports: {} }
   new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
-    moduleObj.exports, require, moduleObj, sourcePath, path.dirname(sourcePath),
+    moduleObj.exports, withProductStockGuard(require), moduleObj, sourcePath, path.dirname(sourcePath),
   )
   Module._load = originalLoad
   return moduleObj.exports
@@ -128,8 +129,7 @@ function row(sql) { return rawDbHandle.prepare(sql).get() }
 // park_lots, since migration 0081 reconciles the ledger onto it).
 // batch_id 2 = a 'Unified stock import' HISTORICAL lot (must be parked).
 function seed() {
-  const wipe = ['branch_batch_stock', 'product_batches', 'branch_stock', 'products', 'branches']
-  exec(wipe.map((t) => `DELETE FROM "${t}";`).join(' '))
+  exec('DELETE FROM damaged_stock_lots; DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches;')
 
   rawDbHandle.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run()
   rawDbHandle.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (2, 'Warehouse', 1, 0)").run()

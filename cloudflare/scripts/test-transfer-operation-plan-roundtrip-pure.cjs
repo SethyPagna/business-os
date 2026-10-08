@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // P4-4a: planTransferOperation (lib/transferOperation.ts) used to await 3-5
 // D1 reads PER LINE inside its planning loop -- source product, destination
 // product, readFifoLotAvailability, one read per allocated lot ("take"), and
@@ -56,7 +57,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const moduleObj = { exports: {} }
   try {
     new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
-      moduleObj.exports, require, moduleObj, sourcePath, path.dirname(sourcePath),
+      moduleObj.exports, withProductStockGuard(require), moduleObj, sourcePath, path.dirname(sourcePath),
     )
   } finally {
     Module._load = originalLoad

@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // N27 -- "set to 0" is a legal stock action.
 //
 // The fast flow's mode switch offers add / remove / set, and the whole point of
@@ -73,7 +74,7 @@ function loadReal(relPath, requireOverrides = {}) {
   }
   const moduleObj = { exports: {} }
   new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
-    moduleObj.exports, require, moduleObj, sourcePath, path.dirname(sourcePath),
+    moduleObj.exports, withProductStockGuard(require), moduleObj, sourcePath, path.dirname(sourcePath),
   )
   Module._load = originalLoad
   return moduleObj.exports
@@ -232,7 +233,7 @@ async function req(body) {
 }
 
 function seed(startingQuantity) {
-  rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches; DELETE FROM inventory_movements; DELETE FROM suppliers;')
+  rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM damaged_stock_lots; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches; DELETE FROM inventory_movements; DELETE FROM suppliers;')
   rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run()
   rawDb.prepare('INSERT INTO products (id, name, barcode, is_active, stock_quantity) VALUES (1, @name, @barcode, 1, @qty)')
     .run({ name: 'Lip Oil A', barcode: 'B123', qty: startingQuantity })
