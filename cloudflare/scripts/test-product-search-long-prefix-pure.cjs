@@ -46,8 +46,13 @@ function freshDb() {
     name TEXT, sku TEXT, barcode TEXT, brand TEXT, category TEXT,
     supplier TEXT, description TEXT, unit TEXT,
     name_normalized TEXT, brand_compact TEXT,
+    stock_quantity REAL NOT NULL DEFAULT 0,
     is_active INTEGER NOT NULL DEFAULT 1
   )`)
+  db.exec(`CREATE TABLE branch_stock(product_id INTEGER,quantity REAL);
+    CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER);
+    CREATE TABLE branch_batch_stock(batch_id INTEGER,quantity REAL);
+    CREATE TABLE damaged_stock_lots(product_id INTEGER,quantity_remaining REAL)`)
   for (const migration of [
     '0018_products_fts.sql',
     '0019_products_fts_code.sql',

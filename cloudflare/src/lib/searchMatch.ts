@@ -862,6 +862,7 @@ export function buildHybridMatchClause(
   mode: 'AND' | 'OR' | string,
   paramPrefix: string,
   column?: string | readonly string[],
+  productVisibilitySql = 'p.is_active = 1',
 ): HybridMatchResult | undefined {
   if (!groups.some((words) => words.length > 1)) return undefined
   const colPrefix = Array.isArray(column) ? `{${column.join(' ')}}:` : (column ? `${column}:` : '')
@@ -902,7 +903,7 @@ export function buildHybridMatchClause(
       // their own, and this function's whole purpose is letting each word
       // in a group resolve via whichever branch actually works for it.
       const brandClause = word.length >= 2
-        ? buildCompactColumnMatchClause(word, 'p.brand_compact', params, `${paramPrefix}_${groupIndex}_${wordIndex}_brand`, true)
+        ? buildCompactColumnMatchClause(word, 'p.brand_compact', params, `${paramPrefix}_${groupIndex}_${wordIndex}_brand`, true, productVisibilitySql)
         : undefined
       if (word.length < 3) return brandClause ? `(${ftsClause} OR ${brandClause})` : `(${ftsClause})`
       const triParam = `${paramPrefix}_${groupIndex}_${wordIndex}_tri`
@@ -1018,9 +1019,10 @@ function buildCompactColumnMatchClause(
   params: Record<string, unknown>,
   paramKey: string,
   alreadyNormalized = false,
+  productVisibilitySql = 'p.is_active = 1',
 ): string {
   const match = buildBoundSubstringClause(word, [compactHaystackSql(columnExpr, alreadyNormalized)], params, paramKey)
-  return `p.id IN (SELECT id FROM products p WHERE p.is_active = 1 AND ${match} LIMIT 200)`
+  return `p.id IN (SELECT id FROM products p WHERE ${productVisibilitySql} AND ${match} LIMIT 200)`
 }
 
 // Standalone top-level clause for the common single-word case (buildHybrid
@@ -1035,13 +1037,14 @@ export function buildCompactBrandMatchClause(
   mode: 'AND' | 'OR' | string,
   params: Record<string, unknown>,
   paramKeyBase: string,
+  productVisibilitySql = 'p.is_active = 1',
 ): string | undefined {
   let idx = 0
   const groupExprs = groups
     .map((words) => words.filter((word) => word.length >= 2))
     .filter((words) => words.length > 0)
     .map((words) => {
-      const wordClauses = words.map((word) => buildCompactColumnMatchClause(word, 'p.brand_compact', params, `${paramKeyBase}_${idx++}`, true))
+      const wordClauses = words.map((word) => buildCompactColumnMatchClause(word, 'p.brand_compact', params, `${paramKeyBase}_${idx++}`, true, productVisibilitySql))
       return wordClauses.length > 1 ? `(${wordClauses.join(' AND ')})` : wordClauses[0]
     })
   if (!groupExprs.length) return undefined
@@ -1085,6 +1088,7 @@ export function buildPartialWordMatchClause(
   paramKeyBase: string,
   minGroupWords = 4,
   alreadyNormalizedCols = false,
+  productVisibilitySql = 'p.is_active = 1',
 ): string | undefined {
   const eligibleGroups = groups.filter((words) => words.length >= minGroupWords)
   if (!eligibleGroups.length) return undefined
@@ -1097,7 +1101,7 @@ export function buildPartialWordMatchClause(
       const match = buildBoundSubstringClause(word, normalizedCols, params, key)
       return `(CASE WHEN (${match}) THEN 1 ELSE 0 END)`
     })
-    return `p.id IN (SELECT id FROM products p WHERE p.is_active = 1 AND (${hitTerms.join(' + ')}) >= ${threshold} LIMIT 200)`
+    return `p.id IN (SELECT id FROM products p WHERE ${productVisibilitySql} AND (${hitTerms.join(' + ')}) >= ${threshold} LIMIT 200)`
   })
   const joiner = mode === 'OR' ? ' OR ' : ' AND '
   return groupExprs.length > 1 ? groupExprs.map((expr) => `(${expr})`).join(joiner) : groupExprs[0]
@@ -1172,6 +1176,7 @@ export function buildShortWordFallbackClause(
   params: Record<string, unknown>,
   paramKeyBase: string,
   alreadyNormalizedCols = false,
+  productVisibilitySql = 'p.is_active = 1',
 ): string | undefined {
   if (!groups.some((words) => words.some((word) => word.length < 3))) return undefined
   let idx = 0
@@ -1186,7 +1191,7 @@ export function buildShortWordFallbackClause(
   // subquery's own 'p' is a fresh, non-correlated scope (a plain lookup,
   // not referencing the outer row), so it can safely reuse the same alias
   // name the way the FTS/trigram IN-subqueries above it already do.
-  return `p.id IN (SELECT id FROM products p WHERE p.is_active = 1 AND (${combined}) LIMIT 500)`
+  return `p.id IN (SELECT id FROM products p WHERE ${productVisibilitySql} AND (${combined}) LIMIT 500)`
 }
 
 export function buildLikeAliasClause(

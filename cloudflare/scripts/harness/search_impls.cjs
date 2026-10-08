@@ -49,7 +49,11 @@ function legacyServerImpl(rows) {
   const db = new DatabaseSync(':memory:')
   db.limits.exprDepth = 100
   db.exec(`CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, sku TEXT, barcode TEXT, brand TEXT, category TEXT, supplier TEXT,
-    description TEXT, unit TEXT, is_active INTEGER NOT NULL DEFAULT 1, name_normalized TEXT, unit_normalized TEXT, brand_compact TEXT)`)
+    description TEXT, unit TEXT, stock_quantity REAL NOT NULL DEFAULT 0, is_active INTEGER NOT NULL DEFAULT 1, name_normalized TEXT, unit_normalized TEXT, brand_compact TEXT)`)
+  db.exec(`CREATE TABLE branch_stock(product_id INTEGER,quantity REAL);
+    CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER);
+    CREATE TABLE branch_batch_stock(batch_id INTEGER,quantity REAL);
+    CREATE TABLE damaged_stock_lots(product_id INTEGER,quantity_remaining REAL)`)
   const insert = db.prepare('INSERT INTO products (id, name, sku, barcode, brand, category, name_normalized, brand_compact) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
   for (const row of rows) {
     insert.run(row.id, row.name ?? null, row.sku ?? null, row.barcode ?? null, row.brand ?? null, row.category ?? null,

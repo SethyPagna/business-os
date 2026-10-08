@@ -366,7 +366,7 @@ export function buildProductSearchQuery(
 
   // 4. Mixed group (one comma-group holding both a word and a code
   // fragment), which neither table resolves alone.
-  const hybridMatch = titleOnly ? undefined : buildHybridMatchClause(termGroups, mode, `${prefix}hyb`, PRODUCT_SEARCH_COLUMNS)
+  const hybridMatch = titleOnly ? undefined : buildHybridMatchClause(termGroups, mode, `${prefix}hyb`, PRODUCT_SEARCH_COLUMNS, stockVisibleProductSql())
   if (hybridMatch) {
     Object.assign(params, hybridMatch.params)
     matchClauses.push(hybridMatch.sql)
@@ -374,11 +374,11 @@ export function buildProductSearchQuery(
 
   // 5. Sub-3-character words (FTS5's trigram tokenizer emits nothing below
   // 3 chars), name only, on the precomputed normalized column.
-  const shortWordMatch = buildShortWordFallbackClause(termGroups, mode, [nameNormalizedColumn], params, `${prefix}shortw`, true)
+  const shortWordMatch = buildShortWordFallbackClause(termGroups, mode, [nameNormalizedColumn], params, `${prefix}shortw`, true, stockVisibleProductSql())
   if (shortWordMatch) matchClauses.push(shortWordMatch)
 
   // 6. Long (4+ word) queries, partial-word, name only.
-  const partialMatch = buildPartialWordMatchClause(termGroups, mode, [nameNormalizedColumn], params, `${prefix}partialw`, 4, true)
+  const partialMatch = buildPartialWordMatchClause(termGroups, mode, [nameNormalizedColumn], params, `${prefix}partialw`, 4, true, stockVisibleProductSql())
   if (partialMatch) matchClauses.push(partialMatch)
 
   // 7. Exact barcode with leading zeros folded on both sides (the
