@@ -414,6 +414,15 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './sqlBinding') {
     return sqlBindingModuleObj.exports // real module -- keeps IN(...) lookups inside D1's bound-parameter limit
   }
+  if (request === './productStockGuard') {
+    const filename = path.join(__dirname, '../src/lib/productStockGuard.ts')
+    const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: filename,
+    }).outputText
+    const loaded = { exports: {} }
+    new Function('exports', 'require', 'module', output)(loaded.exports, require, loaded)
+    return loaded.exports
+  }
   if (request === './planTier') return planTierModule
   if (request === './actorSnapshot') return actorSnapshotModuleObj.exports
   if (request === './db') return { isImportMaintenanceFenceError: () => false }
@@ -710,7 +719,7 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
 // and that change needs a deliberate second look before shipping.
 {
   assert.ok(
-    /UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP\s*\n\s*WHERE is_active = 1 AND \(updated_at IS NULL OR updated_at < @cutoff\)/.test(source),
+    /UPDATE products SET is_active\s*=\s*0,\s*updated_at\s*=\s*CURRENT_TIMESTAMP\s*\n\s*WHERE is_active\s*=\s*1 AND \(updated_at IS NULL OR updated_at < @cutoff\)/.test(source),
     'replace_all\'s deactivation query must be exactly this UPDATE against products -- no other table, no DELETE',
   )
   // Guards against a second statement sneaking into the same block that
@@ -722,7 +731,8 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   const blockEnd = source.indexOf('Last chunk: cache invalidation', blockStart)
   const block = source.slice(blockStart, blockEnd)
   const dbPrepareCount = (block.match(/db\.prepare\(/g) || []).length
-  assert.strictEqual(dbPrepareCount, 1, 'the replace_all block should issue exactly one query (the products deactivation) -- more than one means it started touching something beyond products')
+  assert.strictEqual(dbPrepareCount, 0, 'replacement delegates its guarded transaction to finalizeProductReplacement')
+  assert.match(block, /finalizeProductReplacement\(db,/)
   assert.ok(!/\bDELETE\s+FROM\b/i.test(block), 'replace_all must never hard-DELETE -- soft-deactivate only, so sales/returns/audit rows referencing a deactivated product stay valid')
   assert.ok(!/\bsale_items\b|\breturns\b|\bsales\b|\bbranch_stock\b|\bdiscounts?\b/i.test(block), 'the replace_all block must not reference sales, returns, sale_items, branch_stock, or discounts -- it only ever touches products')
 

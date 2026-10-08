@@ -31,6 +31,8 @@ import { planReconcileBranchSnapshot, planReceiveBatchStock, resolveReceiptLotTa
 import { catalogCostRecomputeStatement, typedCostEntryBeforeWriteStatement } from './catalogCostRecompute'
 import { actorId, actorSnapshot } from './actorSnapshot'
 import { multiplyMoney4 } from './moneyPrecision'
+import { ProductStockGuardError, PRODUCT_HAS_STOCK_CODE, PRODUCT_HAS_STOCK_MESSAGE, productHasStockSql,
+  stockedProductIds, productStockGuardStatement, productStockGuardError } from './productStockGuard'
 import { stockReceiptGateCode, stockReceiptGateMessage, appendReceiptNotes, FREE_GOODS_REASON_NOTE } from './stockReceiptGate'
 // per-row mode system now, just via a different channel than
 // decisionsByRowNumber/policy_json -- BulkImportModal.tsx's review step
@@ -230,6 +232,7 @@ export type ImportRowResult = {
   identifier: string | null
   existingId: number | null
   message: string | null
+  code?: string
   // Structured form of `message` -- same content, kept as an array so a
   // row with more than one warning (e.g. negative stock AND a barcode
   // collision) doesn't lose the boundary between them the way joining into
@@ -5035,10 +5038,13 @@ export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId:
 
   // Duplicate snapshot rows use the same atomic lot/branch reconciliation
   // as an ordinary matched row, including products that predate this job.
-  await runD1BatchGroupsInChunks(guardedDb, groups.map((group) => planReconcileBranchSnapshot({
+  await runD1BatchGroupsInChunks(guardedDb, groups.map((group) => [
+    ...(Number(group.expected_quantity) > 0 ? [productStockGuardStatement([Number(group.product_id)], 'active')] : []),
+    ...planReconcileBranchSnapshot({
     productId: Number(group.product_id), branchId: Number(group.branch_id),
     quantity: Number(group.expected_quantity), receivedDate: group.received_date,
-  }).map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> }))))
+  }).map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })),
+  ]))
   return groups.length
 }
 
@@ -5087,6 +5093,7 @@ export async function finalizeImportApply(
   summary.errored = totalFailed
   summary.warned = warnedApply
   summary.total = totalUnits
+  delete summary.replacement_refused
   if (deactivatedCount > 0) summary.deactivated = deactivatedCount
   if (unifiedGroupCount > 0) summary.groupsUnified = unifiedGroupCount
   if (aggregatedSnapshotGroupCount > 0) summary.snapshotGroupsAggregated = aggregatedSnapshotGroupCount
@@ -5467,7 +5474,9 @@ async function applyStockActionsSinglePass(
       await dispatchStockActionSingle(db, jobId, r, resolveSupplierId)
     } catch (error) {
       if (isImportMaintenanceFenceError(error)) throw error
-      fail(r, error instanceof Error ? error.message : 'Stock action failed')
+      const stockError = productStockGuardError(error)
+      if (stockError) r.code = stockError.code
+      fail(r, stockError ? `${stockError.code}: ${stockError.message}` : error instanceof Error ? error.message : 'Stock action failed')
     }
   }
 
@@ -5685,7 +5694,9 @@ async function applyStockActionsContinuation(
     } catch (error) {
       if (isImportMaintenanceFenceError(error)) throw error
       r.action = 'error'
-      r.message = error instanceof Error ? error.message : 'Stock action failed'
+      const stockError = productStockGuardError(error)
+      if (stockError) r.code = stockError.code
+      r.message = stockError ? `${stockError.code}: ${stockError.message}` : error instanceof Error ? error.message : 'Stock action failed'
       touched.push(r)
     }
   }
@@ -5920,6 +5931,27 @@ export async function runD1BatchGroupsInChunks(
 // needed beyond the existing in-window same-batch dedup below (which only
 // has to cover duplicates within one ~150-row window, same as it always
 // covered duplicates within one batch).
+export async function finalizeProductReplacement(db: D1Compat, cutoff: string): Promise<number> {
+  const candidates = `p.is_active=1 AND (p.updated_at IS NULL OR p.updated_at < @cutoff)`
+  try {
+    const result = await db.batch([
+      { sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products p WHERE ${candidates} AND ${productHasStockSql()})
+          THEN json_extract('[]','$[product_has_stock]') ELSE 1 END`, params: { cutoff } },
+      { sql: `UPDATE products SET is_active=0,updated_at=CURRENT_TIMESTAMP
+          WHERE is_active=1 AND (updated_at IS NULL OR updated_at < @cutoff)`, params: { cutoff } },
+    ])
+    return Number(result[1]?.meta?.changes || 0)
+  } catch (error) { throw productStockGuardError(error) || error }
+}
+
+export function productImportStockStatements(productId: number, active: unknown, incoming: number, existing: boolean) {
+  if (Number(active) !== 1 && incoming !== 0) throw new ProductStockGuardError([productId])
+  const statements = []
+  if (existing && Number(active) !== 1) statements.push(productStockGuardStatement([productId]))
+  if (existing && incoming > 0) statements.push(productStockGuardStatement([productId], 'active'))
+  return statements
+}
+
 export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: number, attempt?: number): Promise<{ applied: number; failed: number }> {
   const db = await getImportFencedDb(env)
   // Same per-request shadow as runImportAnalyze -- see its comment -- and
@@ -5949,6 +5981,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     return { applied: 0, failed: 0 }
   }
 
+  let replacementFinalizing = false
   try {
     // Cancellation is already an authoritative request to perform no import
     // work. Honor it without requiring a now-stale approving actor; the only
@@ -6103,6 +6136,29 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     const productImportMode = job.type === 'products' ? getProductImportMode(job.policy_json) : 'merge'
     const productReplaceColumns = productImportMode === 'replace_columns' ? getProductImportReplaceColumns(job.policy_json) : []
 
+    const candidateRows = results.filter(r => r.action === 'create' || r.action === 'update')
+    const productInboundQuantity = (row: ImportRowResult): number => {
+      const d = row.data as Record<string, unknown>
+      if (job.type === 'inventory') return Math.max(0, Number(d.signedQuantity) || 0)
+      if (row.action === 'create') return Number(d.stock_quantity) || 0
+      if (productImportMode === 'fill_blank' || productImportMode === 'replace_columns' || row.plannedMode === 'override_replace') return 0
+      return d.branch_id_explicit && d.branch_id != null ? Number(d.stock_quantity) || 0 : 0
+    }
+    if (job.type === 'products' || job.type === 'inventory') {
+      const ids = candidateRows.map(r => Number(job.type === 'products' ? r.existingId : (r.data as Record<string, unknown>).product_id)).filter(id => Number.isSafeInteger(id) && id > 0)
+      const stocked = new Set(await stockedProductIds(db, ids))
+      const inactive = new Set((await db.prepare(`SELECT id FROM products WHERE is_active IS NOT 1
+        AND id IN (SELECT value FROM json_each(@ids))`).all<{ id: number }>({ ids: JSON.stringify(ids) })).map(row => Number(row.id)))
+      for (const r of candidateRows) {
+        const d = r.data as Record<string, unknown>
+        const id = Number(job.type === 'products' ? r.existingId : d.product_id)
+        const incoming = productInboundQuantity(r)
+        if ((job.type === 'products' && Number(d.is_active) !== 1 && (incoming !== 0 || stocked.has(id)))
+          || (incoming > 0 && inactive.has(id))) {
+          r.action = 'error'; r.code = PRODUCT_HAS_STOCK_CODE; r.message = `${PRODUCT_HAS_STOCK_CODE}: ${PRODUCT_HAS_STOCK_MESSAGE}`
+        }
+      }
+    }
     const actionable = results.filter((r) => r.action === 'create' || r.action === 'update')
     let importWriteDb = db
     // CUTOVER-LR: rows addressed to a retired branch and landed on the branch the operator confirmed re-prove that
@@ -6362,7 +6418,9 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       for (const r of actionable) {
         const d = r.data as Record<string, unknown> & { branch_id: number | null; branch_id_explicit: number }
         const receiptUnitCostUsd = receiptCosts.get(r.rowNumber) ?? null
-        let rowWriteGroup: Array<{ sql: string; params: Record<string, unknown> }> = []
+        const targetId = Number(r.existingId || d.__importAssignedId)
+        let rowWriteGroup: Array<{ sql: string; params: Record<string, unknown> }> = productImportStockStatements(
+          targetId, d.is_active, productInboundQuantity(r), r.action === 'update')
         // U-cost: an imported cost must hold past the next stock movement,
         // which re-derives cost_price_usd (0195 triggers) and honours only a
         // cost with a product_cost_entries row -- the same row the product
@@ -6868,6 +6926,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
         // nothing.
         if (appliedRowGuards.has(`row:${r.rowNumber}`)) continue
         const group: Array<{ sql: string; params: Record<string, unknown> }> = [rowGuardStatement(r.rowNumber)]
+        if (Number(d.signedQuantity) > 0) group.unshift(productStockGuardStatement([Number(d.product_id)], 'active'))
         group.push({
           sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, created_at) VALUES (@product_id, @product_name, @branch_id, @branch_name, @movement_type, @quantity, @unit_cost_usd, @unit_cost_khr, @total_cost_usd, @total_cost_khr, @reason, @created_at)`,
           // Honor an imported date (classifyInventory's `movementDate`,
@@ -6991,12 +7050,11 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // the replace" signal today.
     let deactivatedCount = 0
     if (job.type === 'products' && getProductImportMode(job.policy_json) === 'replace_all') {
-      const cutoff = jobRow.started_at || nowIso
-      const result = await db.prepare(
-        `UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP
-         WHERE is_active = 1 AND (updated_at IS NULL OR updated_at < @cutoff)`,
-      ).run({ cutoff })
-      deactivatedCount = result.changes || 0
+      // Rows are already committed. Save their cursor before the final phase:
+      // a refused replacement retries only this phase, never stock receipts.
+      await saveChunkState(db, jobId, nextCursor, state)
+      replacementFinalizing = true
+      deactivatedCount = await finalizeProductReplacement(db, jobRow.started_at || nowIso)
     }
 
     // Full product snapshots can contain multiple source rows that resolve to
@@ -7064,8 +7122,19 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     return outcome
   } catch (error) {
     if (isImportMaintenanceFenceError(error)) throw error
-    await markJobFailed(db, jobId, (error as Error).message || 'Apply failed')
-    throw error
+    const stockError = productStockGuardError(error)
+    await markJobFailed(db, jobId, stockError ? `${stockError.code}: ${stockError.message}` : (error as Error).message || 'Apply failed')
+    if (stockError && replacementFinalizing) {
+      const counts = await db.staging.prepare(`SELECT
+        SUM(CASE WHEN action IN ('create','update') THEN 1 ELSE 0 END) AS applied,
+        SUM(CASE WHEN action='error' THEN 1 ELSE 0 END) AS failed
+        FROM import_job_rows WHERE job_id=@id AND phase='apply'`).get<{ applied: number; failed: number }>({ id: jobId })
+      await db.prepare(`UPDATE import_jobs SET phase='replace_all_refused',processed_rows=@applied,failed_rows=@failed,
+        summary_json=json_set(COALESCE(summary_json,'{}'),'$.replacement_refused',json(@refusal)) WHERE id=@id`)
+        .run({ id: jobId, applied: Number(counts?.applied || 0), failed: Number(counts?.failed || 0),
+          refusal: JSON.stringify({ code: stockError.code, committedRows: Number(counts?.applied || 0) }) })
+    }
+    throw stockError || error
   } finally {
     // Released on EVERY exit, including the failure path. A failed chunk is
     // retried by the queue, and that retry must be able to claim the job

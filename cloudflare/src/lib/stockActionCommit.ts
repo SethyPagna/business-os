@@ -1,4 +1,5 @@
 import type { D1Compat } from './db'
+import { assertProductsActive, productStockGuardStatement, productStockGuardError } from './productStockGuard'
 import { roundMoney4, multiplyMoney4, sellingPriceCeilCent } from './moneyPrecision'
 import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
 import { normalizeSearchText } from './searchMatch'
@@ -60,6 +61,8 @@ function positiveId(value: unknown): number | null {
 
 /** A batch the branch guards above aborted wrote nothing: rethrown as the coded English. Any other failure as it was. */
 function rethrowBranchGuardFailure(error: unknown): never {
+  const stockError = productStockGuardError(error)
+  if (stockError) throw stockError
   const message = error instanceof Error ? error.message : String(error)
   if (message.includes('import_branch_redirect_changed')) throw new Error(BRANCH_REDIRECT_TARGET_INVALID_ERROR)
   if (message.includes('import_branch_landing_inactive')) throw new Error(BRANCH_REDIRECT_REQUIRED_ERROR)
@@ -297,6 +300,7 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
   // A redelivery of a row that already landed stays idempotent: the gate runs
   // on receipts this call would WRITE, never on one the ledger already holds.
   if (pre?.status === 'applied') return { actionKey, applied: true, alreadyApplied: true }
+  await assertProductsActive(db, [productId])
   const sheetCostPriceUsd = 'sheetCostPriceUsd' in input ? input.sheetCostPriceUsd : input.costPriceUsd
   // Leave malformed prices for the receipt gate's established error order.
   const costPriceUsd = Number.isFinite(Number(input.costPriceUsd)) && Number(input.costPriceUsd) >= 0
@@ -357,6 +361,7 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
   }
 
   await db.batch([
+    productStockGuardStatement([productId], 'active'),
     {
       sql: `INSERT OR IGNORE INTO import_stock_action_commits
               (job_id, action_key, row_number, action_kind, status)

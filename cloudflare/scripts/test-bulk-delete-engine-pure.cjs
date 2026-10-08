@@ -53,6 +53,7 @@ function loadRealLib(relName) {
 // output (Env/D1Compat/BroadcastChannel are type-only imports, elided by
 // the transpiler) -- anything else falls through to the real require.
 function stubRequire(id) {
+  if (id === './productStockGuard') return loadRealLib('productStockGuard')
   // queueDispatch is pure and is what runBulkDeleteJob's self-continuation
   // enqueues through now; a {} stub makes dispatchImportWork undefined.
   if (id === './queueDispatch') return loadRealLib('queueDispatch')
@@ -76,7 +77,7 @@ const moduleObj = { exports: {} }
 const wrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)
 wrapper(moduleObj.exports, stubRequire, moduleObj, sourcePath, path.dirname(sourcePath))
 
-const { buildCoreDeleteStatements, ENTITY_CONFIGS, bulkDeleteWriteOffCosts } = moduleObj.exports
+const { buildCoreDeleteStatements, ENTITY_CONFIGS } = moduleObj.exports
 
 {
   const statements = buildCoreDeleteStatements(ENTITY_CONFIGS.products, [1, 2, 3])
@@ -153,73 +154,7 @@ const { buildCoreDeleteStatements, ENTITY_CONFIGS, bulkDeleteWriteOffCosts } = m
   }
   console.log('PASS customers/suppliers/delivery_contacts buildExtraStatements resolves to an empty array')
 
-  {
-    const selectedRows = [{
-      productId: 41, branchId: 2, quantity: 3, productName: 'Write-off item', branchName: 'Warehouse',
-      unitCostUsd: 0, unitCostKhr: 12000,
-    }]
-    const db = {
-      prepare(sql) {
-        assert.match(sql, /COALESCE\(p\.cost_price_usd,[\s\S]*?pb\.unit_cost_usd/)
-        assert.match(sql, /p\.cost_price_khr AS unitCostKhr/)
-        return { all: async () => selectedRows }
-      },
-    }
-    const statements = await ENTITY_CONFIGS.products.buildExtraStatements(db, [41], 'Bulk cleanup', { id: 7, name: 'Sok' })
-    assert.strictEqual(statements.length, 1)
-    assert.match(statements[0].sql, /unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr/)
-    assert.strictEqual(statements[0].params.unitCostUsd, 0, 'explicit catalogue zero stays zero')
-    assert.strictEqual(statements[0].params.totalCostUsd, 0)
-    assert.strictEqual(statements[0].params.unitCostKhr, 12000)
-    assert.strictEqual(statements[0].params.totalCostKhr, 36000)
-    selectedRows[0].unitCostKhr = 99000
-    assert.strictEqual(statements[0].params.unitCostKhr, 12000, 'the built statement keeps its plan-time primitive snapshot if the source changes before apply')
-
-    const rawDb = openDb(loadAll())
-    rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (41, 'Write-off item', 1, 3)").run()
-    rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (2, 'Warehouse', 1, 1)").run()
-    await assert.rejects(
-      () => rawDb.batch([
-        statements[0],
-        { sql: 'INSERT INTO table_that_does_not_exist (id) VALUES (1)', params: {} },
-      ]),
-      /no such table/,
-      'a later failure in the delete chunk must fail its atomic batch',
-    )
-    assert.strictEqual(
-      rawDb.prepare('SELECT COUNT(*) AS count FROM inventory_movements WHERE product_id = 41').get().count,
-      0,
-      'the movement and its cost snapshot roll back with the failed delete chunk',
-    )
-
-    rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity, cost_price_usd) VALUES (42, 'Lot-valued item', 1, 4, NULL)").run()
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (42, 2, 4)').run()
-    rawDb.prepare("INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, unit_cost_usd, is_active) VALUES (4201, 42, '42:a', 'a', '2026-01-01', 5, 1)").run()
-    rawDb.prepare("INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, unit_cost_usd, is_active) VALUES (4202, 42, '42:b', 'b', '2026-02-01', 7, 1)").run()
-    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (4201, 2, 1)').run()
-    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (4202, 2, 3)').run()
-    // U-cost 0195 triggers derive the catalog cost from these lots as they land;
-    // re-blank it so this still exercises the engine's blank-cost fallback.
-    rawDb.prepare('UPDATE products SET cost_price_usd = NULL WHERE id = 42').run()
-    const lotFallback = await ENTITY_CONFIGS.products.buildExtraStatements(rawDb, [42], 'Bulk cleanup', { id: 7, name: 'Sok' })
-    assert.strictEqual(lotFallback[0].params.unitCostUsd, 6.5, 'blank product cost uses the plan-time quantity-weighted lot cost')
-    assert.strictEqual(lotFallback[0].params.totalCostUsd, 26)
-
-    rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity, cost_price_usd) VALUES (43, 'Partly tracked item', 1, 5, NULL)").run()
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (43, 2, 5)').run()
-    rawDb.prepare("INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, unit_cost_usd, is_active) VALUES (4301, 43, '43:a', 'a', '2026-01-01', 8, 1)").run()
-    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (4301, 2, 4)').run()
-    rawDb.prepare('UPDATE products SET cost_price_usd = NULL WHERE id = 43').run() // see product 42
-    const partialLotFallback = await ENTITY_CONFIGS.products.buildExtraStatements(rawDb, [43], 'Bulk cleanup', { id: 7, name: 'Sok' })
-    assert.strictEqual(partialLotFallback[0].params.unitCostUsd, null, 'priced lots covering only part of branch stock are unknown, not extrapolated')
-    assert.strictEqual(partialLotFallback[0].params.totalCostUsd, null)
-    assert.throws(
-      () => bulkDeleteWriteOffCosts({ quantity: 2, unitCostUsd: 1e308, unitCostKhr: null }),
-      /outside the supported numeric range/,
-      'an overflowing write-off total is rejected before a D1 statement is built',
-    )
-    console.log('PASS product bulk-delete write-off snapshots zero/nonzero costs and total in the same movement statement')
-  }
+  assert.deepStrictEqual(await ENTITY_CONFIGS.products.buildExtraStatements(undefined, [41], 'Cleanup', { id: 7, name: 'Sok' }), [], 'products never write stock off during bulk deletion')
 
   {
     // ENTITY_PERMISSION_MAP in lib/permissions.ts must already map each of

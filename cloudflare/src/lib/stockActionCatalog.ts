@@ -21,6 +21,7 @@ export type StockActionImportResult = {
   identifier: string | null
   existingId: number | null
   message: string | null
+  code?: string
   warnings?: Array<{ kind: 'stock_action_conflict' | 'other'; message: string }>
   changes: Record<string, { from: unknown; to: unknown }>
   data: Record<string, unknown>

@@ -135,7 +135,8 @@ async function main() {
     const [addThen, saleThen] = then.capture
     const guards = addNow.filter((text) => /landing_branch_guard/.test(text))
     assert.equal(guards.length, 1)
-    assert.deepEqual(addNow.filter((text) => !/landing_branch_guard/.test(text)), addThen, 'add: otherwise byte-identical')
+    assert.equal(addNow.filter(text => /product_has_stock/.test(text)).length, 1, 'one product admission guard')
+    assert.deepEqual(addNow.filter((text) => !/landing_branch_guard|product_has_stock/.test(text)), addThen, 'add: otherwise byte-identical')
     assert.deepEqual(saleNow, saleThen, 'sale: byte-identical')
   })
 
