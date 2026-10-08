@@ -56,6 +56,7 @@ await runTest('no raw avatar <img> is left: all three spots use AccountAvatarIma
   assert.equal(usages.length, 3, 'desktop row, mobile header, mobile panel')
   for (const usage of usages) {
     assert.match(usage, /src=\{user\?\.avatar_path\}/)
+    assert.match(usage, /version=\{user\?\.updated_at\}/)
     assert.match(usage, /alt=\{user\?\.name \|\| 'User'\}/)
     assert.match(usage, /fallback=\{\(?\s*<span className="[^"]*font-bold"[^>]*>\s*\{user\?\.name\?\.\[0\]\?\.toUpperCase\(\)\}\s*<\/span>\s*\)?\}/,
       'the fallback is the initials')
@@ -63,7 +64,7 @@ await runTest('no raw avatar <img> is left: all three spots use AccountAvatarIma
 })
 
 await runTest('each fallback is exactly that spot\'s no-avatar markup', () => {
-  const [desktop, header, panel] = avatarUsages(sidebarCode)
+  const [panel, desktop, header] = avatarUsages(sidebarCode)
   assert.match(desktop, /className="h-8 w-8 rounded-full object-cover"/)
   assert.match(desktop, /<span className="text-sm font-bold" style=\{\{ color: 'var\(--ui-accent\)' \}\}>/)
   assert.match(header, /className="h-10 w-10 object-cover"/)
@@ -85,8 +86,8 @@ async function loadAvatarComponent(clock: { now: number }) {
   const { code: js } = await transform(sidebar.slice(start, end + 2), { loader: 'tsx', jsx: 'transform', jsxFactory: 'h', jsxFragment: 'Fragment', format: 'esm' })
   let dispatcher: ((initial: unknown) => [unknown, (next: unknown) => void]) | null = null
   const useState = (initial: unknown) => dispatcher!(initial)
-  const factory = new Function('useState', 'h', 'Fragment', 'Date', `${js}\nreturn { AccountAvatarImage, brokenAvatarUrls, BROKEN_AVATAR_RETRY_MS }`)
-  const loaded = factory(useState, h, Fragment, { now: () => clock.now })
+  const factory = new Function('useState', 'h', 'Fragment', 'Date', 'buildCacheBustedMediaPath', `${js}\nreturn { AccountAvatarImage, brokenAvatarUrls, BROKEN_AVATAR_RETRY_MS }`)
+  const loaded = factory(useState, h, Fragment, { now: () => clock.now }, (src: unknown) => String(src || '').trim())
   // One mounted instance: hook state survives re-renders, like React's.
   const mount = (props: Record<string, unknown>) => {
     const slots: unknown[] = []
@@ -147,6 +148,8 @@ await runTest('a changed avatar is tried afresh; a broken one is retried after t
   assert.ok(isFallback(mount(props('/uploads/old.jpg')).render()), 'still inside the window')
   clock.now += 2
   assert.equal(mount(props('/uploads/old.jpg')).render().type, 'img', 'retried after the window, like ProductImage')
+  avatar.setProps(props('/uploads/old.jpg'))
+  assert.equal(avatar.render().type, 'img', 'the original failed mounted instance can retry after the window')
 })
 
 if (failed) {

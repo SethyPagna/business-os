@@ -1,3 +1,4 @@
+import { buildCacheBustedMediaPath } from '../../utils/mediaUpload.ts'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import { getHubDestinations, hubAnchor, mobileGroupAction, resolveChromeSection } from '../shared/hubNavigation.ts'
 import { buildMobileHomeLayout, mobileHomeSectionsPanelId } from '../../utils/mobileHomeTiles.ts'
@@ -73,10 +74,10 @@ function isRecentlyBrokenAvatar(src: string): boolean {
   return lastFailedAt > 0 && Date.now() - lastFailedAt < BROKEN_AVATAR_RETRY_MS
 }
 
-function AccountAvatarImage({ src, alt, className, fallback }: { src?: string | null; alt: string; className: string; fallback: ReactNode }) {
-  const safeSrc = String(src || '').trim()
-  const [failedSrc, setFailedSrc] = useState('')
-  if (!safeSrc || failedSrc === safeSrc || isRecentlyBrokenAvatar(safeSrc)) return <>{fallback}</>
+function AccountAvatarImage({ src, version, alt, className, fallback }: { src?: string | null; version?: string | null; alt: string; className: string; fallback: ReactNode }) {
+  const safeSrc = buildCacheBustedMediaPath(src, version)
+  const [, setFailureRevision] = useState(0)
+  if (!safeSrc || isRecentlyBrokenAvatar(safeSrc)) return <>{fallback}</>
   return (
     <img
       src={safeSrc}
@@ -86,7 +87,7 @@ function AccountAvatarImage({ src, alt, className, fallback }: { src?: string | 
       decoding="async"
       onError={() => {
         brokenAvatarUrls.set(safeSrc, Date.now())
-        setFailedSrc(safeSrc)
+        setFailureRevision(current => current + 1)
       }}
     />
   )
@@ -98,6 +99,7 @@ type IntentSource = 'focus' | 'pointer' | 'touch'
 interface SidebarUser {
   name?: string | null
   role_name?: string | null
+  updated_at?: string | null
   avatar_path?: string | null
 }
 
@@ -437,13 +439,23 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
   // user. Update is blue, Exit red, matching the old ☰ menu.
   type AccountAction = { id: string; label: string; icon: LucideIcon; onClick: () => void; tone?: 'blue' | 'red' }
   const accountActions: AccountAction[] = [
-    { id: 'profile', label: t('profile') || 'Profile', icon: User, onClick: () => setProfileOpen(true) },
     ...(canAccessPage('settings') ? [{ id: 'settings', label: t('settings') || 'Settings', icon: Settings, onClick: () => inline ? openMobileGroup('settings') : navigateTo('settings') } as AccountAction] : []),
     ...(canAccessPage('receipt_settings') ? [{ id: 'receipt_settings', label: t('receipt_settings') || 'Receipt Settings', icon: Receipt, onClick: () => navigateTo('receipt_settings') } as AccountAction] : []),
     ...(installRoute && isAdminHostname() ? [{ id: 'install', label: t('install_app') || 'Install app', icon: Download, onClick: installApp } as AccountAction] : []),
     { id: 'update', label: t('refresh_app') || 'Update', icon: RefreshCw, onClick: runAppUpdate, tone: 'blue' },
     { id: 'logout', label: t('logout') || 'Exit', icon: LogOut, onClick: logout, tone: 'red' },
   ]
+  const renderAccountProfile = () => (
+    <button type="button" data-bos-profile-action="true" aria-label={t('profile') || 'Profile'} onClick={() => { setAccountOpen(false); setProfileOpen(true) }} className="mb-1 flex min-h-11 w-full items-center gap-2.5 rounded-lg border-b border-gray-100 px-2.5 py-2 text-left hover:bg-gray-100 focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-700 dark:hover:bg-gray-700">
+      <div className="bos-nav-avatar-face flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-full">
+        <AccountAvatarImage src={user?.avatar_path} version={user?.updated_at} alt={user?.name || 'User'} className="h-8 w-8 object-cover" fallback={<span className="text-sm font-bold">{user?.name?.[0]?.toUpperCase()}</span>} />
+      </div>
+      <div className="min-w-0">
+        <div className="detail-scroll-text text-sm font-medium text-gray-900 dark:text-white">{user?.name}</div>
+        <div className="detail-scroll-text text-xs text-gray-400">{user?.role_name || t('no_role') || 'No role'}</div>
+      </div>
+    </button>
+  )
   const accountActionToneClass = (tone?: 'blue' | 'red') => (
     tone === 'blue'
       ? 'text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20'
@@ -552,6 +564,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
               nav rows; they live here now. */}
           {accountOpen ? (
             <div className="mb-2 space-y-0.5 rounded-xl border border-gray-200 bg-white p-1 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+              {renderAccountProfile()}
               {accountActions.map(renderAccountAction)}
             </div>
           ) : null}
@@ -568,6 +581,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
             <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full" style={{ background: 'var(--ui-accent)22' }}>
               <AccountAvatarImage
                 src={user?.avatar_path}
+                version={user?.updated_at}
                 alt={user?.name || 'User'}
                 className="h-8 w-8 rounded-full object-cover"
                 fallback={(
@@ -650,6 +664,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
               <div className="bos-nav-avatar-face flex h-10 w-10 items-center justify-center overflow-hidden rounded-full">
                 <AccountAvatarImage
                   src={user?.avatar_path}
+                  version={user?.updated_at}
                   alt={user?.name || 'User'}
                   className="h-10 w-10 object-cover"
                   fallback={(
@@ -664,20 +679,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setAccountOpen(false)} />
                 <div className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-xl border border-gray-200 bg-white p-1 shadow-xl dark:border-gray-700 dark:bg-gray-800">
-                  <div className="mb-1 flex items-center gap-2.5 border-b border-gray-100 px-2.5 py-2 dark:border-gray-700">
-                    <div className="bos-nav-avatar-face flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-full">
-                      <AccountAvatarImage
-                        src={user?.avatar_path}
-                        alt={user?.name || 'User'}
-                        className="h-8 w-8 object-cover"
-                        fallback={<span className="text-sm font-bold">{user?.name?.[0]?.toUpperCase()}</span>}
-                      />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="detail-scroll-text text-sm font-medium text-gray-900 dark:text-white">{user?.name}</div>
-                      <div className="detail-scroll-text text-xs text-gray-400">{user?.role_name || t('no_role') || 'No role'}</div>
-                    </div>
-                  </div>
+                  {renderAccountProfile()}
                   {accountActions.map(renderAccountAction)}
                 </div>
               </>
