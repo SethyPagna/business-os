@@ -54,6 +54,8 @@ const sqlBinding = load('lib/sqlBinding.ts')
 // first limits lookup would throw a TypeError -- masking the authority error
 // this file asserts on.
 const planTier = load('lib/planTier.ts')
+const requestMetrics = load('lib/requestMetrics.ts')
+const stockTransaction = load('lib/stockTransaction.ts')
 const productImagePermission = load('lib/productImagePermission.ts', {
   './media': media,
   './sqlBinding': sqlBinding,
@@ -66,6 +68,7 @@ function makeState(actor) {
     products: [{ id: 77, image_path: '/uploads/Love Nude.webp' }],
     assets: new Set(['/uploads/Love Nude.webp', '/uploads/new.webp']),
     cancelRequested: 0,
+    leaseToken: null,
     runs: [],
     batches: 0,
     job: {
@@ -91,13 +94,27 @@ function makeState(actor) {
   }
   state.db = {
     staging,
+    async batchOnce(statements) {
+      state.runs.push(...statements)
+      return statements.map(({ sql, params }) => {
+        if (/SET lease_token = @token/i.test(sql)) {
+          assert.match(sql, /RETURNING status,cancel_requested,started_at,type,chunk_cursor,chunk_state_json/)
+          state.leaseToken = params.token
+          return { meta: { changes: 1 }, results: [{ status: 'queued', cancel_requested: state.cancelRequested,
+            started_at: null, type: state.job.type, chunk_cursor: 0, chunk_state_json: '{}' }] }
+        }
+        if (/SET lease_token = NULL/i.test(sql)) {
+          assert.equal(params.token, state.leaseToken)
+          state.leaseToken = null
+        }
+        if (/(?:UPDATE|INSERT INTO) products\b/i.test(sql)) state.batches++
+        return { meta: { changes: 1 }, results: [] }
+      })
+    },
     prepare(sql) {
       return {
         async get() {
           if (/FROM users u/i.test(sql)) return state.actor || undefined
-          if (/SELECT status, cancel_requested, started_at FROM import_jobs/i.test(sql)) {
-            return { status: 'queued', cancel_requested: state.cancelRequested, started_at: null }
-          }
           if (/SELECT id, type, policy_json, summary_json FROM import_jobs/i.test(sql)) return state.job
           return undefined
         },
@@ -140,6 +157,8 @@ const exactStubs = {
   './productImagePermission': productImagePermission,
   './sqlBinding': sqlBinding,
   './planTier': planTier,
+  './requestMetrics': requestMetrics,
+  './stockTransaction': stockTransaction,
   // Real: the envs here are bare `{}`, so any code path that unexpectedly
   // reached a dispatch must fail loudly instead of being absorbed by the
   // permissive `fallback` proxy below.
@@ -228,7 +247,8 @@ async function main() {
   console.log('PASS revoked image action detects current-window image changes and image-bearing creates')
 
   activeState = makeState(actor({ products: false, 'products:image': false }))
-  await expectAuthorityError(engine.runImportApply({}, 'job-1'), 'products')
+  await expectAuthorityError(requestMetrics.runBackground({}, 'import-authority-fixture', () => engine.runImportApply({}, 'job-1')), 'products')
+  assert.equal(activeState.leaseToken, null)
   assert.equal(activeState.batches, 0)
   assert.equal(activeState.runs.some((entry) => /UPDATE products|INSERT INTO products/i.test(entry.sql || '')), false)
   assert.equal(activeState.runs.some((entry) => /status = 'failed'.*last_error/is.test(entry.sql || '')), true)
@@ -237,7 +257,8 @@ async function main() {
   activeState = makeState(null)
   activeState.cancelRequested = 1
   activeState.job.policy_json = '{}'
-  assert.deepEqual(await engine.runImportApply({}, 'job-1'), { applied: 0, failed: 0 })
+  assert.deepEqual(await requestMetrics.runBackground({}, 'import-authority-fixture', () => engine.runImportApply({}, 'job-1')), { applied: 0, failed: 0 })
+  assert.equal(activeState.leaseToken, null)
   assert.equal(activeState.runs.some((entry) => /status = 'cancelled'/i.test(entry.sql || '')), true)
   assert.equal(activeState.runs.some((entry) => /status = 'failed'/i.test(entry.sql || '')), false)
   console.log('PASS an already-requested cancellation completes before apply-authority checks')
