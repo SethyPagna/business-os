@@ -33,8 +33,7 @@ async function outerProof(staleAuth) {
   app.post('/',async c=>{await Promise.all(tasks);try{return c.json(await kernel.commitStockSession(c.env,c.get('user'),await c.req.json(),null,{statementsUsed:f.count,reserveStatements:4}))}catch(e){return c.json({code:e.code},e.statusCode||500)}})
   f.reset()
   const response=await app.request('/',{method:'POST',headers:{cookie:'bos_session='+token,'content-type':'application/json'},body:JSON.stringify(receiveRequest('outer-proof-'+staleAuth))},f.env,ctx)
-  if(staleAuth){assert.equal(response.status,409);assert.equal((await response.json()).code,'stock_session_query_budget_exceeded');assert.equal(f.batches(),0)}
-  else{assert.equal(response.status,200);await cache.bumpVersion(f.env,'products');await telegram.drainDueTelegramShiftOverviews(f.env);console.log('Cold healthy outer+cache fallback+empty drain',f.count());assert.ok(f.count()<=50);assert.equal(f.sql.prepare('SELECT stock_quantity n FROM products WHERE id=1').get().n,5)}
+  {assert.equal(response.status,200);await cache.bumpVersion(f.env,'products');await telegram.drainDueTelegramShiftOverviews(f.env);console.log(staleAuth?'Cold renewed-auth outer+cache fallback+empty drain':'Cold healthy outer+cache fallback+empty drain',f.count());assert.ok(f.count()<=50);assert.equal(f.sql.prepare('SELECT stock_quantity n FROM products WHERE id=1').get().n,5)}
 }
 
 ;(async () => {
@@ -43,7 +42,7 @@ async function outerProof(staleAuth) {
   const body = receiveRequest('free-one-line-budget')
   const beforeProduct = f.sql.prepare('SELECT * FROM products WHERE id=1').get()
   const receipt = await commitStockSession(f.env,user,body)
-  assert.ok(f.count() <= 38, `cold kernel ${f.count()} must leave measured outer headroom`)
+  assert.ok(f.count() <= 33, `cold kernel ${f.count()} must leave measured outer headroom`)
   assert.equal(f.batches(),1)
   const operation = f.sql.prepare('SELECT * FROM stock_session_operations WHERE id=?').get(receipt.operationId)
   const snapshot = JSON.parse(f.sql.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get(operation.snapshot_id).payload_json)
@@ -64,11 +63,11 @@ async function outerProof(staleAuth) {
   for (const tier of ['free','paid']) {
     for (const extra of [0,1]) {
       const bound=measuredFixture();bound.env.PLAN_TIER=tier
-      const offset=(tier==='free'?50:1000)-38+extra
+      const offset=(tier==='free'?50:1000)-33+extra
       const boundedKernel=loadStockSession()
       const perform=()=>boundedKernel.commitStockSession(bound.env,user,receiveRequest('boundary-'+tier+'-'+extra),null,{statementsUsed:()=>offset,reserveStatements:0})
       if(extra){await assert.rejects(perform,e=>e.code==='stock_session_query_budget_exceeded');assert.equal(bound.batches(),0);assert.equal(bound.sql.prepare('SELECT COUNT(*) n FROM audit_logs').get().n,0)}
-      else {await perform();assert.equal(bound.count(),38)}
+      else {await perform();assert.equal(bound.count(),33)}
     }
   }
   const paid=measuredFixture();paid.env.PLAN_TIER='paid';seedDistinctProducts(paid,25)
@@ -87,7 +86,7 @@ async function outerProof(staleAuth) {
   assert.equal(paid.count(),1,'successful compensation replay must resolve first')
   const lost=measuredFixture();lost.env.PLAN_TIER='free';lost.loseNextCommitAcknowledgement()
   const lostResult=await commitStockSession(lost.env,user,receiveRequest('free-lost-reply-budget'))
-  assert.equal(lostResult.replayed,true);assert.equal(lost.batches(),1);assert.equal(lost.count(),38)
+  assert.equal(lostResult.replayed,true);assert.equal(lost.batches(),1);assert.equal(lost.count(),33)
   assert.equal(lost.sql.prepare('SELECT COUNT(*) n FROM stock_session_operations').get().n,1)
   assert.equal(lost.sql.prepare('SELECT stock_quantity n FROM products WHERE id=1').get().n,5)
   f.reset()

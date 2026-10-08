@@ -1,3 +1,4 @@
+import type { RequestMetrics } from '../lib/requestMetrics'
 import { productStockGuardError } from '../lib/productStockGuard'
 import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, hasAcquisitionCostInput, projectAcquisitionCosts } from '../lib/acquisitionCostAccess'
@@ -489,7 +490,11 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     let outcome: UndoApplierOutcome | void = undefined
     if (applier) {
       try {
-        outcome = await applier.run(payload, { env: c.env, user, direction, historyId: existing.id, generation: body.expected_generation })
+        const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
+        // Include raw maintenance and reserve six cache attempts plus two history-response attempts.
+        const stockSessionQueryBudget = applier.name === STOCK_SESSION_KIND && metrics
+          ? { statementsUsed: () => metrics.attemptedStatements + 1, reserveStatements: 8 } : undefined
+        outcome = await applier.run(payload, { env: c.env, user, direction, historyId: existing.id, generation: body.expected_generation, stockSessionQueryBudget })
         applied = true
         // Server-applied undo/redo rewrites product and stock rows, but the
         // appliers only BROADCAST; none bumps a cache version. Every reader
@@ -498,8 +503,10 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         // serving the pre-undo numbers until its TTL. One 'stock' bump here
         // covers every applier. Lazy and fully swallowed: a cache fault must
         // never turn an applied undo into an error.
-        const stockBump = import('../lib/cache').then(({ bumpVersion }) => bumpVersion(c.env, 'stock')).catch(() => {})
-        try { c.executionCtx.waitUntil(stockBump) } catch { void stockBump }
+        if (applier.name !== STOCK_SESSION_KIND) {
+          const stockBump = import('../lib/cache').then(({ bumpVersion }) => bumpVersion(c.env, 'stock')).catch(() => {})
+          try { c.executionCtx.waitUntil(stockBump) } catch { void stockBump }
+        }
       } catch (error) {
         const stockGuard = productStockGuardError(error)
         if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
@@ -533,7 +540,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         : applier.name === STOCK_IN_LINE_EDIT_KIND
         ? notifyStockInLineEdit(c.env)
         : applier.name === STOCK_SESSION_KIND
-        ? notifyStockSession(c.env, { operationId: String(payload.operation_id) })
+        ? notifyStockSession(c.env, { operationId: String(payload.operation_id) }, true)
         : applier.name === SALE_SETTLEMENT_ACTION_KIND
           ? notifySaleSettlementAction(c.env)
           : applier.name === RETURN_BULK_ACTION_KIND

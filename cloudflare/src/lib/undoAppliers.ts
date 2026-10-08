@@ -41,7 +41,7 @@ import { replaySaleBulkStatus } from './saleBulkStatus'
 import { BULK_CUSTOMER_UPDATE_KIND, BULK_UPDATE_KIND, MULTI_CUSTOMER_UPDATE_KIND, SINGLE_CUSTOMER_UPDATE_KIND, replaySaleBulkUpdate } from './saleBulkUpdate'
 import { RETURN_BULK_ACTION_KIND, replayReturnBulkAction } from './returnBulkAction'
 import { SALE_SETTLEMENT_ACTION_KIND, replaySaleSettlementAction, saleMutationGuard, samePrecisionCompatibleState } from './saleSettlementAction'
-import { STOCK_SESSION_KIND, replayStockSession } from './stockSession'
+import { STOCK_SESSION_KIND, replayStockSession, type StockSessionQueryBudget } from './stockSession'
 import { actorSnapshot } from './actorSnapshot'
 import { CUSTOMER_GENDER_RESTORATION_KIND, replayCustomerGenderRestoration } from './customerGenderRestoration'
 import {
@@ -85,6 +85,7 @@ export interface UndoApplierContext {
   direction: 'undo' | 'redo'
   historyId?: number
   generation?: unknown
+  stockSessionQueryBudget?: StockSessionQueryBudget
 }
 
 export interface UndoApplierOutcome {
@@ -3047,7 +3048,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
     action: 'adjust',
     run: async (payload, ctx) => {
       if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Stock session history context is required.')
-      await replayStockSession(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)
+      await replayStockSession(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload, ctx.stockSessionQueryBudget)
     },
   },
   'sale.status.bulk': {

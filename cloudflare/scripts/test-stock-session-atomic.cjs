@@ -33,7 +33,7 @@ function loadStockSession(entry = 'lib/stockSession.ts', actor = user) {
       // client_request_id, so the guard CLAIMS it first -- which needs the real
       // getDb over the fixture's SQLite-backed env.DB (lib/db.ts).
       if (normalized === 'routes/inventory.ts' && name.startsWith('../') && !['../lib/continuousReadWindow', '../lib/acquisitionCostAccess', '../lib/stockSession', '../lib/permissions', '../lib/stockReason', '../lib/stockCondition', '../lib/stockMutationReceipt', '../lib/db'].includes(name)) return {}
-      if (name === './cache' || name === '../lib/cache') return { bumpVersion: async () => {} }
+      if (name === './cache' || name === '../lib/cache') return { bumpVersion: async () => {}, bumpVersions: async () => {} }
       if (name === '../durable-objects/broadcastHub') return { broadcast: async () => {} }
       if (name.startsWith('./')) return load(`lib/${name.slice(2)}.ts`)
       if (name.startsWith('../')) return load(`${name.slice(3)}.ts`)
@@ -693,8 +693,14 @@ async function main() {
     }])
   })
 
-  await check('revision guard rejects an ABA stock race with the same visible quantity', async () => {
+  await check('non-first packed revision guard rejects an ABA stock race and rolls back every business row', async () => {
     const f = fixture()
+    const originalBatch = f.env.DB.batch.bind(f.env.DB)
+    f.env.DB.batch = async statements => {
+      const packed = statements.find(statement => statement.text.startsWith('INSERT INTO stock_session_guards(guard_value) ') && statement.text.includes('UNION ALL'))
+      assert.ok(packed && packed.text.indexOf('branch_stock') > packed.text.indexOf('UNION ALL'), 'the failing branch-stock guard follows a valid maintenance guard in the same statement')
+      return originalBatch(statements)
+    }
     f.beforeCommit((sql) => {
       sql.prepare('UPDATE branch_stock SET quantity=1 WHERE product_id=1 AND branch_id=1').run()
       sql.prepare('UPDATE branch_stock SET quantity=0 WHERE product_id=1 AND branch_id=1').run()
@@ -705,6 +711,8 @@ async function main() {
     )
     assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 0)
     assert.equal(f.sql.prepare('SELECT COUNT(*) count FROM stock_session_operations').get().count, 0)
+    for (const table of ['product_batches','action_history','undo_snapshots','inventory_movements','audit_logs','stock_session_guards']) assert.equal(f.sql.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0,table)
+    assert.equal(f.sql.prepare('SELECT stock_quantity n FROM products WHERE id=1').get().n,0)
   })
 
   await check('maintenance markers arriving after stock-session admission roll back every business row', async () => {

@@ -1,3 +1,4 @@
+import type { RequestMetrics } from '../lib/requestMetrics'
 import { productStockGuardError, productHasStockSql, productStockGuardStatement, assertProductsActive } from '../lib/productStockGuard'
 import { requireReceivingBranch, receivingBranchAssertion, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from '../lib/receivingBranch'
 import { Hono, type Context } from 'hono'
@@ -151,7 +152,10 @@ app.post('/sessions', async (c) => {
   const body = await c.req.json<unknown>().catch(() => null)
   const stockSession = await import('../lib/stockSession')
   try {
-    const receipt = await stockSession.commitStockSession(c.env, c.get('user'), body, () => branchRedirectTarget(c))
+    const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
+    // Index maintenance uses one raw D1 read; cache handoff can use six attempts.
+    const queryBudget = metrics ? { statementsUsed: () => metrics.attemptedStatements + 1, reserveStatements: 6 } : undefined
+    const receipt = await stockSession.commitStockSession(c.env, c.get('user'), body, () => branchRedirectTarget(c), queryBudget)
     if (!receipt.replayed) c.executionCtx.waitUntil(stockSession.notifyStockSession(c.env, receipt))
     return c.json(receipt)
   } catch (error) {

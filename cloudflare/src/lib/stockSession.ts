@@ -16,7 +16,7 @@ import { normalizeMultiValue, planInsertRow, validateProductImageGallery } from 
 import { sanitizeMediaList, sanitizeMediaPath } from './media'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT, MAX_IMAGES_PER_PRODUCT } from './importImageMatch'
 import { buildInClause, chunkForBinding, D1_MAX_BOUND_PARAMS } from './sqlBinding'
-import { bumpVersion } from './cache'
+import { bumpVersion, bumpVersions } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { actorSnapshot } from './actorSnapshot'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
@@ -634,6 +634,32 @@ function revisionAssertion(type: string, key: string, predicate: string, params:
   })
 }
 
+// Consecutive CHECK guard rows share one statement without dropping predicates or crossing writes.
+function packSessionAssertions(statements: StockWriteStatement[]): StockWriteStatement[] {
+  const prefix = 'INSERT INTO stock_session_guards(guard_value) '
+  const packed: StockWriteStatement[] = []
+  let selects: string[] = []
+  let params: Row = {}
+  let bindings = 0
+  const flush = () => {
+    if (selects.length) packed.push({ sql: prefix + selects.join(' UNION ALL '), params })
+    selects = []; params = {}; bindings = 0
+  }
+  for (const statement of statements) {
+    if (!statement.sql.startsWith(prefix) || Array.isArray(statement.params)) {
+      flush(); packed.push(statement); continue
+    }
+    const count = bindCount(statement)
+    if (bindings + count > D1_MAX_BOUND_PARAMS) flush()
+    const keyPrefix = `g${selects.length}_`
+    selects.push(statement.sql.slice(prefix.length).replace(/@(\w+)/g, (_, key: string) => `@${keyPrefix}${key}`))
+    for (const [key, value] of Object.entries(statement.params || {})) params[keyPrefix + key] = value
+    bindings += count
+  }
+  flush()
+  return packed
+}
+
 function bindCount(statement: StockWriteStatement): number {
   if (Array.isArray(statement.params)) return statement.params.length
   return [...statement.sql.matchAll(/@(\w+)/g)].length
@@ -1210,7 +1236,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   statements.push(...captureReplayState(operationId, replayStateSql, true))
   checkBounds(statements, snapshot)
   try {
-    await execution.commit(statements)
+    await execution.commit(packSessionAssertions(statements))
     execution.finishReads()
   } catch (error) {
     execution.finishReads()
@@ -1238,9 +1264,9 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   return parseStoredReceipt(saved, false)
 }
 
-export async function notifyStockSession(env: Env, receipt: Pick<StockSessionReceipt, 'operationId'>) {
+export async function notifyStockSession(env: Env, receipt: Pick<StockSessionReceipt, 'operationId'>, includeStock = false) {
   await Promise.allSettled([
-    bumpVersion(env, 'products'),
+    includeStock ? bumpVersions(env, ['products', 'stock']) : bumpVersion(env, 'products'),
     broadcast(env, 'products', { action: 'update' }),
     broadcast(env, 'inventory', { action: 'stock_session', id: receipt.operationId }),
   ])
@@ -1659,7 +1685,7 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
     VALUES(@actor,@name,@action,'stock_session',@id,@details)`, params: { actor: user.id, name: actorSnapshot(user), action: `stock_session_${direction}`, id: op.id, details: JSON.stringify({ operationId: op.id, actionHistoryId: historyId, generation: generation + 1 }) } })
   statements.push(...captureReplayState(String(op.id), stateSql))
   checkBounds(statements, snapshot)
-  try { await execution.commit(statements); execution.finishReads() } catch (error) {
+  try { await execution.commit(packSessionAssertions(statements)); execution.finishReads() } catch (error) {
     execution.finishReads()
     if (error instanceof StockSessionError && error.code === 'stock_session_query_budget_exceeded') throw error
     const saved = await db.prepare('SELECT o.generation,h.status FROM stock_session_operations o JOIN action_history h ON h.id=o.history_id WHERE o.id=@id').get<Row>({ id: op.id })
