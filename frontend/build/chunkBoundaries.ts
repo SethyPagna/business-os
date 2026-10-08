@@ -28,10 +28,9 @@ const neutralChunks: ReadonlyArray<readonly [string, string]> = [
   ['/src/components/shared/UnsavedChangesPrompt.tsx', 'shared-modal'],
   ['/src/components/shared/MinimizeButton.tsx', 'shared-modal'],
   ['/src/components/shared/modalCloseContext.ts', 'shared-modal'],
-  // Modal's keyboard contract (SALES-UI A15/A16). Its only importer is Modal;
-  // left to the shared catch-all it lands in app-shared and closes a static
-  // shared-modal -> app-shared -> shared-modal chunk cycle.
-  ['/src/components/shared/useDialogKeyboard.ts', 'shared-modal'],
+  // Modal and lazy recovery share this React-only hook. Keep recovery from
+  // importing the modal implementation back through its keyboard contract.
+  ['/src/components/shared/useDialogKeyboard.ts', 'shared-ui'],
   // G37 client search index (admin pickers only: POS, Products, Inventory,
   // Branches, Transfer, Stock-in, Promotions, Bulk import, Duplicates). Left
   // to the '/src/api/' fallback, the index transport and the shared search

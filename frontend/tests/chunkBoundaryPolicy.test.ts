@@ -38,7 +38,7 @@ const boundaries: Array<[string, string]> = [
   ['components/catalog/legal/LegalPages.tsx', 'catalog-legal'],
   ['components/shared/modalCloseContext.ts', 'shared-modal'],
   ['components/shared/UnsavedChangesPrompt.tsx', 'shared-modal'],
-  ['components/shared/useDialogKeyboard.ts', 'shared-modal'],
+  ['components/shared/useDialogKeyboard.ts', 'shared-ui'],
   // The G37 client search index is admin-only; in app-api-methods it rode the storefront's boot closure.
   ['api/productSearchIndex.ts', 'product-search-index'],
   ['utils/searchCore.ts', 'product-search-index'],
