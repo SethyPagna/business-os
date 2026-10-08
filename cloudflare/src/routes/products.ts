@@ -4275,7 +4275,7 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
   const reversal: MergeReversal & { selectedConflictContext?: Record<string, unknown> } = {
     keeperId: canonicalId,
     keeperName: canonicalName,
-    ...(requestedKeeperActiveAfter === 0 ? { keeperActiveBefore: Number(canonicalBefore.is_active), keeperActiveAfter: 0 } : {}),
+    ...(requestedKeeperActiveAfter === 0 ? { keeperActiveBefore: Number(canonicalBefore.is_active) === 1 ? 1 : 0, keeperActiveAfter: 0 } as const : {}),
     dupId: dup.id,
     dupName: dup.name ?? null,
     keeperImagePathBefore: canonicalBefore?.image_path ?? null,

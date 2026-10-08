@@ -1,4 +1,7 @@
 {
+  "reset_builtin_admin_only": "Only the built-in admin account can reset business data.",
+  "reset_confirm_required": "Type the exact reset phrase to confirm. No data was changed.",
+  "reset_acknowledgement_required": "Acknowledge the reset warning before confirming. No data was changed.",
   "product_has_stock": "Products with stock must stay active. Remove all stock before deleting or deactivating a product, and activate a product before adding stock.",
   "perm_product_cost_view": "View product costs",
   "perm_product_cost_edit": "Edit product costs",

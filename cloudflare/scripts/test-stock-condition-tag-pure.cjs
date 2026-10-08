@@ -879,34 +879,23 @@ const ADD = (extra) => ({
     }
   })
 
-  // --------------------------------------------------- delete and undo
-  // A product delete is a reversible removal: it snapshots the whole stock
-  // graph, zeroes it, and restores it from that snapshot on undo. Held units
-  // are stock -- they simply live in a different table -- so a delete that
-  // ignores them leaves an OPEN held lot pointing at a deleted product: units
-  // nobody can see, sell, dispose of or restore, and that undo cannot bring
-  // back either.
+  // Forward removal must preserve both sellable and tagged holdings.
   await check('stocked product removal refuses without changing sellable or tagged stock', async () => {
     seed()
     assert.equal((await req('POST', '/adjust', ADD())).status, 200)
     assert.equal((await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 4, reason: 'dropped', branchId: 1, conditionTag: 'broken' })).status, 200)
     const before = { sellable: sellable(), lots: heldLots(), movements: movements('write_off') }
-    const plan = await productDelete.prepareProductRemovePlan(db, 1, 'discontinued')
-    await assert.rejects(db.batch(productDelete.productRemoveApplyStatements({
-      plan, operationId: 'op-tagged-1', source: 'direct', requestId: 'req-tagged-1',
-      user: FAKE_USER, transitionStamp: '2026-09-14T10:00:00.000Z',
-      planDigest: await productDelete.productRemovePlanDigest(plan),
-    })), /product_has_stock/)
+    await assert.rejects(productDelete.prepareProductRemovePlan(db, 1, 'discontinued'), error => error.code === 'product_has_stock')
     assert.equal(Number(rawDb.prepare('SELECT is_active FROM products WHERE id=1').get({}).is_active), 1)
     assert.deepEqual({ sellable: sellable(), lots: heldLots(), movements: movements('write_off') }, before)
     assert.equal(rawDb.prepare("SELECT COUNT(*) AS c FROM product_remove_operations WHERE operation_id='op-tagged-1'").get({}).c, 0)
   })
 
-  await check('a historical plan without tagged lots cannot be applied as a new stocked removal', async () => {
+  await check('a saved plan without tagged lots cannot be applied after stock arrives', async () => {
     seed()
+    const fresh = await productDelete.prepareProductRemovePlan(db, 1, 'discontinued')
     assert.equal((await req('POST', '/adjust', ADD())).status, 200)
     assert.equal((await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 4, reason: 'dropped', branchId: 1, conditionTag: 'broken' })).status, 200)
-    const fresh = await productDelete.prepareProductRemovePlan(db, 1, 'discontinued')
     const legacy = { ...fresh }
     delete legacy.damaged_lots
     assert.deepEqual(productDelete.parseProductRemovePlan(legacy), legacy)

@@ -43,6 +43,7 @@ function loadReviewApply(fixture) {
 function productGraph(d1) {
   return {
     product: { ...d1.db.prepare('SELECT * FROM products WHERE id=10000').get() },
+    damagedLots: d1.db.prepare('SELECT * FROM damaged_stock_lots WHERE product_id=10000 ORDER BY id').all().map(row => ({ ...row })),
     stock: d1.db.prepare('SELECT * FROM branch_stock WHERE product_id=10000 ORDER BY id').all().map((row) => ({ ...row })),
     batches: d1.db.prepare('SELECT * FROM product_batches WHERE variant_product_id=10000 ORDER BY id').all().map((row) => ({ ...row })),
     batchStock: d1.db.prepare(`SELECT bbs.* FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id
@@ -63,14 +64,17 @@ async function main() {
       -- seeded product consistent with its on-hand lot, as the app would.
       UPDATE products SET cost_price_usd=4.25,purchase_price_usd=4.25 WHERE id=10000;`)
     const source = productGraph(fixture.d1)
+    fixture.d1.db.exec("INSERT INTO damaged_stock_lots(product_id,branch_id,quantity,quantity_remaining,condition_tag) VALUES(10000,2,3,3,'damaged')")
+    source.damagedLots = productGraph(fixture.d1).damagedLots
     const refused = await remove(fixture.app,10000,{reason:'Stock refusal',client_request_id:'refuse_historical_stock'})
     assert.equal(refused.status,409);assert.equal(refused.body.code,'product_has_stock')
     assert.deepEqual(productGraph(fixture.d1),source)
-    fixture.d1.db.exec('UPDATE branch_stock SET quantity=0 WHERE product_id=10000; UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=10000); UPDATE products SET stock_quantity=0 WHERE id=10000;')
+    fixture.d1.db.exec('UPDATE branch_stock SET quantity=0 WHERE product_id=10000; UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=10000); UPDATE damaged_stock_lots SET quantity_remaining=0 WHERE product_id=10000; UPDATE products SET stock_quantity=0 WHERE id=10000;')
     const removed = await remove(fixture.app,10000,{reason:'Historical fixture',client_request_id:'historical_fixture'})
     const op=fixture.d1.db.prepare('SELECT * FROM product_remove_operations WHERE operation_id=?').get(removed.body.operation_id)
     const saved=JSON.parse(fixture.d1.db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get(op.undo_snapshot_id).payload_json)
     saved.plan.product=source.product
+    saved.plan.damaged_lots=source.damagedLots
     for(const row of saved.plan.branch_stock) Object.assign(row,source.stock.find(old=>old.id===row.id))
     for(const row of saved.plan.branch_batch_stock) Object.assign(row,source.batchStock.find(old=>old.id===row.id))
     saved.plan.state_digest='historical-fixture'
