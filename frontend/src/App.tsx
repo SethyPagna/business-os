@@ -256,7 +256,7 @@ const useApp = useAppHook as () => AppContextValue
 const BOTTOM_STACK_CLEARS_NAV_CLASS = 'bottom-[calc(3.55rem+env(safe-area-inset-bottom))]'
 /** Pages-mode compact navigation has no bottom nav: only the safe area. */
 const BOTTOM_STACK_CLEARS_SAFE_AREA_CLASS = 'bottom-[env(safe-area-inset-bottom)]'
-const bottomStackClass = (clearance: string) => `pointer-events-none fixed inset-x-2 z-[1200] flex flex-col gap-2 ${clearance} md:inset-x-auto md:bottom-4 md:right-4 md:w-[24rem]`
+const bottomStackClass = (clearance: string) => `pointer-events-none fixed inset-x-2 z-[1020] flex flex-col gap-2 ${clearance} md:inset-x-auto md:bottom-4 md:right-4 md:w-[24rem]`
 
 function asPageModule(importer: () => Promise<unknown>): ChunkImporter {
   return () => importer() as Promise<{ default: ComponentType<Record<string, unknown>> }>
