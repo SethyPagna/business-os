@@ -36,8 +36,10 @@ async function world(tier, mode, verified, options = {}) {
     createHash('sha256').update(token).digest('hex'), new Date(Date.now() - 29 * 86400000).toISOString(), new Date(Date.now() + 86400000).toISOString())
   f.env.BROADCAST_HUB = { idFromName: n => n, get: () => ({ fetch: async () => new Response('{}') }) }
   let releaseKv
+  let reachedKv
   const delayedKv = new Promise(resolve => { releaseKv = resolve })
-  f.env.CACHE = { get: async () => { if (options.delayedKv) await delayedKv; return null }, put: async () => { throw Error('KV unavailable') }, delete: async () => {} }
+  const kvReached = new Promise(resolve => { reachedKv = resolve })
+  f.env.CACHE = { get: async () => { if (options.delayedKv) { reachedKv(); await delayedKv } return null }, put: async () => { throw Error('KV unavailable') }, delete: async () => {} }
   f.env.TELEGRAM_BOT_TOKEN = 'local-fixture-token'
   f.env.BUSINESS_OS_ADMIN_URL = 'https://admin.budget.example'
   f.sql.prepare("INSERT INTO settings(key,value) VALUES('telegram_chat_id','123456') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
@@ -109,9 +111,14 @@ async function world(tier, mode, verified, options = {}) {
     physical = 0; failures = new Set()
     const pending = []
     const payload = options.multiLine ? { lines: Array.from({ length: 24 }, (_, i) => ({ key: 'line-' + i, wire: 'adjust', body: { ...body, client_request_id: body.client_request_id + '-' + i } })) } : body
-    const response = await worker.fetch(new Request('https://admin.budget.example' + (options.multiLine ? '/api/inventory/fast-stock-in/commit' : mode === 'receive' ? '/api/batches' : '/api/inventory/adjust'), {
+    const responsePromise = worker.fetch(new Request('https://admin.budget.example' + (options.multiLine ? '/api/inventory/fast-stock-in/commit' : mode === 'receive' ? '/api/batches' : '/api/inventory/adjust'), {
       method: 'POST', headers: { cookie: 'bos_session=' + token, 'content-type': 'application/json', origin: 'https://admin.budget.example' }, body: JSON.stringify(payload),
     }), f.env, { waitUntil(p) { pending.push(Promise.resolve(p)) }, passThroughOnException() {} })
+    if (options.delayedKv && !options.releaseKvAfterResponse) {
+      await Promise.race([responsePromise, kvReached])
+      releaseKv()
+    }
+    const response = await responsePromise
     releaseKv()
     const tasks = await Promise.allSettled(pending)
     assert.equal(observed.invocation.attemptedStatements, physical, 'full physical binding attempts equal invocation admission count')

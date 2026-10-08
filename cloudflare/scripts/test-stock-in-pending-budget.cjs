@@ -16,11 +16,6 @@ fixture = fixture.replace('if (kind && options.tailRetries && !failures.has(kind
       if (kind && options.tailRetries && nth % 2 === 1) {`)
 fixture = fixture.replace('const payload = options.multiLine ?', 'const payload = options.payload || (options.multiLine ?')
 fixture = fixture.replace('} : body\n    const response', '} : body)\n    const response')
-if (!baseline) fixture = fixture.replace('const response = await worker.fetch(', 'const responsePromise = worker.fetch(')
-if (!baseline) fixture = fixture.replace('    releaseKv()\n', `    await new Promise(resolve => setImmediate(resolve))
-    releaseKv()
-    const response = await responsePromise
-`)
 const { world } = new Function('require', '__dirname', fixture + ';return {world};')(fixtureRequire, __dirname)
 
 async function lifecycleChecks() {
@@ -70,7 +65,7 @@ async function lifecycleChecks() {
 
 ;(async () => {
   if (!baseline) await lifecycleChecks()
-  const options = { multiLine: true, tailRetries: true, delayedKv: true, enforceCap: !baseline }
+  const options = { multiLine: true, tailRetries: true, delayedKv: true, releaseKvAfterResponse: baseline, enforceCap: !baseline }
   const f = await world('paid', 'optional-tagged', false, options)
   const before = f.effects()
   const first = await f.call(true)
