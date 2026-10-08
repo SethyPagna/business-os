@@ -83,7 +83,11 @@ function makeState(actor) {
         async run(params = {}) { state.runs.push({ sql, params, staging: true }); return { changes: 1 } },
       }
     },
-    async batch(statements) { state.batches++; state.runs.push(...statements); return [] },
+    async batch(statements) {
+      if (statements.some(entry => /(?:UPDATE|INSERT INTO) products\b/i.test(entry.sql))) state.batches++
+      state.runs.push(...statements)
+      return statements.map(() => ({ meta: { changes: 1 } }))
+    },
   }
   state.db = {
     staging,
@@ -113,7 +117,11 @@ function makeState(actor) {
         },
       }
     },
-    async batch(statements) { state.batches++; state.runs.push(...statements); return [] },
+    async batch(statements) {
+      if (statements.some(entry => /(?:UPDATE|INSERT INTO) products\b/i.test(entry.sql))) state.batches++
+      state.runs.push(...statements)
+      return statements.map(() => ({ meta: { changes: 1 } }))
+    },
   }
   return state
 }
@@ -175,7 +183,7 @@ function imageResult(action, imagePath, existingId = 77) {
 
 async function expectAuthorityError(promise, permission) {
   await assert.rejects(promise, (error) => {
-    assert.equal(error.code, 'import_apply_permission_revoked')
+    assert.equal(error.code, 'import_apply_permission_revoked', error.stack)
     assert.equal(error.permission, permission)
     return true
   })
@@ -297,11 +305,11 @@ async function main() {
   console.log('PASS queue still retries transient apply failures')
 
   const source = fs.readFileSync(enginePath, 'utf8')
-  assert.match(source, /const authority = await assertCurrentImportApplyAuthority\(env, job\)/)
+  assert.match(source, /const authority = await assertCurrentImportApplyAuthority\(env, job, db\)/)
   assert.match(source, /if \(await productImportResultsChangeImages\(db, results, job\.policy_json\)\)/)
   assert.match(source, /stripProductImportImageFields\(results\)/)
   const applyStart = source.indexOf('export async function runImportApply')
-  const authorityIndex = source.indexOf('assertCurrentImportApplyAuthority(env, job)', applyStart)
+  const authorityIndex = source.indexOf('assertCurrentImportApplyAuthority(env, job, db)', applyStart)
   const materializeIndex = source.indexOf('ensureSourceRowsMaterialized(env, db, jobId', authorityIndex)
   // Inventory cost-snapshot preservation intentionally reassigns the
   // classified result array, so this binding can be either const or let.

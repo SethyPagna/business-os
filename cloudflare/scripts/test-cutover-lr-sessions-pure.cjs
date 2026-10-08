@@ -48,7 +48,7 @@ const line = (id, productId, branchId, extra = {}) => ({ line_id: id, kind: 'rec
 const session = (key, items) => ({ client_request_id: key, mode: 'stock_in', items })
 
 async function main() {
-  await W.check('before: a session (new lot, explicit top-up, two branches) writes equal business statements apart from verified admission to the eb5dd0ba3 oracle', async () => {
+  await W.check('before: a session preserves oracle business rows, receipts, history and undo snapshots across statement packing', async () => {
     for (const body of [session('cutover-lr-session-before', [line('a', 10, 2), line('c', 20, 1)]), session('cutover-lr-session-before-2', [line('b', 10, 2, { batch_id: 500, supplier_name: null, supplier_id: null })])]) {
     const dbNew = W.build('before'); const dbOld = W.build('before')
     const capNew = []; const capOld = []
@@ -56,7 +56,10 @@ async function main() {
     const b = await W.call(inventory(oracle), dbOld, 'POST', '/sessions', body, { capture: capOld })
     assert.equal(a.status, 200, JSON.stringify(a.body))
     assert.equal(W.normalised(a), W.normalised(b))
-    assert.equal(W.normalised(withoutProductAdmission(capNew)), W.normalised(withoutProductAdmission(capOld)))
+    withoutProductAdmission(capNew)
+    withoutProductAdmission(capOld)
+    const persisted = db => ['undo_snapshots','audit_logs'].map(table => [table, W.plain(db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())])
+    assert.equal(W.normalised(persisted(dbNew)), W.normalised(persisted(dbOld)))
     assert.equal(W.normalised(W.ledger(dbNew)), W.normalised(W.ledger(dbOld)))
     }
   })

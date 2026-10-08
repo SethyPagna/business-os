@@ -30,6 +30,8 @@ function dbAdapter(raw) {
         bind: (...args) => { bound = args.length === 1 ? args[0] : args; return api },
         get: async (params) => stmt.get(params !== undefined ? params : bound) ?? null,
         all: async (params) => stmt.all(params !== undefined ? params : bound) ?? [],
+        getOnce: async (params) => stmt.get(params !== undefined ? params : bound) ?? null,
+        allOnce: async (params) => stmt.all(params !== undefined ? params : bound) ?? [],
         run: async (params) => {
           const info = stmt.run(params !== undefined ? params : bound)
           return { changes: info.meta?.changes ?? 0, lastInsertRowid: Number(info.meta?.last_row_id ?? 0) }

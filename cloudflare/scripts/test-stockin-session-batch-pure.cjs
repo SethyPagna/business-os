@@ -16,10 +16,9 @@ const stockSessionSource = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib
 const productsSource = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'products.ts'), 'utf8')
 
 let passed = 0
+const checks = []
 function check(name, fn) {
-  fn()
-  passed += 1
-  console.log(`PASS ${name}`)
+  checks.push({ name, fn })
 }
 
 function sliceBetween(source, startMarker, endMarker, label) {
@@ -33,13 +32,39 @@ function sliceBetween(source, startMarker, endMarker, label) {
 // Before: products, branches, suppliers, explicitBatches resolved via four
 // sequential `await rowsIn(...)` calls -- four different tables, no data
 // dependency on each other. After: one Promise.all fan-out.
-check('stockSession.ts commitStockSession: products/branches/suppliers/explicitBatches resolve in one Promise.all', () => {
+check('stockSession.ts commitStockSession: products/branches/suppliers/lots share one fact query', async () => {
   const block = sliceBetween(stockSessionSource, 'export async function commitStockSession', 'for (const id of receiveIds)', 'commitStockSession lookup block')
   assert.match(
     block,
-    /const \[products, branches, suppliers, explicitBatches\] = await Promise\.all\(\[/,
-    'the four independent id-list lookups must be fanned out together, not four sequential awaits',
+    /const facts = await sessionFacts\(env, db, receiveIds, branchIds, supplierIds, explicitBatchIds\)/,
+    'independent table facts use one set-based read',
   )
+  const ts = require('typescript')
+  const parsed = ts.createSourceFile('stockSession.ts', stockSessionSource, ts.ScriptTarget.Latest, true)
+  const functions = ['sessionFacts', 'sessionRowSql'].map(name => parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name))
+  assert.ok(functions.every(Boolean))
+  const compiled = ts.transpileModule(functions.map(node => node.getText(parsed)).join('\n'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+  const db = new (require('better-sqlite3'))(':memory:')
+  try {
+    db.exec(`CREATE TABLE products(id INTEGER,name TEXT); CREATE TABLE branches(id INTEGER,name TEXT);
+      CREATE TABLE suppliers(id INTEGER,name TEXT); CREATE TABLE product_batches(id INTEGER,variant_product_id INTEGER);
+      CREATE TABLE product_cost_entries(id INTEGER,product_id INTEGER,baseline_batch_id INTEGER);
+      INSERT INTO products VALUES(10,'selected'),(20,'other'); INSERT INTO branches VALUES(1,'selected'),(2,'other');
+      INSERT INTO suppliers VALUES(5,'selected'),(6,'other'); INSERT INTO product_batches VALUES(50,10),(51,20),(52,30);
+      INSERT INTO product_cost_entries VALUES(1,10,40),(2,10,49);`)
+    const columns = new Map(['products','branches','suppliers','product_batches'].map(table => [table,new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name))]))
+    const facts = new Function('sessionColumns', compiled + ';return sessionFacts;')(async () => columns)
+    let statements = 0
+    const adapter = { prepare(sql) { statements++; return { all: params => db.prepare(sql).all(params) } } }
+    const result = await facts({},adapter,[10],[1],[5],[51])
+    assert.equal(statements,1)
+    assert.deepEqual(result.products.map(row=>row.id),[10])
+    assert.deepEqual(result.branches.map(row=>row.id),[1])
+    assert.deepEqual(result.suppliers.map(row=>row.id),[5])
+    assert.deepEqual(result.batches.map(row=>row.id),[50,51])
+    assert.deepEqual(result.baselines,[{product_id:10,baseline_batch_id:49}])
+    assert.deepEqual((await facts({},adapter,[],[],[],[])).batches,[])
+  } finally { db.close() }
 })
 
 // Before: possibleDateBatches, productColumns, activeBranches,
@@ -82,4 +107,7 @@ check('products.ts GET /stock-in-session-lines: receipt-count chunks fan out wit
   )
 })
 
-console.log(`\n${passed} checks passed`)
+;(async () => {
+  for (const {name,fn} of checks) { await fn(); passed++; console.log(`PASS ${name}`) }
+  console.log(`\n${passed} checks passed`)
+})().catch(error => { console.error(error); process.exitCode = 1 })

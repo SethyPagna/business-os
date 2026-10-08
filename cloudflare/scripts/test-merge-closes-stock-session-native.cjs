@@ -91,6 +91,20 @@ const DIGEST_TABLES = ['products', 'branch_stock', 'product_batches', 'branch_ba
 const digest = (f) => JSON.stringify(DIGEST_TABLES.map((table) => [table, f.h.raw.prepare(`SELECT * FROM ${table} ORDER BY 1`).all([])]))
 
 async function main() {
+  await check('the native adapter once methods make one attempt and preserve bound parameters', async () => {
+    const h = createProductsRouteHarness({ user: ADMIN })
+    assert.equal((await h.db.prepare('SELECT ? AS value').bind([7]).getOnce()).value, 7)
+    assert.deepEqual((await h.db.prepare('SELECT ? AS value').bind([8]).allOnce()).map(row => row.value), [8])
+    const prepare = h.raw.prepare.bind(h.raw)
+    let attempts = 0
+    const error = new Error('D1 transient once probe')
+    h.raw.prepare = () => ({ get() { attempts++; throw error }, all() { attempts++; throw error } })
+    await assert.rejects(h.db.prepare('probe').getOnce(), failure => failure === error)
+    assert.equal(attempts,1)
+    await assert.rejects(h.db.prepare('probe').allOnce(), failure => failure === error)
+    assert.equal(attempts,2)
+    h.raw.prepare = prepare
+  })
   await check('DISCRIMINATING: a merge of two products, one with an undoable stock-in session, completes and closes that session', async () => {
     const f = fixture()
     const open = await f.receive([{ product_id: 2, quantity: 4 }])
