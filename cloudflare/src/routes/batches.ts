@@ -9,6 +9,7 @@ import { hasPermission, getActionTier, getPermissionTier, isActionBlocked } from
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { getTrackedProductIds, listBatchesForProduct, parseReceiptSellingPrice, planReceiptSellingPrice, receiveBatchStock, type ReceiptSellingPriceRow } from '../lib/productBatches'
+import { executeStockTransaction } from '../lib/stockTransaction'
 import { listOpenDamagedLots } from '../lib/returnsStock'
 import { dateToBatchCode, normalizeTypedDate } from '../lib/batchCode'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
@@ -553,10 +554,13 @@ app.patch('/:id', async (c) => {
   // movements, sale/return snapshots and allocation prices are never edited.
   const recompute = catalogCostRecomputeStatement(existing.variant_product_id)
   const affectsCatalogCost = bodyExtra.unit_cost_usd !== undefined || body.is_active !== undefined
-  const results = await db.batch([
+  const updateStatements = [
     { sql: updateSql, params },
     ...(affectsCatalogCost ? [{ ...recompute, sql: `${recompute.sql} AND changes() > 0` }] : []),
-  ])
+  ]
+  const results = body.is_active !== undefined
+    ? await executeStockTransaction(db, updateStatements, 'retry')
+    : await db.batch(updateStatements)
   if (deactivating && Number(results[0]?.meta?.changes ?? 0) === 0) {
     return c.json({ error: activeBatchStockError(await positiveBatchStock(db, id)) }, 400)
   }
@@ -644,7 +648,7 @@ app.delete('/:id', async (c) => {
   // Keep the invariant atomic with the state change. If a receipt/correction
   // committed first, this matches zero rows; if this committed first, every
   // positive producer reactivates the lot in its own atomic write.
-  const deactivated = await db.prepare(`
+  const [deactivated] = await executeStockTransaction(db, [{ sql: `
     UPDATE product_batches
     SET is_active = 0, updated_at = datetime('now')
     WHERE id = @id
@@ -652,8 +656,8 @@ app.delete('/:id', async (c) => {
         SELECT 1 FROM branch_batch_stock
         WHERE batch_id = @id AND quantity > 0
       )
-  `).run({ id })
-  if (deactivated.changes === 0) {
+  `, params: { id } }], 'retry')
+  if (Number(deactivated?.meta?.changes ?? 0) === 0) {
     return c.json({ error: activeBatchStockError(await positiveBatchStock(db, id)) }, 400)
   }
   // Perf-2: `{ success: true }` reads nothing audit() writes -- defer it

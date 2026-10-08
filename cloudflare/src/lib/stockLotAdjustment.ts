@@ -73,7 +73,7 @@ import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import { getActionTier } from './permissions'
 import { actorSnapshot } from './actorSnapshot'
-import { ordinaryBusinessBatch, ordinaryBusinessMaintenanceGuard } from './businessMaintenanceGuard'
+import { executeStockTransaction, StockTransactionUnavailableError, StockTransactionOutcomeUnknownError } from './stockTransaction'
 import { requireReceivingBranch, receivingBranchAssertion, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from './receivingBranch'
 import { resolveMovementCostSnapshot, type MovementCostPair } from './movementCostSnapshot'
 import { planHoldAsTagged } from './damagedLotActions'
@@ -469,13 +469,14 @@ export async function applyStockLotSet(
   if (!atomicMark) await markWritten()
   try {
     if (atomicMark?.execute) {
-      await atomicMark.execute(db, [...addressedStatements(landing, statements), ordinaryBusinessMaintenanceGuard])
-    } else await ordinaryBusinessBatch(db, addressedStatements(landing, statements))
+      await atomicMark.execute(db, addressedStatements(landing, statements))
+    } else await executeStockTransaction(db, addressedStatements(landing, statements), 'retry')
   } catch (error) {
     if (recordOperation && requestId) {
       const concurrent = await previous()
       if (concurrent) return replay(concurrent)
     }
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const activeGuard = productStockGuardError(error)
     if (activeGuard) throw activeGuard
     if (isMaintenanceError(error)) return MAINTENANCE_RESPONSE
@@ -629,10 +630,11 @@ export async function replayStockLotSet(
       undo_payload=json_set(undo_payload,'$.generation',@next),redo_payload=json_set(redo_payload,'$.generation',@next) WHERE id=@history`, params },
   )
   try {
-    await ordinaryBusinessBatch(db, statements)
+    await executeStockTransaction(db, statements, 'retry')
   } catch (error) {
     const current = await db.prepare('SELECT generation,state FROM stock_lot_adjustment_operations WHERE id=@operation').get<OperationRow>({ operation: row.id })
     if (current?.generation === next && current.state === target) return
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const activeGuard = productStockGuardError(error)
     if (activeGuard) throw activeGuard
     if (isMaintenanceError(error)) throw new StockLotSetReplayError('Maintenance is in progress. Nothing was changed.', 503)
