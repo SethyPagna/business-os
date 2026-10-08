@@ -35,7 +35,7 @@ function fixture() {
         const r = st.run(p); return { changes: Number(r.meta.changes), lastInsertRowid: Number(r.meta.last_row_id) }
       } }
     },
-    batch: items => raw.batch(items), staging: null,
+    batch: items => raw.batch(items), batchOnce: items => db.batch(items), staging: null,
   }
   db.staging = db
   raw.prepare("INSERT INTO branches(id,name,role,canonical_key,is_active,is_default) VALUES(991,'Probe','shop','shop',1,1)").run()
@@ -107,12 +107,18 @@ async function main() {
     const {raw,db}=fixture(); product(raw,91)
     raw.prepare("INSERT INTO bulk_delete_jobs(id,entity_type,status,reason,ids_json,total_count) VALUES('audit-fault','products','pending','test','[91]',1)").run()
     raw.exec("CREATE TRIGGER fail_bulk_audit BEFORE INSERT ON audit_logs WHEN NEW.entity='product' BEGIN SELECT RAISE(ABORT,'audit_fault'); END")
-    await bulk.runBulkDeleteJob({DB:db},'audit-fault')
+    await assert.rejects(bulk.runBulkDeleteJob({DB:db},'audit-fault'), /audit_fault/)
     assert.equal(raw.prepare('SELECT is_active FROM products WHERE id=91').get().is_active,1)
     assert.equal(raw.prepare('SELECT COUNT(*) n FROM audit_logs').get().n,0)
-    assert.equal(raw.prepare("SELECT failed_count FROM bulk_delete_jobs WHERE id='audit-fault'").get().failed_count,1)
+    const beforeRetry = raw.prepare("SELECT processed_count,failed_count FROM bulk_delete_jobs WHERE id='audit-fault'").get()
+    assert.equal(beforeRetry.processed_count,0)
+    assert.equal(beforeRetry.failed_count,0)
+    raw.exec('DROP TRIGGER fail_bulk_audit')
+    await bulk.runBulkDeleteJob({DB:db},'audit-fault')
+    assert.equal(raw.prepare('SELECT COUNT(*) n FROM audit_logs').get().n,1)
+    assert.equal(raw.prepare('SELECT is_active FROM products WHERE id=91').get().is_active,0)
   }
-  console.log('PASS bulk audit fault refuses product removal atomically with truthful failed count')
+  console.log('PASS bulk audit fault rolls back cursor/audit/delete; later delivery commits one audit')
   for (const invalid of [{name:'Probe 95',is_active:'0'}, {description:'missing required name'}]) {
     const {raw,db}=fixture(); product(raw,95); product(raw,96)
     materializedJob(raw,'incomplete',{...invalid},{import_mode:'replace_all'})
@@ -199,6 +205,9 @@ async function main() {
       }
       return batch(items)
     }
+    await assert.rejects(bulk.runBulkDeleteJob({ DB: db }, 'race'), /product_has_stock/)
+    assert.equal(raw.prepare("SELECT processed_count FROM bulk_delete_jobs WHERE id='race'").get().processed_count,0)
+    assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM audit_logs').get().n,0)
     await bulk.runBulkDeleteJob({ DB: db }, 'race')
     assert.equal(raw.prepare('SELECT is_active FROM products WHERE id=72').get().is_active, 1)
     assert.equal(raw.prepare('SELECT is_active FROM products WHERE id=71').get().is_active, 0)

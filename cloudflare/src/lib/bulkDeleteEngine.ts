@@ -19,8 +19,8 @@
 //
 // Runs as a queue consumer (see queue.ts / bulk_delete_jobs migration's
 // header for why it shares the import queue), not an HTTP handler, so it
-// isn't bound by a request timeout -- only by each individual db.batch()
-// call's CPU-time budget, which runD1BatchInChunks already handles.
+// Product jobs commit one tier-sized chunk per delivery, including their
+// progress and per-product audit rows. Other entities retain the legacy loop.
 //
 // ENTITY_CONFIGS is deliberately a map, not a hardcoded "products" path,
 // so Inventory/Sales/Contacts bulk-delete can register into this same
@@ -34,7 +34,7 @@ import { getPlanLimits } from './planTier'
 import { dispatchImportWork } from './queueDispatch'
 import { chunkForBinding } from './sqlBinding'
 import { runD1BatchInChunks } from './importEngine'
-import { stockedProductIds, productStockGuardStatement, productStockGuardError, PRODUCT_HAS_STOCK_CODE } from './productStockGuard'
+import { stockedProductIds, productStockGuardStatement, PRODUCT_HAS_STOCK_CODE } from './productStockGuard'
 import { bumpVersion } from './cache'
 import { broadcast, type BroadcastChannel } from '../durable-objects/broadcastHub'
 import { actorSnapshot } from './actorSnapshot'
@@ -171,6 +171,9 @@ export async function createBulkDeleteJob(
 ): Promise<{ jobId: string; totalCount: number }> {
   const uniqueIds = Array.from(new Set(ids.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0)))
   if (!uniqueIds.length) throw new Error('No valid ids to delete')
+  if (entityType === 'products' && !env.IMPORT_QUEUE && uniqueIds.length > getPlanLimits(env).bulkDeleteChunkSize) {
+    throw Object.assign(new Error('The import queue is unavailable. No products were deleted. Restore the queue or select fewer products for one bulk delete.'), { code: 'bulk_delete_queue_unavailable' })
+  }
   const jobId = crypto.randomUUID()
   const db = await getImportFencedDb(env)
   await db.prepare(`
@@ -200,6 +203,67 @@ async function markFailed(db: D1Compat, jobId: string, message: string): Promise
   })
 }
 
+async function runProductDeleteChunk(env: Env, db: D1Compat, job: JobRow, allIds: number[]): Promise<void> {
+  if (job.cancel_requested) {
+    await db.prepare(`UPDATE bulk_delete_jobs SET status='cancelled',finished_at=CURRENT_TIMESTAMP,
+      updated_at=CURRENT_TIMESTAMP WHERE id=@id AND status='processing'`).run({ id: job.id })
+    return
+  }
+  const cursor = job.processed_count
+  const chunk = allIds.slice(cursor, cursor + getPlanLimits(env).bulkDeleteChunkSize)
+  const present = (await db.prepare(`SELECT id FROM products WHERE is_active=1
+    AND id IN (SELECT value FROM json_each(@ids))`).all<{ id: number }>({ ids: JSON.stringify(chunk) })).map(row => Number(row.id))
+  const blocked = await stockedProductIds(db, present)
+  const blockedSet = new Set(blocked)
+  const pending = present.filter(id => !blockedSet.has(id))
+  const failed = [...new Set([...JSON.parse(job.failed_ids_json || '[]') as number[], ...blocked])]
+  const next = cursor + chunk.length
+  const completed = next >= allIds.length
+  const statements = [{
+    sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM bulk_delete_jobs WHERE id=@id
+      AND processed_count=@cursor AND status='processing' AND cancel_requested=0)
+      THEN 1 ELSE json_extract('[]','$[bulk_delete_progress_changed]') END`,
+    params: { id: job.id, cursor },
+  }, productStockGuardStatement(pending), {
+    sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
+      SELECT @userId,@userName,'delete','product',p.id,json_set(@details,'$.productName',p.name),'product',p.id,NULL
+      FROM products p WHERE p.is_active=1 AND p.id IN (SELECT value FROM json_each(@ids))`,
+    params: { userId: job.created_by_id, userName: job.created_by_name, ids: JSON.stringify(pending),
+      details: JSON.stringify({ reason: job.reason, bulkJobId: job.id, source: 'bulk_delete', membership: 'removed', priorMembership: 'present' }) },
+  }, ...buildCoreDeleteStatements(ENTITY_CONFIGS.products, pending), {
+    sql: `UPDATE bulk_delete_jobs SET processed_count=@next,failed_count=@failedCount,failed_ids_json=@failedIds,
+      status=@status,finished_at=CASE WHEN @status='completed' THEN CURRENT_TIMESTAMP ELSE NULL END,
+      last_error=@error,updated_at=CURRENT_TIMESTAMP WHERE id=@id AND processed_count=@cursor AND status='processing'`,
+    params: { id: job.id, cursor, next, failedCount: failed.length, failedIds: JSON.stringify(failed),
+      status: completed ? 'completed' : 'processing', error: blocked.length ? `${PRODUCT_HAS_STOCK_CODE}: ${JSON.stringify(blocked)}` : job.last_error },
+  }]
+  try {
+    // One attempt: acknowledgement loss is recovered from the atomic cursor,
+    // never by repeating a stale audit/delete plan in this invocation.
+    await db.batchOnce(statements)
+  } catch (error) {
+    if (String(error).includes('bulk_delete_progress_changed')) {
+      const current = await getBulkDeleteJob(env, job.id)
+      if (current?.cancel_requested && current.status === 'processing') {
+        await db.prepare(`UPDATE bulk_delete_jobs SET status='cancelled',finished_at=CURRENT_TIMESTAMP,
+          updated_at=CURRENT_TIMESTAMP WHERE id=@id AND status='processing' AND cancel_requested=1`).run({ id: job.id })
+      }
+      return
+    }
+    throw error
+  }
+  await bumpVersion(env, 'products')
+  await broadcast(env, 'products', { action: 'bulk-delete', ids: pending, jobId: job.id })
+  if (!completed) {
+    if (!env.IMPORT_QUEUE) {
+      const message = 'Bulk delete saved its completed rows, but the import queue is unavailable. Select the remaining products and retry after the queue is restored.'
+      await markFailed(db, job.id, 'bulk_delete_queue_resume_required')
+      throw Object.assign(new Error(message), { code: 'bulk_delete_queue_resume_required' })
+    }
+    await dispatchImportWork(env, { jobId: job.id, kind: 'bulk-delete' })
+  }
+}
+
 export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
   const db = await getImportFencedDb(env)
   // Ids per chunk, tier-aware -- see lib/planTier.ts. Free gets 125 instead
@@ -214,7 +278,7 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
   if (!config) { await markFailed(db, jobId, `Unknown entity_type: ${job.entity_type}`); return }
 
   if (job.status === 'pending') {
-    await db.prepare(`UPDATE bulk_delete_jobs SET status = 'processing', started_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: jobId })
+    await db.prepare(`UPDATE bulk_delete_jobs SET status = 'processing', started_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND status='pending'`).run({ id: jobId })
   }
 
   let allIds: number[]
@@ -222,6 +286,11 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
     allIds = JSON.parse(job.ids_json)
   } catch {
     await markFailed(db, jobId, 'Corrupt ids_json on job row')
+    return
+  }
+
+  if (job.entity_type === 'products') {
+    await runProductDeleteChunk(env, db, job, allIds)
     return
   }
 
@@ -249,45 +318,6 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
       }
     }
     try {
-      if (job.entity_type === 'products') {
-        // Bounded transactions keep each delete and its audit together. Active
-        // filtering makes a redelivered committed chunk leave no duplicate audit.
-        for (const slice of chunkForBinding(deleteChunk, 50)) {
-          let pending = (await db.prepare(`SELECT id FROM products WHERE is_active=1
-            AND id IN (SELECT value FROM json_each(@ids))`).all<{ id: number }>({ ids: JSON.stringify(slice) })).map(row => Number(row.id))
-          while (pending.length) {
-            const blocked = await stockedProductIds(db, pending)
-            if (blocked.length) {
-              for (const id of blocked) if (!failedIds.includes(id)) failedIds.push(id)
-              const blockedIds = new Set(blocked)
-              pending = pending.filter(id => !blockedIds.has(id))
-              await db.prepare('UPDATE bulk_delete_jobs SET last_error=@error WHERE id=@id')
-                .run({ id: jobId, error: `${PRODUCT_HAS_STOCK_CODE}: ${JSON.stringify(blocked)}` })
-            }
-            if (!pending.length) break
-            const audits = pending.map(id => ({
-              sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
-                SELECT @userId,@userName,'delete','product',p.id,json_set(@details,'$.productName',p.name),'product',p.id,NULL
-                FROM products p WHERE p.id=@id AND p.is_active=1`,
-              params: { userId: user.id, userName: actorSnapshot(user), id, details: JSON.stringify({ reason: job.reason, bulkJobId: jobId, source: 'bulk_delete', membership: 'removed', priorMembership: 'present' }) },
-            }))
-            try {
-              await db.batch([productStockGuardStatement(pending), ...audits, ...buildCoreDeleteStatements(config, pending)])
-              break
-            } catch (error) {
-              if (!productStockGuardError(error)) throw error
-              // The guard rolled back every delete/audit. Repartition only
-              // when new blocked identities explain the race; otherwise fail.
-              if (!(await stockedProductIds(db, pending)).length) throw error
-            }
-          }
-        }
-        cursor += chunk.length
-        await db.prepare(`UPDATE bulk_delete_jobs SET processed_count=@cursor,failed_count=@failedCount,
-          failed_ids_json=@failedIds,updated_at=CURRENT_TIMESTAMP WHERE id=@id`)
-          .run({ id: jobId, cursor, failedCount: failedIds.length, failedIds: JSON.stringify(failedIds) })
-        continue
-      }
       // One statement deletes the whole chunk, instead of one DELETE/UPDATE
       // per id -- this is the core of why this is fast at 10k+ scale.
       // Soft (products) vs hard (customers/suppliers/delivery_contacts)

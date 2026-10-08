@@ -29,7 +29,9 @@ async function main() {
       const intercepted = new Proxy(raw, { get(target, key) {
         if (key === 'batch') return async (statements) => {
           batches++;
-          if (batches === insertBeforeBatch) {
+          const productCommit = insertBeforeBatch === 'product-delete'
+            && (await target.prepare("SELECT status FROM bulk_delete_jobs WHERE id='bulk-1'").first())?.status === 'processing';
+          if (batches === insertBeforeBatch || productCommit) {
             await target.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance','{}')").run();
           }
           try { return await target.batch(statements); }
@@ -56,7 +58,7 @@ async function main() {
       if (mode === 'bulk-create') return Response.json(await outcome(() => createBulkDeleteJob(env, 'products', [1], 'test', { id: 1, name: 'admin' })));
       if (mode === 'bulk-run') return Response.json(await outcome(() => runBulkDeleteJob(env, 'bulk-1')));
       if (mode === 'bulk-release-race') return Response.json(await releaseBeforeCatch(env, (racedEnv) => runBulkDeleteJob(racedEnv, 'bulk-1')));
-      if (mode === 'bulk-mid-race') return Response.json(await releaseBeforeCatch(env, (racedEnv) => runBulkDeleteJob(racedEnv, 'bulk-1'), 2));
+      if (mode === 'bulk-mid-race') return Response.json(await releaseBeforeCatch(env, (racedEnv) => runBulkDeleteJob(racedEnv, 'bulk-1'), 'product-delete'));
       if (mode === 'bulk-reap') return Response.json(await outcome(() => reapStalledBulkDeleteJobs(env)));
       if (mode === 'product') return Response.json(await outcome(async () => ensureUnifiedStockProduct(await getImportFencedDb(env), product)));
       if (mode === 'stock-add') return Response.json(await outcome(async () => applyUnifiedStockAdd(await getImportFencedDb(env), stockAdd)));
@@ -98,6 +100,8 @@ async function main() {
       received_quantity REAL,received_branch_id INTEGER, received_branch_name TEXT,received_cost_usd REAL,
       UNIQUE(variant_product_id,batch_key),UNIQUE(variant_product_id,batch_number))`).run()
     await db.prepare('CREATE TABLE branch_batch_stock(batch_id INTEGER,branch_id INTEGER,quantity REAL,updated_at TEXT,UNIQUE(batch_id,branch_id))').run()
+    await db.prepare('CREATE TABLE damaged_stock_lots(product_id INTEGER,branch_id INTEGER,batch_id INTEGER,quantity_remaining REAL)').run()
+    await db.prepare('CREATE TABLE audit_logs(user_id INTEGER,user_name TEXT,action TEXT,entity TEXT,entity_id TEXT,details TEXT,table_name TEXT,record_id TEXT,new_value TEXT)').run()
     await db.prepare(`CREATE TABLE inventory_movements(id INTEGER PRIMARY KEY AUTOINCREMENT,product_id INTEGER,
       product_name TEXT,branch_id INTEGER,branch_name TEXT,movement_type TEXT,quantity REAL,
       unit_cost_usd REAL DEFAULT 0,total_cost_usd REAL DEFAULT 0,reason TEXT,reference_id INTEGER,
