@@ -98,6 +98,7 @@ function fixture() {
       }
       const bare = wrap(text)
       return {
+        ...bare,
         bind(...params) { return wrap(text, params) },
         first: () => bare.first(),
         all: () => bare.all(),
