@@ -46,7 +46,7 @@ import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, FREE_QUANTITY_NOT_RECEIPT, 
 import { effectiveUnitCost } from '../lib/stockSessionMath'
 import { hasColumn } from '../lib/schemaProbe'
 import { parseDatedStockCountEntries, buildDatedStockCountPlan } from '../lib/datedStockCountRoute'
-import { applyDatedStockCountPlan, DatedStockCountConflictError } from '../lib/datedStockCountApply'
+import { DatedStockCountConflictError } from '../lib/datedStockCountApply'
 import { parseRawDatedCountRows, resolveDatedStockCountRows } from '../lib/datedStockCountResolve'
 import { applyDatedStockCountDecisions, DatedDecisionRequestError, type DatedCountDecision } from '../lib/datedStockCountDecisions'
 import { formatStockChangeTelegramLines, formatTransferTelegramLines, sendTelegramEvent } from '../lib/telegram'

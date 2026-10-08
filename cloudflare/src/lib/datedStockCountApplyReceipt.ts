@@ -11,6 +11,7 @@ import { buildAuditStatement } from './audit'
 import { prepareDatedStockCountPlan, DatedStockCountConflictError } from './datedStockCountApply'
 import { executeStockTransaction, stockTransactionStatementCount, StockTransactionUnavailableError } from './stockTransaction'
 import { productStockGuardError } from './productStockGuard'
+import { IMPORT_BRANCH_COLUMNS_SQL } from './importBranchAuthority'
 
 export const DATED_COUNT_APPLY_MESSAGES = {
   dated_count_invalid_id: 'Keep the original dated stock count request. Refresh the app before retrying it.',
@@ -44,23 +45,31 @@ export function datedCountApplyIntent(user: SessionUser, url: string, body: Reco
 export type DatedCountApplyIntent = ReturnType<typeof datedCountApplyIntent>
 
 // Cache bump can read versions, reserve Free KV quota and fall back to a D1
-// upsert: each may retry once. Broadcasts have no D1 reads. Recovery reads once.
+// upsert: each may retry once. Broadcasts have no D1 reads. A recovered
+// receipt returns without cache tails, so recovery and cache reserves do not add.
 const APPLY_CACHE_TAIL_ATTEMPTS = 6
 const APPLY_RECOVERY_ATTEMPTS = 1
 export function datedCountApplyBudget(db: D1Compat, env: Env) {
   const metrics = currentRequestMetrics()
   if (!metrics) throw new DatedCountApplyReceiptError('dated_count_receipt_unavailable', 503)
   const cap = getPlanLimits(env).d1QueriesPerInvocation
-  const admit = (count: number, tail = APPLY_CACHE_TAIL_ATTEMPTS + APPLY_RECOVERY_ATTEMPTS) => {
+  const admit = (count: number, tail = Math.max(APPLY_CACHE_TAIL_ATTEMPTS, APPLY_RECOVERY_ATTEMPTS)) => {
     if (metrics.invocation.attemptedStatements + count + tail > cap) throw new DatedCountApplyReceiptError('dated_count_over_plan_budget', 409)
   }
   const reads = Object.create(db) as D1Compat
+  let branchSnapshot: Promise<unknown> | undefined
   reads.prepare = ((sql: string) => {
     const statement = db.prepare(sql)
     if (!statement.getOnce || !statement.allOnce) throw new DatedCountApplyReceiptError('dated_count_receipt_unavailable', 503)
     return { ...statement,
       get: (params?: Record<string, unknown>) => { admit(1); return statement.getOnce!(params) },
-      all: (params?: Record<string, unknown>) => { admit(1); return statement.allOnce!(params) },
+      all: (params?: Record<string, unknown>) => {
+        if (sql === `SELECT ${IMPORT_BRANCH_COLUMNS_SQL} FROM branches` && params == null) {
+          if (!branchSnapshot) { admit(1); branchSnapshot = statement.allOnce!(params) }
+          return branchSnapshot
+        }
+        admit(1); return statement.allOnce!(params)
+      },
     }
   }) as D1Compat['prepare']
   return { db: reads, admit }
@@ -115,7 +124,8 @@ export async function commitDatedCountApplyReceipt(
       if (recoveryError instanceof DatedCountApplyReceiptError && recoveryError.status === 409) throw recoveryError
       throw new DatedCountApplyReceiptError('dated_count_outcome_unknown', 503)
     }
-    if (error instanceof StockTransactionUnavailableError || error instanceof DatedStockCountConflictError || productStockGuardError(error)) throw error
+    if (error instanceof StockTransactionUnavailableError) throw new DatedCountApplyReceiptError('dated_count_receipt_unavailable', 503)
+    if (error instanceof DatedStockCountConflictError || productStockGuardError(error)) throw error
     const message = error instanceof Error ? error.message : String(error)
     if (/guard_value|stock_session_guards/i.test(message)) throw new DatedStockCountConflictError()
     throw new DatedCountApplyReceiptError('dated_count_outcome_unknown', 503)

@@ -16,9 +16,9 @@
 import type { D1Compat } from './db'
 import { buildInClause, chunkForBinding, selectInChunks } from './sqlBinding'
 import { normalizeToIsoDate } from './batchCode'
-import { importBranchRedirectGuards, validateCanonicalImportBranchIds } from './importBranchAuthority'
+import { IMPORT_BRANCH_COLUMNS_SQL, type CanonicalImportBranchRow, importBranchRedirectGuards, validateCanonicalImportBranchIds } from './importBranchAuthority'
 import {
-  BranchRedirectTargetInvalidError, branchEffectRefusal, branchRedirectDetail, readBranchDirectory, resolveBranchEffect,
+  BranchRedirectTargetInvalidError, branchEffectRefusal, branchRedirectDetail, resolveBranchEffect,
   type BranchRedirectDetail,
 } from './branchEffect'
 import { branchRole } from './branchRoles'
@@ -173,7 +173,7 @@ type RedirectedEntries = { entries: ParsedDatedCountEntry[]; addressedNames: Map
 // provenance while the addressed branch is still disabled. While every branch is active this returns the entries
 // untouched and the target is never read.
 async function redirectDatedCountEntries(db: D1Compat, entries: ParsedDatedCountEntry[], target: number | null): Promise<RedirectedEntries | { refusal: { error: string; code: string; redirect?: BranchRedirectDetail } }> {
-  const directory = await readBranchDirectory(db)
+  const directory = await db.prepare(`SELECT ${IMPORT_BRANCH_COLUMNS_SQL} FROM branches`).all<CanonicalImportBranchRow>()
   const retired = new Set(directory.filter((row) => Number(row.is_active ?? 1) !== 1).map((row) => Number(row.id)))
   const addressedNames = new Map<number, string>()
   if (!retired.size) return { entries, addressedNames, guards: [] }
