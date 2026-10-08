@@ -65,6 +65,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request in requireOverrides) return requireOverrides[request]
+    if (request === '../lib/planTier') return loadReal('lib/planTier.ts')
     return originalLoad.call(this, request, parent, isMain)
   }
   const moduleObj = { exports: {} }

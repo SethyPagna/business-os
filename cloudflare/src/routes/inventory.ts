@@ -1536,7 +1536,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
     },
     { requireReceipt: true, budget: (() => {
       const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
-      return metrics ? { used: () => metrics.invocation.attemptedStatements, limit: getPlanLimits(c.env).d1QueriesPerInvocation,
+      return metrics?.invocation ? { used: () => metrics.invocation.attemptedStatements, limit: getPlanLimits(c.env).d1QueriesPerInvocation,
         reserve: body.sellingPriceUsd != null || body.sellingPriceKhr != null ? 18 : 16 } : undefined
     })() },
   )

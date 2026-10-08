@@ -638,6 +638,31 @@ async function run() {
     console.log('PASS a failed required claim refuses before writes with a retryable 503')
   }
 
+  {
+    const db = freshDb()
+    let used = 0
+    const body = addBody('stockline_budget_after_commit')
+    const json = (value, status = 200) => new Response(JSON.stringify(value), { status })
+    const response = await receiptMod.withStockMutationReceipt(() => db, 7, 'adjust', body, json,
+      async (_markWritten, atomicMark) => {
+        await receiptMod.executeStockMutationBatch(db, [
+          { sql: 'UPDATE branch_stock SET quantity=3 WHERE product_id=1 AND branch_id=1' },
+          { sql: 'UPDATE products SET stock_quantity=3 WHERE id=1' },
+        ], atomicMark)
+        used = 50
+        await receiptMod.executeStockMutationBatch(db, [{ sql: 'UPDATE products SET stock_quantity=99 WHERE id=1' }], atomicMark)
+        return json({ success: true })
+      }, { requireReceipt: true, budget: { used: () => used, limit: 50, reserve: 2 } })
+    assert.equal(response.status, 503)
+    assert.equal((await jsonOf(response)).code, 'stock_request_outcome_unknown', 'a later refusal cannot claim zero stock changes')
+    assert.equal(branchStock(db), 3)
+    assert.equal(Number(receiptRow(db).written), 1, 'a committed claim is never released by later admission')
+    const replay = await receiptMod.withStockMutationReceipt(() => db, 7, 'adjust', body, json,
+      async () => { throw new Error('must not reapply') }, { requireReceipt: true })
+    assert.equal(replay.status, 409)
+    assert.equal((await jsonOf(replay)).code, 'stock_request_partially_applied')
+    console.log('PASS admission after an earlier committed batch returns unknown and retains durable dedup')
+  }
   console.log('\nAll stock mutation receipt assertions passed')
 }
 

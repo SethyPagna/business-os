@@ -244,7 +244,7 @@ export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody
     },
     { requireReceipt: true, budget: (() => {
       const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
-      return metrics ? { used: () => metrics.invocation.attemptedStatements, limit: getPlanLimits(c.env).d1QueriesPerInvocation,
+      return metrics?.invocation ? { used: () => metrics.invocation.attemptedStatements, limit: getPlanLimits(c.env).d1QueriesPerInvocation,
         reserve: body.selling_price_usd != null || body.selling_price_khr != null ? 14 : 12 } : undefined
     })() },
   )

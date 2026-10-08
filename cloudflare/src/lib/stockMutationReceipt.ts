@@ -279,7 +279,8 @@ async function claimStockMutation(
   if (requireReceipt) {
     try {
       const statement = db.prepare(`INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json)
-        VALUES(@actor,@request,@kind,@canonical) ON CONFLICT(actor_id,request_id) DO NOTHING RETURNING request_id`)
+        VALUES(@actor,@request,@kind,@canonical) ON CONFLICT(actor_id,request_id) DO NOTHING
+        RETURNING request_id, request_json, written, response_status, response_json, completed_at`)
       const params = { actor: actorId, request: requestId, kind, canonical }
       const claimed = statement.getOnce ? await statement.getOnce<{ request_id: string }>(params) : await statement.get<{ request_id: string }>(params)
       if (claimed) return { state: 'claimed' }
@@ -438,6 +439,7 @@ export async function withStockMutationReceipt(
     response = await run(markWritten, atomicMark)
   } catch (error) {
     if (error instanceof StockMutationBudgetError) {
+      if (wrote || dispatched) return json(STOCK_MUTATION_UNKNOWN, 503)
       await releaseStockMutation(db, actorId, requestId)
       return json(STOCK_MUTATION_BUDGET, 503)
     }
@@ -450,7 +452,9 @@ export async function withStockMutationReceipt(
     throw error
   }
   if (response.status < 200 || response.status >= 300) {
-    if (dispatched && response.status !== 409) {
+    const failure = await response.clone().json().catch(() => ({})) as Record<string, unknown>
+    const rolledBack = /constraint failed|malformed JSON|bad JSON path|no such (table|column|function)|syntax error|datatype mismatch|too many SQL variables/i.test(String(failure.error || ''))
+    if (dispatched && response.status !== 409 && (wrote || !rolledBack)) {
       if (wrote) await completeStockMutation(db, actorId, requestId, 503, STOCK_MUTATION_UNKNOWN).catch(() => {})
       else await releaseStockMutation(db, actorId, requestId).catch(() => {})
       return json(STOCK_MUTATION_UNKNOWN, 503)

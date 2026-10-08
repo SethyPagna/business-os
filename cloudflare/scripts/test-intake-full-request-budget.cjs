@@ -45,6 +45,7 @@ async function world(tier, mode, verified, options = {}) {
   let physical = 0
   let failures = new Set()
   let completionFault = options.completionFault
+  let claimLostAck = options.claimLostAck
   const raw = f.env.DB
   const dispatch = (statements, params) => {
     physical += statements.length
@@ -67,7 +68,15 @@ async function world(tier, mode, verified, options = {}) {
   }
   const statement = p => new Proxy(p, { get(t, key) {
     if (key === 'bind') return (...v) => statement(t.bind(...v))
-    if (['all', 'run', 'first'].includes(key)) return (...v) => { dispatch([t.text], t.params); return t[key](...v) }
+    if (['all', 'run', 'first'].includes(key)) return async (...v) => {
+      dispatch([t.text], t.params)
+      const result = await t[key](...v)
+      if (claimLostAck && /INSERT INTO stock_mutation_receipts/.test(t.text)) {
+        claimLostAck = false
+        throw Error('D1_ERROR: network lost fresh claim acknowledgement')
+      }
+      return result
+    }
     return t[key]
   } })
   f.env.DB = new Proxy(raw, { get(t, key) {
@@ -98,10 +107,11 @@ async function world(tier, mode, verified, options = {}) {
     }), f.env, { waitUntil(p) { pending.push(Promise.resolve(p)) }, passThroughOnException() {} })
     const tasks = await Promise.allSettled(pending)
     assert.equal(observed.invocation.attemptedStatements, physical, 'full physical binding attempts equal invocation admission count')
+    if (tier === 'free') assert.ok(physical <= 50, 'including swallowed background failures, every attempted statement fits the cap')
     assert.equal(tasks.filter(x => x.status === 'rejected').length, 0)
     return { status: response.status, body: await response.json(), physical, failures: [...failures], effects: effects() }
   }
-  return { ...f, call, effects, restoreCompletion: () => { completionFault = false } }
+  return { ...f, call, body, effects, restoreCompletion: () => { completionFault = false } }
 }
 
 ;(async () => {
@@ -119,6 +129,14 @@ async function world(tier, mode, verified, options = {}) {
         } else assert.equal(first.status, 200)
         const retry = await f.call()
         assert.equal(retry.status, 200, `same ID warm retry ${tier}/${verified}/${mode}`)
+        const quantity = mode === 'optional-tagged' ? 5 : 3
+        const tagged = mode.includes('tagged')
+        assert.equal(retry.effects.stock, before.stock + (tagged ? 0 : quantity))
+        assert.equal(retry.effects.lots, before.lots + (tagged ? 0 : quantity))
+        assert.equal(retry.effects.held, before.held + (tagged ? quantity : 0))
+        assert.equal(retry.effects.received, before.received + (mode.startsWith('correction') ? 0 : quantity))
+        assert.equal(retry.effects.movement, before.movement + (tagged ? 2 : 1))
+        assert.equal(retry.effects.written, 1)
         const replay = await f.call()
         assert.equal(replay.status, 200); assert.equal(replay.body.replayed, true)
         assert.deepEqual(replay.effects, retry.effects, 'successful same ID retry is never applied twice')
@@ -137,6 +155,30 @@ async function world(tier, mode, verified, options = {}) {
     assert.equal(replay.status, 409); assert.equal(replay.body.code, 'stock_request_partially_applied')
     assert.deepEqual(replay.effects, first.effects)
     f.sql.close(); cases++
+    const lost = await world(tier, 'add', true, { claimLostAck: true })
+    const before = lost.effects()
+    const refused = await lost.call(true)
+    assert.equal(refused.status, 409); assert.equal(refused.body.code, 'stock_request_in_flight')
+    assert.deepEqual(refused.effects, before, 'a lost claim acknowledgement never runs the stock kernel')
+    lost.sql.exec("UPDATE stock_mutation_receipts SET created_at=datetime('now','-5 minutes')")
+    const recovered = await lost.call()
+    assert.equal(recovered.status, 200); assert.equal(recovered.effects.stock, 8)
+    lost.body.quantity = 4
+    const conflict = await lost.call()
+    assert.equal(conflict.status, 409); assert.equal(conflict.body.code, 'idempotency_conflict')
+    assert.deepEqual(conflict.effects, recovered.effects)
+    lost.body.quantity = 3
+    const recoveredReplay = await lost.call()
+    assert.equal(recoveredReplay.status, 200); assert.equal(recoveredReplay.body.replayed, true)
+    assert.deepEqual(recoveredReplay.effects, recovered.effects)
+    lost.sql.close(); cases++
+    const missing = await world(tier, 'add', true)
+    missing.sql.exec('ALTER TABLE stock_mutation_receipts DROP COLUMN response_json')
+    const missingBefore = missing.effects()
+    const unavailable = await missing.call(true)
+    assert.equal(unavailable.status, 503); assert.equal(unavailable.body.code, 'stock_receipt_unavailable')
+    assert.deepEqual(unavailable.effects, missingBefore, 'an incomplete required schema refuses before stock effects')
+    missing.sql.close(); cases++
   }
   console.log(`PASS ${cases} actual-index/auth/cold-core cases with binding parity, tail retries, stable-ID recovery and completion uncertainty`)
 })().catch(error => { console.error(error); process.exitCode = 1 })

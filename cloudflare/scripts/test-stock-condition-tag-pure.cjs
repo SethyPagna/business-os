@@ -89,6 +89,7 @@ function loadReal(relPath, requireOverrides = {}) {
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request.endsWith('/productStockGuard')) return productStockGuard
     if (request in requireOverrides) return requireOverrides[request]
+    if (request === '../lib/planTier') return loadReal('lib/planTier.ts')
     return originalLoad.call(this, request, parent, isMain)
   }
   const moduleObj = { exports: {} }
@@ -498,7 +499,11 @@ const ADD = (extra) => ({
     afterDbBatchHook=items=>{
       if (items.some(x=>/INSERT INTO damaged_stock_lots/.test(x.sql))) throw new Error('D1 acknowledgement lost after commit')
     }
-    try { assert.equal((await req('POST','/adjust',body)).status,400) }
+    try {
+      const unknown=await req('POST','/adjust',body)
+      assert.equal(unknown.status,503)
+      assert.equal(unknown.json.code,'stock_request_outcome_unknown')
+    }
     finally { afterDbBatchHook=null }
     assert.equal(Number(heldLots()[0].quantity_remaining),10)
     assert.equal(purchaseTotals().units,10)
