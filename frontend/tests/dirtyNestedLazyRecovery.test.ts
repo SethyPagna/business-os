@@ -138,7 +138,7 @@ try {
 
 
   await page.locator('#draft').fill('kept typed draft');
-  await evaluate('document.querySelector("#trigger").click()');
+  await page.locator('#trigger').click()
   await waitFor(async()=>await evaluate<boolean>('Boolean(document.querySelector("[data-lazy-recovery]"))')?true:null);
   assert.equal(await evaluate<string>('document.querySelector("#draft").value'),'kept typed draft');
   assert.equal(await evaluate<number>('window.__mounted'),1);
@@ -146,59 +146,69 @@ try {
   assert.equal(await evaluate<boolean>('location.search.includes("__bos_reload")'),false);
   assert.equal(await evaluate<string|null>('sessionStorage.getItem("bos-nested-lazy-reload:dirty-fixture")'),null);
   assert.equal(await evaluate<boolean>('Boolean(document.querySelector("#page-error"))'),false);
+  for (const [selector, label] of [['[data-lazy-retry]', 'Retry'], ['[data-lazy-close]', 'Close']]) {
+    assert.equal(await page.locator(selector).getAttribute('aria-label'), label)
+    assert.equal(await page.locator(selector).getAttribute('title'), label)
+    assert.equal(await page.locator(selector).locator('svg[aria-hidden="true"]').count(), 1)
+  }
 
   for(const attempts of [6,9]){
-    await evaluate('document.querySelector("[data-lazy-retry]").click()');
+    await page.locator('[data-lazy-retry]').click()
     await waitFor(async()=>await evaluate<boolean>('window.__attempts==='+attempts+'&&!document.querySelector("[data-lazy-retry]").disabled')?true:null);
     assert.equal(await evaluate<number>('document.querySelectorAll("[data-lazy-recovery]").length'),1);
     assert.equal(await evaluate<string>('document.querySelector("#draft").value'),'kept typed draft');
     assert.equal(await evaluate<number>('window.__mounted'),1);
   }
-  await evaluate('window.__ok=true;document.querySelector("[data-lazy-retry]").click()');
+  await evaluate('window.__ok=true')
+  await page.locator('[data-lazy-retry]').click()
   await waitFor(async()=>await evaluate<boolean>('Boolean(document.querySelector("#loaded"))')?true:null);
   assert.equal(await evaluate<number>('window.__mounted'),1);
-  await evaluate('document.querySelector("#loaded").click()');
+  await page.locator('#loaded').click()
   assert.equal(await evaluate<string>('document.querySelector("#draft").value'),'kept typed draft');
-  await evaluate('window.__ok=false;document.querySelector("#trigger").click()');
+  await evaluate('window.__ok=false')
+  await page.locator('#trigger').click()
   await waitFor(async()=>await evaluate<boolean>('Boolean(document.querySelector("#loaded"))')?true:null);
-  await evaluate('document.querySelector("#loaded").click()');
+  await page.locator('#loaded').click()
   await navigate();
-  await evaluate('document.querySelector("#trigger").click()');
+  await page.locator('#trigger').click()
   await waitFor(async()=>await evaluate<boolean>('Boolean(document.querySelector("[data-lazy-close]"))')?true:null);
-  await evaluate('document.querySelector("[data-lazy-close]").click()');
+  await page.locator('[data-lazy-close]').click()
   assert.equal(await evaluate<boolean>('Boolean(document.querySelector("[data-lazy-recovery]"))'),false);
   assert.equal(await evaluate<number>('window.__mounted'),1);
 
   for(const mode of ['?denied=1','?clean=1&denied=1','?cancel=1','?nocallback=1','?km=1','?km=1&public=1','?late=1','?always=1']){
     await navigate(mode);
-    await evaluate('document.querySelector("#trigger").click()');
+    await page.locator('#trigger').click()
     if(mode.includes('late')){await waitFor(async()=>await evaluate<boolean>('typeof window.__resolveManifest==="function"')?true:null);await evaluate('window.__resolveManifest()')}
     await waitFor(async()=>await evaluate<boolean>('Boolean(document.querySelector("[data-lazy-recovery]"))')?true:null);
     assert.equal(await evaluate<number>('window.__mounted'),1);
     assert.equal(await evaluate<boolean>('location.search.includes("__bos_reload")'),false);
     assert.equal(await evaluate<string|null>('sessionStorage.getItem("bos-nested-lazy-reload:dirty-fixture")'),null);
-    if(mode.includes('km'))assert.equal(await evaluate<string>('document.querySelector("[data-lazy-close]").textContent'),'បិទ');
-    await evaluate('document.querySelector("[data-lazy-close]").click()');
+    if(mode.includes('km')) {
+      assert.equal(await page.locator('[data-lazy-close]').getAttribute('aria-label'), 'បិទ')
+      assert.equal(await page.locator('[data-lazy-retry]').getAttribute('aria-label'), 'ព្យាយាមម្ដងទៀត')
+    }
+    await page.locator('[data-lazy-close]').click()
     assert.equal(await evaluate<boolean>('Boolean(document.querySelector("[data-lazy-recovery]"))'),false);
     assert.equal(await evaluate<number>('window.__mounted'),1);
     if(mode.includes('always')){
-      await evaluate('document.querySelector("#trigger").click()');
+      await page.locator('#trigger').click()
       await waitFor(async()=>await evaluate<boolean>('Boolean(document.querySelector("[data-lazy-recovery]"))')?true:null);
-      await evaluate('document.querySelector("[data-lazy-close]").click()');
+      await page.locator('[data-lazy-close]').click()
       assert.equal(await evaluate<boolean>('Boolean(document.querySelector("[data-lazy-recovery]"))'),false,'always-mounted closed modal stays closed and can reopen');
     }
   }
   await navigate('?clean=1');
-  await evaluate('document.querySelector("#trigger").click()');
+  await page.locator('#trigger').click()
   await waitFor(async()=>await evaluate<boolean>('location.search.includes("__bos_reload")')?true:null);
   await ready();
   assert.ok(await evaluate<string|null>('sessionStorage.getItem("bos-nested-lazy-reload:dirty-fixture")'));
 
-  await evaluate('document.querySelector("#trigger").click()');
+  await page.locator('#trigger').click()
   await waitFor(async()=>await evaluate<boolean>('Boolean(document.querySelector("[data-lazy-recovery]"))')?true:null);
   assert.equal(await evaluate<number>('window.__mounted'),1,'clean marker prevents second navigation');
   await navigate('?programming=1');
-  await evaluate('document.querySelector("#trigger").click()');
+  await page.locator('#trigger').click()
   await waitFor(async()=>await evaluate<boolean>('Boolean(document.querySelector("#page-error"))')?true:null);
   assert.equal(await evaluate<boolean>('Boolean(document.querySelector("[data-lazy-recovery]"))'),false,'programming errors must reach the existing boundary');
   console.log(`PASS ${useWebKit ? 'WebKit' : 'Chromium'} mounted dirty nested lazy recovery, retry/close, and clean reload`);

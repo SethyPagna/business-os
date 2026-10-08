@@ -1,4 +1,6 @@
 import { createElement, useEffect, useState, type ComponentType } from 'react'
+import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
+import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp, type AppContextCoreValue } from '../app/AppContextCore.tsx'
 
 export default function LazyImportRecovery({ componentProps, retry }: {
@@ -36,9 +38,17 @@ export default function LazyImportRecovery({ componentProps, retry }: {
       setLoading(false)
     }
   }
+  const retryLabel = text('retry', 'Retry', 'ព្យាយាមម្ដងទៀត')
+  const closeLabel = text('close', 'Close', 'បិទ')
   return <div role="alert" data-lazy-recovery aria-busy={loading} className="rounded-lg border bg-white p-4 dark:bg-gray-900">
     <p>{text('lazy_load_retryable', 'This part could not load. Retry or close it; your work stays here.', 'មិនអាចផ្ទុកផ្នែកនេះបានទេ។ សូមព្យាយាមម្ដងទៀត ឬបិទវា។ ការងាររបស់អ្នកនៅតែមាន។')}</p>
-    <button type="button" data-lazy-retry disabled={loading} className="btn-primary" onClick={retryLoad}>{text('retry', 'Retry', 'ព្យាយាមម្ដងទៀត')}</button>
-    <button type="button" data-lazy-close className="btn-secondary" onClick={close}>{text('close', 'Close', 'បិទ')}</button>
+    <div className="mt-3 flex items-center gap-2">
+      <button type="button" data-lazy-retry disabled={loading} aria-label={retryLabel} title={retryLabel} className="btn-primary inline-flex items-center gap-2" onClick={retryLoad}>
+        <RotateCcw className="h-4 w-4" aria-hidden="true" /><span className="hidden sm:inline">{retryLabel}</span>
+      </button>
+      <button type="button" data-lazy-close aria-label={closeLabel} title={closeLabel} className="btn-secondary inline-flex items-center gap-2" onClick={close}>
+        <X className="h-4 w-4" aria-hidden="true" /><span className="hidden sm:inline">{closeLabel}</span>
+      </button>
+    </div>
   </div>
 }
