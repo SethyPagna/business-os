@@ -1,4 +1,5 @@
 import { currentRequestMetrics, type RequestMetrics } from '../lib/requestMetrics'
+import { datedCountApplyIntent, datedCountApplyBudget, readDatedCountApplyReceipt, commitDatedCountApplyReceipt, DatedCountApplyReceiptError } from '../lib/datedStockCountApplyReceipt'
 import { canonicalOfflineSaleOwner, offlineSaleOwnerError } from '../lib/offlineSaleOwnership'
 import { getPlanLimits } from '../lib/planTier'
 import { ProductStockGuardError, productStockGuardError, productHasStockSql, productStockGuardStatement, assertProductsActive } from '../lib/productStockGuard'
@@ -2763,10 +2764,22 @@ app.post('/dated-stock-count/apply', async (c) => {
   if ('error' in parsed) return c.json({ success: false, error: parsed.error }, 400)
 
   const db = getDb(c.env)
+  let intent: ReturnType<typeof datedCountApplyIntent>
+  let budget: ReturnType<typeof datedCountApplyBudget>
+  try {
+    intent = datedCountApplyIntent(user, c.req.url, body, parsed.entries, branchRedirectTarget(c))
+    budget = datedCountApplyBudget(db, c.env)
+    const replay = await readDatedCountApplyReceipt(budget.db, intent)
+    if (replay) return c.json(replay)
+  } catch (error) {
+    if (error instanceof DatedCountApplyReceiptError) return c.json(error.body(), error.status)
+    throw error
+  }
   let built: Awaited<ReturnType<typeof buildDatedStockCountPlan>>
   try {
-    built = await buildDatedStockCountPlan(db, parsed.entries, { redirectTarget: branchRedirectTarget(c) })
+    built = await buildDatedStockCountPlan(budget.db, parsed.entries, { redirectTarget: branchRedirectTarget(c) })
   } catch (error) {
+    if (error instanceof DatedCountApplyReceiptError) return c.json(error.body(), error.status)
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     const refusal = branchEffectRefusal(error)
@@ -2778,24 +2791,18 @@ app.post('/dated-stock-count/apply', async (c) => {
   // One atomic batch (lib/datedStockCountApply.ts): a conflict means the
   // prior-run history changed between plan and write -- e.g. a double
   // submit -- and nothing was applied.
-  let result: Awaited<ReturnType<typeof applyDatedStockCountPlan>>
+  let result: Record<string, unknown>
   try {
-    result = await applyDatedStockCountPlan(db, built.plan, { userId: user?.id ?? null, userName: actorSnapshot(user) })
+    result = await commitDatedCountApplyReceipt(db, budget, intent, built.plan, actorSnapshot(user), parsed.entries.length)
   } catch (error) {
+    if (error instanceof DatedCountApplyReceiptError) return c.json(error.body(), error.status)
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     if (error instanceof DatedStockCountConflictError) return c.json({ success: false, error: error.message, code: 'dated_stock_count_conflict' }, 409)
     throw error
   }
 
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'dated_stock_count_import', 'inventory', null, {
-    entryCount: parsed.entries.length,
-    movementsApplied: result.movementsApplied,
-    movementsDeleted: result.movementsDeleted,
-    movementsCompensated: result.movementsCompensated,
-    batchTrackedGroups: result.batchTrackedGroups,
-    plainGroups: result.plainGroups,
-  })
+  if (result.replayed) return c.json(result)
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'dated_stock_count_import' }))
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))

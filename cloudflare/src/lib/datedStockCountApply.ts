@@ -122,11 +122,11 @@ export interface ApplyDatedStockCountPlanResult {
   plainGroups: number
 }
 
-export async function applyDatedStockCountPlan(
+export async function prepareDatedStockCountPlan(
   db: D1Compat,
   plan: StockCountPlan,
   actor: { userId: number | null; userName: string | null } = { userId: null, userName: null },
-): Promise<ApplyDatedStockCountPlanResult> {
+) {
   const branchIds = [...new Set([
     ...plan.finalBranchStock.map((row) => row.branchId),
     ...plan.movementsToCreate.map((row) => row.branchId),
@@ -389,8 +389,25 @@ export async function applyDatedStockCountPlan(
     await assertProductsActive(db, [...activeProducts])
     statements.unshift(productStockGuardStatement([...activeProducts], 'active'))
   }
+  let lotGroups = 0
+  for (const entry of netByGroup.values()) if (entry.lots) lotGroups += 1
+  const movementGroups = new Set(plan.movementsToCreate.map((m) => groupKey(m.productId, m.branchId)))
+  return { db: guardedDb, statements, branchGuardCount: plan.branchRedirects?.length ? 2 : 1, result: {
+    movementsDeleted: 0,
+    movementsCompensated: plan.supersededMovements.length,
+    movementsApplied: plan.movementsToCreate.length,
+    batchTrackedGroups: lotGroups,
+    plainGroups: [...movementGroups].filter((key) => !netByGroup.get(key)?.lots).length,
+  } }
+}
+
+export async function applyDatedStockCountPlan(
+  db: D1Compat, plan: StockCountPlan,
+  actor: { userId: number | null; userName: string | null } = { userId: null, userName: null },
+): Promise<ApplyDatedStockCountPlanResult> {
+  const prepared = await prepareDatedStockCountPlan(db, plan, actor)
   try {
-    if (statements.length) await executeStockTransaction(guardedDb, statements, 'retry')
+    if (prepared.statements.length) await executeStockTransaction(prepared.db, prepared.statements, 'once')
   } catch (error) {
     const activeGuard = productStockGuardError(error)
     if (activeGuard) throw activeGuard
@@ -398,15 +415,5 @@ export async function applyDatedStockCountPlan(
     if (/guard_value|stock_session_guards/i.test(message)) throw new DatedStockCountConflictError()
     throw error
   }
-
-  let lotGroups = 0
-  for (const entry of netByGroup.values()) if (entry.lots) lotGroups += 1
-  const movementGroups = new Set(plan.movementsToCreate.map((m) => groupKey(m.productId, m.branchId)))
-  return {
-    movementsDeleted: 0,
-    movementsCompensated: plan.supersededMovements.length,
-    movementsApplied: plan.movementsToCreate.length,
-    batchTrackedGroups: lotGroups,
-    plainGroups: [...movementGroups].filter((key) => !netByGroup.get(key)?.lots).length,
-  }
+  return prepared.result
 }
