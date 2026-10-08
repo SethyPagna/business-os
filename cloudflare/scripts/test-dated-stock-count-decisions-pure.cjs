@@ -15,7 +15,9 @@ const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 function freshDb() {
-  const rawDb = openDb(loadAll())
+  const rawDb = openDb(loadAll({ through: 242 }))
+  rawDb.exec(fs.readFileSync(path.join(__dirname, '../migrations/0244_dated_count_decision_receipts.sql'), 'utf8'))
+  let epochInstalled = false
   rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run()
   let beforeBatch = null
   const db = {
@@ -23,7 +25,9 @@ function freshDb() {
       const stmt = rawDb.prepare(sql)
       return {
         get: (params) => stmt.get(params),
+        getOnce: (params) => stmt.get(params),
         all: (params) => stmt.all(params) ?? [],
+        allOnce: (params) => stmt.all(params) ?? [],
         run: (params) => {
           const r = stmt.run(params)
           return { changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) }
@@ -51,6 +55,10 @@ function freshDb() {
       // undefined, same root cause as
       // test-dated-stock-count-apply-pure.cjs's two provenance failures.
       return rawDb.batch(items)
+    },
+    async batchOnce(items) { return this.batch(items) },
+    installEpoch() {
+      if (!epochInstalled) { rawDb.exec(fs.readFileSync(path.join(__dirname, '../migrations/0243_stock_schema_epoch.sql'), 'utf8')); epochInstalled = true }
     },
     async transaction(fn) { return fn(this) },
   }
@@ -92,12 +100,30 @@ const originalCompile = Module.prototype._compile
 Module.prototype._compile = function (content, filename) {
   if (filename.includes(`${path.sep}cloudflare${path.sep}src${path.sep}lib${path.sep}`)) {
     const originalRequire = this.require.bind(this)
-    this.require = (id) => (relMap[id] ? relMap[id]() : originalRequire(id))
+    this.require = (id) => {
+      if (relMap[id]) return relMap[id]()
+      if (id.startsWith('.')) {
+        const absolute = path.resolve(path.dirname(filename), id.endsWith('.ts') ? id : id + '.ts')
+        if (fs.existsSync(absolute)) return loadReal(path.relative(path.join(__dirname, '../src'), absolute).replaceAll('\\', '/'))
+      }
+      return originalRequire(id)
+    }
   }
   return originalCompile.call(this, content, filename)
 }
 
-const { applyDatedStockCountDecisions } = loadReal('lib/datedStockCountDecisions.ts')
+const { applyDatedStockCountDecisions: applyWithReceipt } = loadReal('lib/datedStockCountDecisions.ts')
+let requestSequence = 0
+async function applyDatedStockCountDecisions(db, resolved, unresolved, decisions) {
+  // Every fixture is seeded before installing the actual physical-write barrier.
+  db.installEpoch()
+  let used = 0
+  return applyWithReceipt(db, resolved, unresolved, decisions, {
+    actorId: 7, actorName: 'Fixture', requestId: 'dated-pure-' + (++requestSequence),
+    owner: { version: 1, actor_id: 7, organization_id: null, authority: 'http://localhost', runtime: 'cloudflare-workers' },
+    budget: { limit: 1000, used: () => used, charge: n => { used += n } },
+  })
+}
 
 let passed = 0
 let failed = 0

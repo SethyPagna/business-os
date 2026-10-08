@@ -245,6 +245,7 @@ async function planDecisionUnit(
     // rejected outright, never silently overridden either direction.
     const parent = await db.prepare(`SELECT name FROM products WHERE id = @id`).get<{ name: string }>({ id: decision.candidateProductId })
     if (!parent) { errors.push({ rowNumber: row.rowNumber, error: `candidateProductId ${decision.candidateProductId} no longer exists.` }); continue }
+    statements.push({ sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products WHERE id=@parentId AND name=@parentName) THEN 1 ELSE json_extract('[1]','$[dated_decision_parent_changed]') END`, params: { parentId: decision.candidateProductId, parentName: parent.name } })
     const requestedName = decision.name?.trim()
     const nameDiffers = requestedName != null && requestedName.length > 0 && requestedName.toLowerCase() !== parent.name.trim().toLowerCase()
     if (nameDiffers && !decision.nameOverrideConfirmed) {
@@ -315,6 +316,8 @@ export async function applyDatedStockCountDecisions(
   const params = { actor: request.actorId, request: requestId, canonical }
   const budget = request.budget
   if (![budget.limit, budget.used()].every(n => Number.isSafeInteger(n) && n >= 0)) throw new Error('Invalid dated decision invocation budget')
+  // One preparation read, six first-unit statements, canonical guard, two permit statements, one recovery read.
+  const unitAdmission = 1 + 6 + 1 + 2 + 1
   const fits = (n: number) => budget.used() + n <= budget.limit
   const charge = (n: number) => budget.charge?.(n)
   const receiptSql = `SELECT request_json,result_json,next_index,total_rows,invalidated_at FROM dated_count_decision_receipts WHERE actor_id=@actor AND request_id=@request`
@@ -345,12 +348,12 @@ export async function applyDatedStockCountDecisions(
     return {
       ...statement,
       get: async (bound?: import('./db').BindParams) => {
-        if (!fits(12)) throw new DatedDecisionRequestError('dated_decision_budget_exhausted', 'Retry the same dated-decision request to continue its saved progress.', 503)
+        if (!fits(unitAdmission)) throw new DatedDecisionRequestError('dated_decision_budget_exhausted', 'Retry the same dated-decision request to continue its saved progress.', 503)
         charge(1)
         return statement.getOnce ? statement.getOnce(bound) : statement.get(bound)
       },
       all: async (bound?: import('./db').BindParams) => {
-        if (!fits(12)) throw new DatedDecisionRequestError('dated_decision_budget_exhausted', 'Retry the same dated-decision request to continue its saved progress.', 503)
+        if (!fits(unitAdmission)) throw new DatedDecisionRequestError('dated_decision_budget_exhausted', 'Retry the same dated-decision request to continue its saved progress.', 503)
         charge(1)
         return statement.allOnce ? statement.allOnce(bound) : statement.all(bound)
       },
@@ -362,7 +365,7 @@ export async function applyDatedStockCountDecisions(
   let result = receipt ? JSON.parse(receipt.result_json) as ApplyDatedStockCountDecisionsResult : emptyDecisionResult()
   let didCommit = false
   while (next < total || total === 0 && !receipt) {
-    if (!fits(12)) {
+    if (!fits(unitAdmission)) {
       if (receipt) return response(receipt)
       throw new DatedDecisionRequestError('dated_decision_budget_exhausted', 'Retry the same dated-decision request after startup completes.', 503)
     }
@@ -389,7 +392,7 @@ export async function applyDatedStockCountDecisions(
     }
     statements.push({ sql: `UPDATE dated_count_decision_receipts SET result_json=${resultExpression},next_index=@advanced,updated_at=CURRENT_TIMESTAMP WHERE actor_id=@actor AND request_id=@request AND request_json=@canonical AND next_index=@next AND invalidated_at IS NULL RETURNING result_json,next_index,total_rows,request_json,invalidated_at`, params: { ...params, next, advanced, resultJson: JSON.stringify(combined), productKey } })
     const actual = (created ? stockTransactionStatementCount(statements.length) : statements.length) + (branchError ? 0 : 1)
-    if (!fits(actual + 2)) {
+    if (!fits(actual + 1)) {
       if (receipt) return response(receipt)
       throw new DatedDecisionRequestError('dated_decision_budget_exhausted', 'Retry the same dated-decision request to continue.', 503)
     }
