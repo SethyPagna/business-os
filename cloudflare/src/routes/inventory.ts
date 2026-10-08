@@ -1349,7 +1349,7 @@ async function resolveAddStockTarget(
     barcode: string | null
   },
   preflightReceiptCost: (target: Pick<ProductIdentityRow, 'id' | 'cost_price_usd' | 'cost_price_khr'>) => void | Promise<void>,
-): Promise<{ productId: number; created: boolean }> {
+): Promise<{ product: Pick<ProductIdentityRow, 'id' | 'name' | 'cost_price_usd' | 'cost_price_khr'>; created: boolean }> {
   const db = getDb(env)
   const candidate: ProductIdentityRow = {
     id: source.id,
@@ -1402,7 +1402,7 @@ async function resolveAddStockTarget(
   // the catalogue in the first place.
   if (identityBarcodeKey(overrides.barcode) === identityBarcodeKey(source.barcode)) {
     await preflightReceiptCost(source)
-    return { productId: source.id, created: false }
+    return { product: source, created: false }
   }
 
   // A genuinely different barcode is a different article -- but another
@@ -1411,7 +1411,7 @@ async function resolveAddStockTarget(
   const match = await findIdentityMatch(db, candidate)
   if (match) {
     await preflightReceiptCost(match)
-    return { productId: match.id, created: false }
+    return { product: match, created: false }
   }
 
   // No existing row has this exact combination -- create a new sibling
@@ -1452,7 +1452,7 @@ async function resolveAddStockTarget(
     INSERT INTO products (${columns.join(', ')}, created_at, updated_at)
     VALUES (${columns.map((col) => `@${col}`).join(', ')}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
   `, params: insertPayload }], 'retry')
-  return { productId: Number(result.meta.last_row_id), created: true }
+  return { product: { id: Number(result.meta.last_row_id), name: source.name, ...cost }, created: true }
 }
 
 async function defaultBranchId(env: Env): Promise<number | null> {
@@ -1787,7 +1787,9 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // like the mandatory-reason check above, so no path can record goods with an
   // invented supplier or an invented cost.
   const isReceipt = type === 'add'
-  if (isReceipt && (!Number.isSafeInteger(branchId) || branchId <= 0 || !branch || Number(branch.is_active) !== 1)) throw new ReceivingBranchError()
+  const receivingBranchId = body.branchId != null && !landing.redirected ? Number(body.branchId) : branchId
+  if (isReceipt && (!Number.isSafeInteger(receivingBranchId) || receivingBranchId <= 0
+    || !branch || Number(branch.id) !== receivingBranchId || Number(branch.is_active) !== 1)) throw new ReceivingBranchError()
   // A top-up of an EXISTING lot inherits that lot's supplier -- first
   // attribution sticks server-side, so the pickers send no supplier for an
   // attributed lot and show the locked name instead. Read it rather than
@@ -1842,6 +1844,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   let preflightAddMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = null
   let unlockedReceiptCostPreimage: ReceiptCostPreimage | undefined
   let unlockedReceiptLotTarget: Awaited<ReturnType<typeof prepareReceiptLotTarget>> | undefined
+  let unlockedProductSnapshot: Awaited<ReturnType<typeof resolveAddStockTarget>>['product'] | undefined
   let mergedPricingStatement: { sql: string; params: Record<string, unknown> } | null = null
   if (unlockPricing) {
     const pricing = body.pricing as Record<string, unknown>
@@ -1914,12 +1917,10 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         if (target.id > 0) {
           unlockedReceiptLotTarget = await prepareReceiptLotTarget(db, { productId: target.id, receivedDate,
             unitCostUsd: unitCostUsd ?? targetCostUsd, preserveHistoricalUnitCost: unitCostUsd == null })
-          const batchKey = unlockedReceiptLotTarget.batchKey
-          const existingLot = await db.prepare(
-            'SELECT received_cost_usd FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey',
-          ).get<{ received_cost_usd: number | null }>({ productId: target.id, batchKey })
-          unlockedReceiptCostPreimage = { batchExists: Boolean(existingLot), receivedCostUsd: existingLot?.received_cost_usd ?? null }
-          if (existingLot && preflightAddMovementCost.totalCostUsd != null) addMoney4(existingLot.received_cost_usd ?? 0, preflightAddMovementCost.totalCostUsd)
+          const batchExists = unlockedReceiptLotTarget.existingBatchId != null
+          const receivedCostUsd = unlockedReceiptLotTarget.existingReceivedCostUsd
+          unlockedReceiptCostPreimage = { batchExists, receivedCostUsd }
+          if (batchExists && preflightAddMovementCost.totalCostUsd != null) addMoney4(receivedCostUsd ?? 0, preflightAddMovementCost.totalCostUsd)
         }
       })
     } catch (error) {
@@ -1928,7 +1929,9 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       if (error instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
       throw error
     }
-    targetProductId = resolved.productId
+    unlockedProductSnapshot = resolved.product
+    targetProductId = resolved.product.id
+    targetProductName = resolved.product.name ?? source.name
     createdSibling = resolved.created
     if (!createdSibling) {
       // Selling/wholesale price is mergeable data: an explicit unlocked receipt
@@ -1942,21 +1945,14 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         WHERE id = @id`, params: { id: targetProductId, ...overrides } }
     }
     if (createdSibling) {
-      const created = await db.prepare('SELECT id, name FROM products WHERE id = @id').get<{ id: number; name: string }>({ id: targetProductId })
-      targetProductName = created?.name ?? source.name
       c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'create', id: targetProductId }))
-    } else if (targetProductId !== productId) {
-      const matched = await db.prepare('SELECT id, name FROM products WHERE id = @id').get<{ id: number; name: string }>({ id: targetProductId })
-      targetProductName = matched?.name ?? source.name
     }
   }
 
   // Snapshot catalog cost before moving stock. It is only the fallback for a
   // receipt/removal that has no more specific entered/lot cost; it is never
   // consulted later when this historical row is displayed or reverted.
-  const productCostSnapshot = !unlockPricing && targetProductId === productId ? product : await db.prepare(`
-    SELECT cost_price_usd, cost_price_khr FROM products WHERE id = @id
-  `).get<{ cost_price_usd: number | null; cost_price_khr: number | null }>({ id: targetProductId })
+  const productCostSnapshot = unlockedProductSnapshot ?? product
   const receiptUnitCostUsd = correctionLot ? correctionLot.unit_cost_usd : unitCostUsd ?? productCostSnapshot?.cost_price_usd ?? null
 
   // Mandatory batch selection (InventoryStockModals.tsx, add/remove on flat
