@@ -558,6 +558,7 @@ check('blob8 is the build revision the deploy stamped, on route and background d
 })
 
 check('invocation budgets include raw, failed, attached background and late attempts without mixing overlapping requests', async () => {
+  assert.equal(metrics.currentRequestMetrics(), undefined)
   let release
   const barrier = new Promise(resolve => { release = resolve })
   const held = []
@@ -566,12 +567,17 @@ check('invocation budgets include raw, failed, attached background and late atte
   const app = appWith(a => a.get('/api/invocation/:id', async c => {
     const id = c.req.param('id')
     const acc = metrics.requestMetricsOf(c)
+    assert.equal(metrics.currentRequestMetrics(), acc, 'context-free callers see the actual request accumulator')
     accs.set(id, acc)
     hook.rawD1Start(1)
     hook.d1Start(id === 'a' ? 2 : 4)
     hook.d1Call(1, null)
     held.push(metrics.runBackground(undefined, 'attached:' + id, async () => {
+      const background = metrics.currentRequestMetrics()
+      assert.notEqual(background, acc, 'background analytics have their own accumulator')
+      assert.equal(background.invocation, acc.invocation, 'attached work shares the physical invocation allowance')
       await barrier
+      assert.equal(metrics.currentRequestMetrics(), background, 'overlapping requests cannot replace this async scope')
       hook.d1Start(id === 'a' ? 3 : 5)
       hook.d1Call(1, null)
     }))
@@ -587,6 +593,17 @@ check('invocation budgets include raw, failed, attached background and late atte
   assert.equal(accs.get('b').attemptedStatements, 4)
   const isolated = metrics.createRequestMetrics('api', 'new')
   assert.equal(isolated.invocation.attemptedStatements, 0, 'a fresh request gets no earlier attempts')
+  assert.equal(metrics.currentRequestMetrics(), undefined, 'completed work does not leak into its caller')
+  await metrics.runBackground(undefined, 'queue-delivery', async () => {
+    const delivery = metrics.currentRequestMetrics()
+    assert.equal(delivery.invocation.attemptedStatements, 0, 'a fresh queue delivery has its own allowance')
+    assert.notEqual(delivery.invocation, accs.get('a').invocation)
+    assert.notEqual(delivery.invocation, accs.get('b').invocation)
+    hook.d1Start(7)
+    await Promise.resolve()
+    assert.equal(metrics.currentRequestMetrics().invocation.attemptedStatements, 7)
+  })
+  assert.equal(metrics.currentRequestMetrics(), undefined)
 })
 
 ;(async () => {
