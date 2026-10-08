@@ -1,3 +1,4 @@
+-- ops:min-rows 0
 -- ops:max-rows 0
 -- Ledger flags are independent evidence, never additive inventory totals.
 SELECT p.id AS product_id,

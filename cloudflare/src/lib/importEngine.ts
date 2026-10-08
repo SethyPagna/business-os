@@ -31,7 +31,7 @@ import { planReconcileBranchSnapshot, planReceiveBatchStock, resolveReceiptLotTa
 import { catalogCostRecomputeStatement, typedCostEntryBeforeWriteStatement } from './catalogCostRecompute'
 import { actorId, actorSnapshot } from './actorSnapshot'
 import { multiplyMoney4 } from './moneyPrecision'
-import { ProductStockGuardError, PRODUCT_HAS_STOCK_CODE, PRODUCT_HAS_STOCK_MESSAGE, productHasStockSql,
+import { PRODUCT_HAS_STOCK_CODE, PRODUCT_HAS_STOCK_MESSAGE, productHasStockSql,
   productStockGuardStatement, productStockGuardError, assertProductStatusInput } from './productStockGuard'
 import { stockReceiptGateCode, stockReceiptGateMessage, appendReceiptNotes, FREE_GOODS_REASON_NOTE } from './stockReceiptGate'
 // per-row mode system now, just via a different channel than
@@ -5977,7 +5977,7 @@ export async function finalizeProductReplacement(db: D1Compat, cutoff: string,
   } catch (error) { throw productStockGuardError(error) || error }
 }
 
-export function productImportStockStatements(productId: number, active: unknown, incoming: number, existing: boolean) {
+export function productImportStockStatements(productId: number, active: unknown, existing: boolean) {
   assertProductStatusInput({ is_active: active })
   return existing ? [productStockGuardStatement([productId], 'active')] : []
 }
@@ -6449,7 +6449,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
         const receiptUnitCostUsd = receiptCosts.get(r.rowNumber) ?? null
         const targetId = Number(r.existingId || d.__importAssignedId)
         let rowWriteGroup: Array<{ sql: string; params: Record<string, unknown> }> = productImportStockStatements(
-          targetId, d.is_active, productInboundQuantity(r), r.action === 'update')
+          targetId, d.is_active, r.action === 'update')
         // U-cost: an imported cost must hold past the next stock movement,
         // which re-derives cost_price_usd (0195 triggers) and honours only a
         // cost with a product_cost_entries row -- the same row the product

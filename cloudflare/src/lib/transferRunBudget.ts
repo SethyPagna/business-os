@@ -24,7 +24,7 @@ export function transferStatementAllowance(budget: TransferInvocationBudget): nu
 export function transferStatementEstimate(lines: number, allocations: number, clones: number): number {
   if ([lines, allocations, clones].some(value => !Number.isSafeInteger(value) || value < 0)
     || clones > allocations) throw new Error('Invalid transfer statement counts')
-  const result = 18 + 2 * lines + allocations + clones
+  const result = 19 + 2 * lines + allocations + clones
   if (!Number.isSafeInteger(result)) throw new Error('Statement estimate overflow')
   return result
 }

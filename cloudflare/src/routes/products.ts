@@ -1,4 +1,4 @@
-import { assertProductStatusInput, assertProductsActive, catalogProductSql, assertProductsHaveNoStock, productStockGuardStatement, productHasStockSql, productStockGuardError } from '../lib/productStockGuard'
+import { assertProductStatusInput, assertProductsActive, catalogProductSql, productStockGuardStatement, productHasStockSql, productStockGuardError } from '../lib/productStockGuard'
 import { Hono } from 'hono'
 import { acquisitionCostResponses, canEditAcquisitionCosts, hasCatalogCostWrite } from '../lib/acquisitionCostAccess'
 import { roundMoney4 } from '../lib/moneyPrecision'
@@ -4153,7 +4153,7 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
   // return_items.product_id kept pointing at a deactivated row, so a refund of
   // a merged-away twin vanished from the survivor's history.
   const reparentedByTable = snapshot.reparentedByTable
-  for (const { table, column, ids } of reparentedByTable) {
+  for (const { table, column } of reparentedByTable) {
     statements.push({
       sql: `UPDATE ${table} SET ${column} = @canonicalId WHERE ${column} = @dupId`,
       params: { canonicalId, dupId: dup.id },

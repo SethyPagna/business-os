@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import type { Env } from '../index'
 import { requireAuth } from '../lib/auth'
-import { hasPermission, isAdminControlUser } from '../lib/permissions'
+import { hasPermission } from '../lib/permissions'
 import { getDb } from '../lib/db'
 import { audit } from '../lib/audit'
 import { runDataIntegrityCheck } from '../lib/dataIntegrity'

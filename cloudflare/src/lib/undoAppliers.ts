@@ -1,4 +1,4 @@
-import { productStockGuardError, productStockGuardStatement } from './productStockGuard'
+import { productStockGuardError } from './productStockGuard'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
 // Type-only on purpose: dozens of test loaders stub this module's relative

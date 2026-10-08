@@ -282,7 +282,7 @@ const PAID_LIMITS: PlanLimits = {
   importRetentionMaxJobsPerTier: 20,
   ephemeralDeleteBatch: 5000,
   catalogIntegrityMaxProducts: 50_000,
-  stockInLinesPerRequest: 28,
+  stockInLinesPerRequest: 24,
   coreInvariantsReverifySeconds: 6 * 60 * 60,
   dashboardStockOverviewCacheSeconds: 30,
   d1DailyRowsRead: 833_000_000,

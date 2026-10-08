@@ -31,7 +31,8 @@ const ts = require(path.join(cloudflareRoot, 'node_modules', 'typescript'))
 
 // The per-line budget planTier.ts sizes the cap with. A kernel that grows past
 // it turns this file red, which is the prompt to re-measure and re-size.
-const LINE_BUDGET = 35
+const LINE_BUDGET = 40
+const INVOCATION_BUDGET = 10
 
 // ---------------------------------------------------------------------------
 // A D1Database binding over node:sqlite that counts what it is asked to do.
@@ -243,7 +244,7 @@ check('every line shape the modal sends stays inside the per-line budget planTie
     const one = await commit(fx, [build(1, fx.branchId)])
     assert.equal(one.results[0]?.ok, true, `${kind} line must succeed: ${JSON.stringify(one.results[0])}`)
     // Minus the auth baseline and the one receipt-table probe (both counted
-    // in the per-request overhead of 13, not per line).
+    // in the per-request overhead, not per line).
     const perLine = { calls: one.calls - empty.calls - 1, statements: one.statements - empty.statements - 1 }
     assert.ok(perLine.statements <= LINE_BUDGET, `${kind}: ${perLine.statements} statements > ${LINE_BUDGET}`)
     assert.ok(perLine.calls * 1.25 <= LINE_BUDGET, `${kind}: ${perLine.calls} calls leaves under a 25% margin in ${LINE_BUDGET}`)
@@ -257,8 +258,8 @@ for (const tier of ['free', 'paid']) {
     const cap = limits.stockInLinesPerRequest
     assert.ok(Number.isInteger(cap) && cap >= 1, `stockInLinesPerRequest must be a positive integer on ${tier}, got ${cap}`)
     const overhead = await measureOutsideRoute()
-    assert.ok(overhead.calls + 3 + 1 <= 13)
-    assert.equal(cap, Math.floor((limits.d1QueriesPerInvocation - 13) / LINE_BUDGET))
+    assert.ok(overhead.calls + 3 + 1 + 4 <= INVOCATION_BUDGET)
+    assert.equal(cap, Math.floor((limits.d1QueriesPerInvocation - INVOCATION_BUDGET) / LINE_BUDGET))
     const fx = await fixture(tier, cap + 3)
     const lines = Array.from({ length: cap + 3 }, (_, i) => worstLine(i + 1, fx.branchId))
     const res = await commit(fx, lines)
