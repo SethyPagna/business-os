@@ -9,6 +9,7 @@ source = source.replace("if(k==='batch')return ss=>{", "if(k==='batch')return as
 source = source.replace('return t.batch(ss)', 'await options.beforeBatch?.(ss);return t.batch(ss)')
 source = source.replace("cookie:'bos_session='+token", "cookie:options.cookie??('bos_session='+token),...options.headers")
 source = source.replace('return {...f,call,', 'return {worker,ctx,...f,call,')
+source = source.replace("assert.equal(metered,physical,", "if(id!=='overlap-aggregate')assert.ok(physical<=(tier==='free'?50:1000),'whole invocation cap includes background attempts');assert.equal(metered,physical,")
 const { bundleWorker, world } = new Function('require', '__dirname', 'module', source + ';return {bundleWorker,world}')(requireFixture, scripts, { paths: requireFixture.resolve.paths('esbuild') })
 const owner = { version: 1, actor_id: 7, organization_id: null, authority: 'https://admin.business.test', runtime: 'cloudflare-workers' }
 const snapshot = f => JSON.stringify({ stock: f.sql.prepare('SELECT * FROM branch_stock').all(), lots: f.sql.prepare('SELECT * FROM branch_batch_stock').all(),
@@ -60,6 +61,8 @@ async function controls(make, tier) {
     }
     const first = await f.call('initial', body); assert.equal(first.status, 200)
     const committed = snapshot(f)
+    const normalized = await f.call('normalized', {...body, client_request_id:` ${body.client_request_id} `, entries:[{...body.entries[0],date:'09/05/2026'}]})
+    assert.equal(normalized.status,200);assert.equal(normalized.json.replayed,true);assert.equal(snapshot(f),committed)
     const changed = await f.call('changed', {...body, entries: [{...body.entries[0], count: 103}]})
     assert.equal(changed.status, 409); assert.equal(changed.json.code, 'dated_count_request_conflict'); assert.equal(snapshot(f), committed)
     opts.headers = {'x-branch-redirect': '2'}
@@ -135,14 +138,39 @@ async function costRace(make, tier) {
     console.log(`PASS ${tier} concurrent cost baseline change rolls whole receipt/stock/history/audit back`)
   } finally {f.sql.close()}
 }
+async function requestBoundaries(make,tier) {
+  const f=await world(make,tier,{cacheFailure:true,tailRetries:true,staleAuth:true})
+  try {
+    const first=await f.call('stale-auth',bodyFor(`stale-auth-${tier}-request`));assert.equal(first.status,200)
+    assert.equal(receipts(f),1);console.log(`PASS ${tier} actual stale auth/core request fits with cache/retry tails`)
+  } finally {f.sql.close()}
+  const ordered=await world(make,tier,{cacheFailure:true,tailRetries:true})
+  try {
+    const body=bodyFor(`ordered-${tier}-request`);body.entries.push({...body.entries[0],date:'2026-09-06',count:104})
+    assert.equal((await ordered.call('ordered',body)).status,200);const saved=snapshot(ordered)
+    const changed=await ordered.call('reordered',{...body,entries:[...body.entries].reverse()})
+    assert.equal(changed.status,409);assert.equal(changed.json.code,'dated_count_request_conflict');assert.equal(snapshot(ordered),saved)
+    console.log(`PASS ${tier} original normalized entry order is receipt identity`)
+  } finally {ordered.sql.close()}
+  const opts={cacheFailure:true,tailRetries:true,headers:{'x-branch-redirect':'2'}},redirect=await world(make,tier,opts)
+  try {
+    redirect.sql.exec('UPDATE branches SET is_default=0,is_active=0,successor_branch_id=2 WHERE id=1; UPDATE branches SET is_default=1 WHERE id=2')
+    const body=bodyFor(`branch-${tier}-request`),first=await redirect.call('redirected',body)
+    assert.equal(first.status,200);const saved=snapshot(redirect)
+    assert.equal(redirect.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity,100)
+    assert.equal(redirect.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=2').get().quantity,102)
+    const replay=await redirect.call('redirect-replay',body);assert.equal(replay.status,200);assert.equal(replay.json.replayed,true);assert.equal(snapshot(redirect),saved)
+    console.log(`PASS ${tier} explicit retired branch redirect lands once and keeps addressed request identity`)
+  } finally {redirect.sql.close()}
+}
 async function main() {
   const saved = globalThis.fetch; globalThis.fetch = async () => new Response('{"ok":true}')
   try {
     const make = await bundleWorker()
     if (process.env.DATED_COUNT_BASELINE_ACK === '1') return scenario(make, 'free', 1, true)
     for (const tier of ['free', 'paid']) for (const dates of [1, 2, 5]) for (const lostAck of [false, true]) await scenario(make, tier, dates, lostAck)
-    for (const tier of ['free','paid']) {await controls(make,tier);await faults(make,tier);await overlap(make,tier);await costRace(make,tier)}
-    console.log('dated count durable receipt proof PASS 12 size/ACK schedules and 12 control groups')
+    for (const tier of ['free','paid']) {await controls(make,tier);await faults(make,tier);await overlap(make,tier);await costRace(make,tier);await requestBoundaries(make,tier)}
+    console.log('dated count durable receipt proof PASS 12 size/ACK schedules and 18 control groups')
   } finally { globalThis.fetch = saved }
 }
 module.exports = { bundleWorker, world, owner, snapshot, scenario }
