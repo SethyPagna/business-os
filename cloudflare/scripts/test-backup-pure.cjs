@@ -61,6 +61,12 @@ new Function('exports', 'require', 'module', '__filename', '__dirname', uploadSe
   uploadSecurityModuleObj.exports, require, uploadSecurityModuleObj, uploadSecurity.sourcePath, path.dirname(uploadSecurity.sourcePath),
 )
 
+const stockTransaction = transpile('lib/stockTransaction.ts')
+const stockTransactionModule = { exports: {} }
+new Function('exports', stockTransaction.outputText)(stockTransactionModule.exports)
+const maintenance = transpile('lib/maintenance.ts')
+const maintenanceModule = { exports: {} }
+new Function('exports','require',maintenance.outputText)(maintenanceModule.exports, name => name === './stockTransaction' ? stockTransactionModule.exports : require(name))
 const backup = transpile('lib/backup.ts')
 const customTableName = transpile('lib/customTableName.ts')
 const customTableNameModule = { exports: {} }
@@ -68,6 +74,8 @@ new Function('exports', customTableName.outputText)(customTableNameModule.export
 const Module = require('module')
 const originalLoad = Module._load
 Module._load = function patchedLoad(request, parent, isMain) {
+  if (request === './stockTransaction') return stockTransactionModule.exports
+  if (request === './maintenance') return maintenanceModule.exports
   if (request === './planTier') return planTierModuleObj.exports // real limit tables
   if (request === './customTableName') return customTableNameModule.exports
   if (request === './r2') return r2ModuleObj.exports // real module, actually exercised
@@ -116,9 +124,22 @@ for (const fn of [createCloudflareBackup, restoreCloudflareBackup, pruneCloudfla
 //   DELETE FROM "table"  /  INSERT INTO "table" (...) VALUES (...) (restore, via .batch)
 // ---------------------------------------------------------------------
 function makeFakeD1(schema) {
+  schema.system_flags ||= {columns:['key','value'],rows:[]}
   // schema: { tableName: { columns: string[], rows: Record<string, unknown>[] } }
   function run(sql, values) {
     let m
+    if (sql.startsWith('SELECT value FROM system_flags WHERE key = ?')) {
+      return {first:()=>schema.system_flags.rows.find(r=>r.key===values[0])||null}
+    }
+    if (sql.startsWith('INSERT INTO system_flags (key,value,updated_at)')) {
+      return {exec:()=>{
+        const epoch=schema.system_flags.rows.find(r=>r.key==='stock_schema_epoch')
+        const hold=schema.system_flags.rows.find(r=>r.key==='maintenance')
+        if(epoch?.value!=='legacy-separate-pool-v1'||hold?.value!==values[0]||schema.system_flags.rows.some(r=>r.key==='stock_transaction_permit'))throw Error('permit refused')
+        schema.system_flags.rows.push({key:'stock_transaction_permit',value:epoch.value})
+      }}
+    }
+    if (sql.includes("WHERE key='stock_transaction_permit'"))return {exec:()=>{schema.system_flags.rows=schema.system_flags.rows.filter(r=>r.key!=='stock_transaction_permit')}}
     if (sql.includes('FROM sqlite_master AS m LEFT JOIN pragma_foreign_key_list(m.name)')) {
       return { all: () => ({ results: Object.keys(schema).map(table_name => ({ table_name, parent_table: null, fk_id: null, fk_seq: null })) }) }
     }
@@ -173,6 +194,11 @@ function makeFakeD1(schema) {
   }
 
   return {
+    setRestoreOwner(source) {
+      const now=new Date().toISOString()
+      schema.system_flags.rows=[{key:'stock_schema_epoch',value:'legacy-separate-pool-v1'},
+        {key:'maintenance',value:JSON.stringify({mode:'restore',token:'fixture-owner',backupKey:source,startedBy:'admin',startedAt:now,updatedAt:now,phase:'deleting'})}]
+    },
     prepare(sql) {
       return {
         bind(...values) {
@@ -505,7 +531,7 @@ async function main() {
     // bucket in production).
     for (const [key, value] of backupEnv.ASSETS._store) liveEnv.ASSETS._store.set(key, value)
 
-    const restoreResult = await restoreCloudflareBackup(liveEnv, created.key)
+    const restoreResult = await (liveEnv.DB.setRestoreOwner(created.key), restoreCloudflareBackup(liveEnv, created.key, undefined, 'fixture-owner'))
     assert.strictEqual(restoreResult.tables, 2)
     assert.deepStrictEqual(liveSchema.settings.rows, [{ key: 'business_name', value: 'Acme' }])
     assert.deepStrictEqual(liveSchema.branches.rows, [{ id: 1, name: 'Main' }])
@@ -528,7 +554,7 @@ async function main() {
     const liveEnv = makeEnv({ schema: liveSchema, assets: {} })
     for (const [key, value] of backupEnv.ASSETS._store) liveEnv.ASSETS._store.set(key, value)
 
-    await restoreCloudflareBackup(liveEnv, created.key)
+    await (liveEnv.DB.setRestoreOwner(created.key), restoreCloudflareBackup(liveEnv, created.key, undefined, 'fixture-owner'))
     assert.deepStrictEqual(liveSchema.settings.rows, [{ key: 'x', value: 'y' }], 'legacy_col should be silently dropped, not cause a failure')
   })
 

@@ -2,6 +2,8 @@ import type { BindParams, D1Compat } from './db'
 
 export const STOCK_SCHEMA_EPOCH = 'legacy-separate-pool-v1'
 
+export interface RestoreStockAuthority { token: string; backupKey: string; snapshot: string }
+
 type StockStatement = { sql: string; params?: BindParams }
 
 const permitSql = `INSERT INTO system_flags (key,value,updated_at)
@@ -60,13 +62,39 @@ export function executeStockTransaction(
   return execute(statements.length, () => policy === 'once' ? db.batchOnce(batch) : db.batch(batch))
 }
 
-export function executeRawStockTransaction(
+function restorePermit(authority: RestoreStockAuthority): { sql: string; values: string[] } {
+  let state: Record<string, unknown>
+  try { state = JSON.parse(authority.snapshot) } catch { throw new StockTransactionUnavailableError() }
+  if (!state || Array.isArray(state) || state.mode !== 'restore'
+    || !authority.token?.trim() || !authority.backupKey?.trim()
+    || state.token !== authority.token || state.backupKey !== authority.backupKey
+    || !['deleting','inserting','assets','failed'].includes(String(state.phase))
+    || !['startedAt','startedBy','updatedAt'].every(key => typeof state[key] === 'string' && String(state[key]).trim())
+    || !Number.isFinite(Date.parse(String(state.startedAt))) || !Number.isFinite(Date.parse(String(state.updatedAt)))
+    || (state.table !== undefined && typeof state.table !== 'string')
+    || (state.error !== undefined && typeof state.error !== 'string')
+    || (state.rowsDone !== undefined && (typeof state.rowsDone !== 'number' || !Number.isFinite(state.rowsDone) || state.rowsDone < 0))) throw new StockTransactionUnavailableError()
+  return { sql: permitSql.replace("AND NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance')",
+    "AND EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance' AND value=?)"), values: [authority.snapshot] }
+}
+
+function executeRaw(
   db: D1Database,
   statements: D1PreparedStatement[],
+  authority?: RestoreStockAuthority,
 ): Promise<D1Result[]> {
+  const permit = authority ? restorePermit(authority) : { sql: permitSql, values: [] }
   return execute(statements.length, () => {
     const hook = (globalThis as unknown as Record<symbol, { rawD1Start?(count: number): void } | undefined>)[Symbol.for('business-os.request-metrics.v1')]
     hook?.rawD1Start?.(stockTransactionStatementCount(statements.length))
-    return db.batch([db.prepare(permitSql), ...statements, db.prepare(releaseSql)])
+    return db.batch([db.prepare(permit.sql).bind(...permit.values), ...statements, db.prepare(releaseSql)])
   })
+}
+
+export function executeRawStockTransaction(db: D1Database, statements: D1PreparedStatement[]): Promise<D1Result[]> {
+  return executeRaw(db, statements)
+}
+
+export function executeRawRestoreStockTransaction(db: D1Database, statements: D1PreparedStatement[], authority: RestoreStockAuthority): Promise<D1Result[]> {
+  return executeRaw(db, statements, authority)
 }

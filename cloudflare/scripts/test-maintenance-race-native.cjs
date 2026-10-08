@@ -11,6 +11,7 @@ async function main() {
     export default { async fetch(request, env) {
       const input = await request.json(); const db = env.DB;
       await db.prepare('DELETE FROM system_flags').run();
+      await db.prepare("INSERT INTO system_flags(key,value)VALUES('stock_schema_epoch','legacy-separate-pool-v1')").run();
       const begin = () => beginMaintenance(env, {backupKey:'test',startedBy:'admin'});
       if(input.mode === 'begin-race') {
         const results = await Promise.allSettled([begin(),begin(),begin()]);
@@ -22,13 +23,18 @@ async function main() {
         try{await begin()}catch{refusal=true}
         await updateMaintenance(env,'old',{phase:'assets'});
         const ended=await endMaintenance(env,null);
-        const raw=(await db.prepare('SELECT value FROM system_flags').first()).value;
+        const raw=(await db.prepare("SELECT value FROM system_flags WHERE key='maintenance'").first()).value;
         const cleared=await endMaintenance(env,null,{force:true});
         return Response.json({current,refusal,ended,raw,cleared});
       }
       const old = await begin(); let replacement=null, intercepted=false;
-      if(input.mode==='corrupt-force-race')await db.prepare('UPDATE system_flags SET value=?').bind('{"mode":"restore","token":null}').run();
-      const wrapped = {DB:{prepare(sql){const statement=db.prepare(sql);return {bind(...args){const bound=statement.bind(...args);return {
+      if(input.mode==='corrupt-force-race')await db.prepare("UPDATE system_flags SET value=? WHERE key='maintenance'").bind('{"mode":"restore","token":null}').run();
+      const wrapped = {DB:{async batch(statements){
+        if(!intercepted && input.mode==='progress-race') {
+          intercepted=true; await endMaintenance(env,old.token); replacement=await begin();
+        }
+        return db.batch(statements);
+      },prepare(sql){const statement=db.prepare(sql);if(!sql.startsWith('DELETE') || !sql.includes('key = ?'))return statement;return {bind(...args){const bound=statement.bind(...args);return {
         first:()=>bound.first(),
         run:async()=>{
           if(!intercepted && ((input.mode==='progress-race' && sql.startsWith('UPDATE')) || (input.mode!=='progress-race' && sql.startsWith('DELETE')))) {
@@ -40,7 +46,7 @@ async function main() {
         }
       }}}}}};
       let result=null;
-      if(input.mode==='progress-race')await updateMaintenance(wrapped,old.token,{phase:'assets',rowsDone:999});
+      if(input.mode==='progress-race'){try{await updateMaintenance(wrapped,old.token,{phase:'assets',rowsDone:999});}catch(e){if(e.code!=='stock_schema_unavailable')throw e;result='ownership-refused';}}
       else if(input.mode==='progress-after-clear'){
         await endMaintenance(env,old.token);await updateMaintenance(env,old.token,{phase:'assets'});
       }else result=await endMaintenance(wrapped,old.token,{force:input.mode==='force-end-race'||input.mode==='corrupt-force-race'});
