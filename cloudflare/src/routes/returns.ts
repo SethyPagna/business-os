@@ -143,7 +143,7 @@ export async function customerReturnQuotePlanFromDb(
     base_price_usd,base_price_khr,applied_price_usd,applied_price_khr,
     product_discount_usd,product_discount_khr,product_discount_type,product_discount_label,manual_discount_usd,manual_discount_khr,
     manual_discount_type,manual_discount_value,price_mode,pricing_snapshot_json,
-    product_name,branch_id,cost_price_usd,cost_price_khr
+    product_name,branch_id,cost_price_usd,cost_price_khr,batch_id,batch_label,batch_expiry_date
     FROM sale_items WHERE sale_id=@saleId ORDER BY id LIMIT @limit`)
     .all<Record<string, unknown>>(
       { saleId, limit: CUSTOMER_RETURN_MAX_SALE_LINES + 1 },
@@ -1353,8 +1353,14 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   const queryLimit = getPlanLimits(c.env).d1QueriesPerInvocation
   let routeStatements = 0
   let admissionEnabled = false
-  const requestMetrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
-  const statementsUsed = () => Math.max(routeStatements + 10, (requestMetrics?.statements ?? 0) + 1)
+  const requestMetrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as (RequestMetrics & { attemptedStatements?: number }) | undefined
+  const initialStatements = requestMetrics?.attemptedStatements ?? requestMetrics?.statements ?? 0
+  const statementsUsed = () => {
+    if (!requestMetrics) return routeStatements + 10
+    const attempted = requestMetrics.attemptedStatements
+    if (attempted == null && requestMetrics.failed) return Infinity
+    return Math.max(initialStatements + routeStatements, attempted ?? requestMetrics.statements) + 3
+  }
   const countRead = () => {
     if (admissionEnabled) assertReturnCreateQueryBudget(queryLimit, statementsUsed(), 1, 1)
     routeStatements += 1
@@ -1363,8 +1369,16 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   db.prepare = ((sql: string) => {
     const statement = baseDb.prepare(sql)
     return {
-      get: async (params) => { countRead(); return statement.get(params) },
-      all: async (params) => { countRead(); return statement.all(params) },
+      get: async (params) => {
+        countRead()
+        if (!statement.getOnce) throw new Error('Customer returns require single-attempt database reads')
+        return statement.getOnce(params)
+      },
+      all: async (params) => {
+        countRead()
+        if (!statement.allOnce) throw new Error('Customer returns require single-attempt database reads')
+        return statement.allOnce(params)
+      },
       run: async (params) => { countRead(); return statement.run(params) },
     }
   }) as typeof db.prepare
@@ -1407,9 +1421,16 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   // Read the idempotency receipt BEFORE the body is canonicalised so a replay
   // of an already-recorded return still answers with what was recorded: the
   // version gate below is about NEW writes, not about re-reading history.
-  const readReceipt = async () => db.prepare(`SELECT return_id,sale_id,request_digest,response_json
-    FROM return_create_receipts WHERE actor_id=? AND request_id=? LIMIT 1`)
-    .get<{ return_id: number; sale_id: number | null; request_digest: string; response_json: string }>([authenticatedActorId, clientRequestId])
+  let occupiedRequestId: number | null = null
+  const readReceipt = async () => {
+    const row = await db.prepare(`SELECT r.return_id,r.sale_id,r.request_digest,r.response_json,o.id AS occupied_id
+      FROM (SELECT 1) seed
+      LEFT JOIN return_create_receipts r ON r.actor_id=? AND r.request_id=?
+      LEFT JOIN returns o ON o.client_request_id=? AND o.client_request_id<>'' LIMIT 1`)
+      .get<{ return_id: number | null; sale_id: number | null; request_digest: string; response_json: string; occupied_id: number | null }>([authenticatedActorId, clientRequestId, clientRequestId])
+    occupiedRequestId = row?.occupied_id ?? null
+    return row?.return_id == null ? undefined : { ...row, return_id: row.return_id }
+  }
   const priorReceipt = await readReceipt()
   // The sale decides. A body that is not explicitly v1 (absent, or 0) may not
   // open a return against a v1 sale -- refused here, above canonicalisation, so
@@ -1438,9 +1459,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     return c.json(JSON.parse(priorReceipt.response_json) as ReturnCreateResponse)
   }
   admissionEnabled = true
-  const occupiedRequest = await db.prepare("SELECT id FROM returns WHERE client_request_id=? AND client_request_id<>'' LIMIT 1")
-    .get<{ id: number }>([clientRequestId])
-  if (occupiedRequest) {
+  if (occupiedRequestId != null) {
     return c.json({ error: 'client_request_id is already owned by another return.', code: 'idempotency_conflict' }, 409)
   }
 
@@ -1533,7 +1552,10 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
         cost_price_khr: isMoneyV1 || !canEditAcquisitionCosts(user) ? sold.cost_price_khr : sold.cost_price_khr ?? item.cost_price_khr,
       } : item
     })
-    committedReturnLines = isMoneyV1 ? [] : await db.prepare(`SELECT ri.sale_item_id,ri.product_id,ri.quantity
+    committedReturnLines = customerReturnV1Plan ? customerReturnV1Plan.authority.prior_items.map(line => ({
+      sale_item_id: line.sale_item_id == null ? null : Number(line.sale_item_id),
+      product_id: null, quantity: Number(line.quantity),
+    })) : await db.prepare(`SELECT ri.sale_item_id,ri.product_id,ri.quantity
       FROM return_items ri JOIN returns r ON r.id=ri.return_id
       WHERE r.sale_id=? AND COALESCE(r.status,'completed')!='cancelled'
         AND COALESCE(r.return_scope,'customer')='customer' ORDER BY r.id,ri.id`)
@@ -1694,7 +1716,14 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   })
 
   const returnSaleItemIds = returnItems.map((item) => Number(item.sale_item_id)).filter((id) => Number.isSafeInteger(id) && id > 0)
-  const saleItemBatchInfo = await fetchSaleItemBatchInfo(db, returnSaleItemIds)
+  const saleItemBatchInfo: Map<number, SaleLineInfo> = customerReturnV1Plan
+    ? new Map(customerReturnV1Plan.authority.sale_items.filter(line => returnSaleItemIds.includes(Number(line.id))).map(line => [Number(line.id), {
+      batch_id: line.batch_id == null ? null : Number(line.batch_id),
+      batch_label: line.batch_label == null ? null : String(line.batch_label),
+      batch_expiry_date: line.batch_expiry_date == null ? null : String(line.batch_expiry_date),
+      applied_price_usd: line.applied_price_usd == null ? null : Number(line.applied_price_usd),
+      applied_price_khr: line.applied_price_khr == null ? null : Number(line.applied_price_khr),
+    }])) : await fetchSaleItemBatchInfo(db, returnSaleItemIds)
   const saleItemAllocations = await fetchSaleItemAllocations(db, returnSaleItemIds)
   const v1QuoteBySaleItem = new Map(customerReturnV1Plan?.quote.items.map(item => [item.sale_item_id, item]) || [])
   // A return against a sale is priced from that sale's own lines, matched the
@@ -2412,9 +2441,9 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
 
   try {
     assertReturnCreatePlanBounds(statements, canonicalIntent, eventBytes)
-    // Cache D1 fallback (six), return Telegram reads (three), receipt read
-    // (one), and the healthy request drain (one) still belong to this invocation.
-    assertReturnCreateQueryBudget(queryLimit, statementsUsed(), statements.length + 1, 11 + (replacementNotice ? 1 : 0))
+    // Cold cache fallback including quota and retries (six), notification reads including
+    // retries (six), and a single-attempt receipt read (one).
+    assertReturnCreateQueryBudget(queryLimit, statementsUsed(), statements.length + 1, 13 + (replacementNotice ? 2 : 0))
   } catch (error) {
     if (error instanceof ReturnCreateBudgetError) throw error
     const stockGuard = productStockGuardError(error)
@@ -2423,7 +2452,8 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   }
   try {
     routeStatements += statements.length + 1
-    await (typeof db.batchOnce === 'function' ? db.batchOnce([...statements, ordinaryBusinessMaintenanceGuard]) : db.batch([...statements, ordinaryBusinessMaintenanceGuard]))
+    if (!db.batchOnce) throw new Error('Customer returns require single-attempt atomic writes')
+    await db.batchOnce([...statements, ordinaryBusinessMaintenanceGuard])
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
