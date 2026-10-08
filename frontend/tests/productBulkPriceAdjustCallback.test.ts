@@ -3,6 +3,11 @@ import { readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import ts from 'typescript'
 import { ensureClientRequestId } from '../src/api/requestIds.ts'
+import { listCatalogPriceAttempts, prepareCatalogPriceAttempt, readCatalogPriceAttempt, settleCatalogPriceAttempt, type CatalogPriceAttempt } from '../src/utils/productBulkPriceAttempt.ts'
+const memory = new Map<string, string>()
+let storageBlocked = false
+const storage = { getItem: (key: string) => memory.get(key) ?? null, setItem: (key: string, value: string) => { if (storageBlocked) throw Error('storage blocked'); memory.set(key, value) }, removeItem: (key: string) => { memory.delete(key) }, get length() { return memory.size }, key: (i: number) => [...memory.keys()][i] ?? null }
+Object.assign(globalThis, { localStorage: storage, sessionStorage: storage, window: { location: { origin: 'https://app.test' } } })
 
 const source = process.env.OWNER_PRICE_BASELINE ? execFileSync('git', ['show', '8b0e2c4cf608c3f6f3dbcad1d1a2ff8fa7ee1240:frontend/src/components/products/Products.tsx'], { encoding: 'utf8' }) : readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
 const ast = ts.createSourceFile('Products.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
@@ -13,9 +18,10 @@ function visit(node: ts.Node) {
 }
 visit(ast)
 assert.ok(initializer)
-assert.match(source, /onClick=\{runBulkPriceAdjustAllProducts\}/, 'the executed callback is actually wired')
+assert.match(source, /onClick=\{(?:runBulkPriceAdjustAllProducts|\(\) => runBulkPriceAdjustAllProducts\(\))\}/, 'the executed callback is actually wired')
 const callbackJs = ts.transpileModule('return ' + initializer.getText(ast).replace("import('../../api/productWriteTransport.ts')", 'Promise.resolve(api)'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
 function fixture({ lostAck = false, refreshFailure = false, decrease = false } = {}) {
+  memory.clear(); storageBlocked = false; memory.set('businessos_user', JSON.stringify({id:7})); memory.set('businessos_sync_server', 'https://server.test')
   const pending = { current: new Map() }, calls: Array<Record<string, unknown>> = [], receipts = new Map<string, number>(), notices: unknown[] = []
   const form = { adjust_amount: 1, adjust_currency: 'usd', adjust_selling: true, adjust_direction: decrease ? 'decrease' : 'increase', adjust_wholesale: false, adjust_cost: false, adjust_skip_zero: false }
   let price = decrease ? 1 : 5, fail = lostAck, authority = 'actor-server-A'
@@ -23,7 +29,7 @@ function fixture({ lostAck = false, refreshFailure = false, decrease = false } =
   const scope = {
     catalogPricePendingRef: pending, catalogPriceInFlightRef: { current: false }, bulkActionBusy: false, bulkEditForm: form, canEditCosts: true, canViewCosts: true,
     captureActorReadScope: () => ({ authority }), assertActorReadScope: (captured: { authority: string }) => { if (captured.authority !== authority) throw Error('stale actor') },
-    ensureClientRequestId, useCallback: (callback: unknown) => callback, setBulkActionBusy: () => {},
+    ensureClientRequestId, listCatalogPriceAttempts, prepareCatalogPriceAttempt, readCatalogPriceAttempt, settleCatalogPriceAttempt, setCatalogPricePending: (rows: CatalogPriceAttempt[]) => { pending.current = new Map(rows.map(row => [row.payload.client_request_id, row])) }, useCallback: (callback: unknown) => callback, setBulkActionBusy: () => {},
     tr: (_key: string, fallback: string) => fallback, khrSymbol: '៛', usdSymbol: '$', bulkFieldLabel: (field: string) => field,
     notify: (...args: unknown[]) => notices.push(args), getErrorMessage: (error: Error) => error.message,
     askToConfirm: () => confirm(), load: async () => { if (refreshFailure) throw Error('refresh failed') },
@@ -38,8 +44,8 @@ function fixture({ lostAck = false, refreshFailure = false, decrease = false } =
       return { success: true, changed: 1 }
     } },
   }
-  const callback = new Function(...Object.keys(scope), callbackJs)(...Object.values(scope)) as () => Promise<void>
-  return { callback, calls, pending, form, receipts, notices, price: () => price, switchActor: () => { authority = 'actor-server-B' }, holdConfirm: (fn: () => Promise<boolean>) => { confirm = fn } }
+  const callback = new Function(...Object.keys(scope), callbackJs)(...Object.values(scope)) as (recovery?: CatalogPriceAttempt) => Promise<void>
+  return { callback, remount: () => new Function(...Object.keys(scope), callbackJs)(...Object.values({...scope, catalogPriceInFlightRef: {current:false}})) as (recovery?: CatalogPriceAttempt) => Promise<void>, calls, pending, form, receipts, notices, price: () => price, switchActor: () => { authority = 'actor-server-B' }, holdConfirm: (fn: () => Promise<boolean>) => { confirm = fn } }
 }
 {
   const f = fixture({ lostAck: true }); await f.callback(); assert.equal(f.price(), 6); await f.callback()
@@ -84,4 +90,31 @@ function fixture({ lostAck = false, refreshFailure = false, decrease = false } =
   assert.equal(f.price(), 6)
   assert.equal(f.receipts.size, 1)
 }
-console.log('actual catalog price callback lifetime PASS: lost ACK/zero-price recovery/new-intent/refresh/actor/concurrent-click controls')
+{
+  const f = fixture({ lostAck: true }); await f.callback()
+  const original = listCatalogPriceAttempts()[0]
+  assert.ok(original)
+  const reloaded = f.remount()
+  f.form.adjust_amount = 2
+  await reloaded(original)
+  assert.equal(f.price(), 6, 'visible recovery after unmount/reload uses original body and ID despite changed form')
+  assert.equal(f.calls.filter(c => !c.preview)[1].client_request_id, original.payload.client_request_id)
+  assert.equal(listCatalogPriceAttempts().length, 0, 'only confirmed success clears durable attempt')
+  await reloaded(); assert.equal(f.price(), 8, 'explicit changed intent after recovery applies once with new ID')
+  assert.notEqual(f.calls.filter(c => !c.preview)[2].client_request_id, original.payload.client_request_id)
+}
+{
+  const f = fixture(); storageBlocked = true; await f.callback()
+  assert.equal(f.calls.filter(c => !c.preview).length, 0, 'failed durable write refuses before any apply dispatch')
+  assert.equal(f.price(), 5)
+}
+{
+  const f = fixture({ lostAck: true }); await f.callback()
+  const saved = listCatalogPriceAttempts()[0]
+  memory.set('businessos_user', JSON.stringify({id:8}))
+  assert.equal(listCatalogPriceAttempts().length, 0)
+  await f.remount()(saved)
+  assert.equal(f.calls.filter(c => !c.preview).length, 1, 'old saved recovery cannot become a fresh apply for another account')
+  assert.equal(f.price(), 6)
+}
+console.log('actual catalog price callback lifetime PASS: nine lifetime controls including reload recovery, storage refusal and old-account recovery refusal')

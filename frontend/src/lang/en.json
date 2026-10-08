@@ -7365,5 +7365,10 @@
   "product_create_outcome_unknown": "Product creation may have completed. Refresh Products and check pending review before creating again. This saved request will not be resent.",
   "product_create_approval_unconfirmed": "The approval result could not be confirmed. Refresh the review queue before retrying this same request.",
   "stock_request_query_budget_exceeded": "This request needs more recording capacity. No stock was changed. Keep this form open and retry the same line.",
-  "stock_request_outcome_unknown": "The stock request may have been recorded. Keep its original details and request id. Retry the same line to check its receipt, or check Stock Changes."
+  "stock_request_outcome_unknown": "The stock request may have been recorded. Keep its original details and request id. Retry the same line to check its receipt, or check Stock Changes.",
+  "bulk_price_recover_saved": "Recover saved adjustment",
+  "bulk_price_recovery_unavailable": "This saved adjustment is unavailable for the current account or server. No adjustment was sent.",
+  "bulk_price_pending_recovery": "This saved adjustment may already have completed. Recover the original request without applying it again.",
+  "bulk_price_request_not_saved": "The price request could not be saved on this device. No adjustment was sent. Check available storage and try again.",
+  "bulk_price_outcome_unknown": "The price adjustment outcome is not confirmed. Retry the original request without changing it."
 }

@@ -7,7 +7,7 @@ import { canViewAcquisitionCosts, canEditAcquisitionCosts, omitUnauthorizedCatal
 import { Suspense, memo, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { ReactNode, MouseEvent as ReactMouseEvent } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import { ensureClientRequestId } from '../../api/requestIds.ts'
+import { listCatalogPriceAttempts, prepareCatalogPriceAttempt, readCatalogPriceAttempt, settleCatalogPriceAttempt, type CatalogPriceAttempt } from '../../utils/productBulkPriceAttempt.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import MoreVertical from 'lucide-react/dist/esm/icons/more-vertical.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
@@ -1817,7 +1817,8 @@ function ProductsFullEditor() {
   const pendingLoadRef = useRef<{ silent: boolean } | null>(null)
   const latestLoadRef = useRef<((silent?: boolean) => Promise<void>) | null>(null)
   const productSaveInFlightRef = useRef(false)
-  const catalogPricePendingRef = useRef(new Map<string, { payload: Record<string, unknown>; count: number }>())
+  const [, setCatalogPricePending] = useState(listCatalogPriceAttempts)
+  const catalogPricePending = listCatalogPriceAttempts()
   const catalogPriceInFlightRef = useRef(false)
   // Preserve the initiating form authority across uploads, lazy imports and
   // refreshes. The revision detects change-away-and-back, without coupling a
@@ -4378,32 +4379,35 @@ function ProductsFullEditor() {
   // selection flow above it, but the WORK runs server-side (set-based
   // UPDATEs) with a preview count fetched first so the confirm can say the
   // real number -- and it says plainly that this scope has no undo.
-  const runBulkPriceAdjustAllProducts = useCallback(async () => {
+  const runBulkPriceAdjustAllProducts = useCallback(async (recovery?: CatalogPriceAttempt) => {
     if (bulkActionBusy || catalogPriceInFlightRef.current) return
-    const amount = Number(bulkEditForm.adjust_amount)
+    const amount = Number(recovery?.payload.amount ?? bulkEditForm.adjust_amount)
     if (!Number.isFinite(amount) || amount <= 0) {
       notify(tr('bulk_price_amount_required', 'Enter a positive amount first'), 'warning')
       return
     }
-    const currency = bulkEditForm.adjust_currency === 'khr' ? 'khr' : 'usd'
+    const currency = recovery ? (recovery.payload.fields[0]?.endsWith('_khr') ? 'khr' : 'usd') : bulkEditForm.adjust_currency === 'khr' ? 'khr' : 'usd'
     const fields: string[] = []
     if (bulkEditForm.adjust_selling !== false) fields.push(`selling_price_${currency}`)
     // Was `special_price_${currency}`: re-pointed at wholesale by the
     // 2026-09-04 ruling, which deleted the "VIP" tier those columns backed.
     if (bulkEditForm.adjust_wholesale) fields.push(`wholesale_price_${currency}`)
     if (canEditCosts && canViewCosts && bulkEditForm.adjust_cost) fields.push(`cost_price_${currency}`)
+    if (recovery) fields.splice(0, fields.length, ...recovery.payload.fields)
     if (!fields.length) {
       notify(tr('bulk_price_no_change', 'Nothing to change with those settings'), 'warning')
       return
     }
-    const direction = bulkEditForm.adjust_direction === 'decrease' ? 'decrease' as const : 'increase' as const
-    const payload = { direction, amount, fields, skip_zero: !!bulkEditForm.adjust_skip_zero }
+    const direction = recovery?.payload.direction ?? (bulkEditForm.adjust_direction === 'decrease' ? 'decrease' as const : 'increase' as const)
+    const payload = { direction, amount, fields, skip_zero: recovery?.payload.skip_zero ?? !!bulkEditForm.adjust_skip_zero }
     const scope = captureActorReadScope('products')
-    const intentKey = JSON.stringify([scope.authority, payload])
-    const pending = catalogPricePendingRef.current.get(intentKey)
     catalogPriceInFlightRef.current = true
     setBulkActionBusy(true)
     try {
+      const pending = readCatalogPriceAttempt(payload)
+      if (recovery && pending?.payload.client_request_id !== recovery.payload.client_request_id) {
+        throw Object.assign(new Error('This saved adjustment is unavailable for the current account or server. No adjustment was sent.'), { code: 'bulk_price_recovery_unavailable' })
+      }
       const { bulkPriceAdjustAllProducts } = await import('../../api/productWriteTransport.ts')
       assertActorReadScope(scope, false)
       // An uncertain apply keeps its exact request and original review count. A fresh preview could hide a committed decrease.
@@ -4414,7 +4418,7 @@ function ProductsFullEditor() {
         return
       }
       const verb = direction === 'decrease' ? tr('bulk_price_decrease', 'Decrease') : tr('bulk_price_increase', 'Increase')
-      const warning = tr('bulk_price_all_confirm', 'This runs on the WHOLE catalog and cannot be undone.')
+      const warning = pending ? tr('bulk_price_pending_recovery', 'This saved adjustment may already have completed. Recover the original request without applying it again.') : tr('bulk_price_all_confirm', 'This runs on the WHOLE catalog and cannot be undone.')
       if (!(await askToConfirm({
         title: tr('bulk_price_confirm_title', 'Adjust prices?'),
         message: warning,
@@ -4427,21 +4431,24 @@ function ProductsFullEditor() {
         danger: true,
       }))) return
       assertActorReadScope(scope, false)
-      const request = pending?.payload ?? ensureClientRequestId(payload, 'price_adjust')
-      catalogPricePendingRef.current.set(intentKey, { payload: request, count })
+      const prepared = prepareCatalogPriceAttempt(payload, count)
+      setCatalogPricePending(listCatalogPriceAttempts())
+      const request = prepared.attempt.payload
       const result = await bulkPriceAdjustAllProducts(request as typeof payload & { client_request_id: string })
       assertActorReadScope(scope, false)
       if (result?.success !== true || result?.error) throw new Error(String(result?.error || 'Bulk adjustment failed'))
-      catalogPricePendingRef.current.delete(intentKey)
+      settleCatalogPriceAttempt(prepared.attempt, prepared.saved)
+      setCatalogPricePending(listCatalogPriceAttempts())
       notify(`${tr('bulk_price_all_done', 'Adjusted prices across the catalog')}: ${Number(result?.changed ?? count)}`)
       await load(true)
     } catch (error) {
-      notify(getErrorMessage(error, 'Bulk adjustment failed'), 'error')
+      const code = String((error as { code?: string })?.code || '')
+      notify(['bulk_price_request_not_saved', 'bulk_price_recovery_unavailable'].includes(code) ? tr(code, getErrorMessage(error, 'Bulk adjustment failed')) : getErrorMessage(error, 'Bulk adjustment failed'), 'error')
     } finally {
       catalogPriceInFlightRef.current = false
       setBulkActionBusy(false)
     }
-  }, [askToConfirm, bulkActionBusy, bulkEditForm, bulkFieldLabel, khrSymbol, notify, tr, load, usdSymbol])
+  }, [askToConfirm, bulkActionBusy, bulkEditForm, bulkFieldLabel, canEditCosts, canViewCosts, khrSymbol, notify, tr, load, usdSymbol])
 
   const runBulkProductPriceAdjustment = useCallback(async () => {
     if (!selectedVisibleIds.length || bulkActionBusy) return
@@ -5300,12 +5307,20 @@ function ProductsFullEditor() {
               <button
                 disabled={bulkActionBusy}
                 className="rounded-lg border border-amber-300 px-4 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-600/50 dark:text-amber-300 dark:hover:bg-amber-900/20"
-                onClick={runBulkPriceAdjustAllProducts}
+                onClick={() => runBulkPriceAdjustAllProducts()}
               >
                 {tr('bulk_price_apply_all', 'Apply to ALL products in the system…')}
               </button>
               ) : null}
             </div>
+            {canManageLookups && can('products', 'edit') && catalogPricePending.length > 0 ? (
+              <div className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                <p>{tr('bulk_price_pending_recovery', 'This saved adjustment may already have completed. Recover the original request without applying it again.')}</p>
+                {catalogPricePending.map(saved => <button key={saved.payload.client_request_id} disabled={bulkActionBusy} className="btn-secondary mt-1 mr-2 px-3 py-1 text-xs" onClick={() => runBulkPriceAdjustAllProducts(saved)}>
+                  {tr('bulk_price_recover_saved', 'Recover saved adjustment')}: {saved.payload.direction === 'decrease' ? '−' : '+'}{saved.payload.amount} · {saved.payload.fields.map(bulkFieldLabel).join(', ')}
+                </button>)}
+              </div>
+            ) : null}
           </div>
         </div>
       )}
