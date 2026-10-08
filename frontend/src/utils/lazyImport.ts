@@ -1,6 +1,8 @@
-import { lazy, type ComponentType } from 'react'
+import { createElement, lazy, type ComponentType } from 'react'
 import { claimChunkReload, clearChunkReloadMarker } from './chunkReloadGuard.ts'
 import { flushPendingWorkDrafts } from './workDrafts.ts'
+import { hasDirtyWork } from './dirtyWork.ts'
+import LazyImportRecovery from './LazyImportRecovery.tsx'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mirrors React's own lazy() signature (ComponentType<any>), so components with concrete prop types can be passed through unchanged.
 type LazyImporter<T> = () => Promise<{ default: T }>
@@ -33,10 +35,14 @@ function clearLazyRetryMarker(key: string): void {
 // after any later deploy once a single reload had not landed on a good build.
 async function triggerLazyChunkRecovery(key: string): Promise<boolean> {
   if (typeof window === 'undefined' || (typeof navigator !== 'undefined' && navigator.onLine === false)) return false
+  if (hasDirtyWork()) return false
   const decision = await claimChunkReload(nestedMarkerKey(key))
   if (!decision.allow) return false
-  // This path reloads immediately (a modal chunk, not a page): persist any
-  // debounced draft first so the reload cannot become silent form/cart loss.
+  if (hasDirtyWork()) {
+    clearLazyRetryMarker(key)
+    return false
+  }
+  // Flush pending persisted drafts before the clean recovery reload.
   flushPendingWorkDrafts()
   const url = new URL(window.location.href)
   url.searchParams.set('__bos_reload', String(Date.now()))
@@ -95,16 +101,17 @@ export function preloadLazy<T>(importer: LazyImporter<T>): () => void {
  * any lazily-loaded modal, sheet, or sub-component nested inside a page.
  */
 export function lazyRetry<T extends ComponentType<any>>(importer: LazyImporter<T>, key: string) {
-  return lazy(async () => {
+  let resolved: T | null = null
+  const load = async () => {
     for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt += 1) {
       try {
         const loaded = await importWithTimeout(importer, key)
+        resolved = loaded.default
         if (typeof window !== 'undefined') clearLazyRetryMarker(key)
         return loaded
       } catch (error) {
-        const isFinalAttempt = attempt >= RETRY_ATTEMPTS
         if (!isRetryableChunkError(error)) throw error
-        if (isFinalAttempt) {
+        if (attempt >= RETRY_ATTEMPTS) {
           if (await triggerLazyChunkRecovery(key)) return await new Promise<never>(() => {})
           throw error
         }
@@ -112,5 +119,24 @@ export function lazyRetry<T extends ComponentType<any>>(importer: LazyImporter<T
       }
     }
     throw createTimeoutError(key)
+  }
+  return lazy(async () => {
+    try {
+      return await load()
+    } catch (error) {
+      if (!isRetryableChunkError(error)) throw error
+      const Recovery = (props: Record<string, unknown>) => resolved ? createElement(resolved, props) : createElement(LazyImportRecovery, {
+        componentProps: props,
+        retry: async () => {
+          try {
+            return (await load()).default as ComponentType<Record<string, unknown>>
+          } catch (retryError) {
+            if (!isRetryableChunkError(retryError)) throw retryError
+            return null
+          }
+        },
+      })
+      return { default: Recovery as T }
+    }
   })
 }
