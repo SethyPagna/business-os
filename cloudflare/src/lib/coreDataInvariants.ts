@@ -1,4 +1,4 @@
-import { executeStockTransaction } from './stockTransaction'
+import { executeStockTransaction, STOCK_SCHEMA_EPOCH } from './stockTransaction'
 // D1 port of backend/src/postgresDatabase.ts's ensureDefaultSeedData /
 // ensurePrimaryAdminRoleAndUser. The Node backend runs this on every boot;
 // the Worker doesn't have a boot hook, so ensureCoreDataInvariantsOnce()
@@ -456,10 +456,12 @@ export async function runCoreDataInvariants(env: Env): Promise<CoreDataInvariant
   // first successful run for a given product.
   const activeDefaultBranch = await db.prepare(`
     SELECT id FROM branches WHERE is_active = 1
+      AND NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance')
+      AND (SELECT value FROM system_flags WHERE key='stock_schema_epoch')=@stockEpoch
       AND EXISTS (SELECT 1 FROM products p WHERE p.is_active = 1
         AND p.id NOT IN (SELECT product_id FROM branch_stock))
       ORDER BY is_default DESC, id ASC LIMIT 1
-  `).get<{ id: number }>()
+  `).get<{ id: number }>({ stockEpoch: STOCK_SCHEMA_EPOCH })
   if (activeDefaultBranch?.id) {
     await executeStockTransaction(db, [{ sql: `
       INSERT INTO branch_stock (product_id, branch_id, quantity)

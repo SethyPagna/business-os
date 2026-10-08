@@ -10,6 +10,8 @@ source = source.replace('  let failAfterMetadata = false', `  sql.exec("INSERT I
   sql.exec(fs.readFileSync(path.join(root,'migrations','0243_stock_schema_epoch.sql'),'utf8'))
   let failAfterMetadata = false`)
 source = source.replace('mutate(sql)\n      }\n      const result = runBatch', 'await mutate(sql)\n      }\n      const result = runBatch')
+source = source.replace("['routes/inventory.ts', 'routes/actionHistory.ts', 'routes/batches.ts']", "['routes/inventory.ts', 'routes/actionHistory.ts', 'routes/batches.ts', 'routes/branches.ts']")
+source = source.replace("if (name === './cache' || name === '../lib/cache')", "if ((name === './cache' || name === '../lib/cache') && normalized !== 'routes/branches.ts')")
 const harness = new Module(original, module)
 harness.filename = original
 harness.paths = module.paths
@@ -52,6 +54,53 @@ async function main(){
  const bounds=fixture();bounds.env.PLAN_TIER='free'
  await assert.rejects(()=>loadStockSession().commitStockSession(bounds.env,user,receiveRequest('overhead-admission'),null,{statementsUsed:()=>30,reserveStatements:0}),e=>e.code==='stock_session_query_budget_exceeded')
  assert.equal(bounds.sql.prepare('SELECT COUNT(*) n FROM stock_session_operations').get().n,0);zero(bounds)
+ const startup=fixture(),core=loadStockSession('lib/coreDataInvariants.ts')
+ startup.env.BUSINESS_OS_ADMIN_PASSWORD='synthetic-native-password'
+ const held=await loadStockSession('lib/maintenance.ts').beginMaintenance(startup.env,{backupKey:'backups/cloudflare/core.json',startedBy:'admin'})
+ await core.ensureCoreDataInvariants(startup.env)
+ assert.equal(startup.sql.prepare('SELECT COUNT(*) n FROM branch_stock WHERE product_id=2').get().n,0);zero(startup)
+ await loadStockSession('lib/maintenance.ts').endMaintenance(startup.env,held.token)
+ epoch(startup,'old-writer');await core.ensureCoreDataInvariants(startup.env)
+ assert.equal(startup.sql.prepare('SELECT COUNT(*) n FROM branch_stock WHERE product_id=2').get().n,0)
+ epoch(startup,'legacy-separate-pool-v1')
+ const seeded=await count(()=>core.ensureCoreDataInvariants(startup.env));assert.equal(startup.sql.prepare('SELECT quantity n FROM branch_stock WHERE product_id=2').get().n,7);zero(startup)
+ const rev=fixture(),revKernel=loadStockSession('lib/stockRevert.ts'),{D1Compat}=loadStockSession('lib/db.ts')
+ rev.sql.exec("INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason)VALUES(1,'Serum',1,'Shop','remove',2,'native standalone')")
+ const movement=rev.sql.prepare('SELECT * FROM inventory_movements').get()
+ epoch(rev,'old-writer')
+ await assert.rejects(()=>revKernel.applyMovementRevert(new D1Compat(rev.env.DB),movement,{userId:7,userName:'Stock User'}),e=>e.code==='stock_schema_unavailable');zero(rev)
+ epoch(rev,'legacy-separate-pool-v1');rev.loseNextCommitAcknowledgement()
+ const reverted=await count(()=>revKernel.applyMovementRevert(new D1Compat(rev.env.DB),movement,{userId:7,userName:'Stock User'}))
+ assert.equal(rev.sql.prepare('SELECT stock_quantity n FROM products WHERE id=1').get().n,2);zero(rev)
+ const bf=fixture(),admin={...user,permissions:JSON.stringify({all:true,branches:true})}
+ await loadStockSession().commitStockSession(bf.env,user,receiveRequest('branch-fixture-stock'))
+ bf.env.CACHE={get:async()=>null,put:async()=>{},delete:async()=>{}}
+ const branches=loadStockSession('routes/branches.ts',admin).default
+ const tasks=[],ctx={waitUntil(p){tasks.push(p)},passThroughOnException(){}}
+ branches.onError((e,c)=>c.json({code:e.code,error:e.message},409))
+ const transfer=async id=>{const response=await branches.request('/transfer',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({productId:1,fromBranchId:1,toBranchId:2,quantity:2,reason:'native transfer',client_request_id:id,transfer_provenance_version:1})},bf.env,ctx);await Promise.all(tasks.splice(0));return {status:response.status,body:await response.json()}}
+ epoch(bf,'old-writer');assert.equal((await transfer('old-branch-transfer')).body.code,'stock_schema_unavailable');zero(bf)
+ epoch(bf,'legacy-separate-pool-v1')
+ const forwarded=await count(()=>transfer('current-branch-transfer'));assert.equal(forwarded.result.status,200,JSON.stringify(forwarded.result));assert.equal(bf.sql.prepare('SELECT quantity n FROM branch_stock WHERE product_id=1 AND branch_id=2').get().n,2);zero(bf)
+ bf.loseNextCommitAcknowledgement()
+ const branchLost=await count(()=>transfer('lost-branch-transfer'))
+ assert.equal(branchLost.result.status,200,JSON.stringify(branchLost.result));assert.equal(branchLost.result.body.replayed,true)
+ assert.equal(bf.sql.prepare('SELECT quantity n FROM branch_stock WHERE product_id=1 AND branch_id=2').get().n,4);zero(bf)
+ const bulk=async id=>{const response=await branches.request('/transfer-bulk',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({fromBranchId:1,toBranchId:2,items:[{productId:1,quantity:1}],reason:'native bulk transfer',client_request_id:id,transfer_provenance_version:1})},bf.env,ctx);await Promise.all(tasks.splice(0));return {status:response.status,body:await response.json()}}
+ bf.failWhenSqlMatches(/INSERT INTO branch_stock/)
+ assert.equal((await bulk('rollback-bulk-transfer')).status,409)
+ assert.equal(bf.sql.prepare('SELECT quantity n FROM branch_stock WHERE product_id=1 AND branch_id=2').get().n,4);zero(bf)
+ epoch(bf,'old-writer');assert.equal((await bulk('old-bulk-transfer')).body.code,'stock_schema_unavailable')
+ epoch(bf,'legacy-separate-pool-v1')
+ const bulked=await count(()=>bulk('current-bulk-transfer'));assert.equal(bulked.result.status,200,JSON.stringify(bulked.result))
+ assert.equal(bf.sql.prepare('SELECT quantity n FROM branch_stock WHERE product_id=1 AND branch_id=2').get().n,5);zero(bf)
+ epoch(bf,'old-writer');bf.sql.prepare('UPDATE products SET name=? WHERE id=1').run('Metadata remains available')
+ assert.equal(bf.sql.prepare('SELECT name FROM products WHERE id=1').get().name,'Metadata remains available');zero(bf)
+ const unknown=fixture(),unknownDb=unknown.env.DB
+ unknown.env.DB={prepare:sql=>unknownDb.prepare(sql),batch:async()=>[]}
+ await assert.rejects(()=>loadStockSession().commitStockSession(unknown.env,user,receiveRequest('unconfirmed-empty-result')),e=>e.code==='stock_transaction_outcome_unknown');zero(unknown)
+ console.log(JSON.stringify({branchLostAckAttempts:branchLost.attempted,branchBulkAttempts:bulked.attempted}))
+ console.log(JSON.stringify({startupAttempts:seeded.attempted,revertLostAckAttempts:reverted.attempted,branchForwardAttempts:forwarded.attempted}))
  console.log(JSON.stringify({sessionLostAckAttempts:created.attempted,undoLostAckAttempts:undone.attempted,redoAttempts:redone.attempted,overheadPerCommit:2}))
  console.log('stock session writers full-0243 native: PASS')
 }
