@@ -33,6 +33,10 @@ sqlite.exec(`
     action TEXT,
     entity TEXT,
     details TEXT,
+    entity_id TEXT,
+    user_id INTEGER,
+    old_value TEXT,
+    new_value TEXT,
     created_at TEXT
   );
 `)
@@ -76,12 +80,31 @@ const ordinaryShiftRows = [
 ]
 for (const [offset, row] of ordinaryShiftRows.entries()) insert.run(12 + offset, ...row, old)
 
+const priceReceipt = { kind: 'product.bulk-price-adjust', version: 1, client_request_id: 'price_adjust_aged001',
+  claim_nonce: '11111111-1111-1111-1111-111111111111', rowsTouched: 2,
+  request: JSON.stringify({ direction: 'increase', amount: 1, fields: ['selling_price_usd'], skip_zero: false }) }
+const insertPrice = (id, details, overrides = {}) => sqlite.prepare(`INSERT INTO audit_logs
+  (id,action,entity,entity_id,user_id,details,old_value,new_value,created_at) VALUES(@id,@action,@entity,@entityId,@actor,@details,@before,@after,@created)`)
+  .run({id,action:'update',entity:'product',entityId:'bulk-price-adjust',actor:21,details:JSON.stringify(details),before:'{"rows_touched":0}',after:'{"rows_touched":2}',created:old,...overrides})
+insertPrice(100,priceReceipt)
+const malformedPrices = [
+  { ...priceReceipt, kind: 'other' }, { ...priceReceipt, version: 2 }, { ...priceReceipt, client_request_id: 'short' },
+  { ...priceReceipt, client_request_id: 'bad id x' }, { ...priceReceipt, claim_nonce: 'short' },
+  { ...priceReceipt, rowsTouched: null }, { ...priceReceipt, rowsTouched: -1 }, { ...priceReceipt, rowsTouched: 1.5 },
+  { ...priceReceipt, request: '{broken' }, { ...priceReceipt, request: '{}' },
+  ...[{direction:'sideways'},{amount:0},{amount:'1'},{fields:[]},{fields:['unsafe_field']},{fields:[1]},{skip_zero:1}]
+    .map(change=>({...priceReceipt,request:JSON.stringify({direction:'increase',amount:1,fields:['selling_price_usd'],skip_zero:false,...change})})),
+]
+for (const [offset,details] of malformedPrices.entries()) insertPrice(101+offset,details)
+const unrelatedPrices = [{entity:'sale'},{entityId:'another'},{action:'create'},{actor:0},{after:'{"rows_touched":3}'},{after:null},{before:'{broken'}]
+for (const [offset,overrides] of unrelatedPrices.entries()) insertPrice(200+offset,priceReceipt,overrides)
+
 const result = sqlite.prepare(sql).run({ cutoff: '2026-09-01 00:00:00' })
-assert.equal(result.changes, 4 + ordinaryShiftRows.length, 'ordinary, legacy, malformed and unrelated Shift audits still expire')
+assert.equal(result.changes, 4 + ordinaryShiftRows.length + malformedPrices.length + unrelatedPrices.length, 'ordinary, legacy, malformed and unrelated operational audits still expire')
 assert.deepEqual(
   sqlite.prepare('SELECT id FROM audit_logs ORDER BY id').all().map((row) => row.id),
-  [4, 5, 7, 8, 9, 10, 11, 99],
-  'only Return bulk replay and exact Shift lifecycle receipts bypass age retention',
+  [4, 5, 7, 8, 9, 10, 11, 99, 100],
+  'only Return replay, exact Shift receipts and validated completed price receipts bypass age retention',
 )
 for (const id of [8, 9, 10, 11]) {
   assert.deepEqual(JSON.parse(sqlite.prepare('SELECT details FROM audit_logs WHERE id=?').get(id).details).request, request,

@@ -1849,6 +1849,18 @@ function productPriceChanged(plan: { before?: Record<string, unknown> | null; af
     && roundMoney4(Number(plan.after![field]) || 0) !== roundMoney4(Number(plan.before?.[field]) || 0))
 }
 const BULK_PRICE_FIELDS = new Set(['selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr', 'cost_price_usd', 'cost_price_khr'])
+const BULK_PRICE_REQUEST_ID = /^[A-Za-z0-9_-]{8,120}$/
+async function findBulkPriceReceipt(db: ReturnType<typeof getDb>, actorId: number, requestId: string) {
+  const row = await db.prepare(`SELECT details FROM audit_logs WHERE entity = 'product' AND entity_id = 'bulk-price-adjust' AND user_id = @actorId
+    AND CASE WHEN json_valid(details) THEN json_extract(details, '$.client_request_id') END = @requestId ORDER BY id LIMIT 1`)
+    .get<{ details: string | null }>({ actorId, requestId })
+  if (!row) return null
+  const receipt = JSON.parse(String(row.details || '{}')) as { request?: unknown; rowsTouched?: unknown; claim_nonce?: unknown }
+  if (typeof receipt.request !== 'string' || !Number.isSafeInteger(receipt.rowsTouched) || Number(receipt.rowsTouched) < 0) {
+    throw new Error('Catalog price receipt has no confirmed result')
+  }
+  return { request: receipt.request, changed: Number(receipt.rowsTouched), nonce: receipt.claim_nonce }
+}
 app.post('/bulk-price-adjust', async (c) => {
   const user = c.get('user')
   // A catalog-wide price change is a product edit (Edit product) AND a catalog-wide
@@ -1868,11 +1880,12 @@ app.post('/bulk-price-adjust', async (c) => {
     fields?: string[]
     skip_zero?: boolean
     preview?: boolean
+    client_request_id?: string
   }>().catch(() => ({} as Record<string, never>))
   const direction = body.direction === 'decrease' ? 'decrease' : 'increase'
   const amount = Number(body.amount)
   if (!Number.isFinite(amount) || amount <= 0) return c.json({ error: 'Amount must be a positive number' }, 400)
-  const fields = Array.isArray(body.fields) ? body.fields.filter((f) => BULK_PRICE_FIELDS.has(String(f))) : []
+  const fields = Array.isArray(body.fields) ? [...new Set(body.fields.filter((f) => BULK_PRICE_FIELDS.has(f)))].sort() : []
   if (!canEditAcquisitionCosts(user) && fields.some(field => field.startsWith('cost_price_'))) {
     return c.json({ error: 'Cost-entry permission is required to change catalog costs.', code: 'product_cost_edit_required' }, 403)
   }
@@ -1880,6 +1893,26 @@ app.post('/bulk-price-adjust', async (c) => {
   const skipZero = Boolean(body.skip_zero)
   const delta = direction === 'decrease' ? -amount : amount
   const db = getDb(c.env)
+  const requestId = typeof body.client_request_id === 'string' ? body.client_request_id.trim() : ''
+  if (!body.preview && !BULK_PRICE_REQUEST_ID.test(requestId)) {
+    return c.json({ error: 'client_request_id is required to apply a catalog price adjustment.', code: 'client_request_id_required' }, 400)
+  }
+  const canonicalRequest = JSON.stringify({ direction, amount, fields, skip_zero: skipZero })
+  const actorIdForReceipt = Number(user?.id ?? 0)
+  const receiptResponse = (receipt: { request: string; changed: number }, replayed: boolean) => receipt.request !== canonicalRequest
+    ? c.json({ error: 'client_request_id was already used with a different price adjustment.', code: 'idempotency_conflict' }, 409)
+    : c.json({ success: true, replayed, changed: receipt.changed })
+  const outcomeUnknown = () => c.json({ error: 'The price adjustment outcome is not confirmed. Retry the original request without changing it.', code: 'bulk_price_outcome_unknown' }, 503)
+  if (!body.preview) {
+    try {
+      const prior = await findBulkPriceReceipt(db, actorIdForReceipt, requestId)
+      if (prior) {
+        c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+        c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'bulk-price-adjust' }))
+        return receiptResponse(prior, true)
+      }
+    } catch { return outcomeUnknown() }
+  }
 
   // A row "changes" for a field when: decreasing -> the field is > 0 (a 0
   // price is never pushed negative, matching the selection flow's rule);
@@ -1895,10 +1928,13 @@ app.post('/bulk-price-adjust', async (c) => {
   }
 
   const nextValueSql = (field: string) => `MAX(0, ROUND(COALESCE(${field}, 0) + @delta, ${field.endsWith('_khr') ? 0 : 2}))`
+  const claimNonce = crypto.randomUUID()
+  const ownClaim = `EXISTS (SELECT 1 FROM audit_logs al WHERE al.entity = 'product' AND al.entity_id = 'bulk-price-adjust'
+    AND CASE WHEN json_valid(al.details) THEN json_extract(al.details, '$.claim_nonce') END = @claimNonce)`
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = fields.map((field) => ({
     sql: `UPDATE products SET ${field} = ${nextValueSql(field)}, updated_at = CURRENT_TIMESTAMP
-          WHERE is_active = 1 AND (${fieldCondition(field)})`,
-    params: { delta },
+          WHERE is_active = 1 AND (${fieldCondition(field)}) AND ${ownClaim}`,
+    params: { delta, claimNonce },
   }))
   // U-cost: the 0195 triggers re-derive cost_price_usd at every stock
   // movement and honour only a cost with a product_cost_entries row, so a
@@ -1909,8 +1945,8 @@ app.post('/bulk-price-adjust', async (c) => {
     ? `CASE WHEN ${fieldCondition(field)} THEN ${nextValueSql(field)} ELSE ${field} END` : null
   if (fields.includes('cost_price_usd') || fields.includes('cost_price_khr')) {
     statements.unshift({
-      sql: typedCostEntriesBeforeWriteSql({ nextUsdSql: costNext('cost_price_usd'), nextKhrSql: costNext('cost_price_khr'), whereSql: 'is_active = 1' }),
-      params: { delta, ...costEntryActorParams({ id: actorId(user), name: actorSnapshot(user) }) },
+      sql: typedCostEntriesBeforeWriteSql({ nextUsdSql: costNext('cost_price_usd'), nextKhrSql: costNext('cost_price_khr'), whereSql: `is_active = 1 AND ${ownClaim}` }),
+      params: { delta, claimNonce, ...costEntryActorParams({ id: actorId(user), name: actorSnapshot(user) }) },
     })
   }
   // This scope deliberately never materializes ids, so there is no per-row
@@ -1920,27 +1956,33 @@ app.post('/bulk-price-adjust', async (c) => {
   // confirmed admin action) turns "changed 4,120 products" into a figure an
   // operator can actually check. rows_touched rides along as a field so it
   // renders in the same table.
-  const totalsSql = `SELECT ${fields.map((field) => `ROUND(SUM(COALESCE(${field}, 0)), 2) AS "${field}"`).join(', ')} FROM products WHERE is_active = 1`
-  const totalsBefore = await db.prepare(totalsSql).get<Record<string, unknown>>() || {}
-  const results = await db.batch(statements)
-  // D1 reports a batch statement's row count in meta.changes, never at the
-  // top level, so the old read was always undefined -> 0: the response said
-  // "changed: 0" for every adjustment and the toast quietly fell back to the
-  // preview count. Same shape every other reader in this Worker uses.
-  const changed = Math.max(0, ...results.slice(statements.length - fields.length).map((r) => Number(
-    (r as { meta?: { changes?: number } }).meta?.changes ?? (r as { changes?: number }).changes,
-  ) || 0))
-  const totalsAfter = await db.prepare(totalsSql).get<Record<string, unknown>>() || {}
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'product', 'bulk-price-adjust', {
-    scope: 'all', direction, amount, fields, skipZero, rowsTouched: changed,
-  }, changedFields(
-    { ...totalsBefore, rows_touched: 0 },
-    { ...totalsAfter, rows_touched: changed },
-    { keys: [...fields, 'rows_touched'] },
-  ))
+  const counts = fields.map(field => `(SELECT COUNT(*) FROM products WHERE is_active = 1 AND (${fieldCondition(field)}))`)
+  const touchedSql = counts.length === 1 ? counts[0] : `MAX(${counts.join(', ')})`
+  const totalsSql = `(SELECT json_object(${fields.map(field => `'${field}', ROUND(COALESCE(SUM(COALESCE(${field}, 0)), 0), 2)`).join(', ')}) FROM products WHERE is_active = 1)`
+  // Capture the original result and audit preimage inside the same transaction as the claim and every price/cost write.
+  const claim = buildAuditStatement(user?.id ?? null, actorSnapshot(user), 'update', 'product', 'bulk-price-adjust', {
+    scope: 'all', direction, amount, fields, skipZero, kind: 'product.bulk-price-adjust', version: 1,
+    client_request_id: requestId, request: canonicalRequest, claim_nonce: claimNonce,
+  })
+  claim.sql = claim.sql.replace('@details, @table_name', `json_set(@details, '$.rowsTouched', ${touchedSql}), @table_name`)
+    .replace('@old_value, @new_value', `json_set(${totalsSql}, '$.rows_touched', 0), NULL`)
+  claim.sql += ` WHERE NOT EXISTS (SELECT 1 FROM audit_logs prior WHERE prior.entity = 'product' AND prior.entity_id = 'bulk-price-adjust'
+    AND prior.user_id = @user_id AND CASE WHEN json_valid(prior.details) THEN json_extract(prior.details, '$.client_request_id') END = @priorRequestId)`
+  claim.params.priorRequestId = requestId
+  statements.unshift(claim)
+  statements.push({
+    sql: `UPDATE audit_logs SET new_value = json_set(${totalsSql}, '$.rows_touched', json_extract(details, '$.rowsTouched'))
+      WHERE entity = 'product' AND entity_id = 'bulk-price-adjust' AND CASE WHEN json_valid(details) THEN json_extract(details, '$.claim_nonce') END = @claimNonce`,
+    params: { claimNonce },
+  })
+  let uncertain = false
+  try { await db.batch(statements) } catch { uncertain = true }
+  let receipt
+  try { receipt = await findBulkPriceReceipt(db, actorIdForReceipt, requestId) } catch { return outcomeUnknown() }
+  if (!receipt) return outcomeUnknown()
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'bulk-price-adjust' }))
-  return c.json({ success: true, changed })
+  return receiptResponse(receipt, uncertain || receipt.nonce !== claimNonce)
 })
 
 // The ONE product identity rule's manual-path check: an ACTIVE product with

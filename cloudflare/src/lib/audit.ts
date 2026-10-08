@@ -45,6 +45,32 @@ export function buildAuditLogRetentionDeleteSql(): string {
           AND CASE WHEN json_valid(json_extract(details, '$.request.canonical')) THEN
             json_extract(json_extract(details, '$.request.canonical'), '$.client_request_id') = json_extract(details, '$.request.id')
           ELSE 0 END
+        ) OR (
+          entity = 'product' AND entity_id = 'bulk-price-adjust' AND action = 'update'
+          AND user_id > 0
+          AND json_extract(details, '$.kind') = 'product.bulk-price-adjust'
+          AND json_extract(details, '$.version') = 1
+          AND json_type(details, '$.client_request_id') = 'text'
+          AND length(json_extract(details, '$.client_request_id')) BETWEEN 8 AND 120
+          AND json_extract(details, '$.client_request_id') NOT GLOB '*[^a-zA-Z0-9_-]*'
+          AND json_type(details, '$.rowsTouched') = 'integer'
+          AND json_extract(details, '$.rowsTouched') >= 0
+          AND json_type(details, '$.claim_nonce') = 'text'
+          AND length(json_extract(details, '$.claim_nonce')) = 36
+          AND json_type(details, '$.request') = 'text'
+          AND CASE WHEN json_valid(json_extract(details, '$.request')) THEN
+            json_extract(json_extract(details, '$.request'), '$.direction') IN ('increase','decrease')
+            AND json_type(json_extract(details, '$.request'), '$.amount') IN ('integer','real')
+            AND json_extract(json_extract(details, '$.request'), '$.amount') > 0
+            AND json_type(json_extract(details, '$.request'), '$.fields') = 'array'
+            AND json_array_length(json_extract(details, '$.request'), '$.fields') BETWEEN 1 AND 6
+            AND NOT EXISTS (SELECT 1 FROM json_each(json_extract(details, '$.request'), '$.fields')
+              WHERE value NOT IN ('selling_price_usd','selling_price_khr','wholesale_price_usd','wholesale_price_khr','cost_price_usd','cost_price_khr') OR type <> 'text')
+            AND json_type(json_extract(details, '$.request'), '$.skip_zero') IN ('true','false')
+          ELSE 0 END
+          AND json_valid(old_value) AND json_valid(new_value)
+          AND json_type(new_value, '$.rows_touched') = 'integer'
+          AND json_extract(new_value, '$.rows_touched') = json_extract(details, '$.rowsTouched')
         )
       ) ELSE 0 END, 0)
     LIMIT 5000

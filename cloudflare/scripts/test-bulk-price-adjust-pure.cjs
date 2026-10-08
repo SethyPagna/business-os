@@ -79,7 +79,7 @@ function statement(field, direction, amount, skipZero) {
   assert.match(src, /getPermissionTier\(user, 'products'\) !== 'full'/, 'whole-catalog price edits need FULL products access')
   assert.match(src, /if \(body\.preview\) \{/, 'the preview branch answers with a count before anything writes')
   assert.match(src, /'bulk-price-adjust', \{\s*\n\s*scope: 'all'/, 'the audit entry records the whole-catalog scope + parameters')
-  const routeStatement = src.slice(src.indexOf("app.post('/bulk-price-adjust'"), src.indexOf("app.post('/bulk-price-adjust'") + 3200)
+  const routeStatement = src.slice(src.indexOf("app.post('/bulk-price-adjust'"), src.indexOf('// The ONE product identity rule',src.indexOf("app.post('/bulk-price-adjust'")))
   assert.match(routeStatement, /MAX\(0, ROUND\(COALESCE\(\$\{field\}, 0\) \+ @delta, \$\{field\.endsWith\('_khr'\) \? 0 : 2\}\)\)/, 'the route builds exactly the statement shape proven above')
   console.log('PASS route source locks (gate, preview, audit, statement shape)')
 }
