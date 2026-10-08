@@ -2858,7 +2858,7 @@ app.get('/bulk-delete-jobs/:id', async (c) => {
 // cancellation.
 app.post('/bulk-delete-jobs/:id/cancel', async (c) => {
   const user = c.get('user')
-  if (getPermissionTier(user, 'products') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  if (getActionTier(user, 'products', 'bulk_delete') !== 'full') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   try {
     await (await getImportFencedDb(c.env)).prepare(`UPDATE bulk_delete_jobs SET cancel_requested = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND status IN ('pending', 'processing')`).run({ id: c.req.param('id') })
   } catch (error) {
@@ -2874,7 +2874,7 @@ app.post('/variant', async (c) => {
   // role with Products Full and "Add variant" switched off (the Employee default, owner
   // 5 Oct 2026) could still create products here; the action tier honours the override
   // and is identical to the section grant when no override exists.
-  if (getActionTier(user, 'products', 'variant') !== 'full') {
+  if (getActionTier(user, 'products', 'variant') !== 'full' || getActionTier(user, 'products', 'add') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
