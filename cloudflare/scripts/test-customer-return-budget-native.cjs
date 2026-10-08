@@ -223,7 +223,7 @@ async function main() {
   console.log(`PASS cold KV quota handoff/retries: ${handoffMeter.used()} physical statements`)
   for (const option of ['lostAck', 'receiptFailure']) {
     const recovery = await fixture(1)
-    const m = meter(recovery.raw, 50, 10, { [option]: true })
+    const m = meter(recovery.raw, 50, 10, { lostAck: true, [option]: true })
     const first = await request(m.db, '/', recovery.body, recovery.env)
     assert.equal(first.status, option === 'lostAck' ? 200 : 503, JSON.stringify(first))
     if (option === 'receiptFailure') assert.equal(first.body.code, 'unknown_outcome')

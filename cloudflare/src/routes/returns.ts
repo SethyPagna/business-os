@@ -2362,6 +2362,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
       VALUES(@userId,@userName,'create','return_create',@receiptId,@details,'returns',${returnIdExpression},@details)`,
     params: { userId: authenticatedActorId, userName: actorSnapshot(user), receiptId, details: auditDetails, returnClientRequestId: clientRequestId },
   })
+  const receiptResultIndex = statements.length
   statements.push({
     sql: `INSERT INTO return_create_receipts(
       id,actor_id,return_id,sale_id,request_id,request_digest,request_json,response_json,occurred_at
@@ -2370,7 +2371,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
       json_object('id',${returnIdExpression},'returnNumber',@returnNumber,
         'replacementSaleId',${replacementLines.length ? replacementSaleExpression : 'NULL'},
         'replacementReceiptNumber',@replacementReceiptNumber),@occurredAt
-    )`,
+    ) RETURNING return_id,sale_id,request_digest,response_json`,
     params: {
       receiptId, actorId: authenticatedActorId, returnClientRequestId: clientRequestId,
       replacementClientRequestId, saleId: requestedSaleId, requestId: clientRequestId,
@@ -2442,18 +2443,23 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   try {
     assertReturnCreatePlanBounds(statements, canonicalIntent, eventBytes)
     // Cold cache fallback including quota and retries (six), notification reads including
-    // retries (six), and a single-attempt receipt read (one).
-    assertReturnCreateQueryBudget(queryLimit, statementsUsed(), statements.length + 1, 13 + (replacementNotice ? 2 : 0))
+    // retries (six). The successful atomic batch returns its durable receipt.
+    assertReturnCreateQueryBudget(queryLimit, statementsUsed(), statements.length + 1, 12 + (replacementNotice ? 2 : 0))
   } catch (error) {
     if (error instanceof ReturnCreateBudgetError) throw error
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     return c.json({ error: (error as Error).message, code: 'return_too_large' }, 400)
   }
+  let committed: Pick<NonNullable<Awaited<ReturnType<typeof readReceipt>>>,
+    'return_id' | 'sale_id' | 'request_digest' | 'response_json'> | undefined
   try {
     routeStatements += statements.length + 1
     if (!db.batchOnce) throw new Error('Customer returns require single-attempt atomic writes')
-    await db.batchOnce([...statements, ordinaryBusinessMaintenanceGuard])
+    const results = await db.batchOnce([...statements, ordinaryBusinessMaintenanceGuard])
+    if (results.length === statements.length + 1) {
+      committed = results[receiptResultIndex]?.results?.[0] as typeof committed
+    }
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
@@ -2474,16 +2480,10 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     }
   }
 
-  let committed: Awaited<ReturnType<typeof readReceipt>>
-  try {
-    committed = await readReceipt()
-  } catch {
-    return c.json({
-      error: 'The result could not be confirmed. Keep this return open and retry the same request.',
-      code: 'unknown_outcome', action: 'retry_same_request',
-    }, 503)
-  }
-  if (!committed || committed.request_digest !== requestDigest) {
+  if (!committed || committed.request_digest !== requestDigest
+    || (committed.sale_id ?? null) !== requestedSaleId
+    || !Number.isSafeInteger(committed.return_id) || committed.return_id <= 0
+    || typeof committed.response_json !== 'string') {
     return c.json({ error: 'The result could not be confirmed. Retry the same request.', code: 'unknown_outcome', action: 'retry_same_request' }, 503)
   }
   const response = JSON.parse(committed.response_json) as ReturnCreateResponse

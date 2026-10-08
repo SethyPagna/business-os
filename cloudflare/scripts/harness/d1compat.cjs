@@ -123,9 +123,17 @@ class D1Compat {
         // when familyPagination.ts moved from two prepare().get()/.all()
         // calls to one db.batch() round trip.
         const isRead = /^\s*(SELECT|WITH)\b/i.test(item.sql)
-        const info = isRead
-          ? { success: true, results: stmt.all(item.params || {}), meta: { changes: 0 } }
-          : stmt.run(item.params || {})
+        let info
+        if (isRead) {
+          info = { success: true, results: stmt.all(item.params || {}), meta: { changes: 0 } }
+        } else if (stmt._stmt.columns().length > 0) {
+          const before = this.db.prepare('SELECT total_changes() AS n').get().n
+          const rows = stmt.all(item.params || {})
+          const meta = this.db.prepare('SELECT total_changes() - ? AS changes, last_insert_rowid() AS last_row_id').get(before)
+          info = { success: true, results: rows, meta }
+        } else {
+          info = stmt.run(item.params || {})
+        }
         results.push(info)
       }
       this.db.exec('COMMIT')
