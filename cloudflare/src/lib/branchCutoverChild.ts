@@ -173,7 +173,7 @@ export async function executePlannedBranchCutoverChild(db: D1Compat, actor: Sess
   const boundedLots = `(SELECT COUNT(DISTINCT id)<=128 AND COUNT(*)<=256 AND ${lotBytes}<=${SNAPSHOT_BYTES} FROM (${positiveLots}))`
   const fingerprint = await db.prepare(`SELECT CASE WHEN ${boundedLots} THEN (${lotFingerprint}) END AS value`).get<{ value: string }>(stockParams)
   requireChild(fingerprint && typeof fingerprint.value === 'string' && bytes(fingerprint.value) <= SNAPSHOT_BYTES)
-  assertTransferStatementsFit(reservedBudget, 29 + summary.lots)
+  assertTransferStatementsFit(reservedBudget, 30 + summary.lots)
   const boundedReadGate = boundedLots.replaceAll('@product', String(child.transfer.productId)).replaceAll('@source', String(child.sourceBranchId)).replaceAll('@target', String(child.targetBranchId))
     + ` AND EXISTS(SELECT 1 FROM products WHERE id=${child.transfer.productId} AND length(CAST(json_array(name,barcode,created_at) AS BLOB))<=65536)`
   const planningDb = new Proxy(db, { get(target, property, receiver) {
