@@ -1,7 +1,22 @@
 import type { D1Compat } from './db'
 
 export const PRODUCT_HAS_STOCK_CODE = 'product_has_stock'
-export const PRODUCT_HAS_STOCK_MESSAGE = 'Products with stock must stay active. Remove all stock before deleting or deactivating a product, and activate a product before adding stock.'
+export const PRODUCT_HAS_STOCK_MESSAGE = 'Products with stock cannot be removed. Stock can only be added to products that have not been removed.'
+
+export class ProductStatusUnsupportedError extends Error {
+  readonly code = 'product_status_unsupported'
+  readonly status = 409
+  constructor() {
+    super('Products do not have an active or inactive status. Remove the Active column or field and try again.')
+    this.name = 'ProductStatusUnsupportedError'
+  }
+}
+
+export function assertProductStatusInput(body: Record<string, unknown>): void {
+  if (body.is_active != null && ![1, true, '1'].includes(body.is_active as number | boolean | string)) {
+    throw new ProductStatusUnsupportedError()
+  }
+}
 
 export class ProductStockGuardError extends Error {
   readonly code = PRODUCT_HAS_STOCK_CODE
@@ -12,14 +27,15 @@ export class ProductStockGuardError extends Error {
   }
 }
 
-export function productStockGuardError(error: unknown): ProductStockGuardError | null {
+export function productStockGuardError(error: unknown): ProductStockGuardError | ProductStatusUnsupportedError | null {
   const seen = new Set<unknown>()
   let current = error
   while (current && !seen.has(current)) {
-    if (current instanceof ProductStockGuardError) return current
+    if (current instanceof ProductStockGuardError || current instanceof ProductStatusUnsupportedError) return current
     seen.add(current)
     const message = current instanceof Error ? current.message : String(current)
     if (/\bproduct_has_stock\b/.test(message)) return new ProductStockGuardError()
+    if (/\bproduct_status_unsupported\b/.test(message)) return new ProductStatusUnsupportedError()
     current = typeof current === 'object' && 'cause' in current ? current.cause : null
   }
   return null
@@ -41,6 +57,12 @@ function validIds(ids: readonly number[]): number[] {
 
 export function stockVisibleProductSql(alias = 'p', indexedActive = true): string {
   return `(${indexedActive ? '' : '+'}${alias}.is_active = 1 OR ${productHasStockSql(alias)})`
+}
+
+// The legacy bit records catalog removal; ordinary products have no availability status.
+export function catalogProductSql(alias = 'p', indexed = true): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) throw new Error('Invalid product SQL alias')
+  return `${indexed ? '' : '+'}${alias}.is_active = 1`
 }
 
 export async function stockedProductIds(db: Pick<D1Compat, 'prepare'>, ids: readonly number[]): Promise<number[]> {
