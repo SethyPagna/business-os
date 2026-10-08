@@ -106,7 +106,12 @@ export default function AppSelect({
       setOpen(false)
     }
     const closeIfEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        setOpen(false)
+        rootRef.current?.querySelector('button')?.focus({ preventScroll: true })
+      }
     }
     document.addEventListener('mousedown', closeIfOutside)
     document.addEventListener('touchstart', closeIfOutside)

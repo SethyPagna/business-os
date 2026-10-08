@@ -1091,6 +1091,17 @@ export default function FastStockInModal({
   const closeGuard = useCloseGuard({ dirty: closeDirty }, discardAndClose, onMinimize ? preserveAndMinimize : undefined)
   const requestCloseIfIdle = () => { if (!saving) closeGuard.requestClose() }
   const closeBackdropIfIdle = () => { if (!selectedGroup && !reasonsOpen) requestCloseIfIdle() }
+  useEffect(() => {
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || saving || selectedGroup || reasonsOpen || closeGuard.promptOpen) return
+      const targetDialog = event.target instanceof Element ? event.target.closest('[role="dialog"]') : null
+      if (targetDialog && targetDialog !== parentPanelRef.current) return
+      event.preventDefault()
+      closeGuard.requestClose()
+    }
+    window.addEventListener('keydown', onEscape)
+    return () => window.removeEventListener('keydown', onEscape)
+  }, [saving, selectedGroup, reasonsOpen, closeGuard.promptOpen, closeGuard.requestClose])
 
   // ---- lot options ----
   const lotOptions = (() => {
