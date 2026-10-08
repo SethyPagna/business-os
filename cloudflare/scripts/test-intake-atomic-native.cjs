@@ -45,9 +45,9 @@ async function setup(mode, actor = user, realEffects = false, seedBeforeFence) {
         ...(mode.endsWith('tagged') ? { conditionTag: 'broken' } : {}) }
   body.client_request_id = `intake-${mode}-request-0001`
   const url = mode.startsWith('receive') ? '/api/batches' : '/api/inventory/adjust'
-  const send = async (request = body) => {
+  const send = async (request = body, extraHeaders = {}) => {
     const pending = []
-    const res = await app.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) }, f.env, { waitUntil(p) { pending.push(Promise.resolve(p)) } })
+    const res = await app.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...extraHeaders }, body: JSON.stringify(request) }, f.env, { waitUntil(p) { pending.push(Promise.resolve(p)) } })
     await Promise.allSettled(pending)
     return { status: res.status, body: await res.json().catch(() => ({})) }
   }
@@ -334,6 +334,17 @@ async function main() {
     assert.notEqual(refused.status, 200, JSON.stringify(refused))
     assert.equal(f.state(), afterConcurrent)
     assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM stock_mutation_receipts WHERE written=1').get().n, 0)
+  })
+  await check('consolidated branch snapshot preserves explicit redirected intake and addressed history', async () => {
+    const f = await setup('add-tagged', user, false, sql => {
+      sql.exec("INSERT INTO branches(id,name,role,is_active,successor_branch_id) VALUES(2,'Retired fixture','warehouse',0,1)")
+    })
+    const answer = await f.send({ ...f.body, branchId: 2, batchId: 'new' }, { 'X-Branch-Redirect': '1' })
+    assert.equal(answer.status, 200, JSON.stringify(answer))
+    assert.equal(f.sql.prepare('SELECT SUM(quantity_remaining) n FROM damaged_stock_lots WHERE branch_id=1').get().n, 3)
+    const rows = f.sql.prepare('SELECT branch_id,addressed_branch_name FROM inventory_movements ORDER BY id').all()
+    assert.equal(rows.length, 2)
+    assert.ok(rows.every(row => row.branch_id === 1 && row.addressed_branch_name === 'Retired fixture'))
   })
   console.log(JSON.stringify({ passed, failures, budgets }))
   if (failures) process.exitCode = 1
