@@ -24,5 +24,3 @@ async function main(){
  console.log(checks+' no-status checks passed')
 }
 main().catch(error=>{console.error(error);process.exitCode=1})
-
-

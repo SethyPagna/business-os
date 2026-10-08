@@ -40,7 +40,3 @@ async function main() {
   console.log('product no-status stock session: 10 native controls PASS')
 }
 main().catch(e => { console.error(e); process.exitCode = 1 })
-
-
-
-

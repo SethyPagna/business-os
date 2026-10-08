@@ -295,4 +295,3 @@ async function main() {
 }
 if (require.main === module) main().catch(err=>{console.error(err);process.exitCode=1})
 module.exports={seed,request,post,graph,loadReal,rawDb,db,fakeEnv,FAKE_USER,get:async pathname=>{const res=await app.request(pathname,{},fakeEnv,fakeExecutionCtx);return {status:res.status,json:await res.json().catch(()=>null)}},loadedModule:rel=>realModuleCache.get(path.join(SRC_DIR,rel))?.exports}
-
