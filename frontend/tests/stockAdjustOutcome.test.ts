@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import {
+  stockFailureText,
   applyRowOutcome,
   classifyStockAdjustFailure,
   countRows,
@@ -25,6 +26,9 @@ import {
 // DOM: a failure must never touch a row's typed request, a committed row must
 // never re-enter the retry set, and the server's reason must survive intact.
 
+assert.equal(stockFailureText({ code: 'stock_session_query_budget_exceeded', message: 'Saved Worker English' }, (key, fallback) => key === 'stock_session_query_budget_exceeded' ? 'ខ្មែរ' : fallback, 'Fallback'), 'ខ្មែរ')
+assert.equal(stockFailureText({ code: 'vendor_unknown', message: 'Original error' }, (_key, fallback) => fallback, 'Fallback'), 'Original error')
+assert.equal(stockFailureText({ code: 'stock_session_query_budget_exceeded', message: 'Saved Worker English' }, (_key, fallback) => fallback, 'Fallback'), 'Saved Worker English')
 let failed = 0
 function runTest(name: string, fn: () => void): void {
   try {

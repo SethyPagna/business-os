@@ -5635,7 +5635,7 @@ async function applyStockActionsContinuation(
     return { applied: 0, failed: 0 }
     } catch (error) {
       if (!(error instanceof StockQueryBudgetDeferred)) throw error
-      if (reconcile) throw Object.assign(new Error('This reconcile sheet cannot be classified against one stock snapshot within the deployment query budget. Split the sheet or use the paid deployment.'), { code: 'stock_import_reconcile_over_tier_budget' })
+      if (reconcile) throw Object.assign(new Error('This stock file is too large to check against one stock snapshot on the current plan. Split it into smaller files, then try again.'), { code: 'stock_import_reconcile_over_tier_budget' })
       if (windowSize === 1) throw new Error('One stock import row exceeds the deployment query budget during classification; simplify its branch details.')
       stock.classifyWindow = Math.max(1, Math.floor(windowSize / 2))
       budget.reserve = 2
@@ -5708,7 +5708,7 @@ async function applyStockActionsContinuation(
           }
           for (const member of unitRows) {
             member.action = 'error'; member.code = 'stock_import_unit_over_tier_budget'
-            member.message = 'This atomic stock action exceeds the deployment query budget. Split the receipt into smaller independent actions or use the paid deployment.'
+            member.message = 'This stock action is too large for the current plan. Use fewer items or received dates, then try again.'
           }
         } else {
           const stockError = productStockGuardError(error)
@@ -5959,7 +5959,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     const authority = await assertCurrentImportApplyAuthority(env, job, db)
     const importCostActor = { id: actorId(authority.actor), name: actorSnapshot(authority.actor) }
     if (job.type === 'stock_actions' && !env.IMPORT_QUEUE) {
-      throw Object.assign(new Error('Stock action imports require the import queue. Restore the queue binding, then retry this job. Saved stock actions will not be applied again.'), { code: 'import_queue_required' })
+      throw Object.assign(new Error('Stock imports are temporarily unavailable. Ask an administrator to check the import service, then retry this job. Saved stock actions will not be applied again.'), { code: 'import_queue_required' })
     }
     if (jobRow.status !== 'applying') {
       // Reclaim 'applying' status on every entry that isn't already an
@@ -7087,7 +7087,10 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     if (budget) budget.reserve = 2
     if (isImportMaintenanceFenceError(error)) throw error
     const stockError = productStockGuardError(error)
-    await markJobFailed(db, jobId, stockError ? `${stockError.code}: ${stockError.message}` : (error as Error).message || 'Apply failed')
+    const refusalCode = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+    const savedRefusal = ['stock_import_unit_over_tier_budget', 'stock_import_reconcile_over_tier_budget', 'import_queue_required'].includes(refusalCode)
+      ? refusalCode + ': ' + (error as Error).message : null
+    await markJobFailed(db, jobId, stockError ? `${stockError.code}: ${stockError.message}` : savedRefusal || (error as Error).message || 'Apply failed')
     const replacementError = stockError || (error instanceof ProductReplacementIncompleteError ? error : null)
     if (replacementError && replacementFinalizing) {
       const counts = await db.staging.prepare(`SELECT

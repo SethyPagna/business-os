@@ -14,6 +14,7 @@ type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
 
 type ReviewRow = {
+  code?: string | null
   rowNumber: number
   action: string
   identifier?: string | null

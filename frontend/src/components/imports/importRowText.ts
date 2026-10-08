@@ -1,3 +1,4 @@
+import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 // The Worker's stock-import review text, restated in the UI language.
 //
 // The unified stock import (cloudflare/src/lib/stockActionImport.ts) answers each review row with an English
@@ -56,8 +57,8 @@ export function importWarningText(warning: ImportReviewWarning, translate: Trans
     Object.prototype.hasOwnProperty.call(values, name) ? values[name] : token))
 }
 
-export function importRowMessageText(message: string | null | undefined, translate: Translate): string {
-  let text = String(message || '')
+export function importRowMessageText(message: string | null | undefined, translate: Translate, code?: string | null): string {
+  let text = localizeBranchRuleError({ code, message: String(message || '') }, key => translate(key, String(message || '')))
   if (!text) return text
   for (const [english, key] of IMPORT_ROW_SENTENCES) {
     if (text.includes(english)) text = text.split(english).join(translate(key, english))
@@ -67,10 +68,10 @@ export function importRowMessageText(message: string | null | undefined, transla
 
 /** What the review table shows in a row's Details cell. */
 export function importRowDetailText(
-  row: { message?: string | null; warnings?: ImportReviewWarning[] | null },
+  row: { code?: string | null; message?: string | null; warnings?: ImportReviewWarning[] | null },
   translate: Translate,
 ): string {
-  const message = importRowMessageText(row.message, translate)
+  const message = importRowMessageText(row.message, translate, row.code)
   if (message) return message
   return (row.warnings || []).map((warning) => importWarningText(warning, translate)).filter(Boolean).join(' · ') || '—'
 }

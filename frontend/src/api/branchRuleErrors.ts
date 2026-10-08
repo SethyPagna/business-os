@@ -17,6 +17,11 @@
 // pinned against en.json by frontend/tests/productSheetState.test.ts and
 // against the Worker's constants by Cloudflare's branch guard tests.
 export const BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> = [
+  ["This stock change is too large for the current plan. Use fewer products or received dates, then try again.", 'stock_session_query_budget_exceeded'],
+  ["This return is too large for the current plan. Return fewer items or received dates, then try again.", 'customer_return_over_plan_budget'],
+  ["This stock action is too large for the current plan. Use fewer items or received dates, then try again.", 'stock_import_unit_over_tier_budget'],
+  ["This stock file is too large to check against one stock snapshot on the current plan. Split it into smaller files, then try again.", 'stock_import_reconcile_over_tier_budget'],
+  ["Stock imports are temporarily unavailable. Ask an administrator to check the import service, then retry this job. Saved stock actions will not be applied again.", 'import_queue_required'],
   ['Products with stock cannot be removed. Stock can only be added to products that have not been removed.', 'product_has_stock'],
   ['This branch edit can no longer be verified. Refresh Branches and submit a new edit.', 'branch_edit_conflict'],
   ['Branch review is not ready. Refresh after the update and try again.', 'branch_review_schema_required'],
@@ -43,6 +48,9 @@ export const BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> 
 // Worker still in flight (or a queued response) sends these; they map onto the neutral keys so the operator reads the
 // same role-neutral text in either language, and none of them has to equal a pack text.
 export const LEGACY_BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> = [
+  ['This atomic stock action exceeds the deployment query budget. Split the receipt into smaller independent actions or use the paid deployment.', 'stock_import_unit_over_tier_budget'],
+  ['This reconcile sheet cannot be classified against one stock snapshot within the deployment query budget. Split the sheet or use the paid deployment.', 'stock_import_reconcile_over_tier_budget'],
+  ['Stock action imports require the import queue. Restore the queue binding, then retry this job. Saved stock actions will not be applied again.', 'import_queue_required'],
   ['Only allow Shop sale. Please transfer to Shop first.', 'branch_not_sellable'],
   ['Sales can only be recorded at the Shop. Transfer Warehouse stock to the Shop first.', 'branch_not_sellable'],
   ['Transfers move stock only between Shop and Warehouse.', 'transfer_branches_pair_only'],
@@ -65,6 +73,11 @@ export const LEGACY_BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, st
 ]
 
 export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
+  stock_session_query_budget_exceeded: 'stock_session_query_budget_exceeded',
+  customer_return_over_plan_budget: 'customer_return_over_plan_budget',
+  stock_import_unit_over_tier_budget: 'stock_import_unit_over_tier_budget',
+  stock_import_reconcile_over_tier_budget: 'stock_import_reconcile_over_tier_budget',
+  import_queue_required: 'import_queue_required',
   bulk_delete_queue_unavailable: 'bulk_delete_queue_unavailable',
   bulk_delete_queue_resume_required: 'bulk_delete_queue_resume_required',
   product_has_stock: 'product_has_stock',
@@ -135,6 +148,8 @@ export function branchRuleErrorKey(error: unknown): string | null {
     const code = (error as BranchRuleErrorLike).code
     if (typeof code === 'string' && Object.prototype.hasOwnProperty.call(BRANCH_RULE_CODE_KEYS, code)) return BRANCH_RULE_CODE_KEYS[code]
   }
+  const savedCode = /^([a-z_]+):/.exec(branchRuleErrorText(error))?.[1]
+  if (savedCode && Object.prototype.hasOwnProperty.call(BRANCH_RULE_CODE_KEYS, savedCode)) return BRANCH_RULE_CODE_KEYS[savedCode]
   return branchRuleMessageKey(error)
 }
 

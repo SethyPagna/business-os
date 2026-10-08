@@ -11,6 +11,11 @@
 // This is deliberately a short list. A refusal with its own localizer (branchRuleErrors.ts's transfer and branch-edit
 // codes, returns/helpers/returnRefusalError.ts, saleSubmitErrors.ts) is not restated here.
 export const RESTATED_REFUSAL_KEYS: Readonly<Record<string, string>> = {
+  stock_session_query_budget_exceeded: 'stock_session_query_budget_exceeded',
+  customer_return_over_plan_budget: 'customer_return_over_plan_budget',
+  stock_import_unit_over_tier_budget: 'stock_import_unit_over_tier_budget',
+  stock_import_reconcile_over_tier_budget: 'stock_import_reconcile_over_tier_budget',
+  import_queue_required: 'import_queue_required',
   bulk_delete_queue_unavailable: 'bulk_delete_queue_unavailable',
   bulk_delete_queue_resume_required: 'bulk_delete_queue_resume_required',
   product_has_stock: 'product_has_stock',

@@ -1,4 +1,9 @@
 {
+  "stock_session_query_budget_exceeded": "This stock change is too large for the current plan. Use fewer products or received dates, then try again.",
+  "customer_return_over_plan_budget": "This return is too large for the current plan. Return fewer items or received dates, then try again.",
+  "stock_import_unit_over_tier_budget": "This stock action is too large for the current plan. Use fewer items or received dates, then try again.",
+  "stock_import_reconcile_over_tier_budget": "This stock file is too large to check against one stock snapshot on the current plan. Split it into smaller files, then try again.",
+  "import_queue_required": "Stock imports are temporarily unavailable. Ask an administrator to check the import service, then retry this job. Saved stock actions will not be applied again.",
   "bulk_delete_queue_unavailable": "The import queue is unavailable. No products were deleted. Restore the queue or select fewer products for one bulk delete.",
   "bulk_delete_queue_resume_required": "Bulk delete saved its completed rows, but the import queue is unavailable. Select the remaining products and retry after the queue is restored.",
   "product_replacement_incomplete": "Product replacement cannot remove omitted products while source rows failed. Earlier successful rows remain applied. Start a corrected replacement import to finish.",

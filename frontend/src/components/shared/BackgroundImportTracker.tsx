@@ -1,3 +1,4 @@
+import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { Suspense, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { describeJobPolicy } from '../products/import/importTemplateRouter.ts'
 import { parseServerTimestampMs } from '../../utils/formatters.ts'
@@ -1526,7 +1527,7 @@ export default function BackgroundImportTracker() {
             const isJobDismissable = DISMISSABLE_STATUSES.has(jobStatus)
             const isJobRemovable = REMOVABLE_STATUSES.has(jobStatus)
             const isAwaitingReview = jobStatus === 'awaiting_review'
-            const lastError = String(job.last_error || '').trim()
+            const lastError = localizeBranchRuleError(String(job.last_error || '').trim(), t)
             // Active status but either carrying an error, or simply not
             // having checked in for a long time (worker died mid-phase
             // without updating status at all -- see CANCELLABLE/REMOVABLE

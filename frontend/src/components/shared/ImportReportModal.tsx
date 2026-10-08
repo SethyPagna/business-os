@@ -1,3 +1,4 @@
+import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { useEffect, useState } from 'react'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
@@ -259,7 +260,7 @@ export default function ImportReportModal({ jobId, onClose, title }: ImportRepor
               <div className="max-h-56 overflow-y-auto space-y-1.5">
                 {errors.map((row, idx) => (
                   <div key={row.id ?? idx} className="text-xs text-red-900 dark:text-red-200 font-mono">
-                    {row.row_number != null ? `Row ${row.row_number}: ` : ''}{row.message}
+                    {row.row_number != null ? `Row ${row.row_number}: ` : ''}{localizeBranchRuleError(row, t)}
                   </div>
                 ))}
               </div>

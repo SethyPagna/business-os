@@ -48,8 +48,18 @@ const lang = loadModule()
 // CUTOVER-LR adds the disabled-branch family (lib/branchEffect.ts), restated the same way when no redirect float answers.
 const REDIRECT_CODES = ['branch_redirect_required', 'branch_redirect_target_invalid', 'branch_retired_no_successor', 'branch_retired_damaged_stock']
 const BULK_CODES = ['bulk_delete_queue_unavailable', 'bulk_delete_queue_resume_required']
-const CODES = ['branch_not_sellable', 'sale_branch_mismatch', 'sale_identity_conflict', 'unrecorded_stock_line_invalid', 'fee_branch_invalid', 'fee_sale_invalid', 'fee_sale_branch_mismatch', ...REDIRECT_CODES, 'product_has_stock', 'product_status_unsupported', 'product_replacement_incomplete', ...BULK_CODES]
+const PLAN_CODES = ["stock_session_query_budget_exceeded","customer_return_over_plan_budget","stock_import_unit_over_tier_budget","stock_import_reconcile_over_tier_budget","import_queue_required"]
+const CODES = [...PLAN_CODES,'branch_not_sellable', 'sale_branch_mismatch', 'sale_identity_conflict', 'unrecorded_stock_line_invalid', 'fee_branch_invalid', 'fee_sale_invalid', 'fee_sale_branch_mismatch', ...REDIRECT_CODES, 'product_has_stock', 'product_status_unsupported', 'product_replacement_incomplete', ...BULK_CODES]
 const refusal = (code: unknown, message = 'Worker English', status = 400) => Object.assign(new Error(message), { status, code })
+
+await runTest('queue-unavailable HTTP refusal keeps retryable 503 and stable code in Khmer', async () => {
+  uiLanguage = 'km'; packServed = KM
+  const error = refusal('import_queue_required', EN.import_queue_required, 503)
+  await lang.restateBranchRefusal(error)
+  assert.equal(error.message, KM.import_queue_required)
+  assert.equal(error.status, 503)
+  assert.equal(error.code, 'import_queue_required')
+})
 
 await runTest('the restated codes match the Worker refusals and their language pack keys', () => {
   assert.deepEqual(Object.keys(lang.RESTATED_REFUSAL_KEYS).sort(), [...CODES].sort())
@@ -61,6 +71,8 @@ await runTest('the restated codes match the Worker refusals and their language p
 })
 
 await runTest('every code is one the Worker really sends, with the pack English as its sentence', () => {
+  const planSources = ['stockSession.ts', 'returnCreateAction.ts', 'importEngine.ts'].map(file => read(WORKER, 'lib', file)).join('\n')
+  for (const code of PLAN_CODES) { assert.ok(planSources.includes(code)); assert.ok(planSources.includes(EN[code]), code) }
   const guards = read(WORKER, 'lib', 'branchRoleGuards.ts')
   const fees = read(WORKER, 'routes', 'fees.ts')
   const sales = read(WORKER, 'routes', 'sales.ts')

@@ -30,6 +30,9 @@ app.onError((error, c) => {
   if (isImportMaintenanceFenceError(error)) {
     return c.json({ success: false, code: error.code, error: error.message }, 503)
   }
+  if ('code' in error && error.code === 'import_queue_required') {
+    return c.json({ success: false, code: error.code, error: error.message }, 503)
+  }
   console.error(error)
   return c.text('Internal Server Error', 500)
 })
