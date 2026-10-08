@@ -42,8 +42,8 @@ function loadReal(abs) {
 }
 const { applyMovementRevert } = loadReal(path.join(SRC, 'lib', 'stockRevert.ts'))
 
-function freshDb() {
-  const rawDb = openDb(loadAll())
+function freshDb(seedOptions) {
+  const rawDb = openDb(loadAll({ through: 242 }))
   let beforeBatch = null
   const db = {
     prepare(sql) {
@@ -56,14 +56,18 @@ function freshDb() {
         run: async (params) => { const r = stmt.run(params); return { changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) } },
       }
     },
+    async batchOnce(items) { return this.batch(items) },
     async batch(items) {
       await new Promise((r) => setImmediate(r))
-      if (beforeBatch) { const hook = beforeBatch; beforeBatch = null; hook(rawDb) }
+      if (beforeBatch) { const hook = beforeBatch; beforeBatch = null; await hook(rawDb) }
       return rawDb.batch(items)
     },
     async transaction(fn) { return fn(this) },
   }
   rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run()
+  seed(rawDb, seedOptions)
+  rawDb.db.exec(fs.readFileSync(path.join(__dirname,'../migrations/0244_dated_count_decision_receipts.sql'),'utf8'))
+  rawDb.db.exec(fs.readFileSync(path.join(__dirname,'../migrations/0243_stock_schema_epoch.sql'),'utf8'))
   return { rawDb, db, setBeforeBatch(fn) { beforeBatch = fn } }
 }
 
@@ -106,8 +110,7 @@ async function main() {
   ]
   for (const c of cases) {
     await test(`two concurrent reverts of a ${c.name}: exactly one applies`, async () => {
-      const { rawDb, db } = freshDb()
-      seed(rawDb, c)
+      const { rawDb, db } = freshDb(c)
       rawDb.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, batch_id)
         VALUES (50, 1, 'Widget', 1, 'Shop', @type, 3, 'miscount', @batchId)`).run({ type: c.type, batchId: c.batchId })
       const mv = rawDb.prepare('SELECT * FROM inventory_movements WHERE id = 50').get()
@@ -127,8 +130,7 @@ async function main() {
   }
 
   await test('the revert of the revert still applies once (reversal of the reversal)', async () => {
-    const { rawDb, db } = freshDb()
-    seed(rawDb, { stock: 7, lot: false })
+    const { rawDb, db } = freshDb({ stock: 7, lot: false })
     rawDb.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason)
       VALUES (50, 1, 'Widget', 1, 'Shop', 'remove', 3, 'miscount')`).run()
     assert.ok((await applyMovementRevert(db, rawDb.prepare('SELECT * FROM inventory_movements WHERE id = 50').get(), actor)).ok)
@@ -139,14 +141,11 @@ async function main() {
   })
 
   await test('a sale that takes the lot between check and write rolls the whole revert back (stock_changed)', async () => {
-    const { rawDb, db, setBeforeBatch } = freshDb()
-    seed(rawDb, { stock: 10, lot: true })
+    const { rawDb, db, setBeforeBatch } = freshDb({ stock: 10, lot: true })
     rawDb.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, batch_id)
       VALUES (50, 1, 'Widget', 1, 'Shop', 'add', 3, 'miscount', 1)`).run()
-    setBeforeBatch((raw) => {
-      raw.prepare('UPDATE branch_batch_stock SET quantity = 1 WHERE batch_id = 1').run()
-      raw.prepare('UPDATE branch_stock SET quantity = 1 WHERE product_id = 1').run()
-      raw.prepare('UPDATE products SET stock_quantity = 1 WHERE id = 1').run()
+    setBeforeBatch(async (raw) => {
+      await loadReal(path.join(SRC,'lib/stockTransaction.ts')).executeStockTransaction(db,[{sql:'UPDATE branch_batch_stock SET quantity = 1 WHERE batch_id = 1',params:{}},{sql:'UPDATE branch_stock SET quantity = 1 WHERE product_id = 1',params:{}},{sql:'UPDATE products SET stock_quantity = 1 WHERE id = 1',params:{}}], 'once')
     })
     const res = await applyMovementRevert(db, rawDb.prepare('SELECT * FROM inventory_movements WHERE id = 50').get(), actor)
     assert.strictEqual(res.ok, false)
@@ -165,18 +164,12 @@ async function main() {
     { name: 'a removal of 3 from a named lot', stock: 7, type: 'remove', delta: 3 },
   ]) {
     await test(`${c.name} superseded (deleted) between the revert's read and its write: refused, nothing written`, async () => {
-      const { rawDb, db, setBeforeBatch } = freshDb()
-      seed(rawDb, { stock: c.stock, lot: true })
+      const { rawDb, db, setBeforeBatch } = freshDb({ stock: c.stock, lot: true })
       rawDb.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, batch_id)
         VALUES (50, 1, 'Widget', 1, 'Shop', @type, 3, 'Dated stock count import', 1)`).run({ type: c.type })
       const mv = rawDb.prepare('SELECT * FROM inventory_movements WHERE id = 50').get()
-      setBeforeBatch((raw) => {
-        // The re-apply's own batch: the row's effect reversed on both
-        // ledgers, the row deleted (datedStockCountApply.ts).
-        raw.prepare('UPDATE branch_batch_stock SET quantity = quantity + @d WHERE batch_id = 1').run({ d: c.delta })
-        raw.prepare('UPDATE branch_stock SET quantity = quantity + @d WHERE product_id = 1').run({ d: c.delta })
-        raw.prepare('UPDATE products SET stock_quantity = quantity FROM branch_stock WHERE branch_stock.product_id = products.id').run()
-        raw.prepare('DELETE FROM inventory_movements WHERE id = 50').run()
+      setBeforeBatch(async (raw) => {
+      await loadReal(path.join(SRC,'lib/stockTransaction.ts')).executeStockTransaction(db,[{sql:'UPDATE branch_batch_stock SET quantity = quantity + @d WHERE batch_id = 1',params:{ d: c.delta }},{sql:'UPDATE branch_stock SET quantity = quantity + @d WHERE product_id = 1',params:{ d: c.delta }},{sql:'UPDATE products SET stock_quantity = quantity FROM branch_stock WHERE branch_stock.product_id = products.id',params:{}},{sql:'DELETE FROM inventory_movements WHERE id = 50',params:{}}], 'once')
       })
       const before = c.stock + c.delta
       const res = await applyMovementRevert(db, mv, actor)

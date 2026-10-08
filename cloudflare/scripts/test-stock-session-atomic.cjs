@@ -45,10 +45,10 @@ function loadStockSession(entry = 'lib/stockSession.ts', actor = user) {
   return load(entry)
 }
 
-function fixture() {
+function fixture(seedBeforeFence = () => {}) {
   const sql = new Database(':memory:')
   sql.pragma('foreign_keys = OFF')
-  for (const file of fs.readdirSync(path.join(root, 'migrations')).filter((name) => name.endsWith('.sql')).sort()) {
+  for (const file of fs.readdirSync(path.join(root, 'migrations')).filter((name) => name.endsWith('.sql') && !name.startsWith('0243_')).sort()) {
     sql.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
   }
   sql.pragma('foreign_keys = ON')
@@ -58,6 +58,8 @@ function fixture() {
       VALUES(1, 'Serum', 'SER-1', 2, 0, 0, 1);
     INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(1, 1, 0);
   `)
+  seedBeforeFence(sql)
+  sql.exec(fs.readFileSync(path.join(root, 'migrations/0243_stock_schema_epoch.sql'), 'utf8'))
   let failAfterMetadata = false
   let loseNextAcknowledgement = false
   let beforeNextBatch = null
@@ -110,7 +112,7 @@ function fixture() {
       if (beforeNextBatch) {
         const mutate = beforeNextBatch
         beforeNextBatch = null
-        mutate(sql)
+        await mutate(sql)
       }
       const result = runBatch(statements)
       if (loseNextAcknowledgement) {

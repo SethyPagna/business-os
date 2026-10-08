@@ -20,9 +20,8 @@ function appendChain(f, root, depth) {
   return latest(f)
 }
 async function main() {
-  const receipt = fixture()
+  const receipt = fixture(sql => seed({sql}))
   try {
-    seed(receipt)
     const db = getDb(receipt.env)
     for (let generation = 0; generation <= 34; generation++) {
       const lot = receipt.sql.prepare('SELECT received_quantity,received_cost_usd,is_active FROM product_batches WHERE id=7001').get()
@@ -40,9 +39,9 @@ async function main() {
   } finally { receipt.sql.close() }
 
   for (const type of ['add', 'remove', 'adjustment', 'out']) {
-    const f = fixture()
+    let root
+    const f = fixture(sql => { root = seed({sql}, type) })
     try {
-      const root = seed(f, type)
       const db = getDb(f.env)
       const queries = []
       const counted = { prepare: text => { queries.push(text); return db.prepare(text) } }
@@ -63,9 +62,9 @@ async function main() {
   console.log('PASS depth1000 indexed ancestry and receipt versus removal/correction/import financial controls')
 
   for (const malformed of ['missing', 'nonnumeric', 'fractional', 'noncanonical', 'zero', 'negative', 'self', 'forward', 'cycle']) {
-    const f = fixture()
+    let root
+    const f = fixture(sql => { root = seed({sql}, 'add') })
     try {
-      const root = seed(f)
       const end = appendChain(f, root, 2)
       const reference = { missing: 'revert:999999', nonnumeric: 'revert:no-id', fractional: `revert:${root}.5`, noncanonical: `revert:0${root}`, zero: 'revert:0', negative: 'revert:-1', self: `revert:${end.id}`, forward: `revert:${end.id+1}`, cycle: `revert:${end.id-1}` }[malformed]
       f.sql.prepare('UPDATE inventory_movements SET reference_id=? WHERE id=?').run(reference, end.id)
