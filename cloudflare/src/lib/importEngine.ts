@@ -1,3 +1,4 @@
+import { executeStockTransaction, stockTransactionStatementCount, StockTransactionUnavailableError, StockTransactionOutcomeUnknownError } from './stockTransaction'
 // Import job analyze/apply engine.
 //
 // WHAT THIS PORTS FAITHFULLY from backend/src/services/importJobs.ts:
@@ -4695,7 +4696,7 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
     `).run({ id: jobId, total, errored: byAction.error, warned, summary: JSON.stringify(summary) })
     console.log('[import-timing] analyze done', jobId, summary.timings.analyze)
   } catch (error) {
-    if (isImportMaintenanceFenceError(error)) throw error
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError || isImportMaintenanceFenceError(error)) throw error
     await markJobFailed(db, jobId, (error as Error).message || 'Analyze failed')
     throw error
   } finally {
@@ -5074,7 +5075,7 @@ export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId:
     productId: Number(group.product_id), branchId: Number(group.branch_id),
     quantity: Number(group.expected_quantity), receivedDate: group.received_date,
   }).map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })),
-  ]))
+  ]), D1_IMPORT_BATCH_CHUNK_SIZE, true)
   return groups.length
 }
 
@@ -5698,7 +5699,7 @@ async function applyStockActionsContinuation(
         touched.push(...unitRows)
         delete stock.deferredRow
       } catch (error) {
-        if (isImportMaintenanceFenceError(error) || (typeof isRetryableD1Error === 'function' && isRetryableD1Error(error))) throw error
+        if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError || isImportMaintenanceFenceError(error) || (typeof isRetryableD1Error === 'function' && isRetryableD1Error(error))) throw error
         if (error instanceof StockQueryBudgetDeferred) {
           if (budget.physicalBatches !== beforePhysical || stock.deferredRow !== record.row_number) {
             if (budget.physicalBatches === beforePhysical) stock.deferredRow = record.row_number
@@ -5835,13 +5836,16 @@ export async function runD1BatchGroupsInChunks(
   db: D1Compat,
   groups: Array<Array<{ sql: string; params: Record<string, unknown> }>>,
   chunkSize: number = D1_IMPORT_BATCH_CHUNK_SIZE,
+  stockWrites: boolean = false,
 ): Promise<void> {
+  const statementLimit = stockWrites ? chunkSize - stockTransactionStatementCount(0) : chunkSize
   const packs: Array<typeof groups> = []
   let pack: typeof groups = []
   let packSize = 0
   for (const group of groups) {
     if (!group.length) continue
-    if (packSize + group.length > chunkSize && pack.length) {
+    if (stockWrites && stockTransactionStatementCount(group.length) > chunkSize) throw new Error('import_stock_group_statement_budget_exceeded')
+    if (packSize + group.length > statementLimit && pack.length) {
       packs.push(pack)
       pack = []
       packSize = 0
@@ -5852,12 +5856,13 @@ export async function runD1BatchGroupsInChunks(
   if (pack.length) packs.push(pack)
   for (const packedGroups of packs) {
     try {
-      await db.batch(packedGroups.flat())
+      if (stockWrites) await executeStockTransaction(db, packedGroups.flat(), 'retry')
+      else await db.batch(packedGroups.flat())
     } catch (error) {
       if (!isD1CpuLimitError(error) || packedGroups.length <= 1) throw error
       const mid = Math.ceil(packedGroups.length / 2)
-      await runD1BatchGroupsInChunks(db, packedGroups.slice(0, mid), chunkSize)
-      await runD1BatchGroupsInChunks(db, packedGroups.slice(mid), chunkSize)
+      await runD1BatchGroupsInChunks(db, packedGroups.slice(0, mid), chunkSize, stockWrites)
+      await runD1BatchGroupsInChunks(db, packedGroups.slice(mid), chunkSize, stockWrites)
     }
   }
 }
@@ -5889,7 +5894,7 @@ export async function finalizeProductReplacement(db: D1Compat, cutoff: string,
   const candidates = `p.is_active=1 AND (p.updated_at IS NULL OR p.updated_at < @cutoff)`
   const params = { cutoff, jobId: context.jobId ?? null, actorId: context.actor?.id ?? null, actorName: context.actor?.name ?? null }
   try {
-    const result = await db.batch([
+    const result = await executeStockTransaction(db, [
       { sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products p WHERE ${candidates} AND ${productHasStockSql()})
           THEN json_extract('[]','$[product_has_stock]') ELSE 1 END`, params: { cutoff } },
       { sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
@@ -5899,7 +5904,7 @@ export async function finalizeProductReplacement(db: D1Compat, cutoff: string,
           FROM products p WHERE ${candidates}`, params },
       { sql: `UPDATE products SET is_active=0,updated_at=CURRENT_TIMESTAMP
           WHERE is_active=1 AND (updated_at IS NULL OR updated_at < @cutoff)`, params: { cutoff } },
-    ])
+    ], 'retry')
     return Number(result[2]?.meta?.changes || 0)
   } catch (error) { throw productStockGuardError(error) || error }
 }
@@ -6160,6 +6165,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // stay in one D1 batch. Besides preserving the row's own invariants,
     // this prevents a branch identity change between a product INSERT and
     // its branch_stock/batch writes from leaving a half-applied row.
+    const productMetadataStatementGroups = new Set<Array<{ sql: string; params: Record<string, unknown> }>>()
     const productStatementGroups: Array<Array<{ sql: string; params: Record<string, unknown> }>> = []
     let productSeedBranchIds: number[] = []
     const appliedRowGuards = new Set(
@@ -6399,7 +6405,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           if (statement) rowWriteGroup.push(statement)
         }
         let rowWriteGroupFinished = false
-        const finishProductRowWriteGroup = () => {
+        const finishProductRowWriteGroup = (stockWrites = rowWriteGroup.some(statement => /\b(?:INSERT(?: OR IGNORE)? INTO|UPDATE|DELETE FROM)\s+(?:branch_stock|branch_batch_stock|product_batches)\b|\bINSERT INTO products\b|\bUPDATE products SET stock_quantity\b/i.test(statement.sql))) => {
           if (rowWriteGroupFinished) return
           rowWriteGroupFinished = true
           const mergeRecords = autoMergeRecords.filter((record) => record.rowNumber === r.rowNumber)
@@ -6418,7 +6424,10 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           }
           // A row redirected from a disabled branch labels its movements (CUTOVER-LR); any other row is untouched.
           rowWriteGroup = labelAddressedMovements(rowWriteGroup, d)
-          if (rowWriteGroup.length) productStatementGroups.push(rowWriteGroup)
+          if (rowWriteGroup.length) {
+            productStatementGroups.push(rowWriteGroup)
+            if (!stockWrites) productMetadataStatementGroups.add(rowWriteGroup)
+          }
         }
         // Populates the same name_normalized/unit_normalized/brand_compact
         // columns lib/productWrites.ts's insertRow/updateRow compute for
@@ -6464,7 +6473,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
               sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
               params: { ...d, id: r.existingId, updated_at: nowIso },
             })
-            finishProductRowWriteGroup()
+            finishProductRowWriteGroup(false)
             continue
           }
           if (productImportMode === 'replace_columns' && productReplaceColumns.length) {
@@ -6503,7 +6512,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                 params,
               })
             }
-            finishProductRowWriteGroup()
+            finishProductRowWriteGroup(false)
             continue
           }
           // 'merge_stock' means "only touch quantity/batch, leave every
@@ -6927,14 +6936,20 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
         ...productSeedBranchIds,
       ], branchRedirects)
     }
-    if (productStatementGroups.length) await runD1BatchGroupsInChunks(importWriteDb, productStatementGroups)
+    for (let start = 0; start < productStatementGroups.length;) {
+      const stockWrites = !productMetadataStatementGroups.has(productStatementGroups[start])
+      let end = start + 1
+      while (end < productStatementGroups.length && !productMetadataStatementGroups.has(productStatementGroups[end]) === stockWrites) end++
+      await runD1BatchGroupsInChunks(importWriteDb, productStatementGroups.slice(start, end), D1_IMPORT_BATCH_CHUNK_SIZE, stockWrites)
+      start = end
+    }
     if (statements.length) await runD1BatchInChunks(importWriteDb, statements)
     // The guarded additive groups run AFTER the plain statements (their
     // UPDATEs may reference products the create statements above insert)
     // and through the group-atomic runner, so each row's guard commits in
     // the same db.batch() as its stock writes -- see guardedGroups'
     // declaration comment.
-    if (guardedGroups.length) await runD1BatchGroupsInChunks(importWriteDb, guardedGroups)
+    if (guardedGroups.length) await runD1BatchGroupsInChunks(importWriteDb, guardedGroups, D1_IMPORT_BATCH_CHUNK_SIZE, job.type === 'inventory' || job.type === 'products')
     sw.lap('buildAndWriteStatementsMs')
 
     // Each reviewed receipt is one idempotent D1 transaction: header,
@@ -7085,7 +7100,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
   } catch (error) {
     const budget = (db as BudgetDb)[STOCK_QUERY_BUDGET]
     if (budget) budget.reserve = 2
-    if (isImportMaintenanceFenceError(error)) throw error
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError || isImportMaintenanceFenceError(error)) throw error
     const stockError = productStockGuardError(error)
     const refusalCode = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
     const savedRefusal = ['stock_import_unit_over_tier_budget', 'stock_import_reconcile_over_tier_budget', 'import_queue_required'].includes(refusalCode)

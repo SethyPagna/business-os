@@ -1,3 +1,4 @@
+import { executeStockTransaction, stockTransactionStatementCount, StockTransactionUnavailableError, StockTransactionOutcomeUnknownError } from '../lib/stockTransaction'
 import { assertProductStatusInput, assertProductsActive, catalogProductSql, productStockGuardStatement, productHasStockSql, productStockGuardError } from '../lib/productStockGuard'
 import { Hono } from 'hono'
 import { acquisitionCostResponses, canEditAcquisitionCosts, hasCatalogCostWrite } from '../lib/acquisitionCostAccess'
@@ -184,6 +185,7 @@ app.use('*', async (c, next) => {
     }
     announceProductAlert(c, user, PRODUCT_MERGE_ALERT_HEADING, formatProductMergeAlertLines({ kept, merged, by: actorSnapshot(user) }))
   } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     console.error('[telegram] product merge alert failed', error)
   }
 })
@@ -258,6 +260,7 @@ async function validateImageGalleryPayload(
     body.image_gallery = validateProductImageGallery(body.image_gallery, imageLimitForUser(user))
     return null
   } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     if (error instanceof ProductImageLimitError) {
       // Existing admin galleries can be preserved/reordered/reduced by a
       // normal editor, but the editor cannot introduce a fourth/fifth path.
@@ -1195,6 +1198,7 @@ async function searchProductsWithIndexFallback(env: Env, query: Record<string, s
   try {
     return await searchProductsPayload(env, query)
   } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     if (!isProductSearchIndexUnavailable(error)) throw error
     return searchProductsPayload(env, query, { useSearchIndex: false })
   }
@@ -2069,6 +2073,7 @@ async function foldCreateIntoExisting(
 
 function productStatusInputRefusal(c: any, body: Record<string, unknown>) {
   try { assertProductStatusInput(body) } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const refusal = productStockGuardError(error)
     if (refusal) return c.json({ success: false, code: refusal.code, error: refusal.message }, 409)
     throw error
@@ -2089,6 +2094,7 @@ app.post('/', async (c) => {
     return c.json({ error: 'Cost-entry permission is required to set catalog costs.', code: 'product_cost_edit_required' }, 403)
   }
   try { await prepareProductMoneyWrite(c.env, body, null) } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error
   }
@@ -2109,6 +2115,7 @@ app.post('/', async (c) => {
   // import path would never allow. Same name with a DIFFERENT REAL barcode
   // stays a legitimate child row and passes through untouched.
   try { await productCreateDestination(c.env, body, () => branchRedirectTarget(c)) } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const response = productCreateErrorResponse(error)
     if (response) return c.json(response.body, response.status)
     throw error
@@ -2130,6 +2137,7 @@ app.post('/', async (c) => {
   try {
     await resolveProductImageFields(getDb(c.env), body)
   } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     if (error instanceof ProductImageAssetError) return c.json({ error: error.message, code: error.code }, 409)
     throw error
   }
@@ -2169,6 +2177,7 @@ app.post('/', async (c) => {
 
   let created
   try { created = await createProductWithInitialStock(c.env, body, { name, is_active: 1 }, imageLimitForUser(user), undefined, () => branchRedirectTarget(c)) } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const response = productCreateErrorResponse(error)
     if (response) return c.json(response.body, response.status)
     throw error
@@ -2325,6 +2334,7 @@ app.put('/:id', async (c) => {
   // No-op when the client sends no token, so token-less/bulk writes are
   // unaffected; a missing row surfaces as a 'deleted' conflict.
   try { await assertProductsActive(getDb(c.env), [Number(id)]) } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const refusal = productStockGuardError(error)
     if (refusal) return c.json({ success: false, code: refusal.code, error: refusal.message }, 409)
     throw error
@@ -2337,6 +2347,7 @@ app.put('/:id', async (c) => {
     try {
       assertUpdatedAtMatch('product', currentForConflict, expectedProductUpdatedAt)
     } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const stockError = productStockGuardError(error)
     if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
       if (error instanceof WriteConflictError) {
@@ -2348,6 +2359,7 @@ app.put('/:id', async (c) => {
   }
 
   try { await prepareProductMoneyWrite(c.env, body, Number(id), expectedProductUpdatedAt) } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const stockError = productStockGuardError(error)
     if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
@@ -2392,6 +2404,7 @@ app.put('/:id', async (c) => {
       try {
         await resolveProductImageFields(getDb(c.env), body)
       } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const stockError = productStockGuardError(error)
     if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
         if (error instanceof ProductImageAssetError) return c.json({ error: error.message, code: error.code }, 409)
@@ -2458,6 +2471,7 @@ app.put('/:id', async (c) => {
           sql: 'UPDATE products SET name = @name, barcode = @barcode, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND is_active=1',
           params: { name: nextName, barcode: nextBarcode, id: Number(id) },
         }]) } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
           const refusal = productStockGuardError(error)
           if (refusal) return c.json({ error: refusal.message, code: refusal.code }, refusal.status)
           throw error
@@ -2479,6 +2493,7 @@ app.put('/:id', async (c) => {
             'edit identity fold', 'merge', undefined, { operationId: crypto.randomUUID() },
           )
         } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
           const stockError = productStockGuardError(error)
           const stateConflict = /merge_state_conflict|merge_identity_conflict/.test(String(error))
           const refusal = mergeFoldRefusal(error)
@@ -2516,6 +2531,7 @@ app.put('/:id', async (c) => {
             await prepareProductMoneyWrite(c.env, rest, duplicate.id)
             await updateRow(c.env, 'products', duplicate.id, rest, { id: actorId(user), name: actorSnapshot(user) })
           } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const stockError = productStockGuardError(error)
     if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
             if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
@@ -2609,6 +2625,7 @@ app.put('/:id', async (c) => {
       .get<Record<string, unknown>>({ id })
     : null
   try { await updateRow(c.env, 'products', id, body, { id: actorId(user), name: actorSnapshot(user) }) } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const stockError = productStockGuardError(error)
     if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
@@ -2720,6 +2737,7 @@ app.delete('/:id', async (c) => {
     plan = await prepareProductRemovePlan(db, id, reason)
     assertUpdatedAtMatch('product', plan.product, getExpectedUpdatedAt(body))
   } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const stockError = productStockGuardError(error)
     if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
     if (error instanceof WriteConflictError) {
@@ -2738,6 +2756,7 @@ app.delete('/:id', async (c) => {
   if (tier === 'review') {
     try { await db.batch(productRemoveQueueStatements({ plan, operationId, requestId, user, planDigest })) }
     catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const stockError = productStockGuardError(error)
     if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
       const replay = suppliedRequestId ? await db.prepare(`SELECT * FROM product_remove_operations
@@ -2755,8 +2774,9 @@ app.delete('/:id', async (c) => {
   }
   const transitionStamp = new Date().toISOString()
   try {
-    await db.batch(productRemoveApplyStatements({ plan, operationId, source: 'direct', requestId, user, transitionStamp, planDigest }))
+    await executeStockTransaction(db, productRemoveApplyStatements({ plan, operationId, source: 'direct', requestId, user, transitionStamp, planDigest }), 'retry')
   } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const stockError = productStockGuardError(error)
     if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
     const replay = await db.prepare(`SELECT * FROM product_remove_operations WHERE actor_id=@actor AND source='direct' AND request_id=@request`)
@@ -2819,6 +2839,7 @@ app.post('/bulk-delete-jobs', async (c) => {
     const { jobId, totalCount } = await createBulkDeleteJob(c.env, 'products', rawIds as number[], reason, { id: user?.id ?? null, name: actorSnapshot(user) })
     return c.json({ success: true, jobId, totalCount }, 202)
   } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     if (isImportMaintenanceFenceError(error)) return c.json({ code: error.code, error: error.message }, 503)
     if (error instanceof Error && 'code' in error && error.code === 'bulk_delete_queue_unavailable') {
       return c.json({ code: error.code, error: error.message }, 503)
@@ -2862,6 +2883,7 @@ app.post('/bulk-delete-jobs/:id/cancel', async (c) => {
   try {
     await (await getImportFencedDb(c.env)).prepare(`UPDATE bulk_delete_jobs SET cancel_requested = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND status IN ('pending', 'processing')`).run({ id: c.req.param('id') })
   } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     if (isImportMaintenanceFenceError(error)) return c.json({ code: error.code, error: error.message }, 503)
     throw error
   }
@@ -2884,6 +2906,7 @@ app.post('/variant', async (c) => {
     return c.json({ error: 'Cost-entry permission is required to set catalog costs.', code: 'product_cost_edit_required' }, 403)
   }
   try { await prepareProductMoneyWrite(c.env, body, null) } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error
   }
@@ -2894,6 +2917,7 @@ app.post('/variant', async (c) => {
   try {
     await resolveProductImageFields(getDb(c.env), body)
   } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     if (error instanceof ProductImageAssetError) return c.json({ error: error.message, code: error.code }, 409)
     throw error
   }
@@ -2904,6 +2928,7 @@ app.post('/variant', async (c) => {
   if (!changesImages) omitUnchangedProductImageFields(body)
   let created
   try { created = await createProductWithInitialStock(c.env, body, { name, is_active: 1 }, imageLimitForUser(user), undefined, () => branchRedirectTarget(c)) } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const response = productCreateErrorResponse(error)
     if (response) return c.json(response.body, response.status)
     throw error
@@ -4388,12 +4413,13 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
   // Keep each atomic write batch within the same conservative 100-statement
   // bound used by the catalog's D1 query chunking. Refuse before the first
   // write so an unusually linked product cannot create an ambiguous outcome.
-  if (statements.length > 100) throw new Error('merge_case_statement_budget_exceeded')
+  if (stockTransactionStatementCount(statements.length) > 100) throw new Error('merge_case_statement_budget_exceeded')
 
   let batchResults: Array<{ meta?: { last_row_id?: number } }> = []
   try {
-    batchResults = await db.batch(statements)
+    batchResults = await executeStockTransaction(db, statements, 'retry')
   } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const stockError = productStockGuardError(error)
     if (stockError) throw stockError
     if (String(error).includes(MERGE_CONFLICT_RETRY)) throw new Error(MERGE_CONFLICT_RETRY)
@@ -5646,6 +5672,7 @@ app.post('/merge-duplicates', async (c) => {
           stopAfterCommittedCase = true
         }
       } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
         if (isProductMergeInfrastructureError(error)) {
           if (mergedIds.length > 0) {
             groupSummaries.push({ canonicalId, canonicalName, mergedIds, mergedNames })
@@ -5691,6 +5718,7 @@ app.post('/merge-duplicates', async (c) => {
       if (mergedProductsCount >= MERGE_DUPLICATES_MAX_PRODUCTS_PER_REQUEST) break
     }
   } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     if (mergedProductsCount <= 0) throw error
     interruptionCode = 'merge_infrastructure_interrupted'
   }
@@ -5703,6 +5731,7 @@ app.post('/merge-duplicates', async (c) => {
         ? refreshedGroups.filter((group) => groups.some((selected) => selected.canonical.id === group.canonical.id))
         : refreshedGroups
     } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
       if (mergedProductsCount <= 0) throw error
       interruptionCode = 'merge_infrastructure_interrupted'
     }
@@ -7271,6 +7300,7 @@ app.post('/possible-duplicates/merge-batch/preview', async (c) => {
     let request
     try { request = parseProductConflictActionPreviewRequest(raw) }
     catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
       const validation = error instanceof ProductConflictMergeValidationError ? error : new ProductConflictMergeValidationError('The selected conflict review request is invalid.')
       return c.json({ success: false, code: validation.code, error: validation.message }, validation.status as 400 | 409 | 413)
     }
@@ -7306,6 +7336,7 @@ app.post('/possible-duplicates/merge-batch/preview', async (c) => {
       }
       try { review = await createProductConflictActionReview(db, user.id, request, requestDigest) }
       catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
         review = await db.prepare(`SELECT id,actor_id,request_id,request_digest,draft_digest,finalize_digest,manifest_digest,status,
           requested_action_count,requested_group_count,requested_removal_count,actionable_group_count,blocked_group_count,total_member_count,expires_at
           FROM product_conflict_action_reviews WHERE actor_id=@actorId AND request_id=@requestId`)
@@ -7332,6 +7363,7 @@ app.post('/possible-duplicates/merge-batch/preview', async (c) => {
   let request
   try { request = parseProductConflictPreviewRequest(raw) }
   catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const validation = error instanceof ProductConflictMergeValidationError ? error : new ProductConflictMergeValidationError('The selected merge preview request is invalid.')
     return c.json({ success: false, code: validation.code, error: validation.message }, 400)
   }
@@ -7369,6 +7401,7 @@ app.post('/possible-duplicates/merge-batch/reviews/:reviewId/finalize', async (c
   let request
   try { request = parseProductConflictActionFinalizeRequest(await c.req.json().catch(() => null)) }
   catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const validation = error instanceof ProductConflictMergeValidationError ? error : new ProductConflictMergeValidationError('The conflict finalization request is invalid.')
     return c.json({ success: false, code: validation.code, error: validation.message }, validation.status as 400 | 409 | 413)
   }
@@ -7456,6 +7489,7 @@ app.post('/possible-duplicates/merge-batch/reviews/:reviewId/finalize', async (c
       }
     }
   } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const validation = error instanceof ProductConflictMergeValidationError ? error : new ProductConflictMergeValidationError('The reviewed conflict state is invalid.', 'review_state_conflict', 409)
     return c.json({ success: false, code: validation.code, error: validation.message }, validation.status as 400 | 409 | 413)
   }
@@ -8062,6 +8096,7 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
   let request
   try { request = parseProductConflictActionApplyRequest(raw) }
   catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const validation = error instanceof ProductConflictMergeValidationError ? error : new ProductConflictMergeValidationError('The reviewed apply request is invalid.')
     return c.json({ success: false, code: validation.code, error: validation.message }, validation.status as 400 | 409)
   }
@@ -8127,6 +8162,7 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
     plan = strictProductConflictActionFinalPlan(group, review.id)
     detail = JSON.parse(group.detail_json) as ProductConflictActionGroupPlan
   } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const validation = error instanceof ProductConflictMergeValidationError ? error : new ProductConflictMergeValidationError('The stored conflict review is unreadable.', 'review_corrupt', 409)
     throw new ProductConflictActionApplyStop(validation.code, validation.message, 409)
   }
@@ -8236,6 +8272,7 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
         snapshotContext: { review_id: review.id, group_key: group.group_key, authority: plan.authority },
       })
   } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const conflict = /merge_state_conflict|merge_identity_conflict|merge_cluster_plan_conflict|merge_conflict_retry/.test(String(error))
     const stockError = productStockGuardError(error)
     if (stockError) throw new ProductConflictActionApplyStop(stockError.code, stockError.message, 409)
@@ -8269,6 +8306,7 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
         break
       }
     } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
       const stop = error instanceof ProductConflictActionApplyStop
         ? error
         : new ProductConflictActionApplyStop('merge_infrastructure_interrupted', 'The reviewed merge was interrupted.', 500)
@@ -8313,9 +8351,9 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
           status: 'approval_pending', pending_action_id: pending?.pending_action_id ?? null, undo_availability: 'unavailable', generation: 0 })
       } else {
         const transitionStamp = new Date().toISOString()
-        await db.batch(productRemoveApplyStatements({ plan, operationId: operation.operation_id, source: 'conflict_review',
+        await executeStockTransaction(db, productRemoveApplyStatements({ plan, operationId: operation.operation_id, source: 'conflict_review',
           requestId: operation.request_id, reviewId: review.id, actionOrdinal: Number(operation.action_ordinal), user,
-          transitionStamp, planDigest: operation.plan_digest, receiptActorId: operation.actor_id, requesterId: operation.requester_id }))
+          transitionStamp, planDigest: operation.plan_digest, receiptActorId: operation.actor_id, requesterId: operation.requester_id }), 'retry')
         const applied = await db.prepare(`SELECT action_history_id,generation FROM product_remove_operations
           WHERE operation_id=@operation AND status='undo_ready'`).get<{ action_history_id: number | null; generation: number }>({ operation: operation.operation_id })
         if (!applied?.action_history_id) throw new Error('product_remove_history_missing')
@@ -8323,6 +8361,7 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
           status: 'undo_ready', action_history_id: applied.action_history_id, undo_availability: 'ready', generation: Number(applied.generation) })
       }
     } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
       const stockError = productStockGuardError(error)
       if (stockError) {
         interruption = new ProductConflictActionApplyStop(stockError.code, stockError.message, 409)
@@ -8446,6 +8485,7 @@ app.post('/possible-duplicates/merge-batch', async (c) => {
   let request
   try { request = parseProductConflictApplyRequest(raw) }
   catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const validation = error instanceof ProductConflictMergeValidationError ? error : new ProductConflictMergeValidationError('The selected merge request is invalid.')
     return c.json({ success: false, code: validation.code, error: validation.message }, 400)
   }
@@ -8529,6 +8569,7 @@ app.post('/possible-duplicates/merge-batch', async (c) => {
     }
     try { await db.batch(insertStatements) }
     catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
       if (/malformed JSON|selected_conflict_state_guard/i.test(String(error))) {
         return c.json({ success: false, code: 'merge_state_conflict', error: 'A selected product changed during final confirmation. Refresh the combined review; nothing was merged and no receipt was created.' }, 409)
       }
@@ -8590,6 +8631,7 @@ app.post('/possible-duplicates/merge-batch', async (c) => {
         }
         prepared = current.prepared[0]
       } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
         if (isProductMergeInfrastructureError(error)) { interruptionCode = 'merge_infrastructure_interrupted'; break }
         throw error
       }
@@ -8666,6 +8708,7 @@ app.post('/possible-duplicates/merge-batch', async (c) => {
           .run({ status: result.undoReady ? 'undo_ready' : 'history_pending', historyId: result.actionHistoryId, runId: run.id, ordinal: item.ordinal })
         if (!result.undoReady) { interruptionCode = 'merge_history_pending'; break }
       } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
         if (isProductMergeInfrastructureError(error)) {
           interruptionCode = 'merge_infrastructure_interrupted'
           break
@@ -9018,6 +9061,7 @@ app.post('/possible-duplicates/merge', async (c) => {
     try {
       choiceFields = resolveChoiceValues(resolvePlan.choices, resolvePlan.rows)
     } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
       if (error instanceof ProductResolveChoiceError) return c.json({ success: false, code: error.code, error: error.message }, 400)
       throw error
     }
@@ -9093,6 +9137,7 @@ app.post('/possible-duplicates/merge', async (c) => {
       keepMode ? { follows: true, requiresProductEdit: resolveChoicesTypeValues({ choices }), ...(chosenCost ? { cost: chosenCost } : {}), ...(resolvePlan ? { economics: resolveProductMergeEconomics(resolvePlan.rows) } : {}), ...(choiceFields ? { fields: choiceFields } : {}) } : undefined,
     )
   } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     if (/merge_state_conflict|merge_identity_conflict/.test(String(error))) {
       return c.json({ success: false, code: 'merge_state_conflict', error: 'One of these products changed while the merge was being prepared. Refresh and try again.' }, 409)
     }
@@ -9322,7 +9367,8 @@ app.post('/zero-quantity-delete', async (c) => {
   }
 
   if (statements.length) {
-    try { await db.batch([productStockGuardStatement(deletedIds), ...statements]) } catch (error) {
+    try { await executeStockTransaction(db, [productStockGuardStatement(deletedIds), ...statements], 'retry') } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
       const stockError = productStockGuardError(error)
       if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
       throw error
@@ -9513,6 +9559,7 @@ app.get('/lookups/usage', async (c) => {
       units: buildLookupUsageEntries(unitLibrary, unitRows, 'unit'),
     })
   } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     return c.json({ success: false, error: (error as Error).message || 'Failed to load lookup usage' }, 500)
   }
 })
@@ -9566,6 +9613,7 @@ app.post('/upload-image', async (c) => {
   try {
     detected = validateUploadedBuffer(buffer, claimedMimeType, originalName)
   } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     return c.json({ success: false, error: (error as Error).message }, 400)
   }
   if (!isPublicImageFormat(detected)) return c.json({ success: false, error: UNSUPPORTED_IMAGE_MESSAGE }, 400)
