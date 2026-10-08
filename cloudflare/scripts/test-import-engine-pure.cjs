@@ -732,12 +732,15 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   // would touch a different table (sales/returns/sale_items/branch_stock)
   // as part of "replace_all" -- the block between the mode check and the
   // next unrelated section should only ever prepare one statement.
-  const blockStart = source.indexOf("getProductImportMode(job.policy_json) === 'replace_all'")
+  const blockStart = source.indexOf("if (productImportMode === 'replace_all') {", source.indexOf("const finalContext:"))
   assert.ok(blockStart !== -1, 'the replace_all block should still exist in runImportApply')
-  const blockEnd = source.indexOf('Last chunk: cache invalidation', blockStart)
+  const blockEnd = source.indexOf('} else await commitProductFinalization', blockStart)
   const block = source.slice(blockStart, blockEnd)
   const dbPrepareCount = (block.match(/db\.prepare\(/g) || []).length
-  assert.strictEqual(dbPrepareCount, 0, 'replacement delegates its guarded transaction to finalizeProductReplacement')
+  assert.strictEqual(dbPrepareCount, 0, 'replacement delegates its whole guarded finalizer transaction')
+  assert.strictEqual((block.match(/db\.staging\.prepare\(/g) || []).length, 1, 'replacement reads refused source rows from actual staging before finalization')
+  assert.match(block, /ProductReplacementIncompleteError/)
+  assert.match(block, /finalize: finalContext/, 'replacement must carry the current persisted run and lease context')
   assert.match(block, /finalizeProductReplacement\(db,/)
   assert.ok(!/\bDELETE\s+FROM\b/i.test(block), 'replace_all must never hard-DELETE -- soft-deactivate only, so sales/returns/audit rows referencing a deactivated product stay valid')
   assert.ok(!/\bsale_items\b|\breturns\b|\bsales\b|\bbranch_stock\b|\bdiscounts?\b/i.test(block), 'the replace_all block must not reference sales, returns, sale_items, branch_stock, or discounts -- it only ever touches products')
@@ -918,7 +921,10 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   assert.ok(/planReconcileBranchSnapshot/.test(block), 'duplicate and single snapshot rows share the executable lot/branch reconciliation planner')
   assert.ok(/receivedDate: group.received_date/.test(block), 'snapshot reconciliation carries the explicit import receipt date')
   assert.ok(/snapshotGroupsAggregated/.test(source), 'the completed import summary should expose how many duplicate snapshot groups were corrected')
-  assert.ok(/runD1BatchGroupsInChunks\(guardedDb, groups.map/.test(block), 'each duplicate snapshot correction keeps branch, lot, and aggregate writes in one guarded batch group')
+  assert.match(block, /ORDER BY product_id,branch_id LIMIT 1/, 'each invocation advances exactly one persisted product/branch group')
+  assert.match(block, /prior\.pendingHash !== digest/, 'the persisted digest must match the actual rederived snapshot before execution')
+  assert.match(block, /commitProductFinalization\(guardedDb, context, next, \[/, 'each duplicate snapshot correction and its progress seal use the actual atomic executor')
+  assert.match(block, /\], true\)/, 'physical reconciliation remains a stock transaction')
   console.log('PASS duplicate product snapshot rows aggregate their quantities per resolved product+branch, exclude movement modes, sync new opening lots, and report the corrected group count')
 }
 
