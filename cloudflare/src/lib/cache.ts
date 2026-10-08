@@ -185,7 +185,7 @@ export async function bumpVersion(env: Env, namespace: string): Promise<void> {
 }
 
 // Missing KV versions share one D1 lookup and one set-based upsert. KV quota
-// admission and per-key writes retain their existing sequential semantics.
+// admission covers all KV candidates once; per-key writes remain sequential.
 export async function bumpVersions(env: Env, namespaces: string[]): Promise<void> {
   const unique = Array.from(new Set(namespaces.filter(Boolean)))
   if (!unique.length) return
@@ -203,6 +203,10 @@ export async function bumpVersions(env: Env, namespaces: string[]): Promise<void
     kvVersions.set(namespace, currentKvRaw)
   }
   const d1Versions = await readD1Versions(env, unique.filter(namespace => kvVersions.get(namespace) == null))
+  const kvCandidates = unique.filter(namespace => kvVersions.get(namespace) != null || !d1Versions.has(namespace))
+  // Aggregate admission may cross the critical threshold before the first key.
+  // Moving all candidates to D1 early preserves invalidation and quota safety.
+  const budget = kvCandidates.length ? await consumeQuota(env, 'kv_write', kvCandidates.length) : null
 
   for (const namespace of unique) {
     const versionKey = cacheVersionKey(namespace)
@@ -219,11 +223,10 @@ export async function bumpVersions(env: Env, namespaces: string[]): Promise<void
       }
     }
 
-    const budget = await consumeQuota(env, 'kv_write', 1)
     const currentKv = Number(currentKvRaw || '0') || 0
     const nextKv = currentKv + 1
 
-    if (budget.zone === 'critical' || budget.zone === 'exhausted') {
+    if (budget?.zone === 'critical' || budget?.zone === 'exhausted') {
       d1Upserts.push({ namespace, minimumVersion: nextKv })
       // One delete at the handoff. From this point, the D1 row above makes
       // the switch permanent even after the quota counter rolls into a new
