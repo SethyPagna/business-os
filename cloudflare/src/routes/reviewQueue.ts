@@ -1,3 +1,4 @@
+import { productStockGuardError } from '../lib/productStockGuard'
 import { Hono } from 'hono'
 import { acquisitionCostResponses, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
 import { productCreateErrorResponse, hasProductMoneyPolicy, ProductMoneyWriteError } from '../lib/productWrites'
@@ -247,6 +248,8 @@ app.post('/:id/approve', async (c) => {
     if (outcome.replayedBranchAction) return c.json({ success: true, data: outcome.replayedBranchAction, replayed: true })
     pendingActionMarkedAtomically = outcome.pendingActionMarkedAtomically
   } catch (err) {
+    const stockError = productStockGuardError(err)
+    if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
     if (row.section === 'products' && row.action_type === 'create' && row.entity_type === 'product') {
       const response = productCreateErrorResponse(err)
       if (response) return c.json(response.body, response.status)

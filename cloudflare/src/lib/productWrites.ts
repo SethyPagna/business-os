@@ -1,3 +1,4 @@
+import { assertProductsHaveNoStock, ProductStockGuardError, productStockGuardError, productStockGuardStatement } from './productStockGuard'
 // Shared product row-write helpers -- extracted from routes/products.ts
 // (part 152) so lib/reviewApply.ts's Products appliers can replay an
 // approved create/update through the EXACT same write path the route
@@ -308,6 +309,8 @@ export class ProductCreateError extends Error {
 }
 
 export function productCreateErrorResponse(error: unknown) {
+  const stockError = productStockGuardError(error)
+  if (stockError) return { body: { error: stockError.message, code: stockError.code }, status: 409 as const }
   if (isReceivingBranchError(error)) return { body: RECEIVING_BRANCH_INACTIVE, status: 409 as const }
   const refusal = branchEffectRefusal(error)
   if (refusal) return { body: refusal, status: 409 as const }
@@ -324,6 +327,7 @@ export async function productCreateDestination(env: Env, body: Record<string, un
     throw new ProductCreateError('product_initial_quantity_invalid', 'Initial stock must be a finite number.', 400)
   }
   const quantity = Math.max(0, Number(rawQuantity))
+  if (body.is_active != null && Number(body.is_active) !== 1 && quantity !== 0) throw new ProductStockGuardError()
   if (body.branch_id != null && typeof body.branch_id !== 'number' && typeof body.branch_id !== 'string') throw new ReceivingBranchError()
   const explicit = body.branch_id != null && String(body.branch_id).trim() !== ''
   const addressedBranchId = explicit ? Number(body.branch_id) : await defaultBranchId(env)
@@ -372,6 +376,8 @@ export async function createProductWithInitialStock(
   statements.push(ordinaryBusinessMaintenanceGuard, { sql: 'SELECT * FROM products WHERE client_request_id=@key', params: { key } })
   let results
   try { results = await db.batchOnce(addressedStatements(landing, statements)) } catch (error) {
+    const stockError = productStockGuardError(error)
+    if (stockError) throw stockError
     if (isReceivingBranchError(error)) throw new ReceivingBranchError()
     if (isBranchRedirectGuardError(error)) throw new ProductCreateError(BRANCH_REDIRECT_TARGET_INVALID_CODE, BRANCH_REDIRECT_TARGET_INVALID_ERROR, 409)
     if (/bad JSON path: ['"]\$\[product_create_review_conflict\]['"]/i.test(error instanceof Error ? error.message : String(error))) {
@@ -394,6 +400,9 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
   // Every caller (PUT, its edit-fold, the review-queue apply) is a product
   // edit; none may write the stock rollup.
   if (table === 'products') omitProductUpdateStock(payload)
+  if (table === 'products' && Object.prototype.hasOwnProperty.call(payload, 'is_active') && Number(payload.is_active) !== 1) {
+    await assertProductsHaveNoStock(getDb(env), [Number(id)])
+  }
   applySearchNormalizedColumns(payload, body, columns, false)
   if (columns.has('updated_at')) payload.updated_at = nowIso()
   const keys = Object.keys(payload).filter((key) => columns.has(key))
@@ -409,6 +418,9 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
   if (costOverrideActor && (!moneyPlan || table !== 'products')) invalidMoneyPlan()
   const costBefore = moneyPlan?.before as { cost_price_usd: number | null; cost_price_khr: number | null } | null
   const manualEntry = costOverrideActor && costBefore ? planManualCostEntry(Number(id), costBefore, body, costOverrideActor) : null
+  const stockGuard = table === 'products' && Object.prototype.hasOwnProperty.call(payload, 'is_active') && Number(payload.is_active) !== 1
+    ? productStockGuardStatement([Number(id)]) : null
+  const nativeStockGuard = stockGuard ? env.DB.prepare(stockGuard.sql.replace(/@productIds/g, '?')).bind(stockGuard.params.productIds) : null
   let result
   if (moneyPlan?.group_rename) {
     // No rename or audit happens before target admission. A failed target CAS
@@ -425,6 +437,7 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
       .bind(name.toLowerCase(), members.length, JSON.stringify(members))
     try {
       const results = await env.DB.batch([
+        ...(nativeStockGuard ? [nativeStockGuard] : []),
         guardGroup(group.from, group.members),
         guardGroup(group.to, group.target_members),
         statement,
@@ -432,14 +445,17 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
         env.DB.prepare(`UPDATE products SET name = ?, updated_at = ? WHERE name_key = ? AND is_active = 1 AND id != ?`)
           .bind(group.to, payload.updated_at, group.from.toLowerCase(), id),
       ])
-      result = results[2]
+      result = results[nativeStockGuard ? 3 : 2]
     } catch (error) {
+      const stockError = productStockGuardError(error)
+      if (stockError) throw stockError
       if (/malformed JSON|product_money_state_conflict/i.test(String(error))) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product changed before the group rename. Submit a new edit.')
       throw error
     }
   } else if (manualEntry && costOverrideActor && costBefore) {
     try {
       const results = await getDb(env).batch([
+        ...(stockGuard ? [stockGuard] : []),
         { sql: updateSql, params: updateParams },
         { sql: `SELECT CASE WHEN changes()>0 THEN 1 ELSE json('product_money_state_conflict') END` },
         manualEntry,
@@ -453,12 +469,14 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
             oldValue: JSON.stringify({ cost_price_usd: costBefore.cost_price_usd, cost_price_khr: costBefore.cost_price_khr }) } },
         catalogCostRecomputeStatement(Number(id)),
       ])
-      result = results[0]
+      result = results[stockGuard ? 1 : 0]
     } catch (error) {
+      const stockError = productStockGuardError(error)
+      if (stockError) throw stockError
       if (/malformed JSON|product_money_state_conflict/i.test(String(error))) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product changed after the price plan was prepared. Submit a new edit.')
       throw error
     }
-  } else result = await statement.run()
+  } else result = nativeStockGuard ? (await env.DB.batch([nativeStockGuard, statement]))[1] : await statement.run()
   if (moneyPlan && !result.meta?.changes) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product changed after the price plan was prepared. Submit a new edit.')
   return result.meta?.changes || 0
 }

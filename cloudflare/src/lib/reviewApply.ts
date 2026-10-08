@@ -1,3 +1,4 @@
+import { assertProductsHaveNoStock, productStockGuardStatement, productStockGuardError } from './productStockGuard'
 // Step (2)'s other half: once a reviewer approves a pending_actions row
 // (routes/reviewQueue.ts's POST /:id/approve), the underlying write it
 // represents has to actually happen -- this file is where that replay
@@ -173,6 +174,9 @@ registerApplier('fees', 'delete', 'fee', async (env, row, reviewer, waitUntil) =
 // --- products / create / product -----------------------------------
 registerApplier('products', 'create', 'product', async (env, row, reviewer, waitUntil) => {
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
+  if (Object.prototype.hasOwnProperty.call(body, 'is_active') && Number(body.is_active) !== 1) {
+    await assertProductsHaveNoStock(getDb(env), [Number(id)])
+  }
   readProductMoneyPlan(body)
   await resolveProductImageFields(getDb(env), body)
   const name = String(body.name || '').trim()
@@ -256,28 +260,12 @@ registerApplier('products', 'delete', 'product', async (env, row, reviewer, wait
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
   const reason = body.reason ?? null
   const existing = await getDb(env).prepare('SELECT name FROM products WHERE id = @id').get<{ name?: string }>({ id })
-  const stockRows = await getDb(env).prepare(`
-    SELECT bs.branch_id AS branchId, bs.quantity AS quantity, b.name AS branchName
-    FROM branch_stock bs LEFT JOIN branches b ON b.id = bs.branch_id
-    WHERE bs.product_id = @id AND bs.quantity > 0
-  `).all<{ branchId: number; quantity: number; branchName: string | null }>({ id })
-  const result = await getDb(env).prepare('UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ id })
-  if (!result.changes) return
-  for (const stockRow of stockRows) {
-    await getDb(env).prepare(`
-      INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
-      VALUES (@productId, @productName, @branchId, @branchName, 'delete', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)
-    `).run({
-      productId: id,
-      productName: existing?.name ?? null,
-      branchId: stockRow.branchId,
-      branchName: stockRow.branchName,
-      quantity: stockRow.quantity,
-      reason,
-      userId: reviewer.id ?? null,
-      userName: reviewer.name ?? null,
-    })
-  }
+  const db = getDb(env)
+  await assertProductsHaveNoStock(db, [Number(id)])
+  const results = await db.batch([productStockGuardStatement([Number(id)]), {
+    sql: 'UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id },
+  }])
+  if (!results[1]?.meta?.changes) return
   await audit(env, reviewer.id, reviewer.name, 'delete', 'product', id, { name: existing?.name ?? null, reason })
   await bumpVersion(env, 'products')
   await notify(env, waitUntil, 'products', { action: 'delete', id })
@@ -415,6 +403,8 @@ async function applyApprovedProductRemove(
     await db.batch(productRemoveApprovalStatements({ operation, plan, pendingActionId: row.id,
       reviewer: reviewerUser, transitionStamp }))
   } catch (error) {
+    const stockError = productStockGuardError(error)
+    if (stockError) throw stockError
     if (/malformed JSON|product_remove_.*guard|constraint/i.test(String(error))) {
       throw new ProductRemoveError('review_state_conflict', 'The product changed after review. Nothing was approved or removed.')
     }

@@ -1,3 +1,4 @@
+import { assertProductsHaveNoStock, productStockGuardStatement, productHasStockSql, productStockGuardError } from '../lib/productStockGuard'
 import { Hono } from 'hono'
 import { acquisitionCostResponses, canEditAcquisitionCosts, hasCatalogCostWrite } from '../lib/acquisitionCostAccess'
 import { roundMoney4 } from '../lib/moneyPrecision'
@@ -2308,6 +2309,13 @@ app.put('/:id', async (c) => {
   // a stale edit before the review-queue gate so it never even queues.
   // No-op when the client sends no token, so token-less/bulk writes are
   // unaffected; a missing row surfaces as a 'deleted' conflict.
+  if (Object.prototype.hasOwnProperty.call(body, 'is_active') && Number(body.is_active) !== 1) {
+    try { await assertProductsHaveNoStock(getDb(c.env), [Number(id)]) } catch (error) {
+    const stockError = productStockGuardError(error)
+    if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
+      throw error
+    }
+  }
   const expectedProductUpdatedAt = getExpectedUpdatedAt(body)
   if (expectedProductUpdatedAt) {
     const currentForConflict = await getDb(c.env)
@@ -2316,6 +2324,8 @@ app.put('/:id', async (c) => {
     try {
       assertUpdatedAtMatch('product', currentForConflict, expectedProductUpdatedAt)
     } catch (error) {
+    const stockError = productStockGuardError(error)
+    if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
       if (error instanceof WriteConflictError) {
         const { body: conflictBody, status } = writeConflictResponse(error)
         return c.json(conflictBody, status)
@@ -2325,6 +2335,8 @@ app.put('/:id', async (c) => {
   }
 
   try { await prepareProductMoneyWrite(c.env, body, Number(id), expectedProductUpdatedAt) } catch (error) {
+    const stockError = productStockGuardError(error)
+    if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error
   }
@@ -2367,6 +2379,8 @@ app.put('/:id', async (c) => {
       try {
         await resolveProductImageFields(getDb(c.env), body)
       } catch (error) {
+    const stockError = productStockGuardError(error)
+    if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
         if (error instanceof ProductImageAssetError) return c.json({ error: error.message, code: error.code }, 409)
         throw error
       }
@@ -2446,6 +2460,8 @@ app.put('/:id', async (c) => {
             'edit identity fold', 'merge', undefined, { operationId: crypto.randomUUID() },
           )
         } catch (error) {
+    const stockError = productStockGuardError(error)
+    if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
           const stateConflict = /merge_state_conflict|merge_identity_conflict/.test(String(error))
           const refusal = mergeFoldRefusal(error)
           if (stateConflict || refusal) {
@@ -2481,6 +2497,8 @@ app.put('/:id', async (c) => {
             await prepareProductMoneyWrite(c.env, rest, duplicate.id)
             await updateRow(c.env, 'products', duplicate.id, rest, { id: actorId(user), name: actorSnapshot(user) })
           } catch (error) {
+    const stockError = productStockGuardError(error)
+    if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
             if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
             throw error
           }
@@ -2572,6 +2590,8 @@ app.put('/:id', async (c) => {
       .get<Record<string, unknown>>({ id })
     : null
   try { await updateRow(c.env, 'products', id, body, { id: actorId(user), name: actorSnapshot(user) }) } catch (error) {
+    const stockError = productStockGuardError(error)
+    if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error
   }
@@ -2681,6 +2701,8 @@ app.delete('/:id', async (c) => {
     plan = await prepareProductRemovePlan(db, id, reason)
     assertUpdatedAtMatch('product', plan.product, getExpectedUpdatedAt(body))
   } catch (error) {
+    const stockError = productStockGuardError(error)
+    if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
     if (error instanceof WriteConflictError) {
       const conflict = writeConflictResponse(error); return c.json(conflict.body, conflict.status)
     }
@@ -2697,6 +2719,8 @@ app.delete('/:id', async (c) => {
   if (tier === 'review') {
     try { await db.batch(productRemoveQueueStatements({ plan, operationId, requestId, user, planDigest })) }
     catch (error) {
+    const stockError = productStockGuardError(error)
+    if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
       const replay = suppliedRequestId ? await db.prepare(`SELECT * FROM product_remove_operations
         WHERE actor_id=@actor AND source='direct' AND request_id=@request`).get<ProductRemoveOperationRow>({ actor: user.id, request: requestId }) : null
       if (replay?.status === 'approval_pending' && replay.product_id === id && replay.reason === reason) {
@@ -2714,6 +2738,8 @@ app.delete('/:id', async (c) => {
   try {
     await db.batch(productRemoveApplyStatements({ plan, operationId, source: 'direct', requestId, user, transitionStamp, planDigest }))
   } catch (error) {
+    const stockError = productStockGuardError(error)
+    if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
     const replay = await db.prepare(`SELECT * FROM product_remove_operations WHERE actor_id=@actor AND source='direct' AND request_id=@request`)
       .get<ProductRemoveOperationRow>({ actor: user.id, request: requestId })
     if (replay?.status === 'undo_ready' && replay.product_id === id && replay.reason === reason) {
@@ -8252,6 +8278,11 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
           status: 'undo_ready', action_history_id: applied.action_history_id, undo_availability: 'ready', generation: Number(applied.generation) })
       }
     } catch (error) {
+      const stockError = productStockGuardError(error)
+      if (stockError) {
+        interruption = new ProductConflictActionApplyStop(stockError.code, stockError.message, 409)
+        break
+      }
       interruption = new ProductConflictActionApplyStop(/malformed JSON|product_remove_.*guard|constraint/i.test(String(error))
         ? 'review_state_conflict' : 'remove_failed', 'The reviewed product removal could not be applied.',
       /malformed JSON|product_remove_.*guard|constraint/i.test(String(error)) ? 409 : 500)
@@ -9126,7 +9157,7 @@ app.get('/zero-quantity-candidates', async (c) => {
       LEFT JOIN branch_stock bs ON bs.product_id = p.id
       WHERE p.is_active = 1 AND COALESCE(p.is_group, 0) = 0
       GROUP BY p.id
-      HAVING p.stock_quantity = 0 AND COALESCE(SUM(bs.quantity), 0) = 0
+      HAVING NOT ${productHasStockSql()}
     `)
     .all<{
       id: number
@@ -9212,13 +9243,14 @@ app.post('/zero-quantity-delete', async (c) => {
     const { sql, params } = buildInClause('id', chunk)
     return db
       .prepare(`
-        SELECT p.id, p.name, p.stock_quantity AS cachedQuantity, COALESCE(SUM(bs.quantity), 0) AS liveQuantity
+        SELECT p.id, p.name, p.stock_quantity AS cachedQuantity, COALESCE(SUM(bs.quantity), 0) AS liveQuantity,
+          ${productHasStockSql()} AS hasStock
         FROM products p
         LEFT JOIN branch_stock bs ON bs.product_id = p.id
         WHERE p.id IN (${sql}) AND p.is_active = 1
         GROUP BY p.id
       `)
-      .all<{ id: number; name: string | null; cachedQuantity: number; liveQuantity: number }>(params)
+      .all<{ id: number; name: string | null; cachedQuantity: number; liveQuantity: number; hasStock: number }>(params)
   })
   const rowById = new Map(rows.map((row) => [row.id, row]))
 
@@ -9232,8 +9264,8 @@ app.post('/zero-quantity-delete', async (c) => {
       skipped.push({ id, reason: 'not_found_or_already_inactive' })
       continue
     }
-    if (Number(row.cachedQuantity) !== 0 || Number(row.liveQuantity) !== 0) {
-      skipped.push({ id, reason: 'no_longer_zero_quantity' })
+    if (Number(row.hasStock) !== 0) {
+      skipped.push({ id, reason: 'product_has_stock' })
       continue
     }
     statements.push({
@@ -9244,7 +9276,11 @@ app.post('/zero-quantity-delete', async (c) => {
   }
 
   if (statements.length) {
-    await db.batch(statements)
+    try { await db.batch([productStockGuardStatement(deletedIds), ...statements]) } catch (error) {
+      const stockError = productStockGuardError(error)
+      if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
+      throw error
+    }
     for (const id of deletedIds) {
       const row = rowById.get(id)
       await audit(c.env, user?.id ?? null, actorSnapshot(user), 'zero_quantity_delete', 'product', id, {

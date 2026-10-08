@@ -1,3 +1,4 @@
+import { assertProductsHaveNoStock, stockedProductIds, PRODUCT_HAS_STOCK_CODE, PRODUCT_HAS_STOCK_MESSAGE, productStockGuardStatement } from './productStockGuard'
 import type { SessionUser } from './auth'
 import { actorSnapshot } from './actorSnapshot'
 import type { getDb } from './db'
@@ -89,6 +90,7 @@ export async function prepareProductRemovePlan(
   if (Number(product.is_active) !== 1 || Number(product.is_group) === 1) {
     throw new ProductRemoveError('product_not_removable', 'Only an active non-group product can be removed.')
   }
+  await assertProductsHaveNoStock(db, [productId])
   const lotCount = await db.prepare('SELECT COUNT(*) AS count FROM product_batches WHERE variant_product_id=@product')
     .get<{ count: number }>({ product: productId })
   if (Number(lotCount?.count) > PRODUCT_REMOVE_MAX_LOTS) {
@@ -139,6 +141,7 @@ export async function prepareProductRemoveReviewPlans(
   const lotCounts = rows(await db.prepare(`SELECT pb.variant_product_id AS product_id,COUNT(*) AS lot_count
     FROM product_batches pb JOIN json_each(@ids) selected ON CAST(selected.value AS INTEGER)=pb.variant_product_id
     GROUP BY pb.variant_product_id ORDER BY pb.variant_product_id`).all<Record<string, unknown>>({ ids: idsJson }))
+  const stockedIds = new Set(await stockedProductIds(db, removals.map(row => row.product_id)))
   const productById = new Map(products.map((row) => [Number(row.id), row]))
   const lotsById = new Map(lotCounts.map((row) => [Number(row.product_id), Number(row.lot_count) || 0]))
   const blocked = new Map<number, { code: string; message: string }>()
@@ -150,6 +153,8 @@ export async function prepareProductRemoveReviewPlans(
     if (!product) blocked.set(removal.product_id, { code: 'product_not_found', message: 'Product not found.' })
     else if (Number(product.is_active) !== 1 || Number(product.is_group) === 1) {
       blocked.set(removal.product_id, { code: 'product_not_removable', message: 'Only an active non-group product can be removed.' })
+    } else if (stockedIds.has(removal.product_id)) {
+      blocked.set(removal.product_id, { code: PRODUCT_HAS_STOCK_CODE, message: PRODUCT_HAS_STOCK_MESSAGE })
     } else if (lotCount > PRODUCT_REMOVE_MAX_LOTS) {
       blocked.set(removal.product_id, { code: 'remove_graph_too_large', message: 'This product has too many received dates for one reversible removal.' })
     } else if (retainedLots + lotCount > PRODUCT_REMOVE_MAX_REVIEW_LOTS) {
@@ -426,7 +431,7 @@ export function productRemoveQueueStatements(args: {
 }): ProductRemoveStatement[] {
   const userName = actorSnapshot(args.user)
   const payload = JSON.stringify({ kind: 'product.remove.pending', operation_id: args.operationId, plan_digest: args.planDigest })
-  return [...productRemoveGraphGuards(args.plan, 'source'), {
+  return [productStockGuardStatement([args.plan.product_id]), ...productRemoveGraphGuards(args.plan, 'source'), {
     sql: `INSERT INTO product_remove_operations(operation_id,actor_id,requester_id,source,request_id,product_id,reason,
       state_digest,plan_digest,plan_json,status)
       VALUES(@operation,@actor,@actor,'direct',@request,@product,@reason,@stateDigest,@planDigest,@plan,'approval_pending')`,
@@ -451,7 +456,7 @@ export function productRemoveReviewQueueStatements(args: {
 }): ProductRemoveStatement[] {
   const pointer = JSON.stringify({ kind: 'product.remove.pending', operation_id: args.operation.operation_id,
     plan_digest: args.operation.plan_digest })
-  return [...productRemoveGraphGuards(args.plan, 'source'), {
+  return [productStockGuardStatement([args.plan.product_id]), ...productRemoveGraphGuards(args.plan, 'source'), {
     sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_remove_operations WHERE operation_id=@operation
       AND actor_id=@actor AND requester_id=@actor AND source='conflict_review' AND review_id=@review
       AND action_ordinal=@ordinal AND product_id=@product AND plan_digest=@planDigest AND status='ready'
@@ -496,7 +501,7 @@ export function productRemoveApplyStatements(args: {
   const pointer = JSON.stringify({ applier: PRODUCT_REMOVE_ACTION_KIND, operation_id: args.operationId, generation: 0 })
   const snapshot = JSON.stringify({ version: 1, operation_id: args.operationId, generation: 0, transition_stamp: args.transitionStamp, plan })
   const details = JSON.stringify({ operation_id: args.operationId, reason: plan.reason, source: args.source })
-  return [{
+  return [productStockGuardStatement([plan.product_id]), {
     sql: `INSERT INTO product_remove_operations(operation_id,actor_id,requester_id,source,request_id,review_id,action_ordinal,
       product_id,reason,state_digest,plan_digest,plan_json,status,pending_action_id)
       VALUES(@operation,@actor,@requester,@source,@request,@review,@ordinal,@product,@reason,@stateDigest,@planDigest,@plan,'ready',@pending)
@@ -534,38 +539,22 @@ export function productRemoveApplyStatements(args: {
     sql: `UPDATE product_remove_operations SET action_history_id=last_insert_rowid() WHERE operation_id=@operation AND status='ready'`,
     params: { operation: args.operationId },
   }, {
-    sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason,reference_id,user_id,user_name,created_at)
-      SELECT @product,@productName,CAST(json_extract(value,'$.branch_id') AS INTEGER),json_extract(value,'$.branch_name'),
-        'write_off',CAST(json_extract(value,'$.quantity') AS REAL),@reason,@referenceId,@actor,@actorName,@stamp
-      FROM json_each(@rows) WHERE CAST(json_extract(value,'$.quantity') AS REAL)>0`,
-    params: { product: plan.product_id, productName: plan.product.name ?? null, reason: plan.reason,
-      referenceId: productRemoveWriteOffReferenceId(args.operationId, 0),
-      actor: args.user.id, actorName: userName, stamp: args.transitionStamp, rows: JSON.stringify(plan.branch_stock) },
-  }, ...damagedLotWriteOffStatements({
-    plan, movementType: 'write_off', referenceId: productRemoveWriteOffReferenceId(args.operationId, 0),
-    reason: plan.reason, stamp: args.transitionStamp, userId: args.user.id, userName,
-  }), {
     sql: `UPDATE products SET is_active=0,stock_quantity=0,rfid_confirmed_qty=0,updated_at=@stamp WHERE id=@product`,
     params: { stamp: args.transitionStamp, product: plan.product_id },
   }, {
-    sql: `UPDATE branch_stock SET quantity=0,rfid_confirmed_qty=0 WHERE product_id=@product`,
+    sql: `UPDATE branch_stock SET rfid_confirmed_qty=0 WHERE product_id=@product`,
     params: { product: plan.product_id },
-  }, {
-    sql: `UPDATE branch_batch_stock SET quantity=0,updated_at=@stamp
-      WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=@product)`,
-    params: { stamp: args.transitionStamp, product: plan.product_id },
   }, {
     sql: `UPDATE product_batches SET is_active=0,updated_at=@stamp WHERE variant_product_id=@product`,
     params: { stamp: args.transitionStamp, product: plan.product_id },
-  }, ...(legacyPlanDamagedLots(plan) ? [{
-    // P3-losses-writeoff: the held units go with the product, and the
-    // write_off booked just above (damagedLotWriteOffStatements) is their
-    // loss -- they are destroyed here exactly as finally as the tagged row's
-    // own "Remove entirely" would destroy them. Only the stock-side zeroing
-    // happens in this statement now; the loss is already on the ledger.
-    sql: `UPDATE damaged_stock_lots SET quantity_remaining=0,updated_at=@stamp WHERE product_id=@product`,
+  }, {
+    sql: `UPDATE branch_batch_stock SET updated_at=@stamp WHERE batch_id IN
+      (SELECT id FROM product_batches WHERE variant_product_id=@product)`,
     params: { stamp: args.transitionStamp, product: plan.product_id },
-  }] : []), {
+  }, {
+    sql: `UPDATE damaged_stock_lots SET updated_at=@stamp WHERE product_id=@product`,
+    params: { stamp: args.transitionStamp, product: plan.product_id },
+  }, {
     sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
       VALUES(@actor,@actorName,'delete','product',@product,@details,'products',@product,@details)`,
     params: { actor: args.user.id, actorName: userName, product: String(plan.product_id), details },
@@ -732,7 +721,7 @@ export function productRemoveReplayStatements(args: {
     sql: 'UPDATE damaged_stock_lots SET quantity_remaining=0,updated_at=@stamp WHERE product_id=@product',
     params: { stamp: args.transitionStamp, product: plan.product_id },
   }] : [])]
-  return [{
+  return [...(undo ? [] : [productStockGuardStatement([plan.product_id])]), {
     sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_remove_operations
       WHERE operation_id=@operation AND product_id=@product AND status=@status AND generation=@generation
         AND undo_snapshot_id=@snapshot AND action_history_id=@history)
