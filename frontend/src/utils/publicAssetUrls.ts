@@ -18,14 +18,15 @@ function trimBaseUrl(value: unknown): string {
   return String(value || '').trim().replace(/\/$/, '')
 }
 
-function normalizeUploadPath(value: unknown): string {
+export function splitLocalUploadPath(value: unknown): { path: string; suffix: string } | null {
   const raw = String(value || '').trim()
-  if (!raw) return ''
-  if (raw.startsWith('/uploads/')) return raw
-  if (raw.startsWith('uploads/')) return `/${raw}`
-  return raw
+  if (!/^\/?uploads\//.test(raw)) return null
+  const normalized = `/${raw.replace(/^\//, '')}`
+  const queryAt = normalized.indexOf('?')
+  return queryAt < 0 ? { path: normalized, suffix: '' } : {
+    path: normalized.slice(0, queryAt), suffix: normalized.slice(queryAt),
+  }
 }
-
 function appendAssetVersion(url: string, version: unknown = ''): string {
   const normalizedVersion = String(version || '').trim()
   if (!normalizedVersion || /^data:|^blob:/i.test(String(url || ''))) return url
@@ -75,8 +76,9 @@ export function resolvePublicAssetUrl(value: unknown, options: PublicAssetOption
   const raw = String(value || '').trim()
   if (!raw) return ''
   if (raw.startsWith('data:') || raw.startsWith('blob:') || /^https?:\/\//i.test(raw)) return raw
-  const normalized = normalizeUploadPath(raw)
-  if (!normalized.startsWith('/uploads/')) return normalized
+  const localUpload = splitLocalUploadPath(raw)
+  if (!localUpload) return raw
+  const normalized = localUpload.path.split('/').map((segment) => encodeURIComponent(segment)).join('/') + localUpload.suffix
   const configuredBase = trimBaseUrl(options.publicAssetBaseUrl || getStoredPublicAssetBaseUrl())
   const fallbackBase = trimBaseUrl(options.fallbackBaseUrl || getSafeCurrentOrigin())
   const base = configuredBase || fallbackBase

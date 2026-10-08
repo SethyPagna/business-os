@@ -1,4 +1,4 @@
-import { resolvePublicAssetUrl } from './publicAssetUrls.ts'
+import { resolvePublicAssetUrl, splitLocalUploadPath } from './publicAssetUrls.ts'
 import { isTemporaryPreviewUrl } from './mediaUploadState.ts'
 export {
   createInitialUploadState,
@@ -22,9 +22,8 @@ export function canonicalizePersistedMediaPath(value: unknown, fallback = ''): s
   if (isTemporaryPreviewUrl(raw)) return String(fallback || '').trim()
   // Upload responses and Library rows already carry the exact file_assets
   // identity. URL.pathname would percent-encode literal spaces/Khmer.
-  if (/^\/?uploads\//i.test(raw)) {
-    return `/${raw.replace(/^\/+/, '').split(/[?#]/, 1)[0]}`
-  }
+  const localUpload = splitLocalUploadPath(raw)
+  if (localUpload) return localUpload.path
   return raw
 }
 
