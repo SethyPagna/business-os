@@ -1,11 +1,12 @@
 // CUTOVER-LR stock writers: one world for the scripts/test-cutover-lr-*-pure.cjs files.
 //
-// The REAL route and lib modules run against an in-memory SQLite with every migration applied, through the real
+// Current route worlds seed an in-memory SQLite through 0242, then install actual later migrations through the real
 // lib/db.ts D1Compat. Only side channels are replaced: the session (requireAuth), the audit insert, broadcasts,
 // KV cache bumps and Telegram sends.
 //
-// An ORACLE world loads the files CUTOVER-LR changed exactly as they were at eb5dd0ba3 (before this change), so a
-// test can prove that while every branch is active the new code writes byte-identical statements.
+// The historical ORACLE world loads the specified CUTOVER-LR files at ORACLE below on the pre-0243 physical
+// schema. Shared imports stay current and receive a compatibility epoch flag; this hybrid comparison proves
+// business and ledger parity, while only current worlds certify the installed fence and permit lifecycle.
 //
 // Branch fixtures follow production ids: 1 = LC Store (formerly Warehouse), 2 = Shop. 'before' = both active (today),
 // 'after' = the consolidation's end state (Old Shop disabled, successor 1, all stock moved to LC Store, lot 500
@@ -73,6 +74,8 @@ function migratedDb() {
 }
 
 const executorWorld = makeWorld()
+// Capture the compiled executor envelope for exact statement comparison only. Tested routes and fixture writes
+// below dispatch the unchanged executor through actual D1Compat and SQLite transactions.
 let expectedEpochStatements
 executorWorld.load('lib/stockTransaction.ts').executeStockTransaction({ batchOnce: statements => {
   expectedEpochStatements = statements
@@ -205,11 +208,22 @@ const scrub = (text) => text
   .replace(/Set received (?:date|\d{4}-\d{2}-\d{2}(?: from \d+)?) to (\d+)/g, 'Set received <lot> to $1')
 const normalised = (capture) => scrub(JSON.stringify(capture))
 
+function businessStatements(capture) {
+  for (const rows of capture) {
+    if (rows.some(s => /stock_transaction_permit/.test(s.sql))) {
+      assert.equal(rows[0].sql.trim(), expectedEpochStatements[0].sql.trim(), 'exact compiled epoch admission')
+      assert.equal(rows.at(-1).sql.trim(), expectedEpochStatements[1].sql.trim(), 'exact compiled permit release')
+      assert.equal(rows.filter(isEpochStatement).length, 2)
+    }
+  }
+  return capture.map(rows => rows.filter(s => !isEpochStatement(s) && !isMaintenanceGuard(s))).filter(rows => rows.length)
+}
+
 function assertComposedWrites(current, previous, db) {
   const receipt = (s) => /stock_mutation_receipts/.test(s.sql)
   const movement = (s) => /INSERT INTO inventory_movements/.test(s.sql)
   const cost = (s) => /UPDATE products SET\s+cost_price_usd/.test(s.sql)
-  const physical = (s) => /(?:INSERT INTO|UPDATE) branch_(?:batch_)?stock/.test(s.sql)
+  const physical = (s) => /(?:INSERT INTO|UPDATE|DELETE FROM) (?:branch_(?:batch_)?stock|damaged_stock_lots)\b/.test(s.sql)
   const epoch = s => /^INSERT INTO system_flags[\s\S]*'stock_transaction_permit'/.test(s.sql.trim()) || /^DELETE FROM system_flags[\s\S]*stock_transaction_permit/.test(s.sql.trim())
   const currentWrites = current.flat()
   for (const rows of current) {
@@ -307,5 +321,5 @@ async function callWith(app, dbBinding, method, url, body, redirect) {
 
 module.exports = {
   ORACLE, USER, makeWorld, migratedDb, binding, call, callWith, raceBinding, build, ledger, plain, oldShop, movements, maxMovement, qty,
-  normalised, assertComposedWrites, fixtureStockWrite, isEpochStatement, REDIRECT, check, done, assertRefusals,
+  normalised, assertComposedWrites, fixtureStockWrite, isEpochStatement, businessStatements, REDIRECT, check, done, assertRefusals,
 }

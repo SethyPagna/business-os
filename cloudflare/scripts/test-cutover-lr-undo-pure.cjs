@@ -19,22 +19,23 @@ const stockOnly = (db) => JSON.stringify(['branch_stock', 'branch_batch_stock', 
 
 // The cutover's end state applied to a world that recorded work at Shop (2) while it was active: Shop becomes the
 // disabled Old Shop and whatever it still held moves to LC Store (1). The history rows are deliberately NOT closed.
-function cutOver(db) {
-  db.exec(`UPDATE branch_stock SET quantity = quantity + COALESCE((SELECT o.quantity FROM branch_stock o WHERE o.product_id=branch_stock.product_id AND o.branch_id=2),0) WHERE branch_id=1;
+async function cutOver(db) {
+  const sql = `UPDATE branch_stock SET quantity = quantity + COALESCE((SELECT o.quantity FROM branch_stock o WHERE o.product_id=branch_stock.product_id AND o.branch_id=2),0) WHERE branch_id=1;
            UPDATE branch_stock SET quantity = 0 WHERE branch_id=2;
            INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) SELECT batch_id,1,quantity FROM branch_batch_stock WHERE branch_id=2 AND quantity>0
              ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=quantity+excluded.quantity;
            UPDATE branch_batch_stock SET quantity = 0 WHERE branch_id=2;
            UPDATE branches SET name='LC Store', role='shop', is_default=1 WHERE id=1;
-           UPDATE branches SET name='Old Shop', role='shop', is_default=0, is_active=0, successor_branch_id=1 WHERE id=2;`)
+           UPDATE branches SET name='Old Shop', role='shop', is_default=0, is_active=0, successor_branch_id=1 WHERE id=2;`
+  await W.fixtureStockWrite(db, sql.split(';').map(sql => ({ sql: sql.trim() })).filter(s => s.sql))
   return db
 }
 
 async function setAtShopThenCutOver(world) {
-  const db = W.build('before')
+  const db = W.build('before', undefined, { historical: world === oracle })
   const set = await W.call(inventory(world), db, 'POST', '/adjust', { productId: 10, branchId: 2, type: 'set', setScope: 'lot', batchId: 500, quantity: 0, reason: 'count' })
   assert.equal(set.status, 200, JSON.stringify(set.body))
-  return { db: cutOver(db), historyId: set.body.action_history_id }
+  return { db: await cutOver(db), historyId: set.body.action_history_id }
 }
 
 async function main() {
@@ -60,7 +61,7 @@ async function main() {
     const rev = Number(db.prepare("SELECT COALESCE(MAX(revision),0) r FROM stock_session_revisions WHERE entity_type='batch' AND entity_key='500'").get()?.r ?? 0)
     const edited = await W.call(inventory(fresh), db, 'POST', '/stock-in-lines/4000/edit', { client_request_id: 'edit-undo-0001', quantity: 0, expected_quantity: 10, expected_batch_id: 500, expected_batch_revision: rev })
     assert.equal(edited.status, 200, JSON.stringify(edited.body))
-    cutOver(db)
+    await cutOver(db)
     const before = stockOnly(db)
     const undo = await W.call(history(fresh), db, 'POST', `/${edited.body.action_history_id}/undo`, { require_applied: true, expected_generation: 0 }, { redirect: 1 })
     assert.deepEqual([undo.status, undo.body.code], [409, 'undo_closed_branch_retired'], JSON.stringify(undo.body))
@@ -72,7 +73,7 @@ async function main() {
     const committed = await W.call(inventory(fresh), db, 'POST', '/sessions', { client_request_id: 'cutover-lr-undo-session', mode: 'stock_in',
       items: [{ line_id: 'a', kind: 'receive', product_id: 20, branch_id: 2, quantity: 2, unit_cost_usd: 3, supplier_id: 5, supplier_name: 'Acme', received_date: '2026-10-03' }] })
     assert.equal(committed.status, 200, JSON.stringify(committed.body))
-    cutOver(db)
+    await cutOver(db)
     const before = stockOnly(db)
     const undo = await W.call(history(fresh), db, 'POST', `/${committed.body.actionHistoryId}/undo`, { require_applied: true, expected_generation: 0 }, { redirect: 1 })
     assert.equal(undo.status, 409, JSON.stringify(undo.body))

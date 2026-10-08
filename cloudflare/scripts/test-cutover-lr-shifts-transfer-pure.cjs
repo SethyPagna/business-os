@@ -18,8 +18,8 @@ const oracle = W.makeWorld(W.ORACLE, { user: CASHIER })
 const owner = W.makeWorld(null)
 const shifts = (world) => world.load('routes/shifts.ts').default
 
-function shiftDb(state) {
-  const db = W.build(state)
+function shiftDb(state, options) {
+  const db = W.build(state, undefined, options)
   db.prepare("INSERT INTO settings(key,value) VALUES('shift_admin_exempt','false') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
   return db
 }
@@ -28,7 +28,7 @@ const shiftRows = (db) => W.plain(db.prepare('SELECT branch_id, branch_name, clo
 
 async function main() {
   await W.check('before: opening a shift at Shop writes byte-identical statements to the eb5dd0ba3 oracle', async () => {
-    const dbNew = shiftDb('before'); const dbOld = shiftDb('before')
+    const dbNew = shiftDb('before'); const dbOld = shiftDb('before', { historical: true })
     const capNew = []; const capOld = []
     const a = await W.call(shifts(fresh), dbNew, 'POST', '/open', openBody(2), { capture: capNew, redirect: 1 })
     const b = await W.call(shifts(oracle), dbOld, 'POST', '/open', openBody(2), { capture: capOld })
@@ -85,9 +85,8 @@ async function main() {
   })
 
   await W.check('transfers naming Old Shop are refused with a code and write nothing (no redirect for a transfer)', async () => {
-    const db = W.build('after')
     // Units stranded at Old Shop (the 0109 residue shape) make the out-of-Old-Shop direction a real transfer attempt.
-    db.exec('UPDATE branch_stock SET quantity=3 WHERE branch_id=2 AND product_id=10; UPDATE branch_batch_stock SET quantity=3 WHERE branch_id=2 AND batch_id=500')
+    const db = W.build('after', db => db.exec('UPDATE branch_stock SET quantity=3 WHERE branch_id=2 AND product_id=10; UPDATE branch_batch_stock SET quantity=3 WHERE branch_id=2 AND batch_id=500'))
     const before = W.ledger(db)
     const inventory = owner.load('routes/inventory.ts').default
     const branches = owner.load('routes/branches.ts').default

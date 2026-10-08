@@ -31,28 +31,27 @@ function withShopReceipt(db) {
 const tagged = (extra = {}) => ({ productId: 10, branchId: 2, conditionTag: 'broken', quantity: 2, reason: 'checked', ...extra })
 
 async function main() {
-  await W.check('before: restore, dispose and revert write byte-identical statements to the eb5dd0ba3 oracle', async () => {
+  await W.check('before: restore, dispose and revert preserve business statements and ledger parity to the historical oracle', async () => {
     for (const [url, body, setup] of [['/tagged-lots/restore', tagged(), (db) => withHeldLot(db, 2)], ['/tagged-lots/dispose', tagged(), (db) => withHeldLot(db, 2)], ['/movements/4000/revert', {}, withShopReceipt]]) {
-      const dbNew = setup(W.build('before')); const dbOld = setup(W.build('before'))
+      const dbNew = W.build('before', setup); const dbOld = W.build('before', setup, { historical: true })
       const capNew = []; const capOld = []
       const a = await W.call(inventory(fresh), dbNew, 'POST', url, body, { capture: capNew, redirect: 1 })
       const b = await W.call(inventory(oracle), dbOld, 'POST', url, body, { capture: capOld })
       assert.equal(a.status, 200, JSON.stringify(a.body))
       assert.equal(W.normalised(a), W.normalised(b), url)
-      assert.equal(W.normalised(capNew), W.normalised(capOld), url)
+      W.assertComposedWrites(capNew, capOld, dbNew)
       assert.equal(W.normalised(W.ledger(dbNew)), W.normalised(W.ledger(dbOld)), url)
     }
   })
 
   await W.check('control: the oracle restores held units into the disabled branch and reverts a Shop receipt there', async () => {
-    const db = withShopReceipt(withHeldLot(W.build('after'), 2))
-    db.exec('UPDATE branch_stock SET quantity=4 WHERE branch_id=2 AND product_id=10; UPDATE branch_batch_stock SET quantity=4 WHERE branch_id=2 AND batch_id=500')
+    const db = W.build('after', db => { withShopReceipt(withHeldLot(db, 2)); db.exec('UPDATE branch_stock SET quantity=4 WHERE branch_id=2 AND product_id=10; UPDATE branch_batch_stock SET quantity=4 WHERE branch_id=2 AND batch_id=500') }, { historical: true })
     assert.equal((await W.call(inventory(oracle), db, 'POST', '/tagged-lots/restore', tagged())).status, 200)
     assert.equal(W.qty(db, 'branch_stock', 'product_id', 10, 2), 6, 'sellable stock appeared at Old Shop')
   })
 
   await W.check('after: restore: refused without a valid confirmation; with it the units go on sale at LC Store (lot 500 -> survivor 600)', async () => {
-    const db = withHeldLot(W.build('after'), 2)
+    const db = W.build('after', db => withHeldLot(db, 2))
     await W.assertRefusals(db, (redirect) => W.call(inventory(fresh), db, 'POST', '/tagged-lots/restore', tagged(), { redirect }), 'restore')
     const ok = await W.call(inventory(fresh), db, 'POST', '/tagged-lots/restore', tagged(), { redirect: 1 })
     assert.equal(ok.status, 200, JSON.stringify(ok.body))
@@ -65,7 +64,7 @@ async function main() {
   })
 
   await W.check('after: dispose: refused without a valid confirmation; with it the loss is booked at LC Store, addressed to Old Shop', async () => {
-    const db = withHeldLot(W.build('after'), 2)
+    const db = W.build('after', db => withHeldLot(db, 2))
     await W.assertRefusals(db, (redirect) => W.call(inventory(fresh), db, 'POST', '/tagged-lots/dispose', tagged(), { redirect }), 'dispose')
     const ok = await W.call(inventory(fresh), db, 'POST', '/tagged-lots/dispose', tagged(), { redirect: 1 })
     assert.equal(ok.status, 200, JSON.stringify(ok.body))
@@ -76,7 +75,7 @@ async function main() {
   })
 
   await W.check('after: revert of a Shop receipt: refused without a valid confirmation; with it the units leave the survivor lot at LC Store', async () => {
-    const db = withShopReceipt(W.build('after'))
+    const db = W.build('after', withShopReceipt)
     await W.assertRefusals(db, (redirect) => W.call(inventory(fresh), db, 'POST', '/movements/4000/revert', {}, { redirect }), 'revert')
     const ok = await W.call(inventory(fresh), db, 'POST', '/movements/4000/revert', {}, { redirect: 1 })
     assert.equal(ok.status, 200, JSON.stringify(ok.body))
@@ -102,7 +101,7 @@ async function main() {
 
   for (const [label, url, body, setup] of [['restore', '/tagged-lots/restore', tagged(), (db) => withHeldLot(db, 2)], ['revert', '/movements/4000/revert', {}, withShopReceipt]]) {
     await W.check(`race: ${label}: the target disabled between plan and commit aborts the batch, nothing written`, async () => {
-      const db = setup(W.build('after'))
+      const db = W.build('after', setup)
       db.prepare("INSERT INTO branches(id,name,role,is_default,is_active) VALUES(3,'Annex','shop',0,1)").run()
       const before = W.ledger(db)
       const res = await W.callWith(inventory(fresh), W.raceBinding(db, () => db.exec('UPDATE branches SET is_active=0 WHERE id=1')), 'POST', url, body, 1)
