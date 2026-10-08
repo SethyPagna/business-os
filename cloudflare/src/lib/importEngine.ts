@@ -5127,6 +5127,7 @@ export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId:
     ...(context ? { product: context.state.genericApply!.finalize!.product, branch: context.state.genericApply!.finalize!.branch } : {}) })
 
   if (!groups.length) {
+    if (context?.state.genericApply!.finalize!.pendingHash) throw new ProductImportFinalizationConflictError()
     if (context) await commitProductFinalization(db, context,
       { ...context.state.genericApply!.finalize!, phase: 'unify' }, [], false)
     return 0
@@ -6015,11 +6016,15 @@ export class ProductReplacementIncompleteError extends Error {
 
 type ProductFinalizeContext = { jobId: string; leaseToken: string; state: ImportChunkState; queued: boolean }
 type ImportStatement = { sql: string; params: Record<string, unknown> }
+export const PRODUCT_IMPORT_FINALIZATION_CHANGED = {
+  code: 'product_import_finalization_changed',
+  error: 'Stock or product groups changed after this import was planned. Earlier groups remain applied. This group was not changed; review the current stock and start a corrected import.',
+} as const
 class ProductImportFinalizationConflictError extends Error {
-  readonly code = 'product_import_finalization_changed'
+  readonly code = PRODUCT_IMPORT_FINALIZATION_CHANGED.code
   readonly status = 409
   constructor() {
-    super('Stock or product groups changed after this import was planned. Earlier groups remain applied. This group was not changed; review the current stock and start a corrected import.')
+    super(PRODUCT_IMPORT_FINALIZATION_CHANGED.error)
     this.name = 'ProductImportFinalizationConflictError'
   }
 }
@@ -6053,19 +6058,35 @@ async function commitProductFinalization(
     const result = stock
       ? await executeStockTransaction(db, [guard, ...statements, checkpoint], 'once')
       : await db.batchOnce([guard, ...statements, checkpoint])
-    if (countField) next[countField] = Number(result[statements.length]?.meta?.changes || 0)
+    if (!Array.isArray(result) || result.length !== statements.length + 2
+      || result[result.length - 1]?.meta?.changes !== 1) throw new StockTransactionOutcomeUnknownError()
+    if (countField) {
+      const count = result[statements.length]?.meta?.changes
+      if (!Number.isSafeInteger(count) || Number(count) < 0) throw new StockTransactionOutcomeUnknownError()
+      next[countField] = Number(count)
+    }
   } catch (error) {
     const stockRefusal = productStockGuardError(error)
     if (stockRefusal) throw stockRefusal
     if (/import_(?:snapshot|catalog)_changed/.test(String((error as Error)?.message))) throw new ProductImportFinalizationConflictError()
     if (error instanceof StockQueryBudgetDeferred || error instanceof StockTransactionUnavailableError
       || isImportMaintenanceFenceError(error) || String((error as Error)?.message).includes('$[import_lease_changed]')) throw error
-    const receipt = await db.prepare(`SELECT json_extract(chunk_state_json,'$.genericApply.finalize') AS result
-      FROM import_jobs WHERE id=@id`).get<{ result: string | null }>({ id: context.jobId })
-    const committed: ProductFinalizeState | null = receipt?.result ? JSON.parse(receipt.result) : null
+    let committed: ProductFinalizeState | null
+    try {
+      const receipt = await db.prepare(`SELECT json_extract(chunk_state_json,'$.genericApply.finalize') AS result
+        FROM import_jobs WHERE id=@id AND json_extract(chunk_state_json,'$.startedAtMs') IS @run
+        AND EXISTS(SELECT 1 FROM import_stock_action_guards WHERE job_id=@id AND action_key=@action AND guard_key=@key)`)
+        .get<{ result: string | null }>(guard.params)
+      committed = receipt?.result ? JSON.parse(receipt.result) : null
+    } catch (recoveryError) {
+      if (recoveryError instanceof StockQueryBudgetDeferred || recoveryError instanceof StockTransactionUnavailableError
+        || isImportMaintenanceFenceError(recoveryError)) throw recoveryError
+      throw new StockTransactionOutcomeUnknownError()
+    }
     if (!committed || committed.phase !== next.phase || committed.product !== next.product
       || committed.branch !== next.branch || committed.reconciled !== next.reconciled
-      || committed.unified !== next.unified || committed.pendingHash !== next.pendingHash) throw new StockTransactionOutcomeUnknownError()
+      || committed.unified !== next.unified || committed.pendingHash !== next.pendingHash
+      || !countField && committed.deactivated !== next.deactivated) throw new StockTransactionOutcomeUnknownError()
     Object.assign(next, committed)
   }
   context.state.genericApply!.finalize = next
@@ -6156,6 +6177,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       await purgeImportIncomingFiles(env, db, jobId)
       return { applied: 0, failed: 0 }
     }
+    if (savedState.genericApply?.finalize?.phase === 'done'
+      && ['completed', 'completed_with_errors'].includes(jobRow.status)) return { applied: 0, failed: 0 }
     const job = await db.prepare(`SELECT id, type, policy_json, summary_json FROM import_jobs WHERE id = @id`).get<ImportApplyJob>({ id: jobId })
     if (!job) throw new Error('Import job not found')
     // The HTTP approval/retry request is only the enqueue boundary. A role

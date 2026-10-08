@@ -7,6 +7,7 @@ source=source.replace('function fixture(lots = 1)', 'function fixture(lots = 1, 
   .replace('  })\r\n}', '    seed?.(sql)\r\n  })\r\n}').replace('  })\n}', '    seed?.(sql)\n  })\n}')
   .replace('const f=fixture(options.lots || 1)', 'const f=fixture(options.lots || 1, options.seed)')
   .replace('return {worker,...f,call,', 'return {worker,...f,call,measured(){return {physical,metered}},')
+  .replace('const maybeFail=sql=>{', 'const maybeFail=sql=>{ options.failAttempt?.(sql);')
 source=source.replace('export {classifyProducts', "export {executeStockTransaction} from './src/lib/stockTransaction.ts';export {classifyProducts")
 const {bundleWorker,world}=new Function('require','__dirname','module',source+';return {bundleWorker,world}')(require,__dirname,module)
 async function scenario(make,{tier,n,inline=false,fault,staleAuth=false,type='inventory',inventoryAction='remove',cacheFailure=false,tailRetries=false,httpTailRetries=false,claimAck=false,cancel=false,files=false,materialize=false,wrongEpoch=false,saleStatus='completed',productMode='fill_blank'}) {

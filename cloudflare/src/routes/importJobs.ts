@@ -10,6 +10,8 @@ import { sanitizeOriginalFileName, buildUniqueStoredName, getMediaType } from '.
 import { classifyImportUpload, validateUploadedBuffer, EMBEDDED_MARKUP_MESSAGE, MISMATCHED_UPLOAD_MESSAGE, UNSUPPORTED_IMAGE_MESSAGE, UNSUPPORTED_UPLOAD_MESSAGE } from '../lib/uploadSecurity'
 import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, summarizeImportWarnings, countRowsWithWarningKinds, runD1BatchInChunks, importBranchRedirectGate, IMPORT_FILE_SKIPPED_ERROR_CODE, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportBranchRedirectGate, type ImportRowResult, type RowAction } from '../lib/importEngine'
 import { IMPORT_BRANCH_REDIRECT_POLICY_KEY } from '../lib/importBranchAuthority'
+import { PRODUCT_IMPORT_FINALIZATION_CHANGED } from '../lib/importEngine'
+import { stockTransactionRefusal } from '../lib/stockTransaction'
 import { branchRedirectTarget } from '../lib/branchEffect'
 import { readCentralDirectory, extractZipEntry, ZipFormatError, type ZipEntry } from '../lib/zipReader'
 import { MAX_IMAGES_PER_PRODUCT, buildImageDisplayName } from '../lib/importImageMatch'
@@ -27,11 +29,16 @@ import { dispatchImportWork } from '../lib/queueDispatch'
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
 app.onError((error, c) => {
+  const transactionRefusal = stockTransactionRefusal(error)
+  if (transactionRefusal) return c.json({ success: false, ...transactionRefusal }, 503)
   if (isImportMaintenanceFenceError(error)) {
     return c.json({ success: false, code: error.code, error: error.message }, 503)
   }
   if ('code' in error && error.code === 'import_queue_required') {
     return c.json({ success: false, code: error.code, error: error.message }, 503)
+  }
+  if ('code' in error && error.code === PRODUCT_IMPORT_FINALIZATION_CHANGED.code) {
+    return c.json({ success: false, ...PRODUCT_IMPORT_FINALIZATION_CHANGED }, 409)
   }
   console.error(error)
   return c.text('Internal Server Error', 500)
@@ -1655,6 +1662,9 @@ app.post('/:id/retry', async (c) => {
   if (denied) return denied
   const db = await getImportFencedDb(c.env)
   const status = String(job.status || '').toLowerCase()
+  if (status === 'failed' && String(job.last_error || '').startsWith(PRODUCT_IMPORT_FINALIZATION_CHANGED.code + ':')) {
+    return c.json({ success: false, ...PRODUCT_IMPORT_FINALIZATION_CHANGED }, 409)
+  }
   // K4 retention: once the scheduled sweep has pruned a terminal job's
   // staged detail (source rows + unlinked raw file, kept 24h by policy),
   // a retry has nothing to re-run from -- analyze needs the file, apply
@@ -1673,7 +1683,9 @@ app.post('/:id/retry', async (c) => {
   // route into apply. In particular, stock_actions /approve enforces the
   // explicit conflict confirmation and records the confirming actor/time;
   // retry used to bypass that entire gate by queueing `apply` directly.
-  const retryMode = retryModeForImportStatus(status)
+  const savedFinalize = safeJsonParse<{ genericApply?: { finalize?: { phase?: string } } }>(String(job.chunk_state_json || '{}'), {}).genericApply?.finalize
+  const retryMode = status === 'queued' && ['replace', 'reconcile', 'unify', 'notify', 'settle'].includes(savedFinalize?.phase || '')
+    ? 'apply' : retryModeForImportStatus(status)
   if (retryMode === 'review_required') {
     return c.json({ success: false, error: 'This import is waiting for review. Use Confirm to apply it, or cancel it to start over.' }, 409)
   }
