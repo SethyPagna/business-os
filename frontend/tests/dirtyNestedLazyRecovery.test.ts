@@ -20,10 +20,11 @@ const useWebKit = process.env.BOS_LAZY_BROWSER === 'webkit'
 
 
 const fixture = String.raw`
-import React, { useState, Suspense, useEffect } from "react";
+import React, { useState, Suspense, useEffect, useContext } from "react";
 import { createRoot } from "react-dom/client";
 import { lazyRetry } from "./src/utils/lazyImport.ts";
 import { AppContext } from "./src/app/AppContextCore.tsx";
+import { PublicCatalogAppProvider } from "./src/app/PublicCatalogAppProvider.tsx";
 import en from "./src/lang/en.json";
 import km from "./src/lang/km.json";
 import { registerDirtyWork } from "./src/utils/dirtyWork.ts";
@@ -45,6 +46,8 @@ if (!clean || params.has("denied")) Storage.prototype.setItem = function(k, v) {
 window.__ok = false;
 window.__attempts = 0;
 window.__mounted = 0;
+window.__parentClicks = 0;
+document.documentElement.lang = params.has("stale") ? (params.has("km") ? "en" : "km") : (params.has("km") ? "km" : "en");
 const Child = lazyRetry(async () => {
   window.__attempts++;
   if (params.has("programming")) throw new Error("Invalid component module");
@@ -61,17 +64,19 @@ class Boundary extends React.Component {
   }
 }
 function Parent() {
+  const app = useContext(AppContext);
+  useEffect(() => { if (params.has("inverse")) app.toggleLanguage(); }, []);
   const [value, setValue] = useState("unsaved draft"), [open, setOpen] = useState(false);
   useEffect(() => {
     window.__mounted++;
     return registerDirtyWork({ key: "fixture", pageId: "products", label: "draft", isDirty: () => window.__dirty });
   }, []);
-  return React.createElement("div", null, React.createElement("input", { id: "draft", value, onChange: (e) => {
+  return React.createElement("div", { inert: params.has("inert") && open ? "" : undefined, onClick: () => window.__parentClicks++ }, React.createElement("input", { id: "draft", value, onChange: (e) => {
     setValue(e.target.value);
     scheduleWorkDraftWrite("fixture", e.target.value);
-  } }), React.createElement("button", { id: "trigger", onClick: () => setOpen(true) }, "Open"), (open || params.has("always")) && React.createElement(Suspense, { fallback: React.createElement("div", { id: "pending" }, "Loading") }, React.createElement(Child, { open, ...params.has("nocallback") ? {} : params.has("cancel") ? { onClose: "invalid", onCancel: () => setOpen(false) } : { onClose: () => setOpen(false) } })));
+  } }), React.createElement("button", { id: "trigger", onClick: () => setOpen(true) }, "Open"), (open || params.has("always")) && React.createElement(Suspense, { fallback: React.createElement("div", { id: "pending" }, "Loading") }, React.createElement(Child, { ...params.has("omitted") ? {} : { open }, ...params.has("nocallback") ? {} : params.has("cancel") ? { onClose: "invalid", onCancel: () => setOpen(false) } : { onClose: () => setOpen(false) } })));
 }
-createRoot(document.getElementById("root")).render(React.createElement(AppContext.Provider, { value: { language: params.has("km") ? "km" : "en", t: (key) => params.has("public") ? key : (params.has("km") ? km : en)[key] || key } }, React.createElement(Boundary, null, React.createElement(Parent))));
+createRoot(document.getElementById("root")).render(React.createElement(params.has("public") ? PublicCatalogAppProvider : AppContext.Provider, { value: { language: params.has("km") ? "km" : "en", t: (key) => (params.has("km") ? km : en)[key] || key } }, React.createElement(Boundary, null, React.createElement(Parent))));
 
 `
 
@@ -176,7 +181,7 @@ try {
   assert.equal(await evaluate<boolean>('Boolean(document.querySelector("[data-lazy-recovery]"))'),false);
   assert.equal(await evaluate<number>('window.__mounted'),1);
 
-  for(const mode of ['?denied=1','?clean=1&denied=1','?cancel=1','?nocallback=1','?km=1','?km=1&public=1','?late=1','?always=1']){
+  for(const mode of ['?denied=1','?clean=1&denied=1','?cancel=1','?nocallback=1','?km=1','?km=1&public=1','?late=1','?always=1','?inert=1','?inert=1&omitted=1','?public=1&inverse=1','?km=1&stale=1','?stale=1']){
     await navigate(mode);
     await page.locator('#trigger').click()
     if(mode.includes('late')){await waitFor(async()=>await evaluate<boolean>('typeof window.__resolveManifest==="function"')?true:null);await evaluate('window.__resolveManifest()')}
@@ -184,9 +189,22 @@ try {
     assert.equal(await evaluate<number>('window.__mounted'),1);
     assert.equal(await evaluate<boolean>('location.search.includes("__bos_reload")'),false);
     assert.equal(await evaluate<string|null>('sessionStorage.getItem("bos-nested-lazy-reload:dirty-fixture")'),null);
+    if(mode.includes('inert')) {
+      assert.equal(await page.locator('[data-lazy-recovery]').getAttribute('role'), 'dialog')
+      assert.equal(await evaluate<boolean>('Boolean(document.querySelector("[data-lazy-recovery]").closest("[inert]"))'), false)
+      assert.equal(await evaluate<boolean>('document.activeElement === document.querySelector("[data-lazy-retry]")'), true)
+      const parentClicks = await evaluate<number>('window.__parentClicks')
+      await page.locator('[data-lazy-retry]').click()
+      await waitFor(async()=>await page.locator('[data-lazy-retry]').isEnabled()?true:null)
+      assert.equal(await evaluate<number>('window.__parentClicks'), parentClicks, 'portal clicks do not bubble into the suspended parent dialog')
+    }
+    if(mode.includes('nocallback')) assert.equal(await page.locator('[data-lazy-recovery]').getAttribute('role'), 'alert')
     if(mode.includes('km')) {
       assert.equal(await page.locator('[data-lazy-close]').getAttribute('aria-label'), 'បិទ')
       assert.equal(await page.locator('[data-lazy-retry]').getAttribute('aria-label'), 'ព្យាយាមម្ដងទៀត')
+    } else {
+      assert.equal(await page.locator('[data-lazy-close]').getAttribute('aria-label'), 'Close')
+      assert.equal(await page.locator('[data-lazy-retry]').getAttribute('aria-label'), 'Retry')
     }
     await page.locator('[data-lazy-close]').click()
     assert.equal(await evaluate<boolean>('Boolean(document.querySelector("[data-lazy-recovery]"))'),false);
