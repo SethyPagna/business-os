@@ -174,10 +174,36 @@ export function stockInCommitSessionRefusal(lines: StockInCommitLine[], raw: unk
 export async function runStockInCommit(c: InventoryContext, lines: StockInCommitLine[]): Promise<StockInCommitLineResult[]> {
   const cap = getPlanLimits(c.env).stockInLinesPerRequest
   const results: StockInCommitLineResult[] = []
+  let deferred = false
   for (const [index, line] of lines.entries()) {
-    results.push(index < cap
-      ? await runLine(c, line)
-      : { ok: false, key: line?.key, error: STOCK_IN_DEFERRED_ERROR, code: STOCK_IN_DEFERRED_CODE })
+    if (deferred || index >= cap) {
+      results.push({ ok: false, key: line?.key, error: STOCK_IN_DEFERRED_ERROR, code: STOCK_IN_DEFERRED_CODE })
+      continue
+    }
+    const pending: Promise<unknown>[] = []
+    const settleBeforeNextLine = index + 1 < Math.min(cap, lines.length)
+    const lineContext = settleBeforeNextLine ? new Proxy(c, {
+      get(target, key) {
+        const value = Reflect.get(target, key, target)
+        if (key === 'executionCtx') return new Proxy(value, {
+          get(execution, field) {
+            const member = Reflect.get(execution, field, execution)
+            if (field === 'waitUntil') return (task: Promise<unknown>) => {
+              pending.push(Promise.resolve(task))
+              member.call(execution, task)
+            }
+            return typeof member === 'function' ? member.bind(execution) : member
+          },
+        })
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    }) : c
+    const result = await runLine(lineContext, line)
+    if (settleBeforeNextLine) await Promise.allSettled(pending)
+    if (result.code === 'stock_request_query_budget_exceeded') {
+      deferred = true
+      results.push({ ok: false, key: line?.key, error: STOCK_IN_DEFERRED_ERROR, code: STOCK_IN_DEFERRED_CODE })
+    } else results.push(result)
   }
   return results
 }
