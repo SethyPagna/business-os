@@ -2003,6 +2003,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   let addMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = preflightAddMovementCost
   let removeMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = null
   let movementWrittenAtomically = false
+  let taggedReceiptCommitted = false
   let capturedRemovalAllocations: Array<{ batchId: number; quantity: number }> | undefined
   if (type === 'add') {
     delta = quantity
@@ -2086,7 +2087,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       throw error
     }
   }
-  if (!atomicRemoval) await markWritten()
+  const atomicTaggedReceipt = !correctionLot && useBatchLedger && type === 'add' && Boolean(conditionTag)
+  if (!atomicRemoval && !atomicTaggedReceipt) await markWritten()
 
   // The two ledger records a removal can leave -- the plain movement row, or
   // the held-lot row + damage_out movement of a tagged removal -- built in one
@@ -2204,7 +2206,70 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     movementWrittenAtomically = true
   } else if (useBatchLedger && type === 'add') {
     try {
-      if (unlockPricing && !createdSibling && mergedPricingStatement && addMovementCost) {
+      if (conditionTag) {
+        const target = unlockedReceiptLotTarget ?? await prepareReceiptLotTarget(db, {
+          productId: targetProductId, receivedDate, unitCostUsd: receiptUnitCostUsd,
+          batchId: unlockPricing ? null : batchIdRequested, preserveHistoricalUnitCost: unitCostUsd == null,
+        })
+        const [maximum, existing] = await Promise.all([
+          db.prepare('SELECT COALESCE(MAX(id),0) AS id FROM product_batches').get<{ id: number }>(),
+          target.existingBatchId == null ? Promise.resolve(undefined) : db.prepare(
+            'SELECT received_cost_usd FROM product_batches WHERE id=@id AND variant_product_id=@productId',
+          ).get<{ received_cost_usd: number | null }>({ id: target.existingBatchId, productId: targetProductId }),
+        ])
+        const receiptBatchId = target.existingBatchId ?? Number(maximum?.id ?? 0) + 1
+        const plan = planReceiveBatchStock({
+          productId: targetProductId, branchId, quantity, receivedDate, expiryDate,
+          batchId: unlockPricing ? null : batchIdRequested,
+          supplierId, supplierName, unitCostUsd: receiptUnitCostUsd, receiptTotalUsd,
+          preserveHistoricalUnitCost: unitCostUsd == null, paymentStatus, creditDueDate,
+          receiptLotTarget: target,
+          ...(target.existingBatchId == null ? { reservedBatchId: receiptBatchId } : {}),
+          receiptCostPreimage: receiptUnitCostUsd == null ? undefined : {
+            batchExists: target.existingBatchId != null, receivedCostUsd: existing?.received_cost_usd ?? null,
+          },
+        })
+        const receiptCost = addMovementCost || resolveMovementCostSnapshot({
+          quantity, components: [{ quantity, unitCostUsd: receiptUnitCostUsd }],
+          fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
+          fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
+        })
+        const removal = planRemoveStockAcrossBatches({ productId: targetProductId, branchId, quantity,
+          allocations: [{ batchId: receiptBatchId, quantity }] })
+        const mark = atomicMark?.statement() ?? null
+        await db.batch(addressedStatements(landing, [
+          receivingBranchAssertion(branchId),
+          ...plan.statements,
+          ...(mark ? [mark] : []),
+          ...(unlockPricing && !createdSibling && mergedPricingStatement ? [mergedPricingStatement]
+            : sellingPricePlan ? [sellingPricePlan.statement] : []),
+          {
+            sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity,
+              unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, created_at, batch_id${movementFreeColumn ? ', free_quantity' : ''})
+              VALUES (@productId,@productName,@branchId,@branchName,'add',@quantity,
+                @unitCostUsd,@unitCostKhr,@totalCostUsd,@totalCostKhr,@reason,@referenceId,@userId,@userName,CURRENT_TIMESTAMP,@batchId${movementFreeColumn ? ', @freeQuantity' : ''})`,
+            params: { productId: targetProductId, productName: targetProductName, branchId, branchName: branch?.name || null,
+              quantity, ...receiptCost, reason: appendReceiptNotes(reason, reasonNotes), referenceId: sessionId,
+              userId: user?.id ?? null, userName: actorSnapshot(user), batchId: receiptBatchId,
+              ...(movementFreeColumn ? { freeQuantity } : {}) },
+          },
+          ...removal.statements,
+          ...planHoldAsTagged({ productId: targetProductId, productName: targetProductName, branchId,
+            branchName: branch?.name || null, batchId: receiptBatchId, quantity, tag: conditionTag, source: 'restock',
+            reason, cost: receiptCost, referenceId: sessionId,
+            actor: { userId: user?.id ?? null, userName: actorSnapshot(user) } }),
+          { sql: 'DELETE FROM stock_session_guards', params: {} },
+        ]))
+        atomicMark?.committed()
+        const received = await db.prepare('SELECT id,batch_number,lot_code FROM product_batches WHERE id=@id')
+          .get<{ id: number; batch_number: number | null; lot_code: string }>({ id: receiptBatchId })
+        if (!received) throw new Error('Received stock batch was not found after commit')
+        batchNumber = received.batch_number
+        resolvedBatchId = received.id
+        lotCode = received.lot_code
+        movementWrittenAtomically = true
+        taggedReceiptCommitted = true
+      } else if (unlockPricing && !createdSibling && mergedPricingStatement && addMovementCost) {
         const plan = planReceiveBatchStock({
           productId: targetProductId,
           branchId,
@@ -2432,7 +2497,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // (b) is what runs here. The ledger tells the honest story too -- goods
   // arrived and were immediately found broken -- rather than a receipt that
   // silently never became sellable.
-  if (conditionTag && type === 'add' && delta !== 0) {
+  if (conditionTag && type === 'add' && delta !== 0 && !taggedReceiptCommitted) {
     const heldBatchId = useBatchLedger ? resolvedBatchId : null
     const removal = heldBatchId != null
       ? planRemoveStockAcrossBatches({ productId: targetProductId, branchId, quantity: Math.abs(delta),

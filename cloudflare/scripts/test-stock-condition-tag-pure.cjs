@@ -450,25 +450,77 @@ const ADD = (extra) => ({
     assert.deepEqual({stock:sellable(),lots:heldLots(),ledger:lotLedger(),movements:movements()},before)
     assert.equal(rawDb.prepare('SELECT is_active FROM products WHERE id=1').get({}).is_active,1)
   })
-  await check('tagged receipt hold rolls back its drain when admission changes; received goods stay visible', async () => {
+  const taggedReceiptState = () => JSON.stringify(['products','product_batches','branch_stock','branch_batch_stock',
+    'damaged_stock_lots','inventory_movements','action_history','stock_mutation_receipts'].map(table =>
+    [table,rawDb.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]))
+  for (const failure of ['deactivate','fault']) {
+    await check(`tagged receipt ${failure} rolls back purchase and hold, same request retries exactly once`, async () => {
+      seed()
+      const body=ADD({conditionTag:'broken',client_request_id:`atomic_tagged_${failure}_abcdefgh`})
+      const before=taggedReceiptState()
+      let injected=false
+      beforeDbBatchHook=items=>{
+        if (!items.some(x=>/INSERT INTO damaged_stock_lots/.test(x.sql))) return
+        assert.ok(items.some(x=>/INSERT INTO product_batches/.test(x.sql)),'receipt and hold share one transaction')
+        const holdIndex=items.findIndex(x=>/INSERT INTO damaged_stock_lots/.test(x.sql))
+        const drainIndex=items.slice(0,holdIndex).findLastIndex(x=>/UPDATE products SET stock_quantity/.test(x.sql))
+        assert.ok(drainIndex>=0)
+        items.splice(drainIndex+1,0,{sql:failure==='deactivate'
+          ? 'UPDATE products SET is_active=0 WHERE id=1'
+          : "SELECT json_extract('tagged_receipt_fault','$')",params:{}})
+        injected=true
+      }
+      let refusal
+      try { refusal=await req('POST','/adjust',body) }
+      finally { beforeDbBatchHook=null }
+      assert.ok(injected)
+      assert.equal(refusal.status,failure==='deactivate'?409:400,JSON.stringify(refusal.json))
+      if (failure==='deactivate') assert.equal(refusal.json.code,'product_has_stock')
+      assert.equal(taggedReceiptState(),before,'refusal leaves no receipt, stock, purchase, movement, history or request mark')
+      const success=await req('POST','/adjust',body)
+      assert.equal(success.status,200,JSON.stringify(success.json))
+      assert.ok(success.json.batchId>0)
+      assert.deepEqual(sellable(),{product:0,branch:0})
+      assert.equal(Number(heldLots()[0].quantity_remaining),10)
+      assert.equal(Number(heldLots()[0].batch_id),success.json.batchId)
+      assert.equal(purchaseTotals().units,10)
+      const completed=taggedReceiptState()
+      const replay=await req('POST','/adjust',body)
+      assert.equal(replay.status,200)
+      assert.equal(replay.json.replayed,true)
+      assert.equal(replay.json.batchId,success.json.batchId)
+      assert.equal(taggedReceiptState(),completed,'completed retry never receives or holds twice')
+    })
+  }
+  await check('lost acknowledgement of atomic tagged receipt never reapplies the purchase on retry', async () => {
     seed()
-    let received
-    beforeDbBatchHook = items => {
-      if (!items.some(x=>/INSERT INTO damaged_stock_lots/.test(x.sql))) return
-      received = {stock:sellable(),ledger:lotLedger(),movements:movements()}
-      const index=items.findIndex(x=>/UPDATE products SET stock_quantity/.test(x.sql))
-      assert.ok(index>=0)
-      items.splice(index+1,0,{sql:'UPDATE products SET is_active=0 WHERE id=1',params:{}})
+    const body=ADD({conditionTag:'broken',client_request_id:'atomic_tagged_lost_ack_abcdefgh'})
+    afterDbBatchHook=items=>{
+      if (items.some(x=>/INSERT INTO damaged_stock_lots/.test(x.sql))) throw new Error('D1 acknowledgement lost after commit')
     }
-    try {
-      const result=await req('POST','/adjust',ADD({conditionTag:'broken'}))
-      assert.equal(result.status,409,JSON.stringify(result.json))
-      assert.equal(result.json.code,'product_has_stock')
-    } finally { beforeDbBatchHook=null }
-    assert.ok(received)
-    assert.deepEqual({stock:sellable(),ledger:lotLedger(),movements:movements()},received)
-    assert.equal(heldLots().length,0)
-    assert.equal(rawDb.prepare('SELECT is_active FROM products WHERE id=1').get({}).is_active,1)
+    try { assert.equal((await req('POST','/adjust',body)).status,400) }
+    finally { afterDbBatchHook=null }
+    assert.equal(Number(heldLots()[0].quantity_remaining),10)
+    assert.equal(purchaseTotals().units,10)
+    const committed=taggedReceiptState()
+    const retry=await req('POST','/adjust',body)
+    assert.equal(retry.status,409)
+    assert.equal(retry.json.code,'stock_request_partially_applied')
+    assert.equal(taggedReceiptState(),committed)
+  })
+  await check('tagged top-up keeps selected lot identity and existing sellable stock', async () => {
+    seed()
+    const initial=await req('POST','/adjust',ADD())
+    assert.equal(initial.status,200)
+    const batchId=initial.json.batchId
+    const result=await req('POST','/adjust',ADD({quantity:3,batchId,conditionTag:'broken'}))
+    assert.equal(result.status,200,JSON.stringify(result.json))
+    assert.equal(result.json.batchId,batchId)
+    assert.deepEqual(sellable(),{product:10,branch:10})
+    assert.equal(lotLedger(),10)
+    assert.equal(Number(heldLots()[0].batch_id),batchId)
+    assert.equal(Number(heldLots()[0].quantity_remaining),3)
+    assert.equal(purchaseTotals().units,13)
   })
   // ------------------------------------------------------------------ HOLD
   await check('keep-in-group: units leave sellable, land on a tagged lot, and the movement is damage_out with cost', async () => {
