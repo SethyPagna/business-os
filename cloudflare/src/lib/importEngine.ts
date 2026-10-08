@@ -362,13 +362,14 @@ export function stripProductImportImageFields(results: ImportRowResult[]): void 
 export async function assertCurrentImportApplyAuthority(
   env: Env,
   job: ImportApplyJob,
+  db = getDb(env),
 ): Promise<{ actor: SessionUser; allowProductImageWrites: boolean }> {
   const policy = parsePolicyObject(job.policy_json)
   const actorId = Number(policy.apply_authorized_by_id)
   if (!Number.isInteger(actorId) || actorId <= 0) {
     throw new ImportApplyAuthorizationError('import', 'The user who authorized this import is missing. Retry it with a currently authorized user.')
   }
-  const actor = await loadImportApplyActor(getDb(env), actorId)
+  const actor = await loadImportApplyActor(db, actorId)
   if (!actor) {
     throw new ImportApplyAuthorizationError('import', 'The user who authorized this import is no longer active. Retry it with a currently authorized user.')
   }
@@ -4024,7 +4025,9 @@ type ImportChunkState = {
   // forbids), and the idempotency that makes crash/redelivery safe lives in
   // the writers' import_stock_action_commits seals, never in this blob.
   stock?: {
-    phase: 'classify' | 'dispatch'
+    phase: 'classify' | 'dispatch' | 'finalize'
+    classifyWindow?: number
+    deferredRow?: number
     // next unassigned sale-group index (assigned rows are in 0063's table).
     nextGroupIndex: number
     // dispatch cursor: highest row_number whose unit has been dispatched
@@ -4990,9 +4993,21 @@ export async function unifyTouchedProductGroups(db: D1Compat, cutoff: string): P
     }
     if (groupChanged) changedGroups += 1
   }
-  for (let i = 0; i < statements.length; i += 50) {
-    await db.batch(statements.slice(i, i + 50))
+  const groupedUpdates: Array<{ sql: string; params: Record<string, unknown> }> = []
+  for (const field of ['category', 'brand'] as const) {
+    const updates = statements.filter(statement => statement.sql.startsWith(`UPDATE products SET ${field} =`))
+      .map(statement => ({ id: statement.params.id, value: statement.params.value }))
+    if (!updates.length) continue
+    const json = JSON.stringify(updates)
+    if (new TextEncoder().encode(json).length > 1_000_000) throw new Error('Product group finalization exceeds the bounded update payload; split this import.')
+    groupedUpdates.push({
+      sql: `UPDATE products SET ${field}=(SELECT json_extract(value,'$.value') FROM json_each(@updates)
+        WHERE json_extract(value,'$.id')=products.id),updated_at=CURRENT_TIMESTAMP
+        WHERE id IN (SELECT json_extract(value,'$.id') FROM json_each(@updates))`,
+      params: { updates: json },
+    })
   }
+  if (groupedUpdates.length) await db.batch(groupedUpdates)
   return changedGroups
 }
 
@@ -5365,6 +5380,53 @@ const STOCK_POISON_MESSAGE = 'This sale group has a line that could not be resol
  * prevent. So the sheet is classified together and grouped in memory, and
  * kept operator-scale by STOCK_ACTION_MAX_UNITS instead.
  */
+const STOCK_QUERY_BUDGET = Symbol('stockQueryBudget')
+class StockQueryBudgetDeferred extends Error {}
+type StockQueryBudget = { used: number; limit: number; reserve: number; enabled: boolean; physicalBatches: number }
+type BudgetDb = D1Compat & { [STOCK_QUERY_BUDGET]?: StockQueryBudget; readonly importWriteFenceStatements?: 0 | 1 }
+function stockQueryBudgetDb(db: D1Compat, limit: number, factoryQueries = 0): BudgetDb {
+  if ((db as BudgetDb)[STOCK_QUERY_BUDGET]) return db
+  const budget: StockQueryBudget = { used: factoryQueries, limit, reserve: 0, enabled: false, physicalBatches: 0 }
+  const wrap = (source: D1Compat): BudgetDb => {
+    const result = Object.create(source) as BudgetDb
+    Object.defineProperty(result, STOCK_QUERY_BUDGET, { value: budget })
+    const charge = (count: number) => {
+      if (budget.enabled && budget.used + count > budget.limit - budget.reserve) throw new StockQueryBudgetDeferred()
+      budget.used += count
+    }
+    result.prepare = ((sql: string) => {
+      const prepared = source.prepare(sql)
+      return {
+        get: (params?: Parameters<typeof prepared.get>[0]) => { charge(1); return prepared.get(params) },
+        all: (params?: Parameters<typeof prepared.all>[0]) => { charge(1); return prepared.all(params) },
+        run: (params?: Parameters<typeof prepared.run>[0]) => { charge(1 + ((source as BudgetDb).importWriteFenceStatements ?? 0)); return prepared.run(params) },
+      }
+    }) as D1Compat['prepare']
+    const execute = (statements: Parameters<D1Compat['batch']>[0], once: boolean) => {
+      charge(statements.length + ((source as BudgetDb).importWriteFenceStatements ?? 0))
+      if (statements.some(statement => /(?:UPDATE|INSERT INTO|INSERT OR IGNORE INTO)\s+(?:branch_stock|branch_batch_stock|products|sales)\b/i.test(statement.sql))) budget.physicalBatches++
+      return once ? source.batchOnce(statements) : source.batch(statements)
+    }
+    result.batch = statements => execute(statements, false)
+    result.batchOnce = statements => execute(statements, true)
+    return result
+  }
+  const result = wrap(db)
+  result.staging = db.staging === db ? result : wrap(db.staging)
+  return result
+}
+async function persistStockResults(db: D1Compat, jobId: string, results: ImportRowResult[], groups?: Map<number, number>): Promise<void> {
+  if (!results.length) return
+  const rows = results.map(row => ({ rowNumber: row.rowNumber, groupIndex: groups?.get(row.rowNumber) ?? null,
+    action: row.action, identifier: row.identifier, result: row }))
+  const json = JSON.stringify(rows)
+  if (new TextEncoder().encode(json).length > 1_000_000) throw new StockQueryBudgetDeferred()
+  await db.staging.prepare(`INSERT OR REPLACE INTO import_job_rows(job_id,phase,row_number,group_index,action,identifier,result_json)
+    SELECT @id,'apply',json_extract(value,'$.rowNumber'),json_extract(value,'$.groupIndex'),
+      json_extract(value,'$.action'),json_extract(value,'$.identifier'),json_extract(value,'$.result')
+    FROM json_each(@rows)`).run({ id: jobId, rows: json })
+}
+
 export async function applyStockActionsJob(
   env: Env,
   db: D1Compat,
@@ -5375,6 +5437,7 @@ export async function applyStockActionsJob(
   actor: SessionUser,
 ): Promise<{ applied: number; failed: number }> {
   const startedAtMs = Date.now()
+  db = stockQueryBudgetDb(db, getPlanLimits(env).d1QueriesPerInvocation)
   // Same materialize-first contract as the generic apply path: this
   // self-enqueues and returns 'still working' until every raw row is in
   // import_job_source_rows, so this invocation just acks with 0/0.
@@ -5569,6 +5632,9 @@ async function applyStockActionsContinuation(
   // Per-invocation dispatch budget, tier-aware -- see lib/planTier.ts. The
   // module-level STOCK_ACTION_* exports keep their Paid values.
   const limits = getPlanLimits(env)
+  const budget = (db as BudgetDb)[STOCK_QUERY_BUDGET]!
+  budget.enabled = true
+  budget.reserve = 8
   const decisions = getDecisionMap(policyJson)
   const { cursor, state } = await getChunkState(db, jobId)
   if (!state.startedAtMs) state.startedAtMs = startedAtMs
@@ -5582,7 +5648,9 @@ async function applyStockActionsContinuation(
   }
 
   if (stock.phase === 'classify') {
-    const windowRows = await readMaterializedWindow(db, jobId, cursor, STOCK_ACTION_CLASSIFY_WINDOW, decisions)
+    const windowSize = stock.classifyWindow ?? STOCK_ACTION_CLASSIFY_WINDOW
+    try {
+    const windowRows = await readMaterializedWindow(db, jobId, cursor, windowSize, decisions)
     const results = (await classifyRows(db, 'stock_actions', windowRows, jobId, policyJson)) as StockActionImportResult[]
     sw.lap('classifyChunkMs')
     // Classification runs to the end before any dispatch, so a refusal here leaves every business table untouched.
@@ -5636,7 +5704,7 @@ async function applyStockActionsContinuation(
           params: { jobId, key },
         })
       }
-      if (upserts.length) await runD1BatchInChunks(db, upserts)
+      if (upserts.length) await db.batch(upserts)
     }
     const groupCounts = await db.prepare(`SELECT COUNT(*) AS total, COALESCE(SUM(poisoned), 0) AS poisoned FROM import_stock_action_groups WHERE job_id = @id`)
       .get<{ total: number; poisoned: number }>({ id: jobId })
@@ -5653,18 +5721,28 @@ async function applyStockActionsContinuation(
       if (groupIndex === undefined) continue
       for (const rowNumber of rowNumbers) groupIndexByRowNumber.set(rowNumber, groupIndex)
     }
-    await persistChunkResults(db, jobId, 'apply', results, groupIndexByRowNumber)
+    await persistStockResults(db, jobId, results, groupIndexByRowNumber)
     const nextCursor = cursor + windowRows.length
-    const classifyDone = windowRows.length < STOCK_ACTION_CLASSIFY_WINDOW || nextCursor >= totalRows
+    const classifyDone = windowRows.length < windowSize || nextCursor >= totalRows
     if (classifyDone) stock.phase = 'dispatch'
+    budget.reserve = 2
     await saveChunkState(db, jobId, nextCursor, state)
     await db.prepare(`UPDATE import_jobs SET processed_rows = @n, updated_at = CURRENT_TIMESTAMP WHERE id = @id`)
       .run({ id: jobId, n: Math.min(nextCursor, totalRows) })
     console.log('[import-timing] stock-action classify window', jobId, { cursor, nextCursor, totalRows, classifyDone, ...sw.marks })
     await dispatchImportWork(env, { jobId, kind: 'apply' })
     return { applied: 0, failed: 0 }
+    } catch (error) {
+      if (!(error instanceof StockQueryBudgetDeferred)) throw error
+      if (windowSize === 1) throw new Error('One stock import row exceeds the deployment query budget during classification; simplify its branch details.')
+      stock.classifyWindow = Math.max(1, Math.floor(windowSize / 2))
+      budget.reserve = 2
+      await saveChunkState(db, jobId, cursor, state)
+      await dispatchImportWork(env, { jobId, kind: 'apply' })
+      return { applied: 0, failed: 0 }
+    }
   }
-
+  if (stock.phase !== 'finalize') {
   // ---- DISPATCH phase ----
   const poisonedRows = await db.prepare(`SELECT group_key FROM import_stock_action_groups WHERE job_id = @id AND poisoned = 1`)
     .all<{ group_key: string }>({ id: jobId })
@@ -5678,136 +5756,83 @@ async function applyStockActionsContinuation(
   let unitsDispatched = 0
   let after = stock.dispatchAfterRow
   let moreRows = true
-  const pendingAdds: Array<Promise<void>> = []
-  // Two add rows sharing one lot (same product + batchIdentity) must never be
-  // IN FLIGHT together: applyUnifiedStockAdd's gate reads the lot's current
-  // supplier once, at the top of its own call, before either write lands --
-  // so two concurrent adds into the SAME lot, one supplied and one blank,
-  // race that read and accept or refuse depending on which promise's INSERT
-  // happens to land first. Tracking the lot keys already dispatched in this
-  // flush window and forcing a flush before a repeat lets each lot's adds
-  // still run serially (correct) while unrelated lots keep the concurrency
-  // this queue exists for.
-  const pendingLotKeys = new Set<string>()
-  const addLotKey = (resolved: UnifiedStockResolvedRow): string => {
+  let deferred = false
+  while (unitsDispatched < limits.stockActionMaxUnits && !deferred) {
+    let batch: { row_number: number; group_index: number | null; result_json: string }[]
     try {
-      batchIdentity(resolved.date, resolved.batchLabel)
-      // Price-aware lot reservations and next batch numbers are product-scoped.
-      return `${resolved.productId}`
-    } catch {
-      // An unparsable date/label fails inside applyUnifiedStockAdd itself
-      // (caught by runSingle below); give it a key nothing else can share so
-      // it neither blocks nor is blocked by a sibling row.
-      return `invalid:${resolved.rowNumber}`
-    }
-  }
-  const runSingle = async (r: StockActionImportResult) => {
-    try {
-      await dispatchStockActionSingle(db, jobId, r, resolveSupplierId)
-      // The helper mutates r.action for a noop; TS's narrowing from the
-      // caller's guard doesn't see through the call, hence the cast.
-      if ((r.action as RowAction) === 'skip' || r.existingId != null) touched.push(r)
+      batch = await db.staging.prepare(`SELECT row_number,group_index,result_json FROM import_job_rows
+        WHERE job_id=@id AND phase='apply' AND row_number>@after ORDER BY row_number LIMIT ${STOCK_ACTION_DISPATCH_READ}`)
+        .all({ id: jobId, after })
     } catch (error) {
-      if (isImportMaintenanceFenceError(error)) throw error
-      r.action = 'error'
-      const stockError = productStockGuardError(error)
-      if (stockError) r.code = stockError.code
-      r.message = stockError ? `${stockError.code}: ${stockError.message}` : error instanceof Error ? error.message : 'Stock action failed'
-      touched.push(r)
+      if (!(error instanceof StockQueryBudgetDeferred)) throw error
+      deferred = true
+      break
     }
-  }
-  const flushAdds = async () => {
-    if (!pendingAdds.length) return
-    await Promise.all(pendingAdds.splice(0, pendingAdds.length))
-    pendingLotKeys.clear()
-  }
-
-  outer: while (unitsDispatched < limits.stockActionMaxUnits) {
-    const batch = await db.staging.prepare(`
-      SELECT row_number, group_index, result_json FROM import_job_rows
-      WHERE job_id = @id AND phase = 'apply' AND row_number > @after
-      ORDER BY row_number LIMIT ${STOCK_ACTION_DISPATCH_READ}
-    `).all<{ row_number: number; group_index: number | null; result_json: string }>({ id: jobId, after })
     if (!batch.length) { moreRows = false; break }
-
     for (const record of batch) {
-      if (unitsDispatched >= limits.stockActionMaxUnits) break outer
-      after = record.row_number
+      if (unitsDispatched >= limits.stockActionMaxUnits) break
       const r = parseRow(record.result_json)
-      if (!r) continue
-      const resolved = r.data as unknown as UnifiedStockResolvedRow
+      const resolved = r?.data as unknown as UnifiedStockResolvedRow | undefined
       const plan = resolved?.plan
-      if (r.action === 'error' || r.action === 'skip' || !plan) continue // already settled at classify or by an earlier window
-
-      if (plan.kind === 'sale' && plan.saleGroupKey && record.group_index != null) {
-        await flushAdds()
-        // Dispatch the whole receipt when its FIRST row is reached; later
-        // member rows cost nothing. After a crash between the writer's seal
-        // and the row re-persist below, the resumed dispatch re-runs the
-        // writer, whose per-group seal makes it a no-op.
-        const minRow = await db.staging.prepare(`SELECT MIN(row_number) AS m FROM import_job_rows WHERE job_id = @id AND phase = 'apply' AND group_index = @gi`)
-          .get<{ m: number }>({ id: jobId, gi: record.group_index })
-        if (Number(minRow?.m) !== record.row_number) continue
-        const memberRows = await db.staging.prepare(`SELECT row_number, result_json FROM import_job_rows WHERE job_id = @id AND phase = 'apply' AND group_index = @gi ORDER BY row_number`)
-          .all<{ row_number: number; result_json: string }>({ id: jobId, gi: record.group_index })
-        const groupResults = memberRows.map((m) => parseRow(m.result_json)).filter((m): m is StockActionImportResult => !!m && !!(m.data as unknown as UnifiedStockResolvedRow)?.plan)
-        if (!groupResults.length) continue
-        unitsDispatched += 1
-        const markGroup = (mutate: (row: StockActionImportResult) => void) => {
-          for (const member of groupResults) {
-            mutate(member)
-            touched.push(member)
-            touchedGroupIndex.set(member.rowNumber, record.group_index as number)
+      if (!r || r.action === 'error' || r.action === 'skip' || !plan) { after = record.row_number; continue }
+      let unitRows = [r]
+      const beforePhysical = budget.physicalBatches
+      try {
+        if (plan.kind === 'sale' && plan.saleGroupKey && record.group_index != null) {
+          const first = await db.staging.prepare(`SELECT MIN(row_number) m FROM import_job_rows
+            WHERE job_id=@id AND phase='apply' AND group_index=@gi`).get<{ m: number }>({ id: jobId, gi: record.group_index })
+          if (Number(first?.m) !== record.row_number) { after = record.row_number; continue }
+          const members = await db.staging.prepare(`SELECT result_json FROM import_job_rows
+            WHERE job_id=@id AND phase='apply' AND group_index=@gi ORDER BY row_number`).all<{ result_json: string }>({ id: jobId, gi: record.group_index })
+          unitRows = members.map(member => parseRow(member.result_json)).filter((row): row is StockActionImportResult => !!row && !!(row.data as unknown as UnifiedStockResolvedRow)?.plan)
+          for (const member of unitRows) touchedGroupIndex.set(member.rowNumber, record.group_index)
+          if (poisoned.has(plan.saleGroupKey)) {
+            for (const member of unitRows) { member.action = 'error'; member.message = STOCK_POISON_MESSAGE }
+          } else {
+            const outcome = await dispatchStockActionSaleGroup(db, jobId, plan.saleGroupKey, unitRows, actor)
+            if (outcome === 'skipped') for (const member of unitRows) member.action = 'skip'
+          }
+        } else await dispatchStockActionSingle(db, jobId, r, resolveSupplierId)
+        touched.push(...unitRows)
+        delete stock.deferredRow
+      } catch (error) {
+        if (isImportMaintenanceFenceError(error)) throw error
+        if (error instanceof StockQueryBudgetDeferred) {
+          if (budget.physicalBatches !== beforePhysical || stock.deferredRow !== record.row_number) {
+            if (budget.physicalBatches === beforePhysical) stock.deferredRow = record.row_number
+            else delete stock.deferredRow
+            deferred = true
+            break
+          }
+          for (const member of unitRows) {
+            member.action = 'error'; member.code = 'stock_import_unit_over_tier_budget'
+            member.message = 'This atomic stock action exceeds the deployment query budget. Split the receipt into smaller independent actions or use the paid deployment.'
+          }
+        } else {
+          const stockError = productStockGuardError(error)
+          for (const member of unitRows) {
+            member.action = 'error'
+            if (stockError) member.code = stockError.code
+            member.message = stockError ? `${stockError.code}: ${stockError.message}` : error instanceof Error ? error.message : 'Stock action failed'
           }
         }
-        if (poisoned.has(plan.saleGroupKey)) {
-          markGroup((row) => { row.action = 'error'; row.message = STOCK_POISON_MESSAGE })
-          continue
-        }
-        try {
-          const outcome = await dispatchStockActionSaleGroup(db, jobId, plan.saleGroupKey, groupResults, actor)
-          if (outcome === 'skipped') markGroup((row) => { row.action = 'skip' })
-        } catch (error) {
-          if (isImportMaintenanceFenceError(error)) throw error
-          const message = error instanceof Error ? error.message : 'Sale group failed'
-          markGroup((row) => { row.action = 'error'; row.message = message })
-        }
-        continue
+        touched.push(...unitRows); delete stock.deferredRow
       }
-
-      // Single unit: create / add / noop.
-      unitsDispatched += 1
-      if (plan.kind === 'add') {
-        const lotKey = addLotKey(resolved)
-        // A second row of an already-in-flight lot must wait for the first
-        // to land -- flush everything pending rather than pick out just the
-        // one conflicting promise, since Promise.all is already the unit of
-        // ordering this queue uses.
-        if (pendingLotKeys.has(lotKey)) await flushAdds()
-        pendingLotKeys.add(lotKey)
-        pendingAdds.push(runSingle(r))
-        if (pendingAdds.length >= limits.stockActionAddConcurrency) await flushAdds()
-      } else {
-        // Create/noop paths remain ordered. A create can establish identity
-        // used by a later row, while a noop has no I/O to parallelize.
-        await flushAdds()
-        await runSingle(r)
-      }
+      after = record.row_number; unitsDispatched++
     }
   }
-
-  await flushAdds()
+  budget.reserve = 2
   stock.dispatchAfterRow = after
-  if (touched.length) await persistChunkResults(db, jobId, 'apply', touched, touchedGroupIndex)
-  sw.lap('buildAndWriteStatementsMs')
-
-  if (moreRows) {
-    await saveChunkState(db, jobId, cursor, state)
-    console.log('[import-timing] stock-action dispatch window', jobId, { after, unitsDispatched, ...sw.marks })
-    await dispatchImportWork(env, { jobId, kind: 'apply' })
-    return { applied: 0, failed: 0 }
+  await persistStockResults(db, jobId, touched, touchedGroupIndex)
+  if (!moreRows && !deferred) stock.phase = 'finalize'
+  await saveChunkState(db, jobId, cursor, state)
+  await dispatchImportWork(env, { jobId, kind: 'apply' })
+  return { applied: 0, failed: 0 }
   }
-
+  budget.reserve = 7 // failure status2, lease release2 and raw cache fallback up to3.
+  // Raw cache helpers bypass this adapter: charge their traced maximum before invoking them.
+  budget.used += 3
+  budget.reserve = 4
   // Done — same refresh + finalize tail as single-pass.
   await bumpVersion(env, 'products').catch(() => {})
   await broadcast(env, 'products', { action: 'import', jobId }).catch(() => {})
@@ -5983,7 +6008,7 @@ export function productImportStockStatements(productId: number, active: unknown,
 }
 
 export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: number, attempt?: number): Promise<{ applied: number; failed: number }> {
-  const db = await getImportFencedDb(env)
+  const db = stockQueryBudgetDb(await getImportFencedDb(env), getPlanLimits(env).d1QueriesPerInvocation, 1)
   // Same per-request shadow as runImportAnalyze -- see its comment -- and
   // the same redelivery back-off.
   const limits = getPlanLimits(env)
@@ -6029,7 +6054,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // chunk is a fresh queue invocation. Resolve the persisted approving
     // actor from live users/roles before this invocation changes job/chunk
     // state or composes any catalog, stock, sales, or image write.
-    const authority = await assertCurrentImportApplyAuthority(env, job)
+    const authority = await assertCurrentImportApplyAuthority(env, job, db)
     const importCostActor = { id: actorId(authority.actor), name: actorSnapshot(authority.actor) }
     if (jobRow.status !== 'applying') {
       // Reclaim 'applying' status on every entry that isn't already an
@@ -7153,6 +7178,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     console.log('[import-timing] apply done', jobId, outcome)
     return outcome
   } catch (error) {
+    const budget = (db as BudgetDb)[STOCK_QUERY_BUDGET]
+    if (budget) budget.reserve = 2
     if (isImportMaintenanceFenceError(error)) throw error
     const stockError = productStockGuardError(error)
     await markJobFailed(db, jobId, stockError ? `${stockError.code}: ${stockError.message}` : (error as Error).message || 'Apply failed')
@@ -7169,6 +7196,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     }
     throw stockError || error
   } finally {
+    const budget = (db as BudgetDb)[STOCK_QUERY_BUDGET]
+    if (budget) budget.reserve = 0
     // Released on EVERY exit, including the failure path. A failed chunk is
     // retried by the queue, and that retry must be able to claim the job
     // rather than waiting out a 60s lease held by an invocation that is
