@@ -56,6 +56,10 @@ function world({ operations = true, active = true } = {}) {
       assert(values.length <= 100, 'D1 bind limit')
       const statement = raw.prepare(sql)
       if (/^\s*(SELECT|WITH|PRAGMA)/i.test(sql)) return { success: true, results: sqliteD1Call(statement, 'all', values), meta: { changes: 0 } }
+      if (/\bRETURNING\b/i.test(sql) && !process.argv.includes('--wrong-returning')) {
+        const results = sqliteD1Call(statement, 'all', values)
+        return { success: true, results, meta: raw.prepare('SELECT changes() AS changes, last_insert_rowid() AS last_row_id').get() }
+      }
       const r = sqliteD1Call(statement, 'run', values)
       return { success: true, results: [], meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } }
     }
@@ -76,7 +80,7 @@ function world({ operations = true, active = true } = {}) {
 }
 const request = (scope = 'lot', quantity = scope === 'lot' ? 5 : 12) => ({ productId: 1, branchId: 1, batchId: 10, quantity, setScope: scope, reason: 'Physical count', conditionTag: null })
 const apply = (f, body = request(), key = 'set-request-0001') => lot.applyStockLotSet(f.db, actor, key, body, async () => { f.control.barrier++ })
-const snapshot = f => JSON.stringify(['products','branch_stock','product_batches','branch_batch_stock','inventory_movements','stock_lot_adjustment_operations','action_history','audit_logs','damaged_stock_lots']
+const snapshot = f => JSON.stringify(['products','branch_stock','product_batches','branch_batch_stock','inventory_movements','stock_lot_adjustment_operations','stock_mutation_receipts','action_history','audit_logs','damaged_stock_lots']
   .filter(table => f.raw.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table))
   .map(table => [table, f.raw.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]))
 const quantities = f => [f.raw.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=10').get().quantity,

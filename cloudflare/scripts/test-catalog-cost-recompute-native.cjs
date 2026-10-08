@@ -208,8 +208,27 @@ async function main() {
     assert.equal((await request({...correction,attribution:'receipt',supplierName:'Acme'})).body.code,'cost_required')
     assert.equal(state(),beforeDenied)
     sqlite.exec("CREATE TRIGGER correction_failure BEFORE INSERT ON inventory_movements WHEN NEW.movement_type='adjustment' BEGIN SELECT RAISE(ABORT,'injected correction movement failure'); END")
-    assert.equal((await request(correction)).status,500)
+    const retryableCorrection = {...correction,client_request_id:'correction-rollback-retry-0001'}
+    const failed = await request(retryableCorrection)
+    assert.equal(failed.status,503,JSON.stringify(failed.body))
+    assert.equal(failed.body.code,'stock_request_outcome_unknown')
     assert.equal(state(),beforeDenied,'movement failure rolls back both stock ledgers and product quantity')
+    assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM stock_mutation_receipts WHERE request_id=?').get(retryableCorrection.client_request_id).n,0,
+      'an atomic rollback releases its unwritten claim, allowing the original identity to retry')
+    const stockBeforeRetry = sqlite.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity
+    const movementsBeforeRetry = sqlite.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n
+    sqlite.exec('DROP TRIGGER correction_failure')
+    const retried = await request(retryableCorrection)
+    assert.equal(retried.status,200,JSON.stringify(retried.body))
+    assert.equal(sqlite.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity,stockBeforeRetry+1)
+    assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n,movementsBeforeRetry+1)
+    assert.equal(catalogCost().usd,10,'the retried correction still preserves the manual cost override')
+    assert.deepEqual(sqlite.prepare('SELECT * FROM product_batches ORDER BY id').all(),lotsBefore)
+    const committed = state()
+    const replay = await request(retryableCorrection)
+    assert.equal(replay.status,200,JSON.stringify(replay.body))
+    assert.equal(replay.body.replayed,true)
+    assert.equal(state(),committed,'same-request replay cannot repeat stock, history, or catalog cost effects')
   })
 
   console.log(`\n${checks} checks passed`)
