@@ -192,6 +192,7 @@ try {
     if(mode.includes('inert')) {
       assert.equal(await page.locator('[data-lazy-recovery]').getAttribute('role'), 'dialog')
       assert.equal(await evaluate<boolean>('Boolean(document.querySelector("[data-lazy-recovery]").closest("[inert]"))'), false)
+      await waitFor(async()=>await evaluate<boolean>('document.activeElement === document.querySelector("[data-lazy-retry]")')?true:null)
       assert.equal(await evaluate<boolean>('document.activeElement === document.querySelector("[data-lazy-retry]")'), true)
       const parentClicks = await evaluate<number>('window.__parentClicks')
       await page.locator('[data-lazy-retry]').click()

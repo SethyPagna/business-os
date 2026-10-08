@@ -161,17 +161,23 @@ async function main() {
     assert.equal((await f.send(body)).body.code, 'client_request_id_required')
     assert.equal(f.state(), before)
   })
-  await check('transient receipt probe failure is retryable and never invokes stock writer', async () => {
+  await check('transient required receipt claim failure is retryable and never invokes stock writer', async () => {
     const f = await setup('correction-tagged')
     const original = f.env.DB.prepare
     let failing = true
+    let injected = 0
     f.env.DB.prepare = text => {
-      if (failing && /sqlite_master.*stock_mutation_receipts/.test(text)) throw new Error('D1_ERROR: network transient probe')
+      if (failing && /INSERT INTO stock_mutation_receipts/.test(text)) {
+        injected++
+        throw new Error('D1_ERROR: network transient receipt claim')
+      }
       return original(text)
     }
     const before = f.state()
     assert.equal((await f.send()).body.code, 'stock_receipt_unavailable')
+    assert.equal(injected, 1)
     assert.equal(f.state(), before)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) AS n FROM stock_mutation_receipts').get().n, 0)
     failing = false
     assert.equal((await f.send()).status, 200)
   })
