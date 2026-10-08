@@ -9,17 +9,17 @@ const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 
 const actor = { id: 7, username: 'admin', name: 'Fixture', role: 'admin', is_system: 1, permissions: JSON.stringify({ inventory: true, products: true, product_cost_edit: true, product_cost_view: true }) }
 const cache = new Map()
-function load(file) {
+function load(file, sourceOverride) {
   file = path.posix.normalize(file)
-  if (cache.has(file)) return cache.get(file).exports
-  const m = { exports: {} }; cache.set(file, m)
-  const source = fs.readFileSync(path.join(__dirname, '../src', file), 'utf8')
+  if (!sourceOverride && cache.has(file)) return cache.get(file).exports
+  const m = { exports: {} }; if (!sourceOverride) cache.set(file, m)
+  const source = sourceOverride || fs.readFileSync(path.join(__dirname, '../src', file), 'utf8')
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: file }).outputText
   const req = name => {
     if (name === '../lib/auth' || name === './auth') return { requireAuth: async (c, next) => { c.set('user', actor); await next() } }
     if (name === '../lib/cache' || name === './cache') return { bumpVersion: async () => {}, bumpVersions: async () => {} }
     if (name.endsWith('/broadcastHub')) return { broadcast: async () => {} }
-    if (name.endsWith('/telegram') || name === './telegram') return { sendTelegramEvent: async () => {}, formatStockChangeTelegramLines: () => [] }
+    if (name.endsWith('/telegram') || name === './telegram') return { sendTelegramEvent: async () => {}, sendReturnTelegramEvent: async () => {}, formatStockChangeTelegramLines: () => [], formatTransferTelegramLines: () => [] }
     if (name.startsWith('.')) return load(path.posix.join(path.posix.dirname(file), `${name}.ts`))
     return require(name)
   }
@@ -78,7 +78,7 @@ const totals = () => [sql.prepare('SELECT stock_quantity q FROM products WHERE i
 let checks = 0
 async function check(name, fn) { await fn(); assert.equal(permits(), 0); checks++; console.log(`PASS ${name}`) }
 
-;(async () => {
+async function main() {
   await check('actual old unpermitted writer refuses', async () => {
     const before = state()
     await assert.rejects(db.batch([{ sql: 'UPDATE products SET stock_quantity=99 WHERE id=1001' }]), /stock_transaction_required/)
@@ -169,4 +169,9 @@ async function check(name, fn) { await fn(); assert.equal(permits(), 0); checks+
     assert.equal(sql.prepare('SELECT notes FROM product_batches WHERE id=1001').get().notes, 'metadata during hold')
   })
   console.log(`PASS ${checks} actual core writer groups on native SQLite with full0243 schema`)
-})().catch(error => { console.error(error); process.exitCode = 1 }).finally(() => sql.close())
+}
+
+module.exports = { sql, raw, db, load, actor, state, permits,
+  failSql(pattern) { failSql = pattern }, loseNextAcknowledgement() { loseAck = true },
+  counts: () => ({ calls, attempts }) }
+if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 }).finally(() => sql.close())

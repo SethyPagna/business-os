@@ -34,6 +34,14 @@ export class StockTransactionOutcomeUnknownError extends Error {
   }
 }
 
+export function stockTransactionRefusal(error: unknown) {
+  if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) {
+    return { error: error.message, code: error.code,
+      action: error instanceof StockTransactionUnavailableError ? 'reload_required' : 'retry_same_request' }
+  }
+  return null
+}
+
 export function stockTransactionStatementCount(businessStatements: number): number {
   return businessStatements + 2
 }

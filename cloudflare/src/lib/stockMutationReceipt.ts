@@ -1,6 +1,6 @@
 import type { D1Compat } from './db'
 import type { StockWriteStatement } from './productBatches'
-import { executeStockTransaction, stockTransactionStatementCount } from './stockTransaction'
+import { executeStockTransaction, stockTransactionStatementCount, StockTransactionUnavailableError, stockTransactionRefusal } from './stockTransaction'
 
 // Per-line idempotency for the two single-line stock write kernels --
 // routes/inventory.ts's runAdjustAction and routes/batches.ts's
@@ -438,6 +438,10 @@ export async function withStockMutationReceipt(
   try {
     response = await run(markWritten, atomicMark)
   } catch (error) {
+    if (!wrote && error instanceof StockTransactionUnavailableError) {
+      await releaseStockMutation(db, actorId, requestId)
+      return json(stockTransactionRefusal(error)!, 503)
+    }
     if (error instanceof StockMutationBudgetError) {
       if (wrote || dispatched) return json(STOCK_MUTATION_UNKNOWN, 503)
       await releaseStockMutation(db, actorId, requestId)
@@ -453,7 +457,8 @@ export async function withStockMutationReceipt(
   }
   if (response.status < 200 || response.status >= 300) {
     const failure = await response.clone().json().catch(() => ({})) as Record<string, unknown>
-    const rolledBack = /constraint failed|malformed JSON|bad JSON path|no such (table|column|function)|syntax error|datatype mismatch|too many SQL variables/i.test(String(failure.error || ''))
+    const rolledBack = failure.code === 'stock_schema_unavailable'
+      || /constraint failed|malformed JSON|bad JSON path|no such (table|column|function)|syntax error|datatype mismatch|too many SQL variables/i.test(String(failure.error || ''))
     if (dispatched && response.status !== 409 && (wrote || !rolledBack)) {
       if (wrote) await completeStockMutation(db, actorId, requestId, 503, STOCK_MUTATION_UNKNOWN).catch(() => {})
       else await releaseStockMutation(db, actorId, requestId).catch(() => {})

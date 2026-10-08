@@ -50,6 +50,7 @@ const REDIRECT_CODES = ['branch_redirect_required', 'branch_redirect_target_inva
 const BULK_CODES = ['bulk_delete_queue_unavailable', 'bulk_delete_queue_resume_required']
 const PLAN_CODES = ["stock_session_query_budget_exceeded","customer_return_over_plan_budget","stock_import_unit_over_tier_budget","stock_import_reconcile_over_tier_budget","import_queue_required"]
 const CODES = [...PLAN_CODES,'branch_not_sellable', 'sale_branch_mismatch', 'sale_identity_conflict', 'unrecorded_stock_line_invalid', 'fee_branch_invalid', 'fee_sale_invalid', 'fee_sale_branch_mismatch', ...REDIRECT_CODES, 'product_has_stock', 'product_status_unsupported', 'product_replacement_incomplete', ...BULK_CODES]
+const STOCK_ALIASES = { stock_schema_unavailable: 'stock_receipt_unavailable', stock_transaction_outcome_unknown: 'stock_request_outcome_unknown' }
 const refusal = (code: unknown, message = 'Worker English', status = 400) => Object.assign(new Error(message), { status, code })
 
 await runTest('queue-unavailable HTTP refusal keeps retryable 503 and stable code in Khmer', async () => {
@@ -62,12 +63,27 @@ await runTest('queue-unavailable HTTP refusal keeps retryable 503 and stable cod
 })
 
 await runTest('the restated codes match the Worker refusals and their language pack keys', () => {
-  assert.deepEqual(Object.keys(lang.RESTATED_REFUSAL_KEYS).sort(), [...CODES].sort())
+  assert.deepEqual(Object.keys(lang.RESTATED_REFUSAL_KEYS).sort(), [...CODES, ...Object.keys(STOCK_ALIASES)].sort())
   for (const code of CODES) {
     assert.equal(lang.RESTATED_REFUSAL_KEYS[code], code)
     assert.ok(EN[code] && KM[code] && EN[code] !== KM[code] && /[ក-៿]/.test(KM[code]), `${code} is a real pair`)
     assert.equal(BRANCH_RULE_CODE_KEYS[code], code, `branchRuleErrors maps ${code} too, for the surfaces that localize by t()`)
   }
+})
+
+await runTest('stock schema refusal and uncertain outcome retain distinct localized recovery messages', async () => {
+  const source = read(WORKER, 'lib', 'stockTransaction.ts')
+  uiLanguage = 'km'; packServed = KM
+  for (const [code, key] of Object.entries(STOCK_ALIASES)) {
+    assert.ok(source.includes(`readonly code = '${code}'`), `Worker emits ${code}`)
+    assert.equal(lang.RESTATED_REFUSAL_KEYS[code], key)
+    assert.equal(branchRuleErrorKey({ code }), key)
+    assert.ok(EN[key] && KM[key] && EN[key] !== KM[key] && /[ក-៿]/.test(KM[key]))
+    const error = refusal(code, 'Worker stock refusal', 503)
+    assert.equal(await lang.restateBranchRefusal(error), error)
+    assert.equal(error.message, KM[key]); assert.equal(error.status,503); assert.equal(error.code,code)
+  }
+  assert.notEqual(STOCK_ALIASES.stock_schema_unavailable, STOCK_ALIASES.stock_transaction_outcome_unknown)
 })
 
 await runTest('every code is one the Worker really sends, with the pack English as its sentence', () => {
