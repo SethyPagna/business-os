@@ -75,9 +75,9 @@ import type { StockWriteStatement } from './productBatches'
 //
 // Free/paid: no KV, no Queues, no Durable Object, no cron, no custom CPU
 // limit. It does spend D1 queries on the binding the kernel already holds:
-// four per identified line that succeeds (the receipt read, the claim insert,
-// the written mark, the completion), three for a refusal that wrote nothing,
-// plus one schema probe per isolate once the table exists. Until 0192 is
+// Required fresh lines use three statements (claim RETURNING, written mark,
+// completion); existing ids use an ignored insert plus the durable read.
+// Legacy optional lines retain the read/insert and memoised schema probe. Until 0192 is
 // applied the probe runs again for EVERY identified line (only a positive
 // answer is memoised, see receiptsAvailable), so the pre-0192 cost is one
 // query per line. That count is plan-sensitive where many lines share one

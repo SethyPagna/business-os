@@ -38,6 +38,9 @@
 // outside any scope and are not counted either. A /api/sync replay
 // re-dispatches each op through app.request(), so every op is its own
 // request and the outer sync request shows almost no D1 work.
+// The separate invocation budget includes getMaintenance's raw dispatch and
+// attached background/late attempts. It is shared only by work belonging to
+// this invocation; it does not make other uninstrumented raw routes complete.
 //
 // Server-Timing goes to signed-in staff only. Its row counts can differ on a
 // route that reads a row before refusing, which hints whether the target

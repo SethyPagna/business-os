@@ -35,7 +35,9 @@ async function world(tier, mode, verified, options = {}) {
   f.sql.prepare('INSERT INTO user_sessions(user_id,token_hash,created_at,expires_at,last_seen_at) VALUES(7,?,?,?,NULL)').run(
     createHash('sha256').update(token).digest('hex'), new Date(Date.now() - 29 * 86400000).toISOString(), new Date(Date.now() + 86400000).toISOString())
   f.env.BROADCAST_HUB = { idFromName: n => n, get: () => ({ fetch: async () => new Response('{}') }) }
-  f.env.CACHE = { get: async () => null, put: async () => { throw Error('KV unavailable') }, delete: async () => {} }
+  let releaseKv
+  const delayedKv = new Promise(resolve => { releaseKv = resolve })
+  f.env.CACHE = { get: async () => { if (options.delayedKv) await delayedKv; return null }, put: async () => { throw Error('KV unavailable') }, delete: async () => {} }
   f.env.TELEGRAM_BOT_TOKEN = 'local-fixture-token'
   f.env.BUSINESS_OS_ADMIN_URL = 'https://admin.budget.example'
   f.sql.prepare("INSERT INTO settings(key,value) VALUES('telegram_chat_id','123456') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
@@ -81,7 +83,11 @@ async function world(tier, mode, verified, options = {}) {
   } })
   f.env.DB = new Proxy(raw, { get(t, key) {
     if (key === 'prepare') return sql => statement(t.prepare(sql))
-    if (key === 'batch') return ss => { assert.ok(ss.every(s => s.params.length <= 100)); dispatch(ss.map(s => s.text)); return t.batch(ss) }
+    if (key === 'batch') return ss => {
+      assert.ok(ss.every(s => s.params.length <= 100))
+      dispatch(ss.map(s => s.text), ss.map(s=>s.params))
+      return t.batch(ss)
+    }
     return t[key]
   } })
   const body = mode === 'receive' ? { product_id: 1, branch_id: 1, quantity: 3, batch_id: lot.batchId, unit_cost_usd: 2, supplier_name: 'Fixture Supplier' }
@@ -102,9 +108,11 @@ async function world(tier, mode, verified, options = {}) {
     if (cold) { load('lib/schemaProbe.ts').__resetSchemaProbeCacheForTests(); load('lib/stockMutationReceipt.ts').resetStockMutationReceiptSchemaProbe() }
     physical = 0; failures = new Set()
     const pending = []
-    const response = await worker.fetch(new Request('https://admin.budget.example' + (mode === 'receive' ? '/api/batches' : '/api/inventory/adjust'), {
-      method: 'POST', headers: { cookie: 'bos_session=' + token, 'content-type': 'application/json', origin: 'https://admin.budget.example' }, body: JSON.stringify(body),
+    const payload = options.multiLine ? { lines: Array.from({ length: 24 }, (_, i) => ({ key: 'line-' + i, wire: 'adjust', body: { ...body, client_request_id: body.client_request_id + '-' + i } })) } : body
+    const response = await worker.fetch(new Request('https://admin.budget.example' + (options.multiLine ? '/api/inventory/fast-stock-in/commit' : mode === 'receive' ? '/api/batches' : '/api/inventory/adjust'), {
+      method: 'POST', headers: { cookie: 'bos_session=' + token, 'content-type': 'application/json', origin: 'https://admin.budget.example' }, body: JSON.stringify(payload),
     }), f.env, { waitUntil(p) { pending.push(Promise.resolve(p)) }, passThroughOnException() {} })
+    releaseKv()
     const tasks = await Promise.allSettled(pending)
     assert.equal(observed.invocation.attemptedStatements, physical, 'full physical binding attempts equal invocation admission count')
     if (tier === 'free') assert.ok(physical <= 50, 'including swallowed background failures, every attempted statement fits the cap')
@@ -140,7 +148,7 @@ async function world(tier, mode, verified, options = {}) {
         const replay = await f.call()
         assert.equal(replay.status, 200); assert.equal(replay.body.replayed, true)
         assert.deepEqual(replay.effects, retry.effects, 'successful same ID retry is never applied twice')
-        console.log(JSON.stringify({ tier, verified, mode, first: first.physical, status: first.status, retry: retry.physical, retries: retry.failures }))
+        console.log(JSON.stringify({ tier, verified, mode, first: first.physical, status: first.status, retry: retry.physical, retries: retry.failures.map(key=>key.split(':')[0]) }))
       }
       f.sql.close(); cases++
     }
@@ -179,6 +187,19 @@ async function world(tier, mode, verified, options = {}) {
     assert.equal(unavailable.status, 503); assert.equal(unavailable.body.code, 'stock_receipt_unavailable')
     assert.deepEqual(unavailable.effects, missingBefore, 'an incomplete required schema refuses before stock effects')
     missing.sql.close(); cases++
+  }
+  {
+    const multi = await world('paid', 'optional-tagged', false, { multiLine: true, delayedKv: true, tailRetries: true })
+    const answer = await multi.call(true)
+    assert.ok(answer.body.results.every(result=>result.ok))
+    assert.ok(answer.physical <= 1000, 'Paid multiline pending tails fit the invocation cap')
+    assert.deepEqual(answer.effects, { stock: 5, lots: 5, received: 125, movement: 48, held: 120, written: 24 })
+    const replay = await multi.call()
+    assert.ok(replay.body.results.every(result=>result.ok && result.replayed))
+    assert.deepEqual(replay.effects, answer.effects)
+    console.log(JSON.stringify({ tier:'paid', mode:'24-line delayed-KV', physical:answer.physical, replay:replay.physical }))
+    multi.sql.close()
+    cases++
   }
   console.log(`PASS ${cases} actual-index/auth/cold-core cases with binding parity, tail retries, stable-ID recovery and completion uncertainty`)
 })().catch(error => { console.error(error); process.exitCode = 1 })
