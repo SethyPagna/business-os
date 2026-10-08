@@ -87,6 +87,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const sourcePath = path.join(__dirname, '..', 'src', relPath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (['./productStockGuard','../lib/productStockGuard'].includes(request)) return require('./harness/product_stock_guard.cjs')
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }
@@ -104,12 +105,12 @@ function loadReal(relPath, requireOverrides = {}) {
 // backup_restore, not just backup (Part 513): destructive resets now demand
 // the restore/reset permission -- the export-grade 'backup' alone no longer
 // clears the gate this test drives.
-const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ backup: true, backup_restore: true }) }
+const FAKE_USER = { id: 1, username: 'admin', name: 'Test User', permissions: JSON.stringify({ backup: true, backup_restore: true }) }
 // Factory reset demands more (FX-sec): administrator control (the admin role),
 // the typed phrase, the caller's REAL current password, a configured seed
 // admin password and a backup first. This owner satisfies every guard.
 const OWNER_PASSWORD = 'owner-current-password'
-const OWNER_USER = { id: 900, username: 'owner', name: 'Owner', role_code: 'admin', role_permissions: '{"all":true}', permissions: '{}' }
+const OWNER_USER = { id: 900, username: 'admin', name: 'Owner', role_code: 'admin', role_permissions: '{"all":true}', permissions: '{}' }
 let sessionUser = FAKE_USER
 
 // Real table list under test -- if PRODUCTS_RESET_TABLES in the shipped
@@ -235,6 +236,7 @@ const app = systemRoute.default
 const fakeExecutionCtx = { waitUntil: (p) => { p?.catch?.(() => {}) }, passThroughOnException: () => {} }
 
 async function req(method, url, body, env = fakeEnv) {
+  if(url === '/reset-data') body={confirm:body.mode==='all'?'DELETE ALL DATA':body.mode==='products'?'RESET PRODUCTS':'RESET SALES',acknowledged:true,...body}
   const res = await app.request(url, {
     method,
     headers: { 'Content-Type': 'application/json' },
@@ -253,6 +255,7 @@ function tableExists(table) { return Boolean(row(`SELECT 1 AS ok FROM sqlite_mas
 const presentProductsResetTables = () => PRODUCTS_RESET_TABLES.filter(tableExists)
 
 function seed() {
+  exec("INSERT OR IGNORE INTO roles(id,name,code,is_system,permissions) VALUES(901,'Default admin','admin',1,'{\"all\":true}'); DELETE FROM users WHERE id=900; INSERT OR REPLACE INTO users(id,username,name,password,role_id,is_active) VALUES(1,'admin','Admin','hash',901,1)")
   // Wipe every table this test touches so each check() starts clean,
   // regardless of run order.
   exec(`INSERT INTO system_flags(key,value) VALUES('sale_record_events_reset_guard','{"mode":"reset","token":"test-seed"}')
@@ -271,7 +274,7 @@ function seed() {
     'stock_session_members', 'stock_session_operations', 'stock_session_guards',
     'return_item_batch_allocations', 'sale_item_batch_allocations', 'return_items', 'returns',
     'sale_items', 'sales', 'inventory_movements', 'stock_transfers', 'stock_row_moves',
-    'rfid_tags', 'product_images', 'branch_batch_stock', 'product_batches', 'branch_stock',
+    'rfid_tags', 'product_images', 'damaged_stock_lots', 'branch_batch_stock', 'product_batches', 'branch_stock',
     'products', 'branches', 'customers', 'suppliers', 'delivery_contacts', 'action_history',
     'file_assets',
   ]
@@ -285,6 +288,7 @@ function seed() {
   rawDbHandle.prepare('INSERT INTO branch_stock (id, product_id, branch_id, quantity) VALUES (1, 1, 1, 10)').run()
   const batch = rawDbHandle.prepare("INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code) VALUES (1, 1, 'BK-1', 'LOT-A')").run()
   rawDbHandle.prepare('INSERT INTO branch_batch_stock (id, batch_id, branch_id, quantity) VALUES (1, 1, 1, 10)').run()
+  rawDbHandle.prepare("INSERT INTO damaged_stock_lots(product_id,product_name,branch_id,quantity,quantity_remaining,reason,condition_tag,source) VALUES(1,'Eye Shadow Palette',1,3,3,'test','damaged','return')").run()
   rawDbHandle.prepare("INSERT INTO rfid_tags (id, epc_id, product_id, branch_id, status) VALUES (1, 'EPC-1', 1, 1, 'active')").run()
   rawDbHandle.prepare(`INSERT INTO product_conflict_merge_runs(
     id,actor_id,request_id,request_digest,manifest_version,manifest_digest,request_json,status
@@ -499,7 +503,7 @@ async function main() {
     const res = await app.request('/reset-data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: 'products', includeImages: true }),
+      body: JSON.stringify({ mode: 'products', includeImages: true,confirm:'RESET PRODUCTS',acknowledged:true }),
     }, { ...fakeEnv, PLAN_TIER: 'free' }, fakeExecutionCtx)
     const json = await res.json().catch(() => null)
     planTier.__resetPlanTierCacheForTests()
@@ -675,14 +679,17 @@ async function main() {
     assert.strictEqual(count('sale_record_events'), 1, 'sanity: immutable event fixture exists')
     assert.strictEqual(count('return_mutation_receipts'), 1, 'sanity: immutable return receipt fixture exists')
     assert.strictEqual(count('return_create_receipts'), 1, 'sanity: immutable return-create receipt fixture exists')
-    const confirmed = { confirm: 'FACTORY RESET', currentPassword: OWNER_PASSWORD }
+    const confirmed = { acknowledged:true,confirm: 'FACTORY RESET', currentPassword: OWNER_PASSWORD }
     const ownerEnv = { ...fakeEnv, BUSINESS_OS_ADMIN_PASSWORD: 'seed-admin-password' }
     // The guards stay real: a restore-only account and a wrong password are
     // both refused before anything is touched.
+    sessionUser = {...FAKE_USER,id:2}
     const notAdmin = await req('POST', '/factory-reset', confirmed, ownerEnv)
+    sessionUser = FAKE_USER
     assert.strictEqual(notAdmin.status, 403, JSON.stringify(notAdmin.json))
     rawDbHandle.prepare('INSERT OR REPLACE INTO users (id, username, name, password) VALUES (?, ?, ?, ?)')
-      .run([OWNER_USER.id, OWNER_USER.username, OWNER_USER.name, require('bcryptjs').hashSync(OWNER_PASSWORD, 4)])
+      .run([OWNER_USER.id, 'factory-admin', OWNER_USER.name, require('bcryptjs').hashSync(OWNER_PASSWORD, 4)])
+    exec("UPDATE users SET username='normal-admin' WHERE id=1; UPDATE users SET username='admin', role_id=901,is_active=1 WHERE id=900")
     backupCallLog = []
     sessionUser = OWNER_USER
     let status, json, wrong, untouched

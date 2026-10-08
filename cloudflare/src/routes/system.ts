@@ -152,6 +152,24 @@ function denyUnlessRestorePermission(c: any) {
   return null
 }
 
+async function denyUnlessDefaultAdmin(c: any) {
+  const actorId = Number(c.get('user')?.id)
+  const account = Number.isSafeInteger(actorId) && actorId > 0
+    ? await getDb(c.env).prepare(`SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
+        WHERE u.id = @id AND lower(trim(u.username)) = 'admin' AND u.is_active = 1
+          AND u.deleted_at IS NULL AND r.code = 'admin' AND r.is_system = 1`)
+      .get<{ id: number }>({ id: actorId })
+    : null
+  if (!account) return c.json({ success: false, error: 'Only the active built-in default admin account can reset data.', code: 'reset_builtin_admin_only' }, 403)
+  return null
+}
+
+function resetDeleteStatements(tables: readonly string[]) {
+  return tables.flatMap(table => table === 'products'
+    ? [{ sql: 'UPDATE products SET stock_quantity = 0' }, { sql: `DELETE FROM "${table}"` }]
+    : [{ sql: `DELETE FROM "${table}"` }])
+}
+
 // This one-time identity repair is driven only from the signed-in Admin UI.
 // The session cookie is SameSite=Lax, but an explicit exact-origin check keeps
 // the unsafe request boundary self-contained if cookie or browser behaviour
@@ -236,12 +254,17 @@ async function rateLimited(c: any, name: string, max: number, windowSeconds: num
 app.post('/reset-data', async (c) => {
   const denied = denyUnlessRestorePermission(c)
   if (denied) return denied
+  const defaultAdminDenied = await denyUnlessDefaultAdmin(c)
+  if (defaultAdminDenied) return defaultAdminDenied
   if (await rateLimited(c, 'reset_data', 5, 600)) {
     return c.json({ error: 'Too many reset attempts. Wait a few minutes and try again.' }, 429)
   }
 
-  const body = await c.req.json<{ mode?: string; includeMovements?: boolean; includeSales?: boolean; includeImages?: boolean }>().catch(() => ({}) as { mode?: string; includeMovements?: boolean; includeSales?: boolean; includeImages?: boolean })
+  const body = await c.req.json<{ mode?: string; includeMovements?: boolean; includeSales?: boolean; includeImages?: boolean; confirm?: string; acknowledged?: boolean }>().catch(() => ({}) as { mode?: string; includeMovements?: boolean; includeSales?: boolean; includeImages?: boolean; confirm?: string; acknowledged?: boolean })
   const mode = body.mode === 'all' ? 'all' : body.mode === 'products' ? 'products' : 'sales'
+  const phrase = mode === 'all' ? 'DELETE ALL DATA' : mode === 'products' ? 'RESET PRODUCTS' : 'RESET SALES'
+  if (body.confirm !== phrase) return c.json({ success: false, error: `Type ${phrase} to confirm. No data was changed.`, code: 'reset_confirm_required' }, 400)
+  if (body.acknowledged !== true) return c.json({ success: false, error: 'Acknowledge the reset warning before confirming. No data was changed.', code: 'reset_acknowledgement_required' }, 400)
   const includeMovements = mode === 'products' && body.includeMovements === true
   const includeSales = mode === 'products' && body.includeSales === true
   const includeImages = mode === 'products' && body.includeImages === true
@@ -349,7 +372,7 @@ app.post('/reset-data', async (c) => {
         imageKeysToDelete = sanitizeMediaList(rawPaths).map((p) => p.replace(/^\/+/, ''))
       }
 
-      const deletes = (await presentResetTables(db, tablesToClear)).map((table) => ({ sql: `DELETE FROM "${table}"` }))
+      const deletes = resetDeleteStatements(await presentResetTables(db, tablesToClear))
       await db.batch(guardSaleRecordReset(deletes))
       // Deliberately NOT touched by either toggle: customers, suppliers,
       // delivery_contacts, custom_fields, import job history, and every
@@ -475,6 +498,8 @@ app.post('/reset-data', async (c) => {
       { sql: 'DELETE FROM stock_row_moves' },
       { sql: 'UPDATE branch_stock SET quantity = 0, rfid_confirmed_qty = 0' },
       { sql: 'UPDATE branch_batch_stock SET quantity = 0' },
+      { sql: 'DELETE FROM damaged_stock_lots' },
+      { sql: 'UPDATE products SET stock_quantity = 0' },
     ]
 
     if (mode === 'all') {
@@ -529,7 +554,6 @@ app.post('/reset-data', async (c) => {
       )
     } else {
       statements.push(
-        { sql: 'UPDATE products SET stock_quantity = 0' },
         { sql: 'DELETE FROM action_history' },
       )
     }
@@ -1210,9 +1234,10 @@ export const FACTORY_RESET_CONFIRM_PHRASE = 'FACTORY RESET'
 
 app.post('/factory-reset', async (c) => {
   const user = c.get('user')
-  if (!isAdminControlUser(user)) return c.json({ error: 'Administrator access required.' }, 403)
   const denied = denyUnlessRestorePermission(c)
   if (denied) return denied
+  const defaultAdminDenied = await denyUnlessDefaultAdmin(c)
+  if (defaultAdminDenied) return defaultAdminDenied
   // Matches backend's factory-reset rate limit (2 attempts / 30 minutes) --
   // deliberately tighter than reset-data's 5/10min since this is the more
   // destructive of the two.
@@ -1224,6 +1249,7 @@ app.post('/factory-reset', async (c) => {
   if (body?.confirm !== FACTORY_RESET_CONFIRM_PHRASE) {
     return c.json({ success: false, error: `Type ${FACTORY_RESET_CONFIRM_PHRASE} to confirm. No data was changed.`, code: 'factory_reset_confirm_required' }, 400)
   }
+  if (body.acknowledged !== true) return c.json({ success: false, error: 'Acknowledge the reset warning before confirming. No data was changed.', code: 'reset_acknowledgement_required' }, 400)
   const currentPassword = typeof body.currentPassword === 'string' ? body.currentPassword : ''
   if (!currentPassword) {
     return c.json({ success: false, error: 'Enter your current password to confirm. No data was changed.', code: 'current_password_required' }, 400)
@@ -1264,7 +1290,7 @@ app.post('/factory-reset', async (c) => {
   try {
     const droppedCustomTables = await dropAllCustomTables(c.env)
 
-    await db.batch(guardSaleRecordReset((await presentResetTables(db, FACTORY_RESET_TABLES)).map((table) => ({ sql: `DELETE FROM "${table}"` }))))
+    await db.batch(guardSaleRecordReset(resetDeleteStatements(await presentResetTables(db, FACTORY_RESET_TABLES))))
     // The two bulk import-staging tables live on the separate import-staging DB
     // (see lib/db.ts); FACTORY_RESET_TABLES' DELETE of import_job_rows hits only
     // the main DB's empty shell, so clear the real staging on its own DB. No-op

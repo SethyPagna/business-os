@@ -35,6 +35,7 @@ function loadReal(relPath, overrides = {}) {
   // Kept installed for the module's lifetime: the route loads some helpers
   // lazily with await import(), which transpiles to a deferred require().
   const patched = function patchedLoad(request, parent, isMain) {
+    if (request === '../lib/productStockGuard') return require('./harness/product_stock_guard.cjs')
     if (Object.prototype.hasOwnProperty.call(overrides, request)) return overrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }
@@ -47,7 +48,8 @@ function loadReal(relPath, overrides = {}) {
 }
 
 const SCHEMA = `
-  CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, password TEXT, deleted_at TEXT);
+  CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, password TEXT, deleted_at TEXT, role_id INTEGER, is_active INTEGER DEFAULT 1);
+  CREATE TABLE roles(id INTEGER PRIMARY KEY,code TEXT,is_system INTEGER);
   CREATE TABLE sales (id INTEGER PRIMARY KEY, total REAL);
   CREATE TABLE system_flags (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT);
   CREATE TABLE import_job_rows (id INTEGER PRIMARY KEY);
@@ -63,7 +65,7 @@ let actor
 let passwordLimited
 
 const SEED_SECRET = 'seed-secret-Zq81'
-const ADMIN = { id: 1, username: 'owner', role_code: 'admin', permissions: '{}', role_permissions: '{}' }
+const ADMIN = { id: 1, username: 'admin', role_code: 'admin', permissions: '{}', role_permissions: '{}' }
 // Holds backup_restore (the old gate) but is not an administrator.
 const RESTORER = { id: 2, username: 'restorer', role_code: 'manager', permissions: JSON.stringify({ backup: true, backup_restore: true }), role_permissions: '{}' }
 // Named "admin" with no admin role and no `all` grant (item 2's reserved name).
@@ -119,7 +121,8 @@ const ctx = { waitUntil(p) { p?.catch?.(() => {}) }, passThroughOnException() {}
 
 function reset() {
   db = openDb([SCHEMA])
-  db.prepare(`INSERT INTO users(id, username, password) VALUES (1,'owner','hash:owner-pw'), (2,'restorer','hash:restorer-pw'), (3,'admin','hash:named-pw')`).run()
+  db.prepare("INSERT INTO roles VALUES(1,'admin',1),(2,'manager',0)").run()
+  db.prepare(`INSERT INTO users(id, username, password,role_id) VALUES (1,'admin','hash:owner-pw',1), (2,'restorer','hash:restorer-pw',2), (3,'admin','hash:named-pw',2)`).run()
   db.prepare(`INSERT INTO sales(id, total) VALUES (1, 10), (2, 20)`).run()
   log = []
   backupFails = false
@@ -147,7 +150,7 @@ async function post(body) {
 
 const salesLeft = () => db.prepare('SELECT COUNT(*) AS n FROM sales').get().n
 const wiped = () => log.includes('drop-custom') || log.includes('reseed') || salesLeft() !== 2
-const GOOD = { confirm: 'FACTORY RESET', currentPassword: 'owner-pw' }
+const GOOD = { acknowledged:true, confirm: 'FACTORY RESET', currentPassword: 'owner-pw' }
 
 let failures = 0
 async function check(name, fn) {
@@ -157,7 +160,7 @@ async function check(name, fn) {
 ;(async () => {
   await check('backup_restore without administrator control is refused and nothing is touched', async () => {
     actor = RESTORER
-    const res = await post({ confirm: 'FACTORY RESET', currentPassword: 'restorer-pw' })
+    const res = await post({ acknowledged:true, confirm: 'FACTORY RESET', currentPassword: 'restorer-pw' })
     assert.equal(res.status, 403, res.text)
     assert.equal(wiped(), false, 'no wipe')
     assert.equal(log.includes('backup'), false, 'no backup either')
@@ -165,7 +168,7 @@ async function check(name, fn) {
 
   await check('a user merely NAMED admin (no admin role, no all grant) is not an administrator here', async () => {
     actor = NAMED_ADMIN
-    const res = await post({ confirm: 'FACTORY RESET', currentPassword: 'named-pw' })
+    const res = await post({ acknowledged:true, confirm: 'FACTORY RESET', currentPassword: 'named-pw' })
     assert.equal(res.status, 403, res.text)
     assert.equal(wiped(), false)
   })
@@ -189,14 +192,14 @@ async function check(name, fn) {
   })
 
   await check('the phrase without the current password is refused', async () => {
-    const res = await post({ confirm: 'FACTORY RESET' })
+    const res = await post({ acknowledged:true, confirm: 'FACTORY RESET' })
     assert.equal(res.status, 400, res.text)
     assert.equal(res.json?.code, 'current_password_required')
     assert.equal(wiped(), false)
   })
 
   await check('a wrong current password is refused with 400 (never 401) and nothing is touched', async () => {
-    const res = await post({ confirm: 'FACTORY RESET', currentPassword: 'guess' })
+    const res = await post({ acknowledged:true, confirm: 'FACTORY RESET', currentPassword: 'guess' })
     assert.equal(res.status, 400, res.text)
     assert.equal(res.json?.code, 'incorrect_password')
     assert.ok(log.includes('verify:1->1'), 'the check runs through the shared current-password guard, on the caller')
