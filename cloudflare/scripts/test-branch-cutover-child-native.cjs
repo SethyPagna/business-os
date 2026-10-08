@@ -398,9 +398,9 @@ async function main() {
     assert.equal((await execute(w, p)).replayed, true); w.raw.close()
   })
   await check('actual query budget exact limit and one over; Free is explicitly refused', async () => {
-    for (const [used, allowed] of [[932, true], [933, false]]) {
+    for (const [used, allowed] of [[931, true], [932, false]]) {
       const w = world(); const p = await planned(w)
-      if (allowed) { await execute(w, p, { budget: { ...budget, alreadyUsed: used } }); assert.equal(w.stats.statements, 30) }
+      if (allowed) { await execute(w, p, { budget: { ...budget, alreadyUsed: used } }); assert.equal(w.stats.statements, 31) }
       else { await assert.rejects(execute(w, p, { budget: { ...budget, alreadyUsed: used } })); assert.equal(w.stats.batches, 0) }
       w.raw.close()
     }
