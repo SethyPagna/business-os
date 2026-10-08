@@ -530,7 +530,7 @@ export function sessionLotChoices<T extends SessionLot>(mode: StockMode, lots: r
   const narrowed = mode === 'add' ? offered : offered.filter((lot) => lotMatchesSupplier(lot, supplier))
   return narrowed
     .map((lot, index) => ({ lot, index, date: lotIsoDate(lot) }))
-    .sort((a, b) => (a.date && b.date && a.date !== b.date ? (a.date > b.date ? -1 : 1) : a.index - b.index))
+    .sort((a, b) => (a.date === b.date ? a.index - b.index : a.date > b.date ? -1 : 1))
     .map(({ lot }) => lot)
 }
 

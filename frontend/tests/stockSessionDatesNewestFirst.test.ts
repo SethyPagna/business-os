@@ -17,4 +17,9 @@ for (const mode of ['add', 'remove', 'set'] as const) {
 }
 assert.equal(defaultLotChoice({ mode: 'remove', choices: [...lots].reverse() }), 1, 'default is independent of display order')
 assert.equal(defaultLotChoice({ mode: 'set', choices: lots }), 2, 'newest is independent of input order')
+const undatedLots = [lots[0], { id: 4, quantity: 2 }, lots[2], { id: 5, quantity: 3, received_at: '' }, lots[1]]
+for (const mode of ['add', 'remove', 'set'] as const) {
+  assert.deepEqual(sessionLotChoices(mode, undatedLots, supplier).map(lot => lot.id),
+    mode === 'remove' ? [3, 1, 4, 5] : [2, 3, 1, 4, 5], `${mode}: undated lots follow all dates in stable order`)
+}
 console.log('PASS mixed-year received dates, eligibility, explicit selection and independent defaults')
