@@ -138,16 +138,16 @@ const productsRoute = loadReal('routes/products.ts', {
   './db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/audit': { ...loadReal('lib/audit.ts', { './db': { getDb: () => db } }), audit: async () => {} },
-  '../lib/cache': { cachedJsonResponse: async () => null, getVersionWithFallback: async () => 1, bumpVersion: async () => {}, bumpVersions: async () => {} },
+  '../lib/cache': { cachedJsonResponse: async (_request,_ctx,_version,_ttl,producer) => producer(), getVersionWithFallback: async () => 1, bumpVersion: async () => {}, bumpVersions: async () => {} },
   '../lib/imageAudit': { enqueueImageNormalization: async () => {} },
-  '../lib/familyPagination': { paginateProductFamilies: async () => ({ items: [], total: 0, page: 1, pageCount: 0 }) },
+  '../lib/familyPagination': loadReal('lib/familyPagination.ts'),
   '../lib/importImageMatch': { matchLibraryImagesStrict: async () => [], ADMIN_MAX_IMAGES_PER_PRODUCT: 20, MAX_IMAGES_PER_PRODUCT: 10 },
   '../lib/permissions': {
     hasPermission: () => true, getPermissionTier: () => 'full', getActionTier: () => 'full',
     getMergedPermissions: () => ({}), isAdminControlUser: () => true,
   },
-  '../lib/searchMatch': inertSearch,
-  '../lib/productSearchQuery': { buildProductSearchQuery: () => ({ hasSearchTerm: false, titleOnly: false }), buildFamilyRelevanceOrderSql: (tail) => tail },
+  '../lib/searchMatch': loadReal('lib/searchMatch.ts'),
+  '../lib/productSearchQuery': loadReal('lib/productSearchQuery.ts'),
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/reviewGate': { maybeQueueForReview: async () => null },
   '../lib/salesAnalytics': { getProductSalesBreakdown: async () => ({}) },
@@ -214,7 +214,7 @@ async function main() {
     await check('real PUT refuses '+ledger+' alone without effects',async()=>{
       seed(ledger); const before=graph()
       const res=await request('PUT',{is_active:0,description:'must not land'})
-      assert.equal(res.status,409,JSON.stringify(res)); assert.equal(res.json.code,'product_has_stock')
+      assert.equal(res.status,409,JSON.stringify(res)); assert.equal(res.json.code,'product_status_unsupported')
       assert.equal(graph(),before)
     })
     await check('real DELETE refuses '+ledger+' alone without effects',async()=>{
@@ -224,12 +224,12 @@ async function main() {
       assert.equal(graph(),before)
     })
   }
-  await check('all-zero PUT control deactivates',async()=>{
-    seed('zero'); const res=await request('PUT',{is_active:0}); assert.equal(res.status,200,JSON.stringify(res)); assert.equal(rawDb.prepare('SELECT is_active FROM products WHERE id=1').get().is_active,0)
+  await check('all-zero PUT cannot disable a product',async()=>{
+    seed('zero'); const before=graph(); const res=await request('PUT',{is_active:0}); assert.equal(res.status,409,JSON.stringify(res)); assert.equal(res.json.code,'product_status_unsupported'); assert.equal(graph(),before)
   })
   await check('inactive stocked POST refuses without creation',async()=>{
     seed('zero'); const before=graph(); const res=await post('/',{name:'New inactive',is_active:0,stock_quantity:2,branch_id:1})
-    assert.equal(res.status,409,JSON.stringify(res)); assert.equal(res.json.code,'product_has_stock'); assert.equal(graph(),before)
+    assert.equal(res.status,409,JSON.stringify(res)); assert.equal(res.json.code,'product_status_unsupported'); assert.equal(graph(),before)
   })
   const review = loadReal('lib/reviewApply.ts', {
     './db': {getDb:()=>db}, './audit': {audit:async()=>{}}, './cache': {bumpVersion:async()=>{}},
@@ -238,7 +238,7 @@ async function main() {
   for(const action of ['update','delete']) for(const ledger of ['cache','branch','batch','damaged']) {
     await check('review '+action+' refuses '+ledger+' without effects',async()=>{
       seed(ledger); const before=graph()
-      await assert.rejects(()=>review.applyApprovedPendingAction(fakeEnv,{section:'products',action_type:action,entity_type:'product',entity_id:1,payload_json:JSON.stringify({is_active:0,reason:'review guard'})},{id:1,name:'Reviewer'}),err=>err.code==='product_has_stock')
+      await assert.rejects(()=>review.applyApprovedPendingAction(fakeEnv,{section:'products',action_type:action,entity_type:'product',entity_id:1,payload_json:JSON.stringify({is_active:0,reason:'review guard'})},{id:1,name:'Reviewer'}),err=>err.code===(action==='update'?'product_status_unsupported':'product_has_stock'))
       assert.equal(graph(),before)
     })
   }
@@ -254,16 +254,16 @@ async function main() {
   })
   await check('negative row and cancelling branch rows still refuse',async()=>{
     seed('zero');rawDb.exec('PRAGMA ignore_check_constraints=ON');rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,-3)').run();rawDb.exec('PRAGMA ignore_check_constraints=OFF')
-    const first=await request('PUT',{is_active:0});assert.equal(first.json.code,'product_has_stock')
+    const first=await request('DELETE',{reason:'negative',client_request_id:'negative-row'});assert.equal(first.json.code,'product_has_stock')
     rawDb.prepare("INSERT INTO branches(id,name,is_active) VALUES(2,'Offset',1)").run();rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,2,3)').run()
     const before=graph();const second=await request('DELETE',{reason:'offset',client_request_id:'offset-rows'});assert.equal(second.status,409);assert.equal(second.json.code,'product_has_stock');assert.equal(graph(),before)
   })
   for(const method of ['PUT','DELETE']) await check(method+' rejects stock racing after admission before effects',async()=>{
     seed('zero')
-    beforeNextWriteBatch=()=>rawDb.prepare('UPDATE products SET stock_quantity=3 WHERE id=1').run()
-    const res=await request(method,method==='PUT'?{is_active:0,description:'race must not land'}:{reason:'Race',client_request_id:'race-'+method})
+    beforeNextWriteBatch=()=>rawDb.prepare(method==='PUT'?'UPDATE products SET is_active=0 WHERE id=1':'UPDATE products SET stock_quantity=3 WHERE id=1').run()
+    const res=await request(method,method==='PUT'?{is_active:1,description:'race must not land'}:{reason:'Race',client_request_id:'race-'+method})
     assert.equal(res.status,409,JSON.stringify(res));assert.equal(res.json.code,'product_has_stock')
-    assert.equal(rawDb.prepare('SELECT is_active FROM products WHERE id=1').get().is_active,1)
+    assert.equal(rawDb.prepare('SELECT is_active FROM products WHERE id=1').get().is_active,method==='PUT'?0:1)
     assert.equal(rawDb.prepare('SELECT description FROM products WHERE id=1').get().description,null)
     assert.equal(rawDb.prepare('SELECT COUNT(*) n FROM product_remove_operations').get().n,0)
     assert.equal(rawDb.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n,0)
@@ -276,15 +276,15 @@ async function main() {
   await check('deactivate identity fold refuses stocked keeper before source effects',async()=>{
     seed('zero');rawDb.prepare("INSERT INTO products(id,name,barcode,is_active,stock_quantity) VALUES(2,'Keeper','777',1,3)").run()
     const before=graph();const res=await request('PUT',{name:'Keeper',barcode:'777',is_active:0})
-    assert.equal(res.status,409,JSON.stringify(res));assert.equal(res.json.code,'product_has_stock');assert.equal(graph(),before)
+    assert.equal(res.status,409,JSON.stringify(res));assert.equal(res.json.code,'product_status_unsupported');assert.equal(graph(),before)
   })
-  await check('zero-stock identity fold deactivates keeper inside merge and snapshots final state',async()=>{
+  await check('identity fold removes only the discarded product',async()=>{
     seed('zero');rawDb.prepare("INSERT INTO products(id,name,barcode,is_active,stock_quantity) VALUES(2,'Keeper','777',1,0)").run()
-    const res=await request('PUT',{name:'Keeper',barcode:'777',is_active:0})
+    const res=await request('PUT',{name:'Keeper',barcode:'777',is_active:1})
     assert.equal(res.status,200,JSON.stringify(res));assert.equal(res.json.merged_into,2)
-    assert.equal(rawDb.prepare('SELECT is_active FROM products WHERE id=2').get().is_active,0)
+    assert.equal(rawDb.prepare('SELECT is_active FROM products WHERE id=2').get().is_active,1)
     const snapshot=rawDb.prepare("SELECT payload_json FROM undo_snapshots WHERE kind='product.merge' ORDER BY id DESC LIMIT 1").get()
-    const reversal=JSON.parse(snapshot.payload_json);assert.equal(reversal.keeperActiveBefore,1);assert.equal(reversal.keeperActiveAfter,0)
+    const reversal=JSON.parse(snapshot.payload_json);assert.equal(reversal.keeperActiveBefore,undefined);assert.equal(reversal.keeperActiveAfter,undefined)
   })
   await check('zero DELETE succeeds and same request replays without effects',async()=>{
     seed('zero'); const body={reason:'zero control',client_request_id:'zero-delete-control'}
@@ -294,5 +294,5 @@ async function main() {
   console.log(passed+' checks passed')
 }
 if (require.main === module) main().catch(err=>{console.error(err);process.exitCode=1})
-module.exports={seed,request,rawDb,db,fakeEnv,FAKE_USER,loadedModule:rel=>realModuleCache.get(path.join(SRC_DIR,rel))?.exports}
+module.exports={seed,request,post,graph,loadReal,rawDb,db,fakeEnv,FAKE_USER,get:async pathname=>{const res=await app.request(pathname,{},fakeEnv,fakeExecutionCtx);return {status:res.status,json:await res.json().catch(()=>null)}},loadedModule:rel=>realModuleCache.get(path.join(SRC_DIR,rel))?.exports}
 

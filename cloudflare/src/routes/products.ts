@@ -1,4 +1,4 @@
-import { assertProductsHaveNoStock, productStockGuardStatement, productHasStockSql, productStockGuardError } from '../lib/productStockGuard'
+import { assertProductStatusInput, assertProductsActive, catalogProductSql, assertProductsHaveNoStock, productStockGuardStatement, productHasStockSql, productStockGuardError } from '../lib/productStockGuard'
 import { Hono } from 'hono'
 import { acquisitionCostResponses, canEditAcquisitionCosts, hasCatalogCostWrite } from '../lib/acquisitionCostAccess'
 import { roundMoney4 } from '../lib/moneyPrecision'
@@ -26,7 +26,7 @@ import { localRangeClockError, localDateExpr, localMonthExpr } from '../lib/busi
 import { isPublicImageFormat, UNSUPPORTED_IMAGE_MESSAGE, validateUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { admitRequestBody } from '../lib/requestBodyGuard'
-import { audit, changedFields, isSecretShapedAuditKey } from '../lib/audit'
+import { audit, buildAuditStatement, changedFields, isSecretShapedAuditKey } from '../lib/audit'
 import { getPlanLimits } from '../lib/planTier'
 import { absorbedBarcodes, keeperFollowsBarcode, productIdsInOneCluster } from '../lib/productIdentity'
 import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeLeadingZeroBarcodeForCleanup, normalizeProductClusterKey, pickSameIdentityRow, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
@@ -665,7 +665,7 @@ async function expandSearchResultsToNameSiblings(env: Env, items: Array<Record<s
              p.expiry_date, p.expiry_alert_days, p.created_at, p.updated_at,
            COALESCE(p.auto_merged_count, 0) AS auto_merged_count
       FROM products p INDEXED BY idx_products_name_key_pg
-      WHERE (p.is_active = 1 OR ${productHasStockSql()})
+      WHERE ${catalogProductSql()}
         AND p.name_key IN (${sql})
     `).all<Record<string, unknown>>(params)
   })
@@ -779,7 +779,7 @@ async function refreshCachedProductRows(env: Env, items: Array<Record<string, un
   const [liveRows, withBranchStock] = await Promise.all([
     selectInChunks(ids, 0, (chunk) => {
       const { sql, params } = buildInClause('id', chunk)
-      return db.prepare(`SELECT ${PRODUCT_SEARCH_SELECT_SQL} FROM products p WHERE p.id IN (${sql})`).all<Record<string, unknown>>(params)
+      return db.prepare(`SELECT ${PRODUCT_SEARCH_SELECT_SQL} FROM products p WHERE p.id IN (${sql}) AND ${catalogProductSql()}`).all<Record<string, unknown>>(params)
     }),
     attachBranchStock(env, items),
     attachBatchCounts(db, items),
@@ -791,7 +791,7 @@ async function refreshCachedProductRows(env: Env, items: Array<Record<string, un
     item.stock_quantity = withBranchStock[index].stock_quantity
     item.branch_stock = withBranchStock[index].branch_stock
   })
-  return items
+  return items.filter(item => liveById.has(Number(item.id)))
 }
 
 async function searchProductsPayload(env: Env, query: Record<string, string>, options: ProductSearchOptions = {}) {
@@ -919,7 +919,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     // its sibling variants vanished from the response" bug. Plain
     // browsing (category/brand/branch/stock filters, no typed search)
     // keeps the prior per-row-filtered behavior; nothing reported there.
-    familyMemberBaseWhereSql: hasSearchTerm ? (familyMemberWhereSql || `(p.is_active = 1 OR ${productHasStockSql()})`) : undefined,
+    familyMemberBaseWhereSql: hasSearchTerm ? (familyMemberWhereSql || `${catalogProductSql()}`) : undefined,
   })
 
   // Name-duplicate half of the same fix (see expandSearchResultsToNameSiblings's
@@ -993,7 +993,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
 // stockState here means no stock-based filtering at all, same as with no
 // branch selected.
 function buildSearchFilters(query: Record<string, string>, lowStock: LowStockConfig, options: ProductSearchOptions = {}) {
-  const where: string[] = [`(p.is_active = 1 OR ${productHasStockSql()})`]
+  const where: string[] = [`${catalogProductSql()}`]
   const params: Record<string, unknown> = {}
   const joins: string[] = []
 
@@ -1081,6 +1081,7 @@ function buildSearchFilters(query: Record<string, string>, lowStock: LowStockCon
   // the ordering contract and why the tier is separate from the rank.
   const searchQuery = buildProductSearchQuery(rawSearchText, params, {
     mode: query.searchMode,
+    catalogOnly: true,
     titleOnly: ['name', 'title'].includes(String(query.searchFields || query.search_fields || '').toLowerCase()),
     useSearchIndex: options.useSearchIndex !== false,
     rankedIds: parseRankedIds(query.rankIds, query.rankTiers),
@@ -1266,7 +1267,7 @@ export async function buildProductSearchIndexPage(env: Env, page: number, versio
         SELECT CAST((SELECT MIN(id) FROM products WHERE id >= (n + 1) * @size) / @size AS INTEGER) FROM bucket WHERE n IS NOT NULL LIMIT 10000
       ) SELECT n FROM bucket WHERE n IS NOT NULL`).all<{ n: number }>({ size: SEARCH_INDEX_PAGE_IDS }),
     db.prepare(`SELECT id, name, brand, category, barcode, sku FROM products
-      WHERE id >= @lo AND id < @hi AND (is_active = 1 OR ${productHasStockSql('products')}) ORDER BY id`).all<Record<string, unknown>>({ lo, hi }),
+      WHERE id >= @lo AND id < @hi AND ${catalogProductSql('products')} ORDER BY id`).all<Record<string, unknown>>({ lo, hi }),
   ])
   const text = (value: unknown): string => (value == null ? '' : String(value))
   const packed = rows.map((row) => [Number(row.id), text(row.name), text(row.brand), text(row.category), text(row.barcode), text(row.sku)])
@@ -2066,12 +2067,24 @@ async function foldCreateIntoExisting(
   return { item, product: item, id: duplicate.id, folded_into: duplicate.id, success: true }
 }
 
+function productStatusInputRefusal(c: any, body: Record<string, unknown>) {
+  try { assertProductStatusInput(body) } catch (error) {
+    const refusal = productStockGuardError(error)
+    if (refusal) return c.json({ success: false, code: refusal.code, error: refusal.message }, 409)
+    throw error
+  }
+  delete body.is_active
+  return null
+}
+
 app.post('/', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'add') === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  const statusRefusal = productStatusInputRefusal(c, body)
+  if (statusRefusal) return statusRefusal
   if (hasCatalogCostWrite(body, user)) {
     return c.json({ error: 'Cost-entry permission is required to set catalog costs.', code: 'product_cost_edit_required' }, 403)
   }
@@ -2155,7 +2168,7 @@ app.post('/', async (c) => {
   if (normalizedBrands !== undefined) body.brands = normalizedBrands
 
   let created
-  try { created = await createProductWithInitialStock(c.env, body, { name, is_active: body.is_active == null ? 1 : body.is_active }, imageLimitForUser(user), undefined, () => branchRedirectTarget(c)) } catch (error) {
+  try { created = await createProductWithInitialStock(c.env, body, { name, is_active: 1 }, imageLimitForUser(user), undefined, () => branchRedirectTarget(c)) } catch (error) {
     const response = productCreateErrorResponse(error)
     if (response) return c.json(response.body, response.status)
     throw error
@@ -2277,6 +2290,8 @@ const PRODUCT_AUDIT_EXCLUDED_COLUMNS = new Set([
 app.put('/:id', async (c) => {
   const user = c.get('user')
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  const statusRefusal = productStatusInputRefusal(c, body)
+  if (statusRefusal) return statusRefusal
   if (hasCatalogCostWrite(body, user)) {
     return c.json({ error: 'Cost-entry permission is required to change catalog costs. Omit cost fields when editing other product details.', code: 'product_cost_edit_required' }, 403)
   }
@@ -2309,12 +2324,10 @@ app.put('/:id', async (c) => {
   // a stale edit before the review-queue gate so it never even queues.
   // No-op when the client sends no token, so token-less/bulk writes are
   // unaffected; a missing row surfaces as a 'deleted' conflict.
-  if (Object.prototype.hasOwnProperty.call(body, 'is_active') && Number(body.is_active) !== 1) {
-    try { await assertProductsHaveNoStock(getDb(c.env), [Number(id)]) } catch (error) {
-    const stockError = productStockGuardError(error)
-    if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
-      throw error
-    }
+  try { await assertProductsActive(getDb(c.env), [Number(id)]) } catch (error) {
+    const refusal = productStockGuardError(error)
+    if (refusal) return c.json({ success: false, code: refusal.code, error: refusal.message }, 409)
+    throw error
   }
   const expectedProductUpdatedAt = getExpectedUpdatedAt(body)
   if (expectedProductUpdatedAt) {
@@ -2433,14 +2446,6 @@ app.put('/:id', async (c) => {
         const dupRow = await db.prepare('SELECT id, name, barcode, updated_at, image_path, COALESCE(is_group, 0) AS is_group FROM products WHERE id = @id')
           .get<{ id: number; name: string | null; barcode: string | null; updated_at: string | null; image_path: string | null; is_group: number }>({ id: Number(id) })
         if (!dupRow) return c.json({ error: 'Product not found' }, 404)
-        const deactivateKeeper = Object.prototype.hasOwnProperty.call(body, 'is_active') && Number(body.is_active) !== 1
-        if (deactivateKeeper) {
-          try { await assertProductsHaveNoStock(db, [dupRow.id, duplicate.id]) } catch (error) {
-            const stockError = productStockGuardError(error)
-            if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
-            throw error
-          }
-        }
         if (dupRow.is_group) return c.json({ error: 'Group rows cannot be merged — merge the variant products instead' }, 400)
         // foldDuplicateProductInto's own guard (productsShareExactIdentity)
         // requires the two rows to ALREADY carry the same identity in the
@@ -2449,8 +2454,14 @@ app.put('/:id', async (c) => {
         // is what the operator is CHANGING, and `duplicate` is where that
         // change lands. Write the edited identity onto this row first so it
         // genuinely matches before the fold reads it back.
-        await db.prepare('UPDATE products SET name = @name, barcode = @barcode, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
-          .run({ name: nextName, barcode: nextBarcode, id: Number(id) })
+        try { await db.batch([productStockGuardStatement([Number(id), duplicate.id], 'active'), {
+          sql: 'UPDATE products SET name = @name, barcode = @barcode, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND is_active=1',
+          params: { name: nextName, barcode: nextBarcode, id: Number(id) },
+        }]) } catch (error) {
+          const refusal = productStockGuardError(error)
+          if (refusal) return c.json({ error: refusal.message, code: refusal.code }, refusal.status)
+          throw error
+        }
         if (getActionTier(user, 'products', 'image') !== 'full' && await productMergeChangesImages(
           db, [{ keeper: { id: duplicate.id, image_path: null }, discarded: dupRow }],
         )) {
@@ -2465,8 +2476,7 @@ app.put('/:id', async (c) => {
             { id: duplicate.id, name: duplicate.name },
             { id: dupRow.id, name: dupRow.name, image_path: dupRow.image_path },
             branchNameById,
-            'edit identity fold', 'merge', undefined, { operationId: crypto.randomUUID(),
-              ...(deactivateKeeper ? { keeperActiveAfter: 0 as const, preStatements: [productStockGuardStatement([dupRow.id, duplicate.id])] } : {}) },
+            'edit identity fold', 'merge', undefined, { operationId: crypto.randomUUID() },
           )
         } catch (error) {
           const stockError = productStockGuardError(error)
@@ -2489,7 +2499,6 @@ app.put('/:id', async (c) => {
         // Apply the remaining fields this edit carried (price/cost/image/etc,
         // everything but identity/rename bookkeeping) onto the survivor.
         const rest: Record<string, unknown> = { ...body }
-        if (deactivateKeeper) delete rest.is_active
         delete rest.name
         delete rest.barcode
         delete rest.__rename_scope
@@ -2866,6 +2875,8 @@ app.post('/variant', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  const statusRefusal = productStatusInputRefusal(c, body)
+  if (statusRefusal) return statusRefusal
   if (hasCatalogCostWrite(body, user)) {
     return c.json({ error: 'Cost-entry permission is required to set catalog costs.', code: 'product_cost_edit_required' }, 403)
   }
@@ -3588,7 +3599,6 @@ export async function foldDuplicateProductInto(
   economicsOverride?: ProductMergeEconomics,
   atomicHistory?: {
     operationId: string
-    keeperActiveAfter?: 0
     bulkClusterPlan?: ProductMergeClusterPlan
     resumedCluster?: boolean
     preStatements?: Array<{ sql: string; params?: Record<string, unknown> }>
@@ -3609,7 +3619,6 @@ export async function foldDuplicateProductInto(
   // system-detected cluster), and a permitted reviewer's chosen cost replaces
   // the averaged one. Stored in the reversal so a redo repeats it exactly.
   keeperChoice?: ProductMergeKeeperChoice,
-  replayKeeperActiveAfter?: 0,
 ): Promise<{
   batchesMoved: number
   batchesFolded: number
@@ -3685,7 +3694,6 @@ export async function foldDuplicateProductInto(
       if (row.dst != null) transferEvidencedBatchIds.add(Number(row.dst))
     }
   }
-  const requestedKeeperActiveAfter = atomicHistory?.keeperActiveAfter ?? replayKeeperActiveAfter
   const canonicalId = canonical.id
   const canonicalName = canonical.name
   const adjustmentMovementMarker = atomicHistory ? `[merge:${atomicHistory.operationId}]` : ''
@@ -3849,7 +3857,6 @@ export async function foldDuplicateProductInto(
   const statements: Array<{ sql: string; params?: Record<string, unknown> }> = reviewedGuards.length
     ? [productMergeCasAssertion([canonicalBefore, dupPricing]), ...reviewedGuards, sourceUnmovedGuard]
     : [sourceUnmovedGuard, productMergeCasAssertion([canonicalBefore, dupPricing])]
-  if (requestedKeeperActiveAfter === 0) statements.unshift(productStockGuardStatement([canonicalId, dup.id]))
   if (!canChangeProductImages) {
     statements.push(productMergeNoImageEffectAssertion(canonicalId, dup.id))
   }
@@ -4275,7 +4282,6 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
   const reversal: MergeReversal & { selectedConflictContext?: Record<string, unknown> } = {
     keeperId: canonicalId,
     keeperName: canonicalName,
-    ...(requestedKeeperActiveAfter === 0 ? { keeperActiveBefore: Number(canonicalBefore.is_active) === 1 ? 1 : 0, keeperActiveAfter: 0 } as const : {}),
     dupId: dup.id,
     dupName: dup.name ?? null,
     keeperImagePathBefore: canonicalBefore?.image_path ?? null,
@@ -4350,11 +4356,6 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
   // so its Undo is closed here, in the same batch, with the reason on record.
   statements.push({ sql: 'UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dup.id } })
   statements.push(...closeStockSessionsStatements([canonicalId, dup.id], user, atomicHistory?.operationId ?? null, canonicalId))
-  if (requestedKeeperActiveAfter === 0) {
-    statements.push(productStockGuardStatement([canonicalId]), {
-      sql: 'UPDATE products SET is_active=0,updated_at=CURRENT_TIMESTAMP WHERE id=@id', params: { id: canonicalId },
-    })
-  }
   if (atomicHistory?.additionalStatements?.length) statements.push(...atomicHistory.additionalStatements)
   // Record the exact result slots before appending the fixed snapshot/history/
   // audit trio. D1 returns one result per statement in input order.
@@ -4442,8 +4443,8 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
 // since this file imports MergeReversal from there). See lib/undoAppliers.ts.
 // Redo repeats the original decisions: stock disposition, economics and the
 // Resolve grid's keeper choice (N1/N4), passed through to the fold's own slot.
-registerMergeFold((env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride, keeperChoice, ...replayOptions: [keeperActiveAfter?: 0]) => (
-  foldDuplicateProductInto(env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride, undefined, keeperChoice, replayOptions[0])
+registerMergeFold((env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride, keeperChoice) => (
+  foldDuplicateProductInto(env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride, undefined, keeperChoice)
 ))
 
 type DuplicatePreviewStockRow = { branch_id: number; quantity: number }
@@ -9291,7 +9292,7 @@ app.post('/zero-quantity-delete', async (c) => {
     statements.push({
       sql: 'UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id',
       params: { id },
-    })
+    }, buildAuditStatement(user?.id ?? null, actorSnapshot(user), 'zero_quantity_delete', 'product', id, { productName: row.name ?? null }))
     deletedIds.push(id)
   }
 
@@ -9300,12 +9301,6 @@ app.post('/zero-quantity-delete', async (c) => {
       const stockError = productStockGuardError(error)
       if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
       throw error
-    }
-    for (const id of deletedIds) {
-      const row = rowById.get(id)
-      await audit(c.env, user?.id ?? null, actorSnapshot(user), 'zero_quantity_delete', 'product', id, {
-        productName: row?.name ?? null,
-      })
     }
     c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
     c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'delete' }))

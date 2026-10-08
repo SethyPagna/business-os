@@ -1,4 +1,4 @@
-import { assertProductsHaveNoStock, productStockGuardStatement, productStockGuardError } from './productStockGuard'
+import { assertProductStatusInput, assertProductsActive, assertProductsHaveNoStock, productStockGuardStatement, productStockGuardError } from './productStockGuard'
 // Step (2)'s other half: once a reviewer approves a pending_actions row
 // (routes/reviewQueue.ts's POST /:id/approve), the underlying write it
 // represents has to actually happen -- this file is where that replay
@@ -174,6 +174,8 @@ registerApplier('fees', 'delete', 'fee', async (env, row, reviewer, waitUntil) =
 // --- products / create / product -----------------------------------
 registerApplier('products', 'create', 'product', async (env, row, reviewer, waitUntil) => {
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
+  assertProductStatusInput(body)
+  delete body.is_active
   readProductMoneyPlan(body)
   await resolveProductImageFields(getDb(env), body)
   const name = String(body.name || '').trim()
@@ -181,7 +183,7 @@ registerApplier('products', 'create', 'product', async (env, row, reviewer, wait
   const changesImages = productImageFieldsChanged(body)
   if (changesImages) await assertPendingProductImagePermission(env, row)
   else omitUnchangedProductImageFields(body)
-  const { id } = await createProductWithInitialStock(env, body, { name, is_active: body.is_active == null ? 1 : body.is_active }, undefined,
+  const { id } = await createProductWithInitialStock(env, body, { name, is_active: 1 }, undefined,
     { row, reviewer: { reviewedBy: reviewer.id, reviewedByName: reviewer.name } }, reviewer.redirectTarget ?? null)
   await bumpVersion(env, 'products')
   await notify(env, waitUntil, 'products', { action: 'create', id })
@@ -196,9 +198,9 @@ registerApplier('products', 'update', 'product', async (env, row, reviewer, wait
   const id = row.entity_id
   if (id == null) throw new Error('Pending product update is missing its entity id')
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
-  if (Object.prototype.hasOwnProperty.call(body, 'is_active') && Number(body.is_active) !== 1) {
-    await assertProductsHaveNoStock(getDb(env), [Number(id)])
-  }
+  assertProductStatusInput(body)
+  delete body.is_active
+  await assertProductsActive(getDb(env), [Number(id)])
   readProductMoneyPlan(body)
   const submittedImageFields = Object.prototype.hasOwnProperty.call(body, 'image_path')
     || Object.prototype.hasOwnProperty.call(body, 'image_gallery')

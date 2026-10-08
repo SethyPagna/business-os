@@ -1,4 +1,4 @@
-import { assertProductsHaveNoStock, ProductStockGuardError, productStockGuardError, productStockGuardStatement } from './productStockGuard'
+import { assertProductStatusInput, assertProductsActive, productStockGuardError, productStockGuardStatement } from './productStockGuard'
 // Shared product row-write helpers -- extracted from routes/products.ts
 // (part 152) so lib/reviewApply.ts's Products appliers can replay an
 // approved create/update through the EXACT same write path the route
@@ -281,7 +281,8 @@ export function planInsertRow(
   columns: Set<string>,
   required: Record<string, unknown> = {},
 ): { sql: string; params: Record<string, unknown> } {
-  const payload = buildInsertPayload(body, columns, required)
+  assertProductStatusInput(body)
+  const payload = buildInsertPayload(body, columns, { ...required, is_active: 1 })
   const keys = Object.keys(payload)
   if (!keys.length) throw new Error(`No writable ${table} fields were supplied`)
   const params = Object.fromEntries(keys.map((key, index) => [`value${index}`, payload[key]]))
@@ -293,7 +294,8 @@ export function planInsertRow(
 
 export async function insertRow(env: Env, table: string, body: Record<string, unknown>, required: Record<string, unknown> = {}) {
   const columns = await tableColumns(env, table)
-  const payload = buildInsertPayload(body, columns, required)
+  if (table === 'products') assertProductStatusInput(body)
+  const payload = buildInsertPayload(body, columns, table === 'products' ? { ...required, is_active: 1 } : required)
   const keys = Object.keys(payload)
   // sql-bound-params: bounded by construction -- one parameter per COLUMN
   // of a single row, capped by the table's schema, not by any row count.
@@ -327,7 +329,7 @@ export async function productCreateDestination(env: Env, body: Record<string, un
     throw new ProductCreateError('product_initial_quantity_invalid', 'Initial stock must be a finite number.', 400)
   }
   const quantity = Math.max(0, Number(rawQuantity))
-  if (body.is_active != null && Number(body.is_active) !== 1 && quantity !== 0) throw new ProductStockGuardError()
+  assertProductStatusInput(body)
   if (body.branch_id != null && typeof body.branch_id !== 'number' && typeof body.branch_id !== 'string') throw new ReceivingBranchError()
   const explicit = body.branch_id != null && String(body.branch_id).trim() !== ''
   const addressedBranchId = explicit ? Number(body.branch_id) : await defaultBranchId(env)
@@ -351,7 +353,7 @@ export async function createProductWithInitialStock(
   const key = `product-create:${crypto.randomUUID()}`
   const params = { key, branchId, quantity, lotCode: dateToBatchCode(new Date().toISOString().slice(0, 10)) }
   const statements: Array<{ sql: string; params?: import('./db').BindParams }> = [
-    planInsertRow('products', body, await tableColumns(env, 'products'), { ...required, stock_quantity: quantity, client_request_id: key }),
+    planInsertRow('products', body, await tableColumns(env, 'products'), { ...required, is_active: 1, stock_quantity: quantity, client_request_id: key }),
     { sql: `INSERT INTO branch_stock(product_id,branch_id,quantity)
       SELECT p.id,b.id,CASE WHEN b.id=@branchId THEN @quantity ELSE 0 END
       FROM products p CROSS JOIN branches b WHERE p.client_request_id=@key AND b.is_active=1`, params },
@@ -393,6 +395,10 @@ export async function createProductWithInitialStock(
 }
 
 export async function updateRow(env: Env, table: string, id: string | number, body: Record<string, unknown>, costOverrideActor?: { id: number | null; name: string | null }) {
+  if (table === 'products') {
+    assertProductStatusInput(body)
+    await assertProductsActive(getDb(env), [Number(id)])
+  }
   const moneyPlan = readProductMoneyPlan(body)
   if (moneyPlan && (table !== 'products' || moneyPlan.kind !== 'update' || moneyPlan.product_id !== Number(id))) invalidMoneyPlan()
   const columns = await tableColumns(env, table)
@@ -400,10 +406,9 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
   // Every caller (PUT, its edit-fold, the review-queue apply) is a product
   // edit; none may write the stock rollup.
   if (table === 'products') omitProductUpdateStock(payload)
-  if (table === 'products' && Object.prototype.hasOwnProperty.call(payload, 'is_active') && Number(payload.is_active) !== 1) {
-    await assertProductsHaveNoStock(getDb(env), [Number(id)])
-  }
+  if (table === 'products') delete payload.is_active
   applySearchNormalizedColumns(payload, body, columns, false)
+  if (table === 'products' && Object.keys(payload).length === 0) return 0
   if (columns.has('updated_at')) payload.updated_at = nowIso()
   const keys = Object.keys(payload).filter((key) => columns.has(key))
   if (!keys.length) return 0
@@ -418,8 +423,7 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
   if (costOverrideActor && (!moneyPlan || table !== 'products')) invalidMoneyPlan()
   const costBefore = moneyPlan?.before as { cost_price_usd: number | null; cost_price_khr: number | null } | null
   const manualEntry = costOverrideActor && costBefore ? planManualCostEntry(Number(id), costBefore, body, costOverrideActor) : null
-  const stockGuard = table === 'products' && Object.prototype.hasOwnProperty.call(payload, 'is_active') && Number(payload.is_active) !== 1
-    ? productStockGuardStatement([Number(id)]) : null
+  const stockGuard = table === 'products' ? productStockGuardStatement([Number(id)], 'active') : null
   const nativeStockGuard = stockGuard ? env.DB.prepare(stockGuard.sql.replace(/@productIds/g, '?')).bind(stockGuard.params.productIds) : null
   let result
   if (moneyPlan?.group_rename) {
@@ -561,7 +565,9 @@ export async function syncProductImageGallery(
 ): Promise<string[]> {
   const gallery = validateProductImageGallery(rawGallery, maxImages)
   const db = getDb(env)
+  await assertProductsActive(db, [Number(productId)])
   await db.batch([
+    productStockGuardStatement([Number(productId)], 'active'),
     { sql: `DELETE FROM product_images WHERE product_id = @id`, params: { id: productId } },
     ...gallery.map((imagePath, index) => ({
       sql: `INSERT INTO product_images (product_id, image_path, sort_order) VALUES (@id, @path, @order)`,
