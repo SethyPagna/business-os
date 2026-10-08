@@ -74,6 +74,7 @@ const sqlBinding = load('lib/sqlBinding.ts')
 const detailRule = load('lib/productDetailRule.ts', { './moneyPrecision': moneyPrecision })
 const productIdentity = load('lib/productIdentity.ts', { './db': {}, './sqlBinding': sqlBinding, './productDetailRule': detailRule })
 const productMerge = load('lib/productMerge.ts', { './moneyPrecision': moneyPrecision })
+const productStockGuard = load('lib/productStockGuard.ts')
 const productMergeSnapshot = load('lib/productMergeSnapshot.ts', { './db': {} })
 const acquisitionCostAccess = load('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const noAudit = { audit: async () => {} }
@@ -86,6 +87,7 @@ const undoAppliers = load('lib/undoAppliers.ts', {
   '../durable-objects/broadcastHub': broadcastHub,
   './permissions': permissions,
   './productMerge': productMerge,
+  './productStockGuard': productStockGuard,
   './productMergeSnapshot': productMergeSnapshot,
   './sqlBinding': sqlBinding,
   './moneyPrecision': moneyPrecision,
@@ -107,6 +109,7 @@ const products = load('routes/products.ts', {
   '../lib/productDetailRule': detailRule,
   '../lib/productIdentity': productIdentity,
   '../lib/productMerge': productMerge,
+  '../lib/productStockGuard': productStockGuard,
   '../lib/productMergeSnapshot': productMergeSnapshot,
   '../lib/productResolveChoices': choicesLib,
   '../lib/searchMatch': searchMatch,
@@ -173,6 +176,16 @@ async function reviewGroup(requestId, choices) {
 }
 
 async function main() {
+  await check('ROUTE: real stock guard preserves coded refusal and the untouched fixture', async () => {
+    fresh()
+    state.native.db.exec(`UPDATE products SET name='Guard fixture',barcode=NULL WHERE id IN (${KEEP},${M1}); UPDATE products SET stock_quantity=3 WHERE id=${M1}`)
+    const before = dump()
+    const refused = await merge({ keepId: KEEP, mergeId: M1 })
+    assert.equal(refused.status, 409, JSON.stringify(refused.body))
+    assert.equal(refused.body.code, 'product_has_stock')
+    assert.deepEqual(dump(), before)
+  })
+
   // ---- LIB: the shared parity table -----------------------------------------
   await check('LIB: every parity case parses to its canonical choices and resolves to its Final and server columns', async () => {
     assert.ok(FIXTURE.cases.length >= 3)
