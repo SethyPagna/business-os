@@ -4676,6 +4676,7 @@
   "restore": "Restore",
   "restore_backup_btn": "Restore",
   "retry": "Retry",
+  "lazy_load_retryable": "This part could not load. Retry or close it; your work stays here.",
   "retry_import": "Retry import",
   "returnHistory": "Return history",
   "return_date": "Return Date",
