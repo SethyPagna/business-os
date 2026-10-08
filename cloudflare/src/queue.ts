@@ -46,7 +46,11 @@ registerInlineImportRunner(async (env, message) => {
 })
 
 export async function handleImportQueue(batch: MessageBatch<ImportJobMessage>, env: Env): Promise<void> {
-  for (const message of batch.messages) {
+  for (const [index, message] of batch.messages.entries()) {
+    if (index > 0) {
+      message.retry()
+      continue
+    }
     try {
       const { jobId, kind } = message.body
       // message.timestamp is when Cloudflare Queues accepted the message
