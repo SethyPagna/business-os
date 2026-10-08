@@ -37,8 +37,9 @@ function compile(file, stubs = {}) {
 const batchCode = compile('batchCode.ts')
 const sqlBinding = compile('sqlBinding.ts')
 const moneyPrecision = compile('moneyPrecision.ts')
+const receivingBranch = compile('receivingBranch.ts')
 const { planUnreceiveBatchStock } = compile('productBatches.ts', {
-  './db': {}, './batchCode': batchCode, './sqlBinding': sqlBinding, './moneyPrecision': moneyPrecision,
+  './db': {}, './batchCode': batchCode, './sqlBinding': sqlBinding, './moneyPrecision': moneyPrecision, './receivingBranch': receivingBranch,
 })
 const { roundMoney4 } = moneyPrecision
 
