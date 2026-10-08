@@ -5,6 +5,7 @@ import { hasPermission, isAdminControlUser } from '../lib/permissions'
 import { getDb } from '../lib/db'
 import { audit } from '../lib/audit'
 import { runDataIntegrityCheck } from '../lib/dataIntegrity'
+import { productStockGuardError } from '../lib/productStockGuard'
 import { listObjects, deleteObject, deleteObjectsBulk } from '../lib/r2'
 import { variantKeysForUploadKeys } from '../lib/imageVariantStore'
 import { cleanOrphanImportStaging } from '../lib/importRetention'
@@ -1387,6 +1388,8 @@ app.post('/repair-integrity', async (c) => {
     }
     return c.json({ ...result, success: true })
   } catch (error) {
+    const refusal = productStockGuardError(error)
+    if (refusal) return c.json({ success: false, error: refusal.message, code: refusal.code }, 409)
     return c.json({ success: false, error: `Integrity repair failed: ${(error as Error).message}` }, 500)
   }
 })

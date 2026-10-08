@@ -16,6 +16,7 @@
 // at all). POST /repair-integrity calls them with repair=true.
 
 import { getDb } from './db'
+import { assertProductsActive, productStockGuardError, productStockGuardStatement } from './productStockGuard'
 import type { Env } from '../index'
 
 export type IntegrityResult = {
@@ -28,6 +29,7 @@ async function checkStockQuantities(env: Env, repair: boolean): Promise<Integrit
   const db = getDb(env)
   const errors: string[] = []
   const statements: Array<{ sql: string; params?: Record<string, unknown> }> = []
+  const receivingProductIds: number[] = []
 
   try {
     const negativeRows = await db.prepare(`
@@ -56,6 +58,7 @@ async function checkStockQuantities(env: Env, repair: boolean): Promise<Integrit
       const branchTotal = Math.max(0, Number(prod.branch_total || 0))
       const actual = Number(prod.stock_quantity || 0)
       if (Math.abs(actual - branchTotal) > 0.01) {
+        if (branchTotal > Math.max(0, actual)) receivingProductIds.push(prod.id)
         errors.push(`Product ${prod.id}: stock ${repair ? 'corrected' : 'mismatched'} from ${actual} to ${branchTotal}`)
         statements.push({
           sql: "UPDATE products SET stock_quantity = @stock_quantity, updated_at = CURRENT_TIMESTAMP WHERE id = @id",
@@ -64,8 +67,15 @@ async function checkStockQuantities(env: Env, repair: boolean): Promise<Integrit
       }
     }
 
-    if (repair && statements.length) await db.batch(statements)
+    if (repair && statements.length) {
+      await assertProductsActive(db, receivingProductIds)
+      await db.batch(receivingProductIds.length
+        ? [productStockGuardStatement(receivingProductIds, 'active'), ...statements]
+        : statements)
+    }
   } catch (e) {
+    const refusal = productStockGuardError(e)
+    if (refusal) throw refusal
     errors.push(`Stock verification error: ${(e as Error).message}`)
   }
 
