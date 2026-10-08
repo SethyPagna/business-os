@@ -23,6 +23,7 @@ import {
   navLayerToggle,
 } from '../src/utils/mobileNavChrome.ts'
 import { resolveChromeSection, resolveHubSection } from '../src/components/shared/hubNavigation.ts'
+import { createHarness, propsOf, type MemoryNode } from './mountedComponentHarness.ts'
 
 let failed = 0
 const runTest = (name: string, fn: () => void): void => {
@@ -366,8 +367,13 @@ runTest('the bar, the tiles and the title carry the design language, not grey ut
   assert.doesNotMatch(header, /bg-blue-100|dark:bg-blue-900\/40|text-blue-600 dark:text-blue-400/,
     'nor is its face, nor the initials inside it -- in the bar or in the panel it opens')
   assert.match(header, /className="bos-nav-avatar flex h-11 w-11/, 'it is a chrome surface')
-  assert.equal((header.match(/bos-nav-avatar-face/g) || []).length, 2,
-    'both faces -- the bar one and the panel one -- wear the same class')
+  assert.match(header, /bos-nav-avatar-face[\s\S]*?<AccountAvatarImage/,
+    'the mobile bar face uses the chrome class and shared saved-photo renderer')
+  const profile = sidebar.slice(sidebar.indexOf('const renderAccountProfile ='), sidebar.indexOf('const accountActionToneClass ='))
+  assert.match(profile, /bos-nav-avatar-face[\s\S]*?<AccountAvatarImage/,
+    'the shared account-menu face uses the same chrome and saved-photo renderer')
+  assert.equal((sidebar.match(/\{renderAccountProfile\(\)\}/g) || []).length, 2,
+    'desktop and mobile account menus both render the shared profile identity')
   assert.match(css, /\.bos-nav-avatar \{[\s\S]*?background-color: var\(--nav-accent-soft\);[\s\S]*?color: var\(--nav-accent-strong\)/,
     'ground and ink come from the chrome tokens, like .bos-nav-back')
   assert.match(css, /\.bos-nav-avatar-face \{[\s\S]*?background-color: var\(--nav-surface\)/,
@@ -546,4 +552,42 @@ runTest('the header always paints above the open page menu, and the sheet never 
     'the sheet is capped at the header\'s bottom edge, not just a flat 70vh')
 })
 
+const harness = await createHarness()
+try {
+  const app = {
+    page: 'products', language: 'en', user: { id: 42, name: 'Synthetic owner', role_name: 'Owner', avatar_path: '/uploads/owner.png', updated_at: 'photo-1' },
+    settings: { language: 'en' }, t: (key: string) => ({ account: 'Account', profile: 'Profile', no_role: 'No role' } as Record<string, string>)[key] || key,
+    navigateTo: () => {}, logout: () => {}, notify: () => {}, hasPermission: () => false, getPermissionTier: () => 'none', can: () => false, canAccessPage: () => false,
+  }
+  ;(window as unknown as { api: unknown }).api = { getSyncServerUrl: () => 'http://127.0.0.1:4173', debugLog: () => {} }
+  const surface = await harness.mount({ component: 'components/navigation/Sidebar.tsx', props: { showQuickPreferences: false }, app, doubles: {} })
+  const descendants = (node: MemoryNode): MemoryNode[] => [node, ...node.childNodes.flatMap(descendants)]
+  const hasFaceClass = (node: MemoryNode) => String(propsOf(node).className || '').split(' ').includes('bos-nav-avatar-face')
+  await surface.click(surface.button('Account'))
+  const faces = surface.findAll(hasFaceClass)
+  const profiles = surface.findAll(node => propsOf(node)['data-bos-profile-action'] === 'true')
+  const checkFaces = (observed: MemoryNode[]) => {
+    assert.equal(profiles.length, 2, 'desktop and mobile menu identities render')
+    assert.equal(observed.length, 3, 'the header plus both menu faces carry chrome')
+    for (const identity of profiles) {
+      const face = descendants(identity).find(hasFaceClass)
+      assert.ok(face && observed.includes(face), 'each menu has its own visible chrome face')
+      assert.ok(descendants(face).some(node => node.tagName === 'IMG' && propsOf(node).alt === app.user.name), 'menu face shows the current owner photo')
+    }
+    const barFace = observed.find(face => !profiles.some(identity => descendants(identity).includes(face)))
+    assert.ok(barFace && descendants(barFace).some(node => node.tagName === 'IMG' && propsOf(node).alt === app.user.name), 'header face shows the same current owner photo')
+  }
+  runTest('mounted header and both shared account-menu faces retain chrome and the current photo', () => {
+    checkFaces(faces)
+    assert.throws(() => checkFaces(faces.filter(face => profiles.some(identity => descendants(identity).includes(face)))), 'a missing header face must fail')
+    const menuFace = descendants(profiles[0]).find(hasFaceClass)
+    assert.throws(() => checkFaces(faces.filter(face => face !== menuFace)), 'a missing menu face must fail independently')
+  })
+  await surface.unmount()
+} catch (error) {
+  failed += 1
+  console.error('FAIL mounted avatar chrome', error)
+} finally {
+  await harness.close()
+}
 if (failed > 0) process.exitCode = 1
