@@ -702,6 +702,15 @@ export function parseReceiptSellingPrice(usdValue: unknown, khrValue: unknown): 
 
 export type ReceiptSellingPriceRow = { id: number; selling_price_usd: number | null; selling_price_khr: number | null }
 
+export const RECEIPT_SELLING_PRICE_CHANGED = {
+  error: 'The product selling price changed. Nothing was changed. Refresh the product and retry this line.',
+  code: 'receipt_selling_price_changed',
+} as const
+
+export function isReceiptSellingPriceConflict(error: unknown): boolean {
+  return /receipt_selling_price_changed/.test(error instanceof Error ? error.message : String(error))
+}
+
 /** The price write a receipt carries, or null when the row already sells at that price. */
 export function planReceiptSellingPrice(row: ReceiptSellingPriceRow, price: ReceiptSellingPrice): {
   statement: StockWriteStatement

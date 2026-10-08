@@ -38,7 +38,7 @@ import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, identityBarcodeKey, type ProductIdentityRow } from '../lib/productIdentity'
 import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery, parseRankedIds } from '../lib/productSearchQuery'
-import { fifoRemovalAllocations, isStockRemovalConflict, listBatchesForProduct, parseReceiptSellingPrice, planBranchStockRemoval, planReceiptSellingPrice, planReceiveBatchStock, planRemoveStockAcrossBatches, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, removeStockFromBatch, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptSellingPriceRow, type StockWriteStatement } from '../lib/productBatches'
+import { fifoRemovalAllocations, isStockRemovalConflict, isReceiptSellingPriceConflict, RECEIPT_SELLING_PRICE_CHANGED, listBatchesForProduct, parseReceiptSellingPrice, planBranchStockRemoval, planReceiptSellingPrice, planReceiveBatchStock, planRemoveStockAcrossBatches, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, removeStockFromBatch, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptSellingPriceRow, type StockWriteStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
 import { normalizeTypedDate } from '../lib/batchCode'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, FREE_QUANTITY_NOT_RECEIPT, parseFreeQuantity, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
@@ -1527,8 +1527,8 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
     async (markWritten, atomicMark) => {
       try { return await runAdjustActionKernel(c, body, markWritten, atomicMark) }
       catch (error) {
-        if (/receipt_selling_price_changed/.test(error instanceof Error ? error.message : String(error))) {
-          return c.json({ error: 'The product selling price changed. Nothing was changed. Refresh the product and retry this line.', code: 'receipt_selling_price_changed' }, 409)
+        if (isReceiptSellingPriceConflict(error)) {
+          return c.json(RECEIPT_SELLING_PRICE_CHANGED, 409)
         }
         const transactionRefusal = stockTransactionRefusal(error)
         if (transactionRefusal) return c.json(transactionRefusal, 503)
@@ -2390,7 +2390,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       }
     } catch (err) {
       if (stockTransactionRefusal(err) || err instanceof StockMutationBudgetError
-        || /receipt_selling_price_changed/.test(err instanceof Error ? err.message : String(err))) throw err
+        || isReceiptSellingPriceConflict(err)) throw err
       const stockGuard = productStockGuardError(err)
       if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       if (isReceivingBranchError(err)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
@@ -2427,7 +2427,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         } else await removeStockFromBatch(db, { batchId: batchIdRequested, productId: targetProductId, branchId, quantity })
       } catch (err) {
         if (stockTransactionRefusal(err) || err instanceof StockMutationBudgetError
-        || /receipt_selling_price_changed/.test(err instanceof Error ? err.message : String(err))) throw err
+        || isReceiptSellingPriceConflict(err)) throw err
         const stockGuard = productStockGuardError(err)
         if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         if (err instanceof InsufficientBatchStockError) return c.json({ error: err.message }, 400)
@@ -2469,7 +2469,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         ]), atomicMark)
       } catch (err) {
         if (stockTransactionRefusal(err) || err instanceof StockMutationBudgetError
-        || /receipt_selling_price_changed/.test(err instanceof Error ? err.message : String(err))) throw err
+        || isReceiptSellingPriceConflict(err)) throw err
         const stockGuard = productStockGuardError(err)
         if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         if (err instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
