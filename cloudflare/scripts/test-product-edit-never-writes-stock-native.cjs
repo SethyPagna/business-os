@@ -40,6 +40,8 @@ const db = {
     const st = rawDb.prepare(sql)
     let bound
     const api = {
+      sql,
+      get params() { return bound },
       bind: (...args) => { bound = args; return api },
       get: (p) => st.get(p !== undefined ? p : bound),
       all: (p) => st.all(p !== undefined ? p : bound) ?? [],

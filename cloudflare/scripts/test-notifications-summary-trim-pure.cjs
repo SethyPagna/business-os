@@ -312,7 +312,7 @@ async function main() {
   })
 
   await check('a small shop is unchanged: under 50 flagged products there is no preview marker and every item is present', async () => {
-    raw.db.prepare("UPDATE products SET stock_quantity = 500 WHERE name NOT IN ('Out 000', 'Low 000', 'Low 001')").run()
+    raw.db.prepare("UPDATE products SET stock_quantity = 500 WHERE is_active=1 AND name NOT IN ('Out 000', 'Low 000', 'Low 001')").run()
     await cacheModule.bumpVersion(env, 'products')
     const small = await summary()
     const inventory = section(small, 'inventory')
