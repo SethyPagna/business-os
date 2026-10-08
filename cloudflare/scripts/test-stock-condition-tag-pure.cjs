@@ -428,6 +428,48 @@ const ADD = (extra) => ({
 })
 
 ;(async () => {
+  await check('tagged explicit removal rolls its full drain back if admission changes inside the batch', async () => {
+    seed()
+    assert.equal((await req('POST', '/adjust', ADD())).status, 200)
+    const batchId = Number(rawDb.prepare('SELECT id FROM product_batches WHERE variant_product_id=1').get({}).id)
+    const before = { stock:sellable(), lots:heldLots(), ledger:lotLedger(), movements:movements() }
+    let injected = false
+    beforeDbBatchHook = items => {
+      if (!items.some(x=>/INSERT INTO damaged_stock_lots/.test(x.sql))) return
+      const index = items.findIndex(x=>/UPDATE products SET stock_quantity/.test(x.sql))
+      assert.ok(index>=0,'drain and tagged insert share one batch')
+      items.splice(index+1,0,{sql:'UPDATE products SET is_active=0 WHERE id=1',params:{}})
+      injected = true
+    }
+    try {
+      const result = await req('POST','/adjust',{productId:1,type:'remove',quantity:10,reason:'broken',branchId:1,batchId,conditionTag:'broken'})
+      assert.equal(result.status,409,JSON.stringify(result.json))
+      assert.equal(result.json.code,'product_has_stock')
+    } finally { beforeDbBatchHook=null }
+    assert.ok(injected)
+    assert.deepEqual({stock:sellable(),lots:heldLots(),ledger:lotLedger(),movements:movements()},before)
+    assert.equal(rawDb.prepare('SELECT is_active FROM products WHERE id=1').get({}).is_active,1)
+  })
+  await check('tagged receipt hold rolls back its drain when admission changes; received goods stay visible', async () => {
+    seed()
+    let received
+    beforeDbBatchHook = items => {
+      if (!items.some(x=>/INSERT INTO damaged_stock_lots/.test(x.sql))) return
+      received = {stock:sellable(),ledger:lotLedger(),movements:movements()}
+      const index=items.findIndex(x=>/UPDATE products SET stock_quantity/.test(x.sql))
+      assert.ok(index>=0)
+      items.splice(index+1,0,{sql:'UPDATE products SET is_active=0 WHERE id=1',params:{}})
+    }
+    try {
+      const result=await req('POST','/adjust',ADD({conditionTag:'broken'}))
+      assert.equal(result.status,409,JSON.stringify(result.json))
+      assert.equal(result.json.code,'product_has_stock')
+    } finally { beforeDbBatchHook=null }
+    assert.ok(received)
+    assert.deepEqual({stock:sellable(),ledger:lotLedger(),movements:movements()},received)
+    assert.equal(heldLots().length,0)
+    assert.equal(rawDb.prepare('SELECT is_active FROM products WHERE id=1').get({}).is_active,1)
+  })
   // ------------------------------------------------------------------ HOLD
   await check('keep-in-group: units leave sellable, land on a tagged lot, and the movement is damage_out with cost', async () => {
     seed()

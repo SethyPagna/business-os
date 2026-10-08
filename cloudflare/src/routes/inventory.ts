@@ -1,4 +1,4 @@
-import { productStockGuardError, productHasStockSql, productStockGuardStatement } from '../lib/productStockGuard'
+import { productStockGuardError, productHasStockSql, productStockGuardStatement, assertProductsActive } from '../lib/productStockGuard'
 import { requireReceivingBranch, receivingBranchAssertion, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from '../lib/receivingBranch'
 import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
@@ -2076,8 +2076,16 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // quantity, and its movement or held row -- so its write mark rides INSIDE
   // that batch (atomicMark) instead of being set ahead of it. A guard that
   // refuses the write rolls the mark back with it and the claim is released.
-  const atomicRemoval = !correctionLot && useBatchLedger && type === 'remove'
-    && batchIdRequested == null && (rawBatchId == null || rawBatchId === '')
+  const atomicRemoval = !correctionLot && type === 'remove'
+    && (Boolean(conditionTag) || (useBatchLedger && batchIdRequested == null && (rawBatchId == null || rawBatchId === '')))
+  if (conditionTag && delta !== 0) {
+    try { await assertProductsActive(db, [targetProductId]) }
+    catch (error) {
+      const stockGuard = productStockGuardError(error)
+      if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+      throw error
+    }
+  }
   if (!atomicRemoval) await markWritten()
 
   // The two ledger records a removal can leave -- the plain movement row, or
@@ -2305,8 +2313,20 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   } else if (useBatchLedger && type === 'remove') {
     if (batchIdRequested != null) {
       try {
-        await removeStockFromBatch(db, { batchId: batchIdRequested, productId: targetProductId, branchId, quantity })
         removedBatchQuantities = [{ batchId: batchIdRequested, quantity }]
+        if (conditionTag) {
+          resolvedBatchId = batchIdRequested
+          const removal = planRemoveStockAcrossBatches({ productId: targetProductId, branchId, quantity,
+            allocations: [{ batchId: batchIdRequested, quantity }] })
+          const mark = atomicMark?.statement() ?? null
+          await db.batch(addressedStatements(landing, [
+            productStockGuardStatement([targetProductId], 'active'),
+            ...(mark ? [mark] : []),
+            ...removal.statements, ...holdRemovedStatements(conditionTag),
+          ]))
+          atomicMark?.committed()
+          movementWrittenAtomically = true
+        } else await removeStockFromBatch(db, { batchId: batchIdRequested, productId: targetProductId, branchId, quantity })
       } catch (err) {
         const stockGuard = productStockGuardError(err)
         if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
@@ -2361,7 +2381,17 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       movementWrittenAtomically = true
     }
   } else if (delta !== 0) {
-    await applyStockDelta(c.env, targetProductId, branchId, delta, type === 'add')
+    if (conditionTag && type === 'remove') {
+      const mark = atomicMark?.statement() ?? null
+      await db.batch(addressedStatements(landing, [
+        productStockGuardStatement([targetProductId], 'active'),
+        ...(mark ? [mark] : []),
+        ...planBranchStockRemoval({ productId: targetProductId, branchId, quantity: Math.abs(delta) }),
+        ...holdRemovedStatements(conditionTag),
+      ]))
+      atomicMark?.committed()
+      movementWrittenAtomically = true
+    } else await applyStockDelta(c.env, targetProductId, branchId, delta, type === 'add')
   }
 
   // P3-L6 HOLD (remove): the units have just left sellable stock above. A
@@ -2404,20 +2434,14 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // silently never became sellable.
   if (conditionTag && type === 'add' && delta !== 0) {
     const heldBatchId = useBatchLedger ? resolvedBatchId : null
-    try {
-      if (heldBatchId != null) {
-        await removeStockFromBatch(db, { batchId: heldBatchId, productId: targetProductId, branchId, quantity: Math.abs(delta) })
-      } else {
-        await applyStockDelta(c.env, targetProductId, branchId, -Math.abs(delta))
-      }
-    } catch (err) {
-      const stockGuard = productStockGuardError(err)
-      if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
-      if (err instanceof InsufficientBatchStockError) return c.json({ error: err.message }, 400)
-      if (isStockRemovalConflict(err)) return c.json(STOCK_REMOVAL_CONFLICT, 409)
-      return c.json({ error: err instanceof Error ? err.message : 'Failed to hold received stock as tagged' }, 400)
-    }
-    await db.batch(addressedStatements(landing, planHoldAsTagged({
+    const removal = heldBatchId != null
+      ? planRemoveStockAcrossBatches({ productId: targetProductId, branchId, quantity: Math.abs(delta),
+          allocations: [{ batchId: heldBatchId, quantity: Math.abs(delta) }] }).statements
+      : planBranchStockRemoval({ productId: targetProductId, branchId, quantity: Math.abs(delta) })
+    await db.batch(addressedStatements(landing, [
+      productStockGuardStatement([targetProductId], 'active'),
+      ...removal,
+      ...planHoldAsTagged({
       productId: targetProductId,
       productName: targetProductName,
       branchId,
@@ -2435,7 +2459,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       }),
       referenceId: sessionId,
       actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
-    })))
+    }),
+    ]))
   }
 
   // `type` is always 'add'/'remove' here (a 'set' request was converted
@@ -2511,7 +2536,12 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
 
 app.post('/adjust', async (c) => {
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
-  return runAdjustAction(c, body)
+  try { return await runAdjustAction(c, body) }
+  catch (error) {
+    const stockGuard = productStockGuardError(error)
+    if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+    throw error
+  }
 })
 
 // Dated stock-reconciliation import -- route wiring for
