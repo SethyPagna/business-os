@@ -895,7 +895,7 @@ export default function AuditLog() {
         </div>
       ) : null}
 
-      <div className="card overflow-hidden">
+      <div className="card shrink-0 overflow-hidden">
         {loading && !hasLoadedOnce ? (
           <div className="space-y-2 p-3">
             {skeletonRows.map((row) => (

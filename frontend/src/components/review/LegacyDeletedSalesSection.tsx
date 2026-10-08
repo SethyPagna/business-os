@@ -124,7 +124,6 @@ export default function LegacyDeletedSalesSection() {
   const totalLines = Number(data?.total_lines) || 0
 
   const money = (value: unknown): string => `$${(Number(value) || 0).toFixed(2)}`
-  const anyFilter = search !== '' || cashier !== 'all' || fromDate !== '' || toDate !== '' || startTime !== '' || endTime !== ''
 
   const changeFilter = (apply: () => void) => {
     apply()
@@ -143,51 +142,38 @@ export default function LegacyDeletedSalesSection() {
 
   return (
     <div className="page-scroll flex flex-col gap-3 p-3 sm:p-6">
-      <p className="text-xs text-gray-500 dark:text-gray-400">
-        {tr('legacy_deleted_sales_hint', 'Lines cashiers deleted from carts and bills in the old system, preserved as audit evidence. These never changed sales or stock.')}
-      </p>
-
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex min-w-0 items-center gap-2">
         <SearchInput
           id="legacy-deleted-sales-search"
           value={search}
           onChange={(value: string) => changeFilter(() => setSearch(value))}
           placeholder={tr('search', 'Search')}
-          className="min-w-[12rem]"
+          className="min-w-0 flex-1"
         />
         <AppSelect
           ariaLabel={tr('cashier', 'Cashier')}
           value={cashier}
           onChange={(value) => changeFilter(() => setCashier(value))}
-          className="min-w-[10rem]"
+          className="min-w-0 w-[45%] max-w-[18rem] shrink-0"
           options={[
             { value: 'all', label: tr('all_cashiers', 'All cashiers') },
             ...cashierOptions.map((option) => ({ value: option.key, label: String(option.name || option.key) })),
           ]}
         />
-        <StatsRangeRow
-          range={{ startDate: fromDate, endDate: toDate, startTime, endTime }}
-          onRangeChange={(range) => changeFilter(() => {
-            setFromDate(range.startDate || '')
-            setToDate(range.endDate || '')
-            setStartTime(range.startTime || '')
-            setEndTime(range.endTime || '')
-          })}
-          t={(key: string) => t(key)}
-          showTime continuous
-          showPresets
-          className="w-full min-w-0"
-        />
-        {anyFilter ? (
-          <button
-            type="button"
-            className="btn-secondary py-1 text-xs"
-            onClick={() => changeFilter(() => { setSearch(''); setCashier('all'); setFromDate(''); setToDate(''); setStartTime(''); setEndTime('') })}
-          >
-            {tr('clear', 'Clear')}
-          </button>
-        ) : null}
       </div>
+      <StatsRangeRow
+        range={{ startDate: fromDate, endDate: toDate, startTime, endTime }}
+        onRangeChange={(range) => changeFilter(() => {
+          setFromDate(range.startDate || '')
+          setToDate(range.endDate || '')
+          setStartTime(range.startTime || '')
+          setEndTime(range.endTime || '')
+        })}
+        t={(key: string) => t(key)}
+        showTime continuous
+        showPresets
+        className="w-full min-w-0"
+      />
 
       {error ? (
         <div className="flex items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-900/20 dark:text-amber-200">
@@ -219,7 +205,7 @@ export default function LegacyDeletedSalesSection() {
           {rows.length === 0 ? (
             <div className="py-6 text-center text-sm text-gray-400">{tr('legacy_deleted_sales_empty', 'No deleted-sale records match these filters.')}</div>
           ) : (
-            <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700">
+            <div className="shrink-0 overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700">
               <table className="w-full min-w-[980px] text-left text-xs">
                 <thead className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
                   <tr>
