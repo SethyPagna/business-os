@@ -203,7 +203,7 @@ export function buildCompressionPlan(initialMaxDimension: number, initialQuality
  * space -- Part 242, see cloudflare/src/lib/importImageMatch.ts's
  * sanitizeBaseName for the shared rationale).
  */
-export function buildCompressedFileName(originalName: string, renameTo: string | undefined, outputExt: 'webp' | 'jpg'): string {
+export function buildCompressedFileName(originalName: string, renameTo: string | undefined, outputExt: 'webp' | 'jpg' | 'png'): string {
   const base = (renameTo || originalName || 'image').replace(/\.[^./\\]+$/, '')
   const safeBase = base
     .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '-')
@@ -364,12 +364,11 @@ export async function compressImageFile(file: File, options: CompressImageOption
     const { width, height, source } = await loadBitmap(file)
     const plan = buildCompressionPlan(opts.maxDimension, opts.quality)
 
-    let best: { blob: Blob; mime: string; ext: 'webp' | 'jpg' } | null = null
+    let best: { blob: Blob; mime: string; ext: 'webp' | 'jpg' | 'png' } | null = null
     let canvas: HTMLCanvasElement | null = null
     let ctx: CanvasRenderingContext2D | null = null
     let currentDimension = -1
-    let outputMime: 'image/webp' | 'image/jpeg' = 'image/jpeg'
-    let outputExt: 'webp' | 'jpg' = 'jpg'
+    let outputMime: 'image/webp' | 'image/jpeg' | 'image/png' = 'image/jpeg'
     let webpChecked = false
     let anyResized = false
 
@@ -403,16 +402,18 @@ export async function compressImageFile(file: File, options: CompressImageOption
         drawDownscaled(ctx, source as CanvasImageSource, width, height, target.width, target.height)
         currentDimension = step.maxDimension
         if (!webpChecked) {
-          const canEncodeWebp = await canvasToBlob(canvas, 'image/webp', 0.95).then((blob) => !!blob).catch(() => false)
-          outputMime = canEncodeWebp ? 'image/webp' : 'image/jpeg'
-          outputExt = canEncodeWebp ? 'webp' : 'jpg'
+          const canEncodeWebp = await canvasToBlob(canvas, 'image/webp', 0.95).then((blob) => blob?.type === 'image/webp').catch(() => false)
+          outputMime = canEncodeWebp ? 'image/webp' : file.type === 'image/png' ? 'image/png' : 'image/jpeg'
           webpChecked = true
         }
       }
       if (!canvas) break
 
       const blob = await canvasToBlob(canvas, outputMime, step.quality)
-      if (!blob) continue
+      if (!blob || blob.size === 0) continue
+      if (blob.type !== 'image/webp' && blob.type !== 'image/jpeg' && blob.type !== 'image/png') continue
+      const actualMime = blob.type
+      const actualExt = actualMime === 'image/webp' ? 'webp' : actualMime === 'image/png' ? 'png' : 'jpg'
       // The plan walks from highest quality/largest dimension downward, so
       // sizes decrease monotonically. That makes the FIRST attempt at or
       // under the ceiling the LARGEST one that fits -- i.e. the best quality
@@ -423,12 +424,12 @@ export async function compressImageFile(file: File, options: CompressImageOption
       // degraded one the plan produced. That is why stored images sat far
       // below their budget.
       if (blob.size <= opts.maxBytes) {
-        best = { blob, mime: outputMime, ext: outputExt }
+        best = { blob, mime: actualMime, ext: actualExt }
         break
       }
       // Still over the ceiling: hold the smallest seen so far purely as a
       // fallback for a detail-dense source that never gets under it.
-      if (!best || blob.size < best.blob.size) best = { blob, mime: outputMime, ext: outputExt }
+      if (!best || blob.size < best.blob.size) best = { blob, mime: actualMime, ext: actualExt }
     }
     if ('close' in source && typeof (source as ImageBitmap).close === 'function') (source as ImageBitmap).close()
     // Same backing-store release as above, for the last canvas the loop
