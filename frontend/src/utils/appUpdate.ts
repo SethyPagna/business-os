@@ -10,38 +10,48 @@ type RestartAppOptions = {
 type UnsavedWorkNotice = (message: string) => void
 
 let unsavedWorkNotice: UnsavedWorkNotice | null = null
+let restartInFlight: Promise<RestartAppResult> | null = null
+const OPTIONAL_APP_OPERATION_TIMEOUT_MS = 5000
 
-/**
- * G10: where the "you still have unfinished work" refusal is shown.
- *
- * This used to be window.alert(), which is the one dialog in the app that
- * freezes the whole tab until it is acknowledged -- on an installed iOS PWA
- * it is a system sheet over a chromeless window, it stops the render loop,
- * and it is exactly the inconsistent native popup this project replaced
- * everywhere else with its own notice/confirm surfaces. This module is a
- * plain util with no React, so the shell registers its own non-blocking
- * notice here once at mount and BOTH callers of restartIntoLatestApp (the
- * update bar in App.tsx and the sidebar's manual update action, which this
- * lane does not edit) get it without either of them changing.
- *
- * Pass null to unregister.
- */
+export function optionalAppOperation<T>(operation: () => Promise<T> | T): Promise<T | undefined> {
+  return new Promise((resolve) => {
+    const finish = (value?: T) => {
+      window.clearTimeout(timer)
+      resolve(value)
+    }
+    const timer = window.setTimeout(() => finish(), OPTIONAL_APP_OPERATION_TIMEOUT_MS)
+    Promise.resolve().then(operation).then(finish, () => finish())
+  })
+}
+
+function waitForWorkerEvent(target: EventTarget, event: string, ready: (() => boolean) | null, timeout: number, start?: () => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const finish = () => {
+      window.clearTimeout(timer)
+      target.removeEventListener(event, changed)
+      resolve()
+    }
+    const changed = () => { if (!ready || ready()) finish() }
+    const timer = window.setTimeout(finish, timeout)
+    try {
+      target.addEventListener(event, changed)
+      start?.()
+      if (ready) changed()
+    } catch (error) {
+      window.clearTimeout(timer)
+      target.removeEventListener(event, changed)
+      reject(error)
+    }
+  })
+}
+
+// Both restart callers use the shell's non-blocking notice; a native alert
+// would freeze the installed PWA. Pass null to unregister.
 export function setAppUpdateUnsavedWorkNotice(notice: UnsavedWorkNotice | null): void {
   unsavedWorkNotice = notice
 }
 
-/**
- * Activate the newest installed app shell and reload without risking
- * unfinished editor work. Both the global update bar and the sidebar's
- * manual update action use this one path so their safety behavior cannot
- * drift apart.
- */
-export async function restartIntoLatestApp(options: RestartAppOptions = {}): Promise<RestartAppResult> {
-  if (typeof window === 'undefined') return 'blocked'
-
-  // The guard itself is unchanged: a restart still REFUSES while there is
-  // unfinished work, and still flushes the drafts it can before saying so.
-  // Only how the refusal reaches the user changed (see the notice above).
+function refuseDirtyRestart(options: RestartAppOptions): boolean {
   if (hasDirtyWork()) {
     flushPendingWorkDrafts()
     const message = options.unsavedWorkMessage
@@ -52,45 +62,53 @@ export async function restartIntoLatestApp(options: RestartAppOptions = {}): Pro
       // Never silent: a refusal the user cannot see reads as a dead button.
       console.warn(`[app-update] restart blocked: ${message}`)
     }
-    return 'blocked'
+    return true
   }
+  return false
+}
+
+export function restartIntoLatestApp(options: RestartAppOptions = {}): Promise<RestartAppResult> {
+  if (typeof window === 'undefined') return Promise.resolve('blocked')
+  if (restartInFlight) return restartInFlight
+  restartInFlight = restart(options).then((result) => {
+    // Keep successful ownership until navigation; a second caller must not reload twice.
+    if (result === 'blocked') restartInFlight = null
+    return result
+  }, (error) => {
+    restartInFlight = null
+    console.warn('[app-update] restart failed', error)
+    return 'blocked'
+  })
+  return restartInFlight
+}
+
+async function restart(options: RestartAppOptions): Promise<RestartAppResult> {
+  if (refuseDirtyRestart(options)) return 'blocked'
 
   flushPendingWorkDrafts()
   try {
-    const registration = await navigator.serviceWorker?.getRegistration?.('/')
-    await registration?.update?.().catch(() => {})
+    const registration = await optionalAppOperation(() => navigator.serviceWorker?.getRegistration?.('/'))
+    await optionalAppOperation(() => registration?.update?.())
 
     let waiting = registration?.waiting || null
     if (!waiting && registration?.installing) {
       const installing = registration.installing
-      await new Promise<void>((resolve) => {
-        if (installing.state === 'installed') return resolve()
-        const timer = window.setTimeout(resolve, 5000)
-        installing.addEventListener('statechange', () => {
-          if (installing.state !== 'installed') return
-          window.clearTimeout(timer)
-          resolve()
-        }, { once: true })
-      })
+      await waitForWorkerEvent(installing, 'statechange', () => installing.state === 'installed' || installing.state === 'redundant', 5000)
       waiting = registration.waiting
     }
 
     if (waiting) {
-      const changed = new Promise<void>((resolve) => {
-        const timer = window.setTimeout(resolve, 1500)
-        navigator.serviceWorker.addEventListener('controllerchange', () => {
-          window.clearTimeout(timer)
-          resolve()
-        }, { once: true })
-      })
-      waiting.postMessage({ type: 'BUSINESS_OS_SKIP_WAITING' })
-      await changed
+      if (refuseDirtyRestart(options)) return 'blocked'
+      await waitForWorkerEvent(navigator.serviceWorker, 'controllerchange', null, 1500,
+        () => waiting.postMessage({ type: 'BUSINESS_OS_SKIP_WAITING' }))
     }
   } catch {
     // Reload still performs a network-first update when service workers are
     // unavailable or the browser refuses an explicit registration check.
   }
 
+  if (refuseDirtyRestart(options)) return 'blocked'
+  flushPendingWorkDrafts()
   window.location.reload()
   return 'reloading'
 }

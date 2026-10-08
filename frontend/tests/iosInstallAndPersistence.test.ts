@@ -261,7 +261,7 @@ check('G10 the restart still REFUSES while there is unfinished work', () => {
   assert.match(appUpdate, /flushPendingWorkDrafts\(\)/, 'drafts must still be flushed before refusing')
   const at = appUpdate.indexOf('if (hasDirtyWork()) {')
   const branch = appUpdate.slice(at, appUpdate.indexOf('\n  }', at))
-  assert.match(branch, /return 'blocked'/, 'the guarded branch must still return blocked')
+  assert.match(branch, /return true/, 'the shared refusal check must report dirty work; pwaRestartBoundaries executes its blocked result')
 })
 
 check('G10 the refusal reaches the user through the shell notice, never silently', () => {

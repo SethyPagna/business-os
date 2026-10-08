@@ -23,7 +23,7 @@ import PullToRefreshIndicator from './components/shared/PullToRefreshIndicator.t
 import { usePullToRefresh } from './components/shared/usePullToRefresh.ts'
 import { STORAGE_KEYS } from './constants.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
-import { restartIntoLatestApp, setAppUpdateUnsavedWorkNotice } from './utils/appUpdate.ts'
+import { optionalAppOperation, restartIntoLatestApp, setAppUpdateUnsavedWorkNotice } from './utils/appUpdate.ts'
 import { reportClientCrash } from './utils/clientCrashReport.ts'
 import { installBeforeInstallPromptCapture, installStandaloneExternalLinkGuard } from './utils/standaloneNavigation.ts'
 import { persistentNoticeFingerprint, shouldRenderPersistentNotice } from './utils/persistentNoticeDismissal.ts'
@@ -474,16 +474,22 @@ async function triggerChunkRecoveryReload(marker: string): Promise<boolean> {
   // a good build left the tab unable to self-heal after every later deploy.
   const decision = await claimChunkReload(marker)
   if (!decision.allow) return false
-
-  flushPendingWorkDrafts()
-  const target = buildChunkRecoveryUrl(`chunk:${marker}:${decision.reason}`, decision.marker.live)
-  const reload = () => {
-    if (target) window.location.replace(target)
-    else window.location.reload()
+  if (hasDirtyWork()) {
+    flushPendingWorkDrafts()
+    clearChunkReloadMarker(marker)
+    return false
   }
-  clearStaleShellCaches()
-    .catch(() => {})
-    .finally(reload)
+
+  const target = buildChunkRecoveryUrl(`chunk:${marker}:${decision.reason}`, decision.marker.live)
+  await optionalAppOperation(clearStaleShellCaches)
+  if (hasDirtyWork()) {
+    flushPendingWorkDrafts()
+    clearChunkReloadMarker(marker)
+    return false
+  }
+  flushPendingWorkDrafts()
+  if (target) window.location.replace(target)
+  else window.location.reload()
   return true
 }
 
