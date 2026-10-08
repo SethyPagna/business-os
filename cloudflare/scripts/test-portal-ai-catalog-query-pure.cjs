@@ -23,7 +23,7 @@ const sources = process.env.SECURITY_TEST_BASE
 
 async function main() {
   const h = createPortalHarness({ sources })
-  const insert = h.raw.prepare('INSERT INTO products (name, is_active, stock_quantity, out_of_stock_threshold) VALUES (@name, @active, 5, 0)')
+  const insert = h.raw.prepare('INSERT INTO products (name, is_active, stock_quantity, out_of_stock_threshold) VALUES (@name, @active, CASE WHEN @active=1 THEN 5 ELSE 0 END, 0)')
   insert.run({ name: 'Visible Serum', active: 1 })
   insert.run({ name: 'Retired Toner', active: 0 })
   const response = await h.request('/ai/chat', 'POST', { question: 'serum', dataUseConsent: true }, { ip: '203.0.113.5' })

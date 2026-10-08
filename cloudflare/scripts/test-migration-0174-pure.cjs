@@ -17,7 +17,7 @@ const sql0174 = fs.readFileSync(path.join(migrationsDir, '0174_product_leading_z
 function fresh() {
   const db = new Database(':memory:')
   db.pragma('foreign_keys = OFF')
-  for (const migration of loadAll()) db.exec(migration)
+  for (const migration of loadAll({ through: 173 })) db.exec(migration)
   db.prepare("INSERT INTO branches (id, name) VALUES (1, 'Warehouse'), (2, 'Shop')").run()
   return db
 }

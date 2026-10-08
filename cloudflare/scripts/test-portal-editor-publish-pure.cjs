@@ -112,7 +112,7 @@ async function get(url) {
 }
 
 function seedProduct(name, isActive) {
-  return db.prepare('INSERT INTO products (name, is_active, stock_quantity) VALUES (@name, @active, 5) RETURNING id').get({ name, active: isActive }).id
+  return db.prepare('INSERT INTO products (name, is_active, stock_quantity) VALUES (@name, @active, CASE WHEN @active=1 THEN 5 ELSE 0 END) RETURNING id').get({ name, active: isActive }).id
 }
 
 function storeSetting(key, value) {

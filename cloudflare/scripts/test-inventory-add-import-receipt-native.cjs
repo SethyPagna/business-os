@@ -31,7 +31,7 @@ function setup() {
   const sqlite = new Database(':memory:')
   sqlite.exec(`
     CREATE TABLE products(id INTEGER PRIMARY KEY,stock_quantity REAL DEFAULT 0,cost_price_usd REAL DEFAULT 99,
-      purchase_price_usd REAL DEFAULT 99,cost_price_khr REAL DEFAULT 400,purchase_price_khr REAL DEFAULT 400,updated_at TEXT);
+      purchase_price_usd REAL DEFAULT 99,cost_price_khr REAL DEFAULT 400,purchase_price_khr REAL DEFAULT 400,is_active INTEGER NOT NULL DEFAULT 1,updated_at TEXT);
     INSERT INTO products(id) VALUES(1);
     CREATE TABLE branches(id INTEGER PRIMARY KEY,name TEXT);
     INSERT INTO branches VALUES(1,'Shop'),(2,'Warehouse');

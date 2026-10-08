@@ -113,7 +113,7 @@ function world(d1) {
   const run = (sql, params = {}) => d1.prepare(sql).run(params)
   return { d1, raw, product, lot, manual, stored, derived, revision, writes, run }
 }
-const fresh = () => world(openDb(migrationFiles()))
+const fresh = () => world(openDb(migrationFiles({ through: 240 })))
 const recoverySql = () => migrationText.split('\n-- Statements:\n')[1].split('\n-- The backup table')[0]
   .split('\n').filter((l) => l.startsWith('--   ')).map((l) => l.slice(5)).join('\n')
 // Every column of every product, cost columns with their storage type.

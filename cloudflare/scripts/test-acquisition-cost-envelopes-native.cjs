@@ -44,7 +44,7 @@ async function checkEnvelopeRoutes(api) {
   function pure(name) {
     if (modules.has(name)) return modules.get(name).exports
     if (['branchWrites', 'canonicalBranchIdentity', 'branchRoles'].includes(name)) assert.ok(name, 'selected real branch dependency')
-    else assert.ok(['permissions', 'actorSnapshot', 'db', 'pendingActions'].includes(name), name)
+    else assert.ok(['permissions', 'actorSnapshot', 'db', 'pendingActions', 'productStockGuard'].includes(name), name)
     const m = { exports: {} }; modules.set(name, m)
     const code = ts.transpileModule(fs.readFileSync(path.join(root, 'lib', name + '.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
     new Function('require', 'module', 'exports', code)(id => {
@@ -104,6 +104,7 @@ async function checkEnvelopeRoutes(api) {
     const m = { exports: {} }, code = ts.transpileModule(fs.readFileSync(path.join(root, 'routes', file + '.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
     new Function('require', 'module', 'exports', code)(id => {
       if (id === 'hono') return { Hono }
+      if (id === '../lib/productStockGuard') return pure('productStockGuard')
       if (Object.hasOwn(stubs, id)) return stubs[id]
       throw new Error('Unexpected route dependency ' + id)
     }, m, m.exports)

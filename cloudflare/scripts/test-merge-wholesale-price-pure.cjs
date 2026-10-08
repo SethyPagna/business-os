@@ -218,7 +218,7 @@ assert.equal(typeof foldDuplicateProductInto, 'function', 'routes/products.ts mu
 const NAME = 'MAC Matte Lipstick No Box 601'
 
 function seed({ keeperWholesaleUsd, keeperWholesaleKhr, dupWholesaleUsd, dupWholesaleKhr }) {
-  rawDb.exec('DELETE FROM undo_snapshots; DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM inventory_movements; DELETE FROM product_images; DELETE FROM products; DELETE FROM branches;')
+  rawDb.exec('DELETE FROM undo_snapshots; DELETE FROM damaged_stock_lots; DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; UPDATE products SET stock_quantity=0; DELETE FROM inventory_movements; DELETE FROM product_images; DELETE FROM products; DELETE FROM branches;')
   rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run()
   const insert = rawDb.prepare(`INSERT INTO products
       (id, name, barcode, is_active, stock_quantity, selling_price_usd, selling_price_khr,
