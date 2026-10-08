@@ -97,6 +97,7 @@ const sqlBinding = load('lib/sqlBinding.ts')
 const detailRule = load('lib/productDetailRule.ts', { './moneyPrecision': moneyPrecision })
 const productIdentity = load('lib/productIdentity.ts', { './db': {}, './sqlBinding': sqlBinding, './productDetailRule': detailRule })
 const productMerge = load('lib/productMerge.ts', { './moneyPrecision': moneyPrecision })
+const productStockGuard = load('lib/productStockGuard.ts')
 const productMergeSnapshot = load('lib/productMergeSnapshot.ts', { './db': {} })
 const acquisitionCostAccess = load('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const noAudit = { audit: async (_env, _uid, _uname, action, entity, id, detail) => { state.audits.push({ action, entity, id, detail }) } }
@@ -134,6 +135,7 @@ const products = load('routes/products.ts', {
   '../lib/productDetailRule': detailRule,
   '../lib/productIdentity': productIdentity,
   '../lib/productMerge': productMerge,
+  '../lib/productStockGuard': productStockGuard,
   '../lib/productMergeSnapshot': productMergeSnapshot,
   '../lib/productResolveChoices': resolveChoices,
   '../lib/mergeRouteLog': load('lib/mergeRouteLog.ts'),

@@ -181,14 +181,15 @@ async function main() {
     // session that touches either product (audit row + status update).
     // 21 -> 22 (round 2): the discarded-product-unmoved guard joined the write
     // batch, so it is now as long as the 22-statement batch and the set folds them.
-    [3, 8, 22],
+    // The four-ledger conservation assertion adds one atomic statement per fold.
+    [3, 8, 22, 23],
     'the no-stock fold has bounded snapshot/write/fingerprint/finalize statement groups',
   )
   const { batchStatementCounts: _batchStatementCounts, ...reportedCounters } = counters
 
   console.log(JSON.stringify({
     candidates: 1600, chunk: 25, scanMs: Number(scanMs.toFixed(1)), runMs: Number(runMs.toFixed(1)),
-    foldAdapterCalls, foldCallsPerCase: foldAdapterCalls / 25, foldBatchSizes: [22, 8, 3],
+    foldAdapterCalls, foldCallsPerCase: foldAdapterCalls / 25, foldBatchSizes: [23, 22, 8, 3],
     ...reportedCounters,
   }))
   console.log('test-product-merge-bulk-benchmark: all checks passed')

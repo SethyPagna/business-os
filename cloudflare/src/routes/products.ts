@@ -3500,10 +3500,10 @@ const MERGE_BUDGET_ERROR = /merge_case_statement_budget_exceeded|merge_case_fing
 const MERGE_CONFLICT_RETRY_MESSAGE = 'Stock on one of these products changed while the merge was being saved. Nothing was saved. Try again.'
 const MERGE_TOO_LARGE_MESSAGE = 'This product has too many linked stock or history rows for one safe merge and remains unchanged.'
 
-// The two definite answers a fold can give that are neither a stale review nor a
-// fault: stock moved under it (retry), or the case is larger than one atomic
-// batch. Both leave every table untouched, so they are 409s, never 500s.
+// Definite refusals leave the fold untouched and use the existing coded 409s.
 function mergeFoldRefusal(error: unknown): { code: string; error: string; retryable?: true } | null {
+  const stockError = productStockGuardError(error)
+  if (stockError) return { code: stockError.code, error: stockError.message }
   const text = String(error)
   if (text.includes(MERGE_CONFLICT_RETRY)) return { code: MERGE_CONFLICT_RETRY, error: MERGE_CONFLICT_RETRY_MESSAGE, retryable: true }
   if (MERGE_BUDGET_ERROR.test(text)) return { code: 'merge_case_exceeds_safe_limit', error: MERGE_TOO_LARGE_MESSAGE }
@@ -3860,6 +3860,22 @@ export async function foldDuplicateProductInto(
   const statements: Array<{ sql: string; params?: Record<string, unknown> }> = reviewedGuards.length
     ? [productMergeCasAssertion([canonicalBefore, dupPricing]), ...reviewedGuards, sourceUnmovedGuard]
     : [sourceUnmovedGuard, productMergeCasAssertion([canonicalBefore, dupPricing])]
+  // Recomputing caches or combining identities must not hide unexplained
+  // holdings. Lots belong to their product's branch stock; damaged lots are
+  // a separate pool whose rows move unchanged with the product history.
+  statements.push({
+    sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products p WHERE p.id IN (@keeperId,@dupId) AND (
+      COALESCE(p.stock_quantity,0)<0
+      OR (COALESCE(p.stock_quantity,0)<>0 AND p.stock_quantity<>(SELECT COALESCE(SUM(bs.quantity),0) FROM branch_stock bs WHERE bs.product_id=p.id))
+      OR EXISTS(SELECT 1 FROM branch_stock bs WHERE bs.product_id=p.id AND bs.quantity<0)
+      OR EXISTS(SELECT 1 FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id WHERE pb.variant_product_id=p.id AND bbs.quantity<0)
+      OR EXISTS(SELECT 1 FROM damaged_stock_lots dl WHERE dl.product_id=p.id AND dl.quantity_remaining<0)
+      OR EXISTS(SELECT 1 FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
+        WHERE pb.variant_product_id=p.id GROUP BY bbs.branch_id
+        HAVING SUM(bbs.quantity)>COALESCE((SELECT bs.quantity FROM branch_stock bs WHERE bs.product_id=p.id AND bs.branch_id=bbs.branch_id),0))
+    )) THEN json_extract('[]','$[product_has_stock]') ELSE 1 END AS merge_stock_conservation_guard`,
+    params: { keeperId: canonicalId, dupId: dup.id },
+  })
   if (!canChangeProductImages) {
     statements.push(productMergeNoImageEffectAssertion(canonicalId, dup.id))
   }
@@ -4378,6 +4394,8 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
   try {
     batchResults = await db.batch(statements)
   } catch (error) {
+    const stockError = productStockGuardError(error)
+    if (stockError) throw stockError
     if (String(error).includes(MERGE_CONFLICT_RETRY)) throw new Error(MERGE_CONFLICT_RETRY)
     if (/malformed JSON|merge_guard/i.test(String(error))) throw new Error('merge_state_conflict')
     throw error
@@ -5637,6 +5655,7 @@ app.post('/merge-duplicates', async (c) => {
           break mergeGroups
         }
         const conflict = /merge_state_conflict|merge_identity_conflict|merge_cluster_plan_conflict/.test(String(error))
+        const stockError = productStockGuardError(error)
         const exceedsBudget = MERGE_BUDGET_ERROR.test(String(error))
         const retry = String(error).includes(MERGE_CONFLICT_RETRY)
         refusals.push({
@@ -5644,8 +5663,8 @@ app.post('/merge-duplicates', async (c) => {
           keeperId: canonicalId,
           mergedId: dup.id,
           mergedName: dup.name,
-          code: retry ? MERGE_CONFLICT_RETRY : conflict ? 'merge_state_conflict' : exceedsBudget ? 'merge_case_exceeds_safe_limit' : 'merge_failed',
-          error: retry
+          code: stockError ? stockError.code : retry ? MERGE_CONFLICT_RETRY : conflict ? 'merge_state_conflict' : exceedsBudget ? 'merge_case_exceeds_safe_limit' : 'merge_failed',
+          error: stockError ? stockError.message : retry
             ? MERGE_CONFLICT_RETRY_MESSAGE
             : conflict
               ? 'The product changed during this case; refresh and resume.'
@@ -8218,6 +8237,8 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
       })
   } catch (error) {
     const conflict = /merge_state_conflict|merge_identity_conflict|merge_cluster_plan_conflict|merge_conflict_retry/.test(String(error))
+    const stockError = productStockGuardError(error)
+    if (stockError) throw new ProductConflictActionApplyStop(stockError.code, stockError.message, 409)
     const infrastructure = isProductMergeInfrastructureError(error)
     throw new ProductConflictActionApplyStop(conflict ? 'merge_state_conflict' : infrastructure ? 'merge_infrastructure_interrupted' : 'merge_failed',
       conflict ? 'A reviewed product or receipt changed before this fold committed.' : 'The reviewed fold could not be completed.', conflict ? 409 : 500)
@@ -8650,12 +8671,13 @@ app.post('/possible-duplicates/merge-batch', async (c) => {
           break
         }
         const conflict = /merge_state_conflict|merge_identity_conflict|merge_conflict_retry|selected_conflict.*guard|malformed JSON/i.test(String(error))
+        const stockError = productStockGuardError(error)
         const exceeds = MERGE_BUDGET_ERROR.test(String(error))
         await db.prepare(`UPDATE product_conflict_merge_run_cases SET status='refused',refusal_code=@code,error=@error,updated_at=CURRENT_TIMESTAMP
           WHERE run_id=@runId AND ordinal=@ordinal AND status='planned'`)
           .run({
-            code: conflict ? 'merge_state_conflict' : exceeds ? 'merge_case_exceeds_safe_limit' : 'merge_failed',
-            error: conflict ? 'This pair changed during execution and remains unchanged.' : exceeds ? 'This pair exceeds the safe atomic limit and remains unchanged.' : String(error),
+            code: stockError ? stockError.code : conflict ? 'merge_state_conflict' : exceeds ? 'merge_case_exceeds_safe_limit' : 'merge_failed',
+            error: stockError ? stockError.message : conflict ? 'This pair changed during execution and remains unchanged.' : exceeds ? 'This pair exceeds the safe atomic limit and remains unchanged.' : String(error),
             runId: run.id, ordinal: item.ordinal,
           })
         interruptionCode = conflict ? 'merge_state_conflict' : null

@@ -123,6 +123,7 @@ function loadProductsRoute(d1) {
     './db': {}, './sqlBinding': realSqlBinding, './productDetailRule': realDetailRule,
   })
   const realProductMerge = loadTs(path.join('lib', 'productMerge.ts'), {})
+  const realStockGuard = loadTs(path.join('lib', 'productStockGuard.ts'), {})
   const realProductMergeSnapshot = loadTs(path.join('lib', 'productMergeSnapshot.ts'), { './db': {} })
   // U-cost: merge folds and their undo re-derive the keeper's catalog cost.
   const realCatalogCost = loadTs(path.join('lib', 'catalogCostRecompute.ts'), { './db': {} })
@@ -136,6 +137,7 @@ function loadProductsRoute(d1) {
   })
   const auditCalls = []
   const mod = loadTs(path.join('routes', 'products.ts'), {
+    '../lib/productStockGuard': realStockGuard,
     '../lib/actorSnapshot': realActorSnapshot,
     hono: { Hono: FakeHono },
     '../lib/db': { getDb: () => adapter },
@@ -465,6 +467,16 @@ async function main() {
     const { mod, adapter } = loadProductsRoute(d1)
     d1.db.prepare(`DELETE FROM branch_stock WHERE product_id = ${DUP}`).run()
     d1.db.prepare(`DELETE FROM branch_batch_stock WHERE batch_id IN (901, 902)`).run()
+    await check('cache-only stock refuses the fold with the existing product_has_stock409', async () => {
+      const before = JSON.stringify(d1.db.prepare('SELECT * FROM products ORDER BY id').all())
+      await assert.rejects(mod.foldDuplicateProductInto(
+        {}, adapter, { id: 42, username: 'reviewer', name: 'Reviewer' },
+        { id: KEEPER, name: 'Twin' }, { id: DUP, name: 'Twin', image_path: null },
+        branchNames, 'cache-only refusal control',
+      ), error => error.code === 'product_has_stock' && error.status === 409)
+      assert.equal(JSON.stringify(d1.db.prepare('SELECT * FROM products ORDER BY id').all()), before)
+    })
+    d1.db.prepare(`UPDATE products SET stock_quantity=0 WHERE id=${DUP}`).run()
 
     await check('an unstocked row needs no answer', async () => {
       const impact = await mod.readMergeStockImpact(adapter, DUP, branchNames)
