@@ -112,6 +112,7 @@ function foldAdapter(rawDb) {
         run: (p) => { const r = st.run(p == null ? {} : p); return { changes: Number(r.meta?.changes ?? 0), lastInsertRowid: Number(r.meta?.last_row_id ?? 0) } },
       }
     },
+    batchOnce(stmts) { return this.batch(stmts) },
     batch: (stmts) => {
       if (!stmts.every(({ sql }) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(sql))) return rawDb.batch(stmts)
       return Promise.resolve(stmts.map(({ sql, params }) => ({ success: true, results: rawDb.prepare(sql).all(params == null ? {} : params) })))
@@ -137,6 +138,7 @@ function loadFold(rawDb) {
   })
   const products = loadWithStubs(path.join('routes', 'products.ts'), {
     '../lib/actorSnapshot': actorSnapshot, hono: { Hono: FakeHono },
+    '../lib/stockTransaction': lib('stockTransaction'),
     '../lib/db': { getDb: () => adapter }, '../lib/audit': { audit: async () => {} },
     '../lib/undoAppliers': undoAppliers, '../lib/productDetailRule': detailRule, '../lib/productIdentity': productIdentity,
     '../lib/productMerge': productMerge, '../lib/productMergeSnapshot': productMergeSnapshot,
@@ -150,26 +152,39 @@ function loadFold(rawDb) {
 }
 
 function freshDb() {
-  const rawDb = openDb(loadAll())
+  const rawDb = openDb(loadAll({ through: 242 }))
+  rawDb.db.exec(fs.readFileSync(path.join(__dirname, '../migrations/0244_dated_count_decision_receipts.sql'), 'utf8'))
+  let epochInstalled = false
+  const installEpoch = () => {
+    if (!epochInstalled) {
+      rawDb.db.exec(fs.readFileSync(path.join(__dirname, '../migrations/0243_stock_schema_epoch.sql'), 'utf8'))
+      epochInstalled = true
+    }
+  }
   const db = {
     prepare(sql) {
       const stmt = rawDb.prepare(sql)
       return {
         get: (params) => stmt.get(params),
+        getOnce: (params) => stmt.get(params),
         all: (params) => stmt.all(params) ?? [],
+        allOnce: (params) => stmt.all(params) ?? [],
         run: (params) => { const r = stmt.run(params); return { changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) } },
       }
     },
-    async batch(items) { return rawDb.batch(items) },
-    async batchOnce(items) { return rawDb.batch(items) },
+    async batch(items) { installEpoch(); return rawDb.batch(items) },
+    async batchOnce(items) { installEpoch(); return rawDb.batch(items) },
     async transaction(fn) { return fn(this) },
   }
   rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run()
   rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (2, 'Warehouse', 1, 0)").run()
+  rawDb.compat = db
+  rawDb.hasEpoch = () => epochInstalled
   return { rawDb, db }
 }
 
-function addProduct(rawDb, productId) {
+async function addProduct(rawDb, productId) {
+  if (rawDb.hasEpoch()) return lib('stockTransaction').executeStockTransaction(rawDb.compat,[{sql:"INSERT INTO products(id,name,is_active,stock_quantity) VALUES(@id,'Gel ' || @id,1,0)",params:{id:productId}}],'once')
   rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (@id, 'Gel ' || @id, 1, 0)").run({ id: productId })
 }
 
@@ -206,7 +221,7 @@ async function sell(db, rawDb, productId, quantity) {
       { sql: 'UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @p) WHERE id = @p', params: { p: productId } },
     )
   }
-  await db.batch(statements)
+  await lib('stockTransaction').executeStockTransaction(db, statements, 'once')
   return { ok: true, available, lotTotal }
 }
 
@@ -217,7 +232,12 @@ function entriesFor(productId, pairs) {
 async function applyCount(db, productId, pairs) {
   const built = await buildDatedStockCountPlan(db, entriesFor(productId, pairs))
   if ('error' in built) throw new Error(built.error)
-  return applyDatedStockCountPlan(db, built.plan)
+  const originals = await db.prepare('SELECT * FROM inventory_movements ORDER BY id').all()
+  const actions = await db.prepare('SELECT * FROM dated_stock_count_batch_actions ORDER BY id').all()
+  const result = await applyDatedStockCountPlan(db, built.plan)
+  for (const row of originals) assert.deepStrictEqual(await db.prepare('SELECT * FROM inventory_movements WHERE id=@id').get({id:row.id}),row,'original movement bytes remain unchanged through count apply')
+  for (const row of actions) assert.deepStrictEqual(await db.prepare('SELECT * FROM dated_stock_count_batch_actions WHERE id=@id').get({id:row.id}),row,'original provenance bytes remain unchanged through count apply')
+  return result
 }
 
 function latestCount(pairs) {
@@ -277,7 +297,7 @@ async function main() {
   await test('a FIFO sale drains the lot the count created, then the same file is re-applied: branch 10, lots 10 (39146f46: lots 11)', async () => {
     const { rawDb, db } = freshDb()
     const P = 1
-    addProduct(rawDb, P)
+    await addProduct(rawDb, P)
     const COUNT = [['2026-08-16', 10]]
     await runSteps(rawDb, P, [
       ['receipt 7 @08-01', () => receive(db, P, 7, '2026-08-01'), { branch: 7, lots: '2026-08-01=7' }],
@@ -293,7 +313,7 @@ async function main() {
   await test('refuter scenario D: count dated before its lot, the sale drains the count lot first, re-applied twice (D03 was branch 8 / lots 11)', async () => {
     const { rawDb, db } = freshDb()
     const P = 105
-    addProduct(rawDb, P)
+    await addProduct(rawDb, P)
     const COUNT = [['2026-08-25', 8]]
     await runSteps(rawDb, P, [
       ['receipt 5 @09-01', () => receive(db, P, 5, '2026-09-01', 1), { branch: 5 }],
@@ -307,7 +327,7 @@ async function main() {
   await test('refuter scenario H: H04 re-apply 8/8 (was 8/9), H05 corrected 7/7 (was 7/8), H06 sell out 0/0, H07 refused with no phantom lot unit', async () => {
     const { rawDb, db } = freshDb()
     const P = 107
-    addProduct(rawDb, P)
+    await addProduct(rawDb, P)
     await runSteps(rawDb, P, [
       ['H01 receipt 5 @09-01', () => receive(db, P, 5, '2026-09-01', 1), { branch: 5 }],
       ['H02 count 09-26 = 8', () => applyCount(db, P, [['2026-09-26', 8]]), { branch: 8, lots: '2026-09-01=5 2026-09-26=3' }],
@@ -322,7 +342,7 @@ async function main() {
   await test('a later receipt, then a corrected count equal to the baseline (no new movement): the sold-from-count units come off another lot, 3/3', async () => {
     const { rawDb, db } = freshDb()
     const P = 2
-    addProduct(rawDb, P)
+    await addProduct(rawDb, P)
     await runSteps(rawDb, P, [
       ['receipt 7 @08-01', () => receive(db, P, 7, '2026-08-01'), { branch: 7 }],
       ['count 08-16 = 10', () => applyCount(db, P, [['2026-08-16', 10]]), { branch: 10 }],
@@ -337,7 +357,7 @@ async function main() {
   await test('a later receipt, then a corrected count below the baseline (a drain): 2/2, stable on re-apply', async () => {
     const { rawDb, db } = freshDb()
     const P = 3
-    addProduct(rawDb, P)
+    await addProduct(rawDb, P)
     await runSteps(rawDb, P, [
       ['receipt 7 @08-01', () => receive(db, P, 7, '2026-08-01'), { branch: 7 }],
       ['count 08-16 = 10', () => applyCount(db, P, [['2026-08-16', 10]]), { branch: 10 }],
@@ -351,11 +371,11 @@ async function main() {
   await test('a lot the prior count drained was soft-deleted when empty: the re-apply puts its units back on it, 2/2 (39146f46: lots 5)', async () => {
     const { rawDb, db } = freshDb()
     const P = 4
-    addProduct(rawDb, P)
+    await addProduct(rawDb, P)
     await runSteps(rawDb, P, [
       ['receipt 5 @09-01', () => receive(db, P, 5, '2026-09-01'), { branch: 5 }],
       ['count 09-05 = 0 (drains it)', () => applyCount(db, P, [['2026-09-05', 0]]), { branch: 0, lots: '2026-09-01=0' }],
-      ['empty lot soft-deleted', () => rawDb.prepare('UPDATE product_batches SET is_active = 0 WHERE variant_product_id = @p').run({ p: P }), { lots: '2026-09-01=0(inactive)' }],
+      ['empty lot soft-deleted', () => lib('stockTransaction').executeStockTransaction(db, [{sql:'UPDATE product_batches SET is_active=0 WHERE variant_product_id=@p',params:{p:P}}], 'once'), { lots: '2026-09-01=0(inactive)' }],
       ['corrected count 09-05 = 2', () => applyCount(db, P, [['2026-09-05', 2]]), { branch: 2, lotSum: 2 }],
       ['re-applied', () => applyCount(db, P, [['2026-09-05', 2]]), { branch: 2, lotSum: 2 }],
     ])
@@ -364,7 +384,7 @@ async function main() {
   await test('a two-date series (receipt then drain) sold across both lots, re-applied, then corrected: parity at every step', async () => {
     const { rawDb, db } = freshDb()
     const P = 5
-    addProduct(rawDb, P)
+    await addProduct(rawDb, P)
     const SERIES = [['2026-08-16', 10], ['2026-08-20', 6]]
     await runSteps(rawDb, P, [
       ['receipt 7 @08-01', () => receive(db, P, 7, '2026-08-01'), { branch: 7 }],
@@ -379,7 +399,7 @@ async function main() {
   await test('reversal: a ledger revert of the count, then the re-apply lands once; a second revert is refused', async () => {
     const { rawDb, db } = freshDb()
     const P = 6
-    addProduct(rawDb, P)
+    await addProduct(rawDb, P)
     const COUNT = [['2026-08-16', 10]]
     let movement = null
     await runSteps(rawDb, P, [
@@ -405,7 +425,7 @@ async function main() {
   await test('double apply of one plan after a count-lot sale: the second is refused (409), nothing moves, parity holds', async () => {
     const { rawDb, db } = freshDb()
     const P = 7
-    addProduct(rawDb, P)
+    await addProduct(rawDb, P)
     const COUNT = [['2026-08-16', 10]]
     await receive(db, P, 7, '2026-08-01')
     await applyCount(db, P, COUNT)
@@ -421,7 +441,7 @@ async function main() {
   await test('a sale lands between plan and apply and the plan no longer fits the lots: refused (409), nothing written; a fresh plan lands 4/4', async () => {
     const { rawDb, db } = freshDb()
     const P = 8
-    addProduct(rawDb, P)
+    await addProduct(rawDb, P)
     await receive(db, P, 7, '2026-08-01')
     await applyCount(db, P, [['2026-08-16', 10]])
     const stale = await buildDatedStockCountPlan(db, entriesFor(P, [['2026-08-16', 4]]))
@@ -437,7 +457,7 @@ async function main() {
   await test('two branches in one file: an inactive lot loaded for its Shop provenance does not join the Warehouse count (its received units stay 5)', async () => {
     const { rawDb, db } = freshDb()
     const P = 9
-    addProduct(rawDb, P)
+    await addProduct(rawDb, P)
     const WAREHOUSE = 2
     const warehouse = () => ({
       branch: Number(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = @p AND branch_id = 2').get({ p: P })?.quantity ?? 0),
@@ -448,9 +468,9 @@ async function main() {
     await receive(db, P, 5, '2026-09-01', 1)
     const lotId = supplierLot().id
     // The supplier lot once held stock at the Warehouse too: a zero row there.
-    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@id, 2, 0)').run({ id: lotId })
+    await lib('stockTransaction').executeStockTransaction(db,[{sql:'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(@id,2,0)',params:{id:lotId}}],'once')
     await applyCount(db, P, [['2026-09-05', 0]])
-    rawDb.prepare('UPDATE product_batches SET is_active = 0 WHERE id = @id').run({ id: lotId })
+    await lib('stockTransaction').executeStockTransaction(db,[{sql:'UPDATE product_batches SET is_active=0 WHERE id=@id',params:{id:lotId}}],'once')
     const file = [
       { date: '2026-09-05', productId: P, branchId: SHOP, count: 2 },
       { date: '2026-09-01', productId: P, branchId: WAREHOUSE, count: 3 },
@@ -470,7 +490,7 @@ async function main() {
   await test('legacy untracked stock (branch_stock with no lots): the settlement cannot be covered, every lot lands on 0 and lots never exceed branch_stock', async () => {
     const { rawDb, db } = freshDb()
     const P = 10
-    addProduct(rawDb, P)
+    await addProduct(rawDb, P)
     rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@p, 1, 5)').run({ p: P })
     rawDb.prepare('UPDATE products SET stock_quantity = 5 WHERE id = @p').run({ p: P })
     const check = (label, expected) => {
@@ -509,16 +529,15 @@ async function main() {
     await test(`a re-apply drains FIFO by the real date of a superseded lot that is ${variant}: 09-01 first, 09-10 keeps 2`, async () => {
       const { rawDb, db } = freshDb()
       const P = variant.endsWith('kept') ? 11 : 12
-      addProduct(rawDb, P)
+      await addProduct(rawDb, P)
       const lotOn = (date) => rawDb.prepare('SELECT id FROM product_batches WHERE variant_product_id = @p AND received_at LIKE @d').get({ p: P, d: `${date}%` }).id
       await runSteps(rawDb, P, [
         ['receipt 2 @09-01', () => receive(db, P, 2, '2026-09-01'), { branch: 2 }],
         ['receipt 3 @09-10', () => receive(db, P, 3, '2026-09-10'), { branch: 5 }],
         ['count 09-12 = 0 drains both', () => applyCount(db, P, [['2026-09-12', 0]]), { branch: 0, lots: '2026-09-01=0 2026-09-10=0' }],
-        [`09-10 lot ${variant}`, () => {
+        [`09-10 lot ${variant}`, async () => {
           const id = lotOn('2026-09-10')
-          rawDb.prepare('UPDATE product_batches SET is_active = 0 WHERE id = @id').run({ id })
-          if (variant.endsWith('gone')) rawDb.prepare('DELETE FROM branch_batch_stock WHERE batch_id = @id').run({ id })
+          await lib('stockTransaction').executeStockTransaction(db,[{sql:'UPDATE product_batches SET is_active=0 WHERE id=@id',params:{id}},...(variant.endsWith('gone')?[{sql:'DELETE FROM branch_batch_stock WHERE batch_id=@id',params:{id}}]:[])],'once')
         }, { branch: 0 }],
         ['receipt 4 @09-15', () => receive(db, P, 4, '2026-09-15'), { branch: 4 }],
         // Reversal: 09-01 +2, 09-10 +3, baseline 9; the count's -3 drains
@@ -532,7 +551,7 @@ async function main() {
   await test('no lots at all: a sale between plan and apply leaves too little for the plan\'s removal: refused (409), nothing written; a fresh plan lands 4', async () => {
     const { rawDb, db } = freshDb()
     const P = 13
-    addProduct(rawDb, P)
+    await addProduct(rawDb, P)
     rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@p, 1, 10)').run({ p: P })
     rawDb.prepare('UPDATE products SET stock_quantity = 10 WHERE id = @p').run({ p: P })
     const stale = await buildDatedStockCountPlan(db, entriesFor(P, [['2026-08-16', 4]]))
@@ -698,7 +717,7 @@ async function main() {
   await test('N1: receive 4 and 8, count to 0 (one movement over two lots, no batch_id), revert: branch 12, lots 4 / 8 (production: lots 0); reverted again: refused, nothing moves; the revert reverted: 0 / 0', async () => {
     const { rawDb, db } = freshDb()
     const P = 120
-    addProduct(rawDb, P)
+    await addProduct(rawDb, P)
     let count = null
     await runSteps(rawDb, P, [
       ['receive 4 @09-01', () => receive(db, P, 4, '2026-09-01'), { branch: 4 }],
@@ -715,7 +734,7 @@ async function main() {
   await test('N1: the count reverted, then re-applied, re-applied again, corrected, sold out: parity every step', async () => {
     const { rawDb, db } = freshDb()
     const P = 121
-    addProduct(rawDb, P)
+    await addProduct(rawDb, P)
     await runSteps(rawDb, P, [
       ['receive 4 @09-01', () => receive(db, P, 4, '2026-09-01'), { branch: 4 }],
       ['receive 8 @09-05', () => receive(db, P, 8, '2026-09-05'), { branch: 12 }],
@@ -732,7 +751,7 @@ async function main() {
   await test('N1: the count left 2 behind and a sale took them before the revert: each lot gets back exactly what the count took (4 and 6), not what it holds now', async () => {
     const { rawDb, db } = freshDb()
     const P = 122
-    addProduct(rawDb, P)
+    await addProduct(rawDb, P)
     await runSteps(rawDb, P, [
       ['receive 4 @09-01', () => receive(db, P, 4, '2026-09-01'), { branch: 4 }],
       ['receive 8 @09-05', () => receive(db, P, 8, '2026-09-05'), { branch: 12 }],
@@ -746,7 +765,7 @@ async function main() {
   await test('N1: the count also took untracked stock (more than its one lot held, so still no batch_id): the lot gets its 4 back, the untracked 3 stay branch-only, lots never above branch; reverted back: 0 / 0', async () => {
     const { rawDb, db } = freshDb()
     const P = 123
-    addProduct(rawDb, P)
+    await addProduct(rawDb, P)
     rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@p, 1, 3)').run({ p: P })
     rawDb.prepare('UPDATE products SET stock_quantity = 3 WHERE id = @p').run({ p: P })
     await receive(db, P, 4, '2026-09-01')
@@ -817,7 +836,7 @@ async function main() {
   await test('X1: a corrected count drains the oldest lot first: receive 5 @08-01 and 5 @09-01, count 09-10 = 7, corrected to 4: lots 0 / 4 (newest-first: 4 / 0)', async () => {
     const { rawDb, db } = freshDb()
     const P = 130
-    addProduct(rawDb, P)
+    await addProduct(rawDb, P)
     await runSteps(rawDb, P, [
       ['receive 5 @08-01', () => receive(db, P, 5, '2026-08-01'), { branch: 5 }],
       ['receive 5 @09-01', () => receive(db, P, 5, '2026-09-01'), { branch: 10 }],
@@ -831,7 +850,7 @@ async function main() {
   await test('X1: a corrected count settles an overdrawn lot from the oldest lot first: receipt 7 @08-01, count 08-16 = 10, sale 9, receipts 4 @08-10 and 4 @09-01, corrected 08-16 = 3: lots 0 / 0 / 0 / 3 (newest-first: 0 / 1 / 0 / 2)', async () => {
     const { rawDb, db } = freshDb()
     const P = 131
-    addProduct(rawDb, P)
+    await addProduct(rawDb, P)
     await runSteps(rawDb, P, [
       ['receipt 7 @08-01', () => receive(db, P, 7, '2026-08-01'), { branch: 7 }],
       ['count 08-16 = 10 (+3 on its own lot)', () => applyCount(db, P, [['2026-08-16', 10]]), { branch: 10, lots: '2026-08-01=7 2026-08-16=3' }],
@@ -865,7 +884,7 @@ async function main() {
       }
       const int = (lo, hi) => lo + Math.floor(rnd() * (hi - lo + 1))
       const P = 1000 + seq
-      addProduct(rawDb, P)
+      await addProduct(rawDb, P)
       let lastFile = null
       const trace = []
       for (let op = 0; op < OPS; op += 1) {
@@ -904,7 +923,7 @@ async function main() {
           const empty = rawDb.prepare(`SELECT pb.id FROM product_batches pb WHERE pb.variant_product_id = @p AND pb.is_active = 1
             AND NOT EXISTS (SELECT 1 FROM branch_batch_stock b WHERE b.batch_id = pb.id AND b.quantity > 0) ORDER BY pb.id LIMIT 1`).get({ p: P })
           if (empty) {
-            rawDb.prepare('UPDATE product_batches SET is_active = 0 WHERE id = @id').run({ id: empty.id })
+            await lib('stockTransaction').executeStockTransaction(db,[{sql:'UPDATE product_batches SET is_active=0 WHERE id=@id',params:{id:empty.id}}],'once')
             trace.push(`soft-delete empty lot ${empty.id}`)
           }
         } else {
@@ -944,3 +963,4 @@ async function main() {
 }
 
 main()
+

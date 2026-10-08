@@ -47,18 +47,28 @@ const { applyDatedStockCountPlan, DatedStockCountConflictError } = lib('datedSto
 const { applyMovementRevert } = lib('stockRevert')
 
 function freshDb() {
-  const rawDb = openDb(loadAll())
+  const rawDb = openDb(loadAll({ through: 242 }))
+  rawDb.db.exec(fs.readFileSync(path.join(__dirname, '../migrations/0244_dated_count_decision_receipts.sql'), 'utf8'))
+  let epochInstalled = false
+  const installEpoch = () => {
+    if (!epochInstalled) {
+      rawDb.db.exec(fs.readFileSync(path.join(__dirname, '../migrations/0243_stock_schema_epoch.sql'), 'utf8'))
+      epochInstalled = true
+    }
+  }
   const db = {
     prepare(sql) {
       const stmt = rawDb.prepare(sql)
       return {
         get: (params) => stmt.get(params),
+        getOnce: (params) => stmt.get(params),
         all: (params) => stmt.all(params) ?? [],
+        allOnce: (params) => stmt.all(params) ?? [],
         run: (params) => { const r = stmt.run(params); return { changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) } },
       }
     },
-    async batch(items) { return rawDb.batch(items) },
-    async batchOnce(items) { return rawDb.batch(items) },
+    async batch(items) { installEpoch(); return rawDb.batch(items) },
+    async batchOnce(items) { installEpoch(); return rawDb.batch(items) },
     async transaction(fn) { return fn(this) },
   }
   rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run()
@@ -82,8 +92,8 @@ function snapshot(rawDb) {
     product: rawDb.prepare('SELECT stock_quantity FROM products WHERE id = 1').get().stock_quantity,
     lots: rawDb.prepare('SELECT COALESCE(SUM(quantity), 0) AS q FROM branch_batch_stock').get().q,
     received: rawDb.prepare('SELECT COALESCE(SUM(received_quantity), 0) AS q FROM product_batches').get().q,
-    movements: rawDb.prepare("SELECT COUNT(*) AS n FROM inventory_movements WHERE reason = 'Dated stock count import'").get().n,
-    actions: rawDb.prepare('SELECT COUNT(*) AS n FROM dated_stock_count_batch_actions').get().n,
+    movements: rawDb.prepare("SELECT COUNT(*) AS n FROM inventory_movements WHERE reason = 'Dated stock count import' AND NOT EXISTS(SELECT 1 FROM inventory_movements r WHERE r.reference_id='revert:' || inventory_movements.id)").get().n,
+    actions: rawDb.prepare(`SELECT COUNT(*) AS n FROM dated_stock_count_batch_actions a WHERE NOT EXISTS(SELECT 1 FROM inventory_movements r WHERE r.reference_id='revert:' || a.movement_id)`).get().n,
   }
 }
 
@@ -113,11 +123,11 @@ async function main() {
       await applyEntries(db, COUNT_10)
       const second = snapshot(rawDb)
       assert.deepStrictEqual({ branch: second.branch, product: second.product }, { branch: 10, product: 10 })
-      assert.strictEqual(second.movements, 1, 'the superseded movement is replaced, not duplicated')
+      assert.strictEqual(second.movements, 1, 'only the current un-compensated count affects baseline')
       if (lot) {
         assert.strictEqual(second.lots, 10, 'lots equal the branch total')
         assert.strictEqual(second.received, first.received, 'the lot received figure is not inflated by a re-apply')
-        assert.strictEqual(second.actions, first.actions, 'provenance replaced, not duplicated')
+        assert.strictEqual(second.actions, first.actions, 'only current count provenance is counted; originals retained')
       }
       // Third time for good measure: idempotent, not merely two-step lucky.
       await applyEntries(db, COUNT_10)
@@ -148,9 +158,7 @@ async function main() {
       seed(rawDb, { stock: 7, lot })
       await applyEntries(db, COUNT_10)
       // A sale of 2 after the count (direct write, same shape as a till deduction).
-      rawDb.prepare('UPDATE branch_stock SET quantity = quantity - 2 WHERE product_id = 1 AND branch_id = 1').run()
-      rawDb.prepare('UPDATE products SET stock_quantity = stock_quantity - 2 WHERE id = 1').run()
-      if (lot) rawDb.prepare('UPDATE branch_batch_stock SET quantity = quantity - 2 WHERE batch_id = 1').run()
+      await lib('stockTransaction').executeStockTransaction(db, [{ sql: 'UPDATE branch_stock SET quantity=quantity-2 WHERE product_id=1 AND branch_id=1' }, { sql: 'UPDATE products SET stock_quantity=stock_quantity-2 WHERE id=1' }, ...(lot ? [{ sql: 'UPDATE branch_batch_stock SET quantity=quantity-2 WHERE batch_id=1' }] : [])], 'once')
       await applyEntries(db, COUNT_10)
       const s = snapshot(rawDb)
       // Pre-fix: 8 + 5 without reversing the prior +3 = 13.

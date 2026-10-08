@@ -31,8 +31,12 @@ async function main(){
  await seed(2005,7,[[4001,7,'2026-09-01']]);await apply(2005,10);const prior=roots(2005)[0],bytes=originalBytes(prior.id);const batches=f.load('lib/productBatches.ts');await batches.removeStockFromBatch(f.db,{productId:2005,branchId:1,batchId:4001,quantity:2});await apply(2005,10);assert.equal(stock(2005),10);assert.equal(originalBytes(prior.id),bytes);console.log('PASS intervening sale/removal keeps lot and aggregate count arithmetic, provenance unchanged')
  const stale=await plan(2005,12);await apply(2005,11);const before=state();await assert.rejects(current.applyDatedStockCountPlan(f.db,stale),e=>e instanceof current.DatedStockCountConflictError);assert.equal(state(),before)
  const late=await plan(2005,12);f.failSql(/INSERT INTO dated_stock_count_batch_actions/);await assert.rejects(current.applyDatedStockCountPlan(f.db,late),/fixture transaction failure/);assert.equal(state(),before);console.log('PASS concurrent rerun and late rollback retain all physical history/provenance')
+ assert.equal(f.sql.prepare(`SELECT COUNT(*) n FROM inventory_movements m WHERE m.product_id BETWEEN 2001 AND 2005 AND ${removalLossMovementWhere('m')}`).get().n,0);console.log('PASS dated original and numeric counters do not double-count removal losses')
+ await seed(2006,7);await apply(2006,10);const pending=await plan(2006,12);const original=roots(2006)[0];const reverted=await applyMovementRevert(f.db,original,{userId:7,userName:'admin'});assert.equal(reverted.ok,true);const afterRevert=state();await assert.rejects(current.applyDatedStockCountPlan(f.db,pending),e=>e instanceof current.DatedStockCountConflictError);assert.equal(state(),afterRevert);console.log('PASS ledger revert after preview refuses stale recount without duplicate compensation')
+ f.sql.exec("UPDATE branches SET is_active=0 WHERE id=1");const inactive=await buildDatedStockCountPlan(f.db,entry(2006,10));assert.equal(inactive.code,'branch_retired_no_successor');assert.equal(state(),afterRevert);f.sql.exec("UPDATE branches SET is_active=1 WHERE id=1");console.log('PASS inactive branch requires explicit redirect without stock/history changes')
  console.log('PASS actual0243/0244 append-only native compensation controls')
 }
 main().catch(e=>{console.error(e);process.exitCode=1}).finally(()=>f.sql.close())
+
 
 
