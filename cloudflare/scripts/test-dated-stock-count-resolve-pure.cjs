@@ -97,6 +97,7 @@ Module.prototype._compile = function (content, filename) {
 }
 
 const { resolveDatedStockCountRows, parseRawDatedCountRows, MAX_RAW_DATED_COUNT_ROWS } = loadReal('lib/datedStockCountResolve.ts')
+const { STOCK_SCHEMA_EPOCH } = loadReal('lib/stockTransaction.ts')
 
 let passed = 0
 let failed = 0
@@ -126,14 +127,33 @@ async function testAsync(name, fn) {
 function seedBranch(rawDb, id, name, isDefault = 0, isActive = 1) {
   rawDb.prepare('INSERT INTO branches (id, name, is_default, is_active) VALUES (@id, @name, @isDefault, @isActive)').run({ id, name, isDefault, isActive })
 }
-function seedProduct(rawDb, { id, name, sku = null, barcode = null }) {
-  rawDb.prepare('INSERT INTO products (id, name, sku, barcode, is_active) VALUES (@id, @name, @sku, @barcode, 1)').run({ id, name, sku, barcode })
+function seedProduct(rawDb, { id, name, sku = null, barcode = null }, omitPermit = false) {
+  const sql = rawDb.db
+  assert.strictEqual(sql.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get().value, STOCK_SCHEMA_EPOCH)
+  sql.exec('BEGIN IMMEDIATE')
+  try {
+    if (!omitPermit) sql.prepare("INSERT INTO system_flags(key,value) VALUES('stock_transaction_permit',?)").run(STOCK_SCHEMA_EPOCH)
+    rawDb.prepare('INSERT INTO products (id, name, sku, barcode, is_active) VALUES (@id, @name, @sku, @barcode, 1)').run({ id, name, sku, barcode })
+    sql.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'; COMMIT")
+  } catch (error) { sql.exec('ROLLBACK'); throw error }
+  assert.strictEqual(sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
 }
 function row(overrides = {}) {
   return { rowNumber: 1, date: '2026-08-10', branchName: 'Shop', productName: 'Widget', count: 5, ...overrides }
 }
 
 async function main() {
+  test('fixture product seeds own a transaction-local permit; unowned writes remain refused', () => {
+    const { rawDb } = freshDb()
+    const input = { id: 9991, name: 'Seed control' }
+    assert.throws(() => seedProduct(rawDb, input, true), /stock_transaction_required/)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM products WHERE id=9991').get().n, 0)
+    seedProduct(rawDb, input)
+    assert.throws(() => rawDb.prepare('UPDATE products SET stock_quantity=1 WHERE id=9991').run(), /stock_transaction_required/)
+    assert.throws(() => seedProduct(rawDb, input), /UNIQUE/)
+    assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT stock_quantity FROM products WHERE id=9991').get().stock_quantity, 0)
+  })
   test('parseRawDatedCountRows rejects a missing rows array', () => {
     const result = parseRawDatedCountRows({})
     assert.ok('error' in result)
