@@ -82,7 +82,7 @@ export function buildCoreDeleteStatements(config: EntityConfig, chunk: number[])
       const profileOnly = config.table === 'customers' ? ` AND NOT (${customerIsAnonymousSql()})` : ''
       return { sql: `DELETE FROM ${config.table} WHERE ${config.idColumn} IN (${placeholders})${profileOnly}`, params: slice as unknown as Record<string, unknown> }
     }
-    return { sql: `UPDATE ${config.table} SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE ${config.idColumn} IN (${placeholders})`, params: slice as unknown as Record<string, unknown> }
+    return { sql: `UPDATE ${config.table} SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE ${config.idColumn} IN (${placeholders})${config.table === 'products' ? ' AND is_active=1' : ''}`, params: slice as unknown as Record<string, unknown> }
   })
 }
 
@@ -267,11 +267,12 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
             if (!pending.length) break
             const audits = pending.map(id => ({
               sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
-                VALUES(@userId,@userName,'delete','product',@id,@details,'product',@id,NULL)`,
-              params: { userId: user.id, userName: actorSnapshot(user), id, details: JSON.stringify({ reason: job.reason, bulkJobId: jobId }) },
+                SELECT @userId,@userName,'delete','product',p.id,json_set(@details,'$.productName',p.name),'product',p.id,NULL
+                FROM products p WHERE p.id=@id AND p.is_active=1`,
+              params: { userId: user.id, userName: actorSnapshot(user), id, details: JSON.stringify({ reason: job.reason, bulkJobId: jobId, source: 'bulk_delete', membership: 'removed', priorMembership: 'present' }) },
             }))
             try {
-              await db.batch([productStockGuardStatement(pending), ...buildCoreDeleteStatements(config, pending), ...audits])
+              await db.batch([productStockGuardStatement(pending), ...audits, ...buildCoreDeleteStatements(config, pending)])
               break
             } catch (error) {
               if (!productStockGuardError(error)) throw error

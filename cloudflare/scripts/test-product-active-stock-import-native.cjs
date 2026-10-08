@@ -54,6 +54,79 @@ function materializedJob(raw, id, row, policy = {}) {
     .run({ id, row: JSON.stringify({ _rowNumber: 2, ...row }) })
 }
 async function main() {
+  for (const mode of ['merge','replace_all','replace_columns','fill_blank']) {
+    const {raw,db}=fixture(); product(raw,81)
+    raw.prepare('UPDATE products SET is_active=0 WHERE id=81').run()
+    materializedJob(raw,`removed-${mode}`,{name:'Probe 81',is_active:'1',description:'must not write',_action:'override_replace'},
+      {import_mode:mode,replace_columns:['description','is_active']})
+    const run=()=>engine.runImportApply({DB:db,ASSETS:{list:async()=>({objects:[]})}},`removed-${mode}`)
+    if(mode==='replace_all') await assert.rejects(run,e=>e.code==='product_replacement_incomplete')
+    else await run()
+    const result=JSON.parse(raw.prepare("SELECT result_json FROM import_job_rows WHERE phase='apply'").get().result_json)
+    assert.equal(result.action,'error',mode)
+    assert.equal(result.code,'product_has_stock',mode)
+    assert.equal(raw.prepare('SELECT is_active FROM products WHERE id=81').get().is_active,0)
+    assert.equal(raw.prepare('SELECT description FROM products WHERE id=81').get().description,null)
+    assert.equal(raw.prepare('SELECT COUNT(*) n FROM product_cost_entries').get().n,0)
+  }
+  console.log('PASS every ordinary import mode refuses removed identity without revival or metadata edits')
+  for (const status of [0,false,'false']) {
+    const {raw,db}=fixture()
+    materializedJob(raw,`unsupported-${String(status)}`,{name:'New product',is_active:status})
+    await engine.runImportApply({DB:db,ASSETS:{list:async()=>({objects:[]})}},`unsupported-${String(status)}`)
+    const result=JSON.parse(raw.prepare("SELECT result_json FROM import_job_rows WHERE phase='apply'").get().result_json)
+    assert.equal(result.code,'product_status_unsupported')
+    assert.equal(raw.prepare('SELECT COUNT(*) n FROM products').get().n,0)
+  }
+  for (const status of [undefined,null,1,'1']) {
+    const {raw,db}=fixture()
+    materializedJob(raw,`present-${String(status)}`,{name:'New product',is_active:status})
+    await engine.runImportApply({DB:db,ASSETS:{list:async()=>({objects:[]})}},`present-${String(status)}`)
+    assert.equal(raw.prepare('SELECT is_active FROM products').get().is_active,1)
+  }
+  assert.deepEqual(engine.getProductImportReplaceColumns(JSON.stringify({replace_columns:['is_active','description']})),['description'])
+  console.log('PASS raw false/zero status refused; omitted/null/one creates present')
+  {
+    const {raw,db}=fixture(); product(raw,90)
+    raw.exec("CREATE TRIGGER fail_removal_audit BEFORE INSERT ON audit_logs WHEN NEW.entity='product' BEGIN SELECT RAISE(ABORT,'audit_fault'); END")
+    await assert.rejects(()=>engine.finalizeProductReplacement(db,'2026-10-08',{jobId:'audit-fault',actor:{id:91,name:'Operator'}}),/audit_fault/)
+    assert.equal(raw.prepare('SELECT is_active FROM products WHERE id=90').get().is_active,1)
+    assert.equal(raw.prepare('SELECT COUNT(*) n FROM audit_logs').get().n,0)
+    raw.exec('DROP TRIGGER fail_removal_audit')
+    assert.equal(await engine.finalizeProductReplacement(db,'2026-10-08',{jobId:'audit-fault',actor:{id:91,name:'Operator'}}),1)
+    const audit=raw.prepare('SELECT * FROM audit_logs').get()
+    assert.equal(audit.user_id,91)
+    assert.equal(audit.user_name,'Operator')
+    assert.equal(JSON.parse(audit.details).importJobId,'audit-fault')
+    assert.equal(JSON.parse(audit.details).membership,'removed')
+    assert.equal(await engine.finalizeProductReplacement(db,'2026-10-08',{jobId:'audit-fault',actor:{id:91,name:'Operator'}}),0)
+    assert.equal(raw.prepare('SELECT COUNT(*) n FROM audit_logs').get().n,1)
+  }
+  console.log('PASS replace-all removal and actor/job provenance atomic; audit fault retry has one event')
+  {
+    const {raw,db}=fixture(); product(raw,91)
+    raw.prepare("INSERT INTO bulk_delete_jobs(id,entity_type,status,reason,ids_json,total_count) VALUES('audit-fault','products','pending','test','[91]',1)").run()
+    raw.exec("CREATE TRIGGER fail_bulk_audit BEFORE INSERT ON audit_logs WHEN NEW.entity='product' BEGIN SELECT RAISE(ABORT,'audit_fault'); END")
+    await bulk.runBulkDeleteJob({DB:db},'audit-fault')
+    assert.equal(raw.prepare('SELECT is_active FROM products WHERE id=91').get().is_active,1)
+    assert.equal(raw.prepare('SELECT COUNT(*) n FROM audit_logs').get().n,0)
+    assert.equal(raw.prepare("SELECT failed_count FROM bulk_delete_jobs WHERE id='audit-fault'").get().failed_count,1)
+  }
+  console.log('PASS bulk audit fault refuses product removal atomically with truthful failed count')
+  for (const invalid of [{name:'Probe 95',is_active:'0'}, {description:'missing required name'}]) {
+    const {raw,db}=fixture(); product(raw,95); product(raw,96)
+    materializedJob(raw,'incomplete',{...invalid},{import_mode:'replace_all'})
+    await assert.rejects(()=>engine.runImportApply({DB:db,ASSETS:{list:async()=>({objects:[]})}},'incomplete'),e=>e.code==='product_replacement_incomplete')
+    assert.deepEqual(raw.prepare('SELECT is_active FROM products ORDER BY id').all().map(p=>p.is_active),[1,1])
+    assert.equal(raw.prepare('SELECT COUNT(*) n FROM audit_logs').get().n,0)
+    const job=raw.prepare("SELECT phase,chunk_cursor,summary_json FROM import_jobs WHERE id='incomplete'").get()
+    assert.equal(job.phase,'replace_all_refused')
+    assert.equal(job.chunk_cursor,1)
+    assert.equal(JSON.parse(job.summary_json).replacement_refused.code,'product_replacement_incomplete')
+    await assert.rejects(()=>engine.runImportApply({DB:db,ASSETS:{list:async()=>({objects:[]})}},'incomplete'),e=>e.code==='product_replacement_incomplete')
+    assert.equal(raw.prepare("SELECT COUNT(*) n FROM import_job_rows WHERE phase='apply'").get().n,1)
+  }
+  console.log('PASS invalid status and unrelated parse refusal both block omission removal without replay')
   for (const ledger of ['rollup', 'branch', 'lot', 'damaged']) {
     const { raw, db } = fixture(); product(raw, 61)
     if (ledger === 'rollup') raw.prepare('UPDATE products SET stock_quantity=1 WHERE id=61').run()
@@ -67,18 +140,22 @@ async function main() {
     await engine.runImportApply({ DB: db, ASSETS: { list: async () => ({ objects: [] }) } }, `row-${ledger}`)
     const row = raw.prepare("SELECT action,result_json FROM import_job_rows WHERE phase='apply'").get()
     assert.equal(row.action, 'error', `${ledger} must be a row refusal`)
-    assert.match(JSON.parse(row.result_json).message, /product_has_stock/)
+    assert.equal(JSON.parse(row.result_json).code, 'product_status_unsupported')
     assert.equal(raw.prepare('SELECT is_active FROM products WHERE id=61').get().is_active, 1)
     assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM product_cost_entries').get().n, 0)
-    console.log(`PASS real product-row deactivation refuses ${ledger}-alone holdings before effects`)
+    product(raw,62)
+    await assert.rejects(()=>engine.finalizeProductReplacement(db,'2026-10-08'),e=>e.code==='product_has_stock')
+    assert.equal(raw.prepare('SELECT is_active FROM products WHERE id=62').get().is_active,1)
+    assert.equal(raw.prepare('SELECT COUNT(*) n FROM audit_logs').get().n,0)
+    console.log(`PASS status refusal and entire replacement guard preserve ${ledger}-alone holdings and empty sibling`)
   }
   {
     const { raw, db } = fixture(); product(raw, 61)
     materializedJob(raw, 'empty-row', { name: 'Probe 61', is_active: '0', stock_quantity: '0', _action: 'override_replace' })
     await engine.runImportApply({ DB: db, ASSETS: { list: async () => ({ objects: [] }) } }, 'empty-row')
-    assert.equal(raw.prepare('SELECT is_active FROM products WHERE id=61').get().is_active, 0)
-    assert.equal(raw.prepare("SELECT action FROM import_job_rows WHERE phase='apply'").get().action, 'update')
-    console.log('PASS real zero-stock row control deactivates')
+    assert.equal(raw.prepare('SELECT is_active FROM products WHERE id=61').get().is_active, 1)
+    assert.equal(raw.prepare("SELECT action FROM import_job_rows WHERE phase='apply'").get().action, 'error')
+    console.log('PASS explicit disabling is refused even for empty product')
   }
   for (const existing of [false, true]) {
     const { raw, db } = fixture()
@@ -87,7 +164,7 @@ async function main() {
       stock_quantity: '2', branch: 'shop', supplier: 'Supplier', cost_price_usd: '2', _action: 'override_add' })
     await engine.runImportApply({ DB: db, ASSETS: { list: async () => ({ objects: [] }) } }, 'incoming')
     const row = JSON.parse(raw.prepare("SELECT result_json FROM import_job_rows WHERE phase='apply'").get().result_json)
-    assert.equal(row.action, 'error'); assert.equal(row.code, 'product_has_stock')
+    assert.equal(row.action, 'error'); assert.equal(row.code, existing ? 'product_has_stock' : 'product_status_unsupported')
     assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM inventory_movements').get().n, 0)
     assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM product_batches').get().n, 0)
     assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM products').get().n, existing ? 1 : 0)

@@ -83,7 +83,7 @@ const { buildCoreDeleteStatements, ENTITY_CONFIGS } = moduleObj.exports
   const statements = buildCoreDeleteStatements(ENTITY_CONFIGS.products, [1, 2, 3])
   assert.strictEqual(statements.length, 1, 'a chunk inside D1\'s parameter limit stays a single statement')
   const stmt = statements[0]
-  assert.match(stmt.sql, /^UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id IN \(\?,\?,\?\)$/, 'products is a soft delete (UPDATE is_active=0), matching its single-row DELETE route\'s soft-delete behavior')
+  assert.match(stmt.sql, /^UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id IN \(\?,\?,\?\) AND is_active=1$/, 'products is a soft delete (UPDATE is_active=0), matching its single-row DELETE route\'s soft-delete behavior')
   assert.deepStrictEqual(stmt.params, [1, 2, 3], 'params are the raw chunk array for positional IN(...) binding, same shape db.batch() accepts elsewhere')
   console.log('PASS buildCoreDeleteStatements soft-deletes products via UPDATE is_active=0')
 }

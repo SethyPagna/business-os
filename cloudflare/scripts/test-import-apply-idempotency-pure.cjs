@@ -121,7 +121,7 @@ await check('source lock: the apply composes guarded groups for both additive br
     'a product additive row must prepend its guard to the same rowWriteGroup as the product and stock writes',
   )
   assert.ok(
-    /const group: Array<\{ sql: string; params: Record<string, unknown> \}> = \[rowGuardStatement\(r\.rowNumber\)\]\s+group\.push\(\{\s+sql: `INSERT INTO inventory_movements/.test(engineSrc),
+    /const group: Array<\{ sql: string; params: Record<string, unknown> \}> = \[rowGuardStatement\(r\.rowNumber\)\]\s+if \(Number\(d\.signedQuantity\) > 0\) group\.unshift\(productStockGuardStatement\(\[Number\(d\.product_id\)\], 'active'\)\)\s+group\.push\(\{\s+sql: `INSERT INTO inventory_movements/.test(engineSrc),
     'an inventory additive row must lead its movement/write group with the guard',
   )
   assert.ok(

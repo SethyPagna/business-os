@@ -825,7 +825,8 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   const updateMatch = source.match(/UPDATE products SET name=@name[^`]*WHERE id=@id/)
   assert.ok(updateMatch, 'materializeImportChunk should still build an UPDATE products SET ... WHERE id=@id statement for matched existing rows')
   const updateClause = updateMatch[0]
-  for (const column of REQUIRED_PRODUCT_WRITE_COLUMNS) {
+  assert.ok(!/\bis_active=@is_active\b/.test(updateClause), 'ordinary product imports never change catalog membership')
+  for (const column of REQUIRED_PRODUCT_WRITE_COLUMNS.filter(column => column !== 'is_active')) {
     assert.ok(new RegExp(`\\b${column}=@${column}\\b`).test(updateClause), `products UPDATE (existing rows) is missing "${column}=@${column}" -- a field editable through the manual Edit form would silently never update on re-import`)
   }
   assert.ok(!/\bstock_quantity=@stock_quantity\b/.test(updateClause), 'the UPDATE must still exclude stock_quantity -- it is a cross-branch aggregate re-derived from branch_stock a few statements later, never set directly from one CSV row (that would let one branch\'s import clobber another branch\'s total)')
@@ -1074,7 +1075,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     prepare: (sql) => ({
       all: async () => {
         if (/FROM import_job_files/.test(sql)) return []
-        if (/FROM products/.test(sql)) return existingProducts
+        if (/FROM products/.test(sql)) return existingProducts.map(product => ({ is_active: 1, ...product }))
         if (/FROM branches/.test(sql)) return branches
         return []
       },
@@ -1192,7 +1193,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     prepare: (sql) => ({
       all: async () => {
         if (/FROM import_job_files/.test(sql)) return []
-        if (/FROM products/.test(sql)) return existingProducts
+        if (/FROM products/.test(sql)) return existingProducts.map(product => ({ is_active: 1, ...product }))
         if (/FROM branches/.test(sql)) return branches
         return []
       },
@@ -1286,7 +1287,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
       all: async () => {
         if (/FROM import_job_files/.test(sql)) return []
         if (/FROM product_batches/.test(sql)) return batches
-        if (/FROM products/.test(sql)) return existingProducts
+        if (/FROM products/.test(sql)) return existingProducts.map(product => ({ is_active: 1, ...product }))
         if (/FROM branches/.test(sql)) return branches
         return []
       },
@@ -1457,7 +1458,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   const { classifyInventory, validateResolvedImportBranches, inventoryMovementCostSnapshot, applyAnalyzedInventoryCostSnapshots } = moduleObj.exports
   const product = { id: 1, sku: 'INV-1', barcode: 'BC-INV-1', name: 'Inventory Item', stock_quantity: 4, cost_price_usd: 1, cost_price_khr: 0 }
   const makeDb = (branches) => ({
-    prepare: (sql) => ({ all: async () => String(sql).includes('FROM products') ? [product] : String(sql).includes('FROM branches') ? branches : [] }),
+    prepare: (sql) => ({ all: async () => String(sql).includes('FROM products') ? [{ is_active: 1, ...product }] : String(sql).includes('FROM branches') ? branches : [] }),
   })
   const input = (branch) => [{ _rowNumber: 1, sku: 'INV-1', quantity: 2, unit_cost_usd: '1', ...(branch === undefined ? {} : { branch }) }]
 
@@ -1997,7 +1998,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     return {
       prepare: (sql) => ({
         all: async () => {
-          if (sql.includes('FROM products')) return products
+          if (sql.includes('FROM products')) return products.map(product => ({ is_active: 1, ...product }))
           if (sql.includes('FROM branches')) return branches
           if (sql.includes('FROM product_batches')) return batches
           if (sql.includes('FROM customers')) return customers
@@ -2599,7 +2600,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     prepare: (sql) => ({
       all: async () => {
         if (/FROM import_job_files/.test(sql)) return []
-        if (/FROM products/.test(sql)) return existingProducts
+        if (/FROM products/.test(sql)) return existingProducts.map(product => ({ is_active: 1, ...product }))
         if (/FROM branches/.test(sql)) return branches
         return []
       },
@@ -2704,7 +2705,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     prepare: (sql) => ({
       all: async () => {
         if (/FROM import_job_files/.test(sql)) return []
-        if (/FROM products/.test(sql)) return existingProducts
+        if (/FROM products/.test(sql)) return existingProducts.map(product => ({ is_active: 1, ...product }))
         if (/FROM branches/.test(sql)) return branches
         return []
       },
@@ -2906,7 +2907,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     prepare: (sql) => ({
       all: async () => {
         if (/FROM import_job_files/.test(sql)) return []
-        if (/FROM products/.test(sql)) return existingProducts
+        if (/FROM products/.test(sql)) return existingProducts.map(product => ({ is_active: 1, ...product }))
         if (/FROM branches/.test(sql)) return branches
         return []
       },

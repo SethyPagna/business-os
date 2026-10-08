@@ -32,7 +32,7 @@ import { catalogCostRecomputeStatement, typedCostEntryBeforeWriteStatement } fro
 import { actorId, actorSnapshot } from './actorSnapshot'
 import { multiplyMoney4 } from './moneyPrecision'
 import { ProductStockGuardError, PRODUCT_HAS_STOCK_CODE, PRODUCT_HAS_STOCK_MESSAGE, productHasStockSql,
-  stockedProductIds, productStockGuardStatement, productStockGuardError } from './productStockGuard'
+  productStockGuardStatement, productStockGuardError, assertProductStatusInput } from './productStockGuard'
 import { stockReceiptGateCode, stockReceiptGateMessage, appendReceiptNotes, FREE_GOODS_REASON_NOTE } from './stockReceiptGate'
 // per-row mode system now, just via a different channel than
 // decisionsByRowNumber/policy_json -- BulkImportModal.tsx's review step
@@ -1417,7 +1417,7 @@ export const PRODUCT_REPLACE_COLUMNS = [
   'low_stock_threshold', 'out_of_stock_threshold',
   'discount_enabled', 'discount_type', 'discount_percent', 'discount_amount_usd', 'discount_amount_khr',
   'discount_label', 'discount_badge_color', 'discount_starts_at', 'discount_ends_at',
-  'expiry_date', 'expiry_alert_days', 'is_active', 'image_path',
+  'expiry_date', 'expiry_alert_days', 'image_path',
 ] as const
 
 /**
@@ -1595,6 +1595,16 @@ export async function classifyProducts(
     const name = str(row.name || row.product_name || row.product)
     const sku = str(row.sku || row.code || row.product_code)
     const barcode = str(row.barcode || row.upc || row.ean)
+    try {
+      const status = typeof row.is_active === 'string' ? row.is_active.trim() : row.is_active
+      assertProductStatusInput({ is_active: status === '' ? null : status })
+    } catch (error) {
+      const refusal = productStockGuardError(error)
+      if (!refusal) throw error
+      results.push({ rowNumber: row._rowNumber, action: 'error', code: refusal.code,
+        identifier: sku || barcode || name || null, existingId: null, message: `${refusal.code}: ${refusal.message}`, changes: {}, data: row })
+      continue
+    }
     const costWasBlank = [
       row.cost_price_usd, row.purchase_price_usd, row.cost_usd,
       row.cost_price_khr, row.purchase_price_khr, row.cost_khr,
@@ -1669,7 +1679,7 @@ export async function classifyProducts(
       __costPriceKhrProvided: str(rawCostKhr) !== '' ? 1 : 0,
       stock_quantity: parseImportNumericValue(row.stock_quantity ?? row.quantity, 0, { allowNegative: false, field: 'stock_quantity' }),
       low_stock_threshold: parseImportNumericValue(row.low_stock_threshold, 10),
-      is_active: toBool01(row.is_active, 1),
+      is_active: 1,
     }
     // Track F parity (special pricing, discount/promotion fields,
     // out_of_stock_threshold, expiry_date/expiry_alert_days): these columns
@@ -2015,6 +2025,12 @@ export async function classifyProducts(
     // S4-32, resolveMergedPricing's field list is selling_price_* +
     // wholesale_price_* (migration 0111 moved the discounted tier off the dead
     // special_price_* columns), so there is one implementation of max-wins.
+    if (match && Number(match.is_active) !== 1) {
+      results.push({ rowNumber: row._rowNumber, action: 'error', code: PRODUCT_HAS_STOCK_CODE,
+        identifier: sku || barcode || name, existingId: Number(match.id),
+        message: `${PRODUCT_HAS_STOCK_CODE}: ${PRODUCT_HAS_STOCK_MESSAGE}`, changes: {}, data })
+      continue
+    }
     if (match) {
       Object.assign(data, resolveMergedPricing([
         match as unknown as Record<string, unknown>,
@@ -5931,25 +5947,39 @@ export async function runD1BatchGroupsInChunks(
 // needed beyond the existing in-window same-batch dedup below (which only
 // has to cover duplicates within one ~150-row window, same as it always
 // covered duplicates within one batch).
-export async function finalizeProductReplacement(db: D1Compat, cutoff: string): Promise<number> {
+export class ProductReplacementIncompleteError extends Error {
+  readonly code = 'product_replacement_incomplete'
+  readonly status = 409
+  constructor() {
+    super('Product replacement cannot remove omitted products while source rows failed. Earlier successful rows remain applied. Start a corrected replacement import to finish.')
+    this.name = 'ProductReplacementIncompleteError'
+  }
+}
+
+export async function finalizeProductReplacement(db: D1Compat, cutoff: string,
+  context: { jobId?: string; actor?: { id: number | null; name: string | null } } = {},
+): Promise<number> {
   const candidates = `p.is_active=1 AND (p.updated_at IS NULL OR p.updated_at < @cutoff)`
+  const params = { cutoff, jobId: context.jobId ?? null, actorId: context.actor?.id ?? null, actorName: context.actor?.name ?? null }
   try {
     const result = await db.batch([
       { sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products p WHERE ${candidates} AND ${productHasStockSql()})
           THEN json_extract('[]','$[product_has_stock]') ELSE 1 END`, params: { cutoff } },
+      { sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
+          SELECT @actorId,@actorName,'delete','product',p.id,
+            json_object('source','replace_all','importJobId',@jobId,'cutoff',@cutoff,'productName',p.name,
+              'membership','removed','priorMembership','present'), 'product',p.id,NULL
+          FROM products p WHERE ${candidates}`, params },
       { sql: `UPDATE products SET is_active=0,updated_at=CURRENT_TIMESTAMP
           WHERE is_active=1 AND (updated_at IS NULL OR updated_at < @cutoff)`, params: { cutoff } },
     ])
-    return Number(result[1]?.meta?.changes || 0)
+    return Number(result[2]?.meta?.changes || 0)
   } catch (error) { throw productStockGuardError(error) || error }
 }
 
 export function productImportStockStatements(productId: number, active: unknown, incoming: number, existing: boolean) {
-  if (Number(active) !== 1 && incoming !== 0) throw new ProductStockGuardError([productId])
-  const statements = []
-  if (existing && Number(active) !== 1) statements.push(productStockGuardStatement([productId]))
-  if (existing && incoming > 0) statements.push(productStockGuardStatement([productId], 'active'))
-  return statements
+  assertProductStatusInput({ is_active: active })
+  return existing ? [productStockGuardStatement([productId], 'active')] : []
 }
 
 export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: number, attempt?: number): Promise<{ applied: number; failed: number }> {
@@ -6146,14 +6176,13 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     }
     if (job.type === 'products' || job.type === 'inventory') {
       const ids = candidateRows.map(r => Number(job.type === 'products' ? r.existingId : (r.data as Record<string, unknown>).product_id)).filter(id => Number.isSafeInteger(id) && id > 0)
-      const stocked = new Set(await stockedProductIds(db, ids))
       const inactive = new Set((await db.prepare(`SELECT id FROM products WHERE is_active IS NOT 1
         AND id IN (SELECT value FROM json_each(@ids))`).all<{ id: number }>({ ids: JSON.stringify(ids) })).map(row => Number(row.id)))
       for (const r of candidateRows) {
         const d = r.data as Record<string, unknown>
         const id = Number(job.type === 'products' ? r.existingId : d.product_id)
         const incoming = productInboundQuantity(r)
-        if ((job.type === 'products' && Number(d.is_active) !== 1 && (incoming !== 0 || stocked.has(id)))
+        if ((job.type === 'products' && r.action === 'update' && inactive.has(id))
           || (incoming > 0 && inactive.has(id))) {
           r.action = 'error'; r.code = PRODUCT_HAS_STOCK_CODE; r.message = `${PRODUCT_HAS_STOCK_CODE}: ${PRODUCT_HAS_STOCK_MESSAGE}`
         }
@@ -6502,7 +6531,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // row.
             pushImportedCostEntry(Number(r.existingId), { usd: d.cost_price_usd, khr: d.cost_price_khr })
             rowWriteGroup.push({
-              sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, is_active=@is_active, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
+              sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
               params: { ...d, id: r.existingId, updated_at: nowIso },
             })
             finishProductRowWriteGroup()
@@ -6571,7 +6600,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // the cost as typed.
             pushImportedCostEntry(Number(r.existingId), { usd: d.cost_price_usd, khr: d.cost_price_khr })
             rowWriteGroup.push({
-              sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, is_active=@is_active, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
+              sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
               params: { ...d, id: r.existingId, updated_at: nowIso },
             })
           }
@@ -7054,7 +7083,10 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       // a refused replacement retries only this phase, never stock receipts.
       await saveChunkState(db, jobId, nextCursor, state)
       replacementFinalizing = true
-      deactivatedCount = await finalizeProductReplacement(db, jobRow.started_at || nowIso)
+      const refusedRows = await db.staging.prepare(`SELECT COUNT(*) AS n FROM import_job_rows
+        WHERE job_id=@id AND phase='apply' AND action='error'`).get<{ n: number }>({ id: jobId })
+      if (Number(refusedRows?.n || 0) > 0) throw new ProductReplacementIncompleteError()
+      deactivatedCount = await finalizeProductReplacement(db, jobRow.started_at || nowIso, { jobId, actor: importCostActor })
     }
 
     // Full product snapshots can contain multiple source rows that resolve to
@@ -7124,7 +7156,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     if (isImportMaintenanceFenceError(error)) throw error
     const stockError = productStockGuardError(error)
     await markJobFailed(db, jobId, stockError ? `${stockError.code}: ${stockError.message}` : (error as Error).message || 'Apply failed')
-    if (stockError && replacementFinalizing) {
+    const replacementError = stockError || (error instanceof ProductReplacementIncompleteError ? error : null)
+    if (replacementError && replacementFinalizing) {
       const counts = await db.staging.prepare(`SELECT
         SUM(CASE WHEN action IN ('create','update') THEN 1 ELSE 0 END) AS applied,
         SUM(CASE WHEN action='error' THEN 1 ELSE 0 END) AS failed
@@ -7132,7 +7165,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       await db.prepare(`UPDATE import_jobs SET phase='replace_all_refused',processed_rows=@applied,failed_rows=@failed,
         summary_json=json_set(COALESCE(summary_json,'{}'),'$.replacement_refused',json(@refusal)) WHERE id=@id`)
         .run({ id: jobId, applied: Number(counts?.applied || 0), failed: Number(counts?.failed || 0),
-          refusal: JSON.stringify({ code: stockError.code, committedRows: Number(counts?.applied || 0) }) })
+          refusal: JSON.stringify({ code: replacementError.code, message: replacementError.message, committedRows: Number(counts?.applied || 0) }) })
     }
     throw stockError || error
   } finally {
