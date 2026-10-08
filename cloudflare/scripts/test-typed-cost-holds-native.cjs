@@ -42,7 +42,7 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 
 const src = path.resolve(__dirname, '../src')
 const frontendSrc = path.resolve(__dirname, '../../frontend/src')
-const database = openDb(loadAll())
+const database = openDb(loadAll({ through: 242 }))
 const raw = database.db
 const DB = {
   prepare(sql) {
@@ -69,7 +69,7 @@ const env = { DB }
 const real = new Set([
   'acquisitionCostAccess', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db',
   'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply',
-  'conflictControl', 'renameCascade', 'schemaProbe', 'catalogCostRecompute', 'productBatches', 'productStockGuard',
+  'conflictControl', 'renameCascade', 'schemaProbe', 'catalogCostRecompute', 'productBatches', 'productStockGuard', 'stockTransaction', 'businessMaintenanceGuard',
 ])
 const noop = new Proxy(function () {}, { get: () => noop, apply: () => undefined, construct: () => ({}) })
 class ProductImageAssetError extends Error {}
@@ -130,27 +130,34 @@ async function request(app, method, url, body, user = admin) {
 }
 
 raw.prepare("INSERT OR IGNORE INTO branches(id, name) VALUES (1, 'Shop')").run()
+for (const file of fs.readdirSync(path.join(src, '../migrations')).filter(file => file.endsWith('.sql') && Number(file.slice(0,4)) > 242).sort()) raw.exec(fs.readFileSync(path.join(src, '../migrations', file), 'utf8'))
+assert.throws(() => raw.exec("INSERT INTO products(name, stock_quantity) VALUES('Unowned seed',1)"), /stock_transaction_required/)
+const stockWrite = async statements => {
+  try { return await load('lib/stockTransaction.ts').executeStockTransaction(load('lib/db.ts').getDb(env), statements, 'retry') }
+  finally { assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0, 'success and rollback release the actual permit') }
+}
 const cost = (id) => raw.prepare('SELECT cost_price_usd c FROM products WHERE id = ?').get(id).c
 const entries = (id) => raw.prepare('SELECT * FROM product_cost_entries WHERE product_id = ? ORDER BY id').all(id)
 let seq = 0
 // Two lots on hand: 2 x 3.00 and 2 x 5.00 -> the rule's figure is 4.00. A
 // sale of one 3.00 unit moves the rule's figure to (3 + 10) / 3 = 4.3333, so
 // a typed 9 that is not honoured is visibly overwritten.
-function seed(name = `P${++seq}`, active = 1) {
-  const id = Number(raw.prepare('INSERT INTO products(name, cost_price_usd, cost_price_khr, purchase_price_usd, selling_price_usd, is_active, updated_at) VALUES (?, 4, 0, 4, 20, ?, NULL)')
-    .run(name, active).lastInsertRowid)
-  const lot = (unit, day) => {
-    const lotId = Number(raw.prepare(`INSERT INTO product_batches(variant_product_id, batch_key, is_active, unit_cost_usd, received_at, received_quantity, received_branch_id)
-      VALUES (?, ?, 1, ?, ?, 2, 1)`).run(id, `k${++seq}`, unit, `2026-09-${day}`).lastInsertRowid)
-    raw.prepare('INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) VALUES (?, 1, 2)').run(lotId)
+async function seed(name = `P${++seq}`, active = 1) {
+  const [created] = await stockWrite([{ sql: 'INSERT INTO products(name, cost_price_usd, cost_price_khr, purchase_price_usd, selling_price_usd, is_active, updated_at) VALUES (?, 4, 0, 4, 20, ?, NULL)', params: [name, active] }])
+  const id = Number(created.meta.last_row_id)
+  const lot = async (unit, day) => {
+    const [createdLot] = await stockWrite([{ sql: `INSERT INTO product_batches(variant_product_id, batch_key, is_active, unit_cost_usd, received_at, received_quantity, received_branch_id)
+      VALUES (?, ?, 1, ?, ?, 2, 1)`, params: [id, `k${++seq}`, unit, `2026-09-${day}`] }])
+    const lotId = Number(createdLot.meta.last_row_id)
+    await stockWrite([{ sql: 'INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) VALUES (?, 1, 2)', params: [lotId] }])
     return lotId
   }
-  const cheap = lot(3, 10); lot(5, 11)
-  raw.prepare('INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES (?, 1, 4)').run(id)
+  const cheap = await lot(3, 10); await lot(5, 11)
+  await stockWrite([{ sql: 'INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES (?, 1, 4)', params: [id] }])
   return { id, cheap }
 }
-function sell(product) {
-  raw.prepare('UPDATE branch_batch_stock SET quantity = quantity - 1 WHERE batch_id = ? AND branch_id = 1').run(product.cheap)
+async function sell(product) {
+  await stockWrite([{ sql: 'UPDATE branch_batch_stock SET quantity = quantity - 1 WHERE batch_id = ? AND branch_id = 1', params: [product.cheap] }])
 }
 
 let checks = 0
@@ -198,6 +205,7 @@ new Function('require', 'module', 'exports', transpile(`
       appliedRowGuards, rowGuardStatement, receiptLots, receiptBaselines, nextBatchId, productSeedBranchIds, importCostActor } = ctx
     const job = { type: 'products' }
     ${extract(engineSource, '    const productInboundQuantity = ', '\n    }')}
+    const productMetadataStatementGroups = new Set<any[]>()
     const productStatementGroups: any[] = [], guardedGroups: any[] = [], statements: any[] = []
     ${productLoop}
     return [...productStatementGroups, ...statements.map((s: any) => [s]), ...guardedGroups]
@@ -243,29 +251,29 @@ function receiptRow(productId, unitCost, quantity, rowNumber, plannedMode = 'mer
 }
 // runD1BatchGroupsInChunks packs a chunk's small row groups into ONE
 // db.batch: a guard failure anywhere aborts the whole pack.
-async function runChunk(groups) { await database.batch(groups.flat()) }
-async function runGroups(groups) { for (const group of groups) await database.batch(group) }
+async function runChunk(groups) { await stockWrite(groups.flat()) }
+async function runGroups(groups) { for (const group of groups) await stockWrite(group) }
 
 async function main() {
   await check('control: a bare UPDATE of the cost IS reverted by the next sale (the fixture discriminates)', async () => {
-    const p = seed()
+    const p = await seed()
     assert.equal(cost(p.id), 4, 'seeded lots: (2 x 3 + 2 x 5) / 4')
     raw.prepare('UPDATE products SET cost_price_usd = 9 WHERE id = ?').run(p.id)
-    sell(p)
+    await sell(p)
     assert.equal(cost(p.id), 4.3333, 'no cost entry: the rule re-derives (1 x 3 + 2 x 5) / 3')
   })
 
   await check('reference: the product form (PUT /:id) records an entry and the cost holds past a sale', async () => {
-    const p = seed()
+    const p = await seed()
     const saved = await request(products, 'PUT', `/${p.id}`, { cost_price_usd: 9 })
     assert.equal(saved.status, 200, JSON.stringify(saved))
-    sell(p)
+    await sell(p)
     assert.equal(cost(p.id), 9)
     assert.equal(entries(p.id).length, 1)
   })
 
   await check('product form create folding into an existing product (POST /): the averaged cost records the entry and holds past a sale', async () => {
-    const p = seed()
+    const p = await seed()
     const { name } = raw.prepare('SELECT name FROM products WHERE id = ?').get(p.id)
     const folded = await request(products, 'POST', '/', { name, cost_price_usd: 6 })
     assert.equal(folded.status, 200, JSON.stringify(folded))
@@ -276,12 +284,12 @@ async function main() {
     assert.deepEqual([entry.source, entry.cost_usd, entry.previous_cost_usd, entry.user_id, entry.user_name],
       ['manual', 5, 4, 1, 'admin'])
     assert.equal(entry.baseline_batch_id, raw.prepare('SELECT MAX(id) m FROM product_batches WHERE variant_product_id = ?').get(p.id).m)
-    sell(p)
+    await sell(p)
     assert.equal(cost(p.id), 5, 'the folded cost holds past the sale')
   })
 
   await check('product form create folding into an existing product with the SAME cost: nothing moved, no entry', async () => {
-    const p = seed()
+    const p = await seed()
     const { name } = raw.prepare('SELECT name FROM products WHERE id = ?').get(p.id)
     const folded = await request(products, 'POST', '/', { name, cost_price_usd: 4 })
     assert.equal(folded.status, 200, JSON.stringify(folded))
@@ -290,15 +298,15 @@ async function main() {
   })
 
   await check('catalog-wide bulk price adjust: +5 on cost records the form\'s entry per moved row; the cost holds past a sale', async () => {
-    const p = seed()
-    const zero = seed()
+    const p = await seed()
+    const zero = await seed()
     raw.prepare('UPDATE products SET cost_price_usd = 0 WHERE id = ?').run(zero.id)
     // Isolate from earlier checks' rows: only these two are active.
-    raw.prepare('UPDATE damaged_stock_lots SET quantity_remaining=0 WHERE product_id NOT IN (?, ?)').run(p.id, zero.id)
-    raw.prepare('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id NOT IN (?, ?))').run(p.id, zero.id)
-    raw.prepare('UPDATE branch_stock SET quantity=0 WHERE product_id NOT IN (?, ?)').run(p.id, zero.id)
-    raw.prepare('UPDATE products SET stock_quantity=0 WHERE id NOT IN (?, ?)').run(p.id, zero.id)
-    raw.prepare('UPDATE products SET is_active=0 WHERE id NOT IN (?, ?)').run(p.id, zero.id)
+    await stockWrite([{ sql: 'UPDATE damaged_stock_lots SET quantity_remaining=0 WHERE product_id NOT IN (?, ?)', params: [p.id, zero.id] }])
+    await stockWrite([{ sql: 'UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id NOT IN (?, ?))', params: [p.id, zero.id] }])
+    await stockWrite([{ sql: 'UPDATE branch_stock SET quantity=0 WHERE product_id NOT IN (?, ?)', params: [p.id, zero.id] }])
+    await stockWrite([{ sql: 'UPDATE products SET stock_quantity=0 WHERE id NOT IN (?, ?)', params: [p.id, zero.id] }])
+    await stockWrite([{ sql: 'UPDATE products SET is_active=0 WHERE id NOT IN (?, ?)', params: [p.id, zero.id] }])
     const adjusted = await request(products, 'POST', '/bulk-price-adjust', { direction: 'increase', amount: 5, fields: ['cost_price_usd'], skip_zero: true })
     assert.equal(adjusted.status, 200, JSON.stringify(adjusted))
     assert.equal(adjusted.body.changed, 1, 'changed still counts the products UPDATE, not the entry insert')
@@ -309,23 +317,23 @@ async function main() {
       ['manual', 9, 4, 1, 'admin', null], 'same shape as the form\'s entry (KHR not written -> NULL)')
     assert.equal(entry.baseline_batch_id, raw.prepare('SELECT MAX(id) m FROM product_batches WHERE variant_product_id = ?').get(p.id).m)
     assert.equal(entries(zero.id).length, 0, 'skip_zero row did not move: no entry')
-    sell(p)
+    await sell(p)
     assert.equal(cost(p.id), 9, 'typed cost holds past the sale')
-    raw.prepare('UPDATE products SET is_active = 1').run()
+    await stockWrite([{ sql: 'UPDATE products SET is_active = 1', params: [] }])
   })
 
   await check('per-selection bulk adjust: buildProductBulkUpdatePayload -> PUT /:id records the entry; the cost holds', async () => {
     const { buildProductBulkUpdatePayload } = loadFrontend('components/products/helpers/productWriteHelpers.ts')
-    const p = seed()
+    const p = await seed()
     const current = raw.prepare('SELECT * FROM products WHERE id = ?').get(p.id)
     const saved = await request(products, 'PUT', `/${p.id}`, buildProductBulkUpdatePayload({ cost_price_usd: 9 }, current, { id: 1, name: 'admin' }))
     assert.equal(saved.status, 200, JSON.stringify(saved))
-    sell(p)
+    await sell(p)
     assert.equal(cost(p.id), 9)
   })
 
   await check('review queue: an approved cost edit records the entry (requester as actor); the cost holds past a sale', async () => {
-    const p = seed()
+    const p = await seed()
     const queued = await request(products, 'PUT', `/${p.id}`, { cost_price_usd: 9 }, requester)
     assert.equal(queued.status, 202, JSON.stringify(queued))
     assert.equal(cost(p.id), 4, 'not applied until approved')
@@ -335,19 +343,19 @@ async function main() {
     const [entry] = entries(p.id)
     assert.ok(entry, 'an entry was recorded')
     assert.equal(entry.user_name, 'requester')
-    sell(p)
+    await sell(p)
     assert.equal(cost(p.id), 9)
   })
 
   await check('review queue: a plan-less historical queue row still records the entry; the cost holds past a sale', async () => {
-    const p = seed()
+    const p = await seed()
     const pendingId = Number(raw.prepare("INSERT INTO pending_actions(section, action_type, entity_type, entity_id, payload_json, status, requested_by, requested_by_name) VALUES ('products', 'update', 'product', ?, ?, 'open', 2, 'requester')")
       .run(p.id, JSON.stringify({ cost_price_usd: 9 })).lastInsertRowid)
     const approved = await request(reviews, 'POST', `/${pendingId}/approve`, {})
     assert.equal(approved.status, 200, JSON.stringify(approved))
     assert.equal(cost(p.id), 9)
     assert.deepEqual(entries(p.id).map((e) => [e.cost_usd, e.previous_cost_usd, e.user_name]), [[9, 4, 'requester']])
-    sell(p)
+    await sell(p)
     assert.equal(cost(p.id), 9)
   })
 
@@ -357,35 +365,35 @@ async function main() {
     ['replace_columns [cost_price_usd]', undefined, { productImportMode: 'replace_columns', productReplaceColumns: ['cost_price_usd'] }],
   ]) {
     await check(`product import, ${label}: an imported cost records the entry and holds past a sale`, async () => {
-      const p = seed()
+      const p = await seed()
       await runGroups(composeProducts(importCtx([importRow(p.id, { cost_price_usd: 9 }, 2, mode)], extra)))
       assert.equal(cost(p.id), 9)
       assert.equal(entries(p.id).length, 1)
       assert.equal(raw.prepare('SELECT is_active a FROM products WHERE id = ?').get(p.id).a, 1, 'the row write itself is intact')
-      sell(p)
+      await sell(p)
       assert.equal(cost(p.id), 9)
     })
   }
 
   await check('product import, fill_blank: a blank cost filled from the file holds past a sale', async () => {
-    const p = seed()
+    const p = await seed()
     raw.prepare('UPDATE products SET cost_price_usd = 0 WHERE id = ?').run(p.id)
     await runGroups(composeProducts(importCtx([importRow(p.id, { cost_price_usd: 9 })], { productImportMode: 'fill_blank' })))
     assert.equal(cost(p.id), 9)
-    sell(p)
+    await sell(p)
     assert.equal(cost(p.id), 9)
   })
 
   await check('product import: a same-value re-import records nothing', async () => {
-    const p = seed()
+    const p = await seed()
     await runGroups(composeProducts(importCtx([importRow(p.id, {})])))
     assert.equal(entries(p.id).length, 0)
-    sell(p)
+    await sell(p)
     assert.equal(cost(p.id), 4.3333, 'no typed cost: the rule keeps deriving')
   })
 
   await check('product import, override_add WITH a receipt: the lot is the cost record, no override entry', async () => {
-    const p = seed()
+    const p = await seed()
     const row = importRow(p.id, { cost_price_usd: 9, branch_id_explicit: 1, stock_quantity: 2 }, 2, 'override_add')
     row.receiptCost = 9
     await runGroups(composeProducts(importCtx([row])))
@@ -394,7 +402,7 @@ async function main() {
   })
 
   await check('product import: a typed-cost row then a receipt row for the same product in ONE chunk applies; the receipt is the cost record', async () => {
-    const p = seed()
+    const p = await seed()
     const rows = [importRow(p.id, { cost_price_usd: 9 }, 2, 'override_replace'), receiptRow(p.id, 6, 2, 3)]
     await runChunk(composeProducts(importCtx(rows, receiptPlan(p.id))))
     assert.equal(entries(p.id).length, 0, 'no override entry ahead of the receipt that re-checks the baseline')
@@ -403,7 +411,7 @@ async function main() {
   })
 
   await check('product import: a receipt row then a typed-cost row for the same product records the typed cost after the lot; it holds past a sale', async () => {
-    const p = seed()
+    const p = await seed()
     const rows = [receiptRow(p.id, 6, 2, 2), importRow(p.id, { cost_price_usd: 9 }, 3, 'override_replace')]
     await runChunk(composeProducts(importCtx(rows, receiptPlan(p.id))))
     const [entry] = entries(p.id)
@@ -412,36 +420,36 @@ async function main() {
       'its baseline covers the lot the receipt just made')
     assert.equal(entry.previous_cost_usd, 4.6667, 'recorded against the figure the receipt re-derived')
     assert.equal(cost(p.id), 9)
-    sell(p)
+    await sell(p)
     assert.equal(cost(p.id), 9)
   })
 
   await check('product import, override_replace with BLANK cost cells: the 0 written is not a typed cost -- no entry, the rule re-derives at the sale', async () => {
-    const p = seed()
+    const p = await seed()
     await runGroups(composeProducts(importCtx([importRow(p.id,
       { cost_price_usd: 0, cost_price_khr: 0, __costPriceUsdProvided: 0, __costPriceKhrProvided: 0 }, 2, 'override_replace')])))
     assert.equal(cost(p.id), 0, 'the replace still writes what the sheet resolved to')
     assert.equal(entries(p.id).length, 0)
-    sell(p)
+    await sell(p)
     assert.equal(cost(p.id), 4.3333, 'nothing typed: the rule derives (1 x 3 + 2 x 5) / 3')
   })
 
   await check('product import, override_replace with an EXPLICIT 0 cost: stated, so it records the entry and the 0 holds past a sale', async () => {
-    const p = seed()
+    const p = await seed()
     await runGroups(composeProducts(importCtx([importRow(p.id, { cost_price_usd: 0 }, 2, 'override_replace')])))
     assert.deepEqual(entries(p.id).map((e) => [e.cost_usd, e.previous_cost_usd]), [[0, 4]])
-    sell(p)
+    await sell(p)
     assert.equal(cost(p.id), 0, 'as a clear in the form: a typed 0 holds')
   })
 
   await check('inventory import (legacy add row with a unit cost): the cost records the entry and holds past a sale', async () => {
-    const p = seed()
+    const p = await seed()
     const row = { rowNumber: 2, data: { product_id: p.id, product_name: 'x', branch_id: 1, branch_name: 'Shop', movement_type: 'add', quantity: 1, signedQuantity: 1,
       unit_cost_usd: 9, unit_cost_khr: 0, total_cost_usd: 9, total_cost_khr: 0, reason: 'import', cost_price_usd: 9 } }
     await runGroups(composeInventory(importCtx([row])))
     assert.equal(cost(p.id), 9)
     assert.equal(entries(p.id).length, 1)
-    sell(p)
+    await sell(p)
     assert.equal(cost(p.id), 9)
   })
 

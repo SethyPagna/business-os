@@ -9,6 +9,7 @@ const Module = require('node:module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
+const { executeStockTransaction } = require('./test-stock-session-atomic.cjs').loadStockSession('lib/stockTransaction.ts')
 const libRoot = path.resolve(__dirname, '../src/lib')
 const importSource = fs.readFileSync(path.join(libRoot, 'importEngine.ts'), 'utf8')
 const catalogCostModule = { exports: {} }
@@ -32,7 +33,7 @@ function compileNamedFunctions(source, names) {
 
 function loadProductWrites(db) {
   const dependencies = new Map()
-  for (const name of ['receivingBranch', 'businessMaintenanceGuard', 'pendingActions', 'audit']) {
+  for (const name of ['receivingBranch', 'businessMaintenanceGuard', 'pendingActions', 'audit', 'stockTransaction']) {
     const mod = { exports: {} }
     const output = ts.transpileModule(fs.readFileSync(path.join(libRoot, `${name}.ts`), 'utf8'), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -132,7 +133,7 @@ async function main() {
   assert.equal(resolveReceiptLotTarget([candidate], '2025-01-02', 99, 0).existingBatchId, null, 'different receipt price cannot be pooled into that inactive lot')
   assert.equal(resolveReceiptLotTarget([candidate], '2025-01-02', 7.5, 90).existingBatchId, null, 'manual override excludes the old lot even at the same price')
 
-  const db = openDb(loadAll())
+  const db = openDb(loadAll({ through: 242 }))
   db.exec(`
     INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Shop',1,1);
     INSERT INTO products(id,name,stock_quantity,is_active) VALUES(1,'Import item',0,1),(2,'Create item',3,1),(3,'Rollback item',2,1);
@@ -143,6 +144,8 @@ async function main() {
       (92,3,'initial:3','Rollback initial','2025-05-06',0,'Rollback receipt',8,4.5,2,9,1);
     INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(90,1,0);
   `)
+  for (const file of fs.readdirSync(path.join(__dirname, '../migrations')).filter(file => file.endsWith('.sql') && Number(file.slice(0,4)) > 242).sort()) db.exec(fs.readFileSync(path.join(__dirname, '../migrations', file), 'utf8'))
+  assert.throws(() => db.exec('UPDATE products SET stock_quantity=stock_quantity'), /stock_transaction_required/)
   installPositiveLotGuard(db)
 
   const [metadataSql, lotStockSql] = extractMatchedImportStatements(importSource)
@@ -150,7 +153,7 @@ async function main() {
     id: 90, receivedAt: '2025-01-02', updatedAt: '2026-09-11T07:00:00.000Z',
     unitCostUsd: 7.5, receiptTotalCostUsd: 15, qty: 2, branchId: 1, batchId: 90,
   }
-  await db.batch([{ sql: metadataSql, params: importParams }, { sql: lotStockSql, params: importParams }])
+  await executeStockTransaction(db, [{ sql: metadataSql, params: importParams }, { sql: lotStockSql, params: importParams }], 'retry')
   const importedLot = { ...db.prepare(`SELECT lot_code,received_at,is_active,notes,batch_number,unit_cost_usd,received_quantity,received_cost_usd,received_branch_id FROM product_batches WHERE id=90`).get() }
   assert.deepEqual(importedLot, {
     lot_code: 'Original label', received_at: '2025-01-02', is_active: 1, notes: 'Original import receipt',
@@ -184,6 +187,7 @@ async function main() {
     'failed lot-stock insert must roll back the preceding reactivation')
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM branch_batch_stock WHERE batch_id=92').get().n, 0)
 
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
   console.log('PASS inactive additive-import lot selection, atomic reactivation/top-up, initial-lot retry identity, idempotency and rollback')
 }
 

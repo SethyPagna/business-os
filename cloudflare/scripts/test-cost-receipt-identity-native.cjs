@@ -9,6 +9,7 @@ const api = loadStockSession()
 const costs = loadStockSession('lib/catalogCostRecompute.ts')
 const { getDb } = loadStockSession('lib/db.ts')
 const batches = loadStockSession('lib/productBatches.ts')
+const { executeStockTransaction } = loadStockSession('lib/stockTransaction.ts')
 function request(key, cost, extra = {}) {
   const body = receiveRequest(key, 1)
   Object.assign(body.items[0], { unit_cost_usd: cost, ...extra })
@@ -28,6 +29,7 @@ const snapshots = f => JSON.stringify({
 
 async function main() {
   const f = fixture()
+  assert.throws(() => f.sql.exec('UPDATE branch_stock SET quantity=quantity'), /stock_transaction_required/)
   const first = await api.commitStockSession(f.env, user, request('receipt-cost-three', 3))
   const firstRow = lotRows(f)[0]
   const secondBody = request('receipt-cost-five', 5)
@@ -111,14 +113,14 @@ async function main() {
   const reservedPlan = batches.planReceiveBatchStock({...reservedInput,receiptLotTarget:reservedTarget,reservedBatchId:100})
   const repeatedPlan = batches.planReceiveBatchStock({...reservedInput,
     receiptLotTarget:{...reservedTarget,existingBatchId:100},receiptCostPreimage:{batchExists:true,receivedCostUsd:3}})
-  await getDb(reserved.env).batch([...reservedPlan.statements,...repeatedPlan.statements,{sql:'DELETE FROM stock_session_guards'}])
+  await executeStockTransaction(getDb(reserved.env), [...reservedPlan.statements,...repeatedPlan.statements,{sql:'DELETE FROM stock_session_guards'}], 'retry')
   assert.equal(lotRows(reserved)[0].id,100)
   assert.equal(lotRows(reserved)[0].received_quantity,2)
   assert.equal(lotRows(reserved)[0].received_cost_usd,6)
   const reservedBefore = JSON.stringify({lots:lotRows(reserved),stock:reserved.sql.prepare('SELECT * FROM branch_stock').all()})
   const otherTarget = batches.resolveReceiptLotTarget(lotRows(reserved),'2026-09-05',5,0)
   const collision = batches.planReceiveBatchStock({...reservedInput,unitCostUsd:5,receiptLotTarget:otherTarget,reservedBatchId:100})
-  await assert.rejects(getDb(reserved.env).batch([...collision.statements,{sql:'DELETE FROM stock_session_guards'}]))
+  await assert.rejects(executeStockTransaction(getDb(reserved.env), [...collision.statements,{sql:'DELETE FROM stock_session_guards'}], 'retry'))
   assert.equal(JSON.stringify({lots:lotRows(reserved),stock:reserved.sql.prepare('SELECT * FROM branch_stock').all()}),reservedBefore)
   for (const extra of [{reservedBatchId:0},{reservedBatchId:1.5},{reservedBatchId:101,receiptLotTarget:{...reservedTarget,existingBatchId:100}},
     {reservedBatchId:101,receiptLotTarget:{...reservedTarget,baselineBatchId:101}}, {reservedBatchId:101,batchId:100}]) {
@@ -174,6 +176,7 @@ async function main() {
   assert.deepEqual(wide.sql.prepare('SELECT id,received_quantity,received_cost_usd FROM product_batches ORDER BY id').all(),receivedBefore)
   const replacement = await api.commitStockSession(wide.env,user,request('corrected-key-receipt',10))
   assert.notEqual(replacement.items[0].batchId,2,'corrected lot keeps stable key; incoming old price gets another lot')
+  for (const current of [f, wide, distinct, legacy, reserved, raced, dateFixture]) assert.equal(current.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0, 'all success and rollback fixtures leave no epoch permit')
   console.log('PASS batch correction atomically recomputes catalog; original receipts/movements/history money unchanged')
 }
 async function nativeD1() {
@@ -185,7 +188,7 @@ async function nativeD1() {
   try {
     const db = await mf.getD1Database('DB'), env = {DB:db}
     const dir = path.resolve(__dirname,'../migrations')
-    for (const name of fs.readdirSync(dir).filter(n=>n.endsWith('.sql')).sort()) {
+    for (const name of fs.readdirSync(dir).filter(n=>n.endsWith('.sql') && Number(n.slice(0,4)) <= 242).sort()) {
       const statements = split(fs.readFileSync(path.join(dir,name),'utf8'))
         .filter(sql=>!(name==='0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(sql.trim())))
       for (let i=0;i<statements.length;i+=50) await db.batch(statements.slice(i,i+50).map(sql=>db.prepare(sql)))
@@ -195,6 +198,12 @@ async function nativeD1() {
       db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,stock_quantity,is_active) VALUES(1,'Serum','SER-1',2,0,1)"),
       db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,0)'),
     ])
+    for (const name of fs.readdirSync(dir).filter(n=>n.endsWith('.sql') && Number(n.slice(0,4)) > 242).sort()) {
+      await db.batch(split(fs.readFileSync(path.join(dir,name),'utf8')).map(sql=>db.prepare(sql)))
+    }
+    await assert.rejects(db.prepare('UPDATE branch_stock SET quantity=quantity').run(), /stock_transaction_required/)
+    const assertPermitReleased = async () => assert.equal((await db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").first()).n, 0)
+    await assertPermitReleased()
     const readCost = async()=> (await db.prepare('SELECT cost_price_usd c FROM products WHERE id=1').first()).c
     const a = await api.commitStockSession(env,user,request('native-cost-three',3))
     const b = await api.commitStockSession(env,user,request('native-cost-five',5))
@@ -213,6 +222,7 @@ async function nativeD1() {
     assert.notEqual(c.items[0].batchId,a.items[0].batchId)
     assert.equal(await readCost(),8,'(3 x 10 + 1 x 2) / 4: the override prices the 3 units it covered')
     assert.equal((await costs.getCatalogCostBreakdown(getDb(env),1)).result_usd,8)
+    await assertPermitReleased()
     console.log('PASS actual workerd D1 same-day distinct/repeated prices, override, SQL/JS weighted mean and undo/redo')
   } finally { await mf.dispose() }
 }

@@ -287,7 +287,11 @@ const productImagePermissionModule = loadPureSibling('productImagePermission', (
   return require(request)
 })
 
+const stockTransactionModule = loadPureSibling('stockTransaction')
+const requestMetricsModule = loadPureSibling('requestMetrics', name => name === './analytics' ? {} : require(name))
 function requireForProductBatches(request) {
+  if (request === './stockTransaction') return stockTransactionModule
+  if (request === './requestMetrics') return requestMetricsModule
   if (request === './receivingBranch') return loadPureSibling('receivingBranch')
   if (request === './productDetailRule') return productDetailRuleModuleObj.exports
   if (request === './productDescriptionSections') return productDescriptionSectionsModuleObj.exports
@@ -368,6 +372,8 @@ const originalResolve = Module._resolveFilename
 const stubbable = new Set(['../index', './db', './importCsv', './cache', './stockActionCatalog', './stockActionSeal', './stockActionCommit', './stockActionResolver', './stockActionImport', '../durable-objects/broadcastHub'])
 const originalLoad = Module._load
 Module._load = function patchedLoad(request, parent, isMain) {
+  if (request === './stockTransaction') return stockTransactionModule
+  if (request === './requestMetrics') return requestMetricsModule
   if (request === './stockReceiptGate') return stockReceiptGateModule.exports
   if (request === './catalogCostRecompute') return catalogCostRecomputeModule.exports
   if (request === './moneyPrecision') return moneyPrecisionModule.exports
@@ -927,7 +933,9 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   assert.ok(/const productStatementGroups/.test(source))
   assert.ok(/finishProductRowWriteGroup/.test(block))
   assert.ok(!/\bstatements\.push\(/.test(block), 'product row writes must never return to raw statement chunking')
-  assert.ok(/runD1BatchGroupsInChunks\(importWriteDb, productStatementGroups\)/.test(source), 'whole product rows use group-boundary batching through the branch authority adapter')
+  assert.ok(/runD1BatchGroupsInChunks\(importWriteDb, productStatementGroups\.slice\(start, end\), D1_IMPORT_BATCH_CHUNK_SIZE, stockWrites\)/.test(source), 'whole product rows retain group boundaries through the branch adapter and actual stock executor')
+  assert.ok(/const stockWrites = !productMetadataStatementGroups\.has\(productStatementGroups\[start\]\)/.test(source), 'only explicitly marked metadata groups avoid stock execution')
+  assert.ok(/while \(end < productStatementGroups\.length && !productMetadataStatementGroups\.has\(productStatementGroups\[end\]\) === stockWrites\) end\+\+/.test(source), 'packing changes authority only at whole group boundaries')
   console.log('PASS product import keeps each row\'s catalog, stock, batch, and merge-evidence writes in one canonical-branch guarded batch')
 }
 

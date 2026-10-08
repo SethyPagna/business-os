@@ -21,10 +21,18 @@ function load(file) {
 }
 const batches = load('productBatches.ts')
 const additions = load('saleLineAddition.ts')
-const db = openDb(loadAll())
+const db = openDb(loadAll({ through: 242 }))
 db.exec("INSERT INTO branches(id,name,is_active) VALUES(1,'Shop',1),(2,'Warehouse',1); INSERT INTO products(id,name,stock_quantity) VALUES(1,'A',0),(2,'B',0)")
-const receive = (branchId, quantity, receivedDate, extra = {}) => db.batch(batches.planReceiveBatchStock({ productId: 1, branchId, quantity, receivedDate, ...extra }).statements)
-const snapshot = (branchId, quantity, receivedDate = '10/09/2026') => db.batch(batches.planReconcileBranchSnapshot({ productId: 1, branchId, quantity, receivedDate }))
+for (const file of fs.readdirSync(path.join(__dirname, '../migrations')).filter(file => file.endsWith('.sql') && Number(file.slice(0,4)) > 242).sort()) db.exec(fs.readFileSync(path.join(__dirname, '../migrations', file), 'utf8'))
+assert.throws(() => db.exec('UPDATE products SET stock_quantity=stock_quantity'), /stock_transaction_required/)
+const transaction = load('stockTransaction.ts')
+const stockWrite = async statements => {
+  try { return await transaction.executeStockTransaction(db, statements, 'retry') }
+  finally { assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0, 'success and rollback release the actual permit') }
+}
+
+const receive = (branchId, quantity, receivedDate, extra = {}) => stockWrite(batches.planReceiveBatchStock({ productId: 1, branchId, quantity, receivedDate, ...extra }).statements)
+const snapshot = (branchId, quantity, receivedDate = '10/09/2026') => stockWrite(batches.planReconcileBranchSnapshot({ productId: 1, branchId, quantity, receivedDate }))
 const lots = (branchId) => db.prepare(`SELECT pb.id,pb.received_at,pb.batch_key,bbs.quantity FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id WHERE pb.variant_product_id=1 AND bbs.branch_id=? ORDER BY pb.id`).all([branchId])
 function parity(branchId, expected) {
   assert.equal(db.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=?').get([branchId]).quantity, expected)
@@ -53,24 +61,29 @@ async function main() {
   parity(1, 5)
   assert.equal(lots(1).find((lot) => lot.batch_key.startsWith(' snapshot:')).quantity, 5)
   const beforeFailure = lots(1)
-  await assert.rejects(db.batch([...batches.planReconcileBranchSnapshot({ productId: 1, branchId: 1, quantity: 20, receivedDate: '11/09/2026' }),
+  await assert.rejects(stockWrite([...batches.planReconcileBranchSnapshot({ productId: 1, branchId: 1, quantity: 20, receivedDate: '11/09/2026' }),
     { sql: 'INSERT INTO sale_bulk_guards(guard_value) VALUES(0)', params: {} }]), /constraint/i)
   assert.deepEqual(lots(1), beforeFailure); parity(1, 5)
   assert.throws(() => batches.planReconcileBranchSnapshot({ productId: 1, branchId: 1, quantity: 2, receivedDate: '30/02/2026' }), /valid received date/)
   console.log('PASS snapshot grow, repeat, shrink, zero, regrow, two branches, invalid date and atomic rollback')
 
   // Execute the real duplicate-row finalizer, including its staging query,
-  // against the same migrated DB. Only the unrelated chunk scheduler is
-  // reduced to sequential atomic groups (covered by its dedicated suite).
+  // against the same migrated DB and the actual whole-group chunk scheduler.
   const engineSource = fs.readFileSync(path.resolve(__dirname, '../src/lib/importEngine.ts'), 'utf8')
   const engineAst = ts.createSourceFile('importEngine.ts', engineSource, ts.ScriptTarget.Latest, true)
   const declaration = engineAst.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === 'reconcileDuplicateProductSnapshotRows')
   const compiled = ts.transpileModule(declaration.getText(engineAst), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+  const chunkStart = engineSource.indexOf('const D1_IMPORT_BATCH_CHUNK_SIZE =')
+  const chunkEnd = engineSource.indexOf('// Chunked + resumable', chunkStart)
+  assert.ok(chunkStart > 0 && chunkEnd > chunkStart)
+  const scheduler = {}
+  const schedulerCode = ts.transpileModule(engineSource.slice(chunkStart, chunkEnd), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+  const chunkSize = new Function('exports', 'executeStockTransaction', 'stockTransactionStatementCount', schedulerCode + ';return D1_IMPORT_BATCH_CHUNK_SIZE;')(scheduler, transaction.executeStockTransaction, transaction.stockTransactionStatementCount)
   const exports = {}
   const authority = load('importBranchAuthority.ts')
-  new Function('exports', 'planReconcileBranchSnapshot', 'validateCanonicalImportBranchIds', 'withCanonicalImportBranchWriteGuard', 'runD1BatchGroupsInChunks', 'productStockGuardStatement', compiled)(
+  new Function('exports', 'planReconcileBranchSnapshot', 'validateCanonicalImportBranchIds', 'withCanonicalImportBranchWriteGuard', 'runD1BatchGroupsInChunks', 'productStockGuardStatement', 'D1_IMPORT_BATCH_CHUNK_SIZE', compiled)(
     exports, batches.planReconcileBranchSnapshot, authority.validateCanonicalImportBranchIds, authority.withCanonicalImportBranchWriteGuard,
-    async (database, groups) => { for (const group of groups) await database.batch(group) }, require('./harness/product_stock_guard.cjs').productStockGuardStatement)
+    scheduler.runD1BatchGroupsInChunks, require('./harness/product_stock_guard.cjs').productStockGuardStatement, chunkSize)
   for (const [row, quantity] of [[1, 4], [2, 5]]) db.prepare(`INSERT INTO import_job_rows(job_id,phase,row_number,action,result_json) VALUES('snapshot-test','apply',@row,'update',@json)`)
     .run({ row, json: JSON.stringify({ existingId: 1, data: { branch_id: 1, stock_quantity: quantity, received_date: '2026-09-10' } }) })
   assert.equal(await exports.reconcileDuplicateProductSnapshotRows(db, 'snapshot-test'), 1)
@@ -84,7 +97,7 @@ async function main() {
   await receive(2, 1, '11/09/2026', { batchId: original.id })
   assert.equal(lots(2)[0].received_at, '2026-03-04', 'exact-lot top-up retains first date')
   const plannedReturn = batches.planReceiveBatchStock({ productId: 1, branchId: 1, quantity: 2, receivedDate: '11/09/2026', provenanceKey: 'return:one:0', notes: 'Return receipt' })
-  await db.batch(plannedReturn.statements)
+  await stockWrite(plannedReturn.statements)
   const returnLot = lots(1).find((lot) => lot.batch_key === plannedReturn.batchKey)
   assert.equal(returnLot.received_at, '2026-09-11')
   assert.equal(returnLot.quantity, 2)
@@ -92,26 +105,27 @@ async function main() {
   parity(1, 7)
   console.log('PASS first receipt date and event provenance remain distinct')
 
-  db.prepare('UPDATE branch_stock SET quantity=quantity+3 WHERE product_id=1 AND branch_id=1').run()
+  await stockWrite([{ sql: 'UPDATE branch_stock SET quantity=quantity+3 WHERE product_id=1 AND branch_id=1' }])
   const input = { productId: 1, productName: 'A', branchId: 1, quantity: 2, unitPriceUsd: 10, costPriceUsd: 3, costPriceKhr: 12000, unlottedStock: true }
   const availableLots = new Map([['1:1', [{ batchId: returnLot.id, available: 2, receivedAt: '2026-09-11', lotCode: '110926', expiryDate: null }]]])
   const planned = additions.allocateNewSaleLines([input], availableLots, 'completed')
   assert.deepEqual(planned[0].takes, [], 'explicit unlotted source never FIFO allocates')
   assert.equal(availableLots.get('1:1')[0].available, 2)
   assert.equal(additions.resolveExplicitSaleLineBatches([{ ...input, batchId: returnLot.id }], availableLots).ok, false)
-  await db.batch(additions.planUnlottedSaleLineGuards(planned))
+  await stockWrite(additions.planUnlottedSaleLineGuards(planned))
   const duplicate = additions.allocateNewSaleLines([input, input], availableLots, 'completed')
-  await assert.rejects(db.batch(additions.planUnlottedSaleLineGuards(duplicate)), /constraint/i, 'duplicate lines share one residual capacity')
-  const deactivate = () => db.prepare('UPDATE product_batches SET is_active=0 WHERE id=?').run([returnLot.id])
-  assert.throws(deactivate, /Cannot deactivate a received lot/, '0154 rejects new inactive positive stock')
-  // Reconstruct pre-0154 corruption solely to exercise the residual guard.
-  // Restore the current database guard before executing production code.
-  const activationGuard = db.prepare("SELECT sql FROM sqlite_master WHERE name='positive_lot_reject_inactive_update_0154'").get().sql
-  db.exec('DROP TRIGGER positive_lot_reject_inactive_update_0154')
-  try { deactivate() } finally { db.exec(activationGuard) }
-  await assert.rejects(db.batch(additions.planUnlottedSaleLineGuards(duplicate)), /constraint/i, 'inactive lot stock remains attributed')
-  db.prepare('UPDATE branch_stock SET quantity=quantity-2 WHERE product_id=1 AND branch_id=1').run()
-  await assert.rejects(db.batch(additions.planUnlottedSaleLineGuards(planned)), /constraint/i, 'racing residual change fails closed')
+  await assert.rejects(stockWrite(additions.planUnlottedSaleLineGuards(duplicate)), /constraint/i, 'duplicate lines share one residual capacity')
+  await assert.rejects(stockWrite([{ sql: 'UPDATE product_batches SET is_active=0 WHERE id=@id', params: { id: returnLot.id } }]), /Cannot deactivate a received lot/, '0154 rejects new inactive positive stock')
+  // Historical corruption belongs to a genuinely pre-0154 physical schema. No current trigger is removed.
+  const historical = openDb(loadAll({ through: 153 }))
+  historical.exec(`INSERT INTO branches(id,name,is_active) VALUES(1,'Shop',1);
+    INSERT INTO products(id,name,stock_quantity) VALUES(1,'A',5);
+    INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,received_at) VALUES(1,1,'historical',0,'2026-09-11');
+    INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(1,1,2);
+    INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,5);`)
+  await assert.rejects(historical.batch(additions.planUnlottedSaleLineGuards(duplicate)), /constraint/i, 'historical inactive lot stock remains attributed')
+  await stockWrite([{ sql: 'UPDATE branch_stock SET quantity=quantity-2 WHERE product_id=1 AND branch_id=1' }])
+  await assert.rejects(stockWrite(additions.planUnlottedSaleLineGuards(planned)), /constraint/i, 'racing residual change fails closed')
   assert.equal(additions.planUnlottedSaleLineGuards(additions.allocateNewSaleLines([input], availableLots, 'completed', true)).length, 0)
   console.log('PASS explicit unlotted choice, mixed provenance, duplicate capacity, inactive lots, stale residual and stock-skipped parity')
 }
