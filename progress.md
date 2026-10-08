@@ -1,4 +1,14 @@
-## 08/10/2026 — STOCK-ACTIVE and owner interaction fixes — unreleased
+## 08/10/2026 — shared menu keyboard follow-up — local checkpoint
+
+Snapshot at 11:44 UTC: the prior stock/image checkpoint `6d9ea0b5f9e934c49171b7874db3e19b957e05fd` passed Gate 37760285585 (837 Worker and 748 frontend files) and fresh Astra review with documented exceptions. Paid deployment 37766560219 is running its own safety suite; publication has not been verified in this snapshot. Its one-time immediate/open-shift exception applies only to that release.
+
+The isolated mobile follow-up restores AppSelect focus after selection while preserving intentional caller or confirmation-dialog focus. PortalMenu follows the visible viewport, preserves caller width/height caps, scrolls oversized content and retains its scroll position while repositioning. The first correction was independently rejected for overriding a compact height cap and allowing CSS minimum width to exceed a narrow viewport; both have discriminating regressions in the repaired source. AppSelect's accepted implementation remains unchanged by that repair.
+
+At runtime commit `f6bd31240c724c5db0218f090fa6c11c898b1575`, 36 Chromium/WebKit groups across EN/KM passed, as did ten focused sibling files, frontend/SW typechecks, i18n and a post-commit production build. The catalog dependency size remains below the unchanged limit. Synthetic keyboard geometry and browser emulation do not certify physical devices. Independent closure, a new full-SHA GitHub gate and fresh Astra review remain required before this follow-up can deploy; normal evening/closed-shift rules apply. No production action or database migration belongs to this mobile slice.
+
+Damaged-as-counted/sellable-tag conversion, remaining owner UI, broader account/cache/PWA work and parked lanes remain open. The checklist below is the historical pre-gate stock/image snapshot; its pending-certification wording is superseded by this dated checkpoint.
+
+## Historical pre-gate snapshot — STOCK-ACTIVE and owner interaction fixes
 
 - [~] Ordinary products have no active/inactive state. Deliberately removed or merged records remain removed. A product with stock in any of the four ledgers cannot be removed; incoming stock cannot revive a removed product. Shared enforcement, migration backstop, stock readers and focused tests are implemented; composed certification is pending.
 - [~] Adjust Stock: received dates sort newest first across years, with undated lots last; explicit lot selection and allocation defaults are preserved. Keyboard viewport bounds, received-date dropdown placement and guarded Close/Escape are implemented and tested in desktop Chromium and emulated Android/iPhone WebKit. Physical iOS validation remains unavailable.
