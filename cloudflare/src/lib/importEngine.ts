@@ -66,7 +66,8 @@ import type { Env } from '../index'
 import { getDb, getImportFencedDb, isImportMaintenanceFenceError, isRetryableD1Error, type D1Compat } from './db'
 import { purgeImportIncomingFiles } from './importIncomingFiles'
 import { freePlanRefusalSuffix, getPlanLimits } from './planTier'
-import { chunkRowsForAttempt, dispatchImportWork } from './queueDispatch'
+import { chunkRowsForAttempt, dispatchImportWork, ImportInvocationDeferredError } from './queueDispatch'
+import { currentRequestMetrics, type RequestMetrics } from './requestMetrics'
 import { buildInClause, chunkForBinding, selectInChunks } from './sqlBinding'
 import {
   parseCsvRows,
@@ -4002,6 +4003,7 @@ function summarizeImageMatch(match: Awaited<ReturnType<typeof computeImportImage
 // migration 0011_import_job_chunking.sql's header for the overall design.
 
 type ImportChunkState = {
+  genericApply?: { window: number }
   // Populated once, on a phase run's first chunk, for job.type==='products'
   // only -- computeImportImageMatch is a full-file, cross-row computation
   // (see importImageMatch.ts's matchImagesToProducts, worst-case
@@ -4144,14 +4146,14 @@ async function saveChunkState(db: D1Compat, jobId: string, cursor: number, state
 // failed/cancelled/completed attempt's leftovers never bleed into a new
 // one. See runImportAnalyze/runImportApply's own "is this a fresh start"
 // check for how a fresh run is detected.
-async function resetChunkState(db: D1Compat, jobId: string, phase: 'analyze' | 'apply'): Promise<void> {
+async function resetChunkState(db: D1Compat, jobId: string, phase: 'analyze' | 'apply', genericWindow?: number): Promise<void> {
   await db.staging.prepare(`DELETE FROM import_job_rows WHERE job_id = @id AND phase = @phase`).run({ id: jobId, phase })
   // The cross-chunk dedupe ledger is per-RUN, not per-file: a fresh analyze
   // must not inherit the previous run's "already seen" marks, or rows would
   // be reported as merging with rows from a run that no longer exists. This
   // is what discarding chunk_state_json used to do implicitly.
   await db.prepare(`DELETE FROM import_job_row_signatures WHERE job_id = @id`).run({ id: jobId })
-  await saveChunkState(db, jobId, 0, { startedAtMs: Date.now() })
+  await saveChunkState(db, jobId, 0, { startedAtMs: Date.now(), ...(genericWindow ? { genericApply: { window: genericWindow } } : {}) })
 }
 
 // Decides whether a queue message landing in runImportAnalyze/runImportApply
@@ -5381,8 +5383,9 @@ const STOCK_POISON_MESSAGE = 'This sale group has a line that could not be resol
  * kept operator-scale by STOCK_ACTION_MAX_UNITS instead.
  */
 const STOCK_QUERY_BUDGET = Symbol('stockQueryBudget')
-class StockQueryBudgetDeferred extends Error {}
-type StockQueryBudget = { used: number; limit: number; reserve: number; enabled: boolean; physicalBatches: number }
+class StockQueryBudgetDeferred extends ImportInvocationDeferredError {}
+type StockQueryBudget = { used: number; limit: number; reserve: number; enabled: boolean; physicalBatches: number; invocation?: RequestMetrics['invocation'] }
+const stockBudgetUsed = (budget: StockQueryBudget) => budget.invocation?.attemptedStatements ?? budget.used
 type BudgetDb = D1Compat & { [STOCK_QUERY_BUDGET]?: StockQueryBudget; readonly importWriteFenceStatements?: 0 | 1 }
 function stockQueryBudgetDb(db: D1Compat, limit: number, factoryQueries = 0): BudgetDb {
   if ((db as BudgetDb)[STOCK_QUERY_BUDGET]) return db
@@ -5391,7 +5394,7 @@ function stockQueryBudgetDb(db: D1Compat, limit: number, factoryQueries = 0): Bu
     const result = Object.create(source) as BudgetDb
     Object.defineProperty(result, STOCK_QUERY_BUDGET, { value: budget })
     const charge = (count: number) => {
-      if (budget.enabled && budget.used + count > budget.limit - budget.reserve) throw new StockQueryBudgetDeferred()
+      if (budget.enabled && stockBudgetUsed(budget) + count > budget.limit - budget.reserve) throw new StockQueryBudgetDeferred()
       budget.used += count
     }
     result.prepare = ((sql: string) => {
@@ -5921,14 +5924,31 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
   const limits = getPlanLimits(env)
   const chunkRows = chunkRowsForAttempt(limits.rowsPerImportChunk, attempt)
   const sw = makeStopwatch()
-  const jobRow = await db.prepare(`SELECT status, cancel_requested, started_at FROM import_jobs WHERE id = @id`).get<{ status: string; cancel_requested: number; started_at: string | null }>({ id: jobId })
+  const jobRow = await db.prepare(`SELECT status, cancel_requested, started_at, type, chunk_cursor, chunk_state_json FROM import_jobs WHERE id = @id`).get<{ status: string; cancel_requested: number; started_at: string | null; type: ImportType; chunk_cursor: number; chunk_state_json: string | null }>({ id: jobId })
   if (!jobRow) throw new Error('Import job not found')
   // See runImportAnalyze's identical check + isFreshImportRun's comment --
   // a crashed chunk's retry lands here with status='failed' (markJobFailed
   // already ran before the re-throw), not 'applying', so that has to be
   // checked for explicitly rather than assumed to still look like a
   // continuation.
-  const isFreshStart = isFreshImportRun(jobRow.status, 'applying')
+  let savedState: ImportChunkState = {}
+  try { savedState = JSON.parse(jobRow.chunk_state_json || '{}') } catch { /* fresh state */ }
+  const generic = jobRow.type !== 'stock_actions'
+  const budget = (db as BudgetDb)[STOCK_QUERY_BUDGET]!
+  // Settlement is checkpoint2 + inline pause2 (or queued dispatch0) + lease2.
+  // A synchronous import route still has its job reread1 and audit1 to run.
+  const httpTail = env.IMPORT_QUEUE ? 0 : 2
+  const deferTail = 2 + (env.IMPORT_QUEUE ? 0 : 2) + 2 + httpTail
+  if (generic) {
+    const metrics = currentRequestMetrics()
+    if (!metrics) throw new Error('Generic import requires an invocation metrics scope')
+    budget.invocation = metrics.invocation
+    budget.enabled = true
+    budget.reserve = deferTail
+  }
+  let resumeCursor = Number(jobRow.chunk_cursor || 0)
+  let resumeState = savedState
+  const isFreshStart = isFreshImportRun(jobRow.status, 'applying') && !(generic && savedState.genericApply)
 
   // Claim the job before touching a chunk. If another invocation holds it --
   // an at-least-once redelivery, or a retry overlapping the run it retries --
@@ -5974,7 +5994,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       await db.prepare(`UPDATE import_jobs SET status = 'applying', phase = 'applying', started_at = COALESCE(started_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: jobId })
     }
     if (isFreshStart) {
-      await resetChunkState(db, jobId, 'apply')
+      await resetChunkState(db, jobId, 'apply', generic ? chunkRows : undefined)
+      if (generic) { resumeCursor = 0; resumeState = { startedAtMs: Date.now(), genericApply: { window: chunkRows } } }
     }
     // Unified stock actions have their own dedicated, isolated apply path --
     // each add/sale/create is committed by stockActionCommit.ts's atomic,
@@ -5997,14 +6018,24 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     sw.lap('fetchAndParseMs') // now a COUNT + the getChunkState read below, not a full re-parse -- see ensureSourceRowsMaterialized above
     if (!totalRows?.n) throw new Error('No CSV file uploaded for this job')
     const { cursor, state } = await getChunkState(db, jobId)
+    resumeCursor = cursor
+    resumeState = state
+    state.genericApply ??= { window: chunkRows }
+    const genericWindow = Math.min(chunkRows, state.genericApply.window)
     const decisions = getDecisionMap(job.policy_json)
 
     // Same SQL windowing the analyze path uses -- only this chunk's groups,
     // not the whole file re-partitioned on every invocation.
     const isSalesJob = job.type === 'sales'
     const totalUnits = isSalesJob ? await countSalesGroups(db, jobId) : totalRows.n
+    const nowIso = new Date().toISOString()
+    const productImportMode = job.type === 'products' ? getProductImportMode(job.policy_json) : 'merge'
+    if (cursor < totalUnits) {
+    // Results2, source checkpoint2, progress counters2, lease2; inline
+    // additionally pauses2 and leaves the HTTP reread/audit2 untouched.
+    budget.reserve = (db.staging === db ? 2 : 1) + 2 + 2 + 2 + (env.IMPORT_QUEUE ? 0 : 2) + httpTail
     const groupEntries = isSalesJob
-      ? await readSalesGroupWindow(db, jobId, decisions, cursor, chunkRows)
+      ? await readSalesGroupWindow(db, jobId, decisions, cursor, genericWindow)
       : null
 
     let imageMatchCache = state.imageMatch
@@ -6053,7 +6084,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // Already windowed by readSalesGroupWindow's LIMIT/OFFSET -- slicing by
     // `cursor` again here would window it twice and skip whole receipts.
     const windowEntries = groupEntries
-    const windowRows = windowEntries ? windowEntries.flatMap(([, rows]) => rows) : await readMaterializedWindow(db, jobId, cursor, chunkRows, decisions)
+    const windowRows = windowEntries ? windowEntries.flatMap(([, rows]) => rows) : await readMaterializedWindow(db, jobId, cursor, genericWindow, decisions)
     const windowUnitCount = windowEntries ? windowEntries.length : windowRows.length
     const groupIndexByRowNumber = windowEntries
       ? new Map(windowEntries.flatMap(([, rows], i) => rows.map((r) => [r._rowNumber, cursor + i] as const)))
@@ -6098,7 +6129,6 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // job; every other job type keeps its existing per-row plannedMode
     // behavior untouched, same scoping 'replace_all' already uses just
     // below in this same function.
-    const productImportMode = job.type === 'products' ? getProductImportMode(job.policy_json) : 'merge'
     const productReplaceColumns = productImportMode === 'replace_columns' ? getProductImportReplaceColumns(job.policy_json) : []
 
     const candidateRows = results.filter(r => r.action === 'create' || r.action === 'update')
@@ -6176,7 +6206,6 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       sql: `INSERT INTO import_stock_action_guards (job_id, action_key, guard_key, guard_value) VALUES (@jobId, @actionKey, @guardKey, 1)`,
       params: { jobId, actionKey: GENERIC_APPLY_GUARD_ACTION, guardKey: `row:${rowNumber}` },
     })
-    const nowIso = new Date().toISOString()
     // 9.2 (Part 421): each in-file auto-merge (a later create row folding
     // into an earlier row's product via the identity signature) is
     // RECORDED -- the losing row's original values were previously
@@ -6985,20 +7014,25 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     }
     sw.lap('salesItemsMs')
 
-    await persistChunkResults(db, jobId, 'apply', results, groupIndexByRowNumber)
+    await persistStockResults(db, jobId, results, groupIndexByRowNumber)
     const chunkFailed = results.filter((r) => r.action === 'error').length
     const nextCursor = cursor + windowUnitCount
 
-    if (nextCursor < totalUnits) {
+    {
+      budget.reserve = 2 + (env.IMPORT_QUEUE ? 0 : 2) + 2 + httpTail
       await saveChunkState(db, jobId, nextCursor, state)
+      resumeCursor = nextCursor
       // + rather than = -- these accumulate across chunks (unlike
       // analyze's total_rows/processed_rows, which is one number computed
       // fresh each chunk from a stable denominator).
       await db.prepare(`UPDATE import_jobs SET processed_rows = processed_rows + @applied, failed_rows = failed_rows + @failed, updated_at = CURRENT_TIMESTAMP WHERE id = @id`)
         .run({ id: jobId, applied: actionable.length, failed: chunkFailed })
       console.log('[import-timing] apply chunk', jobId, { cursor, nextCursor, totalUnits, ...sw.marks })
-      await dispatchImportWork(env, { jobId, kind: 'apply' })
+      budget.reserve = 2 + httpTail
+      if (!env.IMPORT_QUEUE) await db.prepare(`UPDATE import_jobs SET status='approved',phase='apply_deferred',updated_at=CURRENT_TIMESTAMP WHERE id=@id`).run({ id: jobId })
+      await dispatchImportWork(env, { jobId, kind: 'apply' }, { freshInvocation: true })
       return { applied: actionable.length, failed: chunkFailed }
+    }
     }
 
     // Replace-all mode: this import is the complete, current catalog --
@@ -7026,7 +7060,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     if (job.type === 'products' && getProductImportMode(job.policy_json) === 'replace_all') {
       // Rows are already committed. Save their cursor before the final phase:
       // a refused replacement retries only this phase, never stock receipts.
-      await saveChunkState(db, jobId, nextCursor, state)
+      await saveChunkState(db, jobId, cursor, state)
       replacementFinalizing = true
       const refusedRows = await db.staging.prepare(`SELECT COUNT(*) AS n FROM import_job_rows
         WHERE job_id=@id AND phase='apply' AND action='error'`).get<{ n: number }>({ id: jobId })
@@ -7082,6 +7116,11 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       // No ExecutionContext available here -- await directly rather than
       // waitUntil. This runs inside queue.ts's queue consumer, not an HTTP
       // response path, so there's no early-return race to avoid.
+      // Cache's raw D1 helpers use two attempts per operation: namespace
+      // lookup2, Free quota2, fallback version upsert2 (Paid omits quota).
+      const cacheAttempts = limits.tier === 'free' ? 6 : 4
+      if (stockBudgetUsed(budget) + cacheAttempts > budget.limit - budget.reserve) throw new StockQueryBudgetDeferred()
+      budget.used += cacheAttempts
       await bumpVersion(env, 'products').catch(() => {})
       await broadcast(env, job.type === 'sales' ? 'sales' : job.type === 'inventory' ? 'inventory' : 'products', { action: 'import', jobId }).catch(() => {})
     } else if (CONTACT_IMPORT_CHANNEL[job.type]) {
@@ -7099,7 +7138,19 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     return outcome
   } catch (error) {
     const budget = (db as BudgetDb)[STOCK_QUERY_BUDGET]
-    if (budget) budget.reserve = 2
+    if (generic && error instanceof StockQueryBudgetDeferred) {
+      // The source cursor stays at the last persisted window. Earlier row
+      // receipts can already be committed; redelivery reconciles those seals.
+      // Do not label a safe suffix as failed or return invented zero effects.
+      const previousWindow = resumeState.genericApply?.window ?? chunkRows
+      resumeState.genericApply = { window: Math.max(1, Math.floor(previousWindow / 2)) }
+      budget!.reserve = 2 + (env.IMPORT_QUEUE ? 0 : 2) + httpTail
+      await saveChunkState(db, jobId, resumeCursor, resumeState)
+      budget!.reserve = 2 + httpTail
+      if (!env.IMPORT_QUEUE) await db.prepare(`UPDATE import_jobs SET status='approved',phase='apply_deferred',updated_at=CURRENT_TIMESTAMP WHERE id=@id`).run({ id: jobId })
+      throw error
+    }
+    if (budget) budget.reserve = 2 + httpTail
     if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError || isImportMaintenanceFenceError(error)) throw error
     const stockError = productStockGuardError(error)
     const refusalCode = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
@@ -7120,7 +7171,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     throw stockError || error
   } finally {
     const budget = (db as BudgetDb)[STOCK_QUERY_BUDGET]
-    if (budget) budget.reserve = 0
+    if (budget) budget.reserve = httpTail
     // Released on EVERY exit, including the failure path. A failed chunk is
     // retried by the queue, and that retry must be able to claim the job
     // rather than waiting out a 60s lease held by an invocation that is

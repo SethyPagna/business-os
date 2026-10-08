@@ -605,7 +605,7 @@ export default {
   // own name off the batch itself.
   async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
     if (batch.queue === 'business-os-import') {
-      await handleImportQueue(batch as MessageBatch<{ jobId: string; kind: 'analyze' | 'apply' | 'bulk-delete' }>, env)
+      await runBackground(env, 'import-queue', () => handleImportQueue(batch as MessageBatch<{ jobId: string; kind: 'analyze' | 'apply' | 'bulk-delete' }>, env))
     } else if (batch.queue === 'business-os-import-dlq') {
       await handleImportDeadLetterQueue(batch as MessageBatch<{ jobId: string; kind: 'analyze' | 'apply' | 'bulk-delete' }>, env)
     } else if (batch.queue === 'business-os-media') {
