@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { nullableMoney4, multiplyMoney4 } from '../src/utils/moneyPrecision.ts'
 import { buildStockLineRequest, type StockSessionLine } from '../src/utils/stockSessionDraft.ts'
+import './stockSessionYearLabels.test.ts'
 
 // F2 (Part 419): fast stock-in -- "enter batch + supplier once, then
 // per-product name→details entry; Add appends and continues, Done
@@ -252,7 +253,7 @@ runTest('the lot picker reads the product lots at the session branch', () => {
   assert.equal(lineRequest({ batchChoice: 'new' }).body.receivedDate, '2026-09-30')
   // The lot is frozen onto the queued line and stays visible.
   assert.match(modalSource, /\s+batchChoice,\s+batchLabel: lotLabelFor\(batchChoice\),/)
-  assert.match(itemsSource, /line\.batchLabel \? ` · \$\{shortDate\(line\.batchLabel\)\}` : ''/, 'what was chosen is visible before and after Complete')
+  assert.match(itemsSource, /line\.batchLabel \? ` · \$\{line\.batchLabel\}` : ''/, 'the complete received-date identity remains visible; rendered mixed-year cases run above')
   // Reopening a queued line must not silently drop its lot.
   assert.match(modalSource, /pendingBatchRestoreRef\.current = line\.batchChoice/, 'the restore survives the refetch editLine triggers')
   assert.match(modalSource, /typeof restore === 'number' && choices\.some\(\(lot\) => Number\(lot\.id\) === restore\)/, 'a lot that no longer exists here is not restored')

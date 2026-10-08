@@ -197,10 +197,12 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   const legacyReturnDedupeQuery = /SELECT id, return_number FROM returns WHERE client_request_id = \? AND client_request_id <> '' LIMIT 1/g
   const legacyReturnDedupeMatches = returnsRoute.match(legacyReturnDedupeQuery) || []
   assert.equal(legacyReturnDedupeMatches.length, 1, 'supplier returns retain the indexed legacy request lookup')
-  assert.match(returnsRoute, /const readReceipt = async \(\) => db\.prepare\(`SELECT return_id,sale_id,request_digest,response_json[\s\S]*FROM return_create_receipts WHERE actor_id=\? AND request_id=\? LIMIT 1`\)/)
+  assert.match(returnsRoute, /const readReceipt = async \(\) => \{[\s\S]*SELECT r\.return_id,r\.sale_id,r\.request_digest,r\.response_json,o\.id AS occupied_id[\s\S]*LEFT JOIN return_create_receipts r ON r\.actor_id=\? AND r\.request_id=\?/)
+  assert.match(returnsRoute, /\[authenticatedActorId, clientRequestId, clientRequestId\]/, 'the combined lookup retains authenticated actor scope')
   assert.match(returnsRoute, /if \(priorReceipt\) \{[\s\S]*priorReceipt\.request_digest !== requestDigest[\s\S]*idempotency_conflict[\s\S]*JSON\.parse\(priorReceipt\.response_json\)/)
-  assert.match(returnsRoute, /const occupiedRequest = await db\.prepare\("SELECT id FROM returns WHERE client_request_id=\? AND client_request_id<>'' LIMIT 1"\)/)
-  assert.match(returnsRoute, /if \(occupiedRequest\) \{[\s\S]*client_request_id is already owned by another return\.[\s\S]*idempotency_conflict/)
+  assert.match(returnsRoute, /LEFT JOIN returns o ON o\.client_request_id=\? AND o\.client_request_id<>'' LIMIT 1/)
+  assert.match(returnsRoute, /occupiedRequestId = row\?\.occupied_id \?\? null/)
+  assert.match(returnsRoute, /if \(occupiedRequestId != null\) \{[\s\S]*client_request_id is already owned by another return\.[\s\S]*idempotency_conflict/)
 })
 
 await runTest('file picker and library upload/delete flows keep synchronous action guards', () => {
