@@ -1,4 +1,4 @@
-import { productStockGuardError, productStockGuardStatement, ProductStockGuardError } from './productStockGuard'
+import { assertProductStatusInput, productStockGuardError, productStockGuardStatement, ProductStockGuardError } from './productStockGuard'
 import { getDb, type D1Compat } from './db'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
@@ -625,6 +625,10 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   if (previous) {
     if (previous.request_json !== canonical) fail('client_request_id was already used with different data.', 409, 'idempotency_conflict')
     return parseStoredReceipt(previous, true)
+  }
+
+  for (const line of request.items) {
+    if (line.kind === 'create_receive' && line.product) assertProductStatusInput(line.product)
   }
 
   // Validate new receipts only after exact stored retries have resolved. Older
