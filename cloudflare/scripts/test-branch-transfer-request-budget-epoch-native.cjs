@@ -73,10 +73,18 @@ async function main(){
     // The assertions below fail against that implementation without needing
     // an unmerged historical commit object in a fresh clone.
     const current=await bundleWorker()
+    for(const tier of ['free','paid']) {
+      const f=await world(current,tier),cap=tier==='free'?50:1000
+      f.loseNextCommitAcknowledgement()
+      const coldLost=await f.call('cold-lost-'+tier)
+      assert.equal(coldLost.status,200);assert.equal(coldLost.json.replayed,true);assert.equal(coldLost.stockBatches,1);assert.ok(coldLost.physical<=cap);zero(f)
+      const before=f.snapshot(),replay=await f.call('cold-lost-'+tier)
+      assert.equal(replay.status,200);assert.equal(replay.json.replayed,true);assert.equal(replay.stockBatches,0);assert.equal(f.snapshot(),before)
+    }
     for(const tier of ['free','paid']) for(const options of [{},{cacheFailure:true,tailRetries:true},{staleAuth:true}]){
       const f=await world(current,tier,options),cap=tier==='free'?50:1000
-      const cold=await f.call('cold-'+tier+'-'+JSON.stringify(options));assert.ok(cold.physical<=cap)
-      if(cold.status===409){assert.equal(cold.json.code,'transfer_query_budget_exceeded');assert.equal(cold.batches,0)}else{assert.equal(cold.status,200);assert.equal(cold.json.replayed,false)}
+      const coldBefore=f.snapshot(),cold=await f.call('cold-'+tier+'-'+JSON.stringify(options));assert.ok(cold.physical<=cap)
+      if(cold.status===409){assert.equal(cold.json.code,'transfer_query_budget_exceeded');assert.equal(cold.batches,0);assert.equal(f.snapshot(),coldBefore)}else{assert.equal(cold.status,200);assert.equal(cold.json.replayed,false)}
       const warm=await f.call((cold.status===409?'cold-':'warm-')+tier+'-'+JSON.stringify(options));assert.equal(warm.status,200);assert.equal(warm.json.replayed,false);assert.ok(warm.physical<=cap);assert.equal(warm.stockBatches,1);zero(f)
       f.loseNextCommitAcknowledgement()
       const lost=await f.call('lost-'+tier+'-'+JSON.stringify(options));assert.equal(lost.status,200);assert.equal(lost.json.replayed,true);assert.equal(lost.stockBatches,1);assert.ok(lost.physical<=cap);zero(f)
