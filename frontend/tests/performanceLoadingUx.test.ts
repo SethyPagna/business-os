@@ -275,7 +275,7 @@ assert.match(app, /const IMPORT_TRACKER_IDLE_TIMEOUT_MS = 60000/, 'deferred impo
 // networkFirstStatic even though STATIC_CACHE is scoped per BUILD_HASH
 // exactly like the hashed chunks, so there was nothing it was protecting
 // against. isHashedBuildAsset/networkFirstStatic no longer exist.
-assert.match(serviceWorker, /async function cacheFirstStatic\(request, event\)[\s\S]*const cached = await cache\.match\(request\)[\s\S]*if \(cached\)[\s\S]*return cached/, 'cacheable static assets should use cache-first service-worker reads so repeat visits do not pay tunnel latency')
+assert.match(serviceWorker, /async function cacheFirstStatic\(request, event\)[\s\S]*const cached = await cache\?\.match\(request\)\.catch\(\(\) => undefined\)[\s\S]*if \(cached\)[\s\S]*return cached/, 'cacheable static assets should use optional cache-first service-worker reads so repeat visits do not pay tunnel latency')
 assert.match(serviceWorker, /if \(!isCacheableStaticPath\(url\.pathname\)\)[\s\S]{0,20}return[;\s]*\n[\s\S]{0,700}event\.respondWith\(cacheFirstStatic\(request, event\)\)/, 'every cacheable static path -- hashed chunks and the unhashed manifest/icon/runtime-guard set alike -- should go through cacheFirstStatic')
 assert.doesNotMatch(serviceWorker, /function isHashedBuildAsset/, 'the hashed/unhashed split is gone now that both use the same cache-first strategy')
 assert.doesNotMatch(serviceWorker, /function networkFirstStatic/, 'networkFirstStatic is dead now that its only caller was removed')

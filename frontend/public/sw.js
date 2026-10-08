@@ -880,8 +880,8 @@ function isRecoveryNavigation(request) {
 // to a live fetch (and its normal offline error) only when there is no
 // cached shell yet, e.g. the very first navigation this worker serves.
 async function appShellFallback(request, event) {
-    const cache = await caches.open(APP_SHELL_CACHE);
-    let cached = await cache.match('/index.html') || await cache.match('/');
+    const cache = await caches.open(APP_SHELL_CACHE).catch(() => null);
+    let cached = await cache?.match('/index.html').catch(() => undefined) || await cache?.match('/').catch(() => undefined);
     // A cached shell that cannot legally answer a navigation -- the redirected
     // response an older worker stored -- is dropped here rather than served.
     // Without this, a device already holding one never recovers on its own.
@@ -890,8 +890,8 @@ async function appShellFallback(request, event) {
     // recovery navigation on such a device never reached the origin as a
     // navigation -- the read this host answers with a bot challenge.
     if (cached && !isValidDocumentResponse(cached)) {
-        await cache.delete('/index.html').catch(() => { });
-        await cache.delete('/').catch(() => { });
+        await cache?.delete('/index.html').catch(() => { });
+        await cache?.delete('/').catch(() => { });
         cached = undefined;
     }
     // A recovery navigation says, in its own URL, that the build this worker is
@@ -914,6 +914,8 @@ async function appShellFallback(request, event) {
     // and / are served must-revalidate (frontend/public/_headers), and this URL
     // carries __bos_reload, so there is no stale HTTP-cache hit to guard.
     if (isRecoveryNavigation(request)) {
+        if (!cached)
+            return fetchAndCacheShell(request, cache);
         // Bounded, because this is the only awaited fetch on the response path:
         // an origin that accepts the connection and never answers made
         // respondWith hang forever and the tab stayed blank -- strictly worse
@@ -939,11 +941,9 @@ async function appShellFallback(request, event) {
         // reclaiming one socket.
         const network = fetch(request).catch(() => null);
         let expireTimer;
-        const fresh = cached
-            ? await Promise.race([network, new Promise((resolve) => {
-                    expireTimer = setTimeout(() => resolve(null), RECOVERY_NAVIGATION_FETCH_TIMEOUT_MS);
-                })])
-            : await network;
+        const fresh = await Promise.race([network, new Promise((resolve) => {
+                expireTimer = setTimeout(() => resolve(null), RECOVERY_NAVIGATION_FETCH_TIMEOUT_MS);
+            })]);
         clearTimeout(expireTimer);
         // Whatever the origin answered is what this navigation gets, exactly as
         // it would be with no worker at all; the cached shell answers only when
@@ -965,7 +965,7 @@ async function appShellFallback(request, event) {
         //     the dead shell cannot, because the guard will not reload again.
         if (fresh) {
             // Only the app itself is kept as the shell.
-            if (await isAppShellDocument(fresh))
+            if (cache && await isAppShellDocument(fresh))
                 await cache.put('/index.html', fresh.clone()).catch(() => { });
             return fresh;
         }
@@ -976,7 +976,7 @@ async function appShellFallback(request, event) {
             // Do not let a Cloudflare Access/login redirect, an app-owned HTTP
             // error or a 200 challenge interstitial overwrite a good cached
             // shell -- only the real app shell updates it.
-            if (await isAppShellDocument(response)) {
+            if (cache && await isAppShellDocument(response)) {
                 await cache.put('/index.html', response.clone()).catch(() => { });
             }
         })
@@ -987,8 +987,10 @@ async function appShellFallback(request, event) {
     return fetchAndCacheShell(request, cache);
 }
 async function fetchAndCacheShell(request, cache) {
-    const response = await fetch(request, { cache: 'no-store' });
-    if (await isAppShellDocument(response)) {
+    // An init object rebuilds a navigation as a subresource Request. Preserve
+    // its mode and headers; document URLs already use must-revalidate.
+    const response = await fetch(request);
+    if (cache && await isAppShellDocument(response)) {
         await cache.put('/index.html', response.clone()).catch(() => { });
     }
     return response;
@@ -1002,13 +1004,13 @@ function isImmutableBuildAsset(pathname) {
     return /^\/assets\/[^/]+-[A-Za-z0-9_-]{8}\.[a-z0-9]+$/i.test(pathname);
 }
 async function cacheFirstStatic(request, event) {
-    const cache = await caches.open(STATIC_CACHE);
-    const cached = await cache.match(request);
+    const cache = await caches.open(STATIC_CACHE).catch(() => null);
+    const cached = await cache?.match(request).catch(() => undefined);
     // An entry that is not what its own path claims to be -- the SPA fallback's
     // HTML stored under a .js key by an older worker -- is poison: serving it
     // fails the module parse on every load, forever. Drop it and go to network.
     if (cached && !isValidStaticResponse(request, cached)) {
-        await cache.delete(request).catch(() => { });
+        await cache?.delete(request).catch(() => { });
         return await retainedStaticAsset(request) || fetchAndCacheStatic(request, event, cache);
     }
     if (cached) {
@@ -1023,7 +1025,7 @@ async function cacheFirstStatic(request, event) {
         const refresh = fetch(request)
             .then(async (response) => {
             if (isValidStaticResponse(request, response)) {
-                await cache.put(request, response.clone()).catch(() => { });
+                await cache?.put(request, response.clone()).catch(() => { });
             }
         })
             .catch(() => { });
@@ -1037,8 +1039,8 @@ async function retainedStaticAsset(request) {
     if (url.origin !== self.location.origin || !/^\/assets\/[^/]+-[A-Za-z0-9_-]+\.(js|css)$/.test(url.pathname))
         return null;
     for (const name of await retainedStaticCaches()) {
-        const cache = await caches.open(name);
-        const response = await cache.match(request);
+        const cache = await caches.open(name).catch(() => null);
+        const response = await cache?.match(request).catch(() => undefined);
         const mime = String(response?.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
         const validMime = url.pathname.endsWith('.css') ? mime === 'text/css' : /^(text|application)\/(javascript|ecmascript)$/.test(mime);
         if (validMime && isValidStaticResponse(request, response))
@@ -1049,7 +1051,7 @@ async function retainedStaticAsset(request) {
 async function fetchAndCacheStatic(request, event, cache) {
     const response = await fetch(request);
     if (isValidStaticResponse(request, response)) {
-        await cache.put(request, response.clone()).catch(() => { });
+        await cache?.put(request, response.clone()).catch(() => { });
     }
     else if (isStaleBuildAsset(request, response)) {
         await recoverStaleShell(event);
@@ -1149,9 +1151,9 @@ async function releaseNewBuildForRecovery() {
 }
 async function recoverStaleShell(event) {
     const refresh = (async () => {
-        const cache = await caches.open(APP_SHELL_CACHE);
-        const response = await fetch('/index.html', { cache: 'no-store' }).catch(() => null);
-        if (response && await isAppShellDocument(response)) {
+        const cache = await caches.open(APP_SHELL_CACHE).catch(() => null);
+        const response = cache ? await fetch('/index.html', { cache: 'no-store' }).catch(() => null) : null;
+        if (cache && response && await isAppShellDocument(response)) {
             await cache.put('/index.html', response.clone()).catch(() => { });
         }
         await broadcastSyncEvent('BUSINESS_OS_STALE_ASSET', { build: BUILD_HASH });

@@ -443,7 +443,7 @@ check('the recovery answer rule catches a fetch nobody waits for (positive contr
 for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]] as const) {
   check(`appShellFallback serves the cached shell immediately and revalidates in the background (${label})`, () => {
     const body = functionBody(source, 'async function appShellFallback', 'async function cacheFirstStatic')
-    assert.match(body, /(?:const|let) cached = await cache\.match\('\/index\.html'\) \|\| await cache\.match\('\/'\)/, 'the cache is read once, up front')
+    assert.match(body, /(?:const|let) cached = await cache\?\.match\('\/index\.html'\)\.catch\(\(\) => undefined\) \|\| await cache\?\.match\('\/'\)\.catch\(\(\) => undefined\)/, 'optional cache reads happen up front')
     // Sep 23 2026: exactly ONE awaited fetch now precedes the cache hit -- the
     // recovery navigation (__bos_reload), which exists only because the page
     // has already proven the cached shell cannot run. Answering that one from
@@ -473,7 +473,9 @@ for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]]
     // The miss path moved into fetchAndCacheShell when the Sep 17 redirect fix
     // gave the poisoned-entry branch somewhere to jump to; what matters here is
     // unchanged -- the network is awaited only when the cache could not answer.
-    assert.match(body, /await fetch\(request, \{ ?cache: 'no-store' ?\}\)/, 'only a genuine cache miss (this worker\'s first navigation) still waits on the network')
+    const miss = functionBody(source, 'async function fetchAndCacheShell', 'function isImmutableBuildAsset')
+    assert.match(miss, /await fetch\(request\)/, 'a genuine cache miss awaits its original navigation Request')
+    assert.doesNotMatch(miss, /fetch\(request,/, 'a cache miss must preserve navigation mode and headers')
   })
 }
 
