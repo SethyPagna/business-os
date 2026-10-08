@@ -174,8 +174,8 @@ async function main() {
       assert.equal(money.unit_cost_usd,5.1234)
       assert.equal(money.total_cost_usd,40.9872)
     })
-    check('new lot: folded calls = 5 (lot candidates, override baseline, cost preimage, batch, final-select)', () => {
-      assert.equal(counter.stats().statements, 5, `expected 5, got ${counter.stats().statements}`)
+    check('new lot: folded calls = 4 (shared lot/baseline snapshot, cost preimage, batch, final-select)', () => {
+      assert.equal(counter.stats().statements, 4, `expected 4, got ${counter.stats().statements}`)
     })
     const oldMovement = rawDb.prepare('SELECT * FROM inventory_movements ORDER BY id LIMIT 1').get({})
     const next = await productBatches.receiveBatchStock(counter.db, {
@@ -248,8 +248,8 @@ async function main() {
     const newStats = newCounter.stats()
 
     check('folding the movement insert costs one fewer round trip than the old separate INSERT', () => {
-      assert.equal(oldStats.statements, 6, `expected the old orchestration to cost 6, got ${oldStats.statements}`)
-      assert.equal(newStats.statements, 5, `expected the new orchestration to cost 5, got ${newStats.statements}`)
+      assert.equal(oldStats.statements, 5, `expected the old orchestration to cost 5, got ${oldStats.statements}`)
+      assert.equal(newStats.statements, 4, `expected the new orchestration to cost 4, got ${newStats.statements}`)
       assert.equal(oldStats.statements - newStats.statements, 1)
     })
   }
