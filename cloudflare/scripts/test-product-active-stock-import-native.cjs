@@ -127,6 +127,24 @@ async function main() {
     assert.equal(raw.prepare("SELECT COUNT(*) n FROM import_job_rows WHERE phase='apply'").get().n,1)
   }
   console.log('PASS invalid status and unrelated parse refusal both block omission removal without replay')
+  {
+    const {raw,db}=fixture(); product(raw,97)
+    materializedJob(raw,'empty-update-race',{name:'Probe 97',description:'must not write',_action:'override_replace'})
+    const batch=db.batch; let injected=false
+    db.batch=items=>{
+      if(!injected && items.some(x=>x.sql.includes('product_has_stock'))) {
+        injected=true; raw.prepare('UPDATE products SET is_active=0 WHERE id=97').run()
+      }
+      return batch(items)
+    }
+    await assert.rejects(()=>engine.runImportApply({DB:db,ASSETS:{list:async()=>({objects:[]})}},'empty-update-race'),e=>e.code==='product_has_stock')
+    assert.ok(injected)
+    assert.equal(raw.prepare('SELECT is_active FROM products WHERE id=97').get().is_active,0)
+    assert.equal(raw.prepare('SELECT description FROM products WHERE id=97').get().description,null)
+    assert.equal(raw.prepare('SELECT COUNT(*) n FROM product_cost_entries').get().n,0)
+    assert.equal(raw.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n,0)
+  }
+  console.log('PASS product removal race refuses zero-inbound metadata import before journal or catalog effects')
   for (const ledger of ['rollup', 'branch', 'lot', 'damaged']) {
     const { raw, db } = fixture(); product(raw, 61)
     if (ledger === 'rollup') raw.prepare('UPDATE products SET stock_quantity=1 WHERE id=61').run()
