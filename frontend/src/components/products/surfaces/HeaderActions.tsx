@@ -1,4 +1,4 @@
-import PackagePlus from 'lucide-react/dist/esm/icons/package-plus.js'
+import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import FolderTree from 'lucide-react/dist/esm/icons/folder-tree.js'
 import Award from 'lucide-react/dist/esm/icons/award.js'
@@ -108,7 +108,7 @@ export default function ProductsHeaderActions({
   const importHint = tr('import_button_hint', 'Bring products in from a CSV or Excel file')
   const exportLabel = tr('export', 'Export')
   const exportHint = tr('export_button_hint', 'Download products as a customizable XLSX file')
-  const addLabel = tr('add', 'Add')
+  const addLabel = tr('adjust_stock', 'Adjust stock')
   const productHint = tr('add_products_button_hint', 'Add new products or receive stock for products you already have')
   const mergeDuplicatesLabel = tr('merge_duplicate_products', 'Merge duplicate products')
   const mergeDuplicatesHint = tr('merge_duplicates_button_hint', 'Combine branch-only duplicate rows of the same item into one')
@@ -198,7 +198,7 @@ export default function ProductsHeaderActions({
           ...(onMergeDuplicates ? [{ icon: <Merge className={iconClass} />, label: mergeDuplicatesLabel, description: mergeDuplicatesHint }] : []),
           ...(onWireImages ? [{ icon: <ImagePlus className={iconClass} />, label: wireImagesLabel, description: wireImagesHint }] : []),
           ...(onZeroQuantityCleanup ? [{ icon: <Trash2 className={iconClass} />, label: zeroQuantityCleanupLabel, description: zeroQuantityCleanupHint }] : []),
-          ...(onAdd ? [{ icon: <PackagePlus className={iconClass} />, label: addLabel, description: productHint }] : []),
+          ...(onAdd ? [{ icon: <Boxes className={iconClass} />, label: addLabel, description: productHint }] : []),
           ...(historySlot ? [{ label: historyLabel, description: historyHint }] : []),
         ]}
       />
@@ -235,11 +235,11 @@ export default function ProductsHeaderActions({
         <button
           type="button"
           onClick={onAdd}
-          className={primaryToolbarButtonClassName}
+          className={`${primaryToolbarButtonClassName} min-w-max`}
           aria-label={addLabel}
           title={productHint}
         >
-          <PackagePlus className="h-4 w-4 shrink-0" />
+          <Boxes className="h-4 w-4 shrink-0" />
           <span className="min-w-0 truncate">{addLabel}</span>
         </button>
       ) : null}

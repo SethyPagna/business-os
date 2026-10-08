@@ -4907,12 +4907,9 @@ function ProductsFullEditor() {
                     setExportFieldsOpen(true)
                   } : undefined)
             }
-            /* Stock Changes section replaces the catalog "Add Product" button
-               with its own "Adjust" menu (user, Aug 31) -> drop onAdd there;
-               HeaderActions hides any undefined-handler control. */
-            /* Add opens the Stock Session in Add: new products and stock for
-               existing ones in one session. Stock Changes has its own Adjust. */
-            onAdd={(canAddProduct || canAdjustInventoryStock) && activeProductSection !== 'stock_changes' && activeProductSection !== 'stock_in_sessions' ? () => setStockSession({ mode: 'add' }) : undefined}
+            /* Products and Stock-in Sessions share this Stock Session opener.
+               Stock Changes keeps its ledger-owned Adjust action below. */
+            onAdd={(canAddProduct || canAdjustInventoryStock) && activeProductSection !== 'stock_changes' ? () => setStockSession({ mode: 'add' }) : undefined}
             onMergeDuplicates={canMergeDuplicates ? openMergeDuplicatesReview : undefined}
             onZeroQuantityCleanup={canZeroQuantityCleanup ? openZeroQuantityCleanup : undefined}
             onWireImages={canWireImages ? openWireImages : undefined}

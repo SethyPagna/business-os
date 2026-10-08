@@ -28,10 +28,12 @@ function jsxBlock(source: string, tag: string, from = 0): string {
   return end < 0 ? '' : source.slice(start, end)
 }
 
-// Products header: Add is one button (icon + "Add"), never a menu.
+// Products and Stock-in Sessions share one Adjust stock button, never a menu.
 function headerAddIsOneButton(header: string): boolean {
   return /onClick=\{onAdd\}/.test(header)
-    && /const addLabel = tr\('add', 'Add'\)/.test(header)
+    && /const addLabel = tr\('adjust_stock', 'Adjust stock'\)/.test(header)
+    && /<Boxes className="h-4 w-4 shrink-0" \/>/.test(header)
+    && !/PackagePlus/.test(header)
     && !/addMenuItems|onAddStock/.test(header)
 }
 
@@ -39,6 +41,7 @@ function headerAddIsOneButton(header: string): boolean {
 function headerAddOpensSession(products: string): boolean {
   const modal = jsxBlock(products, 'FastStockInModal', products.indexOf('{stockSession ? ('))
   return /onAdd=\{\(canAddProduct \|\| canAdjustInventoryStock\)[^\n]*\? \(\) => setStockSession\(\{ mode: 'add' \}\) : undefined\}/.test(products)
+    && !/onAdd=\{[^\n]*activeProductSection !== 'stock_in_sessions'/.test(products)
     && /onPrepareProduct=\{canAddProduct \? prepareProductForSession : undefined\}/.test(modal)
     && /brandOptions=\{brandOptions\}/.test(modal)
     && /canCreateProducts=\{canAddProduct\}/.test(modal)
@@ -179,7 +182,7 @@ await runTest('the checks refuse the pre-lane sources', () => {
   assert.equal(legacyRestoresGuardBusySession(OLD_PRODUCTS, OLD_BRANCHES_RESTORE), false)
 })
 
-await runTest('Products header Add is one button reading Add, opening the session in Add', () => {
+await runTest('Products and Stock-in Sessions share one Adjust stock button opening the session in Add', () => {
   assert.ok(headerAddIsOneButton(header))
   assert.ok(headerAddOpensSession(products))
 })
