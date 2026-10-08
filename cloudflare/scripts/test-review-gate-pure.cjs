@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Regression test for step (2) of the "Permissions UI redesign" item
 // (progress.md): lib/reviewGate.ts's maybeQueueForReview actually queueing
 // a write instead of applying it when the acting user's tier for a
@@ -113,7 +114,7 @@ function loadReal(relPath, requireOverrides = {}) {
   }
   const moduleObj = { exports: {} }
   new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
-    moduleObj.exports, require, moduleObj, sourcePath, path.dirname(sourcePath),
+    moduleObj.exports, withProductStockGuard(require), moduleObj, sourcePath, path.dirname(sourcePath),
   )
   Module._load = originalLoad
   return moduleObj.exports

@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -15,7 +16,7 @@ new Function('exports', 'require', 'module', ts.transpileModule(
   fs.readFileSync(path.join(libRoot, 'catalogCostRecompute.ts'), 'utf8'),
   { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
 ).outputText)(catalogCostModule.exports,
-  request => request === './moneyPrecision' ? moneyPrecision : require(request), catalogCostModule)
+  withProductStockGuard(request => request === './moneyPrecision' ? moneyPrecision : require(request)), catalogCostModule)
 
 function compileNamedFunctions(source, names) {
   const ast = ts.createSourceFile('source.ts', source, ts.ScriptTarget.Latest, true)
@@ -25,7 +26,7 @@ function compileNamedFunctions(source, names) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText
   const mod = { exports: {} }
-  new Function('exports', 'require', 'module', output)(mod.exports, require, mod)
+  new Function('exports', 'require', 'module', output)(mod.exports, withProductStockGuard(require), mod)
   return mod.exports
 }
 
@@ -36,10 +37,10 @@ function loadProductWrites(db) {
     const output = ts.transpileModule(fs.readFileSync(path.join(libRoot, `${name}.ts`), 'utf8'), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
     }).outputText
-    new Function('exports', 'require', 'module', output)(mod.exports, request => {
+    new Function('exports', 'require', 'module', output)(mod.exports, withProductStockGuard(request => {
       if (request === './db') return { getDb: () => db }
       throw new Error(`Unexpected ${name} dependency: ${request}`)
-    }, mod)
+    }), mod)
     dependencies.set(`./${name}`, mod.exports)
   }
   const sourcePath = path.join(libRoot, 'productWrites.ts')
@@ -70,7 +71,7 @@ function loadProductWrites(db) {
   try {
     const mod = { exports: {} }
     new Function('exports', 'require', 'module', '__filename', '__dirname', output)(
-      mod.exports, require, mod, sourcePath, path.dirname(sourcePath),
+      mod.exports, withProductStockGuard(require), mod, sourcePath, path.dirname(sourcePath),
     )
     return mod.exports
   } finally {

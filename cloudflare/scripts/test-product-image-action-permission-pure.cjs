@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Drives the real products Hono create/update handlers. The products:image
 // override applies only when the requested primary/gallery actually changes;
 // unchanged full-form submissions are stripped before review/direct writers.
@@ -31,7 +32,7 @@ function loadTs(relativePath, stubs = {}) {
   try {
     const loaded = { exports: {} }
     new Function('exports', 'require', 'module', '__filename', '__dirname', compileTs(filePath))(
-      loaded.exports, require, loaded, filePath, path.dirname(filePath),
+      loaded.exports, withProductStockGuard(require), loaded, filePath, path.dirname(filePath),
     )
     return loaded.exports
   } finally {
@@ -211,7 +212,7 @@ function loadProductsRoute(state) {
     const filePath = path.join(srcRoot, 'routes', 'products.ts')
     const loaded = { exports: {} }
     new Function('exports', 'require', 'module', '__filename', '__dirname', compileTs(filePath))(
-      loaded.exports, require, loaded, filePath, path.dirname(filePath),
+      loaded.exports, withProductStockGuard(require), loaded, filePath, path.dirname(filePath),
     )
     return loaded.exports.default
   } finally {

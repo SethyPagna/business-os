@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Regression tests for the normal=3/admin=5 product-gallery contract.
 // Runs the real validateProductImageGallery from productWrites.ts and also
 // source-locks both route rejection and the two former ProductForm hardcodes.
@@ -28,7 +29,7 @@ function load(relativePath, stubs = {}) {
   try {
     const moduleObj = { exports: {} }
     new Function('exports', 'require', 'module', '__filename', '__dirname', compiled.output)(
-      moduleObj.exports, require, moduleObj, compiled.sourcePath, path.dirname(compiled.sourcePath),
+      moduleObj.exports, withProductStockGuard(require), moduleObj, compiled.sourcePath, path.dirname(compiled.sourcePath),
     )
     return moduleObj.exports
   } finally {

@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -16,7 +17,7 @@ function loadProductMerge() {
     fileName: 'productMerge.ts',
   })
   const mod = { exports: {} }
-  new Function('exports', 'require', 'module', outputText)(mod.exports, (request) => request === './moneyPrecision' ? moneyPrecision : require(request), mod)
+  new Function('exports', 'require', 'module', outputText)(mod.exports, withProductStockGuard((request) => request === './moneyPrecision' ? moneyPrecision : require(request)), mod)
   return mod.exports
 }
 
@@ -81,7 +82,7 @@ function loadUndoAppliers(db) {
       }
       return require(request)
     }
-    new Function('exports', 'require', 'module', outputText)(dependency.exports, dependencyRequire, dependency)
+    new Function('exports', 'require', 'module', outputText)(dependency.exports, withProductStockGuard(dependencyRequire), dependency)
     return dependency.exports
   }
   stubs['./customerGenderRestoration'] = loadDependency(path.join(libDir, 'customerGenderRestoration.ts'))
@@ -103,7 +104,7 @@ function loadUndoAppliers(db) {
     : originalLoad.call(Module, request, parent, isMain)
   const mod = { exports: {} }
   try {
-    new Function('exports', 'require', 'module', outputText)(mod.exports, require, mod)
+    new Function('exports', 'require', 'module', outputText)(mod.exports, withProductStockGuard(require), mod)
   } finally {
     Module._load = originalLoad
   }

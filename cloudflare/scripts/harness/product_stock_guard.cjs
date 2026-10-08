@@ -11,3 +11,10 @@ new Function('module', 'exports', 'require', outputText)(mod, mod.exports, id =>
   throw new Error(`Unmapped productStockGuard dependency: ${id}`)
 })
 module.exports = mod.exports
+
+function withProductStockGuard(nextRequire) {
+  return request => request === './productStockGuard' || request === '../lib/productStockGuard'
+    ? mod.exports
+    : nextRequire(request)
+}
+module.exports.withProductStockGuard = withProductStockGuard

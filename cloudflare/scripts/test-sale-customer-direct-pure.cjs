@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // Direct sale-customer assignment through the real Hono route and SQLite transactions.
 const fs = require('node:fs')
@@ -39,7 +40,7 @@ function load(rel) {
     }
     return require(name)
   }
-  new Function('require', 'module', 'exports', output)(req, mod, mod.exports)
+  new Function('require', 'module', 'exports', output)(withProductStockGuard(req), mod, mod.exports)
   return mod.exports
 }
 

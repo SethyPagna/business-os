@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Real-SQLite test of the Part-77 CRITICAL (x3 audits) fix: inventory's
 // POST /transfer used to move only the plain branch_stock total between
 // branches, leaving every branch_batch_stock row at the source -- the exact
@@ -32,7 +33,7 @@ function transpile(relPath, transform = source => source) {
 
 function loadModule(relPath, requireShim, transform) {
   const module = { exports: {} }
-  new Function('exports', 'require', 'module', transpile(relPath, transform))(module.exports, requireShim, module)
+  new Function('exports', 'require', 'module', transpile(relPath, transform))(module.exports, withProductStockGuard(requireShim), module)
   return module.exports
 }
 

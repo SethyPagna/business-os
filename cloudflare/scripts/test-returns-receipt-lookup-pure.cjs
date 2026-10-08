@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // GET /api/returns/receipt-lookup -- the server side of the new-return
 // receipt typeahead, driven through the REAL Hono route against a real
 // in-memory SQLite database with the real migration chain applied.
@@ -65,7 +66,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const moduleObj = { exports: {} }
   try {
     new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
-      moduleObj.exports, require, moduleObj, sourcePath, path.dirname(sourcePath),
+      moduleObj.exports, withProductStockGuard(require), moduleObj, sourcePath, path.dirname(sourcePath),
     )
   } finally {
     Module._load = originalLoad

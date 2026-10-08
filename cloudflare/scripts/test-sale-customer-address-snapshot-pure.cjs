@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // N21 -- sales.customer_address holds the DISPLAY address, never the Contact
 // Options JSON that customers.address stores.
@@ -74,7 +75,7 @@ function load(rel) {
     }
     return require(name)
   }
-  new Function('require', 'module', 'exports', output)(req, mod, mod.exports)
+  new Function('require', 'module', 'exports', output)(withProductStockGuard(req), mod, mod.exports)
   return mod.exports
 }
 

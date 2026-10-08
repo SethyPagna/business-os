@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // G1: a CANCELLED sale refuses every grouped field edit (POST /api/sales/bulk-update).
 //
@@ -49,7 +50,7 @@ function load(rel) {
     }
     return require(name)
   }
-  new Function('require', 'module', 'exports', output)(req, mod, mod.exports)
+  new Function('require', 'module', 'exports', output)(withProductStockGuard(req), mod, mod.exports)
   return mod.exports
 }
 const sales = load('routes/sales.ts').default

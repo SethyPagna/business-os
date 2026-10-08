@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Actual Hono routes, shared writer, pending queue and review applier on the
 // migrated SQLite schema. Authentication/image/cache services are fixture-only.
 const assert = require('node:assert/strict')
@@ -77,7 +78,7 @@ function load(relative) {
     if (request.startsWith('.')) return unavailable(request)
     return require(request)
   }
-  new Function('require', 'module', 'exports', output)(localRequire, mod, mod.exports)
+  new Function('require', 'module', 'exports', output)(withProductStockGuard(localRequire), mod, mod.exports)
   cache.set(relative, mod.exports); return mod.exports
 }
 const frontendCache = new Map()
@@ -91,7 +92,7 @@ function loadFrontend(relative) {
     const resolved = path.resolve(path.dirname(filename), request)
     return loadFrontend(path.relative(frontendSrc, resolved))
   }
-  new Function('require', 'module', 'exports', output)(localRequire, mod, mod.exports)
+  new Function('require', 'module', 'exports', output)(withProductStockGuard(localRequire), mod, mod.exports)
   frontendCache.set(filename, mod.exports); return mod.exports
 }
 const products = load('routes/products.ts').default

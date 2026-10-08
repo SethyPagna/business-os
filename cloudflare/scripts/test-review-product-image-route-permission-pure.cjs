@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Drives the real review approval Hono handler. A product image request whose
 // requester's authority was revoked remains open and returns a typed conflict,
 // rather than presenting a permission decision as an internal server error.
@@ -47,7 +48,7 @@ function loadMoneyDependency(name) {
     if (allowed.has(request)) return loadMoneyDependency(request.slice(2))
     throw new Error(`Unmapped money-policy dependency: ${request}`)
   }
-  new Function('exports', 'require', 'module', compileTs(filePath))(loaded.exports, dependency, loaded)
+  new Function('exports', 'require', 'module', compileTs(filePath))(loaded.exports, withProductStockGuard(dependency), loaded)
   return loaded.exports
 }
 const productWrites = loadMoneyDependency('productWrites')
@@ -94,7 +95,7 @@ function loadRoute(state) {
   try {
     const loaded = { exports: {} }
     new Function('exports', 'require', 'module', '__filename', '__dirname', compileTs(filePath))(
-      loaded.exports, require, loaded, filePath, path.dirname(filePath),
+      loaded.exports, withProductStockGuard(require), loaded, filePath, path.dirname(filePath),
     )
     return loaded.exports.default
   } finally {

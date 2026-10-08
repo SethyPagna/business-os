@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')
@@ -11,7 +12,7 @@ function compile(file, stubs = {}) {
   }).outputText
   const moduleObj = { exports: {} }
   const localRequire = (request) => Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : require(request)
-  new Function('exports', 'require', 'module', output)(moduleObj.exports, localRequire, moduleObj)
+  new Function('exports', 'require', 'module', output)(moduleObj.exports, withProductStockGuard(localRequire), moduleObj)
   return moduleObj.exports
 }
 

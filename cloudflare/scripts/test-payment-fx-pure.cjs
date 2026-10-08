@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -51,7 +52,7 @@ function load(rel) {
     }
     return require(name)
   }
-  new Function('require','module','exports',output)(req,mod,mod.exports)
+  new Function('require','module','exports',output)(withProductStockGuard(req),mod,mod.exports)
   return mod.exports
 }
 

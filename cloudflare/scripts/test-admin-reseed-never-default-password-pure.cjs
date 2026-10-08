@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Security (compliance audit P1): the production Worker never seeds a known
 // admin password.
 //
@@ -44,7 +45,7 @@ function loadReal(relPath, overrides = {}) {
   try {
     const module = { exports: {} }
     new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
-      module.exports, require, module, sourcePath, path.dirname(sourcePath),
+      module.exports, withProductStockGuard(require), module, sourcePath, path.dirname(sourcePath),
     )
     return module.exports
   } finally {

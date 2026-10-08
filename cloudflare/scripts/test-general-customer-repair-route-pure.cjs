@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Real Hono route/auth coverage for the fixed customer-24969 repair.
 // Uses every real migration and the real helper; backup, KV cache and
 // BroadcastHub are bounded in-memory fakes. No network or remote data.
@@ -33,7 +34,7 @@ function loadReal(relPath, overrides = {}) {
   try {
     new Function('exports', 'require', 'module', '__filename', '__dirname', output)(
       moduleObj.exports,
-      Module.createRequire(sourcePath),
+      withProductStockGuard(Module.createRequire(sourcePath)),
       moduleObj,
       sourcePath,
       path.dirname(sourcePath),

@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // A sale's RECORDS list: the union of every writer that changes a sale (N41,
 // lib/saleRecords.ts + migration 0129).
 //
@@ -42,7 +43,7 @@ function compile(file, stubs = {}) {
   }).outputText
   const moduleObj = { exports: {} }
   const localRequire = (request) => Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : require(request)
-  new Function('exports', 'require', 'module', output)(moduleObj.exports, localRequire, moduleObj)
+  new Function('exports', 'require', 'module', output)(moduleObj.exports, withProductStockGuard(localRequire), moduleObj)
   return moduleObj.exports
 }
 

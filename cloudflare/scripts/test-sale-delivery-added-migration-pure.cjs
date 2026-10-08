@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Focused migration and accounting lock for adding delivery to a recorded sale.
 //
 // Run from cloudflare/: node scripts/test-sale-delivery-added-migration-pure.cjs
@@ -16,7 +17,7 @@ function compile(file, stubs = {}) {
   const localRequire = (request) => Object.prototype.hasOwnProperty.call(stubs, request)
     ? stubs[request]
     : require(request)
-  new Function('exports', 'require', 'module', output)(moduleObj.exports, localRequire, moduleObj)
+  new Function('exports', 'require', 'module', output)(moduleObj.exports, withProductStockGuard(localRequire), moduleObj)
   return moduleObj.exports
 }
 

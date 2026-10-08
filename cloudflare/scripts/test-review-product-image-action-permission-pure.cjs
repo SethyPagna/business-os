@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // Executes the real product review appliers. Approval rechecks the original
 // requester's current image action before applying changed image fields, while
 // unchanged full-form image values are removed from the approved write.
@@ -29,7 +30,7 @@ function loadTs(relativePath, stubs = {}) {
   try {
     const loaded = { exports: {} }
     new Function('exports', 'require', 'module', '__filename', '__dirname', compileTs(filePath))(
-      loaded.exports, require, loaded, filePath, path.dirname(filePath),
+      loaded.exports, withProductStockGuard(require), loaded, filePath, path.dirname(filePath),
     )
     return loaded.exports
   } finally {

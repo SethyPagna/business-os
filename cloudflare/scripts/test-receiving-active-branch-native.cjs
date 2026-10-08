@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 
 const fs = require('fs')
 const path = require('path')
@@ -46,7 +47,7 @@ function loadReal(relPath, overrides = {}) {
   const moduleObj = { exports: {} }
   try {
     new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
-      moduleObj.exports, require, moduleObj, sourcePath, path.dirname(sourcePath),
+      moduleObj.exports, withProductStockGuard(require), moduleObj, sourcePath, path.dirname(sourcePath),
     )
   } finally {
     Module._load = originalLoad

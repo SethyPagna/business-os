@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -69,7 +70,7 @@ function load(relative) {
     if (request.startsWith('.')) return unavailable(request)
     return require(request)
   }
-  new Function('require', 'module', 'exports', output)(localRequire, mod, mod.exports)
+  new Function('require', 'module', 'exports', output)(withProductStockGuard(localRequire), mod, mod.exports)
   cache.set(relative, mod.exports); return mod.exports
 }
 

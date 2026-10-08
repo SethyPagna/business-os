@@ -1,3 +1,4 @@
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 // End-to-end test for the unified stock-action APPLY engine wiring
 // (importEngine.ts::applyStockActionsJob). The atomic writers and the
 // resolver are already covered by their own pure suites; this proves the
@@ -106,7 +107,7 @@ function loadReal(base) {
   const mod = { exports: {} }
   realCache.set(base, mod.exports) // seed before eval so any cycle resolves
   new Function('exports', 'require', 'module', '__filename', '__dirname', transpile(abs))(
-    mod.exports, makeRequire(path.dirname(abs)), mod, abs, path.dirname(abs),
+    mod.exports, withProductStockGuard(makeRequire(path.dirname(abs))), mod, abs, path.dirname(abs),
   )
   realCache.set(base, mod.exports)
   return mod.exports
@@ -116,7 +117,7 @@ function loadReal(base) {
 const engineAbs = path.join(libDir, 'importEngine.ts')
 const engineMod = { exports: {} }
 new Function('exports', 'require', 'module', '__filename', '__dirname', transpile(engineAbs))(
-  engineMod.exports, makeRequire(libDir), engineMod, engineAbs, libDir,
+  engineMod.exports, withProductStockGuard(makeRequire(libDir)), engineMod, engineAbs, libDir,
 )
 const { applyStockActionsJob, runImportApply, STOCK_ACTION_MAX_ROWS, STOCK_ACTION_MAX_UNITS } = engineMod.exports
 assert.strictEqual(typeof applyStockActionsJob, 'function', 'applyStockActionsJob must be exported')
