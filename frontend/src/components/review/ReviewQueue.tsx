@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import EntityLink from '../shared/EntityLink.tsx'
+import { getHubDestinations, hubAnchor } from '../shared/hubNavigation.ts'
+import { REVIEW_TIER_KEYS } from '../../utils/permissions.ts'
+import { entityFieldLabel } from '../../utils/entityRecords.ts'
+import { buildAuditFieldDiff } from '../../utils/auditLogFieldDiff.ts'
+import AuditFieldDiffLine from '../utils-settings/AuditFieldDiffLine.tsx'
 import { fmtDateTime24 } from '../../utils/formatters.ts'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import ClipboardCheck from 'lucide-react/dist/esm/icons/clipboard-check.js'
@@ -26,22 +32,6 @@ import {
   type PendingActionStatus,
 } from '../../api/reviewQueueTransport.ts'
 
-// The Review/Approval page itself -- step (3) of progress.md's
-// "Permissions UI redesign" item. Lists pending_actions rows created by
-// lib/reviewGate.ts's maybeQueueForReview() (currently: fees delete only,
-// see routes/fees.ts + lib/reviewApply.ts's registered applier) and lets
-// a Full-Access `review`-permission user approve or reject each one.
-// Gated Full Access only at the route/nav level (App.tsx/AppContext.tsx/
-// navigationConfig.ts), same pattern Users already uses -- nothing
-// further to check inside this component itself.
-//
-// A 501 response from approve ("no applier registered yet for this
-// section/action/entity") is a real, expected outcome for any section
-// beyond fees today (products/inventory/returns/contacts/library all
-// have REVIEW_TIER_KEYS entries but no wired write route or applier
-// yet) -- surfaced as a plain error notification rather than treated as
-// a bug, since it genuinely means "this can't be approved yet."
-
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: unknown, type?: string, duration?: number) => void
 
@@ -49,6 +39,9 @@ interface ReviewAppContextValue {
   t: TranslateFn
   notify: NotifyFn
   getPermissionTier: (key: string) => string
+  can: (key: string, action: string) => boolean
+  hasPermission: (key: string) => boolean
+  navigateTo: (page: string, anchor?: string) => void
   user?: { id?: number | string | null } | null
 }
 
@@ -76,13 +69,20 @@ function formatDateTime(value: string | null | undefined): string {
   return fmtDateTime24(date)
 }
 
-function formatPayload(row: PendingActionRow): string {
+function reviewPayload(row: PendingActionRow): Record<string, unknown> {
   try {
-    const parsed = JSON.parse(row.payload_json || '{}')
-    return JSON.stringify(parsed, null, 2)
-  } catch {
-    return row.payload_json || '{}'
-  }
+    const value = JSON.parse(row.payload_json || '{}')
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  } catch { return {} }
+}
+
+function reviewDestination(row: PendingActionRow): { page: string; section: string } | null {
+  if (row.section === 'products') return { page: 'products', section: 'products' }
+  if (row.section === 'inventory') return { page: 'branches', section: 'products' }
+  if (row.section === 'branches') return { page: 'branches', section: 'overview' }
+  if (row.section === 'fees' || row.section === 'returns') return { page: 'sales', section: row.section }
+  if (row.section === 'contacts') return { page: 'contacts', section: row.entity_type === 'supplier' ? 'suppliers' : row.entity_type === 'delivery_contact' ? 'delivery' : 'customers' }
+  return null
 }
 
 function statusBadgeClass(status: PendingActionStatus): string {
@@ -92,7 +92,7 @@ function statusBadgeClass(status: PendingActionStatus): string {
 }
 
 export default function ReviewQueue() {
-  const { t, notify, getPermissionTier, user } = useApp()
+  const { t, notify, getPermissionTier, can, hasPermission, navigateTo, user } = useApp()
   // Part 557 slice 5: 'review' is a view-tier section. A View-only grant reads
   // the pending queue but Approve/Reject are hidden here and refused by the
   // backend (both re-check strict hasPermission('review')). Full only.
@@ -170,11 +170,8 @@ export default function ReviewQueue() {
     return null
   }
 
-  const sectionOptions = useMemo(() => {
-    const set = new Set<string>()
-    rows.forEach((row) => { if (row.section) set.add(row.section) })
-    return Array.from(set).sort()
-  }, [rows])
+  const sectionOptions = ['', ...REVIEW_TIER_KEYS].sort((a, b) => Number(b === sectionFilter) - Number(a === sectionFilter))
+  const statusOptions = (['open', 'approved', 'rejected', 'all'] as StatusFilter[]).sort((a, b) => Number(b === statusFilter) - Number(a === statusFilter))
 
   const handleProductCreateApprove = async (row: PendingActionRow) => {
     const pendingId = row.id
@@ -283,30 +280,21 @@ export default function ReviewQueue() {
   }
 
   return (
-    <div className="page-scroll flex flex-col p-3 sm:p-6">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-            {tr('review_queue', 'Review Queue')}
-          </h1>
-          <p className="text-xs text-slate-400 dark:text-slate-500">
-            {tr('review_queue_hint', 'Approve or reject changes submitted by Partial Access users.')}
-          </p>
-        </div>
-      </div>
-
-      <div className="sticky top-2 z-30 -mx-1 mb-4 space-y-3 bg-gray-50 pb-2 dark:bg-gray-900 sm:mx-0">
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5 pt-1">
-          <span className="mr-1 text-xs font-semibold text-slate-500">{tr('sections', 'Sections')}:</span>
-          {['', ...sectionOptions].map((section) => (
-            <button key={section || 'all'} type="button" onClick={() => setSectionFilter(section)} className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${sectionFilter === section ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700'}`}>
-              {section || tr('all', 'All')}
+    <div className="page-scroll flex min-w-0 flex-col p-3 sm:p-6">
+      <div className="sticky top-2 z-30 mb-4 min-w-0 space-y-2 bg-gray-50 pb-2 dark:bg-gray-900">
+        <div role="group" aria-label={tr('sections', 'Sections')} className="flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto scrollbar-none py-1">
+          <span className="shrink-0 text-xs font-semibold text-slate-500">{tr('sections', 'Sections')}:</span>
+          {sectionOptions.map((section) => (
+            <button key={section || 'all'} type="button" aria-pressed={sectionFilter === section} onClick={() => setSectionFilter(section)} className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold ${sectionFilter === section ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700'}`}>
+              {section ? tr(section, section) : tr('all', 'All')}
             </button>
           ))}
-          <span className="ml-2 mr-1 text-xs font-semibold text-slate-500">{tr('status', 'Status')}:</span>
-          {(['open', 'approved', 'rejected', 'all'] as StatusFilter[]).map((status) => (
-            <button key={status} type="button" onClick={() => setStatusFilter(status)} className={`rounded-lg px-2.5 py-1.5 text-xs ${statusFilter === status ? 'bg-slate-800 text-white dark:bg-slate-100 dark:text-slate-900' : 'text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}>
-              {status === 'all' ? tr('all', 'All') : tr(status, status)}
+        </div>
+        <div role="group" aria-label={tr('status', 'Status')} className="flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto scrollbar-none py-1">
+          <span className="shrink-0 text-xs font-semibold text-slate-500">{tr('status', 'Status')}:</span>
+          {statusOptions.map((status) => (
+            <button key={status} type="button" aria-pressed={statusFilter === status} onClick={() => setStatusFilter(status)} className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-2 text-xs ${statusFilter === status ? 'bg-slate-800 text-white dark:bg-slate-100 dark:text-slate-900' : 'text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}>
+              {tr(status, status)}
             </button>
           ))}
         </div>
@@ -337,6 +325,11 @@ export default function ReviewQueue() {
           {rows.map((row) => {
             const expanded = expandedId === row.id
             const isBusy = busyId === row.id
+            const payload = reviewPayload(row)
+            const content = buildAuditFieldDiff(null, row.payload_json, key => entityFieldLabel(key, tr))
+            const destination = reviewDestination(row)
+            const canNavigate = destination && can(row.section, 'view') && getHubDestinations(destination.page, { getPermissionTier, hasPermission, can }).some(item => item.id === destination.section)
+            const search = row.section === 'products' ? String(payload.barcode || payload.name || '') : row.section === 'contacts' ? String(payload.phone || payload.name || '') : undefined
             const approveRefusal = row.status === 'open' ? approveRefusalCode(row) : null
             return (
               <div key={row.id} className="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
@@ -344,15 +337,16 @@ export default function ReviewQueue() {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                        {row.section}
+                        {tr(row.section, row.section)}
                       </span>
-                      <span className="text-xs text-slate-400">{row.action_type} / {row.entity_type}</span>
+                      <span className="text-xs text-slate-400">{tr(row.action_type, row.action_type)} / {entityFieldLabel(row.entity_type, tr)}</span>
                       <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadgeClass(row.status)}`}>
                         {tr(row.status, row.status)}
                       </span>
                     </div>
                     <p className="mt-1 detail-scroll-text text-sm font-medium text-slate-700 dark:text-slate-200">
-                      {row.summary || `#${row.entity_id ?? '--'}`}
+                      {row.summary || `${entityFieldLabel(row.entity_type, tr)}${row.entity_id != null ? ` #${row.entity_id}` : ''}`}
+                      {canNavigate && destination ? <> · <EntityLink page={destination.page} anchor={hubAnchor(destination.page, destination.section)} search={search} navigate={navigateTo}>{tr('view_details', 'View details')}</EntityLink></> : null}
                     </p>
                     <p className="mt-0.5 text-xs text-slate-400">
                       {tr('requested_by', 'Requested by')}: {row.requested_by_name || '--'} · {formatDateTime(row.created_at)}
@@ -363,18 +357,13 @@ export default function ReviewQueue() {
                         {row.reject_reason ? ` — ${row.reject_reason}` : ''}
                       </p>
                     ) : null}
-                    <button
-                      type="button"
-                      className="mt-1 text-xs font-medium text-blue-600 underline dark:text-blue-400"
-                      onClick={() => setExpandedId(expanded ? null : row.id)}
-                    >
+                    <div className="mt-2 min-w-0 space-y-1 [overflow-wrap:anywhere]">
+                      {(expanded ? content : content.slice(0, 3)).map(field => <AuditFieldDiffLine key={field.key} row={field} />)}
+                      {!content.length ? <p className="text-xs text-slate-400">{tr('historical_details_unavailable', 'Historical details unavailable')}</p> : null}
+                    </div>
+                    {content.length > 3 ? <button type="button" aria-expanded={expanded} className="mt-1 text-xs font-medium text-blue-600 underline dark:text-blue-400" onClick={() => setExpandedId(expanded ? null : row.id)}>
                       {expanded ? tr('hide_details', 'Hide details') : tr('view_details', 'View details')}
-                    </button>
-                    {expanded ? (
-                      <pre className="mt-2 max-w-full overflow-x-auto rounded-lg bg-slate-50 p-2 text-xs text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
-                        {formatPayload(row)}
-                      </pre>
-                    ) : null}
+                    </button> : null}
                   </div>
                   {row.status === 'open' && canReview ? (
                     <div className="flex shrink-0 items-center gap-1">
