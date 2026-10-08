@@ -1088,9 +1088,16 @@ async function saveMaterializeState(db: D1Compat, jobId: string, state: Material
 // materialized rows. A no-op (cheap DELETE matching nothing) for a job that
 // was never materialized yet, so it's safe to call unconditionally on every
 // CSV upload rather than needing the caller to first check.
-export async function resetMaterializeState(db: D1Compat, jobId: string): Promise<void> {
+export async function resetMaterializeState(db: D1Compat, jobId: string, sourceOwner: string): Promise<void> {
+  const owner = await db.prepare(`SELECT id FROM import_jobs WHERE id=@id AND cancel_requested=0
+    AND json_extract(CASE WHEN json_valid(chunk_state_json) THEN chunk_state_json ELSE '{}' END,'$.sourceUpload')=@owner`)
+    .get({ id: jobId, owner: sourceOwner })
+  if (!owner) throw new Error('Import source upload ownership changed')
   await db.staging.prepare(`DELETE FROM import_job_source_rows WHERE job_id = @id`).run({ id: jobId })
-  await db.prepare(`UPDATE import_jobs SET materialize_state_json = NULL, materialize_done = 0 WHERE id = @id`).run({ id: jobId })
+  const reset = await db.prepare(`UPDATE import_jobs SET materialize_state_json = NULL, materialize_done = 0 WHERE id = @id
+    AND json_extract(CASE WHEN json_valid(chunk_state_json) THEN chunk_state_json ELSE '{}' END,'$.sourceUpload')=@owner`)
+    .run({ id: jobId, owner: sourceOwner })
+  if (reset.changes !== 1) throw new Error('Import source upload ownership changed')
 }
 
 // One bounded window of parsing per call -- see parseDelimitedRowsWindow's
@@ -4296,7 +4303,7 @@ const IMPORT_LEASE_MS = 60_000
  * actually changed, and only one of them gets 1.
  */
 type ImportLeaseSnapshot = { status: string; cancel_requested: number; started_at: string | null; type: ImportType; chunk_cursor: number; chunk_state_json: string | null }
-async function acquireImportLease(db: D1Compat, jobId: string, snapshot?: { row?: ImportLeaseSnapshot }): Promise<string | null> {
+async function acquireImportLease(db: D1Compat, jobId: string, snapshot?: { row?: ImportLeaseSnapshot }, analyze = false): Promise<string | null> {
   const token = crypto.randomUUID()
   const now = new Date()
   const sql = `
@@ -4304,6 +4311,8 @@ async function acquireImportLease(db: D1Compat, jobId: string, snapshot?: { row?
     SET lease_token = @token, lease_expires_at = @expires, updated_at = CURRENT_TIMESTAMP
     WHERE id = @id
       AND (lease_expires_at IS NULL OR lease_expires_at < @now)
+      AND json_extract(CASE WHEN json_valid(chunk_state_json) THEN chunk_state_json ELSE '{}' END,'$.sourceUpload') IS NULL
+      ${analyze ? "AND json_type(CASE WHEN json_valid(chunk_state_json) THEN chunk_state_json ELSE '{}' END,'$.genericApply') IS NULL" : ''}
   `
   const params = {
     id: jobId,
@@ -4524,7 +4533,7 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
   // ...narrowed further on a redelivery: see chunkRowsForAttempt.
   const chunkRows = chunkRowsForAttempt(limits.rowsPerImportChunk, attempt)
   const sw = makeStopwatch()
-  const jobRow = await db.prepare(`SELECT status, cancel_requested, chunk_state_json FROM import_jobs WHERE id = @id`).get<{ status: string; cancel_requested: number; chunk_state_json: string | null }>({ id: jobId })
+  let jobRow = await db.prepare(`SELECT status, cancel_requested, chunk_state_json FROM import_jobs WHERE id = @id`).get<{ status: string; cancel_requested: number; chunk_state_json: string | null }>({ id: jobId })
   if (!jobRow) throw new Error('Import job not found')
   if (persistedImportApplyState(jobRow.chunk_state_json)) return
   // See isFreshImportRun's comment for the full "why", including the
@@ -4532,18 +4541,20 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
   // chunk that crashed before finishing lands here with status='failed'
   // (markJobFailed already ran), not 'analyzing', so it must be checked for
   // explicitly rather than assumed to still look like a continuation.
-  const isFreshStart = isFreshImportRun(jobRow.status, 'analyzing')
 
   // Claim the job before touching a chunk. If another invocation holds it --
   // an at-least-once redelivery, or a retry overlapping the run it retries --
   // return without processing. Deliberately NOT an error: the holder is
   // making progress, so this message has nothing left to do and must ack
   // rather than retry, or it would spin against a healthy run.
-  const leaseToken = await acquireImportLease(db, jobId)
+  const snapshot: { row?: ImportLeaseSnapshot } = {}
+  const leaseToken = await acquireImportLease(db, jobId, snapshot, true)
   if (!leaseToken) {
     console.log('[import] skipping duplicate delivery; another invocation holds the lease', jobId)
     return
   }
+  jobRow = snapshot.row!
+  const isFreshStart = isFreshImportRun(jobRow.status, 'analyzing')
 
   try {
     if (jobRow.status !== 'analyzing') {
