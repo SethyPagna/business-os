@@ -494,7 +494,7 @@ export default function FastStockInModal({
         setLotsLoadedFor(lotsKey)
         const restore = pendingBatchRestoreRef.current
         pendingBatchRestoreRef.current = null
-        const choices = mode === 'add' ? lots : sessionLotChoices(mode, lots, supplier)
+        const choices = sessionLotChoices(mode, lots, supplier)
         if (typeof restore === 'number' && choices.some((lot) => Number(lot.id) === restore)) setBatchChoice(restore)
         else if (restore === 'new' && mode === 'add') setBatchChoice('new')
         else setBatchChoice(defaultLotChoice({ mode, choices, sheetBatchId: sheetBatchRef.current, sharedDate: receivedDate }))
@@ -512,7 +512,7 @@ export default function FastStockInModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lotsKey])
 
-  const lotChoices = useMemo(() => (mode === 'add' ? batchOptions : sessionLotChoices(mode, batchOptions, supplier)), [mode, batchOptions, supplier])
+  const lotChoices = useMemo(() => sessionLotChoices(mode, batchOptions, supplier), [mode, batchOptions, supplier])
   // The shared Supplier narrows Remove/Set lots; a lot it filters out is not kept.
   useEffect(() => {
     if (!lotsReady || !lotsKey || mode === 'add') return
@@ -1099,7 +1099,7 @@ export default function FastStockInModal({
       value: String(lot.id),
       label: `${batchDisplayLabel(lot, tr('batch', 'Received date'))} · ${lot.quantity}${mode === 'add' && lot.supplier_name ? ` · ${lot.supplier_name}` : ''}`,
     })
-    if (mode === 'add') return [{ value: 'new', label: newLabel }, ...batchOptions.map(lotRow)]
+    if (mode === 'add') return [{ value: 'new', label: newLabel }, ...lotChoices.map(lotRow)]
     if (!lotChoices.length) return [{ value: 'none', label: `${tr('stock_set_branch_total', 'Branch total')} · ${branchQuantity}`, disabled: true }]
     return lotChoices.map(lotRow)
   })()

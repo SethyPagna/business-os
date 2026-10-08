@@ -524,13 +524,13 @@ export function lotMatchesSupplier(lot: SessionLot, supplier: SessionSupplier): 
   return supplierKey(lot.supplier_name) === typed
 }
 
-/** The lots a line may name, oldest first: Remove only lots holding stock; Set every lot. */
+/** The lots a line may name, newest first: Remove only lots holding stock; Set every lot. */
 export function sessionLotChoices<T extends SessionLot>(mode: StockMode, lots: readonly T[], supplier: SessionSupplier): T[] {
   const offered = mode === 'remove' ? lots.filter((lot) => toNumber(lot.quantity) > 0) : [...lots]
   const narrowed = mode === 'add' ? offered : offered.filter((lot) => lotMatchesSupplier(lot, supplier))
   return narrowed
     .map((lot, index) => ({ lot, index, date: lotIsoDate(lot) }))
-    .sort((a, b) => (a.date && b.date && a.date !== b.date ? (a.date < b.date ? -1 : 1) : a.index - b.index))
+    .sort((a, b) => (a.date && b.date && a.date !== b.date ? (a.date > b.date ? -1 : 1) : a.index - b.index))
     .map(({ lot }) => lot)
 }
 
@@ -555,7 +555,14 @@ export function defaultLotChoice(input: {
   if (sheet) return Number(sheet.id)
   const dated = input.sharedDate ? choices.find((lot) => lotIsoDate(lot) === input.sharedDate) : null
   if (dated) return Number(dated.id)
-  return Number((mode === 'set' ? choices[choices.length - 1] : choices[0]).id)
+  const datedChoices = choices.filter((lot) => lotIsoDate(lot))
+  const selected = datedChoices.reduce<SessionLot | undefined>((best, lot) => {
+    if (!best) return lot
+    const earlier = lotIsoDate(lot) < lotIsoDate(best)
+    const later = lotIsoDate(lot) > lotIsoDate(best)
+    return (mode === 'remove' ? earlier : later) ? lot : best
+  }, undefined)
+  return Number((selected || (mode === 'set' ? choices[choices.length - 1] : choices[0])).id)
 }
 
 /** The lot-scope Set preview for the entry row, or null while the target is not a count. */
