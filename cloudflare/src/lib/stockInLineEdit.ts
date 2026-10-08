@@ -1,3 +1,4 @@
+import { executeStockTransaction, StockTransactionUnavailableError, StockTransactionOutcomeUnknownError } from './stockTransaction'
 import { productStockGuardStatement, productStockGuardError } from './productStockGuard'
 // N6 (owner, 23 Sep 2026): "Stock-in sessions editable (today only add or
 // delete)." The ONE writer that edits a saved stock-in line in place:
@@ -713,8 +714,9 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
     } },
   ]
   try {
-    await ordinaryBusinessBatch(db, addressedStatements(landing, statements))
+    await executeStockTransaction(db, addressedStatements(landing, statements), 'retry')
   } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const concurrent = await previous()
     if (concurrent) return replay(concurrent)
     const activeGuard = productStockGuardError(error)
@@ -1013,8 +1015,12 @@ export async function replayStockInLineEdit(
     } },
   ]
   try {
-    await ordinaryBusinessBatch(db, statements)
+    const writesStock = productDelta !== 0 || branchChange !== 0
+      || deltas.some(lot => lot.stockChange !== 0 || lot.to.isActive !== lot.from.isActive)
+    if (writesStock) await executeStockTransaction(db, statements, 'retry')
+    else await ordinaryBusinessBatch(db, statements)
   } catch (error) {
+    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const current = await db.prepare('SELECT generation,state FROM stock_lot_adjustment_operations WHERE id=@operation').get<OperationRow>({ operation: row.id })
     if (current?.generation === next && current.state === target) return
     const activeGuard = productStockGuardError(error)
