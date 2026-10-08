@@ -1401,6 +1401,30 @@ async function restoreBackedUpAsset(env: Env, backedUpKey: string, originalKey: 
   }
 }
 
+function restoreStockAdmission() {
+  const inactiveProducts = new Set<number>()
+  const inactiveBatches = new Set<number>()
+  const MAX_IDENTITIES = 100000
+  const refuse = () => { throw new Error('product_has_stock: Cannot restore inactive products holding stock. No database rows have been changed.') }
+  return (table: string, row: Record<string, unknown>) => {
+    if (table === 'products' && Number(row.is_active === undefined ? 1 : row.is_active) !== 1) {
+      const id = Number(row.id)
+      if (!Number.isSafeInteger(id)) throw new Error('Invalid inactive product identity in backup.')
+      inactiveProducts.add(id)
+      if (Number(row.stock_quantity || 0) !== 0) refuse()
+    } else if (table === 'product_batches' && inactiveProducts.has(Number(row.variant_product_id))) {
+      inactiveBatches.add(Number(row.id))
+    } else if ((table === 'branch_stock' && inactiveProducts.has(Number(row.product_id)) && Number(row.quantity || 0) !== 0)
+      || (table === 'branch_batch_stock' && inactiveBatches.has(Number(row.batch_id)) && Number(row.quantity || 0) !== 0)
+      || (table === 'damaged_stock_lots' && inactiveProducts.has(Number(row.product_id)) && Number(row.quantity_remaining || 0) !== 0)) {
+      refuse()
+    }
+    if (inactiveProducts.size + inactiveBatches.size > MAX_IDENTITIES) {
+      throw new Error('Backup stock admission exceeds its bounded identity limit. No database rows have been changed.')
+    }
+  }
+}
+
 export async function restoreCloudflareBackup(env: Env, source: string, onProgress?: (progress: RestoreProgress) => Promise<void>) {
   const key = resolveBackupKey(source)
 
@@ -1423,9 +1447,11 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   // pass 2 deletes anything; do not query D1 once per document table.
   const documentTables = new Set<string>()
   let pass1Summary: BackupPayload['summary'] | null = null
+  const admitStockRow = restoreStockAdmission()
   const validatedSource = await openPinnedBackupSource(env, key)
   try {
     for await (const ev of streamBackupEvents(validatedSource.body)) {
+      if (ev.type === 'row') admitStockRow(ev.table, ev.row)
       // Custom metadata is backed up, but cannot authorize dropping an
       // arbitrary system table during a later factory reset. Check ALL rows
       // in pass 1, before even the first restore DELETE or progress write.
@@ -1438,7 +1464,7 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
       } else if (ev.type === 'meta' && ev.key === 'summary') {
         pass1Summary = ev.value as BackupPayload['summary']
       }
-      // rows ignored in pass 1 -- nothing is held.
+      // Only inactive product/lot identities are retained, with a hard cap.
     }
   } finally {
     await validatedSource.body.cancel().catch(() => {})
@@ -1494,7 +1520,7 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   if (presentTables.some((table, index) => table !== orderedTables[index])) {
     throw new Error('Cannot restore this backup: tables are not in dependency order. No database rows have been changed.')
   }
-  if (orderedTables.some(table => table.startsWith('stock_session_'))) {
+  if (orderedTables.includes('products') || orderedTables.some(table => table.startsWith('stock_session_'))) {
     const maintenance = await env.DB.prepare("SELECT 1 ok FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore'").first<{ ok: number }>()
     if (!maintenance) throw new Error('Stock replay restore requires restore maintenance mode to preserve revision counters. No database rows have been changed.')
   }
@@ -1505,11 +1531,24 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   const restoreSource = await openPinnedBackupSource(env, key, validatedSource.identity)
   try {
     let statementCount = 0
-    await onProgress?.({ phase: 'deleting' })
+    const deletes: D1PreparedStatement[] = []
     for (const table of [...orderedTables].reverse()) {
-      await env.DB.prepare(`DELETE FROM ${qid(table)}`).run()
-      statementCount += 1
+      if (table === 'products') {
+        // This is the existing snapshot-replacement path: child ledgers have
+        // been cleared in this same transaction. Recompute their derived cache
+        // before replacing product identities; every stock trigger stays on.
+        deletes.push(env.DB.prepare(`UPDATE products SET stock_quantity=0
+          WHERE NOT EXISTS(SELECT 1 FROM branch_stock WHERE product_id=products.id AND quantity<>0)
+            AND NOT EXISTS(SELECT 1 FROM product_batches b JOIN branch_batch_stock s ON s.batch_id=b.id
+              WHERE b.variant_product_id=products.id AND s.quantity<>0)
+            AND NOT EXISTS(SELECT 1 FROM damaged_stock_lots WHERE product_id=products.id AND quantity_remaining<>0)`))
+      }
+      deletes.push(env.DB.prepare(`DELETE FROM ${qid(table)}`))
     }
+    if (deletes.length > 100) throw new Error('Restore deletion plan exceeds the atomic statement limit. No database rows have been changed.')
+    await onProgress?.({ phase: 'deleting' })
+    if (deletes.length) await env.DB.batch(deletes)
+    statementCount += deletes.length
 
     // Pass 2: stream rows and insert in bounded batches, per table.
     const CHUNK = 80
