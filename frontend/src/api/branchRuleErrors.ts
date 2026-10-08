@@ -66,6 +66,7 @@ export const LEGACY_BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, st
 
 export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   product_has_stock: 'product_has_stock',
+  product_status_unsupported: 'product_status_unsupported',
   branch_edit_conflict: 'branch_edit_conflict',
   branch_review_schema_required: 'branch_review_schema_required',
   canonical_branch_configuration_invalid: 'canonical_branch_configuration_invalid',

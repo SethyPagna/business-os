@@ -41,7 +41,7 @@
 // box and narrows the list, and the operator still chooses the row. This
 // file only decides what order the narrowed list is drawn in.
 
-import { stockVisibleProductSql } from './productStockGuard'
+import { catalogProductSql, stockVisibleProductSql } from './productStockGuard'
 import {
   buildExactBarcodeMatchClause,
   exactBarcodePredicateSql,
@@ -60,6 +60,7 @@ import {
 } from './searchMatch'
 
 export interface ProductSearchQueryOptions {
+  catalogOnly?: boolean
   // Search mode from the AND/OR toggle. Anything but 'OR' means AND.
   mode?: string
   // name-only search (Products' "search titles only" switch). Disables the
@@ -133,7 +134,7 @@ export function parseRankedIds(rawIds: unknown, rawTiers?: unknown): RankedIds |
   return { ids, tiers }
 }
 
-function buildRankedIdSearchQuery(ranked: RankedIds, params: Record<string, unknown>, prefix: string, titleOnly: boolean): ProductSearchQuery {
+function buildRankedIdSearchQuery(ranked: RankedIds, params: Record<string, unknown>, prefix: string, titleOnly: boolean, catalogOnly = false): ProductSearchQuery {
   // Present but unusable resolves to no rows, never to the whole catalog.
   if (!ranked.ids.length) return { hasSearchTerm: true, titleOnly, whereClause: '1 = 0' }
   // Tier first (stable), so each tier is one contiguous run of the string.
@@ -157,8 +158,8 @@ function buildRankedIdSearchQuery(ranked: RankedIds, params: Record<string, unkn
     hasSearchTerm: true,
     titleOnly,
     whereClause: `p.id IN ${listed}`,
-    activeWhereSql: stockVisibleProductSql('p', false),
-    familyMemberWhereSql: `${stockVisibleProductSql('p', false)} AND (p.id IN ${listed} OR p.parent_id IN ${listed} OR p.id IN (SELECT listed.parent_id FROM products listed WHERE listed.id IN ${listed}))`,
+    activeWhereSql: catalogOnly ? catalogProductSql('p', false) : stockVisibleProductSql('p', false),
+    familyMemberWhereSql: `${catalogOnly ? catalogProductSql('p', false) : stockVisibleProductSql('p', false)} AND (p.id IN ${listed} OR p.parent_id IN ${listed} OR p.id IN (SELECT listed.parent_id FROM products listed WHERE listed.id IN ${listed}))`,
     matchRankSql: position,
     matchTierSql: `(CASE WHEN ${position} < @${prefix}rankTierCut1 THEN 0 WHEN ${position} < @${prefix}rankTierCut2 THEN 1 WHEN ${position} < @${prefix}rankTierCut3 THEN 2 WHEN ${position} < @${prefix}rankTierCut4 THEN 3 ELSE 4 END)`,
   }
@@ -291,7 +292,7 @@ export function buildProductSearchQuery(
   const nameColumn = options.nameColumn || 'p.name'
   const barcodeColumn = options.barcodeColumn || 'p.barcode'
   const titleOnly = Boolean(options.titleOnly)
-  if (options.rankedIds) return buildRankedIdSearchQuery(options.rankedIds, params, prefix, titleOnly)
+  if (options.rankedIds) return buildRankedIdSearchQuery(options.rankedIds, params, prefix, titleOnly, options.catalogOnly)
   const mode = String(options.mode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
   const termGroups = tokenizeSearchTermGroups(rawSearchText, 6, 8)
   if (!termGroups.length) return { hasSearchTerm: false, titleOnly }
@@ -366,7 +367,8 @@ export function buildProductSearchQuery(
 
   // 4. Mixed group (one comma-group holding both a word and a code
   // fragment), which neither table resolves alone.
-  const hybridMatch = titleOnly ? undefined : buildHybridMatchClause(termGroups, mode, `${prefix}hyb`, PRODUCT_SEARCH_COLUMNS, stockVisibleProductSql())
+  const visibleProducts = options.catalogOnly ? catalogProductSql() : stockVisibleProductSql()
+  const hybridMatch = titleOnly ? undefined : buildHybridMatchClause(termGroups, mode, `${prefix}hyb`, PRODUCT_SEARCH_COLUMNS, visibleProducts)
   if (hybridMatch) {
     Object.assign(params, hybridMatch.params)
     matchClauses.push(hybridMatch.sql)
@@ -374,11 +376,11 @@ export function buildProductSearchQuery(
 
   // 5. Sub-3-character words (FTS5's trigram tokenizer emits nothing below
   // 3 chars), name only, on the precomputed normalized column.
-  const shortWordMatch = buildShortWordFallbackClause(termGroups, mode, [nameNormalizedColumn], params, `${prefix}shortw`, true, stockVisibleProductSql())
+  const shortWordMatch = buildShortWordFallbackClause(termGroups, mode, [nameNormalizedColumn], params, `${prefix}shortw`, true, visibleProducts)
   if (shortWordMatch) matchClauses.push(shortWordMatch)
 
   // 6. Long (4+ word) queries, partial-word, name only.
-  const partialMatch = buildPartialWordMatchClause(termGroups, mode, [nameNormalizedColumn], params, `${prefix}partialw`, 4, true, stockVisibleProductSql())
+  const partialMatch = buildPartialWordMatchClause(termGroups, mode, [nameNormalizedColumn], params, `${prefix}partialw`, 4, true, visibleProducts)
   if (partialMatch) matchClauses.push(partialMatch)
 
   // 7. Exact barcode with leading zeros folded on both sides (the

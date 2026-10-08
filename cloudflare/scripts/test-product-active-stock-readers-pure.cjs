@@ -68,6 +68,9 @@ async function main() {
   const ranked = search.buildProductSearchQuery('', rankedParams, { rankedIds: { ids: [900001,900002,900003,900004,900005,900006], tiers: [] } })
   const listed = db.prepare(`SELECT id FROM products p WHERE ${ranked.activeWhereSql} AND ${ranked.whereClause} ORDER BY id`).all({ rankIdList: rankedParams.rankIdList })
   assert.deepEqual(listed.map(row => row.id), [900001,900002,900003,900004,900005])
+  const catalogParams = {}
+  const catalog = search.buildProductSearchQuery('', catalogParams, { catalogOnly: true, rankedIds: { ids: [900001,900002,900003,900004,900005,900006], tiers: [] } })
+  assert.deepEqual(db.prepare(`SELECT id FROM products p WHERE ${catalog.activeWhereSql} AND ${catalog.whereClause} ORDER BY id`).all({ rankIdList: catalogParams.rankIdList }).map(row => row.id), [900005], 'catalog excludes removal identities even when physical diagnostics retain their stock')
   const branch = functionsFrom('routes/branches.ts', ['buildBranchStockWhere'], { ...deps, ...search })
   for (const query of [{}, { rankIds: '900001,900002,900003,900004,900005,900006' }]) {
     const where = branch.buildBranchStockWhere({ req: { query: key => query[key] } }, 900001, lowStock, { includeStockState: false })

@@ -13,5 +13,15 @@ for (const pack of [en, km]) {
   assert.equal(localizeBranchRuleError(refusal, key => pack[key]), pack.product_has_stock)
 }
 assert.notEqual(en.product_has_stock, km.product_has_stock)
+const unsupported = { code: 'product_status_unsupported', error: 'Worker fallback' }
+assert.equal(branchRuleErrorKey(unsupported), 'product_status_unsupported')
+assert.equal(RESTATED_REFUSAL_KEYS.product_status_unsupported, 'product_status_unsupported')
+for (const pack of [en, km]) {
+  assert.equal(localizeBranchRuleError(unsupported, key => pack[key]), pack.product_status_unsupported)
+  assert.equal(typeof pack.product_status_unsupported, 'string')
+}
+assert.notEqual(en.product_status_unsupported, km.product_status_unsupported)
+assert.doesNotMatch(en.product_has_stock, /activat|inactive|stay active/i)
+assert.doesNotMatch(en.csv_template_columns, /is_active/)
 assert.equal(branchRuleErrorKey({ code: 'some_other_error', error: 'Worker fallback' }), null)
 console.log('PASS stock refusal uses both language packs and shared HTTP/surface maps')
