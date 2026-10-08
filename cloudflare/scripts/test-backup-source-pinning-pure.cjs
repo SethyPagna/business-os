@@ -28,12 +28,13 @@ async function run(options = {}, implementation = current) {
   const env = { DB: implementation.makeFakeD1(schema), ASSETS: implementation.makeFakeR2({
     [key]: { body: options.truncated ? document('VALIDATED').slice(0, -3) : document('VALIDATED') },
   }), CACHE: implementation.makeFakeKV() }
+  env.DB.setRestoreOwner(key)
   let reads = 0, deletes = 0, cancelled = 0
   const progress = [], calls = []
   const prepare = env.DB.prepare.bind(env.DB)
   env.DB.prepare = sql => {
     const stmt = prepare(sql)
-    if (sql.startsWith('DELETE ')) {
+    if (sql.startsWith('DELETE FROM \"settings\"')) {
       const exec = stmt.run; stmt.run = async () => { deletes++; return exec() }
       const batchExec = stmt._exec; stmt._exec = () => { deletes++; return batchExec() }
     }
@@ -72,7 +73,7 @@ async function run(options = {}, implementation = current) {
         if (options.heldOverwrite) await env.ASSETS.put(key, document('REPLACEMENT'))
         if (options.callbackError) throw new Error('admission failed')
       }
-    })
+    }, 'fixture-owner')
   } catch (caught) { error = caught }
   return { schema, reads, deletes, cancelled, progress, calls, error }
 }

@@ -25,6 +25,7 @@ const key = Symbol.for('business-os.request-metrics.v1')
     await raw.exec('CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at TEXT); CREATE TABLE stock(id INTEGER PRIMARY KEY,quantity INTEGER NOT NULL CHECK(quantity>=0)); CREATE TABLE receipts(id TEXT PRIMARY KEY,quantity INTEGER NOT NULL); INSERT INTO stock VALUES(1,7);')
     await raw.prepare('INSERT INTO system_flags(key,value) VALUES(?,?)').bind('stock_schema_epoch', api.STOCK_SCHEMA_EPOCH).run()
     await raw.exec(`CREATE TRIGGER stock_update BEFORE UPDATE ON stock BEGIN SELECT CASE WHEN EXISTS(SELECT 1 FROM system_flags p JOIN system_flags e ON e.key='stock_schema_epoch' AND p.value=e.value WHERE p.key='stock_transaction_permit') THEN 1 ELSE RAISE(ABORT,'stock_transaction_required') END; END;`)
+    assert.throws(() => api.executeRawRestoreStockTransaction(raw, [], undefined), error => error.code === 'stock_schema_unavailable')
     const state = async () => ({ quantity: await raw.prepare('SELECT quantity FROM stock').first('quantity'), permits: await raw.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'").first('n'), receipts: await raw.prepare('SELECT COUNT(*) AS n FROM receipts').first('n') })
     const update = quantity => ({ sql: 'UPDATE stock SET quantity=quantity+@quantity WHERE id=1 RETURNING quantity', params: { quantity } })
     let attempts = 0, calls = 0

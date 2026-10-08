@@ -12,7 +12,7 @@ async function main() {
       const input = await request.json(); const db = env.DB;
       await db.prepare('DELETE FROM system_flags').run();
       await db.prepare("INSERT INTO system_flags(key,value)VALUES('stock_schema_epoch','legacy-separate-pool-v1')").run();
-      const begin = () => beginMaintenance(env, {backupKey:'test',startedBy:'admin'});
+      const begin = () => beginMaintenance(env, {backupKey:input.source===undefined?'test':input.source,startedBy:'admin'});
       if(input.mode === 'begin-race') {
         const results = await Promise.allSettled([begin(),begin(),begin()]);
         return Response.json({results, current:await getMaintenance(env)});
@@ -64,6 +64,9 @@ async function main() {
       assert.equal(response.status, 200, await response.clone().text())
       return response.json()
     }
+    const invalid = await call({ mode: 'begin-race', source: '' })
+    assert.equal(invalid.results.filter(r => r.status === 'fulfilled').length, 0)
+    assert.equal(invalid.current, null)
     const concurrent = await call({ mode: 'begin-race' })
     assert.equal(concurrent.results.filter(r => r.status === 'fulfilled').length, 1)
     assert.equal(concurrent.current.token, concurrent.results.find(r => r.status === 'fulfilled').value.token)

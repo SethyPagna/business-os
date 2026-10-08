@@ -27,13 +27,21 @@ async function main() {
     'restore-race-import', 'restore-race-bulk', 'restore-race-lease']) {
     const db = new Database(':memory:')
     db.exec('CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT);CREATE TABLE import_jobs(status TEXT,lease_token TEXT,lease_expires_at TEXT);CREATE TABLE bulk_delete_jobs(status TEXT)')
+    db.prepare("INSERT INTO system_flags(key,value)VALUES('stock_schema_epoch','legacy-separate-pool-v1')").run()
     const state = { mode: 'restore', token: 'original', phase: 'failed', backupKey: 'backup', startedBy: 'admin', startedAt: '2026-09-21T00:00:00Z', updatedAt: '2026-09-21T00:00:00Z' }
     const original = JSON.stringify(state)
     if (scenario.startsWith('clear') || scenario.startsWith('corrupt')) db.prepare('INSERT INTO system_flags(key,value) VALUES(?,?)').run('maintenance', scenario.startsWith('corrupt') ? '{broken' : original)
     let reads = 0
     const replacement = JSON.stringify({ ...state, token: 'replacement', phase: 'deleting' })
-    const env = { events: [], restoreCalls: 0, replaceAfterRestore: scenario === 'restore-release-failed', replace() { db.prepare('UPDATE system_flags SET value=?').run(replacement) }, DB: { prepare(sql) {
-      const bind = params => ({ first: async () => {
+    const env = { events: [], restoreCalls: 0, replaceAfterRestore: scenario === 'restore-release-failed', replace() { db.prepare("UPDATE system_flags SET value=? WHERE key='maintenance'").run(replacement) }, DB: {async batch(statements){
+      if(scenario.startsWith('restore-race-')){
+        if(scenario==='restore-race-import')db.prepare("INSERT INTO import_jobs(status)VALUES('queued')").run()
+        if(scenario==='restore-race-bulk')db.prepare("INSERT INTO bulk_delete_jobs(status)VALUES('pending')").run()
+        if(scenario==='restore-race-lease')db.prepare("INSERT INTO import_jobs(status,lease_expires_at)VALUES('failed','2099-01-01')").run()
+      }
+      return db.transaction(()=>statements.map(s=>({meta:{changes:db.prepare(s.text).run(...s.params).changes}})))()
+    }, prepare(sql) {
+      const bind = params => ({ text:sql,params, first: async () => {
         if (sql.includes('FROM import_jobs')) {
           if (scenario === 'restore-import-error') throw new Error('D1 unavailable')
           if (scenario === 'restore-import-missing') return null
@@ -63,31 +71,31 @@ async function main() {
       if (scenario !== 'restore-import-active') assert.equal(result.code, 'import_status_unavailable')
       assert.equal(env.restoreCalls, 0, 'uncertain or active imports must never enter restore')
       assert.equal(env.events.length, 0, 'rejected admission must not create a success job/audit')
-      assert.equal(db.prepare('SELECT * FROM system_flags').get(), undefined, 'rejected admission must not acquire maintenance')
+      assert.equal(db.prepare("SELECT * FROM system_flags WHERE key='maintenance'").get(), undefined, 'rejected admission must not acquire maintenance')
     } else if (scenario.startsWith('restore-race-')) {
       assert.equal(response.status, 409)
       assert.equal(result.code, 'maintenance_admission_conflict')
       assert.equal(env.restoreCalls, 0)
       assert.equal(env.events.length, 0, 'raced admission must not record job or audit')
-      assert.equal(db.prepare('SELECT * FROM system_flags').get(), undefined)
+      assert.equal(db.prepare("SELECT * FROM system_flags WHERE key='maintenance'").get(), undefined)
     } else if (scenario === 'corrupt-clear-replaced') {
       assert.equal(response.status, 503); assert.equal(result.cleared, false)
       assert.equal(result.code, 'maintenance_active')
       assert.equal(reads, 1)
       assert.equal(env.events.length, 0, 'corrupt hold must not claim a successful clear')
-      assert.equal(db.prepare('SELECT value FROM system_flags').get().value, replacement)
+      assert.equal(db.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value, replacement)
     } else if (scenario.endsWith('replaced')) {
       assert.equal(response.status, 409); assert.equal(result.cleared, false)
       assert.equal(reads, 2)
       assert.equal(env.events.length, 0, 'failed clear must not claim success in audit')
-      assert.equal(db.prepare('SELECT value FROM system_flags').get().value, replacement)
+      assert.equal(db.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value, replacement)
     } else if (scenario === 'restore-release-failed') {
       assert.equal(response.status, 409); assert.equal(result.data_restored, true)
       assert.equal(result.code, 'maintenance_not_released'); assert.equal(result.item.status, 'failed')
       assert.equal(env.events.find(e => e.kind === 'audit').args.at(-1).maintenance_released, false)
-      assert.equal(db.prepare('SELECT value FROM system_flags').get().value, replacement)
+      assert.equal(db.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value, replacement)
     } else {
-      assert.equal(response.status, 200); assert.equal(db.prepare('SELECT * FROM system_flags').get(), undefined)
+      assert.equal(response.status, 200); assert.equal(db.prepare("SELECT * FROM system_flags WHERE key='maintenance'").get(), undefined)
       assert.equal(env.events.filter(e => e.kind === 'audit').length, 1)
     }
     db.close(); console.log('PASS actual backup route', scenario)

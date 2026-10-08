@@ -28,6 +28,10 @@ async function main() {
           decisions:input.documents.map(names=>restoreDependencyError(schema,new Set(names)))});
       }
       const key='backups/cloudflare/probe.json';
+      await raw.prepare('CREATE TABLE IF NOT EXISTS system_flags(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT)').run();
+      await raw.prepare('DELETE FROM system_flags').run();
+      const now=new Date().toISOString();
+      await raw.prepare("INSERT INTO system_flags(key,value)VALUES('stock_schema_epoch','legacy-separate-pool-v1'),('maintenance',?)").bind(JSON.stringify({mode:'restore',token:'fixture-owner',backupKey:key,startedBy:'admin',startedAt:now,updatedAt:now,phase:'deleting'})).run();
       let document=JSON.stringify({format:'business-os-cloudflare-backup',formatVersion:1,
         createdAt:'2026-09-20T00:00:00Z',source:'manual',runtime:'cloudflare-workers',tables:input.tables,
         r2:{assets:[],copiedKeys:[]},summary:{schemaMigration:input.migration||null}});
@@ -49,7 +53,7 @@ async function main() {
         return {key:object.key,etag:object.etag,version:object.version,size:object.size,customMetadata:object.customMetadata,body};
       }};
       let error=null,result=null;
-      try { result=await restoreCloudflareBackup(env,key,async p=>events.push('progress-'+p.phase)) } catch(e){error=e.message}
+      try { result=await restoreCloudflareBackup(env,key,async p=>events.push('progress-'+p.phase),'fixture-owner') } catch(e){error=e.message}
       return Response.json({calls,events,reads,error,result});
     }}
   ` }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', plugins: [{ name: 'private-discovery-test-access', setup(b) {
@@ -142,7 +146,7 @@ async function main() {
         assert(output.events.indexOf(discoveries[0]) < output.events.indexOf('progress-deleting'))
         assert(output.events.indexOf('source-read-2') < output.events.indexOf('progress-deleting'), 'source pin preserved')
         assert.equal(output.result.tables, 1, 'unknown and duplicate headers must not expand restore targets')
-        assert.equal(output.calls.filter(sql => sql.startsWith('DELETE')).length, 1)
+        assert.equal(output.calls.filter(sql => sql.startsWith('DELETE FROM \"settings\"')).length, 1)
         if (mode === 'unknown') assert.equal((await small.prepare('SELECT id FROM ct_ignore').first()).id, 7)
       } else {
         assert.match(output.error, mode === 'migration' ? /newer database schema/ : mode === 'custom-invalid' ? /Invalid custom table metadata/ : /missing dependency/)

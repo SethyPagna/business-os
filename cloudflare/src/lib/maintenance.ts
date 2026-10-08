@@ -157,6 +157,7 @@ export async function beginMaintenance(env: Env, input: { backupKey: string; sta
     phase: 'deleting',
     updatedAt: new Date().toISOString(),
   }
+  if (!parseState(JSON.stringify(state))) throw new MaintenanceAdmissionConflictError()
   // Admission is decided by this one main-D1 write transaction, not by the
   // route's earlier advisory COUNT. A queued import/bulk job or an unexpired
   // import lease must win over restore even when its status is stale/failed.
@@ -184,6 +185,8 @@ export async function beginMaintenance(env: Env, input: { backupKey: string; sta
 
 export async function updateMaintenance(env: Env, token: string, patch: Partial<Pick<RestoreMaintenanceState, 'phase' | 'table' | 'rowsDone' | 'error'>>): Promise<void> {
   if (!token.trim()) return
+  const hook = (globalThis as unknown as Record<symbol, { rawD1Start?(count: number): void } | undefined>)[Symbol.for('business-os.request-metrics.v1')]
+  hook?.rawD1Start?.(1)
   const row = await env.DB.prepare('SELECT value FROM system_flags WHERE key = ?')
     .bind(MAINTENANCE_FLAG_KEY).first<{ value: string }>()
   if (!row) return
@@ -203,6 +206,8 @@ export async function updateMaintenance(env: Env, token: string, patch: Partial<
 // attempt can never clear someone else's hold.
 export async function endMaintenance(env: Env, token: string | null, options: { force?: boolean; expectedRevision?: string } = {}): Promise<boolean> {
   try {
+    const hook = (globalThis as unknown as Record<symbol, { rawD1Start?(count: number): void } | undefined>)[Symbol.for('business-os.request-metrics.v1')]
+    hook?.rawD1Start?.(1)
     const row = await env.DB.prepare('SELECT value FROM system_flags WHERE key = ?')
       .bind(MAINTENANCE_FLAG_KEY).first<{ value: string }>()
     if (!row) return true
@@ -211,6 +216,7 @@ export async function endMaintenance(env: Env, token: string | null, options: { 
     if (!options.force && (!token || parseState(row.value)?.token !== token)) return false
     // Even force clear is scoped to the exact observed row. A newer holder or
     // concurrent progress change requires a fresh operator decision/retry.
+    hook?.rawD1Start?.(1)
     const result = await env.DB.prepare('DELETE FROM system_flags WHERE key = ? AND value = ?')
       .bind(MAINTENANCE_FLAG_KEY, row.value).run()
     return result.meta.changes === 1

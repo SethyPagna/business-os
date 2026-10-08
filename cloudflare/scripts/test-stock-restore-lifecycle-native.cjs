@@ -14,6 +14,7 @@ async function main() {
     import { guardSaleRecordReset, resetDeleteStatements } from './src/routes/system.ts';
     export default { async fetch(request,env) {
       const input=await request.json();
+      let attempts=0;globalThis[Symbol.for('business-os.request-metrics.v1')]={rawD1Start(n){attempts+=n;},d1Start(n){attempts+=n;},d1Call(){}};
       try {
         if(input.mode==='tables')return Response.json(BACKUP_TABLES);
         if(input.mode==='begin')return Response.json(await beginMaintenance(env,{backupKey:input.source,startedBy:'admin'}));
@@ -22,8 +23,11 @@ async function main() {
         if(input.mode==='stock'){
           const authority=input.owned?await restoreStockAuthority(env,input.token,input.source):undefined;
           const statements=[env.DB.prepare('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=1001 RETURNING quantity')];
-          const results=authority?await executeRawRestoreStockTransaction(env.DB,statements,authority):await executeRawStockTransaction(env.DB,statements);
-          return Response.json(results);
+          if(input.rollback)statements.push(env.DB.prepare("INSERT INTO products(id,name)VALUES(1001,'collision')"));
+          if(input.race)await endMaintenance(env,input.token);
+          const raw=input.lost?{prepare:sql=>env.DB.prepare(sql),batch:async items=>{await env.DB.batch(items);throw Error('lost acknowledgement')}}:env.DB;
+          const results=authority?await executeRawRestoreStockTransaction(raw,statements,authority):await executeRawStockTransaction(raw,statements);
+          return Response.json({results,attempts});
         }
         if(input.mode==='reset'){
           const tables=input.empty?[]:['damaged_stock_lots','branch_batch_stock','branch_stock','product_batches','products'];
@@ -88,12 +92,30 @@ async function main() {
     assert.equal((await call({mode:'begin',source})).status,409)
     assert.equal((await call({mode:'stock'})).status,409)
     for(const bad of [{token:'wrong',source},{token:state.token,source:'wrong'}])assert.equal((await call({mode:'stock',owned:true,...bad})).status,409)
-    assert.equal((await call({mode:'stock',owned:true,token:state.token,source})).status,200)
+    const own=await call({mode:'stock',owned:true,token:state.token,source});assert.equal(own.status,200);assert.equal(own.data.attempts,4);assert.equal(own.data.results[0].results[0].quantity,8)
+    assert.equal((await call({mode:'stock',owned:true,token:state.token,source,rollback:true})).status,409);await zero()
+    assert.equal(await db.prepare('SELECT quantity FROM branch_stock WHERE product_id=1001').first('quantity'),8)
+    await db.prepare("UPDATE system_flags SET value='wrong' WHERE key='stock_schema_epoch'").run()
+    assert.equal((await call({mode:'stock',owned:true,token:state.token,source})).status,409);await zero()
+    await db.prepare("UPDATE system_flags SET value='legacy-separate-pool-v1' WHERE key='stock_schema_epoch'").run()
+    assert.equal((await call({mode:'stock',owned:true,token:state.token,source,lost:true})).status,409);await zero()
+    assert.equal(await db.prepare('SELECT quantity FROM branch_stock WHERE product_id=1001').first('quantity'),9)
     await zero()
     assert.equal((await call({mode:'update',token:state.token})).data.phase,'inserting');await zero()
     assert.equal((await call({mode:'end',token:'wrong'})).data,false)
     assert.equal((await call({mode:'end',token:state.token})).data,true)
     assert.equal((await call({mode:'update',token:state.token})).data,null)
+    const racer=(await call({mode:'begin',source})).data
+    assert.equal((await call({mode:'stock',owned:true,token:racer.token,source,race:true})).status,409);await zero()
+    assert.equal(await db.prepare('SELECT quantity FROM branch_stock WHERE product_id=1001').first('quantity'),9)
+    const replacement=(await call({mode:'begin',source})).data
+    await call({mode:'update',token:racer.token})
+    assert.equal((await call({mode:'end',token:racer.token})).data,false)
+    assert.equal((await call({mode:'end',token:replacement.token})).data,true)
+    await db.prepare("INSERT INTO system_flags(key,value)VALUES('stock_transaction_permit','legacy-separate-pool-v1')").run()
+    assert.equal((await call({mode:'begin',source})).status,409)
+    assert.equal(await db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").first('n'),1)
+    await db.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'").run()
     for(const empty of [true,false]){
       assert.equal((await call({mode:'reset',empty,actor:1002})).status,409)
       const reset=await call({mode:'reset',empty,actor:1001});assert.equal(reset.status,200,JSON.stringify(reset))
@@ -101,10 +123,13 @@ async function main() {
       assert.equal(await db.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").first('value'),'legacy-separate-pool-v1')
       assert.equal(await db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key LIKE '%reset_guard'").first('n'),0)
     }
+    document.tables.system_flags={columns:['key','value'],rows:[{key:'stock_schema_epoch',value:'forged-source-epoch'},{key:'maintenance',value:'forged-source-holder'}]}
     const restored=await call({mode:'restore',source,document});assert.equal(restored.status,200,JSON.stringify(restored));assert.equal(restored.data.ended,true);await zero()
+    assert.equal(await db.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").first('value'),'legacy-separate-pool-v1')
+    assert.equal(await db.prepare("SELECT value FROM system_flags WHERE key='stock_schema_receipt_boundary'").first('value'),'0')
     assert.equal(await db.prepare('SELECT quantity FROM branch_stock WHERE product_id=1001').first('quantity'),7)
     assert.equal(await db.prepare('SELECT quantity_remaining FROM damaged_stock_lots WHERE id=1001').first('quantity_remaining'),3)
-    console.log('PASS actual0243 lifecycle: epoch/lease admission, ordinary refusal, owned token/source, progress/clear, empty/nonempty reset owner guards, complete streamed legacy backup S7/D3 preserved, zero permits')
+    console.log('PASS actual0243 lifecycle: epoch/lease admission, ordinary refusal, owned token/source/epoch/rollback/lost ACK/clear race/metrics, progress/clear, empty/nonempty reset owner guards, complete streamed legacy backup S7/D3 preserved, zero permits')
   }finally{await mf.dispose()}
 }
 main().catch(error=>{console.error(error);process.exitCode=1})

@@ -96,5 +96,6 @@ export function executeRawStockTransaction(db: D1Database, statements: D1Prepare
 }
 
 export function executeRawRestoreStockTransaction(db: D1Database, statements: D1PreparedStatement[], authority: RestoreStockAuthority): Promise<D1Result[]> {
+  if (!authority) throw new StockTransactionUnavailableError()
   return executeRaw(db, statements, authority)
 }
