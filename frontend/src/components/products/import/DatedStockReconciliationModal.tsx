@@ -1,3 +1,4 @@
+import { loadDatedDecisionIntent, prepareDatedDecisionIntent, saveDatedDecisionIntent, type DatedDecisionIntent } from '../../../api/inventoryWriteTransport.ts'
 // Frontend review UI for the dated stock-reconciliation import -- the two
 // pieces progress.md's own "Not done -- still open" list has flagged since
 // Part 290/291: (1) the CSV/XLSX column-mapping step and (2) the
@@ -20,7 +21,7 @@
 // user's own instruction this session ("can no longer choose and change
 // mode as we already uploaded the import... has to press back which
 // cancels the uploaded file and restarts").
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left.js'
 import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
 import UploadIcon from 'lucide-react/dist/esm/icons/upload.js'
@@ -320,8 +321,14 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
     return decision.candidateProductId != null
   })
 
-  async function runApplyDecisions(): Promise<void> {
-    if (!reviewComplete) return
+  const decisionIntent = useRef<DatedDecisionIntent | null>(null)
+  const [savedDecision, setSavedDecision] = useState<DatedDecisionIntent | null>(() => {
+    try { return loadDatedDecisionIntent() } catch { return null }
+  })
+  const [decisionProgress, setDecisionProgress] = useState<{ next: number; total: number } | null>(null)
+
+  async function runApplyDecisions(resume = false): Promise<void> {
+    if (!resume && !reviewComplete) return
     setError('')
     setStep('applying_decisions')
     setWorking(true)
@@ -340,10 +347,26 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
             candidateProductId: d.candidateProductId,
           })),
       ]
-      const result = await apiApplyDecisions({ resolved, unresolved, decisions: decisionList }) as {
-        success?: boolean; error?: string
-        resolved?: ResolvedRow[]; errors?: { rowNumber: number; error: string }[]
-      } | null
+      const intent = { resolved, unresolved, decisions: decisionList }
+      decisionIntent.current = resume ? loadDatedDecisionIntent() : prepareDatedDecisionIntent(intent)
+      if (!decisionIntent.current) throw new Error('No saved decisions are available for this account and server.')
+      saveDatedDecisionIntent(decisionIntent.current)
+      setSavedDecision(decisionIntent.current)
+      type DecisionResponse = { success?: boolean; error?: string; complete?: boolean; next?: number; total?: number; resolved?: ResolvedRow[]; errors?: { rowNumber: number; error: string }[] }
+      let result: DecisionResponse | null = null
+      let previous = -1
+      do {
+        result = await apiApplyDecisions(decisionIntent.current.body) as DecisionResponse | null
+        if (!result || result.success === false) break
+        setDecisionProgress({ next: result.next ?? 0, total: result.total ?? 0 })
+        if (result.complete === false && (result.next ?? 0) <= previous) throw new Error('Saved decisions need another retry to continue. Keep the same request.')
+        previous = result.next ?? 0
+      } while (result.complete === false)
+      if (result?.success !== false && result) {
+        decisionIntent.current.completed = true
+        saveDatedDecisionIntent(decisionIntent.current)
+        setSavedDecision(decisionIntent.current)
+      }
       if (!result || result.success === false) {
         setError(result?.error || T('dated_count_apply_decisions_failed', 'Could not apply those decisions.'))
         setStep('review')
@@ -401,6 +424,7 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
 
   return (
     <Modal title={T('dated_stock_reconciliation_title', 'Dated Stock Reconciliation')} onClose={onClose} size="lg" draggable unsavedChanges={{ dirty: Boolean(csvText) }}>
+      {decisionProgress && step === 'applying_decisions' ? <p className="mb-3 text-xs" role="status">{decisionProgress.next} / {decisionProgress.total}</p> : null}
       {error ? (
         <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -461,6 +485,10 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
             </div>
           ) : null}
         </div>
+      ) : null}
+
+      {savedDecision && !savedDecision.completed && !working ? (
+        <button type="button" onClick={() => void runApplyDecisions(true)} className="rounded-lg border px-3 py-2 text-sm">Resume saved decisions</button>
       ) : null}
 
       {step === 'resolving' || step === 'applying_decisions' || step === 'applying' ? (

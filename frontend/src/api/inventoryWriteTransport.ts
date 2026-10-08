@@ -1,3 +1,4 @@
+import { stampOfflineSaleOwner } from './offlineQueueOwnership.ts'
 import { apiFetch, route } from './http.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
@@ -5,6 +6,36 @@ import { loadTransferRun, prepareTransferRun, saveTransferRun } from './branchTr
 // Records a definitive server refusal on the saved run (Edit/Discard in Inventory).
 import { executeTransferRun, type RecoverableTransferRun } from './transferRunRecovery.ts'
 import { receiveBatchWireBody, type ReceiveBatchPayload } from './batchesTransport.ts'
+
+export type DatedDecisionIntent = { canonical: string; body: Record<string, unknown>; completed: boolean }
+function datedIntentKey(): string {
+  const owner = stampOfflineSaleOwner({}).offline_owner
+  return `dated-decision-intent:v1:${JSON.stringify(owner)}`
+}
+export function loadDatedDecisionIntent(): DatedDecisionIntent | null {
+  const raw = window.localStorage.getItem(datedIntentKey())
+  if (!raw) return null
+  const saved = JSON.parse(raw) as DatedDecisionIntent
+  if (typeof saved.canonical !== 'string' || typeof saved.completed !== 'boolean' || !saved.body || typeof saved.body.client_request_id !== 'string') throw new Error('Saved decisions cannot be read. Keep browser storage and check their history.')
+  stampOfflineSaleOwner(saved.body)
+  return saved
+}
+export function saveDatedDecisionIntent(intent: DatedDecisionIntent): void {
+  stampOfflineSaleOwner(intent.body)
+  const key = datedIntentKey()
+  const raw = JSON.stringify(intent)
+  window.localStorage.setItem(key, raw)
+  if (window.localStorage.getItem(key) !== raw) throw new Error('Could not save the decision identity. Keep this window open and retry before submitting.')
+}
+export function prepareDatedDecisionIntent(payload: Record<string, unknown>): DatedDecisionIntent {
+  const canonical = JSON.stringify(payload)
+  const saved = loadDatedDecisionIntent()
+  if (saved && saved.canonical !== canonical && !saved.completed) throw new Error('Resume the saved decisions before submitting different choices.')
+  if (saved && saved.canonical === canonical) return saved
+  const intent = { canonical, body: JSON.parse(JSON.stringify(ensureClientRequestId(stampOfflineSaleOwner(payload), 'dated-decision'))), completed: false }
+  saveDatedDecisionIntent(intent)
+  return intent
+}
 
 type InventoryPayload = Record<string, unknown>
 
@@ -379,9 +410,10 @@ export function resolveDatedStockCountRows(rows: unknown[] = []): Promise<unknow
 }
 
 export function applyDatedStockCountDecisions(payload: InventoryPayload = {}): Promise<unknown> {
+  const body = JSON.parse(JSON.stringify(ensureClientRequestId(stampOfflineSaleOwner({ ...getDevicePayload(), ...payload }), 'dated-decision')))
   return route(
     'inventory:datedStockCount:applyDecisions',
-    () => apiFetch('POST', '/api/inventory/dated-stock-count/resolve/apply-decisions', { ...getDevicePayload(), ...(payload || {}) }),
+    () => apiFetch('POST', '/api/inventory/dated-stock-count/resolve/apply-decisions', body),
     null,
     true,
   )
