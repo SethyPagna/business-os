@@ -1,5 +1,7 @@
 const assert = require('node:assert/strict')
-const { bundleWorker, world, scenario } = require('./test-generic-import-invocation-budget-epoch-native.cjs')
+const { bundleWorker, world, scenario } = require(process.env.PRODUCT_FINALIZER_TEST_ROOT
+  ? process.env.PRODUCT_FINALIZER_TEST_ROOT + '/cloudflare/scripts/test-generic-import-invocation-budget-epoch-native.cjs'
+  : './test-generic-import-invocation-budget-epoch-native.cjs')
 
 async function finalizers(make, { tier = 'free', groups = 3, fault, inline = false, tails = false }) {
   let afterWork = false
@@ -210,10 +212,138 @@ async function finalizers(make, { tier = 'free', groups = 3, fault, inline = fal
     guards: f.sql.prepare('SELECT * FROM import_stock_action_guards WHERE job_id=? ORDER BY action_key,guard_key').all(id) }), terminal)
   console.log(`FINALIZER PASS ${tier}/${groups}/${fault || 'normal'}/${inline} max=${max}`)
 }
+async function retryContinuation(make, { tier, fault }) {
+  let f, fail = true, injected = false
+  const id = `retry-finalizer-${tier}-${fault}`, pending = [], tasks = []
+  const job = () => f.sql.prepare('SELECT * FROM import_jobs WHERE id=?').get(id)
+  const state = () => JSON.parse(job().chunk_state_json || '{}')
+  const progress = () => state().genericApply?.finalize
+  const quantity = () => f.sql.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity
+  const guards = () => f.sql.prepare('SELECT * FROM import_stock_action_guards WHERE job_id=? ORDER BY action_key,guard_key').all(id)
+  const sourceResults = () => f.sql.prepare("SELECT * FROM import_job_rows WHERE job_id=? AND phase='apply' ORDER BY row_number").all(id)
+  f = await world(make, tier, { seed(sql) {
+    sql.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,stock_quantity,is_active,updated_at) VALUES(2,'Product 2','SER-2',2,0,1,CURRENT_TIMESTAMP)").run()
+  }, failAttempt(sql) {
+    if (fault === 'generic' && fail && progress()?.reconciled === 1 && sql.includes('WITH normalized AS MATERIALIZED')) {
+      injected = true; throw Error('synthetic finalizer read failure after committed group')
+    }
+  } })
+  f.env.IMPORT_QUEUE = { send: async body => pending.push({ body, attempts: 1 }) }
+  f.env.ASSETS = { list: async () => ({ objects: [], truncated: false }), delete: async () => {} }
+  const rows = Array.from({ length: 4 }, (_, i) => ({ _rowNumber: i + 2, name: i < 2 ? 'Serum' : 'Product 2',
+    barcode: i < 2 ? 'SER-1' : 'SER-2', quantity: '1', branch: 'Shop', unit_cost_usd: '2', date: '2026-09-05' }))
+  f.sql.prepare("INSERT INTO import_jobs(id,type,status,policy_json,materialize_done) VALUES(?,'products','awaiting_review',?,1)")
+    .run(id, JSON.stringify({ import_mode: 'replace_all' }))
+  rows.forEach((row, i) => f.sql.prepare('INSERT INTO import_job_source_rows(job_id,sequence,row_number,data_json) VALUES(?,?,?,?)')
+    .run(id, i, i + 2, JSON.stringify(row)))
+  const analyzed = await f.worker.classifyProducts(f.worker.getDb(f.env), rows, id, JSON.stringify({ import_mode: 'replace_all' }))
+  assert.ok(analyzed.every(row => row.action === 'create' || row.action === 'update'))
+  for (const row of analyzed) f.sql.prepare("INSERT INTO import_job_rows(job_id,phase,row_number,action,identifier,result_json) VALUES(?,'analyze',?,?,?,?)")
+    .run(id, row.rowNumber, row.action, row.identifier, JSON.stringify(row))
+  let baseline = f.measured(), max = 0, invocations = 0
+  function measure(phase) {
+    const current = f.measured(), physical = current.physical - baseline.physical, metered = current.metered - baseline.metered
+    baseline = current; max = Math.max(max, physical); invocations++
+    assert.equal(physical, metered, 'every actual raw/wrapped/auth/background attempt is measured')
+    assert.ok(physical <= (tier === 'free' ? 50 : 1000), phase + ': actual invocation over tier cap ' + physical)
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    console.log(JSON.stringify({ tier, fault, retryProof: true, phase, attempts: physical, status: job().status,
+      processed: job().processed_rows, cursor: job().chunk_cursor, finalize: progress(), quantity: quantity() }))
+  }
+  const ctx = { waitUntil(p) { tasks.push(p) }, passThroughOnException() {} }
+  async function http(path, body = {}, authorized = true) {
+    const response = await f.worker.default.fetch(new Request('https://admin.business.test' + path, {
+      method: 'POST', headers: { origin: 'https://admin.business.test', 'content-type': 'application/json',
+        ...(authorized ? { cookie: 'bos_session=branch-auth-cookie' } : {}) }, body: JSON.stringify(body),
+    }), f.env, ctx)
+    while (tasks.length) await Promise.all(tasks.splice(0))
+    measure(path); return { status: response.status, body: await response.json() }
+  }
+  async function deliver(message, queue = 'business-os-import') {
+    await f.worker.default.queue({ queue, messages: [{ ...message, timestamp: new Date(), ack() {},
+      retry() { pending.push({ ...message, attempts: message.attempts + 1 }) } }] }, f.env)
+    measure(queue + '-' + message.body.kind)
+  }
+  assert.equal((await http(`/api/import-jobs/${id}/approve`)).status, 200)
+  for (let delivery = 0; job().status !== 'failed'; delivery++) {
+    assert.ok(delivery < 60)
+    if (fault === 'dlq' && !injected && progress()?.reconciled === 1 && progress()?.pendingHash) {
+      const lot = f.sql.prepare('SELECT id FROM product_batches WHERE variant_product_id=2 ORDER BY id LIMIT 1').get()
+      f.sql.prepare("UPDATE product_batches SET received_branch_name='Changed provenance' WHERE id=?").run(lot.id)
+      injected = true
+    }
+    const message = pending.shift(); assert.ok(message); await deliver(message)
+  }
+  fail = false; pending.length = 0
+  assert.ok(injected); assert.equal(progress().reconciled, 1); assert.equal(quantity(), 2)
+  assert.equal(job().processed_rows, 4); assert.equal(job().lease_token, null)
+  const original = { run: state().startedAtMs, cursor: job().chunk_cursor, progress: progress(),
+    guards: guards(), rows: sourceResults() }
+  const unchanged = () => {
+    assert.equal(state().startedAtMs, original.run); assert.equal(job().chunk_cursor, original.cursor)
+    assert.deepEqual(progress(), original.progress); assert.deepEqual(guards(), original.guards)
+    assert.deepEqual(sourceResults(), original.rows); assert.equal(job().processed_rows, 4)
+  }
+  assert.equal((await http(`/api/import-jobs/${id}/retry`, {}, false)).status, 401); unchanged()
+  for (const action of ['start', 'approve', 'csv']) {
+    assert.equal((await http(`/api/import-jobs/${id}/${action}`)).status, 409); unchanged()
+  }
+  // An old analyze delivery cannot turn a committed apply run into a new run.
+  await deliver({ body: { jobId: id, kind: 'analyze' }, attempts: 1 }); unchanged()
+  if (fault === 'dlq') {
+    const refused = await http(`/api/import-jobs/${id}/retry`)
+    assert.equal(refused.status, 409); assert.equal(refused.body.code, 'product_import_finalization_changed'); unchanged()
+    assert.equal(state().genericApply.finalizationChanged, true)
+    await deliver({ body: { jobId: id, kind: 'apply' }, attempts: 6 }, 'business-os-import-dlq')
+    assert.ok(!job().last_error.startsWith('product_import_finalization_changed:')); unchanged()
+  }
+  assert.equal((await http('/api/inventory/adjust', { client_request_id: 'retry-finalizer-remove-' + tier + '-' + fault,
+    productId: 1, branchId: 1, type: 'remove', quantity: 1, reason: 'Later legitimate removal' })).status, 200)
+  assert.equal(quantity(), 1)
+  let retry
+  for (const status of ['failed', 'applying', 'queued', 'cancelled', 'awaiting_review']) {
+    f.sql.prepare('UPDATE import_jobs SET status=? WHERE id=?').run(status, id)
+    pending.length = 0
+    retry = await http(`/api/import-jobs/${id}/retry`)
+    assert.equal(retry.status, fault === 'dlq' ? 409 : 200)
+    unchanged(); assert.equal(quantity(), 1)
+    if (fault !== 'dlq') assert.equal(pending.at(-1).body.kind, 'apply')
+  }
+  if (fault === 'dlq') {
+    assert.equal(retry.status, 409); assert.equal(retry.body.code, 'product_import_finalization_changed')
+    assert.equal(pending.length, 0); unchanged(); assert.equal(quantity(), 1)
+    // Automatic apply redelivery must also respect the durable correction requirement.
+    await deliver({ body: { jobId: id, kind: 'apply' }, attempts: 7 }); unchanged(); assert.equal(quantity(), 1)
+  } else {
+    assert.equal(retry.status, 200); assert.equal(pending.at(-1).body.kind, 'apply'); unchanged()
+    for (let delivery = 0; job().status !== 'completed'; delivery++) {
+      assert.ok(delivery < 40)
+      const message = pending.shift(); assert.ok(message); await deliver(message)
+      assert.equal(state().startedAtMs, original.run); assert.deepEqual(sourceResults(), original.rows)
+      assert.equal(quantity(), 1, 'retry must never reconcile an already committed group over a later removal')
+    }
+    assert.equal(progress().reconciled, 2); assert.equal(progress().phase, 'done')
+    const terminal = JSON.stringify({ job: job(), guards: guards(), rows: sourceResults() })
+    assert.equal((await http(`/api/import-jobs/${id}/retry`)).status, 200)
+    assert.equal(pending.length, 0)
+    assert.equal(JSON.stringify({ job: job(), guards: guards(), rows: sourceResults() }), terminal)
+    f.sql.prepare("UPDATE import_jobs SET details_pruned_at=CURRENT_TIMESTAMP WHERE id=?").run(id)
+    const pruned = await http(`/api/import-jobs/${id}/retry`)
+    assert.equal(pruned.status, 409); assert.equal(pruned.body.code, 'import_details_pruned')
+    assert.equal(quantity(), 1); assert.deepEqual(sourceResults(), original.rows)
+  }
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM inventory_movements WHERE product_id=1 AND movement_type='remove' AND quantity=1").get().n, 1)
+  console.log(`RETRY FINALIZER PASS ${tier}/${fault} invocations=${invocations} max=${max}`)
+}
+
 async function main() {
   const saved = globalThis.fetch; globalThis.fetch = async () => new Response('{"ok":true}')
   try {
     const make = await bundleWorker()
+    for (const tier of ['free', 'paid']) for (const fault of ['generic', 'dlq']) await retryContinuation(make, { tier, fault })
+    if (process.env.PRODUCT_FINALIZER_RETRY_ONLY === '1') {
+      console.log('product finalizer retry continuation proof PASS 4 schedules'); return
+    }
     for (const tier of ['free', 'paid']) {
       for (const groups of [2, 3, 4]) await finalizers(make, { tier, groups })
       for (const fault of ['interleave', 'ack', 'deactivateAck', 'omitted', 'rollback', 'holder', 'cancel', 'digest', 'costrace', 'identityrace',
@@ -224,8 +354,8 @@ async function main() {
     }
     // Original three-row admission completes after adaptive window reduction.
     await scenario(make, { tier: 'free', n: 3, type: 'products', productMode: 'replace_all' })
-    console.log('product finalizer actual invocation proof PASS 49 schedules')
+    console.log('product finalizer actual invocation proof PASS 53 schedules')
   } finally { globalThis.fetch = saved }
 }
-module.exports = { finalizers }
+module.exports = { finalizers, retryContinuation }
 if (require.main === module) main().catch(e => { console.error(e); process.exitCode = 1 })

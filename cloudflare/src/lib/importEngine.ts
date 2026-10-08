@@ -4023,7 +4023,7 @@ type ProductFinalizeState = {
   pendingHash?: string
 }
 type ImportChunkState = {
-  genericApply?: { window: number; finalize?: ProductFinalizeState }
+  genericApply?: { window: number; finalize?: ProductFinalizeState; finalizationChanged?: boolean }
   // Populated once, on a phase run's first chunk, for job.type==='products'
   // only -- computeImportImageMatch is a full-file, cross-row computation
   // (see importImageMatch.ts's matchImagesToProducts, worst-case
@@ -4154,6 +4154,14 @@ async function getChunkState(db: D1Compat, jobId: string): Promise<{ cursor: num
   let state: ImportChunkState = {}
   try { state = row?.chunk_state_json ? JSON.parse(row.chunk_state_json) : {} } catch { state = {} }
   return { cursor: row?.chunk_cursor ?? 0, state }
+}
+
+export function persistedImportApplyState(chunkStateJson: unknown): ImportChunkState['genericApply'] | null {
+  try {
+    const state = JSON.parse(String(chunkStateJson || '{}')) as ImportChunkState
+    const apply = state?.genericApply
+    return apply && typeof apply === 'object' && !Array.isArray(apply) ? apply : null
+  } catch { return null }
 }
 
 async function saveChunkState(db: D1Compat, jobId: string, cursor: number, state: ImportChunkState): Promise<void> {
@@ -4516,8 +4524,9 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
   // ...narrowed further on a redelivery: see chunkRowsForAttempt.
   const chunkRows = chunkRowsForAttempt(limits.rowsPerImportChunk, attempt)
   const sw = makeStopwatch()
-  const jobRow = await db.prepare(`SELECT status, cancel_requested FROM import_jobs WHERE id = @id`).get<{ status: string; cancel_requested: number }>({ id: jobId })
+  const jobRow = await db.prepare(`SELECT status, cancel_requested, chunk_state_json FROM import_jobs WHERE id = @id`).get<{ status: string; cancel_requested: number; chunk_state_json: string | null }>({ id: jobId })
   if (!jobRow) throw new Error('Import job not found')
+  if (persistedImportApplyState(jobRow.chunk_state_json)) return
   // See isFreshImportRun's comment for the full "why", including the
   // 'failed' case -- Cloudflare's own message.retry() re-delivery of a
   // chunk that crashed before finishing lands here with status='failed'
@@ -4942,12 +4951,16 @@ export function productImportRowSignature(d: ProductImportSignatureInput): strin
 // stuck/zombie card this whole thing is trying to prevent. A few retries
 // with a short pause covers that -- D1 resets the failed transaction, not
 // the whole binding, so a moment later it's normally fine again.
-export async function markJobFailed(db: D1Compat, jobId: string, message: string, leaseToken?: string): Promise<void> {
+export async function markJobFailed(db: D1Compat, jobId: string, message: string, leaseToken?: string, finalizationChanged = false): Promise<void> {
   const error = String(message || '').slice(0, 2000) // last_error is a display field, not a log -- keep it bounded
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      await db.prepare(`UPDATE import_jobs SET status = 'failed', phase = 'failed', last_error = @error, updated_at = CURRENT_TIMESTAMP
-        WHERE id = @id AND (@leaseToken IS NULL OR lease_token=@leaseToken)`).run({ id: jobId, error, leaseToken: leaseToken ?? null })
+      await db.prepare(`UPDATE import_jobs SET status = 'failed', phase = 'failed', last_error = @error, updated_at = CURRENT_TIMESTAMP,
+        chunk_state_json=CASE WHEN @finalizationChanged=1 AND json_type(CASE WHEN json_valid(chunk_state_json)
+          THEN chunk_state_json ELSE '{}' END,'$.genericApply')='object'
+          THEN json_set(chunk_state_json,'$.genericApply.finalizationChanged',json('true')) ELSE chunk_state_json END
+        WHERE id = @id AND (@leaseToken IS NULL OR lease_token=@leaseToken)`)
+        .run({ id: jobId, error, leaseToken: leaseToken ?? null, finalizationChanged: finalizationChanged ? 1 : 0 })
       return
     } catch (writeError) {
       if (isImportMaintenanceFenceError(writeError)) throw writeError
@@ -6165,6 +6178,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     }
     if (savedState.genericApply?.finalize?.phase === 'done'
       && ['completed', 'completed_with_errors'].includes(jobRow.status)) return { applied: 0, failed: 0 }
+    if (savedState.genericApply?.finalizationChanged) throw new ProductImportFinalizationConflictError()
     const job = await db.prepare(`SELECT id, type, policy_json, summary_json FROM import_jobs WHERE id = @id`).get<ImportApplyJob>({ id: jobId })
     if (!job) throw new Error('Import job not found')
     // The HTTP approval/retry request is only the enqueue boundary. A role
@@ -7404,7 +7418,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     const refusalCode = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
     const savedRefusal = ['stock_import_unit_over_tier_budget', 'stock_import_reconcile_over_tier_budget', 'import_queue_required', 'product_import_finalization_changed'].includes(refusalCode)
       ? refusalCode + ': ' + (error as Error).message : null
-    await markJobFailed(db, jobId, stockError ? `${stockError.code}: ${stockError.message}` : savedRefusal || (error as Error).message || 'Apply failed', generic ? leaseToken : undefined)
+    await markJobFailed(db, jobId, stockError ? `${stockError.code}: ${stockError.message}` : savedRefusal || (error as Error).message || 'Apply failed', generic ? leaseToken : undefined,
+      refusalCode === PRODUCT_IMPORT_FINALIZATION_CHANGED.code)
     const replacementError = stockError || (error instanceof ProductReplacementIncompleteError ? error : null)
     if (replacementError && replacementFinalizing) {
       const counts = await db.staging.prepare(`SELECT

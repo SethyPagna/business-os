@@ -10,7 +10,7 @@ import { sanitizeOriginalFileName, buildUniqueStoredName, getMediaType } from '.
 import { classifyImportUpload, validateUploadedBuffer, EMBEDDED_MARKUP_MESSAGE, MISMATCHED_UPLOAD_MESSAGE, UNSUPPORTED_IMAGE_MESSAGE, UNSUPPORTED_UPLOAD_MESSAGE } from '../lib/uploadSecurity'
 import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, summarizeImportWarnings, countRowsWithWarningKinds, runD1BatchInChunks, importBranchRedirectGate, IMPORT_FILE_SKIPPED_ERROR_CODE, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportBranchRedirectGate, type ImportRowResult, type RowAction } from '../lib/importEngine'
 import { IMPORT_BRANCH_REDIRECT_POLICY_KEY } from '../lib/importBranchAuthority'
-import { PRODUCT_IMPORT_FINALIZATION_CHANGED } from '../lib/importEngine'
+import { PRODUCT_IMPORT_FINALIZATION_CHANGED, persistedImportApplyState } from '../lib/importEngine'
 import { stockTransactionRefusal } from '../lib/stockTransaction'
 import { branchRedirectTarget } from '../lib/branchEffect'
 import { readCentralDirectory, extractZipEntry, ZipFormatError, type ZipEntry } from '../lib/zipReader'
@@ -27,6 +27,7 @@ import { getPlanLimits, resolvePlanTier } from '../lib/planTier'
 import { dispatchImportWork } from '../lib/queueDispatch'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
+const IMPORT_APPLY_STARTED = { success: false, error: 'This import has begun applying. Use Retry to continue it; upload a corrected file as a new import.' } as const
 app.use('*', requireAuth)
 app.onError((error, c) => {
   const transactionRefusal = stockTransactionRefusal(error)
@@ -1129,6 +1130,9 @@ app.post('/:id/csv', async (c) => {
   if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
+  if (persistedImportApplyState(job.chunk_state_json)) {
+    return c.json(IMPORT_APPLY_STARTED, 409)
+  }
   // The reviewed source must be immutable. Without this gate a caller could
   // upload a different CSV after analyze finished, retain the old Screen 2
   // summary, then approve and apply the unreviewed replacement. `failed` is
@@ -1447,6 +1451,9 @@ app.post('/:id/start', async (c) => {
   if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
+  if (persistedImportApplyState(job.chunk_state_json)) {
+    return c.json(IMPORT_APPLY_STARTED, 409)
+  }
   const status = String(job.status || '').toLowerCase()
   if (job.cancel_requested || status === 'cancelled' || status === 'cancelling') {
     await auditImportEvent(c, 'import_job_start_blocked', id, job, job, { source: 'api', mode: 'analyze' })
@@ -1471,6 +1478,9 @@ app.post('/:id/approve', async (c) => {
   if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
+  if (persistedImportApplyState(job.chunk_state_json)) {
+    return c.json(IMPORT_APPLY_STARTED, 409)
+  }
   const status = String(job.status || '').toLowerCase()
   if (job.cancel_requested || status === 'cancelled' || status === 'cancelling') {
     return c.json({ success: false, error: 'A cancelled import cannot be approved. Use Retry to analyze it again.' }, 409)
@@ -1662,7 +1672,8 @@ app.post('/:id/retry', async (c) => {
   if (denied) return denied
   const db = await getImportFencedDb(c.env)
   const status = String(job.status || '').toLowerCase()
-  if (status === 'failed' && String(job.last_error || '').startsWith(PRODUCT_IMPORT_FINALIZATION_CHANGED.code + ':')) {
+  const savedApply = persistedImportApplyState(job.chunk_state_json)
+  if (savedApply?.finalizationChanged || status === 'failed' && String(job.last_error || '').startsWith(PRODUCT_IMPORT_FINALIZATION_CHANGED.code + ':')) {
     return c.json({ success: false, ...PRODUCT_IMPORT_FINALIZATION_CHANGED }, 409)
   }
   // K4 retention: once the scheduled sweep has pruned a terminal job's
@@ -1673,6 +1684,7 @@ app.post('/:id/retry', async (c) => {
   if (job.details_pruned_at) {
     return c.json({ success: false, error: 'This import\'s staged data was cleaned up by retention (details are kept 24 hours after a job finishes). Upload the file again to re-import.', code: 'import_details_pruned' }, 409)
   }
+  if (savedApply?.finalize?.phase === 'done') return c.json({ success: true, job: serializeJob(job) })
   // S-uploads: the temporary import file is deleted when a job finishes.
   // A retry still runs from the materialized source rows; only a job that
   // stopped before its CSV was fully read has nothing to retry from.
@@ -1683,9 +1695,7 @@ app.post('/:id/retry', async (c) => {
   // route into apply. In particular, stock_actions /approve enforces the
   // explicit conflict confirmation and records the confirming actor/time;
   // retry used to bypass that entire gate by queueing `apply` directly.
-  const savedFinalize = safeJsonParse<{ genericApply?: { finalize?: { phase?: string } } }>(String(job.chunk_state_json || '{}'), {}).genericApply?.finalize
-  const retryMode = status === 'queued' && ['replace', 'reconcile', 'unify', 'notify', 'settle'].includes(savedFinalize?.phase || '')
-    ? 'apply' : retryModeForImportStatus(status)
+  const retryMode = savedApply ? 'apply' : retryModeForImportStatus(status)
   if (retryMode === 'review_required') {
     return c.json({ success: false, error: 'This import is waiting for review. Use Confirm to apply it, or cancel it to start over.' }, 409)
   }
