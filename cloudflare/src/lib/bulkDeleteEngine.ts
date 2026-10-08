@@ -1,32 +1,7 @@
-// Bulk-delete engine -- the delete-side counterpart to importEngine.ts.
-//
-// Why this exists: products.ts's single DELETE /:id route does a soft
-// delete (UPDATE is_active=0) plus, per row: a name lookup, a branch_stock
-// lookup, one inventory_movements INSERT per branch with stock, one
-// audit_logs INSERT (which itself does a SEPARATE user_sessions lookup --
-// see audit.ts's lookupAuditDeviceInfo), a cache bump, and a broadcast.
-// Products.tsx's bulk-delete flow calls that route once per selected id
-// (see runBulkDeleteConfirmed, runConcurrentTasks). That's fine at the
-// scale it was built for -- a few dozen selected rows -- but at 10k+ rows
-// it's 10k+ round trips, 10k+ separate cache-bump/broadcast messages, and
-// 10k+ redundant session lookups for the exact same user. This module
-// does the same soft-delete + movement-log + audit-log work, but batched:
-// one multi-row UPDATE, movement/audit INSERTs batched together via
-// runD1BatchInChunks (imported from importEngine.ts -- same CPU-limit
-// adaptive-split-and-retry logic, no need to duplicate it), one session
-// lookup total, and one cache-bump/broadcast at the very end instead of
-// per row.
-//
-// Runs as a queue consumer (see queue.ts / bulk_delete_jobs migration's
-// header for why it shares the import queue), not an HTTP handler, so it
-// Product jobs commit one tier-sized chunk per delivery, including their
-// progress and per-product audit rows. Other entities retain the legacy loop.
-//
-// ENTITY_CONFIGS is deliberately a map, not a hardcoded "products" path,
-// so Inventory/Sales/Contacts bulk-delete can register into this same
-// table + queue + frontend polling flow later without a new migration or
-// a new queue message kind -- just a new entry here and a new route that
-// calls createBulkDeleteJob with a different entityType.
+// Product jobs remove only zero-stock products, committing one tier-sized
+// chunk with its progress and audits per queue delivery. Cache invalidation
+// follows each commit and can be repeated without replaying business writes.
+// Other entities retain their legacy loop through the same queue/polling flow.
 
 import type { Env } from '../index'
 import { getDb, getImportFencedDb, isImportMaintenanceFenceError, type D1Compat } from './db'
@@ -137,15 +112,6 @@ export const ENTITY_CONFIGS: Record<BulkDeleteEntityType, EntityConfig> = {
   },
 }
 
-// Same chunk size import already validated for what fits D1's per-batch
-// CPU budget -- see importEngine.ts's D1_IMPORT_BATCH_CHUNK_SIZE comment.
-// Bulk-delete's per-id statement count is smaller (no branch-stock rows
-// for most products), so this errs a little larger than import's; the
-// adaptive halve-and-retry inside runD1BatchInChunks covers it either way
-// if a particular chunk (e.g. unusually stock-heavy) blows the budget.
-// The number itself is plan-sensitive and lives in lib/planTier.ts
-// (bulkDeleteChunkSize: paid 500, free 125), read per job below.
-
 interface JobRow {
   id: string
   entity_type: BulkDeleteEntityType
@@ -248,6 +214,11 @@ async function runProductDeleteChunk(env: Env, db: D1Compat, job: JobRow, allIds
         await db.prepare(`UPDATE bulk_delete_jobs SET status='cancelled',finished_at=CURRENT_TIMESTAMP,
           updated_at=CURRENT_TIMESTAMP WHERE id=@id AND status='processing' AND cancel_requested=1`).run({ id: job.id })
       }
+      if (current && (current.cancel_requested || ['completed', 'cancelled', 'failed'].includes(current.status))
+        && current.processed_count > current.failed_count) {
+        await bumpVersion(env, 'products')
+        await broadcast(env, 'products', { action: 'bulk-delete', jobId: job.id })
+      }
       return
     }
     throw error
@@ -266,14 +237,17 @@ async function runProductDeleteChunk(env: Env, db: D1Compat, job: JobRow, allIds
 
 export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
   const db = await getImportFencedDb(env)
-  // Ids per chunk, tier-aware -- see lib/planTier.ts. Free gets 125 instead
-  // of 500 for the same reason the import chunk shrinks: one chunk has to
-  // fit one invocation's CPU budget. runD1BatchInChunks' adaptive
-  // halve-and-retry still covers a chunk that overshoots on either plan.
   const bulkDeleteChunkSize = getPlanLimits(env).bulkDeleteChunkSize
   const job = await getBulkDeleteJob(env, jobId)
   if (!job) return // job row vanished (shouldn't happen outside manual DB edits) -- nothing to do
-  if (job.status === 'completed' || job.status === 'cancelled' || job.status === 'failed') return // already terminal, e.g. a redelivered queue message
+  const terminal = job.status === 'completed' || job.status === 'cancelled' || job.status === 'failed'
+  if (job.entity_type === 'products' && (terminal || job.cancel_requested) && job.processed_count > job.failed_count) {
+    // A committed cursor may outlive its acknowledgement/cache tail. Repeating
+    // invalidation is safe, including cancellation after a partial commit.
+    await bumpVersion(env, 'products')
+    await broadcast(env, 'products', { action: 'bulk-delete', jobId })
+  }
+  if (terminal) return
   const config = ENTITY_CONFIGS[job.entity_type]
   if (!config) { await markFailed(db, jobId, `Unknown entity_type: ${job.entity_type}`); return }
 

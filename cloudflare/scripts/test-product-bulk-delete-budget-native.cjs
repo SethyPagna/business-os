@@ -12,7 +12,10 @@ function load(file) {
   modules.set(file, mod.exports)
   const resolve = id => {
     if (id === './importEngine') return { runD1BatchInChunks: async () => { throw new Error('non-product path') } }
-    if (id === '../durable-objects/broadcastHub') return { broadcast: async () => {} }
+    if (id === '../durable-objects/broadcastHub') return { broadcast: async (env, channel, payload) => {
+      if (env.failBroadcast) { env.failBroadcast = false; throw new Error('broadcast unavailable') }
+      env.broadcasts.push({ channel, payload })
+    } }
     if (id.startsWith('.')) return load(path.resolve(path.dirname(file), id + '.ts'))
     return require(id)
   }
@@ -22,6 +25,17 @@ function load(file) {
 }
 const { runBulkDeleteJob, createBulkDeleteJob } = load(path.join(root, 'lib/bulkDeleteEngine.ts'))
 const tier = load(path.join(root, 'lib/planTier.ts'))
+const cache = load(path.join(root, 'lib/cache.ts'))
+const productSource = ts.createSourceFile('products.ts', fs.readFileSync(path.join(root, 'routes/products.ts'), 'utf8'), ts.ScriptTarget.Latest, true)
+const indexNames = new Set(['SEARCH_INDEX_FORMAT', 'SEARCH_INDEX_PAGE_IDS', 'fnv1aHex', 'buildProductSearchIndexPage'])
+const indexSource = productSource.statements.filter(node => indexNames.has(node.name?.text)
+  || (ts.isVariableStatement(node) && node.declarationList.declarations.some(item => indexNames.has(item.name.text))))
+  .map(node => node.getText(productSource)).join('\n')
+const indexModule = { exports: {} }
+new Function('getDb', 'catalogProductSql', 'module', 'exports', ts.transpileModule(indexSource, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText)(load(path.join(root, 'lib/db.ts')).getDb, load(path.join(root, 'lib/productStockGuard.ts')).catalogProductSql, indexModule, indexModule.exports)
+const { buildProductSearchIndexPage } = indexModule.exports
 function fixture(plan, total) {
   const raw = new DatabaseSync(':memory:')
   for (const sql of loadAll()) raw.exec(sql)
@@ -29,8 +43,14 @@ function fixture(plan, total) {
   const insert = raw.prepare('INSERT INTO products(id,name,barcode,is_active,stock_quantity) VALUES(?,?,?,1,0)')
   for (const id of ids) insert.run(id, `fixture ${id}`, `BUDGET${id}`)
   raw.prepare("INSERT INTO bulk_delete_jobs(id,entity_type,status,reason,ids_json,total_count) VALUES('budget','products','pending','fixture',?,?)").run(JSON.stringify(ids), total)
-  const state = { statements: 0, ceiling: plan === 'free' ? 50 : 1000, beforeBatch: null, afterBatch: null, queued: [] }
+  const state = { statements: 0, ceiling: plan === 'free' ? 50 : 1000, beforeBatch: null, afterBatch: null, queued: [], failOnce: new Set(), faults: [], failKvPut: false }
   const count = n => { state.statements += n; if (state.statements > state.ceiling) throw new Error('fixture invocation query budget exceeded') }
+  const fault = sql => {
+    const kind = /SELECT namespace, version FROM cache_versions/.test(sql) ? 'cache-read'
+      : /INSERT INTO quota_usage/.test(sql) ? 'quota-write'
+      : /INSERT INTO cache_versions/.test(sql) ? 'cache-batch' : null
+    if (state.failOnce.delete(kind)) { state.faults.push(kind); throw new Error(`D1_ERROR: internal error ${kind}`) }
+  }
   const prepare = sql => {
     let values = []
     const exec = () => {
@@ -39,11 +59,12 @@ function fixture(plan, total) {
       const result = stmt.run(...values)
       return { results: [], meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
     }
-    const stmt = { bind(...args) { values = args; return stmt }, async first() { count(1); return raw.prepare(sql).get(...values) ?? null }, async all() { count(1); return exec() }, async run() { count(1); return exec() }, _exec: exec, sql }
+    const stmt = { bind(...args) { assert.ok(args.length <= 100, 'native D1 binding ceiling'); values = args; return stmt }, async first() { count(1); fault(sql); return raw.prepare(sql).get(...values) ?? null }, async all() { count(1); fault(sql); return exec() }, async run() { count(1); fault(sql); return exec() }, _exec: exec, sql }
     return stmt
   }
   const DB = { prepare, async batch(list) {
     count(list.length)
+    for (const stmt of list) fault(stmt.sql)
     const hook = state.beforeBatch; state.beforeBatch = null; if (hook) hook(list)
     raw.exec('BEGIN IMMEDIATE')
     let out
@@ -52,13 +73,129 @@ function fixture(plan, total) {
     return out
   } }
   const kv = new Map()
-  const env = { DB, PLAN_TIER: plan, CACHE: { get: async k => kv.get(k) ?? null, put: async (k,v) => kv.set(k,v) }, IMPORT_QUEUE: { send: async body => state.queued.push(body) } }
+  const env = { DB, PLAN_TIER: plan, broadcasts: [], CACHE: { get: async k => kv.get(k) ?? null, put: async (k,v) => { if (state.failKvPut) throw new Error('KV unavailable'); kv.set(k,v) }, delete: async k => kv.delete(k) }, IMPORT_QUEUE: { send: async body => state.queued.push(body) } }
   const run = async (reset = true) => { if (reset) state.statements = 0; tier.__resetPlanTierCacheForTests(); await runBulkDeleteJob(env, 'budget'); return state.statements }
   const job = () => raw.prepare("SELECT * FROM bulk_delete_jobs WHERE id='budget'").get()
   const audits = () => raw.prepare("SELECT COUNT(*) n FROM audit_logs WHERE entity='product' AND action='delete'").get().n
-  return { raw, ids, state, env, run, job, audits }
+  return { raw, ids, state, env, kv, run, job, audits }
+}
+async function terminalRecovery() {
+  const previousCaches = globalThis.caches
+  const entries = new Map()
+  globalThis.caches = { default: { match: async req => entries.get(req.url)?.clone(), put: async (req, response) => entries.set(req.url, response.clone()) } }
+  try {
+    for (const plan of ['free', 'paid']) for (const outcome of ['completed', 'cancelled', 'cancelled-race', 'failed']) {
+      entries.clear()
+      const cap = plan === 'free' ? 125 : 500
+      const f = fixture(plan, outcome === 'completed' ? 2 : cap + 3)
+      f.raw.exec("UPDATE bulk_delete_jobs SET status='processing'")
+      if (outcome !== 'completed') f.raw.prepare('UPDATE products SET stock_quantity=1 WHERE id=?').run(f.ids[0])
+      f.kv.set('v2:products', '9')
+      const tasks = []
+      const request = new Request('https://fixture.test/api/products/search-index?page=5&format=1')
+      const read = async () => {
+        const version = await cache.getVersionWithFallback(f.env, 'products')
+        const value = await cache.cachedJsonResponse(request, { waitUntil: task => tasks.push(task) }, version, 3600,
+          () => buildProductSearchIndexPage(f.env, 5, version))
+        await Promise.all(tasks.splice(0))
+        return value
+      }
+      assert.equal((await read()).rows.length, f.ids.length, 'actual search index is warm before removal')
+      f.state.afterBatch = () => { throw new Error('D1_ERROR: internal error after committed chunk') }
+      await assert.rejects(f.run(), /after committed chunk/)
+      assert.equal(f.env.broadcasts.length, 0, 'lost acknowledgement skipped tail')
+      const processed = f.job().processed_count
+      const failed = new Set(JSON.parse(f.job().failed_ids_json))
+      const removed = f.ids.slice(0, processed).filter(id => !failed.has(id))
+      const remaining = f.ids.filter(id => !removed.includes(id))
+      assert.equal(f.audits(), removed.length, 'lost acknowledgement commits one audit per removed product')
+      if (outcome === 'cancelled') f.raw.exec('UPDATE bulk_delete_jobs SET cancel_requested=1')
+      if (outcome === 'cancelled-race') f.state.beforeBatch = () => f.raw.exec('UPDATE bulk_delete_jobs SET cancel_requested=1')
+      if (outcome === 'failed') f.raw.exec("UPDATE bulk_delete_jobs SET status='failed',last_error='fixture partial failure'")
+      await f.run()
+      assert.equal(f.job().status, outcome === 'cancelled-race' ? 'cancelled' : outcome)
+      const saved = JSON.stringify(f.job())
+      const audits = f.raw.prepare('SELECT * FROM audit_logs ORDER BY id').all()
+      const products = f.raw.prepare('SELECT * FROM products ORDER BY id').all()
+      assert.deepEqual((await read()).rows.map(row => row[0]), remaining, `${plan}/${outcome}: replay invalidates actual warm 3600s index`)
+      assert.equal(f.env.broadcasts.length, 1)
+      assert.deepEqual(f.env.broadcasts[0], { channel: 'products', payload: { action: 'bulk-delete', jobId: 'budget' } })
+      for (let repeat = 0; repeat < 2; repeat++) {
+        await f.run()
+        assert.equal(JSON.stringify(f.job()), saved, 'cache-only replay leaves cursor/status/error/timestamps unchanged')
+        assert.deepEqual(f.raw.prepare('SELECT * FROM audit_logs ORDER BY id').all(), audits)
+        assert.deepEqual(f.raw.prepare('SELECT * FROM products ORDER BY id').all(), products, 'membership and quantity are never rewritten')
+      }
+      f.env.failBroadcast = true
+      await assert.rejects(f.run(), /broadcast unavailable/)
+      await f.run()
+      assert.equal(JSON.stringify(f.job()), saved)
+      assert.deepEqual(f.raw.prepare('SELECT * FROM audit_logs ORDER BY id').all(), audits, 'failed recovery broadcast cannot replay business writes')
+      f.kv.clear()
+      f.state.failKvPut = true
+      const expectedFaults = plan === 'free' ? ['cache-read', 'quota-write', 'cache-batch'] : ['cache-read', 'cache-batch']
+      f.state.failOnce = new Set(expectedFaults)
+      const attempts = await f.run()
+      assert.deepEqual(f.state.faults, expectedFaults, 'actual D1Compat retries count all cold cache attempts')
+      assert.ok(attempts <= f.state.ceiling)
+      assert.deepEqual((await read()).rows.map(row => row[0]), remaining, 'D1 fallback cache also invalidates')
+      console.log(`PASS ${plan}/${outcome} final/partial acknowledgement recovery, repeated cache-only replay and cold retries (${attempts} attempts)`)
+      f.raw.close()
+    }
+    for (const status of ['completed', 'cancelled', 'failed']) for (const allFailed of [false, true]) {
+      const f = fixture('free', 2)
+      f.raw.prepare('UPDATE bulk_delete_jobs SET status=?,processed_count=?,failed_count=?,failed_ids_json=?').run(status, allFailed ? 2 : 0, allFailed ? 2 : 0, allFailed ? JSON.stringify(f.ids) : '[]')
+      await f.run()
+      assert.equal(f.kv.size, 0, 'zero successful progress has no invalidation')
+      assert.equal(f.env.broadcasts.length, 0)
+      assert.equal(f.audits(), 0)
+      f.raw.close()
+    }
+    for (const plan of ['free', 'paid']) {
+      const f = fixture(plan, (plan === 'free' ? 125 : 500) + 3)
+      f.state.failKvPut = true
+      const expectedFaults = plan === 'free' ? ['cache-read', 'quota-write', 'cache-batch'] : ['cache-read', 'cache-batch']
+      f.state.failOnce = new Set(expectedFaults)
+      const attempts = await f.run()
+      assert.deepEqual(f.state.faults, expectedFaults)
+      assert.ok(attempts <= f.state.ceiling)
+      assert.equal(f.state.queued.length, 1)
+      console.log(`PASS ${plan} full chunk cold cache/fallback/retry budget (${attempts} attempted statements)`)
+      f.raw.close()
+    }
+    const pending = fixture('free', 2)
+    pending.state.beforeBatch = () => { throw new Error('pending admission failed') }
+    await assert.rejects(pending.run(), /pending admission failed/)
+    assert.equal(pending.job().status, 'pending')
+    assert.equal(pending.env.broadcasts.length, 0)
+    assert.equal(pending.kv.size, 0)
+    pending.raw.close()
+    const absent = fixture('free', 2)
+    absent.raw.exec('UPDATE products SET is_active=0')
+    await absent.run()
+    await absent.run()
+    assert.equal(absent.audits(), 0, 'already absent ids never gain fabricated business effects')
+    absent.raw.close()
+    const contact = fixture('free', 2)
+    contact.raw.exec("UPDATE bulk_delete_jobs SET entity_type='customers',status='completed',processed_count=2")
+    await contact.run()
+    assert.equal(contact.kv.size, 0, 'legacy non-product terminal flow is unchanged')
+    assert.equal(contact.env.broadcasts.length, 0)
+    contact.raw.exec('DELETE FROM bulk_delete_jobs')
+    await contact.run()
+    assert.equal(contact.kv.size, 0, 'missing job remains a no-op')
+    contact.raw.close()
+    const large = fixture('free', 2)
+    large.raw.prepare("UPDATE bulk_delete_jobs SET status='completed',processed_count=50000,total_count=50000,ids_json=?").run(JSON.stringify(Array.from({ length: 50000 }, (_, i) => i + 1)))
+    await large.run()
+    assert.ok(JSON.stringify(large.env.broadcasts[0]).length < 100, 'terminal recovery broadcasts a bounded namespace event for 50k ids')
+    assert.equal(large.audits(), 0)
+    large.raw.close()
+    console.log('PASS pending failure, zero progress, all-failed, absent ids, legacy contact and missing-job no-op controls')
+  } finally { globalThis.caches = previousCaches }
 }
 async function main() {
+  await terminalRecovery()
   for (const plan of ['free', 'paid']) {
     const cap = plan === 'free' ? 125 : 500
     const f = fixture(plan, cap + 3)
