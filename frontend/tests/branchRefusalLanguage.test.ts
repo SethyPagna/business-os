@@ -49,7 +49,8 @@ const lang = loadModule()
 const REDIRECT_CODES = ['branch_redirect_required', 'branch_redirect_target_invalid', 'branch_retired_no_successor', 'branch_retired_damaged_stock']
 const BULK_CODES = ['bulk_delete_queue_unavailable', 'bulk_delete_queue_resume_required']
 const PLAN_CODES = ["stock_session_query_budget_exceeded","customer_return_over_plan_budget","stock_import_unit_over_tier_budget","stock_import_reconcile_over_tier_budget","import_queue_required"]
-const CODES = ['product_import_finalization_changed','receipt_selling_price_changed',...PLAN_CODES,'branch_not_sellable', 'sale_branch_mismatch', 'sale_identity_conflict', 'unrecorded_stock_line_invalid', 'fee_branch_invalid', 'fee_sale_invalid', 'fee_sale_branch_mismatch', ...REDIRECT_CODES, 'product_has_stock', 'product_status_unsupported', 'product_replacement_incomplete', ...BULK_CODES]
+const IMPORT_CODES = ['import_apply_already_started', 'import_source_upload_in_progress', 'import_job_changed']
+const CODES = [...IMPORT_CODES, 'product_import_finalization_changed','receipt_selling_price_changed',...PLAN_CODES,'branch_not_sellable', 'sale_branch_mismatch', 'sale_identity_conflict', 'unrecorded_stock_line_invalid', 'fee_branch_invalid', 'fee_sale_invalid', 'fee_sale_branch_mismatch', ...REDIRECT_CODES, 'product_has_stock', 'product_status_unsupported', 'product_replacement_incomplete', ...BULK_CODES]
 const STOCK_ALIASES = { stock_schema_unavailable: 'stock_receipt_unavailable', stock_transaction_outcome_unknown: 'stock_request_outcome_unknown' }
 const refusal = (code: unknown, message = 'Worker English', status = 400) => Object.assign(new Error(message), { status, code })
 
@@ -64,6 +65,23 @@ await runTest('changed import finalization keeps its 409 and completed-group rec
     assert.equal(await lang.restateBranchRefusal(error), error)
     assert.equal(error.message, pack[code]); assert.equal(error.status, 409); assert.equal(error.code, code)
     assert.equal(localizeBranchRuleError({ code, message: 'Untranslated Worker detail' }, key => pack[key]), pack[code])
+  }
+})
+
+await runTest('import lifecycle conflicts keep their recovery advice and 409 across shared error surfaces', async () => {
+  const source = read(WORKER, 'routes', 'importJobs.ts')
+  for (const code of IMPORT_CODES) {
+    assert.ok(source.includes(`code: '${code}'`), `Worker code ${code}`)
+    assert.ok(EN[code] && source.includes(`error: '${EN[code]}'`), `Worker sentence ${code}`)
+    for (const [language, pack] of [['en', EN], ['km', KM]] as const) {
+      uiLanguage = language; packServed = KM
+      const error = refusal(code, EN[code], 409)
+      assert.equal(await lang.restateBranchRefusal(error), error)
+      assert.equal(error.message, pack[code]); assert.equal(error.status, 409); assert.equal(error.code, code)
+      assert.equal(localizeBranchRuleError({ code, message: 'Original Worker detail' }, key => pack[key]), pack[code])
+      assert.equal(localizeBranchRuleError(EN[code], key => pack[key]), pack[code])
+      assert.equal(localizeBranchRuleError(`${code}: saved Worker detail`, key => pack[key]), pack[code])
+    }
   }
 })
 

@@ -29,7 +29,7 @@ import { dispatchImportWork } from '../lib/queueDispatch'
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 const IMPORT_APPLY_STARTED = { success: false, code: 'import_apply_already_started', error: 'This import has begun applying. Use Retry to continue it; upload a corrected file as a new import.' } as const
 const IMPORT_SOURCE_UPLOAD_PENDING = { success: false, code: 'import_source_upload_in_progress', error: 'This import has an unfinished source upload. Wait for it to finish, or cancel it and create a new import.' } as const
-const IMPORT_JOB_CHANGED = { success: false, error: 'Import changed while this request was pending. Refresh and retry.' } as const
+const IMPORT_JOB_CHANGED = { success: false, code: 'import_job_changed', error: 'Import changed while this request was pending. Refresh and retry.' } as const
 const JOB_STATE_JSON = "CASE WHEN json_valid(chunk_state_json) THEN chunk_state_json ELSE '{}' END"
 const JOB_REQUEST_SNAPSHOT = `chunk_state_json IS @snapshot_state AND status IS @snapshot_status
   AND policy_json IS @snapshot_policy AND cancel_requested IS @snapshot_cancel

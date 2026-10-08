@@ -462,7 +462,7 @@ async function staleSourceRequest(make, { tier, action }) {
   const before = JSON.stringify({ job: job(), rows: f.sql.prepare('SELECT * FROM import_job_source_rows WHERE job_id=?').all(id),
     seals: f.sql.prepare('SELECT * FROM import_stock_action_guards WHERE job_id=?').all(id), queue: pending })
   release(); const refused = await old
-  assert.equal(refused.status, 409)
+  assert.equal(refused.status, 409); assert.equal(refused.body.code, 'import_job_changed')
   assert.equal(JSON.stringify({ job: job(), rows: f.sql.prepare('SELECT * FROM import_job_source_rows WHERE job_id=?').all(id),
     seals: f.sql.prepare('SELECT * FROM import_stock_action_guards WHERE job_id=?').all(id), queue: pending }), before)
   const measured = f.measured(); assert.equal(measured.physical - baseline.physical, measured.metered - baseline.metered)

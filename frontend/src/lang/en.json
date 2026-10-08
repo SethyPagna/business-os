@@ -1,4 +1,7 @@
 {
+  "import_apply_already_started": "This import has begun applying. Use Retry to continue it; upload a corrected file as a new import.",
+  "import_source_upload_in_progress": "This import has an unfinished source upload. Wait for it to finish, or cancel it and create a new import.",
+  "import_job_changed": "Import changed while this request was pending. Refresh and retry.",
   "product_import_finalization_changed": "Stock or product groups changed after this import was planned. Earlier groups remain applied. This group was not changed; review the current stock and start a corrected import.",
   "stock_session_query_budget_exceeded": "This stock change is too large for the current plan. Use fewer products or received dates, then try again.",
   "customer_return_over_plan_budget": "This return is too large for the current plan. Return fewer items or received dates, then try again.",

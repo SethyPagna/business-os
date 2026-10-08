@@ -4,8 +4,8 @@ import { importRowDetailText, importRowMessageText, importWarningText } from '..
 import { localizeBranchRuleError } from '../src/api/branchRuleErrors.ts'
 const km = JSON.parse(fs.readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8'))
 const en = JSON.parse(fs.readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8'))
-const conflictCode = 'product_import_finalization_changed'
-for (const pack of [en, km]) {
+const conflictCodes = ['product_import_finalization_changed', 'import_apply_already_started', 'import_source_upload_in_progress', 'import_job_changed']
+for (const conflictCode of conflictCodes) for (const pack of [en, km]) {
   assert.ok(pack[conflictCode], 'finalization conflict has a translated recovery message')
   const t = (key: string, fallback: string) => pack[key] || fallback
   const saved = `${conflictCode}: Worker detail from a persisted job`
