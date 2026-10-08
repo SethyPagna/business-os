@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import ts from 'typescript'
 import { neutralPrimitiveChunk } from '../build/chunkBoundaries.ts'
+import config from '../vite.config.ts'
 
 const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const appContext = fs.readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
@@ -441,7 +442,19 @@ assert.match(
   /normalized\.endsWith\('\/src\/api\/http\.ts'\)[\s\S]*normalized\.endsWith\('\/src\/api\/query\.ts'\)[\s\S]*normalized\.endsWith\('\/src\/api\/actorQuery\.ts'\)[\s\S]*return 'api-http-core'/,
   'focused read transports should share a tiny HTTP/query core instead of inheriting app-api-methods',
 )
-assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/httpState\.ts'\)\) return 'api-http-state'/, 'sync-server URL/token state should stay in a tiny shared chunk instead of inheriting app-api-methods or api-http-core')
+const chunkOutput = config.build?.rollupOptions?.output
+assert.ok(chunkOutput && !Array.isArray(chunkOutput))
+assert.equal(typeof chunkOutput.manualChunks, 'function')
+const configuredChunk = chunkOutput.manualChunks as (id: string) => string | undefined
+for (const prefix of ['/project/', 'C:\\project\\']) {
+  const id = (relative: string) => prefix + (prefix.includes('\\') ? relative.replaceAll('/', '\\') : relative)
+  for (const relative of ['src/api/httpState.ts', 'src/utils/uploadUrlKernel.ts']) {
+    assert.equal(configuredChunk(id(relative)), 'api-http-state', 'URL/token state and the dependency-free upload kernel must stay in the tiny shared state chunk')
+  }
+  assert.equal(configuredChunk(id('src/api/http.ts')), 'api-http-core', 'heavy HTTP execution remains outside the tiny state chunk')
+  assert.equal(configuredChunk(id('src/api/batchesTransport.ts')), 'app-api-methods', 'method transports retain their separate lazy chunk')
+  assert.equal(configuredChunk(id('src/utils/unrelatedBoundaryProbe.ts')), undefined, 'the state rule must not capture unrelated modules')
+}
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/websocket\.ts'\)[\s\S]*return 'app-api'[\s\S]*if \(normalized\.includes\('\/src\/api\/'\)\) return 'app-api-methods'/, 'Vite should keep only runtime connection files in app-api and move method transports behind the lazy methods chunk')
 assert.match(publicWebApi, /import\('\.\/api\/portalPublicTransport\.ts'\)/, 'public catalog API bootstrap should lazy-load the public-only portal transport')
 assert.doesNotMatch(publicWebApi, /portalTransport\.ts/, 'public catalog API bootstrap should not import the admin portal transport that carries shared HTTP core')
