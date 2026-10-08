@@ -151,21 +151,32 @@ async function main() {
     assert.equal(loss(f).removal_loss_usd, 0, 'an upward Set is not a loss')
   })
 
-  await check('the same scoped Set twice is applied once (0192 receipt) and once without 0192 (0193 identity)', async () => {
-    for (const drop0192 of [false, true]) {
-      const f = seeded()
-      if (drop0192) f.sql.exec('DROP TABLE stock_mutation_receipts')
-      const first = await send(f, 'POST', '/api/inventory/adjust', setLot('lot-set-twice-01', 6))
-      const second = await send(f, 'POST', '/api/inventory/adjust', setLot('lot-set-twice-01', 6))
-      assert.equal(first.status, 200); assert.equal(second.status, 200)
-      assert.equal(second.json.replayed, true)
-      assert.equal(second.json.operation_id, first.json.operation_id)
-      assert.deepEqual(stock(f), { lot10: 6, lot11: 7, branch: 13, product: 13, held: 0 })
-      assert.equal(movements(f).length, 1, 'double-apply: one movement only')
-      assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM stock_lot_adjustment_operations').get().n, 1)
-      const other = await send(f, 'POST', '/api/inventory/adjust', setLot('lot-set-twice-01', 1))
-      assert.equal(other.status, 409, 'same id, different data')
-      assert.deepEqual(stock(f), { lot10: 6, lot11: 7, branch: 13, product: 13, held: 0 })
+  await check('the same scoped Set twice is applied once with its receipt and operation identity', async () => {
+    const f = seeded()
+    const first = await send(f, 'POST', '/api/inventory/adjust', setLot('lot-set-twice-01', 6))
+    const second = await send(f, 'POST', '/api/inventory/adjust', setLot('lot-set-twice-01', 6))
+    assert.equal(first.status, 200); assert.equal(second.status, 200)
+    assert.equal(second.json.replayed, true)
+    assert.equal(second.json.operation_id, first.json.operation_id)
+    assert.deepEqual(stock(f), { lot10: 6, lot11: 7, branch: 13, product: 13, held: 0 })
+    assert.equal(movements(f).length, 1, 'double-apply: one movement only')
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM stock_lot_adjustment_operations').get().n, 1)
+    const other = await send(f, 'POST', '/api/inventory/adjust', setLot('lot-set-twice-01', 1))
+    assert.equal(other.status, 409, 'same id, different data')
+    assert.deepEqual(stock(f), { lot10: 6, lot11: 7, branch: 13, product: 13, held: 0 })
+  })
+
+  await check('scoped Set without receipt schema refuses before stock, movement or operation history writes', async () => {
+    const f = seeded()
+    f.sql.exec('DROP TABLE stock_mutation_receipts')
+    const snapshot = () => JSON.stringify(['products', 'product_batches', 'branch_stock', 'branch_batch_stock', 'inventory_movements', 'audit_logs', 'action_history', 'stock_lot_adjustment_operations']
+      .map(t => f.sql.prepare(`SELECT * FROM ${t}`).all()))
+    const before = snapshot()
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await send(f, 'POST', '/api/inventory/adjust', setLot('lot-set-no-receipt', 6))
+      assert.equal(response.status, 503)
+      assert.equal(response.json.code, 'stock_receipt_unavailable')
+      assert.equal(snapshot(), before)
     }
   })
 

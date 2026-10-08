@@ -138,7 +138,7 @@ const call = async (fn, db, body) => { const res = await fn(ctx(db), body); retu
 // N13: the adjust kernel requires a client_request_id; each call gets a fresh one.
 let adjustProbeSeq = 0
 const adjust = (db, body) => call(inventoryMod.runAdjustAction, db, { client_request_id: 'fixture_probe_' + (++adjustProbeSeq) + '_abcdefgh', productId: 1, branchId: 1, type: 'add', reason: 'New arrival', supplierName: 'Bong Long', paymentStatus: 'paid', ...body })
-const receive = (db, body) => call(batchesMod.runReceiveBatchAction, db, { product_id: 1, branch_id: 1, reason: 'New arrival', supplier_name: 'Bong Long', payment_status: 'paid', ...body })
+const receive = (db, body) => call(batchesMod.runReceiveBatchAction, db, { client_request_id: 'fixture_receive_' + (++adjustProbeSeq) + '_abcdefgh', product_id: 1, branch_id: 1, reason: 'New arrival', supplier_name: 'Bong Long', payment_status: 'paid', ...body })
 const stock = (db) => db.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity
 const lots = (db) => db.prepare('SELECT unit_cost_usd, received_quantity, received_cost_usd FROM product_batches WHERE variant_product_id = 1 ORDER BY id').all()
 const movements = (db) => db.prepare("SELECT quantity, unit_cost_usd, total_cost_usd, free_quantity, reason FROM inventory_movements WHERE product_id = 1 ORDER BY id").all()
@@ -196,7 +196,7 @@ async function run() {
   // 4. A change without the Products edit grant is refused before anything moves.
   for (const [label, fn, body] of [
     ['adjust', inventoryMod.runAdjustAction, { client_request_id: 'fixture_denied_000001', productId: 1, branchId: 1, type: 'add', reason: 'New arrival', supplierName: 'Bong Long', paymentStatus: 'paid', quantity: 2, unitCostUsd: 3.5, sellingPriceUsd: 6 }],
-    ['receive', batchesMod.runReceiveBatchAction, { product_id: 1, branch_id: 1, reason: 'New arrival', supplier_name: 'Bong Long', payment_status: 'paid', quantity: 2, unit_cost_usd: 3.5, selling_price_usd: 6 }],
+    ['receive', batchesMod.runReceiveBatchAction, { client_request_id: 'fixture_price_denied_receive', product_id: 1, branch_id: 1, reason: 'New arrival', supplier_name: 'Bong Long', payment_status: 'paid', quantity: 2, unit_cost_usd: 3.5, selling_price_usd: 6 }],
   ]) {
     const db = freshDb()
     const { status, json } = await callAs(fn, db, STOCK_CLERK, body)
