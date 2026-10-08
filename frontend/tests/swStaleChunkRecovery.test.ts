@@ -134,9 +134,13 @@ type Outcome = {
   shellGeneration: string | null
   catalog: string | null
   bootError: boolean
+  localRecovery: boolean
+  retryActionable: boolean
+  closeActionable: boolean
 }
 
 type FixtureOptions = {
+  probeLocalRecovery?: boolean
   /**
    * Answer a NON-navigation read of the document with the host's bot
    * challenge once the new generation is live. That is the production shape
@@ -374,10 +378,26 @@ async function runScenario(workerSource: string, deploy: boolean, options: Fixtu
     const blankTab = stalledAt !== null && recoveryCommittedAt === null
     if (!blankTab) {
       await page.waitForFunction(
-        () => !!document.querySelector('#catalog') || !!document.querySelector('#boot-error'),
+        () => !!document.querySelector('#catalog') || !!document.querySelector('#boot-error') || !!document.querySelector('[data-lazy-recovery]'),
         null,
         { timeout: 60_000 },
-      ).catch(() => {})
+      )
+    }
+    const localRecovery = !blankTab && await page.locator('[data-lazy-recovery]').count() > 0
+    let retryActionable = false
+    let closeActionable = false
+    if (options.probeLocalRecovery && localRecovery) {
+      const retry = page.locator('[data-lazy-retry]')
+      const close = page.locator('[data-lazy-close]')
+      assert.equal(await retry.isEnabled(), true)
+      assert.equal(await close.isEnabled(), true)
+      await retry.click()
+      await page.waitForFunction(() => document.querySelector<HTMLButtonElement>('[data-lazy-retry]')?.disabled === true)
+      await page.waitForFunction(() => document.querySelector<HTMLButtonElement>('[data-lazy-retry]')?.disabled === false)
+      retryActionable = await retry.isVisible() && await retry.isEnabled()
+      await close.click()
+      await page.waitForFunction(() => !document.querySelector('[data-lazy-recovery]'))
+      closeActionable = await page.locator('[data-lazy-recovery]').count() === 0
     }
     return {
       recoveryReloads,
@@ -388,6 +408,9 @@ async function runScenario(workerSource: string, deploy: boolean, options: Fixtu
       shellGeneration: blankTab ? null : await page.evaluate(() => (window as unknown as Record<string, string>).__SHELL_GENERATION ?? null),
       catalog: blankTab ? null : await page.evaluate(() => document.querySelector('#catalog')?.textContent ?? null),
       bootError: blankTab ? false : await page.evaluate(() => !!document.querySelector('#boot-error')),
+      localRecovery,
+      retryActionable,
+      closeActionable,
     }
   } finally {
     // The server goes first: a stalled request the browser is still waiting on
@@ -642,13 +665,16 @@ test('a stalled origin still gets the cached shell, within the recovery fetch bu
 })
 
 test('negative control: the worker deployed at ef0489c1 stays stuck on the dead shell', { timeout: 180_000 }, async () => {
-  const broken = await runScenario(brokenWorker, true)
+  const broken = await runScenario(brokenWorker, true, { probeLocalRecovery: true })
   // If any of these stop holding, the fixture stopped reproducing the
   // incident and the test above proves nothing.
   assert.equal(broken.recoveryReloads, 1, 'the old worker still let the guard reload once -- that is not what was broken')
   assert.equal(broken.shellGeneration, 'old', 'the incident: the recovery navigation was answered from the stale app-shell cache')
   assert.equal(broken.catalog, null, 'the deleted chunk 404s again on the reload, so the route never mounts')
-  assert.equal(broken.bootError, true, 'and the page ends where the owner saw it: "The app could not start"')
+  assert.equal(broken.bootError, false, 'current nested recovery keeps the historical worker failure out of the fatal startup boundary')
+  assert.equal(broken.localRecovery, true, 'the dead route exposes local recovery instead of mounting the missing catalog')
+  assert.equal(broken.retryActionable, true, 'Retry makes another bounded attempt and remains available after the missing chunk fails again')
+  assert.equal(broken.closeActionable, true, 'Close dismisses local recovery without reloading or mounting the missing route')
 })
 
 test('positive control: a healthy build is not forced through a recovery reload', { timeout: 180_000 }, async () => {
