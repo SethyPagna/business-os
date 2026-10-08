@@ -33,10 +33,11 @@ function transpile(relPath, transform = source => source) {
 
 function loadModule(relPath, requireShim, transform) {
   const module = { exports: {} }
-  new Function('exports', 'require', 'module', transpile(relPath, transform))(module.exports, withProductStockGuard(requireShim), module)
+  new Function('exports', 'require', 'module', transpile(relPath, transform))(module.exports, withProductStockGuard(id => id === './stockTransaction' || id === '../lib/stockTransaction' ? stockTransaction : requireShim(id)), module)
   return module.exports
 }
 
+const stockTransaction = loadModule('lib/stockTransaction.ts', require)
 const batchCode = loadModule('lib/batchCode.ts', require)
 const sqlBinding = loadModule('lib/sqlBinding.ts', require)
 const moneyPrecision = loadModule('lib/moneyPrecision.ts', require)
@@ -177,6 +178,9 @@ const inventoryRequire = (id) => {
   // Migration 0192: this fixture posts no client_request_id, so the per-line
   // receipt guard must hand straight through to the kernel.
   if (id === '../lib/stockMutationReceipt') return { withStockMutationReceipt: (_db, _actor, _kind, _body, _json, run) => run(async () => {}) }
+  if (id === '../lib/planTier') return loadModule('lib/planTier.ts', require)
+  if (id === '../lib/requestMetrics') return loadModule('lib/requestMetrics.ts', require)
+  if (id === '../lib/offlineSaleOwnership') return loadModule('lib/offlineSaleOwnership.ts', require)
   throw new Error(`unexpected inventory route import ${id}`)
 }
 const inventoryRoute = loadModule('routes/inventory.ts', inventoryRequire)
@@ -198,7 +202,8 @@ function wrapDb(sqlite) {
         run: async (params) => (Array.isArray(params) ? stmt.run(...params) : stmt.run(params || {})),
       }
     },
-    batch(statements) {
+    batchOnce(statements) { return this.batch(statements) },
+    async batch(statements) {
       const tx = sqlite.transaction((stmts) => stmts.map((s) => {
           const st = sqlite.prepare(s.sql)
           return st.reader ? { results: [st.get(s.params || {})], meta: { changes: 0 } }
@@ -206,7 +211,7 @@ function wrapDb(sqlite) {
       }))
       // D1's batch() rejects asynchronously; better-sqlite3 throws in place.
       try {
-        if (beforeBatch) { const hook = beforeBatch; beforeBatch = null; hook(sqlite) }
+        if (beforeBatch) { const hook = beforeBatch; beforeBatch = null; await hook(sqlite) }
         return Promise.resolve(tx(statements))
       } catch (error) {
         return Promise.reject(error)
@@ -215,9 +220,9 @@ function wrapDb(sqlite) {
   }
 }
 
-function freshDb() {
+function freshDb(seed = () => {}) {
   const db = new Database(':memory:')
-  for (const name of fs.readdirSync(path.join(__dirname,'../migrations')).filter(name => name.endsWith('.sql')).sort()) {
+  for (const name of fs.readdirSync(path.join(__dirname,'../migrations')).filter(name => name.endsWith('.sql') && Number(name.slice(0,4)) <= 242).sort()) {
     db.exec(fs.readFileSync(path.join(__dirname,'../migrations',name),'utf8'))
   }
   db.prepare("INSERT INTO branches(id,name,is_active) VALUES (1,'Shop',1),(2,'Warehouse',1)").run()
@@ -229,6 +234,9 @@ function freshDb() {
   db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (101, 1, 6)`).run()
   db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (102, 1, 4)`).run()
   db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 12)`).run()
+  seed(db)
+  for (const name of fs.readdirSync(path.join(__dirname,'../migrations')).filter(name => name.endsWith('.sql') && Number(name.slice(0,4)) > 242).sort()) db.exec(fs.readFileSync(path.join(__dirname,'../migrations',name),'utf8'))
+  assert.throws(() => db.exec('UPDATE branch_stock SET quantity=quantity'), /stock_transaction_required/)
   return db
 }
 
@@ -294,7 +302,7 @@ await check('a transfer spanning two lots moves each lot FIFO, atomically, keepi
   const { statements, takes, uncovered } = await composeTransferStatements(db, 8)
   assert.deepStrictEqual(takes.map((t) => [t.batchId, t.quantity]), [[101, 6], [102, 2]], 'oldest lot drains first')
   assert.strictEqual(uncovered, 0)
-  await wrapDb(db).batch(statements)
+  await stockTransaction.executeStockTransaction(wrapDb(db), statements, 'once')
   assert.strictEqual(lotQty(db, 101, 1), 0)
   assert.strictEqual(lotQty(db, 102, 1), 2)
   assert.strictEqual(lotQty(db, 101, 2), 6, 'the SAME batch row holds the moved units at the destination')
@@ -308,7 +316,7 @@ await check('legacy stock the lot ledger never tracked moves on branch_stock alo
   const { statements, takes, uncovered } = await composeTransferStatements(db, 12)
   assert.strictEqual(takes.reduce((sum, t) => sum + t.quantity, 0), 10)
   assert.strictEqual(uncovered, 2)
-  await wrapDb(db).batch(statements)
+  await stockTransaction.executeStockTransaction(wrapDb(db), statements, 'once')
   // Source: 0 stock, 0 in lots. Destination: 12 stock, 10 in lots -- the
   // SAME 2-unit legacy gap that existed at the source, nothing new.
   assert.strictEqual(stockQty(db, 1), 0)
@@ -321,9 +329,11 @@ await check('a concurrent consumer aborts the WHOLE batch (strict decrement + CH
   const db = freshDb()
   const { statements } = await composeTransferStatements(db, 8)
   // Between the availability read and the batch, a sale drains lot A to 3.
-  db.prepare('UPDATE branch_batch_stock SET quantity = 3 WHERE batch_id = 101 AND branch_id = 1').run()
-  db.prepare('UPDATE branch_stock SET quantity = 9 WHERE product_id = 1 AND branch_id = 1').run()
-  await assert.rejects(() => wrapDb(db).batch(statements), /CHECK|constraint/i)
+  await stockTransaction.executeStockTransaction(wrapDb(db), [
+    { sql: 'UPDATE branch_batch_stock SET quantity = 3 WHERE batch_id = 101 AND branch_id = 1' },
+    { sql: 'UPDATE branch_stock SET quantity = 9 WHERE product_id = 1 AND branch_id = 1' },
+  ], 'once')
+  await assert.rejects(() => stockTransaction.executeStockTransaction(wrapDb(db), statements, 'once'), /CHECK|constraint/i)
   // Fully rolled back: source untouched, destination gained nothing.
   assert.strictEqual(lotQty(db, 101, 1), 3)
   assert.strictEqual(lotQty(db, 102, 1), 4)
@@ -418,10 +428,11 @@ await check('real route reads FIFO only once and Telegram matches committed allo
     { name: 'single-untracked', quantity: 8, tracked: [6, 0], uncovered: 2, date: '2026-08-01', lot: 'A', removeB: true },
     { name: 'untracked', quantity: 2, tracked: [0, 0], uncovered: 2, date: null, lot: null, removeAll: true },
   ]) {
-    routeDb = freshDb(); routeUser = { id: 7, name: 'Stock manager', tier: 'full' }
+    routeDb = freshDb(db => {
+      if (scenario.removeB) db.exec('DELETE FROM branch_batch_stock WHERE batch_id=102')
+      if (scenario.removeAll) db.exec('DELETE FROM branch_batch_stock')
+    }); routeUser = { id: 7, name: 'Stock manager', tier: 'full' }
     routeWaits = []; telegramInputs = []; queryReads = []
-    if (scenario.removeB) routeDb.exec('DELETE FROM branch_batch_stock WHERE batch_id=102')
-    if (scenario.removeAll) routeDb.exec('DELETE FROM branch_batch_stock')
     const result = await routeRequest({ productId: 1, fromBranchId: 1, toBranchId: 2,
       quantity: scenario.quantity, reason: scenario.name, client_request_id: `metadata-${scenario.name}` })
     assert.strictEqual(result.status, 200, JSON.stringify(result.json))
@@ -477,7 +488,7 @@ ${marker}`)
 await check('real route race rolls back without Telegram; same request retries a fresh guarded plan once', async () => {
   routeDb = freshDb(); routeUser = { id: 7, name: 'Stock manager', tier: 'full' }
   routeWaits = []; telegramInputs = []
-  beforeBatch = db => db.exec('UPDATE branch_batch_stock SET quantity=3 WHERE batch_id=101 AND branch_id=1; UPDATE branch_stock SET quantity=9 WHERE product_id=1 AND branch_id=1')
+  beforeBatch = db => stockTransaction.executeStockTransaction(wrapDb(db), [{ sql: 'UPDATE branch_batch_stock SET quantity=3 WHERE batch_id=101 AND branch_id=1' }, { sql: 'UPDATE branch_stock SET quantity=9 WHERE product_id=1 AND branch_id=1' }], 'once')
   const body = { productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 8, reason: 'race retry', client_request_id: 'metadata-race-retry' }
   const failed = await routeRequest(body)
   assert.strictEqual(failed.status, 409, JSON.stringify(failed.json))

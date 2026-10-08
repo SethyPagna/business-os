@@ -2,7 +2,7 @@
 // remove) and POST /api/inventory/fast-stock-in/commit addressed to a disabled branch. The REAL routes run against
 // SQLite with every migration (scripts/harness/cutover_lr_world.cjs).
 //
-//   before  both branches active: byte-identical write statements and ledgers vs the eb5dd0ba3 oracle.
+//   before  both branches active: unchanged business statements and ledgers vs the eb5dd0ba3 oracle.
 //   after   Old Shop (2) disabled, successor LC Store (1): no header -> 409 branch_redirect_required, a target that is
 //           the disabled branch or unknown -> 409 branch_redirect_target_invalid, nothing written; with the confirmed
 //           target the effect lands at LC Store in branch_stock AND branch_batch_stock, every movement row says
@@ -22,28 +22,70 @@ const add = (branchId, extra = {}) => ({ productId: 10, branchId, type: 'add', q
 const remove = (branchId, extra = {}) => ({ productId: 10, branchId, type: 'remove', quantity: 3, reason: 'broken jar', ...extra })
 const scopedSet = (branchId, extra = {}) => ({ productId: 10, branchId, type: 'set', setScope: 'lot', batchId: 500, quantity: 12, reason: 'count', ...extra })
 
+
 async function main() {
-  await W.check('before: every adjust kind writes byte-identical statements and ledgers to the eb5dd0ba3 oracle', async () => {
+  await W.check('current epoch: raw stock fails, maintenance and wrong epoch refuse, rollback and success release the actual permit', async () => {
+    const db = W.build('before')
+    const update = { sql: 'UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=10 AND branch_id=2' }
+    const before = W.ledger(db)
+    assert.throws(() => db.exec(update.sql), /stock_transaction_required/)
+    await W.fixtureStockWrite(db, [{ sql: "INSERT INTO system_flags(key,value) VALUES('maintenance','fixture')" }])
+    await assert.rejects(() => W.fixtureStockWrite(db, [update]), error => error.code === 'stock_schema_unavailable')
+    db.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
+    db.prepare("UPDATE system_flags SET value='future-epoch' WHERE key='stock_schema_epoch'").run()
+    await assert.rejects(() => W.fixtureStockWrite(db, [update]), error => error.code === 'stock_schema_unavailable')
+    db.prepare("UPDATE system_flags SET value='legacy-separate-pool-v1' WHERE key='stock_schema_epoch'").run()
+    await assert.rejects(() => W.fixtureStockWrite(db, [update, { sql: "SELECT json_extract('[1]','$[fixture_rollback]')" }]), /fixture_rollback/)
+    assert.equal(W.ledger(db), before)
+    await W.fixtureStockWrite(db, [update])
+    assert.equal(W.qty(db, 'branch_stock', 'product_id', 10, 2), 11)
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  })
+  await W.check('before: every adjust kind preserves business statements and ledgers with atomic receipts to the eb5dd0ba3 oracle', async () => {
     const bodies = [
       add(2), remove(2), remove(2, { batchId: 500 }), { productId: 10, branchId: 2, type: 'set', quantity: 6, reason: 'count' },
       scopedSet(2, { quantity: 4 }), remove(2, { quantity: 1, conditionTag: 'broken' }), add(1, { productId: 20 }),
     ]
     for (const body of bodies) {
-      const dbNew = W.build('before'); const dbOld = W.build('before')
+      const dbNew = W.build('before'); const dbOld = W.build('before', undefined, { historical: true })
       const capNew = []; const capOld = []
       const a = await W.call(inventory(fresh), dbNew, 'POST', '/adjust', body, { capture: capNew, redirect: 1 })
       const b = await W.call(inventory(oracle), dbOld, 'POST', '/adjust', body, { capture: capOld })
       assert.equal(a.status, 200, JSON.stringify(a.body))
       assert.equal(W.normalised({ status: a.status, body: a.body }), W.normalised({ status: b.status, body: b.body }), `${JSON.stringify(body)}: same answer`)
       assert.ok(capNew.length > 0)
-      assert.equal(W.normalised(capNew), W.normalised(capOld), `${JSON.stringify(body)}: same write statements (a header is never read for an active branch)`)
+      W.assertComposedWrites(capNew, capOld, dbNew)
+      if (capNew.flat().some(s => /UPDATE products SET\s+cost_price_usd/.test(s.sql))) {
+        for (const [label, pattern] of [
+          ['missing epoch admission', /^INSERT INTO system_flags[\s\S]*stock_transaction_permit/],
+          ['missing epoch release', /^DELETE FROM system_flags[\s\S]*stock_transaction_permit/],
+          ['missing receipt completion', /UPDATE stock_mutation_receipts SET response_status/],
+          ['missing atomic receipt', /UPDATE stock_mutation_receipts SET written=1|DO UPDATE SET written=excluded\.written/],
+          ['missing movement', /INSERT INTO inventory_movements/],
+          ['missing cost', /UPDATE products SET\s+cost_price_usd/],
+          ['missing business guard', /INSERT INTO stock_session_guards/],
+        ]) {
+          const mutant = capNew.map(rows => rows.filter(s => !pattern.test(s.sql)))
+          assert.throws(() => W.assertComposedWrites(mutant, capOld, dbNew), undefined, label)
+        }
+        const separated = capNew.map(rows => rows.filter(s => !/UPDATE products SET\s+cost_price_usd/.test(s.sql)))
+        separated.push(capNew.flat().filter(s => /UPDATE products SET\s+cost_price_usd/.test(s.sql)))
+        assert.throws(() => W.assertComposedWrites(separated, capOld, dbNew), undefined, 'cost outside stock transaction')
+        const movedGuard = capNew.map(rows => rows.slice())
+        const stockIndex = movedGuard.findIndex(rows => rows.some(s => /(?:INSERT INTO|UPDATE) branch_(?:batch_)?stock/.test(s.sql)))
+        const guardIndex = movedGuard[stockIndex].findIndex(s => /^SELECT CASE/.test(s.sql.trim()))
+        assert.ok(guardIndex >= 0)
+        const [guard] = movedGuard[stockIndex].splice(guardIndex, 1)
+        movedGuard.splice(stockIndex, 0, [guard])
+        assert.deepEqual(movedGuard.flat().filter(s => !W.isEpochStatement(s)), capNew.flat().filter(s => !W.isEpochStatement(s)), 'moved-guard control preserves flattened business ordering')
+        assert.throws(() => W.assertComposedWrites(movedGuard, capOld, dbNew), /mandatory business guards share/, 'guard outside physical stock transaction')
+      }
       assert.equal(W.normalised(W.ledger(dbNew)), W.normalised(W.ledger(dbOld)), `${JSON.stringify(body)}: same ledgers`)
     }
   })
 
   await W.check('control: on the post-cutover world the oracle writes a decrease into the disabled branch (the defect)', async () => {
-    const db = W.build('after')
-    db.exec('UPDATE branch_stock SET quantity=3 WHERE branch_id=2 AND product_id=10; UPDATE branch_batch_stock SET quantity=3 WHERE branch_id=2 AND batch_id=500')
+    const db = W.build('after', db => db.exec('UPDATE branch_stock SET quantity=3 WHERE branch_id=2 AND product_id=10; UPDATE branch_batch_stock SET quantity=3 WHERE branch_id=2 AND batch_id=500'), { historical: true })
     const old = await W.call(inventory(oracle), db, 'POST', '/adjust', remove(2, { quantity: 1 }))
     assert.equal(old.status, 200, 'the oracle accepted a removal at Old Shop')
     assert.equal(W.qty(db, 'branch_stock', 'product_id', 10, 2), 2)

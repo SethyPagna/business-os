@@ -11,12 +11,14 @@ const oracle = W.makeWorld(W.ORACLE)
 const batches = (world) => world.load('routes/batches.ts').default
 const inventory = (world) => world.load('routes/inventory.ts').default
 
-const receive = (branchId, extra = {}) => ({ product_id: 10, branch_id: branchId, quantity: 4, unit_cost_usd: 4, supplier_id: 5, supplier_name: 'Acme', reason: 'delivery', received_date: '2026-10-03', ...extra })
+let receiveSeq = 0
+const receive = (branchId, extra = {}) => ({ client_request_id: `cutover_receive_${++receiveSeq}`, product_id: 10, branch_id: branchId, quantity: 4, unit_cost_usd: 4, supplier_id: 5, supplier_name: 'Acme', reason: 'delivery', received_date: '2026-10-03', ...extra })
 const moveRow = (branchId, extra = {}) => ({ sourceProductId: 10, destinationProductId: 20, branchId, quantity: 2, reason: 'relabel', ...extra })
 const OLD_SHOP_ZERO = [{ t: 'branch_batch_stock', k: 500, quantity: 0 }, { t: 'branch_stock', k: 10, quantity: 0 }]
 
+
 async function main() {
-  await W.check('before: receive, lot top-up, lot Set and move-row write byte-identical statements to the eb5dd0ba3 oracle', async () => {
+  await W.check('before: receive, lot top-up, lot Set and move-row preserve business statements and atomic receipts to the eb5dd0ba3 oracle', async () => {
     const cases = [
       [batches, 'POST', '/', receive(2)],
       [batches, 'POST', '/', receive(2, { batch_id: 500 })],
@@ -24,20 +26,44 @@ async function main() {
       [inventory, 'POST', '/move-row', moveRow(2)],
     ]
     for (const [app, method, url, body] of cases) {
-      const dbNew = W.build('before'); const dbOld = W.build('before')
+      const dbNew = W.build('before'); const dbOld = W.build('before', undefined, { historical: true })
       const capNew = []; const capOld = []
       const a = await W.call(app(fresh), dbNew, method, url, body, { capture: capNew, redirect: 1 })
       const b = await W.call(app(oracle), dbOld, method, url, body, { capture: capOld })
       assert.equal(a.status, 200, JSON.stringify(a.body))
       assert.equal(W.normalised(a), W.normalised(b), `${url}: same answer`)
-      assert.equal(W.normalised(capNew), W.normalised(capOld), `${url}: same write statements`)
+      W.assertComposedWrites(capNew, capOld, dbNew)
+      if (capNew.flat().some(s => /UPDATE products SET\s+cost_price_usd/.test(s.sql))) {
+        for (const [label, pattern] of [
+          ['missing epoch admission', /^INSERT INTO system_flags[\s\S]*stock_transaction_permit/],
+          ['missing epoch release', /^DELETE FROM system_flags[\s\S]*stock_transaction_permit/],
+          ['missing receipt completion', /UPDATE stock_mutation_receipts SET response_status/],
+          ['missing atomic receipt', /UPDATE stock_mutation_receipts SET written=1|DO UPDATE SET written=excluded\.written/],
+          ['missing movement', /INSERT INTO inventory_movements/],
+          ['missing cost', /UPDATE products SET\s+cost_price_usd/],
+          ['missing business guard', /INSERT INTO stock_session_guards/],
+        ]) {
+          const mutant = capNew.map(rows => rows.filter(s => !pattern.test(s.sql)))
+          assert.throws(() => W.assertComposedWrites(mutant, capOld, dbNew), undefined, label)
+        }
+        const separated = capNew.map(rows => rows.filter(s => !/UPDATE products SET\s+cost_price_usd/.test(s.sql)))
+        separated.push(capNew.flat().filter(s => /UPDATE products SET\s+cost_price_usd/.test(s.sql)))
+        assert.throws(() => W.assertComposedWrites(separated, capOld, dbNew), undefined, 'cost outside stock transaction')
+        const movedGuard = capNew.map(rows => rows.slice())
+        const stockIndex = movedGuard.findIndex(rows => rows.some(s => /(?:INSERT INTO|UPDATE) branch_(?:batch_)?stock/.test(s.sql)))
+        const guardIndex = movedGuard[stockIndex].findIndex(s => /^SELECT CASE/.test(s.sql.trim()))
+        assert.ok(guardIndex >= 0)
+        const [guard] = movedGuard[stockIndex].splice(guardIndex, 1)
+        movedGuard.splice(stockIndex, 0, [guard])
+        assert.deepEqual(movedGuard.flat().filter(s => !W.isEpochStatement(s)), capNew.flat().filter(s => !W.isEpochStatement(s)), 'moved-guard control preserves flattened business ordering')
+        assert.throws(() => W.assertComposedWrites(movedGuard, capOld, dbNew), /mandatory business guards share/, 'guard outside physical stock transaction')
+      }
       assert.equal(W.normalised(W.ledger(dbNew)), W.normalised(W.ledger(dbOld)), `${url}: same ledgers`)
     }
   })
 
   await W.check('control: the oracle Set a lot at the disabled branch (a decrease never asked)', async () => {
-    const db = W.build('after')
-    db.exec('UPDATE branch_batch_stock SET quantity=3 WHERE batch_id=500 AND branch_id=2; UPDATE branch_stock SET quantity=3 WHERE product_id=10 AND branch_id=2')
+    const db = W.build('after', db => db.exec('UPDATE branch_batch_stock SET quantity=3 WHERE batch_id=500 AND branch_id=2; UPDATE branch_stock SET quantity=3 WHERE product_id=10 AND branch_id=2'), { historical: true })
     const old = await W.call(batches(oracle), db, 'PATCH', '/500/branches/2', { quantity: 1 })
     assert.equal(old.status, 200)
     assert.equal(W.qty(db, 'branch_batch_stock', 'batch_id', 500, 2), 1)
