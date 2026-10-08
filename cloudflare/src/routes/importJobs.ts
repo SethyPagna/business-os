@@ -27,7 +27,7 @@ import { getPlanLimits, resolvePlanTier } from '../lib/planTier'
 import { dispatchImportWork } from '../lib/queueDispatch'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
-const IMPORT_APPLY_STARTED = { success: false, error: 'This import has begun applying. Use Retry to continue it; upload a corrected file as a new import.' } as const
+const IMPORT_APPLY_STARTED = { success: false, code: 'import_apply_already_started', error: 'This import has begun applying. Use Retry to continue it; upload a corrected file as a new import.' } as const
 app.use('*', requireAuth)
 app.onError((error, c) => {
   const transactionRefusal = stockTransactionRefusal(error)

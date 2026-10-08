@@ -286,7 +286,8 @@ async function retryContinuation(make, { tier, fault }) {
   }
   assert.equal((await http(`/api/import-jobs/${id}/retry`, {}, false)).status, 401); unchanged()
   for (const action of ['start', 'approve', 'csv']) {
-    assert.equal((await http(`/api/import-jobs/${id}/${action}`)).status, 409); unchanged()
+    const refused = await http(`/api/import-jobs/${id}/${action}`)
+    assert.equal(refused.status, 409); assert.equal(refused.body.code, 'import_apply_already_started'); unchanged()
   }
   // An old analyze delivery cannot turn a committed apply run into a new run.
   await deliver({ body: { jobId: id, kind: 'analyze' }, attempts: 1 }); unchanged()
