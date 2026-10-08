@@ -227,7 +227,8 @@ async function main() {
     })
     await bumpVersions(fakeEnv, ['products', 'sales', 'returns'])
     assert.equal(batchCalls.length, 1, 'bumping several namespaces that all fall back to D1 must issue ONE db.batch() call')
-    assert.equal(batchCalls[0].length, 3, 'the single batch call must carry one upsert per namespace')
+    assert.equal(batchCalls[0].length, 1, 'the single batch carries one set-based upsert statement')
+    assert.deepEqual(JSON.parse(batchCalls[0][0].params.entries), ['products','sales','returns'].map(namespace => ({namespace,minimumVersion:1})), 'all namespace minima are retained in the set-based payload')
 
     // Multi-namespace call sites must use bumpVersions, not one bumpVersion()
     // per namespace.

@@ -153,14 +153,15 @@ export async function versionedKey(kv: KVNamespace, namespace: string, suffix: s
   return `${namespace}:${version}:${suffix}`
 }
 
-async function readD1Version(env: Env, namespace: string): Promise<number | null> {
+async function readD1Versions(env: Env, namespaces: string[]): Promise<Map<string, number>> {
+  if (!namespaces.length) return new Map()
   try {
-    const row = await getDb(env)
-      .prepare(`SELECT version FROM cache_versions WHERE namespace = @namespace`)
-      .get<{ version: number }>({ namespace })
-    return row?.version == null ? null : Number(row.version)
+    const rows = await getDb(env).prepare(`SELECT namespace, version FROM cache_versions
+      WHERE namespace IN (SELECT value FROM json_each(@namespaces))`)
+      .all<{ namespace: string; version: number }>({ namespaces: JSON.stringify(namespaces) })
+    return new Map(rows.filter(row => row.version != null).map(row => [row.namespace, Number(row.version)]))
   } catch {
-    return null
+    return new Map()
   }
 }
 
@@ -183,36 +184,35 @@ export async function bumpVersion(env: Env, namespace: string): Promise<void> {
   return bumpVersions(env, [namespace])
 }
 
-// Multi-namespace bump. A write that touches several caches at once (a
-// return that invalidates both 'sales' and 'products', a merge that touches
-// 'products' and 'contacts', ...) used to call bumpVersion() once per
-// namespace -- each call independently re-derives its own KV/D1 plan, and
-// any namespace that had already crossed over to the D1 fallback fired its
-// own separate INSERT..ON CONFLICT. The KV path stays one write per key
-// (KV has no multi-key write primitive), but every namespace that needs the
-// D1 fallback in this one call goes out as ONE db.batch() round trip instead
-// of N sequential prepares.
+// Missing KV versions share one D1 lookup and one set-based upsert. KV quota
+// admission and per-key writes retain their existing sequential semantics.
 export async function bumpVersions(env: Env, namespaces: string[]): Promise<void> {
   const unique = Array.from(new Set(namespaces.filter(Boolean)))
   if (!unique.length) return
 
   const d1Upserts: Array<{ namespace: string; minimumVersion: number }> = []
 
+  const kvVersions = new Map<string, string | null>()
   for (const namespace of unique) {
-    const versionKey = cacheVersionKey(namespace)
-
     let currentKvRaw: string | null = null
     try {
-      currentKvRaw = await env.CACHE.get(versionKey)
+      currentKvRaw = await env.CACHE.get(cacheVersionKey(namespace))
     } catch {
       currentKvRaw = null
     }
+    kvVersions.set(namespace, currentKvRaw)
+  }
+  const d1Versions = await readD1Versions(env, unique.filter(namespace => kvVersions.get(namespace) == null))
+
+  for (const namespace of unique) {
+    const versionKey = cacheVersionKey(namespace)
+    const currentKvRaw = kvVersions.get(namespace) ?? null
 
     // Missing KV + an existing D1 row means this namespace already crossed
     // over. Stay in strongly-consistent D1 mode permanently instead of
     // recreating the KV key when tomorrow's quota window becomes "ok" again.
     if (currentKvRaw == null) {
-      const currentD1 = await readD1Version(env, namespace)
+      const currentD1 = d1Versions.get(namespace)
       if (currentD1 != null) {
         d1Upserts.push({ namespace, minimumVersion: currentD1 + 1 })
         continue
@@ -249,15 +249,14 @@ export async function bumpVersions(env: Env, namespaces: string[]): Promise<void
 
 async function bumpVersionsInD1(env: Env, entries: Array<{ namespace: string; minimumVersion: number }>): Promise<void> {
   try {
-    await getDb(env).batch(entries.map(({ namespace, minimumVersion }) => ({
-      sql: `
-        INSERT INTO cache_versions (namespace, version, updated_at)
-        VALUES (@namespace, @minimumVersion, CURRENT_TIMESTAMP)
-        ON CONFLICT(namespace)
-        DO UPDATE SET version = MAX(version + 1, @minimumVersion), updated_at = CURRENT_TIMESTAMP
-      `,
-      params: { namespace, minimumVersion },
-    })))
+    await getDb(env).batch([{
+      sql: `INSERT INTO cache_versions (namespace, version, updated_at)
+        SELECT json_extract(value, '$.namespace'), json_extract(value, '$.minimumVersion'), CURRENT_TIMESTAMP
+        FROM json_each(@entries) WHERE 1
+        ON CONFLICT(namespace) DO UPDATE SET
+          version = MAX(cache_versions.version + 1, excluded.version), updated_at = CURRENT_TIMESTAMP`,
+      params: { entries: JSON.stringify(entries) },
+    }])
   } catch (error) {
     console.error('[cache] could not advance versions in D1', entries.map((entry) => entry.namespace), error)
   }

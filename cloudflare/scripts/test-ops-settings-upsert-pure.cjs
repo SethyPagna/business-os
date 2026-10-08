@@ -438,7 +438,7 @@ async function main() {
     const auditTs = read('cloudflare', 'src', 'lib', 'audit.ts')
     assert.ok(auditTs.includes(`INSERT INTO audit_logs (${mod.AUDIT_COLUMNS})`), 'audit() writes another column list')
     const cacheTs = read('cloudflare', 'src', 'lib', 'cache.ts')
-    assert.ok(/DO UPDATE SET version = MAX\(version \+ 1, @minimumVersion\), updated_at = CURRENT_TIMESTAMP/.test(cacheTs), 'bumpVersion\'s D1 half changed')
+    assert.ok(/DO UPDATE SET\s+version = MAX\(cache_versions\.version \+ 1, excluded\.version\), updated_at = CURRENT_TIMESTAMP/.test(cacheTs), 'bumpVersion\'s D1 half changed')
     for (const key of ALLOW) {
       assert.ok(!sensitive.isSensitiveSettingKey(key) && !auditMod.isSecretShapedAuditKey(key), `${key} is redacted by the route; the batch records it in clear`)
     }
