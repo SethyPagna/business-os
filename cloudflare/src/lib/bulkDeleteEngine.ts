@@ -6,6 +6,7 @@
 import type { Env } from '../index'
 import { getDb, getImportFencedDb, isImportMaintenanceFenceError, type D1Compat } from './db'
 import { getPlanLimits } from './planTier'
+import { executeStockTransaction } from './stockTransaction'
 import { dispatchImportWork } from './queueDispatch'
 import { chunkForBinding } from './sqlBinding'
 import { runD1BatchInChunks } from './importEngine'
@@ -206,7 +207,7 @@ async function runProductDeleteChunk(env: Env, db: D1Compat, job: JobRow, allIds
   try {
     // One attempt: acknowledgement loss is recovered from the atomic cursor,
     // never by repeating a stale audit/delete plan in this invocation.
-    await db.batchOnce(statements)
+    await executeStockTransaction(db, statements, 'once')
   } catch (error) {
     if (String(error).includes('bulk_delete_progress_changed')) {
       const current = await getBulkDeleteJob(env, job.id)
