@@ -181,6 +181,43 @@ const scrub = (text) => text
   .replace(/Set received (?:date|\d{4}-\d{2}-\d{2}(?: from \d+)?) to (\d+)/g, 'Set received <lot> to $1')
 const normalised = (capture) => scrub(JSON.stringify(capture))
 
+function assertComposedWrites(current, previous, db) {
+  const receipt = (s) => /stock_mutation_receipts/.test(s.sql)
+  const movement = (s) => /INSERT INTO inventory_movements/.test(s.sql)
+  const cost = (s) => /UPDATE products SET\s+cost_price_usd/.test(s.sql)
+  const physical = (s) => /(?:INSERT INTO|UPDATE) branch_(?:batch_)?stock/.test(s.sql)
+  const writes = current.flat(), oldWrites = previous.flat()
+  const business = (rows) => rows.filter(s => !receipt(s) && !movement(s) && !cost(s))
+  assert.equal(normalised(business(writes)), normalised(business(oldWrites)), 'same ordered business guards, stock metadata, quantities and history statements')
+  assert.equal(normalised(writes.filter(cost)), normalised(oldWrites.filter(cost)), 'same catalog cost expression and bindings')
+  assert.equal(writes.filter(movement).length, oldWrites.filter(movement).length, 'same movement count; complete movement values are compared in the ledger')
+  const batch = current.find(rows => rows.some(physical))
+  assert.ok(batch, 'stock effects are captured in a transaction')
+  const guard = s => /^(?:SELECT CASE|INSERT INTO stock_session_guards|DELETE FROM stock_session_guards)/i.test(s.sql.trim())
+  assert.deepEqual(batch.filter(guard), writes.filter(guard), 'mandatory business guards share the physical stock transaction')
+  const completion = writes.find(s => /UPDATE stock_mutation_receipts SET response_status/.test(s.sql))
+  if (!completion) return
+  const marks = batch.filter(s => /UPDATE stock_mutation_receipts SET written=1/.test(s.sql))
+  if (!marks.length) {
+    const unchangedGroups = rows => rows.map(group => group.filter(s => !receipt(s))).filter(group => group.length)
+    assert.equal(normalised(unchangedGroups(current)), normalised(unchangedGroups(previous)), 'legacy explicit-lot path retains its existing transaction grouping')
+    assert.ok(writes.some(s => /UPDATE stock_mutation_receipts SET written=1/.test(s.sql)))
+    return
+  }
+  assert.equal(marks.length, 1, 'required written receipt shares the stock transaction')
+  assert.ok(batch.some(movement), 'movement shares the stock transaction')
+  if (writes.some(cost)) {
+    assert.ok(batch.some(cost), 'catalog cost shares the intake transaction')
+    assert.ok(batch.findIndex(movement) < batch.findIndex(cost), 'intake history precedes derived catalog cost')
+  }
+  assert.ok(current.indexOf(batch) < current.findIndex(rows => rows.includes(completion)), 'receipt completion follows the atomic stock transaction')
+  const rows = db.prepare('SELECT written,completed_at,response_status FROM stock_mutation_receipts').all()
+  assert.equal(rows.length, 1)
+  assert.deepEqual([rows[0].written, rows[0].response_status], [1, 200])
+  assert.ok(rows[0].completed_at, 'receipt is durably completed')
+}
+
+
 // The redirect refusal for Old Shop (2) with LC Store (1) as its successor and only target.
 const REDIRECT = (requested = null) => ({ addressed_branch_id: 2, addressed_branch_name: 'Old Shop', successor_branch_id: 1, successor_branch_name: 'LC Store', targets: [{ id: 1, name: 'LC Store' }], requested_target_id: requested })
 
@@ -232,5 +269,5 @@ async function callWith(app, dbBinding, method, url, body, redirect) {
 
 module.exports = {
   ORACLE, USER, makeWorld, migratedDb, binding, call, callWith, raceBinding, build, ledger, plain, oldShop, movements, maxMovement, qty,
-  normalised, REDIRECT, check, done, assertRefusals,
+  normalised, assertComposedWrites, REDIRECT, check, done, assertRefusals,
 }

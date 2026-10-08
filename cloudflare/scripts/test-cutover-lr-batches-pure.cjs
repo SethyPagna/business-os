@@ -17,40 +17,6 @@ const moveRow = (branchId, extra = {}) => ({ sourceProductId: 10, destinationPro
 const OLD_SHOP_ZERO = [{ t: 'branch_batch_stock', k: 500, quantity: 0 }, { t: 'branch_stock', k: 10, quantity: 0 }]
 
 
-function assertComposedWrites(current, previous, db) {
-  const receipt = (s) => /stock_mutation_receipts/.test(s.sql)
-  const movement = (s) => /INSERT INTO inventory_movements/.test(s.sql)
-  const cost = (s) => /UPDATE products SET\s+cost_price_usd/.test(s.sql)
-  const physical = (s) => /(?:INSERT INTO|UPDATE) branch_(?:batch_)?stock/.test(s.sql)
-  const writes = current.flat(), oldWrites = previous.flat()
-  const business = (rows) => rows.filter(s => !receipt(s) && !movement(s) && !cost(s))
-  assert.equal(W.normalised(business(writes)), W.normalised(business(oldWrites)), 'same ordered business guards, stock metadata, quantities and history statements')
-  assert.equal(W.normalised(writes.filter(cost)), W.normalised(oldWrites.filter(cost)), 'same catalog cost expression and bindings')
-  assert.equal(writes.filter(movement).length, oldWrites.filter(movement).length, 'same movement count; complete movement values are compared in the ledger')
-  const completion = writes.find(s => /UPDATE stock_mutation_receipts SET response_status/.test(s.sql))
-  if (!completion) return
-  const batch = current.find(rows => rows.some(physical))
-  assert.ok(batch, 'stock effects are captured in a transaction')
-  const marks = batch.filter(s => /UPDATE stock_mutation_receipts SET written=1/.test(s.sql))
-  if (!marks.length) {
-    const unchangedGroups = rows => rows.map(group => group.filter(s => !receipt(s))).filter(group => group.length)
-    assert.equal(W.normalised(unchangedGroups(current)), W.normalised(unchangedGroups(previous)), 'legacy explicit-lot path retains its existing transaction grouping')
-    assert.ok(writes.some(s => /UPDATE stock_mutation_receipts SET written=1/.test(s.sql)))
-    return
-  }
-  assert.equal(marks.length, 1, 'required written receipt shares the stock transaction')
-  assert.ok(batch.some(movement), 'movement shares the stock transaction')
-  if (writes.some(cost)) {
-    assert.ok(batch.some(cost), 'catalog cost shares the intake transaction')
-    assert.ok(batch.findIndex(movement) < batch.findIndex(cost), 'intake history precedes derived catalog cost')
-  }
-  assert.ok(current.indexOf(batch) < current.findIndex(rows => rows.includes(completion)), 'receipt completion follows the atomic stock transaction')
-  const rows = db.prepare('SELECT written,completed_at,response_status FROM stock_mutation_receipts').all()
-  assert.equal(rows.length, 1)
-  assert.deepEqual([rows[0].written, rows[0].response_status], [1, 200])
-  assert.ok(rows[0].completed_at, 'receipt is durably completed')
-}
-
 async function main() {
   await W.check('before: receive, lot top-up, lot Set and move-row preserve business statements and atomic receipts to the eb5dd0ba3 oracle', async () => {
     const cases = [
@@ -66,7 +32,7 @@ async function main() {
       const b = await W.call(app(oracle), dbOld, method, url, body, { capture: capOld })
       assert.equal(a.status, 200, JSON.stringify(a.body))
       assert.equal(W.normalised(a), W.normalised(b), `${url}: same answer`)
-      assertComposedWrites(capNew, capOld, dbNew)
+      W.assertComposedWrites(capNew, capOld, dbNew)
       if (capNew.flat().some(s => /UPDATE products SET\s+cost_price_usd/.test(s.sql))) {
         for (const [label, pattern] of [
           ['missing atomic receipt', /UPDATE stock_mutation_receipts SET written=1/],
@@ -75,11 +41,18 @@ async function main() {
           ['missing business guard', /INSERT INTO stock_session_guards/],
         ]) {
           const mutant = capNew.map(rows => rows.filter(s => !pattern.test(s.sql)))
-          assert.throws(() => assertComposedWrites(mutant, capOld, dbNew), undefined, label)
+          assert.throws(() => W.assertComposedWrites(mutant, capOld, dbNew), undefined, label)
         }
         const separated = capNew.map(rows => rows.filter(s => !/UPDATE products SET\s+cost_price_usd/.test(s.sql)))
         separated.push(capNew.flat().filter(s => /UPDATE products SET\s+cost_price_usd/.test(s.sql)))
-        assert.throws(() => assertComposedWrites(separated, capOld, dbNew), undefined, 'cost outside stock transaction')
+        assert.throws(() => W.assertComposedWrites(separated, capOld, dbNew), undefined, 'cost outside stock transaction')
+        const movedGuard = capNew.map(rows => rows.slice())
+        const stockIndex = movedGuard.findIndex(rows => rows.some(s => /(?:INSERT INTO|UPDATE) branch_(?:batch_)?stock/.test(s.sql)))
+        assert.match(movedGuard[stockIndex][0].sql.trim(), /^SELECT CASE/)
+        const [guard] = movedGuard[stockIndex].splice(0, 1)
+        movedGuard.splice(stockIndex, 0, [guard])
+        assert.deepEqual(movedGuard.flat(), capNew.flat(), 'moved-guard control preserves flattened business ordering')
+        assert.throws(() => W.assertComposedWrites(movedGuard, capOld, dbNew), /mandatory business guards share/, 'guard outside physical stock transaction')
       }
       assert.equal(W.normalised(W.ledger(dbNew)), W.normalised(W.ledger(dbOld)), `${url}: same ledgers`)
     }
