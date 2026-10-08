@@ -1,3 +1,12 @@
+## 08/10/2026 — STOCK-ACTIVE and owner interaction fixes — unreleased
+
+- [~] Ordinary products have no active/inactive state. Deliberately removed or merged records remain removed. A product with stock in any of the four ledgers cannot be removed; incoming stock cannot revive a removed product. Shared enforcement, migration backstop, stock readers and focused tests are implemented; composed certification is pending.
+- [~] Adjust Stock: received dates sort newest first across years, with undated lots last; explicit lot selection and allocation defaults are preserved. Keyboard viewport bounds, received-date dropdown placement and guarded Close/Escape are implemented and tested in desktop Chromium and emulated Android/iPhone WebKit. Physical iOS validation remains unavailable.
+- [~] Show the active branch in product details, mobile rows and stock controls even when only one branch remains. Complete EN/KM browser and sibling checks before certification.
+- [~] Keep separate Free and Paid deployment profiles with the same stock rules. Bound imports, returns and stock sessions using actual database attempts, including retries and post-commit work. Both-profile build and full gate evidence remain required; current deployment selection remains Paid.
+- [ ] Damaged stock conversion is a separate subsequent slice: counted, sellable stock with a visible condition tag; returns retain the original tag by default, staff may change it, and clearing a tag preserves quantity with compensating history. This owner ruling supersedes the earlier separate-pool design; that conversion is not implemented yet.
+- [ ] Remaining owner UI requests, broader iOS/PWA checks and parked lanes follow. Finish each coherent slice with a full-SHA GitHub gate, fresh Astra adversarial review and deployment after 20:00 Cambodia with `open_today = 0`. No cutover mode is to be rerun.
+
 <!-- U-1 plan start -->
 ## U-1 — Urgent owner batch (25 Sep 2026) — ACTIVE, takes priority over PD-1 phases 2–7
 
