@@ -63,6 +63,8 @@ const boundaries: Array<[string, string]> = [
   ['api/generalCustomerMembershipRepairTransport.ts', 'backup-reset-tools'],
   ['components/shared/lightboxSwipe.ts', 'image-lightbox'],
   ['components/shared/documentScrollLock.ts', 'app-shell'],
+  ['components/navigation/Sidebar.tsx', 'Sidebar'],
+  ['components/shared/MinimizedWorkTray.tsx', 'Sidebar'],
 ]
 for (const [relative, expected] of boundaries) {
   const id = path.join(frontend, 'src', relative)
@@ -70,7 +72,7 @@ for (const [relative, expected] of boundaries) {
   assert.equal(chunkFor(id), expected, relative)
   assert.equal(chunkFor(id.replace(/\//g, '\\')), expected, `Windows: ${relative}`)
 }
-for (const icon of ['loader-2', 'arrow-left', 'shield-check', 'download', 'copy', 'minus', 'grip-vertical', 'heart', 'user']) {
+for (const icon of ['loader-2', 'arrow-left', 'shield-check', 'download', 'copy', 'minus', 'grip-vertical', 'heart', 'user', 'sliders-horizontal']) {
   assert.equal(chunkFor(`/fixture/node_modules/lucide-react/dist/esm/icons/${icon}.js`), 'shared-ui', icon)
 }
 assert.equal(neutralPrimitiveChunk('/fixture/src/components/catalog/CatalogPage.tsx'), undefined)

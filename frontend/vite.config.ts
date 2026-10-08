@@ -651,6 +651,7 @@ const routeSharedIconNames = new Set([
   'settings-2',
   'shield-alert',
   'shopping-bag',
+  'sliders-horizontal',
   'sparkles',
   'store',
   'sun',
@@ -1046,6 +1047,10 @@ function manualChunks(id: string): string | undefined {
     // public catalog loads: the catalog-products closure passed the budget in
     // tests/performanceBudgets.test.ts. Its own chunk keeps it off the storefront.
     if (normalized.includes('/src/components/shared/useConfirmDialog.tsx')) return 'confirm-dialog-hook'
+    if (
+      normalized.endsWith('/src/components/navigation/Sidebar.tsx')
+      || normalized.endsWith('/src/components/shared/MinimizedWorkTray.tsx')
+    ) return 'Sidebar'
     // The phone Draft chip body (drag, clamp, list) is requested by
     // MinimizedWorkTray only while a draft is parked on a phone. Left to the
     // catch-all below it lands in 'app-shared' and adds ~6 KB to the public
