@@ -45,15 +45,15 @@ export function datedCountApplyIntent(user: SessionUser, url: string, body: Reco
 export type DatedCountApplyIntent = ReturnType<typeof datedCountApplyIntent>
 
 // Cache bump can read versions, reserve Free KV quota and fall back to a D1
-// upsert: each may retry once. Broadcasts have no D1 reads. A recovered
-// receipt returns without cache tails, so recovery and cache reserves do not add.
+// upsert: each may retry once. Broadcasts have no D1 reads. Lost-ACK recovery
+// still refreshes readers, so its receipt read and cache tails both need room.
 const APPLY_CACHE_TAIL_ATTEMPTS = 6
 const APPLY_RECOVERY_ATTEMPTS = 1
 export function datedCountApplyBudget(db: D1Compat, env: Env) {
   const metrics = currentRequestMetrics()
   if (!metrics) throw new DatedCountApplyReceiptError('dated_count_receipt_unavailable', 503)
   const cap = getPlanLimits(env).d1QueriesPerInvocation
-  const admit = (count: number, tail = Math.max(APPLY_CACHE_TAIL_ATTEMPTS, APPLY_RECOVERY_ATTEMPTS)) => {
+  const admit = (count: number, tail = APPLY_CACHE_TAIL_ATTEMPTS + APPLY_RECOVERY_ATTEMPTS) => {
     if (metrics.invocation.attemptedStatements + count + tail > cap) throw new DatedCountApplyReceiptError('dated_count_over_plan_budget', 409)
   }
   const reads = Object.create(db) as D1Compat
@@ -111,7 +111,7 @@ export async function commitDatedCountApplyReceipt(
     return result
   } catch (error) {
     try {
-      budget.admit(1, 0)
+      budget.admit(1, APPLY_CACHE_TAIL_ATTEMPTS)
       const recovery = Object.create(db) as D1Compat
       recovery.prepare = ((sql: string) => {
         const statement = db.prepare(sql)

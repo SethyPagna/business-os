@@ -1,5 +1,5 @@
 import { executeStockTransaction } from './stockTransaction'
-import { productStockGuardStatement, productStockGuardError, assertProductsActive } from './productStockGuard'
+import { productStockGuardStatement, productStockGuardError } from './productStockGuard'
 // Applies a StockCountPlan (lib/datedStockCountImport.ts's pure
 // computation) as real DB writes. Kept in its own file, separate from
 // the plan computation, per that file's own stated boundary ("does no
@@ -386,7 +386,6 @@ export async function prepareDatedStockCountPlan(
     }
   }
   if (activeProducts.size) {
-    await assertProductsActive(db, [...activeProducts])
     statements.unshift(productStockGuardStatement([...activeProducts], 'active'))
   }
   let lotGroups = 0

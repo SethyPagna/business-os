@@ -2766,11 +2766,19 @@ app.post('/dated-stock-count/apply', async (c) => {
   const db = getDb(c.env)
   let intent: ReturnType<typeof datedCountApplyIntent>
   let budget: ReturnType<typeof datedCountApplyBudget>
+  const refreshReaders = () => {
+    c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
+    c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'dated_stock_count_import' }))
+    c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  }
   try {
     intent = datedCountApplyIntent(user, c.req.url, body, parsed.entries, branchRedirectTarget(c))
     budget = datedCountApplyBudget(db, c.env)
     const replay = await readDatedCountApplyReceipt(budget.db, intent)
-    if (replay) return c.json(replay)
+    if (replay) {
+      refreshReaders()
+      return c.json(replay)
+    }
   } catch (error) {
     if (error instanceof DatedCountApplyReceiptError) return c.json(error.body(), error.status)
     throw error
@@ -2802,10 +2810,7 @@ app.post('/dated-stock-count/apply', async (c) => {
     throw error
   }
 
-  if (result.replayed) return c.json(result)
-  c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'dated_stock_count_import' }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  refreshReaders()
 
   return c.json({ success: true, ...result })
 })

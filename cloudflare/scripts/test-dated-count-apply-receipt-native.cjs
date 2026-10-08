@@ -12,6 +12,7 @@ source = source.replace('return {...f,call,', 'return {worker,ctx,...f,call,')
 source = source.replace("assert.equal(metered,physical,", "if(id!=='overlap-aggregate')assert.ok(physical<=(tier==='free'?50:1000),'whole invocation cap includes background attempts');assert.equal(metered,physical,")
 const { bundleWorker, world } = new Function('require', '__dirname', 'module', source + ';return {bundleWorker,world}')(requireFixture, scripts, { paths: requireFixture.resolve.paths('esbuild') })
 const owner = { version: 1, actor_id: 7, organization_id: null, authority: 'https://admin.business.test', runtime: 'cloudflare-workers' }
+const cacheVersion = f => Number(f.sql.prepare("SELECT version FROM cache_versions WHERE namespace='products'").get()?.version || 0)
 const snapshot = f => JSON.stringify({ stock: f.sql.prepare('SELECT * FROM branch_stock').all(), lots: f.sql.prepare('SELECT * FROM branch_batch_stock').all(),
   history: f.sql.prepare('SELECT * FROM inventory_movements').all(), provenance: f.sql.prepare('SELECT * FROM dated_stock_count_batch_actions').all(),
   audit: f.sql.prepare("SELECT * FROM audit_logs WHERE action='dated_stock_count_import'").all() })
@@ -20,7 +21,7 @@ async function scenario(make, tier, dates, lostAck) {
   try {
     const body = { client_request_id: `dated-count-${tier}-${dates}-${lostAck}`, offline_owner: owner, user_id: 99,
       entries: Array.from({ length: dates }, (_, i) => ({ productId: 1, branchId: 1, date: `2026-09-${String(5 + i).padStart(2, '0')}`, count: 102 + i * 2 })) }
-    const before = snapshot(f)
+    const before = snapshot(f), versionBefore = cacheVersion(f)
     if (lostAck) f.loseNextCommitAcknowledgement()
     const first = await f.call('apply', body)
     assert.ok(first.physical <= (tier === 'free' ? 50 : 1000))
@@ -31,8 +32,11 @@ async function scenario(make, tier, dates, lostAck) {
       console.log(`PASS ${tier}/${dates}/${lostAck} whole plan refused before effects`); return
     }
     assert.equal(first.status, 200)
+    assert.ok(cacheVersion(f) > versionBefore, 'successful commit or lost-ACK recovery invalidates product stock readers')
+    const versionAfterCommit = cacheVersion(f)
     const committed = snapshot(f), second = await f.call('apply', body)
     assert.equal(second.status, 200); assert.equal(snapshot(f), committed, 'same ID must not append compensation/history/audit')
+    assert.ok(cacheVersion(f) > versionAfterCommit, 'same-ID replay repairs cache invalidation after an earlier uncertain response')
     assert.ok(second.physical <= (tier === 'free' ? 50 : 1000))
     assert.equal(second.json.replayed, true)
     for (const field of ['movementsDeleted', 'movementsCompensated', 'movementsApplied', 'batchTrackedGroups', 'plainGroups']) assert.equal(second.json[field], first.json[field])
@@ -94,11 +98,12 @@ async function faults(make, tier) {
   }}
   const f = await world(make, tier, opts)
   try {
-    const body=bodyFor(`unknown-${tier}-request`); f.loseNextCommitAcknowledgement()
+    const body=bodyFor(`unknown-${tier}-request`), versionBefore=cacheVersion(f); f.loseNextCommitAcknowledgement()
     const unknown=await f.call('unknown',body)
     assert.equal(unknown.status,503); assert.equal(unknown.json.code,'dated_count_outcome_unknown'); assert.equal(unknown.json.can_review_again,undefined)
     assert.equal(receipts(f),1); const saved=snapshot(f); recoveryUnavailable=false
     const replay=await f.call('unknown-same-id',body); assert.equal(replay.status,200);assert.equal(replay.json.replayed,true);assert.equal(snapshot(f),saved)
+    assert.ok(cacheVersion(f)>versionBefore,'a later same-ID recovery repairs readers after committed but unconfirmed stock')
     assert.ok(unknown.physical <= (tier==='free'?50:1000)); console.log(`PASS ${tier} committed lost ACK plus unavailable recovery is truthful unknown, same-ID replay`)
   } finally {f.sql.close()}
   const missing=await world(make,tier)
@@ -163,14 +168,45 @@ async function requestBoundaries(make,tier) {
     console.log(`PASS ${tier} explicit retired branch redirect lands once and keeps addressed request identity`)
   } finally {redirect.sql.close()}
 }
+async function removedProductControls(make, tier) {
+  for (const retireDuringPlan of [false, true]) {
+    let f, retired = false
+    const seed = write => f.sql.transaction(() => {
+      f.sql.exec("INSERT INTO system_flags(key,value)SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'")
+      write()
+      f.sql.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'")
+    })()
+    const opts = { cacheFailure: true, tailRetries: true, beforeBatch(statements) {
+      if (!retireDuringPlan || retired || !statements.some(s => s.text.includes("VALUES ('stock_transaction_permit'"))) return
+      retired = true
+      seed(() => f.sql.exec('UPDATE products SET is_active=0 WHERE id=1'))
+    } }
+    f = await world(make, tier, opts)
+    try {
+      seed(() => {
+        f.sql.exec('UPDATE branch_stock SET quantity=0 WHERE product_id=1; UPDATE branch_batch_stock SET quantity=0; UPDATE products SET stock_quantity=0 WHERE id=1')
+        f.sql.prepare('UPDATE products SET is_active=? WHERE id=1').run(retireDuringPlan ? 1 : 0)
+      })
+      const before = snapshot(f), versionBefore = cacheVersion(f), body = bodyFor(`removed-${tier}-${retireDuringPlan}`)
+      const result = await f.call('removed-product', body)
+      assert.equal(result.status, 409)
+      assert.equal(result.json.code, 'product_has_stock')
+      assert.equal(snapshot(f), before, 'the in-batch catalog guard rolls receipt/stock/history/audit back')
+      assert.equal(receipts(f), 0)
+      assert.equal(cacheVersion(f), versionBefore, 'a refused count does not acknowledge a stock change')
+      if (retireDuringPlan) assert.equal(retired, true)
+      console.log(`PASS ${tier} removed product before/after planning=${retireDuringPlan}: atomic inbound guard preserved`)
+    } finally { f.sql.close() }
+  }
+}
 async function main() {
   const saved = globalThis.fetch; globalThis.fetch = async () => new Response('{"ok":true}')
   try {
     const make = await bundleWorker()
     if (process.env.DATED_COUNT_BASELINE_ACK === '1') return scenario(make, 'free', 1, true)
     for (const tier of ['free', 'paid']) for (const dates of [1, 2, 5]) for (const lostAck of [false, true]) await scenario(make, tier, dates, lostAck)
-    for (const tier of ['free','paid']) {await controls(make,tier);await faults(make,tier);await overlap(make,tier);await costRace(make,tier);await requestBoundaries(make,tier)}
-    console.log('dated count durable receipt proof PASS 12 size/ACK schedules and 18 control groups')
+    for (const tier of ['free','paid']) {await controls(make,tier);await faults(make,tier);await overlap(make,tier);await costRace(make,tier);await requestBoundaries(make,tier);await removedProductControls(make,tier)}
+    console.log('dated count durable receipt proof PASS 12 size/ACK schedules, 18 original control groups and 4 removed-product controls')
   } finally { globalThis.fetch = saved }
 }
 module.exports = { bundleWorker, world, owner, snapshot, scenario }
