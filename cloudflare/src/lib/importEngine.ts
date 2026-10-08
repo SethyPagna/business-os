@@ -1272,7 +1272,7 @@ async function ensureSourceRowsMaterialized(env: Env, db: D1Compat, jobId: strin
 
   await saveMaterializeState(db, jobId, state, isDone)
   if (kind === 'apply' && materializeBudget?.invocation) {
-    materializeBudget.reserve = 2 + (env.IMPORT_QUEUE ? 0 : 2)
+    materializeBudget.reserve = 2 + (env.IMPORT_QUEUE ? 0 : 4)
     if (!env.IMPORT_QUEUE) await db.prepare(`UPDATE import_jobs SET status='approved',phase='apply_deferred',updated_at=CURRENT_TIMESTAMP WHERE id=@id`).run({ id: jobId })
     await dispatchImportWork(env, { jobId, kind }, { freshInvocation: true })
   } else await dispatchImportWork(env, { jobId, kind })
@@ -4278,20 +4278,39 @@ const IMPORT_LEASE_MS = 60_000
  * cannot both see a free lease -- D1 reports how many rows the UPDATE
  * actually changed, and only one of them gets 1.
  */
-async function acquireImportLease(db: D1Compat, jobId: string): Promise<string | null> {
+type ImportLeaseSnapshot = { status: string; cancel_requested: number; started_at: string | null; type: ImportType; chunk_cursor: number; chunk_state_json: string | null }
+async function acquireImportLease(db: D1Compat, jobId: string, snapshot?: { row?: ImportLeaseSnapshot }): Promise<string | null> {
   const token = crypto.randomUUID()
   const now = new Date()
-  const result = await db.prepare(`
+  const sql = `
     UPDATE import_jobs
     SET lease_token = @token, lease_expires_at = @expires, updated_at = CURRENT_TIMESTAMP
     WHERE id = @id
       AND (lease_expires_at IS NULL OR lease_expires_at < @now)
-  `).run({
+  `
+  const params = {
     id: jobId,
     token,
     now: now.toISOString(),
     expires: new Date(now.getTime() + IMPORT_LEASE_MS).toISOString(),
-  })
+  }
+  if (snapshot) {
+    try {
+      const results = await db.batchOnce([{ sql: sql + ' RETURNING status,cancel_requested,started_at,type,chunk_cursor,chunk_state_json', params }])
+      if (!Array.isArray(results[0]?.results)) throw new StockTransactionOutcomeUnknownError()
+      snapshot.row = results[0].results[0] as ImportLeaseSnapshot | undefined
+      return snapshot.row ? token : null
+    } catch (error) {
+      if (isImportMaintenanceFenceError(error)) throw error
+      // A lost lease ACK does not authorize an empty-result/duplicate reply.
+      // Confirm this exact token once before proceeding with its snapshot.
+      snapshot.row = await db.prepare(`SELECT status,cancel_requested,started_at,type,chunk_cursor,chunk_state_json
+        FROM import_jobs WHERE id=@id AND lease_token=@token`).get<ImportLeaseSnapshot>({ id: jobId, token })
+      if (!snapshot.row) throw new StockTransactionOutcomeUnknownError()
+      return token
+    }
+  }
+  const result = await db.prepare(sql).run(params)
   return result.changes === 1 ? token : null
 }
 
@@ -5941,14 +5960,23 @@ export function productImportStockStatements(productId: number, active: unknown,
 }
 
 export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: number, attempt?: number): Promise<{ applied: number; failed: number }> {
+  const metrics = currentRequestMetrics()
+  if (!metrics) throw new Error('Import apply requires an invocation metrics scope')
   const db = stockQueryBudgetDb(await getImportFencedDb(env), getPlanLimits(env).d1QueriesPerInvocation, 1)
   // Same per-request shadow as runImportAnalyze -- see its comment -- and
   // the same redelivery back-off.
   const limits = getPlanLimits(env)
   const chunkRows = chunkRowsForAttempt(limits.rowsPerImportChunk, attempt)
   const sw = makeStopwatch()
-  const jobRow = await db.prepare(`SELECT status, cancel_requested, started_at, type, chunk_cursor, chunk_state_json FROM import_jobs WHERE id = @id`).get<{ status: string; cancel_requested: number; started_at: string | null; type: ImportType; chunk_cursor: number; chunk_state_json: string | null }>({ id: jobId })
-  if (!jobRow) throw new Error('Import job not found')
+  const snapshot: { row?: ImportLeaseSnapshot } = {}
+  const leaseToken = await acquireImportLease(db, jobId, snapshot)
+  if (!leaseToken) {
+    const exists = await db.prepare('SELECT id FROM import_jobs WHERE id=@id').get({ id: jobId })
+    if (!exists) throw new Error('Import job not found')
+    console.log('[import] skipping duplicate delivery; another invocation holds the lease', jobId)
+    return { applied: 0, failed: 0 }
+  }
+  const jobRow = snapshot.row!
   // See runImportAnalyze's identical check + isFreshImportRun's comment --
   // a crashed chunk's retry lands here with status='failed' (markJobFailed
   // already ran before the re-throw), not 'applying', so that has to be
@@ -5958,13 +5986,11 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
   try { savedState = JSON.parse(jobRow.chunk_state_json || '{}') } catch { /* fresh state */ }
   const generic = jobRow.type !== 'stock_actions'
   const budget = (db as BudgetDb)[STOCK_QUERY_BUDGET]!
-  // Settlement is checkpoint2 + inline pause2 (or queued dispatch0) + lease2.
-  // A synchronous import route still has its job reread1 and audit1 to run.
-  const httpTail = env.IMPORT_QUEUE ? 0 : 2
-  const deferTail = 2 + (env.IMPORT_QUEUE ? 0 : 2) + 2 + httpTail
+  // Settlement is the combined checkpoint/pause2 + lease2.
+  // A synchronous import route retains its two-attempt job reread and audit.
+  const httpTail = env.IMPORT_QUEUE ? 0 : 4
+  const deferTail = 2 + 2 + httpTail
   if (generic) {
-    const metrics = currentRequestMetrics()
-    if (!metrics) throw new Error('Generic import requires an invocation metrics scope')
     budget.invocation = metrics.invocation
     // Only this generic inventory/sales invocation reuses the classifier's branch
     // directory. The whole stock batch still proves current branch authority.
@@ -5974,19 +6000,6 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
   }
   let resumeState = savedState
   const isFreshStart = isFreshImportRun(jobRow.status, 'applying') && !(generic && savedState.genericApply)
-
-  // Claim the job before touching a chunk. If another invocation holds it --
-  // an at-least-once redelivery, or a retry overlapping the run it retries --
-  // return without processing. Deliberately NOT an error: the holder is
-  // making progress, so this message has nothing left to do and must ack
-  // rather than retry, or it would spin against a healthy run.
-  const leaseToken = await acquireImportLease(db, jobId)
-  if (!leaseToken) {
-    console.log('[import] skipping duplicate delivery; another invocation holds the lease', jobId)
-    // Zero applied, zero failed -- honest for an invocation that did
-    // nothing. The holder reports the real totals when it finishes.
-    return { applied: 0, failed: 0 }
-  }
 
   let replacementFinalizing = false
   try {
@@ -6042,8 +6055,10 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     const totalRows = await db.staging.prepare(`SELECT COUNT(*) AS n FROM import_job_source_rows WHERE job_id = @id`).get<{ n: number }>({ id: jobId })
     sw.lap('fetchAndParseMs') // now a COUNT + the getChunkState read below, not a full re-parse -- see ensureSourceRowsMaterialized above
     if (!totalRows?.n) throw new Error('No CSV file uploaded for this job')
-    const { cursor, state } = await getChunkState(db, jobId)
-    resumeState = state
+    // Captured by the lease UPDATE, not a pre-claim cached read. A prior
+    // holder cannot advance between our ownership and this source cursor.
+    const cursor = isFreshStart ? 0 : jobRow.chunk_cursor
+    const state = resumeState
     state.genericApply ??= { window: chunkRows }
     const genericWindow = Math.min(chunkRows, state.genericApply.window)
     const decisions = getDecisionMap(job.policy_json)
@@ -7073,6 +7088,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     }
     sw.lap('salesItemsMs')
 
+    budget.reserve = 2 + 2 + httpTail
     await persistStockResults(db, jobId, results, groupIndexByRowNumber)
     const chunkFailed = results.filter((r) => r.action === 'error').length
     const nextCursor = cursor + windowUnitCount
