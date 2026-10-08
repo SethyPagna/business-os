@@ -65,7 +65,10 @@ async function main() {
     await api.commitStockSession(f.env, user, createRequest())
     const { PRODUCTS_RESET_TABLES } = loadStockSession('lib/coreDataInvariants.ts')
     const revision = f.sql.prepare("SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key='1'").get().revision
-    for (const table of PRODUCTS_RESET_TABLES) f.sql.exec(`DELETE FROM ${table}`)
+    for (const table of PRODUCTS_RESET_TABLES) {
+      if (table === 'products') f.sql.exec('UPDATE products SET stock_quantity=0')
+      f.sql.exec(`DELETE FROM ${table}`)
+    }
     assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM stock_session_operations').get().n, 0)
     assert(f.sql.prepare("SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key='1'").get().revision > revision)
     assert.equal(f.sql.pragma('foreign_key_check').length, 0)

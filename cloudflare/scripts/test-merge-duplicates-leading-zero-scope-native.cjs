@@ -300,7 +300,7 @@ async function main() {
 
 async function boundedPreviewCohorts() {
   const { d1, raw } = seed()
-  raw.exec('DELETE FROM branch_stock; DELETE FROM products;')
+  raw.exec('DELETE FROM branch_stock; UPDATE products SET stock_quantity=0; DELETE FROM products;')
   for (let i = 0; i < 12; i++) for (let member = 0; member < 2; member++) {
     raw.prepare(`INSERT INTO products(id,name,barcode,is_active,is_group,stock_quantity,
       cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr)

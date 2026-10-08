@@ -153,7 +153,7 @@ function generated(count, seed = 7) {
 function world({ control, generatedProducts = 28, duplicate = false } = {}) {
   const raw = new DatabaseSync(':memory:'); raw.limits.exprDepth = 100; raw.limits.variableNumber = 100
   raw.exec('PRAGMA foreign_keys=OFF')
-  for (const file of fs.readdirSync(path.join(root, 'migrations')).filter(n => n.endsWith('.sql')).sort()) raw.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
+  for (const sql of require('./harness/historical_product_stock.cjs').historicalMigrations()) raw.exec(sql)
   raw.limits.functionArg = 100
   raw.exec(`INSERT INTO branches(id,name,notes,is_active,is_default,canonical_key,role,created_at) VALUES
       (2,'Shop','front of house',1,1,'shop','shop','2026-01-01 00:00:00'),(1,'Warehouse','back store',1,0,'warehouse','warehouse','2026-01-01 00:00:00'),
@@ -212,7 +212,7 @@ function world({ control, generatedProducts = 28, duplicate = false } = {}) {
     if (stats.after) { const after = stats.after; stats.after = null; after(raw) }
     return result
   } })
-  const w = { raw, stats, history, products, lots, get m() { return m }, db: makeDb() }
+  const w = { raw, stats, history, products, lots, get m() { require('./harness/historical_product_stock.cjs').installCurrentStockGuards(raw); return m }, db: makeDb() }
   w.reload = (next = control) => { m = modules(next); w.db = makeDb() }
   return w
 }

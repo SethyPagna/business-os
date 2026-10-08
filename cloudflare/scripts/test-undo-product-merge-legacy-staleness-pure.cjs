@@ -27,7 +27,7 @@ const RECORD_CHANGED = 'undo_record_changed'
 const PRICING = 'selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr'
 
 function freshWorld() {
-  const d1 = openDb(loadAll())
+  const d1 = openDb(require('./harness/historical_product_stock.cjs').historicalMigrations())
   const { undoAppliers } = loadUndoAppliers(d1)
   const run = (sql, params) => d1.db.prepare(sql).run(params == null ? {} : params)
   const get = (sql, params) => d1.db.prepare(sql).get(params == null ? {} : params)
@@ -254,6 +254,10 @@ function laterReceipt(world, productId, branchId, lotId, quantity) {
 }
 
 function replay(world, kind, snapshotId, user = USER) {
+  if (!world.currentStockGuardsInstalled) {
+    require('./harness/historical_product_stock.cjs').installCurrentStockGuards(world.d1.db)
+    world.currentStockGuardsInstalled = true
+  }
   const payload = { applier: kind, snapshot_id: snapshotId }
   return world.undoAppliers.resolveUndoApplier(payload).run(payload, { env: {}, user, direction: 'undo', historyId: 1 })
 }

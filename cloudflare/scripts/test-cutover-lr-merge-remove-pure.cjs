@@ -33,11 +33,21 @@ async function main() {
     assert.ok(W.movements(db).length > 0 && W.movements(db).every((m) => m.branch_id === 1), 'the merge movements are all at LC Store')
   })
 
-  await W.check('remove: removing a product with an empty Old Shop row books its write-off at LC Store only', async () => {
+  await W.check('remove: a stocked product refuses without writing off stock at either branch', async () => {
     const db = W.build('after')
     const res = await W.call(products, db, 'DELETE', '/10', { reason: 'discontinued' })
+    assert.equal(res.status, 409, JSON.stringify(res.body))
+    assert.equal(res.body.code, 'product_has_stock')
+    assert.deepEqual(W.movements(db), [])
+    assert.equal(db.prepare('SELECT stock_quantity FROM products WHERE id=10').get().stock_quantity, 15)
+    assert.deepEqual(oldShopTotals(db), { stock: 0, lots: 0, movements: 0 })
+  })
+  await W.check('remove: an empty product remains removable and posts no branch write-off', async () => {
+    const db = W.build('after')
+    db.exec('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=10); UPDATE branch_stock SET quantity=0 WHERE product_id=10; UPDATE products SET stock_quantity=0 WHERE id=10')
+    const res = await W.call(products, db, 'DELETE', '/10', { reason: 'empty duplicate' })
     assert.equal(res.status, 200, JSON.stringify(res.body))
-    assert.deepEqual(W.movements(db).map((m) => [m.branch_id, m.movement_type, m.quantity]), [[1, 'write_off', 15]])
+    assert.deepEqual(W.movements(db), [])
     assert.deepEqual(oldShopTotals(db), { stock: 0, lots: 0, movements: 0 })
   })
 

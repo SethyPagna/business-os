@@ -10,7 +10,7 @@ const path = require('node:path')
 const Module = require('node:module')
 const file = path.join(__dirname, 'test-sale-create-atomic-pure.cjs'), source = fs.readFileSync(file, 'utf8'), boundary = source.indexOf(';(async () => {')
 const harness = new Module(file, module); harness.filename = file; harness.paths = module.paths
-harness._compile(source.slice(0, boundary).replace('const overrides = {', "const overrides = { './db': { getDb: env => env.DB },") + '\nmodule.exports={fixture,request,postSale,app,executionCtx,load,USER,setUser(value){currentUser=value}};', file)
+harness._compile(source.slice(0, boundary).replace('openDb(loadAll())', "openDb(require('./harness/historical_product_stock.cjs').historicalMigrations())").replace('const overrides = {', "const overrides = { './db': { getDb: env => env.DB },") + '\nmodule.exports={fixture,request,postSale,app,executionCtx,load,USER,setUser(value){currentUser=value}};', file)
 const h = harness.exports
 let checks = 0
 async function check(name, run) { await run(); console.log('PASS ' + name); checks++ }
@@ -34,6 +34,7 @@ async function check(name, run) { await run(); console.log('PASS ' + name); chec
     return { f, one }
   }
   const fold = (f) => async (dup, keeper, approved) => {
+    require('./harness/historical_product_stock.cjs').installCurrentStockGuards(f.raw)
     await products.foldDuplicateProductInto({ DB: f.route }, f.route, actor, { id: keeper.id, name: keeper.name }, { id: dup.id, name: dup.name, image_path: dup.image_path },
       new Map([[1, 'Shop']]), 'branch cutover: inactive product holding stock', 'merge', undefined, { operationId: crypto.randomUUID() }, approved ? { follows: true } : undefined)
     f.raw.prepare('UPDATE products SET stock_quantity=COALESCE((SELECT SUM(quantity) FROM branch_stock WHERE product_id=@id),0) WHERE id=@id').run({ id: keeper.id })

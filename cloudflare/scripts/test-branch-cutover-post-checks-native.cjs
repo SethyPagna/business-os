@@ -18,6 +18,8 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { world, drive, snapshot } = require('./test-branch-cutover-parent-e2e-native.cjs')
+const { DatabaseSync } = require('node:sqlite')
+const { historicalMigrations, installCurrentStockGuards } = require('./harness/historical_product_stock.cjs')
 
 const root = path.resolve(__dirname, '../..')
 const NAMES = ['branch-cutover-post-checks', 'branch-cutover-post-stock', 'branch-cutover-post-labels']
@@ -159,9 +161,6 @@ async function main() {
       'a stock transfer written in the same second as begin, before it, outside the run': [`INSERT INTO stock_transfers(product_id, product_name, from_branch_id, to_branch_id, quantity, from_branch_name, to_branch_name, created_at)
         SELECT product_id, product_name, from_branch_id, to_branch_id, quantity, from_branch_name, to_branch_name, datetime((SELECT created_at FROM branch_cutovers LIMIT 1)) FROM stock_transfers ORDER BY id LIMIT 1`,
         /.000Z$/.test(one("SELECT created_at c FROM branch_cutovers LIMIT 1").c) ? ['orphans'] : []],
-      'an inactive product holding stock (the run reactivates them all)': [`DROP TRIGGER transfer_product_identity_update; UPDATE products SET is_active = 0 WHERE id = (SELECT product_id FROM branch_stock WHERE branch_id = ${lc} AND quantity > 0 ORDER BY product_id LIMIT 1)`, ['inactive_with_stock']],
-      'an inactive product with only a drifted cache (owner: recompute it)': [`DROP TRIGGER transfer_product_identity_update; UPDATE products SET is_active = 0, stock_quantity = 8 WHERE id = (SELECT product_id FROM branch_stock WHERE branch_id = ${lc} AND quantity > 0 ORDER BY product_id LIMIT 1)`, ['inactive_with_stock']],
-      'an inactive product holding a held (damaged-tagged) unit': [`DROP TRIGGER transfer_product_identity_update; UPDATE products SET is_active = 0 WHERE id = (SELECT product_id FROM branch_stock WHERE branch_id = ${lc} AND quantity > 0 ORDER BY product_id LIMIT 1); INSERT INTO damaged_stock_lots(product_id, branch_id, quantity, quantity_remaining, condition_tag, source) SELECT id, ${lc}, 1, 1, 'damaged', 'remove' FROM products WHERE is_active = 0 LIMIT 1`, ['inactive_with_stock']],
       'a nonblank history label rewritten': [`UPDATE sales SET branch_name = 'Warehouse' WHERE id = 2`, ['sales']],
       'a history label left blank': [`UPDATE sales SET branch_name = NULL WHERE id = 2`, ['blank_labels', 'sales']],
       'Old Shop renamed back': [`UPDATE branches SET name = 'Shop' WHERE id = ${old}`, ['directory_off']],
@@ -178,6 +177,21 @@ async function main() {
     }
     // and nothing is left over: the untouched result still passes
     assert.deepEqual(caught('SELECT 1'), [])
+  })
+  await check('historical inactive stock is detected on each ledger independently with current guards installed; zero control stays clear', () => {
+    for (const ledger of ['zero', 'cache', 'branch', 'batch', 'damaged']) {
+      const raw = new DatabaseSync(':memory:')
+      for (const sql of historicalMigrations()) raw.exec(sql)
+      raw.exec(`INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Store',1,1),(2,'Old',0,0);
+        INSERT INTO products(id,name,is_active,stock_quantity) VALUES(1,'Historical removed',0,${ledger === 'cache' ? 1 : 0});`)
+      if (ledger === 'branch') raw.exec('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,1)')
+      if (ledger === 'batch') raw.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active) VALUES(1,1,'history',1); INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(1,1,1)")
+      if (ledger === 'damaged') raw.exec('INSERT INTO damaged_stock_lots(product_id,branch_id,quantity,quantity_remaining) VALUES(1,1,1,1)')
+      installCurrentStockGuards(raw)
+      assert.equal(raw.prepare(q['branch-cutover-post-checks']).get().inactive_with_stock, ledger === 'zero' ? 0 : 1, ledger)
+      assert.throws(() => raw.exec('UPDATE products SET stock_quantity=stock_quantity+1 WHERE id=1'), /product_has_stock/, ledger + ': guards remain enabled')
+      raw.close()
+    }
   })
   w.raw.close()
   console.log(`${checks} branch cutover post-check groups passed`)
