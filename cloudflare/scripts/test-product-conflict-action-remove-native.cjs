@@ -64,6 +64,7 @@ async function main() {
           (95202,5201,'native-inactive','LOT-Z','2026-08-01',0,'inactive receipt',82,'Supplier Inactive','credit',0,1,0)`),
       native.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(95201,1,5),(95202,1,0)'),
     ])
+    await native.batch([native.prepare('UPDATE branch_stock SET quantity=0 WHERE product_id=5201'),native.prepare('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (95201,95202)'),native.prepare('UPDATE products SET stock_quantity=0 WHERE id=5201')])
     const { app, controls, db, undo, productDelete } = loadRoute(native, true)
     assert.equal((await db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE type='trigger' AND name='positive_lot_require_active_update_0154'").get()).n,1)
     const graph = async () => ({
@@ -124,8 +125,7 @@ async function main() {
     assert.deepEqual((await db.prepare('SELECT id,is_active,supplier_name FROM product_batches WHERE variant_product_id=5201 ORDER BY id').all()).map((row) => ({ ...row })), [
       { id: 95201, is_active: 0, supplier_name: 'Supplier Active' }, { id: 95202, is_active: 0, supplier_name: 'Supplier Inactive' },
     ])
-    assert.deepEqual({ ...(await db.prepare("SELECT movement_type,quantity,batch_id FROM inventory_movements WHERE product_id=5201 AND movement_type='write_off'").get()) },
-      { movement_type: 'write_off', quantity: 5, batch_id: null })
+    assert.equal((await db.prepare("SELECT COUNT(*) n FROM inventory_movements WHERE product_id=5201 AND movement_type='write_off'").get()).n,0)
     const history = await db.prepare("SELECT id,undo_payload FROM action_history WHERE json_extract(undo_payload,'$.applier')='product.remove'").get()
     assert.ok(history?.id > 0)
     const applyBounds = assertBounds(controls, 'native remove apply')
@@ -134,7 +134,7 @@ async function main() {
     const deletedGraph = await graph()
     const operationBeforeFailure = {...await db.prepare('SELECT * FROM product_remove_operations WHERE operation_id=@id').get({id:storedOperation.operation_id})}
     await native.prepare(`CREATE TRIGGER reject_native_remove_restore BEFORE UPDATE ON branch_batch_stock
-      WHEN NEW.batch_id=95201 AND NEW.quantity>0
+      WHEN NEW.batch_id=95201
       BEGIN SELECT RAISE(ABORT,'injected native replay stock failure'); END`).run()
     // Native D1 wraps constraint failures; the applier exposes its stable
     // conflict message. Dropping only this trigger must make the same retry pass.
@@ -147,7 +147,7 @@ async function main() {
     assert.equal(undone.complete, true)
     assert.deepEqual(await graph(),savedGraph,'native undo restores exact saved dates, costs, supplier metadata, lot states and stock ids')
     assert.deepEqual({ ...(await db.prepare('SELECT is_active,stock_quantity,rfid_confirmed_qty FROM products WHERE id=5201').get()) },
-      { is_active: 1, stock_quantity: 5, rfid_confirmed_qty: 1 })
+      { is_active: 1, stock_quantity: 0, rfid_confirmed_qty: 1 })
     assert.deepEqual((await db.prepare('SELECT id,is_active,supplier_name FROM product_batches WHERE variant_product_id=5201 ORDER BY id').all()).map((row) => ({ ...row })), [
       { id: 95201, is_active: 1, supplier_name: 'Supplier Active' }, { id: 95202, is_active: 0, supplier_name: 'Supplier Inactive' },
     ])

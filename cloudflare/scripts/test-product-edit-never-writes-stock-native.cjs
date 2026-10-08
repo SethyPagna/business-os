@@ -157,7 +157,9 @@ const app = productsRoute.default
 assert.ok(app && typeof app.request === 'function', 'routes/products.ts must export the Hono app as default')
 
 function seedBranch() {
-  rawDb.exec(`DELETE FROM undo_snapshots; DELETE FROM branch_batch_stock; DELETE FROM product_batches;
+  rawDb.exec(`UPDATE branch_stock SET quantity=0; UPDATE branch_batch_stock SET quantity=0;
+    UPDATE damaged_stock_lots SET quantity_remaining=0; UPDATE products SET stock_quantity=0;
+    DELETE FROM damaged_stock_lots;DELETE FROM undo_snapshots; DELETE FROM branch_batch_stock; DELETE FROM product_batches;
     DELETE FROM branch_stock; DELETE FROM inventory_movements; DELETE FROM product_images;
     DELETE FROM products; DELETE FROM branches;`)
   rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run()

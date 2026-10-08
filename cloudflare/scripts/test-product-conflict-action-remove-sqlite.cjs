@@ -25,6 +25,7 @@ function setup() {
   d1.db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active,notes,supplier_id,supplier_name)
     VALUES(99004,10000,'old-inactive','2026-08-01',0,'preserve inactive',55,'Old Supplier')`).run()
   d1.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(99004,1,0)').run()
+  d1.db.exec('UPDATE branch_stock SET quantity=0 WHERE product_id=10000; UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=10000); UPDATE products SET stock_quantity=0 WHERE id=10000;')
   const loaded = loadRoute(d1, true)
   reset(loaded.controls)
   return { d1, ...loaded }
@@ -62,7 +63,20 @@ async function main() {
       -- seeded product consistent with its on-hand lot, as the app would.
       UPDATE products SET cost_price_usd=4.25,purchase_price_usd=4.25 WHERE id=10000;`)
     const source = productGraph(fixture.d1)
-    const removed = await remove(fixture.app,10000,{reason:'Multi-branch replay',client_request_id:'multi_branch_replay'})
+    const refused = await remove(fixture.app,10000,{reason:'Stock refusal',client_request_id:'refuse_historical_stock'})
+    assert.equal(refused.status,409);assert.equal(refused.body.code,'product_has_stock')
+    assert.deepEqual(productGraph(fixture.d1),source)
+    fixture.d1.db.exec('UPDATE branch_stock SET quantity=0 WHERE product_id=10000; UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=10000); UPDATE products SET stock_quantity=0 WHERE id=10000;')
+    const removed = await remove(fixture.app,10000,{reason:'Historical fixture',client_request_id:'historical_fixture'})
+    const op=fixture.d1.db.prepare('SELECT * FROM product_remove_operations WHERE operation_id=?').get(removed.body.operation_id)
+    const saved=JSON.parse(fixture.d1.db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get(op.undo_snapshot_id).payload_json)
+    saved.plan.product=source.product
+    for(const row of saved.plan.branch_stock) Object.assign(row,source.stock.find(old=>old.id===row.id))
+    for(const row of saved.plan.branch_batch_stock) Object.assign(row,source.batchStock.find(old=>old.id===row.id))
+    saved.plan.state_digest='historical-fixture'
+    const historicalDigest=await fixture.productDelete.productRemovePlanDigest(saved.plan)
+    fixture.d1.db.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=?').run(JSON.stringify(saved),op.undo_snapshot_id)
+    fixture.d1.db.prepare('UPDATE product_remove_operations SET plan_json=?,plan_digest=?,state_digest=? WHERE operation_id=?').run(JSON.stringify(saved.plan),historicalDigest,saved.plan.state_digest,op.operation_id)
     assert.equal(removed.status,200,JSON.stringify(removed.body))
     const history=fixture.d1.db.prepare('SELECT id,undo_payload FROM action_history WHERE id=?').get(removed.body.action_history_id)
     const payload=JSON.parse(history.undo_payload)
@@ -98,7 +112,6 @@ async function main() {
       { id: 99001, is_active: 0, supplier_name: 'Supplier A' }, { id: 99004, is_active: 0, supplier_name: 'Old Supplier' },
     ])
     assert.deepEqual(fixture.d1.db.prepare("SELECT movement_type,quantity,batch_id FROM inventory_movements WHERE product_id=10000 AND movement_type='write_off'").all().map((row) => ({ ...row })), [
-      { movement_type: 'write_off', quantity: 2, batch_id: null },
     ])
     assert.equal(fixture.d1.db.prepare("SELECT COUNT(*) n FROM action_history WHERE json_extract(undo_payload,'$.applier')='product.remove'").get().n, 1)
     assert.equal(fixture.d1.db.prepare("SELECT COUNT(*) n FROM undo_snapshots WHERE kind='product.remove'").get().n, 1)

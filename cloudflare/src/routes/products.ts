@@ -665,7 +665,7 @@ async function expandSearchResultsToNameSiblings(env: Env, items: Array<Record<s
              p.expiry_date, p.expiry_alert_days, p.created_at, p.updated_at,
            COALESCE(p.auto_merged_count, 0) AS auto_merged_count
       FROM products p INDEXED BY idx_products_name_key_pg
-      WHERE p.is_active = 1
+      WHERE (p.is_active = 1 OR ${productHasStockSql()})
         AND p.name_key IN (${sql})
     `).all<Record<string, unknown>>(params)
   })
@@ -919,7 +919,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     // its sibling variants vanished from the response" bug. Plain
     // browsing (category/brand/branch/stock filters, no typed search)
     // keeps the prior per-row-filtered behavior; nothing reported there.
-    familyMemberBaseWhereSql: hasSearchTerm ? (familyMemberWhereSql || 'p.is_active = 1') : undefined,
+    familyMemberBaseWhereSql: hasSearchTerm ? (familyMemberWhereSql || `(p.is_active = 1 OR ${productHasStockSql()})`) : undefined,
   })
 
   // Name-duplicate half of the same fix (see expandSearchResultsToNameSiblings's
@@ -993,7 +993,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
 // stockState here means no stock-based filtering at all, same as with no
 // branch selected.
 function buildSearchFilters(query: Record<string, string>, lowStock: LowStockConfig, options: ProductSearchOptions = {}) {
-  const where: string[] = ['p.is_active = 1']
+  const where: string[] = [`(p.is_active = 1 OR ${productHasStockSql()})`]
   const params: Record<string, unknown> = {}
   const joins: string[] = []
 
@@ -1266,7 +1266,7 @@ export async function buildProductSearchIndexPage(env: Env, page: number, versio
         SELECT CAST((SELECT MIN(id) FROM products WHERE id >= (n + 1) * @size) / @size AS INTEGER) FROM bucket WHERE n IS NOT NULL LIMIT 10000
       ) SELECT n FROM bucket WHERE n IS NOT NULL`).all<{ n: number }>({ size: SEARCH_INDEX_PAGE_IDS }),
     db.prepare(`SELECT id, name, brand, category, barcode, sku FROM products
-      WHERE id >= @lo AND id < @hi AND is_active = 1 ORDER BY id`).all<Record<string, unknown>>({ lo, hi }),
+      WHERE id >= @lo AND id < @hi AND (is_active = 1 OR ${productHasStockSql('products')}) ORDER BY id`).all<Record<string, unknown>>({ lo, hi }),
   ])
   const text = (value: unknown): string => (value == null ? '' : String(value))
   const packed = rows.map((row) => [Number(row.id), text(row.name), text(row.brand), text(row.category), text(row.barcode), text(row.sku)])
@@ -1442,7 +1442,7 @@ app.get('/:id/detail-report', async (c) => {
       SELECT batch_id, SUM(quantity) AS qty FROM branch_batch_stock GROUP BY batch_id
     ) bbs ON bbs.batch_id = pb.id
     WHERE pb.variant_product_id = @productId
-      AND pb.is_active = 1
+      AND (pb.is_active = 1 OR EXISTS(SELECT 1 FROM branch_batch_stock held WHERE held.batch_id=pb.id AND held.quantity<>0))
       AND (pb.received_quantity IS NULL OR pb.received_quantity > 0 OR COALESCE(pb.received_cost_usd, 0) > 0)
     GROUP BY supplier_key
     ORDER BY last_received_at DESC
@@ -1461,7 +1461,7 @@ app.get('/:id/detail-report', async (c) => {
     LEFT JOIN (
       SELECT batch_id, SUM(quantity) AS qty FROM branch_batch_stock GROUP BY batch_id
     ) bbs ON bbs.batch_id = pb.id
-    WHERE pb.variant_product_id = @productId AND pb.is_active = 1
+    WHERE pb.variant_product_id = @productId AND (pb.is_active = 1 OR EXISTS(SELECT 1 FROM branch_batch_stock held WHERE held.batch_id=pb.id AND held.quantity<>0))
     ORDER BY pb.received_at DESC, pb.id DESC
     LIMIT 100
   `).all<Record<string, unknown>>({ productId })
@@ -1545,7 +1545,7 @@ app.get('/:id/supplier-purchases', async (c) => {
       SELECT batch_id, SUM(quantity) AS qty FROM branch_batch_stock GROUP BY batch_id
     ) bbs ON bbs.batch_id = pb.id
     WHERE pb.variant_product_id = @productId
-      AND pb.is_active = 1
+      AND (pb.is_active = 1 OR EXISTS(SELECT 1 FROM branch_batch_stock held WHERE held.batch_id=pb.id AND held.quantity<>0))
       AND ${SUPPLIER_KEY_SQL} = @supplierKey
     ORDER BY pb.received_at DESC, pb.id DESC
     LIMIT 100
@@ -3936,7 +3936,6 @@ export async function foldDuplicateProductInto(
 BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
     })
   }
-  statements.push({ sql: 'UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dup.id } })
   statements.push({
     sql: `UPDATE products
           SET selling_price_usd = @sellingUsd,
@@ -4334,6 +4333,7 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
   )
   // A merge makes every stock-in session that touches either product unreplayable,
   // so its Undo is closed here, in the same batch, with the reason on record.
+  statements.push({ sql: 'UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dup.id } })
   statements.push(...closeStockSessionsStatements([canonicalId, dup.id], user, atomicHistory?.operationId ?? null, canonicalId))
   if (atomicHistory?.additionalStatements?.length) statements.push(...atomicHistory.additionalStatements)
   // Record the exact result slots before appending the fixed snapshot/history/

@@ -26,6 +26,7 @@ const SRC_DIR = path.join(__dirname, '..', 'src')
 const migrations = loadAll()
 const rawDb = openDb(migrations)
 
+let beforeNextWriteBatch = null
 const db = {
   // d1compat.cjs's Stmt.bind(params) takes exactly ONE argument (an object
   // or an array), matching this codebase's own @name-bound call sites. Real
@@ -49,6 +50,7 @@ const db = {
     return api
   },
   async batch(items) {
+    if (beforeNextWriteBatch && items.some(item=>/UPDATE|INSERT|DELETE/.test(item.sql))) { const hook=beforeNextWriteBatch;beforeNextWriteBatch=null;hook() }
     return rawDb.batch(items)
   },
   async batchOnce(items) { return this.batch(items) },
@@ -228,6 +230,53 @@ async function main() {
   await check('inactive stocked POST refuses without creation',async()=>{
     seed('zero'); const before=graph(); const res=await post('/',{name:'New inactive',is_active:0,stock_quantity:2,branch_id:1})
     assert.equal(res.status,409,JSON.stringify(res)); assert.equal(res.json.code,'product_has_stock'); assert.equal(graph(),before)
+  })
+  const review = loadReal('lib/reviewApply.ts', {
+    './db': {getDb:()=>db}, './audit': {audit:async()=>{}}, './cache': {bumpVersion:async()=>{}},
+    '../durable-objects/broadcastHub': {broadcast:async()=>{}},
+  })
+  for(const action of ['update','delete']) for(const ledger of ['cache','branch','batch','damaged']) {
+    await check('review '+action+' refuses '+ledger+' without effects',async()=>{
+      seed(ledger); const before=graph()
+      await assert.rejects(()=>review.applyApprovedPendingAction(fakeEnv,{section:'products',action_type:action,entity_type:'product',entity_id:1,payload_json:JSON.stringify({is_active:0,reason:'review guard'})},{id:1,name:'Reviewer'}),err=>err.code==='product_has_stock')
+      assert.equal(graph(),before)
+    })
+  }
+  const deletion=loadReal('lib/productDelete.ts')
+  const stockMapper=loadReal('lib/productStockGuard.ts').productStockGuardError
+  await check('saved positive removal plan refuses before receipt/audit writes',async()=>{
+    seed('zero');const plan=await deletion.prepareProductRemovePlan(db,1,'saved plan')
+    rawDb.prepare('UPDATE products SET stock_quantity=2 WHERE id=1').run();const before=graph()
+    await assert.rejects(()=>db.batch(deletion.productRemoveApplyStatements({plan,operationId:'saved-remove',source:'direct',requestId:'saved-remove',user:FAKE_USER,transitionStamp:'2026-10-08T00:00:00Z',planDigest:'saved-digest'})),err=>stockMapper(err)?.code==='product_has_stock')
+    assert.equal(graph(),before)
+    await assert.rejects(()=>db.batch(deletion.productRemoveReplayStatements({snapshot:{plan,transition_stamp:'2026-10-08T00:00:00Z'},operation:{operation_id:'legacy-removal'},direction:'redo',historyId:1,expectedGeneration:1,user:FAKE_USER,transitionStamp:'2026-10-08T00:00:01Z',transitionRequestId:'redo'})),err=>stockMapper(err)?.code==='product_has_stock')
+    assert.equal(graph(),before)
+  })
+  await check('negative row and cancelling branch rows still refuse',async()=>{
+    seed('zero');rawDb.exec('PRAGMA ignore_check_constraints=ON');rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,-3)').run();rawDb.exec('PRAGMA ignore_check_constraints=OFF')
+    const first=await request('PUT',{is_active:0});assert.equal(first.json.code,'product_has_stock')
+    rawDb.prepare("INSERT INTO branches(id,name,is_active) VALUES(2,'Offset',1)").run();rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,2,3)').run()
+    const before=graph();const second=await request('DELETE',{reason:'offset',client_request_id:'offset-rows'});assert.equal(second.status,409);assert.equal(second.json.code,'product_has_stock');assert.equal(graph(),before)
+  })
+  for(const method of ['PUT','DELETE']) await check(method+' rejects stock racing after admission before effects',async()=>{
+    seed('zero')
+    beforeNextWriteBatch=()=>rawDb.prepare('UPDATE products SET stock_quantity=3 WHERE id=1').run()
+    const res=await request(method,method==='PUT'?{is_active:0,description:'race must not land'}:{reason:'Race',client_request_id:'race-'+method})
+    assert.equal(res.status,409,JSON.stringify(res));assert.equal(res.json.code,'product_has_stock')
+    assert.equal(rawDb.prepare('SELECT is_active FROM products WHERE id=1').get().is_active,1)
+    assert.equal(rawDb.prepare('SELECT description FROM products WHERE id=1').get().description,null)
+    assert.equal(rawDb.prepare('SELECT COUNT(*) n FROM product_remove_operations').get().n,0)
+    assert.equal(rawDb.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n,0)
+  })
+  await check('zero cleanup skips batch-only and damaged-only selected products',async()=>{
+    seed('batch'); const before=graph();const res=await post('/zero-quantity-delete',{ids:[1]})
+    assert.equal(res.status,200,JSON.stringify(res));assert.equal(res.json.deletedCount,0);assert.equal(res.json.skipped[0].reason,'product_has_stock');assert.equal(graph(),before)
+    seed('damaged');const damageBefore=graph();const damaged=await post('/zero-quantity-delete',{ids:[1]});assert.equal(damaged.json.deletedCount,0);assert.equal(graph(),damageBefore)
+  })
+  await check('zero DELETE succeeds and same request replays without effects',async()=>{
+    seed('zero'); const body={reason:'zero control',client_request_id:'zero-delete-control'}
+    const res=await request('DELETE',body); assert.equal(res.status,200,JSON.stringify(res)); assert.equal(res.json.changes,1)
+    const before=graph(); const replay=await request('DELETE',body); assert.equal(replay.status,200);assert.equal(replay.json.replayed,true);assert.equal(graph(),before)
   })
   console.log(passed+' checks passed')
 }

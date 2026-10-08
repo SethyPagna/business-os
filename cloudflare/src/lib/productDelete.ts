@@ -708,17 +708,17 @@ export function productRemoveReplayStatements(args: {
     sql: `UPDATE products SET is_active=0,stock_quantity=0,rfid_confirmed_qty=0,updated_at=@stamp WHERE id=@product`,
     params: { stamp: args.transitionStamp, product: plan.product_id },
   }, {
-    sql: 'UPDATE branch_stock SET quantity=0,rfid_confirmed_qty=0 WHERE product_id=@product',
+    sql: 'UPDATE branch_stock SET rfid_confirmed_qty=0 WHERE product_id=@product',
     params: { product: plan.product_id },
   }, {
-    sql: `UPDATE branch_batch_stock SET quantity=0,updated_at=@stamp
+    sql: `UPDATE branch_batch_stock SET updated_at=@stamp
       WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=@product)`,
     params: { stamp: args.transitionStamp, product: plan.product_id },
   }, {
     sql: 'UPDATE product_batches SET is_active=0,updated_at=@stamp WHERE variant_product_id=@product',
     params: { stamp: args.transitionStamp, product: plan.product_id },
   }, ...(legacyPlanDamagedLots(plan) ? [{
-    sql: 'UPDATE damaged_stock_lots SET quantity_remaining=0,updated_at=@stamp WHERE product_id=@product',
+    sql: 'UPDATE damaged_stock_lots SET updated_at=@stamp WHERE product_id=@product',
     params: { stamp: args.transitionStamp, product: plan.product_id },
   }] : [])]
   return [...(undo ? [] : [productStockGuardStatement([plan.product_id])]), {
@@ -735,16 +735,16 @@ export function productRemoveReplayStatements(args: {
     sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason,reference_id,user_id,user_name,created_at)
       SELECT @product,@productName,CAST(json_extract(value,'$.branch_id') AS INTEGER),json_extract(value,'$.branch_name'),
         @movement,CAST(json_extract(value,'$.quantity') AS REAL),@reason,@referenceId,@actor,@actorName,@stamp
-      FROM json_each(@rows) WHERE CAST(json_extract(value,'$.quantity') AS REAL)>0`,
-    params: { product: plan.product_id, productName: plan.product.name ?? null, movement: undo ? 'add' : 'write_off',
+      FROM json_each(@rows) WHERE @undo=1 AND CAST(json_extract(value,'$.quantity') AS REAL)>0`,
+    params: { undo: undo ? 1 : 0, product: plan.product_id, productName: plan.product.name ?? null, movement: undo ? 'add' : 'write_off',
       reason: `${undo ? 'Undo' : 'Redo'}: ${plan.reason}`, referenceId: writeOffReferenceId,
       actor: args.user.id, actorName, stamp: args.transitionStamp,
       rows: JSON.stringify(plan.branch_stock) },
-  }, ...damagedLotWriteOffStatements({
+  }, ...(undo ? damagedLotWriteOffStatements({
     plan, movementType: undo ? 'add' : 'write_off', referenceId: writeOffReferenceId,
     reason: `${undo ? 'Undo' : 'Redo'}: ${plan.reason}`, stamp: args.transitionStamp,
     userId: args.user.id, userName: actorName,
-  }), {
+  }) : []), {
     sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
       VALUES(@actor,@actorName,@action,'product',@product,@details,'products',@product,@details)`,
     params: { actor: args.user.id, actorName, action: undo ? 'action_undo' : 'action_redo', product: String(plan.product_id), details },

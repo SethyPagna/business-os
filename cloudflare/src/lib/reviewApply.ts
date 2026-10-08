@@ -174,9 +174,6 @@ registerApplier('fees', 'delete', 'fee', async (env, row, reviewer, waitUntil) =
 // --- products / create / product -----------------------------------
 registerApplier('products', 'create', 'product', async (env, row, reviewer, waitUntil) => {
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
-  if (Object.prototype.hasOwnProperty.call(body, 'is_active') && Number(body.is_active) !== 1) {
-    await assertProductsHaveNoStock(getDb(env), [Number(id)])
-  }
   readProductMoneyPlan(body)
   await resolveProductImageFields(getDb(env), body)
   const name = String(body.name || '').trim()
@@ -199,6 +196,9 @@ registerApplier('products', 'update', 'product', async (env, row, reviewer, wait
   const id = row.entity_id
   if (id == null) throw new Error('Pending product update is missing its entity id')
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
+  if (Object.prototype.hasOwnProperty.call(body, 'is_active') && Number(body.is_active) !== 1) {
+    await assertProductsHaveNoStock(getDb(env), [Number(id)])
+  }
   readProductMoneyPlan(body)
   const submittedImageFields = Object.prototype.hasOwnProperty.call(body, 'image_path')
     || Object.prototype.hasOwnProperty.call(body, 'image_gallery')

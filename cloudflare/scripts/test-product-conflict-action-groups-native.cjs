@@ -18,6 +18,7 @@ function loadTs(rel, stubs = {}) {
   })
   const original = Module._load
   Module._load = (request, parent, main) => {
+    if (['./productStockGuard', '../lib/productStockGuard'].includes(request)) return productStockGuard
     if (['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request)) return moneyPrecision
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
     if (request.startsWith('.') || request === 'hono') return permissive()
@@ -28,6 +29,8 @@ function loadTs(rel, stubs = {}) {
   finally { Module._load = original }
   return mod.exports
 }
+
+const productStockGuard = loadTs('lib/productStockGuard.ts')
 
 class FakeHono {
   constructor() { this.posts = new Map(); this.gets = new Map(); FakeHono.instance = this }
