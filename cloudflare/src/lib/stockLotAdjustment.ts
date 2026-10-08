@@ -284,7 +284,7 @@ function movementStatement(input: {
 function forwardMovementStatements(before: Snapshot, effect: Effect, user: SessionUser, reference: string, operationId: string | null): Statement[] {
   const quantity = Math.abs(effect.lotDelta)
   if (effect.lotDelta < 0 && effect.tag) {
-    const [lotInsert, holdMovement] = planHoldAsTagged({
+    const [activeGuard, lotInsert, holdMovement] = planHoldAsTagged({
       productId: before.productId, productName: effect.productName, branchId: before.branchId, branchName: effect.branchName,
       batchId: before.batchId, quantity, tag: effect.tag, source: 'remove', reason: effect.reason,
       cost: movementCost(effect), referenceId: reference,
@@ -297,7 +297,7 @@ function forwardMovementStatements(before: Snapshot, effect: Effect, user: Sessi
       sql: "UPDATE stock_lot_adjustment_operations SET revision_json=json_set(revision_json,'$.heldLotId',last_insert_rowid()) WHERE id=@operation",
       params: { operation: operationId },
     }] : []
-    return [lotInsert, ...remember, holdMovement]
+    return [activeGuard, lotInsert, ...remember, holdMovement]
   }
   return [movementStatement({
     snapshot: before, effect, user, movementType: effect.lotDelta > 0 ? 'adjustment' : 'remove',

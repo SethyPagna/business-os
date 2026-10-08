@@ -1,3 +1,4 @@
+import { productStockGuardStatement } from './productStockGuard'
 // P3-L6: the three stock-side transitions on a TAGGED (held, non-sellable)
 // stock row, as pure statement plans so scripts/test-stock-condition-tag-pure.cjs
 // can drive them against the real migration chain -- the same zero-magic shape
@@ -152,6 +153,7 @@ export function planHoldAsTagged(input: HoldAsTaggedInput): StockWriteStatement[
   const quantity = Number(input.quantity)
   if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Held quantity must be positive')
   return [
+    productStockGuardStatement([input.productId], 'active'),
     createDamagedLotStatement({
       productId: input.productId,
       productName: input.productName,
@@ -295,7 +297,7 @@ export function planDisposeTagged(input: TaggedLotChangeInput): StockWriteStatem
 export function planRestoreTagged(input: TaggedLotChangeInput): StockWriteStatement[] {
   const quantity = takenQuantity(input.takes)
   if (!(quantity > 0)) throw new Error('Restored quantity must be positive')
-  const statements: StockWriteStatement[] = input.takes.flatMap((take) => takeLotStatements(take.lotId, take.quantity))
+  const statements: StockWriteStatement[] = [productStockGuardStatement([input.productId], 'active'), ...input.takes.flatMap((take) => takeLotStatements(take.lotId, take.quantity))]
   for (const take of input.takes) {
     if (take.batchId == null) continue
     statements.push({

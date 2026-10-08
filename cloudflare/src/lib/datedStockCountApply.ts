@@ -1,3 +1,4 @@
+import { productStockGuardStatement, productStockGuardError, assertProductsActive } from './productStockGuard'
 // Applies a StockCountPlan (lib/datedStockCountImport.ts's pure
 // computation) as real DB writes. Kept in its own file, separate from
 // the plan computation, per that file's own stated boundary ("does no
@@ -360,9 +361,25 @@ export async function applyDatedStockCountPlan(
 
   if (usesSessionGuards) statements.push({ sql: 'DELETE FROM stock_session_guards', params: {} })
 
+  const activeProducts = new Set<number>()
+  for (const entry of netByGroup.values()) if (entry.net > 0) activeProducts.add(entry.productId)
+  for (const net of lotNets.values()) {
+    if (net.stock <= 0) continue
+    if (net.ref.kind === 'key') activeProducts.add(net.ref.productId)
+    else {
+      const lot = await db.prepare('SELECT variant_product_id FROM product_batches WHERE id=@id').get<{ variant_product_id: number }>({ id: net.ref.batchId })
+      if (lot) activeProducts.add(Number(lot.variant_product_id))
+    }
+  }
+  if (activeProducts.size) {
+    await assertProductsActive(db, [...activeProducts])
+    statements.unshift(productStockGuardStatement([...activeProducts], 'active'))
+  }
   try {
     await guardedDb.batch(statements)
   } catch (error) {
+    const activeGuard = productStockGuardError(error)
+    if (activeGuard) throw activeGuard
     const message = error instanceof Error ? error.message : String(error)
     if (/guard_value|stock_session_guards/i.test(message)) throw new DatedStockCountConflictError()
     throw error

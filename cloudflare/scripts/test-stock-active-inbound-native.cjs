@@ -47,6 +47,17 @@ assert.equal(db.prepare('SELECT is_active FROM product_batches WHERE id=10').get
 run(batches.restoreBatchStockStatements(20,1,2))
 assert.equal(db.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=20').get().quantity,2)
 console.log('PASS inactive cancellation and lot restore refuse before effects; active restore and neutral/skip controls')
+const tagged = load('damagedLotActions.ts')
+const taggedInput = { productId:1, productName:'Inactive', branchId:1, branchName:'Shop',
+  takes:[{lotId:1,batchId:10,quantity:2,unitCostUsd:2}], quantity:2, batchId:10,
+  tag:'broken', source:'remove', reason:'damaged', cost:{unitCostUsd:2,unitCostKhr:0},
+  actor:{userId:1,userName:'Staff'} }
+for (const plan of [tagged.planHoldAsTagged(taggedInput), tagged.planRestoreTagged(taggedInput)]) {
+  assert.match(plan[0].sql,/product_has_stock/)
+  assert.throws(() => run([plan[0]]),/product_has_stock/)
+}
+assert.doesNotMatch(tagged.planDisposeTagged(taggedInput)[0].sql,/product_has_stock/,'outbound disposal remains permitted')
+console.log('PASS tagged hold and restore admit before effects; outbound disposal has no active admission')
 db.close()
 
 async function routeControls() {
@@ -83,6 +94,26 @@ async function routeControls() {
   assert.equal(replay.operationId,receipt.operationId)
   assert.deepEqual(receiptState(g.sql),depleted,'successful receipt replay has no new admission or effects')
   g.sql.close()
+  const h = sessionFixture()
+  const compat = load('db.ts').getDb(h.env)
+  const dated = load('datedStockCountApply.ts')
+  const datedPlan = { movementsToDelete:[], supersededMovements:[], groupFingerprints:[],
+    movementsToCreate:[{productId:1,productName:'Serum',branchId:1,branchName:'Shop',date:'2026-10-08',quantity:2,movementType:'add',reason:'count',batchActions:[]}],
+    finalBranchStock:[{productId:1,branchId:1,quantity:2}],batchTopUps:[],batchCreates:[],batchDrains:[],batchDeactivations:[] }
+  h.sql.exec('UPDATE products SET is_active=0 WHERE id=1')
+  const datedBefore = receiptState(h.sql)
+  await assert.rejects(dated.applyDatedStockCountPlan(compat,datedPlan),e=>e.code==='product_has_stock')
+  assert.deepEqual(receiptState(h.sql),datedBefore)
+  h.sql.exec('UPDATE products SET is_active=1 WHERE id=1')
+  h.beforeCommit(sql=>sql.exec('UPDATE products SET is_active=0 WHERE id=1'))
+  await assert.rejects(dated.applyDatedStockCountPlan(compat,datedPlan),e=>e.code==='product_has_stock')
+  assert.equal(h.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1').get().quantity,0)
+  assert.equal(h.sql.prepare('SELECT COUNT(*) c FROM inventory_movements').get().c,0)
+  h.sql.exec('UPDATE products SET is_active=1 WHERE id=1')
+  await dated.applyDatedStockCountPlan(compat,datedPlan)
+  assert.equal(h.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1').get().quantity,2)
+  h.sql.close()
+  console.log('PASS dated plain admission refuses before effects, race rolls back, active control applies')
   console.log('PASS real cancellation route exact409/no effects; inactive receipt refuses and successful replay survives depletion/deactivation')
 }
 routeControls().catch(error => { console.error(error); process.exitCode = 1 })
