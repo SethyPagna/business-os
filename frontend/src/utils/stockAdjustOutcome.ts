@@ -1,4 +1,3 @@
-import { branchRuleErrorKey, localizeBranchRuleError } from '../api/branchRuleErrors.ts'
 // Row-outcome kernel for every stock-adjust surface (user, Sep 3: "if the
 // adjustment (add, remove, set) fails for any reason it should not forget
 // this... should not close the action, keep in same page, so user can edit
@@ -235,7 +234,7 @@ export function stockFailureText(
 ): string {
   const source = (error && typeof error === 'object' ? error : {}) as Record<string, unknown>
   const message = typeof error === 'string' ? error : String((source.message ?? source.error ?? '') || '')
-  if (branchRuleErrorKey(error)) return localizeBranchRuleError(error, key => tr(key, message.trim() || fallbackMessage))
+  if (source.code === 'stock_session_query_budget_exceeded') return tr(source.code, message.trim() || fallbackMessage)
   const entry = stockRequestFailureEntry(source.code)
   if (entry) return tr(entry.key, entry.fallback)
   return message.trim() || fallbackMessage
