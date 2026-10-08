@@ -5,13 +5,34 @@
 //
 // An ORACLE is the same set of routes exactly as they were before this change (git 2651672da: LB + LD, files
 // routes/sales.ts, lib/saleBulkStatus.ts, lib/saleTransitions.ts, lib/saleAmendments.ts). It proves two things:
-//   * while both branches are active the new code writes byte-identical statements (inert), and
+//   * while both branches are active the new code writes equal business statements apart from verified admission (inert), and
 //   * on the post-consolidation world the old code strands the units at the retired branch (the defect), so
 //     the fixture discriminates the fix from the bug.
 //
 // Run (from cloudflare/): node scripts/test-sale-retired-branch-effects-pure.cjs
 
 const assert = require('node:assert/strict')
+function withoutProductAdmission(value) {
+  const normalize = sql => sql.replace(/@[A-Za-z_]+|\?[0-9]*/g, '?').replace(/\s+/g, ' ').trim()
+  const allowed = normalize(require('./harness/product_stock_guard.cjs').productStockGuardStatement([1], 'active').sql)
+  const walk = entry => {
+    if (Array.isArray(entry)) return entry.map(walk).filter(v => v !== undefined)
+    let statement = entry
+    if (typeof entry === 'string') { try { statement = JSON.parse(entry) } catch {} }
+    if (statement && typeof statement.sql === 'string' && statement.sql.includes('$[product_has_stock]')) {
+      const single = normalize("SELECT CASE WHEN EXISTS(SELECT 1 FROM products WHERE id=@productId AND is_active IS NOT 1) THEN json_extract('[]','$[product_has_stock]') ELSE 1 END")
+      const batch = normalize("SELECT CASE WHEN EXISTS(SELECT 1 FROM product_batches pb JOIN products p ON p.id=pb.variant_product_id WHERE pb.id=@batchId AND p.is_active IS NOT 1) THEN json_extract('[]','$[product_has_stock]') ELSE 1 END")
+      assert.ok([allowed, single, batch].includes(normalize(statement.sql)), 'only exact active-product admission guards may differ from historical SQL: '+statement.sql)
+      const bound = Array.isArray(statement.params) ? statement.params[0] : statement.params.productIds
+      const ids = bound === undefined ? [Number(statement.params.productId ?? statement.params.batchId)] : (typeof bound === 'number' ? [bound] : JSON.parse(bound))
+      assert.ok(ids.length && ids.every(id => Number.isSafeInteger(id) && id > 0), 'guard names real product identities')
+      return undefined
+    }
+    return entry
+  }
+  return walk(value)
+}
+
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
@@ -517,10 +538,10 @@ async function amend(world, w, body, redirect = null) {
       const x = await run(fresh.sales, a); const y = await run(/expense/.test(name) ? beforeFees.sales : old.sales, b)
       assert.equal(x.status, y.status, `${name}: same status (${JSON.stringify(x.body)} vs ${JSON.stringify(y.body)})`)
       assert.equal(x.status, 200, `${name}: ${JSON.stringify(x.body)}`)
-      const statementsA = normalised(newCapture); const statementsB = normalised(oldCapture)
+      const statementsA = normalised(withoutProductAdmission(newCapture)); const statementsB = normalised(withoutProductAdmission(oldCapture))
       let where = 0
       while (where < statementsA.length && statementsA[where] === statementsB[where]) where++
-      assert.equal(statementsA === statementsB, true, `${name}: byte-identical statements while both branches are active; first difference near: ${statementsA.slice(Math.max(0, where - 150), where + 150)} <> ${statementsB.slice(Math.max(0, where - 150), where + 150)}`)
+      assert.equal(statementsA === statementsB, true, `${name}: equal business statements apart from verified admission while both branches are active; first difference near: ${statementsA.slice(Math.max(0, where - 150), where + 150)} <> ${statementsB.slice(Math.max(0, where - 150), where + 150)}`)
       const ledgerA = scrub(ledgerSnapshot(a.db)); const ledgerB = scrub(ledgerSnapshot(b.db))
       let at = 0
       while (at < ledgerA.length && ledgerA[at] === ledgerB[at]) at++
@@ -528,7 +549,7 @@ async function amend(world, w, body, redirect = null) {
       assert.equal(a.db.prepare("SELECT COUNT(*) n FROM inventory_movements WHERE addressed_branch_name IS NOT NULL").get().n, 0, `${name}: no provenance column is written`)
     }
   }
-  console.log('PASS both branches active: cancel / bulk cancel / expense / amendment write byte-identical statements and ledgers to the code before this change')
+  console.log('PASS both branches active: cancel / bulk cancel / expense / amendment write equal business statements apart from verified admission and ledgers to the code before this change')
 
   // ---------------------------------------------------------------- roles set, names unchanged, both active: still inert
   {

@@ -16,6 +16,27 @@
 // Run (from cloudflare/): node scripts/test-cutover-lr-import-dated-count-pure.cjs
 
 const assert = require('node:assert/strict')
+function withoutProductAdmission(value) {
+  const normalize = sql => sql.replace(/@[A-Za-z_]+|\?[0-9]*/g, '?').replace(/\s+/g, ' ').trim()
+  const allowed = normalize(require('./harness/product_stock_guard.cjs').productStockGuardStatement([1], 'active').sql)
+  const walk = entry => {
+    if (Array.isArray(entry)) return entry.map(walk).filter(v => v !== undefined)
+    let statement = entry
+    if (typeof entry === 'string') { try { statement = JSON.parse(entry) } catch {} }
+    if (statement && typeof statement.sql === 'string' && statement.sql.includes('$[product_has_stock]')) {
+      const single = normalize("SELECT CASE WHEN EXISTS(SELECT 1 FROM products WHERE id=@productId AND is_active IS NOT 1) THEN json_extract('[]','$[product_has_stock]') ELSE 1 END")
+      const batch = normalize("SELECT CASE WHEN EXISTS(SELECT 1 FROM product_batches pb JOIN products p ON p.id=pb.variant_product_id WHERE pb.id=@batchId AND p.is_active IS NOT 1) THEN json_extract('[]','$[product_has_stock]') ELSE 1 END")
+      assert.ok([allowed, single, batch].includes(normalize(statement.sql)), 'only exact active-product admission guards may differ from historical SQL: '+statement.sql)
+      const bound = Array.isArray(statement.params) ? statement.params[0] : statement.params.productIds
+      const ids = bound === undefined ? [Number(statement.params.productId ?? statement.params.batchId)] : (typeof bound === 'number' ? [bound] : JSON.parse(bound))
+      assert.ok(ids.length && ids.every(id => Number.isSafeInteger(id) && id > 0), 'guard names real product identities')
+      return undefined
+    }
+    return entry
+  }
+  return walk(value)
+}
+
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
@@ -126,7 +147,7 @@ async function main() {
     // never uses it (the plan comparison below), and the rest of each entry is exactly what it was.
     assert.deepEqual(now.entries.entries.map(({ addressedBranchId, ...rest }) => rest), then.entries.entries, 'parsed entries')
     assert.deepEqual(now.plan, then.plan, 'plan: identical, no branchRedirects key')
-    assert.deepEqual(now.writes, then.writes, 'every write statement byte-identical')
+    assert.deepEqual(withoutProductAdmission(now.writes), withoutProductAdmission(then.writes), 'every non-admission write statement byte-identical')
     assert.deepEqual(now.rows, then.rows)
     assert.equal(now.rows.movements.length, 2, 'control: the count really wrote (Shop 3->4, Warehouse 5->3)')
   })

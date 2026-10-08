@@ -91,6 +91,12 @@ for (const [file, route] of HANDLERS) {
   const answers = [...after.matchAll(/c\.json\(\{([\s\S]*?)\},\s*(4\d\d)\)/g)]
   assert.ok(answers.length >= 3, `${file} ${route}: found its post-receipt refusals`)
   for (const [, body, status] of answers) {
+    if (/code: stockGuard\.code/.test(body)) {
+      assert.equal(Number(status), 409, 'the shared product stock boundary is a typed conflict')
+      assert.match(after, /productStockGuardError\(error\)/, 'the dynamic code comes only from the real shared mapper')
+      assert.equal(client.transferRefusalFromError({ status:409,code:'product_has_stock',message:'x' }), null, 'new general stock conflicts remain conservative until explicitly included in the transfer receipt contract')
+      continue
+    }
     const codes = codesIn(`{${body}}`)
     if (codes.includes('idempotency_conflict')) continue
     assert.equal(codes.length, 1, `${file} ${route}: post-receipt ${status} has exactly one code: {${body.trim().slice(0, 120)}}`)

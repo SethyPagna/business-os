@@ -4,6 +4,40 @@
 //
 // Run (from cloudflare/): node scripts/test-cutover-lr-sessions-pure.cjs
 const assert = require('node:assert/strict')
+function withoutProductAdmission(value) {
+  const normalize = sql => sql.replace(/@[A-Za-z_]+|\?[0-9]*/g, '?').replace(/\s+/g, ' ').trim()
+  const allowed = normalize(require('./harness/product_stock_guard.cjs').productStockGuardStatement([1], 'active').sql)
+  const walk = entry => {
+    if (Array.isArray(entry)) return entry.map(walk).filter(v => v !== undefined)
+    let statement = entry
+    if (typeof entry === 'string') { try { statement = JSON.parse(entry) } catch {} }
+    if (statement && typeof statement.sql === 'string' && statement.sql.includes('$[product_has_stock]')) {
+      const single = normalize("SELECT CASE WHEN EXISTS(SELECT 1 FROM products WHERE id=@productId AND is_active IS NOT 1) THEN json_extract('[]','$[product_has_stock]') ELSE 1 END")
+      const batch = normalize("SELECT CASE WHEN EXISTS(SELECT 1 FROM product_batches pb JOIN products p ON p.id=pb.variant_product_id WHERE pb.id=@batchId AND p.is_active IS NOT 1) THEN json_extract('[]','$[product_has_stock]') ELSE 1 END")
+      assert.ok([allowed, single, batch].includes(normalize(statement.sql)), 'only exact active-product admission guards may differ from historical SQL: '+statement.sql)
+      const bound = Array.isArray(statement.params) ? statement.params[0] : statement.params.productIds
+      const ids = bound === undefined ? [Number(statement.params.productId ?? statement.params.batchId)] : (typeof bound === 'number' ? [bound] : JSON.parse(bound))
+      assert.ok(ids.length && ids.every(id => Number.isSafeInteger(id) && id > 0), 'guard names real product identities')
+      return undefined
+    }
+    return entry
+  }
+  return walk(value)
+}
+
+
+{
+  const guard = require('./harness/product_stock_guard.cjs').productStockGuardStatement([1], 'active')
+  assert.throws(()=>withoutProductAdmission([[{...guard, sql:guard.sql+'; DELETE FROM products'}]]), /only exact/, 'the comparison never ignores arbitrary business SQL')
+  assert.deepEqual(withoutProductAdmission([[guard, {sql:'UPDATE products SET name=@name WHERE id=@id',params:{id:1,name:'Control'}}]]), [[{sql:'UPDATE products SET name=@name WHERE id=@id',params:{id:1,name:'Control'}}]])
+  const db = new (require('better-sqlite3'))(':memory:')
+  db.exec('CREATE TABLE products(id INTEGER,is_active INTEGER); INSERT INTO products VALUES(1,0)')
+  assert.throws(()=>db.prepare(guard.sql).get(guard.params), /product_has_stock/, 'the admitted extra SQL really refuses removed products')
+  db.exec('UPDATE products SET is_active=1')
+  assert.doesNotThrow(()=>db.prepare(guard.sql).get(guard.params), 'present products remain admitted')
+  db.close()
+}
+
 const W = require('./harness/cutover_lr_world.cjs')
 
 const fresh = W.makeWorld(null)
@@ -14,7 +48,7 @@ const line = (id, productId, branchId, extra = {}) => ({ line_id: id, kind: 'rec
 const session = (key, items) => ({ client_request_id: key, mode: 'stock_in', items })
 
 async function main() {
-  await W.check('before: a session (new lot, explicit top-up, two branches) writes byte-identical statements to the eb5dd0ba3 oracle', async () => {
+  await W.check('before: a session (new lot, explicit top-up, two branches) writes equal business statements apart from verified admission to the eb5dd0ba3 oracle', async () => {
     for (const body of [session('cutover-lr-session-before', [line('a', 10, 2), line('c', 20, 1)]), session('cutover-lr-session-before-2', [line('b', 10, 2, { batch_id: 500, supplier_name: null, supplier_id: null })])]) {
     const dbNew = W.build('before'); const dbOld = W.build('before')
     const capNew = []; const capOld = []
@@ -22,7 +56,7 @@ async function main() {
     const b = await W.call(inventory(oracle), dbOld, 'POST', '/sessions', body, { capture: capOld })
     assert.equal(a.status, 200, JSON.stringify(a.body))
     assert.equal(W.normalised(a), W.normalised(b))
-    assert.equal(W.normalised(capNew), W.normalised(capOld))
+    assert.equal(W.normalised(withoutProductAdmission(capNew)), W.normalised(withoutProductAdmission(capOld)))
     assert.equal(W.normalised(W.ledger(dbNew)), W.normalised(W.ledger(dbOld)))
     }
   })

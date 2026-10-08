@@ -6,6 +6,27 @@
 //
 // Run (from cloudflare/): node scripts/test-cutover-lr-stock-in-edit-pure.cjs
 const assert = require('node:assert/strict')
+function withoutProductAdmission(value) {
+  const normalize = sql => sql.replace(/@[A-Za-z_]+|\?[0-9]*/g, '?').replace(/\s+/g, ' ').trim()
+  const allowed = normalize(require('./harness/product_stock_guard.cjs').productStockGuardStatement([1], 'active').sql)
+  const walk = entry => {
+    if (Array.isArray(entry)) return entry.map(walk).filter(v => v !== undefined)
+    let statement = entry
+    if (typeof entry === 'string') { try { statement = JSON.parse(entry) } catch {} }
+    if (statement && typeof statement.sql === 'string' && statement.sql.includes('$[product_has_stock]')) {
+      const single = normalize("SELECT CASE WHEN EXISTS(SELECT 1 FROM products WHERE id=@productId AND is_active IS NOT 1) THEN json_extract('[]','$[product_has_stock]') ELSE 1 END")
+      const batch = normalize("SELECT CASE WHEN EXISTS(SELECT 1 FROM product_batches pb JOIN products p ON p.id=pb.variant_product_id WHERE pb.id=@batchId AND p.is_active IS NOT 1) THEN json_extract('[]','$[product_has_stock]') ELSE 1 END")
+      assert.ok([allowed, single, batch].includes(normalize(statement.sql)), 'only exact active-product admission guards may differ from historical SQL: '+statement.sql)
+      const bound = Array.isArray(statement.params) ? statement.params[0] : statement.params.productIds
+      const ids = bound === undefined ? [Number(statement.params.productId ?? statement.params.batchId)] : (typeof bound === 'number' ? [bound] : JSON.parse(bound))
+      assert.ok(ids.length && ids.every(id => Number.isSafeInteger(id) && id > 0), 'guard names real product identities')
+      return undefined
+    }
+    return entry
+  }
+  return walk(value)
+}
+
 const W = require('./harness/cutover_lr_world.cjs')
 
 const fresh = W.makeWorld(null)
@@ -28,7 +49,7 @@ const revision = (db) => Number(db.prepare("SELECT COALESCE(MAX(revision),0) r F
 const edit = (db, key, extra) => ({ client_request_id: key, quantity: 5, expected_quantity: 3, expected_batch_id: 701, expected_batch_revision: revision(db), reason: 'recount', ...extra })
 
 async function main() {
-  await W.check('before: a quantity edit and a cost edit write byte-identical statements to the eb5dd0ba3 oracle', async () => {
+  await W.check('before: a quantity edit and a cost edit write equal business statements apart from verified admission to the eb5dd0ba3 oracle', async () => {
     for (const extra of [{}, { quantity: 3, unit_cost_usd: 3.5 }, { quantity: 1 }]) {
       const dbNew = withShopLine(W.build('before'), 'before'); const dbOld = withShopLine(W.build('before'), 'before')
       const capNew = []; const capOld = []
@@ -36,7 +57,7 @@ async function main() {
       const b = await W.call(inventory(oracle), dbOld, 'POST', '/stock-in-lines/4000/edit', edit(dbOld, 'edit-before-0001', extra), { capture: capOld })
       assert.equal(a.status, 200, JSON.stringify(a.body))
       assert.equal(W.normalised(a), W.normalised(b))
-      assert.equal(W.normalised(capNew), W.normalised(capOld))
+      assert.equal(W.normalised(withoutProductAdmission(capNew)), W.normalised(withoutProductAdmission(capOld)))
       assert.equal(W.normalised(W.ledger(dbNew)), W.normalised(W.ledger(dbOld)))
     }
   })

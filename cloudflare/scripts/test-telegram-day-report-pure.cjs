@@ -431,7 +431,7 @@ check('the LIMIT 12 the query has always carried still caps the product list (14
 check('is_active = 0 still excludes a product from /stock entirely', !stockMsg.includes('Inactive item'))
 check('a product above both thresholds is not listed', !stockMsg.includes('Healthy item'))
 check('/inventory counts only the active catalogue (14 qualifying + 1 healthy = 15), never the inactive row',
-  /Active products\/[^\n]*: 15$/m.test(inventoryMsg) && /Units on hand\/[^\n]*: 124$/m.test(inventoryMsg)
+  /Product count\/[^\n]*: 15$/m.test(inventoryMsg) && /Units on hand\/[^\n]*: 124$/m.test(inventoryMsg)
   && /Low stock\/[^\n]*: 8$/m.test(inventoryMsg) && /Out of stock\/[^\n]*: 6$/m.test(inventoryMsg))
 
 // The section shape itself (Sep 23 2026): a title line, then
@@ -581,5 +581,15 @@ check('the day and cashier figures come from the kernel entry points',
 check('the shift report, which already read the kernel, is untouched by this change',
   /getSalesTotals\(env, filters\)/.test(src) && /shiftInvoiceCounts\(env, shift, nowMs\)/.test(src))
 
+// Legacy drift is seeded intentionally in this bare SQLite fixture: readers must
+// expose physical stock on an internally removed identity, while empty removed
+// rows stay excluded and no write path resurrects that identity.
+db.prepare('UPDATE products SET stock_quantity=3 WHERE id=398').run()
+const legacyStockInventory = await telegram.telegramCommandReply({}, '/inventory')
+check('/inventory includes legacy stock once without hiding it behind removal membership',
+  /Product count\/[^\n]*: 16$/m.test(legacyStockInventory)
+  && /Units on hand\/[^\n]*: 127$/m.test(legacyStockInventory)
+  && /Low stock\/[^\n]*: 9$/m.test(legacyStockInventory), legacyStockInventory)
+check('the stock reader never revives the internally removed identity', db.prepare('SELECT is_active FROM products WHERE id=398').get().is_active === 0)
 console.log(`\nALL ${passed} CHECKS PASSED`)
 })().catch((e) => { console.error(e); process.exit(1) })

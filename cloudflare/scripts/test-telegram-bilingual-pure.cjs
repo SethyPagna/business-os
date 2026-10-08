@@ -824,7 +824,7 @@ const lastSent = () => sent[sent.length - 1].body.text
   assert.deepEqual(inventoryReply.split('\n'), [
     '🏷️ Inventory/ស្តុក',
     '=====Products/ផលិតផល=====',
-    '· Active products/ផលិតផលសកម្ម: 1,240',
+    '· Product count/ចំនួនផលិតផល: 1,240',
     '· Units on hand/ឯកតាក្នុងស្តុក: 8,630',
     '=====Stock/ស្តុក=====',
     '· Low stock/ស្តុកទាប: 12',
@@ -937,7 +937,7 @@ const lastSent = () => sent[sent.length - 1].body.text
   assert.deepEqual(lastSent().split('\n'), [
     '🏷️ Inventory/ស្តុក',
     '=====Products/ផលិតផល=====',
-    '· Active products/ផលិតផលសកម្ម: 0',
+    '· Product count/ចំនួនផលិតផល: 0',
     '· Units on hand/ឯកតាក្នុងស្តុក: 0',
     '=====Stock/ស្តុក=====',
     '· N/A',

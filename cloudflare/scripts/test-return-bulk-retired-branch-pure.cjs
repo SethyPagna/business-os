@@ -3,7 +3,7 @@
 //
 // Real returnBulkAction / branchEffect kernels against migrated SQLite and the raw D1 binding shape. An ORACLE is the same
 // kernel as it stood at b2b57f90b, run on the same fixtures: while both branches are active the new kernel writes
-// byte-identical statements and ledgers (inert), and on the post-consolidation fixture the old kernel strands the units in
+// equal business statements apart from verified admission and ledgers (inert), and on the post-consolidation fixture the old kernel strands the units in
 // the retired branch (so the fixture tells the fix from the defect).
 //
 // Run (from cloudflare/): node scripts/test-return-bulk-retired-branch-pure.cjs
@@ -13,6 +13,27 @@ const { execFileSync } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
 const assert = require('node:assert/strict')
+function withoutProductAdmission(value) {
+  const normalize = sql => sql.replace(/@[A-Za-z_]+|\?[0-9]*/g, '?').replace(/\s+/g, ' ').trim()
+  const allowed = normalize(require('./harness/product_stock_guard.cjs').productStockGuardStatement([1], 'active').sql)
+  const walk = entry => {
+    if (Array.isArray(entry)) return entry.map(walk).filter(v => v !== undefined)
+    let statement = entry
+    if (typeof entry === 'string') { try { statement = JSON.parse(entry) } catch {} }
+    if (statement && typeof statement.sql === 'string' && statement.sql.includes('$[product_has_stock]')) {
+      const single = normalize("SELECT CASE WHEN EXISTS(SELECT 1 FROM products WHERE id=@productId AND is_active IS NOT 1) THEN json_extract('[]','$[product_has_stock]') ELSE 1 END")
+      const batch = normalize("SELECT CASE WHEN EXISTS(SELECT 1 FROM product_batches pb JOIN products p ON p.id=pb.variant_product_id WHERE pb.id=@batchId AND p.is_active IS NOT 1) THEN json_extract('[]','$[product_has_stock]') ELSE 1 END")
+      assert.ok([allowed, single, batch].includes(normalize(statement.sql)), 'only exact active-product admission guards may differ from historical SQL: '+statement.sql)
+      const bound = Array.isArray(statement.params) ? statement.params[0] : statement.params.productIds
+      const ids = bound === undefined ? [Number(statement.params.productId ?? statement.params.batchId)] : (typeof bound === 'number' ? [bound] : JSON.parse(bound))
+      assert.ok(ids.length && ids.every(id => Number.isSafeInteger(id) && id > 0), 'guard names real product identities')
+      return undefined
+    }
+    return entry
+  }
+  return walk(value)
+}
+
 const ts = require('typescript')
 const Database = require('better-sqlite3')
 
@@ -239,10 +260,10 @@ async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${na
     ]) {
       const a = fixture('before'); const b = fixture('before')
       await run(fresh, a); await run(old, b)
-      const statementsA = scrub(JSON.stringify(a.capture)); const statementsB = scrub(JSON.stringify(b.capture))
+      const statementsA = scrub(JSON.stringify(withoutProductAdmission(a.capture))); const statementsB = scrub(JSON.stringify(withoutProductAdmission(b.capture)))
       let at = 0
       while (at < statementsA.length && statementsA[at] === statementsB[at]) at++
-      assert.equal(statementsA === statementsB, true, `${name}: byte-identical statements; first difference near ${statementsA.slice(Math.max(0, at - 120), at + 120)} <> ${statementsB.slice(Math.max(0, at - 120), at + 120)}`)
+      assert.equal(statementsA === statementsB, true, `${name}: equal business statements apart from verified admission; first difference near ${statementsA.slice(Math.max(0, at - 120), at + 120)} <> ${statementsB.slice(Math.max(0, at - 120), at + 120)}`)
       assert.equal(scrub(state(a)), scrub(state(b)), `${name}: identical ledgers`)
       assert.equal(a.sql.prepare('SELECT COUNT(*) n FROM inventory_movements WHERE addressed_branch_name IS NOT NULL').get().n, 0, `${name}: no provenance label while both branches are active`)
       assert.equal(stockOf(a).lot3AtOld, name.startsWith('cancel') && !name.includes('restore') ? 4 : 6, `${name}: stock moves at the return's own branch and lot`)

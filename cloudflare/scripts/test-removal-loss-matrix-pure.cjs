@@ -244,6 +244,8 @@ const RECONCILIATION_REMOVE = {
     const text = source(check.file)
     assert.ok(check.pattern.test(text), `${check.file} no longer appears to stamp a cost snapshot for "${check.type}" -- if this is intentional, the read-time fallback chain must cover it and this test's writerChecks entry must be updated deliberately`)
   }
+  assert.doesNotMatch(source(path.join('lib', 'bulkDeleteEngine.ts')), /INSERT INTO inventory_movements/, 'zero-stock bulk identity removal does not invent a loss')
+  assert.match(source(path.join('lib', 'bulkDeleteEngine.ts')), /stockedProductIds/, 'bulk deletion refuses physical stock')
   ok('every loss-bearing writer\'s own source still stamps (or documents deferring to) a cost snapshot')
 }
 

@@ -760,7 +760,16 @@ check('held: outside deploy chain, after dependencies including0195; independent
   const schemaTables = new Set(tables.map((t) => t.toLowerCase()))
   const backfills = chain.filter(file => identityBackfillUnread(chainText(file), migrationText, schemaTables))
   const revisionTriggers = chain.filter(file => revisionTriggerUnread(chainText(file), migrationText))
-  const dependencies = chain.filter((f) => !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && !revisionTriggers.includes(f) && touched.some(namedIn(chainText(f))))
+  const stockGuardOnly = text => {
+    const statements = text.replace(/--[^\n]*/g, '').trim().split(/END\s*;/i).filter(v=>v.trim())
+    return statements.length === 12 && statements.every(statement => /^CREATE TRIGGER [a-z_]+_0242\s+BEFORE (?:UPDATE(?: OF [a-z_,]+)?|INSERT|DELETE) ON (?:products|branch_stock|branch_batch_stock|product_batches|damaged_stock_lots)\s/i.test(statement.trim())
+      && !/\b(?:INSERT|UPDATE|DELETE)\b/i.test(statement.slice(statement.indexOf('BEGIN')))
+      && /SELECT RAISE\(ABORT,'product_has_stock'\);\s*$/i.test(statement.trim()))
+  }
+  const admissionGuards = chain.filter(file=>file==='0242_product_active_stock_invariant.sql' && stockGuardOnly(chainText(file)))
+  assert.deepEqual(admissionGuards, ['0242_product_active_stock_invariant.sql'])
+  assert.equal(stockGuardOnly(chainText(admissionGuards[0])+'\nUPDATE sale_items SET cost_price_usd=123;'), false, 'a business mutation cannot masquerade as guard-only independence')
+  const dependencies = chain.filter((f) => !admissionGuards.includes(f) && !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && !revisionTriggers.includes(f) && touched.some(namedIn(chainText(f))))
   assert.ok(['sale_items', 'return_items', 'catalog_cost_repair_0195_backup'].every((t) => touched.includes(t)), 'control: the scan sees the two tables it writes and the 0195 backup it reads')
   assert.ok(dependencies.includes('0195_catalog_cost_on_hand.sql'), 'control: the scan finds 0195')
   assert.ok(indexOnly('-- x\nCREATE INDEX IF NOT EXISTS i ON sale_items(id);\nCREATE UNIQUE INDEX j ON sale_items(id);'), 'control: an index-only file is skipped')
