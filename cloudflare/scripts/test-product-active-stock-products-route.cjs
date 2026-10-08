@@ -273,6 +273,19 @@ async function main() {
     assert.equal(res.status,200,JSON.stringify(res));assert.equal(res.json.deletedCount,0);assert.equal(res.json.skipped[0].reason,'product_has_stock');assert.equal(graph(),before)
     seed('damaged');const damageBefore=graph();const damaged=await post('/zero-quantity-delete',{ids:[1]});assert.equal(damaged.json.deletedCount,0);assert.equal(graph(),damageBefore)
   })
+  await check('deactivate identity fold refuses stocked keeper before source effects',async()=>{
+    seed('zero');rawDb.prepare("INSERT INTO products(id,name,barcode,is_active,stock_quantity) VALUES(2,'Keeper','777',1,3)").run()
+    const before=graph();const res=await request('PUT',{name:'Keeper',barcode:'777',is_active:0})
+    assert.equal(res.status,409,JSON.stringify(res));assert.equal(res.json.code,'product_has_stock');assert.equal(graph(),before)
+  })
+  await check('zero-stock identity fold deactivates keeper inside merge and snapshots final state',async()=>{
+    seed('zero');rawDb.prepare("INSERT INTO products(id,name,barcode,is_active,stock_quantity) VALUES(2,'Keeper','777',1,0)").run()
+    const res=await request('PUT',{name:'Keeper',barcode:'777',is_active:0})
+    assert.equal(res.status,200,JSON.stringify(res));assert.equal(res.json.merged_into,2)
+    assert.equal(rawDb.prepare('SELECT is_active FROM products WHERE id=2').get().is_active,0)
+    const snapshot=rawDb.prepare("SELECT payload_json FROM undo_snapshots WHERE kind='product.merge' ORDER BY id DESC LIMIT 1").get()
+    const reversal=JSON.parse(snapshot.payload_json);assert.equal(reversal.keeperActiveBefore,1);assert.equal(reversal.keeperActiveAfter,0)
+  })
   await check('zero DELETE succeeds and same request replays without effects',async()=>{
     seed('zero'); const body={reason:'zero control',client_request_id:'zero-delete-control'}
     const res=await request('DELETE',body); assert.equal(res.status,200,JSON.stringify(res)); assert.equal(res.json.changes,1)
@@ -280,5 +293,6 @@ async function main() {
   })
   console.log(passed+' checks passed')
 }
-main().catch(err=>{console.error(err);process.exitCode=1})
+if (require.main === module) main().catch(err=>{console.error(err);process.exitCode=1})
+module.exports={seed,request,rawDb,db,fakeEnv,FAKE_USER,loadedModule:rel=>realModuleCache.get(path.join(SRC_DIR,rel))?.exports}
 

@@ -2433,6 +2433,14 @@ app.put('/:id', async (c) => {
         const dupRow = await db.prepare('SELECT id, name, barcode, updated_at, image_path, COALESCE(is_group, 0) AS is_group FROM products WHERE id = @id')
           .get<{ id: number; name: string | null; barcode: string | null; updated_at: string | null; image_path: string | null; is_group: number }>({ id: Number(id) })
         if (!dupRow) return c.json({ error: 'Product not found' }, 404)
+        const deactivateKeeper = Object.prototype.hasOwnProperty.call(body, 'is_active') && Number(body.is_active) !== 1
+        if (deactivateKeeper) {
+          try { await assertProductsHaveNoStock(db, [dupRow.id, duplicate.id]) } catch (error) {
+            const stockError = productStockGuardError(error)
+            if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
+            throw error
+          }
+        }
         if (dupRow.is_group) return c.json({ error: 'Group rows cannot be merged — merge the variant products instead' }, 400)
         // foldDuplicateProductInto's own guard (productsShareExactIdentity)
         // requires the two rows to ALREADY carry the same identity in the
@@ -2457,20 +2465,21 @@ app.put('/:id', async (c) => {
             { id: duplicate.id, name: duplicate.name },
             { id: dupRow.id, name: dupRow.name, image_path: dupRow.image_path },
             branchNameById,
-            'edit identity fold', 'merge', undefined, { operationId: crypto.randomUUID() },
+            'edit identity fold', 'merge', undefined, { operationId: crypto.randomUUID(),
+              ...(deactivateKeeper ? { keeperActiveAfter: 0 as const, preStatements: [productStockGuardStatement([dupRow.id, duplicate.id])] } : {}) },
           )
         } catch (error) {
-    const stockError = productStockGuardError(error)
-    if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
+          const stockError = productStockGuardError(error)
           const stateConflict = /merge_state_conflict|merge_identity_conflict/.test(String(error))
           const refusal = mergeFoldRefusal(error)
-          if (stateConflict || refusal) {
+          if (stateConflict || refusal || stockError) {
             // The fold wrote nothing, so the identity written above must not stay:
             // the edit is refused as a whole and can simply be sent again.
             await db.prepare(`UPDATE products SET name = @name, barcode = @barcode, updated_at = @updatedAt
               WHERE id = @id AND name = @nextName AND COALESCE(barcode, '') = COALESCE(@nextBarcode, '')`)
               .run({ name: dupRow.name, barcode: dupRow.barcode, updatedAt: dupRow.updated_at, id: dupRow.id, nextName, nextBarcode })
           }
+          if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
           if (stateConflict) {
             return c.json({ success: false, code: 'merge_state_conflict', error: 'One of these products changed while the edit was being applied. Refresh and try again.' }, 409)
           }
@@ -2480,6 +2489,7 @@ app.put('/:id', async (c) => {
         // Apply the remaining fields this edit carried (price/cost/image/etc,
         // everything but identity/rename bookkeeping) onto the survivor.
         const rest: Record<string, unknown> = { ...body }
+        if (deactivateKeeper) delete rest.is_active
         delete rest.name
         delete rest.barcode
         delete rest.__rename_scope
@@ -3578,6 +3588,7 @@ export async function foldDuplicateProductInto(
   economicsOverride?: ProductMergeEconomics,
   atomicHistory?: {
     operationId: string
+    keeperActiveAfter?: 0
     bulkClusterPlan?: ProductMergeClusterPlan
     resumedCluster?: boolean
     preStatements?: Array<{ sql: string; params?: Record<string, unknown> }>
@@ -3598,6 +3609,7 @@ export async function foldDuplicateProductInto(
   // system-detected cluster), and a permitted reviewer's chosen cost replaces
   // the averaged one. Stored in the reversal so a redo repeats it exactly.
   keeperChoice?: ProductMergeKeeperChoice,
+  replayKeeperActiveAfter?: 0,
 ): Promise<{
   batchesMoved: number
   batchesFolded: number
@@ -3673,6 +3685,7 @@ export async function foldDuplicateProductInto(
       if (row.dst != null) transferEvidencedBatchIds.add(Number(row.dst))
     }
   }
+  const requestedKeeperActiveAfter = atomicHistory?.keeperActiveAfter ?? replayKeeperActiveAfter
   const canonicalId = canonical.id
   const canonicalName = canonical.name
   const adjustmentMovementMarker = atomicHistory ? `[merge:${atomicHistory.operationId}]` : ''
@@ -3836,6 +3849,7 @@ export async function foldDuplicateProductInto(
   const statements: Array<{ sql: string; params?: Record<string, unknown> }> = reviewedGuards.length
     ? [productMergeCasAssertion([canonicalBefore, dupPricing]), ...reviewedGuards, sourceUnmovedGuard]
     : [sourceUnmovedGuard, productMergeCasAssertion([canonicalBefore, dupPricing])]
+  if (requestedKeeperActiveAfter === 0) statements.unshift(productStockGuardStatement([canonicalId, dup.id]))
   if (!canChangeProductImages) {
     statements.push(productMergeNoImageEffectAssertion(canonicalId, dup.id))
   }
@@ -4261,6 +4275,7 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
   const reversal: MergeReversal & { selectedConflictContext?: Record<string, unknown> } = {
     keeperId: canonicalId,
     keeperName: canonicalName,
+    ...(requestedKeeperActiveAfter === 0 ? { keeperActiveBefore: Number(canonicalBefore.is_active), keeperActiveAfter: 0 } : {}),
     dupId: dup.id,
     dupName: dup.name ?? null,
     keeperImagePathBefore: canonicalBefore?.image_path ?? null,
@@ -4335,6 +4350,11 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
   // so its Undo is closed here, in the same batch, with the reason on record.
   statements.push({ sql: 'UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dup.id } })
   statements.push(...closeStockSessionsStatements([canonicalId, dup.id], user, atomicHistory?.operationId ?? null, canonicalId))
+  if (requestedKeeperActiveAfter === 0) {
+    statements.push(productStockGuardStatement([canonicalId]), {
+      sql: 'UPDATE products SET is_active=0,updated_at=CURRENT_TIMESTAMP WHERE id=@id', params: { id: canonicalId },
+    })
+  }
   if (atomicHistory?.additionalStatements?.length) statements.push(...atomicHistory.additionalStatements)
   // Record the exact result slots before appending the fixed snapshot/history/
   // audit trio. D1 returns one result per statement in input order.
@@ -4422,8 +4442,8 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
 // since this file imports MergeReversal from there). See lib/undoAppliers.ts.
 // Redo repeats the original decisions: stock disposition, economics and the
 // Resolve grid's keeper choice (N1/N4), passed through to the fold's own slot.
-registerMergeFold((env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride, keeperChoice) => (
-  foldDuplicateProductInto(env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride, undefined, keeperChoice)
+registerMergeFold((env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride, keeperChoice, ...replayOptions: [keeperActiveAfter?: 0]) => (
+  foldDuplicateProductInto(env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride, undefined, keeperChoice, replayOptions[0])
 ))
 
 type DuplicatePreviewStockRow = { branch_id: number; quantity: number }
