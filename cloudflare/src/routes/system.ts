@@ -84,6 +84,8 @@ function guardSaleRecordReset(statements: ResetStatement[], actorId: number): Re
     // Retain request identities so a stale browser retry cannot recreate reset products.
     { sql: `UPDATE dated_count_decision_receipts
       SET invalidated_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE invalidated_at IS NULL` },
+    { sql: `UPDATE dated_count_apply_receipts
+      SET invalidated_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE invalidated_at IS NULL` },
     ...statements,
     {
       sql: `DELETE FROM system_flags

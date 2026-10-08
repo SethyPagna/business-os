@@ -179,7 +179,7 @@ export const BACKUP_TABLES = [
   'fee_operation_receipts',
   'loyalty_point_adjustments',
   'inventory_movements',
-  'dated_count_decision_receipts',
+  'dated_count_decision_receipts', 'dated_count_apply_receipts',
   'stock_transfers',
   'stock_row_moves',
   'import_jobs',
@@ -1185,7 +1185,7 @@ export type RestoreProgress = { phase: 'deleting' | 'inserting' | 'assets'; tabl
 export const SALE_REPLAY_RESTORE_BUNDLE = [
   'pending_actions', 'branches', 'suppliers', 'file_assets', 'product_images',
   'products', 'product_batches', 'branch_stock', 'branch_batch_stock', 'damaged_stock_lots',
-  'dated_count_decision_receipts',
+  'dated_count_decision_receipts', 'dated_count_apply_receipts',
   'sales', 'sale_items', 'sale_item_batch_allocations', 'returns', 'return_items',
   'return_item_batch_allocations', 'fees', 'fee_operation_receipts', 'inventory_movements', 'action_history',
   'stock_lot_adjustment_operations',
@@ -1206,6 +1206,8 @@ export const SALE_REPLAY_RESTORE_BUNDLE = [
   'stock_session_revisions', 'stock_session_operations', 'stock_session_members',
   'transfer_operation_receipts', 'transfer_operation_members', 'stock_transfers',
 ] as const
+
+const DATED_COUNT_RECEIPT_TABLES = new Set(['dated_count_decision_receipts', 'dated_count_apply_receipts'])
 
 function restoreSafeSectionTables(tables: readonly string[]): Set<string> {
   const requested = new Set(tables)
@@ -1543,6 +1545,11 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
     let statementCount = 0
     const deletes: D1PreparedStatement[] = []
     for (const table of [...orderedTables].reverse()) {
+      if (DATED_COUNT_RECEIPT_TABLES.has(table)) {
+        deletes.push(env.DB.prepare(`UPDATE ${qid(table)}
+          SET invalidated_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE invalidated_at IS NULL`))
+        continue
+      }
       if (table === 'products') {
         // This is the existing snapshot-replacement path: child ledgers have
         // been cleared in this same transaction. Recompute their derived cache
@@ -1605,17 +1612,24 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
         let liveColumns = liveColumnsCache.get(ev.table)
         if (!liveColumns) { liveColumns = new Set(await tableColumns(env, ev.table)); liveColumnsCache.set(ev.table, liveColumns) }
         insertColumns = ev.columns.filter((c) => liveColumns!.has(c))
+        if (DATED_COUNT_RECEIPT_TABLES.has(ev.table)) {
+          for (const column of ['invalidated_at', 'updated_at']) if (!insertColumns.includes(column)) insertColumns.push(column)
+        }
         if (!insertColumns.length) { insertSql = ''; continue }
         // sql-bound-params: bounded by construction -- one parameter per COLUMN,
         // one statement per row, and a table has far fewer than 100 columns, so
         // this never nears D1's 100-parameter cap.
         const placeholders = insertColumns.map(() => '?').join(', ')
         insertSql = `INSERT INTO ${qid(ev.table)} (${insertColumns.map(qid).join(', ')}) VALUES (${placeholders})`
+          + (DATED_COUNT_RECEIPT_TABLES.has(ev.table) ? ' ON CONFLICT(actor_id, request_id) DO NOTHING' : '')
         restoreTable = ev.table
       } else if (ev.type === 'row') {
         if (!restoreTable || !insertSql) continue
         if (restoreTable === 'custom_tables') assertCustomTableName(ev.row?.name)
-        const values = insertColumns.map((c) => ev.row[c] ?? null)
+        const restoredRow = DATED_COUNT_RECEIPT_TABLES.has(restoreTable)
+          ? { ...ev.row, invalidated_at: ev.row.invalidated_at || new Date().toISOString(), updated_at: new Date().toISOString() }
+          : ev.row
+        const values = insertColumns.map((c) => restoredRow[c] ?? null)
         batch.push(env.DB.prepare(insertSql).bind(...values))
         if (batch.length >= CHUNK) await flush()
       } else if (ev.type === 'meta') {
