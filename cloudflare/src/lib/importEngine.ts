@@ -1166,7 +1166,14 @@ async function ensureSourceRowsMaterialized(env: Env, db: D1Compat, jobId: strin
   // false the parser must not flush a trailing partial row -- see
   // parseDelimitedRowsWindow's sourceIsComplete.
   let reachedEof = state.byteOffset + csv.bytesRead >= csv.totalSize
-  let window = parseDelimitedRowsWindow(source, state.delimiter, 0, state.inQuotes, MATERIALIZE_ROWS_PER_CHUNK, reachedEof)
+  const materializeBudget = (db as BudgetDb)[STOCK_QUERY_BUDGET]
+  // Source inserts are one statement each, followed by the fenced byte
+  // checkpoint2. Keep the already-derived settlement tail available.
+  const materializeRows = materializeBudget?.enabled
+    ? Math.min(MATERIALIZE_ROWS_PER_CHUNK, materializeBudget.limit - stockBudgetUsed(materializeBudget) - materializeBudget.reserve - ((db.staging as BudgetDb).importWriteFenceStatements ?? 0) - 2)
+    : MATERIALIZE_ROWS_PER_CHUNK
+  if (materializeRows < 1) throw new StockQueryBudgetDeferred()
+  let window = parseDelimitedRowsWindow(source, state.delimiter, 0, state.inQuotes, materializeRows, reachedEof)
 
   // A single row longer than the whole window would parse to zero rows and
   // the job would never advance. Widen and retry rather than spin: real
@@ -1179,7 +1186,7 @@ async function ensureSourceRowsMaterialized(env: Env, db: D1Compat, jobId: strin
     csv = wider
     source = state.byteOffset === 0 ? stripBom(csv.text) : csv.text
     reachedEof = state.byteOffset + csv.bytesRead >= csv.totalSize
-    window = parseDelimitedRowsWindow(source, state.delimiter, 0, state.inQuotes, MATERIALIZE_ROWS_PER_CHUNK, reachedEof)
+    window = parseDelimitedRowsWindow(source, state.delimiter, 0, state.inQuotes, materializeRows, reachedEof)
   }
 
   // The parser reports a CHARACTER offset into this slice; the cursor we
@@ -1264,7 +1271,11 @@ async function ensureSourceRowsMaterialized(env: Env, db: D1Compat, jobId: strin
   const isDone = window.done || cappedEarly
 
   await saveMaterializeState(db, jobId, state, isDone)
-  await dispatchImportWork(env, { jobId, kind })
+  if (kind === 'apply' && materializeBudget?.invocation) {
+    materializeBudget.reserve = 2 + (env.IMPORT_QUEUE ? 0 : 2)
+    if (!env.IMPORT_QUEUE) await db.prepare(`UPDATE import_jobs SET status='approved',phase='apply_deferred',updated_at=CURRENT_TIMESTAMP WHERE id=@id`).run({ id: jobId })
+    await dispatchImportWork(env, { jobId, kind }, { freshInvocation: true })
+  } else await dispatchImportWork(env, { jobId, kind })
   return true
 }
 
@@ -4903,11 +4914,12 @@ export function productImportRowSignature(d: ProductImportSignatureInput): strin
 // stuck/zombie card this whole thing is trying to prevent. A few retries
 // with a short pause covers that -- D1 resets the failed transaction, not
 // the whole binding, so a moment later it's normally fine again.
-export async function markJobFailed(db: D1Compat, jobId: string, message: string): Promise<void> {
+export async function markJobFailed(db: D1Compat, jobId: string, message: string, leaseToken?: string): Promise<void> {
   const error = String(message || '').slice(0, 2000) // last_error is a display field, not a log -- keep it bounded
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      await db.prepare(`UPDATE import_jobs SET status = 'failed', phase = 'failed', last_error = @error, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: jobId, error })
+      await db.prepare(`UPDATE import_jobs SET status = 'failed', phase = 'failed', last_error = @error, updated_at = CURRENT_TIMESTAMP
+        WHERE id = @id AND (@leaseToken IS NULL OR lease_token=@leaseToken)`).run({ id: jobId, error, leaseToken: leaseToken ?? null })
       return
     } catch (writeError) {
       if (isImportMaintenanceFenceError(writeError)) throw writeError
@@ -5384,25 +5396,32 @@ const STOCK_POISON_MESSAGE = 'This sale group has a line that could not be resol
  */
 const STOCK_QUERY_BUDGET = Symbol('stockQueryBudget')
 class StockQueryBudgetDeferred extends ImportInvocationDeferredError {}
-type StockQueryBudget = { used: number; limit: number; reserve: number; enabled: boolean; physicalBatches: number; invocation?: RequestMetrics['invocation'] }
+type StockQueryBudget = { used: number; limit: number; reserve: number; enabled: boolean; physicalBatches: number; invocation?: RequestMetrics['invocation']; cacheReviewedBranches?: boolean }
 const stockBudgetUsed = (budget: StockQueryBudget) => budget.invocation?.attemptedStatements ?? budget.used
 type BudgetDb = D1Compat & { [STOCK_QUERY_BUDGET]?: StockQueryBudget; readonly importWriteFenceStatements?: 0 | 1 }
 function stockQueryBudgetDb(db: D1Compat, limit: number, factoryQueries = 0): BudgetDb {
   if ((db as BudgetDb)[STOCK_QUERY_BUDGET]) return db
   const budget: StockQueryBudget = { used: factoryQueries, limit, reserve: 0, enabled: false, physicalBatches: 0 }
   const wrap = (source: D1Compat): BudgetDb => {
+    let inventoryBranches: Promise<unknown> | undefined
     const result = Object.create(source) as BudgetDb
     Object.defineProperty(result, STOCK_QUERY_BUDGET, { value: budget })
     const charge = (count: number) => {
-      if (budget.enabled && stockBudgetUsed(budget) + count > budget.limit - budget.reserve) throw new StockQueryBudgetDeferred()
+      if (budget.enabled && stockBudgetUsed(budget) + count > budget.limit - budget.reserve) throw new StockQueryBudgetDeferred(`Import query admission ${stockBudgetUsed(budget)} + ${count} + ${budget.reserve} > ${budget.limit}`)
       budget.used += count
     }
     result.prepare = ((sql: string) => {
       const prepared = source.prepare(sql)
       const read = (method: 'getOnce' | 'allOnce', params?: Parameters<typeof prepared.get>[0]) => {
+        const directory = budget.cacheReviewedBranches && method === 'allOnce' && sql === `SELECT ${IMPORT_BRANCH_COLUMNS_SQL} FROM branches`
+        if (directory && inventoryBranches) return inventoryBranches
         charge(1)
         const once = prepared[method]
-        if (once) return once.call(prepared, params)
+        if (once) {
+          const result = once.call(prepared, params)
+          if (directory) inventoryBranches = Promise.resolve(result).catch(error => { inventoryBranches = undefined; throw error })
+          return directory ? inventoryBranches : result
+        }
         if ((source as BudgetDb).importWriteFenceStatements != null) throw new Error('Budgeted import adapter requires single-attempt reads')
         return method === 'getOnce' ? prepared.get(params) : prepared.all(params)
       }
@@ -5434,16 +5453,20 @@ function stockQueryBudgetDb(db: D1Compat, limit: number, factoryQueries = 0): Bu
   result.staging = db.staging === db ? result : wrap(db.staging)
   return result
 }
-async function persistStockResults(db: D1Compat, jobId: string, results: ImportRowResult[], groups?: Map<number, number>): Promise<void> {
-  if (!results.length) return
+function stockResultsStatement(jobId: string, results: ImportRowResult[], groups?: Map<number, number>) {
   const rows = results.map(row => ({ rowNumber: row.rowNumber, groupIndex: groups?.get(row.rowNumber) ?? null,
     action: row.action, identifier: row.identifier, result: row }))
   const json = JSON.stringify(rows)
   if (new TextEncoder().encode(json).length > 1_000_000) throw new StockQueryBudgetDeferred()
-  await db.staging.prepare(`INSERT OR REPLACE INTO import_job_rows(job_id,phase,row_number,group_index,action,identifier,result_json)
+  return { sql: `INSERT OR REPLACE INTO import_job_rows(job_id,phase,row_number,group_index,action,identifier,result_json)
     SELECT @id,'apply',json_extract(value,'$.rowNumber'),json_extract(value,'$.groupIndex'),
       json_extract(value,'$.action'),json_extract(value,'$.identifier'),json_extract(value,'$.result')
-    FROM json_each(@rows)`).run({ id: jobId, rows: json })
+    FROM json_each(@rows)`, params: { id: jobId, rows: json } }
+}
+async function persistStockResults(db: D1Compat, jobId: string, results: ImportRowResult[], groups?: Map<number, number>): Promise<void> {
+  if (!results.length) return
+  const statement = stockResultsStatement(jobId, results, groups)
+  await db.staging.prepare(statement.sql).run(statement.params)
 }
 
 export async function applyStockActionsJob(
@@ -5943,10 +5966,12 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     const metrics = currentRequestMetrics()
     if (!metrics) throw new Error('Generic import requires an invocation metrics scope')
     budget.invocation = metrics.invocation
+    // Only this generic inventory/sales invocation reuses the classifier's branch
+    // directory. The whole stock batch still proves current branch authority.
+    budget.cacheReviewedBranches = jobRow.type === 'inventory' || jobRow.type === 'sales'
     budget.enabled = true
     budget.reserve = deferTail
   }
-  let resumeCursor = Number(jobRow.chunk_cursor || 0)
   let resumeState = savedState
   const isFreshStart = isFreshImportRun(jobRow.status, 'applying') && !(generic && savedState.genericApply)
 
@@ -5986,7 +6011,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     if (job.type === 'stock_actions' && !env.IMPORT_QUEUE) {
       throw Object.assign(new Error('Stock imports are temporarily unavailable. Ask an administrator to check the import service, then retry this job. Saved stock actions will not be applied again.'), { code: 'import_queue_required' })
     }
-    if (jobRow.status !== 'applying') {
+    if (jobRow.status !== 'applying' && !(generic && savedState.genericApply && !env.IMPORT_QUEUE)) {
       // Reclaim 'applying' status on every entry that isn't already an
       // in-progress continuation -- see runImportAnalyze's identical block
       // for why (covers both a genuine fresh start and a resume after a
@@ -5995,7 +6020,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     }
     if (isFreshStart) {
       await resetChunkState(db, jobId, 'apply', generic ? chunkRows : undefined)
-      if (generic) { resumeCursor = 0; resumeState = { startedAtMs: Date.now(), genericApply: { window: chunkRows } } }
+      if (generic) resumeState = { startedAtMs: Date.now(), genericApply: { window: chunkRows } }
     }
     // Unified stock actions have their own dedicated, isolated apply path --
     // each add/sale/create is committed by stockActionCommit.ts's atomic,
@@ -6018,7 +6043,6 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     sw.lap('fetchAndParseMs') // now a COUNT + the getChunkState read below, not a full re-parse -- see ensureSourceRowsMaterialized above
     if (!totalRows?.n) throw new Error('No CSV file uploaded for this job')
     const { cursor, state } = await getChunkState(db, jobId)
-    resumeCursor = cursor
     resumeState = state
     state.genericApply ??= { window: chunkRows }
     const genericWindow = Math.min(chunkRows, state.genericApply.window)
@@ -6031,9 +6055,9 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     const nowIso = new Date().toISOString()
     const productImportMode = job.type === 'products' ? getProductImportMode(job.policy_json) : 'merge'
     if (cursor < totalUnits) {
-    // Results2, source checkpoint2, progress counters2, lease2; inline
-    // additionally pauses2 and leaves the HTTP reread/audit2 untouched.
-    budget.reserve = (db.staging === db ? 2 : 1) + 2 + 2 + 2 + (env.IMPORT_QUEUE ? 0 : 2) + httpTail
+    // Results2, one combined cursor/counters/pause checkpoint2, lease2,
+    // and the synchronous route's reread/audit2.
+    budget.reserve = (db.staging === db ? 2 : 1) + 2 + 2 + httpTail
     const groupEntries = isSalesJob
       ? await readSalesGroupWindow(db, jobId, decisions, cursor, genericWindow)
       : null
@@ -6198,13 +6222,16 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     const productMetadataStatementGroups = new Set<Array<{ sql: string; params: Record<string, unknown> }>>()
     const productStatementGroups: Array<Array<{ sql: string; params: Record<string, unknown> }>> = []
     let productSeedBranchIds: number[] = []
-    const appliedRowGuards = new Set(
+    const appliedRowGuards = new Set(job.type === 'sales' ? [] :
       (await db.prepare(`SELECT guard_key FROM import_stock_action_guards WHERE job_id = @id AND action_key = @ak`)
         .all<{ guard_key: string }>({ id: jobId, ak: GENERIC_APPLY_GUARD_ACTION })).map((g) => g.guard_key),
     )
     const rowGuardStatement = (rowNumber: number) => ({
-      sql: `INSERT INTO import_stock_action_guards (job_id, action_key, guard_key, guard_value) VALUES (@jobId, @actionKey, @guardKey, 1)`,
-      params: { jobId, actionKey: GENERIC_APPLY_GUARD_ACTION, guardKey: `row:${rowNumber}` },
+      sql: `INSERT INTO import_stock_action_guards (job_id, action_key, guard_key, guard_value)
+        VALUES (@jobId, @actionKey, @guardKey, CASE WHEN EXISTS
+          (SELECT 1 FROM import_jobs WHERE id=@jobId AND lease_token=@leaseToken)
+          THEN 1 ELSE json_extract('[1]','$[import_lease_changed]') END)`,
+      params: { jobId, actionKey: GENERIC_APPLY_GUARD_ACTION, guardKey: `row:${rowNumber}`, leaseToken },
     })
     // 9.2 (Part 421): each in-file auto-merge (a later create row folding
     // into an earlier row's product via the identity signature) is
@@ -6978,7 +7005,39 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // and through the group-atomic runner, so each row's guard commits in
     // the same db.batch() as its stock writes -- see guardedGroups'
     // declaration comment.
-    if (guardedGroups.length) await runD1BatchGroupsInChunks(importWriteDb, guardedGroups, D1_IMPORT_BATCH_CHUNK_SIZE, job.type === 'inventory' || job.type === 'products')
+    const atomicSettlement = job.type === 'inventory' && windowUnitCount === 1 && guardedGroups.length === 1
+      && !productStatementGroups.length && !statements.length && db.staging === db
+    if (atomicSettlement) {
+      // One indivisible inventory receipt can seal its result and source
+      // checkpoint in the same whole transaction. No additional fences or
+      // permit fragments; receipt recovery1 + lease2 + HTTP tail2 remain.
+      guardedGroups[0].push(stockResultsStatement(jobId, results, groupIndexByRowNumber), {
+        sql: `UPDATE import_jobs SET chunk_cursor=@cursor,chunk_state_json=@state,
+          processed_rows=processed_rows+@applied,failed_rows=failed_rows+@failed,
+          status=CASE WHEN cancel_requested=1 THEN 'cancelling' ELSE @status END,
+          phase=CASE WHEN cancel_requested=1 THEN 'cancelling' ELSE @phase END,
+          updated_at=CURRENT_TIMESTAMP WHERE id=@id AND lease_token=@leaseToken`,
+        params: { id: jobId, leaseToken, cursor: cursor + 1, state: JSON.stringify(state), applied: actionable.length,
+          failed: results.filter(row => row.action === 'error').length,
+          status: env.IMPORT_QUEUE ? 'applying' : 'approved', phase: env.IMPORT_QUEUE ? 'applying' : 'apply_deferred' },
+      })
+      budget.reserve = 1 + 2 + httpTail
+    }
+    try {
+      if (guardedGroups.length) await runD1BatchGroupsInChunks(importWriteDb, guardedGroups, D1_IMPORT_BATCH_CHUNK_SIZE, job.type === 'inventory' || job.type === 'products')
+    } catch (error) {
+      if (!atomicSettlement || error instanceof StockQueryBudgetDeferred || error instanceof StockTransactionUnavailableError) throw error
+      budget.reserve = 2 + httpTail
+      const receipt = await db.prepare(`SELECT chunk_cursor,
+        EXISTS(SELECT 1 FROM import_job_rows WHERE job_id=@id AND phase='apply' AND row_number=@row) AS settled
+        FROM import_jobs WHERE id=@id AND lease_token=@leaseToken`).get<{ chunk_cursor: number; settled: number }>({ id: jobId, leaseToken, row: results[0].rowNumber })
+      if (!receipt || receipt.chunk_cursor !== cursor + 1 || receipt.settled !== 1) throw new StockTransactionOutcomeUnknownError()
+    }
+    if (atomicSettlement) {
+      budget.reserve = 2 + httpTail
+      await dispatchImportWork(env, { jobId, kind: 'apply' }, { freshInvocation: true })
+      return { applied: actionable.length, failed: results.filter(row => row.action === 'error').length }
+    }
     sw.lap('buildAndWriteStatementsMs')
 
     // Each reviewed receipt is one idempotent D1 transaction: header,
@@ -7019,17 +7078,20 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     const nextCursor = cursor + windowUnitCount
 
     {
-      budget.reserve = 2 + (env.IMPORT_QUEUE ? 0 : 2) + 2 + httpTail
-      await saveChunkState(db, jobId, nextCursor, state)
-      resumeCursor = nextCursor
+      budget.reserve = 2 + httpTail
       // + rather than = -- these accumulate across chunks (unlike
       // analyze's total_rows/processed_rows, which is one number computed
       // fresh each chunk from a stable denominator).
-      await db.prepare(`UPDATE import_jobs SET processed_rows = processed_rows + @applied, failed_rows = failed_rows + @failed, updated_at = CURRENT_TIMESTAMP WHERE id = @id`)
-        .run({ id: jobId, applied: actionable.length, failed: chunkFailed })
+      const checkpoint = await db.prepare(`UPDATE import_jobs SET chunk_cursor=@cursor,chunk_state_json=@state,
+        processed_rows=processed_rows+@applied,failed_rows=failed_rows+@failed,
+        status=CASE WHEN cancel_requested=1 THEN 'cancelling' ELSE @status END,
+        phase=CASE WHEN cancel_requested=1 THEN 'cancelling' ELSE @phase END,
+        updated_at=CURRENT_TIMESTAMP WHERE id=@id AND lease_token=@leaseToken`)
+        .run({ id: jobId, leaseToken, cursor: nextCursor, state: JSON.stringify(state), applied: actionable.length, failed: chunkFailed,
+          status: env.IMPORT_QUEUE ? 'applying' : 'approved', phase: env.IMPORT_QUEUE ? 'applying' : 'apply_deferred' })
+      if (checkpoint.changes !== 1) throw new StockTransactionOutcomeUnknownError()
       console.log('[import-timing] apply chunk', jobId, { cursor, nextCursor, totalUnits, ...sw.marks })
       budget.reserve = 2 + httpTail
-      if (!env.IMPORT_QUEUE) await db.prepare(`UPDATE import_jobs SET status='approved',phase='apply_deferred',updated_at=CURRENT_TIMESTAMP WHERE id=@id`).run({ id: jobId })
       await dispatchImportWork(env, { jobId, kind: 'apply' }, { freshInvocation: true })
       return { applied: actionable.length, failed: chunkFailed }
     }
@@ -7139,24 +7201,31 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
   } catch (error) {
     const budget = (db as BudgetDb)[STOCK_QUERY_BUDGET]
     if (generic && error instanceof StockQueryBudgetDeferred) {
+      console.log('[import] bounded deferral', jobId, error.message)
       // The source cursor stays at the last persisted window. Earlier row
       // receipts can already be committed; redelivery reconciles those seals.
       // Do not label a safe suffix as failed or return invented zero effects.
       const previousWindow = resumeState.genericApply?.window ?? chunkRows
-      resumeState.genericApply = { window: Math.max(1, Math.floor(previousWindow / 2)) }
-      budget!.reserve = 2 + (env.IMPORT_QUEUE ? 0 : 2) + httpTail
-      await saveChunkState(db, jobId, resumeCursor, resumeState)
       budget!.reserve = 2 + httpTail
-      if (!env.IMPORT_QUEUE) await db.prepare(`UPDATE import_jobs SET status='approved',phase='apply_deferred',updated_at=CURRENT_TIMESTAMP WHERE id=@id`).run({ id: jobId })
+      const deferred = await db.prepare(`UPDATE import_jobs SET
+        chunk_state_json=CASE WHEN json_type(COALESCE(chunk_state_json,'{}'),'$.genericApply') IS NOT NULL
+          THEN json_set(chunk_state_json,'$.genericApply.window',@window) ELSE chunk_state_json END,
+        status=CASE WHEN cancel_requested=1 THEN 'cancelling' ELSE @status END,
+        phase=CASE WHEN cancel_requested=1 THEN 'cancelling' ELSE @phase END,
+        updated_at=CURRENT_TIMESTAMP WHERE id=@id AND lease_token=@leaseToken`)
+        .run({ id: jobId, leaseToken, window: Math.max(1, Math.floor(previousWindow / 2)),
+          status: env.IMPORT_QUEUE ? 'applying' : 'approved', phase: env.IMPORT_QUEUE ? 'applying' : 'apply_deferred' })
+      if (deferred.changes !== 1) throw new StockTransactionOutcomeUnknownError()
       throw error
     }
     if (budget) budget.reserve = 2 + httpTail
     if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError || isImportMaintenanceFenceError(error)) throw error
+    if (generic && String((error as Error)?.message).includes('$[import_lease_changed]')) throw new StockTransactionOutcomeUnknownError()
     const stockError = productStockGuardError(error)
     const refusalCode = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
     const savedRefusal = ['stock_import_unit_over_tier_budget', 'stock_import_reconcile_over_tier_budget', 'import_queue_required'].includes(refusalCode)
       ? refusalCode + ': ' + (error as Error).message : null
-    await markJobFailed(db, jobId, stockError ? `${stockError.code}: ${stockError.message}` : savedRefusal || (error as Error).message || 'Apply failed')
+    await markJobFailed(db, jobId, stockError ? `${stockError.code}: ${stockError.message}` : savedRefusal || (error as Error).message || 'Apply failed', generic ? leaseToken : undefined)
     const replacementError = stockError || (error instanceof ProductReplacementIncompleteError ? error : null)
     if (replacementError && replacementFinalizing) {
       const counts = await db.staging.prepare(`SELECT
