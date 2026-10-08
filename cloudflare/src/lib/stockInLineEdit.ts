@@ -716,9 +716,10 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
   try {
     await executeStockTransaction(db, addressedStatements(landing, statements), 'retry')
   } catch (error) {
-    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
+    if (error instanceof StockTransactionUnavailableError) throw error
     const concurrent = await previous()
     if (concurrent) return replay(concurrent)
+    if (error instanceof StockTransactionOutcomeUnknownError) throw error
     const activeGuard = productStockGuardError(error)
     if (activeGuard) throw activeGuard
     if (isMaintenanceError(error)) return { status: 503, body: { error: 'Maintenance is in progress. Nothing was changed; try again shortly.', code: 'maintenance_active' } }
@@ -1020,9 +1021,10 @@ export async function replayStockInLineEdit(
     if (writesStock) await executeStockTransaction(db, statements, 'retry')
     else await ordinaryBusinessBatch(db, statements)
   } catch (error) {
-    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
+    if (error instanceof StockTransactionUnavailableError) throw error
     const current = await db.prepare('SELECT generation,state FROM stock_lot_adjustment_operations WHERE id=@operation').get<OperationRow>({ operation: row.id })
     if (current?.generation === next && current.state === target) return
+    if (error instanceof StockTransactionOutcomeUnknownError) throw error
     const activeGuard = productStockGuardError(error)
     if (activeGuard) throw activeGuard
     if (isMaintenanceError(error)) throw new StockInLineEditReplayError('Maintenance is in progress. Nothing was changed.', 503)

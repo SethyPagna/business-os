@@ -69,7 +69,7 @@ function groupKey(productId: number, branchId: number): string {
 // from changed before it could be written. Nothing was applied.
 export class DatedStockCountConflictError extends Error {
   constructor() {
-    super('The stock count history for these products changed while this import was being applied. Nothing was changed; preview and apply again.')
+    super('The stock count history for these products changed while this import was being applied. Refresh the current stock count history, then preview and apply again.')
     this.name = 'DatedStockCountConflictError'
   }
 }
