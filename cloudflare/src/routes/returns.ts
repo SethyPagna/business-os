@@ -1,5 +1,8 @@
 import { productStockGuardError } from '../lib/productStockGuard'
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
+import { getPlanLimits } from '../lib/planTier'
+import type { RequestMetrics } from '../lib/requestMetrics'
+import { ReturnCreateBudgetError, assertReturnCreateQueryBudget } from '../lib/returnCreateAction'
 import { acquisitionCostResponses, canViewAcquisitionCosts, canEditAcquisitionCosts, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
 import { fillOmittedReturnCosts } from '../lib/returnCostAccess'
 import { getDb } from '../lib/db'
@@ -46,7 +49,7 @@ import { isAnonymousCustomer } from '../lib/anonymousCustomer'
 import {
   assertReturnCreateCapacity, assertReturnCreatePlanBounds, canonicalReturnCreateIntent,
   projectedSaleStatusForReturnCreate, projectedSaleStatusForReturnCreateV1, replacementSaleIdSql, returnCreateGuardStatement,
-  returnCreateIdSql, type ReturnCreateResponse,
+  returnCreateIdSql, RETURN_CREATE_REQUEST_BYTES, type ReturnCreateResponse,
 } from '../lib/returnCreateAction'
 import {
   buildCustomerReturnQuoteV1, CUSTOMER_RETURN_MAX_SALE_LINES,
@@ -130,6 +133,7 @@ export async function customerReturnQuotePlanFromDb(
   const sale = await db.prepare(`SELECT s.id,s.money_precision_version,s.calculated_total_usd,s.total_usd,
     s.subtotal_usd,s.discount_usd,s.membership_discount_usd,s.tax_usd,
     s.exchange_rate,s.is_delivery,s.delivery_fee_usd,s.delivery_fee_paid_by,s.sale_status,s.status_before_return,
+    s.receipt_number,s.customer_id,s.customer_name,s.customer_phone,s.customer_address,s.branch_id,s.branch_name,
     COALESCE(v.revision,0) AS sale_revision
     FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id=@saleId`)
     .get<Record<string, unknown>>({ saleId })
@@ -138,7 +142,8 @@ export async function customerReturnQuotePlanFromDb(
   const saleLines = await db.prepare(`SELECT id,sale_id,product_id,quantity,total_usd,total_khr,
     base_price_usd,base_price_khr,applied_price_usd,applied_price_khr,
     product_discount_usd,product_discount_khr,product_discount_type,product_discount_label,manual_discount_usd,manual_discount_khr,
-    manual_discount_type,manual_discount_value,price_mode,pricing_snapshot_json
+    manual_discount_type,manual_discount_value,price_mode,pricing_snapshot_json,
+    product_name,branch_id,cost_price_usd,cost_price_khr
     FROM sale_items WHERE sale_id=@saleId ORDER BY id LIMIT @limit`)
     .all<Record<string, unknown>>(
       { saleId, limit: CUSTOMER_RETURN_MAX_SALE_LINES + 1 },
@@ -1337,7 +1342,32 @@ app.post('/quote', async (c) => {
 })
 
 app.post('/', async (c) => {
-  const db = getDb(c.env)
+  try { return await createCustomerReturn(c) } catch (error) {
+    if (error instanceof ReturnCreateBudgetError) return c.json({ error: error.message, code: error.code }, 400)
+    throw error
+  }
+})
+
+async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>) {
+  const baseDb = getDb(c.env)
+  const queryLimit = getPlanLimits(c.env).d1QueriesPerInvocation
+  let routeStatements = 0
+  let admissionEnabled = false
+  const requestMetrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
+  const statementsUsed = () => Math.max(routeStatements + 10, (requestMetrics?.statements ?? 0) + 1)
+  const countRead = () => {
+    if (admissionEnabled) assertReturnCreateQueryBudget(queryLimit, statementsUsed(), 1, 1)
+    routeStatements += 1
+  }
+  const db = Object.create(baseDb) as ReturnType<typeof getDb>
+  db.prepare = ((sql: string) => {
+    const statement = baseDb.prepare(sql)
+    return {
+      get: async (params) => { countRead(); return statement.get(params) },
+      all: async (params) => { countRead(); return statement.all(params) },
+      run: async (params) => { countRead(); return statement.run(params) },
+    }
+  }) as typeof db.prepare
   const user = c.get('user')
   if (getActionTier(user, 'returns', 'add') === 'none' || getActionTier(user, 'returns', 'view') === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
@@ -1393,6 +1423,7 @@ app.post('/', async (c) => {
   try {
     canonicalIntent = canonicalReturnCreateIntent(body as Record<string, unknown>)
   } catch (error) {
+    if (error instanceof ReturnCreateBudgetError) throw error
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     return c.json({ error: (error as Error).message }, 400)
@@ -1406,6 +1437,7 @@ app.post('/', async (c) => {
     }
     return c.json(JSON.parse(priorReceipt.response_json) as ReturnCreateResponse)
   }
+  admissionEnabled = true
   const occupiedRequest = await db.prepare("SELECT id FROM returns WHERE client_request_id=? AND client_request_id<>'' LIMIT 1")
     .get<{ id: number }>([clientRequestId])
   if (occupiedRequest) {
@@ -1425,6 +1457,7 @@ app.post('/', async (c) => {
           code: 'customer_return_quote_stale', action: 'review_required' }, 409)
       }
     } catch (error) {
+      if (error instanceof ReturnCreateBudgetError) throw error
       const stockGuard = productStockGuardError(error)
       if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       if (error instanceof SaleMoneyContractError) {
@@ -1441,6 +1474,7 @@ app.post('/', async (c) => {
     try {
       await assertReturnableItems(db, requestedSaleId, body.items)
     } catch (error) {
+      if (error instanceof ReturnCreateBudgetError) throw error
       const stockGuard = productStockGuardError(error)
       if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       return c.json({ error: (error as Error).message }, 400)
@@ -1465,7 +1499,11 @@ app.post('/', async (c) => {
   }> = []
   let committedReturnLines: Array<{ sale_item_id: number | null; product_id: number | null; quantity: number }> = []
   if (requestedSaleId) {
-    saleMeta = await db.prepare(`SELECT s.receipt_number,s.customer_id,s.customer_name,s.customer_phone,s.customer_address,
+    saleMeta = customerReturnV1Plan ? {
+      ...customerReturnV1Plan.authority.sale,
+      write_revision: Number(customerReturnV1Plan.authority.sale.sale_revision),
+      sale_money_precision_version: Number(customerReturnV1Plan.authority.sale.money_precision_version),
+    } as SaleMeta : await db.prepare(`SELECT s.receipt_number,s.customer_id,s.customer_name,s.customer_phone,s.customer_address,
       s.branch_id,s.branch_name,s.exchange_rate,s.sale_status,s.status_before_return,
       s.money_precision_version AS sale_money_precision_version,
       COALESCE(v.revision,0) AS write_revision
@@ -1481,7 +1519,7 @@ app.post('/', async (c) => {
     if (!isMoneyV1 && Number(saleMeta.sale_money_precision_version) === 1) {
       return c.json({ ...MONEY_PRECISION_REVIEW_NEEDED }, 409)
     }
-    soldLines = await db.prepare('SELECT id,product_id,product_name,quantity,branch_id,cost_price_usd,cost_price_khr,applied_price_usd,applied_price_khr FROM sale_items WHERE sale_id=? ORDER BY id')
+    soldLines = customerReturnV1Plan ? customerReturnV1Plan.authority.sale_items as typeof soldLines : await db.prepare('SELECT id,product_id,product_name,quantity,branch_id,cost_price_usd,cost_price_khr,applied_price_usd,applied_price_khr FROM sale_items WHERE sale_id=? ORDER BY id')
       .all<typeof soldLines[number]>([requestedSaleId])
     const soldById = new Map(soldLines.map((line) => [Number(line.id), line]))
     returnItems = body.items.map((item) => {
@@ -1495,7 +1533,7 @@ app.post('/', async (c) => {
         cost_price_khr: isMoneyV1 || !canEditAcquisitionCosts(user) ? sold.cost_price_khr : sold.cost_price_khr ?? item.cost_price_khr,
       } : item
     })
-    committedReturnLines = await db.prepare(`SELECT ri.sale_item_id,ri.product_id,ri.quantity
+    committedReturnLines = isMoneyV1 ? [] : await db.prepare(`SELECT ri.sale_item_id,ri.product_id,ri.quantity
       FROM return_items ri JOIN returns r ON r.id=ri.return_id
       WHERE r.sale_id=? AND COALESCE(r.status,'completed')!='cancelled'
         AND COALESCE(r.return_scope,'customer')='customer' ORDER BY r.id,ri.id`)
@@ -1504,6 +1542,7 @@ app.post('/', async (c) => {
       try {
         assertReturnCreateCapacity(soldLines, committedReturnLines, returnItems)
       } catch (error) {
+        if (error instanceof ReturnCreateBudgetError) throw error
         const stockGuard = productStockGuardError(error)
         if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         return c.json({ error: (error as Error).message }, 400)
@@ -1532,6 +1571,7 @@ app.post('/', async (c) => {
       try {
         projectedStatus = projectedSaleStatusForReturnCreateV1(soldLines, committedReturnLines, returnItems, saleMeta.status_before_return)
       } catch (error) {
+        if (error instanceof ReturnCreateBudgetError) throw error
         const stockGuard = productStockGuardError(error)
         if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         return c.json({ error: (error as Error).message, code: 'customer_return_quote_stale', action: 'review_required' }, 409)
@@ -1559,6 +1599,7 @@ app.post('/', async (c) => {
     try {
       headerEffect = recordedBranchId ? resolveBranchEffect(branchDirectory, recordedBranchId, { sells: replacementInputsRaw.length > 0, target: redirectTarget }) : null
     } catch (error) {
+      if (error instanceof ReturnCreateBudgetError) throw error
       const stockGuard = productStockGuardError(error)
       if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       // A return that moves no stock has nothing to strand on a retired branch no active branch could take. One that
@@ -1570,6 +1611,7 @@ app.post('/', async (c) => {
       try {
         itemEffects.push(recordedItemBranch ? resolveBranchEffect(branchDirectory, recordedItemBranch, { target: redirectTarget }) : null)
       } catch (error) {
+        if (error instanceof ReturnCreateBudgetError) throw error
         const stockGuard = productStockGuardError(error)
         if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         // A line that moves no stock (stock_action none) has nothing to strand, so it never blocks.
@@ -1584,6 +1626,7 @@ app.post('/', async (c) => {
       })
     }
   } catch (error) {
+    if (error instanceof ReturnCreateBudgetError) throw error
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     const refusal = branchEffectRefusal(error)
@@ -1626,6 +1669,7 @@ app.post('/', async (c) => {
   try {
     returnItems = returnItems.map(item => ({ ...item, ...fillOmittedReturnCosts(item, requestedSaleId ? soldLines : [...productMap.values()], requestedSaleId ? 'sale' : 'catalog') }))
   } catch (error) {
+    if (error instanceof ReturnCreateBudgetError) throw error
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     return c.json({ error: (error as Error).message, code: 'return_cost_source_review_required' }, 409)
@@ -1675,6 +1719,7 @@ app.post('/', async (c) => {
       })
     })
   } catch (error) {
+    if (error instanceof ReturnCreateBudgetError) throw error
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     if (error instanceof RefundSaleLineError) return c.json({ error: error.message, code: error.code }, 400)
@@ -1879,30 +1924,31 @@ app.post('/', async (c) => {
       addBatchDelta(take.batchId, line.productId, line.branchId, -take.quantity, true)
     }
   }
-  // Perf-2: branchDeltas/batchDeltas hold one entry per distinct
-  // product+branch (or batch+branch) touched by this return -- each row's
-  // snapshot read is independent of every other's, so both maps read in
-  // one Promise.all fan-out (one round trip per map) instead of one
-  // sequential await per entry.
   const branchDeltaEntries = [...branchDeltas.values()]
-  const branchRows = await Promise.all(branchDeltaEntries.map((value) =>
-    db.prepare('SELECT quantity FROM branch_stock WHERE product_id=? AND branch_id=?')
-      .get<{ quantity: number }>([value.product_id, value.branch_id]),
-  ))
+  const batchDeltaEntries = [...batchDeltas.values()]
+  const snapshotPairs = JSON.stringify({ branches: branchDeltaEntries, batches: batchDeltaEntries })
+  if (new TextEncoder().encode(snapshotPairs).byteLength > RETURN_CREATE_REQUEST_BYTES) throw new ReturnCreateBudgetError()
+  const snapshotRows = await db.prepare(`SELECT 'branch' AS kind,CAST(j.key AS INTEGER) AS ordinal,
+      COALESCE((SELECT quantity FROM branch_stock WHERE product_id=json_extract(j.value,'$.product_id')
+        AND branch_id=json_extract(j.value,'$.branch_id')),0) AS quantity,
+      NULL AS product_id,NULL AS is_active,NULL AS lot_code,NULL AS expiry_date
+    FROM json_each(@pairs,'$.branches') j
+    UNION ALL
+    SELECT 'batch',CAST(j.key AS INTEGER),COALESCE(bbs.quantity,0),pb.variant_product_id,pb.is_active,pb.lot_code,pb.expiry_date
+    FROM json_each(@pairs,'$.batches') j
+    LEFT JOIN product_batches pb ON pb.id=json_extract(j.value,'$.batch_id')
+    LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=json_extract(j.value,'$.branch_id')`)
+    .all<{ kind: string; ordinal: number; quantity: number; product_id: number | null; is_active: number | null; lot_code: string | null; expiry_date: string | null }>({ pairs: snapshotPairs })
+  const branchRows = new Map(snapshotRows.filter(row => row.kind === 'branch').map(row => [row.ordinal, row]))
+  const batchRows = new Map(snapshotRows.filter(row => row.kind === 'batch').map(row => [row.ordinal, row]))
   const branchSnapshots = branchDeltaEntries.map((value, index) => {
-    const row = branchRows[index]
+    const row = branchRows.get(index)
     return { ...value, before: Number(row?.quantity) || 0, after: (Number(row?.quantity) || 0) + value.delta }
   })
-  const batchDeltaEntries = [...batchDeltas.values()]
-  const batchRows = await Promise.all(batchDeltaEntries.map((value) =>
-    db.prepare(`SELECT pb.variant_product_id AS product_id,pb.is_active,pb.lot_code,pb.expiry_date,COALESCE(bbs.quantity,0) quantity
-      FROM product_batches pb LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=? WHERE pb.id=?`)
-      .get<{ product_id: number; is_active: number; lot_code: string | null; expiry_date: string | null; quantity: number }>([value.branch_id, value.batch_id]),
-  ))
   const batchSnapshots = []
   for (let index = 0; index < batchDeltaEntries.length; index += 1) {
     const value = batchDeltaEntries[index]
-    const row = batchRows[index]
+    const row = batchRows.get(index)
     if (!row || Number(row.product_id) !== value.product_id || (value.requires_active === 1 && Number(row.is_active) !== 1)) {
       return c.json({ error: 'A selected received date is no longer active for this product', code: 'write_conflict' }, 409)
     }
@@ -2366,13 +2412,18 @@ app.post('/', async (c) => {
 
   try {
     assertReturnCreatePlanBounds(statements, canonicalIntent, eventBytes)
+    // Cache D1 fallback (six), return Telegram reads (three), receipt read
+    // (one), and the healthy request drain (one) still belong to this invocation.
+    assertReturnCreateQueryBudget(queryLimit, statementsUsed(), statements.length + 1, 11 + (replacementNotice ? 1 : 0))
   } catch (error) {
+    if (error instanceof ReturnCreateBudgetError) throw error
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     return c.json({ error: (error as Error).message, code: 'return_too_large' }, 400)
   }
   try {
-    await db.batch([...statements, ordinaryBusinessMaintenanceGuard])
+    routeStatements += statements.length + 1
+    await (typeof db.batchOnce === 'function' ? db.batchOnce([...statements, ordinaryBusinessMaintenanceGuard]) : db.batch([...statements, ordinaryBusinessMaintenanceGuard]))
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
@@ -2421,7 +2472,7 @@ app.post('/', async (c) => {
   }).catch((error) => console.error('[telegram] replacement sale notification failed', error)))
   c.executionCtx.waitUntil(broadcast(c.env, 'sales', { action: 'update', id: requestedSaleId }))
   return c.json(response)
-})
+}
 
 // POST /api/returns/supplier -- "process" a supplier return: pull stock out
 // (it's leaving via the supplier, not going back on the shelf) and record

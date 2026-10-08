@@ -9,6 +9,18 @@ export const RETURN_CREATE_MAX_REPLACEMENT_ITEMS = 50
 export const RETURN_CREATE_MAX_STATEMENTS = 500
 export const RETURN_CREATE_REQUEST_BYTES = 512_000
 
+export class ReturnCreateBudgetError extends Error {
+  readonly code = 'customer_return_over_plan_budget'
+  constructor() {
+    super('This return is too large for the current plan. Return fewer items or received dates, then try again.')
+  }
+}
+
+export function assertReturnCreateQueryBudget(limit: number, used: number, planned: number, reserve: number): void {
+  if (![limit, used, planned, reserve].every(value => Number.isSafeInteger(value) && value >= 0)
+    || used + planned + reserve > limit) throw new ReturnCreateBudgetError()
+}
+
 export type ReturnCreateResponse = {
   id: number
   returnNumber: string
