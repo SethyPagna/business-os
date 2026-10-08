@@ -1,3 +1,13 @@
+## 08/10/2026 — storage-denial fallback — composed checkpoint
+
+Snapshot at 14:18 UTC: mobile menu release `1cb7b746e4c65a8ff5df2735f7bd3fb66dc7a43b` is live on Paid. Its full gate, fresh Astra review, runtime/frontend provenance, 100% Worker allocation and serial read-only postflight pass. No migrations were applied; all four-ledger removed-stock checks are clear. The PWA restart candidate `8b0e2c4cf608c3f6f3dbcad1d1a2ff8fa7ee1240` passed its full 837 Worker/750 frontend gate and fresh Astra review with exceptions, is on main, and awaits a fresh normal trading preflight before deployment. Main alone does not prove publication.
+
+This checkpoint composes the reviewed service-worker storage fallback onto that exact PWA restart source. A rejected optional CacheStorage open or read uses the original network request; one failed retained generation cannot hide a later usable cached asset. Healthy immutable cache hits still make no network request. Failed cache writes do not discard a valid live response. Document validation, stale-asset recovery, credentials and exclusion of API/media requests remain intact. This adds no platform fork, dependency, backend request or Free/Paid rule difference.
+
+The isolated fallback passed 85 actual source/generated worker fixtures. An independent refuter passed 35 schedules for each artifact, while the prior version and three deliberately broken controls fail. Native Chromium sibling recovery tests also pass. Original failed source pins and their corrected reruns remain in private evidence. Composition tests, an exact build, a full-SHA gate and fresh Astra review are required for this new checkpoint.
+
+This change covers rejected storage access in an installed worker's fetch paths. Forever-pending storage operations, install/activation storage failures and physical iOS/Android lifecycle behavior are not certified. Damaged counted/sellable tags, remaining owner UI, server-authority drafts and parked lanes remain open. Dated sections below retain earlier evidence and are superseded by this snapshot where their status differs.
+
 ## 08/10/2026 — PWA restart protection — composed checkpoint
 
 Snapshot at 13:01 UTC: the stock/image release `6d9ea0b5f9e934c49171b7874db3e19b957e05fd` is deployed on Paid and its live provenance and postflight checks pass. Mobile menu checkpoint `1cb7b746e4c65a8ff5df2735f7bd3fb66dc7a43b` passed its full gate (837 Worker and 749 frontend files, first attempts) and fresh Astra review with exceptions, and is on main. Its separate deployment awaits the normal evening and fresh closed-shift checks; the earlier immediate/open-shift exception is consumed.
