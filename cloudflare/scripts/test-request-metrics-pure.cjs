@@ -62,6 +62,33 @@ const tests = []
 function check(name, fn) { tests.push({ name, fn }) }
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+check('attempted statements include pending and failed batches before they finish', async () => {
+  let release
+  const barrier = new Promise(resolve => { release = resolve })
+  const native = scriptedD1(() => ({ results: [], meta: {} }))
+  native.batch = async () => { await barrier; throw new Error('constraint failed: synthetic') }
+  const db = new dbModule.D1Compat(native)
+  let acc
+  const app = appWith(a => a.get('/api/pending-budget', async c => {
+    acc = metrics.requestMetricsOf(c)
+    const pending = db.batchOnce([{ sql: 'A' }, { sql: 'B' }, { sql: 'C' }])
+    pending.catch(() => {})
+    assert.equal(acc.attemptedStatements, 3, 'pending statements already consume the invocation allowance')
+    release()
+    await assert.rejects(pending, /constraint failed/)
+    assert.equal(acc.attemptedStatements, 3, 'a failed batch still counts every submitted statement')
+    await db.prepare('single').getOnce()
+    assert.equal(acc.attemptedStatements, 4)
+    return c.json({ ok: true })
+  }))
+  try {
+    const response = await app.request('/api/pending-budget', {}, {}, executionCtx())
+    assert.equal(response.status, 200)
+    assert.equal(acc.statements, 1, 'completed-statement analytics retain their existing meaning')
+    assert.equal(acc.failed, 1)
+  } finally { release() }
+})
+
 // A D1Database fake whose statements return scripted metas.
 function scriptedD1(script) {
   const calls = []
@@ -460,6 +487,7 @@ check('a retried call counts both round trips but not the back-off sleep', async
   }
   assert.equal(virtualNow, 220, 'two 10 ms attempts and the 200 ms back-off ran')
   assert.equal(acc.d1Calls, 2)
+  assert.equal(acc.attemptedStatements, 2, 'the retried read consumes two statement attempts')
   assert.equal(acc.failed, 1)
   assert.equal(acc.statements, 1)
   assert.equal(acc.d1WallMs, 20, 'two 10 ms attempts, not the 200 ms back-off')

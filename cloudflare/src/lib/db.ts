@@ -123,7 +123,7 @@ const REQUEST_METRICS_HOOK = Symbol.for('business-os.request-metrics.v1')
 // One entry per D1 round trip (an attempt): the wall-clock measured around
 // the call, and the per-statement metas it returned (null when it threw).
 // Never the SQL text or bound values.
-type D1MetricsHook = { d1Call(wallMs: number, metas: unknown[] | null): void }
+type D1MetricsHook = { d1Call(wallMs: number, metas: unknown[] | null): void; d1Start?(statements: number): void }
 
 function metricsHook(): D1MetricsHook | undefined {
   return (globalThis as unknown as Record<symbol, D1MetricsHook | undefined>)[REQUEST_METRICS_HOOK]
@@ -136,10 +136,11 @@ const clockMs = (): number => (typeof performance !== 'undefined' && typeof perf
 
 // Times EACH attempt (so withD1Retry's back-off sleep is never counted as
 // round trip) and reports it to the request's metrics, if any.
-function timedAttempt<R>(attempt: () => Promise<R>, metas: (result: R) => unknown[]): () => Promise<R> {
+function timedAttempt<R>(attempt: () => Promise<R>, metas: (result: R) => unknown[], statements = 1): () => Promise<R> {
   return async () => {
     const hook = metricsHook()
     if (!hook) return attempt()
+    hook.d1Start?.(statements)
     const started = clockMs()
     let result: R
     try {
@@ -153,8 +154,8 @@ function timedAttempt<R>(attempt: () => Promise<R>, metas: (result: R) => unknow
   }
 }
 
-function metered<R>(attempt: () => Promise<R>, metas: (result: R) => unknown[]): Promise<R> {
-  return withD1Retry(timedAttempt(attempt, metas))
+function metered<R>(attempt: () => Promise<R>, metas: (result: R) => unknown[], statements = 1): Promise<R> {
+  return withD1Retry(timedAttempt(attempt, metas, statements))
 }
 
 const metaOf = (result: { meta?: unknown }) => [result?.meta]
@@ -252,7 +253,7 @@ export class D1Compat {
   async batch(statements: Array<{ sql: string; params?: BindParams }>): Promise<D1Result[]> {
     const prepared = this.prepareBatch(statements)
     // One meta per statement: a batch of N counts as N statements.
-    return metered(() => this.d1.batch(prepared), metasOf)
+    return metered(() => this.d1.batch(prepared), metasOf, statements.length)
   }
 
   /** Explicit single-attempt atomic write. Only callers with durable idempotency
@@ -262,7 +263,7 @@ export class D1Compat {
    */
   async batchOnce(statements: Array<{ sql: string; params?: BindParams }>): Promise<D1Result[]> {
     // Single attempt by contract: timed, never retried.
-    return timedAttempt(() => this.d1.batch(this.prepareBatch(statements)), metasOf)()
+    return timedAttempt(() => this.d1.batch(this.prepareBatch(statements)), metasOf, statements.length)()
   }
 
   async transaction<T>(fn: (db: D1Compat) => Promise<T>): Promise<T> {

@@ -90,6 +90,7 @@ export type RequestMetrics = {
   label: string
   startedAt: number
   statements: number
+  attemptedStatements: number
   rowsRead: number
   rowsWritten: number
   d1Ms: number
@@ -113,7 +114,7 @@ const CONTEXT_KEY = 'requestMetrics'
 export function createRequestMetrics(kind: 'api' | 'bg', label: string, now: number = Date.now()): RequestMetrics {
   return {
     kind, label, startedAt: now,
-    statements: 0, rowsRead: 0, rowsWritten: 0, d1Ms: 0, d1Calls: 0, d1WallMs: 0, d1Region: '', d1Primary: 0, failed: 0,
+    statements: 0, attemptedStatements: 0, rowsRead: 0, rowsWritten: 0, d1Ms: 0, d1Calls: 0, d1WallMs: 0, d1Region: '', d1Primary: 0, failed: 0,
     cacheHits: 0, cacheMisses: 0, flags: {}, sealed: false, late: 0,
   }
 }
@@ -263,11 +264,13 @@ const store = new AsyncLocalStorage<RequestMetrics>()
 // The hook db.ts and cache.ts look up by Symbol.for(REQUEST_METRICS_HOOK_KEY).
 // Every entry swallows its own errors: it runs inside a database call.
 export type RequestMetricsHook = {
+  d1Start(statements: number): void
   d1Call(wallMs: number, metas: unknown[] | null): void
   cache(outcome: 'hit' | 'miss'): void
 }
 
 const hook: RequestMetricsHook = {
+  d1Start(statements) { try { const acc = store.getStore(); if (acc) acc.attemptedStatements += finiteOrZero(statements) } catch { /* no-op */ } },
   d1Call(wallMs, metas) { try { const acc = store.getStore(); if (acc) addD1Call(acc, wallMs, metas) } catch { /* no-op */ } },
   cache(outcome) { try { const acc = store.getStore(); if (acc) addCacheOutcome(acc, outcome) } catch { /* no-op */ } },
 }
