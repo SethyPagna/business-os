@@ -174,6 +174,29 @@ test('deleteImageVariants never throws when R2 or the cache fails, and ignores a
   assert.deepEqual(untouched.ASSETS.deletes, [])
 })
 
+test('legacy variant purge URLs encode raw identities once without percent/space aliases', async () => {
+  const names = ['old#name.png', 'old%20name.png', 'old name.png', 'រូបថត.png']
+  const purged = []
+  globalThis.caches = { default: { async delete(request) { purged.push(request.url); return true } } }
+  const env = { ASSETS: bucket() }
+  for (const name of names) await deleteImageVariants(env, name, 'https://shop.example')
+  assert.deepEqual(env.ASSETS.deletes, names.map(name => [160, 320, 640].map(width => `variants/w${width}/${name}.webp`)))
+  assert.deepEqual(purged, names.flatMap(name => [160, 320, 640].map(width => `https://shop.example/uploads/_v/w${width}/${encodeURIComponent(name)}`)))
+  assert.equal(new Set(purged).size, names.length * 3)
+  const matched = []
+  globalThis.caches = { default: { async match(request) {
+    matched.push(request.url)
+    return new Response(THUMB, { headers: { 'content-type': 'image/webp' } })
+  } } }
+  const { serveUpload } = loadTs(path.join(SRC, 'lib', 'imageVariants.ts'))
+  for (const url of purged) {
+    const request = new Request(url)
+    const response = await serveUpload(env, new URL(url).pathname, request, { waitUntil() {} })
+    assert.equal(response.status, 200)
+  }
+  assert.deepEqual(matched, purged, 'actual serving cache keys match deletion URLs')
+})
+
 // ------------------------------------------------------------ writer census
 const read = (...parts) => fs.readFileSync(path.join(SRC, ...parts), 'utf8').replace(/\r\n/g, '\n')
 

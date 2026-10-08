@@ -126,7 +126,7 @@ export async function deleteImageVariants(env: VariantEnv, storedName: string, c
   if (!cacheOrigin || typeof caches === 'undefined') return
   for (const width of IMAGE_VARIANT_WIDTHS) {
     try {
-      await caches.default.delete(new Request(new URL(`/uploads/_v/w${width}/${storedName}`, cacheOrigin).toString(), { method: 'GET' }))
+      await caches.default.delete(new Request(new URL(`/uploads/_v/w${width}/${encodeURIComponent(storedName)}`, cacheOrigin).toString(), { method: 'GET' }))
     } catch {
       // Same: never surface a purge failure.
     }
