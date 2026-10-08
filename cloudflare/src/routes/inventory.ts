@@ -2790,6 +2790,7 @@ app.post('/dated-stock-count/apply', async (c) => {
     entryCount: parsed.entries.length,
     movementsApplied: result.movementsApplied,
     movementsDeleted: result.movementsDeleted,
+    movementsCompensated: result.movementsCompensated,
     batchTrackedGroups: result.batchTrackedGroups,
     plainGroups: result.plainGroups,
   })
