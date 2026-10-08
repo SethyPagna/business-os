@@ -97,7 +97,7 @@ export default function PortalMenu({
   openOnHover = false,
 }: PortalMenuProps) {
   const [open, setOpen] = useState(defaultOpen)
-  const [position, setPosition] = useState<{ top: number; left: number; maxHeight?: number; maxWidth?: number }>({ top: 0, left: 0 })
+  const [position, setPosition] = useState<{ top: number; left: number; maxHeight?: number; maxWidth?: number; minWidth?: number }>({ top: 0, left: 0 })
   const triggerRef = useRef<HTMLDivElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
   const frameRef = useRef(0)
@@ -130,9 +130,19 @@ export default function PortalMenu({
     const viewportBottom = viewportTop + (viewport?.height || window.innerHeight)
     const viewportRight = viewportLeft + (viewport?.width || window.innerWidth)
     const menu = menuRef.current
-    const naturalHeight = menu ? menu.scrollHeight + menu.offsetHeight - menu.clientHeight : 160
-    const maxWidth = Math.max(1, viewportRight - viewportLeft - 16)
-    const menuWidth = Math.min(menu?.offsetWidth || 170, maxWidth)
+    const scrollTop = menu?.scrollTop || 0
+    const scrollLeft = menu?.scrollLeft || 0
+    if (menu) {
+      menu.style.maxHeight = ''
+      menu.style.maxWidth = ''
+      menu.style.minWidth = ''
+    }
+    const authoredSize = menu ? window.getComputedStyle(menu) : null
+    const authoredMaxHeight = Number.parseFloat(authoredSize?.maxHeight || '')
+    const authoredMaxWidth = Number.parseFloat(authoredSize?.maxWidth || '')
+    const authoredMinWidth = Number.parseFloat(authoredSize?.minWidth || '')
+    const maxWidth = Math.max(1, Math.min(viewportRight - viewportLeft - 16, Number.isFinite(authoredMaxWidth) ? authoredMaxWidth : Infinity))
+    const minWidth = authoredMinWidth > maxWidth ? maxWidth : undefined
 
     // On phones the fixed bottom nav (plus its safe-area-inset-bottom on
     // notched iPhones) covers a real strip of the viewport. window.innerHeight
@@ -145,8 +155,16 @@ export default function PortalMenu({
     const bottomReserve = navRect && navRect.width > 0 && navRect.bottom > viewportTop && navRect.top < viewportBottom
       ? Math.max(8, viewportBottom - navRect.top + 8)
       : 8
-    const maxHeight = Math.max(1, viewportBottom - bottomReserve - viewportTop - 8)
-    const menuHeight = Math.min(naturalHeight, maxHeight)
+    const maxHeight = Math.max(1, Math.min(viewportBottom - bottomReserve - viewportTop - 8, Number.isFinite(authoredMaxHeight) ? authoredMaxHeight : Infinity))
+    if (menu) {
+      menu.style.maxHeight = `${maxHeight}px`
+      menu.style.maxWidth = `${maxWidth}px`
+      menu.style.minWidth = minWidth === undefined ? '' : `${minWidth}px`
+      menu.scrollTop = scrollTop
+      menu.scrollLeft = scrollLeft
+    }
+    const menuHeight = menu?.offsetHeight || Math.min(160, maxHeight)
+    const menuWidth = menu?.offsetWidth || Math.min(170, maxWidth)
 
     let top = triggerRect.bottom + 4
     if (top + menuHeight > viewportBottom - bottomReserve) {
@@ -174,7 +192,7 @@ export default function PortalMenu({
     if (left + menuWidth > viewportRight - 8) left = viewportRight - menuWidth - 8
     if (left < viewportLeft + 8) left = viewportLeft + 8
 
-    setPosition({ top, left, maxHeight, maxWidth })
+    setPosition({ top, left, maxHeight, maxWidth, minWidth })
   }, [align])
 
   useEffect(() => {
@@ -217,7 +235,8 @@ export default function PortalMenu({
       if (!insideMenu && !insideTrigger && !insideNestedPortalMenu) setOpen(false)
     }
 
-    const scheduleReposition = () => {
+    const scheduleReposition = (event?: Event) => {
+      if (event?.target === menuRef.current) return
       if (frameRef.current) window.cancelAnimationFrame(frameRef.current)
       frameRef.current = window.requestAnimationFrame(() => {
         frameRef.current = 0
@@ -333,7 +352,7 @@ export default function PortalMenu({
             event.stopPropagation()
             if (closeOnContentClick) setOpen(false)
           }}
-          style={{ position: 'fixed', top: position.top, left: position.left, maxHeight: position.maxHeight, maxWidth: position.maxWidth, overflowY: 'auto', overscrollBehavior: 'contain', zIndex: 9999 }}
+          style={{ position: 'fixed', top: position.top, left: position.left, maxHeight: position.maxHeight, maxWidth: position.maxWidth, minWidth: position.minWidth, overflowY: 'auto', overscrollBehavior: 'contain', zIndex: 9999 }}
           className={`bg-white dark:bg-neutral-900 shadow-2xl border border-gray-200 dark:border-neutral-700 fade-in ${
             compact ? 'rounded-lg min-w-[150px] py-0.5' : 'rounded-xl min-w-[170px] py-1'
           } ${menuClassName}`.trim()}

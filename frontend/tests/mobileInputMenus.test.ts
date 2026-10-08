@@ -37,8 +37,8 @@ function Harness() {
     const { askToConfirm, confirmDialog } = useConfirmDialog(key => pack[key] || key);
     const [value, setValue] = useState('a'), [visible, setVisible] = useState(true);
     if (params.has('portal'))
-        return <><button id="outside" style={{ position: 'fixed', top: 8, left: 8 }}>Outside</button>
-        <div style={{ position: 'absolute', top: 350, left: 24 }}><PortalMenu align={params.get('align') || 'auto'} trigger={<button id="portal-trigger">{pack.filters}</button>} content={<div style={{ width: 220, height: params.has('large') ? 900 : 160 }}><input id="search" aria-label={pack.search} placeholder={pack.search}/>
+        return <><style>{'[data-portal-menu-content].synthetic-authored-width { min-width:14rem; }'}</style><button id="outside" style={{ position: 'fixed', top: 8, left: 8 }}>Outside</button>
+        <div style={{ position: 'absolute', top: 350, left: 24 }}><PortalMenu menuClassName={params.has('cap') ? 'min-w-[18rem] max-h-[min(28rem,calc(70*var(--app-vh)))]' : params.has('wide') ? 'synthetic-authored-width min-w-[14rem]' : ''} align={params.get('align') || 'auto'} trigger={<button id="portal-trigger">{pack.filters}</button>} content={<div style={{ width: 220, height: params.has('large') ? 900 : 160 }}><input id="search" aria-label={pack.search} placeholder={pack.search}/>
             <PortalMenu trigger={<button id="nested-trigger">Nested</button>} items={[{ label: 'Nested option', onClick: () => { } }]}/><button id="last" style={{ marginTop: params.has('large') ? 700 : 20 }}>Last action</button></div>}/></div>
         {params.has('nav') && <nav className="safe-area-inset-bottom" style={{ position: 'fixed', bottom: 0, width: '100%', height: 64 }}>Nav</nav>}</>;
     return <AppContext.Provider value={{ ...FALLBACK_APP_CONTEXT, t: key => pack[key] || key }}><Modal title={pack.branch} onClose={() => { }} unsavedChanges="read-only">
@@ -173,6 +173,9 @@ try {
                         await page.locator('#last').scrollIntoViewIfNeeded();
                         await expect(page.locator('#last')).toBeVisible();
                         assert.ok(await menu.evaluate(el => el.scrollTop > 0), 'last action reachable');
+                        const actionScroll = await menu.evaluate(el => el.scrollTop);
+                        await viewport(page, { height: 220, offsetTop: 100 });
+                        await expect.poll(async () => await menu.evaluate(el => el.scrollTop)).toBe(actionScroll);
                         await viewport(page, { height: page.viewportSize()!.height, offsetTop: 0 });
                         await expect.poll(async () => await menu.evaluate(el => el.clientHeight)).toBeGreaterThan(300);
                         await page.keyboard.press('Escape');
@@ -197,6 +200,47 @@ try {
                     assert.deepEqual(await page.evaluate(() => (window as any).fixtureListeners()), { resize: 0, scroll: 0 });
                     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
                     assert.deepEqual(errors, []);
+                });
+                await check(`${label} caller height cap survives visible bounds, growth and reopen`, async () => {
+                    await show('&portal&large&cap');
+                    const trigger = page.locator('#portal-trigger'), menu = page.locator('[data-portal-menu-content]').first();
+                    await trigger.click();
+                    await expect.poll(async () => await menu.evaluate((el: HTMLElement) => el.offsetHeight)).toBe(448);
+                    assert.equal(await menu.evaluate((el: HTMLElement) => el.offsetWidth), 288);
+                    await viewport(page, { height: 220, offsetTop: 100 });
+                    await expect.poll(async () => (await bounds(page)).bottom).toBeLessThanOrEqual(313);
+                    await page.locator('#last').scrollIntoViewIfNeeded();
+                    assert.ok(await page.locator('#last').evaluate(el => { const r = el.getBoundingClientRect(); return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === el; }), 'last action remains hit-testable');
+                    await viewport(page, { height: page.viewportSize()!.height, offsetTop: 0 });
+                    await expect.poll(async () => await menu.evaluate((el: HTMLElement) => el.offsetHeight)).toBe(448);
+                    await menu.locator(':scope > div').evaluate(el => { el.style.height = '80px'; el.querySelector('#last')?.remove(); });
+                    await expect.poll(async () => await menu.evaluate((el: HTMLElement) => el.offsetHeight)).toBeLessThan(160);
+                    await menu.locator(':scope > div').evaluate(el => { el.style.height = '900px'; });
+                    await expect.poll(async () => await menu.evaluate((el: HTMLElement) => el.offsetHeight)).toBe(448);
+                    await page.keyboard.press('Escape'); await trigger.click();
+                    await expect.poll(async () => await menu.evaluate((el: HTMLElement) => el.offsetHeight)).toBe(448);
+                });
+                await check(`${label} narrow viewport clamps authored minimum and restores caller widths`, async () => {
+                    for (const variant of ['', '&cap', '&wide']) {
+                        await show('&portal' + variant); const trigger = page.locator('#portal-trigger'), menu = page.locator('[data-portal-menu-content]').first();
+                        await trigger.click();
+                        const originalWidth = await menu.evaluate((el: HTMLElement) => el.offsetWidth);
+                        assert.ok(originalWidth >= (variant === '&cap' ? 288 : variant === '&wide' ? 224 : 170), variant + ': authored width ' + originalWidth);
+                        await viewport(page, { width: 125, offsetLeft: 16 }, 'scroll');
+                        await expect.poll(async () => (await bounds(page)).right).toBeLessThanOrEqual(134);
+                        assert.ok((await bounds(page)).left >= 24);
+                        await viewport(page, { width: page.viewportSize()!.width, offsetLeft: 0 });
+                        await expect.poll(async () => await menu.evaluate((el: HTMLElement) => el.offsetWidth)).toBe(originalWidth);
+                        await viewport(page, { width: 125, offsetLeft: 16 });
+                        await expect.poll(async () => (await bounds(page)).right).toBeLessThanOrEqual(134);
+                        await viewport(page, { width: 125, offsetLeft: 16 }, 'scroll');
+                        await expect.poll(async () => (await bounds(page)).right).toBeLessThanOrEqual(134);
+                        await viewport(page, { width: page.viewportSize()!.width, offsetLeft: 0 });
+                        await expect.poll(async () => await menu.evaluate((el: HTMLElement) => el.offsetWidth)).toBe(originalWidth);
+                        await page.keyboard.press('Escape'); await trigger.click();
+                        await expect.poll(async () => await menu.evaluate((el: HTMLElement) => el.offsetWidth)).toBe(originalWidth);
+                        await page.keyboard.press('Escape');
+                    }
                 });
                 await context.close();
             }
