@@ -97,7 +97,7 @@ export default function PortalMenu({
   openOnHover = false,
 }: PortalMenuProps) {
   const [open, setOpen] = useState(defaultOpen)
-  const [position, setPosition] = useState({ top: 0, left: 0 })
+  const [position, setPosition] = useState<{ top: number; left: number; maxHeight?: number; maxWidth?: number }>({ top: 0, left: 0 })
   const triggerRef = useRef<HTMLDivElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
   const frameRef = useRef(0)
@@ -124,10 +124,15 @@ export default function PortalMenu({
     }
 
     const triggerRect = triggerRef.current.getBoundingClientRect()
-    const viewportWidth = window.innerWidth
-    const viewportHeight = window.innerHeight
-    const menuHeight = menuRef.current?.offsetHeight || 160
-    const menuWidth = menuRef.current?.offsetWidth || 170
+    const viewport = window.visualViewport
+    const viewportTop = viewport?.offsetTop || 0
+    const viewportLeft = viewport?.offsetLeft || 0
+    const viewportBottom = viewportTop + (viewport?.height || window.innerHeight)
+    const viewportRight = viewportLeft + (viewport?.width || window.innerWidth)
+    const menu = menuRef.current
+    const naturalHeight = menu ? menu.scrollHeight + menu.offsetHeight - menu.clientHeight : 160
+    const maxWidth = Math.max(1, viewportRight - viewportLeft - 16)
+    const menuWidth = Math.min(menu?.offsetWidth || 170, maxWidth)
 
     // On phones the fixed bottom nav (plus its safe-area-inset-bottom on
     // notched iPhones) covers a real strip of the viewport. window.innerHeight
@@ -136,17 +141,18 @@ export default function PortalMenu({
     // -- placing its last item(s) directly under the nav bar, functionally
     // unreachable even though z-index draws the menu visually on top.
     const bottomNav = document.querySelector('nav.safe-area-inset-bottom')
-    const bottomReserve = bottomNav && bottomNav.getBoundingClientRect().width > 0
-      ? Math.max(8, viewportHeight - bottomNav.getBoundingClientRect().top + 8)
+    const navRect = bottomNav?.getBoundingClientRect()
+    const bottomReserve = navRect && navRect.width > 0 && navRect.bottom > viewportTop && navRect.top < viewportBottom
+      ? Math.max(8, viewportBottom - navRect.top + 8)
       : 8
+    const maxHeight = Math.max(1, viewportBottom - bottomReserve - viewportTop - 8)
+    const menuHeight = Math.min(naturalHeight, maxHeight)
 
     let top = triggerRect.bottom + 4
-    if (top + menuHeight > viewportHeight - bottomReserve) {
-      top = Math.max(8, triggerRect.top - menuHeight - 4)
+    if (top + menuHeight > viewportBottom - bottomReserve) {
+      top = triggerRect.top - menuHeight - 4
     }
-    if (top + menuHeight > viewportHeight - bottomReserve) {
-      top = Math.max(8, viewportHeight - bottomReserve - menuHeight)
-    }
+    top = Math.max(viewportTop + 8, Math.min(top, viewportBottom - bottomReserve - menuHeight))
 
     let left: number
     if (align === 'right') {
@@ -161,14 +167,14 @@ export default function PortalMenu({
       // right edge instead when the trigger is far enough right that a
       // left-anchored menu would spill past the viewport -- e.g. a
       // three-dot action button at the end of a table row.
-      left = triggerRect.left + menuWidth <= viewportWidth - 8
+      left = triggerRect.left + menuWidth <= viewportRight - 8
         ? triggerRect.left
         : triggerRect.right - menuWidth
     }
-    if (left + menuWidth > viewportWidth - 8) left = viewportWidth - menuWidth - 8
-    if (left < 8) left = 8
+    if (left + menuWidth > viewportRight - 8) left = viewportRight - menuWidth - 8
+    if (left < viewportLeft + 8) left = viewportLeft + 8
 
-    setPosition({ top, left })
+    setPosition({ top, left, maxHeight, maxWidth })
   }, [align])
 
   useEffect(() => {
@@ -246,6 +252,9 @@ export default function PortalMenu({
     document.addEventListener('keydown', closeIfEscape)
     window.addEventListener('scroll', scheduleReposition, true)
     window.addEventListener('resize', scheduleReposition)
+    const viewport = window.visualViewport
+    viewport?.addEventListener('resize', scheduleReposition)
+    viewport?.addEventListener('scroll', scheduleReposition)
     if (typeof ResizeObserver !== 'undefined' && menuRef.current) {
       resizeObserver = new ResizeObserver(() => scheduleReposition())
       resizeObserver.observe(menuRef.current)
@@ -258,6 +267,8 @@ export default function PortalMenu({
       document.removeEventListener('keydown', closeIfEscape)
       window.removeEventListener('scroll', scheduleReposition, true)
       window.removeEventListener('resize', scheduleReposition)
+      viewport?.removeEventListener('resize', scheduleReposition)
+      viewport?.removeEventListener('scroll', scheduleReposition)
       resizeObserver?.disconnect()
       if (frameRef.current) {
         window.cancelAnimationFrame(frameRef.current)
@@ -322,7 +333,7 @@ export default function PortalMenu({
             event.stopPropagation()
             if (closeOnContentClick) setOpen(false)
           }}
-          style={{ position: 'fixed', top: position.top, left: position.left, zIndex: 9999 }}
+          style={{ position: 'fixed', top: position.top, left: position.left, maxHeight: position.maxHeight, maxWidth: position.maxWidth, overflowY: 'auto', overscrollBehavior: 'contain', zIndex: 9999 }}
           className={`bg-white dark:bg-neutral-900 shadow-2xl border border-gray-200 dark:border-neutral-700 fade-in ${
             compact ? 'rounded-lg min-w-[150px] py-0.5' : 'rounded-xl min-w-[170px] py-1'
           } ${menuClassName}`.trim()}

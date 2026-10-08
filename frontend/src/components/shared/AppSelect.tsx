@@ -138,8 +138,14 @@ export default function AppSelect({
 
   const chooseOption = (option: AppSelectOption | undefined) => {
     if (!option || option.disabled) return
+    const trigger = rootRef.current?.querySelector('button')
     onChange(optionValue(option.value))
     setOpen(false)
+    window.requestAnimationFrame(() => {
+      const active = document.activeElement
+      const selectionOwnsFocus = active === document.body || active === trigger || Boolean(active && menuRef.current?.contains(active))
+      if (selectionOwnsFocus && trigger?.isConnected && rootRef.current?.contains(trigger)) trigger.focus({ preventScroll: true })
+    })
   }
 
   const moveActive = (direction: 1 | -1) => {

@@ -25,8 +25,8 @@ runTest('shared filter menu uses one lazy body portal', () => {
 runTest('shared portal is fixed, viewport bounded, and scroll-container safe', () => {
   assert.match(portalMenu, /createPortal\(/)
   assert.match(portalMenu, /style=\{\{ position: 'fixed',[\s\S]*zIndex: 9999 \}\}/)
-  assert.match(portalMenu, /if \(left \+ menuWidth > viewportWidth - 8\)/)
-  assert.match(portalMenu, /if \(left < 8\) left = 8/)
+  assert.match(portalMenu, /if \(left \+ menuWidth > viewportRight - 8\)/)
+  assert.match(portalMenu, /if \(left < viewportLeft \+ 8\) left = viewportLeft \+ 8/)
   assert.match(portalMenu, /window\.addEventListener\('scroll', scheduleReposition, true\)/)
   assert.match(portalMenu, /resizeObserver\.observe\(menuRef\.current\)/)
 })
