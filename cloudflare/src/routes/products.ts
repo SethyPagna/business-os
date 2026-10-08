@@ -1976,7 +1976,7 @@ app.post('/bulk-price-adjust', async (c) => {
     params: { claimNonce },
   })
   let uncertain = false
-  try { await db.batch(statements) } catch { uncertain = true }
+  try { await db.batchOnce(statements) } catch { uncertain = true }
   let receipt
   try { receipt = await findBulkPriceReceipt(db, actorIdForReceipt, requestId) } catch { return outcomeUnknown() }
   if (!receipt) return outcomeUnknown()

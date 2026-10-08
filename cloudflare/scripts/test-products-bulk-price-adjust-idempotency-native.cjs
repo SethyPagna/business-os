@@ -38,6 +38,58 @@ const receipts = () => h.raw.prepare("SELECT details, old_value, new_value FROM 
 const body = (extra = {}) => ({ direction: 'increase', amount: 1, fields: ['selling_price_usd'], client_request_id: 'adjust_req_aaaaaaaa', ...extra })
 
 async function main() {
+  for (const loss of ['before commit', 'after commit']) {
+    await check(`production D1 adapter never blindly repeats a price batch after failure ${loss}`, async () => {
+      fixture()
+      let attempts = 0
+      const binding = {
+        prepare(sql) { return { bind(...values) { return { sql, values } } } },
+        async batch(prepared) {
+          attempts += 1
+          if (attempts === 1 && loss === 'before commit') throw Error('network reset before commit')
+          const results = []
+          h.raw.db.exec('BEGIN IMMEDIATE')
+          try {
+            for (const item of prepared) {
+              const result = h.raw.db.prepare(item.sql).run(...item.values)
+              results.push({ success: true, results: [], meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } })
+            }
+            h.raw.db.exec('COMMIT')
+          } catch (error) { h.raw.db.exec('ROLLBACK'); throw error }
+          if (attempts === 1) throw Error('network reset: ACK lost after committed batch')
+          return results
+        },
+      }
+      const actualDb = h.load('lib/db.ts').getDb({ DB: binding })
+      const originalBatch = h.db.batch, originalOnce = h.db.batchOnce
+      h.db.batch = items => actualDb.batch(items)
+      h.db.batchOnce = items => actualDb.batchOnce(items)
+      try {
+        const intent = body({ fields: ['selling_price_usd', 'cost_price_usd'] })
+        const first = await h.request('POST', '/bulk-price-adjust', intent)
+        assert.equal(attempts, 1, 'the real retry wrapper must not repeat an accumulating batch')
+        if (loss === 'before commit') {
+          assert.equal(first.status, 503)
+          assert.equal(first.json.code, 'bulk_price_outcome_unknown')
+          assert.deepEqual(sellingPrices(), [5, 9])
+          assert.equal(receipts().length, 0)
+        } else {
+          assert.equal(first.status, 200)
+          assert.equal(first.json.replayed, true)
+        }
+        const recovery = await h.request('POST', '/bulk-price-adjust', intent)
+        assert.equal(recovery.status, 200)
+        assert.equal(recovery.json.changed, 2)
+        assert.equal(attempts, loss === 'before commit' ? 2 : 1)
+        assert.deepEqual(sellingPrices(), [6, 10])
+        assert.equal(receipts().length, 1)
+        assert.equal(h.raw.prepare('SELECT COUNT(*) AS n FROM product_cost_entries').get([]).n, 2)
+        assert.deepEqual(h.raw.prepare('SELECT cost_price_usd AS v FROM products ORDER BY id').all([]).map(row => Number(row.v)), [3, 5])
+        assert.equal(JSON.parse(receipts()[0].old_value).selling_price_usd, 14)
+        assert.equal(JSON.parse(receipts()[0].new_value).selling_price_usd, 16)
+      } finally { h.db.batch = originalBatch; h.db.batchOnce = originalOnce }
+    })
+  }
   await check('final audit statement failure rolls prices, cost entries and receipt back together', async () => {
     fixture()
     h.raw.db.exec(`CREATE TRIGGER fail_price_receipt BEFORE UPDATE OF new_value ON audit_logs
@@ -55,10 +107,10 @@ async function main() {
   })
   await check('committed batch loss of ACK recovers original count and complete pre/post audit', async () => {
     fixture()
-    const batch=h.db.batch
-    h.db.batch=async statements=>{await batch(statements);throw Error('lost batch ACK')}
+    const batch=h.db.batchOnce
+    h.db.batchOnce=async statements=>{await batch(statements);throw Error('lost batch ACK')}
     let response
-    try {response=await h.request('POST','/bulk-price-adjust',body())} finally {h.db.batch=batch}
+    try {response=await h.request('POST','/bulk-price-adjust',body())} finally {h.db.batchOnce=batch}
     assert.equal(response.status,200,JSON.stringify(response))
     assert.equal(response.json.changed,2)
     assert.equal(response.json.replayed,true)
@@ -68,15 +120,15 @@ async function main() {
   })
   await check('unavailable recovery remains unknown until same-ID receipt can be read', async () => {
     fixture()
-    const batch=h.db.batch, prepare=h.db.prepare
+    const batch=h.db.batchOnce, prepare=h.db.prepare
     let committed=false
-    h.db.batch=async statements=>{await batch(statements);committed=true;throw Error('lost ACK')}
+    h.db.batchOnce=async statements=>{await batch(statements);committed=true;throw Error('lost ACK')}
     h.db.prepare=sql=>{
       const statement=prepare(sql)
       return committed && /SELECT details FROM audit_logs/.test(sql) ? {...statement,get:async()=>{throw Error('receipt lookup unavailable')}} : statement
     }
     let response
-    try {response=await h.request('POST','/bulk-price-adjust',body())}finally{h.db.batch=batch;h.db.prepare=prepare}
+    try {response=await h.request('POST','/bulk-price-adjust',body())}finally{h.db.batchOnce=batch;h.db.prepare=prepare}
     assert.equal(response.status,503);assert.equal(response.json.code,'bulk_price_outcome_unknown')
     assert.deepEqual(sellingPrices(),[6,10]);assert.equal(receipts().length,1)
     const retry=await h.request('POST','/bulk-price-adjust',body())
