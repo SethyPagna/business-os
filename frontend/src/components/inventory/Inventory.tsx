@@ -1983,7 +1983,7 @@ ${inventoryFeesFormulaText}`,
   const inventoryFilterSections = useMemo(() => {
     if (tab === 'rfid') {
       return [
-        branches.length > 1 ? {
+        branches.length > 0 ? {
           id: 'branch',
           label: t('branch') || 'Branch',
           options: [
@@ -2001,7 +2001,7 @@ ${inventoryFeesFormulaText}`,
 
     if (tab === 'movements') {
       return [
-        branches.length > 1 ? {
+        branches.length > 0 ? {
           id: 'branch',
           label: t('branch') || 'Branch',
           options: [
@@ -2077,7 +2077,7 @@ ${inventoryFeesFormulaText}`,
     }
 
     if (tab === 'products') {
-      return branches.length > 1 ? [{
+      return branches.length > 0 ? [{
         id: 'branch',
         label: t('branch') || 'Branch',
         options: [

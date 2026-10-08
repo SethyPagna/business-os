@@ -1087,8 +1087,8 @@ const ProductDesktopRow = memo(ProductDesktopRowComponent)
 function ProductMobileCardComponent({ product: p, indented = false, ctx }: { product: ProductRecord; indented?: boolean; ctx: ProductRowCtx }) {
   const canViewCosts = canViewAcquisitionCosts(useProductsApp().user)
   const {
-    branchFilter, copy, exchangeRate, fmtUSD,
-    getBranchQty, getBrandColor, getLongPressState,
+    branchFilter, branchNameById, copy, exchangeRate, fmtUSD,
+    getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState,
     isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox,
     promotionRules, lowStockConfig, renderUnitChip, selectionModeActive,
     t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey,
@@ -1105,14 +1105,18 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
     const wholesaleUsd = Number(p.wholesale_price_usd || 0)
     const unitName = typeof p.unit === 'string' ? p.unit : undefined
     const {
+      branchSummaryLabel,
+      selectedBranchName,
       promotion,
       costUsd,
       qty,
       stockStatusTextClass,
     } = buildProductRowDisplayState(p, {
       branchFilter,
+      branchNameById,
       exchangeRate,
       getBranchQty,
+      getBranchSummaryLabel,
       t,
       promotionRules,
       lowStock: lowStockConfig,
@@ -1285,6 +1289,12 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
                   title={brandName}
                 >
                   <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={brandName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>{brandName}</EntityLink>
+                </span>
+              ) : null}
+              {selectedBranchName || branchSummaryLabel ? (
+                <span data-product-branch-summary className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-full bg-cyan-50 px-1.5 py-0.5 text-[10px] font-semibold leading-relaxed text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-200">
+                  <Boxes className="h-3 w-3 shrink-0" aria-hidden="true" />
+                  <span className="min-w-0 break-words">{selectedBranchName ? `${selectedBranchName}: ${qty || 0}` : branchSummaryLabel}</span>
                 </span>
               ) : null}
             </div>

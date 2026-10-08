@@ -728,12 +728,12 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
 
   // Branch + supplier folded into the shared FilterMenu (user, Aug 30 2026:
   // "fold supplier and branch into filter menu") instead of two loose selects
-  // on the toolbar row. Branch only appears when the business has more than
-  // one; the supplier list gets its own in-panel search once it's long
+  // on the toolbar row. Keep the branch identity visible even with one
+  // branch; the supplier list gets its own in-panel search once it's long
   // (searchable). Empty when neither applies -> no filter trigger renders.
   const filterSections = useMemo<FilterSection[]>(() => {
     const sections: FilterSection[] = []
-    if (branches.length > 1) {
+    if (branches.length > 0) {
       sections.push({
         id: 'branch',
         label: tr(t, 'branch', 'Branch'),

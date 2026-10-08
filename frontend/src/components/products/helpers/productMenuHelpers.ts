@@ -362,7 +362,7 @@ export function buildProductFilterSections({
     // Category, Brand, Promotions); range/diagnostic/advanced controls
     // (Created, Issues, Search mode) sit at the end -- "reorganize the
     // filters, make it smart and easy to use" (user, Aug 28).
-    availabilitySection ? availabilitySection : branches.length > 1 ? {
+    availabilitySection ? availabilitySection : branches.length > 0 ? {
       id: 'branch',
       label: t('branch') || 'Branch',
       options: [

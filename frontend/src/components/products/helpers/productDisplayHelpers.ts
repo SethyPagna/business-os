@@ -141,8 +141,7 @@ export function buildProductBranchSummaryLabel(product: ProductRecord, branchNam
   // reads the same as any other out-of-stock product rather than looking
   // like missing data.
   if (!sortedRows.length) return '0'
-  // With one active branch its line repeats the product quantity (see
-  // branchScope.ts): nothing left to name.
+  // Keep the active branch's identity even when it is the only stock line.
   const rows = branchStockLinesWorthShowing(sortedRows)
   if (!rows.length) return ''
   const nameFor = (entry: BranchStockRecord): unknown => (

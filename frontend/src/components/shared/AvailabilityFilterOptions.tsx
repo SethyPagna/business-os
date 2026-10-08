@@ -104,7 +104,7 @@ export function buildAvailabilityFilterSection({
           </div>
           <SectionOptionList options={stockOptions} />
         </div>
-        {branches.length > 1 ? (
+        {branches.length > 0 ? (
           <div>
             <div className="mb-1 px-0.5 text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">
               {T('branch', 'Branch')}

@@ -7,6 +7,7 @@ import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Trash2Icon from 'lucide-react/dist/esm/icons/trash-2.js'
 import LockIcon from 'lucide-react/dist/esm/icons/lock.js'
+import Store from 'lucide-react/dist/esm/icons/store.js'
 import AlertTriangleIcon from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Modal from '../../shared/Modal'
 import { ModalCloseContext } from '../../shared/modalCloseContext.ts'
@@ -1943,7 +1944,12 @@ export default function ProductForm({
                 </p>
               ) : null}
             </div>
-            {isCreateMode && branches.length > 0 && !initialBranchSettled ? (
+            {isCreateMode && initialBranchSettled ? (
+              <div data-product-initial-sole-branch role="group" aria-label={`${tr('branch', 'Branch', 'សាខា')}: ${branches[0].name}`} className="input flex min-h-11 min-w-0 items-center gap-2 lg:col-span-2">
+                <Store className="h-4 w-4 shrink-0 text-gray-400" aria-hidden="true" />
+                <span className="detail-scroll-text min-w-0 leading-relaxed">{branches[0].name}</span>
+              </div>
+            ) : isCreateMode && branches.length > 0 && !initialBranchSettled ? (
               <div className="min-w-0 lg:col-span-2">
                 <label htmlFor="product-initial-branch" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('assign_initial_branch', 'Assign Initial Stock to Branch *', 'កំណត់ស្តុកដំបូងទៅសាខា *')}</label>
                 <AppSelect
@@ -2036,7 +2042,7 @@ export default function ProductForm({
             </> : null}
           </div>
 
-          {activeTab === 'stock' && isEditMode && branches.length > 1 ? (
+          {activeTab === 'stock' && isEditMode && branches.length > 0 ? (
             <div>
               <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">{tr('branch', 'Branch', 'សាខា')}</p>
               <div className="space-y-2">

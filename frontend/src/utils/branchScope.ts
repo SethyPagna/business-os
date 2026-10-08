@@ -65,8 +65,8 @@ export function showsBranchComparison(rows: readonly BranchLike[] | null | undef
 // Which per-branch quantity lines of a product are worth printing. Each line
 // carries its own branch_active flag (the products and inventory payloads add
 // it), so no second list has to be threaded to the screen. With two active
-// branches every line is information. With ONE active branch its line only
-// repeats the product's own quantity, so it goes; a retired branch that still
+// branches every line is information. With ONE active branch its name and
+// quantity stay visible; empty retired lines can go. A retired branch that
 // holds stock stays, because it explains why the active line is not the whole
 // total. Only a payload whose every line SAYS whether its branch is active is
 // judged: lines without the flag (older mirrors, hand-built rows) are shown as
@@ -77,7 +77,7 @@ export function branchStockLinesWorthShowing<T extends { quantity?: unknown; bra
   const isActive = (line: T) => branchIsActive({ is_active: line.branch_active })
   const everyLineSays = lines.length > 0 && lines.every((line) => line.branch_active !== undefined && line.branch_active !== null)
   if (!everyLineSays || lines.filter(isActive).length !== 1) return [...lines]
-  return lines.some((line) => !isActive(line) && Number(line.quantity) !== 0) ? [...lines] : []
+  return lines.some((line) => !isActive(line) && Number(line.quantity) !== 0) ? [...lines] : lines.filter(isActive)
 }
 
 // Marks the choices that are not in the active list and greys them out, so a

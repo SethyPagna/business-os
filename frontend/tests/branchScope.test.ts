@@ -94,17 +94,17 @@ await runTest('labelInactiveChoices marks only what the active list lacks', () =
   assert.deepEqual(labelInactiveChoices(all, [{ value: '1' }], 'Inactive').map((o) => !!o.disabled), [false, true], 'CUTOVER-LR: the disabled branch is greyed out, never a new target')
 })
 
-await runTest('per-branch stock lines: two active keep every line, one active drops its repeat, retired stock stays visible', () => {
+await runTest('per-branch stock lines: sole active identity stays visible, retired stock stays visible', () => {
   const two = [{ branch_id: 1, quantity: 5, branch_active: 1 }, { branch_id: 2, quantity: 0, branch_active: 1 }]
   assert.equal(branchStockLinesWorthShowing(two).length, 2, 'today: unchanged, zero lines included')
   const oneActiveRetiredEmpty = [{ branch_id: 1, quantity: 12, branch_active: 1 }, { branch_id: 2, quantity: 0, branch_active: 0 }]
-  assert.deepEqual(branchStockLinesWorthShowing(oneActiveRetiredEmpty), [], 'the one active line repeats the product quantity')
+  assert.deepEqual(branchStockLinesWorthShowing(oneActiveRetiredEmpty), [oneActiveRetiredEmpty[0]], 'the active branch stays named')
   const retiredHolds = [{ branch_id: 1, quantity: 12, branch_active: 1 }, { branch_id: 2, quantity: 3, branch_active: 0 }]
   assert.equal(branchStockLinesWorthShowing(retiredHolds).length, 2, 'stock left at the retired branch explains the total')
   const noFlags = [{ branch_id: 1, quantity: 5 }, { branch_id: 2, quantity: 1 }]
   assert.equal(branchStockLinesWorthShowing(noFlags).length, 2, 'rows that do not say are shown as they always were (older payloads)')
   assert.equal(branchStockLinesWorthShowing([{ branch_id: 1, quantity: 5 }]).length, 1, 'a lone line that does not say whether its branch is active is not evidence of one branch')
-  assert.deepEqual(branchStockLinesWorthShowing([{ branch_id: 1, quantity: 5, branch_active: 1 }]), [], 'the Products list payload after the cutover: only the active branch is listed, and it says so')
+  assert.deepEqual(branchStockLinesWorthShowing([{ branch_id: 1, quantity: 5, branch_active: 1 }]), [{ branch_id: 1, quantity: 5, branch_active: 1 }], 'sole active Products stock remains visible')
   assert.equal(branchStockLinesWorthShowing([{ branch_id: 1, quantity: 5, branch_active: 1 }, { branch_id: 2, quantity: 0 }]).length, 2, 'a mixed payload (one line silent) is not judged')
   assert.equal(branchStockLinesWorthShowing([{ branch_id: 2, quantity: 0, branch_active: 0 }]).length, 1, 'only a retired line: nothing is hidden')
 })
@@ -115,7 +115,7 @@ await runTest('the product row summary follows the same rule and keeps its old b
     { branch_id: 1, quantity: q[0], branch_active: flags[0] }, { branch_id: 2, quantity: q[1], branch_active: flags[1] },
   ] })
   assert.equal(buildProductBranchSummaryLabel(base([1, 1], [5, 3]), names), 'LC Store: 5, Old Shop: 3', 'two active: unchanged')
-  assert.equal(buildProductBranchSummaryLabel(base([1, 0], [12, 0]), names), '', 'one active: nothing to name')
+  assert.equal(buildProductBranchSummaryLabel(base([1, 0], [12, 0]), names), 'LC Store: 12', 'one active stays named')
   assert.equal(buildProductBranchSummaryLabel(base([1, 0], [12, 3]), names), 'LC Store: 12, Old Shop: 3', 'retired stock stays named')
   assert.equal(buildProductBranchSummaryLabel({ branch_stock: [] }), '0', 'no rows at all is still a bare 0')
 })
@@ -218,10 +218,11 @@ const renderCell = (branch_stock: unknown[]) => quietLayoutEffectWarning(() => r
   product: { id: 1, branch_stock }, tr, fmtUSD: String, renderMetaPill: () => null, selectedBranchId: 'all',
 })))
 
-await runTest('product row pills: two active branches show every line; one active hides its repeat; retired stock stays', () => {
+await runTest('product row pills: sole active branch stays named; retired stock stays', () => {
   assert.match(renderCell([{ branch_id: 1, branch_name: 'Warehouse', quantity: 5, branch_active: 1 }, { branch_id: 2, branch_name: 'Shop', quantity: 0, branch_active: 1 }]), /Warehouse: 5[\s\S]*Shop: 0/)
   const collapsed = renderCell([{ branch_id: 1, branch_name: 'LC Store', quantity: 12, branch_active: 1 }, { branch_id: 2, branch_name: 'Old Shop', quantity: 0, branch_active: 0 }])
-  assert.doesNotMatch(collapsed, /LC Store|Old Shop/)
+  assert.match(collapsed, /LC Store: 12/)
+  assert.doesNotMatch(collapsed, /Old Shop/)
   assert.match(renderCell([{ branch_id: 1, branch_name: 'LC Store', quantity: 12, branch_active: 1 }, { branch_id: 2, branch_name: 'Old Shop', quantity: 3, branch_active: 0 }]), /LC Store: 12[\s\S]*Old Shop: 3/)
 })
 
@@ -236,23 +237,25 @@ const renderSurfaceDetail = (branch_stock: unknown[]) => quietLayoutEffectWarnin
 const TWO_LINES = [{ branch_id: 1, branch_name: 'Warehouse', quantity: 5, branch_active: 1 }, { branch_id: 2, branch_name: 'Shop', quantity: 7, branch_active: 1 }]
 const ONE_LINE = [{ branch_id: 1, branch_name: 'LC Store', quantity: 12, branch_active: 1 }, { branch_id: 2, branch_name: 'Old Shop', quantity: 0, branch_active: 0 }]
 
-await runTest('inventory product detail: both branches and the Branches tile today; neither after the cutover', () => {
+await runTest('inventory product detail: sole active branch and count tile remain visible', () => {
   const today = renderInventoryDetail(TWO_LINES)
   assert.match(today, /Warehouse: <span[^>]*>5/)
   assert.match(today, /Shop: <span[^>]*>7/)
   assert.match(today, /data-detail-branch-row/)
   assert.match(today, />branches</, 'the Branches count tile (its label is the key under the test translator)')
   const after = renderInventoryDetail(ONE_LINE)
-  assert.doesNotMatch(after, /LC Store|Old Shop/)
-  assert.doesNotMatch(after, /data-detail-branch-row/)
-  assert.doesNotMatch(after, />branches</, 'a count of one active branch is not a tile')
+  assert.match(after, /LC Store/)
+  assert.doesNotMatch(after, /Old Shop/)
+  assert.match(after, /data-detail-branch-row/)
+  assert.match(after, />branches</, 'the sole active branch remains counted')
   assert.match(renderInventoryDetail([]), />branches</, 'a product with no branch rows keeps the tile exactly as before (nothing was collapsed)')
 })
 
-await runTest('products product detail: both branches today; no branch row after the cutover', () => {
+await runTest('products product detail: sole active branch row remains visible', () => {
   assert.match(renderSurfaceDetail(TWO_LINES), /Warehouse[\s\S]*Shop/)
   const after = renderSurfaceDetail(ONE_LINE)
-  assert.doesNotMatch(after, /LC Store|Old Shop/)
+  assert.match(after, /LC Store/)
+  assert.doesNotMatch(after, /Old Shop/)
 })
 
 // ---------------------------------------------------------------------------
@@ -342,9 +345,46 @@ await runTest('write pickers collapse through the shared settled test (stale dra
   }
   const product = src('components', 'products', 'forms', 'ProductForm.tsx')
   assert.match(product, /isCreateMode && branches\.length > 0 && !initialBranchSettled \?/)
-  assert.match(product, /activeTab === 'stock' && isEditMode && branches\.length > 1 \?/, 'the per-branch list on the stock tab needs two branches')
+  assert.match(product, /activeTab === 'stock' && isEditMode && branches\.length > 0 \?/, 'the stock tab retains the sole active branch')
   const fast = src('components', 'inventory', 'FastStockInModal.tsx')
   assert.match(fast, /mode === 'add' \? receivingBranchOptions : labelInactiveChoices\(branchOptions, receivingBranchOptions, tr\('inactive', 'Inactive'\)\)/)
+})
+
+const productForm = (await load('components/products/forms/ProductForm.tsx')).default as React.ComponentType<Record<string, unknown>>
+await runTest('create stock tab displays the settled sole branch without a dropdown', () => {
+  const props = {
+    product: null, categories: [], units: [], branches: [{ id: 1, name: 'Current Shop', is_default: 1 }],
+    initialTab: 'stock', createDefaults: { branch_id: 1 }, onSave() {}, onClose() {},
+    t: (key: string) => key, usdSymbol: '$', khrSymbol: '៛', exchangeRate: 4100,
+    user: { id: 1, role_code: 'admin', role_permissions: { all: true } },
+  }
+  const render = (overrides: Record<string, unknown>) => quietLayoutEffectWarning(() => renderToStaticMarkup(React.createElement(productForm, { ...props, ...overrides })))
+  for (const branchWord of ['Branch', 'សាខា']) {
+    const html = render({ t: (key: string) => key === 'branch' ? branchWord : key })
+    assert.match(html, /data-product-initial-sole-branch/)
+    assert.ok(html.includes(`${branchWord}: Current Shop`))
+    assert.doesNotMatch(html, /name="product_initial_branch"/)
+  }
+  const stale = render({ createDefaults: { branch_id: 2 } })
+  assert.doesNotMatch(stale, /data-product-initial-sole-branch/)
+  assert.match(stale, /name="product_initial_branch"/, 'stale branch selection still needs a choice')
+})
+
+const availability = await load('components/shared/AvailabilityFilterOptions.tsx') as {
+  buildAvailabilityFilterSection: (props: Record<string, unknown>) => { summary: string; render: () => React.ReactNode }
+}
+await runTest('Availability renders the sole branch and preserves selected scope in EN/KM', () => {
+  for (const branchWord of ['Branch', 'សាខា']) {
+    const section = availability.buildAvailabilityFilterSection({
+      t: (key: string) => key === 'branch' ? branchWord : key,
+      branches: [{ id: 1, name: 'Current Shop' }], branchFilter: '1', setBranchFilter() {},
+      stockFilter: 'all', setStockFilter() {}, groupFilter: 'all', setGroupFilter() {},
+    })
+    const html = quietLayoutEffectWarning(() => renderToStaticMarkup(section.render()))
+    assert.match(html, /Current Shop/)
+    assert.ok(html.includes(branchWord))
+    assert.equal(section.summary, 'Current Shop')
+  }
 })
 
 if (failed) { console.error(`${failed} test(s) failed`); process.exit(1) }
