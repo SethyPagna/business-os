@@ -32,6 +32,7 @@ import { stockLineReason } from '../../utils/stockLineReason.ts'
 import { findSessionProductDuplicate } from '../../utils/createProductsSession.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import { useVisualViewportInset } from '../../utils/useVisualViewportInset.ts'
 import { stableSnapshot } from '../../utils/formDirty.ts'
 import {
   applyPaidToLines,
@@ -175,6 +176,7 @@ export default function FastStockInModal({
   branchOptions, receivingBranchOptions = branchOptions, defaultBranchId, tr, notify, onClose, onDone, onMinimize, initialHeader, initialMode,
   exchangeRate: exchangeRateOverride, initialProduct, initialLines, onPrepareProduct, brandOptions, canCreateProducts, legacyDraft,
 }: FastStockInModalProps) {
+  useVisualViewportInset()
   const app = useApp() as { user: any; exchangeRate: number; usdSymbol: string; khrSymbol: string }
   const { user, usdSymbol, khrSymbol } = app
   const exchangeRate = exchangeRateOverride ?? app.exchangeRate

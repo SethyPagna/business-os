@@ -49,7 +49,7 @@ export default function AppSelect({
   prefix,
 }: AppSelectProps) {
   const [open, setOpen] = useState(false)
-  const [position, setPosition] = useState({ top: 0, left: 0, width: 160 })
+  const [position, setPosition] = useState({ top: 0, left: 0, width: 160, maxHeight: 288 })
   const rootRef = useRef<HTMLDivElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
   const frameRef = useRef(0)
@@ -70,13 +70,20 @@ export default function AppSelect({
     }
     const rect = root.getBoundingClientRect()
     const menuHeight = menuRef.current?.offsetHeight || Math.min(272, 40 * Math.max(1, options.length))
-    const viewportHeight = window.innerHeight
-    const viewportWidth = window.innerWidth
-    let top = rect.bottom + 6
-    if (top + menuHeight > viewportHeight - 8) top = Math.max(8, rect.top - menuHeight - 6)
-    const width = Math.max(rect.width, 112)
-    const left = Math.max(8, Math.min(rect.left, viewportWidth - width - 8))
-    setPosition({ top, left, width })
+    const viewport = window.visualViewport
+    const viewportTop = viewport?.offsetTop || 0
+    const viewportLeft = viewport?.offsetLeft || 0
+    const viewportBottom = viewportTop + (viewport?.height || window.innerHeight)
+    const viewportWidth = viewport?.width || window.innerWidth
+    const below = Math.max(0, viewportBottom - rect.bottom - 14)
+    const above = Math.max(0, rect.top - viewportTop - 14)
+    const placeBelow = below >= menuHeight || below >= above
+    const maxHeight = Math.max(1, Math.min(288, placeBelow ? below : above))
+    const height = Math.min(menuHeight, maxHeight)
+    const top = Math.max(viewportTop + 8, Math.min(placeBelow ? rect.bottom + 6 : rect.top - height - 6, viewportBottom - height - 8))
+    const width = Math.min(Math.max(rect.width, 112), viewportWidth - 16)
+    const left = Math.max(viewportLeft + 8, Math.min(rect.left, viewportLeft + viewportWidth - width - 8))
+    setPosition({ top, left, width, maxHeight })
   }, [options.length])
 
   useEffect(() => {
@@ -106,6 +113,8 @@ export default function AppSelect({
     document.addEventListener('keydown', closeIfEscape)
     window.addEventListener('scroll', scheduleReposition, true)
     window.addEventListener('resize', scheduleReposition)
+    window.visualViewport?.addEventListener('resize', scheduleReposition)
+    window.visualViewport?.addEventListener('scroll', scheduleReposition)
     scheduleReposition()
     return () => {
       document.removeEventListener('mousedown', closeIfOutside)
@@ -113,6 +122,8 @@ export default function AppSelect({
       document.removeEventListener('keydown', closeIfEscape)
       window.removeEventListener('scroll', scheduleReposition, true)
       window.removeEventListener('resize', scheduleReposition)
+      window.visualViewport?.removeEventListener('resize', scheduleReposition)
+      window.visualViewport?.removeEventListener('scroll', scheduleReposition)
       if (frameRef.current) {
         window.cancelAnimationFrame(frameRef.current)
         frameRef.current = 0
@@ -197,7 +208,7 @@ export default function AppSelect({
           aria-label={ariaLabel}
           className={`max-h-[min(18rem,calc(100*var(--app-vh)_-_1rem))] overflow-y-auto overscroll-contain rounded-[1.05rem] border border-slate-200 bg-white p-1.5 shadow-2xl shadow-slate-900/12 ring-1 ring-black/5 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/35 ${menuClassName}`.trim()}
           data-app-select-menu="true"
-          style={{ position: 'fixed', top: position.top, left: position.left, width: position.width, zIndex: 10000 }}
+          style={{ position: 'fixed', top: position.top, left: position.left, width: position.width, maxHeight: position.maxHeight, zIndex: 10000 }}
         >
           {options.map((option, index) => {
             const optionStringValue = optionValue(option.value)

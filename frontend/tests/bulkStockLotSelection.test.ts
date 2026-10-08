@@ -74,9 +74,9 @@ const lots = [
 const anySupplier = { supplierId: null, supplierName: '' }
 
 test('session: New only for Add, Remove only lots with stock, Set every lot', () => {
-  assert.deepEqual(sessionLotChoices('remove', lots, anySupplier).map((lot) => lot.id), [3, 2], 'Remove offers only lots holding stock, oldest first')
-  assert.deepEqual(sessionLotChoices('set', lots, anySupplier).map((lot) => lot.id), [3, 1, 2], 'Set may correct an emptied lot')
-  assert.match(fast, /if \(mode === 'add'\) return \[\{ value: 'new', label: newLabel \}, \.\.\.batchOptions\.map\(lotRow\)\]/, 'New is an Add-only choice')
+  assert.deepEqual(sessionLotChoices('remove', lots, anySupplier).map((lot) => lot.id), [2, 3], 'Remove offers only lots holding stock, newest first')
+  assert.deepEqual(sessionLotChoices('set', lots, anySupplier).map((lot) => lot.id), [2, 1, 3], 'Set may correct an emptied lot, newest first')
+  assert.match(fast, /if \(mode === 'add'\) return \[\{ value: 'new', label: newLabel \}, \.\.\.lotChoices\.map\(lotRow\)\]/, 'New is an Add-only choice')
 })
 
 test('session: a scoped Set names its lot and the count it read', () => {
