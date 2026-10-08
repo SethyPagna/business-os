@@ -21,7 +21,7 @@ import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } f
 import { planReceiveBatchStock, planRemoveStockFromBatch, readFifoLotAvailabilityForCart, allocateAcrossLots, decrementBatchStockStrictStatement } from '../lib/productBatches'
 import {
   normalizeStockAction, resolveRefundUnitPrice, matchRefundSaleLine, RefundSaleLineError, planReturnLot, ReturnLotRequiredError,
-  reverseDamagedLots, planReplacementStock, listOpenDamagedLots,
+  type ReversedDamagedLot, planReplacementStock, listOpenDamagedLots,
   ConsumedDamagedStockError, DAMAGE_IN_MOVEMENT, DAMAGE_REVERSAL_MOVEMENT,
   REPLACEMENT_OUT_MOVEMENT, resolveDamagedReturnChoice, planDamagedReturnLine,
 } from '../lib/returnsStock'
@@ -3213,7 +3213,7 @@ app.patch('/:id', async (c) => {
   let returnUpdateValues: Record<string, unknown> = {}
 
   // Damaged stock reversals are planned with every sellable-stock change.
-  let editReversedDamaged: Awaited<ReturnType<typeof reverseDamagedLots>> = []
+  let editReversedDamaged: ReversedDamagedLot[] = []
 
   // 11.13: this return's damaged lots come back out before the re-apply.
   // A lot POS already drew from can't be un-damaged (that stock left the
