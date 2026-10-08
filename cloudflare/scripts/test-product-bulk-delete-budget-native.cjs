@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
+const { AsyncLocalStorage } = require('node:async_hooks')
 const { DatabaseSync } = require('node:sqlite')
 const ts = require('typescript')
 const { loadAll } = require('./harness/load_migrations.cjs')
@@ -26,6 +27,9 @@ function load(file) {
 const { runBulkDeleteJob, createBulkDeleteJob } = load(path.join(root, 'lib/bulkDeleteEngine.ts'))
 const tier = load(path.join(root, 'lib/planTier.ts'))
 const cache = load(path.join(root, 'lib/cache.ts'))
+const metrics = load(path.join(root, 'lib/requestMetrics.ts'))
+const transaction = load(path.join(root, 'lib/stockTransaction.ts'))
+const physicalScope = new AsyncLocalStorage()
 const productSource = ts.createSourceFile('products.ts', fs.readFileSync(path.join(root, 'routes/products.ts'), 'utf8'), ts.ScriptTarget.Latest, true)
 const indexNames = new Set(['SEARCH_INDEX_FORMAT', 'SEARCH_INDEX_PAGE_IDS', 'fnv1aHex', 'buildProductSearchIndexPage'])
 const indexSource = productSource.statements.filter(node => indexNames.has(node.name?.text)
@@ -38,13 +42,16 @@ new Function('getDb', 'catalogProductSql', 'module', 'exports', ts.transpileModu
 const { buildProductSearchIndexPage } = indexModule.exports
 function fixture(plan, total) {
   const raw = new DatabaseSync(':memory:')
-  for (const sql of loadAll()) raw.exec(sql)
+  for (const sql of loadAll({through:242})) raw.exec(sql)
   const ids = Array.from({ length: total }, (_, i) => 10000 + i)
   const insert = raw.prepare('INSERT INTO products(id,name,barcode,is_active,stock_quantity) VALUES(?,?,?,1,0)')
   for (const id of ids) insert.run(id, `fixture ${id}`, `BUDGET${id}`)
+  for(const file of fs.readdirSync(path.join(root,'../migrations')).filter(file=>file.endsWith('.sql') && Number(file.slice(0,4))>242).sort())
+    raw.exec(fs.readFileSync(path.join(root,'../migrations',file),'utf8'))
+  assert.throws(()=>raw.prepare("INSERT INTO products(name) VALUES('unguarded must refuse')").run(),/stock_transaction_required/)
   raw.prepare("INSERT INTO bulk_delete_jobs(id,entity_type,status,reason,ids_json,total_count) VALUES('budget','products','pending','fixture',?,?)").run(JSON.stringify(ids), total)
   const state = { statements: 0, ceiling: plan === 'free' ? 50 : 1000, beforeBatch: null, afterBatch: null, queued: [], failOnce: new Set(), faults: [], failKvPut: false }
-  const count = n => { state.statements += n; if (state.statements > state.ceiling) throw new Error('fixture invocation query budget exceeded') }
+  const count = n => { const observed=physicalScope.getStore(); if(observed) observed.attempts+=n; state.statements += n; if (state.statements > state.ceiling) throw new Error('fixture invocation query budget exceeded') }
   const fault = sql => {
     const kind = /SELECT namespace, version FROM cache_versions/.test(sql) ? 'cache-read'
       : /INSERT INTO quota_usage/.test(sql) ? 'quota-write'
@@ -65,19 +72,33 @@ function fixture(plan, total) {
   const DB = { prepare, async batch(list) {
     count(list.length)
     for (const stmt of list) fault(stmt.sql)
-    const hook = state.beforeBatch; state.beforeBatch = null; if (hook) hook(list)
+    const hook = state.beforeBatch; state.beforeBatch = null; if (hook) await hook(list)
     raw.exec('BEGIN IMMEDIATE')
     let out
     try { out = list.map(s => s._exec()); raw.exec('COMMIT') } catch (error) { raw.exec('ROLLBACK'); throw error }
-    const after = state.afterBatch; state.afterBatch = null; if (after) after()
+    const after = state.afterBatch; state.afterBatch = null; if (after) await after()
     return out
   } }
   const kv = new Map()
   const env = { DB, PLAN_TIER: plan, broadcasts: [], CACHE: { get: async k => kv.get(k) ?? null, put: async (k,v) => { if (state.failKvPut) throw new Error('KV unavailable'); kv.set(k,v) }, delete: async k => kv.delete(k) }, IMPORT_QUEUE: { send: async body => state.queued.push(body) } }
-  const run = async (reset = true) => { if (reset) state.statements = 0; tier.__resetPlanTierCacheForTests(); await runBulkDeleteJob(env, 'budget'); return state.statements }
+  const stockDb=new (load(path.join(root,'lib/db.ts')).D1Compat)(DB)
+  const stockWrite=statements=>transaction.executeStockTransaction(stockDb,statements,'once')
+  const run = async (reset = true) => {
+    if (reset) state.statements = 0; tier.__resetPlanTierCacheForTests()
+    const observed={attempts:0}
+    return physicalScope.run(observed,()=>metrics.runBackground(undefined,'bulk-budget-fixture',async()=>{
+      try {await runBulkDeleteJob(env,'budget');return state.statements}
+      finally{
+        assert.equal(metrics.currentRequestMetrics().invocation.attemptedStatements,observed.attempts,'actual metrics equal every native attempt, including failed batches and tails')
+        assert.ok(observed.attempts<=state.ceiling)
+        assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0)
+        console.log('MEASURED bulk '+JSON.stringify({plan,attempts:observed.attempts,aggregate:state.statements}))
+      }
+    }))
+  }
   const job = () => raw.prepare("SELECT * FROM bulk_delete_jobs WHERE id='budget'").get()
   const audits = () => raw.prepare("SELECT COUNT(*) n FROM audit_logs WHERE entity='product' AND action='delete'").get().n
-  return { raw, ids, state, env, kv, run, job, audits }
+  return { raw, ids, state, env, kv, run, job, audits, stockWrite }
 }
 async function terminalRecovery() {
   const previousCaches = globalThis.caches
@@ -89,7 +110,7 @@ async function terminalRecovery() {
       const cap = plan === 'free' ? 125 : 500
       const f = fixture(plan, outcome === 'completed' ? 2 : cap + 3)
       f.raw.exec("UPDATE bulk_delete_jobs SET status='processing'")
-      if (outcome !== 'completed') f.raw.prepare('UPDATE products SET stock_quantity=1 WHERE id=?').run(f.ids[0])
+      if (outcome !== 'completed') await f.stockWrite([{sql:'UPDATE products SET stock_quantity=1 WHERE id=?',params:[f.ids[0]]}])
       f.kv.set('v2:products', '9')
       const tasks = []
       const request = new Request('https://fixture.test/api/products/search-index?page=5&format=1')
@@ -171,7 +192,7 @@ async function terminalRecovery() {
     assert.equal(pending.kv.size, 0)
     pending.raw.close()
     const absent = fixture('free', 2)
-    absent.raw.exec('UPDATE products SET is_active=0')
+    await absent.stockWrite([{sql:'UPDATE products SET is_active=0'}])
     await absent.run()
     await absent.run()
     assert.equal(absent.audits(), 0, 'already absent ids never gain fabricated business effects')
@@ -194,7 +215,26 @@ async function terminalRecovery() {
     console.log('PASS pending failure, zero progress, all-failed, absent ids, legacy contact and missing-job no-op controls')
   } finally { globalThis.caches = previousCaches }
 }
+async function schemaControls(){
+  for(const plan of ['free','paid']) for(const fault of ['wrong epoch','missing epoch','maintenance']){
+    const f=fixture(plan,2)
+    f.raw.exec("UPDATE bulk_delete_jobs SET status='processing'")
+    const epoch=f.raw.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get().value
+    if(fault==='wrong epoch')f.raw.exec("UPDATE system_flags SET value='wrong-test-epoch' WHERE key='stock_schema_epoch'")
+    if(fault==='missing epoch')f.raw.exec("DELETE FROM system_flags WHERE key='stock_schema_epoch'")
+    if(fault==='maintenance')await f.stockWrite([{sql:"INSERT INTO system_flags(key,value) VALUES('maintenance','{}')"}])
+    const saved=JSON.stringify({products:f.raw.prepare('SELECT * FROM products').all(),job:f.job(),audit:f.audits()})
+    await assert.rejects(f.run(),error=>error.code===(fault==='maintenance'?'import_maintenance_active':'stock_schema_unavailable'))
+    assert.equal(JSON.stringify({products:f.raw.prepare('SELECT * FROM products').all(),job:f.job(),audit:f.audits()}),saved)
+    f.raw.prepare("INSERT INTO system_flags(key,value) VALUES('stock_schema_epoch',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(epoch)
+    f.raw.exec("DELETE FROM system_flags WHERE key='maintenance'")
+    await f.run();await f.run();assert.equal(f.audits(),2)
+    console.log('PASS '+plan+' '+fault+' refuses entire physical/audit/cursor group and same-job retry is once')
+    f.raw.close()
+  }
+}
 async function main() {
+  await schemaControls()
   await terminalRecovery()
   for (const plan of ['free', 'paid']) {
     const cap = plan === 'free' ? 125 : 500
@@ -227,13 +267,13 @@ async function main() {
   for (const ledger of ['cache', 'branch', 'batch', 'damaged']) {
     const g = fixture('free', 2)
     const id = g.ids[0]
-    if (ledger === 'cache') g.raw.prepare('UPDATE products SET stock_quantity=1 WHERE id=?').run(id)
-    if (ledger === 'branch') g.raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,1)').run(id)
+    if (ledger === 'cache') await g.stockWrite([{sql:'UPDATE products SET stock_quantity=1 WHERE id=?',params:[id]}])
+    if (ledger === 'branch') await g.stockWrite([{sql:'INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,1)',params:[id]}])
     if (ledger === 'batch') {
-      g.raw.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,is_active) VALUES(9000,?,'budget','budget',1)").run(id)
-      g.raw.exec('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(9000,1,1)')
+      await g.stockWrite([{sql:"INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,is_active) VALUES(9000,?,'budget','budget',1)",params:[id]}])
+      await g.stockWrite([{sql:'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(9000,1,1)'}])
     }
-    if (ledger === 'damaged') g.raw.prepare("INSERT INTO damaged_stock_lots(product_id,branch_id,quantity,quantity_remaining,condition_tag) VALUES(?,1,1,1,'damaged')").run(id)
+    if (ledger === 'damaged') await g.stockWrite([{sql:"INSERT INTO damaged_stock_lots(product_id,branch_id,quantity,quantity_remaining,condition_tag) VALUES(?,1,1,1,'damaged')",params:[id]}])
     await g.run()
     assert.equal(g.job().status, 'completed')
     assert.equal(g.job().failed_count, 1)
@@ -250,7 +290,7 @@ async function main() {
   console.log('PASS each ledger alone refuses stocked product; empty sibling and per-product audit preserved')
   const race = fixture('free', 2)
   race.raw.exec("UPDATE bulk_delete_jobs SET status='processing'")
-  race.state.beforeBatch = () => race.raw.prepare('UPDATE products SET stock_quantity=1 WHERE id=?').run(race.ids[0])
+  race.state.beforeBatch = () => race.stockWrite([{sql:'UPDATE products SET stock_quantity=1 WHERE id=?',params:[race.ids[0]]}])
   await assert.rejects(race.run(), /product_has_stock/)
   assert.equal(race.job().processed_count, 0)
   assert.equal(race.audits(), 0)
