@@ -46,7 +46,7 @@ function installLifecycleFlush(): void {
   }
 }
 
-export function scopedWorkDraftKey(baseKey: string): string {
+function workDraftIdentity(baseKey: string) {
   let userId = 'anonymous'
   let organizationId = 'default'
   try {
@@ -56,7 +56,25 @@ export function scopedWorkDraftKey(baseKey: string): string {
     organizationId = String(user.organization_public_id || user.organizationId || user.organization_id || 'default').replace(/[^a-z0-9_-]+/gi, '_')
   } catch {}
   const cleanBase = String(baseKey || 'draft').replace(/[^a-z0-9_-]+/gi, '_')
-  return `businessos_draft_${organizationId}_${userId}_${cleanBase}`
+  return { organizationId, userId, cleanBase }
+}
+
+export function hasUnscopedWorkDraft(baseKey: string): boolean {
+  const { organizationId, userId, cleanBase } = workDraftIdentity(baseKey)
+  try { return localStorage.getItem(`businessos_draft_${organizationId}_${userId}_${cleanBase}`) !== null } catch { return false }
+}
+
+export function scopedWorkDraftKey(baseKey: string): string {
+  const { organizationId, userId, cleanBase } = workDraftIdentity(baseKey)
+  let origin = ''
+  let server = ''
+  try { origin = window.location?.origin || '' } catch {}
+  try {
+    const configured = localStorage.getItem(STORAGE_KEYS.SYNC_SERVER) || origin
+    server = new URL(configured, origin || undefined).origin
+  } catch {}
+  const authority = encodeURIComponent(JSON.stringify([origin, server, organizationId, userId]))
+  return `businessos_draft_v2_${authority}_${cleanBase}`
 }
 
 export function flushPendingWorkDrafts(): void {
@@ -108,6 +126,14 @@ export function writeWorkDraft<T>(key: string, data: T): void {
   if (pending) window.clearTimeout(pending.timer)
   pendingWorkDrafts.delete(key)
   persistWorkDraft(key, data)
+}
+
+export function clearUnchangedWorkDraft(key: string, expected: WorkDraft<unknown> | null): boolean {
+  flushPendingWorkDraft(key)
+  const current = readWorkDraft<unknown>(key)
+  if (current?.at !== expected?.at || JSON.stringify(current?.data) !== JSON.stringify(expected?.data)) return false
+  clearWorkDraft(key)
+  return true
 }
 
 export function clearWorkDraft(key: string): void {

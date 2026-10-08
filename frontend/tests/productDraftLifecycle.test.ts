@@ -19,7 +19,7 @@ assert.match(productsSource, /draftScope="standalone-create"/, 'standalone creat
 assert.match(productsSource, /if \(!res\?\.success\) throw new Error/, 'failed product creates must reject back to ProductForm')
 assert.match(productFormSource, /clearAfterSuccessfulProductSave/, 'draft clearing must be gated by a resolved save')
 assert.match(productFormSource, /await Promise\.resolve\(save\(\)\)\s+clear\(\)\s+close\(\)/, 'successful save must mark clean before the form closes')
-assert.match(productFormSource, /clearAfterSuccessfulProductSave\([\s\S]*?clearCurrentProductDraft\(\)[\s\S]*?onClose,[\s\S]*?\)/, 'ProductForm must own the ordered successful close')
+assert.match(productFormSource, /clearAfterSuccessfulProductSave\([\s\S]*?savedAuthorityCurrent = cleared && isSaveAuthorityCurrent\(\)[\s\S]*?if \(savedAuthorityCurrent\) clearCurrentProductDraft\(\)[\s\S]*?if \(savedAuthorityCurrent\) onClose\(\)/, 'ProductForm must own the ordered successful close')
 assert.match(productFormSource, /const legacyDraft = !draft && legacyDraftKey/, 'legacy fallback must run only when the new scoped draft is absent')
 assert.match(productFormSource, /restoredLegacyDraftKeyRef\.current = legacyDraft\?\.data \? legacyDraftKey : null/, 'legacy clearing must be armed only by an actual fallback restore')
 assert.match(productFormSource, /useEffect\(\(\) => \(\) => \{[\s\S]*?flushPendingWorkDraft\(draftKey\)[\s\S]*?\}, \[draftKey\]\)/, 'unmount/key change must flush only this form pending draft')

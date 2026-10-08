@@ -28,7 +28,8 @@ import {
   productMatchQueries,
   shouldSearchProductMatches,
 } from '../helpers/productNameSuggestions.ts'
-import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, scopedWorkDraftKey } from '../../../utils/workDrafts.ts'
+import { captureActorReadScope, isActorReadScopeCurrent } from '../../../api/actorReadScope.ts'
+import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, scopedWorkDraftKey, hasUnscopedWorkDraft, clearUnchangedWorkDraft } from '../../../utils/workDrafts.ts'
 import { searchProducts as searchProductsForMatch, getProductFilters } from '../../../api/methods.ts'
 import { buildCacheBustedMediaPath, canonicalizePersistedMediaPath } from '../../../utils/mediaUpload.ts'
 import {
@@ -515,6 +516,7 @@ export default function ProductForm({
   const draftKey = scopedWorkDraftKey(productFormDraftBaseKey(product?.id, draftScope))
   const legacyDraftBaseKey = legacyStandaloneProductDraftBaseKey(product?.id, draftScope)
   const legacyDraftKey = legacyDraftBaseKey ? scopedWorkDraftKey(legacyDraftBaseKey) : null
+  const unscopedDraftAvailable = hasUnscopedWorkDraft(productFormDraftBaseKey(product?.id, draftScope)) || Boolean(legacyDraftBaseKey && hasUnscopedWorkDraft(legacyDraftBaseKey))
 
   const initialForm = useMemo<ProductFormState>(() => {
     if (product?.id) {
@@ -1174,6 +1176,15 @@ export default function ProductForm({
     // disabled button. See the button's own comment for the bug this
     // closes: saving mid-upload used the stale pre-upload imageList.
     if (saving || saveInFlightRef.current || imageUploading || imageUploadInFlightRef.current) return
+    const saveScope = captureActorReadScope('product-draft-save')
+    const isSaveAuthorityCurrent = () => draftKey === scopedWorkDraftKey(productFormDraftBaseKey(product?.id, draftScope)) && isActorReadScopeCurrent(saveScope, false)
+    const canContinueSave = () => {
+      if (isSaveAuthorityCurrent()) return true
+      saveInFlightRef.current = false
+      alert(tr('product_draft_authority_changed', 'The account or server changed. Reopen this form to continue. Its draft stays with the original account and server.', 'គណនី ឬម៉ាស៊ីនមេបានផ្លាស់ប្ដូរ។ សូមបិទហើយបើកទម្រង់នេះឡើងវិញដើម្បីបន្ត។ សេចក្ដីព្រាងនៅតែរក្សាទុកជាមួយគណនី និងម៉ាស៊ីនមេដើម។'))
+      return false
+    }
+    if (!canContinueSave()) return
     if (!String(form.name || '').trim()) {
       alert(tr('name_required_alert', 'Name is required', 'ត្រូវការឈ្មោះ'))
       return
@@ -1212,6 +1223,7 @@ export default function ProductForm({
       const ackKey = `${String(form.name || '').trim().toLowerCase()}|${String(form.barcode || '').trim()}`
       if (createMatchAckRef.current !== ackKey) {
         const choice = await askCreateVerdict()
+        if (!canContinueSave()) return
         if (choice === 'back') return
         if (choice === 'group' && createVerdict.canonicalName) {
           setField('name', createVerdict.canonicalName)
@@ -1295,8 +1307,10 @@ export default function ProductForm({
       if (oldName && newName && oldName.toLowerCase() !== newName.toLowerCase()) {
         try {
           const impact = await getRenameImpact('product_name', oldName, newName)
+          if (!canContinueSave()) return
           if (impact.group_rows > 1) {
             const choice = await askRenameChoice({ kind: 'product_name', from: oldName, to: newName, impact, choices: ['carry', 'only'] })
+            if (!canContinueSave()) return
             if (choice === 'cancel') { saveInFlightRef.current = false; return }
             if (choice === 'carry') (payload as unknown as Record<string, unknown>).__rename_scope = 'group'
           }
@@ -1307,8 +1321,10 @@ export default function ProductForm({
       if (oldBrand && newBrand && oldBrand.toLowerCase() !== newBrand.toLowerCase()) {
         try {
           const impact = await getRenameImpact('brand', oldBrand, newBrand)
+          if (!canContinueSave()) return
           if (impact.products_primary + impact.products_secondary > 1) {
             const choice = await askRenameChoice({ kind: 'brand', from: oldBrand, to: newBrand, impact, choices: ['carry', 'only'] })
+            if (!canContinueSave()) return
             if (choice === 'cancel') { saveInFlightRef.current = false; return }
             if (choice === 'carry') await renameBrandEverywhere(oldBrand, newBrand)
           }
@@ -1320,19 +1336,24 @@ export default function ProductForm({
     // the promise-based askRenameChoice/askCreateVerdict pattern above; a
     // Cancel returns to the still-open form with nothing written.
     const confirmedSave = await askSaveConfirm()
+    if (!canContinueSave()) return
     if (!confirmedSave) { saveInFlightRef.current = false; return }
+    flushPendingWorkDraft(draftKey)
+    const submittedDraft = readWorkDraft<unknown>(draftKey)
+    const submittedLegacyKey = restoredLegacyDraftKeyRef.current
+    const submittedLegacyDraft = submittedLegacyKey ? readWorkDraft<unknown>(submittedLegacyKey) : null
     setSaving(true)
     try {
+      let savedAuthorityCurrent = false
       await clearAfterSuccessfulProductSave(
         () => onSave(payload),
         () => {
-          // Saved for real -- the autosaved draft is now history (Part 388).
-          clearCurrentProductDraft()
+          const cleared = clearUnchangedWorkDraft(draftKey, submittedDraft)
+          if (cleared && submittedLegacyKey) clearUnchangedWorkDraft(submittedLegacyKey, submittedLegacyDraft)
+          savedAuthorityCurrent = cleared && isSaveAuthorityCurrent()
+          if (savedAuthorityCurrent) clearCurrentProductDraft()
         },
-        // ProductForm owns the successful close. Its hosts only persist or
-        // queue the payload; none may unmount this form before the dirty latch
-        // and exact draft are cleared above.
-        onClose,
+        () => { if (savedAuthorityCurrent) onClose() },
       )
     } catch (error) {
       alert(getErrorMessage(error, tr('failed', 'Failed', 'បរាជ័យ')))
@@ -1433,6 +1454,7 @@ export default function ProductForm({
         </>
       )}
       unsavedChanges={{ workKey: dirtyWorkKey }}>
+      {unscopedDraftAvailable ? <p role="status" className="mb-3 text-xs text-amber-700 dark:text-amber-300">{tr('product_draft_unknown_authority', 'An older draft is preserved on this device. Its server cannot be verified, so it has not been opened here.', 'សេចក្ដីព្រាងចាស់នៅតែរក្សាទុកលើឧបករណ៍នេះ។ មិនអាចផ្ទៀងផ្ទាត់ម៉ាស៊ីនមេរបស់វាបានទេ ដូច្នេះវាមិនត្រូវបានបើកនៅទីនេះទេ។')}</p> : null}
       <div ref={productFormContentRef} className="mb-5 -mx-5 border-b border-gray-200 px-5 dark:border-gray-700">
         <div className="flex gap-1 overflow-x-auto">
           {tabs.map((tab) => (

@@ -1,4 +1,6 @@
 {
+  "product_draft_unknown_authority": "An older draft is preserved on this device. Its server cannot be verified, so it has not been opened here.",
+  "product_draft_authority_changed": "The account or server changed. Reopen this form to continue. Its draft stays with the original account and server.",
   "stock_session_query_budget_exceeded": "This stock change is too large for the current plan. Use fewer products or received dates, then try again.",
   "customer_return_over_plan_budget": "This return is too large for the current plan. Return fewer items or received dates, then try again.",
   "stock_import_unit_over_tier_budget": "This stock action is too large for the current plan. Use fewer items or received dates, then try again.",

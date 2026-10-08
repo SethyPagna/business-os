@@ -25,7 +25,7 @@ const eventListeners = new Map<string, Array<() => void>>()
   },
 }
 
-const { flushPendingWorkDraft, flushPendingWorkDrafts, readWorkDraft, writeWorkDraft, clearWorkDraft, scheduleWorkDraftWrite, scopedWorkDraftKey } = await import('../src/utils/workDrafts.ts')
+const { clearUnchangedWorkDraft, flushPendingWorkDraft, flushPendingWorkDrafts, readWorkDraft, writeWorkDraft, clearWorkDraft, scheduleWorkDraftWrite, scopedWorkDraftKey } = await import('../src/utils/workDrafts.ts')
 
 let failed = 0
 
@@ -98,7 +98,7 @@ await runTest('one pending key can flush on form unmount without writing or clea
 
 await runTest('draft keys are scoped to organization and user', () => {
   memory.set('businessos_user', JSON.stringify({ id: 42, organization_public_id: 'shop-a' }))
-  assert.equal(scopedWorkDraftKey('product_new'), 'businessos_draft_shop-a_42_product_new')
+  assert.equal(scopedWorkDraftKey('product_new'), `businessos_draft_v2_${encodeURIComponent(JSON.stringify(['', '', 'shop-a', '42']))}_product_new`)
   memory.delete('businessos_user')
 })
 
@@ -132,6 +132,42 @@ await runTest('all flows ride the ONE store -- no leftover hand-rolled localStor
   assert.match(branchesSource, /if \(receiveTarget\.legacyDraftKey\) clearWorkDraft\(receiveTarget\.legacyDraftKey\)/)
 })
 
+await runTest('server authority separates same actor/org drafts and pending flush preserves its original owner', () => {
+  const originalLocation = (window as unknown as { location?: unknown }).location
+  Object.assign(window, { location: { origin: 'https://app.example.test' } })
+  memory.set('businessos_user', JSON.stringify({ id: 42, organization_public_id: 'shop-a' }))
+  memory.set('businessos_sync_server', 'https://a.example.test')
+  const a = scopedWorkDraftKey('product_new')
+  scheduleWorkDraftWrite(a, { name: 'A pending' }, 60_000)
+  memory.set('businessos_sync_server', 'https://b.example.test')
+  const b = scopedWorkDraftKey('product_new')
+  assert.notEqual(a, b)
+  flushPendingWorkDraft(a)
+  assert.equal(readWorkDraft(b), null)
+  writeWorkDraft(b, { name: 'B own' })
+  memory.set('businessos_sync_server', 'https://a.example.test/')
+  assert.equal(scopedWorkDraftKey('product_new'), a)
+  assert.equal(readWorkDraft<{ name: string }>(a)?.data.name, 'A pending')
+  assert.equal(readWorkDraft<{ name: string }>(b)?.data.name, 'B own')
+  const old = 'businessos_draft_shop-a_42_product_new'
+  const bytes = JSON.stringify({ at: 500, data: { name: 'unknown server legacy' } })
+  memory.set(old, bytes)
+  clearWorkDraft(a); clearWorkDraft(b)
+  assert.equal(readWorkDraft(scopedWorkDraftKey('product_new')), null)
+  assert.equal(memory.get(old), bytes, 'unknown legacy bytes retained, never assigned to current server')
+  memory.delete('businessos_user'); memory.delete('businessos_sync_server')
+  Object.assign(window, { location: originalLocation })
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }
+
+writeWorkDraft('cas', { value: 'submitted' })
+const submitted = readWorkDraft('cas')
+scheduleWorkDraftWrite('cas', { value: 'new edit' }, 60000)
+assert.equal(clearUnchangedWorkDraft('cas', submitted), false)
+assert.deepEqual(readWorkDraft('cas')?.data, { value: 'new edit' })
+assert.equal(clearUnchangedWorkDraft('cas', readWorkDraft('cas')), true)
+assert.equal(readWorkDraft('cas'), null)
+console.log('PASS successful draft cleanup preserves newer pending edits and clears only its unchanged snapshot')
