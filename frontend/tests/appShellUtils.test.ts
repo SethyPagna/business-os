@@ -95,13 +95,13 @@ runTest('service worker serves cached app shell for offline navigations only', (
   assert.match(source, /isNeverCachedPath/)
   assert.match(source, /\/api\//)
   assert.match(source, /\/uploads\//)
-  assert.match(source, /fetch\(request, \{ cache: 'no-store' \}\)/)
+  assert.match(source, /async function fetchAndCacheShell\(request, cache\)[\s\S]*?await fetch\(request\)/)
   assert.match(source, /!response\.redirected/)
   // P4-4b fix 4: appShellFallback is cache-first with background
   // revalidation now (see tests/swNavigationStrategy.test.ts for the full
   // pin) -- a cache hit answers immediately and the network refresh runs
   // through event.waitUntil, not before the response.
-  assert.match(source, /(?:const|let) cached = await cache\.match\('\/index\.html'\) \|\| await cache\.match\('\/'\)/)
+  assert.match(source, /(?:const|let) cached = await cache\?\.match\('\/index\.html'\)\.catch\(\(\) => undefined\) \|\| await cache\?\.match\('\/'\)\.catch\(\(\) => undefined\)/)
   assert.match(source, /event\.waitUntil\(revalidate\)/)
 })
 
