@@ -2,6 +2,13 @@ const assert = require('node:assert/strict')
 const { loadRoute, loadTs, seed, post } = require('./test-product-conflict-action-groups-sqlite.cjs')
 
 const user = { id: 900, username: 'reviewer' }
+function emptyRemovalFixture(d1, ids) {
+  const selected = JSON.stringify(ids)
+  d1.db.prepare('UPDATE damaged_stock_lots SET quantity_remaining=0 WHERE product_id IN (SELECT value FROM json_each(?))').run(selected)
+  d1.db.prepare('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id IN (SELECT value FROM json_each(?)))').run(selected)
+  d1.db.prepare('UPDATE branch_stock SET quantity=0 WHERE product_id IN (SELECT value FROM json_each(?))').run(selected)
+  d1.db.prepare('UPDATE products SET stock_quantity=0 WHERE id IN (SELECT value FROM json_each(?))').run(selected)
+}
 
 function loadReviewApply(fixture) {
   return loadTs('lib/reviewApply.ts', {
@@ -422,12 +429,25 @@ async function main() {
     const { d1 } = seed(1)
     const loaded = loadRoute(d1, true)
     const review = await post(loaded.app, {
-      manifest_version: 1, resolution_version: 2, client_request_id: 'remove_only_review_001', merge_groups: [],
+      manifest_version: 1, resolution_version: 2, client_request_id: 'stocked_remove_review_001', merge_groups: [],
       remove_rows: [{ product_id: 10000, reason: 'Independent duplicate row' }],
     }, { ...user, noMerge: true })
     assert.equal(review.status, 200, JSON.stringify(review.body))
     assert.equal(review.body.counts.requested_groups, 0)
     assert.equal(review.body.counts.requested_removals, 1)
+    assert.equal(d1.db.prepare('SELECT blocker_code FROM product_remove_operations WHERE product_id=10000').get().blocker_code, 'product_has_stock')
+    assert.equal(d1.db.prepare('SELECT stock_quantity FROM products WHERE id=10000').get().stock_quantity, 2)
+    assert.equal(d1.db.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, 0)
+  }
+  {
+    const { d1 } = seed(1)
+    emptyRemovalFixture(d1, [10000])
+    const loaded = loadRoute(d1, true)
+    const review = await post(loaded.app, {
+      manifest_version: 1, resolution_version: 2, client_request_id: 'remove_only_review_001', merge_groups: [],
+      remove_rows: [{ product_id: 10000, reason: 'Independent empty duplicate row' }],
+    }, { ...user, noMerge: true })
+    assert.equal(review.status, 200, JSON.stringify(review.body))
     assert.equal(review.body.page.removals[0].batches[0].supplier_name, 'Supplier A')
     const finalized = await finalize(loaded.app, review.body, [])
     assert.equal(finalized.status, 200, JSON.stringify(finalized.body))
@@ -440,8 +460,7 @@ async function main() {
     assert.equal(applied.body.removals[0].undo_availability, 'ready')
     assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=10000').get().is_active, 0)
     assert.equal(d1.db.prepare('SELECT is_active FROM product_batches WHERE id=99001').get().is_active, 0)
-    assert.deepEqual({ ...d1.db.prepare("SELECT movement_type,quantity FROM inventory_movements WHERE product_id=10000 AND movement_type='write_off'").get() },
-      { movement_type: 'write_off', quantity: 2 })
+    assert.equal(d1.db.prepare("SELECT COUNT(*) n FROM inventory_movements WHERE product_id=10000 AND movement_type='write_off'").get().n, 0)
     const history = d1.db.prepare("SELECT id,undo_payload FROM action_history WHERE json_extract(undo_payload,'$.applier')='product.remove'").get()
     const payload = JSON.parse(history.undo_payload)
     const applier = loaded.undo.resolveUndoApplier(payload)
@@ -462,6 +481,7 @@ async function main() {
     const { d1 } = seed(1)
     d1.db.prepare(`INSERT INTO users(id,username,name,password,permissions,is_active)
       VALUES(900,'requester','Requester','x','{}',1),(903,'approver','Approver','x','{}',1)`).run()
+    emptyRemovalFixture(d1, [10000])
     const loaded = loadRoute(d1, true)
     const reviewer = { ...user, noMerge: true, reviewDelete: true }
     const review = await post(loaded.app, {
@@ -505,6 +525,7 @@ async function main() {
     const { d1 } = seed(7)
     const loaded = loadRoute(d1, true)
     const removeRows = Array.from({ length: 13 }, (_, index) => ({ product_id: 10000 + index, reason: `Remove row ${index + 1}` }))
+    emptyRemovalFixture(d1, removeRows.map(row => row.product_id))
     const review = await post(loaded.app, { manifest_version: 1, resolution_version: 2,
       client_request_id: 'remove_thirteen_001', merge_groups: [], remove_rows: removeRows })
     assert.equal(review.status, 200)
@@ -529,6 +550,7 @@ async function main() {
     const loaded = loadRoute(d1, true)
     const reviewer = { ...user, noMerge: true, reviewDelete: true }
     const removeRows = Array.from({ length: 13 }, (_, index) => ({ product_id: 10000 + index, reason: `Review row ${index + 1}` }))
+    emptyRemovalFixture(d1, removeRows.map(row => row.product_id))
     const review = await post(loaded.app, { manifest_version: 1, resolution_version: 2,
       client_request_id: 'remove_thirteen_review_tier_001', merge_groups: [], remove_rows: removeRows }, reviewer)
     assert.equal(review.status, 200)
@@ -556,6 +578,7 @@ async function main() {
 
   {
     const { d1, groups } = seed(2)
+    emptyRemovalFixture(d1, [10002])
     const loaded = loadRoute(d1, true)
     const review = await post(loaded.app, { manifest_version: 1, resolution_version: 2,
       client_request_id: 'mixed_group_remove_001', merge_groups: [groups[0]],
