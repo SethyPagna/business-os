@@ -42,7 +42,9 @@ export function getIntegrationDoctor(options: { deep?: boolean; write?: boolean 
 // called refreshAppData(). Given the LONG_SYSTEM_ACTION_TIMEOUT_MS this
 // file already uses for other slow one-shot system actions (pick-folder,
 // scale-migration, data-path), these two get the same treatment now.
-export async function resetData(mode = 'sales', options: { includeMovements?: boolean; includeSales?: boolean; includeImages?: boolean } = {}): Promise<unknown> {
+export async function resetData(mode: 'sales' | 'products' | 'all', options: { confirm: string; acknowledged: true; includeMovements?: boolean; includeSales?: boolean; includeImages?: boolean }): Promise<unknown> {
+  const phrase = { sales: 'RESET SALES', products: 'RESET PRODUCTS', all: 'DELETE ALL DATA' }[mode]
+  if (!phrase || options?.confirm !== phrase || options?.acknowledged !== true) throw new Error('Reset requires the warning acknowledgement and exact confirmation phrase.')
   return route(
     'data:reset',
     () => apiFetch('POST', '/api/system/reset-data', { mode, ...options }, LONG_SYSTEM_ACTION_TIMEOUT_MS),
@@ -68,7 +70,8 @@ export async function resetSection(section: string): Promise<unknown> {
 // The Worker enforces the typed phrase and the caller's current password
 // itself (routes/system.ts POST /factory-reset); the browser's own checks in
 // ResetData.tsx are only the first line.
-export async function factoryReset(confirmation: { confirm: string; currentPassword: string }): Promise<unknown> {
+export async function factoryReset(confirmation: { confirm: string; acknowledged: true; currentPassword: string }): Promise<unknown> {
+  if (confirmation?.confirm !== 'FACTORY RESET' || confirmation?.acknowledged !== true || !confirmation?.currentPassword) throw new Error('Factory reset requires the warning acknowledgement, exact confirmation phrase and current password.')
   return route(
     'data:factoryReset',
     () => apiFetch('POST', '/api/system/factory-reset', confirmation, LONG_SYSTEM_ACTION_TIMEOUT_MS),

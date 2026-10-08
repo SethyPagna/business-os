@@ -13,7 +13,7 @@ import { useApp as useAppFromContext } from '../../AppContext.tsx'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { refreshAppData } from '../../utils/appRefresh'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
-import { isAdminControlUser, type PermissionUser } from '../../utils/permissions.ts'
+import type { PermissionUser } from '../../utils/permissions.ts'
 import LegacySubtotalRepair from './LegacySubtotalRepair.tsx'
 import GeneralCustomerRepair from './GeneralCustomerRepair.tsx'
 import GeneralCustomerMembershipRepair from './GeneralCustomerMembershipRepair.tsx'
@@ -51,9 +51,16 @@ type ProductsResetToggles = {
 }
 
 type ResetApi = {
-  resetData?: (mode: ResetMode, options?: ProductsResetToggles) => Promise<ResetApiResult>
+  resetData?: (mode: ResetMode, options: ProductsResetToggles & ResetConfirmation) => Promise<ResetApiResult>
   resetSection?: (section: 'customers' | 'suppliers' | 'delivery_contacts' | 'audit_log') => Promise<ResetApiResult>
-  factoryReset?: (confirmation: { confirm: string; currentPassword: string }) => Promise<ResetApiResult>
+  factoryReset?: (confirmation: ResetConfirmation & { currentPassword: string }) => Promise<ResetApiResult>
+}
+
+type ResetConfirmation = { confirm: string; acknowledged: true }
+
+function isBuiltInResetAdmin(user: PermissionUser): boolean {
+  return String(user?.username || '').trim().toLowerCase() === 'admin'
+    && String(user?.role_code || '').trim().toLowerCase() === 'admin'
 }
 
 type ActionHistory = {
@@ -66,12 +73,13 @@ type ActionHistory = {
 }
 
 type ConfirmResetProps = {
+  allowed?: boolean
   title: string
   description: string
   whatDeleted: string
   whatKept?: string
   confirmWord: string
-  onConfirm: () => void
+  onConfirm: (confirmation: ResetConfirmation) => void
   working: boolean
   elapsedSeconds?: number
   buttonLabel: string
@@ -134,10 +142,12 @@ function ConfirmReset({
   icon: Icon = AlertTriangle,
   t,
   whatHeader,
+  allowed = true,
 }: ConfirmResetProps) {
   const T = (key: string, fallback: string) => (typeof t === 'function' ? t(key, fallback) || fallback : fallback)
   const [step, setStep] = useState(0)
   const [typed, setTyped] = useState('')
+  const [acknowledged, setAcknowledged] = useState(false)
   const showSlowHint = working && elapsedSeconds * 1000 >= SLOW_ACTION_HINT_AFTER_MS
   const workingLabel = showSlowHint
     ? `${T('reset_working', 'Working...')} ${elapsedSeconds}s`
@@ -163,6 +173,7 @@ function ConfirmReset({
       wasWorkingRef.current = false
       setStep(0)
       setTyped('')
+      setAcknowledged(false)
     }
   }, [working])
   const borderCls = color === 'red' ? 'border-red-200 dark:border-red-900/50' : 'border-red-500 dark:border-red-700 bg-red-50/30 dark:bg-red-950/20'
@@ -181,9 +192,10 @@ function ConfirmReset({
       </div>
 
       {whatKept ? <p className="mb-4 text-xs text-gray-400 dark:text-gray-500">{T('reset_kept', 'Kept')}: {whatKept}</p> : null}
+      {!allowed ? <p className="mb-3 text-sm text-red-700 dark:text-red-400">{T('reset_builtin_admin_only', 'Only the built-in admin account can reset business data.')}</p> : null}
 
       {step === 0 ? (
-        <button onClick={() => setStep(1)} className={`rounded-lg px-4 py-2 text-sm text-white ${btnCls}`}>{buttonLabel}</button>
+        <button onClick={() => setStep(1)} disabled={!allowed} className={`rounded-lg px-4 py-2 text-sm text-white ${btnCls} disabled:opacity-40`}>{buttonLabel}</button>
       ) : null}
 
       {step === 1 ? (
@@ -196,8 +208,8 @@ function ConfirmReset({
             <p className="text-xs">{whatDeleted}</p>
           </div>
           <div className="flex gap-3">
-            <button onClick={() => setStep(2)} className={`rounded-lg px-4 py-2 text-sm text-white ${btnCls}`}>{T('reset_yes_continue', 'Yes, continue')}</button>
-            <button onClick={() => setStep(0)} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 dark:border-gray-600 dark:text-gray-300">{T('cancel', 'Cancel')}</button>
+            <button onClick={() => { setAcknowledged(true); setStep(2) }} className={`rounded-lg px-4 py-2 text-sm text-white ${btnCls}`}>{T('reset_yes_continue', 'Yes, continue')}</button>
+            <button onClick={() => { setAcknowledged(false); setStep(0) }} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 dark:border-gray-600 dark:text-gray-300">{T('cancel', 'Cancel')}</button>
           </div>
         </div>
       ) : null}
@@ -212,13 +224,13 @@ function ConfirmReset({
           <input autoFocus disabled={working} className="input font-mono text-sm disabled:opacity-60" placeholder={confirmWord} value={typed} onChange={(event) => setTyped(event.target.value)} />
           <div className="flex gap-3">
             <button
-              onClick={onConfirm}
-              disabled={typed !== confirmWord || working}
+              onClick={() => { if (allowed && acknowledged && typed === confirmWord && !working) onConfirm({ confirm: typed, acknowledged: true }) }}
+              disabled={!allowed || !acknowledged || typed !== confirmWord || working}
               className={`rounded-lg px-4 py-2 text-sm text-white ${btnCls} disabled:opacity-40`}
             >
               {working ? workingLabel : buttonLabel}
             </button>
-            <button onClick={() => { setStep(0); setTyped('') }} disabled={working} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300">{T('cancel', 'Cancel')}</button>
+            <button onClick={() => { setStep(0); setTyped(''); setAcknowledged(false) }} disabled={working} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300">{T('cancel', 'Cancel')}</button>
           </div>
           {showSlowHint ? (
             <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -334,7 +346,7 @@ function ProductsResetOptions({
 }
 
 function ResetData({ actionHistory = null }: ResetPanelProps) {
-  const { t, notify, hasPermission } = useApp()
+  const { t, notify, hasPermission, user } = useApp()
   const T = (key: string, fallback: string) => (typeof t === 'function' ? t(key, fallback) || fallback : fallback)
   const [mode, setMode] = useState<ResetMode>('sales')
   const [working, setWorking] = useState(false)
@@ -364,13 +376,15 @@ function ResetData({ actionHistory = null }: ResetPanelProps) {
 
   const selected = MODES.find((entry) => entry.id === mode) || MODES[0]
 
-  const doReset = async () => {
+  const doReset = async (confirmation: ResetConfirmation) => {
+    if (!isBuiltInResetAdmin(user)) return notify(T('reset_builtin_admin_only', 'Only the built-in admin account can reset business data.'), 'error')
+    if (confirmation?.acknowledged !== true || confirmation?.confirm !== selected.word) return
     if (!hasPermission('backup_restore')) return notify(T('access_denied', 'No permission'), 'error')
     if (!beginSingleAction(resetInFlightRef, { blocked: working })) return
     setWorking(true)
     try {
       const result = await withLoaderTimeout(
-        () => getResetApi().resetData?.(mode) || Promise.resolve({ success: false, error: 'Reset API is unavailable' }),
+        () => getResetApi().resetData?.(mode, confirmation) || Promise.resolve({ success: false, error: 'Reset API is unavailable' }),
         'Reset business data',
         RESET_DATA_TIMEOUT_MS,
       )
@@ -433,6 +447,8 @@ function ResetData({ actionHistory = null }: ResetPanelProps) {
 
 
       <ConfirmReset
+        key={selected.id}
+        allowed={isBuiltInResetAdmin(user)}
         title={selected.label}
         description={selected.desc}
         whatDeleted={selected.deleted}
@@ -485,7 +501,7 @@ type SectionResetApi = {
 // 262 gave (admin self-exclusion / session-invalidation / reseed questions
 // still unresolved for that one specifically).
 function SectionReset({ actionHistory = null }: ResetPanelProps) {
-  const { t, notify, hasPermission } = useApp()
+  const { t, notify, hasPermission, user } = useApp()
   const T = (key: string, fallback: string) => (typeof t === 'function' ? t(key, fallback) || fallback : fallback)
   const [section, setSection] = useState<PageResetOptionId>('products')
   const [working, setWorking] = useState(false)
@@ -571,14 +587,16 @@ function SectionReset({ actionHistory = null }: ResetPanelProps) {
   const whatDeleted = isProducts ? deletedParts.join('; ') : selected.deleted
   const whatKept = isProducts ? keptParts.join(', ') : selected.kept
 
-  const doReset = async () => {
+  const doReset = async (confirmation: ResetConfirmation) => {
+    if (isProducts && !isBuiltInResetAdmin(user)) return notify(T('reset_builtin_admin_only', 'Only the built-in admin account can reset business data.'), 'error')
+    if (isProducts && (confirmation?.acknowledged !== true || confirmation?.confirm !== selected.word)) return
     if (!hasPermission('backup_restore')) return notify(T('access_denied', 'No permission'), 'error')
     if (!beginSingleAction(sectionResetInFlightRef, { blocked: working })) return
     setWorking(true)
     try {
       const result = await withLoaderTimeout(
         () => (isProducts
-          ? getResetApi().resetData?.('products', productToggles)
+          ? getResetApi().resetData?.('products', { ...productToggles, ...confirmation })
           : (getResetApi() as SectionResetApi).resetSection?.(selected.id as SectionMode)
         ) || Promise.resolve({ success: false, error: 'Reset API is unavailable' }),
         isProducts ? 'Reset products' : 'Reset section',
@@ -636,6 +654,8 @@ function SectionReset({ actionHistory = null }: ResetPanelProps) {
       ) : null}
 
       <ConfirmReset
+        key={`${selected.id}:${isProducts ? JSON.stringify(productToggles) : ''}`}
+        allowed={!isProducts || isBuiltInResetAdmin(user)}
         title={selected.label}
         description={selected.desc}
         whatDeleted={whatDeleted}
@@ -658,11 +678,10 @@ function FactoryReset({ actionHistory = null }: ResetPanelProps) {
   const T = (key: string, fallback: string) => (typeof t === 'function' ? t(key, fallback) || fallback : fallback)
   const [step, setStep] = useState(0)
   const [typed, setTyped] = useState('')
+  const [acknowledged, setAcknowledged] = useState(false)
   const [currentPassword, setCurrentPassword] = useState('')
   const [working, setWorking] = useState(false)
-  // Mirrors the Worker's gate (routes/system.ts): administrator control AND
-  // backup_restore. backup_restore alone no longer reaches the wipe.
-  const canFactoryReset = isAdminControlUser(user) && hasPermission('backup_restore')
+  const canFactoryReset = isBuiltInResetAdmin(user) && hasPermission('backup_restore')
   const elapsedSeconds = useElapsedSeconds(working)
   const showSlowHint = working && elapsedSeconds * 1000 >= SLOW_ACTION_HINT_AFTER_MS
   const factoryResetInFlightRef = useRef(false)
@@ -670,11 +689,11 @@ function FactoryReset({ actionHistory = null }: ResetPanelProps) {
 
   async function doFactoryReset() {
     if (!canFactoryReset) return notify(T('access_denied', 'No permission'), 'error')
-    if (typed !== CONFIRM_WORD || !currentPassword) return
+    if (!acknowledged || typed !== CONFIRM_WORD || !currentPassword) return
     if (!beginSingleAction(factoryResetInFlightRef, { blocked: working })) return
     setWorking(true)
     try {
-      const confirmation = { confirm: typed, currentPassword }
+      const confirmation = { confirm: typed, acknowledged: true as const, currentPassword }
       const result = await withLoaderTimeout(
         () => getResetApi().factoryReset?.(confirmation) || Promise.resolve({ success: false, error: 'Factory reset API is unavailable' }),
         'Factory reset',
@@ -693,12 +712,14 @@ function FactoryReset({ actionHistory = null }: ResetPanelProps) {
         setStep(0)
         setTyped('')
         setCurrentPassword('')
+        setAcknowledged(false)
       }
     } catch (error: unknown) {
       notify(`${T('factory_reset_label', 'Factory Reset')} ${T('failed', 'failed')}: ${describeError(error, T)}`, 'error')
       setStep(0)
       setTyped('')
       setCurrentPassword('')
+      setAcknowledged(false)
     } finally {
       finishSingleAction(factoryResetInFlightRef)
       setWorking(false)
@@ -719,7 +740,7 @@ function FactoryReset({ actionHistory = null }: ResetPanelProps) {
       </div>
 
       {step === 0 && !canFactoryReset ? (
-        <p className="text-sm text-red-700 dark:text-red-400">{T('factory_reset_admin_only', 'Only an administrator can run a factory reset.')}</p>
+        <p className="text-sm text-red-700 dark:text-red-400">{T('reset_builtin_admin_only', 'Only the built-in admin account can reset business data.')}</p>
       ) : null}
 
       {step === 0 && canFactoryReset ? (
@@ -745,8 +766,8 @@ function FactoryReset({ actionHistory = null }: ResetPanelProps) {
             </ul>
           </div>
           <div className="flex gap-3">
-            <button onClick={() => setStep(2)} className="rounded-lg bg-red-700 px-4 py-2 text-sm font-bold text-white hover:bg-red-800">{T('yes_continue', 'Yes, I understand - continue')}</button>
-            <button onClick={() => setStep(0)} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 dark:border-gray-600 dark:text-gray-300">{T('cancel', 'Cancel')}</button>
+            <button onClick={() => { setAcknowledged(true); setStep(2) }} className="rounded-lg bg-red-700 px-4 py-2 text-sm font-bold text-white hover:bg-red-800">{T('yes_continue', 'Yes, I understand - continue')}</button>
+            <button onClick={() => { setStep(0); setAcknowledged(false) }} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 dark:border-gray-600 dark:text-gray-300">{T('cancel', 'Cancel')}</button>
           </div>
         </div>
       ) : null}
@@ -774,10 +795,10 @@ function FactoryReset({ actionHistory = null }: ResetPanelProps) {
           </label>
           <p className="text-xs text-red-600 dark:text-red-400">{T('factory_reset_password_hint', 'Enter your current password. A full backup is taken before anything is deleted.')}</p>
           <div className="flex gap-3">
-            <button onClick={doFactoryReset} disabled={typed !== CONFIRM_WORD || !currentPassword || working} className="rounded-lg bg-red-700 px-4 py-2 text-sm font-bold text-white hover:bg-red-800 disabled:opacity-40">
+            <button onClick={doFactoryReset} disabled={!canFactoryReset || !acknowledged || typed !== CONFIRM_WORD || !currentPassword || working} className="rounded-lg bg-red-700 px-4 py-2 text-sm font-bold text-white hover:bg-red-800 disabled:opacity-40">
               {working ? `${T('reset_working', 'Resetting...')}${showSlowHint ? ` ${elapsedSeconds}s` : ''}` : T('factory_reset_label', 'Factory Reset')}
             </button>
-            <button onClick={() => { setStep(0); setTyped(''); setCurrentPassword('') }} disabled={working} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300">{T('cancel', 'Cancel')}</button>
+            <button onClick={() => { setStep(0); setTyped(''); setCurrentPassword(''); setAcknowledged(false) }} disabled={working} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300">{T('cancel', 'Cancel')}</button>
           </div>
           {showSlowHint ? (
             <p className="text-xs text-gray-500 dark:text-gray-400">
