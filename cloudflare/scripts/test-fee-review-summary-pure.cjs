@@ -43,5 +43,3 @@ async function main(){
  const missing=await handler(context(user,9999));assert.equal(missing.status,404);assert.equal(raw.prepare('SELECT COUNT(*) n FROM pending_actions').get().n,before);console.log('PASS missing record cannot create invented summary')
 }
 main().catch(error=>{console.error(error);process.exitCode=1})
-
-

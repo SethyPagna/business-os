@@ -177,5 +177,3 @@ try {
   assert.ok(healthChecks >= 3)
   console.log('PASS mounted draft authority round-trip; synthetic authenticated HTTP origins, no physical cookie/device certificate')
 } finally { await harness.close(); await A.close(); await B.close() }
-
-
