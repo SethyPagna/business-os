@@ -30,8 +30,8 @@ function modules(actor = user, realEffects = false) {
   return load
 }
 
-async function setup(mode, actor = user, realEffects = false) {
-  const f = fixture()
+async function setup(mode, actor = user, realEffects = false, seedBeforeFence) {
+  const f = fixture(seedBeforeFence)
   const load = modules(actor, realEffects)
   const db = load('lib/db.ts').getDb(f.env)
   const lot = await load('lib/productBatches.ts').receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 5, receivedDate: '2026-09-05', unitCostUsd: 2, supplierName: 'Fixture Supplier' })
@@ -122,7 +122,12 @@ async function main() {
       const before = f.state()
       if (index === length) {
         const batch = f.env.DB.batch
-        f.env.DB.batch = statements => batch([...statements, { text: 'SELECT 1', params: [] }])
+        let inject = true
+        f.env.DB.batch = statements => {
+          const scheduled = inject
+          inject = false
+          return batch(scheduled ? [...statements, { text: 'SELECT 1', params: [] }] : statements)
+        }
       }
       f.failBatchStatement(index)
       const refused = await f.send()
@@ -228,11 +233,12 @@ async function main() {
     assert.equal((await f.send(current)).status, 200)
   })
   await check('removed product and wrong selected lot refuse all intake effects', async () => {
-    const f = await setup('correction-tagged')
+    const f = await setup('correction-tagged', user, false, sql => {
+      sql.exec("INSERT INTO products(id,name,is_active,stock_quantity) VALUES(2,'Removed fixture',0,0)")
+    })
     const before = f.state()
     assert.equal((await f.send({ ...f.body, batchId: 9999 })).status, 409)
     assert.equal(f.state(), before)
-    f.sql.exec('INSERT INTO products(id,name,is_active,stock_quantity) VALUES(2,\'Removed fixture\',0,0)')
     const removed = f.state()
     assert.equal((await f.send({ ...f.body, productId: 2, batchId: 'new', attribution: undefined, unitCostUsd: 2, supplierName: 'Fixture Supplier' })).status, 409)
     assert.equal(f.state(), removed)
