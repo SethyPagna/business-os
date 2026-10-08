@@ -69,7 +69,7 @@ const env = { DB }
 const real = new Set([
   'acquisitionCostAccess', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db',
   'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply',
-  'conflictControl', 'renameCascade', 'schemaProbe', 'catalogCostRecompute', 'productBatches',
+  'conflictControl', 'renameCascade', 'schemaProbe', 'catalogCostRecompute', 'productBatches', 'productStockGuard',
 ])
 const noop = new Proxy(function () {}, { get: () => noop, apply: () => undefined, construct: () => ({}) })
 class ProductImageAssetError extends Error {}
@@ -185,6 +185,8 @@ new Function('require', 'module', 'exports', transpile(`
   import * as catalog from './catalogCostRecompute'
   import { multiplyMoney4 } from './moneyPrecision'
   import { normalizeSearchText, compactSearchText } from './searchMatch'
+  import { productStockGuardStatement, assertProductStatusInput } from './productStockGuard'
+  ${extract(engineSource, 'export function productImportStockStatements(', '\n}')}
   const { catalogCostRecomputeStatement } = catalog
   // Absent before the fix: the loop then simply never calls it.
   const typedCostEntryBeforeWriteStatement = (catalog as any).typedCostEntryBeforeWriteStatement
@@ -194,6 +196,8 @@ new Function('require', 'module', 'exports', transpile(`
   export function composeProducts(ctx: any) {
     let { actionable, receiptCosts, autoMergeRecords, jobId, nowIso, productImportMode, productReplaceColumns,
       appliedRowGuards, rowGuardStatement, receiptLots, receiptBaselines, nextBatchId, productSeedBranchIds, importCostActor } = ctx
+    const job = { type: 'products' }
+    ${extract(engineSource, '    const productInboundQuantity = ', '\n    }')}
     const productStatementGroups: any[] = [], guardedGroups: any[] = [], statements: any[] = []
     ${productLoop}
     return [...productStatementGroups, ...statements.map((s: any) => [s]), ...guardedGroups]
@@ -290,7 +294,11 @@ async function main() {
     const zero = seed()
     raw.prepare('UPDATE products SET cost_price_usd = 0 WHERE id = ?').run(zero.id)
     // Isolate from earlier checks' rows: only these two are active.
-    raw.prepare('UPDATE products SET is_active = 0 WHERE id NOT IN (?, ?)').run(p.id, zero.id)
+    raw.prepare('UPDATE damaged_stock_lots SET quantity_remaining=0 WHERE product_id NOT IN (?, ?)').run(p.id, zero.id)
+    raw.prepare('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id NOT IN (?, ?))').run(p.id, zero.id)
+    raw.prepare('UPDATE branch_stock SET quantity=0 WHERE product_id NOT IN (?, ?)').run(p.id, zero.id)
+    raw.prepare('UPDATE products SET stock_quantity=0 WHERE id NOT IN (?, ?)').run(p.id, zero.id)
+    raw.prepare('UPDATE products SET is_active=0 WHERE id NOT IN (?, ?)').run(p.id, zero.id)
     const adjusted = await request(products, 'POST', '/bulk-price-adjust', { direction: 'increase', amount: 5, fields: ['cost_price_usd'], skip_zero: true })
     assert.equal(adjusted.status, 200, JSON.stringify(adjusted))
     assert.equal(adjusted.body.changed, 1, 'changed still counts the products UPDATE, not the entry insert')
