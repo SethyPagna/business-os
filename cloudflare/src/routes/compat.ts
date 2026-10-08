@@ -17,7 +17,7 @@ import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
 import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesTotalsAndPeriodSeries, identifiedCustomerExpr, reportCustomerNameExpr, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr, shiftWindowBound, shiftWindowWhere } from '../lib/salesAnalytics'
 import { getFamilyStockAlertPage, type FamilyStockAlertState } from '../lib/familyStockStats'
-import { loadDashboardStockOverview, type DashboardStockOverviewContext } from '../lib/dashboardStockOverview'
+import { dashboardExpiringProductsSql, loadDashboardStockOverview, type DashboardStockOverviewContext } from '../lib/dashboardStockOverview'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
 import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
@@ -509,13 +509,7 @@ async function dashboardInsightList(env: Env, query: Record<string, string>, kin
     // Same catalog-wide scope as the card -- not range/branch scoped, see
     // dashboardSummary's own comment on why the expiry alert is deliberately
     // the exception to the one-range-scopes-everything convention.
-    const rows = await db.prepare(`
-      SELECT id, name, category, unit, expiry_date, CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry
-      FROM products p
-      WHERE p.is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')
-      ORDER BY date(expiry_date) ASC
-      LIMIT ${DASHBOARD_INSIGHT_LIST_LIMIT}
-    `).all()
+    const rows = await db.prepare(dashboardExpiringProductsSql(DASHBOARD_INSIGHT_LIST_LIMIT)).all()
     return { items: rows || [], truncated: (rows || []).length >= DASHBOARD_INSIGHT_LIST_LIMIT }
   }
 

@@ -54,6 +54,10 @@ async function main() {
   const settings = load('./lowStockSettings')
   const guard = load('./productStockGuard')
   const deps = { getDb: () => adapter, ...settings, ...guard }
+  const insights = functionsFrom('routes/compat.ts', ['dashboardInsightList'], {
+    ...deps, ...load('./dashboardStockOverview'), dateRange: () => ({}), DASHBOARD_INSIGHT_LIST_LIMIT: 300,
+  })
+  assert.equal((await insights.dashboardInsightList({}, {}, 'expiring_products')).items.length, 5)
   const notifications = functionsFrom('routes/notifications.ts', ['buildInventorySection', 'buildExpirySection'], {
     ...deps, joinSummary: items => items.filter(Boolean).join(', '),
   })

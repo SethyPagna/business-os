@@ -62,19 +62,20 @@ const EXPIRY_DATE_WHERE_SQL = `expiry_date IS NOT NULL AND date(expiry_date) <= 
 export const DASHBOARD_EXPIRY_WHERE_SQL = `p.is_active = 1 AND ${EXPIRY_DATE_WHERE_SQL}`
 const INACTIVE_EXPIRY_WHERE_SQL = `p.is_active IS NOT 1 AND ${productHasStockSql()} AND ${EXPIRY_DATE_WHERE_SQL}`
 
+export function dashboardExpiringProductsSql(limit: number): string {
+  if (!Number.isSafeInteger(limit) || limit < 1) throw new Error('Invalid expiry list limit')
+  return `SELECT *, CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry FROM (
+    SELECT id, name, category, unit, expiry_date FROM products p WHERE ${DASHBOARD_EXPIRY_WHERE_SQL}
+    UNION ALL
+    SELECT id, name, category, unit, expiry_date FROM products p WHERE ${INACTIVE_EXPIRY_WHERE_SQL}
+  ) ORDER BY date(expiry_date) ASC LIMIT ${limit}`
+}
+
 export async function computeDashboardStockOverview(env: Env, lowStock: LowStockConfig): Promise<DashboardStockOverview> {
   const db = getDb(env)
   const [overview, expiring, expiringCount] = await Promise.all([
     getFamilyStockOverview({ db, lowStock, previewSize: DASHBOARD_STOCK_PREVIEW_SIZE }),
-    db.prepare(`
-      SELECT *, CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry FROM (
-        SELECT id, name, category, unit, expiry_date FROM products p WHERE ${DASHBOARD_EXPIRY_WHERE_SQL}
-        UNION ALL
-        SELECT id, name, category, unit, expiry_date FROM products p WHERE ${INACTIVE_EXPIRY_WHERE_SQL}
-      )
-      ORDER BY date(expiry_date) ASC
-      LIMIT ${DASHBOARD_STOCK_PREVIEW_SIZE}
-    `).all<DashboardExpiringRow>(),
+    db.prepare(dashboardExpiringProductsSql(DASHBOARD_STOCK_PREVIEW_SIZE)).all<DashboardExpiringRow>(),
     db.prepare(`
       SELECT (SELECT COUNT(*) FROM products p WHERE ${DASHBOARD_EXPIRY_WHERE_SQL})
         + (SELECT COUNT(*) FROM products p WHERE ${INACTIVE_EXPIRY_WHERE_SQL}) AS count
