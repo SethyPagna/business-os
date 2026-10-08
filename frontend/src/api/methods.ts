@@ -866,9 +866,9 @@ export const previewDatedStockCount = async (entries: unknown[] = []) => {
   const module = await loadInventoryWriteTransport()
   return module.previewDatedStockCount(entries)
 }
-export const applyDatedStockCount = async (entries: unknown[] = []) => {
+export const applyDatedStockCount = async (payload: Record<string, unknown>) => {
   const module = await loadInventoryWriteTransport()
-  return module.applyDatedStockCount(entries)
+  return module.applyDatedStockCount(payload)
 }
 
 export const getRfidStatus = async (params = {}) => {

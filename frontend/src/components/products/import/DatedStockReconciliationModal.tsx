@@ -1,4 +1,4 @@
-import { loadDatedDecisionIntent, prepareDatedDecisionIntent, saveDatedDecisionIntent, retireResetDatedDecisionIntent, type DatedDecisionIntent } from '../../../api/inventoryWriteTransport.ts'
+import { loadDatedDecisionIntent, prepareDatedDecisionIntent, saveDatedDecisionIntent, retireResetDatedDecisionIntent, type DatedDecisionIntent, loadDatedCountApplyIntent, prepareDatedCountApplyIntent, saveDatedCountApplyIntent, retireResetDatedCountApplyIntent, type DatedCountApplyIntent } from '../../../api/inventoryWriteTransport.ts'
 // Frontend review UI for the dated stock-reconciliation import -- the two
 // pieces progress.md's own "Not done -- still open" list has flagged since
 // Part 290/291: (1) the CSV/XLSX column-mapping step and (2) the
@@ -96,6 +96,7 @@ interface ResolvedRow {
   productId: number
   branchId: number
   count: number
+  addressedBranchId?: number
   mergedRowNumbers?: number[]
   priceConflict?: PriceConflict
 }
@@ -206,6 +207,7 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
   const [working, setWorking] = useState(false)
 
   async function pickFile(): Promise<void> {
+    if (!countReviewAvailable()) return
     setError('')
     setUploading(true)
     try {
@@ -217,6 +219,8 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
         setUploading(false)
         return
       }
+      const pendingCount = countIntent.current || savedCount
+      if (pendingCount?.canReviewAgain) { countIntent.current = null; setSavedCount(null) }
       const detectedHeaders = Object.keys(rows[0])
       setFileName(result.name)
       setCsvText(result.content)
@@ -258,7 +262,7 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
     && (mapping.productName || mapping.sku || mapping.barcode)
 
   async function runResolve(): Promise<void> {
-    if (!mappingComplete) return
+    if (!mappingComplete || !countReviewAvailable()) return
     setError('')
     setStep('resolving')
     try {
@@ -351,7 +355,7 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
   }
 
   async function runApplyDecisions(resume = false): Promise<void> {
-    if (!resume && !reviewComplete) return
+    if (!resume && (!reviewComplete || !countReviewAvailable())) return
     setError('')
     setStep('applying_decisions')
     setWorking(true)
@@ -404,7 +408,7 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
         setStep('review')
         return
       }
-      const entries = (result.resolved || []).map((row) => ({ date: row.date, productId: row.productId, branchId: row.branchId, count: row.count }))
+      const entries = (result.resolved || []).map((row) => ({ date: row.date, productId: row.productId, branchId: row.branchId, count: row.count, ...(row.addressedBranchId != null ? { addressedBranchId: row.addressedBranchId } : {}) }))
       const previewResult = await apiPreview(entries) as { success?: boolean; error?: string; plan?: { movementsToCreate: PlanMovement[] } } | null
       if (!previewResult || previewResult.success === false || !previewResult.plan) {
         setError(previewResult?.error || T('dated_count_preview_failed', 'Could not build a preview for this import.'))
@@ -420,26 +424,70 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
     }
   }
 
-  async function runApply(): Promise<void> {
+  const countIntent = useRef<DatedCountApplyIntent | null>(null)
+  const [countRecovery] = useState(() => {
+    try { return { intent: loadDatedCountApplyIntent(), error: '' } }
+    catch (failure) { return { intent: null, error: datedStockCountApplyErrorText(failure, T) } }
+  })
+  const [savedCount, setSavedCount] = useState<DatedCountApplyIntent | null>(countRecovery.intent)
+  const [countStorageError, setCountStorageError] = useState(countRecovery.error)
+  function countReviewAvailable(): boolean {
+    const pending = countIntent.current || savedCount
+    if (countStorageError || pending && !pending.completed && !pending.canReviewAgain) {
+      setError(countStorageError || datedStockCountApplyErrorText({ code: 'dated_count_pending_review' }, T))
+      return false
+    }
+    return true
+  }
+  function handleCountFailure(failure: unknown): void {
+    const source = failure && typeof failure === 'object' ? failure as { code?: string; can_review_again?: boolean } : {}
+    if (source.code === 'dated_count_reset_conflict' && countIntent.current) {
+      try {
+        retireResetDatedCountApplyIntent(countIntent.current, failure)
+        countIntent.current = null
+        setSavedCount(null)
+        restartUpload()
+        setError(datedStockCountApplyErrorText(failure, T))
+        return
+      } catch (retirementFailure) { setError(datedStockCountApplyErrorText(retirementFailure, T)) }
+    } else {
+      if (source.code === 'dated_count_over_plan_budget' && source.can_review_again === true && countIntent.current) {
+        countIntent.current = { ...countIntent.current, canReviewAgain: true }
+        setSavedCount(countIntent.current)
+        try { saveDatedCountApplyIntent(countIntent.current) }
+        catch (storageFailure) { setCountStorageError(datedStockCountApplyErrorText(storageFailure, T)) }
+      }
+      setError(datedStockCountApplyErrorText(source.code ? failure : { code: 'dated_count_outcome_unknown' }, T))
+    }
+    setStep('plan')
+  }
+  async function runApply(resume = false): Promise<void> {
     setError('')
     setWorking(true)
     setStep('applying')
     try {
-      const entries = combinedResolved.map((row) => ({ date: row.date, productId: row.productId, branchId: row.branchId, count: row.count }))
-      const result = await apiApply(entries) as { success?: boolean; error?: string; code?: string } | null
-      if (!result || result.success === false) {
-        setError(datedStockCountApplyErrorText(result, T))
-        setStep('plan')
-        return
+      const pending = countIntent.current || savedCount
+      const entries = combinedResolved.map((row) => ({ date: row.date, productId: row.productId, branchId: row.branchId, count: row.count, ...(row.addressedBranchId != null ? { addressedBranchId: row.addressedBranchId } : {}) }))
+      countIntent.current = pending && !pending.completed ? pending : resume ? loadDatedCountApplyIntent() : prepareDatedCountApplyIntent(entries)
+      if (!countIntent.current) throw Object.assign(new Error('No saved count'), { code: 'dated_count_missing' })
+      countIntent.current = { ...countIntent.current, canReviewAgain: false }
+      setSavedCount(countIntent.current)
+      saveDatedCountApplyIntent(countIntent.current, !resume)
+      setCountStorageError('')
+      const result = await apiApply(countIntent.current.body) as { success?: boolean; error?: string; code?: string } | null
+      if (!result || result.success !== true) { handleCountFailure(result); return }
+      countIntent.current = { ...countIntent.current, completed: true, canReviewAgain: false }
+      setSavedCount(countIntent.current)
+      try { saveDatedCountApplyIntent(countIntent.current) }
+      catch (storageFailure) {
+        countIntent.current = { ...countIntent.current, completed: false }
+        setSavedCount(countIntent.current)
+        setCountStorageError(datedStockCountApplyErrorText(storageFailure, T))
       }
       setStep('done')
       onDone()
-    } catch (e) {
-      setError(datedStockCountApplyErrorText(e, T))
-      setStep('plan')
-    } finally {
-      setWorking(false)
-    }
+    } catch (failure) { handleCountFailure(failure) }
+    finally { setWorking(false) }
   }
 
   function updateDecision(rowNumber: number, patch: Partial<RowDecisionState>): void {
@@ -449,10 +497,10 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
   return (
     <Modal title={T('dated_stock_reconciliation_title', 'Dated Stock Reconciliation')} onClose={onClose} size="lg" draggable unsavedChanges={{ dirty: Boolean(csvText) }}>
       {decisionProgress && step === 'applying_decisions' ? <p className="mb-3 text-xs" role="status">{T('dated_decision_progress', 'Saved decisions: {next} / {total}').replace('{next}', String(decisionProgress.next)).replace('{total}', String(decisionProgress.total))}</p> : null}
-      {error || decisionStorageError ? (
+      {error || decisionStorageError || countStorageError ? (
         <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{error || decisionStorageError}</span>
+          <span>{error || decisionStorageError || countStorageError}</span>
         </div>
       ) : null}
 
@@ -513,6 +561,13 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
 
       {savedDecision && !savedDecision.completed && !working ? (
         <button type="button" onClick={() => void runApplyDecisions(true)} className="inline-flex min-h-[40px] max-w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm"><ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" /><span className="min-w-0 break-words">{T('dated_decision_resume', 'Resume saved decisions')}</span></button>
+      ) : null}
+
+      {savedCount && !savedCount.completed && !working ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => void runApply(true)} className="inline-flex min-h-[40px] max-w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm"><ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" /><span className="min-w-0 break-words">{T('dated_count_resume', 'Resume saved count')}</span></button>
+          {savedCount.canReviewAgain ? <button type="button" onClick={() => { countIntent.current = null; setSavedCount(null); restartUpload() }} className="inline-flex min-h-[40px] max-w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm"><ArrowLeft className="h-4 w-4 shrink-0" aria-hidden="true" /><span className="min-w-0 break-words">{T('dated_count_review_smaller', 'Review a smaller count')}</span></button> : null}
+        </div>
       ) : null}
 
       {step === 'resolving' || step === 'applying_decisions' || step === 'applying' ? (
