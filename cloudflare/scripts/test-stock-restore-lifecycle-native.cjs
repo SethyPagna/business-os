@@ -44,9 +44,19 @@ async function main() {
         if(input.mode==='restore'){
           await env.ASSETS.put(input.source,JSON.stringify(input.document));
           const state=await beginMaintenance(env,{backupKey:input.source,startedBy:'admin'});
-          const restored=await restoreCloudflareBackup(env,input.source,progress=>updateMaintenance(env,state.token,progress),state.token);
+          let lateDecision
+          const restored=await restoreCloudflareBackup(env,input.source,async progress=>{
+            await updateMaintenance(env,state.token,progress)
+            if(input.raceDecision&&progress.phase==='inserting'&&progress.table==='settings'){
+              try { await applyDatedStockCountDecisions(new D1Compat(env.DB),[],[],[],{
+                actorId:1001,actorName:'Fixture administrator',requestId:'post-delete-live',
+                owner:{version:1,actor_id:1001,organization_id:1,authority:'http://local.test',runtime:'cloudflare-workers'},
+                budget:{limit:1000,used:()=>attempts}
+              });lateDecision='unexpected success' } catch(error){lateDecision=error.code}
+            }
+          },state.token);
           const ended=await endMaintenance(env,state.token);
-          return Response.json({restored,ended});
+          return Response.json({restored,ended,lateDecision});
         }
       }catch(error){return Response.json({error:error.message,code:error.code},{status:409});}
     }}
@@ -167,7 +177,7 @@ async function main() {
       await db.prepare('INSERT INTO '+table+'('+cols.join(',')+') VALUES('+cols.map(()=>'?').join(',')+')').bind(...cols.map(c=>live[c]??null)).run()
     }
     document.tables.system_flags={columns:['key','value'],rows:[{key:'stock_schema_epoch',value:'forged-source-epoch'},{key:'maintenance',value:'forged-source-holder'}]}
-    const restored=await call({mode:'restore',source,document});assert.equal(restored.status,200,JSON.stringify(restored));assert.equal(restored.data.ended,true);await zero()
+    const restored=await call({mode:'restore',source,document,raceDecision:true});assert.equal(restored.status,200,JSON.stringify(restored));assert.equal(restored.data.ended,true);assert.equal(restored.data.lateDecision,'stock_schema_unavailable');assert.equal(await db.prepare("SELECT COUNT(*) n FROM dated_count_decision_receipts WHERE request_id='post-delete-live'").first('n'),0);await zero()
     assert.equal(await db.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").first('value'),'legacy-separate-pool-v1')
     assert.equal(await db.prepare("SELECT value FROM system_flags WHERE key='stock_schema_receipt_boundary'").first('value'),'0')
     assert.equal(await db.prepare('SELECT quantity FROM branch_stock WHERE product_id=1001').first('quantity'),7)

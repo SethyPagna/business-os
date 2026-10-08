@@ -53,7 +53,11 @@ async function currentControls() {
     await assert.rejects(apply('dated_refused_'+mode,[row('Refused '+mode)]),e=>e.code==='stock_schema_unavailable')
     assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM products WHERE name=?').get('Refused '+mode).n,0)
     assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM dated_count_decision_receipts WHERE request_id=?').get('dated_refused_'+mode).n,0)
-    await apply('dated_metadata_'+mode,[],[{rowNumber:9,action:'skip',priceResolution:'apply_new'}],selected)
+    const priceBefore=f.sql.prepare('SELECT selling_price_usd p FROM products WHERE id=1001').get().p
+    await assert.rejects(apply('dated_metadata_'+mode,[],[{rowNumber:9,action:'skip',priceResolution:'apply_new'}],selected),e=>e.code==='stock_schema_unavailable')
+    await assert.rejects(apply('dated_empty_refused_'+mode,[]),e=>e.code==='stock_schema_unavailable')
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM dated_count_decision_receipts WHERE request_id IN (?,?)').get('dated_metadata_'+mode,'dated_empty_refused_'+mode).n,0)
+    assert.equal(f.sql.prepare('SELECT selling_price_usd p FROM products WHERE id=1001').get().p,priceBefore)
     f.sql.exec("DELETE FROM system_flags WHERE key IN('stock_schema_epoch','maintenance')")
     f.sql.prepare("INSERT INTO system_flags(key,value) VALUES('stock_schema_epoch',?)").run(f.load('lib/stockTransaction.ts').STOCK_SCHEMA_EPOCH)
   }

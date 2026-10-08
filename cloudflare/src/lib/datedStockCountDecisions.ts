@@ -391,14 +391,14 @@ export async function applyDatedStockCountDecisions(
       statements.push(audit)
     }
     statements.push({ sql: `UPDATE dated_count_decision_receipts SET result_json=${resultExpression},next_index=@advanced,updated_at=CURRENT_TIMESTAMP WHERE actor_id=@actor AND request_id=@request AND request_json=@canonical AND next_index=@next AND invalidated_at IS NULL RETURNING result_json,next_index,total_rows,request_json,invalidated_at`, params: { ...params, next, advanced, resultJson: JSON.stringify(combined), productKey } })
-    const actual = (created ? stockTransactionStatementCount(statements.length) : statements.length) + (branchError ? 0 : 1)
+    const actual = stockTransactionStatementCount(statements.length) + (branchError ? 0 : 1)
     if (!fits(actual + 1)) {
       if (receipt) return response(receipt)
       throw new DatedDecisionRequestError('dated_decision_budget_exhausted', 'Retry the same dated-decision request to continue.', 503)
     }
     charge(actual)
     try {
-      const results = created ? await executeStockTransaction(guardedDb, statements, 'once') : await (branchError ? db : guardedDb).batchOnce(statements)
+      const results = await executeStockTransaction(branchError ? db : guardedDb, statements, 'once')
       const committed = results.at(-1)?.results?.[0] as DecisionReceipt | undefined
       if (!committed || committed.next_index !== advanced || committed.request_json !== canonical) throw new Error('Dated decision receipt result is unavailable')
       receipt = committed
