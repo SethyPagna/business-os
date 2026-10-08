@@ -5093,7 +5093,7 @@ type DuplicateProductSnapshotGroup = {
 // modes whose stock semantics are a full snapshot. New products also have their
 // opening import lot brought to the same grouped quantity, preserving the
 // branch_stock = active branch_batch_stock invariant from the first import.
-export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId: string, context?: ProductFinalizeContext): Promise<number> {
+export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId: string, context: ProductFinalizeContext): Promise<number> {
   const groups = await db.staging.prepare(`
     WITH normalized AS MATERIALIZED (
       SELECT
@@ -5121,14 +5121,14 @@ export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId:
     WHERE product_id IS NOT NULL AND branch_id IS NOT NULL
     GROUP BY product_id, branch_id
     HAVING COUNT(*) > 1
-      ${context ? 'AND (product_id>@product OR (product_id=@product AND branch_id>@branch))' : ''}
-    ORDER BY product_id,branch_id ${context ? 'LIMIT 1' : ''}
+      AND (product_id>@product OR (product_id=@product AND branch_id>@branch))
+    ORDER BY product_id,branch_id LIMIT 1
   `).all<DuplicateProductSnapshotGroup>({ id: jobId,
-    ...(context ? { product: context.state.genericApply!.finalize!.product, branch: context.state.genericApply!.finalize!.branch } : {}) })
+    product: context.state.genericApply!.finalize!.product, branch: context.state.genericApply!.finalize!.branch })
 
   if (!groups.length) {
-    if (context?.state.genericApply!.finalize!.pendingHash) throw new ProductImportFinalizationConflictError()
-    if (context) await commitProductFinalization(db, context,
+    if (context.state.genericApply!.finalize!.pendingHash) throw new ProductImportFinalizationConflictError()
+    await commitProductFinalization(db, context,
       { ...context.state.genericApply!.finalize!, phase: 'unify' }, [], false)
     return 0
   }
@@ -5137,7 +5137,7 @@ export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId:
   if (branchAuthorityError) throw new Error(branchAuthorityError)
   const guardedDb = withCanonicalImportBranchWriteGuard(db, branchIds)
 
-  if (context) {
+  {
     const group = groups[0]
     const params = { productId: Number(group.product_id), branchId: Number(group.branch_id) }
     const preimageSql = `SELECT json_object('product',(SELECT json_object('stock',stock_quantity,'active',is_active,
@@ -5177,16 +5177,6 @@ export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId:
     return 1
   }
 
-  // Duplicate snapshot rows use the same atomic lot/branch reconciliation
-  // as an ordinary matched row, including products that predate this job.
-  await runD1BatchGroupsInChunks(guardedDb, groups.map((group) => [
-    ...(Number(group.expected_quantity) > 0 ? [productStockGuardStatement([Number(group.product_id)], 'active')] : []),
-    ...planReconcileBranchSnapshot({
-    productId: Number(group.product_id), branchId: Number(group.branch_id),
-    quantity: Number(group.expected_quantity), receivedDate: group.received_date,
-  }).map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })),
-  ]), D1_IMPORT_BATCH_CHUNK_SIZE, true)
-  return groups.length
 }
 
 // Exported for scripts/test-import-incoming-files-native.cjs.
@@ -6093,7 +6083,7 @@ async function commitProductFinalization(
 }
 
 export async function finalizeProductReplacement(db: D1Compat, cutoff: string,
-  context: { jobId?: string; actor?: { id: number | null; name: string | null }; finalize?: ProductFinalizeContext } = {},
+  context: { jobId: string; actor?: { id: number | null; name: string | null }; finalize: ProductFinalizeContext },
 ): Promise<number> {
   const candidates = `p.is_active=1 AND (p.updated_at IS NULL OR p.updated_at < @cutoff)`
   const params = { cutoff, jobId: context.jobId ?? null, actorId: context.actor?.id ?? null, actorName: context.actor?.name ?? null }
@@ -6109,13 +6099,9 @@ export async function finalizeProductReplacement(db: D1Compat, cutoff: string,
       { sql: `UPDATE products SET is_active=0,updated_at=CURRENT_TIMESTAMP
           WHERE is_active=1 AND (updated_at IS NULL OR updated_at < @cutoff)`, params: { cutoff } },
     ]
-    if (context.finalize) {
-      const prior = context.finalize.state.genericApply!.finalize!
-      await commitProductFinalization(db, context.finalize, { ...prior, phase: 'reconcile' }, statements, true, 'deactivated')
-      return context.finalize.state.genericApply!.finalize!.deactivated
-    }
-    const result = await executeStockTransaction(db, statements, 'retry')
-    return Number(result[2]?.meta?.changes || 0)
+    const prior = context.finalize.state.genericApply!.finalize!
+    await commitProductFinalization(db, context.finalize, { ...prior, phase: 'reconcile' }, statements, true, 'deactivated')
+    return context.finalize.state.genericApply!.finalize!.deactivated
   } catch (error) { throw productStockGuardError(error) || error }
 }
 
