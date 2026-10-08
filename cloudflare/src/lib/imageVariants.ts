@@ -126,7 +126,20 @@ function notFound(): Response {
  * (`/uploads/...`), exactly what index.ts already derives its key from.
  */
 export async function serveUpload(env: Env, requestPath: string, request: Request, ctx?: WaitUntilContext): Promise<Response> {
-  const relative = String(requestPath || '').replace(/^\/uploads\//, '')
+  const supplied = String(requestPath || '').replace(/^\/uploads\//, '')
+  if (parseImageVariantPath(supplied) === 'invalid') return notFound()
+  let relative: string
+  try {
+    // Hono's path has already decoded some escapes. The URL preserves the
+    // wire identity, so a literal percent in a stored name is decoded once.
+    const pathname = new URL(request.url).pathname
+    const raw = pathname.startsWith('/uploads/') ? pathname.slice('/uploads/'.length) : supplied
+    const segments = raw.split('/').map(segment => decodeURIComponent(segment))
+    if (segments.some(segment => segment === '.' || segment === '..' || /[/\\\u0000-\u001f\u007f]/.test(segment))) return notFound()
+    relative = segments.join('/')
+  } catch {
+    return notFound()
+  }
   const variant = parseImageVariantPath(relative)
   if (variant === null) return serveObject(env.ASSETS, `uploads/${relative}`, request, ctx)
   if (variant === 'invalid') return notFound()

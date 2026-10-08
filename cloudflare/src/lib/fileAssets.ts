@@ -92,7 +92,7 @@ export function safeStoredExtension(fileName: string): string {
 export function buildUniqueStoredName(originalName: string, detectedExtension?: string): string {
   const safeName = sanitizeOriginalFileName(originalName)
   const clientExt = extname(safeName)
-  const base = (clientExt ? safeName.slice(0, safeName.length - clientExt.length) : safeName) || 'file'
+  const base = (clientExt ? safeName.slice(0, safeName.length - clientExt.length) : safeName).replace(/[#%]+/g, '-') || 'file'
   const forced = detectedExtension ? String(detectedExtension).toLowerCase() : ''
   const ext = /^\.[a-z0-9]{1,8}$/.test(forced) ? forced : safeStoredExtension(safeName)
   const randomSuffix = crypto.randomUUID().replace(/-/g, '').slice(0, 8)
