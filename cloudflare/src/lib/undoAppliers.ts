@@ -1,4 +1,4 @@
-import { productStockGuardError, productStockGuardStatement, assertProductsHaveNoStock } from './productStockGuard'
+import { productStockGuardError, productStockGuardStatement } from './productStockGuard'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
 // Type-only on purpose: dozens of test loaders stub this module's relative
@@ -192,8 +192,6 @@ export function applierPermissionTier(user: SessionUser, applier: { permission: 
 export interface MergeReversal {
   keeperId: number
   keeperName: string | null
-  keeperActiveBefore?: 0 | 1
-  keeperActiveAfter?: 0
   dupId: number
   dupName: string | null
   mergeContext: string
@@ -658,7 +656,6 @@ export type MergeFoldFn = (
   stockDisposition?: MergeStockDisposition,
   economicsOverride?: ProductMergeEconomics,
   keeperChoice?: ProductMergeKeeperChoice,
-  keeperActiveAfter?: 0,
 ) => Promise<{ reversal: MergeReversal }>
 
 let mergeFoldFn: MergeFoldFn | null = null
@@ -1901,12 +1898,6 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
   if (!dupRow) throw new Error('The merged-away product record no longer exists, so the merge cannot be undone.')
 
   const stmts: Array<{ sql: string; params?: Record<string, unknown> }> = []
-  if (r.keeperActiveBefore !== undefined) {
-    if (r.keeperActiveBefore !== 0 && r.keeperActiveBefore !== 1) throw new UndoConflictError('The saved keeper active state is invalid.')
-    if (r.keeperActiveBefore === 0) stmts.push(productStockGuardStatement([keeperId], 'empty'))
-    stmts.push({ sql: 'UPDATE products SET is_active=@active,updated_at=CURRENT_TIMESTAMP WHERE id=@keeper',
-      params: { keeper: keeperId, active: r.keeperActiveBefore } })
-  }
 
   // 1. Reactivate the merged-away product; restore keeper's image_path.
   // A snapshot without dupBarcodeBefore (every merge but a Resolve barcode swap) leaves the barcode alone.
@@ -2201,7 +2192,6 @@ async function redoBulkMergeFolds(
     ])
     if (!keeper || !dupRow) throw new Error('One of the merged products no longer exists, so this merge cannot be redone.')
     if (!keeper.is_active || !dupRow.is_active) throw new Error('One of the merged products is no longer active, so this merge cannot be redone.')
-    if (r.keeperActiveAfter === 0) await assertProductsHaveNoStock(db, [keeperId, dupId])
     const economicsOverride = savedBulkClusterEconomics(r)
     const { reversal: one } = await mergeFoldFn!(
       env, db, user,
@@ -2214,7 +2204,6 @@ async function redoBulkMergeFolds(
       r.stockDisposition === 'write_off' ? 'write_off' : 'merge',
       economicsOverride,
       r.keeperChoice,
-      r.keeperActiveAfter,
     )
     preserveBulkClusterPlan(r, one)
     fresh.push(one)
@@ -3418,7 +3407,6 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         ])
         if (!keeper || !dupRow) throw new Error('One of the two products no longer exists, so the merge cannot be redone.')
         if (!keeper.is_active || !dupRow.is_active) throw new Error('One of the two products is no longer active, so the merge cannot be redone.')
-        if (reversal.keeperActiveAfter === 0) await assertProductsHaveNoStock(db, [keeperId, dupId])
         const economicsOverride = savedBulkClusterEconomics(reversal)
         const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
         const { reversal: fresh } = await mergeFoldFn(
@@ -3432,7 +3420,6 @@ const APPLIERS: Record<string, UndoApplierDef> = {
           reversal.stockDisposition === 'write_off' ? 'write_off' : 'merge',
           economicsOverride,
           reversal.keeperChoice,
-          reversal.keeperActiveAfter,
         )
         preserveBulkClusterPlan(reversal, fresh)
         await db.prepare('UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id), updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ id: keeperId })

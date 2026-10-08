@@ -17,7 +17,7 @@
 // pinned against en.json by frontend/tests/productSheetState.test.ts and
 // against the Worker's constants by Cloudflare's branch guard tests.
 export const BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> = [
-  ['Products with stock must stay active. Remove all stock before deleting or deactivating a product, and activate a product before adding stock.', 'product_has_stock'],
+  ['Products with stock cannot be removed. Stock can only be added to products that have not been removed.', 'product_has_stock'],
   ['This branch edit can no longer be verified. Refresh Branches and submit a new edit.', 'branch_edit_conflict'],
   ['Branch review is not ready. Refresh after the update and try again.', 'branch_review_schema_required'],
   ['Sales can only be recorded at a selling branch.', 'branch_not_sellable'],
@@ -67,6 +67,7 @@ export const LEGACY_BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, st
 export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   product_has_stock: 'product_has_stock',
   product_status_unsupported: 'product_status_unsupported',
+  product_replacement_incomplete: 'product_replacement_incomplete',
   branch_edit_conflict: 'branch_edit_conflict',
   branch_review_schema_required: 'branch_review_schema_required',
   canonical_branch_configuration_invalid: 'canonical_branch_configuration_invalid',

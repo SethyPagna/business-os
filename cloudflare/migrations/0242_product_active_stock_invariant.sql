@@ -1,3 +1,4 @@
+-- products.is_active is retained as the internal catalog-removal marker; public product status is unsupported.
 -- PRE/POST: inactive-products-with-stock must return no violations; this migration changes no business rows.
 -- RECOVERY: retain these guards on code rollback. Resolve stock through audited compensating operations.
 -- Existing transfer/lot provenance triggers (0151/0154/0155) remain authoritative and unchanged.

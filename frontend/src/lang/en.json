@@ -1,4 +1,5 @@
 {
+  "product_replacement_incomplete": "Product replacement cannot remove omitted products while source rows failed. Earlier successful rows remain applied. Start a corrected replacement import to finish.",
   "product_status_unsupported": "Products do not have an active or inactive status. Remove the Active column or field and try again.",
   "reset_builtin_admin_only": "Only the built-in admin account can reset business data.",
   "reset_confirm_required": "Type the exact reset phrase to confirm. No data was changed.",
@@ -2869,7 +2870,7 @@
   "merge_duplicates_quantity_summed": "Per branch, quantities are ADDED together, never overwritten or picked. If both the kept row and a duplicate already had stock at the same branch, the result is the sum of both (e.g. 5 + 3 = 8) -- not one replacing the other.",
   "merge_duplicates_quantity_title": "What happens to quantity",
   "merge_duplicates_quantity_zero_skip": "A branch where the duplicate had zero quantity is skipped entirely -- no empty stock row or empty movement record is created for it.",
-  "merge_duplicates_summary": "Scans active products and combines exact normalized-name and leading-zero-equivalent barcode identities into one row.",
+  "merge_duplicates_summary": "Scans products and combines exact normalized-name and leading-zero-equivalent barcode identities into one row.",
   "merge_duplicates_trail_audit": "Every merged product’s catalog changes, audit record, and undo record are saved together.",
   "merge_duplicates_trail_batches": "Received-date records (their codes and expiry dates) move to the kept product too, the same way quantity does -- they stay visible under \"Manage Received Dates\" after merging, not just the stock number. If both products already had the same received date, those two records are combined into one rather than kept as duplicates.",
   "merge_duplicates_trail_movement": "Every branch that actually receives quantity gets a real inventory movement record, naming the absorbed product by name and id -- visible in that branch's normal stock history.",
@@ -5959,7 +5960,7 @@
   "zero_quantity_cleanup_never_stocked": "Never had stock",
   "zero_quantity_cleanup_none": "No products have been at 0 stock for that long. Nothing to review.",
   "zero_quantity_cleanup_skipped": "{count} product(s) were skipped because they no longer had 0 stock at confirm time.",
-  "zero_quantity_cleanup_soft_delete_note": "Removed products are deactivated (soft delete), not permanently erased -- old sales and movement records that reference them are unaffected, and every removal is written to the audit log.",
+  "zero_quantity_cleanup_soft_delete_note": "Removed products leave the catalog. Their sales and stock history are kept, and every removal is recorded in the audit log.",
   "zero_quantity_cleanup_sold_out_since": "Sold out since {date}",
   "zero_quantity_cleanup_summary": "Finds products with 0 stock at every branch, confirmed from both the stock cache and a live sum, that have stayed at 0 for at least the threshold below. Nothing is ever deleted automatically -- review the list and confirm which ones to remove.",
   "zero_quantity_cleanup_threshold_label": "Days at 0 stock before eligible",

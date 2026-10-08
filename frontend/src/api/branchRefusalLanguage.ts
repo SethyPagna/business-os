@@ -13,6 +13,7 @@
 export const RESTATED_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   product_has_stock: 'product_has_stock',
   product_status_unsupported: 'product_status_unsupported',
+  product_replacement_incomplete: 'product_replacement_incomplete',
   branch_not_sellable: 'branch_not_sellable',
   sale_branch_mismatch: 'sale_branch_mismatch',
   sale_identity_conflict: 'sale_identity_conflict',

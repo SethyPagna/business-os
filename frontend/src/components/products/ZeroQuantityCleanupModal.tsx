@@ -277,7 +277,7 @@ export default function ZeroQuantityCleanupModal({
           <p className="text-gray-600 dark:text-gray-400">
             {T(
               'zero_quantity_cleanup_soft_delete_note',
-              'Removed products are deactivated (soft delete), not permanently erased -- old sales and movement records that reference them are unaffected, and every removal is written to the audit log.',
+              'Removed products leave the catalog. Their sales and stock history are kept, and every removal is recorded in the audit log.',
             )}
           </p>
         </div>

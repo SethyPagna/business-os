@@ -73,7 +73,7 @@ async function main() {
     const removed = await remove(fixture.app,10000,{reason:'Historical fixture',client_request_id:'historical_fixture'})
     const op=fixture.d1.db.prepare('SELECT * FROM product_remove_operations WHERE operation_id=?').get(removed.body.operation_id)
     const saved=JSON.parse(fixture.d1.db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get(op.undo_snapshot_id).payload_json)
-    saved.plan.product=source.product
+    saved.plan.product={...source.product,is_active:0}
     saved.plan.damaged_lots=source.damagedLots
     for(const row of saved.plan.branch_stock) Object.assign(row,source.stock.find(old=>old.id===row.id))
     for(const row of saved.plan.branch_batch_stock) Object.assign(row,source.batchStock.find(old=>old.id===row.id))
@@ -97,7 +97,7 @@ async function main() {
     fixture.d1.db.exec('DROP TRIGGER reject_remove_stock_restore')
     const restored=await applier.run(payload,{env:{},user:{id:900,username:'owner'},direction:'undo',historyId:history.id,generation:0})
     assert.equal(restored.complete,true)
-    assert.deepEqual(productGraph(fixture.d1),source,'retry restores all saved dates/costs/stock and inactive zero-stock lot exactly')
+    assert.deepEqual(productGraph(fixture.d1),source,'explicit undo restores catalog presence despite obsolete disabled snapshot, and all dates/costs/stock exactly')
   }
   {
     const fixture = setup()

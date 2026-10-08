@@ -219,7 +219,7 @@ const LABELS = {
   stockIn: { en: 'Stock in', km: 'ស្តុកចូល', localizeValue: true },
   stockOut: { en: 'Stock out', km: 'ស្តុកចេញ', localizeValue: true },
   products: { en: 'Products', km: 'ផលិតផល' },
-  activeProducts: { en: 'Active products', km: 'ផលិតផលសកម្ម' },
+  activeProducts: { en: 'Products', km: 'ផលិតផល' },
   unitsOnHand: { en: 'Units on hand', km: 'ឯកតាក្នុងស្តុក' },
   lowStock: { en: 'Low stock', km: 'ស្តុកទាប', localizeValue: true },
   outOfStock: { en: 'Out of stock', km: 'អស់ស្តុក', localizeValue: true },

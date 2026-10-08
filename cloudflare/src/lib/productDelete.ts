@@ -643,7 +643,7 @@ function restoreProductStatement(plan: ProductRemovePlan): ProductRemoveStatemen
   return {
     sql: `UPDATE products SET ${fields.map((field) => `${identifier(field)}=json_extract(@row,'$.${field}')`).join(',')}
       WHERE id=@product`,
-    params: { row: JSON.stringify(plan.product), product: plan.product_id },
+    params: { row: JSON.stringify({ ...plan.product, is_active: 1 }), product: plan.product_id },
   }
 }
 
