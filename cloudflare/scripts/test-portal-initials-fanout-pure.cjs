@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // Pins a real fix to routes/portal.ts's initials/A-Z rail fan-out (item 10,
 // p8/tests sweep, Sep 16 2026). buildPortalCatalog and
 // runPortalProductSearch each fan the real catalog page (attachPortalStockStatus)
@@ -66,6 +67,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const sourcePath = path.join(__dirname, '..', 'src', relPath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './productStockGuard') return productStockGuard
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }

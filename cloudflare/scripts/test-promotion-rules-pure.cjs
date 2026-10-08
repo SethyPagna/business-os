@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // G1 promotion engine -- backend-side checks:
 //   1. the kernel (lib/promotionRules.ts) evaluates rules correctly
 //      (the frontend mirror is byte-guarded + behavior-tested in
@@ -15,7 +16,7 @@ const assert = require('node:assert')
 const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
-const ts = require(path.join(__dirname, '..', '..', 'frontend', 'node_modules', 'typescript'))
+const ts = require('typescript')
 const Database = require(path.join(__dirname, '..', 'node_modules', 'better-sqlite3'))
 
 function transpile(relPath) {
@@ -32,6 +33,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const { sourcePath, outputText } = transpile(relPath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './productStockGuard') return productStockGuard
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }

@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // S4-7 -- the shift report actually leaves the building when a shift is closed.
 //
 // WHAT WAS WRONG. `sendTelegramShiftReport` had ZERO call sites. It existed,
@@ -56,6 +57,7 @@ function loadReal(relPath, requireOverrides = {}) {
   })
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './productStockGuard') return productStockGuard
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }

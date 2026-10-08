@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // The Telegram command menu, the commands status, coded errors, the admin gate and a webhook that never
 // 5xxs (TELEGRAM-FINAL 4.1, 4.2). Real lib/telegram.ts, lib/telegramCommandMenu.ts, lib/telegramTopicSetting.ts
 // and routes/telegram.ts over the real migration chain; the fetch stub only records, and every id is made up.
@@ -22,6 +23,7 @@ function load(file, overrides = {}) {
   const m = { exports: {} }
   new Function('require', 'module', 'exports', output)((name) => {
     if (name in overrides) return overrides[name]
+    if (name === './productStockGuard') return productStockGuard
     if (name.startsWith('.')) throw new Error(`${file} requires ${name}, which this test did not wire`)
     return require(name)
   }, m, m.exports)

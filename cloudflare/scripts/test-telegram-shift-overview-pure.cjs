@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // T10 (owner, 23 Sep 2026): "One minute after a shift closes, the Reports
 // overview is sent to Telegram too" -- a Free-plan path, a Paid path with
 // automatic fallback, and ONE send per shift.
@@ -44,7 +45,7 @@ function loadReal(relPath, overrides = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }, fileName: sourcePath,
   })
   const original = Module._load
-  Module._load = function (request, parent, main) { return request in overrides ? overrides[request] : original.call(this, request, parent, main) }
+  Module._load = function (request, parent, main) { if (request === './productStockGuard') return productStockGuard; return request in overrides ? overrides[request] : original.call(this, request, parent, main) }
   const mod = { exports: {} }
   try { new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(mod.exports, require, mod, sourcePath, path.dirname(sourcePath)) }
   finally { Module._load = original }

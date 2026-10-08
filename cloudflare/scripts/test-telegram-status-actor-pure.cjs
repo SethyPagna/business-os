@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // The receipt-status Telegram message: it must name the user who made the
 // update (S4-6), and it must name the STATUSES the way the app names them
 // (Sep 22 2026 -- the owner found "awaiting payment" still on their phone
@@ -37,6 +38,7 @@ function loadReal(relPath, requireOverrides = {}) {
   })
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './productStockGuard') return productStockGuard
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }

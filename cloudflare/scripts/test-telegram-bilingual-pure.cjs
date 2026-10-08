@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // S4-8 / S4-9. Pins the bilingual Telegram layer on the COMPOSED payload --
 // no bot token, no live chat, no network. Four things it must prove:
 //
@@ -28,6 +29,7 @@ function loadReal(relPath, requireOverrides = {}) {
   })
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './productStockGuard') return productStockGuard
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }

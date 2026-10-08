@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // One "Expenses" on three Telegram reports (R-telegram E2, 27 Sep 2026).
 //
 // The shift report (/shift), the day summary (/report) and the Reports
@@ -50,6 +51,7 @@ function load(file, overrides = {}) {
   const m = { exports: {} }
   new Function('require', 'module', 'exports', output)((name) => {
     if (name in overrides) return overrides[name]
+    if (name === './productStockGuard') return productStockGuard
     if (name.startsWith('.')) throw new Error(`${file} requires ${name}, which this test did not wire`)
     return require(name)
   }, m, m.exports)

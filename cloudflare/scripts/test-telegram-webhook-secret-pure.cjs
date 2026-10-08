@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // R-telegram E7a (27 Sep 2026): the Telegram webhook is PUBLIC -- Telegram
 // cannot present a Business OS session -- so the X-Telegram-Bot-Api-Secret-Token
 // header is the only thing between the internet and the bot's command handler
@@ -38,6 +39,7 @@ function load(file, overrides = {}) {
   const m = { exports: {} }
   new Function('require', 'module', 'exports', output)((name) => {
     if (name in overrides) return overrides[name]
+    if (name === './productStockGuard') return productStockGuard
     if (name.startsWith('.')) throw new Error(`${file} requires ${name}, which this test did not wire`)
     return require(name)
   }, m, m.exports)

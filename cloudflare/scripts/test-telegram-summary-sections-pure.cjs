@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // Owner, 29 Sep 2026: the overview in the Summary topic stays short by default,
 // and each extra section is a Settings switch that is off until turned on.
 //
@@ -25,7 +26,7 @@ function loadReal(relPath, overrides = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }, fileName: sourcePath,
   })
   const original = Module._load
-  Module._load = function (request, parent, main) { return request in overrides ? overrides[request] : original.call(this, request, parent, main) }
+  Module._load = function (request, parent, main) { if (request === './productStockGuard') return productStockGuard; return request in overrides ? overrides[request] : original.call(this, request, parent, main) }
   const mod = { exports: {} }
   try { new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(mod.exports, require, mod, sourcePath, path.dirname(sourcePath)) }
   finally { Module._load = original }

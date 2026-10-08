@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // Owner ask N6: the Telegram day / cashier / sales reports must read the SAME
 // kernel every other stat surface reads. They did not.
 //
@@ -32,6 +33,7 @@ function loadReal(relPath, requireOverrides = {}) {
   })
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './productStockGuard') return productStockGuard
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }
@@ -77,6 +79,9 @@ db.exec(`
   );
   CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, barcode TEXT, category TEXT, stock_quantity REAL,
     is_active INTEGER NOT NULL DEFAULT 1, low_stock_threshold REAL, out_of_stock_threshold REAL DEFAULT 0);
+  CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER);
+  CREATE TABLE branch_batch_stock(batch_id INTEGER,quantity REAL);
+  CREATE TABLE damaged_stock_lots(product_id INTEGER,quantity_remaining REAL);
   CREATE TABLE categories (id INTEGER PRIMARY KEY, name TEXT);
   CREATE TABLE branch_stock (id INTEGER PRIMARY KEY, product_id INTEGER, branch_id INTEGER, quantity REAL);
 `)

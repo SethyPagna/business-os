@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // Owner (25 Sep 2026): each Telegram message family can be routed to its own
 // forum topic via message_thread_id. Settings keys are plain rows in the
 // existing generic `settings` table -- no migration. This pins:
@@ -36,6 +37,7 @@ function loadReal(relPath, requireOverrides = {}) {
   })
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './productStockGuard') return productStockGuard
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }

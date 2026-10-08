@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // PUBLIC-FILTER-MENU (owner, 5 Oct): the storefront's View + Sort live in the
 // filter menu and reach the Worker as `view` and `sort` on
 // GET /catalog/products/search.
@@ -53,6 +54,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const sourcePath = path.join(__dirname, '..', 'src', relPath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './productStockGuard') return productStockGuard
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }

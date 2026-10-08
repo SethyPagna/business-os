@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // Pins the Telegram alert shapes the user specified (Part 581):
 //   sale  -> a receipt summary under a title naming the receipt
 //            ("🛍️ Sale invoice: <receipt>", Sep 23 2026): Status / Date /
@@ -27,6 +28,7 @@ function loadReal(relPath, requireOverrides = {}) {
   })
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './productStockGuard') return productStockGuard
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }

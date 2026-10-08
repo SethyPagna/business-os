@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // Regression test for the public catalog's BRAND-first browsing order
 // (G4, Part 399: was category-first from Part 226 until the user flipped
 // the storefront to browse by brand)
@@ -58,6 +59,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const sourcePath = path.join(__dirname, '..', 'src', relPath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './productStockGuard') return productStockGuard
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }

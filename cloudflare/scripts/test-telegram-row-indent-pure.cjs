@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // Pins the hanging indent of Telegram list rows. Owner, 23 Sep 2026, over a
 // 15-item sale alert: "for each new line in this report to telegram we can do
 // some add spaced so they don't show directly from new line so easier to
@@ -25,6 +26,7 @@ function loadReal(relPath, requireOverrides = {}) {
   })
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './productStockGuard') return productStockGuard
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }

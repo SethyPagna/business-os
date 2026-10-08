@@ -1,3 +1,4 @@
+const productStockGuard = require('./harness/product_stock_guard.cjs')
 // Owner, 27 Sep 2026: set Telegram forum topics from INSIDE Telegram, and give
 // customer returns their own family and topic.
 //
@@ -39,6 +40,7 @@ function load(file, overrides = {}) {
   const m = { exports: {} }
   new Function('require', 'module', 'exports', output)((name) => {
     if (name in overrides) return overrides[name]
+    if (name === './productStockGuard') return productStockGuard
     if (name.startsWith('.')) throw new Error(`${file} requires ${name}, which this test did not wire`)
     return require(name)
   }, m, m.exports)
