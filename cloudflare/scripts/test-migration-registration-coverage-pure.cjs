@@ -37,6 +37,7 @@ const ALLOWLIST = {
 // These are real test-*.cjs sweep companions, not coverage exemptions.
 // Require the named file to exist so deleting/renaming it fails this guard.
 const NAMED_COMPANIONS = {
+  242: 'test-product-active-stock-invariant-sqlite.cjs',
   184: 'test-product-cost-previous-migration-native.cjs',
   // 0188/0190/0191 are unapplied, unwired foundations (transfer receipt
   // retirement, dataset operation journal and its generation transition); their

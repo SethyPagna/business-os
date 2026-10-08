@@ -80,7 +80,7 @@ assert.match(detail, /detailAliveRef\.current[\s\S]{0,180}detailScopeRef\.curren
 assert.match(detail, /const changeAddQuery[\s\S]{0,260}\+\+addSearchSeqRef\.current[\s\S]{0,100}setAddQuery\(value\)/, 'typing invalidates an older query before the next effect commits')
 assert.match(productSearchBackend, /paginateProductFamilies/)
 assert.match(productSearchBackend, /surface === 'pos'/)
-assert.match(productSearchBackend, /familyMemberBaseWhereSql: hasSearchTerm \? \(familyMemberWhereSql \|\| 'p\.is_active = 1'\) : undefined/, 'a typed search keeps the whole active family (the ranked-id path narrows it to the listed rows and links, text search keeps every active row); plain browsing stays per-row filtered')
+assert.match(productSearchBackend, /familyMemberBaseWhereSql: hasSearchTerm \? \(familyMemberWhereSql \|\| `\$\{catalogProductSql\(\)\}`\) : undefined/, 'a typed search keeps the whole active family (the ranked-id path narrows it to the listed rows and links, text search keeps every active row); plain browsing stays per-row filtered')
 assert.match(productSearchBackend, /expandSearchResultsToNameSiblings\(env, items/)
 assert.match(detail, /const choices = \(group\.sellableItems\.length \? group\.sellableItems : \[group\.leadProduct\]\)/)
 assert.match(detail, /__groupChoices: choices/)

@@ -238,7 +238,7 @@ const RECONCILIATION_REMOVE = {
     { type: 'remove', file: path.join('routes', 'inventory.ts'), pattern: /removeMovementCost\s*=\s*resolveMovementCostSnapshot/ },
     { type: 'write_off (DISPOSE)', file: path.join('lib', 'damagedLotActions.ts'), pattern: /resolveMovementCostSnapshot/ },
     { type: 'write_off (productDelete)', file: path.join('lib', 'productDelete.ts'), pattern: /unit_cost_usd[\s\S]{0,400}total_cost_usd/ },
-    { type: 'delete (bulkDeleteEngine)', file: path.join('lib', 'bulkDeleteEngine.ts'), pattern: /unit_cost_usd,\s*unit_cost_khr,\s*total_cost_usd,\s*total_cost_khr/ },
+    
   ]
   for (const check of writerChecks) {
     const text = source(check.file)

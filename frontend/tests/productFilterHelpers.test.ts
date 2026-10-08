@@ -120,7 +120,7 @@ assert.equal(row.Image_Filename_1, 'rose.png')
 assert.equal(row.Image_Filenames, 'rose.png|box.png')
 assert.equal(row.Branch, 'Main')
 assert.equal(row.Is_Group, 'No')
-assert.equal(row.Active, 'Yes')
+assert.equal(Object.hasOwn(row, 'Active'), false, 'exports must not expose removed product-status capability')
 
 // -- branch-scoped export: a product stocked at TWO branches must export
 // Stock_Quantity as the SCOPED branch's own number, not the cross-branch

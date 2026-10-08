@@ -58,8 +58,8 @@ check('POS.tsx does not drop catalog rows whose is_active column is merely ABSEN
     'applyCatalogProducts still uses the truthy is_active filter that reads a missing column as archived',
   )
   assert.ok(
-    /is_active !== 0 && \w+\.is_active !== false/.test(posSrc),
-    'applyCatalogProducts should hide a row only when is_active is explicitly 0/false',
+    /setProducts\(Array\.isArray\(prods\) \? prods\.filter\(Boolean\) : \[\]\)/.test(posSrc),
+    'the server determines catalog membership; the picker must not apply historical status locally',
   )
 })
 

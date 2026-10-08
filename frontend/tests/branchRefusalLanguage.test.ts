@@ -47,7 +47,7 @@ const lang = loadModule()
 
 // CUTOVER-LR adds the disabled-branch family (lib/branchEffect.ts), restated the same way when no redirect float answers.
 const REDIRECT_CODES = ['branch_redirect_required', 'branch_redirect_target_invalid', 'branch_retired_no_successor', 'branch_retired_damaged_stock']
-const CODES = ['branch_not_sellable', 'sale_branch_mismatch', 'sale_identity_conflict', 'unrecorded_stock_line_invalid', 'fee_branch_invalid', 'fee_sale_invalid', 'fee_sale_branch_mismatch', ...REDIRECT_CODES]
+const CODES = ['branch_not_sellable', 'sale_branch_mismatch', 'sale_identity_conflict', 'unrecorded_stock_line_invalid', 'fee_branch_invalid', 'fee_sale_invalid', 'fee_sale_branch_mismatch', ...REDIRECT_CODES, 'product_has_stock', 'product_status_unsupported', 'product_replacement_incomplete']
 const refusal = (code: unknown, message = 'Worker English', status = 400) => Object.assign(new Error(message), { status, code })
 
 await runTest('the restated codes are exactly the eleven the Worker sends, and each is the pack key named after it', () => {

@@ -82,9 +82,9 @@ await runTest('products routes to reset-data (it has toggles) while the other fo
   // The two endpoints are deliberately NOT merged server-side -- see
   // routes/system.ts. This grid is a UI unification, so it must still
   // pick the right one, and only products may carry the toggles.
-  assert.match(fn, /resetData\?\.\('products', productToggles\)/, 'products must go through reset-data with its toggles')
+  assert.match(fn, /resetData\?\.\('products', \{ \.\.\.productToggles, \.\.\.confirmation \}\)/, 'products must go through reset-data with its toggles')
   assert.match(fn, /resetSection\?\.\(selected\.id as SectionMode\)/, 'the other four must go through reset-section')
-  assert.match(fn, /\{isProducts \? \(\s*<ProductsResetOptions/, 'the toggles must only render for products')
+  assert.match(fn, /\{isProducts \? \(\s*<ProductsResetOptions[^}]*[\s\S]*?\) : null\}/, 'the toggles must only render for products')
 })
 
 if (failed > 0) {

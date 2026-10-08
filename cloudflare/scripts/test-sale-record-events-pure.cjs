@@ -157,7 +157,7 @@ assert.match(systemSource, /tablesToClear\.unshift\('sale_record_events'\)[\s\S]
 assert.match(systemSource, /const statements:[\s\S]*?'DELETE FROM sale_record_events'[\s\S]*?'DELETE FROM return_mutation_receipts'[\s\S]*?'DELETE FROM returns'[\s\S]*?'DELETE FROM sales'/)
 // The factory list passes through presentResetTables (a migration-gated table
 // such as 0193's is skipped only while absent) and stays inside the guard.
-assert.match(systemSource, /guardSaleRecordReset\(\(await presentResetTables\(db, FACTORY_RESET_TABLES\)\)/)
+assert.match(systemSource, /guardSaleRecordReset\(resetDeleteStatements\(await presentResetTables\(db, FACTORY_RESET_TABLES\)\)\)/)
 
 db.close()
 console.log('PASS 0140 event/return receipt schema, byte bounds, identity, immutability, restore/reset guards, FK order, and lifecycle coverage')

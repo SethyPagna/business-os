@@ -12,7 +12,7 @@ for (const legacyKey of ['batchDateFrom', 'batch_date_from', 'batchDateTo', 'bat
   assert.ok(!filters.includes(legacyKey), `catalog eligibility must ignore deprecated ${legacyKey}`)
 }
 assert.doesNotMatch(filters, /product_batches[\s\S]*received_at/, 'generic catalog search must not require a received-date lot')
-assert.match(filters, /const where: string\[\] = \['p\.is_active = 1'\]/, 'active-product eligibility must remain enforced')
+assert.match(filters, /const where: string\[\] = \[`\$\{catalogProductSql\(\)\}`\]/, 'present catalog eligibility must remain enforced; removed rows excluded')
 
 // Positive control: received dates still exist elsewhere in this route for
 // stock-in/reporting data. The all-time catalog change must not erase lot

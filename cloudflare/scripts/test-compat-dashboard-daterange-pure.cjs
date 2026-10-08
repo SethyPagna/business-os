@@ -257,11 +257,11 @@ const NEW_TODAY = `date(created_at, '+7 hours') = date('now', '+7 hours') AND cr
     const expiryQueries = overviewSrc.split('db.prepare(').filter((chunk) => /\$\{DASHBOARD_EXPIRY_WHERE_SQL\}/.test(chunk))
     check('the overview keeps both catalog-wide expiry queries (preview and count)', expiryQueries.length === 2)
     check('the overview expiry queries filter on the active catalog only -- no sales/date scope',
-      /^p\.is_active = 1 AND expiry_date IS NOT NULL AND date\(expiry_date\) <= /.test(expiryWhere)
+      /^p\.is_active = 1 AND \$\{EXPIRY_DATE_WHERE_SQL\}/.test(expiryWhere)
       && expiryQueries.every((chunk) => !/sale_items|localDateRangeClause|@startDate|@branchId/.test(chunk.slice(0, chunk.indexOf('`)')))))
     const overviewFn = familySrc.slice(familySrc.indexOf('export async function getFamilyStockOverview'))
     check('the overview family stock stats are catalog-wide too, so the card badges match their lists',
-      /FROM products p\s+LEFT JOIN products parent ON parent\.id = p\.parent_id\s+WHERE p\.is_active = 1\s+\)/.test(overviewFn)
+      /FROM products p\s+LEFT JOIN products parent ON parent\.id = p\.parent_id\s+WHERE \$\{stockVisibleProductSql\(\)\}\s+\)/.test(overviewFn)
       && !/@startDate|@branchId|sale_items/.test(overviewFn))
     check('the overview pages the low/out drill lists by the same family-aware rule (one pass, both states)',
       /CASE WHEN has_low = 1 THEN 'low' ELSE 'out' END AS alert_state/.test(overviewFn)
@@ -282,7 +282,7 @@ const NEW_TODAY = `date(created_at, '+7 hours') = date('now', '+7 hours') AND cr
     && !/defaultStart/.test(src))
   // expiry_date keeps its date() wrapper: the comparison has a per-row bound,
   // so there is no index for a sargable rewrite to reach anyway.
-  check('the expiry_date date() site is deliberately untouched', /date\(expiry_date\)/.test(src))
+  check('the expiry_date date() site is deliberately untouched', /date\(expiry_date\)/.test(fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'dashboardStockOverview.ts'), 'utf8')))
 
   // Manual and scheduled retention now share one SQL builder in lib/audit.ts.
   // Keep checking the effective policy rather than looking for an inline

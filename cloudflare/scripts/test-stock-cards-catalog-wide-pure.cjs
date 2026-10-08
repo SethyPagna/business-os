@@ -114,7 +114,7 @@ for (const [file, calls] of Object.entries(byFile)) {
     /getFamilyStockOverview\(\{ db, lowStock, previewSize: DASHBOARD_STOCK_PREVIEW_SIZE \}\)/.test(compute)
     && !RANGE_SCOPE.test(compute))
   check('the overview expiry list and count both use the one active-catalog predicate',
-    (compute.match(/WHERE \$\{DASHBOARD_EXPIRY_WHERE_SQL\}/g) || []).length === 2)
+    (stockOverview.match(/WHERE \$\{DASHBOARD_EXPIRY_WHERE_SQL\}/g) || []).length === 2 && stockOverview.includes('INACTIVE_EXPIRY_WHERE_SQL'))
   const expiryWhere = (stockOverview.match(/export const DASHBOARD_EXPIRY_WHERE_SQL = `([^`]*)`/) || [])[1] || ''
   check('the overview expiry predicate starts from the active catalog and carries no date/sales range scope',
     /^p\.is_active = 1 AND /.test(expiryWhere) && !RANGE_SCOPE.test(expiryWhere))
@@ -122,7 +122,7 @@ for (const [file, calls] of Object.entries(byFile)) {
   const overviewFn = familyStockStats.slice(familyStockStats.indexOf('export async function getFamilyStockOverview'))
   const overviewSql = overviewFn.slice(0, overviewFn.indexOf('.all<'))
   check('getFamilyStockOverview starts from the plain active catalog',
-    /FROM products p\s+LEFT JOIN products parent ON parent\.id = p\.parent_id\s+WHERE p\.is_active = 1\s+\)/.test(overviewSql))
+    /FROM products p\s+LEFT JOIN products parent ON parent\.id = p\.parent_id\s+WHERE \$\{stockVisibleProductSql\(\)\}\s+\)/.test(overviewSql))
   check('getFamilyStockOverview carries no date/sales range scope and takes no where/join/params from its caller',
     !RANGE_SCOPE.test(overviewSql)
     && /opts: \{\s*db: D1Compat\s*lowStock: LowStockConfig\s*previewSize: number\s*\}/.test(overviewFn))
@@ -130,16 +130,16 @@ for (const [file, calls] of Object.entries(byFile)) {
     /lowStockThresholdSql\(lowStock, 'p\.low_stock_threshold'\)/.test(overviewSql))
 }
 check('branches.ts hub stock stats are the plain active catalog',
-  /whereSql: 'WHERE p\.is_active = 1',/.test(branches))
+  /whereSql: `WHERE \$\{stockVisibleProductSql\(\)\}`,/.test(branches))
 check('inventory.ts stock stats are the plain active catalog',
-  /whereSql: 'WHERE p\.is_active = 1',/.test(inventory))
+  /whereSql: `WHERE \(p\.is_active = 1 OR \$\{productHasStockSql\('p'\)\}\)`,/.test(inventory))
 
 // ---- The two dynamically built WHEREs stay branch/search predicates ----
 {
   const builder = branches.slice(branches.indexOf('function buildBranchStockWhere'))
   const body = builder.slice(0, builder.indexOf('\n}\n'))
   check('branches.ts buildBranchStockWhere never adds a sales-date predicate', !RANGE_SCOPE.test(body))
-  check('branches.ts buildBranchStockWhere starts from the active catalog', /const where = \['p\.is_active = 1'\]/.test(body))
+  check('branches.ts buildBranchStockWhere starts from the active catalog', /const where = \[stockVisibleProductSql\(\)\]/.test(body))
 }
 
 // ---- compat.ts: the alert lists and their counts ----
@@ -156,7 +156,7 @@ check('inventory.ts stock stats are the plain active catalog',
   check('compat.ts stock-alerts drill-down carries no date/sales range scope', drillCalls.every((call) => !RANGE_SCOPE.test(call)) && !RANGE_SCOPE.test(drill))
   check('the family alert helper itself starts from the active catalog and shares the configured low-stock threshold',
     /export async function getFamilyStockAlertPage/.test(familyStockStats)
-    && /WHERE p\.is_active = 1/.test(familyStockStats)
+    && /WHERE \$\{stockVisibleProductSql\(\)\}/.test(familyStockStats)
     && /lowStockThresholdSql\(lowStock, 'p\.low_stock_threshold'\)/.test(familyStockStats))
   // p6/efficiency-3 (3c6a4c1e): dashboardSummary used to run two identical
   // WHERE/params queries (today_count/today_total and all_total -- same
@@ -191,3 +191,12 @@ check('inventory.ts stock stats are the plain active catalog',
 }
 
 console.log(`\nALL ${passed} CHECKS PASSED`)
+
+{
+ const Database = require('better-sqlite3'); const db = new Database(':memory:')
+ db.exec('CREATE TABLE products(id INTEGER,is_active INTEGER,stock_quantity REAL); CREATE TABLE branch_stock(product_id INTEGER,quantity REAL); CREATE TABLE product_batches(id INTEGER,variant_product_id INTEGER); CREATE TABLE branch_batch_stock(batch_id INTEGER,quantity REAL); CREATE TABLE damaged_stock_lots(product_id INTEGER,quantity_remaining REAL); INSERT INTO products VALUES(1,1,0),(2,0,0),(3,0,2),(4,0,0),(5,0,0),(6,0,0); INSERT INTO branch_stock VALUES(4,3); INSERT INTO product_batches VALUES(55,5); INSERT INTO branch_batch_stock VALUES(55,4); INSERT INTO damaged_stock_lots VALUES(6,5);')
+ const guard = require('./harness/product_stock_guard.cjs')
+ assert.deepEqual(db.prepare('SELECT id FROM products p WHERE '+guard.stockVisibleProductSql()).all().map(r=>r.id), [1,3,4,5,6], 'stock readers expose each legacy stocked ledger, exclude removed empty rows')
+ assert.deepEqual(db.prepare('SELECT id FROM products p WHERE '+guard.catalogProductSql()).all().map(r=>r.id), [1], 'ordinary catalog keeps removed identities unavailable, including legacy stock rows')
+ db.close()
+}
