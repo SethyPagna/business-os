@@ -1,3 +1,4 @@
+import { executeStockTransaction } from './stockTransaction'
 import type { D1Compat } from './db'
 
 export const SALE_NOT_PAID_STOCK_RECOVERY_TARGET = 'sale-not-paid-stock-recovery-20260909-v1' as const
@@ -592,7 +593,7 @@ export async function prepareSaleNotPaidStockRecovery(
 }
 
 export async function applySaleNotPaidStockRecovery(
-  db: Pick<D1Compat, 'prepare' | 'batch'>,
+  db: D1Compat,
   prepared: PreparedSaleNotPaidStockRecovery,
 ) {
   if (prepared.outcome === 'already_applied') {
@@ -603,7 +604,7 @@ export async function applySaleNotPaidStockRecovery(
     return storedResponse(receipt, 'already_applied')
   }
   try {
-    await db.batch(prepared.statements)
+    await executeStockTransaction(db, prepared.statements, 'retry')
   } catch (error) {
     let receipt
     try { receipt = await readReceipt(db) } catch {

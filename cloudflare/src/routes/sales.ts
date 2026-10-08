@@ -1,3 +1,4 @@
+import { executeStockTransaction, stockTransactionStatementCount } from '../lib/stockTransaction'
 import { productStockGuardError, productStockGuardStatement } from '../lib/productStockGuard'
 import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, canViewAcquisitionCosts } from '../lib/acquisitionCostAccess'
@@ -1733,7 +1734,6 @@ app.post('/', async (c) => {
             THEN 1 ELSE json_extract('sale_create_incomplete', '$') END`,
       params: { sale_write_key: saleWriteKey, item_count: priced.length },
     }, saleCreationAuditStatement)
-    statements.push(ordinaryBusinessMaintenanceGuard)
     // Receipt-race retry. A failed batch rolled back completely, so re-running
     // it with a fresh number re-evaluates every guard (stock, pricing,
     // customer) from scratch. Retry ONLY when the failure is attributable to
@@ -1742,7 +1742,7 @@ app.post('/', async (c) => {
     // now holds the number. Anything else falls through unchanged.
     for (let attempt = 0; ; attempt++) {
       try {
-        await db.batch(statements)
+        await executeStockTransaction(db, statements, 'retry')
         break
       } catch (batchError) {
         const stockGuard = productStockGuardError(batchError)
@@ -2790,14 +2790,15 @@ app.patch('/:id/status', async (c) => {
 
   statements.push({ sql: 'DELETE FROM sale_bulk_guards', params: {} })
   if (settlementSnapshot) statements.push({ sql: 'DELETE FROM sale_mutation_guards', params: {} })
-  statements.push(ordinaryBusinessMaintenanceGuard)
+  const writesStock = plan.statements.length > 0 || damagedTransitionOps.length > 0
+  if (!writesStock) statements.push(ordinaryBusinessMaintenanceGuard)
   if (settlementSnapshot || directStatusResponse) {
-    assertSaleRecordBatchBounds(statements.length, settlementSnapshot || {
+    assertSaleRecordBatchBounds(writesStock ? stockTransactionStatementCount(statements.length) : statements.length, settlementSnapshot || {
       saleId: Number(id), before: oldStatus, after: saleStatus, response: directStatusResponse,
     }, settlementEventBytes + statusEventBytes)
   }
   try {
-    const results = await db.batch(statements)
+    const results = await (writesStock ? executeStockTransaction(db, statements, 'retry') : db.batch(statements))
     if (settlementResponse && settlementHistoryIndex >= 0) {
       settlementResponse.actionHistoryId = Number(results[settlementHistoryIndex]?.meta?.last_row_id || 0)
     }
@@ -3774,9 +3775,8 @@ app.post('/:id/items', async (c) => {
       },
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
-      ordinaryBusinessMaintenanceGuard,
     )
-    batchResults = await db.batch(atomicStatements) as typeof batchResults
+    batchResults = await executeStockTransaction(db, atomicStatements, 'retry') as typeof batchResults
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
@@ -5118,7 +5118,7 @@ app.post('/:id/amendments', async (c) => {
   // audit entry failed separately would be exactly the silent gap this feature
   // exists to close. ----
   try {
-    await db.batch([
+    const amendmentStatements = [
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
       headerBranchGuard,
@@ -5157,8 +5157,9 @@ app.post('/:id/amendments', async (c) => {
         params:{operation:mutationOperationId,path:`$.lines[${lineMoneyAfterAtLatestRate.findIndex(row=>row.id===0)}].id`}}] : []),
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
-      ordinaryBusinessMaintenanceGuard,
-    ])
+    ]
+    if (!lineEffect) amendmentStatements.push(ordinaryBusinessMaintenanceGuard)
+    await (lineEffect ? executeStockTransaction(db, amendmentStatements, 'retry') : db.batch(amendmentStatements))
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
