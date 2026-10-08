@@ -21,7 +21,7 @@ function loadTs(relativePath, requireMap = {}) {
 }
 
 const searchMatch = loadTs('searchMatch.ts')
-const { buildProductSearchQuery } = loadTs('productSearchQuery.ts', { './searchMatch': searchMatch })
+const { buildProductSearchQuery } = loadTs('productSearchQuery.ts', { './searchMatch': searchMatch, './productStockGuard': require('./harness/product_stock_guard.cjs') })
 const { normalizeSearchText } = searchMatch
 const fullName = 'Clarins Super Restorative Decollete And Neck Concentrate 75ml'
 const longAscii = 'x'.repeat(60)

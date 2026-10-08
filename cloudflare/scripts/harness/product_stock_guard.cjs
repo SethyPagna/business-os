@@ -1,6 +1,13 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
-const source = fs.readFileSync(path.join(__dirname, '../../src/lib/productStockGuard.ts'), 'utf8')
-const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
-new Function('exports', output)(module.exports)
+const file = path.join(__dirname, '..', '..', 'src', 'lib', 'productStockGuard.ts')
+const source = fs.readFileSync(file, 'utf8')
+const { outputText } = ts.transpileModule(source, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: file,
+})
+const mod = { exports: {} }
+new Function('module', 'exports', 'require', outputText)(mod, mod.exports, id => {
+  throw new Error(`Unmapped productStockGuard dependency: ${id}`)
+})
+module.exports = mod.exports

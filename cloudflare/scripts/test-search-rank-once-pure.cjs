@@ -38,6 +38,7 @@ function loadReal(relPath, deps = {}) {
   })
   const mod = { exports: {} }
   new Function('exports', 'require', 'module', outputText)(mod.exports, (id) => {
+    if (id === './productStockGuard') return require('./harness/product_stock_guard.cjs')
     if (id.replace(/\.ts$/, '') === './moneyPrecision') return moneyPrecision
     if (Object.prototype.hasOwnProperty.call(deps, id)) return deps[id]
     throw new Error(`unmapped require(${id}) from ${relPath}`)

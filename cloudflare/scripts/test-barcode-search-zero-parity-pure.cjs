@@ -20,7 +20,8 @@ function loadProductSearchQuery(searchModule) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: file,
   })
   const mod = { exports: {} }
-  const localRequire = (request) => request === './searchMatch' ? searchModule : require(request)
+  const localRequire = (request) => request === './searchMatch' ? searchModule
+    : request === './productStockGuard' ? require('./harness/product_stock_guard.cjs') : require(request)
   new Function('module', 'exports', 'require', outputText)(mod, mod.exports, localRequire)
   return mod.exports
 }

@@ -97,7 +97,7 @@ function loadReal(relPath, requireOverrides = {}) {
 // plumbing (auth, cache, uploads, sessions) is stubbed -- stubbing any of the
 // four below would test the stub's idea of the ranking instead of the app's.
 const searchMatch = loadReal('lib/searchMatch.ts')
-const productSearchQuery = loadReal('lib/productSearchQuery.ts', { './searchMatch': searchMatch })
+const productSearchQuery = loadReal('lib/productSearchQuery.ts', { './searchMatch': searchMatch, './productStockGuard': require('./harness/product_stock_guard.cjs') })
 const familyPagination = loadReal('lib/familyPagination.ts')
 const promotionRulesSql = loadReal('lib/promotionRulesSql.ts', { './promotionRules': loadReal('lib/promotionRules.ts') })
 

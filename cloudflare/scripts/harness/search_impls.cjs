@@ -45,7 +45,7 @@ function coreImpl(rows, core = loadWorkerCore()) {
 
 function legacyServerImpl(rows) {
   const workerMatch = loadTs(path.join(CF_SRC, 'lib', 'searchMatch.ts'))
-  const builder = loadTs(path.join(CF_SRC, 'lib', 'productSearchQuery.ts'), { './searchMatch': workerMatch })
+  const builder = loadTs(path.join(CF_SRC, 'lib', 'productSearchQuery.ts'), { './searchMatch': workerMatch, './productStockGuard': require('./product_stock_guard.cjs') })
   const db = new DatabaseSync(':memory:')
   db.limits.exprDepth = 100
   db.exec(`CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, sku TEXT, barcode TEXT, brand TEXT, category TEXT, supplier TEXT,
