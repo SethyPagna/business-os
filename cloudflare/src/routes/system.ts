@@ -1296,9 +1296,9 @@ app.post('/factory-reset', async (c) => {
   }
 
   try {
-    const droppedCustomTables = await dropAllCustomTables(c.env)
-
-    await executeStockTransaction(db, guardSaleRecordReset(resetDeleteStatements(await presentResetTables(db, FACTORY_RESET_TABLES)), Number(actorId)), 'retry')
+    const resetStatements = resetDeleteStatements(await presentResetTables(db, FACTORY_RESET_TABLES))
+    const droppedCustomTables = await dropAllCustomTables(c.env, customStatements =>
+      executeStockTransaction(db, guardSaleRecordReset([...customStatements, ...resetStatements], Number(actorId)), 'retry'))
     // The two bulk import-staging tables live on the separate import-staging DB
     // (see lib/db.ts); FACTORY_RESET_TABLES' DELETE of import_job_rows hits only
     // the main DB's empty shell, so clear the real staging on its own DB. No-op

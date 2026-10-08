@@ -920,18 +920,15 @@ export async function presentResetTables(
 // orphaned tables sitting in D1 forever, invisible to the app, so this still
 // runs during factory-reset in case any such table was created back when the
 // feature existed.
-export async function dropAllCustomTables(env: Env): Promise<string[]> {
+export async function dropAllCustomTables(env: Env, commit: (statements: { sql: string }[]) => Promise<unknown>): Promise<string[]> {
   const db = getDb(env)
   const rows = await db.prepare(`SELECT name FROM custom_tables`).all<{ name: string }>()
   // Validate the entire set before the first DDL. A later invalid row must
   // not leave an earlier valid custom table already dropped.
   for (const row of rows) assertCustomTableName(row.name)
-  const dropped: string[] = []
-  for (const row of rows) {
-    const safeName = row.name.replace(/"/g, '""')
-    await db.prepare(`DROP TABLE IF EXISTS "${safeName}"`).run()
-    dropped.push(row.name)
-  }
-  await db.prepare(`DELETE FROM custom_tables`).run()
-  return dropped
+  await commit([
+    ...rows.map(row => ({ sql: `DROP TABLE IF EXISTS "${row.name.replace(/"/g, '""')}"` })),
+    { sql: 'DELETE FROM custom_tables' },
+  ])
+  return rows.map(row => row.name)
 }

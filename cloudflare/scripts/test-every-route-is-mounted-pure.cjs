@@ -92,7 +92,7 @@ assert.match(
 )
 assert.match(coreDataInvariants, /SELECT name FROM custom_tables/, 'dropAllCustomTables still reads the metadata table')
 const system = fs.readFileSync(path.join(root, 'src', 'routes', 'system.ts'), 'utf8')
-assert.match(system, /await dropAllCustomTables\(c\.env\)/, 'the factory-reset route still calls it')
+assert.match(system, /await dropAllCustomTables\(c\.env, customStatements =>/, 'the factory-reset route commits custom tables with the guarded reset')
 console.log('PASS factory-reset cleanup for existing custom tables is untouched')
 
 console.log('\nevery-route-is-mounted tests passed')
