@@ -3,7 +3,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
 const original = path.join(__dirname, 'test-stock-session-atomic.cjs')
-let source = fs.readFileSync(original, 'utf8')
+let source = fs.readFileSync(original, 'utf8').replaceAll('\r\n','\n')
 source = source.replace("if (name.endsWith('/productStockGuard')) return productStockGuard", '')
 source = source.replace("name.endsWith('.sql')).sort()", "name.endsWith('.sql') && Number(name.slice(0,4)) < 243).sort()")
 source = source.replace('  let failAfterMetadata = false', `  sql.exec("INSERT INTO branches(id,name,is_default,is_active) VALUES(2,'Warehouse',0,1); INSERT INTO products(id,name,stock_quantity,is_active) VALUES(2,'Missing coverage',7,1)")
@@ -12,6 +12,7 @@ source = source.replace('  let failAfterMetadata = false', `  sql.exec("INSERT I
 source = source.replace('mutate(sql)\n      }\n      const result = runBatch', 'await mutate(sql)\n      }\n      const result = runBatch')
 source = source.replace("['routes/inventory.ts', 'routes/actionHistory.ts', 'routes/batches.ts']", "['routes/inventory.ts', 'routes/actionHistory.ts', 'routes/batches.ts', 'routes/branches.ts']")
 source = source.replace("if (name === './cache' || name === '../lib/cache')", "if ((name === './cache' || name === '../lib/cache') && normalized !== 'routes/branches.ts')")
+source = source.replace('    let result\n    try { result = sqliteD1Call', `    if (sql.prepare(statement.text).reader) return {results:sqliteD1Call(sql.prepare(statement.text),'all',statement.params),meta:{changes:0}}\n    let result\n    try { result = sqliteD1Call`)
 const harness = new Module(original, module)
 harness.filename = original
 harness.paths = module.paths
@@ -76,6 +77,7 @@ async function main(){
  await loadStockSession().commitStockSession(bf.env,user,receiveRequest('branch-fixture-stock'))
  bf.env.CACHE={get:async()=>null,put:async()=>{},delete:async()=>{}}
  const branches=loadStockSession('routes/branches.ts',admin).default
+ globalThis[Symbol.for('business-os.request-metrics.v1')]=hook
  const tasks=[],ctx={waitUntil(p){tasks.push(p)},passThroughOnException(){}}
  branches.onError((e,c)=>c.json({code:e.code,error:e.message},409))
  const transfer=async id=>{const response=await branches.request('/transfer',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({productId:1,fromBranchId:1,toBranchId:2,quantity:2,reason:'native transfer',client_request_id:id,transfer_provenance_version:1})},bf.env,ctx);await Promise.all(tasks.splice(0));return {status:response.status,body:await response.json()}}
