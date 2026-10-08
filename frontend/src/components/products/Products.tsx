@@ -1,4 +1,5 @@
 import ProductNameRail from '../shared/ProductNameRail'
+import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { canViewAcquisitionCosts, canEditAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../../utils/acquisitionCostAccess.ts'
 // Products
 // Main Products page; all sub-modals are imported from sibling files.
@@ -2603,7 +2604,7 @@ function ProductsFullEditor() {
       if (status.status === 'cancelled') {
         notify(`Cancelled -- ${status.processedCount.toLocaleString()} of ${status.totalCount.toLocaleString()} were already deleted`, 'warning')
       } else if (status.status === 'failed') {
-        notify(getErrorMessage(status.lastError, 'Bulk delete failed'), 'error')
+        notify(localizeBranchRuleError(status.lastError, t) || 'Bulk delete failed', 'error')
       } else if (status.failedCount) {
         notify(`Deleted ${(status.processedCount - status.failedCount).toLocaleString()}, ${status.failedCount.toLocaleString()} failed`, 'warning')
       } else {

@@ -47,10 +47,11 @@ const lang = loadModule()
 
 // CUTOVER-LR adds the disabled-branch family (lib/branchEffect.ts), restated the same way when no redirect float answers.
 const REDIRECT_CODES = ['branch_redirect_required', 'branch_redirect_target_invalid', 'branch_retired_no_successor', 'branch_retired_damaged_stock']
-const CODES = ['branch_not_sellable', 'sale_branch_mismatch', 'sale_identity_conflict', 'unrecorded_stock_line_invalid', 'fee_branch_invalid', 'fee_sale_invalid', 'fee_sale_branch_mismatch', ...REDIRECT_CODES, 'product_has_stock', 'product_status_unsupported', 'product_replacement_incomplete']
+const BULK_CODES = ['bulk_delete_queue_unavailable', 'bulk_delete_queue_resume_required']
+const CODES = ['branch_not_sellable', 'sale_branch_mismatch', 'sale_identity_conflict', 'unrecorded_stock_line_invalid', 'fee_branch_invalid', 'fee_sale_invalid', 'fee_sale_branch_mismatch', ...REDIRECT_CODES, 'product_has_stock', 'product_status_unsupported', 'product_replacement_incomplete', ...BULK_CODES]
 const refusal = (code: unknown, message = 'Worker English', status = 400) => Object.assign(new Error(message), { status, code })
 
-await runTest('the restated codes are exactly the eleven the Worker sends, and each is the pack key named after it', () => {
+await runTest('the restated codes match the Worker refusals and their language pack keys', () => {
   assert.deepEqual(Object.keys(lang.RESTATED_REFUSAL_KEYS).sort(), [...CODES].sort())
   for (const code of CODES) {
     assert.equal(lang.RESTATED_REFUSAL_KEYS[code], code)
@@ -144,6 +145,21 @@ await runTest('surfaces that localize by t() map the new codes and the old Engli
     assert.equal(branchRuleMessageKey(old), key, old)
     assert.equal(localizeBranchRuleError(`Could not update the sale: ${old}`, t), KM[key], 'a wrapped message is restated whole')
   }
+})
+
+await runTest('bulk job status strings translate by exact code without classifying arbitrary error text', () => {
+  for (const code of BULK_CODES) {
+    assert.equal(localizeBranchRuleError(code, key => KM[key]), KM[code])
+    assert.equal(localizeBranchRuleError(code, key => EN[key]), EN[code])
+  }
+  for (const text of ['constructor', 'toString', 'bulk_delete_queue_resume_required_extra']) {
+    assert.equal(branchRuleErrorKey(text), null)
+    assert.equal(localizeBranchRuleError(text, key => KM[key]), text)
+  }
+  const products = read(FRONTEND, 'src', 'components', 'products', 'Products.tsx')
+  assert.ok(products.includes('localizeBranchRuleError(status.lastError, t)'), 'the polling consumer translates the saved job code')
+  const route = read(WORKER, 'routes', 'products.ts')
+  assert.ok(route.includes("code === 'bulk_delete_queue_unavailable'"), 'admission failure preserves the stable code')
 })
 
 if (failed) { console.error(`${failed} test(s) failed`); process.exit(1) }

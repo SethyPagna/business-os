@@ -27,6 +27,7 @@ const migrations = loadAll()
 const rawDb = openDb(migrations)
 
 let beforeNextWriteBatch = null
+let bulkAdmissionError = null
 const db = {
   // d1compat.cjs's Stmt.bind(params) takes exactly ONE argument (an object
   // or an array), matching this codebase's own @name-bound call sites. Real
@@ -151,7 +152,7 @@ const productsRoute = loadReal('routes/products.ts', {
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/reviewGate': { maybeQueueForReview: async () => null },
   '../lib/salesAnalytics': { getProductSalesBreakdown: async () => ({}) },
-  '../lib/bulkDeleteEngine': { createBulkDeleteJob: async () => ({}), getBulkDeleteJob: async () => null, reapStalledBulkDeleteJobs: async () => {} },
+  '../lib/bulkDeleteEngine': { createBulkDeleteJob: async () => { if (bulkAdmissionError) throw bulkAdmissionError; return {} }, getBulkDeleteJob: async () => null, reapStalledBulkDeleteJobs: async () => {} },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }), getClientIp: () => '127.0.0.1' },
   '../lib/uploadSecurity': { validateUploadedBuffer: async () => ({ ok: true }) },
 })
@@ -290,6 +291,20 @@ async function main() {
     seed('zero'); const body={reason:'zero control',client_request_id:'zero-delete-control'}
     const res=await request('DELETE',body); assert.equal(res.status,200,JSON.stringify(res)); assert.equal(res.json.changes,1)
     const before=graph(); const replay=await request('DELETE',body); assert.equal(replay.status,200);assert.equal(replay.json.replayed,true);assert.equal(graph(),before)
+  })
+  await check('bulk admission preserves only the recognized infrastructure refusal code', async () => {
+    seed('zero')
+    const before = graph()
+    bulkAdmissionError = Object.assign(new Error('Queue unavailable'), { code: 'bulk_delete_queue_unavailable' })
+    const res = await post('/bulk-delete-jobs', { ids: [1], reason: 'queue control' })
+    assert.equal(res.status, 503, JSON.stringify(res))
+    assert.equal(res.json.code, 'bulk_delete_queue_unavailable')
+    assert.equal(graph(), before)
+    bulkAdmissionError = Object.assign(new Error('Other failure'), { code: 'internal_private_detail' })
+    const other = await post('/bulk-delete-jobs', { ids: [1], reason: 'queue control' })
+    assert.equal(other.status, 400)
+    assert.equal(other.json.code, undefined)
+    bulkAdmissionError = null
   })
   console.log(passed+' checks passed')
 }

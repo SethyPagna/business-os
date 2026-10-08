@@ -2820,6 +2820,9 @@ app.post('/bulk-delete-jobs', async (c) => {
     return c.json({ success: true, jobId, totalCount }, 202)
   } catch (error) {
     if (isImportMaintenanceFenceError(error)) return c.json({ code: error.code, error: error.message }, 503)
+    if (error instanceof Error && 'code' in error && error.code === 'bulk_delete_queue_unavailable') {
+      return c.json({ code: error.code, error: error.message }, 503)
+    }
     return c.json({ error: error instanceof Error ? error.message : 'Failed to start bulk delete' }, 400)
   }
 })

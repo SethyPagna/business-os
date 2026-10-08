@@ -1,4 +1,6 @@
 {
+  "bulk_delete_queue_unavailable": "The import queue is unavailable. No products were deleted. Restore the queue or select fewer products for one bulk delete.",
+  "bulk_delete_queue_resume_required": "Bulk delete saved its completed rows, but the import queue is unavailable. Select the remaining products and retry after the queue is restored.",
   "product_replacement_incomplete": "Product replacement cannot remove omitted products while source rows failed. Earlier successful rows remain applied. Start a corrected replacement import to finish.",
   "product_status_unsupported": "Products do not have an active or inactive status. Remove the Active column or field and try again.",
   "reset_builtin_admin_only": "Only the built-in admin account can reset business data.",

@@ -65,6 +65,8 @@ export const LEGACY_BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, st
 ]
 
 export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
+  bulk_delete_queue_unavailable: 'bulk_delete_queue_unavailable',
+  bulk_delete_queue_resume_required: 'bulk_delete_queue_resume_required',
   product_has_stock: 'product_has_stock',
   product_status_unsupported: 'product_status_unsupported',
   product_replacement_incomplete: 'product_replacement_incomplete',
@@ -126,9 +128,12 @@ export function branchRuleMessageKey(message: unknown): string | null {
 
 /** Prefer the Worker's stable code, retaining exact-message compatibility. */
 export function branchRuleErrorKey(error: unknown): string | null {
+  if (typeof error === 'string' && Object.prototype.hasOwnProperty.call(BRANCH_RULE_CODE_KEYS, error)) {
+    return BRANCH_RULE_CODE_KEYS[error]
+  }
   if (error && typeof error === 'object') {
     const code = (error as BranchRuleErrorLike).code
-    if (typeof code === 'string' && BRANCH_RULE_CODE_KEYS[code]) return BRANCH_RULE_CODE_KEYS[code]
+    if (typeof code === 'string' && Object.prototype.hasOwnProperty.call(BRANCH_RULE_CODE_KEYS, code)) return BRANCH_RULE_CODE_KEYS[code]
   }
   return branchRuleMessageKey(error)
 }
