@@ -4,13 +4,19 @@ import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import Merge from 'lucide-react/dist/esm/icons/merge.js'
+import MoreHorizontal from 'lucide-react/dist/esm/icons/more-horizontal.js'
+import Check from 'lucide-react/dist/esm/icons/check.js'
+import LazyPortalMenu from '../shared/LazyPortalMenu.tsx'
+import FilterMenu from '../shared/FilterMenu.tsx'
+import SectionTitleAction from '../shared/SectionTitleAction.tsx'
+import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import { ConflictIcon, CONFLICT_ICON_CLASS } from '../shared/ConflictIcon.ts'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import ResolveModal, { type ResolveDraft } from '../shared/ResolveModal.tsx'
 import { contactMergeRequest, dismissContactDuplicateCluster, undismissContactDuplicateCluster, getContactDuplicateClusters, mergeContacts, planBulkContactMerges } from './contactDuplicates'
 import type { ContactDuplicateCluster, ContactDuplicateSeverity, ContactTableKind } from './contactDuplicates'
 import { contactHistoryParts, createContactResolveAdapter } from './contactResolveAdapter.ts'
-import SaleLinkConflictsSection from './SaleLinkConflictsSection'
+import SaleLinkConflictsSection, { type SaleLinkToolbarControls } from './SaleLinkConflictsSection'
 import { useApp } from '../../AppContext.tsx'
 import PaginationControls, { DEFAULT_PAGE_SIZE, paginateItems } from '../shared/PaginationControls.tsx'
 import {
@@ -549,104 +555,44 @@ export default function DuplicatesTab({ t, notify, active = true, includeSupplie
     return result
   }, [clusters])
 
-  const activeTableLabel = TABLES.find((entry) => entry.id === table)?.label || ''
+  const renderConflictToolbar = (controls: SaleLinkToolbarControls = { loading, refresh: () => void load(table, showKept), showKept, setShowKept }) => (
+    <>
+      <SectionTitleAction page="contacts" section="duplicates">
+        <button type="button" onClick={controls.refresh} disabled={controls.loading} aria-label={t('refresh') || 'Refresh'} title={t('refresh') || 'Refresh'} className={`${toolbarIconButtonClassName} disabled:opacity-50`}>
+          <RefreshCw aria-hidden="true" className={`h-4 w-4 ${controls.loading ? 'animate-spin' : ''}`} />
+        </button>
+      </SectionTitleAction>
+      <div data-conflict-toolbar className="flex min-w-0 max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto overscroll-x-contain scrollbar-none">
+        {!saleLinksActive ? <div className="relative min-w-[9rem] flex-1 shrink-0">
+          <Search aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+          <input type="text" value={search} onChange={event => setSearch(event.target.value)} placeholder={t('search_duplicates_placeholder') || 'Filter by name or phone...'} aria-label={t('search_duplicates_placeholder') || 'Filter by name or phone...'} className="h-10 w-full rounded-xl border border-gray-200 bg-white pl-8 pr-3 text-xs text-gray-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-gray-100" />
+        </div> : null}
+        <LazyPortalMenu
+          trigger={<button type="button" aria-label={t('options') || 'Options'} title={t('options') || 'Options'} className={toolbarIconButtonClassName}><MoreHorizontal aria-hidden="true" className="h-4 w-4" /></button>}
+          items={[
+            ...TABLES.map(entry => ({ label: entry.label, icon: !saleLinksActive && table === entry.id ? <Check className="h-4 w-4" /> : undefined, onClick: () => { setSaleLinksActive(false); setTable(entry.id) } })),
+            { label: t('link_conflicts_section') || 'Sale links', icon: saleLinksActive ? <Check className="h-4 w-4" /> : undefined, onClick: () => setSaleLinksActive(true) },
+          ]}
+        />
+        <FilterMenu label={t('filters') || 'Filters'} iconOnly large activeCount={Number(controls.showKept) + Number(!saleLinksActive && severityFilter !== 'all')} sections={[
+          !saleLinksActive && { id: 'type', label: t('type') || 'Type', options: (['all', 'phone_conflict', 'exact_match', 'name_only'] as const).map(severity => {
+            const [key, fallback] = severity === 'all' ? ['all_severities', 'All'] : SEVERITY_LABEL_KEY[severity]
+            return { id: severity, label: `${t(key) || fallback}${severity !== 'all' ? ` · ${counts[severity]}` : ''}`, active: severityFilter === severity, onClick: () => setSeverityFilter(severity) }
+          }) },
+          { id: 'show-kept', label: t('show_kept') || 'Show kept', options: [
+            { id: 'all', label: t('no') || 'No', active: !controls.showKept, onClick: () => controls.setShowKept(false) },
+            { id: 'kept', label: t('show_kept') || 'Show kept', active: controls.showKept, onClick: () => controls.setShowKept(true) },
+          ] },
+        ]} />
+      </div>
+    </>
+  )
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        {TABLES.map((entry) => (
-          <button
-            key={entry.id}
-            onClick={() => { setSaleLinksActive(false); setTable(entry.id) }}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-              !saleLinksActive && table === entry.id
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-zinc-800 dark:text-gray-300 dark:hover:bg-zinc-700'
-            }`}
-          >
-            {entry.label}
-          </button>
-        ))}
-        <button
-          onClick={() => setSaleLinksActive(true)}
-          className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-            saleLinksActive
-              ? 'bg-blue-600 text-white'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-zinc-800 dark:text-gray-300 dark:hover:bg-zinc-700'
-          }`}
-        >
-          {t('link_conflicts_section') || 'Sale links'}
-        </button>
-        {saleLinksActive ? null : (
-          <button
-            onClick={() => void load(table, showKept)}
-            disabled={loading}
-            className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:hover:bg-blue-900/20"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-            {t('refresh') || 'Refresh'}
-          </button>
-        )}
-      </div>
-
-      {saleLinksActive ? <SaleLinkConflictsSection t={t} notify={notify} /> : (
+      {saleLinksActive ? <SaleLinkConflictsSection t={t} notify={notify} renderToolbar={renderConflictToolbar} /> : (
       <>
-      <p className="text-xs text-gray-400">
-        {replaceVars(t('duplicates_tab_hint') || 'Groups of {table} that share a phone number or an exact name, most often from records entered before duplicate checking existed. Press Resolve to merge a group\'s records into one.', {
-          table: activeTableLabel.toLowerCase(),
-        })}
-      </p>
-
-      {/* Filter row -- search across name/phone/membership number, plus a
-          severity chip filter. Both are purely client-side over the
-          already-loaded cluster list (each table's cluster count is small
-          enough that a second round trip per keystroke would be wasted
-          work). */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 min-w-[180px]">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t('search_duplicates_placeholder') || 'Filter by name or phone...'}
-            className="w-full rounded-lg border border-gray-200 bg-white py-1.5 pl-8 pr-3 text-xs text-gray-700 outline-none transition placeholder:text-gray-400 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-gray-100"
-          />
-        </div>
-        <div className="flex items-center gap-1">
-          {(['all', 'phone_conflict', 'exact_match', 'name_only'] as const).map((severity) => {
-            const [key, fallback] = severity === 'all' ? ['all_severities', 'All'] : SEVERITY_LABEL_KEY[severity]
-            return (
-              <button
-                key={severity}
-                onClick={() => setSeverityFilter(severity)}
-                className={`rounded-lg px-2 py-1 text-[11px] font-medium transition-colors ${
-                  severityFilter === severity
-                    ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-zinc-800 dark:text-gray-300 dark:hover:bg-zinc-700'
-                }`}
-              >
-                {t(key) || fallback}
-              </button>
-            )
-          })}
-        </div>
-        {/* Reveal kept (dismissed) clusters so they can be reopened -- keeping
-            a conflict is reversible, never a one-way hide. */}
-        <button
-          type="button"
-          onClick={() => setShowKept((v) => !v)}
-          title={t('show_kept_hint') || 'Show clusters you kept (marked not-a-duplicate) so they can be reopened'}
-          className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium transition-colors ${
-            showKept
-              ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-zinc-800 dark:text-gray-300 dark:hover:bg-zinc-700'
-          }`}
-        >
-          <RotateCcw className="h-3 w-3" />
-          {t('show_kept') || 'Show kept'}
-        </button>
-      </div>
+      {renderConflictToolbar()}
 
       {loading && !loaded ? (
         <div className="py-8 text-center text-sm text-gray-400">{t('loading') || 'Loading...'}</div>

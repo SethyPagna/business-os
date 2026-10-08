@@ -637,6 +637,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
             <div className="bos-nav-title min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-sm font-semibold [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden" title={mobileTitle} tabIndex={0}>
               {mobileTitle}
             </div>
+            {!moreOpen && currentSectionId === 'duplicates' && (page === 'products' || page === 'contacts') ? <span data-section-title-action-host={`${page}:duplicates`} data-section-title-action-location="mobile" className="flex shrink-0 items-center" /> : null}
           </div>
         ) : (
         <div className="flex min-w-0 items-center gap-2.5">

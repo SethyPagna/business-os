@@ -9,6 +9,7 @@ import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import Merge from 'lucide-react/dist/esm/icons/merge.js'
 import { ConflictIcon, CONFLICT_ICON_CLASS } from '../shared/ConflictIcon.ts'
 import AppSelect from '../shared/AppSelect.tsx'
+import SectionTitleAction from '../shared/SectionTitleAction.tsx'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import { createRowSearch } from '../../utils/rowSearch.ts'
@@ -771,10 +772,13 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
 
   return (
     <div className="space-y-2">
-      {/* One row (it wraps only on the narrowest phones): search, scan,
-          refresh, the conflict type and the leading-zero shortcut. */}
-      <div data-conflict-toolbar className="flex flex-wrap items-center gap-1.5">
-        <div className="relative min-w-[9rem] flex-1">
+      <SectionTitleAction page="products" section="duplicates">
+        <button type="button" onClick={() => void load()} disabled={loading} title={refreshLabel} aria-label={refreshLabel} className={`${toolbarIconButtonClassName} disabled:opacity-50`}>
+          <RefreshCw aria-hidden="true" className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+        </button>
+      </SectionTitleAction>
+      <div data-conflict-toolbar className="flex min-w-0 max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto overscroll-x-contain scrollbar-none">
+        <div className="relative min-w-[9rem] flex-1 shrink-0">
           <Search aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
@@ -790,16 +794,6 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
           t={(key) => t(key) || key}
           className={toolbarIconButtonClassName}
         />
-        <button
-          type="button"
-          onClick={() => void load()}
-          disabled={loading}
-          title={refreshLabel}
-          aria-label={refreshLabel}
-          className={`${toolbarIconButtonClassName} disabled:opacity-50`}
-        >
-          <RefreshCw aria-hidden="true" className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-        </button>
         <AppSelect
           value={severityFilter}
           options={severityOptions}

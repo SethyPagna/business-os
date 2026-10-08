@@ -4855,8 +4855,8 @@ function ProductsFullEditor() {
               {productSectionTabs.map((section) => {
                 const isActive = activeProductSection === section.id
                 return (
+                  <div key={section.id} className="flex shrink-0 items-center gap-1">
                   <button
-                    key={section.id}
                     type="button"
                     onClick={() => setActiveProductSection(section.id as typeof activeProductSection)}
                     aria-pressed={isActive}
@@ -4864,6 +4864,8 @@ function ProductsFullEditor() {
                   >
                     {tr(section.key, section.label)}
                   </button>
+                  {isActive && section.id === 'duplicates' ? <span data-section-title-action-host="products:duplicates" data-section-title-action-location="sections" className="flex shrink-0 items-center" /> : null}
+                  </div>
                 )
               })}
             </div>

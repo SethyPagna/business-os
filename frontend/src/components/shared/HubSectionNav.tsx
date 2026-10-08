@@ -117,8 +117,8 @@ export default function HubSectionNav({
             const Icon = section.icon
             const isActive = active === section.id
             return (
+              <div key={section.id} className="flex shrink-0 items-center gap-1">
               <button
-                key={section.id}
                 type="button"
                 onClick={() => onChange(section.id)}
                 aria-pressed={isActive}
@@ -127,6 +127,8 @@ export default function HubSectionNav({
                 {Icon ? <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> : null} {section.label}
                 {section.badge}
               </button>
+              {isActive && pageId === 'contacts' && section.id === 'duplicates' ? <span data-section-title-action-host="contacts:duplicates" data-section-title-action-location="sections" className="flex shrink-0 items-center" /> : null}
+              </div>
             )
           })}
         </div>

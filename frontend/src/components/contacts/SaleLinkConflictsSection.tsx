@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
-import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import Link2 from 'lucide-react/dist/esm/icons/link-2.js'
@@ -36,7 +35,9 @@ function replaceVars(template: string, values: Record<string, unknown>): string 
 const mismatchKey = (row: SaleLinkMismatch): string => `${row.customer_id}|${row.phone_key}`
 const missingKey = (row: SaleLinkMissing): string => `${row.name.toLowerCase()}|${row.phone_key}`
 
-export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn; notify: NotifyFn }) {
+export type SaleLinkToolbarControls = { loading: boolean; refresh: () => void; showKept: boolean; setShowKept: (value: boolean) => void }
+
+export default function SaleLinkConflictsSection({ t, notify, renderToolbar }: { t: TranslateFn; notify: NotifyFn; renderToolbar: (controls: SaleLinkToolbarControls) => ReactNode }) {
   const { can } = useApp() as { can: (permissionKey: string, actionKey: string) => boolean }
   const canResolveConflicts = can('contacts', 'resolve_conflicts')
   // Spend and sale counts per group are contact financial history: the server
@@ -178,36 +179,7 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="min-w-0 flex-1 text-xs text-gray-400">
-          {tr('link_conflicts_hint', 'Sales whose customer link disagrees with the phone printed on the receipt, and sales naming a customer that has no contact record. Resolve or dismiss each group.')}
-        </p>
-        <button
-          type="button"
-          onClick={() => {
-            setMismatchPage(1)
-            setMissingPage(1)
-            setShowKept((v) => !v)
-          }}
-          title={tr('show_kept_hint', 'Show clusters you kept (marked not-a-duplicate) so they can be reopened')}
-          className={`inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-medium transition-colors ${
-            showKept
-              ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-zinc-800 dark:text-gray-300 dark:hover:bg-zinc-700'
-          }`}
-        >
-          <RotateCcw className="h-3 w-3" />
-          {tr('show_kept', 'Show kept')}
-        </button>
-        <button
-          onClick={() => void load(showKept)}
-          disabled={loading}
-          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:hover:bg-blue-900/20"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-          {tr('refresh', 'Refresh')}
-        </button>
-      </div>
+      {renderToolbar({ loading, refresh: () => void load(showKept), showKept, setShowKept })}
 
       {data?.pagination ? (
         <div className="flex flex-wrap items-center gap-2">
