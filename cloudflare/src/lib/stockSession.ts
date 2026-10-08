@@ -447,6 +447,7 @@ function sessionBudgetDb(env: Env, budget?: StockSessionQueryBudget) {
   const limit = getPlanLimits(env).d1QueriesPerInvocation
   let local = 0
   let admission = false
+  let tailReads = false
   const used = () => Math.max(initial + local, budget?.statementsUsed() ?? 0)
   const check = (planned: number, tail = 1) => {
     if (used() + planned + tail + reserve > limit) fail('This stock change is too large for the current plan. Use fewer products or received dates, then try again.', 409, 'stock_session_query_budget_exceeded')
@@ -456,12 +457,19 @@ function sessionBudgetDb(env: Env, budget?: StockSessionQueryBudget) {
     const statement = db.prepare(sql)
     const execute = async <T>(fn: () => Promise<T>): Promise<T> => {
       if (admission) check(1)
+      else if (tailReads) check(1, 0)
       local += 1
       return fn()
     }
     return {
-      get: <T>(params?: import('./db').BindParams) => execute(() => statement.get<T>(params)),
-      all: <T>(params?: import('./db').BindParams) => execute(() => statement.all<T>(params)),
+      get: <T>(params?: import('./db').BindParams) => execute(() => {
+        if (!statement.getOnce) throw new Error('Stock sessions require single-attempt database reads')
+        return statement.getOnce<T>(params)
+      }),
+      all: <T>(params?: import('./db').BindParams) => execute(() => {
+        if (!statement.allOnce) throw new Error('Stock sessions require single-attempt database reads')
+        return statement.allOnce<T>(params)
+      }),
       run: params => execute(() => statement.run(params)),
     }
   }
@@ -471,7 +479,7 @@ function sessionBudgetDb(env: Env, budget?: StockSessionQueryBudget) {
       local += statements.length
       return db.batchOnce(statements)
     },
-    finishReads() { admission = false },
+    finishReads() { admission = false; tailReads = true },
   }
 }
 

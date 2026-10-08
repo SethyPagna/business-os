@@ -90,6 +90,31 @@ async function outerProof(staleAuth) {
   assert.equal(lostResult.replayed,true);assert.equal(lost.batches(),1);assert.equal(lost.count(),38)
   assert.equal(lost.sql.prepare('SELECT COUNT(*) n FROM stock_session_operations').get().n,1)
   assert.equal(lost.sql.prepare('SELECT stock_quantity n FROM products WHERE id=1').get().n,5)
+  f.reset()
+  const smallHistory=f.sql.prepare('SELECT * FROM action_history WHERE id=?').get(receipt.actionHistoryId)
+  f.loseNextCommitAcknowledgement()
+  await replayStockSession(f.env,user,'undo',receipt.actionHistoryId,0,JSON.parse(smallHistory.undo_payload))
+  const undoQueries=f.count()-1
+  assert.equal(f.batches(),1,'lost undo acknowledgement cannot retry the atomic mutation')
+  assert.equal(f.sql.prepare('SELECT stock_quantity n FROM products WHERE id=1').get().n,0)
+  assert.equal(f.sql.prepare('SELECT generation n FROM stock_session_operations WHERE id=?').get(receipt.operationId).n,1)
+  for(const tier of ['free','paid']) for(const extra of [0,1]) {
+    const c=measuredFixture();c.env.PLAN_TIER=tier;const k=loadStockSession()
+    const r=await k.commitStockSession(c.env,user,receiveRequest('replay-bound-'+tier+'-'+extra))
+    const row=c.sql.prepare('SELECT * FROM action_history WHERE id=?').get(r.actionHistoryId),payload=JSON.parse(row.undo_payload)
+    c.reset();const offset=(tier==='free'?50:1000)-undoQueries-1+extra
+    const perform=()=>k.replayStockSession(c.env,user,'undo',r.actionHistoryId,0,payload,{statementsUsed:()=>offset,reserveStatements:0})
+    if(extra){await assert.rejects(perform,e=>e.code==='stock_session_query_budget_exceeded');assert.equal(c.batches(),0);assert.equal(c.sql.prepare('SELECT generation n FROM stock_session_operations WHERE id=?').get(r.operationId).n,0);assert.equal(c.sql.prepare('SELECT stock_quantity n FROM products WHERE id=1').get().n,5)}
+    else {await perform();assert.equal(c.count(),undoQueries)}
+  }
+  console.log('one-line undo',undoQueries)
+  const transient=measuredFixture();transient.env.PLAN_TIER='free'
+  const transientDb=transient.env.DB;let attempts=0
+  const failing=p=>new Proxy(p,{get(t,k){if(k==='bind')return(...params)=>failing(t.bind(...params));if(k==='all')return(...params)=>{attempts+=1;if(attempts===1)throw new Error('D1_ERROR: network reset before schema reply');return t.all(...params)};return t[k]}})
+  transient.env.DB=new Proxy(transientDb,{get(t,k){if(k==='prepare')return sql=>/^SELECT t.value table_name/.test(sql)?failing(t.prepare(sql)):t.prepare(sql);return t[k]}})
+  await assert.rejects(()=>loadStockSession().commitStockSession(transient.env,user,receiveRequest('free-transient-once-budget')),/network reset/)
+  assert.equal(attempts,1,'budgeted preflight must never retry implicitly')
+  assert.equal(transient.batches(),0);assert.equal(transient.sql.prepare('SELECT COUNT(*) n FROM stock_session_operations').get().n,0)
   await outerProof(false)
   await outerProof(true)
   console.log('stock-session plan budget native: PASS')
