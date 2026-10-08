@@ -2,6 +2,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const assert = require('node:assert/strict')
 const baseline = process.argv.includes('--baseline')
+const pressureControl = process.argv.includes('--pressure-control')
 const baselineSource = baseline ? require('node:child_process').execFileSync('git', ['show', '12798de289ea6e224ee41aca6b3e000577cca743:cloudflare/src/routes/stockInCommit.ts'], { cwd: path.join(__dirname, '..'), encoding: 'utf8' }) : null
 const fixtureRequire = name => name === 'node:fs' && baseline ? { ...fs, readFileSync(file, ...args) {
   return String(file).replaceAll('\\', '/').endsWith('/src/routes/stockInCommit.ts') ? baselineSource : fs.readFileSync(file, ...args)
@@ -10,13 +11,30 @@ const fixtureRequire = name => name === 'node:fs' && baseline ? { ...fs, readFil
 let fixture = fs.readFileSync(path.join(__dirname, 'test-intake-full-request-budget.cjs'), 'utf8').replace(/\r/g, '').split(';(async () => {')[0]
 fixture = fixture.replace('let failures = new Set()', 'let failures = new Set(); let pairs = new Map()')
 fixture = fixture.replace('physical = 0; failures = new Set()', 'physical = 0; failures = new Set(); pairs = new Map()')
+fixture = fixture.replace('async function world(tier, mode, verified, options = {}) {', `async function world(tier, mode, verified, options = {}) { options.enforceCap ??= ${!baseline};`)
 fixture = fixture.replace('physical += statements.length', "physical += statements.length; if (options.enforceCap) assert.ok(physical <= 1000, 'physical Paid cap including background')")
 fixture = fixture.replace('if (kind && options.tailRetries && !failures.has(kind)) {', `const pair = sql + JSON.stringify(params); const nth = (pairs.get(pair) || 0) + 1
       if (kind) pairs.set(pair, nth)
       if (kind && options.tailRetries && nth % 2 === 1) {`)
+// Failure injection stays at the actual binding dispatch. D1Compat must retry the real product
+// snapshot once per line; each failed and successful attempt is metered by the unchanged Worker.
+const preflightSql = 'SELECT id, name, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr, is_active FROM products WHERE id = '
+assert.ok(fixture.includes('const kind = /SELECT namespace'), 'actual dispatch classifier remains present')
+const branchPreflightSql = 'SELECT id, name, role, is_active, successor_branch_id FROM branches'
+const lotPreflightSql = 'SELECT pb.id,pb.batch_key,pb.received_at,pb.unit_cost_usd,pb.received_cost_usd,'
+fixture = fixture.replace('const kind = /SELECT namespace', `const kind = options.widePreflightRetries && sql.trim().replace(/\\s+/g, ' ') === ${JSON.stringify(branchPreflightSql)} ? 'preflight-branch'
+        : options.widePreflightRetries && sql.trim().replace(/\\s+/g, ' ').startsWith(${JSON.stringify(lotPreflightSql)}) ? 'preflight-lot'
+          : options.preflightRetries && sql.trim().replace(/\\s+/g, ' ').startsWith(${JSON.stringify(preflightSql)}) ? 'preflight' : /SELECT namespace`)
+fixture = fixture.replace("throw Error('D1_ERROR: network synthetic tail retry')", "throw Error('D1_ERROR: network synthetic ' + kind + ' retry')")
+fixture = fixture.replace('let physical = 0', 'let physical = 0; let requests = 0')
+fixture = fixture.replace('const call = async (cold = false) => {', 'const call = async (cold = false) => { requests++')
+fixture = fixture.replace('physical, failures:', `physical, requests, attemptedStatements: observed.invocation.attemptedStatements,
+      preflightAttempts: trace.filter(sql => sql.startsWith(${JSON.stringify(preflightSql)})).length,
+      branchPreflightAttempts: trace.filter(sql => sql === ${JSON.stringify(branchPreflightSql)}).length,
+      lotPreflightAttempts: trace.filter(sql => sql.startsWith(${JSON.stringify(lotPreflightSql)})).length, failures:`)
 fixture = fixture.replace('const payload = options.multiLine ?', 'const payload = options.payload || (options.multiLine ?')
 fixture = fixture.replace('} : body\n    const response', '} : body)\n    const response')
-const { world } = new Function('require', '__dirname', fixture + ';return {world};')(fixtureRequire, __dirname)
+const { world, load } = new Function('require', '__dirname', fixture + ';return {world, load};')(fixtureRequire, __dirname)
 
 async function lifecycleChecks() {
   const { Hono } = require('hono')
@@ -65,36 +83,93 @@ async function lifecycleChecks() {
 
 ;(async () => {
   if (!baseline) await lifecycleChecks()
-  const options = { multiLine: true, tailRetries: true, delayedKv: true, releaseKvAfterResponse: baseline, enforceCap: !baseline }
+  assert.equal(load('lib/planTier.ts').getPlanLimits({ PLAN_TIER: 'paid' }).stockInLinesPerRequest, 24)
+  assert.match(fs.readFileSync(path.join(__dirname, '../src/routes/inventory.ts'), 'utf8'), /reserve: body\.sellingPriceUsd != null \|\| body\.sellingPriceKhr != null \? 18 : 16/, 'optional price receipt retains its 18-statement reserve')
+  const options = { multiLine: true, tailRetries: true, delayedKv: true, releaseKvAfterResponse: baseline, enforceCap: !baseline, preflightRetries: baseline || pressureControl, widePreflightRetries: baseline || pressureControl }
   const f = await world('paid', 'optional-tagged', false, options)
   const before = f.effects()
   const first = await f.call(true)
   if (baseline) {
-    assert.equal(first.physical, 1023)
+    assert.equal(first.status, 200)
     assert.equal(first.body.results.filter(r => r.ok).length, 24)
-    console.log('PASS baseline counter parity with pending-tail overrun: 1023')
+    assert.equal(first.attemptedStatements, first.physical)
+    assert.ok(first.physical > 1000, `historical pending-tail kernel must discriminate current admission: ${first.physical}`)
+    assert.equal(first.preflightAttempts, 48)
+    assert.equal(first.branchPreflightAttempts, 48)
+    assert.equal(first.lotPreflightAttempts, 48)
+    console.log(JSON.stringify({ pass: true, negativeControl: 'historical stockInCommit kernel; actual product/branch/lot D1 retries', attemptedStatements: first.physical, saved: 24, preflightAttempts: [first.preflightAttempts, first.branchPreflightAttempts, first.lotPreflightAttempts] }))
+    f.sql.close()
+    return
+  }
+  if (pressureControl) {
+    assert.equal(first.status, 200)
+    assert.equal(first.attemptedStatements, first.physical)
+    assert.ok(first.physical <= 1000)
+    const saved = first.body.results.filter(r => r.ok).length
+    const deferred = first.body.results.filter(r => r.code === 'deferred').length
+    assert.ok(saved > 0 && deferred > 0)
+    assert.equal(saved + deferred, 24)
+    assert.deepEqual([first.preflightAttempts, first.branchPreflightAttempts, first.lotPreflightAttempts], Array(3).fill(2 * (saved + 1)))
+    assert.deepEqual(first.effects, { ...before, received: before.received + saved * 5, held: before.held + saved * 5,
+      movement: before.movement + saved * 2, written: before.written + saved })
+    console.log(JSON.stringify({ pass: true, control: 'current kernel; same actual product/branch/lot D1 retries', attemptedStatements: first.physical, saved, deferred, preflightAttempts: [first.preflightAttempts, first.branchPreflightAttempts, first.lotPreflightAttempts] }))
     f.sql.close()
     return
   }
   assert.equal(first.status, 200)
-  assert.ok(first.physical <= 1000, `pending tails exceeded admission limit: ${first.physical}`)
+  assert.equal(first.physical, 975, 'optimized all-saved workload including delayed/retried tails')
+  assert.equal(first.attemptedStatements, first.physical)
+  assert.equal(first.requests, 1, 'all-saved completion requires one request')
   assert.equal(first.body.results.length, 24)
-  const saved = first.body.results.filter(r => r.ok).length
-  const deferred = first.body.results.filter(r => r.code === 'deferred').length
-  assert.ok(saved > 0)
-  assert.equal(saved + deferred, 24)
-  assert.equal(first.effects.written, saved)
-  assert.equal(first.effects.held, before.held + saved * 5)
-  assert.equal(first.effects.movement, before.movement + saved * 2)
-  options.payload = { lines: first.body.results.flatMap((result, i) => result.code === 'deferred'
-    ? [{ key: 'line-' + i, wire: 'adjust', body: { ...f.body, client_request_id: f.body.client_request_id + '-' + i } }] : []) }
-  const retry = await f.call()
-  assert.ok(retry.physical <= 1000)
-  assert.equal(retry.body.results.filter(r => r.ok).length, deferred)
-  assert.equal(retry.effects.written, 24)
-  assert.equal(retry.effects.held, before.held + 120)
-  assert.equal(retry.effects.movement, before.movement + 48)
+  assert.ok(first.body.results.every((r, i) => r.ok && r.key === 'line-' + i))
+  assert.equal(first.body.results.filter(r => r.code === 'deferred').length, 0)
+  assert.deepEqual(first.effects, { ...before, received: before.received + 120, held: before.held + 120,
+    movement: before.movement + 48, written: before.written + 24 })
+  // Every line settled; the continuation set is empty, so the client issues no retry request.
   f.sql.close()
+
+  const pressureOptions = { multiLine: true, tailRetries: true, preflightRetries: true, delayedKv: true, enforceCap: true }
+  const pressure = await world('paid', 'optional-tagged', false, pressureOptions)
+  const pressureBefore = pressure.effects()
+  const pressured = await pressure.call(true)
+  assert.equal(pressured.status, 200)
+  assert.equal(pressured.attemptedStatements, pressured.physical)
+  assert.ok(pressured.physical <= 1000)
+  assert.equal(pressured.body.results.length, 24)
+  const saved = pressured.body.results.filter(r => r.ok).length
+  const deferred = pressured.body.results.filter(r => r.code === 'deferred').length
+  assert.ok(saved > 0 && deferred > 0, 'real product preflight retries must produce a genuine deferred suffix')
+  assert.equal(saved + deferred, 24)
+  assert.ok(pressured.failures.includes('preflight'), 'actual dispatch threw a retryable D1 product read failure')
+  assert.equal(pressured.preflightAttempts, 2 * (saved + 1), 'one failed and one successful actual product read for each attempted line, including first deferred line')
+  assert.ok(pressured.body.results.slice(0, saved).every(r => r.ok))
+  assert.ok(pressured.body.results.slice(saved).every(r => r.code === 'deferred'), 'untouched suffix keeps original order')
+  assert.deepEqual(pressured.effects, { ...pressureBefore, received: pressureBefore.received + saved * 5,
+    held: pressureBefore.held + saved * 5, movement: pressureBefore.movement + saved * 2, written: pressureBefore.written + saved })
+  const originalLines = Array.from({ length: 24 }, (_, i) => ({ key: 'line-' + i, wire: 'adjust',
+    body: { ...pressure.body, client_request_id: pressure.body.client_request_id + '-' + i } }))
+  const receiptIds = () => pressure.sql.prepare('SELECT request_id FROM stock_mutation_receipts WHERE written=1 ORDER BY id').all().map(row => row.request_id)
+  assert.deepEqual(receiptIds(), originalLines.slice(0, saved).map(line => line.body.client_request_id))
+  pressureOptions.payload = { lines: originalLines.slice(saved) }
+  assert.deepEqual(pressureOptions.payload.lines.map(line => line.key), pressured.body.results.slice(saved).map(r => r.key))
+  const retry = await pressure.call()
+  assert.equal(retry.status, 200)
+  assert.equal(retry.attemptedStatements, retry.physical)
+  assert.ok(retry.physical <= 1000)
+  assert.equal(retry.requests, 2)
+  assert.equal(retry.preflightAttempts, deferred * 2, 'same actual one-retry pressure applies during continuation')
+  assert.ok(retry.body.results.every((r, i) => r.ok && r.key === originalLines[saved + i].key))
+  assert.equal(retry.body.results.length, deferred)
+  assert.deepEqual(receiptIds(), originalLines.map(line => line.body.client_request_id), 'continuation retains every original ID and never re-applies saved prefix')
+  assert.deepEqual(retry.effects, { ...pressureBefore, received: pressureBefore.received + 120, held: pressureBefore.held + 120,
+    movement: pressureBefore.movement + 48, written: pressureBefore.written + 24 })
+  const replay = await pressure.call()
+  assert.equal(replay.status, 200)
+  assert.ok(replay.body.results.every(r => r.ok && r.replayed))
+  assert.deepEqual(replay.effects, retry.effects)
+  assert.equal(replay.attemptedStatements, replay.physical)
+  assert.ok(replay.physical <= 1000)
+  pressure.sql.close()
   for (const tier of ['free', 'paid']) {
     const singleOptions = { tailRetries: true, multiLine: true }
     const single = await world(tier, 'add', true, singleOptions)
@@ -121,10 +196,10 @@ async function lifecycleChecks() {
   const unknown = await fault.call()
   assert.ok(unknown.body.results.every(r => r.code === 'stock_request_outcome_unknown'))
   assert.equal(unknown.effects.written, 24)
-  const replay = await fault.call()
-  assert.ok(replay.body.results.every(r => r.code === 'stock_request_partially_applied'))
-  assert.deepEqual(replay.effects, unknown.effects)
+  const faultReplay = await fault.call()
+  assert.ok(faultReplay.body.results.every(r => r.code === 'stock_request_partially_applied'))
+  assert.deepEqual(faultReplay.effects, unknown.effects)
   fault.sql.close()
-  console.log(JSON.stringify({ pass: true, paidAttempts: first.physical, saved, deferred, retryAttempts: retry.physical }))
+  console.log(JSON.stringify({ pass: true, allSavedAttempts: first.physical, allSavedRequests: first.requests, pressureAttempts: pressured.physical, preflightAttempts: pressured.preflightAttempts, saved, deferred, retryAttempts: retry.physical, replayAttempts: replay.physical }))
 })().catch(error => { console.error(error); process.exitCode = 1 })
 
