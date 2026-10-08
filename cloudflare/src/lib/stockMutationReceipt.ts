@@ -55,11 +55,10 @@ import type { StockWriteStatement } from './productBatches'
 // STALE CLAIMS. A crash between the claim and the completion used to strand
 // the id in 'in_flight' FOREVER, and the operator had no way back: the line
 // could never be re-sent under that id and nothing pruned it. A claimed row
-// with written = 0 moved no stock by construction, so after 120 seconds -- far
-// longer than any Worker invocation -- it is a crashed request, and the retry
-// takes it over with a conditional UPDATE (whoever's UPDATE reports one
-// changed row owns it, so two racing retries still produce one write).
-// written = 1 is never taken over.
+// with written = 0 may be reclaimed after 120 seconds. The original invocation
+// may still be alive: age is only a retry delay. The written statement asserts
+// that the matching receipt is still unwritten inside the physical transaction,
+// so only one overlapping attempt can commit. written = 1 is never reclaimed.
 //
 // THE ATOMIC MARK. A kernel whose whole stock write IS one db.batch -- the
 // auto-routed removal in routes/inventory.ts (captured lot drain + strict
@@ -93,9 +92,9 @@ const STOCK_MUTATION_STALE_SECONDS = 120
 
 type StockMutationKind = 'adjust' | 'receive'
 
-/** The write mark as a statement for a kernel whose whole stock write is one db.batch (see THE ATOMIC MARK). */
+/** Once-only receipt assertion for a kernel whose whole stock write is one batch. */
 export type StockMutationAtomicMark = {
-  /** The written=1 UPDATE to include in that batch, or null when no claim is held (or it is already marked). */
+  /** The guarded write mark, or null when no claim is held or it is already marked. */
   statement(): StockWriteStatement | null
   /** Call once that batch has committed. */
   committed(): void
@@ -317,12 +316,17 @@ async function claimStockMutation(
   return { state: 'claimed' }
 }
 
-/** Set immediately before the kernel's first stock-mutating statement. */
+/** Abort the whole transaction if another attempt already used or replaced its receipt. */
 const MARK_STOCK_MUTATION_WRITTEN_SQL =
-  'UPDATE stock_mutation_receipts SET written=1 WHERE actor_id=@actor AND request_id=@request AND completed_at IS NULL'
+  `INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json,written)
+   VALUES(@actor,@request,@kind,@canonical,json_extract('1',CASE WHEN EXISTS(
+     SELECT 1 FROM stock_mutation_receipts WHERE actor_id=@actor AND request_id=@request
+       AND kind=@kind AND request_json=@canonical AND written=0 AND completed_at IS NULL
+   ) THEN '$' ELSE 'stock_request_claim_lost' END))
+   ON CONFLICT(actor_id,request_id) DO UPDATE SET written=excluded.written`
 
-async function markStockMutationWritten(db: D1Compat, actorId: number, requestId: string): Promise<void> {
-  await db.prepare(MARK_STOCK_MUTATION_WRITTEN_SQL).run({ actor: actorId, request: requestId })
+async function markStockMutationWritten(db: D1Compat, actorId: number, requestId: string, kind: StockMutationKind, canonical: string): Promise<void> {
+  await db.prepare(MARK_STOCK_MUTATION_WRITTEN_SQL).run({ actor: actorId, request: requestId, kind, canonical })
 }
 
 async function completeStockMutation(
@@ -425,11 +429,11 @@ export async function withStockMutationReceipt(
   }
   const markWritten = async () => {
     if (wrote) return
-    await markStockMutationWritten(db, actorId, requestId)
+    await markStockMutationWritten(db, actorId, requestId, kind, canonical)
     wrote = true
   }
   const atomicMark: StockMutationAtomicMark = {
-    statement: () => (wrote ? null : { sql: MARK_STOCK_MUTATION_WRITTEN_SQL, params: { actor: actorId, request: requestId } }),
+    statement: () => (wrote ? null : { sql: MARK_STOCK_MUTATION_WRITTEN_SQL, params: { actor: actorId, request: requestId, kind, canonical } }),
     committed: () => { wrote = true },
     execute: (db, statements) => executeStockMutationBatch(db, statements, atomicMark),
     admit,
@@ -438,6 +442,7 @@ export async function withStockMutationReceipt(
   try {
     response = await run(markWritten, atomicMark)
   } catch (error) {
+    if (String(error).includes('stock_request_claim_lost')) return json(STOCK_MUTATION_IN_FLIGHT, 409)
     if (error instanceof StockMutationBudgetError) {
       if (wrote || dispatched) return json(STOCK_MUTATION_UNKNOWN, 503)
       await releaseStockMutation(db, actorId, requestId)
@@ -453,6 +458,7 @@ export async function withStockMutationReceipt(
   }
   if (response.status < 200 || response.status >= 300) {
     const failure = await response.clone().json().catch(() => ({})) as Record<string, unknown>
+    if (String(failure.error || '').includes('stock_request_claim_lost')) return json(STOCK_MUTATION_IN_FLIGHT, 409)
     const rolledBack = /constraint failed|malformed JSON|bad JSON path|no such (table|column|function)|syntax error|datatype mismatch|too many SQL variables/i.test(String(failure.error || ''))
     if (dispatched && response.status !== 409 && (wrote || !rolledBack)) {
       if (wrote) await completeStockMutation(db, actorId, requestId, 503, STOCK_MUTATION_UNKNOWN).catch(() => {})

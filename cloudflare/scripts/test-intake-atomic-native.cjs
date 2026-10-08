@@ -222,7 +222,7 @@ async function main() {
     assert.equal((await f.send(stale)).status, 409)
     assert.equal(f.state(), before)
     const current = { ...stale, expectedLotQuantity: 5 }
-    f.failWhenSqlMatches(/UPDATE stock_mutation_receipts SET written=1/)
+    f.failWhenSqlMatches(/DO UPDATE SET written=excluded.written/)
     assert.notEqual((await f.send(current)).status, 200)
     assert.equal(f.state(), before)
     assert.equal((await f.send(current)).status, 200)
@@ -240,4 +240,5 @@ async function main() {
   console.log(JSON.stringify({ passed, failures, budgets }))
   if (failures) process.exitCode = 1
 }
-main().catch(error => { console.error(error); process.exitCode = 1 })
+module.exports = { setup }
+if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })
