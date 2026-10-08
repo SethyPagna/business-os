@@ -21,19 +21,21 @@ test.afterEach(async ({ page }, testInfo) => {
 })
 // Real built UI/transport/decoder, synthetic API storage only. Worker byte/key
 // persistence is separately verified by native upload-route fixtures.
-for (const language of ['en', 'km'] as const) test(`Product image file/capture/Library previews and saved edit in ${language}`, async ({ page }, testInfo) => {
+for (const language of ['en', 'km'] as const) for (const recoveryFailure of [false, true]) test(recoveryFailure
+  ? `Dirty ProductForm Library recovery preserves images and draft in ${language}`
+  : `Product image file/capture/Library previews and saved edit in ${language}`, async ({ page }, testInfo) => {
   const labels = JSON.parse(readFileSync(new URL(`../src/lang/${language}.json`, import.meta.url), 'utf8'))
   const original = JSON.parse(readFileSync(new URL('./fixtures/admin-products.json', import.meta.url), 'utf8'))
   let product = { ...original.items[0], image_path: '', image_gallery: [] }
-  await page.addInitScript(({ denyStorage, staleOrigin }) => {
+  await page.addInitScript(({ denyStorage, staleOrigin, denyDraftStorage }) => {
     const key = 'businessos_public_asset_base_url'
     localStorage.setItem(key, staleOrigin)
-    if (denyStorage) {
+    if (denyStorage || denyDraftStorage) {
       const remove = Storage.prototype.removeItem; const set = Storage.prototype.setItem
-      Storage.prototype.removeItem = function (name) { if (name === key) throw new DOMException('Blocked', 'SecurityError'); return remove.call(this, name) }
-      Storage.prototype.setItem = function (name, value) { if (name === key) throw new DOMException('Quota', 'QuotaExceededError'); return set.call(this, name, value) }
+      Storage.prototype.removeItem = function (name) { if (denyStorage && name === key) throw new DOMException('Blocked', 'SecurityError'); return remove.call(this, name) }
+      Storage.prototype.setItem = function (name, value) { if ((denyStorage && name === key) || (denyDraftStorage && name.startsWith('businessos_draft_'))) throw new DOMException('Quota', 'QuotaExceededError'); return set.call(this, name, value) }
     }
-  }, { denyStorage: language === 'km', staleOrigin: ADMIN_ORIGIN.replace('127.0.0.1', '127.0.0.2') })
+  }, { denyStorage: language === 'km', denyDraftStorage: recoveryFailure, staleOrigin: ADMIN_ORIGIN.replace('127.0.0.1', '127.0.0.2') })
   let explicitCurrentBase = false
   const authorizedAssetOrigin = ADMIN_ORIGIN.replace('127.0.0.1', '127.0.0.3')
   const paths: string[] = []
@@ -80,6 +82,8 @@ for (const language of ['en', 'km'] as const) test(`Product image file/capture/L
     }
     await route.fulfill({ json: { success: true, product, ...product } })
   })
+  let blockedLibraryImports = 0
+  if (recoveryFailure) await page.route(/\/assets\/file-picker-modal-.*\.js(?:\?|$)/, route => { blockedLibraryImports++; return route.abort('failed') })
   await signIn(page, E2E_ACCOUNTS.admin)
   if (language === 'km') await page.getByRole('button', { name: 'Switch to Khmer' }).click()
   await page.goto(`${ADMIN_ORIGIN}/products`)
@@ -144,7 +148,30 @@ for (const language of ['en', 'km'] as const) test(`Product image file/capture/L
   await page.getByRole('option', { name: labels.create_named_product.replace('{name}', 'Brand New Upload'), exact: true }).click()
   await pick(labels.choose_file, 'ordinary.png', 'image/png', png, 1)
   await pick(labels.take_photo, 'ordinary.jpg', 'image/jpeg', jpeg, 2)
+  if (recoveryFailure) await page.locator('#product-name').fill('Unsaved recovery product')
   await page.getByRole('button', { name: labels.open_files, exact: true }).last().click()
+  if (recoveryFailure) {
+    const recovery = page.locator('[data-lazy-recovery]')
+    await expect(recovery).toBeVisible()
+    expect(blockedLibraryImports).toBeGreaterThan(0)
+    await expect(recovery.locator('[data-lazy-retry]')).toBeEnabled()
+    await recovery.locator('[data-lazy-retry]').click()
+    await expect(recovery.locator('[data-lazy-retry]')).toBeDisabled()
+    await expect(recovery.locator('[data-lazy-retry]')).toBeEnabled({ timeout: 25_000 })
+    await recovery.locator('[data-lazy-close]').click()
+    await expect(recovery).toHaveCount(0)
+    await expect(page.locator('#product-name')).toHaveValue('Unsaved recovery product')
+    await decodedGallery(2)
+    expect(created).toBeNull()
+    expect(saves).toEqual([])
+    expect(await page.evaluate(() => location.search)).not.toContain('__bos_reload')
+    expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('businessos_draft_')))).toEqual([])
+    await page.screenshot({ path: testInfo.outputPath(`dirty-library-recovery-${language}.png`), fullPage: true })
+    if (errors.length) await testInfo.attach('raw-pageerrors', { body: JSON.stringify(errors), contentType: 'application/json' })
+    expect(errors).toEqual([])
+    return
+  }
+
   await page.getByText('Synthetic Library Photo', { exact: true }).waitFor()
   await page.getByRole('dialog').last().getByRole('button', { name: labels.select, exact: true }).click()
   await decodedGallery(3)
