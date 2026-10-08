@@ -72,7 +72,8 @@ function formatDateTime(value: string | null | undefined): string {
 function reviewPayload(row: PendingActionRow): Record<string, unknown> {
   try {
     const value = JSON.parse(row.payload_json || '{}')
-    return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+    if (!value || typeof value !== 'object' || Array.isArray(value) || value.kind === 'product.remove.pending') return {}
+    return Object.fromEntries(Object.entries(value).filter(([key]) => !key.startsWith('_') && key !== 'offline_owner'))
   } catch { return {} }
 }
 
@@ -326,7 +327,7 @@ export default function ReviewQueue() {
             const expanded = expandedId === row.id
             const isBusy = busyId === row.id
             const payload = reviewPayload(row)
-            const content = buildAuditFieldDiff(null, row.payload_json, key => entityFieldLabel(key, tr))
+            const content = buildAuditFieldDiff(null, JSON.stringify(payload), key => entityFieldLabel(key, tr))
             const destination = reviewDestination(row)
             const canNavigate = destination && can(row.section, 'view') && getHubDestinations(destination.page, { getPermissionTier, hasPermission, can }).some(item => item.id === destination.section)
             const search = row.section === 'products' ? String(payload.barcode || payload.name || '') : row.section === 'contacts' ? String(payload.phone || payload.name || '') : undefined

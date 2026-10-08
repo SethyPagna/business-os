@@ -440,7 +440,7 @@ export function productRemoveQueueStatements(args: {
   }, {
     sql: `INSERT INTO pending_actions(section,action_type,entity_type,entity_id,payload_json,summary,status,requested_by,requested_by_name)
       VALUES('products','delete','product',@product,@payload,@summary,'open',@actor,@actorName)`,
-    params: { product: args.plan.product_id, payload, summary: `Remove product #${args.plan.product_id}`,
+    params: { product: args.plan.product_id, payload, summary: `Remove product #${args.plan.product_id}: ${String(args.plan.product.name || "")} — ${args.plan.reason}`,
       actor: args.user.id, actorName: userName },
   }, {
     sql: `UPDATE product_remove_operations SET pending_action_id=last_insert_rowid(),updated_at=CURRENT_TIMESTAMP
@@ -467,7 +467,7 @@ export function productRemoveReviewQueueStatements(args: {
   }, {
     sql: `INSERT INTO pending_actions(section,action_type,entity_type,entity_id,payload_json,summary,status,requested_by,requested_by_name)
       VALUES('products','delete','product',@product,@payload,@summary,'open',@actor,@actorName)`,
-    params: { product: args.operation.product_id, payload: pointer, summary: `Remove product #${args.operation.product_id}`,
+    params: { product: args.operation.product_id, payload: pointer, summary: `Remove product #${args.operation.product_id}: ${String(args.plan.product.name || "")} — ${args.plan.reason}`,
       actor: args.user.id, actorName: actorSnapshot(args.user) },
   }, {
     sql: `UPDATE product_remove_operations SET status='approval_pending',pending_action_id=last_insert_rowid(),updated_at=CURRENT_TIMESTAMP

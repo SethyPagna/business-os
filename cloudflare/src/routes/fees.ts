@@ -851,7 +851,7 @@ app.delete('/:id', async (c) => {
     entityType: 'fee',
     entityId: id,
     payload: { id },
-    summary: `Delete fee #${id}`,
+    summary: `Delete fee #${id}: ${existing.label || existing.fee_type} (${existing.fee_type}); USD ${existing.amount_usd}; KHR ${existing.amount_khr}; ${existing.fee_date.split('-').reverse().join('/')}`,
   })
   if (pendingId != null) {
     return c.json({ success: true, pending: true, pendingActionId: pendingId }, 202)
