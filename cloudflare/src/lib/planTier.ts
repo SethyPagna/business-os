@@ -5,7 +5,7 @@
 //
 // This codebase ships as two deployable configurations of the SAME source:
 // wrangler.toml (Paid, current production) and wrangler.free.toml (Free --
-// see that file's header for the four config diffs and why they are the
+// see that file's header for the three config diffs and why they are the
 // only ones). The two configs differ in wrangler-level settings ([limits],
 // queue consumer batch sizes) that application code can neither see nor
 // change -- but a dozen in-app constants (import chunk sizes, single-pass

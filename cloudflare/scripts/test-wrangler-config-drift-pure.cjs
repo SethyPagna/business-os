@@ -1,5 +1,5 @@
 // wrangler.toml vs wrangler.free.toml -- the two configs must stay one
-// config with four known differences.
+// config with three known differences.
 //
 // WHY THIS TEST IS THE WHOLE SAFETY NET FOR THE FREE FILE
 //
@@ -15,8 +15,8 @@
 //
 // So this checks the direction that matters: every VALUE-BEARING key in
 // wrangler.toml appears in wrangler.free.toml with the same value, and the
-// set of key/value pairs that differ is exactly the four documented ones --
-// no more (a fifth drift) and no fewer (someone "simplified" the free file
+// set of key/value pairs that differ is exactly the three documented ones --
+// no more (a fourth drift) and no fewer (someone "simplified" the free file
 // back into a copy of the paid one, which would fail to deploy on free).
 //
 // Line-based on purpose: there is no TOML parser in this package's
@@ -110,24 +110,30 @@ const freePairs = keyedPairs(freeText)
 const freeById = new Map(freePairs.map((p) => [p.id, p]))
 const paidById = new Map(paidPairs.map((p) => [p.id, p]))
 
-// The four differences, and nothing else. `value: null` on the free side
+check('each import delivery has its own invocation query budget on both plans', async () => {
+  const key = '[[queues.consumers]] "business-os-import" :: max_batch_size'
+  for (const [tier, pairs] of [['paid', paidById], ['free', freeById]]) {
+    assert.equal(pairs.get(key)?.value, '1', `${tier} must not combine independently budgeted import chunks`)
+  }
+})
+
+// The three differences, and nothing else. `value: null` on the free side
 // means the key must be ABSENT from wrangler.free.toml entirely.
 const ALLOWED_DIFFS = [
   { id: '[limits] :: [limits]', paid: '[limits]', free: null, why: 'DIFF 1: the whole block is Paid-only (error 100328 on Free)' },
   { id: '[limits] :: cpu_ms', paid: '300000', free: null, why: 'DIFF 1' },
   { id: '[limits] :: subrequests', paid: '10_000', free: null, why: 'DIFF 1' },
-  { id: '[[queues.consumers]] "business-os-import" :: max_batch_size', paid: '5', free: '1', why: 'DIFF 2: one 10ms budget per chunk' },
-  { id: '[[queues.consumers]] "business-os-media" :: max_batch_size', paid: '5', free: '1', why: 'DIFF 3: real per-message CPU, not one D1 write' },
-  { id: '[vars] :: PLAN_TIER', paid: '"paid"', free: '"free"', why: 'DIFF 4: the switch lib/planTier.ts reads' },
+  { id: '[[queues.consumers]] "business-os-media" :: max_batch_size', paid: '5', free: '1', why: 'DIFF 2: real per-message CPU, not one D1 write' },
+  { id: '[vars] :: PLAN_TIER', paid: '"paid"', free: '"free"', why: 'DIFF 3: the switch lib/planTier.ts reads' },
 ]
 
 check('wrangler.free.toml exists and is a full config, not a stub', async () => {
   assert.ok(freeText.length > 3000, 'a truncated free config is worse than none')
   assert.match(freeText, /^# Free-plan deployable config/m)
-  assert.match(freeText, /EXACTLY FOUR differences/)
-  // The four DIFF markers are how a reader finds them in the file itself.
-  for (const n of [1, 2, 3, 4]) {
-    assert.match(freeText, new RegExp(`DIFF ${n} of 4`), `the free config must mark DIFF ${n} at its site`)
+  assert.match(freeText, /EXACTLY THREE differences/)
+  // The three DIFF markers are how a reader finds them in the file itself.
+  for (const n of [1, 2, 3]) {
+    assert.match(freeText, new RegExp(`DIFF ${n} of 3`), `the free config must mark DIFF ${n} at its site`)
   }
 })
 
@@ -143,7 +149,7 @@ check('the free config adds nothing wrangler.toml does not have', async () => {
   assert.deepEqual(extra, [], `only in wrangler.free.toml, so it never went through a paid deploy: ${extra.join(', ')}`)
 })
 
-check('the set of differing values is EXACTLY the four documented diffs', async () => {
+check('the set of differing values is EXACTLY the three documented diffs', async () => {
   const allowed = new Map(ALLOWED_DIFFS.map((d) => [d.id, d]))
   const actual = []
   for (const p of paidPairs) {

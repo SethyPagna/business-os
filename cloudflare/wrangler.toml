@@ -210,21 +210,16 @@ queue = "business-os-backup-assets"
 
 [[queues.consumers]]
 queue = "business-os-import"
-# Restored to 5 (its original value) now that [limits] cpu_ms = 300000 is
-# active on the Paid plan -- exactly the condition the old comment set for
-# raising it again. History for the next reader: this was lowered to 1 on
-# the FREE plan because handleImportQueue processes a batch SEQUENTIALLY in
-# one invocation and Free's fixed 10ms CPU budget is per INVOCATION, so a
-# larger batch silently repacked several chunks' CPU into one 10ms window.
-# With a 5-minute budget, batching is a pure throughput win again.
-max_batch_size = 5
+# Each import chunk budgets one invocation's D1 queries. Combining chunks
+# would share that ceiling even on Paid; larger Paid chunks use its capacity.
+max_batch_size = 1
 max_batch_timeout = 5
 # Six deliveries (1 + max_retries) is what lib/queueDispatch.ts
 # chunkRowsForAttempt needs to walk 600 -> 300 -> 150 -> 75 -> 37 -> 25 rows
 # before a message is given up on; Cloudflare's default of 3 retries stopped
 # at 75, and the operator's Retry then started over at 600. Same value in
 # wrangler.toml and wrangler.free.toml on purpose (the drift test pins the
-# two files to four differences).
+# two files to three differences).
 max_retries = 5
 # Once a message has thrown on every one of its max_retries attempts, it's
 # moved here instead of silently dropped -- queue.ts's
@@ -275,9 +270,7 @@ queue = "business-os-backup-assets"
 # invocation's R2 get()+put() work inside one per-invocation CPU budget rather
 # than packing several continuation steps' worth of copying into one call.
 #
-# This comment used to say "same reasoning as business-os-import's
-# max_batch_size = 1 above" -- stale since that consumer was restored to 5 on
-# Paid (see its own comment). This consumer stays at 1 on BOTH plans: its work
+# This consumer stays at 1 on BOTH plans: its work
 # is R2 byte-copying, not a D1 write, so batching it packs real CPU rather than
 # amortising network latency. wrangler.free.toml therefore does NOT diff here.
 max_batch_size = 1
