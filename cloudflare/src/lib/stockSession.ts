@@ -1,6 +1,7 @@
 import { assertProductStatusInput, productStockGuardError, productStockGuardStatement, ProductStockGuardError } from './productStockGuard'
 import { getDb, type D1Compat } from './db'
 import type { Env } from '../index'
+import { getPlanLimits } from './planTier'
 import type { SessionUser } from './auth'
 import { getActionTier, isAdminControlUser } from './permissions'
 import { productDiscountChanged } from './productDiscountGate'
@@ -11,7 +12,7 @@ import { identityBarcodeMatchSql } from './productIdentity'
 import { barcodeKeysMatch } from './searchMatch'
 import { planReceiveBatchStock, resolveReceiptLotTarget, type ReceiptLotCandidate, type ReceiptLotTarget, type StockWriteStatement } from './productBatches'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from './stockReceiptGate'
-import { normalizeMultiValue, planInsertRow, tableColumns, validateProductImageGallery } from './productWrites'
+import { normalizeMultiValue, planInsertRow, validateProductImageGallery } from './productWrites'
 import { sanitizeMediaList, sanitizeMediaPath } from './media'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT, MAX_IMAGES_PER_PRODUCT } from './importImageMatch'
 import { buildInClause, chunkForBinding, D1_MAX_BOUND_PARAMS } from './sqlBinding'
@@ -412,6 +413,84 @@ function normalizeNewRequestMoney(request: StockSessionRequest): StockSessionReq
   return { ...request, items }
 }
 
+export type StockSessionQueryBudget = { statementsUsed(): number; reserveStatements: number }
+
+const sessionColumnCache = new WeakMap<object, Promise<Map<string, Set<string>>>>()
+
+async function sessionColumns(env: Env, db: D1Compat): Promise<Map<string, Set<string>>> {
+  let pending = sessionColumnCache.get(env.DB)
+  if (!pending) {
+    const tables = [...new Set([...Object.values(REPLAY_TABLES).map(([table]) => table), 'branches', 'suppliers'])]
+    pending = db.prepare(`SELECT t.value table_name,p.name FROM json_each(@tables) t JOIN pragma_table_info(t.value) p ORDER BY t.value,p.cid`)
+      .all<Row>({ tables: JSON.stringify(tables) }).then(rows => {
+        const result = new Map(tables.map(table => [table, new Set<string>()]))
+        for (const row of rows) result.get(String(row.table_name))?.add(String(row.name))
+        return result
+      })
+    sessionColumnCache.set(env.DB, pending)
+    pending.catch(() => sessionColumnCache.delete(env.DB))
+  }
+  return pending
+}
+
+function sessionRowSql(columns: Set<string>): string {
+  let sql = "json('{}')"
+  const names = [...columns]
+  for (let i = 0; i < names.length; i += 15) sql = `json_set(${sql},${names.slice(i,i+15).map(name => `'$.${name}',t."${name}"`).join(',')})`
+  return sql
+}
+
+function sessionBudgetDb(env: Env, budget?: StockSessionQueryBudget) {
+  const db = getDb(env)
+  const initial = budget?.statementsUsed() ?? 0
+  const reserve = budget?.reserveStatements ?? 12
+  const limit = getPlanLimits(env).d1QueriesPerInvocation
+  let local = 0
+  let admission = false
+  const used = () => Math.max(initial + local, budget?.statementsUsed() ?? 0)
+  const check = (planned: number, tail = 1) => {
+    if (used() + planned + tail + reserve > limit) fail('This stock change is too large for the current plan. Use fewer products or received dates, then try again.', 409, 'stock_session_query_budget_exceeded')
+  }
+  const counted = Object.create(db) as D1Compat
+  counted.prepare = sql => {
+    const statement = db.prepare(sql)
+    const execute = async <T>(fn: () => Promise<T>): Promise<T> => {
+      if (admission) check(1)
+      local += 1
+      return fn()
+    }
+    return {
+      get: <T>(params?: import('./db').BindParams) => execute(() => statement.get<T>(params)),
+      all: <T>(params?: import('./db').BindParams) => execute(() => statement.all<T>(params)),
+      run: params => execute(() => statement.run(params)),
+    }
+  }
+  return { db: counted, begin() { admission = true }, check,
+    async commit(statements: StockWriteStatement[]) {
+      check(statements.length)
+      local += statements.length
+      return db.batchOnce(statements)
+    },
+    finishReads() { admission = false },
+  }
+}
+
+async function sessionFacts(env: Env, db: D1Compat, products: number[], branches: number[], suppliers: number[], batches: number[]) {
+  const columns = await sessionColumns(env, db)
+  const predicates: Record<string,string> = {
+    products: 't.id IN (SELECT value FROM json_each(@products))',
+    branches: 't.id IN (SELECT value FROM json_each(@branches))',
+    suppliers: 't.id IN (SELECT value FROM json_each(@suppliers))',
+    product_batches: 't.variant_product_id IN (SELECT value FROM json_each(@products)) OR t.id IN (SELECT value FROM json_each(@batches))',
+  }
+  const rows = await db.prepare(Object.entries(predicates).map(([table,predicate]) =>
+    `SELECT '${table}' kind,${sessionRowSql(columns.get(table) as Set<string>)} row_json,${table === 'products' ? '(SELECT baseline_batch_id FROM product_cost_entries WHERE product_id=t.id ORDER BY id DESC LIMIT 1)' : 'NULL'} baseline FROM ${table} t WHERE ${predicate}`).join(' UNION ALL '))
+    .all<Row>({ products: JSON.stringify(products), branches: JSON.stringify(branches), suppliers: JSON.stringify(suppliers), batches: JSON.stringify(batches) })
+  const of = (table: string) => rows.filter(row => row.kind === table).map(row => JSON.parse(String(row.row_json)) as Row)
+  return { products: of('products'), branches: of('branches'), suppliers: of('suppliers'), batches: of('product_batches'),
+    baselines: rows.filter(row => row.kind === 'products').map(row => ({ product_id: (JSON.parse(String(row.row_json)) as Row).id, baseline_batch_id: row.baseline })) }
+}
+
 async function rowsIn<T>(db: D1Compat, values: readonly unknown[], column: string, select: string): Promise<T[]> {
   const unique = [...new Set(values)]
   const rows: T[] = []
@@ -584,7 +663,7 @@ async function sessionLandings(db: D1Compat, request: StockSessionRequest, redir
   return landings
 }
 
-export async function commitStockSession(env: Env, user: SessionUser, raw: unknown, redirectTarget: RedirectTarget = null): Promise<StockSessionReceipt> {
+export async function commitStockSession(env: Env, user: SessionUser, raw: unknown, redirectTarget: RedirectTarget = null, queryBudget?: StockSessionQueryBudget): Promise<StockSessionReceipt> {
   if (hasAcquisitionCostInput(raw, user)) fail('Cost-entry permission is required to enter receipt costs.', 403, 'product_cost_edit_required')
   let request = parseRequest(raw, isAdminControlUser(user) ? ADMIN_MAX_IMAGES_PER_PRODUCT : MAX_IMAGES_PER_PRODUCT)
   const requiresInventoryAdjust = request.items.some((line) => line.quantity > 0)
@@ -607,7 +686,8 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   if (requiresProductImage && getActionTier(user, 'products', 'image') !== 'full') {
     fail('create_receive with images requires full product-image permission.', 403, 'permission_denied')
   }
-  const db = getDb(env)
+  const execution = sessionBudgetDb(env, queryBudget)
+  const db = execution.db
   const submittedCanonical = JSON.stringify(request)
   const previous = await db.prepare('SELECT request_json,receipt_json FROM stock_session_operations WHERE actor_id=@actor AND request_id=@request')
     .get<Row>({ actor: user.id, request: request.client_request_id })
@@ -627,6 +707,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     return parseStoredReceipt(previous, true)
   }
 
+  execution.begin()
   for (const line of request.items) {
     if (line.kind === 'create_receive' && line.product) assertProductStatusInput(line.product)
   }
@@ -704,15 +785,9 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   const supplierIds = request.items.flatMap((line) => line.supplier_id == null ? [] : [line.supplier_id])
   const explicitBatchIds = request.items.flatMap((line) => line.batch_id == null ? [] : [line.batch_id])
   const beforeFence = await snapshotFence(db, request)
-  // Four independent lookups over four different tables, keyed off the
-  // request's own id lists -- no data dependency on each other's results, so
-  // one Promise.all fan-out replaces four sequential round trips.
-  const [products, branches, suppliers, explicitBatches] = await Promise.all([
-    rowsIn<Row>(db, receiveIds, 'id', 'SELECT * FROM products'),
-    rowsIn<Row>(db, branchIds, 'id', 'SELECT * FROM branches'),
-    rowsIn<Row>(db, supplierIds, 'id', 'SELECT * FROM suppliers'),
-    rowsIn<Row>(db, explicitBatchIds, 'id', 'SELECT * FROM product_batches'),
-  ])
+  const facts = await sessionFacts(env, db, receiveIds, branchIds, supplierIds, explicitBatchIds)
+  const { products, branches, suppliers } = facts
+  const explicitBatches = facts.batches.filter(row => explicitBatchIds.includes(Number(row.id)))
   const receiveProducts = new Map(products.map((row) => [Number(row.id), row]))
   const branchMap = new Map(branches.map((row) => [Number(row.id), row]))
   const supplierMap = new Map(suppliers.map((row) => [Number(row.id), row]))
@@ -780,14 +855,14 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   // sequential round trips (dateBatch lookup, memoized schema probe, active
   // branches, duplicate-name candidates, image asset lookup).
   const [possibleDateBatches, productColumns, activeBranches, duplicateCandidates, assets, costBaselines] = await Promise.all([
-    rowsIn<Row>(db, dateBatchLines.map((line) => line.product_id as number), 'variant_product_id', 'SELECT * FROM product_batches'),
-    createLines.length ? tableColumns(env, 'products') : Promise.resolve(new Set<string>()),
+    Promise.resolve(facts.batches.filter(row => dateBatchLines.some(line => line.product_id === Number(row.variant_product_id)))),
+    createLines.length ? sessionColumns(env, db).then(columns => columns.get('products') as Set<string>) : Promise.resolve(new Set<string>()),
     stockCreateLines.length ? db.prepare('SELECT id FROM branches WHERE is_active=1 ORDER BY id').all<Row>() : Promise.resolve([] as Row[]),
     duplicateNameClause
       ? db.prepare(`SELECT id,name,barcode,cost_price_usd,cost_price_khr FROM products WHERE is_active=1 AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name,'  ',' '),'  ',' '),'  ',' '))) IN (${duplicateNameClause.sql})`).all<Row>(duplicateNameClause.params)
       : Promise.resolve([] as Row[]),
     rowsIn<Row>(db, imagePaths, 'public_path', 'SELECT id,public_path FROM file_assets'),
-    rowsIn<Row>(db, receiveIds, 'p.id', 'SELECT p.id product_id,(SELECT baseline_batch_id FROM product_cost_entries WHERE product_id=p.id ORDER BY id DESC LIMIT 1) baseline_batch_id FROM products p'),
+    Promise.resolve(facts.baselines),
   ])
   const baselineByProduct = new Map(costBaselines.map(row => [Number(row.product_id), Number(row.baseline_batch_id) || 0]))
   const receiptTargets = new Map<string, ReceiptLotTarget>()
@@ -1123,12 +1198,15 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     SELECT @actor,@name,'stock_session_create','stock_session',id,receipt_json,'stock_session_operations',id,receipt_json
     FROM stock_session_operations WHERE id=@id`, params: { actor: user.id, name: actorSnapshot(user), id: operationId } })
   statements.push({ sql: 'DELETE FROM stock_session_guards', params: {} })
-  const replayStateSql = await stockReplayStateSql(env)
+  const replayStateSql = await stockReplayStateSql(env, true, db)
   statements.push(...captureReplayState(operationId, replayStateSql, true))
   checkBounds(statements, snapshot)
   try {
-    await db.batch(statements)
+    await execution.commit(statements)
+    execution.finishReads()
   } catch (error) {
+    execution.finishReads()
+    if (error instanceof StockSessionError && error.code === 'stock_session_query_budget_exceeded') throw error
     const retry = await db.prepare('SELECT request_json,receipt_json FROM stock_session_operations WHERE actor_id=@actor AND request_id=@request')
       .get<Row>({ actor: user.id, request: request.client_request_id })
     if (retry) {
@@ -1211,11 +1289,11 @@ const REPLAY_EXPECTED_SQL = `(SELECT json_set(json_extract(payload_json,'$.expec
     WHERE json_extract(rev.value,'$.entity_type') NOT IN (${REPLAY_UNCOMPARED_REVISION_SQL}))))
   FROM undo_snapshots WHERE id=@snapshotId)`
 
-async function stockReplayStateSql(env: Env, memberBranchNamesCaptured = true): Promise<string> {
+async function stockReplayStateSql(env: Env, memberBranchNamesCaptured = true, db = getDb(env)): Promise<string> {
   const fields: string[] = []
   for (const [key, [table, where]] of Object.entries(REPLAY_TABLES)) {
     const displayOnly = REPLAY_DISPLAY_ONLY_COLUMNS[key] ?? []
-    const columns = [...await tableColumns(env, table)]
+    const columns = [...((await sessionColumns(env, db)).get(table) as Set<string>)]
       .filter(column => memberBranchNamesCaptured || key !== 'members' || column !== 'branch_name')
       .filter(column => !displayOnly.includes(column)).sort()
     // Keep each json_object below SQLite's older function-argument ceiling.
@@ -1334,9 +1412,10 @@ const MEMBER_LOT_MOVED_SQL = `EXISTS(SELECT 1 FROM stock_session_members sm JOIN
   WHERE sm.operation_id=@id AND b.variant_product_id<>sm.product_id)`
 
 export async function replayStockSession(env: Env, user: SessionUser, direction: 'undo' | 'redo', historyId: number,
-  generation: unknown, payload: Row): Promise<void> {
+  generation: unknown, payload: Row, queryBudget?: StockSessionQueryBudget): Promise<void> {
   if (typeof generation !== 'number' || !Number.isSafeInteger(generation) || generation < 0) fail('expected_generation must be a nonnegative JSON integer.', 400)
-  const db = getDb(env)
+  const execution = sessionBudgetDb(env, queryBudget)
+  const db = execution.db
   const op = await db.prepare(`SELECT o.*,s.kind,s.payload_json,h.status FROM stock_session_operations o
     JOIN undo_snapshots s ON s.id=o.snapshot_id JOIN action_history h ON h.id=o.history_id WHERE o.history_id=@history`)
     .get<Row>({ history: historyId })
@@ -1351,6 +1430,7 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
   if (Number(op.generation) === generation + 1 && op.status === targetStatus) return
   if (Number(op.generation) !== generation || op.status !== expectedStatus || generation % 2 !== (direction === 'undo' ? 0 : 1)) fail('Stock session generation changed. Refresh history.')
   if (snapshot.version !== 2 || !snapshot.after || !snapshot.expected) fail('This older session has no authoritative postimage and cannot be safely reversed.')
+  execution.begin()
   const members = await db.prepare('SELECT * FROM stock_session_members WHERE operation_id=@id ORDER BY line_id').all<Row>({ id: op.id })
   if (members.length !== request.items.length || members.length > STOCK_SESSION_MAX_LINES) fail('Stock session members are incomplete.')
   const after = snapshot.after as Record<string, Row[]>
@@ -1360,7 +1440,7 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
   const memberBranchNamesCaptured = expectedMembers.some(row => Object.prototype.hasOwnProperty.call(row, 'branch_name'))
   if (memberBranchNamesCaptured && expectedMembers.some(row => !Object.prototype.hasOwnProperty.call(row, 'branch_name'))) fail('Stock session member postimages have inconsistent branch labels.')
   // Pre-0226 postimages omit this display field; replay never rewrites member labels.
-  const stateSql = await stockReplayStateSql(env, memberBranchNamesCaptured)
+  const stateSql = await stockReplayStateSql(env, memberBranchNamesCaptured, db)
   // REVERT-SET (owner, 6 Oct 2026: "Revert should fully revert, never leaves a
   // stock effect behind"; lead: an Undo is refused only when later movements
   // took the units it needs, never by exact quantity). The session's recorded
@@ -1571,7 +1651,9 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
     VALUES(@actor,@name,@action,'stock_session',@id,@details)`, params: { actor: user.id, name: actorSnapshot(user), action: `stock_session_${direction}`, id: op.id, details: JSON.stringify({ operationId: op.id, actionHistoryId: historyId, generation: generation + 1 }) } })
   statements.push(...captureReplayState(String(op.id), stateSql))
   checkBounds(statements, snapshot)
-  try { await db.batch(statements) } catch (error) {
+  try { await execution.commit(statements); execution.finishReads() } catch (error) {
+    execution.finishReads()
+    if (error instanceof StockSessionError && error.code === 'stock_session_query_budget_exceeded') throw error
     const saved = await db.prepare('SELECT o.generation,h.status FROM stock_session_operations o JOIN action_history h ON h.id=o.history_id WHERE o.id=@id').get<Row>({ id: op.id })
     if (saved?.generation === generation + 1 && saved.status === targetStatus) return
     const activeGuard = productStockGuardError(error)
