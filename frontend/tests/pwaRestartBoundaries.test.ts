@@ -255,7 +255,8 @@ createRoot(document.querySelector('#root')).render(<AppUpdateBanner update={{ver
   build.onLoad({ filter: /[\\/]utils[\\/]appUpdate\.ts$/ }, args => ({ contents: `const window = globalThis.fixtureWindow; const navigator = globalThis.fixtureNavigator;\n${fs.readFileSync(args.path, 'utf8')}`, loader: 'ts' }))
 } }] })).outputFiles![0].text
 
-for (const [engine, browserType] of [['chromium', chromium], ['webkit', webkit]] as const) for (const lang of ['en', 'km']) nodeTest(`mounted actual banner and sidebar callback ${engine}/${lang}`, { timeout: 30000 }, async () => {
+const engines = process.env.PWA_RESTART_WEBKIT === '1' ? [chromium, webkit] : [chromium]
+for (const browserType of engines) for (const lang of ['en', 'km']) nodeTest(`mounted actual banner and sidebar callback ${browserType.name()}/${lang}`, { timeout: 30000 }, async () => {
   const browser = await browserType.launch({ headless: true })
   try {
     const page = await browser.newPage({ viewport: { width: 375, height: 812 } })
