@@ -294,13 +294,13 @@ async function main() {
     assert.equal(retired.body.code, 'branch_redirect_required')
     assert.equal(f.state(), before)
   })
-  for (const [column, initial, competing, requested] of [
+  for (const mode of ['add-tagged', 'receive']) for (const [column, initial, competing, requested] of [
     ['selling_price_usd', null, 0, { sellingPriceUsd: 5 }],
     ['selling_price_usd', 0, null, { sellingPriceUsd: 5 }],
     ['selling_price_usd', 2, 9, { sellingPriceUsd: 5 }],
     ['selling_price_khr', null, 0, { sellingPriceUsd: 5, sellingPriceKhr: 20000 }],
-  ]) await check(`concurrent ${column} ${initial} to ${competing} refuses before stock or price overwrite`, async () => {
-    const f = await setup('add-tagged', user, false, sql => {
+  ]) await check(`${mode}: concurrent ${column} ${initial} to ${competing} refuses before stock or price overwrite`, async () => {
+    const f = await setup(mode, user, false, sql => {
       sql.prepare(`UPDATE products SET ${column}=? WHERE id=1`).run(initial)
     })
     let afterConcurrent
@@ -310,12 +310,18 @@ async function main() {
       }], 'once')
       afterConcurrent = f.state()
     })
-    const refused = await f.send({ ...f.body, ...requested })
+    const request = { ...f.body, ...(mode === 'receive' ? { selling_price_usd: requested.sellingPriceUsd, ...(requested.sellingPriceKhr != null ? { selling_price_khr: requested.sellingPriceKhr } : {}) } : requested) }
+    const refused = await f.send(request)
     assert.equal(refused.status, 409, JSON.stringify(refused))
     assert.equal(refused.body.code, 'receipt_selling_price_changed')
+    assert.equal(refused.body.error, f.load('lib/productBatches.ts').RECEIPT_SELLING_PRICE_CHANGED.error)
     assert.equal(f.state(), afterConcurrent)
     assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM stock_mutation_receipts WHERE written=1').get().n, 0)
     assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    assert.equal((await f.send(request)).status, 200, 'explicit retry uses the new server snapshot and original request ID')
+    const afterRetry = f.state()
+    assert.equal((await f.send(request)).status, 200)
+    assert.equal(f.state(), afterRetry, 'replaying the successful retry cannot add stock again')
   })
   for (const race of ['baseline', 'reserved id']) await check(`consolidated new-lot snapshot refuses concurrent ${race}`, async () => {
     const f = await setup('add-tagged')

@@ -8,7 +8,7 @@ import { audit, changedFields } from '../lib/audit'
 import { hasPermission, getActionTier, getPermissionTier, isActionBlocked } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
-import { getTrackedProductIds, listBatchesForProduct, parseReceiptSellingPrice, planReceiptSellingPrice, receiveBatchStock, type ReceiptSellingPriceRow } from '../lib/productBatches'
+import { getTrackedProductIds, listBatchesForProduct, isReceiptSellingPriceConflict, RECEIPT_SELLING_PRICE_CHANGED, parseReceiptSellingPrice, planReceiptSellingPrice, receiveBatchStock, type ReceiptSellingPriceRow } from '../lib/productBatches'
 import { executeStockTransaction } from '../lib/stockTransaction'
 import { listOpenDamagedLots } from '../lib/returnsStock'
 import { dateToBatchCode, normalizeTypedDate } from '../lib/batchCode'
@@ -204,7 +204,7 @@ export type ReceiveBody = {
   free_goods?: boolean
   /** UI-STOCK 5.3: free units riding with the paid quantity; stock in = quantity + free_quantity. */
   free_quantity?: number | null
-  /** UI-STOCK 5.2: the product's new selling price, typed on the receipt (latest wins). */
+  /** The receipt's explicit new selling price; a concurrent price edit requires retry. */
   selling_price_usd?: number | string | null
   selling_price_khr?: number | string | null
   payment_status?: string | null
@@ -234,6 +234,7 @@ export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody
     async (_markWritten, atomicMark) => {
       try { return await runReceiveBatchActionKernel(c, body, atomicMark) }
       catch (error) {
+        if (isReceiptSellingPriceConflict(error)) return c.json(RECEIPT_SELLING_PRICE_CHANGED, 409)
         const stockGuard = productStockGuardError(error)
         if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         if (isReceivingBranchError(error)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
@@ -409,7 +410,7 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
       }, catalogCostRecomputeIfChangedStatement(productId)]),
     })
   } catch (err) {
-    if (err instanceof StockMutationBudgetError) throw err
+    if (err instanceof StockMutationBudgetError || isReceiptSellingPriceConflict(err)) throw err
     const stockGuard = productStockGuardError(err)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     // The explicit-lot pick can fail validation ("Selected batch does not
