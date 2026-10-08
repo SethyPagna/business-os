@@ -96,13 +96,19 @@ const D1_QUOTA_EXCEEDED_ERROR_PATTERN = /Your account has exceeded D1's (?:free 
 // already handle this class explicitly; ordinary requests must fail once.
 const DETERMINISTIC_SQL_ERROR_PATTERN = /CPU time limit|exceeded its CPU time limit|too many SQL variables|variable number must be between|no such (table|column|function)|constraint failed|syntax error|datatype mismatch|ambiguous column|incomplete input|bad JSON path/i
 
+export function isRetryableD1Error(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return !DETERMINISTIC_SQL_ERROR_PATTERN.test(message)
+    && !D1_QUEUE_OVERLOAD_ERROR_PATTERN.test(message)
+    && !D1_QUOTA_EXCEEDED_ERROR_PATTERN.test(message)
+    && TRANSIENT_D1_ERROR_PATTERN.test(message)
+}
+
 async function withD1Retry<T>(run: () => Promise<T>): Promise<T> {
   try {
     return await run()
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (DETERMINISTIC_SQL_ERROR_PATTERN.test(message) || D1_QUEUE_OVERLOAD_ERROR_PATTERN.test(message) || D1_QUOTA_EXCEEDED_ERROR_PATTERN.test(message)) throw error
-    if (!TRANSIENT_D1_ERROR_PATTERN.test(message)) throw error
+    if (!isRetryableD1Error(error)) throw error
     await new Promise((resolve) => setTimeout(resolve, 200))
     return run()
   }

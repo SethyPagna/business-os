@@ -62,7 +62,7 @@ import { stockReceiptGateCode, stockReceiptGateMessage, appendReceiptNotes, FREE
 // existing logic -- see buildSalesGroups() below.
 
 import type { Env } from '../index'
-import { getDb, getImportFencedDb, isImportMaintenanceFenceError, type D1Compat } from './db'
+import { getDb, getImportFencedDb, isImportMaintenanceFenceError, isRetryableD1Error, type D1Compat } from './db'
 import { purgeImportIncomingFiles } from './importIncomingFiles'
 import { freePlanRefusalSuffix, getPlanLimits } from './planTier'
 import { chunkRowsForAttempt, dispatchImportWork } from './queueDispatch'
@@ -5466,7 +5466,7 @@ export async function applyStockActionsJob(
   const totalRows = Number(rowCount?.n || 0)
   if (!totalRows) throw new Error('No CSV file uploaded for this job')
 
-  // Mode routing (M4). RECONCILE keeps the proven single pass and its caps:
+  // RECONCILE captures the whole capped sheet once before bounded dispatch:
   // its deltas compare every row against ONE consistent live-stock snapshot,
   // which windowed classification across invocations cannot promise. DIRECT
   // rows ARE the change, so the sheet classifies and dispatches in windows
@@ -5486,132 +5486,12 @@ export async function applyStockActionsJob(
         { code: 'stock_import_over_tier_cap' },
       )
     }
-    return await applyStockActionsSinglePass(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs, actor)
+    return await applyStockActionsContinuation(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs, totalRows, actor)
   }
   if (totalRows > STOCK_ACTION_DIRECT_MAX_ROWS) {
     throw new Error(`This stock import has ${totalRows} rows; the ceiling is ${STOCK_ACTION_DIRECT_MAX_ROWS} rows per file — split it before importing.`)
   }
   return await applyStockActionsContinuation(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs, totalRows, actor)
-}
-
-// The original single-pass engine, now reconcile-only. Classifies the whole
-// (capped) sheet at once, groups in memory, dispatches through the shared
-// per-unit helpers, persists every row and finalizes — all in one invocation.
-async function applyStockActionsSinglePass(
-  env: Env,
-  db: D1Compat,
-  jobId: string,
-  policyJson: string | null,
-  sw: ReturnType<typeof makeStopwatch>,
-  queueLatencyMs: number | undefined,
-  startedAtMs: number,
-  actor: SessionUser,
-): Promise<{ applied: number; failed: number }> {
-  const decisions = getDecisionMap(policyJson)
-  const rows = await readAllMaterializedRows(db, jobId, decisions)
-  const totalUnits = rows.length
-  if (!totalUnits) throw new Error('No CSV file uploaded for this job')
-  sw.lap('fetchAndParseMs')
-
-  const results = (await classifyRows(db, 'stock_actions', rows, jobId, policyJson)) as StockActionImportResult[]
-  sw.lap('classifyChunkMs')
-  await refuseUnconfirmedStockRedirect(db, results)
-  const resolvedOf = (r: StockActionImportResult) => r.data as unknown as UnifiedStockResolvedRow
-
-  // A sale receipt is all-or-nothing. A blocked line (bad data / unresolved
-  // identity) has no plan and therefore no saleGroupKey of its own, so its
-  // valid siblings would otherwise commit a PARTIAL receipt. Re-derive the
-  // group key a blocked row WOULD have had (from its own date + action) and
-  // poison that group so the whole receipt is failed together, never split.
-  const poisoned = new Set<string>()
-  for (const r of results) {
-    const resolved = resolvedOf(r)
-    if (r.action !== 'error' && resolved.plan) continue
-    const parsed = parseStockAction(resolved.action)
-    if (parsed.kind === 'sale' && resolved.date) poisoned.add(saleGroupKeyFor(resolved.date, parsed.saleOrdinal))
-  }
-
-  // Partition the actionable rows into sale groups (rows sharing a
-  // saleGroupKey = one receipt) and singles (each create/add/noop row).
-  const saleGroups = new Map<string, StockActionImportResult[]>()
-  const singles: StockActionImportResult[] = []
-  for (const r of results) {
-    const plan = resolvedOf(r).plan
-    if (r.action === 'error' || !plan) continue // already a failure; persisted as-is
-    if (plan.kind === 'sale' && plan.saleGroupKey) {
-      const list = saleGroups.get(plan.saleGroupKey) || []
-      list.push(r)
-      saleGroups.set(plan.saleGroupKey, list)
-    } else {
-      singles.push(r)
-    }
-  }
-
-  const unitCount = saleGroups.size + singles.length
-  const singlePassMaxUnits = getPlanLimits(env).stockActionMaxUnits
-  if (unitCount > singlePassMaxUnits) {
-    // Same refusal, one level down: rows became actions (a receipt is one
-    // action however many lines it has), so a sheet inside the row cap can
-    // still be outside the action cap.
-    throw Object.assign(
-      new Error(`This stock import resolves to ${unitCount} actions; split it into files of at most ${singlePassMaxUnits} actions before importing.${freePlanRefusalSuffix(env)}`),
-      { code: 'stock_import_over_tier_cap' },
-    )
-  }
-
-  const fail = (r: StockActionImportResult, message: string) => { r.action = 'error'; r.message = message }
-  const resolveSupplierId = makeSupplierIdResolver(db)
-
-  // --- Single rows: create / add / noop -----------------------------------
-  for (const r of singles) {
-    try {
-      await dispatchStockActionSingle(db, jobId, r, resolveSupplierId)
-    } catch (error) {
-      if (isImportMaintenanceFenceError(error)) throw error
-      const stockError = productStockGuardError(error)
-      if (stockError) r.code = stockError.code
-      fail(r, stockError ? `${stockError.code}: ${stockError.message}` : error instanceof Error ? error.message : 'Stock action failed')
-    }
-  }
-
-  // --- Sale groups: one atomic receipt each -------------------------------
-  for (const [saleGroupKey, groupRows] of saleGroups) {
-    if (poisoned.has(saleGroupKey)) {
-      for (const r of groupRows) fail(r, STOCK_POISON_MESSAGE)
-      continue
-    }
-    try {
-      const outcome = await dispatchStockActionSaleGroup(db, jobId, saleGroupKey, groupRows, actor)
-      if (outcome === 'skipped') for (const r of groupRows) r.action = 'skip'
-    } catch (error) {
-      if (isImportMaintenanceFenceError(error)) throw error
-      const message = error instanceof Error ? error.message : 'Sale group failed'
-      for (const r of groupRows) fail(r, message)
-    }
-  }
-  sw.lap('buildAndWriteStatementsMs')
-
-  await persistChunkResults(db, jobId, 'apply', results)
-
-  // Stock actions touch products (new rows, aggregate stock), inventory
-  // (branch/batch stock, movements) and sales (imported receipts) -- refresh
-  // every surface that reads them, same fire-and-forget pattern the generic
-  // path uses on its last chunk.
-  await bumpVersion(env, 'products').catch(() => {})
-  await broadcast(env, 'products', { action: 'import', jobId }).catch(() => {})
-  await broadcast(env, 'inventory', { action: 'import', jobId }).catch(() => {})
-  await broadcast(env, 'sales', { action: 'import', jobId }).catch(() => {})
-  sw.lap('cacheInvalidateMs')
-
-  // D6b applies here too: a §12 sheet can CREATE products (child rows with
-  // no category/brand of their own), and those must adopt their name
-  // group's values the same as a products-file import would give them.
-  const stockJobRow = await db.prepare(`SELECT started_at FROM import_jobs WHERE id = @id`).get<{ started_at: string | null }>({ id: jobId })
-  const unifiedGroupCount = stockJobRow?.started_at ? await unifyTouchedProductGroups(db, stockJobRow.started_at) : 0
-
-  const outcome = await finalizeImportApply(env, db, jobId, totalUnits, startedAtMs, sw.marks, queueLatencyMs, 0, unifiedGroupCount)
-  console.log('[import-timing] stock-action apply done', jobId, outcome)
-  return outcome
 }
 
 // DIRECT-mode continuation engine (M4). Two windowed phases, resumed across
@@ -5663,7 +5543,8 @@ async function applyStockActionsContinuation(
   }
 
   if (stock.phase === 'classify') {
-    const windowSize = stock.classifyWindow ?? STOCK_ACTION_CLASSIFY_WINDOW
+    const reconcile = getUnifiedStockMode(policyJson) === 'reconcile'
+    const windowSize = reconcile ? totalRows : stock.classifyWindow ?? STOCK_ACTION_CLASSIFY_WINDOW
     try {
     const windowRows = await readMaterializedWindow(db, jobId, cursor, windowSize, decisions)
     const results = (await classifyRows(db, 'stock_actions', windowRows, jobId, policyJson)) as StockActionImportResult[]
@@ -5692,6 +5573,11 @@ async function applyStockActionsContinuation(
       }
     }
 
+    if (reconcile) {
+      const singles = results.filter(row => row.action !== 'error' && (row.data as unknown as UnifiedStockResolvedRow).plan && (row.data as unknown as UnifiedStockResolvedRow).plan!.kind !== 'sale').length
+      const units = rowsByGroupKey.size + singles
+      if (units > limits.stockActionMaxUnits) throw Object.assign(new Error(`This stock import resolves to ${units} actions; split it into files of at most ${limits.stockActionMaxUnits} actions before importing.${freePlanRefusalSuffix(env)}`), { code: 'stock_import_over_tier_cap' })
+    }
     const windowKeys = [...new Set([...rowsByGroupKey.keys(), ...windowPoisoned])]
     const groupIndexByKey = new Map<string, number>()
     if (windowKeys.length) {
@@ -5749,6 +5635,7 @@ async function applyStockActionsContinuation(
     return { applied: 0, failed: 0 }
     } catch (error) {
       if (!(error instanceof StockQueryBudgetDeferred)) throw error
+      if (reconcile) throw Object.assign(new Error('This reconcile sheet cannot be classified against one stock snapshot within the deployment query budget. Split the sheet or use the paid deployment.'), { code: 'stock_import_reconcile_over_tier_budget' })
       if (windowSize === 1) throw new Error('One stock import row exceeds the deployment query budget during classification; simplify its branch details.')
       stock.classifyWindow = Math.max(1, Math.floor(windowSize / 2))
       budget.reserve = 2
@@ -5811,7 +5698,7 @@ async function applyStockActionsContinuation(
         touched.push(...unitRows)
         delete stock.deferredRow
       } catch (error) {
-        if (isImportMaintenanceFenceError(error)) throw error
+        if (isImportMaintenanceFenceError(error) || (typeof isRetryableD1Error === 'function' && isRetryableD1Error(error))) throw error
         if (error instanceof StockQueryBudgetDeferred) {
           if (budget.physicalBatches !== beforePhysical || stock.deferredRow !== record.row_number) {
             if (budget.physicalBatches === beforePhysical) stock.deferredRow = record.row_number

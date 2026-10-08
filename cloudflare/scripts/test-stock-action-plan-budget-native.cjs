@@ -5,6 +5,7 @@ const assert = require('assert')
 const fixturePath = path.join(__dirname, 'test-stock-action-apply-pure.cjs')
 const fixture = fs.readFileSync(fixturePath, 'utf8').split('let failures = 0')[0].replace('const engineAbs =', `REAL.add('importMaintenanceFence'); REAL.add('permissions'); REAL.add('acquisitionCostAccess'); REAL.add('cache'); REAL.add('quotaGuard'); REAL.add('analytics');
 STUBS['./db'].getImportFencedDb = env => loadReal('importMaintenanceFence').getImportFencedDb(env);
+STUBS['./db'].isRetryableD1Error = e => { const m={exports:{}}; new Function('exports','require','module',transpile(path.join(libDir,'db.ts')))(m.exports,r=>r==='./importMaintenanceFence'?loadReal('importMaintenanceFence'):require(r),m); return m.exports.isRetryableD1Error(e) };
 STUBS['./db'].isImportMaintenanceFenceError = e => loadReal('importMaintenanceFence').isImportMaintenanceFenceError(e);
 const engineAbs =`)
 const native = new Function('require', '__dirname', fixture + `
@@ -22,14 +23,14 @@ async function measure(tier, units, shape = {}) {
   sqlite.exec(`CREATE TABLE system_flags (key TEXT PRIMARY KEY,value TEXT); CREATE TABLE import_job_row_signatures(job_id TEXT); CREATE TABLE quota_usage(resource TEXT,window_key TEXT,used INTEGER,updated_at TEXT,UNIQUE(resource,window_key)); CREATE TABLE cache_versions(namespace TEXT PRIMARY KEY,version INTEGER,updated_at TEXT); CREATE TABLE roles(id INTEGER PRIMARY KEY,code TEXT,name TEXT,permissions TEXT); CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT,name TEXT,organization_id INTEGER,role_id INTEGER,permissions TEXT,is_active INTEGER,deleted_at TEXT); INSERT INTO roles VALUES(1,'admin','Admin','{}'); INSERT INTO users VALUES(61,'admin','Administrator',1,1,'{}',1,NULL); ALTER TABLE import_jobs ADD COLUMN last_error TEXT;`)
   if (!shape.create) native.seedProduct(sqlite,{id:50,name:'Budget',barcode:'B50',shop:shape.sale?units:0})
   if(shape.sale) native.seedBatch(sqlite,{id:1,productId:50,key:'source',lot:'source',received:'2026-01-01',qty:units})
-  const rows = Array.from({length:units},(_,i)=>({_rowNumber:i+2,name:'Budget',barcode:'B50',shop:'1',warehouse:shape.twoBranches?'1':'',date:'2026-01-01',action:shape.sale?'sale1':'add',selling_price:shape.sale?'5':'',cost_price:'4',supplier:'Bong Long',batch:shape.sale?'':`B${i}`}))
+  const rows = Array.from({length:units},(_,i)=>({_rowNumber:i+2,name:'Budget',barcode:'B50',shop:'1',warehouse:shape.twoBranches?'1':'',date:'2026-01-01',action:shape.sale?(shape.reconcileRefusal?'sale'+(i+1):'sale1'):shape.reconcile?'':'add',selling_price:shape.sale?'5':'',cost_price:'4',supplier:'Bong Long',batch:shape.sale?'':`B${i}`}))
   if(shape.mixed){rows.forEach(r=>r._rowNumber++);rows.unshift({_rowNumber:2,name:'Budget',barcode:'B50',shop:'1',date:'2026-01-01',action:'add',cost_price:'4',supplier:'Bong Long',batch:'added'})}
   native.seedJob(sqlite,'budget',rows,{stock_action_mode:shape.reconcile?'reconcile':'direct',apply_authorized_by_id:61})
   let statements=0, calls=0, injected=false
   const instrument=adapter=>{
     const prepare=adapter.prepare.bind(adapter),batch=adapter.batch.bind(adapter)
     adapter.prepare=sql=>{const p=prepare(sql);const once=Object.fromEntries(['get','all','run'].map(method=>[method,async params=>{statements++;calls++;if(shape.finalizeFault&&!injected&&method==='run'&&/UPDATE import_jobs SET\s+status = @status, phase = @status/.test(sql)){injected=true;throw new Error('Injected finalizer failure')}return p[method](params)}]));once.getOnce=once.get;once.allOnce=once.all;return once}
-    adapter.batch=async ss=>{statements+=ss.length;calls++;if(shape.finalizeFault&&!injected&&ss.some(s=>/UPDATE import_jobs SET\s+status = @status, phase = @status/.test(s.sql))){injected=true;throw new Error('Injected finalizer failure')}return(await batch(ss)).map(r=>({meta:{changes:r.changes,last_row_id:Number(r.lastInsertRowid)}}))}
+    adapter.batch=async ss=>{statements+=ss.length;calls++;if(shape.finalizeFault&&!injected&&ss.some(s=>/UPDATE import_jobs SET\s+status = @status, phase = @status/.test(s.sql))){injected=true;throw new Error('Injected finalizer failure')}const result=(await batch(ss)).map(r=>({meta:{changes:r.changes,last_row_id:Number(r.lastInsertRowid)}}));if(shape.lostAck&&!injected&&ss.some(s=>/INSERT INTO inventory_movements/.test(s.sql))){injected=true;throw new Error('D1_ERROR: internal error lost acknowledgement')}return result}
     adapter.batchOnce=adapter.batch
   }
   instrument(db)
@@ -59,6 +60,15 @@ async function measure(tier, units, shape = {}) {
     assert.deepStrictEqual(sqlite.prepare('SELECT chunk_cursor,chunk_state_json FROM import_jobs').get(),checkpoint,'existing checkpoint retained')
     sqlite.close();return []
   }
+  if(shape.reconcileRefusal){
+    statements=0;calls=0
+    const before=physicalSnapshot()
+    await assert.rejects(()=>native.runImportApply(env,'budget'),e=>e.code==='stock_import_reconcile_over_tier_budget')
+    assert.ok(statements<=50,'full entry classification refusal stays below Free budget')
+    assert.strictEqual(physicalSnapshot(),before,'oversized snapshot classification refuses before every business effect')
+    console.log(JSON.stringify({tier,units,shape,statements,calls,refusedBeforeEffects:true}))
+    sqlite.close();return []
+  }
   const stats=[]
   for(let i=0;i<1000;i++) {
     statements=0;calls=0;queued=0
@@ -67,10 +77,10 @@ async function measure(tier, units, shape = {}) {
     const before=sqlite.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n
     let acked=false,retried=false
     await queueModule.exports.handleImportQueue({messages:[{body:{jobId:'budget',kind:'apply'},timestamp:new Date(),attempts:1,ack(){acked=true},retry(){retried=true}}]},env)
-    if(retried){assert.ok(shape.finalizeFault&&injected,'only injected finalizerfailure retries');queued++}else assert.ok(acked,'successful or deferred continuation is acknowledged')
+    if(retried){assert.ok((shape.finalizeFault||shape.lostAck)&&injected,'only injected finalizerfailure retries');queued++}else assert.ok(acked,'successful or deferred continuation is acknowledged')
     const moved=sqlite.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n-before
     stats.push({tier,statements,calls,moved})
-    if(!shape.reconcile) assert.ok(statements<=(tier==='free'?50:1000),'whole queue entry statement bound')
+    assert.ok(statements<=(tier==='free'?50:1000),'whole queue entry statement bound')
     if(!shape.oversized) assert.strictEqual(resultsDb.prepare(`SELECT COUNT(*) n FROM import_job_rows WHERE action='error'`).get().n,0,'budget deferrals never become row failures')
     if(!queued){if(shape.replay&&!firstSnapshot){firstSnapshot=physicalSnapshot();continue}break}
   }
@@ -80,7 +90,7 @@ async function measure(tier, units, shape = {}) {
   assert.strictEqual(sqlite.prepare('SELECT SUM(quantity) quantity FROM branch_stock').get().quantity,shape.mixed?units+1:shape.sale?(shape.oversized?units:0):units*(shape.twoBranches?2:1))
   console.log(JSON.stringify({tier,units,shape,invocations:stats.length,maxStatements:Math.max(...stats.map(s=>s.statements)),maxCalls:Math.max(...stats.map(s=>s.calls))}))
   if(shape.replay) assert.strictEqual(physicalSnapshot(),firstSnapshot,'full queue replay changes no physical business rows')
-  if(shape.finalizeFault) assert.ok(injected,'finalizer fault must actually execute')
+  if(shape.finalizeFault||shape.lostAck) assert.ok(injected,'requested fault must actually execute')
   sqlite.close()
   separate?.sqlite.close()
   return stats
@@ -88,6 +98,8 @@ async function measure(tier, units, shape = {}) {
 async function singleAttemptReadOracle() {
   const dbPath=path.join(__dirname,'..','src','lib','db.ts'), mod={exports:{}}
   new Function('exports','require','module',native.transpile(dbPath))(mod.exports,request=>request==='./importMaintenanceFence'?fence:require(request),mod)
+  assert.strictEqual(mod.exports.isRetryableD1Error(new Error('D1_ERROR: internal error')),true)
+  for(const message of ['D1_ERROR: constraint failed','D1_ERROR: no such table','D1 DB is overloaded','CPU time limit exceeded','product_has_stock']) assert.strictEqual(mod.exports.isRetryableD1Error(new Error(message)),false,message)
   let calls=0
   const raw={prepare(){return{bind(){return{async all(){calls++;if(calls===1)throw new Error('D1_ERROR: internal error');return{results:[{id:1}],meta:{}}}}}}}}
   const db=new mod.exports.D1Compat(raw)
@@ -130,6 +142,7 @@ async function groupFinalizerOracle() {
   await measure('free',1,{separate:true})
   await measure('free',1,{noFlag:true})
   await measure('free',1,{finalizeFault:true})
+  await measure('free',1,{lostAck:true,replay:true})
   await measure('free',1,{replay:true})
   await measure('free',1,{missingQueue:true})
   await measure('free',8,{sale:true,oversized:true})
@@ -140,14 +153,7 @@ async function groupFinalizerOracle() {
   const freeMax=Math.max(...free.map(s=>s.statements)),paidMax=Math.max(...paid.map(s=>s.statements))
   await measure('free',1,{reconcile:true})
   await measure('free',60,{reconcile:true})
+  await measure('free',60,{reconcile:true,sale:true,reconcileRefusal:true})
   assert.ok(freeMax<=50,`Free whole invocation ${freeMax}>50`)
   assert.ok(paidMax<=1000,`Paid single-delivery budget ${paidMax}>1000`)
 })().catch(e=>{console.error(e);process.exitCode=1})
-
-
-
-
-
-
-
-
