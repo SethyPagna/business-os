@@ -13,6 +13,17 @@ harness.paths = module.paths
 harness._compile(source.slice(0, boundary).replace('const overrides = {', "const overrides = { './db': { getDb: env => env.DB },")
   + '\nmodule.exports={fixture,request,postSale,app,executionCtx,load,USER,overrides,setUser(value){currentUser=value}};', file)
 const h = harness.exports
+const originalFixture = h.fixture
+h.fixture = (...args) => {
+  const fixture = originalFixture(...args)
+  const prepare = fixture.route.prepare.bind(fixture.route)
+  fixture.route.prepare = sql => {
+    const statement = prepare(sql)
+    return { ...statement, getOnce: statement.get, allOnce: statement.all }
+  }
+  fixture.route.batchOnce = fixture.route.batch.bind(fixture.route)
+  return fixture
+}
 h.overrides['../lib/cache'].bumpVersions = async () => {}
 Object.assign(h.overrides['../lib/telegram'], { sendReturnTelegramEvent: async () => {}, sendReturnStatusTelegramEvents: async () => {} })
 h.overrides['./cache'] = h.overrides['../lib/cache']

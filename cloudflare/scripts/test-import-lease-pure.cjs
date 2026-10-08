@@ -19,6 +19,7 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
+const ts = require('typescript')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
@@ -129,8 +130,19 @@ check('the lease is released on the FAILURE path too', async () => {
   // A failed chunk is retried by the queue, and that retry has to be able to
   // claim the job rather than waiting out 60s behind an invocation that is
   // already gone.
-  const analyzeAndApply = engine.match(/\} finally \{[\s\S]{0,400}?await releaseImportLease\(db, jobId, leaseToken\)/g) || []
-  assert.equal(analyzeAndApply.length, 2, 'both analyze and apply must release in a finally, not only on success')
+  const parsed = ts.createSourceFile('importEngine.ts', engine, ts.ScriptTarget.Latest, true)
+  for (const name of ['runImportAnalyze', 'runImportApply']) {
+    const fn = parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name)
+    assert.ok(fn, name)
+    const finalizers = []
+    const walk = node => {
+      if (ts.isTryStatement(node) && node.finallyBlock) finalizers.push(node.finallyBlock.getText(parsed))
+      ts.forEachChild(node, walk)
+    }
+    walk(fn)
+    assert.equal(finalizers.filter(block => /await releaseImportLease\(db, jobId, leaseToken\)/.test(block)).length, 1,
+      `${name} releases its token in a finally even when budget cleanup precedes it`)
+  }
 })
 
 check('both phases claim before touching a chunk, and ack rather than retry when refused', async () => {

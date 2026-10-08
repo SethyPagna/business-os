@@ -25,7 +25,7 @@ assert.equal(
 )
 assert.match(
   returnsRoute,
-  /FROM return_create_receipts WHERE actor_id=\? AND request_id=\? LIMIT 1/,
+  /LEFT JOIN return_create_receipts r ON r\.actor_id=\? AND r\.request_id=\?/,
   'customer return replay must use the actor-scoped immutable receipt lookup',
 )
 assert.match(
@@ -98,6 +98,10 @@ assert.match(
 assert.match(
   plan('SELECT id FROM return_create_receipts WHERE actor_id=? AND request_id=? LIMIT 1', [7, 'return:1']),
   /sqlite_autoindex_return_create_receipts/,
+)
+assert.match(
+  plan("SELECT r.id,o.id FROM (SELECT 1) seed LEFT JOIN return_create_receipts r ON r.actor_id=? AND r.request_id=? LEFT JOIN returns o ON o.client_request_id=? AND o.client_request_id<>'' LIMIT 1", [7, 'return:1', 'return:1']),
+  /sqlite_autoindex_return_create_receipts[\s\S]*idx_returns_client_request_unique_pg/,
 )
 assert.match(
   plan("SELECT id FROM products WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1", ['product:1']),

@@ -117,17 +117,23 @@ check('returns.ts POST /: explicit replacement batch lookup is one IN-chunked qu
   )
 })
 
-check('returns.ts POST /: branch/batch delta snapshot reads fan out with Promise.all', () => {
-  assert.match(
-    returnsSource,
-    /const branchRows = await Promise\.all\(branchDeltaEntries\.map\(\(value\) =>/,
-    'branchDeltas snapshot reads must run concurrently, not one sequential await per key',
-  )
-  assert.match(
-    returnsSource,
-    /const batchRows = await Promise\.all\(batchDeltaEntries\.map\(\(value\) =>/,
-    'batchDeltas snapshot reads must run concurrently, not one sequential await per key',
-  )
+check('returns.ts POST /: one set-based snapshot preserves branch/batch identities and zero controls', () => {
+  const block = sliceBetween(returnsSource, 'const snapshotPairs =', 'const branchRows =', 'return snapshots')
+  const sql = block.match(/db\.prepare\(`([\s\S]*?)`\)/)?.[1]
+  assert.ok(sql, 'one snapshot statement')
+  assert.equal((block.match(/db\.prepare\(/g) || []).length, 1)
+  const db = new (require('better-sqlite3'))(':memory:')
+  try {
+    db.exec(`CREATE TABLE branch_stock(product_id INTEGER,branch_id INTEGER,quantity REAL);
+      CREATE TABLE product_batches(id INTEGER,variant_product_id INTEGER,is_active INTEGER,lot_code TEXT,expiry_date TEXT);
+      CREATE TABLE branch_batch_stock(batch_id INTEGER,branch_id INTEGER,quantity REAL);
+      INSERT INTO branch_stock VALUES(10,1,7),(10,2,99);
+      INSERT INTO product_batches VALUES(50,10,1,'A','2027-01-01'),(51,20,0,'B',NULL);
+      INSERT INTO branch_batch_stock VALUES(50,1,3),(50,2,80);`)
+    const rows = db.prepare(sql).all({ pairs: JSON.stringify({ branches: [{product_id:10,branch_id:1},{product_id:20,branch_id:1}], batches:[{batch_id:51,branch_id:1},{batch_id:50,branch_id:1}] }) })
+    assert.deepEqual(rows.map(row => [row.kind,row.ordinal,row.quantity,row.product_id,row.is_active]),
+      [['branch',0,7,null,null],['branch',1,0,null,null],['batch',0,0,20,0],['batch',1,3,10,1]])
+  } finally { db.close() }
 })
 
 // --- batches.ts: the three remaining awaited audits deferred into waitUntil --
