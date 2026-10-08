@@ -16,11 +16,11 @@ import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, parseFreeQuantity, stockRec
 import { effectiveUnitCost } from '../lib/stockSessionMath'
 import { hasColumn } from '../lib/schemaProbe'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
-import { withStockMutationReceipt } from '../lib/stockMutationReceipt'
+import { withStockMutationReceipt, type StockMutationAtomicMark } from '../lib/stockMutationReceipt'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { nullableMoney4, multiplyMoney4 } from '../lib/moneyPrecision'
-import { recomputeCatalogCost, catalogCostRecomputeStatement } from '../lib/catalogCostRecompute'
+import { catalogCostRecomputeStatement, catalogCostRecomputeIfChangedStatement } from '../lib/catalogCostRecompute'
 import { addressedStatements, branchEffectRefusal, branchRedirectGuardRefusal, branchRedirectTarget, isBranchRedirectGuardError, landingLotId, requestBranchLanding } from '../lib/branchRedirectWrite'
 
 // Batch / expiry-date tracking -- schema notes and design rationale live in
@@ -221,14 +221,15 @@ export type ReceiveBody = {
 // was lost is replayed from its stored result instead of topping the lot up
 // a second time.
 export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody): Promise<Response> {
+  if (hasAcquisitionCostInput(body, c.get('user'))) return c.json({ error: 'Cost-entry permission is required to enter receipt costs.', code: 'product_cost_edit_required' }, 403)
   return withStockMutationReceipt(
     () => getDb(c.env),
     c.get('user')?.id ?? null,
     'receive',
     body as unknown as Record<string, unknown>,
     (value, status) => c.json(value as never, status as never),
-    async (markWritten) => {
-      try { return await runReceiveBatchActionKernel(c, body, markWritten) }
+    async (_markWritten, atomicMark) => {
+      try { return await runReceiveBatchActionKernel(c, body, atomicMark) }
       catch (error) {
         const stockGuard = productStockGuardError(error)
         if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
@@ -239,12 +240,13 @@ export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody
         throw error
       }
     },
+    { requireReceipt: true },
   )
 }
 
 // `markWritten` is the receipt guard's write barrier -- see the same argument
 // on runAdjustActionKernel and lib/stockMutationReceipt.ts's header.
-async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody, markWritten: () => Promise<void>): Promise<Response> {
+async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody, atomicMark: StockMutationAtomicMark): Promise<Response> {
   const user = c.get('user')
   if (hasAcquisitionCostInput(body, user)) return c.json({ error: 'Cost-entry permission is required to enter receipt costs.', code: 'product_cost_edit_required' }, 403)
   const db = getDb(c.env)
@@ -329,10 +331,10 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
   let received: { batchId: number; batchNumber: number | null; lotCode: string }
   // Everything above this line is reads and validation; receiveBatchStock below
   // writes both stock ledgers, so the claim stops being releasable here.
-  await markWritten()
   try {
     received = await receiveBatchStock(db, {
       ordinaryReceiving: true,
+      atomicMark,
       productId,
       branchId,
       quantity,
@@ -397,7 +399,7 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
           batchKey,
           ...(movementFreeColumn ? { freeQuantity } : {}),
         },
-      }]),
+      }, catalogCostRecomputeIfChangedStatement(productId)]),
     })
   } catch (err) {
     const stockGuard = productStockGuardError(err)
@@ -414,7 +416,7 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
   // P10-4 (owner ruling 2026-09-16): a receipt just wrote a new lot cost --
   // re-derive products.cost_price_* from the DISTINCT non-zero active-lot
   // costs, same as the other two receipt wires. See catalogCostRecompute.ts.
-  await recomputeCatalogCost(db, productId)
+  // Catalog cost refresh shares the receipt transaction above.
 
   // P4-4a: the response below does not read the audit row, so it can run
   // alongside the cache bump/broadcasts instead of its own awaited round trip.

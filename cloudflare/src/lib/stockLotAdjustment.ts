@@ -73,7 +73,7 @@ import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import { getActionTier } from './permissions'
 import { actorSnapshot } from './actorSnapshot'
-import { ordinaryBusinessBatch } from './businessMaintenanceGuard'
+import { ordinaryBusinessBatch, ordinaryBusinessMaintenanceGuard } from './businessMaintenanceGuard'
 import { requireReceivingBranch, receivingBranchAssertion, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from './receivingBranch'
 import { resolveMovementCostSnapshot, type MovementCostPair } from './movementCostSnapshot'
 import { planHoldAsTagged } from './damagedLotActions'
@@ -355,6 +355,7 @@ export async function applyStockLotSet(
   // X-Branch-Redirect: a Set addressed to a branch that has since been disabled is applied at the active branch the
   // operator confirmed (on the lot as it exists there); without it the Set is refused branch_redirect_required.
   redirectTarget: RedirectTarget = null,
+  atomicMark?: import('./stockMutationReceipt').StockMutationAtomicMark,
 ): Promise<StockLotSetResult> {
   if (getActionTier(user, 'inventory', 'adjust') !== 'full') {
     return { status: 403, body: { error: 'Stock adjustments require Full Access to Inventory.' } }
@@ -465,9 +466,11 @@ export async function applyStockLotSet(
         response_json=json_set(response_json,'$.action_history_id',last_insert_rowid()) WHERE id=@operation`, params: opParams },
     ] : []),
   ]
-  await markWritten()
+  if (!atomicMark) await markWritten()
   try {
-    await ordinaryBusinessBatch(db, addressedStatements(landing, statements))
+    if (atomicMark?.execute) {
+      await atomicMark.execute(db, [...addressedStatements(landing, statements), ordinaryBusinessMaintenanceGuard])
+    } else await ordinaryBusinessBatch(db, addressedStatements(landing, statements))
   } catch (error) {
     if (recordOperation && requestId) {
       const concurrent = await previous()

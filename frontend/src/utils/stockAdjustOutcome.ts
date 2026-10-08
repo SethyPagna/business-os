@@ -201,6 +201,10 @@ const STOCK_REQUEST_FAILURE_ENTRIES: Record<string, StockRequestFailureEntry> = 
     key: 'stock_request_in_flight',
     fallback: 'This line is still being recorded on the server. Wait a moment and try again.',
   },
+  stock_receipt_unavailable: {
+    key: 'stock_receipt_unavailable',
+    fallback: 'Stock recording is temporarily unavailable. Keep this form open and try again.',
+  },
   stock_request_partially_applied: {
     key: 'stock_request_partially_applied',
     fallback: 'Stock was recorded but the request did not finish. Check the Stock Change ledger, then remove this line.',

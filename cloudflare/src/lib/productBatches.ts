@@ -612,6 +612,7 @@ export async function receiveBatchStock(db: D1Compat, input: {
   ordinaryReceiving?: true
   /** Internal stock-revert only: replay the recorded lot, not a new purchase. */
   historicalReceiptReplay?: boolean
+  atomicMark?: import('./stockMutationReceipt').StockMutationAtomicMark
   // P4-4a: statements that need this receipt's own resolved batch_id (e.g. an
   // inventory_movements row logging the receipt) but can only be built once
   // batchKey is known -- built here, after that, and folded into the SAME
@@ -648,12 +649,15 @@ export async function receiveBatchStock(db: D1Compat, input: {
   const extraStatements = input.buildBatchStatements
     ? input.buildBatchStatements({ batchKey: plan.batchKey, lotCode: plan.lotCode, resolvedBatchIdSql })
     : []
-  await db.batch([
+  const statements = [
     ...(input.ordinaryReceiving ? [receivingBranchAssertion(input.branchId)] : []),
     ...plan.statements,
     ...(hasEnteredCost || receiptLotTarget ? [{ sql: 'DELETE FROM stock_session_guards', params: {} }] : []),
     ...extraStatements,
-  ])
+  ]
+  if (input.atomicMark?.execute) {
+    await input.atomicMark.execute(db, statements)
+  } else await db.batch(statements)
   const batch = await db.prepare(
     `SELECT id, batch_number, lot_code FROM product_batches
       WHERE variant_product_id = @productId AND

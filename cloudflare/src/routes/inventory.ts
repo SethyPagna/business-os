@@ -28,7 +28,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, changedFields } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
-import { stockMutationRequestIdMissing, STOCK_MUTATION_REQUEST_ID_REQUIRED, withStockMutationReceipt, type StockMutationAtomicMark } from '../lib/stockMutationReceipt'
+import { stockMutationRequestIdMissing, STOCK_MUTATION_REQUEST_ID_REQUIRED, withStockMutationReceipt, executeStockMutationBatch, type StockMutationAtomicMark } from '../lib/stockMutationReceipt'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -47,7 +47,7 @@ import { parseRawDatedCountRows, resolveDatedStockCountRows } from '../lib/dated
 import { applyDatedStockCountDecisions, type DatedCountDecision } from '../lib/datedStockCountDecisions'
 import { formatStockChangeTelegramLines, formatTransferTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import { TRANSFER_DIRECTION_ERROR, transferDirectionError } from '../lib/branchRoleGuards'
-import { recomputeCatalogCost } from '../lib/catalogCostRecompute'
+import { catalogCostRecomputeIfChangedStatement } from '../lib/catalogCostRecompute'
 import {
   CANONICAL_BRANCH_CONFIGURATION_CODE,
   CANONICAL_BRANCH_CONFIGURATION_ERROR,
@@ -1537,6 +1537,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
         throw error
       }
     },
+    { requireReceipt: true },
   )
 }
 
@@ -1675,7 +1676,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       setScope: body.setScope as 'lot' | 'branch', reason: reason || '', conditionTag,
       ...(expectedLotQuantity === undefined ? {} : { expectedLotQuantity }),
       ...(expectedBranchQuantity === undefined ? {} : { expectedBranchQuantity }),
-    }, markWritten, () => branchRedirectTarget(c))
+    }, markWritten, () => branchRedirectTarget(c), atomicMark)
     if (result.status === 200 && Number(result.body.quantity) > 0 && !result.body.replayed) {
       c.executionCtx.waitUntil(Promise.all([
         audit(c.env, user?.id ?? null, actorSnapshot(user), 'stock_set', 'product', productId, {
@@ -2092,7 +2093,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     }
   }
   const atomicTaggedReceipt = !correctionLot && useBatchLedger && type === 'add' && Boolean(conditionTag)
-  if (!atomicRemoval && !atomicTaggedReceipt) await markWritten()
+  const atomicIntake = type === 'add' && (Boolean(correctionLot) || useBatchLedger)
+  if (!atomicRemoval && !atomicTaggedReceipt && !atomicIntake) await markWritten()
 
   // The two ledger records a removal can leave -- the plain movement row, or
   // the held-lot row + damage_out movement of a tagged removal -- built in one
@@ -2183,7 +2185,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     // A physical count correction is not a new purchase. Preserve lot price,
     // supplier/payment, cumulative received money and the catalog override.
     // Both stock ledgers and the non-purchase movement share the lot guard.
-    await db.batch(addressedStatements(landing, [
+    await executeStockMutationBatch(db, addressedStatements(landing, [
+      productStockGuardStatement([targetProductId], 'active'),
       receivingBranchAssertion(branchId),
       { sql: `INSERT INTO stock_session_guards(guard_value) SELECT CASE WHEN EXISTS(
           SELECT 1 FROM product_batches WHERE id=@batchId AND variant_product_id=@productId
@@ -2202,12 +2205,21 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         params: { productId: targetProductId, productName: targetProductName, branchId, branchName: branch?.name || null,
           quantity, ...addMovementCost, reason: setToNote ? `${reason} (${setToNote})` : reason,
           referenceId: sessionId, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: correctionLot.id } },
+      ...(conditionTag ? [
+        ...planRemoveStockAcrossBatches({ productId: targetProductId, branchId, quantity,
+          allocations: [{ batchId: correctionLot.id, quantity }] }).statements,
+        ...planHoldAsTagged({ productId: targetProductId, productName: targetProductName, branchId,
+          branchName: branch?.name || null, batchId: correctionLot.id, quantity, tag: conditionTag,
+          source: 'restock', reason, cost: addMovementCost, referenceId: sessionId,
+          actor: { userId: user?.id ?? null, userName: actorSnapshot(user) } }),
+      ] : []),
       { sql: 'DELETE FROM stock_session_guards', params: {} },
-    ]))
+    ]), atomicMark)
     resolvedBatchId = correctionLot.id
     batchNumber = correctionLot.batch_number
     lotCode = correctionLot.lot_code
     movementWrittenAtomically = true
+    taggedReceiptCommitted = Boolean(conditionTag)
   } else if (useBatchLedger && type === 'add') {
     try {
       if (conditionTag) {
@@ -2240,11 +2252,9 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         })
         const removal = planRemoveStockAcrossBatches({ productId: targetProductId, branchId, quantity,
           allocations: [{ batchId: receiptBatchId, quantity }] })
-        const mark = atomicMark?.statement() ?? null
-        await db.batch(addressedStatements(landing, [
+        await executeStockMutationBatch(db, addressedStatements(landing, [
           receivingBranchAssertion(branchId),
           ...plan.statements,
-          ...(mark ? [mark] : []),
           ...(unlockPricing && !createdSibling && mergedPricingStatement ? [mergedPricingStatement]
             : sellingPricePlan ? [sellingPricePlan.statement] : []),
           {
@@ -2263,8 +2273,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
             reason, cost: receiptCost, referenceId: sessionId,
             actor: { userId: user?.id ?? null, userName: actorSnapshot(user) } }),
           { sql: 'DELETE FROM stock_session_guards', params: {} },
-        ]))
-        atomicMark?.committed()
+          ...(!createdSibling ? [catalogCostRecomputeIfChangedStatement(targetProductId)] : []),
+        ]), atomicMark)
         const received = await db.prepare('SELECT id,batch_number,lot_code FROM product_batches WHERE id=@id')
           .get<{ id: number; batch_number: number | null; lot_code: string }>({ id: receiptBatchId })
         if (!received) throw new Error('Received stock batch was not found after commit')
@@ -2290,7 +2300,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
           receiptCostPreimage: receiptUnitCostUsd == null ? undefined : unlockedReceiptCostPreimage,
           receiptLotTarget: unlockedReceiptLotTarget,
         })
-        await db.batch(addressedStatements(landing, [
+        await executeStockMutationBatch(db, addressedStatements(landing, [
           receivingBranchAssertion(branchId),
           ...plan.statements,
           mergedPricingStatement,
@@ -2317,7 +2327,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
             },
           },
           ...(receiptUnitCostUsd == null && !unlockedReceiptLotTarget ? [] : [{ sql: 'DELETE FROM stock_session_guards', params: {} }]),
-        ]))
+          catalogCostRecomputeIfChangedStatement(targetProductId),
+        ]), atomicMark)
         const received = await db.prepare(
           'SELECT id,batch_number,lot_code FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey',
         ).get<{ id: number; batch_number: number | null; lot_code: string }>({ productId: targetProductId, batchKey: plan.batchKey })
@@ -2329,6 +2340,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       } else {
       const received = await receiveBatchStock(db, {
         ordinaryReceiving: true,
+        atomicMark,
         productId: targetProductId,
         branchId,
         quantity,
@@ -2352,11 +2364,20 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         preserveHistoricalUnitCost: unitCostUsd == null,
         paymentStatus,
         creditDueDate,
-        ...(sellingPricePlan ? { buildBatchStatements: () => [sellingPricePlan!.statement] } : {}),
+        buildBatchStatements: ({ batchKey, resolvedBatchIdSql }) => {
+          const movement = movementRowStatement()
+          return addressedStatements(landing, [
+            ...(sellingPricePlan ? [sellingPricePlan.statement] : []),
+            { sql: movement.sql.replace('@batchId', resolvedBatchIdSql),
+              params: { ...movement.params, batchId: unlockPricing ? null : batchIdRequested, batchKey } },
+            ...(!createdSibling ? [catalogCostRecomputeIfChangedStatement(targetProductId)] : []),
+          ])
+        },
       })
       batchNumber = received.batchNumber
       resolvedBatchId = received.batchId
       lotCode = received.lotCode
+      movementWrittenAtomically = true
       }
     } catch (err) {
       const stockGuard = productStockGuardError(err)
@@ -2378,7 +2399,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     // vs. the literal per-unit invoice price). Recomputing here would
     // silently overwrite that explicit first entry with the lot figure.
     // Every LATER receipt onto this same row still recomputes normally.
-    if (!createdSibling) await recomputeCatalogCost(db, targetProductId)
+    // The receipt's cost refresh now shares its physical transaction.
   } else if (useBatchLedger && type === 'remove') {
     if (batchIdRequested != null) {
       try {

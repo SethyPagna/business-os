@@ -104,9 +104,24 @@ export type StockMutationAtomicMark = {
   statement(): StockWriteStatement | null
   /** Call once that batch has committed. */
   committed(): void
+  execute?(db: D1Compat, statements: StockWriteStatement[]): Promise<void>
 }
 
 const NO_ATOMIC_MARK: StockMutationAtomicMark = { statement: () => null, committed: () => {} }
+
+export async function executeStockMutationBatch(
+  db: D1Compat,
+  statements: StockWriteStatement[],
+  atomicMark?: StockMutationAtomicMark,
+): Promise<void> {
+  const mark = atomicMark?.statement() ?? null
+  const batch = [...statements, ...(mark ? [mark] : [])]
+  // A durable marker makes a lost acknowledgement recoverable on the next
+  // request. Never automatically repeat an accumulating stock transaction.
+  if (mark && db.batchOnce) await db.batchOnce(batch)
+  else await db.batch(batch)
+  atomicMark?.committed()
+}
 
 type StockMutationClaim =
   | { state: 'disabled' }
@@ -261,6 +276,7 @@ async function claimStockMutation(
   requestId: string,
   kind: StockMutationKind,
   canonical: string,
+  requireReceipt = false,
 ): Promise<StockMutationClaim> {
   if (!await receiptsAvailable(db)) return { state: 'disabled' }
   const existing = await readReceipt(db, actorId, requestId)
@@ -269,7 +285,7 @@ async function claimStockMutation(
     await db.prepare(
       'INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json) VALUES(@actor,@request,@kind,@canonical)',
     ).run({ actor: actorId, request: requestId, kind, canonical })
-  } catch {
+  } catch (error) {
     // Lost the race to a concurrent double-submit of the same id: whoever won
     // owns the write, so read their row and answer from it.
     const raced = await readReceipt(db, actorId, requestId)
@@ -277,7 +293,10 @@ async function claimStockMutation(
     // read -- so it refused, and nothing was written. Answering 409 is the
     // honest, non-guessing reply; a 500 here used to turn a benign race into
     // an alarming server error.
-    if (!raced) return { state: 'in_flight' }
+    if (!raced) {
+      if (requireReceipt) throw error
+      return { state: 'in_flight' }
+    }
     return decideFromStoredReceipt(db, actorId, requestId, raced, canonical)
   }
   return { state: 'claimed' }
@@ -334,6 +353,11 @@ const STOCK_MUTATION_PARTIAL = {
   code: 'stock_request_partially_applied',
 }
 
+const STOCK_RECEIPT_UNAVAILABLE = {
+  error: 'Stock recording is temporarily unavailable. Keep this form open and try again.',
+  code: 'stock_receipt_unavailable',
+}
+
 // The one wrapper both kernels use. `run` is the kernel body, unchanged apart
 // from the markWritten() call it now makes before its first stock write.
 //
@@ -349,6 +373,7 @@ export async function withStockMutationReceipt(
   body: Record<string, unknown>,
   json: (value: unknown, status?: number) => Response,
   run: (markWritten: () => Promise<void>, atomicMark: StockMutationAtomicMark) => Promise<Response>,
+  options: { requireReceipt?: boolean } = {},
 ): Promise<Response> {
   const supplied = body.client_request_id ?? body.clientRequestId
   const requestId = normalizeStockMutationRequestId(supplied)
@@ -357,13 +382,19 @@ export async function withStockMutationReceipt(
     // unprotected would be the worst of the three answers: the client believes
     // the line is deduped, and it is not.
     if (requestIdWasSupplied(supplied)) return json(STOCK_MUTATION_INVALID_ID, 400)
+    if (options.requireReceipt) return json(STOCK_MUTATION_REQUEST_ID_REQUIRED, 400)
     return run(async () => {}, NO_ATOMIC_MARK)
   }
-  if (actorId == null) return run(async () => {}, NO_ATOMIC_MARK)
+  if (actorId == null) return options.requireReceipt ? json(STOCK_RECEIPT_UNAVAILABLE, 503) : run(async () => {}, NO_ATOMIC_MARK)
   const db = openDb()
   const canonical = canonicalStockMutationRequest(body)
-  const claim = await claimStockMutation(db, actorId, requestId, kind, canonical)
-  if (claim.state === 'disabled') return run(async () => {}, NO_ATOMIC_MARK)
+  let claim: StockMutationClaim
+  try { claim = await claimStockMutation(db, actorId, requestId, kind, canonical, options.requireReceipt) }
+  catch (error) {
+    if (options.requireReceipt) return json(STOCK_RECEIPT_UNAVAILABLE, 503)
+    throw error
+  }
+  if (claim.state === 'disabled') return options.requireReceipt ? json(STOCK_RECEIPT_UNAVAILABLE, 503) : run(async () => {}, NO_ATOMIC_MARK)
   if (claim.state === 'conflict') return json(STOCK_MUTATION_CONFLICT, 409)
   if (claim.state === 'in_flight') return json(STOCK_MUTATION_IN_FLIGHT, 409)
   if (claim.state === 'partial') return json(STOCK_MUTATION_PARTIAL, 409)
@@ -372,12 +403,13 @@ export async function withStockMutationReceipt(
   let wrote = false
   const markWritten = async () => {
     if (wrote) return
-    wrote = true
     await markStockMutationWritten(db, actorId, requestId)
+    wrote = true
   }
   const atomicMark: StockMutationAtomicMark = {
     statement: () => (wrote ? null : { sql: MARK_STOCK_MUTATION_WRITTEN_SQL, params: { actor: actorId, request: requestId } }),
     committed: () => { wrote = true },
+    execute: (db, statements) => executeStockMutationBatch(db, statements, atomicMark),
   }
   let response: Response
   try {

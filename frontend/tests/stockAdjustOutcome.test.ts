@@ -30,6 +30,8 @@ assert.equal(stockFailureText({ code: 'stock_session_query_budget_exceeded', mes
 assert.equal(stockFailureText({ code: 'vendor_unknown', message: 'Original error' }, (_key, fallback) => fallback, 'Fallback'), 'Original error')
 assert.equal(stockFailureText({ code: 'stock_session_query_budget_exceeded', message: 'Saved Worker English' }, (_key, fallback) => fallback, 'Fallback'), 'Saved Worker English')
 let failed = 0
+assert.equal(stockFailureText({ code: 'stock_receipt_unavailable' }, (key, fallback) => key === 'stock_receipt_unavailable' ? 'ខ្មែរ' : fallback, 'Fallback'), 'ខ្មែរ')
+assert.equal(classifyStockAdjustFailure({ code: 'stock_receipt_unavailable', status: 503 }).retryable, true)
 function runTest(name: string, fn: () => void): void {
   try {
     fn()
