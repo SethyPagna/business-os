@@ -96,6 +96,7 @@ check('stocked batch cannot be reparented onto an inactive product', () => {
   const db = fixture()
   seeders.lot(db)
   assert.throws(() => db.exec('UPDATE product_batches SET variant_product_id=900002 WHERE id=900001'), refusal)
+  assert.throws(() => db.exec("INSERT OR REPLACE INTO product_batches(id,variant_product_id,batch_key) VALUES(900001,900002,'replacement')"), refusal)
   db.close()
 })
 check('late refusal rolls back earlier writes in the same transaction', () => {

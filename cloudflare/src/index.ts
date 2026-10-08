@@ -54,6 +54,7 @@ import { maybeRunScheduledImageAudit } from './lib/imageAudit'
 import { maybeRunScheduledEphemeralRetention } from './lib/ephemeralRetention'
 import { reapStalledImportJobs } from './routes/importJobs'
 import { ReportMoneyPrecisionError, reportMoneyHttpError } from './lib/reportMoneyPrecision'
+import { productStockGuardError } from './lib/productStockGuard'
 import { ADMIN_DOCUMENT_REWRITES, APP_DOCUMENT_ROUTES, shouldRewriteAdminDocument } from './lib/adminDocumentIdentity'
 import { robotsTxt, sitemapXml } from './lib/publicSeo'
 import { broadcastHubStub } from './durable-objects/broadcastHub'
@@ -206,6 +207,8 @@ app.use('/api/*', requestMetricsMiddleware)
 // the frontend can actually parse and show a sane message for, instead of
 // a bare string.
 app.onError((error, c) => {
+  const stockRefusal = productStockGuardError(error)
+  if (stockRefusal) return c.json({ success: false, error: stockRefusal.message, code: stockRefusal.code }, 409)
   if (error instanceof ReportMoneyPrecisionError) {
     const mapped = reportMoneyHttpError(error)
     return c.json({

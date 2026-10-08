@@ -71,6 +71,14 @@ BEGIN
   SELECT RAISE(ABORT,'product_has_stock');
 END;
 
+CREATE TRIGGER batch_product_insert_active_0242
+BEFORE INSERT ON product_batches
+WHEN EXISTS(SELECT 1 FROM products WHERE id=NEW.variant_product_id AND is_active IS NOT 1)
+ AND EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=NEW.id AND quantity<>0)
+BEGIN
+  SELECT RAISE(ABORT,'product_has_stock');
+END;
+
 CREATE TRIGGER batch_product_active_0242
 BEFORE UPDATE OF variant_product_id ON product_batches
 WHEN NEW.variant_product_id IS NOT OLD.variant_product_id

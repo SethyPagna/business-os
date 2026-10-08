@@ -41,6 +41,7 @@
 // box and narrows the list, and the operator still chooses the row. This
 // file only decides what order the narrowed list is drawn in.
 
+import { stockVisibleProductSql } from './productStockGuard'
 import {
   buildExactBarcodeMatchClause,
   exactBarcodePredicateSql,
@@ -156,8 +157,8 @@ function buildRankedIdSearchQuery(ranked: RankedIds, params: Record<string, unkn
     hasSearchTerm: true,
     titleOnly,
     whereClause: `p.id IN ${listed}`,
-    activeWhereSql: '+p.is_active = 1',
-    familyMemberWhereSql: `+p.is_active = 1 AND (p.id IN ${listed} OR p.parent_id IN ${listed} OR p.id IN (SELECT listed.parent_id FROM products listed WHERE listed.id IN ${listed}))`,
+    activeWhereSql: stockVisibleProductSql('p', false),
+    familyMemberWhereSql: `${stockVisibleProductSql('p', false)} AND (p.id IN ${listed} OR p.parent_id IN ${listed} OR p.id IN (SELECT listed.parent_id FROM products listed WHERE listed.id IN ${listed}))`,
     matchRankSql: position,
     matchTierSql: `(CASE WHEN ${position} < @${prefix}rankTierCut1 THEN 0 WHEN ${position} < @${prefix}rankTierCut2 THEN 1 WHEN ${position} < @${prefix}rankTierCut3 THEN 2 WHEN ${position} < @${prefix}rankTierCut4 THEN 3 ELSE 4 END)`,
   }

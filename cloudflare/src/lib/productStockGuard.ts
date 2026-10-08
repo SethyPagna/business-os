@@ -39,6 +39,10 @@ function validIds(ids: readonly number[]): number[] {
   return [...new Set(ids)]
 }
 
+export function stockVisibleProductSql(alias = 'p', indexedActive = true): string {
+  return `(${indexedActive ? '' : '+'}${alias}.is_active = 1 OR ${productHasStockSql(alias)})`
+}
+
 export async function stockedProductIds(db: Pick<D1Compat, 'prepare'>, ids: readonly number[]): Promise<number[]> {
   const unique = validIds(ids)
   if (!unique.length) return []

@@ -1,4 +1,5 @@
 {
+  "product_has_stock": "Products with stock must stay active. Remove all stock before deleting or deactivating a product, and activate a product before adding stock.",
   "perm_product_cost_view": "View product costs",
   "perm_product_cost_edit": "Edit product costs",
   "product_cost_edit_required": "Cost edit permission is required to receive stock.",

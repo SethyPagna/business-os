@@ -1,4 +1,5 @@
 import { getDb } from './db'
+import { stockVisibleProductSql } from './productStockGuard'
 import { loadLowStockConfig, lowStockThresholdSql } from './lowStockSettings'
 import { customerBilledDeliveryFeeUsd } from './saleTotals'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localDateRangeClause } from './businessDateWindow'
@@ -1013,7 +1014,7 @@ async function lowStockMovedOnDay(env: Env, filters: SalesFilters): Promise<{ ro
   const removed = [stockDigestOutWhere(), localDateRangeClause('inventory_movements.created_at')]
   if (filters.branchId != null) removed.push('inventory_movements.branch_id = @branchId')
   const rows = await getDb(env).prepare(`SELECT name, stock_quantity, ${lowThresholdSql} AS low_threshold, out_of_stock_threshold, COUNT(*) OVER () AS matched
-    FROM products WHERE is_active = 1 AND ${lowOrOutOfStockSql(lowThresholdSql)}
+    FROM products p WHERE ${stockVisibleProductSql()} AND ${lowOrOutOfStockSql(lowThresholdSql)}
       AND (id IN (SELECT sale_items.product_id FROM sale_items JOIN sales ON sales.id = sale_items.sale_id WHERE ${sold.sql})
         OR id IN (SELECT inventory_movements.product_id FROM inventory_movements WHERE ${removed.join(' AND ')}))
     ORDER BY COALESCE(stock_quantity, 0) ASC, name ASC LIMIT ${SUMMARY_ROWS}`).all<LowStockRow & { matched: number }>(sold.params)
@@ -1023,7 +1024,7 @@ async function lowStockMovedOnDay(env: Env, filters: SalesFilters): Promise<{ ro
 async function inventoryReport(env: Env, language: TelegramLanguage): Promise<string> {
   const db = getDb(env)
   const lowThresholdSql = lowStockThresholdSql(await loadLowStockConfig(env), 'low_stock_threshold')
-  const rows = await db.prepare(`SELECT name, stock_quantity, ${lowThresholdSql} AS low_threshold, out_of_stock_threshold FROM products WHERE is_active = 1 AND ${lowOrOutOfStockSql(lowThresholdSql)} ORDER BY COALESCE(stock_quantity, 0) ASC, name ASC LIMIT 12`).all<LowStockRow>()
+  const rows = await db.prepare(`SELECT name, stock_quantity, ${lowThresholdSql} AS low_threshold, out_of_stock_threshold FROM products p WHERE ${stockVisibleProductSql()} AND ${lowOrOutOfStockSql(lowThresholdSql)} ORDER BY COALESCE(stock_quantity, 0) ASC, name ASC LIMIT 12`).all<LowStockRow>()
   return withLanguage(language, () => {
     const title = reportTitle('📦', 'Low stock', 'ស្តុកទាប')
     if (!rows.length) return `${title}\n${bi('No active product is at or below its alert level.', 'គ្មានផលិតផលសកម្មណាមួយស្តុកទាបទេ។')}`
@@ -1044,7 +1045,7 @@ async function inventorySummaryReport(env: Env, language: TelegramLanguage): Pro
     COALESCE(SUM(stock_quantity), 0) AS units,
     COALESCE(SUM(CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) THEN 1 ELSE 0 END), 0) AS out_of_stock,
     COALESCE(SUM(CASE WHEN COALESCE(stock_quantity, 0) > COALESCE(out_of_stock_threshold, 0) AND COALESCE(stock_quantity, 0) <= ${lowThresholdSql} THEN 1 ELSE 0 END), 0) AS low_stock
-    FROM products WHERE is_active = 1`).get<{ products: number; units: number; out_of_stock: number; low_stock: number }>()
+    FROM products p WHERE ${stockVisibleProductSql()}`).get<{ products: number; units: number; out_of_stock: number; low_stock: number }>()
   // Sep 7 2026: the header block, then the stock health as its own section --
   // the shape the other six reports took on Sep 6, which this one and /stock
   // were the two replies to miss.

@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { acquisitionCostResponses } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
+import { assertProductsActive, stockVisibleProductSql } from '../lib/productStockGuard'
 import { ordinaryBusinessMaintenanceGuard } from '../lib/businessMaintenanceGuard'
 
 /** Fail closed until the complete additive release schema is available. */
@@ -95,7 +96,7 @@ async function readStockIntegrityIssues(db: D1Compat): Promise<StockIntegrityIss
            COUNT(bs.id) AS branch_rows
     FROM products p
     LEFT JOIN branch_stock bs ON bs.product_id = p.id
-    WHERE p.is_active = 1
+    WHERE ${stockVisibleProductSql()}
     GROUP BY p.id, p.name, p.stock_quantity
     HAVING (COUNT(bs.id) = 0 AND ABS(COALESCE(p.stock_quantity, 0)) > 0.000001)
         OR (COUNT(bs.id) > 0 AND ABS(COALESCE(p.stock_quantity, 0) - COALESCE(SUM(bs.quantity), 0)) > 0.000001)
@@ -175,7 +176,7 @@ app.get('/summary', async (c) => {
     db,
     lowStock: await loadLowStockConfig(c.env),
     joinSql: '',
-    whereSql: 'WHERE p.is_active = 1',
+    whereSql: `WHERE ${stockVisibleProductSql()}`,
     params: {},
     qtyExpr: 'COALESCE(p.stock_quantity, 0)',
   })
@@ -245,6 +246,7 @@ app.post('/stock-integrity/repair', async (c) => {
     return c.json({ success: false, error: 'Run stock integrity check first, then confirm the matching preview token.' }, 400)
   }
   if (!issues.length) return c.json({ success: true, repairedRows: 0, productCount: 0 })
+  await assertProductsActive(db, issues.map(issue => issue.product_id))
 
   const missingIssues = issues.filter((row) => row.issue_type === 'missing_branch_stock')
   if (missingIssues.length && !defaultBranch) {
@@ -830,7 +832,7 @@ function normalizePositiveInt(value: unknown, fallback: number, { min = 1, max =
 // comment -- both are already reachable via this page's own filter
 // dropdowns, and stay out of the same-shaped noise problem here too).
 function buildBranchStockWhere(c: any, branchId: number, lowStock: LowStockConfig, { includeStockState = true } = {}) {
-  const where = ['p.is_active = 1']
+  const where = [stockVisibleProductSql()]
   const params: Record<string, unknown> = { branchId }
   // `search` accepted as a third alias alongside query/q, same as
   // products.ts/inventory.ts -- an unrecognized key used to mean "return the
@@ -900,7 +902,7 @@ app.get('/:id/stock', async (c) => {
              COALESCE(bs.quantity, 0) AS branch_quantity
       FROM products p
       LEFT JOIN branch_stock bs ON bs.product_id = p.id AND bs.branch_id = @id
-      WHERE p.is_active = 1
+      WHERE ${stockVisibleProductSql()}
       ORDER BY p.name
     `).all({ id })
     return c.json(rows || [])

@@ -11,6 +11,7 @@
 // This is deliberately a short list. A refusal with its own localizer (branchRuleErrors.ts's transfer and branch-edit
 // codes, returns/helpers/returnRefusalError.ts, saleSubmitErrors.ts) is not restated here.
 export const RESTATED_REFUSAL_KEYS: Readonly<Record<string, string>> = {
+  product_has_stock: 'product_has_stock',
   branch_not_sellable: 'branch_not_sellable',
   sale_branch_mismatch: 'sale_branch_mismatch',
   sale_identity_conflict: 'sale_identity_conflict',

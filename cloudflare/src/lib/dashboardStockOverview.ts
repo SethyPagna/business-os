@@ -12,7 +12,8 @@
 // each alert list) plus 2 full active-catalog expiry scans per load, and
 // /dashboard/startup and every sync-triggered reload paid it again.
 // COST NOW, on a miss: ONE family pass (getFamilyStockOverview) plus two
-// expiry statements that seek migration 0228's partial index. On a hit:
+// expiry statements that retain migration 0228's partial index for active products.
+// Inactive products with stock are included as invariant violations. On a hit:
 // zero D1 rows (two cache-version reads, KV first).
 //
 // FRESHNESS: the key folds in the 'products' and 'stock' cache versions --
@@ -32,6 +33,7 @@
 
 import type { Env } from '../index'
 import { getDb } from './db'
+import { productHasStockSql } from './productStockGuard'
 import { getVersionWithFallback } from './cache'
 import { getFamilyStockOverview, type FamilyStockAlertPage, type FamilyStockStats } from './familyStockStats'
 import { loadLowStockConfig, type LowStockConfig } from './lowStockSettings'
@@ -56,26 +58,26 @@ export interface DashboardStockOverview {
   expiringCount: number
 }
 
-// Byte-for-byte the predicate the Dashboard always used. Migration 0228's
-// index (is_active, date(expiry_date)) WHERE expiry_date IS NOT NULL serves
-// both statements without changing it: is_active equality, then date order.
-export const DASHBOARD_EXPIRY_WHERE_SQL = `p.is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')`
+const EXPIRY_DATE_WHERE_SQL = `expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')`
+export const DASHBOARD_EXPIRY_WHERE_SQL = `p.is_active = 1 AND ${EXPIRY_DATE_WHERE_SQL}`
+const INACTIVE_EXPIRY_WHERE_SQL = `p.is_active IS NOT 1 AND ${productHasStockSql()} AND ${EXPIRY_DATE_WHERE_SQL}`
 
 export async function computeDashboardStockOverview(env: Env, lowStock: LowStockConfig): Promise<DashboardStockOverview> {
   const db = getDb(env)
   const [overview, expiring, expiringCount] = await Promise.all([
     getFamilyStockOverview({ db, lowStock, previewSize: DASHBOARD_STOCK_PREVIEW_SIZE }),
     db.prepare(`
-      SELECT id, name, category, unit, expiry_date, CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry
-      FROM products p
-      WHERE ${DASHBOARD_EXPIRY_WHERE_SQL}
+      SELECT *, CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry FROM (
+        SELECT id, name, category, unit, expiry_date FROM products p WHERE ${DASHBOARD_EXPIRY_WHERE_SQL}
+        UNION ALL
+        SELECT id, name, category, unit, expiry_date FROM products p WHERE ${INACTIVE_EXPIRY_WHERE_SQL}
+      )
       ORDER BY date(expiry_date) ASC
       LIMIT ${DASHBOARD_STOCK_PREVIEW_SIZE}
     `).all<DashboardExpiringRow>(),
     db.prepare(`
-      SELECT COUNT(*) AS count
-      FROM products p
-      WHERE ${DASHBOARD_EXPIRY_WHERE_SQL}
+      SELECT (SELECT COUNT(*) FROM products p WHERE ${DASHBOARD_EXPIRY_WHERE_SQL})
+        + (SELECT COUNT(*) FROM products p WHERE ${INACTIVE_EXPIRY_WHERE_SQL}) AS count
     `).get<{ count: number }>(),
   ])
   return {
@@ -89,7 +91,7 @@ export async function computeDashboardStockOverview(env: Env, lowStock: LowStock
 
 // Bump when the cached shape changes, so an old entry can never be read back
 // as the new shape.
-const OVERVIEW_CACHE_SCHEMA = 'dso1'
+const OVERVIEW_CACHE_SCHEMA = 'dso2'
 
 export function dashboardStockOverviewKey(parts: {
   productsVersion: string

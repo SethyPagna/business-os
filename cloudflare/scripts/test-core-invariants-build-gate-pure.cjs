@@ -32,6 +32,7 @@ function load(rel, overrides = {}) {
 }
 const dbModule = load('lib/db.ts', { './importMaintenanceFence': {} })
 const deps = () => ({
+  './productStockGuard': load('lib/productStockGuard.ts'),
   './db': dbModule,
   './sqlBinding': load('lib/sqlBinding.ts'),
   './customTableName': load('lib/customTableName.ts'),
@@ -79,7 +80,7 @@ function world() {
 async function seeded() {
   const w = world()
   await isolate().ensureCoreDataInvariants(w.env)
-  w.raw.exec(`INSERT INTO products(id,name,is_active,stock_quantity) VALUES(100,'Covered',1,7),(101,'Inactive',0,9),(102,'Covered too',1,3);
+  w.raw.exec(`INSERT INTO products(id,name,is_active,stock_quantity) VALUES(100,'Covered',1,7),(101,'Inactive',0,0),(102,'Covered too',1,3);
     INSERT INTO branch_stock(product_id,branch_id,quantity) SELECT 100,id,7 FROM branches WHERE is_default=1;
     INSERT INTO branch_stock(product_id,branch_id,quantity) SELECT 102,id,3 FROM branches WHERE is_default=1;`)
   w.log.length = 0

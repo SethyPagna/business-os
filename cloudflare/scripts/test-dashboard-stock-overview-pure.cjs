@@ -37,6 +37,7 @@ function load(rel, overrides = {}) {
   const mod = { exports: {} }
   const localRequire = (name) => {
     if (Object.hasOwn(overrides, name)) return overrides[name]
+    if (name === './productStockGuard') return load('lib/productStockGuard.ts')
     if (name.startsWith('.')) throw new Error(`${rel}: unexpected dependency ${name}`)
     return require(name)
   }
@@ -97,12 +98,14 @@ function seedCatalog(db, seed) {
   for (let i = 0; i < 160; i++) {
     const name = pick(names.slice(0, 34)) // names 34/35 never get members
     const parent = headers.has(name) && !['Family G', 'Family H'].includes(name) && r() < 0.6 ? headers.get(name) : null
-    ins.run({
+    const row = {
       id: id++, name, category: pick(['A', 'B', null]),
       qty: pick([-2, -1, 0, 0, 0, 1, 2, 3, 3, 5, 8, 9, 10, 11, 25]),
       low: pick([null, null, 3, 5, 10, 12]), out: pick([null, 0, 0, 1, 2]),
       usd: Math.round(r() * 1000) / 100, khr: Math.round(r() * 40000), active: r() < 0.93 ? 1 : 0, isGroup: 0, parent,
-    })
+    }
+    if (!row.active) row.qty = 0
+    ins.run(row)
   }
 }
 

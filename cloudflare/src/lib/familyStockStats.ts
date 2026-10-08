@@ -35,6 +35,7 @@
 import type { D1Compat } from './db'
 import { FAMILY_ROOT_KEY_SQL } from './familyPagination'
 import { lowStockThresholdSql, type LowStockConfig } from './lowStockSettings'
+import { stockVisibleProductSql } from './productStockGuard'
 
 export interface FamilyStockStatsOptions {
   db: D1Compat
@@ -206,7 +207,7 @@ export async function getFamilyStockAlertPage(opts: {
         COALESCE(p.parent_id, 0) AS parent_id
       FROM products p
       LEFT JOIN products parent ON parent.id = p.parent_id
-      WHERE p.is_active = 1
+      WHERE ${stockVisibleProductSql()}
     ),
     non_header_families AS (
       SELECT DISTINCT family_root_id FROM matched WHERE NOT (is_group = 1 AND parent_id = 0)
@@ -343,7 +344,7 @@ export async function getFamilyStockOverview(opts: {
         COALESCE(p.cost_price_khr, 0) AS unit_cost_khr
       FROM products p
       LEFT JOIN products parent ON parent.id = p.parent_id
-      WHERE p.is_active = 1
+      WHERE ${stockVisibleProductSql()}
     ),
     non_header_families AS (
       SELECT DISTINCT family_root_id FROM matched WHERE NOT (is_group = 1 AND parent_id = 0)

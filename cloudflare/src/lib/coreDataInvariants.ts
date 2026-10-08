@@ -17,6 +17,7 @@
 // way an equivalent Docker/Postgres instance would after first boot.
 
 import { getDb } from './db'
+import { productHasStockSql } from './productStockGuard'
 import { assertCustomTableName } from './customTableName'
 import { buildInClause } from './sqlBinding'
 import type { Env } from '../index'
@@ -103,6 +104,7 @@ export type CoreDataInvariants = {
   adminUserId: number | null
   adminUserCreated: boolean
   adminPassword: string | null
+  inactiveStockProducts?: number
 }
 
 // The password a first-run admin is seeded with, or null for "do not seed".
@@ -155,6 +157,8 @@ function configuredOrganizationIdentity(env: Env): { orgName: string; orgSlug: s
 const MISSING_BRANCH_STOCK_SQL = `EXISTS(SELECT 1 FROM products p
         WHERE p.is_active = 1 AND p.id NOT IN (SELECT product_id FROM branch_stock))`
 
+export const INACTIVE_PRODUCT_STOCK_COUNT_SQL = `SELECT COUNT(*) AS count FROM products p WHERE p.is_active IS NOT 1 AND ${productHasStockSql()}`
+
 // Read-only pre-check for ensureCoreDataInvariants(). Every request on a
 // fresh Worker isolate runs ensureCoreDataInvariants() once (see
 // ensureCoreDataInvariantsOnce() below) -- and until this fast path
@@ -185,6 +189,7 @@ async function tryFastPath(
   options: { checkStockCoverage?: boolean } = {},
 ): Promise<CoreDataInvariants | null> {
   const stockCoverageSql = options.checkStockCoverage === false ? '0' : MISSING_BRANCH_STOCK_SQL
+  const inactiveStockSql = options.checkStockCoverage === false ? '0' : `(${INACTIVE_PRODUCT_STOCK_COUNT_SQL})`
   // Keep each selector's original predicates and ordering. In particular,
   // check permissions AFTER choosing the admin role, and retain NOT IN's
   // semantics for stock coverage. Scalar subqueries preserve missing rows
@@ -211,7 +216,8 @@ async function tryFastPath(
       (SELECT id FROM roles WHERE code = 'manager' LIMIT 1) AS managerRoleId,
       (SELECT id FROM roles WHERE code = 'employee' LIMIT 1) AS employeeRoleId,
       (SELECT id FROM users WHERE lower(trim(username)) = 'admin' AND deleted_at IS NULL LIMIT 1) AS adminUserId,
-      ${stockCoverageSql} AS missingBranchStock
+      ${stockCoverageSql} AS missingBranchStock,
+      ${inactiveStockSql} AS inactiveStockProducts
     FROM org
   `).get<{
     organizationId: number
@@ -223,6 +229,7 @@ async function tryFastPath(
     employeeRoleId: number | null
     adminUserId: number | null
     missingBranchStock: number
+    inactiveStockProducts: number
   }>({ publicId, slug: orgSlug, name: orgName })
   if (!state?.organizationId || !state.organizationGroupId || !state.branchId || !state.adminRoleId
     || state.adminPermissions !== JSON.stringify(DEFAULT_ROLE_PERMISSIONS.admin)
@@ -237,6 +244,7 @@ async function tryFastPath(
     adminUserId: state.adminUserId,
     adminUserCreated: false,
     adminPassword: null,
+    ...(Number(state.inactiveStockProducts ?? 0) ? { inactiveStockProducts: Number(state.inactiveStockProducts) } : {}),
   }
 }
 
@@ -287,7 +295,11 @@ export async function runCoreDataInvariants(env: Env): Promise<CoreDataInvariant
   ]
 
   const fastPathResult = await tryFastPath(db, orgName, orgSlug, publicId)
-  if (fastPathResult) return { invariants: fastPathResult, certifiedHealthy: true }
+  if (fastPathResult) {
+    const certifiedHealthy = !fastPathResult.inactiveStockProducts
+    if (!certifiedHealthy) console.warn('[core-invariants] inactive_product_stock: stock requires review; no automatic repair performed')
+    return { invariants: fastPathResult, certifiedHealthy }
+  }
 
   // Prefer the configured identity; fall back to previous identities (most
   // recent first) so an existing organization is adopted and renamed in

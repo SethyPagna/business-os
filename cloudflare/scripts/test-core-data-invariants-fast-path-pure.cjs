@@ -52,6 +52,7 @@ function loadCore(legacy = false) {
     legacyFastPath.toString().replace('legacyFastPath', 'tryFastPath') + '\n\n') : source
   return load('lib/coreDataInvariants.ts', {
     './db': dbModule,
+    './productStockGuard': load('lib/productStockGuard.ts'),
     './sqlBinding': load('lib/sqlBinding.ts'),
     './customTableName': load('lib/customTableName.ts'),
     './passwordHash': { hashPassword: async () => 'focused-test-hash' },
@@ -86,7 +87,7 @@ function fixture() {
 async function healthy() {
   const fx = fixture()
   await core.ensureCoreDataInvariants(fx.env)
-  fx.raw.exec(`INSERT INTO products(id,name,is_active,stock_quantity) VALUES(100,'Active',1,7),(101,'Inactive',0,9);
+  fx.raw.exec(`INSERT INTO products(id,name,is_active,stock_quantity) VALUES(100,'Active',1,7),(101,'Inactive',0,0);
     INSERT INTO branch_stock(product_id,branch_id,quantity) SELECT 100,id,7 FROM branches WHERE is_default=1;
     UPDATE roles SET permissions='{"products":"view"}' WHERE code='manager';
     UPDATE roles SET permissions='{"pos":false}' WHERE code='employee';`)
@@ -132,7 +133,7 @@ const cases = [
   ['admin normalization and inactive allowed', "UPDATE users SET username='  AdMiN  ',is_active=0", true],
   ['missing active product stock', 'DELETE FROM branch_stock'],
   ['stock on nondefault branch is sufficient', 'UPDATE branch_stock SET branch_id=(SELECT id FROM branches WHERE is_default=0)', true],
-  ['inactive products need no stock', 'UPDATE products SET is_active=0; DELETE FROM branch_stock', true],
+  ['inactive products need no stock', 'DELETE FROM branch_stock; UPDATE products SET stock_quantity=0; UPDATE products SET is_active=0', true],
   ['public identity outranks lower id slug match', `UPDATE organizations SET slug='renamed';
     INSERT INTO organizations(id,name,slug,public_id,is_active,setup_enabled) VALUES(-1,'Test OS','test-os','other',1,0);
     INSERT INTO organization_groups(organization_id,name,slug,is_default,is_active) VALUES(-1,'Main','main',1,1)`, true],

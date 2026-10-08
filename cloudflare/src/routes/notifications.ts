@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { Env } from '../index'
 import { getDb } from '../lib/db'
+import { stockVisibleProductSql } from '../lib/productStockGuard'
 import { chunkForBinding } from '../lib/sqlBinding'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
@@ -231,8 +232,8 @@ async function buildInventorySection(env: Env, config: LowStockConfig, itemLimit
       CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) THEN 1 ELSE 0 END AS is_out,
       SUM(CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) THEN 1 ELSE 0 END) OVER () AS out_total,
       COUNT(*) OVER () AS flagged_total
-    FROM products
-    WHERE is_active = 1
+    FROM products p
+    WHERE ${stockVisibleProductSql()}
       AND (COALESCE(stock_quantity, 0) <= ${lowThresholdSql}
            OR COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0))
     ORDER BY is_out DESC, stock_quantity ASC, name ASC, id ASC
@@ -290,8 +291,8 @@ async function buildExpirySection(env: Env, days: number): Promise<NotificationS
   const rows = await db.prepare(`
     SELECT id, name, expiry_date,
       CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry
-    FROM products
-    WHERE is_active = 1
+    FROM products p
+    WHERE ${stockVisibleProductSql()}
       AND expiry_date IS NOT NULL
       AND trim(expiry_date) != ''
       AND julianday(expiry_date) - julianday('now') <= @days
