@@ -16,7 +16,9 @@ import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, parseFreeQuantity, stockRec
 import { effectiveUnitCost } from '../lib/stockSessionMath'
 import { hasColumn } from '../lib/schemaProbe'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
-import { withStockMutationReceipt, type StockMutationAtomicMark } from '../lib/stockMutationReceipt'
+import { StockMutationBudgetError, withStockMutationReceipt, type StockMutationAtomicMark } from '../lib/stockMutationReceipt'
+import type { RequestMetrics } from '../lib/requestMetrics'
+import { getPlanLimits } from '../lib/planTier'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { nullableMoney4, multiplyMoney4 } from '../lib/moneyPrecision'
@@ -240,7 +242,11 @@ export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody
         throw error
       }
     },
-    { requireReceipt: true },
+    { requireReceipt: true, budget: (() => {
+      const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
+      return metrics ? { used: () => metrics.invocation.attemptedStatements, limit: getPlanLimits(c.env).d1QueriesPerInvocation,
+        reserve: body.selling_price_usd != null || body.selling_price_khr != null ? 14 : 12 } : undefined
+    })() },
   )
 }
 
@@ -401,6 +407,7 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
       }, catalogCostRecomputeIfChangedStatement(productId)]),
     })
   } catch (err) {
+    if (err instanceof StockMutationBudgetError) throw err
     const stockGuard = productStockGuardError(err)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     // The explicit-lot pick can fail validation ("Selected batch does not

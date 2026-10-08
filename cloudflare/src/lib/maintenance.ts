@@ -121,6 +121,8 @@ function parseState(raw: unknown): MaintenanceState | null {
 
 export async function getMaintenance(env: Env): Promise<MaintenanceState | null> {
   try {
+    const hook = (globalThis as unknown as Record<symbol, { rawD1Start?(statements: number): void } | undefined>)[Symbol.for('business-os.request-metrics.v1')]
+    hook?.rawD1Start?.(1)
     const row = await env.DB.prepare('SELECT value FROM system_flags WHERE key = ?')
       .bind(MAINTENANCE_FLAG_KEY).first<{ value: string }>()
     if (!row) return null

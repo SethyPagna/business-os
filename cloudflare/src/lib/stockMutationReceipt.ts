@@ -101,6 +101,7 @@ export type StockMutationAtomicMark = {
   committed(): void
   /** Execute a full statement plan once with this marker, then confirm commit. */
   execute?(db: D1Compat, statements: StockWriteStatement[]): Promise<void>
+  admit?(statements: number): void
 }
 
 const NO_ATOMIC_MARK: StockMutationAtomicMark = { statement: () => null, committed: () => {} }
@@ -112,6 +113,7 @@ export async function executeStockMutationBatch(
 ): Promise<void> {
   const mark = atomicMark?.statement() ?? null
   const batch = [...statements, ...(mark ? [mark] : [])]
+  atomicMark?.admit?.(batch.length)
   // A durable marker makes a lost acknowledgement recoverable on the next
   // request. Never automatically repeat an accumulating stock transaction.
   if (mark && db.batchOnce) await db.batchOnce(batch)
@@ -274,7 +276,23 @@ async function claimStockMutation(
   canonical: string,
   requireReceipt = false,
 ): Promise<StockMutationClaim> {
-  if (!await receiptsAvailable(db)) return { state: 'disabled' }
+  if (requireReceipt) {
+    try {
+      const statement = db.prepare(`INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json)
+        VALUES(@actor,@request,@kind,@canonical) ON CONFLICT(actor_id,request_id) DO NOTHING RETURNING request_id`)
+      const params = { actor: actorId, request: requestId, kind, canonical }
+      const claimed = statement.getOnce ? await statement.getOnce<{ request_id: string }>(params) : await statement.get<{ request_id: string }>(params)
+      if (claimed) return { state: 'claimed' }
+    } catch (error) {
+      const raced = await readReceipt(db, actorId, requestId)
+      if (!raced) throw error
+      return decideFromStoredReceipt(db, actorId, requestId, raced, canonical)
+    }
+    const existing = await readReceipt(db, actorId, requestId)
+    if (!existing) return { state: 'in_flight' }
+    return decideFromStoredReceipt(db, actorId, requestId, existing, canonical)
+  }
+  if (!requireReceipt && !await receiptsAvailable(db)) return { state: 'disabled' }
   const existing = await readReceipt(db, actorId, requestId)
   if (existing) return decideFromStoredReceipt(db, actorId, requestId, existing, canonical)
   try {
@@ -369,7 +387,7 @@ export async function withStockMutationReceipt(
   body: Record<string, unknown>,
   json: (value: unknown, status?: number) => Response,
   run: (markWritten: () => Promise<void>, atomicMark: StockMutationAtomicMark) => Promise<Response>,
-  options: { requireReceipt?: boolean } = {},
+  options: { requireReceipt?: boolean; budget?: { used: () => number; limit: number; reserve: number } } = {},
 ): Promise<Response> {
   const supplied = body.client_request_id ?? body.clientRequestId
   const requestId = normalizeStockMutationRequestId(supplied)
@@ -397,6 +415,13 @@ export async function withStockMutationReceipt(
   if (claim.state === 'replay') return json({ ...claim.body, replayed: true }, claim.status)
 
   let wrote = false
+  let dispatched = false
+  const admit = (statements: number) => {
+    if (options.budget && options.budget.used() + statements + options.budget.reserve > options.budget.limit) {
+      throw new StockMutationBudgetError()
+    }
+    dispatched = true
+  }
   const markWritten = async () => {
     if (wrote) return
     await markStockMutationWritten(db, actorId, requestId)
@@ -406,16 +431,30 @@ export async function withStockMutationReceipt(
     statement: () => (wrote ? null : { sql: MARK_STOCK_MUTATION_WRITTEN_SQL, params: { actor: actorId, request: requestId } }),
     committed: () => { wrote = true },
     execute: (db, statements) => executeStockMutationBatch(db, statements, atomicMark),
+    admit,
   }
   let response: Response
   try {
     response = await run(markWritten, atomicMark)
   } catch (error) {
-    if (wrote) await completeStockMutation(db, actorId, requestId, 500, STOCK_MUTATION_PARTIAL)
-    else await releaseStockMutation(db, actorId, requestId)
+    if (error instanceof StockMutationBudgetError) {
+      await releaseStockMutation(db, actorId, requestId)
+      return json(STOCK_MUTATION_BUDGET, 503)
+    }
+    if (wrote || dispatched) {
+      if (wrote) await completeStockMutation(db, actorId, requestId, 503, STOCK_MUTATION_UNKNOWN).catch(() => {})
+      else await releaseStockMutation(db, actorId, requestId).catch(() => {})
+      return json(STOCK_MUTATION_UNKNOWN, 503)
+    }
+    await releaseStockMutation(db, actorId, requestId)
     throw error
   }
   if (response.status < 200 || response.status >= 300) {
+    if (dispatched && response.status !== 409) {
+      if (wrote) await completeStockMutation(db, actorId, requestId, 503, STOCK_MUTATION_UNKNOWN).catch(() => {})
+      else await releaseStockMutation(db, actorId, requestId).catch(() => {})
+      return json(STOCK_MUTATION_UNKNOWN, 503)
+    }
     if (!wrote) {
       await releaseStockMutation(db, actorId, requestId)
       return response
@@ -423,10 +462,23 @@ export async function withStockMutationReceipt(
     // Stock moved and the kernel still refused. Store the refusal so the retry
     // is told exactly that, rather than being invited to apply the delta again.
     const failed = await response.clone().json().catch(() => ({})) as Record<string, unknown>
-    await completeStockMutation(db, actorId, requestId, response.status, failed)
+    try { await completeStockMutation(db, actorId, requestId, response.status, failed) }
+    catch { return json(STOCK_MUTATION_UNKNOWN, 503) }
     return response
   }
   const stored = await response.clone().json().catch(() => ({})) as Record<string, unknown>
-  await completeStockMutation(db, actorId, requestId, response.status, stored)
+  try { await completeStockMutation(db, actorId, requestId, response.status, stored) }
+  catch { return json(STOCK_MUTATION_UNKNOWN, 503) }
   return response
+}
+
+export class StockMutationBudgetError extends Error {}
+
+const STOCK_MUTATION_BUDGET = {
+  code: 'stock_request_query_budget_exceeded',
+  error: 'This request needs more recording capacity. No stock was changed. Keep this form open and retry the same line.',
+}
+const STOCK_MUTATION_UNKNOWN = {
+  code: 'stock_request_outcome_unknown',
+  error: 'The stock request may have been recorded. Keep its original details and request id. Retry the same line to check its receipt, or check Stock Changes.',
 }

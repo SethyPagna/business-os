@@ -205,6 +205,14 @@ const STOCK_REQUEST_FAILURE_ENTRIES: Record<string, StockRequestFailureEntry> = 
     key: 'stock_receipt_unavailable',
     fallback: 'Stock recording is temporarily unavailable. Keep this form open and try again.',
   },
+  stock_request_query_budget_exceeded: {
+    key: 'stock_request_query_budget_exceeded',
+    fallback: 'This request needs more recording capacity. No stock was changed. Keep this form open and retry the same line.',
+  },
+  stock_request_outcome_unknown: {
+    key: 'stock_request_outcome_unknown',
+    fallback: 'The stock request may have been recorded. Keep its original details and request id. Retry the same line to check its receipt, or check Stock Changes.',
+  },
   stock_request_partially_applied: {
     key: 'stock_request_partially_applied',
     fallback: 'Stock was recorded but the request did not finish. Check the Stock Change ledger, then remove this line.',

@@ -268,6 +268,18 @@ runTest('the stored list is capped and survives corrupt or blocked storage', () 
   assert.deepEqual(readFailedStockAttempts(null, 'u'), [])
 })
 
+runTest('budget refusals and uncertain receipts keep the original request for an explicit stable-ID retry', () => {
+  const request = { productId: 1, quantity: 3, client_request_id: 'original-stable-id' }
+  for (const code of ['stock_request_query_budget_exceeded', 'stock_request_outcome_unknown']) {
+    const failure = classifyStockAdjustFailure({ code, status: 503, message: 'recording result' })
+    const rows = applyRowOutcome([createRow(request, 'row')], 'row', { status: 'failed', failure })
+    assert.equal(rows[0].request, request)
+    assert.equal(rowsToSubmit(rows)[0].request.client_request_id, 'original-stable-id')
+    assert.equal(failure.retryable, true)
+    assert.equal(stockFailureText({ code }, (key) => key, ''), code)
+  }
+})
+
 if (failed) {
   console.error(`\n${failed} test(s) failed`)
   process.exit(1)

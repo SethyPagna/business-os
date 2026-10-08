@@ -1,4 +1,5 @@
 import type { RequestMetrics } from '../lib/requestMetrics'
+import { getPlanLimits } from '../lib/planTier'
 import { productStockGuardError, productHasStockSql, productStockGuardStatement, assertProductsActive } from '../lib/productStockGuard'
 import { requireReceivingBranch, receivingBranchAssertion, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from '../lib/receivingBranch'
 import { Hono, type Context } from 'hono'
@@ -28,7 +29,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, changedFields } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
-import { stockMutationRequestIdMissing, STOCK_MUTATION_REQUEST_ID_REQUIRED, withStockMutationReceipt, executeStockMutationBatch, type StockMutationAtomicMark } from '../lib/stockMutationReceipt'
+import { stockMutationRequestIdMissing, STOCK_MUTATION_REQUEST_ID_REQUIRED, StockMutationBudgetError, withStockMutationReceipt, executeStockMutationBatch, type StockMutationAtomicMark } from '../lib/stockMutationReceipt'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -1533,7 +1534,11 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
         throw error
       }
     },
-    { requireReceipt: true },
+    { requireReceipt: true, budget: (() => {
+      const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
+      return metrics ? { used: () => metrics.invocation.attemptedStatements, limit: getPlanLimits(c.env).d1QueriesPerInvocation,
+        reserve: body.sellingPriceUsd != null || body.sellingPriceKhr != null ? 18 : 16 } : undefined
+    })() },
   )
 }
 
@@ -1728,7 +1733,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   const [product, addressedBranchId] = await Promise.all([
     unlockPricing
       ? db.prepare(`SELECT ${STOCK_ROW_COLUMNS} FROM products WHERE id = @id`).get<StockRowFields>({ id: productId })
-      : db.prepare('SELECT id, name FROM products WHERE id = @id').get<{ id: number; name: string }>({ id: productId }),
+      : db.prepare('SELECT id, name, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr FROM products WHERE id = @id').get<{ id: number; name: string } & ReceiptSellingPriceRow & { cost_price_usd: number | null; cost_price_khr: number | null }>({ id: productId }),
     requestedBranchId ? Promise.resolve(requestedBranchId) : defaultBranchId(c.env),
   ])
   if (!product) return c.json({ error: 'Product not found' }, 404)
@@ -1806,8 +1811,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   const reasonNotes = isReceipt && attribution === 'receipt' && freeGoods ? [FREE_GOODS_REASON_NOTE] : []
   let sellingPricePlan: ReturnType<typeof planReceiptSellingPrice> = null
   if (sellingPrice) {
-    const priceRow = await db.prepare('SELECT id, selling_price_usd, selling_price_khr FROM products WHERE id = @id').get<ReceiptSellingPriceRow>({ id: productId })
-    sellingPricePlan = priceRow ? planReceiptSellingPrice(priceRow, sellingPrice) : null
+    sellingPricePlan = planReceiptSellingPrice(product, sellingPrice)
     // An unchanged price writes nothing and needs no price permission.
     // Owner, 5 Oct 2026: the default selling price is also behind the products price action (off for Employee).
     if (sellingPricePlan && (getActionTier(user, 'products', 'edit') !== 'full' || getActionTier(user, 'products', 'price') === 'none')) {
@@ -1939,7 +1943,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // Snapshot catalog cost before moving stock. It is only the fallback for a
   // receipt/removal that has no more specific entered/lot cost; it is never
   // consulted later when this historical row is displayed or reverted.
-  const productCostSnapshot = await db.prepare(`
+  const productCostSnapshot = !unlockPricing && targetProductId === productId ? product : await db.prepare(`
     SELECT cost_price_usd, cost_price_khr FROM products WHERE id = @id
   `).get<{ cost_price_usd: number | null; cost_price_khr: number | null }>({ id: targetProductId })
   const receiptUnitCostUsd = correctionLot ? correctionLot.unit_cost_usd : unitCostUsd ?? productCostSnapshot?.cost_price_usd ?? null
@@ -2376,6 +2380,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       movementWrittenAtomically = true
       }
     } catch (err) {
+      if (err instanceof StockMutationBudgetError) throw err
       const stockGuard = productStockGuardError(err)
       if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       if (isReceivingBranchError(err)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
@@ -2568,10 +2573,9 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     // The alert carries the RESULTING on-hand figures (this branch and all
     // branches), read back after the write -- not just the delta.
     c.executionCtx.waitUntil((async () => {
-      const [branchRow, productRow] = await Promise.all([
-        getDb(c.env).prepare('SELECT quantity FROM branch_stock WHERE product_id = @productId AND branch_id = @branchId').get<{ quantity: number }>({ productId: targetProductId, branchId }),
-        getDb(c.env).prepare('SELECT stock_quantity FROM products WHERE id = @productId').get<{ stock_quantity: number }>({ productId: targetProductId }),
-      ])
+      const onHand = await getDb(c.env).prepare(`SELECT stock_quantity,
+        (SELECT quantity FROM branch_stock WHERE product_id=@productId AND branch_id=@branchId) AS branch_quantity
+        FROM products WHERE id=@productId`).get<{ stock_quantity: number; branch_quantity: number | null }>({ productId: targetProductId, branchId })
       await sendTelegramEvent(c.env, {
         type: type === 'add' ? 'stock_in' : 'stock_out',
         lines: formatStockChangeTelegramLines({
@@ -2582,8 +2586,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
           reason,
           receivedDate: type === 'add' ? receivedDate : null,
           lot: type === 'add' ? lotCode : null,
-          branchOnHand: branchRow ? num(branchRow.quantity) : null,
-          totalOnHand: productRow ? num(productRow.stock_quantity) : null,
+          branchOnHand: onHand?.branch_quantity == null ? null : num(onHand.branch_quantity),
+          totalOnHand: onHand ? num(onHand.stock_quantity) : null,
           by: actorSnapshot(user),
         }),
       })

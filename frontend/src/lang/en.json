@@ -7361,5 +7361,7 @@
   "receiving_submission_unavailable": "This saved line has an unknown outcome. Check Stock Changes before removing it; its original request cannot be reconstructed.",
   "receiving_submission_not_saved": "The request could not be saved on this device. No new request was sent. Check available storage and try again.",
   "product_create_outcome_unknown": "Product creation may have completed. Refresh Products and check pending review before creating again. This saved request will not be resent.",
-  "product_create_approval_unconfirmed": "The approval result could not be confirmed. Refresh the review queue before retrying this same request."
+  "product_create_approval_unconfirmed": "The approval result could not be confirmed. Refresh the review queue before retrying this same request.",
+  "stock_request_query_budget_exceeded": "This request needs more recording capacity. No stock was changed. Keep this form open and retry the same line.",
+  "stock_request_outcome_unknown": "The stock request may have been recorded. Keep its original details and request id. Retry the same line to check its receipt, or check Stock Changes."
 }

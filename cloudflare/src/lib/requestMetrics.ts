@@ -91,6 +91,7 @@ export type RequestMetrics = {
   startedAt: number
   statements: number
   attemptedStatements: number
+  invocation: { attemptedStatements: number }
   rowsRead: number
   rowsWritten: number
   d1Ms: number
@@ -114,7 +115,7 @@ const CONTEXT_KEY = 'requestMetrics'
 export function createRequestMetrics(kind: 'api' | 'bg', label: string, now: number = Date.now()): RequestMetrics {
   return {
     kind, label, startedAt: now,
-    statements: 0, attemptedStatements: 0, rowsRead: 0, rowsWritten: 0, d1Ms: 0, d1Calls: 0, d1WallMs: 0, d1Region: '', d1Primary: 0, failed: 0,
+    statements: 0, attemptedStatements: 0, invocation: { attemptedStatements: 0 }, rowsRead: 0, rowsWritten: 0, d1Ms: 0, d1Calls: 0, d1WallMs: 0, d1Region: '', d1Primary: 0, failed: 0,
     cacheHits: 0, cacheMisses: 0, flags: {}, sealed: false, late: 0,
   }
 }
@@ -265,12 +266,14 @@ const store = new AsyncLocalStorage<RequestMetrics>()
 // Every entry swallows its own errors: it runs inside a database call.
 export type RequestMetricsHook = {
   d1Start(statements: number): void
+  rawD1Start?(statements: number): void
   d1Call(wallMs: number, metas: unknown[] | null): void
   cache(outcome: 'hit' | 'miss'): void
 }
 
 const hook: RequestMetricsHook = {
-  d1Start(statements) { try { const acc = store.getStore(); if (acc) acc.attemptedStatements += finiteOrZero(statements) } catch { /* no-op */ } },
+  rawD1Start(statements) { try { const acc = store.getStore(); if (acc) acc.invocation.attemptedStatements += finiteOrZero(statements) } catch { /* no-op */ } },
+  d1Start(statements) { try { const acc = store.getStore(); if (acc) { acc.attemptedStatements += finiteOrZero(statements); acc.invocation.attemptedStatements += finiteOrZero(statements) } } catch { /* no-op */ } },
   d1Call(wallMs, metas) { try { const acc = store.getStore(); if (acc) addD1Call(acc, wallMs, metas) } catch { /* no-op */ } },
   cache(outcome) { try { const acc = store.getStore(); if (acc) addCacheOutcome(acc, outcome) } catch { /* no-op */ } },
 }
@@ -343,6 +346,8 @@ export const requestMetricsMiddleware = createRequestMetricsMiddleware()
  */
 export async function runBackground<T>(env: Env | undefined, label: string, fn: () => Promise<T>, now: () => number = Date.now): Promise<T> {
   const acc = createRequestMetrics('bg', label, now())
+  const parent = store.getStore()
+  if (parent) acc.invocation = parent.invocation
   let status = 'ok'
   try {
     return await store.run(acc, fn)

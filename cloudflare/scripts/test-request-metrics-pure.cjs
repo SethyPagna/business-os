@@ -557,6 +557,38 @@ check('blob8 is the build revision the deploy stamped, on route and background d
   }
 })
 
+check('invocation budgets include raw, failed, attached background and late attempts without mixing overlapping requests', async () => {
+  let release
+  const barrier = new Promise(resolve => { release = resolve })
+  const held = []
+  const accs = new Map()
+  const hook = globalThis[Symbol.for(metrics.REQUEST_METRICS_HOOK_KEY)]
+  const app = appWith(a => a.get('/api/invocation/:id', async c => {
+    const id = c.req.param('id')
+    const acc = metrics.requestMetricsOf(c)
+    accs.set(id, acc)
+    hook.rawD1Start(1)
+    hook.d1Start(id === 'a' ? 2 : 4)
+    hook.d1Call(1, null)
+    held.push(metrics.runBackground(undefined, 'attached:' + id, async () => {
+      await barrier
+      hook.d1Start(id === 'a' ? 3 : 5)
+      hook.d1Call(1, null)
+    }))
+    return c.json({})
+  }))
+  await Promise.all(['a', 'b'].map(id => app.request('/api/invocation/' + id, {}, {}, executionCtx())))
+  assert.equal(accs.get('a').invocation.attemptedStatements, 3)
+  assert.equal(accs.get('b').invocation.attemptedStatements, 5)
+  release(); await Promise.all(held)
+  assert.equal(accs.get('a').invocation.attemptedStatements, 6)
+  assert.equal(accs.get('b').invocation.attemptedStatements, 10)
+  assert.equal(accs.get('a').attemptedStatements, 2, 'route metrics retain background separation')
+  assert.equal(accs.get('b').attemptedStatements, 4)
+  const isolated = metrics.createRequestMetrics('api', 'new')
+  assert.equal(isolated.invocation.attemptedStatements, 0, 'a fresh request gets no earlier attempts')
+})
+
 ;(async () => {
   let failed = 0
   for (const { name, fn } of tests) {
