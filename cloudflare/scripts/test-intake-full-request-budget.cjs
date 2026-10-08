@@ -30,7 +30,11 @@ async function world(tier, mode, verified, options = {}) {
   const lot = await load('lib/productBatches.ts').receiveBatchStock(load('lib/db.ts').getDb(f.env), {
     productId: 1, branchId: 1, quantity: 5, receivedDate: '2026-09-05', unitCostUsd: 2, supplierName: 'Fixture Supplier',
   })
-  if (mode === 'zero') f.sql.exec('UPDATE branch_stock SET quantity=0; UPDATE branch_batch_stock SET quantity=0; UPDATE products SET stock_quantity=0')
+  if (mode === 'zero') await load('lib/stockTransaction.ts').executeStockTransaction(load('lib/db.ts').getDb(f.env), [
+    { sql: 'UPDATE branch_stock SET quantity=0' },
+    { sql: 'UPDATE branch_batch_stock SET quantity=0' },
+    { sql: 'UPDATE products SET stock_quantity=0' },
+  ], 'once')
   const token = 'intake-budget-cookie'
   f.sql.prepare('INSERT INTO user_sessions(user_id,token_hash,created_at,expires_at,last_seen_at) VALUES(7,?,?,?,NULL)').run(
     createHash('sha256').update(token).digest('hex'), new Date(Date.now() - 29 * 86400000).toISOString(), new Date(Date.now() + 86400000).toISOString())
@@ -47,11 +51,13 @@ async function world(tier, mode, verified, options = {}) {
   if (verified) f.sql.prepare('INSERT INTO system_flags(key,value,updated_at) VALUES(?,?,CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(
     'core_invariants_build', JSON.stringify({ status: 'verified', build: globalThis.__WORKER_BUILD_REVISION__ + ':' + globalThis.__WORKER_BUILD_HASH__, at: Date.now(), watermark: 1 }))
   let physical = 0
+  let trace = []
   let failures = new Set()
   let completionFault = options.completionFault
   let claimLostAck = options.claimLostAck
   const raw = f.env.DB
   const dispatch = (statements, params) => {
+    trace.push(...statements.map(sql => sql.trim().replace(/\s+/g, ' ').slice(0, 180)))
     physical += statements.length
     if (tier === 'free') assert.ok(physical <= 50, `conservative app cap exceeded: ${physical}`)
     for (const sql of statements) {
@@ -108,7 +114,7 @@ async function world(tier, mode, verified, options = {}) {
   })
   const call = async (cold = false) => {
     if (cold) { load('lib/schemaProbe.ts').__resetSchemaProbeCacheForTests(); load('lib/stockMutationReceipt.ts').resetStockMutationReceiptSchemaProbe() }
-    physical = 0; failures = new Set()
+    physical = 0; failures = new Set(); trace = []
     const pending = []
     const payload = options.multiLine ? { lines: Array.from({ length: 24 }, (_, i) => ({ key: 'line-' + i, wire: 'adjust', body: { ...body, client_request_id: body.client_request_id + '-' + i } })) } : body
     const responsePromise = worker.fetch(new Request('https://admin.budget.example' + (options.multiLine ? '/api/inventory/fast-stock-in/commit' : mode === 'receive' ? '/api/batches' : '/api/inventory/adjust'), {
@@ -124,15 +130,15 @@ async function world(tier, mode, verified, options = {}) {
     assert.equal(observed.invocation.attemptedStatements, physical, 'full physical binding attempts equal invocation admission count')
     if (tier === 'free') assert.ok(physical <= 50, 'including swallowed background failures, every attempted statement fits the cap')
     assert.equal(tasks.filter(x => x.status === 'rejected').length, 0)
-    return { status: response.status, body: await response.json(), physical, failures: [...failures], effects: effects() }
+    return { status: response.status, body: await response.json(), physical, failures: [...failures], effects: effects(), ...(process.env.INTAKE_BUDGET_DIAGNOSTIC ? { trace } : {}) }
   }
   return { ...f, call, body, effects, restoreCompletion: () => { completionFault = false } }
 }
 
 ;(async () => {
   let cases = 0
-  for (const tier of ['free', 'paid']) for (const verified of [true, false]) {
-    for (const mode of ['correction', 'correction-tagged', 'add', 'add-tagged', 'receive', 'optional-tagged', 'zero']) {
+  for (const tier of process.env.INTAKE_BUDGET_TIER ? [process.env.INTAKE_BUDGET_TIER] : ['free', 'paid']) for (const verified of process.env.INTAKE_BUDGET_VERIFIED ? [process.env.INTAKE_BUDGET_VERIFIED === 'true'] : [true, false]) {
+    for (const mode of process.env.INTAKE_BUDGET_MODE ? [process.env.INTAKE_BUDGET_MODE] : ['correction', 'correction-tagged', 'add', 'add-tagged', 'receive', 'optional-tagged', 'zero']) {
       const f = await world(tier, mode, verified, { tailRetries: true })
       const before = f.effects()
       const first = await f.call(true)
@@ -143,7 +149,8 @@ async function world(tier, mode, verified, options = {}) {
           assert.deepEqual(first.effects, before, 'budget refusal precedes all stock/tag/history effects')
         } else assert.equal(first.status, 200)
         const retry = await f.call()
-        assert.equal(retry.status, 200, `same ID warm retry ${tier}/${verified}/${mode}`)
+        if (process.env.INTAKE_BUDGET_DIAGNOSTIC) console.log(JSON.stringify({ tier, verified, mode, first, retry }))
+        assert.equal(retry.status, 200, `same ID warm retry ${tier}/${verified}/${mode}: ${JSON.stringify(retry)}`)
         const quantity = mode === 'optional-tagged' ? 5 : 3
         const tagged = mode.includes('tagged')
         assert.equal(retry.effects.stock, before.stock + (tagged ? 0 : quantity))

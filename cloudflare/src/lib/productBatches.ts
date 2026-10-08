@@ -181,15 +181,17 @@ export function resolveReceiptLotTarget(
 export async function prepareReceiptLotTarget(db: D1Compat, input: {
   productId: number; receivedDate?: string | null; unitCostUsd?: number | null;
   batchId?: number | null; preserveHistoricalUnitCost?: boolean;
-}): Promise<ReceiptLotTarget> {
-  const [lots, baseline] = await Promise.all([
-    db.prepare('SELECT id,batch_key,received_at,unit_cost_usd FROM product_batches WHERE variant_product_id=@productId')
-      .all<ReceiptLotCandidate>({ productId: input.productId }),
-    db.prepare('SELECT baseline_batch_id FROM product_cost_entries WHERE product_id=@productId ORDER BY id DESC LIMIT 1')
-      .get<{ baseline_batch_id: number }>({ productId: input.productId }),
-  ])
-  return resolveReceiptLotTarget(lots, normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10),
-    unitCostForReceipt(input.unitCostUsd, input.preserveHistoricalUnitCost === true), Number(baseline?.baseline_batch_id) || 0, input.batchId)
+}): Promise<ReceiptLotTarget & { maximumBatchId: number; existingReceivedCostUsd: number | null }> {
+  const rows = await db.prepare(`SELECT pb.id,pb.batch_key,pb.received_at,pb.unit_cost_usd,pb.received_cost_usd,
+    COALESCE((SELECT baseline_batch_id FROM product_cost_entries WHERE product_id=@productId ORDER BY id DESC LIMIT 1),0) AS baseline_batch_id,
+    (SELECT COALESCE(MAX(id),0) FROM product_batches) AS maximum_batch_id
+    FROM (SELECT 1) LEFT JOIN product_batches pb ON pb.variant_product_id=@productId`)
+    .all<ReceiptLotCandidate & { received_cost_usd: number | null; baseline_batch_id: number; maximum_batch_id: number }>({ productId: input.productId })
+  const lots = rows.filter(row => row.id != null)
+  const target = resolveReceiptLotTarget(lots, normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10),
+    unitCostForReceipt(input.unitCostUsd, input.preserveHistoricalUnitCost === true), Number(rows[0]?.baseline_batch_id) || 0, input.batchId)
+  return { ...target, maximumBatchId: Number(rows[0]?.maximum_batch_id) || 0,
+    existingReceivedCostUsd: lots.find(lot => lot.id === target.existingBatchId)?.received_cost_usd ?? null }
 }
 
 export type StockWriteStatement = {
@@ -714,9 +716,11 @@ export function planReceiptSellingPrice(row: ReceiptSellingPriceRow, price: Rece
   if (price.khr != null) { before.selling_price_khr = row.selling_price_khr; after.selling_price_khr = price.khr }
   return {
     statement: {
-      sql: `UPDATE products SET selling_price_usd = @sellingUsd${price.khr != null ? ', selling_price_khr = @sellingKhr' : ''},
+      sql: `UPDATE products SET selling_price_usd = CASE WHEN selling_price_usd IS @previousSellingUsd${price.khr != null ? ' AND selling_price_khr IS @previousSellingKhr' : ''}
+          THEN @sellingUsd ELSE json_extract('[]','$[receipt_selling_price_changed]') END${price.khr != null ? ', selling_price_khr = @sellingKhr' : ''},
           updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
-      params: { productId: row.id, sellingUsd: price.usd, ...(price.khr != null ? { sellingKhr: price.khr } : {}) },
+      params: { productId: row.id, sellingUsd: price.usd, previousSellingUsd: row.selling_price_usd,
+        ...(price.khr != null ? { sellingKhr: price.khr, previousSellingKhr: row.selling_price_khr } : {}) },
     },
     before,
     after,

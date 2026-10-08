@@ -1,8 +1,8 @@
 import { currentRequestMetrics, type RequestMetrics } from '../lib/requestMetrics'
 import { canonicalOfflineSaleOwner, offlineSaleOwnerError } from '../lib/offlineSaleOwnership'
 import { getPlanLimits } from '../lib/planTier'
-import { productStockGuardError, productHasStockSql, productStockGuardStatement, assertProductsActive } from '../lib/productStockGuard'
-import { requireReceivingBranch, receivingBranchAssertion, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from '../lib/receivingBranch'
+import { ProductStockGuardError, productStockGuardError, productHasStockSql, productStockGuardStatement, assertProductsActive } from '../lib/productStockGuard'
+import { ReceivingBranchError, requireReceivingBranch, receivingBranchAssertion, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from '../lib/receivingBranch'
 import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
 import { getDb, type D1Compat } from '../lib/db'
@@ -38,7 +38,7 @@ import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, identityBarcodeKey, type ProductIdentityRow } from '../lib/productIdentity'
 import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery, parseRankedIds } from '../lib/productSearchQuery'
-import { fifoRemovalAllocations, isStockRemovalConflict, listBatchesForProduct, parseReceiptSellingPrice, planBranchStockRemoval, planReceiptSellingPrice, planReceiveBatchStock, planRemoveStockAcrossBatches, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, removeStockFromBatch, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptLotTarget, type ReceiptSellingPriceRow, type StockWriteStatement } from '../lib/productBatches'
+import { fifoRemovalAllocations, isStockRemovalConflict, listBatchesForProduct, parseReceiptSellingPrice, planBranchStockRemoval, planReceiptSellingPrice, planReceiveBatchStock, planRemoveStockAcrossBatches, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, removeStockFromBatch, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptSellingPriceRow, type StockWriteStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
 import { normalizeTypedDate } from '../lib/batchCode'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, FREE_QUANTITY_NOT_RECEIPT, parseFreeQuantity, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
@@ -76,7 +76,7 @@ import {
   readOpenTaggedLots, readTaggedLotGroups, TAGGED_LOT_CONFLICT_CODE,
 } from '../lib/damagedLotActions'
 import { addMoney4, multiplyMoney4, roundMoney4 } from '../lib/moneyPrecision'
-import { addressedStatements, branchEffectRefusal, branchRedirectGuardRefusal, branchRedirectTarget, isBranchRedirectGuardError, landingLotId, requestBranchLanding } from '../lib/branchRedirectWrite'
+import { addressedStatements, directoryBranchEffect, readBranchDirectory, branchEffectRefusal, branchRedirectGuardRefusal, branchRedirectTarget, isBranchRedirectGuardError, landingLotId, requestBranchLanding } from '../lib/branchRedirectWrite'
 
 // Inventory routes, ported from backend/src/routes/inventory.ts.
 //
@@ -1527,6 +1527,9 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
     async (markWritten, atomicMark) => {
       try { return await runAdjustActionKernel(c, body, markWritten, atomicMark) }
       catch (error) {
+        if (/receipt_selling_price_changed/.test(error instanceof Error ? error.message : String(error))) {
+          return c.json({ error: 'The product selling price changed. Refresh the product and retry this line.', code: 'receipt_selling_price_changed' }, 409)
+        }
         const transactionRefusal = stockTransactionRefusal(error)
         if (transactionRefusal) return c.json(transactionRefusal, 503)
         const stockGuard = productStockGuardError(error)
@@ -1739,13 +1742,15 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   const [product, addressedBranchId] = await Promise.all([
     unlockPricing
       ? db.prepare(`SELECT ${STOCK_ROW_COLUMNS} FROM products WHERE id = @id`).get<StockRowFields>({ id: productId })
-      : db.prepare('SELECT id, name, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr FROM products WHERE id = @id').get<{ id: number; name: string } & ReceiptSellingPriceRow & { cost_price_usd: number | null; cost_price_khr: number | null }>({ id: productId }),
+      : db.prepare('SELECT id, name, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr, is_active FROM products WHERE id = @id').get<{ id: number; name: string; is_active: number | null } & ReceiptSellingPriceRow & { cost_price_usd: number | null; cost_price_khr: number | null }>({ id: productId }),
     requestedBranchId ? Promise.resolve(requestedBranchId) : defaultBranchId(c.env),
   ])
   if (!product) return c.json({ error: 'Product not found' }, 404)
   if (!addressedBranchId) return c.json({ error: 'An active branch is required before stock can be changed' }, 400)
   // One branches read gives both the landing (a disabled branch -> the confirmed active one) and its name.
-  const { landing, branch } = await requestBranchLanding(db, addressedBranchId, () => branchRedirectTarget(c))
+  const directory = await readBranchDirectory(db)
+  const landing = directoryBranchEffect(directory, addressedBranchId, () => branchRedirectTarget(c))
+  const branch = directory.find(row => Number(row.id) === landing.effectBranchId) ?? null
   const branchId = landing.effectBranchId
   if (landing.redirected && body.batchId != null) body = { ...body, batchId: await landingLotId(db, landing, body.batchId) }
 
@@ -1782,7 +1787,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // like the mandatory-reason check above, so no path can record goods with an
   // invented supplier or an invented cost.
   const isReceipt = type === 'add'
-  if (isReceipt) await requireReceivingBranch(db, body.branchId != null && !landing.redirected ? Number(body.branchId) : branchId)
+  if (isReceipt && (!Number.isSafeInteger(branchId) || branchId <= 0 || !branch || Number(branch.is_active) !== 1)) throw new ReceivingBranchError()
   // A top-up of an EXISTING lot inherits that lot's supplier -- first
   // attribution sticks server-side, so the pickers send no supplier for an
   // attributed lot and show the locked name instead. Read it rather than
@@ -1836,7 +1841,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   let createdSibling = false
   let preflightAddMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = null
   let unlockedReceiptCostPreimage: ReceiptCostPreimage | undefined
-  let unlockedReceiptLotTarget: ReceiptLotTarget | undefined
+  let unlockedReceiptLotTarget: Awaited<ReturnType<typeof prepareReceiptLotTarget>> | undefined
   let mergedPricingStatement: { sql: string; params: Record<string, unknown> } | null = null
   if (unlockPricing) {
     const pricing = body.pricing as Record<string, unknown>
@@ -2091,7 +2096,11 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   const atomicRemoval = !correctionLot && type === 'remove'
     && (Boolean(conditionTag) || (useBatchLedger && batchIdRequested == null && (rawBatchId == null || rawBatchId === '')))
   if (conditionTag && delta !== 0) {
-    try { await assertProductsActive(db, [targetProductId]) }
+    try {
+      if (!unlockPricing && targetProductId === productId) {
+        if ((product as { is_active: number | null }).is_active !== 1) throw new ProductStockGuardError([targetProductId])
+      } else await assertProductsActive(db, [targetProductId])
+    }
     catch (error) {
       const stockGuard = productStockGuardError(error)
       if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
@@ -2233,13 +2242,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
           productId: targetProductId, receivedDate, unitCostUsd: receiptUnitCostUsd,
           batchId: unlockPricing ? null : batchIdRequested, preserveHistoricalUnitCost: unitCostUsd == null,
         })
-        const [maximum, existing] = await Promise.all([
-          db.prepare('SELECT COALESCE(MAX(id),0) AS id FROM product_batches').get<{ id: number }>(),
-          target.existingBatchId == null ? Promise.resolve(undefined) : db.prepare(
-            'SELECT received_cost_usd FROM product_batches WHERE id=@id AND variant_product_id=@productId',
-          ).get<{ received_cost_usd: number | null }>({ id: target.existingBatchId, productId: targetProductId }),
-        ])
-        const receiptBatchId = target.existingBatchId ?? Number(maximum?.id ?? 0) + 1
+        const receiptBatchId = target.existingBatchId ?? target.maximumBatchId + 1
         const plan = planReceiveBatchStock({
           productId: targetProductId, branchId, quantity, receivedDate, expiryDate,
           batchId: unlockPricing ? null : batchIdRequested,
@@ -2248,7 +2251,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
           receiptLotTarget: target,
           ...(target.existingBatchId == null ? { reservedBatchId: receiptBatchId } : {}),
           receiptCostPreimage: receiptUnitCostUsd == null ? undefined : {
-            batchExists: target.existingBatchId != null, receivedCostUsd: existing?.received_cost_usd ?? null,
+            batchExists: target.existingBatchId != null, receivedCostUsd: target.existingReceivedCostUsd,
           },
         })
         const receiptCost = addMovementCost || resolveMovementCostSnapshot({
@@ -2386,7 +2389,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       movementWrittenAtomically = true
       }
     } catch (err) {
-      if (stockTransactionRefusal(err) || err instanceof StockMutationBudgetError) throw err
+      if (stockTransactionRefusal(err) || err instanceof StockMutationBudgetError
+        || /receipt_selling_price_changed/.test(err instanceof Error ? err.message : String(err))) throw err
       const stockGuard = productStockGuardError(err)
       if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       if (isReceivingBranchError(err)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
@@ -2422,7 +2426,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
           movementWrittenAtomically = true
         } else await removeStockFromBatch(db, { batchId: batchIdRequested, productId: targetProductId, branchId, quantity })
       } catch (err) {
-        if (stockTransactionRefusal(err) || err instanceof StockMutationBudgetError) throw err
+        if (stockTransactionRefusal(err) || err instanceof StockMutationBudgetError
+        || /receipt_selling_price_changed/.test(err instanceof Error ? err.message : String(err))) throw err
         const stockGuard = productStockGuardError(err)
         if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         if (err instanceof InsufficientBatchStockError) return c.json({ error: err.message }, 400)
@@ -2463,7 +2468,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
           ...(conditionTag ? holdRemovedStatements(conditionTag) : [movementRowStatement()]),
         ]), atomicMark)
       } catch (err) {
-        if (stockTransactionRefusal(err) || err instanceof StockMutationBudgetError) throw err
+        if (stockTransactionRefusal(err) || err instanceof StockMutationBudgetError
+        || /receipt_selling_price_changed/.test(err instanceof Error ? err.message : String(err))) throw err
         const stockGuard = productStockGuardError(err)
         if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         if (err instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
