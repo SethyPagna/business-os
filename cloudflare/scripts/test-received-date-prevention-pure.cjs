@@ -15,7 +15,7 @@ function load(file) {
   const output = ts.transpileModule(fs.readFileSync(absolute, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText
-  new Function('exports', 'require', 'module', output)(mod.exports, withProductStockGuard((request) => request.startsWith('.')
+  new Function('exports', 'require', 'module', output)(mod.exports, withProductStockGuard((request) => request === 'cloudflare:workers' ? { DurableObject: class {} } : request.startsWith('.')
     ? load(path.resolve(path.dirname(absolute), `${request}.ts`)) : require(request)), mod)
   return mod.exports
 }
@@ -67,31 +67,53 @@ async function main() {
   assert.throws(() => batches.planReconcileBranchSnapshot({ productId: 1, branchId: 1, quantity: 2, receivedDate: '30/02/2026' }), /valid received date/)
   console.log('PASS snapshot grow, repeat, shrink, zero, regrow, two branches, invalid date and atomic rollback')
 
-  // Execute the real duplicate-row finalizer, including its staging query,
-  // against the same migrated DB and the actual whole-group chunk scheduler.
-  const engineSource = fs.readFileSync(path.resolve(__dirname, '../src/lib/importEngine.ts'), 'utf8')
-  const engineAst = ts.createSourceFile('importEngine.ts', engineSource, ts.ScriptTarget.Latest, true)
-  const declaration = engineAst.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === 'reconcileDuplicateProductSnapshotRows')
-  const compiled = ts.transpileModule(declaration.getText(engineAst), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
-  const chunkStart = engineSource.indexOf('const D1_IMPORT_BATCH_CHUNK_SIZE =')
-  const chunkEnd = engineSource.indexOf('// Chunked + resumable', chunkStart)
-  assert.ok(chunkStart > 0 && chunkEnd > chunkStart)
-  const scheduler = {}
-  const schedulerCode = ts.transpileModule(engineSource.slice(chunkStart, chunkEnd), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
-  const chunkSize = new Function('exports', 'executeStockTransaction', 'stockTransactionStatementCount', schedulerCode + ';return D1_IMPORT_BATCH_CHUNK_SIZE;')(scheduler, transaction.executeStockTransaction, transaction.stockTransactionStatementCount)
-  const exports = {}
-  const authority = load('importBranchAuthority.ts')
-  new Function('exports', 'planReconcileBranchSnapshot', 'validateCanonicalImportBranchIds', 'withCanonicalImportBranchWriteGuard', 'runD1BatchGroupsInChunks', 'productStockGuardStatement', 'D1_IMPORT_BATCH_CHUNK_SIZE', compiled)(
-    exports, batches.planReconcileBranchSnapshot, authority.validateCanonicalImportBranchIds, authority.withCanonicalImportBranchWriteGuard,
-    scheduler.runD1BatchGroupsInChunks, require('./harness/product_stock_guard.cjs').productStockGuardStatement, chunkSize)
+  const engine = load('importEngine.ts'), metrics = load('requestMetrics.ts')
+  let physical = 0
+  const bindingStatement = (text, params = []) => ({ text, params,
+    bind(...values) { return bindingStatement(text, values) },
+    async all() { physical++; return { results: db.prepare(text).all(params) } },
+    async first() { physical++; return db.prepare(text).get(params) },
+    async run() { physical++; return db.prepare(text).run(params) },
+  })
+  const binding = { prepare: bindingStatement, async batch(statements) {
+    physical += statements.length
+    return db.batch(statements.map(statement => ({ sql: statement.text, params: statement.params })))
+  } }
+  const finalDb = new (load('db.ts').D1Compat)(binding)
+  const state = { startedAtMs: Date.now(), genericApply: { window: 1, finalize:
+    { phase: 'reconcile', product: 0, branch: 0, deactivated: 0, reconciled: 0, unified: 0 } } }
+  const context = { jobId: 'snapshot-test', leaseToken: 'snapshot-holder', state, queued: true }
+  db.prepare(`INSERT INTO import_jobs(id,type,status,lease_token,lease_expires_at,chunk_state_json)
+    VALUES('snapshot-test','products','applying',@lease,@expiry,@state)`).run({ lease: context.leaseToken,
+      expiry: new Date(Date.now()+3600000).toISOString(), state: JSON.stringify(state) })
   for (const [row, quantity] of [[1, 4], [2, 5]]) db.prepare(`INSERT INTO import_job_rows(job_id,phase,row_number,action,result_json) VALUES('snapshot-test','apply',@row,'update',@json)`)
     .run({ row, json: JSON.stringify({ existingId: 1, data: { branch_id: 1, stock_quantity: quantity, received_date: '2026-09-10' } }) })
-  assert.equal(await exports.reconcileDuplicateProductSnapshotRows(db, 'snapshot-test'), 1)
+  const invoke = work => metrics.runBackground(undefined, 'date-finalizer-fixture', async () => {
+    const before = physical
+    try { return await work() }
+    finally {
+      const attempts = physical-before
+      assert.equal(metrics.currentRequestMetrics().invocation.attemptedStatements, attempts)
+      assert.ok(attempts <= 1000, 'actual native dispatch including failed batches fits Paid invocation cap')
+      assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+      console.log('MEASURED date finalizer '+attempts)
+    }
+  })
+  assert.equal(await invoke(() => engine.reconcileDuplicateProductSnapshotRows(finalDb, context.jobId, context)), 0)
+  assert.match(state.genericApply.finalize.pendingHash, /^[a-f0-9]{64}$/)
+  parity(1,5); parity(2,8)
+  const plannedLots = lots(1)
+  await assert.rejects(invoke(() => engine.reconcileDuplicateProductSnapshotRows(finalDb, context.jobId,
+    { ...context, leaseToken: 'foreign-holder' })), /import_lease_changed/)
+  assert.deepEqual(lots(1),plannedLots); parity(1,5)
+  assert.equal(await invoke(() => engine.reconcileDuplicateProductSnapshotRows(finalDb, context.jobId, context)), 1)
   parity(1, 9); parity(2, 8)
-  await exports.reconcileDuplicateProductSnapshotRows(db, 'snapshot-test')
-  parity(1, 9)
+  const finalizedLots = lots(1)
+  assert.equal(await invoke(() => engine.reconcileDuplicateProductSnapshotRows(finalDb, context.jobId, context)), 0)
+  assert.equal(state.genericApply.finalize.phase,'unify')
+  assert.deepEqual(lots(1),finalizedLots); parity(1,9)
   await snapshot(1, 5)
-  console.log('PASS real duplicate import finalizer uses grouped, idempotent lot/branch reconciliation')
+  console.log('PASS real leased/digested duplicate finalizer uses grouped idempotent reconciliation and refuses a foreign holder')
 
   const original = lots(2)[0]
   await receive(2, 1, '11/09/2026', { batchId: original.id })
