@@ -1,21 +1,12 @@
+import { currentUploadAuthority, getCurrentAssetBase, encodeLocalUploadPath } from '../../utils/uploadUrlKernel.ts'
 type CatalogAssetOptions = {
   publicAssetBaseUrl?: unknown
   fallbackBaseUrl?: unknown
   assetVersion?: unknown
 }
 
-const PUBLIC_ASSET_BASE_URL_STORAGE_KEY = 'businessos_public_asset_base_url'
-
 function trimBaseUrl(value: unknown): string {
   return String(value || '').trim().replace(/\/$/, '')
-}
-
-function normalizeUploadPath(value: unknown): string {
-  const raw = String(value || '').trim()
-  if (!raw) return ''
-  if (raw.startsWith('/uploads/')) return raw
-  if (raw.startsWith('uploads/')) return `/${raw}`
-  return raw
 }
 
 function isLocalLikeHostname(hostname = ''): boolean {
@@ -32,20 +23,6 @@ function getSafeCurrentOrigin(): string {
     if (!/^admin\./i.test(String(hostname || '').trim())) return trimBaseUrl(origin)
   } catch (_) {}
   return ''
-}
-
-function getStoredCatalogAssetBaseUrl(): string {
-  if (typeof window === 'undefined') return ''
-  try {
-    const api = (window as Window & { api?: { getPublicAssetBaseUrl?: () => unknown } }).api
-    const fromApi = trimBaseUrl(api?.getPublicAssetBaseUrl?.() || '')
-    if (fromApi) return fromApi
-  } catch (_) {}
-  try {
-    return trimBaseUrl(localStorage.getItem(PUBLIC_ASSET_BASE_URL_STORAGE_KEY) || '')
-  } catch (_) {
-    return ''
-  }
 }
 
 function appendAssetVersion(url: string, version: unknown = ''): string {
@@ -67,10 +44,10 @@ export function resolveCatalogAssetUrl(value: unknown, options: CatalogAssetOpti
   const raw = String(value || '').trim()
   if (!raw) return ''
   if (raw.startsWith('data:') || raw.startsWith('blob:') || /^https?:\/\//i.test(raw)) return raw
-  const normalized = normalizeUploadPath(raw)
-  if (!normalized.startsWith('/uploads/')) return normalized
-  const configuredBase = trimBaseUrl(options.publicAssetBaseUrl || getStoredCatalogAssetBaseUrl())
-  const fallbackBase = trimBaseUrl(options.fallbackBaseUrl || getSafeCurrentOrigin())
+  const normalized = encodeLocalUploadPath(raw)
+  if (!normalized) return raw
+  const configuredBase = trimBaseUrl(options.publicAssetBaseUrl || getCurrentAssetBase())
+  const fallbackBase = trimBaseUrl(options.fallbackBaseUrl || currentUploadAuthority() || getSafeCurrentOrigin())
   const base = configuredBase || fallbackBase
   const assetUrl = base ? `${base}${normalized}` : normalized
   return appendAssetVersion(assetUrl, options.assetVersion || '')

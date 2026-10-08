@@ -1,3 +1,4 @@
+import { splitLocalUploadPath } from './uploadUrlKernel.ts'
 // URLs of the small, persisted copies of an uploaded image.
 //
 // A stored product photo is ~0.84 MB (imageCompression keeps new uploads in a
@@ -35,16 +36,14 @@ const UPLOADS_PREFIX = '/uploads/'
 
 /**
  * The stored name inside an `/uploads/<name>` path (a `?v=` cache-buster or
- * `#fragment` is dropped), or null when the value is not a plain upload path:
+ * `#fragment` following that query is dropped; raw # belongs to the name), or null when the value is not a plain upload path:
  * an absolute URL (an external CDN image), a data:/blob: URL, a nested path,
  * or anything that is not one URL-safe segment.
  */
 export function storedUploadName(value: unknown): string | null {
-  const raw = String(value ?? '').trim()
-  if (!raw) return null
-  const path = raw.startsWith(UPLOADS_PREFIX) ? raw : raw.startsWith('uploads/') ? `/${raw}` : ''
-  if (!path) return null
-  const name = path.slice(UPLOADS_PREFIX.length).split(/[?#]/, 1)[0]
+  const local = splitLocalUploadPath(value)
+  if (!local) return null
+  const name = local.path.slice(UPLOADS_PREFIX.length)
   if (!name) return null
   return name
 }

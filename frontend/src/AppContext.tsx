@@ -1,3 +1,4 @@
+import { replaceAssetBaseFromBootstrap } from './utils/uploadUrlKernel.ts'
 import { getHubPageFromLocation, navigationHash, needsNavigationGuard } from './components/shared/hubNavigation.ts'
 import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from 'react'
 import type { ReactNode } from 'react'
@@ -1014,11 +1015,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     if (safePayload?.system?.serverStartTime) {
       safeStorageSet(getAuthStorage('local'), STORAGE_KEYS.SERVER_START_TIME, String(safePayload.system.serverStartTime))
     }
-    if (safePayload?.system?.publicAssetBaseUrl) {
-      const publicAssetBaseUrl = String(safePayload.system.publicAssetBaseUrl || '').replace(/\/$/, '')
-      safeStorageSet(getAuthStorage('local'), STORAGE_KEYS.PUBLIC_ASSET_BASE_URL, publicAssetBaseUrl)
-      getAppApi().setPublicAssetBaseUrl?.(publicAssetBaseUrl)
-    }
+    replaceAssetBaseFromBootstrap(safePayload)
 
     return {
       user: nextUser,

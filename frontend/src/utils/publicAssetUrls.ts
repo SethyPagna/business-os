@@ -1,3 +1,5 @@
+import { currentUploadAuthority, getCurrentAssetBase, encodeLocalUploadPath } from './uploadUrlKernel.ts'
+export { splitLocalUploadPath } from './uploadUrlKernel.ts'
 import { FRONTEND_BUILD_INFO } from '../api/http.ts'
 
 type PublicAssetOptions = {
@@ -12,21 +14,10 @@ type PublicAssetOptions = {
   unversioned?: boolean
 }
 
-const PUBLIC_ASSET_BASE_URL_STORAGE_KEY = 'businessos_public_asset_base_url'
-
 function trimBaseUrl(value: unknown): string {
   return String(value || '').trim().replace(/\/$/, '')
 }
 
-export function splitLocalUploadPath(value: unknown): { path: string; suffix: string } | null {
-  const raw = String(value || '').trim()
-  if (!/^\/?uploads\//.test(raw)) return null
-  const normalized = `/${raw.replace(/^\//, '')}`
-  const queryAt = normalized.indexOf('?')
-  return queryAt < 0 ? { path: normalized, suffix: '' } : {
-    path: normalized.slice(0, queryAt), suffix: normalized.slice(queryAt),
-  }
-}
 function appendAssetVersion(url: string, version: unknown = ''): string {
   const normalizedVersion = String(version || '').trim()
   if (!normalizedVersion || /^data:|^blob:/i.test(String(url || ''))) return url
@@ -58,29 +49,16 @@ function getSafeCurrentOrigin(): string {
   return ''
 }
 
-export function getStoredPublicAssetBaseUrl(): string {
-  if (typeof window === 'undefined') return ''
-  try {
-    const api = (window as Window & { api?: { getPublicAssetBaseUrl?: () => unknown } }).api
-    const fromApi = trimBaseUrl(api?.getPublicAssetBaseUrl?.() || '')
-    if (fromApi) return fromApi
-  } catch (_) {}
-  try {
-    return trimBaseUrl(localStorage.getItem(PUBLIC_ASSET_BASE_URL_STORAGE_KEY) || '')
-  } catch (_) {
-    return ''
-  }
-}
+export function getStoredPublicAssetBaseUrl(): string { return getCurrentAssetBase() }
 
 export function resolvePublicAssetUrl(value: unknown, options: PublicAssetOptions = {}): string {
   const raw = String(value || '').trim()
   if (!raw) return ''
   if (raw.startsWith('data:') || raw.startsWith('blob:') || /^https?:\/\//i.test(raw)) return raw
-  const localUpload = splitLocalUploadPath(raw)
-  if (!localUpload) return raw
-  const normalized = localUpload.path.split('/').map((segment) => encodeURIComponent(segment)).join('/') + localUpload.suffix
+  const normalized = encodeLocalUploadPath(raw)
+  if (!normalized) return raw
   const configuredBase = trimBaseUrl(options.publicAssetBaseUrl || getStoredPublicAssetBaseUrl())
-  const fallbackBase = trimBaseUrl(options.fallbackBaseUrl || getSafeCurrentOrigin())
+  const fallbackBase = trimBaseUrl(options.fallbackBaseUrl || currentUploadAuthority() || getSafeCurrentOrigin())
   const base = configuredBase || fallbackBase
   const assetUrl = base ? `${base}${normalized}` : normalized
   if (options.unversioned) return assetUrl

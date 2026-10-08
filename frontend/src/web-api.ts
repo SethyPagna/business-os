@@ -1,3 +1,4 @@
+import { currentUploadAuthority, getCurrentAssetBase, setCurrentAssetBase } from './utils/uploadUrlKernel.ts'
 /**
  * web-api.ts - Browser API bootstrap.
  *
@@ -80,10 +81,6 @@ let userReadTransportModulePromise: Promise<UserReadTransportModule> | null = nu
 let actionHistoryTransportModulePromise: Promise<ActionHistoryTransportModule> | null = null
 let localDbPromise: Promise<any> | null = null
 const lazyApiMethodCache = new Map<string, LazyApiMethod>()
-
-function sanitizeBaseUrl(value: unknown): string {
-  return String(value || '').trim().replace(/\/$/, '')
-}
 
 function isPublicRuntimePath(): boolean {
   if (typeof location === 'undefined') return false
@@ -551,22 +548,12 @@ const staticApi = {
   },
 
   setPublicAssetBaseUrl(url: unknown) {
-    const clean = sanitizeBaseUrl(url)
-    try {
-      if (clean) localStorage.setItem(STORAGE_KEYS.PUBLIC_ASSET_BASE_URL, clean)
-      else localStorage.removeItem(STORAGE_KEYS.PUBLIC_ASSET_BASE_URL)
-    } catch (_) {}
-    return clean
+    return setCurrentAssetBase(url, getSyncServerUrl() || currentUploadAuthority())
   },
 
   getPublicAssetBaseUrl() {
-    try {
-      return sanitizeBaseUrl(localStorage.getItem(STORAGE_KEYS.PUBLIC_ASSET_BASE_URL) || '')
-    } catch (_) {
-      return ''
-    }
+    return getCurrentAssetBase(getSyncServerUrl() || currentUploadAuthority())
   },
-
   async getAppBootstrap() {
     const module = await loadAppBootstrapModule()
     return module.getAppBootstrap()

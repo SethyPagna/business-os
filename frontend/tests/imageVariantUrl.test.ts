@@ -28,7 +28,9 @@ await runCase('a plain upload path maps to the w320 variant path', () => {
 await runCase('a bare uploads/ path and a ?v= cache-buster are normalised, never copied into the variant URL', () => {
   assert.equal(toImageVariantPath('uploads/a-1-bb.webp'), '/uploads/_v/w320/a-1-bb.webp')
   assert.equal(toImageVariantPath('/uploads/a-1-bb.webp?v=3'), '/uploads/_v/w320/a-1-bb.webp')
-  assert.equal(toImageVariantPath('/uploads/a-1-bb.webp#x'), '/uploads/_v/w320/a-1-bb.webp')
+  assert.equal(toImageVariantPath('/uploads/a-1-bb.webp?v=3#preview'), '/uploads/_v/w320/a-1-bb.webp')
+  assert.equal(toImageVariantPath('/uploads/old#shade.webp'), '/uploads/_v/w320/old#shade.webp')
+  assert.equal(storedUploadName('/uploads/old#shade.webp'), 'old#shade.webp')
 })
 
 await runCase('names with spaces or Khmer keep their raw form (the browser encodes them exactly as for the original)', () => {

@@ -38,7 +38,12 @@ const worker = transpile(path.join(__dirname, '..', 'src', 'lib', 'imageVariants
   if (request === '../index') return {}
   return require(request)
 })
-const frontend = transpile(path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'imageVariantUrl.ts'))
+const frontendUtils = path.join(__dirname, '..', '..', 'frontend', 'src', 'utils')
+const uploadKernel = transpile(path.join(frontendUtils, 'uploadUrlKernel.ts'))
+const frontend = transpile(path.join(frontendUtils, 'imageVariantUrl.ts'), request => {
+  if (request === './uploadUrlKernel.ts') return uploadKernel
+  throw new Error(`Unexpected frontend dependency: ${request}`)
+})
 
 const tests = []
 const test = (name, fn) => tests.push([name, fn])

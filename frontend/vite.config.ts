@@ -691,7 +691,7 @@ function manualChunks(id: string): string | undefined {
     ) {
       return 'api-http-core'
     }
-    if (normalized.endsWith('/src/api/httpState.ts')) return 'api-http-state'
+    if (normalized.endsWith('/src/api/httpState.ts') || normalized.endsWith('/src/utils/uploadUrlKernel.ts')) return 'api-http-state'
     // Loaded by http.ts on a refusal only (dynamic import) and statically by the redirect float: its own chunk, so the
     // storefront's catalog closure never carries the disabled-branch redirect or its Khmer restatement.
     if (normalized.endsWith('/src/api/branchRedirect.ts') || normalized.endsWith('/src/api/branchRefusalLanguage.ts')
