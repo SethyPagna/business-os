@@ -1528,7 +1528,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
       try { return await runAdjustActionKernel(c, body, markWritten, atomicMark) }
       catch (error) {
         if (/receipt_selling_price_changed/.test(error instanceof Error ? error.message : String(error))) {
-          return c.json({ error: 'The product selling price changed. Refresh the product and retry this line.', code: 'receipt_selling_price_changed' }, 409)
+          return c.json({ error: 'The product selling price changed. Nothing was changed. Refresh the product and retry this line.', code: 'receipt_selling_price_changed' }, 409)
         }
         const transactionRefusal = stockTransactionRefusal(error)
         if (transactionRefusal) return c.json(transactionRefusal, 503)
