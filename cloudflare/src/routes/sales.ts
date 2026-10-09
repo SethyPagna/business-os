@@ -5044,7 +5044,7 @@ app.post('/:id/amendments', async (c) => {
           response_json=${canonicalMutationResponseSql('@responseJson')} WHERE id=@operation`,
         params: { operation: mutationOperationId, saleId, responseJson: JSON.stringify(response), validatedIdentityBindings: JSON.stringify(precisionBasket!.identityBindings), ...(replacementLines ? { replacementPath: `$.lines[${lineMoneyAfterAtLatestRate.findIndex(row=>row.id===0)}].id` } : {}) },
       },
-      { sql: `DELETE FROM sale_mutation_guards WHERE id=1 AND CASE WHEN (${guardCaseExpression(canonicalSaleChildrenGuard(saleId,Number((sale as Record<string,unknown>).money_precision_version)))})=1 THEN 1 ELSE json_extract('sale_amendment_postcondition_conflict','$') END=1`, params: { canonicalSale: saleId } },
+      { sql: `DELETE FROM sale_mutation_guards WHERE id=1 AND CASE WHEN (${guardCaseExpression(canonicalSaleChildrenGuard(saleId,Number((sale as Record<string,unknown>).money_precision_version)))})=1 THEN 1 ELSE json_extract('[1]','$[sale_amendment_postcondition_conflict]') END=1`, params: { canonicalSale: saleId } },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
     ]
     if (!amendmentStatements.some(statement => statement.sql.includes('sale_bulk_guards') && statement.sql.trim() !== 'DELETE FROM sale_bulk_guards')) amendmentStatements = amendmentStatements.filter(statement => statement.sql.trim() !== 'DELETE FROM sale_bulk_guards')
@@ -5064,7 +5064,7 @@ app.post('/:id/amendments', async (c) => {
     if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
     if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
     const message = (error as Error).message || ''
-    if (saleLinePreimageConflict(error)) {
+    if (saleLinePreimageConflict(error) || message.includes('$[sale_amendment_postcondition_conflict]')) {
       return c.json({ error: 'The sale, stock, or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
     }
     return c.json({ error: `Failed to amend this sale: ${message}` }, 500)
