@@ -31,6 +31,10 @@ async function replay(f, direction) {
 }
 
 async function main() {
+  const bounded = loadStockSession('lib/countedDamagedStock.ts')
+  assert.equal(bounded.sumCountedQuantities(Array(10_001).fill(0.00001)), 0.10001)
+  assert.equal(bounded.subtractCountedQuantity(0.20001, Array(10_001).fill(0.00001)), 0.1)
+  console.log('PASS bounded exact intermediate strings across separate 10k term groups')
   const makeWorker = await bundle.exports.bundleWorker()
   for (const tier of ['free', 'paid']) for (const batch of [true, false]) {
     const f = await world(makeWorker, tier, 'zero', seed(0.3, batch))
@@ -64,8 +68,8 @@ async function main() {
       console.log('PASS exact partial clear/dispose/physical cache/Undo ' + tier + ' receipt=' + batch)
     } finally { c.sql.close() }
 
-    for (const mutation of ['cache', 'receipt', 'metadata', 'tag-insert', 'tag-delete', 'tag-identity', 'clear-rival']) {
-      for (const action of ['tag', 'clear']) {
+    for (const mutation of ['cache', 'receipt', 'metadata', 'receipt-owner', 'receipt-inactive', 'tag-insert', 'tag-zero-insert', 'tag-delete', 'tag-identity', 'clear-rival']) {
+      for (const action of ['tag', 'clear', 'dispose']) {
         const r = await world(makeWorker, tier, 'zero', seed(0.3, batch))
         try {
           assert.equal((await tag(r, 0.1, batch, 'quantity-race-seed')).status, 200)
@@ -74,12 +78,15 @@ async function main() {
           if (mutation === 'cache') rival = [{ sql: 'UPDATE products SET stock_quantity=0.4 WHERE id=1' }]
           if (mutation === 'receipt') rival = [{ sql: 'UPDATE branch_batch_stock SET quantity=@quantity WHERE batch_id=1 AND branch_id=1', params: { quantity: batch ? 0.2 : 0.1 } }]
           if (mutation === 'metadata') rival = [{ sql: 'UPDATE product_batches SET unit_cost_usd=3 WHERE id=1' }]
+          if (mutation === 'receipt-owner') rival = [{ sql: "INSERT INTO products(id,name,stock_quantity,is_active)VALUES(2,'Rival',0,1)" }, { sql: 'UPDATE product_batches SET variant_product_id=2 WHERE id=1' }]
+          if (mutation === 'receipt-inactive') rival = [{ sql: 'UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=1 AND branch_id=1' }, { sql: 'UPDATE product_batches SET is_active=0 WHERE id=1' }]
           if (mutation === 'tag-insert') rival = [{ sql: "INSERT INTO damaged_stock_lots(product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source)VALUES(1,1,@batch,0.05,0.05,'damaged','remove')", params: { batch: batch ? 1 : null } }]
+          if (mutation === 'tag-zero-insert') rival = [{ sql: "INSERT INTO damaged_stock_lots(product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source)VALUES(1,1,@batch,0.05,0,'opened','remove')", params: { batch: batch ? 1 : null } }]
           if (mutation === 'tag-delete') rival = [{ sql: 'DELETE FROM damaged_stock_lots WHERE id=1' }]
           if (mutation === 'tag-identity') rival = [{ sql: "UPDATE damaged_stock_lots SET condition_tag='opened' WHERE id=1" }]
           if (mutation === 'clear-rival') rival = [{ sql: 'UPDATE damaged_stock_lots SET quantity_remaining=0.05 WHERE id=1' }]
           r.competeBeforeCommit(rival)
-          const result = action === 'tag' ? await tag(r, 0.1, batch, 'quantity-race-request') : await clear(r, 0.1, 'quantity-race-request')
+          const result = action === 'tag' ? await tag(r, 0.1, batch, 'quantity-race-request') : await clear(r, 0.1, 'quantity-race-request', action === 'dispose' ? 'dispose' : 'restore')
           assert.equal(result.status, 409, mutation + '/' + action)
           assert.ok(['counted_quantity_conflict', 'tagged_lot_conflict'].includes(result.json.code))
           assert.doesNotMatch(JSON.stringify(result.json), /json_extract|bad JSON path|SQLITE/)

@@ -1,4 +1,4 @@
-import { MoneyPrecisionError, subtractDecimalSum } from './moneyPrecision'
+import { MAX_MONEY_SUM_ITEMS, MoneyPrecisionError, subtractDecimalSum } from './moneyPrecision'
 
 type StockWriteStatement = { sql: string; params: Record<string, unknown> }
 
@@ -36,7 +36,11 @@ function exactQuantity(text: string): number {
 }
 
 export function subtractCountedQuantity(total: number, values: readonly number[]): number {
-  return exactQuantity(subtractDecimalSum(total, values))
+  let result = subtractDecimalSum(total, [])
+  for (let offset = 0; offset < values.length; offset += MAX_MONEY_SUM_ITEMS) {
+    result = subtractDecimalSum(result, values.slice(offset, offset + MAX_MONEY_SUM_ITEMS))
+  }
+  return exactQuantity(result)
 }
 
 export function sumCountedQuantities(values: readonly number[]): number {
