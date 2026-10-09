@@ -3184,7 +3184,7 @@ app.post('/stock-in-lines/:movementId/edit', async (c) => {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return c.json({ error: 'A JSON body is required.', code: 'invalid_request' }, 400)
   const { applyStockInLineEdit, notifyStockInLineEdit } = await import('../lib/stockInLineEdit')
   const result = await applyStockInLineEdit(getDb(c.env), c.get('user'), movementId, body, () => branchRedirectTarget(c), c.env)
-  if (result.status === 200 && !result.body.unchanged && !result.body.replayed) c.executionCtx.waitUntil(notifyStockInLineEdit(c.env))
+  if (result.status === 200 && !result.body.unchanged && (!result.body.replayed || result.body.recovered)) c.executionCtx.waitUntil(notifyStockInLineEdit(c.env))
   return c.json(result.body, result.status as 200)
 })
 

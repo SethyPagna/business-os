@@ -198,7 +198,7 @@ function editBudgetDb(raw: D1Compat, env?: Env, explicit?: StockInLineEditBudget
   const initial = budget.used()
   if (!Number.isSafeInteger(initial) || initial < 0) refuse(503,'The invocation budget is unavailable.','stock_in_edit_budget_unavailable')
   let local = 0
-  const check = (planned: number) => { if (Math.max(initial + local, budget.used()) + planned + 9 > budget.limit) refuse(409,'This edit exceeds the current plan request limit. Nothing was changed.','stock_in_edit_over_plan_budget') }
+  const check = (planned: number) => { const used=budget.used();if(!Number.isSafeInteger(used)||used<0)refuse(503,'The invocation budget is unavailable.','stock_in_edit_budget_unavailable');if (Math.max(initial + local, used) + planned + 9 > budget.limit) refuse(409,'This edit exceeds the current plan request limit. Nothing was changed.','stock_in_edit_over_plan_budget') }
   const db = Object.create(raw) as D1Compat
   db.prepare = sql => {
     const stmt = raw.prepare(sql)
@@ -501,9 +501,9 @@ async function applyInner(raw: D1Compat, user: SessionUser, movementId: number, 
         COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@product AND branch_id=@branch),0) AS branch_qty,
         EXISTS(SELECT 1 FROM branch_stock WHERE product_id=@product AND branch_id=@branch) AS branch_exists`)
       .get<Row>({ product: productId, branch: branchId }),
-    db.prepare(`SELECT b.*, COALESCE((SELECT revision FROM stock_session_revisions
+    db.prepare(`SELECT b.*, json_array(b.id,b.variant_product_id,b.batch_key,b.is_active,b.received_at,b.lot_code,b.received_quantity,b.received_cost_usd,b.unit_cost_usd,b.supplier_id,b.supplier_name,b.payment_status,b.credit_due_date,b.expiry_date,b.received_branch_id,b.received_branch_name,b.batch_number) AS fingerprint, COALESCE((SELECT revision FROM stock_session_revisions
       WHERE entity_type='batch' AND entity_key=CAST(b.id AS TEXT)),0) AS batch_revision
-      FROM product_batches b WHERE b.id=@id`).get<LotRow & { batch_revision: number }>({ id: sourceId }),
+      FROM product_batches b WHERE b.id=@id`).get<LotRow & { batch_revision: number;fingerprint:string }>({ id: sourceId }),
     db.prepare('SELECT (SELECT json_group_array(json_array(id,batch_key,received_at,unit_cost_usd)) FROM (SELECT * FROM product_batches WHERE variant_product_id=@product ORDER BY id LIMIT 10001)) source').get<{source:string}>({ product: productId }),
     db.prepare('SELECT baseline_batch_id FROM product_cost_entries WHERE product_id=@product ORDER BY id DESC LIMIT 1').get<Row>({ product: productId }).catch(() => null),
     // Other live receipts into the line's current lot (any line but this one).
@@ -723,10 +723,11 @@ async function applyInner(raw: D1Compat, user: SessionUser, movementId: number, 
       WHERE entity_type='batch' AND entity_key=@batchKey),0)=@revision
       AND ${stockActorPredicate} AND (SELECT ${movementRow('m')} FROM inventory_movements m WHERE m.id=@root)=@rootFingerprint
       AND ${movementSource}=@foldSource
+      AND (SELECT json_array(id,variant_product_id,batch_key,is_active,received_at,lot_code,received_quantity,received_cost_usd,unit_cost_usd,supplier_id,supplier_name,payment_status,credit_due_date,expiry_date,received_branch_id,received_branch_name,batch_number) FROM product_batches WHERE id=@source)=@sourceFingerprint
       AND (SELECT json_group_array(json_array(id,batch_key,received_at,unit_cost_usd)) FROM (SELECT * FROM product_batches WHERE variant_product_id=@product ORDER BY id LIMIT 10001))=@catalogSource
       AND COALESCE((SELECT baseline_batch_id FROM product_cost_entries WHERE product_id=@product ORDER BY id DESC LIMIT 1),0)=@baseline
       AND (SELECT COUNT(*) FROM inventory_movements x WHERE x.batch_id=@source AND x.movement_type IN ('add','stock_in') AND x.id<>@root AND x.quantity>0 AND NOT (x.reference_id>=@lo AND x.reference_id<@hi) AND NOT EXISTS(SELECT 1 FROM inventory_movements r WHERE r.reference_id='revert:'||CAST(x.id AS TEXT)))=@elsewhereCount`,
-    { product:productId,catalogSource,baseline:Number(baseline?.baseline_batch_id)||0,source:sourceId,elsewhereCount:Number(receiptsElsewhere?.n)||0,batchKey: String(sourceId), revision: request.expectedBatchRevision, ...stockActorParams(user),root:movementId,rootFingerprint:root.fingerprint,...range,foldSource }),
+    { product:productId,catalogSource,baseline:Number(baseline?.baseline_batch_id)||0,source:sourceId,sourceFingerprint:sourceLot.fingerprint,elsewhereCount:Number(receiptsElsewhere?.n)||0,batchKey: String(sourceId), revision: request.expectedBatchRevision, ...stockActorParams(user),root:movementId,rootFingerprint:root.fingerprint,...range,foldSource }),
     ...stateGuard(before, targetCreated),
     { sql: `INSERT INTO stock_lot_adjustment_operations(id,actor_id,request_id,request_json,request_digest,response_json,before_json,after_json,revision_json)
       VALUES(@operation,@actor,@requestId,@requestJson,@digest,@response,@before,@after,@revision)`, params: opParams },
@@ -764,7 +765,7 @@ async function applyInner(raw: D1Compat, user: SessionUser, movementId: number, 
   } catch (error) {
     if (error instanceof StockTransactionUnavailableError) throw error
     const concurrent = await previous()
-    if (concurrent) return replay(concurrent)
+    if (concurrent) {const result=replay(concurrent);return result.status===200?{...result,body:{...result.body,recovered:true}}:result}
     if (error instanceof StockTransactionOutcomeUnknownError) throw error
     const activeGuard = productStockGuardError(error)
     if (activeGuard) throw activeGuard
