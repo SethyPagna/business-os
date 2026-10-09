@@ -629,7 +629,7 @@ async function fetchSaleItemAllocations(
     .prepare(`SELECT sale_item_id, batch_id, quantity, released_quantity FROM sale_item_batch_allocations WHERE sale_item_id IN (${chunk.map(() => '?').join(',')}) ORDER BY id ASC`)
     .all<{ sale_item_id: number; batch_id: number; quantity: number; released_quantity: number }>(chunk))
   for (const row of rows) {
-    const outstanding = Math.max(0, (Number(row.quantity) || 0) - (Number(row.released_quantity) || 0))
+    const outstanding = Math.max(0, subtractCountedQuantity(Number(row.quantity) || 0, [Number(row.released_quantity) || 0]))
     if (outstanding <= 0) continue
     const list = map.get(Number(row.sale_item_id)) || []
     list.push({ batch_id: Number(row.batch_id), outstanding })
@@ -2832,9 +2832,37 @@ app.post('/supplier', async (c) => {
 // re-applies stock for the new item list. Supplier returns aren't editable
 // from this route (matches the original).
 app.patch('/:id', async (c) => {
-  const db = getDb(c.env)
+  try { return await editCustomerReturn(c) }
+  catch (error) {
+    if (error instanceof ReturnCreateBudgetError) return c.json({ error: error.message, code: 'return_edit_over_plan_budget' }, 400)
+    if (isCountedStockConflict(error)) return c.json({ error: (error as Error).message, code: 'write_conflict', action: 'reload_required' }, 409)
+    throw error
+  }
+})
+
+async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>) {
+  const baseDb = getDb(c.env)
+  const queryLimit = getPlanLimits(c.env).d1QueriesPerInvocation
+  const requestMetrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as (RequestMetrics & { attemptedStatements?: number }) | undefined
+  const initialStatements = requestMetrics?.attemptedStatements ?? requestMetrics?.statements ?? 0
+  let routeStatements = 0
+  const statementsUsed = () => {
+    if (!requestMetrics) return routeStatements + 10
+    if (requestMetrics.attemptedStatements == null && requestMetrics.failed) return Infinity
+    return Math.max(initialStatements + routeStatements, requestMetrics.attemptedStatements ?? requestMetrics.statements) + 3
+  }
+  const db = Object.create(baseDb) as ReturnType<typeof getDb>
+  db.prepare = ((sql: string) => {
+    const statement = baseDb.prepare(sql)
+    const countRead = () => { assertReturnCreateQueryBudget(queryLimit, statementsUsed(), 1, 1); routeStatements += 1 }
+    return {
+      get: async (params) => { countRead(); if (!statement.getOnce) throw new Error('Return edits require single-attempt reads'); return statement.getOnce(params) },
+      all: async (params) => { countRead(); if (!statement.allOnce) throw new Error('Return edits require single-attempt reads'); return statement.allOnce(params) },
+      run: async (params) => { countRead(); return statement.run(params) },
+    }
+  }) as typeof db.prepare
   const user = c.get('user')
-  const id = c.req.param('id')
+  const id = c.req.param('id')!
   // Part 154: editing a return reverses every previously-restocked item's
   // batch, then re-applies restocking with fresh batch resolution --
   // same live-state dependency (a batch's current available quantity,
@@ -2962,6 +2990,7 @@ app.patch('/:id', async (c) => {
     return_to_stock: number; stock_action: string | null; branch_id: number | null; cost_price_usd: number | null; cost_price_khr: number | null
     batch_id: number | null
   }>([id])
+  const explicitEditConditions = Array.isArray(body.items) ? body.items.map(item=>item.stock_condition!=null || item.condition_tag!=null || item.stock_action==='damaged') : []
   let newItems: ReturnItemInput[] = Array.isArray(body.items) ? body.items : existingItems
   try {
     newItems = await resolveCountedReturnConditions(db,Number(existing.sale_id)||null,newItems as unknown as Array<Record<string,unknown>>) as unknown as ReturnItemInput[]
@@ -2970,8 +2999,9 @@ app.patch('/:id', async (c) => {
       requestJson=JSON.stringify(canonicalIntent);requestDigest=await sha256Hex(requestJson)
     }
   } catch(error) { return c.json({error:(error as Error).message},400) }
+  let editCostSources: Record<string,unknown>[] = []
   if (Array.isArray(body.items)) {
-    const sourceRows = existing.sale_id
+    const sourceRows = editCostSources = existing.sale_id
       ? await db.prepare('SELECT id,product_id,branch_id,cost_price_usd,cost_price_khr FROM sale_items WHERE sale_id=?').all<Record<string, unknown>>([existing.sale_id])
       : await selectInChunks([...new Set(newItems.map(item => Number(item.product_id)).filter(id => id > 0))], 0, chunk => db.prepare(`SELECT id,cost_price_usd,cost_price_khr FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`).all<Record<string, unknown>>(chunk))
     try {
@@ -3083,8 +3113,12 @@ app.patch('/:id', async (c) => {
   // priced from that sale's lines, matched exactly as POST / matches them:
   // by sale_item_id, else by product_id (capped at the recorded price).
   const editSalePriceLines = existing.sale_id
-    ? await db.prepare('SELECT id,product_id,applied_price_usd,applied_price_khr FROM sale_items WHERE sale_id=? ORDER BY id')
-      .all<{ id: number; product_id: number | null; applied_price_usd: number | null; applied_price_khr: number | null }>([existing.sale_id])
+    ? await db.prepare(`SELECT si.id,si.product_id,si.branch_id,si.batch_id,si.damaged_lot_id,si.quantity,si.applied_price_usd,si.applied_price_khr,
+        ci.product_id AS original_product_id,ci.branch_id AS original_branch_id,ci.batch_id AS original_batch_id,ci.condition_tag AS original_condition_tag,
+        (SELECT json_group_array(json_array(batch_id,branch_id,quantity,released_quantity)) FROM (SELECT * FROM sale_item_batch_allocations WHERE sale_item_id=si.id ORDER BY id)) AS allocations_json
+        FROM sale_items si LEFT JOIN counted_sale_item_conditions ci ON ci.sale_item_id=si.id WHERE si.sale_id=? ORDER BY si.id`)
+      .all<{ id:number; product_id:number|null; branch_id:number|null; batch_id:number|null; damaged_lot_id:number|null; quantity:number; applied_price_usd:number|null; applied_price_khr:number|null;
+        original_product_id:number|null; original_branch_id:number|null; original_batch_id:number|null; original_condition_tag:string|null; allocations_json:string }>([existing.sale_id])
     : []
   let editRefundPrices: Array<{ unitUsd: number; unitKhr: number; fromSaleLine: boolean }>
   try {
@@ -3116,6 +3150,13 @@ app.patch('/:id', async (c) => {
     throw error
   }
 
+  for (const [index,item] of newItems.entries()) {
+    const source = editSalePriceLines.find(row=>row.id===item.sale_item_id)
+    if (!source || !source.damaged_lot_id) continue
+    if (!item.counted_original_condition || source.original_product_id!==source.product_id || source.original_branch_id!==source.branch_id
+      || (item.batch_id ?? null)!==source.original_batch_id
+      || (!explicitEditConditions[index] && normalizeStockAction(item)!=='none' && item.stock_condition!==source.original_condition_tag)) throw new CountedStockConflictError()
+  }
   const editLotPlans: Array<{ splits: Array<{ batchId: number; quantity: number }>; plainQuantity: number }> = []
   for (const item of newItems) {
     const quantity = Number(item.quantity) || 0
@@ -3207,12 +3248,18 @@ app.patch('/:id', async (c) => {
 
   // Damaged stock reversals are planned with every sellable-stock change.
   let editReversedDamaged: ReversedDamagedLot[] = []
+  let editDamagedLots: Array<{
+    id:number; return_item_id:number|null; condition_tag:string; product_id:number; product_name:string|null;
+    branch_id:number|null; batch_id:number|null; quantity:number; quantity_remaining:number; reason:string|null;
+    created_by_user_id:number|string|null; created_by_user_name:string|null
+  }> = []
+  let editDispatched = false
 
   // 11.13: this return's damaged lots come back out before the re-apply.
   // A lot POS already drew from can't be un-damaged (that stock left the
   // building) -- ConsumedDamagedStockError blocks the edit outright.
   try {
-    const damagedLots = await db.prepare(`SELECT id,return_item_id,condition_tag,product_id,product_name,branch_id,batch_id,quantity,quantity_remaining,
+    const damagedLots = editDamagedLots = await db.prepare(`SELECT id,return_item_id,condition_tag,product_id,product_name,branch_id,batch_id,quantity,quantity_remaining,
       reason,created_by_user_id,created_by_user_name FROM damaged_stock_lots WHERE return_id=@returnId
       AND (return_item_id IS NULL OR EXISTS(SELECT 1 FROM return_items ri WHERE ri.id=damaged_stock_lots.return_item_id AND ri.return_id=@returnId)) ORDER BY id`)
       .all<{
@@ -3232,7 +3279,6 @@ app.patch('/:id', async (c) => {
     }))
     for(const lot of damagedLots) {
       if(!lot.return_item_id || !lot.branch_id) return c.json({error:'return_condition_attribution_unproven'},409)
-      statements.push(...planCountedTaggedChange({lotId:lot.id,productId:lot.product_id,branchId:lot.branch_id,batchId:lot.batch_id},Number(lot.quantity),'consume'))
     }
     for (const lot of editReversedDamaged) {
       statements.push({
@@ -3281,6 +3327,50 @@ app.patch('/:id', async (c) => {
     for (const [folded, survivor] of found) merged.set(folded, survivor)
     reversalSurvivors.set(effect.effectBranchId, merged)
   }
+  const editContexts = new Map<string, CountedReturnContext>()
+  for (const lot of editDamagedLots) addCountedReturnContext(editContexts,lot.product_id,lot.branch_id!,lot.batch_id===null?[]:[lot.batch_id])
+  for (const [index,item] of existingItems.entries()) {
+    if (!item.return_to_stock || !item.product_id || !item.branch_id) continue
+    const effect = existingLineEffects[index]
+    const branch = effect?.redirected ? effect.effectBranchId : item.branch_id
+    const survivor = (batch:number) => effect?.redirected ? reversalSurvivors.get(branch)?.get(batch) ?? batch : batch
+    addCountedReturnContext(editContexts,item.product_id,branch,
+      [...(existingReturnAllocations.get(Number(item.id)) || []).map(row=>survivor(row.batch_id)),...(item.batch_id != null ? [survivor(item.batch_id)] : [])])
+  }
+  for (const [index,item] of newItems.entries()) {
+    const productId = Number(item.product_id), branchId = Number(item.branch_id || existing.branch_id)
+    if (normalizeStockAction(item)==='none' || !productId || !branchId) continue
+    addCountedReturnContext(editContexts,productId,branchId,
+      editLotPlans[index].splits.map(row=>row.batchId),[
+        ...(normalizeStockAction(item)==='restock' && !item.counted_original_condition && editLotPlans[index].plainQuantity>0
+          ? [planReceiveBatchStock({productId:Number(item.product_id),branchId:Number(item.branch_id || existing.branch_id),quantity:editLotPlans[index].plainQuantity,
+            receivedDate:existing.received_business_date || new Date(Date.parse(mutationStamp)+7*60*60*1000).toISOString().slice(0,10),provenanceKey:`return-edit:${id}:${index}`}).batchKey] : [])])
+  }
+  const exactEdit = await readProjectedReturnStock(db,editContexts)
+  statements.unshift(...exactEdit.takePreimageGuards())
+  const originalItemKeys = ['id','product_id','product_name','quantity','return_to_stock','stock_action','branch_id','cost_price_usd','cost_price_khr','batch_id','sale_item_id','stock_condition']
+  const originalItemsJson = JSON.stringify(existingItems.map(item=>originalItemKeys.map(key=>(item as unknown as Record<string,unknown>)[key] ?? null)))
+  const originalAllocationsJson = JSON.stringify([...existingReturnAllocations].sort(([a],[b])=>a-b).flatMap(([itemId,rows])=>rows.map(row=>[itemId,row.batch_id,row.branch_id,row.quantity])))
+  const originalTagsJson = JSON.stringify(editDamagedLots.map(lot=>[lot.id,lot.return_item_id,lot.condition_tag,lot.product_id,lot.product_name,lot.branch_id,lot.batch_id,lot.quantity,lot.quantity_remaining,lot.reason,lot.created_by_user_id,lot.created_by_user_name]))
+  const costSourcesJson = JSON.stringify(editCostSources.map(row=>[row.id,row.product_id ?? null,row.branch_id ?? null,row.cost_price_usd ?? null,row.cost_price_khr ?? null]))
+  const sourcesJson = JSON.stringify(editSalePriceLines.map(row=>["id","product_id","branch_id","batch_id","damaged_lot_id","quantity","applied_price_usd","applied_price_khr","original_product_id","original_branch_id","original_batch_id","original_condition_tag","allocations_json"].map(key=>(row as unknown as Record<string,unknown>)[key] ?? null)))
+  statements.unshift({sql:`SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM json_each(@costSources) j WHERE
+      CASE WHEN @saleId IS NOT NULL THEN NOT EXISTS(SELECT 1 FROM sale_items row WHERE row.sale_id=@saleId
+        AND row.id IS json_extract(j.value,'$[0]') AND row.product_id IS json_extract(j.value,'$[1]') AND row.branch_id IS json_extract(j.value,'$[2]')
+        AND row.cost_price_usd IS json_extract(j.value,'$[3]') AND row.cost_price_khr IS json_extract(j.value,'$[4]'))
+      ELSE NOT EXISTS(SELECT 1 FROM products row WHERE row.id IS json_extract(j.value,'$[0]')
+        AND row.cost_price_usd IS json_extract(j.value,'$[3]') AND row.cost_price_khr IS json_extract(j.value,'$[4]')) END)
+    AND (@saleId IS NULL OR ((SELECT COUNT(*) FROM sale_items WHERE sale_id=@saleId)=json_array_length(@sources) AND NOT EXISTS(SELECT 1 FROM json_each(@sources) j WHERE NOT EXISTS(SELECT 1 FROM sale_items si LEFT JOIN counted_sale_item_conditions ci ON ci.sale_item_id=si.id WHERE si.sale_id=@saleId AND si.id IS json_extract(j.value,'$[0]') AND si.product_id IS json_extract(j.value,'$[1]') AND si.branch_id IS json_extract(j.value,'$[2]') AND si.batch_id IS json_extract(j.value,'$[3]') AND si.damaged_lot_id IS json_extract(j.value,'$[4]') AND si.quantity IS json_extract(j.value,'$[5]') AND si.applied_price_usd IS json_extract(j.value,'$[6]') AND si.applied_price_khr IS json_extract(j.value,'$[7]') AND ci.product_id IS json_extract(j.value,'$[8]') AND ci.branch_id IS json_extract(j.value,'$[9]') AND ci.batch_id IS json_extract(j.value,'$[10]') AND ci.condition_tag IS json_extract(j.value,'$[11]') AND (SELECT json_group_array(json_array(batch_id,branch_id,quantity,released_quantity)) FROM (SELECT * FROM sale_item_batch_allocations WHERE sale_item_id=si.id ORDER BY id)) IS json_extract(j.value,'$[12]')))))
+    AND (SELECT COUNT(*) FROM return_items row WHERE row.return_id=@returnId)=json_array_length(@items) AND NOT EXISTS(SELECT 1 FROM json_each(@items) j WHERE NOT EXISTS(SELECT 1 FROM return_items row WHERE row.return_id=@returnId AND row.id IS json_extract(j.value,'$[0]') AND row.product_id IS json_extract(j.value,'$[1]') AND row.product_name IS json_extract(j.value,'$[2]') AND row.quantity IS json_extract(j.value,'$[3]') AND row.return_to_stock IS json_extract(j.value,'$[4]') AND row.stock_action IS json_extract(j.value,'$[5]') AND row.branch_id IS json_extract(j.value,'$[6]') AND row.cost_price_usd IS json_extract(j.value,'$[7]') AND row.cost_price_khr IS json_extract(j.value,'$[8]') AND row.batch_id IS json_extract(j.value,'$[9]') AND row.sale_item_id IS json_extract(j.value,'$[10]') AND row.stock_condition IS json_extract(j.value,'$[11]')))
+    AND (SELECT COUNT(*) FROM return_item_batch_allocations row WHERE row.return_item_id IN(SELECT id FROM return_items WHERE return_id=@returnId))=json_array_length(@allocations) AND NOT EXISTS(SELECT 1 FROM json_each(@allocations) j WHERE NOT EXISTS(SELECT 1 FROM return_item_batch_allocations row WHERE row.return_item_id IN(SELECT id FROM return_items WHERE return_id=@returnId) AND row.return_item_id IS json_extract(j.value,'$[0]') AND row.batch_id IS json_extract(j.value,'$[1]') AND row.branch_id IS json_extract(j.value,'$[2]') AND row.quantity IS json_extract(j.value,'$[3]')))
+    AND (SELECT COUNT(*) FROM damaged_stock_lots row WHERE row.return_id=@returnId AND (row.return_item_id IS NULL OR EXISTS(SELECT 1 FROM return_items ri WHERE ri.id=row.return_item_id AND ri.return_id=@returnId)))=json_array_length(@tags) AND NOT EXISTS(SELECT 1 FROM json_each(@tags) j WHERE NOT EXISTS(SELECT 1 FROM damaged_stock_lots row WHERE row.return_id=@returnId AND (row.return_item_id IS NULL OR EXISTS(SELECT 1 FROM return_items ri WHERE ri.id=row.return_item_id AND ri.return_id=@returnId)) AND row.id IS json_extract(j.value,'$[0]') AND row.return_item_id IS json_extract(j.value,'$[1]') AND row.condition_tag IS json_extract(j.value,'$[2]') AND row.product_id IS json_extract(j.value,'$[3]') AND row.product_name IS json_extract(j.value,'$[4]') AND row.branch_id IS json_extract(j.value,'$[5]') AND row.batch_id IS json_extract(j.value,'$[6]') AND row.quantity IS json_extract(j.value,'$[7]') AND row.quantity_remaining IS json_extract(j.value,'$[8]') AND row.reason IS json_extract(j.value,'$[9]') AND row.created_by_user_id IS json_extract(j.value,'$[10]') AND row.created_by_user_name IS json_extract(j.value,'$[11]')))
+    THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`,params:{returnId,saleId:existing.sale_id || null,costSources:costSourcesJson,sources:sourcesJson,items:originalItemsJson,allocations:originalAllocationsJson,tags:originalTagsJson}})
+  for (const lot of editDamagedLots) {
+    const exact = exactEdit.get(lot.product_id,lot.branch_id!)
+    const source = exact.projectedTaggedSource(lot.id)
+    if (!source || source.batchId!==lot.batch_id || source.conditionTag!==lot.condition_tag || source.quantityRemaining!==lot.quantity_remaining) throw new CountedStockConflictError()
+    statements.push(...exact.change({lotId:lot.id,productId:lot.product_id,branchId:lot.branch_id!,batchId:lot.batch_id},lot.quantity,'consume'))
+  }
   for (const [itemIndex, item] of existingItems.entries()) {
     if (!item.return_to_stock || !item.product_id || !item.branch_id) continue
     touchedProductIds.add(item.product_id)
@@ -3292,41 +3382,25 @@ app.patch('/:id', async (c) => {
     // 0084: which lots this reversal actually drew from -- the movement row
     // stamps a batch_id only when ONE lot covered the whole quantity.
     const reversalLots: Array<{ batchId: number; quantity: number }> = []
+    const exact = exactEdit.get(productId,branchIdForItem)
     const recordedAllocs = existingReturnAllocations.get(Number(item.id)) || []
     if (recordedAllocs.length) {
       for (const alloc of recordedAllocs) {
-        const give = Math.min(alloc.quantity, plainRemainder)
-        if (give <= 0) continue
-          const reversalBatchId = survivorOf(alloc.batch_id)
-          statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
-            WHERE pb.id=@batchId AND pb.variant_product_id=@productId AND bbs.branch_id=@branchId AND bbs.quantity>=@quantity)`,
-            { batchId: reversalBatchId, productId, branchId: branchIdForItem, quantity: give }))
-          statements.push(...planRemoveStockFromBatch({ batchId: reversalBatchId, productId, branchId: branchIdForItem, quantity: give }).statements
-            .map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
-          reversalLots.push({ batchId: reversalBatchId, quantity: give })
-          plainRemainder -= give
+        const give = Math.min(alloc.quantity,plainRemainder)
+        if (give<=0) continue
+        if (alloc.branch_id!==null && alloc.branch_id!==item.branch_id) throw new CountedStockConflictError()
+        const reversalBatchId = survivorOf(alloc.batch_id)
+        statements.push(...exact.changeOrdinary(reversalBatchId,give,'consume'))
+        reversalLots.push({batchId:reversalBatchId,quantity:give})
+        plainRemainder = subtractCountedQuantity(plainRemainder,[give])
       }
-    } else if (item.batch_id != null) {
-      // Legacy return (no recorded split): reverse its single recorded lot.
-        const legacyBatchId = survivorOf(item.batch_id)
-        statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
-          WHERE pb.id=@batchId AND pb.variant_product_id=@productId AND bbs.branch_id=@branchId AND bbs.quantity>=@quantity)`,
-          { batchId: legacyBatchId, productId, branchId: branchIdForItem, quantity: plainRemainder }))
-        statements.push(...planRemoveStockFromBatch({ batchId: legacyBatchId, productId, branchId: branchIdForItem, quantity: plainRemainder }).statements
-          .map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
-        reversalLots.push({ batchId: legacyBatchId, quantity: plainRemainder })
-        plainRemainder = 0
+    } else if (item.batch_id!==null) {
+      const legacyBatchId = survivorOf(item.batch_id)
+      statements.push(...exact.changeOrdinary(legacyBatchId,plainRemainder,'consume'))
+      reversalLots.push({batchId:legacyBatchId,quantity:plainRemainder})
+      plainRemainder=0
     }
-    if (plainRemainder > 0) {
-      statements.push(bulkAssertion(`COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@productId AND branch_id=@branchId),0)
-        - COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id
-          WHERE pb.variant_product_id=@productId AND bbs.branch_id=@branchId),0) >= @quantity`,
-        { productId, branchId: branchIdForItem, quantity: plainRemainder }))
-      statements.push({
-        sql: `UPDATE branch_stock SET quantity=quantity-@quantity WHERE product_id=@product_id AND branch_id=@branch_id`,
-        params: { product_id: productId, branch_id: branchIdForItem, quantity: plainRemainder },
-      })
-    }
+    if (plainRemainder>0) statements.push(...exact.changeOrdinary(null,plainRemainder,'consume'))
     statements.push({
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${reversalEffect ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
             VALUES (@product_id, @product_name, @branch_id${reversalEffect ? ', @branch_name, @addressed_branch_name' : ''}, 'return_reversal', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
@@ -3384,15 +3458,22 @@ app.patch('/:id', async (c) => {
       // (last-drawn first), the operator's pick, or a refusal. Nothing here
       // invents a destination.
       for (const split of plan.splits) {
-        statements.push(bulkAssertion('EXISTS(SELECT 1 FROM product_batches WHERE id=@batchId AND variant_product_id=@productId)',
-          { batchId: split.batchId, productId: item.product_id }))
-        const received = planCountedReturnReceive(item.product_id,itemBranchId,split.batchId,split.quantity)
+        const received = planProjectedCountedReturnReceive(exactEdit.get(item.product_id,itemBranchId),split.batchId,split.quantity)
         statements.push(...received.map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
         if (plan.splits.length === 1 && split.quantity === quantity) resolvedBatchId = split.batchId
         itemSplits.push({ batchId: split.batchId, branchId: itemBranchId, quantity: split.quantity, saleItemId: item.sale_item_id ?? null })
       }
-      if (fallbackReceive) statements.push(...fallbackReceive.statements.map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
-      if(!fallbackReceive && plan.plainQuantity>0) statements.push(...planCountedReturnReceive(item.product_id,itemBranchId,null,plan.plainQuantity).map(statement=>({sql:statement.sql,params:statement.params as Record<string,unknown>})))
+      if (fallbackReceive) {
+        const exact = exactEdit.get(item.product_id,itemBranchId)
+        const capturedReceipt = exact.projectedReceiptByKey(fallbackReceive.batchKey)
+        if (capturedReceipt!==null) statements.push(...planProjectedCountedReturnReceive(exact,capturedReceipt,plan.plainQuantity).map(statement=>({sql:statement.sql,params:statement.params as Record<string,unknown>})))
+        else {
+          const created = exact.receiveProjectedCreatedReceipt(fallbackReceive.batchKey,plan.plainQuantity)
+          statements.unshift(...created.guards)
+          statements.push(...fallbackReceive.metadataStatements.map(statement=>({sql:statement.sql,params:statement.params as Record<string,unknown>})),...created.statements)
+        }
+      }
+      if(!fallbackReceive && plan.plainQuantity>0) statements.push(...planProjectedCountedReturnReceive(exactEdit.get(item.product_id,itemBranchId),null,plan.plainQuantity).map(statement=>({sql:statement.sql,params:statement.params as Record<string,unknown>})))
       touchedProductIds.add(item.product_id)
     }
 
@@ -3403,7 +3484,8 @@ app.patch('/:id', async (c) => {
       for(const slice of slices) {
         statements.push(...planDamagedReturnLine({productId:item.product_id,productName:item.product_name||null,branchId:itemBranchId,batchId:slice.batchId,
           returnIdSql:'@return_id',quantity:slice.quantity,reason:String(body.reason||existing.reason||'')||null,userId:user?.id??null,userName:actorSnapshot(user),
-          tag:choice.tag,disposition:choice.disposition,unitCostUsd:item.cost_price_usd??null,unitCostKhr:item.cost_price_khr??null
+          tag:choice.tag,disposition:choice.disposition,unitCostUsd:item.cost_price_usd??null,unitCostKhr:item.cost_price_khr??null,
+          projectedStock:exactEdit.get(item.product_id,itemBranchId)
         }).map(statement=>({sql:statement.sql,params:{...(statement.params as Record<string,unknown>),return_id:id}})))
       }
       touchedProductIds.add(item.product_id)
@@ -3479,12 +3561,17 @@ app.patch('/:id', async (c) => {
     }
   }
 
-  for (const productId of touchedProductIds) {
-    statements.push({
-      sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @productId), updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
-      params: { productId },
-    })
-  }
+  statements.push(...exactEdit.takeFinalPhysicalWrites())
+  const exactTargets = exactEdit.projectedPhysicalTargets()
+  statements.push({sql:`SELECT CASE WHEN
+    NOT EXISTS(SELECT 1 FROM json_each(@targets) ctx WHERE
+      (SELECT stock_quantity FROM products WHERE id=json_extract(ctx.value,'$.product.product_id')) IS NOT json_extract(ctx.value,'$.product.after'))
+    AND NOT EXISTS(SELECT 1 FROM json_each(@targets) ctx,json_each(ctx.value,'$.branches') b WHERE
+      (SELECT quantity FROM branch_stock WHERE product_id=json_extract(b.value,'$.product_id') AND branch_id=json_extract(b.value,'$.branch_id')) IS NOT json_extract(b.value,'$.after'))
+    AND NOT EXISTS(SELECT 1 FROM json_each(@targets) ctx,json_each(ctx.value,'$.receipts') r WHERE
+      (SELECT quantity FROM branch_batch_stock WHERE batch_id=COALESCE(json_extract(r.value,'$.batch_id'),(SELECT id FROM product_batches WHERE variant_product_id=json_extract(r.value,'$.product_id') AND batch_key=json_extract(r.value,'$.batch_key')))
+        AND branch_id=json_extract(r.value,'$.branch_id')) IS NOT json_extract(r.value,'$.after'))
+    THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`,params:{targets:JSON.stringify(exactTargets)}})
 
   // Named so the audit row below records the values this statement actually
   // wrote -- a recomputed copy would be a second source of truth that can
@@ -3582,22 +3669,32 @@ app.patch('/:id', async (c) => {
   const hasStockWrite = touchedProductIds.size > 0 || editReversedDamaged.length > 0 || newItems.some(item => normalizeStockAction(item) === 'damaged')
   assertSaleRecordBatchBounds(hasStockWrite ? stockTransactionStatementCount(statements.length) : statements.length, canonicalIntent, eventBytes)
 
-  if (hasStockWrite) await executeStockTransaction(db, statements, 'retry')
-  else await db.batch(statements)
+  const plannedCount = hasStockWrite ? stockTransactionStatementCount(statements.length) : statements.length
+  assertReturnCreateQueryBudget(queryLimit,statementsUsed(),plannedCount,12)
+  routeStatements += plannedCount
+  editDispatched = true
+  if (hasStockWrite) await executeStockTransaction(db, statements, 'once')
+  else { if (!db.batchOnce) throw new Error('Return edits require single-attempt atomic writes'); await db.batchOnce(statements) }
 
   } catch (error) {
-
+    if (error instanceof ReturnCreateBudgetError) throw error
+    if (isCountedStockConflict(error)) return c.json({error:'The return or its stock source changed. Refresh before retrying.',code:'write_conflict',action:'reload_required'},409)
     const stockGuard = productStockGuardError(error)
-
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     // All lot, branch, return-item and receipt writes share db.batch; a
     // conflict/storage failure rolls them all back before retry inspection.
-    const retry = await db.prepare(`SELECT return_id,request_digest,response_json FROM return_mutation_receipts
+    let retry: { return_id:number; request_digest:string; response_json:string } | undefined
+    try { retry = await db.prepare(`SELECT return_id,request_digest,response_json FROM return_mutation_receipts
       WHERE actor_id=@actor AND mutation_kind='edit' AND request_id=@request`)
       .get<{ return_id: number; request_digest: string; response_json: string }>({ actor: authenticatedActorId, request: requestId })
+    } catch (readError) {
+      if (!editDispatched) throw readError
+      return c.json({error:'The edit result could not be confirmed. Retry the same request.',code:'unknown_outcome',action:'retry_same_request'},503)
+    }
     if (retry) {
       if (Number(retry.return_id) === returnId && retry.request_digest === requestDigest) {
-        return c.json(JSON.parse(retry.response_json) as { id: number; updated_at: string })
+        try { return c.json(JSON.parse(retry.response_json) as { id: number; updated_at: string }) }
+        catch (_) { return c.json({error:'The edit result could not be confirmed. Retry the same request.',code:'unknown_outcome',action:'retry_same_request'},503) }
       }
       return c.json({ error: 'client_request_id was already used with different return edit data.', code: 'idempotency_conflict' }, 409)
     }
@@ -3609,6 +3706,7 @@ app.patch('/:id', async (c) => {
     if (/return_bulk_guards|sale_bulk_guards|CHECK constraint failed: guard_value/i.test((error as Error).message)) {
       return c.json({ error: 'Return or linked sale changed. Refresh before retrying.', code: 'write_conflict', conflict: true }, 409)
     }
+    if (editDispatched) return c.json({error:'The edit result could not be confirmed. Retry the same request.',code:'unknown_outcome',action:'retry_same_request'},503)
     return c.json({
       error: `Failed to update return: ${(error as Error).message}`,
     }, 500)
@@ -3632,6 +3730,6 @@ app.patch('/:id', async (c) => {
   }
 
   return c.json(fixedResponse)
-})
+}
 
 export default app
