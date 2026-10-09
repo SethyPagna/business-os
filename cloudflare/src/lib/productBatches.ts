@@ -34,8 +34,10 @@
 import type { D1Compat } from './db'
 import { receivingBranchAssertion } from './receivingBranch'
 import { dateToBatchCode, normalizeTypedDate } from './batchCode'
-import { addMoney4, multiplyMoney4, nullableMoney4, roundMoney4, sellingPriceCeilCent } from './moneyPrecision'
+import { MoneyPrecisionError, addMoney4, multiplyMoney4, nullableMoney4, roundMoney4, sellingPriceCeilCent } from './moneyPrecision'
 import { buildInClause, selectInChunks } from './sqlBinding'
+import { executeStockTransaction } from './stockTransaction'
+import { ordinarySubsetSql, ordinaryNullCapacityGuard, subtractCountedQuantity } from './countedDamagedStock'
 
 export type ProductBatchRow = {
   id: number
@@ -225,6 +227,8 @@ export type ReceiveBatchPlanInput = {
    * preimage inside the same D1 batch instead of relying on SQLite REAL math.
    */
   receiptCostPreimage?: ReceiptCostPreimage
+  receivedQuantityPreimage?: { quantity: number | null }
+  preserveHistoricalAttribution?: boolean
   /** Server-resolved target; never read directly from an operator payload. */
   receiptLotTarget?: ReceiptLotTarget
   /** Internal chunk-planner reservation for a NEW lot; never operator input. */
@@ -235,6 +239,7 @@ export type ReceiveBatchPlanInput = {
 
 export type ReceiveBatchStatementPlan = {
   statements: StockWriteStatement[]
+  metadataStatements: StockWriteStatement[]
   productIdSql: string
   batchIdSql: string
   batchKey: string
@@ -292,6 +297,12 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
   }
   const branchId = Number(input.branchId)
   if (!Number.isSafeInteger(branchId) || branchId <= 0) throw new Error('A valid branch is required')
+  if (input.receivedQuantityPreimage && (!Number.isSafeInteger(input.batchId) || Number(input.batchId) <= 0)) {
+    throw new Error('An exact receipt quantity requires an existing received date')
+  }
+  if (input.preserveHistoricalAttribution && !input.receivedQuantityPreimage) {
+    throw new Error('Historical receipt attribution requires an exact existing receipt preimage')
+  }
   const receivedAt = normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10)
   const lotCode = dateToBatchCode(receivedAt) as string
   const batchKey = input.provenanceKey ? ` event:${input.provenanceKey}` : input.receiptLotTarget?.batchKey ?? lotCode
@@ -334,6 +345,9 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
     receiptBaseline: input.receiptLotTarget?.baselineBatchId ?? 0,
     receiptExistingBatchId: input.receiptLotTarget?.existingBatchId ?? null,
     reservedBatchId: reservedBatchId ?? null,
+    receivedQuantityBefore: input.receivedQuantityPreimage?.quantity ?? null,
+    receivedQuantityAfter: input.receivedQuantityPreimage
+      ? subtractCountedQuantity(input.receivedQuantityPreimage.quantity ?? 0, [-quantity]) : null,
   }
   const productIdSql = productClientRequestId
     ? `(SELECT id FROM products WHERE client_request_id = @productClientRequestId AND client_request_id <> '')`
@@ -345,8 +359,8 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
           is_active = 1,
           expiry_date = CASE WHEN @expiryProvided = 1 THEN @expiryDate ELSE expiry_date END,
           notes = CASE WHEN @notesProvided = 1 THEN @notes ELSE notes END,
-          ${LOT_ATTRIBUTION_SET_SQL},
-          received_quantity = COALESCE(received_quantity, 0) + @quantity,
+          ${input.preserveHistoricalAttribution ? '' : `${LOT_ATTRIBUTION_SET_SQL},`}
+          received_quantity = ${input.receivedQuantityPreimage ? '@receivedQuantityAfter' : 'COALESCE(received_quantity, 0) + @quantity'},
           received_cost_usd = CASE WHEN @receivedCostUsd IS NULL THEN received_cost_usd
             ELSE @receivedCostAfter END,
           updated_at = CURRENT_TIMESTAMP
@@ -379,14 +393,7 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
   const batchIdSql = explicitBatch
     ? '@batchId'
     : `(SELECT id FROM product_batches WHERE variant_product_id = ${productIdSql} AND batch_key = @batchKey)`
-  return {
-    productIdSql,
-    batchIdSql,
-    batchKey,
-    lotCode,
-    receivedAt,
-    params,
-    statements: [
+  const metadataStatements: StockWriteStatement[] = [
       { sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products WHERE id=${productIdSql} AND is_active IS NOT 1)
           THEN json_extract('[]','$[product_has_stock]') ELSE 1 END`, params },
       ...(reservedBatchId !== undefined ? [{
@@ -418,7 +425,17 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
           ) END`,
         params,
       }]),
+      ...(input.receivedQuantityPreimage ? [{
+        sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_batches WHERE id=@batchId
+          AND variant_product_id=${productIdSql} AND received_quantity IS @receivedQuantityBefore)
+          THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`, params,
+      }] : []),
       metadata,
+  ]
+  return {
+    productIdSql, batchIdSql, batchKey, lotCode, receivedAt, params, metadataStatements,
+    statements: [
+      ...metadataStatements,
       {
         sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity)
           VALUES (${batchIdSql}, @branchId, @quantity)
@@ -659,7 +676,7 @@ export async function receiveBatchStock(db: D1Compat, input: {
   ]
   if (input.atomicMark?.execute) {
     await input.atomicMark.execute(db, statements)
-  } else await db.batch(statements)
+  } else await executeStockTransaction(db, statements, 'retry')
   const batch = await db.prepare(
     `SELECT id, batch_number, lot_code FROM product_batches
       WHERE variant_product_id = @productId AND
@@ -701,6 +718,15 @@ export function parseReceiptSellingPrice(usdValue: unknown, khrValue: unknown): 
 
 export type ReceiptSellingPriceRow = { id: number; selling_price_usd: number | null; selling_price_khr: number | null }
 
+export const RECEIPT_SELLING_PRICE_CHANGED = {
+  error: 'The product selling price changed. Nothing was changed. Refresh the product and retry this line.',
+  code: 'receipt_selling_price_changed',
+} as const
+
+export function isReceiptSellingPriceConflict(error: unknown): boolean {
+  return /receipt_selling_price_changed/.test(error instanceof Error ? error.message : String(error))
+}
+
 /** The price write a receipt carries, or null when the row already sells at that price. */
 export function planReceiptSellingPrice(row: ReceiptSellingPriceRow, price: ReceiptSellingPrice): {
   statement: StockWriteStatement
@@ -715,9 +741,11 @@ export function planReceiptSellingPrice(row: ReceiptSellingPriceRow, price: Rece
   if (price.khr != null) { before.selling_price_khr = row.selling_price_khr; after.selling_price_khr = price.khr }
   return {
     statement: {
-      sql: `UPDATE products SET selling_price_usd = @sellingUsd${price.khr != null ? ', selling_price_khr = @sellingKhr' : ''},
+      sql: `UPDATE products SET selling_price_usd = CASE WHEN selling_price_usd IS @previousSellingUsd${price.khr != null ? ' AND selling_price_khr IS @previousSellingKhr' : ''}
+          THEN @sellingUsd ELSE json_extract('[]','$[receipt_selling_price_changed]') END${price.khr != null ? ', selling_price_khr = @sellingKhr' : ''},
           updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
-      params: { productId: row.id, sellingUsd: price.usd, ...(price.khr != null ? { sellingKhr: price.khr } : {}) },
+      params: { productId: row.id, sellingUsd: price.usd, previousSellingUsd: row.selling_price_usd,
+        ...(price.khr != null ? { sellingKhr: price.khr, previousSellingKhr: row.selling_price_khr } : {}) },
     },
     before,
     after,
@@ -761,6 +789,8 @@ export function planRemoveStockFromBatch(input: RemoveBatchStockPlanInput): { st
   if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Quantity must be a positive number')
   const params = { batchId, productId, branchId, quantity }
   return { statements: [
+    ...planBranchStockRemoval({ productId, branchId, quantity }).slice(0,1),
+    { sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=@batchId AND branch_id=@branchId AND quantity-${ordinarySubsetSql('@productId', '@branchId', '@batchId')}>=@quantity) THEN 1 ELSE json_extract('[1]','$[counted_ordinary_conflict]') END`, params },
     {
       sql: `UPDATE branch_batch_stock SET quantity = quantity - @quantity, updated_at = datetime('now')
             WHERE batch_id = @batchId AND branch_id = @branchId`,
@@ -808,17 +838,26 @@ export function planRemoveStockFromBatch(input: RemoveBatchStockPlanInput): { st
 //     receiving on it again reactivates it.
 // Run inside the caller's atomic db.batch AFTER the stock decrement so the
 // emptiness test sees the post-revert quantities.
-export function planUnreceiveBatchStock(input: { batchId: number; quantity: number; totalCostUsd: number | null }): StockWriteStatement[] {
+export function planUnreceiveBatchStock(input: { batchId: number; quantity: number; totalCostUsd: number | null; receivedQuantityPreimage?: { quantity: number | null } }): StockWriteStatement[] {
   const batchId = Number(input.batchId)
   const quantity = Number(input.quantity)
   if (!Number.isSafeInteger(batchId) || batchId <= 0) throw new Error('A valid received date is required')
   if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Quantity must be a positive number')
   const totalCostUsd = input.totalCostUsd == null ? null : roundMoney4(Number(input.totalCostUsd))
-  const params = { batchId, quantity, totalCostUsd }
+  const params = { batchId, quantity, totalCostUsd,
+    receivedQuantityBefore: input.receivedQuantityPreimage?.quantity ?? null,
+    receivedQuantityAfter: input.receivedQuantityPreimage?.quantity == null ? null
+      : Math.max(0, subtractCountedQuantity(input.receivedQuantityPreimage.quantity, [quantity])),
+  }
   return [
+    ...(input.receivedQuantityPreimage ? [{
+      sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_batches WHERE id=@batchId
+        AND received_quantity IS @receivedQuantityBefore)
+        THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`, params,
+    }] : []),
     {
       sql: `UPDATE product_batches SET
-              received_quantity = CASE WHEN received_quantity IS NULL THEN NULL ELSE MAX(0, received_quantity - @quantity) END,
+              received_quantity = ${input.receivedQuantityPreimage ? '@receivedQuantityAfter' : 'CASE WHEN received_quantity IS NULL THEN NULL ELSE MAX(0, received_quantity - @quantity) END'},
               received_cost_usd = CASE WHEN received_cost_usd IS NULL THEN NULL ELSE MAX(0, ROUND(received_cost_usd - COALESCE(@totalCostUsd, 0), 4)) END,
               updated_at = CURRENT_TIMESTAMP
             WHERE id = @batchId`,
@@ -869,7 +908,7 @@ export async function removeStockFromBatch(db: D1Compat, input: {
   const available = Number(batch.available) || 0
   if (input.quantity > available) throw new InsufficientBatchStockError(available)
 
-  await db.batch([
+  await executeStockTransaction(db, [
     {
       sql: `UPDATE branch_batch_stock SET quantity = MAX(0, quantity - @quantity), updated_at = datetime('now')
             WHERE batch_id = @batchId AND branch_id = @branchId`,
@@ -883,7 +922,7 @@ export async function removeStockFromBatch(db: D1Compat, input: {
       sql: `UPDATE products SET stock_quantity = MAX(0, COALESCE(stock_quantity, 0) - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
       params: { productId: input.productId, quantity: input.quantity },
     },
-  ])
+  ], 'retry')
 
   return { productName: batch.productName, lotCode: batch.lotCode, batchNumber: batch.batchNumber }
 }
@@ -946,14 +985,13 @@ export async function resolveDestinationBatch(
       batchNumber,
     },
   }
-  if (options?.writeGuard) {
-    const results = await db.batch([options.writeGuard, insertStatement])
-    const insertedId = Number(results[1]?.meta?.last_row_id ?? 0)
-    if (!Number.isSafeInteger(insertedId) || insertedId <= 0) throw new Error('Destination received date was not created')
-    return insertedId
-  }
-  const inserted = await db.prepare(insertStatement.sql).run(insertStatement.params)
-  return Number(inserted.lastInsertRowid)
+  const results = await executeStockTransaction(db, [
+    ...(options?.writeGuard ? [options.writeGuard] : []),
+    insertStatement,
+  ], 'retry')
+  const insertedId = Number(results[results.length - 1]?.meta?.last_row_id ?? 0)
+  if (!Number.isSafeInteger(insertedId) || insertedId <= 0) throw new Error('Destination received date was not created')
+  return insertedId
 }
 
 
@@ -962,7 +1000,7 @@ export async function resolveDestinationBatch(
 // caller's whole atomic batch, so an oversell fails instead of flooring the lot.
 export function decrementBatchStockStrictStatement(batchId: number, branchId: number, quantity: number): { sql: string; params: Record<string, unknown> } {
   return {
-    sql: `UPDATE branch_batch_stock SET quantity = quantity - @quantity, updated_at = datetime('now')
+    sql: `UPDATE branch_batch_stock SET quantity = CASE WHEN quantity-@quantity>=${ordinarySubsetSql('(SELECT variant_product_id FROM product_batches WHERE id=@batchId)', '@branchId', '@batchId')} THEN quantity-@quantity ELSE json_extract('[1]','$[counted_ordinary_conflict]') END, updated_at = datetime('now')
           WHERE batch_id = @batchId AND branch_id = @branchId`,
     params: { batchId, branchId, quantity },
   }
@@ -1007,25 +1045,43 @@ export type FifoLotAvailability = {
   receivedAt?: string | null
   expiryDate: string | null
   available: number
+  quantityPreimage?: number
+  tagQuantitiesPreimage?: string
+}
+
+export function fifoLotsFromProjectedCountedStock(stock: import('./countedDamagedStock').CountedStockPlan): FifoLotAvailability[] {
+  return stock.projectedReceiptSources().sort((a,b)=>a.fifoRank-b.fifoRank).map(({fifoRank,...lot})=>lot)
 }
 
 // Active lots with sellable stock at the branch, oldest received_at first
 // (NULL received dates sort last -- an undated legacy lot is drawn only
 // after every dated one), then batch_number/id for a stable tiebreak.
+export function tagQuantityTermsSql(product: string, branch: string, batch: string): string {
+  return `(SELECT json_group_array(quantity_remaining) FROM (SELECT quantity_remaining FROM damaged_stock_lots
+    WHERE product_id=${product} AND branch_id=${branch} AND batch_id IS ${batch} ORDER BY id LIMIT 10001))`
+}
+
+function exactLotAvailability(row: { available: number; tag_quantities: string }): number {
+  const terms = JSON.parse(row.tag_quantities) as number[]
+  if (terms.length > 10000) throw new MoneyPrecisionError('too_many_terms')
+  return Math.max(0, subtractCountedQuantity(Number(row.available), terms))
+}
+
 export async function readFifoLotAvailability(db: D1Compat, productId: number, branchId: number): Promise<FifoLotAvailability[]> {
   const rows = await db.prepare(`
-    SELECT pb.id AS batch_id, pb.lot_code, pb.received_at, pb.expiry_date, bbs.quantity AS available
+    SELECT pb.id AS batch_id, pb.lot_code, pb.received_at, pb.expiry_date, bbs.quantity AS available, ${tagQuantityTermsSql('pb.variant_product_id','bbs.branch_id','pb.id')} AS tag_quantities
     FROM product_batches pb
     JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
     WHERE pb.variant_product_id = @productId AND pb.is_active = 1 AND bbs.quantity > 0
     ORDER BY (pb.received_at IS NULL) ASC, pb.received_at ASC, pb.batch_number ASC, pb.id ASC
-  `).all<{ batch_id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; available: number }>({ productId, branchId })
+  `).all<{ batch_id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; available: number; tag_quantities: string }>({ productId, branchId })
   return rows.map((row) => ({
     batchId: Number(row.batch_id),
     lotCode: row.lot_code ?? null,
     receivedAt: row.received_at ?? null,
     expiryDate: row.expiry_date ?? null,
-    available: Math.max(0, Number(row.available) || 0),
+    available: exactLotAvailability(row),
+    quantityPreimage:Number(row.available), tagQuantitiesPreimage:row.tag_quantities,
   }))
 }
 
@@ -1047,7 +1103,7 @@ export async function readFifoLotAvailabilityForCart(
   // product ids (branches are few, usually one POS branch).
   const rows = await selectInChunks(productIds, branchIds.length, (chunk) => db.prepare(`
     SELECT pb.variant_product_id AS product_id, bbs.branch_id AS branch_id,
-           pb.id AS batch_id, pb.lot_code, pb.received_at, pb.expiry_date, bbs.quantity AS available
+           pb.id AS batch_id, pb.lot_code, pb.received_at, pb.expiry_date, bbs.quantity AS available, ${tagQuantityTermsSql('pb.variant_product_id','bbs.branch_id','pb.id')} AS tag_quantities
     FROM product_batches pb
     JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
     WHERE pb.variant_product_id IN (${chunk.map(() => '?').join(',')})
@@ -1055,7 +1111,7 @@ export async function readFifoLotAvailabilityForCart(
       AND pb.is_active = 1 AND bbs.quantity > 0
     ORDER BY pb.variant_product_id ASC, bbs.branch_id ASC,
              (pb.received_at IS NULL) ASC, pb.received_at ASC, pb.batch_number ASC, pb.id ASC
-  `).all<{ product_id: number; branch_id: number; batch_id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; available: number }>([...chunk, ...branchIds]))
+  `).all<{ product_id: number; branch_id: number; batch_id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; available: number; tag_quantities: string }>([...chunk, ...branchIds]))
   for (const row of rows) {
     const key = `${Number(row.product_id)}:${Number(row.branch_id)}`
     const list = map.get(key) || []
@@ -1064,7 +1120,8 @@ export async function readFifoLotAvailabilityForCart(
       lotCode: row.lot_code ?? null,
       receivedAt: row.received_at ?? null,
       expiryDate: row.expiry_date ?? null,
-      available: Math.max(0, Number(row.available) || 0),
+      available: exactLotAvailability(row),
+    quantityPreimage:Number(row.available), tagQuantitiesPreimage:row.tag_quantities,
     })
     map.set(key, list)
   }
@@ -1091,7 +1148,7 @@ export function allocateAcrossLots(lots: FifoLotAvailability[], quantity: number
     // rows still carry their nullable receivedAt value for audit/returns.
     if (lot.receivedAt !== undefined) allocation.receivedAt = lot.receivedAt
     takes.push(allocation)
-    remaining -= take
+    remaining = subtractCountedQuantity(remaining, [take])
   }
   return { takes, uncovered: remaining }
 }
@@ -1156,7 +1213,7 @@ export function planBranchStockRemoval(input: { productId: number; branchId: num
     {
       sql: `SELECT CASE WHEN EXISTS(
           SELECT 1 FROM branch_stock
-          WHERE product_id=@productId AND branch_id=@branchId AND quantity>=@quantity
+          WHERE product_id=@productId AND branch_id=@branchId AND quantity-${ordinarySubsetSql('@productId', '@branchId')}>=@quantity
         ) THEN 1 ELSE json_extract('stock_removal_conflict','$') END AS branch_stock_guard`,
       params,
     },
@@ -1246,6 +1303,7 @@ export function planRemoveStockAcrossBatches(input: {
   remaining = Math.max(0, remaining)
 
   const statements: StockWriteStatement[] = [
+    ordinaryNullCapacityGuard(productId, branchId, remaining),
     // The exact pre-read allocation and its cost snapshot travel together.
     // Fail the entire D1 batch before any decrement if a concurrent write
     // consumed/deleted/reassigned one of those lots. A newly inserted FIFO
@@ -1255,7 +1313,7 @@ export function planRemoveStockAcrossBatches(input: {
           SELECT 1 FROM branch_batch_stock bbs
           JOIN product_batches pb ON pb.id=bbs.batch_id
           WHERE bbs.batch_id=@batchId AND bbs.branch_id=@branchId
-            AND pb.variant_product_id=@productId AND pb.is_active=1 AND bbs.quantity>=@quantity
+            AND pb.variant_product_id=@productId AND pb.is_active=1 AND bbs.quantity-${ordinarySubsetSql('@productId', '@branchId', '@batchId')}>=@quantity
         ) THEN 1 ELSE json_extract('captured_batch_allocation_conflict','$') END AS allocation_guard`,
       params: { batchId, branchId, productId, quantity: take },
     })),

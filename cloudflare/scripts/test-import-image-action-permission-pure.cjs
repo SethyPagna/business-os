@@ -133,6 +133,12 @@ function loadImportRoute(state) {
   }
   const requireAuth = async (c, next) => { c.set('user', c.env.TEST_USER); await next() }
   const importEngine = new Proxy({
+    persistedImportApplyState: (value) => {
+      try {
+        const state = JSON.parse(typeof value === 'string' ? value : '{}').genericApply
+        return state && typeof state === 'object' && !Array.isArray(state) ? state : null
+      } catch { return null }
+    },
     PREFLIGHT_MAX_ROWS: 1000,
     // CUTOVER-LR: no fixture here addresses a disabled branch, so the approve/retry redirect gate lets it through.
     importBranchRedirectGate: async () => ({ target: null, addressedBranchId: null }),

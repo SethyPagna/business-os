@@ -16,14 +16,17 @@ function load(file) {
   return mod.exports
 }
 const backup = load('lib/backup.ts')
-const { dropAllCustomTables } = load('lib/coreDataInvariants.ts')
+const { dropAllCustomTables: dropWithCommit } = load('lib/coreDataInvariants.ts')
+const dropAllCustomTables = env => dropWithCommit(env, statements => env.legacyDb.batch(statements))
 const { assertCustomTableName } = load('lib/customTableName.ts')
 function fixture(names, chunkSize = 100000, columns = ['id', 'name']) {
   const sql = new DatabaseSync(':memory:')
   sql.exec(`CREATE TABLE custom_tables(id INTEGER PRIMARY KEY, name TEXT NOT NULL);
     INSERT INTO custom_tables VALUES(99,'ct_existing');
-    CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT);
-    INSERT INTO system_flags VALUES('dataset_generation','permanent-generation');
+    CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT);
+    INSERT INTO system_flags(key,value) VALUES('dataset_generation','permanent-generation');
+    INSERT INTO system_flags(key,value) VALUES('stock_schema_epoch','legacy-separate-pool-v1');
+    INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore","token":"custom-table-proof","backupKey":"probe.json","phase":"deleting","startedAt":"2026-10-01T00:00:00Z","startedBy":"fixture","updatedAt":"2026-10-01T00:00:00Z"}');
     CREATE TABLE transfer_operation_receipts(id TEXT PRIMARY KEY);
     INSERT INTO transfer_operation_receipts VALUES('permanent-retry-id');
     CREATE TABLE transfer_run_retirements(id TEXT PRIMARY KEY);
@@ -47,19 +50,30 @@ function fixture(names, chunkSize = 100000, columns = ['id', 'name']) {
     for (let i = 0; i < bytes.length; i += chunkSize) controller.enqueue(bytes.slice(i, i + chunkSize))
     controller.close()
   } })
-  const env = { DB: { prepare: prepared, batch: async stmts => { for (const s of stmts) await s.run() } },
+  const env = { DB: { prepare: prepared, batch: async stmts => {
+    sql.exec('BEGIN')
+    try { const results=[]; for (const s of stmts) results.push(await s.run()); sql.exec('COMMIT'); return results }
+    catch (error) { sql.exec('ROLLBACK'); throw error }
+  } },
     ASSETS: { get: async (key, options) => {
       if (key !== 'backups/cloudflare/probe.json') return null
       const metadata = { key, etag: require('node:crypto').createHash('sha256').update(document).digest('hex'), version: 'fixture-upload', size: Buffer.byteLength(document) }
       if (options?.onlyIf?.etagMatches && options.onlyIf.etagMatches !== metadata.etag) return metadata
       return { ...metadata, body: body(), customMetadata: { format: 'business-os-cloudflare-backup' } }
     } },
-    legacyDb: { prepare: text => ({ all: async () => sql.prepare(text).all(), run: async () => { writes.push(text); sql.prepare(text).run() } }) },
+    legacyDb: {
+      prepare: text => ({ all: async () => sql.prepare(text).all(), run: async () => { writes.push(text); sql.prepare(text).run() } }),
+      batch: async statements => {
+        sql.exec('BEGIN')
+        try { for (const { sql: text } of statements) { writes.push(text); sql.exec(text) } sql.exec('COMMIT') }
+        catch (error) { sql.exec('ROLLBACK'); throw error }
+      },
+    },
   }
   return { sql, writes, env, body }
 }
 function preserved(f) {
-  assert.equal(f.sql.prepare('SELECT value FROM system_flags').get().value, 'permanent-generation')
+  assert.equal(f.sql.prepare("SELECT value FROM system_flags WHERE key='dataset_generation'").get().value, 'permanent-generation')
   assert.equal(f.sql.prepare('SELECT id FROM transfer_operation_receipts').get().id, 'permanent-retry-id')
   assert.equal(f.sql.prepare('SELECT id FROM transfer_run_retirements').get().id, 'permanent-retirement-id')
   assert.equal(f.sql.prepare('SELECT id FROM ct_safe').get().id, 7)
@@ -73,7 +87,7 @@ async function run() {
     assert.doesNotThrow(() => assertCustomTableName(name))
     const f = fixture([name], 1)
     await backup.validateCloudflareBackup(f.env, 'probe.json')
-    await backup.restoreCloudflareBackup(f.env, 'probe.json')
+    await backup.restoreCloudflareBackup(f.env, 'probe.json', undefined, 'custom-table-proof')
     assert.equal(f.sql.prepare('SELECT name FROM custom_tables').get().name, name)
     // CREATE only synthetic names validated above, never an input system name.
     f.sql.exec(`CREATE TABLE IF NOT EXISTS "${name}"(id INTEGER PRIMARY KEY)`)
@@ -115,7 +129,7 @@ async function run() {
   }
   {
     const f = fixture(['ct_safe', 'ct_safe'])
-    await backup.restoreCloudflareBackup(f.env, 'probe.json')
+    await backup.restoreCloudflareBackup(f.env, 'probe.json', undefined, 'custom-table-proof')
     assert.deepEqual(await dropAllCustomTables(f.env), ['ct_safe', 'ct_safe'], 'duplicate valid metadata remains idempotent with IF EXISTS')
     assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM custom_tables').get().n, 0)
     assert.ok(f.sql.prepare('SELECT * FROM system_flags').get()); f.sql.close(); cases++
@@ -134,7 +148,7 @@ async function run() {
     const unsafeDrop = new Function('getDb', code + '; return dropAllCustomTables')(env => env.legacyDb)
     const f = fixture([])
     f.sql.exec("UPDATE custom_tables SET name='system_flags'")
-    await unsafeDrop(f.env)
+    await unsafeDrop(f.env, statements => f.env.legacyDb.batch(statements))
     assert.equal(f.sql.prepare("SELECT 1 FROM sqlite_master WHERE name='system_flags'").get(), undefined)
     f.sql.close(); cases++
   }

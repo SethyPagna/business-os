@@ -66,6 +66,18 @@ const conflicts = read('components/products/import/ProductImportConflictsModal.t
 const contacts = read('components/contacts/ContactImportConflictsModal.tsx')
 const tracker = read('components/shared/BackgroundImportTracker.tsx')
 
+runTest('all product import job displays localize persisted refusals through the shared mapper', () => {
+  const review = read('components/products/import/ProductServerImportReviewScreen.tsx')
+  const bulk = read('components/products/import/BulkImportModal.tsx')
+  assert.ok(review.includes('const localizedJobError = localizeBranchRuleError(jobError, t)'))
+  assert.ok(review.includes('{importRowDetailText(row, tr)}'), 'row details reuse the existing shared code and warning mapper')
+  assert.equal((review.match(/\{localizedJobError \|\|/g) || []).length, 2, 'manual and direct-apply progress both translate')
+  assert.ok(bulk.includes('localizeBranchRuleError(currentJob.last_error || currentJob.error, key => t?.(key))'))
+  assert.ok(tracker.includes("localizeBranchRuleError(String(job.last_error || '').trim(), t)"))
+  assert.ok(!bulk.includes('Backend error:'), 'diagnostic label is replaced by the shared localized Error label')
+})
+
+
 // --- 1. the modal has an i18n hook at all --------------------------------
 
 runTest('ProductImportConflictsModal accepts an optional t and defines the sibling tr() helper', () => {

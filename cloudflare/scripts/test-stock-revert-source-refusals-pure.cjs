@@ -60,15 +60,15 @@ async function main() {
   assert.deepEqual(revertible, [...REVERTIBLE_MOVEMENT_TYPES].sort(), 'every revertible type is in the table')
 
   for (const c of cases) {
-    const f = fixture()
-    try {
-      f.sql.exec(`
+    const f = fixture(sql => sql.exec(`
         UPDATE products SET stock_quantity=20 WHERE id=1; UPDATE branch_stock SET quantity=20 WHERE product_id=1 AND branch_id=1;
         INSERT INTO products(id, name, barcode, stock_quantity, is_active) VALUES(2, 'Other', 'OTH-2', 0, 1);
         INSERT INTO sales(id) VALUES(${SALE_ID}), (${COLLIDING_ID});
         INSERT INTO sale_items(sale_id, product_id) VALUES(${SALE_ID}, 1), (${COLLIDING_ID}, 2);
         INSERT INTO returns(id) VALUES(${RETURN_ID}), (${COLLIDING_ID});
-        INSERT INTO return_items(return_id, product_id) VALUES(${RETURN_ID}, 1), (${COLLIDING_ID}, 1);`)
+        INSERT INTO return_items(return_id, product_id) VALUES(${RETURN_ID}, 1), (${COLLIDING_ID}, 1);`))
+    try {
+      
       const id = Number(f.sql.prepare(`INSERT INTO inventory_movements(product_id, branch_id, branch_name, movement_type, quantity, reason, reference_id, created_at)
         VALUES(1, 1, 'Shop', @type, @qty, @reason, @ref, '2026-09-20 03:00:00')`).run({ type: c.type, qty: c.qty ?? 2, reason: c.reason ?? 'probe', ref: c.ref == null ? null : String(c.ref) }).lastInsertRowid)
       const before = JSON.stringify(f.sql.prepare('SELECT (SELECT quantity FROM branch_stock WHERE product_id=1) b, (SELECT stock_quantity FROM products WHERE id=1) p, (SELECT COUNT(*) FROM inventory_movements) n').get())

@@ -30,8 +30,8 @@ function modules(actor = user, realEffects = false) {
   return load
 }
 
-async function setup(mode, actor = user, realEffects = false) {
-  const f = fixture()
+async function setup(mode, actor = user, realEffects = false, seedBeforeFence) {
+  const f = fixture(seedBeforeFence)
   const load = modules(actor, realEffects)
   const db = load('lib/db.ts').getDb(f.env)
   const lot = await load('lib/productBatches.ts').receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 5, receivedDate: '2026-09-05', unitCostUsd: 2, supplierName: 'Fixture Supplier' })
@@ -45,9 +45,9 @@ async function setup(mode, actor = user, realEffects = false) {
         ...(mode.endsWith('tagged') ? { conditionTag: 'broken' } : {}) }
   body.client_request_id = `intake-${mode}-request-0001`
   const url = mode.startsWith('receive') ? '/api/batches' : '/api/inventory/adjust'
-  const send = async (request = body) => {
+  const send = async (request = body, extraHeaders = {}) => {
     const pending = []
-    const res = await app.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) }, f.env, { waitUntil(p) { pending.push(Promise.resolve(p)) } })
+    const res = await app.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...extraHeaders }, body: JSON.stringify(request) }, f.env, { waitUntil(p) { pending.push(Promise.resolve(p)) } })
     await Promise.allSettled(pending)
     return { status: res.status, body: await res.json().catch(() => ({})) }
   }
@@ -103,9 +103,16 @@ async function main() {
     await check(`${mode} actual route success and receipt replay`, async () => {
       assert.equal(result.status, 200, JSON.stringify(result))
       const branch = probe.sql.prepare('SELECT quantity q FROM branch_stock WHERE product_id=1 AND branch_id=1').get().q
-      assert.equal(branch, mode.endsWith('tagged') ? 5 : 8)
+      assert.equal(branch, 8)
       const held = probe.sql.prepare('SELECT COALESCE(SUM(quantity_remaining),0) q FROM damaged_stock_lots').get().q
       assert.equal(held, mode.endsWith('tagged') ? 3 : 0)
+      assert.equal(branch-held,mode.endsWith('tagged')?5:8,'ordinary entitlement preserves the original intake meaning')
+      assert.equal(probe.sql.prepare('SELECT stock_quantity q FROM products WHERE id=1').get().q,8)
+      assert.equal(probe.sql.prepare('SELECT SUM(quantity) q FROM branch_batch_stock WHERE branch_id=1').get().q,8)
+      if(mode.endsWith('tagged')) {
+        assert.equal(probe.sql.prepare("SELECT COUNT(*) n FROM inventory_movements WHERE movement_type='condition_tag' AND quantity=0").get().n,1)
+        assert.equal(probe.sql.prepare("SELECT COUNT(*) n FROM inventory_movements WHERE movement_type='damage_out'").get().n,0)
+      }
       assert.equal(probe.sql.prepare("SELECT COUNT(*) n FROM inventory_movements WHERE movement_type=?").get(mode.startsWith('correction') ? 'adjustment' : 'add').n, 1)
       assert.equal(probe.sql.prepare('SELECT received_quantity q FROM product_batches WHERE id=?').get(probe.lot.batchId).q, mode.startsWith('correction') ? 5 : 8)
       assert.ok(attempts <= 50, `actual attempted statements ${attempts}`)
@@ -122,7 +129,12 @@ async function main() {
       const before = f.state()
       if (index === length) {
         const batch = f.env.DB.batch
-        f.env.DB.batch = statements => batch([...statements, { text: 'SELECT 1', params: [] }])
+        let inject = true
+        f.env.DB.batch = statements => {
+          const scheduled = inject
+          inject = false
+          return batch(scheduled ? [...statements, { text: 'SELECT 1', params: [] }] : statements)
+        }
       }
       f.failBatchStatement(index)
       const refused = await f.send()
@@ -228,14 +240,124 @@ async function main() {
     assert.equal((await f.send(current)).status, 200)
   })
   await check('removed product and wrong selected lot refuse all intake effects', async () => {
-    const f = await setup('correction-tagged')
+    const f = await setup('correction-tagged', user, false, sql => {
+      sql.exec("INSERT INTO products(id,name,is_active,stock_quantity) VALUES(2,'Removed fixture',0,0)")
+    })
     const before = f.state()
     assert.equal((await f.send({ ...f.body, batchId: 9999 })).status, 409)
     assert.equal(f.state(), before)
-    f.sql.exec('INSERT INTO products(id,name,is_active,stock_quantity) VALUES(2,\'Removed fixture\',0,0)')
     const removed = f.state()
     assert.equal((await f.send({ ...f.body, productId: 2, batchId: 'new', attribution: undefined, unitCostUsd: 2, supplierName: 'Fixture Supplier' })).status, 409)
     assert.equal(f.state(), removed)
+  })
+  await check('receipt snapshot retains empty lots, global maximum, existing cost and new identity', async () => {
+    const f = await setup('add-tagged', user, false, sql => {
+      sql.exec("INSERT INTO products(id,name,is_active,stock_quantity) VALUES(2,'Empty fixture',1,0)")
+    })
+    const db = f.load('lib/db.ts').getDb(f.env)
+    const { prepareReceiptLotTarget } = f.load('lib/productBatches.ts')
+    const empty = await prepareReceiptLotTarget(db, { productId: 2, receivedDate: '2026-09-05', unitCostUsd: 2 })
+    assert.equal(empty.existingBatchId, null)
+    assert.equal(empty.maximumBatchId, f.lot.batchId)
+    assert.equal(empty.baselineBatchId, 0)
+    assert.equal(empty.existingReceivedCostUsd, null)
+    const existing = await prepareReceiptLotTarget(db, { productId: 1, batchId: f.lot.batchId, unitCostUsd: 2 })
+    assert.equal(existing.existingBatchId, f.lot.batchId)
+    assert.equal(existing.existingReceivedCostUsd, 10)
+    const answer = await f.send({ ...f.body, productId: 2, batchId: 'new' })
+    assert.equal(answer.status, 200, JSON.stringify(answer))
+    assert.equal(f.sql.prepare('SELECT SUM(quantity_remaining) n FROM damaged_stock_lots WHERE product_id=2').get().n, 3)
+  })
+  for (const [label, sql] of [
+    ['removed product', 'UPDATE products SET is_active=0 WHERE id=2'],
+    ['retired branch', 'UPDATE branches SET is_active=0 WHERE id=1'],
+    ['changed selected lot cost', 'UPDATE product_batches SET unit_cost_usd=3 WHERE id=1'],
+    ['changed receipt cost preimage', 'UPDATE product_batches SET received_cost_usd=11 WHERE id=1'],
+  ]) await check(`consolidated preflight still refuses concurrent ${label} in the actual batch`, async () => {
+    const f = await setup('add-tagged', user, false, sql => {
+      sql.exec("INSERT INTO products(id,name,is_active,stock_quantity) VALUES(2,'Empty race fixture',1,0)")
+    })
+    let afterConcurrent
+    f.beforeCommit(async () => {
+      await f.load('lib/stockTransaction.ts').executeStockTransaction(f.load('lib/db.ts').getDb(f.env), [{ sql }], 'once')
+      afterConcurrent = f.state()
+    })
+    const answer = await f.send(label === 'removed product' ? { ...f.body, productId: 2, batchId: 'new' } : f.body)
+    assert.notEqual(answer.status, 200, JSON.stringify(answer))
+    assert.equal(f.state(), afterConcurrent, 'only the separately committed concurrent change remains')
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM stock_mutation_receipts WHERE written=1').get().n, 0)
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+  })
+  await check('consolidated branch snapshot preserves unknown and retired-branch refusals', async () => {
+    const f = await setup('add-tagged', user, false, sql => {
+      sql.exec("INSERT INTO branches(id,name,role,is_active) VALUES(2,'Retired fixture','warehouse',0)")
+    })
+    const before = f.state()
+    const unknown = await f.send({ ...f.body, branchId: 9999 })
+    assert.equal(unknown.status, 409)
+    assert.equal(unknown.body.code, 'receiving_branch_inactive')
+    const retired = await f.send({ ...f.body, branchId: 2 })
+    assert.equal(retired.status, 409)
+    assert.equal(retired.body.code, 'branch_redirect_required')
+    assert.equal(f.state(), before)
+  })
+  for (const mode of ['add-tagged', 'receive']) for (const [column, initial, competing, requested] of [
+    ['selling_price_usd', null, 0, { sellingPriceUsd: 5 }],
+    ['selling_price_usd', 0, null, { sellingPriceUsd: 5 }],
+    ['selling_price_usd', 2, 9, { sellingPriceUsd: 5 }],
+    ['selling_price_khr', null, 0, { sellingPriceUsd: 5, sellingPriceKhr: 20000 }],
+  ]) await check(`${mode}: concurrent ${column} ${initial} to ${competing} refuses before stock or price overwrite`, async () => {
+    const f = await setup(mode, user, false, sql => {
+      sql.prepare(`UPDATE products SET ${column}=? WHERE id=1`).run(initial)
+    })
+    let afterConcurrent
+    f.beforeCommit(async () => {
+      await f.load('lib/stockTransaction.ts').executeStockTransaction(f.load('lib/db.ts').getDb(f.env), [{
+        sql: `UPDATE products SET ${column}=@value WHERE id=1`, params: { value: competing },
+      }], 'once')
+      afterConcurrent = f.state()
+    })
+    const request = { ...f.body, ...(mode === 'receive' ? { selling_price_usd: requested.sellingPriceUsd, ...(requested.sellingPriceKhr != null ? { selling_price_khr: requested.sellingPriceKhr } : {}) } : requested) }
+    const refused = await f.send(request)
+    assert.equal(refused.status, 409, JSON.stringify(refused))
+    assert.equal(refused.body.code, 'receipt_selling_price_changed')
+    assert.equal(refused.body.error, f.load('lib/productBatches.ts').RECEIPT_SELLING_PRICE_CHANGED.error)
+    assert.equal(f.state(), afterConcurrent)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM stock_mutation_receipts WHERE written=1').get().n, 0)
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    assert.equal((await f.send(request)).status, 200, 'explicit retry uses the new server snapshot and original request ID')
+    const afterRetry = f.state()
+    assert.equal((await f.send(request)).status, 200)
+    assert.equal(f.state(), afterRetry, 'replaying the successful retry cannot add stock again')
+  })
+  for (const race of ['baseline', 'reserved id']) await check(`consolidated new-lot snapshot refuses concurrent ${race}`, async () => {
+    const f = await setup('add-tagged')
+    const db = f.load('lib/db.ts').getDb(f.env)
+    let afterConcurrent
+    f.beforeCommit(async () => {
+      if (race === 'baseline') await f.load('lib/stockTransaction.ts').executeStockTransaction(db, [{
+        sql: "INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(1,9,'manual',1)",
+      }], 'once')
+      else await f.load('lib/productBatches.ts').receiveBatchStock(db, {
+        productId: 1, branchId: 1, quantity: 1, receivedDate: '2026-09-06', unitCostUsd: 9, supplierName: 'Concurrent supplier',
+      })
+      afterConcurrent = f.state()
+    })
+    const refused = await f.send({ ...f.body, batchId: 'new' })
+    assert.notEqual(refused.status, 200, JSON.stringify(refused))
+    assert.equal(f.state(), afterConcurrent)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM stock_mutation_receipts WHERE written=1').get().n, 0)
+  })
+  await check('consolidated branch snapshot preserves explicit redirected intake and addressed history', async () => {
+    const f = await setup('add-tagged', user, false, sql => {
+      sql.exec("INSERT INTO branches(id,name,role,is_active,successor_branch_id) VALUES(2,'Retired fixture','warehouse',0,1)")
+    })
+    const answer = await f.send({ ...f.body, branchId: 2, batchId: 'new' }, { 'X-Branch-Redirect': '1' })
+    assert.equal(answer.status, 200, JSON.stringify(answer))
+    assert.equal(f.sql.prepare('SELECT SUM(quantity_remaining) n FROM damaged_stock_lots WHERE branch_id=1').get().n, 3)
+    const rows = f.sql.prepare('SELECT branch_id,addressed_branch_name FROM inventory_movements ORDER BY id').all()
+    assert.equal(rows.length, 2)
+    assert.ok(rows.every(row => row.branch_id === 1 && row.addressed_branch_name === 'Retired fixture'))
   })
   console.log(JSON.stringify({ passed, failures, budgets }))
   if (failures) process.exitCode = 1

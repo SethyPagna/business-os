@@ -14,7 +14,7 @@
 // system's live branch_stock for the products/branches involved, and
 // any PRIOR stock-count-import movements this file previously created
 // for the same product+branch+date combinations, it returns exactly
-// what should change -- which old movements to delete, which new ones
+// what should change -- which old movements to compensate, which new ones
 // to insert, and what branch_stock should end up at. It does no I/O and
 // knows nothing about SQL, CSV columns, or branch-name resolution --
 // those are the caller's job (routes/importJobs.ts or wherever this
@@ -155,12 +155,12 @@ export interface BatchDrain {
 }
 
 export interface StockCountPlan {
-  // Existing movement ids to delete first (superseded by this run's
-  // fresh computation for the same product+branch+date).
+  // Legacy selection field: ids superseded by this run. The apply appends
+  // compensating records and retains these originals; it never deletes them.
   movementsToDelete: number[]
   // The same superseded movements with their recorded effect (aggregate
   // signed quantity + lot provenance). The apply layer REVERSES exactly
-  // these in the same atomic batch that deletes them -- the deltas in
+  // these in the same atomic batch that appends their counters -- the deltas in
   // movementsToCreate are relative to the baseline with these undone, so
   // deleting a row without reversing it would apply its effect twice.
   supersededMovements: ExistingCountMovement[]

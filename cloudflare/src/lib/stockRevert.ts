@@ -1,3 +1,4 @@
+import { executeStockTransaction, StockTransactionUnavailableError, StockTransactionOutcomeUnknownError } from './stockTransaction'
 import { productStockGuardStatement, productStockGuardError } from './productStockGuard'
 // Part 553: reverting a Stock Change ledger row. A revert is a COMPENSATING
 // counter-movement -- it posts the opposite stock effect and records a new
@@ -338,6 +339,9 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   // row stayed at the figure the restore left it, and they would exist in
   // neither place. The real reversal for these transitions is the tagged
   // row's own Restore / Remove entirely actions, which move both ledgers.
+  if (/^(?:revert:)*condition_history:/.test(String(m.reference_id||''))) {
+    return refuse(409, 'revert_use_history', 'This condition compensation has exact lot history. Use its History Undo/Redo so physical stock and tags remain together.')
+  }
   if (isDamagedLotReference(m.reference_id)) {
     return refuse(400, 'revert_tagged_row', 'This movement belongs to a tagged (damaged, broken, expired ...) stock row. Reverse it from that row on the product instead, so the tagged quantity moves with the stock.')
   }
@@ -580,17 +584,18 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     },
   })
   try {
-    await db.batch(addressedStatements(landing, [
+    await executeStockTransaction(db, addressedStatements(landing, [
       ...(revertType === 'add' ? [productStockGuardStatement([productId], 'active')] : []),
       { sql: ALREADY_REVERTED_GUARD, params: { ref: counterRef, movementId: Number(m.id) } },
       receiptRowGuard(m),
       ...statements,
       { sql: 'DELETE FROM stock_session_guards', params: {} },
-    ]))
+    ]), 'retry')
   } catch (err) {
     // Nothing was written. Tell the loser of a race apart from a stock
     // change by reading what the winner committed.
     if (await revertExists(db, counterRef)) return ALREADY_REVERTED
+    if (err instanceof StockTransactionUnavailableError || err instanceof StockTransactionOutcomeUnknownError) throw err
     const message = err instanceof Error ? err.message : String(err)
     const activeGuard = productStockGuardError(err)
 
@@ -612,10 +617,9 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
 // repo's existing idiom): 0 when a counter-movement for this row already
 // exists, or when the row itself is gone, which aborts the whole batch before
 // any stock moves. The second half is FX-stock F3: a dated stock count
-// re-apply reverses and DELETES its own superseded movement in one batch; a
+// re-apply reverses its own superseded movement with an appended counter; a
 // revert that read that row just before would otherwise compensate a
-// movement that no longer exists (the stock moved twice, and a revert:<id>
-// row points at nothing). The caller reports it as stock_changed.
+// movement already compensated (or historically deleted), moving stock twice. The caller reports it as stock_changed.
 const ALREADY_REVERTED_GUARD = `INSERT INTO stock_session_guards (guard_value)
   SELECT CASE WHEN EXISTS (SELECT 1 FROM inventory_movements WHERE reference_id = @ref)
     OR NOT EXISTS (SELECT 1 FROM inventory_movements WHERE id = @movementId) THEN 0 ELSE 1 END`

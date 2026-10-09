@@ -12,11 +12,18 @@
 // codes, returns/helpers/returnRefusalError.ts, saleSubmitErrors.ts) is not restated here.
 export const RESTATED_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   bulk_price_outcome_unknown: 'bulk_price_outcome_unknown',
+  receipt_selling_price_changed: 'receipt_selling_price_changed',
+  stock_schema_unavailable: 'stock_receipt_unavailable',
+  stock_transaction_outcome_unknown: 'stock_request_outcome_unknown',
   stock_session_query_budget_exceeded: 'stock_session_query_budget_exceeded',
   customer_return_over_plan_budget: 'customer_return_over_plan_budget',
   stock_import_unit_over_tier_budget: 'stock_import_unit_over_tier_budget',
   stock_import_reconcile_over_tier_budget: 'stock_import_reconcile_over_tier_budget',
   import_queue_required: 'import_queue_required',
+  product_import_finalization_changed: 'product_import_finalization_changed',
+  import_apply_already_started: 'import_apply_already_started',
+  import_source_upload_in_progress: 'import_source_upload_in_progress',
+  import_job_changed: 'import_job_changed',
   bulk_delete_queue_unavailable: 'bulk_delete_queue_unavailable',
   bulk_delete_queue_resume_required: 'bulk_delete_queue_resume_required',
   product_has_stock: 'product_has_stock',

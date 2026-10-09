@@ -27,7 +27,7 @@ fixture = fixture.replace('if (kind && options.tailRetries && !failures.has(kind
       if (kind && options.tailRetries && nth % 2 === 1) {`)
 // Failure injection stays at the actual binding dispatch. D1Compat must retry the real product
 // snapshot once per line; each failed and successful attempt is metered by the unchanged Worker.
-const preflightSql = 'SELECT id, name, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr FROM products WHERE id = '
+const preflightSql = baseline ? 'SELECT id, name, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr FROM products WHERE id = ' : 'SELECT id, name, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr, is_active FROM products WHERE id = '
 assert.ok(fixture.includes('const kind = /SELECT namespace'), 'actual dispatch classifier remains present')
 const branchPreflightSql = 'SELECT id, name, role, is_active, successor_branch_id FROM branches'
 const lotPreflightSql = baseline ? 'SELECT id,batch_key,received_at,unit_cost_usd FROM product_batches WHERE variant_product_id=' : 'SELECT pb.id,pb.batch_key,pb.received_at,pb.unit_cost_usd,pb.received_cost_usd,'
@@ -36,9 +36,6 @@ fixture = fixture.replace('const kind = /SELECT namespace', `const kind = option
           : options.preflightRetries && sql.trim().replace(/\\s+/g, ' ').startsWith(${JSON.stringify(preflightSql)}) ? 'preflight' : /SELECT namespace`)
 fixture = fixture.replace("throw Error('D1_ERROR: network synthetic tail retry')", "throw Error('D1_ERROR: network synthetic ' + kind + ' retry')")
 fixture = fixture.replace('let physical = 0', 'let physical = 0; let requests = 0')
-fixture = fixture.replace('let physical = 0', 'let physical = 0; let trace = []')
-fixture = fixture.replace('physical += statements.length', 'trace.push(...statements); physical += statements.length')
-fixture = fixture.replace('physical = 0; failures = new Set()', 'physical = 0; trace = []; failures = new Set()')
 fixture = fixture.replace('const call = async (cold = false) => {', 'const call = async (cold = false) => { requests++')
 fixture = fixture.replace('physical, failures:', `physical, requests, attemptedStatements: observed.invocation.attemptedStatements,
       preflightAttempts: trace.filter(sql => sql.startsWith(${JSON.stringify(preflightSql)})).length,
@@ -138,8 +135,9 @@ async function lifecycleChecks() {
   assert.equal(first.body.results.length, 24)
   assert.ok(first.body.results.every((r, i) => r.ok && r.key === 'line-' + i))
   assert.equal(first.body.results.filter(r => r.code === 'deferred').length, 0)
-  assert.deepEqual(first.effects, { ...before, received: before.received + 120, held: before.held + 120,
+  assert.deepEqual(first.effects, { ...before, stock: before.stock + 120, lots: before.lots + 120, received: before.received + 120, held: before.held + 120,
     movement: before.movement + 48, written: before.written + 24 })
+  assert.equal(first.effects.stock-first.effects.held,before.stock-before.held,'ordinary entitlement stays unchanged across counted tagged intake')
   // Every line settled; the continuation set is empty, so the client issues no retry request.
   f.sql.close()
 
@@ -160,7 +158,7 @@ async function lifecycleChecks() {
   assert.equal(pressured.preflightAttempts, 2 * (saved + 1), 'one failed and one successful actual product read for each attempted line, including first deferred line')
   assert.ok(pressured.body.results.slice(0, saved).every(r => r.ok))
   assert.ok(pressured.body.results.slice(saved).every(r => r.code === 'deferred'), 'untouched suffix keeps original order')
-  assert.deepEqual(pressured.effects, { ...pressureBefore, received: pressureBefore.received + saved * 5,
+  assert.deepEqual(pressured.effects, { ...pressureBefore, stock: pressureBefore.stock + saved * 5, lots: pressureBefore.lots + saved * 5, received: pressureBefore.received + saved * 5,
     held: pressureBefore.held + saved * 5, movement: pressureBefore.movement + saved * 2, written: pressureBefore.written + saved })
   const originalLines = Array.from({ length: 24 }, (_, i) => ({ key: 'line-' + i, wire: 'adjust',
     body: { ...pressure.body, client_request_id: pressure.body.client_request_id + '-' + i } }))
@@ -177,7 +175,7 @@ async function lifecycleChecks() {
   assert.ok(retry.body.results.every((r, i) => r.ok && r.key === originalLines[saved + i].key))
   assert.equal(retry.body.results.length, deferred)
   assert.deepEqual(receiptIds(), originalLines.map(line => line.body.client_request_id), 'continuation retains every original ID and never re-applies saved prefix')
-  assert.deepEqual(retry.effects, { ...pressureBefore, received: pressureBefore.received + 120, held: pressureBefore.held + 120,
+  assert.deepEqual(retry.effects, { ...pressureBefore, stock: pressureBefore.stock + 120, lots: pressureBefore.lots + 120, received: pressureBefore.received + 120, held: pressureBefore.held + 120,
     movement: pressureBefore.movement + 48, written: pressureBefore.written + 24 })
   const replay = await pressure.call()
   assert.equal(replay.status, 200)

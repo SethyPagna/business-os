@@ -1,3 +1,5 @@
+import { executeRawRestoreStockTransaction, stockTransactionStatementCount } from './stockTransaction'
+import { restoreStockAuthority } from './maintenance'
 import type { Env } from '../index'
 import { getPlanLimits } from './planTier'
 import { copyObject, listObjects } from './r2'
@@ -177,6 +179,7 @@ export const BACKUP_TABLES = [
   'fee_operation_receipts',
   'loyalty_point_adjustments',
   'inventory_movements',
+  'dated_count_decision_receipts', 'dated_count_apply_receipts',
   'stock_transfers',
   'stock_row_moves',
   'import_jobs',
@@ -1182,6 +1185,7 @@ export type RestoreProgress = { phase: 'deleting' | 'inserting' | 'assets'; tabl
 export const SALE_REPLAY_RESTORE_BUNDLE = [
   'pending_actions', 'branches', 'suppliers', 'file_assets', 'product_images',
   'products', 'product_batches', 'branch_stock', 'branch_batch_stock', 'damaged_stock_lots',
+  'dated_count_decision_receipts', 'dated_count_apply_receipts',
   'sales', 'sale_items', 'sale_item_batch_allocations', 'returns', 'return_items',
   'return_item_batch_allocations', 'fees', 'fee_operation_receipts', 'inventory_movements', 'action_history',
   'stock_lot_adjustment_operations',
@@ -1202,6 +1206,8 @@ export const SALE_REPLAY_RESTORE_BUNDLE = [
   'stock_session_revisions', 'stock_session_operations', 'stock_session_members',
   'transfer_operation_receipts', 'transfer_operation_members', 'stock_transfers',
 ] as const
+
+const DATED_COUNT_RECEIPT_TABLES = new Set(['dated_count_decision_receipts', 'dated_count_apply_receipts'])
 
 function restoreSafeSectionTables(tables: readonly string[]): Set<string> {
   const requested = new Set(tables)
@@ -1425,7 +1431,7 @@ function restoreStockAdmission() {
   }
 }
 
-export async function restoreCloudflareBackup(env: Env, source: string, onProgress?: (progress: RestoreProgress) => Promise<void>) {
+export async function restoreCloudflareBackup(env: Env, source: string, onProgress?: (progress: RestoreProgress) => Promise<void>, restoreToken?: string) {
   const key = resolveBackupKey(source)
 
   // Streaming restore (10.1). The old path called object.json() -- the ENTIRE
@@ -1529,10 +1535,7 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   if (presentTables.some((table, index) => table !== orderedTables[index])) {
     throw new Error('Cannot restore this backup: tables are not in dependency order. No database rows have been changed.')
   }
-  if (orderedTables.includes('products') || orderedTables.some(table => table.startsWith('stock_session_'))) {
-    const maintenance = await env.DB.prepare("SELECT 1 ok FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore'").first<{ ok: number }>()
-    if (!maintenance) throw new Error('Stock replay restore requires restore maintenance mode to preserve revision counters. No database rows have been changed.')
-  }
+  await restoreStockAuthority(env, restoreToken || '', source)
 
   // Acquire and verify the second response BEFORE any destructive callback or
   // DELETE. A later overwrite cannot substitute bytes into this held response.
@@ -1542,6 +1545,11 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
     let statementCount = 0
     const deletes: D1PreparedStatement[] = []
     for (const table of [...orderedTables].reverse()) {
+      if (DATED_COUNT_RECEIPT_TABLES.has(table)) {
+        deletes.push(env.DB.prepare(`UPDATE ${qid(table)}
+          SET invalidated_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE invalidated_at IS NULL`))
+        continue
+      }
       if (table === 'products') {
         // This is the existing snapshot-replacement path: child ledgers have
         // been cleared in this same transaction. Recompute their derived cache
@@ -1554,10 +1562,12 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
       }
       deletes.push(env.DB.prepare(`DELETE FROM ${qid(table)}`))
     }
-    if (deletes.length > 100) throw new Error('Restore deletion plan exceeds the atomic statement limit. No database rows have been changed.')
+    if (stockTransactionStatementCount(deletes.length) > 100) throw new Error('Restore deletion plan exceeds the atomic statement limit. No database rows have been changed.')
     await onProgress?.({ phase: 'deleting' })
-    if (deletes.length) await env.DB.batch(deletes)
-    statementCount += deletes.length
+    if (deletes.length) {
+      await executeRawRestoreStockTransaction(env.DB, deletes, await restoreStockAuthority(env, restoreToken || '', source))
+      statementCount += stockTransactionStatementCount(deletes.length)
+    }
 
     // Pass 2: stream rows and insert in bounded batches, per table.
     const CHUNK = 80
@@ -1578,8 +1588,8 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
 
     const flush = async () => {
       if (!batch.length) return
-      await env.DB.batch(batch)
-      statementCount += batch.length
+      await executeRawRestoreStockTransaction(env.DB, batch, await restoreStockAuthority(env, restoreToken || '', source))
+      statementCount += stockTransactionStatementCount(batch.length)
       tableRowsDone += batch.length
       batch = []
       flushesSinceProgress += 1
@@ -1602,17 +1612,24 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
         let liveColumns = liveColumnsCache.get(ev.table)
         if (!liveColumns) { liveColumns = new Set(await tableColumns(env, ev.table)); liveColumnsCache.set(ev.table, liveColumns) }
         insertColumns = ev.columns.filter((c) => liveColumns!.has(c))
+        if (DATED_COUNT_RECEIPT_TABLES.has(ev.table)) {
+          for (const column of ['invalidated_at', 'updated_at']) if (!insertColumns.includes(column)) insertColumns.push(column)
+        }
         if (!insertColumns.length) { insertSql = ''; continue }
         // sql-bound-params: bounded by construction -- one parameter per COLUMN,
         // one statement per row, and a table has far fewer than 100 columns, so
         // this never nears D1's 100-parameter cap.
         const placeholders = insertColumns.map(() => '?').join(', ')
         insertSql = `INSERT INTO ${qid(ev.table)} (${insertColumns.map(qid).join(', ')}) VALUES (${placeholders})`
+          + (DATED_COUNT_RECEIPT_TABLES.has(ev.table) ? ' ON CONFLICT(actor_id, request_id) DO NOTHING' : '')
         restoreTable = ev.table
       } else if (ev.type === 'row') {
         if (!restoreTable || !insertSql) continue
         if (restoreTable === 'custom_tables') assertCustomTableName(ev.row?.name)
-        const values = insertColumns.map((c) => ev.row[c] ?? null)
+        const restoredRow = DATED_COUNT_RECEIPT_TABLES.has(restoreTable)
+          ? { ...ev.row, invalidated_at: ev.row.invalidated_at || new Date().toISOString(), updated_at: new Date().toISOString() }
+          : ev.row
+        const values = insertColumns.map((c) => restoredRow[c] ?? null)
         batch.push(env.DB.prepare(insertSql).bind(...values))
         if (batch.length >= CHUNK) await flush()
       } else if (ev.type === 'meta') {

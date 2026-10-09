@@ -49,28 +49,28 @@ const revision = (db) => Number(db.prepare("SELECT COALESCE(MAX(revision),0) r F
 const edit = (db, key, extra) => ({ client_request_id: key, quantity: 5, expected_quantity: 3, expected_batch_id: 701, expected_batch_revision: revision(db), reason: 'recount', ...extra })
 
 async function main() {
-  await W.check('before: a quantity edit and a cost edit write equal business statements apart from verified admission to the eb5dd0ba3 oracle', async () => {
+  await W.check('before: a quantity edit and a cost edit write equal business statements apart from verified admission to the historical oracle', async () => {
     for (const extra of [{}, { quantity: 3, unit_cost_usd: 3.5 }, { quantity: 1 }]) {
-      const dbNew = withShopLine(W.build('before'), 'before'); const dbOld = withShopLine(W.build('before'), 'before')
+      const dbNew = W.build('before', db => withShopLine(db, 'before')); const dbOld = W.build('before', db => withShopLine(db, 'before'), { historical: true })
       const capNew = []; const capOld = []
       const a = await W.call(inventory(fresh), dbNew, 'POST', '/stock-in-lines/4000/edit', edit(dbNew, 'edit-before-0001', extra), { capture: capNew, redirect: 1 })
       const b = await W.call(inventory(oracle), dbOld, 'POST', '/stock-in-lines/4000/edit', edit(dbOld, 'edit-before-0001', extra), { capture: capOld })
       assert.equal(a.status, 200, JSON.stringify(a.body))
       assert.equal(W.normalised(a), W.normalised(b))
-      assert.equal(W.normalised(withoutProductAdmission(capNew)), W.normalised(withoutProductAdmission(capOld)))
+      assert.equal(W.normalised(W.businessStatements(withoutProductAdmission(capNew))), W.normalised(W.businessStatements(withoutProductAdmission(capOld))))
       assert.equal(W.normalised(W.ledger(dbNew)), W.normalised(W.ledger(dbOld)))
     }
   })
 
   await W.check('control: the oracle adds the edited units into the disabled branch', async () => {
-    const db = withShopLine(W.build('after'), 'after')
+    const db = W.build('after', db => withShopLine(db, 'after'), { historical: true })
     const old = await W.call(inventory(oracle), db, 'POST', '/stock-in-lines/4000/edit', edit(db, 'edit-oracle-0001'))
     assert.equal(old.status, 200, JSON.stringify(old.body))
     assert.equal(W.qty(db, 'branch_stock', 'product_id', 20, 2), 2, 'two units appeared at Old Shop')
   })
 
   await W.check('after: a quantity increase asks, refuses invalid targets, writes nothing; confirmed it lands at LC Store on lot 701', async () => {
-    const db = withShopLine(W.build('after'), 'after')
+    const db = W.build('after', db => withShopLine(db, 'after'))
     await W.assertRefusals(db, (redirect) => W.call(inventory(fresh), db, 'POST', '/stock-in-lines/4000/edit', edit(db, 'edit-after-0001'), { redirect }), 'edit')
     const ok = await W.call(inventory(fresh), db, 'POST', '/stock-in-lines/4000/edit', edit(db, 'edit-after-0001'), { redirect: 1 })
     assert.equal(ok.status, 200, JSON.stringify(ok.body))
@@ -84,7 +84,7 @@ async function main() {
   })
 
   await W.check('after: a quantity decrease confirmed takes the units off lot 701 at LC Store', async () => {
-    const db = withShopLine(W.build('after'), 'after')
+    const db = W.build('after', db => withShopLine(db, 'after'))
     const ok = await W.call(inventory(fresh), db, 'POST', '/stock-in-lines/4000/edit', edit(db, 'edit-after-0002', { quantity: 1 }), { redirect: 1 })
     assert.equal(ok.status, 200, JSON.stringify(ok.body))
     assert.equal(W.qty(db, 'branch_batch_stock', 'batch_id', 701, 1), 1)
@@ -92,7 +92,7 @@ async function main() {
   })
 
   await W.check('after: a cost-only edit moves no stock and asks nothing', async () => {
-    const db = withShopLine(W.build('after'), 'after')
+    const db = W.build('after', db => withShopLine(db, 'after'))
     const stockBefore = W.plain(db.prepare('SELECT * FROM branch_stock ORDER BY rowid').all())
     const ok = await W.call(inventory(fresh), db, 'POST', '/stock-in-lines/4000/edit', edit(db, 'edit-after-0003', { quantity: 3, unit_cost_usd: 3.5 }))
     assert.equal(ok.status, 200, JSON.stringify(ok.body))
@@ -101,7 +101,7 @@ async function main() {
   })
 
   await W.check('race: the target disabled between plan and commit aborts the edit, nothing written', async () => {
-    const db = withShopLine(W.build('after'), 'after')
+    const db = W.build('after', db => withShopLine(db, 'after'))
     db.prepare("INSERT INTO branches(id,name,role,is_default,is_active) VALUES(3,'Annex','shop',0,1)").run()
     const before = W.ledger(db)
     const res = await W.callWith(inventory(fresh), W.raceBinding(db, () => db.exec('UPDATE branches SET is_active=0 WHERE id=1')), 'POST', '/stock-in-lines/4000/edit', edit(db, 'edit-race-0001'), 1)

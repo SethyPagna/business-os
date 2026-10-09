@@ -4,8 +4,22 @@ const fs = require('node:fs')
 const path = require('node:path')
 const assert = require('node:assert/strict')
 const worldFile = path.join(__dirname, 'test-intake-full-request-budget.cjs')
-const source = fs.readFileSync(worldFile, 'utf8').split(';(async () => {')[0]
-const { world } = new Function('require', '__dirname', source + ';return {world};')(require, __dirname)
+const fixtureModule = { exports: require('./test-stock-session-atomic.cjs') }
+let source = fs.readFileSync(worldFile, 'utf8').split(';(async () => {')[0]
+assert.equal(source.split('const f = fixture()').length, 2)
+source = source.replace('const f = fixture()', 'const f = fixture(options.seedBeforeFence)')
+const worldRequire = name => name === './test-stock-session-atomic.cjs' ? fixtureModule.exports : require(name)
+const { world } = new Function('require', '__dirname', source + ';return {world};')(worldRequire, __dirname)
+function seedReceiptCase(sql, {variant, candidates, redirect, branch}) {
+  if (variant === 'existing') sql.exec("INSERT INTO products(id,name,barcode,stock_quantity,cost_price_usd,purchase_price_usd,selling_price_usd,is_active) VALUES(2,'Serum','DIFFERENT-1',0,2,2,3,1); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,0)")
+  for (let i = 0; i < candidates; i++) {
+    const created = sql.prepare('INSERT INTO products(name,barcode,stock_quantity,is_active) VALUES(?,?,0,1)').run('Serum','12345678'+i)
+    sql.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,0)').run(Number(created.lastInsertRowid))
+  }
+  if (redirect) sql.exec("INSERT INTO branches(id,name,is_active,successor_branch_id) VALUES(2,'Retired receiving',0,1)")
+  else if (branch === 2) sql.exec("INSERT INTO branches(id,name,is_active,is_default) VALUES(2,'Selected warehouse',1,0)")
+}
+
 
 function legacy(body, variant) {
   // Exact sealed Astra F1 payload, including supplied actors that must be ignored.
@@ -30,21 +44,16 @@ async function invoke(f, tier, cold, trace, headers = {}) {
   try { answer = await f.call(cold) } finally { globalThis.Request = NativeRequest }
   assert.equal(f.body.client_request_id, requestId, 'transport preserves the exact original intent ID')
   assert.ok(answer.physical <= (tier === 'free' ? 50 : 1000), `all actual outer/auth/failed/retry/background attempts fit ${tier}: ${answer.physical}`)
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0,'every settled invocation releases its stock permit')
   trace.push({ id: requestId, ...answer })
   console.log('MEASURED ' + JSON.stringify({ tier, ...trace.at(-1) }))
   return answer
 }
 async function receiptCase({ tier, variant, warm, tails, branch = 1, candidates = 0, untagged = false, healthy = false, omitBranch = false, redirect = false }) {
-  const f = await world(tier, warm ? 'add' : 'add-tagged', false, { tailRetries: tails })
+  const f = await world(tier, warm ? 'add' : 'add-tagged', false, { tailRetries: tails, seedBeforeFence: sql => seedReceiptCase(sql,{variant,candidates,redirect,branch}) })
   const trace = []
   try {
-    if (variant === 'existing') f.sql.exec("INSERT INTO products(id,name,barcode,stock_quantity,cost_price_usd,purchase_price_usd,selling_price_usd,is_active) VALUES(2,'Serum','DIFFERENT-1',0,2,2,3,1); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,0)")
-    for (let i = 0; i < candidates; i++) {
-      const created = f.sql.prepare('INSERT INTO products(name,barcode,stock_quantity,is_active) VALUES(?,?,0,1)').run('Serum', '12345678' + i)
-      f.sql.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,0)').run(Number(created.lastInsertRowid))
-    }
-    if (redirect) f.sql.exec("INSERT INTO branches(id,name,is_active,successor_branch_id) VALUES(2,'Retired receiving',0,1)")
-    else if (branch === 2) f.sql.exec("INSERT INTO branches(id,name,is_active,is_default) VALUES(2,'Selected warehouse',1,0)")
+    assert.throws(() => f.sql.exec("INSERT INTO products(name) VALUES('unguarded refusal')"), /stock_transaction_required/)
     if (warm) {
       let warmup = await invoke(f, tier, true, trace)
       if (warmup.status === 503) {
@@ -94,7 +103,10 @@ async function receiptCase({ tier, variant, warm, tails, branch = 1, candidates 
     assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM products WHERE barcode='DIFFERENT-1'").get().n, ['match','ui'].includes(variant) ? 0 : 1, 'no duplicate sibling on retry')
     const p = f.sql.prepare('SELECT barcode,cost_price_usd,purchase_price_usd,selling_price_usd FROM products WHERE id=?').get(target)
     assert.equal(p.barcode, ['match','ui'].includes(variant) ? 'SER-1' : 'DIFFERENT-1')
-    const catalogCost = ['match','ui'].includes(variant) ? 2 : 1.2
+    const originalQuantity = warm ? 8 : 5
+    const catalogCost = ['match','ui'].includes(variant)
+      ? Number(((originalQuantity * 2 + 6) / (originalQuantity + 5)).toFixed(4))
+      : 1.2
     assert.equal(p.cost_price_usd, catalogCost); assert.equal(p.purchase_price_usd, catalogCost); assert.equal(p.selling_price_usd, 5)
     const row = f.sql.prepare('SELECT * FROM stock_mutation_receipts WHERE request_id=?').get(id)
     assert.equal(row.actor_id, 7, 'real authenticated actor overrides userId/actorId99')
@@ -105,17 +117,18 @@ async function receiptCase({ tier, variant, warm, tails, branch = 1, candidates 
     assert.equal(ledger.length, untagged ? 1 : 2)
     for (const movement of ledger) {
       assert.equal(movement.product_id, target); assert.equal(movement.branch_id, branch); assert.equal(movement.user_id, 7)
-      assert.equal(movement.batch_id, saved.body.batchId); assert.equal(movement.quantity, 5)
+      assert.equal(movement.batch_id, saved.body.batchId)
+      assert.equal(movement.quantity, movement.movement_type === 'condition_tag' ? 0 : 5)
       assert.equal(movement.unit_cost_usd, 1.2); assert.equal(movement.total_cost_usd, 6)
     }
     if (redirect) assert.deepEqual(f.sql.prepare('SELECT addressed_branch_name FROM inventory_movements WHERE id>? ORDER BY id').all(JSON.parse(physicalBefore).inventory_movements.at(-1)?.id ?? 0), ledger.map(() => ({ addressed_branch_name:'Retired receiving' })), 'canonical landing preserves addressed branch in every movement')
-    if (!untagged) assert.equal(ledger[1].movement_type,'damage_out')
+    if (!untagged) assert.equal(ledger[1].movement_type,'condition_tag')
     assert.equal(ledger[0].movement_type, 'add'); assert.equal(ledger[0].free_quantity, 2)
     assert.equal(ledger[0].total_cost_usd, 6, 'three paid units at2 plus two free units retain six receipt dollars')
     assert.equal(f.sql.prepare('SELECT received_quantity,received_cost_usd,received_branch_id FROM product_batches WHERE id=?').get(saved.body.batchId).received_quantity, 5)
     assert.equal(f.sql.prepare('SELECT received_cost_usd FROM product_batches WHERE id=?').get(saved.body.batchId).received_cost_usd, 6)
     assert.equal(f.sql.prepare('SELECT received_branch_id FROM product_batches WHERE id=?').get(saved.body.batchId).received_branch_id, branch)
-    assert.deepEqual(saved.effects, { stock: before.stock + (untagged ? 5 : 0), lots: before.lots + (untagged ? 5 : 0),
+    assert.deepEqual(saved.effects, { stock: before.stock + 5, lots: before.lots + 5,
       received: before.received + 5, movement: before.movement + (untagged ? 1 : 2), held: before.held + (untagged ? 0 : 5), written: before.written + 1 })
     if (!untagged) {
       const held = f.sql.prepare('SELECT product_id,branch_id,batch_id,condition_tag,quantity_remaining,unit_cost_usd FROM damaged_stock_lots').all()

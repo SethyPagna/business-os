@@ -1,3 +1,4 @@
+import { stampOfflineSaleOwner } from './offlineQueueOwnership.ts'
 import { apiFetch, route } from './http.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
@@ -5,6 +6,122 @@ import { loadTransferRun, prepareTransferRun, saveTransferRun } from './branchTr
 // Records a definitive server refusal on the saved run (Edit/Discard in Inventory).
 import { executeTransferRun, type RecoverableTransferRun } from './transferRunRecovery.ts'
 import { receiveBatchWireBody, type ReceiveBatchPayload } from './batchesTransport.ts'
+
+export type DatedDecisionIntent = { canonical: string; body: Record<string, unknown>; completed: boolean }
+function datedIntentError(code: string): Error {
+  return Object.assign(new Error(code), { code })
+}
+function datedIntentKey(): string {
+  try {
+    const owner = stampOfflineSaleOwner({}).offline_owner
+    return `dated-decision-intent:v1:${JSON.stringify(owner)}`
+  } catch { throw datedIntentError('dated_decision_owner_mismatch') }
+}
+function validateDatedIntent(saved: DatedDecisionIntent): void {
+  if (!saved || typeof saved.canonical !== 'string' || typeof saved.completed !== 'boolean' || !saved.body || typeof saved.body.client_request_id !== 'string' || !/^[A-Za-z0-9_-]{8,120}$/.test(saved.body.client_request_id) || !saved.body.offline_owner) throw datedIntentError('dated_decision_storage_unreadable')
+  try { stampOfflineSaleOwner(saved.body) } catch { throw datedIntentError('dated_decision_owner_mismatch') }
+}
+export function loadDatedDecisionIntent(): DatedDecisionIntent | null {
+  const key = datedIntentKey()
+  let raw: string | null
+  try { raw = window.localStorage.getItem(key) } catch { throw datedIntentError('dated_decision_storage_unreadable') }
+  if (!raw) return null
+  let saved: DatedDecisionIntent
+  try { saved = JSON.parse(raw) as DatedDecisionIntent } catch { throw datedIntentError('dated_decision_storage_unreadable') }
+  validateDatedIntent(saved)
+  return saved
+}
+export function saveDatedDecisionIntent(intent: DatedDecisionIntent, replaceCompleted = false): void {
+  validateDatedIntent(intent)
+  const key = datedIntentKey()
+  const raw = JSON.stringify(intent)
+  try {
+    const saved = loadDatedDecisionIntent()
+    if (saved && (saved.canonical !== intent.canonical || JSON.stringify(saved.body) !== JSON.stringify(intent.body)) && !(replaceCompleted && saved.completed)) throw datedIntentError('dated_decision_pending_choices')
+    window.localStorage.setItem(key, raw)
+    if (window.localStorage.getItem(key) !== raw) throw new Error('Storage verification failed')
+  } catch (failure) {
+    if (failure && typeof failure === 'object' && 'code' in failure) throw failure
+    throw datedIntentError('dated_decision_storage_save_failed')
+  }
+}
+export function retireResetDatedDecisionIntent(intent: DatedDecisionIntent, failure: unknown): void {
+  if (!failure || typeof failure !== 'object' || (failure as { code?: unknown }).code !== 'dated_decision_reset_conflict') throw datedIntentError('dated_decision_retirement_failed')
+  validateDatedIntent(intent)
+  const key = datedIntentKey()
+  const expected = JSON.stringify(intent)
+  try {
+    const saved = loadDatedDecisionIntent()
+    if (!saved || JSON.stringify(saved) !== expected || window.localStorage.getItem(key) !== expected) throw new Error('Saved identity changed')
+    window.localStorage.removeItem(key)
+    if (window.localStorage.getItem(key) !== null) throw new Error('Storage removal failed')
+  } catch { throw datedIntentError('dated_decision_retirement_failed') }
+}
+export function prepareDatedDecisionIntent(payload: Record<string, unknown>): DatedDecisionIntent {
+  const canonical = JSON.stringify(payload)
+  const saved = loadDatedDecisionIntent()
+  if (saved && saved.canonical !== canonical && !saved.completed) throw datedIntentError('dated_decision_pending_choices')
+  if (saved && saved.canonical === canonical) return saved
+  const intent = { canonical, body: JSON.parse(JSON.stringify(ensureClientRequestId(stampOfflineSaleOwner(payload), 'dated-decision'))), completed: false }
+  saveDatedDecisionIntent(intent, true)
+  return intent
+}
+
+export type DatedCountApplyIntent = DatedDecisionIntent & { canReviewAgain?: boolean }
+function countIntentKey(): string {
+  try { return `dated-count-apply-intent:v1:${JSON.stringify(stampOfflineSaleOwner({}).offline_owner)}` }
+  catch { throw datedIntentError('dated_count_owner_mismatch') }
+}
+function validateCountIntent(intent: DatedCountApplyIntent): void {
+  if (!intent || typeof intent.canonical !== 'string' || typeof intent.completed !== 'boolean'
+    || !Array.isArray(intent.body?.entries) || typeof intent.body.client_request_id !== 'string' || !/^[A-Za-z0-9_-]{8,120}$/.test(intent.body.client_request_id)
+    || intent.canonical !== JSON.stringify({ entries: intent.body.entries })
+    || !intent.body.offline_owner || (intent.canReviewAgain !== undefined && typeof intent.canReviewAgain !== 'boolean')) throw datedIntentError('dated_count_storage_unreadable')
+  try { stampOfflineSaleOwner(intent.body) } catch { throw datedIntentError('dated_count_owner_mismatch') }
+}
+export function loadDatedCountApplyIntent(): DatedCountApplyIntent | null {
+  const key = countIntentKey()
+  let raw: string | null
+  try { raw = window.localStorage.getItem(key) } catch { throw datedIntentError('dated_count_storage_unreadable') }
+  if (!raw) return null
+  let intent: DatedCountApplyIntent
+  try { intent = JSON.parse(raw) as DatedCountApplyIntent } catch { throw datedIntentError('dated_count_storage_unreadable') }
+  validateCountIntent(intent)
+  return intent
+}
+export function saveDatedCountApplyIntent(intent: DatedCountApplyIntent, reviewed = false): void {
+  validateCountIntent(intent)
+  const key = countIntentKey(), raw = JSON.stringify(intent)
+  try {
+    const saved = loadDatedCountApplyIntent()
+    if (saved && (saved.canonical !== intent.canonical || JSON.stringify(saved.body) !== JSON.stringify(intent.body))
+      && !(reviewed && (saved.completed || saved.canReviewAgain))) throw datedIntentError('dated_count_pending_review')
+    window.localStorage.setItem(key, raw)
+    if (window.localStorage.getItem(key) !== raw) throw new Error('Storage verification failed')
+  } catch (failure) {
+    if (failure && typeof failure === 'object' && 'code' in failure) throw failure
+    throw datedIntentError('dated_count_storage_save_failed')
+  }
+}
+export function prepareDatedCountApplyIntent(entries: unknown[]): DatedCountApplyIntent {
+  const payload = JSON.parse(JSON.stringify({ entries })), canonical = JSON.stringify(payload)
+  const saved = loadDatedCountApplyIntent()
+  if (saved && !saved.completed && !saved.canReviewAgain) {
+    if (saved.canonical !== canonical) throw datedIntentError('dated_count_pending_review')
+    return saved
+  }
+  return { canonical, body: JSON.parse(JSON.stringify(ensureClientRequestId(stampOfflineSaleOwner(payload), 'dated-count'))), completed: false }
+}
+export function retireResetDatedCountApplyIntent(intent: DatedCountApplyIntent, failure: unknown): void {
+  if (!failure || typeof failure !== 'object' || (failure as { code?: unknown }).code !== 'dated_count_reset_conflict') throw datedIntentError('dated_count_retirement_failed')
+  validateCountIntent(intent)
+  const key = countIntentKey(), expected = JSON.stringify(intent)
+  try {
+    if (JSON.stringify(loadDatedCountApplyIntent()) !== expected || window.localStorage.getItem(key) !== expected) throw new Error('Saved identity changed')
+    window.localStorage.removeItem(key)
+    if (window.localStorage.getItem(key) !== null) throw new Error('Storage removal failed')
+  } catch { throw datedIntentError('dated_count_retirement_failed') }
+}
 
 type InventoryPayload = Record<string, unknown>
 
@@ -379,9 +496,10 @@ export function resolveDatedStockCountRows(rows: unknown[] = []): Promise<unknow
 }
 
 export function applyDatedStockCountDecisions(payload: InventoryPayload = {}): Promise<unknown> {
+  const body = JSON.parse(JSON.stringify(ensureClientRequestId(stampOfflineSaleOwner({ ...getDevicePayload(), ...payload }), 'dated-decision')))
   return route(
     'inventory:datedStockCount:applyDecisions',
-    () => apiFetch('POST', '/api/inventory/dated-stock-count/resolve/apply-decisions', { ...getDevicePayload(), ...(payload || {}) }),
+    () => apiFetch('POST', '/api/inventory/dated-stock-count/resolve/apply-decisions', body),
     null,
     true,
   )
@@ -396,10 +514,15 @@ export function previewDatedStockCount(entries: unknown[] = []): Promise<unknown
   )
 }
 
-export function applyDatedStockCount(entries: unknown[] = []): Promise<unknown> {
+export function applyDatedStockCount(payload: Record<string, unknown>): Promise<unknown> {
+  if (typeof payload.client_request_id !== 'string' || !/^[A-Za-z0-9_-]{8,120}$/.test(payload.client_request_id)) throw datedIntentError('dated_count_invalid_id')
+  if (!payload.offline_owner) throw datedIntentError('dated_count_owner_mismatch')
+  let body: Record<string, unknown>
+  try { body = JSON.parse(JSON.stringify(stampOfflineSaleOwner(payload))) }
+  catch { throw datedIntentError('dated_count_owner_mismatch') }
   return route(
     'inventory:datedStockCount:apply',
-    () => apiFetch('POST', '/api/inventory/dated-stock-count/apply', { ...getDevicePayload(), entries }),
+    () => apiFetch('POST', '/api/inventory/dated-stock-count/apply', body),
     null,
     true,
   )

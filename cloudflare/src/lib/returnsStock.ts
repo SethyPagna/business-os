@@ -1,4 +1,6 @@
-import { productStockGuardStatement, assertProductsActive } from './productStockGuard'
+import { planTaggedSaleSourceChange } from './saleLineAddition'
+import { CountedStockConflictError, ordinaryNullCapacityGuard, subtractCountedQuantity, sumCountedQuantities, planExactCountedOrdinaryChange, planExactCountedTaggedChange, type CountedStockPlan, type CountedTaggedIdentity } from './countedDamagedStock'
+import { productStockGuardStatement } from './productStockGuard'
 // K2 (Part 410, 11.12/11.13): the kernel for the NEW return stock semantics
 // -- the three-way per-item chooser and Replace. The locked design notes
 // this implements (progress.md "Returns/replacements" + "Damaged stock"):
@@ -7,8 +9,8 @@ import { productStockGuardStatement, assertProductsActive } from './productStock
 //     sellable, or restock as DAMAGED.
 //   - Damaged stock lives as traceable lots tied to the exact return,
 //     branch and batch (damaged_stock_lots, migration 0074) -- never as a
-//     duplicate "damaged" product row and never inside sellable
-//     branch_stock. POS's damage option (11.9) draws quantity_remaining
+//     duplicate "damaged" product row. In the counted epoch they remain
+//     a subset of physical branch_stock. POS's damage option (11.9) draws quantity_remaining
 //     down later; a lot that has been drawn from blocks un-doing the
 //     return edit that created it.
 //   - Replace may hand out any catalog product. routes/returns.ts records the
@@ -27,7 +29,7 @@ import { productStockGuardStatement, assertProductsActive } from './productStock
 // added, so scripts/test-returns-replace-damaged-pure.cjs can drive the
 // real logic against a real sqlite database.
 import type { D1Compat } from './db'
-import { InsufficientBatchStockError, planRemoveStockFromBatch, type StockWriteStatement } from './productBatches'
+import { planRemoveStockFromBatch, type StockWriteStatement } from './productBatches'
 import {
   DEFAULT_STOCK_CONDITION_TAG, parseStockConditionTag,
   TAGGED_DISPOSAL_MOVEMENT_TYPE, taggedReasonText,
@@ -206,7 +208,7 @@ export function planReturnLot(input: {
     const give = Math.min(Math.max(0, Number(alloc.outstanding) || 0), remaining)
     if (give <= 0) continue
     splits.push({ batchId: Number(alloc.batch_id), quantity: give })
-    remaining -= give
+    remaining = subtractCountedQuantity(remaining, [give])
   }
   if (remaining > 0 && input.saleLineBatchId != null) {
     splits.push({ batchId: Number(input.saleLineBatchId), quantity: remaining })
@@ -266,20 +268,15 @@ export function createDamagedLotStatement(input: {
   }
 }
 
-export async function createDamagedLot(db: D1Compat, input: {
-  productId: number
-  productName: string | null
-  branchId: number | null
-  batchId: number | null
-  returnId: number | string
+export type ReversedDamagedLot = {
+  product_id: number
+  product_name: string | null
+  branch_id: number | null
+  batch_id: number | null
   quantity: number
   reason: string | null
-  userId: number | string | null
-  userName: string | null
-}): Promise<void> {
-  await assertProductsActive(db, [input.productId])
-  const statement = createDamagedLotStatement({ ...input, returnIdSql: '@return_id' })
-  await db.prepare(statement.sql).run({ ...(statement.params as Record<string, unknown>), return_id: input.returnId })
+  created_by_user_id: number | string | null
+  created_by_user_name: string | null
 }
 
 export class ConsumedDamagedStockError extends Error {
@@ -309,14 +306,35 @@ export class ConsumedDamagedStockError extends Error {
 // records the return, then the SAME row is opened and drained to zero in one
 // batch, with a write_off booking the loss (removalLosses.ts counts
 // 'write_off' at cost). Opening the row rather than skipping it is
-// deliberate: reverseDamagedLots (return edit/cancel) finds it exactly like
+// deliberate: the return edit/cancel reversal finds it exactly like
 // an already-disposed remove-stock row -- quantity_remaining(0) <
 // quantity(original) -- and refuses the edit with the SAME
 // ConsumedDamagedStockError a sold-from lot gets, rather than silently
 // leaving an unreversed loss with nothing in `damaged_stock_lots` to key off.
 // This mirrors DISPOSE's own "no undo path" rule (removalLosses.ts): once
 // destroyed, a separate adjustment is the only way to correct it.
+export function planCountedReturnReceive(productId: number, branchId: number, batchId: number | null, quantity: number): StockWriteStatement[] {
+  if (![productId,branchId].every(id => Number.isSafeInteger(id) && id > 0) || !Number.isFinite(quantity) || quantity <= 0) throw new Error('Invalid returned stock identity')
+  if(batchId!==null && (!Number.isSafeInteger(batchId)||batchId<=0)) throw new Error('Invalid returned receipt identity')
+  const params = {productId,branchId,batchId,quantity}
+  const statements:StockWriteStatement[]=[{
+    sql:"SELECT CASE WHEN EXISTS(SELECT 1 FROM products WHERE id=@productId AND is_active=1) AND EXISTS(SELECT 1 FROM branches WHERE id=@branchId AND is_active=1) AND (@batchId IS NULL OR EXISTS(SELECT 1 FROM product_batches WHERE id=@batchId AND variant_product_id=@productId)) THEN 1 ELSE json_extract('[1]','$[return_stock_identity_conflict]') END",params}]
+  if(batchId!==null) statements.push(
+    {sql:'UPDATE product_batches SET is_active=1 WHERE id=@batchId AND variant_product_id=@productId AND is_active IS NOT 1',params},
+    {sql:'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)VALUES(@batchId,@branchId,@quantity)ON CONFLICT(batch_id,branch_id)DO UPDATE SET quantity=quantity+@quantity,updated_at=CURRENT_TIMESTAMP',params})
+  statements.push(
+    {sql:'INSERT INTO branch_stock(product_id,branch_id,quantity)VALUES(@productId,@branchId,@quantity)ON CONFLICT(product_id,branch_id)DO UPDATE SET quantity=quantity+@quantity',params},
+    {sql:'UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0)FROM branch_stock WHERE product_id=@productId),updated_at=CURRENT_TIMESTAMP WHERE id=@productId',params})
+  return statements
+}
+
+export function planProjectedCountedReturnReceive(exact: CountedStockPlan, batchId: number | null, quantity: number): StockWriteStatement[] {
+  return planExactCountedOrdinaryChange(exact, batchId, quantity,
+    batchId !== null && exact.requiresReceiptActivation(batchId) ? 'activateAndReceive' : 'receive')
+}
+
 export function planDamagedReturnLine(input: {
+  projectedStock?: CountedStockPlan
   productId: number
   productName: string | null
   branchId: number
@@ -336,8 +354,10 @@ export function planDamagedReturnLine(input: {
 }): StockWriteStatement[] {
   const quantity = Number(input.quantity)
   if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Damaged quantity must be positive')
+  if (input.projectedStock && (input.projectedStock.productId !== input.productId || input.projectedStock.branchId !== input.branchId)) throw new CountedStockConflictError()
   const statements: StockWriteStatement[] = [
-    productStockGuardStatement([input.productId], 'active'),
+    ...(input.projectedStock ? planProjectedCountedReturnReceive(input.projectedStock,input.batchId,quantity)
+      : planCountedReturnReceive(input.productId,input.branchId,input.batchId,quantity)),
     createDamagedLotStatement({
       productId: input.productId,
       productName: input.productName,
@@ -362,14 +382,23 @@ export function planDamagedReturnLine(input: {
       },
     },
   ]
+  if (input.projectedStock && input.disposition === 'keep') statements.unshift(...input.projectedStock.hold(input.batchId, quantity))
   if (input.disposition === 'remove') {
+    if (input.projectedStock) statements.push(...planExactCountedOrdinaryChange(input.projectedStock,input.batchId,quantity,'consume'))
+    else {
+    const physicalParams={productId:input.productId,branchId:input.branchId,batchId:input.batchId,quantity}
+    if(input.batchId !== null) statements.push({sql:'UPDATE branch_batch_stock SET quantity=quantity-@quantity WHERE batch_id=@batchId AND branch_id=@branchId',params:physicalParams})
+    statements.push({sql:'UPDATE branch_stock SET quantity=quantity-@quantity WHERE product_id=@productId AND branch_id=@branchId',params:physicalParams},
+      {sql:'UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0)FROM branch_stock WHERE product_id=@productId),updated_at=CURRENT_TIMESTAMP WHERE id=@productId',params:physicalParams})
+    }
+
     // The row this SAME call just opened, keyed the same way the create
     // path's own fallback-batch subquery pattern keys a just-inserted row:
     // by business identity within THIS batch/transaction, not a returned id.
     const lotRefSql = `(SELECT id FROM damaged_stock_lots WHERE return_id=${input.returnIdSql} AND product_id=@dsp_product_id AND branch_id=@dsp_branch_id ORDER BY id DESC LIMIT 1)`
     statements.push(
       {
-        sql: `UPDATE damaged_stock_lots SET quantity_remaining = quantity_remaining - @dsp_quantity, updated_at = CURRENT_TIMESTAMP
+        sql: `UPDATE damaged_stock_lots SET quantity_remaining = 0, updated_at = CURRENT_TIMESTAMP
               WHERE id = ${lotRefSql} AND quantity_remaining >= @dsp_quantity`,
         params: { dsp_product_id: input.productId, dsp_branch_id: input.branchId, dsp_quantity: quantity },
       },
@@ -396,33 +425,6 @@ export function planDamagedReturnLine(input: {
   return statements
 }
 
-// Editing a return re-applies its stock from scratch (see PATCH /:id in
-// routes/returns.ts), so its damaged lots must come back out first. A lot
-// that POS already drew from cannot be silently un-damaged -- that stock
-// left the building -- so consumption blocks the edit outright.
-export async function reverseDamagedLots(
-  db: D1Compat,
-  returnId: number | string,
-): Promise<Array<{ product_id: number; product_name: string | null; branch_id: number | null; batch_id: number | null; quantity: number; reason: string | null; created_by_user_id: number | string | null; created_by_user_name: string | null }>> {
-  const lots = await db.prepare(`
-    SELECT id, product_id, product_name, branch_id, batch_id, quantity, quantity_remaining, reason, created_by_user_id, created_by_user_name
-    FROM damaged_stock_lots WHERE return_id = @return_id
-  `).all<{ id: number; product_id: number; product_name: string | null; branch_id: number | null; batch_id: number | null; quantity: number; quantity_remaining: number; reason: string | null; created_by_user_id: number | string | null; created_by_user_name: string | null }>({ return_id: returnId })
-  if (!lots.length) return []
-  for (const lot of lots) {
-    if (Number(lot.quantity_remaining) < Number(lot.quantity)) {
-      throw new ConsumedDamagedStockError(String(lot.product_name || `product #${lot.product_id}`), Number(lot.quantity) - Number(lot.quantity_remaining))
-    }
-  }
-  await db.prepare('DELETE FROM damaged_stock_lots WHERE return_id = @return_id').run({ return_id: returnId })
-  // batch_id = the original sale lot the damaged units belonged to (0084
-  // reads it for the reversal movement's attribution). reason/created_by
-  // ride along so a failed EDIT can re-create these rows faithfully -- the
-  // validation above guarantees quantity_remaining === quantity, so a
-  // re-creation via createDamagedLot loses nothing.
-  return lots.map((lot) => ({ product_id: lot.product_id, product_name: lot.product_name, branch_id: lot.branch_id, batch_id: lot.batch_id ?? null, quantity: Number(lot.quantity), reason: lot.reason ?? null, created_by_user_id: lot.created_by_user_id ?? null, created_by_user_name: lot.created_by_user_name ?? null }))
-}
-
 export class InsufficientReplacementStockError extends Error {
   constructor(productName: string, requested: number, available: number) {
     super(`Insufficient stock to hand out ${requested} of ${productName} as a replacement: ${available} available in the selected branch`)
@@ -431,6 +433,10 @@ export class InsufficientReplacementStockError extends Error {
 }
 
 export function planReplacementStock(input: {
+  projectedStock?: CountedStockPlan
+  projectedTakes?: Array<{ batchId: number; quantity: number }>
+  tagged?: CountedTaggedIdentity & { conditionTag: string }
+  unlottedStock?: boolean
   productId: number
   productName: string
   branchId: number
@@ -445,6 +451,7 @@ export function planReplacementStock(input: {
 }): { statements: StockWriteStatement[]; usedBatch: boolean } {
   const quantity = Number(input.quantity)
   if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Replacement quantity must be positive')
+  if (input.projectedStock && (input.projectedStock.productId !== input.productId || input.projectedStock.branchId !== input.branchId)) throw new CountedStockConflictError()
   const shared = {
     product_id: input.productId,
     product_name: input.productName,
@@ -455,9 +462,16 @@ export function planReplacementStock(input: {
     reason: `Replacement for return ${input.returnNumber ? `#${input.returnNumber}` : 'being recorded'}`,
     user_id: input.userId,
     user_name: input.userName,
-    batch_id: input.batchId,
+    batch_id: input.tagged?.batchId ?? input.batchId,
   }
-  const statements: StockWriteStatement[] = input.batchId != null
+  if (input.tagged && (input.tagged.productId !== input.productId || input.tagged.branchId !== input.branchId || input.batchId != null || input.unlottedStock)) throw new Error('Conflicting tagged replacement source')
+  if (input.projectedTakes && (!input.projectedStock || input.tagged || input.batchId !== null
+    || sumCountedQuantities(input.projectedTakes.map(take => take.quantity)) !== quantity)) throw new Error('Conflicting projected replacement allocation')
+  const statements: StockWriteStatement[] = input.projectedTakes && input.projectedStock
+    ? input.projectedTakes.flatMap(take => planExactCountedOrdinaryChange(input.projectedStock!,take.batchId,take.quantity,'consume')) : input.projectedStock
+    ? input.tagged ? planExactCountedTaggedChange(input.projectedStock,input.tagged,quantity,'consume')
+      : planExactCountedOrdinaryChange(input.projectedStock,input.batchId,quantity,'consume')
+    : input.tagged ? planTaggedSaleSourceChange(input.tagged,quantity,'consume') : input.batchId != null
     ? [...planRemoveStockFromBatch({ batchId: input.batchId, productId: input.productId, branchId: input.branchId, quantity }).statements]
     : [
         {
@@ -472,6 +486,7 @@ export function planReplacementStock(input: {
           params: shared,
         },
       ]
+  if (input.unlottedStock && !input.projectedStock) statements.unshift(ordinaryNullCapacityGuard(input.productId,input.branchId,quantity))
   statements.push({
     sql: `INSERT INTO inventory_movements (
       product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,
@@ -485,51 +500,6 @@ export function planReplacementStock(input: {
   return { statements, usedBatch: input.batchId != null }
 }
 
-// Drain the stock a replacement line hands to the customer -- the POS way:
-// an explicit batch drains that exact lot (validated by
-// removeStockFromBatch, which also keeps branch_stock/stock_quantity in
-// step); no batch means a validated plain branch_stock decrement. Writes
-// its own movement row; the caller re-derives products.stock_quantity for
-// the plain path (same division of labor as the existing restock path).
-export async function applyReplacementStock(db: D1Compat, input: {
-  productId: number
-  productName: string
-  branchId: number
-  batchId: number | null
-  quantity: number
-  unitCostUsd: number
-  unitCostKhr: number
-  returnId: number | string
-  returnNumber: string | null
-  userId: number | string | null
-  userName: string | null
-}): Promise<{ usedBatch: boolean }> {
-  if (input.batchId != null) {
-    const batch = await db.prepare(`SELECT COALESCE(bbs.quantity,0) AS available
-      FROM product_batches pb
-      LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=@branchId
-      WHERE pb.id=@batchId AND pb.variant_product_id=@productId`).get<{ available: number }>({
-      batchId: input.batchId, productId: input.productId, branchId: input.branchId,
-    })
-    if (!batch) throw new Error('Selected received date does not belong to this product')
-    const available = Number(batch.available) || 0
-    if (input.quantity > available) throw new InsufficientBatchStockError(available)
-  } else {
-    const stockRow = await db.prepare('SELECT quantity FROM branch_stock WHERE product_id = @product_id AND branch_id = @branch_id')
-      .get<{ quantity: number }>({ product_id: input.productId, branch_id: input.branchId })
-    const available = Number(stockRow?.quantity) || 0
-    if (input.quantity > available) {
-      throw new InsufficientReplacementStockError(input.productName, input.quantity, available)
-    }
-  }
-  const plan = planReplacementStock({ ...input, returnIdSql: '@return_id' })
-  await db.batch(plan.statements.map((statement) => ({
-    ...statement,
-    params: { ...(statement.params as Record<string, unknown>), return_id: input.returnId },
-  })))
-  return { usedBatch: plan.usedBatch }
-}
-
 export const DAMAGE_OUT_MOVEMENT = 'damage_out'
 
 export class DamagedLotShortfallError extends Error {
@@ -539,62 +509,6 @@ export class DamagedLotShortfallError extends Error {
     this.name = 'DamagedLotShortfallError'
     this.available = available
   }
-}
-
-// d1compat's run() reports changes as {changes} (typed) or {meta:{changes}}
-// (what D1 actually returns) -- read both, same lesson renameCascade.ts
-// already encodes.
-function changesOf(result: unknown): number {
-  const record = result as { changes?: number; meta?: { changes?: number } } | null
-  return Number(record?.changes ?? record?.meta?.changes ?? 0)
-}
-
-// 11.9: POS's damage source -- draw units out of ONE damaged lot. The
-// UPDATE's own WHERE clause is the race guard (damaged_stock_lots has no
-// CHECK constraint): a concurrent draw that empties the lot makes this
-// statement match zero rows, and the zero-changes read throws WITHOUT
-// having written anything. quantity_remaining only ever shrinks here.
-export async function consumeDamagedLot(db: D1Compat, input: {
-  lotId: number
-  productId: number
-  quantity: number
-}): Promise<{ productName: string | null; branchId: number | null; returnId: number | null }> {
-  const lot = await db.prepare(`
-    SELECT id, product_id, product_name, branch_id, return_id, quantity_remaining
-    FROM damaged_stock_lots WHERE id = @id
-  `).get<{ id: number; product_id: number; product_name: string | null; branch_id: number | null; return_id: number | null; quantity_remaining: number }>({ id: input.lotId })
-  if (!lot || Number(lot.product_id) !== Number(input.productId)) {
-    throw new Error('Selected damaged stock does not belong to this product')
-  }
-  const result = await db.prepare(`
-    UPDATE damaged_stock_lots
-    SET quantity_remaining = quantity_remaining - @quantity, updated_at = datetime('now')
-    WHERE id = @id AND quantity_remaining >= @quantity
-  `).run({ id: input.lotId, quantity: input.quantity })
-  if (!changesOf(result)) {
-    throw new DamagedLotShortfallError(String(lot.product_name || `product #${input.productId}`), input.quantity, Number(lot.quantity_remaining) || 0)
-  }
-  return { productName: lot.product_name, branchId: lot.branch_id, returnId: lot.return_id }
-}
-
-// The reverse (a cancelled sale hands its units back to the lot; also the
-// compensation path when a checkout fails after its draw). Clamped to the
-// lot's original quantity -- restoring can never mint damaged stock.
-export async function restoreDamagedLot(db: D1Compat, input: {
-  lotId: number
-  quantity: number
-}): Promise<boolean> {
-  if (input.quantity > 0) {
-    const lot = await db.prepare('SELECT product_id,quantity,quantity_remaining FROM damaged_stock_lots WHERE id=@id')
-      .get<{ product_id: number; quantity: number; quantity_remaining: number }>({ id: input.lotId })
-    if (lot && Number(lot.quantity_remaining) < Number(lot.quantity)) await assertProductsActive(db, [Number(lot.product_id)])
-  }
-  const result = await db.prepare(`
-    UPDATE damaged_stock_lots
-    SET quantity_remaining = MIN(quantity, quantity_remaining + @quantity), updated_at = datetime('now')
-    WHERE id = @id
-  `).run({ id: input.lotId, quantity: input.quantity })
-  return changesOf(result) > 0
 }
 
 // Open damaged lots for one product (optionally one branch) -- the product

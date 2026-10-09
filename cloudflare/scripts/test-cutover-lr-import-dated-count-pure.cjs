@@ -4,7 +4,7 @@
 // write batch) run against an in-memory SQLite with every migration applied. The route handlers live in
 // routes/inventory.ts; they pass X-Branch-Redirect as `redirectTarget` and answer the refusals with 409.
 //
-//   * before the cutover: resolve output, the plan and every write statement are byte-identical to eb5dd0ba3
+//   * before the cutover: resolve output, plan and non-admission business SQL are byte-identical to the oracle
 //     (ORACLE: the dated-count files and the import authority loaded exactly as they were), rows identical;
 //   * after the cutover with no target: resolve refuses branch_redirect_required, and a plan whose entry names the
 //     disabled branch is the coded 409 -- nothing resolved, nothing planned, nothing written;
@@ -74,40 +74,53 @@ function makeWorld(oracleSha = null) {
     resolve: load('lib/datedStockCountResolve.ts'),
     route: load('lib/datedStockCountRoute.ts'),
     apply: load('lib/datedStockCountApply.ts'),
+    stock: load('lib/stockTransaction.ts'),
   }
 }
 const fresh = makeWorld()
 const old = makeWorld(ORACLE)
 
 let migrations = null
-function world(state) {
+function world(state, options = {}) {
   migrations ||= loadAll()
   const db = openDb(migrations)
   const raw = db.db
-  raw.exec('DELETE FROM branches')
-  if (state === 'before') {
-    raw.exec("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Warehouse',1,1),(2,'Shop',0,1)")
-  } else {
-    raw.exec("INSERT INTO branches(id,name,is_default,is_active,role,canonical_key) VALUES(1,'LC Store',1,1,'shop','warehouse')")
-    raw.exec("INSERT INTO branches(id,name,is_default,is_active,role,canonical_key,successor_branch_id) VALUES(2,'Old Shop',0,0,'shop','shop',1)")
-  }
-  raw.exec("INSERT INTO products(id,name,name_normalized,barcode,sku,unit,selling_price_usd,cost_price_usd,stock_quantity,is_active) VALUES(10,'Serum','serum','ABC','SER-1','pcs',12,4,8,1)")
-  raw.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd,received_quantity) VALUES(600,10,'lot-a','LOT-A','2026-08-01',1,1,4,5)")
-  if (state === 'before') {
-    raw.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd,received_quantity) VALUES(500,10,'lot-b','LOT-B','2026-08-01',1,2,4,3)")
-    raw.exec('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,1,5),(10,2,3)')
-    raw.exec('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(600,1,5),(500,2,3)')
-  } else {
-    raw.exec('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,1,8),(10,2,0)')
-    raw.exec('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(600,1,8)')
-  }
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE type='table' AND name IN ('dated_count_decision_receipts','dated_count_apply_receipts')").get().n, 2, 'full schema includes0244/0245 receipt tables')
+  assert.equal(raw.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get().value, fresh.stock.STOCK_SCHEMA_EPOCH)
+  raw.exec('BEGIN IMMEDIATE')
+  try {
+    if (!options.omitSeedPermit) raw.prepare("INSERT INTO system_flags(key,value) VALUES('stock_transaction_permit',?)").run(fresh.stock.STOCK_SCHEMA_EPOCH)
+    raw.exec('DELETE FROM branches')
+    if (state === 'before') {
+      raw.exec("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Warehouse',1,1),(2,'Shop',0,1)")
+    } else {
+      raw.exec("INSERT INTO branches(id,name,is_default,is_active,role,canonical_key) VALUES(1,'LC Store',1,1,'shop','warehouse')")
+      raw.exec("INSERT INTO branches(id,name,is_default,is_active,role,canonical_key,successor_branch_id) VALUES(2,'Old Shop',0,0,'shop','shop',1)")
+    }
+    raw.exec("INSERT INTO products(id,name,name_normalized,barcode,sku,unit,selling_price_usd,cost_price_usd,stock_quantity,is_active) VALUES(10,'Serum','serum','ABC','SER-1','pcs',12,4,8,1)")
+    raw.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd,received_quantity) VALUES(600,10,'lot-a','LOT-A','2026-08-01',1,1,4,5)")
+    if (state === 'before') {
+      raw.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd,received_quantity) VALUES(500,10,'lot-b','LOT-B','2026-08-01',1,2,4,3)")
+      raw.exec('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,1,5),(10,2,3)')
+      raw.exec('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(600,1,5),(500,2,3)')
+    } else {
+      raw.exec('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,1,8),(10,2,0)')
+      raw.exec('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(600,1,8)')
+    }
+    raw.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'; COMMIT")
+  } catch (error) { raw.exec('ROLLBACK'); throw error }
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
   const capture = []
-  const batch = db.batch.bind(db)
   let beforeBatch = null
-  db.batch = async (statements) => {
-    capture.push(statements.map((statement) => JSON.stringify({ sql: statement.sql, params: statement.params })))
-    if (beforeBatch) { const hook = beforeBatch; beforeBatch = null; hook(raw) }
-    return batch(statements)
+  const batch = db.batch.bind(db)
+  for (const method of ['batch', 'batchOnce']) {
+    db[method] = async (statements) => {
+      capture.push(statements.map(statement => JSON.stringify({ sql: statement.sql, params: statement.params })))
+      if (beforeBatch) { const hook = beforeBatch; beforeBatch = null; hook(raw) }
+      const result = await batch(statements)
+      assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0, 'owned batch cannot leak its permit')
+      return result
+    }
   }
   return { db, raw, capture, setBeforeBatch(hook) { beforeBatch = hook } }
 }
@@ -130,7 +143,17 @@ let checks = 0
 const check = async (name, fn) => { await fn(); checks++; console.log(`PASS ${name}`) }
 
 async function main() {
-  await check('before the cutover: resolve, plan and the apply batch are byte-identical to eb5dd0ba3, and the rows match', async () => {
+  await check('fixture permit is transaction-local and non-owned runtime writes remain refused', async () => {
+    assert.throws(() => world('before', { omitSeedPermit: true }), /stock_transaction_required/)
+    const w = world('before'), before = rows(w.raw)
+    assert.throws(() => w.raw.exec('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=10 AND branch_id=1'), /stock_transaction_required/)
+    assert.equal(w.raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+    assert.deepEqual(rows(w.raw), before)
+    const built = await old.route.buildDatedStockCountPlan(w.db, [{ date: '2026-09-05', productId: 10, branchId: 1, count: 3 }])
+    await assert.rejects(() => old.apply.applyDatedStockCountPlan(w.db, built.plan, ACTOR), /stock_transaction_required/)
+    assert.deepEqual(rows(w.raw), before, 'unwrapped historical writer is refused and rolls back')
+  })
+  await check('before the cutover: resolve, plan and non-admission business SQL match the oracle, with actual executor and identical rows', async () => {
     const results = []
     for (const subject of [fresh, old]) {
       const w = world('before')
@@ -138,16 +161,30 @@ async function main() {
       const entries = subject.route.parseDatedStockCountEntries({ entries: resolved.resolved.map((row) => ({ ...row, addressedBranchId: 2 })) })
       const built = await subject.route.buildDatedStockCountPlan(w.db, entries.entries, { redirectTarget: 1 })
       assert.ok(built.plan, JSON.stringify(built))
-      await subject.apply.applyDatedStockCountPlan(w.db, built.plan, ACTOR)
+      // The oracle is a business-SQL reference, not authority for an old runtime writer.
+      // Its batch gets the SAME actual executor as current code; the unwrapped writer is refused above.
+      const applyDb = subject === old ? Object.assign(Object.create(w.db), {
+        batch: statements => fresh.stock.executeStockTransaction(w.db, statements, 'once'),
+      }) : w.db
+      await subject.apply.applyDatedStockCountPlan(applyDb, built.plan, ACTOR)
       results.push({ resolved, entries, plan: built.plan, writes: w.capture, rows: rows(w.raw) })
     }
     const [now, then] = results
+    const stripBoundary = batches => batches.map(batch => {
+      const parsed = batch.map(text => JSON.parse(text))
+      const boundary = parsed.filter(statement => statement.sql.includes("'stock_transaction_permit'"))
+      assert.equal(boundary.length, 2, 'each reference/current physical batch owns and clears exactly one permit')
+      assert.match(boundary[0].sql, /INSERT INTO system_flags[\s\S]*stock_schema_epoch[\s\S]*NOT EXISTS[\s\S]*maintenance/)
+      assert.match(boundary[1].sql, /^DELETE FROM system_flags/)
+      return batch.filter(text => !JSON.parse(text).sql.includes("'stock_transaction_permit'"))
+    })
+    const nw = withoutProductAdmission(stripBoundary(now.writes)), tw = withoutProductAdmission(stripBoundary(then.writes))
     assert.deepEqual(now.resolved, then.resolved, 'resolve: identical (the target, even when sent, is never read)')
     // The parser now reads an optional addressedBranchId (provenance from /resolve); with nothing disabled the plan
     // never uses it (the plan comparison below), and the rest of each entry is exactly what it was.
     assert.deepEqual(now.entries.entries.map(({ addressedBranchId, ...rest }) => rest), then.entries.entries, 'parsed entries')
     assert.deepEqual(now.plan, then.plan, 'plan: identical, no branchRedirects key')
-    assert.deepEqual(withoutProductAdmission(now.writes), withoutProductAdmission(then.writes), 'every non-admission write statement byte-identical')
+    assert.deepEqual(nw, tw, 'every non-admission write statement byte-identical')
     assert.deepEqual(now.rows, then.rows)
     assert.equal(now.rows.movements.length, 2, 'control: the count really wrote (Shop 3->4, Warehouse 5->3)')
   })

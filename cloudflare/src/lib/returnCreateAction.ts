@@ -46,6 +46,7 @@ type CanonicalItem = {
   // repeat -- see resolveDamagedReturnChoice. The keys are PRESENT only when
   // the client sent a value, so a request without them keeps the exact
   // legacy digest bytes (an in-flight retry across the deploy still replays).
+  stock_condition?: string
   condition_tag?: string
   damaged_disposition?: string
 }
@@ -55,6 +56,8 @@ type CanonicalReplacementItem = {
   product_name: string | null
   branch_id: number | null
   batch_id: number | null
+  damaged_lot_id?: number | null
+  unlotted_stock?: boolean
   quantity: number
   applied_price_usd: number | null
   applied_price_khr: number | null
@@ -66,6 +69,7 @@ type CanonicalV1Item = {
   stock_action: 'none' | 'restock' | 'damaged'
   branch_id: number | null
   batch_id: number | null
+  stock_condition?: string
   condition_tag?: string
   damaged_disposition?: string
 }
@@ -102,10 +106,12 @@ function canonicalStockAction(item: Record<string, unknown>): 'none' | 'restock'
 }
 
 // P4-3 damaged-line choice: keys only when sent, see CanonicalItem.
-function damagedChoiceKeys(item: Record<string, unknown>): { condition_tag?: string, damaged_disposition?: string } {
+function damagedChoiceKeys(item: Record<string, unknown>): { stock_condition?: string, condition_tag?: string, damaged_disposition?: string } {
+  const stockCondition = boundedText(item.stock_condition, 40)
   const conditionTag = boundedText(item.condition_tag, 40)
   const disposition = boundedText(item.damaged_disposition, 40)
   return {
+    ...(stockCondition ? { stock_condition: stockCondition } : {}),
     ...(conditionTag ? { condition_tag: conditionTag } : {}),
     ...(disposition ? { damaged_disposition: disposition } : {}),
   }
@@ -142,7 +148,12 @@ function canonicalReplacementItem(value: unknown, index: number): CanonicalRepla
   const productId = positiveId(item.product_id)
   const quantity = finite(item.quantity)
   if (!productId || !(quantity > 0)) throw new Error(`Replacement item ${index + 1} needs a product and positive quantity`)
+  if (item.unlotted_stock !== undefined && typeof item.unlotted_stock !== 'boolean') throw new Error('Invalid unrecorded replacement source')
+  if (item.damaged_lot_id != null && (!positiveId(item.damaged_lot_id) || item.batch_id != null || item.unlotted_stock === true)) throw new Error('Conflicting tagged replacement source')
+  if (item.unlotted_stock === true && item.batch_id != null) throw new Error('Conflicting replacement received date')
   return {
+    ...(item.damaged_lot_id === undefined ? {} : { damaged_lot_id: positiveId(item.damaged_lot_id) }),
+    ...(item.unlotted_stock === undefined ? {} : { unlotted_stock: item.unlotted_stock as boolean }),
     product_id: productId,
     product_name: boundedText(item.product_name, 500),
     branch_id: positiveId(item.branch_id),

@@ -25,7 +25,7 @@ function withDuplicate(db) {
 
 async function main() {
   await W.check('merge: folding a duplicate with an empty Old Shop row moves nothing into Old Shop and posts no movement there', async () => {
-    const db = withDuplicate(W.build('after'))
+    const db = W.build('after', withDuplicate)
     const res = await W.call(products, db, 'POST', '/merge-duplicates', {})
     assert.equal(res.status, 200, JSON.stringify(res.body))
     assert.equal(db.prepare('SELECT COUNT(*) n FROM products WHERE is_active=1 AND name=?').get(['Powder']).n, 1, 'the duplicate was merged')
@@ -43,8 +43,7 @@ async function main() {
     assert.deepEqual(oldShopTotals(db), { stock: 0, lots: 0, movements: 0 })
   })
   await W.check('remove: an empty product remains removable and posts no branch write-off', async () => {
-    const db = W.build('after')
-    db.exec('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=10); UPDATE branch_stock SET quantity=0 WHERE product_id=10; UPDATE products SET stock_quantity=0 WHERE id=10')
+    const db = W.build('after', db => db.exec('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=10); UPDATE branch_stock SET quantity=0 WHERE product_id=10; UPDATE products SET stock_quantity=0 WHERE id=10'))
     const res = await W.call(products, db, 'DELETE', '/10', { reason: 'empty duplicate' })
     assert.equal(res.status, 200, JSON.stringify(res.body))
     assert.deepEqual(W.movements(db), [])

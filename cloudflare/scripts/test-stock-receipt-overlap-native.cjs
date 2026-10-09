@@ -117,7 +117,7 @@ async function main() {
     const { withStockMutationReceipt } = f.load('lib/stockMutationReceipt.ts')
     const json = (body, status = 200) => new Response(JSON.stringify(body), { status })
     const send = () => withStockMutationReceipt(() => db, 1, 'adjust', { client_request_id: 'legacy-overlap-fixture', quantity: 3 }, json,
-      async mark => { await mark(); f.sql.exec('UPDATE branch_stock SET quantity=quantity+3'); return json({ success: true }) },
+      async mark => { await mark(); await f.load('lib/stockTransaction.ts').executeStockTransaction(db, [{ sql: 'UPDATE branch_stock SET quantity=quantity+3' }], 'once'); return json({ success: true }) },
       { requireReceipt: true })
     const firstClaim = pauseAfter(f, /INSERT INTO stock_mutation_receipts/, 'all')
     const original = send()

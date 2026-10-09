@@ -16,7 +16,7 @@
 // a bad answer.
 const tableColumnCache = new Map<string, Set<string>>()
 
-type SchemaProbeDb = { prepare: (sql: string) => { all: <T = unknown>() => Promise<T[]> } }
+type SchemaProbeDb = { prepare: (sql: string) => { all: <T = unknown>(params?: Record<string, unknown>) => Promise<T[]> } }
 
 function quoteIdentifier(table: string): string {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(table) ? table : `"${table}"`
@@ -35,6 +35,18 @@ export async function tableColumnSet(db: SchemaProbeDb, table: string): Promise<
   const columns = await loadTableColumns(db, table)
   tableColumnCache.set(table, columns)
   return columns
+}
+
+export async function tableColumnSets(db: SchemaProbeDb, tables: readonly string[]): Promise<Map<string, Set<string>>> {
+  const missing = [...new Set(tables)].filter(table => !tableColumnCache.has(table))
+  if (missing.length) {
+    const rows = await db.prepare('SELECT t.value AS table_name, p.name FROM json_each(@tablesJson) t JOIN pragma_table_info(t.value) p').all<{ table_name: string; name: string }>({ tablesJson: JSON.stringify(missing) })
+    const list = Array.isArray(rows) ? rows : ((rows as unknown as { results?: Array<{ table_name: string; name: string }> })?.results ?? [])
+    const loaded = new Map(missing.map(table => [table, new Set<string>()]))
+    for (const row of list) loaded.get(row.table_name)?.add(String(row.name || ''))
+    for (const [table, columns] of loaded) tableColumnCache.set(table, columns)
+  }
+  return new Map(tables.map(table => [table, tableColumnCache.get(table)!]))
 }
 
 // Whether `table` currently has `column`, memoized per isolate.

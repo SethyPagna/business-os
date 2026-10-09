@@ -3,6 +3,11 @@ import fs from 'node:fs'
 import test from 'node:test'
 import ts from 'typescript'
 import { ensureClientRequestId } from '../src/api/requestIds.ts'
+import * as offlineQueueOwnership from '../src/api/offlineQueueOwnership.ts'
+import { STORAGE_KEYS } from '../src/constants.ts'
+
+const authenticatedFixture = { getItem: (key: string) => key === STORAGE_KEYS.USER ? JSON.stringify({ id: 7, organization_id: null }) : null }
+Object.assign(globalThis, { window: { sessionStorage: authenticatedFixture, localStorage: authenticatedFixture, location: { origin: 'https://transfer.example.test' } } })
 
 const calls: Array<{ path: string; body: unknown; timeout?: number }> = []
 const source = fs.readFileSync(new URL('../src/api/branchTransport.ts', import.meta.url), 'utf8')
@@ -52,6 +57,7 @@ for (const kind of ['submit', 'undo', 'redo']) for (const direction of [[1, 2], 
     new Function('exports', 'require', 'module', ts.transpileModule(inventorySource, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
     }).outputText)(inv.exports, (id: string) => {
+      if (id === './offlineQueueOwnership.ts') return offlineQueueOwnership
       if (id === './branchTransport.ts') return module.exports
       if (id === './transferRunRecovery.ts') return recoveryModule
       if (id === './requestIds.ts') return { ensureClientRequestId }

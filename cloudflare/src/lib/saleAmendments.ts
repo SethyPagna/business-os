@@ -1,3 +1,5 @@
+import { CountedStockBatchPlan, planExactCountedOrdinaryChange, planExactCountedTaggedChange, subtractCountedQuantity, sumCountedQuantities, type CountedTaggedIdentity } from './countedDamagedStock'
+import { planTaggedSaleSourceChange, SaleLinePreimageConflictError } from './saleLineAddition'
 import { productStockGuardStatement } from './productStockGuard'
 // Amending a sale that already exists, as an APPEND-ONLY LEDGER (S4-30).
 //
@@ -346,6 +348,7 @@ export function amendmentHeldUnits(sale: AmendableSaleRow, quantity: number): nu
 // The line as it exists now, and its lot attribution.
 // ---------------------------------------------------------------------------
 export type ExistingSaleLine = {
+  tagged?: CountedTaggedIdentity & { conditionTag: string }
   total_usd?: number | null
   id: number
   product_id: number | null
@@ -426,7 +429,15 @@ export class AllocationShortfallError extends Error {
 // sale_items row's quantity and totals are raised, and NEW allocation rows are
 // appended for the new units, rather than a fresh line being inserted.
 // ---------------------------------------------------------------------------
-export function planLineQuantityIncrease(input: {
+export function planLineQuantityIncrease(input: LineQuantityIncreaseInput): AmendmentPlan {
+  return buildLineQuantityIncrease(input)
+}
+
+export function planExactLineQuantityIncrease(input: LineQuantityIncreaseInput, projectedStock: CountedStockBatchPlan): AmendmentPlan {
+  return buildLineQuantityIncrease(input, projectedStock)
+}
+
+type LineQuantityIncreaseInput = {
   moneyPrecisionVersion?: 0 | 1
   saleId: number | string
   sale: AmendableSaleRow
@@ -444,9 +455,32 @@ export function planLineQuantityIncrease(input: {
    * sales.ts passes the real rows it already fetched for the line.
    */
   existingAllocations?: LineAllocation[]
-}): AmendmentPlan {
+}
+
+function validateAmendmentTaggedIdentity(line: ExistingSaleLine, projectedStock: CountedStockBatchPlan): void {
+  if (!line.tagged) return
+  const saved = line.tagged
+  const current = projectedStock.get(Number(line.product_id), Number(line.branch_id)).projectedTaggedSource(saved.lotId)
+  if (!current || saved.productId !== line.product_id || saved.branchId !== line.branch_id
+    || current.batchId !== saved.batchId || current.conditionTag !== saved.conditionTag) throw new SaleLinePreimageConflictError('condition')
+}
+
+function validateAmendmentAllocations(line: ExistingSaleLine, allocations: readonly LineAllocation[]): void {
+  for (const row of allocations) {
+    if (!Number.isSafeInteger(row.id) || row.id<=0 || !Number.isSafeInteger(row.batch_id) || row.batch_id<=0
+      || !Number.isFinite(row.quantity) || row.quantity<=0 || !Number.isFinite(row.released_quantity) || row.released_quantity<0
+      || subtractCountedQuantity(row.quantity,[row.released_quantity])<0) throw new SaleLinePreimageConflictError('quantity')
+  }
+  if (subtractCountedQuantity(line.quantity,allocations.map(row=>row.quantity))<0) throw new SaleLinePreimageConflictError('quantity')
+}
+
+function buildLineQuantityIncrease(input: LineQuantityIncreaseInput, projectedStock?: CountedStockBatchPlan): AmendmentPlan {
   const added = Math.max(0, Number(input.addedQuantity) || 0)
   const line = input.line
+  if (projectedStock) {
+    validateAmendmentTaggedIdentity(line, projectedStock)
+    validateAmendmentAllocations(line,input.existingAllocations||[])
+  }
   const quantityBefore = Number(line.quantity) || 0
   const quantityAfter = input.moneyPrecisionVersion === 1 ? Number(subtractDecimalSum(quantityBefore, [-added])) : round2(quantityBefore + added)
   const unitPrice = Number(line.applied_price_usd) || 0
@@ -457,7 +491,7 @@ export function planLineQuantityIncrease(input: {
   const statements: StockStatement[] = []
   let takes: FifoLotTake[] = []
 
-  if (line.branch_id && added > 0) {
+  if (line.branch_id && added > 0 && !line.tagged) {
     const allocated = allocateAcrossLots(input.lots, added)
     takes = allocated.takes
     // The line already carries SOME allocation rows -- it is batch-tracked --
@@ -478,6 +512,18 @@ export function planLineQuantityIncrease(input: {
   statements.push(lineQuantityUpdateStatement(line, quantityAfter, unitPrice, exchangeRate, input.moneyPrecisionVersion))
 
   if (line.branch_id && heldUnits > 0) {
+    if (line.tagged) {
+      if (line.tagged.productId !== line.product_id || line.tagged.branchId !== line.branch_id) throw new Error('counted_tagged_identity_required')
+      statements.push(...(projectedStock
+        ? planExactCountedTaggedChange(projectedStock.get(Number(line.product_id),line.branch_id),line.tagged,heldUnits,'consume')
+        : planTaggedSaleSourceChange(line.tagged,heldUnits,'consume')))
+    } else {
+    if (projectedStock) {
+      const exact = projectedStock.get(Number(line.product_id),line.branch_id)
+      for (const take of takes) statements.push(...planExactCountedOrdinaryChange(exact,take.batchId,take.quantity,'consume'))
+      const uncovered = subtractCountedQuantity(heldUnits,takes.map(take=>take.quantity))
+      if (uncovered>0) statements.push(...planExactCountedOrdinaryChange(exact,null,uncovered,'consume'))
+    } else {
     for (const take of takes) {
       statements.push(decrementBatchStockStrictStatement(take.batchId, line.branch_id, take.quantity))
     }
@@ -490,6 +536,8 @@ export function planLineQuantityIncrease(input: {
       sql: 'UPDATE products SET stock_quantity = MAX(0, stock_quantity - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @product_id',
       params: { product_id: line.product_id, quantity: heldUnits },
     })
+    }
+    }
     statements.push(saleMovementStatement({
       line,
       movementType: 'sale',
@@ -500,7 +548,7 @@ export function planLineQuantityIncrease(input: {
       userName: input.userName,
       // Same single-lot attribution rule as everywhere else (migration 0084):
       // a split line is not attributable and keeps NULL.
-      batchId: takes.length === 1 && takes[0].quantity === added ? takes[0].batchId : null,
+      batchId: line.tagged ? line.tagged.batchId : takes.length === 1 && takes[0].quantity === added ? takes[0].batchId : null,
     }))
   }
 
@@ -529,6 +577,14 @@ export function planLineQuantityIncrease(input: {
   for (const take of takes) {
     const existing = existingByBatch.get(take.batchId)
     if (existing) {
+      if (projectedStock) {
+        const quantity = sumCountedQuantities([Number(existing.quantity),take.quantity])
+        const released = heldUnits>0 ? Number(existing.released_quantity)||0 : sumCountedQuantities([Number(existing.released_quantity)||0,take.quantity])
+        statements.push({sql:`UPDATE sale_item_batch_allocations SET quantity=@quantity,released_quantity=@released,
+          released_at=CASE WHEN @held=1 THEN released_at ELSE COALESCE(released_at,@stamp) END WHERE id=@id`,
+          params:{id:existing.id,quantity,released,held:heldUnits>0?1:0,stamp:new Date().toISOString()}})
+        continue
+      }
       statements.push(heldUnits > 0
         ? {
           sql: 'UPDATE sale_item_batch_allocations SET quantity = quantity + @added WHERE id = @id',
@@ -595,7 +651,15 @@ export function planLineQuantityIncrease(input: {
 // A line that predates lot tracking has no allocation rows at all and simply
 // rides branch_stock, exactly as it does everywhere else.
 // ---------------------------------------------------------------------------
-export function planLineQuantityDecrease(input: {
+export function planLineQuantityDecrease(input: LineQuantityDecreaseInput): AmendmentPlan {
+  return buildLineQuantityDecrease(input)
+}
+
+export function planExactLineQuantityDecrease(input: LineQuantityDecreaseInput, projectedStock: CountedStockBatchPlan): AmendmentPlan {
+  return buildLineQuantityDecrease(input, projectedStock)
+}
+
+type LineQuantityDecreaseInput = {
   moneyPrecisionVersion?: 0 | 1
   saleId: number | string
   sale: AmendableSaleRow
@@ -608,8 +672,14 @@ export function planLineQuantityDecrease(input: {
   reason: string
   userId: number | string | null
   userName: string | null
-}): AmendmentPlan {
+}
+
+function buildLineQuantityDecrease(input: LineQuantityDecreaseInput, projectedStock?: CountedStockBatchPlan): AmendmentPlan {
   const line = input.line
+  if (projectedStock) {
+    validateAmendmentTaggedIdentity(line, projectedStock)
+    validateAmendmentAllocations(line,input.allocations)
+  }
   const quantityBefore = Number(line.quantity) || 0
   const removed = Math.min(quantityBefore, Math.max(0, Number(input.removedQuantity) || 0))
   const quantityAfter = input.moneyPrecisionVersion === 1 ? Number(subtractDecimalSum(quantityBefore,[removed])) : round2(quantityBefore - removed)
@@ -624,23 +694,27 @@ export function planLineQuantityDecrease(input: {
 
   // Walk the allocations in REVERSE draw order, taking `removed` units back.
   let remaining = removed
-  for (let index = input.allocations.length - 1; index >= 0 && remaining > 0; index -= 1) {
+  for (let index = input.allocations.length - 1; index >= 0 && remaining > 0 && !line.tagged; index -= 1) {
     const allocation = input.allocations[index]
     const attributed = Math.max(0, Number(allocation.quantity) || 0)
     if (attributed <= 0) continue
     const taken = Math.min(attributed, remaining)
-    remaining -= taken
+    remaining = projectedStock ? subtractCountedQuantity(remaining,[taken]) : remaining-taken
 
     // Of the units coming off this allocation, the ones already sitting on the
     // shelf (released) do not come back again; only the still-held ones do.
     const alreadyReleased = Math.max(0, Number(allocation.released_quantity) || 0)
-    const stillHeld = Math.max(0, attributed - alreadyReleased)
+    const stillHeld = Math.max(0, projectedStock ? subtractCountedQuantity(attributed,[alreadyReleased]) : attributed-alreadyReleased)
     const returnsToShelf = movesStock ? Math.min(taken, stillHeld) : 0
-    const releasedGivenUp = Math.max(0, taken - Math.min(taken, stillHeld))
+    const releasedGivenUp = Math.max(0, projectedStock ? subtractCountedQuantity(taken,[Math.min(taken,stillHeld)]) : taken-Math.min(taken,stillHeld))
 
     if (returnsToShelf > 0 && allocation.branch_id) {
-      statements.push(...restoreBatchStockStatements(allocation.batch_id, allocation.branch_id, returnsToShelf))
-      unitsReturnedToShelf += returnsToShelf
+      if (projectedStock) {
+        const exact=projectedStock.get(Number(line.product_id),allocation.branch_id)
+        statements.push(...planExactCountedOrdinaryChange(exact,allocation.batch_id,returnsToShelf,
+          exact.requiresReceiptActivation(allocation.batch_id)?'activateAndReceive':'receive'))
+      } else statements.push(...restoreBatchStockStatements(allocation.batch_id, allocation.branch_id, returnsToShelf))
+      unitsReturnedToShelf = projectedStock ? sumCountedQuantities([unitsReturnedToShelf,returnsToShelf]) : unitsReturnedToShelf+returnsToShelf
       takes.push({ batchId: allocation.batch_id, lotCode: null, expiryDate: null, quantity: returnsToShelf })
     }
 
@@ -653,6 +727,11 @@ export function planLineQuantityDecrease(input: {
         params: { id: allocation.id },
       })
     } else {
+      if (projectedStock) {
+        statements.push({sql:'UPDATE sale_item_batch_allocations SET quantity=@quantity,released_quantity=@released WHERE id=@id',
+          params:{id:allocation.id,quantity:subtractCountedQuantity(attributed,[taken]),released:subtractCountedQuantity(alreadyReleased,[releasedGivenUp])}})
+        continue
+      }
       statements.push({
         sql: `UPDATE sale_item_batch_allocations
               SET quantity = quantity - @taken, released_quantity = MAX(0, released_quantity - @released)
@@ -667,10 +746,19 @@ export function planLineQuantityDecrease(input: {
   // whole removal. Those units ride branch_stock only, exactly as they did on
   // the way out. `movesStock` gates them for the same two reasons it gates the
   // attributed ones.
-  const totalReturned = unitsReturnedToShelf + (movesStock ? remaining : 0)
+  const totalReturned = projectedStock ? sumCountedQuantities([unitsReturnedToShelf,movesStock?remaining:0]) : unitsReturnedToShelf+(movesStock?remaining:0)
 
   if (line.branch_id && totalReturned > 0) {
-    statements.unshift(productStockGuardStatement([Number(line.product_id)], 'active'))
+    if (!projectedStock) statements.unshift(productStockGuardStatement([Number(line.product_id)], 'active'))
+    if (line.tagged) {
+      if (line.tagged.productId !== line.product_id || line.tagged.branchId !== line.branch_id) throw new Error('counted_tagged_identity_required')
+      statements.push(...(projectedStock
+        ? planExactCountedTaggedChange(projectedStock.get(Number(line.product_id),line.branch_id),line.tagged,totalReturned,'restore')
+        : planTaggedSaleSourceChange(line.tagged,totalReturned,'restore')))
+    } else {
+    if (projectedStock) {
+      if (movesStock && remaining>0) statements.push(...planExactCountedOrdinaryChange(projectedStock.get(Number(line.product_id),line.branch_id),null,remaining,'receive'))
+    } else {
     statements.push({
       sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, @quantity)
             ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity + @quantity`,
@@ -680,6 +768,8 @@ export function planLineQuantityDecrease(input: {
       sql: 'UPDATE products SET stock_quantity = stock_quantity + @quantity, updated_at = CURRENT_TIMESTAMP WHERE id = @product_id',
       params: { product_id: line.product_id, quantity: totalReturned },
     })
+    }
+    }
     statements.push(saleMovementStatement({
       line,
       movementType: 'return',
@@ -688,7 +778,7 @@ export function planLineQuantityDecrease(input: {
       saleId: input.saleId,
       userId: input.userId,
       userName: input.userName,
-      batchId: takes.length === 1 && takes[0].quantity === totalReturned ? takes[0].batchId : null,
+      batchId: line.tagged ? line.tagged.batchId : takes.length === 1 && takes[0].quantity === totalReturned ? takes[0].batchId : null,
     }))
   }
 
@@ -1320,6 +1410,18 @@ export function amendmentEntryStatement(entry: AmendmentEntry): StockStatement {
       user_name: entry.userName ?? null,
     },
   }
+}
+
+export function amendmentEntriesStatements(entries: readonly AmendmentEntry[]): StockStatement[] {
+  if (!entries.length) return []
+  const rows=entries.map(entry=>amendmentEntryStatement(entry).params)
+  const payload=JSON.stringify(rows)
+  if (rows.length>10000 || new TextEncoder().encode(payload).byteLength>900000) throw new Error('sale_amendment_plan_too_large')
+  const fields=['sale_id','group_id','kind','sale_item_id','product_id','product_name','quantity_before','quantity_after','quantity_delta',
+    'amount_before_usd','amount_after_usd','amount_delta_usd','total_before_usd','total_after_usd','units_moved','stock_skipped','via',
+    'reverses_amendment_id','undo_action_id','note','before_json','after_json','user_id','user_name']
+  return [{sql:`INSERT INTO sale_amendments(${fields.join(',')}) SELECT ${fields.map(field=>`json_extract(value,'$.${field}')`).join(',')}
+    FROM json_each(@entries) ORDER BY CAST(key AS INTEGER)`,params:{entries:payload}}]
 }
 
 function numberOrNull(value: unknown, moneyPrecisionVersion: 0 | 1 = 0): number | null {

@@ -287,7 +287,11 @@ const productImagePermissionModule = loadPureSibling('productImagePermission', (
   return require(request)
 })
 
+const stockTransactionModule = loadPureSibling('stockTransaction')
+const requestMetricsModule = loadPureSibling('requestMetrics', name => name === './analytics' ? {} : require(name))
 function requireForProductBatches(request) {
+  if (request === './stockTransaction') return stockTransactionModule
+  if (request === './requestMetrics') return requestMetricsModule
   if (request === './receivingBranch') return loadPureSibling('receivingBranch')
   if (request === './productDetailRule') return productDetailRuleModuleObj.exports
   if (request === './productDescriptionSections') return productDescriptionSectionsModuleObj.exports
@@ -368,6 +372,8 @@ const originalResolve = Module._resolveFilename
 const stubbable = new Set(['../index', './db', './importCsv', './cache', './stockActionCatalog', './stockActionSeal', './stockActionCommit', './stockActionResolver', './stockActionImport', '../durable-objects/broadcastHub'])
 const originalLoad = Module._load
 Module._load = function patchedLoad(request, parent, isMain) {
+  if (request === './stockTransaction') return stockTransactionModule
+  if (request === './requestMetrics') return requestMetricsModule
   if (request === './stockReceiptGate') return stockReceiptGateModule.exports
   if (request === './catalogCostRecompute') return catalogCostRecomputeModule.exports
   if (request === './moneyPrecision') return moneyPrecisionModule.exports
@@ -726,12 +732,15 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   // would touch a different table (sales/returns/sale_items/branch_stock)
   // as part of "replace_all" -- the block between the mode check and the
   // next unrelated section should only ever prepare one statement.
-  const blockStart = source.indexOf("getProductImportMode(job.policy_json) === 'replace_all'")
+  const blockStart = source.indexOf("if (productImportMode === 'replace_all') {", source.indexOf("const finalContext:"))
   assert.ok(blockStart !== -1, 'the replace_all block should still exist in runImportApply')
-  const blockEnd = source.indexOf('Last chunk: cache invalidation', blockStart)
+  const blockEnd = source.indexOf('} else await commitProductFinalization', blockStart)
   const block = source.slice(blockStart, blockEnd)
   const dbPrepareCount = (block.match(/db\.prepare\(/g) || []).length
-  assert.strictEqual(dbPrepareCount, 0, 'replacement delegates its guarded transaction to finalizeProductReplacement')
+  assert.strictEqual(dbPrepareCount, 0, 'replacement delegates its whole guarded finalizer transaction')
+  assert.strictEqual((block.match(/db\.staging\.prepare\(/g) || []).length, 1, 'replacement reads refused source rows from actual staging before finalization')
+  assert.match(block, /ProductReplacementIncompleteError/)
+  assert.match(block, /finalize: finalContext/, 'replacement must carry the current persisted run and lease context')
   assert.match(block, /finalizeProductReplacement\(db,/)
   assert.ok(!/\bDELETE\s+FROM\b/i.test(block), 'replace_all must never hard-DELETE -- soft-deactivate only, so sales/returns/audit rows referencing a deactivated product stay valid')
   assert.ok(!/\bsale_items\b|\breturns\b|\bsales\b|\bbranch_stock\b|\bdiscounts?\b/i.test(block), 'the replace_all block must not reference sales, returns, sale_items, branch_stock, or discounts -- it only ever touches products')
@@ -912,7 +921,10 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   assert.ok(/planReconcileBranchSnapshot/.test(block), 'duplicate and single snapshot rows share the executable lot/branch reconciliation planner')
   assert.ok(/receivedDate: group.received_date/.test(block), 'snapshot reconciliation carries the explicit import receipt date')
   assert.ok(/snapshotGroupsAggregated/.test(source), 'the completed import summary should expose how many duplicate snapshot groups were corrected')
-  assert.ok(/runD1BatchGroupsInChunks\(guardedDb, groups.map/.test(block), 'each duplicate snapshot correction keeps branch, lot, and aggregate writes in one guarded batch group')
+  assert.match(block, /ORDER BY product_id,branch_id LIMIT 1/, 'each invocation advances exactly one persisted product/branch group')
+  assert.match(block, /prior\.pendingHash !== digest/, 'the persisted digest must match the actual rederived snapshot before execution')
+  assert.match(block, /commitProductFinalization\(guardedDb, context, next, \[/, 'each duplicate snapshot correction and its progress seal use the actual atomic executor')
+  assert.match(block, /\], true\)/, 'physical reconciliation remains a stock transaction')
   console.log('PASS duplicate product snapshot rows aggregate their quantities per resolved product+branch, exclude movement modes, sync new opening lots, and report the corrected group count')
 }
 
@@ -927,7 +939,9 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   assert.ok(/const productStatementGroups/.test(source))
   assert.ok(/finishProductRowWriteGroup/.test(block))
   assert.ok(!/\bstatements\.push\(/.test(block), 'product row writes must never return to raw statement chunking')
-  assert.ok(/runD1BatchGroupsInChunks\(importWriteDb, productStatementGroups\)/.test(source), 'whole product rows use group-boundary batching through the branch authority adapter')
+  assert.ok(/runD1BatchGroupsInChunks\(importWriteDb, productStatementGroups\.slice\(start, end\), D1_IMPORT_BATCH_CHUNK_SIZE, stockWrites\)/.test(source), 'whole product rows retain group boundaries through the branch adapter and actual stock executor')
+  assert.ok(/const stockWrites = !productMetadataStatementGroups\.has\(productStatementGroups\[start\]\)/.test(source), 'only explicitly marked metadata groups avoid stock execution')
+  assert.ok(/while \(end < productStatementGroups\.length && !productMetadataStatementGroups\.has\(productStatementGroups\[end\]\) === stockWrites\) end\+\+/.test(source), 'packing changes authority only at whole group boundaries')
   console.log('PASS product import keeps each row\'s catalog, stock, batch, and merge-evidence writes in one canonical-branch guarded batch')
 }
 

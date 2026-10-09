@@ -1,3 +1,4 @@
+import { executeStockTransaction } from '../lib/stockTransaction'
 import { Hono } from 'hono'
 import type { Env } from '../index'
 import { requireAuth } from '../lib/auth'
@@ -55,9 +56,13 @@ type ResetStatement = { sql: string; params?: Record<string, unknown> }
 // sale_record_events is immutable outside restore/reset. Keep its short-lived
 // reset authority inside the same D1 transaction as every destructive delete:
 // no request can observe the flag and a failure rolls the flag and deletes back.
-function guardSaleRecordReset(statements: ResetStatement[]): ResetStatement[] {
+function guardSaleRecordReset(statements: ResetStatement[], actorId: number): ResetStatement[] {
   const token = crypto.randomUUID()
   return [
+    { sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM users u JOIN roles r ON r.id=u.role_id
+      WHERE u.id=@actorId AND lower(trim(u.username))='admin' AND u.is_active=1
+      AND u.deleted_at IS NULL AND r.code='admin' AND r.is_system=1) THEN 1
+      ELSE json_extract('[1]','$[reset_builtin_admin_only]') END`, params: { actorId } },
     {
       sql: `INSERT INTO system_flags(key,value,updated_at)
             VALUES(@key,json_object('mode','reset','token',@token),CURRENT_TIMESTAMP)
@@ -76,6 +81,11 @@ function guardSaleRecordReset(statements: ResetStatement[]): ResetStatement[] {
             ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP`,
       params: { key: SALE_NOT_PAID_STOCK_RECOVERY_RESET_GUARD_KEY, token },
     },
+    // Retain request identities so a stale browser retry cannot recreate reset products.
+    { sql: `UPDATE dated_count_decision_receipts
+      SET invalidated_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE invalidated_at IS NULL` },
+    { sql: `UPDATE dated_count_apply_receipts
+      SET invalidated_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE invalidated_at IS NULL` },
     ...statements,
     {
       sql: `DELETE FROM system_flags
@@ -373,7 +383,7 @@ app.post('/reset-data', async (c) => {
       }
 
       const deletes = resetDeleteStatements(await presentResetTables(db, tablesToClear))
-      await db.batch(guardSaleRecordReset(deletes))
+      await executeStockTransaction(db, guardSaleRecordReset(deletes, Number(user.id)), 'retry')
       // Deliberately NOT touched by either toggle: customers, suppliers,
       // delivery_contacts, custom_fields, import job history, and every
       // settings/user/branch/category/unit table.
@@ -558,7 +568,7 @@ app.post('/reset-data', async (c) => {
       )
     }
 
-    await db.batch(guardSaleRecordReset(statements))
+    await executeStockTransaction(db, guardSaleRecordReset(statements, Number(user.id)), 'retry')
 
     // mode 'all' wipes the import tables in `statements` above; the two BULK
     // members (import_job_rows, import_job_source_rows) live on the separate
@@ -1288,9 +1298,9 @@ app.post('/factory-reset', async (c) => {
   }
 
   try {
-    const droppedCustomTables = await dropAllCustomTables(c.env)
-
-    await db.batch(guardSaleRecordReset(resetDeleteStatements(await presentResetTables(db, FACTORY_RESET_TABLES))))
+    const resetStatements = resetDeleteStatements(await presentResetTables(db, FACTORY_RESET_TABLES))
+    const droppedCustomTables = await dropAllCustomTables(c.env, customStatements =>
+      executeStockTransaction(db, guardSaleRecordReset([...customStatements, ...resetStatements], Number(actorId)), 'retry'))
     // The two bulk import-staging tables live on the separate import-staging DB
     // (see lib/db.ts); FACTORY_RESET_TABLES' DELETE of import_job_rows hits only
     // the main DB's empty shell, so clear the real staging on its own DB. No-op

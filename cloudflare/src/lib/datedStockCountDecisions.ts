@@ -1,3 +1,9 @@
+import { executeStockTransaction, stockTransactionStatementCount } from './stockTransaction'
+import { buildAuditStatement } from './audit'
+import { normalizeTransferRequestId, transferRequestDigest } from './transferOperationReceipt'
+import { canonicalProductConflictJson } from './productConflictMergeBatch'
+import type { OfflineSaleOwner } from './offlineSaleOwnership'
+import type { StockWriteStatement } from './productBatches'
 // Executes a human's per-row decisions against Part 288/289/290's
 // analysis-only resolve output (lib/datedStockCountResolve.ts). That
 // layer never writes a product or a price -- it only reports what it
@@ -129,12 +135,14 @@ function pickPrice(row: UnresolvedDatedCountRow['raw']): { usd: number; khr: num
   }
 }
 
-export async function applyDatedStockCountDecisions(
+async function planDecisionUnit(
   db: D1Compat,
   resolved: ResolvedDatedCountRow[],
   unresolved: UnresolvedDatedCountRow[],
   decisions: DatedCountDecision[],
-): Promise<ApplyDatedStockCountDecisionsResult> {
+  productKey: string,
+): Promise<{ result: ApplyDatedStockCountDecisionsResult; statements: StockWriteStatement[] }> {
+  const statements: StockWriteStatement[] = []
   const decisionByRow = new Map<number, DatedCountDecision>()
   for (const d of decisions) decisionByRow.set(d.rowNumber, d)
 
@@ -142,22 +150,6 @@ export async function applyDatedStockCountDecisions(
   const skipped: DatedCountSkipped[] = []
   const productsCreated: ProductCreatedFromDecision[] = []
   const newlyResolved: ResolvedDatedCountRow[] = []
-  const branchIds = [...new Set([
-    ...resolved.map((row) => Number(row.branchId)),
-    ...unresolved.flatMap((row) => row.branchId == null ? [] : [Number(row.branchId)]),
-  ])]
-  const branchAuthorityError = await validateCanonicalImportBranchIds(db, branchIds)
-  if (branchAuthorityError) {
-    return {
-      resolved: [],
-      skipped: [],
-      errors: [...new Set([...resolved.map((row) => row.rowNumber), ...unresolved.map((row) => row.rowNumber)])]
-        .map((rowNumber) => ({ rowNumber, error: branchAuthorityError })),
-      productsCreated: [],
-    }
-  }
-  const guardedDb = withCanonicalImportBranchWriteGuard(db, branchIds)
-
   // ---- Part 1: price-conflict decisions on already-resolved rows ----
   // No row is dropped here -- every resolved row is carried through to
   // the output either way; only its priceConflict (if any) is acted on.
@@ -169,7 +161,7 @@ export async function applyDatedStockCountDecisions(
       if (resolution === 'apply_new') {
         const usd = row.priceConflict.importedUsd ?? row.priceConflict.currentUsd
         const khr = row.priceConflict.importedKhr ?? row.priceConflict.currentKhr
-        await guardedDb.prepare(`UPDATE products SET selling_price_usd = @usd, selling_price_khr = @khr, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ usd, khr, id: row.productId })
+        statements.push({ sql: `UPDATE products SET selling_price_usd = @usd, selling_price_khr = @khr, updated_at = CURRENT_TIMESTAMP WHERE id = @id`, params: { usd, khr, id: row.productId } })
       }
     }
     finalResolved.push(row)
@@ -219,10 +211,8 @@ export async function applyDatedStockCountDecisions(
       const name = String(row.raw.productName ?? '').trim()
       if (!name) { errors.push({ rowNumber: row.rowNumber, error: 'create_new requires a product name; this row had none.' }); continue }
       const price = pickPrice(row.raw)
-      const inserted = await guardedDb
-        .prepare(`INSERT INTO products (name, sku, barcode, selling_price_usd, selling_price_khr, is_active) VALUES (@name, @sku, @barcode, @usd, @khr, 1)`)
-        .run({ name, sku: row.raw.sku ?? null, barcode: row.raw.barcode ?? null, usd: price.usd, khr: price.khr })
-      const productId = Number(inserted.lastInsertRowid)
+      statements.push({ sql: `INSERT INTO products (name, sku, barcode, selling_price_usd, selling_price_khr, is_active, client_request_id) VALUES (@name, @sku, @barcode, @usd, @khr, 1, @productKey) RETURNING id`, params: { name, sku: row.raw.sku ?? null, barcode: row.raw.barcode ?? null, usd: price.usd, khr: price.khr, productKey } })
+    const productId = -1
       productsCreated.push({ rowNumber: row.rowNumber, productId, name, action: 'create_new' })
       newlyResolved.push({ rowNumber: row.rowNumber, date: row.raw.date, productId, branchId, count: row.raw.count })
       continue
@@ -255,6 +245,7 @@ export async function applyDatedStockCountDecisions(
     // rejected outright, never silently overridden either direction.
     const parent = await db.prepare(`SELECT name FROM products WHERE id = @id`).get<{ name: string }>({ id: decision.candidateProductId })
     if (!parent) { errors.push({ rowNumber: row.rowNumber, error: `candidateProductId ${decision.candidateProductId} no longer exists.` }); continue }
+    statements.push({ sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products WHERE id=@parentId AND name=@parentName) THEN 1 ELSE json_extract('[1]','$[dated_decision_parent_changed]') END`, params: { parentId: decision.candidateProductId, parentName: parent.name } })
     const requestedName = decision.name?.trim()
     const nameDiffers = requestedName != null && requestedName.length > 0 && requestedName.toLowerCase() !== parent.name.trim().toLowerCase()
     if (nameDiffers && !decision.nameOverrideConfirmed) {
@@ -269,13 +260,162 @@ export async function applyDatedStockCountDecisions(
     const nameUnlocked = nameDiffers && !!decision.nameOverrideConfirmed
     const finalName = nameUnlocked ? (requestedName as string) : parent.name
     const price = pickPrice(row.raw)
-    const inserted = await guardedDb
-      .prepare(`INSERT INTO products (name, sku, barcode, selling_price_usd, selling_price_khr, is_active) VALUES (@name, @sku, @barcode, @usd, @khr, 1)`)
-      .run({ name: finalName, sku: row.raw.sku ?? null, barcode: row.raw.barcode ?? null, usd: price.usd, khr: price.khr })
-    const productId = Number(inserted.lastInsertRowid)
+    statements.push({ sql: `INSERT INTO products (name, sku, barcode, selling_price_usd, selling_price_khr, is_active, client_request_id) VALUES (@name, @sku, @barcode, @usd, @khr, 1, @productKey) RETURNING id`, params: { name: finalName, sku: row.raw.sku ?? null, barcode: row.raw.barcode ?? null, usd: price.usd, khr: price.khr, productKey } })
+    const productId = -1
     productsCreated.push({ rowNumber: row.rowNumber, productId, name: finalName, action: 'create_child', ...(nameUnlocked ? { nameUnlocked: true } : {}) })
     newlyResolved.push({ rowNumber: row.rowNumber, date: row.raw.date, productId, branchId, count: row.raw.count })
   }
 
-  return { resolved: [...finalResolved, ...newlyResolved], skipped, errors, productsCreated }
+  return { result: { resolved: [...finalResolved, ...newlyResolved], skipped, errors, productsCreated }, statements }
+}
+
+export type DatedDecisionProgress = ApplyDatedStockCountDecisionsResult & {
+  complete: boolean
+  next: number
+  total: number
+  replayed?: boolean
+}
+
+export class DatedDecisionRequestError extends Error {
+  constructor(readonly code: string, message: string, readonly status: 400 | 409 | 503) {
+    super(message)
+    this.name = 'DatedDecisionRequestError'
+  }
+}
+
+export interface DatedDecisionRequest {
+  actorId: number
+  actorName: string | null
+  requestId: unknown
+  owner: OfflineSaleOwner
+  budget: { limit: number; used(): number; charge?(statements: number): void }
+}
+
+type DecisionReceipt = {
+  request_json: string
+  result_json: string
+  next_index: number
+  total_rows: number
+  invalidated_at: string | null
+}
+
+const emptyDecisionResult = (): ApplyDatedStockCountDecisionsResult => ({ resolved: [], skipped: [], errors: [], productsCreated: [] })
+
+export async function applyDatedStockCountDecisions(
+  db: D1Compat,
+  resolved: ResolvedDatedCountRow[],
+  unresolved: UnresolvedDatedCountRow[],
+  decisions: DatedCountDecision[],
+  request?: DatedDecisionRequest,
+): Promise<DatedDecisionProgress> {
+  const requestId = typeof request?.requestId === 'string' ? normalizeTransferRequestId(request.requestId) : null
+  if (!requestId || !request || !Number.isSafeInteger(request.actorId) || request.actorId <= 0) {
+    throw new DatedDecisionRequestError('invalid_client_request_id', 'Keep a valid original dated-decision request ID before applying or retrying.', 400)
+  }
+  const canonical = canonicalProductConflictJson({ owner: request.owner, resolved, unresolved, decisions })
+  const params = { actor: request.actorId, request: requestId, canonical }
+  const budget = request.budget
+  if (![budget.limit, budget.used()].every(n => Number.isSafeInteger(n) && n >= 0)) throw new Error('Invalid dated decision invocation budget')
+  // One preparation read, six first-unit statements, canonical guard, two permit statements, one recovery read.
+  const unitAdmission = 1 + 6 + 1 + 2 + 1
+  const fits = (n: number) => budget.used() + n <= budget.limit
+  const charge = (n: number) => budget.charge?.(n)
+  const receiptSql = `SELECT request_json,result_json,next_index,total_rows,invalidated_at FROM dated_count_decision_receipts WHERE actor_id=@actor AND request_id=@request`
+  async function readReceipt(): Promise<DecisionReceipt | undefined> {
+    if (!fits(1)) throw new DatedDecisionRequestError('dated_decision_budget_exhausted', 'Retry the same dated-decision request to continue its saved progress.', 503)
+    charge(1)
+    const statement = db.prepare(receiptSql)
+    return statement.getOnce ? statement.getOnce<DecisionReceipt>(params) : statement.get<DecisionReceipt>(params)
+  }
+  function checkReceipt(row: DecisionReceipt): void {
+    if (row.invalidated_at) throw new DatedDecisionRequestError('dated_decision_reset_conflict', 'The catalog was reset after this intent. Keep its original identity and review a new import.', 409)
+    if (row.request_json !== canonical) throw new DatedDecisionRequestError('dated_decision_request_conflict', 'This request ID already belongs to different dated decisions.', 409)
+  }
+  function response(row: DecisionReceipt, replayed = false): DatedDecisionProgress {
+    checkReceipt(row)
+    return { ...JSON.parse(row.result_json) as ApplyDatedStockCountDecisionsResult, complete: row.next_index === row.total_rows, next: row.next_index, total: row.total_rows, ...(replayed ? { replayed: true } : {}) }
+  }
+  let receipt = await readReceipt()
+  if (receipt) {
+    checkReceipt(receipt)
+    if (receipt.next_index === receipt.total_rows) return response(receipt, true)
+  }
+  const total = resolved.length + unresolved.length
+  const branchIds = [...new Set([...resolved.map(row => Number(row.branchId)), ...unresolved.flatMap(row => row.branchId == null ? [] : [Number(row.branchId)])])]
+  const reads = Object.create(db) as D1Compat
+  reads.prepare = (sql => {
+    const statement = db.prepare(sql)
+    return {
+      ...statement,
+      get: async (bound?: import('./db').BindParams) => {
+        if (!fits(unitAdmission)) throw new DatedDecisionRequestError('dated_decision_budget_exhausted', 'Retry the same dated-decision request to continue its saved progress.', 503)
+        charge(1)
+        return statement.getOnce ? statement.getOnce(bound) : statement.get(bound)
+      },
+      all: async (bound?: import('./db').BindParams) => {
+        if (!fits(unitAdmission)) throw new DatedDecisionRequestError('dated_decision_budget_exhausted', 'Retry the same dated-decision request to continue its saved progress.', 503)
+        charge(1)
+        return statement.allOnce ? statement.allOnce(bound) : statement.all(bound)
+      },
+    }
+  }) as D1Compat['prepare']
+  const branchError = await validateCanonicalImportBranchIds(reads, branchIds)
+  const guardedDb = withCanonicalImportBranchWriteGuard(db, branchIds)
+  let next = receipt?.next_index ?? 0
+  let result = receipt ? JSON.parse(receipt.result_json) as ApplyDatedStockCountDecisionsResult : emptyDecisionResult()
+  let didCommit = false
+  while (next < total || total === 0 && !receipt) {
+    if (!fits(unitAdmission)) {
+      if (receipt) return response(receipt)
+      throw new DatedDecisionRequestError('dated_decision_budget_exhausted', 'Retry the same dated-decision request after startup completes.', 503)
+    }
+    const productKey = `dated-decision:${await transferRequestDigest(`${request.actorId}:${requestId}:${next}:${canonicalProductConflictJson(request.owner)}`)}`
+    const unit = branchError ? { result: { ...emptyDecisionResult(), errors: [...new Set([...resolved.map(row => row.rowNumber), ...unresolved.map(row => row.rowNumber)])].map(rowNumber => ({ rowNumber, error: branchError })) }, statements: [] as StockWriteStatement[] }
+      : await planDecisionUnit(reads, next < resolved.length ? [resolved[next]] : [], next >= resolved.length && next < total ? [unresolved[next - resolved.length]] : [], decisions, productKey)
+    const priorResolved = result.resolved.length, priorCreated = result.productsCreated.length
+    const combined: ApplyDatedStockCountDecisionsResult = {
+      resolved: [...result.resolved, ...unit.result.resolved], skipped: [...result.skipped, ...unit.result.skipped], errors: [...result.errors, ...unit.result.errors], productsCreated: [...result.productsCreated, ...unit.result.productsCreated],
+    }
+    const created = unit.result.productsCreated.length > 0
+    const resultExpression = created ? `json_set(@resultJson,'$.resolved[${priorResolved}].productId',(SELECT id FROM products WHERE client_request_id=@productKey),'$.productsCreated[${priorCreated}].productId',(SELECT id FROM products WHERE client_request_id=@productKey))` : '@resultJson'
+    const advanced = branchError ? total : Math.min(next + 1, total)
+    const statements: StockWriteStatement[] = []
+    if (!receipt) statements.push({ sql: `INSERT INTO dated_count_decision_receipts(actor_id,request_id,request_json,result_json,next_index,total_rows) VALUES(@actor,@request,@canonical,@emptyJson,0,@total)`, params: { ...params, emptyJson: JSON.stringify(emptyDecisionResult()), total } })
+    statements.push({ sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM dated_count_decision_receipts WHERE actor_id=@actor AND request_id=@request AND request_json=@canonical AND next_index=@next AND invalidated_at IS NULL) THEN 1 ELSE json_extract('[1]','$[dated_decision_cursor_conflict]') END`, params: { ...params, next } }, ...unit.statements)
+    if (unit.statements.length) {
+      const audit = buildAuditStatement(request.actorId, request.actorName, 'dated_stock_count_decisions_applied', 'inventory', null, { requestId, next, rows: unit.result })
+      if (created) {
+        audit.sql = audit.sql.replace('@details', `json_set(@details,'$.rows.resolved[0].productId',(SELECT id FROM products WHERE client_request_id=@productKey),'$.rows.productsCreated[0].productId',(SELECT id FROM products WHERE client_request_id=@productKey))`)
+        audit.params.productKey = productKey
+      }
+      statements.push(audit)
+    }
+    statements.push({ sql: `UPDATE dated_count_decision_receipts SET result_json=${resultExpression},next_index=@advanced,updated_at=CURRENT_TIMESTAMP WHERE actor_id=@actor AND request_id=@request AND request_json=@canonical AND next_index=@next AND invalidated_at IS NULL RETURNING result_json,next_index,total_rows,request_json,invalidated_at`, params: { ...params, next, advanced, resultJson: JSON.stringify(combined), productKey } })
+    const actual = stockTransactionStatementCount(statements.length) + (branchError ? 0 : 1)
+    if (!fits(actual + 1)) {
+      if (receipt) return response(receipt)
+      throw new DatedDecisionRequestError('dated_decision_budget_exhausted', 'Retry the same dated-decision request to continue.', 503)
+    }
+    charge(actual)
+    try {
+      const results = await executeStockTransaction(branchError ? db : guardedDb, statements, 'once')
+      const committed = results.at(-1)?.results?.[0] as DecisionReceipt | undefined
+      if (!committed || committed.next_index !== advanced || committed.request_json !== canonical) throw new Error('Dated decision receipt result is unavailable')
+      receipt = committed
+      result = JSON.parse(committed.result_json) as ApplyDatedStockCountDecisionsResult
+      next = advanced
+      didCommit = true
+    } catch (error) {
+      const recovered = await readReceipt()
+      if (!recovered) throw error
+      checkReceipt(recovered)
+      if (recovered.next_index <= next) throw error
+      receipt = recovered
+      result = JSON.parse(recovered.result_json) as ApplyDatedStockCountDecisionsResult
+      next = recovered.next_index
+      didCommit = true
+    }
+  }
+  if (!receipt) throw new Error('Dated decision receipt was not committed')
+  return response(receipt, !didCommit)
 }

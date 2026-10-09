@@ -1,3 +1,5 @@
+import { importRowDetailText, type ImportReviewWarning } from '../../imports/importRowText.ts'
+import { localizeBranchRuleError } from '../../../api/branchRuleErrors.ts'
 import { useEffect, useRef, useState } from 'react'
 import { useApp } from '../../../AppContext'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
@@ -19,8 +21,9 @@ type ReviewRow = {
   rowNumber: number
   action: string
   identifier?: string | null
+  code?: string | null
   message?: string | null
-  warnings?: Array<{ kind?: string; message?: string }>
+  warnings?: ImportReviewWarning[]
   data?: Record<string, unknown>
   plannedMode?: string | null
   decision?: ReviewDecision
@@ -91,6 +94,7 @@ function ProductServerImportReviewBody({ jobId, jobRevision, t, notify, onApprov
   }
   const [status, setStatus] = useState('queued')
   const [jobError, setJobError] = useState('')
+  const localizedJobError = localizeBranchRuleError(jobError, t)
   const [rows, setRows] = useState<ReviewRow[]>([])
   const [total, setTotal] = useState(0)
   const [counts, setCounts] = useState<Record<string, number>>({})
@@ -241,7 +245,7 @@ function ProductServerImportReviewBody({ jobId, jobRevision, t, notify, onApprov
     return <div className="space-y-4 py-8 text-center">
       {!terminal ? <Loader2 className="mx-auto h-6 w-6 animate-spin text-blue-500" /> : <AlertTriangle className="mx-auto h-6 w-6 text-amber-500" />}
       <p className="text-sm font-semibold">{terminal ? tr('import_analysis_stopped', 'Import analysis stopped') : tr('import_applying_now', 'Importing…')}</p>
-      <p className="text-xs text-slate-500 dark:text-slate-400">{jobError || (terminal ? status : (progressDetail || tr('import_applying_hint', 'Applying your reviewed import. This closes when it starts.')))}</p>
+      <p className="text-xs text-slate-500 dark:text-slate-400">{localizedJobError || (terminal ? status : (progressDetail || tr('import_applying_hint', 'Applying your reviewed import. This closes when it starts.')))}</p>
       <div className="flex justify-center gap-2"><button type="button" className="btn-secondary text-sm" disabled={!canEditCosts} onClick={() => void onCancel()}>{tr('cancel_import', 'Cancel import')}</button><button type="button" className="btn-secondary text-sm" onClick={() => void onReviewLater()}>{tr('continue_in_background', 'Continue in background')}</button></div>
     </div>
   }
@@ -251,7 +255,7 @@ function ProductServerImportReviewBody({ jobId, jobRevision, t, notify, onApprov
     return <div className="space-y-4 py-8 text-center">
       {!terminal ? <Loader2 className="mx-auto h-6 w-6 animate-spin text-blue-500" /> : <AlertTriangle className="mx-auto h-6 w-6 text-amber-500" />}
       <p className="text-sm font-semibold">{terminal ? tr('import_analysis_stopped', 'Import analysis stopped') : tr('import_analyzing', 'Analyzing on the server…')}</p>
-      <p className="text-xs text-slate-500 dark:text-slate-400">{jobError || (terminal ? status : tr('import_analyzing_hint', 'The persisted review will open here when analysis finishes.'))}</p>
+      <p className="text-xs text-slate-500 dark:text-slate-400">{localizedJobError || (terminal ? status : tr('import_analyzing_hint', 'The persisted review will open here when analysis finishes.'))}</p>
       <div className="flex justify-center gap-2"><button type="button" className="btn-secondary text-sm" disabled={!canEditCosts} onClick={() => void onCancel()}>{tr('cancel_import', 'Cancel import')}</button><button type="button" className="btn-secondary text-sm" onClick={() => void onReviewLater()}>{tr('continue_in_background', 'Continue in background')}</button></div>
     </div>
   }
@@ -275,7 +279,7 @@ function ProductServerImportReviewBody({ jobId, jobRevision, t, notify, onApprov
           { value: 'skip', label: 'Skip row' },
         ]
         if (row.action === 'update') options.splice(1, 0, { value: 'merge_stock', label: 'Stock only' }, { value: 'override_add', label: 'Update + add stock' }, { value: 'override_replace', label: 'Update details; keep stock' })
-        return <tr key={row.rowNumber} className="border-t border-slate-100 align-top dark:border-slate-800"><td className="px-3 py-2">{row.rowNumber}</td><td className="px-3 py-2 font-medium">{row.identifier || String(row.data?.name || '—')}<div className="mt-0.5 font-normal text-slate-400">{String(row.data?.barcode || row.data?.sku || '')}</div></td><td className="px-3 py-2">{row.action}</td><td className="max-w-sm px-3 py-2 text-slate-500 dark:text-slate-400">{row.message || (row.warnings || []).map((warning) => warning.message).filter(Boolean).join(' · ') || '—'}</td><td className="w-52 px-3 py-2"><AppSelect value={choiceFor(row)} onChange={(value) => void saveDecision(row, value)} ariaLabel={`Decision for row ${row.rowNumber}`} buttonClassName="w-full px-2 py-1.5 text-xs" options={options} disabled={!canEditCosts || savingRow !== null} /></td></tr>
+        return <tr key={row.rowNumber} className="border-t border-slate-100 align-top dark:border-slate-800"><td className="px-3 py-2">{row.rowNumber}</td><td className="px-3 py-2 font-medium">{row.identifier || String(row.data?.name || '—')}<div className="mt-0.5 font-normal text-slate-400">{String(row.data?.barcode || row.data?.sku || '')}</div></td><td className="px-3 py-2">{row.action}</td><td className="max-w-sm px-3 py-2 text-slate-500 dark:text-slate-400">{importRowDetailText(row, tr)}</td><td className="w-52 px-3 py-2"><AppSelect value={choiceFor(row)} onChange={(value) => void saveDecision(row, value)} ariaLabel={`Decision for row ${row.rowNumber}`} buttonClassName="w-full px-2 py-1.5 text-xs" options={options} disabled={!canEditCosts || savingRow !== null} /></td></tr>
       })}</tbody></table> : <div className="p-8 text-center text-sm text-slate-500">No matching rows.</div>}
     </div>
     <div className="flex justify-center"><PaginationControls compact rangeAsPageSize page={page} pageSize={PAGE_SIZE} totalItems={total} label="records" onPageChange={setPage} /></div>

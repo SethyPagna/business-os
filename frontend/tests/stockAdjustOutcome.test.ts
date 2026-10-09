@@ -280,6 +280,16 @@ runTest('budget refusals and uncertain receipts keep the original request for an
   }
 })
 
+runTest('selling-price conflicts retain the exact row and translate the retry action', () => {
+  const request = { productId: 1, quantity: 3, sellingPriceUsd: 5, client_request_id: 'price-intent' }
+  const failure = classifyStockAdjustFailure({ code: 'receipt_selling_price_changed', status: 409, message: 'server-only English' })
+  const rows = applyRowOutcome([createRow(request, 'price-row')], 'price-row', { status: 'failed', failure })
+  assert.equal(failure.kind, 'conflict')
+  assert.equal(failure.retryable, true)
+  assert.equal(rowsToSubmit(rows)[0].request, request)
+  assert.equal(stockFailureText(failure, key => key === 'receipt_selling_price_changed' ? 'Translated price retry' : '', ''), 'Translated price retry')
+})
+
 if (failed) {
   console.error(`\n${failed} test(s) failed`)
   process.exit(1)

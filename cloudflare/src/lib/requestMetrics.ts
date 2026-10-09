@@ -31,11 +31,9 @@
 // is a no-op. The key below must stay identical in all three files -- the pure
 // test test-request-metrics-pure.cjs enforces it.
 //
-// NOT COUNTED: code that calls env.DB.prepare()/batch() directly instead of
-// going through D1Compat (lib/maintenance.ts, lib/productWrites.ts,
-// lib/backup.ts and a handful of route sites). Those statements are invisible
-// here until they move onto D1Compat. The queue() consumers in index.ts run
-// outside any scope and are not counted either. A /api/sync replay
+// Direct env.DB calls need the explicit rawD1Start hook to contribute to the
+// invocation budget. Uninstrumented raw calls and work outside a metrics
+// scope are not counted. A /api/sync replay
 // re-dispatches each op through app.request(), so every op is its own
 // request and the outer sync request shows almost no D1 work.
 // The separate invocation budget includes getMaintenance's raw dispatch and
@@ -285,6 +283,10 @@ const hook: RequestMetricsHook = {
 /** Reads the accumulator a request middleware bound to this context. */
 export function requestMetricsOf(c: Context): RequestMetrics | undefined {
   try { return (c as unknown as { get(key: string): unknown }).get(CONTEXT_KEY) as RequestMetrics | undefined } catch { return undefined }
+}
+
+export function currentRequestMetrics(): RequestMetrics | undefined {
+  return store.getStore()
 }
 
 type MetricsContext = {

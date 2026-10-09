@@ -225,6 +225,10 @@ const STOCK_REQUEST_FAILURE_ENTRIES: Record<string, StockRequestFailureEntry> = 
     key: 'stock_request_id_invalid',
     fallback: 'This line lost its request id. Remove it and add it again.',
   },
+  receipt_selling_price_changed: {
+    key: 'receipt_selling_price_changed',
+    fallback: "The product selling price changed. Nothing was changed. Refresh the product and retry this line.",
+  },
   stock_removal_conflict: STOCK_CHANGED_RETRY,
   tagged_lot_conflict: STOCK_CHANGED_RETRY,
 }

@@ -23,24 +23,26 @@ function queue(db, branchId) {
 }
 
 async function main() {
-  await W.check('before: create and variant with opening stock write byte-identical statements to the eb5dd0ba3 oracle', async () => {
+  await W.check('before: create and variant with opening stock preserve business statements and ledger parity to the historical oracle', async () => {
     for (const url of ['/', '/variant']) {
-      const dbNew = W.build('before'); const dbOld = W.build('before')
+      const dbNew = W.build('before'); const dbOld = W.build('before', undefined, { historical: true })
       const capNew = []; const capOld = []
       const a = await W.call(products(fresh), dbNew, 'POST', url, createBody(2), { capture: capNew, redirect: 1 })
       const b = await W.call(products(oracle), dbOld, 'POST', url, createBody(2), { capture: capOld })
       assert.equal(a.status, 200, JSON.stringify(a.body))
       assert.equal(W.normalised(a), W.normalised(b), url)
-      assert.equal(W.normalised(capNew), W.normalised(capOld), url)
+      W.assertComposedWrites(capNew, capOld, dbNew)
+      assert.equal(W.normalised(W.ledger(dbNew)), W.normalised(W.ledger(dbOld)), 'complete business ledger parity')
       assert.deepEqual(opening(dbNew), [{ branch_id: 1, quantity: 0, lots: null }, { branch_id: 2, quantity: 5, lots: 5 }])
     }
-    const dbNew = queue(W.build('before'), 2); const dbOld = queue(W.build('before'), 2)
+    const dbNew = queue(W.build('before'), 2); const dbOld = queue(W.build('before', undefined, { historical: true }), 2)
     const capNew = []; const capOld = []
     const a = await W.call(reviewQueue(fresh), dbNew, 'POST', '/50/approve', {}, { capture: capNew, redirect: 1 })
     const b = await W.call(reviewQueue(oracle), dbOld, 'POST', '/50/approve', {}, { capture: capOld })
     assert.equal(a.status, 200, JSON.stringify(a.body))
     assert.equal(W.normalised(a), W.normalised(b))
-    assert.equal(W.normalised(capNew), W.normalised(capOld), 'approval: same write statements')
+    W.assertComposedWrites(capNew, capOld, dbNew)
+    assert.equal(W.normalised(W.ledger(dbNew)), W.normalised(W.ledger(dbOld)), 'approval: complete business ledger parity')
   })
 
   await W.check('control: the oracle refused opening stock at the disabled branch with receiving_branch_inactive (no way through)', async () => {

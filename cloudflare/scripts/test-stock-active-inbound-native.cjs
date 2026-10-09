@@ -20,6 +20,16 @@ function load(file) {
 
 const transitions = load('saleTransitions.ts')
 const batches = load('productBatches.ts')
+const { STOCK_SCHEMA_EPOCH } = load('stockTransaction.ts')
+function seedStockState(sql, seed) {
+  assert.equal(sql.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get().value, STOCK_SCHEMA_EPOCH)
+  sql.transaction(() => {
+    sql.prepare("INSERT INTO system_flags(key,value) VALUES('stock_transaction_permit',?)").run(STOCK_SCHEMA_EPOCH)
+    seed()
+    sql.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'")
+  })()
+  assert.equal(sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+}
 const db = new Database(':memory:')
 db.exec(`CREATE TABLE products(id INTEGER PRIMARY KEY,is_active INTEGER,stock_quantity REAL);
   CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,is_active INTEGER,updated_at TEXT);
@@ -62,14 +72,22 @@ db.close()
 
 async function routeControls() {
   const fixturePath = path.join(__dirname, 'test-sale-bulk-status-pure.cjs')
-  const source = fs.readFileSync(fixturePath, 'utf8')
+  let source = fs.readFileSync(fixturePath, 'utf8')
+  // Keep the shared fixture unchanged; this caller owns only its synthetic setup.
+  source = source.replace("['acquisitionCostAccess'", "['stockTransaction','acquisitionCostAccess'")
+  const seedStart = '  sql.exec("INSERT INTO branches'
+  const seedEnd = '(2,1,100)")'
+  assert.equal(source.split(seedStart).length, 2)
+  assert.equal(source.split(seedEnd).length, 2)
+  source = source.replace(seedStart, '  seedStockState(sql, () => sql.exec("INSERT INTO branches').replace(seedEnd, '(2,1,100)"))')
   const end = source.indexOf('async function run() {')
   assert.ok(end > 0)
-  const { fixture, seed, sales, snapshot } = new Function('require', '__dirname',
-    source.slice(0, end) + '\nreturn { fixture, seed, sales, snapshot }')(require, __dirname)
+  const { fixture, seed, sales, snapshot } = new Function('require', '__dirname', 'seedStockState',
+    source.slice(0, end) + '\nreturn { fixture, seed, sales, snapshot }')(require, __dirname, seedStockState)
   const f = fixture()
   seed(f, 1)
-  f.sql.exec('UPDATE branch_stock SET quantity=0 WHERE product_id=1; UPDATE products SET stock_quantity=0 WHERE id=1; UPDATE products SET is_active=0 WHERE id=1')
+  assert.throws(() => f.sql.exec('UPDATE products SET stock_quantity=0 WHERE id=1'), /stock_transaction_required/)
+  seedStockState(f.sql, () => f.sql.exec('UPDATE branch_stock SET quantity=0 WHERE product_id=1; UPDATE products SET stock_quantity=0 WHERE id=1; UPDATE products SET is_active=0 WHERE id=1'))
   const before = snapshot(f)
   const refusal = await f.call(sales, '/1/status', {sale_status:'cancelled',cancel_reason:'mistake',expected_updated_at:'same-second',client_request_id:'inactive-cancel'}, 'PATCH')
   assert.equal(refusal.status,409,JSON.stringify(refusal.body))
@@ -80,14 +98,14 @@ async function routeControls() {
   const { fixture: sessionFixture, loadStockSession, user, receiveRequest, receiptState } = require('./test-stock-session-atomic.cjs')
   const sessions = loadStockSession()
   const g = sessionFixture()
-  g.sql.exec('UPDATE products SET is_active=0 WHERE id=1')
+  seedStockState(g.sql, () => g.sql.exec('UPDATE products SET is_active=0 WHERE id=1'))
   const initial = receiptState(g.sql)
   await assert.rejects(sessions.commitStockSession(g.env,user,receiveRequest('inactive-receipt')),error => error.code==='product_has_stock' && error.status===409)
   assert.deepEqual(receiptState(g.sql),initial)
-  g.sql.exec('UPDATE products SET is_active=1 WHERE id=1')
+  seedStockState(g.sql, () => g.sql.exec('UPDATE products SET is_active=1 WHERE id=1'))
   const request = receiveRequest('replay-after-deactivation')
   const receipt = await sessions.commitStockSession(g.env,user,request)
-  g.sql.exec('UPDATE branch_batch_stock SET quantity=0; UPDATE branch_stock SET quantity=0; UPDATE products SET stock_quantity=0 WHERE id=1; UPDATE products SET is_active=0 WHERE id=1')
+  seedStockState(g.sql, () => g.sql.exec('UPDATE branch_batch_stock SET quantity=0; UPDATE branch_stock SET quantity=0; UPDATE products SET stock_quantity=0 WHERE id=1; UPDATE products SET is_active=0 WHERE id=1'))
   const depleted = receiptState(g.sql)
   const replay = await sessions.commitStockSession(g.env,user,request)
   assert.equal(replay.replayed,true)
@@ -100,16 +118,16 @@ async function routeControls() {
   const datedPlan = { movementsToDelete:[], supersededMovements:[], groupFingerprints:[],
     movementsToCreate:[{productId:1,productName:'Serum',branchId:1,branchName:'Shop',date:'2026-10-08',quantity:2,movementType:'add',reason:'count',batchActions:[]}],
     finalBranchStock:[{productId:1,branchId:1,quantity:2}],batchTopUps:[],batchCreates:[],batchDrains:[],batchDeactivations:[] }
-  h.sql.exec('UPDATE products SET is_active=0 WHERE id=1')
+  seedStockState(h.sql, () => h.sql.exec('UPDATE products SET is_active=0 WHERE id=1'))
   const datedBefore = receiptState(h.sql)
   await assert.rejects(dated.applyDatedStockCountPlan(compat,datedPlan),e=>e.code==='product_has_stock')
   assert.deepEqual(receiptState(h.sql),datedBefore)
-  h.sql.exec('UPDATE products SET is_active=1 WHERE id=1')
-  h.beforeCommit(sql=>sql.exec('UPDATE products SET is_active=0 WHERE id=1'))
+  seedStockState(h.sql, () => h.sql.exec('UPDATE products SET is_active=1 WHERE id=1'))
+  h.beforeCommit(sql=>seedStockState(sql, () => sql.exec('UPDATE products SET is_active=0 WHERE id=1')))
   await assert.rejects(dated.applyDatedStockCountPlan(compat,datedPlan),e=>e.code==='product_has_stock')
   assert.equal(h.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1').get().quantity,0)
   assert.equal(h.sql.prepare('SELECT COUNT(*) c FROM inventory_movements').get().c,0)
-  h.sql.exec('UPDATE products SET is_active=1 WHERE id=1')
+  seedStockState(h.sql, () => h.sql.exec('UPDATE products SET is_active=1 WHERE id=1'))
   await dated.applyDatedStockCountPlan(compat,datedPlan)
   assert.equal(h.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1').get().quantity,2)
   h.sql.close()

@@ -50,7 +50,7 @@ const session = (key, items) => ({ client_request_id: key, mode: 'stock_in', ite
 async function main() {
   await W.check('before: a session preserves oracle business rows, receipts, history and undo snapshots across statement packing', async () => {
     for (const body of [session('cutover-lr-session-before', [line('a', 10, 2), line('c', 20, 1)]), session('cutover-lr-session-before-2', [line('b', 10, 2, { batch_id: 500, supplier_name: null, supplier_id: null })])]) {
-    const dbNew = W.build('before'); const dbOld = W.build('before')
+    const dbNew = W.build('before'); const dbOld = W.build('before', undefined, { historical: true })
     const capNew = []; const capOld = []
     const a = await W.call(inventory(fresh), dbNew, 'POST', '/sessions', body, { capture: capNew, redirect: 1 })
     const b = await W.call(inventory(oracle), dbOld, 'POST', '/sessions', body, { capture: capOld })

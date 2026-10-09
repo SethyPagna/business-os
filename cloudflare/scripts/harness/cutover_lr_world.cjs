@@ -1,11 +1,12 @@
 // CUTOVER-LR stock writers: one world for the scripts/test-cutover-lr-*-pure.cjs files.
 //
-// The REAL route and lib modules run against an in-memory SQLite with every migration applied, through the real
+// Current route worlds seed an in-memory SQLite through 0242, then install actual later migrations through the real
 // lib/db.ts D1Compat. Only side channels are replaced: the session (requireAuth), the audit insert, broadcasts,
 // KV cache bumps and Telegram sends.
 //
-// An ORACLE world loads the files CUTOVER-LR changed exactly as they were at eb5dd0ba3 (before this change), so a
-// test can prove that while every branch is active the new code writes byte-identical statements.
+// The historical ORACLE world loads the specified CUTOVER-LR files at ORACLE below on the pre-0243 physical
+// schema. Shared imports stay current and receive a compatibility epoch flag; this hybrid comparison proves
+// business and ledger parity, while only current worlds certify the installed fence and permit lifecycle.
 //
 // Branch fixtures follow production ids: 1 = LC Store (formerly Warehouse), 2 = Shop. 'before' = both active (today),
 // 'after' = the consolidation's end state (Old Shop disabled, successor 1, all stock moved to LC Store, lot 500
@@ -63,13 +64,29 @@ function migratedDb() {
   if (!template) {
     const seed = new Database(':memory:')
     seed.pragma('foreign_keys = OFF')
-    for (const migration of loadAll()) seed.exec(migration)
+    for (const migration of loadAll({ through: 242 })) seed.exec(migration)
     template = seed.serialize()
     seed.close()
   }
   const db = new Database(template)
   db.pragma('foreign_keys = OFF')
   return db
+}
+
+const executorWorld = makeWorld()
+// Capture the compiled executor envelope for exact statement comparison only. Tested routes and fixture writes
+// below dispatch the unchanged executor through actual D1Compat and SQLite transactions.
+let expectedEpochStatements
+executorWorld.load('lib/stockTransaction.ts').executeStockTransaction({ batchOnce: statements => {
+  expectedEpochStatements = statements
+  return Promise.resolve(statements.map(() => ({})))
+} }, [], 'once')
+const maintenanceGuardSql = executorWorld.load('lib/businessMaintenanceGuard.ts').ordinaryBusinessMaintenanceGuard.sql.trim()
+const isMaintenanceGuard = s => s.sql.trim() === maintenanceGuardSql
+const isEpochStatement = s => expectedEpochStatements.some(expected => expected.sql.trim() === s.sql.trim())
+async function fixtureStockWrite(db, statements) {
+  const compat = executorWorld.load('lib/db.ts').getDb({ DB: binding(db) })
+  return executorWorld.load('lib/stockTransaction.ts').executeStockTransaction(compat, statements, 'once')
 }
 
 // The D1 binding lib/db.ts wraps. `capture` collects every write in order: each batch as one entry, each
@@ -94,12 +111,12 @@ function binding(sql, capture = null) {
     },
     async batch(statements) {
       if (capture) capture.push(statements.map((statement) => ({ sql: statement.text, params: statement.params })))
-      return sql.transaction(() => statements.map((statement) => {
+      try { return sql.transaction(() => statements.map((statement) => {
         const stmt = sql.prepare(statement.text)
         if (stmt.reader) return { results: sqliteD1Call(stmt, 'all', statement.params), meta: { changes: 0, last_row_id: 0 } }
         const r = sqliteD1Call(stmt, 'run', statement.params)
         return { meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } }
-      }))()
+      }))() } finally { assert.equal(sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0, 'success and rollback leave no epoch permit') }
     },
   }
 }
@@ -123,13 +140,14 @@ async function call(app, db, method, url, body, { redirect = null, capture = nul
     headers: { 'content-type': 'application/json', ...(redirect == null ? {} : { 'x-branch-redirect': String(redirect) }), ...headers },
     body: body === undefined ? undefined : JSON.stringify(body),
   }, { DB: binding(db, capture) }, executionCtx)
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0, 'route leaves no epoch permit')
   const text = await response.text()
   let json; try { json = JSON.parse(text) } catch { json = { error: text } }
   return { status: response.status, body: json }
 }
 
 // Products 10 (lots 500 at Shop, 600 at LC Store, both received 2026-09-01) and 20 (lot 700 at LC Store only).
-function build(state) {
+function build(state, seed = () => {}, { historical = false } = {}) {
   const db = migratedDb()
   db.exec('DELETE FROM branches')
   if (state === 'before') {
@@ -154,6 +172,15 @@ function build(state) {
              INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,2,0),(600,1,15),(700,1,6);`)
     db.prepare("INSERT INTO audit_logs(user_name,action,entity,entity_id,details) VALUES('op','branch_cutover_lot_fold','product_batch','600',?)")
       .run([JSON.stringify({ operationId: 'op-1', productId: 10, survivorBatchId: 600, foldedBatchIds: [500], branchId: 1 })])
+  }
+  seed(db)
+  if (historical) {
+    db.prepare("INSERT INTO system_flags(key,value) VALUES('stock_schema_epoch','legacy-separate-pool-v1')").run()
+  } else {
+    for (const file of fs.readdirSync(path.join(__dirname, '..', '..', 'migrations')).filter(file => /\.sql$/.test(file) && Number(file.slice(0, 4)) > 242).sort()) db.exec(fs.readFileSync(path.join(__dirname, '..', '..', 'migrations', file), 'utf8'))
+    assert.equal(db.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get().value, 'legacy-separate-pool-v1')
+    assert.throws(() => db.exec('UPDATE branch_stock SET quantity=quantity'), /stock_transaction_required/)
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
   }
   return db
 }
@@ -181,26 +208,49 @@ const scrub = (text) => text
   .replace(/Set received (?:date|\d{4}-\d{2}-\d{2}(?: from \d+)?) to (\d+)/g, 'Set received <lot> to $1')
 const normalised = (capture) => scrub(JSON.stringify(capture))
 
+function businessStatements(capture) {
+  for (const rows of capture) {
+    if (rows.some(s => /stock_transaction_permit/.test(s.sql))) {
+      assert.equal(rows[0].sql.trim(), expectedEpochStatements[0].sql.trim(), 'exact compiled epoch admission')
+      assert.equal(rows.at(-1).sql.trim(), expectedEpochStatements[1].sql.trim(), 'exact compiled permit release')
+      assert.equal(rows.filter(isEpochStatement).length, 2)
+    }
+  }
+  return capture.map(rows => rows.filter(s => !isEpochStatement(s) && !isMaintenanceGuard(s))).filter(rows => rows.length)
+}
+
 function assertComposedWrites(current, previous, db) {
   const receipt = (s) => /stock_mutation_receipts/.test(s.sql)
   const movement = (s) => /INSERT INTO inventory_movements/.test(s.sql)
   const cost = (s) => /UPDATE products SET\s+cost_price_usd/.test(s.sql)
-  const physical = (s) => /(?:INSERT INTO|UPDATE) branch_(?:batch_)?stock/.test(s.sql)
-  const writes = current.flat(), oldWrites = previous.flat()
+  const physical = (s) => /(?:INSERT INTO|UPDATE|DELETE FROM) (?:branch_(?:batch_)?stock|damaged_stock_lots)\b/.test(s.sql)
+  const epoch = s => /^INSERT INTO system_flags[\s\S]*'stock_transaction_permit'/.test(s.sql.trim()) || /^DELETE FROM system_flags[\s\S]*stock_transaction_permit/.test(s.sql.trim())
+  const currentWrites = current.flat()
+  for (const rows of current) {
+    if (rows.some(epoch)) {
+      assert.equal(rows[0].sql.trim(), expectedEpochStatements[0].sql.trim(), 'exact compiled epoch admission')
+      assert.equal(rows.at(-1).sql.trim(), expectedEpochStatements[1].sql.trim(), 'exact compiled permit release')
+      assert.equal(rows.filter(epoch).length, 2, 'one begin/end epoch permit in its transaction')
+    }
+  }
+  const writes = currentWrites.filter(s => !epoch(s) && !isMaintenanceGuard(s)), oldWrites = previous.flat().filter(s => !epoch(s) && !isMaintenanceGuard(s))
   const business = (rows) => rows.filter(s => !receipt(s) && !movement(s) && !cost(s))
   assert.equal(normalised(business(writes)), normalised(business(oldWrites)), 'same ordered business guards, stock metadata, quantities and history statements')
   assert.equal(normalised(writes.filter(cost)), normalised(oldWrites.filter(cost)), 'same catalog cost expression and bindings')
   assert.equal(writes.filter(movement).length, oldWrites.filter(movement).length, 'same movement count; complete movement values are compared in the ledger')
-  const batch = current.find(rows => rows.some(physical))
+  const originalBatch = current.find(rows => rows.some(physical))
+  const batch = originalBatch?.filter(s => !epoch(s) && !isMaintenanceGuard(s))
+  assert.ok(originalBatch?.some(epoch), 'physical effects require actual epoch permit bookkeeping')
   assert.ok(batch, 'stock effects are captured in a transaction')
   const guard = s => /^(?:SELECT CASE|INSERT INTO stock_session_guards|DELETE FROM stock_session_guards)/i.test(s.sql.trim())
   assert.deepEqual(batch.filter(guard), writes.filter(guard), 'mandatory business guards share the physical stock transaction')
   const completion = writes.find(s => /UPDATE stock_mutation_receipts SET response_status/.test(s.sql))
+  assert.equal(Boolean(completion), previous.flat().some(s => /UPDATE stock_mutation_receipts SET response_status/.test(s.sql)), 'receipt completion presence is preserved')
   if (!completion) return
   const writeMark = s => /UPDATE stock_mutation_receipts SET written=1|INSERT INTO stock_mutation_receipts[\s\S]*DO UPDATE SET written=excluded\.written/.test(s.sql)
   const marks = batch.filter(writeMark)
   if (!marks.length) {
-    const unchangedGroups = rows => rows.map(group => group.filter(s => !receipt(s))).filter(group => group.length)
+    const unchangedGroups = rows => rows.map(group => group.filter(s => !receipt(s) && !epoch(s) && !isMaintenanceGuard(s))).filter(group => group.length)
     assert.equal(normalised(unchangedGroups(current)), normalised(unchangedGroups(previous)), 'legacy explicit-lot path retains its existing transaction grouping')
     assert.ok(writes.some(writeMark))
     return
@@ -211,7 +261,8 @@ function assertComposedWrites(current, previous, db) {
     assert.ok(batch.some(cost), 'catalog cost shares the intake transaction')
     assert.ok(batch.findIndex(movement) < batch.findIndex(cost), 'intake history precedes derived catalog cost')
   }
-  assert.ok(current.indexOf(batch) < current.findIndex(rows => rows.includes(completion)), 'receipt completion follows the atomic stock transaction')
+  assert.ok(current.indexOf(originalBatch) < current.findIndex(rows => rows.includes(completion)), 'receipt completion follows the atomic stock transaction')
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0, 'epoch permit never persists')
   const rows = db.prepare('SELECT written,completed_at,response_status FROM stock_mutation_receipts').all()
   assert.equal(rows.length, 1)
   assert.deepEqual([rows[0].written, rows[0].response_status], [1, 200])
@@ -270,5 +321,5 @@ async function callWith(app, dbBinding, method, url, body, redirect) {
 
 module.exports = {
   ORACLE, USER, makeWorld, migratedDb, binding, call, callWith, raceBinding, build, ledger, plain, oldShop, movements, maxMovement, qty,
-  normalised, assertComposedWrites, REDIRECT, check, done, assertRefusals,
+  normalised, assertComposedWrites, fixtureStockWrite, isEpochStatement, businessStatements, REDIRECT, check, done, assertRefusals,
 }

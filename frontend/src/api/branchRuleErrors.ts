@@ -17,6 +17,10 @@
 // pinned against en.json by frontend/tests/productSheetState.test.ts and
 // against the Worker's constants by Cloudflare's branch guard tests.
 export const BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> = [
+  ['This import has begun applying. Use Retry to continue it; upload a corrected file as a new import.', 'import_apply_already_started'],
+  ['This import has an unfinished source upload. Wait for it to finish, or cancel it and create a new import.', 'import_source_upload_in_progress'],
+  ['Import changed while this request was pending. Refresh and retry.', 'import_job_changed'],
+  ['Stock or product groups changed after this import was planned. Earlier groups remain applied. This group was not changed; review the current stock and start a corrected import.', 'product_import_finalization_changed'],
   ["This stock change is too large for the current plan. Use fewer products or received dates, then try again.", 'stock_session_query_budget_exceeded'],
   ["This return is too large for the current plan. Return fewer items or received dates, then try again.", 'customer_return_over_plan_budget'],
   ["This stock action is too large for the current plan. Use fewer items or received dates, then try again.", 'stock_import_unit_over_tier_budget'],
@@ -75,11 +79,18 @@ export const LEGACY_BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, st
 export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   bulk_price_outcome_unknown: 'bulk_price_outcome_unknown',
   bulk_price_request_not_saved: 'bulk_price_request_not_saved',
+  receipt_selling_price_changed: 'receipt_selling_price_changed',
+  stock_schema_unavailable: 'stock_receipt_unavailable',
+  stock_transaction_outcome_unknown: 'stock_request_outcome_unknown',
   stock_session_query_budget_exceeded: 'stock_session_query_budget_exceeded',
   customer_return_over_plan_budget: 'customer_return_over_plan_budget',
   stock_import_unit_over_tier_budget: 'stock_import_unit_over_tier_budget',
   stock_import_reconcile_over_tier_budget: 'stock_import_reconcile_over_tier_budget',
   import_queue_required: 'import_queue_required',
+  product_import_finalization_changed: 'product_import_finalization_changed',
+  import_apply_already_started: 'import_apply_already_started',
+  import_source_upload_in_progress: 'import_source_upload_in_progress',
+  import_job_changed: 'import_job_changed',
   bulk_delete_queue_unavailable: 'bulk_delete_queue_unavailable',
   bulk_delete_queue_resume_required: 'bulk_delete_queue_resume_required',
   product_has_stock: 'product_has_stock',

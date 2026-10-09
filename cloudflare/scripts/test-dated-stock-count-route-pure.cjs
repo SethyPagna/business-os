@@ -19,20 +19,32 @@ const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 function freshDb() {
-  const rawDb = openDb(loadAll())
+  const rawDb = openDb(loadAll({ through: 242 }))
+  rawDb.db.exec(fs.readFileSync(path.join(__dirname, '../migrations/0244_dated_count_decision_receipts.sql'), 'utf8'))
+  let epochInstalled = false
+  const installEpoch = () => {
+    if (!epochInstalled) {
+      rawDb.db.exec(fs.readFileSync(path.join(__dirname, '../migrations/0243_stock_schema_epoch.sql'), 'utf8'))
+      epochInstalled = true
+    }
+  }
   const db = {
     prepare(sql) {
       const stmt = rawDb.prepare(sql)
       return {
         get: (params) => stmt.get(params),
+        getOnce: (params) => stmt.get(params),
         all: (params) => stmt.all(params) ?? [],
+        allOnce: (params) => stmt.all(params) ?? [],
         run: (params) => {
           const r = stmt.run(params)
           return { changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) }
         },
       }
     },
+    async batchOnce(items) { return this.batch(items) },
     async batch(items) {
+      installEpoch()
       // Found 2026-09-22: production D1Compat.batch() returns the raw
       // D1Result[] and callers read results[i].meta.last_row_id; a shim that
       // flattened it to { changes, lastInsertRowid } dropped .meta. Pass the
@@ -88,7 +100,7 @@ const originalCompile = Module.prototype._compile
 Module.prototype._compile = function (content, filename) {
   if (filename.includes(`${path.sep}cloudflare${path.sep}src${path.sep}lib${path.sep}`)) {
     const originalRequire = this.require.bind(this)
-    this.require = (id) => (relMap[id] ? relMap[id]() : originalRequire(id))
+    this.require = (id) => { if (relMap[id]) return relMap[id](); if (id.startsWith('.')) { const target = path.resolve(path.dirname(filename), id + (id.endsWith('.ts') ? '' : '.ts')); if (fs.existsSync(target)) return loadReal(path.relative(path.join(__dirname, '../src'), target)) }; return originalRequire(id) }
   }
   return originalCompile.call(this, content, filename)
 }

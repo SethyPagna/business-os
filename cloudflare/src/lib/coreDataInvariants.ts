@@ -1,3 +1,4 @@
+import { executeStockTransaction, STOCK_SCHEMA_EPOCH } from './stockTransaction'
 // D1 port of backend/src/postgresDatabase.ts's ensureDefaultSeedData /
 // ensurePrimaryAdminRoleAndUser. The Node backend runs this on every boot;
 // the Worker doesn't have a boot hook, so ensureCoreDataInvariantsOnce()
@@ -454,10 +455,15 @@ export async function runCoreDataInvariants(env: Env): Promise<CoreDataInvariant
   // the NOT IN subquery on every future call, so this is a no-op after the
   // first successful run for a given product.
   const activeDefaultBranch = await db.prepare(`
-    SELECT id FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC LIMIT 1
-  `).get<{ id: number }>()
+    SELECT id FROM branches WHERE is_active = 1
+      AND NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance')
+      AND (SELECT value FROM system_flags WHERE key='stock_schema_epoch')=@stockEpoch
+      AND EXISTS (SELECT 1 FROM products p WHERE p.is_active = 1
+        AND p.id NOT IN (SELECT product_id FROM branch_stock))
+      ORDER BY is_default DESC, id ASC LIMIT 1
+  `).get<{ id: number }>({ stockEpoch: STOCK_SCHEMA_EPOCH })
   if (activeDefaultBranch?.id) {
-    await db.prepare(`
+    await executeStockTransaction(db, [{ sql: `
       INSERT INTO branch_stock (product_id, branch_id, quantity)
       SELECT p.id, @branchId, COALESCE(p.stock_quantity, 0)
       FROM products p
@@ -467,7 +473,7 @@ export async function runCoreDataInvariants(env: Env): Promise<CoreDataInvariant
         AND @branchId = (
           SELECT id FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC LIMIT 1
         )
-    `).run({ branchId: activeDefaultBranch.id })
+    `, params: { branchId: activeDefaultBranch.id } }], 'retry')
   }
 
   return {
@@ -914,18 +920,15 @@ export async function presentResetTables(
 // orphaned tables sitting in D1 forever, invisible to the app, so this still
 // runs during factory-reset in case any such table was created back when the
 // feature existed.
-export async function dropAllCustomTables(env: Env): Promise<string[]> {
+export async function dropAllCustomTables(env: Env, commit: (statements: { sql: string }[]) => Promise<unknown>): Promise<string[]> {
   const db = getDb(env)
   const rows = await db.prepare(`SELECT name FROM custom_tables`).all<{ name: string }>()
   // Validate the entire set before the first DDL. A later invalid row must
   // not leave an earlier valid custom table already dropped.
   for (const row of rows) assertCustomTableName(row.name)
-  const dropped: string[] = []
-  for (const row of rows) {
-    const safeName = row.name.replace(/"/g, '""')
-    await db.prepare(`DROP TABLE IF EXISTS "${safeName}"`).run()
-    dropped.push(row.name)
-  }
-  await db.prepare(`DELETE FROM custom_tables`).run()
-  return dropped
+  await commit([
+    ...rows.map(row => ({ sql: `DROP TABLE IF EXISTS "${row.name.replace(/"/g, '""')}"` })),
+    { sql: 'DELETE FROM custom_tables' },
+  ])
+  return rows.map(row => row.name)
 }

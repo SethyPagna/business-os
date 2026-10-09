@@ -1,34 +1,8 @@
 import { productStockGuardStatement } from './productStockGuard'
-// P3-L6: the three stock-side transitions on a TAGGED (held, non-sellable)
-// stock row, as pure statement plans so scripts/test-stock-condition-tag-pure.cjs
-// can drive them against the real migration chain -- the same zero-magic shape
-// lib/stockRevert.ts uses.
-//
-// The transition table this file implements. S = sellable stock at the branch
-// (branch_stock + products.stock_quantity + branch_batch_stock), D = held
-// stock (SUM(damaged_stock_lots.quantity_remaining) for that product, branch
-// and tag). Every delta is applied once per call; none of these calls is
-// idempotent by itself, exactly like every other movement writer here, and a
-// second call posts a second movement rather than silently re-applying.
-//
-//   HOLD      keep-as-tagged on a remove, or a tagged restock
-//             S -= q, D += q     movement damage_out (cost filled) + lot row
-//             NOT a loss: the goods are still owned, still countable, still
-//             disposable or restorable. See stockCondition.ts.
-//   DISPOSE   the tagged row's "Remove entirely"
-//             S unchanged, D -= q    movement write_off (cost filled)
-//             THIS is the loss, booked once, at cost. S is untouched because
-//             the units already left sellable stock at HOLD time -- moving S
-//             again here is the double-count this split exists to prevent.
-//   RESTORE   the tagged row's "Restore to sellable"
-//             S += q, D -= q     movement 'in' (cost filled)
-//             The exact reversal of HOLD.
-//
-// A plain untagged removal (no HOLD at all) keeps its existing 'remove'
-// movement and is the loss in its own right -- the owner's "if remove
-// directly it also counts toward losses".
+import { planCountedTaggedChange, tagCapacityGuard, planExactCountedTagCapacity, planExactCountedTaggedChange,
+  subtractCountedQuantity, sumCountedQuantities, type CountedStockPlan } from './countedDamagedStock'
 import type { D1Compat } from './db'
-import { incrementBatchStockStatement, type StockWriteStatement } from './productBatches'
+import type { StockWriteStatement } from './productBatches'
 import { createDamagedLotStatement } from './returnsStock'
 import { resolveMovementCostSnapshot, type MovementCostPair } from './movementCostSnapshot'
 import { buildInClause, selectInChunks } from './sqlBinding'
@@ -36,15 +10,13 @@ import {
   damagedLotReference,
   taggedReasonText,
   TAGGED_DISPOSAL_MOVEMENT_TYPE,
-  TAGGED_HOLD_MOVEMENT_TYPE,
-  TAGGED_RESTORE_MOVEMENT_TYPE,
   type StockConditionSource,
   type StockConditionTag,
 } from './stockCondition'
 
 export type TaggedLotActor = { userId: number | string | null; userName: string | null }
 
-/** One open held lot, oldest first -- what allocateTaggedLots draws from. */
+/** One open tagged lot, oldest first -- what allocateTaggedLots draws from. */
 export type OpenTaggedLot = {
   id: number
   batch_id: number | null
@@ -55,12 +27,12 @@ export type OpenTaggedLot = {
 export type TaggedLotTake = { lotId: number; batchId: number | null; quantity: number; unitCostUsd: number | null }
 
 /**
- * FIFO across a tag's open lots. Oldest lot first, because a held unit's cost
- * and its provenance belong to the lot it came from and the oldest held units
+ * FIFO across a tag's open lots. Oldest lot first, because a tagged unit's cost
+ * and its provenance belong to the lot it came from and the oldest tagged units
  * are the ones an operator means when they say "throw the broken ones out".
  * `uncovered` is what the lots could not supply; every caller refuses rather
  * than partially applying, so a stale client count can never dispose of more
- * than is held.
+ * than is tagged.
  */
 export function allocateTaggedLots(lots: OpenTaggedLot[], quantity: number): { takes: TaggedLotTake[]; uncovered: number } {
   let remaining = Math.max(0, Number(quantity) || 0)
@@ -76,7 +48,7 @@ export function allocateTaggedLots(lots: OpenTaggedLot[], quantity: number): { t
       quantity: take,
       unitCostUsd: lot.unit_cost_usd ?? null,
     })
-    remaining -= take
+    remaining = subtractCountedQuantity(remaining, [take])
   }
   return { takes, uncovered: remaining }
 }
@@ -132,7 +104,7 @@ export type HoldAsTaggedInput = {
   tag: StockConditionTag
   source: Extract<StockConditionSource, 'remove' | 'restock'>
   reason: string | null
-  /** The cost the movement records. Held units are valued at this, and the
+  /** The cost the movement records. Tagged units are valued at this, and the
    *  same USD unit cost is stamped on the lot so a later disposal can book the
    *  loss at what the goods actually cost, not at today's catalog price. */
   cost: MovementCostPair
@@ -141,19 +113,13 @@ export type HoldAsTaggedInput = {
   actor: TaggedLotActor
 }
 
-/**
- * HOLD. The caller has ALREADY taken the units out of sellable stock (the
- * /adjust remove path, or the tagged-restock path that receives and then
- * holds) -- this plan only records where they went. Returned as statements so
- * the movement and the lot row land in one db.batch: a movement with no lot
- * row would be an outflow nobody can restore, and a lot row with no movement
- * would be stock that left sellable without a ledger line.
- */
-export function planHoldAsTagged(input: HoldAsTaggedInput): StockWriteStatement[] {
+/** Tag existing physical units without moving them. The caller commits receipt and tag together. */
+function holdStatements(input: HoldAsTaggedInput, capacity: StockWriteStatement[]): StockWriteStatement[] {
   const quantity = Number(input.quantity)
   if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Held quantity must be positive')
   return [
     productStockGuardStatement([input.productId], 'active'),
+    ...capacity,
     createDamagedLotStatement({
       productId: input.productId,
       productName: input.productName,
@@ -173,11 +139,8 @@ export function planHoldAsTagged(input: HoldAsTaggedInput): StockWriteStatement[
       productName: input.productName,
       branchId: input.branchId,
       branchName: input.branchName,
-      // damage_out, never 'remove': the Stock Change ledger already counts it
-      // as an outflow, and a loss report must NOT count it as one. The loss
-      // happens at DISPOSE. See stockCondition.ts.
-      movementType: TAGGED_HOLD_MOVEMENT_TYPE,
-      quantity,
+      movementType: 'condition_tag',
+      quantity: 0,
       cost: input.cost,
       reason: taggedReasonText(input.tag, input.reason),
       referenceId: input.referenceId,
@@ -185,6 +148,14 @@ export function planHoldAsTagged(input: HoldAsTaggedInput): StockWriteStatement[
       actor: input.actor,
     }),
   ]
+}
+
+export function planHoldAsTagged(input: HoldAsTaggedInput): StockWriteStatement[] {
+  return holdStatements(input, tagCapacityGuard(input.productId, input.branchId, input.batchId, input.quantity))
+}
+
+export function planHoldAsTaggedExact(input: HoldAsTaggedInput, exact: CountedStockPlan): StockWriteStatement[] {
+  return holdStatements(input, planExactCountedTagCapacity(exact, input.productId, input.branchId, input.batchId, input.quantity))
 }
 
 /** The code the in-batch guard below aborts with; the route answers 409 with it. */
@@ -207,24 +178,6 @@ export function isTaggedLotConflict(error: unknown): boolean {
 // still credits sellable stock (Restore) or books a second loss (Dispose). So
 // the guard aborts the whole batch first, and the route answers 409
 // tagged_lot_conflict with nothing written.
-function takeLotStatements(lotId: number, quantity: number): StockWriteStatement[] {
-  const params = { lotId, quantity }
-  return [
-    {
-      sql: `SELECT CASE WHEN EXISTS(
-          SELECT 1 FROM damaged_stock_lots WHERE id = @lotId AND quantity_remaining >= @quantity
-        ) THEN 1 ELSE json_extract('${TAGGED_LOT_CONFLICT_CODE}','$') END AS tagged_lot_guard`,
-      params,
-    },
-    {
-      sql: `UPDATE damaged_stock_lots
-        SET quantity_remaining = quantity_remaining - @quantity, updated_at = CURRENT_TIMESTAMP
-        WHERE id = @lotId AND quantity_remaining >= @quantity`,
-      params,
-    },
-  ]
-}
-
 export type TaggedLotChangeInput = {
   productId: number
   productName: string | null
@@ -241,7 +194,7 @@ export type TaggedLotChangeInput = {
 }
 
 function takenQuantity(takes: TaggedLotTake[]): number {
-  return takes.reduce((sum, take) => sum + Number(take.quantity || 0), 0)
+  return sumCountedQuantities(takes.map(take => Number(take.quantity || 0)))
 }
 
 function costForTakes(input: TaggedLotChangeInput): MovementCostPair {
@@ -263,14 +216,13 @@ function singleBatchId(takes: TaggedLotTake[]): number | null {
 /**
  * DISPOSE -- the tagged row's "Remove entirely". The units are destroyed: the
  * held lots shrink and a write_off movement books the loss at the cost the
- * units were carried at. Sellable stock is deliberately NOT touched; these
- * units left it when they were held.
+ * units were carried at. Physical stock and its tagged subset are reduced together.
  */
-export function planDisposeTagged(input: TaggedLotChangeInput): StockWriteStatement[] {
+function disposeStatements(input: TaggedLotChangeInput, changes: StockWriteStatement[]): StockWriteStatement[] {
   const quantity = takenQuantity(input.takes)
   if (!(quantity > 0)) throw new Error('Disposed quantity must be positive')
   return [
-    ...input.takes.flatMap((take) => takeLotStatements(take.lotId, take.quantity)),
+    ...changes,
     movementStatement({
       productId: input.productId,
       productName: input.productName,
@@ -287,54 +239,43 @@ export function planDisposeTagged(input: TaggedLotChangeInput): StockWriteStatem
   ]
 }
 
-/**
- * RESTORE -- the tagged row's "Restore to sellable", the exact reversal of
- * HOLD. The held lots shrink and the units go back into sellable stock: into
- * the batch they came from when the held lot recorded one (reactivating it, so
- * migration 0154's "positive stock needs an active lot" invariant holds), plus
- * the branch/product aggregate either way.
- */
-export function planRestoreTagged(input: TaggedLotChangeInput): StockWriteStatement[] {
+export function planDisposeTagged(input: TaggedLotChangeInput): StockWriteStatement[] {
+  return disposeStatements(input, input.takes.flatMap(take => planCountedTaggedChange({ lotId: take.lotId, productId: input.productId, branchId: input.branchId, batchId: take.batchId }, take.quantity, 'consume')))
+}
+
+export function planDisposeTaggedExact(input: TaggedLotChangeInput, exact: CountedStockPlan): StockWriteStatement[] {
+  return disposeStatements(input, input.takes.flatMap(take => planExactCountedTaggedChange(exact, { lotId: take.lotId, productId: input.productId, branchId: input.branchId, batchId: take.batchId }, take.quantity, 'consume')))
+}
+
+/** Clear a condition tag without changing physical stock. */
+function restoreStatements(input: TaggedLotChangeInput, changes: StockWriteStatement[]): StockWriteStatement[] {
   const quantity = takenQuantity(input.takes)
   if (!(quantity > 0)) throw new Error('Restored quantity must be positive')
-  const statements: StockWriteStatement[] = [productStockGuardStatement([input.productId], 'active'), ...input.takes.flatMap((take) => takeLotStatements(take.lotId, take.quantity))]
-  for (const take of input.takes) {
-    if (take.batchId == null) continue
-    statements.push({
-      sql: `UPDATE product_batches SET is_active = 1, updated_at = datetime('now') WHERE id = @batchId AND is_active IS NOT 1`,
-      params: { batchId: take.batchId },
-    })
-    statements.push(incrementBatchStockStatement(take.batchId, input.branchId, take.quantity))
-  }
-  statements.push(
-    {
-      sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @quantity)
-            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity`,
-      params: { productId: input.productId, branchId: input.branchId, quantity },
-    },
-    {
-      sql: 'UPDATE products SET stock_quantity = COALESCE(stock_quantity, 0) + @quantity, updated_at = CURRENT_TIMESTAMP WHERE id = @productId',
-      params: { productId: input.productId, quantity },
-    },
+  const statements: StockWriteStatement[] = [
+    ...changes,
     movementStatement({
       productId: input.productId,
       productName: input.productName,
       branchId: input.branchId,
       branchName: input.branchName,
-      movementType: TAGGED_RESTORE_MOVEMENT_TYPE,
-      quantity,
+      movementType: 'condition_clear',
+      quantity: 0,
       cost: costForTakes(input),
       reason: taggedReasonText(input.tag, input.reason),
-      // 'in' IS on stockRevert's revertible allowlist, so this marker is what
-      // stops the ledger from "reverting" a restore -- which would pull the
-      // units back out of sellable stock without putting them back on the
-      // held lot, losing them entirely. stockCondition.ts explains the rule.
       referenceId: damagedLotReference(input.takes[0].lotId),
       batchId: singleBatchId(input.takes),
       actor: input.actor,
     }),
-  )
+  ]
   return statements
+}
+
+export function planRestoreTagged(input: TaggedLotChangeInput): StockWriteStatement[] {
+  return restoreStatements(input, input.takes.flatMap(take => planCountedTaggedChange({ lotId: take.lotId, productId: input.productId, branchId: input.branchId, batchId: take.batchId }, take.quantity, 'clear')))
+}
+
+export function planRestoreTaggedExact(input: TaggedLotChangeInput, exact: CountedStockPlan): StockWriteStatement[] {
+  return restoreStatements(input, input.takes.flatMap(take => planExactCountedTaggedChange(exact, { lotId: take.lotId, productId: input.productId, branchId: input.branchId, batchId: take.batchId }, take.quantity, 'clear')))
 }
 
 export type TaggedLotGroup = {

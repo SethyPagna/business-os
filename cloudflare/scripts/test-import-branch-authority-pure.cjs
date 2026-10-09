@@ -60,6 +60,7 @@ const {
   validateCanonicalImportBranchIds,
   withCanonicalImportBranchWriteGuard,
 } = loadReal('lib/importBranchAuthority.ts')
+const { executeStockTransaction } = loadReal('lib/stockTransaction.ts')
 
 function freshDb() {
   const sqlite = openDb(loadAll())
@@ -74,6 +75,7 @@ function freshDb() {
       }
       return sqlite.batch(statements)
     },
+    async batchOnce(statements) { return this.batch(statements) },
   }
   return { sqlite, db, setBeforeBatch(hook) { beforeBatch = hook } }
 }
@@ -98,8 +100,11 @@ async function main() {
     seedCanonicalBranches(sqlite)
     assert.strictEqual(await validateCanonicalImportBranchIds(db, [1, 2]), null)
     const guarded = withCanonicalImportBranchWriteGuard(db, [1])
-    await guarded.prepare("INSERT INTO products (name, is_active) VALUES ('Valid import', 1)").run()
+    await assert.rejects(() => guarded.prepare("INSERT INTO products (name, is_active) VALUES ('Unowned import', 1)").run(), /stock_transaction_required/)
+    assert.strictEqual(sqlite.prepare("SELECT COUNT(*) n FROM products WHERE name='Unowned import'").get().n, 0)
+    await executeStockTransaction(guarded, [{ sql: "INSERT INTO products (name, is_active) VALUES ('Valid import', 1)" }], 'once')
     assert.strictEqual(sqlite.prepare("SELECT COUNT(*) AS n FROM products WHERE name = 'Valid import'").get().n, 1)
+    assert.strictEqual(sqlite.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
   }
 
   for (const scenario of [
@@ -126,7 +131,7 @@ async function main() {
     const guarded = withCanonicalImportBranchWriteGuard(db, [1])
     setBeforeBatch(scenario.mutate)
     await assert.rejects(
-      () => guarded.prepare("INSERT INTO products (name, is_active) VALUES ('Must not persist', 1)").run(),
+      () => executeStockTransaction(guarded, [{ sql: "INSERT INTO products (name, is_active) VALUES ('Must not persist', 1)" }], 'once'),
       /overflow|constraint|canonical/i,
       `${scenario.name} must fail inside the same atomic batch`,
     )
@@ -138,10 +143,10 @@ async function main() {
     seedCanonicalBranches(sqlite)
     const guarded = withCanonicalImportBranchWriteGuard(db, [1])
     setBeforeBatch((database) => database.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (3, 'SHOP', 1, 0)").run())
-    await assert.rejects(() => guarded.batch([
+    await assert.rejects(() => executeStockTransaction(guarded, [
       { sql: "INSERT INTO products (name, is_active) VALUES ('Batch write one', 1)" },
       { sql: "INSERT INTO products (name, is_active) VALUES ('Batch write two', 1)" },
-    ]), /overflow|constraint|canonical/i)
+    ], 'once'), /overflow|constraint|canonical/i)
     assert.strictEqual(sqlite.prepare("SELECT COUNT(*) AS n FROM products WHERE name LIKE 'Batch write %'").get().n, 0, 'the guard and all writes share one rollback boundary')
   }
 
@@ -215,12 +220,12 @@ async function main() {
     const target = rows.find((r) => r.is_active === 1 && r.is_default === 1).id
     assert.strictEqual(await validateCanonicalImportBranchIds(db, [target]), null, 'the guard accepts the renamed selling branch by role')
     const guarded = withCanonicalImportBranchWriteGuard(db, [target])
-    await guarded.prepare("INSERT INTO products (name, is_active) VALUES ('Role guard ok', 1)").run()
+    await executeStockTransaction(guarded, [{ sql: "INSERT INTO products (name, is_active) VALUES ('Role guard ok', 1)" }], 'once')
     assert.strictEqual(sqlite.prepare("SELECT COUNT(*) AS n FROM products WHERE name = 'Role guard ok'").get().n, 1)
     if (rows === AFTER) {
       assert.match(String(await validateCanonicalImportBranchIds(db, [2])), /inactive/, 'the retired Old Shop is not a write target')
       setBeforeBatch((database) => database.prepare("INSERT INTO branches (id, name, role, is_active, is_default) VALUES (9, 'Another till', 'shop', 1, 0)").run())
-      await assert.rejects(() => guarded.prepare("INSERT INTO products (name, is_active) VALUES ('Role guard rolled back', 1)").run(), /overflow|constraint|canonical|branch/i)
+      await assert.rejects(() => executeStockTransaction(guarded, [{ sql: "INSERT INTO products (name, is_active) VALUES ('Role guard rolled back', 1)" }], 'once'), /overflow|constraint|canonical|branch/i)
       assert.strictEqual(sqlite.prepare("SELECT COUNT(*) AS n FROM products WHERE name = 'Role guard rolled back'").get().n, 0)
     }
   }

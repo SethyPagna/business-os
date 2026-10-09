@@ -38,6 +38,7 @@ import { hasPermission, isAdminControlUser } from './lib/permissions'
 import { admitRequestBody, SMALL_BODY_BYTES, MIGRATION_FINALIZE_BODY_BYTES, smallBodyAccess } from './lib/requestBodyGuard'
 import { ensureCoreDataInvariantsForRequest } from './lib/coreInvariantsGate'
 import { getMaintenance, isBranchCutoverOperatorPath, isMaintenanceGatedRequest } from './lib/maintenance'
+import { stockTransactionRefusal } from './lib/stockTransaction'
 import branchCutoverOperatorRoute from './routes/branchCutoverOperator'
 import { reportError } from './lib/errorReporting'
 import { serveUpload } from './lib/imageVariants'
@@ -207,6 +208,8 @@ app.use('/api/*', requestMetricsMiddleware)
 // the frontend can actually parse and show a sane message for, instead of
 // a bare string.
 app.onError((error, c) => {
+  const transactionRefusal = stockTransactionRefusal(error)
+  if (transactionRefusal) return c.json({ success: false, ...transactionRefusal }, 503)
   const stockRefusal = productStockGuardError(error)
   if (stockRefusal) return c.json({ success: false, error: stockRefusal.message, code: stockRefusal.code }, 409)
   if (error instanceof ReportMoneyPrecisionError) {
@@ -602,7 +605,7 @@ export default {
   // own name off the batch itself.
   async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
     if (batch.queue === 'business-os-import') {
-      await handleImportQueue(batch as MessageBatch<{ jobId: string; kind: 'analyze' | 'apply' | 'bulk-delete' }>, env)
+      await runBackground(env, 'import-queue', () => handleImportQueue(batch as MessageBatch<{ jobId: string; kind: 'analyze' | 'apply' | 'bulk-delete' }>, env))
     } else if (batch.queue === 'business-os-import-dlq') {
       await handleImportDeadLetterQueue(batch as MessageBatch<{ jobId: string; kind: 'analyze' | 'apply' | 'bulk-delete' }>, env)
     } else if (batch.queue === 'business-os-media') {

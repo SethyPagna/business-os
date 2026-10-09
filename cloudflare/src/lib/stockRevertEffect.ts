@@ -20,6 +20,7 @@
 import type { D1Compat } from './db'
 import type { StockMovementRevertPreview } from './stockMovementReplay'
 import { LEDGER_OUT_TYPES } from './stockLedgerQuery'
+import { subtractDecimalSum } from './moneyPrecision'
 
 export type StockRevertEffect = {
   /** The change the Revert makes to stock, signed: -30 takes 30 out. */
@@ -67,14 +68,26 @@ export async function revertEffect(db: D1Compat, movementId: number, revert: Sto
   let quantity: number
   let branchChange: number
   if (revert.kind === 'stock_set') {
-    const operation = await db.prepare('SELECT before_json, after_json FROM stock_lot_adjustment_operations WHERE id = @id')
-      .get<{ before_json: string; after_json: string }>({ id: String(revert.operationId ?? '') })
+    const operation = await db.prepare(`SELECT before_json, after_json, request_json,
+      EXISTS(SELECT 1 FROM counted_stock_conversion_lots c
+        WHERE c.lot_id=json_extract(o.revision_json,'$.heldLotId')
+        AND c.product_id=json_extract(o.before_json,'$.productId')
+        AND c.branch_id=json_extract(o.before_json,'$.branchId')
+        AND c.batch_id IS json_extract(o.before_json,'$.batchId')
+        AND c.condition_tag=json_extract(o.request_json,'$.conditionTag')) AS converted_tag
+      FROM stock_lot_adjustment_operations o WHERE id = @id`)
+      .get<{ before_json: string; after_json: string; request_json: string; converted_tag: number }>({ id: String(revert.operationId ?? '') })
     if (!operation) return null
     const before = JSON.parse(operation.before_json), after = JSON.parse(operation.after_json)
     const sign = revert.direction === 'redo' ? 1 : -1
-    quantity = sign * (Number(after.lotQuantity) - Number(before.lotQuantity))
+    quantity = sign * Number(subtractDecimalSum(Number(after.lotQuantity), [Number(before.lotQuantity)]))
     // The branch moves by its own recorded delta, which differs from the lot's under the lot-scope floor.
-    branchChange = sign * (Number(after.branchQuantity) - Number(before.branchQuantity))
+    branchChange = sign * Number(subtractDecimalSum(Number(after.branchQuantity), [Number(before.branchQuantity)]))
+    if (JSON.parse(operation.request_json).conditionTag && Number(after.lotQuantity) < Number(before.lotQuantity)) {
+      if (!operation.converted_tag) return null
+      quantity = 0
+      branchChange = 0
+    }
   } else {
     const magnitude = Math.abs(Number(row.quantity) || 0)
     quantity = OUT_TYPES.has(row.movement_type) ? magnitude : -magnitude
@@ -83,7 +96,7 @@ export async function revertEffect(db: D1Compat, movementId: number, revert: Sto
   const branchBefore = Number(row.branch_quantity) || 0
   return {
     quantity, batchId: row.batch_id ?? null, receivedAt: row.received_at ?? null, lotCode: row.lot_code ?? null,
-    branchId: Number(row.branch_id), branchName: row.branch_name ?? null, branchBefore, branchAfter: branchBefore + branchChange,
+    branchId: Number(row.branch_id), branchName: row.branch_name ?? null, branchBefore, branchAfter: Number(subtractDecimalSum(branchBefore, [-branchChange])),
   }
 }
 
@@ -103,6 +116,7 @@ export async function laterOpenSets(db: D1Compat, movementIds: number[]): Promis
     JOIN inventory_movements s ON s.product_id = m.product_id
       AND s.created_at >= COALESCE(substr(m.created_at, 1, 10), '') AND s.id > m.id AND s.branch_id = m.branch_id
       AND s.reference_id >= 'stock-set:' AND s.reference_id < 'stock-set;'
+      AND s.movement_type NOT IN ('damage_out','condition_tag','condition_clear')
     LEFT JOIN product_batches b ON b.id = s.batch_id
     WHERE NOT EXISTS (SELECT 1 FROM inventory_movements r WHERE r.reference_id = 'revert:' || CAST(s.id AS TEXT))
     ORDER BY m.id, s.id DESC

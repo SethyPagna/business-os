@@ -55,9 +55,10 @@ const latest = (f) => f.sql.prepare('SELECT * FROM inventory_movements ORDER BY 
 const movement = (f, id) => f.sql.prepare('SELECT * FROM inventory_movements WHERE id=?').get(id)
 
 async function receiptRevertRemovesPurchase() {
-  const f = fixture()
+  let purchases
+  const f = fixture(sql => { purchases = seedPurchases({sql}) })
   try {
-    const { receipt } = seedPurchases(f)
+    const { receipt } = purchases
     const db = getDb(f.env)
     const bought = invoice(f)
     const other = bought.filter((line) => line.id === 9002)
@@ -85,10 +86,9 @@ async function receiptRevertRemovesPurchase() {
 }
 
 async function paidReceiptRevertLowersPaidSpend() {
-  const f = fixture()
+  const f = fixture(sql => seedPurchases({sql}))
   try {
-    seedPurchases(f)
-    f.sql.exec('UPDATE product_batches SET received_quantity=17, received_cost_usd=51 WHERE id=9002; UPDATE branch_batch_stock SET quantity=14 WHERE batch_id=9002; UPDATE branch_stock SET quantity=24 WHERE product_id=1; UPDATE products SET stock_quantity=24 WHERE id=1')
+    await loadStockSession('lib/stockTransaction.ts').executeStockTransaction(getDb(f.env),'UPDATE product_batches SET received_quantity=17, received_cost_usd=51 WHERE id=9002; UPDATE branch_batch_stock SET quantity=14 WHERE batch_id=9002; UPDATE branch_stock SET quantity=24 WHERE product_id=1; UPDATE products SET stock_quantity=24 WHERE id=1'.split(';').map(sql=>({sql})), 'once')
     const paid = Number(f.sql.prepare(`INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,unit_cost_usd,total_cost_usd,reason,batch_id,created_at)
       VALUES(1,1,'add',7,3,21,'Paid receipt',9002,'2026-09-01 03:00:00')`).run().lastInsertRowid)
     assert.deepEqual(supplierTotal(f, 'name:other supplier'), { units: 17, usd: 51 })
@@ -113,9 +113,9 @@ async function legacyReceiptWithoutLot() {
     return Number(f.sql.prepare(`INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,unit_cost_usd,total_cost_usd,reason,created_at)
       VALUES(1,1,'add',5,4,20,'Legacy receipt from Sup Y','2025-01-10 03:00:00')`).run().lastInsertRowid)
   }
-  let f = fixture()
+  let legacy
+  let f = fixture(sql => { legacy = seed({sql}, 5) })
   try {
-    const legacy = seed(f, 5)
     const record = JSON.stringify(invoice(f))
     const result = await applyMovementRevert(getDb(f.env), movement(f, legacy), actor)
     assert.equal(result.ok, true, JSON.stringify(result))
@@ -126,9 +126,8 @@ async function legacyReceiptWithoutLot() {
     console.log('PASS legacy receipt without a lot takes back the undated units only')
   } finally { f.sql.close() }
 
-  f = fixture()
+  f = fixture(sql => { legacy = seed({sql}, 0) })
   try {
-    const legacy = seed(f, 0)
     const before = JSON.stringify([stock(f), invoice(f), f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get()])
     const result = await applyMovementRevert(getDb(f.env), movement(f, legacy), actor)
     assert.equal(result.ok, false)
@@ -137,11 +136,10 @@ async function legacyReceiptWithoutLot() {
     console.log('PASS legacy receipt without a lot is refused when only dated lots could cover it')
   } finally { f.sql.close() }
 
-  f = fixture()
+  f = fixture(sql => { legacy = seed({sql}, 5) })
   try {
-    const legacy = seed(f, 5)
     // A sale takes 3 of the undated units after the revert read the stock.
-    f.beforeCommit((sql) => sql.exec('UPDATE branch_stock SET quantity=quantity-3 WHERE product_id=1 AND branch_id=1; UPDATE products SET stock_quantity=stock_quantity-3 WHERE id=1'))
+    f.beforeCommit(async () => loadStockSession('lib/stockTransaction.ts').executeStockTransaction(getDb(f.env),[{sql:'UPDATE branch_stock SET quantity=quantity-3 WHERE product_id=1 AND branch_id=1'},{sql:'UPDATE products SET stock_quantity=stock_quantity-3 WHERE id=1'}],'once'))
     const result = await applyMovementRevert(getDb(f.env), movement(f, legacy), actor)
     assert.equal(result.code, 'stock_changed', JSON.stringify(result))
     assert.deepEqual(stock(f), { branch: 12, product: 12, lots: { 9101: 10 }, lotTotal: 10 }, 'branch_stock never drops below its dated lots')
@@ -156,14 +154,13 @@ async function legacyReceiptWithoutLot() {
 // receives them again. Two lots (no batch stamp, provenance only) and one.
 async function countIncreaseRevertUnreceives() {
   for (const shape of ['two lots', 'one lot']) {
-    const f = fixture()
-    try {
-      const twoLots = shape === 'two lots'
-      f.sql.exec(`
+    const twoLots = shape === 'two lots'
+    const f = fixture(sql => sql.exec(`
         UPDATE products SET stock_quantity=${twoLots ? 9 : 4} WHERE id=1; UPDATE branch_stock SET quantity=${twoLots ? 9 : 4} WHERE product_id=1 AND branch_id=1;
         INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,received_quantity,received_branch_id)
           VALUES(9201,1,'09102026','09102026','2026-09-10',1,1,4,1)${twoLots ? ",(9202,1,'09122026','09122026','2026-09-12',1,2,5,1)" : ''};
-        INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(9201,1,4)${twoLots ? ',(9202,1,5)' : ''};`)
+        INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(9201,1,4)${twoLots ? ',(9202,1,5)' : ''};`))
+    try {
       const count = Number(f.sql.prepare(`INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,reason,batch_id,created_at)
         VALUES(1,1,'add',${twoLots ? 9 : 4},'Dated stock count import',${twoLots ? 'NULL' : 9201},'2026-09-12 00:00:00')`).run().lastInsertRowid)
       f.sql.exec(`INSERT INTO dated_stock_count_batch_actions(movement_id,batch_id,quantity) VALUES(${count},9201,4)${twoLots ? `,(${count},9202,5)` : ''}`)
@@ -195,9 +192,10 @@ function lossOn(f, day) {
 }
 
 async function removalRevertRemovesTheLoss() {
-  const f = fixture()
+  let purchases
+  const f = fixture(sql => { purchases = seedPurchases({sql}) })
   try {
-    const { receipt, removal } = seedPurchases(f)
+    const { receipt, removal } = purchases
     const db = getDb(f.env)
     const loss = { removal_loss_usd: 9, removal_loss_qty: 3, removal_loss_unvalued_rows: 0 }
     const none = { removal_loss_usd: 0, removal_loss_qty: 0, removal_loss_unvalued_rows: 0 }

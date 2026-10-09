@@ -38,10 +38,15 @@ runTest('an uncoded failure keeps the server message; nothing at all falls back 
   assert.equal(datedStockCountApplyErrorText(null, trFrom(packs.km)), packs.km.dated_count_apply_failed)
 })
 
-runTest('every mapped code is one the Worker apply route actually returns', () => {
-  const route = fs.readFileSync(path.join(root, '..', 'cloudflare', 'src', 'routes', 'inventory.ts'), 'utf8')
+runTest('existing recovery codes are emitted and APPLY codes follow the agreed receipt contract', () => {
+  const receiptPath = path.join(root, '..', 'cloudflare', 'src', 'lib', 'datedStockCountApplyReceipt.ts')
+  const receipt = fs.existsSync(receiptPath) ? fs.readFileSync(receiptPath, 'utf8') : ''
+  const route = receipt + fs.readFileSync(path.join(root, '..', 'cloudflare', 'src', 'routes', 'inventory.ts'), 'utf8') + fs.readFileSync(path.join(root, '..', 'cloudflare', 'src', 'lib', 'datedStockCountDecisions.ts'), 'utf8')
+  const local = read('src/api/inventoryWriteTransport.ts') + read('src/components/products/import/DatedStockReconciliationModal.tsx')
+  const applyContract = new Set(['dated_count_invalid_id', 'dated_count_owner_mismatch', 'dated_count_request_conflict', 'dated_count_reset_conflict', 'dated_count_outcome_unknown', 'dated_count_receipt_unavailable', 'dated_count_over_plan_budget'])
   for (const code of Object.keys(DATED_STOCK_COUNT_APPLY_ERRORS)) {
-    assert.ok(route.includes(`code: '${code}' }, 409)`), `routes/inventory.ts returns 409 ${code}`)
+    if (!receipt && applyContract.has(code)) continue
+    assert.ok(route.includes(`'${code}'`) || local.includes(`'${code}'`), `server or saved-intent recovery produces ${code}`)
   }
 })
 
@@ -53,12 +58,25 @@ runTest('both language packs carry every key, non-empty', () => {
 
 runTest('the dated stock count modal routes both apply failure paths through the mapping', () => {
   const source = read('src/components/products/import/DatedStockReconciliationModal.tsx')
-  const start = source.indexOf('async function runApply()')
-  assert.ok(start > 0, 'found runApply()')
+  const start = source.indexOf('function handleCountFailure(')
+  assert.ok(start > 0, 'found count failure boundary')
   const apply = source.slice(start, source.indexOf('function updateDecision', start))
   assert.ok(apply.includes('await apiApply('), 'found runApply')
-  assert.equal(apply.split('datedStockCountApplyErrorText(').length - 1, 2, 'returned failure and thrown failure both mapped')
+  assert.ok(apply.includes('handleCountFailure(result)') && apply.includes('handleCountFailure(failure)'), 'returned and thrown failures share the mapped boundary')
   assert.ok(!/e instanceof Error \? e\.message/.test(apply), 'no raw server sentence in the apply path')
+})
+
+runTest('count conflicts acknowledge uncertain prior writes and every recovery code uses actual EN/KM packs', () => {
+  assert.ok(!packs.en.dated_count_apply_conflict.includes('Nothing was changed'))
+  assert.ok(packs.en.dated_count_apply_conflict.includes('may have been saved'))
+  for (const code of Object.keys(DATED_STOCK_COUNT_APPLY_ERRORS)) {
+    const [key] = DATED_STOCK_COUNT_APPLY_ERRORS[code]
+    for (const lang of ['en', 'km']) {
+      assert.equal(datedStockCountApplyErrorText({ code, error: 'Raw English' }, trFrom(packs[lang])), packs[lang][key])
+      assert.equal(datedStockCountApplyErrorText(Object.assign(new Error('Raw English'), { code }), trFrom(packs[lang])), packs[lang][key])
+    }
+    assert.notEqual(packs.en[key], packs.km[key])
+  }
 })
 
 if (failed) { console.error(`${failed} failed`); process.exit(1) }

@@ -19,21 +19,33 @@ const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 function freshDb() {
-  const rawDb = openDb(loadAll())
+  const rawDb = openDb(loadAll({ through: 242 }))
+  rawDb.db.exec(fs.readFileSync(path.join(__dirname, '../migrations/0244_dated_count_decision_receipts.sql'), 'utf8'))
+  let epochInstalled = false
+  const installEpoch = () => {
+    if (!epochInstalled) {
+      rawDb.db.exec(fs.readFileSync(path.join(__dirname, '../migrations/0243_stock_schema_epoch.sql'), 'utf8'))
+      epochInstalled = true
+    }
+  }
   let beforeBatch = null
   const db = {
     prepare(sql) {
       const stmt = rawDb.prepare(sql)
       return {
         get: (params) => stmt.get(params),
+        getOnce: (params) => stmt.get(params),
         all: (params) => stmt.all(params) ?? [],
+        allOnce: (params) => stmt.all(params) ?? [],
         run: (params) => {
           const r = stmt.run(params)
           return { changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) }
         },
       }
     },
+    async batchOnce(items) { return this.batch(items) },
     async batch(items) {
+      installEpoch()
       if (beforeBatch) {
         const hook = beforeBatch
         beforeBatch = null
@@ -121,7 +133,7 @@ const originalCompile = Module.prototype._compile
 Module.prototype._compile = function (content, filename) {
   if (filename.includes(`${path.sep}cloudflare${path.sep}src${path.sep}lib${path.sep}`)) {
     const originalRequire = this.require.bind(this)
-    this.require = (id) => (relMap[id] ? relMap[id]() : originalRequire(id))
+    this.require = (id) => { if (relMap[id]) return relMap[id](); if (id.startsWith('.')) { const target = path.resolve(path.dirname(filename), id + (id.endsWith('.ts') ? '' : '.ts')); if (fs.existsSync(target)) return loadReal(path.relative(path.join(__dirname, '../src'), target)) }; return originalRequire(id) }
   }
   return originalCompile.call(this, content, filename)
 }
@@ -160,7 +172,7 @@ function seedProduct(rawDb, { id, name, stockQuantity }) {
 }
 
 async function main() {
-  await testAsync('plain (non-batch-tracked) group: reverses AND deletes superseded movements, applies new ones, updates branch_stock/products.stock_quantity', async () => {
+  await testAsync('plain (non-batch-tracked) group: compensates superseded movements and retains originals, applies new ones, updates branch_stock/products.stock_quantity', async () => {
     const { rawDb, db } = freshDb()
     seedProduct(rawDb, { id: 1, name: 'Widget', stockQuantity: 10 })
     const oldMovementId = rawDb.prepare(
@@ -181,15 +193,17 @@ async function main() {
     }
 
     const result = await applyDatedStockCountPlan(db, plan, { userId: 7, userName: 'Sok' })
-    assert.strictEqual(result.movementsDeleted, 1)
+    assert.strictEqual(result.movementsDeleted, 0)
     assert.strictEqual(result.movementsApplied, 2)
     assert.strictEqual(result.plainGroups, 1)
     assert.strictEqual(result.batchTrackedGroups, 0)
 
     const deleted = rawDb.prepare('SELECT id FROM inventory_movements WHERE id = @id').get({ id: oldMovementId })
-    assert.strictEqual(deleted, undefined, 'superseded movement should be deleted')
+    assert.ok(deleted, 'superseded original is retained')
+    assert.strictEqual(result.movementsCompensated, 1)
+    assert.ok(rawDb.prepare("SELECT id FROM inventory_movements WHERE reference_id=@ref").get({ref: `revert:${oldMovementId}`}))
 
-    const remaining = rawDb.prepare('SELECT movement_type, quantity, created_at FROM inventory_movements WHERE product_id = 1 ORDER BY created_at').all()
+    const remaining = rawDb.prepare(`SELECT movement_type, quantity, created_at FROM inventory_movements WHERE product_id = 1 AND reason='Dated stock count import' AND NOT EXISTS(SELECT 1 FROM inventory_movements r WHERE r.reference_id='revert:' || inventory_movements.id) ORDER BY created_at`).all()
     assert.strictEqual(remaining.length, 2)
     assert.strictEqual(remaining[0].movement_type, 'add')
     assert.strictEqual(remaining[0].created_at, '2026-08-16 00:00:00')
@@ -369,10 +383,11 @@ async function main() {
     await applyDatedStockCountPlan(db, plan)
 
     const orphaned = rawDb.prepare('SELECT id FROM dated_stock_count_batch_actions WHERE movement_id = @id').all({ id: oldMovementId })
-    assert.strictEqual(orphaned.length, 0, 'provenance rows for a deleted movement should not survive it')
+    assert.strictEqual(orphaned.length, 1, 'original provenance remains attached to its retained movement')
+    assert.ok(rawDb.prepare('SELECT id FROM inventory_movements WHERE id=@id').get({id:oldMovementId}))
   })
 
-  await testAsync('direct apply refuses a non-canonical branch before deleting movements or changing stock', async () => {
+  await testAsync('direct apply refuses a non-canonical branch before compensating movements or changing stock', async () => {
     const { rawDb, db } = freshDb()
     seedProduct(rawDb, { id: 8, name: 'Guarded Widget', stockQuantity: 4 })
     rawDb.prepare("UPDATE branches SET name = 'Main' WHERE id = 1").run()

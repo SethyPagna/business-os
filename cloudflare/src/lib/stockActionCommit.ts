@@ -1,3 +1,4 @@
+import { executeStockTransaction } from './stockTransaction'
 import type { D1Compat } from './db'
 import { assertProductsActive, productStockGuardStatement, productStockGuardError } from './productStockGuard'
 import { roundMoney4, multiplyMoney4, sellingPriceCeilCent } from './moneyPrecision'
@@ -238,8 +239,15 @@ export async function ensureUnifiedStockProduct(db: D1Compat, input: UnifiedStoc
     SELECT id FROM products WHERE client_request_id = @clientRequestId AND client_request_id <> ''
   `).get<{ id: number }>({ clientRequestId })
   let created = false
+  const seedBranches = {
+    sql: `INSERT OR IGNORE INTO branch_stock (product_id, branch_id, quantity)
+      SELECT p.id, b.id, 0 FROM products p CROSS JOIN branches b
+      WHERE p.client_request_id=@clientRequestId AND p.client_request_id<>'' AND b.is_active=1`,
+    params: { clientRequestId },
+  }
+  const existed = !!product
   if (!product) {
-    const inserted = await db.prepare(`
+    const inserted = await executeStockTransaction(db, [{ sql: `
       INSERT OR IGNORE INTO products (
         name, name_normalized, barcode, unit, selling_price_usd, wholesale_price_usd, cost_price_usd,
         stock_quantity, is_active, client_request_id, created_at, updated_at
@@ -247,7 +255,7 @@ export async function ensureUnifiedStockProduct(db: D1Compat, input: UnifiedStoc
         @productName, @nameNormalized, @barcode, 'pcs', @sellingPriceUsd, @wholesalePriceUsd, @costPriceUsd,
         0, 1, @clientRequestId, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
       )
-    `).run({
+    `, params: {
       productName,
       nameNormalized: normalizeSearchText(productName),
       barcode: String(input.barcode || '').trim() || null,
@@ -255,7 +263,7 @@ export async function ensureUnifiedStockProduct(db: D1Compat, input: UnifiedStoc
       wholesalePriceUsd: optionalMoney(input.wholesalePriceUsd, true) ?? 0,
       costPriceUsd: optionalMoney(input.costPriceUsd) ?? 0,
       clientRequestId,
-    })
+    } }, seedBranches], 'retry').then(([result]) => ({ changes: Number(result.meta?.changes ?? 0), lastInsertRowid: Number(result.meta?.last_row_id ?? 0) }))
     created = inserted.changes === 1
     product = await db.prepare(`
       SELECT id FROM products WHERE client_request_id = @clientRequestId AND client_request_id <> ''
@@ -264,13 +272,9 @@ export async function ensureUnifiedStockProduct(db: D1Compat, input: UnifiedStoc
   const productId = Number(product?.id || 0)
   if (!Number.isSafeInteger(productId) || productId <= 0) throw new Error('Could not resolve the imported product after creation')
 
-  // Safe to repeat after any interruption. This is deliberately separate
-  // from the product INSERT because the generated id must be read first;
-  // INSERT OR IGNORE makes the second half retry-idempotent as well.
-  await db.prepare(`
-    INSERT OR IGNORE INTO branch_stock (product_id, branch_id, quantity)
-    SELECT @productId, id, 0 FROM branches WHERE is_active = 1
-  `).run({ productId })
+  // An existing identity may still need branches created since its import.
+  // New identities seeded their branches atomically with the INSERT above.
+  if (existed) await executeStockTransaction(db, [seedBranches], 'retry')
   return { productId, created, clientRequestId }
 }
 
@@ -360,7 +364,7 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
     ...(redirect ? { addressedBranchName: String(input.addressedBranchName || '').trim() || null } : {}),
   }
 
-  await db.batch([
+  await executeStockTransaction(db, [
     productStockGuardStatement([productId], 'active'),
     {
       sql: `INSERT OR IGNORE INTO import_stock_action_commits
@@ -495,7 +499,7 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
             WHERE job_id = @jobId AND action_key = @actionKey AND status = 'pending'`,
       params,
     },
-  ]).catch(rethrowBranchGuardFailure)
+  ], 'retry').catch(rethrowBranchGuardFailure)
 
   // No post-commit verify read: db.batch is atomic and its final statement
   // flips this row's status to 'applied', and the pre-read above already
@@ -902,7 +906,7 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
   )
 
   try {
-    await db.batch(statements)
+    await executeStockTransaction(db, statements, 'retry')
   } catch (error) {
     const holder = await db.prepare(`SELECT client_request_id FROM sales WHERE receipt_number = @receiptNumber LIMIT 1`)
       .get<{ client_request_id: string | null }>({ receiptNumber })

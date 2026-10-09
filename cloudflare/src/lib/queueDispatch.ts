@@ -56,7 +56,8 @@ export function registerInlineImportRunner(runner: InlineImportRunner): void {
   inlineRunner = runner
 }
 
-type InlineScope = { pending: ImportQueueMessage[]; active: boolean }
+export class ImportInvocationDeferredError extends Error {}
+type InlineScope = { pending: ImportQueueMessage[]; active: boolean; stop: boolean }
 // Only private runner-facing wrappers are keys, never the shared Worker Env.
 // Thus two requests with the same Env still own independent completion/error.
 // Weak keys do not retain an invocation after its runner releases the wrapper.
@@ -67,7 +68,7 @@ let inlineScopes = new WeakMap<Env, InlineScope>()
  * only errors that escape are the ones the work itself raises (which the
  * callers already handle -- markJobFailed etc.).
  */
-export async function dispatchImportWork(env: Env, message: ImportQueueMessage): Promise<ImportDispatchMode> {
+export async function dispatchImportWork(env: Env, message: ImportQueueMessage, options: { freshInvocation?: boolean } = {}): Promise<ImportDispatchMode> {
   const queue = env?.IMPORT_QUEUE
   if (queue) {
     await queue.send(message)
@@ -86,12 +87,13 @@ export async function dispatchImportWork(env: Env, message: ImportQueueMessage):
   if (inherited) {
     if (!inherited.active) throw new Error('The inline import dispatch scope has already completed.')
     inherited.pending.push(message)
+    if (options.freshInvocation) inherited.stop = true
     // Only continuations carrying THIS root's private wrapper may return
     // early. The root caller awaits the entire flat drain, including errors.
     return 'inline'
   }
 
-  const scope: InlineScope = { pending: [message], active: true }
+  const scope: InlineScope = { pending: [message], active: true, stop: false }
   // Forward bindings without copying, rebinding or annotating the shared Env.
   // Reflect with the original receiver also preserves accessor-backed bindings;
   // own keys/descriptors and binding object identity remain unchanged.
@@ -101,10 +103,12 @@ export async function dispatchImportWork(env: Env, message: ImportQueueMessage):
   inlineScopes.set(scopedEnv, scope)
   const runner = inlineRunner
   try {
-    while (scope.pending.length) {
+    while (scope.pending.length && !scope.stop) {
       const next = scope.pending.shift() as ImportQueueMessage
       await runner(scopedEnv, next)
     }
+  } catch (error) {
+    if (!(error instanceof ImportInvocationDeferredError)) throw error
   } finally {
     scope.active = false
     // Abandon only this root's continuations. Keep the closed scope associated

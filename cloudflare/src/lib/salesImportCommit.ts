@@ -1,3 +1,4 @@
+import { executeStockTransaction } from './stockTransaction'
 import { productStockGuardError, productStockGuardStatement } from './productStockGuard'
 import type { D1Compat } from './db'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from './receiptNumber'
@@ -509,7 +510,7 @@ export async function applyHistoricalSaleImport(
   // rethrown unchanged.
   for (let attempt = 0; ; attempt++) {
     try {
-      await db.batch(statements)
+      await executeStockTransaction(db, statements, 'retry')
       break
     } catch (batchError) {
       const activeGuard = productStockGuardError(batchError)

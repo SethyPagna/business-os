@@ -32,13 +32,13 @@ const LOTS = { 9001: { date: '2026-09-10', cost: 2.3333, supplier: 'Sup X', pay:
 
 function rng(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32 } }
 
-function setup(f) {
+async function setup(f) {
   f.sql.exec('BEGIN')
-  f.sql.exec(`INSERT INTO branches(id,name,is_default,is_active) VALUES(2,'Store',0,1);
+  await runStatements(f, `INSERT INTO branches(id,name,is_default,is_active) VALUES(2,'Store',0,1);
     INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,2,0);
     INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd,payment_status,received_quantity,received_branch_id,received_cost_usd,supplier_name)
       VALUES(9001,1,'20260910-x','09102026','2026-09-10',0,1,2.3333,'credit',0,1,0,'Sup X'),
-            (9002,1,'20260920-y','09202026','2026-09-20',0,2,3.1,'paid',0,1,0,'Sup Y');`)
+            (9002,1,'20260920-y','09202026','2026-09-20',0,2,3.1,'paid',0,1,0,'Sup Y');`.split(';').map(sql => sql.trim()).filter(Boolean).map(sql => ({sql})))
 }
 
 const q = (f, s, ...a) => f.sql.prepare(s).get(...a)
@@ -50,7 +50,7 @@ function snapshot(f) {
     q(f, 'SELECT stock_quantity FROM products WHERE id=1'), q(f, 'SELECT COUNT(*) n FROM inventory_movements')])
 }
 
-async function runStatements(f, statements) { await getDb(f.env).batch(statements) }
+async function runStatements(f, statements) { await loadStockSession('lib/stockTransaction.ts').executeStockTransaction(getDb(f.env),statements,'once') }
 
 function insertMovement(f, { branch, type, qty, lot, unit, total, ref, day }) {
   return Number(f.sql.prepare(`INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,total_cost_usd,reason,reference_id,batch_id,created_at)
@@ -95,7 +95,7 @@ async function removal(f, r) {
 
 async function undatedAdd(f, r) {
   const branch = r() < 0.5 ? 1 : 2; const n = 1 + Math.floor(r() * 4)
-  f.sql.exec(`UPDATE branch_stock SET quantity=quantity+${n} WHERE product_id=1 AND branch_id=${branch}; UPDATE products SET stock_quantity=stock_quantity+${n} WHERE id=1`)
+  await runStatements(f, `UPDATE branch_stock SET quantity=quantity+${n} WHERE product_id=1 AND branch_id=${branch}; UPDATE products SET stock_quantity=stock_quantity+${n} WHERE id=1`.split(';').map(sql => ({sql})))
   insertMovement(f, { branch, type: 'add', qty: n, lot: null, unit: 1, total: n, day: '2025-01-05' })
   return `undated add b${branch} +${n}`
 }
@@ -200,7 +200,7 @@ async function main() {
   try {
     for (let seed = 1; seed <= seeds; seed += 1) {
       const r = rng(seed); const log = []
-      setup(f)
+      await setup(f)
       try {
         for (let i = 0; i < steps; i += 1) {
           const x = r()
@@ -217,9 +217,9 @@ async function main() {
     assert.ok((codes.ok || 0) > 40, `successful Reverts ${JSON.stringify(codes)}`)
     assert.ok((codes.already_reverted || 0) + (codes.revert_insufficient_lot_stock || 0) + (codes.revert_insufficient_branch_stock || 0) > 0, `refusals ${JSON.stringify(codes)}`)
     // Positive control: a corrupted purchase figure is caught by the same checks.
-    setup(f)
+    await setup(f)
     await receipt(f, rng(99)); check(f, 'control-clean')
-    f.sql.exec('UPDATE product_batches SET received_quantity = received_quantity + 1 WHERE received_quantity > 0')
+    await runStatements(f,[{sql:'UPDATE product_batches SET received_quantity = received_quantity + 1 WHERE received_quantity > 0'}])
     assert.throws(() => check(f, 'control'), /received_quantity/, 'the invariants detect a purchase figure that drifted')
     f.sql.exec('ROLLBACK')
   } finally { f.sql.close() }

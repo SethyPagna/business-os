@@ -106,29 +106,55 @@ console.log('PASS: historical finance and durable reversal backup coverage')
 
 // Round-trip committed provenance with the real backup parent/child ordering.
 ;(async () => {
-  const h = require('./test-transfer-operation-receipt-pure.cjs')
-  h.fresh(1)
-  const response = await h.request('branches','/transfer',h.intent(1,1,'backup-transfer-proof',false))
-  assert.equal(response.status,200)
-  const sourceDb=h.getDb()
+  const { setup } = require('./test-intake-atomic-native.cjs')
+  const actor = { id: 7, username: 'fixture-operator', name: 'Fixture Operator', permissions: JSON.stringify({ inventory: true, branches: true }) }
+  const f = await setup('correction', actor)
+  f.env.PLAN_TIER = 'paid'
+  f.load('lib/planTier.ts').__resetPlanTierCacheForTests()
+  f.sql.exec("INSERT INTO branches(id,name,is_active) VALUES(2,'Warehouse',1)")
+  const { Hono } = require('hono')
+  const app = new Hono()
+  app.use('/api/*', f.load('lib/requestMetrics.ts').requestMetricsMiddleware)
+  app.route('/api/branches', f.load('routes/branches.ts').default)
+  const pending = []
+  const response = await app.request('/api/branches/transfer', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({
+    productId:1, fromBranchId:1, toBranchId:2, quantity:2.5, reason:'Backup fixture', transfer_provenance_version:1, client_request_id:'backup-transfer-proof',
+  }) }, f.env, { waitUntil(promise) { pending.push(promise) } })
+  await Promise.all(pending)
+  assert.equal(response.status, 200, await response.text())
+  const sourceDb = f.sql
   const selection=new Set(['branches','products','product_batches','branch_stock','branch_batch_stock','action_history','transfer_operation_receipts','transfer_operation_members','stock_transfers','inventory_movements','audit_logs'])
-  const bundle=tables.filter(table=>selection.has(table)).map(table=>({table,rows:sourceDb.prepare(`SELECT * FROM ${table}`).all()}))
-  const Database=require('better-sqlite3')
-  const restored=new Database(':memory:')
+  const bundle=tables.filter(table=>selection.has(table)).map(table=>({table,rows:sourceDb.prepare('SELECT * FROM '+table).all().map(row=>({...row}))}))
+  const { openDb } = require('./harness/d1compat.cjs')
   const migrations=path.join(__dirname,'../migrations')
-  for(const file of fs.readdirSync(migrations).filter(file=>file.endsWith('.sql')).sort()) restored.exec(fs.readFileSync(path.join(migrations,file),'utf8'))
-  // 0185/0186/0188 are HELD (parked out of the applied chain, ops/scripts/
-  // migration/held/README.md) -- applied explicitly so the 0188 member-
-  // retirement guard this file asserts below is still exercised.
+  const restored=openDb(fs.readdirSync(migrations).filter(file=>file.endsWith('.sql')).sort().map(file=>fs.readFileSync(path.join(migrations,file),'utf8')))
+  // The held member-retirement guard is explicitly included only in this
+  // local compatibility proof; it is never applied remotely by this test.
   const heldDir=path.join(__dirname,'..','..','ops','scripts','migration','held')
   for(const file of ['0185_transfer_runs.sql','0186_transfer_run_retirement.sql','0188_transfer_receipt_retirement.sql']) restored.exec(fs.readFileSync(path.join(heldDir,file),'utf8'))
-  restored.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
+  const snapshot=JSON.stringify({mode:'restore',token:'owned-backup-fixture',backupKey:'fixture-backup',phase:'inserting',startedAt:'2026-10-09T00:00:00Z',updatedAt:'2026-10-09T00:00:00Z',startedBy:'fixture-admin'})
+  assert.throws(()=>restored.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',@snapshot)").run({snapshot}),/stock_transaction_required/)
+  await f.load('lib/stockTransaction.ts').executeStockTransaction(restored,[{sql:"INSERT INTO system_flags(key,value) VALUES('maintenance',@snapshot)",params:{snapshot}}],'retry')
+  const binding={
+    prepare(sql) { return {sql,params:[],bind(...params){this.params=params;return this}} },
+    batch(statements) { return restored.batch(statements) },
+  }
+  const statements=[]
   for(const {table,rows} of bundle) for(const row of rows) {
     const columns=Object.keys(row)
-    restored.prepare(`INSERT INTO ${table}(${columns.map(key=>`"${key}"`).join(',')}) VALUES(${columns.map(()=>'?').join(',')})`).run(...columns.map(key=>row[key]))
+    statements.push(binding.prepare('INSERT INTO '+table+'('+columns.map(key=>'"'+key+'"').join(',')+') VALUES('+columns.map(()=>'?').join(',')+')').bind(...columns.map(key=>row[key])))
   }
+  const { executeRawRestoreStockTransaction }=f.load('lib/stockTransaction.ts')
+  const authority={token:'owned-backup-fixture',backupKey:'fixture-backup',snapshot}
+  await assert.rejects(async()=>executeRawRestoreStockTransaction(binding,statements,{...authority,token:'wrong'}),/unavailable/)
+  assert.equal(restored.prepare('SELECT COUNT(*) n FROM products').get().n,0)
+  await assert.rejects(async()=>executeRawRestoreStockTransaction(binding,[...statements,binding.prepare("INSERT INTO products(id,name) VALUES(1,'collision')")],authority),/UNIQUE/)
+  for(const {table} of bundle) assert.equal(restored.prepare('SELECT COUNT(*) n FROM '+table).get().n,0,'late restore failure rolls back '+table)
+  await executeRawRestoreStockTransaction(binding,statements,authority)
+  assert.equal(restored.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0)
   restored.exec("DELETE FROM system_flags WHERE key='maintenance'")
-  for(const {table,rows} of bundle) assert.deepEqual(restored.prepare(`SELECT * FROM ${table}`).all(),rows,table)
+  for(const {table,rows} of bundle) assert.deepEqual(restored.prepare('SELECT * FROM '+table).all().map(row=>({...row})),rows,table)
+  assert.throws(()=>restored.exec('UPDATE branch_stock SET quantity=quantity+1'),/stock_transaction_required/)
   // 0188 requires permanent retirement evidence before member deletion. Assert
   // the current guard, then prove its refusal preserved the restored records.
   const protectedMembers=restored.prepare('SELECT * FROM transfer_operation_members ORDER BY receipt_id,ordinal').all()
@@ -136,6 +162,7 @@ console.log('PASS: historical finance and durable reversal backup coverage')
   assert.throws(()=>restored.exec('DELETE FROM transfer_operation_members'),/exact member retirement required before delete/)
   assert.deepEqual(restored.prepare('SELECT * FROM transfer_operation_members ORDER BY receipt_id,ordinal').all(),protectedMembers)
   assert.equal(restored.prepare('PRAGMA integrity_check').get().integrity_check,'ok')
-  restored.close()
-  console.log('PASS executable production-schema transfer receipt/member/history/lot backup restore round trip')
+  restored.db.close()
+  f.sql.close()
+  console.log('PASS current guarded transfer receipt/member/history/lot restore, with local held-member compatibility')
 })().catch(error=>{console.error(error);process.exitCode=1})

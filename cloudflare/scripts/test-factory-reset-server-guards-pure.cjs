@@ -54,6 +54,8 @@ const SCHEMA = `
   CREATE TABLE system_flags (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT);
   CREATE TABLE import_job_rows (id INTEGER PRIMARY KEY);
   CREATE TABLE import_job_source_rows (id INTEGER PRIMARY KEY);
+  CREATE TABLE custom_tables (name TEXT);
+  CREATE TABLE ct_fixture (id INTEGER PRIMARY KEY);
 `
 
 let db
@@ -76,6 +78,7 @@ const permissions = loadReal('lib/permissions.ts')
 const app = loadReal('routes/system.ts', {
   hono: require('hono'),
   '../lib/planTier': loadReal('lib/planTier.ts'),
+  '../lib/stockTransaction': loadReal('lib/stockTransaction.ts'),
   '../lib/actorSnapshot': { actorSnapshot: (u) => u?.username || null },
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', actor); return next() } },
@@ -97,7 +100,11 @@ const app = loadReal('routes/system.ts', {
     FACTORY_RESET_TABLES: ['sales'],
     PRODUCTS_RESET_TABLES: [],
     presentResetTables: async (_db, tables) => tables,
-    dropAllCustomTables: async () => { log.push('drop-custom'); return [] },
+    dropAllCustomTables: (env, commit) => { log.push('drop-custom'); return loadReal('lib/coreDataInvariants.ts', {
+      './db': { getDb: () => db }, './sqlBinding': loadReal('lib/sqlBinding.ts'),
+      './customTableName': loadReal('lib/customTableName.ts'), './passwordHash': {},
+      './stockTransaction': loadReal('lib/stockTransaction.ts'), './productStockGuard': require('./harness/product_stock_guard.cjs'),
+    }).dropAllCustomTables(env, commit) },
     ensureCoreDataInvariants: async () => { log.push('reseed'); return { adminUserCreated: true, adminPassword: seedPassword } },
     resolveSeedAdminPassword: () => seedPassword,
   },
@@ -120,7 +127,11 @@ const app = loadReal('routes/system.ts', {
 const ctx = { waitUntil(p) { p?.catch?.(() => {}) }, passThroughOnException() {} }
 
 function reset() {
-  db = openDb([SCHEMA])
+  db = openDb([SCHEMA, fs.readFileSync(path.join(__dirname, '../migrations/0244_dated_count_decision_receipts.sql'), 'utf8')])
+  db.prepare("INSERT INTO system_flags(key,value)VALUES('stock_schema_epoch','legacy-separate-pool-v1')").run()
+  db.prepare("INSERT INTO dated_count_decision_receipts(actor_id,request_id,request_json,result_json,total_rows)VALUES(1,'factory-intent-proof','{}','{}',0)").run()
+  db.prepare("INSERT INTO custom_tables(name)VALUES('ct_fixture')").run()
+  db.prepare('INSERT INTO ct_fixture VALUES(7)').run()
   db.prepare("INSERT INTO roles VALUES(1,'admin',1),(2,'manager',0)").run()
   db.prepare(`INSERT INTO users(id, username, password,role_id) VALUES (1,'admin','hash:owner-pw',1), (2,'restorer','hash:restorer-pw',2), (3,'admin','hash:named-pw',2)`).run()
   db.prepare(`INSERT INTO sales(id, total) VALUES (1, 10), (2, 20)`).run()
@@ -236,12 +247,31 @@ async function check(name, fn) {
     assert.equal(res.status, 200, res.text)
     assert.equal(res.json?.success, true)
     assert.equal(salesLeft(), 0, 'the wipe ran')
+    assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name='ct_fixture'").get(), undefined)
+    assert.ok(db.prepare("SELECT invalidated_at FROM dated_count_decision_receipts WHERE request_id='factory-intent-proof'").get().invalidated_at)
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
     const backupAt = log.indexOf('backup')
     assert.ok(backupAt > -1, 'a full backup was taken')
     assert.ok(backupAt < log.indexOf('drop-custom'), `backup precedes the first destructive step: ${log.join(',')}`)
     assert.ok(backupAt < log.indexOf('reseed'))
     assert.equal(res.text.includes(SEED_SECRET), false, 'the seed admin password never leaves the Worker')
     assert.equal(res.json?.admin?.password ?? null, null)
+  })
+
+  await check('wrong epoch or late reset failure preserves custom data and retry identity with sales', async () => {
+    for (const fault of ['epoch', 'late']) {
+      reset()
+      if (fault === 'epoch') db.prepare("UPDATE system_flags SET value='future' WHERE key='stock_schema_epoch'").run()
+      else db.db.exec("CREATE TRIGGER fail_sales_delete BEFORE DELETE ON sales BEGIN SELECT RAISE(ABORT,'late reset failure'); END")
+      const response = await post(GOOD)
+      assert.equal(response.status, 500, response.text)
+      assert.equal(salesLeft(), 2)
+      assert.equal(db.prepare('SELECT id FROM ct_fixture').get().id, 7, 'custom DDL rolls back with business data')
+      assert.equal(db.prepare('SELECT name FROM custom_tables').get().name, 'ct_fixture')
+      assert.equal(db.prepare("SELECT invalidated_at FROM dated_count_decision_receipts WHERE request_id='factory-intent-proof'").get().invalidated_at, null)
+      assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+      assert.equal(log.includes('reseed'), false)
+    }
   })
 
   await check('the R2 wipe covers variants/ (thumbnails of the wiped uploads/ must not stay reachable)', async () => {

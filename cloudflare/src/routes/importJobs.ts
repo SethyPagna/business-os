@@ -10,6 +10,8 @@ import { sanitizeOriginalFileName, buildUniqueStoredName, getMediaType } from '.
 import { classifyImportUpload, validateUploadedBuffer, EMBEDDED_MARKUP_MESSAGE, MISMATCHED_UPLOAD_MESSAGE, UNSUPPORTED_IMAGE_MESSAGE, UNSUPPORTED_UPLOAD_MESSAGE } from '../lib/uploadSecurity'
 import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, summarizeImportWarnings, countRowsWithWarningKinds, runD1BatchInChunks, importBranchRedirectGate, IMPORT_FILE_SKIPPED_ERROR_CODE, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportBranchRedirectGate, type ImportRowResult, type RowAction } from '../lib/importEngine'
 import { IMPORT_BRANCH_REDIRECT_POLICY_KEY } from '../lib/importBranchAuthority'
+import { PRODUCT_IMPORT_FINALIZATION_CHANGED, persistedImportApplyState } from '../lib/importEngine'
+import { stockTransactionRefusal } from '../lib/stockTransaction'
 import { branchRedirectTarget } from '../lib/branchEffect'
 import { readCentralDirectory, extractZipEntry, ZipFormatError, type ZipEntry } from '../lib/zipReader'
 import { MAX_IMAGES_PER_PRODUCT, buildImageDisplayName } from '../lib/importImageMatch'
@@ -25,13 +27,34 @@ import { getPlanLimits, resolvePlanTier } from '../lib/planTier'
 import { dispatchImportWork } from '../lib/queueDispatch'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
+const IMPORT_APPLY_STARTED = { success: false, code: 'import_apply_already_started', error: 'This import has begun applying. Use Retry to continue it; upload a corrected file as a new import.' } as const
+const IMPORT_SOURCE_UPLOAD_PENDING = { success: false, code: 'import_source_upload_in_progress', error: 'This import has an unfinished source upload. Wait for it to finish, or cancel it and create a new import.' } as const
+const IMPORT_JOB_CHANGED = { success: false, code: 'import_job_changed', error: 'Import changed while this request was pending. Refresh and retry.' } as const
+const JOB_STATE_JSON = "CASE WHEN json_valid(chunk_state_json) THEN chunk_state_json ELSE '{}' END"
+const JOB_REQUEST_SNAPSHOT = `chunk_state_json IS @snapshot_state AND status IS @snapshot_status
+  AND policy_json IS @snapshot_policy AND cancel_requested IS @snapshot_cancel
+  AND json_extract(${JOB_STATE_JSON}, '$.sourceUpload') IS NULL
+  AND (lease_expires_at IS NULL OR lease_expires_at < @snapshot_now)`
+function jobSnapshot(job: any) {
+  return { snapshot_state: job.chunk_state_json ?? null, snapshot_status: job.status,
+    snapshot_policy: job.policy_json ?? null, snapshot_cancel: job.cancel_requested,
+    snapshot_now: new Date().toISOString() }
+}
+function sourceUploadPending(job: any): boolean {
+  return Boolean(safeJsonParse<Record<string, unknown>>(job.chunk_state_json as string, {}).sourceUpload)
+}
 app.use('*', requireAuth)
 app.onError((error, c) => {
+  const transactionRefusal = stockTransactionRefusal(error)
+  if (transactionRefusal) return c.json({ success: false, ...transactionRefusal }, 503)
   if (isImportMaintenanceFenceError(error)) {
     return c.json({ success: false, code: error.code, error: error.message }, 503)
   }
   if ('code' in error && error.code === 'import_queue_required') {
     return c.json({ success: false, code: error.code, error: error.message }, 503)
+  }
+  if ('code' in error && error.code === PRODUCT_IMPORT_FINALIZATION_CHANGED.code) {
+    return c.json({ success: false, ...PRODUCT_IMPORT_FINALIZATION_CHANGED }, 409)
   }
   console.error(error)
   return c.text('Internal Server Error', 500)
@@ -1023,7 +1046,7 @@ app.post('/:id/preflight', async (c) => {
 // extracted and stored individually below), and every kind's stored
 // content-type and extension come from classifyImportUpload -- the bytes
 // for images/ZIP, never the client's claim.
-async function storeUpload(c: any, jobId: string, kind: 'csv' | 'zip' | 'image', file: File, relativePath?: string) {
+async function storeUpload(c: any, jobId: string, kind: 'csv' | 'zip' | 'image', file: File, relativePath?: string, sourceOwner?: string) {
   const user = c.get('user')
   const originalName = sanitizeOriginalFileName(file.name || 'upload.bin')
   const bytes = new Uint8Array(await file.arrayBuffer())
@@ -1042,7 +1065,10 @@ async function storeUpload(c: any, jobId: string, kind: 'csv' | 'zip' | 'image',
   // import". The sweep now also ages every file by its own upload time; this
   // touch keeps the job's idle clock honest too (and the 20-minute reaper
   // off a job that is still being filled).
-  await db.prepare(`UPDATE import_jobs SET updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: jobId })
+  const activity = await db.prepare(`UPDATE import_jobs SET updated_at = CURRENT_TIMESTAMP WHERE id = @id
+    ${sourceOwner ? `AND json_extract(${JOB_STATE_JSON}, '$.sourceUpload')=@source_owner AND cancel_requested=0` : ''}`)
+    .run({ id: jobId, ...(sourceOwner ? { source_owner: sourceOwner } : {}) })
+  if (sourceOwner && activity.changes !== 1) throw new Error(IMPORT_SOURCE_UPLOAD_PENDING.error)
   await c.env.ASSETS.put(key, bytes, { httpMetadata: { contentType: mimeType } })
   // K3: only library-bound files normalize (imports/... staging keys are
   // transient and outside the uploads/ audit scope); the helper's own
@@ -1077,7 +1103,9 @@ async function storeUpload(c: any, jobId: string, kind: 'csv' | 'zip' | 'image',
 
   const result = await db.prepare(`
     INSERT INTO import_job_files (job_id, kind, original_name, stored_path, relative_path, mime_type, byte_size, status, file_asset_id)
-    VALUES (@job_id, @kind, @original_name, @stored_path, @relative_path, @mime_type, @byte_size, 'stored', @file_asset_id)
+    SELECT @job_id, @kind, @original_name, @stored_path, @relative_path, @mime_type, @byte_size, 'stored', @file_asset_id
+    ${sourceOwner ? `WHERE EXISTS (SELECT 1 FROM import_jobs WHERE id=@job_id AND cancel_requested=0
+      AND json_extract(${JOB_STATE_JSON}, '$.sourceUpload')=@source_owner)` : ''}
   `).run({
     job_id: jobId,
     kind,
@@ -1087,7 +1115,9 @@ async function storeUpload(c: any, jobId: string, kind: 'csv' | 'zip' | 'image',
     mime_type: mimeType,
     byte_size: bytes.byteLength,
     file_asset_id: fileAssetId,
+    ...(sourceOwner ? { source_owner: sourceOwner } : {}),
   })
+  if (sourceOwner && result.changes !== 1) throw new Error(IMPORT_SOURCE_UPLOAD_PENDING.error)
 
   // Same broadcast files.ts's own upload handler sends, so a Library tab
   // open in another window/device picks up the new file without a manual
@@ -1122,6 +1152,10 @@ app.post('/:id/csv', async (c) => {
   if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
+  if (sourceUploadPending(job)) return c.json(IMPORT_SOURCE_UPLOAD_PENDING, 409)
+  if (persistedImportApplyState(job.chunk_state_json)) {
+    return c.json(IMPORT_APPLY_STARTED, 409)
+  }
   // The reviewed source must be immutable. Without this gate a caller could
   // upload a different CSV after analyze finished, retain the old Screen 2
   // summary, then approve and apply the unreviewed replacement. `failed` is
@@ -1138,20 +1172,38 @@ app.post('/:id/csv', async (c) => {
   if (ext !== '.csv' && ext !== '.tsv') return c.json({ success: false, error: 'Upload a CSV or TSV file' }, 400)
   if (file.size > MAX_CSV_BYTES) return c.json({ success: false, error: `CSV is too large (max ${Math.floor(MAX_CSV_BYTES / (1024 * 1024))}MB)` }, 400)
   try {
-    const stored = await storeUpload(c, id, 'csv', file)
+    classifyImportUpload('csv', new Uint8Array(await file.arrayBuffer()), file.type || '', sanitizeOriginalFileName(file.name))
+  } catch (error) {
+    return c.json({ success: false, error: (error as Error).message || 'Failed to upload CSV' }, 400)
+  }
+  const db = await getImportFencedDb(c.env)
+  const sourceOwner = crypto.randomUUID()
+  const ownership = await db.prepare(`UPDATE import_jobs
+    SET chunk_state_json=json_set(${JOB_STATE_JSON}, '$.sourceUpload', @source_owner), updated_at=CURRENT_TIMESTAMP
+    WHERE id=@id AND ${JOB_REQUEST_SNAPSHOT} AND cancel_requested=0
+      AND lease_token IS NULL
+      AND json_type(${JOB_STATE_JSON}, '$.genericApply') IS NULL`).run({ id, source_owner: sourceOwner, ...jobSnapshot(job) })
+  if (ownership.changes !== 1) return c.json(IMPORT_JOB_CHANGED, 409)
+  try {
+    const stored = await storeUpload(c, id, 'csv', file, undefined, sourceOwner)
     // A new CSV invalidates any previously materialized import_job_source_rows
     // for this job -- fetchCsvText always reads the LATEST uploaded file, so
     // without this a re-upload would silently keep classifying/applying the
     // FIRST file's already-parsed rows. Cheap no-op if nothing was
     // materialized yet (a job's first-ever CSV upload). See migration
     // 0012_import_job_source_rows.sql.
-    await resetMaterializeState(await getImportFencedDb(c.env), id)
+    await resetMaterializeState(db, id, sourceOwner)
+    const completed = await db.prepare(`UPDATE import_jobs
+      SET chunk_state_json=json_remove(${JOB_STATE_JSON}, '$.sourceUpload'), updated_at=CURRENT_TIMESTAMP
+      WHERE id=@id AND cancel_requested=0 AND json_extract(${JOB_STATE_JSON}, '$.sourceUpload')=@source_owner`)
+      .run({ id, source_owner: sourceOwner })
+    if (completed.changes !== 1) return c.json(IMPORT_SOURCE_UPLOAD_PENDING, 409)
     const after = await getJob(c.env, id)
     await auditImportEvent(c, 'import_job_upload', id, job, after || null, { source: 'api', fileKind: 'csv', fileName: file.name })
     return c.json({ success: true, file: stored, job: serializeJob(after || job) })
   } catch (error) {
     if (isImportMaintenanceFenceError(error)) throw error
-    return c.json({ success: false, error: (error as Error).message || 'Failed to upload CSV' }, 400)
+    return c.json(IMPORT_SOURCE_UPLOAD_PENDING, 409)
   }
 })
 
@@ -1440,6 +1492,10 @@ app.post('/:id/start', async (c) => {
   if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
+  if (sourceUploadPending(job)) return c.json(IMPORT_SOURCE_UPLOAD_PENDING, 409)
+  if (persistedImportApplyState(job.chunk_state_json)) {
+    return c.json(IMPORT_APPLY_STARTED, 409)
+  }
   const status = String(job.status || '').toLowerCase()
   if (job.cancel_requested || status === 'cancelled' || status === 'cancelling') {
     await auditImportEvent(c, 'import_job_start_blocked', id, job, job, { source: 'api', mode: 'analyze' })
@@ -1451,7 +1507,9 @@ app.post('/:id/start', async (c) => {
   const csvCount = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_files WHERE job_id = @id AND kind = 'csv' AND COALESCE(status, '') <> '${IMPORT_FILE_PURGED_STATUS}'`).get<{ n: number }>({ id })
   if (!csvCount?.n) return c.json({ success: false, error: 'Upload a CSV before starting the import' }, 400)
 
-  await db.prepare(`UPDATE import_jobs SET status = 'queued', phase = 'queued', cancel_requested = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id })
+  const started = await db.prepare(`UPDATE import_jobs SET status = 'queued', phase = 'queued', cancel_requested = 0, updated_at = CURRENT_TIMESTAMP
+    WHERE id = @id AND ${JOB_REQUEST_SNAPSHOT}`).run({ id, ...jobSnapshot(job) })
+  if (started.changes !== 1) return c.json(IMPORT_JOB_CHANGED, 409)
   await dispatchImportWork(c.env, { jobId: id, kind: 'analyze' })
   const queued = await getJob(c.env, id)
   await auditImportEvent(c, 'import_job_start', id, job, queued || null, { source: 'api', mode: 'analyze' })
@@ -1464,6 +1522,10 @@ app.post('/:id/approve', async (c) => {
   if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
+  if (sourceUploadPending(job)) return c.json(IMPORT_SOURCE_UPLOAD_PENDING, 409)
+  if (persistedImportApplyState(job.chunk_state_json)) {
+    return c.json(IMPORT_APPLY_STARTED, 409)
+  }
   const status = String(job.status || '').toLowerCase()
   if (job.cancel_requested || status === 'cancelled' || status === 'cancelling') {
     return c.json({ success: false, error: 'A cancelled import cannot be approved. Use Retry to analyze it again.' }, 409)
@@ -1543,8 +1605,8 @@ app.post('/:id/approve', async (c) => {
   }
   const approval = await db.prepare(`
     UPDATE import_jobs SET status = 'approved', phase = 'approved', policy_json = @policy, updated_at = CURRENT_TIMESTAMP
-    WHERE id = @id AND status = 'awaiting_review'
-  `).run({ id, policy: JSON.stringify(policy) })
+    WHERE id = @id AND status = 'awaiting_review' AND ${JOB_REQUEST_SNAPSHOT}
+  `).run({ id, policy: JSON.stringify(policy), ...jobSnapshot(job) })
   if (approval.changes !== 1) {
     return c.json({ success: false, error: 'Import status changed before approval. Refresh and review it again.' }, 409)
   }
@@ -1653,8 +1715,13 @@ app.post('/:id/retry', async (c) => {
   if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
+  if (sourceUploadPending(job)) return c.json(IMPORT_SOURCE_UPLOAD_PENDING, 409)
   const db = await getImportFencedDb(c.env)
   const status = String(job.status || '').toLowerCase()
+  const savedApply = persistedImportApplyState(job.chunk_state_json)
+  if (savedApply?.finalizationChanged || status === 'failed' && String(job.last_error || '').startsWith(PRODUCT_IMPORT_FINALIZATION_CHANGED.code + ':')) {
+    return c.json({ success: false, ...PRODUCT_IMPORT_FINALIZATION_CHANGED }, 409)
+  }
   // K4 retention: once the scheduled sweep has pruned a terminal job's
   // staged detail (source rows + unlinked raw file, kept 24h by policy),
   // a retry has nothing to re-run from -- analyze needs the file, apply
@@ -1663,6 +1730,7 @@ app.post('/:id/retry', async (c) => {
   if (job.details_pruned_at) {
     return c.json({ success: false, error: 'This import\'s staged data was cleaned up by retention (details are kept 24 hours after a job finishes). Upload the file again to re-import.', code: 'import_details_pruned' }, 409)
   }
+  if (savedApply?.finalize?.phase === 'done') return c.json({ success: true, job: serializeJob(job) })
   // S-uploads: the temporary import file is deleted when a job finishes.
   // A retry still runs from the materialized source rows; only a job that
   // stopped before its CSV was fully read has nothing to retry from.
@@ -1673,7 +1741,7 @@ app.post('/:id/retry', async (c) => {
   // route into apply. In particular, stock_actions /approve enforces the
   // explicit conflict confirmation and records the confirming actor/time;
   // retry used to bypass that entire gate by queueing `apply` directly.
-  const retryMode = retryModeForImportStatus(status)
+  const retryMode = savedApply ? 'apply' : retryModeForImportStatus(status)
   if (retryMode === 'review_required') {
     return c.json({ success: false, error: 'This import is waiting for review. Use Confirm to apply it, or cancel it to start over.' }, 409)
   }
@@ -1689,12 +1757,17 @@ app.post('/:id/retry', async (c) => {
     policy.apply_authorized_at = new Date().toISOString()
     applyBranchRedirectToPolicy(c, policy, branchRedirect)
   }
-  await db.prepare(`
+  const retried = await db.prepare(`
     UPDATE import_jobs SET status = 'queued', phase = 'queued', cancel_requested = 0,
-      processed_rows = 0, failed_rows = 0, last_error = NULL,
+      processed_rows = CASE WHEN @continuation=1 AND json_type(CASE WHEN json_valid(chunk_state_json)
+        THEN chunk_state_json ELSE '{}' END,'$.genericApply')='object' THEN processed_rows ELSE 0 END,
+      failed_rows = CASE WHEN @continuation=1 AND json_type(CASE WHEN json_valid(chunk_state_json)
+        THEN chunk_state_json ELSE '{}' END,'$.genericApply')='object' THEN failed_rows ELSE 0 END,
+      last_error = NULL,
       policy_json = COALESCE(@policy, policy_json), updated_at = CURRENT_TIMESTAMP
-    WHERE id = @id
-  `).run({ id, policy: mode === 'apply' ? JSON.stringify(policy) : null })
+    WHERE id = @id AND ${JOB_REQUEST_SNAPSHOT}
+  `).run({ id, continuation: mode === 'apply' ? 1 : 0, policy: mode === 'apply' ? JSON.stringify(policy) : null, ...jobSnapshot(job) })
+  if (retried.changes !== 1) return c.json(IMPORT_JOB_CHANGED, 409)
   await dispatchImportWork(c.env, { jobId: id, kind: mode })
   const queued = await getJob(c.env, id)
   await auditImportEvent(c, 'import_job_retry', id, job, queued || null, { source: 'api', mode })

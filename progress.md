@@ -1,3 +1,21 @@
+## Counted dependency composition — 09 October 2026
+
+LOCAL NONDEPLOYABLE SOURCE COMPOSITION. This first dependency base merges frozen counted core/return/session f949 onto certified owner/account/report release bf740 through a true three-way merge. Current release receipt identity and once-only recovery, service-worker bytes and reviewed owner/account/report behavior are retained. Later counted writer/UI overlays remain separate. Worker/frontend types, focused receipt/session/intake checks, paired localization and frontend build/startup verification pass. Inherited fixture setup/loader failures and the pending read-pressure adapter remain recorded; this is not whole counted feature approval or migration/deployment.
+
+The unsafe fractional 0246 conversion and complete counted restore/reset remain unresolved blockers. Production night release verification is coordinated separately by the lead; no counted code or new migration is part of that release. Physical phone acceptance remains NOT RUN. All dated entries below are preserved historical checkpoints.
+
+## 09/10/2026 — stock transaction prerequisites — local checkpoint
+
+Production and remote main remain `8b0e2c4cf608c3f6f3dbcad1d1a2ff8fa7ee1240`, freshly checked on 08/10 at 21:23 UTC. The earlier stock/image, mobile menu and PWA restart releases are delivered. The separate urgent candidate `440a706e06fe8ad472359d935feb3da575373135` remains frozen while full Gate 37841727342 runs; its fresh Astra review is still required.
+
+This worktree composes the prerequisite stock-schema guard and all accepted local fixes. At `5686641b7b66c7d1cc698f216d9f670711ab7214`, seven importer/bulk/authority scripts pass individually. The bulk product delete now uses the shared stock transaction once, retaining its atomic audit/delete/cursor, rollback and stable-job retry. Its isolated native suite measured 117 invocation scopes within both plan limits; these are background-executor measurements, not a full HTTP certificate. Current permission tests run inside the real metrics scope and retain the no-catalog-write and cancellation checks.
+
+Shared import conflict messages and persisted errors reach both English and Khmer review, row, bulk and tracker surfaces through existing helpers. Six focused frontend scripts, application/service-worker types and i18n verification pass (6609 keys). The original failures remain recorded. The importer retry repair is separate and still being integrated: ordinary failure and dead-letter delivery must preserve applied-group identity, and delayed CSV uploads must not erase source rows after applying begins. A new Free inventory snapshot-reuse component is also being verified against the current database guards and price-conflict checks.
+
+The whole stock-schema prerequisite is not yet certified. Migrations 0243 and 0244 remain local. Durable original-request dated-count receipts, full count invocation admission and the counted/sellable damaged-tag conversion remain unfinished. Damaged stock is still represented by the legacy separate pool until that complete conversion ships. Remaining owner UI, account/server draft isolation, physical iOS/Android camera/HEIC/keyboard checks and freshly composed parked lanes remain open.
+
+The owner now permits at most one night deployment after 20:00 Cambodia with a fresh Ops `open_today = 0`, and one morning deployment at 07:00 Cambodia regardless of shift status. Each needs the exact full-SHA gate, fresh Astra review, Paid deployment workflow and postflight. Skip unready or unchanged releases. Earlier dated night-only statements are historical.
+
 ## Release gate fixture correction — 09 October 2026
 
 LOCAL CANDIDATE, NOT DEPLOYED. The complete owner/account/loyalty/report candidate e192 failed gate37895352494: 851 of853 Worker tests passed and all770 frontend tests passed. The two failures were test integration defects: the membership route fixture omitted the real customer-return SQL helper, and the reports fixture pinned SQL that had been replaced by the canonical report reducer. Runtime behavior is unchanged by this successor.
@@ -135,7 +153,7 @@ Damaged-as-counted/sellable-tag conversion, remaining owner UI, broader account/
 - [~] Full-gate corrections: retain each stock-session assertion while respecting native D1's five-term compound SELECT limit, in addition to the existing bind limit. The real cost/undo regression and native boundary/rollback tests pass locally; obsolete test fixtures now exercise consolidated reads and persisted results. The prior candidate passed its full gate; independent review found additional merge and cache recovery gaps. A new complete gate and fresh review of the repaired composition remain required.
 - [~] Review repairs: shared merges refuse unexplained source or destination stock divergence before changing either product, with the existing localized stock refusal. Native tests cover independent ledgers, late changes and pair/edit/bulk/review/redo callers. Bulk-delete redelivery and cancellation recovery refresh cached views without repeating product removals, audit records or progress. Both plans pass the focused recovery and request-budget checks; release certification is pending.
 - [ ] Damaged stock conversion is a separate subsequent slice: counted, sellable stock with a visible condition tag; returns retain the original tag by default, staff may change it, and clearing a tag preserves quantity with compensating history. This owner ruling supersedes the earlier separate-pool design; that conversion is not implemented yet.
-- [ ] Remaining owner UI requests, broader iOS/PWA checks and parked lanes follow. Finish each coherent slice with a full-SHA GitHub gate, fresh Astra adversarial review and deployment after 20:00 Cambodia with `open_today = 0`. No cutover mode is to be rerun.
+- [ ] Remaining owner UI requests, broader iOS/PWA checks and parked lanes follow. Finish each coherent slice with a full-SHA GitHub gate, fresh Astra adversarial review and one authorized deployment window: after 20:00 Cambodia with `open_today = 0`, or 07:00 Cambodia regardless of shift status. No cutover mode is to be rerun.
 
 The owner authorized one immediate release on 08/10/2026, including permission to deploy while the shift remains open. That exception is unconsumed and does not waive the full gate or independent review. Subsequent checkpoints return to the normal evening and closed-shift rules. This checkpoint does not certify physical iOS/Android devices or complete the broader mobile, account/cache and damaged-stock work.
 
@@ -10273,6 +10291,8 @@ pagination/cache/performance. Re-measure Cloudflare usage before each expansion.
 ## Golden Rules
 
 *Permanent. Read every session. Never traded against each other.*
+
+- **Deployment cadence (owner, 09/10/2026):** at most one night release after 20:00 Cambodia, only after a fresh Ops check confirms `open_today = 0`; one morning release at 07:00 Cambodia regardless of shift status. Both require the full-SHA GitHub gate, fresh Astra review, `deploy.yml` with `plan=paid`, and postflight. Skip unchanged or unready releases; no additional daytime deployment.
 
 - **Priority order when writing or editing any code, frontend or
   backend, in this order and never traded against each other**:
