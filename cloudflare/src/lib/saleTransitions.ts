@@ -77,6 +77,7 @@ export function heldQuantity(status: string, quantity: number, returnedQuantity:
 // (last-drawn units come back first), re-deducts walk them FORWARD.
 export type SaleItemAllocation = {
   id: number
+  branch_id?: number | null
   batch_id: number
   quantity: number
   released_quantity: number

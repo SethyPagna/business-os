@@ -2174,12 +2174,12 @@ app.patch('/:id/status', async (c) => {
   const regularItemIds = regularItems.map((item) => Number(item.id)).filter((value) => value > 0)
   if (regularItemIds.length) {
     const allocRows = await selectInChunks(regularItemIds, 0, (chunk) => db
-      .prepare(`SELECT id, sale_item_id, batch_id, quantity, released_quantity FROM sale_item_batch_allocations WHERE sale_item_id IN (${chunk.map(() => '?').join(',')}) ORDER BY id ASC`)
-      .all<{ id: number; sale_item_id: number; batch_id: number; quantity: number; released_quantity: number }>(chunk))
+      .prepare(`SELECT id, sale_item_id, batch_id, branch_id, quantity, released_quantity FROM sale_item_batch_allocations WHERE sale_item_id IN (${chunk.map(() => '?').join(',')}) ORDER BY id ASC`)
+      .all<{ id: number; sale_item_id: number; batch_id: number; branch_id: number | null; quantity: number; released_quantity: number }>(chunk))
     const allocByItem = new Map<number, SaleItemAllocation[]>()
     for (const row of allocRows) {
       const list = allocByItem.get(Number(row.sale_item_id)) || []
-      list.push({ id: Number(row.id), batch_id: Number(row.batch_id), quantity: Number(row.quantity) || 0, released_quantity: Number(row.released_quantity) || 0 })
+      list.push({ id: Number(row.id), batch_id: Number(row.batch_id), branch_id: row.branch_id == null ? null : Number(row.branch_id), quantity: Number(row.quantity) || 0, released_quantity: Number(row.released_quantity) || 0 })
       allocByItem.set(Number(row.sale_item_id), list)
     }
     for (const item of regularItems) {
@@ -2191,13 +2191,23 @@ app.patch('/:id/status', async (c) => {
   // ACTIVE successor, in the lot that exists there now; the sale and its lines keep their own branch. While
   // every branch is active nothing is redirected and nothing below changes.
   const branchResolver = new BranchEffectResolver(await readBranchDirectory(db), branchRedirectTarget(c))
+  const originalItemBranches = new Map(items.map((item) => [item.id, item.branch_id]))
+  const movesStatusStock = (item: SaleItemRow) => {
+    if (skipStock || !item.product_id || !item.branch_id) return false
+    const returned = Math.max(0, Number(returnedByItem.get(item.id)) || 0)
+    return heldQuantity(saleStatus, item.quantity, returned, true) !== heldQuantity(oldStatus, item.quantity, returned, true)
+  }
   try {
+    for (const item of regularItems) {
+      if (!movesStatusStock(item)) continue
+      for (const allocation of (item as TransitionItem).allocations || []) {
+        if (allocation.branch_id == null || allocation.branch_id === item.branch_id) continue
+        const effect = branchResolver.effect(item.branch_id, { sells: true })
+        if (!effect?.redirected || allocation.branch_id !== effect.effectBranchId) return c.json({ error: 'The recorded allocation branch changed. Refresh before changing this sale.', code: 'write_conflict' }, 409)
+      }
+    }
     await redirectStockItems(db, branchResolver, items as Array<SaleItemRow & { allocations?: SaleItemAllocation[]; effect?: { branchName: string | null; addressedName: string | null } }>, {
-      moves: (item) => {
-        if (skipStock || !item.product_id || !item.branch_id) return false
-        const returned = Math.max(0, Number(returnedByItem.get(item.id)) || 0)
-        return heldQuantity(saleStatus, item.quantity, returned, true) !== heldQuantity(oldStatus, item.quantity, returned, true)
-      },
+      moves: movesStatusStock,
       saleBranchId: Number(sale.branch_id) || null,
       saleLabel: typeof sale.branch_name === 'string' ? sale.branch_name : null,
     })
@@ -2222,7 +2232,7 @@ app.patch('/:id/status', async (c) => {
       skippedDamagedUnits = sumCountedQuantities([skippedDamagedUnits,Math.abs(delta)])
       continue
     }
-    if (!item.condition_branch_id || item.condition_branch_id !== item.branch_id) return c.json({ error: 'counted_tagged_identity_required' },409)
+    if (!item.condition_branch_id || item.condition_branch_id !== originalItemBranches.get(item.id)) return c.json({ error: 'counted_tagged_identity_required' },409)
     damagedTransitionOps.push({ batchId: item.condition_batch_id, lotId: Number(item.damaged_lot_id), productId: item.product_id, productName: item.product_name, branchId: item.branch_id, delta })
   }
 
@@ -2248,7 +2258,7 @@ app.patch('/:id/status', async (c) => {
       statusStockGuards=exactStatusStock.takePreimageGuards()
       for(const item of items)if(item.damaged_lot_id && sources.has(`${item.product_id}:${item.branch_id}`)) {
         const current=exactStatusStock.get(Number(item.product_id),Number(item.branch_id)).projectedTaggedSource(item.damaged_lot_id)
-        if(!current || item.condition_lot_id!==item.damaged_lot_id || item.condition_product_id!==item.product_id || item.condition_branch_id!==item.branch_id || current.batchId!==item.condition_batch_id || current.conditionTag!==item.condition_tag) return c.json({error:'The recorded condition source changed. Refresh before changing this sale.',code:'write_conflict'},409)
+        if(!current || item.condition_lot_id!==item.damaged_lot_id || item.condition_product_id!==item.product_id || item.condition_branch_id!==originalItemBranches.get(item.id) || current.batchId!==item.condition_batch_id || current.conditionTag!==item.condition_tag) return c.json({error:'The recorded condition source changed. Refresh before changing this sale.',code:'write_conflict'},409)
       }
     }
     plan=planSaleStockTransition({saleId:id,oldStatus,newStatus:saleStatus,items:regularItems,returnedByItem,reason:movementReason,userId:user?.id??null,userName:actorSnapshot(user),skipStock,exactQuantities:true,projectedStock:exactStatusStock})

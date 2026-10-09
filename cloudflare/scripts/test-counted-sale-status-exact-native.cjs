@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict')
 const h=require('./test-counted-quantity-exact-native.cjs')
 const {state:baseState}=require('./test-counted-add-budget-native.cjs')
-const state=f=>({...baseState(f),returns:f.sql.prepare('SELECT * FROM returns ORDER BY id').all(),return_items:f.sql.prepare('SELECT * FROM return_items ORDER BY id').all(),sale_record_events:f.sql.prepare('SELECT * FROM sale_record_events ORDER BY id').all(),conditions:f.sql.prepare('SELECT * FROM counted_sale_item_conditions ORDER BY sale_item_id').all(),fees:f.sql.prepare('SELECT * FROM fees ORDER BY id').all()})
+const state=f=>({...baseState(f),returns:f.sql.prepare('SELECT * FROM returns ORDER BY id').all(),return_items:f.sql.prepare('SELECT * FROM return_items ORDER BY id').all(),sale_record_events:f.sql.prepare('SELECT * FROM sale_record_events ORDER BY id').all(),conditions:f.sql.prepare('SELECT * FROM counted_sale_item_conditions ORDER BY sale_item_id').all(),branches:f.sql.prepare('SELECT * FROM branches ORDER BY id').all(),fees:f.sql.prepare('SELECT * FROM fees ORDER BY id').all()})
 async function scenario(makeWorker,tier,receipt=true,partial=true){
  const f=await h.world(makeWorker,tier,'zero',sql=>{h.seed(1,receipt)(sql);sql.exec('UPDATE products SET selling_price_usd=2,selling_price_khr=8000 WHERE id=1')})
  const stock=h.loadStockSession('lib/stockTransaction.ts'),db=h.loadStockSession('lib/db.ts').getDb(f.env)
@@ -94,7 +94,7 @@ async function ackAndNeutral(makeWorker){
   }
  }
 }
-async function tail(makeWorker,fragments=1,probe=false){
+async function tail(makeWorker,fragments=1,probe=false,retired=false){
  for(const tier of ['free','paid']){
   const {f,call,saleId,stock,db}=await scenario(makeWorker,tier,true,false)
   try{
@@ -102,21 +102,75 @@ async function tail(makeWorker,fragments=1,probe=false){
    const unit=fragments>30?0.0001:0.01
    const inserts=[{sql:'DELETE FROM sale_item_batch_allocations WHERE sale_item_id=1'},...Array.from({length:fragments},(_,i)=>({sql:'INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,branch_id,quantity,released_quantity)VALUES(1,1,1,@q,0)',params:{q:i===fragments-1?sub(0.3,Array(fragments-1).fill(unit)):unit}}))]
    await stock.executeStockTransaction(db,inserts,'once')
+   if(retired)await stock.executeStockTransaction(db,[{sql:"INSERT INTO branches(id,name,role,is_active)VALUES(2,'New Shop','shop',1)"},{sql:'UPDATE branches SET is_active=0,is_default=0,successor_branch_id=2 WHERE id=1'},{sql:'UPDATE branch_stock SET quantity=0 WHERE product_id=1 AND branch_id=1'},{sql:'INSERT INTO branch_stock(product_id,branch_id,quantity)VALUES(1,2,0.4)'},{sql:'UPDATE branch_batch_stock SET branch_id=2 WHERE batch_id=1 AND branch_id=1'},{sql:'UPDATE damaged_stock_lots SET branch_id=2 WHERE id=1'}],'once')
    const before=state(f),raw=f.env.DB,attempts=new Map(),failures=new Set();let attempted=0,committed=false,mutationBatchSize=0
    f.env.CACHE={get:async()=>null,put:async()=>{throw new Error('Injected KV unavailable')},delete:async()=>{}}
    f.sql.exec("DELETE FROM cache_versions WHERE namespace IN('stock','sales')")
    const retry=(sql,params)=>{if(!committed)return false;const kind=/INSERT INTO audit_logs/.test(sql)?'audit':/SELECT namespace, version FROM cache_versions/.test(sql)?'versions':/INSERT INTO quota_usage/.test(sql)?'quota':/INSERT INTO cache_versions/.test(sql)?'handoff':/SELECT id, sale_status, updated_at FROM sales/.test(sql)?'updated':null;if(!kind)return false;const key=kind+':'+JSON.stringify(params);attempts.set(key,(attempts.get(key)||0)+1);if(failures.has(key))return false;failures.add(key);return true}
    const wrap=(statement,sql)=>new Proxy(statement,{get(target,key){if(key==='bind')return(...args)=>wrap(target.bind(...args),sql);if(['all','first','run'].includes(key))return(...args)=>{attempted++;return retry(sql,target.params)?Promise.reject(new Error('D1_ERROR: network reset before tail')):target[key](...args)};return target[key]}})
    f.env.DB=new Proxy(raw,{get(target,key){if(key==='prepare')return sql=>wrap(target.prepare(sql),sql);if(key==='batch')return async statements=>{attempted+=statements.length;if(statements.some(statement=>/INSERT INTO sale_record_events/.test(statement.text)))mutationBatchSize=statements.length;if(statements.some(statement=>retry(statement.text,statement.params)))throw new Error('D1_ERROR: network reset before tail');try{return await target.batch(statements)}finally{if(statements.some(statement=>/INSERT INTO sale_record_events/.test(statement.text)))committed=f.sql.prepare("SELECT COUNT(*) n FROM sale_record_events WHERE source_kind='sale_status'").get().n>0}};return target[key]}})
-   const result=await call('cancelled','status-tail-boundary')
-   console.log('STATUS_FULL_TAIL '+JSON.stringify({tier,fragments,status:result.status,code:result.json.code,attempted,mutationBatchSize,attempts:Object.fromEntries(attempts)}))
+   const result=retired?await redirectedCall({call},'cancelled','status-tail-boundary',2):await call('cancelled','status-tail-boundary')
+   console.log('STATUS_FULL_TAIL '+JSON.stringify({tier,fragments,retired,status:result.status,code:result.json.code,attempted,mutationBatchSize,attempts:Object.fromEntries(attempts)}))
    assert.ok(attempted<=(tier==='free'?50:1000),'outer attempts include failed calls/authentication/stock bootstrap/allwaitUntil')
-   if(result.status===409){assert.equal(result.json.code,'sale_status_over_plan_budget');assert.equal(result.json.outcome,'not_dispatched');assert.deepEqual(state(f),before)}else{assert.equal(result.status,200,JSON.stringify(result.json));if(fragments===487)assert.equal(mutationBatchSize,500,'largest existing atomic statement admission');assert.equal(f.state().physical,1);assert.equal(f.state().tags[0].quantity_remaining,0.6)}
-   if(!probe){assert.equal(result.status,fragments>=488||tier==='free'&&fragments>=17?409:200);if(result.status===200)assert.deepEqual([...new Set([...failures].map(key=>key.split(':')[0]))].sort(),tier==='free'?['audit','handoff','quota','versions']:['audit','handoff','versions'],'all actual audit/version/fallback/quota tail families attempted')}
+   if(result.status===409){assert.equal(result.json.code,'sale_status_over_plan_budget');assert.equal(result.json.outcome,'not_dispatched');assert.deepEqual(state(f),before)}else{assert.equal(result.status,200,JSON.stringify(result.json));if(fragments===487)assert.equal(mutationBatchSize,500,'largest existing atomic statement admission');assert.equal(f.state().physical,retired?0:1);if(retired)assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=2').get().quantity,1);assert.equal(f.state().tags[0].quantity_remaining,0.6)}
+   if(!probe){assert.equal(result.status,fragments>=(retired?487:488)||tier==='free'&&fragments>=(retired?13:17)?409:200);if(result.status===200)assert.deepEqual([...new Set([...failures].map(key=>key.split(':')[0]))].sort(),tier==='free'?['audit','handoff','quota','versions']:['audit','handoff','versions'],'all actual audit/version/fallback/quota tail families attempted')}
   }finally{f.sql.close()}
  }
 }
 
-async function main(){const makeWorker=await h.bundle.exports.bundleWorker();if(process.argv.includes('--tail-only')){await tail(makeWorker,Number(process.env.STATUS_FRAGMENTS||1),true);return}if(process.argv.includes('--ack-only')){await ackAndNeutral(makeWorker);return}if(!process.argv.includes('--races-only'))await positive(makeWorker);await races(makeWorker);await ackAndNeutral(makeWorker);await tail(makeWorker);await tail(makeWorker,16);await tail(makeWorker,17);await tail(makeWorker,20);await tail(makeWorker,487);await tail(makeWorker,488)}
-module.exports={scenario,state,positive,races,ackAndNeutral,tail}
+async function redirectedCall(w,status,key,target){
+  const NativeRequest=globalThis.Request
+  globalThis.Request=class extends NativeRequest{constructor(input,init){const headers=new Headers(init?.headers);headers.set('x-branch-redirect',String(target));super(input,{...init,headers})}}
+  try{return await w.call(status,key)}finally{globalThis.Request=NativeRequest}
+}
+
+async function sourceOwnership(makeWorker){
+ for(const tier of ['free','paid']){
+  for(const direction of ['cancel','reactivate'])for(const mode of ['active_wrong','active_race','legacy_null']){
+   const w=await scenario(makeWorker,tier,true,true),{f,stock,db}=w
+   try{
+    if(direction==='reactivate')assert.equal((await w.call('cancelled','ownership-setup')).status,200)
+    await stock.executeStockTransaction(db,[{sql:"INSERT INTO branches(id,name,role,is_active)VALUES(2,'Other','shop',1)"}], 'once')
+    const change={sql:'UPDATE sale_item_batch_allocations SET branch_id='+ (mode==='legacy_null'?'NULL':'2') +' WHERE sale_item_id=1'}
+    let expected
+    if(mode==='active_race')f.beforeCommit(async()=>{await stock.executeStockTransaction(db,[change],'once');expected=state(f)})
+    else await stock.executeStockTransaction(db,[change],'once')
+    const before=state(f),result=await w.call(direction==='cancel'?'cancelled':'completed','ownership-'+mode)
+    if(mode==='legacy_null'){
+     assert.equal(result.status,200,JSON.stringify(result.json));assert.equal(f.state().physical,direction==='cancel'?0.8:0.4)
+     assert.equal(f.sql.prepare('SELECT branch_id FROM sale_item_batch_allocations WHERE sale_item_id=1').get().branch_id,null)
+     const saved=state(f);assert.equal((await w.call(direction==='cancel'?'cancelled':'completed','ownership-'+mode)).status,200);assert.deepEqual(state(f),saved)
+    }else{assert.equal(result.status,409,'original allocation ownership '+JSON.stringify(result.json));assert.equal(result.json.code,'write_conflict');assert.deepEqual(state(f),expected||before)}
+    console.log('PASS original allocation ownership '+JSON.stringify({tier,direction,mode}))
+   }finally{f.sql.close()}
+  }
+  for(const mode of ['original','effect','wrong_third','ownership_race','target_race']){
+   const w=await scenario(makeWorker,tier,true,true),{f,stock,db}=w
+   try{
+    const conditions=state(f).conditions
+    await stock.executeStockTransaction(db,[{sql:"INSERT INTO branches(id,name,role,is_active)VALUES(2,'New Shop','shop',1),(3,'Third Shop','shop',1)"},{sql:"UPDATE branches SET name='Old Shop',is_active=0,is_default=0,successor_branch_id=2 WHERE id=1"},{sql:'UPDATE branch_stock SET quantity=0 WHERE product_id=1 AND branch_id=1'},{sql:'INSERT INTO branch_stock(product_id,branch_id,quantity)VALUES(1,2,0.4)'},{sql:'UPDATE branch_batch_stock SET branch_id=2 WHERE batch_id=1 AND branch_id=1'},{sql:'UPDATE damaged_stock_lots SET branch_id=2 WHERE id=1'},...(mode==='effect'||mode==='wrong_third'?[{sql:'UPDATE sale_item_batch_allocations SET branch_id='+ (mode==='effect'?2:3) +' WHERE sale_item_id=1'}]:[])],'once')
+    const before=state(f)
+    assert.equal((await w.call('cancelled','redirect-no-confirmation')).status,409);assert.deepEqual(state(f),before)
+    assert.equal((await redirectedCall(w,'cancelled','redirect-invalid',99)).status,409);assert.deepEqual(state(f),before)
+    let rival
+    if(mode==='ownership_race'||mode==='target_race')f.beforeCommit(async()=>{await stock.executeStockTransaction(db,[{sql:mode==='ownership_race'?'UPDATE sale_item_batch_allocations SET branch_id=3 WHERE sale_item_id=1':'UPDATE branches SET is_active=0 WHERE id=2'}],'once');rival=state(f)})
+    const result=await redirectedCall(w,'cancelled','redirect-cancel',2)
+    if(['wrong_third','ownership_race','target_race'].includes(mode)){
+     assert.equal(result.status,409,JSON.stringify(result.json));assert.equal(result.json.code,'write_conflict');assert.deepEqual(state(f),rival||before)
+    }else{
+     assert.equal(result.status,200,JSON.stringify(result.json));assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=2').get().quantity,0.8);assert.equal(f.state().physical,0);assert.equal(f.state().cache,0.8);assert.equal(f.state().tags[0].quantity_remaining,0.5)
+     assert.deepEqual(state(f).conditions,conditions,'immutable original condition branch stays historical')
+     assert.equal(f.sql.prepare('SELECT branch_id FROM sale_items WHERE id=1').get().branch_id,1)
+     assert.equal(f.sql.prepare('SELECT branch_id FROM sale_item_batch_allocations WHERE sale_item_id=1').get().branch_id,mode==='effect'?2:1)
+     const saved=state(f);assert.equal((await redirectedCall(w,'cancelled','redirect-cancel',2)).status,200);assert.deepEqual(state(f),saved)
+     assert.equal((await redirectedCall(w,'completed','redirect-reactivate',2)).status,200);assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=2').get().quantity,0.4);assert.equal(f.state().cache,0.4);assert.equal(f.state().tags[0].quantity_remaining,0.3);assert.deepEqual(state(f).conditions,conditions)
+    }
+    console.log('PASS confirmed retired source no-fold redirect '+JSON.stringify({tier,mode}))
+   }finally{f.sql.close()}
+  }
+ }
+}
+
+async function main(){const makeWorker=await h.bundle.exports.bundleWorker();if(process.argv.includes('--redirect-tail-only')){await tail(makeWorker,1,false,true);await tail(makeWorker,12,false,true);await tail(makeWorker,13,false,true);return}if(process.argv.includes('--source-only')){await sourceOwnership(makeWorker);return}if(process.argv.includes('--tail-only')){await tail(makeWorker,Number(process.env.STATUS_FRAGMENTS||1),true,process.argv.includes('--redirect'));return}if(process.argv.includes('--ack-only')){await ackAndNeutral(makeWorker);return}if(!process.argv.includes('--races-only'))await positive(makeWorker);await races(makeWorker);await ackAndNeutral(makeWorker);await tail(makeWorker);await tail(makeWorker,16);await tail(makeWorker,17);await tail(makeWorker,20);await tail(makeWorker,487);await tail(makeWorker,488);await tail(makeWorker,1,false,true);await tail(makeWorker,12,false,true);await tail(makeWorker,13,false,true);await sourceOwnership(makeWorker)}
+module.exports={scenario,state,positive,races,ackAndNeutral,tail,sourceOwnership}
 if(require.main===module)main().catch(error=>{console.error(error);process.exitCode=1})
