@@ -532,9 +532,20 @@ async function run() {
   //    second time -- the guard looked green and the shelf was still wrong.
   {
     const db = freshDb()
-    const c = makeContext(faultyDb(db, 'SELECT id, batch_number, lot_code'))
+    const c = makeContext(db)
+    const resultJson = c.json.bind(c)
+    let resultFailed = false
+    c.json = (body, status = 200) => {
+      if (!resultFailed && status === 200 && body?.success === true) {
+        assert.equal(Number(receiptRow(db).written), 1, 'the result fault follows the durable physical commit')
+        resultFailed = true
+        throw new Error('injected post-commit result delivery failure')
+      }
+      return resultJson(body, status)
+    }
     const refused = await runAdjustAction(c, addBody('stockline_77777777-dead'))
-    assert.equal(refused.status, 503, 'post-commit lot read failed')
+    assert.equal(resultFailed, true, 'the real successful-result boundary was exercised')
+    assert.equal(refused.status, 503, 'post-commit result delivery failed')
     assert.equal((await jsonOf(refused)).code, 'stock_request_outcome_unknown')
     assert.equal(branchStock(db), 5, 'and the stock write really did land')
     const stranded = receiptRow(db)
@@ -546,7 +557,7 @@ async function run() {
     assert.equal((await jsonOf(retry)).code, 'stock_request_partially_applied', 'and names what happened')
     assert.equal(branchStock(db), 5, 'THE FIX: stock stays at 5 -- before this it went to 10')
     assert.equal(movementCount(db), 1, 'physical and movement committed together; the completion outcome is incomplete')
-    console.log('PASS committed intake with failed post-commit result read refuses unsafe retry')
+    console.log('PASS committed intake with failed post-commit result delivery refuses unsafe retry')
   }
 
   // CONTROL for the case above. A failure BEFORE the write must still release,
