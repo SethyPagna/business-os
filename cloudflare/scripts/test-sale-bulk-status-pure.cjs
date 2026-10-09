@@ -6,11 +6,13 @@ const path = require('node:path')
 const assert = require('node:assert/strict')
 const ts = require('typescript')
 const Database = require('better-sqlite3')
+const { applyMigrations } = require('./harness/d1compat.cjs')
 const root = path.join(__dirname, '..')
 const recordContract = JSON.parse(fs.readFileSync(path.join(root, '..', 'outputs', 'takeover-20260908', 'f74-sales-records-backend-contract.json'), 'utf8'))
 let user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
 const cache = new Map()
 const actual = new Set(['acquisitionCostAccess','actorSnapshot','businessDateWindow','businessMaintenanceGuard','movementBranchName','db','permissions','saleBulkStatus','saleBulkUpdate','saleRecordEvents','saleTransitions','saleTotals','sqlBinding','productBatches','batchCode','salesStatus','saleStatusResolution','financialPrecision','undoAppliers','branchWrites','branchRoles','branchRoleGuards','branchEffect','conflictControl','searchMatch'])
+for (const dependency of ['countedDamagedStock','stockTransaction','requestMetrics','planTier','moneyPrecision','stockActorGuard']) actual.add(dependency)
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
   const mod = { exports: {} }; cache.set(rel,mod)
@@ -38,14 +40,45 @@ function load(rel) {
 const sales = load('routes/sales.ts').default
 const history = load('routes/actionHistory.ts').default
 const helper = load('lib/saleBulkStatus.ts')
+const { Hono } = require('hono')
+const { requestMetricsMiddleware } = load('lib/requestMetrics.ts')
+const instrumentedApps = new WeakMap()
+function instrumented(app) {
+  if (!instrumentedApps.has(app)) {
+    const host = new Hono()
+    host.use('*', requestMetricsMiddleware)
+    host.route('/', app)
+    instrumentedApps.set(app, host)
+  }
+  return instrumentedApps.get(app)
+}
 function fixture(migrate = true) {
   const sql=new Database(':memory:')
   sql.pragma('foreign_keys = OFF')
-  for(const file of fs.readdirSync(path.join(root,'migrations')).filter(f=>f.endsWith('.sql') && (migrate || Number(f.slice(0,4)) < 120)).sort()) sql.exec(fs.readFileSync(path.join(root,'migrations',file),'utf8'))
-  sql.exec("INSERT INTO branches(id,name) VALUES(1,'Shop'),(2,'Warehouse'); INSERT INTO products(id,name,stock_quantity) VALUES(1,'A',100),(2,'B',100); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,50),(1,2,50),(2,1,100)")
+  applyMigrations({ db: sql }, fs.readdirSync(path.join(root,'migrations')).filter(f=>f.endsWith('.sql') && (migrate || Number(f.slice(0,4)) < 120)).sort().map(file=>fs.readFileSync(path.join(root,'migrations',file),'utf8')))
+  const fixtureWrite = fn => {
+    const epoch = sql.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get()
+    if (!epoch) return fn()
+    return sql.transaction(() => {
+      sql.prepare("INSERT INTO system_flags(key,value)VALUES('stock_transaction_permit',?)").run(epoch.value)
+      try { return fn() } finally { sql.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'") }
+    })()
+  }
+  const seedSql = new Proxy(sql, { get(target, key) {
+    if (key === 'exec') return text => fixtureWrite(() => target.exec(text))
+    if (key === 'prepare') return text => {
+      const statement = target.prepare(text)
+      return new Proxy(statement, { get(stmt, method) {
+        if (method === 'run') return (...params) => fixtureWrite(() => stmt.run(...params))
+        return typeof stmt[method] === 'function' ? stmt[method].bind(stmt) : stmt[method]
+      } })
+    }
+    return typeof target[key] === 'function' ? target[key].bind(target) : target[key]
+  } })
+  seedSql.exec("INSERT INTO branches(id,name) VALUES(1,'Shop'),(2,'Warehouse'); INSERT INTO products(id,name,stock_quantity) VALUES(1,'A',100),(2,'B',100); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,50),(1,2,50),(2,1,100)")
   let failAt=null, beforeBatch=null, batches=0, reads=0
   const readRows=[]
-  const env={DB:{
+  const env={PLAN_TIER:'paid',DB:{
     prepare(text) {
       return {bind(...params) {
         if(params.length>100) throw Error('too many SQL variables')
@@ -55,12 +88,20 @@ function fixture(migrate = true) {
     async batch(statements) {
       batches++
       if(beforeBatch) {const fn=beforeBatch;beforeBatch=null;await fn()}
-      return sql.transaction(()=>statements.map((s,i)=>{if(failAt!==null&&(i===failAt||s.text.includes(failAt)))throw Error('injected failure');const r=sqliteD1Call(sql.prepare(s.text), 'run', s.params);return {meta:{changes:r.changes,last_row_id:Number(r.lastInsertRowid)}}}))()
+      return sql.transaction(()=>statements.map((s,i)=>{if(failAt!==null&&(i===failAt||s.text.includes(failAt)))throw Error('injected failure');const prepared=sql.prepare(s.text);if(prepared.reader)return {results:sqliteD1Call(prepared,'all',s.params),meta:{changes:0}};const r=sqliteD1Call(prepared, 'run', s.params);return {meta:{changes:r.changes,last_row_id:Number(r.lastInsertRowid)}}}))()
     }
   }}
   const ctx={waitUntil(){},passThroughOnException(){}}
-  const call=async(app,url,body,method='POST')=>{const response=await app.request(url,{method,headers:{'content-type':'application/json'},body:JSON.stringify(body)},env,ctx);const text=await response.text();let parsed;try{parsed=JSON.parse(text)}catch{parsed={error:text}}return {status:response.status,body:parsed}}
-  return {sql,env,call,fail(value){failAt=value},barrier(fn){beforeBatch=fn},metrics:()=>({batches,reads,readRows})}
+  const call=async(app,url,body,method='POST')=>{
+    const role=sql.prepare('SELECT id,code,permissions FROM roles WHERE code=?').get(user.role_code)
+    user={...user,username:user.username||'staff-'+user.id,organization_id:null,role_id:role?.id??null,role_permissions:role?.permissions??null,role_code:role?.code??null,is_active:1,must_change_password:0,permissions:typeof user.permissions==='object'?JSON.stringify(user.permissions):user.permissions}
+    seedSql.prepare('INSERT INTO users(id,username,name,password,role_id,permissions,is_active)VALUES(?,?,?,\'synthetic\',?,?,1) ON CONFLICT(id)DO UPDATE SET username=excluded.username,name=excluded.name,role_id=excluded.role_id,permissions=excluded.permissions,is_active=1').run(user.id,user.username,user.name,user.role_id,user.permissions)
+    assert.equal(sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0)
+    const response=await instrumented(app).request(url,{method,headers:{'content-type':'application/json'},body:JSON.stringify(body)},env,ctx);const text=await response.text();let parsed;try{parsed=JSON.parse(text)}catch{parsed={error:text}}
+    assert.equal(sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0)
+    return {status:response.status,body:parsed}
+  }
+  return {sql:seedSql,rawSql:sql,env,call,fail(value){failAt=value},barrier(fn){beforeBatch=fn},metrics:()=>({batches,reads,readRows})}
 }
 function seed(f,count=9) {
   for(let id=1;id<=count;id++) {
@@ -107,7 +148,8 @@ async function run() {
     const originalAllocation=f.sql.prepare('SELECT * FROM sale_item_batch_allocations').all()
     const req=request(f,restoringFirst?'cancelled':'completed',`archived-sale-${restoringFirst}`)
     const before=snapshot(f);f.fail('INSERT INTO audit_logs')
-    assert.equal((await f.call(sales,'/bulk-status',req)).status,500)
+    const failedApply=await f.call(sales,'/bulk-status',req)
+    assert.equal(failedApply.status,500,JSON.stringify({inactiveSql,restoringFirst,result:failedApply}))
     assert.equal(snapshot(f),before,'apply failure must roll back parent activation and all stock/history')
     f.fail(null)
     const applied=await f.call(sales,'/bulk-status',req)
@@ -142,7 +184,7 @@ async function run() {
   legacy.sql.exec(fs.readFileSync(path.join(root,'migrations/0120_sale_bulk_status_actions.sql'),'utf8'))
   assert.deepEqual(legacy.sql.prepare('SELECT * FROM sales ORDER BY id').all(),domain)
   // ...and then every later migration, so the route below runs against the schema production actually has.
-  for (const file of fs.readdirSync(path.join(root,'migrations')).filter(f=>f.endsWith('.sql') && Number(f.slice(0,4)) > 120).sort()) legacy.sql.exec(fs.readFileSync(path.join(root,'migrations',file),'utf8'))
+  applyMigrations({db:legacy.rawSql},fs.readdirSync(path.join(root,'migrations')).filter(f=>f.endsWith('.sql') && Number(f.slice(0,4)) > 120).sort().map(file=>fs.readFileSync(path.join(root,'migrations',file),'utf8')))
   // Replaying the chain is not revision-neutral any more, and should not be:
   // 0179 (the membership-points switch-off) runs a real `UPDATE sales SET
   // loyalty_accrual = 0`, and 0120's triggers count that write like any
@@ -271,9 +313,14 @@ async function run() {
   assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM fees').get().n,lcFeeBefore+1)
   f=fixture();seed(f,1)
   f.sql.exec("UPDATE branches SET name='LC Store', role='shop' WHERE id=1")
+  const renameBefore=snapshot(f)
+  const renameRequest=lcFeeRequest(f,'request-lc-store-rename-race')
   f.barrier(()=>f.sql.prepare("UPDATE branches SET name='Leang Cosmetics' WHERE id=1").run())
-  const lcRenamedRace=await f.call(sales,'/bulk-status',lcFeeRequest(f,'request-lc-store-rename-race'))
-  assert.equal(lcRenamedRace.status,200,'renaming the selling branch inside the race window is not an identity change: '+JSON.stringify(lcRenamedRace))
+  const lcRenamedRace=await f.call(sales,'/bulk-status',renameRequest)
+  assert.equal(lcRenamedRace.status,409,'captured stock labels changed before commit: '+JSON.stringify(lcRenamedRace))
+  assert.equal(snapshot(f),renameBefore,'stale labels do not create fees or stock/history effects')
+  assert.equal((await f.call(sales,'/bulk-status',renameRequest)).status,200,'the fresh renamed branch remains a valid selling identity')
+  assert.equal(f.sql.prepare('SELECT branch_name FROM fees WHERE sale_id=1').get().branch_name,'Leang Cosmetics')
   f=fixture();seed(f,1)
   f.sql.exec("UPDATE branches SET name='LC Store', role='shop' WHERE id=1")
   const lcRaceCount=f.sql.prepare('SELECT COUNT(*) n FROM fees').get().n
@@ -291,7 +338,7 @@ async function run() {
   const beforeSingleFee=snapshot(f)
   f.fail('INSERT INTO fees')
   const failedSingleFee=await f.call(sales,'/1/status',{sale_status:'cancelled',expected_updated_at:'same-second',client_request_id:'single-fee-failure',cancel_reason:'mistake',cancel_fee_usd:3},'PATCH')
-  assert.equal(failedSingleFee.status,500)
+  assert.equal(failedSingleFee.status,500,JSON.stringify(failedSingleFee))
   assert.equal(snapshot(f),beforeSingleFee)
   f=fixture();seed(f,1)
   const singleFee=await f.call(sales,'/1/status',{sale_status:'cancelled',expected_updated_at:'same-second',client_request_id:'single-fee-success',cancel_reason:'mistake',cancel_fee_usd:3},'PATCH')
@@ -312,10 +359,21 @@ async function run() {
   assert.equal((await replay(f,h)).status,409);assert.equal(snapshot(f),stale)
   console.log('PASS stale member rejects complete replay without history mutation')
   f=fixture();seed(f);h=(await f.call(sales,'/bulk-status',request(f,'cancelled'))).body.actionHistoryId
+  const priorMovements=f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n
+  const priorAudit=f.sql.prepare('SELECT COUNT(*) n FROM audit_logs').get().n
   let release;const gate=new Promise(r=>release=r);let entered;const ready=new Promise(r=>entered=r)
   f.barrier(async()=>{entered();await gate})
   const a=replay(f,h);await ready;const b=await replay(f,h);release();const ar=await a
-  assert.deepEqual([ar.status,b.status].sort(),[200,409])
+  assert.deepEqual([ar.status,b.status],[200,200],'both dispatched requests recover the same committed replay receipt')
+  assert.deepEqual(ar.body,b.body,'recovered replay response is the original canonical receipt')
+  assert.equal(f.sql.prepare('SELECT generation FROM sale_bulk_operations').get().generation,1)
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM action_history').get().n,1)
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM sale_record_events WHERE generation=1 AND via='undo'").get().n,9)
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n,priorMovements+9)
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM audit_logs').get().n,priorAudit+1)
+  const committedReplay=snapshot(f)
+  assert.equal((await replay(f,h,'undo',0)).status,409,'subsequent old-generation request is stale')
+  assert.equal(snapshot(f),committedReplay,'stale replay cannot repeat compensation or history')
   assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity,50)
   console.log('PASS concurrent same-generation replay applies once')
   f=fixture();seed(f);const before=snapshot(f)
@@ -339,19 +397,27 @@ async function run() {
     INSERT INTO sale_item_batch_allocations(id,sale_item_id,batch_id,branch_id,quantity,released_quantity,released_at) VALUES(1,1,1,1,3,0,NULL),(2,1,2,1,2,1,'original');
     INSERT INTO returns(id,sale_id) VALUES(1,1);
     INSERT INTO return_items(id,return_id,sale_item_id,product_id,quantity) VALUES(1,1,1,1,1);
-    INSERT INTO damaged_stock_lots(id,product_id,branch_id,quantity,quantity_remaining) VALUES(1,1,1,5,3);
-    UPDATE sale_items SET damaged_lot_id=1 WHERE id=3;
+    UPDATE branch_stock SET quantity=quantity+3 WHERE product_id=1 AND branch_id=1;
+    UPDATE products SET stock_quantity=stock_quantity+3 WHERE id=1;
+    INSERT INTO damaged_stock_lots(id,product_id,branch_id,quantity,quantity_remaining,condition_tag,source) VALUES(1,1,1,5,3,'damaged','remove');
+    DELETE FROM sale_items WHERE id=3;
+    INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,damaged_lot_id) VALUES(3,3,1,'A',2,1,1);
     UPDATE sales SET stock_skipped=1 WHERE id=4;
   `)
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM counted_sale_item_conditions WHERE sale_item_id=3 AND lot_id=1 AND product_id=1 AND branch_id=1').get().n,1,'tagged sale fixture uses real insert-time historical capture')
   const allocBefore=f.sql.prepare('SELECT * FROM sale_item_batch_allocations ORDER BY id').all()
   const mixed=await f.call(sales,'/bulk-status',request(f,'cancelled'))
   assert.equal(mixed.status,200,JSON.stringify(mixed))
   assert.deepEqual(f.sql.prepare('SELECT quantity FROM branch_batch_stock ORDER BY batch_id').all().map(r=>r.quantity),[23,31,52])
   assert.equal(f.sql.prepare('SELECT quantity_remaining q FROM damaged_stock_lots').get().q,5)
+  assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity,59,'unlotted tag is included once in physical stock')
+  assert.equal(f.sql.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity,111)
   assert.equal((await replay(f,mixed.body.actionHistoryId)).status,200)
   assert.deepEqual(f.sql.prepare('SELECT quantity FROM branch_batch_stock ORDER BY batch_id').all().map(r=>r.quantity),[20,30,50])
   assert.deepEqual(f.sql.prepare('SELECT * FROM sale_item_batch_allocations ORDER BY id').all(),allocBefore)
   assert.equal(f.sql.prepare('SELECT quantity_remaining q FROM damaged_stock_lots').get().q,3)
+  assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity,53)
+  assert.equal(f.sql.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity,103)
   assert.equal((await replay(f,mixed.body.actionHistoryId,'redo',1)).status,200)
   console.log('PASS mixed branches, exact multiple allocations, legacy lot, partial return, damaged and sticky skip')
 
@@ -475,7 +541,8 @@ async function run() {
   h=(await f.call(sales,'/bulk-status',request(f,'cancelled'))).body.actionHistoryId
   assert.equal((await replay(f,h)).status,200)
   before=snapshot(f)
-  assert.equal((await replay(f,h,'redo',1)).status,409);assert.equal(snapshot(f),before)
+  const overflowRedo=await replay(f,h,'redo',1)
+  assert.equal(overflowRedo.status,409,JSON.stringify(overflowRedo));assert.equal(snapshot(f),before)
   // A concurrent edit to the last selected member's history must also be
   // detected even when its first 256 rows still match the saved fingerprint.
   f=fixture();seed(f,1)
