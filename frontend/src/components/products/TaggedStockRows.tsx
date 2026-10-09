@@ -1,65 +1,45 @@
-import { memo, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
+import Eraser from 'lucide-react/dist/esm/icons/eraser.js'
+import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
+import X from 'lucide-react/dist/esm/icons/x.js'
 import Modal from '../shared/Modal'
+import IconButton from '../shared/kit/IconButton.tsx'
+import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
+import { useModalClose } from '../shared/modalCloseContext.ts'
 import { stockConditionLabel } from '../../utils/stockCondition.ts'
-import { disposeTaggedLot, restoreTaggedLot, type TaggedLotGroup } from '../../api/damagedLotsTransport.ts'
+import { disposeTaggedLot, restoreTaggedLot, type TaggedLotChange, type TaggedLotGroup } from '../../api/damagedLotsTransport.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
 import { stockFailureText, stockLineNeedsRemoval } from '../../utils/stockAdjustOutcome.ts'
-
-// P3-L6. The TAGGED child row: units the owner chose to keep inside the
-// product group instead of destroying ("Make it option chooseable to keep in
-// group with tag or remove entiriely"), one row per (product, tag, branch).
-//
-// Three rules this file exists to hold in one place:
-//
-//  1. The row is INSIDE the group and OUTSIDE the group's sellable totals.
-//     These units are not in branch_stock, so productGrouping.ts -- which
-//     builds every group total, every picker list and POS's own product rows
-//     from product records -- cannot see them at all. The exclusion is
-//     structural, not a filter; the row is rendered beside a group's rows from
-//     its own fetch, and is labelled "Not sellable" so the number on screen is
-//     never mistaken for stock that can be sold.
-//  2. The tag text is the raw English constant in every language (the owner:
-//     "the tag remains english even in khmer"). stockConditionLabel returns
-//     the token itself; nothing here routes it through tr().
-//  3. The two row actions are the two directions out of the held state:
-//     "Remove entirely" destroys the units and books the loss at cost, and
-//     "Restore to sellable" is the exact reversal of having kept them. Both
-//     require a reason, like every other stock change.
+import { assertActorSessionDispatchAllowed, captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
 
 type Translate = (key: string, fallbackEn?: string, fallbackKm?: string) => string
+const ACTION_BUTTON_CLASS = `${toolbarIconButtonClassName} !h-10 !w-10`
 
 export type TaggedStockRow = TaggedLotGroup
 
 export type TaggedStockAction = { row: TaggedStockRow; kind: 'dispose' | 'restore' }
 
-function ActionButtons({ row, tr, canWrite, onAction, compact }: {
+function ActionButtons({ row, tr, canWrite, onAction }: {
   row: TaggedStockRow
   tr: Translate
   canWrite: boolean
   onAction: (action: TaggedStockAction) => void
-  compact?: boolean
 }) {
   if (!canWrite) return null
-  const size = compact
-    ? 'h-6 px-1.5 text-[10px]'
-    : 'h-7 px-2 text-[11px]'
-  const base = `inline-flex shrink-0 items-center whitespace-nowrap rounded-lg border font-medium transition-colors ${size}`
   return (
     <div className="flex shrink-0 items-center gap-1">
-      <button
-        type="button"
-        className={`${base} border-slate-300 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700`}
+      <IconButton
+        label={tr('stock_tagged_restore', 'Clear tag', 'លុបស្លាក')}
+        icon={<Eraser className="h-4 w-4" />}
+        className={ACTION_BUTTON_CLASS}
         onClick={(event) => { event.stopPropagation(); onAction({ row, kind: 'restore' }) }}
-      >
-        {tr('stock_tagged_restore', 'Restore to sellable', 'ស្តារទៅជាទំនិញលក់បាន')}
-      </button>
-      <button
-        type="button"
-        className={`${base} border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-900/50`}
+      />
+      <IconButton
+        label={tr('stock_remove_entirely', 'Remove entirely', 'ដកចេញទាំងស្រុង')}
+        icon={<Trash2 className="h-4 w-4" />}
+        className={`${ACTION_BUTTON_CLASS} !text-red-700 dark:!text-red-300`}
         onClick={(event) => { event.stopPropagation(); onAction({ row, kind: 'dispose' }) }}
-      >
-        {tr('stock_remove_entirely', 'Remove entirely', 'ដកចេញទាំងស្រុង')}
-      </button>
+      />
     </div>
   )
 }
@@ -67,16 +47,11 @@ function ActionButtons({ row, tr, canWrite, onAction, compact }: {
 function TagPill({ row }: { row: TaggedStockRow }) {
   return (
     <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">
-      {/* Raw English constant -- see the file header. */}
       {stockConditionLabel(row.condition_tag)}
     </span>
   )
 }
 
-/** Desktop: an ordinary child <tr> in the products table, so the excel-style
- *  columns line up with the sellable rows above it. Only the name rail, the
- *  branch and the quantity carry content -- a held row has no price, no margin
- *  and no catalog identity of its own. */
 function TaggedStockDesktopRowComponent({ row, tr, canWrite, onAction, selectionModeActive }: {
   row: TaggedStockRow
   tr: Translate
@@ -92,7 +67,7 @@ function TaggedStockDesktopRowComponent({ row, tr, canWrite, onAction, selection
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           <TagPill row={row} />
           <span className="text-[11px] text-gray-500 dark:text-gray-400">
-            {tr('stock_tagged_not_sellable', 'Not sellable', 'លក់មិនបាន')}
+            {tr('stock_tagged_sellable', 'Sell with this tag', 'លក់ជាមួយស្លាកនេះ')}
           </span>
         </div>
       </td>
@@ -103,7 +78,7 @@ function TaggedStockDesktopRowComponent({ row, tr, canWrite, onAction, selection
       <td className="px-3 py-2 text-right">
         <div className="flex items-center justify-end gap-2">
           <span className="tabular-nums text-sm font-semibold text-orange-700 dark:text-orange-300">{row.quantity}</span>
-          <ActionButtons row={row} tr={tr} canWrite={canWrite} onAction={onAction} compact />
+          <ActionButtons row={row} tr={tr} canWrite={canWrite} onAction={onAction} />
         </div>
       </td>
     </tr>
@@ -129,7 +104,7 @@ function TaggedStockMobileCardComponent({ row, tr, canWrite, onAction }: {
     >
       <TagPill row={row} />
       <span className="min-w-0 flex-1 detail-scroll-text text-[11px] text-gray-500 dark:text-gray-400">
-        {[row.branch_name, tr('stock_tagged_not_sellable', 'Not sellable', 'លក់មិនបាន')].filter(Boolean).join(' · ')}
+        {[row.branch_name, tr('stock_tagged_sellable', 'Sell with this tag', 'លក់ជាមួយស្លាកនេះ')].filter(Boolean).join(' · ')}
       </span>
       <span className="tabular-nums text-sm font-semibold text-orange-700 dark:text-orange-300">{row.quantity}</span>
       <ActionButtons row={row} tr={tr} canWrite={canWrite} onAction={onAction} />
@@ -139,72 +114,91 @@ function TaggedStockMobileCardComponent({ row, tr, canWrite, onAction }: {
 
 export const TaggedStockMobileCard = memo(TaggedStockMobileCardComponent)
 
-/**
- * The one dialog both actions share. Quantity defaults to the whole held row
- * (the common case) and is capped at it client-side; the Worker re-reads the
- * held lots and refuses anyway, so a stale page cannot over-apply. A reason is
- * mandatory on both, exactly as it is for every other stock change.
- */
+function CancelAction({ tr, onClose, disabled }: { tr: Translate; onClose: () => void; disabled: boolean }) {
+  const requestClose = useModalClose(onClose)
+  return <IconButton label={tr('cancel', 'Cancel')} icon={<X className="h-4 w-4" />} className={ACTION_BUTTON_CLASS} disabled={disabled} onClick={requestClose} />
+}
+
 export function TaggedStockActionModal({ action, tr, notify, onClose, onDone }: {
   action: TaggedStockAction
   tr: Translate
   notify: (message: string, kind?: string) => void
   onClose: () => void
-  onDone: () => void
+  onDone: () => void | Promise<void>
 }) {
   const { row, kind } = action
   const held = Math.max(0, Number(row.quantity) || 0)
   const [quantity, setQuantity] = useState(String(held))
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
-  // SCAN1 STK-D: ONE id for this dialog, minted when it opens -- every retry
-  // click below reuses it, so a Restore / Dispose whose reply was lost
-  // replays on the Worker instead of applying twice. A refused attempt
-  // releases the id server-side, so correcting the quantity and retrying is
-  // fine; the next dialog gets a new one.
+  const [pending, setPending] = useState<Readonly<TaggedLotChange> | null>(null)
+  const [retryBlocked, setRetryBlocked] = useState(false)
+  const [scope] = useState(() => captureActorReadScope())
+  const busy = useRef(false)
+  const mounted = useRef(true)
+  const reasonInput = useRef<HTMLInputElement>(null)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const [requestId] = useState(() => createClientRequestId('tagged'))
   const tag = stockConditionLabel(row.condition_tag)
   const title = kind === 'dispose'
     ? tr('stock_remove_entirely', 'Remove entirely', 'ដកចេញទាំងស្រុង')
-    : tr('stock_tagged_restore', 'Restore to sellable', 'ស្តារទៅជាទំនិញលក់បាន')
+    : tr('stock_tagged_restore', 'Clear tag', 'លុបស្លាក')
+
+  const refreshRows = () => {
+    void Promise.resolve().then(() => { if (isActorReadScopeCurrent(scope, false)) return onDone() }).catch(() => {
+      if (isActorReadScopeCurrent(scope, false)) notify(tr('stock_tagged_refresh_failed', 'Refresh Products to see the latest stock.'), 'error')
+    })
+  }
 
   const submit = async () => {
-    if (saving) return
+    if (busy.current || retryBlocked) return
     const qty = Number(quantity)
     if (!Number.isFinite(qty) || qty <= 0) {
-      notify(tr('fast_stockin_qty', 'Quantity must be at least 1'), 'error'); return
+      notify(tr('invalid_quantity', 'Invalid quantity'), 'error'); return
     }
-    if (qty > held) { notify(tr('stock_tagged_quantity_over', 'More than the held quantity', 'លើសពីបរិមាណដែលរក្សាទុក'), 'error'); return }
+    if (qty > held) { notify(tr('stock_tagged_quantity_over', 'More than the tagged quantity', 'លើសពីបរិមាណមានស្លាក'), 'error'); return }
     if (!reason.trim()) { notify(tr('reason_required', 'A reason is required'), 'error'); return }
+    busy.current = true
     setSaving(true)
+    let committed = false
     try {
-      const payload = {
+      assertActorSessionDispatchAllowed(scope)
+      const payload = pending || Object.freeze({
         productId: row.product_id,
         branchId: Number(row.branch_id),
         conditionTag: tag,
         quantity: qty,
         reason: reason.trim(),
         client_request_id: requestId,
+      })
+      setPending(payload)
+      const response = await (kind === 'dispose' ? disposeTaggedLot(payload) : restoreTaggedLot(payload)) as Record<string, unknown> | null
+      if (!mounted.current || !isActorReadScopeCurrent(scope, false)) return
+      if (!response || response.success !== true || response.productId !== Number(payload.productId)
+        || response.conditionTag !== payload.conditionTag || response.quantity !== payload.quantity
+        || !Number.isSafeInteger(response.branchId) || Number(response.branchId) <= 0) {
+        throw { code: 'stock_request_outcome_unknown' }
       }
-      await (kind === 'dispose' ? disposeTaggedLot(payload) : restoreTaggedLot(payload))
+      committed = true
+    } catch (error) {
+      if (!mounted.current || !isActorReadScopeCurrent(scope, false)) return
+      const detail = error as { code?: unknown; status?: unknown; outcome?: unknown } | null
+      const code = String(detail?.code || '')
+      const refused = detail?.outcome === 'not_dispatched' || (detail?.status === 409 && code === 'tagged_lot_conflict')
+      if (!pending && refused) setPending(null)
+      if (stockLineNeedsRemoval(error)) setRetryBlocked(true)
+      notify(stockFailureText(error, tr, tr('error', 'Error')), 'error')
+      if (code === 'tagged_lot_conflict' || stockLineNeedsRemoval(error)) refreshRows()
+    } finally {
+      busy.current = false
+      if (mounted.current) setSaving(false)
+    }
+    if (committed) {
+      onClose()
       notify(kind === 'dispose'
         ? tr('stock_tagged_dispose_done', 'Removed from tagged stock', 'បានដកចេញពីស្តុកមានស្លាក')
-        : tr('stock_tagged_restore_done', 'Restored to sellable stock', 'បានស្តារទៅស្តុកលក់បាន'))
-      onDone()
-      onClose()
-    } catch (error) {
-      // The dialog STAYS open with everything typed intact -- the standing
-      // rule for a failed stock action. A guard code (the held stock changed
-      // under the action, a replay refusal) is shown in the operator's
-      // language; anything else keeps the Worker's own sentence.
-      notify(stockFailureText(error, tr, tr('error', 'Error')), 'error')
-      // The held stock changed under the action, or it was already recorded /
-      // recorded but did not finish: either way the list on screen is stale,
-      // so refresh it behind the dialog.
-      const code = (error as { code?: unknown } | null)?.code
-      if (code === 'tagged_lot_conflict' || stockLineNeedsRemoval(error)) onDone()
-    } finally {
-      setSaving(false)
+        : tr('stock_tagged_restore_done', 'Tag cleared; physical stock unchanged', 'បានលុបស្លាក។ ស្តុកសរុបមិនផ្លាស់ប្ដូរ។'))
+      refreshRows()
     }
   }
 
@@ -213,10 +207,11 @@ export function TaggedStockActionModal({ action, tr, notify, onClose, onDone }: 
       title={`${title} — ${tag}`}
       onClose={onClose}
       size="sm"
-      // Only the typed reason can be lost, and it cannot outlive this dialog.
-      unsavedChanges={{ dirty: reason.trim().length > 0 }}
+      keyboard
+      closeDisabled={saving}
+      unsavedChanges={{ dirty: !!pending || reason.trim().length > 0 || quantity !== String(held) }}
     >
-      <div className="space-y-3">
+      <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void submit() }}>
         <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
           <span className="font-medium">{row.product_name || `#${row.product_id}`}</span>
           {row.branch_name ? <span className="text-gray-400">· {row.branch_name}</span> : null}
@@ -226,11 +221,16 @@ export function TaggedStockActionModal({ action, tr, notify, onClose, onDone }: 
           <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('quantity', 'Qty')}</span>
           <input
             type="number"
-            min={1}
+            inputMode="decimal"
+            enterKeyHint="next"
+            min={0}
             max={held}
-            step="1"
-            className="input text-sm"
+            step="any"
+            required
+            disabled={saving || !!pending}
+            className="input text-base md:text-sm"
             value={quantity}
+            onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); reasonInput.current?.focus() } }}
             onChange={(event) => setQuantity(event.target.value)}
           />
         </label>
@@ -238,28 +238,29 @@ export function TaggedStockActionModal({ action, tr, notify, onClose, onDone }: 
           <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('reason', 'Reason')} *</span>
           <input
             type="text"
-            className="input text-sm"
+            ref={reasonInput}
+            enterKeyHint="done"
+            maxLength={500}
+            required
+            disabled={saving || !!pending}
+            className="input text-base md:text-sm"
             value={reason}
             onChange={(event) => setReason(event.target.value)}
           />
         </label>
         <p className="text-[11px] text-gray-500 dark:text-gray-400">
-          {tr('stock_tagged_excluded_hint', 'Held stock: counted here but never in the group stock total, and never offered to a sale.', 'ស្តុករក្សាទុក៖ រាប់នៅទីនេះ ប៉ុន្តែមិនរាប់ក្នុងស្តុកសរុបរបស់ក្រុម និងមិនអាចលក់បានទេ។')}
+          {tr('stock_tagged_included_hint', 'Tagged stock is included in physical stock. Clearing a tag leaves physical quantity unchanged.', 'ស្តុកដែលមានស្លាករាប់ក្នុងស្តុកសរុប។ លុបស្លាកមិនផ្លាស់ប្តូរចំនួនសរុបទេ។')}
         </p>
+        {pending && !saving ? <p role="status" className="text-xs text-amber-700 dark:text-amber-300">{retryBlocked
+          ? tr('stock_tagged_check_history', 'This request cannot be retried. Check Stock Changes before closing.')
+          : tr('stock_tagged_pending', 'This request may already be saved. Retry the same details, or check Stock Changes before closing.')}</p> : null}
         <div className="flex justify-end gap-2">
-          <button type="button" className="btn-secondary px-3 text-xs" disabled={saving} onClick={onClose}>
-            {tr('cancel', 'Cancel')}
-          </button>
-          <button
-            type="button"
-            className={`${kind === 'dispose' ? 'btn-danger' : 'btn-primary'} px-3 text-xs`}
-            disabled={saving}
-            onClick={() => { void submit() }}
-          >
-            {title}
-          </button>
+          <CancelAction tr={tr} onClose={onClose} disabled={saving} />
+          <IconButton type="submit" label={pending ? tr('retry', 'Retry') : title}
+            icon={kind === 'dispose' ? <Trash2 className="h-4 w-4" /> : <Eraser className="h-4 w-4" />}
+            className={`${ACTION_BUTTON_CLASS} ${kind === 'dispose' ? '!text-red-700 dark:!text-red-300' : '!text-blue-700 dark:!text-blue-300'}`} loading={saving} disabled={retryBlocked} />
         </div>
-      </div>
+      </form>
     </Modal>
   )
 }

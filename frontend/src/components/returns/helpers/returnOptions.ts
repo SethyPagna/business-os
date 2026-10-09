@@ -33,8 +33,8 @@ export interface StockActionOption {
 
 // The ONE chooser (11.13): each option carries what happens to stock.
 export const STOCK_ACTION_OPTIONS: StockActionOption[] = [
-  { value: 'restock', icon: '↩️', labelKey: 'stock_action_restock', labelEn: 'Restock', descKey: 'stock_action_restock_desc', descEn: 'Back to sellable stock (same received date when known)' },
-  { value: 'damaged', icon: '🟠', labelKey: 'stock_action_damaged', labelEn: 'Damaged', descKey: 'stock_action_damaged_desc', descEn: 'Tracked as damaged stock, not sellable' },
+  { value: 'restock', icon: '↩️', labelKey: 'stock_action_restock', labelEn: 'Restock', descKey: 'stock_action_restock_desc', descEn: 'Restock with the selected condition and original received date when known' },
+  { value: 'damaged', icon: '🟠', labelKey: 'stock_action_damaged', labelEn: 'Damaged', descKey: 'stock_action_damaged_desc', descEn: 'Sellable stock with a condition tag' },
   { value: 'none', icon: '🚫', labelKey: 'stock_action_none', labelEn: 'No restock', descKey: 'stock_action_none_desc', descEn: 'No stock change (write-off / refund only)' },
 ]
 

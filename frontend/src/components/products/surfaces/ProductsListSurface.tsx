@@ -118,13 +118,6 @@ type ProductsListSurfaceProps = {
   // is the affordance).
   bindGroupHold?: (group: ProductGroup) => Record<string, unknown>
   renderGroupActions?: (group: ProductGroup) => ReactNode
-  // P3-L6: the group's TAGGED child rows (broken/damaged/expired units kept
-  // inside the group but not sellable), rendered right after its product
-  // rows. A slot rather than data on ProductGroup on purpose: these units
-  // live in damaged_stock_lots, not in the product records this surface is
-  // built from, so they cannot leak into group counts, summary chips or any
-  // selection scope -- the exclusion is structural. Desktop returns <tr>s
-  // (same columns as a product row), mobile returns cards.
   renderGroupTaggedRows?: (group: ProductGroup) => ReactNode
   renderGroupTaggedCards?: (group: ProductGroup) => ReactNode
   renderGroupThumbnail?: (group: ProductGroup) => ReactNode

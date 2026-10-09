@@ -3724,15 +3724,6 @@ function ProductsFullEditor() {
 
   const visibleIds = useMemo(() => buildVisibleProductIds(visibleProducts), [visibleProducts])
   const visibleIdsSignature = useMemo(() => visibleIds.join(','), [visibleIds])
-  // ---------------------------------------------------------------- P3-L6
-  // TAGGED stock: units the operator chose to KEEP inside a product group
-  // under an English condition tag (broken/damaged/expired/opened/other)
-  // instead of destroying them. They live in damaged_stock_lots, never in
-  // branch_stock or products.stock_quantity, so they are absent from the
-  // product records this page is built from -- and therefore from every
-  // group total, summary chip, selection scope, export column and product
-  // picker, including POS. That exclusion is structural, not a filter, and
-  // this separate read is the ONLY thing on the page that can see them.
   const [taggedLots, setTaggedLots] = useState<TaggedStockRow[]>([])
   const [taggedAction, setTaggedAction] = useState<TaggedStockAction | null>(null)
   const [taggedReloadToken, setTaggedReloadToken] = useState(0)
@@ -5453,10 +5444,6 @@ function ProductsFullEditor() {
         />
       </div>
 
-      {/* P3-L6: "Remove entirely" / "Restore to sellable" for a held row.
-          Both reload the held rows AND the products themselves -- a restore
-          moves units back into branch stock, so the sellable numbers on this
-          page are stale until the products are re-read. */}
       {taggedAction ? (
         <TaggedStockActionModal
           action={taggedAction}

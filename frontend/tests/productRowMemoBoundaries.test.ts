@@ -77,7 +77,7 @@ runTest('renderUnitChip and openLightbox are stabilized with useCallback (previo
 
 runTest('the tagged/held child rows (TaggedStockRows.tsx) are also memoized', () => {
   const taggedStockRows = readFrontend('src/components/products/TaggedStockRows.tsx')
-  assert.match(taggedStockRows, /import \{ memo, useState \} from 'react'/, 'TaggedStockRows.tsx must import memo from react')
+  assert.match(taggedStockRows, /import \{[^}]*\bmemo\b[^}]*\} from 'react'/, 'TaggedStockRows.tsx must import memo from react')
   assert.match(taggedStockRows, /export const TaggedStockDesktopRow = memo\(TaggedStockDesktopRowComponent\)/, 'TaggedStockDesktopRow must be memoized')
   assert.match(taggedStockRows, /export const TaggedStockMobileCard = memo\(TaggedStockMobileCardComponent\)/, 'TaggedStockMobileCard must be memoized')
 })
