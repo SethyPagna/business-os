@@ -1,4 +1,5 @@
 import { apiFetch, route } from './http.ts'
+import { isStockConditionTag } from '../utils/stockCondition.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 
 // K2 / 11.9 (Part 416): open damaged lots for the POS damage source option
@@ -35,7 +36,9 @@ export async function getDamagedLots(productId: number | string, branchId?: numb
   )
   if (!Array.isArray(response?.lots)) throw new Error('Invalid condition stock response')
   const lots = response.lots.map(lot => {
-    if (!Number.isFinite(Number(lot.id)) || Number(lot.id) <= 0 || !Number.isFinite(Number(lot.quantity_remaining)) || Number(lot.quantity_remaining) < 0
+    if (!Number.isInteger(Number(lot.id)) || Number(lot.id) <= 0 || !Number.isFinite(Number(lot.quantity_remaining)) || Number(lot.quantity_remaining) < 0
+      || (lot.batch_id !== null && (!Number.isInteger(Number(lot.batch_id)) || Number(lot.batch_id) <= 0))
+      || (lot.condition_tag != null && !isStockConditionTag(lot.condition_tag))
       || (lot.product_id != null && Number(lot.product_id) !== Number(productId))
       || (branchId != null && branchId !== '' && Number(lot.branch_id) !== Number(branchId))) throw new Error('Invalid condition stock source')
     return { ...lot, product_id: Number(productId) }

@@ -409,7 +409,7 @@ export default function ProductDetailSheet({
   const sourceRows = provisionalState.mergeRowsIntoLotList
     ? provisionalState.candidatePool
     : [groupProduct ? provisionalState.effectiveVariant : product].filter(Boolean)
-  const currentLotScope = `${actorScope}:${provisionalState.effectiveBranchId}:${sourceRows.map((row) => row?.id).join(',')}`
+  const currentLotScope = `${actorScope}:${intent}:${requireFreshLots}:${provisionalState.effectiveBranchId}:${sourceRows.map((row) => row?.id).join(',')}`
   // Branch/variant changes invalidate the old result synchronously, before
   // React runs effect cleanup. Old selected IDs must not enable a new pick.
   const visibleBatches = loadedLotScope === currentLotScope ? batches : []
@@ -567,7 +567,7 @@ export default function ProductDetailSheet({
       setBatchesLoading(false)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isBatchTracked, lotSourceKey, resolvedBranchId, batchesReloadKey, requireFreshLots, actorScope])
+  }, [isBatchTracked, lotSourceKey, resolvedBranchId, batchesReloadKey, requireFreshLots, actorScope, intent])
   // A Branch/Barcode change can resolve to a different (or differently-
   // tracked) row, so a lot picked under the previous row must not silently
   // carry over -- same "don't leak a stale pick into the next selection"
@@ -586,7 +586,7 @@ export default function ProductDetailSheet({
       setConditionsError(t('stock_tagged_load_failed') || posCopy('Failed to load tagged stock', 'មិនអាចផ្ទុកស្តុកដែលមានស្លាកបានទេ'))
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [intent, lotSourceKey, resolvedBranchId, actorScope, conditionsReloadKey])
+  }, [intent, lotSourceKey, resolvedBranchId, actorScope, conditionsReloadKey, requireFreshLots])
   // Keyed on the lot list's OWN identity (which rows it is drawn from, at
   // which branch), not on the resolved row: in merged mode picking a lot is
   // what moves the resolved row, and resetting on that would clear the pick
@@ -598,7 +598,7 @@ export default function ProductDetailSheet({
     setSelectedDamagedLotId(null)
     setBatchPage(0)
     setBatchChoicesOpen(false)
-  }, [lotSourceKey, resolvedBranchId, actorScope])
+  }, [lotSourceKey, resolvedBranchId, actorScope, intent, requireFreshLots])
 
   // The cashier's order: available lots first, each group earliest received
   // date to latest. See posCore.ts's sortBatchesForPicker -- the server's

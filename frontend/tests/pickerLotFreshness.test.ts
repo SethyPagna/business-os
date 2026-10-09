@@ -30,14 +30,18 @@ const actorEnd = source.indexOf('\n', source.indexOf('  const actorScope =', act
 assert.ok(actorStart >= 0 && actorEnd > actorStart, 'execute the real authenticated identity and generation scope')
 const actorCode = source.slice(actorStart, actorEnd)
 let actorRef: any
+let authority = 'server-a'
 const actorUser = { id: 7 }
 const actorKey = (user: { id: number; permissions?: Record<string, boolean> } | null, authReady = true) => compile(actorCode, {
   useApp: () => ({ user, authReady }),
-  captureActorReadScope: () => ({ authority: 'test-server-session' }),
+  captureActorReadScope: () => ({ authority }),
   useRef: (initial: unknown) => (actorRef ||= { current: initial }),
 }, 'actorScope')
 const initialActorScope = actorKey(actorUser)
 assert.equal(actorKey(actorUser), initialActorScope, 'unrelated renders retain the same verification scope')
+authority = 'server-b'
+assert.notEqual(actorKey(actorUser), initialActorScope, 'same user and generation cannot reuse another server authority proof')
+authority = 'server-a'
 assert.notEqual(actorKey({ id: 7 }), initialActorScope, 'same-user authenticated session replacement increments actual generation')
 const permissionSnapshot = { id: 7, permissions: { product_cost_view: true } }
 const permissionScope = actorKey(permissionSnapshot)
@@ -45,7 +49,7 @@ assert.equal(actorKey(permissionSnapshot), permissionScope, 'stable permission s
 assert.notEqual(actorKey({ ...permissionSnapshot, permissions: { product_cost_view: false } }), permissionScope,
   'same-user permission snapshot replacement invalidates prior selectable proof')
 assert.notEqual(actorKey(null, false), initialActorScope, 'sign-out invalidates authenticated scope')
-assert.match(source, /requireFreshLots, actorScope\]\)/, 'lot effect reloads on actor generation changes')
+assert.match(source, /requireFreshLots, actorScope, intent\]\)/, 'lot effect reloads on actor generation changes')
 const deriveCode = source.slice(source.indexOf('const requireFreshLots ='), source.indexOf('  const branchOptions = sheetState.branchOptions'))
 const product = { id: 3263, name: 'Kerastase Conditioner Genesis75ml', barcode: '03474637319687', stock_quantity: 3, branch_stock: [{ branch_id: 2, branch_name: 'Shop', quantity: 3 }] }
 const lot = { id: 56957, is_active: 1, quantity: 3, received_at: '2026-09-02T15:30:00.000Z', lot_code: 'ADJ09/02/2026' }
@@ -132,3 +136,6 @@ await new Promise((resolve) => setTimeout(resolve, 0))
 assert.equal(partialPublished, false)
 assert.equal(partialFailure, true, 'a partial family cannot masquerade as the complete lot list')
 console.log('PASS actual picker derivation/effect: fresh point probe, stale-index target3263, explicit selection, zero/inactive refusal, race cancellation and creation-selector parity')
+
+assert.notEqual(state({ ...loaded, intent: 'stock' }).currentLotScope, pending.currentLotScope, 'stock and sell reads cannot share selectable proof')
+assert.equal(state({ ...loaded, hideReceivedDates: true }).sheetState.pickAllowed, false, 'hidden received-date mode cannot reuse previous sell proof before cleanup')
