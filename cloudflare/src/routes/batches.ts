@@ -10,6 +10,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { getTrackedProductIds, listBatchesForProduct, isReceiptSellingPriceConflict, RECEIPT_SELLING_PRICE_CHANGED, parseReceiptSellingPrice, planReceiptSellingPrice, receiveBatchStock, prepareReceiptLotTarget, planReceiveBatchStock, type ReceiptSellingPriceRow } from '../lib/productBatches'
 import { CountedStockPlan, CountedStockConflictError, countedStockFactsSql, isCountedStockConflict, sumCountedQuantities } from '../lib/countedDamagedStock'
+import { stockActorPredicate, stockActorParams } from '../lib/stockActorGuard'
 import { executeStockTransaction } from '../lib/stockTransaction'
 import { listOpenDamagedLots } from '../lib/returnsStock'
 import { dateToBatchCode, normalizeTypedDate } from '../lib/batchCode'
@@ -256,7 +257,7 @@ export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody
 
 // `markWritten` is the receipt guard's write barrier -- see the same argument
 // on runAdjustActionKernel and lib/stockMutationReceipt.ts's header.
-async function receiveCountedBatchStock(db: ReturnType<typeof getDb>, input: Parameters<typeof receiveBatchStock>[1]): ReturnType<typeof receiveBatchStock> {
+async function receiveCountedBatchStock(db: ReturnType<typeof getDb>, input: Parameters<typeof receiveBatchStock>[1], user: SessionUser): ReturnType<typeof receiveBatchStock> {
   const target = await prepareReceiptLotTarget(db, input)
   const batchId = target.existingBatchId
   const receiptSnapshotSql = `(SELECT json_group_array(json_array(id,received_quantity,received_cost_usd,supplier_id,supplier_name,payment_status,credit_due_date,notes,received_branch_id,received_branch_name,variant_product_id,batch_key,lot_code,expiry_date,received_at,is_active,batch_number,unit_cost_usd,created_at,updated_at)) FROM (
@@ -269,9 +270,9 @@ async function receiveCountedBatchStock(db: ReturnType<typeof getDb>, input: Par
   const before = batchId == null ? undefined : receipts.find(row=>row[0]===batchId)
   if (batchId != null && !before) throw new CountedStockConflictError()
   const exact = new CountedStockPlan(observed.facts,input.branchId)
-  const guards = [...exact.takeInitialGuard(), {sql: `SELECT CASE WHEN ${receiptSnapshotSql}=@receipts
+  const guards = [...exact.takeInitialGuard(), {sql: `SELECT CASE WHEN ${receiptSnapshotSql}=@receipts AND (${stockActorPredicate})
     AND COALESCE((SELECT baseline_batch_id FROM product_cost_entries WHERE product_id=@productId ORDER BY id DESC LIMIT 1),0)=@baseline
-    THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`,params:{productId:input.productId,receipts:observed.receipts,baseline:target.baselineBatchId}}]
+    THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`,params:{...stockActorParams(user),productId:input.productId,receipts:observed.receipts,baseline:target.baselineBatchId}}]
   const plan = planReceiveBatchStock({...input,batchId,receiptLotTarget:target,
     receiptCostPreimage:input.unitCostUsd == null ? undefined : {batchExists:Boolean(before),receivedCostUsd:before?.[2]??null},
     receivedQuantityPreimage:before ? {quantity:before[1]} : undefined})
@@ -449,7 +450,7 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
           ...(movementFreeColumn ? { freeQuantity } : {}),
         },
       }, catalogCostRecomputeIfChangedStatement(productId)]),
-    })
+    }, user)
   } catch (err) {
     if (err instanceof StockMutationBudgetError || isReceiptSellingPriceConflict(err)) throw err
     if (isCountedStockConflict(err) || err instanceof MoneyPrecisionError) return c.json({error:'The recorded stock or receipt changed. Refresh before receiving.',code:'write_conflict'},409)

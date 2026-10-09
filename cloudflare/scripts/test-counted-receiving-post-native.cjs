@@ -60,6 +60,19 @@ async function tails(makeWorker){
  }
 }
 
-async function main(){const makeWorker=await h.bundle.exports.bundleWorker();if(process.argv.includes('--faults-only')){await faults(makeWorker);return}if(process.argv.includes('--tails-only')){await tails(makeWorker);return}await positive(makeWorker);await faults(makeWorker);await tails(makeWorker)}
-module.exports={scenario,positive,faults,tails,state}
+async function actors(makeWorker){
+ for(const tier of ['free','paid'])for(const fault of ['active','username','organization','role','permissions','role_permissions','role_code','must_change']){
+  const {f,stock,db,call}=await scenario(makeWorker,tier)
+  try{
+   let rival
+   const sql={active:'UPDATE users SET is_active=0 WHERE id=7',username:"UPDATE users SET username='different' WHERE id=7",organization:'UPDATE users SET organization_id=99 WHERE id=7',role:'UPDATE users SET role_id=NULL WHERE id=7',permissions:"UPDATE users SET permissions='{}' WHERE id=7",role_permissions:"UPDATE roles SET permissions='{}' WHERE id=(SELECT role_id FROM users WHERE id=7)",role_code:"UPDATE roles SET code='different' WHERE id=(SELECT role_id FROM users WHERE id=7)",must_change:'UPDATE users SET must_change_password=1 WHERE id=7'}[fault]
+   f.beforeCommit(async()=>{await stock.executeStockTransaction(db,[{sql}],'once');rival=state(f)})
+   const result=await call();assert.equal(result.status,409,JSON.stringify(result.json));assert.equal(result.json.code,'write_conflict');assert.deepEqual(state(f),rival);assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM stock_mutation_receipts').get().n,0)
+   console.log('PASS receiving captured current actor race '+JSON.stringify({tier,fault}))
+  }finally{f.sql.close()}
+ }
+}
+
+async function main(){const makeWorker=await h.bundle.exports.bundleWorker();if(process.argv.includes('--actor-only')){await actors(makeWorker);return}if(process.argv.includes('--faults-only')){await faults(makeWorker);return}if(process.argv.includes('--tails-only')){await tails(makeWorker);return}await positive(makeWorker);await faults(makeWorker);await tails(makeWorker);await actors(makeWorker)}
+module.exports={scenario,positive,faults,tails,actors,state}
 if(require.main===module)main().catch(error=>{console.error(error);process.exitCode=1})
