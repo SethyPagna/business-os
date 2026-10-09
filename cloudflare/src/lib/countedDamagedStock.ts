@@ -15,20 +15,24 @@ type CountedFacts = { product: ProductFacts; branch: BranchFacts | null; branche
 type SharedCountedProjection = { product: ProductFacts; branches: [number, number][] }
 type CountedBatchBinding = { products: Map<number, SharedCountedProjection>; receipts: Map<number, ReceiptFacts[]>; guards: () => StockWriteStatement[]; physical?: (key: string, statement: StockWriteStatement, creates: boolean) => void }
 
+function losslessNumberSql(expression: string): string {
+  return `CASE WHEN typeof(${expression})='real' THEN json(printf('%!.26g',${expression})) ELSE ${expression} END`
+}
+
 /** Add to an existing facts SELECT; every capacity term and metadata preimage
  * is bounded and returned individually, never as a floating SQL sum. */
 export function countedStockFactsSql(product: string, branch: string, additionalReceiptIds: string = "'[]'"): string {
   return `(SELECT json_object(
-    'product',json_array(counted_product.id,counted_product.is_active,counted_product.stock_quantity,counted_product.cost_price_usd,counted_product.cost_price_khr,counted_product.name),
-    'branch',(SELECT json_array(counted_branch.id,counted_branch.is_active,counted_branch.name,counted_branch.role) FROM branches counted_branch WHERE counted_branch.id=${branch}),
-    'branches',(SELECT json_group_array(json_array(branch_id,quantity)) FROM (
+    'product',json_array(counted_product.id,${losslessNumberSql('counted_product.is_active')},${losslessNumberSql('counted_product.stock_quantity')},${losslessNumberSql('counted_product.cost_price_usd')},${losslessNumberSql('counted_product.cost_price_khr')},counted_product.name),
+    'branch',(SELECT json_array(counted_branch.id,${losslessNumberSql('counted_branch.is_active')},counted_branch.name,counted_branch.role) FROM branches counted_branch WHERE counted_branch.id=${branch}),
+    'branches',(SELECT json_group_array(json_array(branch_id,${losslessNumberSql('quantity')})) FROM (
       SELECT branch_id,quantity FROM branch_stock WHERE product_id=${product} ORDER BY branch_id LIMIT ${MAX_COUNTED_ROWS + 1})),
-    'receipts',(SELECT json_group_array(json_array(id,variant_product_id,is_active,quantity,unit_cost_usd,received_at,expiry_date,batch_key,batch_number,lot_code,received_quantity,fifo_rank)) FROM (
+    'receipts',(SELECT json_group_array(json_array(id,variant_product_id,${losslessNumberSql('is_active')},${losslessNumberSql('quantity')},${losslessNumberSql('unit_cost_usd')},received_at,expiry_date,batch_key,${losslessNumberSql('batch_number')},lot_code,${losslessNumberSql('received_quantity')},fifo_rank)) FROM (
       SELECT counted_receipt.id,counted_receipt.variant_product_id,counted_receipt.is_active,counted_branch_receipt.quantity,counted_receipt.unit_cost_usd,counted_receipt.received_at,counted_receipt.expiry_date,counted_receipt.batch_key,counted_receipt.batch_number,counted_receipt.lot_code,counted_receipt.received_quantity,
         ROW_NUMBER() OVER (ORDER BY (counted_receipt.received_at IS NULL),counted_receipt.received_at,counted_receipt.batch_number,counted_receipt.id) fifo_rank
       FROM product_batches counted_receipt LEFT JOIN branch_batch_stock counted_branch_receipt ON counted_branch_receipt.batch_id=counted_receipt.id AND counted_branch_receipt.branch_id=${branch}
       WHERE counted_receipt.variant_product_id=${product} AND (counted_branch_receipt.batch_id IS NOT NULL OR counted_receipt.id IN (SELECT CAST(value AS INTEGER) FROM json_each(${additionalReceiptIds}))) ORDER BY counted_receipt.id LIMIT ${MAX_COUNTED_ROWS + 1})),
-    'tags',(SELECT json_group_array(json_array(id,batch_id,quantity,quantity_remaining,condition_tag,source,return_id,return_item_id,unit_cost_usd,created_at)) FROM (
+    'tags',(SELECT json_group_array(json_array(id,batch_id,${losslessNumberSql('quantity')},${losslessNumberSql('quantity_remaining')},condition_tag,source,return_id,return_item_id,${losslessNumberSql('unit_cost_usd')},created_at)) FROM (
       SELECT id,batch_id,quantity,quantity_remaining,condition_tag,source,return_id,return_item_id,unit_cost_usd,created_at
       FROM damaged_stock_lots WHERE product_id=${product} AND branch_id=${branch} ORDER BY id LIMIT ${MAX_COUNTED_ROWS + 1}))
     ) FROM products counted_product WHERE counted_product.id=${product})`
