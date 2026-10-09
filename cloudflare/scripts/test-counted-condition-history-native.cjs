@@ -34,6 +34,7 @@ async function run(tier,batch=true){
  assert.deepEqual(saved.takes.map(t=>t.quantity),[3,1]);assert.equal((await call('/action-history/'+h.id+'/undo',{expected_generation:0})).status,200);assert.equal(D(),5);assert.equal(T(),10)
  const multi={...clear,client_request_id:'condition-multi-dispose'};assert.equal((await call('/inventory/tagged-lots/dispose',multi)).status,200);assert.equal(T(),6);assert.equal(D(),1);assert.equal(loss(),4)
  const mh=history(),ms=JSON.parse(f.sql.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get(JSON.parse(mh.undo_payload).snapshot_id).payload_json);assert.deepEqual(ms.takes.map(t=>t.quantity),[3,1])
+ const multiBefore=JSON.stringify(f.sql.prepare('SELECT * FROM inventory_movements').all());fail=true;assert.notEqual((await call('/action-history/'+mh.id+'/undo',{expected_generation:0})).status,200);assert.equal(T(),6);assert.equal(D(),1);assert.equal(loss(),4);assert.equal(JSON.stringify(f.sql.prepare('SELECT * FROM inventory_movements').all()),multiBefore)
  assert.equal((await call('/action-history/'+mh.id+'/undo',{expected_generation:0})).status,200);assert.equal(T(),10);assert.equal(D(),5);assert.equal(loss(),0)
  assert.equal((await call('/action-history/'+mh.id+'/redo',{expected_generation:1})).status,200);assert.equal(T(),6);assert.equal(D(),1);assert.equal(loss(),4)
  assert.equal(f.sql.prepare('SELECT SUM(total_cost_usd)n FROM inventory_movements m WHERE '+lossWhere).get().n,8)
