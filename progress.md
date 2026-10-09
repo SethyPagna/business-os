@@ -1,3 +1,11 @@
+## Release gate fixture correction — 09 October 2026
+
+LOCAL CANDIDATE, NOT DEPLOYED. The complete owner/account/loyalty/report candidate e192 failed gate37895352494: 851 of853 Worker tests passed and all770 frontend tests passed. The two failures were test integration defects: the membership route fixture omitted the real customer-return SQL helper, and the reports fixture pinned SQL that had been replaced by the canonical report reducer. Runtime behavior is unchanged by this successor.
+
+The membership fixture now loads the actual helper and distinguishes completed customer refunds from supplier compensation and cancelled returns. The report fixture exercises both mounted legacy and snapshot-export responses with the actual cost-permission and export-token helpers. Employees with an explicit cost-view grant retain cost data without receiving administrator control; ungranted employees receive absent sensitive fields. All original privacy, membership identity, minting-race and stale-write assertions remain. Five deliberate incorrect implementations fail these checks. The two corrected tests, three affected neighbors, Worker types and frontend production build/startup checks pass locally. Exact candidate gate and fresh independent Astra review remain required.
+
+Production/main remain440a. Counted damage, its conversion and restore work remain excluded. The owner has not tested the live photo fix on a physical phone; that acceptance remains NOT RUN. The morning window is consumed; the next eligible release is after20:00 Cambodia with a fresh closed-shift Ops check, the complete gate, fresh Astra review, Paid workflow and independent postflight. All earlier dated entries below are historical checkpoints.
+
 ## Account requests, loyalty and complete report exports — 09 October 2026
 
 LOCAL RELEASE COMPOSITION, NOT DEPLOYED. Verified production and main remain at `440a706e06fe8ad472359d935feb3da575373135`. The morning deployment is complete and that window is consumed. The owner UI and pagination fallback passed full gate37871870523 and independent Astra review. This successor adds separately reviewed account, loyalty and report fixes; it still needs its own complete gate and fresh composition review.
