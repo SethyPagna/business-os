@@ -43,7 +43,7 @@ function compile(file, stubs = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText
   const moduleObj = { exports: {} }
-  const localRequire = (request) => request.endsWith('/productStockGuard') ? productStockGuard : Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : require(request)
+  const localRequire = (request) => request.endsWith('/productStockGuard') ? productStockGuard : Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : request.startsWith('./') ? compile(request.slice(2) + '.ts', stubs) : require(request)
   new Function('exports', 'require', 'module', output)(moduleObj.exports, localRequire, moduleObj)
   return moduleObj.exports
 }
@@ -117,7 +117,10 @@ function setup() {
   const sqlite = new Database(':memory:')
   sqlite.exec(`
     CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, stock_quantity REAL DEFAULT 0, updated_at TEXT);
+    CREATE TABLE damaged_stock_lots (product_id INTEGER, branch_id INTEGER, batch_id INTEGER, quantity_remaining REAL DEFAULT 0);
     CREATE TABLE branch_stock (product_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0 CHECK(quantity >= 0), UNIQUE(product_id, branch_id));
+    CREATE TABLE product_batches (id INTEGER PRIMARY KEY, variant_product_id INTEGER, is_active INTEGER NOT NULL DEFAULT 1);
+    INSERT INTO product_batches (id,variant_product_id) VALUES (77,10),(88,11);
     CREATE TABLE branch_batch_stock (batch_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0 CHECK(quantity >= 0), updated_at TEXT, UNIQUE(batch_id, branch_id));
     CREATE TABLE sale_item_batch_allocations (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_item_id INTEGER, batch_id INTEGER, branch_id INTEGER, quantity REAL, released_at TEXT, released_quantity REAL NOT NULL DEFAULT 0);
     CREATE TABLE inventory_movements (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER, product_name TEXT,
@@ -245,8 +248,8 @@ function snapshot(sqlite) {
   // Sticky, and threaded into BOTH stock paths (regular lines + damaged lots).
   assert.match(handler, /const saleAlreadyStockSkipped = Number\(sale\.stock_skipped \|\| 0\) === 1/, 'the route re-reads the persisted flag')
   assert.match(handler, /const skipStock = skipStockRequested \|\| saleAlreadyStockSkipped/, 'once skipped, always skipped')
-  assert.match(handler, /skipStock,\s*\n\s*\}\)/, 'the flag is passed into planSaleStockTransition')
-  assert.match(handler, /if \(skipStock\) \{\s*\n\s*skippedDamagedUnits \+= Math\.abs\(delta\)/, 'damaged-lot moves are skipped with the rest, not half-applied')
+  assert.match(handler, /planSaleStockTransition\(\{[^}]*\bskipStock,/, 'the flag is passed into planSaleStockTransition')
+  assert.match(handler, /if \(skipStock\) \{\s*\n\s*skippedDamagedUnits = sumCountedQuantities\(\[skippedDamagedUnits,\s*Math\.abs\(delta\)\]\)/, 'damaged-lot moves are skipped with the rest, not half-applied')
 
   // Recorded, on the sale AND in the audit trail.
   assert.match(handler, /updates\.push\(\s*\n?\s*'stock_skipped = 1'/, 'the sale is stamped stock_skipped = 1')

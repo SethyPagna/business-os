@@ -40,7 +40,7 @@ function compile(file, stubs = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText
   const moduleObj = { exports: {} }
-  const localRequire = (request) => Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : require(request)
+  const localRequire = (request) => Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : request.startsWith('./') ? compile(request.slice(2) + '.ts', stubs) : require(request)
   new Function('exports', 'require', 'module', output)(moduleObj.exports, withProductStockGuard(localRequire), moduleObj)
   return moduleObj.exports
 }
@@ -67,7 +67,7 @@ function setup() {
   const sqlite = new Database(':memory:')
   sqlite.exec(`
     CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER NOT NULL DEFAULT 1, stock_quantity REAL DEFAULT 0, updated_at TEXT);
-    CREATE TABLE damaged_stock_lots (product_id INTEGER, quantity_remaining REAL DEFAULT 0);
+    CREATE TABLE damaged_stock_lots (product_id INTEGER, branch_id INTEGER, batch_id INTEGER, quantity_remaining REAL DEFAULT 0);
     CREATE TABLE product_batches (id INTEGER PRIMARY KEY, variant_product_id INTEGER NOT NULL DEFAULT 10, is_active INTEGER NOT NULL DEFAULT 1, updated_at TEXT);
     CREATE TABLE branch_stock (product_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0 CHECK(quantity >= 0), UNIQUE(product_id, branch_id));
     CREATE TABLE branch_batch_stock (batch_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0 CHECK(quantity >= 0), updated_at TEXT, UNIQUE(batch_id, branch_id));
@@ -207,7 +207,7 @@ console.log('PASS reasons + held() math')
   short.sqlite.prepare(`INSERT INTO products (id, name, stock_quantity) VALUES (10, 'Serum', 25)`).run()
   short.sqlite.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 25)`).run()
   short.sqlite.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (77, 1, 2)`).run()
-  assert.throws(() => short.apply(plan.statements), /CHECK|constraint/i)
+  assert.throws(() => short.apply(plan.statements), /counted_ordinary_conflict/)
   assert.strictEqual(short.sqlite.prepare('SELECT quantity FROM branch_stock').get().quantity, 25, 'atomic rollback: nothing moved')
   console.log('PASS un-cancel re-deducts shelf + batch atomically (strict, like a sale)')
 }

@@ -43,7 +43,7 @@ function compile(file, stubs = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText
   const moduleObj = { exports: {} }
-  const localRequire = (request) => request.endsWith('/productStockGuard') ? productStockGuard : Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : require(request)
+  const localRequire = (request) => request.endsWith('/productStockGuard') ? productStockGuard : Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : request.startsWith('./') ? compile(request.slice(2) + '.ts', stubs) : require(request)
   new Function('exports', 'require', 'module', output)(moduleObj.exports, localRequire, moduleObj)
   return moduleObj.exports
 }
