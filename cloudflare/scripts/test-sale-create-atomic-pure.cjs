@@ -57,6 +57,8 @@ function load(rel) {
 }
 
 const app = load('routes/sales.ts').default
+const { executeStockTransaction } = load('lib/stockTransaction.ts')
+const seedStock = (db, statements) => executeStockTransaction({ batchOnce: (items) => db.batch(items) }, statements, 'once')
 const executionCtx = {
   waitUntil(promise) { promise?.catch?.(() => {}) },
   passThroughOnException() {},
@@ -97,12 +99,13 @@ function routeDb(db, hooks = {}) {
     },
     exec: (sql) => db.exec(sql),
   }
+  api.batchOnce = api.batch
   api.staging = api
   return api
 }
 
 function fixture(hooks = {}) {
-  const db = openDb(loadAll())
+  const db = openDb(loadAll(), { seedBeforeFence(db) {
   db.prepare("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)").run()
   db.prepare(`INSERT INTO products(id,name,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active)
               VALUES(10,'Powder','POWDER',10,9.5,38000,4,16000,1)`).run()
@@ -110,6 +113,7 @@ function fixture(hooks = {}) {
   db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,expiry_date,received_at,is_active,batch_number)
               VALUES(500,10,'powder-lot','POWDER-LOT','2027-06-01','2026-09-01',1,1)`).run()
   db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,1,10)').run()
+  } })
   return { raw: db, route: routeDb(db, hooks) }
 }
 
@@ -362,10 +366,10 @@ async function assertNativeD1TriggerMetadata() {
   for (const mode of ['reset', 'restore', 'corrupt']) {
     let inject = true
     const f = fixture({
-      beforeBatch(db, statements) {
+      async beforeBatch(db, statements) {
         if (inject && statements.some(({ sql }) => /INSERT\s+INTO\s+sales\s*\(/i.test(sql))) {
           inject = false
-          db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run([mode === 'corrupt' ? '{broken' : JSON.stringify({ mode })])
+          await seedStock(db, [{ sql: "INSERT INTO system_flags(key,value) VALUES('maintenance',@value)", params: { value: mode === 'corrupt' ? '{broken' : JSON.stringify({ mode }) } }])
         }
       },
     })
@@ -405,18 +409,22 @@ async function assertNativeD1TriggerMetadata() {
 
   {
     const f = fixture()
-    f.raw.prepare(`INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,quantity,quantity_remaining)
-                   VALUES(600,10,'Powder',1,2,2)`).run()
+    await seedStock(f.raw, [{ sql: "INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,batch_id,quantity,quantity_remaining,condition_tag) VALUES(600,10,'Powder',1,500,2,2,'damaged')" }])
     f.raw.exec("CREATE TRIGGER fail_damaged_create_audit BEFORE INSERT ON audit_logs WHEN NEW.entity='sale_creation' BEGIN SELECT RAISE(ABORT,'forced damaged audit'); END")
     const damagedRequest = request('damaged-rollback')
-    damagedRequest.items = [{ product_id: 10, quantity: 1, branch_id: 1, damaged_lot_id: 600, applied_price_usd: 9.5 }]
+    damagedRequest.items = [{ ...damagedRequest.items[0], damaged_lot_id: 600 }]
     const failed = await postSale(f.route, damagedRequest)
-    assert.notEqual(failed.status, 200, JSON.stringify(failed.body))
+    assert.equal(failed.status, 500, JSON.stringify(failed.body))
     assert.equal(f.raw.prepare('SELECT quantity_remaining FROM damaged_stock_lots WHERE id=600').get().quantity_remaining, 2)
     assert.deepEqual(creationState(f.raw), {
       sales: 0, items: 0, allocations: 0, movements: 0, audits: 0, revisions: 0,
       product: 10, branch: 10, batch: 10,
     })
-    console.log('PASS damaged-lot consumption rolls back with a later creation-audit failure')
+    f.raw.exec('DROP TRIGGER fail_damaged_create_audit')
+    const retry = await postSale(f.route, damagedRequest)
+    assert.equal(retry.status, 200, JSON.stringify(retry.body))
+    assert.equal(f.raw.prepare('SELECT quantity_remaining FROM damaged_stock_lots WHERE id=600').get().quantity_remaining, 1)
+    assert.equal(creationState(f.raw).movements, 1)
+    console.log('PASS damaged-lot consumption rolls back with a later creation-audit failure and original retry succeeds')
   }
 })().catch((error) => { console.error(error); process.exit(1) })

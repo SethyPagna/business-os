@@ -30,8 +30,8 @@ const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
 //                                     its pre-addition number, the units land
 //                                     in the SAME lots, and the sale's money
 //                                     columns are restored
-//   8. oversell                    -> the strict decrement aborts the whole
-//                                     batch through the CHECK constraint
+//   8. oversell                    -> receipt availability and strict branch
+//                                     decrements abort the whole batch
 //   9. source locks on routes/sales.ts + lib/undoAppliers.ts wiring
 //
 // Run: node scripts/test-sale-add-items-pure.cjs
@@ -47,7 +47,11 @@ function compile(file, stubs = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText
   const moduleObj = { exports: {} }
-  const localRequire = (request) => Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : require(request)
+  const localRequire = request => {
+    if (Object.hasOwn(stubs, request)) return stubs[request]
+    if (['./stockTransaction', './countedDamagedStock', './sqlBinding'].includes(request)) return compile(request.slice(2) + '.ts', stubs)
+    return require(request)
+  }
   new Function('exports', 'require', 'module', output)(moduleObj.exports, withProductStockGuard(localRequire), moduleObj)
   return moduleObj.exports
 }
@@ -107,7 +111,7 @@ function setup() {
   sqlite.exec(`
     CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER NOT NULL DEFAULT 1, stock_quantity REAL DEFAULT 0, updated_at TEXT);
     CREATE TABLE branch_stock (product_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0 CHECK(quantity >= 0), UNIQUE(product_id, branch_id));
-    CREATE TABLE damaged_stock_lots (product_id INTEGER, quantity_remaining REAL DEFAULT 0);
+    CREATE TABLE damaged_stock_lots (product_id INTEGER, branch_id INTEGER, batch_id INTEGER, quantity_remaining REAL DEFAULT 0);
     CREATE TABLE product_batches (id INTEGER PRIMARY KEY, variant_product_id INTEGER NOT NULL DEFAULT 10, is_active INTEGER DEFAULT 1, updated_at TEXT);
     INSERT INTO product_batches(id) VALUES(501),(502);
     CREATE TABLE branch_batch_stock (batch_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0 CHECK(quantity >= 0), updated_at TEXT, UNIQUE(batch_id, branch_id));
@@ -523,18 +527,18 @@ console.log('PASS 7b -- undoing a non-deducting line credits nothing back (symme
   const { sqlite, apply } = setup()
   seedShelf(sqlite, { shelf: 4, lot501: 4, lot502: 0 })
   // The plan was built against availability read a moment ago; a concurrent
-  // sale has since taken the units. branch_stock's CHECK is the real guard.
+  // sale has since taken the units. The ordinary receipt guard runs first.
   const lines = allocateNewSaleLines([LINE(5)], lotsFor(5, 0), 'completed')
   const plan = planSaleLineAddition({ saleId: 77, saleStatus: 'completed', lines, exchangeRate: 4100, userId: null, userName: null })
-  assert.throws(() => apply(plan.statements), /CHECK constraint failed/i, 'an oversell must abort, not clamp')
+  assert.throws(() => apply(plan.statements), /counted_ordinary_conflict/, 'the ordinary receipt guard must abort an oversell before decrement')
   assert.strictEqual(num(sqlite, 'SELECT quantity FROM branch_stock'), 4, 'and nothing at all was applied')
   assert.strictEqual(num(sqlite, 'SELECT COUNT(*) FROM sale_items'), 0, 'no orphan line survived the rollback')
   assert.strictEqual(num(sqlite, 'SELECT COUNT(*) FROM inventory_movements'), 0)
 }
-console.log('PASS 8 -- an oversell aborts the whole batch through the CHECK constraint')
+console.log('PASS 8 -- an oversell aborts the whole batch through the ordinary receipt guard')
 
 // ---- 8b: the same, for a product with NO lot ledger at all ---------------
-// Case 8 is caught by branch_batch_stock's CHECK, so it would still pass if
+// Case 8 is caught by the ordinary receipt guard, so it would still pass if
 // the branch_stock deduction were silently clamped with MAX(0, ...). This
 // case has no lots, so branch_stock's own CHECK is the only guard left --
 // a clamp here would swallow the oversell and lose stock quietly, which is
@@ -585,7 +589,7 @@ console.log('PASS 8b -- an unlotted oversell aborts on branch_stock itself, it i
   assert.match(route, /assertUpdatedAtMatch\('sale', sale, getExpectedUpdatedAt\(body\)\)/, 'optimistic concurrency, same as the other sale writes')
   assert.match(route, /INSERT INTO undo_snapshots\(kind,status,payload_json/, 'a real undo payload is recorded inside the mutation batch')
   assert.match(route, /INSERT INTO action_history\(scope,entity,entity_id/, 'the server history pointer is created in that same batch')
-  assert.match(route, /buildOperationAllocationStatements\(plan\.lines, addItemsOperationId/, 'required lot allocations are created before the core batch can commit')
+  assert.match(route, /buildExactOperationAllocationStatements\(plan\.lines, addItemsOperationId/, 'required lot allocations are created before the core batch can commit')
   assert.match(route, /saleMoneyUpdateStatement\(saleId, moneyAfter\)/, 'the money update rides the SAME atomic batch as the lines')
   assert.match(route, /mutation_kind='add_items'/, 'exact retries are served by the durable actor-scoped mutation receipt')
   // The peer-owned status handler must be untouched by this lane.
@@ -599,6 +603,7 @@ console.log('PASS 8b -- an unlotted oversell aborts on branch_stock itself, it i
   // told not to repeat.
   {
     const undoModule = compile('undoAppliers.ts', {
+      './countedConditionHistory': { COUNTED_CONDITION_HISTORY_KIND: 'inventory.counted_condition', replayCountedCondition: () => { throw new Error('Unexpected condition replay in sale addition registry test') } },
       './actorSnapshot': compile('actorSnapshot.ts'),
       './moneyPrecision': moneyPrecision,
       './saleMoneyPrecision': saleMoneyPrecision,
@@ -665,8 +670,8 @@ console.log('PASS 8b -- an unlotted oversell aborts on branch_stock itself, it i
   }
   assert.match(appliers, /'sale\.add_items':\s*\{/, 'the applier is registered, so resolveUndoApplier can find it')
   assert.match(appliers, /action: 'add_items'/, 'and declares the same granular action the route gates on')
-  assert.match(appliers, /planSaleLineRemoval/, 'undo goes through the shared reversal planner')
-  assert.match(appliers, /planSaleLineAddition/, 'and redo through the shared forward planner -- no second copy of the SQL')
+  assert.match(appliers, /planExactSaleLineRemoval\(\{/, 'undo goes through the shared reversal planner')
+  assert.match(appliers, /planExactSaleLineAddition\(\{/, 'and redo through the shared forward planner -- no second copy of the SQL')
   assert.match(appliers, /saleStateFingerprint/, 'the snapshot pins the full sale header, lines, and amendment head')
   assert.match(appliers, /This sale was edited after the items were added/, 'same-status later edits make undo stale')
   const actionHistory = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'actionHistory.ts'), 'utf8')
