@@ -152,15 +152,7 @@ function loadFold(rawDb) {
 }
 
 function freshDb() {
-  const rawDb = openDb(loadAll({ through: 242 }))
-  rawDb.db.exec(fs.readFileSync(path.join(__dirname, '../migrations/0244_dated_count_decision_receipts.sql'), 'utf8'))
-  let epochInstalled = false
-  const installEpoch = () => {
-    if (!epochInstalled) {
-      rawDb.db.exec(fs.readFileSync(path.join(__dirname, '../migrations/0243_stock_schema_epoch.sql'), 'utf8'))
-      epochInstalled = true
-    }
-  }
+  const rawDb = openDb(loadAll(), { seedBeforeFence(db) { db.exec("INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Shop',1,1),(2,'Warehouse',1,0)") } })
   const db = {
     prepare(sql) {
       const stmt = rawDb.prepare(sql)
@@ -172,14 +164,12 @@ function freshDb() {
         run: (params) => { const r = stmt.run(params); return { changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) } },
       }
     },
-    async batch(items) { installEpoch(); return rawDb.batch(items) },
-    async batchOnce(items) { installEpoch(); return rawDb.batch(items) },
+    async batch(items) { return rawDb.batch(items) },
+    async batchOnce(items) { return rawDb.batch(items) },
     async transaction(fn) { return fn(this) },
   }
-  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run()
-  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (2, 'Warehouse', 1, 0)").run()
   rawDb.compat = db
-  rawDb.hasEpoch = () => epochInstalled
+  rawDb.hasEpoch = () => true
   return { rawDb, db }
 }
 
@@ -189,9 +179,9 @@ async function addProduct(rawDb, productId) {
 }
 
 // Two rows of one item (same name, same barcode): what every merge path folds.
-function addTwin(rawDb, productId) {
-  rawDb.prepare(`INSERT INTO products (id, name, barcode, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr, stock_quantity, is_active)
-    VALUES (@id, 'Twin Gel', '8859199', 5, 20500, 2, 8200, 0, 1)`).run({ id: productId })
+async function addTwin(rawDb, productId) {
+  await lib('stockTransaction').executeStockTransaction(rawDb.compat,[{sql:`INSERT INTO products (id, name, barcode, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr, stock_quantity, is_active)
+    VALUES (@id, 'Twin Gel', '8859199', 5, 20500, 2, 8200, 0, 1)`,params:{id:productId}}],'once')
 }
 
 // A supplier receipt, through the same helper Inventory > Adjust > Add uses.
@@ -491,8 +481,7 @@ async function main() {
     const { rawDb, db } = freshDb()
     const P = 10
     await addProduct(rawDb, P)
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@p, 1, 5)').run({ p: P })
-    rawDb.prepare('UPDATE products SET stock_quantity = 5 WHERE id = @p').run({ p: P })
+    await lib('stockTransaction').executeStockTransaction(db,[{sql:'INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(@p,1,5)',params:{p:P}},{sql:'UPDATE products SET stock_quantity=5 WHERE id=@p',params:{p:P}}],'once')
     const check = (label, expected) => {
       const s = ledger(rawDb, P)
       assert.ok(s.lotSum <= s.branch, `${label}: sum(lots) ${s.lotSum} > branch_stock ${s.branch} [${s.lots}]`)
@@ -552,8 +541,7 @@ async function main() {
     const { rawDb, db } = freshDb()
     const P = 13
     await addProduct(rawDb, P)
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@p, 1, 10)').run({ p: P })
-    rawDb.prepare('UPDATE products SET stock_quantity = 10 WHERE id = @p').run({ p: P })
+    await lib('stockTransaction').executeStockTransaction(db,[{sql:'INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(@p,1,10)',params:{p:P}},{sql:'UPDATE products SET stock_quantity=10 WHERE id=@p',params:{p:P}}],'once')
     const stale = await buildDatedStockCountPlan(db, entriesFor(P, [['2026-08-16', 4]]))
     await sell(db, rawDb, P, 8)
     const before = ledger(rawDb, P)
@@ -581,8 +569,8 @@ async function main() {
       const { rawDb, db } = freshDb()
       const K = 103
       const D = 104
-      addTwin(rawDb, K)
-      addTwin(rawDb, D)
+      await addTwin(rawDb, K)
+      await addTwin(rawDb, D)
       const fold = loadFold(rawDb)
       const folded = disposition === 'merge' ? 7 : 5
       await runSteps(rawDb, K, [
@@ -607,8 +595,8 @@ async function main() {
     const { rawDb, db } = freshDb()
     const K = 116
     const D = 117
-    addTwin(rawDb, K)
-    addTwin(rawDb, D)
+    await addTwin(rawDb, K)
+    await addTwin(rawDb, D)
     const fold = loadFold(rawDb)
     await runSteps(rawDb, K, [
       ['receive keeper 5 @09-01 at $1 (lot A)', () => receive(db, K, 5, '2026-09-01', 1), { branch: 5 }],
@@ -627,8 +615,8 @@ async function main() {
     const { rawDb, db } = freshDb()
     const K = 105
     const D = 106
-    addTwin(rawDb, K)
-    addTwin(rawDb, D)
+    await addTwin(rawDb, K)
+    await addTwin(rawDb, D)
     const fold = loadFold(rawDb)
     await runSteps(rawDb, K, [
       ['receive keeper 20 @09-01', () => receive(db, K, 20, '2026-09-01'), { branch: 20 }],
@@ -650,8 +638,8 @@ async function main() {
       const { rawDb, db } = freshDb()
       const K = flavour === 'drain' ? 107 : 109
       const D = K + 1
-      addTwin(rawDb, K)
-      addTwin(rawDb, D)
+      await addTwin(rawDb, K)
+      await addTwin(rawDb, D)
       const fold = loadFold(rawDb)
       const date = flavour === 'drain' ? '2026-09-10' : '2026-09-01'
       await runSteps(rawDb, K, [
@@ -669,7 +657,7 @@ async function main() {
   await test('E1 chain: a twin folded into a second twin, that one folded into the keeper, then the keeper recounts the first twin\'s date: 10/10, both twins hold nothing', async () => {
     const { rawDb, db } = freshDb()
     const [K, B, A] = [111, 112, 113]
-    for (const id of [K, B, A]) addTwin(rawDb, id)
+    for (const id of [K, B, A]) await addTwin(rawDb, id)
     const fold = loadFold(rawDb)
     await runSteps(rawDb, K, [
       ['receive 3 each @09-01', async () => { for (const id of [K, B, A]) await receive(db, id, 3, '2026-09-01') }, { branch: 3 }],
@@ -687,10 +675,9 @@ async function main() {
     const { rawDb, db } = freshDb()
     const K = 114
     const D = 115
-    addTwin(rawDb, K)
-    addTwin(rawDb, D)
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@p, 1, 5)').run({ p: K })
-    rawDb.prepare('UPDATE products SET stock_quantity = 5 WHERE id = @p').run({ p: K })
+    await addTwin(rawDb, K)
+    await addTwin(rawDb, D)
+    await lib('stockTransaction').executeStockTransaction(db,[{sql:'INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(@p,1,5)',params:{p:K}},{sql:'UPDATE products SET stock_quantity=5 WHERE id=@p',params:{p:K}}],'once')
     const fold = loadFold(rawDb)
     await receive(db, D, 6, '2026-09-01')
     await applyCount(db, D, [['2026-09-10', 2]])
@@ -766,8 +753,7 @@ async function main() {
     const { rawDb, db } = freshDb()
     const P = 123
     await addProduct(rawDb, P)
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@p, 1, 3)').run({ p: P })
-    rawDb.prepare('UPDATE products SET stock_quantity = 3 WHERE id = @p').run({ p: P })
+    await lib('stockTransaction').executeStockTransaction(db,[{sql:'INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(@p,1,3)',params:{p:P}},{sql:'UPDATE products SET stock_quantity=3 WHERE id=@p',params:{p:P}}],'once')
     await receive(db, P, 4, '2026-09-01')
     await applyCount(db, P, [['2026-09-20', 0]])
     const count = countRow(rawDb, P, '2026-09-20')
@@ -792,8 +778,8 @@ async function main() {
     const { rawDb, db } = freshDb()
     const K = 124
     const D = 125
-    addTwin(rawDb, K)
-    addTwin(rawDb, D)
+    await addTwin(rawDb, K)
+    await addTwin(rawDb, D)
     const fold = loadFold(rawDb)
     let count = null
     await runSteps(rawDb, K, [
@@ -809,8 +795,8 @@ async function main() {
     const { rawDb, db } = freshDb()
     const K = 126
     const D = 127
-    addTwin(rawDb, K)
-    addTwin(rawDb, D)
+    await addTwin(rawDb, K)
+    await addTwin(rawDb, D)
     const fold = loadFold(rawDb)
     let count = null
     await runSteps(rawDb, K, [

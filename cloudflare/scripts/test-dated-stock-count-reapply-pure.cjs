@@ -47,15 +47,9 @@ const { applyDatedStockCountPlan, DatedStockCountConflictError } = lib('datedSto
 const { applyMovementRevert } = lib('stockRevert')
 
 function freshDb() {
-  const rawDb = openDb(loadAll({ through: 242 }))
-  rawDb.db.exec(fs.readFileSync(path.join(__dirname, '../migrations/0244_dated_count_decision_receipts.sql'), 'utf8'))
-  let epochInstalled = false
-  const installEpoch = () => {
-    if (!epochInstalled) {
-      rawDb.db.exec(fs.readFileSync(path.join(__dirname, '../migrations/0243_stock_schema_epoch.sql'), 'utf8'))
-      epochInstalled = true
-    }
-  }
+  const rawDb = openDb(loadAll(), { seedBeforeFence(db) {
+    db.exec("INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Shop',1,1),(2,'Warehouse',1,0)")
+  } })
   const db = {
     prepare(sql) {
       const stmt = rawDb.prepare(sql)
@@ -67,23 +61,26 @@ function freshDb() {
         run: (params) => { const r = stmt.run(params); return { changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) } },
       }
     },
-    async batch(items) { installEpoch(); return rawDb.batch(items) },
-    async batchOnce(items) { installEpoch(); return rawDb.batch(items) },
+    async batch(items) { return rawDb.batch(items) },
+    async batchOnce(items) { return rawDb.batch(items) },
     async transaction(fn) { return fn(this) },
   }
-  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run()
-  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (2, 'Warehouse', 1, 0)").run()
+  rawDb.compat = db
+  assert.throws(() => rawDb.exec("INSERT INTO products(id,name,stock_quantity) VALUES(999,'Unfenced',1)"), /stock_transaction_required/)
   return { rawDb, db }
 }
 
-function seed(rawDb, { stock, lot }) {
-  rawDb.prepare('INSERT INTO products (id, name, is_active, stock_quantity) VALUES (1, \'Widget\', 1, @stock)').run({ stock })
-  rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, @stock)').run({ stock })
-  if (lot) {
-    rawDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, received_quantity)
-      VALUES (1, 1, '08012026', '08012026', '2026-08-01', 1, 1, @stock)`).run({ stock })
-    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (1, 1, @stock)').run({ stock })
-  }
+async function seed(rawDb, { stock, lot }) {
+  const statements = [
+    { sql: "INSERT INTO products(id,name,is_active,stock_quantity) VALUES(1,'Widget',1,@stock)", params: { stock } },
+    { sql: 'INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,@stock)', params: { stock } },
+    ...(lot ? [
+      { sql: "INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,received_quantity) VALUES(1,1,'08012026','08012026','2026-08-01',1,1,@stock)", params: { stock } },
+      { sql: 'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(1,1,@stock)', params: { stock } }
+    ] : [])
+  ]
+  await lib('stockTransaction').executeStockTransaction(rawDb.compat, statements, 'once')
+  assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
 }
 
 function snapshot(rawDb) {
@@ -116,7 +113,7 @@ async function main() {
     const label = lot ? 'lot-tracked' : 'no lots'
     await test(`${label}: stock 7, count 10 applied twice lands on 10 (was 13)`, async () => {
       const { rawDb, db } = freshDb()
-      seed(rawDb, { stock: 7, lot })
+      await seed(rawDb, { stock: 7, lot })
       await applyEntries(db, COUNT_10)
       const first = snapshot(rawDb)
       assert.strictEqual(first.branch, 10)
@@ -136,7 +133,7 @@ async function main() {
 
     await test(`${label}: a corrected re-upload (10 -> 8, plus a later date 12) lands on the new counts`, async () => {
       const { rawDb, db } = freshDb()
-      seed(rawDb, { stock: 7, lot })
+      await seed(rawDb, { stock: 7, lot })
       await applyEntries(db, COUNT_10)
       await applyEntries(db, [
         { date: '2026-08-16', productId: 1, branchId: 1, count: 8 },
@@ -155,7 +152,7 @@ async function main() {
 
     await test(`${label}: re-applying after a sale still lands on the count (a count is absolute), not count + prior effect`, async () => {
       const { rawDb, db } = freshDb()
-      seed(rawDb, { stock: 7, lot })
+      await seed(rawDb, { stock: 7, lot })
       await applyEntries(db, COUNT_10)
       // A sale of 2 after the count (direct write, same shape as a till deduction).
       await lib('stockTransaction').executeStockTransaction(db, [{ sql: 'UPDATE branch_stock SET quantity=quantity-2 WHERE product_id=1 AND branch_id=1' }, { sql: 'UPDATE products SET stock_quantity=stock_quantity-2 WHERE id=1' }, ...(lot ? [{ sql: 'UPDATE branch_batch_stock SET quantity=quantity-2 WHERE batch_id=1' }] : [])], 'once')
@@ -168,7 +165,7 @@ async function main() {
 
     await test(`${label}: a failure at the last statement leaves stock, lots and history unchanged`, async () => {
       const { rawDb, db } = freshDb()
-      seed(rawDb, { stock: 7, lot })
+      await seed(rawDb, { stock: 7, lot })
       await applyEntries(db, COUNT_10)
       const before = snapshot(rawDb)
       const ids = rawDb.prepare('SELECT id FROM inventory_movements ORDER BY id').all().map((r) => r.id)
@@ -183,7 +180,7 @@ async function main() {
 
     await test(`${label}: the same plan applied twice (double submit) applies once, the second is refused`, async () => {
       const { rawDb, db } = freshDb()
-      seed(rawDb, { stock: 7, lot })
+      await seed(rawDb, { stock: 7, lot })
       await applyEntries(db, COUNT_10)
       const built = await buildDatedStockCountPlan(db, COUNT_10)
       await applyDatedStockCountPlan(db, built.plan)
@@ -196,7 +193,7 @@ async function main() {
 
   await test('first apply of a stale plan (another apply landed first) is refused, nothing written', async () => {
     const { rawDb, db } = freshDb()
-    seed(rawDb, { stock: 7, lot: false })
+    await seed(rawDb, { stock: 7, lot: false })
     const a = await buildDatedStockCountPlan(db, COUNT_10)
     const b = await buildDatedStockCountPlan(db, COUNT_10)
     await applyDatedStockCountPlan(db, a.plan)
@@ -206,7 +203,7 @@ async function main() {
 
   await test('a prior movement reverted from the ledger is neither reversed again nor deleted', async () => {
     const { rawDb, db } = freshDb()
-    seed(rawDb, { stock: 7, lot: false })
+    await seed(rawDb, { stock: 7, lot: false })
     await applyEntries(db, COUNT_10)
     const mv = rawDb.prepare("SELECT * FROM inventory_movements WHERE reason = 'Dated stock count import'").get()
     const reverted = await applyMovementRevert(db, mv, { userId: 1, userName: 'Admin' })

@@ -21,9 +21,7 @@ function load(file) {
 }
 const batches = load('productBatches.ts')
 const additions = load('saleLineAddition.ts')
-const db = openDb(loadAll({ through: 242 }))
-db.exec("INSERT INTO branches(id,name,is_active) VALUES(1,'Shop',1),(2,'Warehouse',1); INSERT INTO products(id,name,stock_quantity) VALUES(1,'A',0),(2,'B',0)")
-for (const file of fs.readdirSync(path.join(__dirname, '../migrations')).filter(file => file.endsWith('.sql') && Number(file.slice(0,4)) > 242).sort()) db.exec(fs.readFileSync(path.join(__dirname, '../migrations', file), 'utf8'))
+const db = openDb(loadAll(), { seedBeforeFence(db) { db.exec("INSERT INTO branches(id,name,is_active) VALUES(1,'Shop',1),(2,'Warehouse',1); INSERT INTO products(id,name,stock_quantity) VALUES(1,'A',0),(2,'B',0)") } })
 assert.throws(() => db.exec('UPDATE products SET stock_quantity=stock_quantity'), /stock_transaction_required/)
 const transaction = load('stockTransaction.ts')
 const stockWrite = async statements => {

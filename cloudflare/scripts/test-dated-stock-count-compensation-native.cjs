@@ -14,7 +14,9 @@ const coreSource = fs.readFileSync(path.join(__dirname,'test-stock-bridge-core-n
 const marker = "sql.exec('BEGIN IMMEDIATE')"
 assert.ok(coreSource.includes(marker))
 const fixtureModule = { exports: {} }
-const seededSource = coreSource.replace(marker, `sql.exec(${JSON.stringify(preseed)}); sql.exec(fs.readFileSync(path.join(__dirname, '../migrations/0244_dated_count_decision_receipts.sql'), 'utf8')); ${marker}`)
+const epochBlock = /sql\.exec\('BEGIN IMMEDIATE'\)[\s\S]*?sql\.limits\.exprDepth = 100/
+assert.ok(epochBlock.test(coreSource))
+const seededSource = coreSource.replace(epochBlock, `sql.exec(${JSON.stringify(preseed)}); require('./harness/d1compat.cjs').applyMigrations({db:sql},loadAll().slice(loadAll({through:242}).length)); sql.limits.exprDepth = 100`)
 new Function('require','module','__dirname',seededSource)(require,fixtureModule,__dirname)
 const f = fixtureModule.exports
 const current=f.load('lib/datedStockCountApply.ts')
