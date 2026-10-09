@@ -59,7 +59,7 @@ export const ALLOWLIST: AllowEntry[] = [
   {
     file: 'components/products/Products.tsx',
     names: ['branchFilter', 'brandFilter', 'catFilter', 'groupFilter', 'stockFilter', 'supplierFilter'],
-    line: 2222,
+    line: 2283,
     reason:
       'Deferred filter-metadata fallback. filterMetaScope includes all six filters; '
       + 'its own effect just above invalidates the outstanding fallback and clears readiness, '
@@ -72,7 +72,10 @@ export const ALLOWLIST: AllowEntry[] = [
       + 'order and main-load dependency chain are unchanged, only the line number moved. '
       + 'FRAGILE: re-verify if metadata stops arriving with the main product response. '
       + 'RE-VERIFIED 2026-09-25 after U-products-ui (row cost buttons, cost float state) moved it '
-      + 'to :2222; the fallback effect body and its deps are unchanged.',
+      + 'to :2222; the fallback effect body and its deps are unchanged. RE-VERIFIED 2026-10-09 '
+      + 'at :2283: all six filters remain in filterMetaScope, its effect invalidates '
+      + 'the request and readiness, and main load retains effective filter dependencies; '
+      + 'the fallback body and dependencies are byte-identical to the prior release.',
   },
   {
     file: 'components/products/Products.tsx',
