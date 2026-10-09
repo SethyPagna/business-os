@@ -201,9 +201,55 @@ async function routes(engine = 'better') {
     }
   }
 }
+async function creation(engine) {
+  const f = fixture(), dir = fs.mkdtempSync(path.join(os.tmpdir(), 'counted-creation-numbers-'))
+  let raw = f.sql
+  if (engine === 'node') {
+    const file = path.join(dir, 'synthetic.sqlite')
+    fs.writeFileSync(file, f.sql.serialize())
+    raw = new DatabaseSync(file)
+  }
+  const db = compat(raw), commit = rows => stock.executeStockTransaction(db, rows, 'once')
+  const observed = () => raw.prepare('SELECT ' + counted.countedProductCreationFactsSql('999', '1') + ' AS facts').get().facts
+  const input = facts => ({ productId: 999, name: 'Created', costUsd: 2, costKhr: 0, observed: facts })
+  const insert = { sql: "INSERT INTO products(id,name,is_active,stock_quantity,cost_price_usd,cost_price_khr)VALUES(999,'Created',1,0,2,0)" }
+  try {
+    let previous = null
+    for (const active of [1.0000000000000002, 1.0000000000000004, .9999999999999999]) {
+      await commit([{ sql: 'UPDATE branches SET is_active=@active WHERE id=1', params: { active } }])
+      const facts = observed()
+      assert.equal(JSON.parse(facts).branch[1], raw.prepare('SELECT is_active FROM branches WHERE id=1').get().is_active, engine + ' creation branch active source must be lossless')
+      assert.throws(() => new counted.CountedStockPlan(input(facts), 1), counted.CountedStockConflictError, 'malformed initial active source cannot admit creation')
+      if (previous) assert.notEqual(facts, previous)
+      previous = facts
+    }
+    await commit([{ sql: 'UPDATE branches SET is_active=1 WHERE id=1' }])
+    const plan = new counted.CountedStockPlan(input(observed()), 1)
+    const rows = [...plan.takeInitialGuard(), insert, ...counted.planExactCountedOrdinaryChange(plan, null, .1, 'receive')]
+    await commit([{ sql: 'UPDATE branches SET is_active=1.0000000000000002 WHERE id=1' }])
+    await assert.rejects(commit(rows), counted.isCountedStockConflict)
+    assert.equal(raw.prepare('SELECT COUNT(*) n FROM products WHERE id=999').get().n, 0)
+    assert.equal(raw.prepare('SELECT COUNT(*) n FROM branch_stock WHERE product_id=999').get().n, 0)
+    await commit([{ sql: 'UPDATE branches SET is_active=1 WHERE id=1' }])
+    const exact = new counted.CountedStockPlan(input(observed()), 1)
+    await commit([...exact.takeInitialGuard(), insert,
+      ...counted.planExactCountedOrdinaryChange(exact, null, .1, 'receive'),
+      ...counted.planExactCountedOrdinaryChange(exact, null, .2, 'receive')])
+    assert.equal(raw.prepare('SELECT stock_quantity FROM products WHERE id=999').get().stock_quantity, .3)
+    assert.equal(raw.prepare('SELECT quantity FROM branch_stock WHERE product_id=999').get().quantity, .3)
+    assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key IN ('stock_transaction_permit','maintenance')").get().n, 0)
+    console.log(JSON.stringify({ engine, creationMalformedSource: 'refused', creationSourceRace: 'refused', legitimateCreation: .3 }))
+  } finally {
+    if (raw !== f.sql) raw.close()
+    f.sql.close()
+    for (const file of fs.readdirSync(dir)) fs.unlinkSync(path.join(dir, file))
+    fs.rmdirSync(dir)
+  }
+}
 async function main() {
-  if (!process.argv.includes('--routes-only')) for (const engine of ['node', 'better']) await native(engine)
+  if (process.argv.includes('--creation-only')) { for (const engine of ['node', 'better']) await creation(engine); return }
+  if (!process.argv.includes('--routes-only')) for (const engine of ['node', 'better']) { await native(engine); await creation(engine) }
   if (!process.argv.includes('--capture-only')) for (const engine of ['node', 'better']) await routes(engine)
 }
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })
-module.exports = { native, routes }
+module.exports = { native, routes, creation }

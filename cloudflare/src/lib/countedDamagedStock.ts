@@ -44,7 +44,7 @@ export function countedProductCreationFactsSql(product: string, branch: string):
     OR EXISTS(SELECT 1 FROM product_batches WHERE variant_product_id=${product})
     OR EXISTS(SELECT 1 FROM damaged_stock_lots WHERE product_id=${product})
     OR EXISTS(SELECT 1 FROM product_cost_entries WHERE product_id=${product}),
-    'branch',(SELECT json_array(id,is_active,name,role) FROM branches WHERE id=${branch}))`
+    'branch',(SELECT json_array(id,${losslessNumberSql('is_active')},name,role) FROM branches WHERE id=${branch}))`
 }
 
 function exactQuantity(text: string): number {
