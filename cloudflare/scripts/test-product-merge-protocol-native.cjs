@@ -43,7 +43,7 @@ async function prepare(f, generation = -1, fault = '', actor = 7) {
   const snapshot = readPlan.decode(rows)
   const source = rows.get('capture')[0].data
   const direction = generation % 2 === 0 ? 'undo' : 'redo'
-  const plan = JSON.stringify({ version: 2, actor_id: 7, operation_id: 'merge-protocol', request_id: 'stable-request', keeper_id: 1, loser_id: 2, source_capture: source })
+  const plan = JSON.stringify({ version: 2, actor_id: 7, history_id: 1, operation_id: 'merge-protocol', request_id: 'stable-request', keeper_id: 1, loser_id: 2, source_capture: source })
   const transition = JSON.stringify({ operation_id: 'merge-protocol', plan_id: 1, history_id: 1, keeper_id: 1,
     loser_id: fault === 'swapped-loser' ? 3 : 2, actor_id: fault === 'wrong-actor' ? actor + 1 : actor,
     from_generation: generation, to_generation: generation + 1, direction: fault === 'wrong-direction' ? 'invalid' : direction,
@@ -96,7 +96,7 @@ async function main() {
       console.log('PASS ' + fault + ': no stock/history/authority residue')
     } finally { f.sql.close() }
   }
-  for (const fault of ['history-identity', 'initial-seal', 'after-seal-history', 'after-seal-stock', 'early-publish', 'history-delete']) {
+  for (const fault of ['history-identity', 'history-labels', 'initial-seal', 'after-seal-history', 'after-seal-stock', 'early-publish', 'history-delete']) {
     const f = world()
     try {
       const before = state(f), statements = await prepare(f)
@@ -114,6 +114,7 @@ async function main() {
         statements.find(row => row.sql.startsWith('UPDATE action_history SET undo_payload')).params.prior = history.params.pointer
       }
       if (fault === 'after-seal-history') statements.push({ sql: "UPDATE action_history SET undo_payload='{}',redo_payload='{}' WHERE id=1" })
+      if (fault === 'history-labels') statements.push({ sql: "UPDATE action_history SET undo_label='Rewritten',redo_label='Rewritten',reversible=0 WHERE id=1" })
       if (fault === 'after-seal-stock') statements.push({ sql: 'UPDATE branch_stock SET quantity=4 WHERE product_id=1' }, { sql: 'UPDATE products SET stock_quantity=4 WHERE id=1' })
       if (fault === 'early-publish') statements.push({ sql: "UPDATE undo_snapshots SET status='sealed' WHERE id=2" })
       if (fault === 'history-delete') statements.push({ sql: 'DELETE FROM action_history WHERE id=1' })
@@ -122,6 +123,7 @@ async function main() {
       console.log('PASS completion boundary: ' + fault)
     } finally { f.sql.close() }
   }
+  await verifyInsertIdentity()
   for (const omitGuard of [false, true]) {
     const rival = world()
     try {
@@ -183,5 +185,58 @@ async function main() {
   } finally { f.sql.close() }
   console.log('LOCAL PROTOCOL MODULE ONLY: no numbered migration, route integration, clone mapping or Free/Paid admission certificate')
 }
+async function verifyInsertIdentity(makeWorld = world) {
+  const cases = [
+    ['history identity', "INSERT OR REPLACE INTO action_history(id,scope,entity,entity_id,label,status,undo_payload,redo_payload,created_by_id,created_by_name,created_at,updated_at,last_error) SELECT id,scope,entity,entity_id,label,status,undo_payload,redo_payload,8,created_by_name,created_at,updated_at,last_error FROM action_history WHERE id=1"],
+    ['history kind', "INSERT OR REPLACE INTO action_history(id,scope,entity,entity_id,label,status,undo_payload,redo_payload,created_by_id) VALUES(1,'products','unrelated','other','Replaced','recorded','{}','{}',8)"],
+    ['plan kind', "INSERT OR REPLACE INTO undo_snapshots(id,kind,status,payload_json,created_by_id) VALUES(1,'unrelated','recorded','{}',7)"],
+    ['seal kind', "INSERT OR REPLACE INTO undo_snapshots(id,kind,status,payload_json,created_by_id) VALUES(2,'unrelated','recorded','{}',7)"],
+    ['plan request', `INSERT OR REPLACE INTO undo_snapshots(id,kind,status,payload_json,created_by_id) SELECT 99,kind,status,json_set(payload_json,'$.history_id',99,'$.operation_id','different-operation'),created_by_id FROM undo_snapshots WHERE id=1`],
+    ['plan operation', `INSERT OR REPLACE INTO undo_snapshots(id,kind,status,payload_json,created_by_id) SELECT 99,kind,status,json_set(payload_json,'$.history_id',99,'$.request_id','different-request'),created_by_id FROM undo_snapshots WHERE id=1`],
+    ['plan history', `INSERT OR REPLACE INTO undo_snapshots(id,kind,status,payload_json,created_by_id) SELECT 99,kind,status,json_set(payload_json,'$.request_id','different-request','$.operation_id','different-operation'),created_by_id FROM undo_snapshots WHERE id=1`],
+    ['seal generation', `INSERT OR REPLACE INTO undo_snapshots(id,kind,status,payload_json,created_by_id) SELECT 99,kind,status,payload_json,created_by_id FROM undo_snapshots WHERE id=2`],
+  ]
+  for (const [name, write] of cases) {
+    const f = makeWorld()
+    try {
+      assert.equal(f.sql.pragma('recursive_triggers', { simple: true }), 0, 'identity protection does not depend on recursive delete triggers')
+      await executeStockTransaction(f.db, await prepare(f), 'once')
+      const before = state(f)
+      await assert.rejects(executeStockTransaction(f.db, [{ sql: write }], 'once'), /merge_history_immutable|merge_identity_immutable|merge_plan_invalid|merge_transition_invalid/, name)
+      assert.deepEqual(state(f), before, name + ' preserves original rows, current stock and transaction authority')
+      console.log('PASS insert identity: ' + name)
+    } finally { f.sql.close() }
+  }
+  for (const fault of ['wrong-history-id', 'duplicate-history-head', 'pending-collision']) {
+    const f = makeWorld()
+    try {
+      const before = state(f), statements = await prepare(f)
+      if (fault === 'wrong-history-id') {
+        const plan = statements.find(row => row.params?.plan)
+        plan.params.plan = JSON.stringify({ ...JSON.parse(plan.params.plan), history_id: 99 })
+      }
+      if (fault === 'duplicate-history-head') {
+        const historyIndex = statements.findIndex(row => row.sql.startsWith('INSERT INTO action_history'))
+        statements.splice(historyIndex + 1, 0, { ...statements[historyIndex], sql: statements[historyIndex].sql.replace('VALUES(1,', 'VALUES(99,') })
+      }
+      if (fault === 'pending-collision') {
+        const transitionIndex = statements.findIndex(row => row.params?.transition)
+        const row = statements[transitionIndex]
+        statements.splice(transitionIndex + 1, 0, { ...row, sql: row.sql.replace('INSERT INTO', 'INSERT OR REPLACE INTO'), params: { ...row.params, id: 99 } })
+      }
+      await assert.rejects(executeStockTransaction(f.db, statements, 'once'), /merge_history_immutable|merge_identity_immutable|merge_transition_invalid/, fault)
+      assert.deepEqual(state(f), before, fault + ' rolls back the original transaction')
+      console.log('PASS insert identity: ' + fault)
+    } finally { f.sql.close() }
+  }
+  const f = makeWorld()
+  try {
+    const trigger = f.sql.prepare("SELECT sql FROM sqlite_master WHERE name='product_merge_v2_finish'").get().sql
+    const select = trigger.slice(trigger.indexOf('AND EXISTS(') + 'AND EXISTS('.length, trigger.lastIndexOf('\n  BEGIN')).trim().slice(0, -1)
+    const plan = f.sql.prepare('EXPLAIN QUERY PLAN ' + select).all()
+    assert.ok(plan.some(row => /SCAN t USING INDEX product_merge_v2_single_pending/.test(row.detail)), 'transaction finish scans the single-pending partial index, not all historical transitions')
+    console.log('PASS finish query plan uses the at-most-one pending transition index')
+  } finally { f.sql.close() }
+}
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })
-module.exports = { world, prepare, state, main }
+module.exports = { world, prepare, state, main, verifyInsertIdentity }
