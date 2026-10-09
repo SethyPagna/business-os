@@ -316,6 +316,10 @@ async function proveSaleCreate(makeWorker, baseline = false, controls = false) {
       if(source==='tagged') assert.equal(f.state().tags[0].quantity_remaining,0)
       if(source==='receipt') assert.equal(f.state().lots[0].quantity,0)
       assert.deepEqual(f.sql.prepare('SELECT quantity FROM sale_items ORDER BY id').all(),[{quantity:0.1},{quantity:control==='race'?0.1:0.2}])
+      const captured=f.sql.prepare('SELECT product_id,product_name,branch_id,quantity,cost_price_usd,cost_price_khr FROM sale_items WHERE sale_id=? ORDER BY id').all(created.json.id)
+      assert.deepEqual(f.sql.prepare('SELECT product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,user_id,user_name,reference_id,batch_id FROM inventory_movements WHERE reference_id=? ORDER BY id').all(created.json.id),
+        captured.map(line=>({product_id:line.product_id,product_name:line.product_name,branch_id:line.branch_id,movement_type:source==='tagged'?'damage_out':'sale',quantity:-line.quantity,
+          unit_cost_usd:line.cost_price_usd,unit_cost_khr:line.cost_price_khr,user_id:7,user_name:'admin',reference_id:created.json.id,batch_id:source==='receipt'?1:null})))
       const tables=new Set(f.sql.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row=>row.name))
       const triggerScans=new Set()
       for(const statements of observedBatches) for(const statement of statements) {

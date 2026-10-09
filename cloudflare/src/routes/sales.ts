@@ -1437,6 +1437,7 @@ app.post('/', async (c) => {
       }
     }
     const allocationRows: Record<string,unknown>[] = []
+    const movementRows: Record<string,unknown>[] = []
     const allocationReleasedAt = shouldDeductStock ? null : new Date().toISOString()
     for (const [itemIndex, item] of priced.entries()) {
       statements.push({
@@ -1553,24 +1554,24 @@ app.post('/', async (c) => {
         const autoTakes = autoAllocationsByItemIndex.get(itemIndex) || []
         const movementBatchId = item.batch_id
           || (autoTakes.length === 1 && autoTakes[0].quantity === item.quantity ? autoTakes[0].batchId : null)
-        statements.push({
-          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reference_id, user_id, user_name, batch_id)
-                VALUES (@product_id, @product_name, @branch_id, 'sale', @quantity, @unit_cost_usd, @unit_cost_khr,
-                  (SELECT id FROM sales WHERE client_request_id = @sale_write_key AND client_request_id <> ''), @user_id, @user_name, @batch_id)`,
-          params: {
+        movementRows.push({
+            movement_type:'sale',
             product_id: item.product_id,
             product_name: item.product_name,
             branch_id: item.branch_id,
             quantity: -item.quantity,
             unit_cost_usd: item.costPriceUsd,
             unit_cost_khr: item.costPriceKhr,
-            sale_write_key: saleWriteKey,
             user_id: actorId(user),
             user_name: actorSnapshot(user),
             batch_id: movementBatchId,
-          },
         })
       }
+      if (item.branch_id && shouldDeductStock && item.damaged_lot_id) movementRows.push({
+        movement_type:DAMAGE_OUT_MOVEMENT,product_id:item.product_id,product_name:item.product_name,branch_id:item.branch_id,
+        quantity:-item.quantity,unit_cost_usd:item.costPriceUsd,unit_cost_khr:item.costPriceKhr,
+        user_id:actorId(user),user_name:actorSnapshot(user),batch_id:null,
+      })
     }
     if (allocationRows.length) {
       const payload=JSON.stringify(allocationRows)
@@ -1586,6 +1587,15 @@ app.post('/', async (c) => {
         LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=json_extract(a.value,'$.branchId')
         LEFT JOIN branches b ON b.id=bbs.branch_id AND ${sellingBranchConditionSql('b')}`,
         params:{allocations:payload,saleWriteKey,requiresAvailabilityPreimage:shouldDeductStock?0:1,deducts:shouldDeductStock?1:0,releasedAt:allocationReleasedAt}})
+    }
+    if (movementRows.length) {
+      const payload=JSON.stringify(movementRows)
+      if(movementRows.length>10000 || new TextEncoder().encode(payload).byteLength>900000) return c.json({error:'Select fewer stock lines.',code:'sale_source_plan_too_large'},400)
+      const fields=['product_id','product_name','branch_id','movement_type','quantity','unit_cost_usd','unit_cost_khr','user_id','user_name','batch_id']
+      statements.push({sql:`INSERT INTO inventory_movements(${fields.join(',')},reference_id)
+        SELECT ${fields.map(field=>`json_extract(expected.value,'$.${field}')`).join(',')},
+          (SELECT id FROM sales WHERE client_request_id=@sale_write_key AND client_request_id<>'')
+        FROM json_each(@movements) expected ORDER BY CAST(expected.key AS INTEGER)`,params:{movements:payload,sale_write_key:saleWriteKey}})
     }
     statements.push(...exactSaleStock.takeFinalPhysicalWrites())
     statements.push(
