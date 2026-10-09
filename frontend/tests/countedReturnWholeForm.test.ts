@@ -5,7 +5,7 @@ const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),
 const out=process.env.REVIEW_OUT || fs.mkdtempSync(path.join(require('node:os').tmpdir(),'counted-return-ui-')),root=process.env.COUNTED_RETURN_FRONTEND||path.resolve(__dirname,'..'),req=createRequire(path.join(root,'package.json'));
 const {build}=req('esbuild'),{chromium,webkit}=req('@playwright/test') as typeof import('@playwright/test');
 require('node:child_process').execFileSync(process.execPath,[path.resolve(__dirname,'../../cloudflare/scripts/test-counted-return-ui.cjs')],{env:{...process.env,REVIEW_OUT:out},stdio:'inherit'});
-const dto=JSON.parse(fs.readFileSync(path.join(out,'sale-dto-free-false.json'),'utf8')),receiptDto=JSON.parse(fs.readFileSync(path.join(out,'sale-dto-free-true.json'),'utf8'));const km=JSON.parse(fs.readFileSync(path.join(root,'src/lang/km.json'),'utf8')); 
+const dto=JSON.parse(fs.readFileSync(path.join(out,'sale-dto-free-false.json'),'utf8')),receiptDto=JSON.parse(fs.readFileSync(path.join(out,'sale-dto-free-true.json'),'utf8'));const km=JSON.parse(fs.readFileSync(path.join(root,'src/lang/km.json'),'utf8'));
 const packs=JSON.parse(fs.readFileSync(path.join(root,'src/lang/en.json'),'utf8'));
 const modules={
  'empty':`export default ()=>null;`,
