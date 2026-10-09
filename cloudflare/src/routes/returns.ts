@@ -2500,6 +2500,13 @@ app.post('/supplier', async (c) => {
   }
 })
 
+function completeSupplierReturnViews(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, returnId: number) {
+  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'supplier_return', id: returnId }))
+  c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
+  c.executionCtx.waitUntil(bumpVersions(c.env, ['products', 'returns', 'sales']))
+  c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'create', id: returnId }))
+}
+
 async function createSupplierReturn(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>) {
   const user = c.get('user')
   if (!canEditAcquisitionCosts(user)) return c.json({ error: 'Cost-entry permission is required to record supplier return costs and settlement.', code: 'product_cost_edit_required' }, 403)
@@ -2551,9 +2558,27 @@ async function createSupplierReturn(c: Context<{ Bindings: Env; Variables: { use
     return c.json({ error: 'Choose ordinary stock for this supplier return. A recorded condition requires an explicit supported source choice.', code: 'supplier_return_condition_selection_required' }, 400)
   }
 
+  const completeReplay = (existing: { id: number; return_number: string; return_scope: string; return_type: string }) => {
+    if (!Number.isSafeInteger(existing.id) || existing.id <= 0 || !existing.return_number
+      || existing.return_scope !== SUPPLIER_SCOPE || existing.return_type !== 'supplier_return') {
+      return c.json({ error: 'This request key belongs to a different return.', code: 'supplier_return_request_conflict' }, 409)
+    }
+    try {
+      // Recovery only refreshes views: cache lookup, quota admission and D1 fallback, each with at most two attempts.
+      assertReturnCreateQueryBudget(queryLimit, statementsUsed(), 0, 6)
+    } catch (error) {
+      if (!(error instanceof ReturnCreateBudgetError)) throw error
+      return c.json({ error: 'The supplier return is recorded, but its views could not be refreshed within this request. Retry the same request.',
+        code: 'supplier_return_refresh_over_plan_budget', outcome: 'committed', action: 'retry_same_request',
+        id: existing.id, returnNumber: existing.return_number, duplicate: true }, 503)
+    }
+    completeSupplierReturnViews(c, existing.id)
+    return c.json({ id: existing.id, returnNumber: existing.return_number, duplicate: true })
+  }
+
   if (clientRequestId) {
-    const existing = await db.prepare("SELECT id, return_number FROM returns WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1").get<{ id: number; return_number: string }>([clientRequestId])
-    if (existing) return c.json({ id: existing.id, returnNumber: existing.return_number, duplicate: true })
+    const existing = await db.prepare("SELECT id, return_number, return_scope, return_type FROM returns WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1").get<{ id: number; return_number: string; return_scope: string; return_type: string }>([clientRequestId])
+    if (existing) return completeReplay(existing)
   }
 
   const settlement = ['refund', 'credit', 'replacement', 'writeoff'].includes(String(body.settlement || '').toLowerCase())
@@ -2781,9 +2806,14 @@ async function createSupplierReturn(c: Context<{ Bindings: Env; Variables: { use
     if (error instanceof ReturnCreateBudgetError) throw error
     if (isCountedStockConflict(error)) {
       if (dispatched && clientRequestId) {
-        const replay = await db.prepare("SELECT id,return_number FROM returns WHERE client_request_id=? AND client_request_id<>'' LIMIT 1")
-          .get<{ id: number; return_number: string }>([clientRequestId])
-        if (replay) return c.json({ id: replay.id, returnNumber: replay.return_number, duplicate: true })
+        try {
+          const replay = await db.prepare("SELECT id,return_number,return_scope,return_type FROM returns WHERE client_request_id=? AND client_request_id<>'' LIMIT 1")
+            .get<{ id: number; return_number: string; return_scope: string; return_type: string }>([clientRequestId])
+          if (replay) return completeReplay(replay)
+        } catch (_) {
+          return c.json({ error: 'The supplier return outcome could not be confirmed. Retry the original request or review Returns.',
+            code: 'supplier_return_outcome_unknown', action: 'retry_same_request' }, 503)
+        }
       }
       return c.json({ error: 'Stock or its recorded source changed. Refresh before retrying.', code: 'write_conflict', action: 'reload_required' }, 409)
     }
@@ -2793,9 +2823,7 @@ async function createSupplierReturn(c: Context<{ Bindings: Env; Variables: { use
       code: dispatched ? 'supplier_return_outcome_unknown' : 'supplier_return_failed', action: dispatched ? 'retry_same_request' : 'reload_required' }, dispatched ? 503 : 500)
   }
 
-  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'supplier_return', id: returnId }))
-  c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(bumpVersions(c.env, ['products', 'returns', 'sales']))
+  completeSupplierReturnViews(c, returnId)
   // Telegram: supplier return = stock out with the settlement money.
   c.executionCtx.waitUntil(sendReturnTelegramEvent(c.env, returnId, {
     kind: 'supplier', returnNumber, party: body.supplier_name || null,
@@ -2803,7 +2831,6 @@ async function createSupplierReturn(c: Context<{ Bindings: Env; Variables: { use
     reason: body.reason || null, settlement, compensationUsd: supplierCompensationUsd, compensationKhr: supplierCompensationKhr,
     lossUsd: supplierLossUsd, lossKhr: supplierLossKhr, by: actorSnapshot(user),
   }).catch((error) => console.error('[telegram] supplier return notification failed', error)))
-  c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'create', id: returnId }))
   return c.json({ id: returnId, returnNumber })
 }
 

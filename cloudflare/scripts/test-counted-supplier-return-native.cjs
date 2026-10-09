@@ -35,6 +35,9 @@ async function main() {
     for (const mode of ['normal','ack','late','condition','membership','physical','owner','active','actor','cache','zero','unsupported','repeated']) {
       const f=await h.world(make,tier,'zero',sql=>h.seed(mode==='zero'?0:.3,receipt)(sql))
       try {
+        const events=[]
+        f.env.BROADCAST_HUB={idFromName:name=>name,get:()=>({fetch:async request=>{events.push(String(request));return new Response('{}')}})}
+        f.env.CACHE={get:async()=>null,put:async()=>{throw new Error('KV unavailable')},delete:async()=>{}}
         const input=body(.1,'supplier-'+mode)
         const before=savedRows(f)
         if (mode==='ack') f.loseNextCommitAcknowledgement()
@@ -80,6 +83,9 @@ async function main() {
           const retry=await f.call('/returns/supplier',input)
           assert.equal(retry.status,200)
           assert.equal(retry.json.duplicate,true)
+          const versions=f.sql.prepare('SELECT namespace FROM cache_versions ORDER BY namespace').all().map(row=>row.namespace)
+          assert.deepEqual(versions,['products','returns','sales'],'canonical committed recovery must invalidate all shared views')
+          assert.equal(events.length,mode==='ack'?6:12,'three recovery view events reach both existing hubs without stock/history replay')
           assert.deepEqual(savedRows(f),committed,'canonical retry preserves original histories and physical values')
           assert.equal(committed.movements[0].user_name,'admin')
           assert.equal(committed.movements[0].unit_cost_usd,2)
@@ -147,6 +153,126 @@ async function main() {
       assert.equal(result.status,count===4?200:400)
       if(count===4){assert.equal(injected.size,6,'all cache quota/fallback and notification retry paths were counted');assert.equal(savedRows(f).items.length,4)}
       else {assert.equal(result.json.outcome,'not_dispatched');assert.deepEqual(savedRows(f),before);assert.equal(injected.size,0)}
+    } finally {f.sql.close()}
+  }
+  for (const tier of ['free','paid']) for (const mode of ['cold','retry-tail','wrong-kind','race-recovery','race-read-failure']) {
+    const f=await h.world(make,tier,'zero',sql=>h.seed(.3,true)(sql))
+    try {
+      const input=body(.1,'supplier-recovery-'+mode)
+      f.loseNextCommitAcknowledgement()
+      assert.equal((await f.call('/returns/supplier',input)).status,503)
+      const committed=savedRows(f), events=[]
+      f.env.BROADCAST_HUB={idFromName:name=>name,get:()=>({fetch:async(_request,options)=>{events.push(JSON.parse(options.body));return new Response('{}')}})}
+      f.env.CACHE={get:async()=>null,put:async()=>{throw new Error('KV unavailable')},delete:async()=>{}}
+      const injected=new Set()
+      if(mode==='retry-tail') {
+        f.sql.prepare("INSERT INTO quota_usage(resource,window_key,used,updated_at)VALUES('kv_write',?,9999,CURRENT_TIMESTAMP)").run(new Date().toISOString().slice(0,10))
+        const raw=f.env.DB
+        const group=text=>text.includes('quota_usage')?'quota':text.includes('cache_versions')?(text.includes('INSERT')?'cache-write':'cache-read'):null
+        const wrap=statement=>new Proxy(statement,{get(target,key){
+          if(key==='bind')return(...args)=>wrap(target.bind(...args))
+          if(['first','all','run'].includes(key))return async(...args)=>{
+            const result=await target[key](...args),kind=group(target.text||'')
+            if(kind&&!injected.has(kind)){injected.add(kind);throw new Error('D1_ERROR: simulated recovery read acknowledgement loss')}
+            return result
+          }
+          return target[key]
+        }})
+        f.env.DB=new Proxy(raw,{get(target,key){
+          if(key==='prepare')return text=>wrap(target.prepare(text))
+          if(key==='batch')return async statements=>{
+            const result=await target.batch(statements)
+            if(statements.some(row=>(row.text||'').includes('INSERT INTO cache_versions'))&&!injected.has('cache-write')){injected.add('cache-write');throw new Error('D1_ERROR: simulated recovery cache acknowledgement loss')}
+            return result
+          }
+          return target[key]
+        }})
+      }
+      const recoveryDb=f.env.DB
+      if(['race-recovery','race-read-failure'].includes(mode)) {
+        const raw=f.env.DB;let stale=false
+        const wrap=statement=>new Proxy(statement,{get(target,key){
+          if(key==='bind')return(...args)=>wrap(target.bind(...args))
+          if(key==='all')return async(...args)=>{
+            const result=await target.all(...args)
+            if(mode==='race-read-failure'&&(target.text||'').includes('SELECT id,return_number,return_scope'))throw new Error('D1_ERROR: unreadable canonical recovery')
+            if(!stale&&(target.text||'').includes('SELECT id, return_number, return_scope')){stale=true;return {...result,results:[]}}
+            return result
+          }
+          return target[key]
+        }})
+        f.env.DB=new Proxy(raw,{get(target,key){if(key==='prepare')return text=>wrap(target.prepare(text));return target[key]}})
+      }
+      if(mode==='wrong-kind')f.sql.prepare("UPDATE returns SET return_scope='customer',return_type='refund' WHERE id=1").run()
+      const before=savedRows(f);let recovered=await f.call('/returns/supplier',input)
+      if(mode==='race-read-failure'){
+        assert.equal(recovered.status,503);assert.equal(recovered.json.code,'supplier_return_outcome_unknown')
+        assert.deepEqual(savedRows(f),before);assert.equal(events.length,0)
+        f.env.DB=recoveryDb;recovered=await f.call('/returns/supplier',input)
+      }
+      assert.equal(recovered.status,mode==='wrong-kind'?409:200)
+      assert.deepEqual(savedRows(f),before,'recovery never dispatches physical or history writes')
+      if(mode==='wrong-kind'){assert.equal(recovered.json.code,'supplier_return_request_conflict');assert.equal(events.length,0);assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM cache_versions').get().n,0)}
+      else {
+        assert.equal(recovered.json.duplicate,true)
+        assert.deepEqual(events.map(event=>event.channel).sort(),['inventory','inventory','products','products','returns','returns'])
+        assert.deepEqual(f.sql.prepare('SELECT namespace FROM cache_versions ORDER BY namespace').all().map(row=>row.namespace),['products','returns','sales'])
+        assert.deepEqual(savedRows(f),committed)
+        if(mode==='retry-tail')assert.equal(injected.size,tier==='free'?3:2,'Free includes quota retries; Paid bypasses quota and retries the two cache reads/writes')
+      }
+    } finally {f.sql.close()}
+  }
+  for (const extraReads of [39,40,41]) {
+    const f=await h.world(make,'free','zero',sql=>h.seed(.3,true)(sql))
+    try {
+      const input=body(.1,'supplier-recovery-admission-'+extraReads)
+      f.loseNextCommitAcknowledgement()
+      assert.equal((await f.call('/returns/supplier',input)).status,503)
+      const before=savedRows(f),raw=f.env.DB,events=[],injected=new Set()
+      f.env.CACHE={get:async()=>null,put:async()=>{throw new Error('KV unavailable')},delete:async()=>{}}
+      f.env.BROADCAST_HUB={idFromName:name=>name,get:()=>({fetch:async()=>{events.push(1);return new Response('{}')}})}
+      let consumed=false
+      const group=text=>text.includes('quota_usage')?'quota':text.includes('cache_versions')?(text.includes('INSERT')?'cache-write':'cache-read'):null
+      const wrap=statement=>new Proxy(statement,{get(target,key){
+        if(key==='bind')return(...args)=>wrap(target.bind(...args))
+        if(['first','all','run'].includes(key))return async(...args)=>{
+          if(!consumed&&(target.text||'').includes('SELECT id, return_number, return_scope')) {
+            consumed=true
+            for(let n=0;n<extraReads;n++) {
+              // Real extra request reads, metered through the same public D1 hook as the provider adapter.
+              globalThis[Symbol.for('business-os.request-metrics.v1')].d1Start(1)
+              await raw.prepare('SELECT 1 AS consumed_request_read').first()
+            }
+          }
+          const result=await target[key](...args),kind=group(target.text||'')
+          if(kind&&!injected.has(kind)){injected.add(kind);throw new Error('D1_ERROR: simulated admission tail acknowledgement loss')}
+          return result
+        }
+        return target[key]
+      }})
+      f.env.DB=new Proxy(raw,{get(target,key){
+        if(key==='prepare')return text=>wrap(target.prepare(text))
+        if(key==='batch')return async statements=>{
+          const result=await target.batch(statements)
+          if(statements.some(row=>(row.text||'').includes('INSERT INTO cache_versions'))&&!injected.has('cache-write')){injected.add('cache-write');throw new Error('D1_ERROR: simulated admission cache acknowledgement loss')}
+          return result
+        }
+        return target[key]
+      }})
+      const recovered=await f.call('/returns/supplier',input)
+      console.log(JSON.stringify({recoveryAdmissionExtraReads:extraReads,status:recovered.status,tailClasses:[...injected]}))
+      assert.equal(recovered.status,extraReads<=39?200:503)
+      assert.deepEqual(savedRows(f),before)
+      if(extraReads<=39){assert.equal(injected.size,3);assert.equal(events.length,6)}
+      else {
+        assert.equal(recovered.json.code,'supplier_return_refresh_over_plan_budget')
+        assert.equal(recovered.json.outcome,'committed')
+        assert.equal(recovered.json.action,'retry_same_request')
+        assert.equal(events.length,0);assert.equal(injected.size,0)
+        f.env.DB=raw
+        assert.equal((await f.call('/returns/supplier',input)).status,200,'same key can complete refresh in a fresh invocation')
+        assert.deepEqual(savedRows(f),before)
+      }
     } finally {f.sql.close()}
   }
   console.log('counted supplier return ordinary entitlement/fraction/source/actor/atomic history/retry/admission/full failed tails: PASS')
