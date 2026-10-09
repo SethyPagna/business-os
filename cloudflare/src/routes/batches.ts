@@ -20,6 +20,7 @@ import { effectiveUnitCost } from '../lib/stockSessionMath'
 import { hasColumn } from '../lib/schemaProbe'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
 import { StockMutationBudgetError, withStockMutationReceipt, type StockMutationAtomicMark } from '../lib/stockMutationReceipt'
+import { stockRecoveryViews } from '../lib/stockRecoveryViews'
 import type { RequestMetrics } from '../lib/requestMetrics'
 import { getPlanLimits } from '../lib/planTier'
 import type { Env } from '../index'
@@ -246,7 +247,7 @@ export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody
         throw error
       }
     },
-    { requireReceipt: true, budget: (() => {
+    { requireReceipt: true, recovery: stockRecoveryViews(c.env), budget: (() => {
       const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
       // Receipt2 + result2 + audit2 + cache6; a price audit adds two.
       return metrics?.invocation ? { used: () => metrics.invocation.attemptedStatements, limit: getPlanLimits(c.env).d1QueriesPerInvocation,

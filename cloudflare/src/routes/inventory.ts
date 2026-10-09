@@ -1,4 +1,5 @@
 import { currentRequestMetrics, type RequestMetrics } from '../lib/requestMetrics'
+import { stockRecoveryViews } from '../lib/stockRecoveryViews'
 import { datedCountApplyIntent, datedCountApplyBudget, readDatedCountApplyReceipt, commitDatedCountApplyReceipt, DatedCountApplyReceiptError } from '../lib/datedStockCountApplyReceipt'
 import { canonicalOfflineSaleOwner, offlineSaleOwnerError } from '../lib/offlineSaleOwnership'
 import { getPlanLimits } from '../lib/planTier'
@@ -1577,7 +1578,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
         throw error
       }
     },
-    { requireReceipt: true, budget: (() => {
+    { requireReceipt: true, recovery: stockRecoveryViews(c.env), budget: (() => {
       const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
       // One retry each: receipt2 + result2 + audit2 + cache6 + Telegram4.
       // A changed selling price can add a second audit (two attempts).
@@ -3147,6 +3148,7 @@ async function runTaggedLotAction(c: InventoryContext, action: 'dispose' | 'rest
         throw error
       }
     },
+    { recovery: stockRecoveryViews(c.env) },
   )
 }
 

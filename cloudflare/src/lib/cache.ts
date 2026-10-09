@@ -186,7 +186,7 @@ export async function bumpVersion(env: Env, namespace: string): Promise<void> {
 
 // Missing KV versions share one D1 lookup and one set-based upsert. KV quota
 // admission covers all KV candidates once; per-key writes remain sequential.
-export async function bumpVersions(env: Env, namespaces: string[]): Promise<void> {
+export async function bumpVersions(env: Env, namespaces: string[], options: { requirePersistence?: boolean } = {}): Promise<void> {
   const unique = Array.from(new Set(namespaces.filter(Boolean)))
   if (!unique.length) return
 
@@ -231,7 +231,7 @@ export async function bumpVersions(env: Env, namespaces: string[]): Promise<void
       // One delete at the handoff. From this point, the D1 row above makes
       // the switch permanent even after the quota counter rolls into a new
       // day.
-      await env.CACHE.delete(versionKey).catch(() => {})
+      await env.CACHE.delete(versionKey).catch(error => { if (options.requirePersistence) throw error })
       continue
     }
 
@@ -243,14 +243,14 @@ export async function bumpVersions(env: Env, namespaces: string[]): Promise<void
       // replacing, then remove KV so readers cannot observe two competing
       // counters.
       d1Upserts.push({ namespace, minimumVersion: nextKv })
-      await env.CACHE.delete(versionKey).catch(() => {})
+      await env.CACHE.delete(versionKey).catch(error => { if (options.requirePersistence) throw error })
     }
   }
 
-  if (d1Upserts.length) await bumpVersionsInD1(env, d1Upserts)
+  if (d1Upserts.length) await bumpVersionsInD1(env, d1Upserts, options.requirePersistence)
 }
 
-async function bumpVersionsInD1(env: Env, entries: Array<{ namespace: string; minimumVersion: number }>): Promise<void> {
+async function bumpVersionsInD1(env: Env, entries: Array<{ namespace: string; minimumVersion: number }>, requirePersistence = false): Promise<void> {
   try {
     await getDb(env).batch([{
       sql: `INSERT INTO cache_versions (namespace, version, updated_at)
@@ -262,5 +262,6 @@ async function bumpVersionsInD1(env: Env, entries: Array<{ namespace: string; mi
     }])
   } catch (error) {
     console.error('[cache] could not advance versions in D1', entries.map((entry) => entry.namespace), error)
+    if (requirePersistence) throw error
   }
 }

@@ -126,7 +126,7 @@ type StockMutationClaim =
   | { state: 'replay'; status: number; body: Record<string, unknown> }
   | { state: 'conflict' }
   | { state: 'in_flight' }
-  | { state: 'partial' }
+  | { state: 'partial'; committed: boolean }
 
 /** Accept only a stable, bounded id. */
 function normalizeStockMutationRequestId(value: unknown): string | null {
@@ -216,6 +216,7 @@ async function receiptsAvailable(db: D1Compat): Promise<boolean> {
 }
 
 type ReceiptRow = {
+  kind: StockMutationKind
   request_json: string
   written: number | null
   response_status: number | null
@@ -225,7 +226,7 @@ type ReceiptRow = {
 
 async function readReceipt(db: D1Compat, actorId: number, requestId: string): Promise<ReceiptRow | undefined> {
   return db.prepare(
-    `SELECT request_json, written, response_status, response_json, completed_at
+    `SELECT kind, request_json, written, response_status, response_json, completed_at
        FROM stock_mutation_receipts WHERE actor_id=@actor AND request_id=@request`,
   ).get<ReceiptRow>({ actor: actorId, request: requestId })
 }
@@ -250,19 +251,20 @@ async function decideFromStoredReceipt(
   requestId: string,
   row: ReceiptRow,
   canonical: string,
+  kind: StockMutationKind,
 ): Promise<StockMutationClaim> {
-  if (row.request_json !== canonical) return { state: 'conflict' }
+  if (row.kind !== kind || row.request_json !== canonical) return { state: 'conflict' }
   const wrote = Number(row.written ?? 0) === 1
   if (row.completed_at && row.response_status != null) {
     // A stored FAILURE can only exist for a request that had already written
     // stock (see completeStockMutation's caller); it is never replayed as a
     // success, because the operator has to reconcile it by hand.
-    if (row.response_status >= 400) return { state: 'partial' }
+    if (row.response_status >= 400) return { state: 'partial', committed: wrote }
     let body: Record<string, unknown> = {}
     try { body = JSON.parse(row.response_json || '{}') as Record<string, unknown> } catch { body = {} }
     return { state: 'replay', status: row.response_status, body }
   }
-  if (wrote) return { state: 'partial' }
+  if (wrote) return { state: 'partial', committed: true }
   if (await reclaimStaleStockMutation(db, actorId, requestId)) return { state: 'claimed' }
   return { state: 'in_flight' }
 }
@@ -286,15 +288,15 @@ async function claimStockMutation(
     } catch (error) {
       const raced = await readReceipt(db, actorId, requestId)
       if (!raced) throw error
-      return decideFromStoredReceipt(db, actorId, requestId, raced, canonical)
+      return decideFromStoredReceipt(db, actorId, requestId, raced, canonical, kind)
     }
     const existing = await readReceipt(db, actorId, requestId)
     if (!existing) return { state: 'in_flight' }
-    return decideFromStoredReceipt(db, actorId, requestId, existing, canonical)
+    return decideFromStoredReceipt(db, actorId, requestId, existing, canonical, kind)
   }
   if (!requireReceipt && !await receiptsAvailable(db)) return { state: 'disabled' }
   const existing = await readReceipt(db, actorId, requestId)
-  if (existing) return decideFromStoredReceipt(db, actorId, requestId, existing, canonical)
+  if (existing) return decideFromStoredReceipt(db, actorId, requestId, existing, canonical, kind)
   try {
     await db.prepare(
       'INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json) VALUES(@actor,@request,@kind,@canonical)',
@@ -311,7 +313,7 @@ async function claimStockMutation(
       if (requireReceipt) throw error
       return { state: 'in_flight' }
     }
-    return decideFromStoredReceipt(db, actorId, requestId, raced, canonical)
+    return decideFromStoredReceipt(db, actorId, requestId, raced, canonical, kind)
   }
   return { state: 'claimed' }
 }
@@ -385,6 +387,11 @@ const STOCK_RECEIPT_UNAVAILABLE = {
 // permission checks -- scripts/test-acquisition-cost-access.cjs asserts
 // exactly that with a getDb() tripwire, and it is right to: a refusal that
 // opens a connection is a refusal that costs a round trip.
+export type StockMutationRecovery = {
+  canRun(additionalStatements: number): boolean
+  run(): Promise<void>
+}
+
 export async function withStockMutationReceipt(
   openDb: () => D1Compat,
   actorId: number | null | undefined,
@@ -392,7 +399,7 @@ export async function withStockMutationReceipt(
   body: Record<string, unknown>,
   json: (value: unknown, status?: number) => Response,
   run: (markWritten: () => Promise<void>, atomicMark: StockMutationAtomicMark) => Promise<Response>,
-  options: { requireReceipt?: boolean; budget?: { used: () => number; limit: number; reserve: number } } = {},
+  options: { requireReceipt?: boolean; budget?: { used: () => number; limit: number; reserve: number }; recovery?: StockMutationRecovery } = {},
 ): Promise<Response> {
   const supplied = body.client_request_id ?? body.clientRequestId
   const requestId = normalizeStockMutationRequestId(supplied)
@@ -407,6 +414,25 @@ export async function withStockMutationReceipt(
   if (actorId == null) return options.requireReceipt ? json(STOCK_RECEIPT_UNAVAILABLE, 503) : run(async () => {}, NO_ATOMIC_MARK)
   const db = openDb()
   const canonical = canonicalStockMutationRequest(body)
+  const recoverViews = async (confirmed = false, pendingStatements = 0) => {
+    const recovery = options.recovery
+    if (!recovery?.canRun(pendingStatements + (confirmed ? 0 : 2))) return
+    try {
+      if (!confirmed) {
+        const receipt = await readReceipt(db, actorId, requestId)
+        if (receipt?.kind !== kind || receipt.request_json !== canonical || Number(receipt.written) !== 1) return
+      }
+      if (recovery.canRun(pendingStatements)) await recovery.run()
+    } catch {
+      // The original receipt remains available for a later recovery attempt.
+    }
+  }
+  const unknownOutcome = async () => {
+    // Acknowledged kernels may already have audit/cache work in flight.
+    // Keep their original tail allowance until a later receipt-only retry.
+    await recoverViews(false, wrote ? (options.budget?.reserve ?? 10) : 0)
+    return json(STOCK_MUTATION_UNKNOWN, 503)
+  }
   let claim: StockMutationClaim
   try { claim = await claimStockMutation(db, actorId, requestId, kind, canonical, options.requireReceipt) }
   catch (error) {
@@ -416,7 +442,10 @@ export async function withStockMutationReceipt(
   if (claim.state === 'disabled') return options.requireReceipt ? json(STOCK_RECEIPT_UNAVAILABLE, 503) : run(async () => {}, NO_ATOMIC_MARK)
   if (claim.state === 'conflict') return json(STOCK_MUTATION_CONFLICT, 409)
   if (claim.state === 'in_flight') return json(STOCK_MUTATION_IN_FLIGHT, 409)
-  if (claim.state === 'partial') return json(STOCK_MUTATION_PARTIAL, 409)
+  if (claim.state === 'partial') {
+    if (claim.committed) await recoverViews(true)
+    return json(STOCK_MUTATION_PARTIAL, 409)
+  }
   if (claim.state === 'replay') return json({ ...claim.body, replayed: true }, claim.status)
 
   let wrote = false
@@ -448,14 +477,14 @@ export async function withStockMutationReceipt(
       return json(stockTransactionRefusal(error)!, 503)
     }
     if (error instanceof StockMutationBudgetError) {
-      if (wrote || dispatched) return json(STOCK_MUTATION_UNKNOWN, 503)
+      if (wrote || dispatched) return unknownOutcome()
       await releaseStockMutation(db, actorId, requestId)
       return json(STOCK_MUTATION_BUDGET, 503)
     }
     if (wrote || dispatched) {
       if (wrote) await completeStockMutation(db, actorId, requestId, 503, STOCK_MUTATION_UNKNOWN).catch(() => {})
       else await releaseStockMutation(db, actorId, requestId).catch(() => {})
-      return json(STOCK_MUTATION_UNKNOWN, 503)
+      return unknownOutcome()
     }
     await releaseStockMutation(db, actorId, requestId)
     throw error
@@ -468,7 +497,7 @@ export async function withStockMutationReceipt(
     if (dispatched && response.status !== 409 && (wrote || !rolledBack)) {
       if (wrote) await completeStockMutation(db, actorId, requestId, 503, STOCK_MUTATION_UNKNOWN).catch(() => {})
       else await releaseStockMutation(db, actorId, requestId).catch(() => {})
-      return json(STOCK_MUTATION_UNKNOWN, 503)
+      return unknownOutcome()
     }
     if (!wrote) {
       await releaseStockMutation(db, actorId, requestId)
@@ -478,12 +507,13 @@ export async function withStockMutationReceipt(
     // is told exactly that, rather than being invited to apply the delta again.
     const failed = await response.clone().json().catch(() => ({})) as Record<string, unknown>
     try { await completeStockMutation(db, actorId, requestId, response.status, failed) }
-    catch { return json(STOCK_MUTATION_UNKNOWN, 503) }
+    catch { return unknownOutcome() }
+    await recoverViews(false, options.budget?.reserve ?? 10)
     return response
   }
   const stored = await response.clone().json().catch(() => ({})) as Record<string, unknown>
   try { await completeStockMutation(db, actorId, requestId, response.status, stored) }
-  catch { return json(STOCK_MUTATION_UNKNOWN, 503) }
+  catch { return unknownOutcome() }
   return response
 }
 
