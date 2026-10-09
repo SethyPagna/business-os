@@ -64,6 +64,10 @@ async function main() {
       reason,condition_tag,source,unit_cost_usd) VALUES
       (9201,9001,'Original keeper',901,NULL,1,0,'Cleared tag','damaged','adjustment',1.0000000000000002),
       (9202,9002,'Original discarded',901,9102,2,0,'Sold tag','damaged','return',0.30000000000000004);
+    INSERT INTO product_cost_entries(id,product_id,cost_usd,cost_khr,source,user_id,user_name,baseline_batch_id,created_at,previous_cost_usd)
+      VALUES(9301,9001,1.0000000000000002,0,'manual',17,'អ្នកប្រើ',9101,'2026-10-01',0.30000000000000004),
+        (9302,9002,0,NULL,'manual',NULL,NULL,0,'2026-09-01',NULL),
+        (9303,9002,0.30000000000000004,1.0000000000000002,'manual',18,'Original source',9102,'2026-10-01',1.0000000000000002);
     INSERT INTO products(id,name,is_active,stock_quantity) VALUES(9003,'Legacy fraction',1,0.30000000000000004);
     INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(9003,901,0.30000000000000004);
     INSERT INTO product_batches(id,variant_product_id,batch_key,unit_cost_usd) VALUES(9104,9003,'legacy-fraction',1.0000000000000002);
@@ -97,6 +101,8 @@ async function main() {
     'discarded receipts retain all original metadata, types and exact costs')
   assert.deepEqual(snapshot.damagedStockRows, d1.prepare('SELECT * FROM damaged_stock_lots WHERE product_id IN (9001,9002) ORDER BY id').all().map(row => ({ ...row })))
   assert.deepEqual(Object.keys(snapshot.damagedStockRows[0]), d1.prepare('PRAGMA table_info(damaged_stock_lots)').all().map(row => row.name), 'complete current tag metadata and schema order retained')
+  assert.deepEqual(snapshot.productCostRows, d1.prepare('SELECT * FROM product_cost_entries WHERE product_id IN (9001,9002) ORDER BY id').all().map(row => ({ ...row })), 'all manual cost history forboth source products preserves exact rows/types')
+  assert.deepEqual(Object.keys(snapshot.productCostRows[0]), d1.prepare('PRAGMA table_info(product_cost_entries)').all().map(row => row.name), 'complete current manual cost schema order retained')
   assert.deepEqual(snapshot.duplicateImageRows.map((row) => row.image_path), ['/uploads/tea.webp'])
   assert.deepEqual(snapshot.canonicalBatchRows, d1.prepare('SELECT * FROM product_batches WHERE variant_product_id=9001 ORDER BY id').all().map(row => ({ ...row })))
   assert.deepEqual(Object.keys(snapshot.canonicalBatchRows[0]), d1.prepare('PRAGMA table_info(product_batches)').all().map(row => row.name), 'complete current metadata and schema order retained')
@@ -117,6 +123,9 @@ async function main() {
   for (const bad of [[], [...envelope, ...envelope], [{ data: null }], [{ data: '{' }],
     changeCapture(data => { delete data.duplicateStock }),
     changeCapture(data => { data.unknown = [] }),
+    changeCapture(data => { delete data.productCosts }),
+    changeCapture(data => { data.productCosts[0].pop() }),
+    changeCapture(data => { data.productCosts[0][2] = { amount: 1 } }),
     changeCapture(data => { data.duplicateStock = null }),
     changeCapture(data => { data.duplicateStock[0].pop() }),
     changeCapture(data => { data.duplicateStock[0][1] = { quantity: 3 } }),
@@ -127,6 +136,7 @@ async function main() {
     changeCapture(data => { data.duplicateStock[0][1] = ['other', '3'] }),
   ]) assert.throws(() => decode(bad), /merge_snapshot_incomplete/)
   assert.throws(() => decode([{ data: null, oversized: 1 }]), /merge_case_snapshot_limit/)
+  assert.throws(() => decode(changeCapture(data => { data.productCosts = Array.from({ length: 10001 }, (_, id) => [id,9001,1,0,'manual',null,null,0,'2026-10-01',null]) })), /merge_case_snapshot_limit/)
   assert.throws(() => decode(changeCapture(data => { data.childProducts = Array.from({ length: 10001 }, (_, id) => [id]) })), /merge_case_snapshot_limit/)
   assert.throws(() => decode(changeCapture(data => { data.duplicateImages = [['x'.repeat(512 * 1024), 0]] })), /merge_case_snapshot_limit/)
   assert.throws(() => planProductMergeCaseSnapshot(9001, 9002, [{ table: 'products; DROP TABLE products', column: 'id' }]), /merge_snapshot_invalid_table/)

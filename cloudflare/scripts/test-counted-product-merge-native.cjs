@@ -1,8 +1,59 @@
 const assert = require('node:assert/strict')
 const h = require('./test-counted-quantity-exact-native.cjs')
 
+async function costCaptureRivals(worker, modes = ['keeper-cost', 'duplicate-cost', 'keeper-baseline', 'duplicate-baseline', 'older-metadata', 'new-latest', 'empty-keeper']) {
+  for (const mode of modes) {
+    const f = await h.world(worker, 'paid', 'zero', sql => {
+      h.seed(1, true)(sql)
+      sql.exec(`UPDATE products SET name='Merge twin',barcode='MERGE-1' WHERE id=1;
+        INSERT INTO products(id,name,barcode,is_active,stock_quantity,cost_price_usd) VALUES(2,'Merge twin','MERGE-1',1,2,2);
+        INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,2);
+        INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,unit_cost_usd,is_active) VALUES(2,2,'set-first','2026-10-09',2,1);
+        INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(2,1,2);
+        INSERT INTO product_cost_entries(id,product_id,cost_usd,cost_khr,source,user_id,user_name,baseline_batch_id,created_at,previous_cost_usd)
+          VALUES(10,1,2,8000,'manual',7,'admin',0,'2026-09-01',NULL),(11,1,2,8000,'manual',7,'admin',1,'2026-10-01',2),
+            (20,2,2,8000,'manual',7,'admin',0,'2026-09-01',NULL),(21,2,2,8000,'manual',7,'admin',2,'2026-10-01',2);`)
+      if (mode === 'empty-keeper') sql.exec('DELETE FROM product_cost_entries WHERE product_id=1')
+    })
+    try {
+      const protectedState = () => Object.fromEntries(['products', 'product_batches', 'branch_stock', 'branch_batch_stock',
+        'inventory_movements', 'action_history', 'undo_snapshots', 'audit_logs'].map(table => [table, f.sql.prepare(`SELECT * FROM ${table} ORDER BY id`).all()]))
+      const before = protectedState()
+      const rival = mode === 'keeper-cost' ? 'UPDATE product_cost_entries SET cost_usd=1.0000000000000002 WHERE id=11'
+        : mode === 'duplicate-cost' ? 'UPDATE product_cost_entries SET cost_usd=1.0000000000000002 WHERE id=21'
+        : mode === 'keeper-baseline' ? 'UPDATE product_cost_entries SET baseline_batch_id=0 WHERE id=11'
+        : mode === 'duplicate-baseline' ? 'UPDATE product_cost_entries SET baseline_batch_id=0 WHERE id=21'
+        : mode === 'older-metadata' ? "UPDATE product_cost_entries SET source='historical-rival',previous_cost_usd=.30000000000000004 WHERE id=10"
+        : "INSERT INTO product_cost_entries(id,product_id,cost_usd,cost_khr,source,baseline_batch_id) VALUES(99,1,2,8000,'manual',1)"
+      let injected = false
+      const raw = f.env.DB
+      f.env.DB = new Proxy(raw, { get(target, key) {
+        if (key === 'batch') return async statements => {
+          if (!injected && statements.some(statement => /INSERT INTO system_flags/.test(statement.text) && /stock_transaction_permit/.test(statement.text))) {
+            injected = true
+            f.competeBeforeCommit([{ sql: rival }])
+          }
+          return target.batch(statements)
+        }
+        return target[key]
+      } })
+      const result = await f.call('/products/possible-duplicates/merge', { keepId: 1, mergeId: 2, stock: 'merge' })
+      assert.equal(injected, true, mode + ' rival must land after coherent capture')
+      assert.equal(result.status, 409, mode + ' manual history must invalidate capture')
+      assert.equal(result.json.code, 'merge_conflict_retry')
+      assert.deepEqual(protectedState(), before, mode + ' leaves every merge domain row unchanged')
+      if (mode.endsWith('-cost')) assert.equal(f.sql.prepare('SELECT cost_usd FROM product_cost_entries WHERE id=?').get(mode.startsWith('keeper') ? 11 : 21).cost_usd, 1.0000000000000002)
+      else if (mode.endsWith('-baseline')) assert.equal(f.sql.prepare('SELECT baseline_batch_id FROM product_cost_entries WHERE id=?').get(mode.startsWith('keeper') ? 11 : 21).baseline_batch_id, 0)
+      else if (mode === 'older-metadata') assert.equal(f.sql.prepare('SELECT previous_cost_usd FROM product_cost_entries WHERE id=10').get().previous_cost_usd, .30000000000000004)
+      else assert.equal(f.sql.prepare('SELECT product_id FROM product_cost_entries WHERE id=99').get().product_id, 1)
+    } finally { f.sql.close() }
+  }
+  console.log('PASS complete manual cost history: ' + modes.length + ' Paid captured-row/baseline/older/newlatest/empty-source rivals')
+}
+
 async function main() {
   const worker = await h.bundle.exports.bundleWorker()
+  if (process.argv.includes('--cost-only')) return costCaptureRivals(worker)
   for (const { receipt, first, second, total } of [
     { receipt: false, first: 1, second: 2, total: 3 }, { receipt: true, first: 1, second: 2, total: 3 },
     { receipt: false, first: 0.1, second: 0.2, total: 0.3 }, { receipt: true, first: 0.1, second: 0.2, total: 0.3 },
@@ -143,7 +194,9 @@ async function main() {
       else assert.equal(f.sql.prepare('SELECT unit_cost_usd FROM damaged_stock_lots WHERE id=?').get(fault === 'keeper-tag-cost' ? 1 : 2).unit_cost_usd, 1.0000000000000002)
     } finally { f.sql.close() }
   }
+  await costCaptureRivals(worker)
   console.log('PASS merge exact forward: 14 Paid integer/fractional/multi-branch/zero/race/provenance/rollback worlds; history/replay/Free closure remains separate')
 }
 
-main().catch(error => { console.error(error); process.exitCode = 1 })
+module.exports = { costCaptureRivals }
+if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })

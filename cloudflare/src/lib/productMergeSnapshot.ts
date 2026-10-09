@@ -39,6 +39,7 @@ export type ProductMergeCaseSnapshot = {
   canonicalBatchStockRows: ProductMergeBatchStockRow[]
   duplicateBatchStockRows: ProductMergeBatchStockRow[]
   damagedStockRows: Array<Record<string, unknown>>
+  productCostRows: Array<Record<string, unknown>>
   duplicateStockRows: ProductMergeStockRow[]
   canonicalStockBefore: ProductMergeStockRow[]
   canonicalProduct: ProductMergeProductRow | undefined
@@ -124,6 +125,8 @@ const BATCH_COLUMNS = ['id', 'variant_product_id', 'batch_key', 'lot_code', 'exp
   'payment_status', 'credit_due_date', 'unit_cost_usd', 'received_quantity', 'received_branch_id',
   'received_cost_usd', 'received_branch_name']
 const BATCH_STOCK_COLUMNS = ['id', 'batch_id', 'branch_id', 'quantity', 'created_at', 'updated_at']
+const PRODUCT_COST_COLUMNS = ['id', 'product_id', 'cost_usd', 'cost_khr', 'source', 'user_id', 'user_name',
+  'baseline_batch_id', 'created_at', 'previous_cost_usd']
 const DAMAGED_STOCK_COLUMNS = ['id', 'product_id', 'product_name', 'branch_id', 'batch_id', 'return_id',
   'quantity', 'quantity_remaining', 'reason', 'created_by_user_id', 'created_by_user_name', 'created_at',
   'updated_at', 'condition_tag', 'source', 'unit_cost_usd', 'return_item_id']
@@ -236,6 +239,8 @@ export function planProductMergeCaseSnapshot(
         (SELECT COUNT(*) FROM branch_batch_stock WHERE batch_id = product_batches.id) AS lot_stock_rows
         FROM product_batches WHERE variant_product_id=@duplicateId ORDER BY id`,
     },
+    { key: 'productCosts', columns: PRODUCT_COST_COLUMNS, sql: `SELECT ${PRODUCT_COST_COLUMNS.join(',')}
+      FROM product_cost_entries WHERE product_id IN (@keeperId,@duplicateId) ORDER BY id` },
     { key: 'damagedStock', columns: DAMAGED_STOCK_COLUMNS, sql: `SELECT ${DAMAGED_STOCK_COLUMNS.join(',')}
       FROM damaged_stock_lots WHERE product_id IN (@keeperId,@duplicateId) ORDER BY id` },
     { key: 'duplicateImages', columns: ['image_path', 'sort_order'], sql: 'SELECT image_path,sort_order FROM product_images WHERE product_id=@duplicateId ORDER BY sort_order,id' },
@@ -264,6 +269,7 @@ export function planProductMergeCaseSnapshot(
       canonicalBatchStockRows: asRows<ProductMergeBatchStockRow>('canonicalBatchStock'),
       duplicateBatchStockRows: asRows<ProductMergeBatchStockRow>('duplicateBatchStock'),
       damagedStockRows: asRows<Record<string, unknown>>('damagedStock'),
+      productCostRows: asRows<Record<string, unknown>>('productCosts'),
       duplicateStockRows: asRows<ProductMergeStockRow>('duplicateStock'),
       canonicalStockBefore: asRows<ProductMergeStockRow>('canonicalStock'),
       canonicalProduct: asRows<ProductMergeProductRow>('canonicalProduct')[0],
