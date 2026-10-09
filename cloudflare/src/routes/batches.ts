@@ -259,7 +259,7 @@ export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody
 async function receiveCountedBatchStock(db: ReturnType<typeof getDb>, input: Parameters<typeof receiveBatchStock>[1]): ReturnType<typeof receiveBatchStock> {
   const target = await prepareReceiptLotTarget(db, input)
   const batchId = target.existingBatchId
-  const receiptSnapshotSql = `(SELECT json_group_array(json_array(id,received_quantity,received_cost_usd,supplier_id,supplier_name,payment_status,credit_due_date,notes,received_branch_id,received_branch_name)) FROM (
+  const receiptSnapshotSql = `(SELECT json_group_array(json_array(id,received_quantity,received_cost_usd,supplier_id,supplier_name,payment_status,credit_due_date,notes,received_branch_id,received_branch_name,variant_product_id,batch_key,lot_code,expiry_date,received_at,is_active,batch_number,unit_cost_usd,created_at,updated_at)) FROM (
     SELECT * FROM product_batches WHERE variant_product_id=@productId ORDER BY id LIMIT 10001))`
   const observed = await db.prepare(`SELECT ${countedStockFactsSql('@productId','@branchId','@additionalReceiptIds')} AS facts,${receiptSnapshotSql} AS receipts`)
     .get<{facts:string;receipts:string}>({productId:input.productId,branchId:input.branchId,additionalReceiptIds:JSON.stringify(batchId == null ? [] : [batchId])})
