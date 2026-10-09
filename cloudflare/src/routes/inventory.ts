@@ -6,7 +6,7 @@ import { ProductStockGuardError, productStockGuardError, productHasStockSql, pro
 import { ReceivingBranchError, requireReceivingBranch, receivingBranchAssertion, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from '../lib/receivingBranch'
 import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
-import { getDb, type D1Compat } from '../lib/db'
+import { getDb, isRetryableD1Error, type D1Compat } from '../lib/db'
 import { ordinaryBusinessBatch, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
 import { executeStockTransaction, stockTransactionRefusal, StockTransactionOutcomeUnknownError } from '../lib/stockTransaction'
 
@@ -40,7 +40,8 @@ import { MoneyPrecisionError } from '../lib/moneyPrecision'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
-import { findIdentityMatch, identityBarcodeKey, type ProductIdentityRow } from '../lib/productIdentity'
+import { findIdentityMatch, identityBarcodeKey, identityBarcodeMatchSql, type ProductIdentityRow } from '../lib/productIdentity'
+import { normalizeProductGroupName } from '../lib/productDetailRule'
 import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery, parseRankedIds } from '../lib/productSearchQuery'
 import { fifoRemovalAllocations, isStockRemovalConflict, isReceiptSellingPriceConflict, RECEIPT_SELLING_PRICE_CHANGED, listBatchesForProduct, parseReceiptSellingPrice, planBranchStockRemoval, planReceiptSellingPrice, planReceiveBatchStock, planRemoveStockAcrossBatches, prepareReceiptLotTarget, resolveReceiptLotTarget, removeStockFromBatch, InsufficientBatchStockError, type ReceiptSellingPriceRow, type StockWriteStatement } from '../lib/productBatches'
@@ -1323,6 +1324,20 @@ const STOCK_ROW_COLUMNS = `id, name, sku, barcode, category, brand, unit, descri
   purchase_price_usd, purchase_price_khr, cost_price_usd, cost_price_khr,
   low_stock_threshold, out_of_stock_threshold`
 
+function inventorySourcePreimage(rows: readonly ({ id: number } & object)[]) {
+  const params: Record<string, unknown> = {}
+  const columns = new Set([...STOCK_ROW_COLUMNS.split(',').map(column => column.trim()), 'is_active'])
+  const sql = rows.map((row, index) => {
+    const fields = Object.entries(row).filter(([field, value]) => columns.has(field) && value !== undefined)
+    return `EXISTS(SELECT 1 FROM products WHERE ${fields.map(([field, value], fieldIndex) => {
+      const key = `intakeSource${index}Field${fieldIndex}`
+      params[key] = value
+      return `${field} IS @${key}`
+    }).join(' AND ')})`
+  }).join(' AND ')
+  return { sql, params }
+}
+
 // Sets purchase_price_* and cost_price_* to the same value -- the single
 // "Cost" input the frontend now sends. Kept as its own function (rather
 // than inlined at each write site) so every write path that used to ask
@@ -1346,6 +1361,7 @@ function mirrorCostFields(usd: number, khr: number) {
 // brand-new sibling row created to hold a barcode nothing else has.
 async function resolveAddStockTarget(
   env: Env,
+  user: SessionUser,
   source: StockRowFields,
   overrides: {
     sellingUsd: number; sellingKhr: number
@@ -1454,10 +1470,27 @@ async function resolveAddStockTarget(
     stock_quantity: 0,
   }
   const columns = Object.keys(insertPayload)
-  const [result] = await executeStockTransaction(db, [{ sql: `
-    INSERT INTO products (${columns.join(', ')}, created_at, updated_at)
-    VALUES (${columns.map((col) => `@${col}`).join(', ')}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-  `, params: insertPayload }], 'retry')
+  const original = inventorySourcePreimage([source])
+  const barcodeMatch = identityBarcodeMatchSql('barcode', overrides.barcode)
+  const name = `CASE WHEN EXISTS(SELECT 1 FROM products WHERE id=@sourceId AND is_active IS NOT 1)
+    THEN json_extract('[]','$[product_has_stock]')
+    WHEN (${stockActorPredicate}) AND (${original.sql}) AND NOT EXISTS(
+      SELECT 1 FROM products WHERE id!=@sourceId AND name_key=@nameKey AND is_active=1
+      ${barcodeMatch ? `AND ${barcodeMatch.sql}` : ''})
+    THEN @name ELSE json_extract('[1]','$[counted_quantity_conflict]') END`
+  let result: D1Result
+  try {
+    const results = await executeStockTransaction(db, [{ sql: `
+      INSERT INTO products (${columns.join(', ')}, created_at, updated_at)
+      VALUES (${columns.map(col => col === 'name' ? name : `@${col}`).join(', ')}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `, params: { ...insertPayload, ...stockActorParams(user), ...original.params, ...barcodeMatch?.params,
+      sourceId: source.id, nameKey: normalizeProductGroupName(source.name) } }], 'once')
+    result = results[0]
+  } catch (error) {
+    if (isRetryableD1Error(error)) throw new StockTransactionOutcomeUnknownError()
+    throw error
+  }
+  if (!Number.isSafeInteger(Number(result.meta.last_row_id)) || Number(result.meta.last_row_id) <= 0) throw new StockTransactionOutcomeUnknownError()
   return { product: { id: Number(result.meta.last_row_id), name: source.name, ...cost }, created: true }
 }
 
@@ -1616,23 +1649,14 @@ async function planInventoryReceipt(db: D1Compat, input: Parameters<typeof planR
   if (batchId != null && (!before || (correction && before.unit_cost_usd !== correction.unit_cost_usd))) throw new CountedStockConflictError()
   const group = new CountedStockBatchPlan([{ facts: observed.facts, branchId: input.branchId }])
   const exact = group.get(Number(input.productId), input.branchId)
-  const originalParams: Record<string, unknown> = {}
-  const sourceColumns = new Set([...STOCK_ROW_COLUMNS.split(',').map(column => column.trim()), 'is_active'])
-  const originals = originalProducts.map((row, index) => {
-    const fields = Object.entries(row).filter(([field, value]) => sourceColumns.has(field) && value !== undefined)
-    return `EXISTS(SELECT 1 FROM products WHERE ${fields.map(([field, value], fieldIndex) => {
-      const key = `intakeSource${index}Field${fieldIndex}`
-      originalParams[key] = value
-      return `${field} IS @${key}`
-    }).join(' AND ')})`
-  }).join(' AND ')
+  const original = inventorySourcePreimage(originalProducts)
   const reservedBatchId = batchId == null ? observed.maximumId + 1 : undefined
   const guards: StockWriteStatement[] = [
     { sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products WHERE id IN (SELECT value FROM json_each(@sourceProductIds)) AND is_active IS NOT 1)
-      THEN json_extract('[]','$[product_has_stock]') WHEN ${receiptSnapshotSql}=@receipts AND ${baselineSql}=@baseline AND (${stockActorPredicate}) AND (${originals})
+      THEN json_extract('[]','$[product_has_stock]') WHEN ${receiptSnapshotSql}=@receipts AND ${baselineSql}=@baseline AND (${stockActorPredicate}) AND (${original.sql})
       ${reservedBatchId == null ? '' : 'AND NOT EXISTS(SELECT 1 FROM product_batches WHERE id=@reservedBatchId)'}
       THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`,
-    params: { ...stockActorParams(user), ...originalParams, productId: input.productId, receipts: observed.receipts, baseline: observed.baseline,
+    params: { ...stockActorParams(user), ...original.params, productId: input.productId, receipts: observed.receipts, baseline: observed.baseline,
       sourceProductIds: JSON.stringify(originalProducts.map(row => row.id)), ...(reservedBatchId == null ? {} : { reservedBatchId }) } },
     ...group.takePreimageGuards()]
   const metadata = correction ? null : planReceiveBatchStock({ ...input, batchId, receiptLotTarget: target!,
@@ -1974,7 +1998,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     }
     let resolved: Awaited<ReturnType<typeof resolveAddStockTarget>>
     try {
-      resolved = await resolveAddStockTarget(c.env, source, overrides, async (target) => {
+      resolved = await resolveAddStockTarget(c.env, user, source, overrides, async (target) => {
         const targetCostUsd = target.cost_price_usd ?? null
         const targetCostKhr = target.cost_price_khr ?? null
         preflightAddMovementCost = resolveMovementCostSnapshot({
