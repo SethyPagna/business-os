@@ -1,5 +1,5 @@
 import { planTaggedSaleSourceChange } from './saleLineAddition'
-import { ordinaryNullCapacityGuard, type CountedTaggedIdentity } from './countedDamagedStock'
+import { ordinaryNullCapacityGuard, subtractCountedQuantity, type CountedTaggedIdentity } from './countedDamagedStock'
 import { productStockGuardStatement } from './productStockGuard'
 // K2 (Part 410, 11.12/11.13): the kernel for the NEW return stock semantics
 // -- the three-way per-item chooser and Replace. The locked design notes
@@ -208,7 +208,7 @@ export function planReturnLot(input: {
     const give = Math.min(Math.max(0, Number(alloc.outstanding) || 0), remaining)
     if (give <= 0) continue
     splits.push({ batchId: Number(alloc.batch_id), quantity: give })
-    remaining -= give
+    remaining = subtractCountedQuantity(remaining, [give])
   }
   if (remaining > 0 && input.saleLineBatchId != null) {
     splits.push({ batchId: Number(input.saleLineBatchId), quantity: remaining })
