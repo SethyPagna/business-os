@@ -49,8 +49,10 @@ import { productStockGuardStatement, productStockGuardError } from './productSto
 //
 //   undo   L -= d   B -= e   P -= e    refused whole when L - d < 0 or B - e < 0
 //   redo   L += d   B += e   P += e    refused whole when L + d < 0 or B + e < 0
-//   tagged undo also takes |d| back out of THIS generation's held row and is
-//   refused unless that row still holds exactly |d| (not disposed of).
+//   A converted historical tagged Set changes only its exact tagged subset.
+//   Undo clears the original tag; redo restores it within current capacity.
+//   Neither credits physical stock again. The conversion journal proves its
+//   original product/branch/receipt/tag identity; consumed units refuse undo.
 //
 // Later changes on the same branch (a sale of another lot, a receipt, a
 // revert) no longer block the replay; only a lot or branch that cannot cover
@@ -77,7 +79,7 @@ import { executeStockTransaction, StockTransactionUnavailableError, StockTransac
 import { requireReceivingBranch, receivingBranchAssertion, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from './receivingBranch'
 import { resolveMovementCostSnapshot, type MovementCostPair } from './movementCostSnapshot'
 import { planHoldAsTagged } from './damagedLotActions'
-import { ordinarySubsetSql } from './countedDamagedStock'
+import { ordinarySubsetSql, tagCapacityGuard } from './countedDamagedStock'
 import type { StockWriteStatement } from './productBatches'
 import type { StockConditionTag } from './stockCondition'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
@@ -547,6 +549,10 @@ export async function replayStockLotSet(
   const row = await db.prepare('SELECT * FROM stock_lot_adjustment_operations WHERE id=@operation AND history_id=@history')
     .get<OperationRow>({ operation: String(payload.operation_id || ''), history: historyId })
   if (!row) throw new StockLotSetReplayError('This stock correction has no exact stock provenance.')
+  const request = JSON.parse(row.request_json) as StockLotSetRequest
+  if (request.conditionTag && (typeof generation !== 'number' || !Number.isSafeInteger(generation) || generation < 0)) {
+    throw new StockLotSetReplayError('A stock correction generation is required.')
+  }
   // Older clients send no expected_generation; the payload's own generation is
   // then the expectation, still guarded against the row below.
   const expected = generation == null ? Number(payload.generation) : Number(generation)
@@ -558,7 +564,6 @@ export async function replayStockLotSet(
   if (row.generation !== expected || Number(payload.generation) !== expected || row.state !== oldState) {
     throw new StockLotSetReplayError('This stock correction generation is stale. Refresh its history.')
   }
-  const request = JSON.parse(row.request_json) as StockLotSetRequest
   const before = JSON.parse(row.before_json) as Snapshot
   const after = JSON.parse(row.after_json) as Snapshot
   const revision = JSON.parse(row.revision_json || '{}') as { heldLotId?: number; unitCostUsd?: number | null }
@@ -577,15 +582,15 @@ export async function replayStockLotSet(
   const lotDelta = after.lotQuantity - before.lotQuantity
   const branchDelta = after.branchQuantity - before.branchQuantity
   const sign = direction === 'undo' ? -1 : 1
-  const lotChange = sign * lotDelta
-  const branchChange = sign * branchDelta
   const tagged = lotDelta < 0 && !!request.conditionTag
+  const lotChange = tagged ? 0 : sign * lotDelta
+  const branchChange = tagged ? 0 : sign * branchDelta
   const effect: Effect = {
     productName: facts?.product_name || `#${before.productId}`, branchName: facts?.branch_name ?? null,
     unitCostUsd: revision.unitCostUsd ?? null, lotDelta, tag: request.conditionTag,
     reason: `${direction === 'undo' ? 'Undo' : 'Redo'}: ${request.reason} (${setNote(request, before, after, facts?.received_at ?? null)})`,
   }
-  if (direction === 'undo' && tagged && !(Number(revision.heldLotId) > 0)) {
+  if (tagged && !(Number(revision.heldLotId) > 0)) {
     throw new StockLotSetReplayError('The held row of this correction is unknown, so it cannot be reversed exactly.')
   }
   // Read first for a clean answer; deltaStatements' guard is what enforces it.
@@ -615,12 +620,21 @@ export async function replayStockLotSet(
     operation: row.id, history: historyId, generation: expected, next, target, oldState,
     status: direction === 'undo' ? 'redoable' : 'undoable', oldStatus: direction === 'undo' ? 'undoable' : 'redoable',
     forward: stockSetReference(row.id, expected), heldLotId: Number(revision.heldLotId) || 0, held: Math.abs(lotDelta),
+    product: before.productId, branch: before.branchId, batch: before.batchId, tag: request.conditionTag,
   }
   const statements: Statement[] = [
     guard(`EXISTS(SELECT 1 FROM stock_lot_adjustment_operations o JOIN action_history h ON h.id=o.history_id
       WHERE o.id=@operation AND h.id=@history AND o.generation=@generation AND o.state=@oldState AND h.status=@oldStatus
       AND json_extract(h.undo_payload,'$.operation_id')=@operation AND json_extract(h.undo_payload,'$.generation')=@generation)`, params),
   ]
+  if (tagged) {
+    statements.push(productStockGuardStatement([before.productId], 'active'))
+    statements.push(guard(`EXISTS(SELECT 1 FROM damaged_stock_lots d JOIN counted_stock_conversion_lots c ON c.lot_id=d.id
+      WHERE d.id=@heldLotId AND d.product_id=@product AND d.branch_id=@branch AND d.batch_id IS @batch AND d.condition_tag=@tag
+      AND c.product_id=d.product_id AND c.branch_id=d.branch_id AND c.batch_id IS d.batch_id AND c.condition_tag=d.condition_tag
+      AND d.quantity=@held AND d.quantity_remaining=${direction === 'undo' ? '@held' : '0'})`, params))
+    if (direction === 'redo') statements.push(...tagCapacityGuard(before.productId, before.branchId, before.batchId, Math.abs(lotDelta)))
+  }
   if (direction === 'undo') {
     // The counter-movement names the forward row it reverses: removalLosses.ts
     // then stops counting an undone loss, and does not count this row either.
@@ -629,18 +643,23 @@ export async function replayStockLotSet(
     statements.push(guard(`EXISTS(SELECT 1 FROM inventory_movements WHERE reference_id=@forward)
       AND NOT EXISTS(SELECT 1 FROM inventory_movements WHERE reference_id='revert:' || (SELECT id FROM inventory_movements WHERE reference_id=@forward ORDER BY id DESC LIMIT 1))`, params))
     if (tagged) {
-      statements.push(guard('(SELECT quantity_remaining FROM damaged_stock_lots WHERE id=@heldLotId)=@held', params))
       statements.push({ sql: 'UPDATE damaged_stock_lots SET quantity_remaining=quantity_remaining-@held, updated_at=CURRENT_TIMESTAMP WHERE id=@heldLotId AND quantity_remaining>=@held', params })
     }
-    statements.push(...deltaStatements(before, lotChange, branchChange))
+    if (!tagged) statements.push(...deltaStatements(before, lotChange, branchChange))
     statements.push(movementStatement({
-      snapshot: before, effect, user, movementType: lotDelta > 0 ? 'remove' : 'adjustment', reason: effect.reason,
+      snapshot: before, effect, user, movementType: tagged ? 'condition_clear' : lotDelta > 0 ? 'remove' : 'adjustment', reason: effect.reason,
       referenceSql: "'revert:' || (SELECT id FROM inventory_movements WHERE reference_id=@forward ORDER BY id DESC LIMIT 1)",
-      extra: { forward: params.forward },
+      extra: { forward: params.forward, ...(tagged ? { quantity: 0 } : {}) },
     }))
   } else {
-    statements.push(...deltaStatements(before, lotChange, branchChange))
-    statements.push(...forwardMovementStatements(before, effect, user, stockSetReference(row.id, next), row.id))
+    if (tagged) {
+      statements.push({ sql: 'UPDATE damaged_stock_lots SET quantity_remaining=quantity_remaining+@held, updated_at=CURRENT_TIMESTAMP WHERE id=@heldLotId AND quantity_remaining=0', params })
+      statements.push(movementStatement({ snapshot: before, effect, user, movementType: 'condition_tag', reason: effect.reason,
+        referenceSql: '@reference', extra: { reference: stockSetReference(row.id, next), quantity: 0 } }))
+    } else {
+      statements.push(...deltaStatements(before, lotChange, branchChange))
+      statements.push(...forwardMovementStatements(before, effect, user, stockSetReference(row.id, next), row.id))
+    }
   }
   statements.push(
     { sql: "UPDATE stock_lot_adjustment_operations SET generation=@next,state=@target,revision_json=json_set(revision_json,'$.generation',@next) WHERE id=@operation", params },

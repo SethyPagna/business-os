@@ -13,7 +13,7 @@ bundle._compile(fs.readFileSync(bundleFile, 'utf8').split('async function main()
 
 async function world(makeWorker, tier, shape = 'receipt') {
   const f = fixture(sql => {
-    const total = shape === 'split' ? 6 : shape === 'zero' ? 0 : 7
+    const total = shape === 'split' ? 6 : shape === 'zero' ? 0 : shape === 'reversed' ? 10 : 7
     sql.exec(`UPDATE products SET stock_quantity=${total} WHERE id=1;
       UPDATE branch_stock SET quantity=${total} WHERE product_id=1 AND branch_id=1;
       INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,unit_cost_usd,is_active)
@@ -22,7 +22,7 @@ async function world(makeWorker, tier, shape = 'receipt') {
     if (shape === 'split') sql.exec(`INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,unit_cost_usd,is_active)
       VALUES(2,1,'set-second','2026-09-02',2,1);INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(2,1,5);`)
     if (shape !== 'zero') sql.exec(`INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source,unit_cost_usd)
-      VALUES(1,1,1,${shape === 'null' ? 'NULL' : 1},${shape === 'split' ? 4 : 3},${shape === 'split' ? 4 : 3},'damaged','remove',2);`)
+      VALUES(1,1,1,${shape === 'null' ? 'NULL' : 1},${shape === 'split' ? 4 : 3},${shape === 'reversed' ? 0 : shape === 'split' ? 4 : 3},'damaged','remove',2);`)
   })
   const worker = makeWorker()
   f.env.PLAN_TIER = tier
@@ -150,4 +150,5 @@ async function main() {
   }
   console.log('PASS counted Set receipt/branch floors, NULL/zero controls, sibling PATCH, atomic rollback and replay after retagging')
 }
-main().catch(error => { console.error(error); process.exitCode = 1 })
+module.exports = { world, bundleWorker: bundle.exports.bundleWorker }
+if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })
