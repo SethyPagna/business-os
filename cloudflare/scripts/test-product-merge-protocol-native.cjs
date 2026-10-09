@@ -79,7 +79,7 @@ async function prepare(f, generation = -1, fault = '', actor = 7) {
   out.push(statement("UPDATE action_history SET undo_payload=@next,redo_payload=@next,status=@status WHERE id=1 AND undo_payload=@prior AND redo_payload=@prior", {
     next: JSON.stringify(next), prior: fault === 'history-cas' ? '{}' : pointer(generation), status: direction === 'undo' ? 'redoable' : 'undoable',
   }))
-  if (fault !== 'missing-seal') out.push(statement(`UPDATE undo_snapshots SET status='sealed',payload_json=json_set(payload_json,'$.post_capture',${fault === 'false-seal' ? "json('{}')" : `json((SELECT data FROM (${readPlan.reads[0].sql}) WHERE oversized=0))`}) WHERE id=@transitionId`, fault === 'false-seal' ? { transitionId } : { ...readPlan.reads[0].params, transitionId }))
+  if (fault !== 'missing-seal') out.push(statement(`UPDATE undo_snapshots SET status='sealing',payload_json=json_set(payload_json,'$.post_capture',${fault === 'false-seal' ? "json('{}')" : `json((SELECT data FROM (${readPlan.reads[0].sql}) WHERE oversized=0))`}) WHERE id=@transitionId`, fault === 'false-seal' ? { transitionId } : { ...readPlan.reads[0].params, transitionId }))
   if (fault === 'late-failure') out.push(statement('SELECT json_extract(\'[1]\',\'$[merge_late_failure]\')'))
   return out
 }
@@ -94,6 +94,32 @@ async function main() {
       await assert.rejects(executeStockTransaction(f.db, await prepare(f, -1, fault), 'once'))
       assert.deepEqual(state(f), before, fault + ' rolls back complete graph')
       console.log('PASS ' + fault + ': no stock/history/authority residue')
+    } finally { f.sql.close() }
+  }
+  for (const fault of ['history-identity', 'initial-seal', 'after-seal-history', 'after-seal-stock', 'early-publish', 'history-delete']) {
+    const f = world()
+    try {
+      const before = state(f), statements = await prepare(f)
+      if (fault === 'history-identity') {
+        const write = statements.find(row => row.sql.startsWith('UPDATE action_history SET undo_payload'))
+        write.sql = write.sql.replace('SET undo_payload=', "SET created_by_id=8,entity='unrelated',entity_id='unrelated',label='rewritten',undo_payload=")
+      }
+      if (fault === 'initial-seal') {
+        const history = statements.find(row => row.sql.startsWith('INSERT INTO action_history'))
+        const pointer = JSON.parse(history.params.pointer); pointer.seal_id = 999
+        history.params.pointer = JSON.stringify(pointer)
+        const transition = statements.find(row => row.params?.transition)
+        const payload = JSON.parse(transition.params.transition); payload.prior_pointer = history.params.pointer
+        transition.params.transition = JSON.stringify(payload)
+        statements.find(row => row.sql.startsWith('UPDATE action_history SET undo_payload')).params.prior = history.params.pointer
+      }
+      if (fault === 'after-seal-history') statements.push({ sql: "UPDATE action_history SET undo_payload='{}',redo_payload='{}' WHERE id=1" })
+      if (fault === 'after-seal-stock') statements.push({ sql: 'UPDATE branch_stock SET quantity=4 WHERE product_id=1' }, { sql: 'UPDATE products SET stock_quantity=4 WHERE id=1' })
+      if (fault === 'early-publish') statements.push({ sql: "UPDATE undo_snapshots SET status='sealed' WHERE id=2" })
+      if (fault === 'history-delete') statements.push({ sql: 'DELETE FROM action_history WHERE id=1' })
+      await assert.rejects(executeStockTransaction(f.db, statements, 'once'), /merge_history_immutable|merge_transition_/, fault)
+      assert.deepEqual(state(f), before, fault + ' must roll back complete transaction, not leave a stale seal')
+      console.log('PASS completion boundary: ' + fault)
     } finally { f.sql.close() }
   }
   for (const omitGuard of [false, true]) {
@@ -151,6 +177,8 @@ async function main() {
     const beforeStale = state(f)
     await assert.rejects(executeStockTransaction(f.db, await prepare(f, 0), 'once'))
     assert.deepEqual(state(f), beforeStale)
+    await executeStockTransaction(f.db, [{ sql: "UPDATE action_history SET last_error='Display diagnostic' WHERE id=1" }], 'once')
+    assert.equal(f.sql.prepare('SELECT last_error FROM action_history WHERE id=1').get().last_error, 'Display diagnostic', 'unchanged historical identity/head permits diagnostics')
     console.log('PASS lost ACK physical once, original plan/history immutable and four compensating replay transitions')
   } finally { f.sql.close() }
   console.log('LOCAL PROTOCOL MODULE ONLY: no numbered migration, route integration, clone mapping or Free/Paid admission certificate')

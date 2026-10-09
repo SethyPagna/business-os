@@ -31,7 +31,10 @@ export function productMergeProtocolSchemaSql(): string {
     AND json_type(${pointer},'$.version')='integer' AND json_extract(${pointer},'$.version')=2
     AND json_type(${pointer},'$.plan_id')='integer' AND json_extract(${pointer},'$.plan_id')=${plan}
     AND json_extract(${pointer},'$.operation_id')=${operation}
-    AND json_type(${pointer},'$.generation')='integer'`
+    AND json_type(${pointer},'$.generation')='integer'
+    AND ((json_extract(${pointer},'$.generation')=-1 AND json_type(${pointer},'$.seal_id')='null')
+      OR (json_extract(${pointer},'$.generation')>=0 AND json_type(${pointer},'$.seal_id')='integer'
+        AND json_extract(${pointer},'$.seal_id')>0))`
   const currentCapture = planProductMergeCaseSnapshot(1, 2, []).reads[0].sql
     .replaceAll('@keeperId', field('NEW', 'keeper_id')).replaceAll('@duplicateId', field('NEW', 'loser_id'))
   const actualSource = `${field('NEW', 'source_capture')}=(SELECT data FROM (${currentCapture}) WHERE oversized=0)`
@@ -51,7 +54,7 @@ export function productMergeProtocolSchemaSql(): string {
     AND ${field('p', 'operation_id')}=${field('NEW', 'operation_id')}
     AND ${field('p', 'keeper_id')}=${field('NEW', 'keeper_id')}
     AND ${field('p', 'loser_id')}=${field('NEW', 'loser_id')}
-    AND h.created_by_id=p.created_by_id AND h.entity='product_merge' AND h.entity_id=${field('p', 'operation_id')}
+    AND h.created_by_id=p.created_by_id AND h.scope='products' AND h.entity='product_merge' AND h.entity_id=${field('p', 'operation_id')}
     AND h.undo_payload=${field('NEW', 'prior_pointer')} AND h.redo_payload=h.undo_payload
     AND ${pointerIdentity('h.undo_payload', 'p.id', field('p', 'operation_id'))}
     AND json_extract(h.undo_payload,'$.generation')=${field('NEW', 'from_generation')}
@@ -64,10 +67,25 @@ export function productMergeProtocolSchemaSql(): string {
     AND ${field('t', 'loser_id')}=OLD.id AND NEW.id IS OLD.id
     AND ((${field('t', 'direction')}='redo' AND OLD.is_active IS 1 AND NEW.is_active IS 0)
       OR (${field('t', 'direction')}='undo' AND OLD.is_active IS 0 AND NEW.is_active IS 1))`
+  const postStateMatches = (row: string) => `
+    ${field(row, 'post_capture')}=(SELECT data FROM (${currentCapture.replaceAll('NEW.payload_json', `${row}.payload_json`)}) WHERE oversized=0)
+    AND EXISTS(SELECT 1 FROM action_history h JOIN undo_snapshots p ON p.id=${field(row, 'plan_id')}
+      WHERE h.id=${field(row, 'history_id')} AND p.kind='${planKind}' AND p.status='recorded'
+        AND p.created_by_id=h.created_by_id AND h.scope='products' AND h.entity='product_merge'
+        AND h.entity_id=${field('p', 'operation_id')} AND h.entity_id=${field(row, 'operation_id')}
+        AND h.undo_payload=h.redo_payload AND ${pointerIdentity('h.undo_payload', 'p.id', field(row, 'operation_id'))}
+        AND json_extract(h.undo_payload,'$.seal_id')=${row}.id
+        AND json_extract(h.undo_payload,'$.generation')=${field(row, 'to_generation')}
+        AND h.status=CASE ${field(row, 'direction')} WHEN 'undo' THEN 'redoable' ELSE 'undoable' END)`
+  const v2History = (pointer: string) => `CASE WHEN json_valid(${pointer}) THEN
+    json_extract(${pointer},'$.applier')='product.merge' AND json_extract(${pointer},'$.version')=2 ELSE 0 END`
+  const immutableHistory = ['id', 'scope', 'entity', 'entity_id', 'label', 'created_by_id', 'created_by_name', 'created_at']
+    .map(column => `NEW.${column} IS OLD.${column}`).join(' AND ')
   const sql = `
   CREATE UNIQUE INDEX product_merge_v2_plan_request ON undo_snapshots(created_by_id,json_extract(payload_json,'$.request_id')) WHERE kind='${planKind}';
+  CREATE UNIQUE INDEX product_merge_v2_plan_operation ON undo_snapshots(json_extract(payload_json,'$.operation_id')) WHERE kind='${planKind}';
   CREATE UNIQUE INDEX product_merge_v2_transition_generation ON undo_snapshots(json_extract(payload_json,'$.plan_id'),json_extract(payload_json,'$.to_generation')) WHERE kind='${transitionKind}';
-  CREATE UNIQUE INDEX product_merge_v2_single_pending ON undo_snapshots((1)) WHERE kind='${transitionKind}' AND status IN ('prepared','catalog_changed');
+  CREATE UNIQUE INDEX product_merge_v2_single_pending ON undo_snapshots((1)) WHERE kind='${transitionKind}' AND status IN ('prepared','catalog_changed','sealing');
   CREATE TRIGGER product_merge_v2_plan_insert BEFORE INSERT ON undo_snapshots WHEN NEW.kind='${planKind}'
   BEGIN
    SELECT CASE WHEN ${permit} AND NEW.status='recorded' AND json_valid(NEW.payload_json)
@@ -102,23 +120,39 @@ export function productMergeProtocolSchemaSql(): string {
   WHEN NEW.is_active IS NOT OLD.is_active AND EXISTS(${pending})
   BEGIN UPDATE undo_snapshots SET status='catalog_changed' WHERE kind='${transitionKind}' AND status='prepared' AND ${field('undo_snapshots', 'loser_id')}=NEW.id; END;
   CREATE TRIGGER product_merge_v2_transition_update BEFORE UPDATE ON undo_snapshots WHEN OLD.kind='${transitionKind}' OR NEW.kind='${transitionKind}'
-  BEGIN SELECT CASE WHEN ${permit} AND NEW.id IS OLD.id AND NEW.kind IS OLD.kind AND NEW.created_by_id IS OLD.created_by_id
+  BEGIN SELECT CASE WHEN NEW.id IS OLD.id AND NEW.kind IS OLD.kind AND NEW.created_by_id IS OLD.created_by_id
    AND NEW.created_by_name IS OLD.created_by_name AND NEW.created_at IS OLD.created_at
-   AND ((OLD.status='prepared' AND NEW.status='catalog_changed' AND NEW.payload_json IS OLD.payload_json
+   AND ((${permit} AND ((OLD.status='prepared' AND NEW.status='catalog_changed' AND NEW.payload_json IS OLD.payload_json
     AND (SELECT is_active FROM products WHERE id=${field('OLD', 'loser_id')}) IS CASE ${field('OLD', 'direction')} WHEN 'undo' THEN 1 ELSE 0 END)
-   OR (OLD.status='catalog_changed' AND NEW.status='sealed' AND json_remove(NEW.payload_json,'$.post_capture')=OLD.payload_json
+   OR (OLD.status='catalog_changed' AND NEW.status='sealing' AND json_remove(NEW.payload_json,'$.post_capture')=OLD.payload_json
     AND json_type(NEW.payload_json,'$.post_capture')='object'
-    AND ${field('NEW', 'post_capture')}=(SELECT data FROM (${currentCapture}) WHERE oversized=0)
-    AND EXISTS(SELECT 1 FROM action_history h WHERE h.id=${field('OLD', 'history_id')}
-     AND h.undo_payload=h.redo_payload AND ${pointerIdentity('h.undo_payload', field('OLD', 'plan_id'), field('OLD', 'operation_id'))}
-     AND json_extract(h.undo_payload,'$.seal_id')=OLD.id AND json_extract(h.undo_payload,'$.generation')=${field('OLD', 'to_generation')}
-     AND h.status=CASE ${field('OLD', 'direction')} WHEN 'undo' THEN 'redoable' ELSE 'undoable' END)))
+    AND ${postStateMatches('NEW')})))
+   OR (NOT EXISTS(SELECT 1 FROM system_flags WHERE key='stock_transaction_permit')
+     AND OLD.status='sealing' AND NEW.status='sealed' AND NEW.payload_json IS OLD.payload_json
+     AND ${postStateMatches('NEW')}))
    THEN 1 ELSE RAISE(ABORT,'merge_transition_immutable') END; END;
   CREATE TRIGGER product_merge_v2_transition_delete BEFORE DELETE ON undo_snapshots WHEN OLD.kind='${transitionKind}'
   BEGIN SELECT RAISE(ABORT,'merge_transition_immutable'); END;
   CREATE TRIGGER product_merge_v2_finish BEFORE DELETE ON system_flags WHEN OLD.key='stock_transaction_permit'
-   AND EXISTS(SELECT 1 FROM undo_snapshots WHERE kind='${transitionKind}' AND status<>'sealed')
+   AND EXISTS(SELECT 1 FROM undo_snapshots t WHERE t.kind='${transitionKind}' AND t.status<>'sealed'
+     AND (t.status<>'sealing' OR (${postStateMatches('t')}) IS NOT 1))
   BEGIN SELECT RAISE(ABORT,'merge_transition_unfinished'); END;
+  CREATE TRIGGER product_merge_v2_publish AFTER DELETE ON system_flags WHEN OLD.key='stock_transaction_permit'
+  BEGIN UPDATE undo_snapshots SET status='sealed' WHERE kind='${transitionKind}' AND status='sealing'; END;
+  CREATE TRIGGER product_merge_v2_history_update BEFORE UPDATE ON action_history
+  WHEN (${v2History('OLD.undo_payload')}) OR (${v2History('NEW.undo_payload')})
+  BEGIN SELECT CASE WHEN ${immutableHistory} AND (
+    (NEW.undo_payload IS OLD.undo_payload AND NEW.redo_payload IS OLD.redo_payload AND NEW.status IS OLD.status)
+    OR (${permit} AND NEW.undo_payload=NEW.redo_payload AND OLD.undo_payload=OLD.redo_payload
+      AND EXISTS(SELECT 1 FROM undo_snapshots t WHERE t.kind='${transitionKind}' AND t.status='catalog_changed'
+        AND ${field('t', 'history_id')}=OLD.id AND ${field('t', 'prior_pointer')}=OLD.undo_payload
+        AND ${pointerIdentity('NEW.undo_payload', field('t', 'plan_id'), field('t', 'operation_id'))}
+        AND json_extract(NEW.undo_payload,'$.seal_id')=t.id
+        AND json_extract(NEW.undo_payload,'$.generation')=${field('t', 'to_generation')}
+        AND NEW.status=CASE ${field('t', 'direction')} WHEN 'undo' THEN 'redoable' ELSE 'undoable' END)))
+    THEN 1 ELSE RAISE(ABORT,'merge_history_immutable') END; END;
+  CREATE TRIGGER product_merge_v2_history_delete BEFORE DELETE ON action_history WHEN ${v2History('OLD.undo_payload')}
+  BEGIN SELECT RAISE(ABORT,'merge_history_immutable'); END;
   `
 
   return sql.replace(/\r/g, '')
