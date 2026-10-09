@@ -339,6 +339,9 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   // row stayed at the figure the restore left it, and they would exist in
   // neither place. The real reversal for these transitions is the tagged
   // row's own Restore / Remove entirely actions, which move both ledgers.
+  if (String(m.reference_id||'').startsWith('condition_history:')) {
+    return refuse(409, 'revert_use_history', 'This condition compensation has exact lot history. Use its History Undo/Redo so physical stock and tags remain together.')
+  }
   if (isDamagedLotReference(m.reference_id)) {
     return refuse(400, 'revert_tagged_row', 'This movement belongs to a tagged (damaged, broken, expired ...) stock row. Reverse it from that row on the product instead, so the tagged quantity moves with the stock.')
   }

@@ -33,6 +33,7 @@ import { audit, changedFields } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
 import { stockMutationRequestIdMissing, STOCK_MUTATION_REQUEST_ID_REQUIRED, StockMutationBudgetError, withStockMutationReceipt, executeStockMutationBatch, type StockMutationAtomicMark } from '../lib/stockMutationReceipt'
+import { planConditionHistory } from '../lib/countedConditionHistory'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -2126,7 +2127,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     const slices: Array<{ batchId: number | null; quantity: number }> = removedBatchQuantities.map(entry => ({ batchId: entry.batchId, quantity: entry.quantity }))
     const remainder = Math.abs(delta) - slices.reduce((sum, entry) => sum + entry.quantity, 0)
     if (remainder > 0) slices.push({ batchId: null, quantity: remainder })
-    return slices.flatMap(slice => planHoldAsTagged({
+    return planConditionHistory({action:'tag',productId:targetProductId,branchId,tag,actor:user??null}, slices.flatMap(slice => planHoldAsTagged({
       productId: targetProductId,
       productName: targetProductName,
       branchId,
@@ -2139,7 +2140,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       cost: resolveMovementCostSnapshot({ quantity: slice.quantity, components: [{ quantity: slice.quantity, unitCostUsd: slice.batchId == null ? null : removalCostByBatch.get(slice.batchId) ?? null }], fallbackUnitCostUsd: holdCost.unitCostUsd, fallbackUnitCostKhr: holdCost.unitCostKhr }),
       referenceId: sessionId,
       actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
-    }))
+    })))
   }
   const movementRowStatement = (): { sql: string; params: Record<string, unknown> } => {
     let costComponents: MovementCostComponent[] = []
@@ -3326,7 +3327,7 @@ async function runTaggedLotActionKernel(c: InventoryContext, action: 'dispose' |
   }
   try {
     await executeStockMutationBatch(db, addressedStatements(landing, [
-      ...(action === 'dispose' ? planDisposeTagged(change) : planRestoreTagged(change)),
+      ...planConditionHistory({action:action==='dispose'?'dispose':'clear',productId,branchId:landing.effectBranchId,tag:tagResult.tag,actor:user??null,takes:landingTakes}, action === 'dispose' ? planDisposeTagged(change) : planRestoreTagged(change)),
     ]), atomicMark)
   } catch (error) {
     if (stockTransactionRefusal(error) || error instanceof StockMutationBudgetError) throw error

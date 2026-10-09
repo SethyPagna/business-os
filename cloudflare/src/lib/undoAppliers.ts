@@ -1,4 +1,5 @@
 import { executeStockTransaction } from './stockTransaction'
+import { COUNTED_CONDITION_HISTORY_KIND, replayCountedCondition } from './countedConditionHistory'
 import { productStockGuardError } from './productStockGuard'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
@@ -3012,6 +3013,10 @@ async function branchReplayExpectedFields(
 }
 
 const APPLIERS: Record<string, UndoApplierDef> = {
+  [COUNTED_CONDITION_HISTORY_KIND]: {permission:'inventory',action:'adjust',run:async(payload,ctx)=>{
+    if(!ctx.user||!ctx.historyId)throw new UndoConflictError('Condition history context is required.')
+    await replayCountedCondition(ctx.env,ctx.user,ctx.direction,ctx.historyId,ctx.generation,payload)
+  }},
   [CUSTOMER_GENDER_RESTORATION_KIND]: { permission: 'contacts', action: 'edit', run: replayCustomerGenderRestoration },
   // Scoped Set (lib/stockLotAdjustment.ts): the server moves exactly the
   // recorded lot and branch delta of one generation and refuses 409 when the

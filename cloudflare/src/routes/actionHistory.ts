@@ -1,4 +1,5 @@
 import type { RequestMetrics } from '../lib/requestMetrics'
+import { COUNTED_CONDITION_HISTORY_KIND, notifyCountedCondition } from '../lib/countedConditionHistory'
 import { productStockGuardError } from '../lib/productStockGuard'
 import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, hasAcquisitionCostInput, projectAcquisitionCosts } from '../lib/acquisitionCostAccess'
@@ -134,7 +135,7 @@ function isServerManagedPayload(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false
   const payload = value as Record<string, unknown>
   const kind = String(payload.applier || '')
-  return kind === CUSTOMER_GENDER_RESTORATION_KIND || kind === TRANSFER_OPERATION_KIND || kind === STOCK_LOT_SET_KIND || kind === STOCK_IN_LINE_EDIT_KIND || SERVER_BULK_KINDS.has(kind) || kind === PRODUCT_MERGE_GROUP_ACTION_KIND || kind === PRODUCT_REMOVE_ACTION_KIND
+  return kind === COUNTED_CONDITION_HISTORY_KIND || kind === CUSTOMER_GENDER_RESTORATION_KIND || kind === TRANSFER_OPERATION_KIND || kind === STOCK_LOT_SET_KIND || kind === STOCK_IN_LINE_EDIT_KIND || SERVER_BULK_KINDS.has(kind) || kind === PRODUCT_MERGE_GROUP_ACTION_KIND || kind === PRODUCT_REMOVE_ACTION_KIND
     || (kind === SALE_ADD_ITEMS_ACTION_KIND && typeof payload.operation_id === 'string' && payload.operation_id.length > 0)
 }
 
@@ -439,7 +440,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     const nextStatus = direction === 'undo' ? 'redoable' : 'undoable'
     // A scoped Set replays by generation like a stock session: its applier
     // checks the generation and state itself, and a repeat is idempotent.
-    const stockReplay = [STOCK_SESSION_KIND, STOCK_LOT_SET_KIND, STOCK_IN_LINE_EDIT_KIND].includes(String(parseJson(existing.undo_payload)?.applier || ''))
+    const stockReplay = [COUNTED_CONDITION_HISTORY_KIND, STOCK_SESSION_KIND, STOCK_LOT_SET_KIND, STOCK_IN_LINE_EDIT_KIND].includes(String(parseJson(existing.undo_payload)?.applier || ''))
     const groupReplay = parseJson(existing.undo_payload)?.applier === PRODUCT_MERGE_GROUP_ACTION_KIND
     const productRemoveReplay = parseJson(existing.undo_payload)?.applier === PRODUCT_REMOVE_ACTION_KIND
     const transferReplay = parseJson(existing.undo_payload)?.applier === TRANSFER_OPERATION_KIND
@@ -533,6 +534,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     if (serverManagedReplay && applier) {
       if (applier.name !== SALE_ADD_ITEMS_ACTION_KIND && applier.name !== PRODUCT_MERGE_GROUP_ACTION_KIND) c.executionCtx.waitUntil(applier.name === CUSTOMER_GENDER_RESTORATION_KIND
         ? notifyCustomerGenderRestoration(c.env)
+        : applier.name === COUNTED_CONDITION_HISTORY_KIND
+        ? notifyCountedCondition(c.env)
         : applier.name === TRANSFER_OPERATION_KIND
         ? notifyTransferOperation(c.env)
         : applier.name === STOCK_LOT_SET_KIND
