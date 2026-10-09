@@ -26,6 +26,7 @@ const ts = require('typescript')
 const moneyPrecision = require('../src/lib/moneyPrecision.ts')
 const assert = require('assert')
 const Database = require('better-sqlite3')
+const currentStockFixture = require('./test-stock-session-atomic.cjs')
 
 // --- load real TS modules with a controlled require shim -------------------
 
@@ -86,6 +87,7 @@ function wrapDb(sqlite) {
         run: (params) => (Array.isArray(params) ? stmt.run(...params) : stmt.run(params || {})),
       }
     },
+    batchOnce(statements) { return this.batch(statements) },
     batch(statements) {
       if (beforeAtomicBatch) {
         const inject = beforeAtomicBatch
@@ -94,12 +96,12 @@ function wrapDb(sqlite) {
       }
       const tx = sqlite.transaction((stmts) => {
         return stmts.map((s) => {
-          const st = sqlite.prepare(s.sql)
+          let st;try{st=sqlite.prepare(s.sql)}catch(error){if(process.env.UNDO_FIXTURE_DEBUG)console.error('FAILED PREPARE',s.sql,s.params,error.message);throw error}
           const invoke = (method) => s.params == null
             ? st[method]()
             : Array.isArray(s.params) ? st[method](...s.params) : st[method](s.params)
-          if (st.reader) return { results: invoke('all') }
-          const result = invoke('run')
+          if(st.reader){try{return{results:invoke('all')}}catch(error){if(process.env.UNDO_FIXTURE_DEBUG){console.error('FAILED QUERY',s.sql,s.params,error.message);if(s.params?.rows){for(const saved of JSON.parse(s.params.rows)){const live=sqlite.prepare('SELECT * FROM products WHERE id=?').get(saved.id);for(const key of Object.keys(saved))if(live?.[key]!==saved[key])console.error('ROW DIFFERENCE',saved.id,key,'saved',saved[key],'live',live?.[key])}}}throw error}}
+          let result;try{result=invoke('run')}catch(error){if(process.env.UNDO_FIXTURE_DEBUG)console.error('FAILED SQL',s.sql,s.params,error.message);throw error}
           return { results: [], changes: result.changes, meta: { changes: result.changes } }
         })
       })
@@ -185,10 +187,10 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
     planUnlottedSaleLineGuards: guardExports.planUnlottedSaleLineGuards,
     buildAllocationStatements: () => [],
     buildOperationAllocationStatements: (_lines, operationId) => exerciseAtomicSaleItems ? [{
-      sql: `INSERT INTO sale_item_batch_allocations(sale_item_id,quantity)
-            SELECT entity_id,@quantity FROM sale_mutation_members
+      sql: `INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,quantity)
+            SELECT entity_id,501,@quantity FROM sale_mutation_members
             WHERE operation_id=@operation AND entity_kind='sale_item' AND ordinal=0`,
-      params: { operation: operationId, quantity: failAtomicAllocation ? -1 : 1 },
+      params: { operation: operationId, quantity: failAtomicAllocation ? null : 1 },
     }] : [],
     planSaleLineAddition: ({ saleId, lines }) => exerciseAtomicSaleItems ? ({
       lines,
@@ -234,6 +236,7 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
     CUSTOMER_GENDER_RESTORATION_KIND: 'customer.gender_restore',
     replayCustomerGenderRestoration: async () => { throw new Error('Use the native gender restoration harness') },
   }
+  if(id.startsWith('./')&&fs.existsSync(path.join(__dirname,'../src/lib',id.slice(2)+'.ts')))return currentStockFixture.loadStockSession('lib/'+id.slice(2)+'.ts')
   return require(id)
 })
 const { resolveUndoApplier, registeredUndoAppliers, isServerReplayable, mergeReplayChangesProductImages, registerProductMergeGroupRedo, productMergeGroupPrefixFingerprint } = undoAppliers
@@ -274,47 +277,13 @@ function recordBranchHistory(db, id, undoFields, redoFields) {
 
 const atomicUser = { id: 7, name: 'Atomic verifier' }
 
-function atomicSaleItemsFixture() {
-  const db = new Database(':memory:')
-  db.exec(`
-    CREATE TABLE sale_bulk_guards(guard_value INTEGER CHECK(guard_value=1));
-    CREATE TABLE branch_stock(product_id INTEGER,branch_id INTEGER,quantity REAL);
-    CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,is_active INTEGER);
-    CREATE TABLE branch_batch_stock(batch_id INTEGER,branch_id INTEGER,quantity REAL);
-    CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT);
-    CREATE TABLE sales(id INTEGER PRIMARY KEY,sale_status TEXT,total_usd REAL);
-    CREATE TABLE sale_items(id INTEGER PRIMARY KEY AUTOINCREMENT,sale_id INTEGER,product_id INTEGER,product_name TEXT,quantity REAL,total_usd REAL);
-    CREATE TABLE sale_item_batch_allocations(id INTEGER PRIMARY KEY AUTOINCREMENT,sale_item_id INTEGER,quantity REAL CHECK(quantity>0));
-    CREATE TABLE sale_write_revisions(sale_id INTEGER PRIMARY KEY,revision INTEGER NOT NULL);
-    CREATE TABLE undo_snapshots(id INTEGER PRIMARY KEY,kind TEXT,status TEXT,payload_json TEXT,updated_at TEXT);
-    CREATE TABLE action_history(id INTEGER PRIMARY KEY,status TEXT,undo_payload TEXT,redo_payload TEXT,last_error TEXT,updated_at TEXT);
-    CREATE TABLE sale_mutation_receipts(id TEXT PRIMARY KEY,sale_id INTEGER,history_id INTEGER,mutation_kind TEXT,generation INTEGER,sale_revision INTEGER,updated_at TEXT);
-    CREATE TABLE sale_mutation_members(operation_id TEXT,entity_kind TEXT,entity_id INTEGER,ordinal INTEGER,PRIMARY KEY(operation_id,entity_kind,ordinal));
-    CREATE TABLE sale_mutation_guards(id INTEGER PRIMARY KEY,guard_value INTEGER NOT NULL CHECK(guard_value=1));
-    CREATE TABLE audit_logs(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,user_name TEXT,action TEXT,entity TEXT,entity_id TEXT,details TEXT,table_name TEXT,record_id TEXT,new_value TEXT);
-    CREATE TRIGGER revision_sale_update AFTER UPDATE ON sales BEGIN
-      INSERT INTO sale_write_revisions(sale_id,revision) VALUES(NEW.id,1)
-      ON CONFLICT(sale_id) DO UPDATE SET revision=revision+1;
-    END;
-    CREATE TRIGGER revision_line_insert AFTER INSERT ON sale_items BEGIN
-      INSERT INTO sale_write_revisions(sale_id,revision) VALUES(NEW.sale_id,1)
-      ON CONFLICT(sale_id) DO UPDATE SET revision=revision+1;
-    END;
-    CREATE TRIGGER revision_line_delete AFTER DELETE ON sale_items BEGIN
-      INSERT INTO sale_write_revisions(sale_id,revision) VALUES(OLD.sale_id,1)
-      ON CONFLICT(sale_id) DO UPDATE SET revision=revision+1;
-    END;
-    CREATE TRIGGER revision_allocation_insert AFTER INSERT ON sale_item_batch_allocations BEGIN
-      INSERT INTO sale_write_revisions(sale_id,revision)
-      SELECT sale_id,1 FROM sale_items WHERE id=NEW.sale_item_id
-      ON CONFLICT(sale_id) DO UPDATE SET revision=revision+1;
-    END;
-    CREATE TRIGGER revision_allocation_delete AFTER DELETE ON sale_item_batch_allocations BEGIN
-      INSERT INTO sale_write_revisions(sale_id,revision)
-      SELECT sale_id,1 FROM sale_items WHERE id=OLD.sale_item_id
-      ON CONFLICT(sale_id) DO UPDATE SET revision=revision+1;
-    END;
-  `)
+async function atomicSaleItemsFixture() {
+  const native=currentStockFixture.fixture(sql=>{
+    sql.exec("DELETE FROM branch_stock;DELETE FROM products;")
+    sql.exec("INSERT INTO products(id,name,barcode,is_active)VALUES(8,'Baseline','UNDO-8',1),(9,'Serum','UNDO-9',1);")
+    sql.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active)VALUES(501,9,'UNDO-501',1);")
+  })
+  const db=native.sql
   const reversal = {
     saleId: 77, receiptNumber: 'ATOMIC-77', saleStatus: 'completed', exchangeRate: 4100,
     operationId: 'add-operation-77', saleStateRevision: 5,
@@ -325,39 +294,24 @@ function atomicSaleItemsFixture() {
   db.prepare("INSERT INTO sales(id,sale_status,total_usd) VALUES(77,'completed',15)").run()
   db.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,total_usd) VALUES(9,77,8,'Baseline',1,10)").run()
   db.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,total_usd) VALUES(10,77,9,'Serum',1,5)").run()
-  db.prepare('INSERT INTO sale_item_batch_allocations(sale_item_id,quantity) VALUES(10,1)').run()
+  await fixtureWrite(db,'INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,quantity) VALUES(10,501,1)')
   db.prepare('INSERT OR REPLACE INTO sale_write_revisions(sale_id,revision) VALUES(77,5)').run()
   db.prepare("INSERT INTO undo_snapshots(id,kind,status,payload_json) VALUES(1,'sale.add_items','applied',?)").run(JSON.stringify(reversal))
-  db.prepare("INSERT INTO action_history(id,status,undo_payload,redo_payload) VALUES(41,'undoable',?,?)").run(JSON.stringify(payload), JSON.stringify(payload))
-  db.prepare("INSERT INTO sale_mutation_receipts(id,sale_id,history_id,mutation_kind,generation,sale_revision) VALUES('add-operation-77',77,41,'add_items',0,5)").run()
+  db.prepare("INSERT INTO action_history(id,status,undo_payload,redo_payload,label) VALUES(41,'undoable',?,?,'Native atomic history')").run(JSON.stringify(payload), JSON.stringify(payload))
+  db.prepare("INSERT INTO sale_mutation_receipts(id,sale_id,history_id,mutation_kind,generation,sale_revision,actor_id,request_id,request_digest,request_json,before_json,after_json,response_json) VALUES('add-operation-77',77,41,'add_items',0,5,7,'atomic-native-request','synthetic-digest','{}','{}','{}','{}')").run()
   db.prepare("INSERT INTO sale_mutation_members(operation_id,entity_kind,entity_id,ordinal) VALUES('add-operation-77','sale_item',10,0)").run()
   db.prepare("INSERT INTO sale_mutation_members(operation_id,entity_kind,entity_id,ordinal) VALUES('add-operation-77','undo_snapshot',1,0)").run()
   return { db, payload }
 }
 
+async function fixtureWrite(sqlite,sql,params={}) {
+  return currentStockFixture.loadStockSession('lib/stockTransaction.ts').executeStockTransaction(wrapDb(sqlite),[{sql,params}],'once')
+}
 async function productMergeGroupFixture() {
-  const db = new Database(':memory:')
-  db.exec(`
-    CREATE TABLE products(id INTEGER PRIMARY KEY,is_active INTEGER,updated_at TEXT,image_path TEXT,barcode TEXT,
-      category TEXT,categories TEXT,brand TEXT,brands TEXT,unit TEXT,unit_normalized TEXT,brand_compact TEXT,stock_quantity REAL,
-      cost_price_usd REAL,purchase_price_usd REAL); -- U-cost: the merge undo re-derives the catalog cost
-    CREATE TABLE product_cost_entries(id INTEGER PRIMARY KEY,product_id INTEGER,cost_usd REAL,baseline_batch_id INTEGER);
-    CREATE TABLE branch_stock(product_id INTEGER,branch_id INTEGER,quantity REAL,rfid_confirmed_qty REAL,PRIMARY KEY(product_id,branch_id));
-    CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,batch_key TEXT,batch_number INTEGER,is_active INTEGER,updated_at TEXT,unit_cost_usd REAL,received_at TEXT);
-    CREATE TABLE branch_batch_stock(batch_id INTEGER,branch_id INTEGER,quantity REAL,updated_at TEXT,PRIMARY KEY(batch_id,branch_id));
-    CREATE TABLE product_images(id INTEGER PRIMARY KEY,product_id INTEGER,image_path TEXT,sort_order INTEGER);
-    CREATE TABLE stock_session_members(operation_id TEXT,product_id INTEGER);
-    CREATE TABLE inventory_movements(id INTEGER PRIMARY KEY,product_id INTEGER,movement_type TEXT,reason TEXT);
-    CREATE TABLE undo_snapshots(id INTEGER PRIMARY KEY,kind TEXT,status TEXT,payload_json TEXT,created_by_id INTEGER,updated_at TEXT);
-    CREATE TABLE action_history(id INTEGER PRIMARY KEY,status TEXT,undo_payload TEXT,redo_payload TEXT,last_error TEXT,created_by_id INTEGER,updated_at TEXT);
-    CREATE TABLE product_conflict_action_reviews(id TEXT PRIMARY KEY,actor_id INTEGER);
-    CREATE TABLE product_conflict_action_groups(review_id TEXT,ordinal INTEGER,group_key TEXT,status TEXT,reversal_generation INTEGER,action_history_id INTEGER,updated_at TEXT,PRIMARY KEY(review_id,ordinal));
-    CREATE TABLE product_conflict_action_group_members(review_id TEXT,group_ordinal INTEGER,member_ordinal INTEGER,product_id INTEGER,role TEXT,status TEXT,undo_snapshot_id INTEGER,updated_at TEXT,PRIMARY KEY(review_id,group_ordinal,member_ordinal));
-    CREATE TABLE audit_logs(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,user_name TEXT,action TEXT,entity TEXT,entity_id TEXT,details TEXT,table_name TEXT,record_id TEXT,new_value TEXT);
-  `)
-  db.prepare("INSERT INTO products VALUES(1,1,NULL,NULL,'GROUP-1','Final','[\"Final\"]','Final','[\"Final\"]','ea','ea','final',0,NULL,NULL)").run()
-  db.prepare("INSERT INTO products VALUES(2,0,NULL,NULL,'GROUP-1','Old A','[\"Old A\"]','A','[\"A\"]','box','box','a',0,NULL,NULL)").run()
-  db.prepare("INSERT INTO products VALUES(3,0,NULL,NULL,'GROUP-1','Old B','[\"Old B\"]','B','[\"B\"]','pack','pack','b',0,NULL,NULL)").run()
+  const db=currentStockFixture.fixture(sql=>sql.exec("DELETE FROM branch_stock;DELETE FROM products;INSERT INTO users(id,username,name,password,is_active)VALUES(7,'native-history','Native history','synthetic',1);")).sql
+  await fixtureWrite(db,"INSERT INTO products(id,is_active,updated_at,image_path,barcode,category,categories,brand,brands,unit,unit_normalized,brand_compact,stock_quantity,cost_price_usd,purchase_price_usd,name) VALUES(1,1,NULL,NULL,'GROUP-1','Final','[\"Final\"]','Final','[\"Final\"]','ea','ea','final',0,NULL,NULL,'Keeper')")
+  await fixtureWrite(db,"INSERT INTO products(id,is_active,updated_at,image_path,barcode,category,categories,brand,brands,unit,unit_normalized,brand_compact,stock_quantity,cost_price_usd,purchase_price_usd,name) VALUES(2,0,NULL,NULL,'GROUP-1','Old A','[\"Old A\"]','A','[\"A\"]','box','box','a',0,NULL,NULL,'Old A')")
+  await fixtureWrite(db,"INSERT INTO products(id,is_active,updated_at,image_path,barcode,category,categories,brand,brands,unit,unit_normalized,brand_compact,stock_quantity,cost_price_usd,purchase_price_usd,name) VALUES(3,0,NULL,NULL,'GROUP-1','Old B','[\"Old B\"]','B','[\"B\"]','pack','pack','b',0,NULL,NULL,'Old B')")
   const reversal = (dupId, label) => ({
     keeperId: 1, keeperName: 'Keeper', dupId, dupName: label, mergeContext: 'group test',
     keeperImagePathBefore: null, dupImagePathBefore: null, keeperBarcodeBefore: 'GROUP-1',
@@ -378,20 +332,20 @@ async function productMergeGroupFixture() {
   predecessor.mergedStateFingerprint = await undoAppliers.mergeStateFingerprint(wrapDb(db), [predecessor])
   setKeeperCatalog.run(finalKeeper)
   latest.mergedStateFingerprint = await undoAppliers.mergeStateFingerprint(wrapDb(db), [latest])
-  db.prepare("INSERT INTO undo_snapshots VALUES(11,'product.merge.group.child','applied',?,7,NULL)").run(JSON.stringify(predecessor))
-  db.prepare("INSERT INTO undo_snapshots VALUES(12,'product.merge.group.child','applied',?,7,NULL)").run(JSON.stringify(latest))
+  db.prepare("INSERT INTO undo_snapshots(id,kind,status,payload_json,created_by_id,updated_at) VALUES(11,'product.merge.group.child','applied',?,7,CURRENT_TIMESTAMP)").run(JSON.stringify(predecessor))
+  db.prepare("INSERT INTO undo_snapshots(id,kind,status,payload_json,created_by_id,updated_at) VALUES(12,'product.merge.group.child','applied',?,7,CURRENT_TIMESTAMP)").run(JSON.stringify(latest))
   const groupSnapshot = {
     version: 1, review_id: 'review-1', group_key: 'group-1', child_snapshot_ids: childIds,
     prefix_fingerprint: await productMergeGroupPrefixFingerprint('review-1', 'group-1', childIds, 0), generation: 0,
   }
-  db.prepare("INSERT INTO undo_snapshots VALUES(10,'product.merge.group','applied',?,7,NULL)").run(JSON.stringify(groupSnapshot))
+  db.prepare("INSERT INTO undo_snapshots(id,kind,status,payload_json,created_by_id,updated_at) VALUES(10,'product.merge.group','applied',?,7,CURRENT_TIMESTAMP)").run(JSON.stringify(groupSnapshot))
   const pointer = { applier: 'product.merge.group', snapshot_id: 10, review_id: 'review-1', group_key: 'group-1', generation: 0 }
-  db.prepare("INSERT INTO action_history VALUES(41,'undoable',?,?,NULL,7,NULL)").run(JSON.stringify(pointer), JSON.stringify(pointer))
-  db.prepare("INSERT INTO product_conflict_action_reviews VALUES('review-1',7)").run()
-  db.prepare("INSERT INTO product_conflict_action_groups VALUES('review-1',0,'group-1','completed',0,41,NULL)").run()
-  db.prepare("INSERT INTO product_conflict_action_group_members VALUES('review-1',0,0,1,'keeper','undo_ready',NULL,NULL)").run()
-  db.prepare("INSERT INTO product_conflict_action_group_members VALUES('review-1',0,1,2,'merged','undo_ready',11,NULL)").run()
-  db.prepare("INSERT INTO product_conflict_action_group_members VALUES('review-1',0,2,3,'merged','undo_ready',12,NULL)").run()
+  db.prepare("INSERT INTO action_history(id,status,undo_payload,redo_payload,last_error,created_by_id,updated_at,label) VALUES(41,'undoable',?,?,NULL,7,CURRENT_TIMESTAMP,'Native group history')").run(JSON.stringify(pointer), JSON.stringify(pointer))
+  db.prepare("INSERT INTO product_conflict_action_reviews(id,actor_id,request_id,request_digest,manifest_version,resolution_version,draft_digest,requested_action_count,requested_group_count,requested_removal_count,actionable_group_count,blocked_group_count,total_member_count,expires_at) VALUES('review-1',7,'native-review','native-digest',1,2,'native-draft',1,1,0,1,0,3,'2099-01-01T00:00:00Z')").run()
+  db.prepare("INSERT INTO product_conflict_action_groups(review_id,ordinal,group_key,status,reversal_generation,action_history_id,updated_at,source_group_keys_json,member_ids_json,state_digest,detail_json) VALUES('review-1',0,'group-1','completed',0,41,CURRENT_TIMESTAMP,'[]','[1,2,3]','native-state','{}')").run()
+  db.prepare("INSERT INTO product_conflict_action_group_members(review_id,group_ordinal,member_ordinal,product_id,role,status,undo_snapshot_id,updated_at,state_digest,snapshot_json) VALUES('review-1',0,0,1,'keeper','undo_ready',NULL,CURRENT_TIMESTAMP,'native-state','{}')").run()
+  db.prepare("INSERT INTO product_conflict_action_group_members(review_id,group_ordinal,member_ordinal,product_id,role,status,undo_snapshot_id,updated_at,state_digest,snapshot_json) VALUES('review-1',0,1,2,'merged','undo_ready',11,CURRENT_TIMESTAMP,'native-state','{}')").run()
+  db.prepare("INSERT INTO product_conflict_action_group_members(review_id,group_ordinal,member_ordinal,product_id,role,status,undo_snapshot_id,updated_at,state_digest,snapshot_json) VALUES('review-1',0,2,3,'merged','undo_ready',12,CURRENT_TIMESTAMP,'native-state','{}')").run()
   return { db, pointer }
 }
 
@@ -601,10 +555,10 @@ await check('product.merge.group redo is forward-order, resumable, and stale gen
     await applier.run(fixture.pointer, { env: {}, user: atomicUser, direction: 'undo', historyId: 41, generation: 0 })
     registerProductMergeGroupRedo(async ({ db, reversal, completionStatements }) => {
       const fresh = { ...reversal }
-      await db.batch([
+      await currentStockFixture.loadStockSession('lib/stockTransaction.ts').executeStockTransaction(db,[
         { sql: 'UPDATE products SET is_active=0,updated_at=CURRENT_TIMESTAMP WHERE id=@id', params: { id: reversal.dupId } },
         ...completionStatements(fresh),
-      ])
+      ],'once')
     })
     let pointer = JSON.parse(fixture.db.prepare('SELECT redo_payload FROM action_history WHERE id=41').get().redo_payload)
     const first = await applier.run(pointer, { env: {}, user: atomicUser, direction: 'redo', historyId: 41, generation: 1 })
@@ -748,7 +702,7 @@ await check('sale.settlement is a real server applier and invokes the authoritat
 await check('sale.add_items atomically advances revision, receipt, snapshot, history, allocations and audit', async () => {
   exerciseAtomicSaleItems = true
   try {
-    const fixture = atomicSaleItemsFixture()
+    const fixture = await atomicSaleItemsFixture()
     sharedDb = fixture.db
     const resolved = resolveUndoApplier(fixture.payload)
     assert.ok(resolved)
@@ -792,20 +746,20 @@ await check('sale.add_items atomically advances revision, receipt, snapshot, his
 await check('sale.add_items redo refuses a stale unlotted residual with its whole replay rolled back', async () => {
   exerciseAtomicSaleItems = true
   try {
-    const fixture = atomicSaleItemsFixture()
+    const fixture = await atomicSaleItemsFixture()
     sharedDb = fixture.db
     const resolved = resolveUndoApplier(fixture.payload)
     await resolved.run(fixture.payload, { env: {}, user: atomicUser, direction: 'undo', historyId: 41, generation: 0 })
     const snapshot = JSON.parse(fixture.db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=1').get().payload_json)
     snapshot.lines[0].takes = []
     fixture.db.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=1').run(JSON.stringify(snapshot))
-    fixture.db.exec('INSERT INTO branch_stock VALUES(9,1,5); INSERT INTO product_batches VALUES(501,9,0); INSERT INTO branch_batch_stock VALUES(501,1,5)')
+    await fixtureWrite(fixture.db,'INSERT INTO branch_stock(product_id,branch_id,quantity)VALUES(9,1,5)');await fixtureWrite(fixture.db,'UPDATE product_batches SET is_active=0 WHERE id=501');await fixtureWrite(fixture.db,'INSERT INTO product_batches(id,variant_product_id,batch_key,is_active)VALUES(502,9,@key,1)',{key:'UNDO-502'});await fixtureWrite(fixture.db,'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)VALUES(502,1,5)')
     const redoPayload = JSON.parse(fixture.db.prepare('SELECT redo_payload FROM action_history WHERE id=41').get().redo_payload)
     const before = atomicSaleItemsState(fixture.db)
     await assert.rejects(() => resolved.run(redoPayload, { env: {}, user: atomicUser, direction: 'redo', historyId: 41, generation: 1 }), error => error?.statusCode === 409)
     assert.deepEqual(atomicSaleItemsState(fixture.db), before)
     assert.equal(fixture.db.prepare('SELECT COUNT(*) n FROM sale_bulk_guards').get().n, 0)
-    fixture.db.prepare('UPDATE branch_stock SET quantity=6').run()
+    await fixtureWrite(fixture.db,'UPDATE branch_stock SET quantity=6 WHERE product_id=9')
     await resolved.run(redoPayload, { env: {}, user: atomicUser, direction: 'redo', historyId: 41, generation: 1 })
     assert.equal(fixture.db.prepare('SELECT status FROM action_history WHERE id=41').get().status, 'undoable')
     assert.equal(fixture.db.prepare('SELECT COUNT(*) n FROM sale_bulk_guards').get().n, 0)
@@ -815,7 +769,7 @@ await check('sale.add_items redo refuses a stale unlotted residual with its whol
 await check('sale.add_items rejects stale and boundary races without partial replay writes', async () => {
   exerciseAtomicSaleItems = true
   try {
-    const stale = atomicSaleItemsFixture()
+    const stale = await atomicSaleItemsFixture()
     sharedDb = stale.db
     const resolved = resolveUndoApplier(stale.payload)
     stale.db.prepare('UPDATE sales SET total_usd=16 WHERE id=77').run()
@@ -826,7 +780,7 @@ await check('sale.add_items rejects stale and boundary races without partial rep
     )
     assert.deepEqual(atomicSaleItemsState(stale.db), staleState, 'pre-existing stale revision changes nothing')
 
-    const malformed = atomicSaleItemsFixture()
+    const malformed = await atomicSaleItemsFixture()
     sharedDb = malformed.db
     const malformedSnapshot = JSON.parse(malformed.db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=1').get().payload_json)
     malformedSnapshot.saleStateRevision = '5'
@@ -838,7 +792,7 @@ await check('sale.add_items rejects stale and boundary races without partial rep
     )
     assert.deepEqual(atomicSaleItemsState(malformed.db), malformedState, 'operation-backed snapshots cannot fall back to legacy replay when their revision is malformed')
 
-    const raced = atomicSaleItemsFixture()
+    const raced = await atomicSaleItemsFixture()
     sharedDb = raced.db
     beforeAtomicBatch = sqlite => sqlite.prepare('UPDATE sales SET total_usd=17 WHERE id=77').run()
     await assert.rejects(
@@ -852,7 +806,7 @@ await check('sale.add_items rejects stale and boundary races without partial rep
     assert.equal(raced.db.prepare('SELECT generation FROM sale_mutation_receipts').get().generation, 0)
     assert.equal(raced.db.prepare('SELECT COUNT(*) n FROM audit_logs').get().n, 0)
 
-    const boundary = atomicSaleItemsFixture()
+    const boundary = await atomicSaleItemsFixture()
     sharedDb = boundary.db
     await resolved.run(boundary.payload, { env: {}, user: atomicUser, direction: 'undo', historyId: 41, generation: 0 })
     const redoPayload = JSON.parse(boundary.db.prepare('SELECT redo_payload FROM action_history WHERE id=41').get().redo_payload)
