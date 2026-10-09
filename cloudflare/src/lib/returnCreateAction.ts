@@ -56,6 +56,8 @@ type CanonicalReplacementItem = {
   product_name: string | null
   branch_id: number | null
   batch_id: number | null
+  damaged_lot_id?: number | null
+  unlotted_stock?: boolean
   quantity: number
   applied_price_usd: number | null
   applied_price_khr: number | null
@@ -146,7 +148,12 @@ function canonicalReplacementItem(value: unknown, index: number): CanonicalRepla
   const productId = positiveId(item.product_id)
   const quantity = finite(item.quantity)
   if (!productId || !(quantity > 0)) throw new Error(`Replacement item ${index + 1} needs a product and positive quantity`)
+  if (item.unlotted_stock !== undefined && typeof item.unlotted_stock !== 'boolean') throw new Error('Invalid unrecorded replacement source')
+  if (item.damaged_lot_id != null && (!positiveId(item.damaged_lot_id) || item.batch_id != null || item.unlotted_stock === true)) throw new Error('Conflicting tagged replacement source')
+  if (item.unlotted_stock === true && item.batch_id != null) throw new Error('Conflicting replacement received date')
   return {
+    ...(item.damaged_lot_id === undefined ? {} : { damaged_lot_id: positiveId(item.damaged_lot_id) }),
+    ...(item.unlotted_stock === undefined ? {} : { unlotted_stock: item.unlotted_stock as boolean }),
     product_id: productId,
     product_name: boundedText(item.product_name, 500),
     branch_id: positiveId(item.branch_id),

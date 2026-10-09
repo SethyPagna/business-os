@@ -1,3 +1,5 @@
+import { planTaggedSaleSourceChange } from './saleLineAddition'
+import { ordinaryNullCapacityGuard, type CountedTaggedIdentity } from './countedDamagedStock'
 import { productStockGuardStatement } from './productStockGuard'
 // K2 (Part 410, 11.12/11.13): the kernel for the NEW return stock semantics
 // -- the three-way per-item chooser and Replace. The locked design notes
@@ -419,6 +421,8 @@ export class InsufficientReplacementStockError extends Error {
 }
 
 export function planReplacementStock(input: {
+  tagged?: CountedTaggedIdentity & { conditionTag: string }
+  unlottedStock?: boolean
   productId: number
   productName: string
   branchId: number
@@ -443,9 +447,10 @@ export function planReplacementStock(input: {
     reason: `Replacement for return ${input.returnNumber ? `#${input.returnNumber}` : 'being recorded'}`,
     user_id: input.userId,
     user_name: input.userName,
-    batch_id: input.batchId,
+    batch_id: input.tagged?.batchId ?? input.batchId,
   }
-  const statements: StockWriteStatement[] = input.batchId != null
+  if (input.tagged && (input.tagged.productId !== input.productId || input.tagged.branchId !== input.branchId || input.batchId != null || input.unlottedStock)) throw new Error('Conflicting tagged replacement source')
+  const statements: StockWriteStatement[] = input.tagged ? planTaggedSaleSourceChange(input.tagged,quantity,'consume') : input.batchId != null
     ? [...planRemoveStockFromBatch({ batchId: input.batchId, productId: input.productId, branchId: input.branchId, quantity }).statements]
     : [
         {
@@ -460,6 +465,7 @@ export function planReplacementStock(input: {
           params: shared,
         },
       ]
+  if (input.unlottedStock) statements.unshift(ordinaryNullCapacityGuard(input.productId,input.branchId,quantity))
   statements.push({
     sql: `INSERT INTO inventory_movements (
       product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,

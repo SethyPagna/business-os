@@ -1,3 +1,5 @@
+import { type CountedTaggedIdentity } from './countedDamagedStock'
+import { planTaggedSaleSourceChange } from './saleLineAddition'
 import { productStockGuardStatement } from './productStockGuard'
 // Amending a sale that already exists, as an APPEND-ONLY LEDGER (S4-30).
 //
@@ -346,6 +348,7 @@ export function amendmentHeldUnits(sale: AmendableSaleRow, quantity: number): nu
 // The line as it exists now, and its lot attribution.
 // ---------------------------------------------------------------------------
 export type ExistingSaleLine = {
+  tagged?: CountedTaggedIdentity & { conditionTag: string }
   total_usd?: number | null
   id: number
   product_id: number | null
@@ -457,7 +460,7 @@ export function planLineQuantityIncrease(input: {
   const statements: StockStatement[] = []
   let takes: FifoLotTake[] = []
 
-  if (line.branch_id && added > 0) {
+  if (line.branch_id && added > 0 && !line.tagged) {
     const allocated = allocateAcrossLots(input.lots, added)
     takes = allocated.takes
     // The line already carries SOME allocation rows -- it is batch-tracked --
@@ -478,6 +481,10 @@ export function planLineQuantityIncrease(input: {
   statements.push(lineQuantityUpdateStatement(line, quantityAfter, unitPrice, exchangeRate, input.moneyPrecisionVersion))
 
   if (line.branch_id && heldUnits > 0) {
+    if (line.tagged) {
+      if (line.tagged.productId !== line.product_id || line.tagged.branchId !== line.branch_id) throw new Error('counted_tagged_identity_required')
+      statements.push(...planTaggedSaleSourceChange(line.tagged,heldUnits,'consume'))
+    } else {
     for (const take of takes) {
       statements.push(decrementBatchStockStrictStatement(take.batchId, line.branch_id, take.quantity))
     }
@@ -490,6 +497,7 @@ export function planLineQuantityIncrease(input: {
       sql: 'UPDATE products SET stock_quantity = MAX(0, stock_quantity - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @product_id',
       params: { product_id: line.product_id, quantity: heldUnits },
     })
+    }
     statements.push(saleMovementStatement({
       line,
       movementType: 'sale',
@@ -500,7 +508,7 @@ export function planLineQuantityIncrease(input: {
       userName: input.userName,
       // Same single-lot attribution rule as everywhere else (migration 0084):
       // a split line is not attributable and keeps NULL.
-      batchId: takes.length === 1 && takes[0].quantity === added ? takes[0].batchId : null,
+      batchId: line.tagged ? line.tagged.batchId : takes.length === 1 && takes[0].quantity === added ? takes[0].batchId : null,
     }))
   }
 
@@ -624,7 +632,7 @@ export function planLineQuantityDecrease(input: {
 
   // Walk the allocations in REVERSE draw order, taking `removed` units back.
   let remaining = removed
-  for (let index = input.allocations.length - 1; index >= 0 && remaining > 0; index -= 1) {
+  for (let index = input.allocations.length - 1; index >= 0 && remaining > 0 && !line.tagged; index -= 1) {
     const allocation = input.allocations[index]
     const attributed = Math.max(0, Number(allocation.quantity) || 0)
     if (attributed <= 0) continue
@@ -671,6 +679,10 @@ export function planLineQuantityDecrease(input: {
 
   if (line.branch_id && totalReturned > 0) {
     statements.unshift(productStockGuardStatement([Number(line.product_id)], 'active'))
+    if (line.tagged) {
+      if (line.tagged.productId !== line.product_id || line.tagged.branchId !== line.branch_id) throw new Error('counted_tagged_identity_required')
+      statements.push(...planTaggedSaleSourceChange(line.tagged,totalReturned,'restore'))
+    } else {
     statements.push({
       sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, @quantity)
             ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity + @quantity`,
@@ -680,6 +692,7 @@ export function planLineQuantityDecrease(input: {
       sql: 'UPDATE products SET stock_quantity = stock_quantity + @quantity, updated_at = CURRENT_TIMESTAMP WHERE id = @product_id',
       params: { product_id: line.product_id, quantity: totalReturned },
     })
+    }
     statements.push(saleMovementStatement({
       line,
       movementType: 'return',
@@ -688,7 +701,7 @@ export function planLineQuantityDecrease(input: {
       saleId: input.saleId,
       userId: input.userId,
       userName: input.userName,
-      batchId: takes.length === 1 && takes[0].quantity === totalReturned ? takes[0].batchId : null,
+      batchId: line.tagged ? line.tagged.batchId : takes.length === 1 && takes[0].quantity === totalReturned ? takes[0].batchId : null,
     }))
   }
 

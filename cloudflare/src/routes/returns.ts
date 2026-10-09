@@ -1,3 +1,4 @@
+import { readTaggedSaleSources } from '../lib/saleLineAddition'
 import { planCountedTaggedChange } from '../lib/countedDamagedStock'
 import { resolveCountedReturnConditions } from '../lib/countedReturnCondition'
 import { productStockGuardError } from '../lib/productStockGuard'
@@ -61,6 +62,13 @@ import {
 import { canonicalMoney4, SaleMoneyContractError } from '../lib/saleMoneyPrecision'
 import { ProductMergeLineageError, resolveProductMergeLineage } from '../lib/productMergeLineage'
 import { TAGGED_DISPOSAL_MOVEMENT_TYPE } from '../lib/stockCondition'
+
+const replacementSourceColumns = `rri.*,
+  CASE WHEN ci.sale_item_id IS NULL THEN NULL ELSE json_object('version',1,'lot_id',ci.lot_id,'product_id',ci.product_id,'branch_id',ci.branch_id,'batch_id',ci.batch_id,'condition_tag',ci.condition_tag) END AS condition_snapshot,
+  COALESCE(ci.batch_id,rri.batch_id) AS source_batch_id,pb.lot_code AS source_batch_label,pb.received_at AS source_received_at`
+const replacementSourceJoins = `LEFT JOIN counted_sale_item_conditions ci ON ci.sale_item_id=rri.sale_item_id
+  LEFT JOIN product_batches pb ON pb.id=COALESCE(ci.batch_id,rri.batch_id)`
+const replacementSourceRow = (row: Record<string, unknown>) => ({ ...row, condition_snapshot: typeof row.condition_snapshot === 'string' ? JSON.parse(row.condition_snapshot) : null })
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -924,13 +932,13 @@ app.get('/', async (c) => {
     if (!itemsByReturn.has(row.return_id)) itemsByReturn.set(row.return_id, [])
     itemsByReturn.get(row.return_id)!.push(row)
   }
-  const replacementRows = await selectInChunks(ids, 0, (chunk) => db.prepare(`SELECT * FROM return_replacement_items WHERE return_id IN (${chunk.map(() => '?').join(',')}) ORDER BY return_id ASC, id ASC`).all<{ return_id: number; [key: string]: unknown }>(chunk))
-  const replacementsByReturn = new Map<number, unknown[]>()
+  const replacementRows = await selectInChunks(ids, 0, (chunk) => db.prepare(`SELECT ${replacementSourceColumns} FROM return_replacement_items rri ${replacementSourceJoins} WHERE rri.return_id IN (${chunk.map(() => '?').join(',')}) ORDER BY rri.return_id ASC, rri.id ASC`).all<{ return_id: number; [key: string]: unknown }>(chunk))
+  const replacementsByReturn = new Map<number, Record<string, unknown>[]>()
   for (const row of replacementRows) {
     if (!replacementsByReturn.has(row.return_id)) replacementsByReturn.set(row.return_id, [])
     replacementsByReturn.get(row.return_id)!.push(row)
   }
-  return c.json(returns.map((r) => ({ ...r, items: itemsByReturn.get(r.id) || [], replacement_items: replacementsByReturn.get(r.id) || [] })))
+  return c.json(returns.map((r) => ({ ...r, items: itemsByReturn.get(r.id) || [], replacement_items: (replacementsByReturn.get(r.id) || []).map(replacementSourceRow) })))
 })
 
 // GET /api/returns/damaged-lots?product_id=&branch_id= -- open damaged
@@ -1270,8 +1278,8 @@ app.get('/:id', async (c) => {
   `).get<ReturnRow>([id])
   if (!row) return c.json({ error: 'Return not found' }, 404)
   const items = await db.prepare('SELECT * FROM return_items WHERE return_id = ?').all([id])
-  const replacementItems = await db.prepare('SELECT * FROM return_replacement_items WHERE return_id = ?').all([id])
-  return c.json({ ...row, items, replacement_items: replacementItems })
+  const replacementItems = await db.prepare(`SELECT ${replacementSourceColumns} FROM return_replacement_items rri ${replacementSourceJoins} WHERE rri.return_id = ?`).all([id])
+  return c.json({ ...row, items, replacement_items: replacementItems.map(replacementSourceRow) })
 })
 
 // ---------------------------------------------------------------------------
@@ -1408,7 +1416,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     exchange_rate?: number
     return_number?: string
     client_request_id?: string
-    replacement_items?: Array<{ product_id: number; product_name?: string; branch_id?: number; batch_id?: number; quantity: number; applied_price_usd?: number; applied_price_khr?: number }>
+    replacement_items?: Array<{ product_id: number; product_name?: string; branch_id?: number; batch_id?: number; damaged_lot_id?: number | null; unlotted_stock?: boolean; quantity: number; applied_price_usd?: number; applied_price_khr?: number }>
     replacement_payment_method?: string
     money_precision_version?: unknown
     expected_quote?: unknown
@@ -1704,6 +1712,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   if (replacementInputs.some((input) => Number(productMap.get(Number(input.product_id))?.is_active || 0) !== 1)) {
     return c.json({ error: 'Each replacement line needs an active catalog product' }, 400)
   }
+  if (replacementInputs.some(line => (line.unlotted_stock !== undefined && typeof line.unlotted_stock !== 'boolean') || (line.unlotted_stock === true && line.batch_id != null) || (line.damaged_lot_id != null && (line.batch_id != null || line.unlotted_stock === true || !Number.isSafeInteger(Number(line.damaged_lot_id)) || Number(line.damaged_lot_id) <= 0)))) return c.json({error:'Conflicting replacement stock source'},400)
   const replacementLines = replacementInputs.map((input) => {
     const productId = Number(input.product_id)
     const meta = productMap.get(productId)
@@ -1714,11 +1723,16 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     const priceKhr = input.applied_price_khr != null ? toNumber(input.applied_price_khr) : toNumber(meta.selling_price_khr)
     return {
       productId, productName: input.product_name?.trim() || meta.name, branchId: lineBranchId,
+      taggedLotId: input.damaged_lot_id == null ? null : Number(input.damaged_lot_id),
+      tagged: undefined as (Awaited<ReturnType<typeof readTaggedSaleSources>> extends Map<number,infer T> ? T : never) | undefined,
+      unlottedStock: input.unlotted_stock === true,
       batchId: Number(input.batch_id) > 0 ? Number(input.batch_id) : null, quantity,
       priceUsd, priceKhr, totalUsd: Number((priceUsd * quantity).toFixed(2)), totalKhr: Math.round(priceKhr * quantity),
       unitCostUsd: toNumber(meta.cost_price_usd), unitCostKhr: toNumber(meta.cost_price_khr),
     }
   })
+
+  try { const taggedSources = await readTaggedSaleSources(db,replacementLines,true); for (const line of replacementLines) if(line.taggedLotId) line.tagged=taggedSources.get(line.taggedLotId) } catch(error) { return c.json({error:error instanceof Error ? error.message : 'Invalid tagged replacement source'},409) }
 
   const returnSaleItemIds = returnItems.map((item) => Number(item.sale_item_id)).filter((id) => Number.isSafeInteger(id) && id > 0)
   const saleItemBatchInfo: Map<number, SaleLineInfo> = customerReturnV1Plan
@@ -1817,10 +1831,10 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   const replacementFifoTakes = new Map<number, LotTake[]>()
   const replacementExplicitTakes = new Map<number, LotTake[]>()
   const fifoLots = await readFifoLotAvailabilityForCart(db, replacementLines
-    .filter((line) => line.batchId == null)
+    .filter((line) => line.batchId == null && !line.tagged && !line.unlottedStock)
     .map((line) => ({ productId: line.productId, branchId: line.branchId })))
   for (const [index, line] of replacementLines.entries()) {
-    if (line.batchId != null) continue
+    if (line.batchId != null || line.tagged || line.unlottedStock) continue
     const lots = fifoLots.get(`${line.productId}:${line.branchId}`) || []
     const { takes, uncovered } = allocateAcrossLots(lots, line.quantity)
     if (uncovered > 0 && takes.length > 0) {
@@ -1954,6 +1968,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   }
   for (const [index, line] of replacementLines.entries()) {
     addBranchDelta(line.productId, line.branchId, -line.quantity)
+    if (line.tagged?.batchId != null) addBatchDelta(line.tagged.batchId,line.productId,line.branchId,-line.quantity,true)
     for (const take of [...(replacementFifoTakes.get(index) || []), ...(replacementExplicitTakes.get(index) || [])]) {
       addBatchDelta(take.batchId, line.productId, line.branchId, -take.quantity, true)
     }
@@ -2293,15 +2308,15 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     const recordedBatchId = takes.length === 1 && takes[0].quantity === line.quantity ? takes[0].batchId : null
     statements.push({
       sql: `INSERT INTO sale_items(sale_id,product_id,product_name,quantity,applied_price_usd,applied_price_khr,
-        cost_price_usd,cost_price_khr,total_usd,total_khr,branch_id,price_mode,base_price_usd,base_price_khr,batch_id)
+        cost_price_usd,cost_price_khr,total_usd,total_khr,branch_id,price_mode,base_price_usd,base_price_khr,batch_id,damaged_lot_id)
         VALUES(${replacementSaleExpression},@product_id,@product_name,@quantity,@applied_price_usd,@applied_price_khr,
-        @cost_price_usd,@cost_price_khr,@total_usd,@total_khr,@branch_id,'selling',@base_price_usd,@base_price_khr,@batch_id)`,
+        @cost_price_usd,@cost_price_khr,@total_usd,@total_khr,@branch_id,'selling',@base_price_usd,@base_price_khr,@batch_id,@damaged_lot_id)`,
       params: {
         replacementClientRequestId, product_id: line.productId, product_name: line.productName, quantity: line.quantity,
         applied_price_usd: line.priceUsd, applied_price_khr: line.priceKhr,
         cost_price_usd: line.unitCostUsd, cost_price_khr: line.unitCostKhr,
         total_usd: line.totalUsd, total_khr: line.totalKhr, branch_id: line.branchId,
-        base_price_usd: line.priceUsd, base_price_khr: line.priceKhr, batch_id: recordedBatchId,
+        base_price_usd: line.priceUsd, base_price_khr: line.priceKhr, batch_id: recordedBatchId, damaged_lot_id:line.tagged?.lotId ?? null,
       },
     })
     statements.push({
@@ -2329,7 +2344,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     }
     touchedProducts.add(line.productId)
   }
-  for (const productId of touchedProducts) statements.push({
+  for (const productId of touchedProducts) if (!replacementLines.some(line => line.productId === productId)) statements.push({
     sql: `UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@productId),
           updated_at=CURRENT_TIMESTAMP WHERE id=@productId`, params: { productId },
   })
@@ -2439,10 +2454,11 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
       WHERE COALESCE((SELECT stock_quantity FROM products WHERE id=json_extract(j.value,'$.product_id')),0)
         !=COALESCE((SELECT SUM(quantity) FROM branch_stock WHERE product_id=json_extract(j.value,'$.product_id')),0))
   `
-  statements.push(returnCreateGuardStatement(operationId, 'postcondition', postcondition, {
-    ...commonGuardParams, expectedJson, saleId: requestedSaleId, returnClientRequestId: clientRequestId,
-  }))
-  statements.push({ sql: 'DELETE FROM return_create_guards WHERE operation_id=@operationId', params: { operationId } })
+  statements.push({
+    sql: `DELETE FROM return_create_guards WHERE operation_id=@operationId
+      AND CASE WHEN (${postcondition}) THEN 1 ELSE json_extract('[1]','$[return_create_postcondition_conflict]') END=1`,
+    params: { ...commonGuardParams, expectedJson, saleId: requestedSaleId, returnClientRequestId: clientRequestId, operationId },
+  })
 
   const hasStockWrite = touchedProducts.size > 0 || returnItems.some(item => normalizeStockAction(item) === 'damaged')
   const transactionStatementCount = hasStockWrite ? stockTransactionStatementCount(statements.length) : statements.length + 1

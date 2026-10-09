@@ -1,3 +1,6 @@
+import type { D1Compat } from './db'
+import { selectInChunks } from './sqlBinding'
+import { planCountedTaggedChange, ordinarySubsetSql, type CountedTaggedIdentity } from './countedDamagedStock'
 import { productStockGuardStatement } from './productStockGuard'
 // Adding a line to a sale that already exists (S4-24b).
 //
@@ -135,7 +138,35 @@ export function saleStatusDeductsStock(status: string): boolean {
 // has decided which lots it draws from.
 // ---------------------------------------------------------------------------
 
+export function taggedSaleSourceGuard(identity: CountedTaggedIdentity & { conditionTag: string }): StockStatement {
+  return { sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM damaged_stock_lots WHERE id=@lotId AND product_id=@productId AND branch_id=@branchId AND batch_id IS @batchId AND condition_tag=@conditionTag) THEN 1 ELSE json_extract('[1]','$[counted_condition_identity_conflict]') END`, params: { ...identity } }
+}
+
+export function planTaggedSaleSourceChange(identity: CountedTaggedIdentity & { conditionTag: string }, quantity: number, action: 'consume' | 'restore'): StockStatement[] {
+  const statements = planCountedTaggedChange(identity, quantity, action), guard = taggedSaleSourceGuard(identity)
+  statements[0] = { sql: statements[0].sql.replace('SELECT CASE WHEN', `SELECT CASE WHEN (${guard.sql})=1 AND`), params: { ...statements[0].params, ...guard.params } }
+  return statements
+}
+
+export async function readTaggedSaleSources(db: D1Compat, requests: readonly { productId: number; branchId: number | null; taggedLotId?: number | null; quantity: number }[], deductsStock: boolean): Promise<Map<number, CountedTaggedIdentity & { conditionTag: string }>> {
+  const selected = requests.filter(line => line.taggedLotId != null)
+  const ids = [...new Set(selected.map(line => Number(line.taggedLotId)))]
+  if (ids.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new Error('Invalid tagged sale source')
+  const rows = await selectInChunks(ids, 0, chunk => db.prepare(`SELECT id,product_id,branch_id,batch_id,condition_tag,quantity_remaining FROM damaged_stock_lots WHERE id IN (${chunk.map(() => '?').join(',')})`).all<{ id:number; product_id:number; branch_id:number; batch_id:number|null; condition_tag:string; quantity_remaining:number }>(chunk))
+  const byId = new Map(rows.map(row => [Number(row.id), row]))
+  const totals = new Map<number, number>(), identities = new Map<number, CountedTaggedIdentity & { conditionTag: string }>()
+  for (const line of selected) {
+    const id = Number(line.taggedLotId), row = byId.get(id)
+    if (!row || row.product_id !== line.productId || row.branch_id !== line.branchId || !Number.isFinite(line.quantity) || line.quantity <= 0) throw new Error('Tagged lot no longer belongs to this product and branch. Refresh and pick again.')
+    const quantity = (totals.get(id) || 0) + line.quantity; totals.set(id, quantity)
+    if (deductsStock && quantity > row.quantity_remaining) throw new Error('Not enough stock in the selected tagged lot.')
+    identities.set(id, { lotId:id, productId:row.product_id, branchId:row.branch_id, batchId:row.batch_id, conditionTag:row.condition_tag })
+  }
+  return identities
+}
+
 export type NewSaleLineInput = {
+  tagged?: CountedTaggedIdentity & { conditionTag: string }
   pricingSnapshotJson?: string
   moneyPrecisionVersion?: 0 | 1
   productId: number
@@ -179,6 +210,10 @@ export function resolveExplicitSaleLineBatches(
   const resolved: NewSaleLineInput[] = []
 
   for (const [index, line] of lines.entries()) {
+    if (line.tagged) {
+      if (line.batchId || line.unlottedStock || line.tagged.productId !== line.productId || line.tagged.branchId !== line.branchId) return { ok: false, error: 'Conflicting tagged sale source.' }
+      resolved.push(line); continue
+    }
     if (line.unlottedStock && line.batchId) return { ok: false, error: `Added item #${index + 1} cannot select both a received date and stock without a received date.` }
     if (!line.batchId) {
       resolved.push(line)
@@ -257,7 +292,7 @@ export function allocateNewSaleLines(
     const unitPriceUsd = Number(line.unitPriceUsd) || 0
     const heldUnits = skipStock ? 0 : heldQuantity(saleStatus, quantity, 0)
     let takes: FifoLotTake[] = []
-    if (line.branchId && quantity > 0 && !line.unlottedStock) {
+    if (line.branchId && quantity > 0 && !line.unlottedStock && !line.tagged) {
       if (line.batchId) {
         takes = [{
           batchId: Number(line.batchId),
@@ -299,6 +334,7 @@ export function allocateNewSaleLines(
 export function planUnlottedSaleLineGuards(lines: PlannedSaleLine[]): StockStatement[] {
   const requests = new Map<string, { productId: number; branchId: number; quantity: number }>()
   for (const line of lines) {
+    if (line.tagged) continue
     const uncovered = line.heldUnits > 0 ? Math.max(0, line.heldUnits - line.takes.reduce((sum, take) => sum + take.quantity, 0)) : 0
     if (!line.branchId || !uncovered) continue
     const key = `${line.productId}:${line.branchId}`
@@ -310,7 +346,8 @@ export function planUnlottedSaleLineGuards(lines: PlannedSaleLine[]): StockState
     sql: `INSERT INTO sale_bulk_guards(guard_value) SELECT CASE WHEN
       COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@productId AND branch_id=@branchId),0)
       - COALESCE((SELECT SUM(MAX(0,bbs.quantity)) FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id
-        WHERE pb.variant_product_id=@productId AND bbs.branch_id=@branchId),0) >= @quantity THEN 1 ELSE 0 END`,
+        WHERE pb.variant_product_id=@productId AND bbs.branch_id=@branchId),0)
+      -${ordinarySubsetSql('@productId','@branchId','NULL')} >= @quantity THEN 1 ELSE 0 END`,
     params,
   }))
 }
@@ -356,17 +393,24 @@ export function planSaleLineAddition(input: {
       throw new SaleMoneyContractError('money_precision_pricing_intent_required')
     const captured=pricing?.pool.lines.find(row=>row.line_key===pricing.line_key)
     addedSubtotalUsd += line.lineTotalUsd
+    if (line.tagged) {
+      if (line.tagged.productId !== line.productId || line.tagged.branchId !== line.branchId || line.batchId || line.unlottedStock) throw new Error('counted_tagged_identity_required')
+      if (line.heldUnits > 0) statements.push(...planTaggedSaleSourceChange(line.tagged, line.heldUnits, 'consume'))
+      else statements.push(taggedSaleSourceGuard(line.tagged))
+    }
     saleItemStatementIndexByLine[lineIndex] = statements.length
     statements.push({
       sql: `INSERT INTO sale_items (
               sale_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr,
               cost_price_usd, cost_price_khr, total_usd, total_khr, branch_id,
               price_mode, base_price_usd, base_price_khr, batch_id, batch_label, batch_expiry_date
+              ${line.tagged?', damaged_lot_id':''}
               ${pricing?', pricing_snapshot_json, product_discount_type, product_discount_label, product_discount_usd, product_discount_khr, manual_discount_type, manual_discount_value, manual_discount_usd, manual_discount_khr':''}
             ) VALUES (
               @sale_id, @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr,
               @cost_price_usd, @cost_price_khr, @total_usd, @total_khr, @branch_id,
               @price_mode, @base_price_usd, @base_price_khr, @batch_id, @batch_label, @batch_expiry_date
+              ${line.tagged?', @damaged_lot_id':''}
               ${pricing?', @pricing_snapshot_json, @product_discount_type, @product_discount_label, @product_discount_usd, @product_discount_khr, @manual_discount_type, @manual_discount_value, @manual_discount_usd, @manual_discount_khr':''}
             )`,
       params: {
@@ -380,6 +424,7 @@ export function planSaleLineAddition(input: {
           manual_discount_usd:divideMoney4(pricing.amounts.manual_discount_usd,line.quantity),
           manual_discount_khr:multiplyMoney4(divideMoney4(pricing.amounts.manual_discount_usd,line.quantity),exchangeRate),
         }:{}),
+        ...(line.tagged ? { damaged_lot_id: line.tagged.lotId } : {}),
         sale_id: input.saleId,
         product_id: line.productId,
         product_name: line.productName,
@@ -390,7 +435,7 @@ export function planSaleLineAddition(input: {
         cost_price_khr: line.costPriceKhr,
         total_usd: line.lineTotalUsd,
         total_khr: convertedKhr(line.lineTotalUsd, exchangeRate,line.moneyPrecisionVersion),
-        branch_id: line.recordedBranchId ?? line.branchId,
+        branch_id: line.tagged?.branchId ?? line.recordedBranchId ?? line.branchId,
         price_mode: captured?.source ?? 'selling',
         // Same "no manual discount" default POST / uses: base = applied.
         base_price_usd: pricing?.amounts.base_price_usd ?? line.unitPriceUsd,
@@ -416,6 +461,7 @@ export function planSaleLineAddition(input: {
     if (existing) existing.quantity += line.heldUnits
     else deductionMap.set(key, { product_id: line.productId, branch_id: line.branchId, quantity: line.heldUnits })
 
+    if (!line.tagged) {
     for (const take of line.takes) {
       statements.push(decrementBatchStockStrictStatement(take.batchId, line.branchId, take.quantity))
     }
@@ -428,6 +474,7 @@ export function planSaleLineAddition(input: {
       sql: `UPDATE products SET stock_quantity = MAX(0, stock_quantity - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @product_id`,
       params: { product_id: line.productId, quantity: line.heldUnits },
     })
+    }
     statements.push({
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${line.effect ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
             VALUES (@product_id, @product_name, @branch_id${line.effect ? ', @branch_name, @addressed_branch_name' : ''}, 'sale', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
@@ -443,7 +490,7 @@ export function planSaleLineAddition(input: {
         reference_id: input.saleId,
         user_id: input.userId,
         user_name: input.userName,
-        batch_id: line.movementBatchId,
+        batch_id: line.tagged?.batchId ?? line.movementBatchId,
       },
     })
   }
@@ -500,6 +547,7 @@ export function buildAllocationStatements(
 // ---------------------------------------------------------------------------
 
 export type AddedSaleLineRecord = {
+  tagged?: CountedTaggedIdentity & { conditionTag: string }
   pricingSnapshotJson?: string
   moneyPrecisionVersion?: 0 | 1
   saleItemId: number
@@ -529,6 +577,7 @@ export function plannedLineFromRecord(record: AddedSaleLineRecord): PlannedSaleL
   return {
     ...(record.pricingSnapshotJson===undefined?{}:{pricingSnapshotJson:record.pricingSnapshotJson}),
     ...(record.moneyPrecisionVersion === undefined ? {} : {moneyPrecisionVersion:record.moneyPrecisionVersion}),
+    ...(record.tagged ? { tagged: record.tagged } : {}),
     productId: record.productId,
     productName: record.productName || `product #${record.productId}`,
     quantity: record.quantity,
@@ -784,6 +833,10 @@ export function planSaleLineRemoval(input: {
       statements.unshift(productStockGuardStatement([Number(line.productId)], 'active'))
       restoredUnits += line.heldUnits
       const restoredLots: Array<{ batchId: number; quantity: number }> = []
+      if (line.tagged) {
+        if (line.tagged.productId !== line.productId || line.tagged.branchId !== line.branchId) throw new Error('counted_tagged_identity_required')
+        statements.push(...planCountedTaggedChange(line.tagged, line.heldUnits, 'restore'))
+      } else {
       for (let index = line.takes.length - 1; index >= 0; index -= 1) {
         const take = line.takes[index]
         if (take.quantity <= 0) continue
@@ -799,6 +852,7 @@ export function planSaleLineRemoval(input: {
         sql: `UPDATE products SET stock_quantity = stock_quantity + @quantity, updated_at = CURRENT_TIMESTAMP WHERE id = @product_id`,
         params: { product_id: line.productId, quantity: line.heldUnits },
       })
+      }
       statements.push({
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
               VALUES (@product_id, @product_name, @branch_id, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
@@ -814,7 +868,7 @@ export function planSaleLineRemoval(input: {
           user_id: input.userId,
           user_name: input.userName,
           // Same single-lot attribution rule as everywhere else (0084).
-          batch_id: restoredLots.length === 1 && restoredLots[0].quantity === line.heldUnits ? restoredLots[0].batchId : null,
+          batch_id: line.tagged ? line.tagged.batchId : restoredLots.length === 1 && restoredLots[0].quantity === line.heldUnits ? restoredLots[0].batchId : null,
         },
       })
     }
