@@ -29,7 +29,7 @@ async function probe(make, tier, kind) {
   })
   const request = kind === 'equivalent' ? { ...body, pricing: { ...body.pricing, barcode: '011111' } } : body
   const raw = f.env.DB
-  let inserted = 0, injected = false, rival, rivalCatalog
+  let inserted = 0, injected = false, rival, rivalCatalog, rivalStock
   f.env.DB = new Proxy(raw, { get(target, key) {
     if (key === 'batch') return async statements => {
       const creates = statements.some(row => /INSERT INTO products\s*\(/.test(row.text))
@@ -43,7 +43,7 @@ async function probe(make, tier, kind) {
       if (creates && !injected && ['ack', 'after-actor', 'after-source'].includes(kind)) {
         injected = true
         if (kind === 'ack') throw new Error('D1_ERROR: network reset after catalog commit')
-        compete(f, mutations[kind.slice(6)]); rival = state(f); rivalCatalog = catalog(f)
+        compete(f, mutations[kind.slice(6)]); rival = state(f); rivalCatalog = catalog(f); rivalStock = f.state()
       }
       return result
     }
@@ -53,37 +53,44 @@ async function probe(make, tier, kind) {
     if (kind === 'physical-failure') f.sql.exec("CREATE TEMP TRIGGER create_intake_fail BEFORE INSERT ON branch_batch_stock BEGIN SELECT RAISE(ABORT,'CHECK constraint failed: unrelated_catalog_intake'); END")
     const result = await f.call('/inventory/adjust', request)
     console.log('CATALOG_RESULT ' + JSON.stringify({ tier, kind, inserted, status: result.status, code: result.json.code, products: catalog(f).length }))
-    if (mutations[kind] || kind.startsWith('after-')) {
+    if (mutations[kind]) {
       assert.equal(result.status, 409, JSON.stringify(result.json))
       assert.equal(result.json.code, 'counted_quantity_conflict')
       assert.deepEqual(state(f), rival, 'rival is the only stock/history change')
-      assert.deepEqual(catalog(f), rivalCatalog, 'pre-insert authority refusal creates no catalog row; post-insert retains only its documented zero-stock row')
+      assert.deepEqual(catalog(f), rivalCatalog, 'authority refusal creates no catalog row')
       assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM stock_mutation_receipts').get().n, 0)
       assert.equal(inserted, 1)
     } else if (kind === 'ack' || kind === 'physical-failure') {
       assert.equal(result.status, kind === 'ack' ? 503 : 400, JSON.stringify(result.json))
-      if (kind === 'ack') assert.equal(result.json.code, 'stock_transaction_outcome_unknown')
+      if (kind === 'ack') assert.equal(result.json.code, 'stock_request_outcome_unknown')
       assert.equal(inserted, 1, 'unknown catalog acknowledgement never blindly dispatches creation again')
-      assert.equal(catalog(f).length, 2)
-      assert.equal(catalog(f)[1].stock_quantity, 0)
-      assert.equal(f.state().movements.length, 0)
+      assert.equal(catalog(f).length, kind === 'ack' ? 2 : 1)
+      if (kind === 'ack') assert.equal(catalog(f)[1].stock_quantity, 0.2)
+      assert.equal(f.state().movements.length, kind === 'ack' ? 1 : 0)
       if (kind === 'physical-failure') f.sql.exec('DROP TRIGGER create_intake_fail')
       const retry = await f.call('/inventory/adjust', request)
-      assert.equal(retry.status, 200, JSON.stringify(retry.json))
-      assert.equal(retry.json.createdSibling, false)
-      assert.equal(inserted, 1)
+      assert.equal(retry.status, kind === 'ack' ? 409 : 200, JSON.stringify(retry.json))
+      if (kind === 'ack') assert.equal(retry.json.code, 'stock_request_partially_applied')
+      else assert.equal(retry.json.createdSibling, true)
+      assert.equal(inserted, kind === 'ack' ? 1 : 2)
       assert.equal(catalog(f).length, 2)
       assert.equal(catalog(f)[1].stock_quantity, 0.2)
       const saved = state(f), products = catalog(f)
-      assert.equal((await f.call('/inventory/adjust', request)).status, 200)
+      assert.equal((await f.call('/inventory/adjust', request)).status, kind === 'ack' ? 409 : 200)
       assert.deepEqual(state(f), saved)
       assert.deepEqual(catalog(f), products)
     } else {
       assert.equal(result.status, 200, JSON.stringify(result.json))
-      assert.equal(inserted, kind === 'new' ? 1 : 0)
-      assert.equal(result.json.createdSibling, kind === 'new')
+      assert.equal(inserted, kind === 'new' || kind.startsWith('after-') ? 1 : 0)
+      assert.equal(result.json.createdSibling, kind === 'new' || kind.startsWith('after-'))
       assert.equal(f.sql.prepare('SELECT stock_quantity FROM products WHERE id=?').get(result.json.productId).stock_quantity, kind === 'equivalent' ? 0.3 : 0.2)
       assert.equal(f.state().movements.length, 1)
+      if (kind.startsWith('after-')) {
+        assert.deepEqual(f.state(), rivalStock, 'revocation after the atomic commit cannot undo a confirmed authorized commit')
+        assert.deepEqual(catalog(f), rivalCatalog)
+        console.log(`PASS ${tier}/${kind} change after the single committed transaction`)
+        return
+      }
       const saved = state(f), products = catalog(f)
       assert.equal((await f.call('/inventory/adjust', request)).status, 200)
       assert.deepEqual(state(f), saved)

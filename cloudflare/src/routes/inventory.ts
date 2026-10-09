@@ -6,7 +6,7 @@ import { ProductStockGuardError, productStockGuardError, productHasStockSql, pro
 import { ReceivingBranchError, requireReceivingBranch, receivingBranchAssertion, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from '../lib/receivingBranch'
 import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
-import { getDb, isRetryableD1Error, type D1Compat } from '../lib/db'
+import { getDb, type D1Compat } from '../lib/db'
 import { ordinaryBusinessBatch, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
 import { executeStockTransaction, stockTransactionRefusal, StockTransactionOutcomeUnknownError } from '../lib/stockTransaction'
 
@@ -34,7 +34,7 @@ import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
 import { stockMutationRequestIdMissing, STOCK_MUTATION_REQUEST_ID_REQUIRED, StockMutationBudgetError, withStockMutationReceipt, executeStockMutationBatch, type StockMutationAtomicMark } from '../lib/stockMutationReceipt'
 import { planConditionHistory } from '../lib/countedConditionHistory'
-import { countedStockFactsSql, CountedStockBatchPlan, CountedStockPlan, CountedStockConflictError, isCountedStockConflict, subtractCountedQuantity, sumCountedQuantities } from '../lib/countedDamagedStock'
+import { countedStockFactsSql, countedProductCreationFactsSql, CountedStockBatchPlan, CountedStockPlan, CountedStockConflictError, isCountedStockConflict, subtractCountedQuantity, sumCountedQuantities } from '../lib/countedDamagedStock'
 import { stockActorParams, stockActorPredicate } from '../lib/stockActorGuard'
 import { MoneyPrecisionError } from '../lib/moneyPrecision'
 import { maybeQueueForReview } from '../lib/reviewGate'
@@ -1292,6 +1292,7 @@ app.put('/reasons', async (c) => {
 // two different numbers any more, so only one ("cost") is ever asked for.
 type StockRowFields = {
   id: number
+  reserved_product_id: number
   name: string | null
   sku: string | null
   barcode: string | null
@@ -1371,7 +1372,7 @@ async function resolveAddStockTarget(
     barcode: string | null
   },
   preflightReceiptCost: (target: Pick<ProductIdentityRow, 'id' | 'cost_price_usd' | 'cost_price_khr'>) => void | Promise<void>,
-): Promise<{ product: Pick<ProductIdentityRow, 'id' | 'name' | 'cost_price_usd' | 'cost_price_khr'>; created: boolean }> {
+): Promise<{ product: Pick<ProductIdentityRow, 'id' | 'name' | 'cost_price_usd' | 'cost_price_khr'>; created: boolean; statement?: StockWriteStatement }> {
   const db = getDb(env)
   const candidate: ProductIdentityRow = {
     id: source.id,
@@ -1443,7 +1444,9 @@ async function resolveAddStockTarget(
   // the edited pricing, and mirror it into the source's parent, if any.
   const cost = mirrorCostFields(overrides.costUsd, overrides.costKhr)
   await preflightReceiptCost({ id: 0, cost_price_usd: overrides.costUsd, cost_price_khr: overrides.costKhr })
+  if (!Number.isSafeInteger(source.reserved_product_id) || source.reserved_product_id <= 0) throw new CountedStockConflictError()
   const insertPayload = {
+    id: source.reserved_product_id,
     name: source.name,
     sku: null,
     barcode: overrides.barcode,
@@ -1478,20 +1481,12 @@ async function resolveAddStockTarget(
       SELECT 1 FROM products WHERE id!=@sourceId AND name_key=@nameKey AND is_active=1
       ${barcodeMatch ? `AND ${barcodeMatch.sql}` : ''})
     THEN @name ELSE json_extract('[1]','$[counted_quantity_conflict]') END`
-  let result: D1Result
-  try {
-    const results = await executeStockTransaction(db, [{ sql: `
+  const statement = { sql: `
       INSERT INTO products (${columns.join(', ')}, created_at, updated_at)
       VALUES (${columns.map(col => col === 'name' ? name : `@${col}`).join(', ')}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `, params: { ...insertPayload, ...stockActorParams(user), ...original.params, ...barcodeMatch?.params,
-      sourceId: source.id, nameKey: normalizeProductGroupName(source.name) } }], 'once')
-    result = results[0]
-  } catch (error) {
-    if (isRetryableD1Error(error)) throw new StockTransactionOutcomeUnknownError()
-    throw error
-  }
-  if (!Number.isSafeInteger(Number(result.meta.last_row_id)) || Number(result.meta.last_row_id) <= 0) throw new StockTransactionOutcomeUnknownError()
-  return { product: { id: Number(result.meta.last_row_id), name: source.name, ...cost }, created: true }
+      sourceId: source.id, nameKey: normalizeProductGroupName(source.name) } }
+  return { product: { id: source.reserved_product_id, name: source.name, ...cost }, created: true, statement }
 }
 
 async function defaultBranchId(env: Env): Promise<number | null> {
@@ -1625,7 +1620,8 @@ type InventoryReceiptSnapshot = {
 
 async function planInventoryReceipt(db: D1Compat, input: Parameters<typeof planReceiveBatchStock>[0], user: SessionUser,
   originalProducts: readonly ({ id: number } & object)[], correction: Pick<InventoryReceiptSnapshot, 'id' | 'unit_cost_usd'> | null,
-  preflightTarget?: Awaited<ReturnType<typeof prepareReceiptLotTarget>>) {
+  preflightTarget?: Awaited<ReturnType<typeof prepareReceiptLotTarget>>,
+  createdProduct?: Pick<ProductIdentityRow, 'id' | 'name' | 'cost_price_usd' | 'cost_price_khr'>) {
   const columns = ['id','received_quantity','received_cost_usd','supplier_id','supplier_name','payment_status','credit_due_date','notes',
     'received_branch_id','received_branch_name','variant_product_id','batch_key','lot_code','expiry_date','received_at','is_active',
     'batch_number','unit_cost_usd','created_at','updated_at']
@@ -1633,11 +1629,13 @@ async function planInventoryReceipt(db: D1Compat, input: Parameters<typeof planR
     FROM (SELECT * FROM product_batches WHERE variant_product_id=@productId ORDER BY id LIMIT 10001))`
   const candidateIdsSql = '(SELECT json_group_array(id) FROM (SELECT id FROM product_batches WHERE variant_product_id=@productId ORDER BY id LIMIT 10001))'
   const baselineSql = 'COALESCE((SELECT baseline_batch_id FROM product_cost_entries WHERE product_id=@productId ORDER BY id DESC LIMIT 1),0)'
-  const observed = await db.prepare(`SELECT ${countedStockFactsSql('@productId','@branchId',candidateIdsSql)} AS facts,
+  const factsSql = createdProduct ? countedProductCreationFactsSql('@productId','@branchId')
+    : countedStockFactsSql('@productId','@branchId',candidateIdsSql)
+  const observed = await db.prepare(`SELECT ${factsSql} AS facts,
     ${receiptSnapshotSql} AS receipts,${baselineSql} AS baseline,(SELECT COALESCE(MAX(id),0) FROM product_batches) AS maximumId`)
     .get<{ facts: string; receipts: string; baseline: number; maximumId: number }>({ productId: input.productId, branchId: input.branchId })
   if (!observed?.facts || new TextEncoder().encode(observed.facts + observed.receipts).byteLength > 900000) throw new CountedStockConflictError()
-  if (JSON.parse(observed.facts).product[1] !== 1) throw new ProductStockGuardError([Number(input.productId)])
+  if (!createdProduct && JSON.parse(observed.facts).product[1] !== 1) throw new ProductStockGuardError([Number(input.productId)])
   const receipts = JSON.parse(observed.receipts) as InventoryReceiptSnapshot[]
   if (receipts.length > 10000) throw new CountedStockConflictError()
   const receivedAt = normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10)
@@ -1647,18 +1645,22 @@ async function planInventoryReceipt(db: D1Compat, input: Parameters<typeof planR
   const batchId = correction?.id ?? target!.existingBatchId
   const before = batchId == null ? undefined : receipts.find(row => row.id === batchId)
   if (batchId != null && (!before || (correction && before.unit_cost_usd !== correction.unit_cost_usd))) throw new CountedStockConflictError()
-  const group = new CountedStockBatchPlan([{ facts: observed.facts, branchId: input.branchId }])
-  const exact = group.get(Number(input.productId), input.branchId)
+  const group = createdProduct ? null : new CountedStockBatchPlan([{ facts: observed.facts, branchId: input.branchId }])
+  const exact = createdProduct ? new CountedStockPlan({ productId: createdProduct.id, name: String(createdProduct.name),
+    costUsd: createdProduct.cost_price_usd ?? null, costKhr: createdProduct.cost_price_khr ?? null, observed: observed.facts }, input.branchId)
+    : group!.get(Number(input.productId), input.branchId)
   const original = inventorySourcePreimage(originalProducts)
+  const creationPreimage = createdProduct ? exact.takeInitialPredicate() : null
   const reservedBatchId = batchId == null ? observed.maximumId + 1 : undefined
   const guards: StockWriteStatement[] = [
     { sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products WHERE id IN (SELECT value FROM json_each(@sourceProductIds)) AND is_active IS NOT 1)
       THEN json_extract('[]','$[product_has_stock]') WHEN ${receiptSnapshotSql}=@receipts AND ${baselineSql}=@baseline AND (${stockActorPredicate}) AND (${original.sql})
+      ${creationPreimage ? `AND (${creationPreimage.sql})` : ''}
       ${reservedBatchId == null ? '' : 'AND NOT EXISTS(SELECT 1 FROM product_batches WHERE id=@reservedBatchId)'}
       THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`,
-    params: { ...stockActorParams(user), ...original.params, productId: input.productId, receipts: observed.receipts, baseline: observed.baseline,
+    params: { ...stockActorParams(user), ...original.params, ...creationPreimage?.params, productId: input.productId, receipts: observed.receipts, baseline: observed.baseline,
       sourceProductIds: JSON.stringify(originalProducts.map(row => row.id)), ...(reservedBatchId == null ? {} : { reservedBatchId }) } },
-    ...group.takePreimageGuards()]
+    ...(group ? group.takePreimageGuards() : exact.takeInitialGuard())]
   const metadata = correction ? null : planReceiveBatchStock({ ...input, batchId, receiptLotTarget: target!,
     ...(reservedBatchId == null ? {} : { reservedBatchId }),
     receiptCostPreimage: input.unitCostUsd == null ? undefined : { batchExists: Boolean(before), receivedCostUsd: before?.received_cost_usd ?? null },
@@ -1839,7 +1841,9 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // skips that query, unchanged from before).
   const [product, addressedBranchId] = await Promise.all([
     unlockPricing
-      ? db.prepare(`SELECT ${STOCK_ROW_COLUMNS} FROM products WHERE id = @id`).get<StockRowFields>({ id: productId })
+      ? db.prepare(`SELECT ${STOCK_ROW_COLUMNS}, MAX(COALESCE((SELECT MAX(id) FROM products),0),
+          COALESCE((SELECT seq FROM sqlite_sequence WHERE name='products'),0))+1 AS reserved_product_id
+        FROM products WHERE id = @id`).get<StockRowFields>({ id: productId })
       : db.prepare('SELECT id, name, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr, is_active FROM products WHERE id = @id').get<{ id: number; name: string; is_active: number | null } & ReceiptSellingPriceRow & { cost_price_usd: number | null; cost_price_khr: number | null }>({ id: productId }),
     requestedBranchId ? Promise.resolve(requestedBranchId) : defaultBranchId(c.env),
   ])
@@ -1942,6 +1946,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   let preflightAddMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = null
   let unlockedReceiptLotTarget: Awaited<ReturnType<typeof prepareReceiptLotTarget>> | undefined
   let unlockedProductSnapshot: Awaited<ReturnType<typeof resolveAddStockTarget>>['product'] | undefined
+  let plannedProductCreation: StockWriteStatement | undefined
   let mergedPricingStatement: { sql: string; params: Record<string, unknown> } | null = null
   if (unlockPricing) {
     const pricing = body.pricing as Record<string, unknown>
@@ -2029,6 +2034,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     targetProductId = resolved.product.id
     targetProductName = resolved.product.name ?? source.name
     createdSibling = resolved.created
+    plannedProductCreation = resolved.statement
     if (!createdSibling) {
       // Selling/wholesale price is mergeable data: an explicit unlocked receipt
       // may raise it, but never lower it. Cost remains untouched here.
@@ -2039,9 +2045,6 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
           wholesale_price_khr = MAX(COALESCE(wholesale_price_khr, 0), @wholesaleKhr),
           updated_at = CURRENT_TIMESTAMP
         WHERE id = @id`, params: { id: targetProductId, ...overrides } }
-    }
-    if (createdSibling) {
-      c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'create', id: targetProductId }))
     }
   }
 
@@ -2183,9 +2186,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   }
   if (receiptTotalUsd != null && addMovementCost) addMovementCost = { ...addMovementCost, totalCostUsd: receiptTotalUsd }
 
-  // Everything above this line is reads, validation and (for an unlocked add)
-  // at most a sibling product row that a retry resolves to again by identity.
-  // Everything below it can move stock.
+  // Catalog creation and stock are admitted and committed together below.
   //
   // SCAN1 STK-C / OV-6: an auto-routed removal (no lot named) is ONE db.batch
   // -- the captured lot drain, the strict aggregate decrement for the full
@@ -2198,7 +2199,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     try {
       if (!unlockPricing && targetProductId === productId) {
         if ((product as { is_active: number | null }).is_active !== 1) throw new ProductStockGuardError([targetProductId])
-      } else await assertProductsActive(db, [targetProductId])
+      } else if (!plannedProductCreation) await assertProductsActive(db, [targetProductId])
     }
     catch (error) {
       const stockGuard = productStockGuardError(error)
@@ -2306,8 +2307,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         batchId: unlockPricing ? null : batchIdRequested, supplierId, supplierName,
         unitCostUsd: receiptUnitCostUsd, receiptTotalUsd, preserveHistoricalUnitCost: unitCostUsd == null,
         paymentStatus, creditDueDate,
-      }, user!, [product, ...(unlockedProductSnapshot && unlockedProductSnapshot !== product ? [unlockedProductSnapshot] : [])],
-      correctionLot ?? null, unlockedReceiptLotTarget)
+      }, user!, [product, ...(!plannedProductCreation && unlockedProductSnapshot && unlockedProductSnapshot !== product ? [unlockedProductSnapshot] : [])],
+      correctionLot ?? null, unlockedReceiptLotTarget, plannedProductCreation ? unlockedProductSnapshot : undefined)
       resolvedBatchId = intake.batchId
       batchNumber = intake.batchNumber
       lotCode = intake.lotCode
@@ -2323,12 +2324,13 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         ? planHoldAsTaggedCreatedReceipt(tagged, intake.exact, intake.createdReceipt)
         : planHoldAsTaggedExact({ ...tagged, batchId: intake.batchId }, intake.exact) : []
       await executeStockMutationBatch(db, addressedStatements(landing, [
-        receivingBranchAssertion(branchId), ...intake.guards, ...intake.metadata, ...intake.physical,
+        receivingBranchAssertion(branchId), ...intake.guards, ...(plannedProductCreation ? [plannedProductCreation] : []), ...intake.metadata, ...intake.physical,
         ...(correctionLot ? [] : unlockPricing && !createdSibling && mergedPricingStatement ? [mergedPricingStatement]
           : sellingPricePlan ? [sellingPricePlan.statement] : []),
         movement, ...tags, { sql: 'DELETE FROM stock_session_guards', params: {} },
         ...(!correctionLot && !createdSibling ? [catalogCostRecomputeIfChangedStatement(targetProductId)] : []),
       ]), atomicMark)
+      if (plannedProductCreation) c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'create', id: targetProductId }))
       if (!correctionLot) {
         const received = await db.prepare('SELECT id,batch_number,lot_code FROM product_batches WHERE id=@id')
           .get<{ id: number; batch_number: number | null; lot_code: string | null }>({ id: intake.batchId })

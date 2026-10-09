@@ -4,6 +4,7 @@ type StockWriteStatement = { sql: string; params: Record<string, unknown> }
 
 export type CountedTaggedIdentity = { lotId: number; productId: number; branchId: number; batchId: number | null }
 export type CountedCreatedReceipt = Readonly<{ productId: number; branchId: number; batchKey: string; batchId: number }>
+export type CountedProductCreation = { productId: number; name: string; costUsd: number | null; costKhr: number | null; observed: string }
 
 const MAX_COUNTED_ROWS = 10_000
 type ProductFacts = [number, number, number, number | null, number | null, string]
@@ -18,19 +19,28 @@ type CountedBatchBinding = { products: Map<number, SharedCountedProjection>; rec
  * is bounded and returned individually, never as a floating SQL sum. */
 export function countedStockFactsSql(product: string, branch: string, additionalReceiptIds: string = "'[]'"): string {
   return `(SELECT json_object(
-    'product',json_array(p.id,p.is_active,p.stock_quantity,p.cost_price_usd,p.cost_price_khr,p.name),
-    'branch',(SELECT json_array(b.id,b.is_active,b.name,b.role) FROM branches b WHERE b.id=${branch}),
+    'product',json_array(counted_product.id,counted_product.is_active,counted_product.stock_quantity,counted_product.cost_price_usd,counted_product.cost_price_khr,counted_product.name),
+    'branch',(SELECT json_array(counted_branch.id,counted_branch.is_active,counted_branch.name,counted_branch.role) FROM branches counted_branch WHERE counted_branch.id=${branch}),
     'branches',(SELECT json_group_array(json_array(branch_id,quantity)) FROM (
       SELECT branch_id,quantity FROM branch_stock WHERE product_id=${product} ORDER BY branch_id LIMIT ${MAX_COUNTED_ROWS + 1})),
     'receipts',(SELECT json_group_array(json_array(id,variant_product_id,is_active,quantity,unit_cost_usd,received_at,expiry_date,batch_key,batch_number,lot_code,received_quantity,fifo_rank)) FROM (
-      SELECT pb.id,pb.variant_product_id,pb.is_active,bbs.quantity,pb.unit_cost_usd,pb.received_at,pb.expiry_date,pb.batch_key,pb.batch_number,pb.lot_code,pb.received_quantity,
-        ROW_NUMBER() OVER (ORDER BY (pb.received_at IS NULL),pb.received_at,pb.batch_number,pb.id) fifo_rank
-      FROM product_batches pb LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=${branch}
-      WHERE pb.variant_product_id=${product} AND (bbs.batch_id IS NOT NULL OR pb.id IN (SELECT CAST(value AS INTEGER) FROM json_each(${additionalReceiptIds}))) ORDER BY pb.id LIMIT ${MAX_COUNTED_ROWS + 1})),
+      SELECT counted_receipt.id,counted_receipt.variant_product_id,counted_receipt.is_active,counted_branch_receipt.quantity,counted_receipt.unit_cost_usd,counted_receipt.received_at,counted_receipt.expiry_date,counted_receipt.batch_key,counted_receipt.batch_number,counted_receipt.lot_code,counted_receipt.received_quantity,
+        ROW_NUMBER() OVER (ORDER BY (counted_receipt.received_at IS NULL),counted_receipt.received_at,counted_receipt.batch_number,counted_receipt.id) fifo_rank
+      FROM product_batches counted_receipt LEFT JOIN branch_batch_stock counted_branch_receipt ON counted_branch_receipt.batch_id=counted_receipt.id AND counted_branch_receipt.branch_id=${branch}
+      WHERE counted_receipt.variant_product_id=${product} AND (counted_branch_receipt.batch_id IS NOT NULL OR counted_receipt.id IN (SELECT CAST(value AS INTEGER) FROM json_each(${additionalReceiptIds}))) ORDER BY counted_receipt.id LIMIT ${MAX_COUNTED_ROWS + 1})),
     'tags',(SELECT json_group_array(json_array(id,batch_id,quantity,quantity_remaining,condition_tag,source,return_id,return_item_id,unit_cost_usd,created_at)) FROM (
       SELECT id,batch_id,quantity,quantity_remaining,condition_tag,source,return_id,return_item_id,unit_cost_usd,created_at
       FROM damaged_stock_lots WHERE product_id=${product} AND branch_id=${branch} ORDER BY id LIMIT ${MAX_COUNTED_ROWS + 1}))
-    ) FROM products p WHERE p.id=${product})`
+    ) FROM products counted_product WHERE counted_product.id=${product})`
+}
+
+export function countedProductCreationFactsSql(product: string, branch: string): string {
+  return `json_object('occupied',EXISTS(SELECT 1 FROM products WHERE id=${product})
+    OR EXISTS(SELECT 1 FROM branch_stock WHERE product_id=${product})
+    OR EXISTS(SELECT 1 FROM product_batches WHERE variant_product_id=${product})
+    OR EXISTS(SELECT 1 FROM damaged_stock_lots WHERE product_id=${product})
+    OR EXISTS(SELECT 1 FROM product_cost_entries WHERE product_id=${product}),
+    'branch',(SELECT json_array(id,is_active,name,role) FROM branches WHERE id=${branch}))`
 }
 
 function exactQuantity(text: string): number {
@@ -66,6 +76,8 @@ export function isCountedStockConflict(error: unknown): boolean {
  * this same atomic batch. Generated tag identities need no guessed row id. */
 export class CountedStockPlan {
   private readonly facts: CountedFacts
+  private readonly observed: string
+  private readonly createsProduct: boolean
   private guarded = false
   private addedTags: { batchId: number | null; quantity: number }[] = []
   private readonly createdReceipts = new Map<string, number>()
@@ -75,8 +87,18 @@ export class CountedStockPlan {
   readonly productId: number
   readonly branchId: number
 
-  constructor(private readonly observed: string, branchId: number, private readonly batch?: CountedBatchBinding) {
-    this.facts = JSON.parse(observed) as CountedFacts
+  constructor(input: string | CountedProductCreation, branchId: number, private readonly batch?: CountedBatchBinding) {
+    this.createsProduct = typeof input !== 'string'
+    this.observed = typeof input === 'string' ? input : input.observed
+    const captured = JSON.parse(this.observed)
+    if (typeof input === 'string') this.facts = captured as CountedFacts
+    else {
+      if (batch || !Number.isSafeInteger(input.productId) || input.productId <= 0 || typeof input.name !== 'string'
+        || !captured || captured.occupied !== 0 || !Array.isArray(captured.branch)
+        || captured.branch[0] !== branchId || captured.branch[1] !== 1) throw new CountedStockConflictError()
+      this.facts = { product: [input.productId, 1, 0, input.costUsd, input.costKhr, input.name],
+        branch: captured.branch, branches: [], receipts: [], tags: [] }
+    }
     if (!this.facts || !Array.isArray(this.facts.product) || !Array.isArray(this.facts.branches)
       || !Array.isArray(this.facts.receipts) || !Array.isArray(this.facts.tags)) throw new CountedStockConflictError()
     this.productId = this.facts.product[0]
@@ -170,11 +192,18 @@ export class CountedStockPlan {
   }
 
   takeInitialGuard(): StockWriteStatement[] {
-    if (this.guarded) return []
+    const predicate = this.takeInitialPredicate()
+    return predicate ? [{ sql: `SELECT CASE WHEN ${predicate.sql}
+      THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`, params: predicate.params }] : []
+  }
+
+  takeInitialPredicate(): StockWriteStatement | null {
+    if (this.guarded) return null
     this.guarded = true
-    return [{ sql: `SELECT CASE WHEN ${countedStockFactsSql('@productId', '@branchId', '@additionalReceiptIds')}=@observed
-      THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`,
-      params: { productId: this.productId, branchId: this.branchId, observed: this.observed, additionalReceiptIds: this.additionalReceiptIds } }]
+    const factsSql = this.createsProduct ? countedProductCreationFactsSql('@productId', '@branchId')
+      : countedStockFactsSql('@productId', '@branchId', '@additionalReceiptIds')
+    return { sql: `${factsSql}=@observed`,
+      params: { productId: this.productId, branchId: this.branchId, observed: this.observed, additionalReceiptIds: this.additionalReceiptIds } }
   }
 
   private physical(out: StockWriteStatement[], key: string, statement: StockWriteStatement, creates = false): void {
@@ -253,7 +282,8 @@ export class CountedStockPlan {
     branch[1] = subtractCountedQuantity(branch[1], [delta])
     this.facts.product[2] = subtractCountedQuantity(this.facts.product[2], [delta])
     if (branch[1] < 0 || this.facts.product[2] < 0) throw new CountedStockConflictError()
-    const params = { productId: this.productId, branchId: this.branchId, batchId, nextBranch: branch[1], nextProduct: this.facts.product[2] }
+    const params = { productId: this.productId, branchId: this.branchId, batchId, nextBranch: branch[1], nextProduct: this.facts.product[2],
+      ...(this.createsProduct ? { createdProductName: this.facts.product[5] } : {}) }
     if (batchId !== null) {
       const receipt = this.facts.receipts.find(row => row[0] === batchId)!
       receipt[3] = subtractCountedQuantity(receipt[3] ?? 0, [delta])
@@ -261,8 +291,11 @@ export class CountedStockPlan {
         ? 'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)VALUES(@batchId,@branchId,@nextReceipt) ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=excluded.quantity,updated_at=CURRENT_TIMESTAMP'
         : 'UPDATE branch_batch_stock SET quantity=@nextReceipt,updated_at=CURRENT_TIMESTAMP WHERE batch_id=@batchId AND branch_id=@branchId', params: { ...params, nextReceipt: receipt[3] } }, receiving)
     }
+    const receivingProduct = this.createsProduct ? `CASE WHEN EXISTS(SELECT 1 FROM products
+      WHERE id=@productId AND is_active=1 AND name IS @createdProductName) THEN @productId
+      ELSE json_extract('[1]','$[counted_quantity_conflict]') END` : '@productId'
     this.physical(out, `branch:${this.productId}:${this.branchId}`, { sql: receiving
-      ? 'INSERT INTO branch_stock(product_id,branch_id,quantity)VALUES(@productId,@branchId,@nextBranch) ON CONFLICT(product_id,branch_id) DO UPDATE SET quantity=excluded.quantity'
+      ? `INSERT INTO branch_stock(product_id,branch_id,quantity)VALUES(${receivingProduct},@branchId,@nextBranch) ON CONFLICT(product_id,branch_id) DO UPDATE SET quantity=excluded.quantity`
       : 'UPDATE branch_stock SET quantity=@nextBranch WHERE product_id=@productId AND branch_id=@branchId', params }, receiving)
     this.physical(out, `product:${this.productId}`, { sql: 'UPDATE products SET stock_quantity=@nextProduct,updated_at=CURRENT_TIMESTAMP WHERE id=@productId', params })
     this.assertSource(batchId)
