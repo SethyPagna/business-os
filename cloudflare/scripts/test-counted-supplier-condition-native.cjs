@@ -3,8 +3,83 @@ const h=require('./test-counted-quantity-exact-native.cjs')
 const input=(key,quantity=.1,condition='damaged',lot=1)=>({branch_id:1,reason:'Explicit supplier source',settlement:'refund',supplier_name:'Fixture supplier',exchange_rate:4000,client_request_id:key,items:[{product_id:1,branch_id:1,quantity,cost_price_usd:2,stock_condition:condition,...(lot?{damaged_lot_id:lot}:{})}]})
 const state=f=>({...f.state(),returns:f.sql.prepare('SELECT * FROM returns ORDER BY id').all(),items:f.sql.prepare('SELECT * FROM return_items ORDER BY id').all(),receipts:f.sql.prepare('SELECT * FROM return_create_receipts ORDER BY id').all(),audit:f.sql.prepare('SELECT * FROM audit_logs ORDER BY id').all()})
 const status=(f,id,source,target,key)=>{const r=f.sql.prepare('SELECT * FROM returns WHERE id=?').get(id);return f.call('/returns/bulk',{client_request_id:key,field:'status',source,target,items:[{id,expected_status:r.status,expected_method:r.supplier_settlement,expected_updated_at:r.updated_at}]})}
+async function completeMembership(make){
+ for(const tier of ['free','paid'])for(const receipt of [false,true])for(const mode of ['missing-all','missing-ordinary','missing-first','reassigned','zero','negative','product','branch','condition','extra','mixed','shared-tag','wire-numbers']){
+  const f=await h.world(make,tier,'zero',sql=>{h.seed(.5,receipt)(sql);sql.exec(`INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source,unit_cost_usd)VALUES(1,1,1,${receipt?1:'NULL'},.25,.25,'damaged','remove',2)`)});
+  try{
+   const body=input('member-'+mode,.125)
+   body.items.push({...body.items[0],...(mode==='shared-tag'?{}:{stock_condition:'ordinary',damaged_lot_id:undefined})})
+   const positive=['mixed','shared-tag','wire-numbers'].includes(mode)
+   if(mode==='wire-numbers')body.items=body.items.map(item=>({...item,product_id:String(item.product_id),quantity:String(item.quantity),cost_price_usd:String(item.cost_price_usd),cost_price_khr:'0'}))
+   const created=await f.call('/returns/supplier',body);assert.equal(created.status,200,JSON.stringify(created))
+   const id=created.json.id,original=state(f),manifest=original.receipts.find(row=>row.return_id===id).request_json
+   let otherId
+   if(mode==='reassigned'){const other=await f.call('/returns/supplier',input('other-membership-return',.125,'ordinary',null));assert.equal(other.status,200);otherId=other.json.id}
+   if(!positive){
+    f.sql.exec("INSERT INTO system_flags(key,value)VALUES('stock_transaction_permit','counted-tagged-subset-v1')")
+    try{
+     const first=f.sql.prepare('SELECT MIN(id) id FROM return_items WHERE return_id=?').get(id).id
+     if(mode==='missing-all')f.sql.prepare('DELETE FROM return_items WHERE return_id=?').run(id)
+     else if(mode==='missing-ordinary')f.sql.prepare('DELETE FROM return_items WHERE id=(SELECT MAX(id) FROM return_items WHERE return_id=?)').run(id)
+     else if(mode==='missing-first')f.sql.prepare('DELETE FROM return_items WHERE id=?').run(first)
+     else if(mode==='reassigned')f.sql.prepare('UPDATE return_items SET return_id=? WHERE id=?').run(otherId,first)
+     else if(mode==='extra')f.sql.prepare("INSERT INTO return_items(return_id,product_id,branch_id,quantity,cost_price_usd,cost_price_khr,stock_condition,stock_action)VALUES(?,1,1,.125,2,0,'ordinary','none')").run(id)
+     else f.sql.prepare(`UPDATE return_items SET ${ {zero:'quantity=0',negative:'quantity=-.125',product:'product_id=2',branch:'branch_id=2',condition:"stock_condition='opened'"}[mode]} WHERE id=?`).run(first)
+    }finally{f.sql.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'")}
+   }
+   const before=state(f),cancelled=await status(f,id,'completed','cancelled','cancel-member-'+mode)
+   console.log(JSON.stringify({membershipTier:tier,receipt,mode,status:cancelled.status}))
+   if(!positive){assert.equal(cancelled.status,409);assert.deepEqual(state(f),before)}
+   else{
+    assert.equal(cancelled.status,200);assert.equal(f.state().physical,.75);assert.equal(f.state().cache,.75);assert.equal(f.state().tags[0].quantity_remaining,.25)
+    assert.equal((await f.call('/action-history/'+cancelled.json.actionHistoryId+'/undo',{expected_generation:0})).status,200)
+    assert.equal(f.state().physical,original.physical);assert.equal(f.state().tags[0].quantity_remaining,original.tags[0].quantity_remaining)
+    assert.equal((await f.call('/action-history/'+cancelled.json.actionHistoryId+'/redo',{expected_generation:1})).status,200)
+    assert.equal(f.state().physical,.75);assert.equal(f.state().tags[0].quantity_remaining,.25)
+   }
+   assert.equal(f.sql.prepare('SELECT request_json FROM return_create_receipts WHERE return_id=?').get(id).request_json,manifest)
+  }finally{f.sql.close()}
+ }
+ for(const tier of ['free','paid'])for(const phase of ['cancel','undo','redo']){
+  const f=await h.world(make,tier,'zero',sql=>{h.seed(.5,true)(sql);sql.exec("INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source,unit_cost_usd)VALUES(1,1,1,1,.25,.25,'damaged','remove',2)")})
+  try{
+   const body=input('member-race',.125);body.items.push({...body.items[0],stock_condition:'ordinary',damaged_lot_id:undefined})
+   const id=(await f.call('/returns/supplier',body)).json.id;let history
+   if(phase!=='cancel'){const result=await status(f,id,'completed','cancelled','race-setup');assert.equal(result.status,200);history=result.json.actionHistoryId}
+   if(phase==='redo')assert.equal((await f.call('/action-history/'+history+'/undo',{expected_generation:0})).status,200)
+   const before=state(f)
+   f.competeBeforeCommit([{sql:'DELETE FROM return_items WHERE id=(SELECT MAX(id) FROM return_items WHERE return_id=@id)',params:{id}}])
+   const result=phase==='cancel'?await status(f,id,'completed','cancelled','member-race-status'):await f.call('/action-history/'+history+'/'+phase,{expected_generation:phase==='undo'?0:1})
+   assert.equal(result.status,409);assert.equal(f.state().physical,before.physical);assert.equal(f.state().tags[0].quantity_remaining,before.tags[0].quantity_remaining)
+   assert.deepEqual(state(f).returns,before.returns);assert.deepEqual(state(f).movements,before.movements);assert.deepEqual(state(f).audit,before.audit);assert.deepEqual(state(f).receipts,before.receipts)
+   assert.equal(state(f).items.length,before.items.length-1,'intentional rival member deletion persists')
+  }finally{f.sql.close()}
+ }
+ for(const tier of ['free','paid']){
+  const f=await h.world(make,tier,'zero',sql=>{h.seed(.5,true)(sql);sql.exec("INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source,unit_cost_usd)VALUES(1,1,1,1,.25,.25,'damaged','remove',2)")})
+  try{
+   const body=input('member-interread',.125);body.items.push({...body.items[0],stock_condition:'ordinary',damaged_lot_id:undefined})
+   const id=(await f.call('/returns/supplier',body)).json.id,before=state(f),raw=f.env.DB;let changed=false,restored=false
+   const write=quantity=>{f.sql.exec("INSERT INTO system_flags(key,value)VALUES('stock_transaction_permit','counted-tagged-subset-v1')");try{f.sql.prepare('UPDATE return_items SET quantity=? WHERE id=(SELECT MIN(id) FROM return_items WHERE return_id=?)').run(quantity,id)}finally{f.sql.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'")}}
+   const wrap=statement=>new Proxy(statement,{get(target,key){
+    if(key==='bind')return(...args)=>wrap(target.bind(...args))
+    if(key==='all')return async(...args)=>{const result=await target.all(...args),text=target.text||'';
+     if(text.includes('cr.request_json AS supplier_manifest')&&!changed){changed=true;write(0)}
+     else if(text.includes('FROM selected_items ri JOIN returns')&&changed&&!restored){restored=true;write(.125)}
+     return result
+    }
+    return target[key]
+   }})
+   f.env.DB=new Proxy(raw,{get(target,key){return key==='prepare'?text=>wrap(target.prepare(text)):target[key]}})
+   assert.equal((await status(f,id,'completed','cancelled','member-interread-cancel')).status,409)
+   assert.equal(changed,true);assert.equal(restored,true);assert.deepEqual(state(f),before,'changed-then-restored item operands cannot commit an incomplete plan')
+  }finally{f.sql.close()}
+ }
+ console.log('complete immutable supplier item/source coverage and member races: PASS')
+}
 async function main(){
  const make=await h.bundle.exports.bundleWorker()
+ await completeMembership(make)
  for(const tier of ['free','paid'])for(const receipt of [false,true]){
   const f=await h.world(make,tier,'zero',sql=>{h.seed(.3,receipt)(sql);sql.exec(`INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source,unit_cost_usd)VALUES(1,1,1,${receipt?1:'NULL'},.2,.2,'damaged','remove',2)`)});
   try{

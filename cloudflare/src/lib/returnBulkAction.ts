@@ -217,14 +217,19 @@ function supplierManifestParams(member: Member): Row {
   return { supplierManifest: member.supplierManifest?.json ?? null, supplierDigest: member.supplierManifest?.digest ?? null,
     supplierItems: member.supplierManifest?.items ?? null }
 }
-function supplierManifestSources(json: string): SupplierReturnSource[] {
+function supplierManifestSources(json: string, itemsJson: string): SupplierReturnSource[] {
   if (new TextEncoder().encode(json).byteLength > 512_000) fail('Supplier source history exceeds the saved request bound.',409)
-  const value = JSON.parse(json) as SupplierReturnManifest
+  let value: SupplierReturnManifest, items: unknown[][]
+  try { value=JSON.parse(json); items=JSON.parse(itemsJson) } catch { fail('Supplier source history is incomplete.',409) }
+  if (!value || typeof value!=='object') fail('Supplier source history is incomplete.',409)
+  const intentItems=(value.intent as {items?: Array<{product_id:number;quantity:number;stock_condition:string;damaged_lot_id:number|null;cost_price_usd:number;cost_price_khr:number}>})?.items
   if (value.version !== 1 || value.scope !== 'supplier' || value.sale_id !== null || !Array.isArray(value.sources)
-    || value.sources.length > 10_000) fail('Supplier source history is incomplete.',409)
+    || value.sources.length > 10_000 || !Array.isArray(intentItems) || !intentItems.length || intentItems.length>50
+    || !Array.isArray(items) || items.length!==intentItems.length) fail('Supplier source history is incomplete.',409)
   for (const source of value.sources) {
+    if (!source || typeof source!=='object') fail('Supplier source history is incomplete.',409)
     const tag = parseStockConditionTag(source.condition === 'ordinary' ? null : source.condition)
-    if (!Number.isSafeInteger(source.itemIndex) || source.itemIndex < 0 || !Number.isSafeInteger(source.productId) || source.productId <= 0
+    if (!Number.isSafeInteger(source.itemIndex) || source.itemIndex < 0 || source.itemIndex>=intentItems.length || !Number.isSafeInteger(source.productId) || source.productId <= 0
       || !Number.isSafeInteger(source.branchId) || source.branchId <= 0 || !(source.batchId === null || Number.isSafeInteger(source.batchId) && source.batchId > 0)
       || !Number.isFinite(source.quantity) || source.quantity <= 0 || !Number.isFinite(source.costUsd) || !Number.isFinite(source.costKhr)
       || !tag.ok || (source.condition === 'ordinary' ? source.lotId !== null || source.lotIdentity !== null
@@ -232,6 +237,18 @@ function supplierManifestSources(json: string): SupplierReturnSource[] {
       fail('Supplier source history is incomplete.',409)
     }
     subtractCountedQuantity(source.quantity, [])
+  }
+  for (const [index,item] of items.entries()) {
+    const intent=intentItems[index], sources=value.sources.filter(source=>source.itemIndex===index), quantity=Number(intent?.quantity)
+    if (!Array.isArray(item) || item.length!==7 || !Number.isSafeInteger(item[0]) || Number(item[0])<=0
+      || index>0 && Number(items[index-1][0])>=Number(item[0]) || !intent || !Number.isFinite(quantity) || quantity<=0
+      || item[1]!==Number(intent.product_id) || item[3]!==quantity || item[6]!==intent.stock_condition || !sources.length
+      || item[4]!==Number(intent.cost_price_usd) || item[5]!==Number(intent.cost_price_khr)
+      || subtractCountedQuantity(quantity,sources.map(source=>source.quantity))!==0
+      || sources.some(source=>source.productId!==item[1] || source.branchId!==item[2] || source.condition!==item[6]
+        || source.costUsd!==item[4] || source.costKhr!==item[5] || source.lotId!==intent.damaged_lot_id)) {
+      fail('Supplier return members no longer match their complete saved source history.',409)
+    }
   }
   return value.sources
 }
@@ -646,9 +663,11 @@ async function buildMembers(db: D1Compat, request: BulkRequest, user: SessionUse
       }
       member.updateSale = !!linkedSale && !parentCancelled
       const ownItems = items.filter((item) => item.return_id === expected.id)
-      const supplierSources = scope==='supplier' && row.supplier_manifest ? supplierManifestSources(String(row.supplier_manifest)) : null
+      const supplierSources = scope==='supplier' && row.supplier_manifest ? supplierManifestSources(String(row.supplier_manifest),String(row.supplier_items)) : null
       if (supplierSources) {
         if (await sha256Hex(String(row.supplier_manifest)) !== row.supplier_digest) fail('Supplier source history changed.',409)
+        const capturedItems=ownItems.map(item=>[item.id,item.product_id,item.branch_id,item.quantity,item.cost_price_usd,item.cost_price_khr,item.stock_condition])
+        if(JSON.stringify(capturedItems)!==JSON.stringify(JSON.parse(String(row.supplier_items)))) fail('Supplier return members changed during capture.',409)
         member.supplierManifest={json:String(row.supplier_manifest),digest:String(row.supplier_digest),items:String(row.supplier_items)}
       }
       const memberStockStart = member.stock.length
@@ -893,6 +912,10 @@ async function replayReturnBulkActionKernel(env: Env, user: SessionUser, directi
   if (!operation || operation.kind !== RETURN_BULK_ACTION_KIND || operation.id !== payload.operation_id || operation.snapshot_id !== payload.snapshot_id) fail('This grouped Return action changed or its snapshot does not match.')
   const snapshot = JSON.parse(String(operation.payload_json)) as Snapshot
   const supplierExact=snapshot.members.some(member=>!!member.supplierManifest)
+  for (const member of snapshot.members) if(member.supplierManifest) {
+    supplierManifestSources(member.supplierManifest.json,member.supplierManifest.items)
+    if(await sha256Hex(member.supplierManifest.json)!==member.supplierManifest.digest) fail('Supplier source history changed.',409)
+  }
   const confirmedStatus=direction==='undo'?'redoable':'undoable'
   const confirmedSnapshot=direction==='undo'?'reversed':'applied'
   if (Number(operation.generation)!==Number(generation)) {
