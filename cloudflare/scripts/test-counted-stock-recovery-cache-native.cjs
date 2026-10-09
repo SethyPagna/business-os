@@ -199,9 +199,75 @@ async function pressure(make, tier, route, padding, expectedRefresh) {
   } finally { f.sql.close() }
 }
 
+async function versionRead(make,tier,source,failRead) {
+  const f = await h.world(make,tier,'zero',h.seed(0.125,true))
+  const kv = new Map(source === 'kv' ? [['v2:products','1'],['v2:stock','1']] : [])
+  if (source === 'd1') f.sql.exec("INSERT INTO cache_versions(namespace,version,updated_at)VALUES('products',9,CURRENT_TIMESTAMP),('stock',11,CURRENT_TIMESTAMP)")
+  const events = [], writes = []
+  let committed = false, loseAck = true, broken = failRead, dispatches = 0, attempts = 0
+  const raw = f.env.DB
+  f.env.CACHE = { get: async key => {
+    if(committed && broken && source==='kv' && key.startsWith('v2:')) throw Error('Synthetic version read failure')
+    return kv.get(key) ?? null
+  }, put: async (key,value) => { writes.push([key,value]);kv.set(key,value) }, delete: async key => { kv.delete(key) } }
+  f.env.BROADCAST_HUB = { idFromName:n=>n,get:()=>({fetch:async()=>{events.push(1);return new Response('{}')}}) }
+  const wrap = (statement,sql) => new Proxy(statement,{get(target,key){
+    if(key==='bind')return(...args)=>wrap(target.bind(...args),sql)
+    if(['first','all','run'].includes(key))return(...args)=>{
+      attempts++
+      if(committed && broken && source==='d1' && /SELECT namespace, version FROM cache_versions/.test(sql))throw Error('D1_ERROR: network version read failure')
+      return target[key](...args)
+    }
+    return target[key]
+  }})
+  f.env.DB=new Proxy(raw,{get(target,key){
+    if(key==='prepare')return sql=>wrap(target.prepare(sql),sql)
+    if(key==='batch')return async statements=>{
+      attempts+=statements.length
+      const physical=statements.some(row=>/stock_request_claim_lost/.test(row.text))
+      if(physical)dispatches++
+      const result=await target.batch(statements)
+      if(physical){committed=true;if(loseAck){loseAck=false;throw Error('D1_ERROR: network committed acknowledgement lost')}}
+      return result
+    }
+    return target[key]
+  }})
+  const versions=()=>({kv:[...kv],d1:f.sql.prepare('SELECT namespace,version FROM cache_versions ORDER BY namespace').all()})
+  try {
+    const initial=versions(),body={...intake,client_request_id:'version-read-recovery'}
+    const first=await f.call('/inventory/adjust',body)
+    assert.equal(first.status,503)
+    assert.equal(first.json.code,'stock_request_outcome_unknown')
+    assert.equal(f.state().physical,0.325)
+    assert.ok(attempts<=(tier==='free'?50:1000))
+    const refreshed=()=>{
+      assert.equal(events.length,4)
+      if(source==='kv')assert.deepEqual(versions(),{kv:[['v2:products','2'],['v2:stock','2']],d1:[]})
+      else assert.deepEqual(versions(),{kv:[],d1:[{namespace:'products',version:10},{namespace:'stock',version:12}]})
+    }
+    console.log('RECOVERY_VERSION_READ '+JSON.stringify({tier,source,failRead,attempts,events:events.length,writes:writes.length}))
+    if(failRead){
+      assert.deepEqual(versions(),initial,'an unknown version must never be treated as absent')
+      assert.equal(writes.length,0)
+      assert.equal(events.length,0,'failed version proof cannot publish freshness')
+      broken=false;attempts=0
+      const saved=business(f),retry=await f.call('/inventory/adjust',body)
+      assert.equal(retry.status,409)
+      assert.equal(retry.json.code,'stock_request_partially_applied')
+      assert.deepEqual(business(f),saved)
+      refreshed()
+    } else refreshed()
+    assert.equal(dispatches,1)
+  }finally{f.sql.close()}
+}
+
 async function main() {
   const make = await h.bundle.exports.bundleWorker()
   const failures = []
+  for(const tier of ['free','paid'])for(const source of ['kv','d1'])for(const failRead of [false,true]){
+    try{await versionRead(make,tier,source,failRead)}catch(error){failures.push({tier,source,failRead,error:error.stack});console.error('FAIL version read',tier,source,failRead,error.message)}
+  }
+  if(process.argv.includes('--version-only')) {assert.deepEqual(failures,[]);console.log('PASS existing version read authority');return}
   for (const tier of ['free', 'paid']) for (const route of ['adjust', 'receive', 'restore', 'dispose']) {
     if (!process.argv.includes('--pressure-only')) for (const mode of ['normal', 'ack', 'rollback', 'confirm-fail', 'confirm-kind', 'confirm-body', 'confirm-unwritten', 'confirm-actor', 'confirm-key', 'cache-fail', 'cache-delete-fail', 'tails', 'completion']) {
       try { await check(make, tier, route, mode) }
@@ -217,4 +283,4 @@ async function main() {
   console.log('PASS stock recovery and exact next-query budget worlds')
 }
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })
-module.exports = { check, pressure }
+module.exports = { check, pressure, versionRead }

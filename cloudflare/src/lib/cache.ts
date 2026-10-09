@@ -153,14 +153,15 @@ export async function versionedKey(kv: KVNamespace, namespace: string, suffix: s
   return `${namespace}:${version}:${suffix}`
 }
 
-async function readD1Versions(env: Env, namespaces: string[]): Promise<Map<string, number>> {
+async function readD1Versions(env: Env, namespaces: string[], requirePersistence = false): Promise<Map<string, number>> {
   if (!namespaces.length) return new Map()
   try {
     const rows = await getDb(env).prepare(`SELECT namespace, version FROM cache_versions
       WHERE namespace IN (SELECT value FROM json_each(@namespaces))`)
       .all<{ namespace: string; version: number }>({ namespaces: JSON.stringify(namespaces) })
     return new Map(rows.filter(row => row.version != null).map(row => [row.namespace, Number(row.version)]))
-  } catch {
+  } catch (error) {
+    if (requirePersistence) throw error
     return new Map()
   }
 }
@@ -197,12 +198,13 @@ export async function bumpVersions(env: Env, namespaces: string[], options: { re
     let currentKvRaw: string | null = null
     try {
       currentKvRaw = await env.CACHE.get(cacheVersionKey(namespace))
-    } catch {
+    } catch (error) {
+      if (options.requirePersistence) throw error
       currentKvRaw = null
     }
     kvVersions.set(namespace, currentKvRaw)
   }
-  const d1Versions = await readD1Versions(env, unique.filter(namespace => kvVersions.get(namespace) == null))
+  const d1Versions = await readD1Versions(env, unique.filter(namespace => kvVersions.get(namespace) == null), options.requirePersistence)
   const kvCandidates = unique.filter(namespace => kvVersions.get(namespace) != null || !d1Versions.has(namespace))
   // Aggregate admission may cross the critical threshold before the first key.
   // Moving all candidates to D1 early preserves invalidation and quota safety.
