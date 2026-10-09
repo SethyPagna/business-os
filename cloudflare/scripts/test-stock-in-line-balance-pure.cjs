@@ -53,6 +53,11 @@ function ok(cond, label) { assert.ok(cond, label); checks += 1; console.log(`PAS
 const ledger = load(path.join(src, 'lib', 'stockLedgerQuery.ts'))
 const sessions = load(path.join(src, 'lib', 'stockInSessionsQuery.ts'))
 const costs = load(path.join(src, 'lib', 'acquisitionCostAccess.ts'))
+const stock = load(path.join(src, 'lib', 'stockTransaction.ts'))
+async function stockSeed(db, text) {
+  await stock.executeStockTransaction({batchOnce: statements => db.batch(statements)}, text.split(';').map(sql=>sql.trim()).filter(Boolean).map(sql=>({sql})), 'once')
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0,'fixture permit is released before runtime reads')
+}
 
 const db = openDb(loadAll())
 // Product 1's history. Stock is set to what the rows imply (10-3+5-2+2 = 12),
@@ -63,7 +68,7 @@ const db = openDb(loadAll())
 //   #4 sale 2  12 -> 10
 //   #5 +2      10 -> 12    an N6 edit of #3 (5 -> 7 units, cost 4 -> 6)
 // Product 2 has one receipt in the same session and no later movement.
-db.exec(`
+const initialSeed = `
   INSERT INTO users (id,username,name,password) VALUES (7,'james','James','x');
   INSERT INTO branches (id,name,is_active) VALUES (1,'Shop',1);
   INSERT INTO products (id,name,barcode,unit,stock_quantity,is_active) VALUES
@@ -79,13 +84,15 @@ db.exec(`
     (6,2,'Serum',1,'Shop','add',4,3,12,300,7,'James','2026-09-03 03:00:01',2),
     (4,1,'Cream',1,'Shop','sale',2,NULL,NULL,901,7,'James','2026-09-04 03:00:00',NULL),
     (5,1,'Cream',1,'Shop','add',2,6,22,'stock-in-edit:3:op1:1',7,'James','2026-09-05 03:00:00',1);
-`)
+`
 
 // ---- 1. the balance, and parity with the ledger ----------------------------
 // lib/db.ts's D1Compat shape (prepare(sql).all(params)) over the harness db.
 const asD1 = (sqlDb) => ({ prepare: (sql) => ({ all: async (params) => sqlDb.prepare(sql).bind(params || {}).all() }) })
 
 async function main() {
+assert.throws(()=>db.exec("INSERT INTO products(id,name,stock_quantity)VALUES(999,'Unfenced',1)"),/stock_transaction_required/);
+await stockSeed(db,initialSeed)
 const got = (await ledger.loadMovementStockBalances(asD1(db), [3, 6])).balances
 ok(got.get(3).before_qty === 7 && got.get(3).after_qty === 12, 'the received line reads stock 7 -> 12 (hand-computed)')
 ok(got.get(6).before_qty === 0 && got.get(6).after_qty === 4, 'the second line reads 0 -> 4')
@@ -104,7 +111,7 @@ ok(true, 'a session line and the Stock Changes ledger give the same movement the
 // RANGE frame (which counts the row itself and its ties), answers
 // differently here -- the negative controls below prove it.
 const parity = openDb(loadAll())
-parity.exec(`
+await stockSeed(parity,`
   INSERT INTO products (id,name,barcode,unit,stock_quantity,is_active) VALUES (3,'Toner','1003','pcs',9,1), (4,'Mask','1004','pcs',1,1);
   INSERT INTO inventory_movements (id,product_id,product_name,movement_type,quantity,created_at) VALUES
     (10,3,'Toner','add',6,'2026-09-01 03:00:00'),
@@ -164,7 +171,7 @@ ok(plan.some((detail) => /SEARCH bs USING (COVERING )?INDEX idx_branch_stock_pro
 // Product 21: #40 @Shop is followed by #41 with NO branch -- the branch walk
 // cannot pass through it, so #40's branch pair is null, never a guess.
 const branched = openDb(loadAll())
-branched.exec(`
+await stockSeed(branched,`
   INSERT INTO branches (id,name,is_active) VALUES (1,'Shop',1), (2,'Warehouse',1), (3,'Closed',0);
   INSERT INTO products (id,name,barcode,unit,stock_quantity,is_active) VALUES (20,'Balm','2020','pcs',17,1), (21,'Oil','2021','pcs',6,1);
   INSERT INTO branch_stock (product_id,branch_id,quantity) VALUES (20,1,7), (20,2,10), (21,1,5);
@@ -192,7 +199,7 @@ ok(Number(brokenRow.branch_after_qty) !== 7, 'negative control: a branch walk th
 const fields = ledger.movementBalanceFields(both.balances.get(32))
 ok(fields.before_qty === 18 && fields.after_qty === 15 && fields.total_before_qty === 18 && fields.total_after_qty === 15 && fields.branch_before_qty === 10 && fields.branch_after_qty === 7, 'the wire shape keeps before_qty/after_qty as the TOTAL and adds both named pairs')
 ok(Object.values(ledger.movementBalanceFields(undefined)).every((value) => value === null), 'no balance -> every field null')
-branched.exec(`UPDATE branches SET is_active = 0 WHERE id = 2`)
+await stockSeed(branched,`UPDATE branches SET is_active = 0 WHERE id = 2`)
 ok((await ledger.loadMovementStockBalances(asD1(branched), [32])).activeBranchCount === 1, 'after a merge leaves one active branch, the count says 1')
 
 // ---- 1d. transfers, mixed timestamp formats, a missing branch row --------
@@ -215,7 +222,7 @@ ok((await ledger.loadMovementStockBalances(asD1(branched), [32])).activeBranchCo
 // existing product", transferOperation.ts) really moves each product's total.
 // Product 53: its Shop row has no branch_stock row -- no branch pair.
 const moved = openDb(loadAll())
-moved.exec(`
+await stockSeed(moved,`
   INSERT INTO branches (id,name,is_active) VALUES (1,'Shop',1), (2,'Warehouse',1);
   INSERT INTO products (id,name,barcode,unit,stock_quantity,is_active) VALUES
     (50,'Soap','5050','pcs',16,1), (51,'Gel','5051','pcs',7,1), (52,'Gel B','5052','pcs',3,1), (53,'Wax','5053','pcs',4,1);
