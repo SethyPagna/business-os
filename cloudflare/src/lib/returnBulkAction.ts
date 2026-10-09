@@ -1,4 +1,6 @@
 import { stockActorPredicate, stockActorParams } from './stockActorGuard'
+import { planProductMergePhysicalOrigins, validateProductMergePhysicalPaths, productMergePhysicalPathEvidenceSql,
+  ProductMergePhysicalOriginError, type ProductMergePhysicalResolution } from './productMergePhysicalOrigins'
 import { parseStockConditionTag } from './stockCondition'
 import { currentRequestMetrics } from './requestMetrics'
 import { getPlanLimits } from './planTier'
@@ -115,6 +117,104 @@ type Member = {
 
 type SaleStatusSnapshot = { saleId: number; before: string; after: string }
 type Snapshot = { version: 1; operationId: string; field: ReturnField; members: Member[]; saleStatuses?: SaleStatusSnapshot[] }
+
+const RETURN_PHYSICAL_PROOF_KIND = 'return.fields.bulk.physical.v1'
+type PhysicalSources = ProductMergePhysicalResolution['sources']
+type PhysicalProof = { version: 1; operation_id: string; history_id: number; generation: number;
+  sources: readonly (PhysicalSources[number] & {quantity:number;costUsd:number;costKhr:number})[] }
+type PhysicalStock = { sources: PhysicalSources; guards: Statement[]; facts: {facts:string;branchId:number}[] }
+
+export function returnMergePhysicalProofSchemaSql(): string {
+  return `CREATE UNIQUE INDEX return_merge_physical_generation ON undo_snapshots(json_extract(payload_json,'$.operation_id'),json_extract(payload_json,'$.generation')) WHERE kind='${RETURN_PHYSICAL_PROOF_KIND}';
+    CREATE TRIGGER return_merge_physical_insert BEFORE INSERT ON undo_snapshots
+    WHEN NEW.kind='${RETURN_PHYSICAL_PROOF_KIND}' OR EXISTS(SELECT 1 FROM undo_snapshots WHERE id=NEW.id AND kind='${RETURN_PHYSICAL_PROOF_KIND}')
+    BEGIN SELECT CASE WHEN NEW.kind='${RETURN_PHYSICAL_PROOF_KIND}' AND NEW.status='recorded' AND json_valid(NEW.payload_json)
+      AND length(CAST(NEW.payload_json AS BLOB))<=512000 AND json_type(NEW.payload_json,'$.version')='integer' AND json_extract(NEW.payload_json,'$.version')=1
+      AND json_type(NEW.payload_json,'$.generation')='integer' AND json_extract(NEW.payload_json,'$.generation')>=0
+      AND json_type(NEW.payload_json,'$.sources')='array' AND json_array_length(NEW.payload_json,'$.sources') BETWEEN 1 AND 64
+      AND EXISTS(SELECT 1 FROM system_flags WHERE key='stock_transaction_permit' AND value='counted-tagged-subset-v1')
+      AND NOT EXISTS(SELECT 1 FROM undo_snapshots WHERE id=NEW.id AND kind='${RETURN_PHYSICAL_PROOF_KIND}')
+      AND EXISTS(SELECT 1 FROM return_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id
+        WHERE o.id=json_extract(NEW.payload_json,'$.operation_id') AND o.generation=json_extract(NEW.payload_json,'$.generation')
+        AND h.id=json_extract(NEW.payload_json,'$.history_id') AND s.kind='${RETURN_BULK_ACTION_KIND}')
+      THEN 1 ELSE RAISE(ABORT,'return_merge_physical_proof_invalid') END; END;
+    CREATE TRIGGER return_merge_physical_update BEFORE UPDATE ON undo_snapshots WHEN OLD.kind='${RETURN_PHYSICAL_PROOF_KIND}' OR NEW.kind='${RETURN_PHYSICAL_PROOF_KIND}'
+      BEGIN SELECT RAISE(ABORT,'return_merge_physical_proof_immutable'); END;
+    CREATE TRIGGER return_merge_physical_delete BEFORE DELETE ON undo_snapshots WHEN OLD.kind='${RETURN_PHYSICAL_PROOF_KIND}'
+      BEGIN SELECT RAISE(ABORT,'return_merge_physical_proof_immutable'); END;`
+}
+
+function physicalProofSql(): string {
+  return `(SELECT CASE WHEN COUNT(*)=1 THEN payload_json ELSE NULL END FROM undo_snapshots
+    WHERE kind='${RETURN_PHYSICAL_PROOF_KIND}' AND json_extract(payload_json,'$.operation_id')=o.id
+      AND json_extract(payload_json,'$.generation')=o.generation)`
+}
+
+function physicalProofBytes(statements:Statement[],physical:PhysicalStock|null):number{
+  if(!physical)return 0
+  return new TextEncoder().encode(JSON.stringify(physical.guards.map(statement=>statement.params))
+    +JSON.stringify(statements.filter(statement=>statement.params.kind===RETURN_PHYSICAL_PROOF_KIND).map(statement=>statement.params.proof))).byteLength
+}
+
+function physicalProofStatement(operation: string, generation: number, sources: PhysicalSources, user: SessionUser, members:Member[]): Statement {
+  const projected=sources.map(source=>{
+    const member=members.find(member=>member.stock.some((_delta,index)=>`${member.id}:${index}`===source.original.memberKey))
+    const index=member?.stock.findIndex((_delta,index)=>`${member.id}:${index}`===source.original.memberKey)
+    const delta=member && index!==undefined ? member.stock[index] : null
+    if(!delta)fail('Return physical source ordinal is incomplete.',409)
+    return {...source,quantity:delta.quantity*(generation%2?-1:1),costUsd:delta.costUsd,costKhr:delta.costKhr}
+  })
+  const proof = JSON.stringify({version:1,operation_id:operation,generation,sources:projected})
+  if(new TextEncoder().encode(proof).byteLength>512000)fail('Return physical source proof exceeds its bound.',409)
+  return {sql:`INSERT INTO undo_snapshots(kind,status,payload_json,created_by_id,created_by_name)
+    SELECT @kind,'recorded',json_set(@proof,'$.history_id',history_id),@actor,@name FROM return_bulk_operations WHERE id=@operation`,
+    params:{kind:RETURN_PHYSICAL_PROOF_KIND,proof,operation,actor:user.id,name:actorSnapshot(user)}}
+}
+
+function savedPhysicalProof(operation: Row, snapshot: Snapshot): PhysicalProof | null {
+  if(operation.physical_proof===null || operation.physical_proof===undefined)return null
+  let proof:PhysicalProof
+  try{proof=JSON.parse(String(operation.physical_proof))}catch{fail('Return physical source proof is incomplete.',409)}
+  const expected=snapshot.members.filter(member=>member.changed && member.supplierManifest).flatMap(member=>member.stock.map((delta,index)=>({member,delta,key:`${member.id}:${index}`})))
+  if(proof.version!==1 || proof.operation_id!==operation.id || proof.history_id!==operation.history_id || proof.generation!==operation.generation
+    || !Array.isArray(proof.sources) || proof.sources.length!==expected.length)fail('Return physical source proof does not match the original operation.',409)
+  for(const [index,{member,delta,key}]of expected.entries()){
+    const source=supplierManifestSources(member.supplierManifest!.json,member.supplierManifest!.items)[index-expected.findIndex(value=>value.member===member)]
+    const original=proof.sources[index]?.original
+    if(!source || !original || original.memberKey!==key || original.productId!==delta.productId || original.branchId!==delta.branchId
+      || original.batchId!==delta.batchId || original.damagedLotId!==delta.damagedLotId || original.conditionTag!==source.condition)fail('Return physical source ordinal changed.',409)
+    if(proof.sources[index].quantity!==delta.quantity*(proof.generation%2?-1:1) || proof.sources[index].costUsd!==delta.costUsd
+      || proof.sources[index].costKhr!==delta.costKhr)fail('Return physical source quantity or cost changed.',409)
+  }
+  validateProductMergePhysicalPaths(proof.sources,String(operation.physical_evidence||'[]'))
+  return proof
+}
+
+async function supplierPhysicalStock(db:D1Compat,members:Member[],facts:{facts:string;branchId:number}[],previous:PhysicalProof|null=null):Promise<PhysicalStock|null>{
+  const inactive=new Set(facts.filter(row=>JSON.parse(row.facts).product[1]!==1).map(row=>JSON.parse(row.facts).product[0]))
+  if(members.some(member=>member.scope==='customer' && member.stock.some(delta=>inactive.has(delta.productId))))fail('Customer Return merge-origin stock mapping is not available. Nothing was changed.',409,'return_customer_merge_origin_unavailable')
+  const supplier=members.filter(member=>member.changed && member.supplierManifest)
+  if(!previous && !supplier.some(member=>member.stock.some(delta=>inactive.has(delta.productId))))return null
+  const sources=supplier.flatMap(member=>{
+    const original=supplierManifestSources(member.supplierManifest!.json,member.supplierManifest!.items)
+    return member.stock.map((delta,index)=>{
+      const source=original[index]
+      if(!source || source.branchId!==delta.branchId)fail('Supplier Return branch and merge mapping require separate source proof.',409,'return_supplier_merge_branch_unavailable')
+      return {memberKey:`${member.id}:${index}`,productId:delta.productId,branchId:delta.branchId,batchId:delta.batchId,damagedLotId:delta.damagedLotId,
+        conditionTag:source.condition as 'ordinary'|'damaged'|'expired'}
+    })
+  })
+  const plan=planProductMergePhysicalOrigins(sources), resolution=plan.decode(await db.prepare(plan.read.sql).all<Row>(plan.read.params))
+  const byKey=new Map(resolution.sources.map(source=>[source.original.memberKey,source.effect]))
+  const contexts=members.flatMap(member=>member.stock.map((delta,index)=>byKey.get(`${member.id}:${index}`)||delta))
+  const rows=await db.prepare(`SELECT context.branchId,${countedStockFactsSql('context.productId','context.branchId',
+    `(SELECT json_group_array(json_extract(value,'$.batchId')) FROM json_each(@physicalContexts) WHERE json_extract(value,'$.productId')=context.productId AND json_extract(value,'$.branchId')=context.branchId)`)} facts,
+    (SELECT COUNT(*) FROM sqlite_master WHERE name IN ('return_merge_physical_generation','return_merge_physical_insert','return_merge_physical_update','return_merge_physical_delete')) schema_ready
+    FROM (SELECT DISTINCT json_extract(value,'$.productId') productId,json_extract(value,'$.branchId') branchId FROM json_each(@physicalContexts)) context`).all<{facts:string;branchId:number;schema_ready:number}>({physicalContexts:JSON.stringify(contexts)})
+  if(!rows.length || rows.some(row=>row.schema_ready!==4))fail('Return merge-origin proof protection is not installed. Nothing was changed.',409,'return_merge_proof_schema_required')
+  if(new TextEncoder().encode(JSON.stringify(rows)).byteLength>512000)fail('Return physical stock capture exceeds its bound.',409)
+  return {sources:resolution.sources,guards:[resolution.guard as Statement],facts:rows}
+}
 
 // `code` names a business refusal the client restates in the operator's
 // language; without one the route answers the generic write_conflict /
@@ -438,7 +538,7 @@ function supplierReplayWitnessSql(): string {
       SELECT 1 FROM json_each(o.receipt_json,'$.changedIds') changed WHERE changed.value=r.id))`
 }
 
-function validateSupplierReplayStock(operation: Row, snapshot: Snapshot): Map<number,string> | null {
+function validateSupplierReplayStock(operation: Row, snapshot: Snapshot, physical:PhysicalProof|null=null): Map<number,string> | null {
   let request: BulkRequest, receipt: {items:Array<{id:number;changed:boolean;before:string;after:string}>;changedIds:number[]}, witnesses: Row[]
   try {request=parseRequest(JSON.parse(String(operation.request_json)));receipt=JSON.parse(String(operation.receipt_json));witnesses=JSON.parse(String(operation.supplier_witness))}
   catch {fail('The original grouped Return authority is incomplete.',409)}
@@ -482,11 +582,13 @@ function validateSupplierReplayStock(operation: Row, snapshot: Snapshot): Map<nu
     const latest=movementRows.slice(-sources.length)
     for (const [index,source] of sources.entries()) {
       const effect=latest[index],delta=member.stock[index],quantity=sign*source.quantity
-      if (!Array.isArray(effect) || effect.length!==6 || effect[1]!==source.productId || !Number.isSafeInteger(effect[2]) || Number(effect[2])<=0
+      const landing=physical?.sources.find(entry=>entry.original.memberKey===`${member.id}:${index}`)?.effect
+      if (!Array.isArray(effect) || effect.length!==6 || effect[1]!== (landing?.productId??source.productId) || !Number.isSafeInteger(effect[2]) || Number(effect[2])<=0
         || !(effect[3]===null || Number.isSafeInteger(effect[3]) && Number(effect[3])>0)
         || effect[4]!==statusMovementType('supplier',quantity*(generation%2?-1:1)) || effect[5]!==quantity*(generation%2?-1:1)
-        || source.lotId!==null && (effect[2]!==source.branchId || effect[3]!==source.batchId)
-        || !delta || delta.productId!==source.productId || delta.branchId!==effect[2] || delta.batchId!==effect[3]
+        || landing && (effect[2]!==landing.branchId || effect[3]!==landing.batchId)
+        || !landing && source.lotId!==null && (effect[2]!==source.branchId || effect[3]!==source.batchId)
+        || !delta || delta.productId!==source.productId || delta.branchId!==(landing?source.branchId:effect[2]) || delta.batchId!==(landing?source.batchId:effect[3])
         || delta.damagedLotId!==source.lotId || delta.quantity!==quantity || delta.costUsd!==source.costUsd || delta.costKhr!==source.costKhr) {
         fail('The supplier stock projection no longer matches its immutable sources and committed movements.',409)
       }
@@ -525,9 +627,10 @@ function statusMovementType(scope: Member['scope'], quantity: number): string {
   return quantity > 0 ? 'return' : 'return_reversal'
 }
 
-function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, stamp: string, exact: CountedStockBatchPlan): Statement[] {
+function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, stamp: string, exact: CountedStockBatchPlan, physical?:PhysicalStock|null): Statement[] {
   const out: Statement[] = []
-  for (const delta of member.stock) {
+  for (const [index,delta] of member.stock.entries()) {
+    const effect=physical?.sources.find(source=>source.original.memberKey===`${member.id}:${index}`)?.effect??delta
     const quantity = delta.quantity * direction
     const params = {
       product: delta.productId,
@@ -537,20 +640,20 @@ function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, s
       quantity,
       stamp,
     }
-    const context = exact.get(delta.productId, delta.branchId)
+    const context = exact.get(effect.productId, effect.branchId)
     if (delta.damagedLotId) {
-      out.push(...planExactCountedTaggedChange(context, {lotId:delta.damagedLotId,productId:delta.productId,branchId:delta.branchId,batchId:delta.batchId},Math.abs(quantity),quantity>0?'restore':'consume'))
+      out.push(...planExactCountedTaggedChange(context, {lotId:effect.damagedLotId!,productId:effect.productId,branchId:effect.branchId,batchId:effect.batchId},Math.abs(quantity),quantity>0?'restore':'consume'))
     } else {
-      const action = quantity < 0 ? 'consume' : delta.batchId !== null && context.requiresReceiptActivation(delta.batchId) ? 'activateAndReceive' : 'receive'
-      out.push(...planExactCountedOrdinaryChange(context, delta.batchId, Math.abs(quantity), action))
+      const action = quantity < 0 ? 'consume' : effect.batchId !== null && context.requiresReceiptActivation(effect.batchId) ? 'activateAndReceive' : 'receive'
+      out.push(...planExactCountedOrdinaryChange(context, effect.batchId, Math.abs(quantity), action))
     }
     out.push({
       sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id${delta.addressed ? ',branch_name,addressed_branch_name' : ''},movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id)
             VALUES(@product,@name,@branch${delta.addressed ? ',@branchName,@addressed' : ''},@type,@quantity,@usd,@khr,@reason,@returnId,@userId,@userName,@batch)`,
       params: {
-        product: delta.productId,
+        product: effect.productId,
         name: delta.productName,
-        branch: delta.branchId,
+        branch: effect.branchId,
         ...(delta.addressed ? { branchName: delta.branchName ?? null, addressed: delta.addressed } : {}),
         type: member.scope==='supplier' ? statusMovementType(member.scope, quantity) : delta.damagedLotId ? (quantity > 0 ? 'damage_in' : 'damage_reversal') : statusMovementType(member.scope, quantity),
         quantity,
@@ -560,18 +663,18 @@ function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, s
         returnId: member.id,
         userId: user.id ?? null,
         userName: actorSnapshot(user),
-        batch: delta.batchId,
+        batch: effect.batchId,
       },
     })
   }
   return out
 }
 
-function memberStatements(member: Member, direction: 1 | -1, user: SessionUser, stamp: string, exact: CountedStockBatchPlan): Statement[] {
+function memberStatements(member: Member, direction: 1 | -1, user: SessionUser, stamp: string, exact: CountedStockBatchPlan,physical?:PhysicalStock|null): Statement[] {
   if (!member.changed) return []
   const target = direction > 0 ? member.after : member.before
   return [
-    ...stockStatements(member, direction, user, stamp, exact),
+    ...stockStatements(member, direction, user, stamp, exact,physical),
     {
       sql: `UPDATE returns SET status=@status,return_type=@return_type,supplier_settlement=@supplier_settlement,updated_at=@stamp WHERE id=@id`,
       params: { ...target, stamp, id: member.id },
@@ -798,7 +901,7 @@ async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'bef
     saleStatuses: exactStatuses }
 }
 
-async function buildMembers(db: D1Compat, request: BulkRequest, user: SessionUser, redirectTarget: number | null = null): Promise<{ members: Member[]; guards: Statement[]; exact: CountedStockBatchPlan }> {
+async function buildMembers(db: D1Compat, request: BulkRequest, user: SessionUser, redirectTarget: number | null = null): Promise<{ members: Member[]; guards: Statement[]; exact: CountedStockBatchPlan;physical:PhysicalStock|null }> {
   const ids = request.items.map((item) => item.id)
   const returns = await rowsForIds<Row>(db, ids, (marks) => `SELECT r.*,cr.request_json AS supplier_manifest,cr.request_digest AS supplier_digest,${supplierItemsExpression('r.id')} AS supplier_items,COALESCE(v.revision,0) AS write_revision,${movementFingerprint('r.id')} AS movement_fingerprint FROM returns r LEFT JOIN return_create_receipts cr ON cr.return_id=r.id LEFT JOIN return_write_revisions v ON v.return_id=r.id WHERE r.id IN (${marks})`)
   const matchingIds = request.items.flatMap((expected) => {
@@ -990,9 +1093,11 @@ async function buildMembers(db: D1Compat, request: BulkRequest, user: SessionUse
   const effectGuards = resolver.guards()
   if (effectGuards.length) guards.push(guard(branchEffectGuardPredicate('@effects'), { effects: JSON.stringify(effectGuards) }))
   const keys = new Set(members.flatMap(member=>member.stock.map(delta=>`${delta.productId}:${delta.branchId}`)))
-  const exact = new CountedStockBatchPlan(items.filter(item=>keys.has(`${item.product_id}:${item.counted_branch_id}`))
-    .map(item=>({facts:item.counted_facts,branchId:item.counted_branch_id})), { deferPhysicalWrites: true })
-  return { members, guards, exact }
+  const facts=items.filter(item=>keys.has(`${item.product_id}:${item.counted_branch_id}`)).map(item=>({facts:item.counted_facts,branchId:item.counted_branch_id}))
+  const physical=await supplierPhysicalStock(db,members,facts)
+  if(physical)guards.push(...physical.guards)
+  const exact = new CountedStockBatchPlan(physical?.facts??facts, { deferPhysicalWrites: true })
+  return { members, guards, exact,physical }
 }
 
 export async function notifyReturnBulkAction(env: Env): Promise<void> {
@@ -1019,6 +1124,7 @@ export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Ro
 export type ReturnBulkOutcome = { receipt: Row; wrote: boolean }
 
 function exactBulkRefusal(error: unknown): never {
+  if(error instanceof ProductMergePhysicalOriginError || String(error).includes('$[merge_physical_origin_conflict]'))fail('The proven merge source or generation changed. Nothing was applied.',409,'write_conflict')
   if (isCountedStockConflict(error)) fail('The exact stock or condition source changed. Nothing was applied; refresh before retrying.',409,'write_conflict')
   if (error instanceof MoneyPrecisionError) fail(error.message,400,'invalid_bulk_action')
   throw error
@@ -1038,7 +1144,7 @@ async function applyReturnBulkActionOutcomeKernel(env: Env, user: SessionUser, r
     if (previous.request_json !== canonical) fail('Request id was already used with different data.')
     return { receipt: JSON.parse(String(previous.receipt_json)) as Row, wrote: false }
   }
-  const { members, guards, exact } = await buildMembers(db, request, user, redirectTarget)
+  const { members, guards, exact,physical } = await buildMembers(db, request, user, redirectTarget)
   const entitlement = await v1EntitlementGuards(db, members, 'after')
   guards.push(...entitlement.guards)
   const operationId = crypto.randomUUID()
@@ -1070,7 +1176,7 @@ async function applyReturnBulkActionOutcomeKernel(env: Env, user: SessionUser, r
     ...guards,
     { sql: 'INSERT INTO return_bulk_operations(id,actor_id,request_id,request_json,receipt_json) VALUES(@id,@actor,@request,@canonical,@receipt)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical, receipt: JSON.stringify(receipt) } },
   ]
-  for (const member of members) statements.push(...memberStatements(member, 1, user, stamp, exact))
+  for (const member of members) statements.push(...memberStatements(member, 1, user, stamp, exact,physical))
   statements.push(...exact.takeFinalPhysicalWrites())
   for (const saleId of [...new Set(members.filter((member) => member.changed && member.updateSale && member.saleId).map((member) => member.saleId!))]) {
     statements.push(saleStatusStatement(saleId, stamp, exactBySale.get(saleId)?.after))
@@ -1092,9 +1198,10 @@ async function applyReturnBulkActionOutcomeKernel(env: Env, user: SessionUser, r
   for (const member of members.filter((candidate) => candidate.changed)) {
     statements.push({ sql: `INSERT INTO return_bulk_members(operation_id,return_id,revision,sale_id,sale_revision,stock_fingerprint) VALUES(@operation,@id,COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=@id),0),@saleId,CASE WHEN @saleId IS NULL THEN NULL ELSE COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0) END,${movementFingerprint('@id')})`, params: { operation: operationId, id: member.id, saleId: member.saleId } })
   }
+  if(physical)statements.push(physicalProofStatement(operationId,0,physical.sources,user,members))
   statements.push(auditStatement(user, operationId, 'return_fields_bulk', changedIds.length))
   statements.push({ sql: 'DELETE FROM return_bulk_guards', params: {} })
-  assertBounded(statements, snapshot, recordEvents?.eventsBytes || 0)
+  assertBounded(statements, snapshot, (recordEvents?.eventsBytes || 0)+physicalProofBytes(statements,physical))
   const counted=members.some(member=>member.stock.length>0)
   const planned=counted?stockTransactionStatementCount(statements.length):statements.length
   try { assertReturnCreateQueryBudget(getPlanLimits(env).d1QueriesPerInvocation,
@@ -1121,7 +1228,7 @@ async function applyReturnBulkActionOutcomeKernel(env: Env, user: SessionUser, r
     if (activeGuard) throw activeGuard
 
     if (/CHECK constraint failed:\s*guard_value\s*=\s*1/i.test(String(error))) fail('A return or its stock changed. Nothing in the group was applied.')
-    if(members.some(member=>!!member.supplierManifest || member.stock.some(delta=>delta.damagedLotId!==null)) && !isCountedStockConflict(error))throw new ReturnBulkError('The supplier return status outcome could not be confirmed. Retry the original request.',503,'supplier_return_status_outcome_unknown')
+    if(members.some(member=>!!member.supplierManifest || member.stock.some(delta=>delta.damagedLotId!==null)) && !isCountedStockConflict(error) && !String(error).includes('$[merge_physical_origin_conflict]'))throw new ReturnBulkError('The supplier return status outcome could not be confirmed. Retry the original request.',503,'supplier_return_status_outcome_unknown')
     throw error
   }
 }
@@ -1135,13 +1242,15 @@ async function replayReturnBulkActionKernel(env: Env, user: SessionUser, directi
   if (!Number.isSafeInteger(generation) || Number(generation) < 0) fail('Refresh history before replaying this group.')
   const db = getDb(env)
   const operation = await db.prepare(`SELECT o.*,s.payload_json,s.kind,s.status AS snapshot_status,h.status AS replay_status,
+    ${physicalProofSql()} physical_proof,${productMergePhysicalPathEvidenceSql(physicalProofSql())} physical_evidence,
     ${replayCountedFactsSql('s.payload_json')} counted_facts,${supplierReplayWitnessSql()} supplier_witness,${taggedReplayWitnessSql()} tagged_witness,${customerReplayWitnessSql()} customer_witness FROM return_bulk_operations o JOIN undo_snapshots s ON s.id=o.snapshot_id JOIN action_history h ON h.id=o.history_id WHERE o.history_id=?`).get<Row>([historyId])
   if (!operation || operation.kind !== RETURN_BULK_ACTION_KIND || operation.id !== payload.operation_id || operation.snapshot_id !== payload.snapshot_id) fail('This grouped Return action changed or its snapshot does not match.')
   const snapshot = JSON.parse(String(operation.payload_json)) as Snapshot
   if (snapshot.version!==1 || snapshot.operationId!==operation.id || !Array.isArray(snapshot.members) || snapshot.members.length>RETURN_BULK_LIMIT) fail('Unsupported Return bulk snapshot.')
   const tagged=replayTaggedSources(operation,snapshot)
   const customers=replayCustomerStock(operation,snapshot)
-  const supplierFingerprints=validateSupplierReplayStock(operation,snapshot)
+  const previousPhysical=savedPhysicalProof(operation,snapshot)
+  const supplierFingerprints=validateSupplierReplayStock(operation,snapshot,previousPhysical)
   const supplierExact=supplierFingerprints!==null
   const exactReplay=supplierExact || tagged.size>0
   const pinOperationAuthority=exactReplay || customers.size>0
@@ -1155,7 +1264,9 @@ async function replayReturnBulkActionKernel(env: Env, user: SessionUser, directi
     if(exactReplay && Number(operation.generation)===Number(generation)+1 && operation.replay_status===confirmedStatus && operation.snapshot_status===confirmedSnapshot)return
     fail('This grouped Return replay generation changed.')
   }
-  const exact = new CountedStockBatchPlan(JSON.parse(String(operation.counted_facts || '[]')) as {facts:string;branchId:number}[], { deferPhysicalWrites: true })
+  const facts=JSON.parse(String(operation.counted_facts || '[]')) as {facts:string;branchId:number}[]
+  const physical=await supplierPhysicalStock(db,snapshot.members,facts,previousPhysical)
+  const exact = new CountedStockBatchPlan(physical?.facts??facts, { deferPhysicalWrites: true })
   if (snapshot.version !== 1 || snapshot.operationId !== operation.id || snapshot.members.length > RETURN_BULK_LIMIT) fail('Unsupported Return bulk snapshot.')
   const expectedStatus = direction === 'undo' ? 'undoable' : 'redoable'
   const nextStatus = direction === 'undo' ? 'redoable' : 'undoable'
@@ -1164,12 +1275,16 @@ async function replayReturnBulkActionKernel(env: Env, user: SessionUser, directi
   const stamp = new Date().toISOString()
   const statements: Statement[] = [...exact.takePreimageGuards(),guard(`NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM return_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@operation AND o.generation=@generation AND h.id=@history AND h.status=@expectedStatus AND s.kind=@kind AND s.status=@snapshotStatus AND s.payload_json=@snapshot${pinOperationAuthority?' AND o.request_json=@originalRequest AND o.receipt_json=@originalReceipt':''})`, { operation: operation.id, generation, history: historyId, expectedStatus, kind: RETURN_BULK_ACTION_KIND, snapshotStatus, snapshot: operation.payload_json,...(pinOperationAuthority?{originalRequest:operation.request_json,originalReceipt:operation.receipt_json}:{}) })]
   const replayEntitlement = await v1EntitlementGuards(db, snapshot.members, direction === 'undo' ? 'before' : 'after')
+  if(physical)statements.push(...physical.guards)
+  if(previousPhysical)statements.push(guard(`EXISTS(SELECT 1 FROM return_bulk_operations o WHERE o.id=@operation
+    AND ${physicalProofSql()}=@physicalProof AND ${productMergePhysicalPathEvidenceSql(physicalProofSql())}=@physicalEvidence)`,
+    {operation:operation.id,physicalProof:operation.physical_proof,physicalEvidence:operation.physical_evidence}))
   statements.push(...replayEntitlement.guards)
   for (const member of snapshot.members.filter((candidate) => candidate.changed)) {
     const customer=customers.get(member.id)
     statements.push(guard(`EXISTS(SELECT 1 FROM returns r JOIN return_bulk_members m ON m.return_id=r.id WHERE m.operation_id=@operation AND r.id=@id AND m.revision=COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=r.id),0) AND m.stock_fingerprint=${movementFingerprint('r.id')} AND (@taggedFingerprint IS NULL OR m.stock_fingerprint=@taggedFingerprint)${supplierExact?' AND m.stock_fingerprint=@capturedFingerprint':''}${customer?' AND m.stock_fingerprint=@customerFingerprint':''} AND (m.sale_id IS NULL OR (EXISTS(SELECT 1 FROM sales WHERE id=m.sale_id) AND m.sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=m.sale_id),0)))) AND ${taggedReturnAuthority()} AND ${supplierManifestAuthority()} AND (@supplierManifest IS NULL OR (${stockActorPredicate}))${customer?` AND ${customerSourcesSql('@id')}=@customerSources AND ${customerMovementsSql('@id')}=@customerMovements AND ${customerTagMembersSql('@id')}=@customerTags AND (${branchEffectGuardPredicate('@customerEffects')})`:''}`, { operation: operation.id, id: member.id, taggedSources: JSON.stringify(tagged.get(member.id)||[]), taggedFingerprint:tagged.get(member.id)?.[0]?.fingerprint??null, ...supplierManifestParams(member), ...stockActorParams(user),...(supplierExact?{capturedFingerprint:supplierFingerprints!.get(member.id)}:{}),...(customer?{customerSources:customer.sources,customerFingerprint:customer.fingerprint,customerEffects:customer.effects,customerMovements:customer.movements,customerTags:customer.tags}:{}) }))
   }
-  for (const member of snapshot.members) statements.push(...memberStatements(member, directionSign, user, stamp, exact))
+  for (const member of snapshot.members) statements.push(...memberStatements(member, directionSign, user, stamp, exact,physical))
   statements.push(...exact.takeFinalPhysicalWrites())
   const replayExact = new Map(replayEntitlement.saleStatuses.map(status => [status.saleId, status]))
   for (const saleId of [...new Set(snapshot.members.filter((member) => member.changed && member.updateSale && member.saleId).map((member) => member.saleId!))]) {
@@ -1180,11 +1295,12 @@ async function replayReturnBulkActionKernel(env: Env, user: SessionUser, directi
   if (recordEvents) statements.push(recordEvents.statement)
   for (const member of snapshot.members.filter((candidate) => candidate.changed)) statements.push({ sql: `UPDATE return_bulk_members SET revision=COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=@id),0),sale_revision=CASE WHEN sale_id IS NULL THEN NULL ELSE COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_write_revisions.sale_id=return_bulk_members.sale_id),0) END,stock_fingerprint=${movementFingerprint('@id')} WHERE operation_id=@operation AND return_id=@id`, params: { operation: operation.id, id: member.id } })
   statements.push({ sql: 'UPDATE return_bulk_operations SET generation=generation+1 WHERE id=@operation', params: { operation: operation.id } })
+  if(physical)statements.push(physicalProofStatement(String(operation.id),nextGeneration,physical.sources,user,snapshot.members))
   statements.push({ sql: 'UPDATE undo_snapshots SET status=@status,updated_at=@stamp WHERE id=@id', params: { id: operation.snapshot_id, status: direction === 'undo' ? 'reversed' : 'applied', stamp } })
   statements.push({ sql: "UPDATE action_history SET status=@status,last_error=NULL,updated_at=@stamp,undo_payload=json_set(undo_payload,'$.generation',@generation),redo_payload=json_set(redo_payload,'$.generation',@generation) WHERE id=@id", params: { id: historyId, status: nextStatus, stamp, generation: Number(generation) + 1 } })
   statements.push(auditStatement(user, String(operation.id), `action_${direction}`, snapshot.members.filter((member) => member.changed).length))
   statements.push({ sql: 'DELETE FROM return_bulk_guards', params: {} })
-  assertBounded(statements, snapshot, recordEvents?.eventsBytes || 0)
+  assertBounded(statements, snapshot, (recordEvents?.eventsBytes || 0)+physicalProofBytes(statements,physical))
   if(exactReplay){
     const groups=new Set(snapshot.members.filter(member=>member.changed).map(member=>`${member.scope}:${directionSign>0?member.after.status:member.before.status}`)).size
     // Both cache paths six each, IDs/status/history six, per-group config two, and once-only ACK confirmation one.
@@ -1195,7 +1311,7 @@ async function replayReturnBulkActionKernel(env: Env, user: SessionUser, directi
   try {
     await (snapshot.members.some(member => member.stock.length > 0) ? executeStockTransaction(db, statements, exactReplay?'once':'retry') : db.batch(statements))
   } catch (error) {
-    if(exactReplay && !isCountedStockConflict(error) && !/CHECK constraint failed:\s*guard_value\s*=\s*1/i.test(String(error)) && !productStockGuardError(error)){
+    if(exactReplay && !isCountedStockConflict(error) && !String(error).includes('$[merge_physical_origin_conflict]') && !/CHECK constraint failed:\s*guard_value\s*=\s*1/i.test(String(error)) && !productStockGuardError(error)){
       try {
         const confirmed=await db.prepare(`SELECT o.generation,s.payload_json,s.status AS snapshot_status,h.status AS replay_status
           FROM return_bulk_operations o JOIN undo_snapshots s ON s.id=o.snapshot_id JOIN action_history h ON h.id=o.history_id

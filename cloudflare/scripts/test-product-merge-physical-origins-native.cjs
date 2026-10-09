@@ -2,7 +2,8 @@ const assert = require('node:assert/strict')
 const { ready, identity, state } = require('./test-product-merge-forward-stock-native.cjs')
 const { adapter, capture, load } = require('./test-product-merge-origin-plan-native.cjs')
 const { planProductMergeForwardStock } = load('lib/productMergeForwardStock.ts')
-const { planProductMergePhysicalOrigins, ProductMergePhysicalOriginError } = load('lib/productMergePhysicalOrigins.ts')
+const { planProductMergePhysicalOrigins, ProductMergePhysicalOriginError, validateProductMergePhysicalPaths,
+  productMergePhysicalPathEvidenceSql } = load('lib/productMergePhysicalOrigins.ts')
 const { executeStockTransaction } = load('lib/stockTransaction.ts')
 const { CountedStockPlan, countedStockFactsSql } = load('lib/countedDamagedStock.ts')
 const source = (batchId = 10, damagedLotId = null, conditionTag = 'ordinary', memberKey = 'member') =>
@@ -28,6 +29,16 @@ async function run() {
         source(10, 20, 'damaged', 'tag'), source(10, 21, 'expired', 'exhausted-tag'),
         source(null, 22, 'damaged', 'null-tag'), source(null, null, 'ordinary', 'null')]
       const result = resolution(d1, originals)
+      const proof = JSON.stringify({ sources: result.sources })
+      const evidence = d1.prepare('SELECT ' + productMergePhysicalPathEvidenceSql('@proof') + ' evidence').get({proof}).evidence
+      assert.doesNotThrow(() => validateProductMergePhysicalPaths(result.sources, evidence))
+      const oldHead = JSON.parse(evidence)
+      oldHead[0].history.undo = oldHead[0].history.redo = JSON.stringify({ applier:'product.merge',version:2,plan_id:1000,operation_id:identity.origins.operationId,generation:2,seal_id:1002 })
+      assert.doesNotThrow(() => validateProductMergePhysicalPaths(result.sources, JSON.stringify(oldHead)), 'historical seal need not equal later head')
+      assert.throws(() => validateProductMergePhysicalPaths(result.sources, '[]'), ProductMergePhysicalOriginError)
+      const wrong = result.sources.map((row,index) => index ? row : {...row,effect:{...row.effect,batchId:1}})
+      assert.throws(() => validateProductMergePhysicalPaths(wrong, evidence), ProductMergePhysicalOriginError)
+      cases += 4
       assert.deepEqual(result.sources.map(value => [value.effect.productId, value.effect.batchId, value.effect.damagedLotId]),
         [[1, 100, null], [1, 101, null], [1, 103, null], [1, 100, 200], [1, 100, 201], [1, null, 202], [1, null, null]])
       assert.deepEqual(result.sources.map(value => value.original), originals)
