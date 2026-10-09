@@ -33,7 +33,9 @@ const rawStart = pointsSource.indexOf('function rawPointsSql(')
 const rawEnd = pointsSource.indexOf('\nfunction configCte(', rawStart)
 assert.ok(rawStart >= 0 && rawEnd > rawStart, 'shared production raw balance function exists')
 const rawOutput = ts.transpileModule(pointsSource.slice(rawStart, rawEnd), {compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText
-const rawPointsSql = new Function(rawOutput+';return rawPointsSql;')()
+const scopeOutput = ts.transpileModule(read(path.join('lib', 'customerPointsReturn.ts')), {compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText
+const scopeExports = {}; new Function('exports', scopeOutput)(scopeExports)
+const rawPointsSql = new Function('customerPointsReturnSql',rawOutput+';return rawPointsSql;')(scopeExports.customerPointsReturnSql)
 const rawBalance = (basis='usd', usd=1, khr=0) => sqlite.prepare(`WITH cfg AS (SELECT ? AS basis,? AS usd,? AS khr) SELECT ${rawPointsSql('7')} AS raw FROM cfg`).get(basis,usd,khr).raw
 assert.equal(rawBalance(), 7, 'raw USD is earned12 minus redeemed5, excluding historical90 accrual')
 assert.equal(rawBalance('khr',0,1), 49195, 'raw KHR is earned49200 minus redeemed5, excluding historical369000 accrual')

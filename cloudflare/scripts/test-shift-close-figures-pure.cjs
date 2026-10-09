@@ -127,7 +127,7 @@ let user = null
 const cache = new Map()
 const actual = new Set([
   // the sales bulk-update stack (as test-sale-bulk-update-pure.cjs loads it)
-  'businessMaintenanceGuard', 'acquisitionCostAccess', 'saleCustomerAssignmentGuard', 'actorSnapshot', 'anonymousCustomer',
+  'businessMaintenanceGuard', 'acquisitionCostAccess', 'saleCustomerAssignmentGuard','customerPointsReturn', 'actorSnapshot', 'anonymousCustomer',
   'movementBranchName', 'db', 'permissions', 'saleBulkStatus', 'saleBulkUpdate', 'saleRecordEvents', 'saleTransitions',
   'sqlBinding', 'productBatches', 'batchCode', 'salesStatus', 'saleStatusResolution', 'undoAppliers', 'branchWrites',
   'conflictControl', 'searchMatch', 'paymentMethodRegistry', 'contactOptions',

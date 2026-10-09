@@ -39,7 +39,7 @@ const cache = new Map()
 const actual = new Set(['businessDateWindow', 'continuousReadWindow', 'businessMaintenanceGuard',
   'offlineSaleOwnership',
   'acquisitionCostAccess',
-  'saleCustomerAssignmentGuard',
+  'saleCustomerAssignmentGuard','customerPointsReturn',
   'actorSnapshot', 'movementBranchName', 'db', 'permissions', 'saleBulkStatus', 'saleBulkUpdate',
   'saleTransitions', 'saleTotals', 'sqlBinding', 'productBatches', 'batchCode', 'salesStatus','saleStatusResolution',
   'conflictControl', 'searchMatch', 'financialPrecision', 'paymentMethodRegistry',
