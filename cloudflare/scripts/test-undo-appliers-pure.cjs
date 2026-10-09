@@ -370,6 +370,18 @@ function runStatements(db, statements) {
 // --- checks ----------------------------------------------------------------
 
 async function main() {
+await check('real stock executor refuses legacy epoch and raw writers, accepts actual converted fixture',async()=>{
+  const executor=currentStockFixture.loadStockSession('lib/stockTransaction.ts')
+  const legacy=currentStockFixture.fixture(()=>{},{legacyStock:true}),current=currentStockFixture.fixture()
+  try{
+    await assert.rejects(executor.executeStockTransaction(wrapDb(legacy.sql),[{sql:'SELECT 1'}],'once'),error=>error.code==='stock_schema_unavailable')
+    assert.throws(()=>current.sql.exec('UPDATE branch_stock SET quantity=1 WHERE product_id=1'),/stock_transaction_required/)
+    const result=await executor.executeStockTransaction(wrapDb(current.sql),[{sql:'SELECT quantity FROM branch_stock WHERE product_id=1'}],'once')
+    assert.equal(result[0].results[0].quantity,0)
+    assert.equal(current.sql.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get().value,executor.STOCK_SCHEMA_EPOCH)
+    for(const fixture of [legacy,current])assert.equal(fixture.sql.prepare("SELECT COUNT(*)n FROM system_flags WHERE key IN('maintenance','stock_transaction_permit')").get().n,0)
+  }finally{legacy.sql.close();current.sql.close()}
+})
 await check('branchUpdateStatements applies canonical metadata without changing identity', () => {
   const db = freshDb()
   db.prepare(`INSERT INTO branches (id, name, location, phone, manager, notes, is_default, is_active) VALUES (2, 'Shop', 'New Loc', '070', 'Bob', 'edited', 0, 1)`).run()
