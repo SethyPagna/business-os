@@ -5,7 +5,9 @@ import type { D1Compat } from './db'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from './receiptNumber'
 import { RETURN_STATUSES } from './salesStatus'
 import { branchCanSell } from './branchRoles'
-import { actorSnapshot, type ActorLike } from './actorSnapshot'
+import { actorSnapshot } from './actorSnapshot'
+import type { SessionUser } from './auth'
+import { stockActorParams, stockActorPredicate } from './stockActorGuard'
 import { WAREHOUSE_NOT_SELLABLE_ERROR, sellingBranchConditionSql } from './branchRoleGuards'
 import { buildSaleCreationSnapshot } from './saleCreationSnapshot'
 import { isAnonymousCustomer } from './anonymousCustomer'
@@ -102,7 +104,7 @@ export async function applyHistoricalSaleImport(
   // review screen (default OFF -- migrated history should not inflate
   // balances, which are summed from sales). Set true only when the operator
   // explicitly opts a sales import into earning points.
-  input: { jobId: string; rowNumber: number; data: SaleImportData; nowIso: string; actor: ActorLike; accrueLoyalty?: boolean },
+  input: { jobId: string; rowNumber: number; data: SaleImportData; nowIso: string; actor: SessionUser; accrueLoyalty?: boolean },
 ): Promise<HistoricalSaleCommitResult> {
   const jobId = String(input.jobId || '').trim()
   const rowNumber = Number(input.rowNumber)
@@ -155,6 +157,9 @@ export async function applyHistoricalSaleImport(
   const redirected = Number.isSafeInteger(redirectedFrom) && redirectedFrom > 0
   const addressedBranchName = redirected ? String(d.branch_addressed_name || '').trim() || null : null
   const normalizedItems: Array<Record<string, unknown>> = d.items.map((item) => ({ ...item, branch_id: saleHeaderBranchId }))
+  const isReturnGroup = RETURN_STATUSES.has(d.sale_status)
+  const restockedItems = isReturnGroup ? normalizedItems.filter(item => Number(item.returned_quantity) > 0) : []
+  const restockedProductIds = [...new Set(restockedItems.map(item => Number(item.product_id)))]
 
   // Classification is a preview and may be separated from queue apply by
   // minutes. Seal every explicit lot identity again at the writer boundary:
@@ -181,7 +186,10 @@ export async function applyHistoricalSaleImport(
   ])).values()]
   const batchRefsJson = JSON.stringify(uniqueBatchReferences)
   const invalidBatchReferences = await db.prepare(`
-    SELECT COUNT(*) AS n
+    SELECT COUNT(*) AS n,
+      (SELECT json_group_array(json_object('id',p.id,'is_active',p.is_active,
+        'facts','' || ${countedStockFactsSql('p.id', '@branch_id', '@receipt_ids')})) FROM products p
+        WHERE p.id IN (SELECT value FROM json_each(@product_ids))) AS restock_facts
     FROM json_each(@batch_refs_json) expected
     LEFT JOIN product_batches pb
       ON pb.id = CAST(json_extract(expected.value, '$.batch_id') AS INTEGER)
@@ -197,7 +205,8 @@ export async function applyHistoricalSaleImport(
            WHERE matching_pb.variant_product_id = CAST(json_extract(expected.value, '$.product_id') AS INTEGER)
              AND COALESCE(matching_pb.is_active, 0) = 1
              AND lower(trim(COALESCE(matching_pb.lot_code, ''))) = lower(trim(CAST(json_extract(expected.value, '$.batch_label') AS TEXT)))) != 1
-  `).get<{ n: number }>({ batch_refs_json: batchRefsJson, branch_id: saleHeaderBranchId })
+  `).get<{ n: number; restock_facts: string }>({ batch_refs_json: batchRefsJson, branch_id: saleHeaderBranchId,
+    product_ids: JSON.stringify(restockedProductIds), receipt_ids: JSON.stringify(uniqueBatchReferences.map(row => row.batch_id)) })
   if (Number(invalidBatchReferences?.n || 0) > 0) {
     throw new Error(`Sale on row ${rowNumber} references a received date that is missing, inactive, assigned to another product, renamed, or unavailable at the Shop`)
   }
@@ -305,6 +314,7 @@ export async function applyHistoricalSaleImport(
   const creationSnapshotJson = buildCreationSnapshotFor(receiptNumber)
 
   const common = {
+    ...stockActorParams(input.actor),
     job_id: jobId,
     group_key: groupKey,
     row_number: rowNumber,
@@ -340,7 +350,7 @@ export async function applyHistoricalSaleImport(
         )=1
         ELSE 0
       END`
-  const currentHistoricalReferencesGuard = `(${currentImportReferencesGuard}) AND (${currentCustomerReferenceGuard})${redirected ? ` AND (${branchEffectGuardPredicate('@branch_redirect_guards_json')})` : ''}`
+  const currentHistoricalReferencesGuard = `(${stockActorPredicate}) AND (${currentImportReferencesGuard}) AND (${currentCustomerReferenceGuard})${redirected ? ` AND (${branchEffectGuardPredicate('@branch_redirect_guards_json')})` : ''}`
   const writeGuard = `(${pendingGuard}) AND (${currentHistoricalReferencesGuard})`
   // In-transaction receipt uniqueness, on the FIRST statement so every
   // attempt evaluates it -- even over a pre-existing 'pending' row that the
@@ -427,18 +437,16 @@ export async function applyHistoricalSaleImport(
     `Imported as ${d.sale_status} (receipt ${reasonReceiptNumber}${legacyReceiptNumber ? `, source ${legacyReceiptNumber}` : ''})`
   const returnStockParams: Array<Record<string, unknown>> = []
 
-  const isReturnGroup = RETURN_STATUSES.has(d.sale_status)
-  const restockedItems = isReturnGroup ? normalizedItems.filter(item => Number(item.returned_quantity) > 0) : []
-  const restockedProductIds = [...new Set(restockedItems.map(item => Number(item.product_id)))]
-  const restockFacts = restockedItems.length ? await db.prepare(`SELECT p.id,p.is_active,
-    ${countedStockFactsSql('p.id', '@branch_id', '@receipt_ids')} AS facts FROM products p
-    WHERE p.id IN (SELECT value FROM json_each(@product_ids)) ORDER BY p.id`)
-    .all<{ id: number; is_active: number; facts: string }>({ branch_id: saleHeaderBranchId,
-      product_ids: JSON.stringify(restockedProductIds), receipt_ids: JSON.stringify(uniqueBatchReferences.map(row => row.batch_id)) }) : []
+  const restockFacts = JSON.parse(invalidBatchReferences?.restock_facts || '[]') as Array<{ id: number; is_active: number; facts: string }>
   const removedProducts = restockedProductIds.filter(id => !restockFacts.some(row => row.id === id && row.is_active === 1))
   if (removedProducts.length) throw new ProductStockGuardError(removedProducts)
   const exactRestock = new CountedStockBatchPlan(restockFacts.map(row => ({ facts: row.facts, branchId: saleHeaderBranchId })), { deferPhysicalWrites: true })
   const restockGuards: Array<{ sql: string; params: Record<string, unknown> }> = []
+  if (restockedProductIds.length) {
+    const activeGuard = productStockGuardStatement(restockedProductIds, 'active')
+    statements.unshift({ sql: activeGuard.sql.replace('AND p.is_active IS NOT 1', `AND p.is_active IS NOT 1 AND (${currentHistoricalReferencesGuard})`),
+      params: { ...activeGuard.params, ...common } })
+  }
   for (const item of normalizedItems) {
     statements.push({
       sql: `INSERT INTO sale_items (
@@ -472,9 +480,6 @@ export async function applyHistoricalSaleImport(
     // The same object the receipt-race retry rewrites the reason on, so the label rides on it rather than a copy.
     if (redirected) stockParams.addressed_branch_name = addressedBranchName
     returnStockParams.push(stockParams)
-    const activeGuard = productStockGuardStatement([Number(item.product_id)], 'active')
-    statements.unshift({ sql: activeGuard.sql.replace('AND p.is_active IS NOT 1', `AND p.is_active IS NOT 1 AND ${writeGuard}`),
-      params: { ...activeGuard.params, ...common } })
     restockGuards.push(...exactRestock.get(Number(item.product_id), saleHeaderBranchId)
       .changeOrdinary(item.batch_id ? Number(item.batch_id) : null, returnedQuantity, 'receive'))
     statements.push({
@@ -498,7 +503,7 @@ export async function applyHistoricalSaleImport(
   statements.push({
     sql: `UPDATE import_sales_commits SET status = 'applied', applied_at = CURRENT_TIMESTAMP
           WHERE job_id = @job_id AND group_key = @group_key AND status = 'pending'
-            AND ${currentHistoricalReferencesGuard}`,
+            AND ${currentHistoricalReferencesGuard} RETURNING status`,
     params: common,
   })
   // Receipt-race retry. A failed batch rolled back completely, so re-running
@@ -506,9 +511,11 @@ export async function applyHistoricalSaleImport(
   // when the failure is attributable to the receipt number: this row's sale
   // is absent and another sale now holds the number. Anything else is
   // rethrown unchanged.
+  let confirmed = false
   for (let attempt = 0; ; attempt++) {
     try {
-      await executeStockTransaction(db, statements, 'once')
+      const results = await executeStockTransaction(db, statements, 'once')
+      confirmed = (results.at(-1)?.results?.[0] as { status?: string } | undefined)?.status === 'applied'
       break
     } catch (batchError) {
       const activeGuard = productStockGuardError(batchError)
@@ -535,7 +542,7 @@ export async function applyHistoricalSaleImport(
     }
   }
 
-  const committed = await db.prepare(`
+  const committed = confirmed ? { status: 'applied' } : await db.prepare(`
     SELECT status FROM import_sales_commits WHERE job_id = @job_id AND group_key = @group_key
   `).get<{ status: string }>({ job_id: jobId, group_key: groupKey })
   if (committed?.status !== 'applied') throw new Error('Historical sale did not commit because its Shop branch or received-date reference changed before the atomic write')
