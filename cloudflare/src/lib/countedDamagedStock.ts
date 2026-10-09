@@ -57,7 +57,7 @@ export class CountedStockConflictError extends Error {
 }
 
 export function isCountedStockConflict(error: unknown): boolean {
-  return error instanceof CountedStockConflictError || /\bcounted_quantity_conflict\b/.test(error instanceof Error ? error.message : String(error))
+  return error instanceof CountedStockConflictError || (error instanceof Error ? error.message : String(error)).includes('$[counted_quantity_conflict]')
 }
 
 /** One ordered stock plan. Its initial membership guard precedes all writes;
