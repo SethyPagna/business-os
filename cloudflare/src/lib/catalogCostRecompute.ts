@@ -350,6 +350,23 @@ function positiveCost(value: number | null | undefined): number | null {
   return value != null && Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : null
 }
 
+export type EffectiveReceiptCost = {
+  effectiveUnitCostUsd: number | null
+  source: 'manual' | 'receipt' | 'excluded'
+  manualEntryId: number | null
+}
+
+export function selectEffectiveReceiptCost(
+  receipt: Pick<CostBreakdownLotInput, 'id' | 'is_active' | 'unit_cost_usd'>,
+  latestManualEntry: Pick<CostBreakdownManualInput, 'id' | 'cost_usd' | 'baseline_batch_id'> | null,
+): EffectiveReceiptCost {
+  if (!receipt.is_active) return { effectiveUnitCostUsd: null, source: 'excluded', manualEntryId: null }
+  const overridden = latestManualEntry !== null && receipt.id <= (Number(latestManualEntry.baseline_batch_id) || 0)
+  const cost = positiveCost(overridden ? latestManualEntry.cost_usd : receipt.unit_cost_usd)
+  if (cost === null) return { effectiveUnitCostUsd: null, source: 'excluded', manualEntryId: null }
+  return { effectiveUnitCostUsd: cost, source: overridden ? 'manual' : 'receipt', manualEntryId: overridden ? latestManualEntry.id : null }
+}
+
 /** Same order as CATALOG_COST_DERIVE_SQL's fallback: received_at, then id. */
 function compareLotsByReceipt(a: CostBreakdownLotInput, b: CostBreakdownLotInput): number {
   // Binary string order, as SQLite compares TEXT -- not localeCompare.
@@ -386,13 +403,12 @@ export function buildCatalogCostBreakdown(
   const baseline = latestManualEntry ? Number(latestManualEntry.baseline_batch_id) || 0 : null
   const onHandOf = (lot: CostBreakdownLotInput) => Math.max(0, Number(lot.remaining_quantity) || 0)
   const isOnHand = (lot: CostBreakdownLotInput) => onHandOf(lot) > 0
-  const eligibleLots = lots.filter((lot) => !!lot.is_active
-    && (baseline === null || lot.id > baseline)
-    && positiveCost(lot.unit_cost_usd) !== null)
+  const effectiveCosts = new Map(lots.map((lot) => [lot, selectEffectiveReceiptCost(lot, latestManualEntry)]))
+  const eligibleLots = lots.filter((lot) => effectiveCosts.get(lot)?.source === 'receipt')
   const manualCost = latestManualEntry ? positiveCost(latestManualEntry.cost_usd) : null
   // The stock the latest override re-priced: active lots at or below its baseline.
   const overriddenOnHand = latestManualEntry && manualCost !== null
-    ? lots.filter((lot) => !!lot.is_active && lot.id <= (baseline ?? 0)).reduce((sum, lot) => sum + onHandOf(lot), 0)
+    ? lots.filter((lot) => effectiveCosts.get(lot)?.source === 'manual').reduce((sum, lot) => sum + onHandOf(lot), 0)
     : 0
 
   const lotWeight = new Map<CostBreakdownLotInput, number>(eligibleLots.filter(isOnHand).map((lot) => [lot, onHandOf(lot)]))
