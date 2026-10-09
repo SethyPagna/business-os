@@ -17,6 +17,7 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 const tscVersion = execSync('npx tsc --version', { cwd: cloudflareRoot, encoding: 'utf8' }).trim()
 const ignoreConfigFlag = /^Version\s+(?:[6-9]|\d{2,})\./.test(tscVersion) ? ' --ignoreConfig' : ''
 
+async function main() {
 let checks = 0
 function ok(cond, label) {
   assert.ok(cond, label)
@@ -61,13 +62,24 @@ assert.deepEqual(kernelOutTypes, frontendOutTypes, 'LEDGER_OUT_TYPES === fronten
 ok(true, `sign classification pinned to frontend movementSign (${kernelOutTypes.length} down-types)`)
 
 // ---- real DB: full migration chain ----------------------------------------
-const db = openDb(loadAll())
+const db = openDb(loadAll(), { seedBeforeFence(seed) {
+  for (const [id, name, barcode, stock] of [
+    [9001, 'Ledger Test Cream', '8800000000011', 5],
+    [9002, 'Snapshot 50%_Serum', '8800000000028', 7],
+    [9003, 'Outflow Types', '8800000000035', 0],
+  ]) {
+    seed.prepare('INSERT INTO products (id,name,barcode,unit,stock_quantity,is_active) VALUES (@id,@name,@barcode,@unit,@stock,1)')
+      .run({ id, name, barcode, unit: 'pcs', stock })
+  }
+  seed.exec(`
+    INSERT INTO suppliers(id,name) VALUES(61,'Bong Long'),(62,'Dane Japan');
+    INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,supplier_id,supplier_name)
+      VALUES(501,9001,'08202026','08202026','2026-08-20 10:00:00',1,1,61,'Bong Long'),
+        (502,9001,'LOT-CUSTOM','LOT-CUSTOM','2026-08-27 10:00:00',1,2,NULL,'dane  japan');
+  `)
+} })
 ok(true, 'full migration chain applied')
 
-function insertProduct(id, name, barcode, stock) {
-  db.prepare('INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (@id, @name, @barcode, @unit, @stock, 1)')
-    .bind({ id, name, barcode, unit: 'pcs', stock }).run()
-}
 function insertMovement(row) {
   db.prepare(`INSERT INTO inventory_movements
     (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_name, created_at)
@@ -78,7 +90,6 @@ function insertMovement(row) {
 // Product A: full recorded history. Signed walk: +10 -3 +1 +2 -4 -1 = +5,
 // and current stock is set to that same 5, so every derived before/after
 // is exact.
-insertProduct(9001, 'Ledger Test Cream', '8800000000011', 5)
 const A = (over) => ({ product_id: 9001, product_name: 'Ledger Test Cream', branch_id: 1, branch_name: 'Main Store', reason: '', user_name: 'tester', ...over })
 insertMovement(A({ id: 1, movement_type: 'add', quantity: 10, reason: 'initial stock', created_at: '2026-08-20 10:00:00' }))
 insertMovement(A({ id: 2, movement_type: 'sale', quantity: 3, created_at: '2026-08-21 11:00:00' }))
@@ -90,7 +101,6 @@ insertMovement(A({ id: 6, movement_type: 'remove', quantity: 1, reason: 'damaged
 // Product B: snapshot-migrated -- current stock 7, but only ONE recorded
 // movement (sale 2). The derived baseline before that sale must read 9:
 // the number the recorded actions imply, not a fabricated zero.
-insertProduct(9002, 'Snapshot 50%_Serum', '8800000000028', 7)
 insertMovement({ id: 7, product_id: 9002, product_name: 'Snapshot 50%_Serum', branch_id: 1, branch_name: 'Main Store', movement_type: 'sale', quantity: 2, reason: '', user_name: 'tester', created_at: '2026-08-26 09:00:00' })
 
 function runLedger(filters, page = 1, pageSize = 50) {
@@ -177,12 +187,6 @@ ok(true, 'pagination returns the correct slice with the full total')
 // Two suppliers; two lots on product A -- one id-attributed, one name-only
 // (D5a's match-only free-text attribution). Movements: one stamped with each
 // lot, the six existing rows stay batch-less (pre-0084 history).
-db.prepare(`INSERT INTO suppliers (id, name) VALUES (61, 'Bong Long')`).run({})
-db.prepare(`INSERT INTO suppliers (id, name) VALUES (62, 'Dane Japan')`).run({})
-db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, supplier_id, supplier_name)
-  VALUES (501, 9001, '08202026', '08202026', '2026-08-20 10:00:00', 1, 1, 61, 'Bong Long')`).run({})
-db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, supplier_id, supplier_name)
-  VALUES (502, 9001, 'LOT-CUSTOM', 'LOT-CUSTOM', '2026-08-27 10:00:00', 1, 2, NULL, 'dane  japan')`).run({})
 // Normalize the name-only lot to the exact-name form the filter compares
 // (lower/trim only -- the writers already collapse doubled spaces).
 db.prepare(`UPDATE product_batches SET supplier_name = 'Dane Japan' WHERE id = 502`).run({})
@@ -192,7 +196,15 @@ db.prepare(`INSERT INTO inventory_movements
 db.prepare(`INSERT INTO inventory_movements
   (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_name, created_at, batch_id)
   VALUES (9, 9001, 'Ledger Test Cream', 1, 'Main Store', 'sale', 1, '', 'tester', '2026-08-28 10:00:00', 502)`).run({})
-db.prepare(`UPDATE products SET stock_quantity = 8 WHERE id = 9001`).run({})
+const ts = require('typescript')
+const stockTransaction = { exports: {} }
+new Function('module', 'exports', ts.transpileModule(
+  fs.readFileSync(path.join(cloudflareRoot, 'src/lib/stockTransaction.ts'), 'utf8'),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
+).outputText)(stockTransaction, stockTransaction.exports)
+await stockTransaction.exports.executeStockTransaction(db, [{ sql: 'UPDATE products SET stock_quantity=8 WHERE id=9001' }], 'retry')
+assert.equal(db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key IN ('maintenance','stock_transaction_permit')").get().n, 0)
+assert.throws(() => db.exec('UPDATE products SET stock_quantity=9 WHERE id=9001'), /stock_transaction_required/)
 
 const withBatch = runLedger({ productId: 9001 })
 assert.equal(withBatch.total, 8)
@@ -253,7 +265,6 @@ ok(true, 'supplier filter matches a name-only attributed lot (D1b identity rule)
 // ---- Part 553: completed outflow list + stats summary ----------------------
 // Every outflow string the backend actually writes must bucket as Out, not
 // silently count as In (the reported In/Out imbalance was partly this bug).
-insertProduct(9003, 'Outflow Types', '8800000000035', 0)
 const C = (over) => ({ product_id: 9003, product_name: 'Outflow Types', branch_id: 1, branch_name: 'Main Store', reason: '', user_name: 'tester', ...over })
 insertMovement(C({ id: 20, movement_type: 'move_out', quantity: 2, created_at: '2026-08-20 10:00:00' }))
 insertMovement(C({ id: 21, movement_type: 'damage_out', quantity: 3, created_at: '2026-08-20 11:00:00' }))
@@ -291,3 +302,8 @@ assert.equal(cSummaryOut.out_count, 4)
 ok(true, 'summary ignores the selected view (In/Out split always visible)')
 
 console.log(`\nAll ${checks} stock-ledger kernel checks passed`)
+db.db.close()
+fs.rmSync(tmpDir, { recursive: true, force: true })
+}
+
+main().catch(error => { console.error(error); process.exitCode = 1 })

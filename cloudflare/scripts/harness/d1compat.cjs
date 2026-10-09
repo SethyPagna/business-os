@@ -148,15 +148,54 @@ class D1Compat {
   }
 }
 
-function openDb(migrationSqls) {
+function applyMigrations(db, migrationSqls, { seedBeforeFence } = {}) {
+  const raw = db.db
+  let seeded = false
+  for (const sql of migrationSqls) {
+    raw.exec('BEGIN IMMEDIATE')
+    try {
+      if (seedBeforeFence && sql.includes("SELECT 'stock_schema_epoch', CASE WHEN")) {
+        if (seeded) throw new Error('fixture stock seed already applied')
+        seedBeforeFence(db)
+        seeded = true
+      }
+      // The real conversion requires exclusive maintenance and no live permit.
+      // Admission, conversion and cleanup commit together; no fence SQL is skipped.
+      const conversion = sql.includes('$[counted_conversion_exclusion_required]')
+      if (conversion) {
+        raw.exec(`
+          INSERT INTO system_flags(key,value)
+            SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch';
+          INSERT INTO system_flags(key,value)
+            VALUES('maintenance','{"mode":"counted_conversion","token":"d1compat-fixture-conversion"}');
+          DELETE FROM system_flags WHERE key='stock_transaction_permit';
+        `)
+      }
+      raw.exec(sql)
+      if (conversion) raw.exec("DELETE FROM system_flags WHERE key='maintenance'")
+      raw.exec('COMMIT')
+    } catch (error) {
+      raw.exec('ROLLBACK')
+      throw error
+    }
+  }
+  if (seedBeforeFence && !seeded) throw new Error('fixture stock seed requires the epoch fence migration')
+  return db
+}
+
+function openDb(migrationSqls, options) {
   const raw = new DatabaseSync(':memory:')
   raw.exec('PRAGMA foreign_keys = OFF;')
-  for (const sql of migrationSqls) {
-    raw.exec(sql)
+  const db = new D1Compat(raw)
+  try {
+    applyMigrations(db, migrationSqls, options)
+  } catch (error) {
+    raw.close()
+    throw error
   }
   // D1 parses with expression depth 100; node:sqlite defaults to 1000, which hid a Resolve 500.
   raw.limits.exprDepth = 100
-  return new D1Compat(raw)
+  return db
 }
 
-module.exports = { openDb, D1Compat }
+module.exports = { openDb, applyMigrations, D1Compat }
