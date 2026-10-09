@@ -112,6 +112,7 @@ async function proveTailAndActivation(makeWorker) {
     const {f,amend,saleId}=await amendmentWorld(makeWorker,tier,source)
     try {
       const raw=f.env.DB,attempts=new Map(),failed=new Set()
+      let fullAttempts=0
       const retry=sql=>{
         const kind=/SELECT response_json FROM sale_mutation_receipts WHERE id=/.test(sql)?'receipt':/SELECT namespace, version FROM cache_versions/.test(sql)?'versions':/INSERT INTO quota_usage/.test(sql)?'quota':/INSERT INTO cache_versions/.test(sql)?'handoff':null
         if(!kind)return false
@@ -119,15 +120,17 @@ async function proveTailAndActivation(makeWorker) {
         if(failed.has(kind))return false
         failed.add(kind);return true
       }
-      const wrap=(statement,sql)=>new Proxy(statement,{get(target,key){if(key==='bind')return(...args)=>wrap(target.bind(...args),sql);if(['all','first','run'].includes(key))return(...args)=>retry(sql)?Promise.reject(new Error('D1_ERROR: network reset before tail attempt')):target[key](...args);return target[key]}})
+      const wrap=(statement,sql)=>new Proxy(statement,{get(target,key){if(key==='bind')return(...args)=>wrap(target.bind(...args),sql);if(['all','first','run'].includes(key))return(...args)=>{fullAttempts++;return retry(sql)?Promise.reject(new Error('D1_ERROR: network reset before tail attempt')):target[key](...args)};return target[key]}})
       const hook=()=>{
         f.sql.exec("DELETE FROM cache_versions WHERE namespace IN ('stock','sales')")
         f.env.CACHE={get:async()=>null,put:async()=>{throw new Error('Injected KV unavailable')},delete:async()=>{}}
-        f.env.DB=new Proxy(raw,{get(target,key){if(key==='prepare')return sql=>wrap(target.prepare(sql),sql);if(key==='batch')return statements=>statements.some(statement=>retry(statement.text))?Promise.reject(new Error('D1_ERROR: network reset before tail attempt')):target.batch(statements);return target[key]}})
+        f.env.DB=new Proxy(raw,{get(target,key){if(key==='prepare')return sql=>wrap(target.prepare(sql),sql);if(key==='batch')return statements=>{fullAttempts+=statements.length;return statements.some(statement=>retry(statement.text))?Promise.reject(new Error('D1_ERROR: network reset before tail attempt')):target.batch(statements)};return target[key]}})
       }
       const result=await amend('line_quantity_decreased',0.1,'amendment-tail',hook)
       assert.equal(result.status,200,JSON.stringify(result.json))
       assert.deepEqual(Object.fromEntries(attempts),tier==='free'?{receipt:2,versions:2,quota:2,handoff:2}:{receipt:2,versions:2,handoff:2},'complete mutually exclusive successful tail counts')
+      assert.ok(fullAttempts<=(tier==='free'?50:1000),'outer counter includes authentication, bootstrap, every failed attempt and all awaited tails')
+      console.log('AMENDMENT_FULL_TAIL '+JSON.stringify({tier,source,fullAttempts,attempts:Object.fromEntries(attempts)}))
       const after=state(f);assert.equal((await f.call('/sales/'+saleId+'/amendments',result.body)).status,200);assert.deepEqual(state(f),after)
       console.log('PASS full amendment bounded tail '+JSON.stringify({tier,source,attempts:Object.fromEntries(attempts)}))
     }finally{f.sql.close()}
