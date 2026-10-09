@@ -7,7 +7,7 @@ import { createServer, transformWithEsbuild } from 'vite'
 import * as XLSX from 'xlsx'
 const root = path.resolve(import.meta.dirname, '..'), reportDir = path.join(root, 'src/components/sales/reports')
 const packs = Object.fromEntries(['en', 'km'].map(l => [l, JSON.parse(fs.readFileSync(path.join(root, 'src/lang', l+'.json'), 'utf8'))]))
-const before = Object.fromEntries(['ReturnsReport', 'ExpensesReport'].map(name => [name, execFileSync('git', ['show', `afd55b7806293593e74ed60c6634623090869212:frontend/src/components/sales/reports/${name}.tsx`], { cwd: root, encoding: 'utf8' })]))
+const before = Object.fromEntries(['ReturnsReport', 'ExpensesReport'].map(name => [name, execFileSync('git', ['show', `440a706e06fe8ad472359d935feb3da575373135:frontend/src/components/sales/reports/${name}.tsx`], { cwd: root, encoding: 'utf8' })]))
 const transportNames = [...new Set(['reportsTransport','returnsReadTransport','feesTransport'].flatMap(name => [...fs.readFileSync(path.join(root,'src/api',name+'.ts'),'utf8').matchAll(/^export (?:async )?(?:function|class) (\w+)/gm)].map(m=>m[1])))]
 const fixture = String.raw`
 import React,{useState} from 'react';import{createRoot}from'react-dom/client';
@@ -15,6 +15,7 @@ import Returns from '/src/components/sales/reports/ReturnsReport.tsx';import Exp
 import OldReturns from '/src/components/sales/reports/OldReturnsReport.tsx';import OldExpenses from '/src/components/sales/reports/OldExpensesReport.tsx';
 import{AppContext,FALLBACK_APP_CONTEXT}from'/src/app/AppContextCore.tsx';import{getReportView}from'/src/components/sales/reports/reportModel.ts';
 import{makeReportMoneyFormatter}from'/src/utils/reportMoney.ts';import en from'/src/lang/en.json';import km from'/src/lang/km.json';
+import{getSyncServerUrl,setSyncServerUrl}from'/src/api/httpState.ts';window.__initialServer=getSyncServerUrl();window.__server=value=>setSyncServerUrl(value);
 import'/src/styles/main.css';import'/src/components/sales/reports/reports-surface.css';import'@fontsource/noto-sans-khmer/400.css';
 const params=new URLSearchParams(location.search),kind=params.get('kind')||'returns',language=params.get('lang')||'en',old=params.get('old')==='1';
 window.__locale=language;const t=k=>(window.__locale==='km'?km:en)[k]||k,tr=(k,f)=>t(k)===k?f:t(k);document.body.className=language==='km'?'lang-km':'';
@@ -71,8 +72,8 @@ try {
    assert.equal(await page.evaluate(()=>(window as any).__popups[0].document.querySelectorAll('tbody tr').length),604,'603 records plus the exact totals row')
    await page.evaluate(()=>(window as any).__popups.forEach((p:any)=>p.close()))
    if(language==='en'&&width===360){
-    await page.evaluate(()=>localStorage.setItem('businessos_user',JSON.stringify({id:2})))
-    await dialog.getByRole('button',{name:pack.export_csv,exact:true}).click();assert.equal(await page.evaluate(()=>(window as any).__files.length),2);await page.getByRole('dialog').waitFor({state:'hidden'})
+    await dialog.getByRole('button',{name:pack.export_csv,exact:true}).evaluate(button=>{localStorage.setItem('businessos_user',JSON.stringify({id:2}));(button as HTMLButtonElement).click()})
+    assert.equal(await page.evaluate(()=>(window as any).__files.length),2);await page.getByRole('dialog').waitFor({state:'hidden'})
     await page.evaluate(()=>(window as any).__rerender());await prepare()
     await page.evaluate(()=>(window as any).__raw('pending'));await page.getByRole('dialog').waitFor({state:'hidden'});await menu();assert.equal(await page.getByRole('dialog').count(),0)
     await page.evaluate(()=>(window as any).__search(''));await prepare();await dialog.getByRole('button',{name:pack.close,exact:true}).click()
@@ -80,16 +81,16 @@ try {
     await dialog.getByRole('button',{name:pack.close,exact:true}).click();await page.evaluate(()=>(window as any).__search('000receipt1'));await prepare();assert((await dialog.innerText()).includes('111'))
     await dialog.getByRole('button',{name:pack.close,exact:true}).click();await page.evaluate(()=>(window as any).__search(''))
     for(const mode of ['empty','fail','changed']){await page.evaluate(m=>(window as any).__mode=m,mode);await menu();await page.waitForTimeout(100);assert.equal(await page.getByRole('dialog').count(),0);assert.equal(await page.evaluate(()=>(window as any).__files.length),2)}
-    for(const change of ['branch','currency','language','permission','unmount']){
+    for(const change of ['branch','currency','language','permission','server','unmount']){
      await page.evaluate(()=>{(window as any).__mode='held'});await menu();await page.waitForFunction(()=>(window as any).__held.length>0)
-     await page.evaluate(change=>{const w=window as any;if(change==='branch')w.__branch('2');if(change==='currency')w.__currency('usd');if(change==='language')w.__language('km');if(change==='permission')w.__allow=false;if(change==='unmount')w.__unmount();w.__mode='ok';w.__held.splice(0).forEach((r:any)=>r())},change)
+     await page.evaluate(change=>{const w=window as any;if(change==='branch')w.__branch('2');if(change==='currency')w.__currency('usd');if(change==='language')w.__language('km');if(change==='permission')w.__allow=false;if(change==='server')w.__server('https://other.synthetic.invalid');if(change==='unmount')w.__unmount();w.__mode='ok';w.__held.splice(0).forEach((r:any)=>r())},change)
      await page.waitForTimeout(100);assert.equal(await page.getByRole('dialog').count(),0,change+' invalidates the late preparation');assert.equal(await page.evaluate(()=>(window as any).__files.length),2)
-     if(change!=='unmount'){await page.evaluate(()=>{const w=window as any;w.__allow=true;w.__branch('');w.__currency('both');w.__language('en');w.__rerender()});await prepare();await dialog.getByRole('button',{name:pack.close,exact:true}).click()}
+     if(change!=='unmount'){await page.evaluate(()=>{const w=window as any;w.__allow=true;w.__server(w.__initialServer);w.__branch('');w.__currency('both');w.__language('en');w.__rerender()});await prepare();await dialog.getByRole('button',{name:pack.close,exact:true}).click()}
     }
    }
    assert.deepEqual(errors,[]);worlds++
   }finally{await page.close()}
  }
  for(const kind of ['returns','expenses']){const page=await browser.newPage();try{await page.goto(`http://127.0.0.1:${address.port}/record-host?kind=${kind}&old=1`);await page.getByRole('button',{name:kind==='returns'?'Each return':'Each expense',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('tbody tr').length===250);await page.getByRole('button',{name:'Export',exact:true}).click();await page.getByText('Export CSV',{exact:true}).click();await page.waitForFunction(()=>(window as any).__files.length===1);const lines=await page.evaluate(()=>new TextDecoder().decode(new Uint8Array((window as any).__files[0].bytes)).trim().split('\n').length);assert.equal(lines,251,'exact old runtime exports only loaded250, no complete cohort');assert.equal(await page.getByRole('dialog').count(),0)}finally{await page.close()}}
- console.log(`PASS actual mounted Returns/Expenses ${worlds} Chromium EN/KM360/1280 worlds:603 complete CSV/XLSX/gesture print, translated/local search, exact USD/KHR, dates/viewport, stale authority/debounce/failure/permission; exact afd55 loaded250 runtime negatives`)
+ console.log(`PASS actual mounted Returns/Expenses ${worlds} Chromium EN/KM360/1280 worlds:603 complete CSV/XLSX/gesture print, translated/local search, exact USD/KHR, dates/viewport, stale authority/server/debounce/failure/permission; exact public440a loaded250 runtime negatives`)
 }finally{await browser.close();await server.close()}
