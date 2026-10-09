@@ -34,6 +34,8 @@ import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
 import { stockMutationRequestIdMissing, STOCK_MUTATION_REQUEST_ID_REQUIRED, StockMutationBudgetError, withStockMutationReceipt, executeStockMutationBatch, type StockMutationAtomicMark } from '../lib/stockMutationReceipt'
 import { planConditionHistory } from '../lib/countedConditionHistory'
+import { countedStockFactsSql, CountedStockPlan, isCountedStockConflict, subtractCountedQuantity, sumCountedQuantities } from '../lib/countedDamagedStock'
+import { MoneyPrecisionError } from '../lib/moneyPrecision'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -74,7 +76,7 @@ import { findTransferReceipt, normalizeTransferRequestId, transferReceiptRespons
 import { resolveMovementCostSnapshot, type MovementCostComponent } from '../lib/movementCostSnapshot'
 import { parseStockConditionTag, type StockConditionTag } from '../lib/stockCondition'
 import {
-  allocateTaggedLots, isTaggedLotConflict, planDisposeTagged, planHoldAsTagged, planRestoreTagged,
+  allocateTaggedLots, isTaggedLotConflict, planHoldAsTagged, planHoldAsTaggedExact, planDisposeTaggedExact, planRestoreTaggedExact,
   readOpenTaggedLots, readTaggedLotGroups, TAGGED_LOT_CONFLICT_CODE,
 } from '../lib/damagedLotActions'
 import { addMoney4, multiplyMoney4, roundMoney4 } from '../lib/moneyPrecision'
@@ -1529,6 +1531,8 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
     async (markWritten, atomicMark) => {
       try { return await runAdjustActionKernel(c, body, markWritten, atomicMark) }
       catch (error) {
+        if (isCountedStockConflict(error)) return c.json({ error: 'The exact stock or condition source changed. Refresh before retrying.', code: 'counted_quantity_conflict' }, 409)
+        if (error instanceof MoneyPrecisionError) return c.json({ error: 'This quantity cannot be represented exactly.', code: error.code }, 400)
         if (isReceiptSellingPriceConflict(error)) {
           return c.json(RECEIPT_SELLING_PRICE_CHANGED, 409)
         }
@@ -2019,10 +2023,17 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   let movementWrittenAtomically = false
   let taggedReceiptCommitted = false
   let capturedRemovalAllocations: Array<{ batchId: number; quantity: number }> | undefined
+  let exactTaggedPlan: CountedStockPlan | undefined
   if (type === 'add') {
     delta = quantity
   } else {
-    const current = await branchStockQty(c.env, targetProductId, branchId)
+    let current: number
+    if (conditionTag) {
+      const facts = await db.prepare(`SELECT ${countedStockFactsSql('@productId', '@branchId')} AS facts`)
+        .get<{ facts: string }>({ productId: targetProductId, branchId })
+      exactTaggedPlan = new CountedStockPlan(facts!.facts, branchId)
+      current = exactTaggedPlan.branchQuantity
+    } else current = await branchStockQty(c.env, targetProductId, branchId)
     if (quantity > current) return c.json({ error: `Cannot remove ${quantity} - only ${current} available in ${branch?.name || 'this branch'}` }, 400)
     delta = -quantity
   }
@@ -2052,10 +2063,11 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     capturedRemovalAllocations = []
     for (const row of costRows) {
       if (unallocated <= 0) break
-      const take = batchIdRequested != null ? unallocated : Math.min(unallocated, Number(row.available) || 0)
+      const available = conditionTag ? exactTaggedPlan!.ordinaryQuantity(Number(row.id)) : Number(row.available) || 0
+      const take = batchIdRequested != null ? unallocated : Math.min(unallocated, available)
       if (!(take > 0)) continue
       capturedRemovalAllocations.push({ batchId: Number(row.id), quantity: take })
-      unallocated -= take
+      unallocated = subtractCountedQuantity(unallocated, [take])
     }
     removeMovementCost = resolveMovementCostSnapshot({
       quantity,
@@ -2125,9 +2137,10 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
     })
     const slices: Array<{ batchId: number | null; quantity: number }> = removedBatchQuantities.map(entry => ({ batchId: entry.batchId, quantity: entry.quantity }))
-    const remainder = Math.abs(delta) - slices.reduce((sum, entry) => sum + entry.quantity, 0)
+    const remainder = subtractCountedQuantity(Math.abs(delta), slices.map(entry => entry.quantity))
     if (remainder > 0) slices.push({ batchId: null, quantity: remainder })
-    return planConditionHistory({action:'tag',productId:targetProductId,branchId,tag,actor:user??null}, slices.flatMap(slice => planHoldAsTagged({
+    if (!exactTaggedPlan) throw new Error('The exact tagged stock plan is missing')
+    return planConditionHistory({action:'tag',productId:targetProductId,branchId,tag,actor:user??null}, slices.flatMap(slice => planHoldAsTaggedExact({
       productId: targetProductId,
       productName: targetProductName,
       branchId,
@@ -2140,7 +2153,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       cost: resolveMovementCostSnapshot({ quantity: slice.quantity, components: [{ quantity: slice.quantity, unitCostUsd: slice.batchId == null ? null : removalCostByBatch.get(slice.batchId) ?? null }], fallbackUnitCostUsd: holdCost.unitCostUsd, fallbackUnitCostKhr: holdCost.unitCostKhr }),
       referenceId: sessionId,
       actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
-    })))
+    }, exactTaggedPlan!)))
   }
   const movementRowStatement = (): { sql: string; params: Record<string, unknown> } => {
     let costComponents: MovementCostComponent[] = []
@@ -2429,6 +2442,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         const stockGuard = productStockGuardError(err)
         if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
         if (err instanceof InsufficientBatchStockError) return c.json({ error: err.message }, 400)
+        if (conditionTag) throw err
         return c.json({ error: err instanceof Error ? err.message : 'Failed to remove stock' }, 400)
       }
     } else if (rawBatchId != null && rawBatchId !== '') {
@@ -2473,6 +2487,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         if (err instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
         if (isBranchRedirectGuardError(err)) throw err
         if (isStockRemovalConflict(err)) return c.json(STOCK_REMOVAL_CONFLICT, 409)
+        if (conditionTag) throw err
         return c.json({ error: err instanceof Error ? err.message : 'Failed to remove stock' }, 400)
       }
       movementWrittenAtomically = true
@@ -3261,6 +3276,8 @@ async function runTaggedLotAction(c: InventoryContext, action: 'dispose' | 'rest
     (value, status) => c.json(value as never, status as never),
     async (_markWritten, atomicMark) => {
       try { return await runTaggedLotActionKernel(c, action, body, atomicMark) } catch (error) {
+        if (isCountedStockConflict(error)) return c.json({ error: 'The exact stock or condition source changed. Refresh before retrying.', code: 'counted_quantity_conflict' }, 409)
+        if (error instanceof MoneyPrecisionError) return c.json({ error: 'This quantity cannot be represented exactly.', code: error.code }, 400)
         const transactionRefusal = stockTransactionRefusal(error)
         if (transactionRefusal) return c.json(transactionRefusal, 503)
         const stockGuard = productStockGuardError(error)
@@ -3295,16 +3312,18 @@ async function runTaggedLotActionKernel(c: InventoryContext, action: 'dispose' |
   if (!reason) return c.json({ error: 'A reason is required for stock adjustments' }, 400)
 
   const db = getDb(c.env)
-  const product = await db.prepare('SELECT id, name, cost_price_usd, cost_price_khr FROM products WHERE id = @id')
-    .get<{ id: number; name: string; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: productId })
+  const product = await db.prepare(`SELECT id, name, cost_price_usd, cost_price_khr,
+    ${countedStockFactsSql('@id', '@branchId')} AS counted_facts FROM products WHERE id = @id`)
+    .get<{ id: number; name: string; cost_price_usd: number | null; cost_price_khr: number | null; counted_facts: string }>({ id: productId, branchId })
   if (!product) return c.json({ error: 'Product not found' }, 404)
   // Preserve each lot's recorded branch and receipt; any redirect must pass the same exact identity guards.
   const { landing, branch } = await requestBranchLanding(db, branchId, () => branchRedirectTarget(c))
 
   const lots = await readOpenTaggedLots(db, { productId, branchId, tag: tagResult.tag })
+  const exact = new CountedStockPlan(product.counted_facts, branchId)
   const { takes, uncovered } = allocateTaggedLots(lots, quantity)
   if (uncovered > 0) {
-    const held = lots.reduce((sum, lot) => sum + (Number(lot.quantity_remaining) || 0), 0)
+    const held = sumCountedQuantities(lots.map(lot => Number(lot.quantity_remaining) || 0))
     return c.json({ error: `Only ${held} unit(s) are tagged ${tagResult.tag} at ${branch?.name || 'this branch'}, ${quantity} requested.` }, 400)
   }
 
@@ -3325,7 +3344,7 @@ async function runTaggedLotActionKernel(c: InventoryContext, action: 'dispose' |
   }
   try {
     await executeStockMutationBatch(db, addressedStatements(landing, [
-      ...planConditionHistory({action:action==='dispose'?'dispose':'clear',productId,branchId:landing.effectBranchId,tag:tagResult.tag,actor:user??null,takes:landingTakes,fallbackUnitCostUsd:change.fallbackUnitCostUsd,fallbackUnitCostKhr:change.fallbackUnitCostKhr}, action === 'dispose' ? planDisposeTagged(change) : planRestoreTagged(change)),
+      ...planConditionHistory({action:action==='dispose'?'dispose':'clear',productId,branchId:landing.effectBranchId,tag:tagResult.tag,actor:user??null,takes:landingTakes,fallbackUnitCostUsd:change.fallbackUnitCostUsd,fallbackUnitCostKhr:change.fallbackUnitCostKhr}, action === 'dispose' ? planDisposeTaggedExact(change, exact) : planRestoreTaggedExact(change, exact)),
     ]), atomicMark)
   } catch (error) {
     if (stockTransactionRefusal(error) || error instanceof StockMutationBudgetError) throw error
@@ -3335,10 +3354,10 @@ async function runTaggedLotActionKernel(c: InventoryContext, action: 'dispose' |
     if (isBranchRedirectGuardError(error)) return c.json(await branchRedirectGuardRefusal(db, branchId, () => branchRedirectTarget(c)), 409)
     // The in-batch held-lot guard refused: a concurrent sale or action took
     // these units after they were read. Nothing was written.
-    if (isTaggedLotConflict(error)) {
+    if (isTaggedLotConflict(error) || isCountedStockConflict(error)) {
       return c.json({ error: 'The tagged stock changed while this was being saved. Nothing was changed; refresh and try again.', code: TAGGED_LOT_CONFLICT_CODE }, 409)
     }
-    return c.json({ error: error instanceof Error ? error.message : 'Failed to change tagged stock' }, 400)
+    throw error
   }
   await audit(c.env, user?.id ?? null, actorSnapshot(user), action === 'dispose' ? 'stock_tagged_dispose' : 'stock_tagged_restore', 'product', productId, {
     branchId: landing.effectBranchId, conditionTag: tagResult.tag, quantity, reason, lotIds: takes.map((take) => take.lotId),

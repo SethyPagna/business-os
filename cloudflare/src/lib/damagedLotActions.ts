@@ -1,5 +1,6 @@
 import { productStockGuardStatement } from './productStockGuard'
-import { planCountedTaggedChange, tagCapacityGuard } from './countedDamagedStock'
+import { planCountedTaggedChange, tagCapacityGuard, planExactCountedTagCapacity, planExactCountedTaggedChange,
+  subtractCountedQuantity, sumCountedQuantities, type CountedStockPlan } from './countedDamagedStock'
 import type { D1Compat } from './db'
 import type { StockWriteStatement } from './productBatches'
 import { createDamagedLotStatement } from './returnsStock'
@@ -47,7 +48,7 @@ export function allocateTaggedLots(lots: OpenTaggedLot[], quantity: number): { t
       quantity: take,
       unitCostUsd: lot.unit_cost_usd ?? null,
     })
-    remaining -= take
+    remaining = subtractCountedQuantity(remaining, [take])
   }
   return { takes, uncovered: remaining }
 }
@@ -113,12 +114,12 @@ export type HoldAsTaggedInput = {
 }
 
 /** Tag existing physical units without moving them. The caller commits receipt and tag together. */
-export function planHoldAsTagged(input: HoldAsTaggedInput): StockWriteStatement[] {
+function holdStatements(input: HoldAsTaggedInput, capacity: StockWriteStatement[]): StockWriteStatement[] {
   const quantity = Number(input.quantity)
   if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Held quantity must be positive')
   return [
     productStockGuardStatement([input.productId], 'active'),
-    ...tagCapacityGuard(input.productId, input.branchId, input.batchId, quantity),
+    ...capacity,
     createDamagedLotStatement({
       productId: input.productId,
       productName: input.productName,
@@ -147,6 +148,14 @@ export function planHoldAsTagged(input: HoldAsTaggedInput): StockWriteStatement[
       actor: input.actor,
     }),
   ]
+}
+
+export function planHoldAsTagged(input: HoldAsTaggedInput): StockWriteStatement[] {
+  return holdStatements(input, tagCapacityGuard(input.productId, input.branchId, input.batchId, input.quantity))
+}
+
+export function planHoldAsTaggedExact(input: HoldAsTaggedInput, exact: CountedStockPlan): StockWriteStatement[] {
+  return holdStatements(input, planExactCountedTagCapacity(exact, input.productId, input.branchId, input.batchId, input.quantity))
 }
 
 /** The code the in-batch guard below aborts with; the route answers 409 with it. */
@@ -185,7 +194,7 @@ export type TaggedLotChangeInput = {
 }
 
 function takenQuantity(takes: TaggedLotTake[]): number {
-  return takes.reduce((sum, take) => sum + Number(take.quantity || 0), 0)
+  return sumCountedQuantities(takes.map(take => Number(take.quantity || 0)))
 }
 
 function costForTakes(input: TaggedLotChangeInput): MovementCostPair {
@@ -209,11 +218,11 @@ function singleBatchId(takes: TaggedLotTake[]): number | null {
  * held lots shrink and a write_off movement books the loss at the cost the
  * units were carried at. Physical stock and its tagged subset are reduced together.
  */
-export function planDisposeTagged(input: TaggedLotChangeInput): StockWriteStatement[] {
+function disposeStatements(input: TaggedLotChangeInput, changes: StockWriteStatement[]): StockWriteStatement[] {
   const quantity = takenQuantity(input.takes)
   if (!(quantity > 0)) throw new Error('Disposed quantity must be positive')
   return [
-    ...input.takes.flatMap((take) => planCountedTaggedChange({ lotId: take.lotId, productId: input.productId, branchId: input.branchId, batchId: take.batchId }, take.quantity, 'consume')),
+    ...changes,
     movementStatement({
       productId: input.productId,
       productName: input.productName,
@@ -230,12 +239,20 @@ export function planDisposeTagged(input: TaggedLotChangeInput): StockWriteStatem
   ]
 }
 
+export function planDisposeTagged(input: TaggedLotChangeInput): StockWriteStatement[] {
+  return disposeStatements(input, input.takes.flatMap(take => planCountedTaggedChange({ lotId: take.lotId, productId: input.productId, branchId: input.branchId, batchId: take.batchId }, take.quantity, 'consume')))
+}
+
+export function planDisposeTaggedExact(input: TaggedLotChangeInput, exact: CountedStockPlan): StockWriteStatement[] {
+  return disposeStatements(input, input.takes.flatMap(take => planExactCountedTaggedChange(exact, { lotId: take.lotId, productId: input.productId, branchId: input.branchId, batchId: take.batchId }, take.quantity, 'consume')))
+}
+
 /** Clear a condition tag without changing physical stock. */
-export function planRestoreTagged(input: TaggedLotChangeInput): StockWriteStatement[] {
+function restoreStatements(input: TaggedLotChangeInput, changes: StockWriteStatement[]): StockWriteStatement[] {
   const quantity = takenQuantity(input.takes)
   if (!(quantity > 0)) throw new Error('Restored quantity must be positive')
   const statements: StockWriteStatement[] = [
-    ...input.takes.flatMap(take => planCountedTaggedChange({ lotId: take.lotId, productId: input.productId, branchId: input.branchId, batchId: take.batchId }, take.quantity, 'clear')),
+    ...changes,
     movementStatement({
       productId: input.productId,
       productName: input.productName,
@@ -251,6 +268,14 @@ export function planRestoreTagged(input: TaggedLotChangeInput): StockWriteStatem
     }),
   ]
   return statements
+}
+
+export function planRestoreTagged(input: TaggedLotChangeInput): StockWriteStatement[] {
+  return restoreStatements(input, input.takes.flatMap(take => planCountedTaggedChange({ lotId: take.lotId, productId: input.productId, branchId: input.branchId, batchId: take.batchId }, take.quantity, 'clear')))
+}
+
+export function planRestoreTaggedExact(input: TaggedLotChangeInput, exact: CountedStockPlan): StockWriteStatement[] {
+  return restoreStatements(input, input.takes.flatMap(take => planExactCountedTaggedChange(exact, { lotId: take.lotId, productId: input.productId, branchId: input.branchId, batchId: take.batchId }, take.quantity, 'clear')))
 }
 
 export type TaggedLotGroup = {

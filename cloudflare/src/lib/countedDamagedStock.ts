@@ -1,6 +1,162 @@
+import { MoneyPrecisionError, subtractDecimalSum } from './moneyPrecision'
+
 type StockWriteStatement = { sql: string; params: Record<string, unknown> }
 
 export type CountedTaggedIdentity = { lotId: number; productId: number; branchId: number; batchId: number | null }
+
+const MAX_COUNTED_ROWS = 10_000
+type ProductFacts = [number, number, number, number | null, number | null, string]
+type BranchFacts = [number, number, string, string]
+type ReceiptFacts = [number, number, number, number, number | null, string | null, string | null]
+type TagFacts = [number, number | null, number, number, string, string | null, number | null, number | null, number | null, string | null]
+type CountedFacts = { product: ProductFacts; branch: BranchFacts | null; branches: [number, number][]; receipts: ReceiptFacts[]; tags: TagFacts[] }
+
+/** Add to an existing facts SELECT; every capacity term and metadata preimage
+ * is bounded and returned individually, never as a floating SQL sum. */
+export function countedStockFactsSql(product: string, branch: string): string {
+  return `(SELECT json_object(
+    'product',json_array(p.id,p.is_active,p.stock_quantity,p.cost_price_usd,p.cost_price_khr,p.name),
+    'branch',(SELECT json_array(b.id,b.is_active,b.name,b.role) FROM branches b WHERE b.id=${branch}),
+    'branches',(SELECT json_group_array(json_array(branch_id,quantity)) FROM (
+      SELECT branch_id,quantity FROM branch_stock WHERE product_id=${product} ORDER BY branch_id LIMIT ${MAX_COUNTED_ROWS + 1})),
+    'receipts',(SELECT json_group_array(json_array(id,variant_product_id,is_active,quantity,unit_cost_usd,received_at,expiry_date)) FROM (
+      SELECT pb.id,pb.variant_product_id,pb.is_active,bbs.quantity,pb.unit_cost_usd,pb.received_at,pb.expiry_date
+      FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
+      WHERE pb.variant_product_id=${product} AND bbs.branch_id=${branch} ORDER BY pb.id LIMIT ${MAX_COUNTED_ROWS + 1})),
+    'tags',(SELECT json_group_array(json_array(id,batch_id,quantity,quantity_remaining,condition_tag,source,return_id,return_item_id,unit_cost_usd,created_at)) FROM (
+      SELECT id,batch_id,quantity,quantity_remaining,condition_tag,source,return_id,return_item_id,unit_cost_usd,created_at
+      FROM damaged_stock_lots WHERE product_id=${product} AND branch_id=${branch} ORDER BY id LIMIT ${MAX_COUNTED_ROWS + 1}))
+    ) FROM products p WHERE p.id=${product})`
+}
+
+function exactQuantity(text: string): number {
+  const value = Number(text)
+  if (!Number.isFinite(value) || subtractDecimalSum(value, [text]) !== '0') throw new MoneyPrecisionError('invalid_decimal')
+  return value
+}
+
+export function subtractCountedQuantity(total: number, values: readonly number[]): number {
+  return exactQuantity(subtractDecimalSum(total, values))
+}
+
+export function sumCountedQuantities(values: readonly number[]): number {
+  return subtractCountedQuantity(0, values.map(value => -value))
+}
+
+export class CountedStockConflictError extends Error {
+  readonly code = 'counted_quantity_conflict'
+  readonly statusCode = 409
+  constructor() { super('The exact stock or condition source changed. Refresh before retrying.'); this.name = 'CountedStockConflictError' }
+}
+
+export function isCountedStockConflict(error: unknown): boolean {
+  return error instanceof CountedStockConflictError || /\bcounted_quantity_conflict\b/.test(error instanceof Error ? error.message : String(error))
+}
+
+/** One ordered stock plan. Its initial membership guard precedes all writes;
+ * following operations use projected balances from preceding operations in
+ * this same atomic batch. Generated tag identities need no guessed row id. */
+export class CountedStockPlan {
+  private readonly facts: CountedFacts
+  private guarded = false
+  private addedTags: { batchId: number | null; quantity: number }[] = []
+  readonly productId: number
+  readonly branchId: number
+
+  constructor(private readonly observed: string, branchId: number) {
+    this.facts = JSON.parse(observed) as CountedFacts
+    this.productId = this.facts.product[0]
+    this.branchId = branchId
+    if ([this.facts.branches, this.facts.receipts, this.facts.tags].some(rows => rows.length > MAX_COUNTED_ROWS)) throw new MoneyPrecisionError('too_many_terms')
+    for (const quantity of [this.facts.product[2], ...this.facts.branches.map(row => row[1]),
+      ...this.facts.receipts.map(row => row[3]), ...this.facts.tags.flatMap(row => [row[2], row[3]])]) {
+      if (!Number.isFinite(quantity) || quantity < 0) throw new CountedStockConflictError()
+      subtractCountedQuantity(quantity, [])
+    }
+    if (subtractCountedQuantity(this.facts.product[2], this.facts.branches.map(row => row[1])) !== 0) throw new CountedStockConflictError()
+  }
+
+  get branchQuantity(): number { return this.facts.branches.find(row => row[0] === this.branchId)?.[1] ?? 0 }
+
+  ordinaryQuantity(batchId: number | null): number {
+    this.assertSource(batchId)
+    return subtractCountedQuantity(this.capacity(batchId), this.quantities(batchId))
+  }
+
+  private quantities(batchId?: number | null): number[] {
+    return [...this.facts.tags.filter(row => batchId === undefined || row[1] === batchId).map(row => row[3]),
+      ...this.addedTags.filter(row => batchId === undefined || row.batchId === batchId).map(row => row.quantity)]
+  }
+
+  private capacity(batchId: number | null): number {
+    return batchId === null
+      ? subtractCountedQuantity(this.branchQuantity, this.facts.receipts.map(row => row[3]))
+      : this.facts.receipts.find(row => row[0] === batchId)?.[3] ?? 0
+  }
+
+  private assertSource(batchId: number | null): void {
+    if (this.facts.product[1] !== 1 || this.facts.branch?.[0] !== this.branchId || this.facts.branch[1] !== 1
+      || !this.facts.branches.some(row => row[0] === this.branchId)
+      || (batchId !== null && !this.facts.receipts.some(row => row[0] === batchId && row[1] === this.productId && row[2] === 1))) throw new CountedStockConflictError()
+    if (subtractCountedQuantity(this.branchQuantity, this.quantities()) < 0
+      || subtractCountedQuantity(this.capacity(batchId), this.quantities(batchId)) < 0) throw new CountedStockConflictError()
+  }
+
+  private preimageGuard(): StockWriteStatement[] {
+    if (this.guarded) return []
+    this.guarded = true
+    return [{ sql: `SELECT CASE WHEN ${countedStockFactsSql('@productId', '@branchId')}=@observed
+      THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`,
+      params: { productId: this.productId, branchId: this.branchId, observed: this.observed } }]
+  }
+
+  hold(batchId: number | null, quantity: number): StockWriteStatement[] {
+    this.assertSource(batchId)
+    if (!Number.isFinite(quantity) || quantity <= 0
+      || subtractCountedQuantity(this.branchQuantity, [...this.quantities(), quantity]) < 0
+      || subtractCountedQuantity(this.capacity(batchId), [...this.quantities(batchId), quantity]) < 0) throw new CountedStockConflictError()
+    this.addedTags.push({ batchId, quantity })
+    return this.preimageGuard()
+  }
+
+  change(identity: CountedTaggedIdentity, quantity: number, action: 'clear' | 'consume' | 'restore' | 'retag'): StockWriteStatement[] {
+    if (identity.productId !== this.productId || identity.branchId !== this.branchId || !Number.isFinite(quantity) || quantity <= 0) throw new CountedStockConflictError()
+    this.assertSource(identity.batchId)
+    const lot = this.facts.tags.find(row => row[0] === identity.lotId && row[1] === identity.batchId)
+    if (!lot) throw new CountedStockConflictError()
+    const increasing = action === 'restore' || action === 'retag'
+    const remaining = subtractCountedQuantity(lot[3], [increasing ? -quantity : quantity])
+    if (remaining < 0 || subtractCountedQuantity(lot[2], [remaining]) < 0) throw new CountedStockConflictError()
+    const out = this.preimageGuard()
+    lot[3] = remaining
+    out.push({ sql: 'UPDATE damaged_stock_lots SET quantity_remaining=@nextRemaining,updated_at=CURRENT_TIMESTAMP WHERE id=@lotId', params: { ...identity, nextRemaining: remaining } })
+    if (action === 'consume' || action === 'restore') {
+      const delta = action === 'consume' ? quantity : -quantity
+      const branch = this.facts.branches.find(row => row[0] === this.branchId)!
+      branch[1] = subtractCountedQuantity(branch[1], [delta])
+      this.facts.product[2] = subtractCountedQuantity(this.facts.product[2], [delta])
+      if (branch[1] < 0 || this.facts.product[2] < 0) throw new CountedStockConflictError()
+      if (identity.batchId !== null) {
+        const receipt = this.facts.receipts.find(row => row[0] === identity.batchId)!
+        receipt[3] = subtractCountedQuantity(receipt[3], [delta])
+        out.push({ sql: 'UPDATE branch_batch_stock SET quantity=@nextReceipt,updated_at=CURRENT_TIMESTAMP WHERE batch_id=@batchId AND branch_id=@branchId', params: { ...identity, nextReceipt: receipt[3] } })
+      }
+      out.push({ sql: 'UPDATE branch_stock SET quantity=@nextBranch WHERE product_id=@productId AND branch_id=@branchId', params: { ...identity, nextBranch: branch[1] } },
+        { sql: 'UPDATE products SET stock_quantity=@nextProduct,updated_at=CURRENT_TIMESTAMP WHERE id=@productId', params: { ...identity, nextProduct: this.facts.product[2] } })
+    }
+    this.assertSource(identity.batchId)
+    return out
+  }
+}
+
+export function planExactCountedTagCapacity(exact: CountedStockPlan, productId: number, branchId: number, batchId: number | null, quantity: number): StockWriteStatement[] {
+  if (exact.productId !== productId || exact.branchId !== branchId) throw new CountedStockConflictError()
+  return exact.hold(batchId, quantity)
+}
+
+export function planExactCountedTaggedChange(exact: CountedStockPlan, identity: CountedTaggedIdentity, quantity: number, action: 'clear' | 'consume' | 'restore' | 'retag'): StockWriteStatement[] {
+  return exact.change(identity, quantity, action)
+}
 
 export function ordinarySubsetSql(product: string, branch: string, batch?: string): string {
   return `(SELECT COALESCE(SUM(d.quantity_remaining),0) FROM damaged_stock_lots d WHERE d.product_id=${product} AND d.branch_id=${branch}${batch === undefined ? '' : ` AND d.batch_id IS ${batch}`})`

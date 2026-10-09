@@ -6,7 +6,7 @@ import { executeStockTransaction, stockTransactionStatementCount } from './stock
 import { assertReturnCreateQueryBudget, ReturnCreateBudgetError } from './returnCreateAction'
 import { currentRequestMetrics } from './requestMetrics'
 import { getPlanLimits } from './planTier'
-import { planCountedTaggedChange, tagCapacityGuard } from './countedDamagedStock'
+import { countedStockFactsSql, CountedStockPlan, planExactCountedTaggedChange, isCountedStockConflict, subtractCountedQuantity, sumCountedQuantities } from './countedDamagedStock'
 import { actorSnapshot } from './actorSnapshot'
 import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -24,7 +24,7 @@ const lotJson=`json_object('lotId',d.id,'productId',d.product_id,'branchId',d.br
 export function planConditionHistory(input:{action:Snapshot['action'];productId:number;branchId:number;tag:string;actor:SessionUser|null; fallbackUnitCostUsd?:number|null;fallbackUnitCostKhr?:number|null;takes?:Array<{lotId:number;quantity:number;unitCostUsd?:number|null}>}, statements:StockWriteStatement[]):StockWriteStatement[] {
   const operation=crypto.randomUUID()
   const movement=statements.find(statement=>/INSERT\s+INTO\s+inventory_movements/i.test(statement.sql))?.params as Record<string,unknown>|undefined
-  const units=input.takes?.reduce((sum,take)=>sum+take.quantity,0)??statements.filter(statement=>/INSERT\s+INTO\s+damaged_stock_lots/i.test(statement.sql)).reduce((sum,statement)=>sum+Number((statement.params as Record<string,unknown>).quantity),0)
+  const units=sumCountedQuantities(input.takes?.map(take=>take.quantity)??statements.filter(statement=>/INSERT\s+INTO\s+damaged_stock_lots/i.test(statement.sql)).map(statement=>Number((statement.params as Record<string,unknown>).quantity)))
   const params={operation,kind:COUNTED_CONDITION_HISTORY_KIND,product:input.productId,branch:input.branchId,tag:input.tag,
     actor:input.actor?.id??null,actorName:actorSnapshot(input.actor),costUsd:movement?.unitCostUsd??null,costKhr:movement?.unitCostKhr??null,label:`${input.action==='tag'?'Tag':input.action==='clear'?'Clear tag':'Remove tagged'} ${units} ${input.tag} unit(s)`}
   const initial:Snapshot={operation,action:input.action,generation:0,productId:input.productId,branchId:input.branchId,tag:input.tag,takes:[]}
@@ -35,7 +35,7 @@ export function planConditionHistory(input:{action:Snapshot['action'];productId:
   let priorUsd=0,priorKhr=0
   for(let i=0;i<(input.takes?.length??0);i++){
     const take=input.takes![i],prefix=input.takes!.slice(0,i+1)
-    const cost=resolveMovementCostSnapshot({quantity:prefix.reduce((sum,t)=>sum+t.quantity,0),components:prefix.map(t=>({quantity:t.quantity,unitCostUsd:t.unitCostUsd})),fallbackUnitCostUsd:input.fallbackUnitCostUsd,fallbackUnitCostKhr:input.fallbackUnitCostKhr})
+    const cost=resolveMovementCostSnapshot({quantity:sumCountedQuantities(prefix.map(t=>t.quantity)),components:prefix.map(t=>({quantity:t.quantity,unitCostUsd:t.unitCostUsd})),fallbackUnitCostUsd:input.fallbackUnitCostUsd,fallbackUnitCostKhr:input.fallbackUnitCostKhr})
     const totalUsd=movement?.totalCostUsd==null?null:subtractMoney4(cost.totalCostUsd!,priorUsd)
     const totalKhr=movement?.totalCostKhr==null?null:subtractMoney4(cost.totalCostKhr!,priorKhr)
     priorUsd=cost.totalCostUsd??0;priorKhr=cost.totalCostKhr??0
@@ -55,9 +55,10 @@ export function planConditionHistory(input:{action:Snapshot['action'];productId:
 function refuse(message:string):never{throw Object.assign(new Error(message),{statusCode:409,code:'undo_record_changed'})}
 export async function replayCountedCondition(env:Env,user:SessionUser|null,direction:'undo'|'redo',historyId:number,generation:unknown,payload:Record<string,unknown>):Promise<void>{
   const db=getDb(env)
-  const row=await db.prepare(`SELECT s.id,s.status,s.payload_json,h.status history_status,h.undo_payload,h.redo_payload
+  const row=await db.prepare(`SELECT s.id,s.status,s.payload_json,h.status history_status,h.undo_payload,h.redo_payload,
+    ${countedStockFactsSql("json_extract(s.payload_json,'$.productId')", "json_extract(s.payload_json,'$.branchId')")} AS counted_facts
     FROM undo_snapshots s JOIN action_history h ON h.id=@history WHERE s.id=@snapshot AND s.kind=@kind
-    AND json_extract(h.undo_payload,'$.snapshot_id')=s.id AND json_extract(h.undo_payload,'$.applier')=@kind`).get<{id:number;status:string;payload_json:string;history_status:string;undo_payload:string;redo_payload:string}>({history:historyId,snapshot:Number(payload.snapshot_id),kind:COUNTED_CONDITION_HISTORY_KIND})
+    AND json_extract(h.undo_payload,'$.snapshot_id')=s.id AND json_extract(h.undo_payload,'$.applier')=@kind`).get<{id:number;status:string;payload_json:string;history_status:string;undo_payload:string;redo_payload:string;counted_facts:string}>({history:historyId,snapshot:Number(payload.snapshot_id),kind:COUNTED_CONDITION_HISTORY_KIND})
   if(!row)refuse('This condition action has no authoritative saved lot provenance.')
   const saved=JSON.parse(row.payload_json) as Snapshot
   const expected=typeof generation==='number'?generation:NaN
@@ -66,21 +67,21 @@ export async function replayCountedCondition(env:Env,user:SessionUser|null,direc
   if(saved.generation===expected+1&&row.status===target)return
   if(saved.generation!==expected||row.status!==before)refuse('This condition action changed. Refresh history before retrying.')
   if(!Array.isArray(saved.takes)||!saved.takes.length)refuse('This condition action has no exact lot takes.')
+  const exact = new CountedStockPlan(row.counted_facts, saved.branchId)
   const statements:StockWriteStatement[]=[{sql:`SELECT CASE WHEN EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@snapshot AND kind=@kind AND status=@status AND payload_json=@saved)
     AND EXISTS(SELECT 1 FROM action_history WHERE id=@history AND status=@historyStatus AND undo_payload=@undo AND redo_payload=@redo)
     THEN 1 ELSE json_extract('[1]','$[condition_history_changed]') END`,params:{snapshot:row.id,kind:COUNTED_CONDITION_HISTORY_KIND,status:before,saved:row.payload_json,history:historyId,historyStatus:direction==='undo'?'undoable':'redoable',undo:row.undo_payload,redo:row.redo_payload}}]
   for(const take of saved.takes){
     const decreasing=saved.action==='tag'?direction==='undo':direction==='redo'
-    const balance=saved.action==='tag'?take.remaining-(direction==='redo'?take.quantity:0):take.remaining-(direction==='undo'?take.quantity:0)
+    const balance=subtractCountedQuantity(take.remaining,[saved.action==='tag'?(direction==='redo'?take.quantity:0):(direction==='undo'?take.quantity:0)])
     const params={...take,balance}
     statements.push({sql:`SELECT CASE WHEN EXISTS(SELECT 1 FROM damaged_stock_lots WHERE id=@lotId AND product_id=@productId AND branch_id IS @branchId AND batch_id IS @batchId
       AND condition_tag=@tag AND source IS @source AND return_id IS @returnId AND return_item_id IS @returnItemId AND quantity=@originalQuantity AND quantity_remaining=@balance
       AND EXISTS(SELECT 1 FROM products WHERE id=@productId AND is_active=1) AND EXISTS(SELECT 1 FROM branches WHERE id=@branchId AND is_active=1))
       THEN 1 ELSE json_extract('[1]','$[condition_lot_changed]') END`,params})
     const identity={lotId:take.lotId,productId:take.productId,branchId:take.branchId,batchId:take.batchId}
-    if(saved.action==='dispose')statements.push(...planCountedTaggedChange(identity,take.quantity,decreasing?'consume':'restore'))
-    else if(decreasing)statements.push(...planCountedTaggedChange(identity,take.quantity,'clear'))
-    else statements.push(...tagCapacityGuard(take.productId,take.branchId,take.batchId,take.quantity),{sql:'UPDATE damaged_stock_lots SET quantity_remaining=quantity_remaining+@quantity,updated_at=CURRENT_TIMESTAMP WHERE id=@lotId',params})
+    if(saved.action==='dispose')statements.push(...planExactCountedTaggedChange(exact,identity,take.quantity,decreasing?'consume':'restore'))
+    else statements.push(...planExactCountedTaggedChange(exact,identity,take.quantity,decreasing?'clear':'retag'))
     const legacyCost=resolveMovementCostSnapshot({quantity:take.quantity,components:[{quantity:take.quantity,unitCostUsd:take.unitCostUsd,unitCostKhr:take.unitCostKhr}]})
     statements.push({sql:`INSERT INTO inventory_movements(product_id,branch_id,batch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name)
       VALUES(@productId,@branchId,@batchId,@movement,@physical,@unitCostUsd,@unitCostKhr,@totalUsd,@totalKhr,@reason,@reference,@actor,@actorName)`,params:{...params,movement:saved.action==='dispose'?(direction==='undo'?'adjustment':'write_off'):(decreasing?'condition_clear':'condition_tag'),physical:saved.action==='dispose'?take.quantity:0,totalUsd:take.totalCostUsd===undefined?legacyCost.totalCostUsd:take.totalCostUsd,totalKhr:take.totalCostKhr===undefined?legacyCost.totalCostKhr:take.totalCostKhr,reason:`${direction}: ${saved.tag} ${take.quantity} unit(s)`,reference:saved.action==='dispose'&&direction==='undo'?`revert:condition_history:${row.id}:${expected}`:`condition_history:${row.id}:${expected+1}`,actor:user?.id??null,actorName:actorSnapshot(user)}})
@@ -95,7 +96,7 @@ export async function replayCountedCondition(env:Env,user:SessionUser|null,direc
   try{await executeStockTransaction(db,statements,'once')}catch(error){
     const durable=await db.prepare('SELECT status,json_extract(payload_json,\'$.generation\') generation FROM undo_snapshots WHERE id=? AND kind=?').get<{status:string;generation:number}>([row.id,COUNTED_CONDITION_HISTORY_KIND])
     if(durable?.status===target&&durable.generation===next)return
-    if(/JSON|condition_|counted_/i.test(error instanceof Error?error.message:String(error)))refuse('The exact tagged stock changed or was consumed. Nothing was reversed; refresh the stock and history.')
+    if(isCountedStockConflict(error)||/\bcondition_history_changed\b|\bcondition_lot_changed\b/.test(error instanceof Error?error.message:String(error)))refuse('The exact tagged stock changed or was consumed. Nothing was reversed; refresh the stock and history.')
     throw error
   }
 }
