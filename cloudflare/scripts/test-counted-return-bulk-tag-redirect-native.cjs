@@ -103,6 +103,65 @@ async function authority(make){
   }
  }
 }
+async function vectors(make,{tiers=['free','paid'],receipts=[false,true],shapes=['tagged','ordinary','mixed','two-receipts'],phases=['undo','redo'],changes=['unchanged','append','offsets','remove','replace','cost','swap','old-direction','old-fingerprint','source-race']}={}){
+ for(const tier of tiers)for(const receipt of receipts)for(const shape of shapes){
+  if(shape==='two-receipts' && !receipt)continue
+  for(const phase of phases)for(const change of changes){
+   const f=await fixture(make,tier,receipt)
+   try{
+    const setup=[]
+    if(shape==='ordinary' || shape==='two-receipts')setup.push({sql:'DELETE FROM damaged_stock_lots WHERE id=1'}, {sql:"UPDATE return_items SET stock_action='restock',return_to_stock=1,stock_condition='ordinary' WHERE id=10"})
+    if(shape==='mixed' || shape==='two-receipts'){
+     if(shape==='two-receipts')setup.push({sql:"INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,unit_cost_usd,is_active)VALUES(2,1,'vector-second','2026-09-02',3,1)"}, {sql:'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)VALUES(2,1,.2)'},{sql:'UPDATE branch_batch_stock SET quantity=.1 WHERE batch_id=1 AND branch_id=1'})
+     setup.push({sql:`INSERT INTO return_items(id,return_id,product_id,product_name,quantity,cost_price_usd,stock_action,return_to_stock,branch_id,batch_id,stock_condition)VALUES(11,10,1,'Widget',.1,3,'restock',1,2,${shape==='two-receipts'?2:receipt?1:'NULL'},'ordinary')`})
+    }
+    if(setup.length)await h.loadStockSession('lib/stockTransaction.ts').executeStockTransaction(h.loadStockSession('lib/db.ts').getDb(f.env),setup,'once')
+    const initial=state(f),apply=await f.call('/returns/bulk',request(f,'vector-'+shape));assert.equal(apply.status,200,JSON.stringify(apply))
+    const op=f.sql.prepare('SELECT * FROM return_bulk_operations WHERE id=?').get(apply.json.operationId),saved=f.sql.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get(op.snapshot_id).payload_json,oldFingerprint=f.sql.prepare('SELECT stock_fingerprint FROM return_bulk_members WHERE operation_id=?').get(op.id).stock_fingerprint
+    if(phase==='redo')assert.equal((await f.call('/action-history/'+apply.json.actionHistoryId+'/undo',{expected_generation:0})).status,200)
+    const value=JSON.parse(saved),stock=value.members[0].stock
+    if(change==='append')stock.push({...stock[0],damagedLotId:null})
+    if(change==='offsets')stock.push({...stock[0],damagedLotId:null},{...stock[0],damagedLotId:null,quantity:-stock[0].quantity})
+    if(change==='remove')stock.pop()
+    if(change==='replace')stock[0]={...stock[0],damagedLotId:stock[0].damagedLotId===null?1:null,quantity:stock[0].quantity*2}
+    if(change==='cost')stock[0].costUsd=99
+    if(change==='swap'){if(stock.length>1)[stock[0],stock[1]]=[stock[1],stock[0]];else stock[0].batchId=receipt?2:1}
+    if(change==='old-direction')for(const delta of stock)delta.quantity=-delta.quantity
+    if(!['unchanged','source-race','old-fingerprint'].includes(change))f.sql.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=?').run(JSON.stringify(value),op.snapshot_id)
+    if(change==='old-fingerprint' && phase==='redo')f.sql.prepare('UPDATE return_bulk_members SET stock_fingerprint=? WHERE operation_id=?').run(oldFingerprint,op.id)
+    if(change==='source-race')f.competeBeforeCommit([{sql:'UPDATE return_items SET cost_price_usd=99 WHERE id=10'}])
+    const before=state(f),r=await f.call('/action-history/'+apply.json.actionHistoryId+'/'+phase,{expected_generation:phase==='undo'?0:1})
+    if(change==='unchanged' || change==='old-fingerprint' && phase==='undo'){
+     assert.equal(r.status,200,JSON.stringify({shape,change,phase,r}))
+     assert.equal(f.state().physical,phase==='undo'?initial.physical:shape==='mixed'||shape==='two-receipts'?.1:.2)
+     if(phase==='undo')assert.deepEqual(state(f).items,initial.items)
+    }else{
+     assert.equal(r.status,409,JSON.stringify({shape,change,phase,r}))
+     if(change!=='source-race')assert.deepEqual(state(f),before)
+     else{const after=state(f);assert.equal(after.physical,before.physical);assert.deepEqual(after.movements,before.movements);assert.deepEqual(after.history,before.history);assert.deepEqual(after.operations,before.operations);assert.equal(after.items[0].cost_price_usd,99)}
+    }
+   }finally{f.sql.close()}
+  }
+ }
+}
+async function precision(make){
+ for(const tier of ['free','paid'])for(const receipt of [false,true])for(const change of ['unchanged','archive-rounded-cost','late-cost','late-quantity']){
+  const f=await fixture(make,tier,receipt)
+  try{
+   await h.loadStockSession('lib/stockTransaction.ts').executeStockTransaction(h.loadStockSession('lib/db.ts').getDb(f.env),[{sql:'UPDATE return_items SET cost_price_usd=1.0000000000000002 WHERE id=10'}],'once')
+   const apply=await f.call('/returns/bulk',request(f,'precision-'+change));assert.equal(apply.status,200)
+   const op=f.sql.prepare('SELECT * FROM return_bulk_operations WHERE id=?').get(apply.json.operationId),saved=f.sql.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get(op.snapshot_id).payload_json
+   if(change==='archive-rounded-cost'){const value=JSON.parse(saved);assert.equal(value.members[0].stock[0].costUsd,1.0000000000000002);value.members[0].stock[0].costUsd=1;f.sql.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=?').run(JSON.stringify(value),op.snapshot_id)}
+   if(change==='late-cost')f.competeBeforeCommit([{sql:'UPDATE inventory_movements SET unit_cost_usd=1.0000000000000004 WHERE movement_type=\'damage_reversal\''}])
+   if(change==='late-quantity')f.competeBeforeCommit([{sql:'UPDATE inventory_movements SET quantity=-.10000000000000002 WHERE movement_type=\'damage_reversal\''}])
+   const before=state(f),r=await f.call('/action-history/'+apply.json.actionHistoryId+'/undo',{expected_generation:0})
+   assert.equal(r.status,change==='unchanged'?200:409,JSON.stringify({change,r}))
+   if(change==='unchanged')assert.equal(f.state().physical,.3)
+   else{const after=state(f);assert.equal(after.physical,before.physical);assert.deepEqual(after.history,before.history);assert.deepEqual(after.operations,before.operations);assert.deepEqual(after.snapshots,before.snapshots);assert.deepEqual(after.audit,before.audit)}
+   if(change==='late-cost')assert.equal(f.sql.prepare("SELECT json_group_array(json_array(id,product_id,branch_id,batch_id,movement_type,quantity)) fp FROM (SELECT * FROM inventory_movements WHERE reference_id=10 AND movement_type IN ('return','return_reversal','damage_in','damage_reversal','supplier_return','supplier_return_reversal') ORDER BY id)").get().fp,f.sql.prepare('SELECT stock_fingerprint FROM return_bulk_members WHERE operation_id=?').get(op.id).stock_fingerprint,'legacy fingerprint omits costs: raw movement binding alone detects the adjacent REAL cost rival')
+  }finally{f.sql.close()}
+ }
+}
 async function main(){
  const make=await h.bundle.exports.bundleWorker()
  for(const tier of ['free','paid'])for(const receipt of [false,true]){
@@ -126,6 +185,8 @@ async function main(){
  await rivals(make)
  await failures(make)
  await authority(make)
+ await vectors(make)
+ await precision(make)
 }
-module.exports={fixture,request,state}
+module.exports={fixture,request,state,vectors,precision}
 if(require.main===module)main().catch(error=>{console.error(error);process.exitCode=1})

@@ -326,13 +326,6 @@ function replayTaggedSources(operation:Row,snapshot:Snapshot):Map<number,TaggedS
     if(!member || !delta || !witness.item || witness.itemCondition!==witness.condition || delta.productId!==witness.product
       || delta.branchId!==witness.effect || delta.batchId!==witness.batch || Math.abs(delta.quantity)!==witness.quantity
       || delta.costUsd!==witness.costUsd || delta.costKhr!==witness.costKhr)fail('Archived tagged Return source changed.',409)
-    if(witness.recorded!==witness.effect){
-      let moves:unknown[][]
-      try{moves=JSON.parse(witness.fingerprint)}catch{fail('Tagged Return landing witness is incomplete.',409)}
-      const type=member.after.status==='cancelled'?'damage_reversal':'damage_in'
-      if(!Array.isArray(moves) || !moves.some(row=>row[1]===witness.product && row[2]===witness.effect && row[3]===witness.batch
-        && row[4]===type && row[5]===delta.quantity))fail('Tagged Return landing has no committed source witness.',409)
-    }
     const list=result.get(member.id)||[];list.push(witness);result.set(member.id,list)
   }
   for(const member of snapshot.members)if(member.scope==='customer' && member.stock.filter(delta=>delta.damagedLotId!==null).length!==(result.get(member.id)||[]).length)fail('Archived tagged Return sources are incomplete.',409)
@@ -341,6 +334,96 @@ function replayTaggedSources(operation:Row,snapshot:Snapshot):Map<number,TaggedS
 
 function movementFingerprint(idSql: string): string {
   return `(SELECT CASE WHEN COUNT(*)>${RETURN_BULK_MOVEMENT_LIMIT} THEN NULL ELSE json_group_array(json_array(id,product_id,branch_id,batch_id,movement_type,quantity)) END FROM (SELECT id,product_id,branch_id,batch_id,movement_type,quantity FROM inventory_movements WHERE reference_id=${idSql} AND movement_type IN ('return','return_reversal','damage_in','damage_reversal','supplier_return','supplier_return_reversal') ORDER BY id LIMIT ${RETURN_BULK_MOVEMENT_LIMIT + 1}))`
+}
+
+function customerSourcesSql(id:string):string {
+  const allocations=`(SELECT CASE WHEN COUNT(*)<=400 THEN json_group_array(json_array(id,batch_id,branch_id,json(printf('%!.26g',quantity)))) END FROM (SELECT * FROM return_item_batch_allocations WHERE return_item_id=ri.id ORDER BY id LIMIT 401))`
+  const lots=`(SELECT CASE WHEN COUNT(*)<=300 THEN json_group_array(json_array(id,product_id,branch_id,batch_id,json(printf('%!.26g',quantity)),condition_tag)) END FROM (SELECT * FROM damaged_stock_lots WHERE return_item_id=ri.id AND return_id=ri.return_id ORDER BY id LIMIT 301))`
+  return `(SELECT CASE WHEN COUNT(*)<=300 THEN json_group_array(json_array(ri.id,ri.product_id,ri.product_name,COALESCE(NULLIF(ri.branch_id,0),r.branch_id),ri.batch_id,
+    json(printf('%!.26g',ri.quantity)),json(printf('%!.26g',COALESCE(ri.cost_price_usd,0))),json(printf('%!.26g',COALESCE(ri.cost_price_khr,0))),ri.stock_action,ri.return_to_stock,ri.stock_condition,
+    ${allocations},${lots})) END FROM (SELECT * FROM return_items WHERE return_id=${id} ORDER BY id LIMIT 301) ri JOIN returns r ON r.id=ri.return_id)`
+}
+
+function customerReplayWitnessSql():string {
+  return `(SELECT CASE WHEN COUNT(*)<=${RETURN_BULK_LIMIT} THEN json_group_array(json_object('id',r.id,'status',r.status,'fingerprint',m.stock_fingerprint,'sources',(''||${customerSourcesSql('r.id')}),'movements',(''||${customerMovementsSql('r.id')}),'tags',(''||${customerTagMembersSql('r.id')}))) END
+    FROM returns r LEFT JOIN return_bulk_members m ON m.return_id=r.id AND m.operation_id=o.id
+    WHERE COALESCE(r.return_scope,'customer')='customer' AND (m.return_id IS NOT NULL OR EXISTS(SELECT 1 FROM json_each(o.request_json,'$.items') selected WHERE json_extract(selected.value,'$.id')=r.id)))`
+}
+
+function customerTagMembersSql(id:string):string {
+  return `(SELECT CASE WHEN COUNT(*)<=300 THEN json_group_array(json_array(id,return_item_id)) END FROM (SELECT id,return_item_id FROM damaged_stock_lots WHERE return_id=${id} ORDER BY id LIMIT 301))`
+}
+
+function customerMovementsSql(id:string):string {
+  return `(SELECT CASE WHEN COUNT(*)<=${RETURN_BULK_MOVEMENT_LIMIT} THEN json_group_array(json_array(id,product_id,branch_id,batch_id,movement_type,
+    json(printf('%!.26g',quantity)),json(printf('%!.26g',COALESCE(unit_cost_usd,0))),json(printf('%!.26g',COALESCE(unit_cost_khr,0))))) END FROM
+    (SELECT * FROM inventory_movements WHERE reference_id=${id} AND movement_type IN ('return','return_reversal','damage_in','damage_reversal','supplier_return','supplier_return_reversal') ORDER BY id LIMIT ${RETURN_BULK_MOVEMENT_LIMIT+1}))`
+}
+
+type CustomerReplayAuthority={sources:string;fingerprint:string;effects:string;movements:string;tags:string}
+function replayCustomerStock(operation:Row,snapshot:Snapshot):Map<number,CustomerReplayAuthority> {
+  const result=new Map<number,CustomerReplayAuthority>()
+  let request:BulkRequest,receipt:{items:{id:number;changed:boolean;before:string;after:string}[];changedIds:number[]},witnesses:{id:number;status:string;fingerprint:string;sources:string;movements:string;tags:string}[]
+  const raw=String(operation.customer_witness)
+  if(new TextEncoder().encode(raw).byteLength>512000)fail('Customer Return source capture exceeds its bound.',409)
+  try{request=parseRequest(JSON.parse(String(operation.request_json)));receipt=JSON.parse(String(operation.receipt_json));witnesses=JSON.parse(raw)}catch{fail('The original customer Return authority is incomplete.',409)}
+  if(request.field!=='status')return result
+  if(!Array.isArray(witnesses))fail('Customer Return source capture exceeds its row bound.',409)
+  if(!witnesses.length)return result
+  let itemCount=0,allocationCount=0,lotCount=0
+  if(!Array.isArray(receipt.items) || !Array.isArray(receipt.changedIds) || snapshot.field!==request.field
+    || snapshot.members.length!==request.items.length || receipt.items.length!==request.items.length
+    || new Set(snapshot.members.map(member=>member.id)).size!==request.items.length
+    || new Set(receipt.items.map(member=>member.id)).size!==request.items.length
+    || request.items.some(item=>!snapshot.members.some(member=>member.id===item.id))
+    || JSON.stringify(snapshot.members.filter(member=>member.changed).map(member=>member.id).sort((a,b)=>a-b))!==JSON.stringify([...receipt.changedIds].sort((a,b)=>a-b)))fail('Archived customer Return members changed.',409)
+  for(const witness of witnesses){
+    const member=snapshot.members.find(member=>member.id===witness.id),original=receipt.items.find(item=>item.id===witness.id)
+    if(!member || !original || member.scope!=='customer' || member.changed!==original.changed || !Array.isArray(member.stock)
+      || member.before.status!==original.before || member.after.status!==original.after)fail('Archived customer Return member changed.',409)
+    if(!member.changed){if(member.stock.length)fail('An unchanged Return has archived stock effects.',409);continue}
+    let items:unknown[][]
+    try{items=JSON.parse(witness.sources)}catch{fail('Customer Return source capture is incomplete.',409)}
+    if(original.before!==request.source || original.after!==request.target || !Array.isArray(items)
+      || witness.status!==(Number(operation.generation)%2?original.before:original.after))fail('Customer Return source or replay state changed.',409)
+    itemCount+=items.length
+    if(itemCount>300)fail('Customer Return source capture exceeds its item bound.',409)
+    const sources:{product:number;name:unknown;recorded:number;batch:number|null;lot:number|null;quantity:number;usd:number;khr:number}[]=[]
+    for(const item of items){
+      const [id,product,name,recorded,batch,quantity,usd,khr,action,restock,condition,allocations,lots]=item as [number,number,string|null,number,number|null,number,number,number,string|null,number,string,unknown[][],unknown[][]]
+      if(!Array.isArray(allocations) || !Array.isArray(lots))fail('Customer Return source capture is incomplete.',409)
+      allocationCount+=allocations.length;lotCount+=lots.length
+      if(allocationCount>400 || lotCount>300)fail('Customer Return source capture exceeds its allocation or tag bound.',409)
+      if(!(quantity>0))continue
+      const stockAction=normalize(action,restock===1?'restock':'none')
+      if(stockAction==='none')continue
+      if(!Number.isSafeInteger(product) || product<=0 || !Number.isSafeInteger(recorded) || recorded<=0)fail('Customer Return source identity changed.',409)
+      const pieces=stockAction==='damaged'?lots.map(row=>({product:Number(row[1]),recorded:Number(row[2]),batch:row[3] as number|null,quantity:Number(row[4]),lot:Number(row[0]),condition:row[5]}))
+        :allocations.length?allocations.map(row=>({product,recorded:Number(row[2]),batch:Number(row[1]),quantity:Number(row[3]),lot:null,condition}))
+        :[{product,recorded,batch,quantity,lot:null,condition}]
+      if(!pieces.length || pieces.some(piece=>!(piece.quantity>0) || piece.product!==product || stockAction!=='damaged' && piece.recorded!==recorded
+        || stockAction==='damaged' && piece.condition!==condition) || subtractCountedQuantity(quantity,pieces.map(piece=>piece.quantity))!==0)fail('Customer Return source quantities or condition changed.',409)
+      for(const piece of pieces)sources.push({product,name,recorded,batch:piece.batch,lot:piece.lot,quantity:piece.quantity,usd,khr})
+    }
+    let moves:unknown[][]
+    try{moves=JSON.parse(witness.movements)}catch{fail('Customer Return committed movement witness is incomplete.',409)}
+    let tags:unknown[][]
+    try{tags=JSON.parse(witness.tags)}catch{fail('Customer Return tag membership is incomplete.',409)}
+    if(!Array.isArray(tags) || tags.length!==sources.filter(source=>source.lot!==null).length
+      || tags.some(tag=>!sources.some(source=>source.lot===tag[0])))fail('Customer Return tag membership changed.',409)
+    if(!Array.isArray(moves) || moves.length<sources.length || member.stock.length!==sources.length)fail('Customer Return stock vector is incomplete.',409)
+    const sign=original.after==='cancelled'?-1:1,parity=Number(operation.generation)%2?-1:1,tail=moves.slice(-sources.length),effects:{addressed:number;effect:number;sells:0}[]=[]
+    for(const [index,source] of sources.entries()){
+      const delta=member.stock[index],move=tail[index],quantity=sign*source.quantity,type=source.lot!==null?(quantity*parity>0?'damage_in':'damage_reversal'):statusMovementType('customer',quantity*parity)
+      if(!Array.isArray(move) || move.length!==8 || move[1]!==source.product || move[4]!==type || move[5]!==quantity*parity || move[6]!==source.usd || move[7]!==source.khr
+        || delta.productId!==source.product || delta.productName!==source.name || delta.branchId!==move[2] || delta.batchId!==move[3]
+        || delta.damagedLotId!==source.lot || delta.quantity!==quantity || delta.costUsd!==source.usd || delta.costKhr!==source.khr
+        || source.recorded===move[2] && source.batch!==move[3])fail('Customer Return stock vector no longer matches its sources and committed movement ordinal.',409)
+      if(source.recorded!==move[2])effects.push({addressed:source.recorded,effect:Number(move[2]),sells:0})
+    }
+    result.set(member.id,{sources:witness.sources,fingerprint:witness.fingerprint,effects:JSON.stringify(effects),movements:witness.movements,tags:witness.tags})
+  }
+  return result
 }
 
 function supplierReplayWitnessSql(): string {
@@ -1052,11 +1135,12 @@ async function replayReturnBulkActionKernel(env: Env, user: SessionUser, directi
   if (!Number.isSafeInteger(generation) || Number(generation) < 0) fail('Refresh history before replaying this group.')
   const db = getDb(env)
   const operation = await db.prepare(`SELECT o.*,s.payload_json,s.kind,s.status AS snapshot_status,h.status AS replay_status,
-    ${replayCountedFactsSql('s.payload_json')} counted_facts,${supplierReplayWitnessSql()} supplier_witness,${taggedReplayWitnessSql()} tagged_witness FROM return_bulk_operations o JOIN undo_snapshots s ON s.id=o.snapshot_id JOIN action_history h ON h.id=o.history_id WHERE o.history_id=?`).get<Row>([historyId])
+    ${replayCountedFactsSql('s.payload_json')} counted_facts,${supplierReplayWitnessSql()} supplier_witness,${taggedReplayWitnessSql()} tagged_witness,${customerReplayWitnessSql()} customer_witness FROM return_bulk_operations o JOIN undo_snapshots s ON s.id=o.snapshot_id JOIN action_history h ON h.id=o.history_id WHERE o.history_id=?`).get<Row>([historyId])
   if (!operation || operation.kind !== RETURN_BULK_ACTION_KIND || operation.id !== payload.operation_id || operation.snapshot_id !== payload.snapshot_id) fail('This grouped Return action changed or its snapshot does not match.')
   const snapshot = JSON.parse(String(operation.payload_json)) as Snapshot
   if (snapshot.version!==1 || snapshot.operationId!==operation.id || !Array.isArray(snapshot.members) || snapshot.members.length>RETURN_BULK_LIMIT) fail('Unsupported Return bulk snapshot.')
   const tagged=replayTaggedSources(operation,snapshot)
+  const customers=replayCustomerStock(operation,snapshot)
   const supplierFingerprints=validateSupplierReplayStock(operation,snapshot)
   const supplierExact=supplierFingerprints!==null
   const exactReplay=supplierExact || tagged.size>0
@@ -1081,7 +1165,8 @@ async function replayReturnBulkActionKernel(env: Env, user: SessionUser, directi
   const replayEntitlement = await v1EntitlementGuards(db, snapshot.members, direction === 'undo' ? 'before' : 'after')
   statements.push(...replayEntitlement.guards)
   for (const member of snapshot.members.filter((candidate) => candidate.changed)) {
-    statements.push(guard(`EXISTS(SELECT 1 FROM returns r JOIN return_bulk_members m ON m.return_id=r.id WHERE m.operation_id=@operation AND r.id=@id AND m.revision=COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=r.id),0) AND m.stock_fingerprint=${movementFingerprint('r.id')} AND (@taggedFingerprint IS NULL OR m.stock_fingerprint=@taggedFingerprint)${supplierExact?' AND m.stock_fingerprint=@capturedFingerprint':''} AND (m.sale_id IS NULL OR (EXISTS(SELECT 1 FROM sales WHERE id=m.sale_id) AND m.sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=m.sale_id),0)))) AND ${taggedReturnAuthority()} AND ${supplierManifestAuthority()} AND (@supplierManifest IS NULL OR (${stockActorPredicate}))`, { operation: operation.id, id: member.id, taggedSources: JSON.stringify(tagged.get(member.id)||[]), taggedFingerprint:tagged.get(member.id)?.[0]?.fingerprint??null, ...supplierManifestParams(member), ...stockActorParams(user),...(supplierExact?{capturedFingerprint:supplierFingerprints!.get(member.id)}:{}) }))
+    const customer=customers.get(member.id)
+    statements.push(guard(`EXISTS(SELECT 1 FROM returns r JOIN return_bulk_members m ON m.return_id=r.id WHERE m.operation_id=@operation AND r.id=@id AND m.revision=COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=r.id),0) AND m.stock_fingerprint=${movementFingerprint('r.id')} AND (@taggedFingerprint IS NULL OR m.stock_fingerprint=@taggedFingerprint)${supplierExact?' AND m.stock_fingerprint=@capturedFingerprint':''}${customer?' AND m.stock_fingerprint=@customerFingerprint':''} AND (m.sale_id IS NULL OR (EXISTS(SELECT 1 FROM sales WHERE id=m.sale_id) AND m.sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=m.sale_id),0)))) AND ${taggedReturnAuthority()} AND ${supplierManifestAuthority()} AND (@supplierManifest IS NULL OR (${stockActorPredicate}))${customer?` AND ${customerSourcesSql('@id')}=@customerSources AND ${customerMovementsSql('@id')}=@customerMovements AND ${customerTagMembersSql('@id')}=@customerTags AND (${branchEffectGuardPredicate('@customerEffects')})`:''}`, { operation: operation.id, id: member.id, taggedSources: JSON.stringify(tagged.get(member.id)||[]), taggedFingerprint:tagged.get(member.id)?.[0]?.fingerprint??null, ...supplierManifestParams(member), ...stockActorParams(user),...(supplierExact?{capturedFingerprint:supplierFingerprints!.get(member.id)}:{}),...(customer?{customerSources:customer.sources,customerFingerprint:customer.fingerprint,customerEffects:customer.effects,customerMovements:customer.movements,customerTags:customer.tags}:{}) }))
   }
   for (const member of snapshot.members) statements.push(...memberStatements(member, directionSign, user, stamp, exact))
   statements.push(...exact.takeFinalPhysicalWrites())
