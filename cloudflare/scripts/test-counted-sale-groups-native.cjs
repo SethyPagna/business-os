@@ -313,10 +313,10 @@ async function tails(makeWorker, fragments, cold = false) {
           assert.equal(setupUndo.status, 200, JSON.stringify(setupUndo.json))
         }
         f.env.PLAN_TIER = tier
-        if (cold) {
-          current = makeWorker()
-          await current.ensureCoreDataInvariants(f.env)
-        }
+      }
+      if (cold) {
+        current = makeWorker()
+        await current.ensureCoreDataInvariants(f.env)
       }
       const before = state(f), raw = f.env.DB, attempts = new Map(), failed = new Set()
       let attempted = 0, committed = false
@@ -363,13 +363,16 @@ async function tails(makeWorker, fragments, cold = false) {
       const tailAttempts = {}
       for (const [key, count] of attempts) { const kind = key.split(':')[0]; tailAttempts[kind] = (tailAttempts[kind] || 0) + count }
       console.log('GROUP_FULL_TAIL ' + JSON.stringify({ tier, direction, fragments, cold, status: result.status, code: result.json.code, attempted, tailAttempts }))
-      const expectedStatus = tier === 'paid' || fragments <= (cold && direction !== 'apply' ? 5 : 7) ? 200 : 409
+      const limit = direction === 'apply' ? (cold ? 10 : 12) : (cold ? 13 : 15)
+      const expectedStatus = tier === 'paid' || fragments <= limit ? 200 : 409
       assert.equal(result.status, expectedStatus, 'positive boundary fits; next larger action refuses before dispatch')
       assert.ok(attempted <= (tier === 'free' ? 50 : 1000))
       if (result.status === 409) {
         assert.equal(tier, 'free'); assert.deepEqual(state(f), before); assert.equal(committed, false)
       } else {
         assert.equal(result.status, 200, JSON.stringify(result.json)); assert.equal(f.state().cache, direction === 'undo' ? 0.4 : 1)
+        assert.deepEqual(f.sql.prepare("SELECT namespace,version FROM cache_versions WHERE namespace IN('sales','stock') ORDER BY namespace").all(),
+          [{ namespace: 'sales', version: 1 }, { namespace: 'stock', version: 1 }], 'each namespace invalidates exactly once')
         const kinds = [...new Set([...failed].map(key => key.split(':')[0]))]
         for (const expected of ['outcome', 'versions', 'handoff', ...(tier === 'free' ? ['quota'] : []), ...(direction === 'apply' ? [] : ['history'])])
           assert.ok(kinds.includes(expected), 'actual tail exercised ' + expected)
@@ -400,10 +403,11 @@ async function main() {
   await races(makeWorker)
   await sharedSales(makeWorker)
   await movementLimit(makeWorker)
-  await tails(makeWorker, 7)
-  await tails(makeWorker, 5, true)
-  await tails(makeWorker, 6, true)
-  await tails(makeWorker, 8, true)
+  await tails(makeWorker, 12)
+  await tails(makeWorker, 10, true)
+  await tails(makeWorker, 11, true)
+  await tails(makeWorker, 13, true)
+  await tails(makeWorker, 14, true)
 }
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })
 module.exports = { positive, state, quantities }

@@ -226,7 +226,7 @@ function bounded(statements: StockStatement[], snapshot: Snapshot, eventsBytes =
 function queryBudget(env: Env, statements: StockStatement[], members: Member[], replay: boolean): void {
     const planned = members.some(member => member.stock.length > 0) ? stockTransactionStatementCount(statements.length) : statements.length;
     const used = currentRequestMetrics()?.invocation.attemptedStatements ?? 18;
-    const tail = replay ? 18 : 13;
+    const tail = replay ? 10 : 8;
     if (used + planned + tail > getPlanLimits(env).d1QueriesPerInvocation)
         throw new SaleBulkError('Selection is too large for one request. Select fewer sales.', 409,
             { code: 'sale_bulk_over_plan_budget', outcome: 'not_dispatched' });
