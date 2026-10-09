@@ -115,6 +115,53 @@ export async function runProductMergeReadBatch(
 const PRODUCT_MONEY_COLUMNS = `selling_price_usd, selling_price_khr,
   wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr`
 
+const MERGE_CAPTURE_MAX_ROWS = 10_000
+const MERGE_CAPTURE_MAX_BYTES = 512 * 1_024
+const BATCH_COLUMNS = ['id', 'variant_product_id', 'batch_key', 'lot_code', 'expiry_date', 'received_at',
+  'is_active', 'notes', 'synthetic', 'created_at', 'updated_at', 'batch_number', 'supplier_id', 'supplier_name',
+  'payment_status', 'credit_due_date', 'unit_cost_usd', 'received_quantity', 'received_branch_id',
+  'received_cost_usd', 'received_branch_name']
+const BATCH_STOCK_COLUMNS = ['id', 'batch_id', 'branch_id', 'quantity', 'created_at', 'updated_at']
+type CaptureSection = { key: string; columns: string[]; sql: string }
+
+function captureRead(sections: readonly CaptureSection[], keeperId: number, duplicateId: number): KeyedRead {
+  const fields = sections.map(({ key, columns, sql }) => `'${key}',(SELECT json_group_array(json_array(${columns.join(',')}))
+    FROM (${sql} LIMIT ${MERGE_CAPTURE_MAX_ROWS + 1}))`)
+  return {
+    key: 'capture',
+    sql: `WITH captured AS MATERIALIZED (SELECT json_object(${fields.join(',')}) AS data)
+      SELECT CASE WHEN length(CAST(data AS BLOB))<=${MERGE_CAPTURE_MAX_BYTES} THEN data ELSE NULL END AS data,
+        length(CAST(data AS BLOB))>${MERGE_CAPTURE_MAX_BYTES} AS oversized FROM captured`,
+    params: { keeperId, duplicateId },
+  }
+}
+
+function decodeCapture(rows: Map<string, Array<Record<string, unknown>>>, sections: readonly CaptureSection[]): Map<string, Array<Record<string, unknown>>> {
+  const envelope = rows.get('capture')
+  if (envelope?.length !== 1) throw new Error('merge_snapshot_incomplete')
+  if (Number(envelope[0].oversized) === 1) throw new Error('merge_case_snapshot_limit')
+  const raw = envelope[0].data
+  if (typeof raw !== 'string') throw new Error('merge_snapshot_incomplete')
+  if (new TextEncoder().encode(raw).byteLength > MERGE_CAPTURE_MAX_BYTES) throw new Error('merge_case_snapshot_limit')
+  let parsed: unknown
+  try { parsed = JSON.parse(raw) } catch { throw new Error('merge_snapshot_incomplete') }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
+    || Object.keys(parsed).length !== sections.length) throw new Error('merge_snapshot_incomplete')
+  const data = parsed as Record<string, unknown>
+  return new Map(sections.map(({ key, columns }) => {
+    const values = data[key]
+    if (!Array.isArray(values)) throw new Error('merge_snapshot_incomplete')
+    if (values.length > MERGE_CAPTURE_MAX_ROWS) throw new Error('merge_case_snapshot_limit')
+    return [key, values.map(value => {
+      if (!Array.isArray(value) || value.length !== columns.length
+        || value.some(cell => cell !== null && typeof cell !== 'string' && typeof cell !== 'number')) {
+        throw new Error('merge_snapshot_incomplete')
+      }
+      return Object.fromEntries(columns.map((column, index) => [column, value[index]]))
+    })]
+  }))
+}
+
 // Capture one fold's complete preimage in one consistent D1 read transaction.
 // This is deliberately per case: a later fold in the same identity cluster must
 // see the keeper state written by the previous fold.
@@ -135,46 +182,47 @@ export function planProductMergeCaseSnapshot(
   duplicateId: number,
   reparentTables: readonly ProductMergeReparentTable[],
 ): ProductMergeReadPlan<ProductMergeCaseSnapshot> {
-  const reads: KeyedRead[] = [
-    { key: 'canonicalBatches', sql: 'SELECT * FROM product_batches WHERE variant_product_id = @id ORDER BY id', params: { id: keeperId } },
-    { key: 'canonicalBatchStock', sql: `SELECT bbs.* FROM branch_batch_stock bbs
-      JOIN product_batches pb ON pb.id=bbs.batch_id WHERE pb.variant_product_id=@id ORDER BY bbs.id`, params: { id: keeperId } },
-    { key: 'duplicateStock', sql: 'SELECT branch_id, quantity, rfid_confirmed_qty FROM branch_stock WHERE product_id = @id', params: { id: duplicateId } },
-    { key: 'canonicalStock', sql: 'SELECT branch_id, quantity, rfid_confirmed_qty FROM branch_stock WHERE product_id = @id', params: { id: keeperId } },
+  if (reparentTables.some(({ table, column }) => !/^[a-z_]+$/.test(table) || !/^[a-z_]+$/.test(column))) {
+    throw new Error('merge_snapshot_invalid_table')
+  }
+  const productColumns = ['id', 'name', 'barcode', 'image_path', 'is_active', 'updated_at', ...PRODUCT_MONEY_COLUMNS.split(',').map(column => column.trim())]
+  const stockColumns = ['branch_id', 'quantity', 'rfid_confirmed_qty']
+  const sections: CaptureSection[] = [
+    { key: 'canonicalBatches', columns: BATCH_COLUMNS, sql: `SELECT ${BATCH_COLUMNS.join(',')} FROM product_batches WHERE variant_product_id=@keeperId ORDER BY id` },
+    { key: 'canonicalBatchStock', columns: BATCH_STOCK_COLUMNS, sql: `SELECT ${BATCH_STOCK_COLUMNS.map(column => `bbs.${column}`).join(',')} FROM branch_batch_stock bbs
+      JOIN product_batches pb ON pb.id=bbs.batch_id WHERE pb.variant_product_id=@keeperId ORDER BY bbs.id` },
+    { key: 'duplicateStock', columns: stockColumns, sql: 'SELECT branch_id,quantity,rfid_confirmed_qty FROM branch_stock WHERE product_id=@duplicateId ORDER BY branch_id' },
+    { key: 'canonicalStock', columns: stockColumns, sql: 'SELECT branch_id,quantity,rfid_confirmed_qty FROM branch_stock WHERE product_id=@keeperId ORDER BY branch_id' },
     {
-      key: 'canonicalProduct',
-      sql: `SELECT id, name, barcode, image_path, is_active, updated_at, ${PRODUCT_MONEY_COLUMNS}
-            FROM products WHERE id = @id`,
-      params: { id: keeperId },
+      key: 'canonicalProduct', columns: productColumns,
+      sql: `SELECT ${productColumns.join(',')} FROM products WHERE id=@keeperId`,
     },
     {
-      key: 'duplicateProduct',
-      sql: `SELECT id, name, barcode, image_path, is_active, updated_at, ${PRODUCT_MONEY_COLUMNS}
-            FROM products WHERE id = @id`,
-      params: { id: duplicateId },
+      key: 'duplicateProduct', columns: productColumns,
+      sql: `SELECT ${productColumns.join(',')} FROM products WHERE id=@duplicateId`,
     },
     {
-      key: 'duplicateBatches',
+      key: 'duplicateBatches', columns: ['id', 'batch_key', 'batch_number', 'lot_quantity', 'lot_stock_rows'],
       // The two lot_* columns let the fold assert in its write batch that nothing moved on these lots since this read.
       sql: `SELECT id, batch_key, batch_number,
         (SELECT COALESCE(SUM(quantity), 0) FROM branch_batch_stock WHERE batch_id = product_batches.id) AS lot_quantity,
         (SELECT COUNT(*) FROM branch_batch_stock WHERE batch_id = product_batches.id) AS lot_stock_rows
-        FROM product_batches WHERE variant_product_id = @id`,
-      params: { id: duplicateId },
+        FROM product_batches WHERE variant_product_id=@duplicateId ORDER BY id`,
     },
-    { key: 'duplicateImages', sql: 'SELECT image_path, sort_order FROM product_images WHERE product_id = @id ORDER BY sort_order ASC, id ASC', params: { id: duplicateId } },
-    { key: 'canonicalImages', sql: 'SELECT image_path FROM product_images WHERE product_id = @id', params: { id: keeperId } },
+    { key: 'duplicateImages', columns: ['image_path', 'sort_order'], sql: 'SELECT image_path,sort_order FROM product_images WHERE product_id=@duplicateId ORDER BY sort_order,id' },
+    { key: 'canonicalImages', columns: ['image_path'], sql: 'SELECT image_path FROM product_images WHERE product_id=@keeperId ORDER BY id' },
     ...reparentTables.map(({ table, column }, index) => ({
-      key: `reparent:${index}`,
+      key: `reparent:${index}`, columns: ['id'],
       // table/column are compile-time constants supplied from
       // MERGE_REPARENT_TABLES, never request data.
-      sql: `SELECT id FROM ${table} WHERE ${column} = @id`,
-      params: { id: duplicateId },
+      sql: `SELECT id FROM ${table} WHERE ${column}=@duplicateId ORDER BY id`,
     })),
-    { key: 'promotionRules', sql: 'SELECT id, product_ids FROM promotion_rules' },
-    { key: 'childProducts', sql: 'SELECT id FROM products WHERE parent_id = @id', params: { id: duplicateId } },
+    { key: 'promotionRules', columns: ['id', 'product_ids'], sql: 'SELECT id,product_ids FROM promotion_rules ORDER BY id' },
+    { key: 'childProducts', columns: ['id'], sql: 'SELECT id FROM products WHERE parent_id=@duplicateId ORDER BY id' },
   ]
-  const decode: ProductMergeReadPlan<ProductMergeCaseSnapshot>['decode'] = (rows) => {
+  const reads = [captureRead(sections, keeperId, duplicateId)]
+  const decode: ProductMergeReadPlan<ProductMergeCaseSnapshot>['decode'] = (captured) => {
+    const rows = decodeCapture(captured, sections)
     const asRows = <T>(key: string): T[] => (rows.get(key) || []) as T[]
     const reparentedByTable = reparentTables.map(({ table, column }, index) => ({
       table,
