@@ -166,9 +166,12 @@ function captureRead(sections: readonly CaptureSection[], keeperId: number, dupl
     FROM (${sql} LIMIT ${MERGE_CAPTURE_MAX_ROWS + 1}))`)
   return {
     key: 'capture',
-    sql: `WITH captured AS MATERIALIZED (SELECT json_object(${fields.join(',')}) AS data)
-      SELECT CASE WHEN length(CAST(data AS BLOB))<=${MERGE_CAPTURE_MAX_BYTES} THEN data ELSE NULL END AS data,
-        length(CAST(data AS BLOB))>${MERGE_CAPTURE_MAX_BYTES} AS oversized FROM captured`,
+    sql: `WITH captured AS MATERIALIZED (SELECT json_object(${fields.join(',')}) AS data),
+      bounded AS MATERIALIZED (SELECT data,
+        length(CAST(data AS BLOB))>${MERGE_CAPTURE_MAX_BYTES}
+        OR EXISTS(SELECT 1 FROM json_each(data) section WHERE json_array_length(section.value)>${MERGE_CAPTURE_MAX_ROWS}) AS oversized
+        FROM captured)
+      SELECT CASE WHEN oversized=0 THEN data ELSE NULL END AS data, oversized FROM bounded`,
     params: { keeperId, duplicateId },
   }
 }
