@@ -369,9 +369,9 @@ export async function getSupplierReturnSourceOptions(branchId: number, productId
   assertActorReadScope(scope)
   return validateSupplierSourceOptions(result, branchId, productIds)
 }
-export function prepareSupplierReturnRequest(payload: ReturnPayload = {}): ReturnPayload & { client_request_id: string; return_number: string } {
+export function prepareSupplierReturnRequest<T extends ReturnPayload>(payload: T): T & { client_request_id: string; return_number: string } {
   const body = ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'supplier_return')
-  return JSON.parse(JSON.stringify({ ...body, return_number: buildReturnNumber(body, 'SRET') })) as ReturnPayload & { client_request_id: string; return_number: string }
+  return JSON.parse(JSON.stringify({ ...body, return_number: buildReturnNumber(body, 'SRET') })) as T & { client_request_id: string; return_number: string }
 }
 export function createSupplierReturn(payload: ReturnPayload = {}): Promise<unknown> {
   const body = prepareSupplierReturnRequest(payload)

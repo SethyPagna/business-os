@@ -271,8 +271,8 @@ await runTest('legacy customer return: a timed-out or lost create keeps its id A
 await runTest('supplier return: the id survives a timeout, a lost answer and a failed hand-over to the parent', async () => {
   const write = scriptedWrite()
   const notices: Notice[] = []
-  const form = { reason: 'Expired' }
   let parentFailures = 0
+  let closed = 0
   const serum = { id: 5, name: 'Serum', sku: 'SER-5', category: 'Skincare', display_quantity: 6, cost_price_usd: 4, cost_price_khr: 16400 }
   const page = await harness.mount({
     component: 'components/returns/NewSupplierReturnModal.tsx',
@@ -280,7 +280,7 @@ await runTest('supplier return: the id survives a timeout, a lost answer and a f
       notify: recordNotices(notices),
       fmtUSD: (value: unknown) => `$${Number(value || 0).toFixed(2)}`,
       fmtKHR: (value: unknown) => `${Number(value || 0)}៛`,
-      onClose: () => {},
+      onClose: () => { closed += 1 },
       onSuccess: () => {
         if (parentFailures > 0) {
           parentFailures -= 1
@@ -294,31 +294,49 @@ await runTest('supplier return: the id survives a timeout, a lost answer and a f
       'api/contactReadTransport.ts': { getSuppliers: async () => [{ id: 4, name: 'Glow Co' }] },
       'api/inventoryTransport.ts': { getInventorySummary: async () => [serum] },
       'api/returnsReadTransport.ts': { getReturnReasonPresets: async () => ({}) },
-      'api/returnsTransport.ts': { createSupplierReturn: write.fn },
+      'api/returnsTransport.ts': { createSupplierReturn: write.fn,
+        prepareSupplierReturnRequest: (payload: unknown) => ({ ...(payload as Record<string, unknown>), clientTime: 'original-time', deviceTz: 'Asia/Phnom_Penh' }),
+        getSupplierReturnSourceOptions: async () => ({ supplier_condition_version: 1, branch_id: 1, financial_visibility: true, financial_editable: true,
+          items: [{ product_id: 5, branch_id: 1, product_name: 'Serum', ordinary_available: 5.5, ordinary_unlotted: 5.5, ordinary_receipts: [],
+            return_cost_usd: 4, return_cost_khr: 16400, tagged_sources: [{ damaged_lot_id: 8, stock_condition: 'damaged', batch_id: null,
+              received_at: null, batch_number: null, lot_code: null, available: .5, source_cost_usd: 3, source: 'return' }] }] }),
+      },
     },
   })
   try {
     await page.waitFor(() => page.findAll((node) => node.tagName === 'LI' && node.textContent.includes(serum.name)).length > 0, 'the branch stock list')
     await page.type(page.field('supplier-return-supplier'), 'Glow')
     await page.click(page.find((node) => node.getAttribute('role') === 'option' && node.textContent.includes('Glow Co'), 'supplier option Glow Co'))
-    await proveOneIdentityPerMountedIntent({
-      press: async () => {
-        await page.type(page.field('supplier-return-reason'), form.reason)
-        await page.type(page.find((node) => node.tagName === 'INPUT' && !!node.closest('li')?.textContent.includes(serum.name), `quantity for ${serum.name}`), '2')
-        await page.click(page.button(shown('save', 'Save')), pressing(write))
-      },
-      write,
-      notices,
-      identityOf: (call) => [String((call[0] as WireRequest).client_request_id), String((call[0] as WireRequest).return_number)],
-      requestOf: (call) => withoutIdentity(call[0]),
-      editIntent: () => { form.reason = 'Damaged in transit' },
-      committed: answer({ success: true, id: 91 }),
-      failParentOnce: () => { parentFailures = 1 },
-    })
+    assert.ok(page.field('supplier-return-branch'), 'the single active branch remains visible')
+    await page.type(page.field('supplier-return-reason'), 'Expired')
+    await page.type(page.find(node => node.tagName === 'INPUT' && propsOf(node)['aria-label'] === `${shown('quantity', 'Quantity')}: ${serum.name} · ${shown('stock_ordinary', 'Ordinary')}`, 'ordinary source quantity'), '2')
+    await page.type(page.find(node => node.tagName === 'INPUT' && String(propsOf(node)['aria-label']).includes('damaged · #8'), 'explicit tagged source quantity'), '.1')
+    write.will(HANG)
+    await page.click(page.button(shown('save', 'Save')), pressing(write))
+    const frozen = structuredClone(write.calls[0][0]) as WireRequest
+    assert.ok(notices.some(notice => unknownOutcomeAfterAnyWait.test(notice.message)), 'timeout explicitly retains unknown outcome')
+    assert.equal(propsOf(page.find(node => node.tagName === 'FIELDSET', 'supplier fields')).disabled, true, 'uncertain command prevents changed values')
+    for (const outcome of [LOST, REFUSED, answer({ success: true, id: 91 })]) {
+      write.will(outcome)
+      await page.click(page.button(shown('retry', 'Retry')), pressing(write))
+      assert.deepEqual(write.calls.at(-1)?.[0], frozen, 'timeout, lost ACK, in-flight and malformed success all resend exact frozen body including device metadata')
+      assert.equal(closed, 0)
+    }
+    parentFailures = 1
+    write.will(answer({ success: true, id: 91, returnNumber: frozen.return_number }))
+    await page.click(page.button(shown('retry', 'Retry')), pressing(write))
+    const countAfterCanonical = write.calls.length
+    assert.equal(closed, 0, 'failed parent refresh keeps the confirmed request')
+    await page.click(page.button(shown('retry', 'Retry')))
+    assert.equal(write.calls.length, countAfterCanonical, 'refreshing after canonical commit never redispatches the write')
+    assert.equal(closed, 1)
     const first = write.calls[0][0] as WireRequest
     assert.deepEqual(
       { branch: first.branch_id, supplier: first.supplier_id, reason: first.reason, items: first.items },
-      { branch: 1, supplier: 4, reason: 'Expired', items: [{ product_id: 5, product_name: 'Serum', quantity: 2, cost_price_usd: 4, cost_price_khr: 16400 }] },
+      { branch: 1, supplier: 4, reason: 'Expired', items: [
+        { product_id: 5, product_name: 'Serum', quantity: 2, cost_price_usd: 4, cost_price_khr: 16400, stock_condition: 'ordinary' },
+        { product_id: 5, product_name: 'Serum', quantity: .1, cost_price_usd: 4, cost_price_khr: 16400, stock_condition: 'damaged', damaged_lot_id: 8 },
+      ] },
     )
     assert.match(String(first.client_request_id), /^supplier_return_/)
     assert.match(String(first.return_number), /^SRET-/)

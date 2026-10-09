@@ -1,5 +1,9 @@
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
+import RotateCw from 'lucide-react/dist/esm/icons/rotate-cw.js'
+import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
+import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import {
@@ -22,7 +26,9 @@ import { Skeleton } from '../shared/kit'
 import ContactPicker from '../contacts/ContactPicker.tsx'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 import { filterAndRankSupplierReturnProducts } from './supplierReturnSearch.ts'
-import { branchChoiceSettled } from '../../utils/branchScope.ts'
+import { formatBatchReceivedDate } from '../../utils/batchLabel.ts'
+import { assertActorReadScope, captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from '../../api/actorReadScope.ts'
+import type { SupplierProductSources, SupplierTaggedSource } from '../../api/returnsTransport.ts'
 
 const SUPPLIER_RETURN_SETUP_TIMEOUT_MS = 12000
 const SUPPLIER_RETURN_SETUP_WATCHDOG_MS = SUPPLIER_RETURN_SETUP_TIMEOUT_MS + 1500
@@ -74,7 +80,11 @@ interface SupplierReturnItem {
   quantity: number
   cost_price_usd: number
   cost_price_khr: number
+  stock_condition: string
+  damaged_lot_id?: number
 }
+type SupplierSelection = { raw: string; item: SupplierReturnItem; available: number; source: SupplierTaggedSource | null }
+type PendingSupplierReturn = { body: SupplierReturnPayload; scope: ActorReadScope; uncertain: boolean; result?: unknown; notified?: boolean }
 
 interface SupplierReturnPayload extends Record<string, unknown> {
   cashier_id: number | string | null
@@ -96,10 +106,6 @@ interface NewSupplierReturnModalProps {
   notify: (message: string, kind?: NoticeKind) => void
   fmtUSD: MoneyFormatter
   fmtKHR: MoneyFormatter
-}
-
-function isSupplierReturnItem(item: SupplierReturnItem | null): item is SupplierReturnItem {
-  return item != null
 }
 
 const useApp = useAppHook as () => {
@@ -186,18 +192,23 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
   const [settlement, setSettlement] = useState<SettlementMethod>('refund')
   const [notes, setNotes] = useState('')
   const [search, setSearch] = useState('')
-  const [quantities, setQuantities] = useState<Record<string, number>>({})
+  const [quantities, setQuantities] = useState<Record<string, SupplierSelection>>({})
+  const [sources, setSources] = useState<Record<string, SupplierProductSources>>({})
+  const [loadingSources, setLoadingSources] = useState(false)
+  const [sourceError, setSourceError] = useState('')
+  const [sourcePage, setSourcePage] = useState(0)
+  const [sourceRevision, setSourceRevision] = useState(0)
+  const [financialEditable, setFinancialEditable] = useState(false)
+  const [pending, setPending] = useState<PendingSupplierReturn | null>(null)
   const [compensationUsd, setCompensationUsd] = useState('')
   const [compensationKhr, setCompensationKhr] = useState('')
   const bootstrapRequestRef = useRef(0)
   const inventoryRequestRef = useRef(0)
+  const sourceRequestRef = useRef(0)
+  const sourceScopeRef = useRef<ActorReadScope | null>(null)
   const productsBranchRef = useRef('')
   const aliveRef = useRef(true)
   const submitInFlightRef = useRef(false)
-  // SCAN1 F2: one identity per intent. The Worker dedupes a supplier return by
-  // client_request_id alone, so a retry after the UI stopped waiting (the POST
-  // lives on for up to 45 s) must resend the SAME id -- and changed values
-  // must get a NEW one, or the Worker would silently replay the old return.
   const supplierReturnIdentityRef = useRef<IntentIdentityRef<{ client_request_id: string; return_number: string }>['current']>(null)
 
   useEffect(() => {
@@ -206,6 +217,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
       aliveRef.current = false
       invalidateTrackedRequest(bootstrapRequestRef)
       invalidateTrackedRequest(inventoryRequestRef)
+      invalidateTrackedRequest(sourceRequestRef)
     }
   }, [])
 
@@ -271,12 +283,16 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
       productsBranchRef.current = ''
       setLoadingProducts(false)
       setProducts([])
+      setSources({})
       return undefined
     }
     const requestId = beginTrackedRequest(inventoryRequestRef)
     if (productsBranchRef.current !== String(branchId)) {
       setProducts([])
       setQuantities({})
+      setSources({})
+      setSourcePage(0)
+      sourceScopeRef.current = null
     }
     setLoadingProducts(true)
     async function loadInventory() {
@@ -322,25 +338,48 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
   const filteredProducts = useMemo(() => {
     return filterAndRankSupplierReturnProducts(products, search)
   }, [products, search])
+  const pageProducts = filteredProducts.slice(sourcePage * 25, (sourcePage + 1) * 25)
+  const pageProductIds = pageProducts.map(product => Number(product.id)).join(',')
+  useEffect(() => { setSourcePage(0) }, [search])
+  useEffect(() => {
+    const requestId = beginTrackedRequest(sourceRequestRef)
+    const ids = pageProductIds ? pageProductIds.split(',').map(Number) : []
+    if (!branchId || !ids.length || pending) { setLoadingSources(false); return }
+    const scope = captureActorReadScope('returns')
+    setLoadingSources(true)
+    setSourceError('')
+    async function loadSources() {
+      try {
+        const module = await loadReturnsTransport()
+        const result = await withLoaderTimeout(() => module.getSupplierReturnSourceOptions(Number(branchId), ids), 'Supplier return sources', SUPPLIER_RETURN_INVENTORY_TIMEOUT_MS)
+        if (!aliveRef.current || !isTrackedRequestCurrent(sourceRequestRef, requestId)) return
+        assertActorReadScope(scope)
+        sourceScopeRef.current = scope
+        setSources(previous => ({ ...previous, ...Object.fromEntries(result.items.map(item => [String(item.product_id), item])) }))
+        setFinancialEditable(result.financial_editable)
+      } catch (error) {
+        if (!aliveRef.current || !isTrackedRequestCurrent(sourceRequestRef, requestId)) return
+        setSourceError(getLoaderErrorMessage(error, tr('supplier_sources_unavailable', 'Stock sources could not be verified. Refresh before selecting quantities.')))
+      } finally {
+        if (aliveRef.current && isTrackedRequestCurrent(sourceRequestRef, requestId)) setLoadingSources(false)
+      }
+    }
+    void loadSources()
+    return () => { invalidateTrackedRequest(sourceRequestRef) }
+  }, [branchId, pageProductIds, sourceRevision, Boolean(pending)]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedItems = useMemo<SupplierReturnItem[]>(() => {
-    return products
-      .map((product) => {
-        const rawQty = quantities[String(product.id)]
-        const qty = Math.max(0, Math.min(Number(rawQty || 0), Number(product.display_quantity || 0)))
-        if (!qty) return null
-        const unitCostUsd = Number(product.purchase_price_usd || product.cost_price_usd || 0)
-        const unitCostKhr = Number(product.purchase_price_khr || product.cost_price_khr || 0)
-        return {
-          product_id: product.id,
-          product_name: product.name || null,
-          quantity: qty,
-          cost_price_usd: unitCostUsd,
-          cost_price_khr: unitCostKhr,
-        }
-      })
-      .filter(isSupplierReturnItem)
-  }, [products, quantities])
+    return Object.values(quantities).filter(selection => selection.raw !== '' && Number(selection.raw) > 0).map(selection => ({ ...selection.item, quantity: Number(selection.raw) }))
+  }, [quantities])
+  const invalidSelection = Object.values(quantities).some(selection => selection.raw !== '' && (!Number.isFinite(Number(selection.raw)) || Number(selection.raw) < 0 || Number(selection.raw) > selection.available))
+  const staleSelection = Object.values(quantities).some(selection => {
+    if (!(Number(selection.raw) > 0)) return false
+    const current = sources[String(selection.item.product_id)]
+    if (!current) return true
+    if (!selection.source) return Number(selection.raw) > current.ordinary_available
+    const tag = current.tagged_sources.find(tag => tag.damaged_lot_id === selection.source!.damaged_lot_id)
+    return !tag || tag.stock_condition !== selection.source.stock_condition || tag.batch_id !== selection.source.batch_id || Number(selection.raw) > tag.available
+  })
 
   const totals = useMemo(() => {
     const totalUsd = selectedItems.reduce((sum, item) => sum + (item.quantity * item.cost_price_usd), 0)
@@ -368,21 +407,30 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
     }[value],
   })), [t])
 
-  const updateQty = (productId: number | string, nextValue: string, max: number) => {
-    const parsed = Number(nextValue || 0)
-    const normalized = Number.isFinite(parsed) ? Math.max(0, Math.min(parsed, max)) : 0
-    setQuantities((prev) => ({ ...prev, [String(productId)]: normalized }))
+  const updateQty = (key: string, product: SupplierProductSources, source: SupplierTaggedSource | null, raw: string) => {
+    setQuantities(previous => ({ ...previous, [key]: { raw, available: source?.available ?? product.ordinary_available, source,
+      item: { product_id: product.product_id, product_name: product.product_name, quantity: Number(raw),
+        cost_price_usd: product.return_cost_usd ?? 0, cost_price_khr: product.return_cost_khr ?? 0,
+        stock_condition: source?.stock_condition ?? 'ordinary', ...(source ? { damaged_lot_id: source.damaged_lot_id } : {}) } } }))
   }
 
   const submit = async () => {
-    if (!branchId) return notify(tr('branch_required', 'Branch is required'), 'error')
-    if (!supplierId) return notify(tr('supplier_required', 'Supplier is required'), 'error')
-    if (!reason.trim()) return notify(tr('return_reason_required', 'Reason is required'), 'error')
-    if (!selectedItems.length) return notify(tr('select_items_to_return', 'Select at least one item to return.'), 'error')
+    if (!pending) {
+      if (!branchId) return notify(tr('branch_required', 'Branch is required'), 'error')
+      if (!supplierId) return notify(tr('supplier_required', 'Supplier is required'), 'error')
+      if (!reason.trim()) return notify(tr('return_reason_required', 'Reason is required'), 'error')
+      if (!selectedItems.length) return notify(tr('select_items_to_return', 'Select at least one item to return.'), 'error')
+      if (invalidSelection || staleSelection || selectedItems.length > 50) return notify(tr('supplier_quantity_invalid', 'Enter a positive quantity within the selected source availability.'), 'error')
+      if (!financialEditable || sourceError || !sourceScopeRef.current) return notify(tr('supplier_sources_unavailable', 'Stock sources could not be verified. Refresh before selecting quantities.'), 'error')
+    }
 
     if (!beginSingleAction(submitInFlightRef)) return
     setSubmitting(true)
+    let attempt = pending
     try {
+      if (attempt) assertActorReadScope(attempt.scope, false)
+      else {
+      assertActorReadScope(sourceScopeRef.current!)
       const supplierReturnIntent = {
         cashier_id: user?.id || null,
         cashier_name: user?.name || user?.username || null,
@@ -400,23 +448,44 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
         client_request_id: createClientRequestId('supplier_return'),
         return_number: `SRET-${businessDateTimeId()}`,
       }))
-      const result = await withWriteTimeout(
-        () => createSupplierReturnRequest({ ...supplierReturnIntent, ...supplierReturnIdentity }),
+      const module = await loadReturnsTransport()
+      assertActorReadScope(sourceScopeRef.current!)
+      const body = module.prepareSupplierReturnRequest({ ...supplierReturnIntent, ...supplierReturnIdentity })
+      attempt = { body, scope: captureActorReadScope('returns'), uncertain: false }
+      setPending(attempt)
+      }
+      const result = attempt.result ?? await withWriteTimeout(
+        () => createSupplierReturnRequest({ ...attempt!.body }),
         'Create supplier return',
         SUPPLIER_RETURN_CREATE_TIMEOUT_MS,
         (key: string) => tr(key, ''),
       )
+      if (!result || typeof result !== 'object' || !Number.isSafeInteger((result as { id?: unknown }).id) || Number((result as { id?: unknown }).id) <= 0
+        || (result as { returnNumber?: unknown }).returnNumber !== attempt.body.return_number) throw Object.assign(new Error(tr('supplier_pending_unknown', 'The result is unconfirmed. Retry the original request or check Returns and Stock Changes before closing.')), { code: 'write_outcome_unknown' })
+      attempt.result = result
+      setPending({ ...attempt })
+      assertActorReadScope(attempt.scope, false)
+      if (!attempt.notified) {
       notify(tr('supplier_return_success', 'Supplier return processed successfully'), 'success')
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
+      attempt.notified = true
+      }
       await Promise.resolve(onSuccess?.(result))
       // Committed and handed over: the next return, even an identical one, is
       // a new request. (Kept until here so a retry after onSuccess threw
       // replays rather than creating a second return.)
       supplierReturnIdentityRef.current = null
+      setPending(null)
       onClose?.()
     } catch (error) {
+      const failure = error as { code?: string; outcome?: string; status?: number }
+      if (attempt && !attempt.result) {
+        const safelyRejected = failure.outcome === 'not_dispatched' || (failure.status === 409 && failure.code === 'write_conflict')
+        if (!attempt.uncertain && safelyRejected) setPending(null)
+        else { attempt.uncertain = true; setPending({ ...attempt }) }
+      }
       notify(getLoaderErrorMessage(error, tr('error', 'Error')), 'error')
     } finally {
       finishSingleAction(submitInFlightRef)
@@ -432,25 +501,32 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
     || notes.trim().length > 0
     || compensationUsd.trim().length > 0
     || compensationKhr.trim().length > 0
-    || Object.values(quantities).some((value) => Number(value) > 0)
+    || Object.values(quantities).some((value) => Number(value.raw) > 0)
+    || Boolean(pending)
   const summaryRowClass = 'flex justify-between gap-3'
   const summaryLabelClass = 'text-gray-600 dark:text-gray-300'
   const summaryValueClass = 'font-semibold text-gray-800 dark:text-gray-200'
+  const authorityCurrent = pending ? isActorReadScopeCurrent(pending.scope, false) : !sourceScopeRef.current || isActorReadScopeCurrent(sourceScopeRef.current, false)
+  const sourceLabel = (source: SupplierTaggedSource): string => source.batch_id === null ? tr('stock_without_received_date', 'Without a received date')
+    : `${tr('received_date', 'Received date')}: ${formatBatchReceivedDate(source.received_at) ?? tr('unknown', 'Unknown')}${source.batch_number === null ? '' : ` · #${source.batch_number}`}${source.lot_code ? ` · ${source.lot_code}` : ''}`
 
   return (
     <Modal
       title={tr('return_to_supplier', 'Return to Supplier')}
       onClose={() => onClose?.()}
       size="lg"
+      keyboard
       closeDisabled={submitting}
       unsavedChanges={{ dirty: supplierReturnDirty }}
       headerExtra={<InfoHint label={tr('return_to_supplier', 'Return to Supplier')} text={tr('supplier_return_hint', 'Send stock back to supplier and record compensation/loss.')} />}
     >
       {/* The form is on screen from the first paint; only its option lists wait
           for the setup read, and the fields are inert until it lands. */}
-      <fieldset disabled={loading} className="min-w-0 space-y-3 border-0 p-0">
+      {pending && <p role="status" className="mb-3 rounded-lg border border-amber-300 p-2 text-sm">{!authorityCurrent ? tr('supplier_pending_account', 'This request belongs to the previous account. Close this form and check Returns and Stock Changes.')
+        : pending.result ? tr('supplier_pending_refresh', 'The return is recorded. Retry refreshing the list; no new return will be sent.')
+          : tr('supplier_pending_unknown', 'The result is unconfirmed. Retry the original request or check Returns and Stock Changes before closing.')}</p>}
+      <fieldset disabled={loading || submitting || Boolean(pending)} hidden={!authorityCurrent} className="min-w-0 space-y-3 border-0 p-0">
         <div className="grid grid-cols-2 gap-2">
-          {branchChoiceSettled(branches.map((item) => item.id), branchId) ? null : (
             <AppSelect
               id="supplier-return-branch"
               className="min-w-0"
@@ -461,7 +537,6 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
               ariaLabel={tr('branch', 'Branch')}
               prefix={tr('branch', 'Branch')}
             />
-          )}
           <ContactPicker
             id="supplier-return-supplier"
             className="min-w-0"
@@ -508,44 +583,75 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
             <InfoHint label={tr('products', 'Products')} text={tr('supplier_return_stock_hint', 'Only products with stock in the selected branch are shown. Returned quantity cannot exceed available stock.')} />
           </div>
           <div className="max-h-[320px] overflow-y-auto rounded-lg border border-gray-100 dark:border-gray-700">
-            {loading || loadingProducts ? (
+            {loading || loadingProducts || loadingSources ? (
               <div className="p-2"><Skeleton variant="table" rows={4} /></div>
             ) : filteredProducts.length === 0 ? (
               <div className="px-3 py-5 text-center text-xs leading-relaxed text-gray-400">{tr('no_data', 'No data')}</div>
             ) : (
               <ul>
-                {filteredProducts.map((product) => {
-                  const maxQty = Number(product.display_quantity || 0)
-                  const qty = Number(quantities[String(product.id)] || 0)
-                  const unitCostUsd = Number(product.purchase_price_usd || product.cost_price_usd || 0)
-                  const unitCostKhr = Number(product.purchase_price_khr || product.cost_price_khr || 0)
+                {pageProducts.map((product) => {
+                  const source = sources[String(product.id)]
                   return (
-                    <li key={product.id} data-supplier-return-row="" className="flex items-center gap-2 border-t border-gray-100 px-3 py-2 first:border-t-0 dark:border-gray-700">
-                      <div className="min-w-0 flex-1">
+                    <li key={product.id} data-supplier-return-row="" className="space-y-2 border-t border-gray-100 px-3 py-2 first:border-t-0 dark:border-gray-700">
+                      <div className="min-w-0">
                         <div className="break-words text-sm font-medium text-gray-800 dark:text-gray-200">{product.name}</div>
                         <div className="break-words text-xs leading-relaxed text-gray-400">{product.sku || '-'} / {product.category || '-'}</div>
                         <div className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
-                          {tr('available', 'Available')}: {maxQty}
-                          <span title={tr('unit_cost', 'Unit Cost')}> · {fmtUSD(unitCostUsd)}{unitCostKhr > 0 ? ` · ${fmtKHR(unitCostKhr)}` : ''}</span>
+                          {source && source.return_cost_usd !== undefined && <span>{tr('supplier_return_valuation', 'Return valuation')}: {fmtUSD(source.return_cost_usd ?? 0)} · {fmtKHR(source.return_cost_khr ?? 0)}</span>}
                         </div>
                       </div>
-                      <input
-                        className="input w-20 shrink-0 text-center text-sm"
-                        type="number"
-                        min="0"
-                        step="1"
-                        max={maxQty}
-                        value={qty || ''}
-                        placeholder="0"
-                        aria-label={`${tr('quantity', 'Quantity')}: ${product.name}`}
-                        onChange={(event) => updateQty(product.id, event.target.value, maxQty)}
-                      />
+                      {!source ? <p className="text-xs text-amber-700">{tr('supplier_sources_unavailable', 'Stock sources could not be verified. Refresh before selecting quantities.')}</p> : (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <div className="min-w-0 flex-1 text-xs">
+                              <strong>{tr('stock_ordinary', 'Ordinary')}</strong> · {tr('available', 'Available')}: {source.ordinary_available}
+                              <div className="text-gray-500">{tr('supplier_ordinary_fifo', 'Received dates are used in order; stock without a received date is used last.')}</div>
+                            </div>
+                            <input className="input w-20 shrink-0 text-center text-sm" type="number" min="0" step="any" max={source.ordinary_available}
+                              disabled={!financialEditable || source.ordinary_available === 0 || Boolean(sourceError)}
+                              value={quantities[`${product.id}:ordinary`]?.raw ?? ''} placeholder="0"
+                              aria-label={`${tr('quantity', 'Quantity')}: ${product.name} · ${tr('stock_ordinary', 'Ordinary')}`}
+                              onChange={event => updateQty(`${product.id}:ordinary`, source, null, event.target.value)} />
+                          </div>
+                          {source.ordinary_receipts.map(receipt => <div key={receipt.batch_id} className="break-words text-xs text-gray-500">
+                            {tr('received_date', 'Received date')}: {formatBatchReceivedDate(receipt.received_at) ?? tr('unknown', 'Unknown')}{receipt.batch_number === null ? '' : ` · #${receipt.batch_number}`}{receipt.lot_code ? ` · ${receipt.lot_code}` : ''}
+                            {' · '}{receipt.available}{receipt.source_cost_usd !== undefined && <> · {tr('supplier_source_cost', 'Original source cost (USD)')}: {receipt.source_cost_usd === null ? tr('unknown', 'Unknown') : fmtUSD(receipt.source_cost_usd)}</>}
+                          </div>)}
+                          {source.ordinary_unlotted > 0 && <div className="text-xs text-gray-500">{tr('stock_without_received_date', 'Without a received date')}: {source.ordinary_unlotted}</div>}
+                          {source.tagged_sources.map(tag => <div key={tag.damaged_lot_id} className="flex items-center gap-2 rounded-lg border border-amber-200 p-2 dark:border-amber-800">
+                            <div className="min-w-0 flex-1 text-xs">
+                              <strong className="text-amber-700 dark:text-amber-300">{tag.stock_condition}</strong> · {tr('available', 'Available')}: {tag.available}
+                              <div className="break-words text-gray-500">{sourceLabel(tag)}</div>
+                              {tag.source_cost_usd !== undefined && <div className="text-gray-500">{tr('supplier_source_cost', 'Original source cost (USD)')}: {tag.source_cost_usd === null ? tr('unknown', 'Unknown') : fmtUSD(tag.source_cost_usd)}</div>}
+                            </div>
+                            <input className="input w-20 shrink-0 text-center text-sm" type="number" min="0" step="any" max={tag.available}
+                              disabled={!financialEditable || Boolean(sourceError)} value={quantities[`${product.id}:tag:${tag.damaged_lot_id}:${tag.stock_condition}`]?.raw ?? ''} placeholder="0"
+                              aria-label={`${tr('quantity', 'Quantity')}: ${product.name} · ${tag.stock_condition} · #${tag.damaged_lot_id}`}
+                              onChange={event => updateQty(`${product.id}:tag:${tag.damaged_lot_id}:${tag.stock_condition}`, source, tag, event.target.value)} />
+                          </div>)}
+                        </div>
+                      )}
                     </li>
                   )
                 })}
               </ul>
             )}
           </div>
+          {sourceError && <p role="alert" className="mt-2 text-xs text-rose-600">{sourceError}</p>}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button type="button" className="btn-secondary inline-flex items-center gap-1.5 text-xs" onClick={() => setSourceRevision(value => value + 1)} disabled={loadingSources}><RotateCw className="h-4 w-4" aria-hidden="true" />{tr('refresh', 'Refresh')}</button>
+            {filteredProducts.length > 25 && <>
+              <button type="button" className="btn-secondary inline-flex items-center gap-1.5 text-xs" disabled={sourcePage === 0} onClick={() => setSourcePage(value => value - 1)}><ChevronLeft className="h-4 w-4" aria-hidden="true" />{tr('previous', 'Previous')}</button>
+              <span className="text-xs">{sourcePage + 1} / {Math.ceil(filteredProducts.length / 25)}</span>
+              <button type="button" className="btn-secondary inline-flex items-center gap-1.5 text-xs" disabled={(sourcePage + 1) * 25 >= filteredProducts.length} onClick={() => setSourcePage(value => value + 1)}><ChevronRight className="h-4 w-4" aria-hidden="true" />{tr('next', 'Next')}</button>
+            </>}
+          </div>
+          {selectedItems.length > 0 && <ul aria-label={tr('supplier_return_items', 'Selected items')} className="mt-2 space-y-1 text-xs">
+            {Object.entries(quantities).filter(([, selection]) => Number(selection.raw) > 0).map(([key, selection]) => <li key={key} className="flex items-center justify-between gap-2">
+              <span className="min-w-0 break-words">{selection.item.product_name} · {selection.item.stock_condition === 'ordinary' ? tr('stock_ordinary', 'Ordinary') : selection.item.stock_condition} · {selection.raw}</span>
+              <button type="button" className="btn-secondary inline-flex items-center gap-1.5 text-xs" onClick={() => setQuantities(previous => { const next = { ...previous }; delete next[key]; return next })}><Trash2 className="h-4 w-4" aria-hidden="true" />{tr('remove', 'Remove')}</button>
+            </li>)}
+          </ul>}
         </div>
 
         <div className="grid grid-cols-2 gap-2">
@@ -608,9 +714,9 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
       </fieldset>
 
       <div className="sticky bottom-0 -mx-3 -mb-3 mt-3 flex border-t border-gray-200 bg-white px-3 pb-3 pt-3 dark:border-gray-700 dark:bg-gray-800 sm:-mx-4 sm:-mb-4 sm:px-4 sm:pb-4">
-        <button type="button" className="btn-primary inline-flex flex-1 items-center justify-center gap-1.5 disabled:opacity-50" onClick={submit} disabled={loading || loadingProducts || submitting}>
+        <button type="button" className="btn-primary inline-flex flex-1 items-center justify-center gap-1.5 disabled:opacity-50" onClick={submit} disabled={!authorityCurrent || submitting || (!pending && (loading || loadingProducts || loadingSources || !financialEditable || Boolean(sourceError)))}>
           {submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Check className="h-4 w-4" aria-hidden="true" />}
-          {tr('save', 'Save')}
+          {pending ? tr('retry', 'Retry') : tr('save', 'Save')}
         </button>
       </div>
     </Modal>
