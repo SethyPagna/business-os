@@ -194,9 +194,9 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   assert.match(returnsTransport, /ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, 'return'\)/)
   assert.match(returnsTransport, /ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, 'supplier_return'\)/)
   assert.match(returnsRoute, /function normalizeClientRequestId\(value: unknown\)/)
-  const legacyReturnDedupeQuery = /SELECT id, return_number FROM returns WHERE client_request_id = \? AND client_request_id <> '' LIMIT 1/g
+  const legacyReturnDedupeQuery = /SELECT r\.id, r\.return_number, r\.return_scope, r\.return_type, cr\.request_json, cr\.request_digest FROM returns r LEFT JOIN return_create_receipts cr ON cr\.return_id=r\.id WHERE client_request_id = \? AND client_request_id <> '' LIMIT 1/g
   const legacyReturnDedupeMatches = returnsRoute.match(legacyReturnDedupeQuery) || []
-  assert.equal(legacyReturnDedupeMatches.length, 1, 'supplier returns retain the indexed legacy request lookup')
+  assert.equal(legacyReturnDedupeMatches.length, 1, 'supplier returns retain the indexed request lookup and its saved scope and intent proof')
   assert.match(returnsRoute, /const readReceipt = async \(\) => \{[\s\S]*SELECT r\.return_id,r\.sale_id,r\.request_digest,r\.response_json,o\.id AS occupied_id[\s\S]*LEFT JOIN return_create_receipts r ON r\.actor_id=\? AND r\.request_id=\?/)
   assert.match(returnsRoute, /\[authenticatedActorId, clientRequestId, clientRequestId\]/, 'the combined lookup retains authenticated actor scope')
   assert.match(returnsRoute, /if \(priorReceipt\) \{[\s\S]*priorReceipt\.request_digest !== requestDigest[\s\S]*idempotency_conflict[\s\S]*JSON\.parse\(priorReceipt\.response_json\)/)

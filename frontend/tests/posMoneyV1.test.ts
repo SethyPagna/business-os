@@ -219,7 +219,7 @@ actualDetailCallback('stageReplacement', {
   setAddQuery: () => {}, setAddCandidates: () => {}, amendRequestIdRef: { current: '' }, createSettlementRequestId: () => 'replace-request',
   setAmendMutationError: (value: string) => editErrors.push(value), setAmendConfirm: (value: unknown) => replacements.push(value),
   translateOr: (key: string) => key, t: (key: string) => key,
-})({ id: 8, selling_price_usd: 1.2301, name: 'Replacement', stock_quantity: 10 }, '2')
+})({ id: 8, selling_price_usd: 1.2301, name: 'Replacement', stock_quantity: 10 }, { branchId: '2' })
 assert.equal(replacements[0].request.replacement.pricing_quote.total_usd, 3.72)
 assert.equal(replacements[0].request.replacement.pricing_source, 'selling')
 assert.equal(replacements[0].request.replacement.branch_id, 2)
