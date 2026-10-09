@@ -139,13 +139,36 @@ runTest('the price-difference settlement is gone from the returns surface', () =
 })
 
 runTest('no surface offers "any stock" -- a lot is named or the product has none', () => {
-  assert.doesNotMatch(newReturnSource, /any_stock/)
-  assert.doesNotMatch(newReturnSource, /Any stock/i)
+  for (const source of [newReturnSource,
+    readFileSync(new URL('../src/components/shared/ProductOptionSheet.tsx', import.meta.url), 'utf8'),
+    readFileSync(new URL('../src/components/pos/ProductDetailSheet.tsx', import.meta.url), 'utf8'),
+  ]) {
+    assert.doesNotMatch(source, /any_stock/)
+    assert.doesNotMatch(source, /Any stock/i)
+  }
   // the replacement lot picker's empty option is a prompt, never a choice
   assert.match(newReturnSource, /T\('select_lot', 'Choose a received date…'\)/)
   // and a line with no lot named cannot be submitted or even reviewed
   assert.match(newReturnSource, /const itemsMissingLot = activeItems\.filter\(lineNeedsLot\)/)
-  assert.match(newReturnSource, /const replacementsMissingLot = replacements\.filter\(\(line\) => line\.batches\.length > 0 && line\.batch_id == null\)/)
+  // The shared sheet names receipt/NULL/tagged sources and carries their cap.
+  // Execute the modal's actual guard: NULL is valid when explicitly chosen,
+  // while a missing/invalid/exceeded source capacity blocks both actions.
+  const modal = ts.createSourceFile('NewReturnModal.tsx', newReturnSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const guards: ts.Expression[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && node.name.getText(modal) === 'replacementsMissingLot' && node.initializer) guards.push(node.initializer)
+    ts.forEachChild(node, visit)
+  }
+  visit(modal)
+  assert.equal(guards.length, 1, 'the modal must have one replacement source guard')
+  const code = ts.transpileModule(`return ${guards[0].getText(modal)}`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  const missing = new Function('replacements', code) as (lines: Record<string, unknown>[]) => unknown[]
+  for (const source of [{ batch_id: 11 }, { batch_id: null, unlotted_stock: true }, { batch_id: null, damaged: { damagedLotId: 7 } }]) {
+    assert.equal(missing([{ ...source, quantity: 2, available_quantity: 2 }]).length, 0)
+  }
+  for (const available_quantity of [undefined, NaN, Infinity, 0, -1, 1]) {
+    assert.equal(missing([{ batch_id: null, batches: [], quantity: 2, available_quantity }]).length, 1)
+  }
   assert.equal((newReturnSource.match(/if \(itemsMissingLot\.length \|\| replacementsMissingLot\.length\)/g) || []).length, 2,
     'both Review and Confirm must refuse an unnamed lot')
   // the backend refuses the same case rather than trusting the modal
@@ -287,7 +310,19 @@ runTest('K2: NewReturnModal wires the chooser and Replace', () => {
   assert.doesNotMatch(newReturnSource, /if \(exactBarcode\) pickReplacementRow\(/)
   assert.doesNotMatch(newReturnSource, /normName\(row\.name\) === normName\(name\)/)
   assert.match(newReturnSource, /<ScanSearchButton/)
-  assert.match(newReturnSource, /getProductBatches\(productId, branchId, true\)/)
+  // Replacement sources use the shared POS sheet; the callback behavior and
+  // source caps are exercised by countedOptionConsumers/countedProductPicker.
+  const modal = ts.createSourceFile('NewReturnModal.tsx', newReturnSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const sheets: (ts.JsxOpeningElement | ts.JsxSelfClosingElement)[] = []
+  const visit = (node: ts.Node): void => {
+    if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && node.tagName.getText(modal) === 'ProductOptionSheet') sheets.push(node)
+    ts.forEachChild(node, visit)
+  }
+  visit(modal)
+  assert.equal(sheets.length, 1, 'Replace must use the shared source chooser')
+  const attributes = new Map(sheets[0].attributes.properties.filter(ts.isJsxAttribute).map(attribute => [attribute.name.getText(modal), attribute.initializer?.getText(modal)]))
+  assert.equal(attributes.get('intent'), '"sell"')
+  assert.match(attributes.get('onPick') || '', /addReplacementFromCandidate\(picked as unknown as ReplacementCandidate, selection\)/)
   assert.match(newReturnSource, /replacement_items: replacements\.map/)
   // 5.3: the overlay portals to document.body like the other returns modals
   assert.match(newReturnSource, /return createPortal\(/)
