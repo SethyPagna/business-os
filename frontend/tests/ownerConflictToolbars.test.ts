@@ -7,7 +7,7 @@ import { build } from 'esbuild'
 import postcss from 'postcss'
 import tailwindcss from 'tailwindcss'
 import config from '../tailwind.config.ts'
-import { chromium } from '@playwright/test'
+import { chromium, type Page } from '@playwright/test'
 
 declare global { interface Window { calls: Array<{ kind: string; table?: string; includeDismissed?: boolean }>; setFixtureIdentity: (page: string, actor: number) => void } }
 const root = process.env.OWNER_CONFLICT_FIXTURE_ROOT || path.resolve(import.meta.dirname, '..')
@@ -62,13 +62,19 @@ await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));const address=server.
 const executablePath=['C:/Program Files/Google/Chrome/Application/chrome.exe','C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe','/usr/bin/chromium'].find(fs.existsSync)
 const browser=await chromium.launch({headless:true,...(executablePath?{executablePath}:{})});let failed=0
 async function check(label:string,fn:()=>Promise<void>){try{await fn();console.log('PASS '+label)}catch(error){failed++;console.error('FAIL '+label,error)}}
+async function waitForRefresh(page:Page,name:string,timeout=5000){
+  const refresh=page.getByRole('button',{name,exact:true})
+  await refresh.waitFor({state:'visible',timeout})
+  assert.equal(await refresh.count(),1,'exactly one live refresh after portal commit')
+  return refresh
+}
 try {
   for(const kind of ['products','contacts'])for(const lang of ['en','km'])for(const width of [375,1280])for(const mode of width===375?['pages','sections']:['pages']){
     const page=await browser.newPage({viewport:{width,height:812}});page.setDefaultTimeout(5000);const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
     await page.goto(`http://127.0.0.1:${address.port}/?kind=${kind}&lang=${lang}&mode=${mode}&long=1`);await page.waitForFunction(()=>window.calls?.length>0)
     const label=`${kind} ${lang} ${width} ${mode}`
     await check('title refresh '+label,async()=>{
-      const button=page.getByRole('button',{name:packs[lang].refresh,exact:true});assert.equal(await button.count(),1,'one refresh across host and child')
+      const button=await waitForRefresh(page,packs[lang].refresh);assert.equal(await button.count(),1,'one refresh across host and child')
       const host=page.locator(`[data-section-title-action-host="${kind}:duplicates"]`).filter({has:button});assert.equal(await host.count(),1,'refresh belongs to existing title slot')
       const geo=await host.evaluate(el=>{const title=el.previousElementSibling!;const a=title.getBoundingClientRect(),b=el.getBoundingClientRect();return{sameRow:Math.abs(a.top+a.height/2-b.top-b.height/2)<8,visible:b.left>=0&&b.right<=innerWidth,title:title.textContent,headings:document.querySelectorAll('h1,h2').length}})
       assert.equal(geo.sameRow,true,JSON.stringify(geo));assert.equal(geo.visible,true,JSON.stringify(geo));assert.equal(geo.headings,0,'no duplicate page heading')
@@ -91,7 +97,7 @@ try {
         const options=page.getByRole('button',{name:packs[lang].options,exact:true}),filters=page.getByRole('button',{name:packs[lang].filters,exact:true});assert.equal(await options.count(),1);assert.equal(await filters.count(),1)
         await options.focus();await page.keyboard.press('Enter');await page.getByRole('button',{name:packs[lang].delivery_contacts_tab,exact:true}).last().click();await page.waitForFunction(()=>window.calls.some(c=>c.table==='delivery_contacts'))
         await options.click();await page.getByRole('button',{name:packs[lang].link_conflicts_section,exact:true}).last().click();await page.waitForFunction(()=>window.calls.some(c=>c.kind==='links'))
-        assert.equal(await page.getByRole('button',{name:packs[lang].refresh,exact:true}).count(),1);assert.equal(await options.count(),1);assert.equal(await filters.count(),1)
+        await waitForRefresh(page,packs[lang].refresh);assert.equal(await options.count(),1);assert.equal(await filters.count(),1)
         const before=await page.evaluate(()=>window.calls.filter(c=>c.kind==='links').length);await page.getByRole('button',{name:packs[lang].refresh,exact:true}).click();await page.waitForFunction(n=>window.calls.filter(c=>c.kind==='links').length>n,before)
         await filters.click();await page.getByRole('option',{name:packs[lang].show_kept,exact:true}).click();await page.waitForFunction(()=>window.calls.some(c=>c.kind==='links'&&c.includeDismissed===true));await page.keyboard.press('Escape')
       }
@@ -100,6 +106,15 @@ try {
   }
   const page=await browser.newPage({viewport:{width:375,height:812}});await page.goto(`http://127.0.0.1:${address.port}/?kind=contacts&supplier=0`);await page.waitForFunction(()=>window.calls?.length>0)
   await check('supplier option privacy',async()=>{await page.getByRole('button',{name:packs.en.options,exact:true}).click();assert.equal(await page.getByRole('button',{name:packs.en.suppliers,exact:true}).count(),0);assert.equal(await page.evaluate(()=>window.calls.some(c=>c.table==='suppliers')),false)});await page.close()
+  const missingHost=await browser.newPage({viewport:{width:375,height:812}})
+  await missingHost.goto(`http://127.0.0.1:${address.port}/?kind=contacts`);await missingHost.waitForFunction(()=>window.calls?.length>0)
+  await check('missing title host fails committed refresh readiness',async()=>{
+    await missingHost.getByRole('button',{name:packs.en.options,exact:true}).click()
+    await missingHost.getByRole('button',{name:packs.en.link_conflicts_section,exact:true}).last().click()
+    await missingHost.waitForFunction(()=>window.calls.some(c=>c.kind==='links'))
+    await missingHost.evaluate(()=>document.querySelectorAll('[data-section-title-action-host]').forEach(host=>host.remove()))
+    await assert.rejects(()=>waitForRefresh(missingHost,packs.en.refresh,300),/Timeout/,'a started request cannot conceal a missing title action')
+  });await missingHost.close()
   for(const kind of ['products','contacts']){
     const page=await browser.newPage({viewport:{width:375,height:812}});page.setDefaultTimeout(5000);await page.goto(`http://127.0.0.1:${address.port}/?kind=${kind}`);await page.waitForFunction(()=>window.calls?.length>0)
     await check('title action lifecycle '+kind,async()=>{
