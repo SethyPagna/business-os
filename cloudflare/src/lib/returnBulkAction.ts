@@ -268,6 +268,75 @@ function movementFingerprint(idSql: string): string {
   return `(SELECT CASE WHEN COUNT(*)>${RETURN_BULK_MOVEMENT_LIMIT} THEN NULL ELSE json_group_array(json_array(id,product_id,branch_id,batch_id,movement_type,quantity)) END FROM (SELECT id,product_id,branch_id,batch_id,movement_type,quantity FROM inventory_movements WHERE reference_id=${idSql} AND movement_type IN ('return','return_reversal','damage_in','damage_reversal','supplier_return','supplier_return_reversal') ORDER BY id LIMIT ${RETURN_BULK_MOVEMENT_LIMIT + 1}))`
 }
 
+function supplierReplayWitnessSql(): string {
+  return `(SELECT CASE WHEN COUNT(*)<=${RETURN_BULK_LIMIT} AND
+    COALESCE(SUM(COALESCE(length(CAST(cr.request_json AS BLOB)),0)+COALESCE(length(CAST(m.stock_fingerprint AS BLOB)),0)),0)<=512000
+    THEN json_group_array(json_object('id',json_extract(selected.value,'$.id'),'scope',r.return_scope,'status',r.status,
+      'manifest',cr.request_json,'digest',cr.request_digest,'fingerprint',m.stock_fingerprint)) END
+    FROM (SELECT value FROM json_each(o.request_json,'$.items') LIMIT ${RETURN_BULK_LIMIT+1}) selected
+    LEFT JOIN returns r ON r.id=json_extract(selected.value,'$.id')
+    LEFT JOIN return_bulk_members m ON m.operation_id=o.id AND m.return_id=r.id
+    LEFT JOIN return_create_receipts cr ON cr.return_id=r.id AND EXISTS(
+      SELECT 1 FROM json_each(o.receipt_json,'$.changedIds') changed WHERE changed.value=r.id))`
+}
+
+function validateSupplierReplayStock(operation: Row, snapshot: Snapshot): Map<number,string> | null {
+  let request: BulkRequest, receipt: {items:Array<{id:number;changed:boolean;before:string;after:string}>;changedIds:number[]}, witnesses: Row[]
+  try {request=parseRequest(JSON.parse(String(operation.request_json)));receipt=JSON.parse(String(operation.receipt_json));witnesses=JSON.parse(String(operation.supplier_witness))}
+  catch {fail('The original grouped Return authority is incomplete.',409)}
+  if (!Array.isArray(witnesses)) fail('The original grouped Return authority exceeds its capture bound.',409)
+  const supplierExact=request.field==='status' && (witnesses.some(row=>row.manifest && JSON.parse(String(row.manifest)).scope==='supplier')
+    || snapshot.members.some(member=>!!member.supplierManifest))
+  if (!supplierExact) return null
+  if (!Array.isArray(receipt.items) || !Array.isArray(receipt.changedIds) || request.field!==snapshot.field
+    || snapshot.members.length!==request.items.length || witnesses.length!==request.items.length || receipt.items.length!==request.items.length
+    || new Set(snapshot.members.map(member=>member.id)).size!==request.items.length
+    || new Set(witnesses.map(row=>row.id)).size!==request.items.length
+    || new Set(receipt.items.map(member=>member.id)).size!==request.items.length
+    || JSON.stringify([...receipt.changedIds].sort((a,b)=>a-b))!==JSON.stringify(receipt.items.filter(item=>item.changed).map(item=>item.id).sort((a,b)=>a-b))) {
+    fail('The original grouped Return members no longer match their archive.',409)
+  }
+  const fingerprints=new Map<number,string>(), generation=Number(operation.generation)
+  if (!Number.isSafeInteger(generation) || generation<0) fail('The grouped Return generation is invalid.',409)
+  for (const expected of request.items) {
+    const member=snapshot.members.find(item=>item.id===expected.id), original=receipt.items.find(item=>item.id===expected.id), witness=witnesses.find(row=>row.id===expected.id)
+    if (!member || !original || !witness || member.changed!==original.changed || !Array.isArray(member.stock)) fail('The original grouped Return member is missing.',409)
+    if (!member.changed) {if(member.stock.length)fail('An unchanged Return has archived stock effects.',409);continue}
+    if (!witness.fingerprint) fail('The committed Return movement witness is missing.',409)
+    fingerprints.set(member.id,String(witness.fingerprint))
+    if (witness.scope!=='supplier' || !witness.manifest || JSON.parse(String(witness.manifest)).scope!=='supplier') {
+      if(member.supplierManifest)fail('Supplier source ownership changed.',409)
+      continue
+    }
+    if (!member.supplierManifest || member.supplierManifest.json!==witness.manifest || member.supplierManifest.digest!==witness.digest
+      || member.scope!=='supplier' || member.saleId!==null || member.saleRevision!==null || member.updateSale
+      || original.before!==request.source || original.after!==request.target || member.before.status!==original.before || member.after.status!==original.after
+      || member.before.return_type!=='supplier_return' || member.after.return_type!==member.before.return_type
+      || member.before.supplier_settlement!==expected.expected_method || member.after.supplier_settlement!==member.before.supplier_settlement) {
+      fail('The archived supplier operation no longer matches its original request.',409)
+    }
+    const sources=supplierManifestSources(String(witness.manifest),member.supplierManifest.items)
+    const sign=original.before==='completed' && original.after==='cancelled'?1:original.before==='cancelled' && original.after==='completed'?-1:0
+    let movementRows: unknown[][]
+    try {movementRows=JSON.parse(String(witness.fingerprint))} catch {fail('The committed Return movement witness is incomplete.',409)}
+    if (!sign || !Array.isArray(movementRows) || movementRows.length<sources.length || member.stock.length!==sources.length
+      || witness.status!==(generation%2?original.before:original.after)) fail('The supplier stock archive is incomplete.',409)
+    const latest=movementRows.slice(-sources.length)
+    for (const [index,source] of sources.entries()) {
+      const effect=latest[index],delta=member.stock[index],quantity=sign*source.quantity
+      if (!Array.isArray(effect) || effect.length!==6 || effect[1]!==source.productId || !Number.isSafeInteger(effect[2]) || Number(effect[2])<=0
+        || !(effect[3]===null || Number.isSafeInteger(effect[3]) && Number(effect[3])>0)
+        || effect[4]!==statusMovementType('supplier',quantity*(generation%2?-1:1)) || effect[5]!==quantity*(generation%2?-1:1)
+        || source.lotId!==null && (effect[2]!==source.branchId || effect[3]!==source.batchId)
+        || !delta || delta.productId!==source.productId || delta.branchId!==effect[2] || delta.batchId!==effect[3]
+        || delta.damagedLotId!==source.lotId || delta.quantity!==quantity || delta.costUsd!==source.costUsd || delta.costKhr!==source.costKhr) {
+        fail('The supplier stock projection no longer matches its immutable sources and committed movements.',409)
+      }
+    }
+  }
+  return fingerprints
+}
+
 function replayCountedFactsSql(snapshot: string): string {
   const receiptIds = `(SELECT json_group_array(json_extract(delta.value,'$.batchId')) FROM json_each(${snapshot},'$.members') member,
     json_each(member.value,'$.stock') delta WHERE json_extract(delta.value,'$.productId')=context.product_id AND json_extract(delta.value,'$.branchId')=context.branch_id)`
@@ -908,10 +977,12 @@ async function replayReturnBulkActionKernel(env: Env, user: SessionUser, directi
   if (!Number.isSafeInteger(generation) || Number(generation) < 0) fail('Refresh history before replaying this group.')
   const db = getDb(env)
   const operation = await db.prepare(`SELECT o.*,s.payload_json,s.kind,s.status AS snapshot_status,h.status AS replay_status,
-    ${replayCountedFactsSql('s.payload_json')} counted_facts FROM return_bulk_operations o JOIN undo_snapshots s ON s.id=o.snapshot_id JOIN action_history h ON h.id=o.history_id WHERE o.history_id=?`).get<Row>([historyId])
+    ${replayCountedFactsSql('s.payload_json')} counted_facts,${supplierReplayWitnessSql()} supplier_witness FROM return_bulk_operations o JOIN undo_snapshots s ON s.id=o.snapshot_id JOIN action_history h ON h.id=o.history_id WHERE o.history_id=?`).get<Row>([historyId])
   if (!operation || operation.kind !== RETURN_BULK_ACTION_KIND || operation.id !== payload.operation_id || operation.snapshot_id !== payload.snapshot_id) fail('This grouped Return action changed or its snapshot does not match.')
   const snapshot = JSON.parse(String(operation.payload_json)) as Snapshot
-  const supplierExact=snapshot.members.some(member=>!!member.supplierManifest)
+  if (snapshot.version!==1 || snapshot.operationId!==operation.id || !Array.isArray(snapshot.members) || snapshot.members.length>RETURN_BULK_LIMIT) fail('Unsupported Return bulk snapshot.')
+  const supplierFingerprints=validateSupplierReplayStock(operation,snapshot)
+  const supplierExact=supplierFingerprints!==null
   for (const member of snapshot.members) if(member.supplierManifest) {
     supplierManifestSources(member.supplierManifest.json,member.supplierManifest.items)
     if(await sha256Hex(member.supplierManifest.json)!==member.supplierManifest.digest) fail('Supplier source history changed.',409)
@@ -929,11 +1000,11 @@ async function replayReturnBulkActionKernel(env: Env, user: SessionUser, directi
   const snapshotStatus = direction === 'undo' ? 'applied' : 'reversed'
   const directionSign: 1 | -1 = direction === 'undo' ? -1 : 1
   const stamp = new Date().toISOString()
-  const statements: Statement[] = [...exact.takePreimageGuards(),guard("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM return_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@operation AND o.generation=@generation AND h.id=@history AND h.status=@expectedStatus AND s.kind=@kind AND s.status=@snapshotStatus AND s.payload_json=@snapshot)", { operation: operation.id, generation, history: historyId, expectedStatus, kind: RETURN_BULK_ACTION_KIND, snapshotStatus, snapshot: operation.payload_json })]
+  const statements: Statement[] = [...exact.takePreimageGuards(),guard(`NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM return_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@operation AND o.generation=@generation AND h.id=@history AND h.status=@expectedStatus AND s.kind=@kind AND s.status=@snapshotStatus AND s.payload_json=@snapshot${supplierExact?' AND o.request_json=@originalRequest AND o.receipt_json=@originalReceipt':''})`, { operation: operation.id, generation, history: historyId, expectedStatus, kind: RETURN_BULK_ACTION_KIND, snapshotStatus, snapshot: operation.payload_json,...(supplierExact?{originalRequest:operation.request_json,originalReceipt:operation.receipt_json}:{}) })]
   const replayEntitlement = await v1EntitlementGuards(db, snapshot.members, direction === 'undo' ? 'before' : 'after')
   statements.push(...replayEntitlement.guards)
   for (const member of snapshot.members.filter((candidate) => candidate.changed)) {
-    statements.push(guard(`EXISTS(SELECT 1 FROM returns r JOIN return_bulk_members m ON m.return_id=r.id WHERE m.operation_id=@operation AND r.id=@id AND m.revision=COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=r.id),0) AND m.stock_fingerprint=${movementFingerprint('r.id')} AND (m.sale_id IS NULL OR (EXISTS(SELECT 1 FROM sales WHERE id=m.sale_id) AND m.sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=m.sale_id),0)))) AND ${taggedReturnAuthority()} AND ${supplierManifestAuthority()} AND (@supplierManifest IS NULL OR (${stockActorPredicate}))`, { operation: operation.id, id: member.id, taggedIds: taggedMemberIds(member), ...supplierManifestParams(member), ...stockActorParams(user) }))
+    statements.push(guard(`EXISTS(SELECT 1 FROM returns r JOIN return_bulk_members m ON m.return_id=r.id WHERE m.operation_id=@operation AND r.id=@id AND m.revision=COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=r.id),0) AND m.stock_fingerprint=${movementFingerprint('r.id')}${supplierExact?' AND m.stock_fingerprint=@capturedFingerprint':''} AND (m.sale_id IS NULL OR (EXISTS(SELECT 1 FROM sales WHERE id=m.sale_id) AND m.sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=m.sale_id),0)))) AND ${taggedReturnAuthority()} AND ${supplierManifestAuthority()} AND (@supplierManifest IS NULL OR (${stockActorPredicate}))`, { operation: operation.id, id: member.id, taggedIds: taggedMemberIds(member), ...supplierManifestParams(member), ...stockActorParams(user),...(supplierExact?{capturedFingerprint:supplierFingerprints!.get(member.id)}:{}) }))
   }
   for (const member of snapshot.members) statements.push(...memberStatements(member, directionSign, user, stamp, exact))
   statements.push(...exact.takeFinalPhysicalWrites())

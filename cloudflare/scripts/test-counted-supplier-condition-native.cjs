@@ -77,8 +77,104 @@ async function completeMembership(make){
  }
  console.log('complete immutable supplier item/source coverage and member races: PASS')
 }
+async function archivedSupplierProjection(make){
+ const mutations={
+  'empty-stock':member=>{member.stock=[]},'missing-stock':member=>{member.stock.pop()},'duplicate-stock':member=>{member.stock.push({...member.stock[0]})},
+  'wrong-usd':member=>{member.stock[0].costUsd=999},'wrong-khr':member=>{member.stock[0].costKhr=999},'wrong-quantity':member=>{member.stock[0].quantity=.25},
+  'wrong-branch':member=>{member.stock[0].branchId=2},'wrong-batch':member=>{member.stock[0].batchId=member.stock[0].batchId===null?1:null},
+  'wrong-product':member=>{member.stock[0].productId=2},'wrong-lot':member=>{member.stock[0].damagedLotId=2},
+  'no-manifest':member=>{delete member.supplierManifest},'unchanged':member=>{member.changed=false},'wrong-scope':member=>{member.scope='customer'},
+  'reversed-direction':member=>{[member.before.status,member.after.status]=[member.after.status,member.before.status];member.stock.forEach(delta=>delta.quantity=-delta.quantity)}
+ }
+ const replayState=f=>({...state(f),operations:f.sql.prepare('SELECT * FROM return_bulk_operations ORDER BY id').all(),
+  history:f.sql.prepare('SELECT id,status,undo_payload,redo_payload,label,created_by_id FROM action_history ORDER BY id').all(),snapshots:f.sql.prepare('SELECT * FROM undo_snapshots ORDER BY id').all()})
+ for(const tier of ['free','paid'])for(const receipt of [false,true])for(const direction of ['undo','redo']){
+  const f=await h.world(make,tier,'zero',sql=>{h.seed(.5,receipt)(sql);sql.exec(`INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source,unit_cost_usd)VALUES(1,1,1,${receipt?1:'NULL'},.25,.25,'damaged','remove',2)`)});
+  try{
+   const body=input('archived-projection',.125);body.items.push({...body.items[0],stock_condition:'ordinary',damaged_lot_id:undefined,cost_price_usd:3})
+   const id=(await f.call('/returns/supplier',body)).json.id,cancelled=await status(f,id,'completed','cancelled','archive-cancel');assert.equal(cancelled.status,200)
+   const history=cancelled.json.actionHistoryId,generation=direction==='undo'?0:1
+   if(direction==='redo')assert.equal((await f.call('/action-history/'+history+'/undo',{expected_generation:0})).status,200)
+   const saved=f.sql.prepare('SELECT s.* FROM undo_snapshots s JOIN return_bulk_operations o ON o.snapshot_id=s.id WHERE o.history_id=?').get(history)
+   for(const mode of [...Object.keys(mutations),'no-member']){
+    const snapshot=JSON.parse(saved.payload_json)
+    if(mode==='no-member')snapshot.members=[];else mutations[mode](snapshot.members[0])
+    f.sql.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=?').run(JSON.stringify(snapshot),saved.id)
+    const before=replayState(f),result=await f.call('/action-history/'+history+'/'+direction,{expected_generation:generation})
+    console.log(JSON.stringify({archiveTier:tier,receipt,direction,mode,status:result.status}))
+    assert.equal(result.status,409,'corrupt archived projection cannot compensate or advance history');assert.deepEqual(replayState(f),before)
+   }
+   f.sql.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=?').run(saved.payload_json,saved.id)
+   assert.equal((await f.call('/action-history/'+history+'/'+direction,{expected_generation:generation})).status,200)
+   assert.equal(f.state().physical,direction==='undo'?.5:.75);assert.equal(f.state().tags[0].quantity_remaining,direction==='undo'?.125:.25)
+   assert.equal(f.sql.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get(saved.id).payload_json,saved.payload_json,'valid compensation does not rewrite original snapshot')
+   assert.deepEqual(f.sql.prepare('SELECT unit_cost_usd FROM inventory_movements WHERE reference_id=? ORDER BY id DESC LIMIT 2').all(id).map(row=>row.unit_cost_usd),[3,2])
+  }finally{f.sql.close()}
+ }
+ console.log('archived supplier source projection/coverage/cost UndoRedo integrity: PASS')
+}
+async function committedSupplierWitness(make){
+ for(const tier of ['free','paid'])for(const receipt of [false,true]){
+  const f=await h.world(make,tier,'zero',sql=>{h.seed(.5,receipt)(sql);sql.exec("INSERT INTO branches(id,name,is_active)VALUES(2,'Successor',1);INSERT INTO branch_stock(product_id,branch_id,quantity)VALUES(1,2,0)")})
+  try{
+   const created=await f.call('/returns/supplier',input('redirect-source',.125,'ordinary',null));assert.equal(created.status,200)
+   const id=created.json.id,manifest=f.sql.prepare('SELECT request_json FROM return_create_receipts WHERE return_id=?').get(id).request_json
+   const statements=[{sql:'UPDATE branch_stock SET quantity=0 WHERE product_id=1 AND branch_id=1'},
+    {sql:'UPDATE branch_stock SET quantity=.375 WHERE product_id=1 AND branch_id=2'},
+    {sql:'UPDATE branches SET is_active=0,is_default=0,successor_branch_id=2 WHERE id=1'}]
+   if(receipt)statements.push({sql:"INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,unit_cost_usd,is_active)VALUES(2,1,'fold-survivor','2026-09-01',2,1)"},
+    {sql:'UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=1 AND branch_id=1'},
+    {sql:'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)VALUES(2,2,.375)'},
+    {sql:"INSERT INTO audit_logs(action,details)VALUES('branch_cutover_lot_fold','{\"branchId\":2,\"survivorBatchId\":2,\"foldedBatchIds\":[1]}')"})
+   await h.loadStockSession('lib/stockTransaction.ts').executeStockTransaction(h.loadStockSession('lib/db.ts').getDb(f.env),statements,'once')
+   let queries=0;const raw=f.env.DB,wrap=statement=>new Proxy(statement,{get(target,key){
+    if(key==='bind')return(...args)=>wrap(target.bind(...args));if(['first','all','run'].includes(key))return(...args)=>{queries++;return target[key](...args)};return target[key]
+   }})
+   f.env.DB=new Proxy(raw,{get(target,key){if(key==='prepare')return text=>wrap(target.prepare(text));if(key==='batch')return rows=>{queries+=rows.length;return target.batch(rows)};return target[key]}})
+   const header=f.sql.prepare('SELECT * FROM returns WHERE id=?').get(id)
+   const redirect=async()=>{
+    queries=0;const tasks=[]
+    const response=await make().default.fetch(new Request('https://admin.business.test/api/returns/bulk',{method:'POST',headers:{cookie:'bos_session=counted-set-native','content-type':'application/json',origin:'https://admin.business.test','X-Branch-Redirect':'2'},
+     body:JSON.stringify({client_request_id:'redirect-cancel',field:'status',source:'completed',target:'cancelled',items:[{id,expected_status:header.status,expected_method:header.supplier_settlement,expected_updated_at:header.updated_at}]})}),f.env,{waitUntil:promise=>tasks.push(Promise.resolve(promise)),passThroughOnException(){}})
+    while(tasks.length)await Promise.all(tasks.splice(0))
+    const json=await response.json();console.log(JSON.stringify({redirectTier:f.env.PLAN_TIER,receipt,status:response.status,queries}));assert.ok(queries<=(f.env.PLAN_TIER==='free'?50:1000));return {status:response.status,json}
+   }
+   if(tier==='free'){
+    const before=state(f),refused=await redirect();assert.equal(refused.status,400);assert.equal(refused.json.code,'customer_return_over_plan_budget');assert.deepEqual(state(f),before)
+    f.env.PLAN_TIER='paid'
+   }
+   const accepted=await redirect();assert.equal(accepted.status,200,JSON.stringify(accepted));const cancelled=accepted.json
+   f.env.PLAN_TIER=tier
+   const snapshot=f.sql.prepare('SELECT s.payload_json FROM undo_snapshots s JOIN return_bulk_operations o ON o.snapshot_id=s.id WHERE o.history_id=?').get(cancelled.actionHistoryId).payload_json
+   const delta=JSON.parse(snapshot).members[0].stock[0];assert.equal(delta.branchId,2);assert.equal(delta.batchId,receipt?2:null)
+   assert.equal((await f.call('/action-history/'+cancelled.actionHistoryId+'/undo',{expected_generation:0})).status,200)
+   assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=2').get().quantity,.375)
+   assert.equal((await f.call('/action-history/'+cancelled.actionHistoryId+'/redo',{expected_generation:1})).status,200)
+   assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=2').get().quantity,.5)
+   assert.equal(f.state().physical,0);assert.equal(f.state().cache,.5)
+   assert.equal(f.sql.prepare('SELECT request_json FROM return_create_receipts WHERE return_id=?').get(id).request_json,manifest)
+   assert.equal(f.sql.prepare('SELECT payload_json FROM undo_snapshots WHERE payload_json=?').get(snapshot).payload_json,snapshot)
+  }finally{f.sql.close()}
+ }
+ for(const tier of ['free','paid'])for(const direction of ['undo','redo']){
+  const f=await h.world(make,tier,'zero',h.seed(.5,true))
+  try{
+   const id=(await f.call('/returns/supplier',input('witness-race',.125,'ordinary',null))).json.id,cancelled=await status(f,id,'completed','cancelled','witness-race-cancel');assert.equal(cancelled.status,200)
+   if(direction==='redo')assert.equal((await f.call('/action-history/'+cancelled.json.actionHistoryId+'/undo',{expected_generation:0})).status,200)
+   const before=state(f),count=before.movements.length
+   f.competeBeforeCommit([{sql:"INSERT INTO inventory_movements(product_id,branch_id,batch_id,movement_type,quantity,reference_id)VALUES(1,1,1,'supplier_return',0,@id)",params:{id}},
+    {sql:"UPDATE return_bulk_members SET stock_fingerprint=(SELECT json_group_array(json_array(id,product_id,branch_id,batch_id,movement_type,quantity)) FROM (SELECT * FROM inventory_movements WHERE reference_id=@id AND movement_type IN('return','return_reversal','damage_in','damage_reversal','supplier_return','supplier_return_reversal') ORDER BY id)) WHERE return_id=@id",params:{id}}])
+   const result=await f.call('/action-history/'+cancelled.json.actionHistoryId+'/'+direction,{expected_generation:direction==='undo'?0:1})
+   assert.equal(result.status,409);assert.equal(f.state().physical,before.physical);assert.equal(f.state().cache,before.cache);assert.deepEqual(state(f).returns,before.returns);assert.deepEqual(state(f).audit,before.audit)
+   assert.equal(f.state().movements.length,count+1,'only intentional rival witness append persists')
+  }finally{f.sql.close()}
+ }
+ console.log('committed ordinary redirect/fold witness and late coherent fingerprint rivals: PASS')
+}
 async function main(){
  const make=await h.bundle.exports.bundleWorker()
+ await committedSupplierWitness(make)
+ await archivedSupplierProjection(make)
  await completeMembership(make)
  for(const tier of ['free','paid'])for(const receipt of [false,true]){
   const f=await h.world(make,tier,'zero',sql=>{h.seed(.3,receipt)(sql);sql.exec(`INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source,unit_cost_usd)VALUES(1,1,1,${receipt?1:'NULL'},.2,.2,'damaged','remove',2)`)});
@@ -189,3 +285,4 @@ async function main(){
  console.log('supplier explicit immutable source apply/cancel/restore/Undo/Redo: PASS')
 }
 if(require.main===module)main().catch(e=>{console.error(e);process.exitCode=1})
+module.exports={committedSupplierWitness}
