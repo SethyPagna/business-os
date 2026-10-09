@@ -46,7 +46,7 @@ async function controls(make){
    const {f,call}=await scenario(make,tier);try{
     let saved;if(direction!=='apply'){saved=await call();if(direction==='redo')await f.call('/action-history/'+saved.json.action_history_id+'/undo',{expected_generation:0})}
     const before=state(f);f.sql.exec("CREATE TRIGGER line_edit_unrelated BEFORE INSERT ON inventory_movements WHEN NEW.reference_id LIKE 'stock-in-edit:500:%' BEGIN SELECT RAISE(ABORT,'synthetic_unrelated_line_error'); END");
-    const invoke=()=>direction==='apply'?call():f.call('/action-history/'+saved.json.action_history_id+'/'+direction,{expected_generation:direction==='undo'?0:1});const failed=await invoke();assert.equal(failed.status,direction==='apply'?500:409,JSON.stringify(failed));assert.deepEqual(state(f),before);f.sql.exec('DROP TRIGGER line_edit_unrelated');
+    const invoke=()=>direction==='apply'?call():f.call('/action-history/'+saved.json.action_history_id+'/'+direction,{expected_generation:direction==='undo'?0:1});const failed=await invoke();assert.equal(failed.status,500,JSON.stringify(failed));assert.deepEqual(state(f),before);f.sql.exec('DROP TRIGGER line_edit_unrelated');
     f.loseNextCommitAcknowledgement();const result=await invoke();assert.equal(result.status,200,JSON.stringify(result));const committed=state(f);const retry=await invoke();assert.equal(retry.status,200,JSON.stringify(retry));assert.deepEqual(state(f),committed);console.log('PASS line edit rollback/committed lost ACK/canonical recovery '+JSON.stringify({tier,direction}));
    }finally{f.sql.close()}
   }

@@ -184,10 +184,9 @@ function refuse(status: number, message: string, code: string, details: Row = {}
   throw new EditRefusal(status, message, code, details)
 }
 
-// A failed guard inserts 0 into stock_session_guards, whose CHECK(guard_value
-// = 1) aborts the whole batch. Same helper shape as lib/stockLotAdjustment.ts.
+// The local marker distinguishes a failed preimage guard from unrelated DB errors.
 function guard(condition: string, params: Row): Statement {
-  return { sql: `INSERT INTO stock_session_guards(guard_value) SELECT 0 WHERE COALESCE((${condition}),0)=0`, params }
+  return { sql: `INSERT INTO stock_session_guards(guard_value) SELECT json_extract('[]','$[stock_in_line_edit_conflict]') WHERE COALESCE((${condition}),0)=0`, params }
 }
 
 export type StockInLineEditBudget = { limit: number; used(): number }
@@ -399,6 +398,10 @@ function counterPlans(plans: MovementPlan[]): MovementPlan[] {
 async function digest(textValue: string): Promise<string> {
   const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(textValue))
   return [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function isLineEditConflict(error: unknown): boolean {
+  return isCountedStockConflict(error) || (error instanceof Error ? error.message : String(error)).includes('$[stock_in_line_edit_conflict]')
 }
 
 function isMaintenanceError(error: unknown): boolean {
@@ -771,7 +774,7 @@ async function applyInner(raw: D1Compat, user: SessionUser, movementId: number, 
     if (activeGuard) throw activeGuard
     if (isMaintenanceError(error)) return { status: 503, body: { error: 'Maintenance is in progress. Nothing was changed; try again shortly.', code: 'maintenance_active' } }
     if (landing && isBranchRedirectGuardError(error)) return { status: 409, body: await branchRedirectGuardRefusal(db, landing.addressedBranchId, redirectTarget) }
-    if (/constraint/i.test(String(error))) return { status: 409, body: { error: 'Stock changed while saving. Nothing was changed; reopen the session and try again.', code: 'stale_state' } }
+    if (isLineEditConflict(error)) return { status: 409, body: { error: 'Stock changed while saving. Nothing was changed; reopen the session and try again.', code: 'stale_state' } }
     throw error
   }
   const stored = await previous()
@@ -1080,6 +1083,7 @@ async function replayInner(
     const activeGuard = productStockGuardError(error)
     if (activeGuard) throw activeGuard
     if (isMaintenanceError(error)) throw new StockInLineEditReplayError('Maintenance is in progress. Nothing was changed.', 503)
+    if (!isLineEditConflict(error)) throw error
     // A guard tripped after the reads above: something landed in between.
     // RET-D: name the newest change of the product at the branch since this
     // operation's own rows (another edit of the line counts; its own rows do not).
