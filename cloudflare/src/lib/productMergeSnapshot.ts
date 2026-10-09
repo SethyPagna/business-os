@@ -21,8 +21,11 @@ export type ProductMergeStockRow = {
 }
 
 export type ProductMergeImageRow = {
+  id: number
+  product_id: number
   image_path: string
-  sort_order?: number | null
+  sort_order: number | null
+  created_at: string | null
 }
 
 export type ProductMergeProductRow = Record<string, unknown> & {
@@ -48,7 +51,7 @@ export type ProductMergeCaseSnapshot = {
   duplicateImageRows: ProductMergeImageRow[]
   canonicalImageRows: ProductMergeImageRow[]
   reparentedByTable: Array<{ table: string; column: string; ids: number[] }>
-  promotionRuleRows: Array<{ id: number; product_ids: string | null }>
+  promotionRuleRows: Array<{ id: number; product_ids: string | null; updated_at: string | null }>
   childProductRows: Array<{ id: number; parent_id: number | null; updated_at: string | null }>
 }
 
@@ -131,6 +134,7 @@ const PRODUCT_COLUMNS = [
 
 const MERGE_CAPTURE_MAX_ROWS = 10_000
 const MERGE_CAPTURE_MAX_BYTES = 512 * 1_024
+const IMAGE_COLUMNS = ['id', 'product_id', 'image_path', 'sort_order', 'created_at']
 const BATCH_COLUMNS = ['id', 'variant_product_id', 'batch_key', 'lot_code', 'expiry_date', 'received_at',
   'is_active', 'notes', 'synthetic', 'created_at', 'updated_at', 'batch_number', 'supplier_id', 'supplier_name',
   'payment_status', 'credit_due_date', 'unit_cost_usd', 'received_quantity', 'received_branch_id',
@@ -254,15 +258,15 @@ export function planProductMergeCaseSnapshot(
       FROM product_cost_entries WHERE product_id IN (@keeperId,@duplicateId) ORDER BY id` },
     { key: 'damagedStock', columns: DAMAGED_STOCK_COLUMNS, sql: `SELECT ${DAMAGED_STOCK_COLUMNS.join(',')}
       FROM damaged_stock_lots WHERE product_id IN (@keeperId,@duplicateId) ORDER BY id` },
-    { key: 'duplicateImages', columns: ['image_path', 'sort_order'], sql: 'SELECT image_path,sort_order FROM product_images WHERE product_id=@duplicateId ORDER BY sort_order,id' },
-    { key: 'canonicalImages', columns: ['image_path'], sql: 'SELECT image_path FROM product_images WHERE product_id=@keeperId ORDER BY id' },
+    { key: 'duplicateImages', columns: IMAGE_COLUMNS, sql: `SELECT ${IMAGE_COLUMNS.join(',')} FROM product_images WHERE product_id=@duplicateId ORDER BY sort_order,id` },
+    { key: 'canonicalImages', columns: IMAGE_COLUMNS, sql: `SELECT ${IMAGE_COLUMNS.join(',')} FROM product_images WHERE product_id=@keeperId ORDER BY id` },
     ...reparentTables.map(({ table, column }, index) => ({
       key: `reparent:${index}`, columns: ['id'],
       // table/column are compile-time constants supplied from
       // MERGE_REPARENT_TABLES, never request data.
       sql: `SELECT id FROM ${table} WHERE ${column}=@duplicateId ORDER BY id`,
     })),
-    { key: 'promotionRules', columns: ['id', 'product_ids'], sql: 'SELECT id,product_ids FROM promotion_rules ORDER BY id' },
+    { key: 'promotionRules', columns: ['id', 'product_ids', 'updated_at'], sql: 'SELECT id,product_ids,updated_at FROM promotion_rules ORDER BY id' },
     { key: 'childProducts', columns: ['id', 'parent_id', 'updated_at'], sql: 'SELECT id,parent_id,updated_at FROM products WHERE parent_id=@duplicateId ORDER BY id' },
   ]
   const reads = [captureRead(sections, keeperId, duplicateId)]
@@ -289,7 +293,7 @@ export function planProductMergeCaseSnapshot(
       duplicateImageRows: asRows<ProductMergeImageRow>('duplicateImages'),
       canonicalImageRows: asRows<ProductMergeImageRow>('canonicalImages'),
       reparentedByTable,
-      promotionRuleRows: asRows<{ id: number; product_ids: string | null }>('promotionRules'),
+      promotionRuleRows: asRows<{ id: number; product_ids: string | null; updated_at: string | null }>('promotionRules'),
       childProductRows: asRows<{ id: number; parent_id: number | null; updated_at: string | null }>('childProducts'),
     }
     captureProofs.set(snapshot, { read: reads[0], observed: captured.get('capture')![0].data as string })
