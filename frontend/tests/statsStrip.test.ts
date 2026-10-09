@@ -446,6 +446,7 @@ test('Sales CSV delegate executes with the frozen selected-currency formatter an
       }
       if (id.endsWith('/csv.ts')) return { downloadCSV: (name: string, rows: unknown) => downloads.push({ name, rows }) }
       if (id === './salesReportExport.ts') return require('../src/components/sales/reports/salesReportExport.ts')
+      if (id.endsWith('/actorReadScope.ts')) return { captureActorReadScope: () => ({ authority: 'fixture' }) }
       // Preparation, actor capture and print are deliberately outside this
       // publication probe; salesListExport.test.ts executes their lifecycle.
       return {}
