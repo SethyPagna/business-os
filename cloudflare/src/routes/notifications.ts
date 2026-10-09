@@ -2,7 +2,9 @@ import { Hono } from 'hono'
 import type { Env } from '../index'
 import { getDb } from '../lib/db'
 import { stockVisibleProductSql } from '../lib/productStockGuard'
-import { buildPortalConfig, summarizePoints } from './portal'
+import { buildPortalConfig, createPointsAccumulator, accumulatePoints, summarizePointTotals, type PointsAccumulator, type PointsLedger } from './portal'
+import { getPlanLimits } from '../lib/planTier'
+import { requestMetricsOf } from '../lib/requestMetrics'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -451,7 +453,9 @@ async function buildSalesSection(env: Env): Promise<NotificationSection | null> 
   }
 }
 
-async function buildLoyaltySection(env: Env, threshold: number): Promise<NotificationSection | null> {
+class LoyaltyReadBudgetError extends Error {}
+
+async function buildLoyaltySection(env: Env, threshold: number, statementsUsed: () => number): Promise<NotificationSection | null> {
   const db = getDb(env)
   const settings = await db.prepare(`SELECT key, value FROM settings WHERE key IN (
     'loyalty_points_enabled', 'customer_portal_points_basis', 'customer_portal_points_per_usd',
@@ -459,65 +463,63 @@ async function buildLoyaltySection(env: Env, threshold: number): Promise<Notific
   )`).all<{ key: string; value: string }>()
   const config = buildPortalConfig(rowsToSettingMap(settings), env)
   if (!config.loyaltyPointsEnabled) return null
-  const [salesRows, returnRows, rewardRows, adjustmentRows] = await Promise.all([
-    db.prepare(`
-      SELECT customer_id,
-        COALESCE(SUM(CASE WHEN COALESCE(sale_status, 'completed') <> 'awaiting_payment' AND COALESCE(loyalty_accrual, 1) = 1 THEN COALESCE(total_usd, 0) ELSE 0 END), 0) AS sales_usd,
-        COALESCE(SUM(CASE WHEN COALESCE(sale_status, 'completed') <> 'awaiting_payment' AND COALESCE(loyalty_accrual, 1) = 1 THEN COALESCE(total_khr, 0) ELSE 0 END), 0) AS sales_khr,
-        COALESCE(SUM(COALESCE(membership_points_redeemed, 0)), 0) AS redeemed
-      FROM sales
-      WHERE customer_id IS NOT NULL AND COALESCE(sale_status, 'completed') <> 'cancelled'
-      GROUP BY customer_id
-    `).all<{ customer_id: number; sales_usd: number; sales_khr: number; redeemed: number }>(),
-    db.prepare(`
-      SELECT customer_id, COALESCE(SUM(COALESCE(total_refund_usd, 0)), 0) AS refunds_usd,
-        COALESCE(SUM(COALESCE(total_refund_khr, 0)), 0) AS refunds_khr
-      FROM returns
-      WHERE customer_id IS NOT NULL AND COALESCE(status, 'completed') != 'cancelled'
-        AND COALESCE(return_scope, 'customer') != 'supplier'
-      GROUP BY customer_id
-    `).all<{ customer_id: number; refunds_usd: number; refunds_khr: number }>(),
-    db.prepare(`
-      SELECT customer_id, COALESCE(SUM(COALESCE(reward_points, 0)), 0) AS rewarded
-      FROM customer_share_submissions
-      WHERE customer_id IS NOT NULL AND status = 'approved' AND reward_points_voided_at IS NULL
-      GROUP BY customer_id
-    `).all<{ customer_id: number; rewarded: number }>(),
-    db.prepare(`
-      SELECT customer_id, COALESCE(SUM(points), 0) AS manually_awarded
-      FROM loyalty_point_adjustments
-      WHERE voided_at IS NULL
-      GROUP BY customer_id
-    `).all<{ customer_id: number; manually_awarded: number }>(),
-  ])
-
-  const salesMap = new Map(salesRows.map((row) => [Number(row.customer_id), row]))
-  const returnsMap = new Map(returnRows.map((row) => [Number(row.customer_id), row]))
-  const rewardsMap = new Map(rewardRows.map((row) => [Number(row.customer_id), row]))
-  const adjustmentsMap = new Map(adjustmentRows.map((row) => [Number(row.customer_id), row]))
-  const customerIds = new Set<number>([
-    ...salesMap.keys(), ...returnsMap.keys(), ...rewardsMap.keys(), ...adjustmentsMap.keys(),
-  ])
-  if (!customerIds.size) return null
-
-  const matches = [...customerIds].map((customerId) => {
-    const sale = salesMap.get(customerId)
-    const returned = returnsMap.get(customerId)
-    const { balance } = summarizePoints(
-      [{ total_usd: sale?.sales_usd, total_khr: sale?.sales_khr, membership_points_redeemed: sale?.redeemed }],
-      [{ total_refund_usd: returned?.refunds_usd, total_refund_khr: returned?.refunds_khr }],
-      [{ id: customerId, status: 'approved', reward_points: rewardsMap.get(customerId)?.rewarded ?? 0 }],
-      config,
-      [{ points: adjustmentsMap.get(customerId)?.manually_awarded }],
-    )
-    return { id: customerId, balance }
-  }).filter((match) => match.balance >= threshold)
+  const pageSize = 500
+  const limits = getPlanLimits(env)
+  const rowLimit = limits.tier === 'free' ? 10_000 : 100_000
+  const reserve = 2
+  const initial = statementsUsed()
+  let localReads = 0
+  const used = () => Math.max(initial + localReads, statementsUsed())
+  const refuse = (): never => {
+    throw new LoyaltyReadBudgetError('The complete loyalty notification read exceeds this request budget.')
+  }
+  async function readRows<T>(sql: string, params?: Record<string, unknown> | unknown[]): Promise<T[]> {
+    if (used() + 1 + reserve > limits.d1QueriesPerInvocation) refuse()
+    localReads++
+    const statement = db.prepare(sql)
+    return statement.allOnce ? statement.allOnce<T>(params) : statement.all<T>(params)
+  }
+  const ledgers: Array<{ kind: PointsLedger; table: string; columns: string; predicate: string }> = [
+    { kind: 'sales', table: 'sales', columns: 'sale_status,total_usd,total_khr,membership_points_redeemed,loyalty_accrual', predicate: "COALESCE(sale_status,'completed') <> 'cancelled'" },
+    { kind: 'returns', table: 'returns', columns: 'status,total_refund_usd,total_refund_khr', predicate: "COALESCE(status,'completed') <> 'cancelled' AND COALESCE(return_scope,'customer') <> 'supplier'" },
+    { kind: 'submissions', table: 'customer_share_submissions', columns: 'status,reward_points', predicate: "status = 'approved' AND reward_points_voided_at IS NULL" },
+    { kind: 'adjustments', table: 'loyalty_point_adjustments', columns: 'points', predicate: 'voided_at IS NULL' },
+  ]
+  const counts = await readRows<{ kind: PointsLedger; count: number }>(ledgers.map(ledger =>
+    `SELECT /* loyalty-ledger */ '${ledger.kind}' kind,COUNT(*) count FROM ${ledger.table} WHERE customer_id IS NOT NULL AND ${ledger.predicate}`).join(' UNION ALL '))
+  const countMap = new Map(counts.map(row => [row.kind, Number(row.count)]))
+  const totalRows = counts.reduce((total, row) => total + Number(row.count), 0)
+  if (!totalRows) return null
+  const plannedReads = counts.reduce((total, row) => total + (Number(row.count) ? Math.floor(Number(row.count) / pageSize) + 1 : 0), 1)
+  if (totalRows > rowLimit || used() + plannedReads + reserve > limits.d1QueriesPerInvocation) refuse()
+  const totalsByCustomer = new Map<number, PointsAccumulator>()
+  let walked = 0
+  for (const ledger of ledgers) {
+    if (!countMap.get(ledger.kind)) continue
+    let cursor = 0
+    for (;;) {
+      const rows = await readRows<Record<string, unknown>>(`SELECT /* loyalty-ledger */ id,customer_id,${ledger.columns}
+        FROM ${ledger.table} WHERE id > @cursor AND customer_id IS NOT NULL AND ${ledger.predicate}
+        ORDER BY id ASC LIMIT @pageSize`, { cursor, pageSize })
+      walked += rows.length
+      if (walked > rowLimit) refuse()
+      for (const row of rows) {
+        const id = Number(row.customer_id)
+        let totals = totalsByCustomer.get(id)
+        if (!totals) { totals = createPointsAccumulator(); totalsByCustomer.set(id, totals) }
+        accumulatePoints(totals, ledger.kind, row, config)
+      }
+      if (rows.length < pageSize) break
+      cursor = Number(rows[rows.length - 1].id)
+    }
+  }
+  const matches = [...totalsByCustomer].map(([id, totals]) => ({ id, balance: summarizePointTotals(totals, config).balance }))
+    .filter(match => match.balance >= threshold)
     .sort((left, right) => right.balance - left.balance || left.id - right.id)
   if (!matches.length) return null
   const preview = matches.slice(0, 50)
   const placeholders = preview.map(() => '?').join(',')
-  const customerRows = await db.prepare(`SELECT id, name FROM customers WHERE id IN (${placeholders})`)
-    .all<{ id: number; name: string }>(preview.map(customer => customer.id))
+  const customerRows = await readRows<{ id: number; name: string }>(`SELECT id, name FROM customers WHERE id IN (${placeholders})`, preview.map(customer => customer.id))
   const nameMap = new Map(customerRows.map(row => [Number(row.id), row.name]))
 
   return {
@@ -741,6 +743,7 @@ app.get('/summary', async (c) => {
   const cachedSection = sectionCacheFor(c)
 
   const tasks: Array<Promise<NotificationSection | null>> = []
+  let loyaltyTask: (() => Promise<NotificationSection | null>) | undefined
   if (preferences.inventoryEnabled && hasPermission(user, 'inventory')) {
     const lowStockConfig = await loadLowStockConfig(c.env)
     tasks.push(cachedSection('inventory', ['products', 'stock', 'settings'], lowStockCacheInput(lowStockConfig),
@@ -754,8 +757,8 @@ app.get('/summary', async (c) => {
   // a view-only user sees it, a full user whose sales:view was switched off does not.
   if (preferences.salesEnabled && getActionTier(user, 'sales', 'view') !== 'none') tasks.push(buildSalesSection(c.env))
   if (preferences.loyaltyEnabled && getActionTier(user, 'contacts', 'view') !== 'none') {
-    tasks.push(cachedSection('loyalty', ['sales', 'returns', 'customers', 'settings'], `${preferences.loyaltyThreshold}:${loyaltyPointsEnabled ? 1 : 0}`,
-      () => buildLoyaltySection(c.env, preferences.loyaltyThreshold)))
+    loyaltyTask = () => cachedSection('loyalty', ['sales', 'returns', 'customers', 'settings'], `${preferences.loyaltyThreshold}:${loyaltyPointsEnabled ? 1 : 0}`,
+      () => buildLoyaltySection(c.env, preferences.loyaltyThreshold, () => requestMetricsOf(c)?.invocation.attemptedStatements || 0))
   }
   // Pending Share & Reward submissions are an approve/reject queue (an
   // admin decision awards or denies real loyalty points), not an
@@ -785,7 +788,14 @@ app.get('/summary', async (c) => {
   // they are the ones who can act on it.
   if (isAdminControlUser(user)) tasks.push(buildDeviceApprovalSection(c.env))
 
-  const results = await Promise.all(tasks)
+  let results: Array<NotificationSection | null>
+  try {
+    results = await Promise.all(tasks)
+    if (loyaltyTask) results.push(await loyaltyTask())
+  } catch (error) {
+    if (error instanceof LoyaltyReadBudgetError) return c.json({ error: error.message, code: 'loyalty_read_budget_exceeded' }, 503)
+    throw error
+  }
   for (const section of results) if (section) sections.push(section)
   // Device approve/reject/revoke requests are the highest-priority queue --
   // an admin missing a pending device means someone is locked out (or worse,

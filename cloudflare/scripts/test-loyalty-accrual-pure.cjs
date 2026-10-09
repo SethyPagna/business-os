@@ -41,25 +41,24 @@ assert.equal(rawBalance('usd',0,0), -5, 'redemption still counts when earning ra
 assert.match(salesRoute, /preparePointsRedemption\(db, customer.id, membershipPointsRedeemed\)/, 'checkout uses the tested shared balance')
 assert.match(salesRoute, /redemptionGuard \? \[redemptionGuard\] : \[\][\s\S]{0,30}saleInsertStatement/, 'checkout rechecks balance atomically before insertion')
 
-// ---- 3. The notifications aggregation SQL, same treatment ----
+// ---- 3. Notification reads preserve per-row accrual/redemption inputs ----
 const notifications = read(path.join('routes', 'notifications.ts'))
-const notifMatch = notifications.match(/`\s*\n\s*(SELECT customer_id,\s*\n[\s\S]*?GROUP BY customer_id)\s*\n\s*`/)
-assert.ok(notifMatch, 'routes/notifications.ts still contains the loyalty sales aggregation')
-const notifRow = sqlite.prepare(notifMatch[1]).all().find((r) => r.customer_id === 7)
-assert.equal(notifRow.sales_usd, 12, 'notifications earned skips the accrual=0 sale')
-assert.equal(notifRow.redeemed, 5, 'notifications redeemed still counts the non-accruing sale')
+assert.match(notifications, /columns: 'sale_status,total_usd,total_khr,membership_points_redeemed,loyalty_accrual'/,
+  'notification pages carry every per-sale points input; actual route parity is tested separately')
+assert.doesNotMatch(notifications.slice(notifications.indexOf('async function buildLoyaltySection'), notifications.indexOf('function importPermissionForType')), /SUM\(/,
+  'SQL aggregate arithmetic cannot replace the shared sequential points contract')
 
 // ---- 4. summarizePoints (REAL portal.ts source, extracted + transpiled) ----
 const portal = read(path.join('routes', 'portal.ts'))
 const calcStart = portal.indexOf('function calculatePointsValue')
 const sumStart = portal.indexOf('export function summarizePoints')
 assert.ok(calcStart > 0 && sumStart > calcStart, 'portal.ts still defines calculatePointsValue + summarizePoints')
-const sumEnd = portal.indexOf('\n}', portal.indexOf('return {', sumStart)) + 2
+const sumEnd = portal.indexOf('\nfunction normalizePortalSubmissionRows', sumStart)
 const extracted = 'const toNumber = (v) => Number(v) || 0\n' + portal.slice(calcStart, sumEnd)
 const output = ts.transpileModule(extracted, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText
 const moduleObj = { exports: {} }
 new Function('exports', 'require', 'module', output)(moduleObj.exports, require, moduleObj)
-const { summarizePoints } = moduleObj.exports
+const { summarizePoints, createPointsAccumulator, accumulatePoints, summarizePointTotals } = moduleObj.exports
 const config = { pointsBasis: 'usd', pointsPerUsd: 1, pointsPerKhr: 0, redeemPoints: 100 }
 const summary = summarizePoints([
   { sale_status: 'completed', total_usd: 10, total_khr: 41000, membership_points_redeemed: 0, loyalty_accrual: 1 },
@@ -68,6 +67,10 @@ const summary = summarizePoints([
 ], [], [], config)
 assert.equal(summary.earned, 12, 'summarizePoints earns only from accruing sales; absent column keeps the default')
 assert.equal(summary.redeemed, 5, 'summarizePoints still counts redemption on a non-accruing sale')
+const streamed = createPointsAccumulator()
+for (const row of sqlite.prepare('SELECT * FROM sales WHERE customer_id=7 ORDER BY id ASC').all()) accumulatePoints(streamed, 'sales', row, config)
+assert.equal(summarizePointTotals(streamed, config).earned, 12, 'streaming the real per-sale rows skips nonaccrual earnings')
+assert.equal(summarizePointTotals(streamed, config).redeemed, 5, 'streaming retains redeemed points on a nonaccruing sale')
 
 // ---- 5. The two writers ----
 const importCommit = read(path.join('lib', 'salesImportCommit.ts'))
@@ -212,7 +215,7 @@ assert.match(pos, /membershipInfo\?\.points\?\.redeemableUnits/, 'the POS reads 
 // non-zero on that one surface.
 for (const [label, source, needles] of [
   ['contacts', contacts, [/FROM loyalty_point_adjustments[^`]*voided_at IS NULL/, /customer_share_submissions[^`]*reward_points_voided_at IS NULL/]],
-  ['notifications', notifications, [/customer_share_submissions[^`]*reward_points_voided_at IS NULL/, /FROM loyalty_point_adjustments[^`]*voided_at IS NULL/]],
+  ['notifications', notifications, [/table: 'customer_share_submissions'[^\n]*reward_points_voided_at IS NULL/, /table: 'loyalty_point_adjustments'[^\n]*voided_at IS NULL/]],
   ['sales checkout', pointsSource, [/FROM loyalty_point_adjustments[^`]*voided_at IS NULL/, /customer_share_submissions[^`]*reward_points_voided_at IS NULL/]],
 ]) {
   for (const needle of needles) {
@@ -235,8 +238,8 @@ assert.match(
   'the loyalty notification section is gated on the switch',
 )
 
-assert.match(notifications, /summarizePoints\([\s\S]*?adjustmentsMap\.get\(customerId\)\?\.manually_awarded/,
-  'notifications passes manual awards through the shared points formula; route counterexamples pin the former drift')
+assert.match(notifications, /kind: 'adjustments', table: 'loyalty_point_adjustments'[\s\S]*?accumulatePoints\(totals, ledger.kind, row, config\)/,
+  'notifications streams manual awards through the shared points formula; actual route cases pin the former drift')
 
 // ---- 8. Points redeemed on a Not Paid sale are spent. The discount is
 // already off what the customer owes, so the points leave the balance when the
@@ -255,10 +258,11 @@ assert.match(notifications, /summarizePoints\([\s\S]*?adjustmentsMap\.get\(custo
   add.run({ r: 'NP-3', usd: 20, khr: 82000, redeemed: 25, status: 'cancelled' })
   const raw = db.prepare(`WITH cfg AS (SELECT 'usd' AS basis, 1 AS usd, 0 AS khr) SELECT ${rawPointsSql('8')} AS raw FROM cfg`).get().raw
   assert.equal(raw, 60, 'checkout balance: earned 100 minus the 40 spent on the Not Paid sale')
-  const notif = db.prepare(notifMatch[1]).all().find((r) => r.customer_id === 8)
-  assert.equal(notif.sales_usd, 100, 'notifications: the Not Paid sale earns nothing yet')
-  assert.equal(notif.redeemed, 40, 'notifications: the Not Paid redemption is spent, the cancelled one is not')
-  const rows = db.prepare(`SELECT sale_status, total_usd, total_khr, membership_points_redeemed, COALESCE(loyalty_accrual, 1) AS loyalty_accrual FROM sales WHERE customer_id = 8`).all()
+  const rows = db.prepare(`SELECT sale_status, total_usd, total_khr, membership_points_redeemed, COALESCE(loyalty_accrual, 1) AS loyalty_accrual FROM sales WHERE customer_id = 8 ORDER BY id ASC`).all()
+  const notificationTotals = createPointsAccumulator()
+  for (const row of rows) accumulatePoints(notificationTotals, 'sales', row, config)
+  assert.equal(summarizePointTotals(notificationTotals, config).earned, 100, 'notifications: the Not Paid sale earns nothing yet')
+  assert.equal(summarizePointTotals(notificationTotals, config).redeemed, 40, 'notifications: the Not Paid redemption is spent, the cancelled one is not')
   const npSummary = summarizePoints(rows, [], [], config)
   assert.equal(npSummary.earned, 100, 'summarizePoints: the Not Paid sale earns nothing yet')
   assert.equal(npSummary.redeemed, 40, 'summarizePoints: the Not Paid redemption is spent, the cancelled one is not')

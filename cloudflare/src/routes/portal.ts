@@ -1515,35 +1515,37 @@ export type SubmissionRow = {
   [key: string]: unknown
 }
 
-export function summarizePoints(sales: Array<Record<string, unknown>>, returns: Array<Record<string, unknown>>, submissions: SubmissionRow[], config: PortalConfigShape, adjustments: Array<Record<string, unknown>> = []) {
-  let earned = 0
-  let deducted = 0
-  let redeemed = 0
-  let rewarded = 0
-  let manuallyAwarded = 0
+export type PointsAccumulator = { earned: number; deducted: number; redeemed: number; rewarded: number; manuallyAwarded: number }
+export type PointsLedger = 'sales' | 'returns' | 'submissions' | 'adjustments'
 
-  for (const sale of sales) {
-    const status = (sale.sale_status as string) || 'completed'
-    if (status === 'cancelled') continue
+export function createPointsAccumulator(): PointsAccumulator {
+  return { earned: 0, deducted: 0, redeemed: 0, rewarded: 0, manuallyAwarded: 0 }
+}
+
+export function accumulatePoints(totals: PointsAccumulator, ledger: PointsLedger, row: Record<string, unknown>, config: PortalConfigShape): void {
+  if (ledger === 'sales') {
+    const status = (row.sale_status as string) || 'completed'
+    if (status === 'cancelled') return
     // Points redeemed on a Not Paid sale are already spent: the discount is
     // off what the customer owes. Only EARNING waits for the sale to be paid.
-    redeemed += toNumber(sale.membership_points_redeemed)
-    if (status === 'awaiting_payment') continue
+    totals.redeemed += toNumber(row.membership_points_redeemed)
+    if (status === 'awaiting_payment') return
     // loyalty_accrual = 0 (historical imports, POS opt-out -- migration 0061)
     // earns nothing, but points REDEEMED on such a sale still count as spent.
     // Absent column (caller didn't select it) keeps the accruing default.
-    if (sale.loyalty_accrual === undefined || sale.loyalty_accrual === null || toNumber(sale.loyalty_accrual) === 1) {
-      earned += calculatePointsValue(toNumber(sale.total_usd), toNumber(sale.total_khr), config)
+    if (row.loyalty_accrual === undefined || row.loyalty_accrual === null || toNumber(row.loyalty_accrual) === 1) {
+      totals.earned += calculatePointsValue(toNumber(row.total_usd), toNumber(row.total_khr), config)
     }
-  }
-  for (const ret of returns) {
-    if (((ret.status as string) || 'completed') === 'cancelled') continue
-    deducted += calculatePointsValue(toNumber(ret.total_refund_usd), toNumber(ret.total_refund_khr), config)
-  }
-  for (const submission of submissions) {
-    if (submission.status === 'approved') rewarded += toNumber(submission.reward_points)
-  }
-  for (const adjustment of adjustments) manuallyAwarded += toNumber(adjustment.points)
+  } else if (ledger === 'returns') {
+    if (((row.status as string) || 'completed') === 'cancelled') return
+    totals.deducted += calculatePointsValue(toNumber(row.total_refund_usd), toNumber(row.total_refund_khr), config)
+  } else if (ledger === 'submissions') {
+    if (row.status === 'approved') totals.rewarded += toNumber(row.reward_points)
+  } else totals.manuallyAwarded += toNumber(row.points)
+}
+
+export function summarizePointTotals(totals: PointsAccumulator, config: PortalConfigShape) {
+  const { earned, deducted, redeemed, rewarded, manuallyAwarded } = totals
 
   const balance = Math.max(0, earned - deducted - redeemed + rewarded + manuallyAwarded)
 
@@ -1579,6 +1581,15 @@ export function summarizePoints(sales: Array<Record<string, unknown>>, returns: 
     redeemValueUsd: Number((redeemableUnits * config.redeemValueUsd).toFixed(2)),
     redeemValueKhr: Number((redeemableUnits * config.redeemValueKhr).toFixed(0)),
   }
+}
+
+export function summarizePoints(sales: Array<Record<string, unknown>>, returns: Array<Record<string, unknown>>, submissions: SubmissionRow[], config: PortalConfigShape, adjustments: Array<Record<string, unknown>> = []) {
+  const totals = createPointsAccumulator()
+  for (const row of sales) accumulatePoints(totals, 'sales', row, config)
+  for (const row of returns) accumulatePoints(totals, 'returns', row, config)
+  for (const row of submissions) accumulatePoints(totals, 'submissions', row, config)
+  for (const row of adjustments) accumulatePoints(totals, 'adjustments', row, config)
+  return summarizePointTotals(totals, config)
 }
 
 function normalizePortalSubmissionRows(rows: Array<Record<string, unknown>>): SubmissionRow[] {

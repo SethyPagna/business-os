@@ -34,7 +34,7 @@ const ledger = []
 function category(sql) {
   if (/out_of_stock_threshold/.test(sql) && /FROM products/.test(sql)) return 'inventory'
   if (/expiry_date/.test(sql) && /FROM products/.test(sql)) return 'expiry'
-  if (/GROUP BY customer_id/.test(sql) || /FROM customers WHERE id IN/.test(sql)) return 'loyalty'
+  if (/loyalty-ledger|GROUP BY customer_id/.test(sql) || /FROM customers WHERE id IN/.test(sql)) return 'loyalty'
   if (/loyalty_points_enabled'/.test(sql)) return 'loyalty'
   if (/FROM sales/.test(sql)) return 'sales'
   if (/cache_versions/.test(sql)) return 'versions'
@@ -44,10 +44,10 @@ function category(sql) {
 const db = {
   prepare(sql) {
     const stmt = raw.prepare(sql)
-    const note = (rows) => ledger.push({ category: category(sql), rows, sql })
+    const note = (values) => ledger.push({ category: category(sql), rows: values.length, bytes: Buffer.byteLength(JSON.stringify(values)), sql })
     return {
-      all: async (params) => { const rows = stmt.all(params) ?? []; note(rows.length); return rows },
-      get: async (params) => { const row = stmt.get(params) ?? null; note(row ? 1 : 0); return row },
+      all: async (params) => { const rows = stmt.all(params) ?? []; note(rows); return rows },
+      get: async (params) => { const row = stmt.get(params) ?? null; note(row ? [row] : []); return row },
       run: async (params) => { const info = stmt.run(params); return { changes: info.meta?.changes ?? 0, lastInsertRowid: Number(info.meta?.last_row_id ?? 0) } },
     }
   },
@@ -454,15 +454,17 @@ async function main() {
     assert.deepEqual(again, value)
     assert.equal(statements('loyalty'), 0, 'unchanged cached answer costs no ledger/name reads')
   })
-  await loyaltyCheck('uncached loyalty uses six bounded result queries on either plan', async () => {
+  await loyaltyCheck('uncached loyalty uses bounded per-row pages on either plan', async () => {
     const saved = globalThis.caches
     delete globalThis.caches
     try {
       const value = await loyalty()
       assert.equal(value.count, 602)
-      assert.equal(statements('loyalty'), 6, 'settings plus four grouped ledgers plus50 names, independent of customer count')
+      assert.equal(statements('loyalty'), 8, 'settings/count plus four ledgers and one extra adjustment page plus50 names')
       assert.ok(ledger.length < 40, 'the complete summary stays below the Free50query ceiling with headroom for authentication')
-      console.log(`  measured ${env.PLAN_TIER}: uncached summary ${ledger.length} SQL reads; loyalty6; name rows50 (SQLite route harness, authentication mocked)`)
+      const pages = ledger.filter(entry => /ORDER BY id ASC LIMIT/.test(entry.sql))
+      assert.ok(pages.every(entry => entry.rows <= 500))
+      console.log(`  measured ${env.PLAN_TIER}: uncached summary ${ledger.length} SQL reads; loyalty${statements('loyalty')}; name rows50; peak page ${Math.max(...pages.map(entry => entry.bytes))} projected bytes (SQLite route harness, authentication mocked)`)
     } finally { globalThis.caches = saved }
   })
   assert.deepEqual(failures, [], 'all loyalty counterexamples must pass')
@@ -470,4 +472,5 @@ async function main() {
   console.log(`\n${passed} passed`)
 }
 
-main().catch((error) => { console.error(error); process.exit(1) })
+module.exports = { raw, load, env, summary, section, cacheModule, ADMIN, ledger }
+if (require.main === module) main().catch((error) => { console.error(error); process.exit(1) })
