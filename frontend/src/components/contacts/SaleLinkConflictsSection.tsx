@@ -179,7 +179,11 @@ export default function SaleLinkConflictsSection({ t, notify, renderToolbar }: {
 
   return (
     <div className="space-y-3">
-      {renderToolbar({ loading, refresh: () => void load(showKept), showKept, setShowKept })}
+      {renderToolbar({ loading, refresh: () => void load(showKept), showKept, setShowKept: (value) => {
+        setShowKept(value)
+        setMismatchPage(1)
+        setMissingPage(1)
+      } })}
 
       {data?.pagination ? (
         <div className="flex flex-wrap items-center gap-2">

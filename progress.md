@@ -1,3 +1,11 @@
+## Owner UI pagination correction and morning release — 09 October 2026
+
+Production and main are verified at440a706e06fe8ad472359d935feb3da575373135 after Paid morning deploy37862538177. Independent live revision, Worker allocation, frontend assets, health and read-only Ops checks passed;200 migrations remain through0242 and the four-ledger removed-product stock invariant is clear. The morning window is consumed. This owner UI successor is not deployed and includes no counted-stock migration.
+
+The prior owner UI candidateCAF passed full gate37867114176 (849Worker/764frontend files, each once), then fresh Astra found a pagination regression in Sale links: changing Show kept retained old page numbers and skipped the first results. The toolbar callback now resets both independent pagers in the same request. An actual mounted child plus shared PaginationControls test starts at pages3/4, toggles both directions and verifies exactly one page1/page1 request; Refresh retains pages2/5. The previous source fails that discriminator.
+
+Affected conflict icons, pagination contract, translations and both backend dismiss/reopen tests pass. All28 toolbar browser groups pass in Chromium and WebKit across narrow/desktop and EN/KM, including missing-host and permission controls. Frontend app/SW and Worker types, i18n and production build/startup verification pass. No API, locale key, quota or financial behavior changed. The new exact-SHA full gate and fresh Astra review are still required before the next eligible night release after20:00Cambodia and a fresh closed-shift check. Physical iOS/Android acceptance, counted/sellable damage and the remaining task register stay open; dated entries below are historical snapshots.
+
 ## Owner UI release candidate: restoration ownership and browser readiness — 09 October 2026
 
 LOCAL CANDIDATE, NOT DEPLOYED. This successor includes the owner UI/account/permission/relative-price batch, both conflicts toolbars and the four original full-gate repairs described below. The original e61 gate failure remains recorded; a new exact-SHA full gate and fresh Astra review are required. Runtime checkpoint d0c83707b452729db03408b06b57ec20ef85742e passed independent bounded refutation; test-only checkpoint b76962eb4f47c9bac0ca6a213cfab7f7ee63bdf7 corrects browser readiness assertions.
