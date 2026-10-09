@@ -1824,9 +1824,9 @@ function ProductsFullEditor() {
   const auxOptionsRequestRef = useRef(0)
   const filterMetaRequestRef = useRef(0)
   const loadWatchdogRef = useRef<number | null>(null)
-  const loadPromiseRef = useRef<Promise<void> | null>(null)
+  const loadPromiseRef = useRef<Promise<boolean> | null>(null)
   const pendingLoadRef = useRef<{ silent: boolean } | null>(null)
-  const latestLoadRef = useRef<((silent?: boolean) => Promise<void>) | null>(null)
+  const latestLoadRef = useRef<((silent?: boolean) => Promise<boolean>) | null>(null)
   const productSaveInFlightRef = useRef(false)
   const [, setCatalogPricePending] = useState(listCatalogPriceAttempts)
   const catalogPricePending = listCatalogPriceAttempts()
@@ -1907,13 +1907,14 @@ function ProductsFullEditor() {
     withLoaderTimeout(loader, label, PRODUCT_STOCK_MUTATION_TIMEOUT_MS)
   ), [])
 
-  const load = useCallback(async (silent = false) => {
+  const load = useCallback(async (silent = false): Promise<boolean> => {
     if (loadPromiseRef.current) {
       const currentPending = pendingLoadRef.current || { silent: true }
       currentPending.silent = currentPending.silent && silent
       pendingLoadRef.current = currentPending
       return loadPromiseRef.current
     }
+    const actorScope = captureActorReadScope('products:refresh')
     const requestId = beginTrackedRequest(loadRequestRef)
     const promise = (async () => {
       if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
@@ -1980,6 +1981,15 @@ function ProductsFullEditor() {
         const result = await settleLoaderMap({
           products: () => productApi.searchProducts(productQuery),
         })
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId) || !isActorReadScopeCurrent(actorScope, false)) return false
+        const versionMismatchError = Object.values(result.errors || {}).find(isApiVersionMismatchError)
+        if (versionMismatchError) {
+          setLoadError(getErrorMessage(versionMismatchError, 'Product API version mismatch'))
+          throw versionMismatchError
+        }
+        if (!result.hasAnySuccess) {
+          throw new Error(getFirstLoaderError(result.errors, tr('products_load_failed', 'Failed to load products')))
+        }
         const rawProductPayload = result.values.products
         const productPayload = Array.isArray(rawProductPayload)
           ? rawProductPayload
@@ -1994,12 +2004,6 @@ function ProductsFullEditor() {
         const searchProvidedFilterMeta = isObjectRecord(productPayloadObject?.filters)
           || Array.isArray(productPayloadObject?.initials)
 
-        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        const versionMismatchError = Object.values(result.errors || {}).find(isApiVersionMismatchError)
-        if (versionMismatchError) {
-          setLoadError(getErrorMessage(versionMismatchError, 'Product API version mismatch'))
-          throw versionMismatchError
-        }
         setProductsRanked(Boolean((productQuery as Record<string, unknown>).rankIds))
         if (Array.isArray(prods)) {
           // Re-insert any pinned just-edited products the fresh server
@@ -2052,17 +2056,15 @@ function ProductsFullEditor() {
           invalidateTrackedRequest(filterMetaRequestRef)
         }
 
-        if (!result.hasAnySuccess) {
-          throw new Error(getFirstLoaderError(result.errors, tr('products_load_failed', 'Failed to load products')))
-        }
         loadedOnceRef.current = true
         setLoadError(null)
 
         if (result.hasErrors && !silent) {
           notify(t('products_partial_load') || 'Some product data is still catching up. The page will keep refreshing as data arrives.', 'warning')
         }
+        return true
       } catch (e) {
-        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId) || !isActorReadScopeCurrent(actorScope, false)) return false
         const nextMessage = getErrorMessage(e, tr('products_load_failed', 'Failed to load products'))
         if (!loadedOnceRef.current) {
           setLoadError(nextMessage)
@@ -2070,25 +2072,25 @@ function ProductsFullEditor() {
         } else if (!silent) {
           notify(tr('products_refresh_failed', 'Unable to refresh products right now. Showing the latest loaded data.'), 'warning')
         }
+        return false
       } finally {
-        if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
-        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        setLoading(false)
-        setRefreshingProducts(false)
+        if (isTrackedRequestCurrent(loadRequestRef, requestId)) {
+          if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
+          setLoading(false)
+          setRefreshingProducts(false)
+        }
       }
     })()
-    const wrappedPromise = promise.finally(() => {
-      if (loadPromiseRef.current === wrappedPromise) {
-        loadPromiseRef.current = null
-      }
+    const wrappedPromise: Promise<boolean> = promise.then((succeeded) => {
+      if (loadPromiseRef.current !== wrappedPromise) return false
+      loadPromiseRef.current = null
       const pending = pendingLoadRef.current
-      if (pending) {
-        pendingLoadRef.current = null
-        queueMicrotask(() => {
-          const nextLoad = latestLoadRef.current || load
-          nextLoad(Boolean(pending.silent)).catch(() => {})
-        })
+      pendingLoadRef.current = null
+      if (pending && isActorReadScopeCurrent(actorScope, false)) {
+        const nextLoad = latestLoadRef.current || load
+        return nextLoad(Boolean(pending.silent))
       }
+      return succeeded
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
@@ -5461,7 +5463,10 @@ function ProductsFullEditor() {
           tr={tr}
           notify={notify}
           onClose={() => setTaggedAction(null)}
-          onDone={() => { setTaggedReloadToken((token) => token + 1); void load(true) }}
+          onDone={async () => {
+            setTaggedReloadToken((token) => token + 1)
+            if (!await load(true)) throw new Error('Products refresh failed')
+          }}
         />
       ) : null}
 
