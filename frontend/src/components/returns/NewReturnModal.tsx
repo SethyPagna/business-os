@@ -39,7 +39,7 @@ import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { PAYMENT_METHODS } from '../../constants.ts'
 import { STOCK_ACTION_OPTIONS, returnLineNeedsLotPick, describeBatchOption, stockActionOption, type ReturnStockAction } from './helpers/returnOptions.ts'
 import StockConditionTagRow from '../inventory/StockConditionTagRow.tsx'
-import { DEFAULT_STOCK_CONDITION_TAG } from '../../utils/stockCondition.ts'
+import { DEFAULT_STOCK_CONDITION_TAG, stockConditionLabel } from '../../utils/stockCondition.ts'
 import type { DamagedDisposition } from './helpers/returnOptions.ts'
 import { returnRefusalText } from './helpers/returnRefusalError.ts'
 import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
@@ -76,6 +76,8 @@ interface AppUser {
 }
 
 interface SaleItemRow {
+  condition_snapshot?: { version: 1; lot_id: number; product_id: number; branch_id: number; batch_id: number | null; condition_tag: string } | null
+
   id?: number | string | null
   product_id?: number | string | null
   product_name?: string | null
@@ -105,6 +107,7 @@ interface SaleReturnItem extends SaleItemRow {
   // 11.13: the ONE per-item chooser -- what happens to this item's stock.
   // return_to_stock stays derived from it (restock <=> true) for the wire.
   stock_action: ReturnStockAction
+  stock_condition: string
   // P4-3: only meaningful when stock_action is 'damaged'. Defaulted the
   // moment the item becomes 'damaged' (see updateItemAction) to the SAME
   // values an old client's absence of these fields resolves to server-side,
@@ -645,6 +648,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
             included: remaining > 0,
             return_to_stock: true,
             stock_action: 'restock' as ReturnStockAction,
+            stock_condition: item.condition_snapshot?.condition_tag || 'ordinary',
             condition_tag: DEFAULT_STOCK_CONDITION_TAG,
             damaged_disposition: 'keep' as DamagedDisposition,
             lotOptions: [],
@@ -657,7 +661,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
         // active lot is offered, not only the ones with stock left: an empty
         // lot is exactly where returned units of that lot belong.
         void Promise.all(items.map(async (item, index) => {
-          const lotKnown = toNumber(item.batch_id) > 0 || toNumber(item.lot_allocation_count) > 0
+          const lotKnown = !!item.condition_snapshot || toNumber(item.batch_id) > 0 || toNumber(item.lot_allocation_count) > 0
           const branchId = item.branch_id || found.branch_id || null
           if (lotKnown || !item.product_id || !branchId) return
           try {
@@ -757,7 +761,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const handleReturnTypeChange = (v: ReturnType) => {
     setReturnType(v)
     const action: ReturnStockAction = v === 'restock' ? 'restock' : 'none'
-    setSelectedItems((prev) => prev.map((it) => ({ ...it, return_to_stock: action === 'restock', stock_action: action })))
+    setSelectedItems((prev) => prev.map((it) => ({ ...it, return_to_stock: action === 'restock', stock_action: action, stock_condition: action === 'restock' ? 'ordinary' : it.stock_condition })))
   }
 
   const toggleIncluded = (idx: number) => {
@@ -779,6 +783,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const updateItemAction = (idx: number, action: ReturnStockAction) => {
     setSelectedItems((prev) => prev.map((it, i) => i === idx ? {
       ...it, stock_action: action, return_to_stock: action === 'restock',
+      stock_condition: action === 'restock' ? 'ordinary' : it.stock_condition,
       // Landing on 'damaged' always starts on the SAME default the server
       // resolves an old client's absent fields to -- kept, tagged 'damaged'.
       ...(action === 'damaged' && it.stock_action !== 'damaged'
@@ -814,7 +819,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const totalRefundKhr = isV1Sale ? (quote?.total_refund_khr ?? 0) : activeItems.reduce((s, it) => s + toNumber(it.applied_price_khr) * it.returnQty, 0)
   const replacementTotalUsd = replacements.reduce((s, line) => s + line.price_usd * line.quantity, 0)
   const finalReason    = reason === OTHER_LABEL ? customReason.trim() : reason
-  const quoteIntent = JSON.stringify([foundSale?.id, activeItems.map(it => [it.id, it.returnQty, it.stock_action, it.pickedBatchId]), finalReason, notes, returnType, replacements])
+  const quoteIntent = JSON.stringify([foundSale?.id, activeItems.map(it => [it.id, it.returnQty, it.stock_action, it.stock_condition, it.pickedBatchId]), finalReason, notes, returnType, replacements])
   const quoteIntentRef = useRef(quoteIntent)
   quoteIntentRef.current = quoteIntent
   const reviewedIntentRef = useRef<string | null>(null)
@@ -824,7 +829,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   // action that puts units back on a shelf, so it is the only one that needs
   // one; the server refuses the same lines (return_lot_required), this is
   // just the operator finding out before they press Confirm.
-  const lineNeedsLot = (item: SaleReturnItem): boolean => item.stock_action === 'restock' && returnLineNeedsLotPick({
+  const lineNeedsLot = (item: SaleReturnItem): boolean => item.stock_action === 'restock' && !item.condition_snapshot && returnLineNeedsLotPick({
     originalBatchId: toNumber(item.batch_id) > 0 ? item.batch_id : (toNumber(item.lot_allocation_count) > 0 ? 1 : null),
     pickedBatchId: item.pickedBatchId,
     lotOptionCount: item.lotOptions.length,
@@ -872,6 +877,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
             // a possibly redacted or stale product snapshot in this browser.
             return_to_stock:   it.return_to_stock !== false,
             stock_action:      it.stock_action,
+            ...(it.stock_action === 'restock' ? { stock_condition: it.stock_condition } : {}),
             // The tag always rides along, even under "Remove entirely" --
             // it still stamps the held-then-disposed row and its write_off's
             // reason (see planDamagedReturnLine); only disposition decides
@@ -1009,7 +1015,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
           reason: finalReason, return_type: returnType, notes: notes || null,
           branch_id: foundSale?.branch_id || null,
           items: activeItems.map(it => ({ sale_item_id: Number(it.id), product_id: it.product_id, quantity: it.returnQty,
-            stock_action: it.stock_action, return_to_stock: it.stock_action === 'restock', branch_id: it.branch_id || foundSale?.branch_id || null,
+            stock_action: it.stock_action, ...(it.stock_action === 'restock' ? { stock_condition: it.stock_condition } : {}), return_to_stock: it.stock_action === 'restock', branch_id: it.branch_id || foundSale?.branch_id || null,
             ...(it.stock_action === 'damaged' ? {
               condition_tag: it.condition_tag || DEFAULT_STOCK_CONDITION_TAG,
               damaged_disposition: it.damaged_disposition,
@@ -1345,11 +1351,12 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                                   cannot say, the operator names one; there is
                                   nothing unspecified to fall back on. */}
                               {item.stock_action === 'restock' && (
-                                toNumber(item.batch_id) > 0 || toNumber(item.lot_allocation_count) > 0 ? (
+                                item.condition_snapshot || toNumber(item.batch_id) > 0 || toNumber(item.lot_allocation_count) > 0 ? (
                                   <div data-lot="known" className="flex items-center gap-1 text-xs leading-relaxed text-gray-400">
                                     <StockActionIcon action="restock" />
-                                    <span>{T('return_lot_from_sale', 'Back into the received date this line was sold from')}
-                                    {item.batch_label ? `: ${item.batch_label}` : ''}</span>
+                                    <span>{item.condition_snapshot ? <>
+                                      {item.stock_condition === 'ordinary' ? T('stock_action_restock', 'Restock') : stockConditionLabel(item.stock_condition)} · {item.condition_snapshot.batch_id == null ? T('received_date_not_recorded', 'Received date not recorded') : item.batch_label || `#${item.condition_snapshot.batch_id}`}
+                                    </> : <>{T('return_lot_from_sale', 'Back into the received date this line was sold from')}{item.batch_label ? `: ${item.batch_label}` : ''}</>}</span>
                                   </div>
                                 ) : item.lotOptions.length > 0 ? (
                                   <div data-lot="pick" className="flex items-center gap-2">
