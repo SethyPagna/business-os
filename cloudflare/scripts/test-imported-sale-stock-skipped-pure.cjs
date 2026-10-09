@@ -15,29 +15,9 @@
 // Run (from cloudflare/): node scripts/test-imported-sale-stock-skipped-pure.cjs
 const fs = require('fs')
 const path = require('path')
-const ts = require('typescript')
 const assert = require('node:assert/strict')
-const Database = require('better-sqlite3')
-const { loadAll } = require('./harness/load_migrations.cjs')
-
+const { fixture, loadLib } = require('./harness/historical_import_fixture.cjs')
 const SRC = path.join(__dirname, '..', 'src')
-const cache = new Map()
-function loadLib(rel) {
-  const file = path.join(SRC, rel.endsWith('.ts') ? rel : `${rel}.ts`)
-  if (cache.has(file)) return cache.get(file).exports
-  const mod = { exports: {} }
-  cache.set(file, mod)
-  const out = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
-  }).outputText
-  const localRequire = (request) => {
-    if (request === './db') return {}
-    if (request.startsWith('./')) return loadLib(path.join(path.dirname(path.relative(SRC, file)), request.slice(2)))
-    return require(request)
-  }
-  new Function('exports', 'require', 'module', out)(mod.exports, localRequire, mod)
-  return mod.exports
-}
 
 const importCommit = loadLib('lib/salesImportCommit')
 const transitions = loadLib('lib/saleTransitions')
@@ -47,27 +27,12 @@ const capacity = loadLib('lib/returnCreateAction')
 let passed = 0
 async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${name}`) }
 
-function filterParams(sql, params = {}) {
-  if (Array.isArray(params)) return params
-  const filtered = {}
-  for (const match of sql.matchAll(/@(\w+)/g)) filtered[match[1]] = params[match[1]] ?? null
-  return filtered
-}
-
-function setup(migrations = loadAll()) {
-  const sqlite = new Database(':memory:')
-  for (const migration of migrations) sqlite.exec(migration)
-  sqlite.prepare(`INSERT INTO branches (id, name, is_active) VALUES (1, 'Shop', 1)`).run()
-  sqlite.prepare(`INSERT INTO products (id, name, sku, stock_quantity, cost_price_usd) VALUES (10, 'Widget', 'SKU-1', 5, 3)`).run()
-  sqlite.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 5)`).run()
-  const db = {
-    prepare(sql) { return { get(params) { return Promise.resolve(sqlite.prepare(sql).get(filterParams(sql, params))) } } },
-    batch(statements) {
-      const run = sqlite.transaction(() => statements.map(({ sql, params }) => sqlite.prepare(sql).run(filterParams(sql, params))))
-      return Promise.resolve(run())
-    },
-  }
-  return { sqlite, db }
+function setup() {
+  return fixture((sqlite) => {
+    sqlite.prepare("INSERT INTO branches (id, name, is_active) VALUES (1, 'Shop', 1)").run()
+    sqlite.prepare("INSERT INTO products (id, name, sku, stock_quantity, cost_price_usd) VALUES (10, 'Widget', 'SKU-1', 5, 3)").run()
+    sqlite.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 5)').run()
+  }, 'importer')
 }
 
 function saleData(overrides = {}) {
@@ -178,7 +143,9 @@ function cancelPlan(sqlite, saleId, { oldStatus, newStatus = 'cancelled', countI
       assert.ok(add > 0 && allocate > add, `${rel} counts imported returns in held()`)
     }
     const route = fs.readFileSync(path.join(SRC, 'routes/sales.ts'), 'utf8')
-    assert.match(route, /damaged_lot_id, returned_quantity FROM sale_items WHERE sale_id = \?/, 'the status route reads the column')
+    const statusQuery = route.match(/SELECT ([^']+) FROM sale_items si LEFT JOIN counted_sale_item_conditions ci ON ci\.sale_item_id=si\.id WHERE si\.sale_id = \?/)[1]
+    const selected = new Set(statusQuery.split(',').map(column => column.trim()))
+    assert.ok(selected.has('si.damaged_lot_id') && selected.has('si.returned_quantity'), 'the status route reads both recorded source and imported return quantity')
   })
 
   console.log(`\n${passed} check(s) passed.`)

@@ -16,66 +16,21 @@
 // the moment after the probe and before the batch.
 
 const assert = require('node:assert/strict')
-const fs = require('node:fs')
-const path = require('node:path')
-const ts = require('typescript')
-const { openDb } = require('./harness/d1compat.cjs')
-const { loadAll } = require('./harness/load_migrations.cjs')
-
-const moduleCache = new Map()
-function load(rel) {
-  if (moduleCache.has(rel)) return moduleCache.get(rel).exports
-  const sourcePath = path.join(__dirname, '..', 'src', rel)
-  const output = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-    fileName: sourcePath,
-  }).outputText
-  const mod = { exports: {} }
-  moduleCache.set(rel, mod)
-  const localRequire = (request) => {
-    if (request === './db') return {}
-    if (!request.startsWith('.')) return require(request)
-    const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(rel), request))
-    return load(resolved.endsWith('.ts') ? resolved : `${resolved}.ts`)
-  }
-  new Function('require', 'module', 'exports', output)(localRequire, mod, mod.exports)
-  return mod.exports
-}
-
-const { applyHistoricalSaleImport } = load('lib/salesImportCommit.ts')
+const { fixture: historicalFixture, loadLib } = require('./harness/historical_import_fixture.cjs')
+const { applyHistoricalSaleImport } = loadLib('lib/salesImportCommit')
 const SALE_INSERT_RE = /INSERT\s+INTO\s+sales\s*\(/i
 const ACTOR = { id: 41, username: 'importer', name: 'Importer' }
 const NOW = '2026-09-27T08:00:00.000Z'
 
 function fixture(hooks = {}) {
-  const db = openDb(loadAll())
-  db.prepare("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)").run()
-  db.prepare("INSERT INTO products(id,name,sku,stock_quantity,cost_price_usd,is_active) VALUES(10,'Widget','SKU-1',5,3,1)").run()
-  db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,1,5)').run()
-  db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,is_active,batch_number) VALUES(20,10,'lot-a','LOT-A',1,1)").run()
-  db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(20,1,5)').run()
-  const route = {
-    prepare(sql) {
-      const statement = db.prepare(sql)
-      return {
-        all: (params) => statement.all(params),
-        get: (params) => statement.get(params),
-        run: async (params) => statement.run(params),
-      }
-    },
-    batch: async (statements) => {
-      if (hooks.beforeBatch) await hooks.beforeBatch(db, statements)
-      const results = await db.batch(statements)
-      // lib/db.ts batch() runs under withD1Retry: a committed batch whose
-      // acknowledgement was lost is sent again, verbatim.
-      if (hooks.replayCommittedBatchOnce) {
-        hooks.replayCommittedBatchOnce = false
-        return db.batch(statements)
-      }
-      return results
-    },
-  }
-  return { raw: db, route }
+  const world = historicalFixture((sqlite) => {
+    sqlite.prepare("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)").run()
+    sqlite.prepare("INSERT INTO products(id,name,sku,stock_quantity,cost_price_usd,is_active) VALUES(10,'Widget','SKU-1',5,3,1)").run()
+    sqlite.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,1,5)').run()
+    sqlite.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,is_active,batch_number) VALUES(20,10,'lot-a','LOT-A',1,1)").run()
+    sqlite.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(20,1,5)').run()
+  }, ACTOR.username, hooks)
+  return { raw: world.sqlite, route: world.db }
 }
 
 function saleData(overrides = {}) {
@@ -263,17 +218,27 @@ function own(db, rowNumber, jobId = 'job-1') {
     console.log('PASS control: a non-receipt batch failure is rethrown unchanged after one attempt')
   })
 
-  // 7. A committed batch re-sent after a lost acknowledgement (withD1Retry)
-  //    must stay an idempotent no-op: the receipt guard may not mistake the
-  //    row's OWN committed sale for a peer holding its number.
+  // A committed write with a lost acknowledgement stays unknown until the
+  // caller explicitly retries the same immutable input and reads its seal.
   await scenario(7, async () => {
-    const f = fixture({ replayCommittedBatchOnce: true })
-    const result = await applyHistoricalSaleImport(f.route, { jobId: 'job-1', rowNumber: 9, data: saleData(), nowIso: NOW, actor: ACTOR })
-    assert.equal(result.alreadyApplied, false)
+    let batches = 0
+    const f = fixture({ loseAcknowledgementOnce: true, beforeBatch() { batches += 1 } })
+    const input = { jobId: 'job-1', rowNumber: 9, data: saleData(), nowIso: NOW, actor: ACTOR }
+    await assert.rejects(() => applyHistoricalSaleImport(f.route, input), /network reset after commit/)
+    assert.equal(batches, 1, 'an unknown acknowledgement must not redispatch the physical batch')
+    const original = own(f.raw, 9)
+    const originalItems = f.raw.prepare('SELECT * FROM sale_items ORDER BY id').all()
+    const originalCommits = f.raw.prepare('SELECT * FROM import_sales_commits').all()
+    const result = await applyHistoricalSaleImport(f.route, input)
+    assert.equal(result.alreadyApplied, true, 'an explicit identical retry recovers the durable applied seal')
+    assert.equal(batches, 1, 'the sealed retry must not redispatch the batch')
+    assert.deepEqual(own(f.raw, 9), original, 'the original creation snapshot bytes and receipt identity remain unchanged')
+    assert.deepEqual(f.raw.prepare('SELECT * FROM sale_items ORDER BY id').all(), originalItems)
+    assert.deepEqual(f.raw.prepare('SELECT * FROM import_sales_commits').all(), originalCommits)
     assert.equal(Number(f.raw.prepare('SELECT COUNT(*) AS n FROM sales').get().n), 1)
-    assert.equal(own(f.raw, 9).receipt_number, '20260828-143000')
-    assert.equal(Number(f.raw.prepare('SELECT COUNT(*) AS n FROM sale_items').get().n), 1)
-    console.log('PASS a lost-acknowledgement replay of a committed import batch is an idempotent success, not a receipt conflict')
+    assert.equal(original.receipt_number, '20260828-143000')
+    assert.equal(originalItems.length, 1)
+    console.log('PASS a lost acknowledgement followed by explicit identical retry preserves immutable history without redispatch or duplicates')
   })
 
   if (failures.length) {

@@ -1,100 +1,17 @@
-const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
-const fs = require('fs')
-const path = require('path')
-const ts = require('typescript')
 const assert = require('node:assert/strict')
-const Database = require('better-sqlite3')
-const { loadAll } = require('./harness/load_migrations.cjs')
+const { fixture, loadLib } = require('./harness/historical_import_fixture.cjs')
 
-function compileLib(name, localRequire) {
-  const sourcePath = path.join(__dirname, '..', 'src', 'lib', `${name}.ts`)
-  const output = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
-  }).outputText
-  const moduleObj = { exports: {} }
-  new Function('exports', 'require', 'module', output)(moduleObj.exports, withProductStockGuard(localRequire), moduleObj)
-  return moduleObj.exports
-}
-
-function compileSubject() {
-  let actorSnapshot
-  let saleCreationSnapshot
-  let anonymousCustomer
-  let moneyPrecision
-  let saleMoneyPrecision
-  const localRequire = (request) => {
-    if (request === './db') return {}
-    if (request === './salesStatus') return { RETURN_STATUSES: new Set(['returned', 'partial_return']) }
-    if (request === './branchRoles') return compileLib('branchRoles', localRequire)
-    if (request === './branchRoleGuards') return compileLib('branchRoleGuards', localRequire)
-    // CUTOVER-LR: the coded redirect refusal and the in-batch redirect predicate come from the kernel.
-    if (request === './branchEffect') return compileLib('branchEffect', localRequire)
-    if (request === './sqlBinding') return compileLib('sqlBinding', localRequire)
-    // The REAL receipt-number module, not a stub: an imported sale's receipt
-    // id and its legacy-label routing are exactly what this test checks.
-    if (request === './receiptNumber') return compileLib('receiptNumber', localRequire)
-    if (request === './actorSnapshot') {
-      actorSnapshot ||= compileLib('actorSnapshot', localRequire)
-      return actorSnapshot
-    }
-    if (request === './moneyPrecision') {
-      moneyPrecision ||= compileLib('moneyPrecision', localRequire)
-      return moneyPrecision
-    }
-    if (request === './saleMoneyPrecision') {
-      saleMoneyPrecision ||= compileLib('saleMoneyPrecision', localRequire)
-      return saleMoneyPrecision
-    }
-    if (request === './saleCreationSnapshot') {
-      saleCreationSnapshot ||= compileLib('saleCreationSnapshot', localRequire)
-      return saleCreationSnapshot
-    }
-    if (request === './anonymousCustomer') {
-      anonymousCustomer ||= compileLib('anonymousCustomer', localRequire)
-      return anonymousCustomer
-    }
-    return require(request)
-  }
-  return compileLib('salesImportCommit', localRequire)
-}
-
-function filterParams(sql, params = {}) {
-  // The uniqueness probe in receiptNumber.ts binds positionally (`?`), the
-  // commit statements bind by @name. Pass an array straight through.
-  if (Array.isArray(params)) return params
-  const filtered = {}
-  for (const match of sql.matchAll(/@(\w+)/g)) filtered[match[1]] = params[match[1]] ?? null
-  return filtered
-}
+function compileSubject() { return loadLib('lib/salesImportCommit') }
 
 function setup() {
-  const sqlite = new Database(':memory:')
-  for (const migration of loadAll()) sqlite.exec(migration)
-  sqlite.prepare(`INSERT INTO branches (id, name, is_active) VALUES (1, 'Shop', 1)`).run()
-  sqlite.prepare(`INSERT INTO branches (id, name, is_active) VALUES (2, 'Warehouse', 1)`).run()
-  sqlite.prepare(`INSERT INTO products (id, name, sku, stock_quantity, cost_price_usd) VALUES (10, 'Widget', 'SKU-1', 5, 3)`).run()
-  sqlite.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 5)`).run()
-  sqlite.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, is_active, batch_number) VALUES (20, 10, 'lot-a', 'LOT-A', 1, 1)`).run()
-  sqlite.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (20, 1, 5)`).run()
-
-  let beforeBatch = null
-  const db = {
-    prepare(sql) {
-      return {
-        get(params) { return Promise.resolve(sqlite.prepare(sql).get(filterParams(sql, params))) },
-      }
-    },
-    batch(statements) {
-      if (beforeBatch) {
-        const hook = beforeBatch
-        beforeBatch = null
-        hook()
-      }
-      const run = sqlite.transaction(() => statements.map(({ sql, params }) => sqlite.prepare(sql).run(filterParams(sql, params))))
-      return Promise.resolve(run())
-    },
-  }
-  return { sqlite, db, setBeforeBatch(hook) { beforeBatch = hook } }
+  return fixture(sqlite => {
+    sqlite.prepare(`INSERT INTO branches (id, name, is_active) VALUES (1, 'Shop', 1)`).run()
+    sqlite.prepare(`INSERT INTO branches (id, name, is_active) VALUES (2, 'Warehouse', 1)`).run()
+    sqlite.prepare(`INSERT INTO products (id, name, sku, stock_quantity, cost_price_usd) VALUES (10, 'Widget', 'SKU-1', 5, 3)`).run()
+    sqlite.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 5)`).run()
+    sqlite.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, is_active, batch_number) VALUES (20, 10, 'lot-a', 'LOT-A', 1, 1)`).run()
+    sqlite.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (20, 1, 5)`).run()
+  }, 'current-importer')
 }
 
 function saleData(overrides = {}) {
@@ -320,7 +237,7 @@ function customerMatch(overrides = {}) {
     }],
   ]) {
     const invalidBatch = setup()
-    mutate(invalidBatch.sqlite)
+    invalidBatch.stockChange(mutate)
     await assert.rejects(
       () => subject.applyHistoricalSaleImport(invalidBatch.db, { jobId: `job-invalid-batch-${index}`, rowNumber: 4, data, nowIso: input.nowIso, actor }),
       /received[ -]date/,
