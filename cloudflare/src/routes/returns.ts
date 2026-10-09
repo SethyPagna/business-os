@@ -1514,24 +1514,30 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     status_before_return: string | null; write_revision: number
     sale_money_precision_version: number | null
   }
+  let legacyAuthority:(SaleMeta & {sold_json:string;prior_json:string})|null=null
   let saleMeta: SaleMeta | null = null
   let soldLines: Array<{
     id: number; product_id: number | null; product_name: string | null; quantity: number
     branch_id: number | null; cost_price_usd: number | null; cost_price_khr: number | null
     applied_price_usd: number | null; applied_price_khr: number | null
+    batch_id?:number|null;batch_label?:string|null;batch_expiry_date?:string|null
   }> = []
   let committedReturnLines: Array<{ sale_item_id: number | null; product_id: number | null; quantity: number }> = []
   if (requestedSaleId) {
-    saleMeta = customerReturnV1Plan ? {
-      ...customerReturnV1Plan.authority.sale,
-      write_revision: Number(customerReturnV1Plan.authority.sale.sale_revision),
-      sale_money_precision_version: Number(customerReturnV1Plan.authority.sale.money_precision_version),
-    } as SaleMeta : await db.prepare(`SELECT s.receipt_number,s.customer_id,s.customer_name,s.customer_phone,s.customer_address,
-      s.branch_id,s.branch_name,s.exchange_rate,s.sale_status,s.status_before_return,
-      s.money_precision_version AS sale_money_precision_version,
-      COALESCE(v.revision,0) AS write_revision
-      FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id=?`)
-      .get<SaleMeta>([requestedSaleId]) || null
+    if(!customerReturnV1Plan) legacyAuthority=await db.prepare(`SELECT s.receipt_number,s.customer_id,s.customer_name,s.customer_phone,s.customer_address,
+      s.branch_id,s.branch_name,s.exchange_rate,s.sale_status,s.status_before_return,s.money_precision_version AS sale_money_precision_version,COALESCE(v.revision,0) AS write_revision,
+      (SELECT json_group_array(json_object('id',si.id,'product_id',si.product_id,'product_name',si.product_name,'quantity',si.quantity,'branch_id',si.branch_id,
+        'cost_price_usd',si.cost_price_usd,'cost_price_khr',si.cost_price_khr,'applied_price_usd',si.applied_price_usd,'applied_price_khr',si.applied_price_khr,
+        'batch_id',si.batch_id,'batch_label',si.batch_label,'batch_expiry_date',si.batch_expiry_date))
+        FROM(SELECT * FROM sale_items WHERE sale_id=s.id ORDER BY id)si) AS sold_json,
+      (SELECT json_group_array(json_object('sale_item_id',prior.sale_item_id,'product_id',prior.product_id,'quantity',prior.quantity))
+        FROM(SELECT ri.sale_item_id,ri.product_id,ri.quantity FROM return_items ri JOIN returns r ON r.id=ri.return_id
+          WHERE r.sale_id=s.id AND COALESCE(r.status,'completed')!='cancelled' AND COALESCE(r.return_scope,'customer')='customer' ORDER BY r.id,ri.id)prior) AS prior_json
+      FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id=?`).get<NonNullable<typeof legacyAuthority>>([requestedSaleId])||null
+    saleMeta=customerReturnV1Plan?{
+      ...customerReturnV1Plan.authority.sale,write_revision:Number(customerReturnV1Plan.authority.sale.sale_revision),
+      sale_money_precision_version:Number(customerReturnV1Plan.authority.sale.money_precision_version),
+    } as SaleMeta:legacyAuthority
     if (!saleMeta) return c.json({ error: 'Original sale not found' }, 400)
     if (String(saleMeta.sale_status || 'completed') === 'cancelled') {
       return c.json({ error: 'This sale is cancelled -- un-cancel it before recording a return.' }, 400)
@@ -1542,8 +1548,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     if (!isMoneyV1 && Number(saleMeta.sale_money_precision_version) === 1) {
       return c.json({ ...MONEY_PRECISION_REVIEW_NEEDED }, 409)
     }
-    soldLines = customerReturnV1Plan ? customerReturnV1Plan.authority.sale_items as typeof soldLines : await db.prepare('SELECT id,product_id,product_name,quantity,branch_id,cost_price_usd,cost_price_khr,applied_price_usd,applied_price_khr FROM sale_items WHERE sale_id=? ORDER BY id')
-      .all<typeof soldLines[number]>([requestedSaleId])
+    soldLines=customerReturnV1Plan?customerReturnV1Plan.authority.sale_items as typeof soldLines:JSON.parse(legacyAuthority!.sold_json||'[]') as typeof soldLines
     const soldById = new Map(soldLines.map((line) => [Number(line.id), line]))
     returnItems = body.items.map((item) => {
       const sold = item.sale_item_id ? soldById.get(Number(item.sale_item_id)) : null
@@ -1559,11 +1564,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     committedReturnLines = customerReturnV1Plan ? customerReturnV1Plan.authority.prior_items.map(line => ({
       sale_item_id: line.sale_item_id == null ? null : Number(line.sale_item_id),
       product_id: null, quantity: Number(line.quantity),
-    })) : await db.prepare(`SELECT ri.sale_item_id,ri.product_id,ri.quantity
-      FROM return_items ri JOIN returns r ON r.id=ri.return_id
-      WHERE r.sale_id=? AND COALESCE(r.status,'completed')!='cancelled'
-        AND COALESCE(r.return_scope,'customer')='customer' ORDER BY r.id,ri.id`)
-      .all<{ sale_item_id: number | null; product_id: number | null; quantity: number }>([requestedSaleId])
+    })) : JSON.parse(legacyAuthority!.prior_json||'[]') as typeof committedReturnLines
     if (!isMoneyV1) {
       try {
         assertReturnCreateCapacity(soldLines, committedReturnLines, returnItems)
@@ -1727,8 +1728,8 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
       batch_expiry_date: line.batch_expiry_date == null ? null : String(line.batch_expiry_date),
       applied_price_usd: line.applied_price_usd == null ? null : Number(line.applied_price_usd),
       applied_price_khr: line.applied_price_khr == null ? null : Number(line.applied_price_khr),
-    }])) : await fetchSaleItemBatchInfo(db, returnSaleItemIds)
-  const saleItemAllocations = await fetchSaleItemAllocations(db, returnSaleItemIds)
+    }])) : new Map(soldLines.filter(line=>returnSaleItemIds.includes(line.id)).map(line=>[line.id,{batch_id:line.batch_id??null,batch_label:line.batch_label??null,batch_expiry_date:line.batch_expiry_date??null,applied_price_usd:line.applied_price_usd,applied_price_khr:line.applied_price_khr}]))
+  const saleItemAllocations = await fetchSaleItemAllocations(db, returnSaleItemIds.filter(id=>returnItems.some(item=>Number(item.sale_item_id)===id && !item.counted_original_condition)))
   const v1QuoteBySaleItem = new Map(customerReturnV1Plan?.quote.items.map(item => [item.sale_item_id, item]) || [])
   // A return against a sale is priced from that sale's own lines, matched the
   // same way the quantity cap matched them: by sale_item_id, else by product_id.

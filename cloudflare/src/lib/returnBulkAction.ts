@@ -1,3 +1,5 @@
+import { currentRequestMetrics } from './requestMetrics'
+import { getPlanLimits } from './planTier'
 import { planCountedTaggedChange, ordinarySubsetSql, ordinaryNullCapacityGuard } from './countedDamagedStock'
 import { executeStockTransaction, stockTransactionStatementCount } from './stockTransaction'
 import { productStockGuardStatement, productStockGuardError } from './productStockGuard'
@@ -5,14 +7,14 @@ import { getDb, type D1Compat } from './db'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import { getActionTier } from './permissions'
-import { bumpVersion } from './cache'
+import { bumpVersions } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { actorSnapshot } from './actorSnapshot'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents'
 import { validateCustomerReturnRestorationCohortV1, validateCustomerReturnRestorationMemberV1,
   type CustomerReturnRestorationV1 } from './customerReturnEntitlement'
 import { subtractDecimalSum } from './moneyPrecision'
-import { assertReturnCreateCapacity, ReturnCapacityError, type ReturnCapacityParams } from './returnCreateAction'
+import { assertReturnCreateQueryBudget, ReturnCreateBudgetError, assertReturnCreateCapacity, ReturnCapacityError, type ReturnCapacityParams } from './returnCreateAction'
 import {
   BRANCH_RETIRED_DAMAGED_CODE, BRANCH_RETIRED_DAMAGED_ERROR, BranchEffectResolver, BranchRetiredNoSuccessorError,
   branchEffectGuardPredicate, foldedLotSurvivors, readBranchDirectory,
@@ -220,10 +222,15 @@ function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, s
       quantity,
       stamp,
     }
-    if (quantity > 0) out.unshift(productStockGuardStatement([Number(delta.productId)], 'active'))
+    if (quantity > 0 && !delta.damagedLotId) out.unshift(productStockGuardStatement([Number(delta.productId)], 'active'))
     if (delta.damagedLotId) {
-      out.push(guard('EXISTS(SELECT 1 FROM damaged_stock_lots WHERE id=@lot AND return_id=@returnId AND product_id=@product AND branch_id IS @branch AND (batch_id IS NULL OR EXISTS(SELECT 1 FROM product_batches WHERE id=damaged_stock_lots.batch_id AND variant_product_id=@product)) AND quantity_remaining+@quantity BETWEEN 0 AND quantity)', { ...params, returnId: member.id }))
-      out.push(...planCountedTaggedChange({lotId:delta.damagedLotId,productId:delta.productId,branchId:delta.branchId,batchId:delta.batchId},Math.abs(quantity),quantity>0?'restore':'consume'))
+      const tagged=planCountedTaggedChange({lotId:delta.damagedLotId,productId:delta.productId,branchId:delta.branchId,batchId:delta.batchId},Math.abs(quantity),quantity>0?'restore':'consume')
+      tagged[0].sql=tagged[0].sql.replace('AND p.is_active=1', `AND d.return_id=@returnId
+        AND EXISTS(SELECT 1 FROM return_items ri WHERE ri.id=d.return_item_id AND ri.return_id=d.return_id
+          AND ri.product_id=d.product_id AND ri.branch_id IS d.branch_id AND ri.stock_condition=d.condition_tag)
+        AND p.is_active=1`)
+      tagged[0].params={...tagged[0].params,returnId:member.id}
+      out.push(...tagged)
     } else {
       if(quantity<0) {
         out.push(guard(`EXISTS(SELECT 1 FROM branch_stock WHERE product_id=@product AND branch_id=@branch AND quantity+@quantity>=${ordinarySubsetSql('@product','@branch')})`,params))
@@ -567,9 +574,9 @@ async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: 
       updateSale: false,
       stock: [],
     }
+    const memberGuardIndex=guards.length
     if (changed) {
-      guards.push(guard("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM returns WHERE id=@id) AND COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=@id),0)=@revision", { id: expected.id, revision: Number(row.write_revision) || 0 }))
-      guards.push(guard(`${movementFingerprint('@id')}=@fingerprint`, { id: expected.id, fingerprint: row.movement_fingerprint }))
+      guards.push(guard(`NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM returns WHERE id=@id) AND COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=@id),0)=@revision AND ${movementFingerprint('@id')}=@fingerprint`, { id: expected.id, revision: Number(row.write_revision) || 0,fingerprint:row.movement_fingerprint }))
     }
 
     if (changed && request.field === 'status') {
@@ -578,7 +585,7 @@ async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: 
       if (!cancelling && !restoring) fail(`Return ${expected.id} has an unsupported status transition.`, 400)
       const linkedSale = member.saleId ? linkedSales.find((sale) => Number(sale.id) === member.saleId) : null
       member.saleRevision = linkedSale ? Number(linkedSale.write_revision) || 0 : null
-      if (linkedSale) guards.push(guard("EXISTS(SELECT 1 FROM sales WHERE id=@saleId) AND COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0)=@saleRevision", { saleId: linkedSale.id, saleRevision: linkedSale.write_revision }))
+      if(linkedSale){guards[memberGuardIndex].sql=guards[memberGuardIndex].sql.replace(' THEN 1 ELSE 0 END',' AND EXISTS(SELECT 1 FROM sales WHERE id=@saleId) AND COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0)=@saleRevision THEN 1 ELSE 0 END');guards[memberGuardIndex].params={...guards[memberGuardIndex].params,saleId:linkedSale.id,saleRevision:linkedSale.write_revision}}
       // RET-B E1 (owner default D1, 5 Oct 2026): a sale recorded without stock
       // changes (stock_skipped -- every sales import since F4) never took its
       // units off the shelf, so cancelling or restoring its return cannot infer
@@ -667,7 +674,7 @@ async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: 
 
 export async function notifyReturnBulkAction(env: Env): Promise<void> {
   await Promise.allSettled([
-    bumpVersion(env, 'returns'), bumpVersion(env, 'products'), bumpVersion(env, 'sales'),
+    bumpVersions(env, ['returns','products','sales']),
     ...(['returns', 'products', 'inventory', 'sales'] as const).map((channel) => broadcast(env, channel, { action: 'update' })),
   ])
 }
@@ -753,8 +760,14 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
   statements.push(auditStatement(user, operationId, 'return_fields_bulk', changedIds.length))
   statements.push({ sql: 'DELETE FROM return_bulk_guards', params: {} })
   assertBounded(statements, snapshot, recordEvents?.eventsBytes || 0)
+  const counted=members.some(member=>member.stock.length>0)
+  const planned=counted?stockTransactionStatementCount(statements.length):statements.length
+  try { assertReturnCreateQueryBudget(getPlanLimits(env).d1QueriesPerInvocation,
+    currentRequestMetrics()?.invocation.attemptedStatements ?? 18,planned,12)
+  } catch(error) { if(error instanceof ReturnCreateBudgetError) fail(error.message,400,error.code);throw error }
+
   try {
-    const results = await (members.some(member => member.stock.length > 0) ? executeStockTransaction(db, statements, 'retry') : db.batch(statements))
+    const results = await (counted ? executeStockTransaction(db, statements, 'once') : db.batchOnce!(statements))
     return { receipt: { ...receipt, actionHistoryId: Number(results[historyIndex].meta.last_row_id) }, wrote: true }
   } catch (error) {
     const retry = await db.prepare('SELECT request_json,receipt_json FROM return_bulk_operations WHERE actor_id=@actor AND request_id=@request').get<Row>({ actor: user.id, request: request.client_request_id })
