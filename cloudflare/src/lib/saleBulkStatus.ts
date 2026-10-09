@@ -134,8 +134,19 @@ function permission(user: SessionUser) { if (getActionTier(user, 'sales', 'bulk'
 export function bulkAssertion(predicate: string, params: Row = {}): StockStatement {
     return { sql: `INSERT INTO sale_bulk_guards(guard_value) SELECT CASE WHEN (${predicate}) THEN 1 ELSE 0 END`, params };
 }
-export function saleRevisionGuard(id: number, revision: number): StockStatement {
-    return bulkAssertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM sales WHERE id=@id) AND COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@id),0)=@revision", { id, revision });
+const bulkActorPredicate = `EXISTS(SELECT 1 FROM users actor LEFT JOIN roles role ON role.id=actor.role_id
+    WHERE actor.id=@actorId AND actor.is_active=1 AND actor.username IS @actorUsername
+    AND actor.organization_id IS @actorOrganization AND actor.role_id IS @actorRole AND actor.permissions IS @actorPermissions
+    AND role.code IS @actorRoleCode AND role.permissions IS @actorRolePermissions
+    AND COALESCE(actor.must_change_password,0)=@actorMustChange)`;
+function bulkActorParams(user: SessionUser): Row {
+    return { actorId: user.id, actorUsername: user.username, actorOrganization: user.organization_id ?? null,
+        actorRole: user.role_id ?? null, actorPermissions: user.permissions ?? null, actorRoleCode: user.role_code ?? null,
+        actorRolePermissions: user.role_permissions ?? null, actorMustChange: user.must_change_password ?? 0 };
+}
+export function saleRevisionGuard(id: number, revision: number, user?: SessionUser): StockStatement {
+    return bulkAssertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM sales WHERE id=@id) AND COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@id),0)=@revision"
+        + (user ? ` AND ${bulkActorPredicate}` : ''), { id, revision, ...(user ? bulkActorParams(user) : {}) });
 }
 function parseRequest(raw: Row): BulkStatusRequest {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw))
@@ -578,7 +589,7 @@ async function applySaleBulkStatusKernel(env: Env, user: SessionUser, raw: Row, 
         const sourceMatched = request.source_status === undefined || old === request.source_status;
         const changed = sourceMatched && old !== request.target_status;
         if (sourceMatched) {
-            guards.push(saleRevisionGuard(expected.id, Number(sale.write_revision)));
+            guards.push(saleRevisionGuard(expected.id, Number(sale.write_revision), user));
             guards.push(bulkAssertion(`${saleMovementFingerprint('@id')}=@fingerprint`, { id: expected.id, fingerprint: sale.movement_fingerprint }));
         }
         const guard = guardSaleStatusTransition(old, request.target_status, String(sale.status_before_cancel || '') || null);
@@ -776,7 +787,8 @@ async function replaySaleBulkStatusKernel(env: Env, user: SessionUser, direction
     });
     if (unpaid.length)
         refuseUnpaid(unpaid, 409);
-    const statements: StockStatement[] = [...stock.guards, bulkAssertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM sale_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@op AND o.generation=@generation AND h.id=@history AND h.status=@expected AND s.kind=@kind AND s.status=@snap AND s.payload_json=@payload)", { op: op.id, generation, history: historyId, expected, kind: BULK_STATUS_KIND, snap: direction === 'undo' ? 'applied' : 'reversed', payload: op.payload_json })];
+    const statements: StockStatement[] = [...stock.guards, bulkAssertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM sale_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@op AND o.generation=@generation AND h.id=@history AND h.status=@expected AND s.kind=@kind AND s.status=@snap AND s.payload_json=@payload)"
+        + ` AND ${bulkActorPredicate}`, { op: op.id, generation, history: historyId, expected, kind: BULK_STATUS_KIND, snap: direction === 'undo' ? 'applied' : 'reversed', payload: op.payload_json, ...bulkActorParams(user) })];
     for (const m of moved)
         statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM sales s JOIN sale_bulk_members m ON m.sale_id=s.id WHERE m.operation_id=@op AND s.id=@id AND m.revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AND m.movement_fingerprint=${saleMovementFingerprint('s.id')})`, { op: op.id, id: m.id }));
     for (const m of snapshot.members)

@@ -153,16 +153,148 @@ async function positive(makeWorker, tier, receipt, partial) {
   } finally { f.sql.close() }
 }
 
+async function transition(makeWorker, tier, direction) {
+  const w = await single.scenario(makeWorker, tier, true, true), { f, saleId } = w
+  const body = request(f, [saleId], 'group-race')
+  if (direction === 'apply') return { ...w, call: () => f.call('/sales/bulk-status', body) }
+  const applied = await f.call('/sales/bulk-status', body)
+  assert.equal(applied.status, 200, JSON.stringify(applied.json))
+  const historyId = applied.json.actionHistoryId
+  if (direction === 'redo') assert.equal((await f.call('/action-history/' + historyId + '/undo', { expected_generation: 0 })).status, 200)
+  return { ...w, call: () => f.call('/action-history/' + historyId + '/' + direction, { expected_generation: direction === 'undo' ? 0 : 1 }) }
+}
+
+async function races(makeWorker) {
+  const faults = {
+    cache: 'UPDATE products SET stock_quantity=0.7 WHERE id=1',
+    membership: "INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source)VALUES(90,1,1,1,0.1,0,'opened','remove')",
+    condition: "UPDATE damaged_stock_lots SET condition_tag='opened' WHERE id=1",
+    allocation: 'UPDATE sale_item_batch_allocations SET branch_id=2',
+    return: 'UPDATE return_items SET quantity=0.2 WHERE id=1',
+    receipt: 'UPDATE product_batches SET unit_cost_usd=3,received_at=\'2026-10-01\' WHERE id=1',
+    branch: 'UPDATE branches SET is_active=0 WHERE id=1',
+    authority: 'UPDATE users SET is_active=0 WHERE id=7',
+  }
+  for (const tier of ['paid', 'free']) for (const direction of ['apply', 'undo', 'redo']) {
+    for (const [fault, sql] of Object.entries(faults)) {
+      const { f, stock, db, call } = await transition(makeWorker, tier, direction)
+      try {
+        if (fault === 'allocation') await stock.executeStockTransaction(db, [{ sql: "INSERT INTO branches(id,name,is_active)VALUES(2,'Other',1)" }], 'once')
+        let rival
+        f.beforeCommit(async () => { await stock.executeStockTransaction(db, [{ sql }], 'once'); rival = state(f) })
+        const result = await call()
+        assert.equal(result.status, 409, JSON.stringify({ tier, direction, fault, result }))
+        assert.ok(rival, 'the rival actually ran at the batch boundary')
+        assert.deepEqual(state(f), rival, 'exact rival survives with no own writes')
+        console.log('PASS grouped source/authority race ' + JSON.stringify({ tier, direction, fault }))
+      } finally { f.sql.close() }
+    }
+    const { f, call } = await transition(makeWorker, tier, direction)
+    try {
+      const before = state(f)
+      f.sql.exec("CREATE TEMP TABLE group_unrelated(guard_value_unrelated INTEGER CHECK(guard_value_unrelated=1)); CREATE TEMP TRIGGER group_late_failure BEFORE INSERT ON sale_record_events WHEN NEW.source_kind='sale_bulk_status' BEGIN INSERT INTO group_unrelated VALUES(0); END")
+      assert.equal((await call()).status, 500, 'unrelated CHECK is not a known stock conflict')
+      assert.deepEqual(state(f), before, 'late constraint rolls back full business/history action')
+      f.sql.exec('DROP TRIGGER group_late_failure')
+      f.loseNextCommitAcknowledgement()
+      assert.equal((await call()).status, 200, 'committed operation/generation receipt recovers lost acknowledgement')
+      const committed = state(f)
+      assert.equal((await call()).status, direction === 'apply' ? 200 : 409, 'repeated history generation remains stale, never replays twice')
+      assert.deepEqual(state(f), committed)
+      console.log('PASS grouped late CHECK rollback/ACK/current generation ' + JSON.stringify({ tier, direction }))
+    } finally { f.sql.close() }
+  }
+}
+
+async function tails(makeWorker, fragments) {
+  for (const tier of ['paid', 'free']) for (const direction of ['apply', 'undo', 'redo']) {
+    const w = await single.scenario(makeWorker, tier, true, false), { f, saleId, stock, db } = w
+    try {
+      const sub = h.loadStockSession('lib/countedDamagedStock.ts').subtractCountedQuantity
+      await stock.executeStockTransaction(db, [{ sql: 'DELETE FROM sale_item_batch_allocations WHERE sale_item_id=1' },
+        ...Array.from({ length: fragments }, (_, i) => ({ sql: 'INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,branch_id,quantity,released_quantity)VALUES(1,1,1,@q,0)',
+          params: { q: i === fragments - 1 ? sub(0.3, Array(fragments - 1).fill(0.001)) : 0.001 } }))], 'once')
+      const body = request(f, [saleId], 'group-tail')
+      let historyId
+      if (direction !== 'apply') {
+        const setup = await f.call('/sales/bulk-status', body)
+        if (setup.status === 409) { assert.equal(tier, 'free'); assert.equal(setup.json.code, 'sale_bulk_over_plan_budget'); continue }
+        assert.equal(setup.status, 200, JSON.stringify(setup.json)); historyId = setup.json.actionHistoryId
+        if (direction === 'redo') {
+          const setupUndo = await f.call('/action-history/' + historyId + '/undo', { expected_generation: 0 })
+          if (setupUndo.status === 409) { assert.equal(tier, 'free'); continue }
+          assert.equal(setupUndo.status, 200, JSON.stringify(setupUndo.json))
+        }
+      }
+      const before = state(f), raw = f.env.DB, attempts = new Map(), failed = new Set()
+      let attempted = 0, committed = false
+      f.env.CACHE = { get: async () => null, put: async () => { throw new Error('Synthetic unavailable KV') }, delete: async () => {} }
+      f.sql.exec("DELETE FROM cache_versions WHERE namespace IN('stock','sales')")
+      const retry = (sql, params) => {
+        if (!committed) return false
+        const kind = /INSERT INTO audit_logs/.test(sql) ? 'audit' : /SELECT namespace, version FROM cache_versions/.test(sql) ? 'versions'
+          : /INSERT INTO quota_usage/.test(sql) ? 'quota' : /INSERT INTO cache_versions/.test(sql) ? 'handoff'
+            : /SELECT \* FROM action_history WHERE id/.test(sql) ? 'history' : null
+        if (!kind) return false
+        const key = kind + ':' + JSON.stringify(params)
+        attempts.set(key, (attempts.get(key) || 0) + 1)
+        if (failed.has(key)) return false
+        failed.add(key); return true
+      }
+      const wrap = (statement, sql) => new Proxy(statement, { get(target, key) {
+        if (key === 'bind') return (...args) => wrap(target.bind(...args), sql)
+        if (['all', 'first', 'run'].includes(key)) return (...args) => {
+          attempted++
+          return retry(sql, target.params) ? Promise.reject(new Error('D1_ERROR: network reset before grouped tail')) : target[key](...args)
+        }
+        return target[key]
+      } })
+      f.env.DB = new Proxy(raw, { get(target, key) {
+        if (key === 'prepare') return sql => wrap(target.prepare(sql), sql)
+        if (key === 'batch') return async statements => {
+          attempted += statements.length
+          if (statements.some(statement => retry(statement.text, statement.params))) throw new Error('D1_ERROR: network reset before grouped tail')
+          try { return await target.batch(statements) } finally {
+            if (statements.some(statement => /INSERT INTO sale_record_events/.test(statement.text))) {
+              const generation = f.sql.prepare('SELECT generation FROM sale_bulk_operations WHERE request_id=?').get('group-tail')?.generation
+              committed = generation === (direction === 'apply' ? 0 : direction === 'undo' ? 1 : 2)
+            }
+          }
+        }
+        return target[key]
+      } })
+      f.loseNextCommitAcknowledgement()
+      const result = direction === 'apply' ? await f.call('/sales/bulk-status', body)
+        : await f.call('/action-history/' + historyId + '/' + direction, { expected_generation: direction === 'undo' ? 0 : 1 })
+      console.log('GROUP_FULL_TAIL ' + JSON.stringify({ tier, direction, fragments, status: result.status, code: result.json.code, attempted, attempts: Object.fromEntries(attempts) }))
+      assert.ok(attempted <= (tier === 'free' ? 50 : 1000))
+      if (result.status === 409) {
+        assert.equal(tier, 'free'); assert.deepEqual(state(f), before); assert.equal(committed, false)
+      } else {
+        assert.equal(result.status, 200, JSON.stringify(result.json)); assert.equal(f.state().cache, direction === 'undo' ? 0.4 : 1)
+        const kinds = [...new Set([...failed].map(key => key.split(':')[0]))]
+        for (const expected of ['versions', 'handoff', ...(tier === 'free' ? ['quota'] : []), ...(direction === 'apply' ? [] : ['history'])])
+          assert.ok(kinds.includes(expected), 'actual tail exercised ' + expected)
+      }
+    } finally { f.sql.close() }
+  }
+}
+
 async function main() {
   const makeWorker = await h.bundle.exports.bundleWorker()
   if (process.argv.includes('--base')) return positive(makeWorker, 'paid', true, true)
   if (process.argv.includes('--ownership-only')) return ownership(makeWorker)
   if (process.argv.includes('--legacy-only')) return legacy(makeWorker)
+  if (process.argv.includes('--races-only')) return races(makeWorker)
+  if (process.argv.includes('--tails-only')) return tails(makeWorker, Number(process.env.GROUP_FRAGMENTS || 1))
   for (const tier of ['paid', 'free']) for (const receipt of [true, false]) for (const partial of [true, false]) {
     await positive(makeWorker, tier, receipt, partial)
   }
   await ownership(makeWorker)
   await legacy(makeWorker)
+  await races(makeWorker)
+  await tails(makeWorker, 1)
+  await tails(makeWorker, 20)
 }
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })
 module.exports = { positive, state, quantities }
