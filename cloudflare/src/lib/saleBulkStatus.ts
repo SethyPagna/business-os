@@ -28,6 +28,7 @@ type Row = Record<string, unknown>;
 type Item = TransitionItem & {
     sale_id: number;
     damaged_lot_id: number | null;
+    recordedBranchId?: number | null;
 };
 type Allocation = Row & {
     id: number;
@@ -330,7 +331,7 @@ async function captureGroupStock(db: D1Compat, members: Member[]): Promise<Group
                 [heldQuantity(String(member.after.sale_status), item.quantity, returned.get(item.id) || 0, true)]));
             if (!items.length || sumCountedQuantities(deltas) !== sumCountedQuantities(group.map(move => move.quantity))) fail('Saved tagged stock quantities do not match their sale lines.');
             const identities = items.map(item => conditions.find(row => row[0] === item.id));
-            if (identities.some(row => !row || row[1] !== first.lot || row[2] !== first.product || row[3] !== first.branch)) fail('Saved tagged sale identity is missing or changed.');
+            if (identities.some((row, index) => !row || row[1] !== first.lot || row[2] !== first.product || row[3] !== (items[index].recordedBranchId ?? items[index].branch_id))) fail('Saved tagged sale identity is missing or changed.');
             const identity = identities[0]!;
             if (identities.some(row => JSON.stringify(row!.slice(1)) !== JSON.stringify(identity.slice(1)))) fail('Saved tag identities disagree.');
             const current = exact.get(first.product, first.branch).projectedTaggedSource(first.lot!);
@@ -551,13 +552,24 @@ async function applySaleBulkStatusKernel(env: Env, user: SessionUser, raw: Row, 
         // RET-B F4: imported return-status lines (sale_items.returned_quantity), as the single route.
         addImportedReturnedQuantities(itemReturned, own as Array<Item & { returned_quantity?: unknown }>, true);
         const returned = allocateReturnedQuantities(own, itemReturned, productReturned, true);
-        for (const item of own)
+        for (const item of own) {
             item.allocations = allocations.filter(a => a.sale_item_id === item.id);
+            item.recordedBranchId = item.branch_id;
+        }
         const skipped = (changed && !!request.skip_stock) || Number(sale.stock_skipped) === 1;
+        const movesStock = (item: Item) => changed && !skipped && !!item.product_id && !!item.branch_id
+            && heldQuantity(old, item.quantity, returned.get(item.id) || 0, true) !== heldQuantity(request.target_status, item.quantity, returned.get(item.id) || 0, true);
         try {
+            for (const item of own.filter(movesStock)) {
+                for (const allocation of item.allocations || []) {
+                    if (allocation.branch_id == null || Number(allocation.branch_id) === item.branch_id) continue;
+                    const effect = resolver.effect(item.branch_id, { sells: true });
+                    if (!effect?.redirected || Number(allocation.branch_id) !== effect.effectBranchId)
+                        fail('Sale allocation belongs to a different recorded branch.');
+                }
+            }
             await redirectStockItems(db, resolver, own, {
-                moves: item => changed && !skipped && !!item.product_id && !!item.branch_id
-                    && heldQuantity(old, item.quantity, returned.get(item.id) || 0, true) !== heldQuantity(request.target_status, item.quantity, returned.get(item.id) || 0, true),
+                moves: movesStock,
                 saleBranchId: Number(sale.branch_id) || null, saleLabel: typeof sale.sale_branch_label === 'string' && sale.sale_branch_label ? sale.sale_branch_label : null,
             });
         }
@@ -567,7 +579,7 @@ async function applySaleBulkStatusKernel(env: Env, user: SessionUser, raw: Row, 
                 throw new SaleBulkError(refusal.error, 409, { ...refusal, sale_ids: [expected.id] });
             throw error;
         }
-        for (const item of own) {
+        for (const item of own.filter(movesStock)) {
             if (allocations.some(a => a.sale_item_id === item.id && a.branch_id != null && Number(a.branch_id) !== item.branch_id))
                 fail('Sale allocation belongs to a different branch.');
         }
