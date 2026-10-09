@@ -10,6 +10,7 @@ import { ensureClientRequestId } from './requestIds.ts'
 // error, never cache as a definitive "no damaged stock".
 export type DamagedLot = {
   id: number
+  product_id: number
   branch_id: number | null
   batch_id: number | null
   return_id: number | null
@@ -23,22 +24,27 @@ export type DamagedLot = {
   condition_tag?: string | null
 }
 
-export function getDamagedLots(productId: number | string, branchId?: number | string | null): Promise<{ lots: DamagedLot[] }> {
+export async function getDamagedLots(productId: number | string, branchId?: number | string | null, signal?: AbortSignal): Promise<{ lots: DamagedLot[] }> {
   const params = new URLSearchParams({ productId: String(productId) })
   if (branchId != null && branchId !== '') params.set('branchId', String(branchId))
-  return route(
+  const response = await route<{ lots: DamagedLot[] }>(
     `batches:damaged:${productId}:${branchId ?? 'all'}`,
-    () => apiFetch('GET', `/api/batches/damaged-lots?${params.toString()}`),
+    (requestSignal) => apiFetch('GET', `/api/batches/damaged-lots?${params.toString()}`, undefined, 8000, { signal: requestSignal }),
     undefined,
-    { raceLocalFallback: false },
+    { raceLocalFallback: false, bypassCache: true, signal },
   )
+  if (!Array.isArray(response?.lots)) throw new Error('Invalid condition stock response')
+  const lots = response.lots.map(lot => {
+    if (!Number.isFinite(Number(lot.id)) || Number(lot.id) <= 0 || !Number.isFinite(Number(lot.quantity_remaining)) || Number(lot.quantity_remaining) < 0
+      || (lot.product_id != null && Number(lot.product_id) !== Number(productId))
+      || (branchId != null && branchId !== '' && Number(lot.branch_id) !== Number(branchId))) throw new Error('Invalid condition stock source')
+    return { ...lot, product_id: Number(productId) }
+  })
+  return { lots }
 }
 
-// P3-L6: the Products page's TAGGED child rows -- held, non-sellable units
-// grouped per (product, tag, branch). A separate read from the products list
-// on purpose: these units are not in branch_stock and must never be folded
-// into a group's sellable total or offered by a product picker, and keeping
-// them on their own wire makes that structural rather than a filter.
+// Tagged child rows identify the counted subset D inside physical stock T.
+// They are explicit sale sources and must not be added to physical totals.
 export type TaggedLotGroup = {
   product_id: number
   product_name: string | null
@@ -81,7 +87,7 @@ export function disposeTaggedLot(payload: TaggedLotChange): Promise<unknown> {
   return route('inventory:tagged-lots:dispose', () => apiFetch('POST', '/api/inventory/tagged-lots/dispose', body), null, true)
 }
 
-/** Restore to sellable: the exact reversal of keeping the units as tagged. */
+/** Clear the condition tag: decrease D while physical stock T stays unchanged. */
 export function restoreTaggedLot(payload: TaggedLotChange): Promise<unknown> {
   const body = ensureClientRequestId(payload, 'tagged')
   return route('inventory:tagged-lots:restore', () => apiFetch('POST', '/api/inventory/tagged-lots/restore', body), null, true)

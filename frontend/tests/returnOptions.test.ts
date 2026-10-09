@@ -321,8 +321,13 @@ runTest('K2/11.9: the POS damage source option is wired end to end', () => {
   const sheetSource = readFileSync(new URL('../src/components/pos/ProductDetailSheet.tsx', import.meta.url), 'utf8')
   // damaged lots fetched beside the sellable lots; picking one clears the
   // other (a line has exactly ONE source)
-  assert.match(sheetSource, /getDamagedLots\(resolvedProduct\.id, resolvedBranchId\)/)
-  assert.match(sheetSource, /setSelectedDamagedLotId\(lot\.id === selectedDamagedLotId \? null : lot\.id\); setSelectedBatchId\(null\)/)
+  assert.match(sheetSource, /startPickerLotRead\(lotSourceProductIds/)
+  assert.match(sheetSource, /getDamagedLots\(productId, resolvedBranchId, signal\)/)
+  assert.match(sheetSource, /loadedConditionScope === currentLotScope/)
+  assert.match(sheetSource, /conditionLookupUnavailable: intent === 'sell'/)
+  assert.match(sheetSource, /const chooseDamagedLot =/)
+  assert.match(sheetSource, /setSelectedDamagedLotId\(lot\.id === selectedDamagedLotId \? null : lot\.id\)/)
+  assert.match(sheetSource, /setSelectedBatchId\(null\)/)
   assert.match(sheetSource, /setSelectedBatchId\(batch\.id\); setSelectedUnlottedProductId\(null\); setSelectedDamagedLotId\(null\)/)
   // A damaged pick satisfies the lot gate and caps the shown stock. Both
   // derivations moved out of this component and into the pure module every
@@ -341,7 +346,7 @@ runTest('K2/11.9: the POS damage source option is wired end to end', () => {
   // the posCopy key (English first arg): the old `>= 4` relied on the
   // posCopy('X', 'X') no-op duplicating the literal per site, which the
   // Khmer translation pass fixed.
-  assert.equal((sheetSource.match(/posCopy\('Damage \(from returns\)'/g) || []).length >= 2, true)
+  assert.equal((sheetSource.match(/posCopy\('Tagged stock'/g) || []).length >= 2, true)
 
   const posSource = readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
   // capped by the lot, merges only with the same lot's line, and the

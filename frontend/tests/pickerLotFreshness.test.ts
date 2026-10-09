@@ -33,6 +33,7 @@ let actorRef: any
 const actorUser = { id: 7 }
 const actorKey = (user: { id: number; permissions?: Record<string, boolean> } | null, authReady = true) => compile(actorCode, {
   useApp: () => ({ user, authReady }),
+  captureActorReadScope: () => ({ authority: 'test-server-session' }),
   useRef: (initial: unknown) => (actorRef ||= { current: initial }),
 }, 'actorScope')
 const initialActorScope = actorKey(actorUser)
@@ -53,7 +54,7 @@ const base = {
   product, variants: [], groupProduct: false, selectedBranchId: null, activeBranchId: 2, selectedVariantId: null,
   trackedBatchProductIds: new Set(), trackedBatchLookupUnavailable: false,
   hideReceivedDates: false, intent: 'sell', batches: [], knownPositiveQuantityByProduct: {}, selectedBatchId: null,
-  selectedUnlottedProductId: null, damagedLots: [], selectedDamagedLotId: null, loadedLotScope: '',
+  selectedUnlottedProductId: null, damagedLots: [], selectedDamagedLotId: null, loadedLotScope: '', loadedConditionScope: '',
   getDisplayStock: (row: any) => row?.stock_quantity || 0,
   buildVariantOptionLabels: () => ({ stepTitle: 'Option' }), fmtUSD: String, deriveProductSheetState,
 }
@@ -63,7 +64,7 @@ assert.equal(pending.requireFreshLots, true)
 assert.equal(pending.sheetState.isBatchTracked, true, 'stale empty global IDs cannot suppress point lookup')
 assert.equal(pending.sheetState.displayedStock, 3)
 assert.equal(pending.sheetState.pickAllowed, false)
-const loaded = { batches: [lot], knownPositiveQuantityByProduct: { 3263: 3 }, loadedLotScope: pending.currentLotScope }
+const loaded = { batches: [lot], knownPositiveQuantityByProduct: { 3263: 3 }, loadedLotScope: pending.currentLotScope, loadedConditionScope: pending.currentLotScope }
 assert.equal(state(loaded).sheetState.pickAllowed, false, 'successful lookup still requires a deliberate lot choice')
 assert.equal(state({ ...loaded, selectedBatchId: 56957 }).sheetState.pickAllowed, true)
 assert.equal(state({ ...loaded, selectedBatchId: 56957, actorScope: 'true:8:1' }).sheetState.pickAllowed, false, 'actor change immediately hides old proof before effect cleanup')
@@ -78,7 +79,7 @@ for (let id = 1; id <= 100; id++) {
   const first = state({ product: candidate })
   assert.equal(first.sheetState.pickAllowed, false)
   const ready = state({ product: candidate, batches: [{ ...lot, id: id + 100000 }],
-    loadedLotScope: first.currentLotScope, knownPositiveQuantityByProduct: { [id]: 3 }, selectedBatchId: id + 100000 })
+    loadedLotScope: first.currentLotScope, loadedConditionScope: first.currentLotScope, knownPositiveQuantityByProduct: { [id]: 3 }, selectedBatchId: id + 100000 })
   assert.equal(ready.sheetState.pickAllowed, true, `stocked product ${id} reaches its own positive lot without global-index membership`)
 }
 

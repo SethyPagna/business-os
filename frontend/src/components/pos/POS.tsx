@@ -2644,6 +2644,10 @@ export default function POS() {
 // Cart mutations
   function addToCart(product: ProductRecord, priceMode = 'selling', batchSelection?: BatchSelection, branchIdOverride?: string | number | null, damagedSelection?: { damagedLotId: number; quantity: number; label: string }) {
     if (active.checkoutRequestId) return notify(t('money_checkout_recovery_required'), 'error')
+    if (!batchSelection && !damagedSelection) {
+      setDetailProduct(product)
+      return
+    }
     // An empty basket with no request is a new purchase. Existing persisted
     // legacy baskets are never silently repriced or stamped during hydration.
     const version = active.money_precision_version === 1 || active.cart.length === 0 ? 1 : 0

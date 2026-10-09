@@ -10,6 +10,7 @@ import { promotionBadgeForProduct, evaluatePromotionPricing, type PromotionRule 
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { getProductBatches } from '../../api/batchesTransport.ts'
 import { readFreshPickerLots, startPickerLotRead } from '../../utils/pickerLotFreshness.ts'
+import { captureActorReadScope } from '../../api/actorReadScope.ts'
 import { getDamagedLots, type DamagedLot } from '../../api/damagedLotsTransport.ts'
 import { stockConditionLabel } from '../../utils/stockCondition.ts'
 import type { BatchSelection, ProductBatch } from '../../api/batchesTransport.ts'
@@ -301,7 +302,7 @@ export default function ProductDetailSheet({
   if (actorGeneration.current.user !== user) {
     actorGeneration.current = { user, epoch: actorGeneration.current.epoch + 1 }
   }
-  const actorScope = `${authReady}:${user?.id ?? 'anonymous'}:${actorGeneration.current.epoch}`
+  const actorScope = `${authReady}:${user?.id ?? 'anonymous'}:${actorGeneration.current.epoch}:${captureActorReadScope().authority}`
   // Cost access is independent from product/inventory access. POS suppresses
   // costs even for an administrator; other callers require the explicit grant.
   const canReadCost = !posPresentation && canViewAcquisitionCosts(user)
@@ -351,10 +352,10 @@ export default function ProductDetailSheet({
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null)
   const [selectedUnlottedProductId, setSelectedUnlottedProductId] = useState<number | null>(null)
   const [batchChoicesOpen, setBatchChoicesOpen] = useState(false)
-  // 11.9: open damaged lots for the resolved row/branch -- the Damage
-  // source option shown beside the sellable lots. A failed fetch shows no
-  // option (absence is safe; damaged stock is an offer, not a gate).
   const [damagedLots, setDamagedLots] = useState<DamagedLot[]>([])
+  const [loadedConditionScope, setLoadedConditionScope] = useState('')
+  const [conditionsError, setConditionsError] = useState('')
+  const [conditionsReloadKey, setConditionsReloadKey] = useState(0)
   const [selectedDamagedLotId, setSelectedDamagedLotId] = useState<number | null>(null)
   const [batchPage, setBatchPage] = useState(0)
   // Why a branch pill refused the tap, shown under the pills. A tooltip
@@ -412,10 +413,13 @@ export default function ProductDetailSheet({
   // Branch/variant changes invalidate the old result synchronously, before
   // React runs effect cleanup. Old selected IDs must not enable a new pick.
   const visibleBatches = loadedLotScope === currentLotScope ? batches : []
+  const visibleDamagedLots = loadedConditionScope === currentLotScope ? damagedLots : []
   const sheetState = deriveProductSheetState({
     ...sheetInput,
     batches: visibleBatches,
     knownPositiveBatchQuantityByProduct: loadedLotScope === currentLotScope ? knownPositiveQuantityByProduct : {},
+    damagedLots: visibleDamagedLots,
+    conditionLookupUnavailable: intent === 'sell' && loadedConditionScope !== currentLotScope,
     selectedDamagedLotId: !requireFreshLots || loadedLotScope === currentLotScope ? selectedDamagedLotId : null,
   })
   const branchOptions = sheetState.branchOptions
@@ -473,7 +477,6 @@ export default function ProductDetailSheet({
     clampedBarcodePage * VARIANT_CHOICES_PAGE_SIZE,
     clampedBarcodePage * VARIANT_CHOICES_PAGE_SIZE + VARIANT_CHOICES_PAGE_SIZE,
   )
-  const effectiveVariantInStock = effectiveVariant ? effectiveVariantStock > asNumber(effectiveVariant.out_of_stock_threshold) : false
   const effectiveVariantPromoBadge = promotionBadgeForProduct(effectiveVariant || undefined, promotionRules)
   const effectiveVariantPromoEvaluation = evaluatePromotionPricing(effectiveVariant || undefined, 1, promotionRules, exchangeRate)
   const effectiveVariantPromotion = {
@@ -571,15 +574,19 @@ export default function ProductDetailSheet({
   // rule the product-level reset above already applies to Branch/Barcode
   // themselves.
   useEffect(() => {
-    if (resolvedProduct == null || resolvedBranchId == null) { setDamagedLots([]); return }
+    if (intent !== 'sell' || lotSourceProductIds.length === 0 || resolvedBranchId == null) { setDamagedLots([]); return }
     setDamagedLots([])
-    let cancelled = false
-    getDamagedLots(resolvedProduct.id, resolvedBranchId).then((res) => {
-      if (!cancelled) setDamagedLots(Array.isArray(res?.lots) ? res.lots : [])
-    }).catch(() => { if (!cancelled) setDamagedLots([]) })
-    return () => { cancelled = true }
+    setLoadedConditionScope('')
+    setConditionsError('')
+    return startPickerLotRead(lotSourceProductIds, (productId, signal) => getDamagedLots(productId, resolvedBranchId, signal), lists => {
+      setDamagedLots(lists.flatMap(list => list.lots))
+      setLoadedConditionScope(currentLotScope)
+    }, () => {
+      setDamagedLots([])
+      setConditionsError(t('stock_tagged_load_failed') || posCopy('Failed to load tagged stock', 'មិនអាចផ្ទុកស្តុកដែលមានស្លាកបានទេ'))
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedProduct?.id, resolvedBranchId, actorScope])
+  }, [intent, lotSourceKey, resolvedBranchId, actorScope, conditionsReloadKey])
   // Keyed on the lot list's OWN identity (which rows it is drawn from, at
   // which branch), not on the resolved row: in merged mode picking a lot is
   // what moves the resolved row, and resetting on that would clear the pick
@@ -599,7 +606,7 @@ export default function ProductDetailSheet({
   // ones. Ordered here at render (rather than when the fetch lands) so the
   // list can never be shown in the raw transport order.
   const batchWord = t('batch') || 'Received date'
-  const orderedBatches = sortBatchesForPicker(visibleBatches)
+  const orderedBatches = sortBatchesForPicker(sheetState.receivedDateOptions) as PickerBatch[]
   const batchPageCount = Math.max(1, Math.ceil(orderedBatches.length / BATCH_CHOICES_PAGE_SIZE))
   const clampedBatchPage = Math.min(batchPage, batchPageCount - 1)
   const pagedBatches = orderedBatches.slice(clampedBatchPage * BATCH_CHOICES_PAGE_SIZE, clampedBatchPage * BATCH_CHOICES_PAGE_SIZE + BATCH_CHOICES_PAGE_SIZE)
@@ -621,7 +628,7 @@ export default function ProductDetailSheet({
   // which lot it's coming from. Now applies the same way whether the
   // resolved row came from the flat flow or from the group's Branch/
   // Barcode steps.
-  const selectedDamagedLot = damagedLots.find((lot) => lot.id === selectedDamagedLotId) || null
+  const selectedDamagedLot = visibleDamagedLots.find((lot) => lot.id === selectedDamagedLotId) || null
   // A picked damaged lot IS the line's source -- it satisfies the received-
   // date gate the same way a sellable lot does (the units come from it).
   const batchSelectionRequired = sheetState.batchSelectionRequired
@@ -647,12 +654,12 @@ export default function ProductDetailSheet({
     `${lot.condition_tag ? stockConditionLabel(lot.condition_tag) : posCopy('Damage', 'ខូចខាត')} · ${lot.return_id ? `${posCopy('return', 'ប្រគល់វិញ')} #${lot.return_id}` : `#${lot.id}`}`
 
   const buildDamagedSelection = () => selectedDamagedLot
-    ? { damagedLotId: selectedDamagedLot.id, quantity: Number(selectedDamagedLot.quantity_remaining || 0), label: damagedLotLabel(selectedDamagedLot) }
+    ? { damagedLotId: selectedDamagedLot.id, quantity: sheetState.availableStock, label: damagedLotLabel(selectedDamagedLot) }
     : undefined
 
   const buildBatchSelection = (): BatchSelection | undefined => {
     if (selectedDamagedLot) return undefined
-    if (!batchSelectionRequired) return undefined
+    if (!batchSelectionRequired) return intent === 'sell' ? { quantity: sheetState.availableStock } : undefined
     if (sheetState.selectedUnlottedProductId != null && unlottedStockQuantity > 0) return { unlottedStock: true, quantity: unlottedStockQuantity }
     if (!selectedBatch) return undefined
     return {
@@ -662,11 +669,13 @@ export default function ProductDetailSheet({
       // Carried for the hosts that SHOW which intake was picked. The POS
       // ignores it (its cart line keeps label + expiry), so this is additive.
       batchReceivedAt: selectedBatch.received_at ?? null,
-      quantity: Number(selectedBatch.quantity || 0),
+      quantity: sheetState.availableStock,
     }
   }
 
   const closeAfterAdd = (nextProduct: ProductRecord, priceMode: PriceMode) => {
+    if (!pickAllowed) return
+    if (selectedDamagedLot) nextProduct = candidatePool.find(row => Number(row.id) === selectedDamagedLot.product_id) || nextProduct
     onAddToCart(nextProduct, priceMode, buildBatchSelection(), effectiveBranchId, buildDamagedSelection())
     onClose()
   }
@@ -683,10 +692,22 @@ export default function ProductDetailSheet({
   // the line form it gates never opened and the pick appeared to do nothing.
   // The host closes the sheet from inside its own onPick.
   const confirmPick = (nextProduct: ProductRecord) => {
-    if (!pickAllowed) return
+    if (!pickAllowed || selectedDamagedLot) return
     onPick?.(nextProduct, { branchId: effectiveBranchId, batch: buildBatchSelection() })
   }
   const pickButtonLabel = pickLabel || t('select') || 'Select'
+  const conditionReadStatus = intent === 'sell' && loadedConditionScope !== currentLotScope ? (
+    <div role={conditionsError ? 'alert' : 'status'} className="mb-2 flex items-center gap-2 rounded-lg border border-orange-200 px-2 py-1.5 text-xs">
+      <span className="min-w-0 flex-1">{conditionsError || (t('loading') || 'Loading...')}</span>
+      {conditionsError ? <button type="button" className="shrink-0 underline" onClick={() => setConditionsReloadKey(key => key + 1)}>{t('retry') || 'Retry'}</button> : null}
+    </div>
+  ) : null
+  const chooseDamagedLot = (lot: DamagedLot) => {
+    if (onPick || Number(lot.quantity_remaining) <= 0) return
+    setSelectedDamagedLotId(lot.id === selectedDamagedLotId ? null : lot.id)
+    setSelectedBatchId(null); setSelectedUnlottedProductId(null)
+    if (mergeRowsIntoLotList) setSelectedVariantId(String(lot.product_id))
+  }
   const batchLoadFailure = (
     <div role="alert" className="flex items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-300">
       <span className="min-w-0 flex-1 truncate" title={batchesError}>{batchesError || posCopy('Could not load received dates', 'មិនអាចផ្ទុកថ្ងៃចូលបានទេ')}</span>
@@ -863,6 +884,7 @@ export default function ProductDetailSheet({
               a product-level number that could be scoped to a DIFFERENT branch than
               the one on screen, which is what "display shows different data than the
               actual stock in the options" was describing. */}
+          {conditionReadStatus}
           <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('label_stock') || 'Stock'}</span><span className={`font-bold ${displayedStock <= 0 ? 'text-red-600' : displayedStock <= effectiveLowStockThreshold(lowStockConfig, product.low_stock_threshold) ? 'text-yellow-600' : 'text-green-600'}`}>{displayedStock} {product.unit}</span></div>
           {/* "Warehouse: n · Shop: n", ALWAYS -- grouped or standalone, in
               stock or out. The Stock row above is one branch-resolved
@@ -1041,16 +1063,16 @@ export default function ProductDetailSheet({
                       </button>)}
                     </div>
                   ) : null}
-                  {damagedLots.length > 0 ? (
+                  {!onPick && visibleDamagedLots.length > 0 ? (
                     <div className="mb-2 rounded-lg border border-orange-200 bg-orange-50/60 p-2 dark:border-orange-900/50 dark:bg-orange-950/20">
-                      <div className="mb-1.5 text-[11px] font-semibold text-orange-500 dark:text-orange-400">🟠 {posCopy('Damage (from returns)', 'ខូចខាត (ពីការប្រគល់មកវិញ)')}</div>
+                      <div className="mb-1.5 text-[11px] font-semibold text-orange-500 dark:text-orange-400">🟠 {posCopy('Tagged stock', 'ស្តុកដែលមានស្លាក')}</div>
                       <div className="flex flex-wrap gap-1.5">
-                        {damagedLots.map((lot) => (
+                        {visibleDamagedLots.map((lot) => (
                           <button key={lot.id} type="button"
                             disabled={Number(lot.quantity_remaining || 0) <= 0}
                             aria-disabled={Number(lot.quantity_remaining || 0) <= 0}
                             className={pillClass(lot.id === selectedDamagedLotId, Number(lot.quantity_remaining || 0) <= 0)}
-                            onClick={() => { if (Number(lot.quantity_remaining || 0) <= 0) return; setSelectedDamagedLotId(lot.id === selectedDamagedLotId ? null : lot.id); setSelectedBatchId(null); setSelectedUnlottedProductId(null) }}>
+                            onClick={() => chooseDamagedLot(lot)}>
                             <span className="font-mono">{damagedLotLabel(lot)}</span>
                             <span className="ml-1 text-[10px] font-normal opacity-75">({lot.quantity_remaining})</span>
                           </button>
@@ -1060,8 +1082,8 @@ export default function ProductDetailSheet({
                   ) : null}
                   <div className="flex flex-wrap gap-1.5">
                     {onPick ? renderPickButton(effectiveVariant) : null}
-                    {onPick ? null : <button className="btn-primary flex-1 text-xs" disabled={!effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'selling')}>
-                      {batchSelectionRequired && !selectedBatch && sheetState.selectedUnlottedProductId == null ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(effectiveVariant.selling_price_usd || 0))}`}
+                    {onPick ? null : <button className="btn-primary flex-1 text-xs" disabled={!pickAllowed || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'selling')}>
+                      {batchSelectionRequired && !selectedDamagedLot && !selectedBatch && sheetState.selectedUnlottedProductId == null ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(effectiveVariant.selling_price_usd || 0))}`}
                     </button>}
                     {/* The variant's VIP add-to-cart button is deleted by the
                         2026-09-04 ruling; the Wholesale button beside it now
@@ -1069,14 +1091,14 @@ export default function ProductDetailSheet({
                     {!onPick && (asNumber(effectiveVariant.wholesale_price_usd) > 0 || asNumber(effectiveVariant.wholesale_price_khr) > 0) ? (
                       <button
                         className="btn-secondary flex-1 text-xs border-indigo-200 text-indigo-700 dark:border-indigo-800 dark:text-indigo-200"
-                        disabled={!effectiveVariantInStock || !batchReadyToSell}
+                        disabled={!pickAllowed || !batchReadyToSell}
                         onClick={() => closeAfterAdd(effectiveVariant, 'wholesale')}
                       >
                         {`${t('wholesale_price') || 'Wholesale price'} ${fmtUSD(asNumber(effectiveVariant.wholesale_price_usd || 0))}`}
                       </button>
                     ) : null}
                     {!onPick && effectiveVariantPromotion.active ? (
-                      <button className="btn-secondary flex-1 text-xs border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={!effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'promotion')}>
+                      <button className="btn-secondary flex-1 text-xs border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={!pickAllowed || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'promotion')}>
                         {effectiveVariantPromoBadge.kind === 'quantity_hint'
                           ? ((effectiveVariantPromoBadge.show_title && effectiveVariantPromoBadge.title) || `${posCopy('Buy', 'ទិញ')} ${effectiveVariantPromoBadge.min_quantity}+`)
                           : `${(effectiveVariantPromoBadge.show_title && effectiveVariantPromoBadge.title) || effectiveVariant.discount_label || posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')} ${fmtUSD(effectiveVariantPromotion.applied_price_usd)}`}
@@ -1149,16 +1171,16 @@ export default function ProductDetailSheet({
                 </button>)}
               </div>
             ) : null}
-            {damagedLots.length > 0 ? (
+            {!onPick && visibleDamagedLots.length > 0 ? (
               <div className="rounded-xl border border-orange-200 bg-orange-50/60 p-3 dark:border-orange-900/50 dark:bg-orange-950/20">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-orange-500 dark:text-orange-400">🟠 {posCopy('Damage (from returns)', 'ខូចខាត (ពីការប្រគល់មកវិញ)')}</div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-orange-500 dark:text-orange-400">🟠 {posCopy('Tagged stock', 'ស្តុកដែលមានស្លាក')}</div>
                 <div className="flex flex-wrap gap-1.5">
-                  {damagedLots.map((lot) => (
+                  {visibleDamagedLots.map((lot) => (
                     <button key={lot.id} type="button"
                       disabled={Number(lot.quantity_remaining || 0) <= 0}
                       aria-disabled={Number(lot.quantity_remaining || 0) <= 0}
                       className={pillClass(lot.id === selectedDamagedLotId, Number(lot.quantity_remaining || 0) <= 0)}
-                      onClick={() => { if (Number(lot.quantity_remaining || 0) <= 0) return; setSelectedDamagedLotId(lot.id === selectedDamagedLotId ? null : lot.id); setSelectedBatchId(null); setSelectedUnlottedProductId(null) }}>
+                      onClick={() => chooseDamagedLot(lot)}>
                       <span className="font-mono">{damagedLotLabel(lot)}</span>
                       <span className="ml-1 text-[10px] font-normal opacity-75">({lot.quantity_remaining})</span>
                     </button>
@@ -1168,11 +1190,11 @@ export default function ProductDetailSheet({
             ) : null}
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               {onPick ? renderPickButton(product) : null}
-              {onPick ? null : <button className="btn-primary flex-1" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'selling')}>
-                {displayedStock <= asNumber(product.out_of_stock_threshold) ? t('out_of_stock') : batchSelectionRequired && !selectedBatch && sheetState.selectedUnlottedProductId == null ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(product.selling_price_usd || 0))}`}
+              {onPick ? null : <button className="btn-primary flex-1" disabled={!pickAllowed || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'selling')}>
+                {displayedStock <= asNumber(product.out_of_stock_threshold) ? t('out_of_stock') : batchSelectionRequired && !selectedDamagedLot && !selectedBatch && sheetState.selectedUnlottedProductId == null ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(product.selling_price_usd || 0))}`}
               </button>}
               {!onPick && promotion.active ? (
-                <button className="btn-secondary flex-1 border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'promotion')}>
+                <button className="btn-secondary flex-1 border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={!pickAllowed || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'promotion')}>
                   {promoBadge.kind === 'quantity_hint'
                     ? ((promoBadge.show_title && promoBadge.title) || `${posCopy('Buy', 'ទិញ')} ${promoBadge.min_quantity}+`)
                     : `${(promoBadge.show_title && promoBadge.title) || product.discount_label || posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')} ${fmtUSD(promotion.applied_price_usd)}`}
@@ -1183,7 +1205,7 @@ export default function ProductDetailSheet({
               {!onPick && (asNumber(product.wholesale_price_usd) > 0 || asNumber(product.wholesale_price_khr) > 0) ? (
                 <button
                   className="btn-secondary flex-1 border-indigo-200 text-indigo-700 dark:border-indigo-800 dark:text-indigo-200"
-                  disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell}
+                  disabled={!pickAllowed || !batchReadyToSell}
                   onClick={() => closeAfterAdd(product, 'wholesale')}
                 >
                   {`${t('wholesale_price') || 'Wholesale price'} ${fmtUSD(asNumber(product.wholesale_price_usd || 0))}`}

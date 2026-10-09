@@ -45,6 +45,9 @@ export type SheetBatchLike = {
 
 export type SheetDamagedLotLike = {
   id: number
+  product_id?: number
+  branch_id?: number | null
+  batch_id?: number | null
   quantity_remaining?: string | number
 }
 
@@ -84,7 +87,7 @@ export type SheetIntent = 'sell' | 'stock'
 // 'received_date' -- the host asked WHICH intake (trackedBatchProductIds)
 //   and no lot is chosen yet. That question is real on both intents: a
 //   transfer moves a specific lot just as a sale draws from one.
-export type SheetPickBlockedReason = 'out_of_stock' | 'received_date' | null
+export type SheetPickBlockedReason = 'out_of_stock' | 'received_date' | 'condition_read' | null
 
 export type ProductSheetStateInput = {
   product: SheetProductLike
@@ -120,6 +123,7 @@ export type ProductSheetStateInput = {
   // boolean remains as the flat/single-row shorthand used by existing hosts.
   selectedUnlottedProductId?: number | null
   damagedLots?: readonly SheetDamagedLotLike[]
+  conditionLookupUnavailable?: boolean
   selectedDamagedLotId?: number | null
   intent?: SheetIntent
   // Cross-branch fallback used only when the product carries no
@@ -140,6 +144,7 @@ export type ProductSheetState = {
   effectiveVariant: SheetProductLike | null
   effectiveVariantStock: number
   displayedStock: number
+  availableStock: number
   branchSummary: string
   warehouseDisabled: boolean
   isBatchTracked: boolean
@@ -453,6 +458,10 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
   const candidatePool = poolAtBranch(effectiveBranchId)
   const effectiveVariant = resolveRow(candidatePool, effectiveBranchId)
   const effectiveVariantStock = stockAtBranch(effectiveVariant, effectiveBranchId)
+  const taggedQuantity = (productId: number, batchId?: number | null): number => damagedLots
+    .filter(lot => Number(lot.product_id) === productId && String(lot.branch_id) === effectiveBranchId
+      && (batchId === undefined || lot.batch_id === batchId))
+    .reduce((sum, lot) => sum + Math.max(0, toNumber(lot.quantity_remaining)), 0)
 
   const mergeRowsIntoLotList = rowsMergeIntoLotList(candidatePool)
 
@@ -460,7 +469,9 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
   const isBatchTracked = mergeRowsIntoLotList
     || (resolvedProduct != null && (trackedBatchProductIds?.has(Number(resolvedProduct.id)) ?? false))
 
-  const receivedDateOptions = sortBatchesForPicker(batches as readonly SheetBatchLike[]) as SheetBatchLike[]
+  const receivedDateOptions = sortBatchesForPicker(batches.map(batch => ({ ...batch,
+    quantity: intent === 'sell' ? Math.max(0, toNumber(batch.quantity) - taggedQuantity(Number(batch.__productId ?? effectiveVariant?.id), batch.id)) : batch.quantity,
+  })) as readonly SheetBatchLike[]) as SheetBatchLike[]
   const receivedDateTotal = receivedDateOptions.reduce((sum, batch) => sum + toNumber(batch.quantity), 0)
   const selectedBatch = receivedDateOptions.find((batch) => batch.id === selectedBatchId) || null
   const unlottedSourceRows = mergeRowsIntoLotList ? candidatePool : (effectiveVariant ? [effectiveVariant] : [])
@@ -470,14 +481,15 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
     const authoritativeKnownQuantity = input.knownPositiveBatchQuantityByProduct
       ? input.knownPositiveBatchQuantityByProduct[rowId]
       : undefined
-    const rowBatchesTotal = receivedDateOptions
+    const rowBatchesTotal = batches
       .filter((batch) => !mergeRowsIntoLotList || Number(batch.__productId) === rowId)
       .reduce((sum, batch) => sum + toNumber(batch.quantity), 0)
     const knownPositiveBatchQuantity = authoritativeKnownQuantity === undefined
       ? (input.knownPositiveBatchQuantityByProduct === undefined ? rowBatchesTotal : null)
       : (authoritativeKnownQuantity == null ? null : Math.max(0, toNumber(authoritativeKnownQuantity)))
     if (knownPositiveBatchQuantity == null) return []
-    const quantity = Math.max(0, stockAtBranch(row, effectiveBranchId) - knownPositiveBatchQuantity)
+    const quantity = Math.max(0, stockAtBranch(row, effectiveBranchId) - knownPositiveBatchQuantity
+      - (intent === 'sell' ? taggedQuantity(rowId, null) : 0))
     return quantity > 0 ? [{ productId: rowId, quantity }] : []
   })
   const legacySelectedUnlottedProductId = selectedUnlottedStock
@@ -487,11 +499,21 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
   const selectedUnlottedOption = unlottedStockOptions.find((option) => option.productId === selectedUnlottedProductId) || null
   const effectiveUnlottedOption = unlottedStockOptions.find((option) => option.productId === Number(effectiveVariant?.id ?? product.id)) || null
   const unlottedStockQuantity = selectedUnlottedOption?.quantity ?? effectiveUnlottedOption?.quantity ?? 0
-  const selectedDamagedLot = damagedLots.find((lot) => lot.id === selectedDamagedLotId) || null
+  const selectedDamagedLot = damagedLots.find((lot) => lot.id === selectedDamagedLotId
+    && candidatePool.some(row => Number(row.id) === Number(lot.product_id))
+    && String(lot.branch_id) === effectiveBranchId) || null
+  const taggedRow = selectedDamagedLot ? candidatePool.find(row => Number(row.id) === Number(selectedDamagedLot.product_id)) : null
+  const taggedBatch = selectedDamagedLot?.batch_id != null
+    ? batches.find(batch => batch.id === selectedDamagedLot.batch_id && Number(batch.__productId ?? effectiveVariant?.id) === Number(selectedDamagedLot.product_id))
+    : null
+  const taggedKnownLots = selectedDamagedLot ? input.knownPositiveBatchQuantityByProduct?.[Number(selectedDamagedLot.product_id)] : null
+  const taggedUnlottedPhysical = taggedKnownLots == null ? 0 : Math.max(0, stockAtBranch(taggedRow || null, effectiveBranchId) - toNumber(taggedKnownLots))
+  const taggedStock = selectedDamagedLot ? Math.max(0, Math.min(toNumber(selectedDamagedLot.quantity_remaining), stockAtBranch(taggedRow || null, effectiveBranchId),
+    selectedDamagedLot.batch_id == null ? taggedUnlottedPhysical : toNumber(taggedBatch?.quantity))) : 0
 
   const batchSelectionRequired = isBatchTracked
   const batchReadyToSell = selectedDamagedLot != null
-    ? toNumber(selectedDamagedLot.quantity_remaining) > 0
+    ? taggedStock > 0
     : (!batchSelectionRequired || (selectedBatch != null && toNumber(selectedBatch.quantity) > 0) || selectedUnlottedOption != null)
 
   // On-hand comes from branch_stock, the ledger that answers "how many
@@ -499,7 +521,7 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
   // question -- WHICH intake a sale draws from -- and is only allowed to
   // narrow the number once a specific lot is picked.
   const displayedStock = selectedDamagedLot
-    ? toNumber(selectedDamagedLot.quantity_remaining)
+    ? taggedStock
     : selectedBatch
       ? toNumber(selectedBatch.quantity)
       : selectedUnlottedOption
@@ -512,8 +534,12 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
   // button and the figure above it can never disagree -- and the in-stock
   // half of the gate applies to a sale only.
   const pickRow = effectiveVariant ?? product
-  const pickInStock = displayedStock > toNumber(pickRow?.out_of_stock_threshold)
-  const pickBlockedReason: SheetPickBlockedReason = intent === 'sell' && !pickInStock
+  const availableStock = selectedDamagedLot || selectedBatch || selectedUnlottedOption ? displayedStock
+    : Math.max(0, effectiveVariantStock - (intent === 'sell' ? taggedQuantity(Number(effectiveVariant?.id)) : 0))
+  const pickInStock = availableStock > toNumber(pickRow?.out_of_stock_threshold)
+  const pickBlockedReason: SheetPickBlockedReason = intent === 'sell' && input.conditionLookupUnavailable
+    ? 'condition_read'
+    : intent === 'sell' && !pickInStock
     ? 'out_of_stock'
     : (!batchReadyToSell ? 'received_date' : null)
 
@@ -525,6 +551,7 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
     effectiveVariant,
     effectiveVariantStock,
     displayedStock,
+    availableStock,
     branchSummary,
     warehouseDisabled: branchOptions.some((option) => option.role === 'warehouse' && !option.selectable),
     isBatchTracked,

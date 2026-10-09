@@ -22,9 +22,9 @@ import { STOCK_CONDITION_TAGS } from '../../utils/stockCondition.ts'
 type Translate = (key: string, fallbackEn?: string, fallbackKm?: string) => string
 
 export type StockConditionTagRowProps = {
-  /** 'remove' = keep-or-destroy; 'add' = sellable-or-tagged restock. */
+  /** 'remove' = tag existing stock or destroy it; 'add' = ordinary or tagged receipt. */
   mode: 'remove' | 'add'
-  /** '' means the untagged default (remove entirely / receive as sellable). */
+  /** '' means the untagged default (remove entirely / receive ordinary stock). */
   value: string
   onChange: (next: string) => void
   tr: Translate
@@ -45,7 +45,7 @@ export default function StockConditionTagRow({ mode, value, onChange, tr, disabl
   const tagged = Boolean(value)
   const plainLabel = mode === 'remove'
     ? tr('stock_remove_entirely', 'Remove entirely', 'ដកចេញទាំងស្រុង')
-    : tr('stock_restock_sellable', 'Restock as sellable', 'បញ្ចូលជាទំនិញលក់')
+    : tr('stock_restock_sellable', 'Receive ordinary stock', 'បញ្ចូលស្តុកធម្មតា')
   const taggedLabel = mode === 'remove'
     ? tr('stock_keep_in_group_as', 'Keep in group as', 'រក្សាក្នុងក្រុមជា')
     : tr('stock_restock_with_tag', 'Restock with', 'បញ្ចូលជាមួយ')
@@ -56,7 +56,7 @@ export default function StockConditionTagRow({ mode, value, onChange, tr, disabl
   const tagOptions = useMemo(() => STOCK_CONDITION_TAGS.map((tag) => ({ value: tag, label: tag })), [])
   const plainValueLabel = mode === 'remove'
     ? plainLabel
-    : tr('stock_tag_sellable', 'Sellable', 'លក់បាន')
+    : tr('stock_tag_sellable', 'Ordinary stock', 'ស្តុកធម្មតា')
   const selectOptions = useMemo(() => [{ value: '', label: plainValueLabel }, ...tagOptions], [plainValueLabel, tagOptions])
 
   if (variant === 'select') {
