@@ -49,7 +49,11 @@ function compile(file, stubs = {}) {
   const moduleObj = { exports: {} }
   const localRequire = request => {
     if (Object.hasOwn(stubs, request)) return stubs[request]
-    if (['./stockTransaction', './countedDamagedStock', './sqlBinding'].includes(request)) return compile(request.slice(2) + '.ts', stubs)
+    if (request.startsWith('.')) {
+      const target=path.resolve(path.dirname(sourcePath),request)+'.ts'
+      if(fs.existsSync(target)) return compile(path.relative(path.join(__dirname,'../src/lib'),target),stubs)
+      throw new Error('Unwired relative dependency: '+request)
+    }
     return require(request)
   }
   new Function('exports', 'require', 'module', output)(moduleObj.exports, withProductStockGuard(localRequire), moduleObj)
