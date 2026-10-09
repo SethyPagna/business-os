@@ -4630,7 +4630,7 @@ app.post('/:id/amendments', async (c) => {
   for(const allocation of allocations)addStockContext(Number(line.product_id),Number(allocation.branch_id))
   if(replacementIntent)addStockContext(replacementProductId,Number(lineEffect?line.branch_id:replacementIntent.branch_id??saleHeaderBranchId))
   const capturedStockProducts=await db.prepare(`SELECT p.*,CAST(json_extract(context.value,'$.branchId') AS INTEGER) AS stock_branch_id,
-    ${countedStockFactsSql('p.id',"CAST(json_extract(context.value,'$.branchId') AS INTEGER)",'@originalReceipts')} AS counted_facts
+    ${countedStockFactsSql("CAST(json_extract(context.value,'$.productId') AS INTEGER)","CAST(json_extract(context.value,'$.branchId') AS INTEGER)",'@originalReceipts')} AS counted_facts
     FROM json_each(@contexts) context JOIN products p ON p.id=json_extract(context.value,'$.productId')`)
     .all<Record<string,unknown>&{counted_facts:string;id:number;name:string;selling_price_usd:number;cost_price_usd:number;cost_price_khr:number}>({contexts:JSON.stringify([...stockContexts.values()]),originalReceipts:JSON.stringify([...new Set(allocations.map(row=>row.batch_id))])})
   const replacementRules= replacementIntent ? await db.prepare('SELECT * FROM promotion_rules WHERE is_active=1 ORDER BY id LIMIT 101').all<Record<string,unknown>>() : []
