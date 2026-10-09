@@ -13,6 +13,7 @@ import Modal from '../shared/Modal.tsx'
 import { StockLineChange } from '../shared/StockLineChange.tsx'
 import { signedMovementQuantity, translateMovementRowType } from './movementGroups.ts'
 import { buildHistoryRowModel, formatHistoryReference } from '../../utils/historyRowModel.ts'
+import { isStockConditionChange } from '../../utils/stockMovementDetail.ts'
 
 export type MovementDetailRecord = {
   id: string | number
@@ -95,6 +96,7 @@ export function MovementBalance({ movement, tr, loadBalance, fallback, showQuant
       pending={!current}
       showQuantity={showQuantity}
     />
+    {isStockConditionChange(movement.movement_type) ? <p className="leading-relaxed text-gray-500 dark:text-gray-400">{tr('stock_condition_quantity_unchanged', 'Stock quantity is unchanged; only the condition tag changed.')}</p> : null}
     {current?.failed && !usedFallback ? <p className="leading-relaxed text-amber-700 dark:text-amber-300">{tr('stock_balance_unavailable', 'The stock before and after could not be read.')}</p> : null}
   </>
 }

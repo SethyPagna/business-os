@@ -24,6 +24,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import ts from 'typescript'
 import * as movementGroups from '../src/components/inventory/movementGroups.ts'
 import * as historyRowModel from '../src/utils/historyRowModel.ts'
+import * as stockMovementDetail from '../src/utils/stockMovementDetail.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const srcRoot = path.join(here, '..', 'src')
@@ -55,6 +56,7 @@ function renderFloat(movement: Record<string, unknown>, balanceState: unknown): 
     if (id.includes('StockLineChange')) return stockLineChange
     if (id.includes('movementGroups')) return movementGroups
     if (id.includes('historyRowModel')) return historyRowModel
+    if (id.includes('stockMovementDetail')) return stockMovementDetail
     if (id.includes('Modal')) return { default: ({ title, children }: { title: string; children: React.ReactNode }) => React.createElement('section', { 'data-title': title }, children) }
     throw new Error(`Unexpected dependency: ${id}`)
   })
@@ -194,6 +196,7 @@ function renderBalance(props: Record<string, unknown>, balanceState: unknown): s
     if (id.includes('StockLineChange')) return stockLineChange
     if (id.includes('movementGroups')) return movementGroups
     if (id.includes('historyRowModel')) return historyRowModel
+    if (id.includes('stockMovementDetail')) return stockMovementDetail
     if (id.includes('Modal')) return { default: ({ children }: { children: React.ReactNode }) => React.createElement('section', null, children) }
     throw new Error(`Unexpected dependency: ${id}`)
   })

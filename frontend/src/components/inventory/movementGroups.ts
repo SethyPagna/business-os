@@ -176,6 +176,8 @@ export function translateMovementType(type: unknown, t?: (key: string) => string
     move_in: ['movement_type_move_in', 'Moved in'],
     move_out: ['movement_type_move_out', 'Moved out'],
     damage_out: ['movement_type_damage_out', 'Damaged'],
+    condition_tag: ['movement_type_condition_tag', 'Condition tag added'],
+    condition_clear: ['movement_type_condition_clear', 'Condition tag cleared'],
     replacement_out: ['movement_type_replacement_out', 'Replacement'],
     'in': ['stock_in', 'Stock In'],
     out: ['stock_out', 'Stock Out'],

@@ -16,6 +16,11 @@ function normalizedMovementType(value: unknown): string {
   return String(value ?? '').trim().toLowerCase()
 }
 
+export function isStockConditionChange(value: unknown): boolean {
+  const type = normalizedMovementType(value)
+  return type === 'condition_tag' || type === 'condition_clear'
+}
+
 export function isStockReceiptMovement(value: unknown): boolean {
   return receiptTypes.has(normalizedMovementType(value))
 }
