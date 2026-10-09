@@ -7,7 +7,7 @@ export type CountedTaggedIdentity = { lotId: number; productId: number; branchId
 const MAX_COUNTED_ROWS = 10_000
 type ProductFacts = [number, number, number, number | null, number | null, string]
 type BranchFacts = [number, number, string, string]
-type ReceiptFacts = [number, number, number, number | null, number | null, string | null, string | null, string, number | string | null, string | null, number | null, number]
+type ReceiptFacts = [number, number, number | null, number | null, number | null, string | null, string | null, string, number | string | null, string | null, number | null, number]
 type TagFacts = [number, number | null, number, number, string, string | null, number | null, number | null, number | null, string | null]
 type CountedFacts = { product: ProductFacts; branch: BranchFacts | null; branches: [number, number][]; receipts: ReceiptFacts[]; tags: TagFacts[] }
 type SharedCountedProjection = { product: ProductFacts; branches: [number, number][] }
@@ -180,8 +180,8 @@ export class CountedStockPlan {
 
   requiresReceiptActivation(batchId: number): boolean {
     const receipt = this.facts.receipts.find(row => row[0] === batchId && row[1] === this.productId)
-    if (!receipt || (receipt[2] !== 0 && receipt[2] !== 1)) throw new CountedStockConflictError()
-    return receipt[2] === 0
+    if (!receipt || (receipt[2] !== null && receipt[2] !== 0 && receipt[2] !== 1)) throw new CountedStockConflictError()
+    return receipt[2] !== 1
   }
 
   projectedReceiptByKey(batchKey: string): number | null {
@@ -210,7 +210,8 @@ export class CountedStockPlan {
     const activating = action === 'activateAndReceive'
     if (this.facts.product[1] !== 1 || this.facts.branch?.[0] !== this.branchId || this.facts.branch[1] !== 1) throw new CountedStockConflictError()
     if (activating && (batchId === null || !this.requiresReceiptActivation(batchId))) throw new CountedStockConflictError()
-    if (batchId !== null && !this.facts.receipts.some(row => row[0] === batchId && row[1] === this.productId && row[2] === (activating ? 0 : 1))) throw new CountedStockConflictError()
+    const capturedReceipt = batchId === null ? null : this.facts.receipts.find(row => row[0] === batchId && row[1] === this.productId)
+    if (batchId !== null && (!capturedReceipt || (!activating && capturedReceipt[2] !== 1))) throw new CountedStockConflictError()
     if (receiving) {
       if (this.facts.branches.some(row => row[0] === this.branchId)) {
         if (activating) this.assertCapacity(batchId)
@@ -221,7 +222,7 @@ export class CountedStockPlan {
     if (!receiving && this.ordinaryQuantity(batchId) < quantity) throw new CountedStockConflictError()
     const out = this.preimageGuard()
     if (activating) {
-      out.push({ sql: 'UPDATE product_batches SET is_active=1 WHERE id=@batchId AND variant_product_id=@productId AND is_active=0', params: { batchId, productId: this.productId } })
+      out.push({ sql: 'UPDATE product_batches SET is_active=1 WHERE id=@batchId AND variant_product_id=@productId AND is_active IS @inactiveReceipt', params: { batchId, productId: this.productId, inactiveReceipt: capturedReceipt![2] } })
       const peers = this.batch?.receipts.get(batchId!) ?? [this.facts.receipts.find(row => row[0] === batchId)!]
       for (const receipt of peers) receipt[2] = 1
     }
