@@ -47,6 +47,7 @@ try {
  assert.equal(propsOf(profileButtons[0]).type,'button')
  await sidebar.click(profileButtons[0])
  assert.equal(propsOf(sidebar.button('Account'))['aria-expanded'],false,'opening profile closes account menu')
+ await sidebar.waitFor(()=>sidebar.findAll(node=>propsOf(node).role==='dialog').length>0,'actual profile modal')
  assert.ok(sidebar.find(node=>propsOf(node).role==='dialog','actual profile modal'))
  assert.equal(propsOf(sidebar.field('profile-name')).value,'Owner B','actual modal loads the current actor profile')
  await sidebar.click(sidebar.button('Close'))
