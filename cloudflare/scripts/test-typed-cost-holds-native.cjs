@@ -130,7 +130,18 @@ async function request(app, method, url, body, user = admin) {
 }
 
 raw.prepare("INSERT OR IGNORE INTO branches(id, name) VALUES (1, 'Shop')").run()
-for (const file of fs.readdirSync(path.join(src, '../migrations')).filter(file => file.endsWith('.sql') && Number(file.slice(0,4)) > 242).sort()) raw.exec(fs.readFileSync(path.join(src, '../migrations', file), 'utf8'))
+for (const file of fs.readdirSync(path.join(src, '../migrations')).filter(file => file.endsWith('.sql') && Number(file.slice(0,4)) > 242).sort()) {
+  const migration=fs.readFileSync(path.join(src,'../migrations',file),'utf8')
+  if(!file.startsWith('0246_')) {raw.exec(migration);continue}
+  raw.exec('BEGIN IMMEDIATE')
+  try {
+    raw.exec("INSERT INTO system_flags(key,value) VALUES('stock_transaction_permit','legacy-separate-pool-v1');INSERT INTO system_flags(key,value) VALUES('maintenance','{\"mode\":\"counted_conversion\",\"token\":\"typed-cost-fixture\"}');DELETE FROM system_flags WHERE key='stock_transaction_permit'")
+    raw.exec(migration)
+    raw.exec("DELETE FROM system_flags WHERE key='maintenance'")
+    raw.exec('COMMIT')
+  } catch(error) {raw.exec('ROLLBACK');throw error}
+}
+assert.equal(raw.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get().value,'counted-tagged-subset-v1')
 assert.throws(() => raw.exec("INSERT INTO products(name, stock_quantity) VALUES('Unowned seed',1)"), /stock_transaction_required/)
 const stockWrite = async statements => {
   try { return await load('lib/stockTransaction.ts').executeStockTransaction(load('lib/db.ts').getDb(env), statements, 'retry') }
