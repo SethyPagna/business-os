@@ -1,11 +1,7 @@
 const fs = require('node:fs'), path = require('node:path'), Module = require('node:module')
 const assert = require('node:assert/strict'), { createHash } = require('node:crypto')
 const root = path.resolve(__dirname, '..')
-const original = path.join(__dirname, 'test-stock-session-atomic.cjs')
-let source = fs.readFileSync(original, 'utf8').replaceAll('\r\n', '\n')
-source = source.replace("&& !name.startsWith('0243_')", "&& !name.startsWith('0243_') && !name.startsWith('0246_')")
-source = source.replace('    let result\n    try { result = sqliteD1Call', "    if(sql.prepare(statement.text).reader) return {results:sqliteD1Call(sql.prepare(statement.text),'all',statement.params),meta:{changes:0}}\n    let result\n    try { result = sqliteD1Call")
-const shared = new Module(original, module); shared.filename = original; shared.paths = module.paths; shared._compile(source, original)
+const shared = { exports: require('./test-stock-session-atomic.cjs') }
 const conversion = fs.readFileSync(path.join(root, 'migrations/0246_counted_tagged_stock.sql'), 'utf8')
 function world(batch = true, historical = false) {
   return shared.exports.fixture(sql => {
@@ -18,7 +14,7 @@ function world(batch = true, historical = false) {
     if(historical) sql.exec(`INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source,unit_cost_usd)VALUES(2,1,1,1,1,0,'damaged','remove',2);
       INSERT INTO sales(id,receipt_number,branch_id,sale_status,exchange_rate,total_usd,amount_paid_usd)VALUES(50,'NATIVE-HISTORICAL-TAGGED',1,'completed',4000,9.5,9.5);
       INSERT INTO sale_items(id,sale_id,product_id,product_name,branch_id,damaged_lot_id,quantity,applied_price_usd,total_usd)VALUES(50,50,1,'Serum',1,2,1,9.5,9.5);`)
-  })
+  }, { legacyStock: true })
 }
 function exclusive(f) {
   f.sql.exec(`INSERT INTO system_flags(key,value)VALUES('stock_transaction_permit','legacy-separate-pool-v1');INSERT INTO system_flags(key,value)VALUES('maintenance','{"mode":"counted_conversion","token":"counted-native-exclusive"}');DELETE FROM system_flags WHERE key='stock_transaction_permit'`)

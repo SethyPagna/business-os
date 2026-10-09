@@ -45,10 +45,11 @@ function loadStockSession(entry = 'lib/stockSession.ts', actor = user) {
   return load(entry)
 }
 
-function fixture(seedBeforeFence = () => {}) {
+function fixture(seedBeforeFence = () => {}, { legacyStock = false } = {}) {
   const sql = new Database(':memory:')
   sql.pragma('foreign_keys = OFF')
-  for (const file of fs.readdirSync(path.join(root, 'migrations')).filter((name) => name.endsWith('.sql') && !name.startsWith('0243_')).sort()) {
+  const migrations = fs.readdirSync(path.join(root, 'migrations')).filter((name) => name.endsWith('.sql')).sort()
+  for (const file of migrations.filter((name) => Number(name.slice(0, 4)) <= 242)) {
     sql.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
   }
   sql.pragma('foreign_keys = ON')
@@ -59,7 +60,23 @@ function fixture(seedBeforeFence = () => {}) {
     INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(1, 1, 0);
   `)
   seedBeforeFence(sql)
-  sql.exec(fs.readFileSync(path.join(root, 'migrations/0243_stock_schema_epoch.sql'), 'utf8'))
+  for (const file of migrations.filter((name) => Number(name.slice(0, 4)) > 242)) {
+    const migration = fs.readFileSync(path.join(root, 'migrations', file), 'utf8')
+    if (!file.startsWith('0246_')) {
+      sql.exec(migration)
+      continue
+    }
+    if (legacyStock) continue
+    sql.transaction(() => {
+      sql.exec(`
+        INSERT INTO system_flags(key,value) VALUES('stock_transaction_permit','legacy-separate-pool-v1');
+        INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"counted_conversion","token":"native-fixture-conversion"}');
+        DELETE FROM system_flags WHERE key='stock_transaction_permit';
+      `)
+      sql.exec(migration)
+      sql.exec("DELETE FROM system_flags WHERE key='maintenance'")
+    })()
+  }
   let failAfterMetadata = false
   let loseNextAcknowledgement = false
   let beforeNextBatch = null
@@ -92,6 +109,13 @@ function fixture(seedBeforeFence = () => {}) {
     if (failAfterMetadata && /INSERT INTO branch_batch_stock/i.test(statement.text)) {
       failAfterMetadata = false
       throw new Error('injected failure after batch metadata')
+    }
+    const prepared = sql.prepare(statement.text)
+    if (prepared.reader) {
+      const before = sql.prepare('SELECT total_changes() AS n').get().n
+      const results = sqliteD1Call(prepared, 'all', statement.params)
+      const meta = sql.prepare('SELECT total_changes() - ? AS changes, last_insert_rowid() AS last_row_id').get(before)
+      return { results, meta }
     }
     let result
     try { result = sqliteD1Call(sql.prepare(statement.text), 'run', statement.params) }
