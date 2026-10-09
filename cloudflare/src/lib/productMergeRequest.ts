@@ -3,6 +3,8 @@ import type { SessionUser } from './auth'
 import type { ProductMergeCaseSnapshot } from './productMergeSnapshot'
 import type { ProductMergeForwardStockIdentity } from './productMergeForwardStock'
 import type { ProductMergeForwardCatalogOptions, ProductMergeForwardCatalogPlan } from './productMergeForwardCatalog'
+import { productMergeGalleryAdditions } from './productMergeForwardCatalog'
+import { readProductMergeReservations } from './productMergeReservations'
 import { planProductMergeForwardStock } from './productMergeForwardStock'
 import { PRODUCT_MERGE_PLAN_V2, PRODUCT_MERGE_TRANSITION_V2, productMergePointer } from './productMergeProtocol'
 import { stockActorParams, stockActorPredicate } from './stockActorGuard'
@@ -48,6 +50,16 @@ function validate(user: SessionUser, request: ProductMergeRequest): void {
   if (![user.id, request.keeperId, request.loserId].every(id => Number.isSafeInteger(id) && id > 0)
     || request.keeperId === request.loserId || typeof request.requestId !== 'string' || !/^[A-Za-z0-9_-]{8,100}$/.test(request.requestId)
     || typeof request.requestDigest !== 'string' || !/^[a-f0-9]{64}$/.test(request.requestDigest)) conflict()
+}
+
+export async function prepareProductMergeRequest(
+  db: D1Compat, snapshot: ProductMergeCaseSnapshot, operationId: string,
+  catalog: Omit<ProductMergeForwardCatalogOptions, 'imageIds'>, budget: ProductMergeRequestBudget,
+  guards: Statement[] = [],
+): Promise<ProductMergeRequestPreparation> {
+  admit(budget, 1)
+  const { imageIds, ...identity } = await readProductMergeReservations(db, snapshot, operationId, productMergeGalleryAdditions(snapshot).length)
+  return { snapshot, identity, guards, catalog: { ...catalog, imageIds } }
 }
 
 export async function readProductMergeReceipt(db: D1Compat, user: SessionUser, request: ProductMergeRequest): Promise<ProductMergeReceipt | null> {

@@ -18,6 +18,15 @@ export type ProductMergeForwardCatalogOptions = {
   reviewedFields?: ResolveChoiceValues
 }
 
+export function productMergeGalleryAdditions(snapshot: ProductMergeCaseSnapshot) {
+  const imagePaths = new Set(snapshot.canonicalImageRows.map(row => row.image_path))
+  return snapshot.duplicateImageRows.filter(row => {
+    if (!row.image_path || imagePaths.has(row.image_path)) return false
+    imagePaths.add(row.image_path)
+    return true
+  })
+}
+
 export function planProductMergeForwardCatalog(snapshot: ProductMergeCaseSnapshot, options: ProductMergeForwardCatalogOptions) {
   const sourceGuard = productMergeCaptureGuard(snapshot)
   const keeper = snapshot.canonicalProduct, loser = snapshot.duplicateProduct
@@ -73,12 +82,7 @@ export function planProductMergeForwardCatalog(snapshot: ProductMergeCaseSnapsho
   Object.assign(keeperPatch, reviewed)
   for (const [field, value] of Object.entries(fields)) if (field !== 'barcode' || swap) keeperPatch[field] = value
   const loserPatch: Record<string, unknown> = displaced === null ? {} : { barcode: displaced, updated_at: options.updatedAt }
-  const imagePaths = new Set(snapshot.canonicalImageRows.map(row => row.image_path))
-  const additions = snapshot.duplicateImageRows.filter(row => {
-    if (!row.image_path || imagePaths.has(row.image_path)) return false
-    imagePaths.add(row.image_path)
-    return true
-  })
+  const additions = productMergeGalleryAdditions(snapshot)
   const adoptedPrimary = keeper.image_path === null || keeper.image_path === ''
     ? loser.image_path || keeper.image_path : keeper.image_path
   if (!has(keeperPatch, 'image_path') && adoptedPrimary !== keeper.image_path) keeperPatch.image_path = adoptedPrimary

@@ -2,7 +2,7 @@ const assert = require('node:assert/strict')
 const { ready, options, state } = require('./test-product-merge-forward-catalog-native.cjs')
 const { capture, load, reserve } = require('./test-product-merge-origin-plan-native.cjs')
 const { productMergeProtocolSchemaSql } = load('lib/productMergeProtocol.ts')
-const { executeProductMergeRequest } = load('lib/productMergeRequest.ts')
+const { executeProductMergeRequest, prepareProductMergeRequest } = load('lib/productMergeRequest.ts')
 const compilerModule = load('lib/productMergeForwardStock.ts')
 const request = { keeperId: 1, loserId: 2, requestId: 'complete-forward-request', requestDigest: 'c'.repeat(64) }
 const identity = { planId: 1000, transitionId: 1001, historyId: 1000, origins: reserve }
@@ -12,7 +12,7 @@ async function setup(settings = {}) {
   const user = { id: 7, name: 'Operator', username: 'operator', is_active: 1, organization_id: null, role_id: null,
     role_code: null, role_permissions: null, must_change_password: 0, permissions: JSON.stringify(settings.permissions ?? { products: true, product_cost_edit: true }) }
   d1.db.prepare("INSERT INTO users(id,name,username,password,permissions,is_active) VALUES(7,'Operator','operator','synthetic',?,1)").run(user.permissions)
-  let queries = 0, dispatches = 0, preparations = 0, captured, compiledRows
+  let queries = 0, dispatches = 0, preparations = 0, captured, compiledRows, prepared
   const db = { prepare(sql) { return { getOnce: async params => { queries++; return d1.prepare(sql).get(params) }, get: async params => { queries++; return d1.prepare(sql).get(params) } } },
     batch: async rows => { queries += rows.length; return d1.batch(rows) },
     batchOnce: async rows => {
@@ -24,9 +24,13 @@ async function setup(settings = {}) {
     } }
   const budget = { limit: settings.limit ?? 50, used: () => queries, tailReserve: 6 }
   const catalog = { ...options, ...(settings.catalog ?? {}) }
-  const prepare = async () => { preparations++; queries++; captured = await capture(d1); return { snapshot: captured, identity, catalog, guards: [] } }
+  const prepare = async () => {
+    preparations++; queries++; captured = await capture(d1)
+    prepared = await prepareProductMergeRequest(db, captured, 'complete-forward-operation', catalog, budget)
+    return prepared
+  }
   return { d1, user, db, prepare, budget, catalog, apply: () => executeProductMergeRequest(db, user, request, budget, prepare),
-    info: () => ({ queries, dispatches, preparations, captured, compiledRows }) }
+    info: () => ({ queries, dispatches, preparations, captured, compiledRows, prepared }) }
 }
 async function positive(settings = {}) {
   const w = await setup(settings)
@@ -43,17 +47,17 @@ async function positive(settings = {}) {
     assert.equal(w.d1.db.prepare('SELECT is_active FROM products WHERE id=2').get().is_active, 0)
     assert.deepEqual(w.d1.db.prepare('SELECT id,image_path,sort_order FROM product_images WHERE product_id=1 ORDER BY sort_order,id').all().map(row => ({ ...row })), [
       { id: 101, image_path: 'shared', sort_order: 0 }, { id: 102, image_path: 'keeper-tail', sort_order: 1 },
-      { id: 301, image_path: 'new-first', sort_order: 2 }, { id: 302, image_path: 'new-second', sort_order: 3 } ])
+      { id: 205, image_path: 'new-first', sort_order: 2 }, { id: 206, image_path: 'new-second', sort_order: 3 } ])
     for (const table of ['product_cost_entries', 'sale_items', 'return_items', 'sale_item_batch_allocations', 'return_item_batch_allocations', 'transfer_operation_members', 'transfer_operation_receipts']) assert.deepEqual(after[table], before[table], table)
     assert.deepEqual(after.inventory_movements.filter(row => row.id === 99), before.inventory_movements)
-    const saved = JSON.parse(w.d1.db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=1000').get().payload_json)
+    const saved = JSON.parse(w.d1.db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get(result.receipt.planId).payload_json)
     assert.ok(saved.catalog, 'original immutable plan must retain catalogue effects')
     assert.equal(saved.catalog.version, 1)
     const raw = JSON.parse(saved.source_capture)
     for (const refs of Object.values(saved.catalog.beforeRefs)) for (const ref of Array.isArray(refs) ? refs : [refs]) assert.equal(raw[ref.section][ref.index][0], ref.id)
     assert.equal(saved.catalog.effects.keeperPatch.cost_price_usd, settings.catalog?.keeperChoice?.cost?.cost_price_usd ?? 5)
     assert.equal(w.info().compiledRows.filter(row => row.params?.observedCapture).length, 1, 'one original capture guard for stock and catalogue')
-    const sealed = w.d1.db.prepare('SELECT status,payload_json FROM undo_snapshots WHERE id=1001').get()
+    const sealed = w.d1.db.prepare('SELECT status,payload_json FROM undo_snapshots WHERE id=?').get(w.info().prepared.identity.transitionId)
     assert.equal(sealed.status, 'sealed')
     assert.deepEqual(JSON.parse(sealed.payload_json).post_capture, JSON.parse(load('lib/productMergeSnapshot.ts').productMergeCaptureGuard(await capture(w.d1)).params.observedCapture))
     const retry = await w.apply()
@@ -70,6 +74,17 @@ async function main() {
   for (const limit of [50, 1000]) for (const lostAck of [false, true]) await positive({ limit, lostAck })
   await positive({ catalog: { keeperChoice: { follows: true, requiresProductEdit: true, cost: { cost_price_usd: 2.3456, cost_price_khr: 1234 }, fields: { selling_price_usd: 7.1234 } } } })
   await positive({ permissions: { products: true, 'products:edit': false, 'products:price': false } })
+  for (const [limit, reads] of [[8, 2], [36, 3]]) {
+    const w = await setup({ limit })
+    try {
+      const before = state(w.d1)
+      await assert.rejects(w.apply(), error => error.code === 'merge_request_budget')
+      assert.equal(w.info().queries, reads)
+      assert.equal(w.info().dispatches, 0)
+      assert.deepEqual(state(w.d1), before)
+      console.log('PASS actual preparation/write budget refuses before excess statement: ' + limit)
+    } finally { w.d1.db.close() }
+  }
   for (const permission of ['image', 'price', 'edit', 'cost']) {
     const permissions = { products: true, product_cost_edit: permission !== 'cost', ...(permission !== 'cost' ? { ['products:' + permission]: false } : {}) }
     const catalog = permission === 'image' ? {} : { keeperChoice: { follows: true,
@@ -83,7 +98,7 @@ async function main() {
   for (const rival of ['gallery', 'permission', 'late']) {
     let before
     const w = await setup({ beforeDispatch: async (d1, rows) => {
-      if (rival === 'gallery') d1.db.exec("INSERT INTO product_images(id,product_id,image_path) VALUES(301,4,'occupied')")
+      if (rival === 'gallery') d1.db.exec("INSERT INTO product_images(id,product_id,image_path) VALUES(205,4,'occupied')")
       if (rival === 'permission') d1.db.exec("UPDATE users SET permissions='{}' WHERE id=7")
       if (rival === 'late') rows.splice(rows.length - 1, 0, { sql: "SELECT json_extract('[1]','$[merge_late_failure]')" })
       before = state(d1)
