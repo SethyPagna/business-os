@@ -148,6 +148,13 @@ async function actualSale(tier, historical = false) {
     const cleared=await call('/api/inventory/tagged-lots/restore','POST',{productId:1,branchId:1,quantity:1,conditionTag:'damaged',reason:'cleared',client_request_id:'counted-cleared-adjust-native'})
     assert.equal(cleared.status,200);assert.equal(state(f)[0],10);assert.equal(f.sql.prepare('SELECT SUM(quantity_remaining) n FROM damaged_stock_lots').get().n,2)
     console.log('PASS actual inventory tag and clear are quantity-neutral')
+    const retagged=await call('/api/inventory/adjust','POST',{productId:1,branchId:1,batchId:1,type:'remove',quantity:1,conditionTag:'damaged',reason:'damaged',client_request_id:'counted-retagged-adjust-native'})
+    assert.equal(retagged.status,200)
+    const ordinary=q=>({...body,client_request_id:'counted-ordinary-'+q,amount_paid_usd:q*9.5,items:[{...body.items[0],damaged_lot_id:null,batch_id:1,quantity:q,pricing_quote:{gross_usd:q*9.5,product_discount_usd:0,manual_discount_usd:0,total_usd:q*9.5,total_khr:q*38000}}]})
+    const tooMany=await call('/api/sales','POST',ordinary(8));assert.notEqual(tooMany.status,200);assert.equal(state(f)[0],10)
+    const admitted=await call('/api/sales','POST',ordinary(7));assert.equal(admitted.status,200);assert.equal(state(f)[0],3)
+    assert.equal(f.sql.prepare('SELECT SUM(quantity_remaining) n FROM damaged_stock_lots').get().n,3)
+    console.log('PASS actual index ordinary eight refusal/seven success preserves all tagged receipt units')
   } finally {f.sql.close()}
 }
 main().catch(error=>{console.error(error);process.exitCode=1})
