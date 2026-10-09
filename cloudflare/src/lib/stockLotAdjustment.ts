@@ -222,13 +222,18 @@ function countedSubsetGuard(at: Snapshot, observed: CountedSubsetSnapshot): Stat
   const nullQuantities = tags.filter(([, batch]) => batch === null).map(([, , quantity]) => quantity)
   let covers = false
   try {
+    let coversNull = true
+    if (nullQuantities.length) {
+      const afterOtherReceipts = subtractDecimalSum(at.branchQuantity,
+        receipts.filter(([batch]) => batch !== at.batchId).map(([, quantity]) => quantity))
+      const unassigned = subtractDecimalSum(afterOtherReceipts, [at.lotQuantity])
+      coversNull = Number(subtractDecimalSum(unassigned, nullQuantities)) >= 0
+    }
     covers = tags.every(([, , quantity]) => Number.isFinite(quantity) && quantity > 0)
     && receipts.every(([, quantity]) => Number.isFinite(quantity) && quantity >= 0)
     && Number(subtractDecimalSum(at.branchQuantity, tags.map(([, , quantity]) => quantity))) >= 0
     && Number(subtractDecimalSum(at.lotQuantity, tags.filter(([, batch]) => batch === at.batchId).map(([, , quantity]) => quantity))) >= 0
-    && (!nullQuantities.length || Number(subtractDecimalSum(at.branchQuantity, [
-      ...receipts.filter(([batch]) => batch !== at.batchId).map(([, quantity]) => quantity), at.lotQuantity, ...nullQuantities,
-    ])) >= 0)
+    && coversNull
   } catch (error) {
     if (!(error instanceof MoneyPrecisionError)) throw error
   }

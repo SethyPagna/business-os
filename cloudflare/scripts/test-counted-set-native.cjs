@@ -155,6 +155,28 @@ async function main() {
       assert.equal(reassigned.state().tags[0].batch_id, 1)
       assert.equal(reassigned.state().operations.length, 0)
     } finally { reassigned.sql.close() }
+    for (const shape of [{ tags: 10000, otherReceipts: 0 }, { tags: 9999, otherReceipts: 1 }]) {
+      const atLimit = await world(makeWorker, tier, 'zero', sql => sql.exec(`
+        UPDATE products SET stock_quantity=30 WHERE id=1;
+        UPDATE branch_stock SET quantity=30 WHERE product_id=1 AND branch_id=1;
+        UPDATE branch_batch_stock SET quantity=20 WHERE batch_id=1;
+        WITH RECURSIVE ids(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM ids WHERE n<${shape.tags})
+          INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source,unit_cost_usd)
+          SELECT n+30000,1,1,NULL,0.000001,0.000001,'damaged','remove',2 FROM ids;
+        ${shape.otherReceipts ? `WITH RECURSIVE ids(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM ids WHERE n<${shape.otherReceipts})
+          INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,unit_cost_usd,is_active)
+          SELECT n+1,1,'capacity-'||n,'2026-09-02',2,1 FROM ids;
+          INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) SELECT id,1,0.000001 FROM product_batches WHERE id>1;` : ''}`))
+      try {
+        const changed = await atLimit.set(19, 'bounded-null-capacity-' + shape.tags)
+        assert.equal(changed.status, 200, 'individually bounded tag and receipt row sets remain usable together')
+        assert.equal(atLimit.state().lots[0].quantity, 19)
+        assert.equal((await atLimit.call(`/action-history/${changed.json.action_history_id}/undo`, { expected_generation: 0 })).status, 200)
+        assert.equal(atLimit.state().lots[0].quantity, 20)
+        assert.equal((await atLimit.call(`/action-history/${changed.json.action_history_id}/redo`, { expected_generation: 1 })).status, 200)
+        assert.equal(atLimit.state().lots[0].quantity, 19)
+      } finally { atLimit.sql.close() }
+    }
     const bounded = await world(makeWorker, tier, 'zero')
     try {
       assert.equal((await bounded.set(1, 'bounded-tag-capacity-start')).status, 200)
