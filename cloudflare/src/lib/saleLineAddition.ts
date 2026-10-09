@@ -1,6 +1,6 @@
 import type { D1Compat } from './db'
 import { selectInChunks } from './sqlBinding'
-import { planCountedTaggedChange, ordinarySubsetSql, type CountedTaggedIdentity } from './countedDamagedStock'
+import { planCountedTaggedChange, subtractCountedQuantity, ordinarySubsetSql, type CountedTaggedIdentity } from './countedDamagedStock'
 import { productStockGuardStatement } from './productStockGuard'
 // Adding a line to a sale that already exists (S4-24b).
 //
@@ -236,7 +236,7 @@ export function resolveExplicitSaleLineBatches(
     if (quantity > available) {
       return { ok: false, error: `Insufficient stock on that received date for added item #${index + 1}: requested ${quantity}, available ${available}.` }
     }
-    remaining.set(availabilityKey, available - quantity)
+    remaining.set(availabilityKey, subtractCountedQuantity(available, [quantity]))
     resolved.push({
       ...line,
       batchId,
@@ -304,14 +304,14 @@ export function allocateNewSaleLines(
         // product, the same way the FIFO branch below does.
         const lot = (lotsByKey.get(`${line.productId}:${line.branchId}`) || [])
           .find((entry) => entry.batchId === Number(line.batchId))
-        if (lot) lot.available -= quantity
+        if (lot) lot.available = subtractCountedQuantity(lot.available,[quantity])
       } else {
         const lots = lotsByKey.get(`${line.productId}:${line.branchId}`) || []
         const allocated = allocateAcrossLots(lots, quantity)
         takes = allocated.takes
         for (const take of takes) {
           const lot = lots.find((entry) => entry.batchId === take.batchId)
-          if (lot) lot.available -= take.quantity
+          if (lot) lot.available = subtractCountedQuantity(lot.available,[take.quantity])
         }
       }
     }

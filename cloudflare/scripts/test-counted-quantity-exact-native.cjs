@@ -265,12 +265,87 @@ async function proveBulkReturns(makeWorker, oversized = false, multipleReceipts 
   }
 }
 
+async function proveSaleCreate(makeWorker, baseline = false, controls = false) {
+  const money = loadStockSession('lib/moneyPrecision.ts')
+  for (const tier of ['free','paid']) for (const source of ['tagged','receipt','unlotted']) for (const control of controls?['race','late','ack']:['normal']) {
+    const f = await world(makeWorker,tier,'zero',seed(0.3,source!=='unlotted'))
+    try {
+      if(source==='tagged') assert.equal((await tag(f,0.3,true,'quantity-sale-tag')).status,200)
+      const price = f.sql.prepare('SELECT selling_price_usd FROM products WHERE id=1').get().selling_price_usd
+      const items = [0.1,0.2].map((quantity,index)=>({product_id:1,branch_id:1,quantity,
+        ...(source==='tagged'?{damaged_lot_id:1}:source==='receipt'?{batch_id:1}:{}),
+        applied_price_usd:price,client_line_key:'exact-sale-'+index,pricing_source:'selling',
+        pricing_quote:{gross_usd:money.multiplyMoney4(price,quantity),product_discount_usd:0,manual_discount_usd:0,total_usd:money.multiplyMoney4(price,quantity),total_khr:money.multiplyMoney4(money.multiplyMoney4(price,quantity),4000)}}))
+      const body={offline_owner:{version:1,actor_id:7,organization_id:null,authority:'https://admin.business.test',runtime:'cloudflare-workers'},branch_id:1,money_precision_version:1,items,exchange_rate:4000,payment_method:'Cash',payment_currency:'USD',amount_paid_usd:money.multiplyMoney4(price,0.3),client_request_id:'quantity-sale-create'}
+      const before=f.state()
+      const observedBatches=[]
+      const countedDb=f.env.DB
+      f.env.DB=new Proxy(countedDb,{get(target,key){if(key==='batch')return statements=>{observedBatches.push(statements.map(statement=>({text:statement.text,params:statement.params})));return target.batch(statements)};return target[key]}})
+      if(control==='race') {
+        const statements=[{sql:'UPDATE branch_stock SET quantity=0.2 WHERE product_id=1 AND branch_id=1'},{sql:'UPDATE products SET stock_quantity=0.2 WHERE id=1'}]
+        if(source!=='unlotted') statements.push({sql:'UPDATE branch_batch_stock SET quantity=0.2 WHERE batch_id=1 AND branch_id=1'})
+        if(source==='tagged') statements.push({sql:'UPDATE damaged_stock_lots SET quantity_remaining=0.2 WHERE id=1'})
+        f.competeBeforeCommit(statements)
+        const refused=await f.call('/sales',body)
+        assert.equal(refused.status,409)
+        assert.equal(refused.json.code,'counted_quantity_conflict')
+        assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM sales').get().n,0)
+        assert.equal(f.state().cache,0.2)
+        assert.equal(f.state().movements.length,before.movements.length)
+        body.items=items.map(item=>({...item,quantity:0.1,pricing_quote:{...item.pricing_quote,gross_usd:money.multiplyMoney4(price,0.1),total_usd:money.multiplyMoney4(price,0.1),total_khr:money.multiplyMoney4(money.multiplyMoney4(price,0.1),4000)}}))
+        body.amount_paid_usd=money.multiplyMoney4(price,0.2)
+      }
+      if(control==='late') {
+        f.failWhenSqlMatches(/INSERT INTO audit_logs/)
+        assert.equal((await f.call('/sales',body)).status,500)
+        assert.deepEqual(f.state(),before)
+        assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM sales').get().n,0)
+        assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM sale_item_batch_allocations').get().n,0)
+      }
+      if(control==='ack') f.loseNextCommitAcknowledgement()
+      const created=await f.call('/sales',body)
+      if(baseline) {
+        assert.notEqual(created.status,200)
+        assert.deepEqual(f.state(),before)
+        console.log('PASS preserved old repeated decimal sale refusal '+tier+'/'+source)
+        continue
+      }
+      assert.equal(created.status,200,JSON.stringify(created.json))
+      assert.equal(f.state().cache,0)
+      assert.equal(f.state().physical,0)
+      if(source==='tagged') assert.equal(f.state().tags[0].quantity_remaining,0)
+      if(source==='receipt') assert.equal(f.state().lots[0].quantity,0)
+      assert.deepEqual(f.sql.prepare('SELECT quantity FROM sale_items ORDER BY id').all(),[{quantity:0.1},{quantity:control==='race'?0.1:0.2}])
+      const tables=new Set(f.sql.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row=>row.name))
+      const triggerScans=new Set()
+      for(const statements of observedBatches) for(const statement of statements) {
+        for(const row of require('./harness/sqlite_d1_bindings.cjs').sqliteD1Call(f.sql.prepare('EXPLAIN QUERY PLAN '+statement.text),'all',statement.params)) {
+          const scan=/^SCAN (\w+)/.exec(row.detail)
+          if(!scan || scan[1]==='CONSTANT' || /VIRTUAL TABLE/.test(row.detail))continue
+          const alias=new RegExp('\\b(?:FROM|JOIN)\\s+(\\w+)\\s+(?:AS\\s+)?'+scan[1]+'\\b','i').exec(statement.text)
+          const table=alias?alias[1]:scan[1]
+          if(tables.has(table) && !new RegExp('\\b(?:FROM|JOIN)\\s+'+table+'\\b','i').test(statement.text)) { triggerScans.add(table);continue }
+          assert.equal(tables.has(table),false,'root statement table scan '+row.detail+' SQL '+statement.text)
+        }
+      }
+      if(triggerScans.size)console.log('PRESERVED inherited trigger scans outside root-statement scope '+[...triggerScans].join(','))
+      const committed=f.state()
+      assert.equal((await f.call('/sales',body)).status,200)
+      assert.deepEqual(f.state(),committed)
+      console.log('PASS actual exact repeated fractional sale create/replay/indexed root statements '+tier+'/'+source+'/'+control)
+    } finally { f.sql.close() }
+  }
+}
+
+
 async function main() {
   const bounded = loadStockSession('lib/countedDamagedStock.ts')
   assert.equal(bounded.sumCountedQuantities(Array(10_001).fill(0.00001)), 0.10001)
   assert.equal(bounded.subtractCountedQuantity(0.20001, Array(10_001).fill(0.00001)), 0.1)
   console.log('PASS bounded exact intermediate strings across separate 10k term groups')
   const makeWorker = await bundle.exports.bundleWorker()
+  await proveSaleCreate(makeWorker)
+  await proveSaleCreate(makeWorker,false,true)
   await proveMultiBranch(makeWorker)
   await proveReceiptActivation(makeWorker)
   await proveBulkReturns(makeWorker)
@@ -418,4 +493,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })
-module.exports = { world, bundle, loadStockSession, tag, clear, seed, quantities, replay, proveStaleCount, proveMultiBranch, proveReceiptActivation, proveBulkReturns }
+module.exports = { world, bundle, loadStockSession, tag, clear, seed, quantities, replay, proveStaleCount, proveMultiBranch, proveReceiptActivation, proveBulkReturns, proveSaleCreate }

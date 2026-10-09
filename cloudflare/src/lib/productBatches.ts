@@ -34,10 +34,10 @@
 import type { D1Compat } from './db'
 import { receivingBranchAssertion } from './receivingBranch'
 import { dateToBatchCode, normalizeTypedDate } from './batchCode'
-import { addMoney4, multiplyMoney4, nullableMoney4, roundMoney4, sellingPriceCeilCent } from './moneyPrecision'
+import { MoneyPrecisionError, addMoney4, multiplyMoney4, nullableMoney4, roundMoney4, sellingPriceCeilCent } from './moneyPrecision'
 import { buildInClause, selectInChunks } from './sqlBinding'
 import { executeStockTransaction } from './stockTransaction'
-import { ordinarySubsetSql, ordinaryNullCapacityGuard } from './countedDamagedStock'
+import { ordinarySubsetSql, ordinaryNullCapacityGuard, subtractCountedQuantity } from './countedDamagedStock'
 
 export type ProductBatchRow = {
   id: number
@@ -1021,25 +1021,39 @@ export type FifoLotAvailability = {
   receivedAt?: string | null
   expiryDate: string | null
   available: number
+  quantityPreimage?: number
+  tagQuantitiesPreimage?: string
 }
 
 // Active lots with sellable stock at the branch, oldest received_at first
 // (NULL received dates sort last -- an undated legacy lot is drawn only
 // after every dated one), then batch_number/id for a stable tiebreak.
+export function tagQuantityTermsSql(product: string, branch: string, batch: string): string {
+  return `(SELECT json_group_array(quantity_remaining) FROM (SELECT quantity_remaining FROM damaged_stock_lots
+    WHERE product_id=${product} AND branch_id=${branch} AND batch_id IS ${batch} ORDER BY id LIMIT 10001))`
+}
+
+function exactLotAvailability(row: { available: number; tag_quantities: string }): number {
+  const terms = JSON.parse(row.tag_quantities) as number[]
+  if (terms.length > 10000) throw new MoneyPrecisionError('too_many_terms')
+  return Math.max(0, subtractCountedQuantity(Number(row.available), terms))
+}
+
 export async function readFifoLotAvailability(db: D1Compat, productId: number, branchId: number): Promise<FifoLotAvailability[]> {
   const rows = await db.prepare(`
-    SELECT pb.id AS batch_id, pb.lot_code, pb.received_at, pb.expiry_date, bbs.quantity - ${ordinarySubsetSql('pb.variant_product_id', 'bbs.branch_id', 'pb.id')} AS available
+    SELECT pb.id AS batch_id, pb.lot_code, pb.received_at, pb.expiry_date, bbs.quantity AS available, ${tagQuantityTermsSql('pb.variant_product_id','bbs.branch_id','pb.id')} AS tag_quantities
     FROM product_batches pb
     JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
     WHERE pb.variant_product_id = @productId AND pb.is_active = 1 AND bbs.quantity > 0
     ORDER BY (pb.received_at IS NULL) ASC, pb.received_at ASC, pb.batch_number ASC, pb.id ASC
-  `).all<{ batch_id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; available: number }>({ productId, branchId })
+  `).all<{ batch_id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; available: number; tag_quantities: string }>({ productId, branchId })
   return rows.map((row) => ({
     batchId: Number(row.batch_id),
     lotCode: row.lot_code ?? null,
     receivedAt: row.received_at ?? null,
     expiryDate: row.expiry_date ?? null,
-    available: Math.max(0, Number(row.available) || 0),
+    available: exactLotAvailability(row),
+    quantityPreimage:Number(row.available), tagQuantitiesPreimage:row.tag_quantities,
   }))
 }
 
@@ -1061,7 +1075,7 @@ export async function readFifoLotAvailabilityForCart(
   // product ids (branches are few, usually one POS branch).
   const rows = await selectInChunks(productIds, branchIds.length, (chunk) => db.prepare(`
     SELECT pb.variant_product_id AS product_id, bbs.branch_id AS branch_id,
-           pb.id AS batch_id, pb.lot_code, pb.received_at, pb.expiry_date, bbs.quantity - ${ordinarySubsetSql('pb.variant_product_id', 'bbs.branch_id', 'pb.id')} AS available
+           pb.id AS batch_id, pb.lot_code, pb.received_at, pb.expiry_date, bbs.quantity AS available, ${tagQuantityTermsSql('pb.variant_product_id','bbs.branch_id','pb.id')} AS tag_quantities
     FROM product_batches pb
     JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
     WHERE pb.variant_product_id IN (${chunk.map(() => '?').join(',')})
@@ -1069,7 +1083,7 @@ export async function readFifoLotAvailabilityForCart(
       AND pb.is_active = 1 AND bbs.quantity > 0
     ORDER BY pb.variant_product_id ASC, bbs.branch_id ASC,
              (pb.received_at IS NULL) ASC, pb.received_at ASC, pb.batch_number ASC, pb.id ASC
-  `).all<{ product_id: number; branch_id: number; batch_id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; available: number }>([...chunk, ...branchIds]))
+  `).all<{ product_id: number; branch_id: number; batch_id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; available: number; tag_quantities: string }>([...chunk, ...branchIds]))
   for (const row of rows) {
     const key = `${Number(row.product_id)}:${Number(row.branch_id)}`
     const list = map.get(key) || []
@@ -1078,7 +1092,8 @@ export async function readFifoLotAvailabilityForCart(
       lotCode: row.lot_code ?? null,
       receivedAt: row.received_at ?? null,
       expiryDate: row.expiry_date ?? null,
-      available: Math.max(0, Number(row.available) || 0),
+      available: exactLotAvailability(row),
+    quantityPreimage:Number(row.available), tagQuantitiesPreimage:row.tag_quantities,
     })
     map.set(key, list)
   }
@@ -1105,7 +1120,7 @@ export function allocateAcrossLots(lots: FifoLotAvailability[], quantity: number
     // rows still carry their nullable receivedAt value for audit/returns.
     if (lot.receivedAt !== undefined) allocation.receivedAt = lot.receivedAt
     takes.push(allocation)
-    remaining -= take
+    remaining = subtractCountedQuantity(remaining, [take])
   }
   return { takes, uncovered: remaining }
 }
