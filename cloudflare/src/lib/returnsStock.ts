@@ -27,7 +27,7 @@ import { productStockGuardStatement } from './productStockGuard'
 // added, so scripts/test-returns-replace-damaged-pure.cjs can drive the
 // real logic against a real sqlite database.
 import type { D1Compat } from './db'
-import { planReceiveBatchStock, planRemoveStockFromBatch, type StockWriteStatement } from './productBatches'
+import { planRemoveStockFromBatch, type StockWriteStatement } from './productBatches'
 import {
   DEFAULT_STOCK_CONDITION_TAG, parseStockConditionTag,
   TAGGED_DISPOSAL_MOVEMENT_TYPE, taggedReasonText,
@@ -313,12 +313,17 @@ export class ConsumedDamagedStockError extends Error {
 // destroyed, a separate adjustment is the only way to correct it.
 export function planCountedReturnReceive(productId: number, branchId: number, batchId: number | null, quantity: number): StockWriteStatement[] {
   if (![productId,branchId].every(id => Number.isSafeInteger(id) && id > 0) || !Number.isFinite(quantity) || quantity <= 0) throw new Error('Invalid returned stock identity')
-  if (batchId !== null) return planReceiveBatchStock({productId,branchId,batchId,quantity}).statements
-  const params = {productId,branchId,quantity}
-  return [productStockGuardStatement([productId], 'active'),
-    {sql: "SELECT CASE WHEN EXISTS(SELECT 1 FROM branches WHERE id=@branchId AND is_active=1) THEN 1 ELSE json_extract('[1]','$[return_branch_conflict]') END",params},
+  if(batchId!==null && (!Number.isSafeInteger(batchId)||batchId<=0)) throw new Error('Invalid returned receipt identity')
+  const params = {productId,branchId,batchId,quantity}
+  const statements:StockWriteStatement[]=[{
+    sql:"SELECT CASE WHEN EXISTS(SELECT 1 FROM products WHERE id=@productId AND is_active=1) AND EXISTS(SELECT 1 FROM branches WHERE id=@branchId AND is_active=1) AND (@batchId IS NULL OR EXISTS(SELECT 1 FROM product_batches WHERE id=@batchId AND variant_product_id=@productId)) THEN 1 ELSE json_extract('[1]','$[return_stock_identity_conflict]') END",params}]
+  if(batchId!==null) statements.push(
+    {sql:'UPDATE product_batches SET is_active=1 WHERE id=@batchId AND variant_product_id=@productId AND is_active IS NOT 1',params},
+    {sql:'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)VALUES(@batchId,@branchId,@quantity)ON CONFLICT(batch_id,branch_id)DO UPDATE SET quantity=quantity+@quantity,updated_at=CURRENT_TIMESTAMP',params})
+  statements.push(
     {sql:'INSERT INTO branch_stock(product_id,branch_id,quantity)VALUES(@productId,@branchId,@quantity)ON CONFLICT(product_id,branch_id)DO UPDATE SET quantity=quantity+@quantity',params},
-    {sql:'UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0)FROM branch_stock WHERE product_id=@productId),updated_at=CURRENT_TIMESTAMP WHERE id=@productId',params}]
+    {sql:'UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0)FROM branch_stock WHERE product_id=@productId),updated_at=CURRENT_TIMESTAMP WHERE id=@productId',params})
+  return statements
 }
 
 export function planDamagedReturnLine(input: {

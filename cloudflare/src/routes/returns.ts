@@ -1502,16 +1502,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   const reason = String(canonicalIntent.reason)
   let returnItems = body.items
   const replacementInputsRaw = Array.isArray(body.replacement_items) ? body.replacement_items : []
-  if (!isMoneyV1) {
-    try {
-      await assertReturnableItems(db, requestedSaleId, body.items)
-    } catch (error) {
-      if (error instanceof ReturnCreateBudgetError) throw error
-      const stockGuard = productStockGuardError(error)
-      if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
-      return c.json({ error: (error as Error).message }, 400)
-    }
-  }
+
 
   const returnNumber = body.return_number?.trim() || await uniqueBusinessDateTimeNumber(
     'RET', async (candidate) => !!(await db.prepare('SELECT 1 AS hit FROM returns WHERE return_number=? LIMIT 1').get([candidate])),
@@ -2201,8 +2192,8 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     const recordedBatchSql = fallbackReceive && !plan.splits.length ? fallbackBatchSql : '@batch_id'
     if (stockAction === 'restock' && productId && itemBranchId) {
       for (const split of plan.splits) {
-        const receive = planReceiveBatchStock({ productId, branchId: itemBranchId, quantity: split.quantity, batchId: split.batchId })
-        statements.push(...receive.statements.map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
+        const receive = planCountedReturnReceive(productId,itemBranchId,split.batchId,split.quantity)
+        statements.push(...receive.map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
       }
       if (fallbackReceive) statements.push(...fallbackReceive.statements.map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
       if (!fallbackReceive && plan.plainQuantity > 0) statements.push(...planCountedReturnReceive(productId,itemBranchId,null,plan.plainQuantity).map(statement=>({sql:statement.sql,params:statement.params as Record<string,unknown>})))
@@ -2972,6 +2963,7 @@ app.patch('/:id', async (c) => {
       .get<LinkedSaleState>([existing.sale_id]) || null
     if (!linkedSale) return c.json({ error: 'Original sale not found' }, 400)
   }
+  if(linkedSale && String(linkedSale.sale_status||'completed')==='cancelled') return c.json({error:'This sale is cancelled; restore it before editing its return.'},400)
   // The sale decides here too. A v0 return row attached to a v1 sale can only
   // be a legacy-shaped row recorded before that rule was enforced; the edit
   // path below re-derives the refund on the legacy gross-price basis and writes
@@ -3025,6 +3017,7 @@ app.patch('/:id', async (c) => {
   // P4-3: same fail-fast validation the create path runs, before anything
   // below reverses the return's existing stock effect.
   for (const item of newItems) {
+    if(!Number.isFinite(Number(item.quantity)) || Number(item.quantity)<=0) return c.json({error:'Return quantity must be greater than zero'},400)
     if (normalizeStockAction(item) !== 'damaged') continue
     const choice = resolveDamagedReturnChoice(item)
     if (!choice.ok) return c.json({ error: choice.error }, 400)
@@ -3032,7 +3025,6 @@ app.patch('/:id', async (c) => {
 
   try {
     assertUpdatedAtMatch('return', existing, expectedUpdatedAt)
-    await assertReturnableItems(db, existing.sale_id, newItems, Number(id))
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
@@ -3419,8 +3411,8 @@ app.patch('/:id', async (c) => {
       for (const split of plan.splits) {
         statements.push(bulkAssertion('EXISTS(SELECT 1 FROM product_batches WHERE id=@batchId AND variant_product_id=@productId)',
           { batchId: split.batchId, productId: item.product_id }))
-        const received = planReceiveBatchStock({ productId: item.product_id, branchId: itemBranchId, quantity: split.quantity, batchId: split.batchId })
-        statements.push(...received.statements.map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
+        const received = planCountedReturnReceive(item.product_id,itemBranchId,split.batchId,split.quantity)
+        statements.push(...received.map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
         if (plan.splits.length === 1 && split.quantity === quantity) resolvedBatchId = split.batchId
         itemSplits.push({ batchId: split.batchId, branchId: itemBranchId, quantity: split.quantity, saleItemId: item.sale_item_id ?? null })
       }
