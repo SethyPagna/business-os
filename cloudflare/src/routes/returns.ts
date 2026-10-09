@@ -15,14 +15,14 @@ import { executeStockTransaction, stockTransactionStatementCount, stockTransacti
 import { selectInChunks } from '../lib/sqlBinding'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { audit, changedFields } from '../lib/audit'
+import { audit, buildAuditStatement, changedFields } from '../lib/audit'
 import { sendReturnStatusTelegramEvents, sendReturnTelegramEvent, sendTelegramEvent, formatSaleTelegramLines } from '../lib/telegram'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion, bumpVersions } from '../lib/cache'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
-import { planReceiveBatchStock, planRemoveStockFromBatch, readFifoLotAvailabilityForCart, allocateAcrossLots, decrementBatchStockStrictStatement } from '../lib/productBatches'
+import { planReceiveBatchStock, planRemoveStockFromBatch } from '../lib/productBatches'
 import {
   normalizeStockAction, resolveRefundUnitPrice, matchRefundSaleLine, RefundSaleLineError, planReturnLot, ReturnLotRequiredError,
   type ReversedDamagedLot, planReplacementStock, listOpenDamagedLots,
@@ -2493,10 +2493,35 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
 // how the supplier is settling it (refund / credit / replacement / writeoff),
 // tracking any shortfall as supplier_loss_usd/khr.
 app.post('/supplier', async (c) => {
+  try { return await createSupplierReturn(c) } catch (error) {
+    if (error instanceof ReturnCreateBudgetError) return c.json({ error: error.message, code: 'supplier_return_over_plan_budget', outcome: 'not_dispatched' }, 400)
+    if (isCountedStockConflict(error)) return c.json({ error: 'Stock or its recorded source changed. Refresh before retrying.', code: 'write_conflict', action: 'reload_required' }, 409)
+    throw error
+  }
+})
+
+async function createSupplierReturn(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>) {
   const user = c.get('user')
   if (!canEditAcquisitionCosts(user)) return c.json({ error: 'Cost-entry permission is required to record supplier return costs and settlement.', code: 'product_cost_edit_required' }, 403)
   if (!canViewAcquisitionCosts(user)) return c.json({ error: 'Cost-view permission is required to review supplier return compensation and settlement.', code: 'product_cost_view_required' }, 403)
-  const db = getDb(c.env)
+  const baseDb = getDb(c.env)
+  const queryLimit = getPlanLimits(c.env).d1QueriesPerInvocation
+  let routeStatements = 0
+  const requestMetrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as (RequestMetrics & { attemptedStatements?: number }) | undefined
+  const initialStatements = requestMetrics?.attemptedStatements ?? requestMetrics?.statements ?? 0
+  const statementsUsed = () => requestMetrics
+    ? Math.max(initialStatements + routeStatements, requestMetrics.attemptedStatements ?? (requestMetrics.failed ? Infinity : requestMetrics.statements)) + 3
+    : routeStatements + 10
+  const db = Object.create(baseDb) as ReturnType<typeof getDb>
+  db.prepare = ((sql: string) => {
+    const statement = baseDb.prepare(sql)
+    const countRead = () => { assertReturnCreateQueryBudget(queryLimit, statementsUsed(), 1, 1); routeStatements += 1 }
+    return {
+      get: async (params) => { countRead(); if (!statement.getOnce) throw new Error('Supplier returns require single-attempt reads'); return statement.getOnce(params) },
+      all: async (params) => { countRead(); if (!statement.allOnce) throw new Error('Supplier returns require single-attempt reads'); return statement.allOnce(params) },
+      run: async (params) => { countRead(); return statement.run(params) },
+    }
+  }) as typeof db.prepare
   // Per-action override (Part 546): supplier returns are the same 'add'
   // action as customer returns -- one switch covers both create routes.
   if (getActionTier(user, 'returns', 'add') === 'none') {
@@ -2520,6 +2545,11 @@ app.post('/supplier', async (c) => {
   const clientRequestId = normalizeClientRequestId(body.client_request_id)
   if (!Array.isArray(body.items) || body.items.length === 0) return c.json({ error: 'Return items required' }, 400)
   if (!body.reason) return c.json({ error: 'Reason is required' }, 400)
+  if (body.items.length > 50 || new TextEncoder().encode(JSON.stringify(body)).byteLength > RETURN_CREATE_REQUEST_BYTES) throw new ReturnCreateBudgetError()
+  const conditionFields = ['condition_tag','damaged_lot_id','stock_condition','stock_action']
+  if (conditionFields.some(key => Object.hasOwn(body, key)) || body.items.some(item => conditionFields.some(key => Object.hasOwn(item, key)))) {
+    return c.json({ error: 'Choose ordinary stock for this supplier return. A recorded condition requires an explicit supported source choice.', code: 'supplier_return_condition_selection_required' }, 400)
+  }
 
   if (clientRequestId) {
     const existing = await db.prepare("SELECT id, return_number FROM returns WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1").get<{ id: number; return_number: string }>([clientRequestId])
@@ -2555,19 +2585,13 @@ app.post('/supplier', async (c) => {
     throw error
   }
 
-  // Stock check first (plain read, before any writes -- same shape as
-  // sales.ts's POST /).
+  // Validate the ordinary lines before capturing their stock sources.
   for (const item of body.items) {
     const qty = toNumber(item.quantity, 0)
     if (!qty || qty <= 0) return c.json({ error: 'Return quantity must be greater than zero' }, 400)
     if (!item.product_id) return c.json({ error: 'Product is required for supplier return' }, 400)
     const branchId = item.branch_id || body.branch_id || null
     if (!branchId) return c.json({ error: 'Branch is required for supplier return' }, 400)
-    const stockRow = await db.prepare('SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?').get<{ quantity: number }>([item.product_id, branchId])
-    const available = stockRow?.quantity || 0
-    if (qty > available) {
-      return c.json({ error: `Insufficient stock for ${item.product_name || `product #${item.product_id}`} in selected branch: requested ${qty}, available ${available}` }, 409)
-    }
   }
 
   let totalCostUsd = 0
@@ -2637,56 +2661,29 @@ app.post('/supplier', async (c) => {
     supplier_loss_khr: supplierLossKhr,
   } }
 
-  const productIds = [...new Set(body.items.map((i) => Number(i.product_id)))]
-  const productNameMap = new Map<number, string>()
-  if (productIds.length) {
-    const rows = await selectInChunks(productIds, 0, (chunk) => db.prepare(`SELECT id, name FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`).all<{ id: number; name: string }>(chunk))
-    for (const row of rows) productNameMap.set(row.id, row.name)
-  }
+  const contexts = new Map<string, CountedReturnContext>()
+  for (const item of body.items) addCountedReturnContext(contexts, Number(item.product_id), Number(item.branch_id || body.branch_id))
+  const pairs = JSON.stringify([...contexts.values()])
+  const captured = await db.prepare(`SELECT json_extract(j.value,'$.branchId') AS branchId,
+    (SELECT name FROM products WHERE id=json_extract(j.value,'$.productId')) AS productName,
+    ${countedStockFactsSql("json_extract(j.value,'$.productId')", "json_extract(j.value,'$.branchId')")} AS facts
+    FROM json_each(@pairs) j`).all<{ branchId: number; productName: string; facts: string }>({ pairs })
+  if (new TextEncoder().encode(captured.map(row => row.facts).join('')).byteLength > RETURN_CREATE_REQUEST_BYTES) throw new ReturnCreateBudgetError()
+  const exact = new CountedStockBatchPlan(captured, { deferPhysicalWrites: true })
+  const productNameMap = new Map(captured.map(row => [Number(JSON.parse(row.facts).product[0]), row.productName]))
 
   let returnId = 0
+  let dispatched = false
   try {
     const supplierEffectGuard = effectGuardStatement(supplierResolver.guards())
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
-      ...(supplierEffectGuard ? [supplierEffectGuard, { sql: 'DELETE FROM sale_bulk_guards', params: {} }] : []), returnHeaderStatement]
-    const touchedProductIds = new Set<number>()
+      ...exact.takePreimageGuards(),
+      { sql: `SELECT CASE WHEN (${stockActorPredicate}) AND NOT EXISTS(SELECT 1 FROM returns WHERE client_request_id=@supplier_write_key)
+        THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`, params: { ...stockActorParams(user), supplier_write_key: supplierWriteKey } },
+      ...(supplierEffectGuard ? [supplierEffectGuard, { sql: 'DELETE FROM sale_bulk_guards', params: {} }] : []), returnHeaderStatement,
+      buildAuditStatement(user?.id ?? null, actorSnapshot(user), 'create', 'supplier_return', null,
+        { returnNumber, settlement, supplierName: body.supplier_name || null, supplierLossUsd }, undefined, { entityIdFromLastInsert: true })]
     const supplierPerItemBatchSplits: ReturnBatchSplit[][] = []
-    // Draw the deducted units out of the product's active lots FIFO, same as a
-    // sale of a no-lot line, so a supplier return of a batch-tracked product
-    // keeps branch_batch_stock in step with branch_stock instead of leaving the
-    // lot ledger high (a product×branch lot drift). Fetched once for the return.
-    const supplierFifoLots = await readFifoLotAvailabilityForCart(
-      db,
-      body.items.map((i) => ({ productId: Number(i.product_id), branchId: Number(i.branch_id || body.branch_id || 0) })),
-    )
-    // Part-77 (oversell-clamp audit): validate availability BEFORE composing
-    // the deduction — a supplier return can never send back more units than
-    // the branch holds, and the old MAX(0, ...) clamp silently floored the
-    // overshoot instead of refusing it (stock loss with no error). Tracked
-    // cumulatively so two lines of the same product+branch can't each pass
-    // against the same units. The strict (unclamped) decrements below plus
-    // 0058's CHECK(quantity >= 0) then abort the WHOLE atomic batch if a
-    // concurrent sale wins the race between this read and the write.
-    const supplierAvailability = new Map<string, number>()
-    for (const item of body.items) {
-      const qty = toNumber(item.quantity, 0)
-      const itemBranchId = item.branch_id || body.branch_id || null
-      if (!item.product_id || !itemBranchId || !(qty > 0)) continue
-      const availabilityKey = `${item.product_id}:${itemBranchId}`
-      if (!supplierAvailability.has(availabilityKey)) {
-        const stockRow = await db.prepare('SELECT quantity FROM branch_stock WHERE product_id = @product_id AND branch_id = @branch_id')
-          .get<{ quantity: number }>({ product_id: item.product_id, branch_id: itemBranchId })
-        supplierAvailability.set(availabilityKey, Number(stockRow?.quantity) || 0)
-      }
-      const remaining = supplierAvailability.get(availabilityKey)!
-      if (qty > remaining) {
-        const shortName = item.product_name?.trim() || productNameMap.get(Number(item.product_id)) || `product #${item.product_id}`
-        const insufficient = new Error(`Insufficient stock for supplier return of ${shortName}: ${remaining} available at this branch, ${qty} requested`)
-        insufficient.name = 'SupplierReturnStockError'
-        throw insufficient
-      }
-      supplierAvailability.set(availabilityKey, remaining - qty)
-    }
     for (const item of body.items) {
       const qty = toNumber(item.quantity, 0)
       const unitCostUsd = toNumber(item.cost_price_usd ?? item.unit_cost_usd, 0)
@@ -2711,34 +2708,18 @@ app.post('/supplier', async (c) => {
           branch_id: itemBranchId,
         },
       })
-      // Supplier returns leave the branch entirely -- deduct, don't restore.
-      // Strict (unclamped) subtraction: availability was validated above, so
-      // the only way this goes negative is a concurrent consumer winning the
-      // race -- then 0058's CHECK aborts the whole atomic batch instead of
-      // the old MAX(0, ...) clamp silently flooring the overshoot away.
-      statements.push({
-        sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, 0)
-              ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity - @quantity`,
-        params: { product_id: item.product_id, branch_id: itemBranchId, quantity: qty },
-      })
-      // Lot-ledger parity: pull the same units out of the product's active lots
-      // FIFO, strict for the same reason as the aggregate above (takes are
-      // bounded by the just-read availability, so only a race can overdraw --
-      // abort, don't clamp). The shared
-      // availability is consumed so a second line of the same product at this
-      // branch can't double-take a lot; any uncovered remainder is legacy
-      // unlotted stock that rides branch_stock alone, matching the bump above.
-      let supplierReturnTakes: Array<{ batchId: number; quantity: number }> = []
-      if (itemBranchId) {
-        const lots = supplierFifoLots.get(`${item.product_id}:${itemBranchId}`) || []
-        const { takes } = allocateAcrossLots(lots, qty)
-        supplierReturnTakes = takes
-        for (const take of takes) {
-          const lot = lots.find((entry) => entry.batchId === take.batchId)
-          if (lot) lot.available -= take.quantity
-          statements.push(decrementBatchStockStrictStatement(take.batchId, itemBranchId, take.quantity))
-        }
+      const projected = exact.get(Number(item.product_id), Number(itemBranchId))
+      const supplierReturnTakes: Array<{ batchId: number; quantity: number }> = []
+      let remaining = qty
+      for (const receipt of projected.projectedReceiptSources().sort((left, right) => left.fifoRank - right.fifoRank)) {
+        const take = Math.min(remaining, receipt.available)
+        if (take <= 0) continue
+        statements.push(...planExactCountedOrdinaryChange(projected, receipt.batchId, take, 'consume'))
+        supplierReturnTakes.push({ batchId: receipt.batchId, quantity: take })
+        remaining = subtractCountedQuantity(remaining, [take])
+        if (remaining === 0) break
       }
+      if (remaining > 0) statements.push(...planExactCountedOrdinaryChange(projected, null, remaining, 'consume'))
       supplierPerItemBatchSplits.push(supplierReturnTakes.map((take) => ({
         batchId: take.batchId,
         branchId: itemBranchId,
@@ -2765,7 +2746,6 @@ app.post('/supplier', async (c) => {
           batch_id: supplierReturnTakes.length === 1 && supplierReturnTakes[0].quantity === qty ? supplierReturnTakes[0].batchId : null,
         },
       })
-      if (item.product_id) touchedProductIds.add(item.product_id)
     }
     for (const [itemIndex, splits] of supplierPerItemBatchSplits.entries()) {
       for (const split of splits) {
@@ -2783,36 +2763,36 @@ app.post('/supplier', async (c) => {
         })
       }
     }
-    for (const productId of touchedProductIds) {
-      statements.push({
-        sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @productId), updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
-        params: { productId },
-      })
-    }
-    if (touchedProductIds.size) await executeStockTransaction(db, statements, 'retry')
-    else await db.batch([...statements, ordinaryBusinessMaintenanceGuard])
-    const committed = await db.prepare('SELECT id FROM returns WHERE client_request_id=@supplier_write_key')
-      .get<{ id: number }>({ supplier_write_key: supplierWriteKey })
+    statements.push(...exact.takeFinalPhysicalWrites())
+    const identityIndex = statements.length
+    statements.push({ sql: 'SELECT id FROM returns WHERE client_request_id=@supplier_write_key', params: { supplier_write_key: supplierWriteKey } })
+    const plannedCount = stockTransactionStatementCount(statements.length)
+    // Shared return tails: cold cache fallback/quota retries six, notification reads/retries six.
+    assertReturnCreateQueryBudget(queryLimit, statementsUsed(), plannedCount, 12)
+    routeStatements += plannedCount
+    dispatched = true
+    const results = await executeStockTransaction(db, statements, 'once')
+    const committed = results[identityIndex]?.results?.[0] as { id?: number } | undefined
     if (!committed?.id) throw new Error('supplier_return_identity_missing')
     returnId = Number(committed.id)
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
-    if (clientRequestId) {
-      const replay = await db.prepare("SELECT id,return_number FROM returns WHERE client_request_id=? AND client_request_id<>'' LIMIT 1")
-        .get<{ id: number; return_number: string }>([clientRequestId])
-      if (replay) return c.json({ id: replay.id, returnNumber: replay.return_number, duplicate: true })
+    if (error instanceof ReturnCreateBudgetError) throw error
+    if (isCountedStockConflict(error)) {
+      if (dispatched && clientRequestId) {
+        const replay = await db.prepare("SELECT id,return_number FROM returns WHERE client_request_id=? AND client_request_id<>'' LIMIT 1")
+          .get<{ id: number; return_number: string }>([clientRequestId])
+        if (replay) return c.json({ id: replay.id, returnNumber: replay.return_number, duplicate: true })
+      }
+      return c.json({ error: 'Stock or its recorded source changed. Refresh before retrying.', code: 'write_conflict', action: 'reload_required' }, 409)
     }
     const transactionRefusal = stockTransactionRefusal(error)
     if (transactionRefusal) return c.json(transactionRefusal, 503)
-    // An availability refusal is the caller's input problem (400), not a
-    // server failure -- everything composed after it never ran (the one
-    // atomic batch at the end is all-or-nothing).
-    const status = (error as Error)?.name === 'SupplierReturnStockError' ? 400 : 500
-    return c.json({ error: `Failed to record supplier return items: ${(error as Error).message}` }, status)
+    return c.json({ error: dispatched ? 'The supplier return outcome could not be confirmed. Retry the original request or review Returns.' : (error as Error).message,
+      code: dispatched ? 'supplier_return_outcome_unknown' : 'supplier_return_failed', action: dispatched ? 'retry_same_request' : 'reload_required' }, dispatched ? 503 : 500)
   }
 
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', 'supplier_return', returnId, { returnNumber, settlement, supplierName: body.supplier_name || null, supplierLossUsd })
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'supplier_return', id: returnId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(bumpVersions(c.env, ['products', 'returns', 'sales']))
@@ -2825,7 +2805,7 @@ app.post('/supplier', async (c) => {
   }).catch((error) => console.error('[telegram] supplier return notification failed', error)))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'create', id: returnId }))
   return c.json({ id: returnId, returnNumber })
-})
+}
 
 // PATCH /api/returns/:id -- edit a customer return's items/reason/notes.
 // Reverses the previous restock (deduct what it added back), re-validates
