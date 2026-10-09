@@ -43,12 +43,72 @@ async function proveStaleCount(c) {
   console.log('PASS stale quantity coded409/no effects/released receipt/corrected same-id retry')
 }
 
+async function proveMultiBranch(makeWorker) {
+  const counted = loadStockSession('lib/countedDamagedStock.ts')
+  const stock = loadStockSession('lib/stockTransaction.ts')
+  const getDb = loadStockSession('lib/db.ts').getDb
+  for (const tier of ['free', 'paid']) {
+    const f = await world(makeWorker, tier, 'zero', sql => {
+      seed(0.3, false)(sql)
+      sql.exec("INSERT INTO branches(id,name,is_active)VALUES(2,'Other',1);INSERT INTO branch_stock(product_id,branch_id,quantity)VALUES(1,2,0.2);UPDATE products SET stock_quantity=0.5 WHERE id=1")
+    })
+    try {
+      assert.equal((await tag(f, 0.3, false, 'quantity-multi-seed')).status, 200)
+      const db = getDb(f.env)
+      const capture = () => db.prepare(`SELECT value AS branchId,${counted.countedStockFactsSql('1', 'CAST(value AS INTEGER)')} AS facts FROM json_each('[1,2]') ORDER BY value`).all()
+      const before = await capture()
+      const group = new counted.CountedStockBatchPlan(before)
+      const first = group.get(1, 1), second = group.get(1, 2)
+      const identity = { lotId: 1, productId: 1, branchId: 1, batchId: null }
+      const statements = [
+        ...group.takePreimageGuards(),
+        ...counted.planExactCountedTaggedChange(first, identity, 0.1, 'clear'),
+        ...counted.planExactCountedOrdinaryChange(second, null, 0.1, 'consume'),
+        ...counted.planExactCountedTaggedChange(first, identity, 0.1, 'consume'),
+        ...counted.planExactCountedOrdinaryChange(second, null, 0.1, 'receive'),
+        ...counted.planExactCountedTaggedChange(first, identity, 0.1, 'restore'),
+        ...counted.planExactCountedTaggedChange(first, identity, 0.1, 'retag'),
+      ]
+      assert.equal(statements.filter(row => row.sql.startsWith('SELECT CASE WHEN')).length, 2)
+      assert.ok(statements.slice(0, 2).every(row => row.sql.startsWith('SELECT CASE WHEN')))
+      await stock.executeStockTransaction(db, statements, 'once')
+      assert.deepEqual(f.sql.prepare('SELECT branch_id,quantity FROM branch_stock WHERE product_id=1 ORDER BY branch_id').all(), [{ branch_id: 1, quantity: 0.3 }, { branch_id: 2, quantity: 0.2 }])
+      assert.deepEqual(quantities(f), { physical: 0.3, cache: 0.5, tags: [0.3] })
+
+      const stale = new counted.CountedStockBatchPlan(await capture())
+      const refused = [
+        ...stale.takePreimageGuards(),
+        ...counted.planExactCountedOrdinaryChange(stale.get(1, 2), null, 0.1, 'consume'),
+        ...counted.planExactCountedTaggedChange(stale.get(1, 1), identity, 0.1, 'consume'),
+      ]
+      f.competeBeforeCommit([{ sql: 'UPDATE branch_stock SET quantity=0.1 WHERE product_id=1 AND branch_id=2' }, { sql: 'UPDATE products SET stock_quantity=0.4 WHERE id=1' }])
+      await assert.rejects(stock.executeStockTransaction(db, refused, 'once'), error => counted.isCountedStockConflict(error))
+      assert.deepEqual(quantities(f), { physical: 0.3, cache: 0.4, tags: [0.3] })
+      const mixed = await capture()
+      await stock.executeStockTransaction(db, [{ sql: 'UPDATE branch_stock SET quantity=0.2 WHERE product_id=1 AND branch_id=2', params: {} }, { sql: 'UPDATE products SET stock_quantity=0.5 WHERE id=1', params: {} }], 'once')
+      const fresh = await capture()
+      assert.throws(() => new counted.CountedStockBatchPlan([mixed[0], fresh[1]]), error => counted.isCountedStockConflict(error))
+
+      await stock.executeStockTransaction(db, [{ sql: "INSERT INTO branches(id,name,is_active)VALUES(3,'New',1)", params: {} }], 'once')
+      const newBranch = await db.prepare(`SELECT ${counted.countedStockFactsSql('1', '3')} AS facts`).get()
+      const missing = new counted.CountedStockPlan(newBranch.facts, 3)
+      assert.throws(() => counted.planExactCountedOrdinaryChange(missing, null, 0.1, 'consume'), error => counted.isCountedStockConflict(error))
+      const create = new counted.CountedStockPlan(newBranch.facts, 3)
+      await stock.executeStockTransaction(db, counted.planExactCountedOrdinaryChange(create, null, 0.1, 'receive'), 'once')
+      assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=3').get().quantity, 0.1)
+      assert.equal(f.state().cache, 0.6)
+      console.log('PASS same-product multi-branch mixed tag/ordinary batch, rivals, generation and positive missing-branch receive ' + tier)
+    } finally { f.sql.close() }
+  }
+}
+
 async function main() {
   const bounded = loadStockSession('lib/countedDamagedStock.ts')
   assert.equal(bounded.sumCountedQuantities(Array(10_001).fill(0.00001)), 0.10001)
   assert.equal(bounded.subtractCountedQuantity(0.20001, Array(10_001).fill(0.00001)), 0.1)
   console.log('PASS bounded exact intermediate strings across separate 10k term groups')
   const makeWorker = await bundle.exports.bundleWorker()
+  await proveMultiBranch(makeWorker)
   for (const tier of ['free', 'paid']) for (const batch of [true, false]) {
     const f = await world(makeWorker, tier, 'zero', seed(0.3, batch))
     try {
@@ -191,4 +251,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })
-module.exports = { world, bundle, loadStockSession, tag, clear, seed, quantities, replay, proveStaleCount }
+module.exports = { world, bundle, loadStockSession, tag, clear, seed, quantities, replay, proveStaleCount, proveMultiBranch }

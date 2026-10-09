@@ -7,9 +7,11 @@ export type CountedTaggedIdentity = { lotId: number; productId: number; branchId
 const MAX_COUNTED_ROWS = 10_000
 type ProductFacts = [number, number, number, number | null, number | null, string]
 type BranchFacts = [number, number, string, string]
-type ReceiptFacts = [number, number, number, number, number | null, string | null, string | null]
+type ReceiptFacts = [number, number, number, number, number | null, string | null, string | null, string, number | string | null, string | null, number | null]
 type TagFacts = [number, number | null, number, number, string, string | null, number | null, number | null, number | null, string | null]
 type CountedFacts = { product: ProductFacts; branch: BranchFacts | null; branches: [number, number][]; receipts: ReceiptFacts[]; tags: TagFacts[] }
+type SharedCountedProjection = { product: ProductFacts; branches: [number, number][] }
+type CountedBatchBinding = { products: Map<number, SharedCountedProjection>; guards: () => StockWriteStatement[] }
 
 /** Add to an existing facts SELECT; every capacity term and metadata preimage
  * is bounded and returned individually, never as a floating SQL sum. */
@@ -19,8 +21,8 @@ export function countedStockFactsSql(product: string, branch: string): string {
     'branch',(SELECT json_array(b.id,b.is_active,b.name,b.role) FROM branches b WHERE b.id=${branch}),
     'branches',(SELECT json_group_array(json_array(branch_id,quantity)) FROM (
       SELECT branch_id,quantity FROM branch_stock WHERE product_id=${product} ORDER BY branch_id LIMIT ${MAX_COUNTED_ROWS + 1})),
-    'receipts',(SELECT json_group_array(json_array(id,variant_product_id,is_active,quantity,unit_cost_usd,received_at,expiry_date)) FROM (
-      SELECT pb.id,pb.variant_product_id,pb.is_active,bbs.quantity,pb.unit_cost_usd,pb.received_at,pb.expiry_date
+    'receipts',(SELECT json_group_array(json_array(id,variant_product_id,is_active,quantity,unit_cost_usd,received_at,expiry_date,batch_key,batch_number,lot_code,received_quantity)) FROM (
+      SELECT pb.id,pb.variant_product_id,pb.is_active,bbs.quantity,pb.unit_cost_usd,pb.received_at,pb.expiry_date,pb.batch_key,pb.batch_number,pb.lot_code,pb.received_quantity
       FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
       WHERE pb.variant_product_id=${product} AND bbs.branch_id=${branch} ORDER BY pb.id LIMIT ${MAX_COUNTED_ROWS + 1})),
     'tags',(SELECT json_group_array(json_array(id,batch_id,quantity,quantity_remaining,condition_tag,source,return_id,return_item_id,unit_cost_usd,created_at)) FROM (
@@ -67,7 +69,7 @@ export class CountedStockPlan {
   readonly productId: number
   readonly branchId: number
 
-  constructor(private readonly observed: string, branchId: number) {
+  constructor(private readonly observed: string, branchId: number, private readonly batch?: CountedBatchBinding) {
     this.facts = JSON.parse(observed) as CountedFacts
     this.productId = this.facts.product[0]
     this.branchId = branchId
@@ -78,6 +80,15 @@ export class CountedStockPlan {
       subtractCountedQuantity(quantity, [])
     }
     if (subtractCountedQuantity(this.facts.product[2], this.facts.branches.map(row => row[1])) !== 0) throw new CountedStockConflictError()
+    if (batch) {
+      const shared = batch.products.get(this.productId)
+      if (shared) {
+        if (JSON.stringify(shared.product) !== JSON.stringify(this.facts.product)
+          || JSON.stringify(shared.branches) !== JSON.stringify(this.facts.branches)) throw new CountedStockConflictError()
+        this.facts.product = shared.product
+        this.facts.branches = shared.branches
+      } else batch.products.set(this.productId, { product: this.facts.product, branches: this.facts.branches })
+    }
   }
 
   get branchQuantity(): number { return this.facts.branches.find(row => row[0] === this.branchId)?.[1] ?? 0 }
@@ -107,11 +118,48 @@ export class CountedStockPlan {
   }
 
   private preimageGuard(): StockWriteStatement[] {
+    if (this.batch) return this.batch.guards()
+    return this.takeInitialGuard()
+  }
+
+  takeInitialGuard(): StockWriteStatement[] {
     if (this.guarded) return []
     this.guarded = true
     return [{ sql: `SELECT CASE WHEN ${countedStockFactsSql('@productId', '@branchId')}=@observed
       THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`,
       params: { productId: this.productId, branchId: this.branchId, observed: this.observed } }]
+  }
+
+  changeOrdinary(batchId: number | null, quantity: number, action: 'consume' | 'receive'): StockWriteStatement[] {
+    if (!Number.isFinite(quantity) || quantity <= 0) throw new CountedStockConflictError()
+    const receiving = action === 'receive'
+    if (this.facts.product[1] !== 1 || this.facts.branch?.[0] !== this.branchId || this.facts.branch[1] !== 1) throw new CountedStockConflictError()
+    if (batchId !== null && !this.facts.receipts.some(row => row[0] === batchId && row[1] === this.productId && row[2] === 1)) throw new CountedStockConflictError()
+    if (!receiving && this.ordinaryQuantity(batchId) < quantity) throw new CountedStockConflictError()
+    const out = this.preimageGuard()
+    let branch = this.facts.branches.find(row => row[0] === this.branchId)
+    if (!branch) {
+      if (!receiving) throw new CountedStockConflictError()
+      branch = [this.branchId, 0]
+      this.facts.branches.push(branch)
+      this.facts.branches.sort((a, b) => a[0] - b[0])
+    }
+    const delta = receiving ? -quantity : quantity
+    branch[1] = subtractCountedQuantity(branch[1], [delta])
+    this.facts.product[2] = subtractCountedQuantity(this.facts.product[2], [delta])
+    if (branch[1] < 0 || this.facts.product[2] < 0) throw new CountedStockConflictError()
+    const params = { productId: this.productId, branchId: this.branchId, batchId, nextBranch: branch[1], nextProduct: this.facts.product[2] }
+    if (batchId !== null) {
+      const receipt = this.facts.receipts.find(row => row[0] === batchId)!
+      receipt[3] = subtractCountedQuantity(receipt[3], [delta])
+      out.push({ sql: 'UPDATE branch_batch_stock SET quantity=@nextReceipt,updated_at=CURRENT_TIMESTAMP WHERE batch_id=@batchId AND branch_id=@branchId', params: { ...params, nextReceipt: receipt[3] } })
+    }
+    out.push({ sql: receiving
+      ? 'INSERT INTO branch_stock(product_id,branch_id,quantity)VALUES(@productId,@branchId,@nextBranch) ON CONFLICT(product_id,branch_id) DO UPDATE SET quantity=excluded.quantity'
+      : 'UPDATE branch_stock SET quantity=@nextBranch WHERE product_id=@productId AND branch_id=@branchId', params },
+    { sql: 'UPDATE products SET stock_quantity=@nextProduct,updated_at=CURRENT_TIMESTAMP WHERE id=@productId', params })
+    this.assertSource(batchId)
+    return out
   }
 
   hold(batchId: number | null, quantity: number): StockWriteStatement[] {
@@ -151,6 +199,39 @@ export class CountedStockPlan {
     this.assertSource(identity.batchId)
     return out
   }
+}
+
+/** One optimistic generation for every product/branch in one commit. All
+ * preimages precede mutations; branches of one product share its projection. */
+export class CountedStockBatchPlan {
+  private readonly plans = new Map<string, CountedStockPlan>()
+  private guarded = false
+
+  constructor(observed: readonly { facts: string; branchId: number }[]) {
+    const binding: CountedBatchBinding = { products: new Map(), guards: () => this.takePreimageGuards() }
+    for (const row of observed) {
+      const plan = new CountedStockPlan(row.facts, row.branchId, binding)
+      const key = `${plan.productId}:${row.branchId}`
+      if (this.plans.has(key)) throw new CountedStockConflictError()
+      this.plans.set(key, plan)
+    }
+  }
+
+  get(productId: number, branchId: number): CountedStockPlan {
+    const plan = this.plans.get(`${productId}:${branchId}`)
+    if (!plan) throw new CountedStockConflictError()
+    return plan
+  }
+
+  takePreimageGuards(): StockWriteStatement[] {
+    if (this.guarded) return []
+    this.guarded = true
+    return [...this.plans.values()].flatMap(plan => plan.takeInitialGuard())
+  }
+}
+
+export function planExactCountedOrdinaryChange(exact: CountedStockPlan, batchId: number | null, quantity: number, action: 'consume' | 'receive'): StockWriteStatement[] {
+  return exact.changeOrdinary(batchId, quantity, action)
 }
 
 export function planExactCountedTagCapacity(exact: CountedStockPlan, productId: number, branchId: number, batchId: number | null, quantity: number): StockWriteStatement[] {
