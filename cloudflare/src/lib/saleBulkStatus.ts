@@ -6,7 +6,7 @@ import type { SessionUser } from './auth';
 import { getActionTier, isAdminControlUser } from './permissions';
 import { D1_MAX_BOUND_PARAMS } from './sqlBinding';
 import { VALID_SALE_STATUSES } from './salesStatus';
-import { addImportedReturnedQuantities, allocateReturnedQuantities, guardSaleStatusTransition, heldQuantity, normalizeCancelReason, type TransitionItem, type StockStatement } from './saleTransitions';
+import { addImportedReturnedQuantities, allocateReturnedQuantities, guardSaleStatusTransition, heldQuantity, normalizeCancelReason, planSaleStockTransition, type TransitionItem, type StockStatement } from './saleTransitions';
 import { bumpVersion } from './cache';
 import { broadcast } from '../durable-objects/broadcastHub';
 import { actorSnapshot } from './actorSnapshot';
@@ -305,16 +305,91 @@ function conditionRowsSql(): string {
         FROM (SELECT * FROM counted_sale_item_conditions WHERE sale_item_id IN(SELECT CAST(value AS INTEGER) FROM json_each(@itemIds)) ORDER BY sale_item_id))`;
 }
 
+const savedShape = (value: unknown) => JSON.stringify(value, (_key, row) => row && typeof row === 'object' && !Array.isArray(row)
+    ? Object.fromEntries(Object.keys(row).sort().map(key => [key, row[key]])) : row);
+
+function decodeLegacyStock(members: Member[], source: { returned: string; branches: string }): void {
+    const legacy = members.filter(member => member.stock.length && member.stock.every(move => move.itemId === undefined));
+    if (!legacy.length) return;
+    const rows = JSON.parse(source.returned) as Array<[number, number | null, number | null, number]>;
+    const branches = new Map<number, number | null>(JSON.parse(source.branches));
+    if (rows.length > 300) fail('The saved return operands exceed the replay bound.');
+    for (const member of legacy) {
+        const expected: Member = { ...member, stock: [], batches: [], allocations: [] };
+        const returned = (exact: boolean) => {
+            const direct = new Map<number, number>(), product = new Map<number, number>();
+            for (const [, item, productId, quantity] of rows.filter(row => row[0] === member.id)) {
+                const map = item ? direct : product, key = Number(item || productId);
+                map.set(key, exact ? sumCountedQuantities([map.get(key) || 0, quantity]) : (map.get(key) || 0) + quantity);
+            }
+            addImportedReturnedQuantities(direct, member.items, exact);
+            return allocateReturnedQuantities(member.items, direct, product, exact);
+        };
+        const oldReturns = returned(false);
+        if (savedShape([...oldReturns]) !== savedShape(member.returned)) fail('The original return operands no longer match the saved action.');
+        const stamp = String(member.after.cancelled_at || '');
+        const plan = planSaleStockTransition({ saleId: member.id, oldStatus: String(member.before.sale_status), newStatus: String(member.after.sale_status),
+            items: member.items.filter(item => !item.damaged_lot_id), returnedByItem: oldReturns,
+            reason: 'Grouped sale status', userId: null, userName: null, skipStock: member.skipped });
+        for (const statement of plan.statements) {
+            const p = statement.params;
+            if (statement.sql.startsWith('INSERT INTO inventory_movements'))
+                expected.stock.push({ product: Number(p.product_id), branch: Number(p.branch_id), quantity: Number(p.quantity),
+                    batch: p.batch_id ? Number(p.batch_id) : null, lot: null, name: p.product_name as string | null,
+                    costUsd: Number(p.unit_cost_usd), costKhr: Number(p.unit_cost_khr), sale: member.id,
+                    ...(p.addressed_branch_name ? { branchName: (p.branch_name as string | null) ?? null, addressed: String(p.addressed_branch_name) } : {}) });
+            if (statement.sql.startsWith('UPDATE branch_batch_stock') || statement.sql.startsWith('INSERT INTO branch_batch_stock')) {
+                const item = member.items.find(item => item.batch_id === p.batchId || item.allocations?.some(allocation => allocation.batch_id === p.batchId));
+                if (!item) fail('The saved receipt operand is missing.');
+                expected.batches.push({ batch: Number(p.batchId), branch: Number(p.branchId), product: Number(item.product_id),
+                    quantity: Number(p.quantity) * (statement.sql.startsWith('UPDATE') ? -1 : 1) });
+            }
+            if (statement.sql.includes('UPDATE sale_item_batch_allocations') && p.id) {
+                const before = member.items.flatMap(item => item.allocations || []).find(allocation => allocation.id === p.id) as Allocation | undefined;
+                if (!before) fail('The saved allocation operand is missing.');
+                const after = { ...before, released_quantity: before.released_quantity + Number(p.give || 0) - Number(p.take || 0) };
+                after.released_at = after.released_quantity <= 0 ? null : after.released_quantity >= after.quantity ? stamp : before.released_at;
+                expected.allocations.push({ before: { ...before }, after });
+            }
+        }
+        if (member.changed && !member.skipped) for (const item of member.items.filter(item => item.damaged_lot_id)) {
+            const quantity = heldQuantity(String(member.before.sale_status), item.quantity, oldReturns.get(item.id) || 0)
+                - heldQuantity(String(member.after.sale_status), item.quantity, oldReturns.get(item.id) || 0);
+            if (quantity) expected.stock.push({ product: item.product_id!, branch: item.branch_id!, quantity, batch: null,
+                lot: item.damaged_lot_id, name: item.product_name, costUsd: 0, costKhr: 0, sale: member.id });
+        }
+        for (const field of ['stock', 'batches', 'allocations'] as const)
+            if (savedShape(expected[field]) !== savedShape(member[field])) fail('The saved stock action does not match its original operands.');
+        member.returned = [...returned(true)];
+        member.items = member.items.map(item => {
+            if (!branches.has(item.id)) fail('The recorded sale line is missing.');
+            return { ...item, recordedBranchId: branches.get(item.id) };
+        });
+        member.stock = []; member.batches = []; member.allocations = [];
+        planMemberStock(member, stamp);
+    }
+}
+
 async function captureGroupStock(db: D1Compat, members: Member[]): Promise<GroupStock> {
     const moves = members.flatMap(member => member.stock);
     const pairs = [...new Map(moves.map(move => [`${move.product}:${move.branch}`, [move.product, move.branch]])).values()];
     if (!pairs.length) return { exact: new CountedStockBatchPlan([], { deferPhysicalWrites: true }), guards: [], tagged: new Map() };
     const itemIds = JSON.stringify(members.flatMap(member => member.items.filter(item => item.damaged_lot_id).map(item => item.id)));
     const receipts = JSON.stringify([...new Set(members.flatMap(member => member.batches.map(delta => delta.batch)))]);
+    const legacyIds = members.filter(member => member.stock.length && member.stock.every(move => move.itemId === undefined)).map(member => member.id);
+    const legacyColumns = legacyIds.length ? `,
+        (SELECT json_group_array(json_array(sale_id,sale_item_id,product_id,quantity)) FROM
+            (SELECT r.sale_id,ri.sale_item_id,ri.product_id,ri.quantity FROM returns r JOIN return_items ri ON ri.return_id=r.id
+                WHERE r.sale_id IN(SELECT value FROM json_each(@legacyIds)) AND COALESCE(r.status,'completed')!='cancelled'
+                AND COALESCE(r.return_scope,'customer')='customer' ORDER BY ri.id LIMIT 301)) returned,
+        (SELECT json_group_array(json_array(id,branch_id)) FROM
+            (SELECT id,branch_id FROM sale_items WHERE sale_id IN(SELECT value FROM json_each(@legacyIds)) ORDER BY id)) branches` : '';
     const source = await db.prepare(`SELECT (SELECT json_group_array(json_object('branchId',json_extract(value,'$[1]'),
         'facts',(${countedStockFactsSql("json_extract(value,'$[0]')", "json_extract(value,'$[1]')", '@receipts')})||'')) FROM json_each(@pairs)) facts,
-        ${conditionRowsSql()} conditions`).get<{ facts: string; conditions: string }>({ pairs: JSON.stringify(pairs), receipts, itemIds });
+        ${conditionRowsSql()} conditions${legacyColumns}`).get<{ facts: string; conditions: string; returned: string; branches: string }>({
+            pairs: JSON.stringify(pairs), receipts, itemIds, ...(legacyIds.length ? { legacyIds: JSON.stringify(legacyIds) } : {}) });
     if (!source) fail('The grouped stock source is missing.');
+    if (legacyIds.length) decodeLegacyStock(members, source);
     const exact = new CountedStockBatchPlan(JSON.parse(source.facts), { deferPhysicalWrites: true });
     const conditions = JSON.parse(source.conditions) as Array<[number, number, number, number, number | null, string]>;
     const tagged: GroupStock['tagged'] = new Map();
@@ -350,14 +425,16 @@ async function captureGroupStock(db: D1Compat, members: Member[]): Promise<Group
 function stockStatements(member: Member, sign: number, user: SessionUser, stamp: string, stock: GroupStock): StockStatement[] {
     const out: StockStatement[] = [];
     const ordinary = new Map<string, { product: number; branch: number; quantities: number[] }>();
+    const tagged = new Map<string, { productId: number; branchId: number; lotId: number; batchId: number | null; quantities: number[] }>();
     for (const move of member.stock) {
         const q = move.quantity * sign;
         const p = { product: move.product, branch: move.branch, q, lot: move.lot, stamp };
         if (move.lot) {
             const identity = stock.tagged.get(move);
             if (!identity) fail('The tagged stock source is missing.');
-            out.push(...planExactCountedTaggedChange(stock.exact.get(move.product, move.branch),
-                { lotId: move.lot, productId: move.product, branchId: move.branch, batchId: identity.batch }, Math.abs(q), q > 0 ? 'restore' : 'consume'));
+            const key = `${move.product}:${move.branch}:${move.lot}`;
+            const record = tagged.get(key) || { productId: move.product, branchId: move.branch, lotId: move.lot, batchId: identity.batch, quantities: [] };
+            record.quantities.push(q); tagged.set(key, record);
         }
         else {
             const key = `${move.product}:${move.branch}`;
@@ -367,6 +444,11 @@ function stockStatements(member: Member, sign: number, user: SessionUser, stamp:
         const labelled = !!move.addressed;
         const source = stock.tagged.get(move);
         out.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id${labelled ? ',branch_name,addressed_branch_name' : ''},movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id) VALUES(@product,@name,@branch${labelled ? ',@branchName,@addressed' : ''},@type,@q,@usd,@khr,@reason,@sale,@uid,@uname,@batch)`, params: { ...p, ...(labelled ? { branchName: move.branchName ?? null, addressed: move.addressed } : {}), name: move.name, type: move.lot ? (q > 0 ? 'damage_in' : 'damage_out') : (q > 0 ? 'return' : 'sale'), usd: source ? source.costUsd : move.costUsd, khr: source ? source.costKhr : move.costKhr, reason: `${sign < 0 ? 'Undo' : 'Apply'} grouped sale status`, sale: member.id, uid: user.id, uname: actorSnapshot(user), batch: source ? source.batch : move.batch } });
+    }
+    for (const record of tagged.values()) {
+        const quantity = sumCountedQuantities(record.quantities);
+        out.push(...planExactCountedTaggedChange(stock.exact.get(record.productId, record.branchId), record,
+            Math.abs(quantity), quantity > 0 ? 'restore' : 'consume'));
     }
     for (const move of member.batches) {
         const q = move.quantity * sign, exact = stock.exact.get(move.product, move.branch);
