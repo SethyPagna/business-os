@@ -115,7 +115,7 @@ function makeState(actor) {
       return {
         async get() {
           if (/FROM users u/i.test(sql)) return state.actor || undefined
-          if (/SELECT id, type, policy_json, summary_json FROM import_jobs/i.test(sql)) return state.job
+          if (/SELECT id, type, policy_json, summary_json, materialize_state_json FROM import_jobs/i.test(sql)) return { ...state.job, materialize_state_json: null }
           return undefined
         },
         async all(params = {}) {
