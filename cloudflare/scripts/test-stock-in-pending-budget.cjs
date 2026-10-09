@@ -5,16 +5,45 @@ const baseline = process.argv.includes('--baseline')
 const pressureControl = process.argv.includes('--pressure-control')
 const pressureReads = Number(process.argv.find(arg => arg.startsWith('--pressure-reads='))?.split('=')[1] || (baseline ? 3 : 2))
 assert.ok([1, 2, 3].includes(pressureReads))
+const historicalRuntimeBase = 'ad5d4cabb88d3196325dbff437d5a785a4df278f'
 const historicalGraph = {
   '/src/routes/stockInCommit.ts': '12798de289ea6e224ee41aca6b3e000577cca743',
   '/src/routes/inventory.ts': 'ad5d4cabb88d3196325dbff437d5a785a4df278f',
   '/src/lib/productBatches.ts': 'ad5d4cabb88d3196325dbff437d5a785a4df278f',
+  '/src/lib/stockMutationReceipt.ts': 'ad5d4cabb88d3196325dbff437d5a785a4df278f',
+  '/scripts/test-stock-session-atomic.cjs': 'ad5d4cabb88d3196325dbff437d5a785a4df278f',
 }
 const historicalSources = baseline ? Object.fromEntries(Object.entries(historicalGraph).map(([file, sha]) => [file,
   require('node:child_process').execFileSync('git', ['show', sha + ':cloudflare' + file], { cwd: path.join(__dirname, '..'), encoding: 'utf8' })])) : {}
-const fixtureRequire = name => name === 'node:fs' && baseline ? { ...fs, readFileSync(file, ...args) {
+let historicalFixture
+function loadHistoricalFixture() {
+  if (historicalFixture) return historicalFixture
+  const sha = historicalGraph['/scripts/test-stock-session-atomic.cjs']
+  const git = args => require('node:child_process').execFileSync('git', args, { cwd: path.join(__dirname, '..'), encoding: 'utf8' })
+  const migrations = git(['ls-tree', '--full-tree', '-r', '--name-only', sha, 'cloudflare/migrations']).trim().split('\n').filter(file => file.endsWith('.sql'))
+  assert.ok(migrations.length > 0, 'historical fixture uses the exact historical migration manifest')
+  const frozenFs = { ...fs,
+    readdirSync(dir, ...args) {
+      return path.resolve(dir) === path.resolve(__dirname, '../migrations') ? migrations.map(file => path.basename(file)) : fs.readdirSync(dir, ...args)
+    },
+    readFileSync(file, ...args) {
+      return path.dirname(path.resolve(file)) === path.resolve(__dirname, '../migrations')
+        ? git(['show', `${sha}:cloudflare/migrations/${path.basename(file)}`]) : fs.readFileSync(file, ...args)
+    },
+  }
+  const mod = { exports: {} }
+  new Function('require', '__dirname', 'module', 'exports', historicalSources['/scripts/test-stock-session-atomic.cjs'])(
+    name => name === 'node:fs' ? frozenFs : require(name), __dirname, mod, mod.exports)
+  historicalFixture = mod.exports
+  return historicalFixture
+}
+const fixtureRequire = name => name === './test-stock-session-atomic.cjs' && baseline ? loadHistoricalFixture() : name === 'node:fs' && baseline ? { ...fs, readFileSync(file, ...args) {
   const key = Object.keys(historicalSources).find(key => String(file).replaceAll('\\', '/').endsWith(key))
-  return key ? historicalSources[key] : fs.readFileSync(file, ...args)
+  if (key) return historicalSources[key]
+  const relative = path.relative(path.resolve(__dirname, '../src'), path.resolve(file)).replaceAll('\\', '/')
+  if (!relative.startsWith('../') && !path.isAbsolute(relative)) return require('node:child_process').execFileSync('git',
+    ['show', historicalRuntimeBase + ':cloudflare/src/' + relative], { cwd: path.join(__dirname, '..'), encoding: 'utf8' })
+  return fs.readFileSync(file, ...args)
 } } : require(name)
 
 let fixture = fs.readFileSync(path.join(__dirname, 'test-intake-full-request-budget.cjs'), 'utf8').replace(/\r/g, '').split(';(async () => {')[0]
@@ -101,7 +130,7 @@ async function lifecycleChecks() {
   if (baseline) {
     assert.equal(first.status, 200)
     const historicalSaved = first.body.results.filter(r => r.ok).length
-    console.log(JSON.stringify({ historicalObserved: true, attempts: first.physical, saved: historicalSaved, codes: first.body.results.filter(r => !r.ok).map(r => r.code) }))
+    console.log(JSON.stringify({ historicalObserved: true, historicalRuntimeBase, attempts: first.physical, saved: historicalSaved, codes: first.body.results.filter(r => !r.ok).map(r => r.code), ...(process.env.INTAKE_BUDGET_DIAGNOSTIC ? { firstFailure: first.body.results.find(r => !r.ok) } : {}) }))
     assert.ok(historicalSaved > 0)
     assert.equal(first.attemptedStatements, first.physical)
     assert.ok(first.physical > 1000, `historical pending-tail kernel must discriminate current admission: ${first.physical}`)
@@ -118,11 +147,13 @@ async function lifecycleChecks() {
     assert.ok(first.physical <= 1000)
     const saved = first.body.results.filter(r => r.ok).length
     const deferred = first.body.results.filter(r => r.code === 'deferred').length
+    if (process.env.INTAKE_BUDGET_DIAGNOSTIC) console.log(JSON.stringify({ pressureReads, attempts: first.physical, saved, deferred, preflightAttempts: first.preflightAttempts, branchPreflightAttempts: first.branchPreflightAttempts, lotPreflightAttempts: first.lotPreflightAttempts, failures: first.failures }))
     assert.ok(saved > 0)
-    if (pressureReads >= 2) assert.ok(deferred > 0)
+    assert.equal(saved, 24, 'unchanged selling prices fit all lines after query consolidation')
+    assert.equal(deferred, 0)
     assert.equal(saved + deferred, 24)
     assert.deepEqual([first.preflightAttempts, first.branchPreflightAttempts, first.lotPreflightAttempts], [2 * (saved + (deferred ? 1 : 0)), (pressureReads >= 2 ? 2 : 1) * (saved + (deferred ? 1 : 0)), (pressureReads >= 3 ? 2 : 1) * (saved + (deferred ? 1 : 0))])
-    assert.deepEqual(first.effects, { ...before, received: before.received + saved * 5, held: before.held + saved * 5,
+    assert.deepEqual(first.effects, { ...before, stock: before.stock + saved * 5, lots: before.lots + saved * 5, received: before.received + saved * 5, held: before.held + saved * 5,
       movement: before.movement + saved * 2, written: before.written + saved })
     console.log(JSON.stringify({ pass: true, control: 'current kernel; actual D1 retries', pressureReads, attemptedStatements: first.physical, saved, deferred, preflightAttempts: [first.preflightAttempts, first.branchPreflightAttempts, first.lotPreflightAttempts] }))
     f.sql.close()
@@ -143,6 +174,9 @@ async function lifecycleChecks() {
 
   const pressureOptions = { multiLine: true, tailRetries: true, preflightRetries: true, branchPreflightRetries: true, lotPreflightRetries: false, delayedKv: true, enforceCap: true }
   const pressure = await world('paid', 'optional-tagged', false, pressureOptions)
+  const originalLines = Array.from({ length: 24 }, (_, i) => ({ key: 'line-' + i, wire: 'adjust',
+    body: { ...pressure.body, sellingPriceUsd: 5 + i, client_request_id: pressure.body.client_request_id + '-' + i } }))
+  pressureOptions.payload = { lines: originalLines }
   const pressureBefore = pressure.effects()
   const pressured = await pressure.call(true)
   assert.equal(pressured.status, 200)
@@ -151,7 +185,8 @@ async function lifecycleChecks() {
   assert.equal(pressured.body.results.length, 24)
   const saved = pressured.body.results.filter(r => r.ok).length
   const deferred = pressured.body.results.filter(r => r.code === 'deferred').length
-  assert.ok(saved > 0 && deferred > 0, 'real product preflight retries must produce a genuine deferred suffix')
+  if (process.env.INTAKE_BUDGET_DIAGNOSTIC) console.log(JSON.stringify({ pressureAttempts: pressured.physical, saved, deferred, preflightAttempts: pressured.preflightAttempts, branchPreflightAttempts: pressured.branchPreflightAttempts, lotPreflightAttempts: pressured.lotPreflightAttempts, failures: pressured.failures }))
+  assert.ok(saved > 0 && deferred > 0, 'actual read retries and per-line price audits must produce a genuine deferred suffix')
   assert.equal(saved + deferred, 24)
   assert.ok(['preflight', 'preflight-branch'].every(kind => pressured.failures.includes(kind)), 'actual dispatch threw retryable product/branch read failures')
   assert.deepEqual([pressured.branchPreflightAttempts, pressured.lotPreflightAttempts], [2 * (saved + 1), saved + 1])
@@ -160,8 +195,6 @@ async function lifecycleChecks() {
   assert.ok(pressured.body.results.slice(saved).every(r => r.code === 'deferred'), 'untouched suffix keeps original order')
   assert.deepEqual(pressured.effects, { ...pressureBefore, stock: pressureBefore.stock + saved * 5, lots: pressureBefore.lots + saved * 5, received: pressureBefore.received + saved * 5,
     held: pressureBefore.held + saved * 5, movement: pressureBefore.movement + saved * 2, written: pressureBefore.written + saved })
-  const originalLines = Array.from({ length: 24 }, (_, i) => ({ key: 'line-' + i, wire: 'adjust',
-    body: { ...pressure.body, client_request_id: pressure.body.client_request_id + '-' + i } }))
   const receiptIds = () => pressure.sql.prepare('SELECT request_id FROM stock_mutation_receipts WHERE written=1 ORDER BY id').all().map(row => row.request_id)
   assert.deepEqual(receiptIds(), originalLines.slice(0, saved).map(line => line.body.client_request_id))
   pressureOptions.payload = { lines: originalLines.slice(saved) }
