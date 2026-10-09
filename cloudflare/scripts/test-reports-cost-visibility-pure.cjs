@@ -18,7 +18,9 @@ require.extensions['.ts'] = (module, filename) => {
 Module._load = function(request, parent, isMain) {
   if (request === '../lib/saleTotals') return { round2: (value) => Math.round(Number(value) * 100) / 100 }
   if (request === '../lib/auth') return { requireAuth: async (c, next) => {
-    c.set('user', { id: 1, role: c.req.header('x-admin') === '1' ? 'admin' : 'employee', permissions: {} })
+    const role = c.req.header('x-admin') === '1' ? 'admin' : 'employee'
+    c.set('user', { id: role === 'admin' ? 1 : 2, role, role_code: role,
+      permissions: JSON.stringify({ product_cost_view: c.req.header('x-cost-view') === '1' }) })
     return next()
   } }
   if (request === '../lib/permissions') return {
@@ -26,7 +28,7 @@ Module._load = function(request, parent, isMain) {
     isAdminControlUser: (user) => user.role === 'admin',
   }
   if (request === '../lib/db') return { getDb: () => ({}) }
-  if (request === '../lib/acquisitionCostAccess') return { canViewAcquisitionCosts: (user) => user.role === 'admin' }
+  if (request === '../lib/acquisitionCostAccess' || request === '../lib/reportExport') return originalLoad.call(this, request, parent, isMain)
   if (request === '../lib/salesAnalytics') return new Proxy({
     SALES_GROUP_KEYS: ['branch'], reportMoneyDiagnostic: () => null,
     getSalesTotals: async () => ({ ...totals }), previousPeriodFilters: () => ({}),
@@ -35,6 +37,10 @@ Module._load = function(request, parent, isMain) {
     getDeliveryContactTotals: async () => [{ ...courier }],
     getBusinessSummaryPeriodRows: async () => [{ period: '2026-09-13', ...totals }],
     getBusinessSummarySalesRows: async () => [{ id: 1, cursor_at: '2026-09-13 00:00:00', receipt_number: 'R1', revenue_usd: 20, ...saleSensitive }],
+    readSalesReportSnapshot: async () => ({ sales: [{ id: 1 }], items: [], returns: [], returnItems: [] }),
+    businessSummarySalesRowsFromSnapshot: () => [{ id: 1, cursor_at: '2026-09-13 00:00:00', receipt_number: 'R1', revenue_usd: 20, ...saleSensitive }],
+    salesTotalsFromSnapshot: () => ({ ...totals }),
+    whereActiveSales: () => ({ sql: '1=1', params: {} }),
   }, { get: (target, key) => key in target ? target[key] : harmless })
   if (request === '../lib/reportMoneyPrecision') return { ReportMoneyPrecisionError: class extends RangeError {}, reportMoneyHttpError: () => ({ status: 422, message: 'bad' }) }
   if (request.startsWith('../lib/') || request === '../index') return new Proxy({}, { get: () => harmless })
@@ -163,8 +169,8 @@ for (const input of [courier, JSON.parse(JSON.stringify(courier))]) {
 }
 assert.deepEqual(reports.gateCourierRow(courier, true), courier)
 
-async function request(pathname, admin) {
-  const response = await reports.default.request(`http://local${pathname}`, { headers: { 'x-admin': admin ? '1' : '0' } }, {})
+async function request(pathname, admin, costView = false) {
+  const response = await reports.default.request(`http://local${pathname}`, { headers: { 'x-admin': admin ? '1' : '0', 'x-cost-view': costView ? '1' : '0' } }, {})
   assert.equal(response.status, 200, pathname)
   return response.json()
 }
@@ -181,12 +187,31 @@ function assertNoSensitive(value, label) {
     ['/overview', (body) => body.sales], ['/periods?granularity=day', (body) => body.rows],
     ['/grouped?by=branch', (body) => body.rows], ['/grouped?by=product', (body) => body.rows],
     ['/grouped?by=courier', (body) => body.rows], ['/business-summary/sales?pageSize=10', (body) => body.rows],
+    ['/business-summary/sales?intent=export&pageSize=10', (body) => body.rows],
   ]) {
     assertNoSensitive(pick(await request(pathname, false)), pathname)
     const adminBody = pick(await request(pathname, true))
     assert.match(JSON.stringify(adminBody), /"cost_usd"|"actual_cost_usd"/, `${pathname} admin retains sensitive detail`)
   }
+  for (const pathname of ['/business-summary/sales?pageSize=10', '/business-summary/sales?intent=export&pageSize=10']) {
+    const denied = await request(pathname, false)
+    const granted = await request(pathname, false, true)
+    assert.equal(granted.is_admin, false, 'cost-view permission does not grant administrator control')
+    assert.equal(granted.rows.length, 1)
+    for (const key of Object.keys(saleSensitive)) {
+      assert.equal(Object.hasOwn(denied.rows[0], key), false, `${pathname}: ungranted ${key} is absent`)
+      assert.equal(granted.rows[0][key], saleSensitive[key], `${pathname}: explicit cost-view grant retains ${key}`)
+    }
+    assert.equal(granted.rows[0].revenue_usd, denied.rows[0].revenue_usd, 'public revenue is unchanged by the grant')
+    if (pathname.includes('intent=export')) {
+      assertNoSensitive(denied.totals, 'export totals without cost authority')
+      assert.equal(granted.totals.cost_usd, 0.13, 'authorized totals keep the existing cent presentation')
+      assert.match(granted.export_token, /^[a-f0-9]{64}$/)
+      assert.notEqual(granted.export_token, denied.export_token, 'actual export tokens bind the visible cost authority')
+    }
+  }
   console.log('PASS mounted overview/day/group/export employee and admin payload parity')
+  console.log('PASS report totals/day/group/export gates hide actual and derived delivery costs for employees and retain them for admins')
 })().catch((error) => { console.error(error); process.exitCode = 1 })
 
 const source = fs.readFileSync(file, 'utf8')
@@ -194,7 +219,3 @@ assert.match(source, /out\.sales = \{[\s\S]*totals: gateTotals\(totals[\s\S]*pre
 assert.match(source, /periodRows\.map\(\(r\) => gateTotals/)
 assert.match(source, /getSalesGroupedTotals[\s\S]*\.map\(\(r\) => gateTotals/)
 assert.match(source, /getDeliveryContactTotals[\s\S]*\.map\(\(row\) => gateCourierRow/)
-assert.match(source, /const adminColumns = canViewAcquisitionCosts\(user\) \? `, \$\{costCol\} AS cost_usd/,
-  'business-summary sales rows select cost and derived profit only with cost-view authority')
-
-console.log('PASS report totals/day/group/export gates hide actual and derived delivery costs for employees and retain them for admins')

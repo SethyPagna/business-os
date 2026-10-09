@@ -48,6 +48,7 @@ const contactDependencies = {
   '../lib/sqlBinding': load('lib/sqlBinding.ts'),
   '../lib/membershipNumber': membership,
   '../lib/anonymousCustomer': anonymousCustomer,
+  '../lib/customerPointsReturn': load('lib/customerPointsReturn.ts'),
   './portal': { ...portal, loadSettingsMap: async () => ({ loyalty_points_enabled: 'false' }) },
 }
 const contacts = load('routes/contacts.ts', contactDependencies).default
@@ -92,6 +93,16 @@ async function main() {
   for (const method of ['POST', 'PUT', 'DELETE', 'HEAD']) assert.equal((await request('/customers/membership/legacy-id', { pos: true }, method)).status, 403, method)
   assert.equal((await request('/customers/membership/12345678', { pos: true })).status, 404, 'no phone fallback')
   assert.equal((await request('/customers/membership/legacy', { pos: true })).status, 404, 'exact only')
+  raw.prepare(`INSERT INTO returns (return_number, customer_id, return_scope, status, total_refund_usd)
+    VALUES ('MEM-CUSTOMER', 1, 'customer', 'completed', 11),
+           ('MEM-SUPPLIER', 1, 'supplier', 'completed', 70),
+           ('MEM-CANCELLED', 1, 'customer', 'cancelled', 25)`).run()
+  for (const perms of [{ pos: true }, { contacts: true }]) {
+    const response = await request('/customers/membership/legacy-id', perms)
+    assert.equal(response.status, 200)
+    assert.deepEqual(await response.json(), { customer: { id: 1, name: 'Member', membership_number: ' legacy-Id ' }, points: { balance: 239, redeemableUnits: 0 } },
+      'only completed customer returns deduct points; supplier refunds and cancelled returns do not')
+  }
   raw.prepare("INSERT INTO customers (name,membership_number) VALUES ('Ambiguous','LEGACY-ID')").run()
   assert.equal((await request('/customers/membership/legacy-id', { pos: true })).status, 409)
   assert.equal((await portal.default.request('/membership/legacy-id', {}, {})).status, 403, 'public stays disabled')
