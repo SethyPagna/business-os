@@ -377,6 +377,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   // option sheet to choose branch / option / received date. A standalone
   // product opens the same sheet, so the flow never changes shape.
   const [replacementEditingKey, setReplacementEditingKey] = useState<string | null>(null)
+  const replacementSourceRead = useRef(0)
   const [replacementPicking, setReplacementPicking] = useState<ReplacementCandidate | null>(null)
   const [replacementSearching, setReplacementSearching] = useState(false)
   const [replacementSearched, setReplacementSearched] = useState(false)
@@ -527,29 +528,29 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   // the section stays the one place a replacement is chosen.
   const addReplacementSameItem = async (item: SaleReturnItem) => {
     if (!item.product_id) return
-    const scope = captureActorReadScope('returns'), generation = lifecycle.current.generation
+    const scope = captureActorReadScope('returns'), generation = lifecycle.current.generation, revision = ++replacementSourceRead.current
     try {
       const result = await getProductsByIds([item.product_id], { include: 'branch_stock,images,batches', picker: Date.now() }) as { items?: ReplacementCandidate[] }
-      if (!lifecycle.current.alive || lifecycle.current.generation !== generation || !isActorReadScopeCurrent(scope, false)) return
+      if (replacementSourceRead.current !== revision || !lifecycle.current.alive || lifecycle.current.generation !== generation || !isActorReadScopeCurrent(scope, false)) return
       const candidate = result.items?.find(row => Number(row.id) === Number(item.product_id))
       if (!candidate) throw new Error('Product unavailable')
       setReplacementEditingKey(null); setReplacementPicking({ ...candidate, selling_price_usd: item.applied_price_usd, selling_price_khr: item.applied_price_khr })
     } catch (error) {
-      if (lifecycle.current.alive && lifecycle.current.generation === generation && isActorReadScopeCurrent(scope, false)) notify(getLoaderErrorMessage(error, T('error','Error')), 'error')
+      if (replacementSourceRead.current === revision && lifecycle.current.alive && lifecycle.current.generation === generation && isActorReadScopeCurrent(scope, false)) notify(getLoaderErrorMessage(error, T('error','Error')), 'error')
     }
   }
 
   const reselectReplacementSource = async (line: ReplacementLine) => {
-    const scope = captureActorReadScope('returns'), generation = lifecycle.current.generation
+    const scope = captureActorReadScope('returns'), generation = lifecycle.current.generation, revision = ++replacementSourceRead.current
     try {
       const result = await getProductsByIds([line.product_id], { include: 'branch_stock,images,batches', picker: Date.now() }) as { items?: ReplacementCandidate[] }
-      if (!lifecycle.current.alive || lifecycle.current.generation !== generation || !isActorReadScopeCurrent(scope, false)) return
+      if (replacementSourceRead.current !== revision || !lifecycle.current.alive || lifecycle.current.generation !== generation || !isActorReadScopeCurrent(scope, false)) return
       const candidate = result.items?.find(row => Number(row.id) === Number(line.product_id))
       if (!candidate) throw new Error('Product unavailable')
       setReplacementEditingKey(line.key)
       setReplacementPicking({ ...candidate, selling_price_usd: line.price_usd, selling_price_khr: line.price_khr })
     } catch (error) {
-      if (lifecycle.current.alive && lifecycle.current.generation === generation && isActorReadScopeCurrent(scope, false)) notify(getLoaderErrorMessage(error, T('error','Error')), 'error')
+      if (replacementSourceRead.current === revision && lifecycle.current.alive && lifecycle.current.generation === generation && isActorReadScopeCurrent(scope, false)) notify(getLoaderErrorMessage(error, T('error','Error')), 'error')
     }
   }
 
