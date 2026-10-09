@@ -1,4 +1,3 @@
-const productStockGuard = require('./harness/product_stock_guard.cjs')
 // N6 (owner, 23 Sep 2026): "Stock-in sessions editable (today only add or
 // delete)." Companion for lib/stockInLineEdit.ts, the ONE writer behind
 // POST /api/inventory/stock-in-lines/:movementId/edit, and for the line fold
@@ -34,9 +33,13 @@ function loadModules() {
     const mod = { exports: {} }
     cache.set(normalized, mod)
     const req = (name) => {
-    if (name.endsWith('/productStockGuard')) return productStockGuard
       if (name === '../lib/auth' || name === './auth') return {
-        requireAuth: async (c, next) => { c.set('user', c.req.header('x-test-user') ? JSON.parse(c.req.header('x-test-user')) : user); await next() },
+        requireAuth: async (c, next) => {
+          const requested=c.req.header('x-test-user')?JSON.parse(c.req.header('x-test-user')):user
+          const actual=await load('lib/db.ts').getDb(c.env).prepare('SELECT u.*,r.code role_code,r.permissions role_permissions FROM users u LEFT JOIN roles r ON r.id=u.role_id WHERE u.id=@id').get({id:requested.id})
+          assert.ok(actual && actual.is_active===1,'fixture authentication uses a current persisted actor')
+          c.set('user',actual);await next()
+        },
       }
       if (name === './cache' || name === '../lib/cache') return { bumpVersion: async () => {}, getVersion: async () => 0, cacheKey: (...a) => a.join(':'), cachedJson: async (c, k, t, fn) => c.json(await fn()) }
       if (name === '../durable-objects/broadcastHub') return { broadcast: async () => {} }
@@ -53,6 +56,7 @@ function loadModules() {
 
 const load = loadModules()
 const app = new Hono()
+app.use('*',load('lib/requestMetrics.ts').requestMetricsMiddleware)
 app.route('/api/inventory', load('routes/inventory.ts').default)
 app.route('/api/action-history', load('routes/actionHistory.ts').default)
 app.route('/api', load('routes/contacts.ts').default)
@@ -62,14 +66,30 @@ const sessionsQuery = load('lib/stockInSessionsQuery.ts')
 function fresh() {
   load('lib/stockMutationReceipt.ts').resetStockMutationReceiptSchemaProbe()
   load('lib/stockInLineEdit.ts').resetStockInLineEditSchemaProbe()
-  return fixture()
+  const f=fixture(),raw=f.sql
+  f.env.PLAN_TIER='paid'
+  const setup=fn=>raw.transaction(()=>{
+    const epoch=raw.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get().value
+    raw.prepare("INSERT INTO system_flags(key,value)VALUES('stock_transaction_permit',?)").run(epoch)
+    try{return fn()}finally{raw.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'").run()}
+  })()
+  f.sql=new Proxy(raw,{get(target,key){
+    if(key==='exec')return sql=>setup(()=>target.exec(sql))
+    if(key==='prepare')return sql=>{const statement=target.prepare(sql);return new Proxy(statement,{get(stmt,key){if(key==='run')return(...params)=>setup(()=>stmt.run(...params));return typeof stmt[key]==='function'?stmt[key].bind(stmt):stmt[key]}})}
+    return typeof target[key]==='function'?target[key].bind(target):target[key]
+  }})
+  f.seedActor=actor=>{const permission=typeof actor.permissions==='string'?actor.permissions:JSON.stringify(actor.permissions);raw.prepare("INSERT INTO users(id,username,name,password,organization_id,role_id,permissions,is_active,must_change_password)VALUES(?,?,?,'synthetic',?,?,?,1,0) ON CONFLICT(id)DO UPDATE SET permissions=excluded.permissions").run(actor.id,actor.id===user.id?actor.username:actor.username+'-'+actor.id,actor.name,actor.organization_id??null,actor.role_id??null,permission)}
+  f.seedActor(user)
+  return f
 }
 
 function call(f, method, url, body, headers = {}) {
+  if(headers['x-test-user'])f.seedActor(JSON.parse(headers['x-test-user']))
+  const tasks=[]
   return app.request(url, {
     method, headers: { 'Content-Type': 'application/json', ...headers },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  }, f.env, { waitUntil(promise) { Promise.resolve(promise).catch(() => {}) } })
+  }, f.env, { waitUntil(promise) { tasks.push(Promise.resolve(promise)) } }).then(async response=>{while(tasks.length)await Promise.all(tasks.splice(0));return response})
 }
 async function send(f, method, url, body, headers) {
   const res = await call(f, method, url, body, headers)
@@ -157,6 +177,23 @@ async function check(name, fn) {
 }
 
 async function main() {
+  await check('actual fixture guards remain on and counted fractional correction preserves another branch',async()=>{
+    const f=fresh()
+    await assert.rejects(load('lib/db.ts').getDb(f.env).prepare('UPDATE products SET stock_quantity=1 WHERE id=1').run(),/stock_transaction_required/)
+    const {movementId,batchId}=await receive(f,{requestId:'fraction-source-001',quantity:.2})
+    sell(f,batchId,.1)
+    f.sql.exec("INSERT INTO branches(id,name,is_active)VALUES(2,'Other',1);INSERT INTO branch_stock(product_id,branch_id,quantity)VALUES(1,2,.2);UPDATE products SET stock_quantity=.3 WHERE id=1")
+    const rootRow=f.sql.prepare('SELECT * FROM inventory_movements WHERE id=?').get(movementId)
+    const result=await edit(f,movementId,{quantity:.4,expected_quantity:.2,expected_batch_id:batchId})
+    assert.equal(result.status,200,JSON.stringify(result.json));assert.deepEqual(totals(f),{branch:.3,product:.5,lots:.3})
+    const history=historyOf(f,result.json.operation_id)
+    for(const [direction,generation,expected]of[['undo',0,{branch:.1,product:.3,lots:.1}],['redo',1,{branch:.3,product:.5,lots:.3}]]){
+      const response=await(direction==='undo'?undo:redo)(f,history.id,generation);assert.equal(response.status,200,JSON.stringify(response.json));assert.deepEqual(totals(f),expected)
+    }
+    assert.deepEqual(f.sql.prepare('SELECT * FROM inventory_movements WHERE id=?').get(movementId),rootRow)
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0)
+  })
+
   await check('metadata-only edits invalidate the reviewed lot revision without changing quantity or batch id', async () => {
     const f = fresh()
     const { movementId, batchId } = await receive(f, { requestId: 'revision-metadata-01', quantity: 10 })
