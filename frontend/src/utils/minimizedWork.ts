@@ -145,6 +145,23 @@ function normalizeEntry(entry: MinimizedWorkEntry): MinimizedWorkEntry {
     : entry
 }
 
+export type MinimizedWorkRestoreScope = Readonly<{ storeKey: string; entryKey: string; transferKey?: string }>
+const restoreScopes = new WeakMap<MinimizedWorkEntry, MinimizedWorkRestoreScope>()
+
+function restoreScope(entry: MinimizedWorkEntry, storeKey: string): MinimizedWorkRestoreScope {
+  return { storeKey, entryKey: entry.key,
+    ...((entry.kind === 'branch_transfer' || entry.kind === 'inventory_transfer') ? { transferKey: transferDraftKey(entry.kind) } : {}),
+  }
+}
+
+export function captureMinimizedWorkRestoreScope(entry: MinimizedWorkEntry): MinimizedWorkRestoreScope {
+  const known = restoreScopes.get(entry)
+  if (known) return known
+  const scope = restoreScope(entry, ensureCurrentScope())
+  restoreScopes.set(entry, scope)
+  return scope
+}
+
 const STORE_BASE_KEY = 'minimized_work'
 
 function registryDraftKey(): string {
@@ -166,6 +183,7 @@ function ensureCurrentScope(): string {
   if (pendingRestoreScope !== activeStoreKey) {
     pendingRestore = null
     pendingRestoreScope = null
+    pendingRestoreProvenance = null
   }
   return activeStoreKey
 }
@@ -193,7 +211,10 @@ export function removeMinimizedWork(key: string): void {
 }
 
 export function getMinimizedWork(): MinimizedWorkEntry[] {
-  ensureCurrentScope()
+  const storeKey = ensureCurrentScope()
+  for (const entry of entries) {
+    if (!restoreScopes.has(entry)) restoreScopes.set(entry, restoreScope(entry, storeKey))
+  }
   return entries
 }
 
@@ -217,13 +238,23 @@ export function subscribeMinimizedWork(listener: () => void): () => void {
  */
 let pendingRestore: MinimizedWorkEntry | null = null
 let pendingRestoreScope: string | null = null
+let pendingRestoreProvenance: MinimizedWorkRestoreScope | null = null
 
 export function dispatchRestore(entry: MinimizedWorkEntry): void {
   const storeKey = ensureCurrentScope()
+  const previousScope = restoreScopes.get(entry)
+  if (previousScope && previousScope.storeKey !== storeKey) {
+    reparkDeniedRestore(entry, previousScope)
+    return
+  }
   const normalized = normalizeEntry(entry)
+  const provenance = restoreScope(entry, storeKey)
+  restoreScopes.set(entry, provenance)
+  restoreScopes.set(normalized, provenance)
   if (normalized.kind !== 'fast_stockin' && normalized.kind !== 'stock_adjust' && normalized.kind !== 'branch_transfer' && normalized.kind !== 'inventory_transfer') removeMinimizedWork(normalized.key)
   pendingRestore = normalized
   pendingRestoreScope = storeKey
+  pendingRestoreProvenance = provenance
   window.dispatchEvent(new CustomEvent(RESTORE_WORK_EVENT, {
     detail: { kind: normalized.kind, payload: normalized.payload || {}, entry: normalized },
   }))
@@ -244,6 +275,7 @@ export function consumePendingRestore(kind: MinimizedWorkKind): MinimizedWorkEnt
   const entry = pendingRestore
   pendingRestore = null
   pendingRestoreScope = null
+  pendingRestoreProvenance = null
   return entry
 }
 
@@ -263,6 +295,7 @@ export function markRestoreHandled(kind: MinimizedWorkKind): void {
     const handled = pendingRestore
     pendingRestore = null
     pendingRestoreScope = null
+    pendingRestoreProvenance = null
     if (kind === 'fast_stockin' || kind === 'stock_adjust' || kind === 'branch_transfer' || kind === 'inventory_transfer') removeMinimizedWork(handled.key)
   }
 }
@@ -273,13 +306,28 @@ export function markRestoreHandled(kind: MinimizedWorkKind): void {
  * consume its pending replay so a later permission change cannot reopen it
  * without another explicit operator action.
  */
-export function reparkDeniedRestore(entry: MinimizedWorkEntry): void {
-  ensureCurrentScope()
-  if ((entry.kind === 'branch_transfer' || entry.kind === 'inventory_transfer') && entry.draftKey !== transferDraftKey(entry.kind)) return
-  if (pendingRestore?.kind === entry.kind) {
+export function reparkDeniedRestore(
+  entry: MinimizedWorkEntry,
+  provenance = captureMinimizedWorkRestoreScope(entry),
+): void {
+  const currentStoreKey = ensureCurrentScope()
+  if (provenance.entryKey !== entry.key) return
+  if ((entry.kind === 'branch_transfer' || entry.kind === 'inventory_transfer') && entry.draftKey !== provenance.transferKey) return
+  if (pendingRestoreScope === provenance.storeKey && pendingRestore?.key === entry.key && pendingRestoreProvenance === provenance) {
     pendingRestore = null
     pendingRestoreScope = null
+    pendingRestoreProvenance = null
   }
-  const { minimizedAt: _previousMinimizedAt, ...parked } = entry
-  minimizeWork(parked as NewMinimizedWorkEntry)
+  const ownerEntries = provenance.storeKey === currentStoreKey
+    ? entries
+    : (readWorkDraft<MinimizedWorkEntry[]>(provenance.storeKey)?.data ?? []).map(normalizeEntry)
+  if (ownerEntries.some((existing) => existing.key === entry.key)) return
+  const restored = normalizeEntry({ ...entry, minimizedAt: Date.now() } as MinimizedWorkEntry)
+  const next = [...ownerEntries, restored]
+  if (provenance.storeKey === currentStoreKey) {
+    entries = next
+    persist()
+  } else {
+    writeWorkDraft(provenance.storeKey, next)
+  }
 }

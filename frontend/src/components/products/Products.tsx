@@ -144,7 +144,7 @@ import { buildHierarchicalCategoryFilterOptions } from '../shared/CategoryFilter
 import { buildAvailabilityFilterSection } from '../shared/AvailabilityFilterOptions.tsx'
 import { buildSearchModeFilterSection } from '../shared/SearchModeFilterOptions.tsx'
 import { buildAutoMergedFilterSection } from './AutoMergedFilterOptions.tsx'
-import { FAST_STOCK_IN_RESTORE_HOST, RESTORE_WORK_EVENT, canRestoreMinimizedWork, consumePendingRestore, markRestoreHandled, minimizeWork, peekPendingRestore, reparkDeniedRestore, type MinimizedWorkEntry } from '../../utils/minimizedWork.ts'
+import { FAST_STOCK_IN_RESTORE_HOST, RESTORE_WORK_EVENT, canRestoreMinimizedWork, captureMinimizedWorkRestoreScope, consumePendingRestore, markRestoreHandled, minimizeWork, peekPendingRestore, reparkDeniedRestore, type MinimizedWorkEntry } from '../../utils/minimizedWork.ts'
 import { clearWorkDraft, readWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { readStockAdjustDraft } from '../../utils/stockAdjustDraft.ts'
 import { stockSessionHasItems, stockSessionSavedScope } from '../../utils/stockSessionBusy.ts'
@@ -2163,22 +2163,23 @@ function ProductsFullEditor() {
     let disposed = false
     const restoreEdit = async (entry: MinimizedWorkEntry | null | undefined) => {
       if (!entry || entry.kind !== 'edit_product') return
+      const restoreScope = captureMinimizedWorkRestoreScope(entry)
       const restoreRevision = ++productWorkIntentRef.current.revision
       const authorityRevision = productSaveAuthorityRef.current.revision
       if (productWorkIntentRef.current.modal || productWorkIntentRef.current.stockSession) {
-        reparkDeniedRestore(entry)
+        reparkDeniedRestore(entry, restoreScope)
         return
       }
       const productId = Number(entry.payload?.productId || 0)
       if (!productId || !can('products', 'edit') || !canRestoreMinimizedWork(entry, can)) {
-        reparkDeniedRestore(entry)
+        reparkDeniedRestore(entry, restoreScope)
         notify(tr('permission_denied', 'You no longer have permission for this action.', 'អ្នកលែងមានសិទ្ធិសម្រាប់សកម្មភាពនេះទៀតហើយ។'), 'error')
         return
       }
       try {
         const current = (await fetchProductsByIds([productId]))[0]
         if (disposed || productWorkIntentRef.current.revision !== restoreRevision || productSaveAuthorityRef.current.revision !== authorityRevision) {
-          reparkDeniedRestore(entry)
+          reparkDeniedRestore(entry, restoreScope)
           return
         }
         if (!current) throw new Error('Product is no longer available')
@@ -2187,7 +2188,7 @@ function ProductsFullEditor() {
         setModal('form')
         markRestoreHandled('edit_product')
       } catch (error) {
-        reparkDeniedRestore(entry)
+        reparkDeniedRestore(entry, restoreScope)
         if (!disposed && productWorkIntentRef.current.revision === restoreRevision && productSaveAuthorityRef.current.revision === authorityRevision) notify(error instanceof Error ? error.message : String(error), 'error')
       }
     }

@@ -11,7 +11,7 @@ for(const later of ['open','open-close','stock','restore','authority','unmount',
  let selected:{id:number}|null=null,modal:string|null=null,stock:unknown=null,handled=0,reparked=0,notices=0
  const productWorkIntentRef={current:{revision:0,modal:null as string|null,stockSession:false}},productSaveAuthorityRef={current:{revision:0}}
  let disposed=false
- const scope:Record<string,unknown>={productWorkIntentRef,productSaveAuthorityRef,useCallback:(fn:unknown)=>fn,setModalState:(next:string|null)=>{modal=next},setStockSessionState:(next:unknown)=>{stock=next},setSelected:(next:{id:number})=>{selected=next},setFormInitialTab:()=>{},can:()=>true,canRestoreMinimizedWork:()=>true,reparkDeniedRestore:()=>{reparked++},notify:()=>{notices++},tr:(key:string)=>key,fetchProductsByIds:()=>wait,markRestoreHandled:()=>{handled++}}
+ const scope:Record<string,unknown>={productWorkIntentRef,productSaveAuthorityRef,captureMinimizedWorkRestoreScope:()=>({}),useCallback:(fn:unknown)=>fn,setModalState:(next:string|null)=>{modal=next},setStockSessionState:(next:unknown)=>{stock=next},setSelected:(next:{id:number})=>{selected=next},setFormInitialTab:()=>{},can:()=>true,canRestoreMinimizedWork:()=>true,reparkDeniedRestore:()=>{reparked++},notify:()=>{notices++},tr:(key:string)=>key,fetchProductsByIds:()=>wait,markRestoreHandled:()=>{handled++}}
  const modalSetter=variable('setModal',false),stockSetter=variable('setStockSession',false)
  const setModal=modalSetter?compile(modalSetter,scope,'setModal'):scope.setModalState,setStockSession=stockSetter?compile(stockSetter,scope,'setStockSession'):scope.setStockSessionState
  Object.assign(scope,{setModal,setStockSession})
