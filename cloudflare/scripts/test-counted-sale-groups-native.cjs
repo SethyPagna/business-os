@@ -29,12 +29,12 @@ async function legacyWorker() {
   return () => { const m = { exports: {} }; new Function('require', 'module', 'exports', build.outputFiles[0].text)(require, m, m.exports); return m.exports }
 }
 
-async function legacy(makeWorker) {
+async function legacy(makeWorker, fault = null) {
   const oldWorker = await legacyWorker()
-  for (const tier of ['paid', 'free']) for (const shape of ['receipt-partial', 'NULL-partial', 'receipt-full', 'NULL-full', 'different-cost', 'aggregated']) {
+  for (const tier of ['paid', 'free']) for (const shape of fault ? ['receipt-partial'] : ['receipt-partial', 'NULL-partial', 'receipt-full', 'NULL-full', 'different-cost', 'aggregated']) {
     let current, next
     const factory = () => {
-      current = oldWorker(); next = makeWorker()
+      current = fault?.startsWith('current:') ? makeWorker() : oldWorker(); next = makeWorker()
       return { ensureCoreDataInvariants: current.ensureCoreDataInvariants, default: { fetch: (...args) => current.default.fetch(...args) } }
     }
     const receipt = !shape.startsWith('NULL'), partial = !shape.endsWith('full')
@@ -61,6 +61,25 @@ async function legacy(makeWorker) {
         ...(shape === 'aggregated' ? [{ sql: 'UPDATE damaged_stock_lots SET quantity_remaining=0.45 WHERE id=1' }] : []),
       ], 'once')
       current = next
+      if (fault) {
+        const saved = JSON.parse(snapshot.payload_json), member = saved.members[0], mode = fault.split(':')[1]
+        if (mode === 'empty') { member.stock = []; member.batches = []; member.allocations = [] }
+        if (mode === 'omitted') member.stock.shift()
+        if (mode === 'batch') member.batches = []
+        if (mode === 'allocation') member.allocations[0].after.released_quantity = 0.19
+        if (mode === 'mixed') {
+          if (member.stock[0].itemId === undefined) member.stock[0].itemId = member.items[0].id
+          else delete member.stock[0].itemId
+        }
+        if (mode === 'order') member.stock.reverse()
+        f.sql.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=?').run(JSON.stringify(saved), snapshot.id)
+        const before = state(f)
+        const invalid = await f.call('/action-history/' + historyId + '/undo', { expected_generation: 0 })
+        assert.equal(invalid.status, 409, JSON.stringify({ tier, fault, result: invalid.json }))
+        assert.deepEqual(state(f), before, 'invalid synthetic saved action changes neither status, stock nor history')
+        console.log('PASS grouped saved action completeness ' + JSON.stringify({ tier, fault }))
+        continue
+      }
       for (let generation = 0; generation < 4; generation++) {
         const direction = generation % 2 ? 'redo' : 'undo'
         const replay = await f.call('/action-history/' + historyId + '/' + direction, { expected_generation: generation })
@@ -285,6 +304,10 @@ async function main() {
   if (process.argv.includes('--base')) return positive(makeWorker, 'paid', true, true)
   if (process.argv.includes('--ownership-only')) return ownership(makeWorker)
   if (process.argv.includes('--legacy-only')) return legacy(makeWorker)
+  if (process.argv.includes('--snapshots-only')) {
+    for (const kind of ['legacy', 'current']) for (const fault of ['empty', 'omitted', 'batch', 'allocation', 'mixed', 'order']) await legacy(makeWorker, kind + ':' + fault)
+    return
+  }
   if (process.argv.includes('--races-only')) return races(makeWorker)
   if (process.argv.includes('--tails-only')) return tails(makeWorker, Number(process.env.GROUP_FRAGMENTS || 1))
   for (const tier of ['paid', 'free']) for (const receipt of [true, false]) for (const partial of [true, false]) {
@@ -292,6 +315,7 @@ async function main() {
   }
   await ownership(makeWorker)
   await legacy(makeWorker)
+  for (const kind of ['legacy', 'current']) for (const fault of ['empty', 'omitted', 'batch', 'allocation', 'mixed', 'order']) await legacy(makeWorker, kind + ':' + fault)
   await races(makeWorker)
   await tails(makeWorker, 1)
   await tails(makeWorker, 20)
