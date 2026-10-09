@@ -13,11 +13,21 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const { fixture, loadStockSession, user, receiveRequest } = require('./test-stock-session-atomic.cjs')
+const { fixture: baseFixture, loadStockSession, user, receiveRequest } = require('./test-stock-session-atomic.cjs')
 
 const { commitStockSession, replayStockSession } = loadStockSession()
 const { applyMovementRevert } = loadStockSession('lib/stockRevert.ts')
-const { applyStockInLineEdit } = loadStockSession('lib/stockInLineEdit.ts')
+const { applyStockInLineEdit: editLine } = loadStockSession('lib/stockInLineEdit.ts')
+const editEnvironments = new WeakMap()
+const applyStockInLineEdit = (db, actor, id, body) => editLine(db,actor,id,body,null,editEnvironments.get(db),{ limit:1000,used:()=>0 })
+function fixture(seedBeforeFence) {
+  const f=baseFixture(seedBeforeFence)
+  f.env.PLAN_TIER='paid'
+  f.sql.prepare('INSERT INTO users(id,username,name,password,role_id,permissions,organization_id,is_active,must_change_password)VALUES(?,?,?,?,?,?,?,1,0)')
+    .run(user.id,user.username,user.name,'fixture',user.role_id,user.permissions,user.organization_id)
+  editEnvironments.set(getDb(f.env),f.env)
+  return f
+}
 const { getDb } = loadStockSession('lib/db.ts')
 const pb = loadStockSession('lib/productBatches.ts')
 const damagedLots = loadStockSession('lib/damagedLotActions.ts')
