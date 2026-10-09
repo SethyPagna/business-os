@@ -183,6 +183,8 @@ assert.equal(typeof receiptMod.resetStockMutationReceiptSchemaProbe, 'function',
 
 function freshDb() {
   const rawDb = openDb(loadAll(), { seedBeforeFence: seed => seed.exec(`
+    INSERT INTO roles(name,code,permissions) SELECT 'Admin','admin','{"all":true}' WHERE NOT EXISTS(SELECT 1 FROM roles WHERE code='admin');
+    INSERT INTO users(id,username,name,password,role_id,permissions,is_active,must_change_password) SELECT 1,'admin','Admin','fixture',id,'{}',1,0 FROM roles WHERE code='admin';
     INSERT INTO branches(id, name, is_default, is_active) VALUES(1, 'Shop', 1, 1);
     INSERT INTO products(id, name, barcode, cost_price_usd, cost_price_khr, stock_quantity, is_active)
       VALUES(1, 'Serum', 'SER-1', 2, 0, 0, 1);
@@ -196,6 +198,7 @@ function freshDb() {
 const ADMIN_USER = { id: 1, username: 'admin', name: 'Admin', role_code: 'admin', permissions: '{}' }
 
 function makeContext(db, user = ADMIN_USER) {
+  if (user === ADMIN_USER) user = db.prepare('SELECT u.*,r.code AS role_code,r.permissions AS role_permissions FROM users u LEFT JOIN roles r ON r.id=u.role_id WHERE u.id=1').get({})
   currentDb = db
   const context = {
     env: { DB: {}, PLAN_TIER: 'paid' },
