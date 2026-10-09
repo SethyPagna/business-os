@@ -471,7 +471,12 @@ function pickImageFiles(maxCount = 1, options: PickImageFilesOptions = {}): Prom
   })
 }
 
-export default function ProductForm({
+export default function ProductForm(props: ProductFormProps) {
+  const identity = scopedWorkDraftKey(productFormDraftBaseKey(props.product?.id, props.draftScope))
+  return <ProductFormContent key={identity} {...props} />
+}
+
+function ProductFormContent({
   product,
   categories,
   units,

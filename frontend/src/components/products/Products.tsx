@@ -1509,7 +1509,13 @@ function ProductsFullEditor() {
   // row beside info/History/Manage (user, Aug 31). null when that section is
   // not mounted, so the header controls disappear with it.
   const [ledgerActions, setLedgerActions] = useState<StockChangeHeaderActions | null>(null)
-  const [stockSession, setStockSession] = useState<ProductsStockSession | null>(null)
+  const productWorkIntentRef = useRef({ revision: 0, modal: null as ProductModalMode, stockSession: false })
+  const [stockSession, setStockSessionState] = useState<ProductsStockSession | null>(null)
+  const setStockSession = useCallback((next: ProductsStockSession | null) => {
+    productWorkIntentRef.current.revision++
+    productWorkIntentRef.current.stockSession = Boolean(next)
+    setStockSessionState(next)
+  }, [])
   const [reasonsManagerOpen, setReasonsManagerOpen] = useState(false)
   // Dashboard stock-card drills land HERE now (the Branches hub's redundant
   // Products slice was removed, Aug 31): BranchesHubPage forwards the old
@@ -1597,7 +1603,12 @@ function ProductsFullEditor() {
   // buildSearchFilters' generic brand/category/unit/supplier exact-match
   // loop (cloudflare/src/routes/products.ts) already reads.
   const [unitFilter,   setUnitFilter]   = useState<string>('')
-  const [modal,        setModal]        = useState<ProductModalMode>(null)
+  const [modal, setModalState] = useState<ProductModalMode>(null)
+  const setModal = useCallback((next: ProductModalMode) => {
+    productWorkIntentRef.current.revision++
+    productWorkIntentRef.current.modal = next
+    setModalState(next)
+  }, [])
   const [selected,     setSelected]     = useState<ProductRecord | null>(null)
   // 10.2 invariant: this is SET at every open (openProductFormTab and the
   // toolbar Add), never trusted from a previous open. The reported bug --
@@ -2152,6 +2163,12 @@ function ProductsFullEditor() {
     let disposed = false
     const restoreEdit = async (entry: MinimizedWorkEntry | null | undefined) => {
       if (!entry || entry.kind !== 'edit_product') return
+      const restoreRevision = ++productWorkIntentRef.current.revision
+      const authorityRevision = productSaveAuthorityRef.current.revision
+      if (productWorkIntentRef.current.modal || productWorkIntentRef.current.stockSession) {
+        reparkDeniedRestore(entry)
+        return
+      }
       const productId = Number(entry.payload?.productId || 0)
       if (!productId || !can('products', 'edit') || !canRestoreMinimizedWork(entry, can)) {
         reparkDeniedRestore(entry)
@@ -2160,14 +2177,18 @@ function ProductsFullEditor() {
       }
       try {
         const current = (await fetchProductsByIds([productId]))[0]
-        if (disposed || !current) throw new Error('Product is no longer available')
+        if (disposed || productWorkIntentRef.current.revision !== restoreRevision || productSaveAuthorityRef.current.revision !== authorityRevision) {
+          reparkDeniedRestore(entry)
+          return
+        }
+        if (!current) throw new Error('Product is no longer available')
         setSelected(current)
         setFormInitialTab('basic')
         setModal('form')
         markRestoreHandled('edit_product')
       } catch (error) {
         reparkDeniedRestore(entry)
-        if (!disposed) notify(error instanceof Error ? error.message : String(error), 'error')
+        if (!disposed && productWorkIntentRef.current.revision === restoreRevision && productSaveAuthorityRef.current.revision === authorityRevision) notify(error instanceof Error ? error.message : String(error), 'error')
       }
     }
 
