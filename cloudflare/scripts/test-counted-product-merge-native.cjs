@@ -100,7 +100,50 @@ async function main() {
       }
     } finally { f.sql.close() }
   }
-  console.log('PASS merge exact forward: 10 Paid integer/fractional/multi-branch/zero/race/rollback worlds; history/provenance/replay/Free closure remains separate')
+  for (const fault of ['keeper-tag-cost', 'duplicate-tag-cost', 'duplicate-received-date', 'keeper-zero-tag']) {
+    const f = await h.world(worker, 'paid', 'zero', sql => {
+      h.seed(1, true)(sql)
+      sql.exec(`UPDATE products SET name='Merge twin',barcode='MERGE-1' WHERE id=1;
+        INSERT INTO products(id,name,barcode,is_active,stock_quantity,cost_price_usd) VALUES(2,'Merge twin','MERGE-1',1,2,2);
+        INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,2);
+        INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,unit_cost_usd,is_active)
+          VALUES(2,2,'set-first','2026-10-09',2,1);
+        INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(2,1,2);
+        INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source,unit_cost_usd)
+          VALUES(1,1,1,1,1,1,'damaged','remove',2),(2,2,1,2,1,1,'damaged','remove',2);`)
+    })
+    try {
+      const protectedState = () => Object.fromEntries(['products', 'branch_stock', 'branch_batch_stock',
+        'inventory_movements', 'action_history', 'undo_snapshots', 'audit_logs'].map(table => [table, f.sql.prepare(`SELECT * FROM ${table} ORDER BY id`).all()]))
+      const before = protectedState()
+      let injected = false
+      const raw = f.env.DB
+      const rival = fault === 'duplicate-received-date'
+        ? "UPDATE product_batches SET received_at='2026-10-10' WHERE id=2"
+        : fault === 'keeper-zero-tag'
+        ? "INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,unit_cost_usd) VALUES(99,1,1,1,0,0,'damaged',2)"
+        : `UPDATE damaged_stock_lots SET unit_cost_usd=1.0000000000000002 WHERE id=${fault === 'keeper-tag-cost' ? 1 : 2}`
+      f.env.DB = new Proxy(raw, { get(target, key) {
+        if (key === 'batch') return async statements => {
+          if (!injected && statements.some(statement => /INSERT INTO system_flags/.test(statement.text) && /stock_transaction_permit/.test(statement.text))) {
+            injected = true
+            f.competeBeforeCommit([{ sql: rival }])
+          }
+          return target.batch(statements)
+        }
+        return target[key]
+      } })
+      const result = await f.call('/products/possible-duplicates/merge', { keepId: 1, mergeId: 2, stock: 'merge' })
+      assert.equal(injected, true)
+      assert.equal(result.status, 409, `${fault} must invalidate the captured provenance`)
+      assert.equal(result.json.code, 'merge_conflict_retry')
+      assert.deepEqual(protectedState(), before)
+      if (fault === 'duplicate-received-date') assert.equal(f.sql.prepare('SELECT received_at FROM product_batches WHERE id=2').get().received_at, '2026-10-10')
+      else if (fault === 'keeper-zero-tag') assert.equal(f.sql.prepare('SELECT product_id FROM damaged_stock_lots WHERE id=99').get().product_id, 1)
+      else assert.equal(f.sql.prepare('SELECT unit_cost_usd FROM damaged_stock_lots WHERE id=?').get(fault === 'keeper-tag-cost' ? 1 : 2).unit_cost_usd, 1.0000000000000002)
+    } finally { f.sql.close() }
+  }
+  console.log('PASS merge exact forward: 14 Paid integer/fractional/multi-branch/zero/race/provenance/rollback worlds; history/replay/Free closure remains separate')
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1 })

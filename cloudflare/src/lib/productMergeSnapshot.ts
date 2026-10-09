@@ -38,6 +38,7 @@ export type ProductMergeCaseSnapshot = {
   canonicalBatchRows: ProductMergeBatchRow[]
   canonicalBatchStockRows: ProductMergeBatchStockRow[]
   duplicateBatchStockRows: ProductMergeBatchStockRow[]
+  damagedStockRows: Array<Record<string, unknown>>
   duplicateStockRows: ProductMergeStockRow[]
   canonicalStockBefore: ProductMergeStockRow[]
   canonicalProduct: ProductMergeProductRow | undefined
@@ -123,6 +124,9 @@ const BATCH_COLUMNS = ['id', 'variant_product_id', 'batch_key', 'lot_code', 'exp
   'payment_status', 'credit_due_date', 'unit_cost_usd', 'received_quantity', 'received_branch_id',
   'received_cost_usd', 'received_branch_name']
 const BATCH_STOCK_COLUMNS = ['id', 'batch_id', 'branch_id', 'quantity', 'created_at', 'updated_at']
+const DAMAGED_STOCK_COLUMNS = ['id', 'product_id', 'product_name', 'branch_id', 'batch_id', 'return_id',
+  'quantity', 'quantity_remaining', 'reason', 'created_by_user_id', 'created_by_user_name', 'created_at',
+  'updated_at', 'condition_tag', 'source', 'unit_cost_usd', 'return_item_id']
 type CaptureSection = { key: string; columns: string[]; sql: string }
 const captureProofs = new WeakMap<ProductMergeCaseSnapshot, { read: KeyedRead; observed: string }>()
 
@@ -225,13 +229,15 @@ export function planProductMergeCaseSnapshot(
       sql: `SELECT ${productColumns.join(',')} FROM products WHERE id=@duplicateId`,
     },
     {
-      key: 'duplicateBatches', columns: ['id', 'batch_key', 'batch_number', 'lot_quantity', 'lot_stock_rows'],
+      key: 'duplicateBatches', columns: [...BATCH_COLUMNS, 'lot_quantity', 'lot_stock_rows'],
       // The two lot_* columns let the fold assert in its write batch that nothing moved on these lots since this read.
-      sql: `SELECT id, batch_key, batch_number,
+      sql: `SELECT ${BATCH_COLUMNS.join(',')},
         (SELECT COALESCE(SUM(quantity), 0) FROM branch_batch_stock WHERE batch_id = product_batches.id) AS lot_quantity,
         (SELECT COUNT(*) FROM branch_batch_stock WHERE batch_id = product_batches.id) AS lot_stock_rows
         FROM product_batches WHERE variant_product_id=@duplicateId ORDER BY id`,
     },
+    { key: 'damagedStock', columns: DAMAGED_STOCK_COLUMNS, sql: `SELECT ${DAMAGED_STOCK_COLUMNS.join(',')}
+      FROM damaged_stock_lots WHERE product_id IN (@keeperId,@duplicateId) ORDER BY id` },
     { key: 'duplicateImages', columns: ['image_path', 'sort_order'], sql: 'SELECT image_path,sort_order FROM product_images WHERE product_id=@duplicateId ORDER BY sort_order,id' },
     { key: 'canonicalImages', columns: ['image_path'], sql: 'SELECT image_path FROM product_images WHERE product_id=@keeperId ORDER BY id' },
     ...reparentTables.map(({ table, column }, index) => ({
@@ -257,6 +263,7 @@ export function planProductMergeCaseSnapshot(
       canonicalBatchRows: asRows<ProductMergeBatchRow>('canonicalBatches'),
       canonicalBatchStockRows: asRows<ProductMergeBatchStockRow>('canonicalBatchStock'),
       duplicateBatchStockRows: asRows<ProductMergeBatchStockRow>('duplicateBatchStock'),
+      damagedStockRows: asRows<Record<string, unknown>>('damagedStock'),
       duplicateStockRows: asRows<ProductMergeStockRow>('duplicateStock'),
       canonicalStockBefore: asRows<ProductMergeStockRow>('canonicalStock'),
       canonicalProduct: asRows<ProductMergeProductRow>('canonicalProduct')[0],

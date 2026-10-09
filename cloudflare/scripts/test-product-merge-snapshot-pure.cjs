@@ -58,6 +58,12 @@ async function main() {
     INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,reason)
       VALUES(9002,901,'in',3,'Original intake'),(9001,901,'in',2,'Keeper intake');
     UPDATE product_batches SET unit_cost_usd=1.0000000000000002,received_quantity=0.30000000000000004 WHERE id=9101;
+    UPDATE product_batches SET unit_cost_usd=1.0000000000000002,received_quantity=0.30000000000000004,
+      supplier_name='Original discarded supplier',received_at='2026-10-08' WHERE id=9102;
+    INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,batch_id,quantity,quantity_remaining,
+      reason,condition_tag,source,unit_cost_usd) VALUES
+      (9201,9001,'Original keeper',901,NULL,1,0,'Cleared tag','damaged','adjustment',1.0000000000000002),
+      (9202,9002,'Original discarded',901,9102,2,0,'Sold tag','damaged','return',0.30000000000000004);
     INSERT INTO products(id,name,is_active,stock_quantity) VALUES(9003,'Legacy fraction',1,0.30000000000000004);
     INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(9003,901,0.30000000000000004);
     INSERT INTO product_batches(id,variant_product_id,batch_key,unit_cost_usd) VALUES(9104,9003,'legacy-fraction',1.0000000000000002);
@@ -86,6 +92,11 @@ async function main() {
   assert.equal(snapshot.duplicateProduct.id, 9002)
   assert.deepEqual(snapshot.duplicateStockRows.map((row) => Number(row.quantity)), [3])
   assert.deepEqual(snapshot.duplicateBatchRows.map((row) => Number(row.id)), [9102, 9103])
+  assert.deepEqual(snapshot.duplicateBatchRows.map(({ lot_quantity, lot_stock_rows, ...row }) => row),
+    d1.prepare('SELECT * FROM product_batches WHERE variant_product_id=9002 ORDER BY id').all().map(row => ({ ...row })),
+    'discarded receipts retain all original metadata, types and exact costs')
+  assert.deepEqual(snapshot.damagedStockRows, d1.prepare('SELECT * FROM damaged_stock_lots WHERE product_id IN (9001,9002) ORDER BY id').all().map(row => ({ ...row })))
+  assert.deepEqual(Object.keys(snapshot.damagedStockRows[0]), d1.prepare('PRAGMA table_info(damaged_stock_lots)').all().map(row => row.name), 'complete current tag metadata and schema order retained')
   assert.deepEqual(snapshot.duplicateImageRows.map((row) => row.image_path), ['/uploads/tea.webp'])
   assert.deepEqual(snapshot.canonicalBatchRows, d1.prepare('SELECT * FROM product_batches WHERE variant_product_id=9001 ORDER BY id').all().map(row => ({ ...row })))
   assert.deepEqual(Object.keys(snapshot.canonicalBatchRows[0]), d1.prepare('PRAGMA table_info(product_batches)').all().map(row => row.name), 'complete current metadata and schema order retained')
