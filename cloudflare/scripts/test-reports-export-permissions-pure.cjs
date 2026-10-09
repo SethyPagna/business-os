@@ -1,7 +1,7 @@
 // Real report routers, analytics, SQLite queries and both permission policies.
 // Only authentication and the D1 boundary are replaced. Denials must not even
-// open the database; Sales exports add a frozen full-cohort envelope, while
-// Returns/Expenses retain their ordinary page contract.
+// open the database; exports use frozen full-cohort envelopes while ordinary
+// report pages retain their existing contracts.
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -126,7 +126,16 @@ async function samePage(kind, session, query = '') {
       snapshot_max_id, has_more, next_cursor, ...(is_admin === undefined ? {} : { is_admin }),
     })
     assert.deepEqual(page(exported.body), page(view.body), 'Sales preserves row values and cost gates in the frozen envelope')
-  } else assert.deepEqual(exported.body, view.body, `${kind}: export preserves the real query/projection/page contract`)
+  } else {
+    assert.equal(exported.body.export_version, 1)
+    assert.match(exported.body.export_token, /^[a-f0-9]{64}$/)
+    assert.ok(Number.isSafeInteger(exported.body.row_count))
+    assert.ok(exported.body.totals)
+    const page = ({ rows, snapshot_max_id, has_more, next_cursor, is_admin }) => ({
+      rows: rows.map(({ cursor_at, ...row }) => row), snapshot_max_id, has_more, next_cursor, is_admin,
+    })
+    assert.deepEqual(page(exported.body), page(view.body), `${kind}: frozen envelope preserves the existing visible rows and ordinary pages`)
+  }
   assert.ok(exported.reads > 0, `${kind}: real SQL was exercised`)
   return exported.body
 }
@@ -178,7 +187,7 @@ async function main() {
     assert.equal(first.rows.length, 1)
     const cursor = first.next_cursor
     const second = await samePage(kind, authorized,
-      `order=desc&pageSize=1&snapshotMaxId=${first.snapshot_max_id}&afterCreatedAt=${encodeURIComponent(cursor.created_at)}&afterId=${cursor.id}${kind === 'sales' ? `&exportToken=${first.export_token}` : ''}`)
+      `order=desc&pageSize=1&snapshotMaxId=${first.snapshot_max_id}&afterCreatedAt=${encodeURIComponent(cursor.created_at)}&afterId=${cursor.id}&exportToken=${first.export_token}`)
     assert.ok(second.rows.every(row => row.id !== first.rows[0].id), 'cursor advances without repeats')
     const filtered = await samePage(kind, authorized, `q=${kind === 'expenses' ? 'Limes' : 'Alice'}`)
     assert.deepEqual(filtered.rows.map(row => row.id), kind === 'returns' ? [2, 1] : [1], 'search selects actual matching records')

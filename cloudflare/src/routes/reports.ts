@@ -21,19 +21,13 @@ import {
   previousPeriodFilters,
   SALES_GROUP_KEYS,
   type SalesGroupKey,
-  recognizedExpr,
-  recognizedValuedExpr,
-  awaitingExpr,
-  netSaleExpr,
-  customerDeliveryFeeExpr,
-  saleStatusExpr,
-  CUSTOMER_REFUND_JOIN,
-  whereActiveSales, netRefundExpr, collectedSaleExpr, deliveryActualCostExpr, RESTOCKED_RETURN_LINE,
+  whereActiveSales,
   shiftWindowBound,
   reportMoneyDiagnostic,
   type SalesFilters,
 } from '../lib/salesAnalytics'
 import { ReportMoneyPrecisionError, reportMoneyHttpError } from '../lib/reportMoneyPrecision'
+import { parseReportExport, readRecordExport, recordExportTotals, reportExportStamp, reportExportToken } from '../lib/reportExport'
 import { localRangeClockError, isLocalRangeClock, localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import type { Env } from '../index'
 
@@ -58,8 +52,8 @@ const branchHistoryNameSql = (snapshot: string, fallback: string): string =>
 // routes/sales.ts's GET /export already uses (see that file's own header
 // comment): page 1 freezes `snapshot_max_id`, later pages pass it back with
 // `afterCreatedAt`/`afterId` so newly-created/backdated rows can't shift,
-// duplicate or vanish between pages, and the Worker never holds a whole
-// table in memory. The day-bucketed Summary/Reconciliation endpoint is NOT
+// duplicate or vanish between pages. Exports additionally fingerprint a bounded
+// full cohort. The day-bucketed Summary/Reconciliation endpoint is NOT
 // paginated -- it's a GROUP BY aggregate bounded by calendar-day count (even
 // a decade of history is ~3,660 rows), not by table size.
 
@@ -323,15 +317,6 @@ export function salesExportCohort(snapshot: SalesReportSnapshot, search: string)
     row_count: sales.length + items.length + returns.length + returnItems.length }
 }
 
-function salesExportStamp(raw: string): number {
-  return new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`).getTime()
-}
-
-async function salesExportToken(payload: unknown): Promise<string> {
-  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(payload)))
-  return Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, '0')).join('')
-}
-
 export function gateCourierRow(row: Record<string, unknown>, isAdmin: boolean): Record<string, unknown> {
   if (isAdmin) return row
   const {
@@ -547,9 +532,8 @@ app.get('/grouped', async (c) => {
 // Bounded record pages for the existing Sales/Returns/Expenses report tabs.
 // Snapshot IDs exclude newly inserted/backdated records; they do not freeze
 // updates to existing rows. Caller must restart paging when filters change.
-// Ordinary reads remain available to report tabs. A full-walk export caller
-// must explicitly send intent=export; this prerequisite does not convert the
-// existing clients' loaded-row exports into protected full-walk exports.
+// Ordinary reads remain available to report tabs. Export callers explicitly
+// request intent=export and verify the frozen bounded cohort before publishing.
 for (const kind of ['sales', 'returns', 'expenses'] as const) {
   app.get(`/business-summary/${kind}`, async (c) => {
     const user = c.get('user')
@@ -569,29 +553,13 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
     let f: SalesFilters
     try { f = parseViewFilters(query) } catch (error) { return c.json({ error: filterError(error) }, 400) }
     const pageSize = clampInt(query.pageSize, 250, 1, 500)
-    if ((kind as string) === 'sales') {
+    if (kind === 'sales') {
       if (intents) {
         // A continuation is a complete frozen query plus token and ceiling.
         // Reject partial/ambiguous state before any report read.
-        const keys = ['startDate', 'endDate', 'branchId', 'status', 'paymentMethod', 'createdFrom', 'createdTo',
-          'startTime', 'endTime', 'q', 'order', 'pageSize', 'snapshotMaxId', 'exportToken', 'afterCreatedAt', 'afterId', 'verifyOnly']
-        const has = (key: string) => query[key] !== undefined
-        const hasCursor = has('afterId') || has('afterCreatedAt')
-        const hasToken = has('exportToken')
-        const verifyOnly = query.verifyOnly === '1'
-        const snapshotMaxId = has('snapshotMaxId') ? Number(query.snapshotMaxId) : null
-        const afterId = Number(query.afterId)
-        const afterStamp = salesExportStamp(String(query.afterCreatedAt || ''))
-        if (keys.some((key) => (c.req.queries(key)?.length || 0) > 1)
-          || (has('order') && !['asc', 'desc'].includes(query.order))
-          || (has('verifyOnly') && !verifyOnly)
-          || (has('pageSize') && (!/^\d+$/.test(query.pageSize) || Number(query.pageSize) < 1 || Number(query.pageSize) > 500))
-          || hasToken !== has('snapshotMaxId')
-          || (hasToken && (!/^[a-f0-9]{64}$/.test(query.exportToken) || !/^\d+$/.test(query.snapshotMaxId)
-            || !Number.isSafeInteger(snapshotMaxId) || Number(snapshotMaxId) < 0))
-          || (hasCursor && (!hasToken || verifyOnly || !/^\d+$/.test(query.afterId || '') || !Number.isSafeInteger(afterId) || afterId < 1
-            || !/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[zZ]|[+-]\d{2}:?\d{2})?$/.test(query.afterCreatedAt || '') || !Number.isFinite(afterStamp)))
-          || (verifyOnly && !hasToken)) return c.json({ error: 'Invalid sales export continuation' }, 400)
+        const continuation = parseReportExport(query, (key) => c.req.queries(key))
+        if (!continuation) return c.json({ error: 'Invalid sales export continuation' }, 400)
+        const { hasCursor, hasToken, verifyOnly, snapshotMaxId, afterId, afterStamp, limit } = continuation
         // Normalize only effective SQL filters; do not bind page size, cursor,
         // generated time or hidden raw facts into the authorization token.
         if (f.branchId && /^\d+$/.test(String(f.branchId))) f.branchId = String(Number(f.branchId))
@@ -616,17 +584,16 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
         const cohort = salesExportCohort(snapshot, search)
         const canViewCosts = canViewAcquisitionCosts(user)
         const rows = businessSummarySalesRowsFromSnapshot(cohort).map((row) => gateBusinessSummarySaleRow(row, canViewCosts))
-        rows.sort((left, right) => (descending ? -1 : 1) * (salesExportStamp(String(left.cursor_at)) - salesExportStamp(String(right.cursor_at))
+        rows.sort((left, right) => (descending ? -1 : 1) * (reportExportStamp(String(left.cursor_at)) - reportExportStamp(String(right.cursor_at))
           || Number(left.id) - Number(right.id)))
         const totals = gateTotals(salesTotalsFromSnapshot(cohort) as unknown as Record<string, unknown>, isAdmin, canViewCosts)
-        const token = await salesExportToken({ export_version: 1, query: effective, search, order: descending ? 'desc' : 'asc',
+        const token = await reportExportToken({ export_version: 1, query: effective, search, order: descending ? 'desc' : 'asc',
           snapshot_max_id: maximum, authorization: { is_admin: isAdmin, can_view_costs: canViewCosts }, row_count: rows.length, rows, totals })
         if (hasToken && token !== query.exportToken) return c.json({ code: 'report_export_changed', error: 'Sales changed. Restart the export.' }, 409)
         const envelope = { export_version: 1, export_token: token, snapshot_max_id: maximum, row_count: rows.length }
         if (verifyOnly) return c.json({ ...envelope, verified: true })
-        const cursorIndex = hasCursor ? rows.findIndex((row) => Number(row.id) === afterId && salesExportStamp(String(row.cursor_at)) === afterStamp) : -1
+        const cursorIndex = hasCursor ? rows.findIndex((row) => Number(row.id) === afterId && reportExportStamp(String(row.cursor_at)) === afterStamp) : -1
         if (hasCursor && cursorIndex < 0) return c.json({ error: 'Invalid sales export cursor' }, 400)
-        const limit = has('pageSize') ? Number(query.pageSize) : 500
         const start = cursorIndex + 1
         const page = rows.slice(start, start + limit)
         const hasMore = start + page.length < rows.length
@@ -669,21 +636,55 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
         next_cursor: hasMore && last ? { created_at: last.cursor_at || '', id: last.id } : null, is_admin: isAdmin })
     }
     const table = kind === 'expenses' ? 'fees' : kind
-    const alias = kind === 'sales' ? 's' : kind === 'returns' ? 'r' : 'f'
-    const active = kind === 'sales' ? whereActiveSales('s', f) : { sql: '1=1', params: {} }
-    const clauses = [active.sql]; const params: Record<string, unknown> = { ...active.params }
-    if (kind !== 'sales') {
-      const range = reportRecordRange(kind, alias, f)
-      clauses.push(range.sql)
-      Object.assign(params, range.params)
-      // Match the Returns overview: customer returns only, excluding cancelled.
-      if (kind === 'returns') clauses.push("COALESCE(r.return_scope, 'customer') = 'customer'", "COALESCE(r.status, 'completed') <> 'cancelled'")
-    }
+    const alias = kind === 'returns' ? 'r' : 'f'
+    const range = reportRecordRange(kind, alias, f)
+    const clauses = ['1=1', range.sql]
+    const params: Record<string, unknown> = { ...range.params }
+    if (kind === 'returns') clauses.push("COALESCE(r.return_scope, 'customer') = 'customer'", "COALESCE(r.status, 'completed') <> 'cancelled'")
     if (query.q?.trim()) {
-      const fields = kind === 'sales' ? ['receipt_number', 'customer_name', 'customer_phone', 'cashier_name', 'branch_name', 'payment_method']
-        : kind === 'returns' ? ['return_number', 'receipt_number', 'customer_name', 'reason'] : ['label', 'notes', 'fee_type']
+      const fields = kind === 'returns' ? ['return_number', 'receipt_number', 'customer_name', 'reason'] : ['label', 'notes', 'fee_type']
       clauses.push(`instr(lower(${fields.map((name) => `COALESCE(${alias}.${name}, '')`).join(" || ' ' || ")}), lower(@search)) > 0`)
       params.search = query.q.trim()
+    }
+    let select: string; let joins = ''
+    if (kind === 'returns') {
+      select = `r.id, r.created_at AS cursor_at, r.created_at AS date, ${localDateExpr('r.created_at')} AS business_date,
+        r.return_number, r.receipt_number AS sale_receipt_number, ${reportCustomerNameExpr('r.')} AS party, r.return_scope AS scope,
+        r.return_type AS type, r.reason, r.status, r.total_refund_usd AS refund_usd, r.total_refund_khr AS refund_khr`
+    } else {
+      select = `f.id, f.created_at AS cursor_at, f.created_at, f.fee_date AS date, f.fee_type AS type, f.label,
+        ${branchHistoryNameSql('f.branch_name', 'b.name')} AS branch, s.receipt_number AS linked_sale_receipt_number, f.notes, f.amount_usd, f.amount_khr`
+      joins = 'LEFT JOIN branches b ON b.id=f.branch_id LEFT JOIN sales s ON s.id=f.sale_id'
+    }
+    if (intents) {
+      const continuation = parseReportExport(query, (key) => c.req.queries(key))
+      if (!continuation) return c.json({ error: 'Invalid report export continuation' }, 400)
+      const { hasCursor, hasToken, verifyOnly, snapshotMaxId, afterId, afterStamp, limit } = continuation
+      const effective = { sql: clauses.join(' AND '), params: { ...params } }
+      if (snapshotMaxId !== null) { clauses.push(`${alias}.id <= @exportMaximum`); params.exportMaximum = snapshotMaxId }
+      const columns = kind === 'returns'
+        ? ['id', 'cursor_at', 'date', 'business_date', 'return_number', 'sale_receipt_number', 'party', 'scope', 'type', 'reason', 'status', 'refund_usd', 'refund_khr']
+        : ['id', 'cursor_at', 'created_at', 'date', 'type', 'label', 'branch', 'linked_sale_receipt_number', 'notes', 'amount_usd', 'amount_khr']
+      const rows = await readRecordExport(db, `SELECT ${select} FROM ${table} ${alias} ${joins} WHERE ${clauses.join(' AND ')} ORDER BY ${alias}.id`, params, columns)
+      if (!rows) return c.json({ code: 'report_export_too_large', error: 'This export is too large. Narrow the report filters.' }, 413)
+      const maximum = snapshotMaxId ?? rows.reduce((max, row) => Math.max(max, Number(row.id)), 0)
+      const descending = query.order === 'desc'
+      rows.sort((left, right) => (descending ? -1 : 1) * (reportExportStamp(String(left.cursor_at)) - reportExportStamp(String(right.cursor_at))
+        || Number(left.id) - Number(right.id)))
+      const totals = recordExportTotals(kind, rows)
+      const token = await reportExportToken({ export_version: 1, kind, query: effective, order: descending ? 'desc' : 'asc',
+        snapshot_max_id: maximum, authorization: { actor_id: user.id, organization_id: user.organization_id, is_admin: isAdmin }, rows, totals })
+      if (hasToken && token !== query.exportToken) return c.json({ code: 'report_export_changed', error: 'Report changed. Restart the export.' }, 409)
+      const envelope = { export_version: 1, export_token: token, snapshot_max_id: maximum, row_count: rows.length }
+      if (verifyOnly) return c.json({ ...envelope, verified: true })
+      const cursorIndex = hasCursor ? rows.findIndex(row => Number(row.id) === afterId && reportExportStamp(String(row.cursor_at)) === afterStamp) : -1
+      if (hasCursor && cursorIndex < 0) return c.json({ error: 'Invalid report export cursor' }, 400)
+      const start = cursorIndex + 1
+      const page = rows.slice(start, start + limit)
+      const hasMore = start + page.length < rows.length
+      const last = page[page.length - 1]
+      return c.json({ ...envelope, totals, rows: page, has_more: hasMore,
+        next_cursor: hasMore && last ? { created_at: last.cursor_at, id: last.id } : null, is_admin: isAdmin })
     }
     let snapshot = query.snapshotMaxId != null && query.snapshotMaxId !== '' ? clampInt(query.snapshotMaxId, 0, 0, Number.MAX_SAFE_INTEGER) : null
     if (snapshot == null) snapshot = num((await db.prepare(`SELECT MAX(${alias}.id) AS max_id FROM ${table} ${alias} WHERE ${clauses.join(' AND ')}`).get<{ max_id: number }>(params))?.max_id)
@@ -695,57 +696,6 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
     if (Number.isSafeInteger(afterId) && afterId > 0) {
       clauses.push(`(${stamp} ${op} COALESCE(datetime(@afterCreatedAt), '') OR (${stamp} = COALESCE(datetime(@afterCreatedAt), '') AND ${alias}.id ${op} @afterId))`)
       params.afterCreatedAt = query.afterCreatedAt || ''; params.afterId = afterId
-    }
-    let select: string; let joins = ''
-    if (kind === 'sales') {
-      const recognized = recognizedExpr('s.'); const net = netSaleExpr('s.'); const refund = netRefundExpr('s.', 'rf.')
-      // COGS is measured over a NARROWER population than revenue, and the two
-      // gates are not interchangeable. Revenue and the refund that reverses it
-      // ride on recognizedExpr (everything but a cancelled sale). COGS rides on
-      // recognizedValuedExpr, which additionally drops a receipt whose header
-      // value was never recorded -- see valuedSaleExpr and the getSalesTotals
-      // level query, where cost_usd, missing_snapshot_lines and returnedCostSql
-      // all carry that same gate.
-      //
-      // These columns used to be gated on `recognized` alone while claiming to
-      // follow deriveTotals. They followed its FLOOR and not its POPULATION:
-      // the Sep 2-3 import's zero-subtotal receipts recognise $0 of revenue and
-      // were still billed their full COGS here, so the receipt list stopped
-      // summing to the Overview COGS and profit sitting above it, and each
-      // unvalued receipt showed a loss the size of its own goods.
-      const recognizedValued = recognizedValuedExpr('s.')
-      const rawCost = `(COALESCE((SELECT SUM(si.cost_price_usd * si.quantity) FROM sale_items si WHERE si.sale_id=s.id),0)
-        - COALESCE((SELECT SUM(CASE WHEN ${RESTOCKED_RETURN_LINE} THEN ri.cost_price_usd * ri.quantity ELSE 0 END)
-          FROM return_items ri JOIN returns r ON r.id=ri.return_id WHERE r.sale_id=s.id
-          AND COALESCE(r.status,'completed')<>'cancelled' AND COALESCE(r.return_scope,'customer')='customer'),0))`
-      // A receipt floors its own cost; the loaded statement floors the SUM --
-      // the same two-level floor deriveTotals applies over the population above.
-      // Carry the un-floored value so that rollup can re-floor once.
-      const cost = `MAX(0, ${rawCost})`
-      const costCol = `CASE WHEN ${recognizedValued} THEN ${cost} ELSE 0 END`
-      const adminColumns = canViewAcquisitionCosts(user) ? `, ${costCol} AS cost_usd,
-        CASE WHEN ${recognizedValued} THEN ${rawCost} ELSE 0 END AS cost_before_floor_usd,
-        CASE WHEN ${recognizedValued} THEN (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id=s.id AND si.cost_price_usd IS NULL) ELSE 0 END AS cost_missing_snapshot_lines,
-        CASE WHEN ${recognized} THEN ${net}-${refund}+${customerDeliveryFeeExpr('s.')}-${deliveryActualCostExpr('s.')} ELSE 0 END - ${costCol} AS gross_profit_usd` : ''
-      select = `s.id, s.created_at AS cursor_at, s.created_at AS date, ${localDateExpr('s.created_at')} AS business_date,
-        s.receipt_number, s.branch_name AS branch, s.cashier_name AS cashier, ${reportCustomerNameExpr('s.')} AS customer,
-        s.customer_phone,
-        s.payment_method, ${saleStatusExpr('s.')} AS status, COALESCE(s.subtotal_usd,0) AS gross_sales_usd,
-        COALESCE(s.discount_usd,0) AS store_discount_usd, COALESCE(s.membership_discount_usd,0) AS membership_discount_usd,
-        COALESCE(s.tax_usd,0) AS tax_usd, ${customerDeliveryFeeExpr('s.')} AS delivery_usd,
-        CASE WHEN ${recognized} THEN ${refund} ELSE 0 END AS refund_usd,
-        CASE WHEN ${recognized} THEN ${net}-${refund} ELSE 0 END AS net_revenue_usd,
-        CASE WHEN ${awaitingExpr('s.')} THEN ${net} ELSE 0 END AS pending_revenue_usd,
-        CASE WHEN ${collectedSaleExpr('s.')} THEN ${net}+COALESCE(s.tax_usd,0)+${customerDeliveryFeeExpr('s.')}-COALESCE(rf.refund_usd,0) ELSE 0 END AS collected_total_usd ${adminColumns}`
-      joins = `${CUSTOMER_REFUND_JOIN}s.id`
-    } else if (kind === 'returns') {
-      select = `r.id, r.created_at AS cursor_at, r.created_at AS date, ${localDateExpr('r.created_at')} AS business_date,
-        r.return_number, r.receipt_number AS sale_receipt_number, ${reportCustomerNameExpr('r.')} AS party, r.return_scope AS scope,
-        r.return_type AS type, r.reason, r.status, r.total_refund_usd AS refund_usd, r.total_refund_khr AS refund_khr`
-    } else {
-      select = `f.id, f.created_at AS cursor_at, f.created_at, f.fee_date AS date, f.fee_type AS type, f.label,
-        ${branchHistoryNameSql('f.branch_name', 'b.name')} AS branch, s.receipt_number AS linked_sale_receipt_number, f.notes, f.amount_usd, f.amount_khr`
-      joins = 'LEFT JOIN branches b ON b.id=f.branch_id LEFT JOIN sales s ON s.id=f.sale_id'
     }
     const rows = await db.prepare(`SELECT ${select} FROM ${table} ${alias} ${joins} WHERE ${clauses.join(' AND ')}
       ORDER BY ${stamp} ${direction}, ${alias}.id ${direction} LIMIT @limit`).all<Record<string, unknown>>({ ...params, limit: pageSize + 1 })
