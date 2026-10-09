@@ -83,6 +83,18 @@ async function main() {
       assert.equal(denied.reads.length, 0)
       measurements.push({ plan, kind, rows: 603, queryCount: first.reads.length, rowsRead: first.reads[0].rows_read,
         writes: first.reads[0].rows_written, d1Duration: first.reads[0].duration, wallMs: first.wallMs })
+      const table = kind === 'returns' ? 'returns' : 'fees'
+      for (const legacy of ['2026-09-04T03:00Z', '2026-09-04 03:00', '2026-09-04', '2026-09-04T10:00+07:00']) {
+        await call({ seed: [`UPDATE ${table} SET created_at='${legacy}'`] })
+        const one = await request({ pageSize: '1' })
+        assert.equal(one.status, 200)
+        const next = await request({ pageSize: '1', exportToken: one.body.export_token, snapshotMaxId: String(one.body.snapshot_max_id),
+          afterId: String(one.body.next_cursor.id), afterCreatedAt: one.body.next_cursor.created_at })
+        assert.equal(next.status, 200, `${plan}/${kind}/${legacy}: emitted cursor is accepted`)
+        assert.equal(next.body.rows[0].id, 602)
+        assert.equal(one.body.rows[0][kind === 'returns' ? 'date' : 'created_at'], legacy)
+      }
+      await call({ seed: [`UPDATE ${table} SET created_at='2026-09-04 03:00:00'`] })
     }
     await call({ seed: ["UPDATE fees SET notes=printf('%08000d',0)"] })
     const large = await call({ kind: 'expenses', plan: 'free', actor: h.staff({ all: true }), query: { intent: 'export' } })

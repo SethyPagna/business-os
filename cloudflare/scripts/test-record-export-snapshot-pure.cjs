@@ -40,6 +40,22 @@ async function main() {
       assert.equal((await get({ ...frozen, pageSize: '17' })).body.export_token, frozen.exportToken)
       const table = kind === 'returns' ? 'returns' : 'fees'
       const field = kind === 'returns' ? 'reason' : 'notes'
+      for (const legacy of ['2026-09-04T03:00Z', '2026-09-04 03:00', '2026-09-04', '2026-09-04T10:00+07:00']) {
+        h.sql.prepare(`UPDATE ${table} SET created_at=?`).run(legacy)
+        const one = await get({ pageSize: '1' })
+        assert.equal(one.status, 200)
+        const next = await get({ pageSize: '1', exportToken: one.body.export_token, snapshotMaxId: String(one.body.snapshot_max_id),
+          afterId: String(one.body.next_cursor.id), afterCreatedAt: one.body.next_cursor.created_at })
+        assert.equal(next.status, 200, `${kind}: returned legacy cursor must be a valid continuation (${legacy})`)
+        assert.notEqual(next.body.rows[0].id, one.body.rows[0].id)
+        assert.equal(one.body.rows[0][kind === 'returns' ? 'date' : 'created_at'], legacy, 'visible historical timestamp is preserved')
+        h.sql.exec(`UPDATE ${table} SET created_at='2026-09-04 03:00:00'`)
+      }
+      for (const invalid of ['2026-02-30 03:00:00', '2026-09-04 25:00', 'tomorrow', '1', '2026-09-04T03:00:61Z']) {
+        h.sql.prepare(`UPDATE ${table} SET created_at=? WHERE id=1`).run(invalid)
+        assert.equal((await get()).status, 422, `${kind}: malformed calendar/time refuses before a partial export`)
+      }
+      h.sql.exec(`UPDATE ${table} SET created_at='2026-09-04 03:00:00' WHERE id=1`)
       h.sql.exec(`UPDATE ${table} SET ${field}='changed after collection' WHERE id=1`)
       const changed = await get({ ...frozen, verifyOnly: '1' })
       assert.equal(changed.status, 409)

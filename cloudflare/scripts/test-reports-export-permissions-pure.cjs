@@ -132,7 +132,9 @@ async function samePage(kind, session, query = '') {
     assert.ok(Number.isSafeInteger(exported.body.row_count))
     assert.ok(exported.body.totals)
     const page = ({ rows, snapshot_max_id, has_more, next_cursor, is_admin }) => ({
-      rows: rows.map(({ cursor_at, ...row }) => row), snapshot_max_id, has_more, next_cursor, is_admin,
+      rows: rows.map(({ cursor_at, ...row }) => row), snapshot_max_id, has_more,
+      next_cursor: next_cursor ? { ...next_cursor, created_at: new Date(/(?:Z|[+-]\d{2}:?\d{2})$/i.test(next_cursor.created_at)
+        ? next_cursor.created_at.replace(' ', 'T') : `${next_cursor.created_at.replace(' ', 'T')}Z`).toISOString() } : null, is_admin,
     })
     assert.deepEqual(page(exported.body), page(view.body), `${kind}: frozen envelope preserves the existing visible rows and ordinary pages`)
   }

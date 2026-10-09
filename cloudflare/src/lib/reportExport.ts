@@ -36,6 +36,19 @@ export function parseReportExport(query: Record<string, string>, values: (key: s
 export const RECORD_EXPORT_MAX_ROWS = 10_000
 export const RECORD_EXPORT_MAX_BYTES = 4_000_000
 
+function recordExportCursor(raw: unknown): string {
+  if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}(?:[ T](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:[zZ]|[+-](?:[01]\d|2[0-3]):?[0-5]\d)?)?$/.test(raw)) {
+    throw new ReportMoneyPrecisionError('unsupported_row')
+  }
+  const day = raw.slice(0, 10)
+  const calendar = new Date(`${day}T00:00:00Z`)
+  const stamp = reportExportStamp(raw.length === 10 ? `${raw}T00:00:00Z` : raw)
+  if (!Number.isFinite(calendar.getTime()) || calendar.toISOString().slice(0, 10) !== day || !Number.isFinite(stamp)) {
+    throw new ReportMoneyPrecisionError('unsupported_row')
+  }
+  return new Date(stamp).toISOString()
+}
+
 export async function readRecordExport(
   db: { prepare(sql: string): D1CompatPreparedStatement },
   sql: string,
@@ -54,8 +67,8 @@ export async function readRecordExport(
   return result.flatMap(row => {
     if (row.payload === null) return []
     const value = JSON.parse(row.payload) as Record<string, unknown>
-    if (!Number.isSafeInteger(value.id) || Number(value.id) < 1 || typeof value.cursor_at !== 'string'
-      || !Number.isFinite(reportExportStamp(value.cursor_at))) throw new ReportMoneyPrecisionError('unsupported_row')
+    if (!Number.isSafeInteger(value.id) || Number(value.id) < 1) throw new ReportMoneyPrecisionError('unsupported_row')
+    value.cursor_at = recordExportCursor(value.cursor_at)
     return [value]
   })
 }
