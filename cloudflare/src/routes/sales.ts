@@ -56,7 +56,7 @@ import {
   saleSettlementStateStatements,
   type SaleSettlementSnapshot,
 } from '../lib/saleSettlementAction'
-import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from '../lib/saleRecordEvents'
+import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert, SaleRecordEventError } from '../lib/saleRecordEvents'
 import { CUSTOMER_REFUND_JOIN, getCustomerSalesTotals, getDeliveryContactTotals, getSalesDayReport, getSalesPeriodSeries, getSalesTotals, netRefundExpr, netSaleExpr, recognizedExpr, saleStatusExpr, whereActiveSales } from '../lib/salesAnalytics'
 import { readSalesReportSnapshot, salesListFilterReportScope, salesTotalsFromSnapshot, paymentMethodBreakdownFromSnapshot, removalLossesFor, withRemovalLosses } from '../lib/salesAnalytics'
 import { ReportExactDecimal, ReportMoneyPrecisionError, REPORT_MONEY_MAX_ROWS, REPORT_MONEY_PAGE_SIZE } from '../lib/reportMoneyPrecision'
@@ -2670,10 +2670,15 @@ app.patch('/:id/status', async (c) => {
   if (settlementSnapshot) statements.push({ sql: 'DELETE FROM sale_mutation_guards', params: {} })
   const writesStock = plan.statements.length > 0 || damagedTransitionOps.length > 0
   if (!writesStock) statements.push(ordinaryBusinessMaintenanceGuard)
-  if (settlementSnapshot || directStatusResponse) {
-    assertSaleRecordBatchBounds(writesStock ? stockTransactionStatementCount(statements.length) : statements.length, settlementSnapshot || {
-      saleId: Number(id), before: oldStatus, after: saleStatus, response: directStatusResponse,
-    }, settlementEventBytes + statusEventBytes)
+  try {
+    if (settlementSnapshot || directStatusResponse) {
+      assertSaleRecordBatchBounds(writesStock ? stockTransactionStatementCount(statements.length) : statements.length, settlementSnapshot || {
+        saleId: Number(id), before: oldStatus, after: saleStatus, response: directStatusResponse,
+      }, settlementEventBytes + statusEventBytes)
+    }
+  } catch (error) {
+    if (error instanceof SaleRecordEventError) return c.json({ error: error.message, code: 'sale_status_over_plan_budget', outcome: 'not_dispatched' }, 409)
+    throw error
   }
   try {
     const used=currentRequestMetrics()?.invocation.attemptedStatements
