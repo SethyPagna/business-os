@@ -1,5 +1,6 @@
 import { executeStockTransaction } from './stockTransaction'
 import type { D1Compat } from './db'
+import { countedStockFactsSql, CountedStockBatchPlan, CountedStockConflictError, isCountedStockConflict, subtractCountedQuantity } from './countedDamagedStock'
 import { assertProductsActive, productStockGuardStatement, productStockGuardError } from './productStockGuard'
 import { roundMoney4, multiplyMoney4, sellingPriceCeilCent } from './moneyPrecision'
 import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
@@ -309,9 +310,29 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
   // Leave malformed prices for the receipt gate's established error order.
   const costPriceUsd = Number.isFinite(Number(input.costPriceUsd)) && Number(input.costPriceUsd) >= 0
     ? optionalMoney(input.costPriceUsd) : null
-  const lots = await db.prepare(`SELECT id, batch_key, received_at, unit_cost_usd, supplier_name
-    FROM product_batches WHERE variant_product_id = @productId`)
-    .all<ReceiptLotCandidate & { supplier_name: string | null }>({ productId })
+  const receiptCandidatesSql = `(SELECT json_group_array(json_object(
+    'id',id,'batch_key',batch_key,'received_at',received_at,'unit_cost_usd',unit_cost_usd,
+    'supplier_name',supplier_name,'supplier_id',supplier_id,'is_active',is_active,
+    'received_quantity',received_quantity,'received_cost_usd',received_cost_usd,
+    'received_branch_id',received_branch_id,'received_branch_name',received_branch_name,
+    'lot_code',lot_code,'batch_number',batch_number,'expiry_date',expiry_date,'notes',notes)) FROM (
+    SELECT * FROM product_batches WHERE variant_product_id=@productId ORDER BY id LIMIT 10001))`
+  const importSourceSql = `(SELECT json_object('policy',j.policy_json,'cancel',j.cancel_requested,
+    'source',(SELECT data_json FROM import_job_source_rows WHERE job_id=@jobId AND row_number=@rowNumber),
+    'actor',(SELECT json_array(u.id,u.is_active,u.username,u.organization_id,u.role_id,u.permissions,
+      u.must_change_password,r.code,r.permissions) FROM users u LEFT JOIN roles r ON r.id=u.role_id
+      WHERE u.id=CAST(json_extract(j.policy_json,'$.apply_authorized_by_id') AS INTEGER)))
+    FROM import_jobs j WHERE j.id=@jobId)`
+  const captured = await db.prepare(`SELECT ${receiptCandidatesSql} AS candidates, ${importSourceSql} AS source,
+    ${countedStockFactsSql('@productId', '@branchId', '(SELECT json_group_array(id) FROM product_batches WHERE variant_product_id=@productId)')} AS facts`)
+    .get<{ candidates: string; facts: string; source: string | null }>({ productId, branchId, jobId, rowNumber })
+  if (!captured?.facts || !captured.candidates) throw new CountedStockConflictError()
+  if (captured.source) {
+    const source = JSON.parse(captured.source) as { cancel: number; actor: unknown[] | null }
+    if (source.cancel || !source.actor || source.actor[1] !== 1) throw new CountedStockConflictError()
+  }
+  const lots = JSON.parse(captured.candidates) as (ReceiptLotCandidate & { supplier_name: string | null; received_quantity: number | null })[]
+  if (lots.length > 10000) throw new CountedStockConflictError()
   const target = resolveReceiptLotTarget(lots, receivedAt, costPriceUsd, Number(pre?.baseline) || 0)
   const { batchKey } = target
   const lotSupplierName = lots.find(lot => lot.id === target.existingBatchId)?.supplier_name ?? null
@@ -348,13 +369,21 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
   if (roundedRefusal) throw new Error(roundedRefusal)
   optionalMoney(input.costPriceUsd)
   const totalCostUsd = costPriceUsd == null ? null : multiplyMoney4(costPriceUsd, quantity)
+  const exactBatch = new CountedStockBatchPlan([{ facts: captured.facts, branchId }])
+  const exactPreimageGuards = exactBatch.takePreimageGuards()
+  const exact = exactBatch.get(productId, branchId)
+  const existingReceipt = lots.find(lot => lot.id === target.existingBatchId)
+  const nextReceivedQuantity = subtractCountedQuantity(existingReceipt?.received_quantity ?? 0, [-quantity])
+  const newReceipt = target.existingBatchId === null ? exact.receiveProjectedCreatedReceipt(batchKey, quantity) : null
+  const physicalStatements = newReceipt?.statements ?? exact.changeOrdinary(target.existingBatchId!, quantity,
+    exact.requiresReceiptActivation(target.existingBatchId!) ? 'activateAndReceive' : 'receive')
   const params = {
     jobId, actionKey, rowNumber, productId, productName, branchId, branchName,
     quantity, batchKey, lotCode, receivedAt, supplierName, supplierId,
     sellingPriceUsd: optionalMoney(input.sellingPriceUsd, true),
     wholesalePriceUsd: optionalMoney(input.wholesalePriceUsd, true),
     costPriceUsd,
-    totalCostUsd,
+    totalCostUsd, nextReceivedQuantity,
     receiptBaseline: target.baselineBatchId,
     receiptExistingBatchId: target.existingBatchId,
     // The declaration is stamped into the words, not just the zero -- the
@@ -364,8 +393,13 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
     ...(redirect ? { addressedBranchName: String(input.addressedBranchName || '').trim() || null } : {}),
   }
 
-  await executeStockTransaction(db, [
+  try { await executeStockTransaction(db, [
     productStockGuardStatement([productId], 'active'),
+    ...exactPreimageGuards,
+    ...(newReceipt?.guards ?? []),
+    { sql: `SELECT CASE WHEN ${receiptCandidatesSql}=@receiptCandidates AND ${importSourceSql} IS @importSource
+        THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`,
+      params: { productId, jobId, rowNumber, receiptCandidates: captured.candidates, importSource: captured.source } },
     {
       sql: `INSERT OR IGNORE INTO import_stock_action_commits
               (job_id, action_key, row_number, action_kind, status)
@@ -441,32 +475,16 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
       // at the FIRST receipt's cost. @costPriceUsd is NULL whenever the
       // source row recorded no price; COALESCE makes that contribute 0
       // instead of borrowing a sibling receipt's price.
-      sql: `UPDATE product_batches SET received_quantity = COALESCE(received_quantity, 0) + @quantity,
+      sql: `UPDATE product_batches SET received_quantity = @nextReceivedQuantity,
               received_cost_usd = ROUND(COALESCE(received_cost_usd, 0) + COALESCE(@totalCostUsd, 0), 4),
               received_branch_id = CASE WHEN received_quantity = 0 THEN @branchId ELSE COALESCE(received_branch_id, @branchId) END,
               received_branch_name = CASE WHEN received_quantity = 0 OR received_branch_id IS NULL THEN (SELECT name FROM branches WHERE id=@branchId) ELSE received_branch_name END
             WHERE variant_product_id = @productId AND batch_key = @batchKey AND ${guard}`,
       params,
     },
-    {
-      sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity)
-            SELECT id, @branchId, @quantity FROM product_batches
-            WHERE variant_product_id = @productId AND batch_key = @batchKey AND ${guard}
-            ON CONFLICT(batch_id, branch_id) DO UPDATE SET
-              quantity = branch_batch_stock.quantity + excluded.quantity,
-              updated_at = CURRENT_TIMESTAMP`,
-      params,
-    },
-    {
-      sql: `INSERT INTO branch_stock (product_id, branch_id, quantity)
-            SELECT @productId, @branchId, @quantity WHERE ${guard}
-            ON CONFLICT(product_id, branch_id) DO UPDATE SET
-              quantity = branch_stock.quantity + excluded.quantity`,
-      params,
-    },
+    ...physicalStatements,
     {
       sql: `UPDATE products SET
-              stock_quantity = COALESCE(stock_quantity, 0) + @quantity,
               selling_price_usd = CASE WHEN @sellingPriceUsd IS NULL THEN selling_price_usd
                 ELSE MAX(COALESCE(selling_price_usd, 0), @sellingPriceUsd) END,
               wholesale_price_usd = CASE WHEN @wholesalePriceUsd IS NULL THEN wholesale_price_usd
@@ -499,7 +517,16 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
             WHERE job_id = @jobId AND action_key = @actionKey AND status = 'pending'`,
       params,
     },
-  ], 'retry').catch(rethrowBranchGuardFailure)
+  ], 'retry') } catch (error) {
+    // A rival sealed this exact action after our initial read. Recover only
+    // its durable applied receipt; other conflicts and unknown results stay errors.
+    if (isCountedStockConflict(error)) {
+      const receipt = await db.prepare(`SELECT status FROM import_stock_action_commits
+        WHERE job_id=@jobId AND action_key=@actionKey`).get<{ status: string }>({ jobId, actionKey })
+      if (receipt?.status === 'applied') return { actionKey, applied: true, alreadyApplied: true }
+    }
+    rethrowBranchGuardFailure(error)
+  }
 
   // No post-commit verify read: db.batch is atomic and its final statement
   // flips this row's status to 'applied', and the pre-read above already
