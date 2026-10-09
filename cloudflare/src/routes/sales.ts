@@ -16,7 +16,7 @@ import { resolveProductMergeLineage, ProductMergeLineageError, findSaleItemsRequ
 import { chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { canonicalOfflineSaleOwner, offlineSaleOwnerError, offlineSaleOwnerMismatch } from '../lib/offlineSaleOwnership'
-import { audit } from '../lib/audit'
+import { audit, buildAuditStatement } from '../lib/audit'
 import { hasAnyPermission, getActionTier, isAdminControlUser } from '../lib/permissions'
 
 // Sales is a VIEW_TIER section (Part 557 slice 2): a 'view' grant can READ
@@ -98,8 +98,9 @@ import {
   planDeliveryFeeChange,
   planDeliveryAddition,
   planDeliveryActualCostChange,
-  planLineQuantityDecrease,
   planLineQuantityIncrease,
+  planExactLineQuantityDecrease,
+  planExactLineQuantityIncrease,
   recomputeSaleMoneyAfterAmendment,
   resolveAmendedTaxUsd,
   resolveAmendmentWindowMinutes,
@@ -4549,8 +4550,9 @@ app.post('/:id/amendments', async (c) => {
   const lineAuthority = await db.prepare(`SELECT
     (SELECT json_object('lotId',lot_id,'productId',product_id,'branchId',branch_id,'batchId',batch_id,'conditionTag',condition_tag) FROM counted_sale_item_conditions ci WHERE ci.sale_item_id=i.id) AS tagged_json,
     (SELECT quantity_remaining FROM damaged_stock_lots WHERE id=i.damaged_lot_id) AS tagged_remaining,
-    (SELECT json_group_array(json_object('id',a.id,'batch_id',a.batch_id,'branch_id',a.branch_id,'quantity',a.quantity,'released_quantity',a.released_quantity))
-      FROM (SELECT id,batch_id,branch_id,quantity,released_quantity FROM sale_item_batch_allocations WHERE sale_item_id=@lineId ORDER BY id ASC) a) AS allocations_json
+    (SELECT json_group_array(json_object('id',a.id,'batch_id',a.batch_id,'branch_id',a.branch_id,'quantity',a.quantity,'released_quantity',a.released_quantity,
+      'lot_code',a.lot_code,'expiry_date',a.expiry_date,'released_at',a.released_at))
+      FROM (SELECT * FROM sale_item_batch_allocations WHERE sale_item_id=@lineId ORDER BY id ASC) a) AS allocations_json
     FROM sale_items i WHERE i.id=@lineId AND i.sale_id=@saleId`).get<{ tagged_json: string | null; tagged_remaining: number | null; allocations_json: string }>( { lineId, saleId })
   if (!lineAuthority) return c.json({ error: 'That line is not on this sale.' }, 404)
   line.tagged_json = lineAuthority.tagged_json
@@ -4596,6 +4598,31 @@ app.post('/:id/amendments', async (c) => {
     ? allocations.filter((_, index) => Number(storedAllocationBranches[index]) === Number(line.branch_id))
     : allocations
 
+  const replacementIntent:Partial<SaleItemInput>|null = kind==='line_replaced' && body.replacement && typeof body.replacement==='object' ? body.replacement as Partial<SaleItemInput> : null
+  const replacementProductId = Number(replacementIntent?.product_id)
+  const stockContexts = new Map<string,{productId:number;branchId:number}>()
+  const addStockContext=(productId:number,branchId:number)=>{
+    if(Number.isSafeInteger(productId)&&productId>0&&Number.isSafeInteger(branchId)&&branchId>0)stockContexts.set(`${productId}:${branchId}`,{productId,branchId})
+  }
+  addStockContext(Number(line.product_id),Number(line.branch_id))
+  for(const allocation of allocations)addStockContext(Number(line.product_id),Number(allocation.branch_id))
+  if(replacementIntent)addStockContext(replacementProductId,Number(lineEffect?line.branch_id:replacementIntent.branch_id??saleHeaderBranchId))
+  const capturedStockProducts=await db.prepare(`SELECT p.*,CAST(json_extract(context.value,'$.branchId') AS INTEGER) AS stock_branch_id,
+    ${countedStockFactsSql('p.id',"CAST(json_extract(context.value,'$.branchId') AS INTEGER)",'@originalReceipts')} AS counted_facts
+    FROM json_each(@contexts) context JOIN products p ON p.id=json_extract(context.value,'$.productId')`)
+    .all<Record<string,unknown>&{counted_facts:string;id:number;name:string;selling_price_usd:number;cost_price_usd:number;cost_price_khr:number}>({contexts:JSON.stringify([...stockContexts.values()]),originalReceipts:JSON.stringify([...new Set(allocations.map(row=>row.batch_id))])})
+  const replacementRules= replacementIntent ? await db.prepare('SELECT * FROM promotion_rules WHERE is_active=1 ORDER BY id LIMIT 101').all<Record<string,unknown>>() : []
+  const projectedAmendmentStock=new CountedStockBatchPlan(capturedStockProducts.map(product=>({facts:product.counted_facts,branchId:Number(product.stock_branch_id)})),{deferPhysicalWrites:true})
+  const amendmentStockPreimages=projectedAmendmentStock.takePreimageGuards()
+  amendmentStockPreimages.push({sql:`SELECT CASE WHEN
+    (SELECT json_group_array(json_object('id',a.id,'batch_id',a.batch_id,'branch_id',a.branch_id,'quantity',a.quantity,'released_quantity',a.released_quantity,
+      'lot_code',a.lot_code,'expiry_date',a.expiry_date,'released_at',a.released_at)) FROM
+      (SELECT * FROM sale_item_batch_allocations WHERE sale_item_id=@lineId ORDER BY id ASC) a)=@allocations
+    AND (SELECT json_object('lotId',lot_id,'productId',product_id,'branchId',branch_id,'batchId',batch_id,'conditionTag',condition_tag)
+      FROM counted_sale_item_conditions WHERE sale_item_id=@lineId) IS @tagged
+    THEN 1 ELSE json_extract('[1]','$[sale_add_items_changed]') END`,params:{lineId,allocations:lineAuthority.allocations_json,tagged:lineAuthority.tagged_json}})
+  const amendmentLots=()=>line.branch_id&&!line.tagged?fifoLotsFromProjectedCountedStock(projectedAmendmentStock.get(Number(line.product_id),line.branch_id)):[]
+
   const statements: StatementList = []
   const ledgerEntries: Array<Parameters<typeof amendmentEntryStatement>[0]> = []
   const groupId = crypto.randomUUID()
@@ -4626,11 +4653,10 @@ app.post('/:id/amendments', async (c) => {
     const delta=Number(subtractDecimalSum(nextQuantity,[currentQuantity]))
     if(delta!==0){
       const workingLine={...line,applied_price_usd:Number(historical.row.applied_price_usd)}
-      const quantityPlan=delta>0?planLineQuantityIncrease({moneyPrecisionVersion:1,saleId,sale,line:workingLine,addedQuantity:delta,
-        lots:line.branch_id?(await readFifoLotAvailabilityForCart(db,[{productId:Number(line.product_id),branchId:line.branch_id}])).get(`${line.product_id}:${line.branch_id}`)||[]:[],
-        exchangeRate,userId:user?.id??null,userName:actorSnapshot(user),existingAllocations:increaseAllocations})
-        :planLineQuantityDecrease({moneyPrecisionVersion:1,saleId,sale,line:workingLine,removedQuantity:-delta,allocations,exchangeRate,
-          reason:`Quantity changed on sale #${saleId}`,userId:user?.id??null,userName:actorSnapshot(user)})
+      const quantityPlan=delta>0?planExactLineQuantityIncrease({moneyPrecisionVersion:1,saleId,sale,line:workingLine,addedQuantity:delta,
+        lots:amendmentLots(),exchangeRate,userId:user?.id??null,userName:actorSnapshot(user),existingAllocations:increaseAllocations},projectedAmendmentStock)
+        :planExactLineQuantityDecrease({moneyPrecisionVersion:1,saleId,sale,line:workingLine,removedQuantity:-delta,allocations,exchangeRate,
+          reason:`Quantity changed on sale #${saleId}`,userId:user?.id??null,userName:actorSnapshot(user)},projectedAmendmentStock)
       statements.push(...quantityPlan.statements);unitsMoved+=quantityPlan.unitsMoved
     }
     const changedFields=Object.keys(historical.row).filter(key=>historical.row[key]!==original[key])
@@ -4692,30 +4718,21 @@ app.post('/:id/amendments', async (c) => {
       const quantityDelta = Number(exactDelta)
       if (subtractDecimalSum(quantityDelta,[exactDelta])!=='0') throw new SaleItemPricingError()
       if (quantityDelta > 0) {
-        const lots = line.branch_id && !line.tagged
-          ? (await readFifoLotAvailabilityForCart(db, [{ productId: Number(line.product_id), branchId: line.branch_id }])).get(`${line.product_id}:${line.branch_id}`) || []
-          : []
-        if (movesStock && line.branch_id) {
-          const have = await db.prepare('SELECT quantity FROM branch_stock WHERE branch_id = ? AND product_id = ?')
-            .get<{ quantity: number }>([line.branch_id, line.product_id])
-          if (quantityDelta > (Number(have?.quantity) || 0)) {
-            return c.json({ error: `Insufficient stock for ${line.product_name || 'this product'}: requested ${quantityDelta}, available ${Number(have?.quantity) || 0}` }, 409)
-          }
-        }
-        quantityPlan = planLineQuantityIncrease({
+        const lots = amendmentLots()
+        quantityPlan = planExactLineQuantityIncrease({
           moneyPrecisionVersion: 1,
           saleId, sale, line: workingLine, addedQuantity: quantityDelta, lots, exchangeRate,
           userId: user?.id ?? null, userName: actorSnapshot(user), existingAllocations: increaseAllocations,
-        })
+        },projectedAmendmentStock)
       } else {
         const removed = Math.abs(quantityDelta)
         if (removed >= currentQuantity) return c.json({ error: 'Use Remove when a line should be taken off the sale.' }, 400)
-        quantityPlan = planLineQuantityDecrease({
+        quantityPlan = planExactLineQuantityDecrease({
           moneyPrecisionVersion: 1,
           saleId, sale, line: workingLine, removedQuantity: removed, allocations, exchangeRate,
           reason: `Quantity changed on sale #${saleId}`,
           userId: user?.id ?? null, userName: actorSnapshot(user),
-        })
+        },projectedAmendmentStock)
       }
       statements.push(...quantityPlan.statements)
       unitsMoved += quantityPlan.unitsMoved
@@ -4741,42 +4758,6 @@ app.post('/:id/amendments', async (c) => {
     }
   }
 
-  // --- increase / the "add to existing" case, and the add half of a replace ---
-  const needsLots = kind === 'line_quantity_increased' && !isLineUpdate
-  if (needsLots) {
-    const requested = Math.max(0, Number(body.quantity) || 0)
-    if (!(requested > 0)) return c.json({ error: 'How many more units?' }, 400)
-    const lots = line.branch_id && !line.tagged
-      ? (await readFifoLotAvailabilityForCart(db, [{ productId: Number(line.product_id), branchId: line.branch_id }])).get(`${line.product_id}:${line.branch_id}`) || []
-      : []
-    // Pre-flight, plain reads, exactly like POST /'s and POST /:id/items's:
-    // D1's batch() is atomic but cannot branch mid-batch, so a shortage is
-    // reported before the write is built. The CHECK(quantity >= 0) constraints
-    // remain the real race guard.
-    if (movesStock && line.branch_id) {
-      const have = await db.prepare('SELECT quantity FROM branch_stock WHERE branch_id = ? AND product_id = ?')
-        .get<{ quantity: number }>([line.branch_id, line.product_id])
-      if (requested > (Number(have?.quantity) || 0)) {
-        return c.json({ error: `Insufficient stock for ${line.product_name || 'this product'}: requested ${requested}, available ${Number(have?.quantity) || 0}` }, 409)
-      }
-    }
-    const plan = planLineQuantityIncrease({
-      moneyPrecisionVersion: 1,
-      saleId, sale, line, addedQuantity: requested, lots, exchangeRate,
-      userId: user?.id ?? null, userName: actorSnapshot(user), existingAllocations: increaseAllocations,
-    })
-    statements.push(...plan.statements)
-    subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,plan.subtotalDeltaUsd])
-    unitsMoved += plan.unitsMoved
-    ledgerEntries.push({
-      saleId, kind: 'line_quantity_increased', groupId,
-      saleItemId: line.id, productId: line.product_id, productName: line.product_name,
-      quantityBefore: plan.quantityBefore, quantityAfter: plan.quantityAfter,
-      totalBeforeUsd, totalAfterUsd: 0, unitsMoved: plan.unitsMoved, stockSkipped,
-      note, userId: user?.id ?? null, userName: actorSnapshot(user),
-    })
-  }
-
   // --- decrease / remove, and the remove half of a replace ---
   if (kind === 'line_removed' || kind === 'line_replaced') {
     const requested = Number(line.quantity) || 0
@@ -4784,14 +4765,14 @@ app.post('/:id/amendments', async (c) => {
     if (requested > (Number(line.quantity) || 0)) {
       return c.json({ error: `This line only has ${line.quantity}.` }, 400)
     }
-    const plan = planLineQuantityDecrease({
+    const plan = planExactLineQuantityDecrease({
       moneyPrecisionVersion: 1,
       saleId, sale, line, removedQuantity: requested, allocations, exchangeRate,
       reason: kind === 'line_replaced'
         ? `Line replaced on sale #${saleId}`
         : `Line ${kind === 'line_removed' ? 'removed from' : 'reduced on'} sale #${saleId}`,
       userId: user?.id ?? null, userName: actorSnapshot(user),
-    })
+    },projectedAmendmentStock)
     statements.push(...plan.statements)
     subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,plan.subtotalDeltaUsd])
     unitsMoved += plan.unitsMoved
@@ -4819,10 +4800,9 @@ app.post('/:id/amendments', async (c) => {
     if (!Number.isFinite(productId) || productId <= 0) return c.json({ error: 'Which product is replacing it?' }, 400)
     if (!(quantity > 0)) return c.json({ error: 'How many of the replacement?' }, 400)
 
-    const productRead = await db.prepare(`SELECT p.*,(SELECT quantity FROM branch_stock WHERE product_id=p.id AND branch_id=?) AS replacement_branch_quantity FROM products p WHERE p.id = ?`)
-      .get<Record<string,unknown> & { id: number; name: string; selling_price_usd: number; cost_price_usd: number; cost_price_khr: number; replacement_branch_quantity: number | null }>([lineEffect ? Number(line.branch_id) : Number(replacement.branch_id ?? saleHeaderBranchId), productId])
+    const productRead = capturedStockProducts.find(row=>Number(row.id)===productId&&Number(row.stock_branch_id)===Number(lineEffect?line.branch_id:replacement.branch_id??saleHeaderBranchId))
     if (!productRead) return c.json({ error: `Product #${productId} no longer exists.` }, 400)
-    const { replacement_branch_quantity: branchQuantity, ...product } = productRead
+    const { counted_facts,stock_branch_id,...product } = productRead
 
     const branchId = Number(replacement.branch_id ?? saleHeaderBranchId)
     if (!Number.isSafeInteger(branchId) || branchId <= 0 || branchId !== saleHeaderBranchId) {
@@ -4832,7 +4812,6 @@ app.post('/:id/amendments', async (c) => {
       throw new SaleMoneyContractError('money_precision_pricing_intent_required')
     if (precisionBasket!.lines.some(row=>parseSaleItemPricing(row.pricing_snapshot_json as string)?.line_key===replacement.client_line_key))
       throw new SaleItemPricingError()
-    const replacementRules=await db.prepare('SELECT * FROM promotion_rules WHERE is_active=1 ORDER BY id LIMIT 101').all<Record<string,unknown>>()
     statements.unshift(pricingSourceGuard([product],replacementRules))
     const replacementPool:CapturedPricingPool={version:1,pool_key:crypto.randomUUID(),evaluation_time:new Date().toISOString(),exchange_rate:exchangeRate,rules:[],lines:[{
       line_key:replacement.client_line_key,source:replacement.pricing_source!,product:{...capturePricingProduct(product),selling_price_usd:sellingPriceCeilCent(product.selling_price_usd),
@@ -4853,7 +4832,7 @@ app.post('/:id/amendments', async (c) => {
     // redirected to; the new line is stored under the sale's branch.
     const stockBranchId = lineEffect ? Number(line.branch_id) : branchId
     const lotsByKey = stockBranchId && replacement.damaged_lot_id == null
-      ? await readFifoLotAvailabilityForCart(db, [{ productId, branchId: stockBranchId }])
+      ? new Map([[`${productId}:${stockBranchId}`,fifoLotsFromProjectedCountedStock(projectedAmendmentStock.get(productId,stockBranchId))]])
       : new Map()
     // The replacement line is planned by S4-24b's own addition kernel --
     // called, not re-implemented -- so a replaced-in product draws its lots by
@@ -4869,7 +4848,7 @@ app.post('/:id/amendments', async (c) => {
     // that happens to imply it.
     if (replacement.damaged_lot_id != null && (replacement.batch_id != null || replacement.unlotted_stock === true)) return c.json({error:'Conflicting tagged replacement source'},400)
     let taggedReplacement: Awaited<ReturnType<typeof readTaggedSaleSources>>
-    try { taggedReplacement = await readTaggedSaleSources(db,[{productId,branchId:stockBranchId,quantity,taggedLotId:replacement.damaged_lot_id}],movesStock) } catch(error) { return c.json({error:error instanceof Error ? error.message : 'Invalid tagged source'},409) }
+    taggedReplacement = taggedSaleSourcesFromProjectedStock(projectedAmendmentStock,[{productId,branchId:stockBranchId,quantity,taggedLotId:replacement.damaged_lot_id}])
     const explicitReplacement = {batchId:replacement.batch_id == null ? null : Number(replacement.batch_id),batchLabel:replacement.batch_label ?? null,batchExpiryDate:replacement.batch_expiry_date ?? null,unlottedStock:replacement.unlotted_stock === true}
     const sourceResolution=resolveExplicitSaleLineBatches([{productId,productName:product.name,branchId:stockBranchId,quantity,unitPriceUsd,costPriceUsd:null,costPriceKhr:null,...explicitReplacement,...(replacement.damaged_lot_id ? {tagged:taggedReplacement.get(Number(replacement.damaged_lot_id))!} : {})}],lotsByKey)
     if (!sourceResolution.ok) return c.json({error:sourceResolution.error},409)
@@ -4883,30 +4862,21 @@ app.post('/:id/amendments', async (c) => {
       ...(lineEffect ? { recordedBranchId: branchId, effect: lineEffect } : {}),
     }], lotsByKey, saleStatus, !movesStock)
 
-    if (movesStock && stockBranchId) {
-      const have = { quantity: branchQuantity }
-      if (quantity > (Number(have?.quantity) || 0)) {
-        return c.json({ error: `Insufficient stock for ${product.name}: requested ${quantity}, available ${Number(have?.quantity) || 0}` }, 409)
-      }
-    }
-
     // The plan works purely off each line's heldUnits (already 0 when this
     // sale moves no stock), so the status is carried for the record only --
     // no second sentinel.
-    const additionPlan = planSaleLineAddition({
-      saleId, saleStatus, lines: plannedLines,
-      exchangeRate, userId: user?.id ?? null, userName: actorSnapshot(user),
-    })
     replacementLines=plannedLines
     pricingRowsAfter.push(materializeCapturedPricingRow({id:0,product_id:productId,product_name:product.name,quantity,branch_id:plannedLines[0].tagged?.branchId ?? branchId,cost_price_usd:plannedLines[0].costPriceUsd,cost_price_khr:plannedLines[0].costPriceKhr},
       replacementPool,replacementQuantities,replacement.client_line_key,parseSaleItemPricing(replacementJson)!.allocation_context))
-    subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,additionPlan.addedSubtotalUsd])
-    unitsMoved += -additionPlan.deductedUnits || 0
+    const replacementSubtotal=sumMoney4(plannedLines.map(row=>row.lineTotalUsd))
+    const replacementHeld=sumCountedQuantities(plannedLines.map(row=>row.heldUnits))
+    subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,replacementSubtotal])
+    unitsMoved = sumCountedQuantities([unitsMoved,-replacementHeld])
     ledgerEntries.push({
       saleId, kind: 'line_added', groupId,
       productId, productName: product.name,
       quantityBefore: 0, quantityAfter: quantity,
-      totalBeforeUsd, totalAfterUsd: 0, unitsMoved: -additionPlan.deductedUnits || 0, stockSkipped,
+      totalBeforeUsd, totalAfterUsd: 0, unitsMoved: -replacementHeld || 0, stockSkipped,
       note, userId: user?.id ?? null, userName: actorSnapshot(user),
     })
   }
@@ -4982,14 +4952,14 @@ app.post('/:id/amendments', async (c) => {
     }
     if (replacementLines) {
       replacementLines[0].pricingSnapshotJson=String(pricingRowsAfter.find(row=>Number(row.id)===0)!.pricing_snapshot_json)
-      const finalPlan=planSaleLineAddition({saleId,saleStatus,lines:replacementLines,exchangeRate,userId:user?.id??null,userName:actorSnapshot(user)})
-      statements.push(...planUnlottedSaleLineGuards(finalPlan.lines))
+      const finalPlan=planExactSaleLineAddition({saleId,saleStatus,lines:replacementLines,exchangeRate,userId:user?.id??null,userName:actorSnapshot(user)},projectedAmendmentStock)
+      amendmentStockPreimages.push(...finalPlan.preimageStatements)
       for (const [index,statement] of finalPlan.statements.entries()) {
         statements.push(statement)
         const ordinal=finalPlan.saleItemStatementIndexByLine.indexOf(index)
         if (ordinal>=0) statements.push({sql:`INSERT INTO sale_mutation_members(operation_id,entity_kind,entity_id,ordinal) VALUES(@operation,'sale_item',last_insert_rowid(),@ordinal)`,params:{operation:mutationOperationId,ordinal}})
       }
-      statements.push(...buildOperationAllocationStatements(finalPlan.lines,mutationOperationId,mutationStamp))
+      statements.push(...buildExactOperationAllocationStatements(finalPlan.lines,mutationOperationId,mutationStamp))
     }
     lineMoneyAfterAtLatestRate=captureSaleLineKhrSnapshot(pricingRowsAfter)
   }
@@ -5005,6 +4975,13 @@ app.post('/:id/amendments', async (c) => {
   const response = buildAmendmentResponsePayload({
     saleId, sale, money, exchangeRate, stockMoved: movesStock, unitsMoved, stockSkipped, tax: taxPlan.outcome,
   }, mutationStamp)
+  const amendmentAudit=buildAuditStatement(user?.id??null,actorSnapshot(user),'update','sale',saleId,{
+    action:'amend',receipt_number:sale.receipt_number??null,sale_status:sale.sale_status??null,
+    kind,sale_item_id:lineId,product_id:line.product_id,entries:ledgerEntries.map(entry=>entry.kind),units_moved:unitsMoved,
+    stock_skipped:stockSkipped,subtotal_before:subtotalBeforeUsd,subtotal_after:money.subtotalUsd,total_before:totalBeforeUsd,total_after:money.totalUsd,
+    tax_after:taxPlan.outcome.taxUsd,tax_recomputed:taxPlan.outcome.recomputed,tax_reason:taxPlan.outcome.reason,
+    exchange_rate_before:sale.exchange_rate??null,exchange_rate_after:exchangeRate,outside_window:guard.outsideWindow,notes:note,
+  })
 
   // ---- One atomic batch: the line change, its stock, the sale's money, and
   // the ledger entries recording all three. A committed line change whose
@@ -5012,6 +4989,7 @@ app.post('/:id/amendments', async (c) => {
   // exists to close. ----
   try {
     let amendmentStatements = [
+      ...amendmentStockPreimages,
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
       combinedAmendmentPrecondition([headerBranchGuard, amendmentSettingsGuard(moneySettings), saleRevisionGuard(saleId, Number(sale.write_revision)), precisionBasket!.guard]),
@@ -5032,9 +5010,11 @@ app.post('/:id/amendments', async (c) => {
         stamp: mutationStamp,
       }),
       ...statements,
+      ...projectedAmendmentStock.takeFinalPhysicalWrites(),
       ...taxPlan.statements,
       saleMoneyUpdateStatement(saleId, moneyAfterSnapshot),
       ...ledgerEntries.map(amendmentEntryStatement),
+      amendmentAudit,
       {
         sql: `UPDATE sale_mutation_receipts SET
           ${replacementLines ? "after_json=json_set(after_json,@replacementPath,(SELECT entity_id FROM sale_mutation_members WHERE operation_id=@operation AND entity_kind='sale_item' AND ordinal=0))," : ''}
@@ -5048,7 +5028,11 @@ app.post('/:id/amendments', async (c) => {
     if (!amendmentStatements.some(statement => statement.sql.includes('sale_bulk_guards') && statement.sql.trim() !== 'DELETE FROM sale_bulk_guards')) amendmentStatements = amendmentStatements.filter(statement => statement.sql.trim() !== 'DELETE FROM sale_bulk_guards')
     const writesStock = !!lineEffect || (movesStock && (unitsMoved !== 0 || replacementLines != null))
     if (!writesStock) amendmentStatements.push(ordinaryBusinessMaintenanceGuard)
-    await (writesStock ? executeStockTransaction(db, amendmentStatements, 'retry') : db.batch(amendmentStatements))
+    const used=currentRequestMetrics()?.invocation.attemptedStatements
+    const plannedQueries=writesStock?stockTransactionStatementCount(amendmentStatements.length):amendmentStatements.length
+    if(used===undefined||used+plannedQueries+8>getPlanLimits(c.env).d1QueriesPerInvocation)
+      return c.json({error:'This amendment cannot fit safely in this plan. Review a smaller change.',code:'sale_amendment_over_plan_budget',outcome:'not_dispatched'},409)
+    await (writesStock ? executeStockTransaction(db, amendmentStatements, 'once') : db.batch(amendmentStatements))
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
@@ -5058,34 +5042,18 @@ app.post('/:id/amendments', async (c) => {
     if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
     if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
     const message = (error as Error).message || ''
-    if (/CHECK constraint|constraint failed|malformed JSON|counted_condition_identity_conflict/i.test(message)) {
+    if (saleLinePreimageConflict(error)) {
       return c.json({ error: 'The sale, stock, or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
     }
     return c.json({ error: `Failed to amend this sale: ${message}` }, 500)
   }
 
-  await auditAmendment(c, user, saleId, sale, {
-    kind,
-    sale_item_id: lineId,
-    product_id: line.product_id,
-    entries: ledgerEntries.map((entry) => entry.kind),
-    units_moved: unitsMoved,
-    stock_skipped: stockSkipped,
-    subtotal_before: subtotalBeforeUsd,
-    subtotal_after: money.subtotalUsd,
-    total_before: totalBeforeUsd,
-    total_after: money.totalUsd,
-    tax_after: taxPlan.outcome.taxUsd,
-    tax_recomputed: taxPlan.outcome.recomputed,
-    tax_reason: taxPlan.outcome.reason,
-    exchange_rate_before: sale.exchange_rate ?? null,
-    exchange_rate_after: exchangeRate,
-    outside_window: guard.outsideWindow,
-    notes: note,
-  })
+  c.executionCtx.waitUntil(bumpVersions(c.env,['stock','sales']))
 
   return c.json(await committedMutationResponse(db,mutationOperationId))
   } catch (error) {
+    const preimageConflict=saleLinePreimageConflict(error)
+    if(preimageConflict)return c.json({error:preimageConflict.message,code:preimageConflict.kind==='quantity'?'counted_quantity_conflict':preimageConflict.code},409)
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     if (error instanceof SaleHeaderQuoteError || error instanceof HistoricalSalePricingError || error instanceof SaleDiscountRefusedError) return c.json({error:error.message,code:error.code},400)
