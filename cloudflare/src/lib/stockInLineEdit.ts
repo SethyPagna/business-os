@@ -1,3 +1,4 @@
+import { CountedStockBatchPlan, countedStockFactsSql, subtractCountedQuantity, sumCountedQuantities, isCountedStockConflict } from './countedDamagedStock'
 import { executeStockTransaction, StockTransactionUnavailableError, StockTransactionOutcomeUnknownError } from './stockTransaction'
 import { productStockGuardStatement, productStockGuardError } from './productStockGuard'
 // N6 (owner, 23 Sep 2026): "Stock-in sessions editable (today only add or
@@ -306,34 +307,31 @@ function stateGuard(state: EditState, targetAbsent: boolean): Statement[] {
 // Absolute writes are exact because stateGuard pinned the preimage in the same
 // transaction. Order respects migration 0154 (positive lot stock needs an
 // active lot): activate, move stock, then deactivate.
-function stateWrites(to: EditState, productDelta: number, from: EditState): Statement[] {
-  const receivesStock = productDelta > 0 || to.lots.some(lot => lot.stock > (from.lots.find(previous => previous.id === lot.id)?.stock ?? 0))
-  const out: Statement[] = receivesStock ? [productStockGuardStatement([to.productId], 'active')] : []
-  const lotParams = (lot: LotState) => ({
-    product: to.productId, branch: to.branchId, lotId: lot.id, lotKey: lot.batchKey,
-    isActive: lot.isActive, receivedAt: lot.receivedAt, lotCode: lot.lotCode, rq: lot.receivedQuantity, rc: lot.receivedCostUsd,
-    unit: lot.unitCostUsd, sid: lot.supplierId, sname: lot.supplierName, stock: lot.stock, stockExists: lot.stockExists,
-  })
-  for (const lot of to.lots) {
-    out.push({ sql: `UPDATE product_batches SET is_active=CASE WHEN @isActive=1 THEN 1 ELSE is_active END,
-        received_at=@receivedAt, lot_code=@lotCode, received_quantity=@rq, received_cost_usd=@rc, unit_cost_usd=@unit,
-        supplier_id=@sid, supplier_name=@sname, updated_at=CURRENT_TIMESTAMP
-      WHERE id=${lotIdSql('lot')}`, params: lotParams(lot) })
+async function capturePhysical(db:D1Compat,state:EditState) {
+  const ids=JSON.stringify(state.lots.filter(lot=>lot.id!=null).map(lot=>lot.id))
+  const row=await db.prepare('SELECT '+countedStockFactsSql('@product','@branch','@ids')+' facts').get<{facts:string}>({product:state.productId,branch:state.branchId,ids})
+  if(!row?.facts || new TextEncoder().encode(row.facts).byteLength>900000) refuse(409,'The stock source is incomplete or too large.','stock_changed')
+  const exact=new CountedStockBatchPlan([{branchId:state.branchId,facts:row.facts}],{deferPhysicalWrites:true})
+  return exact
+}
+function physicalWrites(exact:CountedStockBatchPlan,from:EditState,to:EditState) {
+  const plan=exact.get(from.productId,from.branchId),guards:Statement[]=[...exact.takePreimageGuards()],logical:Statement[]=[]
+  const changes=to.lots.map(lot=>({lot,change:subtractCountedQuantity(lot.stock,[from.lots.find(row=>row.role===lot.role)!.stock])})).sort((a,b)=>a.change-b.change)
+  for(const {lot,change} of changes) {
+    if(!change)continue
+    if(lot.id==null){const created=plan.receiveProjectedCreatedReceipt(lot.batchKey,change);guards.push(...created.guards);logical.push(...created.statements)}
+    else logical.push(...plan.changeOrdinary(lot.id,Math.abs(change),change<0?'consume':plan.requiresReceiptActivation(lot.id)?'activateAndReceive':'receive'))
   }
-  for (const lot of to.lots) {
-    out.push({ sql: `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) SELECT ${lotIdSql('lot')},@branch,@stock WHERE @stockExists=1
-      ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=excluded.quantity, updated_at=CURRENT_TIMESTAMP`, params: lotParams(lot) })
-    out.push({ sql: `DELETE FROM branch_batch_stock WHERE batch_id=${lotIdSql('lot')} AND branch_id=@branch AND @stockExists=0`, params: lotParams(lot) })
+  return {guards,writes:[...logical,...exact.takeFinalPhysicalWrites()]}
+}
+function stateMetadataWrites(to:EditState):{before:Statement[];after:Statement[]} {
+  const before:Statement[]=[],after:Statement[]=[]
+  for(const lot of to.lots){const params={product:to.productId,branch:to.branchId,lotId:lot.id,lotKey:lot.batchKey,isActive:lot.isActive,receivedAt:lot.receivedAt,lotCode:lot.lotCode,rq:lot.receivedQuantity,rc:lot.receivedCostUsd,unit:lot.unitCostUsd,sid:lot.supplierId,sname:lot.supplierName}
+    if(lot.receivedQuantity!=null&&lot.receivedQuantity<0)refuse(409,'The original receipt quantity cannot be reduced below zero.','stock_changed')
+    before.push({sql:'UPDATE product_batches SET is_active=CASE WHEN @isActive=1 THEN 1 ELSE is_active END,received_at=@receivedAt,lot_code=@lotCode,received_quantity=@rq,received_cost_usd=@rc,unit_cost_usd=@unit,supplier_id=@sid,supplier_name=@sname,updated_at=CURRENT_TIMESTAMP WHERE id='+lotIdSql('lot'),params})
+    if(lot.isActive===0)after.push({sql:'UPDATE product_batches SET is_active=0 WHERE id='+lotIdSql('lot'),params})
   }
-  const branchParams = { product: to.productId, branch: to.branchId, branchQty: to.branchQty, branchExists: to.branchExists, productDelta }
-  out.push({ sql: `INSERT INTO branch_stock(product_id,branch_id,quantity) SELECT @product,@branch,@branchQty WHERE @branchExists=1
-    ON CONFLICT(product_id,branch_id) DO UPDATE SET quantity=excluded.quantity`, params: branchParams })
-  out.push({ sql: 'DELETE FROM branch_stock WHERE product_id=@product AND branch_id=@branch AND @branchExists=0', params: branchParams })
-  out.push({ sql: 'UPDATE products SET stock_quantity=COALESCE(stock_quantity,0)+@productDelta, updated_at=CURRENT_TIMESTAMP WHERE id=@product AND @productDelta<>0', params: branchParams })
-  for (const lot of to.lots) {
-    if (lot.isActive === 0) out.push({ sql: `UPDATE product_batches SET is_active=0 WHERE id=${lotIdSql('lot')}`, params: lotParams(lot) })
-  }
-  return out
+  return {before,after}
 }
 
 function movementStatements(input: {
@@ -390,6 +388,7 @@ export async function applyStockInLineEdit(
   try {
     return await applyInner(db, user, movementId, body, redirectTarget)
   } catch (error) {
+    if(isCountedStockConflict(error))return {status:409,body:{error:'The stock or tagged source changed.',code:'stock_changed'}}
     if (error instanceof EditRefusal) return { status: error.status, body: { error: error.message, code: error.code, ...error.details } }
     const refusal = branchEffectRefusal(error)
     if (refusal) return { status: 409, body: refusal }
@@ -445,7 +444,7 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
   const range = stockInEditRange(movementId)
   const edits = await db.prepare(`SELECT id, quantity, total_cost_usd, batch_id FROM inventory_movements
       WHERE reference_id >= @lo AND reference_id < @hi ORDER BY id`).all<Row>(range)
-  const q0 = Math.abs(Number(root.quantity)) + edits.reduce((sum, row) => sum + (Number(row.quantity) || 0), 0)
+  const q0 = sumCountedQuantities([Math.abs(Number(root.quantity)), ...edits.map(row=>Number(row.quantity)||0)])
   const landing: BranchEffect | null = request.quantity !== q0 || request.receivedDate != null
     ? await requestBranchEffect(db, Number(root.branch_id), redirectTarget) : null
   const branchId = landing ? landing.effectBranchId : Number(root.branch_id)
@@ -455,7 +454,7 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
   const t0 = root.total_cost_usd == null && costRows.length === 0
     ? null
     : roundMoney4((num(root.total_cost_usd) ?? 0) + costRows.reduce((sum, row) => sum + Number(row.total_cost_usd), 0))
-  if ((request.expectedQuantity != null && Math.abs(request.expectedQuantity - q0) > 1e-9)
+  if ((request.expectedQuantity != null && request.expectedQuantity !== q0)
     || (request.expectedBatchId != null && request.expectedBatchId !== sourceId)) {
     refuse(409, 'This line changed since it was opened. Reopen the session and try again.', 'stale_line')
   }
@@ -491,11 +490,11 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
     .get<Row>({ lot: sourceId, branch: branchId })
   const L = Number(sourceStock?.qty) || 0
   const A = lotState('source', sourceLot, L, Number(sourceStock?.present) ? 1 : 0)
-  const exclusive = Number(receiptsElsewhere?.n) === 0 && (A.receivedQuantity == null || Math.abs(A.receivedQuantity - q0) < 1e-9)
+  const exclusive = Number(receiptsElsewhere?.n) === 0 && (A.receivedQuantity == null || A.receivedQuantity === q0)
 
   // ---- What changes.
   const q1 = request.quantity
-  const d = q1 - q0
+  const d = subtractCountedQuantity(q1,[q0])
   let supplier = { id: A.supplierId, name: A.supplierName }
   if (request.supplierProvided) {
     if (request.supplierId != null) {
@@ -538,7 +537,7 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
   const u = costChanged ? request.unitCostUsd : (A.unitCostUsd ?? legacyUnit)
 
   const B = Number(facts.branch_qty) || 0
-  const branchAfter = B + d
+  const branchAfter = sumCountedQuantities([B,d])
   // RET-D (owner, 5 Oct 2026): a refusal names WHY and WHERE -- the sale,
   // transfer or removal that took these units since the receipt -- read only
   // now that the edit is already refused (lib/stockRefusalBlocker.ts).
@@ -590,17 +589,17 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
       }
     }
     before.lots.push(T)
-    const aRq = A.receivedQuantity == null ? null : Math.max(0, A.receivedQuantity - q0)
+    const aRq = A.receivedQuantity == null ? null : subtractCountedQuantity(A.receivedQuantity,[q0])
     const aRc = A.receivedCostUsd == null ? null : Math.max(0, subtractMoney4(A.receivedCostUsd, t0 ?? (A.unitCostUsd != null ? multiplyMoney4(A.unitCostUsd, q0) : 0)))
-    const aStock = L - q0
+    const aStock = subtractCountedQuantity(L,[q0])
     after.lots.push({ ...A, stock: aStock, receivedQuantity: aRq, receivedCostUsd: aRq === 0 ? (aRc == null ? null : 0) : aRc,
       isActive: aRq === 0 && aStock <= 0 && Number(sourceStock?.elsewhere || 0) <= 0 ? 0 : A.isActive })
     const lineCost = d === 0 && !costChanged && t0 != null
       ? t0
       : u == null ? null : multiplyMoney4(u, q1)
     after.lots.push({
-      ...T, isActive: 1, stock: T.stock + q1, stockExists: 1,
-      receivedQuantity: (T.receivedQuantity ?? 0) + q1,
+      ...T, isActive: 1, stock: sumCountedQuantities([T.stock,q1]), stockExists: 1,
+      receivedQuantity: sumCountedQuantities([T.receivedQuantity??0,q1]),
       receivedCostUsd: lineCost == null ? T.receivedCostUsd : addMoney4(T.receivedCostUsd ?? 0, lineCost),
       unitCostUsd: targetCreated ? u : T.unitCostUsd,
       supplierId: T.supplierId ?? supplier.id, supplierName: T.supplierName ?? supplier.name,
@@ -611,8 +610,8 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
     plans.push({ type: 'add', quantity: q1, unitCostUsd: u, totalCostUsd: recordTotals && lineCost != null ? lineCost : null, role: 'target' })
     t1 = recordTotals && lineCost != null ? lineCost : null
   } else {
-    const stock = L + d
-    const rq = A.receivedQuantity == null ? null : Math.max(0, A.receivedQuantity + d)
+    const stock = sumCountedQuantities([L,d])
+    const rq = A.receivedQuantity == null ? null : sumCountedQuantities([A.receivedQuantity,d])
     let rc = A.receivedCostUsd
     let qtyTotal: number | null = null
     let remainder: number | null = null
@@ -674,7 +673,10 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
     after: { quantity: q1, unit_cost_usd: lineAfter.unitCostUsd, received_date: lineAfter.receivedDate, supplier_name: lineAfter.supplierName },
   }
   const created = targetCreated ? after.lots[1] : null
+  const physical=physicalWrites(await capturePhysical(db,before),before,after)
+  const metadata=stateMetadataWrites(after)
   const statements: Statement[] = [
+    ...physical.guards,
     // 0124 retains a revision on EVERY lot mutation, including same-second
     // changes and changes restored to their old values. Pin the review, not
     // just the newer snapshot we happened to read while planning this write.
@@ -697,7 +699,7 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
       sql: "UPDATE stock_lot_adjustment_operations SET revision_json=json_set(revision_json,'$.targetLotId',(SELECT id FROM product_batches WHERE variant_product_id=@product AND batch_key=@targetKey)) WHERE id=@operation",
       params: opParams,
     }] : []),
-    ...stateWrites(after, d, before),
+    ...metadata.before,...physical.writes,...metadata.after,
     catalogCostRecomputeStatement(productId),
     { sql: `UPDATE stock_lot_adjustment_operations SET revision_json=json_set(revision_json,'$.productCostAfter',
         json_object('cost',(SELECT cost_price_usd FROM products WHERE id=@product),'purchase',(SELECT purchase_price_usd FROM products WHERE id=@product))) WHERE id=@operation`, params: opParams },
@@ -774,8 +776,8 @@ type LotDelta = {
 function numericMove(from: number | null, to: number | null, money: boolean): LotDelta['rq'] {
   if (from == null && to == null) return null
   if (from == null || to == null) return { set: to }
-  const change = money ? subtractMoney4(to, from) : to - from
-  return Math.abs(change) < EPSILON ? null : { change }
+  const change = money ? subtractMoney4(to, from) : subtractCountedQuantity(to,[from])
+  return (money ? Math.abs(change)<EPSILON : change===0) ? null : { change }
 }
 
 function lotDelta(from: LotState, to: LotState, id: number): LotDelta {
@@ -787,7 +789,7 @@ function lotDelta(from: LotState, to: LotState, id: number): LotDelta {
     if (!same) fields.push([column, a, b])
   }
   return {
-    role: to.role, id, from, to, stockChange: to.stock - from.stock, fields,
+    role: to.role, id, from, to, stockChange: subtractCountedQuantity(to.stock,[from.stock]), fields,
     rq: numericMove(from.receivedQuantity, to.receivedQuantity, false),
     rc: numericMove(from.receivedCostUsd, to.receivedCostUsd, true),
   }
@@ -829,7 +831,7 @@ function deltaGuards(input: {
   return out
 }
 
-function deltaWrites(input: { deltas: LotDelta[]; productId: number; branchId: number; branchChange: number; productDelta: number }): Statement[] {
+function deltaMetadataWrites(input: { deltas: LotDelta[]; productId: number; branchId: number; branchChange: number; productDelta: number },current:Map<number,{rq:number|null;rc:number|null}>): Statement[] {
   const first: Statement[] = []
   const lotRows: Statement[] = []
   const decreases: Statement[] = []
@@ -844,16 +846,13 @@ function deltaWrites(input: { deltas: LotDelta[]; productId: number; branchId: n
     lot.fields.forEach(([column, , value], index) => { sets.push(`${column}=@t${index}`); params[`t${index}`] = value })
     if (lot.rq) {
       if ('set' in lot.rq) { sets.push('received_quantity=@rqTo'); params.rqTo = lot.rq.set }
-      else { sets.push('received_quantity=MAX(0,COALESCE(received_quantity,0)+@rqChange)'); params.rqChange = lot.rq.change }
+      else { const next=sumCountedQuantities([current.get(lot.id)?.rq??0,lot.rq.change]);if(next<0)throw new StockInLineEditReplayError('The original receipt quantity changed.');sets.push('received_quantity=@rqTo');params.rqTo=next }
     }
     if (lot.rc) {
       if ('set' in lot.rc) { sets.push('received_cost_usd=@rcTo'); params.rcTo = lot.rc.set }
-      else { sets.push('received_cost_usd=MAX(0,ROUND(COALESCE(received_cost_usd,0)+@rcChange,4))'); params.rcChange = lot.rc.change }
+      else { const next=addMoney4(current.get(lot.id)?.rc??0,lot.rc.change);if(next<0)throw new StockInLineEditReplayError('The original receipt cost changed.');sets.push('received_cost_usd=@rcTo');params.rcTo=next }
     }
     if (sets.length) lotRows.push({ sql: `UPDATE product_batches SET ${sets.join(',')},updated_at=CURRENT_TIMESTAMP WHERE id=@id`, params })
-    if (lot.stockChange < 0) decreases.push({ sql: 'UPDATE branch_batch_stock SET quantity=quantity+@change,updated_at=CURRENT_TIMESTAMP WHERE batch_id=@id AND branch_id=@branch', params: base })
-    if (lot.stockChange > 0) increases.push({ sql: `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(@id,@branch,@change)
-      ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=quantity+excluded.quantity,updated_at=CURRENT_TIMESTAMP`, params: base })
     // An emptied lot goes inactive only when it holds nothing anywhere and was never received otherwise.
     if (lot.to.isActive === 0 && lot.from.isActive === 1) last.push({ sql: `UPDATE product_batches SET is_active=0 WHERE id=@id
       AND COALESCE(received_quantity,0)<=0 AND NOT EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=@id AND quantity>0)`, params: base })
@@ -861,18 +860,7 @@ function deltaWrites(input: { deltas: LotDelta[]; productId: number; branchId: n
   if (input.productDelta > 0 || input.branchChange > 0 || input.deltas.some(lot => lot.stockChange > 0)) {
     first.unshift(productStockGuardStatement([input.productId], 'active'))
   }
-  const branchParams = { product: input.productId, branch: input.branchId, change: input.branchChange, productDelta: input.productDelta }
-  const branch: Statement[] = input.branchChange > 0
-    ? [{ sql: `INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(@product,@branch,@change)
-        ON CONFLICT(product_id,branch_id) DO UPDATE SET quantity=quantity+excluded.quantity`, params: branchParams }]
-    : input.branchChange < 0
-      ? [{ sql: 'UPDATE branch_stock SET quantity=quantity+@change WHERE product_id=@product AND branch_id=@branch', params: branchParams }]
-      : []
-  return [
-    ...first, ...lotRows, ...decreases, ...increases, ...branch,
-    { sql: 'UPDATE products SET stock_quantity=COALESCE(stock_quantity,0)+@productDelta, updated_at=CURRENT_TIMESTAMP WHERE id=@product AND @productDelta<>0', params: branchParams },
-    ...last,
-  ]
+  return [...first,...lotRows,...last]
 }
 
 /** Server-side undo/redo of one line-edit generation. */
@@ -937,7 +925,7 @@ export async function replayStockInLineEdit(
     const fromLot = from.lots.find((lot) => lot.role === toLot.role) as LotState
     return lotDelta(fromLot, toLot, Number(toLot.id ?? fromLot.id))
   })
-  const branchChange = to.branchQty - from.branchQty
+  const branchChange = subtractCountedQuantity(to.branchQty,[from.branchQty])
   const ownPrefix = `${STOCK_IN_EDIT_REFERENCE_PREFIX}${revision.rootMovementId}:${row.id}:`
   const ownRange = { lo: ownPrefix, hi: `${ownPrefix.slice(0, -1)};` }
   const [own, root, laterEdit] = await Promise.all([
@@ -983,7 +971,16 @@ export async function replayStockInLineEdit(
       'revert_insufficient_branch_stock', { available: branchNow, needed: -branchChange, branch: String(facts?.branch_name ?? '') },
     )
   }
+  const replayExact=await capturePhysical(db,from)
+  const physical=physicalWrites(replayExact,from,to)
+  const amountRow=await db.prepare('SELECT (SELECT json_group_array(json_array(id,received_quantity,received_cost_usd)) FROM (SELECT * FROM product_batches WHERE variant_product_id=@product ORDER BY id LIMIT 10001)) amounts').get<{amounts:string}>({product:revision.productId})
+  const amountRows=(JSON.parse(amountRow!.amounts) as [number,number|null,number|null][]).map(([id,rq,rc])=>({id,rq,rc}))
+  if(amountRows.length>10000)throw new StockInLineEditReplayError('The receipt source is too large.')
+  const amounts=new Map(amountRows.map(value=>[value.id,{rq:value.rq,rc:value.rc}]))
+  const amountJson=amountRow!.amounts
   const statements: Statement[] = [
+    ...physical.guards,
+    guard('(SELECT json_group_array(json_array(id,received_quantity,received_cost_usd)) FROM (SELECT * FROM product_batches WHERE variant_product_id=@product ORDER BY id LIMIT 10001))=@amounts',{product:revision.productId,amounts:amountJson}),
     guard(`EXISTS(SELECT 1 FROM stock_lot_adjustment_operations o JOIN action_history h ON h.id=o.history_id
       WHERE o.id=@operation AND h.id=@history AND o.generation=@generation AND o.state=@oldState AND h.status=@oldStatus
       AND json_extract(h.undo_payload,'$.operation_id')=@operation AND json_extract(h.undo_payload,'$.generation')=@generation)`, params),
@@ -992,7 +989,8 @@ export async function replayStockInLineEdit(
     { operation: row.id, history: historyId, root: revision.rootMovementId }),
     ...(sessionRowid != null ? [guard(`NOT ${SESSION_UNDONE}`, { rowid: sessionRowid, root: revision.rootMovementId })] : []),
     ...deltaGuards({ deltas, productId: revision.productId, branchId: revision.branchId, branchChange, rootMovementId: revision.rootMovementId, ownFirstId, range: stockInEditRange(revision.rootMovementId) }),
-    ...deltaWrites({ deltas, productId: revision.productId, branchId: revision.branchId, branchChange, productDelta }),
+    ...deltaMetadataWrites({ deltas, productId: revision.productId, branchId: revision.branchId, branchChange, productDelta },amounts),
+    ...physical.writes,
     // U-cost (supervisor decision, 2026-09-25): the catalog cost is re-derived
     // from the lots this replay just restored, never written back from the
     // snapshot -- a lot that sold out since the edit must not count again.
