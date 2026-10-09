@@ -3272,10 +3272,16 @@ async function runTaggedLotAction(c: InventoryContext, action: 'dispose' | 'rest
   )
 }
 
+function taggedStockRecordId(value: unknown): number {
+  if (typeof value === 'number') return value
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) return Number(value)
+  return Number.NaN
+}
+
 async function runTaggedLotActionKernel(c: InventoryContext, action: 'dispose' | 'restore', body: Record<string, unknown>, atomicMark: StockMutationAtomicMark) {
   const user = c.get('user')
-  const productId = Number.parseInt(String(body.productId ?? ''), 10)
-  const branchId = Number.parseInt(String(body.branchId ?? ''), 10)
+  const productId = taggedStockRecordId(body.productId)
+  const branchId = taggedStockRecordId(body.branchId)
   const quantity = Number(body.quantity)
   const reason = body.reason != null ? String(body.reason).trim() || null : null
   const tagResult = parseStockConditionTag(body.conditionTag ?? body.condition_tag)

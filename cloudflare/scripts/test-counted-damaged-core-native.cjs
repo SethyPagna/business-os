@@ -145,7 +145,18 @@ async function actualSale(tier, historical = false) {
     console.log('PASS actual bundled index tagged sale/cancel physical plus immutable subset provenance')
     const tagged=await call('/api/inventory/adjust','POST',{productId:1,branchId:1,batchId:1,type:'remove',quantity:1,conditionTag:'damaged',reason:'damaged',client_request_id:'counted-tagged-adjust-native'})
     assert.equal(tagged.status,200);assert.equal(state(f)[0],10);assert.equal(f.sql.prepare('SELECT SUM(quantity_remaining) n FROM damaged_stock_lots').get().n,3)
-    const cleared=await call('/api/inventory/tagged-lots/restore','POST',{productId:1,branchId:1,quantity:1,conditionTag:'damaged',reason:'cleared',client_request_id:'counted-cleared-adjust-native'})
+    const inventoryState=()=>({stock:state(f),tagged:f.sql.prepare('SELECT SUM(quantity_remaining) n FROM damaged_stock_lots').get().n,movements:f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n})
+    for(const action of ['restore','dispose'])for(const field of ['productId','branchId']){
+      const invalidIds=['1suffix','1.5',1.5,true,[1],{id:1},null,0,-1,'','1e0','0x1',9007199254740992]
+      for(const [index,value] of invalidIds.entries()){
+        const before=inventoryState()
+        const invalid=await call('/api/inventory/tagged-lots/'+action,'POST',{productId:1,branchId:1,[field]:value,quantity:1,conditionTag:'damaged',reason:'invalid identity',client_request_id:`counted-invalid-${action}-${field}-${index}`})
+        assert.equal(invalid.status,400,`${action} must refuse the entire raw ${field}: ${JSON.stringify(value)}`)
+        assert.deepEqual(inventoryState(),before,'invalid identity cannot change physical stock, tagged stock or movements')
+      }
+    }
+    console.log('PASS actual tagged clear/remove reject malformed product and branch identity without effects')
+    const cleared=await call('/api/inventory/tagged-lots/restore','POST',{productId:' 1 ',branchId:'1',quantity:1,conditionTag:'damaged',reason:'cleared',client_request_id:'counted-cleared-adjust-native'})
     assert.equal(cleared.status,200);assert.equal(state(f)[0],10);assert.equal(f.sql.prepare('SELECT SUM(quantity_remaining) n FROM damaged_stock_lots').get().n,2)
     console.log('PASS actual inventory tag and clear are quantity-neutral')
     const retagged=await call('/api/inventory/adjust','POST',{productId:1,branchId:1,batchId:1,type:'remove',quantity:1,conditionTag:'damaged',reason:'damaged',client_request_id:'counted-retagged-adjust-native'})
