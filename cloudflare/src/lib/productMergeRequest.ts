@@ -2,10 +2,12 @@ import type { D1Compat, BindParams } from './db'
 import type { SessionUser } from './auth'
 import type { ProductMergeCaseSnapshot } from './productMergeSnapshot'
 import type { ProductMergeForwardStockIdentity } from './productMergeForwardStock'
+import type { ProductMergeForwardCatalogOptions, ProductMergeForwardCatalogPlan } from './productMergeForwardCatalog'
 import { planProductMergeForwardStock } from './productMergeForwardStock'
 import { PRODUCT_MERGE_PLAN_V2, PRODUCT_MERGE_TRANSITION_V2, productMergePointer } from './productMergeProtocol'
 import { stockActorParams, stockActorPredicate } from './stockActorGuard'
 import { getActionTier } from './permissions'
+import { canEditAcquisitionCosts } from './acquisitionCostAccess'
 import { sumCountedQuantities } from './countedDamagedStock'
 import { executeStockTransaction, stockTransactionStatementCount, StockTransactionOutcomeUnknownError, StockTransactionUnavailableError } from './stockTransaction'
 
@@ -16,6 +18,7 @@ export type ProductMergeRequestPreparation = {
   snapshot: ProductMergeCaseSnapshot
   identity: Pick<ProductMergeForwardStockIdentity, 'planId' | 'transitionId' | 'historyId' | 'origins'>
   guards: Statement[]
+  catalog?: ProductMergeForwardCatalogOptions
 }
 export type ProductMergeReceipt = {
   keptId: number; mergedId: number; operationId: string; actionHistoryId: number
@@ -27,6 +30,13 @@ export class ProductMergeRequestError extends Error {
   }
 }
 const conflict = (): never => { throw new ProductMergeRequestError('merge_request_conflict') }
+function catalogPermission(user: SessionUser, required: ProductMergeForwardCatalogPlan['requiredPermissions']): void {
+  if (!required || ['image', 'priceEdit', 'productEdit', 'acquisitionCostEdit'].some(key => typeof required[key as keyof typeof required] !== 'boolean')) conflict()
+  if ((required.image && getActionTier(user, 'products', 'image') !== 'full')
+    || (required.productEdit && getActionTier(user, 'products', 'edit') !== 'full')
+    || (required.priceEdit && (getActionTier(user, 'products', 'edit') !== 'full' || getActionTier(user, 'products', 'price') === 'none'))
+    || (required.acquisitionCostEdit && !canEditAcquisitionCosts(user))) throw new ProductMergeRequestError('merge_request_permission')
+}
 function admit(budget: ProductMergeRequestBudget, statements: number): void {
   const used = budget.used()
   if (![budget.limit, used, statements, budget.tailReserve].every(value => Number.isSafeInteger(value) && value >= 0)
@@ -69,6 +79,11 @@ export async function readProductMergeReceipt(db: D1Compat, user: SessionUser, r
     || plan.request_digest !== request.requestDigest || plan.keeper_id !== request.keeperId || plan.loser_id !== request.loserId
     || plan.history_id !== row.history_id || typeof plan.operation_id !== 'string') conflict()
   productMergePointer(Number(row.plan_id), plan.operation_id as string, 0, Number(row.seal_id))
+  if (plan.catalog !== undefined) {
+    const catalog = plan.catalog as { version?: unknown; requiredPermissions: ProductMergeForwardCatalogPlan['requiredPermissions'] } | null
+    if (catalog?.version !== 1) conflict()
+    catalogPermission(user, catalog!.requiredPermissions)
+  }
   const origins = plan.origins as { physicalEdges?: { quantity: number }[] } | undefined
   if (!origins || !Array.isArray(origins.physicalEdges) || origins.physicalEdges.some(edge => !edge || typeof edge.quantity !== 'number' || !Number.isFinite(edge.quantity) || edge.quantity < 0)) conflict()
   return { keptId: request.keeperId, mergedId: request.loserId, operationId: plan.operation_id as string,
@@ -88,7 +103,8 @@ export async function executeProductMergeRequest(
   if (prepared.snapshot.canonicalProduct?.id !== request.keeperId || prepared.snapshot.duplicateProduct?.id !== request.loserId) conflict()
   const identity = { ...prepared.identity, actorId: user.id, actorName: user.name || user.username,
     requestId: request.requestId, requestDigest: request.requestDigest }
-  const compiled = planProductMergeForwardStock(prepared.snapshot, identity)
+  const compiled = planProductMergeForwardStock(prepared.snapshot, identity, prepared.catalog)
+  if (compiled.catalog) catalogPermission(user, compiled.catalog.requiredPermissions)
   const statements: Statement[] = [{ sql: `SELECT CASE WHEN ${stockActorPredicate}
     THEN 1 ELSE json_extract('[1]','$[merge_request_permission]') END`, params: stockActorParams(user) }, ...prepared.guards, ...compiled.statements]
   admit(budget, stockTransactionStatementCount(statements.length) + 1)

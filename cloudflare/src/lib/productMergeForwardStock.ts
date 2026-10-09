@@ -6,6 +6,7 @@ import { planProductMergeOrigins } from './productMergeOriginPlan'
 import { planExactProductMergeStock } from './countedProductMerge'
 import { catalogCostRecomputeStatement } from './catalogCostRecompute'
 import { PRODUCT_MERGE_PLAN_V2, PRODUCT_MERGE_TRANSITION_V2, productMergePointer } from './productMergeProtocol'
+import { planProductMergeForwardCatalog, type ProductMergeForwardCatalogOptions } from './productMergeForwardCatalog'
 
 type Statement = { sql: string; params?: BindParams }
 export type ProductMergeForwardStockIdentity = {
@@ -19,7 +20,7 @@ export type ProductMergeForwardStockIdentity = {
   origins: MergeOriginReservation
 }
 
-export function planProductMergeForwardStock(snapshot: ProductMergeCaseSnapshot, identity: ProductMergeForwardStockIdentity) {
+export function planProductMergeForwardStock(snapshot: ProductMergeCaseSnapshot, identity: ProductMergeForwardStockIdentity, catalogOptions?: ProductMergeForwardCatalogOptions) {
   const { planId, transitionId, historyId, actorId, actorName, requestId, requestDigest } = identity
   if ([planId, transitionId, historyId, actorId].some(id => !Number.isSafeInteger(id) || id <= 0)
     || planId === transitionId || typeof requestId !== 'string' || !requestId.trim() || requestId.length > 200
@@ -30,6 +31,9 @@ export function planProductMergeForwardStock(snapshot: ProductMergeCaseSnapshot,
   const exact = planExactProductMergeStock(snapshot, 'merge')
   const { keeperId, loserId, operationId } = origins
   const sourceGuard = productMergeCaptureGuard(snapshot)
+  const catalog = catalogOptions ? planProductMergeForwardCatalog(snapshot, catalogOptions) : null
+  const catalogGuards = catalog?.admissionGuards.filter(statement => statement.sql !== sourceGuard.sql
+    || JSON.stringify(statement.params) !== JSON.stringify(sourceGuard.params)) ?? []
   const sourceCapture = sourceGuard.params.observedCapture
   const sourceRead = planProductMergeCaseSnapshot(keeperId, loserId, []).reads[0]
   const prior = JSON.stringify(productMergePointer(planId, operationId, -1, null))
@@ -38,7 +42,8 @@ export function planProductMergeForwardStock(snapshot: ProductMergeCaseSnapshot,
   const { receiptClones, tagClones, ...savedOrigins } = origins
   const plan = JSON.stringify({ version: 2, actor_id: actorId, history_id: historyId, operation_id: operationId,
     request_id: requestId, request_digest: requestDigest, keeper_id: keeperId, loser_id: loserId,
-    source_capture: sourceCapture, origins: savedOrigins })
+    source_capture: sourceCapture, origins: savedOrigins,
+    ...(catalog ? { catalog: { version: 1, beforeRefs: catalog.beforeRefs, effects: catalog.effects, requiredPermissions: catalog.requiredPermissions } } : {}) })
   const planBytes = new TextEncoder().encode(plan).byteLength
   if (planBytes > 1024 * 1024) throw new Error('merge_case_snapshot_limit')
   const transition = JSON.stringify({ operation_id: operationId, plan_id: planId, history_id: historyId,
@@ -60,7 +65,7 @@ export function planProductMergeForwardStock(snapshot: ProductMergeCaseSnapshot,
     { ...edge.original, quantity: -edge.quantity, productName: snapshot.duplicateProduct!.name, ordinal: edge.ordinal },
     { ...edge.effect, quantity: edge.quantity, productName: snapshot.canonicalProduct!.name, ordinal: edge.ordinal },
   ])
-  const statements: Statement[] = [sourceGuard,
+  const statements: Statement[] = [sourceGuard, ...catalogGuards,
     write(`SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM json_each(@branches) required
       WHERE NOT EXISTS(SELECT 1 FROM branches WHERE id=required.value AND is_active=1))
       THEN 1 ELSE json_extract('[1]','$[merge_state_conflict]') END`, { branches: JSON.stringify(branches) }),
@@ -93,6 +98,7 @@ export function planProductMergeForwardStock(snapshot: ProductMergeCaseSnapshot,
           'condition_tag',json_extract(m.value,'$.conditionTag'),'damaged_lot_id',json_extract(m.value,'$.damagedLotId')),
         @historyId,@actorId,@actorName FROM json_each(@rows) m JOIN branches b ON b.id=json_extract(m.value,'$.branchId')`,
     { operationId, historyId, actorId, actorName, rows: JSON.stringify(movements) }),
+    ...(catalog?.statements ?? []),
     catalogCostRecomputeStatement(keeperId),
     write('UPDATE products SET is_active=0,updated_at=CURRENT_TIMESTAMP WHERE id=@loserId', { loserId }),
     write(`UPDATE action_history SET undo_payload=@next,redo_payload=@next,status='undoable',updated_at=CURRENT_TIMESTAMP
@@ -100,5 +106,5 @@ export function planProductMergeForwardStock(snapshot: ProductMergeCaseSnapshot,
     write(`UPDATE undo_snapshots SET status='sealing',payload_json=json_set(payload_json,'$.post_capture',
       json((SELECT data FROM (${sourceRead.sql}) WHERE oversized=0))) WHERE id=@transitionId`, { ...sourceRead.params, transitionId }),
   ]
-  return { statements, pointer, planBytes, moved: exact.moved }
+  return { statements, pointer, planBytes, moved: exact.moved, catalog }
 }
