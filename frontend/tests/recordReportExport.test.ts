@@ -27,7 +27,7 @@ for (const kind of ['returns', 'expenses'] as const) {
     if (kind === 'returns' && 'label' in patch || kind === 'expenses' && 'reason' in patch) continue
     assert.throws(() => validateRecordExportRow(kind, { ...rows[0], ...patch }), (e: any) => e.code === 'invalid')
   }
-  const footer: RecordExportRow = { ...result.rows[0], id: 0, ...totals } as RecordExportRow
+  const footer: RecordExportRow = { ...result.rows[0], id: 0, date: '', created_at: '', ...totals } as RecordExportRow
   const doc: RecordExportDocument = { ...result, totals: footer, title: 'របាយការណ៍', subtitle: '24/09/2026', language: 'km', metadata: ['Shop', '603 records'], filename: kind,
     fmtMoney: (usd, khr) => `$${usd.toFixed(2)}${khr ? ' · '+khr+'៛' : ''}`, columns: [
       { key: 'date', label: 'Date', kind: kind === 'returns' ? 'datetime' : 'date', value: row => row.date },

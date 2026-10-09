@@ -81,7 +81,7 @@ export function recordExportWorksheet(document: RecordExportDocument): TypedWork
   ] : [{ key: column.key, label: column.kind === 'money' ? `${column.label} (USD)` : column.label, kind: column.kind || 'text' }])
   const rows = [...document.rows, document.totals].map(row => Object.fromEntries(document.columns.flatMap(column => column.khr
     ? [[`${column.key}_usd`, column.value(row)], [`${column.key}_khr`, column.khr(row)]]
-    : [[column.key, column.kind === 'datetime' ? visibleTimestamp(column.value(row)) : column.value(row)]])))
+    : [[column.key, column.kind === 'datetime' && column.value(row) ? visibleTimestamp(column.value(row)) : column.value(row)]])))
   return { sheetName: document.title, columns, rows: rows.slice(0, -1), totals: rows.at(-1), metadata: [document.title, document.subtitle, ...document.metadata] }
 }
 export function recordExportPrint(document: RecordExportDocument) {
