@@ -7,7 +7,8 @@ function requestModule() {
   const fs = require('node:fs'), path = require('node:path'), ts = require('typescript')
   let source = fs.readFileSync(path.resolve(__dirname, '../src/lib/productMergeRequest.ts'), 'utf8')
   const replacements = { 'skip-receipt': ['const previous = await readProductMergeReceipt(db, user, request)', 'const previous = null'],
-    'retry-policy': ["executeStockTransaction(db, statements, 'once')", "executeStockTransaction(db, statements, 'retry')"] }
+    'retry-policy': ["executeStockTransaction(db, statements, 'once')", "executeStockTransaction(db, statements, 'retry')"],
+    'swallow-conflict': ['if (recoveryError instanceof ProductMergeRequestError) throw recoveryError', 'void recoveryError'] }
   const replacement = replacements[mutant]
   assert.ok(replacement && source.includes(replacement[0]), 'mutant must replace the exact production implementation')
   source = source.replace(replacement[0], replacement[1])
@@ -107,6 +108,24 @@ async function main() {
       if (fault !== 'recoveryRead') assert.deepEqual(fullState(w.d1), rivalState)
       else assert.equal(w.d1.db.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity, 3, 'lost ACK remains committed even when recovery read fails')
       console.log('PASS once-only failure: ' + fault)
+    } finally { w.d1.db.close() }
+  }
+  for (const changedDigest of [false, true]) {
+    const options = { limit: 1000 }
+    const w = await setup(options)
+    let winner, winnerState
+    try {
+      options.beforeDispatch = async () => {
+        options.beforeDispatch = undefined
+        winner = await executeProductMergeRequest(w.db, user, { ...request, requestDigest: changedDigest ? 'b'.repeat(64) : request.requestDigest }, w.budget, w.prepare)
+        winnerState = fullState(w.d1)
+      }
+      if (changedDigest) await assert.rejects(w.apply(), error => error.code === 'merge_request_conflict')
+      else assert.deepEqual(await w.apply(), { receipt: winner.receipt, replayed: true })
+      assert.deepEqual(fullState(w.d1), winnerState, 'losing transaction preserves every committed winner row/sequence')
+      assert.equal(w.metrics().dispatches, 2, 'two concurrent requests dispatch at most one batch each')
+      assert.equal(w.metrics().preparations, 2, 'both original request reads preceded winner commit')
+      console.log('PASS competing same-key request with ' + (changedDigest ? 'different digest is conflict' : 'same digest recovers winner'))
     } finally { w.d1.db.close() }
   }
   const reference = await setup()

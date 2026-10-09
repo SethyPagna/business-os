@@ -100,7 +100,10 @@ export async function executeProductMergeRequest(
   } catch (error) {
     let recovered: ProductMergeReceipt | null
     try { recovered = await readProductMergeReceipt(db, user, request) }
-    catch { throw new StockTransactionOutcomeUnknownError() }
+    catch (recoveryError) {
+      if (recoveryError instanceof ProductMergeRequestError) throw recoveryError
+      throw new StockTransactionOutcomeUnknownError()
+    }
     if (recovered) return { receipt: recovered, replayed: true }
     if (error instanceof StockTransactionUnavailableError || /merge_|constraint failed|malformed JSON|bad JSON path|syntax error|no such (table|column)/i.test(String(error))) throw error
     throw new StockTransactionOutcomeUnknownError()
