@@ -1259,6 +1259,62 @@ app.post('/bulk', async (c) => {
   }
 })
 
+app.get('/supplier-options', async (c) => {
+  const user=c.get('user'), branchId=Number(c.req.query('branch_id'))
+  const ids=String(c.req.query('product_ids')||'').split(',').map(Number)
+  if (!Number.isSafeInteger(branchId) || branchId<=0 || !ids.length || ids.length>25 || new Set(ids).size!==ids.length
+    || ids.some(id=>!Number.isSafeInteger(id)||id<=0)) return c.json({error:'Select at most25 products and an active branch.',code:'supplier_source_invalid'},400)
+  c.header('Cache-Control','private, no-store')
+  const statement=getDb(c.env).prepare(`WITH captured AS (
+    SELECT supplier_product.id,${countedStockFactsSql('supplier_product.id','@branchId')} facts FROM products supplier_product WHERE supplier_product.id IN(SELECT value FROM json_each(@ids))
+  ), checked AS (SELECT id,facts,
+    NOT EXISTS(SELECT 1 FROM products p WHERE p.id=captured.id AND (p.stock_quantity IS NOT json_extract(facts,'$.product[2]')
+      OR p.cost_price_usd IS NOT json_extract(facts,'$.product[3]') OR p.cost_price_khr IS NOT json_extract(facts,'$.product[4]')))
+    AND NOT EXISTS(SELECT 1 FROM json_each(facts,'$.branches') j JOIN branch_stock bs ON bs.product_id=captured.id AND bs.branch_id=json_extract(j.value,'$[0]') WHERE bs.quantity IS NOT json_extract(j.value,'$[1]'))
+    AND NOT EXISTS(SELECT 1 FROM json_each(facts,'$.receipts') j JOIN product_batches pb ON pb.id=json_extract(j.value,'$[0]')
+      LEFT JOIN branch_batch_stock bs ON bs.batch_id=pb.id AND bs.branch_id=@branchId
+      WHERE bs.quantity IS NOT json_extract(j.value,'$[3]') OR pb.unit_cost_usd IS NOT json_extract(j.value,'$[4]') OR pb.received_quantity IS NOT json_extract(j.value,'$[10]'))
+    AND NOT EXISTS(SELECT 1 FROM json_each(facts,'$.tags') j JOIN damaged_stock_lots d ON d.id=json_extract(j.value,'$[0]')
+      WHERE d.quantity IS NOT json_extract(j.value,'$[2]') OR d.quantity_remaining IS NOT json_extract(j.value,'$[3]') OR d.unit_cost_usd IS NOT json_extract(j.value,'$[8]')) accurate
+    FROM captured)
+    SELECT CASE WHEN COUNT(*)=@count AND SUM(length(CAST(facts AS BLOB)))<=@bytes AND MIN(accurate)=1
+      THEN json_group_array(json_object('id',id,'facts',facts)) END captured FROM checked`)
+  if(!statement.getOnce) throw new Error('Supplier sources require a single-attempt coherent read')
+  const row=await statement.getOnce<{captured:string|null}>({branchId,ids:JSON.stringify(ids),count:ids.length,bytes:RETURN_CREATE_REQUEST_BYTES})
+  if(!row?.captured) return c.json({error:'Supplier stock sources require a fresh supported snapshot.',code:'supplier_source_unavailable'},409)
+  try {
+    const rows=JSON.parse(row.captured) as Array<{id:number;facts:string}>
+    const exact=new CountedStockBatchPlan(rows.map(row=>({facts:row.facts,branchId})))
+    const items=rows.map(row=>{
+      const facts=JSON.parse(row.facts) as {product:[number,number,number,number|null,number|null,string];branch:[number,number,string,string]|null;
+        branches:Array<[number,number]>;receipts:Array<[number,number,number|null,number|null,number|null,string|null,string|null,string,number|null,string|null,number|null,number]>;
+        tags:Array<[number,number|null,number,number,string,string|null,number|null,number|null,number|null,string|null]>}
+      if(facts.product[1]!==1 || facts.branch?.[0]!==branchId || facts.branch[1]!==1 || facts.receipts.some(receipt=>(receipt[3]||0)>0 && receipt[2]!==1)) throw new CountedStockConflictError()
+      const context=exact.get(row.id,branchId)
+      const ordinary=facts.branches.some(branch=>branch[0]===branchId)?context.ordinaryQuantity(null):0
+      const receipts=context.projectedReceiptSources().filter(source=>source.available>0).sort((a,b)=>a.fifoRank-b.fifoRank).map(source=>{
+        const receipt=facts.receipts.find(receipt=>receipt[0]===source.batchId)!
+        return {batch_id:source.batchId,received_at:source.receivedAt,lot_code:source.lotCode,batch_number:receipt[8],available:source.available,source_cost_usd:receipt[4]}
+      })
+      const tags=facts.tags.filter(tag=>tag[3]>0).map(tag=>{
+        const source=context.projectedTaggedSource(tag[0]),condition=parseStockConditionTag(tag[4])
+        if(!source || !condition.ok || !condition.tag) throw new CountedStockConflictError()
+        const receipt=facts.receipts.find(receipt=>receipt[0]===source.batchId)
+        return {damaged_lot_id:source.lotId,stock_condition:condition.tag,batch_id:source.batchId,available:source.quantityRemaining,
+          received_at:receipt?.[5]??null,lot_code:receipt?.[9]??null,batch_number:receipt?.[8]??null,source_cost_usd:tag[8],source:tag[5]}
+      })
+      return {product_id:row.id,branch_id:branchId,product_name:facts.product[5],ordinary_available:subtractCountedQuantity(context.branchQuantity,facts.tags.map(tag=>tag[3])),
+        ordinary_unlotted:ordinary,ordinary_receipts:receipts,tagged_sources:tags,return_cost_usd:facts.product[3],return_cost_khr:facts.product[4]}
+    })
+    return c.json({supplier_condition_version:1,branch_id:branchId,financial_visibility:canViewAcquisitionCosts(user),financial_editable:canEditAcquisitionCosts(user),items})
+  } catch(error) {
+    if (error instanceof CountedStockConflictError || error instanceof SyntaxError || (error instanceof Error && error.name==='MoneyPrecisionError')) {
+      return c.json({error:'Supplier stock sources changed or cannot be represented exactly.',code:'supplier_source_unavailable'},409)
+    }
+    throw error
+  }
+})
+
 app.get('/capabilities', (c) => {
   if (getActionTier(c.get('user'), 'returns', 'add') === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
