@@ -2,11 +2,9 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 // Amending a recorded sale as an append-only ledger (S4-30,
 // lib/saleAmendments.ts + migration 0115).
 //
-// This is stock- and money-correctness code, so every case here runs against
-// a real in-memory schema carrying production's real CHECK(quantity >= 0)
-// constraints AND migration 0115's real triggers -- the migration file is
-// read off disk and executed, not retyped, so a trigger that stops working
-// fails here rather than in production.
+// Every SQL case uses the shared complete migrated schema and the real
+// once-only stock executor, including current epoch and source guards.
+// The real nonnegative CHECK and append-only ledger triggers stay enabled.
 //
 //    1. append-only is enforced by the DATABASE: UPDATE and DELETE on a
 //       ledger row both abort, and the row survives the attempt
@@ -48,7 +46,6 @@ const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')
 const assert = require('assert')
-const Database = require('better-sqlite3')
 
 function compile(file, stubs = {}) {
   const sourcePath = path.join(__dirname, '..', 'src', 'lib', file)
@@ -56,7 +53,16 @@ function compile(file, stubs = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText
   const moduleObj = { exports: {} }
-  const localRequire = (request) => request.endsWith('/productStockGuard') ? productStockGuard : Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : require(request)
+  const localRequire = request => {
+    if (request.endsWith('/productStockGuard')) return productStockGuard
+    if (Object.hasOwn(stubs, request)) return stubs[request]
+    if (request.startsWith('.')) {
+      const target = path.resolve(path.dirname(sourcePath), request) + '.ts'
+      if (fs.existsSync(target)) return compile(path.relative(path.join(__dirname, '../src/lib'), target), stubs)
+      throw new Error('Unwired relative dependency: ' + request)
+    }
+    return require(request)
+  }
   new Function('exports', 'require', 'module', output)(moduleObj.exports, localRequire, moduleObj)
   return moduleObj.exports
 }
@@ -154,72 +160,36 @@ const { saleRevisionGuard } = saleBulkStatus
 // A schema with production's real constraints AND migration 0115's real
 // triggers, read off disk so this test cannot drift from what ships.
 // ---------------------------------------------------------------------------
-const MIGRATION_0115 = fs.readFileSync(
-  path.join(__dirname, '..', 'migrations', '0115_sale_amendments.sql'),
-  'utf8',
-)
-const MIGRATION_0129 = fs.readFileSync(
-  path.join(__dirname, '..', 'migrations', '0129_sale_actual_delivery_cost_amendment.sql'),
-  'utf8',
-)
-const MIGRATION_0133 = fs.readFileSync(
-  path.join(__dirname, '..', 'migrations', '0133_sale_delivery_added_amendment.sql'),
-  'utf8',
-)
-
+const nativeFixture = require('./test-stock-session-atomic.cjs')
+const stockExecutor = nativeFixture.loadStockSession('lib/stockTransaction.ts')
+const nativeDb = nativeFixture.loadStockSession('lib/db.ts')
+const worlds = []
+const fixtureBySqlite = new WeakMap()
 function setup() {
-  const sqlite = new Database(':memory:')
-  sqlite.exec(`
-    CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, stock_quantity REAL DEFAULT 0, is_active INTEGER DEFAULT 1, updated_at TEXT);
-    CREATE TABLE branch_stock (product_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0 CHECK(quantity >= 0), UNIQUE(product_id, branch_id));
-    CREATE TABLE product_batches (id INTEGER PRIMARY KEY, variant_product_id INTEGER DEFAULT 1, is_active INTEGER DEFAULT 1, updated_at TEXT);
-    INSERT INTO product_batches(id) VALUES(501),(502);
-    CREATE TABLE branch_batch_stock (batch_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0 CHECK(quantity >= 0), updated_at TEXT, UNIQUE(batch_id, branch_id));
-    CREATE TABLE sale_item_batch_allocations (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_item_id INTEGER, batch_id INTEGER,
-      branch_id INTEGER, quantity REAL, lot_code TEXT, expiry_date TEXT, released_at TEXT, released_quantity REAL NOT NULL DEFAULT 0);
-    CREATE TABLE inventory_movements (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER, product_name TEXT,
-      branch_id INTEGER, movement_type TEXT, quantity REAL, unit_cost_usd REAL, unit_cost_khr REAL,
-      reason TEXT, reference_id INTEGER, user_id INTEGER, user_name TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      batch_id INTEGER);
-    CREATE TABLE sale_items (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER, product_id INTEGER, product_name TEXT,
-      quantity REAL, applied_price_usd REAL, applied_price_khr REAL, cost_price_usd REAL, cost_price_khr REAL,
-      total_usd REAL, total_khr REAL, branch_id INTEGER, price_mode TEXT,
-      base_price_usd REAL, base_price_khr REAL, batch_id INTEGER, batch_label TEXT, batch_expiry_date TEXT);
-    -- stock_skipped is S4-2's sticky flag (migration 0114, a lane that has not
-    -- merged into this one's base). It is present HERE so this test can pin
-    -- that the kernel honours it the moment 0114 lands; case 7b drives the
-    -- pre-merge shape, where the column simply is not there.
-    CREATE TABLE sales (id INTEGER PRIMARY KEY, receipt_number TEXT, sale_status TEXT, branch_id INTEGER,
-      exchange_rate REAL DEFAULT 4100, subtotal_usd REAL, subtotal_khr REAL, discount_usd REAL DEFAULT 0,
-      membership_discount_usd REAL DEFAULT 0, tax_usd REAL DEFAULT 0, is_delivery INTEGER DEFAULT 0,
-      delivery_fee_usd REAL DEFAULT 0, delivery_fee_khr REAL DEFAULT 0, delivery_fee_paid_by TEXT DEFAULT 'customer',
-      total_usd REAL, total_khr REAL, amount_paid_usd REAL DEFAULT 0, amount_paid_khr REAL DEFAULT 0,
-      change_usd REAL DEFAULT 0, change_khr REAL DEFAULT 0, stock_skipped INTEGER DEFAULT 0,
-      delivery_actual_cost_usd REAL, delivery_actual_cost_khr REAL,
-      delivery_contact_id INTEGER, delivery_contact_name TEXT, delivery_contact_phone TEXT, delivery_contact_address TEXT,
-      created_at TEXT, updated_at TEXT);
-    CREATE TABLE system_flags (key TEXT PRIMARY KEY, value TEXT);
-    CREATE TABLE sale_write_revisions (sale_id INTEGER PRIMARY KEY, revision INTEGER NOT NULL DEFAULT 0);
-    CREATE TABLE sale_bulk_guards (id INTEGER PRIMARY KEY, guard_value INTEGER NOT NULL CHECK(guard_value = 1));
-  `)
-  sqlite.exec(MIGRATION_0115)
-  sqlite.exec(MIGRATION_0129)
-  sqlite.exec(MIGRATION_0133)
-  const apply = (statements) => {
-    const run = sqlite.transaction(() => statements.map(({ sql, params }) => sqlite.prepare(sql).run(params || {})))
-    return run()
-  }
-  return { sqlite, apply }
+  const f = nativeFixture.fixture(sql => {
+    sql.exec('DELETE FROM branch_stock; DELETE FROM products;')
+    sql.exec("INSERT INTO users(id,username,name,password,is_active) VALUES(9,'fixture-amendment','Sokha','synthetic',1)")
+  })
+  worlds.push(f)
+  const db = nativeDb.getDb(f.env)
+  const apply = statements => stockExecutor.executeStockTransaction(db,
+    process.argv.includes('--wrong-revision-control')
+      ? statements.filter(statement => !statement.sql.startsWith('INSERT INTO sale_bulk_guards')) : statements, 'once')
+  fixtureBySqlite.set(f.sql, apply)
+  return { sqlite: f.sql, apply }
 }
 
 // One product, 20 on the shelf at branch 1, split across lot 501 (older,
 // 8 units) and lot 502 (newer, 6 units); 6 units are legacy aggregate stock
 // the lot ledger never tracked.
-function seedShelf(sqlite, { shelf = 20, lot501 = 8, lot502 = 6 } = {}) {
-  sqlite.prepare(`INSERT INTO products (id, name, stock_quantity) VALUES (10, 'Serum', @shelf)`).run({ shelf })
-  sqlite.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, @shelf)`).run({ shelf })
-  sqlite.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (501, 1, @q)`).run({ q: lot501 })
-  sqlite.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (502, 1, @q)`).run({ q: lot502 })
+async function seedShelf(sqlite, { shelf = 20, lot501 = 8, lot502 = 6 } = {}) {
+  await fixtureBySqlite.get(sqlite)([
+    {sql:"INSERT INTO products(id,name,stock_quantity) VALUES(10,'Serum',@shelf)",params:{shelf}},
+    {sql:"INSERT INTO product_batches(id,variant_product_id,batch_key,is_active) VALUES(501,10,'amendment-501',1),(502,10,'amendment-502',1)",params:{}},
+    {sql:'INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,1,@shelf)',params:{shelf}},
+    {sql:'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(501,1,@q)',params:{q:lot501}},
+    {sql:'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(502,1,@q)',params:{q:lot502}},
+  ])
 }
 
 // A recorded sale: 2 x Serum at $3, delivery $1.50, already paid $7.50.
@@ -297,12 +267,13 @@ const ENTRY = (overrides = {}) => ({
   ...overrides,
 })
 
+async function main() {
 // ---- 1: APPEND-ONLY, enforced by the database ------------------------------
 {
   const { sqlite, apply } = setup()
-  seedShelf(sqlite)
+  await seedShelf(sqlite)
   seedSale(sqlite)
-  apply([amendmentEntryStatement(ENTRY({
+  await apply([amendmentEntryStatement(ENTRY({
     kind: 'line_removed', saleItemId: 1, productId: 10, productName: 'Serum',
     quantityBefore: 2, quantityAfter: 0, unitsMoved: 2,
   }))])
@@ -327,7 +298,7 @@ const ENTRY = (overrides = {}) => ({
   assert.strictEqual(num(sqlite, 'SELECT COUNT(*) FROM sale_amendments'), 1)
 
   // And the kind CHECK is real: an invented kind is refused outright.
-  assert.throws(
+  await assert.rejects(
     () => apply([amendmentEntryStatement(ENTRY({ kind: 'line_price_changed' }))]),
     /CHECK constraint/i,
     'a kind outside the closed set must be refused by the schema',
@@ -338,7 +309,7 @@ console.log('PASS 1 -- the ledger is append-only, and the database is what enfor
 // ---- 2 + 3: the two views disagree exactly as intended ---------------------
 {
   const { sqlite, apply } = setup()
-  seedShelf(sqlite)
+  await seedShelf(sqlite)
   const sale = seedSale(sqlite)
   seedAllocation(sqlite, { quantity: 2, released: 0 })
 
@@ -354,7 +325,7 @@ console.log('PASS 1 -- the ledger is append-only, and the database is what enfor
     userId: 9,
     userName: 'Sokha',
   })
-  apply([...plan.statements, amendmentEntryStatement(ENTRY({
+  await apply([...plan.statements, amendmentEntryStatement(ENTRY({
     kind: 'line_removed', saleItemId: 1, productId: 10, productName: 'Serum',
     quantityBefore: 2, quantityAfter: 0, unitsMoved: plan.unitsMoved,
     totalBeforeUsd: 7.5, totalAfterUsd: 1.5,
@@ -397,7 +368,7 @@ console.log('PASS 2/3 -- a removal vanishes from the receipt and persists in the
 // ---- 4: INCREASE -- "1 and now 2" ------------------------------------------
 {
   const { sqlite, apply } = setup()
-  seedShelf(sqlite)
+  await seedShelf(sqlite)
   const sale = seedSale(sqlite)
   seedAllocation(sqlite, { quantity: 2, released: 0 })
 
@@ -411,7 +382,7 @@ console.log('PASS 2/3 -- a removal vanishes from the receipt and persists in the
   assert.strictEqual(plan.subtotalDeltaUsd, 9, '3 more at $3')
   assert.deepStrictEqual(plan.takes.map((t) => [t.batchId, t.quantity]), [[501, 3]], 'oldest lot first')
 
-  apply(plan.statements)
+  await apply(plan.statements)
   assert.strictEqual(num(sqlite, 'SELECT quantity FROM sale_items WHERE id = 1'), 5, 'the line now says 5')
   assert.strictEqual(num(sqlite, 'SELECT total_usd FROM sale_items WHERE id = 1'), 15, 'and its total followed')
   assert.strictEqual(num(sqlite, 'SELECT quantity FROM branch_stock'), 17)
@@ -431,7 +402,7 @@ console.log('PASS 4 -- an increase draws units oldest-lot-first and appends its 
 // ---- 5: DECREASE -- partial, the line survives -----------------------------
 {
   const { sqlite, apply } = setup()
-  seedShelf(sqlite)
+  await seedShelf(sqlite)
   const sale = seedSale(sqlite)
   // This line drew across two lots: 501 first (2), then 502 (1).
   sqlite.prepare(`UPDATE sale_items SET quantity = 3, total_usd = 9 WHERE id = 1`).run()
@@ -449,7 +420,7 @@ console.log('PASS 4 -- an increase draws units oldest-lot-first and appends its 
   // REVERSE draw order: the last-drawn unit (lot 502) is the one that goes back.
   assert.deepStrictEqual(plan.takes.map((t) => [t.batchId, t.quantity]), [[502, 1]], 'last drawn comes back first')
 
-  apply(plan.statements)
+  await apply(plan.statements)
   assert.strictEqual(num(sqlite, 'SELECT quantity FROM sale_items WHERE id = 1'), 2, 'the line survives at 2')
   assert.strictEqual(num(sqlite, 'SELECT total_usd FROM sale_items WHERE id = 1'), 6)
   assert.strictEqual(num(sqlite, 'SELECT quantity FROM branch_batch_stock WHERE batch_id = 502'), 7, 'lot 502 got its unit back')
@@ -464,7 +435,7 @@ console.log('PASS 5 -- a decrease returns units to the SAME lots in reverse draw
 // ---- 6: REMOVE deletes the line row, never zeroes it -----------------------
 {
   const { sqlite, apply } = setup()
-  seedShelf(sqlite)
+  await seedShelf(sqlite)
   const sale = seedSale(sqlite)
   seedAllocation(sqlite, { quantity: 2, released: 0 })
   const plan = planLineQuantityDecrease({
@@ -472,7 +443,7 @@ console.log('PASS 5 -- a decrease returns units to the SAME lots in reverse draw
     allocations: allocationsOf(sqlite), exchangeRate: 4100,
     reason: 'removed', userId: 9, userName: 'Sokha',
   })
-  apply(plan.statements)
+  await apply(plan.statements)
   const rows = sqlite.prepare('SELECT * FROM sale_items WHERE sale_id = 77').all()
   assert.strictEqual(rows.length, 0, 'a removal DELETES the row -- a 0-quantity row would print as "0 x Serum"')
 }
@@ -481,7 +452,7 @@ console.log('PASS 6 -- a removed line is deleted, not zeroed')
 // ---- 7: a STOCK-SKIPPED sale moves nothing, in EITHER direction ------------
 {
   const { sqlite, apply } = setup()
-  seedShelf(sqlite)
+  await seedShelf(sqlite)
   const sale = seedSale(sqlite, { stock_skipped: 1 })
   seedAllocation(sqlite, { quantity: 2, released: 0 })
 
@@ -495,7 +466,7 @@ console.log('PASS 6 -- a removed line is deleted, not zeroed')
     lots: lotsFor(), exchangeRate: 4100, userId: 9, userName: 'Sokha',
   })
   assert.strictEqual(up.unitsMoved, 0, 'a stock-skipped sale takes no units')
-  apply(up.statements)
+  await apply(up.statements)
   assert.strictEqual(num(sqlite, 'SELECT quantity FROM sale_items WHERE id = 1'), 5, 'the sale still records the goods')
   assert.strictEqual(num(sqlite, 'SELECT quantity FROM branch_stock'), 20, 'branch stock is untouched')
   assert.strictEqual(num(sqlite, 'SELECT quantity FROM branch_batch_stock WHERE batch_id = 501'), 8, 'the lot is untouched')
@@ -508,7 +479,7 @@ console.log('PASS 6 -- a removed line is deleted, not zeroed')
     reason: 'removed', userId: 9, userName: 'Sokha',
   })
   assert.strictEqual(down.unitsMoved, 0, 'a sale the system never took units for must not have units invented for it')
-  apply(down.statements)
+  await apply(down.statements)
   assert.strictEqual(num(sqlite, 'SELECT quantity FROM branch_stock'), 20, 'still 20 -- no stock was conjured')
   assert.strictEqual(num(sqlite, 'SELECT quantity FROM branch_batch_stock WHERE batch_id = 501'), 8)
   assert.strictEqual(num(sqlite, 'SELECT COUNT(*) FROM inventory_movements'), 0)
@@ -531,7 +502,7 @@ console.log('PASS 7 -- a stock-skipped sale moves nothing either way, and an abs
 // nothing" now belongs solely to the stock_skipped flag, which case 7 covers.
 {
   const { sqlite, apply } = setup()
-  seedShelf(sqlite)
+  await seedShelf(sqlite)
   const sale = seedSale(sqlite, { sale_status: 'awaiting_payment' })
   assert.strictEqual(saleAmendmentMovesStock(sale), true, 'S4-3: an unpaid order holds its units')
   const plan = planLineQuantityIncrease({
@@ -540,7 +511,7 @@ console.log('PASS 7 -- a stock-skipped sale moves nothing either way, and an abs
   })
   // Negative = units leaving the shelf, the same sign convention case 4 uses.
   assert.strictEqual(plan.unitsMoved, -2, 'two more units are promised, so two more leave the shelf')
-  apply(plan.statements)
+  await apply(plan.statements)
   assert.strictEqual(num(sqlite, 'SELECT quantity FROM branch_stock'), 18, 'the shelf really drops')
   const allocations = allocationsOf(sqlite)
   assert.strictEqual(allocations.length, 1, 'the lot attribution is recorded')
@@ -635,7 +606,7 @@ console.log('PASS 10 -- the edit window, its default, its setting, the admin byp
 // ---- 11 + 12: the delivery fee, and what stays frozen ----------------------
 {
   const { sqlite, apply } = setup()
-  seedShelf(sqlite)
+  await seedShelf(sqlite)
   // A sale with real tax and a real discount, so "frozen" is actually tested.
   const sale = seedSale(sqlite, { tax_usd: 0.6, discount_usd: 1, total_usd: 7.1, amount_paid_usd: 7.1 })
   sqlite.prepare(`UPDATE sales SET tax_usd = 0.6, discount_usd = 1 WHERE id = 77`).run()
@@ -660,7 +631,7 @@ console.log('PASS 10 -- the edit window, its default, its setting, the admin byp
   assert.strictEqual(before.totalUsd, 7.1)
   assert.strictEqual(after.totalUsd, 7.6, 'the total moved by exactly the fee delta and nothing else')
 
-  apply([
+  await apply([
     ...plan.statements,
     amendmentEntryStatement(ENTRY({
       kind: 'delivery_fee_changed',
@@ -710,7 +681,7 @@ console.log('PASS 11/12 -- the delivery fee nets to one number on the receipt an
 // writes it is the defect itself.
 {
   const { sqlite, apply } = setup()
-  seedShelf(sqlite)
+  await seedShelf(sqlite)
   // A free delivery: the shop ate a $1.50 fee, so the customer's total is
   // 6 - 1 discount + 0.6 tax = $5.60, with no delivery in it.
   seedSale(sqlite, { tax_usd: 0.6, discount_usd: 1, total_usd: 5.6, amount_paid_usd: 5.6 })
@@ -734,7 +705,7 @@ console.log('PASS 11/12 -- the delivery fee nets to one number on the receipt an
   assert.strictEqual(nulled.payerAfter, 'store', 'and neither is an explicit null')
 
   // What the sale row actually ends up holding.
-  apply(payerOnly.statements)
+  await apply(payerOnly.statements)
   assert.strictEqual(
     sqlite.prepare('SELECT delivery_fee_paid_by FROM sales WHERE id = 77').get().delivery_fee_paid_by,
     'customer',
@@ -757,7 +728,7 @@ console.log('PASS 11e -- a free delivery can be switched to customer-paid after 
 // ---- 11b: actual courier cost is editable, report-only, and separately logged
 {
   const { sqlite, apply } = setup()
-  seedShelf(sqlite)
+  await seedShelf(sqlite)
   const sale = seedSale(sqlite, { delivery_actual_cost_usd: 2, delivery_actual_cost_khr: 8200, total_usd: 7.5, amount_paid_usd: 7.5 })
   const stored = sqlite.prepare('SELECT * FROM sales WHERE id = 77').get()
   assert.strictEqual(guardDeliveryActualCostAmendment(stored).ok, true)
@@ -786,7 +757,7 @@ console.log('PASS 11e -- a free delivery can be switched to customer-paid after 
     /mutation stamp/,
     'a blank stamp must fail loudly, not fall back to CURRENT_TIMESTAMP or null the column',
   )
-  apply([
+  await apply([
     ...plan.statements,
     amendmentEntryStatement(ENTRY({
       kind: 'delivery_actual_cost_changed',
@@ -820,7 +791,7 @@ console.log('PASS 11e -- a free delivery can be switched to customer-paid after 
   })
   assert.strictEqual(cleared.costBeforeUsd, 2.5)
   assert.strictEqual(cleared.costAfterUsd, null)
-  apply(cleared.statements)
+  await apply(cleared.statements)
   const afterClear = sqlite.prepare('SELECT delivery_actual_cost_usd, delivery_actual_cost_khr, updated_at FROM sales WHERE id = 77').get()
   assert.strictEqual(afterClear.delivery_actual_cost_usd, null)
   assert.strictEqual(afterClear.delivery_actual_cost_khr, null, 'clearing the cost must clear its KHR twin, never leave a riel figure with no dollar figure')
@@ -831,14 +802,15 @@ console.log('PASS 11b -- actual courier cost changes the reporting fields only, 
 // ---- 11c: a fee response is the next courier-cost request's version -------
 {
   const { sqlite, apply } = setup()
-  seedShelf(sqlite)
+  await seedShelf(sqlite)
   const sale = seedSale(sqlite)
   const initialRevision = num(sqlite, 'SELECT COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id = 77), 0)')
-  assert.strictEqual(initialRevision, 0)
+  // Migration 0120 increments once for the seeded sales row and once for its item.
+  assert.strictEqual(initialRevision, 2)
 
   const feeStamp = '2026-09-07T06:20:00.123Z'
   const feePlan = planDeliveryFeeChange({ saleId: 77, sale, newFeeUsd: 2.5, exchangeRate: 4100 })
-  apply([
+  await apply([
     { sql: 'DELETE FROM sale_bulk_guards', params: {} },
     saleRevisionGuard(77, initialRevision),
     ...feePlan.statements,
@@ -855,11 +827,12 @@ console.log('PASS 11b -- actual courier cost changes the reporting fields only, 
   const afterFee = sqlite.prepare(`SELECT s.*,COALESCE(r.revision,0) AS write_revision
     FROM sales s LEFT JOIN sale_write_revisions r ON r.sale_id=s.id WHERE s.id=77`).get()
   assert.strictEqual(afterFee.updated_at, feeStamp, 'the fee response token is the value persisted on the sale')
-  assert.strictEqual(afterFee.write_revision, 1, 'the fee ledger append advances the authoritative revision')
+  // Two sales UPDATE statements (0120) plus the immutable amendment INSERT (0149).
+  assert.strictEqual(afterFee.write_revision, initialRevision + 3, 'the fee writes and ledger append advance the authoritative revision')
 
   const costStamp = '2026-09-07T06:20:01.456Z'
   const costPlan = planDeliveryActualCostChange({ saleId: 77, sale: afterFee, newCostUsd: 1.25, exchangeRate: 4100, stamp: costStamp })
-  assert.throws(() => apply([
+  await assert.rejects(() => apply([
     { sql: 'DELETE FROM sale_bulk_guards', params: {} },
     saleRevisionGuard(77, initialRevision),
     ...costPlan.statements,
@@ -870,7 +843,7 @@ console.log('PASS 11b -- actual courier cost changes the reporting fields only, 
   ]), /CHECK constraint/i, 'the stale pre-fee revision is still rejected atomically')
   assert.strictEqual(sqlite.prepare('SELECT delivery_actual_cost_usd FROM sales WHERE id=77').get().delivery_actual_cost_usd, null)
 
-  apply([
+  await apply([
     { sql: 'DELETE FROM sale_bulk_guards', params: {} },
     saleRevisionGuard(77, afterFee.write_revision),
     ...costPlan.statements,
@@ -886,7 +859,8 @@ console.log('PASS 11b -- actual courier cost changes the reporting fields only, 
     delivery_actual_cost_usd: 1.25,
     total_usd: 8.5,
     updated_at: costStamp,
-    write_revision: 2,
+    // One courier-cost sales UPDATE plus its immutable amendment INSERT.
+    write_revision: initialRevision + 5,
   })
   assert.strictEqual(num(sqlite, 'SELECT COUNT(*) FROM sale_amendments WHERE sale_id=77'), 2,
     'the successful sequence retains separate fee and courier-cost records')
@@ -927,7 +901,7 @@ console.log('PASS 11c -- fee then courier cost accepts the current revision/toke
   assert.strictEqual(money.totalKhr, 34000)
   assert.throws(() => planDeliveryAddition({ ...plan, saleId: 77, sale, contact: { id: 9, name: null, phone: null, address: null }, feeUsd: -1, actualCostUsd: null, exchangeRate: 4000, stamp }), /non-negative/)
   assert.throws(() => planDeliveryAddition({ saleId: 77, sale, contact: { id: 9, name: null, phone: null, address: null }, feeUsd: 0, actualCostUsd: Number.NaN, exchangeRate: 4000, stamp }), /non-negative/)
-  apply([
+  await apply([
     ...plan.statements,
     {
       sql: 'UPDATE sales SET total_usd=@total,total_khr=@total_khr,updated_at=@stamp WHERE id=@id',
@@ -972,20 +946,46 @@ console.log('PASS 11d -- a counter sale gains driver, customer fee and actual co
 // ---- 13: an oversell aborts the whole batch --------------------------------
 {
   const { sqlite, apply } = setup()
-  seedShelf(sqlite, { shelf: 2, lot501: 2, lot502: 0 })
+  await seedShelf(sqlite, { shelf: 2, lot501: 2, lot502: 0 })
   const sale = seedSale(sqlite)
   const plan = planLineQuantityIncrease({
     saleId: 77, sale, line: LINE(), addedQuantity: 5,
     lots: [{ batchId: 501, lotCode: 'L-501', expiryDate: null, available: 5 }],
     exchangeRate: 4100, userId: 9, userName: 'Sokha',
   })
-  assert.throws(() => apply(plan.statements), /CHECK constraint/i, 'the strict decrement is the real race guard')
+  await assert.rejects(() => apply(plan.statements), error => error.message.includes('$[counted_ordinary_conflict]'), 'the current ordinary source guard rejects oversell before the strict decrement')
   // Nothing half-applied: the line is still 2 and the shelf is still 2.
   assert.strictEqual(num(sqlite, 'SELECT quantity FROM sale_items WHERE id = 1'), 2)
   assert.strictEqual(num(sqlite, 'SELECT quantity FROM branch_stock'), 2)
   assert.strictEqual(num(sqlite, 'SELECT COUNT(*) FROM sale_amendments'), 0, 'and no ledger entry was written for a write that did not happen')
 }
 console.log('PASS 13 -- an oversell aborts the batch, nothing half-applies, no ledger entry')
+
+{
+  const {sqlite,apply}=setup()
+  await seedShelf(sqlite)
+  seedSale(sqlite)
+  const snapshot=()=>JSON.stringify({items:sqlite.prepare('SELECT * FROM sale_items').all(),
+    products:sqlite.prepare('SELECT * FROM products').all(),branches:sqlite.prepare('SELECT * FROM branch_stock').all(),
+    receipts:sqlite.prepare('SELECT * FROM branch_batch_stock').all(),history:sqlite.prepare('SELECT * FROM sale_amendments').all(),
+    movements:sqlite.prepare('SELECT * FROM inventory_movements').all(),revisions:sqlite.prepare('SELECT * FROM sale_write_revisions').all()})
+  const before=snapshot()
+  assert.throws(()=>sqlite.prepare('UPDATE branch_stock SET quantity=0 WHERE product_id=10').run(),/stock_transaction_required/)
+  assert.strictEqual(snapshot(),before,'an unfenced physical mutation changes nothing')
+  await assert.rejects(()=>apply([
+    {sql:'UPDATE sale_items SET quantity=99 WHERE id=1',params:{}},
+    {sql:'UPDATE branch_stock SET quantity=-1 WHERE product_id=10 AND branch_id=1',params:{}},
+  ]),/CHECK constraint/i)
+  assert.strictEqual(snapshot(),before,'the real nonnegative CHECK rolls back metadata and revisions too')
+  sqlite.exec('CREATE TEMP TABLE fixture_amendment_unrelated(value INTEGER CONSTRAINT ordinary_external_check CHECK(value=1))')
+  await assert.rejects(()=>apply([
+    {sql:'UPDATE sale_items SET quantity=99 WHERE id=1',params:{}},
+    {sql:'INSERT INTO fixture_amendment_unrelated VALUES(0)',params:{}},
+  ]),/CHECK constraint failed: ordinary_external_check/)
+  assert.strictEqual(snapshot(),before,'an unrelated CHECK keeps its original failure and complete rollback')
+  assert.strictEqual(num(sqlite,"SELECT COUNT(*) FROM system_flags WHERE key='stock_transaction_permit'"),0)
+}
+console.log('PASS current epoch fence, real negative CHECK and unrelated CHECK preserve complete rollback')
 
 // ---- 14: summarizeAmendments -----------------------------------------------
 {
@@ -1054,7 +1054,7 @@ console.log('PASS 14 -- the detail summary describes the sale, not a moment in i
   // S4-24b is SUBSUMED, not duplicated: its endpoint writes a ledger entry, so
   // there is one way to add a line and one audit trail for it.
   const addItemsBlock = routes.slice(routes.indexOf("app.post('/:id/items'"), routes.indexOf("app.post('/:id/amendments'"))
-  assert.ok(addItemsBlock.includes('amendmentEntryStatement'), 'POST /:id/items must write a line_added ledger entry')
+  assert.ok(addItemsBlock.includes('amendmentEntriesStatements(plan.lines.map('), 'POST /:id/items must write a line_added ledger entry')
   assert.ok(addItemsBlock.includes("kind: 'line_added'"), 'and it must be recorded as line_added')
 
   // The Undo button writes INTO the ledger rather than around it.
@@ -1185,3 +1185,6 @@ console.log('PASS 15 -- routes and the undo applier are wired to the one ledger,
 console.log('PASS 16 -- tax follows the settings switch, and every refusal to recompute is named')
 
 console.log('\nAll sale-amendment ledger checks passed.')
+
+}
+main().catch(error => { console.error(error); process.exitCode = 1 }).finally(() => worlds.forEach(f => f.sql.close()))
