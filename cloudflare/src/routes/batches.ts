@@ -1,5 +1,5 @@
 import { productStockGuardError } from '../lib/productStockGuard'
-import { requireReceivingBranch, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from '../lib/receivingBranch'
+import { requireReceivingBranch, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE, receivingBranchAssertion } from '../lib/receivingBranch'
 import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, canEditAcquisitionCosts, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
@@ -8,7 +8,8 @@ import { audit, changedFields } from '../lib/audit'
 import { hasPermission, getActionTier, getPermissionTier, isActionBlocked } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
-import { getTrackedProductIds, listBatchesForProduct, isReceiptSellingPriceConflict, RECEIPT_SELLING_PRICE_CHANGED, parseReceiptSellingPrice, planReceiptSellingPrice, receiveBatchStock, type ReceiptSellingPriceRow } from '../lib/productBatches'
+import { getTrackedProductIds, listBatchesForProduct, isReceiptSellingPriceConflict, RECEIPT_SELLING_PRICE_CHANGED, parseReceiptSellingPrice, planReceiptSellingPrice, receiveBatchStock, prepareReceiptLotTarget, planReceiveBatchStock, type ReceiptSellingPriceRow } from '../lib/productBatches'
+import { CountedStockPlan, CountedStockConflictError, countedStockFactsSql, isCountedStockConflict, sumCountedQuantities } from '../lib/countedDamagedStock'
 import { executeStockTransaction } from '../lib/stockTransaction'
 import { listOpenDamagedLots } from '../lib/returnsStock'
 import { dateToBatchCode, normalizeTypedDate } from '../lib/batchCode'
@@ -22,7 +23,7 @@ import type { RequestMetrics } from '../lib/requestMetrics'
 import { getPlanLimits } from '../lib/planTier'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
-import { nullableMoney4, multiplyMoney4 } from '../lib/moneyPrecision'
+import { MoneyPrecisionError, nullableMoney4, multiplyMoney4 } from '../lib/moneyPrecision'
 import { catalogCostRecomputeStatement, catalogCostRecomputeIfChangedStatement } from '../lib/catalogCostRecompute'
 import { addressedStatements, branchEffectRefusal, branchRedirectGuardRefusal, branchRedirectTarget, isBranchRedirectGuardError, landingLotId, requestBranchLanding } from '../lib/branchRedirectWrite'
 
@@ -255,6 +256,44 @@ export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody
 
 // `markWritten` is the receipt guard's write barrier -- see the same argument
 // on runAdjustActionKernel and lib/stockMutationReceipt.ts's header.
+async function receiveCountedBatchStock(db: ReturnType<typeof getDb>, input: Parameters<typeof receiveBatchStock>[1]): ReturnType<typeof receiveBatchStock> {
+  const target = await prepareReceiptLotTarget(db, input)
+  const batchId = target.existingBatchId
+  const receiptSnapshotSql = `(SELECT json_group_array(json_array(id,received_quantity,received_cost_usd,supplier_id,supplier_name,payment_status,credit_due_date,notes,received_branch_id,received_branch_name)) FROM (
+    SELECT * FROM product_batches WHERE variant_product_id=@productId ORDER BY id LIMIT 10001))`
+  const observed = await db.prepare(`SELECT ${countedStockFactsSql('@productId','@branchId','@additionalReceiptIds')} AS facts,${receiptSnapshotSql} AS receipts`)
+    .get<{facts:string;receipts:string}>({productId:input.productId,branchId:input.branchId,additionalReceiptIds:JSON.stringify(batchId == null ? [] : [batchId])})
+  if (!observed?.facts || new TextEncoder().encode(observed.facts+observed.receipts).byteLength>900000) throw new CountedStockConflictError()
+  const receipts = JSON.parse(observed.receipts) as Array<[number,number|null,number|null,...unknown[]]>
+  if (receipts.length>10000) throw new CountedStockConflictError()
+  const before = batchId == null ? undefined : receipts.find(row=>row[0]===batchId)
+  if (batchId != null && !before) throw new CountedStockConflictError()
+  const exact = new CountedStockPlan(observed.facts,input.branchId)
+  const guards = [...exact.takeInitialGuard(), {sql: `SELECT CASE WHEN ${receiptSnapshotSql}=@receipts
+    AND COALESCE((SELECT baseline_batch_id FROM product_cost_entries WHERE product_id=@productId ORDER BY id DESC LIMIT 1),0)=@baseline
+    THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`,params:{productId:input.productId,receipts:observed.receipts,baseline:target.baselineBatchId}}]
+  const plan = planReceiveBatchStock({...input,batchId,receiptLotTarget:target,
+    receiptCostPreimage:input.unitCostUsd == null ? undefined : {batchExists:Boolean(before),receivedCostUsd:before?.[2]??null},
+    receivedQuantityPreimage:before ? {quantity:before[1]} : undefined})
+  let physical
+  if (batchId == null) {
+    const created = exact.receiveProjectedCreatedReceipt(plan.batchKey,input.quantity)
+    guards.push(...created.guards)
+    physical = created.statements
+  } else physical = exact.changeOrdinary(batchId,input.quantity,exact.requiresReceiptActivation(batchId)?'activateAndReceive':'receive')
+  const resolvedBatchIdSql = '(SELECT id FROM product_batches WHERE variant_product_id=@productId AND ((@receivingBatchId IS NOT NULL AND id=@receivingBatchId) OR (@receivingBatchId IS NULL AND batch_key=@batchKey)) LIMIT 1)'
+  const extra = input.buildBatchStatements?.({batchKey:plan.batchKey,lotCode:plan.lotCode,resolvedBatchIdSql})??[]
+  const statements = [receivingBranchAssertion(input.branchId),...guards,...plan.metadataStatements,...physical,
+    {sql:'DELETE FROM stock_session_guards',params:{}},...extra.map(statement=>({...statement,params:{...(statement.params as Record<string,unknown>),receivingBatchId:batchId}}))]
+  if(input.atomicMark?.execute)await input.atomicMark.execute(db,statements)
+  else await executeStockTransaction(db,statements,'retry')
+  const batch = await db.prepare(`SELECT id,batch_number,lot_code FROM product_batches WHERE variant_product_id=@productId
+    AND ((@batchId IS NOT NULL AND id=@batchId) OR (@batchId IS NULL AND batch_key=@batchKey)) LIMIT 1`)
+    .get<{id:number;batch_number:number|null;lot_code:string|null}>({productId:input.productId,batchId,batchKey:plan.batchKey})
+  if(!batch)throw new Error('Could not resolve received stock batch')
+  return {batchId:Number(batch.id),created:batchId==null,batchNumber:batch.batch_number,lotCode:batch.lot_code??plan.lotCode}
+}
+
 async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody, atomicMark: StockMutationAtomicMark): Promise<Response> {
   const user = c.get('user')
   if (hasAcquisitionCostInput(body, user)) return c.json({ error: 'Cost-entry permission is required to enter receipt costs.', code: 'product_cost_edit_required' }, 403)
@@ -272,7 +311,9 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
   // A fully free receipt pays for nothing: 0 paid units plus its free units.
   if (!Number.isFinite(paidQuantity) || (freeQuantity > 0 ? paidQuantity < 0 : paidQuantity <= 0)) return c.json({ error: 'quantity must be a positive number' }, 400)
   // Stock in = paid + free units at the effective cost; the supplier is owed for the paid units.
-  const quantity = paidQuantity + freeQuantity
+  let quantity: number
+  try { quantity = sumCountedQuantities([paidQuantity,freeQuantity]) }
+  catch { return c.json({ error: 'Invalid or out-of-range stock quantity', code: 'invalid_quantity' },400) }
   let unitCostUsd: number | null
   let totalCostUsd: number | null
   try {
@@ -340,7 +381,7 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
   let received: { batchId: number; batchNumber: number | null; lotCode: string }
   // Physical stock, movement, cost refresh and written mark commit together.
   try {
-    received = await receiveBatchStock(db, {
+    received = await receiveCountedBatchStock(db, {
       ordinaryReceiving: true,
       atomicMark,
       productId,
@@ -411,6 +452,7 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
     })
   } catch (err) {
     if (err instanceof StockMutationBudgetError || isReceiptSellingPriceConflict(err)) throw err
+    if (isCountedStockConflict(err) || err instanceof MoneyPrecisionError) return c.json({error:'The recorded stock or receipt changed. Refresh before receiving.',code:'write_conflict'},409)
     const stockGuard = productStockGuardError(err)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     // The explicit-lot pick can fail validation ("Selected batch does not
