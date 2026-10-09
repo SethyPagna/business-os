@@ -1,4 +1,5 @@
 import { executeStockTransaction } from './stockTransaction'
+import { CountedStockBatchPlan, isCountedStockConflict } from './countedDamagedStock'
 import { COUNTED_CONDITION_HISTORY_KIND, replayCountedCondition } from './countedConditionHistory'
 import { productStockGuardError } from './productStockGuard'
 import type { Env } from '../index'
@@ -27,6 +28,10 @@ import {
   buildAllocationStatements,
   buildOperationAllocationStatements,
   planSaleLineAddition,
+  planExactSaleLineAddition,
+  planExactSaleLineRemoval,
+  saleLineCountedFactsSql,
+  projectedSaleLineStockFromFacts,
   planUnlottedSaleLineGuards,
   planSaleLineRemoval,
   plannedLineFromRecord,
@@ -1351,6 +1356,7 @@ async function assertLegacySaleAddItemsUnchanged(
 }
 
 function legacySaleAddItemsRaceError(error: unknown, direction: 'undo' | 'redo'): unknown {
+  if (isCountedStockConflict(error)) return new UndoConflictError('The recorded stock changed. Nothing was reversed.', UNDO_RECORD_CHANGED_CODE)
   const activeGuard = productStockGuardError(error)
   if (activeGuard) return activeGuard
   return /JSON path error|sale_add_items_changed/i.test(String((error as Error)?.message ?? error))
@@ -1398,6 +1404,7 @@ async function replayAtomicSaleAddItems(
   snapshotStatus: string,
   payload: Record<string, unknown>,
   ctx: UndoApplierContext,
+  countedFacts: string,
 ): Promise<void> {
   if (!ctx.user || !Number.isSafeInteger(ctx.historyId) || !Number.isSafeInteger(ctx.generation) || Number(ctx.generation) < 0) {
     throw new UndoConflictError('Refresh history before replaying these added items.', UNDO_HISTORY_STALE_CODE)
@@ -1508,23 +1515,27 @@ async function replayAtomicSaleAddItems(
     AND (${basketCondition}) AND (${lineage.condition})
   `, guardParams)
   const stamp = new Date().toISOString()
+  const projectedStock = projectedSaleLineStockFromFacts(countedFacts)
   const statements: ReplayStatement[] = [
+    ...projectedStock.takePreimageGuards(),
     { sql: 'DELETE FROM sale_mutation_guards', params: {} },
     { sql: 'DELETE FROM sale_bulk_guards', params: {} },
     guard,
   ]
 
   if (ctx.direction === 'undo') {
-    const removal = planSaleLineRemoval({
+    const removal = planExactSaleLineRemoval({
       saleId,
       lines,
       reason: `Undo: items added to sale ${reversal.receiptNumber || `#${saleId}`} removed`,
       userId: ctx.user.id,
       userName: actorSnapshot(ctx.user),
-    })
+    },projectedStock)
+    statements.unshift(...removal.preimageStatements)
     const undoGroupId = crypto.randomUUID()
     statements.push(
       ...removal.statements,
+      ...projectedStock.takeFinalPhysicalWrites(),
       saleMoneyUpdateStatement(saleId, reversal.moneyBefore),
       ...(reversal.lineMoneyBefore ? [saleLineKhrSnapshotStatement(saleId, reversal.lineMoneyBefore)] : []),
       ...lines.map((line) => amendmentEntryStatement({
@@ -1541,16 +1552,16 @@ async function replayAtomicSaleAddItems(
     )
   } else {
     const plannedLines = lines.map(plannedLineFromRecord)
-    const plan = planSaleLineAddition({
+    const plan = planExactSaleLineAddition({
       saleId,
       saleStatus: reversal.saleStatus,
       lines: plannedLines,
       exchangeRate: Number(reversal.moneyAfter.exchange_rate ?? reversal.exchangeRate) || 4100,
       userId: ctx.user.id,
       userName: actorSnapshot(ctx.user),
-    })
+    },projectedStock)
+    statements.unshift(...plan.preimageStatements)
     const redoGroupId = crypto.randomUUID()
-    statements.push(...planUnlottedSaleLineGuards(plan.lines))
     const ordinalByStatement = new Map(plan.saleItemStatementIndexByLine.map((statementIndex, ordinal) => [statementIndex, ordinal]))
     for (const [statementIndex, statement] of plan.statements.entries()) {
       statements.push(statement)
@@ -1563,6 +1574,7 @@ async function replayAtomicSaleAddItems(
     }
     statements.push(
       ...buildOperationAllocationStatements(plan.lines, operationId, stamp),
+      ...projectedStock.takeFinalPhysicalWrites(),
       saleMoneyUpdateStatement(saleId, reversal.moneyAfter),
       ...(reversal.lineMoneyAfter ? [saleLineKhrSnapshotStatement(saleId, reversal.lineMoneyAfter)] : []),
       ...plan.lines.map((line) => amendmentEntryStatement({
@@ -1610,11 +1622,13 @@ async function replayAtomicSaleAddItems(
     { sql: 'DELETE FROM sale_bulk_guards', params: {} },
   )
   try {
-    await executeStockTransaction(db, statements, 'retry')
+    await executeStockTransaction(db, statements, 'once')
   } catch (error) {
     const activeGuard = productStockGuardError(error)
 
     if (activeGuard) throw activeGuard
+
+    if (isCountedStockConflict(error)) throw new UndoConflictError('The recorded stock changed. Nothing was reversed.', UNDO_RECORD_CHANGED_CODE)
 
     if (/constraint|guard_value/i.test(String(error))) {
       throw new UndoConflictError('This sale or added-items receipt changed. Nothing was reversed.', UNDO_RECORD_CHANGED_CODE)
@@ -3129,8 +3143,8 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         throw new Error('These added items cannot be replayed: their saved snapshot reference is missing.')
       }
       const snap = await db
-        .prepare('SELECT id, status, payload_json FROM undo_snapshots WHERE id = ? AND kind = ?')
-        .get<{ id: number; status: string; payload_json: string }>([snapshotId, SALE_ADD_ITEMS_ACTION_KIND])
+        .prepare(`SELECT id, status, payload_json, ${saleLineCountedFactsSql("json_extract(s.payload_json,'$.lines')")} counted_facts FROM undo_snapshots s WHERE id = ? AND kind = ?`)
+        .get<{ id: number; status: string; payload_json: string; counted_facts:string }>([snapshotId, SALE_ADD_ITEMS_ACTION_KIND])
       if (!snap) throw new Error('The saved details for these added items are no longer available, so they cannot be reversed.')
       let reversal: SaleAddItemsReversal
       try {
@@ -3154,7 +3168,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         || atomicReversal.operationId !== undefined
         || atomicReversal.saleStateRevision !== undefined
       if (atomicReplay) {
-        await replayAtomicSaleAddItems(db, atomicReversal, snapshotId, snap.status, payload, ctx)
+        await replayAtomicSaleAddItems(db, atomicReversal, snapshotId, snap.status, payload, ctx, snap.counted_facts)
       } else if (ctx.direction === 'undo') {
         if (String(snap.status) !== 'applied') throw new UndoConflictError('These added items have already been removed.', UNDO_ALREADY_DONE_CODE)
         const savedFingerprint = (reversal as SaleAddItemsReversal & { saleStateFingerprint?: string }).saleStateFingerprint
@@ -3164,13 +3178,15 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         // With or without a fingerprint, the state the undo overwrites is
         // derived from the snapshot and re-checked inside the batch.
         const saleGuard = await assertLegacySaleAddItemsUnchanged(db, reversal, 'undo')
-        const removal = planSaleLineRemoval({
+        const projectedStock = projectedSaleLineStockFromFacts(snap.counted_facts)
+        const stockPreimages = projectedStock.takePreimageGuards()
+        const removal = planExactSaleLineRemoval({
           saleId,
           lines: reversal.lines || [],
           reason: `Undo: items added to sale ${reversal.receiptNumber || `#${saleId}`} removed`,
           userId: ctx.user?.id ?? null,
           userName: actorSnapshot(ctx.user),
-        })
+        },projectedStock)
         // S4-30: the Undo button writes INTO the amendment ledger rather than
         // around it. Without this, a sale's detail view would show "added 2 x
         // Serum" and then silently stop mentioning it once someone undid the
@@ -3181,8 +3197,11 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         // the afternoon.
         const undoGroupId = crypto.randomUUID()
         await executeStockTransaction(db, [
+          ...stockPreimages,
+          ...removal.preimageStatements,
           saleGuard,
           ...removal.statements,
+          ...projectedStock.takeFinalPhysicalWrites(),
           saleMoneyUpdateStatement(saleId, reversal.moneyBefore),
           ...(reversal.lineMoneyBefore
             ? [saleLineKhrSnapshotStatement(saleId, reversal.lineMoneyBefore)]
@@ -3206,7 +3225,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
             userId: ctx.user?.id ?? null,
             userName: actorSnapshot(ctx.user),
           })),
-        ], 'retry').catch((error: unknown) => { throw legacySaleAddItemsRaceError(error, 'undo') })
+        ], 'once').catch((error: unknown) => { throw legacySaleAddItemsRaceError(error, 'undo') })
         await db.prepare("UPDATE undo_snapshots SET status = 'reversed', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
       } else {
         if (String(snap.status) !== 'reversed') throw new UndoConflictError('These items are already on the sale; there is nothing to redo.', UNDO_ALREADY_DONE_CODE)
@@ -3219,28 +3238,31 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         // they are the right ones, and the strict decrement aborts the redo
         // if a concurrent sale has since taken them.
         const lines = (reversal.lines || []).map(plannedLineFromRecord)
-        const plan = planSaleLineAddition({
+        const projectedStock = projectedSaleLineStockFromFacts(snap.counted_facts)
+        const stockPreimages = projectedStock.takePreimageGuards()
+        const plan = planExactSaleLineAddition({
           saleId,
           saleStatus: reversal.saleStatus,
           lines,
           exchangeRate: Number(reversal.moneyAfter.exchange_rate ?? reversal.exchangeRate) || 4100,
           userId: ctx.user?.id ?? null,
           userName: actorSnapshot(ctx.user),
-        })
+        },projectedStock)
         // The mirror of the undo branch above: a redo appends its own
         // `line_added` entries marked via 'redo', so the trail reads "added,
         // removed, added back" rather than quietly returning to a state it
         // never explains.
         const redoGroupId = crypto.randomUUID()
-        const residualGuards = planUnlottedSaleLineGuards(plan.lines)
         const leading = [
+          ...stockPreimages,
+          ...plan.preimageStatements,
           saleGuard,
           { sql: 'DELETE FROM sale_bulk_guards', params: {} },
-          ...residualGuards,
         ]
         const results = await executeStockTransaction(db, [
           ...leading,
           ...plan.statements,
+          ...projectedStock.takeFinalPhysicalWrites(),
           saleMoneyUpdateStatement(saleId, reversal.moneyAfter),
           ...(reversal.lineMoneyAfter
             ? [saleLineKhrSnapshotStatement(saleId, reversal.lineMoneyAfter)]
@@ -3264,7 +3286,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
             userName: actorSnapshot(ctx.user),
           })),
           { sql: 'DELETE FROM sale_bulk_guards', params: {} },
-        ], 'retry').catch((error: unknown) => { throw legacySaleAddItemsRaceError(error, 'redo') }) as Array<{ meta?: { last_row_id?: number } }>
+        ], 'once').catch((error: unknown) => { throw legacySaleAddItemsRaceError(error, 'redo') }) as Array<{ meta?: { last_row_id?: number } }>
         const saleItemIdByLine = plan.lines.map((_line, lineIndex) => {
           const statementIndex = leading.length + plan.saleItemStatementIndexByLine[lineIndex]
           return Number(results[statementIndex]?.meta?.last_row_id || 0) || null

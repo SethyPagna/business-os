@@ -1335,6 +1335,18 @@ export function amendmentEntryStatement(entry: AmendmentEntry): StockStatement {
   }
 }
 
+export function amendmentEntriesStatements(entries: readonly AmendmentEntry[]): StockStatement[] {
+  if (!entries.length) return []
+  const rows=entries.map(entry=>amendmentEntryStatement(entry).params)
+  const payload=JSON.stringify(rows)
+  if (rows.length>10000 || new TextEncoder().encode(payload).byteLength>900000) throw new Error('sale_amendment_plan_too_large')
+  const fields=['sale_id','group_id','kind','sale_item_id','product_id','product_name','quantity_before','quantity_after','quantity_delta',
+    'amount_before_usd','amount_after_usd','amount_delta_usd','total_before_usd','total_after_usd','units_moved','stock_skipped','via',
+    'reverses_amendment_id','undo_action_id','note','before_json','after_json','user_id','user_name']
+  return [{sql:`INSERT INTO sale_amendments(${fields.join(',')}) SELECT ${fields.map(field=>`json_extract(value,'$.${field}')`).join(',')}
+    FROM json_each(@entries) ORDER BY CAST(key AS INTEGER)`,params:{entries:payload}}]
+}
+
 function numberOrNull(value: unknown, moneyPrecisionVersion: 0 | 1 = 0): number | null {
   if (value === null || value === undefined) return null
   const parsed = Number(value)

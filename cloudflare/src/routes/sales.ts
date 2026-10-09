@@ -70,6 +70,8 @@ import {
   buildOperationAllocationStatements,
   guardSaleLineAddition,
   planSaleLineAddition,
+  planExactSaleLineAddition,
+  buildExactOperationAllocationStatements,
   captureSaleLineKhrSnapshot,
   saleLineKhrSnapshotStatement,
   resolveExplicitSaleLineBatches,
@@ -84,6 +86,7 @@ import {
   AMENDMENT_WINDOW_SETTING_KEY,
   AllocationShortfallError,
   amendmentEntryStatement,
+  amendmentEntriesStatements,
   guardDeliveryAddition,
   guardDeliveryActualCostAmendment,
   guardDeliveryFeeAmendment,
@@ -3295,7 +3298,7 @@ app.post('/:id/items', async (c) => {
   const lotsByKey = await readFifoLotAvailabilityForCart(
     db,
     requested
-      .filter((item) => item.branchId)
+      .filter((item) => item.branchId && !item.taggedLotId)
       .map((item) => ({ productId: item.productId, branchId: item.branchId as number })),
   )
   const addRuleRows=await db.prepare('SELECT * FROM promotion_rules WHERE is_active=1 ORDER BY id LIMIT 101').all<Record<string,unknown>>()
@@ -3368,13 +3371,15 @@ app.post('/:id/items', async (c) => {
   // D1's batch() is atomic but cannot branch mid-batch, so a shortage has to
   // be reported before the write is built. The CHECK(quantity >= 0)
   // constraints below remain the real race guard. ----
+  const additionCountedFacts: Array<{facts:string;branchId:number}> = []
   if (plan.deductions.length) {
     const branchIds = [...new Set(plan.deductions.map((entry) => entry.branch_id))]
     for (const branchId of branchIds) {
       const idsForBranch = [...new Set(plan.deductions.filter((entry) => entry.branch_id === branchId).map((entry) => entry.product_id))]
       const rows = await selectInChunks(idsForBranch, 1, (chunk) => db
-        .prepare(`SELECT product_id, quantity FROM branch_stock WHERE branch_id = ? AND product_id IN (${chunk.map(() => '?').join(',')})`)
-        .all<{ product_id: number; quantity: number }>([branchId, ...chunk]))
+        .prepare(`SELECT bs.product_id, bs.quantity, ${countedStockFactsSql('bs.product_id','bs.branch_id')} counted_facts FROM branch_stock bs WHERE bs.branch_id = ? AND bs.product_id IN (${chunk.map(() => '?').join(',')})`)
+        .all<{ product_id: number; quantity: number; counted_facts:string }>([branchId, ...chunk]))
+      additionCountedFacts.push(...rows.map(row=>({facts:row.counted_facts,branchId})))
       const available = new Map(rows.map((row) => [row.product_id, row.quantity]))
       for (const entry of plan.deductions.filter((item) => item.branch_id === branchId)) {
         const have = available.get(entry.product_id) || 0
@@ -3434,7 +3439,9 @@ app.post('/:id/items', async (c) => {
   const finalAllocation={version:1 as const,lines:[...existingPricing.map(line=>({line_key:line.line_key,amount:line.amounts.total_usd})),...provisionalAllocation.lines],
     discount_usd:Number(sale.discount_usd),membership_discount_usd:Number(sale.membership_discount_usd),tax_usd:taxPlan.outcome.taxUsd}
   for (const [index,line] of planned.entries()) line.pricingSnapshotJson=serializeSaleItemPricing(addedPool,addedQuantities,addedPool.lines[index].line_key,Number(sale.money_precision_version)===1?finalAllocation:provisionalAllocation)
-  plan=planSaleLineAddition({saleId,saleStatus,lines:planned,exchangeRate,userId:user?.id??null,userName:actorSnapshot(user)})
+  const projectedAdditionStock = new CountedStockBatchPlan(additionCountedFacts,{deferPhysicalWrites:true})
+  const additionStockPreimages = projectedAdditionStock.takePreimageGuards()
+  plan=planExactSaleLineAddition({saleId,saleStatus,lines:planned,exchangeRate,userId:user?.id??null,userName:actorSnapshot(user)},projectedAdditionStock)
   for (const row of lineMoneyAfter) {
     if(Number(sale.money_precision_version)!==1)continue
     const old=parseSaleItemPricing(row.pricing_snapshot_json)!
@@ -3459,10 +3466,10 @@ app.post('/:id/items', async (c) => {
   //
   // One request is one act, so every line shares a group_id.
   const additionGroupId = crypto.randomUUID()
-  const ledgerStatements = plan.lines.map((line) => {
+  const ledgerStatements = amendmentEntriesStatements(plan.lines.map((line) => {
     const totalBeforeUsd = moneyBefore.total_usd
     const totalAfterUsd = moneyAfter.total_usd
-    return amendmentEntryStatement({
+    return {
       moneyPrecisionVersion: 1,
       saleId,
       kind: 'line_added',
@@ -3480,8 +3487,8 @@ app.post('/:id/items', async (c) => {
       note: String(body.notes || '').trim().slice(0, 500) || null,
       userId: user?.id ?? null,
       userName: actorSnapshot(user),
-    })
-  })
+    }
+  }))
 
   const baseResponse: Record<string, unknown> = {
     id: saleId,
@@ -3566,6 +3573,8 @@ app.post('/:id/items', async (c) => {
   let historyStatementIndex = -1
   try {
     const atomicStatements: StatementList = [
+      ...additionStockPreimages,
+      ...plan.preimageStatements,
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
       // A redirected addition re-proves inside the commit that the confirmed branch still sells and the sale's
@@ -3583,9 +3592,9 @@ app.post('/:id/items', async (c) => {
         response: baseResponse, stamp: addItemsStamp,
         identityBindings:precisionBasket.identityBindings,
       }),
-      ...planUnlottedSaleLineGuards(plan.lines),
       ...statementsForPlan,
-      ...buildOperationAllocationStatements(plan.lines, addItemsOperationId, addItemsStamp),
+      ...buildExactOperationAllocationStatements(plan.lines, addItemsOperationId, addItemsStamp),
+      ...projectedAdditionStock.takeFinalPhysicalWrites(),
       ...taxPlan.statements,
       saleLineKhrSnapshotStatement(saleId,lineMoneyAfter),
       canonicalSaleChildrenGuard(saleId,Number((sale as Record<string,unknown>).money_precision_version)),
@@ -3633,7 +3642,7 @@ app.post('/:id/items', async (c) => {
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
     )
-    batchResults = await executeStockTransaction(db, atomicStatements, 'retry') as typeof batchResults
+    batchResults = await executeStockTransaction(db, atomicStatements, 'once') as typeof batchResults
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
@@ -3642,6 +3651,7 @@ app.post('/:id/items', async (c) => {
       .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: addItemsRequestId })
     if (retry?.request_digest === addItemsDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
     if (retry) return c.json({ error: 'client_request_id was already used with different added items.', code: 'idempotency_conflict' }, 409)
+    if (isCountedStockConflict(error)) return c.json({error:'The selected stock changed. Refresh and review the added items.',code:'counted_quantity_conflict'},409)
     const message = (error as Error).message || ''
     if (/malformed JSON/i.test(message)) {
       try { await db.prepare(addSourceGuard.sql).get(addSourceGuard.params) }
@@ -3669,6 +3679,7 @@ app.post('/:id/items', async (c) => {
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+    if (isCountedStockConflict(error)) return c.json({error:'The selected stock changed. Refresh and review the added items.',code:'counted_quantity_conflict'},409)
     if (error instanceof SaleHeaderQuoteError || error instanceof SaleDiscountRefusedError) return c.json({error:error.message,code:error.code},400)
     if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError || error instanceof ProductMergeLineageError) return c.json({ error: error.message, code: error.code },409)
     throw error

@@ -338,6 +338,70 @@ async function proveSaleCreate(makeWorker, baseline = false, controls = false) {
 }
 
 
+async function proveSaleAdd(makeWorker, baseline = false, controls = false) {
+  const money = loadStockSession('lib/moneyPrecision.ts')
+  for (const tier of ['free','paid']) for (const source of ['tagged','receipt','unlotted']) for (const control of controls?['race','late','ack']:['normal']) {
+    const f = await world(makeWorker,tier,'zero',seed(0.4,source!=='unlotted'))
+    try {
+      const price=f.sql.prepare('SELECT selling_price_usd FROM products WHERE id=1').get().selling_price_usd
+      const quote=quantity=>({gross_usd:money.multiplyMoney4(price,quantity),product_discount_usd:0,manual_discount_usd:0,total_usd:money.multiplyMoney4(price,quantity),total_khr:money.multiplyMoney4(money.multiplyMoney4(price,quantity),4000)})
+      const created=await f.call('/sales',{offline_owner:{version:1,actor_id:7,organization_id:null,authority:'https://admin.business.test',runtime:'cloudflare-workers'},branch_id:1,money_precision_version:1,
+        items:[{product_id:1,branch_id:1,quantity:0.1,applied_price_usd:price,client_line_key:'quantity-add-base',pricing_source:'selling',pricing_quote:quote(0.1)}],exchange_rate:4000,payment_method:'Cash',payment_currency:'USD',amount_paid_usd:money.multiplyMoney4(price,0.1),client_request_id:'quantity-add-base'})
+      assert.equal(created.status,200,JSON.stringify(created.json))
+      if(source==='tagged')assert.equal((await tag(f,0.3,true,'quantity-add-tag')).status,200)
+      const url='/sales/'+created.json.id+'/items'
+      const body={money_precision_version:1,client_request_id:'quantity-add',expected_exchange_rate:4000,items:[0.1,0.2].map((quantity,index)=>({product_id:1,branch_id:1,quantity,
+        ...(source==='tagged'?{damaged_lot_id:1}:source==='receipt'?{batch_id:1}:{unlotted_stock:true}),client_line_key:'quantity-added-'+index,pricing_source:'selling',pricing_quote:quote(quantity)}))}
+      const before=f.state()
+      let review=await f.call(url,body)
+      if(baseline){assert.notEqual(review.status,200);assert.deepEqual(f.state(),before);console.log('PASS preserved old repeated decimal sale addition refusal '+tier+'/'+source);continue}
+      assert.equal(review.status,409,JSON.stringify(review.json))
+      assert.ok(review.json.header_quote,JSON.stringify(review.json))
+      body.expected_header_quote=review.json.header_quote
+      if(control==='race') {
+        const statements=[{sql:'UPDATE branch_stock SET quantity=0.2 WHERE product_id=1 AND branch_id=1'},{sql:'UPDATE products SET stock_quantity=0.2 WHERE id=1'}]
+        if(source!=='unlotted')statements.push({sql:'UPDATE branch_batch_stock SET quantity=0.2 WHERE batch_id=1 AND branch_id=1'})
+        if(source==='tagged')statements.push({sql:'UPDATE damaged_stock_lots SET quantity_remaining=0.2 WHERE id=1'})
+        f.competeBeforeCommit(statements)
+        const refused=await f.call(url,body)
+        assert.equal(refused.status,409,JSON.stringify(refused.json))
+        assert.equal(refused.json.code,'counted_quantity_conflict')
+        assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM sale_items WHERE sale_id=?').get(created.json.id).n,1)
+        assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_receipts WHERE request_id='quantity-add'").get().n,0)
+        assert.equal(f.state().movements.length,before.movements.length)
+        body.items=body.items.map(item=>({...item,quantity:0.1,pricing_quote:quote(0.1)}))
+      }
+      if(control==='late'){f.failWhenSqlMatches(/INSERT INTO audit_logs/);assert.equal((await f.call(url,body)).status,500);assert.deepEqual(f.state(),before)}
+      if(control==='ack')f.loseNextCommitAcknowledgement()
+      const added=await f.call(url,body)
+      assert.equal(added.status,200,JSON.stringify(added.json))
+      assert.equal(added.json.unitsDeducted,control==='race'?0.2:0.3)
+      const moved=[0.1,control==='race'?0.1:0.2]
+      const captured=f.sql.prepare('SELECT cost_price_usd,cost_price_khr FROM sale_items WHERE sale_id=? ORDER BY id').all(created.json.id).slice(1)
+      assert.deepEqual(f.sql.prepare("SELECT quantity,unit_cost_usd,unit_cost_khr,user_id,reference_id FROM inventory_movements WHERE reference_id=? AND reason=? ORDER BY id").all(created.json.id,'Item added to sale #'+created.json.id),
+        moved.map((quantity,index)=>({quantity:-quantity,unit_cost_usd:captured[index].cost_price_usd,unit_cost_khr:captured[index].cost_price_khr,user_id:7,reference_id:created.json.id})))
+      assert.deepEqual(f.sql.prepare("SELECT quantity_after,units_moved FROM sale_amendments WHERE sale_id=? AND kind='line_added' ORDER BY id").all(created.json.id),moved.map(quantity=>({quantity_after:quantity,units_moved:-quantity})))
+      assert.equal(f.state().cache,0);assert.equal(f.state().physical,0)
+      if(source==='tagged')assert.equal(f.state().tags[0].quantity_remaining,0)
+      if(source!=='unlotted')assert.equal(f.state().lots[0].quantity,0)
+      const committed=f.state();assert.equal((await f.call(url,body)).status,200);assert.deepEqual(f.state(),committed)
+      const history=added.json.actionHistoryId
+      if(source==='receipt'&&control==='normal')await loadStockSession('lib/stockTransaction.ts').executeStockTransaction(loadStockSession('lib/db.ts').getDb(f.env),[
+        {sql:'DELETE FROM branch_batch_stock WHERE batch_id=1 AND branch_id=1'}, {sql:'UPDATE product_batches SET is_active=0 WHERE id=1'}],'once')
+      const undone=await f.call('/action-history/'+history+'/undo',{expected_generation:0})
+      assert.equal(undone.status,200,JSON.stringify(undone.json))
+      const restored=control==='race'?0.2:0.3
+      assert.equal(f.state().cache,restored);assert.equal(f.state().physical,restored)
+      if(source!=='unlotted')assert.equal(f.state().lots[0].quantity,restored)
+      if(source==='tagged')assert.equal(f.state().tags[0].quantity_remaining,restored)
+      assert.equal((await f.call('/action-history/'+history+'/redo',{expected_generation:1})).status,200)
+      assert.equal(f.state().cache,0);assert.equal(f.state().physical,0)
+      assert.equal(f.sql.prepare('SELECT unit_cost_usd FROM product_batches WHERE id=1').get().unit_cost_usd,2)
+      console.log('PASS actual exact repeated fractional sale addition/replay/UndoRedo '+tier+'/'+source+'/'+control)
+    } finally {f.sql.close()}
+  }
+}
+
 async function main() {
   const bounded = loadStockSession('lib/countedDamagedStock.ts')
   assert.equal(bounded.sumCountedQuantities(Array(10_001).fill(0.00001)), 0.10001)
@@ -346,6 +410,8 @@ async function main() {
   const makeWorker = await bundle.exports.bundleWorker()
   await proveSaleCreate(makeWorker)
   await proveSaleCreate(makeWorker,false,true)
+  await proveSaleAdd(makeWorker)
+  await proveSaleAdd(makeWorker,false,true)
   await proveMultiBranch(makeWorker)
   await proveReceiptActivation(makeWorker)
   await proveBulkReturns(makeWorker)
@@ -493,4 +559,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })
-module.exports = { world, bundle, loadStockSession, tag, clear, seed, quantities, replay, proveStaleCount, proveMultiBranch, proveReceiptActivation, proveBulkReturns, proveSaleCreate }
+module.exports = { world, bundle, loadStockSession, tag, clear, seed, quantities, replay, proveStaleCount, proveMultiBranch, proveReceiptActivation, proveBulkReturns, proveSaleCreate, proveSaleAdd }
