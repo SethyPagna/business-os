@@ -16,7 +16,7 @@ import {
 
 export type TaggedLotActor = { userId: number | string | null; userName: string | null }
 
-/** One open held lot, oldest first -- what allocateTaggedLots draws from. */
+/** One open tagged lot, oldest first -- what allocateTaggedLots draws from. */
 export type OpenTaggedLot = {
   id: number
   batch_id: number | null
@@ -27,12 +27,12 @@ export type OpenTaggedLot = {
 export type TaggedLotTake = { lotId: number; batchId: number | null; quantity: number; unitCostUsd: number | null }
 
 /**
- * FIFO across a tag's open lots. Oldest lot first, because a held unit's cost
- * and its provenance belong to the lot it came from and the oldest held units
+ * FIFO across a tag's open lots. Oldest lot first, because a tagged unit's cost
+ * and its provenance belong to the lot it came from and the oldest tagged units
  * are the ones an operator means when they say "throw the broken ones out".
  * `uncovered` is what the lots could not supply; every caller refuses rather
  * than partially applying, so a stale client count can never dispose of more
- * than is held.
+ * than is tagged.
  */
 export function allocateTaggedLots(lots: OpenTaggedLot[], quantity: number): { takes: TaggedLotTake[]; uncovered: number } {
   let remaining = Math.max(0, Number(quantity) || 0)
@@ -104,7 +104,7 @@ export type HoldAsTaggedInput = {
   tag: StockConditionTag
   source: Extract<StockConditionSource, 'remove' | 'restock'>
   reason: string | null
-  /** The cost the movement records. Held units are valued at this, and the
+  /** The cost the movement records. Tagged units are valued at this, and the
    *  same USD unit cost is stamped on the lot so a later disposal can book the
    *  loss at what the goods actually cost, not at today's catalog price. */
   cost: MovementCostPair

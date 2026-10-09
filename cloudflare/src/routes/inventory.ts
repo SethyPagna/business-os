@@ -2502,14 +2502,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     } else await applyStockDelta(c.env, targetProductId, branchId, delta, type === 'add')
   }
 
-  // P3-L6 HOLD (remove): the units have just left sellable stock above. A
-  // tagged removal records them as still-owned held stock instead of a
-  // destruction: one db.batch writes the damage_out movement AND the
-  // damaged_stock_lots row, so there is no state where stock left sellable
-  // with no held row to restore it from. The movement carries the same cost
-  // snapshot the plain removal would have carried, so the units are valued
-  // at what they cost -- but as damage_out, which a loss report must not
-  // count; the loss is booked once, when the held row is disposed of.
+  // Tagging retains physical stock. Its condition rows and history commit together.
   if (conditionTag && type === 'remove' && delta !== 0 && !movementWrittenAtomically) {
     await executeStockTransaction(db, addressedStatements(landing, holdRemovedStatements(conditionTag)), 'retry')
     movementWrittenAtomically = true
@@ -3223,15 +3216,7 @@ app.patch('/movements/:id/reason', async (c) => {
   return c.json({ success: true, id, reason })
 })
 
-// ---- P3-L6: tagged (held, non-sellable) stock rows --------------------
-//
-// The Products page shows held units as their own child row inside the
-// product group -- one row per (product, tag, branch), qty =
-// SUM(quantity_remaining). The row is DELIBERATELY not part of the group's
-// sellable rows: it is never in branch_stock, never in the POS/product
-// pickers, and never inside the group's stock total. Reading it through its
-// own endpoint (rather than folding it into the products list) is what makes
-// that exclusion structural instead of a filter somebody can forget.
+// Tagged rows describe a subset of physical stock, grouped by product, tag and branch.
 app.get('/tagged-lots', async (c) => {
   const ids = String(c.req.query('productIds') || c.req.query('productId') || '')
     .split(',')
