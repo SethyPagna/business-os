@@ -1,3 +1,4 @@
+import { planCountedTaggedChange, ordinarySubsetSql, ordinaryNullCapacityGuard, type CountedTaggedIdentity } from '../lib/countedDamagedStock'
 import { executeStockTransaction, stockTransactionStatementCount } from '../lib/stockTransaction'
 import { productStockGuardError, productStockGuardStatement } from '../lib/productStockGuard'
 import { Hono, type Context } from 'hono'
@@ -375,7 +376,7 @@ function canonicalSaleItemsSql() {
     'cost_price_usd','cost_price_khr','total_usd','total_khr','branch_id','price_mode','product_discount_type',
     'product_discount_label','product_discount_usd','product_discount_khr','base_price_usd','base_price_khr',
     'manual_discount_type','manual_discount_value','manual_discount_usd','manual_discount_khr','batch_id','batch_label','batch_expiry_date','damaged_lot_id','returned_quantity','pricing_snapshot_json']
-  return `(SELECT json_group_array(json_object(${keys.map(key => `'${key}',i.${key}`).join(',')}))
+  return `(SELECT json_group_array(json_object(${keys.map(key => `'${key}',i.${key}`).join(',')},'condition_snapshot',json((SELECT json_object('version',1,'lot_id',ci.lot_id,'product_id',ci.product_id,'branch_id',ci.branch_id,'batch_id',ci.batch_id,'condition_tag',ci.condition_tag) FROM counted_sale_item_conditions ci WHERE ci.sale_item_id=i.id))))
     FROM (SELECT * FROM sale_items WHERE sale_id=s.id ORDER BY id) i)`
 }
 
@@ -790,22 +791,24 @@ app.post('/', async (c) => {
   // 11.9: damaged-source availability (plain read, same validate-then-write
   // shape as above; consumeDamagedLot's own WHERE clause below remains the
   // real race guard).
-  const damagedItems = normalized.filter((item) => item.damaged_lot_id && shouldDeductStock)
+  const damagedLotIdentities = new Map<number, CountedTaggedIdentity>()
+  const damagedItems = normalized.filter((item) => item.damaged_lot_id)
   if (damagedItems.length) {
     // One chunked read instead of a SELECT per damaged line -- same batched
     // shape as the branch_stock and branch_batch_stock checks above.
     const damagedLotIds = [...new Set(damagedItems.map((item) => item.damaged_lot_id as number))]
     const damagedLotRows = await selectInChunks(damagedLotIds, 0, (chunk) => db
-      .prepare(`SELECT id, product_id, quantity_remaining FROM damaged_stock_lots WHERE id IN (${chunk.map(() => '?').join(',')})`)
-      .all<{ id: number; product_id: number; quantity_remaining: number }>(chunk))
+      .prepare(`SELECT id, product_id, branch_id, batch_id, quantity_remaining FROM damaged_stock_lots WHERE id IN (${chunk.map(() => '?').join(',')})`)
+      .all<{ id: number; product_id: number; branch_id: number; batch_id: number | null; quantity_remaining: number }>(chunk))
     const damagedLotMap = new Map(damagedLotRows.map((row) => [Number(row.id), row]))
     for (const item of damagedItems) {
       const lot = damagedLotMap.get(Number(item.damaged_lot_id))
+      if (lot && lot.branch_id === item.branch_id) damagedLotIdentities.set(lot.id, { lotId: lot.id, productId: lot.product_id, branchId: lot.branch_id, batchId: lot.batch_id })
       const name = productMap.get(item.product_id)?.name || `product #${item.product_id}`
-      if (!lot || Number(lot.product_id) !== Number(item.product_id)) {
+      if (!lot || Number(lot.product_id) !== Number(item.product_id) || lot.branch_id !== item.branch_id) {
         return c.json({ error: `The damaged lot picked for ${name} no longer exists for that product. Refresh and pick again.` }, 409)
       }
-      if (item.quantity > (Number(lot.quantity_remaining) || 0)) {
+      if (shouldDeductStock && item.quantity > (Number(lot.quantity_remaining) || 0)) {
         return c.json({ error: `Insufficient damaged stock for ${name}: requested ${item.quantity}, available ${Number(lot.quantity_remaining) || 0}` }, 409)
       }
     }
@@ -1451,27 +1454,9 @@ app.post('/', async (c) => {
     // batch instead of relying on a best-effort compensation write.
     if (shouldDeductStock) {
       for (const item of damagedItems) {
-        statements.push({
-          sql: `SELECT CASE WHEN EXISTS (
-                  SELECT 1 FROM damaged_stock_lots
-                  WHERE id = @lot_id AND product_id = @product_id
-                    AND quantity_remaining >= @quantity
-                ) THEN 1 ELSE json_extract('damaged_stock_conflict', '$') END`,
-          params: {
-            lot_id: Number(item.damaged_lot_id),
-            product_id: item.product_id,
-            quantity: item.quantity,
-          },
-        }, {
-          sql: `UPDATE damaged_stock_lots
-                SET quantity_remaining = quantity_remaining - @quantity, updated_at = datetime('now')
-                WHERE id = @lot_id AND product_id = @product_id AND quantity_remaining >= @quantity`,
-          params: {
-            lot_id: Number(item.damaged_lot_id),
-            product_id: item.product_id,
-            quantity: item.quantity,
-          },
-        })
+        const identity = damagedLotIdentities.get(Number(item.damaged_lot_id))
+        if (!identity) throw new Error('counted_tagged_identity_required')
+        statements.push(...planCountedTaggedChange(identity, item.quantity, 'consume'))
       }
     }
     // The preflight above improves the cashier response, but it cannot guard
@@ -1506,7 +1491,7 @@ app.post('/', async (c) => {
                 JOIN branch_batch_stock bbs
                   ON bbs.batch_id = pb.id
                  AND bbs.branch_id = @branch_id
-                 AND bbs.quantity >= @quantity
+                 AND bbs.quantity-${ordinarySubsetSql('pb.variant_product_id','bbs.branch_id','pb.id')} >= @quantity
                 WHERE pb.id = @batch_id
                   AND pb.variant_product_id = @product_id
                   AND pb.is_active = 1
@@ -1589,6 +1574,10 @@ app.post('/', async (c) => {
             quantity: item.quantity,
           } as FifoLotTake]
         : autoAllocationsByItemIndex.get(itemIndex) || []
+      if (item.branch_id && shouldDeductStock && !item.damaged_lot_id && !item.batch_id) {
+        const allocated = (autoAllocationsByItemIndex.get(itemIndex) || []).reduce((sum, take) => sum + take.quantity, 0)
+        statements.push(ordinaryNullCapacityGuard(item.product_id, item.branch_id, item.quantity - allocated))
+      }
       if (item.branch_id && !item.damaged_lot_id) {
         for (const take of allocationTakes) {
           statements.push({
@@ -1598,7 +1587,7 @@ app.post('/', async (c) => {
                     JOIN branch_batch_stock bbs
                       ON bbs.batch_id = pb.id
                      AND bbs.branch_id = @branch_id
-                     AND bbs.quantity >= @quantity
+                     AND bbs.quantity-${ordinarySubsetSql('pb.variant_product_id','bbs.branch_id','pb.id')} >= @quantity
                     JOIN branches b
                       ON b.id = bbs.branch_id
                      AND ${sellingBranchConditionSql('b')}
@@ -1681,7 +1670,7 @@ app.post('/', async (c) => {
         // which the availability check already rejects for any positive qty.)
         statements.push({
           sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, 0)
-                ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity - @quantity`,
+                ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = CASE WHEN branch_stock.quantity-@quantity>=${ordinarySubsetSql('@product_id','@branch_id')} THEN branch_stock.quantity-@quantity ELSE json_extract('[1]','$[counted_ordinary_conflict]') END`,
           params: { product_id: item.product_id, branch_id: item.branch_id, quantity: item.quantity },
         })
         // 0084: an explicit lot pick stamps the movement; a no-pick line
@@ -2250,7 +2239,7 @@ app.patch('/:id/status', async (c) => {
     cancelFeeNote = String(body.cancel_fee_note || '').trim() || null
   }
 
-  const items = await db.prepare('SELECT id, product_id, product_name, quantity, cost_price_usd, cost_price_khr, branch_id, batch_id, damaged_lot_id, returned_quantity FROM sale_items WHERE sale_id = ?').all<SaleItemRow & { damaged_lot_id: number | null; returned_quantity: number | null }>([id])
+  const items = await db.prepare('SELECT si.id,si.product_id,si.product_name,si.quantity,si.cost_price_usd,si.cost_price_khr,si.branch_id,si.batch_id,si.damaged_lot_id,si.returned_quantity,ci.batch_id AS condition_batch_id,ci.branch_id AS condition_branch_id FROM sale_items si LEFT JOIN counted_sale_item_conditions ci ON ci.sale_item_id=si.id WHERE si.sale_id = ?').all<SaleItemRow & { damaged_lot_id: number | null; returned_quantity: number | null; condition_batch_id: number | null; condition_branch_id: number | null }>([id])
 
   // How much of each line already came back through real returns
   // (non-cancelled, customer scope; return_to_stock does NOT matter here:
@@ -2332,7 +2321,7 @@ app.patch('/:id/status', async (c) => {
     if (refusal) return c.json(refusal, 409)
     throw error
   }
-  const damagedTransitionOps: Array<{ lotId: number; productId: number; productName: string | null; branchId: number | null; delta: number }> = []
+  const damagedTransitionOps: Array<{ lotId: number; productId: number; productName: string | null; branchId: number | null; batchId: number | null; delta: number }> = []
   let skippedDamagedUnits = 0
   for (const item of items) {
     if (!item.damaged_lot_id || !item.product_id) continue
@@ -2346,7 +2335,8 @@ app.patch('/:id/status', async (c) => {
       skippedDamagedUnits += Math.abs(delta)
       continue
     }
-    damagedTransitionOps.push({ lotId: Number(item.damaged_lot_id), productId: item.product_id, productName: item.product_name, branchId: item.branch_id, delta })
+    if (!item.condition_branch_id || item.condition_branch_id !== item.branch_id) return c.json({ error: 'counted_tagged_identity_required' },409)
+    damagedTransitionOps.push({ batchId: item.condition_batch_id, lotId: Number(item.damaged_lot_id), productId: item.product_id, productName: item.product_name, branchId: item.branch_id, delta })
   }
 
   const plan = planSaleStockTransition({
@@ -2679,16 +2669,8 @@ app.patch('/:id/status', async (c) => {
   // revision-guarded batch as regular stock, with the bulk path's identity
   // and quantity bounds. Any failure rolls back the entire transition.
   for (const op of damagedTransitionOps) {
-    const lotParams = { lot: op.lotId, product: op.productId, branch: op.branchId, q: -op.delta }
-    if (lotParams.q > 0) statements.unshift(productStockGuardStatement([op.productId], 'active'))
-    statements.push(bulkAssertion(
-      'EXISTS(SELECT 1 FROM damaged_stock_lots WHERE id=@lot AND product_id=@product AND branch_id IS @branch AND quantity_remaining+@q BETWEEN 0 AND quantity)',
-      lotParams,
-    ))
-    statements.push({
-      sql: `UPDATE damaged_stock_lots SET quantity_remaining=quantity_remaining+@q, updated_at=datetime('now') WHERE id=@lot`,
-      params: lotParams,
-    })
+    if (!op.branchId) throw new Error('counted_tagged_identity_required')
+    statements.push(...planCountedTaggedChange({ lotId: op.lotId, productId: op.productId, branchId: op.branchId, batchId: op.batchId }, Math.abs(op.delta), op.delta > 0 ? 'consume' : 'restore'))
     statements.push({
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name)
             VALUES (@product_id, @product_name, @branch_id, '${op.delta > 0 ? DAMAGE_OUT_MOVEMENT : DAMAGE_IN_MOVEMENT}', @quantity, 0, 0, @reason, @reference_id, @user_id, @user_name)`,

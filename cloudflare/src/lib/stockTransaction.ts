@@ -1,6 +1,6 @@
 import type { BindParams, D1Compat } from './db'
 
-export const STOCK_SCHEMA_EPOCH = 'legacy-separate-pool-v1'
+export const STOCK_SCHEMA_EPOCH = 'counted-tagged-subset-v1'
 
 export interface RestoreStockAuthority { token: string; backupKey: string; snapshot: string }
 

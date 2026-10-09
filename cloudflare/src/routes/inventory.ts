@@ -2123,20 +2123,23 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
       fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
     })
-    return planHoldAsTagged({
+    const slices: Array<{ batchId: number | null; quantity: number }> = removedBatchQuantities.map(entry => ({ batchId: entry.batchId, quantity: entry.quantity }))
+    const remainder = Math.abs(delta) - slices.reduce((sum, entry) => sum + entry.quantity, 0)
+    if (remainder > 0) slices.push({ batchId: null, quantity: remainder })
+    return slices.flatMap(slice => planHoldAsTagged({
       productId: targetProductId,
       productName: targetProductName,
       branchId,
       branchName: branch?.name || null,
-      batchId: useBatchLedger ? resolvedBatchId : null,
-      quantity: Math.abs(delta),
+      batchId: slice.batchId,
+      quantity: slice.quantity,
       tag,
       source: 'remove',
       reason,
-      cost: holdCost,
+      cost: resolveMovementCostSnapshot({ quantity: slice.quantity, components: [{ quantity: slice.quantity, unitCostUsd: slice.batchId == null ? null : removalCostByBatch.get(slice.batchId) ?? null }], fallbackUnitCostUsd: holdCost.unitCostUsd, fallbackUnitCostKhr: holdCost.unitCostKhr }),
       referenceId: sessionId,
       actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
-    })
+    }))
   }
   const movementRowStatement = (): { sql: string; params: Record<string, unknown> } => {
     let costComponents: MovementCostComponent[] = []
@@ -2218,8 +2221,6 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
           quantity, ...addMovementCost, reason: setToNote ? `${reason} (${setToNote})` : reason,
           referenceId: sessionId, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: correctionLot.id } },
       ...(conditionTag ? [
-        ...planRemoveStockAcrossBatches({ productId: targetProductId, branchId, quantity,
-          allocations: [{ batchId: correctionLot.id, quantity }] }).statements,
         ...planHoldAsTagged({ productId: targetProductId, productName: targetProductName, branchId,
           branchName: branch?.name || null, batchId: correctionLot.id, quantity, tag: conditionTag,
           source: 'restock', reason, cost: addMovementCost, referenceId: sessionId,
@@ -2273,7 +2274,6 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
               userId: user?.id ?? null, userName: actorSnapshot(user), batchId: receiptBatchId,
               ...(movementFreeColumn ? { freeQuantity } : {}) },
           },
-          ...removal.statements,
           ...planHoldAsTagged({ productId: targetProductId, productName: targetProductName, branchId,
             branchName: branch?.name || null, batchId: receiptBatchId, quantity, tag: conditionTag, source: 'restock',
             reason, cost: receiptCost, referenceId: sessionId,
@@ -2418,7 +2418,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
             allocations: [{ batchId: batchIdRequested, quantity }] })
           await executeStockMutationBatch(db, addressedStatements(landing, [
             productStockGuardStatement([targetProductId], 'active'),
-            ...removal.statements, ...holdRemovedStatements(conditionTag),
+            ...holdRemovedStatements(conditionTag),
           ]), atomicMark)
           movementWrittenAtomically = true
         } else await removeStockFromBatch(db, { batchId: batchIdRequested, productId: targetProductId, branchId, quantity })
@@ -2461,7 +2461,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         // it; a multi-lot spread or a legacy-aggregate remainder is not.
         resolvedBatchId = plan.batchIds.length === 1 && plan.remainder === 0 ? plan.batchIds[0] : null
         await executeStockMutationBatch(db, addressedStatements(landing, [
-          ...plan.statements,
+          ...(conditionTag ? [] : plan.statements),
           ...(conditionTag ? holdRemovedStatements(conditionTag) : [movementRowStatement()]),
         ]), atomicMark)
       } catch (err) {
@@ -2480,7 +2480,6 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     if (conditionTag && type === 'remove') {
       await executeStockMutationBatch(db, addressedStatements(landing, [
         productStockGuardStatement([targetProductId], 'active'),
-        ...planBranchStockRemoval({ productId: targetProductId, branchId, quantity: Math.abs(delta) }),
         ...holdRemovedStatements(conditionTag),
       ]), atomicMark)
       movementWrittenAtomically = true
@@ -2533,7 +2532,6 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       : planBranchStockRemoval({ productId: targetProductId, branchId, quantity: Math.abs(delta) })
     await executeStockTransaction(db, addressedStatements(landing, [
       productStockGuardStatement([targetProductId], 'active'),
-      ...removal,
       ...planHoldAsTagged({
       productId: targetProductId,
       productName: targetProductName,

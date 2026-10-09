@@ -37,6 +37,7 @@ import { dateToBatchCode, normalizeTypedDate } from './batchCode'
 import { addMoney4, multiplyMoney4, nullableMoney4, roundMoney4, sellingPriceCeilCent } from './moneyPrecision'
 import { buildInClause, selectInChunks } from './sqlBinding'
 import { executeStockTransaction } from './stockTransaction'
+import { ordinarySubsetSql, ordinaryNullCapacityGuard } from './countedDamagedStock'
 
 export type ProductBatchRow = {
   id: number
@@ -773,6 +774,8 @@ export function planRemoveStockFromBatch(input: RemoveBatchStockPlanInput): { st
   if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Quantity must be a positive number')
   const params = { batchId, productId, branchId, quantity }
   return { statements: [
+    ...planBranchStockRemoval({ productId, branchId, quantity }).slice(0,1),
+    { sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=@batchId AND branch_id=@branchId AND quantity-${ordinarySubsetSql('@productId', '@branchId', '@batchId')}>=@quantity) THEN 1 ELSE json_extract('[1]','$[counted_ordinary_conflict]') END`, params },
     {
       sql: `UPDATE branch_batch_stock SET quantity = quantity - @quantity, updated_at = datetime('now')
             WHERE batch_id = @batchId AND branch_id = @branchId`,
@@ -973,7 +976,7 @@ export async function resolveDestinationBatch(
 // caller's whole atomic batch, so an oversell fails instead of flooring the lot.
 export function decrementBatchStockStrictStatement(batchId: number, branchId: number, quantity: number): { sql: string; params: Record<string, unknown> } {
   return {
-    sql: `UPDATE branch_batch_stock SET quantity = quantity - @quantity, updated_at = datetime('now')
+    sql: `UPDATE branch_batch_stock SET quantity = CASE WHEN quantity-@quantity>=${ordinarySubsetSql('(SELECT variant_product_id FROM product_batches WHERE id=@batchId)', '@branchId', '@batchId')} THEN quantity-@quantity ELSE json_extract('[1]','$[counted_ordinary_conflict]') END, updated_at = datetime('now')
           WHERE batch_id = @batchId AND branch_id = @branchId`,
     params: { batchId, branchId, quantity },
   }
@@ -1025,7 +1028,7 @@ export type FifoLotAvailability = {
 // after every dated one), then batch_number/id for a stable tiebreak.
 export async function readFifoLotAvailability(db: D1Compat, productId: number, branchId: number): Promise<FifoLotAvailability[]> {
   const rows = await db.prepare(`
-    SELECT pb.id AS batch_id, pb.lot_code, pb.received_at, pb.expiry_date, bbs.quantity AS available
+    SELECT pb.id AS batch_id, pb.lot_code, pb.received_at, pb.expiry_date, bbs.quantity - ${ordinarySubsetSql('pb.variant_product_id', 'bbs.branch_id', 'pb.id')} AS available
     FROM product_batches pb
     JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
     WHERE pb.variant_product_id = @productId AND pb.is_active = 1 AND bbs.quantity > 0
@@ -1058,7 +1061,7 @@ export async function readFifoLotAvailabilityForCart(
   // product ids (branches are few, usually one POS branch).
   const rows = await selectInChunks(productIds, branchIds.length, (chunk) => db.prepare(`
     SELECT pb.variant_product_id AS product_id, bbs.branch_id AS branch_id,
-           pb.id AS batch_id, pb.lot_code, pb.received_at, pb.expiry_date, bbs.quantity AS available
+           pb.id AS batch_id, pb.lot_code, pb.received_at, pb.expiry_date, bbs.quantity - ${ordinarySubsetSql('pb.variant_product_id', 'bbs.branch_id', 'pb.id')} AS available
     FROM product_batches pb
     JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
     WHERE pb.variant_product_id IN (${chunk.map(() => '?').join(',')})
@@ -1167,7 +1170,7 @@ export function planBranchStockRemoval(input: { productId: number; branchId: num
     {
       sql: `SELECT CASE WHEN EXISTS(
           SELECT 1 FROM branch_stock
-          WHERE product_id=@productId AND branch_id=@branchId AND quantity>=@quantity
+          WHERE product_id=@productId AND branch_id=@branchId AND quantity-${ordinarySubsetSql('@productId', '@branchId')}>=@quantity
         ) THEN 1 ELSE json_extract('stock_removal_conflict','$') END AS branch_stock_guard`,
       params,
     },
@@ -1257,6 +1260,7 @@ export function planRemoveStockAcrossBatches(input: {
   remaining = Math.max(0, remaining)
 
   const statements: StockWriteStatement[] = [
+    ordinaryNullCapacityGuard(productId, branchId, remaining),
     // The exact pre-read allocation and its cost snapshot travel together.
     // Fail the entire D1 batch before any decrement if a concurrent write
     // consumed/deleted/reassigned one of those lots. A newly inserted FIFO
@@ -1266,7 +1270,7 @@ export function planRemoveStockAcrossBatches(input: {
           SELECT 1 FROM branch_batch_stock bbs
           JOIN product_batches pb ON pb.id=bbs.batch_id
           WHERE bbs.batch_id=@batchId AND bbs.branch_id=@branchId
-            AND pb.variant_product_id=@productId AND pb.is_active=1 AND bbs.quantity>=@quantity
+            AND pb.variant_product_id=@productId AND pb.is_active=1 AND bbs.quantity-${ordinarySubsetSql('@productId', '@branchId', '@batchId')}>=@quantity
         ) THEN 1 ELSE json_extract('captured_batch_allocation_conflict','$') END AS allocation_guard`,
       params: { batchId, branchId, productId, quantity: take },
     })),
