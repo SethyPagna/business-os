@@ -440,7 +440,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     const nextStatus = direction === 'undo' ? 'redoable' : 'undoable'
     // A scoped Set replays by generation like a stock session: its applier
     // checks the generation and state itself, and a repeat is idempotent.
-    const stockReplay = [COUNTED_CONDITION_HISTORY_KIND, STOCK_SESSION_KIND, STOCK_LOT_SET_KIND, STOCK_IN_LINE_EDIT_KIND].includes(String(parseJson(existing.undo_payload)?.applier || ''))
+    const stockReplay = [COUNTED_CONDITION_HISTORY_KIND, STOCK_SESSION_KIND, STOCK_LOT_SET_KIND, STOCK_IN_LINE_EDIT_KIND, TRANSFER_OPERATION_KIND].includes(String(parseJson(existing.undo_payload)?.applier || ''))
     const groupReplay = parseJson(existing.undo_payload)?.applier === PRODUCT_MERGE_GROUP_ACTION_KIND
     const productRemoveReplay = parseJson(existing.undo_payload)?.applier === PRODUCT_REMOVE_ACTION_KIND
     const transferReplay = parseJson(existing.undo_payload)?.applier === TRANSFER_OPERATION_KIND
@@ -504,7 +504,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         // serving the pre-undo numbers until its TTL. One 'stock' bump here
         // covers appliers without their own stock invalidation. Lazy and fully swallowed: a cache fault must
         // never turn an applied undo into an error.
-        if (applier.name !== STOCK_SESSION_KIND && applier.name !== BULK_STATUS_KIND) {
+        if (applier.name !== STOCK_SESSION_KIND && applier.name !== BULK_STATUS_KIND && applier.name !== TRANSFER_OPERATION_KIND) {
           const stockBump = import('../lib/cache').then(({ bumpVersion }) => bumpVersion(c.env, 'stock')).catch(() => {})
           try { c.executionCtx.waitUntil(stockBump) } catch { void stockBump }
         }

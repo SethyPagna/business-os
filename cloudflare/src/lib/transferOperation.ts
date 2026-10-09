@@ -1,17 +1,19 @@
-import { executeStockTransaction, stockTransactionStatementCount, StockTransactionUnavailableError } from './stockTransaction'
+import { executeStockTransaction, stockTransactionStatementCount, StockTransactionUnavailableError, StockTransactionOutcomeUnknownError } from './stockTransaction'
 import { productStockGuardError } from './productStockGuard'
 import { getDb, type D1Compat } from './db'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import { getActionTier } from './permissions'
 import { actorSnapshot } from './actorSnapshot'
-import { CountedStockBatchPlan, countedStockFactsSql, isCountedStockConflict, subtractCountedQuantity, sumCountedQuantities } from './countedDamagedStock'
+import { CountedStockBatchPlan, countedStockFactsSql, CountedStockConflictError, subtractCountedQuantity, sumCountedQuantities } from './countedDamagedStock'
 import { MoneyPrecisionError } from './moneyPrecision'
 import { stockActorParams, stockActorPredicate } from './stockActorGuard'
 import { canonicalTransferAuthorityGuardStatement } from './canonicalBranchIdentity'
 import { transferIntentAuditStatement } from './transferOperationReceipt'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { bumpVersion } from './cache'
+import { bumpVersions } from './cache'
+import { currentRequestMetrics } from './requestMetrics'
+import { getPlanLimits } from './planTier'
 import { resolveMovementCostSnapshot, type MovementCostPair } from './movementCostSnapshot'
 
 export const TRANSFER_OPERATION_KIND = 'stock.transfer'
@@ -43,6 +45,8 @@ export class TransferConflictError extends Error {
   code: string
   constructor(message: string, code = 'stock_conflict') { super(message); this.code = code }
 }
+const isTransferStockConflict = (error: unknown) => error instanceof CountedStockConflictError
+  || (error instanceof Error ? error.message : String(error)).includes('$[counted_quantity_conflict]')
 const refuse = (code: Exclude<TransferRefusalCode, 'transfer_maintenance_active'>) => new TransferConflictError(TRANSFER_REFUSALS[code], code)
 const productSnapshotSql = `json_object('id',id,'name',name,'barcode',barcode,'created_at',created_at,'is_active',is_active)`
 const lotSnapshotSql = `json_object('id',id,'variant_product_id',variant_product_id,'batch_key',batch_key,'lot_code',lot_code,'received_at',received_at,'expiry_date',expiry_date,'notes',notes)`
@@ -103,7 +107,6 @@ export async function planTransferOperation(db: D1Compat, args: {
     sql: `INSERT INTO transfer_operation_receipts(actor_id,request_id,request_digest,request_json,status,operation_id,provenance_version,replay_state,generation)
       VALUES(@actor,@request,@digest,@requestJson,'planning',@operation,1,'applied',0)`, params,
   }, transferIntentAuditStatement({ actorId: args.user.id, actorName: actorSnapshot(args.user), requestId: args.requestId, requestJson: args.requestJson, digest: args.digest, bulk: args.lines.length > 1 })]
-  const members: Member[] = []
   const allocationSummaries: TransferAllocationSummary[] = []
   const pendingLots = new Map<string, string>()
 
@@ -189,7 +192,6 @@ export async function planTransferOperation(db: D1Compat, args: {
       untracked_quantity: uncovered, source_snapshot: JSON.stringify({ ...JSON.parse(snapshots[0]!.snapshot),
         untracked_cost_snapshot: uncovered > 0 ? resolveMovementCostSnapshot({ quantity: uncovered, ...fallback }) : null }),
       destination_snapshot: snapshots[1]!.snapshot, allocations_json: JSON.stringify(allocations) }
-    members.push(member)
     statements.push({ sql: `INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_branch_id,destination_branch_id,quantity,untracked_quantity,source_snapshot,destination_snapshot,allocations_json)
       SELECT ${receiptSql},@ordinal,@sourceProduct,@destProduct,@sourceBranch,@destBranch,@quantity,@untracked,@sourceSnapshot,@destSnapshot,
         (SELECT json_group_array(json_set(a.value,'$.destination_batch_id',b.id,'$.destination_snapshot',json(${lotSnapshotSql.replaceAll(/\b(id|variant_product_id|batch_key|lot_code|received_at|expiry_date|notes)\b(?=[,)])/g, 'b.$1')})))
@@ -225,7 +227,7 @@ export type TransferRefusal = { status: 409 | 503; body: { error: string; code: 
  * receipt first: a same-key request that won the race is a replay. */
 export function transferRefusal(error: unknown): TransferRefusal | null {
   if (error instanceof StockTransactionUnavailableError) return { status: 503, body: { error: error.message, code: error.code } }
-  if (isCountedStockConflict(error) || error instanceof MoneyPrecisionError) return { status: 409, body: { error: TRANSFER_REFUSALS.transfer_stock_changed, code: 'transfer_stock_changed' } }
+  if (isTransferStockConflict(error) || error instanceof MoneyPrecisionError) return { status: 409, body: { error: TRANSFER_REFUSALS.transfer_stock_changed, code: 'transfer_stock_changed' } }
   if (error instanceof TransferConflictError) return { status: 409, body: { error: error.message, code: error.code } }
   const activeGuard = productStockGuardError(error)
   if (activeGuard) return { status: 409, body: { error: activeGuard.message, code: activeGuard.code } }
@@ -279,7 +281,7 @@ export function transferEffectStatements(operation: string, reverse: boolean, ge
   ]
 }
 
-export async function replayTransferOperation(env: Env, user: SessionUser, direction: 'undo' | 'redo', historyId: number, expectedGeneration: unknown, payload: Record<string, unknown>): Promise<void> {
+async function executeTransferReplay(env: Env, user: SessionUser, direction: 'undo' | 'redo', historyId: number, expectedGeneration: unknown, payload: Record<string, unknown>): Promise<void> {
   const db = getDb(env)
   if (!Number.isSafeInteger(expectedGeneration) || Number(expectedGeneration)<0 || !canReplayTransferPayload(user, payload)) throw new TransferConflictError('An authorized transfer generation is required.')
   const operation = await db.prepare(`SELECT * FROM transfer_operation_receipts WHERE operation_id=@operation AND action_history_id=@history AND provenance_version=1 AND status='committed'`).get<Record<string, unknown>>({ operation: payload.operation_id, history: historyId })
@@ -338,15 +340,31 @@ export async function replayTransferOperation(env: Env, user: SessionUser, direc
     { sql: `UPDATE action_history SET status=@status,last_error=NULL,updated_at=CURRENT_TIMESTAMP,undo_payload=json_set(undo_payload,'$.generation',@next),redo_payload=json_set(redo_payload,'$.generation',@next) WHERE id=@history`, params },
     { sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details) VALUES(@actor,@name,@action,'stock_transfer',@operation,@details)`, params: { actor: user.id, name: actorSnapshot(user), action: `action_${direction}`, operation: payload.operation_id, details: JSON.stringify({ operation_id: payload.operation_id, history_id: historyId, generation: generation+1 }) } },
   ]
-  try { await executeStockTransaction(db, statements, 'retry') } catch (error) {
-    const current = await db.prepare(`SELECT generation,replay_state FROM transfer_operation_receipts WHERE operation_id=@operation`).get<{ generation: number; replay_state: string }>({ operation: payload.operation_id })
+  const limits = getPlanLimits(env)
+  const metrics = currentRequestMetrics()
+  const completionReserve = limits.tier === 'free' ? 10 : 8
+  if (!metrics || metrics.invocation.attemptedStatements + stockTransactionStatementCount(statements.length) + completionReserve > limits.d1QueriesPerInvocation) throw refuse('transfer_too_many_lots')
+  try { await executeStockTransaction(db, statements, 'once') } catch (error) {
+    let current: { generation: number; replay_state: string } | undefined
+    try { current = await db.prepare(`SELECT generation,replay_state FROM transfer_operation_receipts WHERE operation_id=@operation`).get<{ generation: number; replay_state: string }>({ operation: payload.operation_id }) }
+    catch { throw Object.assign(new StockTransactionOutcomeUnknownError(), { statusCode: 503 }) }
     if (current?.generation === generation+1 && current.replay_state === target) return
     const activeGuard = productStockGuardError(error)
     if (activeGuard) throw activeGuard
-    throw new TransferConflictError('The exact transferred stock or product changed. Refresh and check its history.')
+    const refusal = transferRefusal(error)
+    if (refusal) throw Object.assign(new Error(refusal.body.error), { code: refusal.body.code, statusCode: refusal.status })
+    throw Object.assign(new StockTransactionOutcomeUnknownError(), { statusCode: 503 })
+  }
+}
+
+export async function replayTransferOperation(env: Env, user: SessionUser, direction: 'undo' | 'redo', historyId: number, expectedGeneration: unknown, payload: Record<string, unknown>): Promise<void> {
+  try { await executeTransferReplay(env, user, direction, historyId, expectedGeneration, payload) }
+  catch (error) {
+    if (isTransferStockConflict(error) || error instanceof MoneyPrecisionError) throw refuse('transfer_stock_changed')
+    throw error
   }
 }
 
 export async function notifyTransferOperation(env: Env): Promise<void> {
-  await Promise.all([broadcast(env, 'branches', { action: 'transfer' }), broadcast(env, 'products', { action: 'update' }), broadcast(env, 'inventory', { action: 'transfer' }), bumpVersion(env, 'products')])
+  await Promise.all([broadcast(env, 'branches', { action: 'transfer' }), broadcast(env, 'products', { action: 'update' }), broadcast(env, 'inventory', { action: 'transfer' }), bumpVersions(env, ['products', 'stock'])])
 }
