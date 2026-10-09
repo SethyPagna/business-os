@@ -1,3 +1,5 @@
+import { subtractDecimalSum } from './moneyPrecision.ts'
+
 // Receipt facts for a stock-IN, shared by every adjust surface (S4-15/S4-16).
 //
 // The Sessions list has always had Supplier, Payment and Total cost columns,
@@ -183,9 +185,14 @@ export function scopedSetPreview(input: {
   const beforeLotQuantity = Number(input.lotQuantity)
   const beforeBranchQuantity = Number(input.branchQuantity)
   const finite = [targetQuantity, beforeLotQuantity, beforeBranchQuantity].every(Number.isFinite)
-  const delta = scope === 'lot' ? targetQuantity - beforeLotQuantity : targetQuantity - beforeBranchQuantity
-  const afterLotQuantity = beforeLotQuantity + delta
-  const afterBranchQuantity = scope === 'lot' ? Math.max(0, beforeBranchQuantity + delta) : targetQuantity
+  let delta = NaN, afterLotQuantity = NaN, afterBranchQuantity = NaN
+  if (finite) {
+    try {
+      delta = Number(subtractDecimalSum(targetQuantity, [scope === 'lot' ? beforeLotQuantity : beforeBranchQuantity]))
+      afterLotQuantity = scope === 'lot' ? targetQuantity : Number(subtractDecimalSum(beforeLotQuantity, [-delta]))
+      afterBranchQuantity = scope === 'lot' ? Math.max(0, Number(subtractDecimalSum(beforeBranchQuantity, [-delta]))) : targetQuantity
+    } catch { /* Unsupported decimal input remains an invalid preview. */ }
+  }
   return {
     scope, targetQuantity, beforeLotQuantity, beforeBranchQuantity, delta, afterLotQuantity, afterBranchQuantity,
     valid: finite && targetQuantity >= 0 && afterLotQuantity >= 0 && afterBranchQuantity >= 0,

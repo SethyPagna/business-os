@@ -31,11 +31,22 @@ import {
   stockReceiptWire,
   stockReceiptGateCode,
   adjustBranchQuantity,
+  scopedSetPreview,
   STOCK_RECEIPT_GATE_CODES,
   STOCK_RECEIPT_GATE_KEYS,
 } from '../src/utils/stockReceiptFields.ts'
 
 let failed = 0
+for (const scope of ['lot', 'branch']) {
+  const preview = scopedSetPreview({ scope, targetQuantity: 0.3, lotQuantity: 7, branchQuantity: 7 })
+  assert.equal(preview.valid, true)
+  assert.equal(preview.delta, -6.7)
+  assert.equal(preview.afterLotQuantity, 0.3)
+  assert.equal(preview.afterBranchQuantity, 0.3)
+  assert.equal(scopedSetPreview({ scope, targetQuantity: NaN, lotQuantity: 7, branchQuantity: 7 }).valid, false)
+}
+assert.equal(scopedSetPreview({ scope: 'branch', targetQuantity: 0.3, lotQuantity: 6.7, branchQuantity: 7 }).afterLotQuantity, 0)
+assert.equal(scopedSetPreview({ scope: 'lot', targetQuantity: 0.3, lotQuantity: 7, branchQuantity: 7.2 }).afterBranchQuantity, 0.5)
 function runTest(name: string, fn: () => void): void {
   try {
     fn()

@@ -11,6 +11,8 @@
 // redo are retired; the session applies the same lot rules to every line.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
+import { subtractDecimalSum } from '../src/utils/moneyPrecision.ts'
 
 import { bulkActionCanReceive, isBatchPickerVisible, isStockInSubmission, normalizeStockSetScope, scopedSetPreview } from '../src/utils/stockReceiptFields.ts'
 import { isRevertibleStockMovement } from '../src/utils/stockMovementDetail.ts'
@@ -44,7 +46,24 @@ test('scoped Set preview matches the Worker lot and branch arithmetic', () => {
     'a branch-total Set cannot drain more than the selected lot holds')
   // Part-77 floor, as the Worker applies it: a drifted aggregate floors at 0.
   assert.equal(scopedSetPreview({ scope: 'lot', targetQuantity: 0, lotQuantity: 10, branchQuantity: 4 }).afterBranchQuantity, 0)
-  assert.match(worker, /Math\.max\(0, before\.branchQuantity \+ lotDelta\)/, 'the Worker floors the same way')
+  const body = worker.match(/function snapshotAfter\([\s\S]*?\n\}/)?.[0]
+  assert.ok(body)
+  const plan = new Function('subtractDecimalSum', stripTypeScriptTypes(body) + '; return snapshotAfter;')(subtractDecimalSum)
+  for (const input of [
+    { scope: 'lot', targetQuantity: 0, lotQuantity: 10, branchQuantity: 4 },
+    { scope: 'lot', targetQuantity: 0.3, lotQuantity: 7, branchQuantity: 7 },
+    { scope: 'branch', targetQuantity: 0.3, lotQuantity: 6.7, branchQuantity: 7 },
+    { scope: 'branch', targetQuantity: 0.3, lotQuantity: 6.6, branchQuantity: 7 },
+  ]) {
+    const client = scopedSetPreview(input)
+    const server = plan({ ...input, productQuantity: input.branchQuantity }, { setScope: input.scope, quantity: input.targetQuantity })
+    assert.equal(Boolean(server), client.valid)
+    if (server) {
+      assert.equal(server.lotDelta, client.delta)
+      assert.equal(server.after.lotQuantity, client.afterLotQuantity)
+      assert.equal(server.after.branchQuantity, client.afterBranchQuantity)
+    }
+  }
   assert.equal(normalizeStockSetScope(undefined), 'lot', 'the selected received date is the default')
 })
 

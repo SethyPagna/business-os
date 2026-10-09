@@ -20,6 +20,7 @@
 import type { D1Compat } from './db'
 import type { StockMovementRevertPreview } from './stockMovementReplay'
 import { LEDGER_OUT_TYPES } from './stockLedgerQuery'
+import { subtractDecimalSum } from './moneyPrecision'
 
 export type StockRevertEffect = {
   /** The change the Revert makes to stock, signed: -30 takes 30 out. */
@@ -79,9 +80,9 @@ export async function revertEffect(db: D1Compat, movementId: number, revert: Sto
     if (!operation) return null
     const before = JSON.parse(operation.before_json), after = JSON.parse(operation.after_json)
     const sign = revert.direction === 'redo' ? 1 : -1
-    quantity = sign * (Number(after.lotQuantity) - Number(before.lotQuantity))
+    quantity = sign * Number(subtractDecimalSum(Number(after.lotQuantity), [Number(before.lotQuantity)]))
     // The branch moves by its own recorded delta, which differs from the lot's under the lot-scope floor.
-    branchChange = sign * (Number(after.branchQuantity) - Number(before.branchQuantity))
+    branchChange = sign * Number(subtractDecimalSum(Number(after.branchQuantity), [Number(before.branchQuantity)]))
     if (JSON.parse(operation.request_json).conditionTag && Number(after.lotQuantity) < Number(before.lotQuantity)) {
       if (!operation.converted_tag) return null
       quantity = 0
@@ -95,7 +96,7 @@ export async function revertEffect(db: D1Compat, movementId: number, revert: Sto
   const branchBefore = Number(row.branch_quantity) || 0
   return {
     quantity, batchId: row.batch_id ?? null, receivedAt: row.received_at ?? null, lotCode: row.lot_code ?? null,
-    branchId: Number(row.branch_id), branchName: row.branch_name ?? null, branchBefore, branchAfter: branchBefore + branchChange,
+    branchId: Number(row.branch_id), branchName: row.branch_name ?? null, branchBefore, branchAfter: Number(subtractDecimalSum(branchBefore, [-branchChange])),
   }
 }
 

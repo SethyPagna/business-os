@@ -3,7 +3,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
 const { createHash } = require('node:crypto')
-const { fixture } = require('./test-stock-session-atomic.cjs')
+const { fixture, loadStockSession } = require('./test-stock-session-atomic.cjs')
 
 const bundleFile = path.join(__dirname, 'test-branch-transfer-request-budget-epoch-native.cjs')
 const bundle = new Module(bundleFile, module)
@@ -11,7 +11,7 @@ bundle.filename = bundleFile
 bundle.paths = module.paths
 bundle._compile(fs.readFileSync(bundleFile, 'utf8').split('async function main(){')[0] + '\nmodule.exports={bundleWorker}', bundleFile)
 
-async function world(makeWorker, tier, shape = 'receipt') {
+async function world(makeWorker, tier, shape = 'receipt', seedExtra = () => {}) {
   const f = fixture(sql => {
     const total = shape === 'split' ? 6 : shape === 'zero' ? 0 : shape === 'reversed' ? 10 : 7
     sql.exec(`UPDATE products SET stock_quantity=${total} WHERE id=1;
@@ -23,6 +23,7 @@ async function world(makeWorker, tier, shape = 'receipt') {
       VALUES(2,1,'set-second','2026-09-02',2,1);INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(2,1,5);`)
     if (shape !== 'zero') sql.exec(`INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source,unit_cost_usd)
       VALUES(1,1,1,${shape === 'null' ? 'NULL' : 1},${shape === 'split' ? 4 : 3},${shape === 'reversed' ? 0 : shape === 'split' ? 4 : 3},'damaged','remove',2);`)
+    seedExtra(sql)
   })
   const worker = makeWorker()
   f.env.PLAN_TIER = tier
@@ -74,12 +75,75 @@ async function world(makeWorker, tier, shape = 'receipt') {
     type: 'set', setScope: 'lot', productId: 1, branchId: 1, batchId: 1, quantity,
     reason: 'Physical count', client_request_id: key, ...extra,
   })
-  return { ...f, call, state, set }
+  const concurrentDb = loadStockSession('lib/db.ts').getDb({ DB: raw })
+  const competeBeforeCommit = statements => f.beforeCommit(() => loadStockSession('lib/stockTransaction.ts').executeStockTransaction(concurrentDb, statements, 'once'))
+  return { ...f, call, state, set, competeBeforeCommit }
 }
 
 async function main() {
   const makeWorker = await bundle.exports.bundleWorker()
   for (const tier of ['free', 'paid']) {
+    for (const scope of ['lot', 'branch', 'patch']) {
+      const f = await world(makeWorker, tier, 'zero', sql => sql.exec(`
+        INSERT INTO branches(id,name,is_active) VALUES(2,'Other branch',1);
+        INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,2,0.2);
+        UPDATE products SET stock_quantity=0.2 WHERE id=1;`))
+      try {
+        assert.equal((await f.set(7, 'fraction-initial-seven')).status, 200)
+        assert.equal((await f.call('/inventory/adjust', { productId: 1, branchId: 1, batchId: 1, type: 'remove', quantity: 0.3,
+          conditionTag: 'damaged', reason: 'Fractional tag', client_request_id: 'fraction-tag-three' })).status, 200)
+        const saved = scope === 'patch'
+          ? await f.call('/batches/1/branches/1', { quantity: 0.3, client_request_id: 'fraction-patch-three' }, 'PATCH')
+          : await f.set(0.3, 'fraction-set-three', { setScope: scope })
+        assert.equal(saved.status, 200, `${tier}/${scope}: equality with a decimal tagged subset is valid`)
+        const exact = quantity => {
+          const state = f.state()
+          assert.equal(state.physical, quantity)
+          assert.equal(state.cache, Number((quantity + 0.2).toFixed(1)), 'cache preserves the other branch exactly')
+          assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=2').get().quantity, 0.2)
+          assert.equal(state.lots[0].quantity, quantity)
+          assert.equal(state.tags[0].quantity_remaining, 0.3)
+        }
+        exact(0.3)
+        const historyId = saved.json.action_history_id
+        assert.ok(Number.isSafeInteger(historyId))
+        assert.equal((await f.call(`/action-history/${historyId}/undo`, { expected_generation: 0 })).status, 200)
+        exact(7)
+        assert.equal((await f.call(`/action-history/${historyId}/redo`, { expected_generation: 1 })).status, 200)
+        exact(0.3)
+        assert.equal((await f.set(0.5, 'fraction-later-change')).status, 200)
+        assert.equal((await f.call(`/action-history/${historyId}/undo`, { expected_generation: 2 })).status, 200)
+        exact(7.2)
+        assert.equal((await f.call(`/action-history/${historyId}/redo`, { expected_generation: 3 })).status, 200)
+        exact(0.5)
+        const before = f.state()
+        assert.equal((await f.set(0.299999, 'fraction-actually-below')).status, 409)
+        assert.deepEqual(f.state(), before, 'strict subset refusal must not gain a rounding tolerance')
+        const invalid = await f.set(1e-25, 'fraction-unsupported-input')
+        assert.equal(invalid.status, 400)
+        assert.equal(invalid.json.code, 'invalid_quantity')
+        assert.deepEqual(f.state(), before, 'unsupported decimal input must fail explicitly before stock or history writes')
+        for (const replay of [false, true]) {
+          const competingBranch = replay ? 0.6 : 0.4
+          const competingCache = replay ? 1.1 : 0.9
+          f.competeBeforeCommit([
+            { sql: 'UPDATE branch_stock SET quantity=@quantity WHERE product_id=1 AND branch_id=2', params: { quantity: competingBranch } },
+            { sql: 'UPDATE products SET stock_quantity=@quantity WHERE id=1', params: { quantity: competingCache } },
+          ])
+          const result = replay
+            ? await f.call(`/action-history/${historyId}/undo`, { expected_generation: 4 })
+            : await f.set(0.4, 'fraction-raced-other-branch')
+          assert.equal(result.status, 409, 'a competing branch update cannot be overwritten in the shared cache')
+          const after = f.state()
+          assert.equal(after.physical, 0.5)
+          assert.equal(after.cache, competingCache)
+          assert.deepEqual(after.lots, before.lots)
+          assert.deepEqual(after.tags, before.tags)
+          assert.deepEqual(after.operations, before.operations)
+          assert.deepEqual(after.movements, before.movements)
+        }
+      } finally { f.sql.close() }
+    }
     const f = await world(makeWorker, tier)
     try {
       const before = f.state()
