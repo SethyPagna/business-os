@@ -81,8 +81,6 @@ const db = openDb(loadAll({ through: 242 }))
 ok(true, 'full migration chain applied')
 
 db.prepare(`INSERT INTO branches (id, name, is_active) VALUES (1, 'Main Store', 1)`).run({})
-db.db.exec(fs.readFileSync(path.join(cloudflareRoot,'migrations/0244_dated_count_decision_receipts.sql'),'utf8'))
-db.db.exec(fs.readFileSync(path.join(cloudflareRoot,'migrations/0243_stock_schema_epoch.sql'),'utf8'))
 db.batchOnce = db.batch.bind(db)
 async function fixtureRun(sql,params={}) { const results = await require(path.join(tmpDir,'stockTransaction.js')).executeStockTransaction(db,[{sql,params}],'once'); return results[0] }
 const actor = { userId: 7, userName: 'tester' }
@@ -100,6 +98,19 @@ async function counterFor(originalId) {
 }
 
 ;(async () => {
+  for(const file of fs.readdirSync(path.join(cloudflareRoot,'migrations')).filter(name=>name.endsWith('.sql')&&Number(name.slice(0,4))>242).sort()){
+    if(file.startsWith('0246_')){
+      await assert.rejects(fixtureRun('SELECT 1'),error=>error.code==='stock_schema_unavailable')
+      db.db.exec(`BEGIN; INSERT INTO system_flags(key,value)VALUES('stock_transaction_permit','legacy-separate-pool-v1');
+        INSERT INTO system_flags(key,value)VALUES('maintenance','{"mode":"counted_conversion","token":"stock-revert-native-conversion"}');
+        DELETE FROM system_flags WHERE key='stock_transaction_permit';`)
+      db.db.exec(fs.readFileSync(path.join(cloudflareRoot,'migrations',file),'utf8'))
+      db.db.exec("DELETE FROM system_flags WHERE key='maintenance';COMMIT;")
+    }else db.db.exec(fs.readFileSync(path.join(cloudflareRoot,'migrations',file),'utf8'))
+  }
+  assert.equal((await db.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get({})).value,require(path.join(tmpDir,'stockTransaction.js')).STOCK_SCHEMA_EPOCH)
+  assert.equal((await db.prepare("SELECT COUNT(*)n FROM system_flags WHERE key IN('maintenance','stock_transaction_permit')").get({})).n,0)
+  ok(true,'legacy executor refusal, actual ordered counted conversion and clean current epoch')
   // ---- case 1: revert a batch-less ADD (revert removes the stock) ----------
   // Batch-less because the batch primitives (receiveBatchStock /
   // removeStockFromBatch) are covered by their own pure tests; this test
@@ -107,6 +118,9 @@ async function counterFor(originalId) {
   // double-revert guard -- against the real schema.
   await fixtureRun(`INSERT INTO products (id, name, barcode, unit, stock_quantity, cost_price_usd, cost_price_khr, is_active) VALUES (9201, 'Revert Cream', 'RC-1', 'pcs', 10, 99, 396000, 1)`,{})
   await fixtureRun(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (9201, 1, 10)`,{})
+  assert.throws(()=>db.db.exec('UPDATE branch_stock SET quantity=11 WHERE product_id=9201'),/stock_transaction_required/)
+  assert.deepEqual(await stockOf(9201,1),{product:10,branch:10})
+  ok(true,'unowned raw old writer refuses without changing actual counted stock')
   await fixtureRun(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_name, created_at)
     VALUES (5001, 9201, 'Revert Cream', 1, 'Main Store', 'add', 10, 4.25, 17000, 42.5, 170000, 'received', 'tester', '2026-08-20 10:00:00')`,{})
   await fixtureRun(`UPDATE products SET cost_price_usd=123, cost_price_khr=492000 WHERE id=9201`,{})
