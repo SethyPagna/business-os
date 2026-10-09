@@ -1,5 +1,12 @@
 const assert = require('node:assert/strict')
-const { setup } = require('./test-intake-atomic-native.cjs')
+const { setup: intakeSetup } = require('./test-intake-atomic-native.cjs')
+const { user } = require('./test-stock-session-atomic.cjs')
+async function setup(mode) {
+  const f = await intakeSetup(mode)
+  f.sql.prepare('INSERT INTO users(id,username,name,password,role_id,permissions,is_active,must_change_password,organization_id) VALUES(?,?,?,?,?,?,1,0,?)')
+    .run(user.id,user.username,user.name,'fixture-only',user.role_id,user.permissions,user.organization_id)
+  return f
+}
 
 function pauseAfter(f, pattern, method) {
   let reached, resume, once = true
@@ -128,6 +135,20 @@ async function main() {
     assert.equal((await original).status, 409)
     assert.equal(totals(f).stock, 8)
     f.sql.close()
+  })
+  await check('receiving current actor revocation refuses before stock and permits exact same-key retry after correction', async () => {
+    const f = await setup('receive')
+    try {
+      const before = totals(f)
+      f.sql.prepare('UPDATE users SET is_active=0 WHERE id=?').run(user.id)
+      const refused = await f.send()
+      assert.equal(refused.status,409)
+      assert.equal(refused.body.code,'write_conflict')
+      assert.deepEqual(totals(f),before)
+      f.sql.prepare('UPDATE users SET is_active=1 WHERE id=?').run(user.id)
+      assert.equal((await f.send()).status,200)
+      assert.deepEqual(totals(f),{ stock:8,movements:1,receipts:1 })
+    } finally { f.sql.close() }
   })
   console.log(JSON.stringify({ passed, failed }))
   if (failed) process.exitCode = 1
