@@ -16,11 +16,23 @@ function loadWorld(removeGuard) {
       removed++
       return value.replace(condition, '1=1')
     }
+    if (String(target).replaceAll('\\','/').endsWith('/src/routes/inventory.ts')) {
+      const condition = '${receiptSnapshotSql}=@receipts'
+      assert.equal(value.split(condition).length - 1, 1)
+      removed++
+      return value.replace(condition, '1=1')
+    }
+    if (removeGuard === 'unit-cost' && String(target).replaceAll('\\','/').endsWith('/src/lib/countedDamagedStock.ts')) {
+      const condition = 'takeInitialGuard(): StockWriteStatement[] {'
+      assert.equal(value.split(condition).length - 1, 1)
+      removed++
+      return value.replace(condition, condition + '\n    return []')
+    }
     return value
   }
   try {
     const exported = new Function('require','__dirname',worldSource + ';return {world};')(require,__dirname)
-    if (removeGuard) assert.equal(removed,1,'actual business module loaded once with one test-local guard mutation')
+    if (removeGuard) assert.equal(removed,removeGuard === 'unit-cost' ? 3 : 2,'remove every overlapping receipt preimage guard in the actual loaded modules')
     return exported.world
   } finally { fs.readFileSync = originalRead }
 }
@@ -49,9 +61,9 @@ async function run(tier, kind, negative = false) {
         const prepared = target.prepare(sql)
         const wrap = statement => new Proxy(statement,{ get(row,method) {
           if (method === 'bind') return (...params) => wrap(row.bind(...params))
-          if (method === 'all') return async (...params) => {
-            const result = await row.all(...params)
-            if (/SELECT pb\.id,pb\.batch_key,pb\.received_at/.test(sql)) snapshotRead = true
+          if (method === 'all' || method === 'first') return async (...params) => {
+            const result = await row[method](...params)
+            if (/AS facts,/.test(sql) && /AS receipts/.test(sql)) snapshotRead = true
             return result
           }
           return row[method]
@@ -77,7 +89,7 @@ async function run(tier, kind, negative = false) {
     assert.ok(answer.physical <= cap, 'failed batch, cleanup, auth and tails remain within actual invocation cap')
     console.log('MEASURED '+JSON.stringify({tier,kind,negative,warmupPhysical:warmup.physical,...answer}))
     if (negative) {
-      assert.equal(answer.status,200,'removing only this guard must admit the stale receipt and discriminate the fixture')
+      assert.equal(answer.status,200,'removing the overlapping receipt preimages must admit the stale receipt and discriminate the fixture')
       assert.equal(answer.effects.stock,beforeEffects.stock+3)
       assert.equal(answer.effects.movement,beforeEffects.movement+1)
       assert.equal(answer.effects.written,beforeEffects.written+1)
@@ -100,7 +112,7 @@ async function run(tier, kind, negative = false) {
     await run(tier,kind); console.log('PASS '+tier+' '+kind+' snapshot-to-batch race preserves winner and refuses all receipt effects')
   }
   for (const kind of ['unit-cost','cumulative-cost']) {
-    await run('paid',kind,true); console.log('PASS negative '+kind+' removes only its guard and exposes stale receipt acceptance')
+    await run('paid',kind,true); console.log('PASS negative '+kind+' removes overlapping receipt preimages and exposes stale receipt acceptance')
   }
   console.log('PASS 6 bounded receipt snapshot races and guard discriminators')
 })().catch(error => { console.error(error); process.exitCode = 1 })

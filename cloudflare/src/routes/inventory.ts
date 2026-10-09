@@ -78,7 +78,7 @@ import { findTransferReceipt, normalizeTransferRequestId, transferReceiptRespons
 import { resolveMovementCostSnapshot, type MovementCostComponent } from '../lib/movementCostSnapshot'
 import { parseStockConditionTag, type StockConditionTag } from '../lib/stockCondition'
 import {
-  allocateTaggedLots, isTaggedLotConflict, planHoldAsTagged, planHoldAsTaggedExact, planHoldAsTaggedCreatedReceipt, planDisposeTaggedExact, planRestoreTaggedExact,
+  allocateTaggedLots, isTaggedLotConflict, planHoldAsTaggedExact, planHoldAsTaggedCreatedReceipt, planDisposeTaggedExact, planRestoreTaggedExact,
   readOpenTaggedLots, readTaggedLotGroups, TAGGED_LOT_CONFLICT_CODE,
 } from '../lib/damagedLotActions'
 import { addMoney4, multiplyMoney4, roundMoney4 } from '../lib/moneyPrecision'
@@ -1617,9 +1617,9 @@ async function planInventoryReceipt(db: D1Compat, input: Parameters<typeof planR
   const group = new CountedStockBatchPlan([{ facts: observed.facts, branchId: input.branchId }])
   const exact = group.get(Number(input.productId), input.branchId)
   const originalParams: Record<string, unknown> = {}
+  const sourceColumns = new Set([...STOCK_ROW_COLUMNS.split(',').map(column => column.trim()), 'is_active'])
   const originals = originalProducts.map((row, index) => {
-    const fields = Object.entries(row).filter(([, value]) => value !== undefined)
-    if (fields.some(([field]) => !/^[a-z_]+$/.test(field))) throw new CountedStockConflictError()
+    const fields = Object.entries(row).filter(([field, value]) => sourceColumns.has(field) && value !== undefined)
     return `EXISTS(SELECT 1 FROM products WHERE ${fields.map(([field, value], fieldIndex) => {
       const key = `intakeSource${index}Field${fieldIndex}`
       originalParams[key] = value
@@ -1627,12 +1627,14 @@ async function planInventoryReceipt(db: D1Compat, input: Parameters<typeof planR
     }).join(' AND ')})`
   }).join(' AND ')
   const reservedBatchId = batchId == null ? observed.maximumId + 1 : undefined
-  const guards: StockWriteStatement[] = [productStockGuardStatement(originalProducts.map(row => row.id), 'active'), ...group.takePreimageGuards(),
-    { sql: `SELECT CASE WHEN ${receiptSnapshotSql}=@receipts AND ${baselineSql}=@baseline AND (${stockActorPredicate}) AND (${originals})
+  const guards: StockWriteStatement[] = [
+    { sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products WHERE id IN (SELECT value FROM json_each(@sourceProductIds)) AND is_active IS NOT 1)
+      THEN json_extract('[]','$[product_has_stock]') WHEN ${receiptSnapshotSql}=@receipts AND ${baselineSql}=@baseline AND (${stockActorPredicate}) AND (${originals})
       ${reservedBatchId == null ? '' : 'AND NOT EXISTS(SELECT 1 FROM product_batches WHERE id=@reservedBatchId)'}
       THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`,
     params: { ...stockActorParams(user), ...originalParams, productId: input.productId, receipts: observed.receipts, baseline: observed.baseline,
-      ...(reservedBatchId == null ? {} : { reservedBatchId }) } }]
+      sourceProductIds: JSON.stringify(originalProducts.map(row => row.id)), ...(reservedBatchId == null ? {} : { reservedBatchId }) } },
+    ...group.takePreimageGuards()]
   const metadata = correction ? null : planReceiveBatchStock({ ...input, batchId, receiptLotTarget: target!,
     ...(reservedBatchId == null ? {} : { reservedBatchId }),
     receiptCostPreimage: input.unitCostUsd == null ? undefined : { batchExists: Boolean(before), receivedCostUsd: before?.received_cost_usd ?? null },
@@ -2085,7 +2087,6 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   let addMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = preflightAddMovementCost
   let removeMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = null
   let movementWrittenAtomically = false
-  let taggedReceiptCommitted = false
   let capturedRemovalAllocations: Array<{ batchId: number; quantity: number }> | undefined
   let exactTaggedPlan: CountedStockPlan | undefined
   if (type === 'add') {
@@ -2312,7 +2313,6 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         lotCode = received.lot_code
       }
       movementWrittenAtomically = true
-      taggedReceiptCommitted = Boolean(conditionTag)
     } catch (err) {
       if (isCountedStockConflict(err) || err instanceof MoneyPrecisionError || stockTransactionRefusal(err)
         || err instanceof StockMutationBudgetError || isReceiptSellingPriceConflict(err)) throw err
@@ -2413,55 +2413,6 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     const movement = movementRowStatement()
     if (landing.redirected) await db.batch(addressedStatements(landing, [movement]))
     else await db.prepare(movement.sql).run(movement.params)
-  }
-
-  // P3-L6 HOLD (restock with a tag). The receipt above ran UNCHANGED: a real
-  // product_batches lot carrying supplier_id/supplier_name, received
-  // quantity/cost and payment state, plus its own 'add' movement. That is
-  // deliberate and is the least-bloat choice of the two on the table:
-  //
-  //   (a) a "non-sellable lot" flag on product_batches -- a new column, a new
-  //       state every lot reader (POS FIFO, pickers, transfers, merges, the
-  //       0154/0155 activation invariants) would have to learn, and a second
-  //       meaning for is_active;
-  //   (b) receive, then immediately hold -- zero new concepts, and every
-  //       supplier-facing column is written by receiveBatchStock, the SAME
-  //       writer the supplier mirror pins as W3
-  //       (scripts/test-supplier-mirror-writers-pure.cjs). Contacts sees the
-  //       purchase, the invoice, the cost and the "not paid" balance exactly
-  //       as it does for any other stock-in.
-  //
-  // (b) is what runs here. The ledger tells the honest story too -- goods
-  // arrived and were immediately found broken -- rather than a receipt that
-  // silently never became sellable.
-  if (conditionTag && type === 'add' && delta !== 0 && !taggedReceiptCommitted) {
-    const heldBatchId = useBatchLedger ? resolvedBatchId : null
-    const removal = heldBatchId != null
-      ? planRemoveStockAcrossBatches({ productId: targetProductId, branchId, quantity: Math.abs(delta),
-          allocations: [{ batchId: heldBatchId, quantity: Math.abs(delta) }] }).statements
-      : planBranchStockRemoval({ productId: targetProductId, branchId, quantity: Math.abs(delta) })
-    await executeStockTransaction(db, addressedStatements(landing, [
-      productStockGuardStatement([targetProductId], 'active'),
-      ...planHoldAsTagged({
-      productId: targetProductId,
-      productName: targetProductName,
-      branchId,
-      branchName: branch?.name || null,
-      batchId: heldBatchId,
-      quantity: Math.abs(delta),
-      tag: conditionTag,
-      source: 'restock',
-      reason,
-      cost: addMovementCost || resolveMovementCostSnapshot({
-        quantity: Math.abs(delta),
-        components: [{ quantity: Math.abs(delta), unitCostUsd: receiptUnitCostUsd }],
-        fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
-        fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
-      }),
-      referenceId: sessionId,
-      actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
-    }),
-    ]), 'retry')
   }
 
   // `type` is always 'add'/'remove' here (a 'set' request was converted
