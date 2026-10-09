@@ -2,7 +2,10 @@ import { getDb } from './db'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import type { StockWriteStatement } from './productBatches'
-import { executeStockTransaction } from './stockTransaction'
+import { executeStockTransaction, stockTransactionStatementCount } from './stockTransaction'
+import { assertReturnCreateQueryBudget, ReturnCreateBudgetError } from './returnCreateAction'
+import { currentRequestMetrics } from './requestMetrics'
+import { getPlanLimits } from './planTier'
 import { planCountedTaggedChange, tagCapacityGuard } from './countedDamagedStock'
 import { actorSnapshot } from './actorSnapshot'
 import { bumpVersion } from './cache'
@@ -73,6 +76,10 @@ export async function replayCountedCondition(env:Env,user:SessionUser|null,direc
   const next=expected+1,pointer=JSON.stringify({applier:COUNTED_CONDITION_HISTORY_KIND,snapshot_id:row.id,generation:next})
   statements.push({sql:`UPDATE undo_snapshots SET status=@target,payload_json=json_set(payload_json,'$.generation',@next),updated_at=CURRENT_TIMESTAMP WHERE id=@snapshot`,params:{target,next,snapshot:row.id}},
     {sql:`UPDATE action_history SET status=@status,undo_payload=@pointer,redo_payload=@pointer,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=@history`,params:{status:direction==='undo'?'redoable':'undoable',pointer,history:historyId}})
+  try{assertReturnCreateQueryBudget(getPlanLimits(env).d1QueriesPerInvocation,currentRequestMetrics()?.invocation.attemptedStatements??18,stockTransactionStatementCount(statements.length),12)}catch(error){
+    if(error instanceof ReturnCreateBudgetError)throw Object.assign(new Error('This condition change is too large for the current plan. Nothing was reversed; use a smaller original action.'),{statusCode:409,code:'stock_request_query_budget_exceeded'})
+    throw error
+  }
   try{await executeStockTransaction(db,statements,'once')}catch(error){
     const durable=await db.prepare('SELECT status,json_extract(payload_json,\'$.generation\') generation FROM undo_snapshots WHERE id=? AND kind=?').get<{status:string;generation:number}>([row.id,COUNTED_CONDITION_HISTORY_KIND])
     if(durable?.status===target&&durable.generation===next)return
