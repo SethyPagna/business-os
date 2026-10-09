@@ -24,6 +24,8 @@ import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { branchStepMatters } from '../../utils/branchScope.ts'
 
+export type SheetConditionSelection = { damagedLotId: number; productId: number; branchId: number; batchId: number | null; conditionTag: string; quantity: number; label: string }
+
 type ProductGroupMeta = {
   groupKind?: string
   hasExplicitGroup?: boolean
@@ -247,7 +249,7 @@ interface ProductDetailSheetProps {
   // Non-POS surfaces hand the resolved row + branch + received date back
   // instead of adding a cart line; the price buttons become one confirm
   // button. See components/shared/ProductOptionSheet.tsx.
-  onPick?: (product: ProductRecord, selection: { branchId: string | null; batch?: BatchSelection }) => void
+  onPick?: (product: ProductRecord, selection: { branchId: string | null; batch?: BatchSelection; damaged?: SheetConditionSelection }) => void
   pickLabel?: string
   // Drop the received-date step on a host whose write cannot carry one (the
   // sale-line REPLACEMENT: the Worker plans it with batchId null and draws by
@@ -654,7 +656,7 @@ export default function ProductDetailSheet({
     `${lot.condition_tag ? stockConditionLabel(lot.condition_tag) : posCopy('Damage', 'ខូចខាត')} · ${lot.return_id ? `${posCopy('return', 'ប្រគល់វិញ')} #${lot.return_id}` : `#${lot.id}`}`
 
   const buildDamagedSelection = () => selectedDamagedLot
-    ? { damagedLotId: selectedDamagedLot.id, quantity: sheetState.availableStock, label: damagedLotLabel(selectedDamagedLot) }
+    ? { damagedLotId: selectedDamagedLot.id, productId: selectedDamagedLot.product_id, branchId: Number(selectedDamagedLot.branch_id), batchId: selectedDamagedLot.batch_id, conditionTag: stockConditionLabel(selectedDamagedLot.condition_tag), quantity: sheetState.availableStock, label: damagedLotLabel(selectedDamagedLot) }
     : undefined
 
   const buildBatchSelection = (): BatchSelection | undefined => {
@@ -692,8 +694,9 @@ export default function ProductDetailSheet({
   // the line form it gates never opened and the pick appeared to do nothing.
   // The host closes the sheet from inside its own onPick.
   const confirmPick = (nextProduct: ProductRecord) => {
-    if (!pickAllowed || selectedDamagedLot) return
-    onPick?.(nextProduct, { branchId: effectiveBranchId, batch: buildBatchSelection() })
+    if (!pickAllowed) return
+    const taggedProduct = selectedDamagedLot ? candidatePool.find(row => Number(row.id) === Number(selectedDamagedLot.product_id)) : null
+    onPick?.(taggedProduct || nextProduct, { branchId: effectiveBranchId, batch: buildBatchSelection(), damaged: buildDamagedSelection() })
   }
   const pickButtonLabel = pickLabel || t('select') || 'Select'
   const conditionReadStatus = intent === 'sell' && loadedConditionScope !== currentLotScope ? (
@@ -703,7 +706,7 @@ export default function ProductDetailSheet({
     </div>
   ) : null
   const chooseDamagedLot = (lot: DamagedLot) => {
-    if (onPick || Number(lot.quantity_remaining) <= 0) return
+    if (Number(lot.quantity_remaining) <= 0) return
     setSelectedDamagedLotId(lot.id === selectedDamagedLotId ? null : lot.id)
     setSelectedBatchId(null); setSelectedUnlottedProductId(null)
     if (mergeRowsIntoLotList) setSelectedVariantId(String(lot.product_id))
@@ -1063,7 +1066,7 @@ export default function ProductDetailSheet({
                       </button>)}
                     </div>
                   ) : null}
-                  {!onPick && visibleDamagedLots.length > 0 ? (
+                  {intent === 'sell' && visibleDamagedLots.length > 0 ? (
                     <div className="mb-2 rounded-lg border border-orange-200 bg-orange-50/60 p-2 dark:border-orange-900/50 dark:bg-orange-950/20">
                       <div className="mb-1.5 text-[11px] font-semibold text-orange-500 dark:text-orange-400">🟠 {posCopy('Tagged stock', 'ស្តុកដែលមានស្លាក')}</div>
                       <div className="flex flex-wrap gap-1.5">
@@ -1171,7 +1174,7 @@ export default function ProductDetailSheet({
                 </button>)}
               </div>
             ) : null}
-            {!onPick && visibleDamagedLots.length > 0 ? (
+            {intent === 'sell' && visibleDamagedLots.length > 0 ? (
               <div className="rounded-xl border border-orange-200 bg-orange-50/60 p-3 dark:border-orange-900/50 dark:bg-orange-950/20">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-orange-500 dark:text-orange-400">🟠 {posCopy('Tagged stock', 'ស្តុកដែលមានស្លាក')}</div>
                 <div className="flex flex-wrap gap-1.5">

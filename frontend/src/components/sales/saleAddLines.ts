@@ -1,3 +1,4 @@
+import type { ProductOptionSelection } from '../shared/ProductOptionSheet.tsx'
 // Staging a line for "add items to this sale", from the SHARED POS sheet.
 //
 // The add-items flow used to be two surfaces: the shared option sheet
@@ -49,6 +50,7 @@ export type SaleAddCandidate = Record<string, unknown> & {
 }
 
 export type StagedAddLine = {
+  damaged?: ProductOptionSelection['damaged']
   clientLineKey?: string
   originalSellingPriceUsd?: number
   sellingPriceInputUsd?: number | string
@@ -83,6 +85,7 @@ export type StagedAddLine = {
 // sheet's own BatchSelection, restated here so this module does not depend
 // on the transport layer for a shape it only reads.
 export type SaleAddSheetSelection = {
+  damaged?: ProductOptionSelection['damaged']
   branchId: string | null
   batch?: ({
     batchId: number
@@ -113,8 +116,8 @@ function toNumber(value: unknown): number {
  * two movements) and the branch joins the key too -- two picks at different
  * branches take units off two different shelves.
  */
-export function stagedAddLineKey(line: Pick<StagedAddLine, 'productId' | 'branchId' | 'batchId' | 'unlottedStock'>): string {
-  return `${line.productId}:${line.branchId ?? 'any'}:${line.batchId ?? (line.unlottedStock ? 'unlotted' : 'stock')}`
+export function stagedAddLineKey(line: Pick<StagedAddLine, 'productId' | 'branchId' | 'batchId' | 'unlottedStock' | 'damaged'>): string {
+  return `${line.productId}:${line.branchId ?? 'any'}:${'damaged' in line && line.damaged ? `tag:${(line.damaged as NonNullable<ProductOptionSelection['damaged']>).damagedLotId}` : line.batchId ?? (line.unlottedStock ? 'unlotted' : 'stock')}`
 }
 
 /**
@@ -133,6 +136,8 @@ export function stagedLineFromSheetPick(
   const branchNumber = Number(selection?.branchId)
   const branchId = Number.isFinite(branchNumber) && branchNumber > 0 ? branchNumber : null
 
+  const damaged = selection?.damaged
+  if (damaged && (selection.batch || damaged.productId !== productId || damaged.branchId !== branchId || !Number.isSafeInteger(damaged.damagedLotId) || damaged.quantity <= 0)) return null
   const batch = selection?.batch ?? null
   const batchQuantity = batch ? toNumber(batch.quantity) : null
   const unlottedStock = batch?.unlottedStock === true
@@ -140,11 +145,12 @@ export function stagedLineFromSheetPick(
   // specific received date is picked. Same order productSheetState.ts uses
   // for the number it prints above the pick button, so the staged row and
   // the sheet it came from can never disagree.
-  const stockQuantity = batchQuantity ?? branchStockQuantity(picked, selection?.branchId) ?? toNumber(picked.stock_quantity)
+  const stockQuantity = damaged?.quantity ?? batchQuantity ?? branchStockQuantity(picked, selection?.branchId) ?? toNumber(picked.stock_quantity)
   const price = toNumber(picked.selling_price_usd)
 
   return {
     ...(moneyPrecisionVersion === 1 ? { originalSellingPriceUsd: price, clientLineKey: `add:${productId}:${branchId || 0}:${batch && !unlottedStock ? batch.batchId : 0}:${Date.now()}:${Math.random().toString(36).slice(2, 9)}` } : {}),
+    ...(damaged ? { damaged } : {}),
     productId,
     name: String(picked.__displayName || picked.name || `#${productId}`),
     // POS behaviour: one tap adds one unit. The staged row's Qty box is

@@ -15,7 +15,7 @@
 // derivation (components/pos/productSheetState.ts) and the warehouse rule
 // are literally the same code on every surface.
 import { useCallback } from 'react'
-import ProductDetailSheet from '../pos/ProductDetailSheet.tsx'
+import ProductDetailSheet, { type SheetConditionSelection } from '../pos/ProductDetailSheet.tsx'
 import { useApp } from '../../AppContext.tsx'
 import type { BatchSelection } from '../../api/batchesTransport.ts'
 import type { SheetIntent } from '../pos/productSheetState.ts'
@@ -29,6 +29,7 @@ export type ProductOptionRow = Record<string, unknown> & {
 export interface ProductOptionSelection {
   branchId: string | null
   batch?: BatchSelection
+  damaged?: SheetConditionSelection
 }
 
 interface ProductOptionSheetProps {

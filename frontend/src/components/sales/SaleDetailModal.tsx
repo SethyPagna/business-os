@@ -1203,7 +1203,8 @@ export default function SaleDetailModal({
    * pair the removal and the addition under a single group id and the history
    * reads as the single act the cashier performed.
    */
-  const stageReplacement = (candidate: AddProductCandidate, branchId: string | null = null): void => {
+  const stageReplacement = (candidate: AddProductCandidate, selection: SaleAddSheetSelection): void => {
+    const branchId = selection.branchId
     const lineId = replaceLineId
     const productId = Number(candidate?.id)
     if (!lineId || !Number.isFinite(productId) || productId <= 0) return
@@ -1217,7 +1218,8 @@ export default function SaleDetailModal({
     let removal: ReturnType<typeof saleRemovalSubtotal>
     try {
       moneyCapability.assertReady()
-      const staged = stagedLineFromSheetPick(candidate, { branchId }, 1)
+      const staged = stagedLineFromSheetPick(candidate, selection, 1)
+      if (staged && quantity > staged.stockQuantity) { setAmendMutationError(t('not_enough_stock')); return }
       if (!staged) throw new Error('sale_item_pricing_invalid')
       replacementIntent = stagedLinePricingIntent({ ...staged, quantity }, savedExchangeRate)
       removal = saleRemovalSubtotal(items as unknown as Record<string, unknown>[], sale as unknown as Record<string, unknown>, lineId, replacementIntent.pricing_quote.total_usd)
@@ -1239,6 +1241,9 @@ export default function SaleDetailModal({
         replacement: {
           product_id: productId,
           quantity,
+          ...(selection.damaged ? { damaged_lot_id: selection.damaged.damagedLotId } : {}),
+          ...(selection.batch?.batchId != null ? { batch_id: selection.batch.batchId } : {}),
+          ...(selection.batch?.unlottedStock ? { unlotted_stock: true } : {}),
           ...replacementIntent,
           ...(saleBranchDisabled ? { branch_id: Number(sale?.branch_id) } : replacementBranchId != null ? { branch_id: replacementBranchId } : {}),
         },
@@ -1643,6 +1648,7 @@ export default function SaleDetailModal({
         // quantity -- and whose lots -- the operator was reading.
         // A sale at a disabled branch keeps its own branch on every line; the shelf is the confirmed one.
         ...(saleBranchDisabled ? { branch_id: Number(sale.branch_id) } : line.branchId != null ? { branch_id: line.branchId } : {}),
+        ...(line.damaged ? { damaged_lot_id: line.damaged.damagedLotId } : {}),
         ...(line.batchId != null ? { batch_id: line.batchId } : {}),
         ...(line.batchLabel ? { batch_label: line.batchLabel } : {}),
         ...(line.batchExpiryDate ? { batch_expiry_date: line.batchExpiryDate } : {}),
@@ -2354,7 +2360,6 @@ export default function SaleDetailModal({
                                     // here would be silently discarded -- a
                                     // batch-identity guarantee the write does
                                     // not make. The step is not offered.
-                                    hideReceivedDates
                                     pickLabel={translateOr('amend_replace', 'Replace', 'ជំនួស')}
                                     onClose={() => setReplacePicking(null)}
                                     onPick={(picked, selection) => {
@@ -2365,7 +2370,7 @@ export default function SaleDetailModal({
                                       // the line fell back to the sale's own
                                       // branch -- a different one from the
                                       // quantity the operator was reading.
-                                      stageReplacement(picked as unknown as AddProductCandidate, selection.branchId)
+                                      stageReplacement(picked as unknown as AddProductCandidate, selection as SaleAddSheetSelection)
                                     }}
                                   />
                                 ) : null}
@@ -2715,7 +2720,7 @@ export default function SaleDetailModal({
                           <span className="min-w-0 flex-1 break-words text-sm font-medium text-gray-900 dark:text-white">
                             {line.name}
                             {line.barcode ? <span className="mt-0.5 block font-mono text-[11px] font-normal text-gray-400">{line.barcode}</span> : null}
-                            {line.batchLabel ? <span className="mt-0.5 block text-[11px] font-normal text-blue-700 dark:text-blue-300">{stagedLineBatchCaption(line, t)}</span> : line.unlottedStock ? <span className="mt-0.5 block text-[11px] font-normal text-amber-700 dark:text-amber-300">{translateOr('received_date_not_recorded', 'Received date not recorded', 'មិនបានកត់ត្រាថ្ងៃចូល')}</span> : null}
+                            {line.damaged ? <span className="mt-0.5 block text-[11px] font-normal text-orange-700 dark:text-orange-300">{line.damaged.label}</span> : line.batchLabel ? <span className="mt-0.5 block text-[11px] font-normal text-blue-700 dark:text-blue-300">{stagedLineBatchCaption(line, t)}</span> : line.unlottedStock ? <span className="mt-0.5 block text-[11px] font-normal text-amber-700 dark:text-amber-300">{translateOr('received_date_not_recorded', 'Received date not recorded', 'មិនបានកត់ត្រាថ្ងៃចូល')}</span> : null}
                           </span>
                           <span className="flex items-center gap-1">
                             <label htmlFor={`sale-add-qty-${stagedLineKey(line)}`} className="text-[11px] text-gray-400">{t('qty_short') || 'Qty'}</label>

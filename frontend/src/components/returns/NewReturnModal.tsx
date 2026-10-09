@@ -18,7 +18,7 @@ import InfoHint from '../shared/InfoHint.tsx'
 import Modal from '../shared/Modal.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
-import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
+import ProductOptionSheet, { type ProductOptionSelection } from '../shared/ProductOptionSheet.tsx'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
 import { fmtTime } from '../../utils/formatters'
 import {
@@ -33,6 +33,7 @@ import { identityForIntent, withWriteTimeout, type IntentIdentityRef } from '../
 import { businessDateTimeId } from '../../utils/timestampId.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
+import { getProductsByIds } from '../../api/productReadTransport.ts'
 import { searchProducts } from '../../api/methods.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { PAYMENT_METHODS } from '../../constants.ts'
@@ -137,6 +138,11 @@ interface ReplacementCandidate {
 }
 
 interface ReplacementLine {
+  damaged?: ProductOptionSelection['damaged']
+  unlotted_stock?: boolean
+  available_quantity?: number
+  source_label?: string
+  source_product?: ReplacementCandidate
   key: string
   product_id: number | string
   product_name: string
@@ -370,6 +376,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   // Same-name rows collapse to ONE title row; tapping it opens the shared
   // option sheet to choose branch / option / received date. A standalone
   // product opens the same sheet, so the flow never changes shape.
+  const [replacementEditingKey, setReplacementEditingKey] = useState<string | null>(null)
   const [replacementPicking, setReplacementPicking] = useState<ReplacementCandidate | null>(null)
   const [replacementSearching, setReplacementSearching] = useState(false)
   const [replacementSearched, setReplacementSearched] = useState(false)
@@ -457,20 +464,6 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   // is deliberately no separate auto-open path -- a scan or a seed never
   // picks a record on the operator's behalf; they see the match and choose.
 
-  const loadReplacementBatches = async (lineKey: string, productId: number | string, branchId: number | string | null) => {
-    if (!branchId) return
-    try {
-      const { batches } = await getProductBatches(productId, branchId, true)
-      setReplacements((prev) => prev.map((line) => line.key === lineKey
-        ? { ...line, batches: (Array.isArray(batches) ? batches : []).filter((batch) => (Number(batch.quantity) || 0) > 0) }
-        : line))
-    } catch {
-      // The lot list is an aid for the operator, not the authority: a
-      // replacement with no hand-picked lot still drains FIFO on the server,
-      // and a genuine shortfall comes back as the 409 the server raises.
-    }
-  }
-
   // One place a replacement line is born, whatever chose it: the catalog
   // search, or the one-tap "same item" shortcut for a straight swap.
   const addReplacementLine = (input: {
@@ -481,6 +474,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     priceUsd: number
     priceKhr: number
     batchId?: number | null
+    selection: ProductOptionSelection
+    sourceProduct: ReplacementCandidate
   }) => {
     const branchId = input.branchId || foundSale?.branch_id || null
     const key = `rep_${input.productId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
@@ -490,18 +485,28 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       product_name: input.productName,
       branch_id: branchId,
       batch_id: input.batchId ?? null,
+      damaged: input.selection.damaged,
+      unlotted_stock: input.selection.batch?.unlottedStock === true,
+      available_quantity: input.selection.damaged?.quantity ?? Number(input.selection.batch?.quantity),
+      source_label: input.selection.damaged?.label ?? (input.selection.batch?.batchLabel || T('received_date_not_recorded','Received date not recorded')),
+      source_product: input.sourceProduct,
       batches: [],
       quantity: Math.max(1, Math.floor(input.quantity) || 1),
       price_usd: input.priceUsd,
       price_khr: input.priceKhr,
     }])
-    void loadReplacementBatches(key, input.productId, branchId)
   }
 
   const addReplacementFromCandidate = (
     candidate: ReplacementCandidate,
-    selection?: { branchId: string | null; batch?: { batchId: number } },
+    selection: ProductOptionSelection,
   ) => {
+    const available = selection.damaged?.quantity ?? Number(selection.batch?.quantity)
+    if (!Number.isFinite(available) || available <= 0 || (selection.damaged && selection.damaged.productId !== Number(candidate.id))) { notify(T('not_enough_stock','Not enough stock'),'error'); return }
+    if (replacementEditingKey) {
+      setReplacements(prev => prev.map(line => line.key === replacementEditingKey ? { ...line, product_id:candidate.id,product_name:String(candidate.name || candidate.id),branch_id:selection.branchId,price_usd:toNumber(candidate.selling_price_usd),price_khr:toNumber(candidate.selling_price_khr), batch_id: selection.batch?.batchId ?? null, damaged: selection.damaged, unlotted_stock: selection.batch?.unlottedStock === true, available_quantity: available, source_label: selection.damaged?.label ?? (selection.batch?.batchLabel || T('received_date_not_recorded','Received date not recorded')), source_product: candidate } : line))
+      setReplacementEditingKey(null); return
+    }
     addReplacementLine({
       productId: candidate.id,
       productName: String(candidate.name || '').trim() || String(candidate.id),
@@ -512,23 +517,40 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       quantity: 1,
       priceUsd: toNumber(candidate.selling_price_usd),
       priceKhr: toNumber(candidate.selling_price_khr),
-      batchId: selection?.batch?.batchId ?? null,
+      batchId: selection.batch?.batchId ?? null,
+      selection, sourceProduct: candidate,
     })
   }
 
   // The straight swap -- same product back out, at the price it was sold for.
   // It lives INSIDE the replacement section (not under the returned rows), so
   // the section stays the one place a replacement is chosen.
-  const addReplacementSameItem = (item: SaleReturnItem) => {
+  const addReplacementSameItem = async (item: SaleReturnItem) => {
     if (!item.product_id) return
-    addReplacementLine({
-      productId: item.product_id as number | string,
-      productName: String(item.product_name || item.name || '').trim(),
-      branchId: item.branch_id || foundSale?.branch_id || null,
-      quantity: item.returnQty || 1,
-      priceUsd: toNumber(item.applied_price_usd),
-      priceKhr: toNumber(item.applied_price_khr),
-    })
+    const scope = captureActorReadScope('returns'), generation = lifecycle.current.generation
+    try {
+      const result = await getProductsByIds([item.product_id], { include: 'branch_stock,images,batches', picker: Date.now() }) as { items?: ReplacementCandidate[] }
+      if (!lifecycle.current.alive || lifecycle.current.generation !== generation || !isActorReadScopeCurrent(scope, false)) return
+      const candidate = result.items?.find(row => Number(row.id) === Number(item.product_id))
+      if (!candidate) throw new Error('Product unavailable')
+      setReplacementEditingKey(null); setReplacementPicking({ ...candidate, selling_price_usd: item.applied_price_usd, selling_price_khr: item.applied_price_khr })
+    } catch (error) {
+      if (lifecycle.current.alive && lifecycle.current.generation === generation && isActorReadScopeCurrent(scope, false)) notify(getLoaderErrorMessage(error, T('error','Error')), 'error')
+    }
+  }
+
+  const reselectReplacementSource = async (line: ReplacementLine) => {
+    const scope = captureActorReadScope('returns'), generation = lifecycle.current.generation
+    try {
+      const result = await getProductsByIds([line.product_id], { include: 'branch_stock,images,batches', picker: Date.now() }) as { items?: ReplacementCandidate[] }
+      if (!lifecycle.current.alive || lifecycle.current.generation !== generation || !isActorReadScopeCurrent(scope, false)) return
+      const candidate = result.items?.find(row => Number(row.id) === Number(line.product_id))
+      if (!candidate) throw new Error('Product unavailable')
+      setReplacementEditingKey(line.key)
+      setReplacementPicking({ ...candidate, selling_price_usd: line.price_usd, selling_price_khr: line.price_khr })
+    } catch (error) {
+      if (lifecycle.current.alive && lifecycle.current.generation === generation && isActorReadScopeCurrent(scope, false)) notify(getLoaderErrorMessage(error, T('error','Error')), 'error')
+    }
   }
 
   const updateReplacement = (lineKey: string, patch: Partial<ReplacementLine>) => {
@@ -807,7 +829,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     lotOptionCount: item.lotOptions.length,
   })
   const itemsMissingLot = activeItems.filter(lineNeedsLot)
-  const replacementsMissingLot = replacements.filter((line) => line.batches.length > 0 && line.batch_id == null)
+  const replacementsMissingLot = replacements.filter(line => !Number.isFinite(line.available_quantity) || Number(line.available_quantity) <= 0 || line.quantity > Number(line.available_quantity))
 
   const handleSubmit = async () => {
     if (!pendingLoaded || pendingError) return
@@ -868,6 +890,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
               product_id: line.product_id,
               product_name: line.product_name,
               branch_id: line.branch_id,
+              ...(line.damaged ? { damaged_lot_id: line.damaged.damagedLotId } : {}),
+              ...(line.unlotted_stock ? { unlotted_stock: true } : {}),
               batch_id: line.batch_id,
               quantity: line.quantity,
               applied_price_usd: line.price_usd,
@@ -1441,9 +1465,9 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                     intent="sell"
                     activeBranchId={foundSale?.branch_id ?? null}
                     pickLabel={T('add', 'Add')}
-                    onClose={() => setReplacementPicking(null)}
+                    onClose={() => { setReplacementPicking(null); setReplacementEditingKey(null) }}
                     onPick={(picked, selection) => {
-                      addReplacementFromCandidate(picked as unknown as ReplacementCandidate, selection as { branchId: string | null; batch?: { batchId: number } })
+                      addReplacementFromCandidate(picked as unknown as ReplacementCandidate, selection)
                       setReplacementPicking(null)
                     }}
                   />
@@ -1477,19 +1501,10 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                           <button type="button" onClick={() => removeReplacement(line.key)} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20" aria-label={T('remove', 'Remove')} title={T('remove', 'Remove')}><Trash2 className="h-4 w-4" aria-hidden="true" /></button>
                         </div>
                         <div className="flex items-center gap-2">
-                          <AppSelect
-                            value={line.batch_id != null ? String(line.batch_id) : ''}
-                            onChange={(next) => updateReplacement(line.key, { batch_id: next ? Number(next) : null })}
-                            ariaLabel={T('batch', 'Received date')}
-                            className="flex-1 min-w-0"
-                            optionClassName="text-xs"
-                            buttonClassName={`h-9 w-full text-xs ${line.batches.length > 0 && line.batch_id == null ? 'border-amber-400 dark:border-amber-600' : ''}`}
-                            options={line.batches.length > 0
-                              ? [{ value: '', label: T('select_lot', 'Choose a received date…') },
-                                ...line.batches.map((batch) => ({ value: String(batch.id), label: describeBatchOption(batch) }))]
-                              : [{ value: '', label: T('lot_untracked_out', 'No received dates — drawn from the branch count') }]}
-                          />
-                          <input type="number" min="1" step="1" className="input w-16 flex-shrink-0 py-1 text-center text-sm"
+                          <button type="button" className="btn-secondary h-9 flex-1 min-w-0 text-left text-xs" onClick={() => void reselectReplacementSource(line)}>
+                            {line.source_label || T('select_lot','Choose a received date…')} · {line.available_quantity ?? '?'}
+                          </button>
+                          <input type="number" min="1" max={line.available_quantity} step="1" className="input w-16 flex-shrink-0 py-1 text-center text-sm"
                             aria-label={T('quantity', 'Quantity')}
                             value={line.quantity}
                             onChange={(e) => updateReplacement(line.key, { quantity: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
@@ -1616,7 +1631,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
               <div className="space-y-1 rounded-xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-800 dark:bg-emerald-900/20">
                 {replacements.map((line) => (
                   <div key={line.key} className="flex justify-between py-1 text-sm">
-                    <span className="mr-2 min-w-0 break-words text-gray-700 dark:text-gray-300"><Repeat className="mr-1 inline h-3.5 w-3.5 align-[-2px]" aria-hidden="true" />{line.product_name} × {line.quantity}</span>
+                    <span className="mr-2 min-w-0 break-words text-gray-700 dark:text-gray-300"><Repeat className="mr-1 inline h-3.5 w-3.5 align-[-2px]" aria-hidden="true" />{line.product_name} × {line.quantity}{line.source_label ? ` · ${line.source_label}` : ''}</span>
                     <span className="flex-shrink-0 font-medium text-gray-900 dark:text-white">{fmtUSD(line.price_usd * line.quantity)}</span>
                   </div>
                 ))}

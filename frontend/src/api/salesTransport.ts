@@ -302,7 +302,7 @@ export interface SaleAmendmentRequest {
   delivery_fee_paid_by?: 'customer' | 'store'
   delivery_actual_cost_usd?: number | string | null
   delivery_contact_id?: number
-  replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null }
+  replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null; batch_id?: number | null; unlotted_stock?: boolean; damaged_lot_id?: number | null }
   notes?: string
   client_request_id: string
   expected_exchange_rate: number
