@@ -5,7 +5,7 @@ import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import { getActionTier } from './permissions'
 import { actorSnapshot } from './actorSnapshot'
-import { CountedStockBatchPlan, countedStockFactsSql, CountedStockConflictError, subtractCountedQuantity, sumCountedQuantities } from './countedDamagedStock'
+import { CountedStockBatchPlan, countedStockFactsSql, isCountedStockConflict, subtractCountedQuantity, sumCountedQuantities } from './countedDamagedStock'
 import { MoneyPrecisionError } from './moneyPrecision'
 import { stockActorParams, stockActorPredicate } from './stockActorGuard'
 import { canonicalTransferAuthorityGuardStatement } from './canonicalBranchIdentity'
@@ -45,8 +45,6 @@ export class TransferConflictError extends Error {
   code: string
   constructor(message: string, code = 'stock_conflict') { super(message); this.code = code }
 }
-const isTransferStockConflict = (error: unknown) => error instanceof CountedStockConflictError
-  || (error instanceof Error ? error.message : String(error)).includes('$[counted_quantity_conflict]')
 const refuse = (code: Exclude<TransferRefusalCode, 'transfer_maintenance_active'>) => new TransferConflictError(TRANSFER_REFUSALS[code], code)
 const productSnapshotSql = `json_object('id',id,'name',name,'barcode',barcode,'created_at',created_at,'is_active',is_active)`
 const lotSnapshotSql = `json_object('id',id,'variant_product_id',variant_product_id,'batch_key',batch_key,'lot_code',lot_code,'received_at',received_at,'expiry_date',expiry_date,'notes',notes)`
@@ -227,7 +225,7 @@ export type TransferRefusal = { status: 409 | 503; body: { error: string; code: 
  * receipt first: a same-key request that won the race is a replay. */
 export function transferRefusal(error: unknown): TransferRefusal | null {
   if (error instanceof StockTransactionUnavailableError) return { status: 503, body: { error: error.message, code: error.code } }
-  if (isTransferStockConflict(error) || error instanceof MoneyPrecisionError) return { status: 409, body: { error: TRANSFER_REFUSALS.transfer_stock_changed, code: 'transfer_stock_changed' } }
+  if (isCountedStockConflict(error) || error instanceof MoneyPrecisionError) return { status: 409, body: { error: TRANSFER_REFUSALS.transfer_stock_changed, code: 'transfer_stock_changed' } }
   if (error instanceof TransferConflictError) return { status: 409, body: { error: error.message, code: error.code } }
   const activeGuard = productStockGuardError(error)
   if (activeGuard) return { status: 409, body: { error: activeGuard.message, code: activeGuard.code } }
@@ -360,7 +358,7 @@ async function executeTransferReplay(env: Env, user: SessionUser, direction: 'un
 export async function replayTransferOperation(env: Env, user: SessionUser, direction: 'undo' | 'redo', historyId: number, expectedGeneration: unknown, payload: Record<string, unknown>): Promise<void> {
   try { await executeTransferReplay(env, user, direction, historyId, expectedGeneration, payload) }
   catch (error) {
-    if (isTransferStockConflict(error) || error instanceof MoneyPrecisionError) throw refuse('transfer_stock_changed')
+    if (isCountedStockConflict(error) || error instanceof MoneyPrecisionError) throw refuse('transfer_stock_changed')
     throw error
   }
 }

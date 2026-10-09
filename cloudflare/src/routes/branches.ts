@@ -1,7 +1,6 @@
+import { transferRequest, transferRequestDb, TransferQueryBudgetError, commitTransfer, transferOnHand, refreshTransferReaders, recoverTransferReceipt } from '../lib/transferRequest'
 import { executeStockTransaction, StockTransactionUnavailableError, StockTransactionOutcomeUnknownError } from '../lib/stockTransaction'
-import { Hono, type Context, type Handler } from 'hono'
-import { requestMetricsOf } from '../lib/requestMetrics'
-import { getPlanLimits } from '../lib/planTier'
+import { Hono } from 'hono'
 import { acquisitionCostResponses } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
 import { assertProductsActive, stockVisibleProductSql } from '../lib/productStockGuard'
@@ -57,75 +56,6 @@ import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { planTransferOperation, transferRefusal } from '../lib/transferOperation'
 import { findTransferReceipt, normalizeTransferRequestId, transferReceiptResponse, transferRequestDigest, type TransferReceiptRow } from '../lib/transferOperationReceipt'
-
-type TransferContext = Context<{ Bindings: Env; Variables: { user: SessionUser } }>
-class TransferQueryBudgetError extends Error {
-  readonly code = 'transfer_query_budget_exceeded'
-  constructor() { super('This transfer is too large for the current plan. Transfer fewer products or received dates, then try again.') }
-}
-function transferRequest(handler: Handler<{ Bindings: Env; Variables: { user: SessionUser } }>): Handler<{ Bindings: Env; Variables: { user: SessionUser } }> {
-  return async (c, next) => {
-    try { return await handler(c, next) } catch (error) {
-      if (error instanceof TransferQueryBudgetError) return c.json({ error: error.message, code: error.code }, 409)
-      throw error
-    }
-  }
-}
-function transferRequestDb(c: TransferContext): D1Compat {
-  const db = getDb(c.env)
-  const metrics = requestMetricsOf(c)
-  const limit = getPlanLimits(c.env).d1QueriesPerInvocation
-  let local = 0
-  const used = () => metrics?.invocation.attemptedStatements ?? local
-  const check = (count: number) => { if (used() + count > limit) throw new TransferQueryBudgetError() }
-  const counted = Object.create(db) as D1Compat
-  counted.prepare = sql => {
-    const statement = db.prepare(sql)
-    return {
-      get: <T>(params?: import('../lib/db').BindParams) => {
-        check(1); local++
-        if (!statement.getOnce) throw new Error('Transfers require single-attempt reads')
-        return statement.getOnce<T>(params)
-      },
-      all: <T>(params?: import('../lib/db').BindParams) => {
-        check(1); local++
-        if (!statement.allOnce) throw new Error('Transfers require single-attempt reads')
-        return statement.allOnce<T>(params)
-      },
-      run: params => statement.run(params),
-    }
-  }
-  counted.batchOnce = statements => {
-    // Cache fallback: version read, Free quota upsert, version upsert, each
-    // with at most two attempts. Telegram: one stock snapshot once, settings
-    // at most twice. Receipt recovery needs one once-read instead of tails.
-    const tailStatements = 2 + (getPlanLimits(c.env).tier === 'free' ? 2 : 0) + 2 + 1 + 2
-    check(statements.length + tailStatements)
-    local += statements.length
-    return db.batchOnce(statements)
-  }
-  return counted
-}
-async function commitTransfer(db: D1Compat, statements: Parameters<D1Compat['batchOnce']>[0]): Promise<TransferReceiptRow> {
-  const receiptIndex = statements.length - 1
-  const receipt = statements[receiptIndex]
-  if (!receipt?.sql.startsWith('UPDATE transfer_operation_receipts SET status=\'committed\'')) throw new Error('Transfer plan has no final receipt')
-  const results = await executeStockTransaction(db, [...statements.slice(0, -1), {
-    ...receipt, sql: receipt.sql + ' RETURNING actor_id,request_id,request_digest,request_json,response_json,status',
-  }, ordinaryBusinessMaintenanceGuard], 'once')
-  const row = results[receiptIndex]?.results?.[0] as TransferReceiptRow | undefined
-  if (!row?.response_json || row.status !== 'committed') throw new StockTransactionOutcomeUnknownError()
-  return row
-}
-async function transferOnHand(db: D1Compat, fromBranchId: number, toBranchId: number, pairs: Array<{ productId: number; destProductId: number }>) {
-  const rows = await db.prepare(`SELECT json_extract(value,'$.productId') product_id,
-      json_extract(value,'$.destProductId') dest_product_id,
-      (SELECT quantity FROM branch_stock WHERE product_id=json_extract(value,'$.productId') AND branch_id=@fromBranch) from_on_hand,
-      (SELECT quantity FROM branch_stock WHERE product_id=json_extract(value,'$.destProductId') AND branch_id=@toBranch) to_on_hand,
-      (SELECT stock_quantity FROM products WHERE id=json_extract(value,'$.destProductId')) total_on_hand
-    FROM json_each(@pairs)`).all<{ product_id: number; dest_product_id: number; from_on_hand: number | null; to_on_hand: number | null; total_on_hand: number | null }>({ fromBranch: fromBranchId, toBranch: toBranchId, pairs: JSON.stringify(pairs) })
-  return new Map(rows.map(row => [`${row.product_id}:${row.dest_product_id}`, row]))
-}
 
 async function sha256Hex(input: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input))
@@ -484,28 +414,23 @@ app.post('/transfer', transferRequest(async (c) => {
     if (previousReceipt.request_digest !== requestDigest || previousReceipt.request_json !== requestJson) {
       return c.json({ error: 'client_request_id was already used for different transfer data.', code: 'idempotency_conflict' }, 409)
     }
+    refreshTransferReaders(c)
     return c.json({ ...(transferReceiptResponse(previousReceipt) as Record<string, unknown>), replayed: true })
   }
   const product = await db.prepare(`
     SELECT id, name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, selling_price_khr,
-      (SELECT quantity FROM branch_stock WHERE product_id=products.id AND branch_id=@fromBranch) AS from_quantity
+      (SELECT quantity FROM branch_stock WHERE product_id=products.id AND branch_id=@fromBranch) AS from_quantity,
+      (SELECT json_object('id',pb.id,'lot_code',pb.lot_code,'received_at',pb.received_at,'expiry_date',pb.expiry_date,'notes',pb.notes,'available',(SELECT quantity FROM branch_batch_stock WHERE batch_id=pb.id AND branch_id=@fromBranch)) FROM product_batches pb WHERE pb.id=@batchId AND pb.variant_product_id=products.id AND pb.is_active=1) AS selected_batch
     FROM products WHERE id = @id
-  `).get<{ id: number; name: string; barcode: string | null; cost_price_usd: number | null; cost_price_khr: number | null; selling_price_usd: number | null; selling_price_khr: number | null; from_quantity: number | null }>({ id: productId, fromBranch: fromBranchId })
+  `).get<{ id: number; name: string; barcode: string | null; cost_price_usd: number | null; cost_price_khr: number | null; selling_price_usd: number | null; selling_price_khr: number | null; from_quantity: number | null; selected_batch: string | null }>({ id: productId, fromBranch: fromBranchId, batchId })
   if (!product) return c.json({ error: 'Product not found', code: 'transfer_product_missing' }, 404)
   const available = Number(product.from_quantity) || 0
   if (quantity > available) return c.json({ error: 'Insufficient stock in source branch', code: 'transfer_insufficient_stock' }, 400)
 
-  let sourceBatch: { id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; notes: string | null } | null = null
+  const sourceBatch = product.selected_batch ? JSON.parse(product.selected_batch) as { id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; notes: string | null; available: number | null } : null
   if (batchId) {
-    sourceBatch = (await db.prepare(
-      `SELECT id, lot_code, received_at, expiry_date, notes FROM product_batches WHERE id = @batchId AND variant_product_id = @productId AND is_active = 1`,
-    ).get<{ id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; notes: string | null }>({ batchId, productId })) ?? null
     if (!sourceBatch) return c.json({ error: 'Received date not found for this product', code: 'transfer_lot_missing' }, 404)
-    const batchStock = await db.prepare(
-      'SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = @branchId',
-    ).get<{ quantity: number }>({ batchId, branchId: fromBranchId })
-    const batchAvailable = batchStock ? Number(batchStock.quantity) || 0 : 0
-    if (quantity > batchAvailable) return c.json({ error: 'Insufficient stock in source branch', code: 'transfer_insufficient_stock' }, 400)
+    if (quantity > (Number(sourceBatch.available) || 0)) return c.json({ error: 'Insufficient stock in source branch', code: 'transfer_insufficient_stock' }, 400)
   }
 
   const [canonicalTransferRows, mergeTarget] = await Promise.all([
@@ -540,6 +465,8 @@ app.post('/transfer', transferRequest(async (c) => {
   const responsePayload = mergeTarget
     ? { success: true, mergedIntoProductId: destProductId, mergedIntoProductName: destProductName, destBatchId, replayed: false }
     : { success: true, destBatchId, replayed: false }
+  let notifyCommitted = true
+  let recoveredCommit = false
   let committedReceipt: TransferReceiptRow
   try {
     // Planned inside the try: the planner's refusals and the batch's guards
@@ -552,26 +479,25 @@ app.post('/transfer', transferRequest(async (c) => {
     committedReceipt = await commitTransfer(db, statements)
   } catch (error) {
     if (error instanceof TransferQueryBudgetError) throw error
-    const retryReceipt = await findTransferReceipt(db, user.id, clientRequestId)
+    const retryReceipt = await recoverTransferReceipt(db, user.id, clientRequestId)
     if (retryReceipt) {
       if (retryReceipt.request_digest !== requestDigest || retryReceipt.request_json !== requestJson) {
         return c.json({ error: 'client_request_id was already used for different transfer data.', code: 'idempotency_conflict' }, 409)
       }
-      return c.json({ ...(transferReceiptResponse(retryReceipt) as Record<string, unknown>), replayed: true })
+      committedReceipt = retryReceipt
+      recoveredCommit = true
+      notifyCommitted = error instanceof StockTransactionOutcomeUnknownError
+    } else {
+      if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
+      const refusal = transferRefusal(error)
+      if (refusal) return c.json(refusal.body, refusal.status)
+      throw error
     }
-    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
-    const refusal = transferRefusal(error)
-    if (refusal) return c.json(refusal.body, refusal.status)
-    throw error
   }
-  c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'transfer' }))
-  c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: productId }))
-  if (mergeTarget) c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: destProductId }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
-  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
+  refreshTransferReaders(c)
   // Telegram: a transfer is a stock change, so the alert carries the
   // resulting on-hand at both branches, read back after the write.
-  c.executionCtx.waitUntil((async () => {
+  if (notifyCommitted) c.executionCtx.waitUntil((async () => {
     const onHand = (await transferOnHand(db, fromBranchId, toBranchId, [{ productId, destProductId }])).get(`${productId}:${destProductId}`)
     await sendTelegramEvent(c.env, {
       type: 'stock_out', heading: '🔁 Stock transferred',
@@ -585,7 +511,7 @@ app.post('/transfer', transferRequest(async (c) => {
       }),
     })
   })().catch((error) => console.error('[telegram] transfer notification failed', error)))
-  return c.json(transferReceiptResponse(committedReceipt))
+  return c.json({ ...(transferReceiptResponse(committedReceipt) as Record<string, unknown>), replayed: recoveredCommit })
 }))
 
 // POST /api/branches/transfer-bulk -- same product-quantity move as
@@ -693,6 +619,7 @@ app.post('/transfer-bulk', transferRequest(async (c) => {
     if (previousReceipt.request_digest !== requestDigest || previousReceipt.request_json !== requestJson) {
       return c.json({ error: 'client_request_id was already used for different transfer data.', code: 'idempotency_conflict' }, 409)
     }
+    refreshTransferReaders(c)
     return c.json({ ...(transferReceiptResponse(previousReceipt) as Record<string, unknown>), replayed: true })
   }
   // A transfer can carry any number of lines, so both product lookups are
@@ -809,6 +736,8 @@ app.post('/transfer-bulk', transferRequest(async (c) => {
     const lot = item.batchId == null ? null : batchById.get(item.batchId)
     if (lot) { receivedDateByItemIndex.set(index, lot.received_at); lotCodeByItemIndex.set(index, lot.lot_code) }
   }
+  let notifyCommitted = true
+  let recoveredCommit = false
   let committedReceipt: TransferReceiptRow
   try {
     // Planned inside the try, as in /transfer: every refusal is a 4xx.
@@ -821,26 +750,26 @@ app.post('/transfer-bulk', transferRequest(async (c) => {
     committedReceipt = await commitTransfer(db, statements)
   } catch (error) {
     if (error instanceof TransferQueryBudgetError) throw error
-    const retryReceipt = await findTransferReceipt(db, user.id, clientRequestId)
+    const retryReceipt = await recoverTransferReceipt(db, user.id, clientRequestId)
     if (retryReceipt) {
       if (retryReceipt.request_digest !== requestDigest || retryReceipt.request_json !== requestJson) {
         return c.json({ error: 'client_request_id was already used for different transfer data.', code: 'idempotency_conflict' }, 409)
       }
-      return c.json({ ...(transferReceiptResponse(retryReceipt) as Record<string, unknown>), replayed: true })
+      committedReceipt = retryReceipt
+      recoveredCommit = true
+      notifyCommitted = error instanceof StockTransactionOutcomeUnknownError
+    } else {
+      if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
+      const refusal = transferRefusal(error)
+      if (refusal) return c.json(refusal.body, refusal.status)
+      throw error
     }
-    if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
-    const refusal = transferRefusal(error)
-    if (refusal) return c.json(refusal.body, refusal.status)
-    throw error
   }
 
-  c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'transfer' }))
-  c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
-  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
+  refreshTransferReaders(c)
   // Telegram: same resulting-on-hand alert as /transfer, one line per item
   // (the builder caps the list and states the remainder).
-  c.executionCtx.waitUntil((async () => {
+  if (notifyCommitted) c.executionCtx.waitUntil((async () => {
     const mergedInto = new Map(merges.map((merge) => [merge.productId, merge]))
     const onHandByPair = await transferOnHand(db, fromBranchId, toBranchId, items.map(item => ({ productId: item.productId, destProductId: mergedInto.get(item.productId)?.mergedIntoProductId ?? item.productId })))
     const lines = items.map((item, itemIndex) => {
@@ -860,7 +789,7 @@ app.post('/transfer-bulk', transferRequest(async (c) => {
       lines: formatTransferTelegramLines({ fromBranch: fromBranch?.name == null ? null : String(fromBranch.name), toBranch: toBranch?.name == null ? null : String(toBranch.name), note: reason, by: actorSnapshot(user), items: lines }),
     })
   })().catch((error) => console.error('[telegram] bulk transfer notification failed', error)))
-  return c.json(transferReceiptResponse(committedReceipt))
+  return c.json({ ...(transferReceiptResponse(committedReceipt) as Record<string, unknown>), replayed: recoveredCommit })
 }))
 
 

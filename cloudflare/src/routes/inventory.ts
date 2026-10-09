@@ -8,7 +8,7 @@ import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
 import { getDb, type D1Compat } from '../lib/db'
 import { ordinaryBusinessBatch, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
-import { executeStockTransaction, stockTransactionRefusal } from '../lib/stockTransaction'
+import { executeStockTransaction, stockTransactionRefusal, StockTransactionOutcomeUnknownError } from '../lib/stockTransaction'
 
 /** Fail closed until the complete additive release schema is available. */
 async function operationWritesReady(db: ReturnType<typeof getDb>): Promise<boolean> {
@@ -68,6 +68,7 @@ import {
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { planTransferOperation, transferRefusal } from '../lib/transferOperation'
+import { transferRequest, transferRequestDb, TransferQueryBudgetError, commitTransfer, transferOnHand, refreshTransferReaders, recoverTransferReceipt } from '../lib/transferRequest'
 import { RESOLVED_BRANCH_NAME_COLUMN, movementBranchNameSql, withResolvedBranchName } from '../lib/movementBranchName'
 import { RESOLVED_ACTOR_NAME_COLUMN, movementActorNameSql, withResolvedActorName } from '../lib/movementActorName'
 import { movementReferenceSelectSql } from '../lib/movementReference'
@@ -2822,7 +2823,7 @@ app.post('/dated-stock-count/apply', async (c) => {
   return c.json({ success: true, ...result })
 })
 
-app.post('/transfer', async (c) => {
+app.post('/transfer', transferRequest(async (c) => {
   const user = c.get('user')
   // Same reasoning as /adjust above -- not wired into the review queue
   // yet, explicitly blocked rather than silently allowed through.
@@ -2866,7 +2867,7 @@ app.post('/transfer', async (c) => {
   // Worker change -- which is the whole point of pinning the wording here.
   if (!reason) return c.json({ error: 'A transfer reason is required.' }, 400)
 
-  const db = getDb(c.env)
+  const db = transferRequestDb(c)
   if (!await operationWritesReady(db)) return c.json({ error: 'An app upgrade is in progress. Please try again shortly.', code: 'release_upgrade_in_progress' }, 503)
   // The legacy canonical body is kept byte-for-byte when no lot was selected,
   // so a pending FIFO retry keeps its original identity.
@@ -2877,18 +2878,17 @@ app.post('/transfer', async (c) => {
     if (previousReceipt.request_digest !== requestDigest || previousReceipt.request_json !== requestJson) {
       return c.json({ error: 'client_request_id was already used for different transfer data.', code: 'idempotency_conflict' }, 409)
     }
+    refreshTransferReaders(c)
     return c.json({ ...(transferReceiptResponse(previousReceipt) as Record<string, unknown>), replayed: true })
   }
-  const product = await db.prepare('SELECT id, name FROM products WHERE id = @id').get<{ id: number; name: string }>({ id: productId })
+  const product = await db.prepare('SELECT id, name, (SELECT quantity FROM branch_stock WHERE product_id=products.id AND branch_id=@branchId) available FROM products WHERE id = @id').get<{ id: number; name: string; available: number | null }>({ id: productId, branchId: fromBranchId })
   if (!product) return c.json({ error: 'Product not found', code: 'transfer_product_missing' }, 404)
-  const available = await branchStockQty(c.env, productId, fromBranchId)
+  const available = Number(product.available) || 0
   if (quantity > available) return c.json({ error: 'Insufficient stock in source branch', code: 'transfer_insufficient_stock' }, 400)
 
-  const [fromBranch, toBranch, canonicalTransferRows] = await Promise.all([
-    db.prepare('SELECT id, name, role FROM branches WHERE id = @id').get<{ id: number; name: string; role: string | null }>({ id: fromBranchId }),
-    db.prepare('SELECT id, name, role FROM branches WHERE id = @id').get<{ id: number; name: string; role: string | null }>({ id: toBranchId }),
-    db.prepare(CANONICAL_TRANSFER_BRANCHES_SQL).all<CanonicalTransferBranchRow>(),
-  ])
+  const canonicalTransferRows = await db.prepare(CANONICAL_TRANSFER_BRANCHES_SQL).all<CanonicalTransferBranchRow>()
+  const fromBranch = canonicalTransferRows.find(row => Number(row.id) === fromBranchId)
+  const toBranch = canonicalTransferRows.find(row => Number(row.id) === toBranchId)
 
   let canonicalTransferPair: CanonicalTransferPair
   try {
@@ -2906,9 +2906,8 @@ app.post('/transfer', async (c) => {
   // routes accept the two ordered Shop/Warehouse directions and refuse every
   // same-role or noncanonical pairing. Inventory undo posts the opposite
   // direction, so it depends on this exact symmetry. Refused BEFORE the
-  // db.batch below, i.e. before any stock moves. The selected rows and the
-  // complete canonical-role set are read separately so duplicate active
-  // identities cannot be hidden by an id lookup.
+  // db.batch below, i.e. before any stock moves. Selection uses the complete
+  // canonical-role set so duplicate active identities remain visible.
   const directionError = transferDirectionError(fromBranch, toBranch)
     || (!isCanonicalTransferSelection(canonicalTransferPair, fromBranchId, toBranchId)
       ? TRANSFER_DIRECTION_ERROR
@@ -2920,7 +2919,10 @@ app.post('/transfer', async (c) => {
   // Its immutable metadata also drives Telegram after commit: a second FIFO
   // read here could describe a different allocation than the committed plan.
   const responsePayload = { success: true, fromBranchId, toBranchId, quantity, replayed: false }
-  let allocationSummaries: Awaited<ReturnType<typeof planTransferOperation>>['allocationSummaries']
+  let notifyCommitted = true
+  let recoveredCommit = false
+  let committedReceipt: Awaited<ReturnType<typeof commitTransfer>>
+  let allocationSummaries: Awaited<ReturnType<typeof planTransferOperation>>['allocationSummaries'] = []
   try {
     // Planned inside the try: a selected received date that can no longer
     // cover the quantity is a TransferConflictError (409), not a 500.
@@ -2930,51 +2932,47 @@ app.post('/transfer', async (c) => {
       lines: [{ productId, destProductId: productId, quantity, batchId }], response: responsePayload,
     })
     allocationSummaries = planned
-    await executeStockTransaction(db, statements, 'retry')
+    committedReceipt = await commitTransfer(db, statements)
   } catch (error) {
+    if (error instanceof TransferQueryBudgetError) throw error
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
-    const retryReceipt = await findTransferReceipt(db, user.id, clientRequestId)
+    const retryReceipt = await recoverTransferReceipt(db, user.id, clientRequestId)
     if (retryReceipt) {
       if (retryReceipt.request_digest !== requestDigest || retryReceipt.request_json !== requestJson) {
         return c.json({ error: 'client_request_id was already used for different transfer data.', code: 'idempotency_conflict' }, 409)
       }
-      return c.json({ ...(transferReceiptResponse(retryReceipt) as Record<string, unknown>), replayed: true })
+      committedReceipt = retryReceipt
+      recoveredCommit = true
+      notifyCommitted = error instanceof StockTransactionOutcomeUnknownError
+    } else {
+      const refusal = transferRefusal(error)
+      if (refusal) return c.json(refusal.body, refusal.status)
+      throw error
     }
-    // Planner refusals and the batch's own guards: a 4xx, never a 500.
-    const refusal = transferRefusal(error)
-    if (refusal) return c.json(refusal.body, refusal.status)
-    throw error
   }
-  c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'transfer' }))
-  c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: productId }))
-  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'transfer', id: productId }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  refreshTransferReaders(c)
   // Telegram: resulting on-hand at both branches, read back after the write
   // (same alert shape as branches.ts /transfer).
-  c.executionCtx.waitUntil((async () => {
-    const [fromRow, toRow, totalRow] = await Promise.all([
-      db.prepare('SELECT quantity FROM branch_stock WHERE product_id = @productId AND branch_id = @branchId').get<{ quantity: number }>({ productId, branchId: fromBranchId }),
-      db.prepare('SELECT quantity FROM branch_stock WHERE product_id = @productId AND branch_id = @branchId').get<{ quantity: number }>({ productId, branchId: toBranchId }),
-      db.prepare('SELECT stock_quantity FROM products WHERE id = @productId').get<{ stock_quantity: number }>({ productId }),
-    ])
+  if (notifyCommitted) c.executionCtx.waitUntil((async () => {
+    const onHand = (await transferOnHand(db, fromBranchId, toBranchId, [{ productId, destProductId: productId }])).get(`${productId}:${productId}`)
     await sendTelegramEvent(c.env, {
       type: 'stock_out', heading: '🔁 Stock transferred',
       lines: formatTransferTelegramLines({
-        fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note: reason, by: actorSnapshot(user),
+        fromBranch: fromBranch?.name == null ? null : String(fromBranch.name), toBranch: toBranch?.name == null ? null : String(toBranch.name), note: reason, by: actorSnapshot(user),
         items: [{
           product: product.name, quantity,
           receivedDate: allocationSummaries[0].takes.length === 1 ? allocationSummaries[0].takes[0].receivedAt || null : null,
           lot: allocationSummaries[0].takes.length === 1 ? allocationSummaries[0].takes[0].lotCode || null : null,
-          fromOnHand: fromRow ? Number(fromRow.quantity) || 0 : null, toOnHand: toRow ? Number(toRow.quantity) || 0 : null,
-          totalOnHand: totalRow ? Number(totalRow.stock_quantity) || 0 : null,
+          fromOnHand: onHand?.from_on_hand ?? null, toOnHand: onHand?.to_on_hand ?? null,
+          totalOnHand: onHand?.total_on_hand ?? null,
         }],
       }),
     })
   })().catch((error) => console.error('[telegram] transfer notification failed', error)))
   // See the matching note in /adjust above -- same missing-`success`-field bug.
-  return c.json(transferReceiptResponse((await findTransferReceipt(db, user.id, clientRequestId))!))
-})
+  return c.json({ ...(transferReceiptResponse(committedReceipt) as Record<string, unknown>), replayed: recoveredCommit })
+}))
 
 // DEPRECATED as a UI entry point (no screen calls it -- api/methods.ts still
 // exports moveStockRow, and it stays listed in the permission matrix as

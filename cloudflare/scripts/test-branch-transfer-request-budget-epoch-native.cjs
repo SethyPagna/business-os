@@ -85,7 +85,7 @@ async function main(){
       const warm=await f.call((cold.status===409?'cold-':'warm-')+tier+'-'+JSON.stringify(options));assert.equal(warm.status,200);assert.equal(warm.json.replayed,false);assert.ok(warm.physical<=cap);assert.equal(warm.stockBatches,1);zero(f)
       f.loseNextCommitAcknowledgement()
       const lost=await f.call('lost-'+tier+'-'+JSON.stringify(options));assert.equal(lost.status,200);assert.equal(lost.json.replayed,true);assert.equal(lost.stockBatches,1);assert.ok(lost.physical<=cap);zero(f)
-      const before=f.snapshot(),replay=await f.call('lost-'+tier+'-'+JSON.stringify(options));assert.equal(replay.status,200);assert.equal(replay.json.replayed,true);assert.equal(replay.batches,0);assert.equal(f.snapshot(),before);assert.ok(replay.physical<=cap)
+      const before=f.snapshot(),replay=await f.call('lost-'+tier+'-'+JSON.stringify(options));assert.equal(replay.status,200);assert.equal(replay.json.replayed,true);assert.equal(replay.stockBatches,0);assert.equal(f.snapshot(),before);assert.ok(replay.physical<=cap)
       const bulk=await f.call('bulk-'+tier+'-'+JSON.stringify(options),{},true);assert.equal(bulk.status,200);assert.ok(bulk.physical<=cap);zero(f)
       f.failPreflight();const failedBefore=f.snapshot(),failed=await f.call('preflight-transient-'+tier);assert.equal(failed.status,500);assert.equal(failed.batches,0);assert.equal(f.snapshot(),failedBefore);assert.ok(failed.physical<=cap)
     }
