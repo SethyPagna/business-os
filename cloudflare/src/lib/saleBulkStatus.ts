@@ -561,7 +561,7 @@ async function applySaleBulkStatusKernel(env: Env, user: SessionUser, raw: Row, 
             && heldQuantity(old, item.quantity, returned.get(item.id) || 0, true) !== heldQuantity(request.target_status, item.quantity, returned.get(item.id) || 0, true);
         try {
             for (const item of own.filter(movesStock)) {
-                for (const allocation of item.allocations || []) {
+                for (const allocation of allocations.filter(row => row.sale_item_id === item.id)) {
                     if (allocation.branch_id == null || Number(allocation.branch_id) === item.branch_id) continue;
                     const effect = resolver.effect(item.branch_id, { sells: true });
                     if (!effect?.redirected || Number(allocation.branch_id) !== effect.effectBranchId)
