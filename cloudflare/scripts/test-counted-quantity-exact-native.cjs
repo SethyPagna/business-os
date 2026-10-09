@@ -30,6 +30,19 @@ async function replay(f, direction) {
   return f.call(`/action-history/${h.id}/${direction}`, { expected_generation: pointer.generation })
 }
 
+async function proveStaleCount(c) {
+  const before = c.state()
+  const stale = await clear(c, 0.4, 'quantity-stale-count')
+  assert.equal(stale.status, 409)
+  assert.equal(stale.json.code, 'tagged_lot_conflict')
+  assert.deepEqual(c.state(), before)
+  assert.equal(c.sql.prepare("SELECT COUNT(*) n FROM stock_mutation_receipts WHERE request_id='quantity-stale-count'").get().n, 0)
+  assert.equal((await clear(c, 0.1, 'quantity-stale-count')).status, 200)
+  assert.equal((await replay(c, 'undo')).status, 200)
+  assert.deepEqual(quantities(c), { physical: 1, cache: 1, tags: [0.3] })
+  console.log('PASS stale quantity coded409/no effects/released receipt/corrected same-id retry')
+}
+
 async function main() {
   const bounded = loadStockSession('lib/countedDamagedStock.ts')
   assert.equal(bounded.sumCountedQuantities(Array(10_001).fill(0.00001)), 0.10001)
@@ -55,6 +68,7 @@ async function main() {
     const c = await world(makeWorker, tier, 'zero', seed(1, batch))
     try {
       assert.equal((await tag(c, 0.3, batch, 'quantity-clear-tag')).status, 200)
+      await proveStaleCount(c)
       assert.equal((await clear(c, 0.1, 'quantity-clear-first')).status, 200)
       assert.deepEqual(quantities(c), { physical: 1, cache: 1, tags: [0.2] })
       assert.equal((await clear(c, 0.2, 'quantity-clear-second')).status, 200)
@@ -177,4 +191,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })
-module.exports = { world, bundle, loadStockSession, tag, clear, seed, quantities, replay }
+module.exports = { world, bundle, loadStockSession, tag, clear, seed, quantities, replay, proveStaleCount }

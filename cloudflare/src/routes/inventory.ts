@@ -3309,7 +3309,7 @@ async function runTaggedLotActionKernel(c: InventoryContext, action: 'dispose' |
   const { takes, uncovered } = allocateTaggedLots(lots, quantity)
   if (uncovered > 0) {
     const held = sumCountedQuantities(lots.map(lot => Number(lot.quantity_remaining) || 0))
-    return c.json({ error: `Only ${held} unit(s) are tagged ${tagResult.tag} at ${branch?.name || 'this branch'}, ${quantity} requested.` }, 400)
+    return c.json({ error: `Only ${held} unit(s) are tagged ${tagResult.tag} at ${branch?.name || 'this branch'}, ${quantity} requested.`, code: TAGGED_LOT_CONFLICT_CODE }, 409)
   }
 
   const landingTakes = landing.redirected && action === 'restore'
