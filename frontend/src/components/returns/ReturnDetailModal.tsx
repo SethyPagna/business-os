@@ -1,3 +1,5 @@
+import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
+import { stockConditionLabel } from '../../utils/stockCondition.ts'
 import { useEffect, useState } from 'react'
 import { supplierDisplay } from '../../utils/supplierDisplay.ts'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
@@ -32,6 +34,9 @@ interface ReturnLineItem {
 }
 
 interface ReplacementLineItem {
+  condition_snapshot?: { version: 1; lot_id: number; product_id: number; branch_id: number; batch_id: number | null; condition_tag: string } | null
+  source_batch_label?: string | null
+  source_received_at?: string | null
   id?: string | number | null
   product_name?: string | null
   quantity?: number | string | null
@@ -119,11 +124,12 @@ export default function ReturnDetailModal({ ret, onClose, onMinimize, onEdit, on
   useEffect(() => {
     if (!needsFetch || returnId == null) { setFetched(null); return }
     let alive = true
+    const scope = captureActorReadScope('returns')
     setFetched(null)
     void (async () => {
       try {
         const detail = await fetchReturnDetail(returnId) as { items?: ReturnLineItem[] | null; replacement_items?: ReplacementLineItem[] | null } | null
-        if (!alive || !detail) return
+        if (!alive || !detail || !isActorReadScopeCurrent(scope, false)) return
         setFetched({
           items: Array.isArray(detail.items) ? detail.items : [],
           replacement_items: Array.isArray(detail.replacement_items) ? detail.replacement_items : [],
@@ -148,11 +154,12 @@ export default function ReturnDetailModal({ ret, onClose, onMinimize, onEdit, on
   useEffect(() => {
     if (!wantsRecords || returnId == null) { setRecordsCount(null); return }
     let alive = true
+    const scope = captureActorReadScope('returns')
     setRecordsCount(null)
     void (async () => {
       try {
         const payload = await fetchReturnRecords(returnId) as { records?: unknown[] } | null
-        if (!alive) return
+        if (!alive || !isActorReadScopeCurrent(scope, false)) return
         setRecordsCount(Array.isArray(payload?.records) ? payload.records.length : null)
       } catch {
         // A failed count leaves the placeholder, never a zero: "0 records" is a
@@ -376,6 +383,10 @@ export default function ReturnDetailModal({ ret, onClose, onMinimize, onEdit, on
                           className="max-w-full"
                           valueClassName="break-words text-gray-700 dark:text-gray-300"
                         />
+                        <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                          {line.condition_snapshot ? <span className="mr-1 font-medium">{stockConditionLabel(line.condition_snapshot.condition_tag)}</span> : null}
+                          <span>{line.source_batch_label || (line.source_received_at ? fmtTime(line.source_received_at) : tr('received_date_not_recorded', 'Received date not recorded'))}</span>
+                        </div>
                       </td>
                       <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 tabular-nums text-gray-700 dark:text-gray-300">{line.quantity || 0}</td>
                       <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 font-medium tabular-nums text-gray-900 dark:text-white">

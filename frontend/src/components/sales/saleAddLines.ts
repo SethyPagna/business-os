@@ -117,7 +117,7 @@ function toNumber(value: unknown): number {
  * branches take units off two different shelves.
  */
 export function stagedAddLineKey(line: Pick<StagedAddLine, 'productId' | 'branchId' | 'batchId' | 'unlottedStock' | 'damaged'>): string {
-  return `${line.productId}:${line.branchId ?? 'any'}:${'damaged' in line && line.damaged ? `tag:${(line.damaged as NonNullable<ProductOptionSelection['damaged']>).damagedLotId}` : line.batchId ?? (line.unlottedStock ? 'unlotted' : 'stock')}`
+  return `${line.productId}:${line.branchId ?? 'any'}:${line.damaged ? `tag:${line.damaged.damagedLotId}` : line.batchId ?? (line.unlottedStock ? 'unlotted' : 'stock')}`
 }
 
 /**
@@ -137,7 +137,7 @@ export function stagedLineFromSheetPick(
   const branchId = Number.isFinite(branchNumber) && branchNumber > 0 ? branchNumber : null
 
   const damaged = selection?.damaged
-  if (damaged && (selection.batch || damaged.productId !== productId || damaged.branchId !== branchId || !Number.isSafeInteger(damaged.damagedLotId) || damaged.quantity <= 0)) return null
+  if (damaged && (selection.batch || damaged.productId !== productId || damaged.branchId !== branchId || !Number.isSafeInteger(damaged.damagedLotId) || damaged.damagedLotId <= 0 || !Number.isFinite(damaged.quantity) || damaged.quantity <= 0)) return null
   const batch = selection?.batch ?? null
   const batchQuantity = batch ? toNumber(batch.quantity) : null
   const unlottedStock = batch?.unlottedStock === true
