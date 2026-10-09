@@ -51,7 +51,7 @@ const contactRead = `export * from ${JSON.stringify(path.join(root, 'src/compone
 export async function getContactDuplicateClusters(table,opts){window.calls.push({kind:'contacts',table,...opts});return[]};
 export async function getSaleLinkConflicts(opts){window.calls.push({kind:'links',...opts});return{mismatches:[],missing:[]}};`
 const bundle = (await build({stdin:{contents:fixture,loader:'tsx',resolveDir:root},loader:{'.css':'empty'},bundle:true,format:'iife',write:false,plugins:[{name:'synthetic-read-boundaries',setup(b){
-  b.onResolve({filter:/AppContext(?:Core)?(?:\.tsx)?$/},a=>({path:'app',namespace:'seam'}))
+  b.onResolve({filter:/AppContext(?:Core)?(?:\.tsx)?$/},()=>({path:'app',namespace:'seam'}))
   b.onResolve({filter:/productWriteTransport\.ts$|(?:\/|^)contactDuplicates(?:\.ts)?$/},a=>a.namespace==='seam'?undefined:({path:a.path.includes('productWriteTransport')?'products':'contacts',namespace:'seam'}))
   b.onLoad({filter:/.*/,namespace:'seam'},a=>({contents:a.path==='app'?app:a.path==='products'?productRead:contactRead,loader:'tsx',resolveDir:root}))
 }}]})).outputFiles[0].text
