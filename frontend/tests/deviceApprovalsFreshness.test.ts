@@ -127,6 +127,24 @@ try {
       await c.resolve(1, 'Refreshed action device')
       await c.surface.unmount()
     }
+    for (const action of ['Approve', 'Reject', 'Revoke', 'End session', 'Sign out everywhere', 'Reset for re-approval']) {
+      const c = await fixture()
+      await c.resolve(0, 'Rendered account target', action === 'Approve' || action === 'Reject' ? 'pending' : action === 'Reset for re-approval' ? 'rejected' : 'approved')
+      const previousUser = window.localStorage.getItem('businessos_user')
+      try {
+        window.localStorage.setItem('businessos_user', JSON.stringify({ id: 99, username: 'changed-cookie-owner' }))
+        await c.surface.click(c.surface.button(action))
+        const confirmation = c.surface.findAll(node => node.tagName === 'BUTTON' && node.textContent.trim() === 'Remove')[0]
+        if (confirmation) await c.surface.call(confirmation, 'onClick', [])
+        assert.deepEqual(c.writes, [], `${action} must not apply an old rendered target under newly captured HTTP authority`)
+        assert.deepEqual(c.notices, [])
+        assert.equal(c.reads.length, 1)
+      } finally {
+        await c.surface.unmount()
+        if (previousUser === null) window.localStorage.removeItem('businessos_user')
+        else window.localStorage.setItem('businessos_user', previousUser)
+      }
+    }
     const held = await fixture()
     await held.resolve(0, 'Rejected request', 'rejected')
     await held.surface.click(held.surface.button('Reset for re-approval'))

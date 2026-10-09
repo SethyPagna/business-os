@@ -56,9 +56,10 @@ function tr(t: TranslateFn, key: string, fallback: string): string {
 export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
   const { user, syncUrl } = useApp() as DevicePanelContext
   const canManage = isAdminControlUser(user)
-  const ownerKey = JSON.stringify([user?.id, user?.organization_id, syncUrl, canManage, captureActorReadScope('devices').authority])
-  const currentOwner = useRef({ ownerKey, canManage })
-  currentOwner.current = { ownerKey, canManage }
+  const renderedAuthority = captureActorReadScope('devices').authority
+  const ownerKey = JSON.stringify([user?.id, user?.organization_id, syncUrl, canManage, renderedAuthority])
+  const currentOwner = useRef({ ownerKey, canManage, authority: renderedAuthority })
+  currentOwner.current = { ownerKey, canManage, authority: renderedAuthority }
   const mounted = useRef(false)
   const requestSequence = useRef(0)
   const actions = useRef(new Set<string>())
@@ -80,6 +81,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
 
   const ownsScope = useCallback((scope: ActorReadScope, owner = ownerKey) => mounted.current
     && currentOwner.current.canManage && currentOwner.current.ownerKey === owner
+    && scope.authority === currentOwner.current.authority
     && isActorReadScopeCurrent(scope, false), [ownerKey])
 
   const load = useCallback(async () => {
