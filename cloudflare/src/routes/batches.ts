@@ -8,7 +8,7 @@ import { audit, changedFields } from '../lib/audit'
 import { hasPermission, getActionTier, getPermissionTier, isActionBlocked } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
-import { getTrackedProductIds, listBatchesForProduct, isReceiptSellingPriceConflict, RECEIPT_SELLING_PRICE_CHANGED, parseReceiptSellingPrice, planReceiptSellingPrice, receiveBatchStock, prepareReceiptLotTarget, planReceiveBatchStock, type ReceiptSellingPriceRow } from '../lib/productBatches'
+import { getTrackedProductIds, listBatchesForProduct, isReceiptSellingPriceConflict, RECEIPT_SELLING_PRICE_CHANGED, parseReceiptSellingPrice, planReceiptSellingPrice, receiveBatchStock, prepareReceiptLotTarget, resolveReceiptLotTarget, planReceiveBatchStock, type ReceiptSellingPriceRow } from '../lib/productBatches'
 import { CountedStockPlan, CountedStockConflictError, countedStockFactsSql, isCountedStockConflict, sumCountedQuantities } from '../lib/countedDamagedStock'
 import { stockActorPredicate, stockActorParams } from '../lib/stockActorGuard'
 import { executeStockTransaction } from '../lib/stockTransaction'
@@ -276,6 +276,10 @@ async function receiveCountedBatchStock(db: ReturnType<typeof getDb>, input: Par
   const plan = planReceiveBatchStock({...input,batchId,receiptLotTarget:target,
     receiptCostPreimage:input.unitCostUsd == null ? undefined : {batchExists:Boolean(before),receivedCostUsd:before?.[2]??null},
     receivedQuantityPreimage:before ? {quantity:before[1]} : undefined})
+  const capturedTarget = resolveReceiptLotTarget(receipts.map(row=>({id:row[0],batch_key:row[11] as string,
+    received_at:row[14] as string|null,unit_cost_usd:row[17] as number|null})),plan.receivedAt,
+    plan.params.unitCostUsd as number|null,target.baselineBatchId,input.batchId)
+  if(capturedTarget.existingBatchId!==target.existingBatchId || capturedTarget.batchKey!==target.batchKey) throw new CountedStockConflictError()
   let physical
   if (batchId == null) {
     const created = exact.receiveProjectedCreatedReceipt(plan.batchKey,input.quantity)

@@ -22,8 +22,8 @@ async function positive(makeWorker){
   }finally{f.sql.close()}
  }
 }
-async function faults(makeWorker){
- for(const tier of ['free','paid'])for(const shape of ['explicit','new','null'])for(const fault of ['cache','receipt_quantity','receipt_cost','receipt_metadata','receipt_date','membership','tag_membership','branch']){
+async function faults(makeWorker,shapes=['explicit','new','null','auto']){
+ for(const tier of ['free','paid'])for(const shape of shapes)for(const fault of ['cache','receipt_quantity','receipt_cost','receipt_metadata','receipt_date','membership','tag_membership','branch']){
   const {f,stock,db,call}=await scenario(makeWorker,tier,0.1,shape)
   try{
    let rival
@@ -33,7 +33,7 @@ async function faults(makeWorker){
    console.log('PASS receiving exact precommit source race '+JSON.stringify({tier,shape,fault}))
   }finally{f.sql.close()}
  }
- for(const tier of ['free','paid'])for(const shape of ['explicit','new','null']){
+ for(const tier of ['free','paid'])for(const shape of shapes){
   const {f,call}=await scenario(makeWorker,tier,0.1,shape)
   try{
    const before=state(f);f.sql.exec("CREATE TEMP TRIGGER receiving_unrelated BEFORE INSERT ON inventory_movements WHEN NEW.reason='Synthetic exact receiving' BEGIN SELECT RAISE(ABORT,'CHECK constraint failed: guard_value_unrelated');END")
@@ -73,6 +73,26 @@ async function actors(makeWorker){
  }
 }
 
-async function main(){const makeWorker=await h.bundle.exports.bundleWorker();if(process.argv.includes('--actor-only')){await actors(makeWorker);return}if(process.argv.includes('--faults-only')){await faults(makeWorker);return}if(process.argv.includes('--tails-only')){await tails(makeWorker);return}await positive(makeWorker);await faults(makeWorker);await tails(makeWorker);await actors(makeWorker)}
-module.exports={scenario,positive,faults,tails,actors,state}
+async function selections(makeWorker){
+ for(const tier of ['free','paid'])for(const initial of [0,.1])for(const [shape,fault] of [['auto','date'],['explicit','date'],['auto','key'],['auto','earlier'],['new','matching'],['auto','cost']]){
+  const {f,stock,db,body,call}=await scenario(makeWorker,tier,initial,shape),raw=f.env.DB;let fired=false,rival,attempted=0;
+  try{
+   if(fault==='earlier')await stock.executeStockTransaction(db,[{sql:"UPDATE product_batches SET received_at='2026-09-02' WHERE id=1"},{sql:"INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,unit_cost_usd,is_active)VALUES(2,1,'later-selected','2026-09-01',2,1)"}],'once');
+   const sql={date:"UPDATE product_batches SET received_at='2026-09-02' WHERE id=1",key:"UPDATE product_batches SET batch_key='rival-key' WHERE id=1",earlier:"UPDATE product_batches SET received_at='2026-09-01' WHERE id=1",matching:"INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,unit_cost_usd,is_active)VALUES(90,1,'matching','2026-09-05',2,1)",cost:'UPDATE product_batches SET unit_cost_usd=3 WHERE id=1'}[fault];
+   const wrap=(statement,text)=>new Proxy(statement,{get(target,key){if(key==='bind')return(...args)=>wrap(target.bind(...args),text);if(['first','all','run'].includes(key))return async(...args)=>{attempted++;const result=await target[key](...args);if(!fired&&key==='all'&&text.includes('SELECT pb.id,pb.batch_key,pb.received_at,pb.unit_cost_usd,pb.received_cost_usd')){fired=true;await stock.executeStockTransaction(db,[{sql}],'once');rival=state(f)}return result};return target[key]}});
+   f.env.DB=new Proxy(raw,{get(target,key){if(key==='prepare')return text=>wrap(target.prepare(text),text);if(key==='batch')return async statements=>{attempted+=statements.length;return target.batch(statements)};return target[key]}});
+   const result=await call(),requestAttempts=attempted;assert.equal(fired,true);assert.ok(requestAttempts<=(tier==='free'?50:1000));
+   if(shape==='explicit'&&fault==='date'){
+    assert.equal(result.status,200,JSON.stringify(result));assert.equal(f.sql.prepare('SELECT received_at FROM product_batches WHERE id=1').get().received_at,'2026-09-02');assert.equal(f.state().physical,initial===0?.2:.3);
+    const saved=state(f);assert.equal((await call()).status,200);assert.deepEqual(state(f),saved);
+   }else{
+    assert.equal(result.status,409,JSON.stringify({tier,initial,shape,fault,result}));assert.equal(result.json.code,'write_conflict');assert.deepEqual(state(f),rival);assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM stock_mutation_receipts').get().n,0);
+   }
+   console.log('RECEIVING_SELECTION '+JSON.stringify({tier,initial,shape,fault,status:result.status,requestAttempts,replayAttempts:attempted-requestAttempts,requested:body.received_date}));
+  }finally{f.sql.close()}
+ }
+}
+
+async function main(){const makeWorker=await h.bundle.exports.bundleWorker();if(process.argv.includes('--selection-only')){await selections(makeWorker);return}if(process.argv.includes('--actor-only')){await actors(makeWorker);return}if(process.argv.includes('--faults-only')){await faults(makeWorker);return}if(process.argv.includes('--tails-only')){await tails(makeWorker);return}await selections(makeWorker);await positive(makeWorker);await faults(makeWorker);await tails(makeWorker);await actors(makeWorker)}
+module.exports={scenario,positive,faults,tails,actors,selections,state}
 if(require.main===module)main().catch(error=>{console.error(error);process.exitCode=1})
