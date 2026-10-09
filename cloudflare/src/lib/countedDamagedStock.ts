@@ -43,7 +43,7 @@ export function planCountedTaggedChange(identity: CountedTaggedIdentity, quantit
           WHERE pb.id=@batchId AND pb.variant_product_id=@productId AND pb.is_active=1 AND bbs.branch_id=@branchId)))
       THEN 1 ELSE json_extract('[1]','$[counted_tagged_conflict]') END`, params,
   }]
-  if (!restore && action === 'consume') {
+  {
     const capacity = `
       COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@productId AND branch_id=@branchId),0)>=${ordinarySubsetSql('@productId', '@branchId')}
       AND CASE WHEN @batchId IS NULL THEN
