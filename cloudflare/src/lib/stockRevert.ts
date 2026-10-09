@@ -1,5 +1,5 @@
 import { executeStockTransaction, StockTransactionUnavailableError, StockTransactionOutcomeUnknownError } from './stockTransaction'
-import { productStockGuardStatement, productStockGuardError } from './productStockGuard'
+import { productStockGuardStatement, productStockGuardError, ProductStockGuardError } from './productStockGuard'
 // Part 553: reverting a Stock Change ledger row. A revert is a COMPENSATING
 // counter-movement -- it posts the opposite stock effect and records a new
 // movement row (reason "Revert of #N", reference_id "revert:N"); nothing is
@@ -23,10 +23,10 @@ import { productStockGuardStatement, productStockGuardError } from './productSto
 import type { D1Compat } from './db'
 import { LEDGER_OUT_TYPES } from './stockLedgerQuery'
 import {
-  decrementBatchStockStrictStatement, planReceiveBatchStock, planRemoveStockFromBatch, planUnreceiveBatchStock,
-  restoreBatchStockStatements, type StockWriteStatement,
+  planReceiveBatchStock, planUnreceiveBatchStock, type StockWriteStatement,
 } from './productBatches'
-import { multiplyMoney4 } from './moneyPrecision'
+import { multiplyMoney4, MoneyPrecisionError } from './moneyPrecision'
+import { CountedStockBatchPlan, countedStockFactsSql, isCountedStockConflict, subtractCountedQuantity, sumCountedQuantities } from './countedDamagedStock'
 import { MOVEMENT_RETURN_REFERENCE_TYPES, movementReferenceKindSql } from './movementReference'
 import { STOCK_RECEIPT_MOVEMENT_TYPES, isStockInEditReference, stockInEditRange } from './stockInSessionsQuery'
 import { STOCK_CONDITION_TAGS, isDamagedLotReference, taggedReasonText } from './stockCondition'
@@ -216,37 +216,6 @@ function receiptRowGuard(m: Pick<RevertMovementRow, 'id' | 'movement_type' | 're
   }
 }
 
-async function branchQty(db: D1Compat, productId: number, branchId: number): Promise<number> {
-  const row = await db.prepare('SELECT quantity FROM branch_stock WHERE product_id = @productId AND branch_id = @branchId')
-    .get<{ quantity: number }>({ productId, branchId })
-  return row ? Number(row.quantity) || 0 : 0
-}
-
-// What this product holds at the branch under a received date. Whatever
-// branch_stock holds beyond it is stock with no date at all.
-const DATED_LOT_QTY_SQL = `SELECT COALESCE(SUM(bbs.quantity), 0) AS quantity FROM branch_batch_stock bbs
-  JOIN product_batches pb ON pb.id = bbs.batch_id
-  WHERE pb.variant_product_id = @productId AND bbs.branch_id = @branchId`
-
-async function datedLotQty(db: D1Compat, productId: number, branchId: number): Promise<number> {
-  const row = await db.prepare(DATED_LOT_QTY_SQL)
-    .get<{ quantity: number }>({ productId, branchId })
-  return Number(row?.quantity) || 0
-}
-
-// In-batch assertion (stock_session_guards' CHECK(guard_value = 1)) that taking
-// undated units never leaves branch_stock below its dated lots: a sale that
-// consumed the undated units after the read above aborts the whole revert
-// instead of forking the two stock ledgers.
-function undatedStockGuard(productId: number, branchId: number): StockWriteStatement {
-  return {
-    sql: `INSERT INTO stock_session_guards (guard_value)
-      SELECT CASE WHEN COALESCE((SELECT quantity FROM branch_stock WHERE product_id = @productId AND branch_id = @branchId), 0)
-        >= (SELECT quantity FROM (${DATED_LOT_QTY_SQL})) THEN 1 ELSE 0 END`,
-    params: { productId, branchId },
-  }
-}
-
 type LotShare = { batchId: number; quantity: number; productId: number | null }
 
 // FX-stock4 N1. A count that no single lot covered carries no batch_id (0084)
@@ -261,38 +230,12 @@ async function rootLotShares(db: D1Compat, rootId: number): Promise<LotShare[]> 
     FROM dated_stock_count_batch_actions a
     LEFT JOIN product_batches pb ON pb.id = a.batch_id
     WHERE a.movement_id = @movementId AND a.quantity <> 0
-    ORDER BY a.id
+    ORDER BY a.id LIMIT 10001
   `).all<LotShare>({ movementId: rootId })
   return rows.map((row) => ({ batchId: Number(row.batchId), quantity: Number(row.quantity), productId: row.productId == null ? null : Number(row.productId) }))
 }
 
 const MERGED_LOT_REFUSAL = 'This count moved stock on a received date that now belongs to another product (the products were merged), so it cannot be reverted here. Nothing was changed; correct it with a new count instead.'
-
-// The aggregate-only move (branch_stock + products.stock_quantity) -- used for
-// the units of a batch-less movement that no lot holds.
-//
-// branch_stock carries CHECK(quantity >= 0) since migration 0058, and SQLite's
-// UPSERT does NOT let ON CONFLICT DO UPDATE bypass a CHECK failure on the
-// would-be-INSERTed candidate row -- so an upsert whose VALUES() carry a
-// NEGATIVE delta is rejected outright, even when the conflicting row exists and
-// the post-update value would be non-negative. A positive delta upserts safely
-// (creating the branch_stock row if absent); a negative delta targets a row
-// that is guaranteed to exist -- the revert-remove path guards magnitude <= the
-// current branch quantity first -- so a plain UPDATE evaluates the CHECK on the
-// final (>= 0) value and never trips it.
-function aggregateDeltaStatements(productId: number, branchId: number, delta: number): StockWriteStatement[] {
-  const branchSql = delta >= 0
-    ? `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @delta)
-       ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity`
-    : `UPDATE branch_stock SET quantity = quantity + @delta WHERE product_id = @productId AND branch_id = @branchId`
-  return [
-    { sql: branchSql, params: { productId, branchId, delta } },
-    {
-      sql: 'UPDATE products SET stock_quantity = COALESCE(stock_quantity, 0) + @delta, updated_at = CURRENT_TIMESTAMP WHERE id = @productId',
-      params: { productId, delta },
-    },
-  ]
-}
 
 // A revert counter-movement (reference_id 'revert:N') compensates a row that
 // must still exist, however deep the chain. One indexed statement follows
@@ -330,15 +273,8 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   if (!productId || !recordedBranchId) {
     return refuse(400, 'revert_not_tied', 'This movement is not tied to a product and branch, so it cannot be reverted here.')
   }
-  // P3-L6. A movement that moved units into or out of a TAGGED held row is
-  // half of a two-ledger transition (sellable stock AND
-  // damaged_stock_lots.quantity_remaining). The allowlist above is keyed on
-  // movement_type alone, and 'in' -- the type a restore-to-sellable writes --
-  // is on it, so without this guard the ledger would happily "revert" a
-  // restore: the units would come back OUT of sellable stock while the held
-  // row stayed at the figure the restore left it, and they would exist in
-  // neither place. The real reversal for these transitions is the tagged
-  // row's own Restore / Remove entirely actions, which move both ledgers.
+  // Condition history owns both the physical stock and its damaged subset.
+  // Replaying only its movement would leave the condition history inconsistent.
   if (/^(?:revert:)*condition_history:/.test(String(m.reference_id||''))) {
     return refuse(409, 'revert_use_history', 'This condition compensation has exact lot history. Use its History Undo/Redo so physical stock and tags remain together.')
   }
@@ -437,163 +373,159 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   const receiptCostUsd = m.total_cost_usd != null ? Number(m.total_cost_usd)
     : m.unit_cost_usd != null ? multiplyMoney4(Number(m.unit_cost_usd), magnitude) : null
   let usedBatchId: number | null = null
-  const statements: StockWriteStatement[] = []
-
-  if (revertType === 'remove') {
-    const current = await branchQty(db, productId, branchId)
-    if (magnitude > current) {
-      return withBlocker(db, refuse(400, 'revert_insufficient_branch_stock', `Cannot revert: only ${current} in stock at ${branchLabel || 'this branch'}, ${magnitude} needed.`, { available: current, needed: magnitude, branch: branchLabel || '' }), { productId, branchId, batchId: null, afterMovementId: Number(m.id) })
+  try {
+    const originalShares = batchId === null ? await rootLotShares(db, root.id) : []
+    if (originalShares.length > 10000) throw new MoneyPrecisionError('too_many_terms')
+    const shares = await landingShares(originalShares)
+    if (shares.some(share => share.productId !== productId)) return refuse(400, 'revert_lot_moved', MERGED_LOT_REFUSAL)
+    const receiptIds = [...new Set([...(batchId === null ? [] : [batchId]), ...shares.map(share => share.batchId)])]
+    const observed = await db.prepare(`SELECT p.is_active, ${countedStockFactsSql('@productId', '@branchId', '@receiptIds')} AS facts
+      FROM products p WHERE p.id=@productId`).get<{ is_active: number; facts: string }>({ productId, branchId, receiptIds: JSON.stringify(receiptIds) })
+    if (revertType === 'add' && observed?.is_active !== 1) throw new ProductStockGuardError([productId])
+    const exact = new CountedStockBatchPlan([{ facts: observed?.facts ?? 'null', branchId }], { deferPhysicalWrites: true })
+    const stock = exact.get(productId, branchId)
+    const guards = exact.takePreimageGuards()
+    const stockStatements: StockWriteStatement[] = []
+    const metadata: StockWriteStatement[] = []
+    type Receipt = { id: number; received_quantity: number | null; received_cost_usd: number | null;
+      supplier_id: number | null; supplier_name: string | null; payment_status: string | null; credit_due_date: string | null;
+      is_active: number; unit_cost_usd: number | null; received_branch_id: number | null; received_branch_name: string | null }
+    let sourceReceiptId = m.batch_id == null ? null : Number(m.batch_id)
+    if (purchaseSide && sourceReceiptId !== null && root.id !== Number(m.id)) {
+      const original = await db.prepare('SELECT batch_id FROM inventory_movements WHERE id=@id')
+        .get<{ batch_id: number | null }>({ id: root.id })
+      sourceReceiptId = original?.batch_id ?? null
+      if (sourceReceiptId === null) {
+        const originalShares = await rootLotShares(db, root.id)
+        if (originalShares.length !== 1 || originalShares[0].quantity !== magnitude) return refuse(409, 'stock_changed', 'The original receipt source cannot be identified. Nothing was changed.')
+        sourceReceiptId = originalShares[0].batchId
+      }
     }
-    if (batchId != null) {
-      // Strict (unclamped) lot + branch decrement in the same batch as the
-      // counter-movement: a sale that took the lot in between trips the
-      // CHECK(quantity >= 0) and the whole revert rolls back.
-      const lot = await db.prepare(`
-        SELECT COALESCE(bbs.quantity, 0) AS available
-        FROM product_batches pb
-        LEFT JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
-        WHERE pb.id = @batchId AND pb.variant_product_id = @productId
-      `).get<{ available: number }>({ batchId, productId, branchId })
-      if (!lot) return refuse(400, 'revert_lot_moved', 'Selected received date does not belong to this product')
-      const available = Number(lot.available) || 0
-      if (magnitude > available) return withBlocker(db, lotShortRefusal(available, magnitude), { productId, branchId, batchId, afterMovementId: Number(m.id) })
-      statements.push(...planRemoveStockFromBatch({ batchId, productId, branchId, quantity: magnitude }).statements)
+    const purchaseIds = purchaseSide ? [...new Set(sourceReceiptId === null ? shares.map(share => share.receivedBatchId) : [sourceReceiptId])] : []
+    const receipts = purchaseIds.length ? await db.prepare(`SELECT id,received_quantity,received_cost_usd,supplier_id,supplier_name,payment_status,credit_due_date,
+      is_active,unit_cost_usd,received_branch_id,received_branch_name
+      FROM product_batches WHERE variant_product_id=@productId AND id IN (SELECT value FROM json_each(@ids)) LIMIT 10001`)
+      .all<Receipt>({ productId, ids: JSON.stringify(purchaseIds) }) : []
+    if (receipts.length !== purchaseIds.length) return refuse(400, 'revert_lot_moved', MERGED_LOT_REFUSAL)
+    if (receipts.length) guards.push({
+      sql: `SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM json_each(@receipts) saved
+        LEFT JOIN product_batches pb ON pb.id=json_extract(saved.value,'$.id') AND pb.variant_product_id=@productId
+        WHERE pb.id IS NULL OR pb.received_quantity IS NOT json_extract(saved.value,'$.received_quantity')
+          OR pb.received_cost_usd IS NOT json_extract(saved.value,'$.received_cost_usd')
+          OR pb.supplier_id IS NOT json_extract(saved.value,'$.supplier_id') OR pb.supplier_name IS NOT json_extract(saved.value,'$.supplier_name')
+          OR pb.payment_status IS NOT json_extract(saved.value,'$.payment_status') OR pb.credit_due_date IS NOT json_extract(saved.value,'$.credit_due_date')
+          OR pb.is_active IS NOT json_extract(saved.value,'$.is_active') OR pb.unit_cost_usd IS NOT json_extract(saved.value,'$.unit_cost_usd')
+          OR pb.received_branch_id IS NOT json_extract(saved.value,'$.received_branch_id') OR pb.received_branch_name IS NOT json_extract(saved.value,'$.received_branch_name'))
+        THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`, params: { productId, receipts: JSON.stringify(receipts) },
+    })
+    const purchaseChange = (receiptId: number, quantity: number, dated: boolean) => {
+      const prior = receipts.find(receipt => receipt.id === receiptId)!
+      const before = prior.received_quantity
+      if (revertType === 'remove') {
+        metadata.push(...planUnreceiveBatchStock({ batchId: receiptId, quantity,
+          totalCostUsd: dated ? receiptCostUsd : null, receivedQuantityPreimage: { quantity: before } }))
+        prior.received_quantity = before === null ? null : Math.max(0, subtractCountedQuantity(before, [quantity]))
+      } else if (dated) {
+        const unitCostUsd = !Number(m.unit_cost_usd) && !Number(m.total_cost_usd) ? null : m.unit_cost_usd ?? null
+        const receive = planReceiveBatchStock({ productId, branchId, batchId: receiptId, quantity, unitCostUsd,
+          receiptTotalUsd: m.total_cost_usd != null ? Number(m.total_cost_usd) : null,
+          preserveHistoricalUnitCost: true, preserveHistoricalAttribution: true,
+          receiptCostPreimage: unitCostUsd != null ? { batchExists: true, receivedCostUsd: prior.received_cost_usd } : undefined,
+          receivedQuantityPreimage: { quantity: before },
+        })
+        metadata.push(...receive.metadataStatements)
+        prior.received_quantity = subtractCountedQuantity(before ?? 0, [-quantity])
+      } else {
+        const next = before === null ? null : subtractCountedQuantity(before, [-quantity])
+        const params = { batchId: receiptId, productId, before, next }
+        metadata.push({ sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_batches WHERE id=@batchId
+          AND variant_product_id=@productId AND received_quantity IS @before)
+          THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`, params },
+          { sql: 'UPDATE product_batches SET received_quantity=@next,updated_at=CURRENT_TIMESTAMP WHERE id=@batchId', params })
+        prior.received_quantity = next
+      }
+    }
+    const move = (source: number | null, quantity: number) => {
+      if (quantity <= 0) return
+      const action = revertType === 'remove' ? 'consume'
+        : source !== null && stock.requiresReceiptActivation(source) ? 'activateAndReceive' : 'receive'
+      stockStatements.push(...stock.changeOrdinary(source, quantity, action))
+    }
+    if (revertType === 'remove' && magnitude > stock.branchQuantity) {
+      const current = stock.branchQuantity
+      return withBlocker(db, refuse(400, 'revert_insufficient_branch_stock', `Cannot revert: only ${current} in stock at ${branchLabel || 'this branch'}, ${magnitude} needed.`,
+        { available: current, needed: magnitude, branch: branchLabel || '' }), { productId, branchId, batchId: null, afterMovementId: Number(m.id) })
+    }
+    if (batchId !== null) {
+      if (revertType === 'remove') {
+        const available = stock.ordinaryQuantity(batchId)
+        if (magnitude > available) return withBlocker(db, lotShortRefusal(available, magnitude), { productId, branchId, batchId, afterMovementId: Number(m.id) })
+      }
+      move(batchId, magnitude)
+      if (purchaseSide) purchaseChange(sourceReceiptId!, magnitude, true)
       usedBatchId = batchId
-      // Un-purchase: the lot loses this receipt's units and money; supplier
-      // and payment state stay on the row for the Revert of this Revert.
-      if (purchaseSide) statements.push(...planUnreceiveBatchStock({ batchId: Number(m.batch_id), quantity: magnitude, totalCostUsd: receiptCostUsd }))
     } else {
-      // No lot stamp: the count's own lot shares come back off those lots;
-      // every other unit (a pre-0084 receipt, an aggregate-only add) was
-      // never put on a received date, so it comes off the stock held under
-      // none. Taking it from a dated lot would guess, and could drain another
-      // supplier's delivery; when the undated stock is short the revert is
-      // refused whole.
-      const shares = await landingShares(await rootLotShares(db, root.id))
-      if (shares.some((share) => share.productId !== productId)) return refuse(400, 'revert_lot_moved', MERGED_LOT_REFUSAL)
+      const undatedQuantity = subtractCountedQuantity(magnitude, [sumCountedQuantities(shares.map(share => share.quantity))])
+      if (undatedQuantity < 0) return refuse(409, 'stock_changed', 'The recorded lot shares exceed this movement. Nothing was changed.')
       for (const share of shares) {
-        const lot = await db.prepare('SELECT COALESCE(quantity, 0) AS available FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = @branchId')
-          .get<{ available: number }>({ batchId: share.batchId, branchId })
-        const available = Number(lot?.available) || 0
-        if (share.quantity > available) return withBlocker(db, lotShortRefusal(available, share.quantity), { productId, branchId, batchId: share.batchId, afterMovementId: Number(m.id) })
-        statements.push(decrementBatchStockStrictStatement(share.batchId, branchId, share.quantity))
+        if (revertType === 'remove') {
+          const available = stock.ordinaryQuantity(share.batchId)
+          if (share.quantity > available) return withBlocker(db, lotShortRefusal(available, share.quantity), { productId, branchId, batchId: share.batchId, afterMovementId: Number(m.id) })
+        }
+        move(share.batchId, share.quantity)
+        if (purchaseSide) purchaseChange(share.receivedBatchId, share.quantity, false)
       }
-      const fromLots = shares.reduce((sum, share) => sum + share.quantity, 0)
-      const undated = current - await datedLotQty(db, productId, branchId)
-      if (magnitude - fromLots > undated) {
-        const available = Math.max(0, undated)
-        const needed = magnitude - fromLots
-        return refuse(400, 'revert_no_received_date', `Cannot revert: this change was saved without a received date and only ${available} of the ${needed} units at ${branchLabel || 'this branch'} are held without one. Nothing was changed. Use Remove stock and choose the received date instead.`, { available, needed, branch: branchLabel || '' })
+      if (revertType === 'remove' && undatedQuantity > 0) {
+        const available = stock.ordinaryQuantity(null)
+        if (undatedQuantity > available) return refuse(400, 'revert_no_received_date',
+          `Cannot revert: this change was saved without a received date and only ${available} of the ${undatedQuantity} units at ${branchLabel || 'this branch'} are held without one. Nothing was changed. Use Remove stock and choose the received date instead.`,
+          { available, needed: undatedQuantity, branch: branchLabel || '' })
       }
-      statements.push(...aggregateDeltaStatements(productId, branchId, -magnitude), undatedStockGuard(productId, branchId))
-      // A count increase was received onto its lots: un-receive each share
-      // (after the stock writes, so an emptied lot is seen as empty).
-      if (purchaseSide) for (const share of shares) statements.push(...planUnreceiveBatchStock({ batchId: share.receivedBatchId, quantity: share.quantity, totalCostUsd: null }))
+      move(null, undatedQuantity)
       usedBatchId = shares.length === 1 && shares[0].quantity === magnitude ? shares[0].batchId : null
     }
-  } else if (batchId != null && purchaseSide) {
-    // Reverting the revert of a receipt puts the purchase back on the same
-    // lot: units and money are received again under the supplier and payment
-    // state the row kept through the revert (they are not on the movement).
-    // A ZEROED lot takes whatever attribution a receipt carries (clearing it
-    // to NULL when none is given), so this call re-supplies the row's own.
-    const priorAttribution = await db.prepare(
-      'SELECT supplier_id, supplier_name, payment_status, credit_due_date FROM product_batches WHERE id = @batchId',
-    ).get<{ supplier_id: number | null; supplier_name: string | null; payment_status: string | null; credit_due_date: string | null }>({ batchId })
-    const before = await db.prepare(
-      'SELECT id, received_cost_usd FROM product_batches WHERE id = @batchId AND variant_product_id = @productId',
-    ).get<{ id: number; received_cost_usd: number | null }>({ batchId, productId })
-    if (!before) return refuse(400, 'revert_lot_moved', 'Selected received date does not belong to this product')
-    // Both cost columns default to 0 (0001), so a row with neither priced (a
-    // dated count) carries no cost and must not turn the lot's NULL into $0.
-    const unitCostUsd = !Number(m.unit_cost_usd) && !Number(m.total_cost_usd) ? null : m.unit_cost_usd ?? null
-    try {
-      statements.push(...planReceiveBatchStock({
-        productId, branchId, quantity: magnitude, batchId, unitCostUsd,
-        // Free units ride at the effective unit cost, so unit x quantity drifts off what the supplier was paid.
-        receiptTotalUsd: m.total_cost_usd != null ? Number(m.total_cost_usd) : null,
-        preserveHistoricalUnitCost: true,
-        supplierId: priorAttribution?.supplier_id ?? null,
-        supplierName: priorAttribution?.supplier_name ?? null,
-        paymentStatus: priorAttribution?.payment_status === 'paid' || priorAttribution?.payment_status === 'credit' ? priorAttribution.payment_status : null,
-        creditDueDate: priorAttribution?.credit_due_date ?? null,
-        receiptCostPreimage: unitCostUsd != null ? { batchExists: true, receivedCostUsd: before.received_cost_usd ?? null } : undefined,
-      }).statements)
-    } catch (err) {
-      return refuse(400, 'revert_lot_moved', err instanceof Error ? err.message : 'Failed to revert stock')
-    }
-    usedBatchId = batchId
-  } else if (batchId != null) {
-    // Putting back units a plain removal took out is not a new delivery: the
-    // lot regains its stock (and picker visibility), its received figures stay.
-    const lot = await db.prepare('SELECT id FROM product_batches WHERE id = @batchId AND variant_product_id = @productId')
-      .get<{ id: number }>({ batchId, productId })
-    if (!lot) return refuse(400, 'revert_lot_moved', 'Selected received date does not belong to this product')
-    statements.push(...restoreBatchStockStatements(batchId, branchId, magnitude), ...aggregateDeltaStatements(productId, branchId, magnitude))
-    usedBatchId = batchId
-  } else {
-    // No lot stamp: a count's lot shares go back on those lots (receive 4
-    // and 8, count to 0, revert -> lots 4 / 8, not branch 12 / lots 0), and a
-    // count increase is received on them again; what no lot held stays
-    // branch-only, as the original left it.
-    const shares = await landingShares(await rootLotShares(db, root.id))
-    if (shares.some((share) => share.productId !== productId)) return refuse(400, 'revert_lot_moved', MERGED_LOT_REFUSAL)
-    for (const share of shares) {
-      statements.push(...restoreBatchStockStatements(share.batchId, branchId, share.quantity))
-      if (purchaseSide) {
-        statements.push({
-          sql: `UPDATE product_batches SET received_quantity = CASE WHEN received_quantity IS NULL THEN NULL ELSE received_quantity + @quantity END,
-                  updated_at = CURRENT_TIMESTAMP WHERE id = @batchId`,
-          params: { batchId: share.receivedBatchId, quantity: share.quantity },
-        })
-      }
-    }
-    statements.push(...aggregateDeltaStatements(productId, branchId, magnitude))
-    usedBatchId = shares.length === 1 && shares[0].quantity === magnitude ? shares[0].batchId : null
-  }
+    const statements = [...guards, ...stockStatements, ...exact.takeFinalPhysicalWrites(), ...metadata]
 
-  const revertReason = `Revert of #${m.id}${m.reason ? `: ${m.reason}` : ` (${m.movement_type})`}`
-  statements.push({
-    sql: `
-    INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-      unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr,
-      reason, reference_id, user_id, user_name, created_at, batch_id)
-    VALUES (@productId, @productName, @branchId, @branchName, @movementType, @quantity,
-      @unitCostUsd, @unitCostKhr, @totalCostUsd, @totalCostKhr,
-      @reason, @referenceId, @userId, @userName, CURRENT_TIMESTAMP, @batchId)
-  `,
-    params: {
-      productId,
-      productName: m.product_name,
-      branchId,
-      branchName: branchLabel,
-      movementType: revertType,
-      quantity: magnitude,
-      // A revert is a compensating record for this exact historical movement.
-      // Copy its immutable snapshot (including explicit zero or NULL); looking
-      // up today's product/lot cost would rewrite history after a price change.
-      unitCostUsd: m.unit_cost_usd ?? null,
-      unitCostKhr: m.unit_cost_khr ?? null,
-      totalCostUsd: m.total_cost_usd ?? null,
-      totalCostKhr: m.total_cost_khr ?? null,
-      reason: revertReason,
-      referenceId: counterRef,
-      userId: actor.userId ?? null,
-      userName: actor.userName ?? null,
-      batchId: usedBatchId,
-    },
-  })
-  try {
+    const revertReason = `Revert of #${m.id}${m.reason ? `: ${m.reason}` : ` (${m.movement_type})`}`
+    statements.push({
+      sql: `
+      INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity,
+        unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr,
+        reason, reference_id, user_id, user_name, created_at, batch_id)
+      VALUES (@productId, @productName, @branchId, @branchName, @movementType, @quantity,
+        @unitCostUsd, @unitCostKhr, @totalCostUsd, @totalCostKhr,
+        @reason, @referenceId, @userId, @userName, CURRENT_TIMESTAMP, @batchId)
+    `,
+      params: {
+        productId,
+        productName: m.product_name,
+        branchId,
+        branchName: branchLabel,
+        movementType: revertType,
+        quantity: magnitude,
+        // A revert is a compensating record for this exact historical movement.
+        // Copy its immutable snapshot (including explicit zero or NULL); looking
+        // up today's product/lot cost would rewrite history after a price change.
+        unitCostUsd: m.unit_cost_usd ?? null,
+        unitCostKhr: m.unit_cost_khr ?? null,
+        totalCostUsd: m.total_cost_usd ?? null,
+        totalCostKhr: m.total_cost_khr ?? null,
+        reason: revertReason,
+        referenceId: counterRef,
+        userId: actor.userId ?? null,
+        userName: actor.userName ?? null,
+        batchId: usedBatchId,
+      },
+    })
     await executeStockTransaction(db, addressedStatements(landing, [
       ...(revertType === 'add' ? [productStockGuardStatement([productId], 'active')] : []),
       { sql: ALREADY_REVERTED_GUARD, params: { ref: counterRef, movementId: Number(m.id) } },
       receiptRowGuard(m),
       ...statements,
       { sql: 'DELETE FROM stock_session_guards', params: {} },
-    ]), 'retry')
+    ]), 'once')
   } catch (err) {
-    // Nothing was written. Tell the loser of a race apart from a stock
-    // change by reading what the winner committed.
+    // A lost acknowledgement may have committed. Reconcile the original counter before classifying the refusal.
     if (await revertExists(db, counterRef)) return ALREADY_REVERTED
     if (err instanceof StockTransactionUnavailableError || err instanceof StockTransactionOutcomeUnknownError) throw err
     const message = err instanceof Error ? err.message : String(err)
@@ -601,7 +533,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
 
     if (activeGuard) throw activeGuard
 
-    if (/CHECK constraint failed/i.test(message)) {
+    if (isCountedStockConflict(err) || err instanceof MoneyPrecisionError || /CHECK constraint failed/i.test(message)) {
       // The in-batch receipt guard: an Edit or a session Undo landed after the
       // reads above. Say which, instead of a generic "stock changed".
       const changed = await receiptRowRefusal(db, m)
