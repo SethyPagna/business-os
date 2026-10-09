@@ -7,7 +7,7 @@ import { getActionTier, isAdminControlUser } from './permissions';
 import { D1_MAX_BOUND_PARAMS } from './sqlBinding';
 import { VALID_SALE_STATUSES } from './salesStatus';
 import { addImportedReturnedQuantities, allocateReturnedQuantities, guardSaleStatusTransition, heldQuantity, normalizeCancelReason, planSaleStockTransition, type TransitionItem, type StockStatement } from './saleTransitions';
-import { bumpVersion } from './cache';
+import { bumpVersions } from './cache';
 import { broadcast } from '../durable-objects/broadcastHub';
 import { actorSnapshot } from './actorSnapshot';
 import { branchCanSell } from './branchRoles';
@@ -226,7 +226,7 @@ function bounded(statements: StockStatement[], snapshot: Snapshot, eventsBytes =
 function queryBudget(env: Env, statements: StockStatement[], members: Member[], replay: boolean): void {
     const planned = members.some(member => member.stock.length > 0) ? stockTransactionStatementCount(statements.length) : statements.length;
     const used = currentRequestMetrics()?.invocation.attemptedStatements ?? 18;
-    const tail = replay ? 16 : 12;
+    const tail = replay ? 18 : 13;
     if (used + planned + tail > getPlanLimits(env).d1QueriesPerInvocation)
         throw new SaleBulkError('Selection is too large for one request. Select fewer sales.', 409,
             { code: 'sale_bulk_over_plan_budget', outcome: 'not_dispatched' });
@@ -438,13 +438,13 @@ async function captureGroupStock(db: D1Compat, members: Member[]): Promise<Group
     return { exact, tagged, guards: [...exact.takePreimageGuards(), bulkAssertion(`${conditionRowsSql()}=@conditions`, { itemIds, conditions: source.conditions })] };
 }
 
-function stockStatements(member: Member, sign: number, user: SessionUser, stamp: string, stock: GroupStock): StockStatement[] {
+function stockStatements(member: Member, sign: number, user: SessionUser, stock: GroupStock): StockStatement[] {
     const out: StockStatement[] = [];
+    const movements: (string | number | null)[][] = [];
     const ordinary = new Map<string, { product: number; branch: number; quantities: number[] }>();
     const tagged = new Map<string, { productId: number; branchId: number; lotId: number; batchId: number | null; quantities: number[] }>();
     for (const move of member.stock) {
         const q = move.quantity * sign;
-        const p = { product: move.product, branch: move.branch, q, lot: move.lot, stamp };
         if (move.lot) {
             const identity = stock.tagged.get(move);
             if (!identity) fail('The tagged stock source is missing.');
@@ -459,8 +459,17 @@ function stockStatements(member: Member, sign: number, user: SessionUser, stamp:
         }
         const labelled = !!move.addressed;
         const source = stock.tagged.get(move);
-        out.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id${labelled ? ',branch_name,addressed_branch_name' : ''},movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id) VALUES(@product,@name,@branch${labelled ? ',@branchName,@addressed' : ''},@type,@q,@usd,@khr,@reason,@sale,@uid,@uname,@batch)`, params: { ...p, ...(labelled ? { branchName: move.branchName ?? null, addressed: move.addressed } : {}), name: move.name, type: move.lot ? (q > 0 ? 'damage_in' : 'damage_out') : (q > 0 ? 'return' : 'sale'), usd: source ? source.costUsd : move.costUsd, khr: source ? source.costKhr : move.costKhr, reason: `${sign < 0 ? 'Undo' : 'Apply'} grouped sale status`, sale: member.id, uid: user.id, uname: actorSnapshot(user), batch: source ? source.batch : move.batch } });
+        const usd = source ? source.costUsd : move.costUsd, khr = source ? source.costKhr : move.costKhr;
+        if (![q, usd, khr].every(Number.isFinite)) fail('The saved stock movement is invalid.');
+        movements.push([move.product, move.name, move.branch, labelled ? move.branchName ?? null : null, labelled ? move.addressed! : null,
+            move.lot ? (q > 0 ? 'damage_in' : 'damage_out') : (q > 0 ? 'return' : 'sale'), q, usd, khr, source ? source.batch : move.batch]);
     }
+    if (movements.length) out.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,addressed_branch_name,
+        movement_type,quantity,unit_cost_usd,unit_cost_khr,batch_id,reason,reference_id,user_id,user_name)
+        SELECT json_extract(value,'$[0]'),json_extract(value,'$[1]'),json_extract(value,'$[2]'),json_extract(value,'$[3]'),json_extract(value,'$[4]'),
+            json_extract(value,'$[5]'),json_extract(value,'$[6]'),json_extract(value,'$[7]'),json_extract(value,'$[8]'),json_extract(value,'$[9]'),
+            @reason,@sale,@uid,@uname FROM json_each(@movements) ORDER BY CAST(key AS INTEGER)`,
+        params: { movements: JSON.stringify(movements), reason: `${sign < 0 ? 'Undo' : 'Apply'} grouped sale status`, sale: member.id, uid: user.id, uname: actorSnapshot(user) } });
     for (const record of tagged.values()) {
         const quantity = sumCountedQuantities(record.quantities);
         out.push(...planExactCountedTaggedChange(stock.exact.get(record.productId, record.branchId), record,
@@ -487,7 +496,7 @@ function memberStatements(member: Member, sign: number, user: SessionUser, stamp
     if (!member.changed)
         return [];
     const target = sign < 0 ? member.before : member.after;
-    const out = stockStatements(member, sign, user, stamp, stock);
+    const out = stockStatements(member, sign, user, stock);
     if (member.createdFee) {
         if (sign > 0) {
             out.push(bulkAssertion('NOT EXISTS(SELECT 1 FROM fees WHERE id=@id)', { id: member.createdFee.id }));
@@ -524,7 +533,7 @@ function auditStatement(user: SessionUser, operationId: string, direction: strin
     return { sql: 'INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value) VALUES(@uid,@name,@action,\'sale\',@id,@details,\'sales\',@id,@details)', params: { uid: user.id, name: actorSnapshot(user), action: direction, id: operationId, details: JSON.stringify({ kind: BULK_STATUS_KIND, count }) } };
 }
 export async function notifyBulkStatus(env: Env) {
-    await Promise.allSettled([bumpVersion(env, 'sales'), bumpVersion(env, 'stock'), ...(['sales', 'products', 'inventory', 'returns', 'fees'] as const).map(channel => broadcast(env, channel, { action: 'update' }))]);
+    await Promise.allSettled([bumpVersions(env, ['sales', 'stock']), ...(['sales', 'products', 'inventory', 'returns', 'fees'] as const).map(channel => broadcast(env, channel, { action: 'update' }))]);
 }
 export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row, redirectTarget: number | null = null) {
     try { return await applySaleBulkStatusKernel(env, user, raw, redirectTarget); } catch (error) { return exactRefusal(error); }
@@ -795,7 +804,7 @@ async function replaySaleBulkStatusKernel(env: Env, user: SessionUser, direction
     const statements: StockStatement[] = [...stock.guards, bulkAssertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM sale_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@op AND o.generation=@generation AND h.id=@history AND h.status=@expected AND s.kind=@kind AND s.status=@snap AND s.payload_json=@payload)"
         + ` AND ${stockActorPredicate}`, { op: op.id, generation, history: historyId, expected, kind: BULK_STATUS_KIND, snap: direction === 'undo' ? 'applied' : 'reversed', payload: op.payload_json, ...stockActorParams(user) })];
     for (const m of moved)
-        statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM sales s JOIN sale_bulk_members m ON m.sale_id=s.id WHERE m.operation_id=@op AND s.id=@id AND m.revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AND m.movement_fingerprint=${saleMovementFingerprint('s.id')})`, { op: op.id, id: m.id }));
+        statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM sales s JOIN sale_bulk_members m ON m.sale_id=s.id WHERE m.operation_id=@op AND s.id=@id AND m.revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AND m.movement_fingerprint=${saleMovementFingerprint('s.id')} AND json_array_length(m.movement_fingerprint)+@movements<=${BULK_STATUS_MOVEMENT_LIMIT})`, { op: op.id, id: m.id, movements: m.stock.length }));
     for (const m of snapshot.members)
         statements.push(...memberStatements(m, sign, user, stamp, stock));
     statements.push(...stock.exact.takeFinalPhysicalWrites());

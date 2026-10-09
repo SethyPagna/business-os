@@ -498,13 +498,13 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         outcome = await applier.run(payload, { env: c.env, user, direction, historyId: existing.id, generation: body.expected_generation, stockSessionQueryBudget })
         applied = true
         // Server-applied undo/redo rewrites product and stock rows, but the
-        // appliers only BROADCAST; none bumps a cache version. Every reader
+        // appliers generally only BROADCAST. Every reader
         // keyed on the 'stock' version (the Dashboard stock overview,
         // stock-filtered product search pages, the storefront) would keep
         // serving the pre-undo numbers until its TTL. One 'stock' bump here
-        // covers every applier. Lazy and fully swallowed: a cache fault must
+        // covers appliers without their own stock invalidation. Lazy and fully swallowed: a cache fault must
         // never turn an applied undo into an error.
-        if (applier.name !== STOCK_SESSION_KIND) {
+        if (applier.name !== STOCK_SESSION_KIND && applier.name !== BULK_STATUS_KIND) {
           const stockBump = import('../lib/cache').then(({ bumpVersion }) => bumpVersion(c.env, 'stock')).catch(() => {})
           try { c.executionCtx.waitUntil(stockBump) } catch { void stockBump }
         }

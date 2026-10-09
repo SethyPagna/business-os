@@ -225,9 +225,79 @@ async function races(makeWorker) {
   }
 }
 
-async function tails(makeWorker, fragments) {
+async function movementLimit(makeWorker) {
+  for (const tier of ['paid', 'free']) {
+    const { f, saleId, stock, db } = await single.scenario(makeWorker, tier, true, false)
+    try {
+      const count = f.sql.prepare("SELECT COUNT(*) n FROM inventory_movements WHERE reference_id=? AND movement_type IN('sale','return','damage_in','damage_out')").get(saleId).n
+      await stock.executeStockTransaction(db, [{ sql: `WITH RECURSIVE padding(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM padding WHERE n<@rows)
+        INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,reference_id)
+        SELECT 1,1,'sale',0,@sale FROM padding`, params: { rows: 252 - count, sale: saleId } }], 'once')
+      const applied = await f.call('/sales/bulk-status', request(f, [saleId], 'movement-limit'))
+      assert.equal(applied.status, 200, JSON.stringify(applied.json))
+      const undone = await f.call('/action-history/' + applied.json.actionHistoryId + '/undo', { expected_generation: 0 })
+      assert.equal(undone.status, 200, JSON.stringify(undone.json))
+      assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM inventory_movements WHERE reference_id=? AND movement_type IN('sale','return','damage_in','damage_out')").get(saleId).n, 256)
+      const before = state(f)
+      const redone = await f.call('/action-history/' + applied.json.actionHistoryId + '/redo', { expected_generation: 1 })
+      assert.equal(redone.status, 409, JSON.stringify(redone.json))
+      assert.deepEqual(state(f), before, 'refuse a compensation that cannot retain its complete movement fingerprint')
+      console.log('PASS grouped complete history ceiling refuses atomically ' + tier)
+    } finally { f.sql.close() }
+  }
+}
+
+async function sharedSales(makeWorker) {
+  for (const tier of ['paid', 'free']) for (const receipt of [true, false]) {
+    const { f, saleId, stock, db } = await single.scenario(makeWorker, tier, receipt, true)
+    try {
+      const quote = { gross_usd: 0.2, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 0.2, total_khr: 800 }
+      const second = await f.call('/sales', {
+        offline_owner: { version: 1, actor_id: 7, organization_id: null, authority: 'https://admin.business.test', runtime: 'cloudflare-workers' },
+        branch_id: 1, money_precision_version: 1,
+        items: [{ product_id: 1, branch_id: 1, quantity: 0.1, client_line_key: 'second-ordinary', pricing_source: 'selling', pricing_quote: quote,
+          ...(receipt ? { batch_id: 1 } : { unlotted_stock: true }) },
+        { product_id: 1, branch_id: 1, quantity: 0.1, client_line_key: 'second-tagged', pricing_source: 'selling', pricing_quote: quote, damaged_lot_id: 1 }],
+        exchange_rate: 4000, payment_method: 'Cash', payment_currency: 'USD', amount_paid_usd: 0.4, client_request_id: 'shared-second-sale',
+      })
+      assert.equal(second.status, 200, JSON.stringify(second.json))
+      const secondId = second.json.id
+      await stock.executeStockTransaction(db, [{ sql: 'UPDATE sale_items SET cost_price_usd=3 WHERE sale_id=@id', params: { id: secondId } }], 'once')
+      const before = state(f), initial = quantities(f), oldRows = f.sql.prepare('SELECT * FROM inventory_movements ORDER BY id').all()
+      const result = await f.call('/sales/bulk-status', request(f, [saleId, secondId], 'shared-group'))
+      if (result.status === 409) {
+        assert.equal(tier, 'free'); assert.equal(result.json.code, 'sale_bulk_over_plan_budget'); assert.deepEqual(state(f), before)
+        continue
+      }
+      assert.equal(result.status, 200, JSON.stringify(result.json))
+      assert.equal(f.state().physical, 0.8); assert.equal(f.state().cache, 0.8); assert.equal(f.state().tags[0].quantity_remaining, 0.5)
+      if (receipt) assert.equal(f.state().lots[0].quantity, 0.8)
+      const movements = f.sql.prepare('SELECT reference_id,movement_type,quantity,unit_cost_usd,branch_name,addressed_branch_name FROM inventory_movements WHERE id>? ORDER BY id').all(oldRows.at(-1).id)
+      assert.deepEqual(movements.map(row => Object.values(row)), [
+        [saleId, 'return', 0.2, 2, null, null], [saleId, 'damage_in', 0.2, 2, null, null],
+        [secondId, 'return', 0.1, 3, null, null], [secondId, 'damage_in', 0.1, 3, null, null],
+      ], 'one ordered immutable movement per source line, keeping each sale cost')
+      const snapshot = f.sql.prepare("SELECT payload_json FROM undo_snapshots WHERE kind='sale.status.bulk' ORDER BY id DESC LIMIT 1").get().payload_json
+      for (let generation = 0; generation < 4; generation++) {
+        const direction = generation % 2 ? 'redo' : 'undo'
+        const replay = await f.call('/action-history/' + result.json.actionHistoryId + '/' + direction, { expected_generation: generation })
+        assert.equal(replay.status, 200, JSON.stringify(replay.json))
+        if (direction === 'undo') assert.deepEqual(quantities(f), initial)
+        else assert.equal(f.state().physical, 0.8)
+        assert.equal(f.sql.prepare("SELECT payload_json FROM undo_snapshots WHERE kind='sale.status.bulk' ORDER BY id DESC LIMIT 1").get().payload_json, snapshot)
+      }
+      assert.deepEqual(f.sql.prepare('SELECT * FROM inventory_movements WHERE id<=? ORDER BY id').all(oldRows.at(-1).id), oldRows)
+      assert.deepEqual(state(f).conditions, before.conditions)
+      console.log('PASS grouped shared sale sources, per-line movement costs and immutable replay ' + JSON.stringify({ tier, receipt }))
+    } finally { f.sql.close() }
+  }
+}
+
+async function tails(makeWorker, fragments, cold = false) {
   for (const tier of ['paid', 'free']) for (const direction of ['apply', 'undo', 'redo']) {
-    const w = await single.scenario(makeWorker, tier, true, false), { f, saleId, stock, db } = w
+    let current = makeWorker()
+    const factory = () => ({ ensureCoreDataInvariants: current.ensureCoreDataInvariants, default: { fetch: (...args) => current.default.fetch(...args) } })
+    const w = await single.scenario(factory, cold && direction !== 'apply' ? 'paid' : tier, true, false), { f, saleId, stock, db } = w
     try {
       const sub = h.loadStockSession('lib/countedDamagedStock.ts').subtractCountedQuantity
       await stock.executeStockTransaction(db, [{ sql: 'DELETE FROM sale_item_batch_allocations WHERE sale_item_id=1' },
@@ -237,12 +307,15 @@ async function tails(makeWorker, fragments) {
       let historyId
       if (direction !== 'apply') {
         const setup = await f.call('/sales/bulk-status', body)
-        if (setup.status === 409) { assert.equal(tier, 'free'); assert.equal(setup.json.code, 'sale_bulk_over_plan_budget'); continue }
         assert.equal(setup.status, 200, JSON.stringify(setup.json)); historyId = setup.json.actionHistoryId
         if (direction === 'redo') {
           const setupUndo = await f.call('/action-history/' + historyId + '/undo', { expected_generation: 0 })
-          if (setupUndo.status === 409) { assert.equal(tier, 'free'); continue }
           assert.equal(setupUndo.status, 200, JSON.stringify(setupUndo.json))
+        }
+        f.env.PLAN_TIER = tier
+        if (cold) {
+          current = makeWorker()
+          await current.ensureCoreDataInvariants(f.env)
         }
       }
       const before = state(f), raw = f.env.DB, attempts = new Map(), failed = new Set()
@@ -251,13 +324,15 @@ async function tails(makeWorker, fragments) {
       f.sql.exec("DELETE FROM cache_versions WHERE namespace IN('stock','sales')")
       const retry = (sql, params) => {
         if (!committed) return false
-        const kind = /INSERT INTO audit_logs/.test(sql) ? 'audit' : /SELECT namespace, version FROM cache_versions/.test(sql) ? 'versions'
+        const kind = /SELECT request_json,receipt_json FROM sale_bulk_operations|SELECT 1 AS committed FROM sale_bulk_operations/.test(sql) ? 'outcome'
+          : /INSERT INTO audit_logs/.test(sql) ? 'audit' : /SELECT namespace, version FROM cache_versions/.test(sql) ? 'versions'
           : /INSERT INTO quota_usage/.test(sql) ? 'quota' : /INSERT INTO cache_versions/.test(sql) ? 'handoff'
             : /SELECT \* FROM action_history WHERE id/.test(sql) ? 'history' : null
         if (!kind) return false
         const key = kind + ':' + JSON.stringify(params)
-        attempts.set(key, (attempts.get(key) || 0) + 1)
-        if (failed.has(key)) return false
+        const count = (attempts.get(key) || 0) + 1
+        attempts.set(key, count)
+        if (count % 2 === 0) return false
         failed.add(key); return true
       }
       const wrap = (statement, sql) => new Proxy(statement, { get(target, key) {
@@ -285,14 +360,18 @@ async function tails(makeWorker, fragments) {
       f.loseNextCommitAcknowledgement()
       const result = direction === 'apply' ? await f.call('/sales/bulk-status', body)
         : await f.call('/action-history/' + historyId + '/' + direction, { expected_generation: direction === 'undo' ? 0 : 1 })
-      console.log('GROUP_FULL_TAIL ' + JSON.stringify({ tier, direction, fragments, status: result.status, code: result.json.code, attempted, attempts: Object.fromEntries(attempts) }))
+      const tailAttempts = {}
+      for (const [key, count] of attempts) { const kind = key.split(':')[0]; tailAttempts[kind] = (tailAttempts[kind] || 0) + count }
+      console.log('GROUP_FULL_TAIL ' + JSON.stringify({ tier, direction, fragments, cold, status: result.status, code: result.json.code, attempted, tailAttempts }))
+      const expectedStatus = tier === 'paid' || fragments <= (cold && direction !== 'apply' ? 5 : 7) ? 200 : 409
+      assert.equal(result.status, expectedStatus, 'positive boundary fits; next larger action refuses before dispatch')
       assert.ok(attempted <= (tier === 'free' ? 50 : 1000))
       if (result.status === 409) {
         assert.equal(tier, 'free'); assert.deepEqual(state(f), before); assert.equal(committed, false)
       } else {
         assert.equal(result.status, 200, JSON.stringify(result.json)); assert.equal(f.state().cache, direction === 'undo' ? 0.4 : 1)
         const kinds = [...new Set([...failed].map(key => key.split(':')[0]))]
-        for (const expected of ['versions', 'handoff', ...(tier === 'free' ? ['quota'] : []), ...(direction === 'apply' ? [] : ['history'])])
+        for (const expected of ['outcome', 'versions', 'handoff', ...(tier === 'free' ? ['quota'] : []), ...(direction === 'apply' ? [] : ['history'])])
           assert.ok(kinds.includes(expected), 'actual tail exercised ' + expected)
       }
     } finally { f.sql.close() }
@@ -309,7 +388,9 @@ async function main() {
     return
   }
   if (process.argv.includes('--races-only')) return races(makeWorker)
-  if (process.argv.includes('--tails-only')) return tails(makeWorker, Number(process.env.GROUP_FRAGMENTS || 1))
+  if (process.argv.includes('--shared-only')) return sharedSales(makeWorker)
+  if (process.argv.includes('--limits-only')) return movementLimit(makeWorker)
+  if (process.argv.includes('--tails-only')) return tails(makeWorker, Number(process.env.GROUP_FRAGMENTS || 1), process.argv.includes('--cold'))
   for (const tier of ['paid', 'free']) for (const receipt of [true, false]) for (const partial of [true, false]) {
     await positive(makeWorker, tier, receipt, partial)
   }
@@ -317,8 +398,12 @@ async function main() {
   await legacy(makeWorker)
   for (const kind of ['legacy', 'current']) for (const fault of ['empty', 'omitted', 'batch', 'allocation', 'mixed', 'order']) await legacy(makeWorker, kind + ':' + fault)
   await races(makeWorker)
-  await tails(makeWorker, 1)
-  await tails(makeWorker, 20)
+  await sharedSales(makeWorker)
+  await movementLimit(makeWorker)
+  await tails(makeWorker, 7)
+  await tails(makeWorker, 5, true)
+  await tails(makeWorker, 6, true)
+  await tails(makeWorker, 8, true)
 }
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })
 module.exports = { positive, state, quantities }
