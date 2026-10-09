@@ -429,7 +429,19 @@ export function planExactSaleLineAddition(input: SaleLineAdditionInput, projecte
   return buildSaleLineAddition(input, projectedStock)
 }
 
+function validateProjectedTaggedIdentities(lines: readonly {productId:number;branchId:number|null;tagged?:CountedTaggedIdentity & {conditionTag:string};heldUnits:number}[],stock:CountedStockBatchPlan):void {
+  for(const line of lines) {
+    if(!line.tagged || line.heldUnits<=0)continue
+    const saved=line.tagged
+    if(saved.productId!==line.productId || saved.branchId!==line.branchId)throw new SaleLinePreimageConflictError('condition')
+    const current=stock.get(saved.productId,saved.branchId).projectedTaggedSource(saved.lotId)
+    if(!current || current.productId!==saved.productId || current.branchId!==saved.branchId
+      || current.batchId!==saved.batchId || current.conditionTag!==saved.conditionTag)throw new SaleLinePreimageConflictError('condition')
+  }
+}
+
 function buildSaleLineAddition(input: SaleLineAdditionInput, projectedStock?: CountedStockBatchPlan): SaleLineAdditionPlan {
+  if(projectedStock)validateProjectedTaggedIdentities(input.lines,projectedStock)
   const exchangeRate = Number(input.exchangeRate) || 4100
   const statements: StockStatement[] = []
   const preimageStatements: StockStatement[] = []
@@ -559,7 +571,7 @@ function buildSaleLineAddition(input: SaleLineAdditionInput, projectedStock?: Co
     else statements.push(movement)
   }
 
-  if (projectedStock) preimageStatements.push(...taggedSaleSourcesGuard(input.lines.flatMap(line=>line.tagged?[line.tagged]:[])))
+  if (projectedStock) preimageStatements.push(...taggedSaleSourcesGuard(input.lines.flatMap(line=>line.tagged&&line.heldUnits<=0?[line.tagged]:[])))
   if (exactMovements.length) {
     const movements=JSON.stringify(exactMovements)
     if (exactMovements.length>10000 || new TextEncoder().encode(movements).byteLength>900000) throw new Error('counted_sale_source_plan_too_large')
@@ -921,6 +933,7 @@ export function planExactSaleLineRemoval(input: SaleLineRemovalInput, projectedS
 }
 
 function buildSaleLineRemoval(input: SaleLineRemovalInput, projectedStock?: CountedStockBatchPlan): { statements: StockStatement[]; preimageStatements: StockStatement[]; restoredUnits: number } {
+  if(projectedStock)validateProjectedTaggedIdentities(input.lines,projectedStock)
   const statements: StockStatement[] = []
   const preimageStatements: StockStatement[] = []
   let restoredUnits = 0
@@ -990,7 +1003,7 @@ function buildSaleLineRemoval(input: SaleLineRemovalInput, projectedStock?: Coun
     })
   }
 
-  if (projectedStock) preimageStatements.push(...taggedSaleSourcesGuard(input.lines.flatMap(line=>line.tagged?[line.tagged]:[])))
+  if (projectedStock) preimageStatements.push(...taggedSaleSourcesGuard(input.lines.flatMap(line=>line.tagged&&line.heldUnits<=0?[line.tagged]:[])))
   return { statements, preimageStatements, restoredUnits }
 }
 

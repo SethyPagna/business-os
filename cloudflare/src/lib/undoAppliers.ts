@@ -3164,6 +3164,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         || atomicReversal.saleStateRevision !== undefined
       if (atomicReplay) {
         await replayAtomicSaleAddItems(db, atomicReversal, snapshotId, snap.status, payload, ctx, snap.counted_facts)
+          .catch((error:unknown)=>{throw legacySaleAddItemsRaceError(error,ctx.direction)})
       } else if (ctx.direction === 'undo') {
         if (String(snap.status) !== 'applied') throw new UndoConflictError('These added items have already been removed.', UNDO_ALREADY_DONE_CODE)
         const savedFingerprint = (reversal as SaleAddItemsReversal & { saleStateFingerprint?: string }).saleStateFingerprint
