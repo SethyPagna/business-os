@@ -79,7 +79,7 @@ import { executeStockTransaction, StockTransactionUnavailableError, StockTransac
 import { requireReceivingBranch, receivingBranchAssertion, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from './receivingBranch'
 import { resolveMovementCostSnapshot, type MovementCostPair } from './movementCostSnapshot'
 import { planHoldAsTagged } from './damagedLotActions'
-import { ordinarySubsetSql, tagCapacityGuard } from './countedDamagedStock'
+import { tagCapacityGuard } from './countedDamagedStock'
 import { MoneyPrecisionError, subtractDecimalSum } from './moneyPrecision'
 import type { StockWriteStatement } from './productBatches'
 import type { StockConditionTag } from './stockCondition'
@@ -204,30 +204,53 @@ function stateGuard(from: Snapshot): Statement {
   })
 }
 
-function countedSubsetGuard(at: Snapshot): Statement {
-  return guard(`
-    COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@product AND branch_id=@branch),0)
-      >=${ordinarySubsetSql('@product', '@branch')}
-    AND COALESCE((SELECT quantity FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch),0)
-      >=${ordinarySubsetSql('@product', '@branch', '@batch')}
-    AND (${ordinarySubsetSql('@product', '@branch', 'NULL')}=0
-      OR COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@product AND branch_id=@branch),0)
-      -COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id
-        WHERE pb.variant_product_id=@product AND bbs.branch_id=@branch),0)
-      >=${ordinarySubsetSql('@product', '@branch', 'NULL')})`, {
-    product: at.productId, branch: at.branchId, batch: at.batchId,
+const MAX_COUNTED_CAPACITY_ROWS = 10_000
+const countedTagRowsSql = `(SELECT json_group_array(json_array(id,batch_id,quantity_remaining)) FROM (
+  SELECT id,batch_id,quantity_remaining FROM damaged_stock_lots
+  WHERE product_id=@product AND branch_id=@branch AND quantity_remaining<>0 ORDER BY id LIMIT ${MAX_COUNTED_CAPACITY_ROWS + 1}))`
+const countedReceiptRowsSql = `(SELECT json_group_array(json_array(batch_id,quantity)) FROM (
+  SELECT bbs.batch_id,bbs.quantity FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id
+  WHERE pb.variant_product_id=@product AND bbs.branch_id=@branch ORDER BY bbs.batch_id LIMIT ${MAX_COUNTED_CAPACITY_ROWS + 1}))`
+const needsNullCapacitySql = `EXISTS(SELECT 1 FROM damaged_stock_lots
+  WHERE product_id=@product AND branch_id=@branch AND batch_id IS NULL AND quantity_remaining<>0)`
+type CountedSubsetSnapshot = { counted_tags: string; counted_receipts: string }
+
+function countedSubsetGuard(at: Snapshot, observed: CountedSubsetSnapshot): Statement {
+  const tags = JSON.parse(observed.counted_tags) as [number, number | null, number][]
+  const receipts = JSON.parse(observed.counted_receipts) as [number, number][]
+  if (tags.length > MAX_COUNTED_CAPACITY_ROWS || receipts.length > MAX_COUNTED_CAPACITY_ROWS) return guard('0', {})
+  const nullQuantities = tags.filter(([, batch]) => batch === null).map(([, , quantity]) => quantity)
+  let covers = false
+  try {
+    covers = tags.every(([, , quantity]) => Number.isFinite(quantity) && quantity > 0)
+    && receipts.every(([, quantity]) => Number.isFinite(quantity) && quantity >= 0)
+    && Number(subtractDecimalSum(at.branchQuantity, tags.map(([, , quantity]) => quantity))) >= 0
+    && Number(subtractDecimalSum(at.lotQuantity, tags.filter(([, batch]) => batch === at.batchId).map(([, , quantity]) => quantity))) >= 0
+    && (!nullQuantities.length || Number(subtractDecimalSum(at.branchQuantity, [
+      ...receipts.filter(([batch]) => batch !== at.batchId).map(([, quantity]) => quantity), at.lotQuantity, ...nullQuantities,
+    ])) >= 0)
+  } catch (error) {
+    if (!(error instanceof MoneyPrecisionError)) throw error
+  }
+  // Compare individual decimal quantities, then pin the same row sets atomically.
+  // SQL SUM/subtraction can turn 0.1 + 0.2 or 0.7 - 0.4 into a false shortage.
+  return guard(`@covers=1 AND ${countedTagRowsSql}=@tags
+    AND (@hasNull=0 OR ${countedReceiptRowsSql}=@receipts)`, {
+    product: at.productId, branch: at.branchId, covers: covers ? 1 : 0,
+    tags: observed.counted_tags, receipts: observed.counted_receipts, hasNull: nullQuantities.length ? 1 : 0,
   })
 }
 
 // Absolute writes are exact here because stateGuard pinned the preimage in the
 // same transaction: writing `to` equals applying (to - from) to each ledger.
-function quantityStatements(from: Snapshot, to: Snapshot): Statement[] {
+function quantityStatements(from: Snapshot, to: Snapshot, observed: CountedSubsetSnapshot): Statement[] {
   const params = {
     product: to.productId, branch: to.branchId, batch: to.batchId,
     lot: to.lotQuantity, branchQty: to.branchQuantity, lotExists: to.lotExists, branchExists: to.branchExists,
     productQty: to.productQuantity, productDelta: Number(subtractDecimalSum(to.branchQuantity, [from.branchQuantity])),
   }
   return [
+    countedSubsetGuard(to, observed),
     ...(to.lotQuantity > from.lotQuantity || to.branchQuantity > from.branchQuantity ? [productStockGuardStatement([to.productId], 'active')] : []),
     // 0154: positive lot stock needs an active lot. Activate first.
     ...(to.lotQuantity > 0 ? [{ sql: `UPDATE product_batches SET is_active=1, updated_at=datetime('now') WHERE id=@batch AND is_active IS NOT 1`, params }] : []),
@@ -238,13 +261,12 @@ function quantityStatements(from: Snapshot, to: Snapshot): Statement[] {
       ON CONFLICT(product_id,branch_id) DO UPDATE SET quantity=excluded.quantity`, params },
     { sql: 'DELETE FROM branch_stock WHERE product_id=@product AND branch_id=@branch AND @branchExists=0', params },
     { sql: 'UPDATE products SET stock_quantity=@productQty, updated_at=CURRENT_TIMESTAMP WHERE id=@product AND @productDelta<>0', params },
-    countedSubsetGuard(to),
   ]
 }
 
 // Replay applies the recorded delta to current quantities, retaining later changes.
 // The same-batch preimage guard prevents a concurrent write from being overwritten.
-function deltaStatements(at: Snapshot, lotChange: number, branchChange: number): Statement[] {
+function deltaStatements(at: Snapshot, lotChange: number, branchChange: number, observed: CountedSubsetSnapshot): Statement[] {
   const lotQuantity = Number(subtractDecimalSum(at.lotQuantity, [-lotChange]))
   const branchQuantity = Number(subtractDecimalSum(at.branchQuantity, [-branchChange]))
   const after: Snapshot = {
@@ -253,7 +275,7 @@ function deltaStatements(at: Snapshot, lotChange: number, branchChange: number):
     lotExists: at.lotExists || (lotQuantity > 0 ? 1 : 0),
     branchExists: at.branchExists || (branchQuantity > 0 ? 1 : 0),
   }
-  return [stateGuard(at), ...quantityStatements(at, after)]
+  return [stateGuard(at), ...quantityStatements(at, after, observed)]
 }
 
 function movementCost(effect: Effect): MovementCostPair {
@@ -402,10 +424,12 @@ export async function applyStockLotSet(
       COALESCE((SELECT quantity FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch),0) AS lot_quantity,
       COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@product AND branch_id=@branch),0) AS branch_quantity,
       COALESCE((SELECT stock_quantity FROM products WHERE id=@product),0) AS product_quantity,
+      ${countedTagRowsSql} AS counted_tags,
+      CASE WHEN ${needsNullCapacitySql} THEN ${countedReceiptRowsSql} ELSE '[]' END AS counted_receipts,
       EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch) AS lot_exists,
       EXISTS(SELECT 1 FROM branch_stock WHERE product_id=@product AND branch_id=@branch) AS branch_exists`)
     .get<{ product_name: string | null; branch_name: string | null; lot_product_id: number | null; unit_cost_usd: number | null; received_at: string | null
-      lot_quantity: number; branch_quantity: number; product_quantity: number; lot_exists: number; branch_exists: number }>({ product: request.productId, branch: request.branchId, batch: request.batchId })
+      lot_quantity: number; branch_quantity: number; product_quantity: number; counted_tags: string; counted_receipts: string; lot_exists: number; branch_exists: number }>({ product: request.productId, branch: request.branchId, batch: request.batchId })
   if (!facts?.product_name) return { status: 404, body: { error: 'Product not found' } }
   if (!facts.branch_name) return { status: 400, body: { error: 'An active branch is required before stock can be changed' } }
   if (Number(facts.lot_product_id) !== request.productId) return conflict('Selected received date does not belong to this product.', 'batch_mismatch')
@@ -467,7 +491,7 @@ export async function applyStockLotSet(
     ...(lotDelta > 0 ? [receivingBranchAssertion(request.branchId)] : []),
     ...(recordOperation ? [{ sql: `INSERT INTO stock_lot_adjustment_operations(id,actor_id,request_id,request_json,request_digest,response_json,before_json,after_json,revision_json)
       VALUES(@operation,@actor,@requestId,@requestJson,@digest,@response,@before,@after,@revision)`, params: opParams }] : []),
-    ...quantityStatements(before, after),
+    ...quantityStatements(before, after, facts),
     ...forwardMovementStatements(before, effect, user, stockSetReference(operationId, 0), recordOperation ? operationId : null),
     ...(recordOperation ? [
       { sql: `INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload,created_by_id,created_by_name)
@@ -563,11 +587,13 @@ export async function replayStockLotSet(
       COALESCE((SELECT quantity FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch),0) AS lot_quantity,
       COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@product AND branch_id=@branch),0) AS branch_quantity,
       COALESCE((SELECT stock_quantity FROM products WHERE id=@product),0) AS product_quantity,
+      ${countedTagRowsSql} AS counted_tags,
+      CASE WHEN ${needsNullCapacitySql} THEN ${countedReceiptRowsSql} ELSE '[]' END AS counted_receipts,
       EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch) AS lot_exists,
       EXISTS(SELECT 1 FROM branch_stock WHERE product_id=@product AND branch_id=@branch) AS branch_exists,
       (SELECT id FROM inventory_movements WHERE reference_id=@forward ORDER BY id DESC LIMIT 1) AS forward_id`)
     .get<{ product_name: string | null; branch_name: string | null; branch_active: number | null; received_at: string | null
-      lot_quantity: number; branch_quantity: number; product_quantity: number; lot_exists: number; branch_exists: number; forward_id: number | null }>({
+      lot_quantity: number; branch_quantity: number; product_quantity: number; counted_tags: string; counted_receipts: string; lot_exists: number; branch_exists: number; forward_id: number | null }>({
       product: before.productId, branch: before.branchId, batch: before.batchId, forward: stockSetReference(row.id, expected),
     })
   // An Undo cannot carry a confirmed redirect: a Set at a branch that has since been disabled stays closed.
@@ -642,7 +668,7 @@ export async function replayStockLotSet(
     if (tagged) {
       statements.push({ sql: 'UPDATE damaged_stock_lots SET quantity_remaining=quantity_remaining-@held, updated_at=CURRENT_TIMESTAMP WHERE id=@heldLotId AND quantity_remaining>=@held', params })
     }
-    if (!tagged) statements.push(...deltaStatements(current, lotChange, branchChange))
+    if (!tagged) statements.push(...deltaStatements(current, lotChange, branchChange, facts!))
     statements.push(movementStatement({
       snapshot: before, effect, user, movementType: tagged ? 'condition_clear' : lotDelta > 0 ? 'remove' : 'adjustment', reason: effect.reason,
       referenceSql: "'revert:' || (SELECT id FROM inventory_movements WHERE reference_id=@forward ORDER BY id DESC LIMIT 1)",
@@ -654,7 +680,7 @@ export async function replayStockLotSet(
       statements.push(movementStatement({ snapshot: before, effect, user, movementType: 'condition_tag', reason: effect.reason,
         referenceSql: '@reference', extra: { reference: stockSetReference(row.id, next), quantity: 0 } }))
     } else {
-      statements.push(...deltaStatements(current, lotChange, branchChange))
+      statements.push(...deltaStatements(current, lotChange, branchChange, facts!))
       statements.push(...forwardMovementStatements(before, effect, user, stockSetReference(row.id, next), row.id))
     }
   }

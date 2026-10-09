@@ -83,6 +83,90 @@ async function world(makeWorker, tier, shape = 'receipt', seedExtra = () => {}) 
 async function main() {
   const makeWorker = await bundle.exports.bundleWorker()
   for (const tier of ['free', 'paid']) {
+    const combined = await world(makeWorker, tier, 'zero')
+    try {
+      assert.equal((await combined.set(7, 'split-decimal-start')).status, 200)
+      for (const quantity of [0.1, 0.2]) assert.equal((await combined.call('/inventory/adjust', {
+        type: 'remove', productId: 1, branchId: 1, batchId: 1, quantity, conditionTag: 'damaged', reason: 'Separate tags',
+        client_request_id: 'split-decimal-tag-' + Math.round(quantity * 10),
+      })).status, 200)
+      const saved = await combined.set(0.3, 'split-decimal-target')
+      assert.equal(saved.status, 200, 'separate decimal tags sum exactly to the entered quantity')
+      assert.equal(combined.state().physical, 0.3)
+      for (const operation of combined.state().operations) {
+        assert.equal('counted_tags' in JSON.parse(operation.before_json), false)
+        assert.equal('counted_receipts' in JSON.parse(operation.after_json), false)
+      }
+      assert.equal((await combined.call(`/action-history/${saved.json.action_history_id}/undo`, { expected_generation: 0 })).status, 200)
+      assert.equal((await combined.call(`/action-history/${saved.json.action_history_id}/redo`, { expected_generation: 1 })).status, 200)
+      const before = combined.state()
+      assert.equal((await combined.set(0.299999, 'split-decimal-below')).status, 409)
+      assert.deepEqual(combined.state(), before)
+      assert.equal((await combined.set(1, 'split-decimal-race-start')).status, 200)
+      const priorRace = combined.state()
+      for (const mutation of [
+        "INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source,unit_cost_usd) VALUES(30,1,1,1,0.1,0.1,'expired','remove',2)",
+        'UPDATE damaged_stock_lots SET quantity_remaining=0.05 WHERE id=30',
+        'DELETE FROM damaged_stock_lots WHERE id=30',
+      ]) {
+        combined.competeBeforeCommit([{ sql: mutation }])
+        assert.equal((await combined.set(0.5, 'split-decimal-race-' + mutation.slice(0, 6))).status, 409)
+        assert.equal(combined.state().physical, 1, 'a changed tag row set requires a fresh quantity decision')
+        assert.deepEqual(combined.state().operations, priorRace.operations)
+        assert.deepEqual(combined.state().movements, priorRace.movements)
+      }
+    } finally { combined.sql.close() }
+    const nullTag = await world(makeWorker, tier, 'zero', sql => sql.exec(`
+      UPDATE products SET stock_quantity=0.7 WHERE id=1;
+      UPDATE branch_stock SET quantity=0.7 WHERE product_id=1 AND branch_id=1;
+      UPDATE branch_batch_stock SET quantity=0.7 WHERE batch_id=1;
+      INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source,unit_cost_usd)
+        VALUES(1,1,1,NULL,0.3,0.3,'damaged','remove',2);`))
+    try {
+      assert.equal((await nullTag.set(0.4, 'null-decimal-target')).status, 200, 'NULL reservation subtracts receipt quantity exactly')
+      assert.equal(nullTag.state().physical, 0.7)
+      assert.equal(nullTag.state().lots[0].quantity, 0.4)
+      assert.equal(nullTag.state().tags[0].quantity_remaining, 0.3)
+    } finally { nullTag.sql.close() }
+    const otherLots = await world(makeWorker, tier, 'zero', sql => sql.exec(`
+      UPDATE products SET stock_quantity=0.9 WHERE id=1;
+      UPDATE branch_stock SET quantity=0.9 WHERE product_id=1 AND branch_id=1;
+      UPDATE branch_batch_stock SET quantity=0.7 WHERE batch_id=1;
+      INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,unit_cost_usd,is_active)
+        VALUES(2,1,'other-a','2026-09-02',2,1),(3,1,'other-b','2026-09-03',2,1);
+      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(2,1,0.1),(3,1,0.1);
+      INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source,unit_cost_usd)
+        VALUES(1,1,1,NULL,0.3,0.3,'damaged','remove',2);`))
+    try {
+      otherLots.competeBeforeCommit([
+        { sql: 'UPDATE branch_batch_stock SET quantity=0.15 WHERE batch_id=2 AND branch_id=1' },
+        { sql: 'UPDATE branch_batch_stock SET quantity=0.05 WHERE batch_id=3 AND branch_id=1' },
+      ])
+      assert.equal((await otherLots.set(0.4, 'null-other-receipts-race')).status, 409)
+      assert.deepEqual(otherLots.state().lots.map(row => row.quantity), [0.7, 0.15, 0.05])
+      assert.equal(otherLots.state().physical, 1.2)
+      assert.equal(otherLots.state().operations.length, 0)
+    } finally { otherLots.sql.close() }
+    const reassigned = await world(makeWorker, tier, 'null')
+    try {
+      reassigned.competeBeforeCommit([{ sql: 'UPDATE damaged_stock_lots SET batch_id=1 WHERE id=1' }])
+      assert.equal((await reassigned.set(4, 'tag-receipt-reassigned')).status, 409)
+      assert.equal(reassigned.state().physical, 10)
+      assert.equal(reassigned.state().tags[0].batch_id, 1)
+      assert.equal(reassigned.state().operations.length, 0)
+    } finally { reassigned.sql.close() }
+    const bounded = await world(makeWorker, tier, 'zero')
+    try {
+      assert.equal((await bounded.set(1, 'bounded-tag-capacity-start')).status, 200)
+      bounded.competeBeforeCommit([{ sql: `WITH RECURSIVE ids(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM ids WHERE n<10001)
+        INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source,unit_cost_usd)
+        SELECT n+30000,1,1,1,0.000001,0.000001,'damaged','remove',2 FROM ids` }])
+      assert.equal((await bounded.set(0.9, 'bounded-tag-capacity-race')).status, 409)
+      assert.equal((await bounded.set(0.9, 'bounded-tag-capacity-refresh')).status, 409, 'a truncated row set cannot authorize a write')
+      assert.equal(bounded.sql.prepare('SELECT COUNT(*) AS n FROM damaged_stock_lots').get().n, 10001)
+      assert.equal(bounded.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 1)
+      assert.equal(bounded.sql.prepare('SELECT COUNT(*) AS n FROM stock_lot_adjustment_operations').get().n, 1)
+    } finally { bounded.sql.close() }
     for (const scope of ['lot', 'branch', 'patch']) {
       const f = await world(makeWorker, tier, 'zero', sql => sql.exec(`
         INSERT INTO branches(id,name,is_active) VALUES(2,'Other branch',1);
