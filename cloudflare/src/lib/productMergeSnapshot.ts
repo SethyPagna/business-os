@@ -37,6 +37,7 @@ export type ProductMergeProductRow = Record<string, unknown> & {
 export type ProductMergeCaseSnapshot = {
   canonicalBatchRows: ProductMergeBatchRow[]
   canonicalBatchStockRows: ProductMergeBatchStockRow[]
+  duplicateBatchStockRows: ProductMergeBatchStockRow[]
   duplicateStockRows: ProductMergeStockRow[]
   canonicalStockBefore: ProductMergeStockRow[]
   canonicalProduct: ProductMergeProductRow | undefined
@@ -123,6 +124,18 @@ const BATCH_COLUMNS = ['id', 'variant_product_id', 'batch_key', 'lot_code', 'exp
   'received_cost_usd', 'received_branch_name']
 const BATCH_STOCK_COLUMNS = ['id', 'batch_id', 'branch_id', 'quantity', 'created_at', 'updated_at']
 type CaptureSection = { key: string; columns: string[]; sql: string }
+const captureProofs = new WeakMap<ProductMergeCaseSnapshot, { read: KeyedRead; observed: string }>()
+
+export function productMergeCaptureGuard(snapshot: ProductMergeCaseSnapshot): { sql: string; params: Record<string, unknown> } {
+  const proof = captureProofs.get(snapshot)
+  if (!proof) throw new Error('merge_snapshot_incomplete')
+  return {
+    sql: `WITH current_capture AS (${proof.read.sql}) SELECT CASE WHEN
+      (SELECT data FROM current_capture)=@observedCapture AND (SELECT oversized FROM current_capture)=0
+      THEN 1 ELSE json_extract('[1]','$[merge_conflict_retry]') END AS merge_source_guard`,
+    params: { ...proof.read.params, observedCapture: proof.observed },
+  }
+}
 
 function captureRead(sections: readonly CaptureSection[], keeperId: number, duplicateId: number): KeyedRead {
   const cell = (column: string) => `CASE WHEN typeof(${column})='real'
@@ -193,12 +206,14 @@ export function planProductMergeCaseSnapshot(
   if (reparentTables.some(({ table, column }) => !/^[a-z_]+$/.test(table) || !/^[a-z_]+$/.test(column))) {
     throw new Error('merge_snapshot_invalid_table')
   }
-  const productColumns = ['id', 'name', 'barcode', 'image_path', 'is_active', 'updated_at', ...PRODUCT_MONEY_COLUMNS.split(',').map(column => column.trim())]
+  const productColumns = ['id', 'name', 'barcode', 'image_path', 'is_active', 'updated_at', 'stock_quantity', ...PRODUCT_MONEY_COLUMNS.split(',').map(column => column.trim())]
   const stockColumns = ['branch_id', 'quantity', 'rfid_confirmed_qty']
   const sections: CaptureSection[] = [
     { key: 'canonicalBatches', columns: BATCH_COLUMNS, sql: `SELECT ${BATCH_COLUMNS.join(',')} FROM product_batches WHERE variant_product_id=@keeperId ORDER BY id` },
     { key: 'canonicalBatchStock', columns: BATCH_STOCK_COLUMNS, sql: `SELECT ${BATCH_STOCK_COLUMNS.map(column => `bbs.${column}`).join(',')} FROM branch_batch_stock bbs
       JOIN product_batches pb ON pb.id=bbs.batch_id WHERE pb.variant_product_id=@keeperId ORDER BY bbs.id` },
+    { key: 'duplicateBatchStock', columns: BATCH_STOCK_COLUMNS, sql: `SELECT ${BATCH_STOCK_COLUMNS.map(column => `bbs.${column}`).join(',')} FROM branch_batch_stock bbs
+      JOIN product_batches pb ON pb.id=bbs.batch_id WHERE pb.variant_product_id=@duplicateId ORDER BY bbs.id` },
     { key: 'duplicateStock', columns: stockColumns, sql: 'SELECT branch_id,quantity,rfid_confirmed_qty FROM branch_stock WHERE product_id=@duplicateId ORDER BY branch_id' },
     { key: 'canonicalStock', columns: stockColumns, sql: 'SELECT branch_id,quantity,rfid_confirmed_qty FROM branch_stock WHERE product_id=@keeperId ORDER BY branch_id' },
     {
@@ -238,9 +253,10 @@ export function planProductMergeCaseSnapshot(
       ids: asRows<{ id: number }>(`reparent:${index}`).map((row) => Number(row.id)),
     })).filter((entry) => entry.ids.length > 0)
 
-    return {
+    const snapshot: ProductMergeCaseSnapshot = {
       canonicalBatchRows: asRows<ProductMergeBatchRow>('canonicalBatches'),
       canonicalBatchStockRows: asRows<ProductMergeBatchStockRow>('canonicalBatchStock'),
+      duplicateBatchStockRows: asRows<ProductMergeBatchStockRow>('duplicateBatchStock'),
       duplicateStockRows: asRows<ProductMergeStockRow>('duplicateStock'),
       canonicalStockBefore: asRows<ProductMergeStockRow>('canonicalStock'),
       canonicalProduct: asRows<ProductMergeProductRow>('canonicalProduct')[0],
@@ -252,6 +268,8 @@ export function planProductMergeCaseSnapshot(
       promotionRuleRows: asRows<{ id: number; product_ids: string | null }>('promotionRules'),
       childProductRows: asRows<{ id: number }>('childProducts'),
     }
+    captureProofs.set(snapshot, { read: reads[0], observed: captured.get('capture')![0].data as string })
+    return snapshot
   }
   return { reads, decode }
 }

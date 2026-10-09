@@ -36,11 +36,12 @@ import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail } from
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { buildAtomicMergeHistoryStatements, closeStockSessionsStatements, readOpenStockSessions, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition, type ProductMergeKeeperChoice } from '../lib/undoAppliers'
 import { INVALID_RESOLVE_CHOICES_CODE, KEEPER_CHOICE_BEFORE_SQL, MERGE_APPLIED_PROBE_SQL, ProductResolveChoiceError, RESOLVE_EDIT_PERMISSION_CODE, keeperChoiceBefore, keeperChoiceStatements, mergeFailedBody, parseProductResolveChoices, resolveChoicesTypeValues, resolveChoiceValues, type ProductResolveChoices, type ResolveChoiceValues } from '../lib/productResolveChoices'
-import { createProductMergeClusterPlan, isMergePriceEditError, MERGE_COST_FIELDS, MERGE_PRICE_EDIT_CODE, MERGE_PRICE_EDIT_MESSAGE, MERGE_PRICE_FIELDS, mergePriceEditError, mergePriceOverrides, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergeSourceUnmovedAssertion, MERGE_CONFLICT_RETRY, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
+import { createProductMergeClusterPlan, isMergePriceEditError, MERGE_COST_FIELDS, MERGE_PRICE_EDIT_CODE, MERGE_PRICE_EDIT_MESSAGE, MERGE_PRICE_FIELDS, mergePriceEditError, mergePriceOverrides, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, MERGE_CONFLICT_RETRY, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
 import { sendTelegramEvent } from '../lib/telegram'
 import { PRODUCT_EDIT_ALERT_HEADING, PRODUCT_MERGE_ALERT_HEADING, formatProductEditAlertLines, formatProductMergeAlertLines, productEditAlertFields } from '../lib/productEditAlert'
 import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedSql, costEntryActorParams, typedCostEntriesBeforeWriteSql, typedCostEntryBeforeWriteStatement } from '../lib/catalogCostRecompute'
-import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, productMergeSourceExtent, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
+import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, productMergeCaptureGuard, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
+import { planExactProductMergeStock } from '../lib/countedProductMerge'
 import type { ProductMergeCaseSnapshot, ProductMergeLotSnapshot } from '../lib/productMergeSnapshot'
 import {
   PRODUCT_CONFLICT_MERGE_MANIFEST_VERSION,
@@ -3922,32 +3923,23 @@ export async function foldDuplicateProductInto(
   // A caller that reviewed the state itself (Resolve digest, selected-conflict
   // fingerprint, leading-zero plan) brings guards with a more specific answer
   // ("changed after review"), so they run before the generic stock-moved guard.
-  const sourceUnmovedGuard = productMergeSourceUnmovedAssertion(dup.id, productMergeSourceExtent(snapshot))
+  const exactStock = planExactProductMergeStock(snapshot, stockDisposition)
+  const sourceUnmovedGuard = productMergeCaptureGuard(snapshot)
   const reviewedGuards = atomicHistory?.preStatements || []
   const statements: Array<{ sql: string; params?: Record<string, unknown> }> = reviewedGuards.length
     ? [productMergeCasAssertion([canonicalBefore, dupPricing]), ...reviewedGuards, sourceUnmovedGuard]
     : [sourceUnmovedGuard, productMergeCasAssertion([canonicalBefore, dupPricing])]
-  // Recomputing caches or combining identities must not hide unexplained
-  // holdings. Lots belong to their product's branch stock; damaged lots are
-  // a separate pool whose rows move unchanged with the product history.
   statements.push({
-    sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products p WHERE p.id IN (@keeperId,@dupId) AND (
-      COALESCE(p.stock_quantity,0)<0
-      OR (COALESCE(p.stock_quantity,0)<>0 AND p.stock_quantity<>(SELECT COALESCE(SUM(bs.quantity),0) FROM branch_stock bs WHERE bs.product_id=p.id))
-      OR EXISTS(SELECT 1 FROM branch_stock bs WHERE bs.product_id=p.id AND bs.quantity<0)
-      OR EXISTS(SELECT 1 FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id WHERE pb.variant_product_id=p.id AND bbs.quantity<0)
-      OR EXISTS(SELECT 1 FROM damaged_stock_lots dl WHERE dl.product_id=p.id AND dl.quantity_remaining<0)
-      OR EXISTS(SELECT 1 FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
-        WHERE pb.variant_product_id=p.id GROUP BY bbs.branch_id
-        HAVING SUM(bbs.quantity)>COALESCE((SELECT bs.quantity FROM branch_stock bs WHERE bs.product_id=p.id AND bs.branch_id=bbs.branch_id),0))
-    )) THEN json_extract('[]','$[product_has_stock]') ELSE 1 END AS merge_stock_conservation_guard`,
+    sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM damaged_stock_lots
+      WHERE product_id IN (@keeperId,@dupId) AND quantity_remaining<0)
+      THEN json_extract('[]','$[product_has_stock]') ELSE 1 END AS merge_stock_conservation_guard`,
     params: { keeperId: canonicalId, dupId: dup.id },
   })
   if (!canChangeProductImages) {
     statements.push(productMergeNoImageEffectAssertion(canonicalId, dup.id))
   }
-  let quantityMoved = 0
-  let quantityWrittenOff = 0
+  const quantityMoved = exactStock.moved
+  const quantityWrittenOff = exactStock.writtenOff
   for (const row of stockRows) {
     const qty = Number(row.quantity) || 0
     if (!qty) continue
@@ -3958,7 +3950,6 @@ export async function foldDuplicateProductInto(
       // pass further down then carries it onto the keeper with the rest of that
       // history, which is what keeps the keeper's ledger balanced (the stock
       // came in on the discarded row and went out again on the same row).
-      quantityWrittenOff += qty
       statements.push({
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
               VALUES (@productId, @productName, @branchId, @branchName, 'adjustment', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
@@ -3975,11 +3966,10 @@ export async function foldDuplicateProductInto(
       })
       continue
     }
-    quantityMoved += qty
     statements.push({
       sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@canonicalId, @branchId, @qty)
-            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity`,
-      params: { canonicalId, branchId: row.branch_id, qty },
+            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = excluded.quantity`,
+      params: { canonicalId, branchId: row.branch_id, qty: exactStock.keeperByBranch.get(row.branch_id) },
     })
     statements.push({
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
@@ -4133,7 +4123,7 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
       // that INTEGER column the way the RECON import once did.
       const lotSnapshot = dependentLotSnapshots.get(Number(batchRow.id))
       if (!lotSnapshot) throw new Error('merge_snapshot_incomplete')
-      const dupBatchStockRows = lotSnapshot.duplicateStockRows
+      const dupBatchStockRows = snapshot.duplicateBatchStockRows.filter(row => row.batch_id === Number(batchRow.id))
       statements.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @id', params: { id: batchRow.id } })
       statements.push({ sql: 'UPDATE product_batches SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchRow.id } })
       writtenOffBatches.push({
@@ -4155,8 +4145,8 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
     if (existingCanonicalBatchId) {
       const lotSnapshot = dependentLotSnapshots.get(Number(batchRow.id))
       if (!lotSnapshot) throw new Error('merge_snapshot_incomplete')
-      const dupBatchStockRows = lotSnapshot.duplicateStockRows
-      const keeperBatchStockBefore = lotSnapshot.keeperStockBefore
+      const dupBatchStockRows = snapshot.duplicateBatchStockRows.filter(row => row.batch_id === Number(batchRow.id))
+      const keeperBatchStockBefore = snapshot.canonicalBatchStockRows.filter(row => row.batch_id === existingCanonicalBatchId)
       // An archived same-key keeper can still own stock. Activate it before
       // folding positive quantities so the committed stock stays selectable.
       // Empty historical lots keep their prior state; dates/costs do not change.
@@ -4172,8 +4162,8 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
         if (!qty) continue
         statements.push({
           sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@batchId, @branchId, @qty)
-                ON CONFLICT(batch_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity, updated_at = CURRENT_TIMESTAMP`,
-          params: { batchId: existingCanonicalBatchId, branchId: bbs.branch_id, qty },
+                ON CONFLICT(batch_id, branch_id) DO UPDATE SET quantity = excluded.quantity, updated_at = CURRENT_TIMESTAMP`,
+          params: { batchId: existingCanonicalBatchId, branchId: bbs.branch_id, qty: exactStock.receiptAfter(existingCanonicalBatchId, bbs.branch_id, qty) },
         })
       }
       statements.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @id', params: { id: batchRow.id } })
@@ -4430,8 +4420,8 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
   // Product stock caches and durable history belong to this case's transaction.
   // A failure at any later statement rolls the graph mutations back as well.
   statements.push(
-    { sql: 'UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@id),updated_at=CURRENT_TIMESTAMP WHERE id=@id', params: { id: canonicalId } },
-    { sql: 'UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@id),updated_at=CURRENT_TIMESTAMP WHERE id=@id', params: { id: dup.id } },
+    { sql: 'UPDATE products SET stock_quantity=@quantity,updated_at=CURRENT_TIMESTAMP WHERE id=@id', params: { id: canonicalId, quantity: exactStock.keeperTotal } },
+    { sql: 'UPDATE products SET stock_quantity=0,updated_at=CURRENT_TIMESTAMP WHERE id=@id', params: { id: dup.id } },
     // U-cost (owner ruling 2026-09-25, 0195): the keeper's catalog cost is the
     // quantity-weighted mean of the lots it now holds. Re-pointing a lot fires
     // no trigger, so without this the plan's merged figure would stand until
