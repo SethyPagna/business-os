@@ -39,6 +39,11 @@ async function edit(makeWorker, tier, kind = 'ordinary', scenario = 'normal') {
       source:'UPDATE sale_items SET batch_id=NULL WHERE id=50',
       price:'UPDATE sale_items SET applied_price_usd=11 WHERE id=50',
       cost:'UPDATE sale_items SET cost_price_usd=3 WHERE id=50',
+      actor:'UPDATE users SET is_active=0 WHERE id=7',
+      role:"UPDATE roles SET permissions='{}' WHERE code='admin'",
+      saleAllocation:'UPDATE sale_item_batch_allocations SET released_quantity=0.1 WHERE sale_item_id=50',
+      returnPrice:'UPDATE return_items SET applied_price_usd=11 WHERE return_id=55',
+      returnHeader:"UPDATE returns SET reason='Rival reason' WHERE id=55",
       receipt:'UPDATE product_batches SET unit_cost_usd=3 WHERE id=1',
       active:'UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=1 AND branch_id=1',
       member:"INSERT INTO product_batches(id,variant_product_id,batch_key,is_active)VALUES(99,1,'new-zero-member',1)",
@@ -51,27 +56,34 @@ async function edit(makeWorker, tier, kind = 'ordinary', scenario = 'normal') {
       f.competeBeforeCommit(statements)
     }
     if(scenario==='late')f.failWhenSqlMatches(/INSERT INTO return_mutation_receipts/)
+    if(scenario==='lookalike')f.sql.exec('CREATE TEMP TABLE unrelated(guard_value_unrelated INTEGER CHECK(guard_value_unrelated=1));CREATE TEMP TRIGGER unrelated_late BEFORE INSERT ON return_mutation_receipts BEGIN INSERT INTO unrelated VALUES(0);END')
     if(scenario==='ack')f.loseNextCommitAcknowledgement()
     if(scenario==='none')body.items[0].stock_action='none'
+    if(['near','over'].includes(scenario)) {
+      body.branch_id=1;body.items=[{...body.items[0]},{...body.items[0]}]
+      if(scenario==='over')body.items.push({...body.items[0],quantity:.05})
+    }
     const result = await f.call('/returns/55',body,'PATCH')
+    if(scenario==='over'){assert.equal(result.status,400,JSON.stringify(result));assert.equal(result.json.code,'return_edit_over_plan_budget');assert.deepEqual(f.state(),before);assert.equal(f.sql.prepare('SELECT count(*) n FROM return_mutation_receipts').get().n,0);console.log('PASS Free third stock item refuses before dispatch');return}
     if (result.status===400 && tier==='free') {
-      assert.equal(result.json.code,'return_edit_over_plan_budget');assert.deepEqual(f.state(),before)
-      assert.equal(f.sql.prepare('SELECT count(*) n FROM return_mutation_receipts').get().n,0)
-      console.log('PASS exact legacy PATCH safe Free refusal '+kind);return
+      if(scenario==='over'){assert.equal(result.json.code,'return_edit_over_plan_budget');assert.deepEqual(f.state(),before);assert.equal(f.sql.prepare('SELECT count(*) n FROM return_mutation_receipts').get().n,0);console.log('PASS Free +1 planned item refuses before dispatch');return}
+      assert.fail('Common single-return edit must fit Free: '+JSON.stringify(result.json))
     }
     if(rivals[scenario]) {
       assert.equal(result.status,409,JSON.stringify(result.json));assert.equal(result.json.code,'write_conflict')
       assert.equal(f.state().physical,.3);assert.deepEqual(f.state().movements,before.movements)
-      assert.deepEqual(f.sql.prepare('SELECT * FROM return_items WHERE return_id=55 ORDER BY id').all(),originalItems)
+      if(scenario!=='returnPrice')assert.deepEqual(f.sql.prepare('SELECT * FROM return_items WHERE return_id=55 ORDER BY id').all(),originalItems)
+      else assert.equal(f.sql.prepare('SELECT applied_price_usd FROM return_items WHERE return_id=55').get().applied_price_usd,11)
       assert.equal(f.sql.prepare('SELECT count(*) n FROM return_mutation_receipts').get().n,0)
       console.log('PASS exact legacy PATCH rival '+scenario);return
     }
-    if(scenario==='late') {
+    if(['late','lookalike'].includes(scenario)) {
       assert.equal(result.status,503);assert.equal(result.json.code,'unknown_outcome');assert.deepEqual(f.state(),before)
       assert.deepEqual(f.sql.prepare('SELECT * FROM return_items WHERE return_id=55 ORDER BY id').all(),originalItems)
+      if(scenario==='lookalike')f.sql.exec('DROP TRIGGER unrelated_late')
       assert.equal((await f.call('/returns/55',body,'PATCH')).status,200)
     } else assert.equal(result.status,200,JSON.stringify(result.json))
-    assert.equal(f.state().physical,scenario==='none'?.1:.2,'exact reversal and receive')
+    assert.equal(f.state().physical,scenario==='none'?.1:['near','over'].includes(scenario)?.3:.2,'exact reversal and receive')
     assert.equal(f.state().cache,f.state().physical)
     if(batch)assert.equal(f.state().lots[0].quantity,f.state().physical)
     if(kind==='NULL')assert.equal(f.sql.prepare('SELECT batch_id FROM return_items WHERE return_id=55').get().batch_id,null)
@@ -89,6 +101,6 @@ async function edit(makeWorker, tier, kind = 'ordinary', scenario = 'normal') {
     console.log('PASS exact legacy PATCH '+tier+' '+kind)
   } finally { f.sql.close() }
 }
-async function main(){const makeWorker=await h.bundle.exports.bundleWorker();for(const tier of ['free','paid'])for(const kind of ['ordinary','opened','NULL','dated'])await edit(makeWorker,tier,kind);for(const scenario of ['condition','allocation','source','price','cost','receipt','active','member','tagOwner','late','ack','none'])await edit(makeWorker,'paid',['condition','tagOwner'].includes(scenario)?'opened':'ordinary',scenario)}
+async function main(){const makeWorker=await h.bundle.exports.bundleWorker();for(const tier of ['free','paid'])for(const kind of ['ordinary','opened','NULL','dated'])await edit(makeWorker,tier,kind);for(const tier of ['free','paid'])for(const scenario of ['condition','allocation','source','price','cost','actor','role','saleAllocation','returnPrice','returnHeader','receipt','active','member','tagOwner','late','lookalike','ack','none'])await edit(makeWorker,tier,['condition','tagOwner'].includes(scenario)?'opened':'ordinary',scenario);for(const scenario of ['near','over'])await edit(makeWorker,'free','ordinary',scenario)}
 if(require.main===module)main().catch(error=>{console.error(error);process.exitCode=1})
 module.exports={edit}

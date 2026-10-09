@@ -1,6 +1,7 @@
 import { readTaggedSaleSources } from '../lib/saleLineAddition'
+import { stockActorPredicate, stockActorParams } from '../lib/stockActorGuard'
 import { planCountedTaggedChange, CountedStockBatchPlan, CountedStockConflictError, countedStockFactsSql, isCountedStockConflict, subtractCountedQuantity, planExactCountedOrdinaryChange } from '../lib/countedDamagedStock'
-import { resolveCountedReturnConditions } from '../lib/countedReturnCondition'
+import { resolveCountedReturnConditions, resolveCountedReturnConditionsFromSnapshot, type OriginalReturnCondition } from '../lib/countedReturnCondition'
 import { productStockGuardError } from '../lib/productStockGuard'
 import { Hono, type Context } from 'hono'
 import { getPlanLimits } from '../lib/planTier'
@@ -2944,8 +2945,12 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
     return c.json(JSON.parse(previousReceipt.response_json) as { id: number; updated_at: string })
   }
 
-  const existing = await db.prepare(`SELECT r.*,date(r.created_at,'+7 hours') AS received_business_date,COALESCE(v.revision,0) AS write_revision
-    FROM returns r LEFT JOIN return_write_revisions v ON v.return_id=r.id WHERE r.id=?`).get<ReturnRow & { write_revision: number; received_business_date: string | null }>([id])
+  const existing = await db.prepare(`SELECT r.*,date(r.created_at,'+7 hours') AS received_business_date,COALESCE(v.revision,0) AS write_revision,
+      (SELECT json_group_array(json_object('id',id,'sale_item_id',sale_item_id,'product_id',product_id,'product_name',product_name,'quantity',quantity,'applied_price_usd',applied_price_usd,'applied_price_khr',applied_price_khr,'cost_price_usd',cost_price_usd,'cost_price_khr',cost_price_khr,'total_usd',total_usd,'total_khr',total_khr,'return_to_stock',return_to_stock,'stock_action',stock_action,'stock_condition',stock_condition,'branch_id',branch_id,'batch_id',batch_id)) FROM (SELECT * FROM return_items WHERE return_id=r.id ORDER BY id)) AS item_snapshot,
+      (SELECT json_group_array(json_object('id',id,'return_item_id',return_item_id,'condition_tag',condition_tag,'product_id',product_id,'product_name',product_name,'branch_id',branch_id,'batch_id',batch_id,'quantity',quantity,'quantity_remaining',quantity_remaining,'reason',reason,'created_by_user_id',created_by_user_id,'created_by_user_name',created_by_user_name)) FROM (SELECT * FROM damaged_stock_lots WHERE return_id=r.id AND (return_item_id IS NULL OR EXISTS(SELECT 1 FROM return_items ri WHERE ri.id=damaged_stock_lots.return_item_id AND ri.return_id=r.id)) ORDER BY id)) AS tag_snapshot,
+      (SELECT json_group_array(json_array(id,return_item_id,batch_id,branch_id,quantity)) FROM (SELECT * FROM return_item_batch_allocations WHERE return_item_id IN(SELECT id FROM return_items WHERE return_id=r.id) ORDER BY id)) AS allocation_snapshot,
+      (SELECT json_group_array(json(snapshot_row)) FROM (SELECT json_array(ri.id,sr.id,ri.sale_item_id,ri.product_id,ri.quantity,sr.status) AS snapshot_row FROM return_items ri JOIN returns sr ON sr.id=ri.return_id WHERE sr.sale_id=r.sale_id AND sr.id<>r.id AND COALESCE(sr.status,'completed')!='cancelled' AND COALESCE(sr.return_scope,'customer')='customer' ORDER BY sr.id,ri.id)) AS sibling_snapshot
+    FROM returns r LEFT JOIN return_write_revisions v ON v.return_id=r.id WHERE r.id=?`).get<ReturnRow & { write_revision:number; received_business_date:string|null; item_snapshot:string; tag_snapshot:string; allocation_snapshot:string; sibling_snapshot:string }>([id])
   if (!existing) return c.json({ error: 'Return not found' }, 404)
   if (normalizeScope(existing.return_scope, CUSTOMER_SCOPE) !== CUSTOMER_SCOPE) {
     return c.json({ error: 'Supplier returns cannot be edited from this form yet.' }, 400)
@@ -2954,17 +2959,28 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
     return c.json({ error: 'Exact net-entitlement returns cannot be edited until the v1 edit flow is available.',
       code: 'customer_return_edit_v1_not_supported', action: 'review_required' }, 409)
   }
+  type CapturedEditSaleSource = OriginalReturnCondition & {
+    id:number; batch_id:number|null; batch_label:string|null; batch_expiry_date:string|null; quantity:number;
+    applied_price_usd:number|null; applied_price_khr:number|null; cost_price_usd:number|null; cost_price_khr:number|null; allocations_json:string
+  }
+  let editSaleSources: CapturedEditSaleSource[] = []
   type LinkedSaleState = {
     id: number; sale_status: string | null; status_before_return: string | null
-    receipt_number: string | null; write_revision: number; money_precision_version: number | null
+    receipt_number:string|null; write_revision:number; money_precision_version:number|null; item_snapshot:string
   }
   let linkedSale: LinkedSaleState | null = null
   if (existing.sale_id) {
     linkedSale = await db.prepare(`SELECT s.id,s.sale_status,s.status_before_return,s.receipt_number,s.money_precision_version,
-      COALESCE(v.revision,0) AS write_revision
+      COALESCE(v.revision,0) AS write_revision,
+        (SELECT json_group_array(json(snapshot_row)) FROM (SELECT json_object('id',si.id,'sale_id',si.sale_id,'product_id',si.product_id,'branch_id',si.branch_id,'batch_id',si.batch_id,'damaged_lot_id',si.damaged_lot_id,'batch_label',si.batch_label,'batch_expiry_date',si.batch_expiry_date,'quantity',si.quantity,'applied_price_usd',si.applied_price_usd,'applied_price_khr',si.applied_price_khr,'cost_price_usd',si.cost_price_usd,'cost_price_khr',si.cost_price_khr,'sale_item_id',si.id,
+          'original_product_id',ci.product_id,'original_branch_id',ci.branch_id,'original_batch_id',ci.batch_id,'original_condition_tag',ci.condition_tag,
+          'allocations_json',((SELECT json_group_array(json_array(id,batch_id,branch_id,quantity,released_quantity)) FROM (SELECT * FROM sale_item_batch_allocations WHERE sale_item_id=si.id ORDER BY id))||'')) AS snapshot_row
+          FROM sale_items si LEFT JOIN counted_sale_item_conditions ci ON ci.sale_item_id=si.id WHERE si.sale_id=s.id ORDER BY si.id)) AS item_snapshot
       FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id=?`)
       .get<LinkedSaleState>([existing.sale_id]) || null
     if (!linkedSale) return c.json({ error: 'Original sale not found' }, 400)
+    if (new TextEncoder().encode(linkedSale.item_snapshot).byteLength>RETURN_CREATE_REQUEST_BYTES) throw new ReturnCreateBudgetError()
+    editSaleSources=JSON.parse(linkedSale.item_snapshot) as CapturedEditSaleSource[]
   }
   if(linkedSale && String(linkedSale.sale_status||'completed')==='cancelled') return c.json({error:'This sale is cancelled; restore it before editing its return.'},400)
   // The sale decides here too. A v0 return row attached to a v1 sale can only
@@ -2985,15 +3001,16 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
       code: 'return_edit_cancelled', action: 'restore_required' }, 409)
   }
 
-  const existingItems = await db.prepare('SELECT * FROM return_items WHERE return_id = ? ORDER BY id').all<{
+  if (new TextEncoder().encode(existing.item_snapshot+existing.tag_snapshot+existing.allocation_snapshot+existing.sibling_snapshot).byteLength>RETURN_CREATE_REQUEST_BYTES) throw new ReturnCreateBudgetError()
+  const existingItems = JSON.parse(existing.item_snapshot) as Array<{
     id: number; product_id: number | null; product_name: string | null; quantity: number
     return_to_stock: number; stock_action: string | null; branch_id: number | null; cost_price_usd: number | null; cost_price_khr: number | null
     batch_id: number | null
-  }>([id])
+  }>
   const explicitEditConditions = Array.isArray(body.items) ? body.items.map(item=>item.stock_condition!=null || item.condition_tag!=null || item.stock_action==='damaged') : []
   let newItems: ReturnItemInput[] = Array.isArray(body.items) ? body.items : existingItems
   try {
-    newItems = await resolveCountedReturnConditions(db,Number(existing.sale_id)||null,newItems as unknown as Array<Record<string,unknown>>) as unknown as ReturnItemInput[]
+    newItems = resolveCountedReturnConditionsFromSnapshot(Number(existing.sale_id)||null,newItems as unknown as Array<Record<string,unknown>>,editSaleSources) as unknown as ReturnItemInput[]
     if(Array.isArray(body.items)) {
       body.items=newItems;canonicalIntent=canonicalReturnEditIntent(returnId,expectedUpdatedAt,body)
       requestJson=JSON.stringify(canonicalIntent);requestDigest=await sha256Hex(requestJson)
@@ -3002,7 +3019,7 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
   let editCostSources: Record<string,unknown>[] = []
   if (Array.isArray(body.items)) {
     const sourceRows = editCostSources = existing.sale_id
-      ? await db.prepare('SELECT id,product_id,branch_id,cost_price_usd,cost_price_khr FROM sale_items WHERE sale_id=?').all<Record<string, unknown>>([existing.sale_id])
+      ? editSaleSources.map(row=>({id:row.id,product_id:row.product_id,branch_id:row.branch_id,cost_price_usd:row.cost_price_usd,cost_price_khr:row.cost_price_khr}))
       : await selectInChunks([...new Set(newItems.map(item => Number(item.product_id)).filter(id => id > 0))], 0, chunk => db.prepare(`SELECT id,cost_price_usd,cost_price_khr FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`).all<Record<string, unknown>>(chunk))
     try {
       newItems = newItems.map(item => {
@@ -3104,22 +3121,19 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
   // refused having touched nothing -- the Part-77 discipline the settlement
   // gate used to hold this slot for.
   const editSaleItemIds = newItems.map((i) => i.sale_item_id).filter((sid): sid is number => Number.isFinite(sid) && Number(sid) > 0)
-  const saleItemBatchInfoForEdit = await fetchSaleItemBatchInfo(db, editSaleItemIds)
-  const saleItemAllocationsForEdit = await fetchSaleItemAllocations(db, editSaleItemIds)
+  const saleItemBatchInfoForEdit = new Map(editSaleSources.filter(row=>editSaleItemIds.includes(row.id)).map(row=>[row.id,row]))
+  const saleItemAllocationsForEdit = new Map(editSaleSources.filter(row=>editSaleItemIds.includes(row.id)).map(row=>[row.id,
+    (JSON.parse(row.allocations_json) as Array<[number,number,number|null,number,number]>).flatMap(alloc=>{
+      const outstanding = Math.max(0,subtractCountedQuantity(alloc[3],[alloc[4]]))
+      return outstanding>0 ? [{batch_id:alloc[1],outstanding}] : []
+    })]))
 
   // The refund per line: the ORIGINAL sale line's price, always -- an edit is
   // not a chance to restate what the customer paid. A manual return (no sale
   // line) has only the posted price to go on. A return against a sale is
   // priced from that sale's lines, matched exactly as POST / matches them:
   // by sale_item_id, else by product_id (capped at the recorded price).
-  const editSalePriceLines = existing.sale_id
-    ? await db.prepare(`SELECT si.id,si.product_id,si.branch_id,si.batch_id,si.damaged_lot_id,si.quantity,si.applied_price_usd,si.applied_price_khr,
-        ci.product_id AS original_product_id,ci.branch_id AS original_branch_id,ci.batch_id AS original_batch_id,ci.condition_tag AS original_condition_tag,
-        (SELECT json_group_array(json_array(batch_id,branch_id,quantity,released_quantity)) FROM (SELECT * FROM sale_item_batch_allocations WHERE sale_item_id=si.id ORDER BY id)) AS allocations_json
-        FROM sale_items si LEFT JOIN counted_sale_item_conditions ci ON ci.sale_item_id=si.id WHERE si.sale_id=? ORDER BY si.id`)
-      .all<{ id:number; product_id:number|null; branch_id:number|null; batch_id:number|null; damaged_lot_id:number|null; quantity:number; applied_price_usd:number|null; applied_price_khr:number|null;
-        original_product_id:number|null; original_branch_id:number|null; original_batch_id:number|null; original_condition_tag:string|null; allocations_json:string }>([existing.sale_id])
-    : []
+  const editSalePriceLines = editSaleSources
   let editRefundPrices: Array<{ unitUsd: number; unitKhr: number; fromSaleLine: boolean }>
   try {
     editRefundPrices = newItems.map((item) => {
@@ -3201,7 +3215,7 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
       const merged = new Map<number, number>()
       for (const split of plan.splits) {
         const batchId = survivors.get(split.batchId) ?? split.batchId
-        merged.set(batchId, (merged.get(batchId) || 0) + split.quantity)
+        merged.set(batchId, subtractCountedQuantity(merged.get(batchId) || 0, [-split.quantity]))
       }
       editLotPlans[index] = { splits: [...merged].map(([batchId, quantity]) => ({ batchId, quantity })), plainQuantity: plan.plainQuantity }
     }
@@ -3209,14 +3223,8 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
 
   let projectedSaleStatus: string | null = null
   if (linkedSale) {
-    const soldLines = await db.prepare('SELECT id,product_id,quantity FROM sale_items WHERE sale_id=? ORDER BY id')
-      .all<{ id: number; product_id: number | null; quantity: number }>([existing.sale_id])
-    const siblingLines = await db.prepare(`SELECT ri.sale_item_id,ri.product_id,ri.quantity
-      FROM return_items ri JOIN returns r ON r.id=ri.return_id
-      WHERE r.sale_id=@sale AND r.id<>@return
-        AND COALESCE(r.status,'completed')!='cancelled'
-        AND COALESCE(r.return_scope,'customer')='customer'
-      ORDER BY r.id,ri.id`).all<{ sale_item_id: number | null; product_id: number | null; quantity: number }>({ sale: existing.sale_id, return: returnId })
+    const soldLines = editSaleSources.map(row=>({id:row.id,product_id:row.product_id,quantity:row.quantity}))
+    const siblingLines = (JSON.parse(existing.sibling_snapshot) as Array<[number,number,number|null,number|null,number,string|null]>).map(row=>({sale_item_id:row[2],product_id:row[3],quantity:row[4]}))
     const proposedLines = String(existing.status || 'completed') === 'cancelled' ? [] : newItems.map((item) => ({
       sale_item_id: item.sale_item_id ?? null,
       product_id: item.product_id ?? null,
@@ -3259,14 +3267,7 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
   // A lot POS already drew from can't be un-damaged (that stock left the
   // building) -- ConsumedDamagedStockError blocks the edit outright.
   try {
-    const damagedLots = editDamagedLots = await db.prepare(`SELECT id,return_item_id,condition_tag,product_id,product_name,branch_id,batch_id,quantity,quantity_remaining,
-      reason,created_by_user_id,created_by_user_name FROM damaged_stock_lots WHERE return_id=@returnId
-      AND (return_item_id IS NULL OR EXISTS(SELECT 1 FROM return_items ri WHERE ri.id=damaged_stock_lots.return_item_id AND ri.return_id=@returnId)) ORDER BY id`)
-      .all<{
-        id:number; return_item_id:number|null; condition_tag:string; product_id: number; product_name: string | null; branch_id: number | null; batch_id: number | null
-        quantity: number; quantity_remaining: number; reason: string | null
-        created_by_user_id: number | string | null; created_by_user_name: string | null
-      }>({ returnId: id })
+    const damagedLots = editDamagedLots = JSON.parse(existing.tag_snapshot) as typeof editDamagedLots
     for (const lot of damagedLots) {
       if (Number(lot.quantity_remaining) < Number(lot.quantity)) {
         throw new ConsumedDamagedStockError(String(lot.product_name || `product #${lot.product_id}`), Number(lot.quantity) - Number(lot.quantity_remaining))
@@ -3315,7 +3316,12 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
   // Old aggregate-only returns may reverse only the actual unlotted residual;
   // consumed/merged lot stock fails closed instead of taking unrelated units.
   const existingItemIds = existingItems.map((it) => Number(it.id)).filter((n) => Number.isFinite(n) && n > 0)
-  const existingReturnAllocations = await fetchReturnItemBatchAllocations(db, existingItemIds)
+  const existingReturnAllocations = new Map<number,Array<{id:number;batch_id:number;branch_id:number|null;quantity:number}>>()
+  for (const row of JSON.parse(existing.allocation_snapshot) as Array<[number,number,number,number|null,number]>) {
+    if (!existingItemIds.includes(row[1])) throw new CountedStockConflictError()
+    const entries = existingReturnAllocations.get(row[1]) || []
+    entries.push({id:row[0],batch_id:row[2],branch_id:row[3],quantity:row[4]});existingReturnAllocations.set(row[1],entries)
+  }
   // Lots the consolidation folded: the reversal takes the units out of the lot that exists NOW.
   const reversalSurvivors = new Map<number, Map<number, number>>()
   for (const [index, effect] of existingLineEffects.entries()) {
@@ -3348,23 +3354,31 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
   }
   const exactEdit = await readProjectedReturnStock(db,editContexts)
   statements.unshift(...exactEdit.takePreimageGuards())
-  const originalItemKeys = ['id','product_id','product_name','quantity','return_to_stock','stock_action','branch_id','cost_price_usd','cost_price_khr','batch_id','sale_item_id','stock_condition']
+  const originalItemKeys = ['id','product_id','product_name','quantity','return_to_stock','stock_action','branch_id','cost_price_usd','cost_price_khr','batch_id','sale_item_id','stock_condition','applied_price_usd','applied_price_khr','total_usd','total_khr']
   const originalItemsJson = JSON.stringify(existingItems.map(item=>originalItemKeys.map(key=>(item as unknown as Record<string,unknown>)[key] ?? null)))
-  const originalAllocationsJson = JSON.stringify([...existingReturnAllocations].sort(([a],[b])=>a-b).flatMap(([itemId,rows])=>rows.map(row=>[itemId,row.batch_id,row.branch_id,row.quantity])))
+  const originalAllocationsJson = JSON.stringify([...existingReturnAllocations].sort(([a],[b])=>a-b).flatMap(([itemId,rows])=>rows.map(row=>[row.id,itemId,row.batch_id,row.branch_id,row.quantity])))
   const originalTagsJson = JSON.stringify(editDamagedLots.map(lot=>[lot.id,lot.return_item_id,lot.condition_tag,lot.product_id,lot.product_name,lot.branch_id,lot.batch_id,lot.quantity,lot.quantity_remaining,lot.reason,lot.created_by_user_id,lot.created_by_user_name]))
   const costSourcesJson = JSON.stringify(editCostSources.map(row=>[row.id,row.product_id ?? null,row.branch_id ?? null,row.cost_price_usd ?? null,row.cost_price_khr ?? null]))
   const sourcesJson = JSON.stringify(editSalePriceLines.map(row=>["id","product_id","branch_id","batch_id","damaged_lot_id","quantity","applied_price_usd","applied_price_khr","original_product_id","original_branch_id","original_batch_id","original_condition_tag","allocations_json"].map(key=>(row as unknown as Record<string,unknown>)[key] ?? null)))
-  statements.unshift({sql:`SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM json_each(@costSources) j WHERE
+  statements.unshift({sql:`SELECT CASE WHEN
+    NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')
+    AND (${stockActorPredicate})
+    AND EXISTS(SELECT 1 FROM returns r WHERE r.id=@returnId AND r.sale_id IS @saleId AND r.return_scope IS @scope AND r.status IS @returnStatus AND r.updated_at IS @updatedAt AND r.created_at IS @createdAt AND r.return_number IS @returnNumber AND r.money_precision_version IS @returnMoneyVersion)
+    AND COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=@returnId),0)=@returnRevision
+    AND (@saleId IS NULL OR (EXISTS(SELECT 1 FROM sales s WHERE s.id=@saleId AND COALESCE(s.sale_status,'completed')=@saleStatus AND COALESCE(s.status_before_return,'')=@beforeReturn AND s.money_precision_version IS @saleMoneyVersion)
+      AND COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0)=@saleRevision))
+    AND (SELECT json_group_array(json(snapshot_row)) FROM (SELECT json_array(ri.id,sr.id,ri.sale_item_id,ri.product_id,ri.quantity,sr.status) AS snapshot_row FROM return_items ri JOIN returns sr ON sr.id=ri.return_id WHERE sr.sale_id=@saleId AND sr.id<>@returnId AND COALESCE(sr.status,'completed')!='cancelled' AND COALESCE(sr.return_scope,'customer')='customer' ORDER BY sr.id,ri.id))=@siblings
+    AND NOT EXISTS(SELECT 1 FROM json_each(@costSources) j WHERE
       CASE WHEN @saleId IS NOT NULL THEN NOT EXISTS(SELECT 1 FROM sale_items row WHERE row.sale_id=@saleId
         AND row.id IS json_extract(j.value,'$[0]') AND row.product_id IS json_extract(j.value,'$[1]') AND row.branch_id IS json_extract(j.value,'$[2]')
         AND row.cost_price_usd IS json_extract(j.value,'$[3]') AND row.cost_price_khr IS json_extract(j.value,'$[4]'))
       ELSE NOT EXISTS(SELECT 1 FROM products row WHERE row.id IS json_extract(j.value,'$[0]')
         AND row.cost_price_usd IS json_extract(j.value,'$[3]') AND row.cost_price_khr IS json_extract(j.value,'$[4]')) END)
-    AND (@saleId IS NULL OR ((SELECT COUNT(*) FROM sale_items WHERE sale_id=@saleId)=json_array_length(@sources) AND NOT EXISTS(SELECT 1 FROM json_each(@sources) j WHERE NOT EXISTS(SELECT 1 FROM sale_items si LEFT JOIN counted_sale_item_conditions ci ON ci.sale_item_id=si.id WHERE si.sale_id=@saleId AND si.id IS json_extract(j.value,'$[0]') AND si.product_id IS json_extract(j.value,'$[1]') AND si.branch_id IS json_extract(j.value,'$[2]') AND si.batch_id IS json_extract(j.value,'$[3]') AND si.damaged_lot_id IS json_extract(j.value,'$[4]') AND si.quantity IS json_extract(j.value,'$[5]') AND si.applied_price_usd IS json_extract(j.value,'$[6]') AND si.applied_price_khr IS json_extract(j.value,'$[7]') AND ci.product_id IS json_extract(j.value,'$[8]') AND ci.branch_id IS json_extract(j.value,'$[9]') AND ci.batch_id IS json_extract(j.value,'$[10]') AND ci.condition_tag IS json_extract(j.value,'$[11]') AND (SELECT json_group_array(json_array(batch_id,branch_id,quantity,released_quantity)) FROM (SELECT * FROM sale_item_batch_allocations WHERE sale_item_id=si.id ORDER BY id)) IS json_extract(j.value,'$[12]')))))
-    AND (SELECT COUNT(*) FROM return_items row WHERE row.return_id=@returnId)=json_array_length(@items) AND NOT EXISTS(SELECT 1 FROM json_each(@items) j WHERE NOT EXISTS(SELECT 1 FROM return_items row WHERE row.return_id=@returnId AND row.id IS json_extract(j.value,'$[0]') AND row.product_id IS json_extract(j.value,'$[1]') AND row.product_name IS json_extract(j.value,'$[2]') AND row.quantity IS json_extract(j.value,'$[3]') AND row.return_to_stock IS json_extract(j.value,'$[4]') AND row.stock_action IS json_extract(j.value,'$[5]') AND row.branch_id IS json_extract(j.value,'$[6]') AND row.cost_price_usd IS json_extract(j.value,'$[7]') AND row.cost_price_khr IS json_extract(j.value,'$[8]') AND row.batch_id IS json_extract(j.value,'$[9]') AND row.sale_item_id IS json_extract(j.value,'$[10]') AND row.stock_condition IS json_extract(j.value,'$[11]')))
-    AND (SELECT COUNT(*) FROM return_item_batch_allocations row WHERE row.return_item_id IN(SELECT id FROM return_items WHERE return_id=@returnId))=json_array_length(@allocations) AND NOT EXISTS(SELECT 1 FROM json_each(@allocations) j WHERE NOT EXISTS(SELECT 1 FROM return_item_batch_allocations row WHERE row.return_item_id IN(SELECT id FROM return_items WHERE return_id=@returnId) AND row.return_item_id IS json_extract(j.value,'$[0]') AND row.batch_id IS json_extract(j.value,'$[1]') AND row.branch_id IS json_extract(j.value,'$[2]') AND row.quantity IS json_extract(j.value,'$[3]')))
+    AND (@saleId IS NULL OR ((SELECT COUNT(*) FROM sale_items WHERE sale_id=@saleId)=json_array_length(@sources) AND NOT EXISTS(SELECT 1 FROM json_each(@sources) j WHERE NOT EXISTS(SELECT 1 FROM sale_items si LEFT JOIN counted_sale_item_conditions ci ON ci.sale_item_id=si.id WHERE si.sale_id=@saleId AND si.id IS json_extract(j.value,'$[0]') AND si.product_id IS json_extract(j.value,'$[1]') AND si.branch_id IS json_extract(j.value,'$[2]') AND si.batch_id IS json_extract(j.value,'$[3]') AND si.damaged_lot_id IS json_extract(j.value,'$[4]') AND si.quantity IS json_extract(j.value,'$[5]') AND si.applied_price_usd IS json_extract(j.value,'$[6]') AND si.applied_price_khr IS json_extract(j.value,'$[7]') AND ci.product_id IS json_extract(j.value,'$[8]') AND ci.branch_id IS json_extract(j.value,'$[9]') AND ci.batch_id IS json_extract(j.value,'$[10]') AND ci.condition_tag IS json_extract(j.value,'$[11]') AND (SELECT json_group_array(json_array(id,batch_id,branch_id,quantity,released_quantity)) FROM (SELECT * FROM sale_item_batch_allocations WHERE sale_item_id=si.id ORDER BY id)) IS json_extract(j.value,'$[12]')))))
+    AND (SELECT COUNT(*) FROM return_items row WHERE row.return_id=@returnId)=json_array_length(@items) AND NOT EXISTS(SELECT 1 FROM json_each(@items) j WHERE NOT EXISTS(SELECT 1 FROM return_items row WHERE row.return_id=@returnId AND row.id IS json_extract(j.value,'$[0]') AND row.product_id IS json_extract(j.value,'$[1]') AND row.product_name IS json_extract(j.value,'$[2]') AND row.quantity IS json_extract(j.value,'$[3]') AND row.return_to_stock IS json_extract(j.value,'$[4]') AND row.stock_action IS json_extract(j.value,'$[5]') AND row.branch_id IS json_extract(j.value,'$[6]') AND row.cost_price_usd IS json_extract(j.value,'$[7]') AND row.cost_price_khr IS json_extract(j.value,'$[8]') AND row.batch_id IS json_extract(j.value,'$[9]') AND row.sale_item_id IS json_extract(j.value,'$[10]') AND row.stock_condition IS json_extract(j.value,'$[11]') AND row.applied_price_usd IS json_extract(j.value,'$[12]') AND row.applied_price_khr IS json_extract(j.value,'$[13]') AND row.total_usd IS json_extract(j.value,'$[14]') AND row.total_khr IS json_extract(j.value,'$[15]')))
+    AND (SELECT COUNT(*) FROM return_item_batch_allocations row WHERE row.return_item_id IN(SELECT id FROM return_items WHERE return_id=@returnId))=json_array_length(@allocations) AND NOT EXISTS(SELECT 1 FROM json_each(@allocations) j WHERE NOT EXISTS(SELECT 1 FROM return_item_batch_allocations row WHERE row.return_item_id IN(SELECT id FROM return_items WHERE return_id=@returnId) AND row.id IS json_extract(j.value,'$[0]') AND row.return_item_id IS json_extract(j.value,'$[1]') AND row.batch_id IS json_extract(j.value,'$[2]') AND row.branch_id IS json_extract(j.value,'$[3]') AND row.quantity IS json_extract(j.value,'$[4]')))
     AND (SELECT COUNT(*) FROM damaged_stock_lots row WHERE row.return_id=@returnId AND (row.return_item_id IS NULL OR EXISTS(SELECT 1 FROM return_items ri WHERE ri.id=row.return_item_id AND ri.return_id=@returnId)))=json_array_length(@tags) AND NOT EXISTS(SELECT 1 FROM json_each(@tags) j WHERE NOT EXISTS(SELECT 1 FROM damaged_stock_lots row WHERE row.return_id=@returnId AND (row.return_item_id IS NULL OR EXISTS(SELECT 1 FROM return_items ri WHERE ri.id=row.return_item_id AND ri.return_id=@returnId)) AND row.id IS json_extract(j.value,'$[0]') AND row.return_item_id IS json_extract(j.value,'$[1]') AND row.condition_tag IS json_extract(j.value,'$[2]') AND row.product_id IS json_extract(j.value,'$[3]') AND row.product_name IS json_extract(j.value,'$[4]') AND row.branch_id IS json_extract(j.value,'$[5]') AND row.batch_id IS json_extract(j.value,'$[6]') AND row.quantity IS json_extract(j.value,'$[7]') AND row.quantity_remaining IS json_extract(j.value,'$[8]') AND row.reason IS json_extract(j.value,'$[9]') AND row.created_by_user_id IS json_extract(j.value,'$[10]') AND row.created_by_user_name IS json_extract(j.value,'$[11]')))
-    THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`,params:{returnId,saleId:existing.sale_id || null,costSources:costSourcesJson,sources:sourcesJson,items:originalItemsJson,allocations:originalAllocationsJson,tags:originalTagsJson}})
+    THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`,params:{...stockActorParams(user),returnId,saleId:existing.sale_id || null,scope:existing.return_scope,returnStatus:existing.status,updatedAt:existing.updated_at,createdAt:existing.created_at,returnNumber:existing.return_number,returnMoneyVersion:existing.money_precision_version,returnRevision:Number(existing.write_revision),saleStatus:String(linkedSale?.sale_status || 'completed'),beforeReturn:String(linkedSale?.status_before_return || ''),saleMoneyVersion:linkedSale?.money_precision_version ?? null,saleRevision:Number(linkedSale?.write_revision || 0),siblings:existing.sibling_snapshot,costSources:costSourcesJson,sources:sourcesJson,items:originalItemsJson,allocations:originalAllocationsJson,tags:originalTagsJson}})
   for (const lot of editDamagedLots) {
     const exact = exactEdit.get(lot.product_id,lot.branch_id!)
     const source = exact.projectedTaggedSource(lot.id)
@@ -3599,34 +3613,9 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
     },
   })
 
-  const expectedReturnRevision = Number(existing.write_revision)
-  statements.unshift(
-    { sql: 'DELETE FROM return_bulk_guards', params: {} },
-    { sql: 'DELETE FROM sale_bulk_guards', params: {} },
-    {
-      sql: `INSERT INTO return_bulk_guards(guard_value)
-            SELECT CASE WHEN (
-              NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')
-              AND EXISTS(SELECT 1 FROM returns WHERE id=@id)
-              AND COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=@id),0)=@revision
-            ) THEN 1 ELSE 0 END`,
-      params: { id: returnId, revision: expectedReturnRevision },
-    },
-    ...(editResolver.guards().length ? [effectGuardStatement(editResolver.guards())!] : []),
-  )
+  if (editResolver.guards().length) statements.unshift(effectGuardStatement(editResolver.guards())!)
   let eventBytes = 0
   if (linkedSale) {
-    statements.splice(3, 0,
-      saleRevisionGuard(linkedSale.id, Number(linkedSale.write_revision)),
-      bulkAssertion(`
-        COALESCE((SELECT sale_status FROM sales WHERE id=@sale),'completed')=@status
-        AND COALESCE((SELECT status_before_return FROM sales WHERE id=@sale),'')=@beforeReturn
-      `, {
-        sale: linkedSale.id,
-        status: String(linkedSale.sale_status || 'completed'),
-        beforeReturn: String(linkedSale.status_before_return || ''),
-      }),
-    )
     const beforeStatus = String(linkedSale.sale_status || 'completed')
     if (projectedSaleStatus && projectedSaleStatus !== beforeStatus) {
       statements.push({
@@ -3652,10 +3641,6 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
       saleEventProvenance = { source_kind: 'return_edit', source_id: receiptId, generation: 0, sale_id: linkedSale.id }
     }
   }
-  statements.push(
-    { sql: 'DELETE FROM return_bulk_guards', params: {} },
-    { sql: 'DELETE FROM sale_bulk_guards', params: {} },
-  )
   statements.push({
     sql: `INSERT INTO return_mutation_receipts(
       id,actor_id,return_id,sale_id,mutation_kind,request_id,request_digest,request_json,response_json,occurred_at
@@ -3703,9 +3688,6 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
     }
     const transactionRefusal = stockTransactionRefusal(error)
     if (transactionRefusal) return c.json(transactionRefusal, 503)
-    if (/return_bulk_guards|sale_bulk_guards|CHECK constraint failed: guard_value/i.test((error as Error).message)) {
-      return c.json({ error: 'Return or linked sale changed. Refresh before retrying.', code: 'write_conflict', conflict: true }, 409)
-    }
     if (editDispatched) return c.json({error:'The edit result could not be confirmed. Retry the same request.',code:'unknown_outcome',action:'retry_same_request'},503)
     return c.json({
       error: `Failed to update return: ${(error as Error).message}`,

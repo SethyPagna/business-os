@@ -13,6 +13,10 @@ export async function resolveCountedReturnConditions(db: D1Compat, saleId: numbe
       ci.product_id AS original_product_id,ci.branch_id AS original_branch_id,ci.batch_id AS original_batch_id,ci.condition_tag AS original_condition_tag
       FROM sale_items si LEFT JOIN counted_sale_item_conditions ci ON ci.sale_item_id=si.id
       WHERE si.id IN(SELECT CAST(value AS INTEGER) FROM json_each(@ids))`).all<OriginalReturnCondition>({ids:JSON.stringify(ids)}) : []
+  return resolveCountedReturnConditionsFromSnapshot(saleId,items,rows)
+}
+
+export function resolveCountedReturnConditionsFromSnapshot(saleId:number|null,items:Array<Record<string,unknown>>,rows:readonly OriginalReturnCondition[]):Array<Record<string,unknown>> {
   const originals = new Map(rows.map(row => [row.sale_item_id,row]))
   return items.map(item => {
     const original = originals.get(Number(item.sale_item_id))
