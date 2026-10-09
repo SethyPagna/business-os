@@ -8,7 +8,52 @@ mod.filename = filename
 mod.paths = module.paths
 mod._compile(fs.readFileSync(filename, 'utf8').split('async function main() {')[0] + '\nmodule.exports={world,bundle}', filename)
 
+async function verifyRedirectHistory() {
+  const { fixture, loadStockSession } = require('./test-stock-session-atomic.cjs')
+  const { applyMovementRevert } = loadStockSession('lib/stockRevert.ts')
+  for (const originalBranch of [1, null]) for (const folded of [false, true]) {
+    const f = fixture(sql => sql.exec(`
+      INSERT INTO branches(id,name,is_active) VALUES(2,'Landing',1);
+      UPDATE branches SET is_active=0,is_default=0,successor_branch_id=2 WHERE id=1;
+      INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,2,0);
+      INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_quantity,received_cost_usd,
+        received_branch_id,received_branch_name,supplier_name,payment_status,credit_due_date)
+        VALUES(1,1,'old-receipt',0,2,0,0,${originalBranch ?? 'NULL'},${originalBranch === null ? 'NULL' : "'Original shop'"},'Original supplier','credit','2026-11-01');
+      ${folded ? `INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_quantity,received_cost_usd)
+        VALUES(2,1,'survivor',1,2,0,0);
+        INSERT INTO audit_logs(action,entity,entity_id,details) VALUES('branch_cutover_lot_fold','branch',2,'{"branchId":2,"survivorBatchId":2,"foldedBatchIds":[1]}');` : ''}
+      INSERT INTO inventory_movements(id,product_id,branch_id,branch_name,movement_type,quantity,batch_id,unit_cost_usd,total_cost_usd,reference_id)
+        VALUES(101,1,1,'Original shop','add',1,1,2,2,NULL),(102,1,1,'Original shop','remove',1,1,2,2,'revert:101');`))
+    try {
+      const db = loadStockSession('lib/db.ts').getDb(f.env)
+      const before = f.sql.prepare('SELECT * FROM product_batches WHERE id=1').get()
+      let movement = f.sql.prepare('SELECT * FROM inventory_movements WHERE id=102').get()
+      const originals = f.sql.prepare('SELECT * FROM inventory_movements ORDER BY id').all()
+      for (const expected of [1, 0, 1]) {
+        assert.equal((await applyMovementRevert(db, movement, { userId: null, userName: 'Test' }, 2)).ok, true)
+        const after = f.sql.prepare('SELECT * FROM product_batches WHERE id=1').get()
+        for (const key of ['supplier_id', 'supplier_name', 'payment_status', 'credit_due_date', 'unit_cost_usd', 'received_branch_id', 'received_branch_name']) {
+          assert.equal(after[key], before[key], key + ' remains historical across redirected counters')
+        }
+        assert.equal(after.received_quantity, expected)
+        assert.equal(after.received_cost_usd, expected * 2)
+        const counter = f.sql.prepare('SELECT * FROM inventory_movements WHERE reference_id=?').get(`revert:${movement.id}`)
+        assert.equal(counter.batch_id, folded ? 2 : 1)
+        assert.equal(counter.branch_id, 2)
+        if (movement.id === 102) assert.equal(counter.addressed_branch_name, 'Shop')
+        assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=2').get().quantity, expected)
+        assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 0)
+        assert.deepEqual(f.sql.prepare('SELECT * FROM inventory_movements WHERE id<=102 ORDER BY id').all(), originals)
+        movement = counter
+      }
+    } finally { f.sql.close() }
+  }
+  console.log('PASS four redirect/folded receipt worlds, three compensation generations, historical NULL attribution')
+}
+
 async function main() {
+  await verifyRedirectHistory()
+  if (process.argv.includes('--redirect-only')) return
   const { world, bundle } = mod.exports
   const makeWorker = await bundle.exports.bundleWorker()
   const counter = (f, id) => f.sql.prepare('SELECT * FROM inventory_movements WHERE reference_id=?').get(`revert:${id}`)

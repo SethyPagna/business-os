@@ -148,15 +148,14 @@ function isMergeOwnedRow(m: Pick<RevertMovementRow, 'movement_type' | 'quantity'
   return Number(m.quantity) < 0 || MERGE_ROW_REASON.test(String(m.reason ?? ''))
 }
 
-// A receipt recorded with a condition tag is written as a normal 'add' and then
-// immediately moved to the held row (routes/inventory.ts, planHoldAsTagged):
-// the units are no longer sellable, so reverting the 'add' would take them out
-// of sellable stock a second time. The held 'damage_out' row beside it shares
-// product, branch, lot, units, reference and the tag-prefixed reason.
+// Intake condition history owns its receipt. Current tags change no physical
+// units; legacy tags recorded a damage_out. Both retain the receipt reference.
 async function isHeldAsTaggedReceipt(db: D1Compat, m: Pick<RevertMovementRow, 'id' | 'product_id' | 'branch_id' | 'batch_id' | 'quantity' | 'reason' | 'reference_id'>): Promise<boolean> {
   const held = await db.prepare(`SELECT reason FROM inventory_movements
-    WHERE id > @id AND movement_type = 'damage_out' AND product_id = @productId AND branch_id = @branchId
-      AND COALESCE(batch_id, 0) = @batchId AND ABS(quantity) = @quantity AND CAST(COALESCE(reference_id, '') AS TEXT) = @reference`)
+    WHERE id > @id AND ((movement_type = 'damage_out' AND ABS(quantity) = @quantity)
+        OR (movement_type = 'condition_tag' AND quantity = 0))
+      AND product_id = @productId AND branch_id = @branchId
+      AND COALESCE(batch_id, 0) = @batchId AND CAST(COALESCE(reference_id, '') AS TEXT) = @reference`)
     .all<{ reason: string | null }>({
       id: Number(m.id), productId: Number(m.product_id), branchId: Number(m.branch_id), batchId: Number(m.batch_id) || 0,
       quantity: Math.abs(Number(m.quantity)), reference: String(m.reference_id ?? ''),

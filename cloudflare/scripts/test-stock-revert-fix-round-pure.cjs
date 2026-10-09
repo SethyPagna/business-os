@@ -9,8 +9,7 @@
 //        write aborts the Revert's batch instead of being reversed twice
 //   RF3  a receipt written as type 'in' by the Inventory import leaves the
 //        purchase reports when reverted, and comes back with the Revert of it
-//   RF5  a receipt that was immediately held as tagged is refused (the units
-//        are already out of sellable stock)
+//   RF5  a receipt tagged at intake must use condition history for reversal.
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -204,14 +203,18 @@ async function main() {
       const cost = { unitCostUsd: 2, unitCostKhr: null, totalCostUsd: 8, totalCostKhr: null }
       if (hold) {
         await loadStockSession('lib/stockTransaction.ts').executeStockTransaction(db,[
-          ...pb.planRemoveStockFromBatch({ batchId: add.batch_id, productId: 1, branchId: 1, quantity: 4 }).statements,
           ...damagedLots.planHoldAsTagged({ productId: 1, productName: 'Serum', branchId: 1, branchName: 'Shop', batchId: add.batch_id, quantity: 4, tag: 'damaged',
             source: 'restock', reason: 'box crushed', cost, referenceId: 55, actor: { userId: 7, userName: 'Stock User' } }),
         ], 'once')
+        assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 4)
+        assert.equal(f.sql.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=? AND branch_id=1').get(add.batch_id).quantity, 4)
+        assert.equal(f.sql.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity, 4)
+        assert.equal(f.sql.prepare('SELECT quantity_remaining FROM damaged_stock_lots WHERE batch_id=?').get(add.batch_id).quantity_remaining, 4)
       }
       if (unrelated) {
         f.sql.exec(`INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,reason,reference_id,created_at,batch_id)
-          VALUES(1,1,'damage_out',4,'damaged: customer return','9001','2026-09-05 04:00:00',${add.batch_id})`)
+          VALUES(1,1,'damage_out',4,'damaged: customer return','9001','2026-09-05 04:00:00',${add.batch_id}),
+                (1,1,'condition_tag',0,'damaged: box crushed','9002','2026-09-05 04:00:00',${add.batch_id})`)
       }
       return add.id
     }

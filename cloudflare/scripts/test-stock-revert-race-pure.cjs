@@ -43,7 +43,10 @@ function loadReal(abs) {
 const { applyMovementRevert } = loadReal(path.join(SRC, 'lib', 'stockRevert.ts'))
 
 function freshDb(seedOptions) {
-  const rawDb = openDb(loadAll({ through: 242 }))
+  const rawDb = openDb(loadAll(), { seedBeforeFence(raw) {
+    raw.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run()
+    seed(raw, seedOptions)
+  } })
   let beforeBatch = null
   const db = {
     prepare(sql) {
@@ -64,10 +67,6 @@ function freshDb(seedOptions) {
     },
     async transaction(fn) { return fn(this) },
   }
-  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run()
-  seed(rawDb, seedOptions)
-  rawDb.db.exec(fs.readFileSync(path.join(__dirname,'../migrations/0244_dated_count_decision_receipts.sql'),'utf8'))
-  rawDb.db.exec(fs.readFileSync(path.join(__dirname,'../migrations/0243_stock_schema_epoch.sql'),'utf8'))
   return { rawDb, db, setBeforeBatch(fn) { beforeBatch = fn } }
 }
 
@@ -154,11 +153,8 @@ async function main() {
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM stock_session_guards').get().n, 0)
   })
 
-  // FX-stock F3 (R-stock+returns): a dated stock count re-apply supersedes
-  // its own prior movement -- reverses its effect and DELETES the row -- in
-  // one batch. A revert that read that row just before must not then
-  // compensate a movement that no longer exists (the refuter's G02: branch
-  // 0 where the count says 5, and a revert:<id> row pointing at nothing).
+  // Corrupt legacy state can lose a movement after the read. This injected
+  // deletion must refuse; supported corrections append compensating history.
   for (const c of [
     { name: 'an addition of 3 onto a named lot', stock: 10, type: 'add', delta: -3 },
     { name: 'a removal of 3 from a named lot', stock: 7, type: 'remove', delta: 3 },
