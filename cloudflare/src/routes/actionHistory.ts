@@ -440,7 +440,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     const nextStatus = direction === 'undo' ? 'redoable' : 'undoable'
     // A scoped Set replays by generation like a stock session: its applier
     // checks the generation and state itself, and a repeat is idempotent.
-    const stockReplay = [COUNTED_CONDITION_HISTORY_KIND, STOCK_SESSION_KIND, STOCK_LOT_SET_KIND, STOCK_IN_LINE_EDIT_KIND, TRANSFER_OPERATION_KIND].includes(String(parseJson(existing.undo_payload)?.applier || ''))
+    const stockReplay = [COUNTED_CONDITION_HISTORY_KIND, STOCK_SESSION_KIND, STOCK_LOT_SET_KIND, STOCK_IN_LINE_EDIT_KIND, TRANSFER_OPERATION_KIND, RETURN_BULK_ACTION_KIND].includes(String(parseJson(existing.undo_payload)?.applier || ''))
     const groupReplay = parseJson(existing.undo_payload)?.applier === PRODUCT_MERGE_GROUP_ACTION_KIND
     const productRemoveReplay = parseJson(existing.undo_payload)?.applier === PRODUCT_REMOVE_ACTION_KIND
     const transferReplay = parseJson(existing.undo_payload)?.applier === TRANSFER_OPERATION_KIND
@@ -527,7 +527,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         // The numbers a coded refusal's sentence names ("only 3 left, 27 needed").
         const refusalParams = status === 409 ? (error as { params?: unknown })?.params : null
         const paramFields = refusalParams && typeof refusalParams === 'object' && !Array.isArray(refusalParams) ? { params: refusalParams } : {}
-        return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action`, ...blockingFields, ...paramFields, ...(refusalCode ? { code: refusalCode } : {}), ...(saleCustomerReplay && isLoyaltyAssignmentError(error) ? { code: LOYALTY_REASSIGNMENT_CODE } : {}) }, status)
+        return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action`, ...blockingFields, ...paramFields, ...(refusalCode ? { code: refusalCode } : {}), ...(applier.name===RETURN_BULK_ACTION_KIND && (status===400 || status===503) && typeof (error as {code?:unknown}).code==='string'
+          ? {code:(error as {code:string}).code,...((error as {code:string}).code==='supplier_return_replay_over_plan_budget'?{outcome:'not_dispatched'}:{}),...(status===503?{action:'retry_same_request'}:{})}:{}), ...(saleCustomerReplay && isLoyaltyAssignmentError(error) ? { code: LOYALTY_REASSIGNMENT_CODE } : {}) }, status)
       }
     }
 

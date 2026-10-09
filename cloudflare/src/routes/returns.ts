@@ -1,6 +1,7 @@
+import { parseStockConditionTag } from '../lib/stockCondition'
 import { readTaggedSaleSources } from '../lib/saleLineAddition'
 import { stockActorPredicate, stockActorParams } from '../lib/stockActorGuard'
-import { planCountedTaggedChange, CountedStockBatchPlan, CountedStockConflictError, countedStockFactsSql, isCountedStockConflict, subtractCountedQuantity, planExactCountedOrdinaryChange } from '../lib/countedDamagedStock'
+import { planCountedTaggedChange, CountedStockBatchPlan, CountedStockConflictError, countedStockFactsSql, isCountedStockConflict, subtractCountedQuantity, planExactCountedTaggedChange, planExactCountedOrdinaryChange } from '../lib/countedDamagedStock'
 import { resolveCountedReturnConditions, resolveCountedReturnConditionsFromSnapshot, type OriginalReturnCondition } from '../lib/countedReturnCondition'
 import { productStockGuardError } from '../lib/productStockGuard'
 import { Hono, type Context } from 'hono'
@@ -31,7 +32,7 @@ import {
 } from '../lib/returnsStock'
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { computeSaleTotals } from '../lib/saleTotals'
-import { applyReturnBulkActionOutcome, notifyReturnBulkAction, ReturnBulkError } from '../lib/returnBulkAction'
+import { applyReturnBulkActionOutcome, notifyReturnBulkAction, ReturnBulkError, type SupplierReturnManifest, type SupplierReturnSource } from '../lib/returnBulkAction'
 import { bulkAssertion, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert, SaleRecordEventError, sha256Hex } from '../lib/saleRecordEvents'
 import { loadReturnRecords } from '../lib/returnRecords'
@@ -2535,7 +2536,7 @@ async function createSupplierReturn(c: Context<{ Bindings: Env; Variables: { use
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = await c.req.json<{
-    items: Array<{ product_id: number; product_name?: string; quantity: number; cost_price_usd?: number; cost_price_khr?: number; unit_cost_usd?: number; unit_cost_khr?: number; branch_id?: number }>
+    items: Array<{ product_id: number; product_name?: string; quantity: number; cost_price_usd?: number; cost_price_khr?: number; unit_cost_usd?: number; unit_cost_khr?: number; branch_id?: number; stock_condition?: string; damaged_lot_id?: number }>
     branch_id?: number
     reason?: string
     notes?: string
@@ -2553,15 +2554,34 @@ async function createSupplierReturn(c: Context<{ Bindings: Env; Variables: { use
   if (!Array.isArray(body.items) || body.items.length === 0) return c.json({ error: 'Return items required' }, 400)
   if (!body.reason) return c.json({ error: 'Reason is required' }, 400)
   if (body.items.length > 50 || new TextEncoder().encode(JSON.stringify(body)).byteLength > RETURN_CREATE_REQUEST_BYTES) throw new ReturnCreateBudgetError()
-  const conditionFields = ['condition_tag','damaged_lot_id','stock_condition','stock_action']
+  const conditionFields = ['condition_tag','stock_action']
   if (conditionFields.some(key => Object.hasOwn(body, key)) || body.items.some(item => conditionFields.some(key => Object.hasOwn(item, key)))) {
     return c.json({ error: 'Choose ordinary stock for this supplier return. A recorded condition requires an explicit supported source choice.', code: 'supplier_return_condition_selection_required' }, 400)
   }
 
-  const completeReplay = (existing: { id: number; return_number: string; return_scope: string; return_type: string }) => {
+  for(const item of body.items){
+    const chosen=item.stock_condition??'ordinary'
+    const tag=parseStockConditionTag(chosen==='ordinary'?null:chosen)
+    if(!tag.ok || (chosen==='ordinary' ? item.damaged_lot_id!=null : !tag.tag || !Number.isSafeInteger(item.damaged_lot_id) || Number(item.damaged_lot_id)<=0)) {
+      return c.json({error:'Choose ordinary stock or an exact lot with its recorded condition.',code:'supplier_return_condition_selection_required'},400)
+    }
+  }
+  const supplierIntent={branch_id:body.branch_id??null,reason:body.reason,notes:body.notes??null,supplier_id:body.supplier_id??null,
+    supplier_name:body.supplier_name??null,settlement:body.settlement??'refund',supplier_compensation_usd:body.supplier_compensation_usd??null,
+    supplier_compensation_khr:body.supplier_compensation_khr??null,exchange_rate:body.exchange_rate??null,return_number:body.return_number??null,
+    items:body.items.map(item=>({product_id:item.product_id,branch_id:item.branch_id??body.branch_id??null,product_name:item.product_name??null,
+      quantity:item.quantity,cost_price_usd:item.cost_price_usd??item.unit_cost_usd??0,cost_price_khr:item.cost_price_khr??item.unit_cost_khr??0,
+      stock_condition:item.stock_condition??'ordinary',damaged_lot_id:item.damaged_lot_id??null}))}
+  const completeReplay = (existing: { id: number; return_number: string; return_scope: string; return_type: string; request_json: string | null; request_digest: string | null }) => {
     if (!Number.isSafeInteger(existing.id) || existing.id <= 0 || !existing.return_number
       || existing.return_scope !== SUPPLIER_SCOPE || existing.return_type !== 'supplier_return') {
       return c.json({ error: 'This request key belongs to a different return.', code: 'supplier_return_request_conflict' }, 409)
+    }
+    if(existing.request_json){
+      try {
+        const saved=JSON.parse(existing.request_json) as SupplierReturnManifest
+        if(saved.scope!=='supplier' || JSON.stringify(saved.intent)!==JSON.stringify(supplierIntent)) return c.json({error:'Request id was already used with different supplier return data.',code:'idempotency_conflict'},409)
+      }catch(_){return c.json({error:'The saved supplier return source could not be confirmed.',code:'supplier_return_outcome_unknown',action:'retry_same_request'},503)}
     }
     try {
       // Recovery only refreshes views: cache lookup, quota admission and D1 fallback, each with at most two attempts.
@@ -2577,7 +2597,7 @@ async function createSupplierReturn(c: Context<{ Bindings: Env; Variables: { use
   }
 
   if (clientRequestId) {
-    const existing = await db.prepare("SELECT id, return_number, return_scope, return_type FROM returns WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1").get<{ id: number; return_number: string; return_scope: string; return_type: string }>([clientRequestId])
+    const existing = await db.prepare("SELECT r.id, r.return_number, r.return_scope, r.return_type, cr.request_json, cr.request_digest FROM returns r LEFT JOIN return_create_receipts cr ON cr.return_id=r.id WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1").get<{ id: number; return_number: string; return_scope: string; return_type: string; request_json: string | null; request_digest: string | null }>([clientRequestId])
     if (existing) return completeReplay(existing)
   }
 
@@ -2697,6 +2717,8 @@ async function createSupplierReturn(c: Context<{ Bindings: Env; Variables: { use
   const exact = new CountedStockBatchPlan(captured, { deferPhysicalWrites: true })
   const productNameMap = new Map(captured.map(row => [Number(JSON.parse(row.facts).product[0]), row.productName]))
 
+  const sources: SupplierReturnSource[]=[]
+  const originalTags=new Map(captured.map(row=>[`${JSON.parse(row.facts).product[0]}:${row.branchId}`,JSON.parse(row.facts).tags as unknown[][]]))
   let returnId = 0
   let dispatched = false
   try {
@@ -2709,7 +2731,7 @@ async function createSupplierReturn(c: Context<{ Bindings: Env; Variables: { use
       buildAuditStatement(user?.id ?? null, actorSnapshot(user), 'create', 'supplier_return', null,
         { returnNumber, settlement, supplierName: body.supplier_name || null, supplierLossUsd }, undefined, { entityIdFromLastInsert: true })]
     const supplierPerItemBatchSplits: ReturnBatchSplit[][] = []
-    for (const item of body.items) {
+    for (const [itemIndex,item] of body.items.entries()) {
       const qty = toNumber(item.quantity, 0)
       const unitCostUsd = toNumber(item.cost_price_usd ?? item.unit_cost_usd, 0)
       const unitCostKhr = toNumber(item.cost_price_khr ?? item.unit_cost_khr, 0)
@@ -2719,10 +2741,11 @@ async function createSupplierReturn(c: Context<{ Bindings: Env; Variables: { use
       const safeProductName = item.product_name?.trim() || productNameMap.get(Number(item.product_id)) || `product #${item.product_id}`
 
       statements.push({
-        sql: `INSERT INTO return_items (return_id, sale_item_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr, cost_price_usd, cost_price_khr, total_usd, total_khr, return_to_stock, branch_id)
-              VALUES (${returnIdExpression}, NULL, @product_id, @product_name, @quantity, @unit_cost_usd, @unit_cost_khr, @unit_cost_usd, @unit_cost_khr, @total_usd, @total_khr, 0, @branch_id)`,
+        sql: `INSERT INTO return_items (return_id, sale_item_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr, cost_price_usd, cost_price_khr, total_usd, total_khr, return_to_stock, branch_id, stock_condition,stock_action)
+              VALUES (${returnIdExpression}, NULL, @product_id, @product_name, @quantity, @unit_cost_usd, @unit_cost_khr, @unit_cost_usd, @unit_cost_khr, @total_usd, @total_khr, 0, @branch_id,@stock_condition,'none')`,
         params: {
           supplier_write_key: supplierWriteKey,
+          stock_condition:item.stock_condition??'ordinary',
           product_id: item.product_id,
           product_name: safeProductName,
           quantity: qty,
@@ -2735,16 +2758,32 @@ async function createSupplierReturn(c: Context<{ Bindings: Env; Variables: { use
       })
       const projected = exact.get(Number(item.product_id), Number(itemBranchId))
       const supplierReturnTakes: Array<{ batchId: number; quantity: number }> = []
+      const sourceBase={itemIndex,productId:Number(item.product_id),branchId:Number(itemBranchId),quantity:qty,costUsd:unitCostUsd,costKhr:unitCostKhr}
       let remaining = qty
+      if(item.damaged_lot_id){
+        const source=projected.projectedTaggedSource(item.damaged_lot_id)
+        if(!source || source.conditionTag!==item.stock_condition)throw new CountedStockConflictError()
+        const tag=originalTags.get(`${item.product_id}:${itemBranchId}`)?.find(row=>row[0]===item.damaged_lot_id)
+        if(!tag)throw new CountedStockConflictError()
+        statements.push(...planExactCountedTaggedChange(projected,source,qty,'consume'))
+        sources.push({...sourceBase,batchId:source.batchId,lotId:source.lotId,condition:source.conditionTag,
+          lotIdentity:[tag[1],tag[2],tag[4],tag[5],tag[6],tag[7],tag[8],tag[9]]})
+        if(source.batchId!==null)supplierReturnTakes.push({batchId:source.batchId,quantity:qty})
+        remaining=0
+      }
       for (const receipt of projected.projectedReceiptSources().sort((left, right) => left.fifoRank - right.fifoRank)) {
         const take = Math.min(remaining, receipt.available)
         if (take <= 0) continue
         statements.push(...planExactCountedOrdinaryChange(projected, receipt.batchId, take, 'consume'))
         supplierReturnTakes.push({ batchId: receipt.batchId, quantity: take })
+        sources.push({...sourceBase,quantity:take,batchId:receipt.batchId,lotId:null,condition:'ordinary',lotIdentity:null})
         remaining = subtractCountedQuantity(remaining, [take])
         if (remaining === 0) break
       }
-      if (remaining > 0) statements.push(...planExactCountedOrdinaryChange(projected, null, remaining, 'consume'))
+      if (remaining > 0) {
+        statements.push(...planExactCountedOrdinaryChange(projected, null, remaining, 'consume'))
+        sources.push({...sourceBase,quantity:remaining,batchId:null,lotId:null,condition:'ordinary',lotIdentity:null})
+      }
       supplierPerItemBatchSplits.push(supplierReturnTakes.map((take) => ({
         batchId: take.batchId,
         branchId: itemBranchId,
@@ -2790,7 +2829,14 @@ async function createSupplierReturn(c: Context<{ Bindings: Env; Variables: { use
     }
     statements.push(...exact.takeFinalPhysicalWrites())
     const identityIndex = statements.length
-    statements.push({ sql: 'SELECT id FROM returns WHERE client_request_id=@supplier_write_key', params: { supplier_write_key: supplierWriteKey } })
+    const manifest: SupplierReturnManifest={version:1,scope:'supplier',sale_id:null,intent:supplierIntent,sources}
+    const manifestJson=JSON.stringify(manifest)
+    if(new TextEncoder().encode(manifestJson).byteLength>RETURN_CREATE_REQUEST_BYTES)throw new ReturnCreateBudgetError()
+    statements.push({sql:`INSERT INTO return_create_receipts(id,actor_id,return_id,sale_id,request_id,request_digest,request_json,response_json,occurred_at)
+      VALUES(@receipt,@actor,${returnIdExpression},NULL,@supplier_write_key,@digest,@manifest,
+        json_object('id',${returnIdExpression},'returnNumber',@returnNumber,'replacementSaleId',NULL,'replacementReceiptNumber',NULL),@stamp)
+      RETURNING return_id AS id`,params:{receipt:crypto.randomUUID(),actor:user.id,supplier_write_key:supplierWriteKey,
+        digest:await sha256Hex(manifestJson),manifest:manifestJson,returnNumber,stamp:new Date().toISOString()}})
     const plannedCount = stockTransactionStatementCount(statements.length)
     // Shared return tails: cold cache fallback/quota retries six, notification reads/retries six.
     assertReturnCreateQueryBudget(queryLimit, statementsUsed(), plannedCount, 12)
@@ -2807,8 +2853,8 @@ async function createSupplierReturn(c: Context<{ Bindings: Env; Variables: { use
     if (isCountedStockConflict(error)) {
       if (dispatched && clientRequestId) {
         try {
-          const replay = await db.prepare("SELECT id,return_number,return_scope,return_type FROM returns WHERE client_request_id=? AND client_request_id<>'' LIMIT 1")
-            .get<{ id: number; return_number: string; return_scope: string; return_type: string }>([clientRequestId])
+          const replay = await db.prepare("SELECT r.id,r.return_number,r.return_scope,r.return_type,cr.request_json,cr.request_digest FROM returns r LEFT JOIN return_create_receipts cr ON cr.return_id=r.id WHERE client_request_id=? AND client_request_id<>'' LIMIT 1")
+            .get<{ id: number; return_number: string; return_scope: string; return_type: string; request_json: string | null; request_digest: string | null }>([clientRequestId])
           if (replay) return completeReplay(replay)
         } catch (_) {
           return c.json({ error: 'The supplier return outcome could not be confirmed. Retry the original request or review Returns.',

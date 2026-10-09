@@ -195,8 +195,8 @@ async function main() {
           if(key==='bind')return(...args)=>wrap(target.bind(...args))
           if(key==='all')return async(...args)=>{
             const result=await target.all(...args)
-            if(mode==='race-read-failure'&&(target.text||'').includes('SELECT id,return_number,return_scope'))throw new Error('D1_ERROR: unreadable canonical recovery')
-            if(!stale&&(target.text||'').includes('SELECT id, return_number, return_scope')){stale=true;return {...result,results:[]}}
+            if(mode==='race-read-failure'&&(target.text||'').includes('SELECT r.id,r.return_number,r.return_scope'))throw new Error('D1_ERROR: unreadable canonical recovery')
+            if(!stale&&(target.text||'').includes('SELECT r.id, r.return_number, r.return_scope')){stale=true;return {...result,results:[]}}
             return result
           }
           return target[key]
@@ -236,7 +236,7 @@ async function main() {
       const wrap=statement=>new Proxy(statement,{get(target,key){
         if(key==='bind')return(...args)=>wrap(target.bind(...args))
         if(['first','all','run'].includes(key))return async(...args)=>{
-          if(!consumed&&(target.text||'').includes('SELECT id, return_number, return_scope')) {
+          if(!consumed&&(target.text||'').includes('SELECT r.id, r.return_number, r.return_scope')) {
             consumed=true
             for(let n=0;n<extraReads;n++) {
               // Real extra request reads, metered through the same public D1 hook as the provider adapter.
