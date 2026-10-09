@@ -32,6 +32,7 @@ function loadReal(relPath, overrides = {}) {
   const originalLoad = Module._load
   const patchedLoad = function (request, parent, isMain) {
     if (request in overrides) return overrides[request]
+    if (request === 'cloudflare:workers') return { DurableObject: class {} }
     if (request.startsWith('.')) {
       if (relPath.startsWith('lib/')) return loadReal(path.posix.normalize(path.posix.join(path.posix.dirname(relPath), request)) + '.ts')
       return autoStub()
@@ -45,6 +46,7 @@ function loadReal(relPath, overrides = {}) {
   }
   Module._load = patchedLoad
   const moduleObj = { exports: {} }
+  moduleCache.set(cacheKey, moduleObj.exports)
   try {
     new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
       moduleObj.exports, withProductStockGuard(require), moduleObj, sourcePath, path.dirname(sourcePath),
@@ -69,6 +71,7 @@ function wrapFlat(rawDb) {
         },
       }
     },
+    async batchOnce(items) { return this.batch(items) },
     async batch(items) {
       return rawDb.batch(items)
     },
@@ -109,6 +112,10 @@ const broadcastStub = { broadcast: async () => {} }
 const authStub = { requireAuth: async (c, next) => { await next() } }
 
 const inventoryMod = loadReal('routes/inventory.ts', {
+  '../lib/countedDamagedStock': loadReal('lib/countedDamagedStock.ts'),
+  '../lib/countedConditionHistory': loadReal('lib/countedConditionHistory.ts', { './db': dbOverride }),
+  '../lib/stockTransaction': loadReal('lib/stockTransaction.ts'),
+  '../lib/businessMaintenanceGuard': loadReal('lib/businessMaintenanceGuard.ts'),
   '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   '../lib/receivingBranch': receivingBranchMod,
   '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'),
@@ -175,8 +182,7 @@ assert.equal(typeof runStockInCommit, 'function', 'routes/stockInCommit.ts expor
 assert.equal(typeof runAdjustAction, 'function', 'routes/inventory.ts exports runAdjustAction (P4-B extraction)')
 assert.equal(typeof batchesMod.runReceiveBatchAction, 'function', 'routes/batches.ts exports runReceiveBatchAction (P4-B extraction)')
 function freshDb() {
-  const rawDb = openDb(loadAll())
-  rawDb.exec(`
+  const rawDb = openDb(loadAll(), { seedBeforeFence(db) { db.exec(`
     INSERT INTO branches(id, name, is_default, is_active) VALUES(1, 'Shop', 1, 1),(2, 'Warehouse', 0, 1);
     INSERT INTO products(id, name, barcode, cost_price_usd, cost_price_khr, stock_quantity, is_active)
       VALUES(1, 'Serum', 'SER-1', 2, 0, 0, 1);
@@ -184,7 +190,8 @@ function freshDb() {
       VALUES(2, 'Toner', 'TON-1', 3, 0, 0, 1);
     INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(1, 1, 0);
     INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(2, 1, 0);
-  `)
+  `) } })
+  assert.throws(() => rawDb.exec('UPDATE products SET stock_quantity=stock_quantity'), /stock_transaction_required/)
   return wrapFlat(rawDb)
 }
 const ADMIN_USER = { id: 1, username: 'admin', name: 'Admin', role_code: 'admin', permissions: '{}' }

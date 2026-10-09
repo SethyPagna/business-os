@@ -42,7 +42,7 @@ const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
-const rawDb = openDb(loadAll())
+let rawDb = null
 let afterDbBatchHook = null
 let beforeDbBatchHook = null
 // Flatten node:sqlite's run() result the same way lib/db.ts's real
@@ -60,6 +60,7 @@ const db = {
       },
     }
   },
+  async batchOnce(items) { return this.batch(items) },
   async batch(items) {
     if (beforeDbBatchHook) await beforeDbBatchHook(items)
     // Exercise D1's actual atomic batch contract. A later assertion/trigger
@@ -67,7 +68,11 @@ const db = {
     // Pass results through unmapped, like the real D1Compat.batch() (db.ts)
     // -- flattening to {changes,lastInsertRowid} dropped .meta and made a
     // batched insert's row id read back as 0. Found 2026-09-22.
-    const results = await rawDb.batch(items)
+    const results = process.argv.includes('--non-atomic')
+      ? items.map(item => /^\s*(SELECT|WITH)\b/i.test(item.sql)
+        ? {success:true,results:rawDb.prepare(item.sql).all(item.params || {}),meta:{changes:0}}
+        : rawDb.prepare(item.sql).run(item.params || {}))
+      : await rawDb.batch(items)
     if (afterDbBatchHook) await afterDbBatchHook(items)
     return results
   },
@@ -85,15 +90,23 @@ function transpile(relPath) {
   return { sourcePath, outputText }
 }
 
+const realCache = new Map()
 function loadReal(relPath, requireOverrides = {}) {
+  const cacheKey = relPath + '::' + Object.keys(requireOverrides).sort().join(',')
+  if (realCache.has(cacheKey)) return realCache.get(cacheKey)
   const { sourcePath, outputText } = transpile(relPath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request in requireOverrides) return requireOverrides[request]
-    if (request === '../lib/planTier') return loadReal('lib/planTier.ts')
+    if (request === 'cloudflare:workers') return { DurableObject: class {} }
+    if (request.startsWith('.')) {
+      const target = path.resolve(path.dirname(sourcePath), request) + '.ts'
+      if (fs.existsSync(target)) return loadReal(path.relative(path.join(__dirname,'../src'),target), {})
+    }
     return originalLoad.call(this, request, parent, isMain)
   }
   const moduleObj = { exports: {} }
+  realCache.set(cacheKey, moduleObj.exports)
   try {
     new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
       moduleObj.exports, withProductStockGuard(require), moduleObj, sourcePath, path.dirname(sourcePath),
@@ -343,25 +356,26 @@ async function req(method, url, body) {
 // destination and starts empty.
 const LOT_ID = 10
 function seedStock({ lot = 0, unlotted = 0 } = {}) {
-  rawDb.exec(`DELETE FROM damaged_stock_lots; DELETE FROM branch_batch_stock; DELETE FROM product_batches;
-    DELETE FROM branch_stock; DELETE FROM damaged_stock_lots; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches; DELETE FROM inventory_movements;
-    DELETE FROM stock_mutation_receipts; DELETE FROM action_history;`)
-  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run({})
-  rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, stock_quantity, cost_price_usd, cost_price_khr)
+  rawDb?.db.close()
+  rawDb = openDb(loadAll(), { seedBeforeFence(seedDb) {
+seedDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run({})
+  seedDb.prepare(`INSERT INTO products (id, name, barcode, is_active, stock_quantity, cost_price_usd, cost_price_khr)
     VALUES (1, 'Widget', 'B123', 1, @total, 3, 12000)`).run({ total: lot + unlotted })
-  rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, stock_quantity, cost_price_usd, cost_price_khr)
+  seedDb.prepare(`INSERT INTO products (id, name, barcode, is_active, stock_quantity, cost_price_usd, cost_price_khr)
     VALUES (2, 'Widget relabelled', 'B124', 1, 0, 3, 12000)`).run({})
   if (lot + unlotted > 0) {
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, @q)').run({ q: lot + unlotted })
+    seedDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, @q)').run({ q: lot + unlotted })
   }
   if (lot > 0) {
-    rawDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, unit_cost_usd, received_quantity)
+    seedDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, unit_cost_usd, received_quantity)
       VALUES (@id, 1, '09052026', '09052026', '2026-09-05', 1, 2, @q)`).run({ id: LOT_ID, q: lot })
-    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@id, 1, @q)').run({ id: LOT_ID, q: lot })
+    seedDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@id, 1, @q)').run({ id: LOT_ID, q: lot })
     // The catalog-cost trigger (0195) may have re-derived the catalog cost
     // from the lot; the fixture wants the catalog cost it set.
-    rawDb.prepare('UPDATE products SET cost_price_usd = 3 WHERE id = 1').run({})
+    seedDb.prepare('UPDATE products SET cost_price_usd = 3 WHERE id = 1').run({})
   }
+  } })
+  assert.throws(() => rawDb.exec('UPDATE products SET stock_quantity=stock_quantity'), /stock_transaction_required/)
   audits.length = 0
 }
 
@@ -393,15 +407,17 @@ function onFirstBatch(fn) {
   }
 }
 // A concurrent POS sale of `quantity` units that the lot ledger did not carry.
-const concurrentUnlottedSale = (quantity) => () => {
-  rawDb.prepare('UPDATE branch_stock SET quantity = quantity - @q WHERE product_id = 1 AND branch_id = 1').run({ q: quantity })
-  rawDb.prepare('UPDATE products SET stock_quantity = stock_quantity - @q WHERE id = 1').run({ q: quantity })
-}
+const stockExecutor = loadReal('lib/stockTransaction.ts')
+const countedStock = loadReal('lib/countedDamagedStock.ts')
+const concurrentUnlottedSale = quantity => () => stockExecutor.executeStockTransaction(db, [
+  { sql:'UPDATE branch_stock SET quantity=quantity-@q WHERE product_id=1 AND branch_id=1',params:{q:quantity}},
+  { sql:'UPDATE products SET stock_quantity=stock_quantity-@q WHERE id=1',params:{q:quantity}}
+], 'once')
 // A concurrent POS sale of `quantity` units out of lot 10.
-const concurrentLotSale = (quantity) => () => {
-  rawDb.prepare('UPDATE branch_batch_stock SET quantity = quantity - @q WHERE batch_id = @id AND branch_id = 1').run({ q: quantity, id: LOT_ID })
-  concurrentUnlottedSale(quantity)()
-}
+const concurrentLotSale = quantity => () => stockExecutor.executeStockTransaction(db,
+  productBatches.planRemoveStockFromBatch({productId:1,branchId:1,batchId:LOT_ID,quantity}).statements,'once')
+const consumeHeld = () => stockExecutor.executeStockTransaction(db, heldLots().flatMap(lot =>
+  countedStock.planCountedTaggedChange({lotId:lot.id,productId:lot.product_id,branchId:lot.branch_id,batchId:lot.batch_id},lot.quantity_remaining,'consume')), 'once')
 
 // OV-6: make the movement INSERT fail, inside whatever transaction it rides.
 function withMovementFailure() {
@@ -467,15 +483,16 @@ const hold = async (tag, quantity) => {
     assert.equal(moves(1, 'remove').length, 1)
   })
 
-  await check('STK-C: a TAGGED remove of mixed stock holds the units (damage_out + held lot), no remove movement', async () => {
+  await check('STK-C: a TAGGED mixed removal labels the counted physical units with immutable condition provenance', async () => {
     seedStock({ lot: 3, unlotted: 2 })
     const res = await req('POST', '/adjust', REMOVE({ quantity: 4, conditionTag: 'broken' }))
     assert.equal(res.status, 200, JSON.stringify(res.json))
-    assert.deepEqual(stateOf(1), { branch: 1, product: 1, lots: 0 })
+    assert.deepEqual(stateOf(1), { branch: 5, product: 5, lots: 3 })
     assert.equal(heldRemaining('broken'), 4)
-    const heldMoves = moves(1, 'damage_out')
-    assert.equal(heldMoves.length, 1)
-    assert.equal(Number(heldMoves[0].quantity), 4)
+    const heldMoves = moves(1, 'condition_tag')
+    assert.equal(heldMoves.length, 2, 'each lot or NULL allocation retains its condition provenance')
+    assert.ok(heldMoves.every(row => Number(row.quantity)===0), 'tagging does not count a physical removal')
+    assert.equal(moves(1, 'damage_out').length, 0)
     assert.equal(moves(1, 'remove').length, 0, 'held, not destroyed')
   })
 
@@ -534,7 +551,7 @@ const hold = async (tag, quantity) => {
 
   await check('race: the branch_stock row vanished after the read -> 409, the lot is untouched', async () => {
     seedStock({ lot: 5 })
-    onFirstBatch(() => { rawDb.prepare('DELETE FROM branch_stock WHERE product_id = 1').run({}) })
+    onFirstBatch(() => stockExecutor.executeStockTransaction(db,[{sql:'DELETE FROM branch_stock WHERE product_id=1'}],'once'))
     const res = await req('POST', '/adjust', REMOVE({ quantity: 2 }))
     assert.equal(res.status, 409, JSON.stringify(res.json))
     assert.equal(res.json?.code, 'stock_removal_conflict')
@@ -617,8 +634,8 @@ const hold = async (tag, quantity) => {
   await check('STK-D: held units consumed after the read -> Restore is 409 and credits nothing', async () => {
     seedStock({ lot: 5 })
     await hold('opened', 5)
-    assert.deepEqual(stateOf(1), { branch: 0, product: 0, lots: 0 })
-    onFirstBatch(() => { rawDb.prepare('UPDATE damaged_stock_lots SET quantity_remaining = 0').run({}) })
+    assert.deepEqual(stateOf(1), { branch: 5, product: 5, lots: 5 })
+    onFirstBatch(consumeHeld)
     const res = await req('POST', '/tagged-lots/restore', TAGGED())
     assert.equal(res.status, 409, JSON.stringify(res.json))
     assert.equal(res.json?.code, 'tagged_lot_conflict')
@@ -629,7 +646,7 @@ const hold = async (tag, quantity) => {
   await check('STK-D: held units consumed after the read -> Dispose is 409 and books no loss', async () => {
     seedStock({ lot: 5 })
     await hold('broken', 5)
-    onFirstBatch(() => { rawDb.prepare('UPDATE damaged_stock_lots SET quantity_remaining = 0').run({}) })
+    onFirstBatch(consumeHeld)
     const res = await req('POST', '/tagged-lots/dispose', TAGGED({ conditionTag: 'broken' }))
     assert.equal(res.status, 409, JSON.stringify(res.json))
     assert.equal(res.json?.code, 'tagged_lot_conflict')
@@ -645,7 +662,9 @@ const hold = async (tag, quantity) => {
     assert.equal(again.status, 200, JSON.stringify(again.json))
     assert.equal(again.json?.replayed, true)
     assert.deepEqual(stateOf(1), { branch: 5, product: 5, lots: 5 })
-    assert.equal(moves(1, 'in').length, 1)
+    assert.equal(moves(1, 'in').length, 0, 'clearing a tag does not receive physical units')
+    assert.equal(moves(1, 'condition_clear').length, 1)
+    assert.equal(heldRemaining('opened'), 0)
   })
 
   await check('STK-D: the same id with a different quantity is refused (409 idempotency_conflict)', async () => {
@@ -656,20 +675,22 @@ const hold = async (tag, quantity) => {
     const other = await req('POST', '/tagged-lots/restore', TAGGED({ quantity: 3, client_request_id: 'stkd-diff-0001' }))
     assert.equal(other.status, 409, JSON.stringify(other.json))
     assert.equal(other.json?.code, 'idempotency_conflict')
-    assert.equal(branchQty(1), 2)
+    assert.equal(branchQty(1), 5)
+    assert.equal(heldRemaining('opened'), 3)
   })
 
   await check('STK-D: a conflicted Restore RELEASES its claim (the write mark rides the aborted batch)', async () => {
     seedStock({ lot: 5 })
     await hold('expired', 5)
-    onFirstBatch(() => { rawDb.prepare('UPDATE damaged_stock_lots SET quantity_remaining = 0').run({}) })
+    onFirstBatch(consumeHeld)
     const first = await req('POST', '/tagged-lots/restore', TAGGED({ conditionTag: 'expired', client_request_id: 'stkd-release-0001' }))
     assert.equal(first.status, 409, JSON.stringify(first.json))
     assert.equal(first.json?.code, 'tagged_lot_conflict')
     const retry = await req('POST', '/tagged-lots/restore', TAGGED({ conditionTag: 'expired', client_request_id: 'stkd-release-0001' }))
     assert.notEqual(retry.json?.code, 'stock_request_partially_applied', 'nothing was written, so nothing is partial')
-    assert.equal(retry.status, 400, JSON.stringify(retry.json))
-    assert.match(String(retry.json?.error || ''), /held/)
+    assert.equal(retry.status, 409, JSON.stringify(retry.json))
+    assert.equal(retry.json?.code, 'tagged_lot_conflict')
+    assert.match(String(retry.json?.error || ''), /Only 0 unit\(s\) are tagged/)
     assert.deepEqual(stateOf(1), { branch: 0, product: 0, lots: 0 })
   })
 
