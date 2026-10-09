@@ -34,8 +34,9 @@ function loadReal(relPath, overrides = {}) {
     if (request in overrides) return overrides[request]
     if (request === 'cloudflare:workers') return { DurableObject: class {} }
     if (request.startsWith('.')) {
-      if (relPath.startsWith('lib/')) return loadReal(path.posix.normalize(path.posix.join(path.posix.dirname(relPath), request)) + '.ts')
-      return autoStub()
+      const target = path.posix.normalize(path.posix.join(path.posix.dirname(relPath), request)) + '.ts'
+      if (fs.existsSync(path.join(root,'src',target))) return loadReal(target)
+      throw new Error('Unwired relative dependency: '+request)
     }
     Module._load = originalLoad
     try {
@@ -112,6 +113,7 @@ const broadcastStub = { broadcast: async () => {} }
 const authStub = { requireAuth: async (c, next) => { await next() } }
 
 const inventoryMod = loadReal('routes/inventory.ts', {
+  '../lib/transferRequest': loadReal('lib/transferRequest.ts'),
   '../lib/countedDamagedStock': loadReal('lib/countedDamagedStock.ts'),
   '../lib/countedConditionHistory': loadReal('lib/countedConditionHistory.ts', { './db': dbOverride }),
   '../lib/stockTransaction': loadReal('lib/stockTransaction.ts'),
@@ -183,6 +185,8 @@ assert.equal(typeof runAdjustAction, 'function', 'routes/inventory.ts exports ru
 assert.equal(typeof batchesMod.runReceiveBatchAction, 'function', 'routes/batches.ts exports runReceiveBatchAction (P4-B extraction)')
 function freshDb() {
   const rawDb = openDb(loadAll(), { seedBeforeFence(db) { db.exec(`
+    INSERT INTO roles(name,code,permissions) SELECT 'Admin','admin','{"all":true}' WHERE NOT EXISTS(SELECT 1 FROM roles WHERE code='admin');
+    INSERT INTO users(id,username,name,password,role_id,permissions,is_active,must_change_password) SELECT 1,'admin','Admin','fixture',id,'{}',1,0 FROM roles WHERE code='admin';
     INSERT INTO branches(id, name, is_default, is_active) VALUES(1, 'Shop', 1, 1),(2, 'Warehouse', 0, 1);
     INSERT INTO products(id, name, barcode, cost_price_usd, cost_price_khr, stock_quantity, is_active)
       VALUES(1, 'Serum', 'SER-1', 2, 0, 0, 1);
@@ -198,10 +202,10 @@ const ADMIN_USER = { id: 1, username: 'admin', name: 'Admin', role_code: 'admin'
 const NO_PERM_USER = { id: 2, username: 'cashier', name: 'Cashier', permissions: JSON.stringify({ inventory: false }) }
 
 function makeContext(db, user) {
-  let currentUser = user
+  let currentUser = user.id===1 ? {...user,...db.prepare(`SELECT u.role_id,u.organization_id,u.permissions,u.must_change_password,r.code role_code,r.permissions role_permissions FROM users u LEFT JOIN roles r ON r.id=u.role_id WHERE u.id=1`).get()} : user
   currentDb = db
   return {
-    env: { DB: {} },
+    env: { DB: {}, PLAN_TIER: 'paid' },
     req: { header: () => undefined }, // CUTOVER-LR: a disabled branch reads X-Branch-Redirect (absent here)
     executionCtx: { waitUntil: (p) => { Promise.resolve(p).catch(() => {}) } },
     get(key) { return key === 'user' ? currentUser : undefined },
