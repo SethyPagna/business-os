@@ -10,6 +10,9 @@ async function prove(makeWorker, tier, shape) {
     if (existing) sql.exec("UPDATE product_batches SET batch_key='09102026',received_at='2026-10-09',received_quantity=0.1,supplier_name='Original Supplier' WHERE id=1")
     sql.prepare("INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source,unit_cost_usd)VALUES(1,1,1,?,?,?,'damaged','remove',2)").run(existing ? 1 : null, integer ? 1 : 0.1, integer ? 1 : 0.1)
   })
+  const split = shape.startsWith('split'), staging = split ? require('./test-stock-session-atomic.cjs').fixture() : null
+  if (staging) f.env.IMPORT_DB = staging.env.DB
+  const sourceDb = staging?.sql ?? f.sql
   try {
     const initial = integer ? 1 : 0.1, expected = integer ? 3 : 0.3
     assert.equal(f.state().physical, initial, 'conversion counts original tag exactly once')
@@ -17,14 +20,22 @@ async function prove(makeWorker, tier, shape) {
     f.env.IMPORT_QUEUE = { send: async body => pending.push({ body, attempts: 1 }) }
     f.sql.prepare("INSERT INTO import_jobs(id,type,status,phase,created_by_id,created_by_name,total_rows,materialize_done,policy_json,summary_json)VALUES(?,'stock_actions','awaiting_review','awaiting_review',7,'Admin',1,1,'{}','{}')").run(job)
     const data = { _rowNumber: 2, name: 'Serum', barcode: 'SER-1', date: '2026-10-09', action: 'add', shop: String(quantity), cost_price: '2', supplier: 'Fixture Supplier' }
-    f.sql.prepare('INSERT INTO import_job_source_rows(job_id,sequence,row_number,data_json)VALUES(?,0,2,?)').run(job, JSON.stringify(data))
+    sourceDb.prepare('INSERT INTO import_job_source_rows(job_id,sequence,row_number,data_json)VALUES(?,0,2,?)').run(job, JSON.stringify(data))
+    const beforeReceipts = f.sql.prepare('SELECT * FROM product_batches ORDER BY id').all()
     const raw = f.env.DB
+    const beforeCapture = {
+      'actor-before': "UPDATE users SET role_id=NULL,permissions='{}' WHERE id=7",
+      'materialized-before': "UPDATE import_job_rows SET result_json='{}' WHERE phase='apply' AND row_number=2",
+      'source-before': "UPDATE import_job_source_rows SET data_json='{}' WHERE row_number=2",
+    }[shape]
     let queries = 0, injected = false, unknownRetry = false
     const rival = {
       date: "UPDATE product_batches SET received_at='2026-10-08' WHERE id=1",
       owner: 'UPDATE product_batches SET variant_product_id=2 WHERE id=1',
       actor: 'UPDATE users SET is_active=0 WHERE id=7',
       source: "UPDATE import_job_source_rows SET data_json='{}' WHERE row_number=2",
+      'split-lock': "UPDATE import_jobs SET chunk_state_json=json_set(chunk_state_json,'$.sourceUpload','rival-owner'),lease_token=NULL",
+      policy: "UPDATE import_jobs SET policy_json='{}'",
       member: "INSERT INTO damaged_stock_lots(product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source,unit_cost_usd)VALUES(1,1,1,0,0,'opened','remove',2)",
     }[shape]
     const wrap = stmt => new Proxy(stmt, { get(target, key) {
@@ -33,7 +44,10 @@ async function prove(makeWorker, tier, shape) {
       return target[key]
     } })
     f.env.DB = new Proxy(raw, { get(target, key) {
-      if (key === 'prepare') return text => wrap(target.prepare(text))
+      if (key === 'prepare') return text => {
+        if (!injected && beforeCapture && text.includes('AS candidates')) { f.sql.exec(beforeCapture); injected = true }
+        return wrap(target.prepare(text))
+      }
       if (key === 'batch') return statements => {
         queries += statements.length
         if (!injected && statements.some(s => /INSERT OR IGNORE INTO import_stock_action_commits/.test(s.text))) {
@@ -46,6 +60,14 @@ async function prove(makeWorker, tier, shape) {
       }
       return target[key]
     } })
+    if (staging) {
+      const stagingRaw = f.env.IMPORT_DB
+      f.env.IMPORT_DB = new Proxy(stagingRaw, { get(target, key) {
+        if (key === 'prepare') return text => wrap(target.prepare(text))
+        if (key === 'batch') return statements => { queries += statements.length; return target.batch(statements) }
+        return target[key]
+      } })
+    }
     assert.equal((await f.call(`/import-jobs/${job}/approve`, {})).status, 200)
     let invocations = 0
     while (pending.length && invocations++ < 12) {
@@ -60,11 +82,12 @@ async function prove(makeWorker, tier, shape) {
     assert.equal(pending.length, 0)
     assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM products').get().n, 1, 'must reuse existing product')
     const commits = f.sql.prepare('SELECT * FROM import_stock_action_commits').all()
-    if (rival || shape === 'late') {
+    if (rival || beforeCapture || shape === 'late') {
       assert.equal(f.state().physical, initial)
       assert.equal(f.state().cache, initial)
       assert.equal(f.state().movements.length, 0, 'late guard/failure rolls back movement and exact physical writes')
       assert.equal(commits.length, 0, 'failed add rolls back applied journal')
+      if (!['date', 'owner'].includes(shape)) assert.deepEqual(f.sql.prepare('SELECT * FROM product_batches ORDER BY id').all(), beforeReceipts, 'receipt metadata/cost changes roll back too')
       assert.equal(f.state().tags[0].quantity_remaining, initial)
       assert.equal(injected, true)
       console.log(`PASS ${tier} ${shape} rival retained/no add effects`)
@@ -99,11 +122,11 @@ async function prove(makeWorker, tier, shape) {
     assert.equal(f.state().cache, expected)
     assert.equal(f.state().tags[0].quantity_remaining, 0)
     console.log(`PASS ${tier} ${shape} exact add/cost/source/journal/tag clear/replay`)
-  } finally { f.sql.close() }
+  } finally { f.sql.close(); staging?.sql.close() }
 }
 
 async function main() {
   const makeWorker = await h.bundle.exports.bundleWorker()
-  for (const tier of ['free', 'paid']) for (const shape of ['integer', 'fractional', 'existing', 'ack', 'date', 'owner', 'actor', 'source', 'member', 'late']) await prove(makeWorker, tier, shape)
+  for (const tier of ['free', 'paid']) for (const shape of ['integer', 'fractional', 'existing', 'ack', 'date', 'owner', 'actor', 'source', 'member', 'late', 'actor-before', 'materialized-before', 'source-before', 'policy', 'split', 'split-lock']) await prove(makeWorker, tier, shape)
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

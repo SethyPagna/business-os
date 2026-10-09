@@ -1,5 +1,7 @@
 import { executeStockTransaction } from './stockTransaction'
 import type { D1Compat } from './db'
+import type { SessionUser } from './auth'
+import { stockActorParams, stockActorPredicate } from './stockActorGuard'
 import { countedStockFactsSql, CountedStockBatchPlan, CountedStockConflictError, isCountedStockConflict, subtractCountedQuantity } from './countedDamagedStock'
 import { assertProductsActive, productStockGuardStatement, productStockGuardError } from './productStockGuard'
 import { roundMoney4, multiplyMoney4, sellingPriceCeilCent } from './moneyPrecision'
@@ -71,7 +73,15 @@ function rethrowBranchGuardFailure(error: unknown): never {
   throw error
 }
 
+export interface UnifiedStockImportAuthority {
+  actor: SessionUser
+  policyJson: string | null
+  leaseToken: string
+  materializationState: string | null
+}
+
 export interface UnifiedStockAddInput {
+  importContext?: UnifiedStockImportAuthority & { reviewedResult: string; sourceJson: string | null }
   jobId: string
   rowNumber: number
   productId: number
@@ -317,20 +327,36 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
     'received_branch_id',received_branch_id,'received_branch_name',received_branch_name,
     'lot_code',lot_code,'batch_number',batch_number,'expiry_date',expiry_date,'notes',notes)) FROM (
     SELECT * FROM product_batches WHERE variant_product_id=@productId ORDER BY id LIMIT 10001))`
-  const importSourceSql = `(SELECT json_object('policy',j.policy_json,'cancel',j.cancel_requested,
-    'source',(SELECT data_json FROM import_job_source_rows WHERE job_id=@jobId AND row_number=@rowNumber),
-    'actor',(SELECT json_array(u.id,u.is_active,u.username,u.organization_id,u.role_id,u.permissions,
-      u.must_change_password,r.code,r.permissions) FROM users u LEFT JOIN roles r ON r.id=u.role_id
-      WHERE u.id=CAST(json_extract(j.policy_json,'$.apply_authorized_by_id') AS INTEGER)))
-    FROM import_jobs j WHERE j.id=@jobId)`
-  const captured = await db.prepare(`SELECT ${receiptCandidatesSql} AS candidates, ${importSourceSql} AS source,
-    ${countedStockFactsSql('@productId', '@branchId', '(SELECT json_group_array(id) FROM product_batches WHERE variant_product_id=@productId)')} AS facts`)
-    .get<{ candidates: string; facts: string; source: string | null }>({ productId, branchId, jobId, rowNumber })
-  if (!captured?.facts || !captured.candidates) throw new CountedStockConflictError()
-  if (captured.source) {
-    const source = JSON.parse(captured.source) as { cancel: number; actor: unknown[] | null }
-    if (source.cancel || !source.actor || source.actor[1] !== 1) throw new CountedStockConflictError()
+  const context = input.importContext
+  if (context && (typeof context.sourceJson !== 'string' || !context.reviewedResult || !context.leaseToken)) throw new CountedStockConflictError()
+  const sharedStaging = db.staging === db
+  if (context && !sharedStaging) {
+    // A separate D1 cannot join the operational transaction. Revalidate the
+    // recorded bytes before planning; main source-upload/lease ownership below
+    // excludes sanctioned source replacements while this command commits.
+    const materialized = await db.staging.prepare(`SELECT result_json,(SELECT data_json FROM import_job_source_rows
+        WHERE job_id=@jobId AND row_number=@rowNumber) AS source_json FROM import_job_rows
+      WHERE job_id=@jobId AND phase='apply' AND row_number=@rowNumber`)
+      .get<{ result_json: string; source_json: string | null }>({ jobId, rowNumber })
+    if (materialized?.result_json !== context.reviewedResult || materialized.source_json !== context.sourceJson) throw new CountedStockConflictError()
   }
+  const authorityPredicate = context ? `(${stockActorPredicate}) AND EXISTS(SELECT 1 FROM import_jobs j
+    WHERE j.id=@jobId AND j.type='stock_actions' AND j.policy_json IS @authorizedPolicy
+      AND j.lease_token=@importLease AND j.cancel_requested=0 AND j.materialize_done=1
+      AND j.materialize_state_json IS @materializationState
+      AND json_extract(CASE WHEN json_valid(j.chunk_state_json) THEN j.chunk_state_json ELSE '{}' END,'$.sourceUpload') IS NULL)
+    ${sharedStaging ? `AND EXISTS(SELECT 1 FROM import_job_rows
+      WHERE job_id=@jobId AND phase='apply' AND row_number=@rowNumber AND result_json=@reviewedResult) AND EXISTS(SELECT 1 FROM import_job_source_rows
+      WHERE job_id=@jobId AND row_number=@rowNumber AND data_json IS @reviewedSource)` : ''}`
+    : 'NOT EXISTS(SELECT 1 FROM import_jobs WHERE id=@jobId)'
+  const authorityParams = { jobId, rowNumber, ...(context ? { ...stockActorParams(context.actor),
+    authorizedPolicy: context.policyJson, importLease: context.leaseToken,
+    materializationState: context.materializationState, reviewedResult: context.reviewedResult, reviewedSource: context.sourceJson } : {}) }
+  const captured = await db.prepare(`SELECT ${receiptCandidatesSql} AS candidates,
+    ${countedStockFactsSql('@productId', '@branchId', '(SELECT json_group_array(id) FROM product_batches WHERE variant_product_id=@productId)')} AS facts,
+    (${authorityPredicate}) AS authorized`)
+    .get<{ candidates: string; facts: string; authorized: number }>({ productId, branchId, ...authorityParams })
+  if (!captured?.facts || !captured.candidates || captured.authorized !== 1) throw new CountedStockConflictError()
   const lots = JSON.parse(captured.candidates) as (ReceiptLotCandidate & { supplier_name: string | null; received_quantity: number | null })[]
   if (lots.length > 10000) throw new CountedStockConflictError()
   const target = resolveReceiptLotTarget(lots, receivedAt, costPriceUsd, Number(pre?.baseline) || 0)
@@ -397,9 +423,9 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
     productStockGuardStatement([productId], 'active'),
     ...exactPreimageGuards,
     ...(newReceipt?.guards ?? []),
-    { sql: `SELECT CASE WHEN ${receiptCandidatesSql}=@receiptCandidates AND ${importSourceSql} IS @importSource
+    { sql: `SELECT CASE WHEN ${receiptCandidatesSql}=@receiptCandidates AND (${authorityPredicate})
         THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`,
-      params: { productId, jobId, rowNumber, receiptCandidates: captured.candidates, importSource: captured.source } },
+      params: { productId, receiptCandidates: captured.candidates, ...authorityParams } },
     {
       sql: `INSERT OR IGNORE INTO import_stock_action_commits
               (job_id, action_key, row_number, action_kind, status)
@@ -528,7 +554,7 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
     rethrowBranchGuardFailure(error)
   }
 
-  // No post-commit verify read: db.batch is atomic and its final statement
+  // No post-commit success verify read: db.batch is atomic and its final statement
   // flips this row's status to 'applied', and the pre-read above already
   // returns early for an already-applied row -- a verify would only confirm
   // what the atomic batch guarantees. Dropped to save a round-trip per unit.

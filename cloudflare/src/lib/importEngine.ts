@@ -97,7 +97,7 @@ import { sanitizeMediaPath } from './media'
 import { resolveProductImagePathIdentities } from './productImagePermission'
 import { classifyUnifiedStockActions, type StockActionImportResult } from './stockActionCatalog'
 import { countUnifiedStockConfirmationRows, sealUnifiedStockAnalyzeConflicts } from './stockActionSeal'
-import { applyUnifiedStockAdd, applyUnifiedStockSale, ensureUnifiedStockProduct, unifiedStockReceiptRefusal, type UnifiedStockSaleLine } from './stockActionCommit'
+import { applyUnifiedStockAdd, applyUnifiedStockSale, ensureUnifiedStockProduct, unifiedStockReceiptRefusal, type UnifiedStockImportAuthority, type UnifiedStockSaleLine } from './stockActionCommit'
 import { parseStockAction, saleGroupKeyFor } from './stockActionResolver'
 import { applyHistoricalSaleImport, MAX_HISTORICAL_SALE_LINES } from './salesImportCommit'
 import { getUnifiedStockMode, type UnifiedStockResolvedRow } from './stockActionImport'
@@ -142,6 +142,7 @@ type ImportApplyJob = {
   id: string
   type: ImportType
   policy_json: string | null
+  materialize_state_json?: string | null
   summary_json?: string | null
 }
 
@@ -5358,6 +5359,7 @@ async function dispatchStockActionSingle(
   jobId: string,
   r: StockActionImportResult,
   resolveSupplierId: ResolveSupplierId,
+  importContext?: UnifiedStockImportAuthority & { reviewedResult: string; sourceJson: string | null },
 ): Promise<void> {
   const resolved = r.data as unknown as UnifiedStockResolvedRow
   const plan = resolved.plan!
@@ -5405,6 +5407,7 @@ async function dispatchStockActionSingle(
   const supplierId = supplierName ? await resolveSupplierId(supplierName) : null
   for (const add of adds) {
     await applyUnifiedStockAdd(db, {
+      importContext,
       jobId,
       rowNumber: resolved.rowNumber,
       productId,
@@ -5591,6 +5594,7 @@ export async function applyStockActionsJob(
   sw: ReturnType<typeof makeStopwatch>,
   queueLatencyMs: number | undefined,
   actor: SessionUser,
+  importAuthority?: UnifiedStockImportAuthority,
 ): Promise<{ applied: number; failed: number }> {
   const startedAtMs = Date.now()
   db = stockQueryBudgetDb(db, getPlanLimits(env).d1QueriesPerInvocation)
@@ -5627,12 +5631,12 @@ export async function applyStockActionsJob(
         { code: 'stock_import_over_tier_cap' },
       )
     }
-    return await applyStockActionsContinuation(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs, totalRows, actor)
+    return await applyStockActionsContinuation(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs, totalRows, actor, importAuthority)
   }
   if (totalRows > STOCK_ACTION_DIRECT_MAX_ROWS) {
     throw new Error(`This stock import has ${totalRows} rows; the ceiling is ${STOCK_ACTION_DIRECT_MAX_ROWS} rows per file — split it before importing.`)
   }
-  return await applyStockActionsContinuation(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs, totalRows, actor)
+  return await applyStockActionsContinuation(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs, totalRows, actor, importAuthority)
 }
 
 // DIRECT-mode continuation engine (M4). Two windowed phases, resumed across
@@ -5664,6 +5668,7 @@ async function applyStockActionsContinuation(
   startedAtMs: number,
   totalRows: number,
   actor: SessionUser,
+  importAuthority?: UnifiedStockImportAuthority,
 ): Promise<{ applied: number; failed: number }> {
   // Per-invocation dispatch budget, tier-aware -- see lib/planTier.ts. The
   // module-level STOCK_ACTION_* exports keep their Paid values.
@@ -5801,10 +5806,12 @@ async function applyStockActionsContinuation(
   let moreRows = true
   let deferred = false
   while (unitsDispatched < limits.stockActionMaxUnits && !deferred) {
-    let batch: { row_number: number; group_index: number | null; result_json: string }[]
+    let batch: { row_number: number; group_index: number | null; result_json: string; source_json: string | null }[]
     try {
-      batch = await db.staging.prepare(`SELECT row_number,group_index,result_json FROM import_job_rows
-        WHERE job_id=@id AND phase='apply' AND row_number>@after ORDER BY row_number LIMIT ${STOCK_ACTION_DISPATCH_READ}`)
+      batch = await db.staging.prepare(`SELECT r.row_number,r.group_index,r.result_json,
+          (SELECT s.data_json FROM import_job_source_rows s WHERE s.job_id=r.job_id AND s.row_number=r.row_number) AS source_json
+        FROM import_job_rows r WHERE r.job_id=@id AND r.phase='apply' AND r.row_number>@after
+        ORDER BY r.row_number LIMIT ${STOCK_ACTION_DISPATCH_READ}`)
         .all({ id: jobId, after })
     } catch (error) {
       if (!(error instanceof StockQueryBudgetDeferred)) throw error
@@ -5835,7 +5842,8 @@ async function applyStockActionsContinuation(
             const outcome = await dispatchStockActionSaleGroup(db, jobId, plan.saleGroupKey, unitRows, actor)
             if (outcome === 'skipped') for (const member of unitRows) member.action = 'skip'
           }
-        } else await dispatchStockActionSingle(db, jobId, r, resolveSupplierId)
+        } else await dispatchStockActionSingle(db, jobId, r, resolveSupplierId,
+          importAuthority ? { ...importAuthority, reviewedResult: record.result_json, sourceJson: record.source_json } : undefined)
         touched.push(...unitRows)
         delete stock.deferredRow
       } catch (error) {
@@ -6190,7 +6198,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     if (savedState.genericApply?.finalize?.phase === 'done'
       && ['completed', 'completed_with_errors'].includes(jobRow.status)) return { applied: 0, failed: 0 }
     if (savedState.genericApply?.finalizationChanged) throw new ProductImportFinalizationConflictError()
-    const job = await db.prepare(`SELECT id, type, policy_json, summary_json FROM import_jobs WHERE id = @id`).get<ImportApplyJob>({ id: jobId })
+    const job = await db.prepare(`SELECT id, type, policy_json, summary_json, materialize_state_json FROM import_jobs WHERE id = @id`).get<ImportApplyJob>({ id: jobId })
     if (!job) throw new Error('Import job not found')
     // The HTTP approval/retry request is only the enqueue boundary. A role
     // can be edited or revoked while the message waits, and every later
@@ -6220,7 +6228,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // would mutate sales tables with the wrong row shape. Returns here with
     // its own {applied, failed}; the lease is released in the shared finally.
     if (job.type === 'stock_actions') {
-      return await applyStockActionsJob(env, db, jobId, job.policy_json, sw, queueLatencyMs, authority.actor)
+      return await applyStockActionsJob(env, db, jobId, job.policy_json, sw, queueLatencyMs, authority.actor, { actor: authority.actor,
+        policyJson: job.policy_json, leaseToken, materializationState: job.materialize_state_json ?? null })
     }
 
     const stillMaterializing = await ensureSourceRowsMaterialized(env, db, jobId, 'apply')
