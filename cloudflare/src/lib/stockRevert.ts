@@ -150,17 +150,26 @@ function isMergeOwnedRow(m: Pick<RevertMovementRow, 'movement_type' | 'quantity'
 
 // Intake condition history owns its receipt. Current tags change no physical
 // units; legacy tags recorded a damage_out. Both retain the receipt reference.
-async function isHeldAsTaggedReceipt(db: D1Compat, m: Pick<RevertMovementRow, 'id' | 'product_id' | 'branch_id' | 'batch_id' | 'quantity' | 'reason' | 'reference_id'>): Promise<boolean> {
-  const held = await db.prepare(`SELECT reason FROM inventory_movements
-    WHERE id > @id AND ((movement_type = 'damage_out' AND ABS(quantity) = @quantity)
+type TaggedReceiptIdentity = Pick<RevertMovementRow, 'id' | 'product_id' | 'branch_id' | 'batch_id' | 'quantity' | 'reason' | 'reference_id'>
+
+const TAGGED_RECEIPT_OWNERSHIP_SQL = `SELECT reason FROM inventory_movements
+    WHERE id > @taggedMovementId AND ((movement_type = 'damage_out' AND ABS(quantity) = @taggedQuantity)
         OR (movement_type = 'condition_tag' AND quantity = 0))
-      AND product_id = @productId AND branch_id = @branchId
-      AND COALESCE(batch_id, 0) = @batchId AND CAST(COALESCE(reference_id, '') AS TEXT) = @reference`)
-    .all<{ reason: string | null }>({
-      id: Number(m.id), productId: Number(m.product_id), branchId: Number(m.branch_id), batchId: Number(m.batch_id) || 0,
-      quantity: Math.abs(Number(m.quantity)), reference: String(m.reference_id ?? ''),
-    })
-  return held.some((row) => STOCK_CONDITION_TAGS.some((tag) => row.reason === taggedReasonText(tag, m.reason)))
+      AND product_id = @taggedProductId AND branch_id = @taggedBranchId
+      AND COALESCE(batch_id, 0) = @taggedBatchId AND CAST(COALESCE(reference_id, '') AS TEXT) = @taggedReference
+      AND reason IN (SELECT value FROM json_each(@taggedReasons))`
+
+function taggedReceiptIdentityParams(m: TaggedReceiptIdentity) {
+  return {
+    taggedMovementId: Number(m.id), taggedProductId: Number(m.product_id), taggedBranchId: Number(m.branch_id),
+    taggedBatchId: Number(m.batch_id) || 0, taggedQuantity: Math.abs(Number(m.quantity)),
+    taggedReference: String(m.reference_id ?? ''), taggedReasons: JSON.stringify(STOCK_CONDITION_TAGS.map(tag => taggedReasonText(tag, m.reason))),
+  }
+}
+
+async function isHeldAsTaggedReceipt(db: D1Compat, m: TaggedReceiptIdentity): Promise<boolean> {
+  const held = await db.prepare(TAGGED_RECEIPT_OWNERSHIP_SQL).all<{ reason: string | null }>(taggedReceiptIdentityParams(m))
+  return held.length > 0
 }
 
 // 0153 (and any repair like it) wrote an 'adjustment' that carries the SALE's id
@@ -201,17 +210,33 @@ async function receiptRowRefusal(db: D1Compat, m: Pick<RevertMovementRow, 'id' |
   return null
 }
 
-function receiptRowGuard(m: Pick<RevertMovementRow, 'id' | 'movement_type' | 'reference_id'>): StockWriteStatement {
+function receiptRowGuard(m: RevertMovementRow): StockWriteStatement {
   const { lo, hi } = stockInEditRange(Number(m.id))
   const checkEdits = RECEIPT_TYPES.has(m.movement_type)
   const sessionRowid = /^\d+$/.test(String(m.reference_id ?? '')) ? Number(m.reference_id) : null
   return {
     sql: `INSERT INTO stock_session_guards (guard_value)
       SELECT CASE
+        WHEN NOT EXISTS (SELECT 1 FROM inventory_movements WHERE id=@movementId
+          AND product_id IS @sourceProductId AND branch_id IS @sourceBranchId AND batch_id IS @sourceBatchId
+          AND movement_type IS @sourceType AND quantity IS @sourceQuantity
+          AND reason IS @sourceReason AND reference_id IS @sourceReference
+          AND product_name IS @sourceProductName AND branch_name IS @sourceBranchName
+          AND unit_cost_usd IS @sourceUnitCostUsd AND unit_cost_khr IS @sourceUnitCostKhr
+          AND total_cost_usd IS @sourceTotalCostUsd AND total_cost_khr IS @sourceTotalCostKhr) THEN 0
+        WHEN @checkTaggedReceipt = 1 AND EXISTS (${TAGGED_RECEIPT_OWNERSHIP_SQL})
+          THEN json_extract('[1]','$[revert_tagged_receipt_conflict]')
         WHEN @checkEdits = 1 AND EXISTS (SELECT 1 FROM inventory_movements WHERE reference_id >= @lo AND reference_id < @hi) THEN 0
         WHEN @rowid IS NOT NULL AND EXISTS (${SESSION_UNDONE_SQL}) THEN 0
         ELSE 1 END`,
-    params: { checkEdits: checkEdits ? 1 : 0, lo, hi, rowid: sessionRowid, movementId: Number(m.id) },
+    params: { checkEdits: checkEdits ? 1 : 0, lo, hi, rowid: sessionRowid, movementId: Number(m.id),
+      checkTaggedReceipt: checkEdits && !String(m.reference_id ?? '').startsWith('revert:') ? 1 : 0,
+      sourceProductId: m.product_id, sourceBranchId: m.branch_id, sourceBatchId: m.batch_id ?? null,
+      sourceType: m.movement_type, sourceQuantity: m.quantity, sourceReason: m.reason ?? null, sourceReference: m.reference_id ?? null,
+      sourceProductName: m.product_name ?? null, sourceBranchName: m.branch_name ?? null,
+      sourceUnitCostUsd: m.unit_cost_usd ?? null, sourceUnitCostKhr: m.unit_cost_khr ?? null,
+      sourceTotalCostUsd: m.total_cost_usd ?? null, sourceTotalCostKhr: m.total_cost_khr ?? null,
+      ...taggedReceiptIdentityParams(m) },
   }
 }
 
@@ -531,6 +556,10 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     const activeGuard = productStockGuardError(err)
 
     if (activeGuard) throw activeGuard
+
+    if (message.includes('$[revert_tagged_receipt_conflict]')) {
+      return refuse(409, 'revert_tagged_row', 'This receipt was held as a tagged (damaged, broken, expired ...) stock row. Reverse it from that row on the product instead, so the tagged quantity moves with the stock.')
+    }
 
     if (isCountedStockConflict(err) || err instanceof MoneyPrecisionError || /CHECK constraint failed/i.test(message)) {
       // The in-batch receipt guard: an Edit or a session Undo landed after the

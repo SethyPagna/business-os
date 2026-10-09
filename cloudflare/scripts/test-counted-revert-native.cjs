@@ -51,11 +51,92 @@ async function verifyRedirectHistory() {
   console.log('PASS four redirect/folded receipt worlds, three compensation generations, historical NULL attribution')
 }
 
+async function verifyTaggedReceiptOwnership(makeWorker) {
+  const { loadStockSession } = require('./test-stock-session-atomic.cjs')
+  for (const tier of ['free', 'paid']) for (const timing of ['before-facts', 'before-commit']) {
+    for (const shape of ['current', 'legacy', 'null', 'source-reason', 'source-reference', 'reference', 'product', 'branch', 'batch', 'reason', 'legacy-quantity', 'earlier']) {
+      const edited = shape.startsWith('source-')
+      const owns = edited || ['current', 'legacy', 'null'].includes(shape)
+      const undated = shape === 'null'
+      const f = await mod.exports.world(makeWorker, tier, 'zero', sql => sql.exec(`
+        INSERT INTO branches(id,name,is_active) VALUES(2,'Other',1);
+        INSERT INTO products(id,name,stock_quantity,is_active) VALUES(2,'Other product',0,1);
+        INSERT INTO product_batches(id,variant_product_id,batch_key,is_active) VALUES(2,1,'Other receipt',1);
+        UPDATE products SET stock_quantity=2 WHERE id=1;
+        UPDATE branch_stock SET quantity=2 WHERE product_id=1 AND branch_id=1;
+        UPDATE branch_batch_stock SET quantity=${undated ? 0 : 2} WHERE batch_id=1 AND branch_id=1;
+        UPDATE product_batches SET received_quantity=2,received_cost_usd=4 WHERE id=1;
+        INSERT INTO inventory_movements(id,product_id,branch_id,movement_type,quantity,batch_id,reference_id,reason,unit_cost_usd,total_cost_usd)
+          VALUES(101,1,1,'add',1,${undated ? 'NULL' : 1},'55','  box crushed  ',2,2);`))
+      try {
+        let fired = false, rivalState
+        const raw = f.env.DB
+        const db = loadStockSession('lib/db.ts').getDb({ DB: raw })
+        const legacy = shape === 'legacy' || shape === 'legacy-quantity'
+        const rival = async () => {
+          if (fired) return
+          fired = true
+          const statements = owns ? [{ sql: `INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source)
+            VALUES(30,1,1,${undated ? 'NULL' : 1},1,1,'damaged','restock')` }] : []
+          if (edited) statements.push({ sql: shape === 'source-reason'
+            ? "UPDATE inventory_movements SET reason='Changed intake reason' WHERE id=101"
+            : "UPDATE inventory_movements SET reference_id='77' WHERE id=101" })
+          statements.push({ sql: `INSERT INTO inventory_movements(id,product_id,branch_id,movement_type,quantity,batch_id,reference_id,reason)
+            VALUES(${shape === 'earlier' ? 100 : 102},${shape === 'product' ? 2 : 1},${shape === 'branch' ? 2 : 1},
+              '${legacy ? 'damage_out' : 'condition_tag'}',${legacy ? shape === 'legacy-quantity' ? -2 : -1 : 0},
+              ${undated ? 'NULL' : shape === 'batch' ? 2 : 1},'${shape === 'reference' ? '9002' : shape === 'source-reference' ? '77' : '55'}',
+              '${shape === 'reason' ? 'damaged: unrelated' : shape === 'source-reason' ? 'damaged: Changed intake reason' : 'damaged: box crushed'}')` })
+          await loadStockSession('lib/stockTransaction.ts').executeStockTransaction(db, statements, 'once')
+          rivalState = f.state()
+        }
+        if (timing === 'before-commit') f.beforeCommit(rival)
+        else f.env.DB = new Proxy(raw, { get(target, key) {
+          if (key !== 'prepare') return target[key]
+          return query => {
+            const wrap = statement => new Proxy(statement, { get(s, name) {
+              if (name === 'bind') return (...values) => wrap(s.bind(...values))
+              if (name === 'all' && query.includes('SELECT reason FROM inventory_movements') && query.includes('condition_tag')) {
+                return async (...args) => { const result = await s.all(...args); await rival(); return result }
+              }
+              return s[name]
+            } })
+            return wrap(target.prepare(query))
+          }
+        } })
+        const result = await f.call('/inventory/movements/101/revert', {})
+        assert.equal(fired, true, timing + '/' + shape)
+        assert.equal(result.status, owns ? 409 : 200, timing + '/' + shape)
+        if (owns) {
+          assert.equal(result.json.code, edited ? 'stock_changed' : 'revert_tagged_row')
+          assert.deepEqual(f.state(), rivalState, 'ownership refusal leaves only rival history and physical stock')
+          assert.equal((await f.call('/inventory/movements/101/revert', {})).json.code, 'revert_tagged_row')
+          assert.deepEqual(f.state(), rivalState, 'fresh ownership remains authoritative')
+        } else {
+          assert.equal(f.state().physical, 1)
+          const counter = f.sql.prepare("SELECT * FROM inventory_movements WHERE reference_id='revert:101'").get()
+          assert.equal(counter.total_cost_usd, 2)
+          assert.equal(counter.batch_id, undated ? null : 1)
+          const committed = f.state()
+          assert.equal((await f.call('/inventory/movements/101/revert', {})).json.code, 'already_reverted')
+          assert.deepEqual(f.state(), committed)
+        }
+        assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n, 0)
+      } finally { f.sql.close() }
+    }
+  }
+  console.log('PASS 48 authenticated intake history ownership worlds: fresh-facts/late, current/legacy/NULL, source edits, unrelated identities, immutable counters and retry')
+}
+
 async function main() {
+  if (process.argv.includes('--ownership-only')) {
+    await verifyTaggedReceiptOwnership(await mod.exports.bundle.exports.bundleWorker())
+    return
+  }
   await verifyRedirectHistory()
   if (process.argv.includes('--redirect-only')) return
   const { world, bundle } = mod.exports
   const makeWorker = await bundle.exports.bundleWorker()
+  await verifyTaggedReceiptOwnership(makeWorker)
   const counter = (f, id) => f.sql.prepare('SELECT * FROM inventory_movements WHERE reference_id=?').get(`revert:${id}`)
   const revert = (f, id) => f.call(`/inventory/movements/${id}/revert`, {})
   for (const tier of ['free', 'paid']) {
