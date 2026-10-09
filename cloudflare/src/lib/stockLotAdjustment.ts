@@ -79,7 +79,7 @@ import { executeStockTransaction, StockTransactionUnavailableError, StockTransac
 import { requireReceivingBranch, receivingBranchAssertion, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from './receivingBranch'
 import { resolveMovementCostSnapshot, type MovementCostPair } from './movementCostSnapshot'
 import { planHoldAsTagged } from './damagedLotActions'
-import { tagCapacityGuard } from './countedDamagedStock'
+import { CountedStockPlan, countedStockFactsSql, planExactCountedTaggedChange, isCountedStockConflict } from './countedDamagedStock'
 import { MoneyPrecisionError, subtractDecimalSum } from './moneyPrecision'
 import type { StockWriteStatement } from './productBatches'
 import type { StockConditionTag } from './stockCondition'
@@ -593,12 +593,13 @@ export async function replayStockLotSet(
       COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@product AND branch_id=@branch),0) AS branch_quantity,
       COALESCE((SELECT stock_quantity FROM products WHERE id=@product),0) AS product_quantity,
       ${countedTagRowsSql} AS counted_tags,
+      ${request.conditionTag ? countedStockFactsSql('@product', '@branch') : 'NULL'} AS counted_facts,
       CASE WHEN ${needsNullCapacitySql} THEN ${countedReceiptRowsSql} ELSE '[]' END AS counted_receipts,
       EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch) AS lot_exists,
       EXISTS(SELECT 1 FROM branch_stock WHERE product_id=@product AND branch_id=@branch) AS branch_exists,
       (SELECT id FROM inventory_movements WHERE reference_id=@forward ORDER BY id DESC LIMIT 1) AS forward_id`)
     .get<{ product_name: string | null; branch_name: string | null; branch_active: number | null; received_at: string | null
-      lot_quantity: number; branch_quantity: number; product_quantity: number; counted_tags: string; counted_receipts: string; lot_exists: number; branch_exists: number; forward_id: number | null }>({
+      lot_quantity: number; branch_quantity: number; product_quantity: number; counted_tags: string; counted_facts: string | null; counted_receipts: string; lot_exists: number; branch_exists: number; forward_id: number | null }>({
       product: before.productId, branch: before.branchId, batch: before.batchId, forward: stockSetReference(row.id, expected),
     })
   // An Undo cannot carry a confirmed redirect: a Set at a branch that has since been disabled stays closed.
@@ -655,13 +656,24 @@ export async function replayStockLotSet(
       WHERE o.id=@operation AND h.id=@history AND o.generation=@generation AND o.state=@oldState AND h.status=@oldStatus
       AND json_extract(h.undo_payload,'$.operation_id')=@operation AND json_extract(h.undo_payload,'$.generation')=@generation)`, params),
   ]
+  let taggedChanges: Statement[] = []
   if (tagged) {
     statements.push(productStockGuardStatement([before.productId], 'active'))
     statements.push(guard(`EXISTS(SELECT 1 FROM damaged_stock_lots d JOIN counted_stock_conversion_lots c ON c.lot_id=d.id
       WHERE d.id=@heldLotId AND d.product_id=@product AND d.branch_id=@branch AND d.batch_id IS @batch AND d.condition_tag=@tag
       AND c.product_id=d.product_id AND c.branch_id=d.branch_id AND c.batch_id IS d.batch_id AND c.condition_tag=d.condition_tag
       AND d.quantity=@held AND d.quantity_remaining=${direction === 'undo' ? '@held' : '0'})`, params))
-    if (direction === 'redo') statements.push(...tagCapacityGuard(before.productId, before.branchId, before.batchId, Math.abs(lotDelta)))
+    try {
+      if (!facts?.counted_facts) throw new StockLotSetReplayError('The current condition stock could not be read.')
+      taggedChanges = planExactCountedTaggedChange(new CountedStockPlan(facts.counted_facts, before.branchId), {
+        lotId: params.heldLotId, productId: before.productId, branchId: before.branchId, batchId: before.batchId,
+      }, Math.abs(lotDelta), direction === 'undo' ? 'clear' : 'retag')
+    } catch (error) {
+      if (isCountedStockConflict(error) || error instanceof MoneyPrecisionError) {
+        throw new StockLotSetReplayError('The exact condition stock changed. Refresh before retrying.', 409, null, 'stock_changed')
+      }
+      throw error
+    }
   }
   if (direction === 'undo') {
     // The counter-movement names the forward row it reverses: removalLosses.ts
@@ -671,7 +683,7 @@ export async function replayStockLotSet(
     statements.push(guard(`EXISTS(SELECT 1 FROM inventory_movements WHERE reference_id=@forward)
       AND NOT EXISTS(SELECT 1 FROM inventory_movements WHERE reference_id='revert:' || (SELECT id FROM inventory_movements WHERE reference_id=@forward ORDER BY id DESC LIMIT 1))`, params))
     if (tagged) {
-      statements.push({ sql: 'UPDATE damaged_stock_lots SET quantity_remaining=quantity_remaining-@held, updated_at=CURRENT_TIMESTAMP WHERE id=@heldLotId AND quantity_remaining>=@held', params })
+      statements.push(...taggedChanges)
     }
     if (!tagged) statements.push(...deltaStatements(current, lotChange, branchChange, facts!))
     statements.push(movementStatement({
@@ -681,7 +693,7 @@ export async function replayStockLotSet(
     }))
   } else {
     if (tagged) {
-      statements.push({ sql: 'UPDATE damaged_stock_lots SET quantity_remaining=quantity_remaining+@held, updated_at=CURRENT_TIMESTAMP WHERE id=@heldLotId AND quantity_remaining=0', params })
+      statements.push(...taggedChanges)
       statements.push(movementStatement({ snapshot: before, effect, user, movementType: 'condition_tag', reason: effect.reason,
         referenceSql: '@reference', extra: { reference: stockSetReference(row.id, next), quantity: 0 } }))
     } else {
