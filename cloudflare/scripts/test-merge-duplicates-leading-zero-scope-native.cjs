@@ -72,18 +72,25 @@ function adapter(d1, beforeMutationBatch) {
         },
       }
     },
+    async batchOnce(statements) { return this.batch(statements) },
     async batch(statements) {
       const readOnly = statements.every(({ sql }) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(sql))
       if (!readOnly) {
         if (mutationHookPending) {
           mutationHookPending = false
-          beforeMutationBatch()
+          await beforeMutationBatch()
         }
         return d1.batch(statements)
       }
       return statements.map(({ sql, params }) => ({ success: true, results: d1.prepare(sql).all(params || {}) }))
     },
   }
+}
+
+const stockTransaction = loadTs(path.join('lib', 'stockTransaction.ts'))
+const productStockGuard = loadTs(path.join('lib', 'productStockGuard.ts'))
+async function stockWrite(d1, statements) {
+  return stockTransaction.executeStockTransaction(adapter(d1), statements, 'once')
 }
 
 function loadRoute(db) {
@@ -98,7 +105,7 @@ function loadRoute(db) {
   // U-cost: merge folds and their undo re-derive the keeper's catalog cost.
   const catalogCost = loadTs(path.join('lib', 'catalogCostRecompute.ts'), { './db': {} })
   const undoAppliers = loadTs(path.join('lib', 'undoAppliers.ts'), {
-    './catalogCostRecompute': catalogCost,
+    './catalogCostRecompute': catalogCost, './stockTransaction': stockTransaction, './productStockGuard': productStockGuard,
     '../index': {}, './auth': {}, './db': { getDb: () => db }, './audit': { audit: async () => {} },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
     './branchWrites': { branchUpdateStatements: () => [] },
@@ -107,6 +114,7 @@ function loadRoute(db) {
   return loadTs(path.join('routes', 'products.ts'), {
     hono: { Hono: CapturingHono },
     '../lib/db': { getDb: () => db },
+    '../lib/stockTransaction': stockTransaction, '../lib/productStockGuard': productStockGuard,
     '../lib/permissions': { getActionTier: () => 'full', hasPermission: () => true, getPermissionTier: () => 'full' },
     '../lib/productIdentity': productIdentity,
     '../lib/productDetailRule': detailRule,
@@ -120,8 +128,8 @@ function loadRoute(db) {
   }).default
 }
 
-function seed() {
-  const d1 = openDb(loadAll())
+function seed(prepare = () => {}) {
+  const d1 = openDb(loadAll({ through: 242 }))
   const raw = d1.db
   raw.exec("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)")
   const insert = raw.prepare(`INSERT INTO products(
@@ -159,6 +167,24 @@ function seed() {
   add(12, 'Aardvark Pair', '555555', 0, 8)
   add(13, 'Zebra Pair', '0666666', 0, 2)
   add(14, 'Zebra Pair', '666666', 0, 200)
+  prepare(raw)
+  const migrations = path.join(__dirname, '..', 'migrations')
+  for (const file of fs.readdirSync(migrations).filter(file => file.endsWith('.sql') && Number(file.slice(0, 4)) > 242).sort()) {
+    const sql = fs.readFileSync(path.join(migrations, file), 'utf8')
+    if (!file.startsWith('0246_')) { raw.exec(sql); continue }
+    raw.exec('BEGIN IMMEDIATE')
+    try {
+      raw.exec("INSERT INTO system_flags(key,value) VALUES('stock_transaction_permit','legacy-separate-pool-v1')")
+      raw.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(JSON.stringify({ mode: 'counted_conversion', token: 'leadingzero-native-fixture' }))
+      raw.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'")
+      raw.exec(sql)
+      raw.exec("DELETE FROM system_flags WHERE key='maintenance'")
+      raw.exec('COMMIT')
+    } catch (error) { raw.exec('ROLLBACK'); throw error }
+  }
+  assert.equal(raw.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get().value, 'counted-tagged-subset-v1')
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key IN ('stock_transaction_permit','maintenance')").get().n, 0)
+  assert.throws(() => raw.prepare('UPDATE products SET stock_quantity=4 WHERE id=1').run(), /stock_transaction_required/)
   return { d1, raw }
 }
 
@@ -211,26 +237,26 @@ async function main() {
   } }))
   assert.equal(malformed.status, 400)
 
-  raw.prepare('UPDATE products SET stock_quantity=4 WHERE id=1').run()
+  await stockWrite(d1, [{ sql: 'UPDATE products SET stock_quantity=4 WHERE id=1' }])
   const stockChanged = await apply(context({ body: {
     scope: 'leading_zero', manifest_version: 1, manifest_digest: result.body.applyManifest.manifest_digest,
     groups: result.body.applyManifest.groups,
   } }))
   assert.equal(stockChanged.status, 409)
   assert.match(stockChanged.body.error, /stock/i)
-  raw.prepare('UPDATE products SET stock_quantity=3 WHERE id=1').run()
+  await stockWrite(d1, [{ sql: 'UPDATE products SET stock_quantity=3 WHERE id=1' }])
 
   const collisionPreview = await preview(context({ scope: 'leading_zero' }))
   // Folds (leading zeros stripped) to '123456', the Clean Pair manifest
   // group's canonical barcode -- a late collision introduced between
   // preview and apply.
-  addOutsider(raw, 'Other Fresh Name', '000123456')
+  await addOutsider(d1, 'Other Fresh Name', '000123456')
   const newCollision = await apply(context({ body: {
     ...collisionPreview.body.applyManifest,
   } }))
   assert.equal(newCollision.status, 409)
   assert.match(newCollision.body.error, /more than one exact product name/i)
-  raw.prepare('DELETE FROM products WHERE id=10').run()
+  await stockWrite(d1, [{ sql: 'DELETE FROM products WHERE id=10' }])
 
   const pricePreview = await preview(context({ scope: 'leading_zero' }))
   raw.prepare('UPDATE products SET selling_price_usd=11 WHERE id=1').run()
@@ -247,7 +273,7 @@ async function main() {
   // the Clean Pair group's one real cluster, changing its membership -- a
   // genuinely different real barcode would instead form its own cluster and
   // never join this group at all.
-  addOutsider(raw, 'Clean Pair', '99')
+  await addOutsider(d1, 'Clean Pair', '99')
   const changedGroup = await apply(context({ body: {
     scope: 'leading_zero', manifest_version: 1, manifest_digest: refreshed.body.applyManifest.manifest_digest,
     groups: refreshed.body.applyManifest.groups,
@@ -278,16 +304,15 @@ async function main() {
   await concurrentGuard('price', (rawDb) => {
     rawDb.prepare('UPDATE products SET selling_price_usd=99 WHERE id=1').run()
   })
-  await concurrentGuard('cross-name folded outsider', (rawDb) => {
+  await concurrentGuard('cross-name folded outsider', (rawDb, d1) => {
     // Folds to '123456', the Clean Pair manifest group's canonical barcode.
-    addOutsider(rawDb, 'Concurrent Other Name', '000123456')
+    return addOutsider(d1, 'Concurrent Other Name', '000123456')
   })
-  await concurrentGuard('new linked history', (rawDb) => {
-    rawDb.prepare(`INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity)
-      VALUES(1,'Clean Pair',1,'Shop','remove',1)`).run()
+  await concurrentGuard('new linked history', (rawDb, d1) => {
+    return stockWrite(d1, [{ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity) VALUES(1,'Clean Pair',1,'Shop','remove',1)` }])
   })
-  await concurrentGuard('received-date metadata', (rawDb) => {
-    rawDb.prepare("UPDATE product_batches SET expiry_date='2031-01-01' WHERE id=100").run()
+  await concurrentGuard('received-date metadata', (rawDb, d1) => {
+    return stockWrite(d1, [{ sql: "UPDATE product_batches SET expiry_date='2031-01-01' WHERE id=100" }])
   }, (rawDb) => {
     rawDb.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,batch_number,received_at,expiry_date,is_active)
       VALUES(100,1,'lot-100','L100',1,'2026-01-01','2030-01-01',1)`).run()
@@ -300,13 +325,13 @@ async function main() {
 
 async function boundedPreviewCohorts() {
   const { d1, raw } = seed()
-  raw.exec('DELETE FROM branch_stock; UPDATE products SET stock_quantity=0; DELETE FROM products;')
+  await stockWrite(d1, [{ sql: 'DELETE FROM branch_stock' }, { sql: 'UPDATE products SET stock_quantity=0' }, { sql: 'DELETE FROM products' }])
   for (let i = 0; i < 12; i++) for (let member = 0; member < 2; member++) {
-    raw.prepare(`INSERT INTO products(id,name,barcode,is_active,is_group,stock_quantity,
+    await stockWrite(d1, [{ sql: `INSERT INTO products(id,name,barcode,is_active,is_group,stock_quantity,
       cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr)
-      VALUES(?,?,?,1,0,0,4,16000,10,40000,8,32000)`).run(
+      VALUES(?,?,?,1,0,0,4,16000,10,40000,8,32000)`, params: [
       100 + i * 2 + member, `Cohort ${String(i).padStart(3, '0')}`, `${member ? '0' : ''}${100000 + i}`,
-    )
+    ] }])
   }
   const base = adapter(d1)
   let calls = 0
@@ -371,10 +396,9 @@ async function boundedPreviewCohorts() {
 }
 
 async function concurrentGuard(label, mutate, prepare = () => {}) {
-  const fixture = seed()
-  fixture.raw.prepare('DELETE FROM products WHERE id IN (11,12,13,14)').run()
-  prepare(fixture.raw)
-  const guardedAdapter = adapter(fixture.d1, () => mutate(fixture.raw))
+  const fixture = seed(prepare)
+  await stockWrite(fixture.d1, [{ sql: 'DELETE FROM products WHERE id IN (11,12,13,14)' }])
+  const guardedAdapter = adapter(fixture.d1, () => mutate(fixture.raw, fixture.d1))
   const app = loadRoute(guardedAdapter)
   const preview = app.routes.find((route) => route.method === 'GET' && route.path === '/merge-duplicates/preview').handler
   const apply = app.routes.find((route) => route.method === 'POST' && route.path === '/merge-duplicates').handler
@@ -387,11 +411,11 @@ async function concurrentGuard(label, mutate, prepare = () => {}) {
   assert.equal(fixture.raw.prepare("SELECT COUNT(*) AS n FROM action_history WHERE scope='products'").get().n, 0, `${label}: rolled-back fold left no history receipt`)
 }
 
-function addOutsider(raw, name, barcode) {
-  raw.prepare(`INSERT INTO products(
+async function addOutsider(d1, name, barcode) {
+  await stockWrite(d1, [{ sql: `INSERT INTO products(
     id,name,barcode,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,
     wholesale_price_usd,wholesale_price_khr,stock_quantity,is_active,is_group
-  ) VALUES(10,?,?,4,16000,10,40000,8,32000,0,1,0)`).run(name, barcode)
+  ) VALUES(10,?,?,4,16000,10,40000,8,32000,0,1,0)`, params: [name, barcode] }])
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1 })
