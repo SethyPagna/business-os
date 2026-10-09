@@ -3,6 +3,7 @@ import { MAX_MONEY_SUM_ITEMS, MoneyPrecisionError, subtractDecimalSum } from './
 type StockWriteStatement = { sql: string; params: Record<string, unknown> }
 
 export type CountedTaggedIdentity = { lotId: number; productId: number; branchId: number; batchId: number | null }
+export type CountedCreatedReceipt = Readonly<{ productId: number; branchId: number; batchKey: string; batchId: number }>
 
 const MAX_COUNTED_ROWS = 10_000
 type ProductFacts = [number, number, number, number | null, number | null, string]
@@ -68,6 +69,8 @@ export class CountedStockPlan {
   private guarded = false
   private addedTags: { batchId: number | null; quantity: number }[] = []
   private readonly createdReceipts = new Map<string, number>()
+  private readonly createdReceiptIdentities = new Map<string, CountedCreatedReceipt>()
+  private readonly createdReceiptTags = new Map<string, number[]>()
   private readonly additionalReceiptIds: string
   readonly productId: number
   readonly branchId: number
@@ -138,7 +141,8 @@ export class CountedStockPlan {
 
   private quantities(batchId?: number | null): number[] {
     return [...this.facts.tags.filter(row => batchId === undefined || row[1] === batchId).map(row => row[3]),
-      ...this.addedTags.filter(row => batchId === undefined || row.batchId === batchId).map(row => row.quantity)]
+      ...this.addedTags.filter(row => batchId === undefined || row.batchId === batchId).map(row => row.quantity),
+      ...(batchId === undefined ? [...this.createdReceiptTags.values()].flat() : [])]
   }
 
   private capacity(batchId: number | null): number {
@@ -188,10 +192,13 @@ export class CountedStockPlan {
     return this.facts.receipts.find(row => row[7] === batchKey)?.[0] ?? null
   }
 
-  receiveProjectedCreatedReceipt(batchKey: string, quantity: number): { guards: StockWriteStatement[]; statements: StockWriteStatement[] } {
+  receiveProjectedCreatedReceipt(batchKey: string, quantity: number, reservedBatchId?: number): { guards: StockWriteStatement[]; statements: StockWriteStatement[]; createdReceipt: CountedCreatedReceipt | null } {
     if (!batchKey || this.createdReceipts.has(batchKey) || this.projectedReceiptByKey(batchKey) !== null) throw new CountedStockConflictError()
+    if (reservedBatchId !== undefined && (!Number.isSafeInteger(reservedBatchId) || reservedBatchId <= 0 || this.facts.receipts.some(row => row[0] === reservedBatchId))) throw new CountedStockConflictError()
     const statements = this.changeOrdinary(null, quantity, 'receive')
     this.createdReceipts.set(batchKey, quantity)
+    const createdReceipt = reservedBatchId === undefined ? null : Object.freeze({ productId: this.productId, branchId: this.branchId, batchKey, batchId: reservedBatchId })
+    if (createdReceipt) this.createdReceiptIdentities.set(batchKey, createdReceipt)
     const params = { productId: this.productId, branchId: this.branchId, newReceiptKey: batchKey, nextReceipt: quantity }
     this.physical(statements, `receipt:event:${this.productId}:${this.branchId}:${batchKey}`, {
       sql: `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)
@@ -201,7 +208,16 @@ export class CountedStockPlan {
     this.assertSource(null)
     return { guards: [{ sql: `SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM product_batches
       WHERE variant_product_id=@productId AND batch_key=@newReceiptKey)
-      THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`, params }], statements }
+      THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`, params }], statements, createdReceipt }
+  }
+
+  holdCreatedReceipt(receipt: CountedCreatedReceipt, quantity: number): StockWriteStatement[] {
+    if (this.createdReceiptIdentities.get(receipt.batchKey) !== receipt || !Number.isFinite(quantity) || quantity <= 0) throw new CountedStockConflictError()
+    const tagged = this.createdReceiptTags.get(receipt.batchKey) ?? []
+    if (subtractCountedQuantity(this.createdReceipts.get(receipt.batchKey)!, [...tagged, quantity]) < 0
+      || subtractCountedQuantity(this.branchQuantity, [...this.quantities(), quantity]) < 0) throw new CountedStockConflictError()
+    this.createdReceiptTags.set(receipt.batchKey, [...tagged, quantity])
+    return this.preimageGuard()
   }
 
   changeOrdinary(batchId: number | null, quantity: number, action: 'consume' | 'receive' | 'activateAndReceive'): StockWriteStatement[] {

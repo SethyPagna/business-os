@@ -1,6 +1,6 @@
 import { productStockGuardStatement } from './productStockGuard'
 import { planCountedTaggedChange, tagCapacityGuard, planExactCountedTagCapacity, planExactCountedTaggedChange,
-  subtractCountedQuantity, sumCountedQuantities, type CountedStockPlan } from './countedDamagedStock'
+  subtractCountedQuantity, sumCountedQuantities, CountedStockConflictError, type CountedCreatedReceipt, type CountedStockPlan } from './countedDamagedStock'
 import type { D1Compat } from './db'
 import type { StockWriteStatement } from './productBatches'
 import { createDamagedLotStatement } from './returnsStock'
@@ -156,6 +156,11 @@ export function planHoldAsTagged(input: HoldAsTaggedInput): StockWriteStatement[
 
 export function planHoldAsTaggedExact(input: HoldAsTaggedInput, exact: CountedStockPlan): StockWriteStatement[] {
   return holdStatements(input, planExactCountedTagCapacity(exact, input.productId, input.branchId, input.batchId, input.quantity))
+}
+
+export function planHoldAsTaggedCreatedReceipt(input: Omit<HoldAsTaggedInput, 'batchId'>, exact: CountedStockPlan, receipt: CountedCreatedReceipt): StockWriteStatement[] {
+  if (input.productId !== receipt.productId || input.branchId !== receipt.branchId) throw new CountedStockConflictError()
+  return holdStatements({ ...input, batchId: receipt.batchId }, exact.holdCreatedReceipt(receipt, input.quantity))
 }
 
 /** The code the in-batch guard below aborts with; the route answers 409 with it. */
