@@ -1,5 +1,6 @@
 import { executeStockTransaction } from './stockTransaction'
-import { productStockGuardError, productStockGuardStatement } from './productStockGuard'
+import { ProductStockGuardError, productStockGuardError, productStockGuardStatement } from './productStockGuard'
+import { CountedStockBatchPlan, countedStockFactsSql } from './countedDamagedStock'
 import type { D1Compat } from './db'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from './receiptNumber'
 import { RETURN_STATUSES } from './salesStatus'
@@ -427,6 +428,17 @@ export async function applyHistoricalSaleImport(
   const returnStockParams: Array<Record<string, unknown>> = []
 
   const isReturnGroup = RETURN_STATUSES.has(d.sale_status)
+  const restockedItems = isReturnGroup ? normalizedItems.filter(item => Number(item.returned_quantity) > 0) : []
+  const restockedProductIds = [...new Set(restockedItems.map(item => Number(item.product_id)))]
+  const restockFacts = restockedItems.length ? await db.prepare(`SELECT p.id,p.is_active,
+    ${countedStockFactsSql('p.id', '@branch_id', '@receipt_ids')} AS facts FROM products p
+    WHERE p.id IN (SELECT value FROM json_each(@product_ids)) ORDER BY p.id`)
+    .all<{ id: number; is_active: number; facts: string }>({ branch_id: saleHeaderBranchId,
+      product_ids: JSON.stringify(restockedProductIds), receipt_ids: JSON.stringify(uniqueBatchReferences.map(row => row.batch_id)) }) : []
+  const removedProducts = restockedProductIds.filter(id => !restockFacts.some(row => row.id === id && row.is_active === 1))
+  if (removedProducts.length) throw new ProductStockGuardError(removedProducts)
+  const exactRestock = new CountedStockBatchPlan(restockFacts.map(row => ({ facts: row.facts, branchId: saleHeaderBranchId })), { deferPhysicalWrites: true })
+  const restockGuards: Array<{ sql: string; params: Record<string, unknown> }> = []
   for (const item of normalizedItems) {
     statements.push({
       sql: `INSERT INTO sale_items (
@@ -463,29 +475,8 @@ export async function applyHistoricalSaleImport(
     const activeGuard = productStockGuardStatement([Number(item.product_id)], 'active')
     statements.unshift({ sql: activeGuard.sql.replace('AND p.is_active IS NOT 1', `AND p.is_active IS NOT 1 AND ${writeGuard}`),
       params: { ...activeGuard.params, ...common } })
-    statements.push({
-      sql: `UPDATE products SET stock_quantity = stock_quantity + @returned_quantity, updated_at = @updated_at
-            WHERE id = @product_id AND ${writeGuard}`,
-      params: stockParams,
-    })
-    if (item.branch_id) {
-      statements.push({
-        sql: `INSERT INTO branch_stock (product_id, branch_id, quantity)
-              SELECT @product_id, @branch_id, @returned_quantity WHERE ${writeGuard}
-              ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity + excluded.quantity`,
-        params: stockParams,
-      })
-      if (item.batch_id) {
-        statements.push({
-          sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity)
-                SELECT @batch_id, @branch_id, @returned_quantity WHERE ${writeGuard}
-                ON CONFLICT(batch_id, branch_id) DO UPDATE SET
-                  quantity = branch_batch_stock.quantity + excluded.quantity,
-                  updated_at = CURRENT_TIMESTAMP`,
-          params: stockParams,
-        })
-      }
-    }
+    restockGuards.push(...exactRestock.get(Number(item.product_id), saleHeaderBranchId)
+      .changeOrdinary(item.batch_id ? Number(item.batch_id) : null, returnedQuantity, 'receive'))
     statements.push({
       // 0084: the historical line's recorded lot (when it had one) is the
       // lot the restock above bumped -- stamp it; NULL otherwise.
@@ -497,6 +488,13 @@ export async function applyHistoricalSaleImport(
     })
   }
 
+  statements.unshift(...restockGuards.map(guard => ({
+    sql: `SELECT CASE WHEN (${currentHistoricalReferencesGuard}) AND NOT EXISTS (
+      SELECT 1 FROM import_sales_commits WHERE job_id=@job_id AND group_key=@group_key AND status IS NOT 'pending'
+    ) THEN (${guard.sql}) ELSE json_extract('[]','$[historical_sale_source_conflict]') END`,
+    params: { ...guard.params, ...common },
+  })))
+  statements.push(...exactRestock.takeFinalPhysicalWrites())
   statements.push({
     sql: `UPDATE import_sales_commits SET status = 'applied', applied_at = CURRENT_TIMESTAMP
           WHERE job_id = @job_id AND group_key = @group_key AND status = 'pending'
@@ -510,11 +508,14 @@ export async function applyHistoricalSaleImport(
   // rethrown unchanged.
   for (let attempt = 0; ; attempt++) {
     try {
-      await executeStockTransaction(db, statements, 'retry')
+      await executeStockTransaction(db, statements, 'once')
       break
     } catch (batchError) {
       const activeGuard = productStockGuardError(batchError)
       if (activeGuard) throw activeGuard
+      if (String(batchError).includes('$[historical_sale_source_conflict]')) {
+        throw new Error('Historical sale did not commit because its Shop branch or received-date reference changed before the atomic write')
+      }
       const ownSale = await db.prepare(`SELECT 1 AS hit FROM sales
         WHERE client_request_id = @client_request_id AND client_request_id <> '' LIMIT 1`)
         .get({ client_request_id: clientRequestId })
