@@ -1,12 +1,12 @@
 import { executeStockTransaction, stockTransactionStatementCount } from './stockTransaction'
-import { productStockGuardStatement, productStockGuardError } from './productStockGuard'
+import { productStockGuardError } from './productStockGuard'
 import { getDb, type D1Compat } from './db';
 import type { Env } from '../index';
 import type { SessionUser } from './auth';
 import { getActionTier, isAdminControlUser } from './permissions';
 import { D1_MAX_BOUND_PARAMS } from './sqlBinding';
 import { VALID_SALE_STATUSES } from './salesStatus';
-import { addImportedReturnedQuantities, allocateReturnedQuantities, guardSaleStatusTransition, heldQuantity, normalizeCancelReason, planSaleStockTransition, type TransitionItem, type StockStatement } from './saleTransitions';
+import { addImportedReturnedQuantities, allocateReturnedQuantities, guardSaleStatusTransition, heldQuantity, normalizeCancelReason, type TransitionItem, type StockStatement } from './saleTransitions';
 import { bumpVersion } from './cache';
 import { broadcast } from '../durable-objects/broadcastHub';
 import { actorSnapshot } from './actorSnapshot';
@@ -16,6 +16,11 @@ import { sellingBranchConditionSql } from './branchRoleGuards';
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents';
 import type { SaleRecordChange, SaleRecordValueState } from './saleRecords';
 import { statusChangeNeedsPayment } from './saleStatusResolution';
+import { CountedStockBatchPlan, countedStockFactsSql, planExactCountedOrdinaryChange, planExactCountedTaggedChange,
+    sumCountedQuantities, subtractCountedQuantity, isCountedStockConflict } from './countedDamagedStock';
+import { MoneyPrecisionError } from './moneyPrecision';
+import { currentRequestMetrics } from './requestMetrics';
+import { getPlanLimits } from './planTier';
 export const BULK_STATUS_KIND = 'sale.status.bulk';
 export const BULK_STATUS_LIMIT = 25;
 export const BULK_STATUS_MOVEMENT_LIMIT = 256;
@@ -33,6 +38,7 @@ type Allocation = Row & {
     released_at: string | null;
 };
 type StockDelta = {
+    itemId?: number;
     product: number;
     branch: number;
     quantity: number;
@@ -214,6 +220,14 @@ function bounded(statements: StockStatement[], snapshot: Snapshot, eventsBytes =
         throw new SaleBulkError('Selection is too large for one atomic action. Select fewer sales.', 400);
     }
 }
+function queryBudget(env: Env, statements: StockStatement[], members: Member[], replay: boolean): void {
+    const planned = members.some(member => member.stock.length > 0) ? stockTransactionStatementCount(statements.length) : statements.length;
+    const used = currentRequestMetrics()?.invocation.attemptedStatements ?? 18;
+    const tail = replay ? 16 : 12;
+    if (used + planned + tail > getPlanLimits(env).d1QueriesPerInvocation)
+        throw new SaleBulkError('Selection is too large for one request. Select fewer sales.', 409,
+            { code: 'sale_bulk_over_plan_budget', outcome: 'not_dispatched' });
+}
 function recordState(value: unknown): SaleRecordValueState {
     return value === null || value === undefined ? { state: 'known_none' } : { state: 'known_value', value };
 }
@@ -237,35 +251,132 @@ function statusRecordEvents(members: Member[], operationId: string, generation: 
         };
     }));
 }
-function stockStatements(member: Member, sign: number, user: SessionUser, stamp: string): StockStatement[] {
+type GroupStock = { exact: CountedStockBatchPlan; guards: StockStatement[];
+    tagged: Map<StockDelta, { batch: number | null; condition: string; costUsd: number; costKhr: number }> };
+
+function exactRefusal(error: unknown): never {
+    if (isCountedStockConflict(error) || error instanceof MoneyPrecisionError)
+        throw new SaleBulkError('The stock or condition source changed. Refresh before retrying.', 409, { code: 'write_conflict' });
+    throw error;
+}
+
+function planMemberStock(member: Member, stamp: string): void {
+    if (!member.changed || member.skipped) return;
+    const returned = new Map(member.returned);
+    for (const item of member.items) {
+        const quantity = subtractCountedQuantity(heldQuantity(String(member.before.sale_status), item.quantity, returned.get(item.id) || 0, true),
+            [heldQuantity(String(member.after.sale_status), item.quantity, returned.get(item.id) || 0, true)]);
+        if (!quantity) continue;
+        if (!item.product_id || !item.branch_id) fail('A stock-moving line has no product or branch.');
+        const move: StockDelta = { itemId: item.id, product: item.product_id, branch: item.branch_id, quantity,
+            batch: null, lot: item.damaged_lot_id, name: item.product_name, costUsd: item.cost_price_usd || 0,
+            costKhr: item.cost_price_khr || 0, sale: member.id,
+            ...(item.effect ? { branchName: item.effect.branchName, addressed: item.effect.addressedName } : {}) };
+        if (!item.damaged_lot_id) {
+            let remaining = Math.abs(quantity);
+            const touched: BatchDelta[] = [];
+            const allocations = quantity > 0 ? [...item.allocations || []].reverse() : item.allocations || [];
+            for (const allocation of allocations) {
+                if (allocation.released_quantity < 0 || allocation.released_quantity > allocation.quantity)
+                    fail('Sale received-date allocations changed.');
+                if (!remaining) continue;
+                const capacity = quantity > 0 ? subtractCountedQuantity(allocation.quantity, [allocation.released_quantity]) : allocation.released_quantity;
+                const share = Math.min(capacity, remaining);
+                if (!share) continue;
+                const released = sumCountedQuantities([allocation.released_quantity, quantity > 0 ? share : -share]);
+                const before = { ...allocation } as Allocation;
+                member.allocations.push({ before, after: { ...before, released_quantity: released,
+                    released_at: released <= 0 ? null : released >= allocation.quantity ? stamp : before.released_at } });
+                touched.push({ product: item.product_id, branch: item.branch_id, batch: allocation.batch_id, quantity: quantity > 0 ? share : -share });
+                remaining = subtractCountedQuantity(remaining, [share]);
+            }
+            if (allocations.length && remaining) fail('Sale received-date allocations cannot cover the transition.');
+            if (!allocations.length && item.batch_id) touched.push({ product: item.product_id, branch: item.branch_id, batch: item.batch_id, quantity });
+            member.batches.push(...touched);
+            if (touched.length === 1 && touched[0].quantity === quantity) move.batch = touched[0].batch;
+        }
+        member.stock.push(move);
+    }
+}
+
+function conditionRowsSql(): string {
+    return `(SELECT json_group_array(json_array(sale_item_id,lot_id,product_id,branch_id,batch_id,condition_tag))
+        FROM (SELECT * FROM counted_sale_item_conditions WHERE sale_item_id IN(SELECT CAST(value AS INTEGER) FROM json_each(@itemIds)) ORDER BY sale_item_id))`;
+}
+
+async function captureGroupStock(db: D1Compat, members: Member[]): Promise<GroupStock> {
+    const moves = members.flatMap(member => member.stock);
+    const pairs = [...new Map(moves.map(move => [`${move.product}:${move.branch}`, [move.product, move.branch]])).values()];
+    if (!pairs.length) return { exact: new CountedStockBatchPlan([], { deferPhysicalWrites: true }), guards: [], tagged: new Map() };
+    const itemIds = JSON.stringify(members.flatMap(member => member.items.filter(item => item.damaged_lot_id).map(item => item.id)));
+    const receipts = JSON.stringify([...new Set(members.flatMap(member => member.batches.map(delta => delta.batch)))]);
+    const source = await db.prepare(`SELECT (SELECT json_group_array(json_object('branchId',json_extract(value,'$[1]'),
+        'facts',(${countedStockFactsSql("json_extract(value,'$[0]')", "json_extract(value,'$[1]')", '@receipts')})||'')) FROM json_each(@pairs)) facts,
+        ${conditionRowsSql()} conditions`).get<{ facts: string; conditions: string }>({ pairs: JSON.stringify(pairs), receipts, itemIds });
+    if (!source) fail('The grouped stock source is missing.');
+    const exact = new CountedStockBatchPlan(JSON.parse(source.facts), { deferPhysicalWrites: true });
+    const conditions = JSON.parse(source.conditions) as Array<[number, number, number, number, number | null, string]>;
+    const tagged: GroupStock['tagged'] = new Map();
+    for (const member of members) {
+        const groups = new Map<string, StockDelta[]>();
+        for (const move of member.stock.filter(move => move.lot)) {
+            const key = `${move.product}:${move.branch}:${move.lot}`;
+            groups.set(key, [...groups.get(key) || [], move]);
+        }
+        for (const group of groups.values()) {
+            const first = group[0], returned = new Map(member.returned);
+            const items = member.items.filter(item => item.product_id === first.product && item.branch_id === first.branch && item.damaged_lot_id === first.lot);
+            const deltas = items.map(item => subtractCountedQuantity(heldQuantity(String(member.before.sale_status), item.quantity, returned.get(item.id) || 0, true),
+                [heldQuantity(String(member.after.sale_status), item.quantity, returned.get(item.id) || 0, true)]));
+            if (!items.length || sumCountedQuantities(deltas) !== sumCountedQuantities(group.map(move => move.quantity))) fail('Saved tagged stock quantities do not match their sale lines.');
+            const identities = items.map(item => conditions.find(row => row[0] === item.id));
+            if (identities.some(row => !row || row[1] !== first.lot || row[2] !== first.product || row[3] !== first.branch)) fail('Saved tagged sale identity is missing or changed.');
+            const identity = identities[0]!;
+            if (identities.some(row => JSON.stringify(row!.slice(1)) !== JSON.stringify(identity.slice(1)))) fail('Saved tag identities disagree.');
+            const current = exact.get(first.product, first.branch).projectedTaggedSource(first.lot!);
+            if (!current || current.batchId !== identity[4] || current.conditionTag !== identity[5]) fail('The original tag or receipt identity changed.');
+            for (const move of group) {
+                const own = move.itemId ? items.filter(item => item.id === move.itemId) : items;
+                if (!own.length || own.some(item => (item.cost_price_usd || 0) !== (own[0].cost_price_usd || 0) || (item.cost_price_khr || 0) !== (own[0].cost_price_khr || 0)))
+                    fail('Saved tagged stock cost attribution is ambiguous.');
+                tagged.set(move, { batch: identity[4], condition: identity[5], costUsd: own[0].cost_price_usd || 0, costKhr: own[0].cost_price_khr || 0 });
+            }
+        }
+    }
+    return { exact, tagged, guards: [...exact.takePreimageGuards(), bulkAssertion(`${conditionRowsSql()}=@conditions`, { itemIds, conditions: source.conditions })] };
+}
+
+function stockStatements(member: Member, sign: number, user: SessionUser, stamp: string, stock: GroupStock): StockStatement[] {
     const out: StockStatement[] = [];
+    const ordinary = new Map<string, { product: number; branch: number; quantities: number[] }>();
     for (const move of member.stock) {
         const q = move.quantity * sign;
         const p = { product: move.product, branch: move.branch, q, lot: move.lot, stamp };
-        if (q > 0) out.unshift(productStockGuardStatement([Number(move.product)], 'active'));
         if (move.lot) {
-            out.push(bulkAssertion('EXISTS(SELECT 1 FROM damaged_stock_lots WHERE id=@lot AND product_id=@product AND branch_id IS @branch AND quantity_remaining+@q BETWEEN 0 AND quantity)', p));
-            out.push({ sql: 'UPDATE damaged_stock_lots SET quantity_remaining=quantity_remaining+@q, updated_at=@stamp WHERE id=@lot', params: p });
+            const identity = stock.tagged.get(move);
+            if (!identity) fail('The tagged stock source is missing.');
+            out.push(...planExactCountedTaggedChange(stock.exact.get(move.product, move.branch),
+                { lotId: move.lot, productId: move.product, branchId: move.branch, batchId: identity.batch }, Math.abs(q), q > 0 ? 'restore' : 'consume'));
         }
         else {
-            out.push(bulkAssertion('EXISTS(SELECT 1 FROM products WHERE id=@product AND stock_quantity+@q>=0) AND EXISTS(SELECT 1 FROM branches WHERE id=@branch) AND (@q>=0 OR EXISTS(SELECT 1 FROM branch_stock WHERE product_id=@product AND branch_id=@branch AND quantity+@q>=0))', p));
-            out.push({ sql: 'INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(@product,@branch,@q) ON CONFLICT(product_id,branch_id) DO UPDATE SET quantity=quantity+@q', params: p });
-            // The INSERT value must itself satisfy CHECK on an existing row too.
-            if (q < 0)
-                out[out.length - 1] = { sql: 'UPDATE branch_stock SET quantity=quantity+@q WHERE product_id=@product AND branch_id=@branch', params: p };
-            out.push({ sql: 'UPDATE products SET stock_quantity=stock_quantity+@q, updated_at=@stamp WHERE id=@product', params: p });
+            const key = `${move.product}:${move.branch}`;
+            const record = ordinary.get(key) || { product: move.product, branch: move.branch, quantities: [] };
+            record.quantities.push(q); ordinary.set(key, record);
         }
         const labelled = !!move.addressed;
-        out.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id${labelled ? ',branch_name,addressed_branch_name' : ''},movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id) VALUES(@product,@name,@branch${labelled ? ',@branchName,@addressed' : ''},@type,@q,@usd,@khr,@reason,@sale,@uid,@uname,@batch)`, params: { ...p, ...(labelled ? { branchName: move.branchName ?? null, addressed: move.addressed } : {}), name: move.name, type: move.lot ? (q > 0 ? 'damage_in' : 'damage_out') : (q > 0 ? 'return' : 'sale'), usd: move.costUsd, khr: move.costKhr, reason: `${sign < 0 ? 'Undo' : 'Apply'} grouped sale status`, sale: member.id, uid: user.id, uname: actorSnapshot(user), batch: move.batch } });
+        const source = stock.tagged.get(move);
+        out.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id${labelled ? ',branch_name,addressed_branch_name' : ''},movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id) VALUES(@product,@name,@branch${labelled ? ',@branchName,@addressed' : ''},@type,@q,@usd,@khr,@reason,@sale,@uid,@uname,@batch)`, params: { ...p, ...(labelled ? { branchName: move.branchName ?? null, addressed: move.addressed } : {}), name: move.name, type: move.lot ? (q > 0 ? 'damage_in' : 'damage_out') : (q > 0 ? 'return' : 'sale'), usd: source ? source.costUsd : move.costUsd, khr: source ? source.costKhr : move.costKhr, reason: `${sign < 0 ? 'Undo' : 'Apply'} grouped sale status`, sale: member.id, uid: user.id, uname: actorSnapshot(user), batch: source ? source.batch : move.batch } });
     }
     for (const move of member.batches) {
-        const p = { ...move, q: move.quantity * sign, stamp };
-        out.push(bulkAssertion('EXISTS(SELECT 1 FROM product_batches WHERE id=@batch AND variant_product_id=@product) AND (@q>=0 OR EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch AND quantity+@q>=0))', p));
-        // A depleted lot may have been archived. Restore its selectable parent
-        // before the positive stock write, in this same guarded transaction.
-        if (p.q > 0)
-            out.push({ sql: 'UPDATE product_batches SET is_active=1 WHERE id=@batch AND variant_product_id=@product AND is_active IS NOT 1', params: p });
-        out.push({ sql: p.q < 0 ? 'UPDATE branch_batch_stock SET quantity=quantity+@q, updated_at=@stamp WHERE batch_id=@batch AND branch_id=@branch' : 'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(@batch,@branch,@q) ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=quantity+@q,updated_at=@stamp', params: p });
+        const q = move.quantity * sign, exact = stock.exact.get(move.product, move.branch);
+        const record = ordinary.get(`${move.product}:${move.branch}`);
+        if (!record) fail('Saved receipt stock has no ordinary sale movement.');
+        record.quantities.push(-q);
+        out.push(...planExactCountedOrdinaryChange(exact, move.batch, Math.abs(q), q < 0 ? 'consume' : exact.requiresReceiptActivation(move.batch) ? 'activateAndReceive' : 'receive'));
+    }
+    for (const record of ordinary.values()) {
+        const quantity = sumCountedQuantities(record.quantities);
+        if (quantity) out.push(...planExactCountedOrdinaryChange(stock.exact.get(record.product, record.branch), null, Math.abs(quantity), quantity < 0 ? 'consume' : 'receive'));
     }
     for (const a of member.allocations) {
         const target = sign < 0 ? a.before : a.after;
@@ -273,11 +384,11 @@ function stockStatements(member: Member, sign: number, user: SessionUser, stamp:
     }
     return out;
 }
-function memberStatements(member: Member, sign: number, user: SessionUser, stamp: string): StockStatement[] {
+function memberStatements(member: Member, sign: number, user: SessionUser, stamp: string, stock: GroupStock): StockStatement[] {
     if (!member.changed)
         return [];
     const target = sign < 0 ? member.before : member.after;
-    const out = stockStatements(member, sign, user, stamp);
+    const out = stockStatements(member, sign, user, stamp, stock);
     if (member.createdFee) {
         if (sign > 0) {
             out.push(bulkAssertion('NOT EXISTS(SELECT 1 FROM fees WHERE id=@id)', { id: member.createdFee.id }));
@@ -317,6 +428,9 @@ export async function notifyBulkStatus(env: Env) {
     await Promise.allSettled([bumpVersion(env, 'sales'), bumpVersion(env, 'stock'), ...(['sales', 'products', 'inventory', 'returns', 'fees'] as const).map(channel => broadcast(env, channel, { action: 'update' }))]);
 }
 export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row, redirectTarget: number | null = null) {
+    try { return await applySaleBulkStatusKernel(env, user, raw, redirectTarget); } catch (error) { return exactRefusal(error); }
+}
+async function applySaleBulkStatusKernel(env: Env, user: SessionUser, raw: Row, redirectTarget: number | null) {
     permission(user);
     const request = parseRequest(raw);
     if (request.skip_stock && !isAdminControlUser(user))
@@ -432,18 +546,18 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
         for (const r of returns.filter(r => r.sale_id === expected.id)) {
             const map = r.sale_item_id ? itemReturned : productReturned;
             const key = Number(r.sale_item_id || r.product_id);
-            map.set(key, (map.get(key) || 0) + r.quantity);
+            map.set(key, sumCountedQuantities([map.get(key) || 0, r.quantity]));
         }
         // RET-B F4: imported return-status lines (sale_items.returned_quantity), as the single route.
-        addImportedReturnedQuantities(itemReturned, own as Array<Item & { returned_quantity?: unknown }>);
-        const returned = allocateReturnedQuantities(own, itemReturned, productReturned);
+        addImportedReturnedQuantities(itemReturned, own as Array<Item & { returned_quantity?: unknown }>, true);
+        const returned = allocateReturnedQuantities(own, itemReturned, productReturned, true);
         for (const item of own)
             item.allocations = allocations.filter(a => a.sale_item_id === item.id);
         const skipped = (changed && !!request.skip_stock) || Number(sale.stock_skipped) === 1;
         try {
             await redirectStockItems(db, resolver, own, {
                 moves: item => changed && !skipped && !!item.product_id && !!item.branch_id
-                    && heldQuantity(old, item.quantity, returned.get(item.id) || 0) !== heldQuantity(request.target_status, item.quantity, returned.get(item.id) || 0),
+                    && heldQuantity(old, item.quantity, returned.get(item.id) || 0, true) !== heldQuantity(request.target_status, item.quantity, returned.get(item.id) || 0, true),
                 saleBranchId: Number(sale.branch_id) || null, saleLabel: typeof sale.sale_branch_label === 'string' && sale.sale_branch_label ? sale.sale_branch_label : null,
             });
         }
@@ -489,54 +603,24 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
             if (!member.fee)
                 fail('Linked cancellation fee is missing.');
         }
-        const plan = planSaleStockTransition({ saleId: expected.id, oldStatus: old, newStatus: request.target_status, items: own.filter(i => !i.damaged_lot_id), returnedByItem: returned, reason: 'Grouped sale status', userId: user.id, userName: actorSnapshot(user), skipStock: skipped });
-        // The existing transition kernel decides every regular movement and batch delta.
-        // Persist typed deltas, never executable SQL, for an exact inverse after reload.
-        for (const statement of plan.statements) {
-            const p = statement.params;
-            if (statement.sql.startsWith('INSERT INTO inventory_movements'))
-                member.stock.push({ product: Number(p.product_id), branch: Number(p.branch_id), quantity: Number(p.quantity), batch: p.batch_id ? Number(p.batch_id) : null, lot: null, name: p.product_name as string | null, costUsd: Number(p.unit_cost_usd), costKhr: Number(p.unit_cost_khr), sale: expected.id, ...(p.addressed_branch_name ? { branchName: (p.branch_name as string | null) ?? null, addressed: String(p.addressed_branch_name) } : {}) });
-            if (statement.sql.startsWith('UPDATE branch_batch_stock') || statement.sql.startsWith('INSERT INTO branch_batch_stock')) {
-                const item = own.find(i => i.batch_id === p.batchId || i.allocations?.some(a => a.batch_id === p.batchId))!;
-                member.batches.push({ batch: Number(p.batchId), branch: Number(p.branchId), product: Number(item.product_id), quantity: Number(p.quantity) * (statement.sql.startsWith('UPDATE') ? -1 : 1) });
-            }
-            if (statement.sql.includes('UPDATE sale_item_batch_allocations') && p.id) {
-                const a = allocations.find(a => a.id === p.id)!, next = { ...a };
-                next.released_quantity += Number(p.give || 0) - Number(p.take || 0);
-                next.released_at = next.released_quantity <= 0 ? null : next.released_quantity >= next.quantity ? stamp : a.released_at;
-                member.allocations.push({ before: { ...a }, after: next });
-            }
-        }
-        if (changed && !skipped)
-            for (const item of own) {
-                const delta = heldQuantity(old, item.quantity, returned.get(item.id) || 0) - heldQuantity(request.target_status, item.quantity, returned.get(item.id) || 0);
-                if (!delta)
-                    continue;
-                if (!item.product_id || !item.branch_id)
-                    fail('A stock-moving line has no product or branch.');
-                if (item.damaged_lot_id)
-                    member.stock.push({ product: item.product_id, branch: item.branch_id, quantity: delta, batch: null, lot: item.damaged_lot_id, name: item.product_name, costUsd: 0, costKhr: 0, sale: expected.id });
-                else if (item.allocations?.length) {
-                    const capacity = item.allocations.reduce((n, a) => n + (delta > 0 ? a.quantity - a.released_quantity : a.released_quantity), 0);
-                    if (capacity < Math.abs(delta) || item.allocations.some(a => a.released_quantity < 0 || a.released_quantity > a.quantity))
-                        fail('Sale received-date allocations cannot cover the transition.');
-                }
-            }
+        planMemberStock(member, stamp);
         // Do not create an undoable action already at the fingerprint ceiling:
         // reserve room for its forward movements AND its first full undo.
         if (JSON.parse(String(sale.movement_fingerprint)).length + 2 * member.stock.length > BULK_STATUS_MOVEMENT_LIMIT)
             throw new SaleBulkError('This sale has too much stock history for a bulk action and its undo.', 400);
         members.push(member);
     }
+    const stock = await captureGroupStock(db, members);
     const snapshot: Snapshot = { version: 1, operationId, members };
     const changedIds = members.filter(m => m.changed).map(m => m.id), unchangedIds = members.filter(m => !m.changed).map(m => m.id);
     const receipt = { operationId, changedIds, unchangedIds, changedCount: changedIds.length, unchangedCount: unchangedIds.length, currentReplayGeneration: 0, items: members.map(m => ({ id: m.id, receipt_number: m.receipt, before: m.before.sale_status, after: m.after.sale_status, changed: m.changed, reason: m.changed ? 'changed' : (request.source_status !== undefined && m.before.sale_status !== request.source_status ? 'source_mismatch' : 'already_target'), stock_skipped: m.skipped })) };
     const effectGuards = resolver.guards();
     if (effectGuards.length)
         guards.push(bulkAssertion(branchEffectGuardPredicate('@effects'), { effects: JSON.stringify(effectGuards) }));
-    const statements: StockStatement[] = [...guards, { sql: 'INSERT INTO sale_bulk_operations(id,actor_id,request_id,request_json,receipt_json) VALUES(@id,@actor,@request,@canonical,@receipt)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical, receipt: JSON.stringify(receipt) } }];
+    const statements: StockStatement[] = [...stock.guards, ...guards, { sql: 'INSERT INTO sale_bulk_operations(id,actor_id,request_id,request_json,receipt_json) VALUES(@id,@actor,@request,@canonical,@receipt)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical, receipt: JSON.stringify(receipt) } }];
     for (const m of members)
-        statements.push(...memberStatements(m, 1, user, stamp));
+        statements.push(...memberStatements(m, 1, user, stamp, stock));
+    statements.push(...stock.exact.takeFinalPhysicalWrites());
     const recordEvents = statusRecordEvents(members, operationId, 0, 'apply', user, stamp);
     if (recordEvents)
         statements.push(recordEvents.statement);
@@ -549,8 +633,9 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
         statements.push({ sql: `INSERT INTO sale_bulk_members(operation_id,sale_id,revision,movement_fingerprint) VALUES(@op,@id,COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@id),0),${saleMovementFingerprint('@id')})`, params: { op: operationId, id: m.id } });
     statements.push(auditStatement(user, operationId, 'sale_status_bulk', changedIds.length), { sql: 'DELETE FROM sale_bulk_guards', params: {} });
     bounded(statements, snapshot, recordEvents?.eventsBytes || 0);
+    queryBudget(env, statements, members, false);
     try {
-        const results = await (members.some(member => member.stock.length > 0) ? executeStockTransaction(db, statements, 'retry') : db.batch(statements));
+        const results = await (members.some(member => member.stock.length > 0) ? executeStockTransaction(db, statements, 'once') : db.batchOnce(statements));
         return { ...receipt, actionHistoryId: Number(results[historyStatementIndex].meta.last_row_id) };
     }
     catch (error) {
@@ -561,12 +646,15 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
 
         if (activeGuard) throw activeGuard
 
-        if (/constraint/i.test(String(error)))
+        if (/CHECK constraint failed:\s*guard_value\s*=\s*1/i.test(String(error)))
             fail('Sale or stock changed. The entire group was rejected; refresh before retrying.');
         throw error;
     }
 }
 export async function replaySaleBulkStatus(env: Env, user: SessionUser, direction: 'undo' | 'redo', historyId: number, generation: unknown, payload: Row) {
+    try { return await replaySaleBulkStatusKernel(env, user, direction, historyId, generation, payload); } catch (error) { return exactRefusal(error); }
+}
+async function replaySaleBulkStatusKernel(env: Env, user: SessionUser, direction: 'undo' | 'redo', historyId: number, generation: unknown, payload: Row) {
     permission(user);
     if (!Number.isSafeInteger(generation) || Number(generation) < 0)
         fail('Refresh history before replaying this group.');
@@ -577,6 +665,7 @@ export async function replaySaleBulkStatus(env: Env, user: SessionUser, directio
     const snapshot = JSON.parse(String(op.payload_json)) as Snapshot;
     if (snapshot.version !== 1 || snapshot.operationId !== op.id || snapshot.members.length > BULK_STATUS_LIMIT)
         fail('Unsupported bulk snapshot.');
+    const stock = await captureGroupStock(db, snapshot.members);
     const sign = direction === 'undo' ? -1 : 1, expected = direction === 'undo' ? 'undoable' : 'redoable', next = direction === 'undo' ? 'redoable' : 'undoable', stamp = new Date().toISOString();
     // S4-41: undo and redo move statuses too. A redo can re-apply a group
     // recorded before the payment check existed, and undoing a group reopen
@@ -593,11 +682,12 @@ export async function replaySaleBulkStatus(env: Env, user: SessionUser, directio
     });
     if (unpaid.length)
         refuseUnpaid(unpaid, 409);
-    const statements: StockStatement[] = [bulkAssertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM sale_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@op AND o.generation=@generation AND h.id=@history AND h.status=@expected AND s.kind=@kind AND s.status=@snap AND s.payload_json=@payload)", { op: op.id, generation, history: historyId, expected, kind: BULK_STATUS_KIND, snap: direction === 'undo' ? 'applied' : 'reversed', payload: op.payload_json })];
+    const statements: StockStatement[] = [...stock.guards, bulkAssertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM sale_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@op AND o.generation=@generation AND h.id=@history AND h.status=@expected AND s.kind=@kind AND s.status=@snap AND s.payload_json=@payload)", { op: op.id, generation, history: historyId, expected, kind: BULK_STATUS_KIND, snap: direction === 'undo' ? 'applied' : 'reversed', payload: op.payload_json })];
     for (const m of moved)
         statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM sales s JOIN sale_bulk_members m ON m.sale_id=s.id WHERE m.operation_id=@op AND s.id=@id AND m.revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AND m.movement_fingerprint=${saleMovementFingerprint('s.id')})`, { op: op.id, id: m.id }));
     for (const m of snapshot.members)
-        statements.push(...memberStatements(m, sign, user, stamp));
+        statements.push(...memberStatements(m, sign, user, stamp, stock));
+    statements.push(...stock.exact.takeFinalPhysicalWrites());
     const nextGeneration = Number(generation) + 1;
     const recordEvents = statusRecordEvents(snapshot.members, String(op.id), nextGeneration, direction, user, stamp);
     if (recordEvents)
@@ -609,15 +699,23 @@ export async function replaySaleBulkStatus(env: Env, user: SessionUser, directio
     statements.push({ sql: "UPDATE action_history SET status=@status,last_error=NULL,updated_at=@stamp,undo_payload=json_set(undo_payload,'$.generation',@generation),redo_payload=json_set(redo_payload,'$.generation',@generation) WHERE id=@id", params: { id: historyId, status: next, stamp, generation: Number(generation) + 1 } });
     statements.push(auditStatement(user, String(op.id), `action_${direction}`, moved.length), { sql: 'DELETE FROM sale_bulk_guards', params: {} });
     bounded(statements, snapshot, recordEvents?.eventsBytes || 0);
+    queryBudget(env, statements, snapshot.members, true);
     try {
-        await (snapshot.members.some(member => member.stock.length > 0) ? executeStockTransaction(db, statements, 'retry') : db.batch(statements));
+        await (snapshot.members.some(member => member.stock.length > 0) ? executeStockTransaction(db, statements, 'once') : db.batchOnce(statements));
     }
     catch (error) {
+        const committed = await db.prepare(`SELECT 1 AS committed FROM sale_bulk_operations o JOIN action_history h ON h.id=o.history_id
+            JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@op AND o.history_id=@history AND o.snapshot_id=@snapshot
+            AND o.generation=@generation AND h.status=@status AND s.status=@snapshotStatus AND s.payload_json=@payload`).get({
+                op: op.id, history: historyId, snapshot: op.snapshot_id, generation: Number(generation) + 1,
+                status: next, snapshotStatus: direction === 'undo' ? 'reversed' : 'applied', payload: op.payload_json,
+            });
+        if (committed) return;
         const activeGuard = productStockGuardError(error)
 
         if (activeGuard) throw activeGuard
 
-        if (/constraint/i.test(String(error)))
+        if (/CHECK constraint failed:\s*guard_value\s*=\s*1/i.test(String(error)))
             fail('A sale, its stock, or this replay changed. Nothing in the group was applied.');
         throw error;
     }
