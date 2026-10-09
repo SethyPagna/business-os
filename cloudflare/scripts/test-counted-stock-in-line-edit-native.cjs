@@ -30,6 +30,54 @@ async function roundtrip(make,tier,shape){
   assert.equal(f.sql.prepare('SELECT generation FROM stock_lot_adjustment_operations').get().generation,4);assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM inventory_movements WHERE reference_id LIKE 'stock-in-edit:500:%'").get().n,5);console.log('PASS counted stock-in edit/compensation '+JSON.stringify({tier,shape}));
  }finally{f.sql.close()}
 }
-async function main(){const make=await h.bundle.exports.bundleWorker();for(const tier of ['free','paid']){await roundtrip(make,tier,'integer');for(const shape of ['fraction','batch-tag','null-tag','legacy'])await roundtrip(make,tier,shape)}}
-module.exports={scenario,roundtrip,state}
+
+async function controls(make){
+ for(const tier of ['free','paid']){
+  for(const direction of ['apply','undo','redo'])for(const fault of ['root','fold','receipt','receipt_set','tag_set','actor','generation','operation']){
+   if(direction==='apply'&&['generation','operation'].includes(fault))continue;
+   const {f,call}=await scenario(make,tier);try{
+    let saved;if(direction!=='apply'){saved=await call();assert.equal(saved.status,200);if(direction==='redo')assert.equal((await f.call('/action-history/'+saved.json.action_history_id+'/undo',{expected_generation:0})).status,200)}
+    const sql={root:"UPDATE inventory_movements SET reason='Rival history' WHERE id=500",fold:"INSERT INTO inventory_movements(product_id,branch_id,batch_id,movement_type,quantity,reason,reference_id)VALUES(1,1,1,'adjustment',0,'Rival fold','stock-in-edit:500:rival:0')",receipt:"UPDATE product_batches SET supplier_name='Rival' WHERE id=1",receipt_set:"INSERT INTO product_batches(id,variant_product_id,batch_key,is_active)VALUES(90,1,'rival-empty',1);INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)VALUES(90,1,0)",tag_set:"INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source)VALUES(90,1,1,NULL,0,0,'damaged','remove')",actor:'UPDATE users SET is_active=0 WHERE id=7',generation:'UPDATE stock_lot_adjustment_operations SET generation=generation+10',operation:"UPDATE stock_lot_adjustment_operations SET before_json=json_set(before_json,'$.branchQty',999)"}[fault];
+    let rival;f.beforeCommit(async()=>{await h.loadStockSession('lib/stockTransaction.ts').executeStockTransaction(h.loadStockSession('lib/db.ts').getDb(f.env),sql.split(';').map(sql=>({sql})), 'once');rival=state(f)});
+    const result=direction==='apply'?await call():await f.call('/action-history/'+saved.json.action_history_id+'/'+direction,{expected_generation:direction==='undo'?0:1});assert.equal(result.status,409,JSON.stringify({tier,direction,fault,result}));assert.deepEqual(state(f),rival);console.log('PASS line edit captured source race '+JSON.stringify({tier,direction,fault}));
+   }finally{f.sql.close()}
+  }
+  for(const direction of ['apply','undo','redo']){
+   const {f,call}=await scenario(make,tier);try{
+    let saved;if(direction!=='apply'){saved=await call();if(direction==='redo')await f.call('/action-history/'+saved.json.action_history_id+'/undo',{expected_generation:0})}
+    const before=state(f);f.sql.exec("CREATE TRIGGER line_edit_unrelated BEFORE INSERT ON inventory_movements WHEN NEW.reference_id LIKE 'stock-in-edit:500:%' BEGIN SELECT RAISE(ABORT,'synthetic_unrelated_line_error'); END");
+    const invoke=()=>direction==='apply'?call():f.call('/action-history/'+saved.json.action_history_id+'/'+direction,{expected_generation:direction==='undo'?0:1});const failed=await invoke();assert.equal(failed.status,direction==='apply'?500:409,JSON.stringify(failed));assert.deepEqual(state(f),before);f.sql.exec('DROP TRIGGER line_edit_unrelated');
+    f.loseNextCommitAcknowledgement();const result=await invoke();assert.equal(result.status,200,JSON.stringify(result));const committed=state(f);const retry=await invoke();assert.equal(retry.status,200,JSON.stringify(retry));assert.deepEqual(state(f),committed);console.log('PASS line edit rollback/committed lost ACK/canonical recovery '+JSON.stringify({tier,direction}));
+   }finally{f.sql.close()}
+  }
+ }
+}
+async function tails(make){
+ for(const tier of ['free','paid'])for(const direction of ['apply','undo','redo']){
+  const {f,call}=await scenario(make,tier);let saved;if(direction!=='apply'){saved=await call();if(direction==='redo')await f.call('/action-history/'+saved.json.action_history_id+'/undo',{expected_generation:0})}
+  let attempts=0,body=0,committed=false;const failed=new Set(),families=new Set(),raw=f.env.DB;
+  try{
+   f.env.CACHE={get:async()=>null,put:async()=>{throw Error('Synthetic KV failure')},delete:async()=>{}};f.sql.exec("DELETE FROM cache_versions WHERE namespace='products'");
+   const fault=(sql,params)=>{if(!committed)return false;const family=/SELECT namespace, version FROM cache_versions/.test(sql)?'versions':/INSERT INTO quota_usage/.test(sql)?'quota':/INSERT INTO cache_versions/.test(sql)?'handoff':null;if(!family)return false;families.add(family);const key=family+JSON.stringify(params);if(failed.has(key))return false;failed.add(key);return true};
+   const wrap=(stmt,sql)=>new Proxy(stmt,{get(target,key){if(key==='bind')return(...args)=>wrap(target.bind(...args),sql);if(['all','first','run'].includes(key))return(...args)=>{attempts++;return fault(sql,target.params)?Promise.reject(Error('D1_ERROR: network reset before line tail')):target[key](...args)};return target[key]}});
+   f.env.DB=new Proxy(raw,{get(target,key){if(key==='prepare')return sql=>wrap(target.prepare(sql),sql);if(key==='batch')return async statements=>{attempts+=statements.length;const mutation=statements.some(row=>/INSERT INTO inventory_movements/.test(row.text));if(mutation)body=statements.length;if(statements.some(row=>fault(row.text,row.params)))throw Error('D1_ERROR: network reset before line tail');const result=await target.batch(statements);if(mutation)committed=true;return result};return target[key]}});
+   const result=direction==='apply'?await call():await f.call('/action-history/'+saved.json.action_history_id+'/'+direction,{expected_generation:direction==='undo'?0:1});assert.equal(result.status,200,JSON.stringify(result));assert.ok(attempts<=(tier==='free'?50:1000));assert.deepEqual([...families].sort(),tier==='free'?['handoff','quota','versions']:['handoff','versions']);console.log('LINE_EDIT_FULL_TAIL '+JSON.stringify({tier,direction,attempts,body}));
+  }finally{f.sql.close()}
+ }
+}
+async function budget(make){
+ for(const tier of ['free','paid']){
+  const {f,call,body}=await scenario(make,tier,'integer');try{
+   const snapshot=state(f);body.quantity=0;assert.equal((await call()).status,200);assert.equal(f.state().physical,0);assert.equal(f.state().lots[0].quantity,0);console.log('PASS line edit zero correction '+tier);
+  }finally{f.sql.close()}
+  const c=await scenario(make,tier,'integer');try{
+   await h.loadStockSession('lib/stockTransaction.ts').executeStockTransaction(h.loadStockSession('lib/db.ts').getDb(c.f.env),[{sql:"INSERT INTO inventory_movements(id,product_id,branch_id,batch_id,movement_type,quantity,reference_id)VALUES(900,1,1,1,'add',1,'other-receipt')"},{sql:'UPDATE product_batches SET received_quantity=2,received_cost_usd=4 WHERE id=1'}],'once');c.body.received_date='2026-09-05';c.body.expected_batch_revision=c.f.sql.prepare("SELECT revision FROM stock_session_revisions WHERE entity_type='batch' AND entity_key='1'").get().revision;
+   const before=state(c.f),result=await c.call();assert.equal(result.status,tier==='free'?409:200,JSON.stringify(result));if(tier==='free'){assert.equal(result.json.code,'stock_in_edit_over_plan_budget');assert.deepEqual(state(c.f),before)}else{assert.equal(c.f.state().physical,2);const undo=await c.f.call('/action-history/'+result.json.action_history_id+'/undo',{expected_generation:0});assert.equal(undo.status,200,JSON.stringify(undo));assert.equal(c.f.state().physical,1);assert.equal(c.f.sql.prepare('SELECT is_active FROM product_batches ORDER BY id DESC LIMIT 1').get().is_active,0,'undo deactivates emptied created receipt after physical write');const redo=await c.f.call('/action-history/'+result.json.action_history_id+'/redo',{expected_generation:1});assert.equal(redo.status,200,JSON.stringify(redo));assert.equal(c.f.state().physical,2)}console.log('PASS whole-batch plan admission/moved receipt '+JSON.stringify({tier,status:result.status}));
+  }finally{c.f.sql.close()}
+ }
+ const {f,body}=await scenario(make,'free');try{const mod=h.loadStockSession('lib/stockInLineEdit.ts'),db=h.loadStockSession('lib/db.ts').getDb(f.env),user=f.sql.prepare('SELECT u.*,r.code role_code,r.permissions role_permissions FROM users u LEFT JOIN roles r ON r.id=u.role_id WHERE u.id=7').get(),before=state(f);const missing=await mod.applyStockInLineEdit(db,user,500,body);assert.equal(missing.status,503);assert.deepEqual(state(f),before);const blocked=await mod.applyStockInLineEdit(db,user,500,body,null,undefined,{limit:1,used:()=>0});assert.equal(blocked.status,409,JSON.stringify(blocked));assert.deepEqual(state(f),before);const valid=await mod.applyStockInLineEdit(db,user,500,body,null,undefined,{limit:50,used:()=>0});assert.equal(valid.status,200,JSON.stringify(valid));assert.equal(f.state().physical,.3);console.log('PASS explicit isolated helper budget/missing budget refusal');}finally{f.sql.close()}
+}
+
+async function main(){const make=await h.bundle.exports.bundleWorker();if(process.argv.includes('--controls-only')){await controls(make);return}if(process.argv.includes('--tails-only')){await tails(make);return}if(process.argv.includes('--budget-only')){await budget(make);return}for(const tier of ['free','paid']){await roundtrip(make,tier,'integer');for(const shape of ['fraction','batch-tag','null-tag','legacy'])await roundtrip(make,tier,shape)}await controls(make);await tails(make);await budget(make)}
+module.exports={scenario,roundtrip,controls,tails,budget,state}
 if(require.main===module)main().catch(e=>{console.error(e);process.exitCode=1})

@@ -1,3 +1,6 @@
+import { currentRequestMetrics } from './requestMetrics'
+import { getPlanLimits } from './planTier'
+import { stockActorPredicate, stockActorParams } from './stockActorGuard'
 import { CountedStockBatchPlan, countedStockFactsSql, subtractCountedQuantity, sumCountedQuantities, isCountedStockConflict } from './countedDamagedStock'
 import { executeStockTransaction, StockTransactionUnavailableError, StockTransactionOutcomeUnknownError } from './stockTransaction'
 import { productStockGuardStatement, productStockGuardError } from './productStockGuard'
@@ -82,7 +85,7 @@ import { resolveReceiptLotTarget, type ReceiptLotCandidate, type StockWriteState
 import { catalogCostRecomputeIfChangedStatement, catalogCostRecomputeStatement } from './catalogCostRecompute'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
 import { stockReceiptGateCode, stockReceiptGateMessage } from './stockReceiptGate'
-import { divideMoney4, multiplyMoney4, roundMoney4, subtractMoney4, addMoney4 } from './moneyPrecision'
+import { divideMoney4, multiplyMoney4, roundMoney4, subtractMoney4, addMoney4, sumMoney4, MoneyPrecisionError } from './moneyPrecision'
 import {
   STOCK_RECEIPT_MOVEMENT_TYPES, STOCK_IN_EDIT_REFERENCE_PREFIX, stockInEditRange, stockInEditReference,
 } from './stockInSessionsQuery'
@@ -156,6 +159,7 @@ type OperationRow = {
 }
 
 type Revision = {
+  rootFingerprint?: string
   generation: number
   rootMovementId: number
   productId: number
@@ -186,6 +190,32 @@ function guard(condition: string, params: Row): Statement {
   return { sql: `INSERT INTO stock_session_guards(guard_value) SELECT 0 WHERE COALESCE((${condition}),0)=0`, params }
 }
 
+export type StockInLineEditBudget = { limit: number; used(): number }
+function editBudgetDb(raw: D1Compat, env?: Env, explicit?: StockInLineEditBudget) {
+  const metrics = currentRequestMetrics()
+  const budget = explicit ?? (env && metrics?.invocation ? { limit: getPlanLimits(env).d1QueriesPerInvocation, used: () => metrics.invocation.attemptedStatements } : undefined)
+  if (!budget || !Number.isSafeInteger(budget.limit) || budget.limit <= 0) refuse(503,'Stock-in editing requires an invocation budget. Nothing was changed.','stock_in_edit_budget_unavailable')
+  const initial = budget.used()
+  if (!Number.isSafeInteger(initial) || initial < 0) refuse(503,'The invocation budget is unavailable.','stock_in_edit_budget_unavailable')
+  let local = 0
+  const check = (planned: number) => { if (Math.max(initial + local, budget.used()) + planned + 9 > budget.limit) refuse(409,'This edit exceeds the current plan request limit. Nothing was changed.','stock_in_edit_over_plan_budget') }
+  const db = Object.create(raw) as D1Compat
+  db.prepare = sql => {
+    const stmt = raw.prepare(sql)
+    if(!stmt.getOnce || !stmt.allOnce)refuse(503,'Single-attempt reads are unavailable.','stock_in_edit_budget_unavailable')
+    const read = <T>(fn:()=>Promise<T>)=>{check(1);local++;return fn()}
+    return {get:<T>(params?:import('./db').BindParams)=>read(()=>stmt.getOnce!<T>(params)),all:<T>(params?:import('./db').BindParams)=>read(()=>stmt.allOnce!<T>(params)),run:params=>stmt.run(params)}
+  }
+  return {db,commit:async(statements:Statement[])=>{check(statements.length+2);local+=statements.length+2;return executeStockTransaction(raw,statements,'once')}}
+}
+const movementColumns = ['id','product_id','product_name','branch_id','branch_name','movement_type','quantity','unit_cost_usd','unit_cost_khr','total_cost_usd','total_cost_khr','reason','reference_id','user_id','user_name','created_at','batch_id','free_quantity','addressed_branch_name']
+const movementRow = (alias:string) => 'json_array('+movementColumns.map(column=>alias+'.'+column).join(',')+')'
+const movementSource = '(SELECT json_group_array('+movementRow('m')+') FROM (SELECT * FROM inventory_movements WHERE reference_id>=@lo AND reference_id<@hi ORDER BY id LIMIT 10001) m)'
+function boundedMovementSource(value:unknown):string {
+  if(typeof value!=='string'||new TextEncoder().encode(value).byteLength>900000||JSON.parse(value).length>10000)refuse(409,'The source history is incomplete or too large.','stock_changed')
+  return value
+}
+
 function num(value: unknown): number | null {
   if (value == null || value === '') return null
   const parsed = Number(value)
@@ -211,7 +241,7 @@ async function operationsAvailable(db: D1Compat): Promise<boolean> {
   try {
     const row = await db.prepare("SELECT COUNT(*) AS ready FROM sqlite_master WHERE type='table' AND name='stock_lot_adjustment_operations'").get<{ ready: number }>()
     operationsReady = Number(row?.ready ?? 0) > 0
-  } catch { operationsReady = false }
+  } catch(error) { if(error instanceof EditRefusal)throw error;operationsReady = false }
   return operationsReady
 }
 
@@ -219,6 +249,7 @@ async function operationsAvailable(db: D1Compat): Promise<boolean> {
 export function parseStockInLineEditRequest(movementId: number, body: Row): StockInLineEditRequest {
   if (!Number.isSafeInteger(movementId) || movementId <= 0) refuse(400, 'A valid stock-in line is required.', 'invalid_request')
   const quantity = typeof body.quantity === 'number' ? body.quantity : NaN
+  try { sumCountedQuantities([quantity]) } catch { refuse(400,'Quantity has unsupported precision or is out of range.','invalid_quantity') }
   if (!Number.isFinite(quantity) || quantity < 0 || quantity > MAX_QUANTITY) refuse(400, 'Quantity must be between 0 and 1,000,000,000.', 'invalid_quantity')
   const unitCostProvided = Object.prototype.hasOwnProperty.call(body, 'unit_cost_usd') && body.unit_cost_usd !== undefined
   let unitCostUsd: number | null = null
@@ -383,12 +414,12 @@ function isMaintenanceError(error: unknown): boolean {
 // branch that has since been disabled moves the stock at the active branch the operator confirmed; without it the
 // edit is refused branch_redirect_required. A cost or supplier edit moves no stock and asks nothing.
 export async function applyStockInLineEdit(
-  db: D1Compat, user: SessionUser, movementId: number, body: Row, redirectTarget: RedirectTarget = null,
+  db: D1Compat, user: SessionUser, movementId: number, body: Row, redirectTarget: RedirectTarget = null, env?: Env, budget?: StockInLineEditBudget,
 ): Promise<StockInLineEditResult> {
   try {
-    return await applyInner(db, user, movementId, body, redirectTarget)
+    return await applyInner(db, user, movementId, body, redirectTarget, env, budget)
   } catch (error) {
-    if(isCountedStockConflict(error))return {status:409,body:{error:'The stock or tagged source changed.',code:'stock_changed'}}
+    if(isCountedStockConflict(error)||error instanceof MoneyPrecisionError)return {status:409,body:{error:'The stock or tagged source changed.',code:'stock_changed'}}
     if (error instanceof EditRefusal) return { status: error.status, body: { error: error.message, code: error.code, ...error.details } }
     const refusal = branchEffectRefusal(error)
     if (refusal) return { status: 409, body: refusal }
@@ -396,7 +427,8 @@ export async function applyStockInLineEdit(
   }
 }
 
-async function applyInner(db: D1Compat, user: SessionUser, movementId: number, body: Row, redirectTarget: RedirectTarget): Promise<StockInLineEditResult> {
+async function applyInner(raw: D1Compat, user: SessionUser, movementId: number, body: Row, redirectTarget: RedirectTarget, env?: Env, budget?: StockInLineEditBudget): Promise<StockInLineEditResult> {
+  const admission=editBudgetDb(raw,env,budget),db=admission.db
   const tier = getActionTier(user, 'inventory', 'adjust')
   if (tier !== 'full') refuse(403, 'Editing a stock-in line requires Full Access to adjust inventory.', 'permission_denied')
   const request = parseStockInLineEditRequest(movementId, body)
@@ -417,8 +449,9 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
   if (existing) return replay(existing)
 
   // ---- The root line and its current folded state.
-  const root = await db.prepare(`SELECT m.*, EXISTS(SELECT 1 FROM inventory_movements r WHERE r.reference_id='revert:' || CAST(m.id AS TEXT)) AS reverted
+  const root = await db.prepare(`SELECT m.*, ${movementRow('m')} AS fingerprint, EXISTS(SELECT 1 FROM inventory_movements r WHERE r.reference_id='revert:' || CAST(m.id AS TEXT)) AS reverted
       FROM inventory_movements m WHERE m.id=@id`).get<Row>({ id: movementId })
+  if(root)boundedMovementSource(root.fingerprint)
   const reference = String(root?.reference_id ?? '')
   if (!root || !(STOCK_RECEIPT_MOVEMENT_TYPES as readonly string[]).includes(String(root.movement_type))
     || !(Number(root.batch_id) > 0) || !(Number(root.branch_id) > 0) || !(Math.abs(Number(root.quantity) || 0) > 0)
@@ -442,8 +475,9 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
   }
   const productId = Number(root.product_id)
   const range = stockInEditRange(movementId)
-  const edits = await db.prepare(`SELECT id, quantity, total_cost_usd, batch_id FROM inventory_movements
-      WHERE reference_id >= @lo AND reference_id < @hi ORDER BY id`).all<Row>(range)
+  const foldRow=await db.prepare('SELECT '+movementSource+' AS source').get<{source:string}>(range)
+  const foldSource=boundedMovementSource(foldRow?.source)
+  const edits=(JSON.parse(foldSource) as unknown[][]).map(values=>Object.fromEntries(movementColumns.map((column,index)=>[column,values[index]]))) as Row[]
   const q0 = sumCountedQuantities([Math.abs(Number(root.quantity)), ...edits.map(row=>Number(row.quantity)||0)])
   const landing: BranchEffect | null = request.quantity !== q0 || request.receivedDate != null
     ? await requestBranchEffect(db, Number(root.branch_id), redirectTarget) : null
@@ -453,7 +487,7 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
   const costRows = edits.filter((row) => row.total_cost_usd != null)
   const t0 = root.total_cost_usd == null && costRows.length === 0
     ? null
-    : roundMoney4((num(root.total_cost_usd) ?? 0) + costRows.reduce((sum, row) => sum + Number(row.total_cost_usd), 0))
+    : sumMoney4([num(root.total_cost_usd) ?? 0,...costRows.map(row=>Number(row.total_cost_usd))])
   if ((request.expectedQuantity != null && request.expectedQuantity !== q0)
     || (request.expectedBatchId != null && request.expectedBatchId !== sourceId)) {
     refuse(409, 'This line changed since it was opened. Reopen the session and try again.', 'stale_line')
@@ -470,7 +504,7 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
     db.prepare(`SELECT b.*, COALESCE((SELECT revision FROM stock_session_revisions
       WHERE entity_type='batch' AND entity_key=CAST(b.id AS TEXT)),0) AS batch_revision
       FROM product_batches b WHERE b.id=@id`).get<LotRow & { batch_revision: number }>({ id: sourceId }),
-    db.prepare('SELECT id,batch_key,received_at,unit_cost_usd FROM product_batches WHERE variant_product_id=@product').all<ReceiptLotCandidate>({ product: productId }),
+    db.prepare('SELECT (SELECT json_group_array(json_array(id,batch_key,received_at,unit_cost_usd)) FROM (SELECT * FROM product_batches WHERE variant_product_id=@product ORDER BY id LIMIT 10001)) source').get<{source:string}>({ product: productId }),
     db.prepare('SELECT baseline_batch_id FROM product_cost_entries WHERE product_id=@product ORDER BY id DESC LIMIT 1').get<Row>({ product: productId }).catch(() => null),
     // Other live receipts into the line's current lot (any line but this one).
     db.prepare(`SELECT COUNT(*) AS n FROM inventory_movements x
@@ -484,6 +518,8 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
   if (sourceLot.batch_revision !== request.expectedBatchRevision) {
     refuse(409, 'This line changed since it was opened. Reopen the session and try again.', 'stale_line')
   }
+  const catalogSource=boundedMovementSource(lots?.source)
+  const candidates=(JSON.parse(catalogSource) as [number,string,string|null,number|null][]).map(([id,batch_key,received_at,unit_cost_usd])=>({id,batch_key,received_at,unit_cost_usd}))
   const sourceStock = await db.prepare(`SELECT COALESCE((SELECT quantity FROM branch_batch_stock WHERE batch_id=@lot AND branch_id=@branch),0) AS qty,
       EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=@lot AND branch_id=@branch) AS present,
       COALESCE((SELECT SUM(quantity) FROM branch_batch_stock WHERE batch_id=@lot AND branch_id<>@branch),0) AS elsewhere`)
@@ -565,7 +601,7 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
     // Resolve the receiving lot exactly as a fresh receipt would.
     const target = (() => {
       try {
-        return resolveReceiptLotTarget(lots.filter((lot) => Number(lot.id) !== A.id), request.receivedDate as string, u, Number(baseline?.baseline_batch_id) || 0)
+        return resolveReceiptLotTarget(candidates.filter((lot) => Number(lot.id) !== A.id), request.receivedDate as string, u, Number(baseline?.baseline_batch_id) || 0)
       } catch { return refuse(409, 'The receiving received date could not be resolved. Refresh and retry.', 'target_unresolved') }
     })()
     targetKey = target.batchKey
@@ -590,7 +626,8 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
     }
     before.lots.push(T)
     const aRq = A.receivedQuantity == null ? null : subtractCountedQuantity(A.receivedQuantity,[q0])
-    const aRc = A.receivedCostUsd == null ? null : Math.max(0, subtractMoney4(A.receivedCostUsd, t0 ?? (A.unitCostUsd != null ? multiplyMoney4(A.unitCostUsd, q0) : 0)))
+    const aRc = A.receivedCostUsd == null ? null : subtractMoney4(A.receivedCostUsd, t0 ?? (A.unitCostUsd != null ? multiplyMoney4(A.unitCostUsd, q0) : 0))
+    if(aRc!=null&&aRc<0)refuse(409,'The receipt cost cannot be reduced below zero.','stock_changed')
     const aStock = subtractCountedQuantity(L,[q0])
     after.lots.push({ ...A, stock: aStock, receivedQuantity: aRq, receivedCostUsd: aRq === 0 ? (aRc == null ? null : 0) : aRc,
       isActive: aRq === 0 && aStock <= 0 && Number(sourceStock?.elsewhere || 0) <= 0 ? 0 : A.isActive })
@@ -620,12 +657,13 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
       const lineCost = multiplyMoney4(u as number, q1)
       rc = lineCost
       qtyTotal = d === 0 ? null : multiplyMoney4(u as number, d)
-      remainder = roundMoney4(lineCost - (t0 ?? 0) - (qtyTotal ?? 0))
+      remainder = subtractMoney4(subtractMoney4(lineCost,t0??0),qtyTotal??0)
       t1 = lineCost
     } else {
-      if (u != null && rc != null) rc = Math.max(0, addMoney4(rc, multiplyMoney4(u, d)))
+      if (u != null && rc != null) rc = addMoney4(rc, multiplyMoney4(u, d))
       qtyTotal = t0 != null && u != null && d !== 0 ? multiplyMoney4(u, d) : null
-      t1 = t0 == null ? null : roundMoney4(t0 + (qtyTotal ?? 0))
+      t1 = t0 == null ? null : addMoney4(t0,qtyTotal??0)
+      if(rc!=null&&rc<0)refuse(409,'The receipt cost cannot be reduced below zero.','stock_changed')
     }
     after.lots.push({
       ...A, stock, stockExists: A.stockExists || (stock > 0 ? 1 : 0), receivedQuantity: rq, receivedCostUsd: rc,
@@ -649,6 +687,7 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
   const operationId = crypto.randomUUID()
   const reasonText = `Edit of stock-in line #${movementId}${request.reason ? `: ${request.reason}` : ''}`
   const revision: Revision = {
+    rootFingerprint: String(root.fingerprint),
     generation: 0, rootMovementId: movementId, productId, branchId, productDelta: d, movements: plans,
     targetCreated, targetBatchKey: targetKey, productCostBefore: { cost: num(facts.cost_price_usd), purchase: num(facts.purchase_price_usd) },
     lineBefore, lineAfter, requiresCostEdit: request.unitCostProvided, reason: reasonText,
@@ -681,8 +720,13 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
     // changes and changes restored to their old values. Pin the review, not
     // just the newer snapshot we happened to read while planning this write.
     guard(`COALESCE((SELECT revision FROM stock_session_revisions
-      WHERE entity_type='batch' AND entity_key=@batchKey),0)=@revision`,
-    { batchKey: String(sourceId), revision: request.expectedBatchRevision }),
+      WHERE entity_type='batch' AND entity_key=@batchKey),0)=@revision
+      AND ${stockActorPredicate} AND (SELECT ${movementRow('m')} FROM inventory_movements m WHERE m.id=@root)=@rootFingerprint
+      AND ${movementSource}=@foldSource
+      AND (SELECT json_group_array(json_array(id,batch_key,received_at,unit_cost_usd)) FROM (SELECT * FROM product_batches WHERE variant_product_id=@product ORDER BY id LIMIT 10001))=@catalogSource
+      AND COALESCE((SELECT baseline_batch_id FROM product_cost_entries WHERE product_id=@product ORDER BY id DESC LIMIT 1),0)=@baseline
+      AND (SELECT COUNT(*) FROM inventory_movements x WHERE x.batch_id=@source AND x.movement_type IN ('add','stock_in') AND x.id<>@root AND x.quantity>0 AND NOT (x.reference_id>=@lo AND x.reference_id<@hi) AND NOT EXISTS(SELECT 1 FROM inventory_movements r WHERE r.reference_id='revert:'||CAST(x.id AS TEXT)))=@elsewhereCount`,
+    { product:productId,catalogSource,baseline:Number(baseline?.baseline_batch_id)||0,source:sourceId,elsewhereCount:Number(receiptsElsewhere?.n)||0,batchKey: String(sourceId), revision: request.expectedBatchRevision, ...stockActorParams(user),root:movementId,rootFingerprint:root.fingerprint,...range,foldSource }),
     ...stateGuard(before, targetCreated),
     { sql: `INSERT INTO stock_lot_adjustment_operations(id,actor_id,request_id,request_json,request_digest,response_json,before_json,after_json,revision_json)
       VALUES(@operation,@actor,@requestId,@requestJson,@digest,@response,@before,@after,@revision)`, params: opParams },
@@ -716,7 +760,7 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
     } },
   ]
   try {
-    await executeStockTransaction(db, addressedStatements(landing, statements), 'retry')
+    await admission.commit(addressedStatements(landing, statements))
   } catch (error) {
     if (error instanceof StockTransactionUnavailableError) throw error
     const concurrent = await previous()
@@ -831,7 +875,7 @@ function deltaGuards(input: {
   return out
 }
 
-function deltaMetadataWrites(input: { deltas: LotDelta[]; productId: number; branchId: number; branchChange: number; productDelta: number },current:Map<number,{rq:number|null;rc:number|null}>): Statement[] {
+function deltaMetadataWrites(input: { deltas: LotDelta[]; productId: number; branchId: number; branchChange: number; productDelta: number },current:Map<number,{rq:number|null;rc:number|null}>): {before:Statement[];after:Statement[]} {
   const first: Statement[] = []
   const lotRows: Statement[] = []
   const decreases: Statement[] = []
@@ -860,16 +904,21 @@ function deltaMetadataWrites(input: { deltas: LotDelta[]; productId: number; bra
   if (input.productDelta > 0 || input.branchChange > 0 || input.deltas.some(lot => lot.stockChange > 0)) {
     first.unshift(productStockGuardStatement([input.productId], 'active'))
   }
-  return [...first,...lotRows,...last]
+  return {before:[...first,...lotRows],after:last}
 }
 
 /** Server-side undo/redo of one line-edit generation. */
-export async function replayStockInLineEdit(
-  env: Env, user: SessionUser, direction: 'undo' | 'redo', historyId: number, generation: unknown, payload: Row,
+export async function replayStockInLineEdit(env:Env,user:SessionUser,direction:'undo'|'redo',historyId:number,generation:unknown,payload:Row,budget?:StockInLineEditBudget):Promise<void>{
+  try { await replayInner(env,user,direction,historyId,generation,payload,budget) }
+  catch(error){if(error instanceof EditRefusal)throw new StockInLineEditReplayError(error.message,error.status,error.code);if(isCountedStockConflict(error)||error instanceof MoneyPrecisionError)throw new StockInLineEditReplayError('The counted stock source changed.',409,'stock_changed');throw error}
+}
+
+async function replayInner(
+  env: Env, user: SessionUser, direction: 'undo' | 'redo', historyId: number, generation: unknown, payload: Row, budget?: StockInLineEditBudget,
 ): Promise<void> {
   if (getActionTier(user, 'inventory', 'adjust') !== 'full') throw new StockInLineEditReplayError('Editing a stock-in line requires Full Access to adjust inventory.', 403)
   if (Number(payload.requires_cost_edit) === 1 && !canEditAcquisitionCosts(user)) throw new StockInLineEditReplayError('Cost-entry permission is required to reverse a cost change.', 403)
-  const db = getDb(env)
+  const admission=editBudgetDb(getDb(env),env,budget),db=admission.db
   const row = await db.prepare('SELECT * FROM stock_lot_adjustment_operations WHERE id=@operation AND history_id=@history')
     .get<OperationRow>({ operation: String(payload.operation_id || ''), history: historyId })
   if (!row) throw new StockInLineEditReplayError('This stock-in line edit has no exact stock provenance.')
@@ -931,11 +980,13 @@ export async function replayStockInLineEdit(
   const [own, root, laterEdit] = await Promise.all([
     db.prepare('SELECT MIN(id) AS first, MAX(id) AS last FROM inventory_movements WHERE reference_id >= @lo AND reference_id < @hi')
       .get<{ first: number | null; last: number | null }>(ownRange),
-    db.prepare('SELECT reference_id FROM inventory_movements WHERE id=@id').get<{ reference_id: unknown }>({ id: revision.rootMovementId }),
+    db.prepare('SELECT reference_id,'+movementRow('m')+' AS fingerprint,'+movementSource+' AS source FROM inventory_movements m WHERE id=@id').get<{reference_id:unknown;fingerprint:string;source:string}>({id:revision.rootMovementId,...stockInEditRange(revision.rootMovementId)}),
     db.prepare(`SELECT 1 AS hit FROM stock_lot_adjustment_operations WHERE id<>@operation AND state='applied' AND history_id > @history
       AND json_extract(request_json,'$.kind')='stock_in_line_edit' AND json_extract(request_json,'$.movementId')=@root LIMIT 1`)
       .get<{ hit: number }>({ operation: row.id, history: historyId, root: revision.rootMovementId }),
   ])
+  const foldSource=boundedMovementSource(root?.source)
+  if(!root || (revision.rootFingerprint!=null && revision.rootFingerprint!==root.fingerprint))throw new StockInLineEditReplayError('The original stock-in history changed.')
   const ownFirstId = Number(own?.first) || revision.rootMovementId
   const ownLastId = Number(own?.last) || revision.rootMovementId
   if (laterEdit) {
@@ -973,24 +1024,28 @@ export async function replayStockInLineEdit(
   }
   const replayExact=await capturePhysical(db,from)
   const physical=physicalWrites(replayExact,from,to)
-  const amountRow=await db.prepare('SELECT (SELECT json_group_array(json_array(id,received_quantity,received_cost_usd)) FROM (SELECT * FROM product_batches WHERE variant_product_id=@product ORDER BY id LIMIT 10001)) amounts').get<{amounts:string}>({product:revision.productId})
+  const amountRow=await db.prepare('SELECT (SELECT json_group_array(json_array(id,received_quantity,received_cost_usd,unit_cost_usd,received_at,lot_code,supplier_id,supplier_name,is_active,payment_status,credit_due_date,expiry_date,received_branch_id,received_branch_name,batch_key,batch_number)) FROM (SELECT * FROM product_batches WHERE variant_product_id=@product ORDER BY id LIMIT 10001)) amounts').get<{amounts:string}>({product:revision.productId})
   const amountRows=(JSON.parse(amountRow!.amounts) as [number,number|null,number|null][]).map(([id,rq,rc])=>({id,rq,rc}))
   if(amountRows.length>10000)throw new StockInLineEditReplayError('The receipt source is too large.')
   const amounts=new Map(amountRows.map(value=>[value.id,{rq:value.rq,rc:value.rc}]))
   const amountJson=amountRow!.amounts
+  if(new TextEncoder().encode(amountJson).byteLength>900000)throw new StockInLineEditReplayError('The receipt source is too large.')
+  const metadata=deltaMetadataWrites({ deltas, productId: revision.productId, branchId: revision.branchId, branchChange, productDelta },amounts)
   const statements: Statement[] = [
     ...physical.guards,
-    guard('(SELECT json_group_array(json_array(id,received_quantity,received_cost_usd)) FROM (SELECT * FROM product_batches WHERE variant_product_id=@product ORDER BY id LIMIT 10001))=@amounts',{product:revision.productId,amounts:amountJson}),
+    guard('(SELECT json_group_array(json_array(id,received_quantity,received_cost_usd,unit_cost_usd,received_at,lot_code,supplier_id,supplier_name,is_active,payment_status,credit_due_date,expiry_date,received_branch_id,received_branch_name,batch_key,batch_number)) FROM (SELECT * FROM product_batches WHERE variant_product_id=@product ORDER BY id LIMIT 10001))=@amounts',{product:revision.productId,amounts:amountJson}),
     guard(`EXISTS(SELECT 1 FROM stock_lot_adjustment_operations o JOIN action_history h ON h.id=o.history_id
       WHERE o.id=@operation AND h.id=@history AND o.generation=@generation AND o.state=@oldState AND h.status=@oldStatus
-      AND json_extract(h.undo_payload,'$.operation_id')=@operation AND json_extract(h.undo_payload,'$.generation')=@generation)`, params),
+      AND json_extract(h.undo_payload,'$.operation_id')=@operation AND json_extract(h.undo_payload,'$.generation')=@generation
+      AND o.request_json=@requestJson AND o.before_json=@beforeJson AND o.after_json=@afterJson AND o.revision_json=@revisionJson)
+      AND ${stockActorPredicate} AND (SELECT ${movementRow('m')} FROM inventory_movements m WHERE m.id=@root)=@rootFingerprint AND ${movementSource}=@foldSource`, {...params,...stockActorParams(user),root:revision.rootMovementId,rootFingerprint:root.fingerprint,...stockInEditRange(revision.rootMovementId),foldSource,requestJson:row.request_json,beforeJson:row.before_json,afterJson:row.after_json,revisionJson:row.revision_json}),
     guard(`NOT EXISTS(SELECT 1 FROM stock_lot_adjustment_operations WHERE id<>@operation AND state='applied' AND history_id > @history
       AND json_extract(request_json,'$.kind')='stock_in_line_edit' AND json_extract(request_json,'$.movementId')=@root)`,
     { operation: row.id, history: historyId, root: revision.rootMovementId }),
     ...(sessionRowid != null ? [guard(`NOT ${SESSION_UNDONE}`, { rowid: sessionRowid, root: revision.rootMovementId })] : []),
     ...deltaGuards({ deltas, productId: revision.productId, branchId: revision.branchId, branchChange, rootMovementId: revision.rootMovementId, ownFirstId, range: stockInEditRange(revision.rootMovementId) }),
-    ...deltaMetadataWrites({ deltas, productId: revision.productId, branchId: revision.branchId, branchChange, productDelta },amounts),
-    ...physical.writes,
+    ...metadata.before,
+    ...physical.writes,...metadata.after,
     // U-cost (supervisor decision, 2026-09-25): the catalog cost is re-derived
     // from the lots this replay just restored, never written back from the
     // snapshot -- a lot that sold out since the edit must not count again.
@@ -1014,11 +1069,9 @@ export async function replayStockInLineEdit(
     } },
   ]
   try {
-    const writesStock = productDelta !== 0 || branchChange !== 0
-      || deltas.some(lot => lot.stockChange !== 0 || lot.to.isActive !== lot.from.isActive)
-    if (writesStock) await executeStockTransaction(db, statements, 'retry')
-    else await ordinaryBusinessBatch(db, statements)
+    await admission.commit(statements)
   } catch (error) {
+    if(error instanceof EditRefusal)throw new StockInLineEditReplayError(error.message,error.status,error.code)
     if (error instanceof StockTransactionUnavailableError) throw error
     const current = await db.prepare('SELECT generation,state FROM stock_lot_adjustment_operations WHERE id=@operation').get<OperationRow>({ operation: row.id })
     if (current?.generation === next && current.state === target) return
