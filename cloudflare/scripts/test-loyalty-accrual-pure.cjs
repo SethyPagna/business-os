@@ -212,7 +212,7 @@ assert.match(pos, /membershipInfo\?\.points\?\.redeemableUnits/, 'the POS reads 
 // non-zero on that one surface.
 for (const [label, source, needles] of [
   ['contacts', contacts, [/FROM loyalty_point_adjustments[^`]*voided_at IS NULL/, /customer_share_submissions[^`]*reward_points_voided_at IS NULL/]],
-  ['notifications', notifications, [/customer_share_submissions[^`]*reward_points_voided_at IS NULL/]],
+  ['notifications', notifications, [/customer_share_submissions[^`]*reward_points_voided_at IS NULL/, /FROM loyalty_point_adjustments[^`]*voided_at IS NULL/]],
   ['sales checkout', pointsSource, [/FROM loyalty_point_adjustments[^`]*voided_at IS NULL/, /customer_share_submissions[^`]*reward_points_voided_at IS NULL/]],
 ]) {
   for (const needle of needles) {
@@ -231,23 +231,12 @@ assert.match(portalRoute, /adjustments: Array<Record<string, unknown>> = \[\]/, 
 // the programme is off; it is a prompt to act on something switched off.
 assert.match(
   notifications,
-  /loyalty_points_enabled[\s\S]{0,400}return null/,
+  /if \(!config\.loyaltyPointsEnabled\) return null/,
   'the loyalty notification section is gated on the switch',
 )
 
-// KNOWN, DELIBERATELY NOT FIXED HERE, AND RECORDED SO IT IS NOT LOST:
-// buildLoyaltySection computes `earned - deducted - redeemed + rewarded` and
-// omits the manual-adjustment term the other three sites include, so its
-// balance already disagrees with them. Pre-existing drift, its own item. It is
-// pinned here because migration 0117 will HIDE it -- once every term is zero
-// all four sites agree, and the disagreement only returns the first time
-// someone issues a new adjustment, by which point nothing connects it to the
-// reset. This assertion documents the state; change it when the drift is
-// fixed, do not delete it.
-assert.ok(
-  !/\+ rewarded \+ manuallyAwarded\)/.test(notifications),
-  'notifications still omits the manual-adjustment term (known drift, tracked separately) -- if this now fails, the drift was fixed and this assertion should be inverted',
-)
+assert.match(notifications, /summarizePoints\([\s\S]*?adjustmentsMap\.get\(customerId\)\?\.manually_awarded/,
+  'notifications passes manual awards through the shared points formula; route counterexamples pin the former drift')
 
 // ---- 8. Points redeemed on a Not Paid sale are spent. The discount is
 // already off what the customer owes, so the points leave the balance when the

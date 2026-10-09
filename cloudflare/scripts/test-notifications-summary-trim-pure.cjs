@@ -44,7 +44,7 @@ function category(sql) {
 const db = {
   prepare(sql) {
     const stmt = raw.prepare(sql)
-    const note = (rows) => ledger.push({ category: category(sql), rows })
+    const note = (rows) => ledger.push({ category: category(sql), rows, sql })
     return {
       all: async (params) => { const rows = stmt.all(params) ?? []; note(rows.length); return rows },
       get: async (params) => { const row = stmt.get(params) ?? null; note(row ? 1 : 0); return row },
@@ -63,6 +63,7 @@ const overrides = {
   '../lib/db': { getDb: () => db },
   './db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', currentUser); return next() } },
+  '../durable-objects/broadcastHub': { broadcast: async () => {} },
 }
 const modules = new Map()
 function load(rel) {
@@ -95,7 +96,7 @@ const kv = new Map()
 let kvReads = 0
 const env = {
   DB: raw,
-  PLAN_TIER: 'paid',
+  PLAN_TIER: process.env.TEST_PLAN_TIER === 'free' ? 'free' : 'paid',
   CACHE: {
     async get(key) { kvReads += 1; return kv.has(key) ? kv.get(key) : null },
     async put(key, value) { kv.set(key, String(value)) },
@@ -332,6 +333,139 @@ async function main() {
       globalThis.caches = saved
     }
   })
+
+  const failures = []
+  const loyaltyCheck = async (name, fn) => {
+    try { await check(name, fn) } catch (error) { failures.push(name); console.error(`FAIL ${name}: ${error.message}`) }
+  }
+  const setting = (key, value) => raw.db.prepare('INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, String(value))
+  const resetLoyaltyCache = () => cacheModule.bumpVersion(env, 'customers')
+  const loyalty = async (user = ADMIN) => section(await summary(user), 'loyalty')
+  const pointsOf = (value, id) => Number(value?.items.find(item => item.id === `loyalty-${id}`)?.meta.split(' ')[0])
+  setting('loyalty_points_enabled', 'true')
+  setting('notifications_loyalty_threshold', 100)
+  await cacheModule.bumpVersion(env, 'settings')
+  for (let id = 5101; id <= 5107; id += 1) raw.db.prepare('INSERT INTO customers(id,name) VALUES (?,?)').run(id, `Loyalty customer ${id}`)
+  raw.db.exec(`
+    INSERT INTO loyalty_point_adjustments(customer_id,points) VALUES (5101,125),(5102,900);
+    UPDATE loyalty_point_adjustments SET voided_at='2026-01-01' WHERE customer_id=5102;
+    INSERT INTO customer_share_submissions(id,customer_id,status,reward_points,reward_points_voided_at)
+      VALUES (5103,5103,'approved',150,NULL),(5104,5104,'pending',1000,NULL),(5105,5105,'approved',1000,'2026-01-01');
+  `)
+  await resetLoyaltyCache()
+  await loyaltyCheck('loyalty includes manual and reward-only customers without a sale, excluding voided and pending awards', async () => {
+    const value = await loyalty()
+    assert.equal(value?.count, 2)
+    assert.equal(pointsOf(value, 5101), 125)
+    assert.equal(pointsOf(value, 5103), 150)
+    assert.ok(!value.items.some(item => ['loyalty-5102', 'loyalty-5104', 'loyalty-5105'].includes(item.id)))
+  })
+
+  raw.db.exec(`
+    INSERT INTO sales(receipt_number,customer_id,sale_status,total_usd,total_khr,membership_points_redeemed,loyalty_accrual) VALUES
+      ('LOY-PAID',5106,'completed',80,320000,0,1),
+      ('LOY-NP',5106,'awaiting_payment',900,900000,25,1),
+      ('LOY-NONACCRUAL',5106,'completed',700,700000,5,0),
+      ('LOY-CANCELLED',5106,'cancelled',800,800000,500,1);
+    INSERT INTO returns(return_number,customer_id,status,return_scope,total_refund_usd,total_refund_khr) VALUES
+      ('LOY-RETURN',5106,'completed','customer',10,40000),
+      ('LOY-SUPPLIER',5106,'completed','supplier',700,700000),
+      ('LOY-VOIDRETURN',5106,'cancelled','customer',700,700000);
+    INSERT INTO loyalty_point_adjustments(customer_id,points) VALUES (5106,20.126);
+    INSERT INTO customer_share_submissions(customer_id,status,reward_points) VALUES (5106,'approved',5);
+  `)
+  setting('customer_portal_points_basis', 'usd')
+  setting('customer_portal_points_per_usd', 2)
+  await cacheModule.bumpVersion(env, 'settings')
+  await loyaltyCheck('loyalty uses the configured USD rate and all eligible ledger terms with final rounding', async () => {
+    assert.equal(pointsOf(await loyalty(), 5106), 135.13)
+  })
+  setting('customer_portal_points_basis', 'khr')
+  setting('customer_portal_points_per_khr', 0.001)
+  await cacheModule.bumpVersion(env, 'settings')
+  await loyaltyCheck('loyalty uses configured KHR rather than USD, excluding supplier and cancelled returns', async () => {
+    assert.equal(pointsOf(await loyalty(), 5106), 275.13)
+  })
+  raw.db.prepare("DELETE FROM settings WHERE key='customer_portal_points_per_khr'").run()
+  setting('exchange_rate', 4000)
+  setting('customer_portal_points_per_usd', 4)
+  await cacheModule.bumpVersion(env, 'settings')
+  await loyaltyCheck('loyalty derives the missing KHR rate from the same exchange-rate configuration as checkout', async () => {
+    assert.equal(pointsOf(await loyalty(), 5106), 275.13)
+  })
+  setting('notifications_loyalty_threshold', 1)
+  setting('customer_portal_points_basis', 'usd')
+  setting('customer_portal_points_per_usd', 0)
+  await cacheModule.bumpVersion(env, 'settings')
+  await loyaltyCheck('zero earning rates do not resurrect spent points and negative balances stay below the threshold', async () => {
+    const value = await loyalty()
+    assert.equal(pointsOf(value, 5101), 125)
+    assert.ok(!value.items.some(item => item.id === 'loyalty-5106'))
+  })
+  await loyaltyCheck('loyalty read permission is checked even when an administrator warmed the shared cache', async () => {
+    await loyalty()
+    const viewer = { id: 8, role_code: 'staff', permissions: JSON.stringify({ contacts: 'review' }) }
+    const hidden = { id: 9, role_code: 'staff', permissions: JSON.stringify({ contacts: true, 'contacts:view': false, 'contacts:add': false, 'contacts:edit': false }) }
+    const writer = { id: 10, role_code: 'staff', permissions: JSON.stringify({ contacts: true, 'contacts:view': false }) }
+    assert.equal(pointsOf(await loyalty(viewer), 5101), 125)
+    assert.equal(await loyalty(hidden), undefined)
+    assert.equal(pointsOf(await loyalty(writer), 5101), 125, 'the existing Add/Edit implies View ruling still applies')
+  })
+  setting('loyalty_points_enabled', 'false')
+  await cacheModule.bumpVersion(env, 'settings')
+  await loyaltyCheck('the disabled programme does not emit loyalty prompts', async () => assert.equal(await loyalty(), undefined))
+  setting('loyalty_points_enabled', 'true')
+  await cacheModule.bumpVersion(env, 'settings')
+
+  await loyaltyCheck('an actual share review immediately invalidates loyalty cache, and a denied review cannot award points', async () => {
+    const portal = load('routes/portal.ts').default
+    const review = async (user, status, reward_points) => {
+      currentUser = user
+      const response = await portal.request('http://local/submissions/5104/review', {
+        method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status, reward_points }),
+      }, env, executionCtx)
+      await Promise.all(pending.splice(0))
+      return response.status
+    }
+    const before = await loyalty()
+    assert.ok(!before.items.some(item => item.id === 'loyalty-5104'))
+    assert.equal(await review(CASHIER, 'approved', 600), 403)
+    assert.equal(raw.db.prepare('SELECT status FROM customer_share_submissions WHERE id=5104').get().status, 'pending')
+    assert.equal(await review(ADMIN, 'approved', 600), 200)
+    assert.equal(pointsOf(await loyalty(), 5104), 600, 'the cached pre-review section must turn over immediately')
+    assert.equal(await review(ADMIN, 'rejected', 600), 200)
+    assert.ok(!(await loyalty()).items.some(item => item.id === 'loyalty-5104'))
+  })
+
+  await loyaltyCheck('loyalty count remains exact for600 customers while only50 names are read for the preview', async () => {
+    for (let id = 6000; id < 6600; id += 1) {
+      raw.db.prepare('INSERT INTO customers(id,name) VALUES (?,?)').run(id, `Preview ${id}`)
+      raw.db.prepare('INSERT INTO loyalty_point_adjustments(customer_id,points) VALUES (?,?)').run(id, 1000 + id)
+    }
+    await resetLoyaltyCache()
+    const value = await loyalty()
+    assert.equal(value.count, 602)
+    assert.equal(value.items.length, 50)
+    assert.equal(value.items[0].id, 'loyalty-6599')
+    const names = ledger.filter(entry => /FROM customers WHERE id IN/.test(entry.sql))
+    assert.equal(names.length, 1, 'names are read once for the bounded preview')
+    assert.equal(names[0].rows, 50)
+    const again = await loyalty()
+    assert.deepEqual(again, value)
+    assert.equal(statements('loyalty'), 0, 'unchanged cached answer costs no ledger/name reads')
+  })
+  await loyaltyCheck('uncached loyalty uses six bounded result queries on either plan', async () => {
+    const saved = globalThis.caches
+    delete globalThis.caches
+    try {
+      const value = await loyalty()
+      assert.equal(value.count, 602)
+      assert.equal(statements('loyalty'), 6, 'settings plus four grouped ledgers plus50 names, independent of customer count')
+      assert.ok(ledger.length < 40, 'the complete summary stays below the Free50query ceiling with headroom for authentication')
+      console.log(`  measured ${env.PLAN_TIER}: uncached summary ${ledger.length} SQL reads; loyalty6; name rows50 (SQLite route harness, authentication mocked)`)
+    } finally { globalThis.caches = saved }
+  })
+  assert.deepEqual(failures, [], 'all loyalty counterexamples must pass')
 
   console.log(`\n${passed} passed`)
 }

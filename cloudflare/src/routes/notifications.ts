@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import type { Env } from '../index'
 import { getDb } from '../lib/db'
 import { stockVisibleProductSql } from '../lib/productStockGuard'
-import { chunkForBinding } from '../lib/sqlBinding'
+import { buildPortalConfig, summarizePoints } from './portal'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -453,65 +453,72 @@ async function buildSalesSection(env: Env): Promise<NotificationSection | null> 
 
 async function buildLoyaltySection(env: Env, threshold: number): Promise<NotificationSection | null> {
   const db = getDb(env)
-  // Membership points can be switched off shop-wide (settings key `loyalty_points_enabled`).
-  // This is the fourth and last site that computes a balance; without the gate the shop keeps
-  // getting "N customers reached X+ points" alerts for a programme it has turned off.
-  const loyaltySwitch = await db.prepare(`SELECT value FROM settings WHERE key = 'loyalty_points_enabled'`)
-    .get<{ value: string }>()
-  if (['0', 'false', 'no', 'off'].includes(String(loyaltySwitch?.value ?? '').trim().toLowerCase())) return null
-  const [salesRows, returnRows, rewardRows] = await Promise.all([
+  const settings = await db.prepare(`SELECT key, value FROM settings WHERE key IN (
+    'loyalty_points_enabled', 'customer_portal_points_basis', 'customer_portal_points_per_usd',
+    'customer_portal_points_per_khr', 'exchange_rate'
+  )`).all<{ key: string; value: string }>()
+  const config = buildPortalConfig(rowsToSettingMap(settings), env)
+  if (!config.loyaltyPointsEnabled) return null
+  const [salesRows, returnRows, rewardRows, adjustmentRows] = await Promise.all([
     db.prepare(`
       SELECT customer_id,
         COALESCE(SUM(CASE WHEN COALESCE(sale_status, 'completed') <> 'awaiting_payment' AND COALESCE(loyalty_accrual, 1) = 1 THEN COALESCE(total_usd, 0) ELSE 0 END), 0) AS sales_usd,
+        COALESCE(SUM(CASE WHEN COALESCE(sale_status, 'completed') <> 'awaiting_payment' AND COALESCE(loyalty_accrual, 1) = 1 THEN COALESCE(total_khr, 0) ELSE 0 END), 0) AS sales_khr,
         COALESCE(SUM(COALESCE(membership_points_redeemed, 0)), 0) AS redeemed
       FROM sales
       WHERE customer_id IS NOT NULL AND COALESCE(sale_status, 'completed') <> 'cancelled'
       GROUP BY customer_id
-    `).all<{ customer_id: number; sales_usd: number; redeemed: number }>(),
+    `).all<{ customer_id: number; sales_usd: number; sales_khr: number; redeemed: number }>(),
     db.prepare(`
-      SELECT customer_id, COALESCE(SUM(COALESCE(total_refund_usd, 0)), 0) AS refunds_usd
+      SELECT customer_id, COALESCE(SUM(COALESCE(total_refund_usd, 0)), 0) AS refunds_usd,
+        COALESCE(SUM(COALESCE(total_refund_khr, 0)), 0) AS refunds_khr
       FROM returns
       WHERE customer_id IS NOT NULL AND COALESCE(status, 'completed') != 'cancelled'
         AND COALESCE(return_scope, 'customer') != 'supplier'
       GROUP BY customer_id
-    `).all<{ customer_id: number; refunds_usd: number }>(),
+    `).all<{ customer_id: number; refunds_usd: number; refunds_khr: number }>(),
     db.prepare(`
       SELECT customer_id, COALESCE(SUM(COALESCE(reward_points, 0)), 0) AS rewarded
       FROM customer_share_submissions
       WHERE customer_id IS NOT NULL AND status = 'approved' AND reward_points_voided_at IS NULL
       GROUP BY customer_id
     `).all<{ customer_id: number; rewarded: number }>(),
+    db.prepare(`
+      SELECT customer_id, COALESCE(SUM(points), 0) AS manually_awarded
+      FROM loyalty_point_adjustments
+      WHERE voided_at IS NULL
+      GROUP BY customer_id
+    `).all<{ customer_id: number; manually_awarded: number }>(),
   ])
-  if (!salesRows.length) return null
 
   const salesMap = new Map(salesRows.map((row) => [Number(row.customer_id), row]))
   const returnsMap = new Map(returnRows.map((row) => [Number(row.customer_id), row]))
   const rewardsMap = new Map(rewardRows.map((row) => [Number(row.customer_id), row]))
+  const adjustmentsMap = new Map(adjustmentRows.map((row) => [Number(row.customer_id), row]))
   const customerIds = new Set<number>([
-    ...salesMap.keys(), ...returnsMap.keys(), ...rewardsMap.keys(),
+    ...salesMap.keys(), ...returnsMap.keys(), ...rewardsMap.keys(), ...adjustmentsMap.keys(),
   ])
   if (!customerIds.size) return null
 
-  const idChunks = chunkForBinding([...customerIds])
-  const customerRows: Array<{ id: number; name: string }> = []
-  for (const idChunk of idChunks) {
-    const placeholders = idChunk.map(() => '?').join(',')
-    const chunkRows = await db.prepare(`SELECT id, name FROM customers WHERE id IN (${placeholders})`)
-      .all<{ id: number; name: string }>(idChunk)
-    customerRows.push(...chunkRows)
-  }
-  const nameMap = new Map(customerRows.map((row) => [Number(row.id), row.name]))
-
   const matches = [...customerIds].map((customerId) => {
-    const earned = Number(salesMap.get(customerId)?.sales_usd || 0)
-    const redeemed = Number(salesMap.get(customerId)?.redeemed || 0)
-    const deducted = Number(returnsMap.get(customerId)?.refunds_usd || 0)
-    const rewarded = Number(rewardsMap.get(customerId)?.rewarded || 0)
-    const balance = Math.max(0, earned - deducted - redeemed + rewarded)
-    return { id: customerId, name: nameMap.get(customerId) || `Customer #${customerId}`, balance: Number(balance.toFixed(2)) }
+    const sale = salesMap.get(customerId)
+    const returned = returnsMap.get(customerId)
+    const { balance } = summarizePoints(
+      [{ total_usd: sale?.sales_usd, total_khr: sale?.sales_khr, membership_points_redeemed: sale?.redeemed }],
+      [{ total_refund_usd: returned?.refunds_usd, total_refund_khr: returned?.refunds_khr }],
+      [{ id: customerId, status: 'approved', reward_points: rewardsMap.get(customerId)?.rewarded ?? 0 }],
+      config,
+      [{ points: adjustmentsMap.get(customerId)?.manually_awarded }],
+    )
+    return { id: customerId, balance }
   }).filter((match) => match.balance >= threshold)
-    .sort((left, right) => right.balance - left.balance)
+    .sort((left, right) => right.balance - left.balance || left.id - right.id)
   if (!matches.length) return null
+  const preview = matches.slice(0, 50)
+  const placeholders = preview.map(() => '?').join(',')
+  const customerRows = await db.prepare(`SELECT id, name FROM customers WHERE id IN (${placeholders})`)
+    .all<{ id: number; name: string }>(preview.map(customer => customer.id))
+  const nameMap = new Map(customerRows.map(row => [Number(row.id), row.name]))
 
   return {
     id: 'loyalty',
@@ -519,10 +526,10 @@ async function buildLoyaltySection(env: Env, threshold: number): Promise<Notific
     pageId: 'loyalty_points',
     count: matches.length,
     summary: `${matches.length} customer${matches.length === 1 ? '' : 's'} reached ${threshold}+ points`,
-    items: matches.slice(0, 50).map((customer) => ({
+    items: preview.map((customer) => ({
       id: `loyalty-${customer.id}`,
       tone: 'success' as const,
-      label: customer.name,
+      label: nameMap.get(customer.id) || `Customer #${customer.id}`,
       meta: `${customer.balance} points`,
       kind: 'loyalty_points_balance',
       pageId: 'loyalty_points',
@@ -746,7 +753,7 @@ app.get('/summary', async (c) => {
   // The section lists receipt numbers and totals, so it follows the sales READ rule (reports.ts, sales.ts canReadSales):
   // a view-only user sees it, a full user whose sales:view was switched off does not.
   if (preferences.salesEnabled && getActionTier(user, 'sales', 'view') !== 'none') tasks.push(buildSalesSection(c.env))
-  if (preferences.loyaltyEnabled && hasPermission(user, 'contacts')) {
+  if (preferences.loyaltyEnabled && getActionTier(user, 'contacts', 'view') !== 'none') {
     tasks.push(cachedSection('loyalty', ['sales', 'returns', 'customers', 'settings'], `${preferences.loyaltyThreshold}:${loyaltyPointsEnabled ? 1 : 0}`,
       () => buildLoyaltySection(c.env, preferences.loyaltyThreshold)))
   }

@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { buildInClause, inlineIntegerIds, selectInChunks } from '../lib/sqlBinding'
-import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { admitRequestBody, SMALL_BODY_BYTES, PORTAL_SCREENSHOT_BODY_BYTES } from '../lib/requestBodyGuard'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission } from '../lib/permissions'
@@ -2162,6 +2162,7 @@ app.patch('/submissions/:id/review', requireAuth, async (c) => {
   })
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'review', 'portal_submission', id ?? null, { status, rewardPoints })
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'customers'))
   c.executionCtx.waitUntil(broadcast(c.env, 'portalSubmissions', { action: 'review', id }))
   return c.json({ success: true })
 })
