@@ -1,7 +1,7 @@
 import { executeStockTransaction, stockTransactionStatementCount, StockTransactionUnavailableError, StockTransactionOutcomeUnknownError } from './stockTransaction'
 import { assertProductStatusInput, productStockGuardError, productStockGuardStatement, ProductStockGuardError } from './productStockGuard'
 import { getDb, type D1Compat } from './db'
-import { CountedStockBatchPlan, countedStockFactsSql, isCountedStockConflict, sumCountedQuantities } from './countedDamagedStock'
+import { CountedStockBatchPlan, countedStockFactsSql, isCountedStockConflict, subtractCountedQuantity, sumCountedQuantities } from './countedDamagedStock'
 import { stockActorPredicate,stockActorParams } from './stockActorGuard'
 import type { Env } from '../index'
 import { getPlanLimits } from './planTier'
@@ -23,7 +23,7 @@ import { bumpVersion, bumpVersions } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { actorSnapshot } from './actorSnapshot'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
-import { multiplyMoney4, roundMoney4, sumMoney4 } from './moneyPrecision'
+import { MoneyPrecisionError, multiplyMoney4, roundMoney4, sumMoney4 } from './moneyPrecision'
 import { catalogCostRecomputeIfChangedStatement, catalogCostRecomputeStatement } from './catalogCostRecompute'
 import { findConsumingBlocker, findLaterChangeBlocker } from './stockRefusalBlocker'
 import { revertChainOpenSql } from './stockInSessionsQuery'
@@ -1510,8 +1510,22 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
   // session itself wrote on products and lots, its member and movement rows,
   // the images of products it created, and the lots' identity.
   const expectedImage = snapshot.expected as Record<string, Row[]>
+  const existingProducts = !members.some(member=>Number(member.product_created)===1)
+    && members.every(member=>(before.products||[]).some(row=>Number(row.id)===Number(member.product_id)))
   const sign = direction === 'undo' ? -1 : 1
   const num = (value: unknown) => Number(value) || 0
+  const exactQuantity = (total:unknown, values:unknown[]):number => {
+    try{return subtractCountedQuantity(Number(total??0),values.map(value=>Number(value??0)))}catch(error){
+      if(error instanceof MoneyPrecisionError)fail('The recorded stock decimals cannot be replayed exactly. Nothing was changed.',409,'stock_session_snapshot_unsupported')
+      throw error
+    }
+  }
+  const exactPlan = <T>(operation:()=>T):T => {
+    try{return countedSessionPlan(operation)}catch(error){
+      if(error instanceof MoneyPrecisionError)fail('The recorded stock decimals cannot be replayed exactly. Nothing was changed.',409,'stock_session_snapshot_unsupported')
+      throw error
+    }
+  }
   const originalOf = (key: ReplayKey, row: Row) => (before[key] || []).find(r => r.id === row.id)
   const expectedOf = (key: ReplayKey, row: Row) => (expectedImage[key] || []).find(r => r.id === row.id)
   const editsTable = await db.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='stock_lot_adjustment_operations'").get<{ ok: number }>()
@@ -1527,10 +1541,32 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
   // Lots first, so a shortage names the received date before the branch total.
   for (const key of ['branchBatchStock', 'branchStock'] as const) {
     for (const row of after[key] || []) {
+      if(existingProducts&&!members.some(member=>Number(member.branch_id)===Number(row.branch_id)
+        && (key==='branchBatchStock'?Number(member.batch_id)===Number(row.batch_id):Number(member.product_id)===Number(row.product_id))))continue
       const original = originalOf(key, row)
-      const delta = num(row.quantity) - num(original?.quantity)
-      if (Math.abs(delta) < 1e-9 && original) continue
+      const delta = existingProducts?exactQuantity(row.quantity,[original?.quantity]):num(row.quantity) - num(original?.quantity)
+      if ((existingProducts?delta===0:Math.abs(delta)<1e-9) && original) continue
       stockChanges.push({ key, row, original, change: sign * delta })
+    }
+  }
+  const captured=existingProducts?await db.prepare(`SELECT ${stateSql} AS state,
+    (SELECT json_group_array(json_object('branchId',source.branch_id,'facts',printf('%s',${countedStockFactsSql('source.product_id','source.branch_id',"(SELECT json_group_array(id) FROM product_batches WHERE variant_product_id=source.product_id)")})))
+    FROM (SELECT DISTINCT product_id,branch_id FROM stock_session_members WHERE operation_id=@id ORDER BY product_id,branch_id) source) AS contexts`).get<{state:string;contexts:string}>({id:op.id}):null
+  const currentImage=captured?JSON.parse(captured.state) as Record<string,Row[]>:null
+  if(captured&&(new TextEncoder().encode(JSON.stringify(captured)).length>STOCK_SESSION_MAX_SNAPSHOT_BYTES
+    || Object.keys(REPLAY_TABLES).some(key=>currentImage![key].length>100) || currentImage!.revisions.length>500))fail('The current stock snapshot exceeds the replay bound.',409,'stock_session_snapshot_unsupported')
+  const exactReplay=captured?exactPlan(()=>new CountedStockBatchPlan(JSON.parse(captured.contexts),{deferPhysicalWrites:true})):null
+  const exactGuards=exactReplay?.takePreimageGuards()??[]
+  const exactStatements:StockWriteStatement[]=[]
+  if(exactReplay){
+    for(const row of after.products){
+      const productId=Number(row.id),delta=exactQuantity(row.stock_quantity,[originalOf('products',row)?.stock_quantity])
+      const branches=stockChanges.filter(item=>item.key==='branchStock'&&Number(item.row.product_id)===productId)
+      if(exactQuantity(sign*delta,branches.map(item=>item.change))!==0)fail('Recorded product and branch changes disagree. Nothing was changed.',409,'stock_session_snapshot_unsupported')
+    }
+    for(const row of after.batches){
+      const current=currentImage!.batches.find(item=>item.id===row.id)
+      if(!current)fail('A recorded receipt no longer exists. Nothing was changed.')
     }
   }
   const ownLast = await db.prepare(`SELECT MAX(COALESCE((SELECT MAX(id) FROM inventory_movements WHERE reference_id = o.rowid AND movement_type IN ('add', 'remove')
@@ -1541,12 +1577,15 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
   for (const item of stockChanges) {
     if (item.change >= 0) continue
     const lot = item.key === 'branchBatchStock'
-    const current = await db.prepare(lot
+    const current = captured?{
+      qty:currentImage![item.key].find(row=>lot?row.batch_id===item.row.batch_id&&row.branch_id===item.row.branch_id:row.product_id===item.row.product_id&&row.branch_id===item.row.branch_id)?.quantity??0,
+      branch:JSON.parse((JSON.parse(captured.contexts) as {branchId:number;facts:string}[]).find(row=>row.branchId===Number(item.row.branch_id))!.facts).branch?.[2],
+    }:await db.prepare(lot
       ? 'SELECT COALESCE((SELECT quantity FROM branch_batch_stock WHERE batch_id=@a AND branch_id=@b),0) AS qty, (SELECT name FROM branches WHERE id=@b) AS branch'
       : 'SELECT COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@a AND branch_id=@b),0) AS qty, (SELECT name FROM branches WHERE id=@b) AS branch')
       .get<{ qty: number; branch: string | null }>({ a: lot ? item.row.batch_id : item.row.product_id, b: item.row.branch_id })
     const available = num(current?.qty)
-    if (available + item.change < -1e-9) {
+    if ((existingProducts?exactQuantity(available,[-item.change])<0:available+item.change < -1e-9)) {
       const productId = lot
         ? num(members.find(m => Number(m.batch_id) === Number(item.row.batch_id))?.product_id)
         : num(item.row.product_id)
@@ -1561,8 +1600,22 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
     }
   }
 
+  if(exactReplay){
+    for(const item of stockChanges.filter(item=>item.key==='branchBatchStock'&&item.change!==0)){
+      const productId=Number(after.batches.find(row=>row.id===item.row.batch_id)?.variant_product_id)
+      const exact=exactReplay.get(productId,Number(item.row.branch_id)),batchId=Number(item.row.batch_id)
+      exactStatements.push(...exactPlan(()=>exact.changeOrdinary(batchId,Math.abs(item.change),item.change<0?'consume':exact.requiresReceiptActivation(batchId)?'activateAndReceive':'receive')))
+    }
+    for(const item of stockChanges.filter(item=>item.key==='branchStock')){
+      const receipts=stockChanges.filter(receipt=>receipt.key==='branchBatchStock'&&receipt.row.branch_id===item.row.branch_id
+        && Number(after.batches.find(row=>row.id===receipt.row.batch_id)?.variant_product_id)===Number(item.row.product_id))
+      const change=exactQuantity(item.change,receipts.map(receipt=>receipt.change))
+      if(change!==0)exactStatements.push(...exactPlan(()=>exactReplay.get(Number(item.row.product_id),Number(item.row.branch_id)).changeOrdinary(null,Math.abs(change),change<0?'consume':'receive')))
+    }
+  }
+
   const statements: StockWriteStatement[] = [
-    assertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')"),
+    assertion(`NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND (${stockActorPredicate})`,stockActorParams(user)),
     assertion(`EXISTS(SELECT 1 FROM stock_session_operations o JOIN action_history h ON h.id=o.history_id
       JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@id AND o.history_id=@history AND o.generation=@generation
       AND h.status=@status AND s.payload_json=@snapshot)`, { id: op.id, history: historyId, generation, status: expectedStatus, snapshot: op.payload_json }),
@@ -1574,7 +1627,29 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
     // products it created) and its lots' identity are exactly as it left them.
     assertion(`(WITH cur(x) AS (SELECT ${stateSql}) SELECT ${pinnedReplayState('cur.x')} FROM cur)
       = (SELECT ${pinnedReplayState("json_extract(payload_json,'$.expected')")} FROM undo_snapshots WHERE id=@snapshotId)`, { id: op.id, snapshotId: op.snapshot_id }),
+    ...exactGuards,
+    ...(captured?[assertion(`${stateSql}=@captured`,{id:op.id,captured:captured.state})]:[]),
   ]
+  const metadataGuards:StockWriteStatement[]=[]
+  const physicalWrites:StockWriteStatement[]=[]
+  if(exactReplay){
+    for(const item of stockChanges){
+      const table=REPLAY_TABLES[item.key][0],lot=item.key==='branchBatchStock'
+      const natural=lot?'batch_id=@a AND branch_id=@b':'product_id=@a AND branch_id=@b'
+      const params:Row={a:lot?item.row.batch_id:item.row.product_id,b:item.row.branch_id,rowId:item.row.id}
+      if(item.change>=0&&!currentImage![item.key].some(row=>lot?row.batch_id===item.row.batch_id&&row.branch_id===item.row.branch_id:row.product_id===item.row.product_id&&row.branch_id===item.row.branch_id)){
+        metadataGuards.push(assertion(`NOT EXISTS(SELECT 1 FROM ${table} WHERE id=@rowId)`,params))
+        const columns=Object.keys(item.row)
+        physicalWrites.push({sql:`INSERT INTO ${table}(${columns.map(c=>`"${c}"`).join(',')}) SELECT ${columns.map((c,i)=>c==='quantity'?'0':`@v${i}`).join(',')} WHERE NOT EXISTS(SELECT 1 FROM ${table} WHERE ${natural})`,params:{...params,...Object.fromEntries(columns.map((c,i)=>[`v${i}`,item.row[c]]))}})
+      }
+    }
+    physicalWrites.push(...exactStatements,...exactReplay.takeFinalPhysicalWrites())
+    if(direction==='undo')for(const item of stockChanges.filter(item=>!item.original)){
+      const lot=item.key==='branchBatchStock'
+      physicalWrites.push({sql:`DELETE FROM ${REPLAY_TABLES[item.key][0]} WHERE ${lot?'batch_id=@a':'product_id=@a'} AND branch_id=@b AND quantity=0`,params:{a:lot?item.row.batch_id:item.row.product_id,b:item.row.branch_id}})
+    }
+    if(direction==='undo')statements.push(...physicalWrites)
+  }
   // The columns the session itself wrote on a product or lot are pinned to
   // the value it (or its last replay) left, and moved to the other side.
   const pinColumns = (table: string, key: 'products' | 'batches', row: Row, columns: string[]) => {
@@ -1582,7 +1657,7 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
     if (!pinned) return
     for (let i = 0; i < columns.length; i += 40) {
       const slice = columns.slice(i, i + 40)
-      statements.push(assertion(`EXISTS(SELECT 1 FROM ${table} WHERE id=@rowId AND ${slice.map((c, j) => `"${c}" IS @p${j}`).join(' AND ')})`,
+      metadataGuards.push(assertion(`EXISTS(SELECT 1 FROM ${table} WHERE id=@rowId AND ${slice.map((c, j) => `"${c}" IS @p${j}`).join(' AND ')})`,
         { rowId: row.id, ...Object.fromEntries(slice.map((c, j) => [`p${j}`, pinned[c] ?? null])) }))
     }
   }
@@ -1599,7 +1674,7 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
           // through because someone retyped the barcode with a leading zero,
           // are both the same bug in opposite directions.
           const barcodeMatch = identityBarcodeMatchSql('barcode', row.barcode)
-          statements.push(assertion(`NOT EXISTS(SELECT 1 FROM products WHERE id<>@product AND is_active=1
+          metadataGuards.push(assertion(`NOT EXISTS(SELECT 1 FROM products WHERE id<>@product AND is_active=1
             ${barcodeMatch ? `AND ${barcodeMatch.sql}` : ''}
             AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name,'  ',' '),'  ',' '),'  ',' ')))=@nameKey)`, {
             ...(barcodeMatch?.params || {}), product: row.id, nameKey: normalizeProductGroupName(row.name),
@@ -1623,14 +1698,19 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
             }
           }
         }
-        if (key === 'products') {
+        if (key === 'products'&&!exactReplay) {
           const change = sign * (num(row.stock_quantity) - num(original?.stock_quantity))
           if (change > 1e-9 && !created) statements.unshift(productStockGuardStatement([Number(row.id)], 'active'))
           if (Math.abs(change) > 1e-9) { sets.push('stock_quantity=COALESCE(stock_quantity,0)+@change'); params.change = change }
-        } else {
-          const rq = sign * (num(row.received_quantity) - num(original?.received_quantity))
+        } else if(key==='batches') {
+          const rq = sign * (exactReplay?exactQuantity(row.received_quantity,[original?.received_quantity]):num(row.received_quantity) - num(original?.received_quantity))
           const rc = sign * (num(row.received_cost_usd) - num(original?.received_cost_usd))
-          if (Math.abs(rq) > 1e-9) { sets.push('received_quantity=MAX(0,COALESCE(received_quantity,0)+@rq)'); params.rq = rq }
+          if(exactReplay&&rq!==0){
+            const current=currentImage!.batches.find(item=>item.id===row.id)!
+            const receivedQuantity=exactQuantity(current.received_quantity,[-rq])
+            if(receivedQuantity<0)fail('The receipt received quantity is insufficient. Nothing was changed.')
+            sets.push('received_quantity=@receivedQuantity');params.receivedQuantity=receivedQuantity
+          }else if (!exactReplay&&Math.abs(rq) > 1e-9) { sets.push('received_quantity=MAX(0,COALESCE(received_quantity,0)+@rq)'); params.rq = rq }
           if (Math.abs(rc) > 0.00005) { sets.push('received_cost_usd=MAX(0,ROUND(COALESCE(received_cost_usd,0)+@rc,4))'); params.rc = roundMoney4(rc) }
           // Migration 0154: activate before the redo puts stock back on the lot.
           if (direction === 'redo' && num(row.is_active) === 1) sets.push('is_active=1')
@@ -1666,6 +1746,7 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
       }
       continue
     }
+    if(exactReplay)continue
     const lot = key === 'branchBatchStock'
     const natural = lot ? 'batch_id=@a AND branch_id=@b' : 'product_id=@a AND branch_id=@b'
     for (const item of stockChanges.filter(change => change.key === key)) {
@@ -1686,6 +1767,8 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
       }
     }
   }
+  statements.unshift(...metadataGuards)
+  if(exactReplay&&direction==='redo')statements.push(...physicalWrites)
   // U-cost (supervisor decision, 2026-09-25): the products image above carries
   // the cost the formula gave WHEN the snapshot was taken. Undo writes it back
   // after branchBatchStock (whose 0195 triggers already re-derived), so a lot
@@ -1708,19 +1791,23 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
     undo_payload=json_set(undo_payload,'$.generation',@generation),redo_payload=json_set(redo_payload,'$.generation',@generation) WHERE id=@history`, params: { status: targetStatus, generation: generation + 1, history: historyId } })
   statements.push({ sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details)
     VALUES(@actor,@name,@action,'stock_session',@id,@details)`, params: { actor: user.id, name: actorSnapshot(user), action: `stock_session_${direction}`, id: op.id, details: JSON.stringify({ operationId: op.id, actionHistoryId: historyId, generation: generation + 1 }) } })
-  statements.push(...captureReplayState(String(op.id), stateSql))
+  const physicalTargets=exactReplay?JSON.stringify(exactReplay.projectedPhysicalTargets()):null
+  statements.push(...captureReplayState(String(op.id), stateSql,false,physicalTargets?{predicate:`NOT EXISTS(SELECT 1 FROM json_each(@physicalTargets) ctx WHERE
+    NOT EXISTS(SELECT 1 FROM products p WHERE p.id=json_extract(ctx.value,'$.product.product_id') AND p.stock_quantity IS json_extract(ctx.value,'$.product.after'))
+    OR EXISTS(SELECT 1 FROM json_each(ctx.value,'$.branches') target WHERE COALESCE((SELECT quantity FROM branch_stock WHERE product_id=json_extract(target.value,'$.product_id') AND branch_id=json_extract(target.value,'$.branch_id')),0) IS NOT json_extract(target.value,'$.after'))
+    OR EXISTS(SELECT 1 FROM json_each(ctx.value,'$.receipts') target WHERE NOT EXISTS(SELECT 1 FROM product_batches pb WHERE pb.id=json_extract(target.value,'$.batch_id') AND pb.variant_product_id=json_extract(target.value,'$.product_id')) OR COALESCE((SELECT quantity FROM branch_batch_stock WHERE batch_id=json_extract(target.value,'$.batch_id') AND branch_id=json_extract(target.value,'$.branch_id')),0) IS NOT json_extract(target.value,'$.after')))`,params:{physicalTargets}}:undefined))
   checkBounds(statements, snapshot)
   try { await execution.commit(packSessionAssertions(statements)); execution.finishReads() } catch (error) {
     execution.finishReads()
     if (error instanceof StockSessionError && error.code === 'stock_session_query_budget_exceeded') throw error
-    const saved = await db.prepare('SELECT o.generation,h.status FROM stock_session_operations o JOIN action_history h ON h.id=o.history_id WHERE o.id=@id').get<Row>({ id: op.id })
+    const saved = await db.prepare('SELECT o.generation,h.status FROM stock_session_operations o JOIN action_history h ON h.id=o.history_id WHERE o.id=@id').get<Row>({ id: op.id }).catch(()=>null)
     if (saved?.generation === generation + 1 && saved.status === targetStatus) return
     if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const activeGuard = productStockGuardError(error)
 
     if (activeGuard) throw activeGuard
 
-    if (/constraint/i.test(String(error))) {
+    if (isCountedStockConflict(error)||/CHECK constraint failed: guard_value\s*=\s*1\s*$/i.test(String(error))) {
       if (await movedByBranchCutover(db, String(op.id))) fail(BRANCH_CUTOVER_PRODUCT_MOVED_MESSAGE, 409, BRANCH_CUTOVER_PRODUCT_MOVED_CODE)
       // RET-D: name the newest stock change on one of the session's product +
       // branch pairs since the session's own rows (its receipts and every
@@ -1735,7 +1822,7 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
       const refusal = own ? await findLaterChangeBlocker(db, { pairs, afterMovementId: Number(own.last_id) || 0 }) : null
       fail('Stock, metadata, references, or revision changed. Nothing was reversed; refresh history.', 409, 'stock_session_rejected', refusal ? { refusal } : undefined)
     }
-    throw error
+    fail('The stock session replay result could not be confirmed. Retry the same generation.',503,'unknown_outcome',{action:'retry_same_request'})
   }
 }
 
