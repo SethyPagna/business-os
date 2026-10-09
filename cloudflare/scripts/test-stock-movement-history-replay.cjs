@@ -157,7 +157,16 @@ async function main() {
     const newest = s.sql.prepare('SELECT id FROM inventory_movements ORDER BY id DESC LIMIT 1').get().id
     const again = (await preview(s, newest)).body.revert
     assert.deepEqual([again.direction, again.expectedGeneration], ['redo', 3])
-    s.sql.prepare('UPDATE branch_batch_stock SET quantity=1 WHERE batch_id=? AND branch_id=1').run(batchId)
+    const removal = loadStockSession('lib/productBatches.ts').planRemoveStockAcrossBatches({
+      productId: 1, branchId: 1, quantity: 4, allocations: [{ batchId, quantity: 4 }],
+    })
+    await loadStockSession('lib/stockTransaction.ts').executeStockTransaction(db, removal.statements, 'once')
+    assert.deepEqual([
+      s.sql.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=? AND branch_id=1').get(batchId).quantity,
+      s.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity,
+      s.sql.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity,
+    ], [1, 1, 1], 'physical consumption updates the lot, branch and product together')
+    assert.equal(s.sql.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key IN ('maintenance','stock_transaction_permit')").get().n, 0)
     const changed = state(s)
     assert.equal((await replay(s, again)).status, 409)
     assert.deepEqual(state(s), changed, 'a change that took the units the replay needs refuses it with no write')
