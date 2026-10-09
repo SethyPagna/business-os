@@ -83,8 +83,11 @@ interface SupplierReturnItem {
   stock_condition: string
   damaged_lot_id?: number
 }
-type SupplierSelection = { raw: string; item: SupplierReturnItem; available: number; source: SupplierTaggedSource | null }
+type SupplierSelection = { raw: string; item: SupplierReturnItem; available: number; source: SupplierTaggedSource | null; review: string }
 type PendingSupplierReturn = { body: SupplierReturnPayload; scope: ActorReadScope; uncertain: boolean; result?: unknown; notified?: boolean }
+function supplierSourceReview(product: SupplierProductSources, visible: boolean, editable: boolean): string {
+  return JSON.stringify({ visible, editable, product })
+}
 
 interface SupplierReturnPayload extends Record<string, unknown> {
   cashier_id: number | string | null
@@ -199,6 +202,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
   const [sourcePage, setSourcePage] = useState(0)
   const [sourceRevision, setSourceRevision] = useState(0)
   const [financialEditable, setFinancialEditable] = useState(false)
+  const [financialVisible, setFinancialVisible] = useState(false)
   const [pending, setPending] = useState<PendingSupplierReturn | null>(null)
   const [compensationUsd, setCompensationUsd] = useState('')
   const [compensationKhr, setCompensationKhr] = useState('')
@@ -357,8 +361,10 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
         sourceScopeRef.current = scope
         setSources(previous => ({ ...previous, ...Object.fromEntries(result.items.map(item => [String(item.product_id), item])) }))
         setFinancialEditable(result.financial_editable)
+        setFinancialVisible(result.financial_visibility)
       } catch (error) {
         if (!aliveRef.current || !isTrackedRequestCurrent(sourceRequestRef, requestId)) return
+        if ((error as { status?: number }).status === 403) { setFinancialVisible(false); setFinancialEditable(false) }
         setSourceError(getLoaderErrorMessage(error, tr('supplier_sources_unavailable', 'Stock sources could not be verified. Refresh before selecting quantities.')))
       } finally {
         if (aliveRef.current && isTrackedRequestCurrent(sourceRequestRef, requestId)) setLoadingSources(false)
@@ -376,6 +382,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
     if (!(Number(selection.raw) > 0)) return false
     const current = sources[String(selection.item.product_id)]
     if (!current) return true
+    if (selection.review !== supplierSourceReview(current, financialVisible, financialEditable)) return true
     if (!selection.source) return Number(selection.raw) > current.ordinary_available
     const tag = current.tagged_sources.find(tag => tag.damaged_lot_id === selection.source!.damaged_lot_id)
     return !tag || tag.stock_condition !== selection.source.stock_condition || tag.batch_id !== selection.source.batch_id || Number(selection.raw) > tag.available
@@ -409,6 +416,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
 
   const updateQty = (key: string, product: SupplierProductSources, source: SupplierTaggedSource | null, raw: string) => {
     setQuantities(previous => ({ ...previous, [key]: { raw, available: source?.available ?? product.ordinary_available, source,
+      review: supplierSourceReview(product, financialVisible, financialEditable),
       item: { product_id: product.product_id, product_name: product.product_name, quantity: Number(raw),
         cost_price_usd: product.return_cost_usd ?? 0, cost_price_khr: product.return_cost_khr ?? 0,
         stock_condition: source?.stock_condition ?? 'ordinary', ...(source ? { damaged_lot_id: source.damaged_lot_id } : {}) } } }))
@@ -421,7 +429,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
       if (!reason.trim()) return notify(tr('return_reason_required', 'Reason is required'), 'error')
       if (!selectedItems.length) return notify(tr('select_items_to_return', 'Select at least one item to return.'), 'error')
       if (invalidSelection || staleSelection || selectedItems.length > 50) return notify(tr('supplier_quantity_invalid', 'Enter a positive quantity within the selected source availability.'), 'error')
-      if (!financialEditable || sourceError || !sourceScopeRef.current) return notify(tr('supplier_sources_unavailable', 'Stock sources could not be verified. Refresh before selecting quantities.'), 'error')
+      if (!financialVisible || !financialEditable || sourceError || !sourceScopeRef.current) return notify(tr('supplier_sources_unavailable', 'Stock sources could not be verified. Refresh before selecting quantities.'), 'error')
     }
 
     if (!beginSingleAction(submitInFlightRef)) return
@@ -481,6 +489,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
       onClose?.()
     } catch (error) {
       const failure = error as { code?: string; outcome?: string; status?: number }
+      if (failure.status === 403) { setFinancialVisible(false); setFinancialEditable(false) }
       if (attempt && !attempt.result) {
         const safelyRejected = failure.outcome === 'not_dispatched' || (failure.status === 409 && failure.code === 'write_conflict')
         if (!attempt.uncertain && safelyRejected) setPending(null)
@@ -525,7 +534,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
       {pending && <p role="status" className="mb-3 rounded-lg border border-amber-300 p-2 text-sm">{!authorityCurrent ? tr('supplier_pending_account', 'This request belongs to the previous account. Close this form and check Returns and Stock Changes.')
         : pending.result ? tr('supplier_pending_refresh', 'The return is recorded. Retry refreshing the list; no new return will be sent.')
           : tr('supplier_pending_unknown', 'The result is unconfirmed. Retry the original request or check Returns and Stock Changes before closing.')}</p>}
-      <fieldset disabled={loading || submitting || Boolean(pending)} hidden={!authorityCurrent} className="min-w-0 space-y-3 border-0 p-0">
+      {authorityCurrent && <fieldset disabled={loading || submitting || Boolean(pending)} className="min-w-0 space-y-3 border-0 p-0">
         <div className="grid grid-cols-2 gap-2">
             <AppSelect
               id="supplier-return-branch"
@@ -597,7 +606,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
                         <div className="break-words text-sm font-medium text-gray-800 dark:text-gray-200">{product.name}</div>
                         <div className="break-words text-xs leading-relaxed text-gray-400">{product.sku || '-'} / {product.category || '-'}</div>
                         <div className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
-                          {source && source.return_cost_usd !== undefined && <span>{tr('supplier_return_valuation', 'Return valuation')}: {fmtUSD(source.return_cost_usd ?? 0)} · {fmtKHR(source.return_cost_khr ?? 0)}</span>}
+                          {financialVisible && source && source.return_cost_usd !== undefined && <span>{tr('supplier_return_valuation', 'Return valuation')}: {fmtUSD(source.return_cost_usd ?? 0)} · {fmtKHR(source.return_cost_khr ?? 0)}</span>}
                         </div>
                       </div>
                       {!source ? <p className="text-xs text-amber-700">{tr('supplier_sources_unavailable', 'Stock sources could not be verified. Refresh before selecting quantities.')}</p> : (
@@ -608,24 +617,24 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
                               <div className="text-gray-500">{tr('supplier_ordinary_fifo', 'Received dates are used in order; stock without a received date is used last.')}</div>
                             </div>
                             <input className="input w-20 shrink-0 text-center text-sm" type="number" min="0" step="any" max={source.ordinary_available}
-                              disabled={!financialEditable || source.ordinary_available === 0 || Boolean(sourceError)}
+                              disabled={!financialVisible || !financialEditable || source.ordinary_available === 0 || Boolean(sourceError)}
                               value={quantities[`${product.id}:ordinary`]?.raw ?? ''} placeholder="0"
                               aria-label={`${tr('quantity', 'Quantity')}: ${product.name} · ${tr('stock_ordinary', 'Ordinary')}`}
                               onChange={event => updateQty(`${product.id}:ordinary`, source, null, event.target.value)} />
                           </div>
                           {source.ordinary_receipts.map(receipt => <div key={receipt.batch_id} className="break-words text-xs text-gray-500">
                             {tr('received_date', 'Received date')}: {formatBatchReceivedDate(receipt.received_at) ?? tr('unknown', 'Unknown')}{receipt.batch_number === null ? '' : ` · #${receipt.batch_number}`}{receipt.lot_code ? ` · ${receipt.lot_code}` : ''}
-                            {' · '}{receipt.available}{receipt.source_cost_usd !== undefined && <> · {tr('supplier_source_cost', 'Original source cost (USD)')}: {receipt.source_cost_usd === null ? tr('unknown', 'Unknown') : fmtUSD(receipt.source_cost_usd)}</>}
+                            {' · '}{receipt.available}{financialVisible && receipt.source_cost_usd !== undefined && <> · {tr('supplier_source_cost', 'Original source cost (USD)')}: {receipt.source_cost_usd === null ? tr('unknown', 'Unknown') : fmtUSD(receipt.source_cost_usd)}</>}
                           </div>)}
                           {source.ordinary_unlotted > 0 && <div className="text-xs text-gray-500">{tr('stock_without_received_date', 'Without a received date')}: {source.ordinary_unlotted}</div>}
                           {source.tagged_sources.map(tag => <div key={tag.damaged_lot_id} className="flex items-center gap-2 rounded-lg border border-amber-200 p-2 dark:border-amber-800">
                             <div className="min-w-0 flex-1 text-xs">
                               <strong className="text-amber-700 dark:text-amber-300">{tag.stock_condition}</strong> · {tr('available', 'Available')}: {tag.available}
                               <div className="break-words text-gray-500">{sourceLabel(tag)}</div>
-                              {tag.source_cost_usd !== undefined && <div className="text-gray-500">{tr('supplier_source_cost', 'Original source cost (USD)')}: {tag.source_cost_usd === null ? tr('unknown', 'Unknown') : fmtUSD(tag.source_cost_usd)}</div>}
+                              {financialVisible && tag.source_cost_usd !== undefined && <div className="text-gray-500">{tr('supplier_source_cost', 'Original source cost (USD)')}: {tag.source_cost_usd === null ? tr('unknown', 'Unknown') : fmtUSD(tag.source_cost_usd)}</div>}
                             </div>
                             <input className="input w-20 shrink-0 text-center text-sm" type="number" min="0" step="any" max={tag.available}
-                              disabled={!financialEditable || Boolean(sourceError)} value={quantities[`${product.id}:tag:${tag.damaged_lot_id}:${tag.stock_condition}`]?.raw ?? ''} placeholder="0"
+                              disabled={!financialVisible || !financialEditable || Boolean(sourceError)} value={quantities[`${product.id}:tag:${tag.damaged_lot_id}:${tag.stock_condition}`]?.raw ?? ''} placeholder="0"
                               aria-label={`${tr('quantity', 'Quantity')}: ${product.name} · ${tag.stock_condition} · #${tag.damaged_lot_id}`}
                               onChange={event => updateQty(`${product.id}:tag:${tag.damaged_lot_id}:${tag.stock_condition}`, source, tag, event.target.value)} />
                           </div>)}
@@ -638,6 +647,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
             )}
           </div>
           {sourceError && <p role="alert" className="mt-2 text-xs text-rose-600">{sourceError}</p>}
+          {staleSelection && <p role="alert" className="mt-2 text-xs text-amber-700">{tr('supplier_selection_changed', 'Stock sources or valuation changed. Remove and select the affected items again before saving.')}</p>}
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <button type="button" className="btn-secondary inline-flex items-center gap-1.5 text-xs" onClick={() => setSourceRevision(value => value + 1)} disabled={loadingSources}><RotateCw className="h-4 w-4" aria-hidden="true" />{tr('refresh', 'Refresh')}</button>
             {filteredProducts.length > 25 && <>
@@ -654,7 +664,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
           </ul>}
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
+        {financialVisible && <div className="grid grid-cols-2 gap-2">
           <div className="relative">
             <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400" aria-hidden="true">$</span>
             <input
@@ -685,9 +695,9 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
               title={tr('supplier_compensation_khr', 'Supplier compensation (KHR)')}
             />
           </div>
-        </div>
+        </div>}
 
-        <div className="space-y-1 rounded-xl bg-gray-50 p-3 text-sm dark:bg-gray-700/40">
+        {financialVisible && <div className="space-y-1 rounded-xl bg-gray-50 p-3 text-sm dark:bg-gray-700/40">
           <div className={summaryRowClass}>
             <span className={summaryLabelClass}>{tr('supplier_return_items', 'Selected items')}</span>
             <span className={summaryValueClass}>{selectedItems.length}</span>
@@ -710,11 +720,11 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
           <p className="text-xs leading-relaxed text-gray-400">
             {fmtKHR(totals.totalKhr)} / {fmtKHR(effectiveCompensationKhr)} / {fmtKHR(lossKhr)}
           </p>
-        </div>
-      </fieldset>
+        </div>}
+      </fieldset>}
 
       <div className="sticky bottom-0 -mx-3 -mb-3 mt-3 flex border-t border-gray-200 bg-white px-3 pb-3 pt-3 dark:border-gray-700 dark:bg-gray-800 sm:-mx-4 sm:-mb-4 sm:px-4 sm:pb-4">
-        <button type="button" className="btn-primary inline-flex flex-1 items-center justify-center gap-1.5 disabled:opacity-50" onClick={submit} disabled={!authorityCurrent || submitting || (!pending && (loading || loadingProducts || loadingSources || !financialEditable || Boolean(sourceError)))}>
+        <button type="button" className="btn-primary inline-flex flex-1 items-center justify-center gap-1.5 disabled:opacity-50" onClick={submit} disabled={!authorityCurrent || submitting || (!pending && (loading || loadingProducts || loadingSources || !financialVisible || !financialEditable || Boolean(sourceError)))}>
           {submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Check className="h-4 w-4" aria-hidden="true" />}
           {pending ? tr('retry', 'Retry') : tr('save', 'Save')}
         </button>

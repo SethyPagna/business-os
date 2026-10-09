@@ -1,4 +1,5 @@
 {
+  "supplier_selection_changed": "Stock sources or valuation changed. Remove and select the affected items again before saving.",
   "stock_ordinary": "Ordinary",
   "supplier_sources_unavailable": "Stock sources could not be verified. Refresh before selecting quantities.",
   "supplier_quantity_invalid": "Enter a positive quantity within the selected source availability. Remove or refresh changed selections.",

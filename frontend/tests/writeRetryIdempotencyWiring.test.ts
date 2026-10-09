@@ -30,12 +30,13 @@ async function runTest(name: string, fn: () => void | Promise<void>): Promise<vo
 
 type Call = unknown[]
 type Notice = { message: string; tone?: string }
-type Outcome = { kind: 'hang' } | { kind: 'lost' } | { kind: 'refused' } | { kind: 'answer'; value: unknown }
+type Outcome = { kind: 'hang' } | { kind: 'lost' } | { kind: 'refused' } | { kind: 'forbidden' } | { kind: 'answer'; value: unknown }
 type WireRequest = Record<string, unknown>
 
 const HANG: Outcome = { kind: 'hang' }
 const LOST: Outcome = { kind: 'lost' }
 const REFUSED: Outcome = { kind: 'refused' }
+const FORBIDDEN: Outcome = { kind: 'forbidden' }
 const answer = (value: unknown): Outcome => ({ kind: 'answer', value })
 
 function outcomeOf(outcome: Outcome): Promise<unknown> {
@@ -46,6 +47,7 @@ function outcomeOf(outcome: Outcome): Promise<unknown> {
   if (outcome.kind === 'refused') {
     return Promise.reject(Object.assign(new Error('The same request is still being processed.'), { code: 'in_flight', status: 409 }))
   }
+  if (outcome.kind === 'forbidden') return Promise.reject(Object.assign(new Error('Forbidden'), { code: 'forbidden', status: 403 }))
   return Promise.resolve(outcome.value)
 }
 
@@ -316,11 +318,15 @@ await runTest('supplier return: the id survives a timeout, a lost answer and a f
     const frozen = structuredClone(write.calls[0][0]) as WireRequest
     assert.ok(notices.some(notice => unknownOutcomeAfterAnyWait.test(notice.message)), 'timeout explicitly retains unknown outcome')
     assert.equal(propsOf(page.find(node => node.tagName === 'FIELDSET', 'supplier fields')).disabled, true, 'uncertain command prevents changed values')
-    for (const outcome of [LOST, REFUSED, answer({ success: true, id: 91 })]) {
+    for (const outcome of [LOST, REFUSED, FORBIDDEN, answer({ success: true, id: 91 })]) {
       write.will(outcome)
       await page.click(page.button(shown('retry', 'Retry')), pressing(write))
       assert.deepEqual(write.calls.at(-1)?.[0], frozen, 'timeout, lost ACK, in-flight and malformed success all resend exact frozen body including device metadata')
       assert.equal(closed, 0)
+      if (outcome.kind === 'forbidden') {
+        assert.equal(page.findAll(node => node.tagName === 'INPUT' && Boolean(node.getAttribute('id')?.startsWith('supplier-return-compensation'))).length, 0)
+        assert.doesNotMatch(page.text(), /\$[\d.]+/, 'a denied retry keeps its opaque command but hides all financial display')
+      }
     }
     parentFailures = 1
     write.will(answer({ success: true, id: 91, returnNumber: frozen.return_number }))
