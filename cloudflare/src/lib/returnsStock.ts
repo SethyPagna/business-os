@@ -7,8 +7,8 @@ import { productStockGuardStatement } from './productStockGuard'
 //     sellable, or restock as DAMAGED.
 //   - Damaged stock lives as traceable lots tied to the exact return,
 //     branch and batch (damaged_stock_lots, migration 0074) -- never as a
-//     duplicate "damaged" product row and never inside sellable
-//     branch_stock. POS's damage option (11.9) draws quantity_remaining
+//     duplicate "damaged" product row. In the counted epoch they remain
+//     a subset of physical branch_stock. POS's damage option (11.9) draws quantity_remaining
 //     down later; a lot that has been drawn from blocks un-doing the
 //     return edit that created it.
 //   - Replace may hand out any catalog product. routes/returns.ts records the
@@ -27,7 +27,7 @@ import { productStockGuardStatement } from './productStockGuard'
 // added, so scripts/test-returns-replace-damaged-pure.cjs can drive the
 // real logic against a real sqlite database.
 import type { D1Compat } from './db'
-import { planRemoveStockFromBatch, type StockWriteStatement } from './productBatches'
+import { planReceiveBatchStock, planRemoveStockFromBatch, type StockWriteStatement } from './productBatches'
 import {
   DEFAULT_STOCK_CONDITION_TAG, parseStockConditionTag,
   TAGGED_DISPOSAL_MOVEMENT_TYPE, taggedReasonText,
@@ -311,6 +311,16 @@ export class ConsumedDamagedStockError extends Error {
 // leaving an unreversed loss with nothing in `damaged_stock_lots` to key off.
 // This mirrors DISPOSE's own "no undo path" rule (removalLosses.ts): once
 // destroyed, a separate adjustment is the only way to correct it.
+export function planCountedReturnReceive(productId: number, branchId: number, batchId: number | null, quantity: number): StockWriteStatement[] {
+  if (![productId,branchId].every(id => Number.isSafeInteger(id) && id > 0) || !Number.isFinite(quantity) || quantity <= 0) throw new Error('Invalid returned stock identity')
+  if (batchId !== null) return planReceiveBatchStock({productId,branchId,batchId,quantity}).statements
+  const params = {productId,branchId,quantity}
+  return [productStockGuardStatement([productId], 'active'),
+    {sql: "SELECT CASE WHEN EXISTS(SELECT 1 FROM branches WHERE id=@branchId AND is_active=1) THEN 1 ELSE json_extract('[1]','$[return_branch_conflict]') END",params},
+    {sql:'INSERT INTO branch_stock(product_id,branch_id,quantity)VALUES(@productId,@branchId,@quantity)ON CONFLICT(product_id,branch_id)DO UPDATE SET quantity=quantity+@quantity',params},
+    {sql:'UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0)FROM branch_stock WHERE product_id=@productId),updated_at=CURRENT_TIMESTAMP WHERE id=@productId',params}]
+}
+
 export function planDamagedReturnLine(input: {
   productId: number
   productName: string | null
@@ -332,7 +342,7 @@ export function planDamagedReturnLine(input: {
   const quantity = Number(input.quantity)
   if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Damaged quantity must be positive')
   const statements: StockWriteStatement[] = [
-    productStockGuardStatement([input.productId], 'active'),
+    ...planCountedReturnReceive(input.productId,input.branchId,input.batchId,quantity),
     createDamagedLotStatement({
       productId: input.productId,
       productName: input.productName,
@@ -358,6 +368,11 @@ export function planDamagedReturnLine(input: {
     },
   ]
   if (input.disposition === 'remove') {
+    const physicalParams={productId:input.productId,branchId:input.branchId,batchId:input.batchId,quantity}
+    if(input.batchId !== null) statements.push({sql:'UPDATE branch_batch_stock SET quantity=quantity-@quantity WHERE batch_id=@batchId AND branch_id=@branchId',params:physicalParams})
+    statements.push({sql:'UPDATE branch_stock SET quantity=quantity-@quantity WHERE product_id=@productId AND branch_id=@branchId',params:physicalParams},
+      {sql:'UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0)FROM branch_stock WHERE product_id=@productId),updated_at=CURRENT_TIMESTAMP WHERE id=@productId',params:physicalParams})
+
     // The row this SAME call just opened, keyed the same way the create
     // path's own fallback-batch subquery pattern keys a just-inserted row:
     // by business identity within THIS batch/transaction, not a returned id.

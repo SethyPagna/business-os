@@ -1,3 +1,5 @@
+import { planCountedTaggedChange } from '../lib/countedDamagedStock'
+import { resolveCountedReturnConditions } from '../lib/countedReturnCondition'
 import { productStockGuardError } from '../lib/productStockGuard'
 import { Hono, type Context } from 'hono'
 import { getPlanLimits } from '../lib/planTier'
@@ -23,7 +25,7 @@ import {
   normalizeStockAction, resolveRefundUnitPrice, matchRefundSaleLine, RefundSaleLineError, planReturnLot, ReturnLotRequiredError,
   type ReversedDamagedLot, planReplacementStock, listOpenDamagedLots,
   ConsumedDamagedStockError, DAMAGE_IN_MOVEMENT, DAMAGE_REVERSAL_MOVEMENT,
-  REPLACEMENT_OUT_MOVEMENT, resolveDamagedReturnChoice, planDamagedReturnLine,
+  REPLACEMENT_OUT_MOVEMENT, resolveDamagedReturnChoice, planDamagedReturnLine, planCountedReturnReceive,
 } from '../lib/returnsStock'
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { computeSaleTotals } from '../lib/saleTotals'
@@ -434,7 +436,7 @@ function canonicalReturnEditIntent(returnId: number, expectedUpdatedAt: string, 
   const items = Array.isArray(rawItems) ? rawItems.map((raw, index) => {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`Return item ${index + 1} must be an object`)
     const item = raw as Record<string, unknown>
-    return Object.fromEntries(itemKeys.map((key) => [key, returnEditIntentField(item, key)]))
+    return { ...Object.fromEntries(itemKeys.map((key) => [key, returnEditIntentField(item, key)])), ...(Object.prototype.hasOwnProperty.call(item,'stock_condition')?{stock_condition:returnEditIntentField(item,'stock_condition')}: {}) }
   }) : []
   return {
     return_id: returnId,
@@ -543,6 +545,8 @@ type ReturnItemInput = {
   // 11.13: 'none' | 'restock' | 'damaged'; absent falls back to the
   // return_to_stock boolean's historical meaning (see normalizeStockAction).
   stock_action?: string
+  counted_original_condition?: boolean
+  stock_condition?: string
   // P4-3: only meaningful when stock_action is 'damaged'. Both absent means
   // the untouched legacy behavior (tag 'damaged', kept as a held row) --
   // see resolveDamagedReturnChoice.
@@ -1444,6 +1448,14 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   let canonicalIntent: Record<string, unknown>
   try {
     canonicalIntent = canonicalReturnCreateIntent(body as Record<string, unknown>)
+    const legacyDigest = priorReceipt ? await sha256Hex(JSON.stringify(canonicalIntent)) : null
+    if (priorReceipt && priorReceipt.request_digest === legacyDigest
+      && (priorReceipt.sale_id ?? null) === (Number(canonicalIntent.sale_id) || null)) {
+      return c.json(JSON.parse(priorReceipt.response_json) as ReturnCreateResponse)
+    }
+    body.items = await resolveCountedReturnConditions(db, Number(canonicalIntent.sale_id) || null,
+      body.items as unknown as Array<Record<string, unknown>>) as unknown as ReturnItemInput[]
+    canonicalIntent = canonicalReturnCreateIntent(body as Record<string, unknown>)
   } catch (error) {
     if (error instanceof ReturnCreateBudgetError) throw error
     const stockGuard = productStockGuardError(error)
@@ -1765,7 +1777,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     const quantity = Number(item.quantity)
     const productId = Number(item.product_id)
     const itemBranchId = Number(item.branch_id || branchId)
-    if (normalizeStockAction(item) !== 'restock' || !productId || !itemBranchId) {
+    if (normalizeStockAction(item) === 'none' || !productId || !itemBranchId) {
       returnLotPlans.push({ splits: [], plainQuantity: 0 })
       continue
     }
@@ -1943,7 +1955,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     batchDeltas.set(key, current)
   }
   for (const [index, item] of returnItems.entries()) {
-    if (normalizeStockAction(item) !== 'restock' || !item.product_id || !(item.branch_id || branchId)) continue
+    if (normalizeStockAction(item) === 'none' || (normalizeStockAction(item) === 'damaged' && item.damaged_disposition === 'remove') || !item.product_id || !(item.branch_id || branchId)) continue
     const productId = Number(item.product_id); const lineBranchId = Number(item.branch_id || branchId); const quantity = Number(item.quantity)
     addBranchDelta(productId, lineBranchId, quantity)
     for (const split of returnLotPlans[index].splits) addBatchDelta(split.batchId, productId, lineBranchId, split.quantity)
@@ -2180,7 +2192,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     const unitCostKhr = item.cost_price_khr == null ? null : Number(item.cost_price_khr)
     const plan = returnLotPlans[index] || { splits: [], plainQuantity: 0 }
     const returnReceivedDate = new Date(Date.parse(occurredAt) + 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
-    const fallbackReceive = plan.plainQuantity > 0 && productId && itemBranchId ? planReceiveBatchStock({
+    const fallbackReceive = stockAction === 'restock' && !item.counted_original_condition && plan.plainQuantity > 0 && productId && itemBranchId ? planReceiveBatchStock({
       productId, branchId: itemBranchId, quantity: plan.plainQuantity, receivedDate: returnReceivedDate,
       provenanceKey: `return:${clientRequestId}:${index}`, notes: 'Received from customer return; original received date unavailable',
     }) : null
@@ -2193,25 +2205,24 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
         statements.push(...receive.statements.map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
       }
       if (fallbackReceive) statements.push(...fallbackReceive.statements.map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
+      if (!fallbackReceive && plan.plainQuantity > 0) statements.push(...planCountedReturnReceive(productId,itemBranchId,null,plan.plainQuantity).map(statement=>({sql:statement.sql,params:statement.params as Record<string,unknown>})))
       touchedProducts.add(productId)
     }
-    const originalBatchId = effectiveBatchId(index, item.sale_item_id ? saleItemBatchInfo.get(Number(item.sale_item_id))?.batch_id ?? null : null)
     if (stockAction === 'damaged' && productId && itemBranchId) {
       // Already 400'd above (resolveDamagedReturnChoice) if this were invalid.
       const choice = resolveDamagedReturnChoice(item)
       if (choice.ok) {
-        const damagedStatements = planDamagedReturnLine({
-          productId, productName, branchId: itemBranchId, batchId: originalBatchId,
-          returnIdSql: returnIdExpression, quantity, reason,
-          userId: authenticatedActorId, userName: actorSnapshot(user),
-          tag: choice.tag, disposition: choice.disposition,
-          unitCostUsd, unitCostKhr,
-        })
-        statements.push(...damagedStatements.map((statement) => ({
-          sql: statement.sql,
-          params: { ...(statement.params as Record<string, unknown>), returnClientRequestId: clientRequestId },
-        })))
-        movementCount += choice.disposition === 'remove' ? 2 : 1
+        const slices = [...plan.splits.map(split=>({batchId:split.batchId,quantity:split.quantity})),...(plan.plainQuantity>0?[{batchId:null,quantity:plan.plainQuantity}]:[])]
+        for (const slice of slices) {
+          const damagedStatements = planDamagedReturnLine({
+            productId,productName,branchId:itemBranchId,batchId:slice.batchId,
+            returnIdSql:returnIdExpression,quantity:slice.quantity,reason,
+            userId:authenticatedActorId,userName:actorSnapshot(user),tag:choice.tag,disposition:choice.disposition,unitCostUsd,unitCostKhr,
+          })
+          statements.push(...damagedStatements.map(statement=>({sql:statement.sql,params:{...(statement.params as Record<string,unknown>),returnClientRequestId:clientRequestId}})))
+          movementCount += choice.disposition === 'remove' ? 2 : 1
+        }
+        touchedProducts.add(productId)
       }
     }
     const splits = plan.splits
@@ -2220,9 +2231,9 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     const exactRefund = v1QuoteBySaleItem.get(Number(item.sale_item_id))
     statements.push({
       sql: `INSERT INTO return_items(return_id,sale_item_id,product_id,product_name,quantity,applied_price_usd,applied_price_khr,
-        cost_price_usd,cost_price_khr,total_usd,total_khr,return_to_stock,stock_action,branch_id,batch_id,refund_snapshot_json)
+        cost_price_usd,cost_price_khr,total_usd,total_khr,return_to_stock,stock_action,stock_condition,branch_id,batch_id,refund_snapshot_json)
         VALUES(${returnIdExpression},@sale_item_id,@product_id,@product_name,@quantity,@applied_price_usd,@applied_price_khr,
-        @cost_price_usd,@cost_price_khr,@total_usd,@total_khr,@return_to_stock,@stock_action,@branch_id,${recordedBatchSql},@refund_snapshot_json)`,
+        @cost_price_usd,@cost_price_khr,@total_usd,@total_khr,@return_to_stock,@stock_action,@stock_condition,@branch_id,${recordedBatchSql},@refund_snapshot_json)`,
       params: {
         returnClientRequestId: clientRequestId, sale_item_id: item.sale_item_id || null, product_id: productId,
         product_name: productName, quantity, applied_price_usd: refund.unitUsd, applied_price_khr: refund.unitKhr,
@@ -2230,7 +2241,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
         total_usd: exactRefund?.total_usd ?? Number((refund.unitUsd * quantity).toFixed(2)),
         total_khr: exactRefund?.total_khr ?? Math.round(refund.unitKhr * quantity),
         refund_snapshot_json: exactRefund?.refund_snapshot_json ?? null,
-        return_to_stock: stockAction === 'restock' ? 1 : 0, stock_action: stockAction,
+        return_to_stock: stockAction === 'restock' ? 1 : 0, stock_action: stockAction,stock_condition:item.stock_condition ?? null,
         branch_id: itemBranchId, batch_id: recordedBatchId, ...fallbackParams,
       },
     })
@@ -2915,15 +2926,23 @@ app.patch('/:id', async (c) => {
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     return c.json({ error: (error as Error).message }, 400)
   }
-  const requestJson = JSON.stringify(canonicalIntent)
+  let requestJson = JSON.stringify(canonicalIntent)
   if (new TextEncoder().encode(requestJson).byteLength > 131072) {
     return c.json({ error: 'Return edit is too large. Submit fewer items.', code: 'request_too_large' }, 400)
   }
-  const requestDigest = await sha256Hex(requestJson)
+  let requestDigest = await sha256Hex(requestJson)
   const previousReceipt = await db.prepare(`
     SELECT return_id,request_digest,response_json FROM return_mutation_receipts
     WHERE actor_id=@actor AND mutation_kind='edit' AND request_id=@request
   `).get<{ return_id: number; request_digest: string; response_json: string }>({ actor: authenticatedActorId, request: requestId })
+  if (previousReceipt && previousReceipt.request_digest !== requestDigest && Array.isArray(body.items)) {
+    const origin=await db.prepare('SELECT sale_id FROM returns WHERE id=?').get<{sale_id:number|null}>([returnId])
+    try {
+      body.items=await resolveCountedReturnConditions(db,Number(origin?.sale_id)||null,body.items as unknown as Array<Record<string,unknown>>) as unknown as ReturnItemInput[]
+      canonicalIntent=canonicalReturnEditIntent(returnId,expectedUpdatedAt,body)
+      requestJson=JSON.stringify(canonicalIntent);requestDigest=await sha256Hex(requestJson)
+    } catch(error) { return c.json({error:(error as Error).message},400) }
+  }
   if (previousReceipt) {
     if (Number(previousReceipt.return_id) !== returnId || previousReceipt.request_digest !== requestDigest) {
       return c.json({ error: 'client_request_id was already used with different return edit data.', code: 'idempotency_conflict' }, 409)
@@ -2977,6 +2996,13 @@ app.patch('/:id', async (c) => {
     batch_id: number | null
   }>([id])
   let newItems: ReturnItemInput[] = Array.isArray(body.items) ? body.items : existingItems
+  try {
+    newItems = await resolveCountedReturnConditions(db,Number(existing.sale_id)||null,newItems as unknown as Array<Record<string,unknown>>) as unknown as ReturnItemInput[]
+    if(Array.isArray(body.items)) {
+      body.items=newItems;canonicalIntent=canonicalReturnEditIntent(returnId,expectedUpdatedAt,body)
+      requestJson=JSON.stringify(canonicalIntent);requestDigest=await sha256Hex(requestJson)
+    }
+  } catch(error) { return c.json({error:(error as Error).message},400) }
   if (Array.isArray(body.items)) {
     const sourceRows = existing.sale_id
       ? await db.prepare('SELECT id,product_id,branch_id,cost_price_usd,cost_price_khr FROM sale_items WHERE sale_id=?').all<Record<string, unknown>>([existing.sale_id])
@@ -3128,7 +3154,7 @@ app.patch('/:id', async (c) => {
     const quantity = Number(item.quantity) || 0
     const productId = Number(item.product_id) || 0
     const itemBranchId = item.branch_id || existing.branch_id || null
-    if (normalizeStockAction(item) !== 'restock' || !productId || !itemBranchId) {
+    if (normalizeStockAction(item) === 'none' || !productId || !itemBranchId) {
       editLotPlans.push({ splits: [], plainQuantity: 0 })
       continue
     }
@@ -3219,10 +3245,11 @@ app.patch('/:id', async (c) => {
   // A lot POS already drew from can't be un-damaged (that stock left the
   // building) -- ConsumedDamagedStockError blocks the edit outright.
   try {
-    const damagedLots = await db.prepare(`SELECT product_id,product_name,branch_id,batch_id,quantity,quantity_remaining,
-      reason,created_by_user_id,created_by_user_name FROM damaged_stock_lots WHERE return_id=@returnId ORDER BY id`)
+    const damagedLots = await db.prepare(`SELECT id,return_item_id,condition_tag,product_id,product_name,branch_id,batch_id,quantity,quantity_remaining,
+      reason,created_by_user_id,created_by_user_name FROM damaged_stock_lots WHERE return_id=@returnId
+      AND (return_item_id IS NULL OR EXISTS(SELECT 1 FROM return_items ri WHERE ri.id=damaged_stock_lots.return_item_id AND ri.return_id=@returnId)) ORDER BY id`)
       .all<{
-        product_id: number; product_name: string | null; branch_id: number | null; batch_id: number | null
+        id:number; return_item_id:number|null; condition_tag:string; product_id: number; product_name: string | null; branch_id: number | null; batch_id: number | null
         quantity: number; quantity_remaining: number; reason: string | null
         created_by_user_id: number | string | null; created_by_user_name: string | null
       }>({ returnId: id })
@@ -3236,7 +3263,10 @@ app.patch('/:id', async (c) => {
       batch_id: lot.batch_id ?? null, quantity: Number(lot.quantity), reason: lot.reason ?? null,
       created_by_user_id: lot.created_by_user_id ?? null, created_by_user_name: lot.created_by_user_name ?? null,
     }))
-    if (damagedLots.length) statements.push({ sql: 'DELETE FROM damaged_stock_lots WHERE return_id=@returnId', params: { returnId: id } })
+    for(const lot of damagedLots) {
+      if(!lot.return_item_id || !lot.branch_id) return c.json({error:'return_condition_attribution_unproven'},409)
+      statements.push(...planCountedTaggedChange({lotId:lot.id,productId:lot.product_id,branchId:lot.branch_id,batchId:lot.batch_id},Number(lot.quantity),'consume'))
+    }
     for (const lot of editReversedDamaged) {
       statements.push({
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
@@ -3374,7 +3404,7 @@ app.patch('/:id', async (c) => {
     const itemSplits: ReturnBatchSplit[] = []
     let resolvedBatchId: number | null = null
     const plan = editLotPlans[itemIndex] || { splits: [], plainQuantity: 0 }
-    const fallbackReceive = returnToStock && item.product_id && itemBranchId && plan.plainQuantity > 0 ? planReceiveBatchStock({
+    const fallbackReceive = returnToStock && !item.counted_original_condition && item.product_id && itemBranchId && plan.plainQuantity > 0 ? planReceiveBatchStock({
       productId: item.product_id, branchId: itemBranchId, quantity: plan.plainQuantity,
       receivedDate: existing.received_business_date || new Date(Date.parse(mutationStamp) + 7 * 60 * 60 * 1000).toISOString().slice(0, 10),
       provenanceKey: `return-edit:${id}:${itemIndex}`, notes: 'Received from customer return; original received date unavailable',
@@ -3395,34 +3425,29 @@ app.patch('/:id', async (c) => {
         itemSplits.push({ batchId: split.batchId, branchId: itemBranchId, quantity: split.quantity, saleItemId: item.sale_item_id ?? null })
       }
       if (fallbackReceive) statements.push(...fallbackReceive.statements.map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
+      if(!fallbackReceive && plan.plainQuantity>0) statements.push(...planCountedReturnReceive(item.product_id,itemBranchId,null,plan.plainQuantity).map(statement=>({sql:statement.sql,params:statement.params as Record<string,unknown>})))
       touchedProductIds.add(item.product_id)
     }
 
     if (stockAction === 'damaged' && item.product_id && itemBranchId) {
-      const originalBatchId = item.sale_item_id ? (saleItemBatchInfoForEdit.get(item.sale_item_id)?.batch_id ?? null) : null
-      const choice = resolveDamagedReturnChoice(item)
-      if (!choice.ok) return c.json({ error: choice.error }, 400)
-      const damagedStatements = planDamagedReturnLine({
-        productId: item.product_id, productName: item.product_name || null,
-        branchId: itemBranchId, batchId: originalBatchId,
-        returnIdSql: '@return_id', quantity,
-        reason: String(body.reason || existing.reason || '') || null,
-        userId: user?.id ?? null, userName: actorSnapshot(user),
-        tag: choice.tag, disposition: choice.disposition,
-        unitCostUsd: item.cost_price_usd ?? null, unitCostKhr: item.cost_price_khr ?? null,
-      })
-      statements.push(...damagedStatements.map((statement) => ({
-        sql: statement.sql,
-        params: { ...(statement.params as Record<string, unknown>), return_id: id },
-      })))
+      const choice=resolveDamagedReturnChoice(item)
+      if(!choice.ok) return c.json({error:choice.error},400)
+      const slices=[...plan.splits,...(plan.plainQuantity>0?[{batchId:null,quantity:plan.plainQuantity}]:[])]
+      for(const slice of slices) {
+        statements.push(...planDamagedReturnLine({productId:item.product_id,productName:item.product_name||null,branchId:itemBranchId,batchId:slice.batchId,
+          returnIdSql:'@return_id',quantity:slice.quantity,reason:String(body.reason||existing.reason||'')||null,userId:user?.id??null,userName:actorSnapshot(user),
+          tag:choice.tag,disposition:choice.disposition,unitCostUsd:item.cost_price_usd??null,unitCostKhr:item.cost_price_khr??null
+        }).map(statement=>({sql:statement.sql,params:{...(statement.params as Record<string,unknown>),return_id:id}})))
+      }
+      touchedProductIds.add(item.product_id)
     }
 
     statements.push({
-      sql: `INSERT INTO return_items (return_id, sale_item_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr, cost_price_usd, cost_price_khr, total_usd, total_khr, return_to_stock, stock_action, branch_id, batch_id)
-            VALUES (@return_id, @sale_item_id, @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr, @cost_price_usd, @cost_price_khr, @total_usd, @total_khr, @return_to_stock, @stock_action, @branch_id, ${recordedBatchSql})`,
+      sql: `INSERT INTO return_items (return_id, sale_item_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr, cost_price_usd, cost_price_khr, total_usd, total_khr, return_to_stock, stock_action, stock_condition, branch_id, batch_id)
+            VALUES (@return_id, @sale_item_id, @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr, @cost_price_usd, @cost_price_khr, @total_usd, @total_khr, @return_to_stock, @stock_action, @stock_condition, @branch_id, ${recordedBatchSql})`,
       params: {
         return_id: id,
-        stock_action: stockAction,
+        stock_action: stockAction,stock_condition:item.stock_condition??null,
         sale_item_id: item.sale_item_id || null,
         product_id: item.product_id || null,
         product_name: item.product_name || null,

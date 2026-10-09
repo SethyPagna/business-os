@@ -1,3 +1,4 @@
+import { planCountedTaggedChange, ordinarySubsetSql, ordinaryNullCapacityGuard } from './countedDamagedStock'
 import { executeStockTransaction, stockTransactionStatementCount } from './stockTransaction'
 import { productStockGuardStatement, productStockGuardError } from './productStockGuard'
 import { getDb, type D1Compat } from './db'
@@ -49,6 +50,7 @@ type ReturnItem = Row & {
   cost_price_usd: number | null
   cost_price_khr: number | null
   return_to_stock: number | null
+  stock_condition:string|null
   stock_action: string | null
 }
 
@@ -61,6 +63,8 @@ type Allocation = {
 }
 
 type DamagedLot = Row & {
+  return_item_id:number|null
+  condition_tag:string
   id: number
   return_id: number
   product_id: number
@@ -219,8 +223,13 @@ function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, s
     if (quantity > 0) out.unshift(productStockGuardStatement([Number(delta.productId)], 'active'))
     if (delta.damagedLotId) {
       out.push(guard('EXISTS(SELECT 1 FROM damaged_stock_lots WHERE id=@lot AND return_id=@returnId AND product_id=@product AND branch_id IS @branch AND (batch_id IS NULL OR EXISTS(SELECT 1 FROM product_batches WHERE id=damaged_stock_lots.batch_id AND variant_product_id=@product)) AND quantity_remaining+@quantity BETWEEN 0 AND quantity)', { ...params, returnId: member.id }))
-      out.push({ sql: 'UPDATE damaged_stock_lots SET quantity_remaining=quantity_remaining+@quantity, updated_at=@stamp WHERE id=@lot', params })
+      out.push(...planCountedTaggedChange({lotId:delta.damagedLotId,productId:delta.productId,branchId:delta.branchId,batchId:delta.batchId},Math.abs(quantity),quantity>0?'restore':'consume'))
     } else {
+      if(quantity<0) {
+        out.push(guard(`EXISTS(SELECT 1 FROM branch_stock WHERE product_id=@product AND branch_id=@branch AND quantity+@quantity>=${ordinarySubsetSql('@product','@branch')})`,params))
+        if(delta.batchId===null) out.push(ordinaryNullCapacityGuard(delta.productId,delta.branchId,-quantity))
+        else out.push(guard(`EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch AND quantity+@quantity>=${ordinarySubsetSql('@product','@branch','@batch')})`,params))
+      }
       out.push(guard('EXISTS(SELECT 1 FROM products WHERE id=@product AND stock_quantity+@quantity>=0) AND EXISTS(SELECT 1 FROM branches WHERE id=@branch) AND (@quantity>=0 OR EXISTS(SELECT 1 FROM branch_stock WHERE product_id=@product AND branch_id=@branch AND quantity+@quantity>=0))', params))
       out.push({
         sql: quantity < 0
@@ -584,7 +593,6 @@ async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: 
       }
       member.updateSale = !!linkedSale && !parentCancelled
       const ownItems = items.filter((item) => item.return_id === expected.id)
-      const handledDamagedGroups = new Set<string>()
       const memberStockStart = member.stock.length
       const landings = new Map<number, { effectName: string | null; label: string | null }>()
       for (const item of ownItems) {
@@ -609,19 +617,14 @@ async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: 
           landings.set(branchId, { effectName: landing.effectName, label: ownLabel ?? landing.addressedName ?? landing.effectName })
         }
         if (scope === 'customer' && stockAction === 'damaged') {
-          const damagedGroup = `${productId}:${branchId}`
-          if (handledDamagedGroups.has(damagedGroup)) continue
-          handledDamagedGroups.add(damagedGroup)
-          const groupedItems = ownItems.filter((candidate) => Number(candidate.product_id) === productId
-            && (resolver.effectId(Number(candidate.branch_id || row.branch_id)) ?? Number(candidate.branch_id || row.branch_id)) === branchId
-            && normalize(candidate.stock_action, Number(candidate.return_to_stock) === 1 ? 'restock' : 'none') === 'damaged')
-          const lots = damaged.filter((lot) => Number(lot.return_id) === expected.id && Number(lot.product_id) === productId && Number(lot.branch_id) === branchId)
-          if (!lots.length) fail(`Return ${expected.id} has no damaged-stock provenance and cannot change status safely.`, 400)
-          const itemQuantity = groupedItems.reduce((sum, candidate) => sum + (Number(candidate.quantity) || 0), 0)
-          const lotQuantity = lots.reduce((sum, lot) => sum + (Number(lot.quantity) || 0), 0)
-          if (Math.abs(itemQuantity - lotQuantity) > 0.000001) fail(`Return ${expected.id} has incomplete damaged-stock provenance.`, 400)
-          const costUsd = groupedItems.reduce((sum, candidate) => sum + (Number(candidate.cost_price_usd) || 0) * (Number(candidate.quantity) || 0), 0) / itemQuantity
-          const costKhr = groupedItems.reduce((sum, candidate) => sum + (Number(candidate.cost_price_khr) || 0) * (Number(candidate.quantity) || 0), 0) / itemQuantity
+          if(!item.stock_condition || item.stock_condition==='ordinary') fail(`Return ${expected.id} has no chosen condition attribution.`,409)
+          const lots=damaged.filter(lot=>Number(lot.return_id)===expected.id && Number(lot.return_item_id)===item.id
+            && Number(lot.product_id)===productId && Number(lot.branch_id)===branchId && lot.condition_tag===item.stock_condition)
+          if(!lots.length) fail(`Return ${expected.id} has no exact damaged-stock provenance.`,409)
+          const itemQuantity=quantity
+          const lotQuantity=lots.reduce((sum,lot)=>sum+Number(lot.quantity||0),0)
+          if(Math.abs(itemQuantity-lotQuantity)>0.000001) fail(`Return ${expected.id} has incomplete damaged-stock provenance.`,400)
+          const costUsd=Number(item.cost_price_usd)||0,costKhr=Number(item.cost_price_khr)||0
           for (const lot of lots) {
             if (cancelling && Number(lot.quantity_remaining) !== Number(lot.quantity)) fail(`Damaged stock from return ${expected.id} has already been consumed.`, 409)
             if (restoring && Number(lot.quantity_remaining) !== 0) fail(`Damaged stock from return ${expected.id} is not fully cancelled.`, 409)
@@ -639,7 +642,7 @@ async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: 
           }
         } else if (item.batch_id) {
           member.stock.push({ productId, productName: item.product_name, branchId, batchId: Number(item.batch_id), damagedLotId: null, quantity: (scope === 'customer' ? (cancelling ? -1 : 1) : (cancelling ? 1 : -1)) * quantity, costUsd: Number(item.cost_price_usd) || 0, costKhr: Number(item.cost_price_khr) || 0, movementType: '' })
-        } else if (trackedProducts.has(productId)) {
+        } else if (trackedProducts.has(productId) && item.stock_condition !== 'ordinary') {
           fail(`Return ${expected.id} predates exact received-date tracking. Its stock cannot be changed safely in bulk; edit stock with the recorded received-date details first.`, 400)
         } else {
           member.stock.push({ productId, productName: item.product_name, branchId, batchId: null, damagedLotId: null, quantity: (scope === 'customer' ? (cancelling ? -1 : 1) : (cancelling ? 1 : -1)) * quantity, costUsd: Number(item.cost_price_usd) || 0, costKhr: Number(item.cost_price_khr) || 0, movementType: '' })
