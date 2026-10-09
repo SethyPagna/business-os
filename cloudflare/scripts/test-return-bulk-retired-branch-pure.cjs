@@ -3,37 +3,18 @@
 //
 // Real returnBulkAction / branchEffect kernels against migrated SQLite and the raw D1 binding shape. An ORACLE is the same
 // kernel as it stood at b2b57f90b, run on the same fixtures: while both branches are active the new kernel writes
-// equal business statements apart from verified admission and ledgers (inert), and on the post-consolidation fixture the old kernel strands the units in
+// equal business data and ledgers (inert), while the current transaction proves its counted schema epoch, and on the post-consolidation fixture the old kernel strands the units in
 // the retired branch (so the fixture tells the fix from the defect).
 //
 // Run (from cloudflare/): node scripts/test-return-bulk-retired-branch-pure.cjs
 
+const { applyMigrations } = require('./harness/d1compat.cjs')
+const { loadAll } = require('./harness/load_migrations.cjs')
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 const { execFileSync } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
 const assert = require('node:assert/strict')
-function withoutProductAdmission(value) {
-  const normalize = sql => sql.replace(/@[A-Za-z_]+|\?[0-9]*/g, '?').replace(/\s+/g, ' ').trim()
-  const allowed = normalize(require('./harness/product_stock_guard.cjs').productStockGuardStatement([1], 'active').sql)
-  const walk = entry => {
-    if (Array.isArray(entry)) return entry.map(walk).filter(v => v !== undefined)
-    let statement = entry
-    if (typeof entry === 'string') { try { statement = JSON.parse(entry) } catch {} }
-    if (statement && typeof statement.sql === 'string' && statement.sql.includes('$[product_has_stock]')) {
-      const single = normalize("SELECT CASE WHEN EXISTS(SELECT 1 FROM products WHERE id=@productId AND is_active IS NOT 1) THEN json_extract('[]','$[product_has_stock]') ELSE 1 END")
-      const batch = normalize("SELECT CASE WHEN EXISTS(SELECT 1 FROM product_batches pb JOIN products p ON p.id=pb.variant_product_id WHERE pb.id=@batchId AND p.is_active IS NOT 1) THEN json_extract('[]','$[product_has_stock]') ELSE 1 END")
-      assert.ok([allowed, single, batch].includes(normalize(statement.sql)), 'only exact active-product admission guards may differ from historical SQL: '+statement.sql)
-      const bound = Array.isArray(statement.params) ? statement.params[0] : statement.params.productIds
-      const ids = bound === undefined ? [Number(statement.params.productId ?? statement.params.batchId)] : (typeof bound === 'number' ? [bound] : JSON.parse(bound))
-      assert.ok(ids.length && ids.every(id => Number.isSafeInteger(id) && id > 0), 'guard names real product identities')
-      return undefined
-    }
-    return entry
-  }
-  return walk(value)
-}
-
 const ts = require('typescript')
 const Database = require('better-sqlite3')
 
@@ -63,7 +44,7 @@ function makeLoader(overrides) {
 const fresh = makeLoader({})('lib/returnBulkAction.ts')
 const old = makeLoader({ 'lib/returnBulkAction.ts': oracleSource })('lib/returnBulkAction.ts')
 
-const admin = { id: 1, username: 'admin', role_code: 'admin', permissions: JSON.stringify({ all: true }) }
+const admin = { id:1, username:'admin', role_id:1, role_code:'admin', role_permissions:JSON.stringify({all:true}), permissions:JSON.stringify({all:true}) }
 const tables = ['returns', 'return_items', 'return_item_batch_allocations', 'sales', 'sale_items', 'products', 'product_batches', 'branch_stock',
   'branch_batch_stock', 'damaged_stock_lots', 'inventory_movements', 'undo_snapshots', 'action_history', 'return_bulk_operations',
   'return_bulk_members', 'return_bulk_guards', 'return_write_revisions', 'sale_write_revisions', 'audit_logs', 'sale_record_events']
@@ -73,7 +54,7 @@ function migratedDb() {
   if (!migratedTemplate) {
     const seed = new Database(':memory:')
     seed.pragma('foreign_keys = OFF')
-    for (const file of fs.readdirSync(path.join(root, 'migrations')).filter((name) => name.endsWith('.sql')).sort()) seed.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
+    applyMigrations({db:seed},loadAll({through:242}))
     migratedTemplate = seed.serialize()
     seed.close()
   }
@@ -87,9 +68,10 @@ function migratedDb() {
 //   before  both branches active, NULL roles; lot 3 holds the 2 units at Shop
 //   after   consolidated: LC Store holds lot 1 with everything, Old Shop is empty and retired with successor LC Store
 //   orphan  as after, but Old Shop has no successor
-function fixture(state, { damaged = false } = {}) {
+function fixture(state, { damaged = false, legacy = false } = {}) {
   const sql = migratedDb()
   let batches = 0
+  let beforeBatch=null
   const capture = []
   const env = { DB: {
     prepare(text) {
@@ -102,14 +84,18 @@ function fixture(state, { damaged = false } = {}) {
       } }
     },
     async batch(statements) {
+      if(beforeBatch){const rival=beforeBatch;beforeBatch=null;await rival()}
       batches++
       capture.push(statements.map((statement) => ({ sql: statement.text, params: statement.params })))
       return sql.transaction(() => statements.map((statement) => {
-        const result = sqliteD1Call(sql.prepare(statement.text), 'run', statement.params)
-        return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
+        const prepared=sql.prepare(statement.text)
+        if(prepared.reader)return {success:true,results:sqliteD1Call(prepared,'all',statement.params)}
+        const result=sqliteD1Call(prepared,'run',statement.params)
+        return {success:true,meta:{changes:result.changes,last_row_id:Number(result.lastInsertRowid)}}
       }))()
     },
   } }
+  sql.exec("INSERT INTO users(id,username,name,password,role_id,permissions,is_active)VALUES(1,'admin','Admin','fixture',1,'{\"all\":true}',1);UPDATE roles SET code='admin',permissions='{\"all\":true}' WHERE id=1")
   sql.exec('DELETE FROM branches')
   if (state === 'before') {
     sql.exec("INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Warehouse',1,0),(2,'Shop',1,1)")
@@ -140,7 +126,9 @@ function fixture(state, { damaged = false } = {}) {
   sql.prepare(`INSERT INTO return_items(id,return_id,sale_item_id,product_id,product_name,quantity,total_usd,total_khr,applied_price_usd,applied_price_khr,stock_action,return_to_stock,branch_id,batch_id,refund_snapshot_json)
     VALUES(10,10,101,1,'A',2,20,80000,10,40000,?,?,2,3,?)`).run(damaged ? 'damaged' : 'restock', damaged ? 0 : 1, snapshot)
   sql.prepare('INSERT INTO return_item_batch_allocations(return_item_id,batch_id,branch_id,quantity) VALUES(10,3,2,2)').run()
-  return { sql, env, capture, batches: () => batches }
+  if(!legacy)applyMigrations({db:sql},loadAll().slice(loadAll({through:242}).length))
+  const stockChange=mutate=>sql.transaction(()=>{sql.exec("INSERT INTO system_flags(key,value)SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'");mutate();sql.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'")})()
+  return {sql,env,capture,stockChange,batches:()=>batches,beforeBatch:rival=>{beforeBatch=rival}}
 }
 
 const request = (f, source, target, key) => ({ client_request_id: key, field: 'status', source, target,
@@ -157,6 +145,15 @@ const stockOf = (f) => ({
 const state = (f) => JSON.stringify(tables.map((table) => [table, f.sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]))
 const scrub = (text) => text.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<uuid>')
   .replace(/\d{4}-\d{2}-\d{2}[ T][\d:.Z]+/g, '<ts>').replace(/-\d{12,}/g, '<id>')
+function businessState(f, historical) {
+  return JSON.stringify(tables.map(table=>{
+    const columns=historical.sql.prepare(`PRAGMA table_info(${table})`).all().map(row=>row.name)
+    return [table,f.sql.prepare(`SELECT ${columns.join(',')} FROM ${table} ORDER BY rowid`).all()]
+  }))
+}
+function assertBusinessEqual(current,historical,name) {
+  assert.equal(scrub(businessState(current,historical)),scrub(state(historical)),`${name}: identical original business facts and ledgers`)
+}
 const movements = (f) => f.sql.prepare("SELECT movement_type, branch_id, branch_name, addressed_branch_name, quantity, batch_id FROM inventory_movements ORDER BY id").all().map((row) => ({ ...row }))
 async function replay(kernel, f, receipt, direction, generation) {
   const row = f.sql.prepare('SELECT undo_payload,redo_payload FROM action_history WHERE id=?').get(receipt.actionHistoryId)
@@ -172,15 +169,19 @@ const refused = async (kernel, f, req, status, code, redirect = null) => {
 }
 
 let passed = 0
-async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${name}`) }
+const failures=[]
+async function check(name, fn) {
+  try{await fn();passed++;console.log(`PASS ${name}`)}
+  catch(error){failures.push(error);console.error(`FAIL ${name}`,error)}
+}
 
 ;(async () => {
   await check('CONTROL: the code before this change cannot cancel an old Shop return at all (it asks the empty retired branch for the units)', async () => {
-    const f = fixture('after')
+    const f = fixture('after',{legacy:true})
     const before = state(f)
     await assert.rejects(old.applyReturnBulkActionOutcome(f.env, admin, request(f, 'completed', 'cancelled', 'old-cancel')), (error) => error instanceof old.ReturnBulkError && error.statusCode === 409)
     assert.equal(state(f), before)
-    const stocked = fixture('after')
+    const stocked = fixture('after',{legacy:true})
     stocked.sql.exec('UPDATE branch_batch_stock SET quantity=2 WHERE batch_id=3 AND branch_id=2; UPDATE branch_stock SET quantity=2 WHERE product_id=1 AND branch_id=2')
     const outcome = await old.applyReturnBulkActionOutcome(stocked.env, admin, request(stocked, 'completed', 'cancelled', 'old-cancel-2'))
     assert.equal(outcome.wrote, true)
@@ -226,14 +227,14 @@ async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${na
     const orphan = fixture('orphan')
     const askedOrphan = await refused(fresh, orphan, request(orphan, 'completed', 'cancelled', 'orphan-1'), 409, 'branch_redirect_required')
     assert.equal(askedOrphan.extra.redirect.successor_branch_id, null, 'no successor: asked with no default')
-    orphan.sql.exec("UPDATE branches SET is_active=0 WHERE id=1")
+    orphan.stockChange(()=>orphan.sql.exec("UPDATE branches SET is_active=0 WHERE id=1"))
     await refused(fresh, orphan, request(orphan, 'completed', 'cancelled', 'orphan-1'), 409, 'branch_retired_no_successor', 1)
     const damaged = fixture('after', { damaged: true })
     await refused(fresh, damaged, request(damaged, 'completed', 'cancelled', 'damaged-1'), 409, 'branch_retired_damaged_stock', 1)
   })
 
   await check('F4 a held unit the cutover moved to LC Store: cancelling and restoring the old Shop damaged return succeeds and lands at LC Store; a held unit still at Old Shop keeps refusing', async () => {
-    const lotAt = (f, branch) => f.sql.prepare("INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,return_id,quantity,quantity_remaining,reason) VALUES(1,1,'A',?,10,2,2,'damaged')").run(branch)
+    const lotAt = (f, branch) => f.stockChange(()=>{f.sql.prepare("INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,return_id,return_item_id,condition_tag,batch_id,quantity,quantity_remaining,reason) VALUES(1,1,'A',?,10,10,'damaged',1,2,2,'damaged')").run(branch);f.sql.exec("UPDATE return_items SET stock_condition='damaged' WHERE id=10")})
     const stillThere = fixture('after', { damaged: true }); lotAt(stillThere, 2)
     await refused(fresh, stillThere, request(stillThere, 'completed', 'cancelled', 'held-old'), 409, 'branch_retired_damaged_stock', 1)
     assert.equal(stillThere.sql.prepare('SELECT quantity_remaining q FROM damaged_stock_lots WHERE id=1').get().q, 2, 'nothing written')
@@ -246,9 +247,21 @@ async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${na
     const back = await fresh.applyReturnBulkActionOutcome(moved.env, admin, request(moved, 'cancelled', 'completed', 'held-restore'), 1)
     assert.equal(back.wrote, true)
     assert.equal(moved.sql.prepare('SELECT quantity_remaining q FROM damaged_stock_lots WHERE id=1').get().q, 2, 'restore gives the held unit back at LC Store')
+    assert.equal(moved.sql.prepare('SELECT branch_id FROM return_items WHERE id=10').get().branch_id,2,'original source branch stays immutable')
+    assert.deepEqual(stockOf(moved),stockOf(fixture('after',{damaged:true})),'cancel and restore preserve physical and cache totals')
+    for(const kind of ['original-active','retag','extra-source']){
+      const f=fixture('after',{damaged:true});lotAt(f,1)
+      let rivalState
+      f.beforeBatch(()=>{f.stockChange(()=>f.sql.exec(kind==='original-active'?"UPDATE branches SET is_active=1,successor_branch_id=NULL WHERE id=2":kind==='retag'?"UPDATE damaged_stock_lots SET condition_tag='opened' WHERE id=1":"INSERT INTO damaged_stock_lots(id,product_id,branch_id,return_id,quantity,quantity_remaining,condition_tag)VALUES(2,1,2,10,0,0,'damaged')"));rivalState=state(f)})
+      await assert.rejects(()=>fresh.applyReturnBulkActionOutcome(f.env,admin,request(f,'completed','cancelled','f4-rival-'+kind),1),error=>error.statusCode===409)
+      assert.ok(rivalState,`${kind}: rival really committed before the guarded batch`)
+      assert.equal(state(f),rivalState,`${kind}: no own business effects beyond the intentional rival and its revision trigger`)
+      assert.equal(f.sql.prepare('SELECT quantity_remaining FROM damaged_stock_lots WHERE id=1').get().quantity_remaining,2)
+      assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0)
+    }
   })
 
-  await check('INERT while both branches are active: the grouped action writes the exact statements and ledgers the old kernel wrote', async () => {
+  await check('INERT while both branches are active: business data and ledgers equal the old kernel, with genuine epoch admission', async () => {
     for (const [name, run] of [
       ['cancel', async (kernel, f) => kernel.applyReturnBulkActionOutcome(f.env, admin, request(f, 'completed', 'cancelled', 'inert-cancel'))],
       // A stray confirmed branch while every branch is active is never read (the old kernel takes no such argument).
@@ -258,17 +271,32 @@ async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${na
         return kernel.applyReturnBulkActionOutcome(f.env, admin, request(f, 'cancelled', 'completed', 'inert-restore'))
       }],
     ]) {
-      const a = fixture('before'); const b = fixture('before')
+      const a = fixture('before'); const b = fixture('before',{legacy:true}); const originalItems=a.sql.prepare('SELECT * FROM return_items ORDER BY id').all()
       await run(fresh, a); await run(old, b)
-      const statementsA = scrub(JSON.stringify(withoutProductAdmission(a.capture))); const statementsB = scrub(JSON.stringify(withoutProductAdmission(b.capture)))
-      let at = 0
-      while (at < statementsA.length && statementsA[at] === statementsB[at]) at++
-      assert.equal(statementsA === statementsB, true, `${name}: equal business statements apart from verified admission; first difference near ${statementsA.slice(Math.max(0, at - 120), at + 120)} <> ${statementsB.slice(Math.max(0, at - 120), at + 120)}`)
-      assert.equal(scrub(state(a)), scrub(state(b)), `${name}: identical ledgers`)
+      assertBusinessEqual(a,b,name)
+      assert.deepEqual(a.sql.prepare('SELECT * FROM return_items ORDER BY id').all(),originalItems,`${name}: every current source field remains immutable`)
+      assert.equal(a.sql.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get().value, makeLoader({})('lib/stockTransaction.ts').STOCK_SCHEMA_EPOCH)
+      assert.equal(a.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").get().n,0,`${name}: the counted permit is released`)
       assert.equal(a.sql.prepare('SELECT COUNT(*) n FROM inventory_movements WHERE addressed_branch_name IS NOT NULL').get().n, 0, `${name}: no provenance label while both branches are active`)
       assert.equal(stockOf(a).lot3AtOld, name.startsWith('cancel') && !name.includes('restore') ? 4 : 6, `${name}: stock moves at the return's own branch and lot`)
     }
   })
 
-  console.log(`${passed} grouped return retired-branch checks passed`)
+  await check('the semantic oracle catches an actual doubled-stock writer and missing schema epoch',async()=>{
+    const source=fs.readFileSync(path.join(root,'src/lib/returnBulkAction.ts'),'utf8'),needle='const quantity = delta.quantity * direction'
+    assert.ok(source.includes(needle),'mutant targets the actual stock writer')
+    const wrong=makeLoader({'lib/returnBulkAction.ts':source.replace(needle,needle+' * 2')})('lib/returnBulkAction.ts')
+    const a=fixture('before'),b=fixture('before',{legacy:true})
+    await wrong.applyReturnBulkActionOutcome(a.env,admin,request(a,'completed','cancelled','wrong-stock-writer'))
+    await old.applyReturnBulkActionOutcome(b.env,admin,request(b,'completed','cancelled','wrong-stock-writer'))
+    assert.throws(()=>assertBusinessEqual(a,b,'wrong writer'),assert.AssertionError)
+    assert.equal(stockOf(a).old,12);assert.equal(stockOf(b).old,14)
+    const unavailable=fixture('before');unavailable.sql.exec("DELETE FROM system_flags WHERE key='stock_schema_epoch'")
+    const before=state(unavailable)
+    await assert.rejects(()=>fresh.applyReturnBulkActionOutcome(unavailable.env,admin,request(unavailable,'completed','cancelled','missing-real-epoch')),error=>error.code==='stock_schema_unavailable')
+    assert.equal(state(unavailable),before,'epoch refusal preserves every business row')
+  })
+
+  console.log(`${passed} grouped return retired-branch checks passed; ${failures.length} failed`)
+  if(failures.length)throw new AggregateError(failures,'Original retired-branch assertions remain unsatisfied')
 })().catch((error) => { console.error(error); process.exit(1) })
