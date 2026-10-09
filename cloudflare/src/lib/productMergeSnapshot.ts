@@ -49,7 +49,7 @@ export type ProductMergeCaseSnapshot = {
   canonicalImageRows: ProductMergeImageRow[]
   reparentedByTable: Array<{ table: string; column: string; ids: number[] }>
   promotionRuleRows: Array<{ id: number; product_ids: string | null }>
-  childProductRows: Array<{ id: number }>
+  childProductRows: Array<{ id: number; parent_id: number | null; updated_at: string | null }>
 }
 
 // What the fold read about the discarded product, as the extent its write batch
@@ -115,8 +115,19 @@ export async function runProductMergeReadBatch(
   return new Map(reads.map((read, index) => [read.key, resultRows(results[index])]))
 }
 
-const PRODUCT_MONEY_COLUMNS = `selling_price_usd, selling_price_khr,
-  wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr`
+const PRODUCT_COLUMNS = [
+  'id', 'name', 'sku', 'barcode', 'category',
+  'unit', 'description', 'selling_price_usd', 'selling_price_khr', 'purchase_price_usd',
+  'purchase_price_khr', 'cost_price_usd', 'cost_price_khr', 'stock_quantity', 'rfid_confirmed_qty',
+  'low_stock_threshold', 'out_of_stock_threshold', 'image_path', 'is_active', 'supplier',
+  'custom_fields', 'parent_id', 'created_at', 'updated_at', 'brand',
+  'client_request_id', 'special_price_usd', 'special_price_khr', 'is_group', 'discount_enabled',
+  'discount_type', 'discount_percent', 'discount_amount_usd', 'discount_amount_khr', 'discount_label',
+  'discount_badge_color', 'discount_starts_at', 'discount_ends_at', 'expiry_date', 'expiry_alert_days',
+  'name_key', 'is_grouped_cached', 'categories', 'brands', 'name_normalized',
+  'unit_normalized', 'brand_compact', 'tag_label', 'auto_merged_count', 'wholesale_price_usd',
+  'wholesale_price_khr',
+]
 
 const MERGE_CAPTURE_MAX_ROWS = 10_000
 const MERGE_CAPTURE_MAX_BYTES = 512 * 1_024
@@ -213,7 +224,7 @@ export function planProductMergeCaseSnapshot(
   if (reparentTables.some(({ table, column }) => !/^[a-z_]+$/.test(table) || !/^[a-z_]+$/.test(column))) {
     throw new Error('merge_snapshot_invalid_table')
   }
-  const productColumns = ['id', 'name', 'barcode', 'image_path', 'is_active', 'updated_at', 'stock_quantity', ...PRODUCT_MONEY_COLUMNS.split(',').map(column => column.trim())]
+  const productColumns = PRODUCT_COLUMNS
   const stockColumns = ['branch_id', 'quantity', 'rfid_confirmed_qty']
   const sections: CaptureSection[] = [
     { key: 'canonicalBatches', columns: BATCH_COLUMNS, sql: `SELECT ${BATCH_COLUMNS.join(',')} FROM product_batches WHERE variant_product_id=@keeperId ORDER BY id` },
@@ -252,7 +263,7 @@ export function planProductMergeCaseSnapshot(
       sql: `SELECT id FROM ${table} WHERE ${column}=@duplicateId ORDER BY id`,
     })),
     { key: 'promotionRules', columns: ['id', 'product_ids'], sql: 'SELECT id,product_ids FROM promotion_rules ORDER BY id' },
-    { key: 'childProducts', columns: ['id'], sql: 'SELECT id FROM products WHERE parent_id=@duplicateId ORDER BY id' },
+    { key: 'childProducts', columns: ['id', 'parent_id', 'updated_at'], sql: 'SELECT id,parent_id,updated_at FROM products WHERE parent_id=@duplicateId ORDER BY id' },
   ]
   const reads = [captureRead(sections, keeperId, duplicateId)]
   const decode: ProductMergeReadPlan<ProductMergeCaseSnapshot>['decode'] = (captured) => {
@@ -279,7 +290,7 @@ export function planProductMergeCaseSnapshot(
       canonicalImageRows: asRows<ProductMergeImageRow>('canonicalImages'),
       reparentedByTable,
       promotionRuleRows: asRows<{ id: number; product_ids: string | null }>('promotionRules'),
-      childProductRows: asRows<{ id: number }>('childProducts'),
+      childProductRows: asRows<{ id: number; parent_id: number | null; updated_at: string | null }>('childProducts'),
     }
     captureProofs.set(snapshot, { read: reads[0], observed: captured.get('capture')![0].data as string })
     return snapshot

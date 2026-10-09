@@ -94,6 +94,11 @@ async function main() {
   assert.equal(batches[0].length, 1, 'all logical case rowsets consume one actual SQL statement')
   assert.equal(snapshot.canonicalProduct.id, 9001)
   assert.equal(snapshot.duplicateProduct.id, 9002)
+  const productColumns = d1.prepare('PRAGMA table_info(products)').all().map(row => row.name)
+  assert.deepEqual(Object.keys(snapshot.canonicalProduct), productColumns, 'complete current keeper catalog schema')
+  assert.deepEqual(Object.keys(snapshot.duplicateProduct), productColumns, 'complete current loser catalog schema')
+  assert.deepEqual(snapshot.canonicalProduct, { ...d1.prepare('SELECT * FROM products WHERE id=9001').get() })
+  assert.deepEqual(snapshot.duplicateProduct, { ...d1.prepare('SELECT * FROM products WHERE id=9002').get() })
   assert.deepEqual(snapshot.duplicateStockRows.map((row) => Number(row.quantity)), [3])
   assert.deepEqual(snapshot.duplicateBatchRows.map((row) => Number(row.id)), [9102, 9103])
   assert.deepEqual(snapshot.duplicateBatchRows.map(({ lot_quantity, lot_stock_rows, ...row }) => row),
