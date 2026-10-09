@@ -3325,7 +3325,7 @@ async function runTaggedLotActionKernel(c: InventoryContext, action: 'dispose' |
   }
   try {
     await executeStockMutationBatch(db, addressedStatements(landing, [
-      ...planConditionHistory({action:action==='dispose'?'dispose':'clear',productId,branchId:landing.effectBranchId,tag:tagResult.tag,actor:user??null,takes:landingTakes}, action === 'dispose' ? planDisposeTagged(change) : planRestoreTagged(change)),
+      ...planConditionHistory({action:action==='dispose'?'dispose':'clear',productId,branchId:landing.effectBranchId,tag:tagResult.tag,actor:user??null,takes:landingTakes,fallbackUnitCostUsd:change.fallbackUnitCostUsd,fallbackUnitCostKhr:change.fallbackUnitCostKhr}, action === 'dispose' ? planDisposeTagged(change) : planRestoreTagged(change)),
     ]), atomicMark)
   } catch (error) {
     if (stockTransactionRefusal(error) || error instanceof StockMutationBudgetError) throw error

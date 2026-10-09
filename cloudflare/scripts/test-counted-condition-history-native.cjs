@@ -4,7 +4,7 @@ core._compile(fs.readFileSync(coreFile,'utf8').split('async function main() {')[
 const {world,exclusive,convert,stock,db,load}=core.exports
 const bundleFile=path.join(__dirname,'test-branch-transfer-request-budget-epoch-native.cjs'),bundle=new Module(bundleFile,module);bundle.filename=bundleFile;bundle.paths=module.paths
 bundle._compile(fs.readFileSync(bundleFile,'utf8').split('async function main(){')[0]+'\nmodule.exports={bundleWorker}',bundleFile)
-async function run(tier,batch=true){
+async function run(tier,batch=true,mixed=false){
  const worker=(await bundle.exports.bundleWorker())(),f=world(batch)
  exclusive(f);convert(f);f.sql.exec("DELETE FROM system_flags WHERE key='maintenance'")
  try{
@@ -19,6 +19,32 @@ async function run(tier,batch=true){
  async function call(url,body){count=0;const tasks=[],r=await worker.default.fetch(new Request('https://admin.business.test/api'+url,{method:'POST',headers:{cookie:'bos_session='+token,'content-type':'application/json',origin:'https://admin.business.test'},body:JSON.stringify(body)}),f.env,{waitUntil:p=>tasks.push(Promise.resolve(p)),passThroughOnException(){}});while(tasks.length)await Promise.all(tasks.splice(0));const json=await r.json();console.log(JSON.stringify({tier,url,status:r.status,count,code:json.code,error:json.error}));assert.ok(count<=(tier==='free'?50:1000));return{status:r.status,json}}
  const lossWhere=load('lib/removalLosses.ts').removalLossMovementWhere('m');const loss=()=>f.sql.prepare('SELECT COALESCE(SUM(quantity),0)n FROM inventory_movements m WHERE '+lossWhere).get().n
  const T=()=>f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity,D=()=>f.sql.prepare('SELECT COALESCE(SUM(quantity_remaining),0)n FROM damaged_stock_lots').get().n
+ if(mixed){
+ const rounding=mixed==='rounding',unit=rounding?8.123456:8,fallback=rounding?2.123456:2,khr=rounding?9.123456:9000
+ await stock.executeStockTransaction(db(f),[
+ {sql:'UPDATE products SET cost_price_usd=@usd,cost_price_khr=@khr WHERE id=1',params:{usd:fallback,khr}},
+ {sql:'UPDATE damaged_stock_lots SET unit_cost_usd=@unit WHERE id=1',params:{unit}},
+ {sql:"INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source,unit_cost_usd)VALUES(2,1,1,@batch,1,1,'damaged','remove',NULL)",params:{batch:batch?1:null}}
+ ],'once')
+ const cost=()=>f.sql.prepare('SELECT COALESCE(SUM(total_cost_usd),0)usd,COALESCE(SUM(total_cost_khr),0)khr FROM inventory_movements m WHERE '+lossWhere).get()
+ assert.equal((await call('/inventory/tagged-lots/dispose',{productId:1,branchId:1,quantity:4,conditionTag:'damaged',reason:'mixed immutable cost',client_request_id:'mixed-cost'})).status,200)
+ const h=f.sql.prepare("SELECT * FROM action_history WHERE entity='stock_condition' ORDER BY id DESC LIMIT 1").get(),pointer=JSON.parse(h.undo_payload),snapshot=JSON.parse(f.sql.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get(pointer.snapshot_id).payload_json)
+ const original=cost(),max=f.sql.prepare('SELECT MAX(id)n FROM inventory_movements').get().n,originalRows=JSON.stringify(f.sql.prepare('SELECT * FROM inventory_movements WHERE id<=? ORDER BY id').all(max))
+ assert.equal(original.usd,rounding?26.4938:26);assert.equal(original.khr,rounding?36.4938:36000)
+ assert.deepEqual(snapshot.takes.map(t=>t.unitCostUsd),[unit,fallback]);assert.deepEqual(snapshot.takes.map(t=>t.unitCostKhr),[khr,khr])
+ const source=fs.readFileSync(path.resolve(__dirname,'../../frontend/src/utils/actionHistory.ts'),'utf8'),helper=source.match(/export function buildServerReplayRequest[\s\S]*?\r?\n}\r?\n/)[0]
+ const build=new Function(require('node:module').stripTypeScriptTypes(helper.replace('export ',''))+';return buildServerReplayRequest')(),originalBody=build(pointer)
+ assert.deepEqual(originalBody,{require_applied:true,expected_generation:0})
+ for(const bad of [undefined,null,'0',false,-1,0.5,'bad']){assert.equal((await call('/action-history/'+h.id+'/undo',{require_applied:true,...(bad===undefined?{}:{expected_generation:bad})})).status,409);assert.deepEqual([T(),D(),cost()],[6,0,original])}
+ await stock.executeStockTransaction(db(f),[{sql:'UPDATE products SET cost_price_usd=99,cost_price_khr=99999 WHERE id=1'}],'once')
+ lose=true;assert.equal((await call('/action-history/'+h.id+'/undo',originalBody)).status,200);assert.deepEqual([T(),D(),cost()],[10,4,{usd:0,khr:0}])
+ assert.equal((await call('/action-history/'+h.id+'/undo',originalBody)).status,200);assert.equal(T(),10)
+ const next=f.sql.prepare('SELECT redo_payload FROM action_history WHERE id=?').get(h.id)
+ assert.equal((await call('/action-history/'+h.id+'/redo',build(JSON.parse(next.redo_payload)))).status,200);assert.deepEqual([T(),D(),cost()],[6,0,original])
+ assert.equal((await call('/action-history/'+h.id+'/undo',originalBody)).status,409);assert.deepEqual([T(),D(),cost()],[6,0,original])
+ assert.equal(JSON.stringify(f.sql.prepare('SELECT * FROM inventory_movements WHERE id<=? ORDER BY id').all(max)),originalRows)
+ console.log('PASS mixed immutable USD/KHR cost and rounding, actual client generation, missing/invalid/stale refusal, committed response recovery',JSON.stringify({tier,batch,rounding,original}));return
+ }
  const command={productId:1,branchId:1,batchId:batch?1:null,type:'remove',quantity:2,conditionTag:'damaged',reason:'tag native',client_request_id:'condition-tag-one'}
  assert.equal((await call('/inventory/adjust',command)).status,200);assert.equal(T(),10);assert.equal(D(),5)
  assert.equal((await call('/inventory/adjust',command)).status,200);assert.equal(D(),5)
@@ -65,4 +91,4 @@ async function run(tier,batch=true){
  console.log('PASS actual tag/unequal clear/remove authoritative undo redo exact shares, repeated request/generation, final rollback and unknown recovery')
  }finally{f.sql.close()}
 }
-(async()=>{for(const tier of ['free','paid'])for(const batch of [true,false])await run(tier,batch)})().catch(e=>{console.error(e);process.exitCode=1})
+(async()=>{for(const tier of ['free','paid'])for(const batch of [true,false])for(const mixed of [false,true,'rounding'])await run(tier,batch,mixed)})().catch(e=>{console.error(e);process.exitCode=1})
