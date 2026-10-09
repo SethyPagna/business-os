@@ -77,6 +77,7 @@ import { executeStockTransaction, StockTransactionUnavailableError, StockTransac
 import { requireReceivingBranch, receivingBranchAssertion, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from './receivingBranch'
 import { resolveMovementCostSnapshot, type MovementCostPair } from './movementCostSnapshot'
 import { planHoldAsTagged } from './damagedLotActions'
+import { ordinarySubsetSql } from './countedDamagedStock'
 import type { StockWriteStatement } from './productBatches'
 import type { StockConditionTag } from './stockCondition'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
@@ -198,6 +199,21 @@ function stateGuard(from: Snapshot): Statement {
   })
 }
 
+function countedSubsetGuard(at: Snapshot): Statement {
+  return guard(`
+    COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@product AND branch_id=@branch),0)
+      >=${ordinarySubsetSql('@product', '@branch')}
+    AND COALESCE((SELECT quantity FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch),0)
+      >=${ordinarySubsetSql('@product', '@branch', '@batch')}
+    AND (${ordinarySubsetSql('@product', '@branch', 'NULL')}=0
+      OR COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@product AND branch_id=@branch),0)
+      -COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id
+        WHERE pb.variant_product_id=@product AND bbs.branch_id=@branch),0)
+      >=${ordinarySubsetSql('@product', '@branch', 'NULL')})`, {
+    product: at.productId, branch: at.branchId, batch: at.batchId,
+  })
+}
+
 // Absolute writes are exact here because stateGuard pinned the preimage in the
 // same transaction: writing `to` equals applying (to - from) to each ledger.
 function quantityStatements(from: Snapshot, to: Snapshot): Statement[] {
@@ -217,6 +233,7 @@ function quantityStatements(from: Snapshot, to: Snapshot): Statement[] {
       ON CONFLICT(product_id,branch_id) DO UPDATE SET quantity=excluded.quantity`, params },
     { sql: 'DELETE FROM branch_stock WHERE product_id=@product AND branch_id=@branch AND @branchExists=0', params },
     { sql: 'UPDATE products SET stock_quantity=COALESCE(stock_quantity,0)+@productDelta, updated_at=CURRENT_TIMESTAMP WHERE id=@product AND @productDelta<>0', params },
+    countedSubsetGuard(to),
   ]
 }
 
@@ -251,6 +268,7 @@ function deltaStatements(at: Snapshot, lotChange: number, branchChange: number):
   if (branchChange !== 0) {
     statements.push({ sql: 'UPDATE products SET stock_quantity=COALESCE(stock_quantity,0)+@branchChange, updated_at=CURRENT_TIMESTAMP WHERE id=@product', params })
   }
+  statements.push(countedSubsetGuard(at))
   return statements
 }
 
