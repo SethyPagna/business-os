@@ -57,6 +57,11 @@ async function main() {
       received_cost_usd=1.2,received_branch_name='Shop at receipt' WHERE id=9101;
     INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,reason)
       VALUES(9002,901,'in',3,'Original intake'),(9001,901,'in',2,'Keeper intake');
+    UPDATE product_batches SET unit_cost_usd=1.0000000000000002,received_quantity=0.30000000000000004 WHERE id=9101;
+    INSERT INTO products(id,name,is_active,stock_quantity) VALUES(9003,'Legacy fraction',1,0.30000000000000004);
+    INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(9003,901,0.30000000000000004);
+    INSERT INTO product_batches(id,variant_product_id,batch_key,unit_cost_usd) VALUES(9104,9003,'legacy-fraction',1.0000000000000002);
+    INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(9104,901,0.30000000000000004);
   `)
   for (const file of fs.readdirSync(path.join(__dirname, '..', 'migrations')).filter(file => file.endsWith('.sql') && Number(file.slice(0, 4)) > 242).sort()) {
     if (file.startsWith('0246_')) d1.db.exec(`BEGIN;
@@ -104,6 +109,11 @@ async function main() {
     changeCapture(data => { data.duplicateStock = null }),
     changeCapture(data => { data.duplicateStock[0].pop() }),
     changeCapture(data => { data.duplicateStock[0][1] = { quantity: 3 } }),
+    changeCapture(data => { data.duplicateStock[0][1] = ['real', 'Infinity'] }),
+    changeCapture(data => { data.duplicateStock[0][1] = ['real', '1e999'] }),
+    changeCapture(data => { data.duplicateStock[0][1] = ['real', ''] }),
+    changeCapture(data => { data.duplicateStock[0][1] = ['real', 3] }),
+    changeCapture(data => { data.duplicateStock[0][1] = ['other', '3'] }),
   ]) assert.throws(() => decode(bad), /merge_snapshot_incomplete/)
   assert.throws(() => decode([{ data: null, oversized: 1 }]), /merge_case_snapshot_limit/)
   assert.throws(() => decode(changeCapture(data => { data.childProducts = Array.from({ length: 10001 }, (_, id) => [id]) })), /merge_case_snapshot_limit/)
@@ -114,9 +124,24 @@ async function main() {
   const pooled = pooledPlans.map((item, index) => item.decode(new Map(item.reads.map(read => [read.key, pooledRows.get(`${index}:${read.key}`)]))))
   assert.deepEqual(pooled.map(item => [item.canonicalProduct.id, item.duplicateProduct.id]), [[9001, 9002], [9002, 9001]], 'pooled cases keep independent parameter and result scopes')
   assert.deepEqual(pooled[0], snapshot)
+  const legacyFraction = await readProductMergeCaseSnapshot(adapter, 9003, 9999, reparent)
+  assert.equal(legacyFraction.canonicalStockBefore[0].quantity, 0.30000000000000004, 'capture preserves existing branch drift; only the exact planner may decide whether it can be used')
+  assert.equal(legacyFraction.canonicalBatchStockRows[0].quantity, 0.30000000000000004, 'receipt quantity is not silently rounded')
+  assert.equal(legacyFraction.canonicalBatchRows[0].unit_cost_usd, 1.0000000000000002)
+  const numericValues = [0, -0, 0.1, 0.2, 0.1 + 0.2, 1.0000000000000002, 0.9999999999999999,
+    Number.MIN_VALUE, Number.MIN_VALUE * 2, 2.2250738585072014e-308, 1e-100, 1e-10,
+    100000000000000.02, Number.MAX_SAFE_INTEGER, Number.MAX_VALUE, -0.1, -Number.MIN_VALUE, -Number.MAX_VALUE]
+  for (const value of numericValues) {
+    d1.db.prepare('UPDATE product_batches SET received_quantity=? WHERE id=9101').run(value)
+    const direct = d1.db.prepare('SELECT received_quantity FROM product_batches WHERE id=9101').get().received_quantity
+    const capturedValue = (await readProductMergeCaseSnapshot(adapter, 9001, 9002, reparent)).canonicalBatchRows[0].received_quantity
+    assert.equal(capturedValue, direct, `REAL capture round trips the original binary value ${value}`)
+  }
+  d1.db.prepare('UPDATE product_batches SET received_quantity=? WHERE id=9101').run(0.30000000000000004)
 
+  const beforeDependent = batches.length
   const lots = await readProductMergeDependentLotSnapshots(adapter, snapshot, 'merge')
-  assert.equal(batches.length, 4, 'dependent collision reads use a separate D1 batch call')
+  assert.equal(batches.length, beforeDependent + 1, 'dependent collision reads use a separate D1 batch call')
   assert.equal(batches.at(-1).length, 4, 'one collision reads both stocks and both allocation tables')
   assert.deepEqual(lots.get(9102).duplicateStockRows.map((row) => Number(row.quantity)), [2])
   assert.deepEqual(lots.get(9102).keeperStockBefore.map((row) => Number(row.quantity)), [1])

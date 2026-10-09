@@ -125,7 +125,9 @@ const BATCH_STOCK_COLUMNS = ['id', 'batch_id', 'branch_id', 'quantity', 'created
 type CaptureSection = { key: string; columns: string[]; sql: string }
 
 function captureRead(sections: readonly CaptureSection[], keeperId: number, duplicateId: number): KeyedRead {
-  const fields = sections.map(({ key, columns, sql }) => `'${key}',(SELECT json_group_array(json_array(${columns.join(',')}))
+  const cell = (column: string) => `CASE WHEN typeof(${column})='real'
+    THEN json_array('real',printf('%!.26g',${column})) ELSE ${column} END`
+  const fields = sections.map(({ key, columns, sql }) => `'${key}',(SELECT json_group_array(json_array(${columns.map(cell).join(',')}))
     FROM (${sql} LIMIT ${MERGE_CAPTURE_MAX_ROWS + 1}))`)
   return {
     key: 'capture',
@@ -148,16 +150,22 @@ function decodeCapture(rows: Map<string, Array<Record<string, unknown>>>, sectio
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
     || Object.keys(parsed).length !== sections.length) throw new Error('merge_snapshot_incomplete')
   const data = parsed as Record<string, unknown>
+  const decodeCell = (cell: unknown): string | number | null => {
+    if (cell === null || typeof cell === 'string') return cell
+    if (typeof cell === 'number' && Number.isFinite(cell)) return cell
+    if (Array.isArray(cell) && cell.length === 2 && cell[0] === 'real' && typeof cell[1] === 'string'
+      && /^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(cell[1]) && Number.isFinite(Number(cell[1]))) return Number(cell[1])
+    throw new Error('merge_snapshot_incomplete')
+  }
   return new Map(sections.map(({ key, columns }) => {
     const values = data[key]
     if (!Array.isArray(values)) throw new Error('merge_snapshot_incomplete')
     if (values.length > MERGE_CAPTURE_MAX_ROWS) throw new Error('merge_case_snapshot_limit')
     return [key, values.map(value => {
-      if (!Array.isArray(value) || value.length !== columns.length
-        || value.some(cell => cell !== null && typeof cell !== 'string' && typeof cell !== 'number')) {
+      if (!Array.isArray(value) || value.length !== columns.length) {
         throw new Error('merge_snapshot_incomplete')
       }
-      return Object.fromEntries(columns.map((column, index) => [column, value[index]]))
+      return Object.fromEntries(columns.map((column, index) => [column, decodeCell(value[index])]))
     })]
   }))
 }
