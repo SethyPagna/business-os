@@ -2488,6 +2488,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         if (err instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
         if (isBranchRedirectGuardError(err)) throw err
         if (isStockRemovalConflict(err)) return c.json(STOCK_REMOVAL_CONFLICT, 409)
+        if (isCountedStockConflict(err)) throw err
         if (conditionTag) throw err
         return c.json({ error: err instanceof Error ? err.message : 'Failed to remove stock' }, 400)
       }

@@ -439,7 +439,8 @@ const hold = async (tag, quantity) => {
   assert.equal(res.status, 200, `hold ${quantity} as ${tag}: ${JSON.stringify(res.json)}`)
 }
 
-;(async () => {
+module.exports = { db, seedStock, req, REMOVE, onFirstBatch, concurrentUnlottedSale, stateOf, moves, fakeEnv, raw: () => rawDb, loadReal }
+if (require.main === module) (async () => {
   // ====================================================================== STK-C
   await check('STK-C: removing wholly UNLOTTED stock succeeds and moves both figures once', async () => {
     seedStock({ unlotted: 5 })
@@ -543,7 +544,7 @@ const hold = async (tag, quantity) => {
     onFirstBatch(concurrentUnlottedSale(2))
     const res = await req('POST', '/adjust', REMOVE({ quantity: 4 }))
     assert.equal(res.status, 409, JSON.stringify(res.json))
-    assert.equal(res.json?.code, 'stock_removal_conflict')
+    assert.equal(res.json?.code, 'counted_quantity_conflict')
     // Only the concurrent sale's effect: 3 left, all of it the lot.
     assert.deepEqual(stateOf(1), { branch: 3, product: 3, lots: 3 })
     assert.equal(moves(1).length, 0)
@@ -554,7 +555,7 @@ const hold = async (tag, quantity) => {
     onFirstBatch(() => stockExecutor.executeStockTransaction(db,[{sql:'DELETE FROM branch_stock WHERE product_id=1'}],'once'))
     const res = await req('POST', '/adjust', REMOVE({ quantity: 2 }))
     assert.equal(res.status, 409, JSON.stringify(res.json))
-    assert.equal(res.json?.code, 'stock_removal_conflict')
+    assert.equal(res.json?.code, 'counted_quantity_conflict')
     assert.equal(lotQty(1), 5)
     assert.equal(moves(1).length, 0)
   })
@@ -564,7 +565,7 @@ const hold = async (tag, quantity) => {
     onFirstBatch(concurrentUnlottedSale(2))
     const first = await req('POST', '/adjust', REMOVE({ quantity: 4, client_request_id: 'stkc-release-0001' }))
     assert.equal(first.status, 409, JSON.stringify(first.json))
-    assert.equal(first.json?.code, 'stock_removal_conflict')
+    assert.equal(first.json?.code, 'counted_quantity_conflict')
     const retry = await req('POST', '/adjust', REMOVE({ quantity: 4, client_request_id: 'stkc-release-0001' }))
     assert.notEqual(retry.json?.code, 'stock_request_partially_applied', 'nothing was written, so nothing is partial')
     assert.equal(retry.status, 400, JSON.stringify(retry.json))
