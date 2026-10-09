@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import ts from 'typescript'
 import * as money from '../src/utils/moneyPrecision.ts'
+import * as stockCondition from '../src/utils/stockCondition.ts'
 import * as scopes from '../src/api/actorReadScope.ts'
 import * as httpState from '../src/api/httpState.ts'
 import { ensureClientRequestId } from '../src/api/requestIds.ts'
@@ -18,7 +19,7 @@ httpState.setSyncServerUrl('https://fixture.local')
 const calls: Array<{ method: string; url: string; body: unknown }> = []
 let network: (method: string, url: string, body: any) => Promise<any>
 const dependencies: Record<string, unknown> = {
-  './actorReadScope.ts': scopes, './httpState.ts': httpState, '../utils/moneyPrecision.ts': money,
+  './actorReadScope.ts': scopes, './httpState.ts': httpState, '../utils/moneyPrecision.ts': money, '../utils/stockCondition.ts': stockCondition,
   './requestIds.ts': { ensureClientRequestId }, '../utils/deviceInfo.ts': { getClientDeviceInfo: () => ({ clientTime: 'fixed', deviceTz: 'UTC' }) },
   '../utils/timestampId.ts': { businessDateTimeId: () => '20260913-120000' }, './conflicts.ts': {},
   './lazyLocalDb.ts': { getLocalDb: () => { throw Error('unexpected local mirror') } }, './returnsReadTransport.ts': {},

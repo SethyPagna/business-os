@@ -9,6 +9,7 @@ import type { ReturnBulkPayload, ReturnBulkResult } from '../components/returns/
 import { assertActorReadScope, captureActorReadScope, type ActorReadScope } from './actorReadScope.ts'
 import { getSyncServerUrl } from './httpState.ts'
 import { roundMoney2, roundMoney4, subtractMoney4, sumMoney4 } from '../utils/moneyPrecision.ts'
+import { isStockConditionTag, type StockConditionTag } from '../utils/stockCondition.ts'
 
 type ReturnPayload = Record<string, unknown>
 export type PreparedReturnUpdateRequest = Record<string, unknown> & { client_request_id: string }
@@ -297,14 +298,86 @@ export function createReturn(payload: ReturnPayload = {}): Promise<unknown> {
   )
 }
 
-export function createSupplierReturn(payload: ReturnPayload = {}): Promise<unknown> {
+export type SupplierReceiptSource = {
+  batch_id: number; received_at: string | null; lot_code: string | null; batch_number: number | null
+  available: number; source_cost_usd?: number | null
+}
+export type SupplierTaggedSource = Omit<SupplierReceiptSource, 'batch_id'> & {
+  batch_id: number | null; damaged_lot_id: number; stock_condition: StockConditionTag; source: string | null
+}
+export type SupplierProductSources = {
+  product_id: number; branch_id: number; product_name: string; ordinary_available: number; ordinary_unlotted: number
+  ordinary_receipts: SupplierReceiptSource[]; tagged_sources: SupplierTaggedSource[]
+  return_cost_usd?: number | null; return_cost_khr?: number | null
+}
+export type SupplierSourceOptions = {
+  supplier_condition_version: 1; branch_id: number; financial_visibility: boolean; financial_editable: boolean
+  items: SupplierProductSources[]
+}
+
+function supplierSourceError(): Error { return Object.assign(new Error('supplier_sources_unavailable'), { code: 'supplier_sources_unavailable', outcome: 'not_dispatched' }) }
+function positiveId(value: unknown): value is number { return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 }
+function sourceQuantity(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value) && value >= 0 }
+function nullableSourceText(value: unknown): boolean { return value === null || typeof value === 'string' }
+function supplierSourceMetadata(row: Record<string, unknown>, financialVisibility: boolean): boolean {
+  return sourceQuantity(row.available) && row.available > 0 && nullableSourceText(row.received_at) && nullableSourceText(row.lot_code)
+    && (row.batch_number === null || typeof row.batch_number === 'number' && Number.isFinite(row.batch_number))
+    && (financialVisibility ? row.source_cost_usd === null || sourceQuantity(row.source_cost_usd) : !Object.hasOwn(row, 'source_cost_usd'))
+}
+export function validateSupplierSourceOptions(value: unknown, branchId: number, productIds: number[]): SupplierSourceOptions {
+  if (!positiveId(branchId) || !productIds.length || productIds.length > 25 || productIds.some(id => !positiveId(id)) || new Set(productIds).size !== productIds.length
+    || !value || typeof value !== 'object' || Array.isArray(value)) throw supplierSourceError()
+  const result = value as Record<string, unknown>
+  if (result.supplier_condition_version !== 1 || result.branch_id !== branchId || typeof result.financial_visibility !== 'boolean'
+    || typeof result.financial_editable !== 'boolean' || !Array.isArray(result.items) || result.items.length !== productIds.length) throw supplierSourceError()
+  const expected = new Set(productIds)
+  const seen = new Set<number>()
+  const lots = new Set<number>()
+  for (const value of result.items) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw supplierSourceError()
+    const row = value as Record<string, unknown>
+    if (!positiveId(row.product_id) || !expected.has(row.product_id) || seen.has(row.product_id) || row.branch_id !== branchId || typeof row.product_name !== 'string'
+      || !sourceQuantity(row.ordinary_available) || !sourceQuantity(row.ordinary_unlotted) || row.ordinary_unlotted > row.ordinary_available
+      || !Array.isArray(row.ordinary_receipts) || !Array.isArray(row.tagged_sources)
+      || (result.financial_visibility ? ![row.return_cost_usd, row.return_cost_khr].every(v => v === null || sourceQuantity(v))
+        : Object.hasOwn(row, 'return_cost_usd') || Object.hasOwn(row, 'return_cost_khr'))) throw supplierSourceError()
+    seen.add(row.product_id)
+    const receipts = new Set<number>()
+    for (const value of row.ordinary_receipts) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw supplierSourceError()
+      const receipt = value as Record<string, unknown>
+      if (!positiveId(receipt.batch_id) || receipts.has(receipt.batch_id) || !supplierSourceMetadata(receipt, result.financial_visibility)) throw supplierSourceError()
+      receipts.add(receipt.batch_id)
+    }
+    for (const value of row.tagged_sources) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw supplierSourceError()
+      const lot = value as Record<string, unknown>
+      if (!positiveId(lot.damaged_lot_id) || lots.has(lot.damaged_lot_id) || !isStockConditionTag(lot.stock_condition)
+        || (lot.batch_id !== null && !positiveId(lot.batch_id)) || !nullableSourceText(lot.source)
+        || !supplierSourceMetadata(lot, result.financial_visibility)) throw supplierSourceError()
+      lots.add(lot.damaged_lot_id)
+    }
+  }
+  return JSON.parse(JSON.stringify(result)) as SupplierSourceOptions
+}
+export async function getSupplierReturnSourceOptions(branchId: number, productIds: number[]): Promise<SupplierSourceOptions> {
+  const scope = captureActorReadScope('returns')
+  assertActorReadScope(scope)
+  if (navigator.onLine === false) throw supplierSourceError()
+  if (!positiveId(branchId) || !productIds.length || productIds.length > 25 || productIds.some(id => !positiveId(id)) || new Set(productIds).size !== productIds.length) throw supplierSourceError()
+  const result = await apiFetch('GET', `/api/returns/supplier-options?branch_id=${branchId}&product_ids=${productIds.join(',')}`)
+  assertActorReadScope(scope)
+  return validateSupplierSourceOptions(result, branchId, productIds)
+}
+export function prepareSupplierReturnRequest(payload: ReturnPayload = {}): ReturnPayload & { client_request_id: string; return_number: string } {
   const body = ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'supplier_return')
+  return JSON.parse(JSON.stringify({ ...body, return_number: buildReturnNumber(body, 'SRET') })) as ReturnPayload & { client_request_id: string; return_number: string }
+}
+export function createSupplierReturn(payload: ReturnPayload = {}): Promise<unknown> {
+  const body = prepareSupplierReturnRequest(payload)
   return route(
     'returns:createSupplier',
-    () => apiFetch('POST', '/api/returns/supplier', {
-      ...body,
-      return_number: buildReturnNumber(body, 'SRET'),
-    }),
+    () => apiFetch('POST', '/api/returns/supplier', body),
     null,
     true,
   )
