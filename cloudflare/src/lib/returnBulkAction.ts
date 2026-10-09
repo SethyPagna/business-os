@@ -1144,6 +1144,7 @@ async function replayReturnBulkActionKernel(env: Env, user: SessionUser, directi
   const supplierFingerprints=validateSupplierReplayStock(operation,snapshot)
   const supplierExact=supplierFingerprints!==null
   const exactReplay=supplierExact || tagged.size>0
+  const pinOperationAuthority=exactReplay || customers.size>0
   for (const member of snapshot.members) if(member.supplierManifest) {
     supplierManifestSources(member.supplierManifest.json,member.supplierManifest.items)
     if(await sha256Hex(member.supplierManifest.json)!==member.supplierManifest.digest) fail('Supplier source history changed.',409)
@@ -1161,7 +1162,7 @@ async function replayReturnBulkActionKernel(env: Env, user: SessionUser, directi
   const snapshotStatus = direction === 'undo' ? 'applied' : 'reversed'
   const directionSign: 1 | -1 = direction === 'undo' ? -1 : 1
   const stamp = new Date().toISOString()
-  const statements: Statement[] = [...exact.takePreimageGuards(),guard(`NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM return_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@operation AND o.generation=@generation AND h.id=@history AND h.status=@expectedStatus AND s.kind=@kind AND s.status=@snapshotStatus AND s.payload_json=@snapshot${exactReplay?' AND o.request_json=@originalRequest AND o.receipt_json=@originalReceipt':''})`, { operation: operation.id, generation, history: historyId, expectedStatus, kind: RETURN_BULK_ACTION_KIND, snapshotStatus, snapshot: operation.payload_json,...(exactReplay?{originalRequest:operation.request_json,originalReceipt:operation.receipt_json}:{}) })]
+  const statements: Statement[] = [...exact.takePreimageGuards(),guard(`NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM return_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@operation AND o.generation=@generation AND h.id=@history AND h.status=@expectedStatus AND s.kind=@kind AND s.status=@snapshotStatus AND s.payload_json=@snapshot${pinOperationAuthority?' AND o.request_json=@originalRequest AND o.receipt_json=@originalReceipt':''})`, { operation: operation.id, generation, history: historyId, expectedStatus, kind: RETURN_BULK_ACTION_KIND, snapshotStatus, snapshot: operation.payload_json,...(pinOperationAuthority?{originalRequest:operation.request_json,originalReceipt:operation.receipt_json}:{}) })]
   const replayEntitlement = await v1EntitlementGuards(db, snapshot.members, direction === 'undo' ? 'before' : 'after')
   statements.push(...replayEntitlement.guards)
   for (const member of snapshot.members.filter((candidate) => candidate.changed)) {

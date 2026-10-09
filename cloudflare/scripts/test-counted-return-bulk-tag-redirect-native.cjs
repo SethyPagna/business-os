@@ -162,6 +162,32 @@ async function precision(make){
   }finally{f.sql.close()}
  }
 }
+function databaseState(f){return f.sql.prepare("SELECT name,sql FROM sqlite_master WHERE type='table' ORDER BY name").all().map(({name,sql})=>({name,schema:sql,rows:f.sql.prepare('SELECT * FROM "'+name.replaceAll('"','""')+'"').all().map(row=>JSON.stringify(row)).sort().map(row=>JSON.parse(row))}))}
+async function operationAuthority(make){
+ for(const tier of ['free','paid'])for(const receipt of [false,true])for(const shape of ['ordinary','tagged'])for(const mutation of ['none','request','receipt']){
+  const f=await fixture(make,tier,receipt)
+  try{
+   const stock=h.loadStockSession('lib/stockTransaction.ts'),db=h.loadStockSession('lib/db.ts').getDb(f.env)
+   if(shape==='ordinary')await stock.executeStockTransaction(db,[{sql:'DELETE FROM damaged_stock_lots WHERE id=1'},{sql:"UPDATE return_items SET stock_action='restock',return_to_stock=1,stock_condition='ordinary' WHERE id=10"}],'once')
+   const apply=await f.call('/returns/bulk',request(f,'authority-'+shape+'-'+mutation));assert.equal(apply.status,200)
+   const original=f.sql.prepare('SELECT * FROM return_bulk_operations WHERE id=?').get(apply.json.operationId)
+   let rivalState
+   if(mutation!=='none')f.beforeCommit(async()=>{
+    await stock.executeStockTransaction(db,[{sql:mutation==='request'?"UPDATE return_bulk_operations SET request_json=json_set(request_json,'$.target','completed') WHERE id=@id":"UPDATE return_bulk_operations SET receipt_json=json_set(receipt_json,'$.changedIds',json('[]')) WHERE id=@id",params:{id:apply.json.operationId}}],'once')
+    rivalState=databaseState(f)
+   })
+   const result=await f.call('/action-history/'+apply.json.actionHistoryId+'/undo',{expected_generation:0})
+   if(mutation==='none'){assert.equal(result.status,200);assert.equal(f.state().physical,.3)}
+   else{
+    assert.ok(rivalState,'the authority rival really committed before the guarded batch');assert.equal(result.status,409,JSON.stringify({tier,receipt,shape,mutation,result}))
+    assert.deepEqual(databaseState(f),rivalState,'every database table and history row preserves the intended rival only')
+    await stock.executeStockTransaction(db,[{sql:'UPDATE return_bulk_operations SET request_json=@request,receipt_json=@receipt WHERE id=@id',params:{request:original.request_json,receipt:original.receipt_json,id:original.id}}],'once')
+    assert.equal((await f.call('/action-history/'+apply.json.actionHistoryId+'/undo',{expected_generation:0})).status,200,'the unchanged original identity and generation remain retryable')
+    assert.equal(f.state().physical,.3)
+   }
+  }finally{f.sql.close()}
+ }
+}
 async function main(){
  const make=await h.bundle.exports.bundleWorker()
  for(const tier of ['free','paid'])for(const receipt of [false,true]){
@@ -187,6 +213,7 @@ async function main(){
  await authority(make)
  await vectors(make)
  await precision(make)
+ await operationAuthority(make)
 }
-module.exports={fixture,request,state,vectors,precision}
+module.exports={fixture,request,state,vectors,precision,operationAuthority}
 if(require.main===module)main().catch(error=>{console.error(error);process.exitCode=1})
