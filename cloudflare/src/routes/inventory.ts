@@ -3291,23 +3291,21 @@ async function runTaggedLotActionKernel(c: InventoryContext, action: 'dispose' |
   if (!Number.isSafeInteger(productId) || productId <= 0) return c.json({ error: 'Missing required fields' }, 400)
   if (!Number.isSafeInteger(branchId) || branchId <= 0) return c.json({ error: 'A branch is required' }, 400)
   if (!Number.isFinite(quantity) || quantity <= 0) return c.json({ error: 'Quantity must be a positive number' }, 400)
-  // Same mandatory-cause rule POST /adjust enforces -- a tagged disposal is a
-  // loss and a restore puts sellable stock back; neither goes undocumented.
+  // Clearing changes the tagged subset; disposal removes physical stock and books a loss.
   if (!reason) return c.json({ error: 'A reason is required for stock adjustments' }, 400)
 
   const db = getDb(c.env)
   const product = await db.prepare('SELECT id, name, cost_price_usd, cost_price_khr FROM products WHERE id = @id')
     .get<{ id: number; name: string; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: productId })
   if (!product) return c.json({ error: 'Product not found' }, 404)
-  // The held lots stay the record of the branch they were held at; the units a Restore puts back on sale and the
-  // movement of either action land on the active branch the operator confirmed once that branch is disabled.
+  // Preserve each lot's recorded branch and receipt; any redirect must pass the same exact identity guards.
   const { landing, branch } = await requestBranchLanding(db, branchId, () => branchRedirectTarget(c))
 
   const lots = await readOpenTaggedLots(db, { productId, branchId, tag: tagResult.tag })
   const { takes, uncovered } = allocateTaggedLots(lots, quantity)
   if (uncovered > 0) {
     const held = lots.reduce((sum, lot) => sum + (Number(lot.quantity_remaining) || 0), 0)
-    return c.json({ error: `Only ${held} ${tagResult.tag} unit(s) are held at ${branch?.name || 'this branch'}, ${quantity} requested.` }, 400)
+    return c.json({ error: `Only ${held} unit(s) are tagged ${tagResult.tag} at ${branch?.name || 'this branch'}, ${quantity} requested.` }, 400)
   }
 
   const landingTakes = landing.redirected && action === 'restore'
@@ -3338,7 +3336,7 @@ async function runTaggedLotActionKernel(c: InventoryContext, action: 'dispose' |
     // The in-batch held-lot guard refused: a concurrent sale or action took
     // these units after they were read. Nothing was written.
     if (isTaggedLotConflict(error)) {
-      return c.json({ error: 'The held stock changed while this was being saved. Nothing was changed; refresh and try again.', code: TAGGED_LOT_CONFLICT_CODE }, 409)
+      return c.json({ error: 'The tagged stock changed while this was being saved. Nothing was changed; refresh and try again.', code: TAGGED_LOT_CONFLICT_CODE }, 409)
     }
     return c.json({ error: error instanceof Error ? error.message : 'Failed to change tagged stock' }, 400)
   }

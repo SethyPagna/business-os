@@ -65,6 +65,3 @@ async function run(tier,batch=true){
  }finally{f.sql.close()}
 }
 (async()=>{for(const tier of ['free','paid'])for(const batch of [true,false])await run(tier,batch)})().catch(e=>{console.error(e);process.exitCode=1})
-
-
-
