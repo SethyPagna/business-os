@@ -1,4 +1,4 @@
-const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
+const { fixture: nativeFixture } = require('./test-stock-session-atomic.cjs')
 // THE identity rule on the FAST STOCK-IN path (N15 repair, 2026-09-06).
 //
 // commitStockSession's create_receive guard was the last inflow still using
@@ -61,46 +61,17 @@ function loadModule(entry) {
   return load(entry)
 }
 
-function fixture() {
-  const sql = new Database(':memory:')
-  sql.pragma('foreign_keys = OFF')
-  for (const file of fs.readdirSync(path.join(root, 'migrations')).filter((name) => name.endsWith('.sql')).sort()) {
-    sql.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
-  }
-  sql.pragma('foreign_keys = ON')
-  sql.exec(`
-    INSERT INTO branches(id, name, is_default, is_active) VALUES(1, 'Shop', 1, 1);
-    INSERT INTO products(id, name, barcode, cost_price_usd, cost_price_khr, stock_quantity, is_active)
-      VALUES(1, 'Rose Lip Oil', '3614274226546', 5, 0, 0, 1);
-    INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(1, 1, 0);
-  `)
-  const wrap = (text, params = []) => ({
-    text, params,
-    async first() { return sqliteD1Call(sql.prepare(text), 'get', params) || null },
-    async all() { return { results: sqliteD1Call(sql.prepare(text), 'all', params) } },
-    async run() {
-      const result = sqliteD1Call(sql.prepare(text), 'run', params)
-      return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
-    },
+function fixture(seed = () => {}) {
+  const world = nativeFixture(sql => {
+    sql.exec("UPDATE products SET name='Rose Lip Oil',barcode='3614274226546',cost_price_usd=5 WHERE id=1")
+    sql.prepare('INSERT INTO users(id,username,name,password,permissions,is_active)VALUES(?,?,?,?,?,1)')
+      .run(user.id, user.username, user.name, 'synthetic', user.permissions)
+    seed(sql)
   })
-  const envDb = {
-    prepare(text) {
-      const bare = wrap(text)
-      return {
-        bind(...params) { return wrap(text, params) },
-        first: () => bare.first(),
-        all: () => bare.all(),
-        run: () => bare.run(),
-      }
-    },
-    async batch(statements) {
-      return sql.transaction(() => statements.map((statement) => {
-        const result = sqliteD1Call(sql.prepare(statement.text), 'run', statement.params)
-        return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
-      }))()
-    },
-  }
-  return { sql, env: { DB: envDb } }
+  assert.equal(world.sql.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get().value, 'counted-tagged-subset-v1')
+  assert.equal(world.sql.prepare("SELECT COUNT(*) n FROM system_flags WHERE key IN('maintenance','stock_transaction_permit')").get().n, 0)
+  assert.throws(() => world.sql.exec('UPDATE branch_stock SET quantity=1 WHERE product_id=1'), /stock_transaction_required/)
+  return world
 }
 
 let seq = 0
@@ -345,13 +316,12 @@ async function main() {
   })
 
   await check('valid UPC-E and unrelated seven-digit internal codes can be received together', async () => {
-    const { sql, env } = fixture()
-    sql.exec(`
+    const { sql, env } = fixture(sql => sql.exec(`
       UPDATE products SET name='UPC-E article', barcode='01234565' WHERE id=1;
       INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active)
         VALUES(2,'Internal-code article','1234565',4,0,0,1);
       INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,0);
-    `)
+    `))
     const request = {
       client_request_id: 'session-upce-internal-control', mode: 'stock_in',
       defaults: { branch_id: 1, received_date: '2026-09-05', supplier_name: 'Bong Long' },
@@ -366,13 +336,12 @@ async function main() {
   })
 
   await check('actual UPC-E and UPC-A pair is refused before any session write', async () => {
-    const { sql, env } = fixture()
-    sql.exec(`
+    const { sql, env } = fixture(sql => sql.exec(`
       UPDATE products SET name='UPC-E article', barcode='01234565' WHERE id=1;
       INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active)
         VALUES(2,'UPC-A article','012345000065',4,0,0,1);
       INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,0);
-    `)
+    `))
     const request = {
       client_request_id: 'session-upce-upca-duplicate', mode: 'stock_in',
       defaults: { branch_id: 1, received_date: '2026-09-05', supplier_name: 'Bong Long' },
@@ -388,12 +357,11 @@ async function main() {
   })
 
   await check('two existing products with the same normalized name are refused before any write', async () => {
-    const { sql, env } = fixture()
-    sql.exec(`
+    const { sql, env } = fixture(sql => sql.exec(`
       INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active)
         VALUES(2,'  rose   lip oil ','9999999999999',4,0,0,1);
       INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,0);
-    `)
+    `))
     const request = {
       client_request_id: 'session-name-duplicate', mode: 'stock_in',
       defaults: { branch_id: 1, received_date: '2026-09-05', supplier_name: 'Bong Long' },
@@ -412,12 +380,11 @@ async function main() {
   })
 
   await check('two existing products with folded-equal barcodes are refused even when names differ', async () => {
-    const { sql, env } = fixture()
-    sql.exec(`
+    const { sql, env } = fixture(sql => sql.exec(`
       INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active)
         VALUES(2,'Other label','03614274226546',4,0,0,1);
       INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,0);
-    `)
+    `))
     const request = {
       client_request_id: 'session-barcode-duplicate', mode: 'stock_in',
       defaults: { branch_id: 1, received_date: '2026-09-05', supplier_name: 'Bong Long' },
