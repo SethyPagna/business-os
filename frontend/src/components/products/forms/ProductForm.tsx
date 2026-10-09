@@ -599,6 +599,9 @@ export default function ProductForm({
   const [scannerField, setScannerField] = useState<ScannerField | ''>('')
   const [scannerLaunchingField, setScannerLaunchingField] = useState<ScannerField | ''>('')
   const [saving, setSaving] = useState(false)
+  const [saveAuthorityWarning, setSaveAuthorityWarning] = useState<string | null>(null)
+  const currentFormDraftKeyRef = useRef(draftKey)
+  currentFormDraftKeyRef.current = draftKey
   const [imageUploading, setImageUploading] = useState(false)
   // Which gallery tile is currently being drag-reordered, if any (Part 242) --
   // see reorderImage/moveImage above.
@@ -1177,11 +1180,13 @@ export default function ProductForm({
     // closes: saving mid-upload used the stale pre-upload imageList.
     if (saving || saveInFlightRef.current || imageUploading || imageUploadInFlightRef.current) return
     const saveScope = captureActorReadScope('product-draft-save')
-    const isSaveAuthorityCurrent = () => draftKey === scopedWorkDraftKey(productFormDraftBaseKey(product?.id, draftScope)) && isActorReadScopeCurrent(saveScope, false)
+    const isSaveAuthorityCurrent = () => aliveRef.current && currentFormDraftKeyRef.current === draftKey && draftKey === scopedWorkDraftKey(productFormDraftBaseKey(product?.id, draftScope)) && isActorReadScopeCurrent(saveScope, false)
     const canContinueSave = () => {
       if (isSaveAuthorityCurrent()) return true
-      saveInFlightRef.current = false
-      alert(tr('product_draft_authority_changed', 'The account or server changed. Reopen this form to continue. Its draft stays with the original account and server.', 'គណនី ឬម៉ាស៊ីនមេបានផ្លាស់ប្ដូរ។ សូមបិទហើយបើកទម្រង់នេះឡើងវិញដើម្បីបន្ត។ សេចក្ដីព្រាងនៅតែរក្សាទុកជាមួយគណនី និងម៉ាស៊ីនមេដើម។'))
+      if (aliveRef.current && currentFormDraftKeyRef.current === draftKey) {
+        saveInFlightRef.current = false
+        setSaveAuthorityWarning(draftKey)
+      }
       return false
     }
     if (!canContinueSave()) return
@@ -1356,10 +1361,12 @@ export default function ProductForm({
         () => { if (savedAuthorityCurrent) onClose() },
       )
     } catch (error) {
-      alert(getErrorMessage(error, tr('failed', 'Failed', 'បរាជ័យ')))
+      if (isSaveAuthorityCurrent()) alert(getErrorMessage(error, tr('failed', 'Failed', 'បរាជ័យ')))
     } finally {
-      saveInFlightRef.current = false
-      setSaving(false)
+      if (aliveRef.current && currentFormDraftKeyRef.current === draftKey) {
+        saveInFlightRef.current = false
+        setSaving(false)
+      }
     }
   }
 
@@ -1454,6 +1461,7 @@ export default function ProductForm({
         </>
       )}
       unsavedChanges={{ workKey: dirtyWorkKey }}>
+      {saveAuthorityWarning === draftKey ? <p role="alert" className="mb-3 text-sm text-red-700 dark:text-red-300">{tr('product_draft_authority_changed', 'The account or server changed. Reopen this form to continue. Its draft stays with the original account and server.', 'គណនី ឬម៉ាស៊ីនមេបានផ្លាស់ប្ដូរ។ សូមបិទហើយបើកទម្រង់នេះឡើងវិញដើម្បីបន្ត។ សេចក្ដីព្រាងនៅតែរក្សាទុកជាមួយគណនី និងម៉ាស៊ីនមេដើម។')}</p> : null}
       {unscopedDraftAvailable ? <p role="status" className="mb-3 text-xs text-amber-700 dark:text-amber-300">{tr('product_draft_unknown_authority', 'An older draft is preserved on this device. Its server cannot be verified, so it has not been opened here.', 'សេចក្ដីព្រាងចាស់នៅតែរក្សាទុកលើឧបករណ៍នេះ។ មិនអាចផ្ទៀងផ្ទាត់ម៉ាស៊ីនមេរបស់វាបានទេ ដូច្នេះវាមិនត្រូវបានបើកនៅទីនេះទេ។')}</p> : null}
       <div ref={productFormContentRef} className="mb-5 -mx-5 border-b border-gray-200 px-5 dark:border-gray-700">
         <div className="flex gap-1 overflow-x-auto">
