@@ -67,6 +67,7 @@ export class CountedStockPlan {
   private readonly facts: CountedFacts
   private guarded = false
   private addedTags: { batchId: number | null; quantity: number }[] = []
+  private readonly createdReceipts = new Map<string, number>()
   private readonly additionalReceiptIds: string
   readonly productId: number
   readonly branchId: number
@@ -104,6 +105,19 @@ export class CountedStockPlan {
 
   get branchQuantity(): number { return this.facts.branches.find(row => row[0] === this.branchId)?.[1] ?? 0 }
 
+  projectedPhysicalTargets(): {
+    product: { product_id: number; after: number }
+    branches: Array<{ product_id: number; branch_id: number; after: number }>
+    receipts: Array<{ batch_id: number | null; batch_key: string | null; product_id: number; branch_id: number; after: number }>
+  } {
+    return {
+      product: { product_id: this.productId, after: this.facts.product[2] },
+      branches: this.facts.branches.map(row => ({ product_id: this.productId, branch_id: row[0], after: row[1] })),
+      receipts: [...this.facts.receipts.filter(row => row[3] !== null).map(row => ({ batch_id: row[0], batch_key: null, product_id: this.productId, branch_id: this.branchId, after: row[3]! })),
+        ...[...this.createdReceipts].map(([batch_key, after]) => ({ batch_id: null, batch_key, product_id: this.productId, branch_id: this.branchId, after }))],
+    }
+  }
+
   projectedTaggedSource(lotId: number): (CountedTaggedIdentity & {conditionTag:string;quantityRemaining:number}) | null {
     const tag=this.facts.tags.find(row=>row[0]===lotId)
     if (!tag) return null
@@ -129,7 +143,7 @@ export class CountedStockPlan {
 
   private capacity(batchId: number | null): number {
     return batchId === null
-      ? subtractCountedQuantity(this.branchQuantity, this.facts.receipts.map(row => row[3] ?? 0))
+      ? subtractCountedQuantity(subtractCountedQuantity(this.branchQuantity, this.facts.receipts.map(row => row[3] ?? 0)), [...this.createdReceipts.values()])
       : this.facts.receipts.find(row => row[0] === batchId)?.[3] ?? 0
   }
 
@@ -141,7 +155,7 @@ export class CountedStockPlan {
   }
 
   private assertCapacity(batchId: number | null): void {
-    if (subtractCountedQuantity(this.branchQuantity, this.facts.receipts.map(row => row[3] ?? 0)) < 0
+    if (this.capacity(null) < 0
       || subtractCountedQuantity(this.branchQuantity, this.quantities()) < 0
       || subtractCountedQuantity(this.capacity(batchId), this.quantities(batchId)) < 0) throw new CountedStockConflictError()
   }
@@ -168,6 +182,26 @@ export class CountedStockPlan {
     const receipt = this.facts.receipts.find(row => row[0] === batchId && row[1] === this.productId)
     if (!receipt || (receipt[2] !== 0 && receipt[2] !== 1)) throw new CountedStockConflictError()
     return receipt[2] === 0
+  }
+
+  projectedReceiptByKey(batchKey: string): number | null {
+    return this.facts.receipts.find(row => row[7] === batchKey)?.[0] ?? null
+  }
+
+  receiveProjectedCreatedReceipt(batchKey: string, quantity: number): { guards: StockWriteStatement[]; statements: StockWriteStatement[] } {
+    if (!batchKey || this.createdReceipts.has(batchKey) || this.projectedReceiptByKey(batchKey) !== null) throw new CountedStockConflictError()
+    const statements = this.changeOrdinary(null, quantity, 'receive')
+    this.createdReceipts.set(batchKey, quantity)
+    const params = { productId: this.productId, branchId: this.branchId, newReceiptKey: batchKey, nextReceipt: quantity }
+    this.physical(statements, `receipt:event:${this.productId}:${this.branchId}:${batchKey}`, {
+      sql: `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)
+        VALUES((SELECT id FROM product_batches WHERE variant_product_id=@productId AND batch_key=@newReceiptKey),@branchId,@nextReceipt)
+        ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=excluded.quantity,updated_at=CURRENT_TIMESTAMP`, params,
+    }, true)
+    this.assertSource(null)
+    return { guards: [{ sql: `SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM product_batches
+      WHERE variant_product_id=@productId AND batch_key=@newReceiptKey)
+      THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`, params }], statements }
   }
 
   changeOrdinary(batchId: number | null, quantity: number, action: 'consume' | 'receive' | 'activateAndReceive'): StockWriteStatement[] {
@@ -292,6 +326,10 @@ export class CountedStockBatchPlan {
     const plan = this.plans.get(`${productId}:${branchId}`)
     if (!plan) throw new CountedStockConflictError()
     return plan
+  }
+
+  projectedPhysicalTargets(): ReturnType<CountedStockPlan['projectedPhysicalTargets']>[] {
+    return [...this.plans.values()].map(plan => plan.projectedPhysicalTargets())
   }
 
   takeFinalPhysicalWrites(): StockWriteStatement[] {

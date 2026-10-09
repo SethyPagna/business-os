@@ -227,6 +227,8 @@ export type ReceiveBatchPlanInput = {
    * preimage inside the same D1 batch instead of relying on SQLite REAL math.
    */
   receiptCostPreimage?: ReceiptCostPreimage
+  receivedQuantityPreimage?: { quantity: number | null }
+  preserveHistoricalAttribution?: boolean
   /** Server-resolved target; never read directly from an operator payload. */
   receiptLotTarget?: ReceiptLotTarget
   /** Internal chunk-planner reservation for a NEW lot; never operator input. */
@@ -237,6 +239,7 @@ export type ReceiveBatchPlanInput = {
 
 export type ReceiveBatchStatementPlan = {
   statements: StockWriteStatement[]
+  metadataStatements: StockWriteStatement[]
   productIdSql: string
   batchIdSql: string
   batchKey: string
@@ -294,6 +297,12 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
   }
   const branchId = Number(input.branchId)
   if (!Number.isSafeInteger(branchId) || branchId <= 0) throw new Error('A valid branch is required')
+  if (input.receivedQuantityPreimage && (!Number.isSafeInteger(input.batchId) || Number(input.batchId) <= 0)) {
+    throw new Error('An exact receipt quantity requires an existing received date')
+  }
+  if (input.preserveHistoricalAttribution && !input.receivedQuantityPreimage) {
+    throw new Error('Historical receipt attribution requires an exact existing receipt preimage')
+  }
   const receivedAt = normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10)
   const lotCode = dateToBatchCode(receivedAt) as string
   const batchKey = input.provenanceKey ? ` event:${input.provenanceKey}` : input.receiptLotTarget?.batchKey ?? lotCode
@@ -336,6 +345,9 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
     receiptBaseline: input.receiptLotTarget?.baselineBatchId ?? 0,
     receiptExistingBatchId: input.receiptLotTarget?.existingBatchId ?? null,
     reservedBatchId: reservedBatchId ?? null,
+    receivedQuantityBefore: input.receivedQuantityPreimage?.quantity ?? null,
+    receivedQuantityAfter: input.receivedQuantityPreimage
+      ? subtractCountedQuantity(input.receivedQuantityPreimage.quantity ?? 0, [-quantity]) : null,
   }
   const productIdSql = productClientRequestId
     ? `(SELECT id FROM products WHERE client_request_id = @productClientRequestId AND client_request_id <> '')`
@@ -347,8 +359,8 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
           is_active = 1,
           expiry_date = CASE WHEN @expiryProvided = 1 THEN @expiryDate ELSE expiry_date END,
           notes = CASE WHEN @notesProvided = 1 THEN @notes ELSE notes END,
-          ${LOT_ATTRIBUTION_SET_SQL},
-          received_quantity = COALESCE(received_quantity, 0) + @quantity,
+          ${input.preserveHistoricalAttribution ? '' : `${LOT_ATTRIBUTION_SET_SQL},`}
+          received_quantity = ${input.receivedQuantityPreimage ? '@receivedQuantityAfter' : 'COALESCE(received_quantity, 0) + @quantity'},
           received_cost_usd = CASE WHEN @receivedCostUsd IS NULL THEN received_cost_usd
             ELSE @receivedCostAfter END,
           updated_at = CURRENT_TIMESTAMP
@@ -381,14 +393,7 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
   const batchIdSql = explicitBatch
     ? '@batchId'
     : `(SELECT id FROM product_batches WHERE variant_product_id = ${productIdSql} AND batch_key = @batchKey)`
-  return {
-    productIdSql,
-    batchIdSql,
-    batchKey,
-    lotCode,
-    receivedAt,
-    params,
-    statements: [
+  const metadataStatements: StockWriteStatement[] = [
       { sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products WHERE id=${productIdSql} AND is_active IS NOT 1)
           THEN json_extract('[]','$[product_has_stock]') ELSE 1 END`, params },
       ...(reservedBatchId !== undefined ? [{
@@ -420,7 +425,17 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
           ) END`,
         params,
       }]),
+      ...(input.receivedQuantityPreimage ? [{
+        sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_batches WHERE id=@batchId
+          AND variant_product_id=${productIdSql} AND received_quantity IS @receivedQuantityBefore)
+          THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`, params,
+      }] : []),
       metadata,
+  ]
+  return {
+    productIdSql, batchIdSql, batchKey, lotCode, receivedAt, params, metadataStatements,
+    statements: [
+      ...metadataStatements,
       {
         sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity)
           VALUES (${batchIdSql}, @branchId, @quantity)
@@ -823,17 +838,26 @@ export function planRemoveStockFromBatch(input: RemoveBatchStockPlanInput): { st
 //     receiving on it again reactivates it.
 // Run inside the caller's atomic db.batch AFTER the stock decrement so the
 // emptiness test sees the post-revert quantities.
-export function planUnreceiveBatchStock(input: { batchId: number; quantity: number; totalCostUsd: number | null }): StockWriteStatement[] {
+export function planUnreceiveBatchStock(input: { batchId: number; quantity: number; totalCostUsd: number | null; receivedQuantityPreimage?: { quantity: number | null } }): StockWriteStatement[] {
   const batchId = Number(input.batchId)
   const quantity = Number(input.quantity)
   if (!Number.isSafeInteger(batchId) || batchId <= 0) throw new Error('A valid received date is required')
   if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Quantity must be a positive number')
   const totalCostUsd = input.totalCostUsd == null ? null : roundMoney4(Number(input.totalCostUsd))
-  const params = { batchId, quantity, totalCostUsd }
+  const params = { batchId, quantity, totalCostUsd,
+    receivedQuantityBefore: input.receivedQuantityPreimage?.quantity ?? null,
+    receivedQuantityAfter: input.receivedQuantityPreimage?.quantity == null ? null
+      : Math.max(0, subtractCountedQuantity(input.receivedQuantityPreimage.quantity, [quantity])),
+  }
   return [
+    ...(input.receivedQuantityPreimage ? [{
+      sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_batches WHERE id=@batchId
+        AND received_quantity IS @receivedQuantityBefore)
+        THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`, params,
+    }] : []),
     {
       sql: `UPDATE product_batches SET
-              received_quantity = CASE WHEN received_quantity IS NULL THEN NULL ELSE MAX(0, received_quantity - @quantity) END,
+              received_quantity = ${input.receivedQuantityPreimage ? '@receivedQuantityAfter' : 'CASE WHEN received_quantity IS NULL THEN NULL ELSE MAX(0, received_quantity - @quantity) END'},
               received_cost_usd = CASE WHEN received_cost_usd IS NULL THEN NULL ELSE MAX(0, ROUND(received_cost_usd - COALESCE(@totalCostUsd, 0), 4)) END,
               updated_at = CURRENT_TIMESTAMP
             WHERE id = @batchId`,

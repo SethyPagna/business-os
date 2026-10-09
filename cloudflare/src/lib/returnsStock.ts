@@ -1,5 +1,5 @@
 import { planTaggedSaleSourceChange } from './saleLineAddition'
-import { ordinaryNullCapacityGuard, subtractCountedQuantity, type CountedTaggedIdentity } from './countedDamagedStock'
+import { CountedStockConflictError, ordinaryNullCapacityGuard, subtractCountedQuantity, sumCountedQuantities, planExactCountedOrdinaryChange, planExactCountedTaggedChange, type CountedStockPlan, type CountedTaggedIdentity } from './countedDamagedStock'
 import { productStockGuardStatement } from './productStockGuard'
 // K2 (Part 410, 11.12/11.13): the kernel for the NEW return stock semantics
 // -- the three-way per-item chooser and Replace. The locked design notes
@@ -328,7 +328,13 @@ export function planCountedReturnReceive(productId: number, branchId: number, ba
   return statements
 }
 
+export function planProjectedCountedReturnReceive(exact: CountedStockPlan, batchId: number | null, quantity: number): StockWriteStatement[] {
+  return planExactCountedOrdinaryChange(exact, batchId, quantity,
+    batchId !== null && exact.requiresReceiptActivation(batchId) ? 'activateAndReceive' : 'receive')
+}
+
 export function planDamagedReturnLine(input: {
+  projectedStock?: CountedStockPlan
   productId: number
   productName: string | null
   branchId: number
@@ -348,8 +354,10 @@ export function planDamagedReturnLine(input: {
 }): StockWriteStatement[] {
   const quantity = Number(input.quantity)
   if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Damaged quantity must be positive')
+  if (input.projectedStock && (input.projectedStock.productId !== input.productId || input.projectedStock.branchId !== input.branchId)) throw new CountedStockConflictError()
   const statements: StockWriteStatement[] = [
-    ...planCountedReturnReceive(input.productId,input.branchId,input.batchId,quantity),
+    ...(input.projectedStock ? planProjectedCountedReturnReceive(input.projectedStock,input.batchId,quantity)
+      : planCountedReturnReceive(input.productId,input.branchId,input.batchId,quantity)),
     createDamagedLotStatement({
       productId: input.productId,
       productName: input.productName,
@@ -374,11 +382,15 @@ export function planDamagedReturnLine(input: {
       },
     },
   ]
+  if (input.projectedStock && input.disposition === 'keep') statements.unshift(...input.projectedStock.hold(input.batchId, quantity))
   if (input.disposition === 'remove') {
+    if (input.projectedStock) statements.push(...planExactCountedOrdinaryChange(input.projectedStock,input.batchId,quantity,'consume'))
+    else {
     const physicalParams={productId:input.productId,branchId:input.branchId,batchId:input.batchId,quantity}
     if(input.batchId !== null) statements.push({sql:'UPDATE branch_batch_stock SET quantity=quantity-@quantity WHERE batch_id=@batchId AND branch_id=@branchId',params:physicalParams})
     statements.push({sql:'UPDATE branch_stock SET quantity=quantity-@quantity WHERE product_id=@productId AND branch_id=@branchId',params:physicalParams},
       {sql:'UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0)FROM branch_stock WHERE product_id=@productId),updated_at=CURRENT_TIMESTAMP WHERE id=@productId',params:physicalParams})
+    }
 
     // The row this SAME call just opened, keyed the same way the create
     // path's own fallback-batch subquery pattern keys a just-inserted row:
@@ -386,7 +398,7 @@ export function planDamagedReturnLine(input: {
     const lotRefSql = `(SELECT id FROM damaged_stock_lots WHERE return_id=${input.returnIdSql} AND product_id=@dsp_product_id AND branch_id=@dsp_branch_id ORDER BY id DESC LIMIT 1)`
     statements.push(
       {
-        sql: `UPDATE damaged_stock_lots SET quantity_remaining = quantity_remaining - @dsp_quantity, updated_at = CURRENT_TIMESTAMP
+        sql: `UPDATE damaged_stock_lots SET quantity_remaining = 0, updated_at = CURRENT_TIMESTAMP
               WHERE id = ${lotRefSql} AND quantity_remaining >= @dsp_quantity`,
         params: { dsp_product_id: input.productId, dsp_branch_id: input.branchId, dsp_quantity: quantity },
       },
@@ -421,6 +433,8 @@ export class InsufficientReplacementStockError extends Error {
 }
 
 export function planReplacementStock(input: {
+  projectedStock?: CountedStockPlan
+  projectedTakes?: Array<{ batchId: number; quantity: number }>
   tagged?: CountedTaggedIdentity & { conditionTag: string }
   unlottedStock?: boolean
   productId: number
@@ -437,6 +451,7 @@ export function planReplacementStock(input: {
 }): { statements: StockWriteStatement[]; usedBatch: boolean } {
   const quantity = Number(input.quantity)
   if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Replacement quantity must be positive')
+  if (input.projectedStock && (input.projectedStock.productId !== input.productId || input.projectedStock.branchId !== input.branchId)) throw new CountedStockConflictError()
   const shared = {
     product_id: input.productId,
     product_name: input.productName,
@@ -450,7 +465,13 @@ export function planReplacementStock(input: {
     batch_id: input.tagged?.batchId ?? input.batchId,
   }
   if (input.tagged && (input.tagged.productId !== input.productId || input.tagged.branchId !== input.branchId || input.batchId != null || input.unlottedStock)) throw new Error('Conflicting tagged replacement source')
-  const statements: StockWriteStatement[] = input.tagged ? planTaggedSaleSourceChange(input.tagged,quantity,'consume') : input.batchId != null
+  if (input.projectedTakes && (!input.projectedStock || input.tagged || input.batchId !== null
+    || sumCountedQuantities(input.projectedTakes.map(take => take.quantity)) !== quantity)) throw new Error('Conflicting projected replacement allocation')
+  const statements: StockWriteStatement[] = input.projectedTakes && input.projectedStock
+    ? input.projectedTakes.flatMap(take => planExactCountedOrdinaryChange(input.projectedStock!,take.batchId,take.quantity,'consume')) : input.projectedStock
+    ? input.tagged ? planExactCountedTaggedChange(input.projectedStock,input.tagged,quantity,'consume')
+      : planExactCountedOrdinaryChange(input.projectedStock,input.batchId,quantity,'consume')
+    : input.tagged ? planTaggedSaleSourceChange(input.tagged,quantity,'consume') : input.batchId != null
     ? [...planRemoveStockFromBatch({ batchId: input.batchId, productId: input.productId, branchId: input.branchId, quantity }).statements]
     : [
         {
@@ -465,7 +486,7 @@ export function planReplacementStock(input: {
           params: shared,
         },
       ]
-  if (input.unlottedStock) statements.unshift(ordinaryNullCapacityGuard(input.productId,input.branchId,quantity))
+  if (input.unlottedStock && !input.projectedStock) statements.unshift(ordinaryNullCapacityGuard(input.productId,input.branchId,quantity))
   statements.push({
     sql: `INSERT INTO inventory_movements (
       product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,
