@@ -155,6 +155,7 @@ import {
   planSaleStockTransition,
   type CancelReason,
   type SaleItemAllocation,
+  type TransitionItem,
   addImportedReturnedQuantities,
 } from '../lib/saleTransitions'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
@@ -2127,7 +2128,7 @@ app.patch('/:id/status', async (c) => {
     cancelFeeNote = String(body.cancel_fee_note || '').trim() || null
   }
 
-  const items = await db.prepare('SELECT si.id,si.product_id,si.product_name,si.quantity,si.cost_price_usd,si.cost_price_khr,si.branch_id,si.batch_id,si.damaged_lot_id,si.returned_quantity,ci.batch_id AS condition_batch_id,ci.branch_id AS condition_branch_id FROM sale_items si LEFT JOIN counted_sale_item_conditions ci ON ci.sale_item_id=si.id WHERE si.sale_id = ?').all<SaleItemRow & { damaged_lot_id: number | null; returned_quantity: number | null; condition_batch_id: number | null; condition_branch_id: number | null }>([id])
+  const items = await db.prepare('SELECT si.id,si.product_id,si.product_name,si.quantity,si.cost_price_usd,si.cost_price_khr,si.branch_id,si.batch_id,si.damaged_lot_id,si.returned_quantity,ci.batch_id AS condition_batch_id,ci.branch_id AS condition_branch_id,ci.condition_tag AS condition_tag,ci.lot_id AS condition_lot_id,ci.product_id AS condition_product_id FROM sale_items si LEFT JOIN counted_sale_item_conditions ci ON ci.sale_item_id=si.id WHERE si.sale_id = ?').all<SaleItemRow & { damaged_lot_id: number | null; returned_quantity: number | null; condition_batch_id: number | null; condition_branch_id: number | null; condition_tag: string | null; condition_lot_id: number | null; condition_product_id: number | null }>([id])
 
   // How much of each line already came back through real returns
   // (non-cancelled, customer scope; return_to_stock does NOT matter here:
@@ -2135,36 +2136,34 @@ app.patch('/:id/status', async (c) => {
   // its return record -- either way it is no longer "out with this sale",
   // so a cancel must not re-add it and an un-cancel must not re-take it).
   const returnedRows = await db.prepare(`
-    SELECT ri.sale_item_id AS sale_item_id, ri.product_id AS product_id, SUM(ri.quantity) AS quantity
+    SELECT ri.sale_item_id AS sale_item_id, ri.product_id AS product_id, ri.quantity AS quantity
     FROM return_items ri
     JOIN returns r ON r.id = ri.return_id
     WHERE r.sale_id = @saleId
       AND COALESCE(r.status, 'completed') != 'cancelled'
       AND COALESCE(r.return_scope, 'customer') = 'customer'
-    GROUP BY ri.sale_item_id, ri.product_id
+    ORDER BY r.id,ri.id
   `).all<{ sale_item_id: number | null; product_id: number | null; quantity: number }>({ saleId: id })
   const itemLevelReturned = new Map<number, number>()
   const productLevelReturned = new Map<number, number>()
   for (const row of returnedRows) {
     const qty = Math.max(0, Number(row.quantity) || 0)
     if (!qty) continue
-    if (row.sale_item_id) itemLevelReturned.set(Number(row.sale_item_id), (itemLevelReturned.get(Number(row.sale_item_id)) || 0) + qty)
-    else if (row.product_id) productLevelReturned.set(Number(row.product_id), (productLevelReturned.get(Number(row.product_id)) || 0) + qty)
+    if (row.sale_item_id) itemLevelReturned.set(Number(row.sale_item_id), sumCountedQuantities([itemLevelReturned.get(Number(row.sale_item_id)) || 0,qty]))
+    else if (row.product_id) productLevelReturned.set(Number(row.product_id), sumCountedQuantities([productLevelReturned.get(Number(row.product_id)) || 0,qty]))
   }
   // RET-B F4: units an imported return-status row brought back (restocked at
   // import, no return_items row) are no longer out with the sale either.
-  addImportedReturnedQuantities(itemLevelReturned, items)
-  const returnedByItem = allocateReturnedQuantities(items, itemLevelReturned, productLevelReturned)
+  addImportedReturnedQuantities(itemLevelReturned, items, true)
+  const returnedByItem = allocateReturnedQuantities(items, itemLevelReturned, productLevelReturned, true)
 
   const movementReason = saleStatus === 'cancelled'
     ? `Sale cancelled (${cancelReasonLabel(cancelReason!)})${cancelNote ? ` -- ${cancelNote}` : ''}`
     : oldStatus === 'cancelled'
       ? `Sale cancellation reverted (back to ${saleStatus})`
       : `Sale status changed from ${oldStatus} to ${saleStatus}`
-  // 11.9: damaged-source lines never touch branch/batch stock -- their
-  // units live in damaged_stock_lots.quantity_remaining, so the branch
-  // plan below runs on the regular lines only and the damaged lines get
-  // their own ops on the SAME heldQuantity state machine.
+  // Every source shares one physical projection; tagged lines also change
+  // their original condition subset on the same heldQuantity state machine.
   const regularItems = items.filter((item) => !item.damaged_lot_id)
   // Z0: attach each line's recorded lot allocations (migration 0078) so the
   // transition kernel restores/re-deducts to the SAME batches the sale drew
@@ -2197,7 +2196,7 @@ app.patch('/:id/status', async (c) => {
       moves: (item) => {
         if (skipStock || !item.product_id || !item.branch_id) return false
         const returned = Math.max(0, Number(returnedByItem.get(item.id)) || 0)
-        return heldQuantity(saleStatus, item.quantity, returned) !== heldQuantity(oldStatus, item.quantity, returned)
+        return heldQuantity(saleStatus, item.quantity, returned, true) !== heldQuantity(oldStatus, item.quantity, returned, true)
       },
       saleBranchId: Number(sale.branch_id) || null,
       saleLabel: typeof sale.branch_name === 'string' ? sale.branch_name : null,
@@ -2214,43 +2213,48 @@ app.patch('/:id/status', async (c) => {
   for (const item of items) {
     if (!item.damaged_lot_id || !item.product_id) continue
     const returned = Math.max(0, Number(returnedByItem.get(item.id)) || 0)
-    const delta = heldQuantity(saleStatus, item.quantity, returned) - heldQuantity(oldStatus, item.quantity, returned)
+    const delta = subtractCountedQuantity(heldQuantity(saleStatus,item.quantity,returned,true),[heldQuantity(oldStatus,item.quantity,returned,true)])
     if (delta === 0) continue
     // S4-2: a damaged lot is stock too -- "don't touch stock" means all of
     // it, so these ops (and their damage movements) are counted and then
     // NOT queued, rather than half-applying the transition.
     if (skipStock) {
-      skippedDamagedUnits += Math.abs(delta)
+      skippedDamagedUnits = sumCountedQuantities([skippedDamagedUnits,Math.abs(delta)])
       continue
     }
     if (!item.condition_branch_id || item.condition_branch_id !== item.branch_id) return c.json({ error: 'counted_tagged_identity_required' },409)
     damagedTransitionOps.push({ batchId: item.condition_batch_id, lotId: Number(item.damaged_lot_id), productId: item.product_id, productName: item.product_name, branchId: item.branch_id, delta })
   }
 
-  const plan = planSaleStockTransition({
-    saleId: id,
-    oldStatus,
-    newStatus: saleStatus,
-    items: regularItems,
-    returnedByItem,
-    reason: movementReason,
-    userId: user?.id ?? null,
-    userName: actorSnapshot(user),
-    skipStock,
-  })
-  const totalSkippedUnits = plan.skippedUnits + skippedDamagedUnits
-
-  // Pre-flight availability for anything the plan TAKES (plain read; the
-  // CHECK(quantity >= 0) constraints below remain the real race guard,
-  // same validate-then-batch shape as POST / -- see lib/db.ts's batch()).
-  for (const deduction of plan.deductions) {
-    const stockRow = await db.prepare('SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?').get<{ quantity: number }>([deduction.product_id, deduction.branch_id])
-    const available = stockRow?.quantity || 0
-    if (deduction.quantity > available) {
-      const name = items.find((item) => item.product_id === deduction.product_id)?.product_name || `product #${deduction.product_id}`
-      return c.json({ error: `Insufficient stock for ${name}: requested ${deduction.quantity}, available ${available}` }, 409)
+  let exactStatusStock: CountedStockBatchPlan | undefined
+  let statusStockGuards: Array<{sql:string;params:Record<string,unknown>}> = []
+  const taggedStatusStatements: Array<{sql:string;params:Record<string,unknown>}> = []
+  let plan: ReturnType<typeof planSaleStockTransition>
+  try {
+    const sources = new Map<string,{productId:number;branchId:number;receipts:Set<number>}>()
+    for (const item of items) {
+      if (skipStock || !item.product_id || !item.branch_id || heldQuantity(saleStatus,item.quantity,returnedByItem.get(item.id)||0,true)===heldQuantity(oldStatus,item.quantity,returnedByItem.get(item.id)||0,true)) continue
+      const key=`${item.product_id}:${item.branch_id}`
+      let source=sources.get(key)
+      if(!source) {source={productId:item.product_id,branchId:item.branch_id,receipts:new Set()};sources.set(key,source)}
+      for(const receipt of [(item.damaged_lot_id?item.condition_batch_id:item.batch_id),...((item as TransitionItem).allocations||[]).map(row=>row.batch_id)])if(receipt!=null)source.receipts.add(receipt)
     }
-  }
+    if(sources.size) {
+      const payload=JSON.stringify([...sources.values()].map(source=>({...source,receipts:[...source.receipts].sort((a,b)=>a-b)})))
+      if(sources.size>10000 || new TextEncoder().encode(payload).byteLength>900000)return c.json({error:'This sale has too many stock sources for one status change.',code:'sale_status_over_plan_budget',outcome:'not_dispatched'},409)
+      const observed=await db.prepare(`WITH status_sources AS (SELECT json_extract(value,'$.productId') product_id,json_extract(value,'$.branchId') branch_id,json_extract(value,'$.receipts') receipts FROM json_each(@sources))
+        SELECT branch_id AS branchId,${countedStockFactsSql('status_sources.product_id','status_sources.branch_id','status_sources.receipts')} AS facts FROM status_sources`).all<{branchId:number;facts:string}>({sources:payload})
+      exactStatusStock=new CountedStockBatchPlan(observed,{deferPhysicalWrites:true})
+      statusStockGuards=exactStatusStock.takePreimageGuards()
+      for(const item of items)if(item.damaged_lot_id && sources.has(`${item.product_id}:${item.branch_id}`)) {
+        const current=exactStatusStock.get(Number(item.product_id),Number(item.branch_id)).projectedTaggedSource(item.damaged_lot_id)
+        if(!current || item.condition_lot_id!==item.damaged_lot_id || item.condition_product_id!==item.product_id || item.condition_branch_id!==item.branch_id || current.batchId!==item.condition_batch_id || current.conditionTag!==item.condition_tag) return c.json({error:'The recorded condition source changed. Refresh before changing this sale.',code:'write_conflict'},409)
+      }
+    }
+    plan=planSaleStockTransition({saleId:id,oldStatus,newStatus:saleStatus,items:regularItems,returnedByItem,reason:movementReason,userId:user?.id??null,userName:actorSnapshot(user),skipStock,exactQuantities:true,projectedStock:exactStatusStock})
+    for(const op of damagedTransitionOps)taggedStatusStatements.push(...planExactCountedTaggedChange(exactStatusStock!.get(op.productId,Number(op.branchId)),{lotId:op.lotId,productId:op.productId,branchId:Number(op.branchId),batchId:op.batchId},Math.abs(op.delta),op.delta>0?'consume':'restore'))
+  }catch(error){if(isCountedStockConflict(error)||error instanceof MoneyPrecisionError)return c.json({error:'The exact stock source changed. Refresh before changing this sale.',code:'write_conflict'},409);throw error}
+  const totalSkippedUnits = sumCountedQuantities([plan.skippedUnits,skippedDamagedUnits])
 
   const mutationStamp = new Date().toISOString()
   // Stable identity shared by the generic status audit and any richer audit
@@ -2550,15 +2554,17 @@ app.patch('/:id/status', async (c) => {
   statements.push(...settlementLineStatements)
   const effectGuard = effectGuardStatement(branchResolver.guards())
   if (effectGuard) statements.push(effectGuard)
+  statements.unshift(...statusStockGuards)
   statements.push(...plan.statements)
 
   // A provisional restore can be spent by another request before a status
   // conflict is discovered. Keep damaged stock and its ledger in the SAME
   // revision-guarded batch as regular stock, with the bulk path's identity
   // and quantity bounds. Any failure rolls back the entire transition.
+  statements.push(...taggedStatusStatements)
   for (const op of damagedTransitionOps) {
     if (!op.branchId) throw new Error('counted_tagged_identity_required')
-    statements.push(...planCountedTaggedChange({ lotId: op.lotId, productId: op.productId, branchId: op.branchId, batchId: op.batchId }, Math.abs(op.delta), op.delta > 0 ? 'consume' : 'restore'))
+
     statements.push({
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name)
             VALUES (@product_id, @product_name, @branch_id, '${op.delta > 0 ? DAMAGE_OUT_MOVEMENT : DAMAGE_IN_MOVEMENT}', @quantity, 0, 0, @reason, @reference_id, @user_id, @user_name)`,
@@ -2574,6 +2580,8 @@ app.patch('/:id/status', async (c) => {
       },
     })
   }
+
+  if(exactStatusStock) statements.push(...exactStatusStock.takeFinalPhysicalWrites())
 
   if (settlementSnapshot && settlementResponse && settlementOperationId && settlementRequestId && settlementDigest && settlementCanonical) {
     const historyPayload = JSON.stringify({
@@ -2668,7 +2676,10 @@ app.patch('/:id/status', async (c) => {
     }, settlementEventBytes + statusEventBytes)
   }
   try {
-    const results = await (writesStock ? executeStockTransaction(db, statements, 'retry') : db.batch(statements))
+    const used=currentRequestMetrics()?.invocation.attemptedStatements
+    const planned=writesStock?stockTransactionStatementCount(statements.length):statements.length
+    if(used===undefined||used+planned+12>getPlanLimits(c.env).d1QueriesPerInvocation)return c.json({error:'This sale status change cannot fit safely in this plan. Review a smaller change.',code:'sale_status_over_plan_budget',outcome:'not_dispatched'},409)
+    const results = await (writesStock ? executeStockTransaction(db, statements, 'once') : db.batch(statements))
     if (settlementResponse && settlementHistoryIndex >= 0) {
       settlementResponse.actionHistoryId = Number(results[settlementHistoryIndex]?.meta?.last_row_id || 0)
     }
@@ -2696,7 +2707,7 @@ app.patch('/:id/status', async (c) => {
         return c.json({ error: 'client_request_id was already used with different sale status data.', code: 'idempotency_conflict' }, 409)
       }
     }
-    if (/guard_value/i.test(message)) {
+    if (isCountedStockConflict(error) || /guard_value/i.test(message)) {
       return c.json({ error: 'This sale changed while the status update was being prepared. Refresh and try again.', code: 'write_conflict' }, 409)
     }
     // Same race guard as POST /: a CHECK(quantity >= 0) failure means a
@@ -2704,9 +2715,6 @@ app.patch('/:id/status', async (c) => {
     // between the availability read above and this write. The batch rolled
     // back atomically (status unchanged, nothing moved), so just report
     // the shortage as a 409 rather than a 500.
-    if (/CHECK constraint|constraint failed/i.test(message)) {
-      return c.json({ error: 'Insufficient stock to complete this sale: another sale took the last units first. Refresh and try again.', code: 'stock_conflict' }, 409)
-    }
     throw error
   }
 
@@ -2737,13 +2745,12 @@ app.patch('/:id/status', async (c) => {
       } : {}),
     }),
     // I2-1: a sale moves stock only -- 'stock', not the catalog version.
-    bumpVersion(c.env, 'stock'),
-    bumpVersion(c.env, 'sales'),
+    bumpVersions(c.env, ['stock','sales']),
     ...((sale.cancel_fee_id || (saleStatus === 'cancelled' && (cancelFeeUsd > 0 || cancelFeeKhr > 0)))
       ? [broadcast(c.env, 'fees', { action: 'update' })]
       : []),
   ]))
-  const updated = await db.prepare('SELECT id, sale_status, updated_at FROM sales WHERE id = ?').get<{ id: number; sale_status: string; updated_at: string }>([id])
+  const updated = settlementResponse || directStatusResponse ? null : await db.prepare('SELECT id, sale_status, updated_at FROM sales WHERE id = ?').get<{ id: number; sale_status: string; updated_at: string }>([id])
   const payload = settlementResponse || directStatusResponse || updated || { id: Number(id), sale_status: saleStatus }
   // S4-6: name who made the change. The actor is the request's authenticated
   // user (requireAuth, above) -- known synchronously here regardless of

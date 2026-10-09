@@ -1,4 +1,5 @@
 import { productStockGuardStatement } from './productStockGuard'
+import { CountedStockBatchPlan, planExactCountedOrdinaryChange, subtractCountedQuantity, sumCountedQuantities } from './countedDamagedStock'
 // The sale lifecycle transition kernel (Part 383 R3) -- one place that
 // decides, for ANY old->new sale_status pair, exactly how much stock moves
 // and which transitions are even legal. routes/sales.ts's PATCH /:id/status
@@ -58,13 +59,13 @@ export function cancelReasonLabel(reason: CancelReason): string {
   return 'Other'
 }
 
-export function heldQuantity(status: string, quantity: number, returnedQuantity: number): number {
+export function heldQuantity(status: string, quantity: number, returnedQuantity: number, exact = false): number {
   const normalized = status || 'completed'
   // Only the statuses that hold NOTHING belong here. Anything that holds is
   // decided by STOCK_DEDUCTED_STATUSES below -- never by a second list.
   if (normalized === 'cancelled') return 0
   if (STOCK_DEDUCTED_STATUSES.has(normalized) || RETURN_STATUSES.has(normalized)) {
-    return Math.max(0, (Number(quantity) || 0) - Math.max(0, Number(returnedQuantity) || 0))
+    return Math.max(0, exact ? subtractCountedQuantity(Number(quantity) || 0, [Math.max(0, Number(returnedQuantity) || 0)]) : (Number(quantity) || 0) - Math.max(0, Number(returnedQuantity) || 0))
   }
   return 0
 }
@@ -110,6 +111,7 @@ export function allocateReturnedQuantities(
   items: TransitionItem[],
   itemLevelReturned: Map<number, number>,
   productLevelReturned: Map<number, number>,
+  exact = false,
 ): Map<number, number> {
   const result = new Map<number, number>()
   const productRemaining = new Map<number, number>()
@@ -121,10 +123,10 @@ export function allocateReturnedQuantities(
     let returned = Math.min(item.quantity, direct)
     const productId = Number(item.product_id) || 0
     if (productId && (productRemaining.get(productId) || 0) > 0) {
-      const capacity = Math.max(0, item.quantity - returned)
+      const capacity = Math.max(0, exact ? subtractCountedQuantity(item.quantity,[returned]) : item.quantity - returned)
       const take = Math.min(capacity, productRemaining.get(productId) || 0)
-      returned += take
-      productRemaining.set(productId, (productRemaining.get(productId) || 0) - take)
+      returned = exact ? sumCountedQuantities([returned,take]) : returned + take
+      productRemaining.set(productId, exact ? subtractCountedQuantity(productRemaining.get(productId) || 0,[take]) : (productRemaining.get(productId) || 0) - take)
     }
     result.set(item.id, returned)
   }
@@ -164,12 +166,13 @@ export function importedReturnedQuantity(line: { returned_quantity?: unknown } |
 export function addImportedReturnedQuantities(
   itemLevelReturned: Map<number, number>,
   lines: ImportedReturnLine[],
+  exact = false,
 ): Map<number, number> {
   for (const line of lines) {
     const quantity = importedReturnedQuantity(line)
     if (!quantity) continue
     const id = Number(line.id)
-    itemLevelReturned.set(id, (itemLevelReturned.get(id) || 0) + quantity)
+    itemLevelReturned.set(id, exact ? sumCountedQuantities([itemLevelReturned.get(id) || 0,quantity]) : (itemLevelReturned.get(id) || 0) + quantity)
   }
   return itemLevelReturned
 }
@@ -293,6 +296,8 @@ export function planSaleStockTransition(input: {
   // Admin-only, verified by the route BEFORE this is set (see
   // isAdminControlUser there) -- the kernel never decides permission.
   skipStock?: boolean
+  exactQuantities?: boolean
+  projectedStock?: CountedStockBatchPlan
 }): SaleStockTransitionPlan {
   const statements: StockStatement[] = []
   const deductionMap = new Map<string, { product_id: number; branch_id: number; quantity: number }>()
@@ -300,20 +305,53 @@ export function planSaleStockTransition(input: {
   let deductedUnits = 0
   let skippedUnits = 0
   const skipStock = input.skipStock === true
+  const exactQuantities = !!input.projectedStock || input.exactQuantities === true
 
   for (const item of input.items) {
     if (!item.product_id || !item.branch_id) continue
     const returned = Math.max(0, Number(input.returnedByItem.get(item.id)) || 0)
-    const before = heldQuantity(input.oldStatus, item.quantity, returned)
-    const after = heldQuantity(input.newStatus, item.quantity, returned)
-    const delta = after - before
+    const before = heldQuantity(input.oldStatus, item.quantity, returned, exactQuantities)
+    const after = heldQuantity(input.newStatus, item.quantity, returned, exactQuantities)
+    const delta = exactQuantities ? subtractCountedQuantity(after,[before]) : after - before
     if (delta === 0) continue
 
     if (skipStock) {
       // Count what was NOT moved, emit nothing at all, and leave
       // restoredUnits/deductedUnits at zero so the audit trail cannot
       // read as if stock had moved.
-      skippedUnits += Math.abs(delta)
+      skippedUnits = exactQuantities ? sumCountedQuantities([skippedUnits,Math.abs(delta)]) : skippedUnits + Math.abs(delta)
+      continue
+    }
+
+    if (input.projectedStock) {
+      const stock = input.projectedStock.get(item.product_id,item.branch_id)
+      const amount = Math.abs(delta), taking = delta > 0
+      const lots: Array<{batchId:number;quantity:number}> = []
+      let remaining = amount
+      const allocations = taking ? item.allocations || [] : [...item.allocations || []].reverse()
+      for (const allocation of allocations) {
+        if (remaining <= 0) break
+        const available = taking ? allocation.released_quantity : Math.max(0,subtractCountedQuantity(allocation.quantity,[allocation.released_quantity]))
+        const share = Math.min(Math.max(0,available),remaining)
+        if (share <= 0) continue
+        statements.push(...planExactCountedOrdinaryChange(stock,allocation.batch_id,share,taking?'consume':stock.requiresReceiptActivation(allocation.batch_id)?'activateAndReceive':'receive'))
+        const released = taking ? subtractCountedQuantity(allocation.released_quantity,[share]) : sumCountedQuantities([allocation.released_quantity,share])
+        statements.push({sql:'UPDATE sale_item_batch_allocations SET released_quantity=@released,released_at=CASE WHEN @released<=0 THEN NULL WHEN @released>=quantity THEN CURRENT_TIMESTAMP ELSE released_at END WHERE id=@id',params:{released,id:allocation.id}})
+        lots.push({batchId:allocation.batch_id,quantity:share})
+        remaining = subtractCountedQuantity(remaining,[share])
+      }
+      if (!allocations.length && item.batch_id) {
+        statements.push(...planExactCountedOrdinaryChange(stock,item.batch_id,remaining,taking?'consume':stock.requiresReceiptActivation(item.batch_id)?'activateAndReceive':'receive'))
+        lots.push({batchId:item.batch_id,quantity:remaining});remaining=0
+      }
+      if (remaining > 0) statements.push(...planExactCountedOrdinaryChange(stock,null,remaining,taking?'consume':'receive'))
+      if (taking) {
+        deductedUnits=sumCountedQuantities([deductedUnits,amount])
+        const key=`${item.product_id}:${item.branch_id}`,previous=deductionMap.get(key)
+        deductionMap.set(key,{product_id:item.product_id,branch_id:item.branch_id,quantity:sumCountedQuantities([previous?.quantity||0,amount])})
+      } else restoredUnits=sumCountedQuantities([restoredUnits,amount])
+      statements.push({sql:`INSERT INTO inventory_movements(product_id,product_name,branch_id${item.effect?',branch_name,addressed_branch_name':''},movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id)
+        VALUES(@product_id,@product_name,@branch_id${item.effect?',@branch_name,@addressed_branch_name':''},@movement,@quantity,@usd,@khr,@reason,@reference,@actor,@actorName,@batch)`,params:{product_id:item.product_id,product_name:item.product_name,branch_id:item.branch_id,...(item.effect?{branch_name:item.effect.branchName,addressed_branch_name:item.effect.addressedName}:{}),movement:taking?'sale':'return',quantity:-delta,usd:item.cost_price_usd||0,khr:item.cost_price_khr||0,reason:input.reason,reference:input.saleId,actor:input.userId,actorName:input.userName,batch:lots.length===1&&lots[0].quantity===amount?lots[0].batchId:null}})
       continue
     }
 
