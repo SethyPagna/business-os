@@ -238,6 +238,8 @@ function renderReturnsReport(response: unknown, fmtMoney: Fmt, search: string): 
   const modules: Record<string, unknown> = {
     'lucide-react/dist/esm/icons/download.js': { __esModule: true, default: noIcon },
     'lucide-react/dist/esm/icons/printer.js': { __esModule: true, default: noIcon },
+    'lucide-react/dist/esm/icons/file-spreadsheet.js': { __esModule: true, default: noIcon },
+    './RecordReportExport.tsx': { __esModule: true, default: noIcon, useRecordReportExporter: () => ({ available: () => false, errorMessage: null }) },
     '../../../api/reportsTransport.ts': { getBusinessSummaryReturnsPage: () => Promise.resolve(null) },
     '../../../api/returnsReadTransport.ts': { getReturnsReport: () => Promise.resolve(null) },
     '../../../utils/csv.ts': { downloadCSV: () => undefined },

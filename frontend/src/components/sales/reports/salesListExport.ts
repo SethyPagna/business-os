@@ -15,7 +15,8 @@ export function useReportExport<Result, Document extends { filename: string }>(i
  printInput: (document: Document) => Parameters<typeof openPrintExport>[0];
  channel: string;
 }) {
-  const renderedAuthority = captureActorReadScope(input.channel).authority
+  const renderedScope = captureActorReadScope(input.channel)
+  const renderedAuthority = renderedScope.authority
   const currentInput = useRef(input)
   currentInput.current = input
   const lifecycle = useRef({ key: input.key, generation: 0, mounted: true })
@@ -86,7 +87,9 @@ export function useReportExport<Result, Document extends { filename: string }>(i
     } catch (error) { failOwned(error, generation) }
   }
   const close = () => { lifecycle.current.generation++; setState({ key: input.key, generation: lifecycle.current.generation }) }
-  return { prepare, csv, excel, print, close, busy: relevant && !!state.busy,
+  return { prepare, csv, excel, print, close,
+    available: () => lifecycle.current.mounted && lifecycle.current.key === input.key && isActorReadScopeCurrent(renderedScope) && currentInput.current.canExport(),
+    unavailable: () => failOwned(new SalesExportError('unavailable'), state.generation), busy: relevant && !!state.busy,
     document: relevant && state.current?.() ? state.document : undefined, error: relevant ? state.error : undefined }
 }
 

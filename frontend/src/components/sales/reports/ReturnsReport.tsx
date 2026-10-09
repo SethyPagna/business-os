@@ -7,6 +7,8 @@
 import { useMemo, useRef, useState } from 'react'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Printer from 'lucide-react/dist/esm/icons/printer.js'
+import FileSpreadsheet from 'lucide-react/dist/esm/icons/file-spreadsheet.js'
+import RecordReportExport, { useRecordReportExporter } from './RecordReportExport.tsx'
 import { getBusinessSummaryReturnsPage } from '../../../api/reportsTransport.ts'
 import { getReturnsReport } from '../../../api/returnsReadTransport.ts'
 import { downloadCSV } from '../../../utils/csv.ts'
@@ -154,6 +156,8 @@ export default function ReturnsReport(p: ReportViewProps) {
     refundColumn<ReturnRow>(tr),
   ]
 
+  const exporter = useRecordReportExporter(p, 'returns', mode, params, eachColumns,
+    totals => ({ ...mapReturnRow({}, -1), return_number: labels.total, refund_usd: totals.refund_usd! }), row => matches(`${row.return_number} ${row.sale_receipt_number} ${row.party} ${row.reason} ${humanize(row.type)}`, search))
   const fileName = (ext: string) => `returns-report-${mode}-${filters.startDate || 'all'}_${filters.endDate || 'all'}.${ext}`
   const csvRows = () =>
     mode === 'days' ? rowsToCsvObjects(csvColumnsFor(dayColumns, fmtMoney), days)
@@ -161,8 +165,16 @@ export default function ReturnsReport(p: ReportViewProps) {
         : mode === 'types' ? rowsToCsvObjects(csvColumnsFor(typeColumns, fmtMoney), types)
           : rowsToCsvObjects(csvColumnsFor(eachColumns, fmtMoney), each)
   const headers = () => (mode === 'days' ? dayColumns : mode === 'reasons' ? reasonColumns : mode === 'types' ? typeColumns : eachColumns).map((c) => c.label)
-  const exportCsv = () => downloadCSV(fileName('csv'), csvRows())
-  const exportPrint = () => openPrintExport({ title: `${tr('reports', 'Reports')} · ${title} · ${tr(MODES.find((m) => m.id === mode)!.key, MODES.find((m) => m.id === mode)!.fallback)}`, subtitle: rangeSubtitle(filters, tr), headers: headers(), rows: csvRows() })
+  const exportCsv = () => {
+    if (!exporter.available()) return exporter.unavailable()
+    if (mode === 'each') void exporter.prepare()
+    else downloadCSV(fileName('csv'), csvRows())
+  }
+  const exportPrint = () => {
+    if (!exporter.available()) return exporter.unavailable()
+    if (mode === 'each') { void exporter.prepare(); return }
+    openPrintExport({ title: `${tr('reports', 'Reports')} · ${title} · ${tr(MODES.find((m) => m.id === mode)!.key, MODES.find((m) => m.id === mode)!.fallback)}`, subtitle: rangeSubtitle(filters, tr), headers: headers(), rows: csvRows() })
+  }
 
   const loading = mode === 'each' ? paged.loading : state.loading
   const error = mode === 'each' ? paged.error : state.error
@@ -183,12 +195,13 @@ export default function ReturnsReport(p: ReportViewProps) {
           ))}
         </>
       }
-      menuAction={p.canExport() ? <OverflowMenu label={tr('export', 'Export')} items={exportMenuItems(tr, p.canExport, exportCsv, exportPrint, { csv: <Download className="h-3.5 w-3.5" />, print: <Printer className="h-3.5 w-3.5" /> })} /> : null}
+      menuAction={p.canExport() ? <OverflowMenu label={tr('export', 'Export')} items={[...exportMenuItems(tr, p.canExport, exportCsv, exportPrint, { csv: <Download className="h-3.5 w-3.5" />, print: <Printer className="h-3.5 w-3.5" /> }), ...(mode === 'each' ? [{ label: tr('rpt_export_excel', 'Export Excel'), icon: <FileSpreadsheet className="h-3.5 w-3.5" />, onSelect: () => { if (p.canExport()) void exporter.prepare() } }] : [])]} /> : null}
       summary={summary}
-      error={error}
-      onRetry={reload}
+      error={exporter.errorMessage || error}
+      onRetry={exporter.error ? () => { void exporter.prepare() } : reload}
       retryLabel={tr('retry', 'Retry')}
     >
+      <RecordReportExport exporter={exporter} p={p} kind="returns" />
       {mode === 'days' ? <ReportTable surfaceKey="reports-returns-days" columns={dayColumns} rows={days} rowKey={(r) => r.date} totalsRow={days.length > 1 ? { ...totals, date: labels.total } : null} {...common} /> : null}
       {mode === 'reasons' ? <ReportTable surfaceKey="reports-returns-reasons" columns={reasonColumns} rows={reasons} rowKey={(r) => r.reason || '—'} totalsRow={reasons.length > 1 ? { ...totals, reason: labels.total } : null} {...common} /> : null}
       {mode === 'types' ? <ReportTable surfaceKey="reports-returns-types" columns={typeColumns} rows={types} rowKey={(r) => r.return_type || '—'} totalsRow={types.length > 1 ? { ...totals, return_type: labels.total } : null} {...common} /> : null}

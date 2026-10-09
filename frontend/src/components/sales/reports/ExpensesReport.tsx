@@ -6,6 +6,8 @@
 import { useMemo, useRef, useState } from 'react'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Printer from 'lucide-react/dist/esm/icons/printer.js'
+import FileSpreadsheet from 'lucide-react/dist/esm/icons/file-spreadsheet.js'
+import RecordReportExport, { useRecordReportExporter } from './RecordReportExport.tsx'
 import { getFeesReport } from '../../../api/feesTransport.ts'
 import { getBusinessSummaryExpensesPage } from '../../../api/reportsTransport.ts'
 import { downloadCSV } from '../../../utils/csv.ts'
@@ -147,6 +149,8 @@ export default function ExpensesReport(p: ReportViewProps) {
     { key: 'amount', label: tr('amount', 'Amount'), kind: 'money', value: (r) => r.amount_usd, khr: (r) => r.amount_khr, emphasis: true },
   ]
 
+  const exporter = useRecordReportExporter(p, 'expenses', mode, params, eachColumns,
+    totals => ({ ...mapExpenseRow({}, -1), label: labels.total, amount_usd: totals.amount_usd!, amount_khr: totals.amount_khr! }), row => matches(`${row.label} ${feeTypeLabel(row.type, tr)} ${row.notes} ${row.linked_sale_receipt_number} ${row.branch}`, search))
   const fileName = (ext: string) => `expenses-report-${mode}-${filters.startDate || 'all'}_${filters.endDate || 'all'}.${ext}`
   const csvRows = () =>
     mode === 'days' ? rowsToCsvObjects(csvColumnsFor(dayColumns, fmtMoney), days)
@@ -154,8 +158,16 @@ export default function ExpensesReport(p: ReportViewProps) {
         : mode === 'labels' ? rowsToCsvObjects(csvColumnsFor(categoryColumns, fmtMoney), categories)
           : rowsToCsvObjects(csvColumnsFor(eachColumns, fmtMoney), each)
   const headers = () => (mode === 'days' ? dayColumns : mode === 'types' ? typeColumns : mode === 'labels' ? categoryColumns : eachColumns).map((c) => c.label)
-  const exportCsv = () => downloadCSV(fileName('csv'), csvRows())
-  const exportPrint = () => openPrintExport({ title: `${tr('reports', 'Reports')} · ${title} · ${tr(MODES.find((m) => m.id === mode)!.key, MODES.find((m) => m.id === mode)!.fallback)}`, subtitle: rangeSubtitle(filters, tr), headers: headers(), rows: csvRows() })
+  const exportCsv = () => {
+    if (!exporter.available()) return exporter.unavailable()
+    if (mode === 'each') void exporter.prepare()
+    else downloadCSV(fileName('csv'), csvRows())
+  }
+  const exportPrint = () => {
+    if (!exporter.available()) return exporter.unavailable()
+    if (mode === 'each') { void exporter.prepare(); return }
+    openPrintExport({ title: `${tr('reports', 'Reports')} · ${title} · ${tr(MODES.find((m) => m.id === mode)!.key, MODES.find((m) => m.id === mode)!.fallback)}`, subtitle: rangeSubtitle(filters, tr), headers: headers(), rows: csvRows() })
+  }
 
   const loading = mode === 'each' ? paged.loading : state.loading
   const error = mode === 'each' ? paged.error : state.error
@@ -176,12 +188,13 @@ export default function ExpensesReport(p: ReportViewProps) {
           ))}
         </>
       }
-      menuAction={p.canExport() ? <OverflowMenu label={tr('export', 'Export')} items={exportMenuItems(tr, p.canExport, exportCsv, exportPrint, { csv: <Download className="h-3.5 w-3.5" />, print: <Printer className="h-3.5 w-3.5" /> })} /> : null}
+      menuAction={p.canExport() ? <OverflowMenu label={tr('export', 'Export')} items={[...exportMenuItems(tr, p.canExport, exportCsv, exportPrint, { csv: <Download className="h-3.5 w-3.5" />, print: <Printer className="h-3.5 w-3.5" /> }), ...(mode === 'each' ? [{ label: tr('rpt_export_excel', 'Export Excel'), icon: <FileSpreadsheet className="h-3.5 w-3.5" />, onSelect: () => { if (p.canExport()) void exporter.prepare() } }] : [])]} /> : null}
       summary={summary}
-      error={error}
-      onRetry={reload}
+      error={exporter.errorMessage || error}
+      onRetry={exporter.error ? () => { void exporter.prepare() } : reload}
       retryLabel={tr('retry', 'Retry')}
     >
+      <RecordReportExport exporter={exporter} p={p} kind="expenses" />
       {mode === 'days' ? <ReportTable surfaceKey="reports-expenses-days" columns={dayColumns} rows={days} rowKey={(r) => r.date} totalsRow={days.length > 1 ? { ...totals, date: labels.total } : null} {...common} /> : null}
       {mode === 'types' ? <ReportTable surfaceKey="reports-expenses-types" columns={typeColumns} rows={types} rowKey={(r) => r.fee_type || '—'} totalsRow={types.length > 1 ? { ...totals, fee_type: labels.total } : null} {...common} /> : null}
       {mode === 'labels' ? <ReportTable surfaceKey="reports-expenses-labels" columns={categoryColumns} rows={categories} rowKey={(r) => `${r.fee_type}:${r.label}`} totalsRow={categories.length > 1 ? { ...totals, label: labels.total, fee_type: '' } : null} {...common} /> : null}
