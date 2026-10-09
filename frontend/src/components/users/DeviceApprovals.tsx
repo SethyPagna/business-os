@@ -1,4 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useApp } from '../../AppContext.tsx'
+import { captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from '../../api/actorReadScope.ts'
+import { isAdminControlUser, type PermissionUser } from '../../utils/permissions.ts'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import ShieldX from 'lucide-react/dist/esm/icons/shield-x.js'
@@ -21,6 +24,17 @@ import {
 
 type TranslateFn = (key: string) => string
 type NotifyFn = (message: string, tone?: string) => void
+type DevicePanelContext = {
+  user: (NonNullable<PermissionUser> & { id?: unknown; organization_id?: unknown }) | null
+  syncUrl: string
+}
+type DeviceSnapshot = {
+  ownerKey: string
+  pending: TrustedDeviceRecord[]
+  approvedDevices: TrustedDeviceRecord[]
+  rejectedHistory: TrustedDeviceRecord[]
+  sessions: LiveSessionRecord[]
+}
 
 interface DeviceApprovalsProps {
   t: TranslateFn
@@ -40,61 +54,97 @@ function tr(t: TranslateFn, key: string, fallback: string): string {
 // permission check here can't itself grant access -- this UI is
 // convenience, not the security boundary.
 export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
+  const { user, syncUrl } = useApp() as DevicePanelContext
+  const canManage = isAdminControlUser(user)
+  const ownerKey = JSON.stringify([user?.id, user?.organization_id, syncUrl, canManage, captureActorReadScope('devices').authority])
+  const currentOwner = useRef({ ownerKey, canManage })
+  currentOwner.current = { ownerKey, canManage }
+  const mounted = useRef(false)
+  const requestSequence = useRef(0)
+  const actions = useRef(new Set<string>())
   const { askToConfirm, confirmDialog } = useConfirmDialog(t)
-  const [pending, setPending] = useState<TrustedDeviceRecord[]>([])
-  const [approvedDevices, setApprovedDevices] = useState<TrustedDeviceRecord[]>([])
-  const [rejectedHistory, setRejectedHistory] = useState<TrustedDeviceRecord[]>([])
-  const [sessions, setSessions] = useState<LiveSessionRecord[]>([])
-  const [loading, setLoading] = useState(true)
+  const [snapshot, setSnapshot] = useState<DeviceSnapshot | null>(null)
+  const currentSnapshot = snapshot?.ownerKey === ownerKey ? snapshot : null
+  const pending = currentSnapshot?.pending || []
+  const approvedDevices = currentSnapshot?.approvedDevices || []
+  const rejectedHistory = currentSnapshot?.rejectedHistory || []
+  const sessions = currentSnapshot?.sessions || []
+  const [readState, setReadState] = useState({ ownerKey, loading: true, error: '' })
+  const loading = !currentSnapshot && (readState.ownerKey !== ownerKey || readState.loading)
+  const error = readState.ownerKey === ownerKey ? readState.error : ''
   const [busyId, setBusyId] = useState<number | null>(null)
   // Session ids and device ids are separate sequences -- separate busy state
   // so a session action can't disable an unrelated device button.
   const [busySessionId, setBusySessionId] = useState<number | null>(null)
   const [busyUserId, setBusyUserId] = useState<number | null>(null)
-  const [error, setError] = useState('')
+
+  const ownsScope = useCallback((scope: ActorReadScope, owner = ownerKey) => mounted.current
+    && currentOwner.current.canManage && currentOwner.current.ownerKey === owner
+    && isActorReadScopeCurrent(scope, false), [ownerKey])
 
   const load = useCallback(async () => {
-    setLoading(true)
-    setError('')
+    const scope = captureActorReadScope('devices')
+    if (!ownsScope(scope)) return
+    const sequence = ++requestSequence.current
+    const current = () => sequence === requestSequence.current && ownsScope(scope)
+    setReadState({ ownerKey, loading: true, error: '' })
     try {
       const [pendingRes, allRes, sessionsRes] = await Promise.all([
         getPendingDevices(),
         getAllDevices(),
         getLiveSessions(),
       ])
-      setPending(pendingRes?.devices || [])
+      if (!current()) return
       const nonPending = (allRes?.devices || []).filter((device) => device.status !== 'pending')
-      setApprovedDevices(nonPending.filter((device) => device.status === 'approved'))
-      setRejectedHistory(nonPending.filter((device) => device.status !== 'approved'))
-      setSessions(sessionsRes?.sessions || [])
+      setSnapshot({ ownerKey, pending: pendingRes?.devices || [], approvedDevices: nonPending.filter((device) => device.status === 'approved'), rejectedHistory: nonPending.filter((device) => device.status !== 'approved'), sessions: sessionsRes?.sessions || [] })
     } catch (err) {
-      setError(err instanceof Error ? err.message : tr(t, 'device_load_failed', 'Could not load device requests.'))
+      if (current()) setReadState({ ownerKey, loading: false, error: err instanceof Error ? err.message : tr(t, 'device_load_failed', 'Could not load device requests.') })
     } finally {
-      setLoading(false)
+      if (current()) setReadState((state) => ({ ...state, loading: false }))
     }
-  }, [t])
+  }, [t, ownerKey, ownsScope])
 
   useEffect(() => {
-    load()
+    mounted.current = true
+    void load()
+    return () => { mounted.current = false; requestSequence.current++ }
   }, [load])
+  useEffect(() => {
+    setBusyId(null)
+    setBusySessionId(null)
+    setBusyUserId(null)
+  }, [ownerKey])
 
-  const runAction = async (id: number, action: 'approve' | 'reject' | 'revoke' | 'reset', successMessage: string) => {
-    setBusyId(id)
+  const runOnlineAction = async (kind: 'device' | 'session' | 'user', id: number, write: () => Promise<unknown>, successMessage: (result: unknown) => string, authority = { scope: captureActorReadScope('devices'), ownerKey }) => {
+    if (!ownsScope(authority.scope, authority.ownerKey)) return
+    const actionKey = `${authority.ownerKey}:${kind}:${id}`
+    if (actions.current.has(actionKey)) return
+    actions.current.add(actionKey)
+    requestSequence.current++
+    const setBusy = kind === 'device' ? setBusyId : kind === 'session' ? setBusySessionId : setBusyUserId
+    setBusy(id)
     try {
-      if (action === 'approve') await approveDevice(id)
-      else if (action === 'reject') await rejectDevice(id)
-      else if (action === 'reset') await resetDeviceForReapproval(id)
-      else await revokeDevice(id)
-      notify(successMessage, 'success')
+      const result = await write()
+      if (!ownsScope(authority.scope, authority.ownerKey)) return
+      notify(successMessage(result), 'success')
       await load()
     } catch (err) {
-      notify(err instanceof Error ? err.message : tr(t, 'device_action_failed', 'Action failed. Please try again.'), 'error')
+      if (ownsScope(authority.scope, authority.ownerKey)) notify(err instanceof Error ? err.message : tr(t, 'device_action_failed', 'Action failed. Please try again.'), 'error')
     } finally {
-      setBusyId(null)
+      actions.current.delete(actionKey)
+      if (ownsScope(authority.scope, authority.ownerKey)) setBusy((current) => current === id ? null : current)
     }
   }
+  const runAction = (id: number, action: 'approve' | 'reject' | 'revoke' | 'reset', successMessage: string, authority = { scope: captureActorReadScope('devices'), ownerKey }) => runOnlineAction('device', id, () => {
+    if (action === 'approve') return approveDevice(id)
+    if (action === 'reject') return rejectDevice(id)
+    if (action === 'reset') return resetDeviceForReapproval(id)
+    return revokeDevice(id)
+  }, () => successMessage, authority)
 
   const resetForReapproval = async (device: TrustedDeviceRecord) => {
+    const authority = { scope: captureActorReadScope('devices'), ownerKey }
+    if (!ownsScope(authority.scope)) return
     const confirmed = await askToConfirm({
       title: tr(t, 'device_reapproval_reset_title', 'Remove rejected device request?'),
       message: tr(
@@ -106,38 +156,12 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
       danger: true,
     })
     if (!confirmed) return
-    void runAction(device.id, 'reset', tr(t, 'device_reapproval_reset_done', 'Rejected device request removed. It must sign in again for a new approval request.'))
+    void runAction(device.id, 'reset', tr(t, 'device_reapproval_reset_done', 'Rejected device request removed. It must sign in again for a new approval request.'), authority)
   }
 
-  const runSessionRevoke = async (sessionId: number) => {
-    setBusySessionId(sessionId)
-    try {
-      await revokeLiveSession(sessionId)
-      notify(tr(t, 'session_revoked_notice', 'Session ended. That device is signed out.'), 'success')
-      await load()
-    } catch (err) {
-      notify(err instanceof Error ? err.message : tr(t, 'device_action_failed', 'Action failed. Please try again.'), 'error')
-    } finally {
-      setBusySessionId(null)
-    }
-  }
+  const runSessionRevoke = (sessionId: number) => runOnlineAction('session', sessionId, () => revokeLiveSession(sessionId), () => tr(t, 'session_revoked_notice', 'Session ended. That device is signed out.'))
 
-  const runSignOutEverywhere = async (userId: number) => {
-    setBusyUserId(userId)
-    try {
-      const result = await revokeAllUserSessions(userId)
-      const count = Number(result?.revoked || 0)
-      notify(
-        `${tr(t, 'sessions_revoked_notice', 'Signed the account out everywhere.')} (${count})`,
-        'success',
-      )
-      await load()
-    } catch (err) {
-      notify(err instanceof Error ? err.message : tr(t, 'device_action_failed', 'Action failed. Please try again.'), 'error')
-    } finally {
-      setBusyUserId(null)
-    }
-  }
+  const runSignOutEverywhere = (userId: number) => runOnlineAction('user', userId, () => revokeAllUserSessions(userId), (result) => `${tr(t, 'sessions_revoked_notice', 'Signed the account out everywhere.')} (${Number((result as { revoked?: number } | null)?.revoked || 0)})`)
 
   // Per-account grouping (J3's "per-user devices"): one card per user that
   // has an approved device or a live session, devices then sessions inside.
@@ -185,6 +209,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
     </div>
   )
 
+  if (!canManage) return null
   return (
     <div className="space-y-6">
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
