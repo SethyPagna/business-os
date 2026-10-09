@@ -2,6 +2,35 @@ import type { D1Compat } from './db'
 import { selectInChunks } from './sqlBinding'
 import { CountedStockBatchPlan, countedStockFactsSql, planExactCountedTaggedChange, planExactCountedOrdinaryChange, planCountedTaggedChange, subtractCountedQuantity, sumCountedQuantities, ordinarySubsetSql, type CountedTaggedIdentity } from './countedDamagedStock'
 import { productStockGuardStatement } from './productStockGuard'
+import { CountedStockConflictError } from './countedDamagedStock'
+
+export class SaleLinePreimageConflictError extends Error {
+  readonly code='sale_line_preimage_conflict'
+  readonly statusCode=409
+  constructor(readonly kind:'quantity'|'condition'|'revision') {super('The captured sale or stock source changed. Nothing was written.');this.name='SaleLinePreimageConflictError'}
+}
+
+export function saleLinePreimageConflict(error:unknown): SaleLinePreimageConflictError | null {
+  if(error instanceof SaleLinePreimageConflictError)return error
+  if(error instanceof CountedStockConflictError)return new SaleLinePreimageConflictError('quantity')
+  const message=error instanceof Error?error.message:String(error)
+  if(/(?:bad JSON path|JSON path error)[^\r\n]*['"]\$\[counted_quantity_conflict\]['"]/i.test(message))return new SaleLinePreimageConflictError('quantity')
+  if(/(?:bad JSON path|JSON path error)[^\r\n]*['"]\$\[counted_condition_identity_conflict\]['"]/i.test(message))return new SaleLinePreimageConflictError('condition')
+  if(/(?:bad JSON path|JSON path error)[^\r\n]*['"]\$\[sale_add_items_changed\]['"]/i.test(message)
+    || /CHECK constraint failed: (?:guard_value\s*=\s*1|sale_(?:mutation|bulk)_guards)/i.test(message))return new SaleLinePreimageConflictError('revision')
+  return null
+}
+
+export function taggedSaleSourcesFromProjectedStock(stock:CountedStockBatchPlan,requests:readonly {productId:number;branchId:number|null;taggedLotId?:number|null;quantity:number}[]):Map<number,CountedTaggedIdentity & {conditionTag:string}> {
+  const identities=new Map<number,CountedTaggedIdentity & {conditionTag:string}>(),totals=new Map<number,number>()
+  for(const line of requests.filter(line=>line.taggedLotId!=null)) {
+    const id=Number(line.taggedLotId),source=line.branchId===null?null:stock.get(line.productId,line.branchId).projectedTaggedSource(id)
+    const quantity=sumCountedQuantities([totals.get(id)||0,line.quantity]);totals.set(id,quantity)
+    if(!source || quantity>source.quantityRemaining)throw new SaleLinePreimageConflictError('condition')
+    const {quantityRemaining,...identity}=source;identities.set(id,identity)
+  }
+  return identities
+}
 // Adding a line to a sale that already exists (S4-24b).
 //
 // The Sales page could change a sale's status, its customer and its

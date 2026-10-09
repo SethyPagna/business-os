@@ -7,7 +7,7 @@ export type CountedTaggedIdentity = { lotId: number; productId: number; branchId
 const MAX_COUNTED_ROWS = 10_000
 type ProductFacts = [number, number, number, number | null, number | null, string]
 type BranchFacts = [number, number, string, string]
-type ReceiptFacts = [number, number, number, number | null, number | null, string | null, string | null, string, number | string | null, string | null, number | null]
+type ReceiptFacts = [number, number, number, number | null, number | null, string | null, string | null, string, number | string | null, string | null, number | null, number]
 type TagFacts = [number, number | null, number, number, string, string | null, number | null, number | null, number | null, string | null]
 type CountedFacts = { product: ProductFacts; branch: BranchFacts | null; branches: [number, number][]; receipts: ReceiptFacts[]; tags: TagFacts[] }
 type SharedCountedProjection = { product: ProductFacts; branches: [number, number][] }
@@ -21,8 +21,9 @@ export function countedStockFactsSql(product: string, branch: string, additional
     'branch',(SELECT json_array(b.id,b.is_active,b.name,b.role) FROM branches b WHERE b.id=${branch}),
     'branches',(SELECT json_group_array(json_array(branch_id,quantity)) FROM (
       SELECT branch_id,quantity FROM branch_stock WHERE product_id=${product} ORDER BY branch_id LIMIT ${MAX_COUNTED_ROWS + 1})),
-    'receipts',(SELECT json_group_array(json_array(id,variant_product_id,is_active,quantity,unit_cost_usd,received_at,expiry_date,batch_key,batch_number,lot_code,received_quantity)) FROM (
-      SELECT pb.id,pb.variant_product_id,pb.is_active,bbs.quantity,pb.unit_cost_usd,pb.received_at,pb.expiry_date,pb.batch_key,pb.batch_number,pb.lot_code,pb.received_quantity
+    'receipts',(SELECT json_group_array(json_array(id,variant_product_id,is_active,quantity,unit_cost_usd,received_at,expiry_date,batch_key,batch_number,lot_code,received_quantity,fifo_rank)) FROM (
+      SELECT pb.id,pb.variant_product_id,pb.is_active,bbs.quantity,pb.unit_cost_usd,pb.received_at,pb.expiry_date,pb.batch_key,pb.batch_number,pb.lot_code,pb.received_quantity,
+        ROW_NUMBER() OVER (ORDER BY (pb.received_at IS NULL),pb.received_at,pb.batch_number,pb.id) fifo_rank
       FROM product_batches pb LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=${branch}
       WHERE pb.variant_product_id=${product} AND (bbs.batch_id IS NOT NULL OR pb.id IN (SELECT CAST(value AS INTEGER) FROM json_each(${additionalReceiptIds}))) ORDER BY pb.id LIMIT ${MAX_COUNTED_ROWS + 1})),
     'tags',(SELECT json_group_array(json_array(id,batch_id,quantity,quantity_remaining,condition_tag,source,return_id,return_item_id,unit_cost_usd,created_at)) FROM (
@@ -94,7 +95,7 @@ export class CountedStockPlan {
       } else batch.products.set(this.productId, { product: this.facts.product, branches: this.facts.branches })
       for (const receipt of this.facts.receipts) {
         const peers = batch.receipts.get(receipt[0]) ?? []
-        if (peers.length && JSON.stringify(peers[0].filter((_, index) => index !== 3)) !== JSON.stringify(receipt.filter((_, index) => index !== 3))) throw new CountedStockConflictError()
+        if (peers.length && JSON.stringify(peers[0].filter((_, index) => index !== 3 && index !== 11)) !== JSON.stringify(receipt.filter((_, index) => index !== 3 && index !== 11))) throw new CountedStockConflictError()
         peers.push(receipt)
         batch.receipts.set(receipt[0], peers)
       }
@@ -102,6 +103,19 @@ export class CountedStockPlan {
   }
 
   get branchQuantity(): number { return this.facts.branches.find(row => row[0] === this.branchId)?.[1] ?? 0 }
+
+  projectedTaggedSource(lotId: number): (CountedTaggedIdentity & {conditionTag:string;quantityRemaining:number}) | null {
+    const tag=this.facts.tags.find(row=>row[0]===lotId)
+    if (!tag) return null
+    this.assertSource(tag[1])
+    return {lotId,productId:this.productId,branchId:this.branchId,batchId:tag[1],conditionTag:tag[4],quantityRemaining:tag[3]}
+  }
+
+  projectedReceiptSources(): Array<{batchId:number;lotCode:string|null;receivedAt:string|null;expiryDate:string|null;fifoRank:number;available:number}> {
+    return this.facts.receipts.filter(row=>row[2]===1 && row[3]!==null && row[3]>0).map(row=>({
+      batchId:row[0],lotCode:row[9],receivedAt:row[5],expiryDate:row[6],fifoRank:row[11],available:this.ordinaryQuantity(row[0]),
+    }))
+  }
 
   ordinaryQuantity(batchId: number | null): number {
     this.assertSource(batchId)

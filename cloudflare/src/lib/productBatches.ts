@@ -1025,6 +1025,10 @@ export type FifoLotAvailability = {
   tagQuantitiesPreimage?: string
 }
 
+export function fifoLotsFromProjectedCountedStock(stock: import('./countedDamagedStock').CountedStockPlan): FifoLotAvailability[] {
+  return stock.projectedReceiptSources().sort((a,b)=>a.fifoRank-b.fifoRank).map(({fifoRank,...lot})=>lot)
+}
+
 // Active lots with sellable stock at the branch, oldest received_at first
 // (NULL received dates sort last -- an undated legacy lot is drawn only
 // after every dated one), then batch_number/id for a stable tiebreak.

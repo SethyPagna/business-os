@@ -29,6 +29,7 @@ import {
   buildOperationAllocationStatements,
   planSaleLineAddition,
   planExactSaleLineAddition,
+  saleLinePreimageConflict,
   planExactSaleLineRemoval,
   saleLineCountedFactsSql,
   projectedSaleLineStockFromFacts,
@@ -1356,12 +1357,10 @@ async function assertLegacySaleAddItemsUnchanged(
 }
 
 function legacySaleAddItemsRaceError(error: unknown, direction: 'undo' | 'redo'): unknown {
-  if (isCountedStockConflict(error)) return new UndoConflictError('The recorded stock changed. Nothing was reversed.', UNDO_RECORD_CHANGED_CODE)
+  if (saleLinePreimageConflict(error)) return new UndoConflictError('The recorded stock or sale source changed. Nothing was reversed.', UNDO_RECORD_CHANGED_CODE)
   const activeGuard = productStockGuardError(error)
   if (activeGuard) return activeGuard
-  return /JSON path error|sale_add_items_changed/i.test(String((error as Error)?.message ?? error))
-    ? new UndoConflictError(`This sale changed while the added items were being ${direction === 'undo' ? 'removed' : 'added back'}. Nothing was changed.`, UNDO_RECORD_CHANGED_CODE)
-    : error
+  return error
 }
 
 type AtomicSaleAddItemsReversal = SaleAddItemsReversal & {
@@ -1628,11 +1627,7 @@ async function replayAtomicSaleAddItems(
 
     if (activeGuard) throw activeGuard
 
-    if (isCountedStockConflict(error)) throw new UndoConflictError('The recorded stock changed. Nothing was reversed.', UNDO_RECORD_CHANGED_CODE)
-
-    if (/constraint|guard_value/i.test(String(error))) {
-      throw new UndoConflictError('This sale or added-items receipt changed. Nothing was reversed.', UNDO_RECORD_CHANGED_CODE)
-    }
+    if (saleLinePreimageConflict(error)) throw new UndoConflictError('The recorded stock or added-items receipt changed. Nothing was reversed.', UNDO_RECORD_CHANGED_CODE)
     throw error
   }
 }
