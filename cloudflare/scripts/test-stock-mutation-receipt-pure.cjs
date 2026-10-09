@@ -27,19 +27,9 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 
 const root = path.join(__dirname, '..')
 
-function autoStub() {
-  return new Proxy({}, {
-    get(_target, prop) {
-      if (prop === '__esModule') return true
-      if (typeof prop === 'symbol') return undefined
-      return () => undefined
-    },
-  })
-}
-
 const moduleCache = new Map()
 function loadReal(relPath, overrides = {}) {
-  const cacheKey = relPath + '::' + Object.keys(overrides).sort().join(',')
+  const cacheKey = relPath
   if (moduleCache.has(cacheKey)) return moduleCache.get(cacheKey)
   const sourcePath = path.join(root, 'src', relPath)
   const source = fs.readFileSync(sourcePath, 'utf8')
@@ -50,7 +40,10 @@ function loadReal(relPath, overrides = {}) {
   const originalLoad = Module._load
   const patchedLoad = function (request, parent, isMain) {
     if (request in overrides) return overrides[request]
-    if (request.startsWith('.')) return autoStub()
+    if (request === './db' || request === '../lib/db') return dbOverride
+    if (request === './cache' || request === '../lib/cache') return cacheStub
+    if (request.endsWith('/telegram') || request === './telegram') return { sendTelegramEvent: async () => {}, formatStockChangeTelegramLines: () => [] }
+    if (request.startsWith('.')) return loadReal(path.posix.normalize(path.posix.join(path.posix.dirname(relPath), request + '.ts')))
     Module._load = originalLoad
     try {
       return originalLoad.call(this, request, parent, isMain)
@@ -75,16 +68,18 @@ function wrapFlat(rawDb) {
   return {
     prepare(sql) {
       const stmt = rawDb.prepare(sql)
+      const attempted = fn => params => { globalThis[Symbol.for('business-os.request-metrics.v1')]?.d1Start(1); return fn(params) }
       return {
-        get: (params) => stmt.get(params),
-        all: (params) => stmt.all(params) ?? [],
-        run: (params) => {
+        get: attempted(params => stmt.get(params)),
+        all: attempted(params => stmt.all(params) ?? []),
+        run: attempted((params) => {
           const r = stmt.run(params)
           return { changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) }
-        },
+        }),
       }
     },
-    async batch(items) { return rawDb.batch(items) },
+    async batch(items) { globalThis[Symbol.for('business-os.request-metrics.v1')]?.d1Start(items.length); return rawDb.batch(items) },
+    async batchOnce(items) { return this.batch(items) },
     async transaction(fn) { return fn(this) },
     raw: rawDb,
   }
@@ -174,20 +169,25 @@ const stockInCommitMod = loadReal('routes/stockInCommit.ts', {
   './batches': batchesMod,
 })
 
-const { runStockInCommit } = stockInCommitMod
-const { runAdjustAction } = inventoryMod
-const { runReceiveBatchAction } = batchesMod
+const metricsMod = loadReal('lib/requestMetrics.ts')
+const invoke = fn => (c, body) => metricsMod.runBackground(undefined, 'receipt-fixture-invocation', async () => {
+  const response = await fn(c, body)
+  await Promise.allSettled(c.pending.splice(0))
+  return response
+})
+const runStockInCommit = invoke(stockInCommitMod.runStockInCommit)
+const runAdjustAction = invoke(inventoryMod.runAdjustAction)
+const runReceiveBatchAction = invoke(batchesMod.runReceiveBatchAction)
 assert.equal(typeof receiptMod.withStockMutationReceipt, 'function', 'lib/stockMutationReceipt.ts exports withStockMutationReceipt')
 assert.equal(typeof receiptMod.resetStockMutationReceiptSchemaProbe, 'function', 'the schema probe is resettable for tests')
 
 function freshDb() {
-  const rawDb = openDb(loadAll())
-  rawDb.exec(`
+  const rawDb = openDb(loadAll(), { seedBeforeFence: seed => seed.exec(`
     INSERT INTO branches(id, name, is_default, is_active) VALUES(1, 'Shop', 1, 1);
     INSERT INTO products(id, name, barcode, cost_price_usd, cost_price_khr, stock_quantity, is_active)
       VALUES(1, 'Serum', 'SER-1', 2, 0, 0, 1);
     INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(1, 1, 0);
-  `)
+  `) })
   receiptMod.resetStockMutationReceiptSchemaProbe()
   return wrapFlat(rawDb)
 }
@@ -197,15 +197,17 @@ const ADMIN_USER = { id: 1, username: 'admin', name: 'Admin', role_code: 'admin'
 
 function makeContext(db, user = ADMIN_USER) {
   currentDb = db
-  return {
-    env: { DB: {} },
-    executionCtx: { waitUntil: (p) => { Promise.resolve(p).catch(() => {}) } },
-    get(key) { return key === 'user' ? user : undefined },
+  const context = {
+    env: { DB: {}, PLAN_TIER: 'paid' },
+    pending: [],
+    executionCtx: { waitUntil: (p) => { context.pending.push(Promise.resolve(p)) } },
+    get(key) { return key === 'user' ? user : key === 'requestMetrics' ? metricsMod.currentRequestMetrics() : undefined },
     set() {},
     json(obj, status = 200) {
       return new Response(JSON.stringify(obj), { status, headers: { 'content-type': 'application/json' } })
     },
   }
+  return context
 }
 
 function branchStock(db, productId = 1) {
@@ -239,6 +241,7 @@ function faultyDb(db, match) {
       return db.prepare(sql)
     },
     batch: (items) => db.batch(items),
+    batchOnce: (items) => db.batchOnce(items),
     transaction: (fn) => db.transaction(fn),
     raw: db.raw,
   }
@@ -256,6 +259,7 @@ function noReleaseDb(db) {
       return db.prepare(sql)
     },
     batch: (items) => db.batch(items),
+    batchOnce: (items) => db.batchOnce(items),
     transaction: (fn) => db.transaction(fn),
     raw: db.raw,
   }
