@@ -47,7 +47,7 @@ async function proveMultiBranch(makeWorker) {
   const counted = loadStockSession('lib/countedDamagedStock.ts')
   const stock = loadStockSession('lib/stockTransaction.ts')
   const getDb = loadStockSession('lib/db.ts').getDb
-  for (const tier of ['free', 'paid']) {
+  for (const tier of ['free', 'paid']) for (const deferred of [false, true]) {
     const f = await world(makeWorker, tier, 'zero', sql => {
       seed(0.3, false)(sql)
       sql.exec("INSERT INTO branches(id,name,is_active)VALUES(2,'Other',1);INSERT INTO branch_stock(product_id,branch_id,quantity)VALUES(1,2,0.2);UPDATE products SET stock_quantity=0.5 WHERE id=1")
@@ -57,7 +57,7 @@ async function proveMultiBranch(makeWorker) {
       const db = getDb(f.env)
       const capture = () => db.prepare(`SELECT value AS branchId,${counted.countedStockFactsSql('1', 'CAST(value AS INTEGER)')} AS facts FROM json_each('[1,2]') ORDER BY value`).all()
       const before = await capture()
-      const group = new counted.CountedStockBatchPlan(before)
+      const group = new counted.CountedStockBatchPlan(before, { deferPhysicalWrites: deferred })
       const first = group.get(1, 1), second = group.get(1, 2)
       const identity = { lotId: 1, productId: 1, branchId: 1, batchId: null }
       const statements = [
@@ -68,6 +68,7 @@ async function proveMultiBranch(makeWorker) {
         ...counted.planExactCountedOrdinaryChange(second, null, 0.1, 'receive'),
         ...counted.planExactCountedTaggedChange(first, identity, 0.1, 'restore'),
         ...counted.planExactCountedTaggedChange(first, identity, 0.1, 'retag'),
+        ...group.takeFinalPhysicalWrites(),
       ]
       assert.equal(statements.filter(row => row.sql.startsWith('SELECT CASE WHEN')).length, 2)
       assert.ok(statements.slice(0, 2).every(row => row.sql.startsWith('SELECT CASE WHEN')))
@@ -75,11 +76,12 @@ async function proveMultiBranch(makeWorker) {
       assert.deepEqual(f.sql.prepare('SELECT branch_id,quantity FROM branch_stock WHERE product_id=1 ORDER BY branch_id').all(), [{ branch_id: 1, quantity: 0.3 }, { branch_id: 2, quantity: 0.2 }])
       assert.deepEqual(quantities(f), { physical: 0.3, cache: 0.5, tags: [0.3] })
 
-      const stale = new counted.CountedStockBatchPlan(await capture())
+      const stale = new counted.CountedStockBatchPlan(await capture(), { deferPhysicalWrites: deferred })
       const refused = [
         ...stale.takePreimageGuards(),
         ...counted.planExactCountedOrdinaryChange(stale.get(1, 2), null, 0.1, 'consume'),
         ...counted.planExactCountedTaggedChange(stale.get(1, 1), identity, 0.1, 'consume'),
+        ...stale.takeFinalPhysicalWrites(),
       ]
       f.competeBeforeCommit([{ sql: 'UPDATE branch_stock SET quantity=0.1 WHERE product_id=1 AND branch_id=2' }, { sql: 'UPDATE products SET stock_quantity=0.4 WHERE id=1' }])
       await assert.rejects(stock.executeStockTransaction(db, refused, 'once'), error => counted.isCountedStockConflict(error))
@@ -89,6 +91,19 @@ async function proveMultiBranch(makeWorker) {
       const fresh = await capture()
       assert.throws(() => new counted.CountedStockBatchPlan([mixed[0], fresh[1]]), error => counted.isCountedStockConflict(error))
 
+      const emptyReceipt = await db.prepare(`SELECT ${counted.countedStockFactsSql('1', '2', "'[1]'")} AS facts`).get()
+      assert.equal(JSON.parse(emptyReceipt.facts).receipts[0][3], null)
+      const receiptGroup = new counted.CountedStockBatchPlan([{facts:emptyReceipt.facts,branchId:2}], {deferPhysicalWrites:deferred})
+      const receipt = receiptGroup.get(1, 2)
+      await stock.executeStockTransaction(db, [
+        ...counted.planExactCountedOrdinaryChange(receipt, 1, 0.1, 'receive'),
+        ...counted.planExactCountedOrdinaryChange(receipt, 1, 0.1, 'consume'),
+        ...receiptGroup.takeFinalPhysicalWrites(),
+      ], 'once')
+      assert.equal(f.sql.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=1 AND branch_id=2').get().quantity, 0)
+      assert.equal(f.state().cache, 0.5)
+      console.log('PASS genuine NULL receipt ledger preimage creates exact known active receipt and consumes in one batch ' + tier + ' deferred=' + deferred)
+
       await stock.executeStockTransaction(db, [{ sql: "INSERT INTO branches(id,name,is_active)VALUES(3,'New',1)", params: {} }], 'once')
       const newBranch = await db.prepare(`SELECT ${counted.countedStockFactsSql('1', '3')} AS facts`).get()
       const missing = new counted.CountedStockPlan(newBranch.facts, 3)
@@ -97,7 +112,155 @@ async function proveMultiBranch(makeWorker) {
       await stock.executeStockTransaction(db, counted.planExactCountedOrdinaryChange(create, null, 0.1, 'receive'), 'once')
       assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=3').get().quantity, 0.1)
       assert.equal(f.state().cache, 0.6)
-      console.log('PASS same-product multi-branch mixed tag/ordinary batch, rivals, generation and positive missing-branch receive ' + tier)
+      await stock.executeStockTransaction(db,[{sql:"INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd)VALUES(2,1,'over-ledger',1,2)"},{sql:'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)VALUES(2,1,0.4)'}],'once')
+      const overLedger = await db.prepare(`SELECT ${counted.countedStockFactsSql('1','1')} facts`).get()
+      const invalid = new counted.CountedStockBatchPlan([{facts:overLedger.facts,branchId:1}], {deferPhysicalWrites:deferred})
+      const invalidBefore = f.state()
+      assert.throws(()=>counted.planExactCountedTaggedChange(invalid.get(1,1),identity,0.1,'consume'),error=>counted.isCountedStockConflict(error))
+      assert.deepEqual(f.state(),invalidBefore)
+      console.log('PASS same-product multi-branch mixed tag/ordinary batch, rivals, generation and positive missing-branch receive ' + tier + ' deferred=' + deferred)
+    } finally { f.sql.close() }
+  }
+}
+
+async function proveReceiptActivation(makeWorker) {
+  const counted = loadStockSession('lib/countedDamagedStock.ts')
+  const stock = loadStockSession('lib/stockTransaction.ts')
+  const getDb = loadStockSession('lib/db.ts').getDb
+  for (const tier of ['free', 'paid']) for (const deferred of [false, true]) {
+    const f = await world(makeWorker, tier, 'zero', sql => {
+      sql.exec("UPDATE product_batches SET is_active=0 WHERE id=1;INSERT INTO branches(id,name,is_active)VALUES(2,'Other',1);INSERT INTO branch_stock(product_id,branch_id,quantity)VALUES(1,2,0);INSERT INTO products(id,name,stock_quantity,is_active)VALUES(2,'Unrelated',0,1);INSERT INTO branch_stock(product_id,branch_id,quantity)VALUES(2,1,0);INSERT INTO product_batches(id,variant_product_id,batch_key,is_active)VALUES(2,2,'unrelated',0)")
+    })
+    try {
+      const db = getDb(f.env)
+      const capture = () => db.prepare(`SELECT value AS branchId,${counted.countedStockFactsSql('1', 'CAST(value AS INTEGER)', "'[1]'")} AS facts FROM json_each('[1,2]') ORDER BY value`).all()
+      const prepare = async () => {
+        const group = new counted.CountedStockBatchPlan(await capture(), { deferPhysicalWrites: deferred })
+        const first = group.get(1, 1), second = group.get(1, 2)
+        assert.throws(() => counted.planExactCountedOrdinaryChange(first, 1, 0.1, 'consume'), error => counted.isCountedStockConflict(error))
+        assert.throws(() => counted.planExactCountedOrdinaryChange(first, 1, 0.1, 'receive'), error => counted.isCountedStockConflict(error))
+        assert.throws(() => counted.planExactCountedOrdinaryChange(first, 2, 0.1, 'activateAndReceive'), error => counted.isCountedStockConflict(error))
+        const out = [...group.takePreimageGuards(), ...counted.planExactCountedOrdinaryChange(first, 1, 0.1, 'activateAndReceive')]
+        assert.equal(second.requiresReceiptActivation(1), false)
+        return [...out, ...counted.planExactCountedOrdinaryChange(second, 1, 0.2, 'receive'), ...group.takeFinalPhysicalWrites()]
+      }
+      const before = f.state()
+      await assert.rejects(stock.executeStockTransaction(db, [...await prepare(), { sql: 'SELECT unknown_late_receipt_column', params: {} }], 'once'), error => !counted.isCountedStockConflict(error))
+      assert.deepEqual(f.state(), before)
+      assert.equal(f.sql.prepare('SELECT is_active FROM product_batches WHERE id=1').get().is_active, 0)
+      for (const mutation of ['active', 'owner']) {
+        const statements = await prepare()
+        f.competeBeforeCommit([{ sql: mutation === 'active' ? 'UPDATE product_batches SET is_active=1 WHERE id=1' : 'UPDATE product_batches SET variant_product_id=2 WHERE id=1' }])
+        await assert.rejects(stock.executeStockTransaction(db, statements, 'once'), error => counted.isCountedStockConflict(error))
+        assert.deepEqual(f.state(), before)
+        await stock.executeStockTransaction(db, [{ sql: 'UPDATE product_batches SET is_active=0,variant_product_id=1 WHERE id=1', params: {} }], 'once')
+      }
+      await stock.executeStockTransaction(db, await prepare(), 'once')
+      assert.equal(f.sql.prepare('SELECT is_active FROM product_batches WHERE id=1').get().is_active, 1)
+      assert.equal(f.sql.prepare('SELECT is_active FROM product_batches WHERE id=2').get().is_active, 0)
+      assert.equal(f.state().cache, 0.3)
+      assert.deepEqual(f.sql.prepare('SELECT branch_id,quantity FROM branch_batch_stock WHERE batch_id=1 ORDER BY branch_id').all(), [{ branch_id: 1, quantity: 0.1 }, { branch_id: 2, quantity: 0.2 }])
+      console.log('PASS explicit original receipt activation across two branches, unrelated/inactive consumption refusal, owner/active rivals and late rollback ' + tier + ' deferred=' + deferred)
+    } finally { f.sql.close() }
+  }
+}
+
+async function proveBulkReturns(makeWorker, oversized = false, multipleReceipts = false) {
+  const stock = loadStockSession('lib/stockTransaction.ts')
+  const getDb = loadStockSession('lib/db.ts').getDb
+  for (const tier of ['free', 'paid']) for (const receipt of [true, false]) for (const splitBranch of [false, true]) for (const shape of ['tagged', 'mixed', 'ordinary']) {
+    if (multipleReceipts && (!receipt || splitBranch || shape !== 'ordinary')) continue
+    if (oversized && (tier !== 'free' || !receipt || !splitBranch || shape !== 'tagged')) continue
+    const f = await world(makeWorker, tier, 'zero', sql => {
+      seed(0.3, receipt)(sql)
+      if (multipleReceipts) sql.exec("UPDATE branch_batch_stock SET quantity=0.1 WHERE batch_id=1;INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_quantity)VALUES(2,1,'second-source',1,2,0.2);INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)VALUES(2,1,0.2)")
+      if (splitBranch) sql.exec(`INSERT INTO branches(id,name,is_active)VALUES(2,'Other',1);UPDATE branch_stock SET quantity=0.1 WHERE product_id=1 AND branch_id=1;INSERT INTO branch_stock(product_id,branch_id,quantity)VALUES(1,2,0.2);UPDATE branch_batch_stock SET quantity=${receipt ? 0.1 : 0} WHERE batch_id=1 AND branch_id=1;${receipt ? 'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)VALUES(1,2,0.2);' : ''}`)
+      for (const [index, quantity] of [0.1, 0.2].entries()) {
+        const id = index + 1, branch = splitBranch && index ? 2 : 1
+        const tagged = shape === 'tagged' || (shape === 'mixed' && !index)
+        if (oversized) sql.prepare("INSERT INTO returns(id,return_number,return_scope,status,return_type,branch_id,updated_at)VALUES(?,?,'customer','completed','restock',?,'bulk-quantity-v1')").run(id,'RET-Q-'+id,branch)
+        else if (!index) sql.prepare("INSERT INTO returns(id,return_number,return_scope,status,return_type,branch_id,updated_at)VALUES(1,'RET-Q-1','customer','completed','restock',1,'bulk-quantity-v1')").run()
+        sql.prepare('INSERT INTO return_items(id,return_id,product_id,product_name,branch_id,batch_id,quantity,cost_price_usd,return_to_stock,stock_action)VALUES(?,?,1,?,?,?, ?,2,1,?)')
+          .run(id, oversized ? id : 1, 'Serum', branch, receipt ? multipleReceipts ? id : 1 : null, quantity, tagged ? 'damaged' : 'restock')
+      }
+    })
+    try {
+      const setup = []
+      for (const [index, quantity] of [0.1, 0.2].entries()) {
+        const id = index + 1, branch = splitBranch && index ? 2 : 1
+        const tagged = shape === 'tagged' || (shape === 'mixed' && !index)
+        setup.push({ sql: 'UPDATE return_items SET stock_condition=@condition WHERE id=@id', params: { id, condition: tagged ? 'damaged' : 'ordinary' } })
+        if (tagged) setup.push({ sql: "INSERT INTO damaged_stock_lots(id,product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source,return_id,return_item_id,unit_cost_usd)VALUES(@id,1,@branch,@batch,@quantity,@quantity,'damaged','return',@returnId,@id,2)", params: { id, returnId: oversized ? id : 1, branch, batch: receipt ? 1 : null, quantity } })
+      }
+      await stock.executeStockTransaction(getDb(f.env), setup, 'once')
+      const body = { client_request_id: 'quantity-bulk-cancel', field: 'status', source: 'completed', target: 'cancelled', items: f.sql.prepare('SELECT id,status AS expected_status,return_type AS expected_method,updated_at AS expected_updated_at FROM returns ORDER BY id').all() }
+      const before = f.state()
+      if (oversized) {
+        const refused = await f.call('/returns/bulk',body)
+        assert.equal(refused.status,400)
+        assert.equal(refused.json.code,'customer_return_over_plan_budget')
+        assert.deepEqual(f.state(),before)
+        assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM return_bulk_operations').get().n,0)
+        console.log('PASS larger two-header Free admission refuses atomically with unchanged reserve')
+        continue
+      }
+      const receiptIdentity = f.sql.prepare('SELECT id,unit_cost_usd,received_quantity FROM product_batches ORDER BY id').all()
+      if (shape === 'tagged' && splitBranch && receipt) for (const rival of ['cost','identity']) {
+        f.competeBeforeCommit([{sql:rival==='cost'?'UPDATE product_batches SET unit_cost_usd=3 WHERE id=1':'UPDATE damaged_stock_lots SET return_item_id=2 WHERE id=1'}])
+        const refused = await f.call('/returns/bulk',body)
+        assert.equal(refused.status,409)
+        assert.equal(refused.json.code,'write_conflict')
+        assert.deepEqual(f.state(),before)
+        await stock.executeStockTransaction(getDb(f.env),[{sql:rival==='cost'?'UPDATE product_batches SET unit_cost_usd=2 WHERE id=1':'UPDATE damaged_stock_lots SET return_item_id=1 WHERE id=1'}],'once')
+      }
+      if (shape === 'mixed' && !splitBranch) {
+        f.failWhenSqlMatches(/UPDATE return_bulk_operations SET history_id=/)
+        assert.equal((await f.call('/returns/bulk', body)).status, 500)
+        assert.deepEqual(f.state(), before)
+        assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM return_bulk_operations').get().n, 0)
+      }
+      if (shape === 'ordinary' && !splitBranch) f.loseNextCommitAcknowledgement()
+      const saved = await f.call('/returns/bulk', body)
+      assert.equal(saved.status, 200, tier + '/' + receipt + '/' + splitBranch + '/' + shape + ' ' + JSON.stringify(saved.json))
+      assert.equal(f.state().cache, 0)
+      assert.ok(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1').all().every(row => row.quantity === 0))
+      assert.ok(f.state().tags.every(row => row.quantity_remaining === 0))
+      const committed = f.state()
+      assert.equal((await f.call('/returns/bulk', body)).status, 200)
+      assert.deepEqual(f.state(), committed)
+      if (shape === 'ordinary' && receipt) await stock.executeStockTransaction(getDb(f.env), [{ sql: 'UPDATE product_batches SET is_active=0 WHERE id=1', params: {} }], 'once')
+      let history = f.sql.prepare('SELECT id,undo_payload FROM action_history WHERE id=?').get(saved.json.actionHistoryId)
+      assert.equal((await f.call(`/action-history/${history.id}/undo`, { expected_generation: JSON.parse(history.undo_payload).generation })).status, 200)
+      assert.equal(f.state().cache, 0.3)
+      assert.deepEqual(f.sql.prepare('SELECT branch_id,quantity FROM branch_stock WHERE product_id=1 ORDER BY branch_id').all(), splitBranch ? [{ branch_id: 1, quantity: 0.1 }, { branch_id: 2, quantity: 0.2 }] : [{ branch_id: 1, quantity: 0.3 }])
+      assert.deepEqual(f.state().tags, before.tags)
+      assert.deepEqual(f.state().lots, before.lots)
+      const coherence = loadStockSession('lib/countedDamagedStock.ts')
+      for (const branchId of splitBranch ? [1,2] : [1]) {
+        const observed = await getDb(f.env).prepare(`SELECT ${coherence.countedStockFactsSql('1',String(branchId))} facts`).get()
+        assert.ok(new coherence.CountedStockPlan(observed.facts,branchId).ordinaryQuantity(receipt ? 1 : null)>=0)
+      }
+      if (receipt) assert.equal(f.sql.prepare('SELECT is_active FROM product_batches WHERE id=1').get().is_active, 1)
+      history = f.sql.prepare('SELECT id,redo_payload FROM action_history WHERE id=?').get(history.id)
+      assert.equal((await f.call(`/action-history/${history.id}/redo`, { expected_generation: JSON.parse(history.redo_payload).generation })).status, 200)
+      assert.equal(f.state().cache, 0)
+      assert.deepEqual(f.sql.prepare('SELECT id,unit_cost_usd,received_quantity FROM product_batches ORDER BY id').all(),receiptIdentity)
+      const exactFacts = loadStockSession('lib/countedDamagedStock.ts')
+      for (const branchId of splitBranch ? [1,2] : [1]) {
+        const observed = await getDb(f.env).prepare(`SELECT ${exactFacts.countedStockFactsSql('1',String(branchId))} facts`).get()
+        const context = new exactFacts.CountedStockPlan(observed.facts,branchId)
+        assert.equal(context.ordinaryQuantity(receipt ? 1 : null),0)
+      }
+      if (multipleReceipts) {
+        await stock.executeStockTransaction(getDb(f.env),[{sql:'DELETE FROM branch_batch_stock WHERE batch_id IN(1,2)'},{sql:'UPDATE product_batches SET is_active=0 WHERE id IN(1,2)'}],'once')
+        const restored = await f.call('/returns/bulk',{...body,client_request_id:'quantity-missing-original-receipts',source:'cancelled',target:'completed',items:f.sql.prepare('SELECT id,status AS expected_status,return_type AS expected_method,updated_at AS expected_updated_at FROM returns ORDER BY id').all()})
+        assert.equal(restored.status,200,JSON.stringify(restored.json))
+        assert.equal(f.state().cache,0.3)
+        assert.deepEqual(f.sql.prepare('SELECT batch_id,quantity FROM branch_batch_stock ORDER BY batch_id').all(),[{batch_id:1,quantity:0.1},{batch_id:2,quantity:0.2}])
+        assert.deepEqual(f.sql.prepare('SELECT id,unit_cost_usd,received_quantity FROM product_batches ORDER BY id').all(),receiptIdentity)
+        console.log('PASS two distinct original missing ledgers captured consistently across repeated product items '+tier)
+      }
+      console.log('PASS actual grouped decimal cancel/replay/UndoRedo, exact same-product projected cache and archived ordinary receipt restore ' + JSON.stringify({ tier, receipt, splitBranch, shape }))
     } finally { f.sql.close() }
   }
 }
@@ -109,6 +272,10 @@ async function main() {
   console.log('PASS bounded exact intermediate strings across separate 10k term groups')
   const makeWorker = await bundle.exports.bundleWorker()
   await proveMultiBranch(makeWorker)
+  await proveReceiptActivation(makeWorker)
+  await proveBulkReturns(makeWorker)
+  await proveBulkReturns(makeWorker,true)
+  await proveBulkReturns(makeWorker,false,true)
   for (const tier of ['free', 'paid']) for (const batch of [true, false]) {
     const f = await world(makeWorker, tier, 'zero', seed(0.3, batch))
     try {
@@ -251,4 +418,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })
-module.exports = { world, bundle, loadStockSession, tag, clear, seed, quantities, replay, proveStaleCount, proveMultiBranch }
+module.exports = { world, bundle, loadStockSession, tag, clear, seed, quantities, replay, proveStaleCount, proveMultiBranch, proveReceiptActivation, proveBulkReturns }

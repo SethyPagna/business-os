@@ -1,8 +1,9 @@
 import { currentRequestMetrics } from './requestMetrics'
 import { getPlanLimits } from './planTier'
-import { planCountedTaggedChange, ordinarySubsetSql, ordinaryNullCapacityGuard } from './countedDamagedStock'
+import { CountedStockBatchPlan, countedStockFactsSql, planExactCountedTaggedChange, planExactCountedOrdinaryChange,
+  subtractCountedQuantity, sumCountedQuantities, isCountedStockConflict } from './countedDamagedStock'
 import { executeStockTransaction, stockTransactionStatementCount } from './stockTransaction'
-import { productStockGuardStatement, productStockGuardError } from './productStockGuard'
+import { productStockGuardError } from './productStockGuard'
 import { getDb, type D1Compat } from './db'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
@@ -13,7 +14,7 @@ import { actorSnapshot } from './actorSnapshot'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents'
 import { validateCustomerReturnRestorationCohortV1, validateCustomerReturnRestorationMemberV1,
   type CustomerReturnRestorationV1 } from './customerReturnEntitlement'
-import { subtractDecimalSum } from './moneyPrecision'
+import { MoneyPrecisionError, subtractDecimalSum } from './moneyPrecision'
 import { assertReturnCreateQueryBudget, ReturnCreateBudgetError, assertReturnCreateCapacity, ReturnCapacityError, type ReturnCapacityParams } from './returnCreateAction'
 import {
   BRANCH_RETIRED_DAMAGED_CODE, BRANCH_RETIRED_DAMAGED_ERROR, BranchEffectResolver, BranchRetiredNoSuccessorError,
@@ -184,8 +185,27 @@ function guard(predicate: string, params: Row = {}): Statement {
   return { sql: `INSERT INTO return_bulk_guards(guard_value) SELECT CASE WHEN (${predicate}) THEN 1 ELSE 0 END`, params }
 }
 
+function taggedReturnAuthority(): string {
+  return `NOT EXISTS(SELECT 1 FROM json_each(@taggedIds) selected WHERE NOT EXISTS(
+    SELECT 1 FROM damaged_stock_lots d JOIN return_items ri ON ri.id=d.return_item_id
+    WHERE d.id=CAST(selected.value AS INTEGER) AND d.return_id=@id AND ri.return_id=d.return_id
+      AND ri.product_id=d.product_id AND ri.branch_id IS d.branch_id AND ri.stock_condition=d.condition_tag))`
+}
+
+function taggedMemberIds(member: Member): string {
+  return JSON.stringify(member.stock.filter(delta=>delta.damagedLotId!==null).map(delta=>delta.damagedLotId))
+}
+
 function movementFingerprint(idSql: string): string {
   return `(SELECT CASE WHEN COUNT(*)>${RETURN_BULK_MOVEMENT_LIMIT} THEN NULL ELSE json_group_array(json_array(id,product_id,branch_id,batch_id,movement_type,quantity)) END FROM (SELECT id,product_id,branch_id,batch_id,movement_type,quantity FROM inventory_movements WHERE reference_id=${idSql} AND movement_type IN ('return','return_reversal','damage_in','damage_reversal','supplier_return','supplier_return_reversal') ORDER BY id LIMIT ${RETURN_BULK_MOVEMENT_LIMIT + 1}))`
+}
+
+function replayCountedFactsSql(snapshot: string): string {
+  const receiptIds = `(SELECT json_group_array(json_extract(delta.value,'$.batchId')) FROM json_each(${snapshot},'$.members') member,
+    json_each(member.value,'$.stock') delta WHERE json_extract(delta.value,'$.productId')=context.product_id AND json_extract(delta.value,'$.branchId')=context.branch_id)`
+  return `(SELECT json_group_array(json_object('branchId',context.branch_id,'facts',(${countedStockFactsSql('context.product_id', 'context.branch_id', receiptIds)})||'')) FROM (
+    SELECT DISTINCT json_extract(delta.value,'$.productId') product_id,json_extract(delta.value,'$.branchId') branch_id
+    FROM json_each(${snapshot},'$.members') member,json_each(member.value,'$.stock') delta) context)`
 }
 
 async function rowsForIds<T>(db: D1Compat, ids: number[], sql: (marks: string) => string): Promise<T[]> {
@@ -210,7 +230,7 @@ function statusMovementType(scope: Member['scope'], quantity: number): string {
   return quantity > 0 ? 'return' : 'return_reversal'
 }
 
-function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, stamp: string): Statement[] {
+function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, stamp: string, exact: CountedStockBatchPlan): Statement[] {
   const out: Statement[] = []
   for (const delta of member.stock) {
     const quantity = delta.quantity * direction
@@ -222,41 +242,12 @@ function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, s
       quantity,
       stamp,
     }
-    if (quantity > 0 && !delta.damagedLotId) out.unshift(productStockGuardStatement([Number(delta.productId)], 'active'))
+    const context = exact.get(delta.productId, delta.branchId)
     if (delta.damagedLotId) {
-      const tagged=planCountedTaggedChange({lotId:delta.damagedLotId,productId:delta.productId,branchId:delta.branchId,batchId:delta.batchId},Math.abs(quantity),quantity>0?'restore':'consume')
-      tagged[0].sql=tagged[0].sql.replace('AND p.is_active=1', `AND d.return_id=@returnId
-        AND EXISTS(SELECT 1 FROM return_items ri WHERE ri.id=d.return_item_id AND ri.return_id=d.return_id
-          AND ri.product_id=d.product_id AND ri.branch_id IS d.branch_id AND ri.stock_condition=d.condition_tag)
-        AND p.is_active=1`)
-      tagged[0].params={...tagged[0].params,returnId:member.id}
-      out.push(...tagged)
+      out.push(...planExactCountedTaggedChange(context, {lotId:delta.damagedLotId,productId:delta.productId,branchId:delta.branchId,batchId:delta.batchId},Math.abs(quantity),quantity>0?'restore':'consume'))
     } else {
-      if(quantity<0) {
-        out.push(guard(`EXISTS(SELECT 1 FROM branch_stock WHERE product_id=@product AND branch_id=@branch AND quantity+@quantity>=${ordinarySubsetSql('@product','@branch')})`,params))
-        if(delta.batchId===null) out.push(ordinaryNullCapacityGuard(delta.productId,delta.branchId,-quantity))
-        else out.push(guard(`EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch AND quantity+@quantity>=${ordinarySubsetSql('@product','@branch','@batch')})`,params))
-      }
-      out.push(guard('EXISTS(SELECT 1 FROM products WHERE id=@product AND stock_quantity+@quantity>=0) AND EXISTS(SELECT 1 FROM branches WHERE id=@branch) AND (@quantity>=0 OR EXISTS(SELECT 1 FROM branch_stock WHERE product_id=@product AND branch_id=@branch AND quantity+@quantity>=0))', params))
-      out.push({
-        sql: quantity < 0
-          ? 'UPDATE branch_stock SET quantity=quantity+@quantity WHERE product_id=@product AND branch_id=@branch'
-          : 'INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(@product,@branch,@quantity) ON CONFLICT(product_id,branch_id) DO UPDATE SET quantity=quantity+@quantity',
-        params,
-      })
-      out.push({ sql: 'UPDATE products SET stock_quantity=stock_quantity+@quantity, updated_at=@stamp WHERE id=@product', params })
-      if (delta.batchId) {
-        out.push(guard('EXISTS(SELECT 1 FROM product_batches WHERE id=@batch AND variant_product_id=@product) AND (@quantity>=0 OR EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch AND quantity+@quantity>=0))', params))
-        // Customer restores and supplier-return reversals must make the exact
-        // archived lot selectable before adding stock, including undo/redo.
-        if (quantity > 0) out.push({ sql: 'UPDATE product_batches SET is_active=1 WHERE id=@batch AND variant_product_id=@product AND is_active IS NOT 1', params })
-        out.push({
-          sql: quantity < 0
-            ? 'UPDATE branch_batch_stock SET quantity=quantity+@quantity,updated_at=@stamp WHERE batch_id=@batch AND branch_id=@branch'
-            : 'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(@batch,@branch,@quantity) ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=quantity+@quantity,updated_at=@stamp',
-          params,
-        })
-      }
+      const action = quantity < 0 ? 'consume' : delta.batchId !== null && context.requiresReceiptActivation(delta.batchId) ? 'activateAndReceive' : 'receive'
+      out.push(...planExactCountedOrdinaryChange(context, delta.batchId, Math.abs(quantity), action))
     }
     out.push({
       sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id${delta.addressed ? ',branch_name,addressed_branch_name' : ''},movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id)
@@ -281,11 +272,11 @@ function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, s
   return out
 }
 
-function memberStatements(member: Member, direction: 1 | -1, user: SessionUser, stamp: string): Statement[] {
+function memberStatements(member: Member, direction: 1 | -1, user: SessionUser, stamp: string, exact: CountedStockBatchPlan): Statement[] {
   if (!member.changed) return []
   const target = direction > 0 ? member.after : member.before
   return [
-    ...stockStatements(member, direction, user, stamp),
+    ...stockStatements(member, direction, user, stamp, exact),
     {
       sql: `UPDATE returns SET status=@status,return_type=@return_type,supplier_settlement=@supplier_settlement,updated_at=@stamp WHERE id=@id`,
       params: { ...target, stamp, id: member.id },
@@ -512,7 +503,7 @@ async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'bef
     saleStatuses: exactStatuses }
 }
 
-async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: number | null = null): Promise<{ members: Member[]; guards: Statement[] }> {
+async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: number | null = null): Promise<{ members: Member[]; guards: Statement[]; exact: CountedStockBatchPlan }> {
   const ids = request.items.map((item) => item.id)
   const returns = await rowsForIds<Row>(db, ids, (marks) => `SELECT r.*,COALESCE(v.revision,0) AS write_revision,${movementFingerprint('r.id')} AS movement_fingerprint FROM returns r LEFT JOIN return_write_revisions v ON v.return_id=r.id WHERE r.id IN (${marks})`)
   const matchingIds = request.items.flatMap((expected) => {
@@ -523,7 +514,15 @@ async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: 
     return (request.field === 'status' || request.field === methodField(scope)) && current === request.source ? [expected.id] : []
   })
   if (returns.some((row) => matchingIds.includes(Number(row.id)) && row.movement_fingerprint === null)) fail(`A matching return exceeds ${RETURN_BULK_MOVEMENT_LIMIT} stock movements.`, 400)
-  const items = await rowsForIds<ReturnItem>(db, matchingIds, (marks) => `SELECT ri.* FROM return_items ri WHERE ri.return_id IN (${marks}) ORDER BY ri.id LIMIT 301`)
+  const recordedBranch = 'COALESCE(NULLIF(ri.branch_id,0),r.branch_id)'
+  const redirect = Number.isSafeInteger(redirectTarget) && Number(redirectTarget) > 0 ? String(redirectTarget) : '0'
+  const stockBranch = `(CASE WHEN EXISTS(SELECT 1 FROM branches WHERE id=${recordedBranch} AND is_active=1) THEN ${recordedBranch} ELSE ${redirect} END)`
+  const receiptIds = `(SELECT json_group_array(batch_id) FROM (
+    SELECT a.batch_id FROM return_item_batch_allocations a JOIN selected_items s ON s.id=a.return_item_id WHERE s.product_id=ri.product_id
+    UNION SELECT s.batch_id FROM selected_items s WHERE s.product_id=ri.product_id
+    UNION SELECT d.batch_id FROM damaged_stock_lots d JOIN selected_items s ON s.id=d.return_item_id AND s.return_id=d.return_id WHERE s.product_id=ri.product_id))`
+  const items = await rowsForIds<ReturnItem & { counted_branch_id: number; counted_facts: string }>(db, matchingIds, (marks) => `WITH selected_items AS (SELECT * FROM return_items WHERE return_id IN (${marks})) SELECT ri.*,${stockBranch} counted_branch_id,
+    ${countedStockFactsSql('ri.product_id', stockBranch, receiptIds)} counted_facts FROM selected_items ri JOIN returns r ON r.id=ri.return_id ORDER BY ri.id LIMIT 301`)
   if (items.length > 300) fail('Select fewer return lines (maximum 300).', 400)
   const allocations = await rowsForIds<Allocation>(db, matchingIds, (marks) => `SELECT a.* FROM return_item_batch_allocations a JOIN return_items ri ON ri.id=a.return_item_id WHERE ri.return_id IN (${marks}) ORDER BY a.id LIMIT 401`)
   if (allocations.length > 400) fail('Select fewer received-date allocations to return (maximum 400).', 400)
@@ -574,18 +573,12 @@ async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: 
       updateSale: false,
       stock: [],
     }
-    const memberGuardIndex=guards.length
-    if (changed) {
-      guards.push(guard(`NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM returns WHERE id=@id) AND COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=@id),0)=@revision AND ${movementFingerprint('@id')}=@fingerprint`, { id: expected.id, revision: Number(row.write_revision) || 0,fingerprint:row.movement_fingerprint }))
-    }
-
     if (changed && request.field === 'status') {
       const cancelling = before.status === 'completed' && after.status === 'cancelled'
       const restoring = before.status === 'cancelled' && after.status === 'completed'
       if (!cancelling && !restoring) fail(`Return ${expected.id} has an unsupported status transition.`, 400)
       const linkedSale = member.saleId ? linkedSales.find((sale) => Number(sale.id) === member.saleId) : null
       member.saleRevision = linkedSale ? Number(linkedSale.write_revision) || 0 : null
-      if(linkedSale){guards[memberGuardIndex].sql=guards[memberGuardIndex].sql.replace(' THEN 1 ELSE 0 END',' AND EXISTS(SELECT 1 FROM sales WHERE id=@saleId) AND COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0)=@saleRevision THEN 1 ELSE 0 END');guards[memberGuardIndex].params={...guards[memberGuardIndex].params,saleId:linkedSale.id,saleRevision:linkedSale.write_revision}}
       // RET-B E1 (owner default D1, 5 Oct 2026): a sale recorded without stock
       // changes (stock_skipped -- every sales import since F4) never took its
       // units off the shelf, so cancelling or restoring its return cannot infer
@@ -629,8 +622,8 @@ async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: 
             && Number(lot.product_id)===productId && Number(lot.branch_id)===branchId && lot.condition_tag===item.stock_condition)
           if(!lots.length) fail(`Return ${expected.id} has no exact damaged-stock provenance.`,409)
           const itemQuantity=quantity
-          const lotQuantity=lots.reduce((sum,lot)=>sum+Number(lot.quantity||0),0)
-          if(Math.abs(itemQuantity-lotQuantity)>0.000001) fail(`Return ${expected.id} has incomplete damaged-stock provenance.`,400)
+          const lotQuantity=sumCountedQuantities(lots.map(lot=>Number(lot.quantity||0)))
+          if(subtractCountedQuantity(itemQuantity,[lotQuantity])!==0) fail(`Return ${expected.id} has incomplete damaged-stock provenance.`,400)
           const costUsd=Number(item.cost_price_usd)||0,costKhr=Number(item.cost_price_khr)||0
           for (const lot of lots) {
             if (cancelling && Number(lot.quantity_remaining) !== Number(lot.quantity)) fail(`Damaged stock from return ${expected.id} has already been consumed.`, 409)
@@ -641,8 +634,8 @@ async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: 
         }
         const ownAllocations = allocations.filter((allocation) => allocation.return_item_id === item.id)
         if (ownAllocations.length) {
-          const allocated = ownAllocations.reduce((sum, allocation) => sum + Number(allocation.quantity || 0), 0)
-          if (Math.abs(allocated - quantity) > 0.000001) fail(`Return ${expected.id} has incomplete received-date provenance.`, 400)
+          const allocated = sumCountedQuantities(ownAllocations.map(allocation => Number(allocation.quantity || 0)))
+          if (subtractCountedQuantity(allocated,[quantity])!==0) fail(`Return ${expected.id} has incomplete received-date provenance.`, 400)
           for (const allocation of ownAllocations) {
             if (Number(allocation.branch_id) !== recordedBranchId) fail(`Return ${expected.id} has a lot allocation for a different branch.`, 400)
             member.stock.push({ productId, productName: item.product_name, branchId, batchId: Number(allocation.batch_id), damagedLotId: null, quantity: (scope === 'customer' ? (cancelling ? -1 : 1) : (cancelling ? 1 : -1)) * Number(allocation.quantity), costUsd: Number(item.cost_price_usd) || 0, costKhr: Number(item.cost_price_khr) || 0, movementType: '' })
@@ -665,11 +658,21 @@ async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: 
         }
       }
     }
+    if (changed) {
+      guards.push(guard(`NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM returns WHERE id=@id)
+        AND COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=@id),0)=@revision AND ${movementFingerprint('@id')}=@fingerprint
+        AND ${taggedReturnAuthority()}${member.saleRevision === null ? '' : ' AND EXISTS(SELECT 1 FROM sales WHERE id=@saleId) AND COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0)=@saleRevision'}`,
+      { id: expected.id, revision: Number(row.write_revision)||0, fingerprint: row.movement_fingerprint, taggedIds: taggedMemberIds(member),
+        ...(member.saleRevision === null ? {} : { saleId: member.saleId, saleRevision: member.saleRevision }) }))
+    }
     members.push(member)
   }
   const effectGuards = resolver.guards()
   if (effectGuards.length) guards.push(guard(branchEffectGuardPredicate('@effects'), { effects: JSON.stringify(effectGuards) }))
-  return { members, guards }
+  const keys = new Set(members.flatMap(member=>member.stock.map(delta=>`${delta.productId}:${delta.branchId}`)))
+  const exact = new CountedStockBatchPlan(items.filter(item=>keys.has(`${item.product_id}:${item.counted_branch_id}`))
+    .map(item=>({facts:item.counted_facts,branchId:item.counted_branch_id})), { deferPhysicalWrites: true })
+  return { members, guards, exact }
 }
 
 export async function notifyReturnBulkAction(env: Env): Promise<void> {
@@ -695,7 +698,17 @@ export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Ro
  */
 export type ReturnBulkOutcome = { receipt: Row; wrote: boolean }
 
+function exactBulkRefusal(error: unknown): never {
+  if (isCountedStockConflict(error)) fail('The exact stock or condition source changed. Nothing was applied; refresh before retrying.',409,'write_conflict')
+  if (error instanceof MoneyPrecisionError) fail(error.message,400,'invalid_bulk_action')
+  throw error
+}
+
 export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, raw: Row, redirectTarget: number | null = null): Promise<ReturnBulkOutcome> {
+  try { return await applyReturnBulkActionOutcomeKernel(env,user,raw,redirectTarget) } catch(error) { return exactBulkRefusal(error) }
+}
+
+async function applyReturnBulkActionOutcomeKernel(env: Env, user: SessionUser, raw: Row, redirectTarget: number | null = null): Promise<ReturnBulkOutcome> {
   permission(user)
   const request = parseRequest(raw)
   const db = getDb(env)
@@ -705,7 +718,7 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
     if (previous.request_json !== canonical) fail('Request id was already used with different data.')
     return { receipt: JSON.parse(String(previous.receipt_json)) as Row, wrote: false }
   }
-  const { members, guards } = await buildMembers(db, request, redirectTarget)
+  const { members, guards, exact } = await buildMembers(db, request, redirectTarget)
   const entitlement = await v1EntitlementGuards(db, members, 'after')
   guards.push(...entitlement.guards)
   const operationId = crypto.randomUUID()
@@ -733,10 +746,12 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
     })),
   }
   const statements: Statement[] = [
+    ...exact.takePreimageGuards(),
     ...guards,
     { sql: 'INSERT INTO return_bulk_operations(id,actor_id,request_id,request_json,receipt_json) VALUES(@id,@actor,@request,@canonical,@receipt)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical, receipt: JSON.stringify(receipt) } },
   ]
-  for (const member of members) statements.push(...memberStatements(member, 1, user, stamp))
+  for (const member of members) statements.push(...memberStatements(member, 1, user, stamp, exact))
+  statements.push(...exact.takeFinalPhysicalWrites())
   for (const saleId of [...new Set(members.filter((member) => member.changed && member.updateSale && member.saleId).map((member) => member.saleId!))]) {
     statements.push(saleStatusStatement(saleId, stamp, exactBySale.get(saleId)?.after))
   }
@@ -782,31 +797,38 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
 
     if (activeGuard) throw activeGuard
 
-    if (/constraint/i.test(String(error))) fail('A return or its stock changed. Nothing in the group was applied.')
+    if (/CHECK constraint failed:\s*guard_value\s*=\s*1/i.test(String(error))) fail('A return or its stock changed. Nothing in the group was applied.')
     throw error
   }
 }
 
 export async function replayReturnBulkAction(env: Env, user: SessionUser, direction: 'undo' | 'redo', historyId: number, generation: unknown, payload: Row): Promise<void> {
+  try { return await replayReturnBulkActionKernel(env,user,direction,historyId,generation,payload) } catch(error) { return exactBulkRefusal(error) }
+}
+
+async function replayReturnBulkActionKernel(env: Env, user: SessionUser, direction: 'undo' | 'redo', historyId: number, generation: unknown, payload: Row): Promise<void> {
   permission(user)
   if (!Number.isSafeInteger(generation) || Number(generation) < 0) fail('Refresh history before replaying this group.')
   const db = getDb(env)
-  const operation = await db.prepare('SELECT o.*,s.payload_json,s.kind,s.status AS snapshot_status FROM return_bulk_operations o JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.history_id=?').get<Row>([historyId])
+  const operation = await db.prepare(`SELECT o.*,s.payload_json,s.kind,s.status AS snapshot_status,
+    ${replayCountedFactsSql('s.payload_json')} counted_facts FROM return_bulk_operations o JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.history_id=?`).get<Row>([historyId])
   if (!operation || operation.kind !== RETURN_BULK_ACTION_KIND || operation.id !== payload.operation_id || operation.snapshot_id !== payload.snapshot_id || Number(operation.generation) !== Number(generation)) fail('This grouped Return action changed or its snapshot does not match.')
   const snapshot = JSON.parse(String(operation.payload_json)) as Snapshot
+  const exact = new CountedStockBatchPlan(JSON.parse(String(operation.counted_facts || '[]')) as {facts:string;branchId:number}[], { deferPhysicalWrites: true })
   if (snapshot.version !== 1 || snapshot.operationId !== operation.id || snapshot.members.length > RETURN_BULK_LIMIT) fail('Unsupported Return bulk snapshot.')
   const expectedStatus = direction === 'undo' ? 'undoable' : 'redoable'
   const nextStatus = direction === 'undo' ? 'redoable' : 'undoable'
   const snapshotStatus = direction === 'undo' ? 'applied' : 'reversed'
   const directionSign: 1 | -1 = direction === 'undo' ? -1 : 1
   const stamp = new Date().toISOString()
-  const statements: Statement[] = [guard("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM return_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@operation AND o.generation=@generation AND h.id=@history AND h.status=@expectedStatus AND s.kind=@kind AND s.status=@snapshotStatus AND s.payload_json=@snapshot)", { operation: operation.id, generation, history: historyId, expectedStatus, kind: RETURN_BULK_ACTION_KIND, snapshotStatus, snapshot: operation.payload_json })]
+  const statements: Statement[] = [...exact.takePreimageGuards(),guard("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM return_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@operation AND o.generation=@generation AND h.id=@history AND h.status=@expectedStatus AND s.kind=@kind AND s.status=@snapshotStatus AND s.payload_json=@snapshot)", { operation: operation.id, generation, history: historyId, expectedStatus, kind: RETURN_BULK_ACTION_KIND, snapshotStatus, snapshot: operation.payload_json })]
   const replayEntitlement = await v1EntitlementGuards(db, snapshot.members, direction === 'undo' ? 'before' : 'after')
   statements.push(...replayEntitlement.guards)
   for (const member of snapshot.members.filter((candidate) => candidate.changed)) {
-    statements.push(guard(`EXISTS(SELECT 1 FROM returns r JOIN return_bulk_members m ON m.return_id=r.id WHERE m.operation_id=@operation AND r.id=@id AND m.revision=COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=r.id),0) AND m.stock_fingerprint=${movementFingerprint('r.id')} AND (m.sale_id IS NULL OR (EXISTS(SELECT 1 FROM sales WHERE id=m.sale_id) AND m.sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=m.sale_id),0))))`, { operation: operation.id, id: member.id }))
+    statements.push(guard(`EXISTS(SELECT 1 FROM returns r JOIN return_bulk_members m ON m.return_id=r.id WHERE m.operation_id=@operation AND r.id=@id AND m.revision=COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=r.id),0) AND m.stock_fingerprint=${movementFingerprint('r.id')} AND (m.sale_id IS NULL OR (EXISTS(SELECT 1 FROM sales WHERE id=m.sale_id) AND m.sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=m.sale_id),0)))) AND ${taggedReturnAuthority()}`, { operation: operation.id, id: member.id, taggedIds: taggedMemberIds(member) }))
   }
-  for (const member of snapshot.members) statements.push(...memberStatements(member, directionSign, user, stamp))
+  for (const member of snapshot.members) statements.push(...memberStatements(member, directionSign, user, stamp, exact))
+  statements.push(...exact.takeFinalPhysicalWrites())
   const replayExact = new Map(replayEntitlement.saleStatuses.map(status => [status.saleId, status]))
   for (const saleId of [...new Set(snapshot.members.filter((member) => member.changed && member.updateSale && member.saleId).map((member) => member.saleId!))]) {
     statements.push(saleStatusStatement(saleId, stamp, replayExact.get(saleId)?.after))
@@ -828,7 +850,7 @@ export async function replayReturnBulkAction(env: Env, user: SessionUser, direct
 
     if (activeGuard) throw activeGuard
 
-    if (/constraint/i.test(String(error))) fail('A return, its stock, or this replay changed. Nothing in the group was applied.')
+    if (/CHECK constraint failed:\s*guard_value\s*=\s*1/i.test(String(error))) fail('A return, its stock, or this replay changed. Nothing in the group was applied.')
     throw error
   }
 }
