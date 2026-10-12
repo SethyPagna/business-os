@@ -59,6 +59,24 @@ export function orderLotsOnHandFirst<T>(lots: readonly T[], quantityOf: (lot: T)
   ]
 }
 
+/**
+ * GET /api/batches answers per branch (a lot's quantity is what THAT branch
+ * holds), so a product's lots across several branches arrive as one list per
+ * branch. One lot is one row: its id is its identity and its quantity is the
+ * sum over the lists.
+ */
+export function mergeBranchLots<T extends { id: unknown; quantity?: unknown }>(lists: readonly (readonly T[])[]): T[] {
+  const merged = new Map<string, T>()
+  for (const list of lists) {
+    for (const lot of list) {
+      const key = String(lot.id)
+      const existing = merged.get(key)
+      merged.set(key, existing ? { ...existing, quantity: Number(existing.quantity || 0) + Number(lot.quantity || 0) } : { ...lot })
+    }
+  }
+  return [...merged.values()]
+}
+
 // `includeEmpty` (default false) keeps every existing caller's behavior
 // unchanged -- compact row/list previews (Inventory.tsx, ProductRowParts.tsx)
 // only want lots that actually have stock, since "what's sellable here" is

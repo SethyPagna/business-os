@@ -10,14 +10,19 @@ import ArrowRightLeft from 'lucide-react/dist/esm/icons/arrow-right-left.js'
 import Layers from 'lucide-react/dist/esm/icons/layers.js'
 import { useCopyFloat } from '../shared/CopyFloat.tsx'
 import { calculateProductDiscount } from '../../utils/pricing.ts'
-import { buildBatchPreview, getVisibleProductBatches, isDepletedLot } from '../../utils/productBatches.ts'
+import { getVisibleProductBatches, isDepletedLot, mergeBranchLots } from '../../utils/productBatches.ts'
+import { fmtDateOnly } from '../../utils/formatters'
+import { getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
+import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { useLowStockConfig } from '../../AppContext'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import { TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
 import ScrollText from 'lucide-react/dist/esm/icons/scroll-text.js'
-import { Fragment, Suspense, useState, type ReactNode } from 'react'
+import { Fragment, Suspense, useEffect, useState, type ReactNode } from 'react'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
+import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { branchStockLinesWorthShowing } from '../../utils/branchScope.ts'
 
@@ -38,15 +43,10 @@ interface BranchStockEntry {
   quantity?: number
 }
 
-interface ProductBatchEntry {
-  id?: string | number
-  batch_id?: string | number
-  lot_code?: string
-  quantity?: number
-  expiry_date?: string
-  branch_stock?: Array<{ branch_id?: string | number; quantity?: number }>
-  [key: string]: unknown
-}
+// The product's lots are read when the detail opens: the list reads that feed
+// this modal carry only the scalar batch_count, never the lots themselves.
+const LOT_PAGE_SIZE = 8
+type LotRead = { key: string; lots: ProductBatch[] } | { key: string; error: string }
 
 interface InventoryProduct {
   name?: string
@@ -71,7 +71,7 @@ interface InventoryProduct {
   revenue_usd?: number
   cogs_usd?: number
   branch_stock?: BranchStockEntry[]
-  batches?: ProductBatchEntry[]
+  batch_count?: number
   [key: string]: unknown
 }
 
@@ -117,6 +117,36 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
   // affordance appears only where the reader would get the whole trail.
   const [fieldHistoryOpen, setFieldHistoryOpen] = useState(false)
   const canReadFieldHistory = getPermissionTier('audit_log') === 'full'
+  // GET /api/batches is per branch, so a product's lots are read once for each
+  // branch it has a stock line at and merged by lot. The answer is kept under
+  // the key it was asked for, and dropped when the product, the branches, the
+  // account or the server has changed since (a late answer shows nothing).
+  const productId = Number(p?.id) || 0
+  const lotBranchIds = (Array.isArray(p?.branch_stock) ? p.branch_stock : [])
+    .map((line) => Number(line.branch_id))
+    .filter((id, index, ids) => Number.isInteger(id) && id > 0 && ids.indexOf(id) === index)
+  const lotBranchKey = lotBranchIds.join(',')
+  const [lotsReloadKey, setLotsReloadKey] = useState(0)
+  const lotReadKey = `${productId}|${lotBranchKey}|${lotsReloadKey}`
+  const [lotRead, setLotRead] = useState<LotRead | null>(null)
+  const [lotsExpandedFor, setLotsExpandedFor] = useState('')
+  useEffect(() => {
+    if (!productId || !lotBranchKey) return undefined
+    let cancelled = false
+    const scope = captureActorReadScope('inventory')
+    const stale = () => cancelled || !isActorReadScopeCurrent(scope, false)
+    Promise.all(lotBranchKey.split(',').map((branchId) => getProductBatches(productId, branchId)))
+      .then((answers) => {
+        if (stale()) return
+        setLotRead({ key: lotReadKey, lots: mergeBranchLots(answers.map((answer) => (Array.isArray(answer?.batches) ? answer.batches : []))) })
+      })
+      .catch((error: unknown) => {
+        if (stale()) return
+        setLotRead({ key: lotReadKey, error: error instanceof Error ? error.message : '' })
+      })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lotReadKey])
   if (!p) return null
 
   const costPriceUsd = Number(p.purchase_price_usd || p.cost_price_usd || 0)
@@ -161,12 +191,15 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
   // Products surface detail modal (see utils/productBatches.ts): the full
   // detail view should still surface a fresh product's zero-stock starter
   // batch instead of showing an empty Batches section.
-  const visibleBatches = getVisibleProductBatches(p, 'all', { includeEmpty: true })
-  const batchPreview = buildBatchPreview(p, 'all', { limit: 8, includeEmpty: true }) as {
-    items: ProductBatchEntry[]
-    extraCount: number
-  }
-  const batchCount = visibleBatches.length
+  const currentLotRead = lotRead && lotRead.key === lotReadKey ? lotRead : null
+  const loadedLots = currentLotRead && 'lots' in currentLotRead ? currentLotRead.lots : null
+  const lotsError = currentLotRead && 'error' in currentLotRead ? currentLotRead.error : null
+  const lotsLoading = lotBranchKey !== '' && currentLotRead == null
+  const visibleBatches = (loadedLots ? getVisibleProductBatches({ batches: loadedLots }, 'all', { includeEmpty: true }) : []) as ProductBatch[]
+  const lotsExpanded = lotsExpandedFor === lotReadKey
+  const shownBatches = lotsExpanded ? visibleBatches : visibleBatches.slice(0, LOT_PAGE_SIZE)
+  const hiddenBatchCount = visibleBatches.length - shownBatches.length
+  const batchCount = loadedLots ? visibleBatches.length : Number(p.batch_count || 0)
   const headerMeta: ReactNode[] = [
     p.brand ? <span className="whitespace-nowrap" {...copy(p.brand)}>{p.brand}</span> : null,
     p.category ? <span className="whitespace-nowrap text-blue-600 dark:text-blue-400">{p.category}</span> : null,
@@ -370,25 +403,52 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
             </div>
           ) : null}
 
-          {visibleBatches.length ? (
-            <div>
+          {lotsLoading || lotsError != null || visibleBatches.length ? (
+            <div data-detail-received-dates="true">
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{T('batches', 'Received dates')}</div>
-              <div className="space-y-2">
-                {/* Sold-out lots arrive last (getVisibleProductBatches) and are
-                    greyed: still viewable history, not stock on hand. */}
-                {batchPreview.items.map((batch, index) => (
-                  <div key={String(batch.id || batch.batch_id || `batch-${index}`)} className={`rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/20 ${isDepletedLot(batch.quantity) ? 'opacity-50' : ''}`}>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold text-amber-700 dark:text-amber-200">{batchDisplayLabel({ id: batch.id ?? batch.batch_id ?? `b-${index}`, lot_code: batch.lot_code ?? null, received_at: (batch.received_at as string) ?? null, batch_number: (batch.batch_number as number) ?? null }, T('batch', 'Received date'))}</span>
-                      <span className="text-sm font-medium text-gray-900 dark:text-white">{batch.quantity} {p.unit}</span>
+              {lotsError != null ? (
+                <div role="alert" className="flex items-center justify-between gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-300">
+                  <span className="min-w-0 flex-1 leading-relaxed">{lotsError || T('failed_to_load_data', 'Failed to load data')}</span>
+                  <button
+                    type="button"
+                    className={toolbarIconButtonClassName}
+                    onClick={() => { setLotRead(null); setLotsReloadKey((key) => key + 1) }}
+                    aria-label={T('retry', 'Retry')}
+                    title={T('retry', 'Retry')}
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : lotsLoading ? (
+                <div className="rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 text-center text-xs leading-relaxed text-gray-400 dark:border-amber-900/50 dark:bg-amber-950/20">{T('loading', 'Loading...')}</div>
+              ) : (
+                <div className="space-y-2">
+                  {/* Newest received first; sold-out lots come after the ones on
+                      hand (getVisibleProductBatches) and are greyed: still
+                      viewable history, not stock on hand. */}
+                  {shownBatches.map((batch) => (
+                    <div key={String(batch.id)} className={`rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/20 ${isDepletedLot(batch.quantity) ? 'opacity-50' : ''}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-amber-700 dark:text-amber-200">{batchDisplayLabel({ id: batch.id, lot_code: batch.lot_code ?? null, received_at: batch.received_at ?? null, batch_number: batch.batch_number ?? null }, T('batch', 'Received date'))}</span>
+                        <span className="text-sm font-medium text-gray-900 dark:text-white">{batch.quantity} {p.unit}</span>
+                      </div>
+                      <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-300">{batch.expiry_date ? fmtDateOnly(batch.expiry_date) : T('no_expiry', 'No expiry')}</div>
                     </div>
-                    <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-300">{batch.expiry_date || T('no_expiry', 'No expiry')}</div>
-                  </div>
-                ))}
-                {batchPreview.extraCount ? (
-                  <div className="text-[11px] text-gray-400">+{batchPreview.extraCount} {T('more', 'more')}</div>
-                ) : null}
-              </div>
+                  ))}
+                  {hiddenBatchCount > 0 ? (
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-center gap-1 rounded-lg py-1 text-[11px] text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700/50"
+                      onClick={() => setLotsExpandedFor(lotReadKey)}
+                      aria-label={T('show_more', 'Show more')}
+                      title={T('show_more', 'Show more')}
+                    >
+                      <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+                      <span>+{hiddenBatchCount}</span>
+                    </button>
+                  ) : null}
+                </div>
+              )}
             </div>
           ) : null}
         </div>
