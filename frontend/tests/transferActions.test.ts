@@ -55,6 +55,10 @@ for (const kind of ['submit', 'undo', 'redo']) for (const direction of [[1, 2], 
       if (id === './branchTransport.ts') return module.exports
       if (id === './transferRunRecovery.ts') return recoveryModule
       if (id === './requestIds.ts') return { ensureClientRequestId }
+      if (id === './actorReadScope.ts') return {
+        captureActorReadScope: () => { throw new Error('Receiving scope must not run in this transfer fixture') },
+        assertActorReadScope: () => { throw new Error('Receiving scope must not run in this transfer fixture') },
+      }
       if (id === '../utils/deviceInfo.ts') return { getClientDeviceInfo: () => ({ device_name: 'changed after reload' }) }
       // P4-B: inventoryWriteTransport.ts's commitFastStockIn() reuses
       // batchesTransport.ts's receive-body conversion; unused by this
