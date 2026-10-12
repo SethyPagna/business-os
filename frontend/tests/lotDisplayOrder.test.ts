@@ -11,6 +11,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { batchReceivedInstant, sortLotsForDisplay } from '../src/utils/lotDisplayOrder.ts'
+import { getVisibleProductBatches } from '../src/utils/productBatches.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const read = (file: string) => fs.readFileSync(path.join(here, file), 'utf8').replace(/\r\n/g, '\n')
@@ -110,6 +111,47 @@ check('POS: the picker and the sheet state order lots through the shared helper'
   uses('../src/components/pos/ProductDetailSheet.tsx', /sortLotsForDisplay\(visibleBatches\)/, 'ProductDetailSheet')
   uses('../src/components/pos/productSheetState.ts', /sortLotsForDisplay\(batches as readonly SheetBatchLike\[\]\)/, 'productSheetState')
   assert.doesNotMatch(read('../src/components/pos/posCore.ts'), /export function sortBatchesForPicker/, 'posCore keeps no second ordering implementation')
+})
+
+check('Transfer: the single-product list and every checked row of the bulk list are ordered', () => {
+  const transfer = read('../src/components/branches/TransferModal.tsx')
+  assert.match(transfer, /sortLotsForDisplay\(productBatches\)\.map\(/, 'single transfer lot list')
+  assert.match(transfer, /sortLotsForDisplay\(loadedLots\.batches\)/, 'bulk transfer row lots')
+})
+
+check('Inventory transfer form orders its lot options', () => {
+  uses('../src/components/inventory/InventoryStockModals.tsx', /sortLotsForDisplay\(transferBatchOptions\)\.map\(/, 'Inventory transfer lot select')
+})
+
+check('Manage Received Dates orders its rows, then keeps sold-out lots after the ones on hand', () => {
+  uses('../src/components/inventory/ManageBatchesModal.tsx', /orderLotsOnHandFirst\(sortLotsForDisplay\(batches\), /, 'Manage Received Dates')
+})
+
+check('Returns order both lot selects (returned units and replacement)', () => {
+  const returns = read('../src/components/returns/NewReturnModal.tsx')
+  assert.match(returns, /sortLotsForDisplay\(item\.lotOptions\)\.map\(/, 'returned-units lot select')
+  assert.match(returns, /sortLotsForDisplay\(line\.batches\)\.map\(/, 'replacement lot select')
+})
+
+check('Attribute Supplier lists its lots through the shared helper', () => {
+  const modal = read('../src/components/products/surfaces/AttributeSupplierModal.tsx')
+  assert.match(modal, /sortLotsForDisplay\(lots\)/)
+  assert.doesNotMatch(modal, /localeCompare\(String\(a\.received_at/, 'no raw received_at string compare')
+})
+
+check('the shared product-detail lot list is newest first inside the on-hand group and inside the sold-out group', () => {
+  const product = {
+    batches: [
+      { id: 1, received_at: '2026-01-01', quantity: 5 },
+      { id: 2, received_at: '2026-08-01', quantity: 0 },
+      { id: 3, received_at: '2026-05-01', quantity: 2 },
+      { id: 4, received_at: '2026-03-01', quantity: 0 },
+    ],
+  }
+  assert.deepEqual(getVisibleProductBatches(product, 'all', { includeEmpty: true }).map((batch) => batch.id), [3, 1, 2, 4],
+    'on hand: 1 May, 1 Jan; then sold out (owner, 25 Sep): 1 Aug, 1 Mar')
+  assert.deepEqual(getVisibleProductBatches(product).map((batch) => batch.id), [3, 1], 'compact previews still drop sold-out lots')
+  uses('../src/utils/productBatches.ts', /orderLotsOnHandFirst\(sortLotsForDisplay\(visible\)/, 'getVisibleProductBatches')
 })
 
 if (failures.length) {

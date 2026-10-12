@@ -7,6 +7,7 @@ import UnsavedChangesPrompt from '../../shared/UnsavedChangesPrompt.tsx'
 import SupplierPickerField, { type SupplierChoice } from '../../shared/SupplierPickerField.tsx'
 import { backfillProductSupplier } from '../../../api/productWriteTransport.ts'
 import { batchDisplayLabel } from '../../../utils/batchLabel.ts'
+import { sortLotsForDisplay } from '../../../utils/lotDisplayOrder.ts'
 import { fmtDate } from '../../../utils/formatters'
 
 // D5 (Part 578, item 3): attribute a supplier to a product's UNATTRIBUTED lots
@@ -53,10 +54,7 @@ export default function AttributeSupplierModal({
   const canApply = choice.supplierId != null && selectedCount > 0 && !busy
   const allSelected = selectedCount === lots.length && lots.length > 0
 
-  const sortedLots = useMemo(
-    () => [...lots].sort((a, b) => String(b.received_at || '').localeCompare(String(a.received_at || ''))),
-    [lots],
-  )
+  const sortedLots = useMemo(() => sortLotsForDisplay(lots), [lots])
 
   const toggleLot = (id: number) => {
     setSelected((prev) => {

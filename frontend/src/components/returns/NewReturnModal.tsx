@@ -46,6 +46,7 @@ import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
 import type { PendingReturnCreateV1, ReturnQuoteV1 } from '../../api/returnsTransport.ts'
 import { subtractDecimalSum } from '../../utils/moneyPrecision.ts'
+import { sortLotsForDisplay } from '../../utils/lotDisplayOrder.ts'
 import StockActionIcon from './StockActionIcon.tsx'
 
 const RETURN_SALE_SEARCH_TIMEOUT_MS = 12000
@@ -1338,7 +1339,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                                       optionClassName="text-xs"
                                       options={[
                                         { value: '', label: T('select_lot', 'Choose a received date…') },
-                                        ...item.lotOptions.map((batch) => ({ value: String(batch.id), label: describeBatchOption(batch) })),
+                                        ...sortLotsForDisplay(item.lotOptions).map((batch) => ({ value: String(batch.id), label: describeBatchOption(batch) })),
                                       ]}
                                     />
                                   </div>
@@ -1486,7 +1487,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                             buttonClassName={`h-9 w-full text-xs ${line.batches.length > 0 && line.batch_id == null ? 'border-amber-400 dark:border-amber-600' : ''}`}
                             options={line.batches.length > 0
                               ? [{ value: '', label: T('select_lot', 'Choose a received date…') },
-                                ...line.batches.map((batch) => ({ value: String(batch.id), label: describeBatchOption(batch) }))]
+                                ...sortLotsForDisplay(line.batches).map((batch) => ({ value: String(batch.id), label: describeBatchOption(batch) }))]
                               : [{ value: '', label: T('lot_untracked_out', 'No received dates — drawn from the branch count') }]}
                           />
                           <input type="number" min="1" step="1" className="input w-16 flex-shrink-0 py-1 text-center text-sm"

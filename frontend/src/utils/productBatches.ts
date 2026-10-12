@@ -1,3 +1,5 @@
+import { sortLotsForDisplay } from './lotDisplayOrder.ts'
+
 type BranchId = string | number
 
 type BranchStockEntry = {
@@ -90,9 +92,10 @@ export function getVisibleProductBatches(product: ProductWithBatches, branchId: 
       }
     })
     .filter((batch) => includeEmpty || !isDepletedLot(batch.quantity))
-  // Only the detail views (includeEmpty) ever keep a sold-out lot; they list
-  // it after the lots that still hold stock (owner, 2026-09-25).
-  return orderLotsOnHandFirst(visible, (batch) => batch.quantity)
+  // Newest received first (owner, 2026-10-12), then, since only the detail
+  // views (includeEmpty) ever keep a sold-out lot, that lot after the ones
+  // that still hold stock (owner, 2026-09-25).
+  return orderLotsOnHandFirst(sortLotsForDisplay(visible), (batch) => batch.quantity)
 }
 
 export function buildBatchPreview(product: ProductWithBatches, branchId: BranchId = 'all', { limit = 3, includeEmpty = false }: BatchPreviewOptions = {}) {
