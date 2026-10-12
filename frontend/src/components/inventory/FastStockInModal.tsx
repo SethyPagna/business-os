@@ -836,6 +836,7 @@ export default function FastStockInModal({
     const id = extractHistoryResultId(result as never)
     if (!id) throw unknownError()
     try { await finishReceivingProductAttempt(attempt, 'confirmed', id) } catch { throw unknownError() }
+    submissionsRef.current.unknown = submissionsRef.current.unknown.filter((key) => key !== line.key)
     return id
   }
 
