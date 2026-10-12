@@ -313,6 +313,7 @@ export default function FastStockInModal({
   const [linesInvalidKey, setLinesInvalidKey] = useState('')
   const [supplierRefused, setSupplierRefused] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [signInChanged, setSignInChanged] = useState(false)
 
   // ---- transient ----
   const [candidates, setCandidates] = useState<ProductCandidate[]>([])
@@ -380,7 +381,7 @@ export default function FastStockInModal({
   // Keystrokes ride the debounced autosave. No dirtyWork registration: with the
   // draft persisting, leaving is safe -- everything is here on reopen.
   useEffect(() => {
-    if (!isActorReadScopeCurrent(receivingScope, false)) return
+    if (!isActorReadScopeCurrent(receivingScope, false)) { setSignInChanged(true); return }
     return scheduleWorkDraftWrite<StockSessionDraft>(fastStockInDraftKey, currentDraft())
   },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -900,15 +901,23 @@ export default function FastStockInModal({
     return { failed, lines }
   }
 
+  // The sign-in changed under this session: nothing more is sent or applied, the
+  // pinned draft is kept for reopening, and close and minimize stay reachable.
+  const stopForSignInChange = () => {
+    setSaving(false)
+    setSignInChanged(true)
+  }
+
   const finishSession = () => {
-    if (!isActorReadScopeCurrent(receivingScope, false)) return
+    if (!isActorReadScopeCurrent(receivingScope, false)) { stopForSignInChange(); return }
     onDone()
     clearWorkDraft(fastStockInDraftKey)
     onClose()
   }
 
   const performCommit = async () => {
-    if (saving || !isActorReadScopeCurrent(receivingScope, false)) return
+    if (saving) return
+    if (!isActorReadScopeCurrent(receivingScope, false)) { stopForSignInChange(); return }
     let lines = received
     const pending = lines.filter((line) => line.status !== 'saved')
     if (!pending.length) { finishSession(); return }
@@ -927,11 +936,11 @@ export default function FastStockInModal({
       setReceived(lines)
       try {
         const id = await createHeldProduct(line, lines)
-        if (!isActorReadScopeCurrent(receivingScope, false)) return
+        if (!isActorReadScopeCurrent(receivingScope, false)) { stopForSignInChange(); return }
         lines = lines.map((entry) => (entry.key === line.key ? { ...entry, product: { ...entry.product, id }, status: 'queued', detail: '' } : entry))
         setCreatedProductIds((prev) => [...prev, String(id)])
       } catch (error) {
-        if (!isActorReadScopeCurrent(receivingScope, false)) return
+        if (!isActorReadScopeCurrent(receivingScope, false)) { stopForSignInChange(); return }
         failed += 1
         const reviewPending = (error as { code?: string } | null)?.code === 'product_pending_review'
         lines = applyLineOutcome(lines, line.key, { status: 'error', detail: failureText(error, tr('error', 'Error')), ...(reviewPending ? { needsRemoval: true } : {}) })
@@ -993,9 +1002,9 @@ export default function FastStockInModal({
       }
       try {
         batched = await commitFastStockIn(toCommit.map(buildLineRequest), foldRound, { session, writeScope: receivingScope })
-        if (!isActorReadScopeCurrent(receivingScope, false)) return
+        if (!isActorReadScopeCurrent(receivingScope, false)) { stopForSignInChange(); return }
       } catch (error) {
-        if (!isActorReadScopeCurrent(receivingScope, false)) return
+        if (!isActorReadScopeCurrent(receivingScope, false)) { stopForSignInChange(); return }
         requestFailure = String((error as { code?: unknown } | null)?.code || 'request')
         const message = failureText(error, error instanceof Error ? error.message : tr('error', 'Error'))
         // Only lines no round has answered: a line already saved must stay saved.
@@ -1007,7 +1016,7 @@ export default function FastStockInModal({
       }
       if (batched === null) {
         const sequential = await performCommitSequential(toCommit, lines)
-        if (!isActorReadScopeCurrent(receivingScope, false)) return
+        if (!isActorReadScopeCurrent(receivingScope, false)) { stopForSignInChange(); return }
         failed = sequential.failed
         lines = sequential.lines
       }
@@ -1337,6 +1346,7 @@ export default function FastStockInModal({
           )}
         </div>
 
+        {signInChanged ? <p role="alert" className="border-t border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 sm:px-4 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{tr('stock_session_sign_in_changed', 'Your sign-in changed. Close this session and open it again to continue.')}</p> : null}
         <StockSessionFooter
           tr={tr}
           onBack={goBack}
@@ -1344,7 +1354,7 @@ export default function FastStockInModal({
           total={footerTotal}
           primaryLabel={footerPrimary}
           onPrimary={goNext}
-          primaryDisabled={footerDisabled}
+          primaryDisabled={footerDisabled || signInChanged}
           primaryTitle={footerTitle}
           saving={saving}
         />

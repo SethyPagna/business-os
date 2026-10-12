@@ -83,7 +83,7 @@ const { scopedWorkDraftKey, writeWorkDraft, clearWorkDraft } = await import('../
 
 runTest('the float calls onDone before it clears its draft, so the saved scope is still readable', () => {
   const float = readFrontend('src/components/inventory/FastStockInModal.tsx').replace(/\r\n/g, '\n')
-  assert.match(float, /const finishSession = \(\) => \{\n(?:\s*if \(!isActorReadScopeCurrent\(receivingScope, false\)\) return\n)?\s*onDone\(\)\n\s*clearWorkDraft\(fastStockInDraftKey\)/)
+  assert.match(float, /const finishSession = \(\) => \{\n\s*if \(!isActorReadScopeCurrent\(receivingScope, false\)\) \{ stopForSignInChange\(\); return \}\n\s*onDone\(\)\n\s*clearWorkDraft\(fastStockInDraftKey\)/)
   assert.match(float, /persistSessionDraft\(lines\)[\s\S]*?if \(failed\) \{\n\s*onDone\(\)/, 'a partial failure reports after the outcomes are written')
 })
 

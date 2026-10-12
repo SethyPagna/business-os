@@ -799,7 +799,7 @@ await runTest('the Stock Session commit refuses a repeat and replays by line id'
   const float = readFrontend('src/components/inventory/FastStockInModal.tsx')
   const footer = readFrontend('src/components/stock-session/StockSessionFooter.tsx')
   const draft = readFrontend('src/utils/stockSessionDraft.ts')
-  assert.match(float, /const performCommit = async \(\) => \{\s*if \(saving(?: \|\| !isActorReadScopeCurrent\(receivingScope, false\))?\) return/)
+  assert.match(float, /const performCommit = async \(\) => \{\s*if \(saving\) return\s*if \(!isActorReadScopeCurrent\(receivingScope, false\)\) \{ stopForSignInChange\(\); return \}/)
   assert.match(footer, /disabled=\{primaryDisabled \|\| saving\}/)
   assert.equal((draft.match(/client_request_id: line\.requestId/g) || []).length, 3, 'receive, adjust and set each carry the line id')
   assert.equal(existsSync(new URL('../src/components/products/forms/BulkAddStockModal.tsx', import.meta.url)), false)

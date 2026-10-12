@@ -46,7 +46,7 @@ assert.match(modal, /const currentDraft = \(lines: StockSessionLine\[\] = receiv
 assert.match(modal, /receivingSubmissions: retainReceivingSubmissions\(submissionsRef\.current, lines\)/, 'the saved draft retains exact submitted wires alongside protected values')
 assert.match(modal, /const submissions = restoreReceivingSubmissions\(storedRaw, opened\.lines\)/, 'reload recovers submission facts alongside the unchanged core normalizer')
 assert.match(modal, /overlayReceivingProductAttempts\(user\?\.id, submissions, opened\.lines\)\s*if \(rewrite\) writeWorkDraft/, 'authoritative attempt outcomes overlay before a restored draft is rewritten')
-assert.match(modal, /useEffect\(\(\) => \{\s*if \(!isActorReadScopeCurrent\(receivingScope, false\)\) return\s*return scheduleWorkDraftWrite<StockSessionDraft>\(fastStockInDraftKey, currentDraft\(\)\)/, 'the debounced autosave snapshots the live queue only for its original owner')
+assert.match(modal, /useEffect\(\(\) => \{\s*if \(!isActorReadScopeCurrent\(receivingScope, false\)\) \{ setSignInChanged\(true\); return \}\s*return scheduleWorkDraftWrite<StockSessionDraft>\(fastStockInDraftKey, currentDraft\(\)\)/, 'the debounced autosave snapshots the live queue only for its original owner')
 assert.match(modal, /const persistSessionDraft = \(lines: StockSessionLine\[\] = received\) => \{\s*writeWorkDraft<StockSessionDraft>\(fastStockInDraftKey, currentDraft\(lines\)\)/, 'the synchronous writer defaults to the live queue')
 assert.match(modal, /const pendingBatchRestoreRef = useRef<LotChoice \| null>\(init\.draft\.picked \? init\.draft\.batchChoice : null\)/, 'a parked lot choice must be revalidated by the options effect')
 

@@ -6176,6 +6176,7 @@
   "stock_session_no_lot_to_edit": "Every line was created at 0 — no received date to edit or reverse.",
   "stock_lines_without_cost": "line(s) have no receipt-level cost. Shared received-date totals are not guessed.",
   "stock_session_partial": "{n} line(s) could not be saved. Fix them and complete the session again.",
+  "stock_session_sign_in_changed": "Your sign-in changed. Close this session and open it again to continue.",
   "stock_session_too_large": "This session has more than 2,000 lines. Narrow or split it before editing.",
   "stock_session_updated": "Stock-in session updated",
   "trend_explanation": "Change compared with the immediately previous period of the same length. Formula: (current − previous) ÷ previous × 100.",

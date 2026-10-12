@@ -80,7 +80,7 @@ runTest('one line-building function feeds both the batched request and the seque
 })
 
 runTest("a whole-request failure that is NOT a 404 fails every still-pending line with one message, instead of silently retrying the slow loop", () => {
-  assert.match(performCommitBody(), /\} catch \(error\) \{\s*if \(!isActorReadScopeCurrent\(receivingScope, false\)\) return\s*requestFailure = [^\n]*\n\s*const message = failureText\(error, error instanceof Error \? error\.message : tr\('error', 'Error'\)\)[\s\S]*?failed \+= unsettled\.size\s*lines = lines\.map\(\(item\) => \(unsettled\.has\(item\.key\)/,
+  assert.match(performCommitBody(), /\} catch \(error\) \{\s*if \(!isActorReadScopeCurrent\(receivingScope, false\)\) \{ stopForSignInChange\(\); return \}\s*requestFailure = [^\n]*\n\s*const message = failureText\(error, error instanceof Error \? error\.message : tr\('error', 'Error'\)\)[\s\S]*?failed \+= unsettled\.size\s*lines = lines\.map\(\(item\) => \(unsettled\.has\(item\.key\)/,
     'every line no round has answered fails with the one message; a line an earlier round saved keeps "saved"')
 })
 
