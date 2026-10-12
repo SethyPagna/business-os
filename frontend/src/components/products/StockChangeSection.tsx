@@ -1397,10 +1397,10 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                 [tr(t, 'category', 'Category'), detail.category],
                 [tr(t, 'brand', 'Brand'), detail.brand],
                 [tr(t, 'tag', 'Tag'), detail.tag_label],
-                [tr(t, 'expiry_date', 'Expiry'), detail.batch_expiry_date],
+                [tr(t, 'expiry_date', 'Expiry'), detail.batch_expiry_date ? fmtDate(detail.batch_expiry_date) : null],
                 ...(detailShowsReceiptAccounting ? [
-                  [tr(t, 'payment_status', 'Payment status'), detail.batch_payment_status],
-                  [tr(t, 'credit_due_date', 'Not Paid due date'), detail.batch_credit_due_date],
+                  [tr(t, 'payment_status', 'Payment status'), detail.batch_payment_status === 'credit' ? tr(t, 'on_credit', 'Not Yet Paid') : detail.batch_payment_status === 'paid' ? tr(t, 'paid', 'Paid') : detail.batch_payment_status],
+                  [tr(t, 'credit_due_date', 'Due date (Not Yet Paid)'), detail.batch_credit_due_date ? fmtDate(detail.batch_credit_due_date) : null],
                   [tr(t, 'receipt_sessions', 'Receipt sessions'), detail.batch_receipt_session_count],
                 ] : []),
               ] as Array<[string, string | number | null | undefined]>).filter(([, value]) => value !== null && value !== undefined && value !== '').map(([label, value]) => (
