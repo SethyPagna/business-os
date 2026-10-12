@@ -67,7 +67,35 @@ export function planProductMergeReplay(current: ProductMergeCaseSnapshot, eviden
   const { receiptClones: _receipts, tagClones: _tags, ...expectedOrigins } = origins
   if (!same(expectedOrigins, saved)) return conflict()
   const exact = planExactProductMergeStock(original, 'merge')
+  planExactProductMergeStock(current, 'merge')
   const undo = direction === 'undo'
+  const matchesMetadata = (actual: Record<string, unknown> | undefined, expected: Record<string, unknown>, omitted: readonly string[] = []) =>
+    actual && Object.entries(expected).every(([key, value]) => omitted.includes(key) || actual[key] === value)
+  const currentReceipts = [...current.canonicalBatchRows, ...current.duplicateBatchRows]
+  const expectedReceipts = [...original.canonicalBatchRows, ...original.duplicateBatchRows, ...origins.receiptClones.map(row => row.metadata)]
+  if (currentReceipts.length !== expectedReceipts.length || expectedReceipts.some(row => !matchesMetadata(currentReceipts.find(actual => actual.id === row.id), row, ['lot_quantity', 'lot_stock_rows']))) return conflict()
+  const expectedTags = [...original.damagedStockRows, ...origins.tagClones.map(row => row.metadata)]
+  if (current.damagedStockRows.length !== expectedTags.length || expectedTags.some(row => !matchesMetadata(current.damagedStockRows.find(actual => actual.id === row.id), row, ['quantity_remaining']))) return conflict()
+  const expectedBranchQuantity = (productId: number, branchId: number) => productId === keeperId
+    ? (undo ? exact.keeperByBranch : exact.keeperSource.quantityByBranch).get(branchId) ?? 0
+    : undo ? 0 : exact.duplicateSource.quantityByBranch.get(branchId) ?? 0
+  for (const [productId, rows] of [[keeperId, current.canonicalStockBefore], [loserId, current.duplicateStockRows]] as const) {
+    if (rows.some(row => row.quantity !== expectedBranchQuantity(productId, row.branch_id))) return conflict()
+  }
+  if (current.canonicalProduct.stock_quantity !== (undo ? exact.keeperTotal : exact.keeperSource.total)
+    || current.duplicateProduct.stock_quantity !== (undo ? 0 : exact.duplicateSource.total)) return conflict()
+  const expectedReceiptStock = new Map(original.canonicalBatchStockRows.map(row => [`${row.batch_id}:${row.branch_id}`, row.quantity]))
+  for (const row of original.duplicateBatchStockRows) expectedReceiptStock.set(`${undo ? origins.receiptOrigins.find(receipt => receipt.original.id === row.batch_id)!.targetReceiptId : row.batch_id}:${row.branch_id}`, row.quantity)
+  const currentReceiptStock = [...current.canonicalBatchStockRows, ...current.duplicateBatchStockRows]
+  if (currentReceiptStock.some(row => row.quantity !== (expectedReceiptStock.get(`${row.batch_id}:${row.branch_id}`) ?? 0))
+    || [...expectedReceiptStock].some(([key, quantity]) => !currentReceiptStock.some(row => `${row.batch_id}:${row.branch_id}` === key && row.quantity === quantity))) return conflict()
+  for (const row of expectedTags) {
+    const originalTag = original.damagedStockRows.find(tag => tag.id === row.id)
+    const derivedTag = origins.tagOrigins.find(tag => tag.targetTagId === row.id)
+    const remaining = derivedTag ? undo ? original.damagedStockRows[derivedTag.original.index].quantity_remaining : 0
+      : originalTag!.product_id === loserId && undo ? 0 : originalTag!.quantity_remaining
+    if (current.damagedStockRows.find(actual => actual.id === row.id)!.quantity_remaining !== remaining) return conflict()
+  }
   const write = (sql: string, params?: BindParams): Statement => ({ sql, params })
   const guard = (predicate: string, params: BindParams) => write(`SELECT CASE WHEN ${predicate} THEN 1 ELSE json_extract('[1]','$[merge_state_conflict]') END`, params)
   const statements: Statement[] = [sourceGuard, guard(`EXISTS(SELECT 1 FROM undo_snapshots p JOIN action_history h ON h.id=@historyId
@@ -183,5 +211,5 @@ export function planProductMergeReplay(current: ProductMergeCaseSnapshot, eviden
   statements.push(write(`UPDATE action_history SET undo_payload=@next,redo_payload=@next,status=@status,updated_at=CURRENT_TIMESTAMP
     WHERE id=@historyId AND undo_payload=@prior AND redo_payload=@prior`, { next, status: undo ? 'redoable' : 'undoable', historyId: history.id, prior: history.undo_payload }),
     write(`UPDATE undo_snapshots SET status='sealing',payload_json=json_set(payload_json,'$.post_capture',json((SELECT data FROM (${sourceRead.sql}) WHERE oversized=0))) WHERE id=@transitionId`, { ...sourceRead.params, transitionId }))
-  return { statements, pointer: nextPointer, requiredPermissions, moved: exact.moved }
+  return { statements: statements.map(row => ({ ...row, sql: row.sql.replace(/\r/g, '') })), pointer: nextPointer, requiredPermissions, moved: exact.moved }
 }
