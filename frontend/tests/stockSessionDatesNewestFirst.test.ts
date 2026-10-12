@@ -23,3 +23,25 @@ for (const mode of ['add', 'remove', 'set'] as const) {
     mode === 'remove' ? [3, 1, 4, 5] : [2, 3, 1, 4, 5], `${mode}: undated lots follow all dates in stable order`)
 }
 console.log('PASS mixed-year received dates, eligibility, explicit selection and independent defaults')
+
+// Two lots received on the SAME business day, hours apart (02:00Z and 10:00Z are 09:00 and 17:00 in Cambodia). The list is
+// newest received first by the full timestamp, not by the day alone, whichever order the Worker sends them in.
+const morning = { id: 6, quantity: 3, received_at: '2026-09-01 02:00:00' }
+const evening = { id: 7, quantity: 3, received_at: '2026-09-01 10:00:00' }
+const earlierDay = { id: 8, quantity: 3, received_at: '2026-08-31 23:00:00' }
+for (const incoming of [[morning, evening, earlierDay], [earlierDay, evening, morning], [evening, earlierDay, morning]]) {
+  for (const mode of ['add', 'remove', 'set'] as const) {
+    assert.deepEqual(sessionLotChoices(mode, incoming, supplier).map(lot => lot.id), [7, 6, 8], `${mode}: same-day lots are newest received first, ${incoming.map(lot => lot.id).join(',')}`)
+  }
+  // The starting lot is not a function of the new display order: Remove still starts on the oldest, Set on the newest.
+  assert.equal(defaultLotChoice({ mode: 'remove', choices: sessionLotChoices('remove', incoming, supplier) }), 8, 'Remove starts on the oldest lot')
+  assert.equal(defaultLotChoice({ mode: 'set', choices: sessionLotChoices('set', incoming, supplier) }), 7, 'Set starts on the newest lot')
+}
+// Same day only: the oldest of the day is Remove's start, the latest of the day is Set's, whatever the arrival order.
+for (const sameDay of [[morning, evening], [evening, morning]]) {
+  const removeChoices = sessionLotChoices('remove', sameDay, supplier)
+  const setChoices = sessionLotChoices('set', sameDay, supplier)
+  assert.equal(defaultLotChoice({ mode: 'remove', choices: removeChoices }), 6, 'Remove starts on the earlier lot of the day, not the first listed')
+  assert.equal(defaultLotChoice({ mode: 'set', choices: setChoices }), 7, 'Set starts on the later lot of the day')
+}
+console.log('PASS same-day lots are newest received first and the starting lot does not follow the display order')
