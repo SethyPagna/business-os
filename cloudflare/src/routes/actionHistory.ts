@@ -440,6 +440,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     }
     if (isProductMergeV2Payload(parseJson(existing.undo_payload))) {
       const payload = parseJson(direction === 'undo' ? existing.undo_payload : existing.redo_payload)
+      let replayConfirmed = false
       try {
         const token = getCookie(c, 'bos_session')
         if (!token) return c.json({ success: false, code: 'merge_replay_permission', error: 'Sign in again before continuing.' }, 403)
@@ -452,15 +453,17 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         if (!applier) return c.json({ success: false, code: UNDO_HISTORY_STALE_CODE, error: 'Refresh this history item.' }, 409)
         const outcome = await applier.run(payload, { env: c.env, user, direction, historyId: existing.id,
           generation: body.expected_generation, productMergeReplayAuthority: authority })
+        replayConfirmed = true
         const { notifyProductMergeReplay } = await import('../lib/productMergeReplayAction')
         c.executionCtx.waitUntil(notifyProductMergeReplay(c.env).catch(error => console.error('[merge replay cache]', error)))
         const row = await db.prepare('SELECT * FROM action_history WHERE id=@id').getOnce!<ActionHistoryRow>({ id: existing.id })
+        if (!row) throw Object.assign(new Error('The committed merge replay response could not be loaded. Retry this same generation.'), { code: 'merge_replay_outcome_unknown', statusCode: 503 })
         return c.json(visibleHistoryReplayResponse({ success: true, applied: true, ...outcome,
           item: row ? await mapRow(row, user, c.env) : null, payload: parseJson(row?.undo_payload) }, user))
       } catch (error) {
         const raw = error as { statusCode?: number; code?: string; message?: string }
-        const status = [400,403,404,409,503].includes(Number(raw.statusCode)) ? raw.statusCode! as 400 | 403 | 404 | 409 | 503 : 500
-        return c.json({ success: false, code: raw.code || 'undo_history_unusable', error: raw.message || 'Merge replay could not be confirmed.',
+        const status = [400,403,404,409,503].includes(Number(raw.statusCode)) ? raw.statusCode! as 400 | 403 | 404 | 409 | 503 : replayConfirmed ? 503 : 500
+        return c.json({ success: false, code: raw.code || (replayConfirmed ? 'merge_replay_outcome_unknown' : 'undo_history_unusable'), error: raw.message || 'Merge replay could not be confirmed.',
           ...(status === 503 ? { action: 'retry_same_request' } : {}), ...(raw.code === 'merge_replay_over_plan_budget' ? { outcome: 'not_dispatched' } : {}) }, status)
       }
     }

@@ -19,7 +19,8 @@ function measure(f){
   let queries=0;const raw=f.env.DB,sqls=[]
   const wrap=(statement,text)=>new Proxy(statement,{get(target,key){if(key==='bind')return(...args)=>wrap(target.bind(...args),text);if(['first','all','run'].includes(key))return(...args)=>{queries++;sqls.push(text);return target[key](...args)};return target[key]}})
   f.env.DB=new Proxy(raw,{get(target,key){if(key==='prepare')return text=>wrap(target.prepare(text),text);if(key==='batch')return rows=>{queries+=rows.length;sqls.push(...rows.map(row=>row.text));return target.batch(rows)};return target[key]}})
-  const original=f.call
+  let original=f.call
+  f.replaceCaller=caller=>{original=caller}
   f.call=async(url,body,method)=>{
     queries=0;sqls.length=0;const result=await original(url,body,method);const tier=f.env.PLAN_TIER
     assert.ok(queries<=(tier==='free'?50:1000),'actual current invocation tier including all response/cache tails')
@@ -34,7 +35,7 @@ function measure(f){
   return f
 }
 async function setup(worker, tier, receipt = true, tagged = true, catalog = false, selected = false, zero = false) {
-  const f = measure(await pair.world(worker, catalog?'paid':tier, receipt, tagged))
+  const f = measure(await pair.world(worker, catalog&&!process.argv.includes('--free-forward')?'paid':tier, receipt, tagged))
   if (catalog) await executeStockTransaction(getDb(f.env), [
     { sql: "UPDATE products SET image_path='',parent_id=2 WHERE id=1" },
     { sql: "UPDATE products SET image_path='loser-primary' WHERE id=2" },
@@ -61,7 +62,13 @@ async function setup(worker, tier, receipt = true, tagged = true, catalog = fals
     if(process.argv.includes('--free-forward'))f.env.PLAN_TIER=tier
     const merged = await f.call('/products/possible-duplicates/merge', { keepId: 1, mergeId: 2, stock: 'merge', client_request_id: 'replay-http-original' })
     if(process.argv.includes('--free-forward')&&merged.status===409){
-      assert.equal(merged.json.code,'merge_request_budget');assert.deepEqual(state(f),before)
+      assert.equal(merged.json.code,'merge_request_budget')
+      const current=state(f),expected=structuredClone(before)
+      const marker=current.system_flags.find(row=>row.key==='core_invariants_build')
+      assert.equal(JSON.parse(marker.value).status,'verified')
+      current.system_flags=current.system_flags.filter(row=>row.key!=='core_invariants_build')
+      expected.system_flags=expected.system_flags.filter(row=>row.key!=='core_invariants_build')
+      assert.deepEqual(current,expected)
       console.log('PASS genuine Free rich forward remains bounded write-free admission refusal; Paid-produced Free replay is separate')
       return {...f,historyId:null,before}
     }
@@ -71,6 +78,18 @@ async function setup(worker, tier, receipt = true, tagged = true, catalog = fals
   const originalPlan = f.sql.prepare("SELECT payload_json FROM undo_snapshots WHERE kind='product.merge.plan.v2'").get().payload_json
   if(selected)assert.equal((await f.call(`/action-history/${historyId}/undo`,{expected_generation:-1})).status,400)
   f.env.PLAN_TIER=tier
+  if(catalog&&tier==='free'){
+    const replayWorker=worker()
+    f.replaceCaller(async(url,body,method='POST')=>{
+      const tasks=[]
+      const response=await replayWorker.default.fetch(new Request('https://admin.business.test/api'+url,{method,
+        headers:{cookie:'bos_session=counted-set-native','content-type':'application/json',origin:'https://admin.business.test'},body:JSON.stringify(body)}),f.env,
+        {waitUntil:promise=>tasks.push(Promise.resolve(promise)),passThroughOnException(){}})
+      while(tasks.length)await Promise.all(tasks.splice(0))
+      return{status:response.status,json:await response.json()}
+    })
+    assert.equal((await f.call(`/action-history/${historyId}/undo`,{expected_generation:-1})).status,400)
+  }
   return {...f,historyId,before,originalPlan}
 }
 function intercept(f, callback) {
@@ -214,16 +233,85 @@ async function budget(worker,tier){
   assert.equal(await trial(accepted),true);assert.equal(await trial(refused),false)
   console.log(`PASS exact actual upstream-read admission boundary ${tier}: ${accepted} accepted, ${refused} refused before stock dispatch`)
 }
+async function edgeControls(worker,tier){
+  for(const mode of['server-managed','stale-head','original-image','derived-image','response-fault','tail-retries']){
+    const f=await setup(worker,tier,true,true,true)
+    try{
+      let once=false,responseFault=false,permissionReads=0
+      const failures=new Set()
+      const batches=intercept(f,(_rows,phase)=>{
+        if(phase==='after'&&mode==='response-fault'&&!once){once=true;responseFault=true}
+        if(phase==='after'&&mode==='tail-retries'&&!once){once=true;throw Error('network lost acknowledgement')}
+      })
+      if(mode==='server-managed'){
+        const pointer=JSON.parse(f.sql.prepare('SELECT undo_payload FROM action_history WHERE id=?').get(f.historyId).undo_payload)
+        const before=state(f)
+        assert.equal((await f.call('/action-history',{scope:'products',entity:'product_merge',entity_id:pointer.operation_id,undo_payload:pointer,redo_payload:pointer})).status,403)
+        assert.equal((await f.call(`/action-history/${f.historyId}`,{status:'redoable'},'PATCH')).status,403)
+        assert.deepEqual(state(f),before);assert.equal(batches(),0)
+      }else if(mode==='stale-head'){
+        assert.equal((await call(f,'undo',0)).status,200);assert.equal((await call(f,'redo',1)).status,200)
+        const before=state(f);const stale=await call(f,'undo',0)
+        assert.equal(stale.status,409);assert.equal(stale.json.code,'undo_history_stale');assert.deepEqual(state(f),before);assert.equal(batches(),2)
+      }else if(mode.endsWith('image')){
+        if(mode==='derived-image')assert.equal((await call(f,'undo',0)).status,200)
+        f.sql.prepare('INSERT INTO product_images(id,product_id,image_path)VALUES(?,4,?)').run(mode==='original-image'?12:14,'Later unrelated image')
+        const before=state(f),result=await call(f,mode==='original-image'?'undo':'redo',mode==='original-image'?0:1)
+        assert.equal(result.status,409,JSON.stringify(result.json));assert.deepEqual(state(f),before)
+      }else{
+        const raw=f.env.DB
+        if(mode==='tail-retries'){
+          f.sql.exec('DELETE FROM cache_versions')
+          f.env.CACHE={get:async()=>{throw Error('synthetic KV unavailable')},put:async()=>{throw Error('synthetic KV unavailable')},delete:async()=>{}}
+        }
+        f.env.DB=new Proxy(raw,{get(target,key){
+          if(key==='prepare')return text=>{
+            const statement=target.prepare(text)
+            return new Proxy(statement,{get(t,k){if(k==='bind')return(...args)=>{
+              const bound=t.bind(...args)
+              return new Proxy(bound,{get(b,m){if(m==='all')return async(...values)=>{
+                const result=await b.all(...values)
+                if(responseFault&&text.includes('SELECT * FROM action_history WHERE id=')){responseFault=false;throw Error('network response read lost')}
+                if(mode==='tail-retries'){
+                  const group=text.includes('SELECT namespace, version FROM cache_versions')?'cache-read':text.includes('INSERT INTO quota_usage')?'quota':null
+                  if(group&&!failures.has(group)){failures.add(group);throw Error('D1_ERROR: internal error')}
+                  if(text.includes('SELECT payload_json FROM undo_snapshots')){permissionReads++;if(permissionReads===1||permissionReads===3)throw Error('D1_ERROR: internal error')}
+                }
+                return result
+              };return b[m]}})
+            };return t[k]}})
+          }
+          if(key==='batch')return async rows=>{
+            const result=await target.batch(rows)
+            if(mode==='tail-retries'&&rows.some(row=>row.text.includes('INSERT INTO cache_versions'))&&!failures.has('cache-write')){failures.add('cache-write');throw Error('D1_ERROR: internal error')}
+            return result
+          }
+          return target[key]
+        }})
+        const result=await call(f,'undo',0)
+        assert.equal(result.status,mode==='response-fault'?503:200,JSON.stringify(result.json));invariant(f,true)
+        if(mode==='response-fault'){assert.equal(result.json.code,'merge_replay_outcome_unknown');assert.equal(result.json.action,'retry_same_request')}
+        else assert.deepEqual([...failures].sort(),tier==='free'?['cache-read','cache-write','quota']:['cache-read','cache-write'])
+        const before=state(f),retry=await call(f,'undo',0)
+        assert.equal(retry.status,200);assert.equal(retry.json.replayed,true);assert.deepEqual(state(f),before);assert.equal(batches(),1)
+        assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='action_undo'").get().n,1)
+      }
+      console.log(`PASS actual HTTP edge control ${tier} ${mode}`)
+    }finally{f.sql.close()}
+  }
+}
 async function main() {
   const worker = await h.bundle.exports.bundleWorker()
   if(process.argv.includes('--smoke')){await positive(worker,'free',true,true,false,'normal');return}
   if(process.argv.includes('--free-forward')){await positive(worker,'free',true,true,true,'normal');return}
+  if(process.argv.includes('--edge-controls')){for(const tier of ['free','paid'])await edgeControls(worker,tier);return}
   for(const tier of ['free','paid']){
     for(const receipt of[false,true])for(const tagged of[false,true])await positive(worker,tier,receipt,tagged,false,'normal')
     for(const receipt of[false,true])for(const tagged of[false,true])await positive(worker,tier,receipt,tagged,true,'normal')
     for(const mode of['lost-ack','nonadmin','cache-fault','zero'])await positive(worker,tier,true,true,true,mode)
     await refusals(worker,tier)
     await budget(worker,tier)
+    await edgeControls(worker,tier)
   }
   console.log('LOCAL ACTUAL HTTP REPLAY: original real-pair producer plus explicit selected-catalog compiler producer permission controls; full invocation tails counted, no deployment/device certificate')
   console.log('TOTALS '+JSON.stringify({requests:measurements.length,free:Math.max(...measurements.filter(row=>row.tier==='free').map(row=>row.queries)),paid:Math.max(...measurements.filter(row=>row.tier==='paid').map(row=>row.queries))}))
