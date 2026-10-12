@@ -220,6 +220,7 @@ const productWrites = loadReal('lib/productWrites.ts', { './schemaProbe': schema
   // above, not left to fall through to node's own require() (which can't
   // resolve a bare .ts file).
   './importImageMatch': { MAX_IMAGES_PER_PRODUCT: 3 },
+  './productDiscountGate': loadReal('lib/productDiscountGate.ts'),
   '../index': {},
 })
 const reviewApply = loadReal('lib/reviewApply.ts', {
@@ -279,6 +280,7 @@ const reviewQueueRoute = loadReal('routes/reviewQueue.ts', {
   '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   ...dbStub,
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
+  '../lib/productDiscountGate': loadReal('lib/productDiscountGate.ts'),
   '../lib/productWrites': productWrites,
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', CURRENT_USER); return next() } },

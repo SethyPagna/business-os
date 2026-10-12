@@ -22,6 +22,7 @@ import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { getDb } from '../lib/db'
 import { reviewApprovalPermissionError } from '../lib/reviewApprovalPermission'
+import { normalizeProductDiscountBody, ProductDiscountInputError } from '../lib/productDiscountGate'
 import { assertBranchExpectedState, BranchEditConflictError, BranchApprovalReceiptError } from '../lib/branchWrites'
 import type { BranchIdentitySnapshot } from '../lib/canonicalBranchIdentity'
 
@@ -136,6 +137,14 @@ app.post('/:id/resubmit', async (c) => {
         if (stable(oldPayload) !== stable(JSON.parse(payloadJson))) {
           return c.json({ error: 'A saved product price plan cannot be edited. Submit a new product edit; unchanged resubmission is allowed.', code: 'product_money_plan_immutable' }, 409)
         }
+      }
+      // OPUS-H-7: a resubmitted product payload is held to the same canonical discount block as a new edit
+      // (after the plan checks, which compare what the requester sent with what was saved).
+      const nextPayload = JSON.parse(payloadJson) as unknown
+      if (nextPayload && typeof nextPayload === 'object' && !Array.isArray(nextPayload)) {
+        const invalidDiscount = normalizeProductDiscountBody(nextPayload as Record<string, unknown>)
+        if (invalidDiscount) return c.json(invalidDiscount, 400)
+        payloadJson = JSON.stringify(nextPayload)
       }
     }
   }
@@ -263,6 +272,7 @@ app.post('/:id/approve', async (c) => {
       ...(err.code === 'unknown_outcome' ? { action: 'retry_same_request' } : {}) }, err.status)
     if (err instanceof BranchEditConflictError) return c.json({ success: false, error: err.message, code: err.code, conflict: true }, 409)
     if (err instanceof ProductMoneyWriteError) return c.json({ error: err.message, code: err.code }, err.status as 400 | 409)
+    if (err instanceof ProductDiscountInputError) return c.json({ error: err.message, code: err.code, field: err.field }, 400)
     if (err instanceof NoReviewApplierError) {
       return c.json({ error: err.message, code: 'no_review_applier' }, 501)
     }

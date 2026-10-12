@@ -53,6 +53,7 @@ const productWrites = load('lib/productWrites.ts', {
   './importImageMatch': { MAX_IMAGES_PER_PRODUCT: 3 },
   '../index': {},
   './schemaProbe': load('lib/schemaProbe.ts'),
+  './productDiscountGate': load('lib/productDiscountGate.ts'),
 })
 
 const { validateProductImageGallery, validatePreservedProductImageGallery, ProductImageLimitError } = productWrites

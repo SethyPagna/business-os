@@ -59,6 +59,7 @@ function loadRoute(state) {
   const stubs = {
     '../lib/reviewApprovalPermission': loadMoneyDependency('reviewApprovalPermission'),
     '../lib/acquisitionCostAccess': loadMoneyDependency('acquisitionCostAccess'),
+    '../lib/productDiscountGate': loadMoneyDependency('productDiscountGate'),
     '../lib/productWrites': productWrites,
     '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
     '../lib/db': loadMoneyDependency('db'),

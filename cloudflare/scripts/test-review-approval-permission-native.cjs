@@ -372,6 +372,128 @@ async function main() {
     assert.equal(bad.length, 0)
   })
 
+  // ============================================================= OPUS-H-1: discount switch spellings (6.0.37)
+  await group(`OPUS-H-1 review: ${ODD_ENABLED.length} odd discount_enabled spellings are refused 400 for every reviewer, till unchanged`, async w => {
+    const pid = await makeProduct(w, 'Enabled review')
+    const t = cases()
+    for (const reviewer of [NOPRICE, FULL]) {
+      grants(w, reviewer)
+      for (const value of ODD_ENABLED) {
+        setDiscount(w, pid, { enabled: 0, percent: 50 })
+        const before = effect(w, pid)
+        const id = queue(w, 'products', 'update', 'product', { discount_enabled: value }, pid)
+        const snap = snapshot(w)
+        const result = await approve(w, id)
+        const after = effect(w, pid)
+        t.check(`${reviewer === FULL ? 'price' : 'no-price'} ${JSON.stringify(value)}`, result.status === 400 && result.body?.code === 'invalid_discount_enabled'
+          && snapshot(w) === snap && status(w, id) === 'open', { status: result.status, code: result.body?.code, before: before.till, after: after.till })
+      }
+    }
+    t.done(ODD_ENABLED.length * 2)
+  })
+  await group(`OPUS-H-1 direct PUT: ${ODD_ENABLED.length} odd discount_enabled spellings are refused 400 for every editor, till unchanged`, async w => {
+    const pid = await makeProduct(w, 'Enabled direct')
+    const t = cases()
+    for (const editor of [3, 4]) {
+      for (const value of ODD_ENABLED) {
+        setDiscount(w, pid, { enabled: 0, percent: 50 })
+        const snap = snapshot(w)
+        const result = await request(w, 'products', 'PUT', `/${pid}`, { discount_enabled: value }, editor)
+        t.check(`${editor === 4 ? 'price' : 'no-price'} ${JSON.stringify(value)}`, result.status === 400 && result.body?.code === 'invalid_discount_enabled'
+          && snapshot(w) === snap, { status: result.status, code: result.body?.code, till: till(w, pid) })
+      }
+    }
+    t.done(ODD_ENABLED.length * 2)
+  })
+  await group('OPUS-H-1 direct POST and review create: odd discount_enabled spellings are refused 400 and create nothing', async w => {
+    grants(w, FULL)
+    const t = cases()
+    for (const value of ['1.0', 2, 'yes', ' 1', 'false ']) {
+      const snap = snapshot(w)
+      const direct = await request(w, 'products', 'POST', '/', { name: `Create ${JSON.stringify(value)}`, discount_enabled: value, discount_percent: 50 }, 4)
+      t.check(`direct ${JSON.stringify(value)}`, direct.status === 400 && direct.body?.code === 'invalid_discount_enabled' && snapshot(w) === snap, direct)
+      const id = queue(w, 'products', 'create', 'product', { name: `Queued ${JSON.stringify(value)}`, discount_enabled: value, discount_percent: 50 }, null)
+      const snap2 = snapshot(w)
+      const queued = await approve(w, id)
+      t.check(`review ${JSON.stringify(value)}`, queued.status === 400 && queued.body?.code === 'invalid_discount_enabled' && snapshot(w) === snap2, queued)
+    }
+    t.done(10)
+  })
+  await group('OPUS-H-1 controls: canonical spellings compare on the stored value; with the grant they write exact 0/1', async w => {
+    const pid = await makeProduct(w, 'Enabled controls')
+    const t = cases()
+    for (const value of [1, true, '1', 'true', 'TRUE']) {
+      setDiscount(w, pid, { enabled: 0, percent: 50 })
+      grants(w, NOPRICE)
+      const id = queue(w, 'products', 'update', 'product', { discount_enabled: value }, pid)
+      const snap = snapshot(w)
+      const r = await approve(w, id)
+      t.check(`no-price review ${JSON.stringify(value)} -> 403`, r.status === 403 && r.body?.permission === 'products:price' && snapshot(w) === snap, r)
+      const d = await request(w, 'products', 'PUT', `/${pid}`, { discount_enabled: value }, 3)
+      t.check(`no-price PUT ${JSON.stringify(value)} -> 403`, d.status === 403 && d.body?.code === 'product_price_edit_required', d)
+      grants(w, FULL)
+      const ok = await approve(w, id)
+      const e = effect(w, pid)
+      t.check(`price review ${JSON.stringify(value)} -> 200 exact 1`, ok.status === 200 && e.row.e === 1 && e.row.et === 'integer' && e.till.unit_price_usd === 2.5 && e.sql === 1, { ok, e })
+    }
+    for (const value of [0, false, '0', 'false', 'FALSE', null, '']) {
+      setDiscount(w, pid, { enabled: 0, percent: 50 })
+      grants(w, NOPRICE)
+      const r = await approve(w, queue(w, 'products', 'update', 'product', { discount_enabled: value }, pid))
+      const e = effect(w, pid)
+      t.check(`no-price review unchanged ${JSON.stringify(value)} -> 200`, r.status === 200 && e.till.unit_price_usd === 5 && e.sql === 0
+        && (e.row.e === 0 || e.row.e === null) && e.row.et !== 'text', { r, e })
+      setDiscount(w, pid, { enabled: 0, percent: 50 })
+      const d = await request(w, 'products', 'PUT', `/${pid}`, { discount_enabled: value }, 3)
+      const e2 = effect(w, pid)
+      t.check(`no-price PUT unchanged ${JSON.stringify(value)} -> 200`, d.status === 200 && e2.till.unit_price_usd === 5 && e2.sql === 0 && e2.row.et !== 'text', { d, e2 })
+    }
+    setDiscount(w, pid, { enabled: 1, percent: 50 })
+    const d = await request(w, 'products', 'PUT', `/${pid}`, { discount_enabled: 'TRUE' }, 3)
+    const e = effect(w, pid)
+    t.check('active TRUE text stays exact INTEGER 1 and both readers agree', d.status === 200 && e.row.e === 1 && e.row.et === 'integer' && e.sql === 1 && e.till.active, { d, e })
+    t.done(5 * 3 + 7 * 2 + 1)
+  })
+  await group(`OPUS-H-1 discount_type: ${ODD_TYPE.length} odd kinds are refused 400 on review and direct PUT; exact kinds compare on the stored value`, async w => {
+    const pid = await makeProduct(w, 'Kind spellings')
+    const t = cases()
+    for (const value of ODD_TYPE) {
+      setDiscount(w, pid, { enabled: 1, type: 'fixed', percent: 50, usd: 1 })
+      grants(w, FULL)
+      const id = queue(w, 'products', 'update', 'product', { discount_type: value }, pid)
+      const snap = snapshot(w)
+      const r = await approve(w, id)
+      t.check(`review ${JSON.stringify(value)}`, r.status === 400 && r.body?.code === 'invalid_discount_type' && snapshot(w) === snap, r)
+      const d = await request(w, 'products', 'PUT', `/${pid}`, { discount_type: value }, 4)
+      t.check(`PUT ${JSON.stringify(value)}`, d.status === 400 && d.body?.code === 'invalid_discount_type' && snapshot(w) === snap, d)
+    }
+    setDiscount(w, pid, { enabled: 1, type: 'fixed', percent: 50, usd: 1 })
+    const same = await request(w, 'products', 'PUT', `/${pid}`, { discount_type: 'FIXED' }, 3)
+    const e = effect(w, pid)
+    t.check('FIXED is the stored fixed kind: unchanged for no-price, stored lower-case', same.status === 200 && e.row.ty === 'fixed' && e.till.unit_price_usd === 4 && e.sql === 1, { same, e })
+    const flip = await request(w, 'products', 'PUT', `/${pid}`, { discount_type: 'percent' }, 3)
+    t.check('fixed -> percent needs products:price', flip.status === 403 && flip.body?.code === 'product_price_edit_required', flip)
+    t.done(ODD_TYPE.length * 2 + 2)
+  })
+  await group('OPUS-H-1 legacy stored spellings: a value the readers disagree on is a change, never "unchanged"', async w => {
+    const pid = await makeProduct(w, 'Legacy stored')
+    grants(w, NOPRICE)
+    const t = cases()
+    // stored TEXT the kernel reads as ON (truthy) and SQL reads as OFF: writing canonical 0 would remove the discount
+    // on the till, so it is a price change.
+    for (const stored of ['false', 'no', 2, 'fixed ']) {
+      const isKind = stored === 'fixed '
+      w.raw.prepare(`UPDATE products SET selling_price_usd=5, discount_enabled=?, discount_type=?, discount_percent=50, discount_amount_usd=1 WHERE id=?`)
+        .run(isKind ? 1 : stored, isKind ? stored : 'percent', pid)
+      const payload = isKind ? { discount_type: 'fixed' } : { discount_enabled: 0 }
+      const r = await approve(w, queue(w, 'products', 'update', 'product', payload, pid))
+      t.check(`review over stored ${JSON.stringify(stored)}`, r.status === 403 && r.body?.permission === 'products:price', r)
+      const d = await request(w, 'products', 'PUT', `/${pid}`, payload, 3)
+      t.check(`PUT over stored ${JSON.stringify(stored)}`, d.status === 403, d)
+    }
+    t.done(8)
+  })
+
   // ================================================================================ OPUS-H hunt: flow cases
   await group('OPUS-H hunt: 7 flow cases (revocation, self approval, forged pointer, case variant, mixed sequence, re-approval)', async w => {
     const pid = await makeProduct(w, 'Flow hunt')
@@ -412,6 +534,21 @@ async function main() {
     const r2 = await approve(w, done)
     t.check('already-approved row re-approved: with grant 409 / without grant 403', r1.status === 409 && r2.status === 403, { r1: r1.status, r2: r2.status })
     t.done(7)
+  })
+
+  // ========================================================= OPUS-H-7: rejected legacy rows can be resubmitted
+  await group('OPUS-H-7: a requester resubmitting a rejected plan-less row with "1.0" cannot get a discount approved', async w => {
+    const pid = await makeProduct(w, 'Resubmit')
+    setDiscount(w, pid, { enabled: 0, percent: 50 })
+    const id = queue(w, 'products', 'update', 'product', { description: 'first' }, pid)
+    grants(w, FULL)
+    assert.equal((await request(w, 'reviewQueue', 'POST', `/${id}/reject`, { reason: 'no' })).status, 200)
+    const resubmit = await request(w, 'reviewQueue', 'POST', `/${id}/resubmit`, { payload: { discount_enabled: '1.0' } }, 1)
+    assert.ok([200, 400].includes(resubmit.status), JSON.stringify(resubmit))
+    grants(w, NOPRICE)
+    const r = await approve(w, id)
+    assert.notEqual(r.status, 200, JSON.stringify(r))
+    assert.deepEqual(till(w, pid), { active: false, unit_price_usd: 5 })
   })
 
   // ========================================================================= D1 query budget (Free 50 / Paid 1000)

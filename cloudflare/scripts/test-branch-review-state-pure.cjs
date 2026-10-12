@@ -491,7 +491,7 @@ const moneyErrors = evaluate(named('cloudflare/src/lib/productWrites.ts', ['Prod
 const imageErrors = evaluate(named('cloudflare/src/lib/productImagePermission.ts', ['ProductImageAssetError']), {}, '{ProductImageAssetError}')
 function reviewRoute(route, overrides = {}, reviewOverrides = {}) {
   return evaluate(`const handler=${selectRoute('cloudflare/src/routes/reviewQueue.ts', 'post', route)}`, {
-    ...branchDeps, ...lib('pendingActions'), ...lib('reviewApprovalPermission'), ...review(reviewOverrides), ...moneyErrors, ...imageErrors, ...lib('productDelete'), ...lib('productStockGuard'),
+    ...branchDeps, ...lib('pendingActions'), ...lib('reviewApprovalPermission'), ...lib('productDiscountGate'), ...review(reviewOverrides), ...moneyErrors, ...imageErrors, ...lib('productDelete'), ...lib('productStockGuard'),
     ...lib('acquisitionCostAccess'), hasProductMoneyPolicy: () => { throw new Error('Out of scope product money path invoked') }, ...overrides,
   }, 'handler')
 }

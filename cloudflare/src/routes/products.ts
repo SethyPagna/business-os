@@ -2,7 +2,7 @@ import { assertProductStatusInput, assertProductsActive, catalogProductSql, prod
 import { Hono } from 'hono'
 import { acquisitionCostResponses, canEditAcquisitionCosts, hasCatalogCostWrite } from '../lib/acquisitionCostAccess'
 import { roundMoney4 } from '../lib/moneyPrecision'
-import { PRODUCT_DISCOUNT_PRICE_FIELDS, PRODUCT_DISCOUNT_PRICE_REFUSAL, PRODUCT_DISCOUNT_SELECT, productDiscountChanged } from '../lib/productDiscountGate'
+import { PRODUCT_DISCOUNT_PRICE_FIELDS, PRODUCT_DISCOUNT_PRICE_REFUSAL, PRODUCT_DISCOUNT_SELECT, normalizeProductDiscountBody, productDiscountChanged } from '../lib/productDiscountGate'
 import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { collectMergeProductIds, describeMergeFailure } from '../lib/mergeRouteLog'
@@ -2130,6 +2130,9 @@ app.post('/', async (c) => {
   if (hasCatalogCostWrite(body, user)) {
     return c.json({ error: 'Cost-entry permission is required to set catalog costs.', code: 'product_cost_edit_required' }, 403)
   }
+  // OPUS-H-1: the discount block is stored exactly as the price gate below compares it (lib/productDiscountGate.ts).
+  const invalidDiscount = normalizeProductDiscountBody(body)
+  if (invalidDiscount) return c.json(invalidDiscount, 400)
   try { await prepareProductMoneyWrite(c.env, body, null) } catch (error) {
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error
@@ -2356,6 +2359,9 @@ app.put('/:id', async (c) => {
   // the permission check, so neither the audit diff, the edit-fold nor the
   // review queue ever sees the form's stale figure.
   delete body.stock_quantity
+  // OPUS-H-1: canonical before the money plan, the price gate, the review queue and the writer see it.
+  const invalidDiscount = normalizeProductDiscountBody(body)
+  if (invalidDiscount) return c.json(invalidDiscount, 400)
 
   // Optimistic-concurrency guard, the same one every other editable entity
   // enforces (contacts/sales/branches/notes/... via conflictControl). The
@@ -2925,6 +2931,8 @@ app.post('/variant', async (c) => {
   if (hasCatalogCostWrite(body, user)) {
     return c.json({ error: 'Cost-entry permission is required to set catalog costs.', code: 'product_cost_edit_required' }, 403)
   }
+  const invalidDiscount = normalizeProductDiscountBody(body)
+  if (invalidDiscount) return c.json(invalidDiscount, 400)
   try { await prepareProductMoneyWrite(c.env, body, null) } catch (error) {
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error

@@ -6,7 +6,7 @@ import { hasCatalogCostWrite } from './acquisitionCostAccess'
 import { getDb } from './db'
 import { roundMoney4, subtractDecimalSum } from './moneyPrecision'
 import { readProductMoneyPlan } from './productWrites'
-import { productDiscountChanged, PRODUCT_DISCOUNT_PRICE_FIELDS } from './productDiscountGate'
+import { normalizeProductDiscountBody, productDiscountChanged, PRODUCT_DISCOUNT_PRICE_FIELDS } from './productDiscountGate'
 import { productImageFieldsChanged, productImageFieldsChangedResolved } from './productImagePermission'
 
 // Finding H (12 Oct 2026): approving a queued request replays its write with the REVIEWER's authority
@@ -30,7 +30,7 @@ const REVIEW_ACTIONS: Readonly<Record<string, string>> = {
 const PRICE_FIELDS = ['selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr'] as const
 const owns = (body: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(body, key)
 
-export type ReviewApprovalRefusal = { status: 403 | 501; body: Record<string, unknown> }
+export type ReviewApprovalRefusal = { status: 400 | 403 | 501; body: Record<string, unknown> }
 
 function refusal(permission: string): ReviewApprovalRefusal {
   return { status: 403, body: { error: `Full ${permission} permission is required to approve this request.`, code: 'review_action_full_required', permission } }
@@ -65,6 +65,10 @@ export async function reviewApprovalPermissionError(env: Env, user: SessionUser,
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
   const plan = readProductMoneyPlan(body)
   if (hasCatalogCostWrite(body, user)) return refusal('product_cost_edit')
+  // OPUS-H-1: judge the value the writer will store. A queued spelling with no canonical form is refused for
+  // every reviewer (the writer would refuse it too), so it can never be approved as "unchanged".
+  const invalidDiscount = normalizeProductDiscountBody(body)
+  if (invalidDiscount) return { status: 400, body: invalidDiscount }
   const priceDenied = getActionTier(user, 'products', 'price') !== 'full'
   const imageDenied = getActionTier(user, 'products', 'image') !== 'full'
   if (row.action_type === 'create') {
