@@ -102,6 +102,38 @@ async function main() {
       console.log('PASS actual HTTP refusal/rollback: ' + fault)
     } finally { f.sql.close() }
   }
+  for (const tier of ['free', 'paid']) for (const mode of ['empty', 'condition', 'nonadmin', 'image-denied', 'image-retry']) {
+    const f = await world(worker, tier, true, false)
+    try {
+      const db = h.loadStockSession('lib/db.ts').getDb(f.env)
+      const write = rows => h.loadStockSession('lib/stockTransaction.ts').executeStockTransaction(db, rows, 'once')
+      if (mode === 'empty') await write([
+        { sql: 'UPDATE branch_batch_stock SET quantity=0' }, { sql: 'UPDATE branch_stock SET quantity=0' }, { sql: 'UPDATE products SET stock_quantity=0' },
+      ])
+      if (mode === 'condition') await write([{ sql: "INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source) VALUES(1,2,'Original',1,2,1,.1,'unsupported','return')" }])
+      if (mode.startsWith('image')) f.sql.exec("UPDATE products SET image_path='original-image' WHERE id=2; INSERT INTO product_images(id,product_id,image_path) VALUES(1,2,'original-image')")
+      if (mode === 'nonadmin' || mode === 'image-denied') f.sql.prepare('UPDATE users SET role_id=NULL,permissions=? WHERE id=7').run(JSON.stringify({ products: true, ...(mode === 'image-denied' ? { 'products:image': false } : {}) }))
+      const before = state(f), batches = intercept(f)
+      const body = { ...command, ...(mode === 'empty' ? { stock: null } : {}) }
+      const first = await f.call(endpoint, body)
+      if (['condition', 'image-denied'].includes(mode)) {
+        assert.equal(first.status, mode === 'condition' ? 409 : 403, JSON.stringify(first.json))
+        assert.equal(first.json.code, mode === 'condition' ? 'merge_state_conflict' : 'image_permission_required')
+        assert.deepEqual(state(f), before); assert.equal(batches(), 0)
+      } else {
+        assert.equal(first.status, 200, JSON.stringify(first.json))
+        assert.equal(first.json.committed, true); assert.equal(first.json.historyResolved, true)
+        assert.equal(first.json.undoReady, false, 'do not advertise v2 replay before its implementation')
+        assert.equal(first.json.quantityMoved, mode === 'empty' ? 0 : .2)
+        const after = state(f)
+        if (mode === 'image-retry') f.sql.prepare('UPDATE users SET role_id=NULL,permissions=? WHERE id=7').run(JSON.stringify({ products: true, 'products:image': false }))
+        const retry = await f.call(endpoint, body)
+        assert.equal(retry.status, mode === 'image-retry' ? 403 : 200, JSON.stringify(retry.json))
+        assert.deepEqual(state(f), after); assert.equal(batches(), 1)
+      }
+      console.log('PASS actual HTTP acceptance ' + tier + ': ' + mode)
+    } finally { f.sql.close() }
+  }
   console.log('BOUNDED ORDINARY PAIR HTTP ONLY; reviewed/identity/bulk/replay/reset/schema rollout remain open')
 }
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })

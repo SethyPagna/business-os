@@ -9075,6 +9075,7 @@ app.post('/possible-duplicates/merge', async (c) => {
       const refusal = error as { mergeResponse?: Record<string, unknown>; mergeStatus?: 400 | 404 | 409; code?: string }
       if (refusal.mergeResponse && refusal.mergeStatus) return c.json({ success: false, ...refusal.mergeResponse }, refusal.mergeStatus)
       if (refusal.code === 'image_permission_required') return c.json({ success: false, code: refusal.code, error: 'Changing product images needs image permission.' }, 403)
+      if (refusal.code === 'merge_origin_plan_conflict') return c.json({ success: false, code: 'merge_state_conflict', error: 'The products changed. Refresh before merging them.' }, 409)
       const known = mergeFoldRefusal(error)
       if (known) return c.json({ success: false, ...known }, 409)
       if (/merge_|constraint failed|malformed JSON|bad JSON path/i.test(String(error))) return c.json({ success: false, code: 'merge_state_conflict', error: 'The products changed. Refresh before merging them.' }, 409)
