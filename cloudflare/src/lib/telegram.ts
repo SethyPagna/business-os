@@ -1246,6 +1246,38 @@ export type ShiftReportFigures = {
   reconciliation?: ShiftReconciliation
 }
 
+/**
+ * The shift's three REGISTERED cash figures as `·` rows: Opening, Additional
+ * change used, Closing -- the order the drawer actually moves in and the order
+ * every shift surface in the app reads (ShiftGate, the report figures, the
+ * amend form; owner, 14 Sep 2026: opening -> additional -> closing). The extra
+ * change went in and was spent BEFORE the final count was taken, so printing it
+ * after the closing cash told the phone a different story from the app.
+ *
+ * ONE composer for every message that carries a drawer, so no two of them can
+ * disagree about which rows exist.
+ *
+ * Additional change used is ALWAYS a row (owner, 13 Oct 2026: "for the shift i
+ * don't see additional used in telegram. we have the opening closing and
+ * additional used"). It used to print only when non-zero, so a shift that never
+ * needed more change showed Opening and Closing with the middle line missing,
+ * which read as a figure the message did not have. None added is a fact --
+ * `$0.00 · 0៛`, the same money format as the rows around it. A NULL column is
+ * the same fact, not an unknown: it is NOT NULL DEFAULT 0 (migration 0147), so a
+ * NULL here is a caller that never set it. Opening stays `N/A` when it was never
+ * registered: unknown is not zero.
+ *
+ * An open shift has taken no count yet, so it has no closing row.
+ */
+function registeredCashRows(shift: ShiftReportSession): string[] {
+  const rows = [
+    labeled('cashOpen', registeredMoney(shift.opening_float_usd, shift.opening_float_khr)),
+    labeled('additionalCash', registeredMoney(shift.additional_cash_usd ?? 0, shift.additional_cash_khr ?? 0)),
+  ]
+  if (shift.closed_at) rows.push(labeled('cashEnd', registeredMoney(shift.closing_counted_usd, shift.closing_counted_khr)))
+  return rows
+}
+
 const REVIEW_LABELS: Partial<Record<string, TelegramLabelKey>> = {
   tender_incomplete: 'reviewTender',
   change_ambiguous: 'reviewChange',
@@ -1336,20 +1368,11 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   if (figures.refundUsd) sales.push(labeled('refunds', usd(figures.refundUsd)))
   lines.push(sectionHeader('sales', SHIFT_SECTION_EDGE), ...sales)
 
-  // 3. Cash count -- the owner's specific gap: registered opening and closing
-  // cash, both currencies. A factual readout, and an open shift (no count
-  // taken yet) simply has no closing half.
-  // Opening -> additional change used -> closing, the order the drawer
-  // actually moves in and the order every shift surface in the app reads
-  // (ShiftGate, the report figures, the amend form): the extra change went in
-  // and was spent BEFORE the final count was taken. Printing it after the
-  // closing cash made the phone message tell a different story from the app.
-  const cash = [labeled('cashOpen', registeredMoney(shift.opening_float_usd, shift.opening_float_khr))]
-  const additionalCash = shift.additional_cash_usd || shift.additional_cash_khr
-    ? registeredMoney(shift.additional_cash_usd ?? 0, shift.additional_cash_khr ?? 0)
-    : ''
-  if (additionalCash) cash.push(labeled('additionalCash', additionalCash))
-  if (shift.closed_at) cash.push(labeled('cashEnd', registeredMoney(shift.closing_counted_usd, shift.closing_counted_khr)))
+  // 3. Cash count -- the owner's specific gap: registered opening, additional
+  // and closing cash, both currencies. A factual readout, and an open shift
+  // (no count taken yet) simply has no closing half. The three rows come from
+  // registeredCashRows, the one composer for every message that carries a drawer.
+  const cash = registeredCashRows(shift)
 
   // One informational difference line -- not an expected-must-match check.
   // The reconciliation is still computed (ONE shared definition,

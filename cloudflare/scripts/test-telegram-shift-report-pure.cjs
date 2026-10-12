@@ -190,10 +190,13 @@ const rowsOf = (text) => text.split('\n').filter((line) => !line.startsWith(tele
 // The cap moved from 28 to 38 on Sep 21 2026 with the two breakdown sections
 // and the two discount rows the owner's reference reinstated, and from 38 to
 // 32 on Sep 23 2026, when the six drawn rules came off the sections (their
-// titles are one dashed line each now). It is still a ceiling with the same
-// one row of slack: this fixture, with every optional block on, renders in 31.
-check(`the shift report stays at a glance (${rowsOf(report).length} rows, cap 32)`,
-  rowsOf(report).length <= 32, report)
+// titles are one dashed line each now), and from 32 to 33 on 13 Oct 2026, when
+// the Additional change used row became a permanent row of the Cash count
+// section (owner: "we have the opening closing and additional used"). It is
+// still a ceiling with the same one row of slack: this fixture, with every
+// optional block on, renders in 32.
+check(`the shift report stays at a glance (${rowsOf(report).length} rows, cap 33)`,
+  rowsOf(report).length <= 33, report)
 check('and the fixture really is a busy shift, not a quiet one',
   figures.invoices > 20 && figures.creditUsd > 0 && figures.refundUsd > 0
   && figures.deliveryCostRecorded > 0 && figures.otherExpenseKhr > 0
@@ -243,6 +246,11 @@ assert.deepEqual(lines, [
   // Sep 23 2026: "you can use less header marks if it pushes to next row").
   '====Cash count/ការរាប់សាច់ប្រាក់====',
   '· Opening cash/សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛',
+  // Always a row, in the order the drawer moves (opening -> additional ->
+  // closing; owner, 14 Sep 2026), even at zero: this fixture added no change,
+  // and the message says so instead of leaving the line out (owner, 13 Oct
+  // 2026: "for the shift i don't see additional used in telegram").
+  '· Additional change used/ប្រាក់អាប់បន្ថែមដែលបានប្រើ: $0.00 · 0៛',
   '· Closing cash/សាច់ប្រាក់បិទវេន: $182.50 · 240,000៛',
   '· Expected cash/សាច់ប្រាក់ត្រូវមាន: $178.00 · 240,000៛',
   '· Difference/ភាពខុសគ្នា: +$4.50 · 0៛',
@@ -298,6 +306,7 @@ assert.deepEqual(englishReport.split('\n'), [
   '· Refunds: $15.00',
   '=====Cash count=====',
   '· Opening cash: $50.00 · 100,000៛',
+  '· Additional change used: $0.00 · 0៛',
   '· Closing cash: $182.50 · 240,000៛',
   '· Expected cash: $178.00 · 240,000៛',
   '· Difference: +$4.50 · 0៛',
@@ -338,6 +347,7 @@ assert.deepEqual(khmerReport.split('\n'), [
   '· ការសងប្រាក់: $15.00',
   '=====ការរាប់សាច់ប្រាក់=====',
   '· សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛',
+  '· ប្រាក់អាប់បន្ថែមដែលបានប្រើ: $0.00 · 0៛',
   '· សាច់ប្រាក់បិទវេន: $182.50 · 240,000៛',
   '· សាច់ប្រាក់ត្រូវមាន: $178.00 · 240,000៛',
   '· ភាពខុសគ្នា: +$4.50 · 0៛',
@@ -560,6 +570,7 @@ assert.deepEqual(quiet.split('\n'), [
   '· Profit/ចំណេញ: $0.00',
   '====Cash count/ការរាប់សាច់ប្រាក់====',
   '· Opening cash/សាច់ប្រាក់ដើមវេន: $0.00 · 0៛',
+  '· Additional change used/ប្រាក់អាប់បន្ថែមដែលបានប្រើ: $0.00 · 0៛',
   '· Expected cash/សាច់ប្រាក់ត្រូវមាន: $0.00 · 0៛',
   '=====Payment methods/វិធីទូទាត់=====',
   // `N/A` since Sep 22 2026 (owner: "show n/a"). The bare `—` it replaced
