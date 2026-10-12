@@ -5,6 +5,15 @@ Runtime commit: `e1de711c1148a7a47275c5eabb63d3eb4d9da521`.
 Code and regression checkpoint: `d49924d5eed678f332104362806585b47ac5f04d`.
 This note does not establish deployment or physical-device acceptance.
 
+Later mounted-browser testing found that multiple new products still failed:
+the second creation persisted the original React render's idless rows and
+restored the first product's unknown marker. The original extracted controller
+fixture used mutable current rows and missed that boundary. Its captured-render
+correction and the follow-up runtime fix are documented in
+[authority and retry boundaries](2026-10-12-receiving-authority-boundaries.md).
+The results below describe the original checkpoint and are not certification of
+that later-discovered multiple-create scenario.
+
 ## Problem and change
 
 Creating a product inside a Stock-in / receiving session succeeded, but its

@@ -1,6 +1,6 @@
 # Receiving session authority and retry boundaries
 
-Source checkpoint: `f25476baaf19f8f1dbde8d96d4d08de31b22d8a6`, based on
+Source checkpoint: `70e7ec633205d8e380bc82a0357d06d39e5018f0`, based on
 production/main `bf7408b492937ddf18813441ea7f75d23ac0b10a`. This continues the
 [confirmed-product handoff repair](2026-10-12-receiving-confirmed-product-handoff.md).
 Publication and deployment status are recorded separately in `progress.md`.
@@ -10,6 +10,14 @@ Publication and deployment status are recorded separately in `progress.md`.
 The original repair lets a confirmed new product reach receiving in the same
 session as an existing product. Deeper testing found two additional ways a
 delayed operation could lose its original account/server ownership.
+
+A mounted-browser case with two new products also exposed an incomplete part of
+the original repair: the second creation persisted the old render's rows,
+restoring uncertainty for the first confirmed product. Creation now receives
+and persists the commit loop's current rows. The regression captures React's
+fixed render snapshot; it fails on the previous source at two new products after
+four healthy single-product controls, then passes with the correction. The
+original fixture had incorrectly read mutable current rows and missed this bug.
 
 First, the receiving transport started each deferred round with the current
 connection. Changing servers while the first answer was pending could send the
@@ -34,7 +42,7 @@ an unanswered write failed or automatically repeat product creation.
 
 | Surface | Observed evidence |
 | --- | --- |
-| Original new/existing product handoff | Ten full-controller groups still pass, covering new-only, existing-only, both mixed orders, multiple new products, pending/unknown refusal and stable request IDs. |
+| New/existing product handoff | Ten controller groups pass with the corrected fixed-render snapshot, covering new-only, existing-only, both mixed orders, multiple new products, pending/unknown refusal and stable request IDs. The mounted multiple-create failure is retained as evidence; its built-browser recheck is required before final acceptance. |
 | Receiving modal and deferred transport | Eighteen regression groups pass. The previous source fails sixteen safety assertions while both healthy controls pass. Six deliberately incorrect repairs are rejected. |
 | Real account/server scope integration | Twelve independent probes pass: server, account, organization and login changes during success/404; unchanged-authority and ordinary cache-invalidation controls preserve valid deferred rounds. |
 | Shared HTTP redirect | Nine actual-API regression groups pass; the previous source fails five stale-authority cases. Existing redirect and HTTP tests pass. Current-owner confirmation, cancellation, successive redirects and a fresh command by the new owner remain functional. |
