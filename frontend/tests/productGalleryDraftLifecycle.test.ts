@@ -16,8 +16,10 @@ assert.match(source, /scheduleWorkDraftWrite<ProductFormDraftPayload>\(draftKey,
   'form and gallery persist atomically under the existing scoped draft key')
 assert.match(source, /setImageUploading\(true\)[\s\S]*?await pickFiles/,
   'the form locks dismissal before the native picker/upload awaits')
-assert.match(source, /for \(const \[index, file\] of files\.entries\(\)\)[\s\S]*?updateImageList\([\s\S]*?persistImmediately: true/,
-  'every successful file is linked and flushed before the next upload can fail')
+assert.match(source, /for \(const image of batch\) await uploadPendingImage\(image\.id\)[\s\S]*?async function uploadPendingImage[\s\S]*?updateImageList\([\s\S]*?persistImmediately: true[\s\S]*?dropPendingImage\(id\)/,
+  'every file uploads in turn and is linked and flushed to the draft before its preview tile is dropped, so a later failure cannot orphan it')
+assert.doesNotMatch(source, /\balert\(getErrorMessage\(error, tr\('image_upload_failed'/,
+  'an upload failure is an inline alert on the failed tile, never a native popup that can freeze the installed app')
 assert.doesNotMatch(source, /stagedImages/, 'uploads are not held only in volatile batch-local state')
 assert.match(source, /closeDisabled=\{imageUploading\}/)
 assert.match(source, /disabled=\{saving \|\| imageUploading\}[\s\S]*?onMinimize=\{preserveAndMinimize\}/)

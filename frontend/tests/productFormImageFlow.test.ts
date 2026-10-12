@@ -44,6 +44,12 @@ async function fire(input: Pending['input'], type: 'change' | 'cancel'): Promise
 const focusWindow = async (): Promise<void> => { await act(async () => { for (const listener of [...focusListeners]) listener() }) }
 const photo = (name: string): File => new File(['pixels'], name, { type: 'image/jpeg' })
 
+const objectUrls = { created: [] as string[], revoked: [] as string[] }
+const realCreateObjectURL = URL.createObjectURL
+const realRevokeObjectURL = URL.revokeObjectURL
+URL.createObjectURL = ((blob: Blob) => { const url = `blob:probe-${objectUrls.created.length + 1}-${(blob as File).name ?? 'blob'}`; objectUrls.created.push(url); return url }) as typeof URL.createObjectURL
+URL.revokeObjectURL = ((url: string) => { objectUrls.revoked.push(url) }) as typeof URL.revokeObjectURL
+
 const uploads: Array<{ file: File; fileName: string; productName?: string }> = []
 let uploadImpl: (payload: { file: File }) => Promise<unknown> = async () => ({ public_path: '/uploads/products/probe-1.jpg', cache_version: 'v1' })
 const doubles = {
@@ -51,7 +57,7 @@ const doubles = {
   'api/productImageUploadTransport.ts': { uploadProductImage: async (payload: { file: File; fileName: string; productName?: string }) => { uploads.push(payload); return uploadImpl(payload) } },
 }
 
-async function mountForm(lang = 'en'): Promise<MountedSurface> {
+async function mountForm(lang = 'en', overrides: Record<string, unknown> = {}): Promise<MountedSurface> {
   localStorage.clear()
   const words = packs[lang]
   const user = { id: 42, organization_id: 1, organization_public_id: 'org-1', role_code: 'admin', role_permissions: { all: true } }
@@ -60,7 +66,7 @@ async function mountForm(lang = 'en'): Promise<MountedSurface> {
     component: 'components/products/forms/ProductForm.tsx',
     props: {
       product: null, categories: [], units: [], branches: [], user, t: (key: string) => words[key] || '', usdSymbol: '$', khrSymbol: '៛', exchangeRate: 4100,
-      onClose() {}, onSave: async () => undefined,
+      onClose() {}, onSave: async () => undefined, ...overrides,
     },
     app, doubles,
   })
@@ -106,6 +112,7 @@ try {
     const input = pickers[before]
     input.files = [photo('camera.jpg')]
     await fire(input, 'change')
+    await surface.waitFor(() => uploads.length === 1, 'the late photo upload')
     await surface.settle()
     assert.equal(uploads.length, 1, 'a change after the fallback still uploads the photo')
     assert.equal(uploads[0].file.name, 'camera.jpg')
@@ -148,7 +155,137 @@ try {
   }
 
   console.log('PASS the product form releases the picker on cancel or focus and uploads a late camera photo')
+
+  const tile = (surface: MountedSurface, status: string): MemoryNode | undefined => surface.findAll((node) => node.getAttribute('data-image-tile') === status)[0]
+  const alerts = (surface: MountedSurface): string[] => surface.findAll((node) => node.getAttribute('role') === 'alert').map((node) => node.textContent)
+  async function pickOne(surface: MountedSurface, name: string, label = 'Choose File'): Promise<void> {
+    const before = pickers.length
+    await surface.click(pickerButton(surface, label))
+    pickers[before].files = [photo(name)]
+    await fire(pickers[before], 'change')
+  }
+  const resetProbes = (): void => {
+    uploads.length = 0
+    objectUrls.created.length = 0
+    objectUrls.revoked.length = 0
+    uploadImpl = async () => ({ public_path: '/uploads/products/probe-1.jpg', cache_version: 'v1' })
+  }
+
+  // The picked photo is on screen the moment it is chosen, before compression and upload finish.
+  {
+    resetProbes()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    uploadImpl = async () => { await gate; return { public_path: '/uploads/products/probe-1.jpg', cache_version: 'v1' } }
+    const surface = await mountForm()
+    await pickOne(surface, 'camera.jpg', 'Take Photo')
+    await surface.waitFor(() => uploads.length === 1, 'the upload to start')
+    await surface.settle()
+    assert.equal(uploads.length, 1, 'the upload has started and is still waiting')
+    assert.deepEqual(galleryImages(surface), ['blob:probe-1-camera.jpg'], 'the local preview is shown while the upload is pending')
+    const pending = tile(surface, 'uploading')
+    assert.ok(pending, 'the preview tile is marked uploading')
+    assert.equal(surface.findAll((node) => node.getAttribute('role') === 'status' && pending.contains(node)).length, 1, 'the tile carries an uploading indicator')
+    assert.equal(propsOf(saveButton(surface)).disabled, true, 'Save still waits for the upload')
+    assert.deepEqual(objectUrls.revoked, [], 'the preview URL stays alive while it is shown')
+    release()
+    await surface.waitFor(() => !tile(surface, 'uploading'), 'the stored photo to replace the preview')
+    await surface.settle()
+    assert.deepEqual(galleryImages(surface).map(pathOf), ['/uploads/products/probe-1.jpg'], 'the stored photo replaces the preview')
+    assert.ok(!tile(surface, 'uploading'), 'no pending tile is left')
+    assert.deepEqual(objectUrls.revoked, ['blob:probe-1-camera.jpg'], 'the preview URL is revoked when the stored path swaps in')
+    assert.equal(propsOf(saveButton(surface)).disabled, false)
+    await surface.unmount()
+  }
+
+  // A failed upload keeps its tile, shows an inline alert with Retry, never a native popup, and Retry swaps in the stored photo.
+  for (const lang of ['en', 'km']) {
+    resetProbes()
+    const words = packs[lang]
+    let attempts = 0
+    uploadImpl = async () => {
+      attempts += 1
+      if (attempts === 1) throw 'offline'
+      return { public_path: '/uploads/products/probe-1.jpg', cache_version: 'v1' }
+    }
+    const surface = await mountForm(lang)
+    await pickOne(surface, 'camera.jpg', words.take_photo)
+    await surface.waitFor(() => Boolean(tile(surface, 'failed')), 'the failed photo tile')
+    await surface.settle()
+    const failed = tile(surface, 'failed')
+    assert.ok(failed, `${lang}: the failed photo keeps its tile`)
+    assert.deepEqual(galleryImages(surface), ['blob:probe-1-camera.jpg'], `${lang}: the tile still shows the photo`)
+    assert.deepEqual(alerts(surface), [words.image_upload_failed], `${lang}: an inline alert says the upload failed, in the pack language`)
+    assert.equal(propsOf(saveButton(surface)).disabled, false, `${lang}: the form is usable again`)
+    assert.ok(!surface.text().includes(words.uploading), `${lang}: nothing claims to be uploading`)
+    await surface.click(surface.button(words.retry, failed))
+    await surface.waitFor(() => attempts === 2 && !tile(surface, 'failed') && !tile(surface, 'uploading'), 'the retried photo to land')
+    await surface.settle()
+    assert.equal(attempts, 2, `${lang}: Retry uploads the same photo again`)
+    assert.equal(uploads[1].file, uploads[0].file, `${lang}: without picking it again`)
+    assert.deepEqual(alerts(surface), [], `${lang}: the alert clears`)
+    assert.deepEqual(galleryImages(surface).map(pathOf), ['/uploads/products/probe-1.jpg'])
+    assert.deepEqual(objectUrls.revoked, ['blob:probe-1-camera.jpg'])
+    await surface.unmount()
+  }
+
+  // Removing a failed tile and closing the form both release the preview URL.
+  {
+    resetProbes()
+    uploadImpl = async () => { throw new Error('Server said no') }
+    const surface = await mountForm()
+    await pickOne(surface, 'one.jpg')
+    await surface.waitFor(() => Boolean(tile(surface, 'failed')), 'the failed photo tile')
+    await surface.settle()
+    assert.deepEqual(alerts(surface), ['Server said no'], 'the server message is shown as is')
+    await surface.click(surface.button('Remove', tile(surface, 'failed')))
+    assert.ok(!tile(surface, 'failed'))
+    assert.deepEqual(alerts(surface), [])
+    assert.deepEqual(objectUrls.revoked, ['blob:probe-1-one.jpg'], 'removing the tile revokes its preview URL')
+    await pickOne(surface, 'two.jpg')
+    await surface.waitFor(() => Boolean(tile(surface, 'failed')), 'the second failed photo tile')
+    await surface.settle()
+    assert.ok(tile(surface, 'failed'))
+    await surface.unmount()
+    assert.deepEqual(objectUrls.revoked, ['blob:probe-1-one.jpg', 'blob:probe-2-two.jpg'], 'closing the form revokes the preview URL of a tile still on screen')
+  }
+  {
+    resetProbes()
+    let release!: () => void
+    uploadImpl = async () => { await new Promise<void>((resolve) => { release = resolve }); return { public_path: '/uploads/products/probe-1.jpg' } }
+    const surface = await mountForm()
+    await pickOne(surface, 'mid-flight.jpg')
+    await surface.waitFor(() => uploads.length === 1, 'the upload to start')
+    await surface.settle()
+    await surface.unmount()
+    assert.deepEqual(objectUrls.revoked, ['blob:probe-1-mid-flight.jpg'], 'unmounting mid-upload revokes the preview URL')
+    release()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+
+  // The stored photo is what Save sends, and it is what a reopened product shows.
+  {
+    resetProbes()
+    const saved: Array<{ image_gallery: string[]; image_path: string }> = []
+    const surface = await mountForm('en', { onSave: async (payload: { image_gallery: string[]; image_path: string }) => { saved.push(payload) } })
+    await surface.type(surface.find((node) => node.id === 'product-name', 'name'), 'Probe serum')
+    await pickOne(surface, 'camera.jpg')
+    await surface.waitFor(() => galleryImages(surface).some((src) => !src.startsWith('blob:')), 'the stored photo')
+    await surface.settle()
+    await surface.click(saveButton(surface))
+    await surface.click(surface.button('Create Products', surface.find((node) => node.getAttribute('role') === 'dialog' && node.textContent.includes('Selling price'), 'the save review')))
+    assert.deepEqual(saved.map((payload) => payload.image_gallery), [['/uploads/products/probe-1.jpg']], 'Save sends the stored path, never a blob URL')
+    assert.equal(saved[0].image_path, '/uploads/products/probe-1.jpg')
+    await surface.unmount()
+    const reopened = await mountForm('en', { product: { id: 7, name: 'Probe serum', image_path: '/uploads/products/probe-1.jpg', image_gallery: ['/uploads/products/probe-1.jpg'] } })
+    assert.deepEqual(galleryImages(reopened).map(pathOf), ['/uploads/products/probe-1.jpg'], 'the reopened product shows its stored photo')
+    await reopened.unmount()
+  }
+
+  console.log('PASS a picked photo shows at once with an uploading indicator, a failure shows an inline alert with Retry, and preview URLs are revoked')
 } finally {
+  URL.createObjectURL = realCreateObjectURL
+  URL.revokeObjectURL = realRevokeObjectURL
   window.addEventListener = realAddListener
   window.removeEventListener = realRemoveListener
   document.createElement = realCreateElement as typeof document.createElement

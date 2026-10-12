@@ -8,6 +8,7 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Trash2Icon from 'lucide-react/dist/esm/icons/trash-2.js'
 import LockIcon from 'lucide-react/dist/esm/icons/lock.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
+import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import AlertTriangleIcon from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Modal from '../../shared/Modal'
 import { ModalCloseContext } from '../../shared/modalCloseContext.ts'
@@ -252,6 +253,17 @@ interface PickImageFilesOptions {
   capture?: string
 }
 
+// A photo the person just chose: shown from its local object URL the moment it is picked, while compression and
+// upload run, and kept (failed) with its file so Retry can send the same photo again without picking it twice.
+interface PendingImage {
+  id: string
+  file: File
+  previewUrl: string
+  status: 'uploading' | 'failed'
+  error: string
+  uploadName: string | undefined
+}
+
 type ProductFormDraftPayload = {
   form: Partial<ProductFormState>
   imageList: string[]
@@ -341,6 +353,14 @@ export function normalizeProductFormDraft(value: unknown): { form: Partial<Produ
 function buildGalleryImageName(productName: string, position: number, total: number): string {
   const base = String(productName || '').trim() || 'product'
   return total > 1 ? `${base}_${position}` : base
+}
+
+function previewUrlFor(file: File): string {
+  try {
+    return URL.createObjectURL(file)
+  } catch {
+    return ''
+  }
 }
 
 function editablePrice(value: unknown, fallback = 0): string {
@@ -558,6 +578,9 @@ function ProductFormContent({
   const currentFormDraftKeyRef = useRef(draftKey)
   currentFormDraftKeyRef.current = draftKey
   const [imageUploading, setImageUploading] = useState(false)
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([])
+  const pendingImagesRef = useRef<PendingImage[]>([])
+  const nextPendingImageIdRef = useRef(0)
   // Which gallery tile is currently being drag-reordered, if any (Part 242) --
   // see reorderImage/moveImage above.
   const [dragImageIndex, setDragImageIndex] = useState<number | null>(null)
@@ -762,6 +785,11 @@ function ProductFormContent({
   useEffect(() => () => {
     aliveRef.current = false
     invalidateTrackedRequest(supplierRequestRef)
+  }, [])
+
+  useEffect(() => () => {
+    for (const image of pendingImagesRef.current) if (image.previewUrl) URL.revokeObjectURL(image.previewUrl)
+    pendingImagesRef.current = []
   }, [])
 
   useEffect(() => {
@@ -984,7 +1012,7 @@ function ProductFormContent({
       key: dirtyWorkKey,
       pageId: 'products',
       label: `${t('product_form') || 'Product form'}${productLabel ? ` — ${productLabel}` : ''}`,
-      isDirty: () => formDirtyRef.current,
+      isDirty: () => formDirtyRef.current || pendingImagesRef.current.length > 0,
       // No save hook on purpose: this form's save runs required-field and
       // identity validation -- auto-submitting from a navigation prompt
       // would surface those errors in a page the user is trying to leave.
@@ -1062,53 +1090,87 @@ function ProductFormContent({
     else void withImageLock(() => uploadImageFiles(files))
   }
 
+  function commitPendingImages(next: PendingImage[]): void {
+    pendingImagesRef.current = next
+    if (aliveRef.current) setPendingImages(next)
+  }
+
+  function patchPendingImage(id: string, patch: Partial<PendingImage>): void {
+    commitPendingImages(pendingImagesRef.current.map((image) => (image.id === id ? { ...image, ...patch } : image)))
+  }
+
+  function dropPendingImage(id: string): void {
+    const image = pendingImagesRef.current.find((entry) => entry.id === id)
+    if (image?.previewUrl) URL.revokeObjectURL(image.previewUrl)
+    commitPendingImages(pendingImagesRef.current.filter((entry) => entry.id !== id))
+  }
+
   async function uploadPickedImages(options: PickImageFilesOptions = {}): Promise<void> {
     if (!canManageImages || imageUploading || imageUploadInFlightRef.current) return
-    const remaining = Math.max(0, imageLimit - imageListRef.current.length)
+    const remaining = Math.max(0, imageLimit - imageListRef.current.length - pendingImagesRef.current.length)
     if (!remaining) return
     await withImageLock(async () => {
       await uploadImageFiles(await pickFiles({ ...options, maxCount: remaining, onLateChange: receiveLateImageFiles }))
     })
   }
 
+  async function retryPendingImage(id: string): Promise<void> {
+    if (!canManageImages || saving || imageUploading || imageUploadInFlightRef.current) return
+    await withImageLock(() => uploadPendingImage(id))
+  }
+
   async function uploadImageFiles(picked: File[]): Promise<void> {
-    const files = picked.slice(0, Math.max(0, imageLimit - imageListRef.current.length))
+    const files = picked.slice(0, Math.max(0, imageLimit - imageListRef.current.length - pendingImagesRef.current.length))
     if (!files.length) return
+    const productNameForNaming = String(formRef.current.name || '').trim()
+    // Position/total are computed against the gallery's final size (existing
+    // images already on the product + every file in this batch), not just
+    // this batch alone -- see buildGalleryImageName above.
+    const existingCount = imageListRef.current.length + pendingImagesRef.current.length
+    const totalAfterBatch = Math.min(imageLimit, existingCount + files.length)
+    const batch: PendingImage[] = files.map((file, index) => ({
+      id: `pending-image-${++nextPendingImageIdRef.current}`,
+      file,
+      previewUrl: previewUrlFor(file),
+      status: 'uploading',
+      error: '',
+      uploadName: productNameForNaming ? buildGalleryImageName(productNameForNaming, existingCount + index + 1, totalAfterBatch) : undefined,
+    }))
+    commitPendingImages([...pendingImagesRef.current, ...batch])
+    for (const image of batch) await uploadPendingImage(image.id)
+  }
+
+  async function uploadPendingImage(id: string): Promise<void> {
+    const pending = pendingImagesRef.current.find((entry) => entry.id === id)
+    if (!pending) return
+    const { file } = pending
+    patchPendingImage(id, { status: 'uploading', error: '' })
     try {
-      const productNameForNaming = String(formRef.current.name || '').trim()
-      // Position/total are computed against the gallery's final size (existing
-      // images already on the product + every file in this batch), not just
-      // this batch alone -- see buildGalleryImageName above.
-      const existingCount = imageListRef.current.length
-      const totalAfterBatch = Math.min(imageLimit, existingCount + files.length)
-      for (const [index, file] of files.entries()) {
-        const uploaded = await withLoaderTimeout(
-          async () => (await loadProductImageUploadTransportModule()).uploadProductImage({
-            productId: currentProductId || undefined,
-            file,
-            fileName: file.name || 'product.jpg',
-            productName: productNameForNaming
-              ? buildGalleryImageName(productNameForNaming, existingCount + index + 1, totalAfterBatch)
-              : undefined,
-          }) as Promise<ProductImageUploadResult | undefined>,
-          'Upload product form image',
-          PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS,
-        )
-        const rawPath = uploaded?.public_path || uploaded?.path || uploaded?.asset?.public_path || uploaded?.data?.path || ''
-        const publicPath = canonicalizePersistedMediaPath(rawPath)
-        if (!publicPath) throw new Error(tr('image_upload_missing_path', 'Image upload completed without a stored file path.', 'ការបង្ហោះរូបភាពបានបញ្ចប់ ប៉ុន្តែមិនមានទីតាំងឯកសារដែលបានរក្សាទុកទេ។'))
-        const renderVersion = String(uploaded?.cache_version || uploaded?.asset?.updated_at || uploaded?.asset?.created_at || '').trim()
-        if (aliveRef.current && renderVersion) setImageRenderVersions((current) => ({ ...current, [publicPath]: renderVersion }))
-        // Persist every successful file before starting the next one. A later
-        // failure can report honestly without orphaning earlier uploads from
-        // the restorable product draft.
-        updateImageList(
-          (current) => current.includes(publicPath) || current.length >= imageLimit ? current : [...current, publicPath],
-          { persistImmediately: true },
-        )
-      }
+      const uploaded = await withLoaderTimeout(
+        async () => (await loadProductImageUploadTransportModule()).uploadProductImage({
+          productId: currentProductId || undefined,
+          file,
+          fileName: file.name || 'product.jpg',
+          productName: pending.uploadName,
+        }) as Promise<ProductImageUploadResult | undefined>,
+        'Upload product form image',
+        PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS,
+      )
+      const rawPath = uploaded?.public_path || uploaded?.path || uploaded?.asset?.public_path || uploaded?.data?.path || ''
+      const publicPath = canonicalizePersistedMediaPath(rawPath)
+      if (!publicPath) throw new Error(tr('image_upload_missing_path', 'Image upload completed without a stored file path.', 'ការបង្ហោះរូបភាពបានបញ្ចប់ ប៉ុន្តែមិនមានទីតាំងឯកសារដែលបានរក្សាទុកទេ។'))
+      const renderVersion = String(uploaded?.cache_version || uploaded?.asset?.updated_at || uploaded?.asset?.created_at || '').trim()
+      if (aliveRef.current && renderVersion) setImageRenderVersions((current) => ({ ...current, [publicPath]: renderVersion }))
+      // Persist every successful file before starting the next one. A later
+      // failure can report honestly without orphaning earlier uploads from
+      // the restorable product draft.
+      updateImageList(
+        (current) => current.includes(publicPath) || current.length >= imageLimit ? current : [...current, publicPath],
+        { persistImmediately: true },
+      )
+      dropPendingImage(id)
     } catch (error) {
-      alert(getErrorMessage(error, tr('image_upload_failed', 'Image upload failed', 'ការបង្ហោះរូបភាពបានបរាជ័យ')))
+      if (aliveRef.current) patchPendingImage(id, { status: 'failed', error: getErrorMessage(error, tr('image_upload_failed', 'Image upload failed', 'ការបង្ហោះរូបភាពបានបរាជ័យ')) })
     }
   }
 
@@ -1383,6 +1445,7 @@ function ProductFormContent({
     () => (isCreateMode && !nameLocked ? buildProductNameSuggestions(createMatches, { excludeId: product?.id }) : []),
     [isCreateMode, nameLocked, createMatches, product?.id],
   )
+  const failedImageMessages = [...new Set(pendingImages.filter((image) => image.status === 'failed').map((image) => image.error))]
   const preserveAndMinimize = onMinimize ? () => {
     if (imageUploading || imageUploadInFlightRef.current) return
     // The shared unsaved prompt may offer Minimize only through an explicit
@@ -1502,7 +1565,12 @@ function ProductFormContent({
                 {tr('no_permission', 'You do not have permission to manage product images.', 'អ្នកមិនមានសិទ្ធិគ្រប់គ្រងរូបភាពផលិតផលទេ។')}
               </p>
             )}
-            {imageList.length && !imagesOwnedByGroupLead ? (
+            {failedImageMessages.length ? (
+              <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
+                {failedImageMessages.join(' ')}
+              </p>
+            ) : null}
+            {(imageList.length > 0 || pendingImages.length > 0) && !imagesOwnedByGroupLead ? (
               <>
                 {imageList.length > 1 ? (
                   <p className="text-[11px] text-gray-400">
@@ -1563,6 +1631,46 @@ function ProductFormContent({
                           {tr('remove', 'Remove', 'លុប')}
                         </button>
                       </div> : null}
+                    </div>
+                  ))}
+                  {pendingImages.map((image, index) => (
+                    <div
+                      key={image.id}
+                      data-image-tile={image.status}
+                      className={`relative overflow-hidden rounded-xl border bg-slate-100 dark:bg-slate-800 ${image.status === 'failed' ? 'border-red-300 dark:border-red-700' : 'border-slate-200'}`}
+                    >
+                      {image.previewUrl ? (
+                        <img
+                          src={image.previewUrl}
+                          alt={`product-${imageList.length + index + 1}`}
+                          className="h-20 w-full object-cover sm:h-24"
+                          onError={(event) => { event.currentTarget.style.visibility = 'hidden' }}
+                        />
+                      ) : <div className="h-20 w-full sm:h-24" />}
+                      {image.status === 'uploading' ? (
+                        <div
+                          role="status"
+                          aria-label={tr('uploading', 'Uploading...', 'កំពុងបង្ហោះ...')}
+                          title={tr('uploading', 'Uploading...', 'កំពុងបង្ហោះ...')}
+                          className="absolute inset-0 flex items-center justify-center bg-black/40"
+                        >
+                          <Loader2 className="h-5 w-5 animate-spin text-white" />
+                        </div>
+                      ) : (
+                        <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-black/60 px-1.5 py-1 text-[11px] leading-snug text-white">
+                          <button
+                            type="button"
+                            className="rounded px-1 py-0.5 hover:bg-white/20 disabled:opacity-40"
+                            onClick={() => void retryPendingImage(image.id)}
+                            disabled={saving || imageUploading}
+                          >
+                            {tr('retry', 'Retry', 'ព្យាយាមម្ដងទៀត')}
+                          </button>
+                          <button type="button" className="rounded px-1 py-0.5 hover:bg-white/20" onClick={() => dropPendingImage(image.id)}>
+                            {tr('remove', 'Remove', 'លុប')}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

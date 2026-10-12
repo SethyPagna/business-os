@@ -55,7 +55,7 @@ function sourceFiles(dir: string): string[] {
 // already shows translated text; lower the number when you move one onto
 // notify().
 const REMAINING: Record<string, number> = {
-  'components/products/forms/ProductForm.tsx': 6,
+  'components/products/forms/ProductForm.tsx': 5,
   'components/receipt-settings/PrintSettings.tsx': 2,
   'components/receipt/Receipt.tsx': 1,
 }
