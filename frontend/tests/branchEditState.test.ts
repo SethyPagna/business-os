@@ -49,6 +49,7 @@ function formSave(outcome: unknown) {
     setSaving: () => {}, onSave: async () => typeof outcome === 'function' ? outcome() : outcome, form: { notes: 'unsaved' },
     savedRef: effects.saved, dirtyRef: effects.dirty, restoredDraftRef: effects.restored,
     clearWorkDraft: () => { effects.cleared++ }, draftKey: 'branch_2', onClose: () => { effects.closed++ },
+    authority: {}, isDraftAuthorityCurrent: () => true, setAuthorityRefused: () => {},
   })
   return { effects, run }
 }

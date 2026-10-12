@@ -58,6 +58,7 @@ import {
   peekPendingRestore,
 } from '../../utils/minimizedWork.ts'
 import { clearWorkDraft, flushPendingWorkDraft, readWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
+import { isDraftAuthorityCurrent, openDraftAuthority, type DraftAuthority } from '../../utils/draftAuthority.ts'
 import { stockSessionHasItems, stockSessionSavedScope } from '../../utils/stockSessionBusy.ts'
 import {
   beginTrackedRequest,
@@ -1063,17 +1064,32 @@ export default function Branches({ embedded = false, view, showSectionNavigation
     }
   }
 
-  const branchDraftKey = scopedWorkDraftKey(branchFormDraftBaseKey(selected?.id))
+  // The account and server the open form was opened under, frozen with it
+  // (draftAuthority.ts): minimize must park the draft the form wrote, not the
+  // one the current account and server would resolve to.
+  const branchAuthorityRef = useRef<{ id: string; authority: DraftAuthority } | null>(null)
+  if (modal !== 'form' || !selected) branchAuthorityRef.current = null
+  else if (branchAuthorityRef.current?.id !== String(selected.id)) {
+    branchAuthorityRef.current = { id: String(selected.id), authority: openDraftAuthority(branchFormDraftBaseKey(selected.id)) }
+  }
+  const branchAuthority = branchAuthorityRef.current?.authority ?? null
   const canMinimizeBranchForm = selected != null && canEditBranch
   const preserveBranchForm = () => {
-    flushPendingWorkDraft(branchDraftKey)
+    if (!branchAuthority) return
+    flushPendingWorkDraft(branchAuthority.draftKey)
+    // A chip parked now would sit in the new account's list pointing at the
+    // old account's draft, and dismissing it would delete that draft.
+    if (!isDraftAuthorityCurrent(branchAuthority)) {
+      notify(tr('product_draft_authority_changed', 'The account or server changed. Reopen this form to continue. Its draft stays with the original account and server.'), 'warning')
+      return
+    }
     minimizeWork({
       key: branchFormWorkKey(selected?.id),
       kind: 'branch_form',
       pageId: 'branches',
       label: `${tr('edit_branch', 'Edit Branch')} — ${selected?.name || selected?.id}`,
       payload: { branchId: selected?.id },
-      draftKey: branchDraftKey,
+      draftKey: branchAuthority.draftKey,
       requiredPermission: { permissionKey: 'branches', actionKey: 'edit' },
     })
     setModal(null)
@@ -1775,7 +1791,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
           headerExtra={canMinimizeBranchForm ? <MinimizeButton tr={(key, fallback) => tr(key, fallback)} onMinimize={preserveBranchForm} /> : null}
           unsavedChanges={{ workKey: branchFormWorkKey(selected?.id) }}
         >
-          <BranchForm branch={selected} onSave={handleSaveBranch} onClose={() => setModal(null)} />
+          <BranchForm branch={selected} draftAuthority={branchAuthority ?? undefined} onSave={handleSaveBranch} onClose={() => setModal(null)} />
         </Modal>
       ) : null}
 
