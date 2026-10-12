@@ -1365,6 +1365,8 @@ function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
     const adjustment = reportHeaderAdjustment(sale, version)
     let refundPaid = ReportExactDecimal.zero()
     let legacyRefundPaid = ReportExactDecimal.zero()
+    let v1RefundRounding = ReportExactDecimal.zero()
+    let v1Returns = 0
     let returnedCost = ReportExactDecimal.zero()
     let missingCostLines = 0
     for (const returned of returns.get(Number(sale.id)) || []) {
@@ -1379,7 +1381,8 @@ function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
       const payout = reportMoney(returned, 'total_refund_usd', returnVersion, false)
       if (returnVersion === 1) {
         reportMoney(returned, 'calculated_refund_usd', returnVersion, false)
-        reportMoney(returned, 'rounding_adjustment_usd', returnVersion, false)
+        v1RefundRounding = v1RefundRounding.add(reportMoney(returned, 'rounding_adjustment_usd', returnVersion, false))
+        v1Returns += 1
       }
       refundPaid = refundPaid.add(payout)
       if (returnVersion === 0) legacyRefundPaid = legacyRefundPaid.add(payout)
@@ -1394,7 +1397,12 @@ function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
     const v1Refund = reportV1RefundReversal(Number(sale.id), returns.get(Number(sale.id)) || [], returnItems)
     const legacyBasis = subtotal.isPositive() ? legacyRefundPaid.multiply(net).divide(subtotal) : legacyRefundPaid
     const basis = legacyBasis.add(v1Refund.merchandise)
-    const refund = net.min(basis)
+    // The sale's rounding adjustment is recognized with it, so once v1 refunds
+    // take back its whole entitlement the reversal is on the charged basis:
+    // the merchandise plus the refunds' own rounding, never more than the sale
+    // recognized (net + adjustment). Partial refunds keep the merchandise basis.
+    const fullyRefunded = version === 1 && v1Returns > 0 && basis.compare(net) >= 0
+    const refund = fullyRefunded ? net.add(v1RefundRounding).min(net.add(adjustment)) : net.min(basis)
     const refundExcess = basis.subtract(net).max(ReportExactDecimal.zero())
     let cost = ReportExactDecimal.zero(), unvaluedCost = ReportExactDecimal.zero()
     let itemDiscount = ReportExactDecimal.zero()
