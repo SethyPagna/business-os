@@ -80,10 +80,40 @@ function dbCompat() {
         },
       }
     },
+    // K5a: the edit, its version guard and its audit row now commit as ONE D1 batch. Real D1 runs a batch as one
+    // transaction (any failing statement rolls every earlier one back); this mirrors that, and fires the same
+    // "concurrent writer lands just before the UPDATE" injection the single-statement path above fires.
+    async batch(items) {
+      sqlite.exec('BEGIN')
+      try {
+        const results = []
+        for (const item of items) {
+          if (/^\s*UPDATE fees SET fee_type = @feeType/.test(item.sql)) {
+            if (beforeFeeUpdate) {
+              const inject = beforeFeeUpdate
+              beforeFeeUpdate = null
+              // The competing writer committed before this batch began: run it outside the transaction.
+              sqlite.exec('ROLLBACK'); inject(sqlite); sqlite.exec('BEGIN')
+            }
+            feeUpdateRuns += 1
+          }
+          const statement = sqlite.prepare(item.sql)
+          const bound = namedParams(item.sql, item.params || {})
+          if (/^\s*(SELECT|WITH)\b/i.test(item.sql)) results.push({ results: statement.all(bound) })
+          else { const r = statement.run(bound); results.push({ meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } }) }
+        }
+        sqlite.exec('COMMIT')
+        return results
+      } catch (error) {
+        sqlite.exec('ROLLBACK')
+        throw error
+      }
+    },
   }
 }
 
 const conflictControl = loadReal('lib/conflictControl.ts')
+const realAudit = loadReal('lib/audit.ts', { './db': { getDb: dbCompat } })
 const actorSnapshot = loadReal('lib/actorSnapshot.ts')
 const feeOperationReceipt = loadReal('lib/feeOperationReceipt.ts')
 const feeRoute = loadReal('routes/fees.ts', {
@@ -95,7 +125,7 @@ const feeRoute = loadReal('routes/fees.ts', {
       return next()
     },
   },
-  '../lib/audit': { changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, audit: async (...args) => { audits.push(args) } },
+  '../lib/audit': { changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, audit: async (...args) => { audits.push(args) }, buildAuditStatement: realAudit.buildAuditStatement },
   '../lib/permissions': { getPermissionTier: () => 'full', getActionTier: () => 'full' },
   '../durable-objects/broadcastHub': { broadcast: async (...args) => { broadcasts.push(args) } },
   '../lib/conflictControl': conflictControl,
@@ -140,6 +170,10 @@ function reset() {
       successor_branch_id INTEGER
     );
     INSERT INTO branches (id, name, is_active) VALUES (2, 'Shop', 1);
+    CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT);
+    CREATE TABLE user_sessions (id INTEGER PRIMARY KEY, user_id INTEGER, device_name TEXT, device_tz TEXT, revoked_at TEXT, last_seen_at TEXT);
+    CREATE TABLE audit_logs (id INTEGER PRIMARY KEY, user_id INTEGER, user_name TEXT, action TEXT, entity TEXT, entity_id TEXT, details TEXT,
+      table_name TEXT, record_id TEXT, old_value TEXT, new_value TEXT, device_name TEXT, device_tz TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
     INSERT INTO fees (
       id, fee_type, label, amount_usd, amount_khr, fee_date, branch_id,
       created_by, created_by_name, created_at, updated_at
@@ -161,6 +195,10 @@ async function update(body) {
     body: JSON.stringify(body),
   }, {}, { waitUntil: () => {}, passThroughOnException: () => {} })
   return { status: response.status, body: await response.json() }
+}
+
+function auditCount() {
+  return audits.length + Number(sqlite.prepare('SELECT COUNT(*) AS n FROM audit_logs').get().n)
 }
 
 function row() {
@@ -218,7 +256,7 @@ async function main() {
       assert.equal(refused.body.code === 'expected_updated_at_required', false, 'refused for money, not for a missing version')
       assert.deepEqual(row(), before)
       assert.equal(feeUpdateRuns, 0)
-      assert.equal(audits.length, 0)
+      assert.equal(auditCount(), 0)
       assert.equal(broadcasts.length, 0)
     }
   })
@@ -231,7 +269,7 @@ async function main() {
     assert.equal(row().label, 'ordinary edit')
     assert.equal(row().amount_usd, 12)
     assert.equal(feeUpdateRuns, 1)
-    assert.equal(audits.length, 1)
+    assert.equal(auditCount(), 1)
     assert.equal(broadcasts.length, 1)
   })
 
@@ -245,7 +283,7 @@ async function main() {
     assert.equal(result.body.code, 'write_conflict')
     assert.deepStrictEqual(row(), before)
     assert.equal(feeUpdateRuns, 0)
-    assert.equal(audits.length, 0)
+    assert.equal(auditCount(), 0)
     assert.equal(broadcasts.length, 0)
   })
 
@@ -268,7 +306,7 @@ async function main() {
       updated_at: '2026-09-08T00:00:01.000Z',
     })
     assert.equal(feeUpdateRuns, 1)
-    assert.equal(audits.length, 0)
+    assert.equal(auditCount(), 0)
     assert.equal(broadcasts.length, 0)
   })
 
@@ -283,7 +321,7 @@ async function main() {
     }
     assert.deepStrictEqual(row(), before)
     assert.equal(feeUpdateRuns, 0)
-    assert.equal(audits.length, 0)
+    assert.equal(auditCount(), 0)
     assert.equal(broadcasts.length, 0)
   })
 
@@ -314,7 +352,7 @@ async function main() {
     assert.equal(result.status, 409, JSON.stringify(result.body))
     assert.equal(result.body.reason, 'deleted')
     assert.equal(feeUpdateRuns, 1)
-    assert.equal(audits.length, 0)
+    assert.equal(auditCount(), 0)
     assert.equal(broadcasts.length, 0)
     assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM fees').get().n, 0)
   })
@@ -324,7 +362,7 @@ async function main() {
     const result = await update({ label: 'lost edit', expectedUpdatedAt: '2026-09-08T00:00:00.000Z' })
     assert.equal(result.status, 409, JSON.stringify(result.body))
     assert.equal(result.body.code, 'write_conflict')
-    assert.equal(audits.length, 0)
+    assert.equal(auditCount(), 0)
     assert.equal(broadcasts.length, 0)
   })
 
@@ -346,7 +384,7 @@ async function main() {
     assert.equal(loser.body.code, 'write_conflict')
     assert.equal(row().label, a.status === 200 ? 'edit A' : 'edit B', 'the winner\'s edit is what is stored')
     assert.ok(row().updated_at, 'the winning edit stamped a version')
-    assert.equal(audits.length, 1, 'one audit row, for the winner only')
+    assert.equal(auditCount(), 1, 'one audit row, for the winner only')
     assert.equal(broadcasts.length, 1)
   })
 
@@ -357,7 +395,7 @@ async function main() {
     assert.equal(result.status, 409, JSON.stringify(result.body))
     assert.equal(result.body.code, 'write_conflict')
     assert.equal(row().label, 'concurrent winner')
-    assert.equal(audits.length, 0)
+    assert.equal(auditCount(), 0)
     assert.equal(broadcasts.length, 0)
   })
 

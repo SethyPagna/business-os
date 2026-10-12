@@ -262,12 +262,9 @@ const feesRoute = loadReal('routes/fees.ts', {
   '../lib/batchCode': batchCode,
   '../lib/businessDateWindow': businessDateWindow,
   '../lib/telegram': { sendTelegramEvent: async () => false },
-  '../lib/conflictControl': {
-    assertUpdatedAtMatch: () => {},
-    getExpectedUpdatedAt: () => undefined,
-    writeConflictResponse: (err) => ({ body: { error: String(err) }, status: 409 }),
-    WriteConflictError: class WriteConflictError extends Error {},
-  },
+  // Real and pure: the expense DELETE now admits a stated version (expected_updated_at) through the same
+  // helpers as the edit, so a partial stub here would only test the stub.
+  '../lib/conflictControl': loadReal('lib/conflictControl.ts'),
 })
 
 const reviewQueueRoute = loadReal('routes/reviewQueue.ts', {
