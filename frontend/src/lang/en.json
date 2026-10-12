@@ -4711,6 +4711,8 @@
   "return_reasons_title": "Return reasons",
   "return_refund": "Refund",
   "return_edit_cancelled": "This return is cancelled. Restore it before editing.",
+  "return_edit_load_failed": "The lines of this return could not be loaded, so it cannot be edited yet. Nothing was changed.",
+  "return_history_lines_unavailable": "The lines of this return were not loaded when this change was recorded, so it cannot be undone or redone here. Nothing was changed.",
   "return_restore_over_capacity": "Cannot restore: more units would count as returned than the sale sold. Nothing was changed.",
   "return_restore_over_capacity_detail": "Cannot restore: {returned} of {product} would count as returned, but the sale sold only {sold}. Nothing was changed.",
   "return_refund_price_ambiguous": "This product was sold at different prices on this sale. Pick the exact sale item being returned.",
