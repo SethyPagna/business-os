@@ -34,6 +34,7 @@ import { findSessionProductDuplicate } from '../../utils/createProductsSession.t
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import { useVisualViewportInset } from '../../utils/useVisualViewportInset.ts'
+import { hasFinePointer } from '../../utils/pointerFocus.ts'
 import { stableSnapshot } from '../../utils/formDirty.ts'
 import {
   applyPaidToLines,
@@ -336,6 +337,7 @@ export default function FastStockInModal({
   const searchSeqRef = useRef(0)
   const sessionIdRef = useRef(init.draft.sessionId)
   const searchInputRef = useRef<HTMLInputElement | null>(null)
+  const focusSearch = () => { if (hasFinePointer()) searchInputRef.current?.focus() }
   const parentPanelRef = useRef<HTMLDivElement | null>(null)
 
   const productIdNumber = Number(picked?.id) > 0 ? Number(picked?.id) : 0
@@ -403,9 +405,7 @@ export default function FastStockInModal({
   useEffect(() => {
     if (init.legacyBlocked === 'submission_unknown') notify(tr('stock_request_partially_applied', 'Stock was recorded but the request did not finish. Check the Stock Change ledger, then remove this line.'), 'error')
     else if (init.legacyBlocked) notify(tr('failed', 'Failed'), 'error')
-    if (!init.draft.picked && typeof window !== 'undefined' && window.matchMedia?.('(pointer: fine)').matches) {
-      window.setTimeout(() => searchInputRef.current?.focus(), 0)
-    }
+    if (!init.draft.picked) window.setTimeout(focusSearch, 0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -591,7 +591,7 @@ export default function FastStockInModal({
     setAddAttempted(false)
     pendingBatchRestoreRef.current = null
     setBatchChoice(mode === 'add' ? 'new' : 'none')
-    window.setTimeout(() => searchInputRef.current?.focus(), 0)
+    window.setTimeout(focusSearch, 0)
   }
 
   const applyEntry = (entry: Partial<StockSessionDraft>) => {
@@ -646,7 +646,7 @@ export default function FastStockInModal({
 
   function closeCandidateOptions() {
     setSelectedGroup(null)
-    window.setTimeout(() => searchInputRef.current?.focus(), 0)
+    window.setTimeout(focusSearch, 0)
   }
 
   // S3: the option sheet's branch fills the shared Branch, its received date the line's.
