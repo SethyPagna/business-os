@@ -113,6 +113,7 @@ type Member = {
   updateSale: boolean
   stock: StockDelta[]
   supplierManifest?: { json: string; digest: string; items: string }
+  customerSources?: string
 }
 
 type SaleStatusSnapshot = { saleId: number; before: string; after: string }
@@ -123,6 +124,27 @@ type PhysicalSources = ProductMergePhysicalResolution['sources']
 type PhysicalProof = { version: 1; operation_id: string; history_id: number; generation: number;
   sources: readonly (PhysicalSources[number] & {quantity:number;costUsd:number;costKhr:number})[] }
 type PhysicalStock = { sources: PhysicalSources; guards: Statement[]; facts: {facts:string;branchId:number}[] }
+
+function originalPhysicalSource(member: Member, index: number) {
+  const delta=member.stock[index]
+  if(!delta)fail('Return physical source ordinal is incomplete.',409)
+  let condition: string
+  if(member.supplierManifest){
+    const source=supplierManifestSources(member.supplierManifest.json,member.supplierManifest.items)[index]
+    if(!source || source.branchId!==delta.branchId)fail('Supplier Return branch and merge mapping require separate source proof.',409,'return_supplier_merge_branch_unavailable')
+    condition=source.condition
+  }else{
+    let items: unknown[][]
+    try{items=JSON.parse(member.customerSources!)}catch{fail('Customer Return source capture is incomplete.',409)}
+    const item=items.find(item=>item[1]===delta.productId && (delta.damagedLotId===null
+      ? item[4]===delta.batchId || (item[11] as unknown[][]).some(row=>row[1]===delta.batchId)
+      : (item[12] as unknown[][]).some(row=>row[0]===delta.damagedLotId)))
+    if(!item)fail('Customer Return physical source ordinal is incomplete.',409)
+    condition=delta.damagedLotId===null?'ordinary':String(item[10])
+  }
+  return {memberKey:`${member.id}:${index}`,productId:delta.productId,branchId:delta.branchId,batchId:delta.batchId,
+    damagedLotId:delta.damagedLotId,conditionTag:condition as 'ordinary'|'damaged'|'expired'}
+}
 
 export function returnMergePhysicalProofSchemaSql(): string {
   return `CREATE UNIQUE INDEX return_merge_physical_generation ON undo_snapshots(json_extract(payload_json,'$.operation_id'),json_extract(payload_json,'$.generation')) WHERE kind='${RETURN_PHYSICAL_PROOF_KIND}';
@@ -153,7 +175,8 @@ function physicalProofSql(): string {
 function physicalProofBytes(statements:Statement[],physical:PhysicalStock|null):number{
   if(!physical)return 0
   return new TextEncoder().encode(JSON.stringify(physical.guards.map(statement=>statement.params))
-    +JSON.stringify(statements.filter(statement=>statement.params.kind===RETURN_PHYSICAL_PROOF_KIND).map(statement=>statement.params.proof))).byteLength
+    +JSON.stringify(statements.filter(statement=>statement.params.kind===RETURN_PHYSICAL_PROOF_KIND).map(statement=>statement.params.proof))
+    +JSON.stringify(statements.filter(statement=>statement.params.movements!==undefined).map(statement=>statement.params.movements))).byteLength
 }
 
 function physicalProofStatement(operation: string, generation: number, sources: PhysicalSources, user: SessionUser, members:Member[]): Statement {
@@ -175,14 +198,14 @@ function savedPhysicalProof(operation: Row, snapshot: Snapshot): PhysicalProof |
   if(operation.physical_proof===null || operation.physical_proof===undefined)return null
   let proof:PhysicalProof
   try{proof=JSON.parse(String(operation.physical_proof))}catch{fail('Return physical source proof is incomplete.',409)}
-  const expected=snapshot.members.filter(member=>member.changed && member.supplierManifest).flatMap(member=>member.stock.map((delta,index)=>({member,delta,key:`${member.id}:${index}`})))
+  const expected=snapshot.members.filter(member=>member.changed && (member.supplierManifest || member.customerSources)).flatMap(member=>member.stock.map((delta,index)=>({member,delta,key:`${member.id}:${index}`,index})))
   if(proof.version!==1 || proof.operation_id!==operation.id || proof.history_id!==operation.history_id || proof.generation!==operation.generation
     || !Array.isArray(proof.sources) || proof.sources.length!==expected.length)fail('Return physical source proof does not match the original operation.',409)
-  for(const [index,{member,delta,key}]of expected.entries()){
-    const source=supplierManifestSources(member.supplierManifest!.json,member.supplierManifest!.items)[index-expected.findIndex(value=>value.member===member)]
+  for(const [index,{member,delta,key,index:ordinal}]of expected.entries()){
+    const source=originalPhysicalSource(member,ordinal)
     const original=proof.sources[index]?.original
     if(!source || !original || original.memberKey!==key || original.productId!==delta.productId || original.branchId!==delta.branchId
-      || original.batchId!==delta.batchId || original.damagedLotId!==delta.damagedLotId || original.conditionTag!==source.condition)fail('Return physical source ordinal changed.',409)
+      || original.batchId!==delta.batchId || original.damagedLotId!==delta.damagedLotId || original.conditionTag!==source.conditionTag)fail('Return physical source ordinal changed.',409)
     if(proof.sources[index].quantity!==delta.quantity*(proof.generation%2?-1:1) || proof.sources[index].costUsd!==delta.costUsd
       || proof.sources[index].costKhr!==delta.costKhr)fail('Return physical source quantity or cost changed.',409)
   }
@@ -190,20 +213,26 @@ function savedPhysicalProof(operation: Row, snapshot: Snapshot): PhysicalProof |
   return proof
 }
 
-async function supplierPhysicalStock(db:D1Compat,members:Member[],facts:{facts:string;branchId:number}[],previous:PhysicalProof|null=null):Promise<PhysicalStock|null>{
+function customerPhysicalSnapshot(operation:Row,snapshot:Snapshot):Snapshot{
+  let witnesses:{id:number;sources:string}[]
+  const raw=String(operation.customer_witness)
+  if(new TextEncoder().encode(raw).byteLength>512000)fail('Customer Return source capture exceeds its bound.',409)
+  try{witnesses=JSON.parse(raw)}catch{fail('Customer Return source capture is incomplete.',409)}
+  if(!Array.isArray(witnesses))fail('Customer Return source capture is incomplete.',409)
+  return {...snapshot,members:snapshot.members.map(member=>{
+    if(member.scope!=='customer' || !member.stock.length || member.customerSources!==undefined)return member
+    const source=witnesses.find(witness=>witness.id===member.id)?.sources
+    if(typeof source!=='string')fail('Customer Return physical source capture is incomplete.',409)
+    return {...member,customerSources:source}
+  })}
+}
+
+async function returnPhysicalStock(db:D1Compat,members:Member[],facts:{facts:string;branchId:number}[],previous:PhysicalProof|null=null):Promise<PhysicalStock|null>{
   const inactive=new Set(facts.filter(row=>JSON.parse(row.facts).product[1]!==1).map(row=>JSON.parse(row.facts).product[0]))
-  if(members.some(member=>member.scope==='customer' && member.stock.some(delta=>inactive.has(delta.productId))))fail('Customer Return merge-origin stock mapping is not available. Nothing was changed.',409,'return_customer_merge_origin_unavailable')
-  const supplier=members.filter(member=>member.changed && member.supplierManifest)
-  if(!previous && !supplier.some(member=>member.stock.some(delta=>inactive.has(delta.productId))))return null
-  const sources=supplier.flatMap(member=>{
-    const original=supplierManifestSources(member.supplierManifest!.json,member.supplierManifest!.items)
-    return member.stock.map((delta,index)=>{
-      const source=original[index]
-      if(!source || source.branchId!==delta.branchId)fail('Supplier Return branch and merge mapping require separate source proof.',409,'return_supplier_merge_branch_unavailable')
-      return {memberKey:`${member.id}:${index}`,productId:delta.productId,branchId:delta.branchId,batchId:delta.batchId,damagedLotId:delta.damagedLotId,
-        conditionTag:source.condition as 'ordinary'|'damaged'|'expired'}
-    })
-  })
+  const proven=members.filter(member=>member.changed && (member.supplierManifest || member.customerSources))
+  if(!previous && !members.some(member=>member.stock.some(delta=>inactive.has(delta.productId))))return null
+  if(members.some(member=>member.stock.some(delta=>inactive.has(delta.productId)) && !proven.includes(member)))fail('Return merge-origin source proof is unavailable.',409)
+  const sources=proven.flatMap(member=>member.stock.map((_delta,index)=>originalPhysicalSource(member,index)))
   const plan=planProductMergePhysicalOrigins(sources), resolution=plan.decode(await db.prepare(plan.read.sql).all<Row>(plan.read.params))
   const byKey=new Map(resolution.sources.map(source=>[source.original.memberKey,source.effect]))
   const contexts=members.flatMap(member=>member.stock.map((delta,index)=>byKey.get(`${member.id}:${index}`)||delta))
@@ -461,7 +490,7 @@ function customerMovementsSql(id:string):string {
 }
 
 type CustomerReplayAuthority={sources:string;fingerprint:string;effects:string;movements:string;tags:string}
-function replayCustomerStock(operation:Row,snapshot:Snapshot):Map<number,CustomerReplayAuthority> {
+function replayCustomerStock(operation:Row,snapshot:Snapshot,physical:PhysicalProof|null=null):Map<number,CustomerReplayAuthority> {
   const result=new Map<number,CustomerReplayAuthority>()
   let request:BulkRequest,receipt:{items:{id:number;changed:boolean;before:string;after:string}[];changedIds:number[]},witnesses:{id:number;status:string;fingerprint:string;sources:string;movements:string;tags:string}[]
   const raw=String(operation.customer_witness)
@@ -484,6 +513,7 @@ function replayCustomerStock(operation:Row,snapshot:Snapshot):Map<number,Custome
     if(!member.changed){if(member.stock.length)fail('An unchanged Return has archived stock effects.',409);continue}
     let items:unknown[][]
     try{items=JSON.parse(witness.sources)}catch{fail('Customer Return source capture is incomplete.',409)}
+    if(member.customerSources!==undefined && member.customerSources!==witness.sources)fail('Archived customer Return source capture changed.',409)
     if(original.before!==request.source || original.after!==request.target || !Array.isArray(items)
       || witness.status!==(Number(operation.generation)%2?original.before:original.after))fail('Customer Return source or replay state changed.',409)
     itemCount+=items.length
@@ -515,11 +545,13 @@ function replayCustomerStock(operation:Row,snapshot:Snapshot):Map<number,Custome
     const sign=original.after==='cancelled'?-1:1,parity=Number(operation.generation)%2?-1:1,tail=moves.slice(-sources.length),effects:{addressed:number;effect:number;sells:0}[]=[]
     for(const [index,source] of sources.entries()){
       const delta=member.stock[index],move=tail[index],quantity=sign*source.quantity,type=source.lot!==null?(quantity*parity>0?'damage_in':'damage_reversal'):statusMovementType('customer',quantity*parity)
-      if(!Array.isArray(move) || move.length!==8 || move[1]!==source.product || move[4]!==type || move[5]!==quantity*parity || move[6]!==source.usd || move[7]!==source.khr
-        || delta.productId!==source.product || delta.productName!==source.name || delta.branchId!==move[2] || delta.batchId!==move[3]
+      const landing=physical?.sources.find(entry=>entry.original.memberKey===`${member.id}:${index}`)?.effect
+      if(!Array.isArray(move) || move.length!==8 || move[1]!== (landing?.productId??source.product) || move[4]!==type || move[5]!==quantity*parity || move[6]!==source.usd || move[7]!==source.khr
+        || landing && (move[2]!==landing.branchId || move[3]!==landing.batchId)
+        || delta.productId!==source.product || delta.productName!==source.name || delta.branchId!==(landing?source.recorded:move[2]) || delta.batchId!==(landing?source.batch:move[3])
         || delta.damagedLotId!==source.lot || delta.quantity!==quantity || delta.costUsd!==source.usd || delta.costKhr!==source.khr
-        || source.recorded===move[2] && source.batch!==move[3])fail('Customer Return stock vector no longer matches its sources and committed movement ordinal.',409)
-      if(source.recorded!==move[2])effects.push({addressed:source.recorded,effect:Number(move[2]),sells:0})
+        || !landing && source.recorded===move[2] && source.batch!==move[3])fail('Customer Return stock vector no longer matches its sources and committed movement ordinal.',409)
+      if(!landing && source.recorded!==move[2])effects.push({addressed:source.recorded,effect:Number(move[2]),sells:0})
     }
     result.set(member.id,{sources:witness.sources,fingerprint:witness.fingerprint,effects:JSON.stringify(effects),movements:witness.movements,tags:witness.tags})
   }
@@ -629,6 +661,18 @@ function statusMovementType(scope: Member['scope'], quantity: number): string {
 
 function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, stamp: string, exact: CountedStockBatchPlan, physical?:PhysicalStock|null): Statement[] {
   const out: Statement[] = []
+  const projected=new Map<string,{effect:PhysicalSources[number]['effect'];quantities:number[]}>()
+  if(physical)for(const [index,delta]of member.stock.entries()){
+    const effect=physical.sources.find(source=>source.original.memberKey===`${member.id}:${index}`)?.effect
+    if(!effect)fail('Return physical source ordinal is incomplete.',409)
+    const key=JSON.stringify([effect.productId,effect.branchId,effect.batchId,effect.damagedLotId])
+    const group=projected.get(key)??{effect,quantities:[]};group.quantities.push(delta.quantity*direction);projected.set(key,group)
+  }
+  for(const {effect,quantities}of projected.values()){
+    const quantity=sumCountedQuantities(quantities),context=exact.get(effect.productId,effect.branchId)
+    if(effect.damagedLotId!==null)out.push(...planExactCountedTaggedChange(context,{lotId:effect.damagedLotId,productId:effect.productId,branchId:effect.branchId,batchId:effect.batchId},Math.abs(quantity),quantity>0?'restore':'consume'))
+    else out.push(...planExactCountedOrdinaryChange(context,effect.batchId,Math.abs(quantity),quantity<0?'consume':effect.batchId!==null && context.requiresReceiptActivation(effect.batchId)?'activateAndReceive':'receive'))
+  }
   for (const [index,delta] of member.stock.entries()) {
     const effect=physical?.sources.find(source=>source.original.memberKey===`${member.id}:${index}`)?.effect??delta
     const quantity = delta.quantity * direction
@@ -641,9 +685,9 @@ function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, s
       stamp,
     }
     const context = exact.get(effect.productId, effect.branchId)
-    if (delta.damagedLotId) {
+    if (!physical && delta.damagedLotId) {
       out.push(...planExactCountedTaggedChange(context, {lotId:effect.damagedLotId!,productId:effect.productId,branchId:effect.branchId,batchId:effect.batchId},Math.abs(quantity),quantity>0?'restore':'consume'))
-    } else {
+    } else if(!physical) {
       const action = quantity < 0 ? 'consume' : effect.batchId !== null && context.requiresReceiptActivation(effect.batchId) ? 'activateAndReceive' : 'receive'
       out.push(...planExactCountedOrdinaryChange(context, effect.batchId, Math.abs(quantity), action))
     }
@@ -667,6 +711,16 @@ function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, s
       },
     })
   }
+  const movements=physical?out.filter(statement=>statement.sql.startsWith('INSERT INTO inventory_movements(')):[]
+  if(movements.length>1)return [...out.filter(statement=>!movements.includes(statement)),{
+    sql:`INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,addressed_branch_name,movement_type,quantity,
+      unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id)
+      SELECT json_extract(value,'$.product'),json_extract(value,'$.name'),json_extract(value,'$.branch'),json_extract(value,'$.branchName'),
+        json_extract(value,'$.addressed'),json_extract(value,'$.type'),json_extract(value,'$.quantity'),json_extract(value,'$.usd'),
+        json_extract(value,'$.khr'),json_extract(value,'$.reason'),json_extract(value,'$.returnId'),json_extract(value,'$.userId'),
+        json_extract(value,'$.userName'),json_extract(value,'$.batch') FROM json_each(@movements) ORDER BY CAST(key AS INTEGER)`,
+    params:{movements:JSON.stringify(movements.map(statement=>statement.params))}
+  }]
   return out
 }
 
@@ -903,7 +957,7 @@ async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'bef
 
 async function buildMembers(db: D1Compat, request: BulkRequest, user: SessionUser, redirectTarget: number | null = null): Promise<{ members: Member[]; guards: Statement[]; exact: CountedStockBatchPlan;physical:PhysicalStock|null }> {
   const ids = request.items.map((item) => item.id)
-  const returns = await rowsForIds<Row>(db, ids, (marks) => `SELECT r.*,cr.request_json AS supplier_manifest,cr.request_digest AS supplier_digest,${supplierItemsExpression('r.id')} AS supplier_items,COALESCE(v.revision,0) AS write_revision,${movementFingerprint('r.id')} AS movement_fingerprint FROM returns r LEFT JOIN return_create_receipts cr ON cr.return_id=r.id LEFT JOIN return_write_revisions v ON v.return_id=r.id WHERE r.id IN (${marks})`)
+  const returns = await rowsForIds<Row>(db, ids, (marks) => `SELECT r.*,${customerSourcesSql('r.id')} customer_sources,cr.request_json AS supplier_manifest,cr.request_digest AS supplier_digest,${supplierItemsExpression('r.id')} AS supplier_items,COALESCE(v.revision,0) AS write_revision,${movementFingerprint('r.id')} AS movement_fingerprint FROM returns r LEFT JOIN return_create_receipts cr ON cr.return_id=r.id LEFT JOIN return_write_revisions v ON v.return_id=r.id WHERE r.id IN (${marks})`)
   const matchingIds = request.items.flatMap((expected) => {
     const row = returns.find((candidate) => Number(candidate.id) === expected.id)
     if (!row) fail(`Return ${expected.id} changed. The entire group was rejected; refresh before retrying.`)
@@ -1049,8 +1103,9 @@ async function buildMembers(db: D1Compat, request: BulkRequest, user: SessionUse
           if(subtractCountedQuantity(itemQuantity,[lotQuantity])!==0) fail(`Return ${expected.id} has incomplete damaged-stock provenance.`,400)
           const costUsd=Number(item.cost_price_usd)||0,costKhr=Number(item.cost_price_khr)||0
           for (const lot of lots) {
-            if (cancelling && Number(lot.quantity_remaining) !== Number(lot.quantity)) fail(`Damaged stock from return ${expected.id} has already been consumed.`, 409)
-            if (restoring && Number(lot.quantity_remaining) !== 0) fail(`Damaged stock from return ${expected.id} is not fully cancelled.`, 409)
+            const originalActive=JSON.parse(item.counted_facts).product[1]===1
+            if (originalActive && cancelling && Number(lot.quantity_remaining) !== Number(lot.quantity)) fail(`Damaged stock from return ${expected.id} has already been consumed.`, 409)
+            if (originalActive && restoring && Number(lot.quantity_remaining) !== 0) fail(`Damaged stock from return ${expected.id} is not fully cancelled.`, 409)
             member.stock.push({ productId, productName: item.product_name, branchId, batchId: lot.batch_id, damagedLotId: lot.id, quantity: cancelling ? -Number(lot.quantity) : Number(lot.quantity), costUsd, costKhr, movementType: '' })
           }
           continue
@@ -1084,18 +1139,22 @@ async function buildMembers(db: D1Compat, request: BulkRequest, user: SessionUse
     if (changed) {
       guards.push(guard(`NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM returns WHERE id=@id)
         AND COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=@id),0)=@revision AND ${movementFingerprint('@id')}=@fingerprint
-        AND ${taggedReturnAuthority()} AND ${supplierManifestAuthority()} AND (@supplierManifest IS NULL OR (${stockActorPredicate}))${member.saleRevision === null ? '' : ' AND EXISTS(SELECT 1 FROM sales WHERE id=@saleId) AND COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0)=@saleRevision'}`,
-      { id: expected.id, revision: Number(row.write_revision)||0, fingerprint: row.movement_fingerprint, taggedSources: JSON.stringify(taggedSources(member,items,damaged)), ...supplierManifestParams(member), ...stockActorParams(user),
-        ...(member.saleRevision === null ? {} : { saleId: member.saleId, saleRevision: member.saleRevision }) }))
+        AND ${taggedReturnAuthority()} AND ${supplierManifestAuthority()} AND (@customerCapture IS NULL OR ${customerSourcesSql('@id')}=@customerCapture) AND ((@supplierManifest IS NULL AND @pinCustomerActor=0) OR (${stockActorPredicate}))${member.saleRevision === null ? '' : ' AND EXISTS(SELECT 1 FROM sales WHERE id=@saleId) AND COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0)=@saleRevision'}`,
+      { id: expected.id, revision: Number(row.write_revision)||0, fingerprint: row.movement_fingerprint, taggedSources: JSON.stringify(taggedSources(member,items,damaged)), ...supplierManifestParams(member), ...stockActorParams(user), customerCapture:scope==='customer' && request.field==='status'?row.customer_sources:null,
+        pinCustomerActor:0,...(member.saleRevision === null ? {} : { saleId: member.saleId, saleRevision: member.saleRevision }) }))
     }
+    if(changed && scope==='customer' && request.field==='status')member.customerSources=String(row.customer_sources)
     members.push(member)
   }
   const effectGuards = resolver.guards()
   if (effectGuards.length) guards.push(guard(branchEffectGuardPredicate('@effects'), { effects: JSON.stringify(effectGuards) }))
   const keys = new Set(members.flatMap(member=>member.stock.map(delta=>`${delta.productId}:${delta.branchId}`)))
   const facts=items.filter(item=>keys.has(`${item.product_id}:${item.counted_branch_id}`)).map(item=>({facts:item.counted_facts,branchId:item.counted_branch_id}))
-  const physical=await supplierPhysicalStock(db,members,facts)
-  if(physical)guards.push(...physical.guards)
+  const physical=await returnPhysicalStock(db,members,facts)
+  if(physical){
+    for(const statement of guards)if(statement.sql.includes('@pinCustomerActor'))statement.params.pinCustomerActor=1
+    guards.push(...physical.guards)
+  }else for(const member of members)delete member.customerSources
   const exact = new CountedStockBatchPlan(physical?.facts??facts, { deferPhysicalWrites: true })
   return { members, guards, exact,physical }
 }
@@ -1215,7 +1274,7 @@ async function applyReturnBulkActionOutcomeKernel(env: Env, user: SessionUser, r
   } catch (error) {
     let retry: Row | undefined
     try {retry = await db.prepare('SELECT request_json,receipt_json FROM return_bulk_operations WHERE actor_id=@actor AND request_id=@request').getOnce!<Row>({ actor: user.id, request: request.client_request_id })}
-    catch(readError){if(members.some(member=>!!member.supplierManifest || member.stock.some(delta=>delta.damagedLotId!==null)))throw new ReturnBulkError('The supplier return status outcome could not be confirmed. Retry the original request.',503,'supplier_return_status_outcome_unknown');throw readError}
+    catch(readError){if(physical || members.some(member=>!!member.supplierManifest || member.stock.some(delta=>delta.damagedLotId!==null)))throw new ReturnBulkError('The supplier return status outcome could not be confirmed. Retry the original request.',503,'supplier_return_status_outcome_unknown');throw readError}
     if (retry?.request_json === canonical) {
       const stored = JSON.parse(String(retry.receipt_json)) as Row
       // operationId is this call's own random UUID: the stored receipt carries
@@ -1228,7 +1287,7 @@ async function applyReturnBulkActionOutcomeKernel(env: Env, user: SessionUser, r
     if (activeGuard) throw activeGuard
 
     if (/CHECK constraint failed:\s*guard_value\s*=\s*1/i.test(String(error))) fail('A return or its stock changed. Nothing in the group was applied.')
-    if(members.some(member=>!!member.supplierManifest || member.stock.some(delta=>delta.damagedLotId!==null)) && !isCountedStockConflict(error) && !String(error).includes('$[merge_physical_origin_conflict]'))throw new ReturnBulkError('The supplier return status outcome could not be confirmed. Retry the original request.',503,'supplier_return_status_outcome_unknown')
+    if((physical || members.some(member=>!!member.supplierManifest || member.stock.some(delta=>delta.damagedLotId!==null))) && !isCountedStockConflict(error) && !String(error).includes('$[merge_physical_origin_conflict]'))throw new ReturnBulkError('The supplier return status outcome could not be confirmed. Retry the original request.',503,'supplier_return_status_outcome_unknown')
     throw error
   }
 }
@@ -1248,11 +1307,12 @@ async function replayReturnBulkActionKernel(env: Env, user: SessionUser, directi
   const snapshot = JSON.parse(String(operation.payload_json)) as Snapshot
   if (snapshot.version!==1 || snapshot.operationId!==operation.id || !Array.isArray(snapshot.members) || snapshot.members.length>RETURN_BULK_LIMIT) fail('Unsupported Return bulk snapshot.')
   const tagged=replayTaggedSources(operation,snapshot)
-  const customers=replayCustomerStock(operation,snapshot)
-  const previousPhysical=savedPhysicalProof(operation,snapshot)
+  const sourceSnapshot=customerPhysicalSnapshot(operation,snapshot)
+  const previousPhysical=savedPhysicalProof(operation,sourceSnapshot)
+  const customers=replayCustomerStock(operation,snapshot,previousPhysical)
   const supplierFingerprints=validateSupplierReplayStock(operation,snapshot,previousPhysical)
   const supplierExact=supplierFingerprints!==null
-  const exactReplay=supplierExact || tagged.size>0
+  const exactReplay=supplierExact || tagged.size>0 || previousPhysical!==null
   const pinOperationAuthority=exactReplay || customers.size>0
   for (const member of snapshot.members) if(member.supplierManifest) {
     supplierManifestSources(member.supplierManifest.json,member.supplierManifest.items)
@@ -1265,7 +1325,7 @@ async function replayReturnBulkActionKernel(env: Env, user: SessionUser, directi
     fail('This grouped Return replay generation changed.')
   }
   const facts=JSON.parse(String(operation.counted_facts || '[]')) as {facts:string;branchId:number}[]
-  const physical=await supplierPhysicalStock(db,snapshot.members,facts,previousPhysical)
+  const physical=await returnPhysicalStock(db,sourceSnapshot.members,facts,previousPhysical)
   const exact = new CountedStockBatchPlan(physical?.facts??facts, { deferPhysicalWrites: true })
   if (snapshot.version !== 1 || snapshot.operationId !== operation.id || snapshot.members.length > RETURN_BULK_LIMIT) fail('Unsupported Return bulk snapshot.')
   const expectedStatus = direction === 'undo' ? 'undoable' : 'redoable'
@@ -1282,7 +1342,7 @@ async function replayReturnBulkActionKernel(env: Env, user: SessionUser, directi
   statements.push(...replayEntitlement.guards)
   for (const member of snapshot.members.filter((candidate) => candidate.changed)) {
     const customer=customers.get(member.id)
-    statements.push(guard(`EXISTS(SELECT 1 FROM returns r JOIN return_bulk_members m ON m.return_id=r.id WHERE m.operation_id=@operation AND r.id=@id AND m.revision=COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=r.id),0) AND m.stock_fingerprint=${movementFingerprint('r.id')} AND (@taggedFingerprint IS NULL OR m.stock_fingerprint=@taggedFingerprint)${supplierExact?' AND m.stock_fingerprint=@capturedFingerprint':''}${customer?' AND m.stock_fingerprint=@customerFingerprint':''} AND (m.sale_id IS NULL OR (EXISTS(SELECT 1 FROM sales WHERE id=m.sale_id) AND m.sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=m.sale_id),0)))) AND ${taggedReturnAuthority()} AND ${supplierManifestAuthority()} AND (@supplierManifest IS NULL OR (${stockActorPredicate}))${customer?` AND ${customerSourcesSql('@id')}=@customerSources AND ${customerMovementsSql('@id')}=@customerMovements AND ${customerTagMembersSql('@id')}=@customerTags AND (${branchEffectGuardPredicate('@customerEffects')})`:''}`, { operation: operation.id, id: member.id, taggedSources: JSON.stringify(tagged.get(member.id)||[]), taggedFingerprint:tagged.get(member.id)?.[0]?.fingerprint??null, ...supplierManifestParams(member), ...stockActorParams(user),...(supplierExact?{capturedFingerprint:supplierFingerprints!.get(member.id)}:{}),...(customer?{customerSources:customer.sources,customerFingerprint:customer.fingerprint,customerEffects:customer.effects,customerMovements:customer.movements,customerTags:customer.tags}:{}) }))
+    statements.push(guard(`EXISTS(SELECT 1 FROM returns r JOIN return_bulk_members m ON m.return_id=r.id WHERE m.operation_id=@operation AND r.id=@id AND m.revision=COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=r.id),0) AND m.stock_fingerprint=${movementFingerprint('r.id')} AND (@taggedFingerprint IS NULL OR m.stock_fingerprint=@taggedFingerprint)${supplierExact?' AND m.stock_fingerprint=@capturedFingerprint':''}${customer?' AND m.stock_fingerprint=@customerFingerprint':''} AND (m.sale_id IS NULL OR (EXISTS(SELECT 1 FROM sales WHERE id=m.sale_id) AND m.sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=m.sale_id),0)))) AND ${taggedReturnAuthority()} AND ${supplierManifestAuthority()} AND (@customerCapture IS NULL OR ${customerSourcesSql('@id')}=@customerCapture) AND ((@supplierManifest IS NULL AND @pinCustomerActor=0) OR (${stockActorPredicate}))${customer?` AND ${customerSourcesSql('@id')}=@customerSources AND ${customerMovementsSql('@id')}=@customerMovements AND ${customerTagMembersSql('@id')}=@customerTags AND (${branchEffectGuardPredicate('@customerEffects')})`:''}`, { operation: operation.id, id: member.id, taggedSources: JSON.stringify(tagged.get(member.id)||[]), taggedFingerprint:tagged.get(member.id)?.[0]?.fingerprint??null, ...supplierManifestParams(member), ...stockActorParams(user), customerCapture:member.customerSources??null,pinCustomerActor:physical?1:0,...(supplierExact?{capturedFingerprint:supplierFingerprints!.get(member.id)}:{}),...(customer?{customerSources:customer.sources,customerFingerprint:customer.fingerprint,customerEffects:customer.effects,customerMovements:customer.movements,customerTags:customer.tags}:{}) }))
   }
   for (const member of snapshot.members) statements.push(...memberStatements(member, directionSign, user, stamp, exact,physical))
   statements.push(...exact.takeFinalPhysicalWrites())

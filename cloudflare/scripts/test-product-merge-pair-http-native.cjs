@@ -121,6 +121,55 @@ async function mergedSupplierReturn(worker, tier, receipt, tagged) {
     console.log(`PASS real pair HTTP then supplier cancel/retry/Undo/Redo ${tier} receipt=${receipt} tagged=${tagged}`)
   } finally { f.sql.close() }
 }
+async function mergedCustomerReturn(worker, tier, receipt, tagged) {
+  const f = await world(worker, tier, receipt, tagged)
+  try {
+    f.sql.exec(load('lib/returnBulkAction.ts').returnMergePhysicalProofSchemaSql())
+    const db = load('lib/db.ts').getDb(f.env)
+    await load('lib/stockTransaction.ts').executeStockTransaction(db, [
+      { sql: "INSERT INTO returns(id,return_number,return_scope,status,return_type,branch_id,updated_at) VALUES(10,'PAIR-CUSTOMER','customer','completed','refund',1,'original')" },
+      ...(tagged ? [{ sql: 'UPDATE damaged_stock_lots SET return_id=10,quantity=.1,unit_cost_usd=2 WHERE id=1' }] : []),
+      { sql: `INSERT INTO return_items(id,return_id,product_id,product_name,quantity,cost_price_usd,stock_action,stock_condition,return_to_stock,branch_id,batch_id)
+        VALUES(10,10,2,'Historical original',.1,2,@action,@condition,1,1,@batch)`,
+        params: { action: tagged ? 'damaged' : 'restock', condition: tagged ? 'damaged' : 'ordinary', batch: receipt ? 2 : null } },
+      { sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,reference_id,user_id,batch_id)
+        VALUES(2,'Historical original',1,@movement,.1,2,10,7,@batch)`, params: { movement: tagged ? 'damage_in' : 'return', batch: receipt ? 2 : null } },
+    ], 'once')
+    const original = () => ({
+      items: f.sql.prepare('SELECT * FROM return_items ORDER BY id').all(),
+      allocations: f.sql.prepare('SELECT * FROM return_item_batch_allocations ORDER BY id').all(),
+      receipt: f.sql.prepare('SELECT * FROM product_batches WHERE id=2').get(),
+      movement: f.sql.prepare('SELECT * FROM inventory_movements WHERE id=99').get(),
+    })
+    const archive = original()
+    const merged = await f.call(endpoint, command)
+    assert.equal(merged.status, 200, JSON.stringify(merged.json))
+    assert.equal(merged.json.quantityMoved, .2)
+    const quantity = () => f.sql.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity
+    const body = (key, source = 'completed', target = 'cancelled') => ({ client_request_id: key, field: 'status', source, target,
+      items: f.sql.prepare('SELECT id,status expected_status,return_type expected_method,updated_at expected_updated_at FROM returns WHERE id=10').all() })
+    const cancel = body('pair-customer-cancel')
+    const cancelled = await f.call('/returns/bulk', cancel)
+    assert.equal(cancelled.status, 200, JSON.stringify(cancelled.json)); assert.equal(quantity(), .2)
+    const afterCancel = state(f)
+    assert.equal((await f.call('/returns/bulk', cancel)).status, 200)
+    assert.deepEqual(state(f), afterCancel)
+    const undo = await f.call(`/action-history/${cancelled.json.actionHistoryId}/undo`, { expected_generation: 0 })
+    assert.equal(undo.status, 200, JSON.stringify(undo.json)); assert.equal(quantity(), .3)
+    const redo = await f.call(`/action-history/${cancelled.json.actionHistoryId}/redo`, { expected_generation: 1 })
+    assert.equal(redo.status, 200, JSON.stringify(redo.json)); assert.equal(quantity(), .2)
+    const restored = await f.call('/returns/bulk', body('pair-customer-restore', 'cancelled', 'completed'))
+    assert.equal(restored.status, 200, JSON.stringify(restored.json)); assert.equal(quantity(), .3)
+    assert.deepEqual(original(), archive)
+    assert.equal(f.sql.prepare('SELECT stock_quantity FROM products WHERE id=2').get().stock_quantity, 0)
+    if (tagged) assert.deepEqual(f.sql.prepare('SELECT product_id,quantity_remaining FROM damaged_stock_lots ORDER BY id').all(),
+      [{ product_id: 2, quantity_remaining: 0 }, { product_id: 1, quantity_remaining: .1 }])
+    const proofs = f.sql.prepare("SELECT payload_json FROM undo_snapshots WHERE kind='return.fields.bulk.physical.v1' ORDER BY id").all().map(row => JSON.parse(row.payload_json))
+    assert.deepEqual(proofs.map(proof => [proof.generation, proof.sources[0].original.productId, proof.sources[0].effect.productId]),
+      [[0, 2, 1], [1, 2, 1], [2, 2, 1], [0, 2, 1]])
+    console.log(`PASS real pair HTTP then customer cancel/retry/Undo/Redo/restore ${tier} receipt=${receipt} tagged=${tagged}`)
+  } finally { f.sql.close() }
+}
 async function main() {
   const worker = await h.bundle.exports.bundleWorker()
   for (const tier of ['free', 'paid']) for (const receipt of [false, true]) for (const tagged of [false, true]) await positive(worker, tier, receipt, tagged, tagged)
@@ -181,7 +230,8 @@ async function main() {
     } finally { f.sql.close() }
   }
   for (const tier of ['free', 'paid']) for (const receipt of [false, true]) for (const tagged of [false, true]) await mergedSupplierReturn(worker, tier, receipt, tagged)
-  console.log('BOUNDED ORDINARY PAIR AND SUPPLIER CONSUMER HTTP; reviewed/identity/bulk/merge replay/reset/schema rollout remain open')
+  for (const tier of ['free', 'paid']) for (const receipt of [false, true]) for (const tagged of [false, true]) await mergedCustomerReturn(worker, tier, receipt, tagged)
+  console.log('BOUNDED ORDINARY PAIR AND SUPPLIER/CUSTOMER BULK CONSUMER HTTP; reviewed/identity/group/merge replay/create/edit/reset/schema rollout remain open')
 }
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })
-module.exports = { world, main }
+module.exports = { world, main, mergedCustomerReturn }
