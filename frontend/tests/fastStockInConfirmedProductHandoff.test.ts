@@ -77,11 +77,14 @@ function line(created: boolean): StockSessionLine {
 }
 
 type CreationOutcome = 'confirmed' | 'unknown' | 'pending'
-async function controller(createdRows: boolean[], creationOutcome: CreationOutcome = 'confirmed') {
+async function controller(createdRows: boolean[], creationOutcomes: CreationOutcome | CreationOutcome[] = 'confirmed') {
   const api = loadAttempts()
   let received = createdRows.map(line), saving = false, step = 'review', finished = 0, creates = 0
   const original = structuredClone(received)
-  for (const entry of received.filter(row => row.createPayload)) await api.registerReceivingProductAttempt(7, entry.createRequestId)
+  for (const entry of received.filter(row => row.createPayload)) {
+    assert(entry.createRequestId)
+    await api.registerReceivingProductAttempt(7, entry.createRequestId)
+  }
   const submissionsRef = { current: destination.restoreReceivingSubmissions(null, received) }
   const destinationRef = { current: { branchId: '1', options: [{ value: '1', label: 'Active' }] } }
   const requests: Array<{ lines: FastStockInCommitLine[]; options: unknown }> = []
@@ -102,8 +105,9 @@ async function controller(createdRows: boolean[], creationOutcome: CreationOutco
         return { createProduct: async (_payload: Record<string, unknown>, check: () => void) => {
           check()
           creates++
+          const creationOutcome = Array.isArray(creationOutcomes) ? creationOutcomes[creates - 1] : creationOutcomes
           if (creationOutcome === 'unknown') throw new TypeError('lost acknowledgement after product creation')
-          const result = creationOutcome === 'pending' ? { pending: true } : { id: 72 }
+          const result = creationOutcome === 'pending' ? { pending: true } : { id: 71 + creates }
           check()
           return result
         } }
@@ -138,7 +142,7 @@ async function controller(createdRows: boolean[], creationOutcome: CreationOutco
   }
 }
 
-for (const rows of [[false], [true], [false, true], [true, false]]) {
+for (const rows of [[false], [true], [false, true], [true, false], [true, true], [false, true, true]]) {
   const subject = await controller(rows)
   await subject.complete()
   const state = subject.state()
@@ -147,7 +151,8 @@ for (const rows of [[false], [true], [false, true], [true, false]]) {
   assert.equal(state.finished, 1)
   assert.equal(state.saving, false)
   assert(state.received.every(entry => entry.status === 'saved'))
-  assert.deepEqual(subject.requests[0].lines.map(entry => entry.body.productId), rows.map(created => created ? 72 : 1))
+  let createdId = 71
+  assert.deepEqual(subject.requests[0].lines.map(entry => entry.body.productId), rows.map(created => created ? ++createdId : 1))
   assert.deepEqual(subject.requests[0].lines.map(entry => entry.body.clientRequestId), subject.original.map(entry => entry.requestId))
   assert.deepEqual(subject.requests[0].options, { session: { supplierTotalUsd: rows.length * 6.5, paymentStatus: 'paid' } })
   assert.deepEqual(subject.submissionsRef.current.unknown, [])
@@ -173,4 +178,23 @@ for (const failure of ['unknown', 'pending'] as const) {
   assert.equal(created.unitCost, '3.25')
   assert.equal(subject.api.readReceivingProductAttempt(7, created.createRequestId)?.state, failure)
   console.log(`PASS actual complete flow ${failure}: existing stock stays untouched, draft preserves entry and creation cannot repeat after restore`)
+}
+
+for (const outcomes of [['confirmed', 'unknown'], ['unknown', 'confirmed']] as const) {
+  const subject = await controller([false, true, true], [...outcomes])
+  await subject.complete()
+  const state = subject.state(), created = state.received.filter(entry => entry.createPayload)
+  const uncertain = created[outcomes.indexOf('unknown')]
+  assert.equal(state.creates, 2)
+  assert.equal(subject.requests.length, 0, 'one unconfirmed creation blocks receipt for the whole supplier total')
+  assert.deepEqual(subject.submissionsRef.current.unknown, [uncertain.key], 'confirming one product clears only its own stale marker')
+  assert.equal(subject.api.readReceivingProductAttempt(7, uncertain.createRequestId)?.state, 'unknown')
+  const confirmedIndex = outcomes.indexOf('confirmed')
+  assert.equal(created[confirmedIndex].product.id, 72 + confirmedIndex)
+  subject.restore()
+  await subject.complete()
+  assert.equal(subject.state().creates, 2)
+  assert.equal(subject.requests.length, 0)
+  assert(subject.submissionsRef.current.unknown.includes(uncertain.key))
+  console.log(`PASS actual complete flow ${JSON.stringify(outcomes)}: another line's unknown marker survives confirmation and restore`)
 }
