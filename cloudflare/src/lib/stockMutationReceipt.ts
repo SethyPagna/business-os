@@ -71,6 +71,11 @@ import type { StockWriteStatement } from './productBatches'
 // the kernel again instead of being told "partially applied" for a request
 // that wrote nothing. A batch that committed but whose reply was lost still
 // left written=1 behind, which the release's written=0 condition respects.
+// A kernel whose answer is already known before its batch (every /adjust
+// removal) passes that answer to executeStockMutationBatch: the mark then also
+// completes the receipt in the same transaction (completedStatement), so the
+// retry of a request whose acknowledgement was lost replays the original 200
+// instead of answering stock_request_partially_applied (AL-STOCK A4).
 //
 // Free/paid: no KV, no Queues, no Durable Object, no cron, no custom CPU
 // limit. It does spend D1 queries on the binding the kernel already holds:
@@ -92,10 +97,19 @@ const STOCK_MUTATION_STALE_SECONDS = 120
 
 type StockMutationKind = 'adjust' | 'receive'
 
+/** The answer a kernel gives once its one stock batch has committed. */
+export type StockMutationOutcome = { status: number; body: Record<string, unknown> }
+
 /** Once-only receipt assertion for a kernel whose whole stock write is one batch. */
 export type StockMutationAtomicMark = {
   /** The guarded write mark, or null when no claim is held or it is already marked. */
   statement(): StockWriteStatement | null
+  /**
+   * The same guarded mark that also stores the kernel's final answer, for a kernel whose answer is fully known
+   * before its one batch. The receipt then completes in the same transaction as the stock, so a retry after a
+   * lost acknowledgement replays that answer instead of being told the request was partially applied.
+   */
+  completedStatement?(outcome: StockMutationOutcome): StockWriteStatement | null
   /** Call once that batch has committed. */
   committed(): void
   /** Execute a full statement plan once with this marker, then confirm commit. */
@@ -109,8 +123,9 @@ export async function executeStockMutationBatch(
   db: D1Compat,
   statements: StockWriteStatement[],
   atomicMark?: StockMutationAtomicMark,
+  outcome?: StockMutationOutcome,
 ): Promise<void> {
-  const mark = atomicMark?.statement() ?? null
+  const mark = (outcome && atomicMark?.completedStatement ? atomicMark.completedStatement(outcome) : atomicMark?.statement()) ?? null
   const batch = [...statements, ...(mark ? [mark] : [])]
   atomicMark?.admit?.(batch.length)
   // A durable marker makes a lost acknowledgement recoverable on the next
@@ -325,6 +340,16 @@ const MARK_STOCK_MUTATION_WRITTEN_SQL =
    ) THEN '$' ELSE 'stock_request_claim_lost' END))
    ON CONFLICT(actor_id,request_id) DO UPDATE SET written=excluded.written`
 
+/** The written mark plus the final answer, in one statement: the receipt completes with the stock it describes. */
+const MARK_STOCK_MUTATION_COMPLETED_SQL =
+  `INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json,written,response_status,response_json,completed_at)
+   VALUES(@actor,@request,@kind,@canonical,json_extract('1',CASE WHEN EXISTS(
+     SELECT 1 FROM stock_mutation_receipts WHERE actor_id=@actor AND request_id=@request
+       AND kind=@kind AND request_json=@canonical AND written=0 AND completed_at IS NULL
+   ) THEN '$' ELSE 'stock_request_claim_lost' END),@status,@response,CURRENT_TIMESTAMP)
+   ON CONFLICT(actor_id,request_id) DO UPDATE SET written=excluded.written,response_status=excluded.response_status,
+     response_json=excluded.response_json,completed_at=excluded.completed_at`
+
 async function markStockMutationWritten(db: D1Compat, actorId: number, requestId: string, kind: StockMutationKind, canonical: string): Promise<void> {
   await db.prepare(MARK_STOCK_MUTATION_WRITTEN_SQL).run({ actor: actorId, request: requestId, kind, canonical })
 }
@@ -434,6 +459,8 @@ export async function withStockMutationReceipt(
   }
   const atomicMark: StockMutationAtomicMark = {
     statement: () => (wrote ? null : { sql: MARK_STOCK_MUTATION_WRITTEN_SQL, params: { actor: actorId, request: requestId, kind, canonical } }),
+    completedStatement: (outcome) => (wrote ? null : { sql: MARK_STOCK_MUTATION_COMPLETED_SQL,
+      params: { actor: actorId, request: requestId, kind, canonical, status: outcome.status, response: JSON.stringify(outcome.body) } }),
     committed: () => { wrote = true },
     execute: (db, statements) => executeStockMutationBatch(db, statements, atomicMark),
     admit,

@@ -25,8 +25,9 @@ const scopedSet = (branchId, extra = {}) => ({ productId: 10, branchId, type: 's
 
 async function main() {
   await W.check('before: every adjust kind preserves business statements and ledgers with atomic receipts to the eb5dd0ba3 oracle', async () => {
+    // The explicit-lot remove has its own check below: AL-STOCK A changed its statements on purpose.
     const bodies = [
-      add(2), remove(2), remove(2, { batchId: 500 }), { productId: 10, branchId: 2, type: 'set', quantity: 6, reason: 'count' },
+      add(2), remove(2), { productId: 10, branchId: 2, type: 'set', quantity: 6, reason: 'count' },
       scopedSet(2, { quantity: 4 }), remove(2, { quantity: 1, conditionTag: 'broken' }), add(1, { productId: 20 }),
     ]
     for (const body of bodies) {
@@ -61,6 +62,28 @@ async function main() {
       }
       assert.equal(W.normalised(W.ledger(dbNew)), W.normalised(W.ledger(dbOld)), `${JSON.stringify(body)}: same ledgers`)
     }
+  })
+
+  // AL-STOCK A (6.0.55): the oracle drained an explicitly selected lot through removeStockFromBatch -- MAX(0) clamped
+  // lot, branch and product decrements in a batch of their own, the movement written after it -- so two concurrent
+  // removals both answered 200 and a lost acknowledgement removed twice. The new statements differ on purpose; the
+  // answer and the ledgers must not, and the whole effect is ONE transaction with guarded, unclamped decrements.
+  await W.check('before: the explicit-lot remove lands on the oracle answer and ledgers as one guarded, unclamped transaction', async () => {
+    const body = remove(2, { batchId: 500 })
+    const dbNew = W.build('before'); const dbOld = W.build('before')
+    const capNew = []
+    const a = await W.call(inventory(fresh), dbNew, 'POST', '/adjust', body, { capture: capNew, redirect: 1 })
+    const b = await W.call(inventory(oracle), dbOld, 'POST', '/adjust', body)
+    assert.equal(a.status, 200, JSON.stringify(a.body))
+    assert.equal(W.normalised({ status: a.status, body: a.body }), W.normalised({ status: b.status, body: b.body }), 'same answer')
+    assert.equal(W.normalised(W.ledger(dbNew)), W.normalised(W.ledger(dbOld)), 'same ledgers')
+    const stockBatches = capNew.filter((rows) => rows.some((s) => /(?:INSERT INTO|UPDATE) branch_(?:batch_)?stock/.test(s.sql)))
+    assert.equal(stockBatches.length, 1, 'one stock transaction')
+    for (const [label, pattern] of [['lot guard', /allocation_guard/], ['branch guard', /branch_stock_guard/],
+      ['movement', /INSERT INTO inventory_movements/], ['completed receipt', /INSERT INTO stock_mutation_receipts[\s\S]*response_status/]]) {
+      assert.ok(stockBatches[0].some((s) => pattern.test(s.sql)), `${label} shares the stock transaction`)
+    }
+    assert.ok(!capNew.flat().some((s) => /MAX\(0/.test(s.sql)), 'no decrement is clamped at zero')
   })
 
   await W.check('control: on the post-cutover world the oracle writes a decrease into the disabled branch (the defect)', async () => {
