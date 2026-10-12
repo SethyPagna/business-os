@@ -29,10 +29,12 @@ function runTest(name: string, fn: () => void): void {
 const packs = { en: JSON.parse(read('src/lang/en.json')), km: JSON.parse(read('src/lang/km.json')) } as Record<string, Record<string, string>>
 const trFrom = (pack: Record<string, string>) => (key: string, fallback: string) => pack[key] ?? fallback
 // The FX-returns refusals, RET-B E1 and the branch cutover's: a return of a sale whose branch is inactive with no
-// active successor (cloudflare/src/lib/branchEffect.ts, 409 on POST /).
-const CODES = ['return_edit_cancelled', 'return_restore_over_capacity', 'return_refund_price_ambiguous', 'return_refund_sale_line_required', 'return_stock_skipped_sale', 'branch_retired_no_successor']
+// active successor (cloudflare/src/lib/branchEffect.ts, 409 on POST /). return_edit_empty (6.0.41): an edit that
+// would leave a return with no lines -- the client no longer builds one, but a retry stored by an older build can
+// still be resent and refused, and a Khmer till must read why.
+const CODES = ['return_edit_cancelled', 'return_restore_over_capacity', 'return_refund_price_ambiguous', 'return_refund_sale_line_required', 'return_stock_skipped_sale', 'branch_retired_no_successor', 'return_edit_empty']
 
-runTest('the mapping covers exactly the FX-returns refusal codes, RET-B E1 and the retired-branch one', () => {
+runTest('the mapping covers exactly the FX-returns refusal codes, RET-B E1, the retired-branch one and the empty edit', () => {
   assert.deepEqual(Object.keys(RETURN_REFUSAL_ERRORS).sort(), [...CODES].sort())
 })
 
@@ -113,6 +115,10 @@ runTest('every mapped code is one the Worker actually sends, and the route forwa
   // CUTOVER-LR: the whole disabled-branch family (redirect required / invalid target / no successor) goes out as one 409 body.
   assert.ok(route.includes('const refusal = branchEffectRefusal(error)\n    if (refusal) return c.json(refusal, 409)') || route.includes('const refusal = branchEffectRefusal(error)\r\n    if (refusal) return c.json(refusal, 409)'), 'POST / forwards the retired-branch refusal with its code')
   assert.ok(readWorker('lib/branchEffect.ts').includes("export const BRANCH_RETIRED_NO_SUCCESSOR_CODE = 'branch_retired_no_successor'"), 'the code is the one the Worker defines')
+  // One sentence on both sides: the Worker's English for return_edit_empty is the helper's fallback.
+  assert.match(route, /error: '([^']+)',\r?\n\s+code: 'return_edit_empty',/, 'PATCH /:id refuses an empty edit with return_edit_empty')
+  assert.equal(/error: '([^']+)',\r?\n\s+code: 'return_edit_empty',/.exec(route)?.[1], RETURN_REFUSAL_ERRORS.return_edit_empty,
+    'the Worker and the helper state the empty-edit refusal in the same English')
 })
 
 // Each surface is sliced to the one handler that receives the refusal -- from
