@@ -1,0 +1,778 @@
+'use strict'
+// ============================================================================================
+// HARNESS -- identical in all four test-al-stock-{a,b,i,k}-native.cjs files (each file is
+// self-contained on purpose: this lane may only ADD files named test-al-stock-<letter>-native.cjs).
+//
+// What it runs: the REAL Worker (cloudflare/src/index.ts, every middleware, route and lib) bundled
+// with esbuild and executed in workerd under Miniflare, on a D1 migrated with every file in
+// cloudflare/migrations, with real KV (cache versions), R2, Durable Objects (the live-update
+// WebSocket hub) and a real session cookie. Nothing in src/ is changed. Only authentication
+// credential entry is shortcut: the session row is inserted directly (same SHA-256 token hash the
+// real login stores) so a user can be given an exact permission set.
+//
+// A thin wrapper entry sits in FRONT of the Worker (never inside it) so that a test can
+//   (a) count D1 statements per invocation (foreground + waitUntil), the number compared with the
+//       Free 50 / Paid 1000 per-invocation limits,
+//   (b) arm a deterministic interleaving: run request X to completion at the instant request Y is
+//       about to execute a matching D1 statement (`hook`), or hold N requests at a matching
+//       statement until all have arrived (`barrier`),
+//   (c) arm a lost acknowledgement at the D1 binding: the batch really commits, then the call
+//       throws a transient "Network connection lost" error, exactly what lib/db.ts withD1Retry
+//       treats as retryable.
+// Mutation controls (`--fix`, `--wrong=<name>`) rewrite SOURCE TEXT IN MEMORY at bundle time; they
+// never touch a file on disk and fail loudly if their anchor text is missing.
+// ============================================================================================
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const { createHash } = require('node:crypto')
+
+const root = path.resolve(__dirname, '..')
+const ARGS = process.argv.slice(2)
+const FLAGS = new Set(ARGS.filter(a => a.startsWith('--') && !a.includes('=')).map(a => a.slice(2)))
+const OPTIONS = Object.fromEntries(ARGS.filter(a => a.startsWith('--') && a.includes('=')).map(a => [a.slice(2, a.indexOf('=')), a.slice(a.indexOf('=') + 1)]))
+const sha256 = text => createHash('sha256').update(text).digest('hex')
+
+const WRAPPER = `
+import worker from './src/index'
+export { SyncUploadSession, BroadcastHub } from './src/index'
+
+const control = { hooks: [], barrier: null, ackLoss: [], queueStatements: 0 }
+const rawFetch = (request, env, ctx) => worker.fetch(request, env, ctx)
+function matches(pattern, sqls) { const re = new RegExp(pattern, 'i'); return sqls.some(sql => re.test(sql)) }
+
+function wrapDb(db, counter, env) {
+  const statement = (inner, sql) => ({
+    sql, inner,
+    bind: (...args) => statement(inner.bind(...args), sql),
+    first: async (...a) => { await before([sql], env); counter.n++; counter.log.push(sql); const r = await inner.first(...a); await after([sql]); return r },
+    all: async (...a) => { await before([sql], env); counter.n++; counter.log.push(sql); const r = await inner.all(...a); await after([sql]); return r },
+    run: async (...a) => { await before([sql], env); counter.n++; counter.log.push(sql); const r = await inner.run(...a); await after([sql]); return r },
+    raw: async (...a) => { await before([sql], env); counter.n++; counter.log.push(sql); const r = await inner.raw(...a); await after([sql]); return r },
+  })
+  return {
+    prepare: (sql) => statement(db.prepare(sql), sql),
+    batch: async (statements) => {
+      const sqls = statements.map(s => s.sql)
+      await before(sqls, env)
+      counter.n += statements.length
+      for (const sql of sqls) counter.log.push(sql)
+      const result = await db.batch(statements.map(s => s.inner))
+      await after(sqls)
+      return result
+    },
+    exec: (q) => db.exec(q),
+  }
+}
+
+async function before(sqls, env) {
+  if (control.barrier && matches(control.barrier.pattern, sqls)) {
+    const barrier = control.barrier
+    barrier.arrived++
+    if (barrier.arrived >= barrier.count) barrier.release()
+    await Promise.race([barrier.promise, new Promise(resolve => setTimeout(resolve, 20000))])
+  }
+  for (const hook of control.hooks) {
+    if (hook.fired || !matches(hook.pattern, sqls)) continue
+    hook.fired = true
+    const request = new Request(hook.request.url, { method: hook.request.method, headers: hook.request.headers, body: hook.request.body })
+    const response = await handle(request, env.__raw, env.__ctx)
+    hook.result = { status: response.status, body: await response.text() }
+  }
+}
+
+async function after(sqls) {
+  for (const fault of control.ackLoss) {
+    if (fault.times > 0 && matches(fault.pattern, sqls)) {
+      fault.times--
+      fault.hits++
+      throw new Error(fault.message || 'D1_ERROR: Network connection lost')
+    }
+  }
+}
+
+function instrument(rawEnv, ctx, counter) {
+  const pending = []
+  const env = { ...rawEnv, __raw: rawEnv }
+  env.DB = wrapDb(rawEnv.DB, counter, env)
+  const ctx2 = { waitUntil(p) { pending.push(Promise.resolve(p).catch(() => {})); try { ctx.waitUntil(p) } catch (e) {} }, passThroughOnException() {} }
+  env.__ctx = ctx2
+  return { env, ctx2, pending }
+}
+
+async function drain(pending) {
+  for (let i = 0; i < 20; i++) { const before = pending.length; await Promise.allSettled(pending.slice()); if (pending.length === before) break }
+}
+
+async function handle(request, rawEnv, ctx) {
+  const url = new URL(request.url)
+  if (url.pathname.startsWith('/__al/')) return control_(url, request)
+  const counter = { n: 0, log: [] }
+  const { env, ctx2, pending } = instrument(rawEnv, ctx, counter)
+  const response = await rawFetch(request, env, ctx2)
+  if (response.webSocket) return response
+  await drain(pending)
+  const headers = new Headers(response.headers)
+  headers.set('x-al-d1', String(counter.n))
+  // The statement log rides in a response header; a request that runs hundreds of statements (a chunked import) would
+  // overflow the header limit and drop the connection, so only the first 40 are carried. The count is x-al-d1.
+  headers.set('x-al-sql', encodeURIComponent(JSON.stringify(counter.log.slice(0, 40).map(s => s.replace(/\\s+/g, ' ').trim().slice(0, 120)))))
+  return new Response(response.body, { status: response.status, headers })
+}
+
+async function control_(url, request) {
+  const body = request.method === 'POST' ? await request.json().catch(() => ({})) : {}
+  switch (url.pathname) {
+    case '/__al/hooks': control.hooks = (body.hooks || []).map(h => ({ ...h, fired: false })); return Response.json({ ok: true })
+    case '/__al/hooks/result': return Response.json(control.hooks.map(h => ({ fired: h.fired, result: h.result || null })))
+    case '/__al/barrier': {
+      if (!body.pattern) { control.barrier = null; return Response.json({ ok: true }) }
+      let release; const promise = new Promise(r => { release = r })
+      control.barrier = { pattern: body.pattern, count: body.count || 2, arrived: 0, release, promise }
+      return Response.json({ ok: true })
+    }
+    case '/__al/barrier/result': return Response.json({ arrived: control.barrier ? control.barrier.arrived : null })
+    case '/__al/ackloss': control.ackLoss = (body.faults || []).map(f => ({ ...f, hits: 0 })); return Response.json({ ok: true })
+    case '/__al/ackloss/result': return Response.json(control.ackLoss)
+    case '/__al/reset': control.hooks = []; control.barrier = null; control.ackLoss = []; return Response.json({ ok: true })
+    case '/__al/queue-statements': return Response.json({ n: control.queueStatements })
+    default: return new Response('unknown', { status: 404 })
+  }
+}
+
+export default {
+  fetch: (request, env, ctx) => handle(request, env, ctx),
+  async queue(batch, rawEnv, ctx) {
+    const counter = { n: 0, log: [] }
+    const { env, ctx2, pending } = instrument(rawEnv, ctx, counter)
+    try { return await worker.queue(batch, env, ctx2) } finally { await drain(pending); control.queueStatements = counter.n }
+  },
+}
+`
+
+// In-memory source rewrites. `patches` = [{ name, file: 'src/...ts', from, to }]. Line endings are normalised first
+// (the working tree may be CRLF), and a missing anchor is a hard error, never a silent no-op.
+async function bundle(patches) {
+  const { build } = require('esbuild')
+  const applied = new Set()
+  const result = await build({
+    stdin: { contents: WRAPPER, resolveDir: root, loader: 'ts', sourcefile: 'al-wrapper.ts' },
+    bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022',
+    conditions: ['workerd', 'worker', 'browser'], external: ['node:*', 'cloudflare:*'], logLevel: 'error',
+    plugins: [{ name: 'al-source-patches', setup(b) {
+      b.onLoad({ filter: /[\\/]cloudflare[\\/]src[\\/].*\.ts$/ }, args => {
+        const here = args.path.replaceAll('\\', '/')
+        const mine = patches.filter(p => here.endsWith('/cloudflare/' + p.file))
+        if (!mine.length) return undefined
+        let text = fs.readFileSync(args.path, 'utf8').replace(/\r\n/g, '\n')
+        for (const p of mine) {
+          assert.equal(text.split(p.from).length - 1, 1, 'negative-control anchor must occur exactly once in ' + p.file + ': ' + p.from.slice(0, 80))
+          text = text.replace(p.from, () => p.to)
+          applied.add(p.name)
+        }
+        return { contents: text, loader: 'ts' }
+      })
+    } }],
+  })
+  for (const p of patches) assert.ok(applied.has(p.name), 'patch ' + p.name + ' was not applied')
+  return result.outputFiles[0].text
+}
+
+async function migrate(db) {
+  const { unstable_splitSqlQuery: split } = require('wrangler')
+  const dir = path.join(root, 'migrations')
+  const statements = []
+  for (const name of fs.readdirSync(dir).filter(n => n.endsWith('.sql')).sort()) {
+    for (const statement of split(fs.readFileSync(path.join(dir, name), 'utf8')).filter(s => s.trim())) {
+      // Miniflare's test D1 caps compound SELECT terms lower than the deployed runner; this one seed statement is a
+      // no-op on an empty users table (same exemption test-customer-return-create-d1-native.cjs makes).
+      if (name === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(statement.trim())) continue
+      statements.push({ name, statement })
+    }
+  }
+  for (let i = 0; i < statements.length; i += 100) {
+    const chunk = statements.slice(i, i + 100)
+    try { await db.batch(chunk.map(x => db.prepare(x.statement))) } catch (error) { error.message = chunk[0].name + '+: ' + error.message; throw error }
+  }
+}
+
+const LC = 1   // LC Store: the only active branch
+const OLD = 2  // Old Shop: inactive, successor = LC Store
+
+async function world({ patches = [], plan = 'paid' } = {}) {
+  const { Miniflare, Log, LogLevel } = require('miniflare')
+  const script = await bundle(patches)
+  const mf = new Miniflare({
+    modules: true, script, compatibilityDate: '2026-07-01', compatibilityFlags: ['nodejs_compat', 'no_handle_cross_request_promise_resolution'],
+    d1Databases: ['DB'], kvNamespaces: ['CACHE'], r2Buckets: ['ASSETS'],
+    durableObjects: { BROADCAST_HUB: 'BroadcastHub', SYNC_UPLOADS: 'SyncUploadSession' },
+    bindings: { PLAN_TIER: plan, BUSINESS_OS_PUBLIC_URL: 'https://leangbeauty.com', BUSINESS_OS_ADMIN_URL: 'https://admin.leangbeauty.com',
+      BUSINESS_OS_ADMIN_PASSWORD: 'al-repro-admin-password-1', BUSINESS_OS_ORGANIZATION_SLUG: 'leangbeauty' },
+    log: new Log(LogLevel.ERROR),
+  })
+  const db = await mf.getD1Database('DB')
+  const kv = await mf.getKVNamespace('CACHE')
+  await migrate(db)
+  // First request: the Worker seeds its default organization / branches / roles / admin (22 D1 statements, once per isolate).
+  await mf.dispatchFetch('http://localhost/api/settings')
+  // Owner rule: LC Store (id 1) is the only active branch; Old Shop (id 2) is inactive and redirects to it.
+  await db.batch([
+    db.prepare("UPDATE branches SET is_active=0,is_default=0,name='Old Shop',role='shop',canonical_key='shop',successor_branch_id=1 WHERE id=2"),
+    db.prepare("UPDATE branches SET name='LC Store',role='warehouse',canonical_key='warehouse',is_default=1,is_active=1 WHERE id=1"),
+  ])
+  const H = { mf, db, kv, frames: [], tokens: {}, sockets: [] }
+
+  H.addUser = async (id, username, permissions, extra = {}) => {
+    await db.prepare(`INSERT INTO users(id,username,name,password,role_id,permissions,is_active,organization_id,organization_group_id)
+      VALUES(?,?,?,?,?,?,1,2,2)`).bind(id, username, extra.name || username, 'x', extra.role_id ?? null, JSON.stringify(permissions)).run()
+  }
+  H.addSession = async (name, userId, { device = 'Test Device', tz = 'Asia/Phnom_Penh', lastSeenSecondsAgo = 0 } = {}) => {
+    const token = 'tok-' + name + '-' + sha256(name + userId + device).slice(0, 8)
+    H.tokens[name] = token
+    await db.prepare(`INSERT INTO user_sessions(user_id,token_hash,device_name,device_tz,expires_at,last_seen_at)
+      VALUES(?,?,?,?,'2099-01-01T00:00:00.000Z',datetime('now', ?))`).bind(userId, sha256(token), device, tz, `-${lastSeenSecondsAgo} seconds`).run()
+    return token
+  }
+  await H.addSession('admin', 1, { device: 'Owner Laptop', lastSeenSecondsAgo: 1 })
+
+  H.api = async (method, route, body, { as = 'admin', headers = {} } = {}) => {
+    const response = await mf.dispatchFetch('http://localhost' + route, {
+      method, headers: { 'content-type': 'application/json', cookie: 'bos_session=' + H.tokens[as], ...headers },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    const text = await response.text()
+    let json; try { json = JSON.parse(text) } catch { json = text }
+    let sql = []; try { sql = JSON.parse(decodeURIComponent(response.headers.get('x-al-sql') || '[]')) } catch { /* none */ }
+    return { status: response.status, body: json, d1: Number(response.headers.get('x-al-d1') || 0), sql }
+  }
+  H.multipart = async (route, field, name, content, { as = 'admin' } = {}) => {
+    const form = new FormData(); form.set(field, new File([content], name, { type: 'text/csv' }))
+    const encoded = new Request('http://encode.local/', { method: 'POST', body: form })
+    const response = await mf.dispatchFetch('http://localhost' + route, { method: 'POST',
+      headers: { cookie: 'bos_session=' + H.tokens[as], 'content-type': encoded.headers.get('content-type') }, body: Buffer.from(await encoded.arrayBuffer()) })
+    return { status: response.status, body: await response.json().catch(() => null), d1: Number(response.headers.get('x-al-d1') || 0) }
+  }
+  H.control = async (route, body) => (await mf.dispatchFetch('http://localhost/__al/' + route, { method: 'POST', body: JSON.stringify(body || {}) })).json()
+  H.controlGet = async route => (await mf.dispatchFetch('http://localhost/__al/' + route)).json()
+  H.disarm = () => H.control('reset')
+  H.hookRequest = (method, route, body, as = 'admin') => ({ url: 'http://localhost' + route, method,
+    headers: { 'content-type': 'application/json', cookie: 'bos_session=' + H.tokens[as] }, body: body === undefined ? undefined : JSON.stringify(body) })
+  // Live-update socket: the real BroadcastHub Durable Object pushes `sync:update` frames to it.
+  H.listen = async () => {
+    const response = await mf.dispatchFetch('http://localhost/ws', { headers: { Upgrade: 'websocket', cookie: 'bos_session=' + H.tokens.admin } })
+    assert.equal(response.status, 101, 'websocket upgrade')
+    response.webSocket.accept()
+    response.webSocket.addEventListener('message', event => { try { H.frames.push(JSON.parse(String(event.data))) } catch { /* ignore */ } })
+    H.sockets.push(response.webSocket)
+  }
+  H.settle = (ms = 250) => new Promise(resolve => setTimeout(resolve, ms))
+  H.syncFrames = (since = 0) => H.frames.slice(since).filter(f => f.type === 'sync:update')
+  H.cacheVersion = async (ns = 'products') => Number((await kv.get('v2:' + ns)) || 0)
+  H.q = async (sql, ...bind) => (await db.prepare(sql).bind(...bind).all()).results
+  H.q1 = async (sql, ...bind) => (await db.prepare(sql).bind(...bind).first())
+  H.dispose = async () => { for (const s of H.sockets) { try { s.close() } catch { /* ignore */ } } await mf.dispose() }
+  await H.listen()
+  return H
+}
+
+// ------------------------------------------------------------------------------------------------
+// Reporting: a case collects every violated invariant (soft assertions) and is RED if there is any.
+// ------------------------------------------------------------------------------------------------
+const results = []
+function caseRun(id, title, severity) {
+  const misses = []
+  const notes = []
+  const t = {
+    eq(label, actual, expected) {
+      const a = JSON.stringify(actual), e = JSON.stringify(expected)
+      if (a !== e) misses.push(label + ': expected ' + e + ' but actual ' + a)
+    },
+    ok(label, condition, detail) { if (!condition) misses.push(label + (detail === undefined ? '' : ': ' + JSON.stringify(detail))) },
+    note(text) { notes.push(text) },
+  }
+  return { t, misses, notes, id, title, severity }
+}
+async function check(id, title, severity, fn) {
+  // --only=ID[,ID...] runs just those cases (debugging aid; a full run is the default and the only certified one).
+  if (OPTIONS.only && !OPTIONS.only.split(',').includes(id)) return
+  const c = caseRun(id, title, severity)
+  try { await fn(c.t) } catch (error) { c.misses.push('THREW ' + (error && error.stack ? error.stack.split('\n').slice(0, 4).join(' | ') : String(error))) }
+  const red = c.misses.length > 0
+  results.push({ id, title, severity, red, misses: c.misses, notes: c.notes })
+  console.log((red ? 'RED   ' : 'GREEN ') + id + '  [' + severity + ']  ' + title)
+  for (const m of c.misses) console.log('        - ' + m)
+  for (const n of c.notes) console.log('        . ' + n)
+}
+function finish(finding) {
+  const red = results.filter(r => r.red)
+  console.log('\nSUMMARY ' + finding + ': ' + (results.length - red.length) + ' GREEN, ' + red.length + ' RED' + (red.length ? ' -> ' + red.map(r => r.id).join(', ') : ''))
+  if (red.length) process.exitCode = 1
+}
+
+// ============================================================================================
+// FINDING K -- expenses (fees) and the generic review family: optimistic versioning, an immutable before/after record,
+// atomic mutation + audit + queue, approve/reject races, legacy Undo, reasons, request-device attribution and the
+// survival of the restore audit.
+//
+// Everything runs over HTTP against the real Worker. Fixture: LC Store (id 1) is the selling branch (role "shop", the
+// consolidated state fees book to); Old Shop (id 2) is inactive and redirects to it.
+//   admin      full access, one session ("Owner Laptop")
+//   clerk      fees = Review Required: every DELETE is queued for a reviewer (two sessions, see K8)
+//   reviewer   fees full + review; reviewer2 the same (the second reviewer in the approve/reject race)
+//   editor     fees full, two live sessions on different devices (K8)
+//
+// Correct outcome under the owner's rules: an edit or delete is admitted only against the version the person saw; the
+// record of it (who, which device, the whole before and after) is written in the SAME transaction as the change and is
+// never rewritten; an approval is judged against the thing that was reviewed; a decision and its effect agree even when
+// two reviewers act at once; history is append-only (Revert creates a compensating record).
+//
+// Run (from cloudflare/):  node scripts/test-al-stock-k-native.cjs
+//   --fix                      apply in memory the parts that have a small, local fix: the delete version guard with its audit in
+//                              one batch (K2, K5b), the edit and its audit in one batch (K5a), a stale-aware approval with a before
+//                              image whose decision commits in the same batch (K3, K4, K5c, K6), the reject-reason cap (K7), a
+//                              request-scoped device for the audit row (K8a) and the undo status guard (K9a). K8b (needs a schema
+//                              column), K10a/K10b (restore design) and K11 (retention policy) stay RED under --fix on purpose.
+//   --wrong=no-version-check   mutant: PUT /api/fees/:id ignores expected_updated_at (K1b and K1d must catch it)
+//   --only=K1c,K6              run just those cases (debugging aid)
+// ============================================================================================
+const FEES = 'src/routes/fees.ts', REVIEW_QUEUE = 'src/routes/reviewQueue.ts', REVIEW_APPLY = 'src/lib/reviewApply.ts', ACTION_HISTORY = 'src/routes/actionHistory.ts'
+const PATCHES = {
+  fix: [
+    { name: 'fix-fees-audit-import', file: FEES, from: "import { audit, changedFields } from '../lib/audit'", to: "import { audit, buildAuditStatement, changedFields } from '../lib/audit'" },
+    // K2 + K5b: the delete is admitted only against the version that was read, and its audit row rides in the same batch.
+    { name: 'fix-fee-delete-atomic', file: FEES,
+      from: [
+        '  await db.prepare(`DELETE FROM fees WHERE id = @id`).run({ id })',
+        '  // after === null records every field of the deleted expense as removed.',
+        "  await audit(c.env, user.id, user.username || null, 'delete', 'fee', id, { before: existing, after: null },",
+        '    changedFields(existing as unknown as Record<string, unknown>, null, { keys: FEE_AUDIT_COLUMNS }))'].join('\n'),
+      to: [
+        '  try {',
+        '    await db.batch([',
+        "      { sql: `SELECT CASE WHEN EXISTS (SELECT 1 FROM fees WHERE id = @id AND updated_at IS @expected) THEN 1 ELSE json_extract('fee_changed_since_read', '$') END AS fee_version_guard`, params: { id, expected: existing.updated_at } },",
+        '      { sql: `DELETE FROM fees WHERE id = @id AND updated_at IS @expected`, params: { id, expected: existing.updated_at } },',
+        "      buildAuditStatement(user.id, user.username || null, 'delete', 'fee', id, { before: existing, after: null },",
+        '        changedFields(existing as unknown as Record<string, unknown>, null, { keys: FEE_AUDIT_COLUMNS })),',
+        '    ])',
+        '  } catch (error) {',
+        "    if (/malformed JSON/i.test(String(error))) return c.json({ error: 'This expense changed after you opened it. Refresh and try again.', code: 'write_conflict' }, 409)",
+        '    throw error',
+        '  }'].join('\n') },
+    // K3: a queued delete remembers the version it was requested against.
+    { name: 'fix-fee-delete-queue-state', file: FEES,
+      from: '    payload: { id },\n',
+      to: '    payload: { id },\n    expectedEntityStateJson: JSON.stringify({ updated_at: existing.updated_at }),\n' },
+    { name: 'fix-apply-audit-import', file: REVIEW_APPLY, from: "import { audit, buildAuditStatement } from './audit'", to: "import { audit, buildAuditStatement, changedFields } from './audit'" },
+    // K3 + K4: refuse a stale approval, and write the deleted record as the audit before-image.
+    { name: 'fix-fee-delete-applier', file: REVIEW_APPLY,
+      from: [
+        "  const existing = await db.prepare('SELECT id FROM fees WHERE id = @id').get<{ id: number }>({ id })"].join('\n'),
+      to: [
+        "  const existing = await db.prepare('SELECT * FROM fees WHERE id = @id').get<Record<string, unknown>>({ id })"].join('\n') },
+    { name: 'fix-fee-delete-applier-write', file: REVIEW_APPLY,
+      from: [
+        "  await db.prepare('DELETE FROM fees WHERE id = @id').run({ id })",
+        "  await audit(env, reviewer.id, reviewer.name, 'delete', 'fee', id, null)"].join('\n'),
+      to: [
+        '  const expectedState = row.expected_entity_state_json ? JSON.parse(row.expected_entity_state_json) as { updated_at?: string } : null',
+        "  if (expectedState && expectedState.updated_at !== existing.updated_at) throw new Error('fee_changed_since_request')",
+        // K5c + K6: the decision (queue row approved) is part of the SAME batch as the delete and its audit row, guarded on the row
+        // still being open, so a concurrent reject or a failure marking the row leaves neither half behind.
+        '  await db.batch([',
+        "    { sql: `SELECT CASE WHEN EXISTS (SELECT 1 FROM pending_actions WHERE id = @pid AND status = 'open') THEN 1 ELSE json_extract('review_not_open', '$') END AS review_open_guard`, params: { pid: row.id } },",
+        "    { sql: `SELECT CASE WHEN EXISTS (SELECT 1 FROM fees WHERE id = @id AND updated_at IS @expected) THEN 1 ELSE json_extract('fee_changed_since_read', '$') END AS fee_version_guard`, params: { id, expected: existing.updated_at } },",
+        '    { sql: `DELETE FROM fees WHERE id = @id AND updated_at IS @expected`, params: { id, expected: existing.updated_at } },',
+        "    buildAuditStatement(reviewer.id, reviewer.name, 'delete', 'fee', id, { before: existing, after: null },",
+        "      changedFields(existing, null, { keys: ['fee_type', 'label', 'amount_usd', 'amount_khr', 'fee_date', 'sale_id', 'branch_id', 'delivery_contact_id', 'notes'] })),",
+        "    { sql: `UPDATE pending_actions SET status = 'approved', reviewed_by = @by, reviewed_by_name = @byName, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = @pid AND status = 'open'`, params: { pid: row.id, by: reviewer.id, byName: reviewer.name } },",
+        '  ])'].join('\n') },
+    { name: 'fix-fee-delete-applier-marked', file: REVIEW_APPLY,
+      from: "  await notify(env, waitUntil, 'fees', { type: 'deleted', id })",
+      to: "  await notify(env, waitUntil, 'fees', { type: 'deleted', id })\n  return { pendingActionMarkedAtomically: true }" },
+    // K5a: the edit, its conflict guard and its audit row are one batch; the late best-effort audit() is skipped.
+    { name: 'fix-fee-put-atomic', file: FEES,
+      from: '    : await db.prepare(updateSql).run(updateParams)',
+      to: [
+        '    : await (async () => {',
+        '      const afterFee = { ...existing, fee_type: feeType, label, amount_usd: amountUsd, amount_khr: amountKhr, fee_date: feeDate, sale_id: saleId, branch_id: branchId, delivery_contact_id: deliveryContactId, notes, updated_at: now }',
+        '      try {',
+        '        await db.batch([',
+        '          { sql: updateSql, params: updateParams },',
+        "          { sql: `SELECT CASE WHEN changes() = 1 THEN 1 ELSE json_extract('fee_write_conflict', '$') END AS fee_write_guard`, params: {} },",
+        "          buildAuditStatement(user.id, user.username || null, 'update', 'fee', id, { before: existing, after: afterFee, sale_id: saleId, branch_id: branchId },",
+        '            changedFields(existing as unknown as Record<string, unknown>, afterFee as unknown as Record<string, unknown>, { keys: FEE_AUDIT_COLUMNS })),',
+        '        ])',
+        '        return { changes: 1, audited: true }',
+        '      } catch (error) {',
+        '        if (/malformed JSON/i.test(String(error))) return { changes: 0, audited: false }',
+        '        throw error',
+        '      }',
+        '    })()'].join('\n') },
+    { name: 'fix-fee-put-skip-late-audit', file: FEES,
+      from: "  await audit(c.env, user.id, user.username || null, 'update', 'fee', id, {",
+      to: "  if (!(updateResult as { audited?: boolean }).audited) await audit(c.env, user.id, user.username || null, 'update', 'fee', id, {" },
+    // K8a: the device is the one the REQUEST arrived on (request-scoped, set once in requireAuth), not the user's freshest session.
+    { name: 'fix-device-audit-als', file: 'src/lib/audit.ts',
+      from: "import { getDb } from './db'",
+      to: "import { getDb } from './db'\nimport { AsyncLocalStorage } from 'node:async_hooks'\nexport const requestDevice = new AsyncLocalStorage<{ device_name?: string | null; device_tz?: string | null }>()" },
+    { name: 'fix-device-audit-sql', file: 'src/lib/audit.ts',
+      from: ['        s.device_name,', '        s.device_tz', '      FROM (SELECT 1 AS one) AS _dummy'].join('\n'),
+      to: ['        COALESCE(@req_device_name, s.device_name),', '        COALESCE(@req_device_tz, s.device_tz)', '      FROM (SELECT 1 AS one) AS _dummy'].join('\n') },
+    { name: 'fix-device-audit-params', file: 'src/lib/audit.ts',
+      from: ['      table_name: entity,', '      old_value: changeColumns.old_value,'].join('\n'),
+      to: ['      table_name: entity,', '      req_device_name: requestDevice.getStore()?.device_name ?? null,', '      req_device_tz: requestDevice.getStore()?.device_tz ?? null,', '      old_value: changeColumns.old_value,'].join('\n') },
+    { name: 'fix-device-auth-import', file: 'src/lib/auth.ts',
+      from: "import type { Env } from '../index'",
+      to: "import type { Env } from '../index'\nimport { requestDevice } from './audit'" },
+    { name: 'fix-device-auth-select', file: 'src/lib/auth.ts',
+      from: 's.last_seen_at AS session_last_seen_at',
+      to: 's.last_seen_at AS session_last_seen_at, s.device_name AS session_device_name, s.device_tz AS session_device_tz' },
+    { name: 'fix-device-auth-run', file: 'src/lib/auth.ts',
+      from: ["    return c.json({ error: 'Your password is publicly known. Change it before continuing.', code: 'password_change_required' }, 403)", '  }', "  c.set('user', user)", '  await next()'].join('\n'),
+      to: ["    return c.json({ error: 'Your password is publicly known. Change it before continuing.', code: 'password_change_required' }, 403)", '  }', "  c.set('user', user)", '  await requestDevice.run({ device_name: (user as unknown as Record<string, string | null>).session_device_name ?? null, device_tz: (user as unknown as Record<string, string | null>).session_device_tz ?? null }, () => next())'].join('\n') },
+    { name: 'fix-stale-approval-409', file: REVIEW_QUEUE,
+      from: "    return c.json({ error: (err as Error).message || 'Failed to apply the approved change' }, 500)",
+      to: [
+        "    if (/fee_changed_since_request|malformed JSON/i.test(String((err as Error).message))) return c.json({ error: 'This expense changed after the delete was requested. Reject the request or ask again.', code: 'review_entity_changed' }, 409)",
+        "    return c.json({ error: (err as Error).message || 'Failed to apply the approved change' }, 500)"].join('\n') },
+    // K7: the same 512-character cap every stock reason already has.
+    { name: 'fix-reject-reason-cap', file: REVIEW_QUEUE,
+      from: '  const ok = await markPendingActionRejected(c.env, id, {',
+      to: [
+        "  if (typeof reason === 'string' && reason.length > 512) return c.json({ error: 'Reason is too long (max 512 characters)', code: 'reason_too_long' }, 400)",
+        '  const ok = await markPendingActionRejected(c.env, id, {'].join('\n') },
+    // K9a: the flip is conditional on the status that was read, so a second Undo cannot also succeed.
+    { name: 'fix-undo-status-guard', file: ACTION_HISTORY,
+      from: [
+        '    await db.prepare(`',
+        '      UPDATE action_history SET status = @status, last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id',
+        '    `).run({ status: nextStatus, id: existing.id })'].join('\n'),
+      to: [
+        '    const flipped = await db.prepare(`',
+        '      UPDATE action_history SET status = @status, last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND status = @fromStatus',
+        '    `).run({ status: nextStatus, id: existing.id, fromStatus: currentStatus })',
+        "    if (!applier && !flipped.changes) return c.json({ success: false, error: `Action is not ${direction === 'undo' ? 'undoable' : 'redoable'} right now`, code: UNDO_HISTORY_STALE_CODE }, 409)"].join('\n') },
+  ],
+  'no-version-check': [
+    { name: 'no-version-check-pre', file: FEES, from: "    assertRequiredUpdatedAtMatch('fee', existing, expectedUpdatedAt)", to: '    void expectedUpdatedAt' },
+    { name: 'no-version-check-sql', file: FEES, from: '    WHERE id = @id AND updated_at IS @expectedUpdatedAt', to: '    WHERE id = @id AND (@expectedUpdatedAt IS NULL OR 1 = 1)' },
+  ],
+}
+
+const TOKEN0 = '2026-10-01T00:00:00.000Z'
+async function seedFee(H, { amount = 10, label = 'Rent', notes = 'monthly' } = {}) {
+  // The migrated database already holds the historical expenses, so the new row takes the next free id.
+  const res = await H.db.prepare(`INSERT INTO fees(fee_type,label,amount_usd,amount_khr,fee_date,branch_id,branch_name,notes,created_by,created_by_name,created_at,updated_at)
+    VALUES('expense',?,?,0,'2026-10-01',?,?,?,1,'admin',?,?)`).bind(label, amount, LC, 'LC Store', notes, TOKEN0, TOKEN0).run()
+  return { id: res.meta.last_row_id, token: TOKEN0, amount, label }
+}
+const feeOf = (H, id) => H.q1('SELECT * FROM fees WHERE id=?', id)
+// entity_id is compared as a number: this harness's D1 stores the update/delete audit ids as the text "4241.0" (a JS number
+// bound to a TEXT column) while create/undo rows hold "4241"; both mean the same record.
+const feeAudits = (H, id, action) => H.q("SELECT * FROM audit_logs WHERE entity='fee' AND CAST(entity_id AS REAL)=?" + (action ? ' AND action=?' : '') + ' ORDER BY id', ...(action ? [Number(id), action] : [Number(id)]))
+const auditCount = async H => (await H.q1('SELECT COUNT(*) n FROM audit_logs')).n
+const pendingOf = (H, id) => H.q1('SELECT * FROM pending_actions WHERE id=?', id)
+const parse = text => { try { return JSON.parse(text) } catch { return null } }
+const canon = value => value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value
+const pick = (value, keys) => value ? Object.fromEntries(keys.map(key => [key, value[key]])) : value
+const putFee = (H, f, body, as = 'admin') => H.api('PUT', '/api/fees/' + f.id, { expected_updated_at: f.token, ...body }, { as })
+const queueDelete = async (H, f, as = 'clerk') => { const r = await H.api('DELETE', '/api/fees/' + f.id, undefined, { as }); return { r, pid: r.body && r.body.pendingActionId } }
+const approve = (H, pid, as = 'reviewer') => H.api('POST', '/api/review/' + pid + '/approve', {}, { as })
+const reject = (H, pid, reason, as = 'reviewer') => H.api('POST', '/api/review/' + pid + '/reject', { reason }, { as })
+const hookResult = async H => (await H.controlGet('hooks/result'))[0]
+const withTrigger = async (H, name, sql, fn) => {
+  await H.db.prepare(sql).run()
+  try { return await fn() } finally { await H.db.prepare('DROP TRIGGER IF EXISTS ' + name).run() }
+}
+
+async function main() {
+  const flavour = FLAGS.has('fix') ? 'fix' : OPTIONS.wrong
+  const patches = flavour ? (PATCHES[flavour] || assert.fail('unknown control ' + flavour)) : []
+  console.log('MODE: ' + (flavour ? 'control ' + flavour : 'production code at HEAD (no patch)'))
+  const H = await world({ patches })
+  let R
+  try {
+    // LC Store is the selling branch after the consolidation (fees book to a branch with the selling role).
+    await H.db.prepare("UPDATE branches SET role='shop' WHERE id=1").run()
+    await H.addUser(2, 'al-clerk', { fees: 'review' })
+    await H.addSession('clerk', 2, { device: 'Counter Tablet', lastSeenSecondsAgo: 200 })
+    await H.addSession('clerkPhone', 2, { device: 'Owner Phone', lastSeenSecondsAgo: 20 })
+    await H.addUser(3, 'al-reviewer', { fees: true, review: true })
+    await H.addSession('reviewer', 3, { device: 'Reviewer Laptop' })
+    await H.addUser(4, 'al-reviewer2', { fees: true, review: true })
+    await H.addSession('reviewer2', 4, { device: 'Reviewer Phone' })
+    await H.addUser(5, 'al-editor', { fees: true })
+    await H.addSession('editorA', 5, { device: 'Counter Tablet', lastSeenSecondsAgo: 180 })
+    await H.addSession('editorB', 5, { device: 'Owner Phone', lastSeenSecondsAgo: 60 })
+
+    // ------------------------------------------------------------------ K1: optimistic versioning of an expense edit + its record
+    await check('K1a', 'PUT without expected_updated_at is refused 400 (expected_updated_at_required) and changes nothing', 'control', async (t) => {
+      const f = await seedFee(H)
+      const audits0 = await auditCount(H)
+      const r = await H.api('PUT', '/api/fees/' + f.id, { amount_usd: 99 })
+      t.eq('status', r.status, 400)
+      t.eq('code', r.body && r.body.code, 'expected_updated_at_required')
+      t.eq('fee unchanged', pick(await feeOf(H, f.id), ['amount_usd', 'updated_at']), { amount_usd: 10, updated_at: TOKEN0 })
+      t.eq('no audit row', (await auditCount(H)) - audits0, 0)
+    })
+    await check('K1b', 'PUT with a stale expected_updated_at is refused 409 and changes nothing (fee, audit)', 'high', async (t) => {
+      const f = await seedFee(H)
+      const audits0 = await auditCount(H)
+      const r = await putFee(H, { ...f, token: '2026-09-30T00:00:00.000Z' }, { amount_usd: 99 })
+      t.eq('status', r.status, 409)
+      t.eq('fee unchanged', pick(await feeOf(H, f.id), ['amount_usd', 'updated_at']), { amount_usd: 10, updated_at: TOKEN0 })
+      t.eq('no audit row', (await auditCount(H)) - audits0, 0)
+    })
+    await check('K1c', 'PUT with the current token succeeds and records the complete before and after (details, old_value, new_value, actor)', 'high', async (t) => {
+      const f = await seedFee(H)
+      const r = await putFee(H, f, { amount_usd: 12.5, label: 'Rent edited' })
+      const stored = await feeOf(H, f.id)
+      const rows = await feeAudits(H, f.id, 'update')
+      const d = parse(rows[0] && rows[0].details)
+      t.eq('status', r.status, 200)
+      t.ok('the version token moved', stored.updated_at !== TOKEN0, stored.updated_at)
+      t.eq('exactly one update audit row', rows.length, 1)
+      const keys = ['fee_type', 'label', 'amount_usd', 'amount_khr', 'fee_date', 'branch_id', 'notes', 'updated_at']
+      t.eq('details.before is the whole record as read before the edit', canon(pick(d && d.before, keys)), canon({ fee_type: 'expense', label: 'Rent', amount_usd: 10, amount_khr: 0, fee_date: '2026-10-01', branch_id: LC, notes: 'monthly', updated_at: TOKEN0 }))
+      t.eq('details.after is the record exactly as stored', canon(pick(d && d.after, keys)), canon(pick(stored, keys)))
+      t.eq('old_value / new_value hold exactly the fields that changed', [canon(parse(rows[0] && rows[0].old_value)), canon(parse(rows[0] && rows[0].new_value))], [canon({ label: 'Rent', amount_usd: 10 }), canon({ label: 'Rent edited', amount_usd: 12.5 })])
+      t.eq('actor', rows[0] && rows[0].user_id, 1)
+      t.note('D1 statements, PUT: ' + r.d1)
+    })
+    await check('K1d', 'two edits against the same token: exactly one wins, the loser gets 409, the record reflects only the winner', 'high', async (t) => {
+      const f = await seedFee(H)
+      await H.control('hooks', { hooks: [{ pattern: 'UPDATE fees SET fee_type', request: H.hookRequest('PUT', '/api/fees/' + f.id, { expected_updated_at: f.token, amount_usd: 20 }) }] })
+      const r = await putFee(H, f, { amount_usd: 30 })
+      const hook = await hookResult(H)
+      await H.disarm()
+      const rows = await feeAudits(H, f.id, 'update')
+      t.ok('the competing edit really ran first', hook.fired && hook.result.status === 200, hook)
+      t.eq('the late edit is refused', r.status, 409)
+      t.eq('the record reflects only the winner', (await feeOf(H, f.id)).amount_usd, 20)
+      t.eq('one update audit row, and it is the winner\'s', rows.map(row => parse(row.details)?.after?.amount_usd), [20])
+    })
+
+    // ------------------------------------------------------------------ K2: delete has no version admission
+    await check('K2', 'delete after a concurrent edit: either refused 409 (fee kept) or the audit before-image is the record that was actually deleted', 'high', async (t) => {
+      const f = await seedFee(H)
+      await H.control('hooks', { hooks: [{ pattern: 'DELETE FROM fees WHERE id', request: H.hookRequest('PUT', '/api/fees/' + f.id, { expected_updated_at: f.token, amount_usd: 777 }) }] })
+      const r = await H.api('DELETE', '/api/fees/' + f.id)
+      const hook = await hookResult(H)
+      await H.disarm()
+      const gone = !(await feeOf(H, f.id))
+      const rows = await feeAudits(H, f.id, 'delete')
+      t.ok('the concurrent edit really landed first', hook.fired && hook.result.status === 200, hook)
+      if (gone) t.eq('the audit before-image is the record that was actually removed (amount 777, not the stale 10)', parse(rows[0] && rows[0].details)?.before?.amount_usd, 777)
+      else t.eq('a refused delete answers 409', r.status, 409)
+      t.note('delete status ' + r.status + '; fee gone=' + gone + '; audited before.amount_usd=' + parse(rows[0] && rows[0].details)?.before?.amount_usd)
+    })
+    await check('K2-control-direct', 'control: an undisturbed direct delete removes the fee and records its before-image', 'control', async (t) => {
+      const f = await seedFee(H)
+      const r = await H.api('DELETE', '/api/fees/' + f.id)
+      const rows = await feeAudits(H, f.id, 'delete')
+      t.eq('status', r.status, 200)
+      t.eq('gone', !(await feeOf(H, f.id)), true)
+      t.eq('before-image', pick(parse(rows[0] && rows[0].details)?.before, ['label', 'amount_usd', 'updated_at']), { label: 'Rent', amount_usd: 10, updated_at: TOKEN0 })
+    })
+
+    // ------------------------------------------------------------------ K3 / K4: the generic review path (queued delete)
+    await check('K3-control', 'control: a queued delete of an UNCHANGED fee is approved and applied by a second person', 'control', async (t) => {
+      const f = await seedFee(H)
+      const { r, pid } = await queueDelete(H, f)
+      t.eq('queued (202)', r.status, 202)
+      const a = await approve(H, pid)
+      t.eq('approve status', a.status, 200)
+      t.eq('fee gone', !(await feeOf(H, f.id)), true)
+      t.eq('request approved', (await pendingOf(H, pid)).status, 'approved')
+      t.note('D1 statements: queue ' + r.d1 + ', approve ' + a.d1)
+    })
+    await check('K3', 'a queued delete is judged against what was reviewed: after the fee is edited, approving it is refused 409 and the edited fee survives', 'high', async (t) => {
+      const f = await seedFee(H)
+      const { pid } = await queueDelete(H, f)
+      const e = await putFee(H, f, { amount_usd: 500, label: 'Rent edited' })
+      const a = await approve(H, pid)
+      t.eq('the edit itself succeeded', e.status, 200)
+      t.eq('approve of the stale request is refused', a.status, 409)
+      t.eq('the edited fee still exists', !!(await feeOf(H, f.id)), true)
+      t.ok('the request is not marked approved', (await pendingOf(H, pid)).status !== 'approved', (await pendingOf(H, pid)).status)
+    })
+    await check('K4', 'the approved delete writes the deleted record as the audit before-image (as the direct delete does)', 'high', async (t) => {
+      const f = await seedFee(H)
+      const { pid } = await queueDelete(H, f)
+      const a = await approve(H, pid)
+      const rows = await feeAudits(H, f.id, 'delete')
+      t.eq('approve status', a.status, 200)
+      t.eq('one delete audit row', rows.length, 1)
+      t.eq('before-image', pick(parse(rows[0] && rows[0].details)?.before, ['label', 'amount_usd', 'updated_at']), { label: 'Rent', amount_usd: 10, updated_at: TOKEN0 })
+      t.ok('old_value is populated', rows[0] && rows[0].old_value != null, rows[0] && rows[0].old_value)
+      t.note('delete audit details: ' + String(rows[0] && rows[0].details).slice(0, 80))
+    })
+
+    // ------------------------------------------------------------------ K5: atomicity of mutation, audit and queue
+    await check('K5a', 'an expense edit is never committed without its audit row (audit store unavailable)', 'high', async (t) => {
+      const f = await seedFee(H)
+      await withTrigger(H, 'al_audit_down', "CREATE TRIGGER al_audit_down BEFORE INSERT ON audit_logs WHEN NEW.entity='fee' AND NEW.action='update' BEGIN SELECT RAISE(ABORT,'al: audit store unavailable'); END", async () => {
+        const r = await putFee(H, f, { amount_usd: 41 })
+        const mutated = (await feeOf(H, f.id)).amount_usd !== 10
+        const audited = (await feeAudits(H, f.id, 'update')).length > 0
+        t.eq('a committed edit without an audit row', mutated && !audited, false)
+        t.note('PUT status ' + r.status + '; fee mutated=' + mutated + '; audit rows=' + (audited ? '>0' : 0))
+      })
+    })
+    await check('K5b', 'an expense delete is never committed without its audit row (audit store unavailable)', 'high', async (t) => {
+      const f = await seedFee(H)
+      await withTrigger(H, 'al_audit_down', "CREATE TRIGGER al_audit_down BEFORE INSERT ON audit_logs WHEN NEW.entity='fee' AND NEW.action='delete' BEGIN SELECT RAISE(ABORT,'al: audit store unavailable'); END", async () => {
+        const r = await H.api('DELETE', '/api/fees/' + f.id)
+        const gone = !(await feeOf(H, f.id))
+        const audited = (await feeAudits(H, f.id, 'delete')).length > 0
+        t.eq('a committed delete without an audit row', gone && !audited, false)
+        t.note('DELETE status ' + r.status + '; fee gone=' + gone + '; audit rows=' + (audited ? '>0' : 0))
+      })
+    })
+    await check('K5-control-create', 'control: creating an expense IS atomic with its audit (the sibling path proves the assertion is satisfiable)', 'control', async (t) => {
+      const ok = await H.api('POST', '/api/fees', { client_request_id: 'al-k5-create-0001', fee_type: 'expense', label: 'AL create ok', amount_usd: 5, fee_date: '2026-10-02', branch_id: LC })
+      t.eq('a normal create works (fixture reaches the path)', ok.status, 201)
+      await withTrigger(H, 'al_audit_down', "CREATE TRIGGER al_audit_down BEFORE INSERT ON audit_logs WHEN NEW.entity='fee' AND NEW.action='create' BEGIN SELECT RAISE(ABORT,'al: audit store unavailable'); END", async () => {
+        await H.api('POST', '/api/fees', { client_request_id: 'al-k5-create-0002', fee_type: 'expense', label: 'AL create blocked', amount_usd: 6, fee_date: '2026-10-02', branch_id: LC })
+        t.eq('no expense row without its audit row', (await H.q1("SELECT COUNT(*) n FROM fees WHERE label='AL create blocked'")).n, 0)
+      })
+    })
+    await check('K5c', 'an approval and its effect commit together: if the queue row cannot be marked approved, the fee is not deleted', 'high', async (t) => {
+      const f = await seedFee(H)
+      const { pid } = await queueDelete(H, f)
+      await withTrigger(H, 'al_pa_down', "CREATE TRIGGER al_pa_down BEFORE UPDATE ON pending_actions WHEN NEW.status='approved' BEGIN SELECT RAISE(ABORT,'al: queue store unavailable'); END", async () => {
+        const a = await approve(H, pid)
+        const gone = !(await feeOf(H, f.id))
+        const status = (await pendingOf(H, pid)).status
+        t.ok('effect and decision agree (deleted and approved, or kept and still open)', (gone && status === 'approved') || (!gone && status === 'open'), { feeGone: gone, requestStatus: status, approveHttp: a.status })
+      })
+    })
+
+    // ------------------------------------------------------------------ K6: approve / reject race
+    await check('K6', 'approve and reject at the same instant: the decision and the effect agree (never "rejected" with the fee deleted)', 'high', async (t) => {
+      const f = await seedFee(H)
+      const { pid } = await queueDelete(H, f)
+      await H.control('hooks', { hooks: [{ pattern: 'DELETE FROM fees WHERE id', request: H.hookRequest('POST', '/api/review/' + pid + '/reject', { reason: 'Duplicate of another expense' }, 'reviewer2') }] })
+      const a = await approve(H, pid)
+      const hook = await hookResult(H)
+      await H.disarm()
+      const gone = !(await feeOf(H, f.id))
+      const status = (await pendingOf(H, pid)).status
+      t.ok('the reject really landed while the approval was applying', hook.fired && hook.result.status === 200, hook)
+      t.ok('decision and effect agree (approved and deleted, or rejected and kept)', (status === 'approved' && gone) || (status === 'rejected' && !gone), { requestStatus: status, feeGone: gone, approveHttp: a.status })
+    })
+
+    // ------------------------------------------------------------------ K7: reasons
+    await check('K7', 'a reject reason over 512 characters (the cap every stock reason has) is refused 400 reason_too_long and the request stays open', 'medium', async (t) => {
+      const f = await seedFee(H)
+      const { pid } = await queueDelete(H, f)
+      const r = await reject(H, pid, 'x'.repeat(513))
+      const row = await pendingOf(H, pid)
+      t.eq('status', r.status, 400)
+      t.eq('code', r.body && r.body.code, 'reason_too_long')
+      t.eq('request still open', row.status, 'open')
+      t.note('stored reason length: ' + (row.reject_reason ? row.reject_reason.length : 0))
+    })
+    await check('K7-control', 'control: a 512-character reason is accepted and stored whole', 'control', async (t) => {
+      const f = await seedFee(H)
+      const { pid } = await queueDelete(H, f)
+      const r = await reject(H, pid, 'y'.repeat(512))
+      const row = await pendingOf(H, pid)
+      t.eq('status', r.status, 200)
+      t.eq('stored length', row.reject_reason && row.reject_reason.length, 512)
+    })
+
+    // ------------------------------------------------------------------ K8: request-device attribution
+    await check('K8-control', 'control: with ONE live session the audit row names that session\'s device', 'control', async (t) => {
+      const f = await seedFee(H)
+      const r = await putFee(H, f, { amount_usd: 11 })
+      t.eq('status', r.status, 200)
+      t.eq('audit device', (await feeAudits(H, f.id, 'update'))[0]?.device_name, 'Owner Laptop')
+    })
+    await check('K8a', 'the audit row names the device the REQUEST came from, not the user\'s most recently active other session', 'medium', async (t) => {
+      const f = await seedFee(H)
+      const r = await putFee(H, f, { amount_usd: 13 }, 'editorA')
+      const rows = await feeAudits(H, f.id, 'update')
+      t.eq('status', r.status, 200)
+      t.eq('audit device (request came from the Counter Tablet; the Owner Phone session was seen more recently)', rows[0] && rows[0].device_name, 'Counter Tablet')
+    })
+    await check('K8b', 'a queued request records the device it was made on', 'medium', async (t) => {
+      const f = await seedFee(H)
+      const { r, pid } = await queueDelete(H, f, 'clerk')
+      const row = await pendingOf(H, pid)
+      const columns = (await H.q("PRAGMA table_info('pending_actions')")).map(c => c.name)
+      t.eq('queued', r.status, 202)
+      t.ok('the queue row carries the requesting device (Counter Tablet)', JSON.stringify(row).includes('Counter Tablet'), { deviceColumns: columns.filter(c => /device|session|tz/i.test(c)) })
+    })
+
+    // ------------------------------------------------------------------ K9: generic legacy Undo (client-closure history record)
+    await check('K9a', 'two Undo requests for one legacy history record: exactly one succeeds (the other is 409 stale) and one audit row is written', 'high', async (t) => {
+      const created = await H.api('POST', '/api/action-history', { scope: 'fees', entity: 'fee', entity_id: '1', label: 'Edit expense', undo_label: 'Undo edit', redo_label: 'Redo edit', reversible: true, undo_payload: { kind: 'client-closure', note: 'al' }, redo_payload: { kind: 'client-closure', note: 'al' } })
+      const hid = created.body && created.body.id
+      t.eq('history record created', created.status, 200)
+      await H.control('hooks', { hooks: [{ pattern: 'UPDATE action_history SET status', request: H.hookRequest('POST', '/api/action-history/' + hid + '/undo', {}) }] })
+      const a = await H.api('POST', '/api/action-history/' + hid + '/undo', {})
+      const hook = await hookResult(H)
+      await H.disarm()
+      const audits = await H.q("SELECT COUNT(*) n FROM audit_logs WHERE action='action_undo' AND CAST(entity_id AS TEXT)='1' AND details LIKE ?", '%"actionHistoryId":' + hid + ',%')
+      t.ok('the competing Undo really ran inside the first', hook.fired && hook.result.status === 200, hook)
+      t.eq('statuses of the two Undo requests (one 200, one 409)', [a.status, hook.result.status].sort(), [200, 409])
+      t.eq('undo audit rows for the record', audits[0].n, 1)
+      t.note('each 200 hands the payload back for the browser to replay: ' + [a.status, hook.result.status].join(' / '))
+    })
+
+    // ------------------------------------------------------------------ K11: evidence vs the audit-log retention window (owner decision)
+    await check('K11', 'owner-decision: the expense before/after and the undo record outlive the audit-log retention window (history is immutable)', 'owner-decision', async (t) => {
+      const f = await seedFee(H)
+      const e = await putFee(H, f, { amount_usd: 15 })
+      const hist = await H.api('POST', '/api/action-history', { scope: 'fees', entity: 'fee', entity_id: String(f.id), label: 'Edit expense', undo_label: 'Undo edit', reversible: true, undo_payload: { kind: 'client-closure' }, redo_payload: { kind: 'client-closure' } })
+      await H.api('POST', '/api/action-history/' + hist.body.id + '/undo', {})
+      t.eq('edit and undo were recorded', [e.status, (await feeAudits(H, f.id, 'update')).length, (await feeAudits(H, f.id, 'action_undo')).length], [200, 1, 1])
+      await H.db.prepare("UPDATE audit_logs SET created_at = datetime('now','-30 days') WHERE CAST(entity_id AS REAL)=? AND entity='fee'").bind(Number(f.id)).run()
+      const cleared = await H.api('DELETE', '/api/system/audit-logs/retention?olderThanDays=21&confirm=true')
+      t.eq('retention sweep ran', cleared.status, 200)
+      t.eq('expense update row survives a 30-day-old sweep', (await feeAudits(H, f.id, 'update')).length, 1)
+      t.eq('undo row survives a 30-day-old sweep', (await feeAudits(H, f.id, 'action_undo')).length, 1)
+      t.note('deleted by the sweep: ' + (cleared.body && cleared.body.deleted) + ' (default retention is 21 days; only return bulk undo/redo, shift lifecycle and bulk price rows are exempt)')
+    })
+
+    // ------------------------------------------------------------------ K10: restore audit (own world: a restore rewinds the whole database)
+    R = await world({ patches })
+    await R.db.prepare("UPDATE branches SET role='shop' WHERE id=1").run()
+    const mkFee = (label, amount) => R.api('POST', '/api/fees', { client_request_id: 'al-k10-' + label + '-0001', fee_type: 'expense', label, amount_usd: amount, fee_date: '2026-10-02', branch_id: LC })
+    const backupName = async () => {
+      const bk = await R.api('POST', '/api/backups', { type: 'export-cloudflare' })
+      return { status: bk.status, name: bk.body && bk.body.item && bk.body.item.result && bk.body.item.result.packageId }
+    }
+    // K10b runs first: a restore re-inserts every audit row of its backup, so the fault injected for the restore audit must not exist in the snapshot.
+    await check('K10b', 'a restore that cannot be audited does not report success (the audit write is part of the operation)', 'high', async (t) => {
+      const bk = await backupName()
+      await withTrigger(R, 'al_restore_audit_down', "CREATE TRIGGER al_restore_audit_down BEFORE INSERT ON audit_logs WHEN NEW.action='restore' BEGIN SELECT RAISE(ABORT,'al: audit store unavailable'); END", async () => {
+        const restored = await R.api('POST', '/api/backups', { type: 'import-folder', sourceDir: bk.name })
+        const audited = (await R.q("SELECT COUNT(*) n FROM audit_logs WHERE entity='backup' AND action='restore'"))[0].n > 0
+        t.eq('a restore reported done with no audit row', restored.status === 200 && !audited, false)
+        t.note('restore status ' + restored.status + '; audited=' + audited)
+      })
+    })
+    await check('K10a', 'a restore does not erase the audit trail of what happened after the backup (the edit that was rolled back stays on record)', 'high', async (t) => {
+      const created = await mkFee('Rent', 10)
+      const fee = created.body.fee
+      const bk = await backupName()
+      const e = await R.api('PUT', '/api/fees/' + fee.id, { expected_updated_at: fee.updated_at, amount_usd: 77 })
+      const editAudit0 = (await R.q("SELECT COUNT(*) n FROM audit_logs WHERE entity='fee' AND action='update'"))[0].n
+      const restored = await R.api('POST', '/api/backups', { type: 'import-folder', sourceDir: bk.name })
+      t.eq('fixture: create, backup, edit, restore all succeeded', [created.status, bk.status, e.status, restored.status], [201, 200, 200, 200])
+      t.eq('fixture: the edit was audited before the restore', editAudit0, 1)
+      t.eq('the fee is back to the backed-up amount', (await R.q1('SELECT amount_usd a FROM fees WHERE id=?', fee.id)).a, 10)
+      t.eq('the pre-restore edit audit row is still on record', (await R.q("SELECT COUNT(*) n FROM audit_logs WHERE entity='fee' AND action='update'"))[0].n, 1)
+      t.eq('the restore itself is on record', (await R.q("SELECT COUNT(*) n FROM audit_logs WHERE entity='backup' AND action='restore'"))[0].n, 1)
+      t.note('restore: ' + restored.status + '; D1 statements of the restore request: ' + restored.d1)
+    })
+  } finally {
+    await H.disarm().catch(() => {})
+    await H.dispose()
+    if (R) { await R.disarm().catch(() => {}); await R.dispose() }
+  }
+  finish('K')
+}
+main().catch(error => { console.error(error); process.exitCode = 2 })
