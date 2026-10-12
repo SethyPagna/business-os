@@ -2,6 +2,7 @@ import type { RequestMetrics } from '../lib/requestMetrics'
 import { COUNTED_CONDITION_HISTORY_KIND, notifyCountedCondition } from '../lib/countedConditionHistory'
 import { productStockGuardError } from '../lib/productStockGuard'
 import { Hono, type Context } from 'hono'
+import { getCookie } from 'hono/cookie'
 import { acquisitionCostResponses, hasAcquisitionCostInput, projectAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -22,6 +23,7 @@ import { actorSnapshot } from '../lib/actorSnapshot'
 import { TRANSFER_OPERATION_KIND, canReplayTransferPayload, notifyTransferOperation } from '../lib/transferOperation'
 import { STOCK_LOT_SET_KIND, notifyStockLotSet } from '../lib/stockLotAdjustment'
 import { STOCK_IN_LINE_EDIT_KIND, notifyStockInLineEdit } from '../lib/stockInLineEdit'
+import { isProductMergeV2Payload } from '../lib/undoAppliers'
 
 const SERVER_SALE_BULK_KINDS = new Set([BULK_STATUS_KIND, ...SALE_BULK_UPDATE_KINDS])
 const SERVER_BULK_KINDS = new Set([...SERVER_SALE_BULK_KINDS, RETURN_BULK_ACTION_KIND, STOCK_SESSION_KIND, SALE_SETTLEMENT_ACTION_KIND])
@@ -135,6 +137,7 @@ function isServerManagedPayload(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false
   const payload = value as Record<string, unknown>
   const kind = String(payload.applier || '')
+  if (isProductMergeV2Payload(payload)) return true
   return kind === COUNTED_CONDITION_HISTORY_KIND || kind === CUSTOMER_GENDER_RESTORATION_KIND || kind === TRANSFER_OPERATION_KIND || kind === STOCK_LOT_SET_KIND || kind === STOCK_IN_LINE_EDIT_KIND || SERVER_BULK_KINDS.has(kind) || kind === PRODUCT_MERGE_GROUP_ACTION_KIND || kind === PRODUCT_REMOVE_ACTION_KIND
     || (kind === SALE_ADD_ITEMS_ACTION_KIND && typeof payload.operation_id === 'string' && payload.operation_id.length > 0)
 }
@@ -434,6 +437,32 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     if (branchClosure) return c.json({ success: false, error: branchClosure.message, code: branchClosure.code }, 409)
     if (!Number(existing.reversible || 0)) {
       return c.json({ success: false, error: 'This action is recorded only and cannot be reversed' }, 400)
+    }
+    if (isProductMergeV2Payload(parseJson(existing.undo_payload))) {
+      const payload = parseJson(direction === 'undo' ? existing.undo_payload : existing.redo_payload)
+      try {
+        const token = getCookie(c, 'bos_session')
+        if (!token) return c.json({ success: false, code: 'merge_replay_permission', error: 'Sign in again before continuing.' }, 403)
+        const { sha256Hex } = await import('../lib/saleRecordEvents')
+        const authority = { predicate: `EXISTS(SELECT 1 FROM user_sessions s JOIN users u ON u.id=s.user_id
+          WHERE s.token_hash=@mergeSessionHash AND s.user_id=@mergeSessionActor AND s.revoked_at IS NULL
+            AND s.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') AND u.deleted_at IS NULL)`,
+          params: { mergeSessionHash: await sha256Hex(token), mergeSessionActor: user.id } }
+        const applier = resolveUndoApplier(payload)
+        if (!applier) return c.json({ success: false, code: UNDO_HISTORY_STALE_CODE, error: 'Refresh this history item.' }, 409)
+        const outcome = await applier.run(payload, { env: c.env, user, direction, historyId: existing.id,
+          generation: body.expected_generation, productMergeReplayAuthority: authority })
+        const { notifyProductMergeReplay } = await import('../lib/productMergeReplayAction')
+        c.executionCtx.waitUntil(notifyProductMergeReplay(c.env).catch(error => console.error('[merge replay cache]', error)))
+        const row = await db.prepare('SELECT * FROM action_history WHERE id=@id').getOnce!<ActionHistoryRow>({ id: existing.id })
+        return c.json(visibleHistoryReplayResponse({ success: true, applied: true, ...outcome,
+          item: row ? await mapRow(row, user, c.env) : null, payload: parseJson(row?.undo_payload) }, user))
+      } catch (error) {
+        const raw = error as { statusCode?: number; code?: string; message?: string }
+        const status = [400,403,404,409,503].includes(Number(raw.statusCode)) ? raw.statusCode! as 400 | 403 | 404 | 409 | 503 : 500
+        return c.json({ success: false, code: raw.code || 'undo_history_unusable', error: raw.message || 'Merge replay could not be confirmed.',
+          ...(status === 503 ? { action: 'retry_same_request' } : {}), ...(raw.code === 'merge_replay_over_plan_budget' ? { outcome: 'not_dispatched' } : {}) }, status)
+      }
     }
     const currentStatus = String(existing.status || '').toLowerCase()
     const expected = direction === 'undo' ? 'undoable' : 'redoable'

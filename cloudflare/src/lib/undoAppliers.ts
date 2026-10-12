@@ -94,6 +94,7 @@ export interface UndoApplierContext {
   historyId?: number
   generation?: unknown
   stockSessionQueryBudget?: StockSessionQueryBudget
+  productMergeReplayAuthority?: { predicate: string; params: Record<string, unknown> }
 }
 
 export interface UndoApplierOutcome {
@@ -334,6 +335,7 @@ function assertMergeChoicePermissions(reversals: MergeReversal[], user: SessionU
 }
 
 export async function mergeReplayChoicePermissionError(env: Env, payload: Record<string, unknown>, user: SessionUser): Promise<string | null> {
+  if (isProductMergeV2Payload(payload)) return (await import('./productMergeReplayAction')).productMergeReplayPermissionError(env, payload, user)
   const kind = String(payload.applier || '')
   if (kind !== 'product.merge' && kind !== 'product.merge.bulk') return null
   const snapshotId = Number(payload.snapshot_id || 0)
@@ -372,6 +374,10 @@ export async function mergeReplayChangesProductImages(
   payload: Record<string, unknown>,
   direction: 'undo' | 'redo',
 ): Promise<boolean> {
+  if (isProductMergeV2Payload(payload)) {
+    try { return (await (await import('./productMergeReplayAction')).productMergeReplayRequirements(env, payload)).image }
+    catch { return true }
+  }
   const kind = String(payload.applier || '')
   const snapshotId = Number(payload.snapshot_id || 0)
   if (!PRODUCT_MERGE_APPLIER_KINDS.has(kind) || !Number.isInteger(snapshotId) || snapshotId <= 0) return false
@@ -3396,6 +3402,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
     permission: 'products',
     action: 'merge_duplicates',
     run: async (payload, ctx) => {
+      if (isProductMergeV2Payload(payload)) return (await import('./productMergeReplayAction')).replayProductMergeAction(payload, ctx)
       const db = getDb(ctx.env)
       const snapshotId = Number(payload.snapshot_id || 0)
       if (!Number.isInteger(snapshotId) || snapshotId <= 0) {
@@ -3586,6 +3593,10 @@ export function resolveUndoApplier(payload: Record<string, unknown> | null | und
   const name = typeof payload.applier === 'string' ? payload.applier : ''
   const def = name ? APPLIERS[name] : undefined
   return def ? { name, permission: def.permission, action: def.action, run: def.run } : null
+}
+
+export function isProductMergeV2Payload(payload: Record<string, unknown>): boolean {
+  return payload.applier === 'product.merge' && payload.version === 2
 }
 
 // Whether a stored action_history row's NEXT transition can be replayed by the
