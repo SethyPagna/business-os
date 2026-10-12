@@ -20,7 +20,7 @@ import assert from 'node:assert/strict'
 import { fmtDate, fmtDateOnly, fmtDateTime24, fmtClock24, fmtDayFirst } from '../src/utils/formatters.ts'
 import { normalizeDateEntry, isoToDisplayDate, applyDateEntryMask } from '../src/utils/dateEntry.ts'
 import { formatBatchReceivedDate, lotCodeAsDate, lotCodeToIsoDate, batchDisplayLabel } from '../src/utils/batchLabel.ts'
-import { batchReceivedInstant } from '../src/components/pos/posCore.ts'
+import { batchReceivedInstant } from '../src/utils/lotDisplayOrder.ts'
 import { dateToBatchCode, normalizeToIsoDate, normalizeTypedDate, readBatchDateCell } from '../src/utils/batchCode.ts'
 import { businessDateTimeId, stockSessionId, isBusinessReceiptNumber } from '../src/utils/timestampId.ts'
 

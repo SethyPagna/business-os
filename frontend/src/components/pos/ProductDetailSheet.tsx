@@ -16,7 +16,8 @@ import type { BatchSelection, ProductBatch } from '../../api/batchesTransport.ts
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { useApp, useLowStockConfig } from '../../AppContext'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
-import { buildVariantOptionLabels, computeExpiryStatus, sortBatchesForPicker } from './posCore.ts'
+import { buildVariantOptionLabels, computeExpiryStatus } from './posCore.ts'
+import { sortLotsForDisplay } from '../../utils/lotDisplayOrder.ts'
 import { branchStockQuantity, deriveProductSheetState, type SheetIntent, type SheetProductLike } from './productSheetState.ts'
 import ProductImage from './ProductImage'
 import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
@@ -593,13 +594,13 @@ export default function ProductDetailSheet({
     setBatchChoicesOpen(false)
   }, [lotSourceKey, resolvedBranchId, actorScope])
 
-  // The cashier's order: available lots first, each group earliest received
-  // date to latest. See posCore.ts's sortBatchesForPicker -- the server's
-  // list is expiry-first FIFO, which interleaves empty lots among sellable
-  // ones. Ordered here at render (rather than when the fetch lands) so the
-  // list can never be shown in the raw transport order.
+  // The cashier's order: newest received date first (owner, 12 Oct 2026; was
+  // earliest first under S4-18). See utils/lotDisplayOrder.ts -- the server's
+  // list is expiry-first FIFO and stays the order a sale deducts in; this is
+  // display only. Ordered here at render (rather than when the fetch lands) so
+  // the list can never be shown in the raw transport order.
   const batchWord = t('batch') || 'Received date'
-  const orderedBatches = sortBatchesForPicker(visibleBatches)
+  const orderedBatches = sortLotsForDisplay(visibleBatches)
   const batchPageCount = Math.max(1, Math.ceil(orderedBatches.length / BATCH_CHOICES_PAGE_SIZE))
   const clampedBatchPage = Math.min(batchPage, batchPageCount - 1)
   const pagedBatches = orderedBatches.slice(clampedBatchPage * BATCH_CHOICES_PAGE_SIZE, clampedBatchPage * BATCH_CHOICES_PAGE_SIZE + BATCH_CHOICES_PAGE_SIZE)
