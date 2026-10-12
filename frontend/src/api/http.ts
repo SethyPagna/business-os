@@ -858,6 +858,7 @@ export const WRITE_REQUEST_TIMEOUT_MS = 45_000
  * before the branch consolidation no Worker sends that refusal.
  */
 export async function apiFetch(method: unknown, path: string, body?: unknown, timeoutMs?: number, options: ApiFetchOptions = {}): Promise<any> {
+  const scope = captureActorReadScope()
   try {
     return await apiFetchOnce(method, path, body, timeoutMs, options)
   } catch (error) {
@@ -865,9 +866,11 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
     const refusedCode = String((error as { code?: unknown } | null)?.code || '')
     if (verb === 'GET' || verb === 'HEAD' || verb === 'OPTIONS' || !BRANCH_REDIRECT_CODES.has(refusedCode)) throw error
     const redirectModule = await import('./branchRedirect.ts')
+    assertActorSessionDispatchAllowed(scope)
     const request = redirectModule.branchRedirectRequestOf(error)
     if (!request || !redirectModule.hasBranchRedirectHandler()) throw error
     const target = await redirectModule.askBranchRedirect(request)
+    assertActorSessionDispatchAllowed(scope)
     if (target === null) {
       const declined = new Error(`Nothing was changed. ${request.detail.addressed_branch_name || ''} is disabled.`) as ApiRuntimeError
       declined.status = 409
