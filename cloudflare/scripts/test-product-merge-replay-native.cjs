@@ -17,6 +17,14 @@ function evidence(d1) {
 async function setup(kind = 'catalog') {
   const d1 = kind === 'catalog' ? await catalogFixture.ready() : await stockFixture.ready()
   if (kind === 'catalog') d1.db.exec(productMergeProtocolSchemaSql())
+  await executeStockTransaction(adapter(d1), [
+    { sql: "INSERT INTO sales(id,receipt_number,branch_id,total_usd)VALUES(600,'ORIGINAL-SALE',1,8)" },
+    { sql: "INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id)VALUES(601,600,2,'Original sale name',1,1)" },
+    { sql: "INSERT INTO sale_item_batch_allocations(id,sale_item_id,batch_id,branch_id,quantity,lot_code,expiry_date)VALUES(602,601,10,1,1,'Original lot','2028-01-01')" },
+    { sql: "INSERT INTO returns(id,return_number,sale_id,branch_id,total_refund_usd)VALUES(700,'ORIGINAL-RETURN',600,1,2)" },
+    { sql: "INSERT INTO return_items(id,return_id,sale_item_id,product_id,product_name,quantity,branch_id)VALUES(701,700,601,2,'Original return name',.4,1)" },
+    { sql: "INSERT INTO return_item_batch_allocations(id,return_item_id,sale_item_id,batch_id,branch_id,quantity,lot_code)VALUES(702,701,601,10,1,.4,'Original lot')" },
+  ], 'once')
   if (kind === 'fraction') await executeStockTransaction(adapter(d1), [
     { sql: 'UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN(10,11,12,13)' },
     { sql: 'UPDATE damaged_stock_lots SET quantity_remaining=0 WHERE product_id=2' },
@@ -41,7 +49,7 @@ async function compile(d1, direction, transitionId) {
   return planProductMergeReplay(await capture(d1), proof, { transitionId, direction, actorId: 7, actorName: 'Operator', pointer: JSON.parse(proof.history.undo_payload) })
 }
 function immutable(d1, before, original) {
-  for (const table of ['inventory_movements', 'product_batches', 'damaged_stock_lots', 'product_cost_entries', 'transfer_operation_members', 'transfer_operation_receipts']) {
+  for (const table of ['inventory_movements', 'product_batches', 'damaged_stock_lots', 'product_cost_entries', 'transfer_operation_members', 'transfer_operation_receipts', 'sales', 'sale_items', 'sale_item_batch_allocations', 'returns', 'return_items', 'return_item_batch_allocations']) {
     for (const row of before[table]) {
       const actual = rows(d1, table).find(value => value.id === row.id)
       if (table === 'damaged_stock_lots') {
@@ -72,14 +80,35 @@ function physical(d1, original, undo) {
     assert.equal(d1.db.prepare('SELECT quantity_remaining FROM damaged_stock_lots WHERE id=?').get(target).quantity_remaining, undo ? 0 : tag.quantity_remaining)
   }
 }
+function compensation(d1, compiled, direction) {
+  const origins = JSON.parse(evidence(d1).plan.payload_json).origins
+  const generation = compiled.pointer.generation
+  const movements = rows(d1, 'inventory_movements').filter(row => { try { return JSON.parse(row.reason).generation === generation } catch { return false } })
+  assert.equal(movements.length, origins.physicalEdges.filter(edge => edge.quantity > 0).length * 2)
+  for (const edge of origins.physicalEdges.filter(edge => edge.quantity > 0)) {
+    const pair = movements.filter(row => JSON.parse(row.reason).ordinal === edge.ordinal).sort((a,b) => a.id - b.id)
+    const source = direction === 'undo' ? edge.effect : edge.original, target = direction === 'undo' ? edge.original : edge.effect
+    for (const [row, tuple, quantity] of [[pair[0], source, -edge.quantity], [pair[1], target, edge.quantity]]) {
+      const reason = JSON.parse(row.reason)
+      assert.deepEqual([row.product_id, row.branch_id, row.batch_id, row.quantity, reason.condition_tag, reason.damaged_lot_id],
+        [tuple.productId, tuple.branchId, tuple.batchId, quantity, tuple.conditionTag, tuple.damagedLotId])
+    }
+  }
+}
 async function positive(kind) {
   const { d1, original, before } = await setup(kind)
   try {
     const savedPlan = evidence(d1).plan.payload_json
     for (const [direction, id] of [['undo', 1002], ['redo', 1003], ['undo', 1004]]) {
       const compiled = await compile(d1, direction, id)
+      assert.ok(compiled.statements.every(row => !row.sql.includes('\r')), 'compiled SQL is LF-only')
       await executeStockTransaction(adapter(d1), compiled.statements, 'once')
       physical(d1, original, direction === 'undo'); immutable(d1, before, original)
+      compensation(d1, compiled, direction)
+      if (kind === 'catalog') {
+        assert.deepEqual(rows(d1, 'products').find(row => row.id === 4), before.products.find(row => row.id === 4), 'unrelated sibling bytes')
+        assert.deepEqual(rows(d1, 'promotion_rules').find(row => row.id === 2), before.promotion_rules.find(row => row.id === 2), 'unrelated promotion bytes')
+      }
       assert.equal(evidence(d1).plan.payload_json, savedPlan)
       assert.equal(evidence(d1).seal.status, 'sealed')
       const current = stockFixture.state(d1)
@@ -100,7 +129,7 @@ async function positive(kind) {
   } finally { d1.db.close() }
 }
 async function faults() {
-  for (const fault of ['source-rival', 'catalog-rival', 'child-rival', 'receipt-rival', 'stale-head', 'late-failure', 'omitted-seal', 'omitted-head', 'omitted-transition', 'occupied-transition']) {
+  for (const fault of ['source-rival', 'catalog-rival', 'child-rival', 'receipt-rival', 'inactive-branch', 'original-image-reused', 'derived-image-reused', 'stale-head', 'late-failure', 'omitted-seal', 'omitted-head', 'omitted-transition', 'occupied-transition']) {
     const { d1 } = await setup('catalog')
     try {
       let compiled = await compile(d1, 'undo', 1002)
@@ -108,6 +137,13 @@ async function faults() {
       if (fault === 'catalog-rival') await executeStockTransaction(adapter(d1), [{ sql: "UPDATE products SET name='Later change' WHERE id=1" }], 'once')
       if (fault === 'child-rival') await executeStockTransaction(adapter(d1), [{ sql: "UPDATE products SET parent_id=4,updated_at='later-child' WHERE id=3" }], 'once')
       if (fault === 'receipt-rival') await executeStockTransaction(adapter(d1), [{ sql: "UPDATE product_batches SET notes='Later receipt' WHERE id=100" }], 'once')
+      if (fault === 'inactive-branch') d1.db.exec('UPDATE branches SET is_active=0 WHERE id=1')
+      if (fault === 'original-image-reused') d1.db.exec("INSERT INTO product_images(id,product_id,image_path)VALUES(201,4,'Unrelated image')")
+      if (fault === 'derived-image-reused') {
+        await executeStockTransaction(adapter(d1), compiled.statements, 'once')
+        compiled = await compile(d1, 'redo', 1003)
+        d1.db.exec("INSERT INTO product_images(id,product_id,image_path)VALUES(301,4,'Unrelated image')")
+      }
       if (fault === 'stale-head') await executeStockTransaction(adapter(d1), (await compile(d1, 'undo', 1005)).statements, 'once')
       if (fault === 'late-failure') compiled.statements.push({ sql: "SELECT json_extract('[1]','$[late_failure]')" })
       if (fault === 'omitted-seal') compiled.statements = compiled.statements.filter(row => !row.sql.startsWith("UPDATE undo_snapshots SET status='sealing'"))
@@ -133,6 +169,20 @@ async function faults() {
 async function main() {
   for (const kind of ['catalog', 'stock', 'fraction', 'zero']) await positive(kind)
   await faults()
+  for (const wrong of ['wrong-compensation', 'deleted-history']) {
+    const { d1, before, original } = await setup('catalog')
+    try {
+      const compiled = await compile(d1, 'undo', 1002)
+      if (wrong === 'wrong-compensation') {
+        const statement = compiled.statements.find(row => row.sql.startsWith('INSERT INTO inventory_movements'))
+        const movements = JSON.parse(statement.params.rows); movements[0].quantity = -movements[0].quantity
+        statement.params.rows = JSON.stringify(movements)
+      } else compiled.statements.splice(-2, 0, { sql: 'DELETE FROM inventory_movements WHERE id=99' })
+      await executeStockTransaction(adapter(d1), compiled.statements, 'once')
+      assert.throws(() => { compensation(d1, compiled, 'undo'); immutable(d1, before, original) }, error => error.code === 'ERR_ASSERTION')
+      console.log('PASS actual wrong compiler discriminator: ' + wrong)
+    } finally { d1.db.close() }
+  }
   console.log('LOCAL replay compiler: full-schema SQLite only; HTTP actor authorization, request recovery, Free/Paid quota and route wiring remain parent integration work')
 }
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })
