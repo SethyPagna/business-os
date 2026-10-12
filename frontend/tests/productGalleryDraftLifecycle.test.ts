@@ -14,7 +14,7 @@ assert.match(source, /normalizeProductFormDraft\(restoredDraft\.data\)[\s\S]*?se
   'restore applies gallery order only while image permission is currently granted')
 assert.match(source, /scheduleWorkDraftWrite<ProductFormDraftPayload>\(draftKey, \{[\s\S]*?form,[\s\S]*?imageList:/,
   'form and gallery persist atomically under the existing scoped draft key')
-assert.match(source, /setImageUploading\(true\)[\s\S]*?await pickImageFiles/,
+assert.match(source, /setImageUploading\(true\)[\s\S]*?await pickFiles/,
   'the form locks dismissal before the native picker/upload awaits')
 assert.match(source, /for \(const \[index, file\] of files\.entries\(\)\)[\s\S]*?updateImageList\([\s\S]*?persistImmediately: true/,
   'every successful file is linked and flushed before the next upload can fail')

@@ -52,6 +52,7 @@ import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { useIsPageActive } from '../shared/pageActivity'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
+import { pickFiles } from '../../utils/filePicker.ts'
 import { buildSettingsConflictState, diffSettingsConflictFields } from './settingsConflict.ts'
 import SettingsRenderBoundary from './SettingsRenderBoundary.tsx'
 import { diffSettings, settingsSaveOutcome, settingsSaveSucceeded } from '../../utils/settingsSave.ts'
@@ -557,6 +558,7 @@ export default function Settings() {
   const [telegramAction, setTelegramAction] = useState<'test' | 'summary' | null>(null)
   const settingsSaveInFlightRef = useRef(false)
   const uploadInFlightKeysRef = useRef<Set<string>>(new Set())
+  const lateUploadFilesRef = useRef<Map<string, File>>(new Map())
   const uploadControllersRef = useRef<Map<string, AbortController>>(new Map())
   const uploadOriginalValuesRef = useRef<Map<string, string>>(new Map())
   const uploadPreviewUrlsRef = useRef<Map<string, string>>(new Map())
@@ -920,16 +922,15 @@ export default function Settings() {
     updateUploadState(key, { type: 'cancel' })
   }, [updateUploadState])
 
-  const uploadImageSetting = async (key: string) => {
-    if (!beginKeyedAction(uploadInFlightKeysRef, key)) return
+  // A photo that reaches the picker after its fallback released the key (Android camera) is uploaded here as `lateFile`.
+  const uploadImageSetting = async (key: string, lateFile?: File) => {
+    if (lateFile && !aliveRef.current) return
+    if (!beginKeyedAction(uploadInFlightKeysRef, key)) {
+      if (lateFile) lateUploadFilesRef.current.set(key, lateFile)
+      return
+    }
     try {
-      const file = await new Promise<File | null>((resolve) => {
-        const input = document.createElement('input')
-        input.type = 'file'
-        input.accept = 'image/*'
-        input.onchange = () => resolve(input.files?.[0] || null)
-        input.click()
-      })
+      const file = lateFile ?? (await pickFiles({ accept: 'image/*', onLateChange: ([late]) => { void uploadImageSetting(key, late) } }))[0]
       if (!file) return
       const previousValue = String(form[key] || settings[key] || '').trim()
       uploadOriginalValuesRef.current.set(key, previousValue)
@@ -984,6 +985,11 @@ export default function Settings() {
       finishKeyedAction(uploadInFlightKeysRef, key)
       uploadControllersRef.current.delete(key)
       uploadOriginalValuesRef.current.delete(key)
+      const queued = lateUploadFilesRef.current.get(key)
+      if (queued) {
+        lateUploadFilesRef.current.delete(key)
+        void uploadImageSetting(key, queued)
+      }
     }
   }
 

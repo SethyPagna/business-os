@@ -32,6 +32,7 @@ import { captureActorReadScope, isActorReadScopeCurrent } from '../../../api/act
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, scopedWorkDraftKey, hasUnscopedWorkDraft, clearUnchangedWorkDraft } from '../../../utils/workDrafts.ts'
 import { searchProducts as searchProductsForMatch, getProductFilters } from '../../../api/methods.ts'
 import { buildCacheBustedMediaPath, canonicalizePersistedMediaPath } from '../../../utils/mediaUpload.ts'
+import { pickFiles } from '../../../utils/filePicker.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -420,57 +421,6 @@ function editableInitialForm(initialForm: ProductFormState): ProductFormState {
   }
 }
 
-function pickImageFiles(maxCount = 1, options: PickImageFilesOptions = {}): Promise<File[]> {
-  return new Promise((resolve) => {
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = options.accept || 'image/*'
-    if (options.capture) input.setAttribute('capture', options.capture)
-    input.multiple = maxCount > 1
-    // Visually hidden but attached to the DOM -- some mobile browsers/
-    // in-app webviews only reliably fire `change` on an input that's
-    // actually in the document, not a detached one.
-    input.style.position = 'fixed'
-    input.style.top = '-1000px'
-    input.style.left = '-1000px'
-    input.style.opacity = '0'
-    input.style.pointerEvents = 'none'
-
-    let settled = false
-    let cancelCheckTimer: ReturnType<typeof setTimeout> | null = null
-
-    const cleanup = (): void => {
-      window.removeEventListener('focus', onWindowFocus)
-      if (cancelCheckTimer) clearTimeout(cancelCheckTimer)
-      input.remove()
-    }
-    const settle = (files: File[]): void => {
-      if (settled) return
-      settled = true
-      cleanup()
-      resolve(files)
-    }
-
-    input.onchange = () => {
-      settle(Array.from(input.files || []).slice(0, maxCount))
-    }
-
-    // The OS file picker gives no reliable "cancelled" event on every
-    // platform. Detecting the window regaining focus after the dialog
-    // closes -- with a short delay so a real `change` event (which fires
-    // first on every browser tested) gets a chance to settle this first --
-    // is the standard fallback so a dismissed dialog doesn't leave this
-    // promise (and the caller's in-flight guard) hanging forever.
-    const onWindowFocus = (): void => {
-      cancelCheckTimer = setTimeout(() => settle(Array.from(input.files || []).slice(0, maxCount)), 300)
-    }
-    window.addEventListener('focus', onWindowFocus)
-
-    document.body.appendChild(input)
-    input.click()
-  })
-}
-
 export default function ProductForm(props: ProductFormProps) {
   const identity = scopedWorkDraftKey(productFormDraftBaseKey(props.product?.id, props.draftScope))
   return <ProductFormContent key={identity} {...props} />
@@ -686,6 +636,7 @@ function ProductFormContent({
   const canManageImages = canManageProductImages(user)
   const aliveRef = useRef(true)
   const imageUploadInFlightRef = useRef(false)
+  const lateImageFilesRef = useRef<File[][]>([])
   const saveInFlightRef = useRef(false)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
 
@@ -1090,16 +1041,41 @@ function ProductFormContent({
     await uploadPickedImages({ capture: 'environment' })
   }
 
-  async function uploadPickedImages(options: PickImageFilesOptions = {}): Promise<void> {
-    if (!canManageImages || imageUploading || imageUploadInFlightRef.current) return
+  async function withImageLock(task: () => Promise<void>): Promise<void> {
     imageUploadInFlightRef.current = true
     setImageUploading(true)
     try {
-      const remaining = Math.max(0, imageLimit - imageListRef.current.length)
-      if (!remaining) return
-      const files = await pickImageFiles(remaining, options)
-      if (!files.length) return
-      const productNameForNaming = String(form.name || '').trim()
+      await task()
+    } finally {
+      imageUploadInFlightRef.current = false
+      if (aliveRef.current) setImageUploading(false)
+      const queued = lateImageFilesRef.current.shift()
+      if (queued && aliveRef.current) void withImageLock(() => uploadImageFiles(queued))
+    }
+  }
+
+  // Android returns a camera photo through `change` after the focus fallback already released the lock.
+  // A save already in flight has taken its gallery snapshot, so a photo that arrives now could not be linked to it.
+  function receiveLateImageFiles(files: File[]): void {
+    if (!aliveRef.current || saveInFlightRef.current) return
+    if (imageUploadInFlightRef.current) lateImageFilesRef.current.push(files)
+    else void withImageLock(() => uploadImageFiles(files))
+  }
+
+  async function uploadPickedImages(options: PickImageFilesOptions = {}): Promise<void> {
+    if (!canManageImages || imageUploading || imageUploadInFlightRef.current) return
+    const remaining = Math.max(0, imageLimit - imageListRef.current.length)
+    if (!remaining) return
+    await withImageLock(async () => {
+      await uploadImageFiles(await pickFiles({ ...options, maxCount: remaining, onLateChange: receiveLateImageFiles }))
+    })
+  }
+
+  async function uploadImageFiles(picked: File[]): Promise<void> {
+    const files = picked.slice(0, Math.max(0, imageLimit - imageListRef.current.length))
+    if (!files.length) return
+    try {
+      const productNameForNaming = String(formRef.current.name || '').trim()
       // Position/total are computed against the gallery's final size (existing
       // images already on the product + every file in this batch), not just
       // this batch alone -- see buildGalleryImageName above.
@@ -1133,9 +1109,6 @@ function ProductFormContent({
       }
     } catch (error) {
       alert(getErrorMessage(error, tr('image_upload_failed', 'Image upload failed', 'ការបង្ហោះរូបភាពបានបរាជ័យ')))
-    } finally {
-      imageUploadInFlightRef.current = false
-      if (aliveRef.current) setImageUploading(false)
     }
   }
 

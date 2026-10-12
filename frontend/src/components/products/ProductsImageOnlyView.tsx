@@ -33,6 +33,7 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { fmtDateOnly } from '../../utils/formatters'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
+import { pickFiles } from '../../utils/filePicker.ts'
 
 // Same lazyRetry pattern ProductForm.tsx already uses for this modal --
 // keeps it out of this view's own (deliberately tiny, per Part 241) bundle
@@ -109,41 +110,6 @@ function normalizeRows(payload: unknown): { items: ImageOnlyProduct[]; total: nu
   return { items, total }
 }
 
-// Single hidden <input type=file>, reused across rows (one at a time) --
-// avoids mounting 50+ file inputs on a page whose whole point is a long
-// scrollable list. `capture: 'environment'` (Part 242) opens the device
-// camera directly instead of the general gallery/file chooser, mirroring
-// ProductForm.tsx's own addPhoto()/pickImageFiles(options) split.
-function pickImageFile(options: { capture?: 'environment' } = {}): Promise<File | null> {
-  return new Promise((resolve) => {
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = 'image/*'
-    if (options.capture) input.setAttribute('capture', options.capture)
-    input.style.position = 'fixed'
-    input.style.top = '-1000px'
-    input.style.opacity = '0'
-    let settled = false
-    const settle = (file: File | null) => {
-      if (settled) return
-      settled = true
-      window.removeEventListener('focus', onFocus, true)
-      input.remove()
-      resolve(file)
-    }
-    const onFocus = () => {
-      // Mirrors ProductForm.tsx's own pickImageFiles: if the picker closed
-      // (window refocused) without a change event firing shortly after,
-      // treat it as a cancel rather than hanging forever.
-      window.setTimeout(() => { if (!input.files?.length) settle(null) }, 400)
-    }
-    input.addEventListener('change', () => settle(input.files?.[0] || null))
-    window.addEventListener('focus', onFocus, true)
-    document.body.appendChild(input)
-    input.click()
-  })
-}
-
 export default function ProductsImageOnlyView() {
   const { t, notify, hasPermission, fmtUSD, fmtKHR } = useImageOnlyApp()
   // Settings > Stock Alerts -- the image grid and its details flyout are
@@ -197,6 +163,8 @@ export default function ProductsImageOnlyView() {
   // before the first one lands (same class of bug as the full editor's
   // Save-button-during-upload race, see ProductForm.tsx's saveForm guard).
   const [savingId, setSavingId] = useState<number | null>(null)
+  const savingRef = useRef(false)
+  const queuedSavesRef = useRef<Array<{ product: ImageOnlyProduct; task: () => Promise<void> }>>([])
   // Which row's "choose an existing library file" picker is open, if any --
   // a single shared FilePickerModal instance (same "one at a time" reasoning
   // as the hidden file input above), targeted at whichever row opened it.
@@ -351,40 +319,50 @@ export default function ProductsImageOnlyView() {
     notify(t('product_updated') || 'Product updated')
   }
 
-  async function handlePickAndSave(product: ImageOnlyProduct, options: { capture?: 'environment' } = {}) {
-    if (savingId !== null) return
-    const file = await pickImageFile(options)
-    if (!file) return
+  // One row saves at a time. A photo that reaches the picker after its focus fallback gave up (Android returns the
+  // camera shot that way) waits its turn here instead of being dropped.
+  async function saveRow(product: ImageOnlyProduct, task: () => Promise<void>) {
+    if (savingRef.current) {
+      queuedSavesRef.current.push({ product, task })
+      return
+    }
+    savingRef.current = true
     setSavingId(product.id)
     try {
-      const uploadModule = await loadUploadModule()
-      const uploaded = await uploadModule.uploadProductImage({
-        file,
-        fileName: file.name || 'product.jpg',
-        productId: product.id,
-        productName: product.name,
-      }) as { public_path?: string; path?: string; asset?: { public_path?: string } } | undefined
-      const path = uploaded?.public_path || uploaded?.path || uploaded?.asset?.public_path || ''
-      if (!path) throw new Error('Image upload failed')
-      await saveImagePath(product, path)
+      await task()
     } catch (error) {
       notify(getErrorMessage(error, t('failed') || 'Failed to save image'), 'error')
     } finally {
+      savingRef.current = false
       setSavingId(null)
+      const next = queuedSavesRef.current.shift()
+      if (next) void saveRow(next.product, next.task)
     }
+  }
+
+  async function uploadAndSave(product: ImageOnlyProduct, file: File) {
+    const uploadModule = await loadUploadModule()
+    const uploaded = await uploadModule.uploadProductImage({
+      file,
+      fileName: file.name || 'product.jpg',
+      productId: product.id,
+      productName: product.name,
+    }) as { public_path?: string; path?: string; asset?: { public_path?: string } } | undefined
+    const path = uploaded?.public_path || uploaded?.path || uploaded?.asset?.public_path || ''
+    if (!path) throw new Error('Image upload failed')
+    await saveImagePath(product, path)
+  }
+
+  async function handlePickAndSave(product: ImageOnlyProduct, options: { capture?: 'environment' } = {}) {
+    if (savingRef.current) return
+    const [file] = await pickFiles({ ...options, onLateChange: ([late]) => { void saveRow(product, () => uploadAndSave(product, late)) } })
+    if (file) await saveRow(product, () => uploadAndSave(product, file))
   }
 
   async function handleLibrarySelect(product: ImageOnlyProduct, publicPath: string) {
     setLibraryPickerProductId(null)
-    if (savingId !== null || !publicPath) return
-    setSavingId(product.id)
-    try {
-      await saveImagePath(product, publicPath)
-    } catch (error) {
-      notify(getErrorMessage(error, t('failed') || 'Failed to save image'), 'error')
-    } finally {
-      setSavingId(null)
-    }
+    if (savingRef.current || !publicPath) return
+    await saveRow(product, () => saveImagePath(product, publicPath))
   }
 
   return (
