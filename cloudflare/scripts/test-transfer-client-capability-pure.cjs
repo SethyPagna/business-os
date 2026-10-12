@@ -14,6 +14,10 @@ function load(name) {
   new Function('exports','require','module',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(module.exports, id => {
     if (id === './http.ts') return { route: (_key, online) => online(), apiFetch: async (_method,path,body) => { calls.push({path,body}); return { success:true } } }
     if (id === './requestIds.ts') return { ensureClientRequestId: body => ({...body,client_request_id:body.client_request_id || 'capability-test-key'}) }
+    if (id === './actorReadScope.ts') return {
+      captureActorReadScope: () => { throw new Error('Receiving scope must not run in this transfer fixture') },
+      assertActorReadScope: () => { throw new Error('Receiving scope must not run in this transfer fixture') },
+    }
     if (id === '../utils/deviceInfo.ts') return { getClientDeviceInfo: () => ({device_name:'fixture'}) }
     if (id === './branchTransport.ts') return branch
     if (['./transferRunRecovery.ts', './transferRunRefusal.ts', './branchRuleErrors.ts'].includes(id)) return loaded[id] ||= load(id.slice(2))
