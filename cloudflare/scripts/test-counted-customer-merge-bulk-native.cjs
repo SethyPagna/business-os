@@ -8,13 +8,15 @@ const {readProductMergeCaseSnapshot}=load('lib/productMergeSnapshot.ts')
 const {planProductMergeForwardStock}=load('lib/productMergeForwardStock.ts')
 const {sqliteD1Call}=require('./harness/sqlite_d1_bindings.cjs')
 async function concurrentStock(f,statements){
- const db={batchOnce:async rows=>f.sql.transaction(()=>rows.map(row=>{
-  const prepared=f.sql.prepare(row.sql)
-  let result
-  try{result=sqliteD1Call(prepared,prepared.reader?'all':'run',row.params??[])}catch(error){console.error('Concurrent stock failure:',String(error));throw error}
+ const prepare=(text,params=[])=>({text,params,bind:(...values)=>prepare(text,values),
+  first:async()=>sqliteD1Call(f.sql.prepare(text),'get',params)??null,
+  all:async()=>({results:sqliteD1Call(f.sql.prepare(text),'all',params)}),
+  run:async()=>({meta:sqliteD1Call(f.sql.prepare(text),'run',params)})})
+ const raw={prepare,batch:async rows=>f.sql.transaction(()=>rows.map(row=>{
+  const prepared=f.sql.prepare(row.text),result=sqliteD1Call(prepared,prepared.reader?'all':'run',row.params)
   return prepared.reader?{results:result,meta:{changes:0}}:{meta:{changes:result.changes,last_row_id:Number(result.lastInsertRowid)}}
  }))()}
- await executeStockTransaction(db,statements,'once')
+ await executeStockTransaction(getDb({DB:raw}),statements,'once')
 }
 async function merge(f,target,source,number){
  const db=getDb(f.env),snapshot=await readProductMergeCaseSnapshot(db,target,source,[])
@@ -129,6 +131,8 @@ async function refusals(make){
   try{
    let invoke
    if(fault==='schema'){
+    const warm=await f.call('/returns/bulk',body(f,'customer-schema-warm'));assert.equal(warm.status,200)
+    assert.equal((await f.call('/action-history/'+warm.json.actionHistoryId+'/undo',{expected_generation:0})).status,200)
     f.sql.exec('DROP TRIGGER return_merge_physical_insert');invoke=()=>f.call('/returns/bulk',body(f,'customer-missing-schema'))
    }else{
     const r=await f.call('/returns/bulk',body(f,'customer-corruption-setup'));assert.equal(r.status,200)

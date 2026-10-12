@@ -175,7 +175,8 @@ function physicalProofSql(): string {
 function physicalProofBytes(statements:Statement[],physical:PhysicalStock|null):number{
   if(!physical)return 0
   return new TextEncoder().encode(JSON.stringify(physical.guards.map(statement=>statement.params))
-    +JSON.stringify(statements.filter(statement=>statement.params.kind===RETURN_PHYSICAL_PROOF_KIND).map(statement=>statement.params.proof))).byteLength
+    +JSON.stringify(statements.filter(statement=>statement.params.kind===RETURN_PHYSICAL_PROOF_KIND).map(statement=>statement.params.proof))
+    +JSON.stringify(statements.filter(statement=>statement.params.movements!==undefined).map(statement=>statement.params.movements))).byteLength
 }
 
 function physicalProofStatement(operation: string, generation: number, sources: PhysicalSources, user: SessionUser, members:Member[]): Statement {
