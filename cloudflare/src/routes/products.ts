@@ -2329,6 +2329,52 @@ const PRODUCT_AUDIT_EXCLUDED_COLUMNS = new Set([
   'categories', 'brands', 'is_grouped_cached',
 ])
 
+// Finding I (13 Oct 2026): an edit that moves this row onto another product's
+// identity folds it into that product, and the fold needs the edited identity
+// written onto the row first (see the PUT below). Every refusal of such an
+// edit is decided HERE, before that write: a refusal after it left the new
+// name, barcode, updated_at and the open stock sessions' revisions behind.
+//   1. products:image = none: refused when the fold would change an image,
+//      judged against the keeper's REAL cover -- the pair the merge routes and
+//      the fold's own atomic guard judge (a null cover refused folds that move
+//      no image). Before the queue, as on the plain edit path, so an
+//      image-blocked request is refused rather than queued.
+//   2. Review Required (owner, 13 Oct 2026: review is queue-first, and an
+//      edit that would merge two products waits for approval): queued with
+//      the payload the plain edit queues; nothing is applied.
+// Returns the response to send, or null to go on with the fold.
+async function identityFoldRefusal(
+  c: any,
+  user: SessionUser,
+  db: ReturnType<typeof getDb>,
+  duplicate: { id: number },
+  dupRow: { id: number; image_path: string | null },
+  body: Record<string, unknown>,
+  isImageOnlyEdit: boolean,
+): Promise<Response | null> {
+  if (getActionTier(user, 'products', 'image') === 'none') {
+    const keeper = await db.prepare('SELECT id, image_path FROM products WHERE id = @id')
+      .get<{ id: number; image_path: string | null }>({ id: duplicate.id })
+    // A keeper that vanished meanwhile is judged coverless: the strict reading.
+    if (await productMergeChangesImages(db, [{ keeper: keeper ?? { id: duplicate.id, image_path: null }, discarded: dupRow }])) {
+      return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    }
+  }
+  if (!isImageOnlyEdit) {
+    const payload: Record<string, unknown> = { ...body }
+    delete payload.__rename_scope
+    const pendingId = await maybeQueueForReview(c.env, user, 'products', {
+      actionType: 'update',
+      entityType: 'product',
+      entityId: dupRow.id,
+      payload,
+      summary: `Update product #${dupRow.id}`,
+    })
+    if (pendingId != null) return c.json({ success: true, pending: true, pendingActionId: pendingId }, 202)
+  }
+  return null
+}
+
 app.put('/:id', async (c) => {
   const user = c.get('user')
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
@@ -2495,7 +2541,10 @@ app.put('/:id', async (c) => {
         // duplicates) but NOT yet true here: this row's stored name/barcode
         // is what the operator is CHANGING, and `duplicate` is where that
         // change lands. Write the edited identity onto this row first so it
-        // genuinely matches before the fold reads it back.
+        // genuinely matches before the fold reads it back -- after every
+        // refusal (identityFoldRefusal), never before one.
+        const identityRefusal = await identityFoldRefusal(c, user, db, duplicate, dupRow, body, isImageOnlyEdit)
+        if (identityRefusal) return identityRefusal
         try { await db.batch([productStockGuardStatement([Number(id), duplicate.id], 'active'), {
           sql: 'UPDATE products SET name = @name, barcode = @barcode, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND is_active=1',
           params: { name: nextName, barcode: nextBarcode, id: Number(id) },
@@ -2503,11 +2552,6 @@ app.put('/:id', async (c) => {
           const refusal = productStockGuardError(error)
           if (refusal) return c.json({ error: refusal.message, code: refusal.code }, refusal.status)
           throw error
-        }
-        if (getActionTier(user, 'products', 'image') !== 'full' && await productMergeChangesImages(
-          db, [{ keeper: { id: duplicate.id, image_path: null }, discarded: dupRow }],
-        )) {
-          return c.json({ error: 'You do not have permission to perform this action' }, 403)
         }
         let foldResult: Awaited<ReturnType<typeof foldDuplicateProductInto>>
         try {
