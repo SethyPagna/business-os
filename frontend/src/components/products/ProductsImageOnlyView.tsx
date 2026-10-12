@@ -21,6 +21,8 @@ import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Camera from 'lucide-react/dist/esm/icons/camera.js'
 import FolderOpen from 'lucide-react/dist/esm/icons/folder-open.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
+import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
+import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp, useLowStockConfig } from '../../AppContext'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import SearchInput from '../shared/SearchInput'
@@ -98,6 +100,26 @@ function loadUploadModule() {
   return uploadModulePromise
 }
 
+// The photo a row has just been given, shown from its local object URL while it uploads. A failed one stays on
+// the row with its file so Retry sends the same photo again instead of asking the person to pick it twice.
+interface RowPhoto {
+  token: number
+  file: File
+  url: string
+  status: 'uploading' | 'failed'
+  error: string
+  // Set once the upload itself succeeded, so a Retry after a failed product save does not upload the file twice.
+  path: string
+}
+
+function previewUrlFor(file: File): string {
+  try {
+    return URL.createObjectURL(file)
+  } catch {
+    return ''
+  }
+}
+
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
@@ -165,6 +187,20 @@ export default function ProductsImageOnlyView() {
   const [savingId, setSavingId] = useState<number | null>(null)
   const savingRef = useRef(false)
   const queuedSavesRef = useRef<Array<{ product: ImageOnlyProduct; task: () => Promise<void> }>>([])
+  // Per-row local previews and their upload state (see RowPhoto). The ref is the source of truth for the async
+  // upload callbacks; the state only drives rendering.
+  const [rowPhotos, setRowPhotos] = useState<Record<number, RowPhoto>>({})
+  const rowPhotosRef = useRef<Record<number, RowPhoto>>({})
+  const rowPhotoTokenRef = useRef(0)
+  const aliveRef = useRef(true)
+  useEffect(() => {
+    aliveRef.current = true
+    return () => {
+      aliveRef.current = false
+      for (const photo of Object.values(rowPhotosRef.current)) if (photo.url) URL.revokeObjectURL(photo.url)
+      rowPhotosRef.current = {}
+    }
+  }, [])
   // Which row's "choose an existing library file" picker is open, if any --
   // a single shared FilePickerModal instance (same "one at a time" reasoning
   // as the hidden file input above), targeted at whichever row opened it.
@@ -340,7 +376,7 @@ export default function ProductsImageOnlyView() {
     }
   }
 
-  async function uploadAndSave(product: ImageOnlyProduct, file: File) {
+  async function uploadProductPhoto(product: ImageOnlyProduct, file: File): Promise<string> {
     const uploadModule = await loadUploadModule()
     const uploaded = await uploadModule.uploadProductImage({
       file,
@@ -349,14 +385,60 @@ export default function ProductsImageOnlyView() {
       productName: product.name,
     }) as { public_path?: string; path?: string; asset?: { public_path?: string } } | undefined
     const path = uploaded?.public_path || uploaded?.path || uploaded?.asset?.public_path || ''
-    if (!path) throw new Error('Image upload failed')
-    await saveImagePath(product, path)
+    if (!path) throw new Error(t('image_upload_failed') || 'Image upload failed')
+    return path
+  }
+
+  // Replaces (or clears) a row's photo. The previous object URL is released here, in the one place every swap goes
+  // through, so a replaced, discarded, uploaded or unmounted photo cannot leak its blob.
+  function setRowPhoto(productId: number, next: RowPhoto | null) {
+    const current = rowPhotosRef.current[productId]
+    if (current?.url && current.url !== next?.url) URL.revokeObjectURL(current.url)
+    const map = { ...rowPhotosRef.current }
+    if (next) map[productId] = next
+    else delete map[productId]
+    rowPhotosRef.current = map
+    if (aliveRef.current) setRowPhotos(map)
+  }
+
+  // Uploads the row's photo and links it to the product. It handles its own failure (the row shows an inline
+  // alert with Retry), so saveRow's generic error toast never doubles it.
+  async function uploadRowPhoto(product: ImageOnlyProduct, token: number) {
+    const photo = rowPhotosRef.current[product.id]
+    if (!photo || photo.token !== token) return
+    try {
+      let { path } = photo
+      if (!path) {
+        path = await uploadProductPhoto(product, photo.file)
+        const live = rowPhotosRef.current[product.id]
+        if (live?.token === token) rowPhotosRef.current = { ...rowPhotosRef.current, [product.id]: { ...live, path } }
+      }
+      await saveImagePath(product, path)
+      if (rowPhotosRef.current[product.id]?.token === token) setRowPhoto(product.id, null)
+    } catch (error) {
+      const live = rowPhotosRef.current[product.id]
+      if (live?.token === token) setRowPhoto(product.id, { ...live, status: 'failed', error: getErrorMessage(error, t('image_upload_failed') || 'Image upload failed') })
+    }
+  }
+
+  function stageRowPhoto(product: ImageOnlyProduct, file: File) {
+    const token = rowPhotoTokenRef.current + 1
+    rowPhotoTokenRef.current = token
+    setRowPhoto(product.id, { token, file, url: previewUrlFor(file), status: 'uploading', error: '', path: '' })
+    void saveRow(product, () => uploadRowPhoto(product, token))
+  }
+
+  function retryRowPhoto(product: ImageOnlyProduct) {
+    const photo = rowPhotosRef.current[product.id]
+    if (!photo || photo.status !== 'failed') return
+    setRowPhoto(product.id, { ...photo, status: 'uploading', error: '' })
+    void saveRow(product, () => uploadRowPhoto(product, photo.token))
   }
 
   async function handlePickAndSave(product: ImageOnlyProduct, options: { capture?: 'environment' } = {}) {
     if (savingRef.current) return
-    const [file] = await pickFiles({ ...options, onLateChange: ([late]) => { void saveRow(product, () => uploadAndSave(product, late)) } })
-    if (file) await saveRow(product, () => uploadAndSave(product, file))
+    const [file] = await pickFiles({ ...options, onLateChange: ([late]) => stageRowPhoto(product, late) })
+    if (file) stageRowPhoto(product, file)
   }
 
   async function handleLibrarySelect(product: ImageOnlyProduct, publicPath: string) {
@@ -423,7 +505,9 @@ export default function ProductsImageOnlyView() {
           ) : items.length === 0 ? (
             <div className="py-10 text-center text-gray-400">{t('no_data') || 'No products found'}</div>
           ) : items.map((product) => {
-            const isSaving = savingId === product.id
+            const photo = rowPhotos[product.id]
+            // A photo waiting its turn behind another row's save is just as busy as the row being saved.
+            const isSaving = savingId === product.id || photo?.status === 'uploading'
             // Meta line -- only the fields this role was actually granted
             // (Part 243) ever have a value to show; anything not granted
             // is simply absent on `product` (server-enforced), so this
@@ -456,18 +540,30 @@ export default function ProductsImageOnlyView() {
               // of just losing pointer events with no visual change.
               <div
                 key={product.id}
-                className={`card flex items-center gap-3 p-3 transition-shadow ${
+                className={`card flex flex-wrap items-center gap-3 p-3 transition-shadow ${
                   isSaving ? 'ring-2 ring-blue-400/60 dark:ring-blue-500/50' : 'hover:shadow-md'
                 }`}
               >
                 <div className="relative h-14 w-14 shrink-0">
-                  {product.image_path ? (
+                  {photo?.url ? (
+                    // The photo just chosen, from its local copy, so the row answers the tap before the upload finishes.
+                    <img
+                      src={photo.url}
+                      alt={product.name}
+                      className={`h-14 w-14 rounded-xl object-cover ${photo.status === 'failed' ? 'ring-2 ring-red-400 dark:ring-red-500' : ''}`}
+                      onError={(event) => { event.currentTarget.style.visibility = 'hidden' }}
+                    />
+                  ) : product.image_path ? (
                     <ProductImg src={product.image_path} alt={product.name} className="h-14 w-14 rounded-xl object-cover" />
                   ) : (
                     <ProductImagePlaceholder className="h-14 w-14 rounded-xl" />
                   )}
                   {isSaving ? (
-                    <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/40">
+                    <div
+                      role="status"
+                      aria-label={t('uploading') || 'Uploading...'}
+                      className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/40"
+                    >
                       <Loader2 className="h-5 w-5 animate-spin text-white" />
                     </div>
                   ) : null}
@@ -552,6 +648,31 @@ export default function ProductsImageOnlyView() {
                     <FolderOpen className="h-3.5 w-3.5" />
                   </button>
                 </div>
+                {photo?.status === 'failed' ? (
+                  // Inline, never a native popup: the reason, the way to try the same photo again, and the way to
+                  // give it up. The line wraps and grows with the text, so Khmer is not clipped.
+                  <div className="flex basis-full items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 dark:border-red-900/40 dark:bg-red-950/30">
+                    <p role="alert" className="min-w-0 flex-1 break-words text-xs leading-relaxed text-red-700 dark:text-red-300">{photo.error}</p>
+                    <button
+                      type="button"
+                      className="btn-secondary flex shrink-0 items-center gap-1 px-2 py-1 text-xs"
+                      onClick={() => retryRowPhoto(product)}
+                      title={t('retry') || 'Retry'}
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      {t('retry') || 'Retry'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secondary shrink-0 p-1.5"
+                      onClick={() => setRowPhoto(product.id, null)}
+                      title={t('discard') || 'Discard'}
+                      aria-label={t('discard') || 'Discard'}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ) : null}
               </div>
             )
           })}
