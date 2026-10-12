@@ -229,6 +229,23 @@ export function auditChangeColumns(change: AuditFieldChange | null | undefined):
   }
 }
 
+// K8a: the device of the request being served, set by lib/auth.ts requireAuth
+// (see the note on REQUEST_DEVICE_HOOK_KEY there; the key must match). Read
+// through a global hook so this module keeps no import of auth.ts. It applies
+// only to a row whose actor IS the authenticated user: a row written for
+// another account, or outside a request, keeps the freshest-session fallback.
+const REQUEST_DEVICE_HOOK_KEY = 'business-os.request-device.v1'
+type RequestDevice = { userId: number; deviceName: string | null; deviceTz: string | null }
+function currentRequestDevice(): RequestDevice | null {
+  try {
+    const hook = (globalThis as unknown as Record<symbol, { current?: () => RequestDevice | undefined } | undefined>)[Symbol.for(REQUEST_DEVICE_HOOK_KEY)]
+    const device = hook?.current?.()
+    return device && Number.isSafeInteger(device.userId) ? device : null
+  } catch {
+    return null
+  }
+}
+
 // Ported from backend/src/helpers.ts's audit(). Deliberately swallows its
 // own errors (matching the original's comment: "Audit failures must never
 // crash the main request") -- an audit log write failing should never be
@@ -329,6 +346,7 @@ export function buildAuditStatement(
     : null
   const changeColumns = auditChangeColumns(change)
   const idSql = options.entityIdFromLastInsert ? 'last_insert_rowid()' : '@entity_id'
+  const requestDevice = currentRequestDevice()
   return {
     sql: `
       INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, old_value, new_value, device_name, device_tz)
@@ -336,8 +354,8 @@ export function buildAuditStatement(
         @user_id,
         COALESCE(NULLIF(TRIM(u.username), ''), NULLIF(TRIM(@user_name), '')),
         @action, @entity, ${idSql}, @details, @table_name, ${idSql}, @old_value, @new_value,
-        s.device_name,
-        s.device_tz
+        CASE WHEN @request_user_id IS NOT NULL AND @request_user_id = @user_id THEN @request_device_name ELSE s.device_name END,
+        CASE WHEN @request_user_id IS NOT NULL AND @request_user_id = @user_id THEN @request_device_tz ELSE s.device_tz END
       FROM (SELECT 1 AS one) AS _dummy
       LEFT JOIN users u ON u.id = @user_id
       LEFT JOIN (
@@ -358,6 +376,9 @@ export function buildAuditStatement(
       table_name: entity,
       old_value: changeColumns.old_value,
       new_value: change === undefined ? detailsStr : changeColumns.new_value,
+      request_user_id: requestDevice ? requestDevice.userId : null,
+      request_device_name: requestDevice ? requestDevice.deviceName : null,
+      request_device_tz: requestDevice ? requestDevice.deviceTz : null,
     },
   }
 }

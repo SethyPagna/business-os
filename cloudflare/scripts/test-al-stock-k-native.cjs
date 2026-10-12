@@ -403,6 +403,14 @@ const PATCHES = {
       from: "  await notify(env, waitUntil, 'fees', { type: 'deleted', id })\n  return { pendingActionMarkedAtomically: true }",
       to: "  await notify(env, waitUntil, 'fees', { type: 'deleted', id })\n  return { pendingActionMarkedAtomically: false }" },
   ],
+  // The audit row takes the user's most recently seen session again (the pre-fix device). Must turn K8a RED.
+  'freshest-session-device': [
+    { name: 'freshest-session-device', file: 'src/lib/audit.ts',
+      from: [
+        '        CASE WHEN @request_user_id IS NOT NULL AND @request_user_id = @user_id THEN @request_device_name ELSE s.device_name END,',
+        '        CASE WHEN @request_user_id IS NOT NULL AND @request_user_id = @user_id THEN @request_device_tz ELSE s.device_tz END'].join('\n'),
+      to: '        s.device_name,\n        s.device_tz' },
+  ],
   // The reject reason is taken as-is again. Must turn K7 and K7b RED.
   'no-reason-cap': [
     { name: 'no-reason-cap-type', file: REVIEW_QUEUE,
