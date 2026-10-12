@@ -27,7 +27,7 @@ import { canEditAcquisitionCosts, isAcquisitionCostImport } from './acquisitionC
 import { COST_OUTLIER_RATIO, identityBarcodeKey, normalizeProductGroupName, productIdentitySignature, resolveMergedCostDetail, resolveMergedPricing, barcodeIdentityMatches, clusterRowsByBarcodeIdentity, rankBarcodeIdentityWinner, isRealBarcode } from './productDetailRule'
 import type { MergedCostOutlier } from './productDetailRule'
 import { sanitizeImportedDescription } from './productDescriptionSections'
-import { planReconcileBranchSnapshot, planReceiveBatchStock, resolveReceiptLotTarget, type ReceiptLotCandidate } from './productBatches'
+import { planImportCountIncrease, planReconcileBranchSnapshot, planReceiveBatchStock, resolveReceiptLotTarget, type ReceiptLotCandidate } from './productBatches'
 import { catalogCostRecomputeStatement, typedCostEntryBeforeWriteStatement } from './catalogCostRecompute'
 import { actorId, actorSnapshot } from './actorSnapshot'
 import { multiplyMoney4 } from './moneyPrecision'
@@ -2776,6 +2776,7 @@ async function preserveAnalyzedInventoryCostSnapshots(
   db: D1Compat,
   jobId: string,
   results: ImportRowResult[],
+  appliedRowGuards: ReadonlySet<string>,
 ): Promise<ImportRowResult[]> {
   const rowNumbers = results.map((result) => Number(result.rowNumber)).filter((value) => Number.isSafeInteger(value))
   if (!rowNumbers.length) return results
@@ -2788,7 +2789,15 @@ async function preserveAnalyzedInventoryCostSnapshots(
     `).all<{ row_number: number; result_json: string }>({ ...params, id: jobId })
     for (const row of rows) analyzedByRow.set(Number(row.row_number), parsePolicyObject(row.result_json) as ImportRowResult)
   }
-  return applyAnalyzedInventoryCostSnapshots(results, analyzedByRow)
+  // A row an earlier attempt of this chunk already applied (its redelivery
+  // guard committed with its stock) is reported as the plan it was applied
+  // under. Judged again, it would meet stock that already includes it: a
+  // Remove 8 of 10 would read as "only 2 on hand", a Set as "already at".
+  const unapplied = results.map((result) => {
+    const analyzed = analyzedByRow.get(result.rowNumber)
+    return appliedRowGuards.has(`row:${result.rowNumber}`) && analyzed?.action === 'create' ? analyzed : result
+  })
+  return applyAnalyzedInventoryCostSnapshots(unapplied, analyzedByRow)
 }
 
 /** Plans reviewed add receipts without writes. The caller commits each entire
@@ -2858,6 +2867,213 @@ export async function planInventoryImportReceiptGroups(
   })
 }
 
+type ImportStatement = { sql: string; params: Record<string, unknown> }
+type StockGroupEntry = {
+  row: ImportRowResult
+  productId: number
+  branchId: number
+  delta: number
+  /** Removal only: the lots it drains, oldest first, and the units it takes from stock held under no lot. */
+  takes: Array<{ batchId: number; quantity: number }>
+  /** Increase only: the counted lot it lands in (planImportCountIncrease). */
+  increase: ReturnType<typeof planImportCountIncrease> | null
+}
+
+// Keep each atomic group inside one import batch (runD1BatchGroupsInChunks packs to
+// D1_IMPORT_BATCH_CHUNK_SIZE statements), leaving room for the branch and fence guards it prepends.
+const STOCK_GROUP_STATEMENT_CAP = 280
+
+/**
+ * Remove / Set / legacy rows of an inventory import, applied through the same four ledgers as the UI's Remove and
+ * Set (AL-STOCK B): the lot ledger, branch_stock, products.stock_quantity and the movement move together, or not at
+ * all. The importer used to write `products.stock_quantity` and the movement only, so branch_stock and the lots kept
+ * the old count, and a Remove larger than the stock drove the product total below zero.
+ *
+ *   removal  -> drained from the branch's lots oldest first (expiry, then received date -- the /adjust auto-routed
+ *               rule), any rest from stock the branch holds under no lot; refused (a coded row error) when the
+ *               branch no longer holds it after the rows before it in this chunk
+ *   increase -> (a Set above the count) the branch's counted lot for the row's date (planImportCountIncrease)
+ *
+ * Reads the chunk's lots and branch stock once, plans the rows in order against a running balance, and writes the
+ * rows as few atomic groups: each row's redelivery guard and movement, plus one guarded, unclamped set of lot,
+ * branch and product statements for the whole group. A concurrent sale between this read and the write fails the
+ * group's guard (nothing written); the queue's retry re-reads and re-plans. A row that reverses the direction of an
+ * earlier row of the same product and branch in this chunk is refused rather than netted.
+ */
+export async function planInventoryImportStockGroups(
+  db: D1Compat,
+  rows: ImportRowResult[],
+  rowGuardStatement: (rowNumber: number) => ImportStatement,
+  nowIso: string,
+): Promise<{ groups: ImportStatement[][]; refused: Array<{ row: ImportRowResult; code: string; message: string }> }> {
+  const refused: Array<{ row: ImportRowResult; code: string; message: string }> = []
+  if (!rows.length) return { groups: [], refused }
+  const pairs = uniqueStockPairs(rows.map((row) => row.data))
+  const onHand = await readBranchOnHand(db, pairs)
+  const lotRows = await db.prepare(`SELECT pb.variant_product_id AS product_id, bbs.branch_id, pb.id AS batch_id, bbs.quantity
+    FROM json_each(@pairs) pair
+    JOIN product_batches pb ON pb.variant_product_id = json_extract(pair.value, '$[0]') AND pb.is_active = 1
+    JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = json_extract(pair.value, '$[1]') AND bbs.quantity > 0
+    ORDER BY pb.variant_product_id, bbs.branch_id, (pb.expiry_date IS NULL), pb.expiry_date, pb.received_at, pb.id`)
+    .all<{ product_id: number; branch_id: number; batch_id: number; quantity: number }>({ pairs: JSON.stringify(pairs) })
+  const state = new Map<string, { onHand: number; lots: Array<{ batchId: number; quantity: number }>; direction: number }>()
+  for (const [productId, branchId] of pairs) state.set(`${productId}:${branchId}`, { onHand: onHand.get(`${productId}:${branchId}`) ?? 0, lots: [], direction: 0 })
+  for (const lot of lotRows) state.get(`${Number(lot.product_id)}:${Number(lot.branch_id)}`)?.lots.push({ batchId: Number(lot.batch_id), quantity: Number(lot.quantity) || 0 })
+
+  const planned: StockGroupEntry[] = []
+  for (const row of rows) {
+    const data = row.data
+    const productId = Number(data.product_id)
+    const branchId = Number(data.branch_id)
+    const delta = Number(data.signedQuantity)
+    const pair = state.get(`${productId}:${branchId}`)!
+    const direction = Math.sign(delta)
+    if (pair.direction && direction && direction !== pair.direction) {
+      refused.push({ row, code: INVENTORY_IMPORT_MIXED_DIRECTION_CODE, message: `An earlier row of this file moves ${String(data.product_name)} at ${String(data.branch_name)} the other way. Import additions and removals of one product separately.` })
+      continue
+    }
+    if (delta < 0) {
+      const need = -delta
+      if (need > pair.onHand) {
+        refused.push({ row, code: INVENTORY_IMPORT_INSUFFICIENT_STOCK_CODE, message: `Only ${pair.onHand} on hand at ${String(data.branch_name)} after the rows before it -- cannot remove ${need}.` })
+        continue
+      }
+      const takes: Array<{ batchId: number; quantity: number }> = []
+      let remaining = need
+      for (const lot of pair.lots) {
+        if (!(remaining > 0)) break
+        const take = Math.min(remaining, lot.quantity)
+        if (!(take > 0)) continue
+        takes.push({ batchId: lot.batchId, quantity: take })
+        lot.quantity -= take
+        remaining -= take
+      }
+      pair.onHand -= need
+      planned.push({ row, productId, branchId, delta, takes, increase: null })
+    } else {
+      // A Set above the count. receivedDate: the row's own date, else today (the Add import's convention).
+      pair.onHand += delta
+      const increase = delta > 0 ? planImportCountIncrease({ productId, branchId, quantity: delta, receivedDate: String(data.created_at || nowIso).slice(0, 10) }) : null
+      planned.push({ row, productId, branchId, delta, takes: [], increase })
+    }
+    if (direction) pair.direction = direction
+  }
+
+  const groups: ImportStatement[][] = []
+  let current: StockGroupEntry[] = []
+  let estimate = 0
+  for (const entry of planned) {
+    const cost = 2 + (entry.increase ? entry.increase.statements.length : 0)
+    if (current.length && estimate + cost > STOCK_GROUP_STATEMENT_CAP) {
+      groups.push(inventoryStockGroupStatements(current, rowGuardStatement, nowIso))
+      current = []
+      estimate = 0
+    }
+    current.push(entry)
+    estimate += cost
+  }
+  if (current.length) groups.push(inventoryStockGroupStatements(current, rowGuardStatement, nowIso))
+  return { groups, refused }
+}
+
+// One atomic group: every row's redelivery guard, the guarded strict lot / branch decrements, the counted-lot
+// increases, the branch increments, the product totals re-derived from branch_stock, then every row's movement.
+function inventoryStockGroupStatements(entries: StockGroupEntry[], rowGuardStatement: (rowNumber: number) => ImportStatement, nowIso: string): ImportStatement[] {
+  const statements: ImportStatement[] = entries.map((entry) => rowGuardStatement(entry.row.rowNumber))
+  const asStatement = (statement: { sql: string; params?: unknown }): ImportStatement => ({ sql: statement.sql, params: (statement.params || {}) as Record<string, unknown> })
+
+  const increased = entries.filter((entry) => entry.increase)
+  if (increased.length) {
+    statements.push(asStatement(productStockGuardStatement([...new Set(increased.map((entry) => entry.productId))], 'active')))
+    for (const entry of increased) statements.push(...entry.increase!.statements.map(asStatement))
+  }
+
+  const lotTakes = new Map<string, { productId: number; batchId: number; branchId: number; quantity: number }>()
+  for (const entry of entries) {
+    for (const take of entry.takes) {
+      const key = `${take.batchId}:${entry.branchId}`
+      const sum = lotTakes.get(key) || { productId: entry.productId, batchId: take.batchId, branchId: entry.branchId, quantity: 0 }
+      sum.quantity += take.quantity
+      lotTakes.set(key, sum)
+    }
+  }
+  if (lotTakes.size) {
+    const takes = JSON.stringify([...lotTakes.values()])
+    const matchesTake = `json_extract(t.value,'$.batchId') = branch_batch_stock.batch_id AND json_extract(t.value,'$.branchId') = branch_batch_stock.branch_id`
+    statements.push({
+      sql: `SELECT CASE WHEN EXISTS(
+          SELECT 1 FROM json_each(@takes) t
+          LEFT JOIN branch_batch_stock bbs ON bbs.batch_id = json_extract(t.value,'$.batchId') AND bbs.branch_id = json_extract(t.value,'$.branchId')
+          LEFT JOIN product_batches pb ON pb.id = json_extract(t.value,'$.batchId')
+          WHERE bbs.batch_id IS NULL OR pb.variant_product_id IS NOT json_extract(t.value,'$.productId') OR pb.is_active IS NOT 1
+            OR bbs.quantity < json_extract(t.value,'$.quantity')
+        ) THEN json_extract('captured_batch_allocation_conflict','$') ELSE 1 END AS allocation_guard`,
+      params: { takes },
+    }, {
+      sql: `UPDATE branch_batch_stock SET quantity = quantity - (SELECT json_extract(t.value,'$.quantity') FROM json_each(@takes) t WHERE ${matchesTake}),
+          updated_at = datetime('now')
+        WHERE batch_id IN (SELECT json_extract(value,'$.batchId') FROM json_each(@takes))
+          AND EXISTS (SELECT 1 FROM json_each(@takes) t WHERE ${matchesTake})`,
+      params: { takes },
+    })
+  }
+
+  const branchDeltas = new Map<string, { productId: number; branchId: number; quantity: number }>()
+  for (const entry of entries) {
+    const key = `${entry.productId}:${entry.branchId}`
+    const sum = branchDeltas.get(key) || { productId: entry.productId, branchId: entry.branchId, quantity: 0 }
+    sum.quantity += entry.delta
+    branchDeltas.set(key, sum)
+  }
+  const decreases = [...branchDeltas.values()].filter((sum) => sum.quantity < 0).map((sum) => ({ ...sum, quantity: -sum.quantity }))
+  const increases = [...branchDeltas.values()].filter((sum) => sum.quantity > 0)
+  if (decreases.length) {
+    const json = JSON.stringify(decreases)
+    const matchesBranch = `json_extract(t.value,'$.productId') = branch_stock.product_id AND json_extract(t.value,'$.branchId') = branch_stock.branch_id`
+    statements.push({
+      sql: `SELECT CASE WHEN EXISTS(
+          SELECT 1 FROM json_each(@decreases) t
+          LEFT JOIN branch_stock bs ON bs.product_id = json_extract(t.value,'$.productId') AND bs.branch_id = json_extract(t.value,'$.branchId')
+          WHERE bs.product_id IS NULL OR bs.quantity < json_extract(t.value,'$.quantity')
+        ) THEN json_extract('stock_removal_conflict','$') ELSE 1 END AS branch_stock_guard`,
+      params: { decreases: json },
+    }, {
+      sql: `UPDATE branch_stock SET quantity = quantity - (SELECT json_extract(t.value,'$.quantity') FROM json_each(@decreases) t WHERE ${matchesBranch})
+        WHERE product_id IN (SELECT json_extract(value,'$.productId') FROM json_each(@decreases))
+          AND EXISTS (SELECT 1 FROM json_each(@decreases) t WHERE ${matchesBranch})`,
+      params: { decreases: json },
+    })
+  }
+  if (increases.length) {
+    statements.push({
+      sql: `INSERT INTO branch_stock (product_id, branch_id, quantity)
+        SELECT json_extract(value,'$.productId'), json_extract(value,'$.branchId'), json_extract(value,'$.quantity') FROM json_each(@increases) WHERE 1
+        ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity`,
+      params: { increases: JSON.stringify(increases) },
+    })
+  }
+  statements.push({
+    sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id = products.id), updated_at = @updated_at
+      WHERE id IN (SELECT value FROM json_each(@ids))`,
+    params: { ids: JSON.stringify([...new Set(entries.map((entry) => entry.productId))]), updated_at: nowIso },
+  })
+
+  for (const entry of entries) {
+    const d = entry.row.data
+    // 0084: the movement names its lot when ONE lot covers it; a spread or a part from stock under no lot does not.
+    const takenFromLots = entry.takes.reduce((sum, take) => sum + take.quantity, 0)
+    const singleLot = entry.takes.length === 1 && takenFromLots === -entry.delta ? entry.takes[0].batchId : null
+    const batchSql = entry.increase ? entry.increase.batchIdSql : '@movement_batch_id'
+    statements.push(...labelAddressedMovements([{
+      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, created_at, batch_id) VALUES (@product_id, @product_name, @branch_id, @branch_name, @movement_type, @quantity, @unit_cost_usd, @unit_cost_khr, @total_cost_usd, @total_cost_khr, @reason, @created_at, ${batchSql})`,
+      // Honor an imported date (classifyInventory's `movementDate`, spread in via `d.created_at`) when the row
+      // supplied one; `nowIso` is only the fallback for a blank/unparseable cell.
+      params: { ...d, created_at: (d.created_at as string | null | undefined) || nowIso, movement_batch_id: singleLot, ...(entry.increase ? entry.increase.batchIdParams : {}) },
+    }], d))
+  }
+  return statements
+}
+
 // Picks the ONE product a wildcard-collapsed same-name cluster (see
 // clusterRowsByBarcodeIdentity) resolves an import row to. Ranking has to
 // run over the REAL-barcode rows first, never the whole cluster: a cluster
@@ -2913,6 +3129,8 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
   }
 
   const results: ImportRowResult[] = []
+  // Set rows and every removal, finished by judgeAgainstBranchStock once each row's branch is known.
+  const judged: BranchStockJudgedRow[] = []
   for (const row of rows) {
     const sku = str(row.sku || row.product_sku)
     const barcode = str(row.barcode)
@@ -2992,25 +3210,22 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
 
     let movementType: string
     let signedQuantity: number
+    if ((inventoryAction === 'add' || inventoryAction === 'remove') && quantity === 0) {
+      results.push({ rowNumber: row._rowNumber, action: 'skip', identifier: sku || barcode, existingId: product.id, message: `Zero quantity: no ${inventoryAction === 'add' ? 'receipt' : 'removal'} needed.`, changes: {}, data: row })
+      continue
+    }
     if (inventoryAction === 'add') {
-      if (quantity === 0) {
-        results.push({ rowNumber: row._rowNumber, action: 'skip', identifier: sku || barcode, existingId: product.id, message: 'Zero quantity: no receipt needed.', changes: {}, data: row })
-        continue
-      }
       movementType = 'in'
       signedQuantity = quantity
     } else if (inventoryAction === 'remove') {
       movementType = 'out'
       signedQuantity = -quantity
     } else if (inventoryAction === 'set') {
-      // Target absolute count, not a delta -- the movement is whatever
-      // gets the product from its current stock_quantity to this number.
-      signedQuantity = quantity - (product.stock_quantity || 0)
-      movementType = signedQuantity >= 0 ? 'in' : 'out'
-      if (signedQuantity === 0) {
-        results.push({ rowNumber: row._rowNumber, action: 'skip', identifier: sku || barcode, existingId: product.id, message: `Already at ${quantity} -- no movement needed.`, changes: {}, data: row })
-        continue
-      }
+      // Target absolute count, not a delta. The movement is whatever gets the
+      // ROW'S BRANCH from its own on-hand to this number, which is only known
+      // once the branch is resolved below: judgeAgainstBranchStock sets it.
+      signedQuantity = quantity
+      movementType = 'in'
     } else {
       // Legacy combined-template path, unchanged.
       if (quantity === 0) {
@@ -3106,7 +3321,7 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
       data.free_goods = freeGoods
       data.reason = appendReceiptNotes(String(data.reason), freeGoods ? [FREE_GOODS_REASON_NOTE] : [])
     }
-    results.push({
+    const result: ImportRowResult = {
       rowNumber: row._rowNumber,
       action: 'create',
       identifier: sku || barcode,
@@ -3114,9 +3329,85 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
       message: null,
       changes: {},
       data,
-    })
+    }
+    results.push(result)
+    if (inventoryAction === 'set' || signedQuantity < 0) judged.push({ result, row, quantity, costs: { usd: product.cost_price_usd, khr: product.cost_price_khr } })
   }
+  await judgeAgainstBranchStock(db, inventoryAction, judged)
   return results
+}
+
+/** Row codes for the inventory Remove / Set rows the branch's stock refuses. */
+export const INVENTORY_IMPORT_INSUFFICIENT_STOCK_CODE = 'import_insufficient_branch_stock'
+export const INVENTORY_IMPORT_DUPLICATE_COUNT_CODE = 'import_duplicate_count_row'
+export const INVENTORY_IMPORT_MIXED_DIRECTION_CODE = 'import_mixed_direction_rows'
+
+type BranchStockJudgedRow = { result: ImportRowResult; row: ParsedCsvRow; quantity: number; costs: { usd: number | null; khr: number | null } }
+
+function refuseInventoryRow(target: ImportRowResult, code: string, message: string, data?: Record<string, unknown>): void {
+  target.action = 'error'
+  target.code = code
+  target.message = message
+  if (data) target.data = data
+}
+
+/** On-hand of each (product, branch) pair, in one read. Pairs with no branch_stock row hold 0. */
+async function readBranchOnHand(db: D1Compat, pairs: ReadonlyArray<readonly [number, number]>): Promise<Map<string, number>> {
+  const onHand = new Map<string, number>()
+  if (!pairs.length) return onHand
+  const rows = await db.prepare(`SELECT bs.product_id, bs.branch_id, bs.quantity
+    FROM json_each(@pairs) pair
+    JOIN branch_stock bs ON bs.product_id = json_extract(pair.value, '$[0]') AND bs.branch_id = json_extract(pair.value, '$[1]')`)
+    .all<{ product_id: number; branch_id: number; quantity: number }>({ pairs: JSON.stringify(pairs) })
+  for (const row of rows) onHand.set(`${Number(row.product_id)}:${Number(row.branch_id)}`, Number(row.quantity) || 0)
+  return onHand
+}
+
+function uniqueStockPairs(datas: ReadonlyArray<Record<string, unknown>>): Array<[number, number]> {
+  const seen = new Map<string, [number, number]>()
+  for (const data of datas) seen.set(`${Number(data.product_id)}:${Number(data.branch_id)}`, [Number(data.product_id), Number(data.branch_id)])
+  return [...seen.values()]
+}
+
+/**
+ * Remove and Set rows are judged against the stock of the branch each row resolved to, never the all-branch total
+ * (AL-STOCK B): a Set's movement is its target minus THAT branch's on-hand (equal -> nothing to do), and a removal
+ * larger than what the branch holds is a coded row error instead of a movement that drives stock below zero. One
+ * read for every (product, branch) pair. Each row is judged against the stock before the file; rows that only
+ * together remove more than the branch holds are refused at apply, where the earlier rows' removals are known
+ * (planInventoryImportStockGroups). A second count of the same product and branch is refused: both would be judged
+ * against the same on-hand, so applying both would land on a number nobody counted.
+ */
+async function judgeAgainstBranchStock(db: D1Compat, inventoryAction: InventoryImportAction | null | undefined, judged: BranchStockJudgedRow[]): Promise<void> {
+  if (!judged.length) return
+  const onHand = await readBranchOnHand(db, uniqueStockPairs(judged.map(({ result }) => result.data)))
+  const firstCountRow = new Map<string, number>()
+  for (const { result, row, quantity, costs } of judged) {
+    const data = result.data
+    const pair = `${Number(data.product_id)}:${Number(data.branch_id)}`
+    const here = onHand.get(pair) ?? 0
+    if (inventoryAction === 'set') {
+      const earlier = firstCountRow.get(pair)
+      if (earlier != null) {
+        refuseInventoryRow(result, INVENTORY_IMPORT_DUPLICATE_COUNT_CODE, `Row ${earlier} already counts this product at ${String(data.branch_name)}. Keep one count per product and branch.`, row)
+        continue
+      }
+      firstCountRow.set(pair, result.rowNumber)
+      const signedQuantity = quantity - here
+      if (signedQuantity === 0) {
+        Object.assign(result, { action: 'skip', message: `Already at ${quantity} -- no movement needed.`, data: row })
+        continue
+      }
+      const movementCosts = inventoryMovementCostSnapshot({ fallbackUsd: costs.usd, fallbackKhr: costs.khr, quantity: Math.abs(signedQuantity) })
+      Object.assign(data, {
+        movement_type: signedQuantity > 0 ? 'in' : 'out', quantity: Math.abs(signedQuantity), signedQuantity,
+        unit_cost_usd: movementCosts.unitCostUsd, unit_cost_khr: movementCosts.unitCostKhr,
+        total_cost_usd: movementCosts.totalCostUsd, total_cost_khr: movementCosts.totalCostKhr,
+      })
+    } else if (-Number(data.signedQuantity) > here) {
+      refuseInventoryRow(result, INVENTORY_IMPORT_INSUFFICIENT_STOCK_CODE, `Only ${here} on hand at ${String(data.branch_name)} -- cannot remove ${-Number(data.signedQuantity)}.`, row)
+    }
+  }
 }
 
 // Groups CSV rows into orders. If an `order_reference` column is present,
@@ -6064,11 +6355,37 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       const decision = decisions[String(result.rowNumber)]
       if (decision?.action === 'skip') result.action = 'skip'
     }
+    // Redelivery guard for the ADDITIVE apply writes (Part-77, pipelines
+    // audit): the queue is at-least-once and this chunk is NOT one atomic
+    // transaction (runD1BatchInChunks splits it), so a redelivered or
+    // crash-retried chunk used to re-run every merge_stock/override_add
+    // branch_stock increment and every inventory movement/stock delta --
+    // double-applying stock. Each such row's writes now travel as ONE group
+    // (runD1BatchGroupsInChunks -- never split across batches) together
+    // with a guard row in import_stock_action_guards, the same generic
+    // (job_id, action_key, guard_key) ledger the stock-action path already
+    // seals its units with. A retry pre-reads the applied guard keys and
+    // composes nothing for those rows; the guard's PRIMARY KEY is the
+    // backstop if a read somehow races. Idempotent writes (field UPDATEs,
+    // snapshot REPLACEs, creates -- which the signature ledger already
+    // dedupes) stay in the plain `statements` path, re-runnable as before.
+    // Read before the inventory rows are judged: a row an earlier attempt
+    // already applied is not judged again against stock that includes it.
+    const GENERIC_APPLY_GUARD_ACTION = 'generic_apply'
+    const appliedRowGuards = new Set(
+      (await db.prepare(`SELECT guard_key FROM import_stock_action_guards WHERE job_id = @id AND action_key = @ak`)
+        .all<{ guard_key: string }>({ id: jobId, ak: GENERIC_APPLY_GUARD_ACTION })).map((g) => g.guard_key),
+    )
+    const rowGuardStatement = (rowNumber: number) => ({
+      sql: `INSERT INTO import_stock_action_guards (job_id, action_key, guard_key, guard_value) VALUES (@jobId, @actionKey, @guardKey, 1)`,
+      params: { jobId, actionKey: GENERIC_APPLY_GUARD_ACTION, guardKey: `row:${rowNumber}` },
+    })
+    const nowIso = new Date().toISOString()
     if (job.type === 'inventory') {
       // Identity/availability is still revalidated against live state, but
       // historical valuation is the snapshot the operator reviewed. Do not
       // let a catalogue edit between Analyze and Apply silently change it.
-      results = await preserveAnalyzedInventoryCostSnapshots(db, jobId, results)
+      results = await preserveAnalyzedInventoryCostSnapshots(db, jobId, results, appliedRowGuards)
     }
     if (['customers', 'suppliers', 'delivery_contacts'].includes(job.type)) {
       const unresolvedTarget = results.find((result) => result.action === 'error' && result.contactMatchTargetInvalid)
@@ -6118,6 +6435,15 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
         }
       }
     }
+    // AL-STOCK B: an inventory Remove / Set row moves the lots, branch_stock,
+    // the product total and its movement together. Planned before `actionable`
+    // is fixed, so a row the branch can no longer cover becomes a row error.
+    const inventoryStockPlan = job.type === 'inventory'
+      ? await planInventoryImportStockGroups(db, candidateRows.filter((r) => r.action === 'create'
+          && (r.data as Record<string, unknown>).inventory_receipt_plan_version !== INVENTORY_RECEIPT_PLAN_VERSION
+          && !appliedRowGuards.has(`row:${r.rowNumber}`)), rowGuardStatement, nowIso)
+      : null
+    for (const { row, code, message } of inventoryStockPlan?.refused ?? []) refuseInventoryRow(row, code, message)
     const actionable = results.filter((r) => r.action === 'create' || r.action === 'update')
     let importWriteDb = db
     // CUTOVER-LR: rows addressed to a retired branch and landed on the branch the operator confirmed re-prove that
@@ -6140,21 +6466,6 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     sw.lap('resolveBranchesMs')
 
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
-    // Redelivery guard for the ADDITIVE apply writes (Part-77, pipelines
-    // audit): the queue is at-least-once and this chunk is NOT one atomic
-    // transaction (runD1BatchInChunks splits it), so a redelivered or
-    // crash-retried chunk used to re-run every merge_stock/override_add
-    // branch_stock increment and every inventory movement/stock delta --
-    // double-applying stock. Each such row's writes now travel as ONE group
-    // (runD1BatchGroupsInChunks -- never split across batches) together
-    // with a guard row in import_stock_action_guards, the same generic
-    // (job_id, action_key, guard_key) ledger the stock-action path already
-    // seals its units with. A retry pre-reads the applied guard keys and
-    // composes nothing for those rows; the guard's PRIMARY KEY is the
-    // backstop if a read somehow races. Idempotent writes (field UPDATEs,
-    // snapshot REPLACEs, creates -- which the signature ledger already
-    // dedupes) stay in the plain `statements` path, re-runnable as before.
-    const GENERIC_APPLY_GUARD_ACTION = 'generic_apply'
     const guardedGroups: Array<Array<{ sql: string; params: Record<string, unknown> }>> = []
     // Product catalog + stock/batch statements for one imported row must
     // stay in one D1 batch. Besides preserving the row's own invariants,
@@ -6162,15 +6473,6 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // its branch_stock/batch writes from leaving a half-applied row.
     const productStatementGroups: Array<Array<{ sql: string; params: Record<string, unknown> }>> = []
     let productSeedBranchIds: number[] = []
-    const appliedRowGuards = new Set(
-      (await db.prepare(`SELECT guard_key FROM import_stock_action_guards WHERE job_id = @id AND action_key = @ak`)
-        .all<{ guard_key: string }>({ id: jobId, ak: GENERIC_APPLY_GUARD_ACTION })).map((g) => g.guard_key),
-    )
-    const rowGuardStatement = (rowNumber: number) => ({
-      sql: `INSERT INTO import_stock_action_guards (job_id, action_key, guard_key, guard_value) VALUES (@jobId, @actionKey, @guardKey, 1)`,
-      params: { jobId, actionKey: GENERIC_APPLY_GUARD_ACTION, guardKey: `row:${rowNumber}` },
-    })
-    const nowIso = new Date().toISOString()
     // 9.2 (Part 421): each in-file auto-merge (a later create row folding
     // into an earlier row's product via the identity signature) is
     // RECORDED -- the losing row's original values were previously
@@ -6875,50 +7177,10 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       const receiptRows = actionable.filter(row => (row.data as Record<string, unknown>).inventory_receipt_plan_version === INVENTORY_RECEIPT_PLAN_VERSION
         && !appliedRowGuards.has(`row:${row.rowNumber}`))
       guardedGroups.push(...await planInventoryImportReceiptGroups(db, receiptRows, rowGuardStatement))
-      for (const r of actionable) {
-        const d = r.data as Record<string, unknown> & { cost_price_usd?: number; cost_price_khr?: number }
-        if (d.inventory_receipt_plan_version === INVENTORY_RECEIPT_PLAN_VERSION) continue
-        // Redelivery-guarded, same as the products additive branch above
-        // (Part-77): the movement INSERT duplicates and the stock delta
-        // double-applies on a retried chunk, so each row's writes travel
-        // as one atomic group with a guard, and a guarded row composes
-        // nothing.
-        if (appliedRowGuards.has(`row:${r.rowNumber}`)) continue
-        const group: Array<{ sql: string; params: Record<string, unknown> }> = [rowGuardStatement(r.rowNumber)]
-        if (Number(d.signedQuantity) > 0) group.unshift(productStockGuardStatement([Number(d.product_id)], 'active'))
-        group.push({
-          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, created_at) VALUES (@product_id, @product_name, @branch_id, @branch_name, @movement_type, @quantity, @unit_cost_usd, @unit_cost_khr, @total_cost_usd, @total_cost_khr, @reason, @created_at)`,
-          // Honor an imported date (classifyInventory's `movementDate`,
-          // spread in via `d.created_at`) when the row supplied one;
-          // `nowIso` is only the fallback for a blank/unparseable cell.
-          // `d` is spread first, then the fallback applied only when
-          // `d.created_at` is falsy -- a bare `{ ...d, created_at: nowIso }`
-          // would always win regardless of what the CSV had, the same
-          // ordering bug already called out for classifyProducts/
-          // classifyContacts elsewhere in this file.
-          params: { ...d, created_at: (d.created_at as string | null | undefined) || nowIso },
-        })
-        group.push({
-          sql: `UPDATE products SET stock_quantity = stock_quantity + @delta, updated_at = @updated_at WHERE id = @id`,
-          params: { delta: (d as { signedQuantity: number }).signedQuantity, id: d.product_id, updated_at: nowIso },
-        })
-        // 'add' rows only -- classifyInventory only ever sets these two
-        // fields when a unit cost was actually given in the file.
-        if (d.cost_price_usd != null || d.cost_price_khr != null) {
-          // U-cost: recorded like a typed cost so the next stock movement
-          // (0195 triggers) does not re-derive it away.
-          const costEntry = typedCostEntryBeforeWriteStatement(Number(d.product_id), {
-            ...(d.cost_price_usd != null ? { usd: d.cost_price_usd } : {}),
-            ...(d.cost_price_khr != null ? { khr: d.cost_price_khr } : {}),
-          }, importCostActor)
-          if (costEntry) group.push(costEntry)
-          group.push({
-            sql: `UPDATE products SET ${d.cost_price_usd != null ? 'cost_price_usd = @usd' : ''}${d.cost_price_usd != null && d.cost_price_khr != null ? ', ' : ''}${d.cost_price_khr != null ? 'cost_price_khr = @khr' : ''}, updated_at = @updated_at WHERE id = @id`,
-            params: { usd: d.cost_price_usd, khr: d.cost_price_khr, id: d.product_id, updated_at: nowIso },
-          })
-        }
-        guardedGroups.push(labelAddressedMovements(group, d))
-      }
+      // Remove / Set / legacy rows: each row's redelivery guard and movement in
+      // the same atomic group as the lot, branch and product writes, planned
+      // above (planInventoryImportStockGroups). A guarded row composes nothing.
+      guardedGroups.push(...(inventoryStockPlan?.groups ?? []))
     }
 
     if (job.type === 'products' && productSeedBranchIds.length) {

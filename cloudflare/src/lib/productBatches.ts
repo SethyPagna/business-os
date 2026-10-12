@@ -442,6 +442,74 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
   }
 }
 
+// The batch_key a branch's snapshot-reconciliation lot for one date starts from.
+function snapshotLotBatchKey(branchId: number, receivedAt: string): string {
+  return ` snapshot:${branchId}:${receivedAt}`
+}
+
+// Every unit of a product held under a lot at one branch, active lots or not.
+function branchLotQuantitySql(productId: string, branchId: string): string {
+  return `(SELECT COALESCE(SUM(bbs.quantity),0) FROM branch_batch_stock bbs
+    JOIN product_batches pb ON pb.id=bbs.batch_id WHERE pb.variant_product_id=${productId}
+    AND bbs.branch_id=${branchId})`
+}
+
+// The batch_key of the snapshot-reconciliation lot to use. Reuse an active
+// snapshot lot, but never unarchive a previous one. The fallback suffix is
+// above every existing row id and is evaluated inside the atomic write group.
+// After insertion this resolves to that active row.
+function snapshotLotKeySql(productId: string, batchKey: string): string {
+  return `COALESCE((SELECT batch_key FROM product_batches
+    WHERE variant_product_id=${productId} AND is_active=1
+      AND (batch_key=${batchKey} OR substr(batch_key,1,length(${batchKey})+8)=${batchKey}||':active:')
+    ORDER BY id DESC LIMIT 1), CASE WHEN EXISTS (
+      SELECT 1 FROM product_batches WHERE variant_product_id=${productId} AND batch_key=${batchKey}
+    ) THEN ${batchKey}||':active:'||(SELECT COALESCE(MAX(id),0)+1 FROM product_batches) ELSE ${batchKey} END)`
+}
+
+// An inventory-import Set that RAISES a branch's count names no lot (the sheet
+// has no lot column). The extra units land in the branch's snapshot-
+// reconciliation lot for that date -- the lot planReconcileBranchSnapshot gives
+// an uncovered product-import count -- as a DELTA, so the till (which reads
+// lots) can sell them and the lot ledger moves with branch_stock and the
+// movement (AL-STOCK B). Units the branch already held under no lot are folded
+// into the same lot, as the snapshot count does, so the first lot of a product
+// never hides them from the till. A count correction, not a purchase: no
+// received quantity, cost or supplier is written.
+//
+// The caller increments branch_stock and re-derives the product total AFTER
+// these statements, in the same batch: the fold reads the branch before it.
+// `batchIdSql` resolves the lot for the movement row written after them.
+export function planImportCountIncrease(input: { productId: number; branchId: number; quantity: number; receivedDate: string }): {
+  statements: StockWriteStatement[]; batchIdSql: string; batchIdParams: Record<string, unknown>
+} {
+  const receivedAt = normalizeTypedDate(input.receivedDate)
+  if (!receivedAt) throw new Error('A valid received date is required for a counted stock increase')
+  if (![input.productId, input.branchId].every((n) => Number.isSafeInteger(n) && n > 0)
+    || !Number.isFinite(input.quantity) || !(input.quantity > 0)) throw new Error('Invalid counted stock increase')
+  const batchKey = snapshotLotBatchKey(input.branchId, receivedAt)
+  const params = { productId: input.productId, branchId: input.branchId, quantity: input.quantity, receivedAt, batchKey, lotCode: dateToBatchCode(receivedAt) }
+  const lotKey = snapshotLotKeySql('@productId', '@batchKey')
+  const unlotted = `MAX(0, COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@productId AND branch_id=@branchId),0)
+    - ${branchLotQuantitySql('@productId', '@branchId')})`
+  return {
+    statements: [
+      { sql: `INSERT INTO product_batches(variant_product_id,batch_key,lot_code,received_at,is_active,notes,batch_number,received_branch_id,received_branch_name)
+        SELECT @productId,${lotKey},@lotCode,@receivedAt,1,'Stock counted up by an inventory import',
+          (SELECT COALESCE(MAX(batch_number),0)+1 FROM product_batches WHERE variant_product_id=@productId),@branchId,(SELECT name FROM branches WHERE id=@branchId)
+        WHERE 1
+        ON CONFLICT(variant_product_id,batch_key) DO NOTHING`, params },
+      { sql: `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)
+        SELECT id,@branchId,@quantity+${unlotted} FROM product_batches
+        WHERE variant_product_id=@productId AND is_active=1 AND batch_key=${lotKey}
+        ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=branch_batch_stock.quantity+excluded.quantity,updated_at=CURRENT_TIMESTAMP`, params },
+    ],
+    batchIdSql: `(SELECT id FROM product_batches WHERE variant_product_id=@countProductId AND is_active=1
+      AND batch_key=${snapshotLotKeySql('@countProductId', '@countBatchKey')})`,
+    batchIdParams: { countProductId: input.productId, countBatchKey: batchKey },
+  }
+}
+
 // Absolute import counts retain the oldest dated lots up to the target count.
 // Only an uncovered increase gets an explicit snapshot-reconciliation lot;
 // its date is the import's receipt date, never the product's creation date.
@@ -456,19 +524,9 @@ export function planReconcileBranchSnapshot(input: {
   if (!receivedAt) throw new Error('A valid received date is required for a stock snapshot')
   if (![input.productId, input.branchId].every((n) => Number.isSafeInteger(n) && n > 0)
     || !Number.isFinite(input.quantity) || input.quantity < 0) throw new Error('Invalid stock snapshot')
-  const params = { ...input, batchId: input.batchId ?? null, receivedAt, batchKey: ` snapshot:${input.branchId}:${receivedAt}`, lotCode: dateToBatchCode(receivedAt) }
-  const available = `(SELECT COALESCE(SUM(bbs.quantity),0) FROM branch_batch_stock bbs
-    JOIN product_batches pb ON pb.id=bbs.batch_id WHERE pb.variant_product_id=@productId
-    AND bbs.branch_id=@branchId)`
-  // Reuse an active snapshot lot, but never unarchive a previous one. The
-  // fallback suffix is above every existing row id and is evaluated inside
-  // the atomic write group. After insertion this resolves to that active row.
-  const snapshotKey = `COALESCE((SELECT batch_key FROM product_batches
-    WHERE variant_product_id=@productId AND is_active=1
-      AND (batch_key=@batchKey OR substr(batch_key,1,length(@batchKey)+8)=@batchKey||':active:')
-    ORDER BY id DESC LIMIT 1), CASE WHEN EXISTS (
-      SELECT 1 FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey
-    ) THEN @batchKey||':active:'||(SELECT COALESCE(MAX(id),0)+1 FROM product_batches) ELSE @batchKey END)`
+  const params = { ...input, batchId: input.batchId ?? null, receivedAt, batchKey: snapshotLotBatchKey(input.branchId, receivedAt), lotCode: dateToBatchCode(receivedAt) }
+  const available = branchLotQuantitySql('@productId', '@branchId')
+  const snapshotKey = snapshotLotKeySql('@productId', '@batchKey')
   return [
     { sql: `INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,notes,batch_number,received_branch_id,received_branch_name)
       SELECT @batchId,@productId,${snapshotKey},@lotCode,@receivedAt,1,'Stock reconciled from product import snapshot',

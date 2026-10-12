@@ -120,9 +120,16 @@ await check('source lock: the apply composes guarded groups for both additive br
     /const group: Array<\{ sql: string; params: Record<string, unknown> \}> = \[rowGuardStatement\(r\.rowNumber\), \.\.\.rowWriteGroup\]\s+rowWriteGroup = group/.test(engineSrc),
     'a product additive row must prepend its guard to the same rowWriteGroup as the product and stock writes',
   )
+  // AL-STOCK B: inventory Remove / Set rows are planned as atomic groups (planInventoryImportStockGroups): every
+  // row's guard leads the group that also carries the lot, branch and product writes and the row's movement.
   assert.ok(
-    /const group: Array<\{ sql: string; params: Record<string, unknown> \}> = \[rowGuardStatement\(r\.rowNumber\)\]\s+if \(Number\(d\.signedQuantity\) > 0\) group\.unshift\(productStockGuardStatement\(\[Number\(d\.product_id\)\], 'active'\)\)\s+group\.push\(\{\s+sql: `INSERT INTO inventory_movements/.test(engineSrc),
-    'an inventory additive row must lead its movement/write group with the guard',
+    /const statements: ImportStatement\[\] = entries\.map\(\(entry\) => rowGuardStatement\(entry\.row\.rowNumber\)\)/.test(engineSrc)
+      && /statements\.push\(\.\.\.labelAddressedMovements\(\[\{\s+sql: `INSERT INTO inventory_movements/.test(engineSrc),
+    'an inventory stock row must lead its movement/write group with the guard',
+  )
+  assert.ok(
+    /guardedGroups\.push\(\.\.\.\(inventoryStockPlan\?\.groups \?\? \[\]\)\)/.test(engineSrc),
+    'the planned inventory stock groups must run with the other guarded groups',
   )
   assert.ok(
     /if \(productStatementGroups\.length\) await runD1BatchGroupsInChunks\(importWriteDb, productStatementGroups\)/.test(engineSrc),
