@@ -13,7 +13,7 @@ Production and remote main remain `bf7408b492937ddf18813441ea7f75d23ac0b10a`. Th
 | Merged customer return bulk actions | `1be0918a6998b807ed52a966b4e36502016a7e90` / 6.0.8 | Reviewed source composed locally. Actual pair merge followed by supplier/customer return actions: 143 requests, maximum Free 45/Paid 44. Customer matrix: 212 requests, maximum 42/41. Original sources remain unchanged. |
 | Merge Undo/Redo HTTP | `15fbdc8e085ab309ae9b6f13231560600ec465d6` / 6.0.6 | Author matrix passed 352 HTTP requests, genuine Free maximum 44/Paid 995, including admission workloads. Independent review stopped after five completed controls; no HTTP PASS certificate. Not composed. |
 | Return edit Undo fields | `7077327aa7ee217090f355720ae43795f4cf49af` / 6.0.9 | Preserves action, condition, disposition, receipt and persisted zero. Eight focused tests, types, translations and build passed. Independent review and composition remain open. |
-| Review action permissions | Separate H lane | Local corrections and regression evidence are preserved. Earlier price representations bypassed admission. Final independent certification remains unfinished; do not compose an earlier green checkpoint. |
+| Review action permissions | `93dd96a98c47f246b320759bd7a79779e0fb5238` / 6.0.11 | NOT CERTIFIED. Final native cases completed, but the exact final focused gate and independent review did not run. Earlier price representations bypassed admission; do not compose an earlier green checkpoint. |
 | Progress reconciliation | Documentary work complete | All 49 execution rows, 20 families, 30 owner requirements and 428 historical observations are preserved. The observations are not 428 unique bugs. The compact rewrite remains unpublished. |
 
 The complete historical applicability mapping distinguishes 283 applicable observations, 124 uncertain observations, eight bounded closures and 13 supersessions. Standing rules and composite requests retain their remaining obligations. No completion percentage is implied.
@@ -25,13 +25,17 @@ The complete historical applicability mapping distinguishes 283 applicable obser
 - Merge HTTP review still needs its unfinished response-loss/account-race controls and exact seal validation. Do not advertise merge Undo readiness merely because author tests passed.
 - Identity, group and review merge callers, remaining stock writers and readers, reset/restore, conversion/operator procedures and the complete combined release remain open. Migrations 0243–0248 remain local and nondeployable.
 - Physical iOS/Android camera/library/HEIC, native keyboard, installed-PWA and printing acceptance is NOT RUN. The owner has not tested the current photo fix on a physical phone.
-- GitHub cleanup inventory and five exact branch clearances are saved. Cleanup was stopped before execution; clearance is not proof of deletion or authority to continue during the pause.
+- GitHub cleanup deleted zero branches. The saved inventory had 1,069 refs, with only five independently cleared and 1,064 not cleared. All clearance needs fresh main/tip/ownership/PR/workflow checks after authorized continuation. The prepared cleanup script remains unreviewed because destination-rewrite and remote-binding protocol checks exposed problems; do not execute it unchanged.
 
 The wider queue still includes catalog/history/search, sales/POS/shifts, returns/credit/report arithmetic, import/export/review, contacts/suppliers/membership, audit/history, shared compact UI, settings/accounts, storefront, backup/Library/assets, Free/Paid performance, notifications/Telegram, security, proven dead-code removal, data evidence, external decisions and deferred or explicitly paused features. Historical tasks do not disappear because a narrower fix passes.
+
+Cross-cutting owner acceptance includes immediate and saved camera/library images; iOS/Android and installed-PWA fallbacks; native keyboard, stock-adjustment input and action layout; all received dates in newest-first order; active branch details even with one branch; and account/server/session/cookie/cache isolation. Both Free and Paid require measured efficiency without weakening their limits. Preserve shipped fixes and distinguish unfinished acceptance from a reproduced defect.
 
 ## Resume boundaries
 
 After an explicit owner continuation, read the local recovery handoff and claim the exact files before editing. Keep the real Source repository and isolated worktrees; preserve all prior failed evidence and uncommitted work. Records remain private.
+
+The owner subsequently requested a clearer Claude takeover prompt. Only documentation was refined. This does not resume implementation, goals, agents or schedules. A new Claude session must receive the owner's continuation instruction; it must not automatically reactivate old Codex chats or unattended schedules.
 
 The receiving candidate is separate from the unreleased counted-stock integration. Re-run a complete gate for its exact frozen SHA, then obtain final independent Astra review before publication. A cancelled gate is not a pass.
 

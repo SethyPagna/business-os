@@ -10,6 +10,10 @@ Separate clean checkpoints preserve merge HTTP replay (`15fbdc8e085ab309ae9b6f13
 
 The full task register retains 49 execution rows, 20 families, 30 owner requirements and 428 historical observations. All observations now have an applicability mapping: 283 applicable, 124 uncertain, eight bounded closures and 13 supersessions. These counts are documentary scope, not unique bugs or a completion percentage. The compact replacement draft is preserved but has not replaced the history or Golden Rules.
 
+The handoff covers the entire applicable backlog, including mobile/PWA compatibility and fallbacks, camera/library preview and saved images, keyboard and stock-adjustment controls, newest-first received dates, sole-branch visibility, account/session/cache/cookie isolation, Free/Paid efficiency, owner UI requests and parked work. Existing shipment evidence must be retained; these cross-cutting obligations are not all newly discovered defects. Original owner decisions and explicitly deferred work remain in force.
+
+The final H review-permission checkpoint is `93dd96a98c47f246b320759bd7a79779e0fb5238` (6.0.11), NOT CERTIFIED: its exact final focused gate and independent review remain unrun. GitHub branch cleanup has deleted zero branches; the five saved clearances need fresh checks, and the prepared cleanup script remains unreviewed. The owner's subsequent request authorized a clearer takeover prompt and documentation only; work, goals and schedules remain paused.
+
 See the [saved checkpoints and remaining work](docs/fleet/2026-10-12-paused-claude-handoff.md). The complete local Claude handoff includes worktree paths, claims, test logs, unfinished review controls and the latest peer checkpoints. Resume only after explicit owner instruction.
 
 ---
