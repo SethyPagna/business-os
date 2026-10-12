@@ -451,6 +451,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
           params: { mergeSessionHash: await sha256Hex(token), mergeSessionActor: user.id } }
         const applier = resolveUndoApplier(payload)
         if (!applier) return c.json({ success: false, code: UNDO_HISTORY_STALE_CODE, error: 'Refresh this history item.' }, 409)
+        if (applierPermissionTier(user, applier) !== 'full') return c.json({ success: false, code: 'merge_replay_permission', error: 'You do not have permission to perform this action' }, 403)
         const outcome = await applier.run(payload, { env: c.env, user, direction, historyId: existing.id,
           generation: body.expected_generation, productMergeReplayAuthority: authority })
         replayConfirmed = true

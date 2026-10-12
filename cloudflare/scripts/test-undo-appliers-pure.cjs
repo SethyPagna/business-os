@@ -74,8 +74,6 @@ const { branchUpdateStatements } = branchWrites
 // side channels, which have their own coverage).
 let sharedDb = null
 let settlementReplayCalls = 0
-let exerciseAtomicSaleItems = false
-let failAtomicAllocation = false
 let beforeAtomicBatch = null
 function wrapDb(sqlite) {
   return {
@@ -121,13 +119,6 @@ const saleItemPricingKernel = loadModule('lib/saleItemPricing.ts', (id) => {
   if (id === './promotionRules') return promotionRulesKernel
   return require(id)
 })
-const additionSource = fs.readFileSync(path.join(__dirname, '../src/lib/saleLineAddition.ts'), 'utf8')
-const additionAst = ts.createSourceFile('saleLineAddition.ts', additionSource, ts.ScriptTarget.Latest, true)
-const guardDeclaration = additionAst.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === 'planUnlottedSaleLineGuards')
-const guardExports = {}
-new Function('exports', ts.transpileModule(guardDeclaration.getText(additionAst), {
-  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-}).outputText)(guardExports)
 // undoAppliers.ts now imports the exact sale money kernel (depends only on
 // moneyPrecision, which loadModule already maps).
 const saleMoneyPrecisionKernel = loadModule('lib/saleMoneyPrecision.ts', require)
@@ -179,45 +170,11 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
   // getPermissionTier); the source-lock checks below read the real source, so
   // these stubs only need to let the module load.
   if (id === './permissions') return { getActionTier: () => 'full', getPermissionTier: () => 'full' }
-  // S4-24b: the 'sale.add_items' applier's planners. This file exercises the
-  // branch/merge appliers only, so these stubs exist to let the module load;
-  // the real planners are driven against a live schema by
-  // test-sale-add-items-pure.cjs, which is where that applier is proved.
-  if (id === './saleLineAddition') return {
-    planUnlottedSaleLineGuards: guardExports.planUnlottedSaleLineGuards,
-    buildAllocationStatements: () => [],
-    buildOperationAllocationStatements: (_lines, operationId) => exerciseAtomicSaleItems ? [{
-      sql: `INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,quantity)
-            SELECT entity_id,501,@quantity FROM sale_mutation_members
-            WHERE operation_id=@operation AND entity_kind='sale_item' AND ordinal=0`,
-      params: { operation: operationId, quantity: failAtomicAllocation ? null : 1 },
-    }] : [],
-    planSaleLineAddition: ({ saleId, lines }) => exerciseAtomicSaleItems ? ({
-      lines,
-      statements: [{
-        sql: 'INSERT INTO sale_items(sale_id,product_id,product_name,quantity,total_usd) VALUES(@saleId,@productId,@productName,@quantity,@totalUsd)',
-        params: { saleId, productId: lines[0].productId, productName: lines[0].productName, quantity: lines[0].quantity, totalUsd: lines[0].lineTotalUsd },
-      }],
-      saleItemStatementIndexByLine: [0], deductions: [], deductedUnits: 0, addedSubtotalUsd: lines[0].lineTotalUsd,
-    }) : ({ lines: [], statements: [], saleItemStatementIndexByLine: [], deductions: [], deductedUnits: 0, addedSubtotalUsd: 0 }),
-    planSaleLineRemoval: ({ saleId, lines }) => exerciseAtomicSaleItems ? ({
-      statements: [
-        { sql: 'DELETE FROM sale_item_batch_allocations WHERE sale_item_id=@lineId', params: { lineId: lines[0].saleItemId } },
-        { sql: 'DELETE FROM sale_items WHERE id=@lineId AND sale_id=@saleId', params: { lineId: lines[0].saleItemId, saleId } },
-      ],
-      restoredUnits: lines[0].heldUnits,
-    }) : ({ statements: [], restoredUnits: 0 }),
-    plannedLineFromRecord: (record) => record,
-    saleMoneyUpdateStatement: (saleId, money) => exerciseAtomicSaleItems
-      ? { sql: 'UPDATE sales SET total_usd=@total WHERE id=@saleId', params: { saleId, total: money.total_usd } }
-      : { sql: 'SELECT 1', params: {} },
-    saleLineKhrSnapshotStatement: () => ({ sql: 'SELECT 1', params: {} }),
-  }
-  // S4-30: the same applier now also appends an amendment-ledger entry, so an
-  // undone addition leaves a visible trail instead of a hole. Stubbed for the
-  // same reason as above -- the real statement builder and the append-only
-  // triggers behind it are driven against a live schema by
-  // test-sale-amendments-pure.cjs.
+  // './saleLineAddition' is NOT stubbed: the sale.add_items checks below need
+  // the exact counted planners, so the catch-all at the end loads the real one.
+  // S4-30: the same applier also appends an amendment-ledger entry. The real
+  // statement builder and its append-only triggers are driven against a live
+  // schema by test-sale-amendments-pure.cjs.
   if (id === './saleAmendments') return {
     amendmentEntryStatement: () => ({ sql: 'SELECT 1', params: {} }),
   }
@@ -712,7 +669,6 @@ await check('sale.settlement is a real server applier and invokes the authoritat
 })
 
 await check('sale.add_items atomically advances revision, receipt, snapshot, history, allocations and audit', async () => {
-  exerciseAtomicSaleItems = true
   try {
     const fixture = await atomicSaleItemsFixture()
     sharedDb = fixture.db
@@ -750,13 +706,11 @@ await check('sale.add_items atomically advances revision, receipt, snapshot, his
     assert.equal(fixture.db.prepare('SELECT status FROM action_history WHERE id=41').get().status, 'undoable')
     assert.equal(fixture.db.prepare('SELECT COUNT(*) n FROM audit_logs').get().n, 2)
   } finally {
-    exerciseAtomicSaleItems = false
     sharedDb = null
   }
 })
 
 await check('sale.add_items redo refuses a stale unlotted residual with its whole replay rolled back', async () => {
-  exerciseAtomicSaleItems = true
   try {
     const fixture = await atomicSaleItemsFixture()
     sharedDb = fixture.db
@@ -765,21 +719,22 @@ await check('sale.add_items redo refuses a stale unlotted residual with its whol
     const snapshot = JSON.parse(fixture.db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=1').get().payload_json)
     snapshot.lines[0].takes = []
     fixture.db.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=1').run(JSON.stringify(snapshot))
-    await fixtureWrite(fixture.db,'INSERT INTO branch_stock(product_id,branch_id,quantity)VALUES(9,1,5)');await fixtureWrite(fixture.db,'UPDATE product_batches SET is_active=0 WHERE id=501');await fixtureWrite(fixture.db,'INSERT INTO product_batches(id,variant_product_id,batch_key,is_active)VALUES(502,9,@key,1)',{key:'UNDO-502'});await fixtureWrite(fixture.db,'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)VALUES(502,1,5)')
+    assert.deepEqual(fixture.db.prepare('SELECT batch_id,quantity FROM branch_batch_stock').all(), [{ batch_id: 501, quantity: 1 }], 'the real undo restored the unit to its lot')
+    await fixtureWrite(fixture.db,'INSERT INTO product_batches(id,variant_product_id,batch_key,is_active)VALUES(502,9,@key,1)',{key:'UNDO-502'});await fixtureWrite(fixture.db,'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)VALUES(502,1,5)')
+    await fixtureWrite(fixture.db,'UPDATE branch_stock SET quantity=6 WHERE product_id=9 AND branch_id=1');await fixtureWrite(fixture.db,'UPDATE products SET stock_quantity=6 WHERE id=9')
     const redoPayload = JSON.parse(fixture.db.prepare('SELECT redo_payload FROM action_history WHERE id=41').get().redo_payload)
     const before = atomicSaleItemsState(fixture.db)
     await assert.rejects(() => resolved.run(redoPayload, { env: {}, user: atomicUser, direction: 'redo', historyId: 41, generation: 1 }), error => error?.statusCode === 409)
     assert.deepEqual(atomicSaleItemsState(fixture.db), before)
     assert.equal(fixture.db.prepare('SELECT COUNT(*) n FROM sale_bulk_guards').get().n, 0)
-    await fixtureWrite(fixture.db,'UPDATE branch_stock SET quantity=6 WHERE product_id=9')
+    await fixtureWrite(fixture.db,'UPDATE branch_stock SET quantity=7 WHERE product_id=9 AND branch_id=1');await fixtureWrite(fixture.db,'UPDATE products SET stock_quantity=7 WHERE id=9')
     await resolved.run(redoPayload, { env: {}, user: atomicUser, direction: 'redo', historyId: 41, generation: 1 })
     assert.equal(fixture.db.prepare('SELECT status FROM action_history WHERE id=41').get().status, 'undoable')
     assert.equal(fixture.db.prepare('SELECT COUNT(*) n FROM sale_bulk_guards').get().n, 0)
-  } finally { exerciseAtomicSaleItems = false; sharedDb = null }
+  } finally { sharedDb = null }
 })
 
 await check('sale.add_items rejects stale and boundary races without partial replay writes', async () => {
-  exerciseAtomicSaleItems = true
   try {
     const stale = await atomicSaleItemsFixture()
     sharedDb = stale.db
@@ -823,15 +778,13 @@ await check('sale.add_items rejects stale and boundary races without partial rep
     await resolved.run(boundary.payload, { env: {}, user: atomicUser, direction: 'undo', historyId: 41, generation: 0 })
     const redoPayload = JSON.parse(boundary.db.prepare('SELECT redo_payload FROM action_history WHERE id=41').get().redo_payload)
     const beforeFailedRedo = atomicSaleItemsState(boundary.db)
-    failAtomicAllocation = true
+    boundary.db.exec("CREATE TRIGGER undo_fixture_allocation_boundary BEFORE INSERT ON sale_item_batch_allocations BEGIN SELECT RAISE(ABORT,'synthetic allocation boundary failure'); END")
     await assert.rejects(
       () => resolved.run(redoPayload, { env: {}, user: atomicUser, direction: 'redo', historyId: 41, generation: 1 }),
-      error => error?.statusCode === 409,
+      /synthetic allocation boundary failure/,
     )
     assert.deepEqual(atomicSaleItemsState(boundary.db), beforeFailedRedo, 'allocation failure rolls back line, member, money, revision, snapshot, history, receipt and audit')
   } finally {
-    exerciseAtomicSaleItems = false
-    failAtomicAllocation = false
     beforeAtomicBatch = null
     sharedDb = null
   }
@@ -871,16 +824,22 @@ await check('source lock: the applier permission gate (full tier) guards BOTH re
     'canRecordHistory must gate payloads naming a registered applier')
   assert.ok(/applierPermissionTier\(user, applier\) !== 'full'/.test(routeSrc),
     'non-stock appliers must demand the FULL tier of their declared permission')
-  // Operate time: the gate must sit inside the transition handler BEFORE the
-  // status-flip UPDATE (and therefore before applier.run, which follows it).
-  const handlerStart = routeSrc.indexOf('completeServerHistoryTransition')
-  const operateGateAt = routeSrc.indexOf("applierPermissionTier(user, applier) !== 'full'", handlerStart)
-  const applierRunAt = routeSrc.indexOf('applier.run(payload', handlerStart)
-  const statusFlipAt = routeSrc.indexOf('UPDATE action_history SET status = @status, last_error = NULL', handlerStart)
-  assert.ok(operateGateAt > -1, 'the operate-time applier permission gate must exist in the transition handler')
-  assert.ok(applierRunAt > -1 && statusFlipAt > -1, 'expected the applier run and the status-flip UPDATE')
-  assert.ok(operateGateAt < applierRunAt, 'the permission gate must run before the applier replays')
-  assert.ok(operateGateAt < statusFlipAt, 'the permission gate must run before the status flip')
+  // Operate time: EVERY replay site in the transition handler (the v2 merge
+  // branch and the generic applier path) needs its own gate between the
+  // previous replay site and itself; the last gate also precedes the status flip.
+  const handler = routeSrc.slice(routeSrc.indexOf('async function completeServerHistoryTransition'))
+  const gate = "applierPermissionTier(user, applier) !== 'full'"
+  const runs = [...handler.matchAll(/applier\.run\(payload/g)].map(match => match.index)
+  const statusFlipAt = handler.indexOf('UPDATE action_history SET status = @status, last_error = NULL')
+  assert.ok(handler.includes(gate), 'the operate-time applier permission gate must exist in the transition handler')
+  assert.ok(runs.length > 0 && statusFlipAt > -1, 'expected the applier run and the status-flip UPDATE')
+  let previousRunAt = 0
+  for (const runAt of runs) {
+    const gateAt = handler.indexOf(gate, previousRunAt)
+    assert.ok(gateAt > -1 && gateAt < runAt, 'the permission gate must run before the applier replays')
+    previousRunAt = runAt
+  }
+  assert.ok(handler.lastIndexOf(gate, runs.at(-1)) < statusFlipAt, 'the permission gate must run before the status flip')
 })
 
 await check('source lock: routes/actionHistory.ts stamps server_replayable and refuses require_applied BEFORE the status flip', () => {
