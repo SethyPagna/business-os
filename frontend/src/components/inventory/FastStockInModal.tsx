@@ -5,6 +5,7 @@
 // (per-line 0192 ids, deferred rounds), with the per-line fallback for an old
 // Worker.
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { assertActorReadScope, captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
 import { createPortal } from 'react-dom'
 import { useApp } from '../../AppContext'
 import { canEditAcquisitionCosts, canViewAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../../utils/acquisitionCostAccess.ts'
@@ -179,6 +180,7 @@ export default function FastStockInModal({
   useVisualViewportInset()
   const app = useApp() as { user: any; exchangeRate: number; usdSymbol: string; khrSymbol: string }
   const { user, usdSymbol, khrSymbol } = app
+  const receivingScope = useRef(captureActorReadScope('inventory')).current
   const exchangeRate = exchangeRateOverride ?? app.exchangeRate
   const canViewCosts = canViewAcquisitionCosts(user)
   const canEditCosts = canEditAcquisitionCosts(user)
@@ -188,7 +190,7 @@ export default function FastStockInModal({
   const canCreate = (canCreateProducts ?? true) && permissions.can('products', 'add')
   const canEditReasons = permissions.can('inventory', 'edit_reasons')
   const packLookup = (key: string): string | undefined => tr(key, '') || undefined
-  const fastStockInDraftKey = scopedWorkDraftKey('fast_stockin')
+  const fastStockInDraftKey = useRef(scopedWorkDraftKey('fast_stockin')).current
   const fallbackBranchId = String(initialHeader?.branchId || (defaultBranchId != null && defaultBranchId !== '' ? defaultBranchId : (branchOptions[0]?.value || '')))
 
   const entryFor = (product: ProductCandidate, mode: StockMode): Partial<StockSessionDraft> => {
@@ -377,7 +379,10 @@ export default function FastStockInModal({
 
   // Keystrokes ride the debounced autosave. No dirtyWork registration: with the
   // draft persisting, leaving is safe -- everything is here on reopen.
-  useEffect(() => scheduleWorkDraftWrite<StockSessionDraft>(fastStockInDraftKey, currentDraft()),
+  useEffect(() => {
+    if (!isActorReadScopeCurrent(receivingScope, false)) return
+    return scheduleWorkDraftWrite<StockSessionDraft>(fastStockInDraftKey, currentDraft())
+  },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [mode, currentStep, brand, branchId, receivedDate, supplier, paymentStatus, creditDueDate, paidAmount, query, picked, quantity, protectedUnitCost, sellingPrice, expiryDate, reason, conditionTag, batchChoice, createPayload, createRequestId, scannedBarcode, createdProductIds, received])
 
@@ -763,8 +768,10 @@ export default function FastStockInModal({
   }
 
   const holdNewProduct = async (payload: Record<string, unknown> = {}) => {
+    assertActorReadScope(receivingScope, false)
     const cleaned = omitUnauthorizedCatalogCosts(payload, user)
     const prepared = onPrepareProduct ? await onPrepareProduct(cleaned) : withoutInlineImages(cleaned)
+    assertActorReadScope(receivingScope, false)
     const held: Record<string, unknown> = { ...prepared, stock_quantity: 0 }
     const name = String(held.name || '').trim()
     const openingQuantity = Math.max(0, Math.floor(Number(payload.stock_quantity) || 0))
@@ -777,6 +784,7 @@ export default function FastStockInModal({
     try { await registerReceivingProductAttempt(user?.id, requestId) } catch (error) {
       throw Object.assign(new Error(stockFailureText(error, tr, tr('failed', 'Failed'))), { code: (error as { code?: string })?.code })
     }
+    assertActorReadScope(receivingScope, false)
     applyEntry({
       picked: product, query: name, quantity: canReceive ? String(openingQuantity || 1) : '0',
       unitCost: canViewCosts && held.cost_price_usd != null ? String(held.cost_price_usd) : '', sellingPrice: priceText(held.selling_price_usd),
@@ -867,6 +875,7 @@ export default function FastStockInModal({
     let failed = 0
     let lines = start
     for (const line of pending) {
+      if (!isActorReadScopeCurrent(receivingScope, false)) return { failed, lines }
       lines = applyLineOutcome(lines, line.key, { status: 'saving' })
       setReceived(lines)
       const request = buildLineRequest(line)
@@ -874,8 +883,10 @@ export default function FastStockInModal({
         const result = request.wire === 'adjust'
           ? await adjustStock(request.body) as { lotCode?: string | null } | null
           : await receiveBatchStock(request.body)
+        if (!isActorReadScopeCurrent(receivingScope, false)) return { failed, lines }
         lines = applyLineOutcome(lines, line.key, { status: 'saved', detail: describeLineResult(line, result) })
       } catch (error) {
+        if (!isActorReadScopeCurrent(receivingScope, false)) return { failed, lines }
         failed += 1
         lines = applyLineOutcome(lines, line.key, {
           status: 'error',
@@ -890,13 +901,14 @@ export default function FastStockInModal({
   }
 
   const finishSession = () => {
+    if (!isActorReadScopeCurrent(receivingScope, false)) return
     onDone()
     clearWorkDraft(fastStockInDraftKey)
     onClose()
   }
 
   const performCommit = async () => {
-    if (saving) return
+    if (saving || !isActorReadScopeCurrent(receivingScope, false)) return
     let lines = received
     const pending = lines.filter((line) => line.status !== 'saved')
     if (!pending.length) { finishSession(); return }
@@ -915,9 +927,11 @@ export default function FastStockInModal({
       setReceived(lines)
       try {
         const id = await createHeldProduct(line)
+        if (!isActorReadScopeCurrent(receivingScope, false)) return
         lines = lines.map((entry) => (entry.key === line.key ? { ...entry, product: { ...entry.product, id }, status: 'queued', detail: '' } : entry))
         setCreatedProductIds((prev) => [...prev, String(id)])
       } catch (error) {
+        if (!isActorReadScopeCurrent(receivingScope, false)) return
         failed += 1
         const reviewPending = (error as { code?: string } | null)?.code === 'product_pending_review'
         lines = applyLineOutcome(lines, line.key, { status: 'error', detail: failureText(error, tr('error', 'Error')), ...(reviewPending ? { needsRemoval: true } : {}) })
@@ -956,6 +970,7 @@ export default function FastStockInModal({
       lines = lines.map((line) => (unsettled.has(line.key) ? { ...line, status: 'saving' as const } : line))
       setReceived(lines)
       const foldRound = (settled: FastStockInCommitSettled) => {
+        assertActorReadScope(receivingScope, false)
         for (const { index, result } of settled) {
           const line = toCommit[index]
           unsettled.delete(line.key)
@@ -977,8 +992,10 @@ export default function FastStockInModal({
         setReceived(lines.map((item) => (unsettled.has(item.key) ? { ...item, status: 'saving' as const } : item)))
       }
       try {
-        batched = await commitFastStockIn(toCommit.map(buildLineRequest), foldRound, { session })
+        batched = await commitFastStockIn(toCommit.map(buildLineRequest), foldRound, { session, writeScope: receivingScope })
+        if (!isActorReadScopeCurrent(receivingScope, false)) return
       } catch (error) {
+        if (!isActorReadScopeCurrent(receivingScope, false)) return
         requestFailure = String((error as { code?: unknown } | null)?.code || 'request')
         const message = failureText(error, error instanceof Error ? error.message : tr('error', 'Error'))
         // Only lines no round has answered: a line already saved must stay saved.
@@ -990,6 +1007,7 @@ export default function FastStockInModal({
       }
       if (batched === null) {
         const sequential = await performCommitSequential(toCommit, lines)
+        if (!isActorReadScopeCurrent(receivingScope, false)) return
         failed = sequential.failed
         lines = sequential.lines
       }

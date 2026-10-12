@@ -1,4 +1,5 @@
 import { apiFetch, route } from './http.ts'
+import { assertActorReadScope, captureActorReadScope, type ActorReadScope } from './actorReadScope.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { loadTransferRun, prepareTransferRun, saveTransferRun } from './branchTransport.ts'
@@ -190,8 +191,9 @@ export function fastStockInCommitPayload<L>(batch: L[], session: FastStockInSess
 export async function commitFastStockIn(
   lines: FastStockInCommitLine[],
   onSettled?: (settled: FastStockInCommitSettled) => void,
-  options?: { session?: FastStockInSessionBlock | null },
+  options?: { session?: FastStockInSessionBlock | null; writeScope?: ActorReadScope },
 ): Promise<FastStockInCommitLineResult[] | null> {
+  const scope = options?.writeScope ?? captureActorReadScope('inventory')
   const wireLines = lines.map((line) => (
     line.wire === 'receive' ? { key: line.key, wire: line.wire, body: receiveBatchWireBody(line.body) } : line
   ))
@@ -203,13 +205,14 @@ export async function commitFastStockIn(
       'inventory:fastStockIn:commit',
       () => apiFetch('POST', '/api/inventory/fast-stock-in/commit', { ...getDevicePayload(), ...payload }),
       null,
-      true,
+      { isWrite: true, writeScope: scope },
     ) as { results?: FastStockInCommitLineResult[] } | null
     return result?.results ?? []
   }
   try {
     return await commitStockInLinesInRounds(wireLines, send, onSettled)
   } catch (error) {
+    assertActorReadScope(scope, false)
     if (error && typeof error === 'object' && (error as { status?: number }).status === 404) return null
     throw error
   }
