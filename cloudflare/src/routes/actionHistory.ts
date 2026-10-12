@@ -188,7 +188,10 @@ async function mapRow(row: ActionHistoryRow, user: SessionUser, env: Env) {
     reversible: !!row.reversible,
     undo_payload: undoPayload,
     redo_payload: redoPayload,
+    // A v2 merge replays only with expected_generation, which the History bar does not send for it yet
+    // (products undoReady stays false), so offering it would show an Undo the Worker always refuses.
     server_replayable: !!(applier
+      && !isProductMergeV2Payload(undoPayload)
       && !choicePermissionError
       && canUseNamedAppliers(user, [undoPayload, redoPayload])
       && (applier.name !== CUSTOMER_GENDER_RESTORATION_KIND || Number(row.created_by_id) === Number(user.id))

@@ -136,7 +136,7 @@ async function positive(worker,tier,receipt,tagged,catalog,mode) {
       invariant(f,direction==='undo')
       const before=state(f),retry=await call(f,direction,generation)
       assert.equal(retry.status,200,JSON.stringify(retry.json));assert.equal(retry.json.replayed,true);assert.deepEqual(state(f),before)
-      assert.equal(result.json.item.server_replayable,true)
+      assert.equal(result.json.item.server_replayable,false,'not offered in the History bar until it sends expected_generation for v2 merges')
       assert.equal(result.json.item.created_by_id,7)
       const seal=f.sql.prepare('SELECT created_by_id,status FROM undo_snapshots WHERE id=?').get(result.json.item.undo_payload.seal_id)
       assert.equal(seal.created_by_id,mode==='nonadmin'?8:7);assert.equal(seal.status,'sealed')
