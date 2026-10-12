@@ -1479,6 +1479,7 @@ function ProductFormContent({
       onClose={onClose}
       onMinimize={preserveAndMinimize}
       closeDisabled={imageUploading}
+      keyboard
       layer={modalLayer}
       wide
       headerExtra={(
@@ -2295,6 +2296,7 @@ function ProductFormContent({
             : tr('create_match_barcode_title', 'Barcode already in use', 'បាកូដកំពុងប្រើរួចហើយ')}
           onClose={() => resolveCreateVerdict('back')}
           size="sm"
+          keyboard
           layer={modalLayer}
           unsavedChanges="read-only">
           <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
@@ -2352,7 +2354,7 @@ function ProductFormContent({
         </Modal>
       ) : null}
       {nameUnlockConfirmOpen ? (
-        <Modal title={tr('unlock_name_confirm_title', 'Unlock product name?', 'ដោះសោឈ្មោះផលិតផល?')} onClose={() => setNameUnlockConfirmOpen(false)} size="sm" layer={modalLayer} unsavedChanges="read-only">
+        <Modal title={tr('unlock_name_confirm_title', 'Unlock product name?', 'ដោះសោឈ្មោះផលិតផល?')} onClose={() => setNameUnlockConfirmOpen(false)} size="sm" keyboard layer={modalLayer} unsavedChanges="read-only">
           <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
             <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/40 dark:bg-amber-950/30">
               <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />

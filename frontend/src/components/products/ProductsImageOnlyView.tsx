@@ -709,7 +709,7 @@ export default function ProductsImageOnlyView() {
       ) : null}
 
       {detailsProduct ? (
-        <Modal title={detailsProduct.name} onClose={() => setDetailsProduct(null)} size="sm" unsavedChanges="read-only">
+        <Modal title={detailsProduct.name} onClose={() => setDetailsProduct(null)} size="sm" keyboard unsavedChanges="read-only">
           <div className="flex flex-col gap-4">
             <div className="flex justify-center">
               {detailsProduct.image_path ? (

@@ -29,6 +29,10 @@ export function useDialogKeyboard(
     panelRef.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus()
     const onKeyDown = (event: KeyboardEvent) => {
       if (openDialogs[openDialogs.length - 1] !== id) return
+      // A dialog that opened a confirm or picker of its own (ProductForm's save review, file picker, scanner) is made
+      // inert while that surface is up. The surface on top owns the keyboard; this one answering Escape would close
+      // the form underneath it and lose the work the confirm was about to save.
+      if (panelRef.current?.closest('[inert]')) return
       const { promptOpen: promptShowing, onEscape: close, onPromptEscape: dismissPrompt } = latest.current
       if (event.key === 'Escape') {
         if (document.querySelector('[data-app-select-menu="true"]')) return
