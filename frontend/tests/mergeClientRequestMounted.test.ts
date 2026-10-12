@@ -35,7 +35,7 @@ const modules = {
 }
 const entry = `import React from 'react';import{createRoot}from'react-dom/client';import{useMergeStockChoice}from'./${component}';import{resetActorReadSession,captureActorReadScope,isActorReadScopeCurrent}from'./src/api/actorReadScope.ts';import{setSyncServerUrl}from'./src/api/httpState.ts';
 window.pack=${JSON.stringify(packs)}[new URLSearchParams(location.search).get('lang')||'en'];sessionStorage.setItem('businessos_user',JSON.stringify({id:1}));window.calls=[];window.pending=[];window.outcomes=[];window.failures=[];window.previews=0;window.preview={needsStockChoice:false};window.switchActor=id=>{sessionStorage.setItem('businessos_user',JSON.stringify({id}));resetActorReadSession()};
-window.switchServer=setSyncServerUrl;window.ack=(i,override)=>window.pending[i].resolve(override||{success:true,keptId:window.calls[i].keepId,mergedId:window.calls[i].mergeId,operationId:'synthetic-op-'+i,actionHistoryId:i+1});window.fail=(i,error)=>window.pending[i].reject(Object.assign(Error(error.message||'synthetic failure'),error));
+window.switchServer=setSyncServerUrl;window.ack=(i,override)=>window.pending[i].resolve(override||{success:true,keptId:window.calls[i].keepId,mergedId:window.calls[i].mergeId,operationId:'synthetic-op-'+i,actionHistoryId:i+1,planId:'synthetic-plan-'+i,generation:0,quantityMoved:.3,replayed:i>0,committed:true,historyResolved:true,undoReady:false});window.fail=(i,error)=>window.pending[i].reject(Object.assign(Error(error.message||'synthetic failure'),error));
 function App(){const{mergeWithChoice,mergeStockChoiceDialog}=useMergeStockChoice(k=>window.pack[k]);window.merge=mergeWithChoice;window.start=(k=1,l=2)=>{const p=mergeWithChoice({id:k,name:'Keeper'},{id:l,name:'Loser'});p.then(x=>window.outcomes.push(x),e=>{window.outcomes.push(e.code||e.message);window.failures.push(e.message)});return p};return <><h1>Synthetic pair merge</h1><button onClick={()=>window.start()}>Keep this</button>{mergeStockChoiceDialog}</>};createRoot(document.getElementById('root')).render(<App/>);`
 const callerEntry = `window.ui=[];window.callerDone=false;
 const dupResolverBusyKey=null;
@@ -78,6 +78,9 @@ try {
 
     await fresh();await p.evaluate(()=>{(window as any).preview={needsStockChoice:true,stockImpact:{productId:2,totalQuantity:.3,lotCount:0,branches:[]}}});await start(p)
     const dialog=p.getByRole('dialog');await expect(dialog).toBeVisible()
+    const box=await dialog.boundingBox();assert.ok(box && box.x>=0 && box.x+box.width<=width,'dialog fits viewport')
+    assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'no page-wide horizontal overflow')
+    if(process.env.MERGE_CLIENT_SCREENSHOTS)await p.screenshot({path:resolve(process.env.MERGE_CLIENT_SCREENSHOTS,`merge-client-${lang}-${width}.png`)})
     await dialog.getByText(packs[lang].merge_stock_choice_merge,{exact:true}).click();await dialog.getByRole('button',{name:packs[lang].merge,exact:true}).click();await count(p,1)
     const frozen=(await state(p)).calls[0];assert.equal(frozen.stock,'merge')
     await fail(p,0,{code:'request_timeout',outcome:'unknown'});await outcomes(p,1)
@@ -134,7 +137,6 @@ try {
     console.log(`PASS ${lang}/${width} actual Products success/failure/load caller actor and server fences`)
     await fresh();await p.evaluate(()=>{(window as any).previewFail=true});await start(p);await count(p,1);await fail(p,0,{status:400,code:'stock_choice_required',stockImpact:{productId:2,totalQuantity:.3,lotCount:0,branches:[]}});await dialog.getByText(packs[lang].merge_stock_choice_merge,{exact:true}).click();await dialog.getByRole('button',{name:packs[lang].merge,exact:true}).click();await count(p,2);assert.notEqual((await state(p)).calls[0].client_request_id,(await state(p)).calls[1].client_request_id);await ack(p,1);await outcomes(p,1)
     assert.deepEqual(errors,[])
-    if(process.env.MERGE_CLIENT_SCREENSHOTS)await p.screenshot({path:resolve(process.env.MERGE_CLIENT_SCREENSHOTS,`merge-client-${lang}-${width}.png`)})
     console.log(`PASS ${lang}/${width} legacy preview refusal and unchanged modal choices`)
     await p.close()
   }
