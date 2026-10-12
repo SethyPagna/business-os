@@ -78,6 +78,7 @@ async function checkEnvelopeRoutes(api) {
     '../lib/telegram': {}, '../lib/saleSettlementAction': { SALE_SETTLEMENT_ACTION_KIND: 'sale.settlement' },
     '../lib/stockSession': { STOCK_SESSION_KIND: 'stock.session' }, '../lib/transferOperation': { TRANSFER_OPERATION_KIND: 'stock.transfer' },
     '../lib/stockLotAdjustment': { STOCK_LOT_SET_KIND: 'stock.quantity_set' }, '../lib/stockInLineEdit': { STOCK_IN_LINE_EDIT_KIND: 'stock.session_line_edit' },
+    '../lib/countedConditionHistory': { COUNTED_CONDITION_HISTORY_KIND: 'inventory.counted_condition', notifyCountedCondition: unused },
   }
   DB.batch = async statements => {
     native.exec('BEGIN')
@@ -88,7 +89,7 @@ async function checkEnvelopeRoutes(api) {
   for(const table of ['sales','inventory_movements','returns','stock_row_moves'])native.exec('CREATE TABLE '+table+'(branch_id INTEGER,branch_name TEXT,updated_at TEXT)')
   native.exec("INSERT INTO branches(id,name,is_default,is_active,notes)VALUES(1,'Warehouse',1,1,'after'),(2,'Shop',0,1,NULL)")
   const declarations=undoSource.statements.filter(node=>
-    (ts.isFunctionDeclaration(node)&&['applierPermissionTier','branchReplayExpectedFields','resolveUndoApplier','isServerReplayable','mergeReplayChoicePermissionError','mergeReplayChangesProductImages','replayRefusalCode'].includes(node.name?.text))
+    (ts.isFunctionDeclaration(node)&&['applierPermissionTier','branchReplayExpectedFields','isProductMergeV2Payload','resolveUndoApplier','isServerReplayable','mergeReplayChoicePermissionError','mergeReplayChangesProductImages','replayRefusalCode'].includes(node.name?.text))
     ||(ts.isClassDeclaration(node)&&node.name?.text==='UndoConflictError')
     ||(ts.isVariableStatement(node)&&node.declarationList.declarations.some(d=>/^(UNDO_|STOCK_SESSION_UNDO_CLOSED_BY_MERGE$|isUndoClosedByMerge$|PRODUCT_MERGE_GROUP_ACTION_KIND$|PRODUCT_MERGE_APPLIER_KINDS$)/.test(d.name.getText(undoSource)))))
   const registry=undoSource.statements.filter(ts.isVariableStatement).flatMap(node=>[...node.declarationList.declarations]).find(d=>d.name.getText(undoSource)==='APPLIERS')
@@ -104,6 +105,7 @@ async function checkEnvelopeRoutes(api) {
     const m = { exports: {} }, code = ts.transpileModule(fs.readFileSync(path.join(root, 'routes', file + '.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
     new Function('require', 'module', 'exports', code)(id => {
       if (id === 'hono') return { Hono }
+      if (id === 'hono/cookie') return require('hono/cookie')
       if (id === '../lib/productStockGuard') return pure('productStockGuard')
       if (Object.hasOwn(stubs, id)) return stubs[id]
       throw new Error('Unexpected route dependency ' + id)
