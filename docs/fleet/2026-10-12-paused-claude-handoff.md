@@ -14,9 +14,17 @@ Production and remote main remain `bf7408b492937ddf18813441ea7f75d23ac0b10a`. Th
 | Merge Undo/Redo HTTP | `15fbdc8e085ab309ae9b6f13231560600ec465d6` / 6.0.6 | Author matrix passed 352 HTTP requests, genuine Free maximum 44/Paid 995, including admission workloads. Independent review stopped after five completed controls; no HTTP PASS certificate. Not composed. |
 | Return edit Undo fields | `7077327aa7ee217090f355720ae43795f4cf49af` / 6.0.9 | Preserves action, condition, disposition, receipt and persisted zero. Eight focused tests, types, translations and build passed. Independent review and composition remain open. |
 | Review action permissions | `93dd96a98c47f246b320759bd7a79779e0fb5238` / 6.0.11 | NOT CERTIFIED. Final native cases completed, but the exact final focused gate and independent review did not run. Earlier price representations bypassed admission; do not compose an earlier green checkpoint. |
-| Progress reconciliation | Documentary work complete | All 49 execution rows, 20 families, 30 owner requirements and 428 historical observations are preserved. The observations are not 428 unique bugs. The compact rewrite remains unpublished. |
+| Recent progress reconciliation | Recent observation mapping complete; broader historical applicability remains open | All 49 execution rows, 20 families, 30 owner requirements and 428 historical observations are preserved. The observations are not 428 unique bugs. The compact rewrite remains unpublished. |
 
-The complete historical applicability mapping distinguishes 283 applicable observations, 124 uncertain observations, eight bounded closures and 13 supersessions. Standing rules and composite requests retain their remaining obligations. No completion percentage is implied.
+The recent observation applicability mapping distinguishes 283 applicable observations, 124 uncertain observations, eight bounded closures and 13 supersessions. Standing rules and composite requests retain their remaining obligations. No completion percentage is implied.
+
+## Full scope carried forward
+
+The documentation-only completeness audit also carries forward the older owner corpus: 1,327 requests, 290 standing rules, goals G01–G64 and 86 question/disposition entries with 17 later answer bullets. These overlap the recent register and are not additive counts of unfinished bugs. Four recovered archived-chat groups contribute 19 source-bound acceptance clauses. Historical applicability, missing attachments and inaccessible histories remain explicit gaps; no new implementation or acceptance pass is claimed. The private unfinished index binds the source IDs and retains the complete declared rows. Keep actual owner answers ahead of earlier proposed defaults.
+
+After explicit continuation, prioritize the urgent receiving release, confirmed stock/money/permission risks and daily-use mobile/account acceptance, then the remaining applicable historical/current backlog and independently reviewed consolidation. Historical backfill, incomplete schema rollout, destructive operations and unresolved owner decisions remain held. All Codex agents, goals and schedules remain paused.
+
+The local handoff additionally retains all A–L counterexamples, older held sales/cost/display/dirty-state work, backup/recovery proof gaps, named donor lanes and the complete repository custody requirement. Earlier defaults are superseded by actual owner answers. The financial rounding choice and unresolved condition/review decisions remain explicit. The audit preserved declared source IDs and historical observations; it did not certify universal raw-chat coverage or rerun runtime tests.
 
 ## Important open findings
 
