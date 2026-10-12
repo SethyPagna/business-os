@@ -96,6 +96,7 @@ async function controller(createdRows: boolean[], creationOutcomes: CreationOutc
     savedDraft = structuredClone({ lines, receivingSubmissions: submissionsRef.current })
   }
   const complete = async () => {
+    const renderedReceived = received
     const dependencies = {
       ...api, ...destination, ...draft, ...outcome, extractHistoryResultId,
       receivingScope, isActorReadScopeCurrent: () => true, assertActorReadScope: () => {},
@@ -118,7 +119,7 @@ async function controller(createdRows: boolean[], creationOutcomes: CreationOutc
       notify: (message: string) => notifications.push(message),
       setStep: (value: string) => { step = value }, setSaving: (value: boolean) => { saving = value },
       setReceived: (value: StockSessionLine[]) => { received = value }, setCreatedProductIds: () => {},
-      persistSubmissionDraft: persist, persistSessionDraft: persist,
+      persistSubmissionDraft: (lines = renderedReceived) => persist(lines), persistSessionDraft: persist,
       stockLineReason: (entry: StockSessionLine) => entry.reason,
       describeLineResult: () => 'Received', isDeferredStockInResult: (result: { code?: string }) => result.code === 'deferred',
       commitFastStockIn: async (lines: FastStockInCommitLine[], settled: (value: FastStockInCommitSettled) => void, options: unknown) => {
