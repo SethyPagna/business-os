@@ -7,8 +7,12 @@
 // machine).
 //
 // Usage:
-//   const h = createPortalHarness()
+//   const h = createPortalHarness({ settings: { customer_portal_signup_enabled: 'true' } })
 //   await h.request('/auth/signup', 'POST', { ... }, { ip: '203.0.113.9' })
+//
+// options.settings seeds the settings table. Sign-up is paused unless
+// customer_portal_signup_enabled is explicitly 'true' (owner ruling 6 Oct), so
+// a test that needs an open sign-up must say so.
 'use strict'
 const fs = require('node:fs')
 const path = require('node:path')
@@ -43,6 +47,9 @@ if (typeof globalThis.caches === 'undefined') {
 
 function createPortalHarness(options = {}) {
   const raw = openDb(loadAll())
+  for (const [key, value] of Object.entries(options.settings || {})) {
+    raw.prepare('INSERT INTO settings (key, value) VALUES (@key, @value)').run({ key, value })
+  }
   const db = dbAdapter(raw)
   const aiCalls = []
   const env = {
