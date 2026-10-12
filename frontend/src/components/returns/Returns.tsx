@@ -121,7 +121,12 @@ interface ReturnItem {
   cost_price_usd?: number | string | null
   cost_price_khr?: number | string | null
   return_to_stock?: boolean | null
+  stock_action?: 'none' | 'restock' | 'damaged'
+  stock_condition?: string | null
+  condition_tag?: string
+  damaged_disposition?: 'keep' | 'remove'
   branch_id?: number | string | null
+  batch_id?: number | string | null
 }
 
 interface ReturnRow extends Record<string, unknown> {
@@ -173,7 +178,12 @@ interface ReturnHistoryPayload extends Record<string, unknown> {
     applied_price_usd: number | string
     applied_price_khr: number | string
     return_to_stock: boolean
+    stock_action: string | null
+    stock_condition: string | null
+    condition_tag: string | null
+    damaged_disposition: string | null
     branch_id: number | string | null
+    batch_id: number | string | null
   }>
 }
 
@@ -905,8 +915,13 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         applied_price_usd: item.applied_price_usd || 0,
         applied_price_khr: item.applied_price_khr || 0,
         // Undo/replay must not convert a permission-redacted snapshot to zero.
-        return_to_stock: item.return_to_stock !== false,
+        return_to_stock: item.return_to_stock !== false && String(item.return_to_stock) !== '0',
+        stock_action: item.stock_action ?? null,
+        stock_condition: item.stock_condition ?? null,
+        condition_tag: item.condition_tag ?? null,
+        damaged_disposition: item.damaged_disposition ?? null,
         branch_id: item.branch_id || snapshot.branch_id || null,
+        batch_id: item.batch_id ?? null,
       })),
     }
   }, [])
