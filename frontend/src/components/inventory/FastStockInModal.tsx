@@ -794,7 +794,7 @@ export default function FastStockInModal({
     if (held.supplier && !supplier.supplierName.trim()) setSupplier({ supplierId: null, supplierName: String(held.supplier) })
   }
 
-  const createHeldProduct = async (line: StockSessionLine): Promise<number> => {
+  const createHeldProduct = async (line: StockSessionLine, lines: StockSessionLine[]): Promise<number> => {
     overlayReceivingProductAttempts(user?.id, submissionsRef.current, [line])
     const creationCode = productCreationRefusal(submissionsRef.current, line)
     if (creationCode) throw Object.assign(new Error(stockFailureText({ code: creationCode }, tr, '')), { code: creationCode })
@@ -814,7 +814,7 @@ export default function FastStockInModal({
       if (code) throw Object.assign(new Error(stockFailureText({ code }, tr, '')), { code })
     }
     validateDestination()
-    persistSubmissionDraft()
+    persistSubmissionDraft(lines)
     const attempt = await reserveReceivingProductAttempt(user?.id, line.createRequestId, payload, validateDestination)
     overlayReceivingProductAttempts(user?.id, submissionsRef.current, [line])
     const unknownCode = 'product_create_outcome_unknown'
@@ -926,7 +926,7 @@ export default function FastStockInModal({
       lines = applyLineOutcome(lines, line.key, { status: 'saving' })
       setReceived(lines)
       try {
-        const id = await createHeldProduct(line)
+        const id = await createHeldProduct(line, lines)
         if (!isActorReadScopeCurrent(receivingScope, false)) return
         lines = lines.map((entry) => (entry.key === line.key ? { ...entry, product: { ...entry.product, id }, status: 'queued', detail: '' } : entry))
         setCreatedProductIds((prev) => [...prev, String(id)])
