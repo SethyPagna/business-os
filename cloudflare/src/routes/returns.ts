@@ -1,8 +1,13 @@
 import { parseStockConditionTag } from '../lib/stockCondition'
 import { readTaggedSaleSources } from '../lib/saleLineAddition'
 import { stockActorPredicate, stockActorParams } from '../lib/stockActorGuard'
-import { planCountedTaggedChange, CountedStockBatchPlan, CountedStockConflictError, countedStockFactsSql, isCountedStockConflict, subtractCountedQuantity, planExactCountedTaggedChange, planExactCountedOrdinaryChange } from '../lib/countedDamagedStock'
-import { resolveCountedReturnConditions, resolveCountedReturnConditionsFromSnapshot, type OriginalReturnCondition } from '../lib/countedReturnCondition'
+import { planCountedTaggedChange, CountedStockBatchPlan, CountedStockConflictError, countedStockFactsSql, isCountedStockConflict, subtractCountedQuantity, sumCountedQuantities, planExactCountedTaggedChange, planExactCountedOrdinaryChange } from '../lib/countedDamagedStock'
+import {
+  assertReturnKeeperClaimsProven, resolveCountedReturnConditions, resolveCountedReturnConditionsFromSnapshot, returnKeeperClaimError,
+  returnKeeperClaimSources, ReturnKeeperClaimError, type OriginalReturnCondition, type ReturnKeeperClaim,
+} from '../lib/countedReturnCondition'
+import { planProductMergePhysicalOrigins, ProductMergePhysicalOriginError, type ProductMergePhysicalSource } from '../lib/productMergePhysicalOrigins'
+import type { MergeOriginIdentity } from '../lib/productMergeOriginPlan'
 import { productStockGuardError } from '../lib/productStockGuard'
 import { Hono, type Context } from 'hono'
 import { getPlanLimits } from '../lib/planTier'
@@ -1439,6 +1444,77 @@ async function readProjectedReturnStock(db: ReturnType<typeof getDb>, contexts: 
   return new CountedStockBatchPlan(rows, { deferPhysicalWrites: true })
 }
 
+// A product merged away holds no stock: its units sit on the keeper's derivative receipt or tag, as the product-merge
+// records prove (chains of merges included). Returned units that belonged to it are reversed and received THERE,
+// and only the NEW return line names that keeper; the original sale item keeps the refund, cost and entitlement.
+const RETURN_MERGE_REFUSAL = {
+  error: 'This return names a merged product whose current stock location could not be proven. Nothing was changed. Refresh before retrying.',
+  code: 'return_merge_origin_unproven', action: 'reload_required',
+}
+function returnMergeRefusal(error: unknown): { body: Record<string, string>; status: 400 | 409 } | null {
+  if (error instanceof ReturnKeeperClaimError) return { body: { error: error.code }, status: 400 }
+  if (error instanceof ProductMergePhysicalOriginError) return { body: RETURN_MERGE_REFUSAL, status: 409 }
+  return null
+}
+type ReturnLotPlan = { splits: Array<{ batchId: number; quantity: number }>; plainQuantity: number }
+type ReturnMergeEffects = {
+  /** Where a requested tuple's stock is now; a tuple that was not requested is its own effect. */
+  effect(tuple: MergeOriginIdentity): MergeOriginIdentity
+  guard: { sql: string; params: Record<string, unknown> } | null
+}
+const mergeTupleKey = (tuple: MergeOriginIdentity) => JSON.stringify([tuple.productId, tuple.branchId, tuple.batchId, tuple.damagedLotId, tuple.conditionTag])
+const ordinaryTuple = (productId: number, branchId: number, batchId: number | null): MergeOriginIdentity =>
+  ({ productId, branchId, batchId, damagedLotId: null, conditionTag: 'ordinary' })
+
+/** One read for every merged tuple and keeper claim of the request; its guard joins the atomic write batch, so a
+ *  merge, undo or redo landing before commit refuses the write instead of moving stock to a stale keeper. */
+async function readReturnMergeEffects(db: ReturnType<typeof getDb>, tuples: readonly MergeOriginIdentity[],
+  claims: readonly ReturnKeeperClaim[], branchOf: (index: number) => number): Promise<ReturnMergeEffects> {
+  const sources = new Map<string, ProductMergePhysicalSource>()
+  for (const tuple of tuples) sources.set(mergeTupleKey(tuple), { ...tuple, memberKey: mergeTupleKey(tuple) })
+  const claimSources = returnKeeperClaimSources(claims, branchOf)
+  if (!sources.size && !claimSources.length) return { effect: tuple => tuple, guard: null }
+  const resolve = async (wanted: ProductMergePhysicalSource[]) => {
+    const plan = planProductMergePhysicalOrigins(wanted)
+    return plan.decode(await db.prepare(plan.read.sql).all<Record<string, unknown>>(plan.read.params))
+  }
+  let resolution: Awaited<ReturnType<typeof resolve>>
+  try { resolution = await resolve([...sources.values(), ...claimSources]) }
+  catch (error) {
+    // A claimed product the records cannot place at all (deleted, unknown, another organisation's id) is the
+    // client's identity error, not a merge-record failure: tell them apart by resolving without the claims.
+    if (!(error instanceof ProductMergePhysicalOriginError) || !claimSources.length) throw error
+    if (sources.size) await resolve([...sources.values()])
+    throw returnKeeperClaimError(claims[0])
+  }
+  assertReturnKeeperClaimsProven(claims, branchOf, resolution)
+  const effects = new Map(resolution.sources.map(source => [source.original.memberKey, source.effect]))
+  return {
+    effect: tuple => effects.get(mergeTupleKey(tuple)) ?? tuple,
+    guard: { sql: resolution.guard.sql, params: resolution.guard.params as Record<string, unknown> },
+  }
+}
+
+/** The tuples a returned line receives into: each lot split (owned by splitOwner) and its unattributed units. */
+function returnLineTuples(productId: number, branchId: number, plan: ReturnLotPlan, splitOwner: number): MergeOriginIdentity[] {
+  return [...plan.splits.map(split => ordinaryTuple(splitOwner, branchId, split.batchId)),
+    ...(plan.plainQuantity > 0 ? [ordinaryTuple(productId, branchId, null)] : [])]
+}
+
+/** Re-target one returned line to where its tuples' stock is now; every tuple of a line lands on one product. */
+function landReturnLine(effects: ReturnMergeEffects, productId: number, branchId: number, plan: ReturnLotPlan, splitOwner: number): { productId: number; plan: ReturnLotPlan } {
+  const landed = returnLineTuples(productId, branchId, plan, splitOwner).map(tuple => effects.effect(tuple))
+  if (!landed.length || landed.some(effect => effect.productId !== landed[0].productId || effect.branchId !== branchId
+    || effect.damagedLotId !== null)) throw new ProductMergePhysicalOriginError()
+  const splits = new Map<number, number>()
+  plan.splits.forEach((split, index) => {
+    const batchId = landed[index].batchId
+    if (batchId === null) throw new ProductMergePhysicalOriginError()
+    splits.set(batchId, sumCountedQuantities([splits.get(batchId) ?? 0, split.quantity]))
+  })
+  return { productId: landed[0].productId, plan: { splits: [...splits].map(([batchId, quantity]) => ({ batchId, quantity })), plainQuantity: plan.plainQuantity } }
+}
+
 async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>) {
   const baseDb = getDb(c.env)
   const queryLimit = getPlanLimits(c.env).d1QueriesPerInvocation
@@ -1532,6 +1608,9 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     return c.json({ ...MONEY_PRECISION_REVIEW_NEEDED }, 409)
   }
   let canonicalIntent: Record<string, unknown>
+  // Lines naming a keeper instead of the sold product; proven from merge records before any write (a replay
+  // below writes nothing, so it needs no proof).
+  const keeperClaims: ReturnKeeperClaim[] = []
   try {
     canonicalIntent = canonicalReturnCreateIntent(body as Record<string, unknown>)
     const legacyDigest = priorReceipt ? await sha256Hex(JSON.stringify(canonicalIntent)) : null
@@ -1540,7 +1619,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
       return c.json(JSON.parse(priorReceipt.response_json) as ReturnCreateResponse)
     }
     body.items = await resolveCountedReturnConditions(db, Number(canonicalIntent.sale_id) || null,
-      body.items as unknown as Array<Record<string, unknown>>) as unknown as ReturnItemInput[]
+      body.items as unknown as Array<Record<string, unknown>>, keeperClaims) as unknown as ReturnItemInput[]
     canonicalIntent = canonicalReturnCreateIntent(body as Record<string, unknown>)
   } catch (error) {
     if (error instanceof ReturnCreateBudgetError) throw error
@@ -1905,6 +1984,37 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     }
   }
 
+  // Refund, cost and entitlement are settled above from the ORIGINAL sale item. A line whose sold product has since
+  // been merged away now receives its units on the proven keeper; only that new line's physical tuple names it.
+  const isMergedProduct = (productId: number) => Number(productMap.get(productId)?.is_active ?? 1) !== 1
+  const unprovableClaim = keeperClaims.find(claim => !isMergedProduct(claim.originalProductId))
+  if (unprovableClaim) return c.json({ error: returnKeeperClaimError(unprovableClaim).code }, 400)
+  const lineBranchId = (index: number) => Number(returnItems[index].branch_id || branchId)
+  // An operator-picked receipt belongs to the product the line names (a proven keeper may hold it); every other
+  // split came from the sale's own allocations, so it belongs to the sold product.
+  const splitOwner = (index: number) => {
+    const item = returnItems[index]
+    return Number(item.batch_id) > 0 && !item.counted_original_condition
+      ? keeperClaims.find(claim => claim.index === index)?.productId ?? Number(item.product_id) : Number(item.product_id)
+  }
+  const mergedLines = returnItems.flatMap((item, index) => normalizeStockAction(item) !== 'none' && Number(item.product_id) > 0
+    && lineBranchId(index) > 0 && isMergedProduct(Number(item.product_id)) ? [index] : [])
+  let mergeEffects: ReturnMergeEffects
+  try {
+    mergeEffects = await readReturnMergeEffects(db, mergedLines.flatMap(index => returnLineTuples(Number(returnItems[index].product_id),
+      lineBranchId(index), returnLotPlans[index], splitOwner(index))), keeperClaims, lineBranchId)
+    for (const index of mergedLines) {
+      const landed = landReturnLine(mergeEffects, Number(returnItems[index].product_id), lineBranchId(index), returnLotPlans[index], splitOwner(index))
+      returnItems[index] = { ...returnItems[index], product_id: landed.productId }
+      returnLotPlans[index] = landed.plan
+    }
+  } catch (error) {
+    if (error instanceof ReturnCreateBudgetError) throw error
+    const refusal = returnMergeRefusal(error)
+    if (refusal) return c.json(refusal.body, refusal.status)
+    throw error
+  }
+
   type LotTake = { batchId: number; lotCode: string | null; expiryDate: string | null; quantity: number }
   const replacementFifoTakes = new Map<number, LotTake[]>()
   const replacementExplicitTakes = new Map<number, LotTake[]>()
@@ -2084,6 +2194,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
     ...exactStock.takePreimageGuards(),
     returnCreateGuardStatement(operationId, 'precondition', precondition, commonGuardParams),
+    ...(mergeEffects.guard ? [mergeEffects.guard] : []),
   ]
   const returnIdExpression = returnCreateIdSql()
   const replacementSaleExpression = replacementSaleIdSql()
@@ -2509,7 +2620,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
       }
       const transactionRefusal = stockTransactionRefusal(error)
       if (transactionRefusal) return c.json(transactionRefusal, 503)
-      if (isCountedStockConflict(error) || /return_create_(?:precondition|postcondition)_conflict|return_create_guards|CHECK constraint failed: guard_value/.test(error instanceof Error ? error.message : String(error))) {
+      if (isCountedStockConflict(error) || /return_create_(?:precondition|postcondition)_conflict|return_create_guards|CHECK constraint failed: guard_value|merge_physical_origin_conflict/.test(error instanceof Error ? error.message : String(error))) {
         return c.json({ error: 'The sale or stock changed while this return was being recorded. Reload and try again.', code: 'write_conflict', action: 'reload_required' }, 409)
       }
       return c.json({ error: 'The result could not be confirmed. Keep this return open and retry the same request.', code: 'unknown_outcome', action: 'retry_same_request' }, 503)
@@ -3042,7 +3153,9 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
   if (previousReceipt && previousReceipt.request_digest !== requestDigest && Array.isArray(body.items)) {
     const origin=await db.prepare('SELECT sale_id FROM returns WHERE id=?').get<{sale_id:number|null}>([returnId])
     try {
-      body.items=await resolveCountedReturnConditions(db,Number(origin?.sale_id)||null,body.items as unknown as Array<Record<string,unknown>>) as unknown as ReturnItemInput[]
+      // Digest only: a replay writes nothing, so a keeper claim normalises without needing fresh merge proof and an
+      // already committed edit replays whatever merges happened since.
+      body.items=await resolveCountedReturnConditions(db,Number(origin?.sale_id)||null,body.items as unknown as Array<Record<string,unknown>>,[]) as unknown as ReturnItemInput[]
       canonicalIntent=canonicalReturnEditIntent(returnId,expectedUpdatedAt,body)
       requestJson=JSON.stringify(canonicalIntent);requestDigest=await sha256Hex(requestJson)
     } catch(error) { return c.json({error:(error as Error).message},400) }
@@ -3055,8 +3168,10 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
   }
 
   const existing = await db.prepare(`SELECT r.*,date(r.created_at,'+7 hours') AS received_business_date,COALESCE(v.revision,0) AS write_revision,
-      (SELECT json_group_array(json_object('id',id,'sale_item_id',sale_item_id,'product_id',product_id,'product_name',product_name,'quantity',quantity,'applied_price_usd',applied_price_usd,'applied_price_khr',applied_price_khr,'cost_price_usd',cost_price_usd,'cost_price_khr',cost_price_khr,'total_usd',total_usd,'total_khr',total_khr,'return_to_stock',return_to_stock,'stock_action',stock_action,'stock_condition',stock_condition,'branch_id',branch_id,'batch_id',batch_id)) FROM (SELECT * FROM return_items WHERE return_id=r.id ORDER BY id)) AS item_snapshot,
-      (SELECT json_group_array(json_object('id',id,'return_item_id',return_item_id,'condition_tag',condition_tag,'product_id',product_id,'product_name',product_name,'branch_id',branch_id,'batch_id',batch_id,'quantity',quantity,'quantity_remaining',quantity_remaining,'reason',reason,'created_by_user_id',created_by_user_id,'created_by_user_name',created_by_user_name)) FROM (SELECT * FROM damaged_stock_lots WHERE return_id=r.id AND (return_item_id IS NULL OR EXISTS(SELECT 1 FROM return_items ri WHERE ri.id=damaged_stock_lots.return_item_id AND ri.return_id=r.id)) ORDER BY id)) AS tag_snapshot,
+      (SELECT json_group_array(json_object('id',id,'sale_item_id',sale_item_id,'product_id',product_id,'product_name',product_name,'quantity',quantity,'applied_price_usd',applied_price_usd,'applied_price_khr',applied_price_khr,'cost_price_usd',cost_price_usd,'cost_price_khr',cost_price_khr,'total_usd',total_usd,'total_khr',total_khr,'return_to_stock',return_to_stock,'stock_action',stock_action,'stock_condition',stock_condition,'branch_id',branch_id,'batch_id',batch_id,
+        'product_active',(SELECT p.is_active FROM products p WHERE p.id=line.product_id))) FROM (SELECT * FROM return_items WHERE return_id=r.id ORDER BY id) line) AS item_snapshot,
+      (SELECT json_group_array(json_object('id',id,'return_item_id',return_item_id,'condition_tag',condition_tag,'product_id',product_id,'product_name',product_name,'branch_id',branch_id,'batch_id',batch_id,'quantity',quantity,'quantity_remaining',quantity_remaining,'reason',reason,'created_by_user_id',created_by_user_id,'created_by_user_name',created_by_user_name,
+        'product_active',(SELECT p.is_active FROM products p WHERE p.id=tag.product_id))) FROM (SELECT * FROM damaged_stock_lots WHERE return_id=r.id AND (return_item_id IS NULL OR EXISTS(SELECT 1 FROM return_items ri WHERE ri.id=damaged_stock_lots.return_item_id AND ri.return_id=r.id)) ORDER BY id) tag) AS tag_snapshot,
       (SELECT json_group_array(json_array(id,return_item_id,batch_id,branch_id,quantity)) FROM (SELECT * FROM return_item_batch_allocations WHERE return_item_id IN(SELECT id FROM return_items WHERE return_id=r.id) ORDER BY id)) AS allocation_snapshot,
       (SELECT json_group_array(json(snapshot_row)) FROM (SELECT json_array(ri.id,sr.id,ri.sale_item_id,ri.product_id,ri.quantity,sr.status) AS snapshot_row FROM return_items ri JOIN returns sr ON sr.id=ri.return_id WHERE sr.sale_id=r.sale_id AND sr.id<>r.id AND COALESCE(sr.status,'completed')!='cancelled' AND COALESCE(sr.return_scope,'customer')='customer' ORDER BY sr.id,ri.id)) AS sibling_snapshot
     FROM returns r LEFT JOIN return_write_revisions v ON v.return_id=r.id WHERE r.id=?`).get<ReturnRow & { write_revision:number; received_business_date:string|null; item_snapshot:string; tag_snapshot:string; allocation_snapshot:string; sibling_snapshot:string }>([id])
@@ -3071,6 +3186,7 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
   type CapturedEditSaleSource = OriginalReturnCondition & {
     id:number; batch_id:number|null; batch_label:string|null; batch_expiry_date:string|null; quantity:number;
     applied_price_usd:number|null; applied_price_khr:number|null; cost_price_usd:number|null; cost_price_khr:number|null; allocations_json:string
+    product_active:number|null
   }
   let editSaleSources: CapturedEditSaleSource[] = []
   type LinkedSaleState = {
@@ -3083,6 +3199,7 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
       COALESCE(v.revision,0) AS write_revision,
         (SELECT json_group_array(json(snapshot_row)) FROM (SELECT json_object('id',si.id,'sale_id',si.sale_id,'product_id',si.product_id,'branch_id',si.branch_id,'batch_id',si.batch_id,'damaged_lot_id',si.damaged_lot_id,'batch_label',si.batch_label,'batch_expiry_date',si.batch_expiry_date,'quantity',si.quantity,'applied_price_usd',si.applied_price_usd,'applied_price_khr',si.applied_price_khr,'cost_price_usd',si.cost_price_usd,'cost_price_khr',si.cost_price_khr,'sale_item_id',si.id,
           'original_product_id',ci.product_id,'original_branch_id',ci.branch_id,'original_batch_id',ci.batch_id,'original_condition_tag',ci.condition_tag,
+          'product_active',(SELECT p.is_active FROM products p WHERE p.id=si.product_id),
           'allocations_json',((SELECT json_group_array(json_array(id,batch_id,branch_id,quantity,released_quantity)) FROM (SELECT * FROM sale_item_batch_allocations WHERE sale_item_id=si.id ORDER BY id))||'')) AS snapshot_row
           FROM sale_items si LEFT JOIN counted_sale_item_conditions ci ON ci.sale_item_id=si.id WHERE si.sale_id=s.id ORDER BY si.id)) AS item_snapshot
       FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id=?`)
@@ -3114,12 +3231,19 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
   const existingItems = JSON.parse(existing.item_snapshot) as Array<{
     id: number; product_id: number | null; product_name: string | null; quantity: number
     return_to_stock: number; stock_action: string | null; branch_id: number | null; cost_price_usd: number | null; cost_price_khr: number | null
-    batch_id: number | null
+    batch_id: number | null; sale_item_id: number | null; product_active: number | null
   }>
   const explicitEditConditions = Array.isArray(body.items) ? body.items.map(item=>item.stock_condition!=null || item.condition_tag!=null || item.stock_action==='damaged') : []
   let newItems: ReturnItemInput[] = Array.isArray(body.items) ? body.items : existingItems
+  // Lines naming a keeper (a return recorded after a product merge names it) resolve on their sale item's own
+  // identity and are proven from merge records before any write; a product still active has no keeper.
+  const keeperClaims: ReturnKeeperClaim[] = []
+  const productActive = new Map<number, boolean>([...editSaleSources, ...existingItems].filter(row => row.product_id != null)
+    .map(row => [Number(row.product_id), Number(row.product_active ?? 1) === 1]))
   try {
-    newItems = resolveCountedReturnConditionsFromSnapshot(Number(existing.sale_id)||null,newItems as unknown as Array<Record<string,unknown>>,editSaleSources) as unknown as ReturnItemInput[]
+    newItems = resolveCountedReturnConditionsFromSnapshot(Number(existing.sale_id)||null,newItems as unknown as Array<Record<string,unknown>>,editSaleSources,keeperClaims) as unknown as ReturnItemInput[]
+    const unprovable = keeperClaims.find(claim => productActive.get(claim.originalProductId) !== false)
+    if (unprovable) throw returnKeeperClaimError(unprovable)
     if(Array.isArray(body.items)) {
       body.items=newItems;canonicalIntent=canonicalReturnEditIntent(returnId,expectedUpdatedAt,body)
       requestJson=JSON.stringify(canonicalIntent);requestDigest=await sha256Hex(requestJson)
@@ -3132,7 +3256,9 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
       : await selectInChunks([...new Set(newItems.map(item => Number(item.product_id)).filter(id => id > 0))], 0, chunk => db.prepare(`SELECT id,cost_price_usd,cost_price_khr FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`).all<Record<string, unknown>>(chunk))
     try {
       newItems = newItems.map(item => {
-        const previous = existingItems.filter(row => Number(row.product_id) === Number(item.product_id) && (item.branch_id == null || row.branch_id === item.branch_id))
+        // A line keeps its sale item's recorded cost even when its saved row names the proven keeper.
+        const previous = existingItems.filter(row => (Number(item.sale_item_id) > 0 ? Number(row.sale_item_id) === Number(item.sale_item_id)
+          : Number(row.product_id) === Number(item.product_id)) && (item.branch_id == null || row.branch_id === item.branch_id))
         const costs = previous.length ? fillOmittedReturnCosts(item, previous, 'return') : fillOmittedReturnCosts(item, sourceRows, existing.sale_id ? 'sale' : 'catalog')
         return { ...item, ...costs }
       })
@@ -3368,7 +3494,7 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
   let editDamagedLots: Array<{
     id:number; return_item_id:number|null; condition_tag:string; product_id:number; product_name:string|null;
     branch_id:number|null; batch_id:number|null; quantity:number; quantity_remaining:number; reason:string|null;
-    created_by_user_id:number|string|null; created_by_user_name:string|null
+    created_by_user_id:number|string|null; created_by_user_name:string|null; product_active:number|null
   }> = []
   let editDispatched = false
 
@@ -3378,7 +3504,8 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
   try {
     const damagedLots = editDamagedLots = JSON.parse(existing.tag_snapshot) as typeof editDamagedLots
     for (const lot of damagedLots) {
-      if (Number(lot.quantity_remaining) < Number(lot.quantity)) {
+      // A merged product's original tag reads zero by design; its live units are checked on the keeper's derivative tag below.
+      if (Number(lot.product_active ?? 1) === 1 && Number(lot.quantity_remaining) < Number(lot.quantity)) {
         throw new ConsumedDamagedStockError(String(lot.product_name || `product #${lot.product_id}`), Number(lot.quantity) - Number(lot.quantity_remaining))
       }
     }
@@ -3389,24 +3516,6 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
     }))
     for(const lot of damagedLots) {
       if(!lot.return_item_id || !lot.branch_id) return c.json({error:'return_condition_attribution_unproven'},409)
-    }
-    for (const lot of editReversedDamaged) {
-      statements.push({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-              VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_REVERSAL_MOVEMENT}', @quantity, 0, 0, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
-        params: {
-          product_id: lot.product_id,
-          product_name: lot.product_name,
-          branch_id: lot.branch_id,
-          quantity: -lot.quantity,
-          reason: `Return #${existing.return_number} updated - reversing damaged stock`,
-          reference_id: id,
-          user_id: user?.id ?? null,
-          user_name: actorSnapshot(user),
-          // 0084: the original sale lot the damaged units belonged to.
-          batch_id: lot.batch_id,
-        },
-      })
     }
   } catch (error) {
     const stockGuard = productStockGuardError(error)
@@ -3442,15 +3551,47 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
     for (const [folded, survivor] of found) merged.set(folded, survivor)
     reversalSurvivors.set(effect.effectBranchId, merged)
   }
+  // Units of a product merged away are reversed and received where the merge records prove they are now (the keeper's
+  // derivative receipt or tag); lines of products still active keep their own tuples. The saved lines, tags and
+  // movements of this return are history and are not rewritten; the re-inserted lines name the proven keeper.
+  const isMergedProduct = (productId: number | null | undefined) => productId != null && productActive.get(Number(productId)) === false
+  const reversalBranch = (index: number) => existingLineEffects[index]?.redirected ? existingLineEffects[index]!.effectBranchId : Number(existingItems[index].branch_id)
+  const reversalTuple = (index: number, batchId: number | null) => ordinaryTuple(Number(existingItems[index].product_id), reversalBranch(index),
+    batchId === null || !existingLineEffects[index]?.redirected ? batchId : reversalSurvivors.get(reversalBranch(index))?.get(Number(batchId)) ?? batchId)
+  const lotTuple = (lot: (typeof editDamagedLots)[number]): MergeOriginIdentity => ({ productId: lot.product_id, branchId: lot.branch_id!,
+    batchId: lot.batch_id, damagedLotId: lot.id, conditionTag: lot.condition_tag as MergeOriginIdentity['conditionTag'] })
+  const newLineBranch = (index: number) => Number(newItems[index].branch_id || existing.branch_id)
+  // An operator-picked receipt belongs to the product the line names (a proven keeper may hold it); every other
+  // split came from the sale's own allocations, so it belongs to the sold product.
+  const newSplitOwner = (index: number) => {
+    const item = newItems[index]
+    return Number(item.batch_id) > 0 && !item.counted_original_condition
+      ? keeperClaims.find(claim => claim.index === index)?.productId ?? Number(item.product_id) : Number(item.product_id)
+  }
+  const mergedReversals = existingItems.flatMap((item, index) => item.return_to_stock && item.product_id && item.branch_id && isMergedProduct(item.product_id) ? [index] : [])
+  const mergedNewLines = newItems.flatMap((item, index) => normalizeStockAction(item) !== 'none' && Number(item.product_id) > 0
+    && newLineBranch(index) > 0 && isMergedProduct(Number(item.product_id)) ? [index] : [])
+  const mergeEffects = await readReturnMergeEffects(db, [
+    ...editDamagedLots.filter(lot => isMergedProduct(lot.product_id)).map(lotTuple),
+    ...mergedReversals.flatMap(index => [reversalTuple(index, null),
+      ...(existingReturnAllocations.get(Number(existingItems[index].id)) || []).map(row => reversalTuple(index, row.batch_id)),
+      ...(existingItems[index].batch_id != null ? [reversalTuple(index, existingItems[index].batch_id)] : [])]),
+    ...mergedNewLines.flatMap(index => returnLineTuples(Number(newItems[index].product_id), newLineBranch(index), editLotPlans[index], newSplitOwner(index))),
+  ], keeperClaims, newLineBranch)
+  for (const index of mergedNewLines) {
+    const landed = landReturnLine(mergeEffects, Number(newItems[index].product_id), newLineBranch(index), editLotPlans[index], newSplitOwner(index))
+    newItems[index] = { ...newItems[index], product_id: landed.productId }
+    editLotPlans[index] = landed.plan
+  }
+  if (mergeEffects.guard) statements.unshift(mergeEffects.guard)
+  const reversalAt = (index: number, batchId: number | null) => mergeEffects.effect(reversalTuple(index, batchId))
+  const lotAt = (lot: (typeof editDamagedLots)[number]) => mergeEffects.effect(lotTuple(lot))
   const editContexts = new Map<string, CountedReturnContext>()
-  for (const lot of editDamagedLots) addCountedReturnContext(editContexts,lot.product_id,lot.branch_id!,lot.batch_id===null?[]:[lot.batch_id])
+  for (const lot of editDamagedLots) { const at = lotAt(lot); addCountedReturnContext(editContexts,at.productId,at.branchId,at.batchId===null?[]:[at.batchId]) }
   for (const [index,item] of existingItems.entries()) {
     if (!item.return_to_stock || !item.product_id || !item.branch_id) continue
-    const effect = existingLineEffects[index]
-    const branch = effect?.redirected ? effect.effectBranchId : item.branch_id
-    const survivor = (batch:number) => effect?.redirected ? reversalSurvivors.get(branch)?.get(batch) ?? batch : batch
-    addCountedReturnContext(editContexts,item.product_id,branch,
-      [...(existingReturnAllocations.get(Number(item.id)) || []).map(row=>survivor(row.batch_id)),...(item.batch_id != null ? [survivor(item.batch_id)] : [])])
+    addCountedReturnContext(editContexts,reversalAt(index,null).productId,reversalBranch(index),
+      [...(existingReturnAllocations.get(Number(item.id)) || []).map(row=>reversalAt(index,row.batch_id).batchId!),...(item.batch_id != null ? [reversalAt(index,item.batch_id).batchId!] : [])])
   }
   for (const [index,item] of newItems.entries()) {
     const productId = Number(item.product_id), branchId = Number(item.branch_id || existing.branch_id)
@@ -3488,19 +3629,40 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
     AND (SELECT COUNT(*) FROM return_item_batch_allocations row WHERE row.return_item_id IN(SELECT id FROM return_items WHERE return_id=@returnId))=json_array_length(@allocations) AND NOT EXISTS(SELECT 1 FROM json_each(@allocations) j WHERE NOT EXISTS(SELECT 1 FROM return_item_batch_allocations row WHERE row.return_item_id IN(SELECT id FROM return_items WHERE return_id=@returnId) AND row.id IS json_extract(j.value,'$[0]') AND row.return_item_id IS json_extract(j.value,'$[1]') AND row.batch_id IS json_extract(j.value,'$[2]') AND row.branch_id IS json_extract(j.value,'$[3]') AND row.quantity IS json_extract(j.value,'$[4]')))
     AND (SELECT COUNT(*) FROM damaged_stock_lots row WHERE row.return_id=@returnId AND (row.return_item_id IS NULL OR EXISTS(SELECT 1 FROM return_items ri WHERE ri.id=row.return_item_id AND ri.return_id=@returnId)))=json_array_length(@tags) AND NOT EXISTS(SELECT 1 FROM json_each(@tags) j WHERE NOT EXISTS(SELECT 1 FROM damaged_stock_lots row WHERE row.return_id=@returnId AND (row.return_item_id IS NULL OR EXISTS(SELECT 1 FROM return_items ri WHERE ri.id=row.return_item_id AND ri.return_id=@returnId)) AND row.id IS json_extract(j.value,'$[0]') AND row.return_item_id IS json_extract(j.value,'$[1]') AND row.condition_tag IS json_extract(j.value,'$[2]') AND row.product_id IS json_extract(j.value,'$[3]') AND row.product_name IS json_extract(j.value,'$[4]') AND row.branch_id IS json_extract(j.value,'$[5]') AND row.batch_id IS json_extract(j.value,'$[6]') AND row.quantity IS json_extract(j.value,'$[7]') AND row.quantity_remaining IS json_extract(j.value,'$[8]') AND row.reason IS json_extract(j.value,'$[9]') AND row.created_by_user_id IS json_extract(j.value,'$[10]') AND row.created_by_user_name IS json_extract(j.value,'$[11]')))
     THEN 1 ELSE json_extract('[1]','$[counted_quantity_conflict]') END`,params:{...stockActorParams(user),returnId,saleId:existing.sale_id || null,scope:existing.return_scope,returnStatus:existing.status,updatedAt:existing.updated_at,createdAt:existing.created_at,returnNumber:existing.return_number,returnMoneyVersion:existing.money_precision_version,returnRevision:Number(existing.write_revision),saleStatus:String(linkedSale?.sale_status || 'completed'),beforeReturn:String(linkedSale?.status_before_return || ''),saleMoneyVersion:linkedSale?.money_precision_version ?? null,saleRevision:Number(linkedSale?.write_revision || 0),siblings:existing.sibling_snapshot,costSources:costSourcesJson,sources:sourcesJson,items:originalItemsJson,allocations:originalAllocationsJson,tags:originalTagsJson}})
-  for (const lot of editDamagedLots) {
-    const exact = exactEdit.get(lot.product_id,lot.branch_id!)
-    const source = exact.projectedTaggedSource(lot.id)
-    if (!source || source.batchId!==lot.batch_id || source.conditionTag!==lot.condition_tag || source.quantityRemaining!==lot.quantity_remaining) throw new CountedStockConflictError()
-    statements.push(...exact.change({lotId:lot.id,productId:lot.product_id,branchId:lot.branch_id!,batchId:lot.batch_id},lot.quantity,'consume'))
+  for (const [index, lot] of editDamagedLots.entries()) {
+    const at = lotAt(lot), merged = isMergedProduct(lot.product_id)
+    const exact = exactEdit.get(at.productId,at.branchId)
+    const source = exact.projectedTaggedSource(at.damagedLotId!)
+    if (!source || source.batchId!==at.batchId || source.conditionTag!==lot.condition_tag || (!merged && source.quantityRemaining!==lot.quantity_remaining)) throw new CountedStockConflictError()
+    // The merge zeroed the original tag; only units missing from the keeper's derivative were really drawn.
+    if (merged && source.quantityRemaining < lot.quantity) throw new ConsumedDamagedStockError(String(lot.product_name || `product #${lot.product_id}`), subtractCountedQuantity(lot.quantity,[source.quantityRemaining]))
+    const reversed = editReversedDamaged[index]
+    statements.push({
+      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+            VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_REVERSAL_MOVEMENT}', @quantity, 0, 0, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
+      params: {
+        product_id: at.productId,
+        product_name: reversed.product_name,
+        branch_id: at.branchId,
+        quantity: -reversed.quantity,
+        reason: `Return #${existing.return_number} updated - reversing damaged stock`,
+        reference_id: id,
+        user_id: user?.id ?? null,
+        user_name: actorSnapshot(user),
+        // 0084: the lot the damaged units sit in now (the original sale lot, or its proven merge derivative).
+        batch_id: at.batchId,
+      },
+    })
+    statements.push(...exact.change({lotId:at.damagedLotId!,productId:at.productId,branchId:at.branchId,batchId:at.batchId},lot.quantity,'consume'))
   }
   for (const [itemIndex, item] of existingItems.entries()) {
     if (!item.return_to_stock || !item.product_id || !item.branch_id) continue
-    touchedProductIds.add(item.product_id)
-    const productId = item.product_id
+    const productId = reversalAt(itemIndex,null).productId
+    touchedProductIds.add(productId)
     const reversalEffect = existingLineEffects[itemIndex]?.redirected ? existingLineEffects[itemIndex] : null
-    const branchIdForItem = reversalEffect ? reversalEffect.effectBranchId : item.branch_id
-    const survivorOf = (batchId: number): number => reversalEffect ? reversalSurvivors.get(reversalEffect.effectBranchId)?.get(Number(batchId)) ?? batchId : batchId
+    const branchIdForItem = reversalBranch(itemIndex)
+    // The lot that holds the units now: the consolidation survivor and/or the proven merge derivative.
+    const batchNow = (batchId: number): number => reversalAt(itemIndex,batchId).batchId!
     let plainRemainder = Number(item.quantity) || 0
     // 0084: which lots this reversal actually drew from -- the movement row
     // stamps a batch_id only when ONE lot covered the whole quantity.
@@ -3512,13 +3674,13 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
         const give = Math.min(alloc.quantity,plainRemainder)
         if (give<=0) continue
         if (alloc.branch_id!==null && alloc.branch_id!==item.branch_id) throw new CountedStockConflictError()
-        const reversalBatchId = survivorOf(alloc.batch_id)
+        const reversalBatchId = batchNow(alloc.batch_id)
         statements.push(...exact.changeOrdinary(reversalBatchId,give,'consume'))
         reversalLots.push({batchId:reversalBatchId,quantity:give})
         plainRemainder = subtractCountedQuantity(plainRemainder,[give])
       }
     } else if (item.batch_id!==null) {
-      const legacyBatchId = survivorOf(item.batch_id)
+      const legacyBatchId = batchNow(item.batch_id)
       statements.push(...exact.changeOrdinary(legacyBatchId,plainRemainder,'consume'))
       reversalLots.push({batchId:legacyBatchId,quantity:plainRemainder})
       plainRemainder=0
@@ -3772,7 +3934,11 @@ async function editCustomerReturn(c: Context<{ Bindings: Env; Variables: { user:
 
   } catch (error) {
     if (error instanceof ReturnCreateBudgetError) throw error
-    if (isCountedStockConflict(error)) return c.json({error:'The return or its stock source changed. Refresh before retrying.',code:'write_conflict',action:'reload_required'},409)
+    // Pre-dispatch refusals first: an unproven merge read and the in-batch merge guard share one marker string.
+    const mergeRefusal = returnMergeRefusal(error)
+    if (mergeRefusal) return c.json(mergeRefusal.body, mergeRefusal.status)
+    if (error instanceof ConsumedDamagedStockError) return c.json({ error: error.message }, 400)
+    if (isCountedStockConflict(error) || String(error instanceof Error ? error.message : error).includes('merge_physical_origin_conflict')) return c.json({error:'The return or its stock source changed. Refresh before retrying.',code:'write_conflict',action:'reload_required'},409)
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     // All lot, branch, return-item and receipt writes share db.batch; a
