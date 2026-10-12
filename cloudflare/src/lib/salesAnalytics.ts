@@ -2178,6 +2178,20 @@ function deliveryContactTotalsFromSnapshot(
   })).sort((a, b) => (b.deliveries + b.linked_expense_count) - (a.deliveries + a.linked_expense_count))
 }
 
+/** The Overview's sales block off ONE snapshot: its totals, payment-method
+ *  fold and courier fold read the same rows once, as getSalesDayReport does.
+ *  Three separate reads cost about 45 D1 statements of the Free plan's 50. */
+export async function getSalesOverviewBlocks(env: Env, f: SalesFilters): Promise<{
+  totals: SalesTotals; paymentMethods: SalesGroupedReport; couriers: DeliveryContactTotalsRow[]
+}> {
+  const [snapshot, loss] = await Promise.all([readSalesReportSnapshot(env, f, true), removalLossesFor(env, f)])
+  return {
+    totals: withRemovalLosses(salesTotalsFromSnapshot(snapshot), loss),
+    paymentMethods: await getSalesGroupedReport(env, f, 'payment_method', 500, snapshot),
+    couriers: deliveryContactTotalsFromSnapshot(snapshot, f),
+  }
+}
+
 export async function getDeliveryContactTotals(
   env: Env,
   f: SalesFilters & { contactId?: number | string | null },
@@ -2800,6 +2814,48 @@ function reportGroupIdentity(row: ReportScalarRow, groupBy: SalesGroupKey): { ke
   return { key: String(id || 0), label: String(row.branch_name || ''), entity_id: id }
 }
 
+export interface SalesGroupedReport {
+  rows: SalesGroupedRow[]
+  /** Every group in the window; rows holds at most `limit` of them. */
+  total_groups: number
+  /** The whole window's totals -- never the sum of the returned rows. */
+  totals: SalesTotals
+}
+
+/** Grouped rows plus what a capped response needs to stay honest: how many
+ *  groups exist and the window's own totals. An already-read snapshot (the
+ *  Overview's) is reused rather than read a second time. */
+export async function getSalesGroupedReport(
+  env: Env, f: SalesFilters, groupBy: SalesGroupKey, limit = 500, read?: SalesReportSnapshot,
+): Promise<SalesGroupedReport> {
+  const snapshot = read ?? await readSalesReportSnapshot(env, f)
+  const identity = (row: ReportScalarRow) => reportGroupIdentity(row, groupBy)
+  const metadata = new Map([...snapshot.sales, ...snapshot.voidSales].map((row) => [identity(row).key, identity(row)]))
+  const rows = [...aggregateReportSnapshot(snapshot, (sale) => identity(sale).key).entries()].map(([key, bucket]) => {
+    const totals = exactReportTotals(bucket, snapshot)
+    const meta = metadata.get(key) || { key, label: '', entity_id: null }
+    const row = { key, label: meta.label, entity_id: meta.entity_id,
+      cost_missing_snapshot_lines: bucket.missingCostLines, ...totals } as SalesGroupedRow
+    return attachReportDiagnostic(row, reportMoneyDiagnostic(totals)!)
+  })
+  const level = salesGroupExprs('sales', groupBy)
+  const joined = salesGroupExprs('s', groupBy)
+  if (groupBy === 'customer') {
+    const extra = await customerIdentityByGroup(env, f, level.key)
+    for (const row of rows) { const hit = extra.get(row.key) || { is_new: false, gender: '', phone: '' }; Object.assign(row, hit) }
+  } else if (groupBy === 'cashier') {
+    const extra = await cohortCountsByGroup(env, f, level.key)
+    for (const row of rows) Object.assign(row, extra.get(row.key) || { new_customer_count: 0, return_customer_count: 0, unregistered_count: 0, paid_tx_count: 0 })
+  } else if (groupBy === 'branch') {
+    const extra = await branchActivityByGroup(env, f, level.key, joined.key)
+    for (const row of rows) Object.assign(row, extra.get(row.key) || { customer_count: 0, items_sold_qty: 0 })
+  }
+  if (groupBy === 'hour' || groupBy === 'weekday') rows.sort((a, b) => a.key.localeCompare(b.key))
+  else rows.sort((a, b) => b.revenue_usd - a.revenue_usd || b.tx_count - a.tx_count || a.label.localeCompare(b.label))
+  const cap = Math.max(1, Math.min(2000, Math.trunc(limit) || 500))
+  return { rows: rows.slice(0, cap), total_groups: rows.length, totals: salesTotalsFromSnapshot(snapshot) }
+}
+
 /**
  * Canonical SalesTotals per group. Same two-query shape as
  * getBusinessSummaryDayRows (sale level + item-level COGS, merged through
@@ -2808,32 +2864,7 @@ function reportGroupIdentity(row: ReportScalarRow, groupBy: SalesGroupKey): { ke
  */
 export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: SalesGroupKey, limit = 500): Promise<SalesGroupedRow[]> {
   {
-    const snapshot = await readSalesReportSnapshot(env, f)
-    const identity = (row: ReportScalarRow) => reportGroupIdentity(row, groupBy)
-    const metadata = new Map([...snapshot.sales, ...snapshot.voidSales].map((row) => [identity(row).key, identity(row)]))
-    const rows = [...aggregateReportSnapshot(snapshot, (sale) => identity(sale).key).entries()].map(([key, bucket]) => {
-      const totals = exactReportTotals(bucket, snapshot)
-      const meta = metadata.get(key) || { key, label: '', entity_id: null }
-      const row = { key, label: meta.label, entity_id: meta.entity_id,
-        cost_missing_snapshot_lines: bucket.missingCostLines, ...totals } as SalesGroupedRow
-      return attachReportDiagnostic(row, reportMoneyDiagnostic(totals)!)
-    })
-    const level = salesGroupExprs('sales', groupBy)
-    const joined = salesGroupExprs('s', groupBy)
-    if (groupBy === 'customer') {
-      const extra = await customerIdentityByGroup(env, f, level.key)
-      for (const row of rows) { const hit = extra.get(row.key) || { is_new: false, gender: '', phone: '' }; Object.assign(row, hit) }
-    } else if (groupBy === 'cashier') {
-      const extra = await cohortCountsByGroup(env, f, level.key)
-      for (const row of rows) Object.assign(row, extra.get(row.key) || { new_customer_count: 0, return_customer_count: 0, unregistered_count: 0, paid_tx_count: 0 })
-    } else if (groupBy === 'branch') {
-      const extra = await branchActivityByGroup(env, f, level.key, joined.key)
-      for (const row of rows) Object.assign(row, extra.get(row.key) || { customer_count: 0, items_sold_qty: 0 })
-    }
-    if (groupBy === 'hour' || groupBy === 'weekday') rows.sort((a, b) => a.key.localeCompare(b.key))
-    else rows.sort((a, b) => b.revenue_usd - a.revenue_usd || b.tx_count - a.tx_count || a.label.localeCompare(b.label))
-    const cap = Math.max(1, Math.min(2000, Math.trunc(limit) || 500))
-    return rows.slice(0, cap)
+    return (await getSalesGroupedReport(env, f, groupBy, limit)).rows
   }
   const db = getDb(env)
   const level = salesGroupExprs('sales', groupBy)
@@ -2957,6 +2988,77 @@ export interface ProductSalesRankingRow {
   on_hand_qty: number
 }
 
+export interface ProductSalesReport {
+  rows: ProductSalesRankingRow[]
+  /** Every product group in the window; rows holds at most `limit` of them. */
+  total_groups: number
+  /** The whole window's product totals -- never the sum of the returned rows. */
+  totals: { sale_count: number; qty: number; line_sales_usd: number; cost_usd: number; profit_usd: number; cost_missing_snapshot_lines: number }
+}
+
+export async function getProductSalesReport(env: Env, f: SalesFilters, limit = 200): Promise<ProductSalesReport> {
+  const snapshot = await readSalesReportSnapshot(env, f)
+  const saleById = new Map(snapshot.sales.map((sale) => [Number(sale.id), sale]))
+  const groups = new Map<string, { product_id: number | null; product_name: string; saleIds: Set<number>; qty: number;
+    lineSales: ReportExactDecimal; cost: ReportExactDecimal; missing: number }>()
+  for (const item of snapshot.items) {
+    const sale = saleById.get(Number(item.sale_id)); if (!sale || reportStatus(sale) === 'cancelled') continue
+    const productId = item.product_id == null ? null : Number(item.product_id)
+    const name = String(item.product_name || '')
+    const key = productId == null ? `name:${name.trim().toLowerCase()}` : `id:${productId}`
+    const group = groups.get(key) || { product_id: productId, product_name: name, saleIds: new Set<number>(), qty: 0,
+      lineSales: ReportExactDecimal.zero(), cost: ReportExactDecimal.zero(), missing: 0 }
+    const version = reportVersion(sale)
+    const quantity = ReportExactDecimal.quantity(item.quantity as string | number)
+    group.qty += Number(item.quantity)
+    group.saleIds.add(Number(sale.id))
+    group.lineSales = group.lineSales.add(reportMoney(item, 'total_usd', version))
+    if (item.cost_price_usd == null) group.missing += 1
+    else {
+      const unit = reportMoney(item, 'cost_price_usd', version, false)
+      if (unit.isNegative()) throw new ReportMoneyPrecisionError(version === 1 ? 'invalid_saved_money4' : 'invalid_recorded_decimal')
+      group.cost = group.cost.add(unit.multiply(quantity))
+    }
+    groups.set(key, group)
+  }
+  const db = getDb(env)
+  const productColumns = await reportTableColumns(db, 'products')
+  const categoryColumns = await reportTableColumns(db, 'categories')
+  const metadata = new Map<number, Record<string, unknown>>()
+  if (productColumns.has('id')) {
+    const categoryJoin = categoryColumns.has('id') && categoryColumns.has('name')
+      ? "LEFT JOIN categories cat ON lower(trim(cat.name))=lower(trim(COALESCE(p.category,''))) AND COALESCE(p.category,'')<>''" : ''
+    const categoryId = categoryJoin ? 'cat.id' : 'NULL'
+    const onHand = f.branchId
+      ? 'COALESCE((SELECT SUM(bs.quantity) FROM branch_stock bs WHERE bs.product_id=p.id AND bs.branch_id=@branchId),0)'
+      : 'COALESCE(p.stock_quantity,0)'
+    const rows = await db.prepare(`SELECT p.id,p.name,p.barcode,p.category,${categoryId} AS category_id,${onHand} AS on_hand_qty FROM products p ${categoryJoin}`)
+      .all<Record<string, unknown>>(f.branchId ? { branchId: f.branchId } : {})
+    for (const row of rows || []) metadata.set(Number(row.id), row)
+  }
+  const diagnostic = { precision_mode: snapshot.precision_mode, complete: true, unknown_cost_lines: 0, contributing_rows: snapshot.row_count }
+  const rows = [...groups.values()].map((group) => {
+    const meta = group.product_id == null ? null : metadata.get(group.product_id)
+    const row: ProductSalesRankingRow = {
+      product_id: group.product_id, product_name: String(meta?.name || group.product_name), sale_count: group.saleIds.size, qty: group.qty,
+      line_sales_usd: group.lineSales.toNumber(), cost_usd: group.cost.toNumber(),
+      profit_usd: group.lineSales.subtract(group.cost).toNumber(), cost_missing_snapshot_lines: group.missing,
+      category_id: meta?.category_id == null ? null : Number(meta.category_id), category_name: String(meta?.category || ''),
+      barcode: String(meta?.barcode || ''), on_hand_qty: num(meta?.on_hand_qty),
+    }
+    return attachReportDiagnostic(row, { ...diagnostic, complete: group.missing === 0, unknown_cost_lines: group.missing })
+  })
+  rows.sort((a, b) => b.line_sales_usd - a.line_sales_usd || b.qty - a.qty)
+  const all = { sales: new Set<number>(), qty: 0, lineSales: ReportExactDecimal.zero(), cost: ReportExactDecimal.zero(), missing: 0 }
+  for (const group of groups.values()) {
+    for (const id of group.saleIds) all.sales.add(id)
+    all.qty += group.qty; all.lineSales = all.lineSales.add(group.lineSales); all.cost = all.cost.add(group.cost); all.missing += group.missing
+  }
+  return { rows: rows.slice(0, Math.max(1, Math.min(1000, Math.trunc(limit) || 200))), total_groups: rows.length,
+    totals: { sale_count: all.sales.size, qty: all.qty, line_sales_usd: all.lineSales.toNumber(), cost_usd: all.cost.toNumber(),
+      profit_usd: all.lineSales.subtract(all.cost).toNumber(), cost_missing_snapshot_lines: all.missing } }
+}
+
 /**
  * Products ranked by line sales over RECOGNIZED sales only (the same
  * population revenue and COGS are computed from), respecting every
@@ -2964,59 +3066,7 @@ export interface ProductSalesRankingRow {
  */
 export async function getProductSalesRanking(env: Env, f: SalesFilters, limit = 200): Promise<ProductSalesRankingRow[]> {
   {
-    const snapshot = await readSalesReportSnapshot(env, f)
-    const saleById = new Map(snapshot.sales.map((sale) => [Number(sale.id), sale]))
-    const groups = new Map<string, { product_id: number | null; product_name: string; saleIds: Set<number>; qty: number;
-      lineSales: ReportExactDecimal; cost: ReportExactDecimal; missing: number }>()
-    for (const item of snapshot.items) {
-      const sale = saleById.get(Number(item.sale_id)); if (!sale || reportStatus(sale) === 'cancelled') continue
-      const productId = item.product_id == null ? null : Number(item.product_id)
-      const name = String(item.product_name || '')
-      const key = productId == null ? `name:${name.trim().toLowerCase()}` : `id:${productId}`
-      const group = groups.get(key) || { product_id: productId, product_name: name, saleIds: new Set<number>(), qty: 0,
-        lineSales: ReportExactDecimal.zero(), cost: ReportExactDecimal.zero(), missing: 0 }
-      const version = reportVersion(sale)
-      const quantity = ReportExactDecimal.quantity(item.quantity as string | number)
-      group.qty += Number(item.quantity)
-      group.saleIds.add(Number(sale.id))
-      group.lineSales = group.lineSales.add(reportMoney(item, 'total_usd', version))
-      if (item.cost_price_usd == null) group.missing += 1
-      else {
-        const unit = reportMoney(item, 'cost_price_usd', version, false)
-        if (unit.isNegative()) throw new ReportMoneyPrecisionError(version === 1 ? 'invalid_saved_money4' : 'invalid_recorded_decimal')
-        group.cost = group.cost.add(unit.multiply(quantity))
-      }
-      groups.set(key, group)
-    }
-    const db = getDb(env)
-    const productColumns = await reportTableColumns(db, 'products')
-    const categoryColumns = await reportTableColumns(db, 'categories')
-    const metadata = new Map<number, Record<string, unknown>>()
-    if (productColumns.has('id')) {
-      const categoryJoin = categoryColumns.has('id') && categoryColumns.has('name')
-        ? "LEFT JOIN categories cat ON lower(trim(cat.name))=lower(trim(COALESCE(p.category,''))) AND COALESCE(p.category,'')<>''" : ''
-      const categoryId = categoryJoin ? 'cat.id' : 'NULL'
-      const onHand = f.branchId
-        ? 'COALESCE((SELECT SUM(bs.quantity) FROM branch_stock bs WHERE bs.product_id=p.id AND bs.branch_id=@branchId),0)'
-        : 'COALESCE(p.stock_quantity,0)'
-      const rows = await db.prepare(`SELECT p.id,p.name,p.barcode,p.category,${categoryId} AS category_id,${onHand} AS on_hand_qty FROM products p ${categoryJoin}`)
-        .all<Record<string, unknown>>(f.branchId ? { branchId: f.branchId } : {})
-      for (const row of rows || []) metadata.set(Number(row.id), row)
-    }
-    const diagnostic = { precision_mode: snapshot.precision_mode, complete: true, unknown_cost_lines: 0, contributing_rows: snapshot.row_count }
-    const rows = [...groups.values()].map((group) => {
-      const meta = group.product_id == null ? null : metadata.get(group.product_id)
-      const row: ProductSalesRankingRow = {
-        product_id: group.product_id, product_name: String(meta?.name || group.product_name), sale_count: group.saleIds.size, qty: group.qty,
-        line_sales_usd: group.lineSales.toNumber(), cost_usd: group.cost.toNumber(),
-        profit_usd: group.lineSales.subtract(group.cost).toNumber(), cost_missing_snapshot_lines: group.missing,
-        category_id: meta?.category_id == null ? null : Number(meta.category_id), category_name: String(meta?.category || ''),
-        barcode: String(meta?.barcode || ''), on_hand_qty: num(meta?.on_hand_qty),
-      }
-      return attachReportDiagnostic(row, { ...diagnostic, complete: group.missing === 0, unknown_cost_lines: group.missing })
-    })
-    rows.sort((a, b) => b.line_sales_usd - a.line_sales_usd || b.qty - a.qty)
-    return rows.slice(0, Math.max(1, Math.min(1000, Math.trunc(limit) || 200)))
+    return (await getProductSalesReport(env, f, limit)).rows
   }
   const db = getDb(env)
   const { sql: whereSql, params } = whereActiveSales('s', f)

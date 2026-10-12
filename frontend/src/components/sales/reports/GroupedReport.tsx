@@ -41,12 +41,18 @@ import {
   statementGroupLabel,
   statementNoteText,
   sumTotals,
+  topOfLabel,
   WEEKDAY_LABEL_KEYS,
   type ReportGroupBy,
+  type ReportNoun,
   type ReportTotals,
   type SortState,
 } from './reportModel.ts'
 import { exportMenuItems, rangeSubtitle, tableLabels, type DrillPatch, type ReportViewProps, type Tr } from './reportTypes.ts'
+
+/** GET /api/reports/grouped. total_groups counts every group in the window;
+ *  totals are the window's (product totals for by=product), absent for couriers. */
+interface GroupedResponse { rows?: unknown[]; total_groups?: number; truncated?: boolean; totals?: unknown }
 
 export interface GroupRow extends ReportTotals {
   key: string
@@ -169,9 +175,19 @@ export default function GroupedReport(p: ReportViewProps) {
   const by: ReportGroupBy = view.groupedBy || 'customer'
   const params = useMemo(() => ({ ...reportQueryParams(filters, view), by, limit: 500 }), [filters, view, by])
   const depsKey = JSON.stringify(params)
-  const state = useReportData<{ rows?: unknown[] }>(() => getReportGrouped(params) as Promise<{ rows?: unknown[] }>, depsKey)
+  const state = useReportData<GroupedResponse>(() => getReportGrouped(params) as Promise<GroupedResponse>, depsKey)
   const raw = state.data?.rows || []
+  // The server keeps the top `limit` groups. A capped list says so, and its
+  // totals line and export carry the window's own totals rather than the sum
+  // of the rows that fit. A search narrows rows on this page only, so a
+  // searched list sums what it shows.
+  const totalGroups = Math.max(num(state.data?.total_groups), raw.length)
+  const truncated = state.data?.truncated === true || totalGroups > raw.length
+  const windowTotals = !search && state.data?.totals && typeof state.data.totals === 'object' ? state.data.totals as Record<string, unknown> : null
+  const countPart = (shown: number, noun: ReportNoun) => !truncated ? countLabel(shown, noun, tr)
+    : search ? `${countLabel(shown, noun, tr)} · ${topOfLabel(raw.length, totalGroups, noun, tr)}` : topOfLabel(shown, totalGroups, noun, tr)
   const labels = tableLabels(tr)
+  const totalLabel = truncated && !search ? `${labels.total} · ${topOfLabel(raw.length, totalGroups, REPORT_NOUNS[by], tr)}` : labels.total
   const title = tr(view.labelKey, view.fallback)
   const basisLabel = tr(BASIS_LABELS[options.basis].key, BASIS_LABELS[options.basis].fallback)
   const [sort, setSort] = useState<SortState | null>(null)
@@ -244,10 +260,13 @@ export default function GroupedReport(p: ReportViewProps) {
   )
 
   if (by === 'product') {
-    const totalLine = round2(productRows.reduce((s, r) => s + r.line_sales_usd, 0))
-    const totalQty = productRows.reduce((s, r) => s + r.qty, 0)
+    const totalLine = windowTotals ? num(windowTotals.line_sales_usd) : round2(productRows.reduce((s, r) => s + r.line_sales_usd, 0))
+    const totalQty = windowTotals ? num(windowTotals.qty) : productRows.reduce((s, r) => s + r.qty, 0)
+    const totalSales = windowTotals ? num(windowTotals.sale_count) : productRows.reduce((s, r) => s + r.sale_count, 0)
     const allProfit = productRows.length > 0 && productRows.every((r) => typeof r.profit_usd === 'number')
-    const totalProfit = allProfit ? round2(productRows.reduce((s, r) => s + num(r.profit_usd), 0)) : null
+    const totalProfit = allProfit ? (windowTotals ? num(windowTotals.profit_usd) : round2(productRows.reduce((s, r) => s + num(r.profit_usd), 0))) : null
+    const totalCost = allProfit ? (windowTotals ? num(windowTotals.cost_usd) : round2(productRows.reduce((s, r) => s + num(r.cost_usd), 0))) : null
+    const productTotalsRow: ProductRow | null = productRows.length > 1 || truncated ? { product_id: null, product_name: totalLabel, sale_count: totalSales, qty: totalQty, line_sales_usd: totalLine, ...(allProfit ? { cost_usd: totalCost ?? 0, profit_usd: totalProfit ?? 0, margin_pct: pct(totalProfit ?? 0, totalLine) } : {}) } : null
     // Memoized like every other view's column list (PeriodReport,
     // SalesListReport): an unmemoized array here defeated ReportTable's own
     // memoization of columnDefs/visibleColumns/sortedRows downstream, so an
@@ -269,7 +288,7 @@ export default function GroupedReport(p: ReportViewProps) {
         : []),
       { key: 'share', label: tr('rpt_share', 'Share'), kind: 'pct', value: (r) => pct(r.line_sales_usd, totalLine), defaultVisible: false },
     ], [tr, allProfit, totalLine]) // eslint-disable-line react-hooks/rules-of-hooks -- `by` is fixed per mounted instance (see comment above)
-    const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtMoney), productRows)
+    const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtMoney), productTotalsRow ? [...productRows, productTotalsRow] : productRows)
     const open = productRows.find((r) => String(r.product_id ?? r.product_name) === openKey) || null
     return (
       <ReportFrame
@@ -277,7 +296,7 @@ export default function GroupedReport(p: ReportViewProps) {
         titleControl={p.titleControl}
         hint={{ label: title, text: tr('rpt_hint_products', 'Line sales = item line totals after line discounts, before order-level discounts, over recognized sales only. Ranked by line sales; top 500.') }}
         menuAction={exportMenu(() => downloadCSV(reportFileName('products', filters, 'csv'), csv()), () => openPrintExport({ title: printTitle, subtitle, headers: columns.map((c) => c.label), rows: csv() }))}
-        summary={productRows.length ? joinSummary([countLabel(productRows.length, REPORT_NOUNS.product, tr), `${fmtQty(totalQty)} ${tr('quantity', 'Quantity').toLowerCase()}`, `${tr('rpt_line_sales', 'Line sales')} ${fmtMoney(totalLine)}`, totalProfit != null ? `${tr('rpt_gross_profit', 'Gross profit')} ${fmtMoney(totalProfit)} (${fmtPct(pct(totalProfit, totalLine))})` : null]) : ''}
+        summary={productRows.length ? joinSummary([countPart(productRows.length, REPORT_NOUNS.product), `${fmtQty(totalQty)} ${tr('quantity', 'Quantity').toLowerCase()}`, `${tr('rpt_line_sales', 'Line sales')} ${fmtMoney(totalLine)}`, totalProfit != null ? `${tr('rpt_gross_profit', 'Gross profit')} ${fmtMoney(totalProfit)} (${fmtPct(pct(totalProfit, totalLine))})` : null]) : ''}
         error={state.error}
         onRetry={state.reload}
         retryLabel={tr('retry', 'Retry')}
@@ -291,7 +310,7 @@ export default function GroupedReport(p: ReportViewProps) {
           fmtMoney={fmtMoney}
           labels={labels}
           loading={state.loading}
-          totalsRow={productRows.length > 1 ? { product_id: null, product_name: labels.total, sale_count: productRows.reduce((s, r) => s + r.sale_count, 0), qty: totalQty, line_sales_usd: totalLine, ...(allProfit ? { cost_usd: round2(productRows.reduce((s, r) => s + num(r.cost_usd), 0)), profit_usd: totalProfit ?? 0, margin_pct: pct(totalProfit ?? 0, totalLine) } : {}) } : null}
+          totalsRow={productTotalsRow}
           cardBody={(row) => renderProductCard(row, tr, fmtMoney)}
           sort={sort}
           onSortChange={setSort}
@@ -377,12 +396,13 @@ export default function GroupedReport(p: ReportViewProps) {
   }
 
   // ---- canonical groups (customer / cashier / payment / hour / weekday / branch) ----
-  const totals = sumTotals(groupRows)
+  const totals = (windowTotals && normalizeTotals(windowTotals)) || sumTotals(groupRows)
+  const groupTotalsRow: GroupRow | null = groupRows.length > 1 || truncated ? { ...totals, key: '__totals', label: totalLabel, entity_id: null } : null
   const showProfit = groupRows.length > 0 && groupRows.every((r) => hasProfit(r))
   const totalBasis = basisValue(totals, options.basis)
   // Memoized for the same reason as the products/couriers branches above.
   const columns = useMemo<Array<ReportColumn<GroupRow>>>(() => [
-    { key: 'label', label: tr(view.labelKey, view.fallback), primary: true, value: (r) => groupRowLabel(by, r, tr), sortDir: 'asc' },
+    { key: 'label', label: tr(view.labelKey, view.fallback), primary: true, value: (r) => (r.key === '__totals' ? r.label : groupRowLabel(by, r, tr)), sortDir: 'asc' },
     { key: 'tx_count', label: tr('sales', 'Sales'), kind: 'int', value: (r) => r.tx_count },
     { key: 'gross_sales_usd', label: tr('rpt_total_sales', 'Total sales'), kind: 'money', value: (r) => r.gross_sales_usd + r.item_discount_usd, defaultVisible: options.basis === 'gross', emphasis: options.basis === 'gross' },
     { key: 'discounts', label: tr('discounts', 'Discounts'), kind: 'money', value: (r) => r.total_discount_usd, defaultVisible: false },
@@ -400,7 +420,7 @@ export default function GroupedReport(p: ReportViewProps) {
         ]
       : []),
   ], [tr, view.labelKey, view.fallback, by, options.basis, totalBasis, showProfit]) // eslint-disable-line react-hooks/rules-of-hooks -- `by` is fixed per mounted instance
-  const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtMoney), groupRows)
+  const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtMoney), groupTotalsRow ? [...groupRows, groupTotalsRow] : groupRows)
   const open = groupRows.find((r) => r.key === openKey) || null
   const drill = open ? groupDrill(by, open) : null
   const statement = open ? buildIncomeStatement({ sales: open, profitMode: 'gross', khrToUsd: p.khrToUsd }) : []
@@ -411,7 +431,7 @@ export default function GroupedReport(p: ReportViewProps) {
       titleControl={p.titleControl}
       hint={{ label: title, text: tr('rpt_hint_grouped', 'Each row is the full revenue calculation for that group (same definition as the Overview), so the rows add up to the totals line. Share = the row’s basis figure as a percentage of the total.') }}
       menuAction={exportMenu(() => downloadCSV(reportFileName(view.id, filters, 'csv'), csv()), () => openPrintExport({ title: printTitle, subtitle, headers: columns.map((c) => c.label), rows: csv() }))}
-      summary={groupRows.length ? joinSummary([countLabel(groupRows.length, REPORT_NOUNS[by], tr), countLabel(totals.tx_count, REPORT_NOUNS.sale, tr), `${basisLabel} ${fmtMoney(totalBasis)}`, totals.refund_usd ? `${tr('refunds', 'Refunds')} ${fmtMoney(totals.refund_usd)}` : null, hasProfit(totals) ? `${tr('rpt_gross_profit', 'Gross profit')} ${fmtMoney(totals.profit_usd)} (${fmtPct(pct(totals.profit_usd, totalBasis))})` : null]) : ''}
+      summary={groupRows.length ? joinSummary([countPart(groupRows.length, REPORT_NOUNS[by]), countLabel(totals.tx_count, REPORT_NOUNS.sale, tr), `${basisLabel} ${fmtMoney(totalBasis)}`, totals.refund_usd ? `${tr('refunds', 'Refunds')} ${fmtMoney(totals.refund_usd)}` : null, hasProfit(totals) ? `${tr('rpt_gross_profit', 'Gross profit')} ${fmtMoney(totals.profit_usd)} (${fmtPct(pct(totals.profit_usd, totalBasis))})` : null]) : ''}
       error={state.error}
       onRetry={state.reload}
       retryLabel={tr('retry', 'Retry')}
@@ -425,7 +445,7 @@ export default function GroupedReport(p: ReportViewProps) {
         fmtMoney={fmtMoney}
         labels={labels}
         loading={state.loading}
-        totalsRow={groupRows.length > 1 ? { ...totals, key: '__totals', label: labels.total, entity_id: null } : null}
+        totalsRow={groupTotalsRow}
         sort={sort ?? (clockOrder ? { key: 'label', dir: 'asc' } : null)}
         onSortChange={setSort}
         selectedKey={openKey}

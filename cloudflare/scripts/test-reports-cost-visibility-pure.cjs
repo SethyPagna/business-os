@@ -32,8 +32,11 @@ Module._load = function(request, parent, isMain) {
   if (request === '../lib/salesAnalytics') return new Proxy({
     SALES_GROUP_KEYS: ['branch'], reportMoneyDiagnostic: () => null,
     getSalesTotals: async () => ({ ...totals }), previousPeriodFilters: () => ({}),
-    getSalesGroupedTotals: async () => [{ key: 'main', label: 'Main', ...totals }],
-    getProductSalesRanking: async () => [{ product_id: 1, product_name: 'P', line_sales_usd: 20, ...productSensitive }],
+    getSalesGroupedReport: async () => ({ rows: [{ key: 'main', label: 'Main', ...totals }], total_groups: 1, totals: { ...totals } }),
+    getSalesOverviewBlocks: async () => ({ totals: { ...totals }, couriers: [{ ...courier }],
+      paymentMethods: { rows: [{ key: 'cash', label: 'Cash', ...totals }], total_groups: 1, totals: { ...totals } } }),
+    getProductSalesReport: async () => ({ rows: [{ product_id: 1, product_name: 'P', line_sales_usd: 20, ...productSensitive }], total_groups: 1,
+      totals: { line_sales_usd: 20, ...productSensitive } }),
     getDeliveryContactTotals: async () => [{ ...courier }],
     getBusinessSummaryPeriodRows: async () => [{ period: '2026-09-13', ...totals }],
     getBusinessSummarySalesRows: async () => [{ id: 1, cursor_at: '2026-09-13 00:00:00', receipt_number: 'R1', revenue_usd: 20, ...saleSensitive }],
@@ -217,5 +220,7 @@ function assertNoSensitive(value, label) {
 const source = fs.readFileSync(file, 'utf8')
 assert.match(source, /out\.sales = \{[\s\S]*totals: gateTotals\(totals[\s\S]*previous: previous \? gateTotals/)
 assert.match(source, /periodRows\.map\(\(r\) => gateTotals/)
-assert.match(source, /getSalesGroupedTotals[\s\S]*\.map\(\(r\) => gateTotals/)
+assert.match(source, /getSalesGroupedReport[\s\S]*\.map\(\(r\) => gateTotals/)
+assert.match(source, /totals = gateTotals\(report\.totals/)
+assert.match(source, /totals = gateProductRow\(report\.totals/)
 assert.match(source, /getDeliveryContactTotals[\s\S]*\.map\(\(row\) => gateCourierRow/)

@@ -265,6 +265,20 @@ insRet.run(1, 3, 10, 'completed', 'customer', UTC(24, 8), 1) // customer refund 
   check('paymentMethod filter: grouped rows still reconcile to getSalesTotals (revenue 50)', near(sum(abaOnly, 'revenue_usd'), abaTotals.revenue_usd) && near(abaTotals.revenue_usd, 50))
   const limited = await kernel.getSalesGroupedTotals(env, filters, 'customer', 1)
   check('limit caps the row count (top by revenue)', limited.length === 1 && limited[0].key === 'id:2')
+  // AL L2: a capped list must say it is capped and carry the window's totals.
+  const limitedReport = await kernel.getSalesGroupedReport(env, filters, 'customer', 1)
+  const allCustomers = await kernel.getSalesGroupedReport(env, filters, 'customer')
+  const windowTotals = await kernel.getSalesTotals(env, filters)
+  check(`capped grouped report counts every group (${limitedReport.total_groups} of ${allCustomers.rows.length}) and keeps the window totals (revenue ${limitedReport.totals.revenue_usd} = ${windowTotals.revenue_usd}, not the one row's ${limitedReport.rows[0].revenue_usd})`,
+    limitedReport.rows.length === 1 && limitedReport.total_groups === allCustomers.rows.length && limitedReport.total_groups > 1
+      && near(limitedReport.totals.revenue_usd, windowTotals.revenue_usd) && !near(limitedReport.totals.revenue_usd, limitedReport.rows[0].revenue_usd)
+      && allCustomers.total_groups === allCustomers.rows.length)
+  const limitedProducts = await kernel.getProductSalesReport(env, filters, 1)
+  const allProducts = await kernel.getProductSalesReport(env, filters)
+  check(`capped product report counts every product (${limitedProducts.total_groups}) and totals the window (line sales ${limitedProducts.totals.line_sales_usd})`,
+    limitedProducts.rows.length === 1 && limitedProducts.total_groups === allProducts.rows.length && limitedProducts.total_groups > 1
+      && near(limitedProducts.totals.line_sales_usd, sum(allProducts.rows, 'line_sales_usd'))
+      && near(limitedProducts.totals.profit_usd, sum(allProducts.rows, 'profit_usd')))
 
   // ---- product ranking ----
   const products = await kernel.getProductSalesRanking(env, filters)

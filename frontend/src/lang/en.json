@@ -6441,6 +6441,7 @@
   "rpt_hint_rounding": "Each figure above is rounded to the cent on its own, so the chain can land a cent from the total. Shown rather than absorbed into a line.",
   "rpt_operating_expenses": "Operating expenses",
   "rpt_total_profit": "Final Profit",
+  "rpt_top_n_of_m": "Top {shown} of {total} {noun}",
   "rpt_hint_net_result": "Gross profit minus every recorded expense in the range. This is the bottom line.",
   "rpt_delivery_breakdown": "Delivery fees: charged vs actual cost",
   "rpt_hint_delivery_charged": "Delivery fees charged to customers on every delivery in the range. A fee the shop paid itself is not counted here.",

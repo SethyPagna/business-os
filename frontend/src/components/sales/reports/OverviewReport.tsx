@@ -34,6 +34,7 @@ import {
   num,
   pct,
   receiptLineKind,
+  REPORT_NOUNS,
   reportFileName,
   reportQueryParams,
   STATEMENT_GROUPS,
@@ -41,6 +42,7 @@ import {
   statementGroupLabel,
   statementNoteText,
   statementOperator,
+  topOfLabel,
   type StatementGroup,
   type StatementLine,
 } from './reportModel.ts'
@@ -65,7 +67,7 @@ interface TypeRow { fee_type: string; count: number; amount_usd: number; amount_
 interface OverviewResponse {
   is_admin?: boolean
   previous_range?: { startDate: string; endDate: string } | null
-  sales?: { totals: unknown; previous: unknown; payment_methods: PaymentRow[]; couriers: CourierRow[] }
+  sales?: { totals: unknown; previous: unknown; payment_methods: PaymentRow[]; payment_methods_total_groups?: number; payment_methods_truncated?: boolean; couriers: CourierRow[] }
   returns?: { totals: ReturnsTotals; previous: ReturnsTotals | null; by_reason: ReasonRow[] }
   expenses?: { totals: ExpenseTotals; previous: ExpenseTotals | null; by_type: TypeRow[] }
 }
@@ -134,11 +136,16 @@ export default function OverviewReport(p: ReportViewProps) {
     setOpen((cur) => (cur === id ? null : id))
   }
   const payments = data?.sales?.payment_methods || []
+  // The fold holds the top methods only; a capped fold says so and shares
+  // against the window's revenue, not the sum of the methods that fit.
+  const paymentGroups = Math.max(num(data?.sales?.payment_methods_total_groups), payments.length)
+  const paymentsTruncated = data?.sales?.payment_methods_truncated === true || paymentGroups > payments.length
+  const paymentRevenue = paymentsTruncated && sales ? sales.revenue_usd : payments.reduce((s, row) => s + row.revenue_usd, 0)
   const couriers = data?.sales?.couriers || []
   const reasons = data?.returns?.by_reason || []
   const types = data?.expenses?.by_type || []
   const chips: Array<{ id: Breakdown; label: string; count: number }> = [
-    data?.sales ? { id: 'payments', label: tr('rpt_payments', 'Payment methods'), count: payments.length } : null,
+    data?.sales ? { id: 'payments', label: tr('rpt_payments', 'Payment methods'), count: paymentGroups } : null,
     data?.sales && couriers.length ? { id: 'couriers', label: tr('rpt_couriers', 'Couriers'), count: couriers.length } : null,
     data?.returns ? { id: 'reasons', label: tr('by_reason', 'By reason'), count: reasons.length } : null,
     data?.expenses ? { id: 'types', label: `${tr('fees', 'Expenses')} · ${tr('by_type', 'By type')}`, count: types.length } : null,
@@ -155,7 +162,7 @@ export default function OverviewReport(p: ReportViewProps) {
     { key: 'revenue_usd', label: tr('revenue', 'Revenue'), kind: 'money', value: (r) => r.revenue_usd, emphasis: true },
     { key: 'pending_revenue_usd', label: tr('rpt_pending_credit', 'Not Paid'), kind: 'money', value: (r) => r.pending_revenue_usd, defaultVisible: false },
     { key: 'collected_usd', label: tr('collected_total', 'Collected total'), kind: 'money', value: (r) => r.collected_usd },
-    { key: 'share', label: tr('rpt_share', 'Share'), kind: 'pct', value: (r) => pct(r.revenue_usd, payments.reduce((s, p) => s + p.revenue_usd, 0)), defaultVisible: false },
+    { key: 'share', label: tr('rpt_share', 'Share'), kind: 'pct', value: (r) => pct(r.revenue_usd, paymentRevenue), defaultVisible: false },
   ]
   const courierColumns: Array<ReportColumn<CourierRow>> = [
     { key: 'name', label: tr('rpt_courier', 'Courier'), primary: true, value: (r) => r.delivery_contact_name || tr('unknown', 'Unknown') },
@@ -338,7 +345,7 @@ export default function OverviewReport(p: ReportViewProps) {
       </ReportFrame>
       <Fold className="reports-fold-panel" open={open != null} onClose={() => setOpen(null)} anchorRef={anchorRef} anchorKey={open ?? undefined} size="lg" title={chips.find((c) => c.id === open)?.label || ''}>
         <div className="p-2">
-          {open === 'payments' ? <ReportTable surfaceKey="reports-overview-payments" columns={paymentColumns} rows={payments} rowKey={(r) => r.key} style={style} fmtMoney={fmtMoney} labels={labels} /> : null}
+          {open === 'payments' ? <ReportTable surfaceKey="reports-overview-payments" columns={paymentColumns} rows={payments} rowKey={(r) => r.key} style={style} fmtMoney={fmtMoney} labels={labels} footer={paymentsTruncated ? <p className="text-[length:var(--ui-size-meta)] text-[var(--ui-ink-3)]">{topOfLabel(payments.length, paymentGroups, REPORT_NOUNS.payment_method, tr)}</p> : undefined} /> : null}
           {open === 'couriers' ? <ReportTable surfaceKey="reports-overview-couriers" columns={courierColumns} rows={couriers} rowKey={(r) => String(r.delivery_contact_id ?? r.delivery_contact_name)} style={style} fmtMoney={fmtMoney} labels={labels} /> : null}
           {open === 'reasons' ? <ReportTable surfaceKey="reports-overview-reasons" columns={reasonColumns} rows={reasons} rowKey={(r) => r.reason || '—'} style={style} fmtMoney={fmtMoney} labels={labels} /> : null}
           {open === 'types' ? <ReportTable surfaceKey="reports-overview-types" columns={typeColumns} rows={types} rowKey={(r) => r.fee_type || '—'} style={style} fmtMoney={fmtMoney} labels={labels} /> : null}

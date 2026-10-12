@@ -15,9 +15,10 @@ import {
   type SalesReportSnapshot,
   getSalesTotals,
   getDeliveryContactTotals,
-  getSalesGroupedTotals,
+  getSalesGroupedReport,
+  getSalesOverviewBlocks,
   reportCustomerNameExpr,
-  getProductSalesRanking,
+  getProductSalesReport,
   previousPeriodFilters,
   SALES_GROUP_KEYS,
   type SalesGroupKey,
@@ -413,18 +414,19 @@ app.get('/overview', async (c) => {
   }
 
   if (canSales) {
-    const [totals, previous, paymentMethods, couriers] = await Promise.all([
-      getSalesTotals(c.env, f),
+    // The payments fold is the SAME grouped kernel the "Payment methods" view
+    // reads (case-insensitive method key, canonical revenue / collected
+    // figures), so the two can never disagree. It shares the totals' snapshot.
+    const [{ totals, paymentMethods: payments, couriers }, previous] = await Promise.all([
+      getSalesOverviewBlocks(c.env, f),
       prev ? getSalesTotals(c.env, prev) : Promise.resolve(null),
-      // The SAME grouped kernel the "Payment methods" view reads (case-
-      // insensitive method key, canonical revenue / collected figures), so the
-      // Overview's payments fold and that view can never disagree.
-      getSalesGroupedTotals(c.env, f, 'payment_method'),
-      getDeliveryContactTotals(c.env, f),
     ])
+    const paymentMethods = payments.rows
     out.sales = {
       totals: gateTotals(totals as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user)),
       previous: previous ? gateTotals(previous as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user)) : null,
+      payment_methods_total_groups: payments.total_groups,
+      payment_methods_truncated: payments.total_groups > paymentMethods.length,
       payment_methods: paymentMethods.map((r) => ({
         key: r.key,
         payment_method: r.label || r.key,
@@ -515,17 +517,29 @@ app.get('/grouped', async (c) => {
   const by = String(query.by || '').trim().toLowerCase()
   const limit = clampInt(query.limit, 300, 1, 1000)
   const isAdmin = isAdminControlUser(user)
+  // A capped list says so: total_groups counts every group in the window,
+  // truncated flags that rows hold fewer, and totals are the whole window's
+  // (never the sum of the returned rows) so a totals line or export stays true.
   let rows: unknown[]
+  let totalGroups: number
+  let totals: Record<string, unknown> | null = null
   if (by === 'product') {
-    rows = (await getProductSalesRanking(c.env, f, limit)).map((r) => gateProductRow(r as unknown as Record<string, unknown>, canViewAcquisitionCosts(user)))
+    const report = await getProductSalesReport(c.env, f, limit)
+    rows = report.rows.map((r) => gateProductRow(r as unknown as Record<string, unknown>, canViewAcquisitionCosts(user)))
+    totalGroups = report.total_groups
+    totals = gateProductRow(report.totals as unknown as Record<string, unknown>, canViewAcquisitionCosts(user))
   } else if (by === 'courier') {
     rows = (await getDeliveryContactTotals(c.env, f)).map((row) => gateCourierRow(row as unknown as Record<string, unknown>, isAdmin))
+    totalGroups = rows.length
   } else if ((SALES_GROUP_KEYS as readonly string[]).includes(by)) {
-    rows = (await getSalesGroupedTotals(c.env, f, by as SalesGroupKey, limit)).map((r) => gateTotals(r as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user)))
+    const report = await getSalesGroupedReport(c.env, f, by as SalesGroupKey, limit)
+    rows = report.rows.map((r) => gateTotals(r as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user)))
+    totalGroups = report.total_groups
+    totals = gateTotals(report.totals as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user))
   } else {
     return c.json({ error: 'by must be one of customer, cashier, payment_method, hour, weekday, branch, product, courier' }, 400)
   }
-  return c.json({ by, is_admin: isAdmin, filters: f, rows })
+  return c.json({ by, is_admin: isAdmin, filters: f, rows, total_groups: totalGroups, truncated: totalGroups > rows.length, totals })
 })
 
 

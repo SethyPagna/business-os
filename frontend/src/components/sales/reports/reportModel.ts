@@ -329,6 +329,12 @@ export function countLabel(n: number, noun: ReportNoun, tr: (key: string, fallba
   return `${fmtInt(n)}${more ? '+' : ''} ${word.toLowerCase()}`
 }
 
+/** "Top 500 of 501 customers": a capped list says how much of the window it holds. */
+export function topOfLabel(shown: number, total: number, noun: ReportNoun, tr: (key: string, fallback: string) => string): string {
+  return tr('rpt_top_n_of_m', 'Top {shown} of {total} {noun}')
+    .replace('{shown}', fmtInt(shown)).replace('{total}', fmtInt(total)).replace('{noun}', tr(noun[2], noun[3]).toLowerCase())
+}
+
 export function fmtInt(n: number): string {
   return Math.round(num(n)).toLocaleString('en-US')
 }
