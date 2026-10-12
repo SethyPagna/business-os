@@ -372,6 +372,46 @@ const PATCHES = {
     { name: 'delete-audit-best-effort', file: FEES, from: FEE_DELETE_BATCH_AUDIT,
       to: "    ])\n    await audit(c.env, user.id, user.username || null, 'delete', 'fee', id, { before: existing, after: null }, changedFields(existing as unknown as Record<string, unknown>, null, { keys: FEE_AUDIT_COLUMNS }))" },
   ],
+  // The approval ignores the version the requester saw (judges only what it reads now). Must turn K3 RED.
+  'approve-ignores-reviewed-version': [
+    { name: 'approve-ignores-reviewed-version', file: REVIEW_APPLY,
+      from: '  if (reviewed.known && version !== reviewed.updatedAt) throw new FeeReviewStaleError()',
+      to: '  void reviewed' },
+  ],
+  // The approved delete's audit row carries no before-image (the pre-fix applier wrote details = null). Must turn K4 RED.
+  'approve-no-before-image': [
+    { name: 'approve-no-before-image', file: REVIEW_APPLY,
+      from: [
+        "      buildAuditStatement(reviewer.id, reviewer.name, 'delete', 'fee', id, {",
+        '        before: existing,',
+        '        after: null,',
+        '        pending_action_id: row.id,',
+        '        requested_by: row.requested_by,',
+        '        requested_by_name: row.requested_by_name,',
+        '      }, changedFields(existing, null, { keys: FEE_DELETE_AUDIT_COLUMNS })),'].join('\n'),
+      to: "      buildAuditStatement(reviewer.id, reviewer.name, 'delete', 'fee', id, null)," },
+  ],
+  // The decision is marked after the effect, in a separate commit (the pre-fix shape). Must turn K5c and K6 RED.
+  'approve-decision-separate': [
+    { name: 'approve-decision-separate-batch', file: REVIEW_APPLY,
+      from: "      { sql: `SELECT CASE WHEN changes() = 1 THEN 1 ELSE json_extract('review_not_open', '$') END AS review_decision_guard`, params: {} },",
+      to: '' },
+    { name: 'approve-decision-separate-update', file: REVIEW_APPLY,
+      from: "        WHERE id = @pendingId AND status = 'open' AND updated_at IS @pendingVersion`,",
+      to: "        WHERE 0`," },
+    { name: 'approve-decision-separate-outcome', file: REVIEW_APPLY,
+      from: "  await notify(env, waitUntil, 'fees', { type: 'deleted', id })\n  return { pendingActionMarkedAtomically: true }",
+      to: "  await notify(env, waitUntil, 'fees', { type: 'deleted', id })\n  return { pendingActionMarkedAtomically: false }" },
+  ],
+  // The reject reason is taken as-is again. Must turn K7 and K7b RED.
+  'no-reason-cap': [
+    { name: 'no-reason-cap-type', file: REVIEW_QUEUE,
+      from: "    if (supplied !== null && typeof supplied !== 'string') return c.json({ error: 'The reason must be text.', code: 'invalid_reason' }, 400)",
+      to: '' },
+    { name: 'no-reason-cap-length', file: REVIEW_QUEUE,
+      from: '  if (reason !== null && reason.length > REVIEW_REASON_MAX_LENGTH) {',
+      to: '  if (false) {' },
+  ],
   // The edit's audit row goes back to a best-effort call after the commit. Must turn K5a RED.
   'put-audit-best-effort': [
     { name: 'put-audit-best-effort', file: FEES, from: FEE_PUT_BATCH_AUDIT,
@@ -531,6 +571,7 @@ async function main() {
       t.eq('approve status', a.status, 200)
       t.eq('fee gone', !(await feeOf(H, f.id)), true)
       t.eq('request approved', (await pendingOf(H, pid)).status, 'approved')
+      t.eq('the request remembers the version it was made against', parse((await pendingOf(H, pid)).expected_entity_state_json), { updated_at: TOKEN0 })
       t.note('D1 statements: queue ' + r.d1 + ', approve ' + a.d1)
     })
     await check('K3', 'a queued delete is judged against what was reviewed: after the fee is edited, approving it is refused 409 and the edited fee survives', 'high', async (t) => {
@@ -619,6 +660,14 @@ async function main() {
       t.eq('code', r.body && r.body.code, 'reason_too_long')
       t.eq('request still open', row.status, 'open')
       t.note('stored reason length: ' + (row.reject_reason ? row.reject_reason.length : 0))
+    })
+    await check('K7b', 'a reject reason that is not text is refused 400 invalid_reason and the request stays open', 'medium', async (t) => {
+      const f = await seedFee(H)
+      const { pid } = await queueDelete(H, f)
+      const r = await reject(H, pid, { text: 'not a string' })
+      t.eq('status', r.status, 400)
+      t.eq('code', r.body && r.body.code, 'invalid_reason')
+      t.eq('request still open', (await pendingOf(H, pid)).status, 'open')
     })
     await check('K7-control', 'control: a 512-character reason is accepted and stored whole', 'control', async (t) => {
       const f = await seedFee(H)

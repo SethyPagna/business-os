@@ -887,6 +887,9 @@ app.delete('/:id', async (c) => {
     entityType: 'fee',
     entityId: id,
     payload: { id },
+    // K3: the reviewer approves the removal of THIS version. An edit in between
+    // makes the approval stale (lib/reviewApply.ts refuses it, the request stays open).
+    expectedEntityStateJson: JSON.stringify({ updated_at: deleteVersion }),
     summary: `Delete fee #${id}: ${existing.label || existing.fee_type} (${existing.fee_type}); USD ${existing.amount_usd}; KHR ${existing.amount_khr}; ${existing.fee_date.split('-').reverse().join('/')}`,
   })
   if (pendingId != null) {

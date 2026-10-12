@@ -13,9 +13,10 @@ import {
   markPendingActionApproved,
   markPendingActionRejected,
   resubmitPendingAction,
+  REVIEW_REASON_MAX_LENGTH,
   type PendingActionStatus,
 } from '../lib/pendingActions'
-import { applyApprovedPendingAction, NoReviewApplierError, productRemovePendingPointer, ReviewRequesterPermissionError, recoverApprovedBranchAction } from '../lib/reviewApply'
+import { applyApprovedPendingAction, FeeReviewStaleError, NoReviewApplierError, productRemovePendingPointer, ReviewDecisionConflictError, ReviewRequesterPermissionError, recoverApprovedBranchAction } from '../lib/reviewApply'
 import { ProductImageAssetError } from '../lib/productImagePermission'
 import { ProductRemoveError } from '../lib/productDelete'
 import type { Env } from '../index'
@@ -270,6 +271,10 @@ app.post('/:id/approve', async (c) => {
     if (err instanceof ProductRemoveError) {
       return c.json({ error: err.message, code: err.code }, err.status)
     }
+    // K3: the expense changed after the delete was requested; nothing applied, the request stays open.
+    if (err instanceof FeeReviewStaleError) return c.json({ success: false, error: err.message, code: err.code, conflict: true }, 409)
+    // K6: another decision won; nothing applied.
+    if (err instanceof ReviewDecisionConflictError) return c.json({ error: err.message, code: err.code }, 409)
     return c.json({ error: (err as Error).message || 'Failed to apply the approved change' }, 500)
   }
 
@@ -294,10 +299,17 @@ app.post('/:id/reject', async (c) => {
   if (!hasPermission(user, 'review')) return c.json({ error: 'Forbidden' }, 403)
   let reason: string | null = null
   try {
-    const body = await c.req.json<{ reason?: string }>()
-    reason = body?.reason ?? null
+    const body = await c.req.json<{ reason?: unknown }>()
+    const supplied = body?.reason ?? null
+    // K7: a reason is text, and capped like every other reason. Refused,
+    // never truncated: the request stays open.
+    if (supplied !== null && typeof supplied !== 'string') return c.json({ error: 'The reason must be text.', code: 'invalid_reason' }, 400)
+    reason = supplied
   } catch {
     reason = null
+  }
+  if (reason !== null && reason.length > REVIEW_REASON_MAX_LENGTH) {
+    return c.json({ error: `Reason is too long (max ${REVIEW_REASON_MAX_LENGTH} characters)`, code: 'reason_too_long' }, 400)
   }
   const ok = await markPendingActionRejected(c.env, id, {
     reviewedBy: user.id,

@@ -127,6 +127,12 @@ export async function getPendingAction(env: Env, id: number): Promise<PendingAct
   return row ?? null
 }
 
+// K7: one cap for a reviewer's reject reason, the same number and the same
+// measure (code units, reason.length) as every stock reason
+// (lib/stockReason.ts STOCK_REASON_MAX_LENGTH); scripts/test-fees-k-parity-pure.cjs
+// pins the two equal. Refused with 400 reason_too_long, never truncated.
+export const REVIEW_REASON_MAX_LENGTH = 512
+
 export interface ReviewPendingActionInput {
   reviewedBy?: number | null
   reviewedByName?: string | null
