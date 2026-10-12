@@ -19,6 +19,7 @@ import { sortLotsForDisplay } from '../../utils/lotDisplayOrder.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import TruncatedText from '../shared/TruncatedText.tsx'
+import SoleBranchLabel from '../shared/SoleBranchLabel.tsx'
 import { branchChoiceSettled } from '../../utils/branchScope.ts'
 import { buildHistoryRowModel, formatHistoryReference } from '../../utils/historyRowModel.ts'
 
@@ -279,6 +280,10 @@ export default function ManageBatchesModal({
     }
   }
 
+  // One branch to look at and it is already chosen: no picker, but the name stays visible.
+  const soleBranch = branchChoiceSettled(branchSelectOptions.map((option) => option.value), branchId) ? branchSelectOptions[0] : null
+  const soleBranchName = soleBranch && (typeof soleBranch.label === 'string' || typeof soleBranch.label === 'number') ? String(soleBranch.label) : ''
+
   return createPortal(
     <>
     <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center" onClick={closeIfIdle}>
@@ -287,13 +292,14 @@ export default function ManageBatchesModal({
           <div className="min-w-0">
             <h2 className="font-bold text-gray-900 dark:text-white">{tr('manage_batches', 'Manage Received Dates')}</h2>
             <div className="mt-0.5 detail-scroll-text text-xs text-gray-400">{product.name}</div>
+            {soleBranchName ? <SoleBranchLabel name={soleBranchName} label={t('branch') || 'Branch'} className="mt-0.5 text-xs text-gray-500 dark:text-gray-400" /> : null}
           </div>
           <button type="button" onClick={closeIfIdle} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600" disabled={!!savingId}>
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        {branchChoiceSettled(branchSelectOptions.map((option) => option.value), branchId) ? null : (
+        {soleBranch ? null : (
           <div className="border-b border-gray-200 p-4 dark:border-gray-700">
             <label className="block">
               <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{t('branch') || 'Branch'}</span>

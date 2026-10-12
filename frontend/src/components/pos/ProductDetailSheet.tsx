@@ -23,6 +23,7 @@ import ProductImage from './ProductImage'
 import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { branchStepMatters } from '../../utils/branchScope.ts'
+import SoleBranchLabel from '../shared/SoleBranchLabel.tsx'
 
 type ProductGroupMeta = {
   groupKind?: string
@@ -871,6 +872,9 @@ export default function ProductDetailSheet({
               units were at the other branch or nowhere. This used to render
               only for a standalone product that was already at zero, i.e.
               it disappeared exactly when the cashier could act on it. */}
+          {!branchChoiceMatters && sheetState.branchOptions.length === 1 ? (
+            <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('branch') || 'Branch'}</span><SoleBranchLabel name={sheetState.branchOptions[0].name} label={t('branch') || 'Branch'} className="text-xs font-medium text-gray-700 dark:text-gray-300" /></div>
+          ) : null}
           {branchChoiceMatters ? (
             <div className="flex gap-3"><span className="w-24 flex-shrink-0" /><span className="text-xs text-gray-400">{sheetState.branchSummary}</span></div>
           ) : null}

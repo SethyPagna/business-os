@@ -3,6 +3,7 @@ import { normalizePriceValue } from '../../utils/pricing.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { computeCartLineSavings } from './posCore.ts'
 import AppSelect from '../shared/AppSelect'
+import SoleBranchLabel from '../shared/SoleBranchLabel.tsx'
 import ProductNameRail from '../shared/ProductNameRail.tsx'
 import { branchCanSellNow } from '../../utils/branchRoles.ts'
 import { promotionLabelText } from '../../utils/saleItemNameLayout.ts'
@@ -251,6 +252,8 @@ export default function CartItem({
                 })),
               ]}
             />
+          ) : branches.length === 1 ? (
+            <SoleBranchLabel name={branches[0].name} label={translate(t, 'branch', 'Branch')} className="max-w-[100px] text-[11px] text-gray-500 dark:text-gray-400" />
           ) : null}
           <button
             type="button"
