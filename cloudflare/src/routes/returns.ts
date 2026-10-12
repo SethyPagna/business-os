@@ -2921,6 +2921,20 @@ app.patch('/:id', async (c) => {
     }
     return c.json(JSON.parse(previousReceipt.response_json) as { id: number; updated_at: string })
   }
+  // An edit never empties a return. Omitting `items` keeps the lines (below);
+  // an explicit empty list would reverse every restocked line, delete every
+  // line and rewrite the refund as 0 -- the body a client sent when it built
+  // the form or an Undo from a list row whose lines were never loaded. A whole
+  // return is undone by cancelling it, which keeps its lines for a restore.
+  // Lines at quantity 0 are refused by assertReturnableItems below. This sits
+  // after the receipt replay so a lost acknowledgement of an edit committed
+  // before this rule still replays as the success it was.
+  if (Array.isArray(body.items) && body.items.length === 0) {
+    return c.json({
+      error: 'A return must keep at least one line. To undo the whole return, cancel it instead.',
+      code: 'return_edit_empty',
+    }, 400)
+  }
 
   const existing = await db.prepare(`SELECT r.*,date(r.created_at,'+7 hours') AS received_business_date,COALESCE(v.revision,0) AS write_revision
     FROM returns r LEFT JOIN return_write_revisions v ON v.return_id=r.id WHERE r.id=?`).get<ReturnRow & { write_revision: number; received_business_date: string | null }>([id])
