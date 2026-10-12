@@ -75,6 +75,52 @@ async function positive(worker, tier, receipt, tagged, lostAck) {
     console.log(`PASS HTTP immutable pair ${tier} receipt=${receipt} tagged=${tagged} lostACK=${lostAck}, retry before inactive lookup`)
   } finally { f.sql.close() }
 }
+async function mergedSupplierReturn(worker, tier, receipt, tagged) {
+  const f = await world(worker, tier, receipt, tagged)
+  try {
+    f.sql.exec(load('lib/returnBulkAction.ts').returnMergePhysicalProofSchemaSql())
+    const created = await f.call('/returns/supplier', {
+      branch_id: 1, reason: 'Original pair source', settlement: 'refund', supplier_name: 'Fixture supplier',
+      exchange_rate: 4000, client_request_id: 'pair-supplier-create',
+      items: [{ product_id: 2, branch_id: 1, quantity: .1, cost_price_usd: 2,
+        stock_condition: tagged ? 'damaged' : 'ordinary', ...(tagged ? { damaged_lot_id: 1 } : {}) }],
+    })
+    assert.equal(created.status, 200, JSON.stringify(created.json))
+    const original = () => ({
+      items: f.sql.prepare('SELECT * FROM return_items ORDER BY id').all(),
+      receipts: f.sql.prepare('SELECT * FROM return_create_receipts ORDER BY return_id').all(),
+      allocations: f.sql.prepare('SELECT * FROM return_item_batch_allocations ORDER BY id').all(),
+      receipt: f.sql.prepare('SELECT * FROM product_batches WHERE id=2').get(),
+      movement: f.sql.prepare('SELECT * FROM inventory_movements WHERE id=99').get(),
+    })
+    const before = original()
+    const merged = await f.call(endpoint, command)
+    assert.equal(merged.status, 200, JSON.stringify(merged.json))
+    assert.deepEqual(original(), before)
+    const quantity = () => f.sql.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity
+    assert.equal(quantity(), .2)
+    const body = { client_request_id: 'pair-supplier-cancel', field: 'status', source: 'completed', target: 'cancelled',
+      items: f.sql.prepare('SELECT id,status expected_status,supplier_settlement expected_method,updated_at expected_updated_at FROM returns WHERE id=?').all(created.json.id) }
+    const cancelled = await f.call('/returns/bulk', body)
+    assert.equal(cancelled.status, 200, JSON.stringify(cancelled.json))
+    assert.equal(quantity(), .3)
+    const afterCancel = state(f)
+    assert.equal((await f.call('/returns/bulk', body)).status, 200)
+    assert.deepEqual(state(f), afterCancel)
+    const undo = await f.call(`/action-history/${cancelled.json.actionHistoryId}/undo`, { expected_generation: 0 })
+    assert.equal(undo.status, 200, JSON.stringify(undo.json)); assert.equal(quantity(), .2)
+    const redo = await f.call(`/action-history/${cancelled.json.actionHistoryId}/redo`, { expected_generation: 1 })
+    assert.equal(redo.status, 200, JSON.stringify(redo.json)); assert.equal(quantity(), .3)
+    assert.deepEqual(original(), before)
+    assert.equal(f.sql.prepare('SELECT stock_quantity FROM products WHERE id=2').get().stock_quantity, 0)
+    if (tagged) assert.deepEqual(f.sql.prepare('SELECT product_id,quantity_remaining FROM damaged_stock_lots ORDER BY id').all(),
+      [{ product_id: 2, quantity_remaining: 0 }, { product_id: 1, quantity_remaining: .1 }])
+    const proofs = f.sql.prepare("SELECT payload_json FROM undo_snapshots WHERE kind='return.fields.bulk.physical.v1' ORDER BY id").all().map(row => JSON.parse(row.payload_json))
+    assert.deepEqual(proofs.map(proof => [proof.generation, proof.sources[0].original.productId, proof.sources[0].effect.productId]),
+      [[0, 2, 1], [1, 2, 1], [2, 2, 1]])
+    console.log(`PASS real pair HTTP then supplier cancel/retry/Undo/Redo ${tier} receipt=${receipt} tagged=${tagged}`)
+  } finally { f.sql.close() }
+}
 async function main() {
   const worker = await h.bundle.exports.bundleWorker()
   for (const tier of ['free', 'paid']) for (const receipt of [false, true]) for (const tagged of [false, true]) await positive(worker, tier, receipt, tagged, tagged)
@@ -134,7 +180,8 @@ async function main() {
       console.log('PASS actual HTTP acceptance ' + tier + ': ' + mode)
     } finally { f.sql.close() }
   }
-  console.log('BOUNDED ORDINARY PAIR HTTP ONLY; reviewed/identity/bulk/replay/reset/schema rollout remain open')
+  for (const tier of ['free', 'paid']) for (const receipt of [false, true]) for (const tagged of [false, true]) await mergedSupplierReturn(worker, tier, receipt, tagged)
+  console.log('BOUNDED ORDINARY PAIR AND SUPPLIER CONSUMER HTTP; reviewed/identity/bulk/merge replay/reset/schema rollout remain open')
 }
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })
 module.exports = { world, main }
