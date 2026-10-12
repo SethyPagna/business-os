@@ -1,3 +1,19 @@
+## 12 October 2026 — active local merge checkpoint
+
+This dated checkpoint supersedes older current-state prose below; all historical entries remain preserved. The complete owner backlog is still active. A commit or bounded test pass is not a deployment or physical-device acceptance.
+
+Production and origin main remain bf7408b492937ddf18813441ea7f75d23ac0b10a. No production or schema change occurred in this continuation. The last recorded paid release has independent postflight evidence. Owner deployment windows remain 07:00 Cambodia and one night after 20:00 with a fresh closed-shift check; actual current release authorization and full-SHA gate/review requirements still apply.
+
+Local combined checkpoint 023521fa7efa9fea29a753a90ab317dca9a91418 contains reviewed ordinary pair merge and supplier-return physical-origin mapping. The actual HTTP chain creates a supplier return, merges its product, cancels the original return, retries, then performs Undo/Redo. All 95 requests pass across Free/Paid, receipt/NULL and ordinary/tagged cases; maximum measured statements per request are 45/44. Original purchase, movement, return-item and allocation evidence stays unchanged. The separate 296-request supplier matrix and Worker typecheck also pass. These are local adapter tests, not provider or full-feature certification.
+
+Client retry work is separate: stable actor/server-bound command and request key, unknown-outcome retry, duplicate-click coalescing and caller fences. Independent review found a late old-account fallback dialog could replace the new account prompt. Corrected local 1c3344c5 passes 32 mounted groups and fresh independent account/server late-response checks; composition is pending. The inherited fastStockIn source-pin failure remains recorded.
+
+A newly reported live receiving-session problem is reproduced on the production revision: product creation succeeds, but its stale unknown marker prevents the mixed new/existing stock request. A separate narrow modal fix passes scoped package and actual built-browser checks; full release gate and remaining browser matrix are pending. It does not depend on unreleased counted-stock schema.
+
+Still open: customer merge-origin consumers; reviewed/identity/group merge callers; compensating merge Undo/Redo; remaining sale, transfer and purchase-revert consumers; reset/restore/schema rollout; persisted destructive-import authority; full combined gate and release. Migrations 0243–0248 remain local and nondeployable. Every applicable original progress task, UI request and newer owner requirement remains in the private canonical register, including A–L counterexample mapping and receiving-session issue. Physical iOS/Android camera/library/HEIC, keyboard, installed PWA and printing acceptance remains NOT RUN; the owner has not tested the current photo fix.
+
+---
+
 ## Counted dependency composition — 09 October 2026
 
 LOCAL NONDEPLOYABLE SOURCE COMPOSITION. This partial union merges frozen counted core/return/session f949 onto certified owner/account/report release bf740 through a true three-way merge, followed by precise reviewed single-sale, grouped-sale, receiving, transfer, line-edit, standalone revert, conflict-mapper, converted legacy Set and import Add/history patches. Current release receipt identity and once-only recovery, service-worker bytes and reviewed owner/account/report behavior are retained. Tagged action, Products refresh, picker/options/return/history UI dependencies and the narrow amendment classifier/source-identity repairs are composed; newer inventory Add, supplier-return and merge writers remain separate. Scoped native, receipt/session/intake, Worker/frontend type and browser checks pass for the completed boundaries, with original failures retained. Request-pressure and identity fixture checks pass; combined independent certification remains pending. This is not whole counted feature approval or migration/deployment.
