@@ -30,8 +30,20 @@ let finalizerRun=0
 function fixture() {
   const raw = openDb(loadAll({through:242}))
   raw.prepare("INSERT INTO branches(id,name,role,canonical_key,is_active,is_default) VALUES(991,'Probe','shop','shop',1,1)").run()
-  for(const file of fs.readdirSync(path.join(__dirname,'../migrations')).filter(file=>file.endsWith('.sql') && Number(file.slice(0,4))>242).sort())
-    raw.exec(fs.readFileSync(path.join(__dirname,'../migrations',file),'utf8'))
+  for(const file of fs.readdirSync(path.join(__dirname,'../migrations')).filter(file=>file.endsWith('.sql') && Number(file.slice(0,4))>242).sort()) {
+    const migration=fs.readFileSync(path.join(__dirname,'../migrations',file),'utf8')
+    if(!file.startsWith('0246_')) { raw.exec(migration); continue }
+    raw.exec('BEGIN IMMEDIATE')
+    try {
+      raw.exec(`INSERT INTO system_flags(key,value) VALUES('stock_transaction_permit','legacy-separate-pool-v1');
+        INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"counted_conversion","token":"active-import-fixture"}');
+        DELETE FROM system_flags WHERE key='stock_transaction_permit';`)
+      raw.exec(migration)
+      raw.exec("DELETE FROM system_flags WHERE key='maintenance'; COMMIT")
+    } catch(error) { raw.exec('ROLLBACK'); throw error }
+  }
+  assert.equal(raw.prepare("SELECT value FROM system_flags WHERE key='stock_schema_epoch'").get().value,'counted-tagged-subset-v1')
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key IN ('maintenance','stock_transaction_permit')").get().n,0)
   assert.throws(()=>raw.exec("INSERT INTO products(name) VALUES('unguarded must refuse')"),/stock_transaction_required/)
   let physical=0
   const statement=(text,params=[])=>({text,params,bind(...values){return statement(text,values)},
