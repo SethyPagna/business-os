@@ -3,7 +3,7 @@ import { build } from 'esbuild'
 import { chromium, expect, type Page } from '@playwright/test'
 import { createServer } from 'node:http'
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import postcss from 'postcss'
@@ -55,7 +55,10 @@ const css = (await postcss([tailwindcss({ ...config, content: ['src/components/p
 const server = createServer((req,res)=>{res.setHeader('Content-Type',req.url==='/app.js'?'application/javascript':'text/html; charset=utf-8');res.end(req.url==='/app.js'?js:`<html><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style><body><div id="root"></div><script src="/app.js"></script></body></html>`)})
 await new Promise<void>(r=>server.listen(0,'127.0.0.1',r))
 const address=server.address();assert.ok(address&&typeof address!=='string')
-const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe'})
+const browserPaths = process.platform === 'win32'
+  ? ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Microsoft/Edge/Application/msedge.exe']
+  : ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser']
+const browser=await chromium.launch({headless:true,executablePath:browserPaths.find(existsSync)})
 const state=(p:Page)=>p.evaluate(()=>({calls:(window as any).calls,previews:(window as any).previews,outcomes:(window as any).outcomes}))
 async function start(p:Page,k=1,l=2){await p.evaluate(([k,l])=>{void(window as any).start(k,l)},[k,l])}
 async function count(p:Page,n:number){await p.waitForFunction(n=>(window as any).calls.length===n,n)}
