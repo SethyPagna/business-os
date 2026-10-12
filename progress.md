@@ -1,3 +1,20 @@
+## Current status — paused for Claude, 12 October 2026
+
+The owner explicitly stopped all BusinessOS chats and agents, paused goals and schedules, and requested this handoff. Do not restart implementation, CI, merges, deployments or branch cleanup automatically. The dated entries below are historical; their older active-state statements are superseded by this notice.
+
+Production and remote main remain `bf7408b492937ddf18813441ea7f75d23ac0b10a`. No new main publication or deployment occurred. The deployment heartbeat and local snapshot loop are paused/stopped. Receiving candidate `6bce28e212861732ce63e33c0d4a3e7468948ec7` is preserved, but its full Gate 38219617896 was cancelled at the owner's request; final Astra, publication and release remain unfinished.
+
+Local counted-stock work is saved through `1be0918a6998b807ed52a966b4e36502016a7e90` (6.0.8). The import authority composition passed 76 authority cases and 67 finalizer schedules. The real merge-to-return composition passed 143 authenticated requests, plus the 212-request customer matrix and Worker types. These are bounded local results, not approval of the complete counted feature or schema rollout.
+
+Separate clean checkpoints preserve merge HTTP replay (`15fbdc8e085ab309ae9b6f13231560600ec465d6`, partial independent review) and return-edit Undo fields (`7077327aa7ee217090f355720ae43795f4cf49af`, independent review pending). Customer CREATE/EDIT merge mapping, final review-permission certification, remaining consumers, reset/restore and migrations 0243–0248 remain open. Physical iOS/Android photo, HEIC, keyboard, installed-PWA and printing acceptance remains NOT RUN.
+
+The full task register retains 49 execution rows, 20 families, 30 owner requirements and 428 historical observations. All observations now have an applicability mapping: 283 applicable, 124 uncertain, eight bounded closures and 13 supersessions. These counts are documentary scope, not unique bugs or a completion percentage. The compact replacement draft is preserved but has not replaced the history or Golden Rules.
+
+See the [saved checkpoints and remaining work](docs/fleet/2026-10-12-paused-claude-handoff.md). The complete local Claude handoff includes worktree paths, claims, test logs, unfinished review controls and the latest peer checkpoints. Resume only after explicit owner instruction.
+
+---
+
+
 ## 12 October 2026 — active local merge checkpoint
 
 This dated checkpoint supersedes older current-state prose below; all historical entries remain preserved. The complete owner backlog is still active. A commit or bounded test pass is not a deployment or physical-device acceptance.
