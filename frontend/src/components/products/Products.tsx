@@ -3290,6 +3290,7 @@ function ProductsFullEditor() {
   // uses, so this list shortcut cannot be the quiet way round the question.
   const handleDuplicateKeepThis = useCallback(async (keepId: number, info: ExactDuplicateInfo) => {
     if (dupResolverBusyKey) return
+    const actorScope = captureActorReadScope('products:merge')
     const others = info.members.filter((m) => Number(m.id) !== Number(keepId))
     if (!others.length) return
     const keeper = info.members.find((m) => Number(m.id) === Number(keepId)) || { id: keepId, name: null }
@@ -3298,17 +3299,19 @@ function ProductsFullEditor() {
       let merged = 0
       for (const other of others) {
         const outcome = await mergeWithChoice(keeper, other)
+        if (!isActorReadScopeCurrent(actorScope, false)) return
         if (outcome === 'cancelled') break
         merged += 1
       }
       if (!merged) return
       notify(t('product_duplicate_merged') || 'Merged — stock, received-date records and images were carried onto the kept product')
       await load(true)
+      if (!isActorReadScopeCurrent(actorScope, false)) return
       await refreshDuplicateClusters()
     } catch (e) {
-      notify(getErrorMessage(e, t('merge_duplicate_failed') || 'Could not merge these records'), 'error')
+      if (isActorReadScopeCurrent(actorScope, false)) notify(getErrorMessage(e, t('merge_duplicate_failed') || 'Could not merge these records'), 'error')
     } finally {
-      setDupResolverBusyKey(null)
+      if (isActorReadScopeCurrent(actorScope, false)) setDupResolverBusyKey(null)
     }
   }, [dupResolverBusyKey, load, mergeWithChoice, notify, refreshDuplicateClusters, t])
 

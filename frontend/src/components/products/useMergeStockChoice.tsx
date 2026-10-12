@@ -1,9 +1,13 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import MergeStockChoiceDialog, {
   type MergeIdentityDiff, type MergePricingChange, type MergeStockChoice, type MergeStockImpact,
 } from './MergeStockChoiceDialog'
 import { mergeNeedsConfirmation } from './mergeConfirmationRule'
-import { getMergePreview, mergePossiblySameProducts } from '../../api/productWriteTransport.ts'
+import { getMergePreview, prepareProductPairMergeRequest, mergeProductPairRequest, type ProductPairMergeRequest } from '../../api/productWriteTransport.ts'
+import { captureActorReadScope, assertActorSessionDispatchAllowed, isActorReadScopeCurrent, type ActorReadScope } from '../../api/actorReadScope.ts'
+import { freezeDirectMutationBody } from '../../utils/directMutationRequest.ts'
+import { directMutationRefusedBeforeWrite } from '../../utils/directMutationRefusal.ts'
+import { presentWriteError } from '../../utils/writeErrorPresentation.ts'
 
 // The ONE merge-a-duplicate-pair flow, shared by every surface that resolves a
 // twin: the Products → Conflicts review, the exact-duplicate "Keep this" action
@@ -66,6 +70,12 @@ function replaceVars(template: string, values: Record<string, unknown>): string 
 // server's English. Any other error passes through untouched.
 function localizeRefusal(t: TranslateFn, error: unknown): unknown {
   const code = errorCode(error)
+  const key = ({
+    merge_request_conflict: 'resolve_refusal_request_conflict',
+    merge_request_permission: 'resolve_refusal_permission',
+    merge_request_budget: 'resolve_refusal_too_large',
+  } as Record<string, string>)[code]
+  if (key && t(key)) return Object.assign(new Error(t(key)), error, { message: t(key) })
   if (code === 'cost_outlier_review') {
     const outlier = (error as { costOutlier?: { min?: number; max?: number } } | null)?.costOutlier
     const template = t('merge_cost_outlier_refused')
@@ -97,15 +107,63 @@ function errorStockImpact(error: unknown, productId: number): MergeStockImpact {
 export function useMergeStockChoice(t: TranslateFn) {
   const [pending, setPending] = useState<PendingAsk | null>(null)
   const [working, setWorking] = useState(false)
+  const attemptRef = useRef<{ body: ProductPairMergeRequest; scope: ActorReadScope } | null>(null)
+  const flightRef = useRef<{ pair: string; scope: ActorReadScope; promise: Promise<'merged' | 'cancelled'> } | null>(null)
+  const cancelAskRef = useRef<(() => void) | null>(null)
+  const authority = captureActorReadScope('products:merge').authority
+
+  useEffect(() => {
+    if (attemptRef.current && !isActorReadScopeCurrent(attemptRef.current.scope, false)) attemptRef.current = null
+    if (flightRef.current && !isActorReadScopeCurrent(flightRef.current.scope, false)) {
+      cancelAskRef.current?.()
+      cancelAskRef.current = null
+      setPending(null)
+      setWorking(false)
+    }
+  }, [authority])
 
   const ask = useCallback((request: Omit<PendingAsk, 'resolve'>) => new Promise<MergeStockChoice | null>((resolve) => {
+    cancelAskRef.current = () => resolve(null)
     setPending({ ...request, resolve })
   }), [])
 
   // Merge `other` into `keeper`, asking first whenever the decision is not the
   // operator's to skip. Resolves 'merged' or 'cancelled'; real failures throw so
   // the caller can report them the way it already does.
-  const mergeWithChoice = useCallback(async (keeper: Product, other: Product): Promise<'merged' | 'cancelled'> => {
+  const runMerge = useCallback(async (keeper: Product, other: Product, scope: ActorReadScope): Promise<'merged' | 'cancelled'> => {
+    assertActorSessionDispatchAllowed(scope)
+    const unknown = () => Object.assign(new Error(presentWriteError({ outcome: 'unknown' }, t).detail), { code: 'write_outcome_unknown', outcome: 'unknown' })
+    const send = async (stock?: MergeStockChoice): Promise<'merged'> => {
+      assertActorSessionDispatchAllowed(scope)
+      const attempt = attemptRef.current ?? { body: freezeDirectMutationBody(prepareProductPairMergeRequest(keeper.id, other.id, stock)), scope }
+      attemptRef.current = attempt
+      setWorking(true)
+      try {
+        const result = await mergeProductPairRequest(freezeDirectMutationBody(attempt.body))
+        assertActorSessionDispatchAllowed(attempt.scope)
+        const receipt = result as { success?: unknown; keptId?: unknown; mergedId?: unknown; operationId?: unknown; actionHistoryId?: unknown } | null
+        if (!receipt || receipt.success !== true || receipt.keptId !== attempt.body.keepId || receipt.mergedId !== attempt.body.mergeId
+          || (attempt.body.stock !== 'write_off' && (
+            typeof receipt.operationId !== 'string' || !receipt.operationId.trim()
+            || !Number.isSafeInteger(receipt.actionHistoryId) || Number(receipt.actionHistoryId) <= 0))) throw unknown()
+        if (attemptRef.current === attempt) attemptRef.current = null
+        return 'merged'
+      } catch (error) {
+        if (attemptRef.current === attempt && (error as { outcome?: unknown } | null)?.outcome !== 'unknown' && directMutationRefusedBeforeWrite(error)) attemptRef.current = null
+        throw error
+      } finally {
+        if (isActorReadScopeCurrent(scope, false)) setWorking(false)
+      }
+    }
+    const original = attemptRef.current
+    if (original) {
+      if (!isActorReadScopeCurrent(original.scope, false)) attemptRef.current = null
+      else {
+        if (original.body.keepId !== keeper.id || original.body.mergeId !== other.id) throw unknown()
+        return send()
+      }
+    }
+    assertActorSessionDispatchAllowed(scope)
     const keeperName = nameOf(keeper)
     const discardedName = nameOf(other)
 
@@ -129,6 +187,7 @@ export function useMergeStockChoice(t: TranslateFn) {
       // rather than assuming either answer.
       needsChoice = null
     }
+    assertActorSessionDispatchAllowed(scope)
 
     if (needsChoice !== null) {
       // ONE rule, shared with the dialog that renders the consequences
@@ -140,7 +199,7 @@ export function useMergeStockChoice(t: TranslateFn) {
       // be reached.
       if (!mergeNeedsConfirmation({ needsChoice, pricing, identity })) {
         try {
-          await mergePossiblySameProducts(keeper.id, other.id)
+          await send()
         } catch (error) {
           throw localizeRefusal(t, error)
         }
@@ -149,21 +208,19 @@ export function useMergeStockChoice(t: TranslateFn) {
       setWorking(false)
       const choice = await ask({ keeperName, discardedName, impact: impact!, pricing, identity, needsChoice })
       if (!choice) return 'cancelled'
-      setWorking(true)
       try {
-        await mergePossiblySameProducts(keeper.id, other.id, needsChoice ? choice : undefined)
+        await send(needsChoice ? choice : undefined)
         return 'merged'
       } catch (error) {
         throw localizeRefusal(t, error)
       } finally {
-        setWorking(false)
-        setPending(null)
+        if (isActorReadScopeCurrent(scope, false)) { setWorking(false); setPending(null); cancelAskRef.current = null }
       }
     }
 
     // No preview: try, and let the server's refusal tell us what to ask.
     try {
-      await mergePossiblySameProducts(keeper.id, other.id)
+      await send()
       return 'merged'
     } catch (error) {
       if (errorCode(error) !== 'stock_choice_required') throw localizeRefusal(t, error)
@@ -176,16 +233,33 @@ export function useMergeStockChoice(t: TranslateFn) {
         needsChoice: true,
       })
       if (!choice) return 'cancelled'
-      setWorking(true)
       try {
-        await mergePossiblySameProducts(keeper.id, other.id, choice)
+        await send(choice)
         return 'merged'
       } finally {
-        setWorking(false)
-        setPending(null)
+        if (isActorReadScopeCurrent(scope, false)) { setWorking(false); setPending(null); cancelAskRef.current = null }
       }
     }
   }, [ask, t])
+
+  const mergeWithChoice = useCallback((keeper: Product, other: Product): Promise<'merged' | 'cancelled'> => {
+    const scope = captureActorReadScope('products:merge')
+    const pair = JSON.stringify([keeper.id, other.id])
+    const flight = flightRef.current
+    if (flight && isActorReadScopeCurrent(flight.scope, false)) {
+      if (flight.pair === pair) return flight.promise
+      return Promise.reject(Object.assign(new Error(presentWriteError({ outcome: 'unknown' }, t).detail), { code: 'write_outcome_unknown', outcome: 'unknown' }))
+    }
+    if (flight) { cancelAskRef.current?.(); cancelAskRef.current = null; setPending(null); setWorking(false) }
+    // Install the latch before preview or the modal can yield to another click.
+    const promise = Promise.resolve().then(() => runMerge(keeper, other, scope)).catch(error => {
+      throw localizeRefusal(t, error)
+    }).finally(() => {
+      if (flightRef.current?.promise === promise) flightRef.current = null
+    })
+    flightRef.current = { pair, scope, promise }
+    return promise
+  }, [runMerge, t])
 
   const mergeStockChoiceDialog = pending ? (
     <MergeStockChoiceDialog

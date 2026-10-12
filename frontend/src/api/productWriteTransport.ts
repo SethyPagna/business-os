@@ -444,6 +444,21 @@ export type ProductResolveChoices = Partial<Record<
   ProductResolveChoice
 >>
 
+export type ProductPairMergeRequest = {
+  keepId: number | string
+  mergeId: number | string
+  stock?: 'merge' | 'write_off'
+  client_request_id: string
+}
+
+export function prepareProductPairMergeRequest(keepId: number | string, mergeId: number | string, stock?: 'merge' | 'write_off'): ProductPairMergeRequest {
+  return ensureClientRequestId(stock ? { keepId, mergeId, stock } : { keepId, mergeId }, 'product_merge') as ProductPairMergeRequest
+}
+
+export function mergeProductPairRequest(body: ProductPairMergeRequest): Promise<unknown> {
+  return route('products:mergePossiblySame', () => apiFetch('POST', '/api/products/possible-duplicates/merge', body), null, true)
+}
+
 export function mergePossiblySameProducts(
   keepId: number | string,
   mergeId: number | string,
@@ -458,6 +473,7 @@ export function mergePossiblySameProducts(
     choices?: ProductResolveChoices
   },
 ): Promise<unknown> {
+  if (!keep) return mergeProductPairRequest(prepareProductPairMergeRequest(keepId, mergeId, stock))
   const body: Record<string, unknown> = stock ? { keepId, mergeId, stock } : { keepId, mergeId }
   if (keep) {
     body.keep = true
