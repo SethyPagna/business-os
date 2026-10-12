@@ -223,6 +223,7 @@ export function useMergeStockChoice(t: TranslateFn) {
       await send()
       return 'merged'
     } catch (error) {
+      assertActorSessionDispatchAllowed(scope)
       if (errorCode(error) !== 'stock_choice_required') throw localizeRefusal(t, error)
       const choice = await ask({
         keeperName,

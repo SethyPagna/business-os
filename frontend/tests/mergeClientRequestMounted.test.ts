@@ -139,6 +139,47 @@ try {
     assert.deepEqual(await p.evaluate(()=>(window as any).ui),beforeSwitch,'stale load continuation cannot refresh or unlock replacement UI')
     console.log(`PASS ${lang}/${width} actual Products success/failure/load caller actor and server fences`)
     await fresh();await p.evaluate(()=>{(window as any).previewFail=true});await start(p);await count(p,1);await fail(p,0,{status:400,code:'stock_choice_required',stockImpact:{productId:2,totalQuantity:.3,lotCount:0,branches:[]}});await dialog.getByText(packs[lang].merge_stock_choice_merge,{exact:true}).click();await dialog.getByRole('button',{name:packs[lang].merge,exact:true}).click();await count(p,2);assert.notEqual((await state(p)).calls[0].client_request_id,(await state(p)).calls[1].client_request_id);await ack(p,1);await outcomes(p,1)
+    for (const authority of ['actor','server']) for (const settlement of ['fallback','success','unknown']) {
+      await fresh()
+      if (settlement === 'fallback') {
+        await p.evaluate(()=>{(window as any).previewFail=true})
+        await start(p)
+      } else {
+        await p.evaluate(()=>{(window as any).preview={needsStockChoice:true,stockImpact:{productId:2,totalQuantity:.3,lotCount:0,branches:[]}}})
+        await start(p)
+        await dialog.getByText(packs[lang].merge_stock_choice_merge,{exact:true}).click()
+        await dialog.getByRole('button',{name:packs[lang].merge,exact:true}).click()
+      }
+      await count(p,1)
+      await p.evaluate(authority=>{
+        const w=window as any
+        if(authority==='actor')w.switchActor(2);else w.switchServer('https://new-business.invalid')
+        w.previewFail=false
+        w.preview={needsStockChoice:true,stockImpact:{productId:4,totalQuantity:.2,lotCount:0,branches:[]}}
+        w.newOutcomes=[]
+        w.merge({id:3,name:'NEW KEEPER'},{id:4,name:'NEW LOSER'}).then((result:unknown)=>w.newOutcomes.push(result),(error:any)=>w.newOutcomes.push(error.code))
+      },authority)
+      await expect(dialog).toContainText('NEW LOSER')
+      if (settlement === 'success') await ack(p,0)
+      else await fail(p,0,settlement==='fallback'
+        ? {status:400,code:'stock_choice_required',stockImpact:{productId:2,totalQuantity:.3,lotCount:0,branches:[]}}
+        : {status:503,code:'stock_transaction_outcome_unknown',outcome:'unknown'})
+      await p.waitForFunction(()=>(window as any).outcomes.length===1 || document.querySelector('[role="dialog"]')?.textContent?.includes('Keeper'))
+      await expect(dialog).toContainText('NEW LOSER')
+      await outcomes(p,1)
+      assert.deepEqual(await p.evaluate(()=>(window as any).newOutcomes),[],'old fallback/finally cannot resolve the new prompt')
+      assert.equal((await state(p)).calls.length,1,'old settlement cannot dispatch a replacement command')
+      await dialog.getByText(packs[lang].merge_stock_choice_merge,{exact:true}).click()
+      await dialog.getByRole('button',{name:packs[lang].merge,exact:true}).click()
+      await count(p,2)
+      assert.equal((await state(p)).calls[1].keepId,3)
+      assert.equal((await state(p)).calls[1].mergeId,4)
+      await ack(p,1)
+      await p.waitForFunction(()=>(window as any).newOutcomes.length===1)
+      assert.deepEqual(await p.evaluate(()=>(window as any).newOutcomes),['merged'],'new authority can still complete its own pair')
+      await expect(dialog).toHaveCount(0)
+    }
+    console.log(`PASS ${lang}/${width} late fallback and finally preserve new actor/server prompt and completion`)
     assert.deepEqual(errors,[])
     console.log(`PASS ${lang}/${width} legacy preview refusal and unchanged modal choices`)
     await p.close()
