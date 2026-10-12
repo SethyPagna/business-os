@@ -105,6 +105,8 @@ function loadUndoAppliers(d1) {
   }
   const stubs = {
     './customerGenderRestoration': loadActualDependency(path.join(LIB_DIR, 'customerGenderRestoration.ts')),
+    './stockTransaction': loadActualDependency(path.join(LIB_DIR, 'stockTransaction.ts')),
+    './countedConditionHistory': loadActualDependency(path.join(LIB_DIR, 'countedConditionHistory.ts')),
     // undoAppliers.ts now imports the exact money kernels; Module._load only
     // maps listed keys, so unlisted relative requests would resolve against this
     // test file and fail.
@@ -194,6 +196,16 @@ function loadUndoAppliers(d1) {
   return mod.exports
 }
 
+// Migration 0243 fences raw stock writes. Fixture seeding and the mirrored fold
+// take the same permit executeStockTransaction takes; the code under test runs
+// with the fence active.
+const STOCK_PERMIT = "INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'"
+const STOCK_RELEASE = "DELETE FROM system_flags WHERE key='stock_transaction_permit'"
+function permittedRun(d1, sql, params) {
+  d1.db.exec(STOCK_PERMIT)
+  try { return d1.db.prepare(sql).run(params == null ? {} : params) } finally { d1.db.exec(STOCK_RELEASE) }
+}
+
 // --------------------------------------------------------------------------
 // A forward fold that mirrors routes/products.ts foldDuplicateProductInto and
 // returns the SAME MergeReversal shape. Pinned to the real source in the
@@ -273,7 +285,7 @@ async function foldForward(d1, keeper, dup, branchNameById, mergeContext) {
   // Complete the physical fold before retiring the source catalog membership.
   stmts.push({ sql: 'UPDATE products SET stock_quantity=0 WHERE id=@id', params: { id: dup.id } })
   stmts.push({ sql: 'UPDATE products SET is_active=0, updated_at=CURRENT_TIMESTAMP WHERE id=@id', params: { id: dup.id } })
-  await d1.batch(stmts)
+  await d1.batch([{ sql: STOCK_PERMIT }, ...stmts, { sql: STOCK_RELEASE }])
 
   const adjustmentMovementIds = d1.db.prepare(`SELECT id FROM inventory_movements WHERE product_id = ? AND movement_type = 'adjustment' AND reason LIKE ?`).all(canonicalId, `%(#${dup.id}) into this product%`).map((r) => Number(r.id))
 
@@ -443,7 +455,7 @@ async function run() {
   const B1 = 1, B2 = 2, B3 = 3
   const KB = 5000, DB1 = 5001, DB2 = 5002 // keeper batch, dup folded batch, dup repointed batch
   const BATCH_IDS = [KB, DB1, DB2]
-  const run1 = (sql, p) => d1.db.prepare(sql).run(p == null ? {} : p)
+  const run1 = (sql, p) => permittedRun(d1, sql, p)
 
   // ---- Seed a scenario exercising every reversal branch ----
   run1(`INSERT INTO branches (id, name) VALUES (1,'B1'),(2,'B2'),(3,'B3')`)
@@ -576,12 +588,13 @@ async function run() {
     assert.match(productsSrc, /const reparentedByTable = snapshot\.reparentedByTable/)
     assert.match(productsSrc, /for \(const \{ table, column(?:, ids)? \} of reparentedByTable\)/)
     assert.match(snapshotSrc, /\.\.\.reparentTables\.map\(\(\{ table, column \}, index\) =>/)
-    assert.match(snapshotSrc, /sql: `SELECT id FROM \$\{table\} WHERE \$\{column\} = @id`/)
+    assert.match(snapshotSrc, /sql: `SELECT id FROM \$\{table\} WHERE \$\{column\}=@duplicateId ORDER BY id`/)
     assert.match(appliersSrc, /\{ table: 'sale_items', column: 'product_id' \}/)
     assert.match(appliersSrc, /\{ table: 'inventory_movements', column: 'product_id' \}/)
     assert.match(productsSrc, /const reparentedSaleItemIds = byTable\('sale_items'\)/)
     assert.match(productsSrc, /const reparentedMovementIds = byTable\('inventory_movements'\)/)
-    assert.match(snapshotSrc, /rfid_confirmed_qty FROM branch_stock WHERE product_id = @id/)
+    assert.match(snapshotSrc, /SELECT branch_id,quantity,rfid_confirmed_qty FROM branch_stock WHERE product_id=@duplicateId ORDER BY branch_id/)
+    assert.match(snapshotSrc, /SELECT branch_id,quantity,rfid_confirmed_qty FROM branch_stock WHERE product_id=@keeperId ORDER BY branch_id/)
     assert.match(productsSrc, /const adjustmentMovementIds =/)
     // Redo runs the real fold, passing the Resolve grid's keeper choice (N1/N4)
     // through to the fold's own slot (behaviour: test-product-resolve-keep-merge-native.cjs).
@@ -659,7 +672,7 @@ async function runSavedClusterEconomics() {
   const d1 = openDb(loadAll())
   const undo = loadUndoAppliers(d1)
   const productMerge = loadRealProductMerge()
-  const run1 = (sql, p) => d1.db.prepare(sql).run(p == null ? {} : p)
+  const run1 = (sql, p) => permittedRun(d1, sql, p)
 
   run1(`INSERT INTO products (
     id, name, barcode, is_active,
@@ -783,7 +796,7 @@ async function runBulk() {
   const d1 = openDb(loadAll())
   const undo = loadUndoAppliers(d1)
   undo.registerMergeFold((env, _db, _user, keeper, dup, branchNameById, ctx) => foldForward(d1, keeper, dup, branchNameById, ctx))
-  const run1 = (sql, p) => d1.db.prepare(sql).run(p == null ? {} : p)
+  const run1 = (sql, p) => permittedRun(d1, sql, p)
 
   // Group A: keeper 100 <- dups 201, 202 (in that order). Group B: keeper 300 <- dup 301.
   const PIDS = [100, 201, 202, 300, 301]
@@ -911,7 +924,7 @@ async function runResolveChoiceUndo() {
   const d1 = openDb(loadAll())
   const undo = loadUndoAppliers(d1)
   const choices = loadActualDependency(path.join(LIB_DIR, 'productResolveChoices.ts'))
-  const run1 = (sql, p) => d1.db.prepare(sql).run(p == null ? {} : p)
+  const run1 = (sql, p) => permittedRun(d1, sql, p)
   const one = (sql, ...a) => { const row = d1.db.prepare(sql).get(...a); return row ? { ...row } : row }
   const KEEPER = 110, DUP = 111
   const CHOICE_COLUMNS = 'name,name_normalized,barcode,brand,brands,brand_compact,category,categories,unit,unit_normalized,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr,cost_price_usd,cost_price_khr,image_path'
