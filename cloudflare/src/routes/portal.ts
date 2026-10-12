@@ -2,7 +2,7 @@ import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { buildInClause, inlineIntegerIds, selectInChunks } from '../lib/sqlBinding'
 import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
-import { admitRequestBody, SMALL_BODY_BYTES, PORTAL_SCREENSHOT_BODY_BYTES } from '../lib/requestBodyGuard'
+import { admitRequestBody, SMALL_BODY_BYTES, PORTAL_SCREENSHOT_BODY_BYTES, requireJsonSameOriginCredentialPost } from '../lib/requestBodyGuard'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission } from '../lib/permissions'
 import { audit } from '../lib/audit'
@@ -1770,6 +1770,20 @@ async function loadAccountProfile(env: Env, accountId: number): Promise<{ member
     .get<{ membership_id: string; name: string; email: string | null }>([accountId])
   return row ? { membershipId: row.membership_id, name: row.name, email: row.email ?? null } : null
 }
+
+// G38 E5 (login CSRF): every storefront write that rides the bos_portal
+// cookie or plants one -- sign-up, sign-in, sign-out, the saved cart and
+// wishlist, and a screenshot submission -- must be a same-origin JSON
+// request, exactly as staff /api/auth/login is (lib/requestBodyGuard
+// credentialPostRefusal). The global originGuard lets a write through when it
+// carries neither Origin nor Sec-Fetch-Site, and these handlers parse a
+// text/plain body as JSON, so without this a cross-site form could sign a
+// victim's browser into an attacker's account. Registered before every
+// handler below so Hono runs it first; GETs (/auth/me, the saved buckets)
+// pass untouched. /ai/chat reads no cookie and stays open.
+app.use('/auth/*', requireJsonSameOriginCredentialPost)
+app.use('/account/*', requireJsonSameOriginCredentialPost)
+app.use('/submissions', requireJsonSameOriginCredentialPost)
 
 app.post('/auth/signup', async (c) => {
   const ip = getClientNetworkKey(c.req.raw)

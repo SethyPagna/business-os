@@ -101,11 +101,19 @@ function createPortalHarness(options = {}) {
   const portal = load('routes/portal.ts')
   const app = portal.default
 
-  async function request(pathname, method = 'POST', body, { ip = '203.0.113.9', headers = {} } = {}) {
-    const allHeaders = { ...(ip ? { 'CF-Connecting-IP': ip } : {}), ...headers }
-    if (body !== undefined) allHeaders['Content-Type'] = 'application/json'
+  // Requests look like the shop's own page by default (Sec-Fetch-Site:
+  // same-origin, JSON body); pass headers to override either, with a value of
+  // null to drop a header. rawBody sends a string as-is.
+  async function request(pathname, method = 'POST', body, { ip = '203.0.113.9', headers = {}, rawBody } = {}) {
+    const allHeaders = {
+      ...(ip ? { 'CF-Connecting-IP': ip } : {}),
+      'Sec-Fetch-Site': 'same-origin',
+      ...(body !== undefined || rawBody !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...headers,
+    }
+    for (const key of Object.keys(allHeaders)) if (allHeaders[key] == null) delete allHeaders[key]
     const response = await app.request(pathname, {
-      method, headers: allHeaders, body: body === undefined ? undefined : JSON.stringify(body),
+      method, headers: allHeaders, body: rawBody !== undefined ? rawBody : body === undefined ? undefined : JSON.stringify(body),
     }, env, { waitUntil() {}, passThroughOnException() {} })
     let json = null
     try { json = await response.json() } catch (_) {}

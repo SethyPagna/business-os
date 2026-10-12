@@ -39,13 +39,13 @@ function streamRequest(url, bytes, length, options = {}) {
     },
     cancel() { state.cancelled = true },
   }, { highWaterMark: 0 })
-  const headers = { 'content-type': options.contentType || 'application/json', 'x-preserved': 'yes' }
+  const headers = { 'content-type': options.contentType || 'application/json', 'x-preserved': 'yes', ...(options.headers || {}) }
   if (length !== undefined) headers['content-length'] = length
   return { request: new Request(url, { method: 'POST', body, headers, duplex: 'half' }), state }
 }
 
 async function main() {
-  const { admitRequestBody, smallBodyAccess, SMALL_BODY_BYTES: small, PORTAL_SCREENSHOT_BODY_BYTES: large, MIGRATION_FINALIZE_BODY_BYTES: repairLimit } = load('lib/requestBodyGuard.ts')
+  const { admitRequestBody, smallBodyAccess, requireJsonSameOriginCredentialPost, SMALL_BODY_BYTES: small, PORTAL_SCREENSHOT_BODY_BYTES: large, MIGRATION_FINALIZE_BODY_BYTES: repairLimit } = load('lib/requestBodyGuard.ts')
   let effects = 0
   const app = new Hono()
   app.onError((_, c) => c.json({ error: 'generic handler' }, 500))
@@ -135,7 +135,11 @@ async function main() {
     },
   }
   const permissions = { hasPermission: (_, key) => key === 'backup' ? backup : restore, isAdminControlUser: () => admin }
-  const guard = { admitRequestBody, smallBodyAccess, SMALL_BODY_BYTES: small, PORTAL_SCREENSHOT_BODY_BYTES: large, MIGRATION_FINALIZE_BODY_BYTES: repairLimit }
+  // The real storefront credential guard too (routes/portal.ts registers it on
+  // /auth/*, /account/* and /submissions): a request that must reach a guarded
+  // portal handler says it comes from the shop's own page (SAME_ORIGIN).
+  const guard = { admitRequestBody, smallBodyAccess, requireJsonSameOriginCredentialPost, SMALL_BODY_BYTES: small, PORTAL_SCREENSHOT_BODY_BYTES: large, MIGRATION_FINALIZE_BODY_BYTES: repairLimit }
+  const SAME_ORIGIN = { headers: { 'sec-fetch-site': 'same-origin' } }
   const portalImagePrivacy = load('lib/portalImagePrivacy.ts')
   const portal = load('routes/portal.ts', {
     '../lib/requestBodyGuard': guard, '../lib/auth': auth,
@@ -243,12 +247,20 @@ async function main() {
     assert.deepEqual(calls, before, 'public rejection before ALL downstream effects')
   }
   // Actual router strictness: a trailing slash or encoded literal must not
-  // reach an unguarded version of a public auth/submission handler.
+  // reach an unguarded version of a public auth/submission handler. Sent as
+  // the shop's own page, so a 404 means no handler, not the credential guard.
   for (const route of ['/api/portal/auth/signup/', '/api/portal/submissions/']) {
-    assert.equal((await send(route, small + 1, '1')).status, 404, route)
+    assert.equal((await send(route, small + 1, '1', SAME_ORIGIN)).status, 404, route)
   }
   assert.equal((await send('/api/portal/auth/%73ignup', small + 1, '1')).status, 413)
-  assert.equal((await send('/api/portal/%73ubmissions', large + 1, '1')).status, 413)
+  assert.equal((await send('/api/portal/%73ubmissions', large + 1, '1', SAME_ORIGIN)).status, 413)
+  // Encoding the literal does not slip past the credential guard either: a
+  // header-less write to the decoded /submissions is refused before the body.
+  {
+    const refused = await send('/api/portal/%73ubmissions', large + 1, '1')
+    assert.equal(refused.status, 403)
+    assert.equal((await refused.json()).code, 'credential_origin_refused')
+  }
   for (const route of ['/api/auth/session-duration', '/api/auth/devices/sessions/revoke-user', '/api/backups', '/api/backups/maintenance/clear']) {
     assert.equal((await send(route, small + 1)).status, 401, route)
   }
@@ -264,17 +276,17 @@ async function main() {
     assert.equal((await send(route, small + 1, '1')).status, 413, route)
   }
   for (const [route, limit] of [['/api/portal/ai/chat', small], ['/api/portal/submissions', large]]) {
-    const response = await send(route, limit + 1, '1')
+    const response = await send(route, limit + 1, '1', SAME_ORIGIN)
     assert.equal(response.status, 413, route)
     assert.equal(response.headers.get('x-frame-options'), 'SAMEORIGIN')
     // At the exact limit the real route continues past admission. AI reaches
     // validation; submissions stop at the account boundary before body fields
     // can identify another customer.
-    assert.equal((await send(route, limit)).status, route.endsWith('/submissions') ? 401 : 400, route)
+    assert.equal((await send(route, limit, undefined, SAME_ORIGIN)).status, route.endsWith('/submissions') ? 401 : 400, route)
     enabled = false
-    assert.equal((await send(route, limit + 1)).status, 403, route)
+    assert.equal((await send(route, limit + 1, undefined, SAME_ORIGIN)).status, 403, route)
     enabled = true; allowed = false
-    assert.equal((await send(route, limit + 1)).status, 429, route)
+    assert.equal((await send(route, limit + 1, undefined, SAME_ORIGIN)).status, 429, route)
     allowed = true
   }
   // Existing client screenshot ceiling fits: eight 2,000,000-character images
@@ -282,7 +294,7 @@ async function main() {
   const screenshots = Array(8).fill('data:image/png;base64,' + 'A'.repeat(2_000_000 - 22))
   const screenshotBody = new TextEncoder().encode(JSON.stringify({ screenshots, membershipNumber: '' }))
   assert.ok(screenshotBody.byteLength < large)
-  const screenshotResponse = await worker.fetch(streamRequest('https://unit.test/api/portal/submissions', screenshotBody).request, env, ctx)
+  const screenshotResponse = await worker.fetch(streamRequest('https://unit.test/api/portal/submissions', screenshotBody, undefined, SAME_ORIGIN).request, env, ctx)
   assert.equal(screenshotResponse.status, 401)
   const screenshotError = await screenshotResponse.json()
   assert.equal(screenshotError.code, 'portal_unauthenticated')
