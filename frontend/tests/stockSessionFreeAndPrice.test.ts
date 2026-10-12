@@ -221,7 +221,7 @@ runTest('a new product is held, then dispatched from its captured attempt at Com
   assert.equal(lineNeedsCreate(line()), false, 'an existing product is never created')
   const modal = src('components/inventory/FastStockInModal.tsx')
   assert.match(modal, /client_request_id: line\.createRequestId/, 'the create attempt keeps the id minted when the payload was held')
-  const create = modal.indexOf('const id = await createHeldProduct(line)')
+  const create = modal.indexOf('const id = await createHeldProduct(line, lines)')
   const persist = modal.indexOf('persistSessionDraft(lines)', create)
   const receive = modal.indexOf('await commitFastStockIn(')
   assert.ok(create > 0 && persist > create && receive > persist, 'create, then the id is persisted synchronously, then the receipt')
