@@ -88,6 +88,7 @@ async function controller(createdRows: boolean[], creationOutcomes: CreationOutc
   const submissionsRef = { current: destination.restoreReceivingSubmissions(null, received) }
   const destinationRef = { current: { branchId: '1', options: [{ value: '1', label: 'Active' }] } }
   const requests: Array<{ lines: FastStockInCommitLine[]; options: unknown }> = []
+  const receivingScope = { authority: 'same-receiving-owner', channel: 'inventory', revision: '0:0' }
   const notifications: string[] = []
   let savedDraft: { lines: StockSessionLine[]; receivingSubmissions: destination.ReceivingSubmissions } | null = null
   const persist = (lines = received) => {
@@ -97,6 +98,7 @@ async function controller(createdRows: boolean[], creationOutcomes: CreationOutc
   const complete = async () => {
     const dependencies = {
       ...api, ...destination, ...draft, ...outcome, extractHistoryResultId,
+      receivingScope, isActorReadScopeCurrent: () => true, assertActorReadScope: () => {},
       submissionsRef, destinationRef, received, branchId: '1', user: { id: 7, name: 'Actor' }, saving,
       canEditCosts: true, canEditPrice: true, canViewCosts: true, paidAmount: '', paymentStatus: 'paid', creditDueDate: '',
       receivedDate: '2026-10-12', supplier: { supplierId: null, supplierName: 'Supplier' }, sessionIdRef: { current: 123 },
@@ -131,7 +133,7 @@ async function controller(createdRows: boolean[], creationOutcomes: CreationOutc
     const performCommit = new Function(...Object.keys(dependencies), js(controllerSource) + ';return performCommit')(...Object.values(dependencies)) as () => Promise<void>
     await performCommit()
   }
-  return { complete, original, requests, notifications, api, submissionsRef,
+  return { complete, original, requests, notifications, api, submissionsRef, receivingScope,
     state: () => ({ received, saving, step, finished, creates }),
     restore() {
       assert(savedDraft)
@@ -154,7 +156,7 @@ for (const rows of [[false], [true], [false, true], [true, false], [true, true],
   let createdId = 71
   assert.deepEqual(subject.requests[0].lines.map(entry => entry.body.productId), rows.map(created => created ? ++createdId : 1))
   assert.deepEqual(subject.requests[0].lines.map(entry => entry.body.clientRequestId), subject.original.map(entry => entry.requestId))
-  assert.deepEqual(subject.requests[0].options, { session: { supplierTotalUsd: rows.length * 6.5, paymentStatus: 'paid' } })
+  assert.deepEqual(subject.requests[0].options, { session: { supplierTotalUsd: rows.length * 6.5, paymentStatus: 'paid' }, writeScope: subject.receivingScope })
   assert.deepEqual(subject.submissionsRef.current.unknown, [])
   await subject.complete()
   assert.equal(subject.state().creates, state.creates, 'another Complete action cannot create again')

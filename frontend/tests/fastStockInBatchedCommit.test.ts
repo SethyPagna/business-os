@@ -53,7 +53,7 @@ runTest('the modal imports the batched commit transport', () => {
 
 runTest('performCommit issues ONE commitFastStockIn call for the whole pending list, not a per-line request loop', () => {
   const body = performCommitBody()
-  assert.match(body, /batched = await commitFastStockIn\(toCommit\.map\(buildLineRequest\), foldRound, \{ session \}\)/, 'exactly one call, covering every pending line (the transport re-sends only deferred lines)')
+  assert.match(body, /batched = await commitFastStockIn\(toCommit\.map\(buildLineRequest\), foldRound, \{ session, writeScope: receivingScope \}\)/, 'exactly one call, covering every pending line (the transport re-sends only deferred lines)')
   // Positive control: the pre-fix shape awaited adjustStock/receiveBatchStock
   // directly inside a `for (const line of pending)` loop as the PRIMARY path.
   // That loop must survive only as the named 404 fallback below, not as
@@ -75,12 +75,12 @@ runTest('one line-building function feeds both the batched request and the seque
   assert.match(modal, /try \{ persistSubmissionDraft\(lines\) \} catch \(error\) \{[\s\S]*?return/, 'failed durable capture refuses dispatch')
   assert.match(draftUtil, /export function buildStockLineRequest\(line: StockSessionLine, ctx: LineRequestContext\): FastStockInCommitLine \{/)
   // Both call sites reuse it.
-  assert.match(modal, /batched = await commitFastStockIn\(toCommit\.map\(buildLineRequest\), foldRound, \{ session \}\)/)
+  assert.match(modal, /batched = await commitFastStockIn\(toCommit\.map\(buildLineRequest\), foldRound, \{ session, writeScope: receivingScope \}\)/)
   assert.match(modal, /const request = buildLineRequest\(line\)/)
 })
 
 runTest("a whole-request failure that is NOT a 404 fails every still-pending line with one message, instead of silently retrying the slow loop", () => {
-  assert.match(performCommitBody(), /\} catch \(error\) \{\s*requestFailure = [^\n]*\n\s*const message = failureText\(error, error instanceof Error \? error\.message : tr\('error', 'Error'\)\)[\s\S]*?failed \+= unsettled\.size\s*lines = lines\.map\(\(item\) => \(unsettled\.has\(item\.key\)/,
+  assert.match(performCommitBody(), /\} catch \(error\) \{\s*if \(!isActorReadScopeCurrent\(receivingScope, false\)\) return\s*requestFailure = [^\n]*\n\s*const message = failureText\(error, error instanceof Error \? error\.message : tr\('error', 'Error'\)\)[\s\S]*?failed \+= unsettled\.size\s*lines = lines\.map\(\(item\) => \(unsettled\.has\(item\.key\)/,
     'every line no round has answered fails with the one message; a line an earlier round saved keeps "saved"')
 })
 
