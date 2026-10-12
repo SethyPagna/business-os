@@ -266,7 +266,7 @@ runTest('EXECUTED: a legacy draft with no ids has them persisted in the same tic
   // line lacked an id, write the result back in the same (render) tick.
   assert.match(fastStockIn, /stored = normalizeStockSessionDraft\(raw, mintLineId\)/)
   assert.match(fastStockIn, /rewrite = Array\.isArray\(rawLines\) && rawLines\.some\(\(line\) => !line \|\| typeof line !== 'object' \|\| !\(line as \{ requestId\?: unknown \}\)\.requestId\)/)
-  assert.match(fastStockIn, /if \(rewrite\) writeWorkDraft<StockSessionDraft>\(fastStockInDraftKey, opened\)/)
+  assert.match(fastStockIn, /if \(rewrite\) writeWorkDraft\(fastStockInDraftKey, \{ \.\.\.opened, receivingSubmissions: submissions \}\)/)
   const opened = normalizeStockSessionDraft(raw, () => createClientRequestId('stockline'))!
   writeWorkDraft(key, opened)
 
@@ -291,8 +291,9 @@ runTest('EXECUTED: the draft key is actor-scoped, which is what stops a cross-ac
   currentUser = { id: 8, username: "dara", organization_public_id: "org1" }
   const forEight = scopedWorkDraftKey('fast_stock_in')
   assert.notEqual(forSeven, forEight, 'two accounts on one device must not share a stock-in draft')
-  assert.match(forSeven, /_7_/, 'the acting user id is part of the key')
-  assert.match(forEight, /_8_/, 'the acting user id is part of the key')
+  writeWorkDraft(forSeven, { lines: [{ requestId: 'stockline_actor_seven', status: 'queued' }] })
+  assert.equal(readWorkDraft(forEight), null, 'another actor cannot read the first actor\'s receiving draft')
+  assert.equal(readWorkDraft<Draft>(forSeven)?.data.lines[0].requestId, 'stockline_actor_seven')
   currentUser = { id: 7, username: "kanha", organization_public_id: "org2" }
   assert.notEqual(scopedWorkDraftKey('fast_stock_in'), forSeven, 'and so is the organization')
 
@@ -341,4 +342,8 @@ runTest('the batched commit envelope carries the guard code back to the client',
   }
 })
 
+if (failed > 0) {
+  console.error(`\n${failed} test(s) failed`)
+  process.exit(1)
+}
 console.log('\nAll stock line request id durability assertions passed')
