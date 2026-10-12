@@ -91,7 +91,8 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { VALID_SALE_STATUSES, RETURN_STATUSES, normalizeSaleStatus } from './salesStatus'
 import { dateToBatchCode, normalizeToIsoDate, readBatchDateCell } from './batchCode'
 import { normalizeSearchText, compactSearchText } from './searchMatch'
-import { getActionTier, hasPermission, isActionBlocked } from './permissions'
+import { getActionTier, hasPermission, isActionBlocked, type PermissionUser } from './permissions'
+import { stockActorParams, stockActorPredicate } from './stockActorGuard'
 import type { SessionUser } from './auth'
 import { sanitizeMediaPath } from './media'
 import { resolveProductImagePathIdentities } from './productImagePermission'
@@ -189,7 +190,7 @@ function importActionSection(type: ImportType): string {
 
 async function loadImportApplyActor(db: D1Compat, actorId: number): Promise<SessionUser | null> {
   const actor = await db.prepare(`
-    SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active,
+    SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.must_change_password,
            r.code AS role_code, r.permissions AS role_permissions, r.name AS role_name
     FROM users u
     LEFT JOIN roles r ON r.id = u.role_id
@@ -389,6 +390,10 @@ export async function assertCurrentImportApplyAuthority(
   }
   if (isActionBlocked(actor, section, 'import')) {
     throw new ImportApplyAuthorizationError(`${section}:import`, `The user who authorized this import no longer has ${section}:import permission.`)
+  }
+  const destructivePermission = missingDestructiveImportPermission(actor, job.type, job.policy_json)
+  if (destructivePermission) {
+    throw new ImportApplyAuthorizationError(destructivePermission, `The user who authorized this import no longer has ${destructivePermission} permission.`)
   }
 
   const allowProductImageWrites = job.type !== 'products' || getActionTier(actor, 'products', 'image') === 'full'
@@ -1480,6 +1485,30 @@ export function getProductImportMode(policyJson: string | null | undefined): Pro
   } catch (_) {
     return 'merge'
   }
+}
+
+function isDestructiveProductImport(type: string, policyJson: string | null | undefined): boolean {
+  const mode = getProductImportMode(policyJson)
+  return type === 'products' && (mode === 'replace_all' || mode === 'replace_columns')
+}
+
+export function missingDestructiveImportPermission(user: PermissionUser, type: string, policyJson: string | null | undefined): string | null {
+  if (!isDestructiveProductImport(type, policyJson)) return null
+  if (!hasPermission(user, 'destructive_delete')) return 'destructive_delete'
+  return isActionBlocked(user, 'products', 'import_replace_all') ? 'products:import_replace_all' : null
+}
+
+type DestructiveImportAuthority = { actor: SessionUser; policyJson: string | null }
+
+function destructiveImportCommitGuard(authority: DestructiveImportAuthority | undefined): string {
+  return authority ? `WHEN NOT (${stockActorPredicate}
+    AND EXISTS(SELECT 1 FROM users WHERE id=@stockActorId AND deleted_at IS NULL)
+    AND EXISTS(SELECT 1 FROM import_jobs WHERE id=@authorityJobId AND type='products' AND policy_json IS @authorityPolicy))
+    THEN json_extract('[1]','$[import_authority_changed]')` : ''
+}
+
+function destructiveImportCommitParams(jobId: string, authority: DestructiveImportAuthority | undefined): Record<string, unknown> {
+  return authority ? { ...stockActorParams(authority.actor), authorityJobId: jobId, authorityPolicy: authority.policyJson } : {}
 }
 
 // Column-replace's own column selection, read the same way decisions/
@@ -4045,7 +4074,7 @@ type ImportChunkState = {
   // import_job_image_matches / import_job_image_renames in migration 0052.
   // Held here purely as the "already computed" flag and for the finished
   // job's summary_json; the bulk that made this column expensive is gone.
-  imageMatch?: ImportImageMatchSummaryJson & { hasRenamePlan?: boolean }
+  imageMatch?: ImportImageMatchSummaryJson & { hasRenamePlan?: boolean; renameComplete?: boolean }
   startedAtMs?: number // real wall-clock start of this whole (possibly many-invocation) phase run, for an honest summary_json.timings totalMs at the end
   // DIRECT-mode stock-action continuation (see applyStockActionsJob): the
   // apply runs as windowed CLASSIFY invocations (chunk_cursor = source-row
@@ -4471,7 +4500,6 @@ async function readRowImagePaths(
   return found
 }
 
-/** The full rename plan. Read once per apply run, on its first chunk. */
 async function readImageRenamePlan(db: D1Compat, jobId: string): Promise<Array<[string, string]>> {
   const rows = await db
     .prepare(`SELECT file_id, new_name FROM import_job_image_renames WHERE job_id = @id`)
@@ -6036,7 +6064,7 @@ export class ProductReplacementIncompleteError extends Error {
   }
 }
 
-type ProductFinalizeContext = { jobId: string; leaseToken: string; state: ImportChunkState; queued: boolean }
+type ProductFinalizeContext = { jobId: string; leaseToken: string; state: ImportChunkState; queued: boolean; authority?: DestructiveImportAuthority }
 type ImportStatement = { sql: string; params: Record<string, unknown> }
 export const PRODUCT_IMPORT_FINALIZATION_CHANGED = {
   code: 'product_import_finalization_changed',
@@ -6061,12 +6089,12 @@ async function commitProductFinalization(
     status: context.queued ? 'applying' : 'approved', phase: context.queued ? 'applying' : 'apply_deferred' }
   const guard: ImportStatement = {
     sql: `INSERT INTO import_stock_action_guards(job_id,action_key,guard_key,guard_value)
-      SELECT @id,@action,@key,CASE WHEN EXISTS(SELECT 1 FROM import_jobs
+      SELECT @id,@action,@key,CASE ${destructiveImportCommitGuard(context.authority)} WHEN EXISTS(SELECT 1 FROM import_jobs
         WHERE id=@id AND lease_token=@leaseToken AND lease_expires_at>@now AND cancel_requested=0
         AND json_extract(chunk_state_json,'$.startedAtMs') IS @run
         AND COALESCE(json_extract(chunk_state_json,'$.genericApply.finalize'),'null')=json(@before))
         THEN 1 ELSE json_extract('[1]','$[import_lease_changed]') END`,
-    params: { ...params, run: context.state.startedAtMs, action: `generic_finalize:${context.state.startedAtMs}`,
+    params: { ...params, ...destructiveImportCommitParams(context.jobId, context.authority), run: context.state.startedAtMs, action: `generic_finalize:${context.state.startedAtMs}`,
       key: before ? `${before.phase}:${before.product}:${before.branch}:${before.pendingHash ?? 'plan'}` : 'start', now: new Date().toISOString() },
   }
   const checkpoint: ImportStatement = {
@@ -6092,7 +6120,7 @@ async function commitProductFinalization(
     if (stockRefusal) throw stockRefusal
     if (/import_(?:snapshot|catalog)_changed/.test(String((error as Error)?.message))) throw new ProductImportFinalizationConflictError()
     if (error instanceof StockQueryBudgetDeferred || error instanceof StockTransactionUnavailableError
-      || isImportMaintenanceFenceError(error) || String((error as Error)?.message).includes('$[import_lease_changed]')) throw error
+      || isImportMaintenanceFenceError(error) || /\$\[import_(?:lease|authority)_changed\]/.test(String((error as Error)?.message))) throw error
     let committed: ProductFinalizeState | null
     try {
       const receipt = await db.prepare(`SELECT json_extract(chunk_state_json,'$.genericApply.finalize') AS result
@@ -6206,6 +6234,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // actor from live users/roles before this invocation changes job/chunk
     // state or composes any catalog, stock, sales, or image write.
     const authority = await assertCurrentImportApplyAuthority(env, job, db)
+    const destructiveAuthority = isDestructiveProductImport(job.type, job.policy_json)
+      ? { actor: authority.actor, policyJson: job.policy_json } : undefined
     const importCostActor = { id: actorId(authority.actor), name: actorSnapshot(authority.actor) }
     if (job.type === 'stock_actions' && !env.IMPORT_QUEUE) {
       throw Object.assign(new Error('Stock imports are temporarily unavailable. Ask an administrator to check the import service, then retry this job. Saved stock actions will not be applied again.'), { code: 'import_queue_required' })
@@ -6277,33 +6307,38 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       deniedImagePaths = (await computeImportImageMatch(db, jobId, allRows, job.policy_json)).rowImagePaths
     }
 
-    // Auto-rename matched images now that this job is actually committing
-    // (analyze already showed the plan for review; apply is the point a
-    // match becomes final). Renames are keyed by fileId, global to the
-    // job -- not row-window-scoped -- so this only needs to run once, on
-    // this run's first chunk, not repeated per window.
-    if (isFreshStart && job.type === 'products' && authority.allowProductImageWrites && imageMatchCache?.hasRenamePlan) {
-      // Read here rather than carried in chunk state: this runs on the first
-      // chunk only, so serialising the whole plan on all ~58 of them paid for
-      // something used once.
+    if (cursor === 0 && job.type === 'products' && authority.allowProductImageWrites
+      && imageMatchCache?.hasRenamePlan && !imageMatchCache.renameComplete) {
       const renamePlanEntries = await readImageRenamePlan(db, jobId)
-      const renameRows = await db.prepare(`SELECT id, file_asset_id FROM import_job_files WHERE job_id = @jobId AND kind = 'image'`).all<{ id: number; file_asset_id: number | null }>({ jobId })
-      const fileAssetByJobFileId = new Map(renameRows.map((r) => [r.id, r.file_asset_id]))
-      const renameStatements: Array<{ sql: string; params: Record<string, unknown> }> = []
+      const renameRows = await db.prepare(`SELECT f.id, f.file_asset_id, f.original_name, a.original_name AS asset_name
+        FROM import_job_files f LEFT JOIN file_assets a ON a.id=f.file_asset_id
+        WHERE f.job_id = @jobId AND f.kind = 'image'`)
+        .all<{ id: number; file_asset_id: number | null; original_name: string; asset_name: string | null }>({ jobId })
+      const fileByJobFileId = new Map(renameRows.map((r) => [r.id, r]))
+      const renameGroups: ImportStatement[][] = []
       for (const [fileId, newName] of renamePlanEntries) {
-        renameStatements.push({
+        const file = fileByJobFileId.get(Number(fileId))
+        if (file?.original_name === newName && (!file.file_asset_id || file.asset_name === newName)) continue
+        const group: ImportStatement[] = [{
           sql: `UPDATE import_job_files SET original_name = @name WHERE id = @id`,
           params: { id: fileId, name: newName },
-        })
-        const assetId = fileAssetByJobFileId.get(Number(fileId))
+        }]
+        const assetId = file?.file_asset_id
         if (assetId) {
-          renameStatements.push({
+          group.push({
             sql: `UPDATE file_assets SET original_name = @name WHERE id = @id`,
             params: { id: assetId, name: newName },
           })
         }
+        if (destructiveAuthority) group.unshift({
+          sql: `SELECT CASE ${destructiveImportCommitGuard(destructiveAuthority)} ELSE 1 END AS destructive_import_authority`,
+          params: destructiveImportCommitParams(jobId, destructiveAuthority),
+        })
+        renameGroups.push(group)
       }
-      if (renameStatements.length) await runD1BatchInChunks(db, renameStatements)
+      if (destructiveAuthority) await runD1BatchGroupsInChunks(db, renameGroups, D1_IMPORT_BATCH_CHUNK_SIZE, false)
+      else await runD1BatchInChunks(db, renameGroups.flat())
+      imageMatchCache.renameComplete = true
     }
     sw.lap('imageRenameMs')
 
@@ -6683,6 +6718,10 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           // A row redirected from a disabled branch labels its movements (CUTOVER-LR); any other row is untouched.
           rowWriteGroup = labelAddressedMovements(rowWriteGroup, d)
           if (rowWriteGroup.length) {
+            if (destructiveAuthority) rowWriteGroup.unshift({
+              sql: `SELECT CASE ${destructiveImportCommitGuard(destructiveAuthority)} ELSE 1 END AS destructive_import_authority`,
+              params: destructiveImportCommitParams(jobId, destructiveAuthority),
+            })
             productStatementGroups.push(rowWriteGroup)
             if (!stockWrites) productMetadataStatementGroups.add(rowWriteGroup)
           }
@@ -7321,7 +7360,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // semantics "not part of the new file's data" and "not acted on" are
     // the same thing; there's no separate "explicitly keep this out of
     // the replace" signal today.
-    const finalContext: ProductFinalizeContext | undefined = job.type === 'products' ? { jobId, leaseToken, state, queued: Boolean(env.IMPORT_QUEUE) } : undefined
+    const finalContext: ProductFinalizeContext | undefined = job.type === 'products' ? { jobId, leaseToken, state, queued: Boolean(env.IMPORT_QUEUE), authority: destructiveAuthority } : undefined
     const continueFinalization = async () => {
       budget.reserve = 2 + httpTail
       await dispatchImportWork(env, { jobId, kind: 'apply' }, { freshInvocation: true })
@@ -7434,6 +7473,9 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     if (budget) budget.reserve = 2 + httpTail
     if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError || isImportMaintenanceFenceError(error)) throw error
     if (generic && String((error as Error)?.message).includes('$[import_lease_changed]')) throw new StockTransactionOutcomeUnknownError()
+    if (String((error as Error)?.message).includes('$[import_authority_changed]')) {
+      error = new ImportApplyAuthorizationError('import', 'Destructive import authority changed before commit. Retry it with a currently authorized user.')
+    }
     const stockError = productStockGuardError(error)
     const refusalCode = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
     const savedRefusal = ['stock_import_unit_over_tier_budget', 'stock_import_reconcile_over_tier_budget', 'import_queue_required', 'product_import_finalization_changed'].includes(refusalCode)

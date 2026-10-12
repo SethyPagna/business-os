@@ -10,7 +10,7 @@ import { sanitizeOriginalFileName, buildUniqueStoredName, getMediaType } from '.
 import { classifyImportUpload, validateUploadedBuffer, EMBEDDED_MARKUP_MESSAGE, MISMATCHED_UPLOAD_MESSAGE, UNSUPPORTED_IMAGE_MESSAGE, UNSUPPORTED_UPLOAD_MESSAGE } from '../lib/uploadSecurity'
 import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, summarizeImportWarnings, countRowsWithWarningKinds, runD1BatchInChunks, importBranchRedirectGate, IMPORT_FILE_SKIPPED_ERROR_CODE, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportBranchRedirectGate, type ImportRowResult, type RowAction } from '../lib/importEngine'
 import { IMPORT_BRANCH_REDIRECT_POLICY_KEY } from '../lib/importBranchAuthority'
-import { PRODUCT_IMPORT_FINALIZATION_CHANGED, persistedImportApplyState } from '../lib/importEngine'
+import { PRODUCT_IMPORT_FINALIZATION_CHANGED, persistedImportApplyState, missingDestructiveImportPermission } from '../lib/importEngine'
 import { stockTransactionRefusal } from '../lib/stockTransaction'
 import { branchRedirectTarget } from '../lib/branchEffect'
 import { readCentralDirectory, extractZipEntry, ZipFormatError, type ZipEntry } from '../lib/zipReader'
@@ -498,27 +498,9 @@ app.post('/', async (c) => {
   if (!ALLOWED_TYPES.has(type)) return c.json({ success: false, error: 'Unsupported import job type' }, 400)
   const denied = await requireImportPermission(c as any, undefined, type)
   if (denied) return denied
-  // Replace-all (products) soft-deactivates every active product this run
-  // doesn't touch, and column-level replace overwrites whichever fields
-  // the operator picked on every matched row -- both are more destructive
-  // than an ordinary merge import, but import_mode/replace_columns live
-  // inside the client-supplied policy blob with nothing else gating them.
-  // The frontend's mode picker + window.confirm are a UI nicety, not a
-  // security boundary: a raw POST here with the same ordinary 'products'
-  // permission could otherwise trigger either. Reuse the existing
-  // 'destructive_delete' permission (defined in permissions.ts, exposed in
-  // the admin permission editor) as the extra gate, same as any other
-  // destructive-beyond-the-base-entity action should be.
-  const requestedImportMode = (body?.policy as { import_mode?: unknown } | undefined)?.import_mode
-  if (type === 'products' && (requestedImportMode === 'replace_all' || requestedImportMode === 'replace_columns')) {
-    if (!hasPermission(user, 'destructive_delete')) {
-      return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'destructive_delete' }, 403)
-    }
-    // Per-action override (Part 546): 'products:import_replace_all' can be
-    // switched off for a role even when destructive_delete is granted.
-    if (isActionBlocked(user, 'products', 'import_replace_all')) {
-      return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'products:import_replace_all' }, 403)
-    }
+  const destructivePermission = missingDestructiveImportPermission(user, type, JSON.stringify(body?.policy || {}))
+  if (destructivePermission) {
+    return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: destructivePermission }, 403)
   }
 
   const id = crypto.randomUUID()
@@ -1522,6 +1504,8 @@ app.post('/:id/approve', async (c) => {
   if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
+  const destructivePermission = missingDestructiveImportPermission(c.get('user'), String(job.type), job.policy_json as string | null)
+  if (destructivePermission) return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: destructivePermission }, 403)
   if (sourceUploadPending(job)) return c.json(IMPORT_SOURCE_UPLOAD_PENDING, 409)
   if (persistedImportApplyState(job.chunk_state_json)) {
     return c.json(IMPORT_APPLY_STARTED, 409)
@@ -1748,6 +1732,8 @@ app.post('/:id/retry', async (c) => {
   const mode = retryMode
   const policy = safeJsonParse<Record<string, any>>(job.policy_json as string, {})
   if (mode === 'apply') {
+    const destructivePermission = missingDestructiveImportPermission(c.get('user'), String(job.type), job.policy_json as string | null)
+    if (destructivePermission) return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: destructivePermission }, 403)
     const imageDenied = await requireChangedProductImportImageAction(c as any, job)
     if (imageDenied) return imageDenied
     // A re-apply is a fresh confirmation point (CUTOVER-LR): the same gate as /approve, before anything is queued.

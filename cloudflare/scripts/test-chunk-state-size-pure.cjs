@@ -66,7 +66,7 @@ const stateCode = stateType
 
 check('chunk state carries no per-row image collections', () => {
   assert.ok(!/rowImagePathEntries/.test(stateCode), 'rowImagePathEntries belongs in import_job_image_matches, not chunk state')
-  assert.ok(!/renamePlanEntries/.test(stateCode), 'renamePlanEntries belongs in import_job_image_renames -- it is read ONCE per run, not per chunk')
+  assert.ok(!/renamePlanEntries/.test(stateCode), 'renamePlanEntries belongs in import_job_image_renames, not chunk state')
 })
 
 check('chunk state carries no per-row signature ledger', () => {
@@ -107,13 +107,14 @@ check('image paths are read for the CURRENT WINDOW, not all at once', () => {
   )
 })
 
-check('the rename plan is read once per authorized run, not carried through every chunk', () => {
+check('the rename plan resumes only during authorized unfinished pre-row work', () => {
   assert.match(engine, /const renamePlanEntries = await readImageRenamePlan\(db, jobId\)/)
   assert.match(
     engine,
-    /isFreshStart && job\.type === 'products' && authority\.allowProductImageWrites && imageMatchCache\?\.hasRenamePlan/,
-    'only a fresh, image-authorized apply may load and execute the persisted rename plan',
+    /cursor === 0 && job\.type === 'products' && authority\.allowProductImageWrites\s*&& imageMatchCache\?\.hasRenamePlan && !imageMatchCache\.renameComplete/,
+    'budget deferral must resume unfinished renames without repeating them on later row windows',
   )
+  assert.match(engine, /imageMatchCache\.renameComplete = true/)
 })
 
 check('a re-run replaces the previous match rather than merging into it', () => {

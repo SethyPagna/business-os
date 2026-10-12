@@ -18,11 +18,12 @@ function compileTs(filePath) {
   }).outputText
 }
 
-function loadTs(relativePath, stubs = {}) {
+function loadTs(relativePath, stubs = {}, unrelatedDependency) {
   const filePath = path.join(srcRoot, relativePath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
+    if (unrelatedDependency && (request.startsWith('./') || request.startsWith('../durable-objects/'))) return unrelatedDependency
     return originalLoad.call(this, request, parent, isMain)
   }
   try {
@@ -37,6 +38,11 @@ function loadTs(relativePath, stubs = {}) {
 }
 
 const permissions = loadTs('lib/permissions.ts')
+const authorityEngine = loadTs('lib/importEngine.ts', {
+  './permissions': permissions, './queueDispatch': loadTs('lib/queueDispatch.ts'),
+}, new Proxy({}, {
+  get(_target, property) { return () => { throw new Error(`Unexpected authority dependency: ${String(property)}`) } },
+}))
 const acquisitionCostAccess = loadTs('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const media = loadTs('lib/media.ts')
 const sqlBinding = loadTs('lib/sqlBinding.ts')
@@ -133,6 +139,7 @@ function loadImportRoute(state) {
   }
   const requireAuth = async (c, next) => { c.set('user', c.env.TEST_USER); await next() }
   const importEngine = new Proxy({
+    missingDestructiveImportPermission: authorityEngine.missingDestructiveImportPermission,
     persistedImportApplyState: (value) => {
       try {
         const state = JSON.parse(typeof value === 'string' ? value : '{}').genericApply
@@ -246,7 +253,7 @@ async function request(state, routePath, method = 'POST', body = {}) {
 }
 
 async function main() {
-  const blocked = () => role({ products: true, product_cost_edit: true, 'products:image': false })
+  const blocked = () => role({ products: true, product_cost_edit: true, destructive_delete: true, 'products:image': false })
   {
     const state = freshState(role({ products: true, 'products:image': true }))
     const response = await request(state, '/job-1/approve')

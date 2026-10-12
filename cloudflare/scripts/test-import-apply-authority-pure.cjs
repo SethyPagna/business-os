@@ -152,6 +152,7 @@ const exactStubs = {
     isImportMaintenanceFenceError: () => false,
   },
   './permissions': permissions,
+  './stockActorGuard': load('lib/stockActorGuard.ts'),
   './auth': {},
   './media': media,
   './productImagePermission': productImagePermission,
@@ -209,6 +210,21 @@ async function expectAuthorityError(promise, permission) {
 }
 
 async function main() {
+  for (const mode of ['replace_all', 'replace_columns']) {
+    const policy = JSON.stringify({ import_mode: mode })
+    assert.equal(engine.missingDestructiveImportPermission(actor({ products: true }), 'products', policy), 'destructive_delete')
+    assert.equal(engine.missingDestructiveImportPermission(actor({ products: true, destructive_delete: true, 'products:import_replace_all': false }), 'products', policy), 'products:import_replace_all')
+    assert.equal(engine.missingDestructiveImportPermission(actor({}, { role_permissions: JSON.stringify({ products: true, destructive_delete: true }) }), 'products', policy), null)
+    assert.equal(engine.missingDestructiveImportPermission(actor({ destructive_delete: false }, { role_permissions: JSON.stringify({ products: true, destructive_delete: true }) }), 'products', policy), 'destructive_delete')
+    assert.equal(engine.missingDestructiveImportPermission(actor({ 'products:import_replace_all': false }, { role_permissions: JSON.stringify({ products: true, destructive_delete: true }) }), 'products', policy), 'products:import_replace_all')
+    assert.equal(engine.missingDestructiveImportPermission(actor({ destructive_delete: false, 'products:import_replace_all': false }, { role_code: 'admin' }), 'products', policy), null)
+    assert.equal(engine.missingDestructiveImportPermission(actor({ contacts: true }), 'customers', policy), null)
+  }
+  for (const policy of [null, '', '{', 'null', '[]', '{}', '{"import_mode":"merge"}', '{"import_mode":"fill_blank"}', '{"import_mode":" REPLACE_ALL "}']) {
+    assert.equal(engine.missingDestructiveImportPermission(actor({ products: true }), 'products', policy), null)
+  }
+  console.log('PASS 23 destructive-mode checks preserve execution parser, role inheritance, explicit denials and admin semantics')
+
   activeState = makeState(actor({ products: true, 'products:image': true }))
   activeState.job.policy_json = '{}'
   await expectAuthorityError(engine.assertCurrentImportApplyAuthority({}, activeState.job), 'import')
