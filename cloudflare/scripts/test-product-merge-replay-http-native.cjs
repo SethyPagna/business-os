@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict')
+const fs = require('node:fs'), path = require('node:path')
 const h = require('./test-counted-quantity-exact-native.cjs')
 const pair = require('./test-product-merge-pair-http-native.cjs')
 const { load } = require('./test-product-merge-origin-plan-native.cjs')
@@ -12,12 +13,33 @@ const tables = ['products','product_batches','branch_stock','branch_batch_stock'
   'product_cost_entries','inventory_movements','action_history','undo_snapshots','audit_logs','system_flags','sqlite_sequence']
 const state = f => Object.fromEntries(tables.map(table => [table,f.sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]))
 const grants = { products: true, 'products:merge_duplicates': true, 'products:image': true, 'products:edit': true, 'products:price': true, product_cost_view: true, product_cost_edit: true, audit_log: true }
+const measurements=[]
+let richTraceSaved=false
+function measure(f){
+  let queries=0;const raw=f.env.DB,sqls=[]
+  const wrap=(statement,text)=>new Proxy(statement,{get(target,key){if(key==='bind')return(...args)=>wrap(target.bind(...args),text);if(['first','all','run'].includes(key))return(...args)=>{queries++;sqls.push(text);return target[key](...args)};return target[key]}})
+  f.env.DB=new Proxy(raw,{get(target,key){if(key==='prepare')return text=>wrap(target.prepare(text),text);if(key==='batch')return rows=>{queries+=rows.length;sqls.push(...rows.map(row=>row.text));return target.batch(rows)};return target[key]}})
+  const original=f.call
+  f.call=async(url,body,method)=>{
+    queries=0;sqls.length=0;const result=await original(url,body,method);const tier=f.env.PLAN_TIER
+    assert.ok(queries<=(tier==='free'?50:1000),'actual current invocation tier including all response/cache tails')
+    measurements.push({tier,url,status:result.status,queries,code:result.json.code})
+    console.log('MEASURE '+JSON.stringify(measurements.at(-1)))
+    if(process.argv.includes('--save-trace')&&!richTraceSaved&&url==='/products/possible-duplicates/merge'&&queries>=45){
+      richTraceSaved=true
+      fs.writeFileSync(path.resolve(__dirname,'../../../..','Records/Lanes/2026-10-12/MERGE-REPLAY-RICH-FORWARD-TRACE.json'),JSON.stringify({tier,status:result.status,queries,images:{keeper:1,loser:2},children:2,promotions:2,sqls},null,2))
+    }
+    return {...result,queries}
+  }
+  return f
+}
 async function setup(worker, tier, receipt = true, tagged = true, catalog = false, selected = false, zero = false) {
-  const f = await pair.world(worker, tier, receipt, tagged)
+  const f = measure(await pair.world(worker, catalog?'paid':tier, receipt, tagged))
   if (catalog) await executeStockTransaction(getDb(f.env), [
     { sql: "UPDATE products SET image_path='',parent_id=2 WHERE id=1" },
     { sql: "UPDATE products SET image_path='loser-primary' WHERE id=2" },
     { sql: "INSERT INTO products(id,name,is_active,parent_id)VALUES(3,'Child',1,2),(4,'Unrelated',1,NULL)" },
+    { sql: 'INSERT INTO branch_stock(product_id,branch_id,quantity)VALUES(3,1,0),(4,1,0)' },
     { sql: "INSERT INTO product_images(id,product_id,image_path,sort_order,created_at)VALUES(11,1,'shared',0,'old-k'),(12,2,'new-image',0,'old-l'),(13,2,'shared',1,'old-s')" },
     { sql: "INSERT INTO promotion_rules(id,title,rule_type,percent_off,product_ids,updated_at)VALUES(1,'Affected','percent_off',10,'[2,1,3]','old-p'),(2,'Unrelated','percent_off',5,'[4]','old-u')" },
   ], 'once')
@@ -36,12 +58,19 @@ async function setup(worker, tier, receipt = true, tagged = true, catalog = fals
       {canChangeImages:true,imageIds:reservations.imageIds,updatedAt:'2026-10-12T06:00:00Z',keeperChoice:{requiresProductEdit:true,fields:{name:'Chosen keeper',selling_price_usd:9},cost:{cost_price_usd:3}}})
     await executeStockTransaction(getDb(f.env),compiled.statements,'once');historyId=reservations.historyId
   } else {
-    if(catalog&&tier==='free')f.env.PLAN_TIER='paid'
+    if(process.argv.includes('--free-forward'))f.env.PLAN_TIER=tier
     const merged = await f.call('/products/possible-duplicates/merge', { keepId: 1, mergeId: 2, stock: 'merge', client_request_id: 'replay-http-original' })
+    if(process.argv.includes('--free-forward')&&merged.status===409){
+      assert.equal(merged.json.code,'merge_request_budget');assert.deepEqual(state(f),before)
+      console.log('PASS genuine Free rich forward remains bounded write-free admission refusal; Paid-produced Free replay is separate')
+      return {...f,historyId:null,before}
+    }
     assert.equal(merged.status,200,JSON.stringify(merged.json));historyId=merged.json.actionHistoryId
     f.env.PLAN_TIER=tier
   }
   const originalPlan = f.sql.prepare("SELECT payload_json FROM undo_snapshots WHERE kind='product.merge.plan.v2'").get().payload_json
+  if(selected)assert.equal((await f.call(`/action-history/${historyId}/undo`,{expected_generation:-1})).status,400)
+  f.env.PLAN_TIER=tier
   return {...f,historyId,before,originalPlan}
 }
 function intercept(f, callback) {
@@ -73,6 +102,7 @@ function invariant(f, undo) {
 }
 async function positive(worker,tier,receipt,tagged,catalog,mode) {
   const f=await setup(worker,tier,receipt,tagged,catalog,false,mode==='zero')
+  if(f.historyId===null){f.sql.close();return}
   try {
     let lost=false
     const batches=intercept(f,(_rows,phase)=>{if(mode==='lost-ack'&&phase==='after'&&!lost){lost=true;throw Error('network acknowledgement lost')}})
@@ -101,8 +131,9 @@ async function refusals(worker,tier) {
   for(const fault of ['session','expiry','actor','role','image','source','child','branch','late-audit','generation','missing-generation','unknown-before','unknown-recovery']){
     const f=await setup(worker,tier,true,true,true)
     try {
-      let rival,failRead=false
+      let rival,failRead=false,failedOnce=false
       const batches=intercept(f,(_rows,phase)=>{
+        if(fault==='unknown-recovery'&&phase==='after'&&!failedOnce){failedOnce=true;failRead=true;throw Error('network acknowledgement lost after commit')}
         if(phase!=='before')return
         if(fault==='session')f.sql.exec('UPDATE user_sessions SET revoked_at=CURRENT_TIMESTAMP')
         if(fault==='expiry')f.sql.exec("UPDATE user_sessions SET expires_at='2000-01-01T00:00:00Z'")
@@ -114,14 +145,13 @@ async function refusals(worker,tier) {
         if(fault==='source')f.competeBeforeCommit([{sql:"UPDATE products SET brand='Source rival' WHERE id=1"}])
         if(fault==='late-audit')f.sql.exec("CREATE TRIGGER fail_replay_audit BEFORE INSERT ON audit_logs WHEN NEW.action='action_undo' BEGIN SELECT RAISE(ABORT,'merge_replay_late_failure');END")
         rival=state(f)
-        if(fault==='unknown-before')throw Error('network failed before commit')
-        if(fault==='unknown-recovery'){failRead=true;throw Error('network failed before outcome confirmed')}
+        if(fault==='unknown-before'&&!failedOnce){failedOnce=true;throw Error('network failed before commit')}
       })
       if(fault==='unknown-recovery'){
         const raw=f.env.DB
         f.env.DB=new Proxy(raw,{get(target,key){if(key==='prepare')return text=>{
           const statement=target.prepare(text)
-          if(failRead&&text.includes(' authorized,'))return new Proxy(statement,{get(t,k){if(k==='bind')return(...args)=>{const bound=t.bind(...args);return new Proxy(bound,{get(b,m){if(m==='first')return()=>{throw Error('network recovery unavailable')};return b[m]}})};return t[k]}})
+          if(failRead&&text.includes(' authorized,'))return new Proxy(statement,{get(t,k){if(k==='bind')return(...args)=>{const bound=t.bind(...args);return new Proxy(bound,{get(b,m){if(m==='all')return async(...values)=>{await b.all(...values);throw Error('network recovery unavailable')};return b[m]}})};return t[k]}})
           return statement
         };return target[key]}})
       }
@@ -131,9 +161,18 @@ async function refusals(worker,tier) {
       assert.equal(result.status,expected,JSON.stringify(result.json))
       const expectedState=structuredClone(rival||before)
       if(fault==='source')expectedState.products.find(row=>row.id===1).brand='Source rival'
-      assert.deepEqual(state(f),expectedState,'refusal keeps complete physical/history graph and prior rival')
+      if(fault==='unknown-recovery')invariant(f,true)
+      else assert.deepEqual(state(f),expectedState,'refusal keeps complete physical/history graph and prior rival')
       assert.ok(batches()<=1)
       if(fault.startsWith('unknown'))assert.equal(result.json.action,'retry_same_request')
+      if(fault.startsWith('unknown')){
+        failRead=false
+        const committed=state(f),retry=await call(f,'undo',0)
+        assert.equal(retry.status,200,JSON.stringify(retry.json));invariant(f,true)
+        if(fault==='unknown-recovery'){assert.equal(retry.json.replayed,true);assert.deepEqual(state(f),committed);assert.equal(batches(),1)}
+        else assert.equal(batches(),2)
+        assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='action_undo'").get().n,1)
+      }
       console.log('PASS HTTP atomic refusal '+tier+' '+fault)
     }finally{f.sql.close()}
   }
@@ -148,15 +187,46 @@ async function refusals(worker,tier) {
     }finally{f.sql.close()}
   }
 }
+async function budget(worker,tier){
+  async function trial(extra){
+    const f=await setup(worker,tier,true,true,false)
+    try{
+      const before=state(f),raw=f.env.DB;let injected=false
+      const batches=intercept(f)
+      const counted=f.env.DB
+      f.env.DB=new Proxy(counted,{get(target,key){if(key==='batch')return async rows=>{
+        if(!injected&&rows.some(row=>row.text.includes('canonicalBatches'))){
+          injected=true
+          const hook=globalThis[Symbol.for('business-os.request-metrics.v1')]
+          for(let index=0;index<extra;index++){hook.rawD1Start(1);await raw.prepare('SELECT 1 AS bounded_upstream_read').first()}
+        }
+        return target.batch(rows)
+      };return target[key]}})
+      const result=await call(f,'undo',0)
+      if(result.status===400){assert.equal(result.json.code,'merge_replay_over_plan_budget');assert.equal(result.json.outcome,'not_dispatched');assert.equal(batches(),0);assert.deepEqual(state(f),before)}
+      else{assert.equal(result.status,200,JSON.stringify(result.json));assert.equal(batches(),1);invariant(f,true)}
+      return result.status===200
+    }finally{f.sql.close()}
+  }
+  let accepted=0,refused=tier==='free'?30:990
+  assert.equal(await trial(refused),false)
+  while(refused-accepted>1){const middle=Math.floor((accepted+refused)/2);if(await trial(middle))accepted=middle;else refused=middle}
+  assert.equal(await trial(accepted),true);assert.equal(await trial(refused),false)
+  console.log(`PASS exact actual upstream-read admission boundary ${tier}: ${accepted} accepted, ${refused} refused before stock dispatch`)
+}
 async function main() {
   const worker = await h.bundle.exports.bundleWorker()
   if(process.argv.includes('--smoke')){await positive(worker,'free',true,true,false,'normal');return}
+  if(process.argv.includes('--free-forward')){await positive(worker,'free',true,true,true,'normal');return}
   for(const tier of ['free','paid']){
+    for(const receipt of[false,true])for(const tagged of[false,true])await positive(worker,tier,receipt,tagged,false,'normal')
     for(const receipt of[false,true])for(const tagged of[false,true])await positive(worker,tier,receipt,tagged,true,'normal')
     for(const mode of['lost-ack','nonadmin','cache-fault','zero'])await positive(worker,tier,true,true,true,mode)
     await refusals(worker,tier)
+    await budget(worker,tier)
   }
   console.log('LOCAL ACTUAL HTTP REPLAY: original real-pair producer plus explicit selected-catalog compiler producer permission controls; full invocation tails counted, no deployment/device certificate')
+  console.log('TOTALS '+JSON.stringify({requests:measurements.length,free:Math.max(...measurements.filter(row=>row.tier==='free').map(row=>row.queries)),paid:Math.max(...measurements.filter(row=>row.tier==='paid').map(row=>row.queries))}))
 }
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })
 module.exports = { main }

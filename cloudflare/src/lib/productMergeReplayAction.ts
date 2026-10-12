@@ -15,6 +15,11 @@ import { bumpVersions } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 
 type Permissions = { image: boolean; productEdit: boolean; priceEdit: boolean; acquisitionCostEdit: boolean }
+const ACK_RECOVERY_READ_ATTEMPTS = 1
+const HISTORY_RESPONSE_READ_ATTEMPTS = 5
+const CACHE_INVALIDATION_READ_WRITE_ATTEMPTS = 6
+const RAW_MAINTENANCE_MARGIN = 1
+const MERGE_REPLAY_TAIL_STATEMENTS = ACK_RECOVERY_READ_ATTEMPTS + HISTORY_RESPONSE_READ_ATTEMPTS + CACHE_INVALIDATION_READ_WRITE_ATTEMPTS + RAW_MAINTENANCE_MARGIN
 export type ProductMergeReplayAuthority = { predicate: string; params: Record<string, unknown> }
 const fail = (code: string, statusCode = 409): never => {
   throw Object.assign(new Error(code === 'merge_replay_outcome_unknown'
@@ -58,7 +63,7 @@ export async function replayProductMergeAction(payload: Record<string, unknown>,
   if (!Number.isSafeInteger(historyId) || Number(historyId) <= 0 || payload.applier !== 'product.merge' || payload.version !== 2) return fail('undo_history_unusable')
   const db = getDb(env), limit = getPlanLimits(env).d1QueriesPerInvocation
   const used = () => currentRequestMetrics()?.invocation.attemptedStatements ?? Number.NaN
-  const admit = (statements: number, tail = 13) => {
+  const admit = (statements: number, tail = MERGE_REPLAY_TAIL_STATEMENTS) => {
     if (!Number.isSafeInteger(used()) || used() + statements + tail > limit) return fail('merge_replay_over_plan_budget', 400)
   }
   const authorityParams = { ...stockActorParams(user), ...authority.params }
