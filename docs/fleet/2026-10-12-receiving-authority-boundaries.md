@@ -42,7 +42,7 @@ an unanswered write failed or automatically repeat product creation.
 
 | Surface | Observed evidence |
 | --- | --- |
-| New/existing product handoff | Ten controller groups pass with the corrected fixed-render snapshot, covering new-only, existing-only, both mixed orders, multiple new products, pending/unknown refusal and stable request IDs. The mounted multiple-create failure is retained as evidence; its built-browser recheck is required before final acceptance. |
+| New/existing product handoff | Ten controller groups pass with the corrected fixed-render snapshot, covering new-only, existing-only, both mixed orders, multiple new products, pending/unknown refusal and stable request IDs. Eight independent actual-persistence cases preserve quantities, free units, costs, prices and supplier totals. The mounted multiple-create failure and strict previous-source failure are retained. |
 | Receiving modal and deferred transport | Eighteen regression groups pass. The previous source fails sixteen safety assertions while both healthy controls pass. Six deliberately incorrect repairs are rejected. |
 | Real account/server scope integration | Twelve independent probes pass: server, account, organization and login changes during success/404; unchanged-authority and ordinary cache-invalidation controls preserve valid deferred rounds. |
 | Shared HTTP redirect | Nine actual-API regression groups pass; the previous source fails five stale-authority cases. Existing redirect and HTTP tests pass. Current-owner confirmation, cancellation, successive redirects and a fresh command by the new owner remain functional. |
@@ -56,6 +56,25 @@ Stale editors retain the original operation's recovery evidence. The application
 may hide or lock them during account reconciliation; this report does not claim
 that every authority transition automatically remounts the editor. Reopening
 under the original authority must retain the saved request IDs and uncertainty.
+
+The final local scoped gate reports **5/5 green**: both frontend TypeScript
+configurations, translations, 27 selected test files, production build and
+startup dependency checks. Earlier fixture failures and the real render-snapshot
+failure were retained; only the corrected final run is green.
+
+The final built-browser matrix passes EN/KM at 1440px and 375px. Each mixed
+single-new/existing flow sends one create and one 18 USD stock receipt, closes
+the dialog and has no page overflow or uncaught page error. The additional
+two-new/existing flow sends two creates and one 30 USD stock receipt. Delayed
+creation keeps completion/close/minimize disabled and blocks Escape. Explicit
+400/403/409 responses produce no stock or repeated creation; lost acknowledgement
+preserves both rows and its uncertainty after reload, with no write on retry.
+
+Final browser evidence uses an isolated profile and verifies that loaded
+`index-BSeaE3Sc` and `FastStockInModal-GS3XrBri` match the built files. An earlier
+repeat of the failure loaded the old PWA shell and is explicitly excluded from
+the final-source result. Fixture-only background endpoint noise was retained;
+this is not a clean whole-app network certificate.
 
 Local fixture checks do not establish live production behavior or physical
 iOS/Android acceptance. The final source still requires the full GitHub release
