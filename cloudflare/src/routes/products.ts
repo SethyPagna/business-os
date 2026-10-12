@@ -1,6 +1,10 @@
 import { executeStockTransaction, stockTransactionStatementCount, StockTransactionUnavailableError, StockTransactionOutcomeUnknownError } from '../lib/stockTransaction'
 import { assertProductStatusInput, assertProductsActive, catalogProductSql, productStockGuardStatement, productHasStockSql, productStockGuardError } from '../lib/productStockGuard'
 import { Hono } from 'hono'
+import { getCookie } from 'hono/cookie'
+import { executeProductMergeRequest, prepareProductMergeRequest, ProductMergeRequestError } from '../lib/productMergeRequest'
+import { currentRequestMetrics } from '../lib/requestMetrics'
+import { sha256Hex } from '../lib/saleRecordEvents'
 import { acquisitionCostResponses, canEditAcquisitionCosts, hasCatalogCostWrite } from '../lib/acquisitionCostAccess'
 import { roundMoney4 } from '../lib/moneyPrecision'
 import { PRODUCT_DISCOUNT_PRICE_FIELDS, PRODUCT_DISCOUNT_PRICE_REFUSAL, PRODUCT_DISCOUNT_SELECT, productDiscountChanged } from '../lib/productDiscountGate'
@@ -8964,7 +8968,7 @@ app.post('/possible-duplicates/merge', async (c) => {
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
-  const body = await c.req.json().catch(() => ({})) as { keepId?: unknown; mergeId?: unknown; stock?: unknown; keep?: unknown; cost_price_usd?: unknown; cost_price_khr?: unknown; resolve?: ResolveProductRequest; choices?: unknown }
+  const body = await c.req.json().catch(() => ({})) as { client_request_id?: unknown; keepId?: unknown; mergeId?: unknown; stock?: unknown; keep?: unknown; cost_price_usd?: unknown; cost_price_khr?: unknown; resolve?: ResolveProductRequest; choices?: unknown }
   const keepId = Number(body.keepId)
   const mergeId = Number(body.mergeId)
   // The operator's answer for the discarded row's stock. Anything other than
@@ -9009,6 +9013,73 @@ app.post('/possible-duplicates/merge', async (c) => {
   // exist only with a Resolve plan.
   if (body.choices !== undefined && (!keepMode || resolve === undefined)) {
     return c.json({ success: false, code: INVALID_RESOLVE_CHOICES_CODE, error: 'Field choices need a reviewed Resolve plan.' }, 400)
+  }
+  if (!keepMode && resolve === undefined && stockChoice !== 'write_off') {
+    if (typeof body.client_request_id !== 'string' || !/^[A-Za-z0-9_-]{8,100}$/.test(body.client_request_id)) {
+      return c.json({ success: false, code: 'merge_request_conflict', error: 'A valid merge request identity is required.' }, 400)
+    }
+    const token = getCookie(c, 'bos_session')
+    if (!token) return c.json({ success: false, code: 'merge_request_permission', error: 'Sign in again before merging products.' }, 403)
+    const authority = {
+      predicate: `EXISTS(SELECT 1 FROM user_sessions s JOIN users u ON u.id=s.user_id
+        WHERE s.token_hash=@mergeSessionHash AND s.user_id=@mergeSessionActor AND s.revoked_at IS NULL
+          AND s.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') AND u.deleted_at IS NULL)`,
+      params: { mergeSessionHash: await sha256Hex(token), mergeSessionActor: user.id },
+    }
+    const request = { keeperId: keepId, loserId: mergeId, requestId: body.client_request_id,
+      requestDigest: await sha256Hex(canonicalProductConflictJson({ version: 2, keepId, mergeId, stock: stockChoice })) }
+    const budget = { limit: getPlanLimits(c.env).d1QueriesPerInvocation,
+      used: () => currentRequestMetrics()?.invocation.attemptedStatements ?? Number.NaN, tailReserve: 6 }
+    let stockImpact: MergeStockImpact | undefined
+    try {
+      const result = await executeProductMergeRequest(db, user, request, budget, async () => {
+        if (budget.used() + 7 + budget.tailReserve > budget.limit) throw new ProductMergeRequestError('merge_request_budget')
+        const snapshot = await readProductMergeCaseSnapshot(db, keepId, mergeId, [])
+        const keeper = snapshot.canonicalProduct, discarded = snapshot.duplicateProduct
+        const refuse = (status: 400 | 404 | 409, response: Record<string, unknown>): never => {
+          throw Object.assign(new Error(String(response.code ?? 'merge_state_conflict')), { mergeResponse: response, mergeStatus: status })
+        }
+        if (!keeper || !discarded) refuse(404, { error: 'Both products must exist' })
+        if (keeper!.is_active !== 1 || discarded!.is_active !== 1) refuse(409, { code: 'product_merge_inactive', error: 'A product was already merged or deleted.' })
+        if (keeper!.is_group || discarded!.is_group) refuse(400, { error: 'Group rows cannot be merged. Merge the variant products instead.' })
+        const branchRows = await db.prepare('SELECT id,name FROM branches').all<{ id: number; name: string }>()
+        const branchNames = new Map(branchRows.map(row => [row.id, row.name]))
+        const identity = await readMergeIdentityDiff(db, keepId, mergeId)
+        if (!identity.same) refuse(409, { code: 'incompatible_product_identity', error: 'These products do not have the same normalized name and barcode.', identity })
+        const numericIssue = mergeNumericRefusal(identity)
+        if (numericIssue) refuse(409, { code: 'invalid_merge_numeric', error: productMergeNumericError(identity.numericIssues), identity, numericIssue })
+        stockImpact = await readMergeStockImpact(db, mergeId, branchNames)
+        if (!stockChoice && mergeStockImpactNeedsChoice(stockImpact)) refuse(400, { code: 'stock_choice_required',
+          error: 'Choose what happens to the stock before merging these products.', stockImpact, identity })
+        const operationId = crypto.randomUUID()
+        const prepared = await prepareProductMergeRequest(db, snapshot, operationId,
+          { canChangeImages: getActionTier(user, 'products', 'image') === 'full', updatedAt: new Date().toISOString() }, budget)
+        prepared.afterStatements = [
+          ...closeStockSessionsStatements([keepId, mergeId], user, operationId, keepId),
+          buildAuditStatement(user.id, user.name, 'merge_duplicate', 'product', keepId,
+            { operationId, keptId: keepId, mergedId: mergeId, stockDisposition: 'merge', stockImpact, actionHistoryId: prepared.identity.historyId }),
+        ]
+        return prepared
+      }, authority)
+      c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+      c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
+      c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
+      return c.json({ success: true, ...result.receipt, replayed: result.replayed, stockDisposition: 'merge',
+        ...(stockImpact ? { stockImpact } : {}), committed: true, historyResolved: true, undoReady: false })
+    } catch (error) {
+      if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
+      if (error instanceof ProductMergeRequestError) return c.json({ success: false, code: error.code,
+        error: error.code === 'merge_request_permission' ? 'Your access changed. Sign in again before continuing.'
+          : error.code === 'merge_request_budget' ? 'This merge exceeds the available request capacity. No changes were saved.'
+            : 'This merge request already has a different result or choices.' }, error.code === 'merge_request_permission' ? 403 : 409)
+      const refusal = error as { mergeResponse?: Record<string, unknown>; mergeStatus?: 400 | 404 | 409; code?: string }
+      if (refusal.mergeResponse && refusal.mergeStatus) return c.json({ success: false, ...refusal.mergeResponse }, refusal.mergeStatus)
+      if (refusal.code === 'image_permission_required') return c.json({ success: false, code: refusal.code, error: 'Changing product images needs image permission.' }, 403)
+      const known = mergeFoldRefusal(error)
+      if (known) return c.json({ success: false, ...known }, 409)
+      if (/merge_|constraint failed|malformed JSON|bad JSON path/i.test(String(error))) return c.json({ success: false, code: 'merge_state_conflict', error: 'The products changed. Refresh before merging them.' }, 409)
+      throw error
+    }
   }
   let choices: ProductResolveChoices = {}
   const resolveGuards: AtomicMergeStatement[] = []

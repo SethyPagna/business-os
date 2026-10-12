@@ -16,10 +16,12 @@ import { executeStockTransaction, stockTransactionStatementCount, StockTransacti
 type Statement = { sql: string; params?: BindParams }
 export type ProductMergeRequest = { keeperId: number; loserId: number; requestId: string; requestDigest: string }
 export type ProductMergeRequestBudget = { limit: number; used: () => number; tailReserve: number }
+export type ProductMergeRequestAuthority = { predicate: string; params: Record<string, unknown> }
 export type ProductMergeRequestPreparation = {
   snapshot: ProductMergeCaseSnapshot
   identity: Pick<ProductMergeForwardStockIdentity, 'planId' | 'transitionId' | 'historyId' | 'origins'>
   guards: Statement[]
+  afterStatements?: Statement[]
   catalog?: ProductMergeForwardCatalogOptions
 }
 export type ProductMergeReceipt = {
@@ -62,9 +64,9 @@ export async function prepareProductMergeRequest(
   return { snapshot, identity, guards, catalog: { ...catalog, imageIds } }
 }
 
-export async function readProductMergeReceipt(db: D1Compat, user: SessionUser, request: ProductMergeRequest): Promise<ProductMergeReceipt | null> {
+export async function readProductMergeReceipt(db: D1Compat, user: SessionUser, request: ProductMergeRequest, authority?: ProductMergeRequestAuthority): Promise<ProductMergeReceipt | null> {
   validate(user, request)
-  const query = db.prepare(`SELECT (${stockActorPredicate}) actor_authorized,p.id plan_id,p.payload_json IS NOT NULL found,
+  const query = db.prepare(`SELECT (${stockActorPredicate} AND (${authority?.predicate ?? '1'})) actor_authorized,p.id plan_id,p.payload_json IS NOT NULL found,
     CASE WHEN length(CAST(p.payload_json AS BLOB))<=1048576 THEN p.payload_json END plan_json,
     h.id history_id,t.id seal_id,
     COALESCE(p.status='recorded' AND h.scope='products' AND h.entity='product_merge'
@@ -80,7 +82,7 @@ export async function readProductMergeReceipt(db: D1Compat, user: SessionUser, r
       AND json_extract(p.payload_json,'$.request_id')=@requestId
     LEFT JOIN action_history h ON h.id=json_extract(p.payload_json,'$.history_id')
     LEFT JOIN undo_snapshots t ON t.id=json_extract(h.undo_payload,'$.seal_id')`)
-  const params = { ...stockActorParams(user), requestId: request.requestId, planKind: PRODUCT_MERGE_PLAN_V2, transitionKind: PRODUCT_MERGE_TRANSITION_V2 }
+  const params = { ...stockActorParams(user), ...authority?.params, requestId: request.requestId, planKind: PRODUCT_MERGE_PLAN_V2, transitionKind: PRODUCT_MERGE_TRANSITION_V2 }
   const row = await (query.getOnce ? query.getOnce<Record<string, unknown>>(params) : query.get<Record<string, unknown>>(params))
   if (row?.actor_authorized !== 1) throw new ProductMergeRequestError('merge_request_permission')
   if (row.found !== 1) return null
@@ -106,10 +108,11 @@ export async function readProductMergeReceipt(db: D1Compat, user: SessionUser, r
 export async function executeProductMergeRequest(
   db: D1Compat, user: SessionUser, request: ProductMergeRequest, budget: ProductMergeRequestBudget,
   prepare: () => Promise<ProductMergeRequestPreparation>,
+  authority?: ProductMergeRequestAuthority,
 ): Promise<{ receipt: ProductMergeReceipt; replayed: boolean }> {
   validate(user, request)
   admit(budget, 1)
-  const previous = await readProductMergeReceipt(db, user, request)
+  const previous = await readProductMergeReceipt(db, user, request, authority)
   if (previous) return { receipt: previous, replayed: true }
   const prepared = await prepare()
   if (prepared.snapshot.canonicalProduct?.id !== request.keeperId || prepared.snapshot.duplicateProduct?.id !== request.loserId) conflict()
@@ -117,8 +120,9 @@ export async function executeProductMergeRequest(
     requestId: request.requestId, requestDigest: request.requestDigest }
   const compiled = planProductMergeForwardStock(prepared.snapshot, identity, prepared.catalog)
   if (compiled.catalog) catalogPermission(user, compiled.catalog.requiredPermissions)
-  const statements: Statement[] = [{ sql: `SELECT CASE WHEN ${stockActorPredicate}
-    THEN 1 ELSE json_extract('[1]','$[merge_request_permission]') END`, params: stockActorParams(user) }, ...prepared.guards, ...compiled.statements]
+  const statements: Statement[] = [{ sql: `SELECT CASE WHEN ${stockActorPredicate} AND (${authority?.predicate ?? '1'})
+    THEN 1 ELSE json_extract('[1]','$[merge_request_permission]') END`, params: { ...stockActorParams(user), ...authority?.params } },
+    ...prepared.guards, ...compiled.statements, ...prepared.afterStatements ?? []]
   admit(budget, stockTransactionStatementCount(statements.length) + 1)
   const receipt: ProductMergeReceipt = { keptId: request.keeperId, mergedId: request.loserId, operationId: identity.origins.operationId,
     actionHistoryId: identity.historyId, planId: identity.planId, generation: 0, quantityMoved: compiled.moved }
@@ -127,7 +131,7 @@ export async function executeProductMergeRequest(
     return { receipt, replayed: false }
   } catch (error) {
     let recovered: ProductMergeReceipt | null
-    try { recovered = await readProductMergeReceipt(db, user, request) }
+    try { recovered = await readProductMergeReceipt(db, user, request, authority) }
     catch (recoveryError) {
       if (recoveryError instanceof ProductMergeRequestError) throw recoveryError
       throw new StockTransactionOutcomeUnknownError()
