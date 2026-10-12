@@ -271,6 +271,11 @@ const feesRoute = loadReal('routes/fees.ts', {
 })
 
 const reviewQueueRoute = loadReal('routes/reviewQueue.ts', {
+  '../lib/reviewApprovalPermission': loadReal('lib/reviewApprovalPermission.ts', {
+    ...dbStub, './permissions': permissions, './acquisitionCostAccess': acquisitionCostAccess,
+    './productWrites': productWrites, './productImagePermission': productImagePermission,
+    './moneyPrecision': loadReal('lib/moneyPrecision.ts'), './productDiscountGate': loadReal('lib/productDiscountGate.ts'),
+  }),
   '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   ...dbStub,
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
@@ -302,7 +307,7 @@ const fakeExecutionCtx = { waitUntil: (p) => { p?.catch?.(() => {}) }, passThrou
 let CURRENT_USER = null
 const FULL_USER = { id: 1, username: 'full', name: 'Full Access', permissions: JSON.stringify({ fees: true, review: true }) }
 const REVIEW_TIER_USER = { id: 2, username: 'reviewtier', name: 'Review Tier', permissions: JSON.stringify({ fees: 'review' }) }
-const REVIEWER_USER = { id: 3, username: 'reviewer', name: 'Reviewer', permissions: JSON.stringify({ review: true, fees: true, products: true, inventory: true, branches: true }) }
+const REVIEWER_USER = { id: 3, username: 'reviewer', name: 'Reviewer', permissions: JSON.stringify({ review: true, fees: true, products: true, inventory: true, branches: true, product_cost_edit: true }) }
 
 async function req(app, user, method, url, body) {
   CURRENT_USER = user
