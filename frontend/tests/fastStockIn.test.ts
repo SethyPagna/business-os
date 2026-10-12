@@ -184,8 +184,8 @@ runTest('STK-06: creation reuses ProductForm and resumes without losing the stoc
     ['client_request_id: line.createRequestId', 'client_request_id: crypto.randomUUID()'],
     ['JSON.parse(attempt.bodyJson!), assertDispatch', 'payload'],
   ]) assert.throws(() => assertCapturedCreation(modalSource.replace(before, after)), assert.AssertionError)
-  assert.match(modalSource, /const fastStockInDraftKey = scopedWorkDraftKey\('fast_stockin'\)/,
-    'stock session drafts should be scoped to the signed-in user')
+  assert.match(modalSource, /const fastStockInDraftKey = useRef\(scopedWorkDraftKey\('fast_stockin'\)\)\.current/,
+    'stock session drafts stay scoped to the user who opened the session')
   assert.match(modalSource, /writeWorkDraft<StockSessionDraft>\(fastStockInDraftKey/)
   assert.match(modalSource, /onClose=\{\(\) => setCreateForm\(null\)\}/)
   const holdStart = modalSource.indexOf('  const holdNewProduct = async')
