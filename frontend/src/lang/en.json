@@ -3640,8 +3640,8 @@
           "question": "Why does the assistant sometimes suggest several options instead of one product?"
         },
         "20": {
-          "answer": "Yes. Open a suggested product to see the reason, use case, and any extra online reference notes the provider returned for that answer.",
-          "question": "Can the assistant explain why a product was recommended?"
+          "answer": "Yes. Open a suggested product to see the catalogue-based reason and why it matched your question. The assistant does not give usage directions, cautions or ingredient lists, so read the product label. It does not browse for reviews or prove product claims.",
+          "question": "Can the assistant explain why a product was suggested?"
         },
         "21": {
           "answer": "We support delivery in select areas along with in-store pickup. Message the store on Facebook, Instagram, or Telegram with your location so we can confirm delivery options and timing.",

@@ -42,5 +42,5 @@ export const AI_FAQ_STARTER_TEXT = [
   ['17', 'Which products can the AI recommend?', 'The assistant receives a limited set of products from the current public catalogue. Stock can change, so confirm availability with the store.'],
   ['18', 'Should I trust the AI as medical or skin-treatment advice?', 'No. AI answers are for general product comparison only. Ask a qualified health professional about sensitive skin, allergies, reactions, treatment, medicines, or pregnancy.'],
   ['19', 'Why does the assistant sometimes suggest several options instead of one product?', 'The assistant compares your question with the live store catalogue and shows a short list when several products fit your needs.'],
-  ['20', 'Can the assistant explain why a product was suggested?', 'A suggestion can include a catalogue-based reason, use instructions and cautions. The assistant does not browse for reviews or prove product claims.'],
+  ['20', 'Can the assistant explain why a product was suggested?', 'Yes. Open a suggested product to see the catalogue-based reason and why it matched your question. The assistant does not give usage directions, cautions or ingredient lists, so read the product label. It does not browse for reviews or prove product claims.'],
 ]
