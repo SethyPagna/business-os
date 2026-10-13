@@ -387,8 +387,17 @@ export default function PortalFooter({
             </div>
           </nav>
         </div>
-        <div className="mx-auto mt-6 max-w-5xl border-t border-slate-200 pt-4 text-[11px] leading-5 text-slate-500 dark:border-neutral-800 dark:text-neutral-500">
-          {fill('portal_legal_footer_rights')}
+        <div className="mx-auto mt-6 flex max-w-5xl flex-wrap items-center justify-between gap-x-4 border-t border-slate-200 pt-4 text-[11px] leading-relaxed text-slate-500 dark:border-neutral-800 dark:text-neutral-500">
+          <span>{fill('portal_legal_footer_rights')}</span>
+          <a
+            href="/THIRD_PARTY_NOTICES.txt"
+            target="_blank"
+            rel="noreferrer"
+            data-portal-footer-notices="true"
+            className="inline-flex min-h-10 items-center underline underline-offset-2 transition hover:text-slate-700 dark:hover:text-neutral-300"
+          >
+            {text('portal_legal_footer_notices')}
+          </a>
         </div>
       </footer>
 

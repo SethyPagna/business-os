@@ -27,7 +27,9 @@
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:report": "playwright show-report e2e-report",
     "verify:i18n": "node ../ops/scripts/frontend/verify-i18n.ts",
-    "verify:public-runtime": "node ../ops/scripts/frontend/build-public-runtime-scripts.ts --check"
+    "verify:public-runtime": "node ../ops/scripts/frontend/build-public-runtime-scripts.ts --check",
+    "licenses:notices": "node ../ops/scripts/licenses/generate-third-party-notices.mjs",
+    "licenses:check": "node ../ops/scripts/licenses/generate-third-party-notices.mjs --check"
   },
   "dependencies": {
     "@fontsource/noto-sans-khmer": "^5.2.8",

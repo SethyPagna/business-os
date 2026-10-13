@@ -2391,6 +2391,18 @@ export default function Settings() {
         <button type="button" className="btn-primary px-8 py-3 text-base w-full sm:w-auto" onClick={handleSaveSettings} disabled={savingSettings || uploadingImage}>
           {savingSettings ? (t('saving') || 'Saving...') : t('save')}
         </button>
+
+        <p className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+          <a
+            href="/THIRD_PARTY_NOTICES.txt"
+            target="_blank"
+            rel="noreferrer"
+            data-settings-notices="true"
+            className="underline underline-offset-2 hover:text-gray-700 dark:hover:text-gray-200"
+          >
+            {t('open_source_notices') || 'Open-source notices'}
+          </a>
+        </p>
       </div>
       {confirmDialog}
     </div>
