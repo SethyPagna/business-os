@@ -8,7 +8,7 @@ import { hasPermission, hasAnyPermission, isActionBlocked, getActionTier } from 
 import { audit } from '../lib/audit'
 import { sanitizeOriginalFileName, buildUniqueStoredName, getMediaType } from '../lib/fileAssets'
 import { classifyImportUpload, validateUploadedBuffer, EMBEDDED_MARKUP_MESSAGE, MISMATCHED_UPLOAD_MESSAGE, UNSUPPORTED_IMAGE_MESSAGE, UNSUPPORTED_UPLOAD_MESSAGE } from '../lib/uploadSecurity'
-import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, summarizeImportWarnings, countRowsWithWarningKinds, runD1BatchInChunks, importBranchRedirectGate, IMPORT_FILE_SKIPPED_ERROR_CODE, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportBranchRedirectGate, type ImportRowResult, type RowAction } from '../lib/importEngine'
+import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, summarizeImportWarnings, countRowsWithWarningKinds, runD1BatchInChunks, importBranchRedirectGate, missingDestructiveImportPermission, IMPORT_FILE_SKIPPED_ERROR_CODE, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportBranchRedirectGate, type ImportRowResult, type RowAction } from '../lib/importEngine'
 import { IMPORT_BRANCH_REDIRECT_POLICY_KEY } from '../lib/importBranchAuthority'
 import { branchRedirectTarget } from '../lib/branchEffect'
 import { readCentralDirectory, extractZipEntry, ZipFormatError, type ZipEntry } from '../lib/zipReader'
@@ -475,27 +475,13 @@ app.post('/', async (c) => {
   if (!ALLOWED_TYPES.has(type)) return c.json({ success: false, error: 'Unsupported import job type' }, 400)
   const denied = await requireImportPermission(c as any, undefined, type)
   if (denied) return denied
-  // Replace-all (products) soft-deactivates every active product this run
-  // doesn't touch, and column-level replace overwrites whichever fields
-  // the operator picked on every matched row -- both are more destructive
-  // than an ordinary merge import, but import_mode/replace_columns live
-  // inside the client-supplied policy blob with nothing else gating them.
-  // The frontend's mode picker + window.confirm are a UI nicety, not a
-  // security boundary: a raw POST here with the same ordinary 'products'
-  // permission could otherwise trigger either. Reuse the existing
-  // 'destructive_delete' permission (defined in permissions.ts, exposed in
-  // the admin permission editor) as the extra gate, same as any other
-  // destructive-beyond-the-base-entity action should be.
-  const requestedImportMode = (body?.policy as { import_mode?: unknown } | undefined)?.import_mode
-  if (type === 'products' && (requestedImportMode === 'replace_all' || requestedImportMode === 'replace_columns')) {
-    if (!hasPermission(user, 'destructive_delete')) {
-      return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'destructive_delete' }, 403)
-    }
-    // Per-action override (Part 546): 'products:import_replace_all' can be
-    // switched off for a role even when destructive_delete is granted.
-    if (isActionBlocked(user, 'products', 'import_replace_all')) {
-      return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'products:import_replace_all' }, 403)
-    }
+  // Replace-all / replace-column products imports need destructive_delete on
+  // top of the import grant; the rule (and why the UI picker is not the gate)
+  // lives in missingDestructiveImportPermission, the one definition every
+  // boundary shares.
+  const destructivePermission = missingDestructiveImportPermission(user, type, JSON.stringify(body?.policy || {}))
+  if (destructivePermission) {
+    return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: destructivePermission }, 403)
   }
 
   const id = crypto.randomUUID()
