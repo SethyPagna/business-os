@@ -146,6 +146,13 @@ await check('the real permission refresh keeps the stored account and the owner,
     freshTab(); const before = actor.captureActorWriteIdentity(); await resets.permissionRefresh(); await change()
     assert.equal(actor.isActorWriteIdentityCurrent(before), false, `${name} after a refresh still refuses`)
   }
+  // Another tab signs B in while this tab's refresh is in its async cleanup: the
+  // refresh never writes A back over B.
+  freshTab(); const held = actor.captureActorWriteIdentity()
+  await resets.permissionRefresh(() => writeUser({ id: 8 }))
+  assert.equal(JSON.parse(String(local.get('businessos_user'))).id, 8, 'B signed in during the refresh stays stored; A is not restored over it')
+  assert.equal(JSON.parse(actor.captureActorWriteIdentity().owner)[2], '8', 'a session opened next is B\'s')
+  assert.equal(actor.isActorWriteIdentityCurrent(held), false, 'and A\'s session refuses')
 })
 await check('sign-out and session expiry still clear the stored account; the runtime refresh keeps it', async () => {
   for (const [name, reset] of [['sign-out', resets.signOut], ['session expiry', resets.sessionExpiry]] as const) {

@@ -301,13 +301,16 @@ export async function resetClientRuntimeState(options: RuntimeResetOptions = {})
     sessionPreserveKeys.add(STORAGE_KEYS.USER_EXPIRY)
   }
 
+  // Live coordination keys are never removed, and must never be restored from a
+  // snapshot after asynchronous cleanup: their owner may have changed. The
+  // signed-in account is one -- another tab can sign in or out meanwhile, and
+  // writing the old account back would hand it the new account's session.
+  const liveKeys = new Set(['businessos_read_session', 'businessos_auth_cookie_pending', 'businessos_unresolved_signout_v1', STORAGE_KEYS.USER, STORAGE_KEYS.USER_EXPIRY])
   const keptLocal = canUseBrowserStorage() ? [
-    // Live coordination keys are never removed, and must never be restored
-    // from a snapshot after asynchronous cleanup: their owner may have changed.
-    ...snapshotStorage(window.localStorage, localPreserveKeys).filter(([key]) => key !== 'businessos_read_session' && key !== 'businessos_auth_cookie_pending' && key !== 'businessos_unresolved_signout_v1'),
+    ...snapshotStorage(window.localStorage, localPreserveKeys).filter(([key]) => !liveKeys.has(key)),
     ...(options.preserveUiDrafts === true ? snapshotStoragePrefixes(window.localStorage, ['businessos_draft_']) : []),
   ] : []
-  const keptSession = canUseBrowserStorage() ? snapshotStorage(window.sessionStorage, sessionPreserveKeys) : []
+  const keptSession = canUseBrowserStorage() ? snapshotStorage(window.sessionStorage, sessionPreserveKeys).filter(([key]) => !liveKeys.has(key)) : []
 
   // Kept in place, never snapshotted and restored, so a value another tab writes
   // during the asynchronous cleanup below survives byte for byte: the device's

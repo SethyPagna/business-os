@@ -95,6 +95,27 @@ try {
     assert.equal(local.getItem('businessos_draft_stock'), preserveUiDrafts ? 'draft' : null)
   }
   console.log('PASS the write-owner generation survives every reset unrolled; receiving attempts stay in place with the drafts and go without them')
+
+  // A same-user reset keeps the signed-in account in place and never writes it
+  // back from a snapshot: whatever another tab stores meanwhile is what stays.
+  const { USER, USER_EXPIRY } = STORAGE_KEYS
+  const account = (id: number | null, expiry: string) => { for (const store of [local, session]) {
+    if (id === null) { store.removeItem(USER); store.removeItem(USER_EXPIRY) } else { store.setItem(USER, `{"id":${id}}`); store.setItem(USER_EXPIRY, expiry) }
+  } }
+  const stored = () => [local, session].map((store) => [store.getItem(USER), store.getItem(USER_EXPIRY)])
+  const sameUserReset = () => runtimeModule.exports.resetClientRuntimeState({ clearAuth: false, preserveServiceWorker: true, preserveOfflineWork: true, preserveUiDrafts: true })
+  account(7, '111'); duringMirrorReset = () => account(8, '222')
+  await sameUserReset()
+  assert.deepEqual(stored(), [['{"id":8}', '222'], ['{"id":8}', '222']], 'another tab signed B in during the cleanup: B stays, A is not written back')
+  account(7, '111'); duringMirrorReset = () => account(null, '')
+  await sameUserReset()
+  assert.deepEqual(stored(), [[null, null], [null, null]], 'another tab signed out during the cleanup: it stays signed out')
+  account(7, '111'); duringMirrorReset = () => {}
+  await sameUserReset()
+  assert.deepEqual(stored(), [['{"id":7}', '111'], ['{"id":7}', '111']], 'nobody else wrote: the same account stays')
+  await runtimeModule.exports.resetClientRuntimeState({ preserveServiceWorker: true, preserveOfflineWork: true })
+  assert.deepEqual(stored(), [[null, null], [null, null]], 'a reset that clears auth still clears it')
+  console.log('PASS a same-user reset keeps the signed-in account in place and never restores an older one over a newer sign-in or sign-out')
 } finally {
   if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow)
   else Reflect.deleteProperty(globalThis, 'window')
