@@ -7,6 +7,8 @@ import { permissionRefreshIntent } from '../src/utils/permissionRefreshAccumulat
 import { ACTOR_GUARD_KEYS } from '../src/api/branchRefusalLanguage.ts'
 import { STOCK_SESSION_FAILURE_KEYS } from '../src/utils/stockSessionDraft.ts'
 import { stockFailureText } from '../src/utils/stockAdjustOutcome.ts'
+import * as workDrafts from '../src/utils/workDrafts.ts'
+import { appStorageResets } from './appPermissionRefresh.ts'
 
 // The Stock Session writes for the owner who opened it: server, origin, user id
 // and organization. Every case below runs the REAL authority module in one fake
@@ -43,7 +45,10 @@ const http = source('api/http.ts'), transport = source('api/inventoryWriteTransp
 
 // ---- one fake browser tab ----
 const local = new Map<string, string>(), tabSession = new Map<string, string>()
-const store = (map: Map<string, string>) => ({ getItem: (key: string) => map.get(key) ?? null, setItem: (key: string, value: string) => { map.set(key, String(value)) }, removeItem: (key: string) => { map.delete(key) } })
+const store = (map: Map<string, string>) => ({
+  getItem: (key: string) => map.get(key) ?? null, setItem: (key: string, value: string) => { map.set(key, String(value)) }, removeItem: (key: string) => { map.delete(key) },
+  get length() { return map.size }, key: (index: number) => [...map.keys()][index] ?? null,
+})
 let onSyncUpdate: ((detail: any) => void) | null = null
 Object.defineProperty(globalThis, 'window', { configurable: true, value: {
   localStorage: store(local), sessionStorage: store(tabSession), location: { origin: 'https://shop.test', hostname: 'shop.test' },
@@ -61,14 +66,18 @@ function freshTab() {
   assert.equal(actor.isActorSessionQuarantined(), false)
 }
 
-// A failed probe then a good one: http.ts's own reconnect refresh, the real
-// permission-refresh intent, and the reset AppContext.clearLocalBusinessState runs.
-async function healthFlap() {
+// AppContext's own resets (source-read) over the real runtime reset.
+const resets = appStorageResets(actor)
+// A failed probe then a good one: http.ts's own reconnect refresh and the real
+// permission-refresh intent start AppContext's real permission refresh, which
+// runs the real runtime reset. 'bootstrap' says whether the bootstrap answered
+// (applyBootstrapPayload writes the same account back) or not yet / failed.
+async function healthFlap(bootstrap: 'back' | 'not back') {
   const before = actor.captureActorReadScope('inventory')
   const nativeFetch = globalThis.fetch
-  let resets = 0
+  const refreshes: Promise<void>[] = []
   onSyncUpdate = (detail) => {
-    if (permissionRefreshIntent(detail, { userId: OWNER.id, roleId: OWNER.role_id }) === 'refresh') { actor.resetActorReadSession(); resets++ }
+    if (permissionRefreshIntent(detail, { userId: OWNER.id, roleId: OWNER.role_id }) === 'refresh') refreshes.push(resets.permissionRefresh())
   }
   try {
     globalThis.fetch = (async () => { throw new TypeError('Failed to fetch') }) as typeof fetch
@@ -76,15 +85,20 @@ async function healthFlap() {
     globalThis.fetch = (async () => new Response('ok', { status: 200 })) as typeof fetch
     await pingServerHealth(true)
   } finally { globalThis.fetch = nativeFetch; onSyncUpdate = null }
-  assert(resets > 0, 'the reconnect really ran the permission-refresh reset')
+  assert(refreshes.length > 0, 'the reconnect really ran the permission refresh')
+  await Promise.all(refreshes)
   assert.equal(actor.isActorReadScopeCurrent(before, false), false, 'control: the full read fingerprint moved')
+  if (bootstrap === 'back') writeUser({ permissions: ['inventory.adjust', 'refreshed'] })
 }
 const SAME_USER: Record<string, () => void | Promise<void>> = {
   'session reset': () => actor.resetActorReadSession(),
   'permissions rewrite': () => writeUser({ permissions: ['inventory.adjust', 'products.add'] }),
   'avatar rewrite': () => writeUser({ avatar_path: 'avatar.png' }),
   'expiry rewrite': () => { local.set('businessos_user_expiry', String(Date.now() + 86_400_000)) },
-  'health flap': healthFlap,
+  'health flap, bootstrap back': () => healthFlap('back'),
+  'health flap, bootstrap not back or failed': () => healthFlap('not back'),
+  // Defence in depth: whatever leaves no stored user for a moment, it is not another account.
+  'stored user briefly missing': () => { local.delete('businessos_user'); tabSession.delete('businessos_user') },
 }
 const REAL_CHANGE: Record<string, () => void | Promise<void>> = {
   'another user': () => writeUser({ id: 8 }),
@@ -116,6 +130,59 @@ await check('the real modules: same-user churn keeps the write identity, a real 
   assert.equal(actor.isActorReadScopeCurrent(read, false), true, 'the read fence ignores it too without includeInvalidation')
 })
 
+await check('the real permission refresh keeps the stored account and the owner, inside the reset, before the bootstrap and after', async () => {
+  const identity = actor.captureActorWriteIdentity()
+  let inside: unknown = null
+  await resets.permissionRefresh(() => { inside = { stored: local.has('businessos_user'), current: actor.isActorWriteIdentityCurrent(identity) } })
+  assert.deepEqual(inside, { stored: true, current: true }, 'inside the reset (W1)')
+  assert.equal(local.has('businessos_user'), true, 'the bootstrap has not answered, or failed: the account is still stored (W2)')
+  assert.doesNotThrow(() => actor.assertActorWriteIdentity(identity), 'W2: the route checks pass')
+  const opened = actor.captureActorWriteIdentity()
+  assert.equal(JSON.parse(opened.owner)[2], String(OWNER.id), 'W7: a session opened in that moment is the same account\'s')
+  writeUser({ avatar_path: 'fresh.png' })
+  assert.equal(actor.isActorWriteIdentityCurrent(identity), true, 'W4: the bootstrap wrote the same account back')
+  assert.equal(actor.isActorWriteIdentityCurrent(opened), true, 'W7: and the session opened in the gap continues')
+  for (const [name, change] of Object.entries(REAL_CHANGE)) {
+    freshTab(); const before = actor.captureActorWriteIdentity(); await resets.permissionRefresh(); await change()
+    assert.equal(actor.isActorWriteIdentityCurrent(before), false, `${name} after a refresh still refuses`)
+  }
+})
+await check('sign-out and session expiry still clear the stored account; the runtime refresh keeps it', async () => {
+  for (const [name, reset] of [['sign-out', resets.signOut], ['session expiry', resets.sessionExpiry]] as const) {
+    freshTab(); await reset(); assert.equal(local.has('businessos_user'), false, name)
+  }
+  assert.deepEqual([resets.options.permissionRefresh.clearAuth, resets.options.sessionExpiry.clearAuth, resets.options.signOut.clearAuth], [false, true, true])
+  // Session expiry forgets the account before clearing it, so a missing user then reads as signed out.
+  assert.match(source('AppContext.tsx').replace(/\r\n/g, '\n'), /const handleUnauthorizedSession = useCallback\(async[^\n]*\n\s*if \(isActorSessionQuarantined\(\)\) return\n\s*disconnectWS\(\)\n\s*forgetActorWriteAccount\(\)\n\s*await clearLocalBusinessState\(\{\n\s*clearAuth: true,/)
+})
+await check('no stored user is the last account, unless the session is locked, a sign-in is pending or the session expired', async () => {
+  const missing = () => { local.delete('businessos_user'); tabSession.delete('businessos_user') }
+  let identity = actor.captureActorWriteIdentity(); missing()
+  assert.equal(actor.isActorWriteIdentityCurrent(identity), true, 'a moment with no stored user is the same account')
+  writeUser({ id: 8 }); assert.equal(actor.isActorWriteIdentityCurrent(identity), false, 'the next account written decides')
+  writeUser(); assert.equal(actor.isActorWriteIdentityCurrent(identity), false, 'A -> B -> A through the gap still refuses')
+  freshTab(); identity = actor.captureActorWriteIdentity(); missing(); setSyncServerUrl('https://other.example.test')
+  assert.equal(actor.isActorWriteIdentityCurrent(identity), false, 'another server during the gap refuses'); setSyncServerUrl(SERVER)
+  freshTab(); identity = actor.captureActorWriteIdentity(); missing(); local.set('businessos_read_session', 'another-tab-signed-in')
+  assert.equal(actor.isActorWriteIdentityCurrent(identity, true), false, 'locked: no stored user is not assumed to be anyone')
+  freshTab(); identity = actor.captureActorWriteIdentity(); missing(); local.set('businessos_auth_cookie_pending', 'auth-pending:fixture')
+  assert.throws(() => actor.assertActorWriteIdentity(identity), { code: 'actor_session_quarantined' }, 'a sign-in pending')
+  local.delete('businessos_auth_cookie_pending')
+  freshTab(); identity = actor.captureActorWriteIdentity()
+  const tab = (globalThis as unknown as { window: Record<string, unknown> }).window
+  tab.navigator = globalThis.navigator
+  try {
+    const marker = await actor.beginActorCookieMutation()
+    missing()
+    assert.equal(actor.isActorWriteIdentityCurrent(identity, true), false, 'a sign-in or sign-out in this tab: no stored user is nobody')
+    assert.equal(actor.finishActorCookieMutation(marker), true)
+    assert.equal(actor.isActorWriteIdentityCurrent(identity, true), false, 'and stays nobody once that phase settles')
+    writeUser(); assert.equal(actor.isActorWriteIdentityCurrent(identity, true), true, 'the same account signing in continues')
+  } finally { delete tab.navigator }
+  freshTab(); identity = actor.captureActorWriteIdentity(); actor.forgetActorWriteAccount(); missing()
+  assert.throws(() => actor.assertActorWriteIdentity(identity), { code: 'actor_owner_changed' }, 'expired: signed out')
+  writeUser(); assert.equal(actor.isActorWriteIdentityCurrent(identity), true, 'the same account signing back in continues')
+})
 await check('another tab signing in locks the identity, and the same owner confirmed again releases it', () => {
   const identity = actor.captureActorWriteIdentity()
   local.set('businessos_read_session', 'another-tab-signed-in')
@@ -203,7 +270,7 @@ await check('an identity captured before product preparation is not recaptured a
 // ---- the modal: performCommit and friends extracted from source, real authority ----
 function modalFixture(boundary: string, change: () => void | Promise<void>) {
   const receivingIdentity = actor.captureActorWriteIdentity()
-  const effects: Array<{ name: string; current: boolean }> = [], requests: number[] = [], drafts: Array<{ current: boolean; lines: any[] }> = []
+  const effects: Array<{ name: string; current: boolean }> = [], requests: number[] = [], drafts: Array<{ current: boolean; lines: any[] }> = [], screens: Array<{ current: boolean; lines: any[] }> = []
   const effect = (name: string) => effects.push({ name, current: actor.isActorWriteIdentityCurrent(receivingIdentity) })
   let saving = false, switched = false
   const received = [1, 2].map(id => ({ key: String(id), product: { id }, mode: 'add', status: 'queued', quantity: 1, freeQuantity: 0, createPayload: boundary.startsWith('create') && id === 1 ? { name: 'New' } : null }))
@@ -215,6 +282,7 @@ function modalFixture(boundary: string, change: () => void | Promise<void>) {
     setSaving: (value: boolean) => { saving = value; effect(`saving:${value}`) }, setSignInChanged: (value: boolean) => effect(`sign-in-changed:${value}`),
     setReceived: (lines: any[] = []) => {
       effect('received')
+      screens.push({ current: actor.isActorWriteIdentityCurrent(receivingIdentity), lines: structuredClone(lines) })
       // Between two old-Worker sends: the next line must be checked before it goes out.
       if (boundary === 'fallback-between' && !switched && lines.some(line => line.status === 'saved')) { switched = true; void change() }
     },
@@ -259,14 +327,14 @@ function modalFixture(boundary: string, change: () => void | Promise<void>) {
   dependencies.performCommitSequential = extract(modal, 'performCommitSequential', dependencies)
   const performCommit = extract(modal, 'performCommit', dependencies)
   const perform = async () => { if (boundary === 'before') await change(); await performCommit() }
-  return { perform, effects, requests, drafts, saving: () => saving, receivingIdentity }
+  return { perform, effects, requests, drafts, screens, saving: () => saving, receivingIdentity }
 }
 const exits = (saving: boolean, receivingIdentity: unknown) => {
   const reached: string[] = []
   const closeGuard = { requestClose: () => reached.push('close'), promptOpen: false }
   extract(modal, 'requestCloseIfIdle', { saving, closeGuard })()
   extract(modal, 'preserveAndMinimize', {
-    saving, onMinimize: () => reached.push('minimize'), flushPendingWorkDraft() {}, fastStockInDraftKey: 'pinned-owner-key', sessionLabel: 'Add Session',
+    saving, onMinimize: () => reached.push('minimize'), flushPendingWorkDraft() {}, writeWorkDraft() {}, currentDraft: () => ({}), fastStockInDraftKey: 'pinned-owner-key', sessionLabel: 'Add Session',
     onClose: () => reached.push('closed'), notify: (message: string) => reached.push(`notice:${message.slice(0, 7)}`),
     tr: (_key: string, fallback: string) => fallback, isActorWriteIdentityCurrent: actor.isActorWriteIdentityCurrent, receivingIdentity,
   })()
@@ -302,6 +370,7 @@ const KEPT: Record<string, (lines: any[]) => void> = {
   commit: (lines) => assert.deepEqual(lines.map(line => [line.key, line.status]), [['1', 'saved'], ['2', 'saving']], 'only the confirmed line is saved'),
   fallback: (lines) => assert.deepEqual(lines.map(line => [line.key, line.status]), [['1', 'saved'], ['2', 'saving']], 'the line sent before the change is saved'),
 }
+const SHOWN: Record<string, string[][]> = { commit: [['1', 'saved'], ['2', 'queued']], fallback: [['1', 'saved'], ['2', 'queued']] }
 for (const [name, change] of Object.entries(REAL_CHANGE)) {
   for (const boundary of ['before', 'create', 'create-error', 'commit', 'commit-error', 'fallback', 'fallback-error', 'fallback-between', 'round-settle']) {
     await check(`actual modal, ${name} at ${boundary}: applies nothing, clears saving and says how to continue`, async () => {
@@ -310,7 +379,9 @@ for (const [name, change] of Object.entries(REAL_CHANGE)) {
       const staleDrafts = f.drafts.filter(draft => !draft.current)
       if (KEPT[boundary]) { assert.equal(staleDrafts.length, 1, 'kept once'); KEPT[boundary](staleDrafts[0].lines) }
       else assert.deepEqual(staleDrafts, [], 'nothing unconfirmed is written')
-      assert.deepEqual(new Set(stale), KEPT[boundary] ? new Set([...STOP, 'draft']) : STOP, stale.join(','))
+      // N1: after a started commit the screen shows what the server confirmed, so Complete never resends it.
+      assert.deepEqual(new Set(stale), new Set([...STOP, ...(KEPT[boundary] ? ['draft'] : []), ...(boundary === 'before' ? [] : ['received'])]), stale.join(','))
+      if (SHOWN[boundary]) assert.deepEqual(f.screens.filter(screen => !screen.current).at(-1)?.lines.map((line: any) => [line.key, line.status]), SHOWN[boundary], 'the screen')
       assert.equal(f.saving(), false, 'saving is cleared, so close and minimize work')
       assert.equal(f.effects.some(effect => effect.name === 'finish'), false)
       if (boundary.startsWith('fallback')) assert.deepEqual(f.requests, [1])
@@ -352,9 +423,10 @@ await check('autosave: the same owner keeps saving through churn; another owner 
   const receivingIdentity = actor.captureActorWriteIdentity(), writes: unknown[] = [], flags: boolean[] = []
   const run = extract(`const run = ${effectCallback(modal, 'scheduleWorkDraftWrite')}`, 'run', {
     isActorWriteIdentityCurrent: actor.isActorWriteIdentityCurrent, receivingIdentity, setSignInChanged: (value: boolean) => flags.push(value),
-    scheduleWorkDraftWrite: (...args: unknown[]) => writes.push(args), fastStockInDraftKey: 'old-owner', currentDraft: () => ({ lines: ['original'] }),
+    scheduleWorkDraftWrite: (...args: unknown[]) => { writes.push(args); return () => {} }, fastStockInDraftKey: 'old-owner', currentDraft: () => ({ lines: ['original'] }),
+    autosaveCancelRef: { current: () => {} },
   })
-  run(); await healthFlap(); actor.resetActorReadSession(); writeUser({ avatar_path: 'a.png' }); run()
+  run(); await healthFlap('not back'); actor.resetActorReadSession(); writeUser({ avatar_path: 'a.png' }); run()
   assert.equal(writes.length, 2, 'churn keeps the autosave going'); assert.deepEqual(flags, [false, false])
   writeUser({ id: 8 }); run()
   assert.equal(writes.length, 2, 'nothing is saved under another owner')
@@ -384,11 +456,12 @@ await check('the message is inline and translated, Complete waits while it shows
   const flat = modal.replace(/\r\n/g, '\n')
   assert(flat.includes(`tr('stock_session_sign_in_changed', ${JSON.stringify(en.stock_session_sign_in_changed).replace(/^"|"$/g, "'")})`), 'the fallback is the pack English')
   assert(flat.includes(`tr('stock_session_kept_for_owner', ${JSON.stringify(en.stock_session_kept_for_owner).replace(/^"|"$/g, "'")})`), 'the fallback is the pack English')
-  assert.match(flat, /\{signInChanged \? <p role="alert"[^>]*>\{ownerChangedText\(\)\}<\/p> : null\}\s*<StockSessionFooter/)
-  assert.match(flat, /primaryDisabled=\{footerDisabled \|\| signInChanged\}/)
+  assert.match(flat, /\{ownerDiffers \? <p role="alert"[^>]*>\{ownerChangedText\(\)\}<\/p> : null\}\s*<StockSessionFooter/)
+  assert.match(flat, /primaryDisabled=\{footerDisabled \|\| ownerDiffers\}/)
+  assert.match(flat, /const ownerDiffers = signInChanged && !isActorWriteIdentityCurrent\(receivingIdentity\)\n/, 'they follow the owner itself')
   assert.match(flat, /<StockSessionHeader[\s\S]*?disabled=\{busy\}[\s\S]*?onClose=\{requestCloseIfIdle\}/, 'close and minimize follow saving alone')
   assert.match(flat, /const busy = saving\n/)
-  assert.match(flat, /const editLocked = busy \|\| signInChanged\n/, 'edits that would no longer be saved are locked')
+  assert.match(flat, /const editLocked = busy \|\| ownerDiffers\n/, 'edits that would no longer be saved are locked')
   for (const surface of ['StockSessionSharedDetails', 'StockSessionLineEntry', 'StockSessionItems', 'StockSessionPaymentStep']) {
     assert.match(flat, new RegExp(`<${surface}[\\s\\S]*?(?:busy|disabled)=\\{editLocked(?: \\|\\| detailsLocked)?\\}`), surface)
   }
@@ -486,6 +559,84 @@ await check('the receiving flow says the sign-in guards in the UI language', asy
     dependencies.assertReceivingOwner = extract(modal, 'assertReceivingOwner', dependencies)
     const hold = extract(modal, 'holdNewProduct', dependencies)
     await assert.rejects(hold({ name: 'New' }), (error: any) => error.message === km[code] && error.code === code, step)
+  }
+})
+await check('the banner and the locks follow the owner: a lock raises them, the same owner back drops them, another owner keeps them', () => {
+  const receivingIdentity = actor.captureActorWriteIdentity()
+  const ownerDiffers = (signInChanged: boolean) => extract(modal, 'ownerDiffers', { signInChanged, isActorWriteIdentityCurrent: actor.isActorWriteIdentityCurrent, receivingIdentity })
+  assert.equal(ownerDiffers(false), false)
+  local.set('businessos_read_session', 'another-tab-signed-in')
+  assert.equal(ownerDiffers(true), true, 'locked while the sign-in is checked')
+  actor.completeActorSessionReconciliation(actor.actorSessionReconciliationMarker())
+  assert.equal(ownerDiffers(true), false, 'the same owner confirmed: gone at the next render, before anything resets the latch')
+  const flags: boolean[] = []
+  const run = extract(`const run = ${effectCallback(modal, 'scheduleWorkDraftWrite')}`, 'run', {
+    isActorWriteIdentityCurrent: actor.isActorWriteIdentityCurrent, receivingIdentity, setSignInChanged: (value: boolean) => flags.push(value),
+    scheduleWorkDraftWrite: () => () => {}, fastStockInDraftKey: 'owner', currentDraft: () => ({}), autosaveCancelRef: { current: () => {} },
+  })
+  run(); assert.deepEqual(flags, [false], 'the owner check resets the latch')
+  assert.match(modal.replace(/\r\n/g, '\n'), /scannedBarcode, createdProductIds, received, user\]\)/, 'and runs again when the app\'s user changes (the bootstrap after a refresh)')
+  writeUser({ id: 8 })
+  assert.equal(ownerDiffers(true), true, 'another owner: they stay')
+})
+
+await check('autosave never loses a scan to the refresh or a lock; minimize says "nothing was lost" only when true; Discard keeps another owner\'s draft', async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: (globalThis as unknown as { window: { localStorage: Storage } }).window.localStorage })
+  try {
+    const session = () => {
+      const key = 'businessos_draft_v2_fixture_fast_stockin'
+      const receivingIdentity = actor.captureActorWriteIdentity()
+      const box = { lines: ['line-1'], flags: [] as boolean[], toasts: [] as string[] }
+      const deps = {
+        isActorWriteIdentityCurrent: actor.isActorWriteIdentityCurrent, receivingIdentity, setSignInChanged: (value: boolean) => box.flags.push(value),
+        scheduleWorkDraftWrite: workDrafts.scheduleWorkDraftWrite, writeWorkDraft: workDrafts.writeWorkDraft, flushPendingWorkDraft: workDrafts.flushPendingWorkDraft,
+        clearWorkDraft: workDrafts.clearWorkDraft, fastStockInDraftKey: key, currentDraft: () => ({ lines: [...box.lines] }), autosaveCancelRef: { current: () => {} },
+        saving: false, onMinimize: () => box.toasts.push('chip: nothing was lost'), notify: (message: string) => box.toasts.push(message),
+        tr: (_key: string, fallback: string) => fallback, onClose() {}, onDone() {}, received: [], sessionLabel: 'Add Session',
+      }
+      // React runs the previous cleanup before every new run.
+      const effect = extract(`const effect = ${effectCallback(modal, 'scheduleWorkDraftWrite')}`, 'effect', deps)
+      let cleanup: unknown
+      const run = () => { if (typeof cleanup === 'function') cleanup(); cleanup = effect() }
+      const saved = () => workDrafts.readWorkDraft<{ lines: string[] }>(key)?.data?.lines.join(',')
+      return { box, run, saved, minimize: extract(modal, 'preserveAndMinimize', deps), discard: extract(modal, 'discardAndClose', deps), flush: () => workDrafts.flushPendingWorkDraft(key) }
+    }
+    let s = session()
+    s.run(); s.flush()
+    s.box.lines = ['line-1', 'line-2']; s.run()
+    await healthFlap('not back')
+    s.box.lines = ['line-1', 'line-2', 'line-3']; s.run()
+    assert.equal(s.box.flags.at(-1), false, 'A1: no banner while the bootstrap is out')
+    writeUser({ avatar_path: 'fresh.png' })
+    s.minimize()
+    assert.equal(s.saved(), 'line-1,line-2,line-3', 'A4: the chip reopens every scan')
+    assert.equal(s.box.toasts.at(-1), 'chip: nothing was lost', 'A3: so the message is true')
+
+    freshTab(); s = session()
+    s.run(); s.box.lines = ['line-1', 'line-2']; s.run()
+    local.set('businessos_read_session', 'another-tab-signed-in')
+    s.box.lines = ['line-1', 'line-2', 'typed-while-locked']; s.run(); s.flush()
+    assert.equal(s.saved(), 'line-1,line-2', 'a lock keeps the scan made before it')
+    actor.completeActorSessionReconciliation(actor.actorSessionReconciliationMarker())
+    s.minimize()
+    assert.equal(s.saved(), 'line-1,line-2,typed-while-locked', 'the same owner confirmed: minimize keeps exactly what the screen shows')
+    assert.equal(s.box.toasts.at(-1), 'chip: nothing was lost')
+
+    freshTab(); s = session()
+    s.run(); s.box.lines = ['line-1', 'line-2']; s.run()
+    await healthFlap('not back'); writeUser({ id: 8 })
+    s.box.lines = ['line-1', 'line-2', 'typed-by-b']; s.run(); s.flush()
+    assert.equal(s.saved(), 'line-1,line-2', 'A5: another account: the original owner\'s scans kept, nothing after')
+    s.discard()
+    assert.equal(s.saved(), 'line-1,line-2', 'A6: Discard by another account keeps the original owner\'s draft')
+    assert.match(s.box.toasts.at(-1) || '', /kept for the account that started it/)
+    s.minimize()
+    assert.equal(s.saved(), 'line-1,line-2', 'minimize after the change writes nothing of the new account')
+  } finally {
+    workDrafts.flushPendingWorkDrafts()
+    if (previous) Object.defineProperty(globalThis, 'localStorage', previous)
+    else Reflect.deleteProperty(globalThis, 'localStorage')
   }
 })
 if (failed) process.exitCode = 1

@@ -6,6 +6,7 @@ import { apiFetch, __resetApiHealthForTests, __resetApiWriteDedupeForTests, ping
 import * as actor from '../src/api/actorReadScope.ts'
 import * as redirect from '../src/api/branchRedirect.ts'
 import { permissionRefreshIntent } from '../src/utils/permissionRefreshAccumulator.ts'
+import { appStorageResets } from './appPermissionRefresh.ts'
 
 const { captureActorReadScope, isActorReadScopeCurrent, resetActorReadSession } = actor
 const { BRANCH_REDIRECT_DECLINED_CODE, BRANCH_REDIRECT_HEADER, registerBranchRedirectHandler } = redirect
@@ -28,7 +29,9 @@ const stale = (error: unknown) => ['actor_session_quarantined', 'actor_owner_cha
 // A real owner change: another user, organization or server, or B signed in (and seen) before A came back.
 const REAL_CHANGES = ['actor', 'server', 'organization', 'A to B and back to A'] as const
 // The same user's churn: never a reason to drop the operator's confirmed answer.
-const SAME_USER = ['session reset', 'permissions rewrite', 'avatar rewrite', 'expiry rewrite', 'health flap'] as const
+const SAME_USER = ['session reset', 'permissions rewrite', 'avatar rewrite', 'expiry rewrite', 'health flap, bootstrap back', 'health flap, bootstrap not back', 'stored user briefly missing'] as const
+// AppContext's own permission refresh (source-read) over the real runtime reset.
+const resets = appStorageResets(actor)
 type ChangeKind = typeof REAL_CHANGES[number] | typeof SAME_USER[number]
 type Call = { url: string; body: BodyInit | null | undefined; redirect: string | null }
 async function fixture(run: (f: {
@@ -37,7 +40,10 @@ async function fixture(run: (f: {
 }) => Promise<void>) {
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window'), originalFetch = globalThis.fetch
   const storage = new Map<string, string>()
-  const store = { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) }
+  const store = {
+    getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key),
+    get length() { return storage.size }, key: (index: number) => [...storage.keys()][index] ?? null,
+  }
   let onSyncUpdate: ((detail: any) => void) | null = null
   Object.defineProperty(globalThis, 'window', { configurable: true, value: {
     localStorage: store, sessionStorage: { getItem: () => null }, location: { origin: 'https://fixture.test' },
@@ -59,13 +65,15 @@ async function fixture(run: (f: {
     calls.push({ url: String(url), body: options?.body, redirect: new Headers(options?.headers).get(BRANCH_REDIRECT_HEADER) })
     return response()
   }) as typeof fetch
-  // A failed probe then a good one: http.ts's reconnect refresh, the real permission-refresh
-  // intent, and the reset AppContext.clearLocalBusinessState runs before re-bootstrapping.
-  const healthFlap = async () => {
-    let resets = 0
-    onSyncUpdate = (detail) => { if (permissionRefreshIntent(detail, { userId: USER.id, roleId: USER.role_id }) === 'refresh') { resetActorReadSession(); resets++ } }
+  // A failed probe then a good one: http.ts's reconnect refresh and the real permission-refresh
+  // intent start AppContext's real permission refresh; the bootstrap then answers, or not yet.
+  const healthFlap = async (bootstrap: 'back' | 'not back') => {
+    const refreshes: Promise<void>[] = []
+    onSyncUpdate = (detail) => { if (permissionRefreshIntent(detail, { userId: USER.id, roleId: USER.role_id }) === 'refresh') refreshes.push(resets.permissionRefresh()) }
     try { health = 'down'; await pingServerHealth(true); health = 'up'; await pingServerHealth(true) } finally { onSyncUpdate = null }
-    assert(resets > 0, 'the reconnect really ran the permission-refresh reset')
+    assert(refreshes.length > 0, 'the reconnect really ran the permission refresh')
+    await Promise.all(refreshes)
+    if (bootstrap === 'back') writeUser({ permissions: ['inventory.adjust', 'refreshed'] })
   }
   const change = async (kind: ChangeKind) => {
     if (kind === 'actor') { writeUser({ id: 8 }); resetActorReadSession() }
@@ -76,7 +84,8 @@ async function fixture(run: (f: {
     else if (kind === 'permissions rewrite') writeUser({ permissions: ['inventory.adjust', 'products.add'] })
     else if (kind === 'avatar rewrite') writeUser({ avatar_path: 'avatar.png' })
     else if (kind === 'expiry rewrite') storage.set('businessos_user_expiry', String(Date.now() + 86_400_000))
-    else await healthFlap()
+    else if (kind === 'stored user briefly missing') storage.delete('businessos_user')
+    else await healthFlap(kind === 'health flap, bootstrap back' ? 'back' : 'not back')
   }
   try {
     await run({ calls, respond: (fn) => { response = fn }, change })
@@ -131,7 +140,7 @@ for (const kind of SAME_USER) {
     try {
       const pending = apiFetch('POST', '/api/inventory/adjust', body)
       await asked.promise; await change(kind)
-      if (kind !== 'session reset' && kind !== 'health flap') assert.equal(isActorReadScopeCurrent(scope, false), false, 'control: the read fingerprint moved')
+      if (kind !== 'session reset') assert.equal(isActorReadScopeCurrent(scope, false), false, 'control: the read fingerprint moved')
       answer.resolve(2)
       assert.deepEqual(await pending, { success: true })
       assert.equal(calls.length, 2); assert.equal(calls[1].body, calls[0].body); assert.equal(calls[1].redirect, '2')
@@ -273,6 +282,18 @@ await check('the float drops the question when another tab signs a different acc
     assert.equal(host.value, null, 'the lock screen\'s change notice re-checks the owner without an app render')
     assert(host.renders.length > before && host.renders.slice(before).every((rendered) => rendered === null))
     assert.equal(await answer, null)
+  } finally { host.unmount() }
+}))
+await check('the float keeps the question when it re-renders while a refresh waits for its bootstrap', () => fixture(async ({ change }) => {
+  const host = mountQueueHook()
+  try {
+    const answer = redirect.askBranchRedirect(request); await tick()
+    await change('health flap, bootstrap not back'); host.render()
+    assert(host.value, 'still shown: nothing answered Back for the operator')
+    await change('stored user briefly missing'); host.render()
+    assert(host.value, 'still shown with no stored user for a moment')
+    host.value.answer(2)
+    assert.equal(await answer, 2)
   } finally { host.unmount() }
 }))
 await check('positive control: the float keeps the question through a session reset and returns the answer', () => fixture(async ({ change }) => {

@@ -10,6 +10,7 @@ let lastWriteOwner = ''
 let writeOwnerEpoch = 0
 let parsedUserRaw: string | null = null
 let parsedUser: Record<string, unknown> = {}
+let lastSignedInUser: Record<string, unknown> | null = null
 let allRevision = 0
 const revisions = new Map<string, number>()
 const resultScopes = new WeakMap<object, ActorReadScope>()
@@ -143,6 +144,7 @@ export async function beginActorCookieMutation(signoutToken?: string): Promise<s
     // left behind can never complete now, so it does not get to outlive this
     // moment. prepareActorOauthCookieRedirect() writes the new one after this.
     clearActorOauthCookieOwner()
+    lastSignedInUser = null
     expectedPending = marker
     expectedMarker = marker
     localSession++
@@ -390,11 +392,18 @@ export function assertActorReadScope(scope: ActorReadScope, includeInvalidation 
 //
 // The epoch is the device's owner generation, kept in WRITE_OWNER as
 // "generation:digest" so records that outlive a tab (the receiving product
-// attempts) can be bound to it. Any tab or reload that sees a different owner
-// than the one recorded raises it; a tab adopts a higher generation another tab
-// recorded, even if it never saw the owner in between. The digest is a hash of
-// the owner, never the account id itself, and a sign-out leaves it in place: the
-// same account signing back in continues the generation, any other raises it.
+// attempts) can be bound to it. A tab raises it when it sees another owner
+// itself -- a sign-in here, or a reload whose stored owner is not the one
+// recorded -- and continues the generation the device recorded for the owner
+// it now sees. A change only another tab saw leaves this tab's owner alone:
+// the session marker locked this tab meanwhile, so nothing it sent crossed
+// owners. The digest is a 64-bit hash of the owner; staff ids are small, so it
+// does not hide which account last signed in from someone reading the storage.
+//
+// No stored user is not another account. A same-user refresh, or a bootstrap
+// still on its way, can leave none stored for a moment: unless the session is
+// locked or a sign-in is pending, that is the last account seen. A cookie phase
+// (sign-in, sign-out) and session expiry forget it.
 export type ActorWriteIdentity = { owner: string; epoch: number }
 
 const STORED_USER = 'businessos_user'
@@ -416,7 +425,7 @@ function recordedWriteOwner(): { generation: number; digest: string } | null {
   return match ? { generation: Number(match[1]), digest: match[2] } : null
 }
 
-function storedWriteOwner(): { owner: string; signedIn: boolean } {
+function storedAccount(): Record<string, unknown> | null {
   const raw = readScopeStorage('session', STORED_USER) || readScopeStorage('local', STORED_USER)
   if (raw !== parsedUserRaw) {
     parsedUserRaw = raw
@@ -425,11 +434,27 @@ function storedWriteOwner(): { owner: string; signedIn: boolean } {
       parsedUser = value && typeof value === 'object' ? value as Record<string, unknown> : {}
     } catch { parsedUser = {} }
   }
+  if (parsedUser.id != null && String(parsedUser.id) !== '') return (lastSignedInUser = parsedUser)
+  return lastSignedInUser && !isActorSessionQuarantined() && !isActorCookieMutationPending() ? lastSignedInUser : null
+}
+
+function storedWriteOwner(): { owner: string; signedIn: boolean } {
+  const user = storedAccount() || {}
   let origin = ''
   try { origin = String(window.location?.origin || '') } catch { origin = '' }
-  const id = parsedUser.id == null ? '' : String(parsedUser.id)
-  const organization = String(parsedUser.organization_id || parsedUser.organization_slug || '')
+  const id = user.id == null ? '' : String(user.id)
+  const organization = String(user.organization_id || user.organization_slug || '')
   return { owner: JSON.stringify([getSyncServerUrl(), origin, id, organization]), signedIn: id !== '' }
+}
+
+/** Session expiry: from now a missing stored user reads as signed out. */
+export function forgetActorWriteAccount(): void { lastSignedInUser = null }
+
+/** The account writes are signed for: the stored user, or the last one seen
+ *  while none is stored (see above); null when signed out. */
+export function actorWriteAccount(): Record<string, unknown> | null {
+  observeWriteOwner()
+  return storedAccount()
 }
 
 function observeWriteOwner(): string {
@@ -445,10 +470,7 @@ function observeWriteOwner(): string {
     else writeOwnerEpoch = Math.max(writeOwnerEpoch, recorded?.generation ?? 0) + 1
     lastWriteOwner = owner
     lastWriteDigest = digest
-  } else if (recorded && recorded.generation > writeOwnerEpoch) {
-    writeOwnerEpoch = recorded.generation
-    return owner
-  } else if (recorded && recorded.generation === writeOwnerEpoch) return owner
+  } else if (recorded && recorded.generation >= writeOwnerEpoch) return owner
   writeScopeStorage('local', WRITE_OWNER, `${writeOwnerEpoch}:${lastWriteDigest}`)
   return owner
 }

@@ -291,3 +291,24 @@ const retirement = controller(retirementId, async () => ({ id: 76 }), {
 await assert.rejects(retirement.create(), code('product_create_outcome_unknown'))
 assert.equal(retirement.calls(), 0)
 console.log('PASS destination retirement after reservation refuses before transport and retains uncertainty fence')
+
+// The sign-in fence refused before sending: known not sent, so the product stays sendable for its owner.
+const fencedId = requestId()
+const fencedApi = loadAttempts()
+await fencedApi.registerReceivingProductAttempt(7, fencedId)
+const fenced = controller(fencedId, async () => { throw Object.assign(Error('locked'), { code: 'actor_session_quarantined', outcome: 'not_dispatched' }) }, fencedApi)
+await assert.rejects(fenced.create(), code('actor_session_quarantined'))
+assert.equal(fencedApi.readReceivingProductAttempt(7, fencedId)?.state, 'not_dispatched', 'recorded as not sent, not unknown')
+assert.equal(await controller(fencedId, async () => ({ id: 77 }), fencedApi).create(), 77, 'and sent once the owner is confirmed')
+// The session locked while the answer was on its way: the server's answer for this owner is kept.
+const answeredId = requestId()
+const answeredApi = loadAttempts()
+await answeredApi.registerReceivingProductAttempt(7, answeredId)
+const answered = controller(answeredId, async () => {
+  store.setItem('businessos_read_session', 'another-tab-reset')
+  throw Object.assign(Error('locked'), { code: 'actor_session_quarantined', outcome: 'unknown', confirmedResult: { id: 78 } })
+}, answeredApi)
+assert.equal(await answered.create(), 78, 'the product the server created for this owner')
+store.setItem('businessos_read_session', 'same-login-marker')
+assert.equal(loadAttempts().readReceivingProductAttempt(7, answeredId)?.state, 'confirmed', 'recorded as confirmed even while the session was locked')
+console.log('PASS a refusal before sending is recorded not sent; an answer that arrived during a lock is kept as confirmed')

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, startTransition } fr
 import type { ReactNode } from 'react'
 import { BUSINESS_TIME_ZONE, STORAGE_KEYS, SYNC } from './constants'
 import { cacheClearAll, ensureSyncUpdateCacheListener, FRONTEND_BUILD_INFO, isTransientGatewayError, pingServerHealth, primeServerHealthFromRuntime, startHealthCheck } from './api/http.ts'
-import { ACTOR_SESSION_RETRY_EVENT, acknowledgeActorCookieUser, actorCookieMutationPendingStatus, actorSessionReconciliationMarker, captureActorReadScope, isActorReadScopeCurrent, completeActorSessionReconciliation, isActorCookieMutationPending, isActorSessionQuarantined, resetActorReadSession, setActorSessionQuarantineStatus, subscribeActorSessionQuarantine } from './api/actorReadScope.ts'
+import { ACTOR_SESSION_RETRY_EVENT, acknowledgeActorCookieUser, actorCookieMutationPendingStatus, actorSessionReconciliationMarker, captureActorReadScope, isActorReadScopeCurrent, completeActorSessionReconciliation, forgetActorWriteAccount, isActorCookieMutationPending, isActorSessionQuarantined, resetActorReadSession, setActorSessionQuarantineStatus, subscribeActorSessionQuarantine } from './api/actorReadScope.ts'
 import { readActorSessionRecoveryBootstrap } from './api/http.ts'
 import { PASSWORD_CHANGE_REQUIRED_EVENT, currentApiRequestSequence, recoverUnresolvedSignout } from './api/http.ts'
 import { SIGNOUT_RETRY_EVENT, acknowledgeConfirmedSignout, assertNoUnresolvedSignout, beginUnresolvedSignout, isSignoutBlocked, prepareConfirmedSignoutUi, readSignoutIntent } from './api/unresolvedSignout.ts'
@@ -884,7 +884,11 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   // through clearLocalBusinessState below.
   const resetLocalBusinessState = useCallback(async (options: LocalBusinessStateResetOptions = {}) => {
     await resetClientRuntimeState({
-  // Authentication helpers.
+      // Only an explicit clearAuth: false keeps the signed-in account: a
+      // permission or runtime refresh is the same user, so its stored account
+      // stays put. Sign-out and session expiry pass true. (ee4e9a3f3 dropped
+      // this line, so every refresh deleted the stored user until bootstrap.)
+      clearAuth: options.clearAuth !== false,
       preserveDeviceSettings: true,
       preserveSyncServer: options.preserveSyncServer !== false,
       preserveSessionDuration: options.preserveSessionDuration !== false,
@@ -893,7 +897,6 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       preserveOfflineWork: options.preserveOfflineWork === true,
       preserveServiceWorker: options.preserveOfflineWork === true,
       preserveUiDrafts: options.preserveUiDrafts === true,
-  // Authentication helpers.
     }).catch(() => {})
     cacheClearAll()
   }, [])
@@ -907,6 +910,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   const handleUnauthorizedSession = useCallback(async (message = 'Please sign in again to continue.'): Promise<void> => {
     if (isActorSessionQuarantined()) return
     disconnectWS()
+    forgetActorWriteAccount()
     await clearLocalBusinessState({
       clearAuth: true,
       preserveSyncServer: true,
