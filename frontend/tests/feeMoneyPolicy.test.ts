@@ -40,6 +40,8 @@ const storage={getItem:(key:string)=>items.get(key)??null,setItem:(key:string,va
 const oldBody=Object.fromEntries(Object.entries(legacy).reverse())
 const oldEnvelope=JSON.stringify({actor_id:'7',client_request_id:'legacy-frozen-0001',body:oldBody})
 storage.setItem(pendingFeeCreateStorageKey(7),oldEnvelope)
+// The key names the server it was saved against (api/retryRecordScope.ts).
+const oldEnvelopeKey=pendingFeeCreateStorageKey(7)
 assert.equal(JSON.stringify(getPendingFeeCreate(7,storage)?.body),JSON.stringify(oldBody),'read returns stored body, never normalized replacement')
 assert.equal(storage.getItem(pendingFeeCreateStorageKey(7)),oldEnvelope,'read never rewrites storage')
 const retry=prepareFeeCreatePayload(oldBody,7,storage)
@@ -84,7 +86,7 @@ try {
   assert.equal(attempts.length,2,'double click shares the retry transport request')
   assert.equal(attempts[0],attempts[1],'version and frozen money survive exact lost-ack retry')
   assert.equal(getPendingFeeCreate(8),null)
-  assert.equal(storage.getItem(pendingFeeCreateStorageKey(7)),oldEnvelope,'other legacy request remains untouched')
+  assert.equal(storage.getItem(oldEnvelopeKey),oldEnvelope,'other legacy request remains untouched')
 } finally {
   globalThis.fetch=oldFetch
   Object.defineProperty(globalThis,'window',{configurable:true,writable:true,value:oldWindow})

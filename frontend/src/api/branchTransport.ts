@@ -3,6 +3,7 @@ import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { dispatchResolvedSyncError, type SyncProblemReference } from '../utils/syncProblemLifecycle.ts'
+import { adoptLegacyRetryRecord, retryRecordKey } from './retryRecordScope.ts'
 
 type BranchPayload = Record<string, unknown>
 const BRANCH_MIRROR_WRITE_DELAY_MS = 10_000
@@ -22,9 +23,12 @@ type TransferStore = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 function transferStore(): TransferStore {
   return window.sessionStorage
 }
-function transferRunKey(actorId: unknown): string {
+const TRANSFER_RUN_PREFIX = 'businessos_pending_transfer_v1:'
+function transferRunKey(actorId: unknown, store?: TransferStore): string {
   if (!String(actorId ?? '').trim()) throw new Error('Sign in before transferring stock.')
-  return `businessos_pending_transfer_v1:${actorId}`
+  const key = retryRecordKey(TRANSFER_RUN_PREFIX, actorId)
+  adoptLegacyRetryRecord(store, `${TRANSFER_RUN_PREFIX}${actorId}`, key)
+  return key
 }
 
 /** Capture device metadata, nested items and the key once, before network I/O. */
@@ -40,7 +44,8 @@ export function prepareTransferRun(actorId: unknown, payloads: Array<{ bulk: boo
 
 export function loadTransferRun(actorId: unknown, storage?: TransferStore): PendingTransferRun | null {
   if (!String(actorId ?? '').trim()) return null
-  const raw = (storage ?? transferStore()).getItem(transferRunKey(actorId))
+  const store = storage ?? transferStore()
+  const raw = store.getItem(transferRunKey(actorId, store))
   if (!raw) return null
   const run = JSON.parse(raw) as PendingTransferRun
   if (run.version !== 1 || run.actorId !== String(actorId) || !Array.isArray(run.requests)
@@ -52,8 +57,8 @@ export function loadTransferRun(actorId: unknown, storage?: TransferStore): Pend
 }
 
 export function saveTransferRun(actorId: unknown, run: PendingTransferRun | null, storage?: TransferStore): void {
-  const key = transferRunKey(actorId)
   const store = storage ?? transferStore()
+  const key = transferRunKey(actorId, store)
   if (run && run.actorId !== String(actorId)) throw new Error('The saved transfer belongs to another user.')
   if (!run) { store.removeItem(key); if (store.getItem(key) != null) throw new Error('The saved transfer could not be cleared.'); return }
   const serialized = JSON.stringify(run)

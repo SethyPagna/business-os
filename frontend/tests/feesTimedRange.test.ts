@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import ts from 'typescript'
 import { createRequire } from 'node:module'
 import { feeRangeParams } from '../src/api/feesTransport.ts'
+import * as retryRecordScope from '../src/api/retryRecordScope.ts'
 import { reportQueryParams, REPORT_VIEWS } from '../src/components/sales/reports/reportModel.ts'
 
 const range = { startDate: '2026-09-20', endDate: '2026-09-21', startTime: '22:00', endTime: '02:00' }
@@ -37,6 +38,7 @@ new Function('exports', 'require', 'module', ts.transpileModule(source, { compil
   if (id.includes('businessTimeBounds')) return require('../src/utils/businessTimeBounds.ts')
   if (id.includes('syncProblemLifecycle')) return {}
   if (id.includes('directMutationRefusal')) return require('../src/utils/directMutationRefusal.ts')
+  if (id === './retryRecordScope.ts') return retryRecordScope
   throw new Error(id)
 }, module)
 await module.exports.getFees({ ...exact, limit: 25, offset: 0 })

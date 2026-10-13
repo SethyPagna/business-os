@@ -10,6 +10,7 @@
 // draft (slice 1) repopulates the content.
 
 import { readWorkDraft, writeWorkDraft, clearWorkDraft, scopedWorkDraftKey } from './workDrafts.ts'
+import { legacyRetryRecordsReadable, retryRecordKey } from '../api/retryRecordScope.ts'
 
 export const RESTORE_WORK_EVENT = 'bos:restore-work'
 
@@ -105,7 +106,11 @@ export function writeTransferDraft<T>(kind: TransferDraftKind, actorId: unknown,
 export function hasUnresolvedTransfer(kind: TransferDraftKind, actorId: unknown): boolean {
   try {
     const prefix = kind === 'inventory_transfer' ? 'inventory:' : ''
-    return sessionStorage.getItem(`${prefix}businessos_pending_transfer_v1:${actorId}`) != null
+    // This server's run, or, on the server this tab started with, one saved
+    // before keys carried the server (api/retryRecordScope.ts).
+    const keys = [retryRecordKey('businessos_pending_transfer_v1:', actorId)]
+    if (legacyRetryRecordsReadable()) keys.push(`businessos_pending_transfer_v1:${actorId}`)
+    return keys.some((key) => sessionStorage.getItem(`${prefix}${key}`) != null)
   } catch { return true }
 }
 export function discardTransferDraft(kind: TransferDraftKind, actorId: unknown, key: string): boolean {

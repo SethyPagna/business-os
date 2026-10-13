@@ -1,3 +1,5 @@
+import { adoptLegacyRetryRecord, retryRecordKey } from '../api/retryRecordScope.ts'
+
 export type DirectMutationKind = 'sale-status' | 'return-edit' | 'return-history' | 'sale-add-items' | 'sale-amendment'
 export type SaleLineMutationKind = 'sale-add-items' | 'sale-amendment'
 const isSaleLineKind = (kind: DirectMutationKind): kind is SaleLineMutationKind => kind === 'sale-add-items' || kind === 'sale-amendment'
@@ -73,12 +75,23 @@ function defaultSessionStore(): SessionStore | null {
   }
 }
 
-export function directMutationStorageKey(kind: DirectMutationKind, actorId: unknown, entityId: unknown): string {
-  return `${STORAGE_PREFIX}${kind}_v2:${requireActorId(actorId)}:${normalizedScopePart(entityId)}`
+// Sale-line actor ids already carry the page origin and server; the other
+// kinds' records are keyed by server and organization (api/retryRecordScope.ts),
+// and one saved before that moves once to the scope it is first read under.
+function recordKey(kind: DirectMutationKind, tail: string, storage?: SessionStore | null): string {
+  const prefix = `${STORAGE_PREFIX}${kind}_v2:`
+  if (isSaleLineKind(kind)) return `${prefix}${tail}`
+  const key = retryRecordKey(prefix, tail)
+  adoptLegacyRetryRecord(storage, `${prefix}${tail}`, key)
+  return key
 }
 
-function directMutationSlotKey(kind: DirectMutationKind, actorId: unknown): string {
-  return `${STORAGE_PREFIX}${kind}_v2:${requireActorId(actorId)}:active`
+export function directMutationStorageKey(kind: DirectMutationKind, actorId: unknown, entityId: unknown, storage?: SessionStore | null): string {
+  return recordKey(kind, `${requireActorId(actorId)}:${normalizedScopePart(entityId)}`, storage)
+}
+
+function directMutationSlotKey(kind: DirectMutationKind, actorId: unknown, storage?: SessionStore | null): string {
+  return recordKey(kind, `${requireActorId(actorId)}:active`, storage)
 }
 
 /** Freeze at the JSON boundary used by apiFetch and sessionStorage. */
@@ -256,7 +269,7 @@ export function loadPendingDirectMutation<TBody extends Record<string, unknown>>
   const actor = normalizedScopePart(actorId)
   const entity = normalizedScopePart(entityId)
   if (!actor || !entity) return null
-  return readPending(directMutationStorageKey(kind, actor, entity), kind, actor, entity, storage, now)
+  return readPending(directMutationStorageKey(kind, actor, entity, storage), kind, actor, entity, storage, now)
 }
 
 export function savePendingDirectMutation<TBody extends Record<string, unknown>>(
@@ -271,7 +284,7 @@ export function savePendingDirectMutation<TBody extends Record<string, unknown>>
   const actor = requireActorId(actorId)
   const entity = normalizedScopePart(entityId)
   if (!entity) throw new DirectMutationPersistenceError('This request was not sent because its target could not be identified. Refresh and try again.')
-  const key = directMutationStorageKey(kind, actor, entity)
+  const key = directMutationStorageKey(kind, actor, entity, storage)
   if (isSaleLineKind(kind)) {
     if (!body) throw new DirectMutationPersistenceError('Sale requests require an exact receipt-bound release.')
     const pending = readPending<TBody>(key, kind, actor, entity, storage, now)
@@ -291,7 +304,7 @@ export function loadPendingDirectMutationSlot<TBody extends Record<string, unkno
 ): PendingDirectMutation<TBody> | null {
   const actor = normalizedScopePart(actorId)
   if (!actor) return null
-  return readPending(directMutationSlotKey(kind, actor), kind, actor, undefined, storage, now)
+  return readPending(directMutationSlotKey(kind, actor, storage), kind, actor, undefined, storage, now)
 }
 
 export function savePendingDirectMutationSlot<TBody extends Record<string, unknown>>(
@@ -306,7 +319,7 @@ export function savePendingDirectMutationSlot<TBody extends Record<string, unkno
   const actor = requireActorId(actorId)
   const entity = normalizedScopePart(entityId)
   if (!entity) throw new DirectMutationPersistenceError('This request was not sent because its target could not be identified. Refresh and try again.')
-  const key = directMutationSlotKey(kind, actor)
+  const key = directMutationSlotKey(kind, actor, storage)
   if (isSaleLineKind(kind)) throw new DirectMutationPersistenceError('Sale line requests use a sale-specific durable slot.')
   return persistPending(key, body ? buildPending(kind, actor, entity, body, history, now) : null, storage)
 }
