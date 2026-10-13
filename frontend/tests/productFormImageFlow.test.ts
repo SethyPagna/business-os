@@ -74,8 +74,9 @@ URL.revokeObjectURL = ((url: string) => { objectUrls.revoked.push(url) }) as typ
 
 const uploads: Array<{ file: File; fileName: string; productName?: string }> = []
 let uploadImpl: (payload: { file: File }) => Promise<unknown> = async () => ({ public_path: '/uploads/products/probe-1.jpg', cache_version: 'v1' })
+let createMatchRows: unknown[] = []
 const doubles = {
-  'api/methods.ts': { searchProducts: async () => ({ items: [] }), getProductFilters: async () => ({ categories: [], brands: [] }) },
+  'api/methods.ts': { searchProducts: async () => ({ items: createMatchRows }), getProductFilters: async () => ({ categories: [], brands: [] }) },
   'api/productImageUploadTransport.ts': { uploadProductImage: async (payload: { file: File; fileName: string; productName?: string }) => { uploads.push(payload); return uploadImpl(payload) } },
 }
 
@@ -265,6 +266,7 @@ try {
     uploads.length = 0
     objectUrls.created.length = 0
     objectUrls.revoked.length = 0
+    createMatchRows = []
     uploadImpl = async () => ({ public_path: '/uploads/products/probe-1.jpg', cache_version: 'v1' })
   }
 
@@ -541,8 +543,38 @@ try {
     assert.equal(uploads.length, 0)
   }
 
+  // The create-verdict dialog ("Name already exists") is part of the save too: a photo arriving behind it is reported, not uploaded and left out.
+  for (const lang of ['en', 'km']) {
+    resetProbes()
+    notices.length = 0
+    createMatchRows = [{ id: 9, name: 'Probe serum', barcode: '880999', selling_price_usd: 5 }]
+    const words = packs[lang]
+    const saved: Array<{ image_gallery: string[] }> = []
+    const surface = await mountForm(lang, { onSave: async (payload: { image_gallery: string[] }) => { saved.push(payload) } })
+    await surface.type(surface.find((node) => node.id === 'product-name', 'name'), 'Probe serum')
+    await surface.type(surface.find((node) => node.id === 'product-barcode', 'barcode'), '880123')
+    await surface.waitFor(() => surface.text().includes(words.create_match_name_hint.split('{n}')[0]), `${lang}: the name-match hint`)
+    const before = pickers.length
+    await surface.click(pickerButton(surface, words.take_photo))
+    const duringVerdict = pickers[before]
+    await tapPage()
+    await surface.click(saveButton(surface))
+    surface.find((node) => node.getAttribute('role') === 'dialog' && node.textContent.includes(words.create_match_name_title), `${lang}: the verdict dialog`)
+    duringVerdict.files = [photo('during-verdict.jpg')]
+    await fire(duringVerdict, 'change')
+    await surface.settle()
+    assert.deepEqual(notices, [words.image_arrived_too_late], `${lang}: a photo that arrives behind the verdict dialog is reported`)
+    assert.equal(uploads.length, 0, `${lang}: and not uploaded`)
+    await surface.click(surface.find((node) => node.tagName === 'BUTTON' && node.textContent.startsWith(words.create_match_group_button.split('{name}')[0]), `${lang}: the group button`))
+    await surface.click(surface.button(words.add_product, saveReview(surface, words)))
+    assert.equal(saved.length, 1, `${lang}: the save carries on after the verdict`)
+    assert.deepEqual(saved[0].image_gallery, [], `${lang}: with the gallery the form had when Save was pressed`)
+    assert.equal(uploads.length, 0, `${lang}: nothing was uploaded behind the person's back`)
+    await surface.unmount()
+  }
+
   console.log('PASS a failed photo tile has icon-only 44 px Retry and Remove that fit a phone, and Save and Minimize refuse until it is retried or removed')
-  console.log('PASS a photo that arrives after Save started or the form closed is reported in English and Khmer, never dropped silently')
+  console.log('PASS a photo that arrives after Save started, behind the create-verdict dialog, or after the form closed is reported in English and Khmer, never dropped silently')
   console.log('PASS only an upload that is really running locks the form, and an upload that never answers times out and unlocks it')
 } finally {
   URL.createObjectURL = realCreateObjectURL

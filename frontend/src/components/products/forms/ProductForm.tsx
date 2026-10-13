@@ -1296,7 +1296,10 @@ function ProductFormContent({
     if (isCreateMode && createVerdict.kind && createVerdict.kind !== 'exact_twin') {
       const ackKey = `${String(form.name || '').trim().toLowerCase()}|${String(form.barcode || '').trim()}`
       if (createMatchAckRef.current !== ackKey) {
+        // The verdict dialog is part of the save: a photo arriving while it is open cannot join the product (receiveImageFiles).
+        saveInFlightRef.current = true
         const choice = await askCreateVerdict()
+        saveInFlightRef.current = false
         if (!canContinueSave()) return
         if (choice === 'back') return
         if (choice === 'group' && createVerdict.canonicalName) {
