@@ -29,6 +29,10 @@ export const DIRECT_MUTATION_RECONCILE_AFTER_MS = 7 * 24 * 60 * 60 * 1000
 export const SALE_LINE_IN_FLIGHT_BOUND_MS = 10 * 60 * 1000
 
 const STORAGE_PREFIX = 'businessos_pending_'
+const DIRECT_MUTATION_KINDS: readonly DirectMutationKind[] = ['sale-status', 'return-edit', 'return-history', 'sale-add-items', 'sale-amendment']
+// This store's own records. Other retry records share the prefix (transfer
+// runs, expenses, return creates) and are never counted or removed here.
+const isDirectMutationStorageKey = (key: string): boolean => DIRECT_MUTATION_KINDS.some((kind) => key.startsWith(`${STORAGE_PREFIX}${kind}_v2:`))
 
 export class DirectMutationPersistenceError extends Error {
   code = 'pending_request_persistence_failed'
@@ -171,7 +175,7 @@ function pendingEntryCount(storage: SessionStore, targetKey: string): number {
   let count = 0
   for (let index = storage.length - 1; index >= 0; index -= 1) {
     const key = storage.key(index)
-    if (!key?.startsWith(STORAGE_PREFIX) || key === targetKey) continue
+    if (!key || !isDirectMutationStorageKey(key) || key === targetKey) continue
     const raw = storage.getItem(key)
     if (!raw) continue
     // Corrupt/foreign financial attempts still occupy a slot. Counting other

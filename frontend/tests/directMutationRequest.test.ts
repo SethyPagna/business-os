@@ -388,5 +388,33 @@ await test('production send and banner paths derive current actor and entity sco
   assert.doesNotMatch(editReturn, /const prepared = pendingRequest\?\.body \|\|/)
 })
 
+await test('saving a sale or return request never removes another family\'s retry record', async () => {
+  // The real transfer and expense transports write their own records into the
+  // same tab store; a sale-status or return-edit save beside them leaves both.
+  const session = new MemoryStorage(), local = new MemoryStorage()
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'window')
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage: local, sessionStorage: session, location: { origin: 'https://shop.test', hostname: 'shop.test' }, addEventListener() {}, removeEventListener() {}, dispatchEvent: () => true, setTimeout, clearTimeout } })
+  try {
+    const { prepareTransferRun, saveTransferRun, loadTransferRun } = await import('../src/api/branchTransport.ts')
+    const { prepareFeeCreatePayload, getPendingFeeCreate } = await import('../src/api/feesTransport.ts')
+    const transfer = prepareTransferRun(7, [{ bulk: false, body: { product_id: 1, from_branch_id: 1, to_branch_id: 2, quantity: 1 } }])
+    saveTransferRun(7, transfer, session)
+    const fee = prepareFeeCreatePayload({ fee_type: 'rent', label: 'Rent', amount_usd: 10 }, 7, session)
+    session.setItem('businessos_pending_unknown_family_v9:7', 'opaque{')
+    savePendingDirectMutationSlot('sale-status', 7, 55, { client_request_id: 'req-status' }, session)
+    savePendingDirectMutation('return-edit', 7, 56, { client_request_id: 'req-return' }, session)
+    assert.equal(loadTransferRun(7, session)?.requests[0].body.client_request_id, transfer.requests[0].body.client_request_id, 'the pending transfer run keeps its request id')
+    assert.equal(getPendingFeeCreate(7, session)?.client_request_id, fee.client_request_id, 'the pending expense keeps its request id')
+    assert.equal(session.getItem('businessos_pending_unknown_family_v9:7'), 'opaque{', 'a record this store does not own is left alone')
+    // Its own malformed records are still pruned, as before.
+    session.setItem(directMutationStorageKey('return-edit', 7, 57), 'corrupt{')
+    savePendingDirectMutation('return-edit', 7, 58, { client_request_id: 'req-return-2' }, session)
+    assert.equal(session.getItem(directMutationStorageKey('return-edit', 7, 57)), null)
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'window', previous)
+    else Reflect.deleteProperty(globalThis, 'window')
+  }
+})
+
 if (failed) process.exit(1)
 console.log('direct mutation requests: all cases pass')
