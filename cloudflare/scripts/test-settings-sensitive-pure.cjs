@@ -70,7 +70,7 @@ check('ordinary settings keys pass through untouched', () => {
 check('source lock: GET /api/settings strips before responding', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'settings.ts'), 'utf8')
   assert.ok(/from '\.\.\/lib\/settingsSensitive'/.test(src), 'settings.ts must import the shared redaction')
-  assert.ok(/\.\.\.stripSensitiveSettings\(map\)/.test(src), 'the GET / response must spread the STRIPPED map')
+  assert.ok(/\.\.\.settingsReadableBy\(user, stripSensitiveSettings\(map\)\)/.test(src), 'the GET / response must spread the STRIPPED map, narrowed to what the account may read')
 })
 
 check('source lock: GET /auth/bootstrap strips before responding', () => {

@@ -8,6 +8,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { stripSensitiveSettings, isSensitiveSettingKey } from '../lib/settingsSensitive'
+import { canReadSettingKey, settingsReadableBy } from '../lib/settingsVisibility'
 // Shared with routes/sales.ts, which folds a method into this list the moment
 // a sale uses one. Both sides use the same rules so an automatic registration
 // and this file's manual backfill can never disagree about what counts as
@@ -108,6 +109,7 @@ async function scopedUpdatedAt(env: Env, stored: Map<string, StoredSettingRow>):
 }
 
 app.get('/', async (c) => {
+  const user = c.get('user')
   const db = getDb(c.env)
   // One round trip for both reads (perf F5). The second statement is exactly
   // getSettingsUpdatedAt()'s unscoped branch, including its fallback to now
@@ -123,8 +125,10 @@ app.get('/', async (c) => {
   for (const row of rows) map[row.key] = row.value
   // Secret-bearing keys (Drive OAuth tokens etc.) never leave the Worker --
   // see lib/settingsSensitive.ts. requireAuth alone is not enough here:
-  // every logged-in cashier gets this map.
-  return c.json({ ...stripSensitiveSettings(map), updatedAt })
+  // every logged-in cashier gets this map. Rows only the Settings screen reads
+  // (Telegram routing, Drive sync, audit retention) go to accounts with
+  // Settings access alone -- see lib/settingsVisibility.ts.
+  return c.json({ ...settingsReadableBy(user, stripSensitiveSettings(map)), updatedAt })
 })
 
 // Real, confirmed bug (traced from a live user report of "Portal settings
@@ -149,9 +153,10 @@ app.get('/', async (c) => {
 // keys it's about to write can ask "what's the real current version of
 // THOSE keys" instead of "what's the newest anything in this whole table".
 app.get('/meta', async (c) => {
+  const user = c.get('user')
   const keysParam = c.req.query('keys')
   const keys = keysParam
-    ? keysParam.split(',').map((key) => key.trim()).filter(Boolean)
+    ? keysParam.split(',').map((key) => key.trim()).filter((key) => key && canReadSettingKey(user, key))
     : undefined
   return c.json({ updatedAt: await getSettingsUpdatedAt(c.env, keys) })
 })
