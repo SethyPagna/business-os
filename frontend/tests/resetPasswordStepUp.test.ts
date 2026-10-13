@@ -139,6 +139,26 @@ await runTest('the Worker asks for the password after the cheap checks and befor
   assert.ok(orphanRoute.indexOf('if (apply) {') > -1 && orphanRoute.indexOf('if (apply) {') < orphanRoute.indexOf('denyUnlessCurrentPassword(c, body, 403)'), 'only the forced delete asks; the dry-run report does not')
 })
 
+await runTest('audit retention is saved through its own endpoint with the password, never through the generic settings save', () => {
+  const component = read('../src/components/utils-settings/AuditRetentionSetting.tsx')
+  const settingsPanel = read('../src/components/utils-settings/Settings.tsx')
+  const transport = read('../src/api/settingsTransport.ts')
+  const policy = read('../../cloudflare/src/lib/auditRetentionPolicy.ts')
+  assert.match(transport, /apiFetch\('PUT', '\/api\/settings\/audit-log-retention', \{ days, currentPassword: confirmation\.currentPassword \}\)/)
+  assert.match(component, /saveAuditLogRetention\(Number\(trimmed\), \{ currentPassword \}\)/)
+  assert.match(component, /type="password"[\s\S]{0,120}autoComplete="current-password"/)
+  assert.match(component, /if \(!currentPassword\) return notify\(/)
+  assert.match(settingsPanel, /<AuditRetentionSetting/)
+  assert.match(settingsPanel, /SERVER_OWNED_SETTING_KEYS = new Set\(\['audit_log_retention_days'\]\)/)
+  assert.ok(!/name="audit_log_retention_days"/.test(settingsPanel), 'the generic Settings form no longer carries the field')
+  const floor = policy.match(/AUDIT_LOG_RETENTION_FLOOR_DAYS = (\d+)/)?.[1]
+  const ceiling = policy.match(/AUDIT_LOG_RETENTION_MAX_DAYS = (\d+)/)?.[1]
+  assert.equal(component.match(/const MIN_DAYS = (\d+)/)?.[1], floor, 'the control and the Worker agree on the floor')
+  assert.equal(component.match(/const MAX_DAYS = (\d+)/)?.[1], ceiling, 'and on the ceiling')
+  assert.ok(en.invalid_audit_retention_days && km.invalid_audit_retention_days, 'the refusal needs text in both packs')
+  assert.notEqual(en.invalid_audit_retention_days, km.invalid_audit_retention_days)
+})
+
 if (failed > 0) {
   console.error(`\n${failed} test(s) failed`)
   process.exit(1)

@@ -782,7 +782,7 @@ async function main() {
       await H.db.prepare("INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details) VALUES(1,'admin','update','settings','al-k11-control','{}')").run()
       t.eq('fixture: edit, delete and undo were recorded', [e.status, d.status, u.status, (await feeAudits(H, f.id, 'update')).length, (await feeAudits(H, g.id, 'delete')).length, (await feeAudits(H, f.id, 'action_undo')).length], [200, 200, 200, 1, 1, 1])
       await H.db.prepare("UPDATE audit_logs SET created_at = datetime('now','-30 days') WHERE (entity='fee' AND CAST(entity_id AS REAL) IN (?, ?)) OR entity_id IN ('al-k11-revert','al-k11-control')").bind(Number(f.id), Number(g.id)).run()
-      const cleared = await H.api('DELETE', '/api/system/audit-logs/retention?olderThanDays=21&confirm=true')
+      const cleared = await H.api('DELETE', '/api/system/audit-logs/retention?olderThanDays=21&confirm=true', { currentPassword: 'al-repro-admin-password-1' })
       const left = async (sql) => (await H.q1(sql)).n
       t.eq('retention sweep ran', cleared.status, 200)
       t.eq('the 30-day-old expense edit row is kept', (await feeAudits(H, f.id, 'update')).length, 1)

@@ -31,6 +31,7 @@ import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Users from 'lucide-react/dist/esm/icons/users.js'
 import FontFamilyPicker from './FontFamilyPicker'
+import AuditRetentionSetting from './AuditRetentionSetting.tsx'
 import TelegramSummarySections from './TelegramSummarySections.tsx'
 import { ACCOUNT_NAV_IDS, DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parseNavSetting } from '../shared/navigationConfig'
 import SectionSwitcher from '../shared/SectionSwitcher'
@@ -178,9 +179,13 @@ const SETTINGS_IMAGE_UPLOAD_TIMEOUT_MS = 30000
 // the Worker refuses any change to them (P1-3), so a sync that ran after the
 // page loaded would block an unrelated save. Never send them from here.
 const SERVER_OWNED_SETTING_PREFIXES = ['drive_sync_']
+const SERVER_OWNED_SETTING_KEYS = new Set(['audit_log_retention_days'])
 function withoutServerOwnedSettings<T extends Record<string, unknown>>(record: T): T {
   return Object.fromEntries(
-    Object.entries(record).filter(([key]) => !SERVER_OWNED_SETTING_PREFIXES.some((prefix) => key.trim().toLowerCase().startsWith(prefix))),
+    Object.entries(record).filter(([key]) => {
+      const normalized = key.trim().toLowerCase()
+      return !SERVER_OWNED_SETTING_KEYS.has(normalized) && !SERVER_OWNED_SETTING_PREFIXES.some((prefix) => normalized.startsWith(prefix))
+    }),
   ) as T
 }
 
@@ -2365,25 +2370,13 @@ export default function Settings() {
             title={t('audit_log_retention') || 'Audit log retention'}
             description={t('audit_log_retention_desc') || 'Audit log entries older than this are cleared automatically. There is no manual "Clear" action anymore.'}
           >
-            <div className="max-w-xs">
-              <label htmlFor="settings-audit-log-retention-days" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                {t('audit_log_retention_days') || 'Keep audit logs for (days)'}
-              </label>
-              <input
-                id="settings-audit-log-retention-days"
-                name="audit_log_retention_days"
-                className="input max-w-xs"
-                type="number"
-                min="1"
-                max="3650"
-                step="1"
-                value={form.audit_log_retention_days || '21'}
-                onChange={(event) => setValue('audit_log_retention_days', event.target.value)}
-              />
-              <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                {t('audit_log_retention_days_desc') || 'Entries older than this are deleted automatically on a daily schedule. Default is 21 days.'}
-              </p>
-            </div>
+            <AuditRetentionSetting
+              t={t}
+              notify={notify}
+              username={String(user?.username || '')}
+              value={toStringValue(settings.audit_log_retention_days) || '21'}
+              onSaved={() => loadSettings({ force: true })}
+            />
           </SettingsSection>
         ) : null}
         </SettingsRenderBoundary>

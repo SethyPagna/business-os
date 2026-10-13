@@ -15,8 +15,14 @@ const output = ts.transpileModule(auditSource, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 }).outputText
 const moduleObj = { exports: {} }
+let storedRetention = null
+const policyOutput = ts.transpileModule(fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'auditRetentionPolicy.ts'), 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+}).outputText
+const policyModule = { exports: {} }
+new Function('exports', 'module', policyOutput)(policyModule.exports, policyModule)
 const localRequire = (request) => {
-  if (request === './db') return { getDb: () => { throw new Error('not used') } }
+  if (request === './db') return { getDb: () => ({ prepare: () => ({ get: async () => (storedRetention === null ? null : { value: storedRetention }) }) }) }
   if (request === './actorSnapshot') return { ACTOR_USERNAME_SQL: '', resolveActorUsername: () => null }
   return require(request)
 }
@@ -194,6 +200,22 @@ assert.doesNotMatch(compatSource, /DELETE FROM audit_logs WHERE id IN \(SELECT i
   assert.ok(written.has('stock_revert'), 'the stock Revert route still writes stock_revert')
   for (const action of written) assert.ok(AUDIT_RETENTION_KEPT_REVERT_ACTIONS.includes(action), 'revert action ' + action + ' must be kept by retention')
   console.log('audit retention K11: expense evidence + revert records kept, Undo/Redo history pruned; 3 wrong policies rejected')
+}
+
+{
+  const { getAuditLogRetentionDays } = moduleObj.exports
+  ;(async () => {
+    for (const [stored, expected] of [[null, 21], ['1', 21], ['20', 21], ['0', 21], ['-3', 21], ['abc', 21], ['21', 21], ['45', 45]]) {
+      storedRetention = stored
+      assert.equal(await getAuditLogRetentionDays({}), expected, `a stored ${JSON.stringify(stored)} must not shorten the window below 21 days`)
+    }
+    const { parseAuditRetentionDays, AUDIT_LOG_RETENTION_FLOOR_DAYS } = policyModule.exports
+    assert.equal(moduleObj.exports.DEFAULT_AUDIT_LOG_RETENTION_DAYS, AUDIT_LOG_RETENTION_FLOOR_DAYS, 'the purge default and the floor the routes enforce are one number')
+    for (const [input, expected] of [[21, 21], ['3650', 3650], [' 30 ', 30], [20, null], [3651, null], [21.5, null], ['21.5', null], ['', null], [null, null], [[30], null], ['1e2', null]]) {
+      assert.equal(parseAuditRetentionDays(input), expected, `parse ${JSON.stringify(input)}`)
+    }
+    console.log('audit retention floor: a stored value under 21 days never shortens the window; whole days from 21 to 3650 only')
+  })().catch((error) => { console.error(error); process.exit(1) })
 }
 
 console.log('audit retention: Return bulk provenance and exact Shift lifecycle receipts preserved narrowly')

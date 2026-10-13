@@ -711,16 +711,22 @@ app.delete('/system/audit-logs/retention', requireAuth, async (c) => {
   if (denied) return denied
   const user = c.get('user')
   if (!isAdminControlUser(user)) return c.json({ error: 'Administrator access required.' }, 403)
-  const olderThanDays = Math.max(1, Number.parseInt(c.req.query('olderThanDays') || '30', 10) || 30)
+  const { AUDIT_LOG_RETENTION_FLOOR_DAYS } = await import('../lib/auditRetentionPolicy')
+  const olderThanDays = Number.parseInt(c.req.query('olderThanDays') || '30', 10) || 30
+  if (olderThanDays < AUDIT_LOG_RETENTION_FLOOR_DAYS) {
+    return c.json({ error: `Audit logs are kept for at least ${AUDIT_LOG_RETENTION_FLOOR_DAYS} days.`, code: 'invalid_audit_retention_days' }, 400)
+  }
   const confirmedQuery = String(c.req.query('confirm') || '').toLowerCase()
-  let confirmedBody = false
+  let body: { confirm?: boolean; currentPassword?: unknown } = {}
   try {
-    const body = await c.req.json<{ confirm?: boolean }>()
-    confirmedBody = body?.confirm === true
+    body = (await c.req.json<{ confirm?: boolean; currentPassword?: unknown }>()) ?? {}
   } catch (_) { /* no body sent, fall through to query param */ }
-  if (!confirmedBody && confirmedQuery !== 'true' && confirmedQuery !== '1') {
+  if (body.confirm !== true && confirmedQuery !== 'true' && confirmedQuery !== '1') {
     return c.json({ error: 'Confirmation is required to clear old audit logs.' }, 400)
   }
+  const { denyUnlessCurrentPassword } = await import('../lib/destructiveStepUp')
+  const passwordDenied = await denyUnlessCurrentPassword(c, body, 403)
+  if (passwordDenied) return passwordDenied
   // Raw column against a full 'YYYY-MM-DD HH:MM:SS' cutoff (matches audit_logs'
   // own CURRENT_TIMESTAMP shape), batched by id -- same fix as the scheduled
   // retention in lib/audit.ts:140-147: the old `date(created_at) < @cutoff`

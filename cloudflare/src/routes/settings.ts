@@ -9,6 +9,7 @@ import { bumpVersion } from '../lib/cache'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { stripSensitiveSettings, isSensitiveSettingKey } from '../lib/settingsSensitive'
 import { canReadSettingKey, settingsReadableBy } from '../lib/settingsVisibility'
+import { AUDIT_LOG_RETENTION_FLOOR_DAYS, AUDIT_LOG_RETENTION_MAX_DAYS, parseAuditRetentionDays } from '../lib/auditRetentionPolicy'
 // Shared with routes/sales.ts, which folds a method into this list the moment
 // a sale uses one. Both sides use the same rules so an automatic registration
 // and this file's manual backfill can never disagree about what counts as
@@ -1085,6 +1086,16 @@ app.post('/', async (c) => {
     }
   }
 
+  // How long the audit trail lives is changed only through its own endpoint,
+  // which asks for the current password; resending the stored value stays a no-op.
+  const retentionKey = attemptedKeys.find((key) => key.trim().toLowerCase() === 'audit_log_retention_days')
+  if (retentionKey && (storedSettingValues(stored)[retentionKey] ?? '') !== sentAsText[retentionKey]) {
+    return c.json({
+      error: `"${retentionKey}" must be changed through its dedicated endpoint.`,
+      code: 'dedicated_setting_endpoint_required',
+    }, 400)
+  }
+
   // Registered seller identity is displayed by the public portal only after
   // staff have supplied it. Keep these two values as deliberate plain text:
   // trim surrounding whitespace, allow an empty string to clear an unverified
@@ -1326,6 +1337,37 @@ app.post('/', async (c) => {
     ...(changedKeys.length < attemptedKeys.length ? { unchanged: attemptedKeys.filter((key) => !changedKeys.includes(key)) } : {}),
     ...(Object.keys(saved).length ? { saved } : {}),
   })
+})
+
+app.put('/audit-log-retention', async (c) => {
+  const user = c.get('user')
+  if (!hasPermission(user, 'settings') || !isAdminControlUser(user)) {
+    return c.json({ error: 'Only an administrator can change "audit_log_retention_days".', code: 'admin_control_setting_required' }, 403)
+  }
+  const body = await c.req.json<{ days?: unknown; currentPassword?: unknown }>().catch(() => ({}) as { days?: unknown; currentPassword?: unknown })
+  const days = parseAuditRetentionDays(body.days)
+  if (days === null) {
+    return c.json({
+      error: `Keep audit logs for ${AUDIT_LOG_RETENTION_FLOOR_DAYS} to ${AUDIT_LOG_RETENTION_MAX_DAYS} days.`,
+      code: 'invalid_audit_retention_days',
+    }, 400)
+  }
+  const { denyUnlessCurrentPassword } = await import('../lib/destructiveStepUp')
+  const passwordDenied = await denyUnlessCurrentPassword(c, body, 403)
+  if (passwordDenied) return passwordDenied
+  const db = getDb(c.env)
+  const before = await db.prepare("SELECT value FROM settings WHERE key = 'audit_log_retention_days'").get<{ value: string }>()
+  const value = String(days)
+  await db.prepare(
+    `INSERT INTO settings (key, value, updated_at) VALUES ('audit_log_retention_days', @value, CURRENT_TIMESTAMP)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+  ).run({ value })
+  const keys = ['audit_log_retention_days']
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'settings', null, { keys },
+    changedFields({ audit_log_retention_days: before?.value ?? null }, { audit_log_retention_days: value }, { keys }))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'settings'))
+  c.executionCtx.waitUntil(broadcast(c.env, 'settings', { action: 'update', keys, writeId: crypto.randomUUID() }))
+  return c.json({ key: keys[0], value, updatedAt: await getSettingsUpdatedAt(c.env, keys) })
 })
 
 export default app

@@ -109,10 +109,16 @@ async function main() {
   })
 
   await check('an administrator can still change them', async () => {
-    const res = await save(ADMIN, { telegram_chat_id: '-100222', audit_log_retention_days: '30' })
+    const res = await save(ADMIN, { telegram_chat_id: '-100222' })
     assert.equal(res.status, 200)
     assert.equal(stored('telegram_chat_id'), '-100222')
-    assert.equal(stored('audit_log_retention_days'), '30')
+  })
+
+  await check('even an administrator changes the retention window only through its own endpoint', async () => {
+    const res = await save(ADMIN, { audit_log_retention_days: '30' })
+    assert.equal(res.status, 400)
+    assert.equal(res.body.code, 'dedicated_setting_endpoint_required')
+    assert.equal(stored('audit_log_retention_days'), '21')
   })
 
   await check('source lock: the Settings form never resends Worker-owned drive_sync_* rows', () => {

@@ -441,7 +441,7 @@ async function setSettingValue(env: Env, key: string, value: string): Promise<vo
 export async function getAuditLogRetentionDays(env: Env): Promise<number> {
   const raw = await getSettingValue(env, AUDIT_LOG_RETENTION_SETTING_KEY)
   const parsed = raw ? Number.parseInt(raw, 10) : NaN
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_AUDIT_LOG_RETENTION_DAYS
+  return Number.isFinite(parsed) ? Math.max(DEFAULT_AUDIT_LOG_RETENTION_DAYS, parsed) : DEFAULT_AUDIT_LOG_RETENTION_DAYS
 }
 
 // Runs on the scheduled worker tick. Deletes audit_logs rows older than the
