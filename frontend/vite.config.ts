@@ -628,14 +628,12 @@ const routeSharedIconNames = new Set([
   'eye',
   'eye-off',
   'external-link',
-  'facebook',
   'flame',
   'globe',
   'help-circle',
   'image-off',
   'images',
   'info',
-  'instagram',
   'languages',
   'mail',
   'map-pin',
@@ -878,15 +876,16 @@ function manualChunks(id: string): string | undefined {
       // the admin CatalogPage (catalog), so it lives in the shared core chunk.
       || normalized.includes('/src/components/catalog/portalBrowse.ts')
       // BrandIcons.tsx lives under components/shared/ but is only ever imported by
-      // two catalog surfaces (CatalogEditorSurface -> catalog-editor,
-      // PublicCatalogPage -> catalog-public). Left to the generic
+      // catalog surfaces (CatalogEditorSurface -> catalog-editor, PublicCatalogPage
+      // -> catalog-public, CatalogPage -> catalog, CatalogSecondaryTabs,
+      // LegalPages -> catalog-legal). Left to the generic
       // '/src/components/shared/' catch-all further down, it lands in 'app-shared' --
       // and since PublicCatalogPage (catalog-public) statically imports it, that
       // creates a catalog-public -> app-shared back-edge with no corresponding
       // forward edge, which is exactly the class of cycle this file's other
       // "keep it with its only consumers" comments already warn about (observed as
       // `catalog-public -> app-shared -> catalog-public` in a real build). Since
-      // it's shared by two catalog chunks rather than one, put it in
+      // it's shared by several catalog chunks rather than one, put it in
       // 'catalog-public-core' -- the chunk this file already uses for exactly that
       // "shared by multiple catalog surfaces" case (catalogImages/catalogUi/etc.
       // above) -- instead of either individual consumer's chunk.

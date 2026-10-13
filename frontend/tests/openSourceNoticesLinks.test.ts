@@ -21,10 +21,15 @@ function compile(rel: string, resolve: (id: string) => unknown, loader: 'ts' | '
 
 const legalContent = await import('../src/components/catalog/legal/legalContent.ts') as Record<string, any>
 const Icon = () => null
+const brandIcons = compile('../src/components/shared/BrandIcons.tsx', (id) => {
+  if (id === 'react' || id === 'react/jsx-runtime') return require(id)
+  throw new Error(`BrandIcons.tsx imports ${id}, which this harness does not provide`)
+}, 'tsx')
 const legalPages = compile('../src/components/catalog/legal/LegalPages.tsx', (id) => {
   if (id === 'react' || id === 'react/jsx-runtime') return require(id)
   if (id.startsWith('lucide-react/')) return { __esModule: true, default: Icon }
   if (id.endsWith('/legalContent.ts')) return legalContent
+  if (id.endsWith('/BrandIcons.tsx')) return brandIcons
   if (id.endsWith('/documentScrollLock.ts')) return { lockDocumentScroll: () => () => {} }
   throw new Error(`LegalPages.tsx imports ${id}, which this harness does not provide`)
 }, 'tsx')

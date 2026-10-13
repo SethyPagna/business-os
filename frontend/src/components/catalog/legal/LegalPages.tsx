@@ -12,12 +12,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 
-import Facebook from 'lucide-react/dist/esm/icons/facebook.js'
 import Globe from 'lucide-react/dist/esm/icons/globe.js'
-import Instagram from 'lucide-react/dist/esm/icons/instagram.js'
 import Send from 'lucide-react/dist/esm/icons/send.js'
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
+import { FacebookIcon, InstagramIcon } from '../../shared/BrandIcons.tsx'
 import {
   LEGAL_PAGE_ORDER,
   LEGAL_PAGE_SECTIONS,
@@ -96,7 +95,7 @@ const FOOTER_HEADING_CLASS = 'mb-2 flex items-center gap-1.5 text-[11px] font-se
 const FOOTER_LINK_CLASS = 'inline-flex min-h-10 items-center text-sm leading-6 text-slate-700 underline-offset-2 transition hover:text-slate-900 hover:underline dark:text-neutral-200 dark:hover:text-white'
 
 function SocialIcon({ kind }: { kind: string }) {
-  const Icon = kind === 'facebook' ? Facebook : kind === 'instagram' ? Instagram : kind === 'telegram' ? Send : Globe
+  const Icon = kind === 'facebook' ? FacebookIcon : kind === 'instagram' ? InstagramIcon : kind === 'telegram' ? Send : Globe
   return <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
 }
 

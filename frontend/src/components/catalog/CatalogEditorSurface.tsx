@@ -3,10 +3,8 @@ import InfoHint from '../shared/InfoHint'
 import { buildLogoImageStyle } from './logoImageStyle'
 import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
 import Eye from 'lucide-react/dist/esm/icons/eye.js'
-import Facebook from 'lucide-react/dist/esm/icons/facebook.js'
 import Globe from 'lucide-react/dist/esm/icons/globe.js'
 import Images from 'lucide-react/dist/esm/icons/images.js'
-import Instagram from 'lucide-react/dist/esm/icons/instagram.js'
 import PhoneCall from 'lucide-react/dist/esm/icons/phone-call.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Save from 'lucide-react/dist/esm/icons/save.js'
@@ -19,7 +17,7 @@ import { Suspense, useEffect, useMemo, useState, type RefObject } from 'react'
 import { useApp, type AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import { ProductImg } from '../products/shared/primitives'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
-import { MessengerIcon } from '../shared/BrandIcons.tsx'
+import { FacebookIcon, InstagramIcon, MessengerIcon } from '../shared/BrandIcons.tsx'
 import ButtonGuidePopover from '../shared/ButtonGuidePopover'
 import { CatalogPageProvider, useCatalogPageContext } from './CatalogPageContext'
 import ImageField from './CatalogImageField'
@@ -1513,12 +1511,12 @@ function CatalogEditorSurfaceContent() {
                     <input id="portal-website-label" name="customer_portal_website_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_website_label || ''} onChange={(event) => setDraft('customer_portal_website_label', event.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <label htmlFor="portal-facebook" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><Facebook className="h-3.5 w-3.5 text-[#1877F2]" />{ed('web_editor_facebook', 'Facebook', 'Facebook')}</label>
+                    <label htmlFor="portal-facebook" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><FacebookIcon className="h-3.5 w-3.5 text-[#1877F2]" />{ed('web_editor_facebook', 'Facebook', 'Facebook')}</label>
                     <input id="portal-facebook" name="customer_portal_facebook" autoComplete="url" className="input" value={editorDraft.customer_portal_facebook || ''} onChange={(event) => setDraft('customer_portal_facebook', event.target.value)} />
                     <input id="portal-facebook-label" name="customer_portal_facebook_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_facebook_label || ''} onChange={(event) => setDraft('customer_portal_facebook_label', event.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <label htmlFor="portal-instagram" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><Instagram className="h-3.5 w-3.5 text-[#E1306C]" />{ed('web_editor_instagram', 'Instagram', 'Instagram')}</label>
+                    <label htmlFor="portal-instagram" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><InstagramIcon className="h-3.5 w-3.5 text-[#E1306C]" />{ed('web_editor_instagram', 'Instagram', 'Instagram')}</label>
                     <input id="portal-instagram" name="customer_portal_instagram" autoComplete="url" className="input" value={editorDraft.customer_portal_instagram || ''} onChange={(event) => setDraft('customer_portal_instagram', event.target.value)} />
                     <input id="portal-instagram-label" name="customer_portal_instagram_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_instagram_label || ''} onChange={(event) => setDraft('customer_portal_instagram_label', event.target.value)} />
                   </div>
@@ -1569,7 +1567,7 @@ function CatalogEditorSurfaceContent() {
                       entries={[
                         { icon: <MessengerIcon className="h-4 w-4" />, label: ed('web_editor_messenger', 'Messenger', 'Messenger'), description: copy('contactGuideMessenger', 'Username, @username, or full m.me / facebook.com link. Blank uses the Facebook link above.') },
                         { icon: <Send className="h-4 w-4" />, label: ed('web_editor_telegram', 'Telegram', 'Telegram'), description: copy('contactGuideTelegram', 'Username, @username, or full t.me link, including group/channel invites. Blank uses the Telegram link above.') },
-                        { icon: <Instagram className="h-4 w-4" />, label: ed('web_editor_instagram', 'Instagram', 'Instagram'), description: copy('contactGuideInstagram', 'Username, @username, or full instagram.com / ig.me link. Opens a direct message, not the profile. Blank uses the Instagram link above.') },
+                        { icon: <InstagramIcon className="h-4 w-4" />, label: ed('web_editor_instagram', 'Instagram', 'Instagram'), description: copy('contactGuideInstagram', 'Username, @username, or full instagram.com / ig.me link. Opens a direct message, not the profile. Blank uses the Instagram link above.') },
                         { icon: <PhoneCall className="h-4 w-4" />, label: ed('web_editor_call', 'Call', 'ហៅទូរស័ព្ទ'), description: copy('contactGuideCall', 'Phone number to dial. Blank uses your business phone.') },
                       ]}
                     />
@@ -1586,7 +1584,7 @@ function CatalogEditorSurfaceContent() {
                       <input id="portal-contact-telegram-label" name="customer_portal_contact_telegram_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_contact_telegram_label || ''} onChange={(event) => setDraft('customer_portal_contact_telegram_label', event.target.value)} />
                     </div>
                     <div className="space-y-2">
-                      <label htmlFor="portal-contact-instagram" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><Instagram className="h-3.5 w-3.5 text-[#E1306C]" />{ed('web_editor_instagram', 'Instagram', 'Instagram')}</label>
+                      <label htmlFor="portal-contact-instagram" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><InstagramIcon className="h-3.5 w-3.5 text-[#E1306C]" />{ed('web_editor_instagram', 'Instagram', 'Instagram')}</label>
                       <input id="portal-contact-instagram" name="customer_portal_contact_instagram" autoComplete="off" className="input" placeholder="username or instagram.com/username" value={editorDraft.customer_portal_contact_instagram || ''} onChange={(event) => setDraft('customer_portal_contact_instagram', event.target.value)} />
                       <input id="portal-contact-instagram-label" name="customer_portal_contact_instagram_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_contact_instagram_label || ''} onChange={(event) => setDraft('customer_portal_contact_instagram_label', event.target.value)} />
                     </div>

@@ -4,10 +4,8 @@ import { buildLogoImageStyle } from './logoImageStyle'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up.js'
-import Facebook from 'lucide-react/dist/esm/icons/facebook.js'
 import Globe from 'lucide-react/dist/esm/icons/globe.js'
 import HelpCircle from 'lucide-react/dist/esm/icons/help-circle.js'
-import Instagram from 'lucide-react/dist/esm/icons/instagram.js'
 import Mail from 'lucide-react/dist/esm/icons/mail.js'
 import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
 import Phone from 'lucide-react/dist/esm/icons/phone.js'
@@ -17,6 +15,7 @@ import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
 import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
+import { FacebookIcon, InstagramIcon } from '../shared/BrandIcons.tsx'
 import PortalEmbedConsent from './legal/PortalEmbedConsent.tsx'
 import { SectionShell } from './catalogUi'
 import { splitNoTranslateSegments, stripNoTranslateMarkers } from './portalNoTranslate.ts'
@@ -435,9 +434,9 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
               <div className="flex flex-wrap gap-2">
                 {socialLinks.map((item) => {
                   const Icon = item.key === 'facebook'
-                    ? Facebook
+                    ? FacebookIcon
                     : item.key === 'instagram'
-                      ? Instagram
+                      ? InstagramIcon
                       : item.key === 'telegram'
                         ? Send
                         : Globe
