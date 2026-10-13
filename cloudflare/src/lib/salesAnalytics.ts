@@ -1974,7 +1974,7 @@ export async function getSalesTotalsAndPeriodSeries(
   env: Env,
   f: SalesFilters,
   granularity: 'day' | 'week' | 'month',
-): Promise<{ totals: SalesTotals; periodSeries: SalesPeriodRow[]; byPayment: DashboardPaymentRow[]; byBranch: DashboardBranchRow[] }> {
+): Promise<{ totals: SalesTotals; periodSeries: SalesPeriodRow[]; byPayment: DashboardPaymentRow[]; byBranch: DashboardBranchRow[] } & DashboardRankings> {
   const [snapshot, loss] = await Promise.all([
     readSalesReportSnapshot(env, f),
     removalLossesFor(env, f),
@@ -1983,6 +1983,7 @@ export async function getSalesTotalsAndPeriodSeries(
     totals: withRemovalLosses(salesTotalsFromSnapshot(snapshot), loss),
     periodSeries: salesPeriodRowsFromSnapshot(snapshot, granularity),
     ...dashboardSplitsFromSnapshot(snapshot),
+    ...dashboardRankingsFromSnapshot(snapshot),
   }
 }
 
@@ -2010,6 +2011,67 @@ export function dashboardSplitsFromSnapshot(snapshot: SalesReportSnapshot): { by
       branch_id: row.entity_id, branch_name: row.label || 'Unassigned', tx_count: row.tx_count, count: row.tx_count, revenue_usd: row.revenue_usd,
     })),
   }
+}
+
+// The Dashboard's other four rankings -- top customers, busy hours, top products by
+// revenue and by quantity -- and their "view more" lists. They were SQL of their
+// own too (net sale minus refund; the rounding adjustment left out; cents), so for
+// the same rows the Dashboard said 10.004 / 5.004 where the kernel and Reports say
+// 10.0085 / 5 (release-2 refuter, SF-4). Now they come from the SAME verified
+// snapshot and the SAME buckets as Reports, at 4 places, so a ranked row is the
+// Reports row of the same key and the rows add up to the window revenue.
+export interface DashboardCustomerRow {
+  customer_name: string; sale_count: number; gross_revenue_usd: number
+  store_discount_usd: number; membership_discount_usd: number; total_refund_usd: number; net_revenue_usd: number
+}
+export interface DashboardHourRow { hour: number; count: number; revenue_usd: number }
+export interface DashboardProductRow { product_id: number | null; product_name: string; qty_sold: number; revenue_usd: number }
+export interface DashboardRankings {
+  topCustomers: DashboardCustomerRow[]
+  hourlyDist: DashboardHourRow[]
+  topProducts: DashboardProductRow[]
+  topProductsQty: DashboardProductRow[]
+}
+export const DASHBOARD_TOP_ROWS = 20
+
+/** Pure: the four rankings of one verified snapshot. Product names are the sale lines' own; applyLiveProductNames swaps in the current ones. */
+export function dashboardRankingsFromSnapshot(snapshot: SalesReportSnapshot, limit = DASHBOARD_TOP_ROWS): DashboardRankings {
+  const topCustomers = groupedRowsFromSnapshot(snapshot, 'customer').filter((row) => row.tx_count > 0).sort(revenueFirst).slice(0, limit)
+    .map((row) => ({
+      customer_name: row.label, sale_count: row.tx_count, gross_revenue_usd: row.gross_sales_usd,
+      store_discount_usd: row.store_discount_usd, membership_discount_usd: row.membership_discount_usd,
+      // The customer float's "Refunded" line used to read a field the old SQL never selected, so it always showed 0.
+      total_refund_usd: row.refund_usd, net_revenue_usd: row.revenue_usd,
+    }))
+  const hourlyDist = groupedRowsFromSnapshot(snapshot, 'hour').filter((row) => row.tx_count > 0)
+    .map((row) => ({ hour: Number(row.key), count: row.tx_count, revenue_usd: row.revenue_usd })).sort((a, b) => a.hour - b.hour)
+  const { groups } = productRevenueGroups(snapshot)
+  const productRow = (group: ProductRevenueGroup): DashboardProductRow => ({
+    product_id: group.id, product_name: group.name, qty_sold: round2(group.qty), revenue_usd: group.units / MONEY_UNITS,
+  })
+  return {
+    topCustomers, hourlyDist,
+    topProducts: [...groups].sort(byProductRevenue).slice(0, limit).map(productRow),
+    topProductsQty: [...groups].sort(byProductQty).slice(0, limit).map(productRow),
+  }
+}
+
+/** The product rows under their CURRENT names (a renamed or merged product shows its current name; the sale line's name is the fallback). One lookup for every list given. */
+export async function applyLiveProductNames<T extends { product_id: number | null; product_name: string }>(env: Env, lists: T[][]): Promise<T[][]> {
+  const ids = [...new Set(lists.flat().map((row) => row.product_id).filter((id): id is number => id != null))]
+  if (!ids.length) return lists
+  const live = await liveProductNames(env, ids)
+  return lists.map((list) => list.map((row) => ({ ...row, product_name: (row.product_id != null && live.get(row.product_id)) || row.product_name })))
+}
+
+/** The Dashboard "view more" list of one ranking: the same snapshot, the same buckets, just more rows than the card keeps. */
+export async function dashboardInsightRows(
+  env: Env, f: SalesFilters, kind: 'top_customers' | 'top_products' | 'top_products_qty', limit: number,
+): Promise<Array<DashboardCustomerRow | DashboardProductRow>> {
+  const ranked = dashboardRankingsFromSnapshot(await readSalesReportSnapshot(env, f), limit)
+  if (kind === 'top_customers') return ranked.topCustomers
+  const [named] = await applyLiveProductNames(env, [kind === 'top_products_qty' ? ranked.topProductsQty : ranked.topProducts])
+  return named
 }
 
 // The Sales export preview's two splits. Same rule as the Dashboard cards above:
@@ -2048,20 +2110,20 @@ function allocateUnits(total: number, weights: number[]): number[] | null {
   return parts.map((part) => (total < 0 ? -part : part))
 }
 
+type ProductRevenueGroup = { key: string; id: number | null; name: string; qty: number; units: number }
+
 /**
  * Revenue and quantity per product over the recognized sales of the snapshot.
  * Each sale's revenue (net + rounding adjustment - refund, the kernel's one
  * definition) is split across that sale's product lines by their share of the
- * line value. A sale with no line value cannot be split and is kept whole as
- * "Unallocated sales"; its quantities still count. The preview stays bounded:
- * the top products, one "Other products" row for the overflow, and the
- * unallocated row when there is one.
+ * line value. A sale with no line value cannot be split: its revenue comes back
+ * as `unallocated`, its quantities still count. The export preview and the
+ * Dashboard's top-product lists both read this, so they cannot disagree.
  */
-export async function exportProductSplitFromSnapshot(env: Env, snapshot: SalesReportSnapshot): Promise<ExportProductRow[]> {
+function productRevenueGroups(snapshot: SalesReportSnapshot): { groups: ProductRevenueGroup[]; unallocated: number } {
   const itemsBySale = new Map<number, ReportScalarRow[]>()
   for (const item of snapshot.items) { const id = Number(item.sale_id); itemsBySale.set(id, [...(itemsBySale.get(id) || []), item]) }
-  type Group = { id: number | null; name: string; qty: number; units: number }
-  const groups = new Map<string, Group>()
+  const groups = new Map<string, ProductRevenueGroup>()
   let unallocated = 0
   for (const fact of reportSaleFacts(snapshot)) {
     if (!fact.recognized) continue
@@ -2081,28 +2143,49 @@ export async function exportProductSplitFromSnapshot(env: Env, snapshot: SalesRe
     const shares = allocateUnits(units, list.map((line) => line.weight))
     if (!shares) unallocated += units
     list.forEach((line, index) => {
-      const group = groups.get(line.key) || { id: line.id, name: line.name, qty: 0, units: 0 }
+      const group = groups.get(line.key) || { key: line.key, id: line.id, name: line.name, qty: 0, units: 0 }
       group.qty += line.qty
       group.units += shares ? shares[index] : 0
       group.name = line.name || group.name
       groups.set(line.key, group)
     })
   }
-  const ranked = [...groups.values()].sort((a, b) => b.units - a.units || b.qty - a.qty || a.name.localeCompare(b.name) || (a.id ?? 0) - (b.id ?? 0))
+  return { groups: [...groups.values()], unallocated }
+}
+
+const byProductRevenue = (a: ProductRevenueGroup, b: ProductRevenueGroup): number =>
+  b.units - a.units || b.qty - a.qty || a.name.localeCompare(b.name) || (a.id ?? 0) - (b.id ?? 0)
+const byProductQty = (a: ProductRevenueGroup, b: ProductRevenueGroup): number =>
+  b.qty - a.qty || b.units - a.units || a.name.localeCompare(b.name) || (a.id ?? 0) - (b.id ?? 0)
+
+/** Current names of products, one statement per 99 ids. */
+async function liveProductNames(env: Env, ids: number[]): Promise<Map<number, string>> {
+  const live = new Map<number, string>()
+  for (let from = 0; from < ids.length; from += 99) {
+    const slice = ids.slice(from, from + 99)
+    // sql-bound-params: bounded by construction -- sliced to 99 ids per statement, under D1's 100-parameter limit.
+    // (Not routed through the chunk helper on purpose: this module is compiled by tests that copy a fixed
+    // dependency list, and the lookup must stay one statement for any list this module produces today.)
+    const rows = await getDb(env).prepare(`SELECT id, name FROM products WHERE id IN (${slice.map(() => '?').join(',')})`).all<{ id: number; name: string | null }>(slice)
+    for (const row of rows || []) if (row.name) live.set(Number(row.id), String(row.name))
+  }
+  return live
+}
+
+/**
+ * The export preview's product split: the top products, one "Other products" row
+ * for the overflow, and the unallocated row when there is one, so the rows add up
+ * to the window revenue exactly.
+ */
+export async function exportProductSplitFromSnapshot(env: Env, snapshot: SalesReportSnapshot): Promise<ExportProductRow[]> {
+  const { groups, unallocated } = productRevenueGroups(snapshot)
+  const ranked = groups.sort(byProductRevenue)
   const named = ranked.slice(0, unallocated !== 0 ? EXPORT_PRODUCT_ROWS - 1 : EXPORT_PRODUCT_ROWS)
   const rest = ranked.slice(named.length)
   // A renamed or merged product exports under its current name; the sale's own
   // snapshot name is the fallback for a product that no longer exists.
   const ids = named.map((group) => group.id).filter((id): id is number => id != null)
-  const live = new Map<number, string>()
-  if (ids.length) {
-    // sql-bound-params: bounded by construction -- `named` is sliced to at most
-    // EXPORT_PRODUCT_ROWS (99) groups above, one id each, under D1's 100-parameter limit.
-    // (Not chunked on purpose: this module is compiled by tests that copy a fixed
-    // dependency list, and the lookup must stay one statement per request.)
-    const rows = await getDb(env).prepare(`SELECT id, name FROM products WHERE id IN (${ids.map(() => '?').join(',')})`).all<{ id: number; name: string | null }>(ids)
-    for (const row of rows || []) if (row.name) live.set(Number(row.id), String(row.name))
-  }
+  const live = ids.length ? await liveProductNames(env, ids) : new Map<number, string>()
   const rows: ExportProductRow[] = named.map((group) => ({
     product_id: group.id, product_name: (group.id != null && live.get(group.id)) || group.name,
     qty_sold: round2(group.qty), revenue_usd: group.units / MONEY_UNITS,

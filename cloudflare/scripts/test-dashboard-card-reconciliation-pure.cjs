@@ -16,6 +16,8 @@
 //   * the cards sum to the Reports payment / branch buckets exactly,
 //   * the headline (cents) is within half a cent of what the rows sum to,
 //   * the export's by_status and by_product rows sum to the same figure exactly,
+//   * the Dashboard's top customers, busy hours and top products (SF-4, release-2 refuter) are the
+//     Reports customer / hour buckets and the export's product rows, at 4 places,
 //   * and the Dashboard path reads the database no more than getSalesTotals does.
 //
 // Controls: the OLD card SQL is run on the same database and must miss the headline
@@ -210,6 +212,22 @@ async function reconcile(world, { cards = 'new' } = {}) {
   assert.equal(byStatus.find((row) => row.status === 'cancelled')?.revenue ?? 0, 0, 'a voided sale carries no revenue')
   assert.ok(byProduct.every((row) => row.product_name !== 'Unallocated sales' || row.product_id === null))
   assert.ok(byProduct.filter((row) => /^Live P/.test(row.product_name)).length > 0, 'a product exports under its live name')
+
+  // the Dashboard's other rankings, off the same snapshot
+  const reportsCustomer = (await analytics.getSalesGroupedReport({}, f, 'customer', 1000)).rows.filter((row) => row.tx_count > 0)
+  const reportsHour = (await analytics.getSalesGroupedReport({}, f, 'hour', 1000)).rows.filter((row) => row.tx_count > 0)
+  const ranked = analytics.dashboardRankingsFromSnapshot(snapshot, 1000)
+  assert.deepEqual(ranked.topCustomers.map((row) => [row.customer_name, row.sale_count, row.gross_revenue_usd, row.total_refund_usd, row.net_revenue_usd]),
+    reportsCustomer.map((row) => [row.label, row.tx_count, row.gross_sales_usd, row.refund_usd, row.revenue_usd]), 'top customers are the Reports customer buckets, in order')
+  assert.deepEqual(ranked.hourlyDist.map((row) => [row.hour, row.count, row.revenue_usd]),
+    reportsHour.map((row) => [Number(row.key), row.tx_count, row.revenue_usd]), 'busy hours are the Reports hour buckets')
+  assert.equal(sum(ranked.topCustomers, 'net_revenue_usd'), sum(reportsPay, 'revenue_usd'), 'top customers add up to the Reports buckets, 4 places')
+  assert.equal(sum(ranked.hourlyDist, 'revenue_usd'), sum(reportsPay, 'revenue_usd'), 'busy hours add up to the Reports buckets, 4 places')
+  assert.equal(sum(ranked.topProducts, 'revenue_usd'), sum(reportsPay, 'revenue_usd'), 'top products add up to the Reports buckets, 4 places')
+  assert.deepEqual(ranked.topProducts.map((row) => [row.product_id, row.qty_sold, row.revenue_usd]).sort(),
+    byProduct.map((row) => [row.product_id, row.qty_sold, row.revenue_usd]).sort(), 'the Dashboard and the export preview share one product allocation')
+  assert.deepEqual(dashboard.topCustomers, ranked.topCustomers.slice(0, 20), 'the Dashboard path returns the first 20 of the same ranking')
+  assert.deepEqual(dashboard.hourlyDist, ranked.hourlyDist)
   return { headline, byPayment, byBranch, byStatus, byProduct, dashboardStatements, totalsStatements }
 }
 
@@ -261,6 +279,8 @@ async function main() {
       to: 'method: row.label || \'Unknown\', payment_method: row.label || \'Unknown\', count: row.tx_count, revenue_usd: Math.round(row.revenue_usd * 100) / 100,' }] },
     { name: 'product allocation drops its remainder', patches: [{ file: SA, from: 'for (let i = 0; i < left; i += 1) parts[order[i % order.length].index] += 1', to: '' }] },
     { name: 'product revenue without the rounding adjustment', patches: [{ file: SA, from: 'const units = toUnits(fact.net.add(fact.adjustment).subtract(fact.refund))', to: 'const units = toUnits(fact.net.subtract(fact.refund))' }] },
+    { name: 'top customers rounded to cents', patches: [{ file: SA, from: 'total_refund_usd: row.refund_usd, net_revenue_usd: row.revenue_usd,', to: 'total_refund_usd: row.refund_usd, net_revenue_usd: Math.round(row.revenue_usd * 100) / 100,' }] },
+    { name: 'busy hours rounded to cents', patches: [{ file: SA, from: '.map((row) => ({ hour: Number(row.key), count: row.tx_count, revenue_usd: row.revenue_usd }))', to: '.map((row) => ({ hour: Number(row.key), count: row.tx_count, revenue_usd: Math.round(row.revenue_usd * 100) / 100 }))' }] },
     { name: 'status revenue taken from the legacy basis', patches: [{ file: SA, from: 'revenue: exactReportTotals(bucket, snapshot, BUCKET_MONEY_PLACES).revenue_usd,', to: 'revenue: exactReportTotals(bucket, snapshot, 2).revenue_usd,' }] },
   ]
   for (const mutant of mutants) {

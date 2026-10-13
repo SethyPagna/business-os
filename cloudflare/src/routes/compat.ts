@@ -16,11 +16,11 @@ import { readAuditLogPage } from '../lib/auditLogPage'
 import { redactAuditRows } from '../lib/courierCostAccess'
 import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
-import { BUCKET_MONEY_PLACES, CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesTotalsAndPeriodSeries, identifiedCustomerExpr, reportCustomerNameExpr, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr, shiftWindowBound, shiftWindowWhere } from '../lib/salesAnalytics'
+import { BUCKET_MONEY_PLACES, applyLiveProductNames, dashboardInsightRows, getSalesTotals, getSalesTotalsAndPeriodSeries, reportCustomerNameExpr, previousPeriodFilters, shiftWindowBound, shiftWindowWhere } from '../lib/salesAnalytics'
 import { getFamilyStockAlertPage, type FamilyStockAlertState } from '../lib/familyStockStats'
 import { dashboardExpiringProductsSql, loadDashboardStockOverview, type DashboardStockOverviewContext } from '../lib/dashboardStockOverview'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
-import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
+import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { branchHistoryNameSql } from '../lib/stockInSessionsQuery'
@@ -314,35 +314,15 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdm
   const filters = { startDate, endDate, createdFrom, createdTo, branchId: query.branchId || null }
   const analyticsParams = dashboardRangeParams(range, filters.branchId)
   const branchClause = (alias: string) => filters.branchId ? ` AND ${alias}.branch_id = @branchId` : ''
-  const activeSalesClause = (alias: string) => `${dashboardRangeClause(alias, range)} AND ${recognizedExpr(`${alias}.`)}${branchClause(alias)}`
-  // Apportions a sale's net revenue across its lines by each line's share of
-  // subtotal_usd. The > 0 guard avoids a divide-by-zero.
-  //
-  // It used to cost an asymmetry: a sale whose subtotal was never written
-  // contributed 0 to every by-product figure while still appearing in the
-  // by-payment-method and by-branch ones, which read the sale row directly --
-  // which is how the Sep 2-3 import's 22 zero-subtotal receipts hid here. As
-  // of Sep 6 2026 the kernel's valuedSaleExpr holds those receipts out of the
-  // sale-level figures too (netSaleExpr floors at 0 and netRefundExpr caps at
-  // that 0), so both populations now agree at zero and the same 22 receipts
-  // are reported as unvalued_tx_count instead of silently split.
-  const attributedLineRevenue = `CASE
-    WHEN COALESCE(s.subtotal_usd, 0) > 0
-      THEN COALESCE(si.total_usd, 0) / s.subtotal_usd * (${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')})
-    ELSE 0
-  END`
   const [
-    { totals, periodSeries: periodData, byPayment, byBranch },
+    { totals, periodSeries: periodData, byPayment, byBranch, topCustomers, hourlyDist, topProducts: rankedProducts, topProductsQty: rankedProductsQty },
     prevTotals,
     periodReturns,
     periodSupplierReturns,
-    topProducts,
-    topProductsQty,
-    topCustomers,
-    hourlyDist,
   ] = await Promise.all([
-    // The payment-method and branch cards are two more views of that one snapshot
-    // (kernel buckets, 4 places) -- not their own SQL, which left every sale's
+    // The payment-method and branch cards, the top customers, top products (by
+    // revenue and by quantity) and busy hours are more views of that one snapshot
+    // (kernel buckets, 4 places) -- not SQL of their own, which left every sale's
     // rounding adjustment out and disagreed with the headline and with Reports.
     //
     // P11-14: totals and periodData are the SAME window read twice through
@@ -377,64 +357,9 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdm
         AND COALESCE(r.return_scope, 'customer') = 'supplier'
         AND COALESCE(r.status, 'completed') <> 'cancelled'${branchClause('r')}
     `).get(analyticsParams),
-    // Grouped by product_id (COALESCE(si.product_id, 0), falling back to a
-    // normalized name key only for the NULL-id/no-link legacy rows) -- NOT
-    // by (product_id, product_name). A product merge (migration 0165+) keeps
-    // one keeper id but leaves old sale_items rows carrying the pre-merge
-    // product_name snapshot, so grouping by the pair split one merged
-    // product's history back into N rows here, one per historical name. The
-    // display name is read live from `products` (COALESCE(MAX(p.name),
-    // MAX(si.product_name))) so a renamed/merged product shows its current
-    // name; the snapshot is only a fallback for a deleted product_id.
-    // Same id-only grouping shape as lib/salesAnalytics.ts's top-products
-    // kernel (line ~3049), just this endpoint's own revenue-attribution math.
-    db.prepare(`
-      SELECT si.product_id, COALESCE(MAX(p.name), MAX(si.product_name)) AS product_name, SUM(si.quantity) AS qty_sold,
-             COALESCE(SUM(${attributedLineRevenue}), 0) AS revenue_usd
-      FROM sale_items si
-      JOIN sales s ON s.id = si.sale_id
-      LEFT JOIN products p ON p.id = si.product_id
-      ${CUSTOMER_REFUND_JOIN}s.id
-      WHERE ${activeSalesClause('s')}
-      GROUP BY COALESCE(si.product_id, 0), CASE WHEN si.product_id IS NULL THEN lower(trim(COALESCE(si.product_name, ''))) ELSE '' END
-      ORDER BY revenue_usd DESC
-      LIMIT 20
-    `).all(analyticsParams),
-    db.prepare(`
-      SELECT si.product_id, COALESCE(MAX(p.name), MAX(si.product_name)) AS product_name, SUM(si.quantity) AS qty_sold,
-             COALESCE(SUM(${attributedLineRevenue}), 0) AS revenue_usd
-      FROM sale_items si
-      JOIN sales s ON s.id = si.sale_id
-      LEFT JOIN products p ON p.id = si.product_id
-      ${CUSTOMER_REFUND_JOIN}s.id
-      WHERE ${activeSalesClause('s')}
-      GROUP BY COALESCE(si.product_id, 0), CASE WHEN si.product_id IS NULL THEN lower(trim(COALESCE(si.product_name, ''))) ELSE '' END
-      ORDER BY qty_sold DESC
-      LIMIT 20
-    `).all(analyticsParams),
-    db.prepare(`
-      SELECT MAX(CASE WHEN ${identifiedCustomerExpr('s.')} IS NULL THEN '' ELSE ${reportCustomerNameExpr('s.')} END) AS customer_name, COUNT(*) AS sale_count,
-             COALESCE(SUM(s.subtotal_usd), 0) AS gross_revenue_usd,
-             COALESCE(SUM(s.discount_usd), 0) AS store_discount_usd,
-             COALESCE(SUM(s.membership_discount_usd), 0) AS membership_discount_usd,
-             COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS net_revenue_usd
-      FROM sales s
-      ${CUSTOMER_REFUND_JOIN}s.id
-      WHERE ${activeSalesClause('s')}
-      GROUP BY ${identifiedCustomerExpr('s.')}
-      ORDER BY net_revenue_usd DESC
-      LIMIT 20
-    `).all(analyticsParams),
-    db.prepare(`
-      SELECT CAST(${localHourExpr('s.created_at')} AS INTEGER) AS hour, COUNT(*) AS count,
-             COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS revenue_usd
-      FROM sales s
-      ${CUSTOMER_REFUND_JOIN}s.id
-      WHERE ${activeSalesClause('s')}
-      GROUP BY CAST(${localHourExpr('s.created_at')} AS INTEGER)
-      ORDER BY hour ASC
-    `).all(analyticsParams),
   ])
+  // Products show under their CURRENT name (a merged or renamed product), one lookup for both lists.
+  const [topProducts, topProductsQty] = await applyLiveProductNames(env, [rankedProducts || [], rankedProductsQty || []])
   return {
     // cost_usd / profit_usd and the removal-loss pair are the SAME admin-only
     // money reports.ts's gateTotals already gates -- reused rather than
@@ -498,49 +423,16 @@ async function dashboardInsightList(env: Env, query: Record<string, string>, kin
     return { items: rows || [], truncated: (rows || []).length >= DASHBOARD_INSIGHT_LIST_LIMIT }
   }
 
-  // top_products / top_products_qty / top_customers: same recognized-sales
-  // window dashboardAnalytics uses for these three cards. The GROUP BY
-  // already computes every group before the preview's LIMIT 20 truncates it,
-  // so raising the limit here costs nothing extra -- it is the SAME query,
-  // just kept instead of cut.
-  const analyticsParams = dashboardRangeParams(range, branchId)
-  const branchClause = branchId ? ' AND s.branch_id = @branchId' : ''
-  const activeSalesClause = `${dashboardRangeClause('s', range)} AND ${recognizedExpr('s.')}${branchClause}`
-  const attributedLineRevenue = `CASE
-    WHEN COALESCE(s.subtotal_usd, 0) > 0
-      THEN COALESCE(si.total_usd, 0) / s.subtotal_usd * (${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')})
-    ELSE 0
-  END`
-  if (kind === 'top_customers') {
-    const rows = await db.prepare(`
-      SELECT MAX(CASE WHEN ${identifiedCustomerExpr('s.')} IS NULL THEN '' ELSE ${reportCustomerNameExpr('s.')} END) AS customer_name, COUNT(*) AS sale_count,
-             COALESCE(SUM(s.subtotal_usd), 0) AS gross_revenue_usd,
-             COALESCE(SUM(s.discount_usd), 0) AS store_discount_usd,
-             COALESCE(SUM(s.membership_discount_usd), 0) AS membership_discount_usd,
-             COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS net_revenue_usd
-      FROM sales s
-      ${CUSTOMER_REFUND_JOIN}s.id
-      WHERE ${activeSalesClause}
-      GROUP BY ${identifiedCustomerExpr('s.')}
-      ORDER BY net_revenue_usd DESC
-      LIMIT ${DASHBOARD_INSIGHT_LIST_LIMIT}
-    `).all(analyticsParams)
-    return { items: rows || [], truncated: (rows || []).length >= DASHBOARD_INSIGHT_LIST_LIMIT }
-  }
-  const orderBy = kind === 'top_products_qty' ? 'qty_sold DESC' : 'revenue_usd DESC'
-  const rows = await db.prepare(`
-    SELECT si.product_id, COALESCE(MAX(p.name), MAX(si.product_name)) AS product_name, SUM(si.quantity) AS qty_sold,
-           COALESCE(SUM(${attributedLineRevenue}), 0) AS revenue_usd
-    FROM sale_items si
-    JOIN sales s ON s.id = si.sale_id
-    LEFT JOIN products p ON p.id = si.product_id
-    ${CUSTOMER_REFUND_JOIN}s.id
-    WHERE ${activeSalesClause}
-    GROUP BY COALESCE(si.product_id, 0), CASE WHEN si.product_id IS NULL THEN lower(trim(COALESCE(si.product_name, ''))) ELSE '' END
-    ORDER BY ${orderBy}
-    LIMIT ${DASHBOARD_INSIGHT_LIST_LIMIT}
-  `).all(analyticsParams)
-  return { items: rows || [], truncated: (rows || []).length >= DASHBOARD_INSIGHT_LIST_LIMIT }
+  // top_products / top_products_qty / top_customers: the same verified snapshot
+  // and the same kernel rankings dashboardAnalytics reads for these three cards,
+  // just with more rows kept, so the list can never disagree with its card.
+  const rows = await dashboardInsightRows(
+    env,
+    { startDate: range.startDate, endDate: range.endDate, createdFrom: range.createdFrom, createdTo: range.createdTo, branchId },
+    kind,
+    DASHBOARD_INSIGHT_LIST_LIMIT,
+  )
+  return { items: rows, truncated: rows.length >= DASHBOARD_INSIGHT_LIST_LIMIT }
 }
 
 // The shared stock overview's cache key lives on this request's origin, and

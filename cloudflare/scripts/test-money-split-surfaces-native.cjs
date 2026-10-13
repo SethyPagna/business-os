@@ -1,13 +1,17 @@
 'use strict'
-// The Dashboard's payment-method and branch cards and the Sales export preview's
-// by_status / by_product splits, mounted: the whole Worker on workerd + D1, sales and
+// The Dashboard's payment-method and branch cards, its top customers / busy hours / top
+// products (and their "view more" lists) and the Sales export preview's by_status /
+// by_product splits, mounted: the whole Worker on workerd + D1, sales and
 // customer returns written through the real routes, then read through
 //   GET /api/analytics            (Dashboard)
+//   GET /api/dashboard/insight-list (Dashboard "view more" lists)
 //   GET /api/reports/grouped      (Reports buckets, by payment method and by branch)
 //   GET /api/reports/overview     (Reports headline)
 //   GET /api/sales/export         (Sales export preview)
 //
-// One revenue definition, sliced (Sonnet area review of release 2, finding 4):
+// One revenue definition, sliced (Sonnet area review of release 2, finding 4; the refuter's
+// SF-4 for customers / hours / products -- its probe fixture is two sales of 10.004 / 5.004 that
+// the kernel and Reports count as 10.0085 / 5 and the Dashboard SQL counted as 10.004 / 5.004):
 //   * every split row carries 4 decimals and equals the Reports bucket of its key,
 //   * the rows of every split add up to the Reports buckets EXACTLY (4 places) and to the
 //     headline within half a cent, and the headline itself stays in cents,
@@ -17,7 +21,7 @@
 // two $29.9955 sales are refunded in part and in full.
 //
 // Budget: the Dashboard and export reads must not cost more D1 statements than they did
-// (BASE_STATEMENTS, measured on dde1ba879 with this fixture).
+// (BASE_STATEMENTS, measured on the commit before SF-4 with this fixture).
 //
 // Run (from cloudflare/):  node scripts/test-money-split-surfaces-native.cjs
 //   --base=<commit>   the red-on-the-base run: every src file that differs from that commit is bundled as
@@ -26,8 +30,8 @@ const assert = require('node:assert/strict')
 const H = require('./harness/al_money_native.cjs')
 
 const BASE = (process.argv.slice(2).find(arg => arg.startsWith('--base=')) || '').slice('--base='.length)
-// Statements per request on dde1ba879 for this fixture (see the lane report).
-const BASE_STATEMENTS = { analytics: 39, export: 22 }
+// Statements per request before SF-4 (c329b9e29) for this fixture (see the lane report).
+const BASE_STATEMENTS = { analytics: 37, export: 21 }
 
 const day = (date, hourUtc = 3) => `${date}T${String(hourUtc).padStart(2, '0')}:00:00.000Z`
 const DAY = '2026-10-05'
@@ -44,19 +48,23 @@ async function main() {
   try {
     await H.seedProduct(h, 7100, 'MSS Serum', 10, 1000, 1)
     await H.seedProduct(h, 7101, 'MSS Cream', 10, 1000, 1)
+    const ALICE = 9001, BOB = 9002
+    for (const [id, name, phone] of [[ALICE, 'MSS Alice', '0129001'], [BOB, 'MSS Bob', '0129002']]) {
+      await h.db.prepare('INSERT INTO customers(id,name,phone) VALUES(?,?,?)').bind(id, name, phone).run()
+    }
 
     // ---- ten $9.9955 sales paid $10.00: a +$0.0045 rounding adjustment each ----
-    const priced = (key, method) => H.createSale(h, { key, createdAt: day(DAY), label: `sale ${key}`,
+    const priced = (key, method, customerId, hour) => H.createSale(h, { key, createdAt: day(DAY, hour), customerId, label: `sale ${key}`,
       lines: [{ productId: 7100, quantity: 1, manualPrice: 10, fixedDiscount: 0.0045,
         quote: { gross_usd: 10, product_discount_usd: 0, manual_discount_usd: 0.0045, total_usd: 9.9955, total_khr: 39982 } }],
       paymentDetails: [{ method, amount_usd: 10, amount_khr: 0 }] })
-    for (let i = 1; i <= 6; i++) assert.equal((await priced(`mss-cash-${i}`, 'Cash')).status, 200)
-    for (let i = 1; i <= 4; i++) assert.equal((await priced(`mss-aba-${i}`, 'ABA')).status, 200)
+    for (let i = 1; i <= 6; i++) assert.equal((await priced(`mss-cash-${i}`, 'Cash', ALICE, 3)).status, 200)
+    for (let i = 1; i <= 4; i++) assert.equal((await priced(`mss-aba-${i}`, 'ABA', BOB, 8)).status, 200)
 
     // ---- two 3 x $10 sales with a $0.0045 discount (total $29.9955, paid $30): one refunded in part, one in full ----
     const refunded = []
-    for (const key of ['mss-part', 'mss-full']) {
-      const sale = await H.createSale(h, { key, createdAt: day(DAY), label: `sale ${key}`,
+    for (const [key, customerId] of [['mss-part', ALICE], ['mss-full', BOB]]) {
+      const sale = await H.createSale(h, { key, createdAt: day(DAY, 3), customerId, label: `sale ${key}`,
         lines: [{ productId: 7101, quantity: 3, manualPrice: 10, fixedDiscount: 0.0045, quote: { gross_usd: 30, product_discount_usd: 0, manual_discount_usd: 0.0045, total_usd: 29.9955, total_khr: 119982 } }],
         paymentDetails: [{ method: 'Cash', amount_usd: 30, amount_khr: 0 }] })
       assert.equal(sale.status, 200, JSON.stringify(sale.body).slice(0, 300))
@@ -69,7 +77,7 @@ async function main() {
     }
 
     // ---- a delivery sale with a customer-paid fee ----
-    const delivery = await H.createSale(h, { key: 'mss-delivery', createdAt: day(DAY), label: 'sale mss-delivery',
+    const delivery = await H.createSale(h, { key: 'mss-delivery', createdAt: day(DAY, 9), label: 'sale mss-delivery',
       lines: [{ productId: 7100, quantity: 1, quote: { gross_usd: 10, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 10, total_khr: 40000 } }],
       paymentDetails: [{ method: 'ABA', amount_usd: 11.5, amount_khr: 0 }],
       extra: { is_delivery: true, delivery_fee_usd: 1.5, delivery_fee_paid_by: 'customer', delivery_actual_cost_usd: 1 } })
@@ -88,7 +96,14 @@ async function main() {
     const reportsPay = (await grouped('payment_method')).rows.filter(row => row.tx_count > 0)
     const reportsBranch = (await grouped('branch')).rows.filter(row => row.tx_count > 0)
     const exported = await get(`/api/sales/export?${RANGE}`, 'sales export')
-    const { byPayment, byBranch, totals } = analytics.body
+    const reportsCustomer = (await grouped('customer')).rows.filter(row => row.tx_count > 0)
+    const reportsHour = (await grouped('hour')).rows.filter(row => row.tx_count > 0)
+    const listStatements = {}
+    const list = async insight => { const res = await get(`/api/dashboard/insight-list?${RANGE}&insight=${insight}`, `dashboard list ${insight}`); listStatements[insight] = res.statements; return res.body }
+    const insightCustomers = await list('top_customers')
+    const insightProducts = await list('top_products')
+    const insightQty = await list('top_products_qty')
+    const { byPayment, byBranch, totals, topCustomers, hourlyDist, topProducts, topProductsQty } = analytics.body
     const { by_status: byStatus, by_product: byProduct, summary } = exported.body
     const headline = overview.revenue_usd
 
@@ -97,6 +112,10 @@ async function main() {
     console.log(`INFO Reports payment buckets ${JSON.stringify(reportsPay.map(row => [row.label, row.tx_count, row.revenue_usd]))}`)
     console.log(`INFO branch cards ${JSON.stringify(byBranch)} | by_status ${JSON.stringify(byStatus)}`)
     console.log(`INFO by_product ${JSON.stringify(byProduct)}`)
+    console.log(`INFO top customers ${JSON.stringify(topCustomers)}`)
+    console.log(`INFO Reports customer buckets ${JSON.stringify(reportsCustomer.map(row => [row.label, row.tx_count, row.revenue_usd]))}`)
+    console.log(`INFO busy hours ${JSON.stringify(hourlyDist)} | Reports hour buckets ${JSON.stringify(reportsHour.map(row => [row.key, row.tx_count, row.revenue_usd]))}`)
+    console.log(`INFO top products ${JSON.stringify(topProducts)} | by quantity ${JSON.stringify(topProductsQty)}`)
 
     r.check('control: the fixture exercises 4 decimals and a rounding adjustment', () => {
       assert.ok(reportsPay.some(row => places(row.revenue_usd) >= 3), `no Reports payment bucket carries more than cents: ${JSON.stringify(reportsPay.map(row => row.revenue_usd))}`)
@@ -134,8 +153,32 @@ async function main() {
       assert.equal(cream.qty_sold, 6)
       assert.ok(places(cream.revenue_usd) >= 3, `the refunded product's revenue keeps its 4 places: ${cream.revenue_usd}`)
     })
+    r.check('the top customers are the Reports customer buckets, row for row, 4 places, in revenue order', () => {
+      assert.ok(topCustomers.length >= 3, 'Alice, Bob and the walk-in')
+      assert.deepEqual(topCustomers.map(row => [row.customer_name, row.sale_count, row.gross_revenue_usd, row.store_discount_usd, row.membership_discount_usd, row.total_refund_usd, row.net_revenue_usd]),
+        reportsCustomer.map(row => [row.label, row.tx_count, row.gross_sales_usd, row.store_discount_usd, row.membership_discount_usd, row.refund_usd, row.revenue_usd]))
+      assert.ok(topCustomers.some(row => row.total_refund_usd > 0), 'the refunded customers show their refund (it used to read 0 on this card)')
+      assert.equal(sum(topCustomers, 'net_revenue_usd'), sum(reportsPay, 'revenue_usd'))
+    })
+    r.check('the busy hours are the Reports hour buckets, row for row, 4 places', () => {
+      assert.deepEqual(hourlyDist.map(row => [row.hour, row.count, row.revenue_usd]), reportsHour.map(row => [Number(row.key), row.tx_count, row.revenue_usd]))
+      assert.deepEqual(hourlyDist.map(row => row.hour), [10, 15, 16], 'three business hours (UTC+7)')
+      assert.equal(sum(hourlyDist, 'revenue_usd'), sum(reportsPay, 'revenue_usd'))
+    })
+    r.check('the top products are the export preview product rows (one allocation) and add up to the Reports buckets', () => {
+      const key = rows => rows.map(row => JSON.stringify([row.product_id, row.product_name, row.qty_sold, row.revenue_usd])).sort()
+      assert.deepEqual(key(topProducts), key(byProduct))
+      assert.equal(sum(topProducts, 'revenue_usd'), sum(reportsPay, 'revenue_usd'))
+      assert.deepEqual(topProductsQty.map(row => row.product_name), ['MSS Serum', 'MSS Cream'])
+    })
+    r.check('the "view more" lists are the cards\' rows: same snapshot, same buckets', () => {
+      assert.deepEqual(insightCustomers.items, topCustomers)
+      assert.deepEqual(insightProducts.items, topProducts)
+      assert.deepEqual(insightQty.items, topProductsQty)
+      assert.equal(insightCustomers.truncated, false)
+    })
     r.check('the export preview and the Dashboard read no more D1 statements than they did', () => {
-      console.log(`D1 /api/analytics ${analytics.statements} statements (base ${BASE_STATEMENTS.analytics}); /api/sales/export ${exported.statements} (base ${BASE_STATEMENTS.export})`)
+      console.log(`D1 /api/analytics ${analytics.statements} statements (before ${BASE_STATEMENTS.analytics}); /api/sales/export ${exported.statements} (before ${BASE_STATEMENTS.export}); view-more lists ${JSON.stringify(listStatements)}`)
       assert.ok(analytics.statements <= BASE_STATEMENTS.analytics, `${analytics.statements} > ${BASE_STATEMENTS.analytics}`)
       assert.ok(exported.statements <= BASE_STATEMENTS.export, `${exported.statements} > ${BASE_STATEMENTS.export}`)
     })

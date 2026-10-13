@@ -26,9 +26,21 @@ test('control: formatUsd4 keeps the four places a cents formatter would drop', (
 
 test('Dashboard: the payment and branch cards, their detail rows and the branch bars format at 4 places', () => {
   assert.match(dashboard, /const fmtSplitUsd = useCallback\(\(value: unknown\): string => formatUsd4\(Number\(value\) \|\| 0, usdSymbol\), \[usdSymbol\]\)/)
-  assert.equal((dashboard.match(/fmtUSD=\{fmtSplitUsd\}/g) || []).length, 2, 'both card components get the split formatter')
+  assert.equal((dashboard.match(/fmtUSD=\{fmtSplitUsd\}/g) || []).length, 3, 'the payment, branch and busy-hours cards get the split formatter')
   assert.match(dashboard, /label: translateOr\('revenue', 'Revenue'\), value: fmtSplitUsd\(branch\.revenue_usd \|\| 0\)/)
   assert.match(dashboard, /label: translateOr\('revenue', 'Revenue'\), value: fmtSplitUsd\(payment\.revenue_usd \|\| 0\)/)
+})
+
+test('Dashboard: top products, top customers and busy hours (cards, view-more lists, detail floats) format at 4 places', () => {
+  assert.match(dashboard, /fmtSplitUsd\(hourStat\.revenue_usd \|\| 0\)/)
+  assert.match(dashboard, /fmtSplitUsd\(hour\.revenue_usd\)/)
+  assert.equal((dashboard.match(/: fmtSplitUsd\(p\.revenue_usd\)\}/g) || []).length, 2, 'top products: the card and the view-more list')
+  assert.equal((dashboard.match(/\{fmtSplitUsd\(c\.net_revenue_usd \|\| 0\)\}/g) || []).length, 2, 'top customers: the card and the view-more list')
+  for (const field of ['gross_revenue_usd', 'store_discount_usd', 'membership_discount_usd', 'total_refund_usd', 'net_revenue_usd']) {
+    assert.match(dashboard, new RegExp(`fmtSplitUsd\\(customerDetail\\.${field}\\|\\|0\\)`), `customer detail ${field}`)
+  }
+  assert.match(dashboard, /fmtSplitUsd\(productDetail\.revenue_usd\|\|0\)/)
+  assert.doesNotMatch(dashboard, /fmtUSD\((?:hourStat\.revenue_usd|p\.revenue_usd|c\.net_revenue_usd)/, 'no ranked revenue is still formatted to cents')
 })
 
 test('Dashboard: the headline KPI cards keep cents', () => {
@@ -42,6 +54,10 @@ test('Dashboard CSV: payment and branch revenue export at 4 places, not as a rou
   assert.match(dashboardExport, /Branch: b\.branch_name \|\| '',\n\s+Tx: b\.count \|\| 0,\n\s+Revenue: splitCsv\(b\.revenue_usd\)/)
   assert.doesNotMatch(dashboardExport, /Revenue: priceCsv\(p\.revenue_usd\)/)
   assert.doesNotMatch(dashboardExport, /Revenue: priceCsv\(b\.revenue_usd\)/)
+  assert.match(dashboardExport, /Revenue_USD: splitCsv\(p\.revenue_usd\)/, 'top products')
+  for (const [column, field] of [['Gross', 'gross_revenue_usd'], ['Store_Discounts', 'store_discount_usd'], ['Membership_Discounts', 'membership_discount_usd'], ['Returns', 'total_refund_usd'], ['Net', 'net_revenue_usd']]) {
+    assert.match(dashboardExport, new RegExp(`${column}: splitCsv\\(c\\.${field}\\)`), `top customers ${column}`)
+  }
 })
 
 test('Sales export preview: the status and product rows format at 4 places, the summary figures keep cents', () => {

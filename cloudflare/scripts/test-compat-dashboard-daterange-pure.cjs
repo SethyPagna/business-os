@@ -237,7 +237,13 @@ const NEW_TODAY = `date(created_at, '+7 hours') = date('now', '+7 hours') AND cr
   // duplicate.
   check('compat.ts scopes dashboard summary sales and returns through the selected local-date range',
     (src.match(/dashboardRangeClause\('(sales|returns)', range\)/g) || []).length >= 3)
-  check('compat.ts buckets hour-of-day in local time', /localHourExpr\('s\.created_at'\)/.test(src))
+  // Busy hours are the kernel's 'hour' grouping of the dashboard's one snapshot (SF-4, 13 Oct 2026),
+  // which shifts the stored instant to business time (UTC+7) before taking the hour; compat.ts keeps no hour SQL.
+  const kernelSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'salesAnalytics.ts'), 'utf8')
+  check('compat.ts takes busy hours from the kernel snapshot, which buckets hour-of-day in business time',
+    /hourlyDist/.test(src) && !/localHourExpr/.test(src)
+      && /const local = new Date\(new Date\(.*\)\.getTime\(\) \+ 7 \* 3_600_000\)/.test(kernelSrc)
+      && /if \(groupBy === 'hour'\) \{ const key = String\(local\.getUTCHours\(\)\)\.padStart\(2, '0'\)/.test(kernelSrc))
   // Alert scope lock -- see the "Alert scope" block above for the behavior.
   check('compat.ts no longer scopes any dashboard card to products sold in the range',
     !/productInRangeClause/.test(src) && !/dashboard_si/.test(src))
@@ -272,8 +278,11 @@ const NEW_TODAY = `date(created_at, '+7 hours') = date('now', '+7 hours') AND cr
   check('compat.ts derives recent-sale item counts from canonical sale_items rows',
     /SUM\(quantity\), 0\) FROM sale_items WHERE sale_id = sales\.id/.test(src)
     && /item_count: num\(\(sale as Record<string, unknown>\)\.item_count\)/.test(src))
-  check('compat.ts breakdowns share the canonical recognized net-sale formula',
-    /recognizedExpr\(`\$\{alias\}\.`\)/.test(src) && /netSaleExpr\('s\.'\)/.test(src) && /CUSTOMER_REFUND_JOIN/.test(src))
+  // Every revenue breakdown (payment, branch, customers, hours, products and their view-more lists) is a view of the
+  // kernel's verified snapshot; compat.ts keeps no net-sale SQL of its own (release-2 refuter SF-4, 13 Oct 2026).
+  check('compat.ts breakdowns come from the canonical kernel, with no net-sale SQL of their own',
+    /getSalesTotalsAndPeriodSeries\(env, filters, granularity/.test(src) && /dashboardInsightRows\(/.test(src) && /applyLiveProductNames\(/.test(src)
+      && !/netSaleExpr|netRefundExpr|CUSTOMER_REFUND_JOIN|attributedLineRevenue/.test(src))
   // The default window is the business day itself, matching every list page
   // (user, 2026-09-03) -- not a rolling seven days, not all history.
   check('compat.ts default range is today, the business day',

@@ -1549,7 +1549,7 @@ export default function Dashboard() {
         { label: translateOr('time_window', 'Time window'), value: `${String(hourStat.hour).padStart(2, '0')}:00 - ${String((Number(hourStat.hour) + 1) % 24).padStart(2, '0')}:00` },
         { label: translateOr('local_time', 'Local time'), value: formatDashboardHourLabel(hourStat.hour) },
         { label: translateOr('transactions', 'Transactions'), value: Number(hourStat.count || 0) },
-        { label: translateOr('revenue', 'Revenue'), value: fmtUSD(hourStat.revenue_usd || 0) },
+        { label: translateOr('revenue', 'Revenue'), value: fmtSplitUsd(hourStat.revenue_usd || 0) },
         rank ? { label: translateOr('rank', 'Rank'), value: `#${rank}` } : null,
       ].filter(Boolean) as Array<{ label: ReactNode; value: ReactNode }>,
     })
@@ -2224,7 +2224,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
           analyticsError={analyticsError}
           t={t}
           translateOr={translateOr}
-          fmtUSD={fmtUSD}
+          fmtUSD={fmtSplitUsd}
           onOpenHour={openHourDetail}
           onViewMore={() => setBestHourListOpen(true)}
         />
@@ -2284,7 +2284,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
                             <span className="text-gray-700 dark:text-gray-300 detail-scroll-text max-w-32 sm:max-w-48 lg:max-w-72 xl:max-w-96">{p.product_name}</span>
                           </div>
                           <span className="font-medium text-gray-900 dark:text-white">
-                            {topMode==='qty' ? `${p.qty_sold} ${t('qty_sold')}` : fmtUSD(p.revenue_usd)}
+                            {topMode==='qty' ? `${p.qty_sold} ${t('qty_sold')}` : fmtSplitUsd(p.revenue_usd)}
                           </span>
                         </div>
                         <div className="h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden ml-5">
@@ -2335,7 +2335,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
                                       <span className="text-gray-400 w-4 text-right">{i+1}.</span>
                                       <span className="text-gray-700 dark:text-gray-300 detail-scroll-text max-w-36">{c.customer_name || t('walk_in') || 'General'}</span>
                                     </div>
-                                    <span className="font-medium text-green-700 dark:text-green-400">{fmtUSD(c.net_revenue_usd || 0)}</span>
+                                    <span className="font-medium text-green-700 dark:text-green-400">{fmtSplitUsd(c.net_revenue_usd || 0)}</span>
                                   </div>
                                   <div className="h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden ml-5">
                                     <div className="h-full bg-green-500 rounded-full" style={{ width:`${pct}%` }} />
@@ -2591,7 +2591,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
             >
               <div className="min-w-0"><span className="text-gray-400">{i + 1}.</span> <span className="text-sm text-gray-700 dark:text-gray-300">{p.product_name}</span></div>
               <div className="shrink-0 text-right text-sm font-semibold text-gray-900 dark:text-white">
-                {topMode === 'qty' ? `${p.qty_sold} ${t('qty_sold')}` : fmtUSD(p.revenue_usd)}
+                {topMode === 'qty' ? `${p.qty_sold} ${t('qty_sold')}` : fmtSplitUsd(p.revenue_usd)}
               </div>
             </button>
           )}
@@ -2617,7 +2617,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
               onClick={() => { setTopCustomersListOpen(false); setCustomerDetail({ ...c, rank: i + 1 }) }}
             >
               <div className="min-w-0"><span className="text-gray-400">{i + 1}.</span> <span className="text-sm text-gray-700 dark:text-gray-300">{c.customer_name || t('walk_in') || 'General'}</span></div>
-              <div className="shrink-0 text-sm font-semibold text-green-700 dark:text-green-400">{fmtUSD(c.net_revenue_usd || 0)}</div>
+              <div className="shrink-0 text-sm font-semibold text-green-700 dark:text-green-400">{fmtSplitUsd(c.net_revenue_usd || 0)}</div>
             </button>
           )}
         />
@@ -2683,7 +2683,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
             onClick={() => { setBestHourListOpen(false); openHourDetail(hour, i + 1) }}
           >
             <div className="min-w-0 text-sm text-gray-700 dark:text-gray-300">{`#${i + 1} ${formatDashboardHourLabel(hour.hour)}`}</div>
-            <div className="shrink-0 text-right"><div className="text-sm font-semibold text-gray-900 dark:text-white">{hour.count} {t('sale')}{hour.count !== 1 ? 's' : ''}</div><div className="text-xs text-green-600 dark:text-green-400">{fmtUSD(hour.revenue_usd)}</div></div>
+            <div className="shrink-0 text-right"><div className="text-sm font-semibold text-gray-900 dark:text-white">{hour.count} {t('sale')}{hour.count !== 1 ? 's' : ''}</div><div className="text-xs text-green-600 dark:text-green-400">{fmtSplitUsd(hour.revenue_usd)}</div></div>
           </button>
         ))}
       </DashboardListModal>
@@ -2787,7 +2787,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
                       ]
                     : [
                         { label: t('qty_sold'),  value: productDetail.qty_sold||0, cls:'text-blue-600', bg:'bg-blue-50 dark:bg-blue-900/20' },
-                        { label: translateOr('revenue', 'Revenue'), value: fmtUSD(productDetail.revenue_usd||0), cls:'text-green-600', bg:'bg-green-50 dark:bg-green-900/20' },
+                        { label: translateOr('revenue', 'Revenue'), value: fmtSplitUsd(productDetail.revenue_usd||0), cls:'text-green-600', bg:'bg-green-50 dark:bg-green-900/20' },
                       ]
                 ).map(item => (
                   <div key={item.label} className={`${item.bg} rounded-xl p-3 text-center`}>
@@ -2843,11 +2843,11 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
               <div className="grid grid-cols-2 gap-2">
                 {[
                   { label: t('total_sales'),   value: customerDetail.sale_count,                     cls:'text-blue-600',   bg:'bg-blue-50 dark:bg-blue-900/20' },
-                  { label: t('gross_revenue'), value: fmtUSD(customerDetail.gross_revenue_usd||0),   cls:'text-purple-600', bg:'bg-purple-50 dark:bg-purple-900/20' },
-                  { label: t('store_discounts') || 'Store discounts', value: fmtUSD(customerDetail.store_discount_usd||0), cls:'text-amber-600', bg:'bg-amber-50 dark:bg-amber-900/20' },
-                  { label: t('membership_discounts') || 'Membership discounts', value: fmtUSD(customerDetail.membership_discount_usd||0), cls:'text-emerald-600', bg:'bg-emerald-50 dark:bg-emerald-900/20' },
-                  { label: t('refunded') || 'Refunded', value: fmtUSD(customerDetail.total_refund_usd||0), cls:'text-red-600', bg:'bg-red-50 dark:bg-red-900/20' },
-                  { label: t('net_revenue'),   value: fmtUSD(customerDetail.net_revenue_usd||0),     cls:'text-green-600',  bg:'bg-green-50 dark:bg-green-900/20' },
+                  { label: t('gross_revenue'), value: fmtSplitUsd(customerDetail.gross_revenue_usd||0),   cls:'text-purple-600', bg:'bg-purple-50 dark:bg-purple-900/20' },
+                  { label: t('store_discounts') || 'Store discounts', value: fmtSplitUsd(customerDetail.store_discount_usd||0), cls:'text-amber-600', bg:'bg-amber-50 dark:bg-amber-900/20' },
+                  { label: t('membership_discounts') || 'Membership discounts', value: fmtSplitUsd(customerDetail.membership_discount_usd||0), cls:'text-emerald-600', bg:'bg-emerald-50 dark:bg-emerald-900/20' },
+                  { label: t('refunded') || 'Refunded', value: fmtSplitUsd(customerDetail.total_refund_usd||0), cls:'text-red-600', bg:'bg-red-50 dark:bg-red-900/20' },
+                  { label: t('net_revenue'),   value: fmtSplitUsd(customerDetail.net_revenue_usd||0),     cls:'text-green-600',  bg:'bg-green-50 dark:bg-green-900/20' },
                 ].map(item => (
                   <div key={item.label} className={`${item.bg} rounded-xl p-3 text-center`}>
                     <div className={`text-base font-bold ${item.cls}`}>{item.value}</div>

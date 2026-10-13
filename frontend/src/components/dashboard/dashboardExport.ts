@@ -225,7 +225,7 @@ function buildDashboardTopProductRows(products: DashboardExportProduct[] = []): 
   return products.map((p, i) => ({
     Rank: i + 1,
     Product: p.product_name || '',
-    Revenue_USD: priceCsv(p.revenue_usd),
+    Revenue_USD: splitCsv(p.revenue_usd),
     Qty: p.qty_sold || 0,
   }))
 }
@@ -235,11 +235,11 @@ function buildDashboardTopCustomerRows(ctx: DashboardExportContext): Row[] {
     Rank: i + 1,
     Customer: c.customer_name || ctx.translateOr('walk_in', 'General'),
     Sales: c.sale_count || 0,
-    Gross: priceCsv(c.gross_revenue_usd),
-    Store_Discounts: priceCsv(c.store_discount_usd),
-    Membership_Discounts: priceCsv(c.membership_discount_usd),
-    Returns: priceCsv(c.total_refund_usd),
-    Net: priceCsv(c.net_revenue_usd),
+    Gross: splitCsv(c.gross_revenue_usd),
+    Store_Discounts: splitCsv(c.store_discount_usd),
+    Membership_Discounts: splitCsv(c.membership_discount_usd),
+    Returns: splitCsv(c.total_refund_usd),
+    Net: splitCsv(c.net_revenue_usd),
   }))
 }
 
