@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, changedFields, auditChangeColumns, isSecretShapedAuditKey } from '../lib/audit'
@@ -282,6 +282,14 @@ const SALES_POLICY_KEYS = new Set([
   // whole settings table.
   'loyalty_points_enabled',
 ])
+
+// The payment-method reads below disclose which labels sales use and which sales
+// carry malformed payment details, so they need what their write twins need.
+function denyUnlessPaymentMethodPermission(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>) {
+  const user = c.get('user')
+  if (!hasPermission(user, 'sales_policy') && !hasPermission(user, 'settings')) return c.json({ error: 'No permission' }, 403)
+  return null
+}
 
 function normalizeReferenceName(value: unknown): string {
   return paymentMethodKey(value)
@@ -607,6 +615,8 @@ async function loadPaymentMethodCandidates(
  * scan of the JSON would, without reading 15k JSON blobs.
  */
 app.get('/payment-methods/unregistered', async (c) => {
+  const denied = denyUnlessPaymentMethodPermission(c)
+  if (denied) return denied
   const rows = await getDb(c.env).prepare(
     "SELECT DISTINCT payment_method FROM sales WHERE payment_method IS NOT NULL AND trim(payment_method) != ''",
   ).all<{ payment_method: string }>()
@@ -617,8 +627,9 @@ app.get('/payment-methods/unregistered', async (c) => {
 })
 
 app.post('/payment-methods/backfill', async (c) => {
+  const denied = denyUnlessPaymentMethodPermission(c)
+  if (denied) return denied
   const user = c.get('user')
-  if (!hasPermission(user, 'sales_policy') && !hasPermission(user, 'settings')) return c.json({ error: 'No permission' }, 403)
   const db = getDb(c.env)
   const rows = await db.prepare(
     "SELECT DISTINCT payment_method FROM sales WHERE payment_method IS NOT NULL AND trim(payment_method) != ''",
@@ -644,6 +655,8 @@ app.post('/payment-methods/backfill', async (c) => {
 // evidence is explicit: linked mode updates the live sales reporting dimension
 // and itemized tender JSON, while audit logs remain immutable.
 app.get('/payment-methods/impact', async (c) => {
+  const denied = denyUnlessPaymentMethodPermission(c)
+  if (denied) return denied
   const from = String(c.req.query('from') || '').trim()
   const to = String(c.req.query('to') || '').trim()
   if (!from || !to || from.length > MAX_METHOD_LENGTH || to.length > MAX_METHOD_LENGTH) {
@@ -681,8 +694,9 @@ app.get('/payment-methods/impact', async (c) => {
 })
 
 app.post('/payment-methods/replace', async (c) => {
+  const denied = denyUnlessPaymentMethodPermission(c)
+  if (denied) return denied
   const user = c.get('user')
-  if (!hasPermission(user, 'sales_policy') && !hasPermission(user, 'settings')) return c.json({ error: 'No permission' }, 403)
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
   const from = String(body.from || '').trim()
   const to = String(body.to || '').trim()
