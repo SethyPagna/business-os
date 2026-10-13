@@ -75,6 +75,29 @@ function durationOfToken(token: string): string | null {
   return isNamedDuration(key) ? key : null
 }
 
+const NAMED_DURATIONS_MS = [...new Set(Object.values(SESSION_DURATIONS_MS))].sort((a, b) => a - b)
+// created_at is stored to the second after expires_at was computed in
+// JavaScript, so a fresh window can read a moment under its duration.
+const DURATION_INFERENCE_SLACK_MS = 60 * 1000
+
+// Tokens issued before the suffix existed: the largest named duration the
+// row's window covers. Exact only until the session is first renewed, after
+// which the window may have grown past the original choice; the renewal
+// length is still always a named duration, never the grown window itself.
+function inferDurationMs(createdAt: string | null, expiresAt: string | null): number | null {
+  if (!createdAt || !expiresAt) return null
+  const windowMs = asUtc(expiresAt) - asUtc(createdAt)
+  if (!Number.isFinite(windowMs)) return null
+  let inferred: number | null = null
+  for (const ms of NAMED_DURATIONS_MS) if (ms <= windowMs + DURATION_INFERENCE_SLACK_MS) inferred = ms
+  return inferred
+}
+
+export function sessionDurationMs(token: string, createdAt: string | null, expiresAt: string | null): number | null {
+  const key = durationOfToken(token)
+  return key ? SESSION_DURATIONS_MS[key] : inferDurationMs(createdAt, expiresAt)
+}
+
 // SHA-256 via Web Crypto (crypto.subtle) -- a Workers-native standard API,
 // not the node:crypto compat shim. The original backend/src/sessionAuth.ts
 // uses crypto.createHash('sha256'); this produces byte-identical hex output
@@ -133,8 +156,8 @@ type SessionLookupRow = SessionUser & {
 }
 
 type SessionExpiryMetadata = {
-  created_at: string | null
   expires_at: string | null
+  duration_ms: number | null
 }
 
 // Persisting last_seen_at on every authenticated request turns a read-heavy
@@ -379,8 +402,8 @@ async function lookupSessionUser<E extends { Bindings: Env } = { Bindings: Env }
   }
 
   c.executionCtx.waitUntil(slideSessionExpiry(c, tokenHash, {
-    created_at: createdAt,
     expires_at: expiresAt,
+    duration_ms: sessionDurationMs(token, createdAt, expiresAt),
   }))
 
   return user
@@ -406,9 +429,10 @@ const SESSION_SLIDE_AFTER_FRACTION = 0.5
  * rather than "N days from login", which is what people already assume it
  * means and what the wording ("Keep me signed in for 30 days") implies.
  *
- * The existing renewal policy infers TTL from `expires_at - created_at`.
- * Since created_at does not move, this inferred interval can grow after
- * renewal. That pre-existing duration policy is intentionally unchanged here.
+ * The renewal length is the duration chosen at sign-in (sessionDurationMs),
+ * never `expires_at - created_at`: created_at does not move, so that interval
+ * grew with every renewal. A session whose duration cannot be determined is
+ * not renewed.
  * The browser retains newly issued transport cookies for at most 399 days;
  * longer/"always" sessions still need an explicit auth operation by that cap.
  *
@@ -423,18 +447,17 @@ async function slideSessionExpiry<E extends { Bindings: Env } = { Bindings: Env 
 ): Promise<void> {
   try {
     const db = getDb(c.env)
-    if (!session?.created_at || !session?.expires_at) return
+    if (!session?.expires_at) return
 
     // SQLite's CURRENT_TIMESTAMP writes "YYYY-MM-DD HH:MM:SS" (UTC, no
     // zone marker). Date.parse treats that as LOCAL time in some runtimes,
     // which would skew every comparison here, so the marker is added when
     // it is missing rather than trusting the default parse.
-    const createdAt = asUtc(session.created_at)
     const expiresAt = asUtc(session.expires_at)
-    if (!Number.isFinite(createdAt) || !Number.isFinite(expiresAt)) return
+    if (!Number.isFinite(expiresAt)) return
 
-    const ttlMs = expiresAt - createdAt
-    if (ttlMs <= 0) return
+    const ttlMs = session.duration_ms
+    if (!ttlMs || ttlMs <= 0) return
 
     const now = Date.now()
     const remaining = expiresAt - now

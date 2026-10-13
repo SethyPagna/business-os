@@ -158,6 +158,73 @@ async function main() {
     assert.equal((await request('/api/auth/me', { cookie: done.cookie })).status, 200)
   })
 
+  const DURATION_MS = { session: DAY, '1d': DAY, '3d': 3 * DAY, '7d': 7 * DAY }
+  const sqliteStamp = (ms) => new Date(ms).toISOString().replace('T', ' ').slice(0, 19)
+  const waitForExpiryChange = async (cookie, before) => {
+    for (let i = 0; i < 100; i += 1) {
+      const row = await sessionRow(cookie)
+      if (row.expires_at !== before) return row
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    return sessionRow(cookie)
+  }
+  // Pretends time has passed: the session keeps `leftMs` of its window, with
+  // created_at and expires_at both moved back, then one request renews it.
+  const useAfterAging = async (cookie, leftMs) => {
+    const row = await sessionRow(cookie)
+    const shift = (Date.parse(row.expires_at) - Date.now()) - leftMs
+    const expires = new Date(Date.parse(row.expires_at) - shift).toISOString()
+    const created = sqliteStamp(Date.parse(`${row.created_at.replace(' ', 'T')}Z`) - shift)
+    await db.prepare('UPDATE user_sessions SET created_at = ?, expires_at = ?, last_seen_at = NULL WHERE id = ?').bind(created, expires, row.id).run()
+    assert.equal((await request('/api/auth/me', { cookie })).status, 200)
+    return waitForExpiryChange(cookie, expires)
+  }
+
+  for (const choice of ['session', '1d', '3d']) {
+    await check(`S1b: three renewals of a "${choice}" session never lengthen its window`, async () => {
+      const chosen = DURATION_MS[choice]
+      const res = await signIn('owner_b', choice)
+      assert.equal(res.status, 200, JSON.stringify(res.body))
+      for (let i = 1; i <= 3; i += 1) {
+        const row = await useAfterAging(res.cookie, 0.45 * chosen)
+        const remaining = Date.parse(row.expires_at) - Date.now()
+        assert.ok(remaining > 0.9 * chosen, `renewal ${i}: renewed, ${(remaining / HOUR).toFixed(1)} h left`)
+        assert.ok(remaining <= chosen + 5000, `renewal ${i}: ${(remaining / HOUR).toFixed(1)} h left exceeds the chosen ${(chosen / HOUR).toFixed(1)} h`)
+      }
+    })
+  }
+
+  await check('S1b: a session in the first half of its window is not renewed', async () => {
+    const res = await signIn('owner_b', '3d')
+    const row = await sessionRow(res.cookie)
+    await db.prepare('UPDATE user_sessions SET last_seen_at = NULL WHERE id = ?').bind(row.id).run()
+    assert.equal((await request('/api/auth/me', { cookie: res.cookie })).status, 200)
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    assert.equal((await sessionRow(res.cookie)).expires_at, row.expires_at)
+  })
+
+  await check('S1b: the duration in a token cannot be edited into a longer one', async () => {
+    const res = await signIn('owner_b', 'session')
+    assert.equal((await request('/api/auth/me', { cookie: res.cookie })).status, 200)
+    const forged = res.cookie.replace(/\.session$/, '.always')
+    assert.notEqual(forged, res.cookie)
+    assert.equal((await request('/api/auth/me', { cookie: forged })).status, 401)
+  })
+
+  await check('S1b: a token issued before the duration suffix renews by a named duration, not by its grown window', async () => {
+    const userId = (await db.prepare("SELECT id FROM users WHERE username = 'owner_c'").first()).id
+    const token = `legacy-${Date.now()}`
+    const now = Date.now()
+    await db.prepare('INSERT INTO user_sessions (user_id, token_hash, device_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?)')
+      .bind(userId, createHash('sha256').update(token).digest('hex'), 'dev-owner_c', sqliteStamp(now - 50 * HOUR), new Date(now + 24 * HOUR).toISOString()).run()
+    const cookie = `bos_session=${token}`
+    const row = await sessionRow(cookie)
+    assert.equal((await request('/api/auth/me', { cookie })).status, 200)
+    const renewed = await waitForExpiryChange(cookie, row.expires_at)
+    const remaining = Date.parse(renewed.expires_at) - Date.now()
+    assert.ok(Math.abs(remaining - 3 * DAY) < 5000, `74 h window renews by 3 days, not 74 h: ${(remaining / HOUR).toFixed(2)} h left`)
+  })
+
   console.log(`\n${passed} passed, ${failed} failed`)
 }
 
