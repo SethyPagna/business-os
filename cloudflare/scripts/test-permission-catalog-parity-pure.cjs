@@ -70,7 +70,7 @@ const rel = (file) => path.relative(WORKER, file).split(path.sep).join('/')
 const collapse = (text) => text.replace(/\s+/g, ' ').trim()
 
 // Only a file that names a permission helper (or is a lookup table) can hold a check; emit just those, once.
-const CHECK_CALLEES = 'hasPermission|hasAnyPermission|getPermissionTier|getActionTier|isActionBlocked|isReviewRequired|denyUnless|requireReadKey|requirePermission|requireKey'
+const CHECK_CALLEES = 'hasPermission|hasAnyPermission|getPermissionTier|getActionTier|isActionBlocked|isReviewRequired|denyUnless|requireReadKey|requirePermission|requireKey|getMergedPermissions|parsePermissions'
 // Keys enforced through a lookup table rather than a call carrying the key.
 const TABLE_FILES = ['routes/settings.ts', 'lib/productWrites.ts', 'lib/acquisitionCostAccess.ts']
 const mentionsCheck = new RegExp(`\\b(?:${CHECK_CALLEES})\\b`)
@@ -298,23 +298,67 @@ function topLevelArguments(text, open) {
   return args
 }
 
+// The helpers that take a permission key (the two action helpers take a section and an action, read above).
+const KEY_HELPERS = Object.keys(KEY_ARGUMENTS).filter((name) => !HELPERS.includes(name))
+const KEY_HELPER_ALIAS = new RegExp(`\\b(?:const|let|var)\\s+(\\w+)\\s*=\\s*(${KEY_HELPERS.join('|')})\\b(?!\\s*\\()`, 'g')
+// The names a file calls the key helpers by: their own, an import alias, or a local alias.
+function keyHelperNames(text) {
+  const names = new Map(KEY_HELPERS.map((name) => [name, name]))
+  for (const clause of text.matchAll(/import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*'[^']*'/g)) {
+    for (const part of clause[1].split(',')) {
+      const [original, alias] = part.trim().split(/\s+as\s+/)
+      if (alias && KEY_HELPERS.includes(original.trim())) names.set(alias.trim(), original.trim())
+    }
+  }
+  for (const declaration of text.matchAll(KEY_HELPER_ALIAS)) names.set(declaration[1], declaration[2])
+  return names
+}
+const LITERAL_KEY = /^\s*(?:\[\s*(?:'[a-z_]+'\s*,?\s*)*\]|'[a-z_]+')\s*$/
+
 const checkedKeys = new Map()
+const variableKeySites = []
 for (const [file, text] of workerText) {
   if (NOT_EVIDENCE.has(file)) continue
-  const names = new Map([...Object.keys(KEY_ARGUMENTS).map((name) => [name, name]), ...calleeNames(text)])
+  const names = new Map([...Object.keys(KEY_ARGUMENTS).map((name) => [name, name]), ...calleeNames(text), ...keyHelperNames(text)])
   for (const match of text.matchAll(new RegExp(`\\b(${[...names.keys()].join('|')})\\s*\\(`, 'g'))) {
     const helper = names.get(match[1])
     const args = topLevelArguments(text, match.index + match[0].length - 1)
     for (const argument of KEY_ARGUMENTS[helper](args)) {
-      const literals = /^\s*(?:\[[^\]]*\]|'[a-z_]+')\s*$/.test(argument) ? [...argument.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]) : []
+      const literals = LITERAL_KEY.test(argument) ? [...argument.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]) : []
       for (const key of literals) checkedKeys.set(key, [...(checkedKeys.get(key) || []), `${file} ${helper}`])
+      if (!literals.length && !HELPERS.includes(helper)) variableKeySites.push(`${file}: ${helper}(${args.map((arg) => collapse(arg)).join(', ')})`)
     }
   }
+}
+
+// Any other reading of the key helpers (handed to another function, stored in an object) hides its keys.
+const LOCAL_KEY_WRAPPERS = { 'routes/promotions.ts': ['requireKey', 'requireReadKey'] }
+const bareKeyHelperUses = []
+for (const [file, text] of workerText) {
+  if (file === HELPERS_FILE) continue
+  const names = keyHelperNames(text)
+  const bare = text.replace(IMPORT_CLAUSE, '').replace(KEY_HELPER_ALIAS, '')
+  for (const use of bare.matchAll(new RegExp(`\\b(${[...names.keys()].join('|')})\\b(?!\\s*\\()`, 'g'))) {
+    if (/(?:const|let|var|function)\s+$/.test(bare.slice(Math.max(0, use.index - 12), use.index)) && (LOCAL_KEY_WRAPPERS[file] || []).includes(use[1])) continue
+    bareKeyHelperUses.push(`${file}: ${collapse(bare.slice(Math.max(0, use.index - 40), use.index + 60))}`)
+  }
+}
+
+// Permission maps read as a whole rather than asked a question: the keys read from them are invisible to the
+// helper scan, so each file is listed with the keys it reads.
+const DIRECT_READ_CALL = /\b(?:getMergedPermissions|parsePermissions)\s*\(/g
+const directReadFiles = new Map()
+for (const [file, text] of workerText) {
+  if (file === HELPERS_FILE) continue
+  const reads = [...text.replace(IMPORT_CLAUSE, '').matchAll(DIRECT_READ_CALL)].length
+  if (reads) directReadFiles.set(file, reads)
 }
 
 function workerChecksKey(key) {
   const call = checkedKeys.get(key)
   if (call) return `${call[0].split(' ')[0]} (check call)`
+  const directFile = Object.keys(DIRECT_READS).find((file) => DIRECT_READS[file].keys.includes(key))
+  if (directFile) return `${directFile} (direct read)`
   const table = new RegExp(`(?:'${key}'|"${key}"|\\.${key}\\b|(?:^|[\\s,{(])${key}\\s*:)`)
   const tableFile = TABLE_FILES.find((file) => table.test(workerText.get(file) || ''))
   return tableFile ? `${tableFile} (table)` : null
@@ -398,6 +442,34 @@ const REQUIREMENT_PROOFS = {
   'products:import': { file: 'routes/importJobs.ts', proof: [/requireImportPermission\(c, undefined, type\)[\s\S]{0,300}?missingDestructiveImportPermission\(/, /isActionBlocked\(user, overrideSection, 'import'\)/] },
   'sales:customer': { file: 'routes/contacts.ts', proof: SALE_LINK_GRANTS },
   'sales:customer_reassign': { file: 'routes/contacts.ts', proof: SALE_LINK_GRANTS },
+}
+// Calls of a key helper whose key is a variable: the scan cannot read which keys they check, so each is listed with
+// where the value comes from. `count` is how many identical calls the file makes.
+const VARIABLE_KEY_SITES = [
+  { file: 'lib/contactSalesSource.ts', call: 'getPermissionTier(user, SOURCE_GRANT[raw])', count: 1, why: 'SOURCE_GRANT in the same file maps a contact source to pos or sales.' },
+  { file: 'lib/importEngine.ts', call: 'hasPermission(actor, permission)', count: 1, why: 'Each key of permissionsForImportType: products, inventory, sales or contacts.' },
+  { file: 'lib/reviewGate.ts', call: 'getPermissionTier(user, section)', count: 1, why: 'The review-tier section the caller passes to maybeQueueForReview.' },
+  { file: 'lib/undoAppliers.ts', call: 'getPermissionTier(user, applier.permission)', count: 1, why: 'The permission of an undo applier, a literal in the applier table (read as a dynamic site above).' },
+  { file: 'routes/actionHistory.ts', call: 'hasPermission(user, permission)', count: 2, why: 'permissionForActionHistory (ENTITY_PERMISSION_MAP in lib/permissions.ts), or the transfer payload\'s branches / inventory.' },
+  { file: 'routes/compat.ts', call: 'denyUnless(c, ...perms)', count: 1, why: 'The definition of the local denyUnless wrapper; its callers pass literals, which the scan reads.' },
+  { file: 'routes/compat.ts', call: 'hasAnyPermission(user, perms)', count: 1, why: 'The same wrapper: perms are the literals its callers pass.' },
+  { file: 'routes/importJobs.ts', call: 'hasPermission(user, permission)', count: 2, why: 'Each key of permissionsForType: products, inventory, sales or contacts.' },
+  { file: 'routes/notifications.ts', call: 'hasPermission(user, importPermissionForType(row.type))', count: 1, why: 'The import type\'s section: products, inventory, sales or contacts.' },
+  { file: 'routes/promotions.ts', call: 'hasPermission(c.get(\'user\'), key)', count: 1, why: 'The local requireKey / requireReadKey wrappers; their callers pass literals, which the scan reads.' },
+  { file: 'routes/promotions.ts', call: 'hasPermission(user, key)', count: 1, why: 'The same wrappers.' },
+  { file: 'routes/promotions.ts', call: 'getPermissionTier(c.get(\'user\'), key)', count: 1, why: 'The same wrappers.' },
+  { file: 'routes/reviewQueue.ts', call: 'getPermissionTier(user, row.section)', count: 1, why: 'The section of the pending action being approved or rejected (a review-tier key).' },
+  { file: 'routes/settings.ts', call: 'hasPermission(user, bucket)', count: 1, why: 'settingsBucketPermissionFor(key): drive_credentials, business_identity or sales_policy, which the table above reads.' },
+]
+// Files that read the merged permission map directly, with the keys they read as properties.
+const DIRECT_READS = {
+  'lib/acquisitionCostAccess.ts': { keys: ['product_cost_view', 'product_cost_edit'], why: 'The two cost grants are separate keys read off the merged map.' },
+  'lib/undoAppliers.ts': { keys: ['product_cost_edit'], why: 'A revert that restores a chosen cost needs Edit product costs.' },
+  'routes/products.ts': { keys: [], why: 'Hands the merged map to restrictToImageOnlyFields (lib/productWrites.ts), which reads the products_image_only keys.' },
+}
+// Branch reads that do not check branches:view.
+const OPEN_READS = {
+  'GET /': 'Every signed-in user: the branch pickers on every page list the branches, so the list is not gated. It carries the address fields; reported to the owner, not changed here.',
 }
 // Every Worker refusal that names a cost grant, and what it means for the editor. `row`: the grant is a `requires`
 // on an import row. `input`: only a request that carries a cost field is refused, so a role without the grant just
@@ -632,6 +704,55 @@ check('every Worker refusal that names a cost grant is classified', () => {
   assert.deepEqual(unclassified, [], `A Worker route refuses a role for lacking a cost grant and COST_GATES does not say what that means for the editor (a \`requires\` on a row, an input-only refusal, or a listed gap):\n${unclassified.map((message) => `${message}  <- ${[...new Set(seen.get(message))].join(', ')}`).join('\n')}`)
   const stale = COST_GATES.filter((gate) => ![...seen.keys()].some((message) => message.startsWith(gate.text))).map((gate) => gate.text)
   assert.deepEqual(stale, [], `COST_GATES entries no Worker route refuses with any more (remove them):\n${stale.join('\n')}`)
+})
+
+check('every permission-key check passes a literal key or is a listed variable site', () => {
+  const found = new Map()
+  for (const site of variableKeySites) found.set(site, (found.get(site) || 0) + 1)
+  const listed = new Map(VARIABLE_KEY_SITES.map((entry) => [`${entry.file}: ${entry.call}`, entry.count]))
+  const problems = []
+  for (const [site, count] of found) {
+    if (!listed.has(site)) problems.push(`${site}  <- not listed in VARIABLE_KEY_SITES, so the key it checks is invisible to this test`)
+    else if (listed.get(site) !== count) problems.push(`${site}  <- ${count} call(s), VARIABLE_KEY_SITES says ${listed.get(site)}`)
+  }
+  for (const [site] of listed) if (!found.has(site)) problems.push(`${site}  <- listed in VARIABLE_KEY_SITES but no longer in the Worker; remove it`)
+  assert.deepEqual(problems, [], 'Add the call to VARIABLE_KEY_SITES with where its key comes from, or pass a literal key:')
+})
+
+check('no permission-key helper is passed around as a value', () => {
+  assert.deepEqual(bareKeyHelperUses, [], `A key helper (or an alias of it) is used other than as a direct call, so the keys it checks are invisible to this test:\n${bareKeyHelperUses.join('\n')}`)
+  const stale = Object.entries(LOCAL_KEY_WRAPPERS).flatMap(([file, names]) => names.filter((name) => !new RegExp(`\\b(?:const|let|var|function)\\s+${name}\\b`).test(textOf(file)))).map((name) => name)
+  assert.deepEqual(stale, [], `LOCAL_KEY_WRAPPERS names a wrapper its file no longer declares: ${stale.join(', ')}`)
+})
+
+check('every read of the merged permission map is listed with the keys it reads', () => {
+  const problems = []
+  for (const [file, reads] of directReadFiles) {
+    const entry = DIRECT_READS[file]
+    if (!entry) { problems.push(`${file}: ${reads} direct read(s) of the merged permission map, not listed in DIRECT_READS`); continue }
+    for (const key of entry.keys) if (!new RegExp(`\\.${key}\\b`).test(textOf(file))) problems.push(`${file}: listed as reading ${key} but no longer reads it`)
+  }
+  for (const file of Object.keys(DIRECT_READS)) if (!directReadFiles.has(file)) problems.push(`${file} is listed in DIRECT_READS but no longer reads the merged map; remove it`)
+  assert.deepEqual(problems, [])
+})
+
+check('every branch read checks branches:view, or is a listed open read', () => {
+  const text = textOf('routes/branches.ts')
+  const starts = [...text.matchAll(/\bapp\.(get|post|put|patch|delete)\('([^']*)'/g)]
+  const problems = []
+  const reads = []
+  starts.forEach((start, index) => {
+    if (start[1] !== 'get') return
+    const route = `GET ${start[2]}`
+    reads.push(route)
+    const body = text.slice(start.index, index + 1 < starts.length ? starts[index + 1].index : text.length)
+    const checksView = /getActionTier\([^;]*?'branches', 'view'\)/.test(body)
+    if (!checksView && !OPEN_READS[route]) problems.push(`${route} does not check branches:view and is not listed in OPEN_READS`)
+    if (checksView && OPEN_READS[route]) problems.push(`${route} checks branches:view now; remove it from OPEN_READS`)
+  })
+  for (const route of Object.keys(OPEN_READS)) if (!reads.includes(route)) problems.push(`${route} is listed in OPEN_READS but routes/branches.ts has no such read`)
+  assert.ok(reads.length >= 4, `only ${reads.length} branch reads found; the scan is broken`)
+  assert.deepEqual(problems, [])
 })
 
 check('control: the scan sees known checks and misses a known gap', () => {
