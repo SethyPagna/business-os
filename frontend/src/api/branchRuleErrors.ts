@@ -85,6 +85,7 @@ export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   product_has_stock: 'product_has_stock',
   product_status_unsupported: 'product_status_unsupported',
   product_replacement_incomplete: 'product_replacement_incomplete',
+  product_merge_permission_required: 'product_merge_permission_required',
   branch_edit_conflict: 'branch_edit_conflict',
   branch_review_schema_required: 'branch_review_schema_required',
   canonical_branch_configuration_invalid: 'canonical_branch_configuration_invalid',

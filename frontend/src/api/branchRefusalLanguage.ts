@@ -22,6 +22,8 @@ export const RESTATED_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   product_has_stock: 'product_has_stock',
   product_status_unsupported: 'product_status_unsupported',
   product_replacement_incomplete: 'product_replacement_incomplete',
+  // PUT /products/:id that would fold the row into another product, by an editor whose merge switch is off.
+  product_merge_permission_required: 'product_merge_permission_required',
   branch_not_sellable: 'branch_not_sellable',
   sale_branch_mismatch: 'sale_branch_mismatch',
   sale_identity_conflict: 'sale_identity_conflict',
