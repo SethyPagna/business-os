@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import * as actor from '../src/api/actorReadScope.ts'
-import { __resetApiHealthForTests, pingServerHealth, setSyncServerUrl } from '../src/api/http.ts'
+import { __resetApiHealthForTests, apiFetch, pingServerHealth, setSyncServerUrl } from '../src/api/http.ts'
 import { permissionRefreshIntent } from '../src/utils/permissionRefreshAccumulator.ts'
 import { ACTOR_GUARD_KEYS } from '../src/api/branchRefusalLanguage.ts'
 import { STOCK_SESSION_FAILURE_KEYS } from '../src/utils/stockSessionDraft.ts'
@@ -230,6 +230,34 @@ await check('a forgotten account stays forgotten until a sign-in is confirmed, e
     read(); missing()
     assert.equal(actor.isActorWriteIdentityCurrent(identity), true, 'a returned Google sign-in: a missing user is that account again')
   } finally { delete tab.navigator }
+  freshTab()
+})
+await check('a login-duration change keeps the account; a sign-out through the same transport still forgets it', async () => {
+  const missing = () => { local.delete('businessos_user'); tabSession.delete('businessos_user') }
+  const tab = (globalThis as unknown as { window: Record<string, unknown> }).window
+  const nativeFetch = globalThis.fetch
+  const sent: string[] = []
+  tab.navigator = globalThis.navigator
+  globalThis.fetch = (async (url: unknown) => {
+    sent.push(new URL(String(url)).pathname)
+    assert.equal(actor.isActorCookieMutationPending(), true, 'the request runs inside a cookie phase')
+    return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }) as typeof fetch
+  try {
+    // Opus Q2 / K3: the duration change re-issues the same account's cookie.
+    freshTab(); let identity = actor.captureActorWriteIdentity()
+    await apiFetch('POST', '/api/auth/session-duration', { sessionDuration: '7d' })
+    assert.equal(actor.isActorCookieMutationPending(), false)
+    missing()
+    assert.equal(actor.isActorWriteIdentityCurrent(identity), true, 'after a login-duration change a missing user is still the same account')
+    assert.doesNotThrow(() => actor.assertActorWriteIdentity(identity), 'no false "account changed"')
+    // Control: a sign-out over the same transport forgets.
+    freshTab(); identity = actor.captureActorWriteIdentity()
+    await apiFetch('POST', '/api/auth/logout', {})
+    missing()
+    assert.throws(() => actor.assertActorWriteIdentity(identity), { code: 'actor_owner_changed' }, 'after a sign-out a missing user is nobody')
+    assert.deepEqual(sent, ['/api/auth/session-duration', '/api/auth/logout'])
+  } finally { globalThis.fetch = nativeFetch; delete tab.navigator }
   freshTab()
 })
 await check('another tab signing in locks the identity, and the same owner confirmed again releases it', () => {

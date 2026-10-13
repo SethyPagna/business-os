@@ -116,8 +116,10 @@ function pendingCookieOwner(): string | null {
 }
 
 /** Call immediately before the browser request that can change the shared
- * HttpOnly cookie. No elapsed-time lease may release an unfinished request. */
-export async function beginActorCookieMutation(signoutToken?: string): Promise<string> {
+ * HttpOnly cookie. No elapsed-time lease may release an unfinished request.
+ * keepsAccount: the request re-issues the same account's cookie (a login
+ * duration change), so the last account seen is not forgotten. */
+export async function beginActorCookieMutation(signoutToken?: string, keepsAccount = false): Promise<string> {
   const beforeAdmission = captureActorReadScope()
   if (typeof window === 'undefined') return AUTH_PENDING_PREFIX + runtimeId
   const locks = window.navigator?.locks
@@ -145,7 +147,7 @@ export async function beginActorCookieMutation(signoutToken?: string): Promise<s
     // left behind can never complete now, so it does not get to outlive this
     // moment. prepareActorOauthCookieRedirect() writes the new one after this.
     clearActorOauthCookieOwner()
-    forgetActorWriteAccount()
+    if (!keepsAccount) forgetActorWriteAccount()
     expectedPending = marker
     expectedMarker = marker
     localSession++

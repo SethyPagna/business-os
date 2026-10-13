@@ -71,6 +71,10 @@ const APP_LOGIN_TIMEOUT_MS = 15000
 const APP_GOOGLE_OAUTH_COMPLETE_TIMEOUT_MS = 20000
 const APP_SETTINGS_SAVE_TIMEOUT_MS = 15000
 const APP_SESSION_DURATION_TIMEOUT_MS = 12000
+// The login duration when none is chosen or stored: the sign-in form's and the
+// Worker's default. Every writer of the stored user falls back to the same one,
+// so none moves it to the other storage behind another tab's back.
+const DEFAULT_SESSION_DURATION = 'always'
 const INITIAL_SYNC_URL_PERSIST_DELAY_MS = 1500
 const INITIAL_SYNC_URL_PERSIST_IDLE_TIMEOUT_MS = 8000
 
@@ -987,7 +991,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       const sessionDuration = String(
         mergedSettings.login_session_duration
         || safeStorageGet(getAuthStorage('local'), STORAGE_KEYS.SESSION_DURATION)
-        || 'session',
+        || DEFAULT_SESSION_DURATION,
       )
       const storedExpiry = Number(getStoredUserExpiry())
       const expiryTime = Number.isFinite(storedExpiry) && storedExpiry > Date.now()
@@ -1560,7 +1564,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     const persistUser = (next: AppUser) => {
       const expiry = getStoredUserExpiry()
       const expiryTime = expiry ? Number(expiry) : null
-      const currentMode = safeStorageGet(getAuthStorage('local'), STORAGE_KEYS.SESSION_DURATION) || '30d'
+      const currentMode = safeStorageGet(getAuthStorage('local'), STORAGE_KEYS.SESSION_DURATION) || DEFAULT_SESSION_DURATION
       persistAuthState({
         user: next,
         expiryTime: Number.isFinite(expiryTime) ? expiryTime : null,
