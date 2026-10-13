@@ -162,6 +162,7 @@ import { contactDisplayAddress } from '../lib/contactOptions'
 import { buildSaleCreationSnapshot, SaleCreationSnapshotError } from '../lib/saleCreationSnapshot'
 import type { Env } from '../index'
 import { costViewProfit } from '../lib/reportProfitView'
+import { redactAmendmentEntries, redactSaleRecords } from '../lib/courierCostAccess'
 import { actorId, actorSnapshot } from '../lib/actorSnapshot'
 import { ANONYMOUS_CUSTOMER_ERROR_CODE, ANONYMOUS_CUSTOMER_MUTATION_ERROR, isAnonymousCustomer } from '../lib/anonymousCustomer'
 
@@ -3875,7 +3876,8 @@ app.get('/:id/amendments', async (c) => {
     FROM sale_amendments WHERE sale_id = ? ORDER BY id ASC
   `).all<LedgerRow>([saleId])
 
-  return c.json({ saleId, entries, summary: summarizeAmendments(entries) })
+  const visible = redactAmendmentEntries(entries, c.get('user'))
+  return c.json({ saleId, entries: visible, summary: summarizeAmendments(visible) })
 })
 
 // ---------------------------------------------------------------------------
@@ -4057,7 +4059,7 @@ app.get('/:id/records', async (c) => {
     mutations,
     mutationReplays,
   })
-  return c.json({ saleId, records, count: records.length })
+  return c.json({ saleId, records: redactSaleRecords(records, c.get('user')), count: records.length })
 })
 
 // ---------------------------------------------------------------------------

@@ -1462,6 +1462,9 @@ export default function SaleDetailModal({
   const deliveryFeeUsd = totals.delivery.faceUsd
   const deliveryFeeKhr = totals.delivery.faceKhr
   const deliveryPaidByStore = totals.delivery.printsAsFree
+  // The Worker drops the key for a reader who may not see the courier's cost; an
+  // absent key is "not shown to you", which "Not recorded" would misreport.
+  const actualCostVisible = Object.prototype.hasOwnProperty.call(sale, 'delivery_actual_cost_usd')
   const actualCostRaw = sale.delivery_actual_cost_usd
   const actualCostParsed = actualCostRaw === null || actualCostRaw === undefined || String(actualCostRaw).trim() === '' ? null : Number(actualCostRaw)
   const actualCostUsd = actualCostParsed !== null && Number.isFinite(actualCostParsed) && actualCostParsed >= 0 ? actualCostParsed : null
@@ -2029,7 +2032,7 @@ export default function SaleDetailModal({
                     sits beside the person it was paid to, the receipt-shaped
                     summary is untouched, and a customer-facing surface still
                     never sees it. */}
-                {isDelivery ? (
+                {isDelivery && actualCostVisible ? (
                   <div data-sale-actual-cost="" className="min-w-0 space-y-1">
                     <div className="flex min-w-0 items-center gap-1.5">
                       <label htmlFor="amend-delivery-actual-cost" className="min-w-0 flex-1 text-xs leading-relaxed text-gray-500">
@@ -2877,7 +2880,7 @@ export default function SaleDetailModal({
                             {translateOr('amendment_replaced', 'Replaced', 'បានជំនួស')}
                             {` — ${entry.removed.subject} ${entry.removed.deltaText}, ${entry.added.subject} ${entry.added.deltaText}`}
                           </div>
-                        ) : (
+                        ) : entry.row.valuesHidden ? null : (
                           <div className="mt-1 flex flex-wrap items-baseline gap-x-2 text-gray-600 dark:text-gray-300">
                             {/* "1 -> 2 (+1)": the before is kept on the screen,
                                 which is the whole of the owner's "in details it

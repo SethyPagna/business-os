@@ -70,9 +70,30 @@ export default { ...worker, async fetch(request, env, ctx) {
 // so return id N could never be created (see AL-MONEY-REPRO.md, side finding
 // M; test-al-money-g-native.cjs pins it with floor 0). Production return and
 // sale ids live in different ranges, which the floor models.
-async function startWorker({ returnIdFloor = 100000 } = {}) {
+//
+// patches: [{ name, file: 'src/lib/x.ts', from, to }] rewrite SOURCE TEXT IN MEMORY
+// at bundle time (a negative control's mutant). Nothing on disk changes, and an
+// anchor that does not occur exactly once is a hard error, never a silent no-op.
+async function startWorker({ returnIdFloor = 100000, patches = [] } = {}) {
+  const applied = new Set()
+  const plugins = patches.length ? [{ name: 'al-source-patches', setup(b) {
+    b.onLoad({ filter: /[\\/]src[\\/].*\.ts$/ }, args => {
+      const here = path.relative(root, args.path).replaceAll('\\', '/')
+      const mine = patches.filter(p => p.file === here)
+      if (!mine.length) return undefined
+      let text = fs.readFileSync(args.path, 'utf8').replace(/\r\n/g, '\n')
+      for (const p of mine) {
+        if (p.whole !== undefined) { text = p.whole.replace(/\r\n/g, '\n'); applied.add(p.name); continue }
+        assert.equal(text.split(p.from).length - 1, 1, `patch anchor must occur exactly once in ${p.file}: ${p.from.slice(0, 80)}`)
+        text = text.replace(p.from, () => p.to)
+        applied.add(p.name)
+      }
+      return { contents: text, loader: 'ts' }
+    })
+  } }] : []
   const bundle = await build({ stdin: { contents: WRAPPER, resolveDir: root, loader: 'ts' }, bundle: true, write: false,
-    platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'], logLevel: 'silent' })
+    platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'], logLevel: 'silent', plugins })
+  for (const p of patches) assert.ok(applied.has(p.name), `patch ${p.name} was not applied`)
   const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-07-01',
     compatibilityFlags: ['nodejs_compat'], d1Databases: ['DB'], r2Buckets: ['ASSETS'], kvNamespaces: ['CACHE'],
     durableObjects: { BROADCAST_HUB: 'BroadcastHub', SYNC_UPLOADS: 'SyncUploadSession' },
@@ -303,5 +324,16 @@ async function importSale(h, rowNumber, status, lines, { paidUsd, jobId = 'al-im
   return { sale, items }
 }
 
-module.exports = { startWorker, setReturnIdFloor, fresh, recorder, budgetLine, seedProduct, createSale, customerReturn, amendSale, addSaleItems, bulkReturnStatus,
+// The Worker exactly as a commit had it, for a test's own "red on the base" run: every
+// src file that differs from `commit` is bundled from that commit instead (nothing on
+// disk changes). A file added since `commit` is simply not imported by the old code.
+function basePatches(commit) {
+  const { execFileSync } = require('node:child_process')
+  const repo = path.resolve(root, '..')
+  const git = (...args) => execFileSync('git', args, { cwd: repo, maxBuffer: 64 * 1024 * 1024 }).toString('utf8')
+  return git('diff', '--name-only', '--diff-filter=M', commit, '--', 'cloudflare/src').split('\n').filter(Boolean)
+    .map(name => ({ name: `base:${name}`, file: name.replace(/^cloudflare\//, ''), whole: git('show', `${commit}:${name}`) }))
+}
+
+module.exports = { basePatches, startWorker, setReturnIdFloor, fresh, recorder, budgetLine, seedProduct, createSale, customerReturn, amendSale, addSaleItems, bulkReturnStatus,
   historyStep, importSale, FREE_QUERY_LIMIT, PAID_QUERY_LIMIT }

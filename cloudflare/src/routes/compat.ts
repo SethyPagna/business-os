@@ -13,6 +13,7 @@ import { readAllQuotas } from '../lib/quotaGuard'
 import { audit, buildAuditLogRetentionDeleteSql } from '../lib/audit'
 import { decodeAuditCursor } from '../lib/auditLogQuery'
 import { readAuditLogPage } from '../lib/auditLogPage'
+import { redactAuditRows } from '../lib/courierCostAccess'
 import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
 import { BUCKET_MONEY_PLACES, CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesTotalsAndPeriodSeries, identifiedCustomerExpr, reportCustomerNameExpr, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr, shiftWindowBound, shiftWindowWhere } from '../lib/salesAnalytics'
@@ -677,7 +678,7 @@ app.get('/system/audit-logs', requireAuth, async (c) => {
     // Own-scoping is enforced HERE by locking the reader to the caller's id
     // (never trusting the client's userId param for a view user); the lock
     // applies to the rows and to the per-user roster alike.
-    return c.json(await readAuditLogPage(getDb(c.env), {
+    const page = await readAuditLogPage(getDb(c.env), {
       search: c.req.query('search'),
       action: c.req.query('action'),
       entity: c.req.query('entity'),
@@ -696,7 +697,9 @@ app.get('/system/audit-logs', requireAuth, async (c) => {
       cursor,
       pageSize: c.req.query('pageSize'),
       counts: c.req.query('counts'),
-    }))
+    })
+    // The courier's actual cost is administrator-only here as everywhere else.
+    return c.json({ ...page, items: redactAuditRows(page.items, user) })
   } catch (error) {
     if (error instanceof RangeError) return c.json({ error: error.message }, 400)
     // A db error is a 500, never an empty 200 that reads as "no logs": the
