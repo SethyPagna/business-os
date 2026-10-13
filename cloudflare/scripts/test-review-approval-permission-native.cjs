@@ -680,7 +680,15 @@ async function main() {
       t.check(`no-price ${label} -> 403 before any write`, r.status === 403 && r.body?.code === 'product_price_edit_required' && snapshot(w) === snap
         && JSON.stringify(till(w, b)) === JSON.stringify(tillB), { r: { status: r.status, code: r.body?.code, merged_into: r.body?.merged_into }, b: pick(b), till: till(w, b) })
     }
-    // A Review-tier editor's identity fold is finding I's (it will be queued, owner 13 Oct); not asserted here.
+    // Queue-first (owner 13 Oct): a Review-tier editor -- even one whose price action is switched off -- is never
+    // refused by the survivor check; finding I holds that edit for approval (202) and the reviewer's price grant
+    // decides then. Asserted as "not this refusal" so it composes with and without finding I's queue.
+    w.raw.prepare(`INSERT INTO users(id,username,name,password,permissions) VALUES(5,'reviewtier','Review tier','fixture','{"products":"review","products:price":false}')`).run()
+    const ar = await makeProduct(w, 'Fold source review tier', { barcode: '8890000000001' })
+    twin('8890000000002')
+    const rr = await request(w, 'products', 'PUT', `/${ar}`, { name: 'Fold twin', barcode: '8890000000002', selling_price_usd: 5, discount_enabled: 0 }, 5)
+    t.check('review-tier editor without price is left to the review queue, not refused by the survivor check',
+      !(rr.status === 403 && rr.body?.code === 'product_price_edit_required'), { status: rr.status, code: rr.body?.code })
     // Unchanged survivor values: the fold itself is not a price edit.
     const a = await makeProduct(w, 'Fold source same', { barcode: '8870000000001' })
     w.raw.prepare("UPDATE products SET selling_price_usd=9, wholesale_price_usd=8, discount_enabled=1, discount_percent=50 WHERE id=?").run(a)
@@ -692,7 +700,7 @@ async function main() {
     const b2 = twin('8880000000002')
     const ok = await request(w, 'products', 'PUT', `/${a2}`, { name: 'Fold twin', barcode: '8880000000002', selling_price_usd: 5, discount_enabled: 0 }, 4)
     t.check('price editor fold reprices the survivor -> 200', ok.status === 200 && ok.body?.merged_into === b2 && pick(b2).s === 5 && pick(b2).e === 0, { status: ok.status, b: pick(b2) })
-    t.done(5)
+    t.done(6)
   })
 
   // ================================================================================ OPUS-H hunt: flow cases
