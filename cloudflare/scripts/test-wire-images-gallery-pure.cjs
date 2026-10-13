@@ -132,6 +132,8 @@ const productWrites = loadReal('lib/productWrites.ts', { './schemaProbe': schema
   './audit': loadReal('lib/audit.ts', { './db': { getDb: () => dbShim } }),
   './catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts'),
   './db': { getDb: () => dbShim },
+  // Only a create-fold that carries its request receipt writes one (lib/createFold.ts); this test never folds a create.
+  './stockMutationReceipt': { completedStockMutationReceiptStatement: () => { throw new Error('this test passes no stock-mutation receipt') } },
   './media': media,
   './importImageMatch': importImageMatch,
   './productDiscountGate': loadReal('lib/productDiscountGate.ts'),
@@ -165,6 +167,8 @@ const productsRoute = loadReal('routes/products.ts', {
   '../lib/promotionRules': promotionRules,
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => dbShim },
+  // 6.0.132: the create route folds through lib/createFold.ts; this test never folds a create.
+  '../lib/createFold': new Proxy({}, { get: (_t, key) => () => { throw new Error('createFold.' + String(key) + ' is not part of this test') } }),
   '../lib/importMaintenanceFence': { getImportFencedDb: async () => dbShim, isImportMaintenanceFenceError: () => false },
   '../lib/lowStockSettings': lowStockStub,
   // routes/products.ts buckets the sales drill-down in UTC+7 through the pure
