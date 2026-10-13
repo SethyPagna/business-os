@@ -25,10 +25,35 @@ const AUDIT_LOG_RETENTION_MIN_INTERVAL_MS = 24 * 60 * 60 * 1000
 // ordinary Shift logs and legacy writes without request identity still age out.
 // Keep this predicate narrow: ordinary audit data, the original bulk receipt,
 // and unrelated undo/redo rows continue to follow the configured retention.
+//
+// K11, owner 13 Oct (relayed): "keep old expenses. ... for the revert, yes, as
+// it is same with stock changes ... for undo redo history no need." So, kept
+// forever regardless of age:
+//   - expense evidence: every row about an expense record (entity 'fee': create,
+//     edit, delete, approved delete) or an expense label rewrite ('fee_label':
+//     replace, classify), and the review decisions on expense requests
+//     ('pending_action' rows whose request section is 'fees');
+//   - revert records: the audit rows of a stock Revert (a compensating
+//     counter-movement, kept like the stock change itself) and of the one-off
+//     repairs of a revert. scripts/test-audit-retention-pure.cjs fails if the
+//     source writes a 'stock_revert*' action this list does not name.
+// Undo/Redo history ('action_undo'/'action_redo' rows, including those about an
+// expense) still ages out, as does everything else not named here. The
+// expense and revert ledgers themselves (fees, fee_operation_receipts,
+// inventory_movements) are never touched by this sweep.
+export const AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES = ['fee', 'fee_label'] as const
+export const AUDIT_RETENTION_KEPT_REVERT_ACTIONS = ['stock_revert', 'stock_revert_repair', 'stock_revert_repair_before'] as const
+const sqlList = (values: readonly string[]): string => values.map((value) => `'${value}'`).join(', ')
+
 export function buildAuditLogRetentionDeleteSql(): string {
   return `DELETE FROM audit_logs WHERE id IN (
     SELECT id FROM audit_logs
     WHERE created_at < @cutoff
+      AND NOT (COALESCE(entity, '') IN (${sqlList(AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES)})
+        AND COALESCE(action, '') NOT IN ('action_undo', 'action_redo'))
+      AND NOT (COALESCE(entity, '') = 'pending_action'
+        AND COALESCE(CASE WHEN json_valid(details) THEN json_extract(details, '$.section') END, '') = 'fees')
+      AND COALESCE(action, '') NOT IN (${sqlList(AUDIT_RETENTION_KEPT_REVERT_ACTIONS)})
       AND NOT COALESCE(CASE WHEN json_valid(details) THEN (
         (entity = 'return'
         AND action IN ('action_undo','action_redo')

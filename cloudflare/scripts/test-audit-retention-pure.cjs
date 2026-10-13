@@ -122,4 +122,78 @@ assert.match(compatSource, /prepare\(buildAuditLogRetentionDeleteSql\(\)\)/,
 assert.doesNotMatch(compatSource, /DELETE FROM audit_logs WHERE id IN \(SELECT id FROM audit_logs WHERE created_at < @cutoff LIMIT 5000\)/,
   'manual retention must not retain its old blanket deletion path')
 
+// ---------------------------------------------------------------------------------------------------------------
+// K11, owner ruling 13 Oct (relayed): "keep old expenses ... for the revert, yes, as it is same with stock changes ...
+// for undo redo history no need." Expense evidence and revert records never age out; Undo/Redo history still does.
+// The same fixture is run against the shipped SQL and against three wrong policies (sweep off, no K11 exemptions,
+// keep every expense row including its undo history); each wrong policy must give a different answer.
+// ---------------------------------------------------------------------------------------------------------------
+{
+  const { AUDIT_RETENTION_KEPT_REVERT_ACTIONS, AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES } = moduleObj.exports
+  assert.deepEqual([...AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES], ['fee', 'fee_label'])
+  const rows = [
+    // [id, action, entity, details, keep]
+    [1, 'create', 'fee', '{"after":{"amount_usd":5}}', true],
+    [2, 'update', 'fee', '{"before":{},"after":{}}', true],
+    [3, 'delete', 'fee', '{"before":{},"after":null}', true],
+    [4, 'delete', 'fee', null, true],                        // the pre-fix approved delete wrote details = NULL
+    [5, 'replace', 'fee_label', '{"from":"a","to":"b"}', true],
+    [6, 'classify', 'fee_label', '{"label":"Grab"}', true],
+    [7, 'approve', 'pending_action', '{"section":"fees","action_type":"delete"}', true],
+    [8, 'reject', 'pending_action', '{"section":"fees","action_type":"delete"}', true],
+    [9, 'stock_revert', 'product', '{"movementId":1}', true],
+    [10, 'stock_revert_repair', 'product', '{}', true],
+    [11, 'stock_revert_repair_before', 'product', '{}', true],
+    [12, 'action_undo', 'fee', '{"actionHistoryId":1}', false],  // Undo/Redo history: "no need"
+    [13, 'action_redo', 'fee', '{"actionHistoryId":1}', false],
+    [14, 'action_undo', 'product', '{"actionHistoryId":2}', false],
+    [15, 'approve', 'pending_action', '{"section":"products"}', false],
+    [16, 'reject', 'pending_action', '{broken', false],
+    [17, 'update', 'settings', '{}', false],
+    [18, null, null, null, false],                           // NULL entity/action must not be kept by accident
+    [19, 'adjust', 'product', '{"note":"stock_revert"}', false],
+  ]
+  const recent = [[100, 'update', 'settings', '{}'], [101, 'action_undo', 'fee', '{}']]
+  const run = (deleteSql) => {
+    const db = new Database(':memory:')
+    db.exec('CREATE TABLE audit_logs (id INTEGER PRIMARY KEY, action TEXT, entity TEXT, details TEXT, entity_id TEXT, user_id INTEGER, old_value TEXT, new_value TEXT, created_at TEXT)')
+    const ins = db.prepare('INSERT INTO audit_logs(id,action,entity,details,created_at) VALUES(?,?,?,?,?)')
+    for (const [id, action, entity, details] of rows) ins.run(id, action, entity, details, '2026-08-01 00:00:00')
+    for (const [id, action, entity, details] of recent) ins.run(id, action, entity, details, '2026-09-30 00:00:00')
+    db.prepare(deleteSql).run({ cutoff: '2026-09-01 00:00:00' })
+    const left = db.prepare('SELECT id FROM audit_logs ORDER BY id').all().map((row) => row.id)
+    db.close()
+    return left
+  }
+  const expected = [...rows.filter((row) => row[4]).map((row) => row[0]), ...recent.map((row) => row[0])]
+  const shipped = buildAuditLogRetentionDeleteSql()
+  assert.deepEqual(run(shipped), expected, 'K11: expense evidence and revert records survive; Undo/Redo history and ordinary rows age out')
+
+  // Discrimination: the fixture tells the ruling apart from the plausible wrong policies.
+  const k11 = /\n\s*AND NOT \(COALESCE\(entity, ''\) IN \('fee', 'fee_label'\)[\s\S]*?AND COALESCE\(action, ''\) NOT IN \('stock_revert', 'stock_revert_repair', 'stock_revert_repair_before'\)/
+  assert.match(shipped, k11, 'the K11 predicate is where this test expects it')
+  const wrong = {
+    'sweep disabled (keeps everything)': shipped.replace('WHERE created_at < @cutoff', 'WHERE 0'),
+    'no K11 exemptions (blanket 21-day sweep)': shipped.replace(k11, ''),
+    'every expense row kept, its Undo/Redo history too': shipped.replace("AND COALESCE(action, '') NOT IN ('action_undo', 'action_redo'))", ')'),
+  }
+  for (const [name, sql] of Object.entries(wrong)) {
+    assert.notEqual(sql, shipped, name + ': the mutation applied')
+    assert.notDeepEqual(run(sql), expected, name + ' must not satisfy the ruling')
+  }
+
+  // Every revert action the source writes is on the kept list (a new 'stock_revert*' action cannot silently age out).
+  const srcRoot = path.join(__dirname, '..', 'src')
+  const written = new Set()
+  const walk = (dir) => { for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) walk(full)
+    else if (entry.name.endsWith('.ts')) for (const m of fs.readFileSync(full, 'utf8').matchAll(/'(stock_revert[a-z_]*)'/g)) written.add(m[1])
+  } }
+  walk(srcRoot)
+  assert.ok(written.has('stock_revert'), 'the stock Revert route still writes stock_revert')
+  for (const action of written) assert.ok(AUDIT_RETENTION_KEPT_REVERT_ACTIONS.includes(action), 'revert action ' + action + ' must be kept by retention')
+  console.log('audit retention K11: expense evidence + revert records kept, Undo/Redo history pruned; 3 wrong policies rejected')
+}
+
 console.log('audit retention: Return bulk provenance and exact Shift lifecycle receipts preserved narrowly')
