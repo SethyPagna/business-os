@@ -119,6 +119,20 @@ runTest('prices shown: the card prices follow the display currency', () => {
   assert.match(renderCard({ showPrices: true, priceDisplay: 'KHR' }, recommendation), /5,061,696៛/)
 })
 
+runTest('prices on but the payload carries none (flag flipped mid-visit, or an old bundle against the new Worker): no price, never $0.00 or 0៛', () => {
+  const unpriced = { reason: 'fits oily skin', fit_summary: 'light texture' }
+  for (const priceDisplay of ['USD', 'KHR', 'BOTH']) {
+    const html = renderCard({ showPrices: true, priceDisplay }, unpriced)
+    assert.match(html, /Daily Sunscreen/)
+    assert.ok(!html.includes('$0') && !html.includes('0៛') && !html.includes('NaN'), `no invented price (priceDisplay=${priceDisplay})`)
+    assert.ok(!html.includes(' | '), 'no empty price separator')
+  }
+  const wrongCurrency = renderCard({ showPrices: true, priceDisplay: 'KHR' }, { reason: 'x', selling_price_usd: 12.5 })
+  assert.ok(!wrongCurrency.includes('0៛') && !wrongCurrency.includes('12.50'), 'KHR mode with only a USD figure shows nothing')
+  const garbage = renderCard({ showPrices: true, priceDisplay: 'USD' }, { reason: 'x', selling_price_usd: 'abc' })
+  assert.ok(!garbage.includes('NaN') && !garbage.includes('$0'), 'a non-numeric price shows nothing')
+})
+
 if (failed > 0) {
   console.error(`\n${failed} failing test(s)`)
   process.exit(1)

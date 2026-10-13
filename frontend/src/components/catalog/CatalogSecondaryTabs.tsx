@@ -798,6 +798,12 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
           <div className="space-y-3">
             {assistantResponse.recommendations.map((item) => {
               const open = assistantExpandedProductId === item.product_id
+              const servedPrice = previewConfig.showPrices === true
+                ? (previewConfig.priceDisplay === 'KHR' ? item.selling_price_khr : item.selling_price_usd)
+                : undefined
+              const priceLabel = typeof servedPrice === 'number' && Number.isFinite(servedPrice)
+                ? (previewConfig.priceDisplay === 'KHR' ? `${servedPrice.toLocaleString()}៛` : `$${servedPrice.toFixed(2)}`)
+                : ''
               return (
                 <article key={item.product_id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900/90">
                   <button type="button" className="flex w-full items-start gap-3 px-4 py-4 text-left" onClick={() => setAssistantExpandedProductId((current) => current === item.product_id ? null : item.product_id)}>
@@ -815,10 +821,10 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                       </div>
                       <div className="mt-1 text-xs text-slate-500 dark:text-neutral-400">
                         {item.category || copy('noCategory', 'No category', 'គ្មានប្រភេទ')}
-                        {previewConfig.showPrices === true ? (
+                        {priceLabel ? (
                           <>
                             {' | '}
-                            <span translate="no" className="notranslate">{previewConfig.priceDisplay === 'KHR' ? `${Number(item.selling_price_khr || 0).toLocaleString()}៛` : `$${Number(item.selling_price_usd || 0).toFixed(2)}`}</span>
+                            <span translate="no" className="notranslate">{priceLabel}</span>
                           </>
                         ) : null}
                       </div>
