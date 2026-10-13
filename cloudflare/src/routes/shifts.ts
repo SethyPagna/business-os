@@ -1265,8 +1265,8 @@ app.post('/close', async (c) => {
     note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Manual shift close', request: mutationRequest(body, shift.id) })
   if (result.changed) {
     // The report names the closer when it is not the cashier (an administrator closing a till):
-    // the stored closed_by_user_name, the name the close just wrote.
-    const report = sendTelegramShiftReport(c.env, shift.id, Date.now(), { closedBy: result.shift?.closed_by_user_name ?? displayName(user) })
+    // the stored closer's name and account id, which the close just wrote.
+    const report = sendTelegramShiftReport(c.env, shift.id, Date.now(), { closedBy: result.shift?.closed_by_user_name ?? displayName(user), closedById: result.shift?.closed_by_user_id ?? user.id })
     try { c.executionCtx.waitUntil(report) } catch { void report }
     scheduleOverviewAfterClose(c, shift.id)
     return c.json({ shift: result.shift ? await reconciledShift(c.env, user, result.shift) : null, already_closed: false, is_open: false }, 200)
@@ -1311,7 +1311,7 @@ app.post('/:id/close', async (c) => {
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
     note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Historic manual close', request: mutationRequest(body, id) })
   if (!result.changed || !result.shift) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
-  const report = sendTelegramShiftReport(c.env, shift.id, Date.now(), { closedBy: result.shift.closed_by_user_name ?? displayName(user) })
+  const report = sendTelegramShiftReport(c.env, shift.id, Date.now(), { closedBy: result.shift.closed_by_user_name ?? displayName(user), closedById: result.shift.closed_by_user_id ?? user.id })
   try { c.executionCtx.waitUntil(report) } catch { void report }
   scheduleOverviewAfterClose(c, shift.id)
   return c.json({ shift: await reconciledShift(c.env, user, result.shift), already_closed: false, is_open: false }, 200)

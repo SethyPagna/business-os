@@ -186,6 +186,7 @@ async function main() {
     sok: { id: 8, name: 'Sok Full Name', username: 'sok', permissions: pos, phone: '+85522222222', email: 'sok@example.com' },
     dara: { id: 9, name: 'Dara Full Name', username: 'dara', permissions: pos },
     lee: { id: 10, name: 'Lee Full Name', username: 'lee', permissions: pos },
+    mia: { id: 11, name: 'Mia Full Name', username: 'mia', permissions: pos },
     owner: { id: 1, name: 'Owner Full Name', username: 'owner', role_code: 'admin', permissions: pos, phone: '+85533333333', email: 'owner@example.com' },
   }
   let user = users.za
@@ -266,7 +267,7 @@ async function main() {
 
   // Open the shifts the scenarios need (each cashier once on this branch-day).
   const opened = {}
-  for (const who of ['za', 'sok', 'dara', 'lee']) {
+  for (const who of ['za', 'sok', 'dara', 'lee', 'mia']) {
     const sent = await act(who, 'POST', '/open', TODAY_OPEN, 201)
     opened[who] = sent.json.shift
     assert.deepEqual(anyActorRow(sent.text), [], `a fresh open names nobody (${who})`)
@@ -288,13 +289,31 @@ async function main() {
   await section('1. a cashier closing their OWN till: no "Closed by" row (the Cashier row says it)', async () => {
     const sent = await act('za', 'POST', '/close', { shift_id: opened.za.id, expected_revision: opened.za.revision, client_request_id: 'actors-close-za-0001', ...counted }, 200)
     assert.equal(sent.options.closedBy, 'za', 'the route hands over the stored closer')
+    assert.equal(sent.options.closedById, users.za.id, 'and the closing account id')
     assert.deepEqual(anyActorRow(sent.text), [], sent.text)
     for (const mode of ['en', 'km']) assert.deepEqual(anyActorRow(await replay(sent, mode)), [], `[${mode}]`)
+  })
+
+  await section('1b. the cashier is told apart from the closer by account, not by name', async () => {
+    // mia opened under the name "mia"; the account has been renamed since, and she closes her own till.
+    users.mia = { ...users.mia, username: 'mia-renamed', name: 'Mia Renamed' }
+    const sent = await act('mia', 'POST', '/close', { shift_id: opened.mia.id, expected_revision: opened.mia.revision, client_request_id: 'actors-close-mia-0001', ...counted }, 200)
+    assert.deepEqual([sent.options.closedBy, sent.options.closedById], ['mia-renamed', users.mia.id])
+    assert.deepEqual(anyActorRow(sent.text), [], `the same account is not named again under its new name\n${sent.text}`)
+    assert.ok(!sent.text.includes('mia-renamed'), 'the new name appears nowhere in the report')
+    // The composer on its own: the id decides when it is given, the name only as the fallback.
+    const rowsFor = async (options) => anyActorRow(await replay({ shiftId: opened.za.id, options }, 'en'))
+    const named = (name) => [actorRow('en', 'shift_closed_by', name)]
+    assert.deepEqual(await rowsFor({ closedBy: 'ZA', closedById: users.owner.id }), named('ZA'), 'another account that carries the cashier\'s name is still another account')
+    assert.deepEqual(await rowsFor({ closedBy: 'someone-new', closedById: users.za.id }), [], 'the cashier\'s own account under any name is the cashier')
+    assert.deepEqual(await rowsFor({ closedBy: 'ZA' }), [], 'without an id the names are compared, case-insensitively')
+    assert.deepEqual(await rowsFor({ closedBy: 'owner' }), named('owner'), 'and a different name is named')
   })
 
   await section('2. an administrator closing a cashier\'s till (live close): "Closed by: owner" under the cashier\'s ID', async () => {
     const sent = await act('owner', 'POST', '/close', { shift_id: opened.sok.id, expected_revision: opened.sok.revision, client_request_id: 'actors-close-sok-0001', ...counted }, 200)
     assert.equal(sent.options.closedBy, 'owner', 'the stored closed_by_user_name, not the cashier')
+    assert.equal(sent.options.closedById, users.owner.id, 'and the closing account id')
     const code = codeOf(opened.sok.id)
     for (const mode of ['both', 'en', 'km']) {
       const text = mode === 'both' ? sent.text : await replay(sent, mode)
@@ -315,7 +334,7 @@ async function main() {
     const sent = await act('owner', 'POST', `/${opened.dara.id}/close`, {
       expected_revision: opened.dara.revision, closed_at: new Date().toISOString(), ...counted,
     }, 200)
-    assert.equal(sent.options.closedBy, 'owner')
+    assert.deepEqual([sent.options.closedBy, sent.options.closedById], ['owner', users.owner.id])
     assert.deepEqual(anyActorRow(sent.text), [actorRow('both', 'shift_closed_by', 'owner')], sent.text)
   })
 
@@ -368,9 +387,10 @@ async function main() {
   await section('7. every other send names nobody: the three actor rows are reserved for their own events', async () => {
     const closeSends = sends.filter((send) => send.options)
     assert.deepEqual(closeSends.map((send) => Object.keys(send.options).sort()), [
-      ['closedBy'], ['closedBy'], ['closedBy'], ['reopenedBy'], ['reopenedBy'], ['amendedBy'],
-    ].map((keys) => keys.sort()), 'one actor key per event: close x3, reopen x2, amend x1')
-    assert.equal(sends.filter((send) => !send.options).length, 6, 'open x4 + cancel + replacement open pass no options')
+      ['closedBy', 'closedById'], ['closedBy', 'closedById'], ['closedBy', 'closedById'], ['closedBy', 'closedById'],
+      ['reopenedBy'], ['reopenedBy'], ['amendedBy'],
+    ].map((keys) => keys.sort()), 'one actor per event: close x4 (name and account id), reopen x2, amend x1')
+    assert.equal(sends.filter((send) => !send.options).length, 7, 'open x5 + cancel + replacement open pass no options')
   })
 
   if (failures.length) {

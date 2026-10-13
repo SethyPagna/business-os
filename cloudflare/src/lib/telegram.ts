@@ -1186,9 +1186,11 @@ export type ShiftReportSession = {
  *    is posted under the ORIGINAL cashier's name, so without this it reads as a
  *    fresh open. Shown even when the reopener is the cashier.
  *  - `closedBy`: the account that closed it (closed_by_user_name). Shown only when
- *    it is not the cashier, who is already on the Cashier row.
+ *    it is not the cashier, who is already on the Cashier row. `closedById` is that
+ *    account's id: when given the two are compared by account, so a cashier renamed
+ *    since opening is still the cashier; without it, by name.
  */
-export type ShiftReportOptions = { amendedBy?: string | null; reopenedBy?: string | null; closedBy?: string | null }
+export type ShiftReportOptions = { amendedBy?: string | null; reopenedBy?: string | null; closedBy?: string | null; closedById?: number | null }
 
 export type ShiftReportFigures = {
   invoices: number
@@ -1367,7 +1369,8 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   const closedBy = cleanLine(options.closedBy, 60)
   // A cashier closing their own till is already on the Cashier row; naming them
   // again would be noise on the commonest close of all.
-  if (closedBy && closedBy.toLowerCase() !== cashier) lines.push(labeled('closedBy', closedBy))
+  const closerIsCashier = options.closedById != null ? options.closedById === shift.user_id : closedBy.toLowerCase() === cashier
+  if (closedBy && !closerIsCashier) lines.push(labeled('closedBy', closedBy))
   const reopenedBy = cleanLine(options.reopenedBy, 60)
   if (reopenedBy) lines.push(labeled('reopenedBy', reopenedBy))
   const amendedBy = cleanLine(options.amendedBy, 60)
