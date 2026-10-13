@@ -153,6 +153,24 @@ async function main() {
     assert.ok(!('selling_price_khr' in result.recommendations[0]))
   })
 
+  await check('generatePortalAiResponse itself fails closed: a config without showPrices, or with a non-true value, serves no price', async () => {
+    for (const config of [
+      { businessName: 'Shop', aiProviderId: null, aiDisclaimer: 'AI disclaimer', aiPrompt: '' },
+      { businessName: 'Shop', aiProviderId: null, aiDisclaimer: 'AI disclaimer', aiPrompt: '', showPrices: undefined },
+      { businessName: 'Shop', aiProviderId: null, aiDisclaimer: 'AI disclaimer', aiPrompt: '', showPrices: 'true' },
+      { businessName: 'Shop', aiProviderId: null, aiDisclaimer: 'AI disclaimer', aiPrompt: '', showPrices: 1 },
+    ]) {
+      modelReply = MODEL_JSON_WITH_LABEL_FACTS
+      sentMessages = []
+      const result = await generatePortalAiResponse({ APP_ENCRYPTION_KEY: 'k' }, { config, profile: {}, question: 'sunscreen', products: [product()], visitorFingerprint: 'v' })
+      assert.strictEqual(result.recommendations.length, 1, 'positive control: the recommendation is served')
+      assert.ok(!JSON.stringify(result.recommendations).includes(String(PRICE_USD)), `no price for showPrices=${String(config.showPrices)}`)
+      assert.ok(!('selling_price_usd' in result.recommendations[0]) && !('selling_price_khr' in result.recommendations[0]))
+      const prompt = sentMessages.map((message) => message.content).join(' ')
+      assert.match(prompt, /does not show prices on its website/, 'the prompt takes the hidden-prices branch as well')
+    }
+  })
+
   await check('the model never sees a price in either mode, and is told to say prices are hidden when they are', async () => {
     for (const showPrices of [true, false]) {
       const { prompt } = await ask(showPrices)
