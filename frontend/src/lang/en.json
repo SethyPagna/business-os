@@ -6613,6 +6613,7 @@
   "shift_save_amendment": "Save amendment",
   "shift_amendments": "Amendment record",
   "shift_edited": "Edited",
+  "shift_amended_by": "Amended by",
   "shift_branch_inactive": "Branch inactive",
   "shift_branch_inactive_hint": "This branch no longer trades. The shift stays here as a read-only record; a shift still open there can only be closed.",
   "shift_branch_closed_title": "This branch is closed",

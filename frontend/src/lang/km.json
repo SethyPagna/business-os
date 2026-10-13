@@ -6613,6 +6613,7 @@
   "shift_save_amendment": "រក្សាទុកការកែប្រែ",
   "shift_amendments": "កំណត់ត្រាការកែប្រែ",
   "shift_edited": "បានកែប្រែ",
+  "shift_amended_by": "កែប្រែដោយ",
   "shift_branch_inactive": "សាខាអសកម្ម",
   "shift_branch_inactive_hint": "សាខានេះលែងលក់ហើយ។ វេននេះនៅរក្សាទុកទីនេះជាកំណត់ត្រាសម្រាប់មើលតែប៉ុណ្ណោះ។ វេនដែលនៅបើកនៅទីនោះ អាចត្រឹមតែបិទប៉ុណ្ណោះ។",
   "shift_branch_closed_title": "សាខានេះបានបិទ",

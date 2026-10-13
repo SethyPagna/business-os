@@ -1174,6 +1174,15 @@ export type ShiftReportSession = {
   cancel_reason?: string | null
 }
 
+/**
+ * What a particular SEND adds to the shift report beyond the shift's own row.
+ * `amendedBy` is the account that just amended the shift (PATCH /api/shifts/:id):
+ * the report is re-sent as a new message, and a status-style message names who
+ * did it. The name the amendment record stores (the account username, from the
+ * route's displayName) -- never a phone number or an email.
+ */
+export type ShiftReportOptions = { amendedBy?: string | null }
+
 export type ShiftReportFigures = {
   invoices: number
   cancelled: number
@@ -1310,7 +1319,7 @@ function reviewReasons(codes: readonly string[]): string {
  * scripts/test-shift-report-pure.cjs drives it directly, so the shape and the
  * arithmetic are pinned without a database.
  */
-export function formatShiftReport(shopName: string, shift: ShiftReportSession, figures: ShiftReportFigures, nowMs: number = Date.now()): string {
+export function formatShiftReport(shopName: string, shift: ShiftReportSession, figures: ShiftReportFigures, nowMs: number = Date.now(), options: ShiftReportOptions = {}): string {
   const cancelled = !!shift.cancelled_at
   // The TITLE states the shift's state, the way the owner's reference does
   // ("Shift Report - Open or Closed"), after a colon since Sep 23 2026. An
@@ -1344,6 +1353,11 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     // in half either.
     labeled('shift', cleanLine(shift.shift_code, 80)),
   ]
+  // A report re-sent after an amendment says who amended it (owner rule: a change
+  // notification names who did it). One row, with the other who/which rows; absent
+  // when the send is not an amendment or the account has no username.
+  const amendedBy = cleanLine(options.amendedBy, 60)
+  if (amendedBy) lines.push(labeled('amendedBy', amendedBy))
   if (cancelled) {
     lines.push(row(bi('Cancelled at', 'បោះបង់នៅ'), formatBusinessDateTime(shift.cancelled_at, nowMs)))
     lines.push(row(bi('Cancelled by', 'បោះបង់ដោយ'), cleanLine(shift.cancelled_by_user_name || 'Unknown', 60)))
@@ -1623,9 +1637,9 @@ async function shopName(env: Env): Promise<string> {
   return cleanLine(row?.value || 'Business OS', 80)
 }
 
-async function shiftReportFor(env: Env, shift: ShiftReportSession, nowMs: number, language: TelegramLanguage): Promise<string> {
+async function shiftReportFor(env: Env, shift: ShiftReportSession, nowMs: number, language: TelegramLanguage, options: ShiftReportOptions = {}): Promise<string> {
   const [name, figures] = await Promise.all([shopName(env), shiftFigures(env, shift, nowMs, language)])
-  return withLanguage(language, () => formatShiftReport(name, shift, figures, nowMs))
+  return withLanguage(language, () => formatShiftReport(name, shift, figures, nowMs, options))
 }
 
 /**
@@ -1666,13 +1680,13 @@ async function shiftReport(env: Env, date: string, nowMs: number, language: Tele
  * the id is unknown, so it can never turn a successful close into a failed
  * request.
  */
-export async function sendTelegramShiftReport(env: Env, shiftId: number, nowMs: number = Date.now()): Promise<boolean> {
+export async function sendTelegramShiftReport(env: Env, shiftId: number, nowMs: number = Date.now(), options: ShiftReportOptions = {}): Promise<boolean> {
   try {
     const config = await getTelegramConfig(env)
     if (!config.enabled || configurationProblem(config)) return false
     const shift = await getDb(env).prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE id = @id`).get<ShiftReportSession>({ id: shiftId })
     if (!shift) return false
-    await postTelegram(config, await shiftReportFor(env, shift, nowMs, config.language), config.chatId, config.topics.telegram_topic_shift, 'telegram_topic_shift')
+    await postTelegram(config, await shiftReportFor(env, shift, nowMs, config.language, options), config.chatId, config.topics.telegram_topic_shift, 'telegram_topic_shift')
     return true
   } catch (error) {
     console.error('[telegram] shift report could not be sent', error)
