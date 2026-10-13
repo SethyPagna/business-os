@@ -51,12 +51,13 @@ type ProductsResetToggles = {
 }
 
 type ResetApi = {
-  resetData?: (mode: ResetMode, options: ProductsResetToggles & ResetConfirmation) => Promise<ResetApiResult>
-  resetSection?: (section: 'customers' | 'suppliers' | 'delivery_contacts' | 'audit_log') => Promise<ResetApiResult>
+  resetData?: (mode: ResetMode, options: ProductsResetToggles & ResetConfirmation & { currentPassword: string }) => Promise<ResetApiResult>
+  resetSection?: (section: 'customers' | 'suppliers' | 'delivery_contacts' | 'audit_log', confirmation: { currentPassword: string }) => Promise<ResetApiResult>
   factoryReset?: (confirmation: ResetConfirmation & { currentPassword: string }) => Promise<ResetApiResult>
 }
 
 type ResetConfirmation = { confirm: string; acknowledged: true }
+type ResetSubmission = ResetConfirmation & { currentPassword?: string }
 
 function isBuiltInResetAdmin(user: PermissionUser): boolean {
   return String(user?.username || '').trim().toLowerCase() === 'admin'
@@ -79,7 +80,11 @@ type ConfirmResetProps = {
   whatDeleted: string
   whatKept?: string
   confirmWord: string
-  onConfirm: (confirmation: ResetConfirmation) => void
+  onConfirm: (confirmation: ResetSubmission) => void
+  // Every data wipe asks for the account's current password (the Worker
+  // enforces it); the migration-finalize steps only zero counts and do not.
+  requirePassword?: boolean
+  username?: string
   working: boolean
   elapsedSeconds?: number
   buttonLabel: string
@@ -135,6 +140,8 @@ function ConfirmReset({
   whatKept,
   confirmWord,
   onConfirm,
+  requirePassword = false,
+  username = '',
   working,
   elapsedSeconds = 0,
   buttonLabel,
@@ -148,6 +155,7 @@ function ConfirmReset({
   const [step, setStep] = useState(0)
   const [typed, setTyped] = useState('')
   const [acknowledged, setAcknowledged] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState('')
   const showSlowHint = working && elapsedSeconds * 1000 >= SLOW_ACTION_HINT_AFTER_MS
   const workingLabel = showSlowHint
     ? `${T('reset_working', 'Working...')} ${elapsedSeconds}s`
@@ -174,6 +182,7 @@ function ConfirmReset({
       setStep(0)
       setTyped('')
       setAcknowledged(false)
+      setCurrentPassword('')
     }
   }, [working])
   const borderCls = color === 'red' ? 'border-red-200 dark:border-red-900/50' : 'border-red-500 dark:border-red-700 bg-red-50/30 dark:bg-red-950/20'
@@ -222,15 +231,33 @@ function ConfirmReset({
             {T('reset_type_to_confirm', 'Type {word} to confirm').split('{word}')[1]}
           </p>
           <input autoFocus disabled={working} className="input font-mono text-sm disabled:opacity-60" placeholder={confirmWord} value={typed} onChange={(event) => setTyped(event.target.value)} />
+          {requirePassword ? (
+            <>
+              <input type="text" name="username" autoComplete="username" value={username} readOnly className="sr-only" tabIndex={-1} aria-hidden="true" />
+              <label className="block text-sm text-gray-700 dark:text-gray-300">
+                {T('current_password', 'Current password')}
+                <input
+                  type="password"
+                  name="current_password"
+                  autoComplete="current-password"
+                  disabled={working}
+                  className="input mt-1 text-sm disabled:opacity-60"
+                  value={currentPassword}
+                  onChange={(event) => setCurrentPassword(event.target.value)}
+                />
+              </label>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{T('reset_password_hint', 'Enter your current password to confirm. A fresh backup is taken before anything is deleted.')}</p>
+            </>
+          ) : null}
           <div className="flex gap-3">
             <button
-              onClick={() => { if (allowed && acknowledged && typed === confirmWord && !working) onConfirm({ confirm: typed, acknowledged: true }) }}
-              disabled={!allowed || !acknowledged || typed !== confirmWord || working}
+              onClick={() => { if (allowed && acknowledged && typed === confirmWord && (!requirePassword || currentPassword) && !working) onConfirm({ confirm: typed, acknowledged: true, ...(requirePassword ? { currentPassword } : {}) }) }}
+              disabled={!allowed || !acknowledged || typed !== confirmWord || (requirePassword && !currentPassword) || working}
               className={`rounded-lg px-4 py-2 text-sm text-white ${btnCls} disabled:opacity-40`}
             >
               {working ? workingLabel : buttonLabel}
             </button>
-            <button onClick={() => { setStep(0); setTyped(''); setAcknowledged(false) }} disabled={working} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300">{T('cancel', 'Cancel')}</button>
+            <button onClick={() => { setStep(0); setTyped(''); setAcknowledged(false); setCurrentPassword('') }} disabled={working} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300">{T('cancel', 'Cancel')}</button>
           </div>
           {showSlowHint ? (
             <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -376,15 +403,16 @@ function ResetData({ actionHistory = null }: ResetPanelProps) {
 
   const selected = MODES.find((entry) => entry.id === mode) || MODES[0]
 
-  const doReset = async (confirmation: ResetConfirmation) => {
+  const doReset = async (confirmation: ResetSubmission) => {
     if (!isBuiltInResetAdmin(user)) return notify(T('reset_builtin_admin_only', 'Only the built-in admin account can reset business data.'), 'error')
-    if (confirmation?.acknowledged !== true || confirmation?.confirm !== selected.word) return
+    const { currentPassword } = confirmation
+    if (confirmation?.acknowledged !== true || confirmation?.confirm !== selected.word || !currentPassword) return
     if (!hasPermission('backup_restore')) return notify(T('access_denied', 'No permission'), 'error')
     if (!beginSingleAction(resetInFlightRef, { blocked: working })) return
     setWorking(true)
     try {
       const result = await withLoaderTimeout(
-        () => getResetApi().resetData?.(mode, confirmation) || Promise.resolve({ success: false, error: 'Reset API is unavailable' }),
+        () => getResetApi().resetData?.(mode, { ...confirmation, currentPassword }) || Promise.resolve({ success: false, error: 'Reset API is unavailable' }),
         'Reset business data',
         RESET_DATA_TIMEOUT_MS,
       )
@@ -455,6 +483,8 @@ function ResetData({ actionHistory = null }: ResetPanelProps) {
         whatKept={selected.kept}
         confirmWord={selected.word}
         onConfirm={doReset}
+        requirePassword
+        username={String(user?.username || '')}
         working={working}
         elapsedSeconds={elapsedSeconds}
         buttonLabel={selected.label}
@@ -488,7 +518,7 @@ type PageResetOptionId = Extract<ResetMode, 'products'> | SectionMode
 type PageResetOption = Omit<ResetOption, 'id'> & { id: PageResetOptionId; kind: PageResetKind }
 
 type SectionResetApi = {
-  resetSection?: (section: SectionMode) => Promise<ResetApiResult>
+  resetSection?: (section: SectionMode, confirmation: { currentPassword: string }) => Promise<ResetApiResult>
 }
 
 // One consolidated screen rather than a separate per-page entry point for
@@ -587,8 +617,10 @@ function SectionReset({ actionHistory = null }: ResetPanelProps) {
   const whatDeleted = isProducts ? deletedParts.join('; ') : selected.deleted
   const whatKept = isProducts ? keptParts.join(', ') : selected.kept
 
-  const doReset = async (confirmation: ResetConfirmation) => {
+  const doReset = async (confirmation: ResetSubmission) => {
     if (isProducts && !isBuiltInResetAdmin(user)) return notify(T('reset_builtin_admin_only', 'Only the built-in admin account can reset business data.'), 'error')
+    const { currentPassword } = confirmation
+    if (!currentPassword) return
     if (isProducts && (confirmation?.acknowledged !== true || confirmation?.confirm !== selected.word)) return
     if (!hasPermission('backup_restore')) return notify(T('access_denied', 'No permission'), 'error')
     if (!beginSingleAction(sectionResetInFlightRef, { blocked: working })) return
@@ -596,8 +628,8 @@ function SectionReset({ actionHistory = null }: ResetPanelProps) {
     try {
       const result = await withLoaderTimeout(
         () => (isProducts
-          ? getResetApi().resetData?.('products', { ...productToggles, ...confirmation })
-          : (getResetApi() as SectionResetApi).resetSection?.(selected.id as SectionMode)
+          ? getResetApi().resetData?.('products', { ...productToggles, ...confirmation, currentPassword })
+          : (getResetApi() as SectionResetApi).resetSection?.(selected.id as SectionMode, { currentPassword })
         ) || Promise.resolve({ success: false, error: 'Reset API is unavailable' }),
         isProducts ? 'Reset products' : 'Reset section',
         RESET_DATA_TIMEOUT_MS,
@@ -662,6 +694,8 @@ function SectionReset({ actionHistory = null }: ResetPanelProps) {
         whatKept={whatKept}
         confirmWord={selected.word}
         onConfirm={doReset}
+        requirePassword
+        username={String(user?.username || '')}
         working={working}
         elapsedSeconds={elapsedSeconds}
         buttonLabel={selected.label}

@@ -1146,8 +1146,8 @@ const RESET_SECTION_MIRROR_TABLES = {
   audit_log: ['audit_logs'],
 }
 
-export async function resetSection(section) {
-  const result = await callSystemRuntimeMethod('resetSection', section)
+export async function resetSection(section, confirmation) {
+  const result = await callSystemRuntimeMethod('resetSection', section, confirmation)
   await invalidateClientRuntimeState(`reset-section-${section}`, RESET_SECTION_MIRROR_TABLES[section] || [])
   return result
 }

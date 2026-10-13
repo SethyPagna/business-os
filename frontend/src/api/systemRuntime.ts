@@ -42,9 +42,9 @@ export function getIntegrationDoctor(options: { deep?: boolean; write?: boolean 
 // called refreshAppData(). Given the LONG_SYSTEM_ACTION_TIMEOUT_MS this
 // file already uses for other slow one-shot system actions (pick-folder,
 // scale-migration, data-path), these two get the same treatment now.
-export async function resetData(mode: 'sales' | 'products' | 'all', options: { confirm: string; acknowledged: true; includeMovements?: boolean; includeSales?: boolean; includeImages?: boolean }): Promise<unknown> {
+export async function resetData(mode: 'sales' | 'products' | 'all', options: { confirm: string; acknowledged: true; currentPassword: string; includeMovements?: boolean; includeSales?: boolean; includeImages?: boolean }): Promise<unknown> {
   const phrase = { sales: 'RESET SALES', products: 'RESET PRODUCTS', all: 'DELETE ALL DATA' }[mode]
-  if (!phrase || options?.confirm !== phrase || options?.acknowledged !== true) throw new Error('Reset requires the warning acknowledgement and exact confirmation phrase.')
+  if (!phrase || options?.confirm !== phrase || options?.acknowledged !== true || !options?.currentPassword) throw new Error('Reset requires the warning acknowledgement, exact confirmation phrase and current password.')
   return route(
     'data:reset',
     () => apiFetch('POST', '/api/system/reset-data', { mode, ...options }, LONG_SYSTEM_ACTION_TIMEOUT_MS),
@@ -58,10 +58,11 @@ export async function resetData(mode: 'sales' | 'products' | 'all', options: { c
 // timeout as resetData/factoryReset above for the same reason: a fresh
 // backup + D1 batch delete can legitimately run past apiFetch's generic
 // default before the Worker responds.
-export async function resetSection(section: string): Promise<unknown> {
+export async function resetSection(section: string, confirmation: { currentPassword: string }): Promise<unknown> {
+  if (!confirmation?.currentPassword) throw new Error('Reset requires the current password.')
   return route(
     'data:resetSection',
-    () => apiFetch('POST', '/api/system/reset-section', { section }, LONG_SYSTEM_ACTION_TIMEOUT_MS),
+    () => apiFetch('POST', '/api/system/reset-section', { section, currentPassword: confirmation.currentPassword }, LONG_SYSTEM_ACTION_TIMEOUT_MS),
     null,
     true,
   )

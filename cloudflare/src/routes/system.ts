@@ -164,6 +164,33 @@ async function denyUnlessDefaultAdmin(c: any) {
   return null
 }
 
+// Step-up for every route that wipes data (SEC-4 / audit B2): the caller's
+// current password, checked through the shared rate-limited guard that profile
+// saves and Google unlink use, so an unattended or hijacked session cannot wipe
+// data on its own. Runs after the cheap validation and before any backup or
+// delete, so a refusal changes nothing. factory-reset answers a refusal with
+// 400 (its pinned contract) and the resets with 403; never 401, which the
+// client reads as a dead session.
+async function denyUnlessCurrentPassword(c: any, body: { currentPassword?: unknown }, refusalStatus: 400 | 403) {
+  const currentPassword = typeof body.currentPassword === 'string' ? body.currentPassword : ''
+  if (!currentPassword) {
+    return c.json({ success: false, error: 'Enter your current password to confirm. No data was changed.', code: 'current_password_required' }, refusalStatus)
+  }
+  const actorId = Number(c.get('user')?.id || 0)
+  const account = actorId
+    ? await getDb(c.env).prepare('SELECT password FROM users WHERE id = @id AND deleted_at IS NULL').get<{ password: string | null }>({ id: actorId })
+    : null
+  if (!account) return c.json({ error: 'Please sign in again to continue.' }, 403)
+  // Lazy, like the repair modules below: only the routes that ask for a password need it.
+  const guard = await import('../lib/currentPasswordGuard')
+  const verdict = await guard.verifyCurrentPassword(c, { actorId, targetId: actorId }, currentPassword, String(account.password || ''))
+  if (!verdict.ok && verdict.rateLimited) {
+    return c.json({ success: false, error: guard.CURRENT_PASSWORD_RATE_LIMITED_ERROR, code: 'current_password_rate_limited', retryAfterSeconds: verdict.retryAfterSeconds }, 429)
+  }
+  if (!verdict.ok) return c.json({ success: false, error: 'Current password is incorrect. No data was changed.', code: 'incorrect_password' }, refusalStatus)
+  return null
+}
+
 function resetDeleteStatements(tables: readonly string[]) {
   return tables.flatMap(table => table === 'products'
     ? [{ sql: 'UPDATE products SET stock_quantity = 0' }, { sql: `DELETE FROM "${table}"` }]
@@ -250,7 +277,19 @@ async function rateLimited(c: any, name: string, max: number, windowSeconds: num
 // All three modes force a fresh backup first (Part 248) -- 'products' had
 // this from the start; 'sales'/'all' were missing it until Part 248, a real
 // gap since they delete strictly more than 'products' does.
+//
+// Every mode also needs the caller's current password (denyUnlessCurrentPassword).
 // ---------------------------------------------------------------------------
+type ResetDataBody = {
+  mode?: string
+  includeMovements?: boolean
+  includeSales?: boolean
+  includeImages?: boolean
+  confirm?: string
+  acknowledged?: boolean
+  currentPassword?: unknown
+}
+
 app.post('/reset-data', async (c) => {
   const denied = denyUnlessRestorePermission(c)
   if (denied) return denied
@@ -260,11 +299,13 @@ app.post('/reset-data', async (c) => {
     return c.json({ error: 'Too many reset attempts. Wait a few minutes and try again.' }, 429)
   }
 
-  const body = await c.req.json<{ mode?: string; includeMovements?: boolean; includeSales?: boolean; includeImages?: boolean; confirm?: string; acknowledged?: boolean }>().catch(() => ({}) as { mode?: string; includeMovements?: boolean; includeSales?: boolean; includeImages?: boolean; confirm?: string; acknowledged?: boolean })
+  const body = await c.req.json<ResetDataBody>().catch(() => ({}) as ResetDataBody)
   const mode = body.mode === 'all' ? 'all' : body.mode === 'products' ? 'products' : 'sales'
   const phrase = mode === 'all' ? 'DELETE ALL DATA' : mode === 'products' ? 'RESET PRODUCTS' : 'RESET SALES'
   if (body.confirm !== phrase) return c.json({ success: false, error: `Type ${phrase} to confirm. No data was changed.`, code: 'reset_confirm_required' }, 400)
   if (body.acknowledged !== true) return c.json({ success: false, error: 'Acknowledge the reset warning before confirming. No data was changed.', code: 'reset_acknowledgement_required' }, 400)
+  const passwordDenied = await denyUnlessCurrentPassword(c, body, 403)
+  if (passwordDenied) return passwordDenied
   const includeMovements = mode === 'products' && body.includeMovements === true
   const includeSales = mode === 'products' && body.includeSales === true
   const includeImages = mode === 'products' && body.includeImages === true
@@ -701,11 +742,13 @@ app.post('/reset-section', async (c) => {
     return c.json({ error: 'Too many reset attempts. Wait a few minutes and try again.' }, 429)
   }
 
-  const body = await c.req.json<{ section?: string }>().catch(() => ({}) as { section?: string })
+  const body = await c.req.json<{ section?: string; currentPassword?: unknown }>().catch(() => ({}) as { section?: string; currentPassword?: unknown })
   const section = body.section as ResettableSection
   if (!RESETTABLE_SECTIONS.includes(section)) {
     return c.json({ error: `Unknown section. Must be one of: ${RESETTABLE_SECTIONS.join(', ')}` }, 400)
   }
+  const passwordDenied = await denyUnlessCurrentPassword(c, body, 403)
+  if (passwordDenied) return passwordDenied
 
   const config = SECTION_CONFIG[section]
   const db = getDb(c.env)
@@ -1250,25 +1293,10 @@ app.post('/factory-reset', async (c) => {
     return c.json({ success: false, error: `Type ${FACTORY_RESET_CONFIRM_PHRASE} to confirm. No data was changed.`, code: 'factory_reset_confirm_required' }, 400)
   }
   if (body.acknowledged !== true) return c.json({ success: false, error: 'Acknowledge the reset warning before confirming. No data was changed.', code: 'reset_acknowledgement_required' }, 400)
-  const currentPassword = typeof body.currentPassword === 'string' ? body.currentPassword : ''
-  if (!currentPassword) {
-    return c.json({ success: false, error: 'Enter your current password to confirm. No data was changed.', code: 'current_password_required' }, 400)
-  }
+  const passwordDenied = await denyUnlessCurrentPassword(c, body, 400)
+  if (passwordDenied) return passwordDenied
 
   const db = getDb(c.env)
-  const actorId = Number(user?.id || 0)
-  const account = actorId
-    ? await db.prepare('SELECT password FROM users WHERE id = @id AND deleted_at IS NULL').get<{ password: string | null }>({ id: actorId })
-    : null
-  if (!account) return c.json({ error: 'Please sign in again to continue.' }, 403)
-  // Lazy, like the repair modules above: only this route needs it.
-  const guard = await import('../lib/currentPasswordGuard')
-  const verdict = await guard.verifyCurrentPassword(c, { actorId, targetId: actorId }, currentPassword, String(account.password || ''))
-  if (!verdict.ok && verdict.rateLimited) {
-    return c.json({ success: false, error: guard.CURRENT_PASSWORD_RATE_LIMITED_ERROR, code: 'current_password_rate_limited', retryAfterSeconds: verdict.retryAfterSeconds }, 429)
-  }
-  // 400, never 401: the client treats a 401 on /api as a dead session.
-  if (!verdict.ok) return c.json({ success: false, error: 'Current password is incorrect. No data was changed.', code: 'incorrect_password' }, 400)
 
   if (!resolveSeedAdminPassword(c.env)) {
     return c.json({
