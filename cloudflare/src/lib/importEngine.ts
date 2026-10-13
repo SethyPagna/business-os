@@ -233,6 +233,10 @@ export type ImportRowResult = {
   existingId: number | null
   message: string | null
   code?: string
+  // The values `code`'s sentence names (a count, a branch, a row number), so the review can restate the sentence in the
+  // operator's language from the pack key named after the code (frontend importRowText.ts, IMPORT_ROW_CODES). `message`
+  // stays the English the errors CSV and an older client read. Absent on a row whose message is not coded.
+  params?: Record<string, string | number>
   // Structured form of `message` -- same content, kept as an array so a
   // row with more than one warning (e.g. negative stock AND a barcode
   // collision) doesn't lose the boundary between them the way joining into
@@ -2934,8 +2938,8 @@ export async function planInventoryImportStockGroups(
   rows: ImportRowResult[],
   rowGuardStatement: (rowNumber: number) => ImportStatement,
   nowIso: string,
-): Promise<{ groups: ImportStatement[][]; refused: Array<{ row: ImportRowResult; code: string; message: string }> }> {
-  const refused: Array<{ row: ImportRowResult; code: string; message: string }> = []
+): Promise<{ groups: ImportStatement[][]; refused: Array<{ row: ImportRowResult; code: string; message: string; params: Record<string, string | number> }> }> {
+  const refused: Array<{ row: ImportRowResult; code: string; message: string; params: Record<string, string | number> }> = []
   if (!rows.length) return { groups: [], refused }
   const pairs = uniqueStockPairs(rows.map((row) => row.data))
   const onHand = await readBranchOnHand(db, pairs)
@@ -2958,13 +2962,15 @@ export async function planInventoryImportStockGroups(
     const pair = state.get(`${productId}:${branchId}`)!
     const direction = Math.sign(delta)
     if (pair.direction && direction && direction !== pair.direction) {
-      refused.push({ row, code: INVENTORY_IMPORT_MIXED_DIRECTION_CODE, message: `An earlier row of this file moves ${String(data.product_name)} at ${String(data.branch_name)} the other way. Import additions and removals of one product separately.` })
+      refused.push({ row, code: INVENTORY_IMPORT_MIXED_DIRECTION_CODE, message: `An earlier row of this file moves ${String(data.product_name)} at ${String(data.branch_name)} the other way. Import additions and removals of one product separately.`,
+        params: { product: String(data.product_name), branch: String(data.branch_name) } })
       continue
     }
     if (delta < 0) {
       const need = -delta
       if (need > pair.onHand) {
-        refused.push({ row, code: INVENTORY_IMPORT_INSUFFICIENT_STOCK_CODE, message: `Only ${pair.onHand} on hand at ${String(data.branch_name)} after the rows before it -- cannot remove ${need}.` })
+        refused.push({ row, code: INVENTORY_IMPORT_INSUFFICIENT_STOCK_CODE, message: `Only ${pair.onHand} on hand at ${String(data.branch_name)} after the rows before it -- cannot remove ${need}.`,
+          params: { onHand: pair.onHand, branch: String(data.branch_name), quantity: need, afterEarlierRows: 1 } })
         continue
       }
       const takes: Array<{ batchId: number; quantity: number }> = []
@@ -3145,16 +3151,23 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
   }
   const canonicalImportBranches = indexCanonicalImportBranches(branches)
 
-  const pickCompatible = (candidates: (typeof products)[number][] | undefined, rowName: string): { product: (typeof products)[number] | null; message: string | null } => {
+  // A refusal names the sentence by `code` and the values it mentions by `params`; the caller prefixes the field it matched
+  // on (sku / barcode) as the English `SKU "x": ` and as the `field` / `value` params.
+  type PickRefusal = { code: string; params: Record<string, string | number> }
+  const pickCompatible = (candidates: (typeof products)[number][] | undefined, rowName: string): { product: (typeof products)[number] | null; message: string | null; refusal?: PickRefusal } => {
     if (!candidates?.length) return { product: null, message: null }
     if (!rowName) {
       if (candidates.length === 1) return { product: candidates[0], message: null }
-      return { product: null, message: `Matches ${candidates.length} different products -- add the product name so the right one is chosen.` }
+      return { product: null, message: `Matches ${candidates.length} different products -- add the product name so the right one is chosen.`,
+        refusal: { code: INVENTORY_IMPORT_ROW_CODES.matchManyProducts, params: { count: candidates.length } } }
     }
     const compatible = candidates.filter((candidate) => normalizeProductGroupName(candidate.name) === normalizeProductGroupName(rowName))
     if (compatible.length === 1) return { product: compatible[0], message: null }
-    if (compatible.length > 1) return { product: null, message: `Matches ${compatible.length} duplicate products with this same name -- merge them before importing.` }
-    return { product: null, message: `Belongs to a different product ("${candidates[0].name || 'unnamed'}") -- not "${rowName}". Stock adjustments never attach across names.` }
+    if (compatible.length > 1) return { product: null, message: `Matches ${compatible.length} duplicate products with this same name -- merge them before importing.`,
+      refusal: { code: INVENTORY_IMPORT_ROW_CODES.matchDuplicateProducts, params: { count: compatible.length } } }
+    const found = candidates[0].name || 'unnamed'
+    return { product: null, message: `Belongs to a different product ("${found}") -- not "${rowName}". Stock adjustments never attach across names.`,
+      refusal: { code: INVENTORY_IMPORT_ROW_CODES.matchOtherName, params: { found, given: rowName } } }
   }
 
   const results: ImportRowResult[] = []
@@ -3166,10 +3179,14 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     const rowName = str(row.name || row.product_name)
     let product: (typeof products)[number] | null = null
     let resolveError: string | null = null
+    let resolveRefusal: PickRefusal | null = null
     if (sku) {
       const picked = pickCompatible(bySku.get(lower(sku)), rowName)
       product = picked.product
-      if (picked.message) resolveError = `SKU "${sku}": ${picked.message}`
+      if (picked.message) {
+        resolveError = `SKU "${sku}": ${picked.message}`
+        if (picked.refusal) resolveRefusal = { code: picked.refusal.code, params: { ...picked.refusal.params, field: 'sku', value: sku } }
+      }
     }
     if (!product && !resolveError && barcode) {
       // Wildcard-aware (Sep 15 2026 ruling): scans by IDENTITY match, not a
@@ -3189,7 +3206,10 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
         : products.filter((candidate) => identityBarcodeKey(candidate.barcode) === identityBarcodeKey(barcode) && identityBarcodeKey(barcode))
       const picked = pickCompatible(barcodeMatches, rowName)
       product = picked.product
-      if (picked.message) resolveError = `Barcode "${barcode}": ${picked.message}`
+      if (picked.message) {
+        resolveError = `Barcode "${barcode}": ${picked.message}`
+        if (picked.refusal) resolveRefusal = { code: picked.refusal.code, params: { ...picked.refusal.params, field: 'barcode', value: barcode } }
+      }
     }
     // Name-only fallback, unambiguous matches only -- same as classifySales.
     // Only for rows with NO sku/barcode at all: a row that carries one which
@@ -3210,11 +3230,14 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
           product = pickIdentityClusterWinner(clusters[0])
         } else {
           resolveError = `Name "${rowName}" matches several products -- add the barcode so the right one is chosen.`
+          resolveRefusal = { code: INVENTORY_IMPORT_ROW_CODES.nameMatchesSeveral, params: { name: rowName } }
         }
       }
     }
     if (!product) {
-      results.push({ rowNumber: row._rowNumber, action: 'error', identifier: sku || barcode || rowName || null, existingId: null, message: resolveError || 'Product not found for sku/barcode', changes: {}, data: row })
+      const refusal = resolveRefusal ?? (resolveError ? null : { code: INVENTORY_IMPORT_ROW_CODES.productNotFound, params: undefined })
+      results.push({ rowNumber: row._rowNumber, action: 'error', identifier: sku || barcode || rowName || null, existingId: null, message: resolveError || 'Product not found for sku/barcode',
+        ...(refusal ? { code: refusal.code, ...(refusal.params ? { params: refusal.params } : {}) } : {}), changes: {}, data: row })
       continue
     }
     // 'add'/'remove' templates always carry a plain positive quantity (how
@@ -3229,7 +3252,8 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     try {
       quantity = parseImportNumericValue(row.quantity, 0, { allowNegative: !requireNonNegative, field: 'quantity', strict: true })
     } catch (error) {
-      results.push({ rowNumber: row._rowNumber, action: 'error', identifier: sku || barcode, existingId: product.id, message: (error as Error).message, changes: {}, data: row })
+      results.push({ rowNumber: row._rowNumber, action: 'error', identifier: sku || barcode, existingId: product.id, message: (error as Error).message,
+        code: (error as Error).message === 'quantity cannot be negative' ? INVENTORY_IMPORT_ROW_CODES.quantityNegative : INVENTORY_IMPORT_ROW_CODES.quantityInvalid, changes: {}, data: row })
       continue
     }
     if (requireNonNegative && quantity < 0) {
@@ -3240,7 +3264,8 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     let movementType: string
     let signedQuantity: number
     if ((inventoryAction === 'add' || inventoryAction === 'remove') && quantity === 0) {
-      results.push({ rowNumber: row._rowNumber, action: 'skip', identifier: sku || barcode, existingId: product.id, message: `Zero quantity: no ${inventoryAction === 'add' ? 'receipt' : 'removal'} needed.`, changes: {}, data: row })
+      results.push({ rowNumber: row._rowNumber, action: 'skip', identifier: sku || barcode, existingId: product.id, message: `Zero quantity: no ${inventoryAction === 'add' ? 'receipt' : 'removal'} needed.`,
+        code: inventoryAction === 'add' ? INVENTORY_IMPORT_ROW_CODES.zeroReceipt : INVENTORY_IMPORT_ROW_CODES.zeroRemoval, changes: {}, data: row })
       continue
     }
     if (inventoryAction === 'add') {
@@ -3258,7 +3283,7 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     } else {
       // Legacy combined-template path, unchanged.
       if (quantity === 0) {
-        results.push({ rowNumber: row._rowNumber, action: 'error', identifier: sku || barcode, existingId: product.id, message: 'Quantity must be non-zero', changes: {}, data: row })
+        results.push({ rowNumber: row._rowNumber, action: 'error', identifier: sku || barcode, existingId: product.id, message: 'Quantity must be non-zero', code: INVENTORY_IMPORT_ROW_CODES.quantityZero, changes: {}, data: row })
         continue
       }
       movementType = lower(row.movement_type) || (quantity >= 0 ? 'in' : 'out')
@@ -3277,6 +3302,9 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
         message: branchName
           ? `Branch "${branchName}" must uniquely match an existing active Shop or Warehouse.`
           : 'A blank branch requires exactly one active canonical default Shop or Warehouse.',
+        ...(branchName
+          ? { code: INVENTORY_IMPORT_ROW_CODES.branchUnmatched, params: { branch: branchName } }
+          : { code: INVENTORY_IMPORT_ROW_CODES.branchRequired }),
         changes: {},
         data: row,
       })
@@ -3370,13 +3398,32 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
 export const INVENTORY_IMPORT_INSUFFICIENT_STOCK_CODE = 'import_insufficient_branch_stock'
 export const INVENTORY_IMPORT_DUPLICATE_COUNT_CODE = 'import_duplicate_count_row'
 export const INVENTORY_IMPORT_MIXED_DIRECTION_CODE = 'import_mixed_direction_rows'
+// The rest of the inventory import's own row sentences (the classifier below). Each is a pack key of the same name
+// (frontend importRowText.ts); the parse errors the numeric / cost helpers throw are shared with other imports and stay
+// the Worker's English.
+export const INVENTORY_IMPORT_ROW_CODES = {
+  productNotFound: 'inventory_import_product_not_found',
+  matchManyProducts: 'inventory_import_match_many_products',
+  matchDuplicateProducts: 'inventory_import_match_duplicate_products',
+  matchOtherName: 'inventory_import_match_other_name',
+  nameMatchesSeveral: 'inventory_import_name_matches_several',
+  zeroReceipt: 'inventory_import_zero_receipt',
+  zeroRemoval: 'inventory_import_zero_removal',
+  quantityZero: 'inventory_import_quantity_zero',
+  quantityInvalid: 'inventory_import_quantity_invalid',
+  quantityNegative: 'inventory_import_quantity_negative',
+  branchUnmatched: 'inventory_import_branch_unmatched',
+  branchRequired: 'inventory_import_branch_required',
+  alreadyAtCount: 'inventory_import_already_at_count',
+} as const
 
 type BranchStockJudgedRow = { result: ImportRowResult; row: ParsedCsvRow; quantity: number; costs: { usd: number | null; khr: number | null } }
 
-function refuseInventoryRow(target: ImportRowResult, code: string, message: string, data?: Record<string, unknown>): void {
+function refuseInventoryRow(target: ImportRowResult, code: string, message: string, data?: Record<string, unknown>, params?: Record<string, string | number>): void {
   target.action = 'error'
   target.code = code
   target.message = message
+  if (params) target.params = params
   if (data) target.data = data
 }
 
@@ -3418,13 +3465,14 @@ async function judgeAgainstBranchStock(db: D1Compat, inventoryAction: InventoryI
     if (inventoryAction === 'set') {
       const earlier = firstCountRow.get(pair)
       if (earlier != null) {
-        refuseInventoryRow(result, INVENTORY_IMPORT_DUPLICATE_COUNT_CODE, `Row ${earlier} already counts this product at ${String(data.branch_name)}. Keep one count per product and branch.`, row)
+        refuseInventoryRow(result, INVENTORY_IMPORT_DUPLICATE_COUNT_CODE, `Row ${earlier} already counts this product at ${String(data.branch_name)}. Keep one count per product and branch.`, row,
+          { row: earlier, branch: String(data.branch_name) })
         continue
       }
       firstCountRow.set(pair, result.rowNumber)
       const signedQuantity = quantity - here
       if (signedQuantity === 0) {
-        Object.assign(result, { action: 'skip', message: `Already at ${quantity} -- no movement needed.`, data: row })
+        Object.assign(result, { action: 'skip', message: `Already at ${quantity} -- no movement needed.`, code: INVENTORY_IMPORT_ROW_CODES.alreadyAtCount, params: { quantity }, data: row })
         continue
       }
       const movementCosts = inventoryMovementCostSnapshot({ fallbackUsd: costs.usd, fallbackKhr: costs.khr, quantity: Math.abs(signedQuantity) })
@@ -3434,7 +3482,8 @@ async function judgeAgainstBranchStock(db: D1Compat, inventoryAction: InventoryI
         total_cost_usd: movementCosts.totalCostUsd, total_cost_khr: movementCosts.totalCostKhr,
       })
     } else if (-Number(data.signedQuantity) > here) {
-      refuseInventoryRow(result, INVENTORY_IMPORT_INSUFFICIENT_STOCK_CODE, `Only ${here} on hand at ${String(data.branch_name)} -- cannot remove ${-Number(data.signedQuantity)}.`, row)
+      refuseInventoryRow(result, INVENTORY_IMPORT_INSUFFICIENT_STOCK_CODE, `Only ${here} on hand at ${String(data.branch_name)} -- cannot remove ${-Number(data.signedQuantity)}.`, row,
+        { onHand: here, branch: String(data.branch_name), quantity: -Number(data.signedQuantity) })
     }
   }
 }
@@ -6500,7 +6549,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           && (r.data as Record<string, unknown>).inventory_receipt_plan_version !== INVENTORY_RECEIPT_PLAN_VERSION
           && !appliedRowGuards.has(`row:${r.rowNumber}`)), rowGuardStatement, nowIso)
       : null
-    for (const { row, code, message } of inventoryStockPlan?.refused ?? []) refuseInventoryRow(row, code, message)
+    for (const { row, code, message, params } of inventoryStockPlan?.refused ?? []) refuseInventoryRow(row, code, message, undefined, params)
     const actionable = results.filter((r) => r.action === 'create' || r.action === 'update')
     let importWriteDb = db
     // CUTOVER-LR: rows addressed to a retired branch and landed on the branch the operator confirmed re-prove that

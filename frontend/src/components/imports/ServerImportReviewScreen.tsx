@@ -15,6 +15,8 @@ type NotifyFn = (message: string, tone?: string) => void
 
 type ReviewRow = {
   code?: string | null
+  // The values a coded row's sentence names (importRowText.ts restates it from the pack by `code` + `params`).
+  params?: Record<string, unknown> | null
   rowNumber: number
   action: string
   identifier?: string | null

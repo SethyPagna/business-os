@@ -664,7 +664,7 @@ async function main() {
     })
 
     // ------------------------------------------------------------------ B9 / B10: rows that only together, or twice, do not fit
-    const rowResults = (jobId, phase) => H.q("SELECT action a, json_extract(result_json,'$.code') c FROM import_job_rows WHERE job_id=? AND phase=? ORDER BY row_number", jobId, phase)
+    const rowResults = (jobId, phase) => H.q("SELECT action a, json_extract(result_json,'$.code') c, json_extract(result_json,'$.params') p FROM import_job_rows WHERE job_id=? AND phase=? ORDER BY row_number", jobId, phase)
     await check('B9', 'apply: two Remove rows that each fit but together exceed the branch -- the first applies, the second is a coded row error', 'high', async (t) => {
       const s = await seedProduct(H, { lc: 10, a: 5, b: 5 })
       const r = await importCsv(H, 'remove', [row(s, 6, 'AL first'), row(s, 6, 'AL second')])
@@ -673,6 +673,9 @@ async function main() {
       t.eq('analysis judged each row on its own', (await rowResults(r.id, 'analyze')).map(x => x.a), ['create', 'create'])
       t.eq('job status / processed / failed', [r.job.status, r.job.processed_rows, r.job.failed_rows], ['completed_with_errors', 1, 1])
       t.eq('apply rows: the first applied, the second refused with its code', (await rowResults(r.id, 'apply')).map(x => [x.a, x.c]), [['create', null], ['error', 'import_insufficient_branch_stock']])
+      // The review restates the sentence in the operator's language from these values (13 Oct 2026).
+      t.eq('the refused row carries the values its sentence names (4 left after the first row, 6 asked, the earlier-rows wording)',
+        JSON.parse((await rowResults(r.id, 'apply'))[1].p), { onHand: 4, branch: 'LC Store', quantity: 6, afterEarlierRows: 1 })
       t.eq('every ledger agrees on 4', [l.lotsSum, l.branch, l.product], [4, 4, 4])
       t.eq('one movement of 6', l.movements.map(m => [m.t, m.q]), [['out', 6]])
     })
@@ -680,6 +683,8 @@ async function main() {
       const s = await seedProduct(H, { lc: 10, a: 5, b: 5 })
       const r = await importCsv(H, 'set', [row(s, 12), row(s, 8)], { approve: false })
       t.eq('analysed rows', (await rowResults(r.id, 'analyze')).map(x => [x.a, x.c]), [['create', null], ['error', 'import_duplicate_count_row']])
+      const duplicate = JSON.parse((await rowResults(r.id, 'analyze'))[1].p)
+      t.eq('the refused row names the earlier row and the branch', [duplicate.row, duplicate.branch], [(await H.q1("SELECT MIN(row_number) n FROM import_job_rows WHERE job_id=? AND phase='analyze'", r.id)).n, 'LC Store'])
     })
 
     // ------------------------------------------------------------------ B6: chunk boundary (Free plan: 150 rows per chunk)

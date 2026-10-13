@@ -1590,6 +1590,83 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   console.log('PASS classifyInventory and apply branch validation never create unknown or synthetic branches')
 }
 
+// Inventory import row sentences carry a stable code and the values they name (13 Oct 2026). The review restates each from
+// the pack key named after the code (frontend importRowText.ts), so this pins, for every sentence the classifier and the
+// stock judging emit: the code, the params, that the English pack text IS the Worker's message once the params are
+// substituted (the convention for every restated sentence), and that the Khmer text names the same placeholders.
+{
+  const { classifyInventory } = moduleObj.exports
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'importEngine.ts'), 'utf8')
+  const pack = (name) => JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'lang', name + '.json'), 'utf8'))
+  const en = pack('en'), km = pack('km')
+  const holders = (text) => [...String(text).matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort()
+  const fieldWord = { sku: 'sku', barcode: 'barcode' }
+  // What the pack says for a coded row (the English; the Khmer placeholders are compared separately).
+  const restate = (row, language = en, key = row.code) => {
+    const params = { ...(row.params || {}) }
+    if (params.field) params.field = language[fieldWord[params.field]]
+    return String(language[key]).replace(/\{(\w+)\}/g, (token, name) => (Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : token))
+  }
+  const branches = [{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]
+  const dbWith = (products, branchRows = branches, onHand = 4) => ({
+    prepare: (sql) => ({ all: async () => String(sql).includes('FROM products') ? products.map((p) => ({ is_active: 1, ...p }))
+      : String(sql).includes('FROM branches') ? branchRows
+        : String(sql).includes('JOIN branch_stock') ? branchRows.map((branch) => ({ product_id: products[0].id, branch_id: branch.id, quantity: onHand }))
+          : [] }),
+  })
+  const item = (id, extra = {}) => ({ id, sku: 'INV-' + id, barcode: 'BC-INV-' + id, name: 'Inventory Item ' + id, stock_quantity: 4, cost_price_usd: 1, cost_price_khr: 0, ...extra })
+  const one = async (action, products, rowExtra, branchRows = branches, onHand = 4) =>
+    (await classifyInventory(dbWith(products, branchRows, onHand), [{ _rowNumber: 7, quantity: 2, unit_cost_usd: '1', ...rowExtra }], action))[0]
+  // [description, row, expected code, expected params, expected action]
+  const cases = []
+  const sharedSku = [item(1, { sku: 'DUP', name: 'Twin' }), item(2, { sku: 'DUP', name: 'Twin Two' })]
+  cases.push(['nameless row matching two products by sku', await one('add', sharedSku, { sku: 'DUP' }), 'inventory_import_match_many_products', { count: 2, field: 'sku', value: 'DUP' }, 'error'])
+  cases.push(['same-name duplicates by sku', await one('add', [item(1, { sku: 'DUP', name: 'Twin' }), item(2, { sku: 'DUP', name: 'Twin' })], { sku: 'DUP', name: 'Twin' }),
+    'inventory_import_match_duplicate_products', { count: 2, field: 'sku', value: 'DUP' }, 'error'])
+  cases.push(['sku that belongs to another name', await one('add', [item(1, { sku: 'DUP', name: 'Twin' })], { sku: 'DUP', name: 'Other' }),
+    'inventory_import_match_other_name', { found: 'Twin', given: 'Other', field: 'sku', value: 'DUP' }, 'error'])
+  cases.push(['barcode that belongs to another name', await one('add', [item(1, { barcode: '8851234567890', name: 'Twin' })], { barcode: '8851234567890', name: 'Other' }),
+    'inventory_import_match_other_name', { found: 'Twin', given: 'Other', field: 'barcode', value: '8851234567890' }, 'error'])
+  cases.push(['name that matches several products by real barcode', await one('add', [item(1, { barcode: '8850000000011', name: 'Same' }), item(2, { barcode: '8850000000028', name: 'Same' })], { name: 'Same' }),
+    'inventory_import_name_matches_several', { name: 'Same' }, 'error'])
+  cases.push(['product not found', await one('add', [item(1)], { sku: 'NOPE' }), 'inventory_import_product_not_found', undefined, 'error'])
+  cases.push(['invalid quantity', await one('add', [item(1)], { sku: 'INV-1', quantity: 'abc' }), 'inventory_import_quantity_invalid', undefined, 'error'])
+  cases.push(['negative quantity', await one('add', [item(1)], { sku: 'INV-1', quantity: -3 }), 'inventory_import_quantity_negative', undefined, 'error'])
+  cases.push(['zero quantity add', await one('add', [item(1)], { sku: 'INV-1', quantity: 0 }), 'inventory_import_zero_receipt', undefined, 'skip'])
+  cases.push(['zero quantity remove', await one('remove', [item(1)], { sku: 'INV-1', quantity: 0 }), 'inventory_import_zero_removal', undefined, 'skip'])
+  cases.push(['zero quantity on the legacy template', await one(null, [item(1)], { sku: 'INV-1', quantity: 0 }), 'inventory_import_quantity_zero', undefined, 'error'])
+  cases.push(['branch that matches nothing', await one('add', [item(1)], { sku: 'INV-1', branch: 'Nowhere' }), 'inventory_import_branch_unmatched', { branch: 'Nowhere' }, 'error'])
+  cases.push(['blank branch with two canonical defaults', await one('add', [item(1)], { sku: 'INV-1' }, [{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }, { id: 2, name: ' shop ', is_default: 0, is_active: 1 }]),
+    'inventory_import_branch_required', undefined, 'error'])
+  // Stock judging (AL-STOCK B): the branch holds 4.
+  cases.push(['remove more than the branch holds', await one('remove', [item(1)], { sku: 'INV-1', quantity: 6 }), 'import_insufficient_branch_stock', { onHand: 4, branch: 'Shop', quantity: 6 }, 'error'])
+  cases.push(['set to the count it already has', await one('set', [item(1)], { sku: 'INV-1', quantity: 4 }), 'inventory_import_already_at_count', { quantity: 4 }, 'skip'])
+  const counted = await classifyInventory(dbWith([item(1)]), [{ _rowNumber: 3, sku: 'INV-1', quantity: 9 }, { _rowNumber: 8, sku: 'INV-1', quantity: 2 }], 'set')
+  cases.push(['second count of the same product and branch', counted[1], 'import_duplicate_count_row', { row: 3, branch: 'Shop' }, 'error'])
+  const ruleKeys = new Set()
+  for (const [what, row, code, params, action] of cases) {
+    assert.strictEqual(row.action, action, what + ': action')
+    assert.strictEqual(row.code, code, what + ': code')
+    assert.deepStrictEqual(row.params, params, what + ': params')
+    assert.ok(en[code] && km[code], what + ': both packs carry the key named after the code')
+    assert.strictEqual(restate(row), row.message, what + ': the English pack text with the params substituted IS the Worker message')
+    assert.deepStrictEqual(holders(km[code]), holders(en[code]), what + ': the Khmer sentence names the same placeholders')
+    assert.ok(/[ក-៿]/.test(km[code]) && km[code] !== en[code], what + ': the Khmer text is Khmer')
+    for (const name of holders(en[code])) assert.ok(params && Object.prototype.hasOwnProperty.call(params, name), what + ': ' + name + ' is a param the Worker sends')
+    ruleKeys.add(code)
+  }
+  // The apply-time sentence (planInventoryImportStockGroups) is the same code with the earlier-rows wording; its
+  // placeholders are pinned here, the rows themselves by test-al-stock-b-native.cjs (B9 / B11).
+  for (const key of ['import_insufficient_branch_stock_after_rows', 'import_mixed_direction_rows']) {
+    assert.ok(en[key] && km[key], key + ' in both packs')
+    assert.deepStrictEqual(holders(km[key]), holders(en[key]), key + ': same placeholders in Khmer')
+  }
+  assert.ok(en.import_insufficient_branch_stock_after_rows.includes('after the rows before it'), 'the apply-time English names the rows before it')
+  assert.ok(source.includes('after the rows before it -- cannot remove ${need}.`'), 'the Worker apply-time sentence is the pack English')
+  assert.ok(ruleKeys.size >= 15, 'every coded sentence of the family was exercised')
+  console.log('PASS inventory import rows: stable codes, params, English pack parity and Khmer placeholders for the whole family')
+}
+
 // -- classifyContacts: customer membership-number auto-assignment
 // (creation-only), same-name-can't-coexist with a 'force_create' reviewer
 // override (both against the existing DB and within one file), canonical
