@@ -66,6 +66,23 @@ runTest('the editor and the Worker carry the same explicit suffix list', () => {
   assert.equal(suffixListIn(editor), suffixListIn(worker))
 })
 
+runTest('the storefront CSP frame-src names every host the allowlist accepts, so an accepted map is never blocked once the CSP is enforced', () => {
+  const headers = fs.readFileSync(path.join(here, '..', 'public', '_headers'), 'utf8')
+  const frameSrc = /frame-src ([^;]+);/.exec(headers)
+  assert.ok(frameSrc, '_headers declares frame-src')
+  const allowed = new Set(frameSrc[1].trim().split(/\s+/))
+  const suffixes = suffixListIn(path.join(here, '..', 'src', 'components', 'catalog', 'portalEditorUtils.ts')).replace(/'/g, '').split(',').filter(Boolean)
+  assert.ok(suffixes.length >= 9, 'the suffix list was read')
+  for (const suffix of suffixes) {
+    for (const prefix of ['', 'www.', 'maps.']) {
+      const host = `${prefix}google.${suffix}`
+      assert.equal(normalizeGoogleMapsEmbed(`https://${host}/maps/embed?pb=abc`), `https://${host}/maps/embed?pb=abc`, `the editor accepts ${host}`)
+      assert.ok(allowed.has(`https://${host}`), `frame-src must list https://${host}`)
+    }
+  }
+  for (const origin of allowed) assert.match(origin, /^https:\/\/(?:www\.|maps\.)?google\.[a-z.]+$/, `frame-src lists only Google map hosts: ${origin}`)
+})
+
 if (failed > 0) {
   console.error(`\n${failed} failing test(s)`)
   process.exit(1)
