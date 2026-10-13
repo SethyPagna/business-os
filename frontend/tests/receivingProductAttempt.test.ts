@@ -215,16 +215,18 @@ for (const corrupt of ['{', '{}', saved.replace('"prepared"', '"unknown-mode"'),
   await assert.rejects(api.reserveReceivingProductAttempt(7, unavailableId, body(unavailableId), noop))
   store.setItem(rawKey(unavailableId), saved)
 }
+// A same-user session reset moves only the marker: the record is the same owner's (F3).
+store.setItem('businessos_read_session', 'changed-login')
+assert.equal(loadAttempts().readReceivingProductAttempt(7, unavailableId)?.state, 'prepared')
+store.setItem('businessos_read_session', 'same-login-marker')
 store.setItem('businessos_user', JSON.stringify({ id: 8, organization_id: 3 }))
 await assert.rejects(loadAttempts().reserveReceivingProductAttempt(8, unavailableId, { ...body(unavailableId), userId: 8 }, noop))
 store.setItem('businessos_user', JSON.stringify({ id: 7, organization_id: 4 }))
 await assert.rejects(loadAttempts().reserveReceivingProductAttempt(7, unavailableId, body(unavailableId), noop))
 store.setItem('businessos_user', JSON.stringify({ id: 7, organization_id: 3 }))
-store.setItem('businessos_read_session', 'changed-login')
-await assert.rejects(loadAttempts().reserveReceivingProductAttempt(7, unavailableId, body(unavailableId), noop))
-store.setItem('businessos_read_session', 'same-login-marker')
+await assert.rejects(loadAttempts().reserveReceivingProductAttempt(7, unavailableId, body(unavailableId), noop), code('product_create_outcome_unknown'))
 assert.equal(store.getItem(rawKey(unavailableId)), saved)
-console.log('PASS no locks/storage, readback mismatch, oversized/corrupt record, actor/organization/session mismatch all refuse without clearing evidence')
+console.log('PASS no locks/storage, readback mismatch, oversized/corrupt record, another actor/organization and A -> B -> A refuse without clearing evidence; a marker-only change keeps it')
 
 const finalId = requestId()
 const finalApi = loadAttempts()

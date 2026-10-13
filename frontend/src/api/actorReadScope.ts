@@ -387,9 +387,34 @@ export function assertActorReadScope(scope: ActorReadScope, includeInvalidation 
 // permission, profile or expiry rewrite, a reconnect); the Worker checks
 // permissions on every write. A change to another signed-in owner bumps an
 // epoch that only increases, so A -> B -> A never passes as unchanged.
+//
+// The epoch is the device's owner generation, kept in WRITE_OWNER as
+// "generation:digest" so records that outlive a tab (the receiving product
+// attempts) can be bound to it. Any tab or reload that sees a different owner
+// than the one recorded raises it; a tab adopts a higher generation another tab
+// recorded, even if it never saw the owner in between. The digest is a hash of
+// the owner, never the account id itself, and a sign-out leaves it in place: the
+// same account signing back in continues the generation, any other raises it.
 export type ActorWriteIdentity = { owner: string; epoch: number }
 
 const STORED_USER = 'businessos_user'
+const WRITE_OWNER = 'businessos_write_owner_v1'
+let lastWriteDigest = ''
+
+function ownerDigest(owner: string): string {
+  let high = 0x811c9dc5, low = 0x01000193
+  for (let index = 0; index < owner.length; index++) {
+    const unit = owner.charCodeAt(index)
+    high = Math.imul(high ^ unit, 0x01000193) >>> 0
+    low = Math.imul(low ^ unit, 0x5bd1e995) >>> 0
+  }
+  return high.toString(16).padStart(8, '0') + low.toString(16).padStart(8, '0')
+}
+
+function recordedWriteOwner(): { generation: number; digest: string } | null {
+  const match = /^(\d{1,15}):([0-9a-f]{16})$/.exec(readScopeStorage('local', WRITE_OWNER) || '')
+  return match ? { generation: Number(match[1]), digest: match[2] } : null
+}
 
 function storedWriteOwner(): { owner: string; signedIn: boolean } {
   const raw = readScopeStorage('session', STORED_USER) || readScopeStorage('local', STORED_USER)
@@ -409,10 +434,22 @@ function storedWriteOwner(): { owner: string; signedIn: boolean } {
 
 function observeWriteOwner(): string {
   const { owner, signedIn } = storedWriteOwner()
-  if (signedIn && owner !== lastWriteOwner) {
-    if (lastWriteOwner) writeOwnerEpoch++
+  if (!signedIn) return owner
+  const recorded = recordedWriteOwner()
+  if (owner !== lastWriteOwner) {
+    const digest = ownerDigest(owner)
+    // The device already recorded this owner at a generation this tab has not
+    // passed (a reload, or another tab got there first): continue it. Anything
+    // else is a new owner for this device.
+    if (recorded && recorded.digest === digest && (!lastWriteOwner || recorded.generation > writeOwnerEpoch)) writeOwnerEpoch = recorded.generation
+    else writeOwnerEpoch = Math.max(writeOwnerEpoch, recorded?.generation ?? 0) + 1
     lastWriteOwner = owner
-  }
+    lastWriteDigest = digest
+  } else if (recorded && recorded.generation > writeOwnerEpoch) {
+    writeOwnerEpoch = recorded.generation
+    return owner
+  } else if (recorded && recorded.generation === writeOwnerEpoch) return owner
+  writeScopeStorage('local', WRITE_OWNER, `${writeOwnerEpoch}:${lastWriteDigest}`)
   return owner
 }
 

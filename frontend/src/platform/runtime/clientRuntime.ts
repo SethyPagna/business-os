@@ -233,13 +233,13 @@ function snapshotStoragePrefixes(storage: Storage | null, prefixes: readonly str
   return kept
 }
 
-function clearStorage(storage: Storage | null, preserveKeys: Set<string>): void {
+function clearStorage(storage: Storage | null, preserveKeys: Set<string>, keepInPlace: readonly string[] = []): void {
   if (!storage) return
   const toDelete: string[] = []
   try {
     for (let index = 0; index < storage.length; index += 1) {
       const key = storage.key(index)
-      if (!key || preserveKeys.has(key)) continue
+      if (!key || preserveKeys.has(key) || keepInPlace.some((prefix) => key.startsWith(prefix))) continue
       // These exact frozen financial attempts outlive logout/runtime refresh.
       // Do not parse, snapshot or restore them: malformed evidence and a newer
       // cross-tab value must survive asynchronous cleanup byte-for-byte.
@@ -309,7 +309,13 @@ export async function resetClientRuntimeState(options: RuntimeResetOptions = {})
   ] : []
   const keptSession = canUseBrowserStorage() ? snapshotStorage(window.sessionStorage, sessionPreserveKeys) : []
 
-  clearStorage(canUseBrowserStorage() ? window.localStorage : null, localPreserveKeys)
+  // Kept in place, never snapshotted and restored, so a value another tab writes
+  // during the asynchronous cleanup below survives byte for byte: the device's
+  // write-owner generation, which only ever increases (api/actorReadScope.ts),
+  // and -- with the drafts -- the receiving Stock Session's product-attempt
+  // records, which belong to its draft (utils/receivingProductAttempt.ts).
+  const keepInPlace = ['businessos_write_owner_v1', ...(options.preserveUiDrafts === true ? ['businessos_receiving_product_attempt_v1:'] : [])]
+  clearStorage(canUseBrowserStorage() ? window.localStorage : null, localPreserveKeys, keepInPlace)
   clearStorage(canUseBrowserStorage() ? window.sessionStorage : null, sessionPreserveKeys)
 
   if (options.preserveServiceWorker !== true) await clearServiceWorkersAndCaches()

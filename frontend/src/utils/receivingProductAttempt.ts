@@ -1,20 +1,28 @@
-import { assertActorSessionDispatchAllowed, captureActorReadScope } from '../api/actorReadScope.ts'
+import { assertActorSessionDispatchAllowed, captureActorWriteIdentity } from '../api/actorReadScope.ts'
 import { getSyncServerUrl } from '../api/httpState.ts'
 import { authenticatedOrganizationId } from '../api/offlineQueueOwnership.ts'
 import type { ReceivingSubmissions } from './receivingDestination.ts'
 import type { StockSessionLine } from './stockSessionDraft.ts'
 
 type AttemptState = 'prepared' | 'attempting' | 'not_dispatched' | 'unknown' | 'pending' | 'confirmed'
-type AttemptIdentity = { actor: number; organization: number | null; origin: string; server: string; session: string; requestId: string }
+// A record belongs to who signs the write -- account, organization, origin and
+// server -- and to the device's owner generation (actorReadScope's write
+// identity), not to the read-session marker: a same-user reset keeps it, while
+// another account, organization or server, or A -> B -> A, refuses it.
+type AttemptIdentity = { actor: number; organization: number | null; origin: string; server: string; generation: number; requestId: string }
+// The marker is read only to recognise a record written before the generation existed.
+type CurrentIdentity = AttemptIdentity & { marker: string | null }
 export type ReceivingProductAttempt = AttemptIdentity & {
-  version: 1; state: AttemptState; owner: string | null; bodyJson: string | null; productId: number | null
+  version: 2; state: AttemptState; owner: string | null; bodyJson: string | null; productId: number | null
 }
+const RECORD_KEYS = 'actor,bodyJson,generation,organization,origin,owner,productId,requestId,server,state,version'
+const LEGACY_RECORD_KEYS = 'actor,bodyJson,organization,origin,owner,productId,requestId,server,session,state,version'
 const PREFIX = 'businessos_receiving_product_attempt_v1:'
 const MAX_BYTES = 128 * 1024
 const failure = (code = 'receiving_submission_not_saved') => Object.assign(new Error(code), { code })
 const positiveId = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0
 
-function identity(actorId: unknown, requestId: unknown): AttemptIdentity {
+function identity(actorId: unknown, requestId: unknown): CurrentIdentity {
   assertActorSessionDispatchAllowed()
   try {
     if (!positiveId(Number(actorId)) || typeof requestId !== 'string' || !/^[A-Za-z0-9_-]{1,120}$/.test(requestId)) throw failure()
@@ -23,9 +31,11 @@ function identity(actorId: unknown, requestId: unknown): AttemptIdentity {
     const origin = window.location.origin
     const server = new URL(getSyncServerUrl() || origin, origin)
     if (!/^https?:$/.test(server.protocol) || server.username || server.password || server.search || server.hash) throw failure()
-    const session = window.localStorage.getItem('businessos_read_session')
-    if (!session || session.length > 256) throw failure('receiving_submission_locked')
-    return { actor: Number(actorId), organization: authenticatedOrganizationId(user), origin, server: server.href.replace(/\/$/, ''), session, requestId }
+    const { epoch } = captureActorWriteIdentity()
+    return {
+      actor: Number(actorId), organization: authenticatedOrganizationId(user), origin, server: server.href.replace(/\/$/, ''),
+      generation: epoch, requestId, marker: window.localStorage.getItem('businessos_read_session'),
+    }
   } catch (error) {
     if ((error as { code?: string })?.code) throw error
     throw failure()
@@ -36,20 +46,37 @@ function keyOf(value: AttemptIdentity): string {
   return PREFIX + encodeURIComponent(JSON.stringify([value.origin, value.server, value.requestId]))
 }
 
-function sameIdentity(a: AttemptIdentity, b: AttemptIdentity): boolean {
-  return a.actor === b.actor && a.organization === b.organization && a.origin === b.origin && a.server === b.server
-    && a.session === b.session && a.requestId === b.requestId
+function sameOwner(a: Omit<AttemptIdentity, 'generation'>, b: Omit<AttemptIdentity, 'generation'>): boolean {
+  return a.actor === b.actor && a.organization === b.organization && a.origin === b.origin && a.server === b.server && a.requestId === b.requestId
 }
 
-function read(current: AttemptIdentity): ReceivingProductAttempt | null {
+function sameIdentity(a: AttemptIdentity, b: AttemptIdentity): boolean {
+  return sameOwner(a, b) && a.generation === b.generation
+}
+
+const attemptIdentity = ({ actor, organization, origin, server, generation, requestId }: AttemptIdentity): AttemptIdentity =>
+  ({ actor, organization, origin, server, generation, requestId })
+
+function read(current: AttemptIdentity & { marker?: string | null }): ReceivingProductAttempt | null {
   try {
     const raw = window.localStorage.getItem(keyOf(current))
     if (raw === null) return null
     if (new TextEncoder().encode(raw).length > MAX_BYTES) throw failure()
-    const saved = JSON.parse(raw) as ReceivingProductAttempt
-    if (!saved || Object.keys(saved).sort().join() !== 'actor,bodyJson,organization,origin,owner,productId,requestId,server,session,state,version'
-      || saved.version !== 1 || !sameIdentity(saved, current)
-      || !['prepared', 'attempting', 'not_dispatched', 'unknown', 'pending', 'confirmed'].includes(saved.state)) throw failure()
+    const stored = JSON.parse(raw) as ReceivingProductAttempt & { session?: unknown }
+    const keys = stored && typeof stored === 'object' ? Object.keys(stored).sort().join() : ''
+    let saved: ReceivingProductAttempt
+    if (keys === RECORD_KEYS && stored.version === 2 && sameIdentity(stored, current)) saved = stored
+    // Written before 6.0.91, bound to the read-session marker. Accepted only under
+    // that rule -- the same account, organization, origin and server, and the
+    // marker it was written under still current, so no sign-in or reset happened
+    // since -- and stored in the new form on its next write. Anything else reads
+    // as unknown and needs re-confirmation; it is never sent.
+    else if (keys === LEGACY_RECORD_KEYS && (stored.version as number) === 1 && sameOwner(stored, current)
+      && typeof stored.session === 'string' && !!current.marker && stored.session === current.marker) {
+      const { session: _legacyMarker, ...rest } = stored
+      saved = { ...rest, version: 2, generation: current.generation }
+    } else throw failure()
+    if (!['prepared', 'attempting', 'not_dispatched', 'unknown', 'pending', 'confirmed'].includes(saved.state)) throw failure()
     if (saved.state === 'prepared') {
       if (saved.owner !== null || saved.bodyJson !== null || saved.productId !== null) throw failure()
     } else {
@@ -72,11 +99,11 @@ function write(current: AttemptIdentity, value: ReceivingProductAttempt): void {
   } catch { throw failure() }
 }
 
+// Re-checked inside the lock against the write identity, never a read scope
+// captured before the wait: a same-user reset while waiting does not refuse.
 async function locked<T>(current: AttemptIdentity, action: () => T): Promise<T> {
-  const scope = captureActorReadScope('receiving-product-attempt')
   if (typeof navigator === 'undefined' || !navigator.locks?.request) throw failure()
   return navigator.locks.request(keyOf(current), { mode: 'exclusive' }, () => {
-    assertActorSessionDispatchAllowed(scope)
     if (!sameIdentity(current, identity(current.actor, current.requestId))) throw failure('receiving_submission_locked')
     return action()
   })
@@ -90,7 +117,7 @@ export async function registerReceivingProductAttempt(actorId: unknown, requestI
   const current = identity(actorId, requestId)
   await locked(current, () => {
     if (read(current)) throw failure('product_create_outcome_unknown')
-    write(current, { ...current, version: 1, state: 'prepared', owner: null, bodyJson: null, productId: null })
+    write(current, { ...attemptIdentity(current), version: 2, state: 'prepared', owner: null, bodyJson: null, productId: null })
   })
 }
 

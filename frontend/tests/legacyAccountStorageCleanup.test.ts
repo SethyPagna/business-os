@@ -76,6 +76,25 @@ try {
   assert.equal(local.getItem('businessos_auth_cookie_pending'), 'new-owner')
   assert.deepEqual(localDbCalls, ['preserve'])
   console.log('PASS full runtime reset clears both stores without changing device, coordination, newer financial evidence, or offline-work policy')
+
+  // The write-owner generation is kept by every reset and never rolled back by a
+  // snapshot; receiving product attempts are kept, in place, exactly when drafts are.
+  const owner = 'businessos_write_owner_v1'
+  const attempt = 'businessos_receiving_product_attempt_v1:%5B%22a%22%5D'
+  for (const preserveUiDrafts of [false, true]) {
+    local.setItem(owner, '4:0123456789abcdef')
+    local.setItem(attempt, '{"state":"prepared"}')
+    local.setItem('businessos_draft_stock', 'draft')
+    duringMirrorReset = () => {
+      local.setItem(owner, '5:fedcba9876543210')
+      if (local.getItem(attempt) !== null) local.setItem(attempt, '{"state":"confirmed"}')
+    }
+    await runtimeModule.exports.resetClientRuntimeState({ preserveServiceWorker: true, preserveOfflineWork: true, preserveUiDrafts })
+    assert.equal(local.getItem(owner), '5:fedcba9876543210', 'a generation raised during cleanup is not rolled back')
+    assert.equal(local.getItem(attempt), preserveUiDrafts ? '{"state":"confirmed"}' : null, `attempts follow the drafts (preserveUiDrafts ${preserveUiDrafts})`)
+    assert.equal(local.getItem('businessos_draft_stock'), preserveUiDrafts ? 'draft' : null)
+  }
+  console.log('PASS the write-owner generation survives every reset unrolled; receiving attempts stay in place with the drafts and go without them')
 } finally {
   if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow)
   else Reflect.deleteProperty(globalThis, 'window')
