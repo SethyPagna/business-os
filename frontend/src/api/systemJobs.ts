@@ -119,6 +119,25 @@ export type RestoreMaintenanceState = {
   updatedAt?: string
 } | null
 
+// K10b (Worker routes/backups.ts): the restore wrote every row, but its audit row could not be recorded. The Worker
+// answers 503 with this code and leaves maintenance ON (phase failed) until an administrator clears it and runs the
+// same restore again. The data IS restored, so this is not an ordinary failed import.
+export const RESTORE_AUDIT_NOT_RECORDED_CODE = 'restore_audit_not_recorded'
+
+// The maintenance state the Worker leaves behind carries no code, only its sentence, and that is all a reload (or a
+// lost response) can read. The banner recognises the state by the sentence's own first words, pinned to the Worker's
+// text by tests/backupRestoreAuditNotRecorded.test.ts; if the wording ever changes the state falls back to the
+// crashed-restore banner, which has the same way out.
+const RESTORE_AUDIT_NOT_RECORDED_STATE_TEXT = 'Backup data was restored, but the restore could not be recorded in the audit log.'
+
+export function isRestoreAuditNotRecordedError(error: unknown): boolean {
+  return !!error && typeof error === 'object' && (error as { code?: unknown }).code === RESTORE_AUDIT_NOT_RECORDED_CODE
+}
+
+export function isRestoreAuditNotRecordedState(state: RestoreMaintenanceState): boolean {
+  return state?.phase === 'failed' && typeof state.error === 'string' && state.error.startsWith(RESTORE_AUDIT_NOT_RECORDED_STATE_TEXT)
+}
+
 export async function getBackupMaintenance(): Promise<{ maintenance: RestoreMaintenanceState }> {
   return apiFetch('GET', '/api/backups/maintenance') as Promise<{ maintenance: RestoreMaintenanceState }>
 }

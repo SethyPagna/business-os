@@ -16,6 +16,7 @@ import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert.js'
+import Unlock from 'lucide-react/dist/esm/icons/unlock.js'
 import Layers from 'lucide-react/dist/esm/icons/layers.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
 import { useActionHistory } from '../../utils/actionHistory.ts'
@@ -32,7 +33,7 @@ import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
-import { clearBackupMaintenance, getBackupMaintenance, type RestoreMaintenanceState } from '../../api/systemJobs.ts'
+import { clearBackupMaintenance, getBackupMaintenance, isRestoreAuditNotRecordedError, isRestoreAuditNotRecordedState, type RestoreMaintenanceState } from '../../api/systemJobs.ts'
 
 type TranslateFn = (key: string) => string
 type NotifyFn = (message: string, type?: string) => void
@@ -272,7 +273,15 @@ function getBackupApi(): BackupApi {
 // only "every save fails with a 503"), and offers the two honest exits:
 // restart the restore (safe: full delete+reinsert) or force-clear, which
 // accepts the half-restored state. Renders nothing while maintenance is off.
-function RestoreMaintenanceBanner({ copy, notify }: { copy: CopyFn; notify: NotifyFn }) {
+//
+// One failed state is not a crash: the restore finished but its audit row could
+// not be written (K10b, 503 restore_audit_not_recorded). The data is restored,
+// so the banner says that, and the way out is to clear maintenance and run the
+// same restore again right away. It is recognised from the state itself, so it
+// reads the same after a reload or a lost response. `refreshSignal` makes the
+// banner re-read the state at once after a restore request, instead of at its
+// next 15 s poll.
+function RestoreMaintenanceBanner({ copy, notify, refreshSignal }: { copy: CopyFn; notify: NotifyFn; refreshSignal: number }) {
   const [state, setState] = useState<RestoreMaintenanceState>(null)
   const [clearing, setClearing] = useState(false)
   const { askToConfirm, confirmDialog } = useConfirmDialog()
@@ -291,10 +300,12 @@ function RestoreMaintenanceBanner({ copy, notify }: { copy: CopyFn; notify: Noti
     void poll()
     const stopPolling = startVisibleInterval(() => { void poll() }, 15000)
     return () => { alive = false; stopPolling() }
-  }, [pageActive])
+  }, [pageActive, refreshSignal])
   if (!state) return null
   const failed = state.phase === 'failed'
-  const detail = [
+  const auditPending = isRestoreAuditNotRecordedState(state)
+  // The state's own English sentence is replaced by the translated hint below.
+  const detail = auditPending ? '' : [
     state.phase ? `${copy('restore_phase', 'Phase')}: ${state.phase}` : '',
     state.table ? `${copy('restore_table', 'Table')}: ${state.table}${state.rowsDone ? ` (${state.rowsDone} rows)` : ''}` : '',
     state.startedAt ? `${copy('restore_started', 'Started')}: ${fmtDateTime24(state.startedAt)} (${state.startedBy || '?'})` : '',
@@ -302,7 +313,21 @@ function RestoreMaintenanceBanner({ copy, notify }: { copy: CopyFn; notify: Noti
   ].filter(Boolean).join(' · ')
   const handleClear = async () => {
     if (clearing) return
-    if (!(await askToConfirm({
+    // Both ask before clearing; the audit-pending one shows what changes (before -> after), and is not a danger:
+    // the data is already restored.
+    if (!(await askToConfirm(auditPending ? {
+      title: copy('restore_audit_pending_clear', 'Clear maintenance'),
+      message: copy(
+        'restore_audit_pending_clear_confirm',
+        'Clear maintenance now? Writes open again straight away. The data is already restored; the restore is recorded when you run it again.',
+      ),
+      items: [
+        { label: copy('restore_audit_pending_writes', 'Writes'), value: copy('restore_audit_pending_writes_change', 'Paused \u2192 Open') },
+        { label: copy('audit_log', 'Audit Log'), value: copy('restore_audit_pending_audit_change', 'Not recorded \u2192 Recorded by the next restore') },
+      ],
+      confirmLabel: copy('restore_audit_pending_clear', 'Clear maintenance'),
+      cancelLabel: copy('cancel', 'Cancel'),
+    } : {
       title: copy('restore_maintenance_clear', 'Force clear (accept half-state)'),
       message: copy(
         'restore_maintenance_clear_confirm',
@@ -316,7 +341,9 @@ function RestoreMaintenanceBanner({ copy, notify }: { copy: CopyFn; notify: Noti
     try {
       await clearBackupMaintenance()
       setState(null)
-      notify(copy('restore_maintenance_cleared', 'Maintenance cleared -- writes are open again'), 'warning')
+      notify(auditPending
+        ? copy('restore_audit_pending_cleared', 'Maintenance cleared. Run the same restore again now to record it.')
+        : copy('restore_maintenance_cleared', 'Maintenance cleared -- writes are open again'), 'warning')
     } catch (error) {
       notify(getErrorMessage(error, copy('unknown_error', 'Unknown error')), 'error')
     } finally {
@@ -324,21 +351,41 @@ function RestoreMaintenanceBanner({ copy, notify }: { copy: CopyFn; notify: Noti
     }
   }
   return (
-    <div className={`flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-sm ${failed
+    <div className={`flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-sm ${failed && !auditPending
       ? 'border-red-300 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200'
       : 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-900/20 dark:text-amber-200'}`}
     >
       <ShieldAlert className="h-4 w-4 shrink-0" />
-      <span className="font-semibold">
-        {failed
-          ? copy('restore_maintenance_failed', 'A restore CRASHED mid-way -- the database is read-only and half-restored')
-          : copy('restore_maintenance_running', 'Restore in progress -- the system is read-only')}
+      <span className={`font-semibold leading-relaxed${auditPending ? ' min-w-0 flex-1' : ''}`}>
+        {auditPending
+          ? copy('restore_audit_pending_title', 'Restored, but not recorded in the audit log. Writes are paused.')
+          : failed
+            ? copy('restore_maintenance_failed', 'A restore CRASHED mid-way -- the database is read-only and half-restored')
+            : copy('restore_maintenance_running', 'Restore in progress -- the system is read-only')}
       </span>
       {detail ? <span className="min-w-0 flex-1 truncate text-xs opacity-90" title={detail}>{detail}</span> : null}
-      {failed ? (
+      {auditPending ? (
+        // The banner's one action: icon plus one word, its full name in the tooltip.
+        <button
+          type="button"
+          className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap text-xs"
+          onClick={handleClear}
+          disabled={clearing}
+          aria-label={copy('restore_audit_pending_clear', 'Clear maintenance')}
+          title={copy('restore_audit_pending_clear', 'Clear maintenance')}
+        >
+          <Unlock className="h-3.5 w-3.5" aria-hidden="true" />
+          {clearing ? copy('working', 'Working...') : copy('clear', 'Clear')}
+        </button>
+      ) : failed ? (
         <button type="button" className="btn-secondary whitespace-nowrap text-xs" onClick={handleClear} disabled={clearing}>
           {clearing ? copy('working', 'Working...') : copy('restore_maintenance_clear', 'Force clear (accept half-state)')}
         </button>
+      ) : null}
+      {auditPending ? (
+        <p className="basis-full text-xs leading-relaxed opacity-90">
+          {copy('restore_audit_pending_hint', 'Clear maintenance, then run the same restore again straight away. The second run replaces all data with the backup again and records the restore.')}
+        </p>
       ) : null}
       {confirmDialog}
     </div>
@@ -1715,6 +1762,8 @@ export default function Backup() {
   const [advancedMaintenanceOpen, setAdvancedMaintenanceOpen] = useState(false)
   const [maintenanceTier, setMaintenanceTier] = useState<'section' | 'data' | 'migration' | 'factory'>('section')
   const [backupSection, setBackupSection] = useState<BackupSectionId>('all')
+  // Bumped after every restore request that fails, so the maintenance banner re-reads its state at once.
+  const [maintenanceSignal, setMaintenanceSignal] = useState(0)
   const aliveRef = useRef(true)
   const jobStopRef = useRef<StopFn | null>(null)
   const activeJobSignatureRef = useRef('')
@@ -1907,7 +1956,15 @@ export default function Backup() {
       }
       throw new Error(copy('backup_restore_job_not_queued', 'Restore job could not be queued. Run Doctor or restart Business OS.'))
     } catch (error) {
-      notify(`${copy('import_failed', 'Import failed')}: ${getErrorMessage(error, copy('unknown_error', 'Unknown error'))}`, 'error')
+      // A failed restore may have left maintenance on: let the banner say so now rather than at its next poll.
+      if (aliveRef.current) setMaintenanceSignal((count) => count + 1)
+      if (isRestoreAuditNotRecordedError(error)) {
+        // K10b: the data IS restored; only its audit record is missing, and the Worker keeps writes paused until
+        // maintenance is cleared. Not an "Import failed": say what to do (the banner offers the way out).
+        notify(copy('restore_audit_not_recorded', 'The backup data was restored, but the restore could not be recorded in the audit log, so writes stay paused. Clear maintenance, then run the same restore again.'), 'error')
+      } else {
+        notify(`${copy('import_failed', 'Import failed')}: ${getErrorMessage(error, copy('unknown_error', 'Unknown error'))}`, 'error')
+      }
     } finally {
       finishBackupAction('folder-import')
     }
@@ -1947,7 +2004,7 @@ export default function Backup() {
           subtitle={copy('backup_page_subtitle', 'Create, restore, and verify full Business OS backups.', 'បង្កើត ស្ដារ និងពិនិត្យ backup Business OS ពេញលេញ។')}
           historySlot={<ActionHistoryBar history={actionHistory} className="flex-shrink-0" t={t} showLabel />}
         />
-        <RestoreMaintenanceBanner copy={copy} notify={notify} />
+        <RestoreMaintenanceBanner copy={copy} notify={notify} refreshSignal={maintenanceSignal} />
         {/* Sections get their own full-width row now that History sits next
             to the page-guide icon in PageHeader's row above (per explicit
             user direction: the icon explaining what this page does, then
