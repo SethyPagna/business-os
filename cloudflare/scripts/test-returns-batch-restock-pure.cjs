@@ -236,6 +236,8 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/saleBulkStatus': saleBulkStatusKernel,
   '../lib/saleRecordEvents': saleRecordEventsKernel,
   '../lib/returnCreateAction': returnCreateActionKernel,
+  // routes/returns.ts counts imported returned units through saleTransitions (N1 / finding C).
+  '../lib/saleTransitions': loadReal('lib/saleTransitions.ts', { './salesStatus': loadReal('lib/salesStatus.ts'), './productBatches': productBatches }),
   // The records reader (GET /:id/records); this file exercises the write paths.
   '../lib/returnRecords': { loadReturnRecords: async () => null },
   '../lib/customerReturnEntitlement': customerReturnEntitlementKernel,
