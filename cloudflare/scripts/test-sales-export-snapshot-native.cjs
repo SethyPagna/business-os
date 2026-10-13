@@ -69,7 +69,7 @@ async function main() {
       (11,'2026-09-04 01:00:00','completed','fraction',.0044,.0044),
       (12,'2026-09-04 01:00:00','completed','floor',10,10),
       (13,'2026-09-04 01:00:00','completed','floor',10,10);
-      INSERT INTO sale_items VALUES(10,10,.0044,1),(11,11,.0044,1),(12,12,1,1),(13,13,5,1);
+      INSERT INTO sale_items(id,sale_id,cost_price_usd,quantity) VALUES(10,10,.0044,1),(11,11,.0044,1),(12,12,1,1),(13,13,5,1);
       INSERT INTO returns(id,sale_id,total_refund_usd) VALUES(12,12,0);
       INSERT INTO return_items VALUES(12,12,3,1,'restock',1);`)
     const fraction = (await h.get({ q: 'fraction' })).body
@@ -198,8 +198,9 @@ async function main() {
     assert.equal(Object.hasOwn(refused.body, 'rows'), false)
   })
   await check('a totals-only fractional edit changes token even when every rounded output row is identical', async h => {
-    // Receipt rows carry 4 places (owner 13 Oct, L3), so only a legacy fifth
-    // decimal can move the exact totals while every output row stays identical.
+    // Receipt rows carry 4 places (owner 13 Oct, L3). A legacy fifth decimal is
+    // one edit that moves the exact totals without moving any row; the v1 item
+    // discount in the next check is the ordinary one.
     h.sql.exec(`INSERT INTO sales(id,created_at,sale_status,customer_name,subtotal_usd,total_usd) VALUES
       (10,'2026-09-04 01:00:00','completed','tiny',.00242,.00242),
       (11,'2026-09-04 01:00:00','completed','tiny',.00242,.00242);`)
@@ -211,6 +212,22 @@ async function main() {
     assert.equal(next.totals.revenue_usd, .0049)
     assert.notEqual(next.export_token, first.export_token)
     assert.equal((await h.get(frozen(first, { q: 'tiny', verifyOnly: '1' }))).status, 409)
+  })
+  await check('a v1 item-discount edit changes token while every receipt row stays byte-identical', async h => {
+    h.sql.exec(`ALTER TABLE sales ADD COLUMN money_precision_version INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE sales ADD COLUMN calculated_total_usd REAL;
+      ALTER TABLE sales ADD COLUMN rounding_adjustment_usd REAL NOT NULL DEFAULT 0;
+      INSERT INTO sales(id,created_at,sale_status,branch_id,customer_name,subtotal_usd,total_usd,money_precision_version,calculated_total_usd,rounding_adjustment_usd)
+        VALUES(20,'2026-09-04 01:00:00','completed',2,'itemdisc',10,10,1,10,0);
+      INSERT INTO sale_items(id,sale_id,cost_price_usd,quantity) VALUES(20,20,4,1);`)
+    const first = (await h.get({ q: 'itemdisc' })).body
+    assert.equal(first.row_count, 1); assert.equal(first.totals.item_discount_usd, 0)
+    h.sql.exec('UPDATE sale_items SET product_discount_usd=.5 WHERE id=20')
+    const next = (await h.get({ q: 'itemdisc' })).body
+    assert.equal(JSON.stringify(next.rows), JSON.stringify(first.rows), 'no receipt row carries the item discount')
+    assert.equal(next.totals.item_discount_usd, .5)
+    assert.notEqual(next.export_token, first.export_token, 'the token must cover the totals row, not only the receipt rows')
+    assert.equal((await h.get(frozen(first, { q: 'itemdisc', verifyOnly: '1' }))).status, 409)
   })
   await check('explicit cancelled cohort counts selected cancelled receipts without unrelated void activity', async h => {
     const cancelled = (await h.get({ status: 'cancelled' })).body
