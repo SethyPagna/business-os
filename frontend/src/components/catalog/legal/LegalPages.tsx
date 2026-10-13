@@ -69,6 +69,9 @@ type LegalOpenDetail = { page: LegalPageKey; handled: boolean }
 
 const INLINE_LINK_CLASS = 'font-semibold text-emerald-700 underline underline-offset-2 transition hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200'
 
+const CONCERNS_CONTACT_EN = 'If something on this site is about you, or you are concerned about an image, contact us on {contact}. We review every request and ask only for the information needed to identify the content and the person making the request.'
+const CONCERNS_CONTACT_KM = 'បើមានខ្លឹមសារអំពីអ្នក ឬអ្នកបារម្ភអំពីរូបភាពណាមួយ សូមទាក់ទងយើងតាម {contact}។ យើងពិនិត្យរាល់សំណើ ហើយសុំតែព័ត៌មានដែលត្រូវការ ដើម្បីសម្គាល់ខ្លឹមសារ និងអ្នកដាក់សំណើ។'
+
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 
 /** A storefront section the footer can jump to (the nav's own tabs). */
@@ -188,6 +191,8 @@ export default function PortalFooter({
 
   const year = new Date().getFullYear()
   const fill = useCallback((key: string) => interpolateLegal(text(key), details, year), [text, details, year])
+  const telegramLink = socialLinks.find((link) => link.key === 'telegram')
+  const [concernsBefore, concernsAfter = ''] = copy('portalFooterConcernsContact', CONCERNS_CONTACT_EN, CONCERNS_CONTACT_KM).split('{contact}')
 
   const openPage = useCallback((page: LegalPageKey) => {
     // The opener -- one of the footer's always-visible policy links, or the
@@ -321,11 +326,24 @@ export default function PortalFooter({
             {/* A takedown route, in the one place every page of the site
                 ends. A storefront that publishes photographs -- product
                 shots, and the screenshots customers send in -- needs
-                somewhere for the person in one of them to write. Hidden when
-                no address is configured: a contact route with nowhere to
-                send it is worse than no route. */}
+                somewhere for the person in one of them to write. Falls back to
+                the Telegram link, then the phone, when no e-mail is set, and
+                is hidden only when none of the three is configured: a contact
+                route with nowhere to send it is worse than no route. */}
             {details.email ? (
               <div className="pt-1">{fill('portal_legal_footer_content_concerns')}</div>
+            ) : telegramLink || details.phone ? (
+              <div className="pt-1">
+                {concernsBefore}
+                {telegramLink ? (
+                  <a className={INLINE_LINK_CLASS} href={telegramLink.value} target="_blank" rel="noreferrer">
+                    <span className="notranslate" translate="no">{telegramLink.label}</span>
+                  </a>
+                ) : contactHref('tel', details.phone) ? (
+                  <a className={INLINE_LINK_CLASS} href={contactHref('tel', details.phone)}>{details.phone}</a>
+                ) : details.phone}
+                {concernsAfter}
+              </div>
             ) : null}
           </div>
 

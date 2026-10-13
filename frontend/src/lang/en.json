@@ -6984,6 +6984,8 @@
   "fee_sale_search_placeholder": "Search receipt, customer, phone, product, SKU or barcode",
   "portalPublicationReadinessWarning": "These seller details are shown on the storefront's legal and contact pages, so complete them when you can.",
   "portalPublicationMissingFields": "Missing: {fields}",
+  "portalSellerIdentityWarning": "The footer's seller details show the registered business name, the address and an e-mail. Fill in the ones left empty; without an e-mail, the line for concerns about site content shows your Telegram or phone instead.",
+  "portalFooterConcernsContact": "If something on this site is about you, or you are concerned about an image, contact us on {contact}. We review every request and ask only for the information needed to identify the content and the person making the request.",
   "productDefaultsUseSuggested": "Use suggested text",
   "shareProofTitle": "Send share proof",
   "shareProofInstructions": "Upload screenshots for staff review. A submission does not guarantee points or approval.",
