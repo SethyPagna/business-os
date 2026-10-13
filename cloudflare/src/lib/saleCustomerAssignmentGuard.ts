@@ -10,11 +10,13 @@ export const LOYALTY_REASSIGNMENT_MESSAGE = 'Customer reassignment would leave i
 // ledger. Even a cancelled/pending sale may activate its stored points later.
 // Fail closed independently of mutable programme rates rather than inventing
 // an award, discarding a redemption, or relying on a clamped balance.
+// A refund of a sale that earns no points (loyalty_accrual = 0) takes none back (customerPointsReturnSql), so it is not a
+// loyalty fact either: a migrated sale with returns can be reassigned unless it redeemed points.
 export function loyaltyAffectingSaleSql(alias = 's'): string {
   return `(COALESCE(${alias}.membership_points_redeemed,0)<>0
     OR (COALESCE(${alias}.loyalty_accrual,1)=1 AND (COALESCE(${alias}.total_usd,0)<>0 OR COALESCE(${alias}.total_khr,0)<>0))
-    OR EXISTS(SELECT 1 FROM returns loyalty_return WHERE loyalty_return.sale_id=${alias}.id
-      AND (COALESCE(loyalty_return.total_refund_usd,0)<>0 OR COALESCE(loyalty_return.total_refund_khr,0)<>0)))`
+    OR (COALESCE(${alias}.loyalty_accrual,1)=1 AND EXISTS(SELECT 1 FROM returns loyalty_return WHERE loyalty_return.sale_id=${alias}.id
+      AND (COALESCE(loyalty_return.total_refund_usd,0)<>0 OR COALESCE(loyalty_return.total_refund_khr,0)<>0))))`
 }
 
 export function isLoyaltyAssignmentError(error: unknown): boolean {
