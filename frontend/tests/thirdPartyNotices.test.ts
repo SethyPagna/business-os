@@ -10,6 +10,7 @@ const FRONTEND = path.resolve(here, '..')
 const REPO = path.resolve(FRONTEND, '..')
 const GENERATOR = path.join(REPO, 'ops', 'scripts', 'licenses', 'generate-third-party-notices.mjs')
 const NOTICES = path.join(FRONTEND, 'public', 'THIRD_PARTY_NOTICES.txt')
+const readCommittedNotices = (): string => fs.readFileSync(NOTICES, 'utf8').replace(/\r\n/g, '\n')
 
 type Run = { status: number | null; stdout: string; stderr: string }
 function run(root: string | null, ...flags: string[]): Run {
@@ -71,7 +72,7 @@ runCase('the committed notices match the locked production packages of both lock
 })
 
 runCase('every production package in either lockfile is named in the shipped file, and dev tooling is not', () => {
-  const committed = fs.readFileSync(NOTICES, 'utf8')
+  const committed = readCommittedNotices()
   const production: string[] = []
   const development: string[] = []
   for (const workspace of ['frontend', 'cloudflare']) {
@@ -89,7 +90,7 @@ runCase('every production package in either lockfile is named in the shipped fil
 })
 
 runCase('the file carries the notices the audit named: Noto Sans Khmer OFL, Lucide ISC, Dexie NOTICE, ZXing jai-imageio, hono, bcryptjs', () => {
-  const committed = fs.readFileSync(NOTICES, 'utf8')
+  const committed = readCommittedNotices()
   assert.match(committed, /@fontsource\/noto-sans-khmer@[\d.]+ \(OFL-1\.1\)/)
   assert.match(committed, /SIL OPEN FONT LICENSE Version 1\.1/)
   assert.match(committed, /Copyright 2022 The Noto Project Authors/)
@@ -99,7 +100,7 @@ runCase('the file carries the notices the audit named: Noto Sans Khmer OFL, Luci
   assert.match(committed, /hono@[\d.]+ \(MIT\)/)
   assert.match(committed, /bcryptjs@[\d.]+ \(BSD-3-Clause\)/)
   assert.doesNotMatch(committed, /ffmpeg/i)
-  assert.ok(!committed.includes('\r'), 'the generated file is written with LF endings')
+  assert.doesNotMatch(fs.readFileSync(NOTICES, 'utf8'), /\r(?!\n)/, 'the file has only LF or CRLF line endings, never a bare CR')
 })
 
 runCase('frontend/package.json exposes licenses:notices and licenses:check, both through the one generator', () => {
@@ -116,6 +117,7 @@ runCase('generating then checking is green; dev-only packages are left out; iden
     const written = run(root)
     assert.equal(written.status, 0, written.stderr)
     const text = fs.readFileSync(output, 'utf8')
+    assert.ok(!text.includes('\r'), 'the generator writes LF, whatever the checkout does to the committed copy')
     assert.ok(text.includes('alpha@1.0.0 (MIT)') && text.includes('alpha-twin@1.0.0 (MIT)') && text.includes('@scope/beta@1.0.0 (MIT)'))
     assert.ok(!text.includes('TOOLING ONLY TEXT') && !text.includes('tooling@'))
     assert.equal(text.split('Permission is hereby granted').length - 1, 1, 'two packages with the same licence text print it once')
