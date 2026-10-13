@@ -125,9 +125,14 @@ async function main() {
       const body = { expected_revision: await revisionOf(aShift), reason: 'probe' }
       refused('B POST /:id/reopen', await call('b', 'POST', `/${aShift}/reopen`, body), await call('b', 'POST', `/${ghost}/reopen`, body))
     }))
-    await check('B POST /:id/cancel stays administrator-only (403)', () => unchanged('B cancel', aShift, async () => {
-      const cancel = await call('b', 'POST', `/${aShift}/cancel`, { expected_revision: await revisionOf(aShift), reason: 'probe' })
-      assert.equal(cancel.status, 403, cancel.text)
+    await check('B POST /:id/cancel: administrator-only, one 403 for a missing and a hidden id, with and without a request identity', () => unchanged('B cancel', aShift, async () => {
+      for (const identity of [{}, { client_request_id: 'b-cancel-0000000001' }]) {
+        const body = { expected_revision: await revisionOf(aShift), reason: 'probe', ...identity }
+        const hidden = await call('b', 'POST', `/${aShift}/cancel`, body)
+        const missing = await call('b', 'POST', `/${ghost}/cancel`, body)
+        assert.equal(hidden.status, 403, `${JSON.stringify(identity)}: ${hidden.text}`)
+        assert.equal(hidden.text, missing.text, `${JSON.stringify(identity)}: a hidden id and a missing id answer alike`)
+      }
     }))
 
     // The owner and the shift-review administrator still reach it, with and without a request identity.
@@ -181,6 +186,22 @@ async function main() {
     await check('owner and administrator still amend it', async () => {
       assert.equal((await call('c', 'PATCH', `/${wide}`, amend(await revisionOf(wide), { opening_float_usd: 6 }))).status, 200)
       assert.equal((await call('admin', 'PATCH', `/${wide}`, amend(await revisionOf(wide), { opening_float_usd: 5 }))).status, 200)
+    })
+    // ---- 4. a cancelled shift is hidden the same way: the 404 comes before the 409 that names its state ----------
+    await check('administrator cancels with a request identity', async () => {
+      const cancel = await call('admin', 'POST', `/${aShift}/cancel`,
+        { expected_revision: await revisionOf(aShift), reason: 'Opened by mistake', client_request_id: 'admin-cancel-000000001' })
+      assert.equal(cancel.status, 200, cancel.text)
+      assert.equal(cancel.json.cancelled, true)
+    })
+    await check('B PATCH of a hidden cancelled shift answers 404, with and without a request identity', () => unchanged('B PATCH, cancelled', aShift, async () => {
+      refused('B PATCH', await call('b', 'PATCH', `/${aShift}`, amend(await revisionOf(aShift))), ghostAmend)
+      const identity = { client_request_id: 'b-amend-0000000003' }
+      refused('B PATCH + identity', await call('b', 'PATCH', `/${aShift}`, amend(await revisionOf(aShift), identity)), await call('b', 'PATCH', `/${ghost}`, amend(0, identity)))
+    }))
+    await check('control: the owner can see the cancelled shift, so the owner hears its state (409)', async () => {
+      const own = await call('a', 'PATCH', `/${aShift}`, amend(await revisionOf(aShift)))
+      assert.equal(own.status, 409, own.text)
     })
     await check('nothing left the process', async () => assert.deepEqual(outbound, []))
     assert.deepEqual(failures, [], `\n${failures.join('\n')}`)

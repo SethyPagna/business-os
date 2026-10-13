@@ -41,19 +41,20 @@ app.use('*', async (c, next) => {
   if (typeof body.client_request_id !== 'string' || !/^[a-zA-Z0-9_-]{16,128}$/.test(body.client_request_id)) {
     return c.json({ error: 'Invalid shift request identity.' }, 400)
   }
+  // Cancel is administrator-only, refused before any row is read (as in the handler), so a missing
+  // id and a hidden one get the same answer.
+  if (action === 'cancel' && !canManageShifts(user)) return c.json({ error: 'Shift permission is required.' }, 403)
   const db = getDb(c.env); const target = await readShiftById(db, legacyClose ? Number(body.shift_id) : Number(match?.[1]))
   if (!target) return c.json({ error: 'Shift not found.' }, 404)
-  // Visibility first, and before the replay lookup: a receipt this account earned while the
-  // shift was visible (shop_wide, since switched back) must not hand the row back (A1).
-  // Cancel is administrator-only and an administrator sees every shift, so it skips this.
+  // Visibility comes before the replay lookup: a receipt this account earned while the shift was
+  // visible (shop_wide, since switched back) must not hand the row back. Cancel is skipped: only
+  // an administrator reaches it here, and an administrator sees every shift.
   if (action !== 'cancel' && !canSeeShift(user, await readShiftPolicy(db), target)) return c.json({ error: 'Shift not found.' }, 404)
   // The same split the handlers enforce, applied before the replay lookup so
   // a caller who may not act cannot probe a receipt: amend follows
-  // canAmendShift (any shifts user), cancel is administrator-only, and the
-  // close/reopen transitions stay with the owner or an administrator.
-  const permitted = action === 'amend' ? canAmendShift(user, target)
-    : action === 'cancel' ? canManageShifts(user) && canMutateShift(user, target)
-      : canMutateShift(user, target)
+  // canAmendShift (any shifts user), and close, reopen and cancel stay with
+  // the owner or an administrator.
+  const permitted = action === 'amend' ? canAmendShift(user, target) : canMutateShift(user, target)
   if (!permitted) return c.json({ error: 'Shift permission is required.' }, 403)
   // No branch-activity check here: a committed receipt replays even after its
   // branch was retired, and each handler decides what an inactive branch
