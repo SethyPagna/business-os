@@ -1075,6 +1075,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
           // resetActorReadSession here: logout already rotated the marker, and
           // rotating it again from each tab would re-quarantine the others.
           const prepared = await prepareConfirmedSignoutUi(signout.token, async () => {
+            // Signed out: from now a missing stored user is nobody, as on expiry.
+            forgetActorWriteAccount()
             await resetLocalBusinessState({
               clearAuth: true,
               preserveSyncServer: true,

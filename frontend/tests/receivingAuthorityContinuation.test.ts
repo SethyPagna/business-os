@@ -161,6 +161,8 @@ await check('sign-out and session expiry still clear the stored account; the run
   assert.deepEqual([resets.options.permissionRefresh.clearAuth, resets.options.sessionExpiry.clearAuth, resets.options.signOut.clearAuth], [false, true, true])
   // Session expiry forgets the account before clearing it, so a missing user then reads as signed out.
   assert.match(source('AppContext.tsx').replace(/\r\n/g, '\n'), /const handleUnauthorizedSession = useCallback\(async[^\n]*\n\s*if \(isActorSessionQuarantined\(\)\) return\n\s*disconnectWS\(\)\n\s*forgetActorWriteAccount\(\)\n\s*await clearLocalBusinessState\(\{\n\s*clearAuth: true,/)
+  // So does another tab's confirmed sign-out, before this tab's account cleanup.
+  assert.match(source('AppContext.tsx').replace(/\r\n/g, '\n'), /prepareConfirmedSignoutUi\(signout\.token, async \(\) => \{\n(?:\s*\/\/[^\n]*\n)*\s*forgetActorWriteAccount\(\)\n\s*await resetLocalBusinessState\(\{\n\s*clearAuth: true,/)
 })
 await check('no stored user is the last account, unless the session is locked, a sign-in is pending or the session expired', async () => {
   const missing = () => { local.delete('businessos_user'); tabSession.delete('businessos_user') }
@@ -189,6 +191,46 @@ await check('no stored user is the last account, unless the session is locked, a
   freshTab(); identity = actor.captureActorWriteIdentity(); actor.forgetActorWriteAccount(); missing()
   assert.throws(() => actor.assertActorWriteIdentity(identity), { code: 'actor_owner_changed' }, 'expired: signed out')
   writeUser(); assert.equal(actor.isActorWriteIdentityCurrent(identity), true, 'the same account signing back in continues')
+})
+await check('a forgotten account stays forgotten until a sign-in is confirmed, even if read while still stored', async () => {
+  const missing = () => { local.delete('businessos_user'); tabSession.delete('businessos_user') }
+  const read = () => { actor.actorWriteAccount(); actor.captureActorWriteIdentity() }
+  const tab = (globalThis as unknown as { window: Record<string, unknown> }).window
+  tab.navigator = globalThis.navigator
+  try {
+    // A sign-out in this tab: reads while A is still stored do not bring A back.
+    freshTab(); let identity = actor.captureActorWriteIdentity()
+    const signout = await actor.beginActorCookieMutation()
+    read(); assert.equal(actor.isActorWriteIdentityCurrent(identity, true), true, 'A still stored during the sign-out')
+    missing(); assert.equal(actor.finishActorCookieMutation(signout), true); read()
+    assert.equal(actor.isActorWriteIdentityCurrent(identity, true), false, 'signed out: no stored user is nobody')
+    // Session expiry: a read before the account is cleared does not bring it back.
+    freshTab(); identity = actor.captureActorWriteIdentity(); actor.forgetActorWriteAccount(); read(); missing(); read()
+    assert.throws(() => actor.assertActorWriteIdentity(identity), { code: 'actor_owner_changed' }, 'expired: still signed out')
+    // Another tab's confirmed sign-out: reconciling with no stored user confirms nobody.
+    const peerChange = (marker: string) => { local.set('businessos_read_session', marker); assert.equal(actor.completeActorSessionReconciliation(actor.actorSessionReconciliationMarker()), true) }
+    freshTab(); identity = actor.captureActorWriteIdentity(); actor.forgetActorWriteAccount(); missing(); peerChange('peer-signed-out')
+    writeUser(); read(); missing(); read()
+    assert.equal(actor.isActorWriteIdentityCurrent(identity), false, 'an account stored after a sign-out is not remembered until a sign-in is confirmed')
+    // Released by a confirmed sign-in: another tab's, reconciled with its account stored ...
+    writeUser(); peerChange('peer-signed-in'); read(); missing()
+    assert.equal(actor.isActorWriteIdentityCurrent(identity), true, 'a reconciled sign-in: a missing user is that account again')
+    // ... or this tab's own, acknowledged.
+    freshTab(); identity = actor.captureActorWriteIdentity()
+    const signin = await actor.beginActorCookieMutation(), signedIn = { ...OWNER }
+    assert.equal(actor.finishActorCookieMutation(signin, true, signedIn), true)
+    assert.equal(actor.acknowledgeActorCookieUser(signedIn), true)
+    read(); missing()
+    assert.equal(actor.isActorWriteIdentityCurrent(identity), true, 'an acknowledged sign-in: a missing user is that account again')
+    // ... or a Google sign-in returning to this tab.
+    freshTab(); identity = actor.captureActorWriteIdentity()
+    const oauth = await actor.beginActorCookieMutation()
+    actor.prepareActorOauthCookieRedirect(oauth, 'https://shop.test/')
+    assert.equal(actor.finishActorOauthCookieRedirect(oauth), true)
+    read(); missing()
+    assert.equal(actor.isActorWriteIdentityCurrent(identity), true, 'a returned Google sign-in: a missing user is that account again')
+  } finally { delete tab.navigator }
+  freshTab()
 })
 await check('another tab signing in locks the identity, and the same owner confirmed again releases it', () => {
   const identity = actor.captureActorWriteIdentity()
