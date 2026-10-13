@@ -52,7 +52,7 @@ type ProductsResetToggles = {
 
 type ResetApi = {
   resetData?: (mode: ResetMode, options: ProductsResetToggles & ResetConfirmation & { currentPassword: string }) => Promise<ResetApiResult>
-  resetSection?: (section: 'customers' | 'suppliers' | 'delivery_contacts' | 'audit_log', confirmation: { currentPassword: string }) => Promise<ResetApiResult>
+  resetSection?: (section: 'customers' | 'suppliers' | 'delivery_contacts' | 'audit_log', confirmation: ResetConfirmation & { currentPassword: string }) => Promise<ResetApiResult>
   factoryReset?: (confirmation: ResetConfirmation & { currentPassword: string }) => Promise<ResetApiResult>
 }
 
@@ -518,7 +518,7 @@ type PageResetOptionId = Extract<ResetMode, 'products'> | SectionMode
 type PageResetOption = Omit<ResetOption, 'id'> & { id: PageResetOptionId; kind: PageResetKind }
 
 type SectionResetApi = {
-  resetSection?: (section: SectionMode, confirmation: { currentPassword: string }) => Promise<ResetApiResult>
+  resetSection?: (section: SectionMode, confirmation: ResetConfirmation & { currentPassword: string }) => Promise<ResetApiResult>
 }
 
 // One consolidated screen rather than a separate per-page entry point for
@@ -621,7 +621,7 @@ function SectionReset({ actionHistory = null }: ResetPanelProps) {
     if (isProducts && !isBuiltInResetAdmin(user)) return notify(T('reset_builtin_admin_only', 'Only the built-in admin account can reset business data.'), 'error')
     const { currentPassword } = confirmation
     if (!currentPassword) return
-    if (isProducts && (confirmation?.acknowledged !== true || confirmation?.confirm !== selected.word)) return
+    if (confirmation?.acknowledged !== true || confirmation?.confirm !== selected.word) return
     if (!hasPermission('backup_restore')) return notify(T('access_denied', 'No permission'), 'error')
     if (!beginSingleAction(sectionResetInFlightRef, { blocked: working })) return
     setWorking(true)
@@ -629,7 +629,7 @@ function SectionReset({ actionHistory = null }: ResetPanelProps) {
       const result = await withLoaderTimeout(
         () => (isProducts
           ? getResetApi().resetData?.('products', { ...productToggles, ...confirmation, currentPassword })
-          : (getResetApi() as SectionResetApi).resetSection?.(selected.id as SectionMode, { currentPassword })
+          : (getResetApi() as SectionResetApi).resetSection?.(selected.id as SectionMode, { ...confirmation, currentPassword })
         ) || Promise.resolve({ success: false, error: 'Reset API is unavailable' }),
         isProducts ? 'Reset products' : 'Reset section',
         RESET_DATA_TIMEOUT_MS,

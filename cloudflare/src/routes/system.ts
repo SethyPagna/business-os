@@ -191,6 +191,14 @@ async function denyUnlessCurrentPassword(c: any, body: { currentPassword?: unkno
   return null
 }
 
+// The typed phrase and the acknowledged warning, enforced here so no reset relies
+// on its dialog. reset-data and reset-section share the wording and the codes.
+function denyUnlessResetConfirmed(c: any, body: { confirm?: unknown; acknowledged?: unknown }, phrase: string) {
+  if (body.confirm !== phrase) return c.json({ success: false, error: `Type ${phrase} to confirm. No data was changed.`, code: 'reset_confirm_required' }, 400)
+  if (body.acknowledged !== true) return c.json({ success: false, error: 'Acknowledge the reset warning before confirming. No data was changed.', code: 'reset_acknowledgement_required' }, 400)
+  return null
+}
+
 function resetDeleteStatements(tables: readonly string[]) {
   return tables.flatMap(table => table === 'products'
     ? [{ sql: 'UPDATE products SET stock_quantity = 0' }, { sql: `DELETE FROM "${table}"` }]
@@ -302,8 +310,8 @@ app.post('/reset-data', async (c) => {
   const body = await c.req.json<ResetDataBody>().catch(() => ({}) as ResetDataBody)
   const mode = body.mode === 'all' ? 'all' : body.mode === 'products' ? 'products' : 'sales'
   const phrase = mode === 'all' ? 'DELETE ALL DATA' : mode === 'products' ? 'RESET PRODUCTS' : 'RESET SALES'
-  if (body.confirm !== phrase) return c.json({ success: false, error: `Type ${phrase} to confirm. No data was changed.`, code: 'reset_confirm_required' }, 400)
-  if (body.acknowledged !== true) return c.json({ success: false, error: 'Acknowledge the reset warning before confirming. No data was changed.', code: 'reset_acknowledgement_required' }, 400)
+  const confirmationDenied = denyUnlessResetConfirmed(c, body, phrase)
+  if (confirmationDenied) return confirmationDenied
   const passwordDenied = await denyUnlessCurrentPassword(c, body, 403)
   if (passwordDenied) return passwordDenied
   const includeMovements = mode === 'products' && body.includeMovements === true
@@ -723,17 +731,19 @@ app.post('/reset-data', async (c) => {
 const RESETTABLE_SECTIONS = ['customers', 'suppliers', 'delivery_contacts', 'audit_log'] as const
 type ResettableSection = typeof RESETTABLE_SECTIONS[number]
 
-const SECTION_CONFIG: Record<ResettableSection, { tables: string[]; label: string; broadcastChannel: import('../durable-objects/broadcastHub').BroadcastChannel | null }> = {
-  customers: { tables: ['customer_share_submissions', 'customers'], label: 'Customers', broadcastChannel: 'customers' },
-  suppliers: { tables: ['suppliers'], label: 'Suppliers', broadcastChannel: 'suppliers' },
-  delivery_contacts: { tables: ['delivery_contacts'], label: 'Delivery contacts', broadcastChannel: 'deliveryContacts' },
+const SECTION_CONFIG: Record<ResettableSection, { tables: string[]; label: string; phrase: string; broadcastChannel: import('../durable-objects/broadcastHub').BroadcastChannel | null }> = {
+  customers: { tables: ['customer_share_submissions', 'customers'], label: 'Customers', phrase: 'RESET CUSTOMERS', broadcastChannel: 'customers' },
+  suppliers: { tables: ['suppliers'], label: 'Suppliers', phrase: 'RESET SUPPLIERS', broadcastChannel: 'suppliers' },
+  delivery_contacts: { tables: ['delivery_contacts'], label: 'Delivery contacts', phrase: 'RESET DELIVERY CONTACTS', broadcastChannel: 'deliveryContacts' },
   // No real-time broadcast channel exists for the audit log (see
   // BroadcastChannel's own union in broadcastHub.ts) -- the Audit Log page
   // already re-fetches on its own navigation/action-history triggers, so
   // this is left null rather than broadcasting on an invented channel name
   // no client listens for.
-  audit_log: { tables: ['audit_logs'], label: 'Audit log', broadcastChannel: null },
+  audit_log: { tables: ['audit_logs'], label: 'Audit log', phrase: 'RESET AUDIT LOG', broadcastChannel: null },
 }
+
+type ResetSectionBody = { section?: string; confirm?: string; acknowledged?: boolean; currentPassword?: unknown }
 
 app.post('/reset-section', async (c) => {
   const denied = denyUnlessRestorePermission(c)
@@ -742,15 +752,17 @@ app.post('/reset-section', async (c) => {
     return c.json({ error: 'Too many reset attempts. Wait a few minutes and try again.' }, 429)
   }
 
-  const body = await c.req.json<{ section?: string; currentPassword?: unknown }>().catch(() => ({}) as { section?: string; currentPassword?: unknown })
+  const body = await c.req.json<ResetSectionBody>().catch(() => ({}) as ResetSectionBody)
   const section = body.section as ResettableSection
   if (!RESETTABLE_SECTIONS.includes(section)) {
     return c.json({ error: `Unknown section. Must be one of: ${RESETTABLE_SECTIONS.join(', ')}` }, 400)
   }
+  const config = SECTION_CONFIG[section]
+  const confirmationDenied = denyUnlessResetConfirmed(c, body, config.phrase)
+  if (confirmationDenied) return confirmationDenied
   const passwordDenied = await denyUnlessCurrentPassword(c, body, 403)
   if (passwordDenied) return passwordDenied
 
-  const config = SECTION_CONFIG[section]
   const db = getDb(c.env)
   const user = c.get('user')
 

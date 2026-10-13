@@ -67,7 +67,8 @@ await runTest('both resets refuse to call the API without a password and forward
   assert.match(dataResetPanel, /resetData\?\.\(mode, \{ \.\.\.confirmation, currentPassword \}\)/)
   assert.match(sectionResetPanel, /if \(!currentPassword\) return/)
   assert.match(sectionResetPanel, /resetData\?\.\('products', \{ \.\.\.productToggles, \.\.\.confirmation, currentPassword \}\)/)
-  assert.match(sectionResetPanel, /resetSection\?\.\(selected\.id as SectionMode, \{ currentPassword \}\)/)
+  assert.match(sectionResetPanel, /resetSection\?\.\(selected\.id as SectionMode, \{ \.\.\.confirmation, currentPassword \}\)/)
+  assert.match(sectionResetPanel, /confirmation\?\.acknowledged !== true \|\| confirmation\?\.confirm !== selected\.word\) return/, 'every page reset, not only Products, sends the phrase it was asked for')
 })
 
 await runTest('the transport sends the password with reset-data and reset-section', () => {
@@ -76,8 +77,8 @@ await runTest('the transport sends the password with reset-data and reset-sectio
   assert.match(resetDataFn, /!options\?\.currentPassword\) throw new Error/)
   assert.match(resetDataFn, /apiFetch\('POST', '\/api\/system\/reset-data', \{ mode, \.\.\.options \}/)
   const resetSectionFn = between(runtime, 'export async function resetSection(', 'export async function factoryReset(')
-  assert.match(resetSectionFn, /if \(!confirmation\?\.currentPassword\) throw new Error/)
-  assert.match(resetSectionFn, /\{ section, currentPassword: confirmation\.currentPassword \}/)
+  assert.match(resetSectionFn, /confirmation\?\.acknowledged !== true \|\| !confirmation\?\.confirm \|\| !confirmation\?\.currentPassword\) throw new Error/)
+  assert.match(resetSectionFn, /\{ section, confirm: confirmation\.confirm, acknowledged: true, currentPassword: confirmation\.currentPassword \}/)
   assert.match(methods, /export async function resetSection\(section, confirmation\) \{\s*const result = await callSystemRuntimeMethod\('resetSection', section, confirmation\)/)
 })
 
@@ -91,11 +92,25 @@ await runTest('the Worker answers with the codes the packs translate, in both la
   assert.ok(/No data was changed/.test(en.incorrect_password) && /No data was changed/.test(en.current_password_required))
 })
 
+await runTest('reset-data and reset-section share one phrase-and-acknowledgement check, phrase first', () => {
+  const helper = between(system, 'function denyUnlessResetConfirmed(', 'function resetDeleteStatements(')
+  assert.ok(helper.indexOf("code: 'reset_confirm_required'") > 0)
+  assert.ok(helper.indexOf("code: 'reset_confirm_required'") < helper.indexOf("code: 'reset_acknowledgement_required'"))
+  for (const code of ['reset_confirm_required', 'reset_acknowledgement_required']) assert.ok(en[code] && km[code], `${code} needs text in both packs`)
+  for (const [section, phrase] of [['customers', 'RESET CUSTOMERS'], ['suppliers', 'RESET SUPPLIERS'], ['delivery_contacts', 'RESET DELIVERY CONTACTS'], ['audit_log', 'RESET AUDIT LOG']]) {
+    const entry = system.split('\n').find((line) => line.trim().startsWith(`${section}: { tables:`)) || ''
+    assert.ok(entry.includes(`phrase: '${phrase}'`), `${section} must ask for ${phrase}`)
+    assert.ok(resetData.includes(`word: '${phrase}'`), `the dialog must ask for the same ${phrase}`)
+  }
+})
+
 await runTest('the Worker asks for the password after the cheap checks and before any backup or delete', () => {
   const resetDataRoute = between(system, "app.post('/reset-data'", 'createCloudflareBackup')
-  assert.ok(resetDataRoute.indexOf('reset_acknowledgement_required') < resetDataRoute.indexOf('denyUnlessCurrentPassword(c, body, 403)'))
+  assert.ok(resetDataRoute.indexOf('denyUnlessResetConfirmed(c, body, phrase)') > 0)
+  assert.ok(resetDataRoute.indexOf('denyUnlessResetConfirmed(c, body, phrase)') < resetDataRoute.indexOf('denyUnlessCurrentPassword(c, body, 403)'))
   const resetSectionRoute = between(system, "app.post('/reset-section'", 'createSectionBackup')
-  assert.ok(resetSectionRoute.indexOf('RESETTABLE_SECTIONS.includes(section)') < resetSectionRoute.indexOf('denyUnlessCurrentPassword(c, body, 403)'))
+  assert.ok(resetSectionRoute.indexOf('RESETTABLE_SECTIONS.includes(section)') < resetSectionRoute.indexOf('denyUnlessResetConfirmed(c, body, config.phrase)'))
+  assert.ok(resetSectionRoute.indexOf('denyUnlessResetConfirmed(c, body, config.phrase)') < resetSectionRoute.indexOf('denyUnlessCurrentPassword(c, body, 403)'))
   assert.match(system, /denyUnlessCurrentPassword\(c, body, 400\)/, 'factory-reset keeps its pinned 400 refusal through the same helper')
 })
 

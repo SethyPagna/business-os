@@ -238,7 +238,7 @@ const fakeExecutionCtx = { waitUntil: (p) => { p?.catch?.(() => {}) }, passThrou
 
 async function req(method, url, body, env = fakeEnv) {
   if(url === '/reset-data') body={confirm:body.mode==='all'?'DELETE ALL DATA':body.mode==='products'?'RESET PRODUCTS':'RESET SALES',acknowledged:true,currentPassword:OWNER_PASSWORD,...body}
-  if(url === '/reset-section') body={currentPassword:OWNER_PASSWORD,...body}
+  if(url === '/reset-section') body={confirm:'RESET '+String(body.section).toUpperCase().replace(/_/g,' '),acknowledged:true,currentPassword:OWNER_PASSWORD,...body}
   const res = await app.request(url, {
     method,
     headers: { 'Content-Type': 'application/json' },

@@ -58,11 +58,11 @@ export async function resetData(mode: 'sales' | 'products' | 'all', options: { c
 // timeout as resetData/factoryReset above for the same reason: a fresh
 // backup + D1 batch delete can legitimately run past apiFetch's generic
 // default before the Worker responds.
-export async function resetSection(section: string, confirmation: { currentPassword: string }): Promise<unknown> {
-  if (!confirmation?.currentPassword) throw new Error('Reset requires the current password.')
+export async function resetSection(section: string, confirmation: { confirm: string; acknowledged: true; currentPassword: string }): Promise<unknown> {
+  if (confirmation?.acknowledged !== true || !confirmation?.confirm || !confirmation?.currentPassword) throw new Error('Reset requires the warning acknowledgement, the confirmation phrase and the current password.')
   return route(
     'data:resetSection',
-    () => apiFetch('POST', '/api/system/reset-section', { section, currentPassword: confirmation.currentPassword }, LONG_SYSTEM_ACTION_TIMEOUT_MS),
+    () => apiFetch('POST', '/api/system/reset-section', { section, confirm: confirmation.confirm, acknowledged: true, currentPassword: confirmation.currentPassword }, LONG_SYSTEM_ACTION_TIMEOUT_MS),
     null,
     true,
   )

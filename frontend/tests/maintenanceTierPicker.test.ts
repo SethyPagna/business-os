@@ -83,7 +83,7 @@ await runTest('products routes to reset-data (it has toggles) while the other fo
   // routes/system.ts. This grid is a UI unification, so it must still
   // pick the right one, and only products may carry the toggles.
   assert.match(fn, /resetData\?\.\('products', \{ \.\.\.productToggles, \.\.\.confirmation, currentPassword \}\)/, 'products must go through reset-data with its toggles and the password')
-  assert.match(fn, /resetSection\?\.\(selected\.id as SectionMode, \{ currentPassword \}\)/, 'the other four must go through reset-section with the password')
+  assert.match(fn, /resetSection\?\.\(selected\.id as SectionMode, \{ \.\.\.confirmation, currentPassword \}\)/, 'the other four must go through reset-section with the phrase and the password')
   assert.match(fn, /\{isProducts \? \(\s*<ProductsResetOptions[^}]*[\s\S]*?\) : null\}/, 'the toggles must only render for products')
 })
 
