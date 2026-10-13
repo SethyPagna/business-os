@@ -1252,7 +1252,9 @@ app.post('/close', async (c) => {
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
     note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Manual shift close', request: mutationRequest(body, shift.id) })
   if (result.changed) {
-    const report = sendTelegramShiftReport(c.env, shift.id)
+    // The report names the closer when it is not the cashier (an administrator closing a till):
+    // the stored closed_by_user_name, the name the close just wrote.
+    const report = sendTelegramShiftReport(c.env, shift.id, Date.now(), { closedBy: result.shift?.closed_by_user_name ?? displayName(user) })
     try { c.executionCtx.waitUntil(report) } catch { void report }
     scheduleOverviewAfterClose(c, shift.id)
     return c.json({ shift: result.shift ? await reconciledShift(c.env, user, result.shift) : null, already_closed: false, is_open: false }, 200)
@@ -1296,7 +1298,7 @@ app.post('/:id/close', async (c) => {
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
     note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Historic manual close', request: mutationRequest(body, id) })
   if (!result.changed || !result.shift) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
-  const report = sendTelegramShiftReport(c.env, shift.id)
+  const report = sendTelegramShiftReport(c.env, shift.id, Date.now(), { closedBy: result.shift.closed_by_user_name ?? displayName(user) })
   try { c.executionCtx.waitUntil(report) } catch { void report }
   scheduleOverviewAfterClose(c, shift.id)
   return c.json({ shift: await reconciledShift(c.env, user, result.shift), already_closed: false, is_open: false }, 200)
@@ -1370,7 +1372,10 @@ app.post('/:id/reopen', async (c) => {
     afterCancellation: false, auditAction: 'shift.reopen', request: mutationRequest(body, id) })
   if (!continuation.changed || !continuation.shift) return c.json({ error: 'This shift segment was already reopened or changed concurrently.' }, 409)
   const reopened = continuation.shift
-  const report = sendTelegramShiftReport(c.env, reopened.id)
+  // A reopen is posted under the original cashier's name, so it names who reopened it: the
+  // stored reopened_by_user_name (what writeContinuation just wrote). The open push that
+  // replaces a CANCELLED shift goes through a different route and says nothing of the kind.
+  const report = sendTelegramShiftReport(c.env, reopened.id, Date.now(), { reopenedBy: reopened.reopened_by_user_name ?? displayName(user) })
   try { c.executionCtx.waitUntil(report) } catch { void report }
   return c.json({ shift: await presentShift(db, user, reopened), reopened_from_shift_id: parent.id }, 201)
 })

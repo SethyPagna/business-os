@@ -1175,13 +1175,20 @@ export type ShiftReportSession = {
 }
 
 /**
- * What a particular SEND adds to the shift report beyond the shift's own row.
- * `amendedBy` is the account that just amended the shift (PATCH /api/shifts/:id):
- * the report is re-sent as a new message, and a status-style message names who
- * did it. The name the amendment record stores (the account username, from the
- * route's displayName) -- never a phone number or an email.
+ * What a particular SEND adds to the shift report beyond the shift's own row: who
+ * did the thing the message announces (owner rule: a change notification names who
+ * did it). Each is the name the route has just stored for the event -- the account
+ * username, from the route's displayName -- never a phone number or an email, and
+ * a send carries at most one of them:
+ *  - `amendedBy`: the account that amended the shift (PATCH /api/shifts/:id); the
+ *    report is re-sent as a new message.
+ *  - `reopenedBy`: the account that reopened it (reopened_by_user_name). A reopen
+ *    is posted under the ORIGINAL cashier's name, so without this it reads as a
+ *    fresh open. Shown even when the reopener is the cashier.
+ *  - `closedBy`: the account that closed it (closed_by_user_name). Shown only when
+ *    it is not the cashier, who is already on the Cashier row.
  */
-export type ShiftReportOptions = { amendedBy?: string | null }
+export type ShiftReportOptions = { amendedBy?: string | null; reopenedBy?: string | null; closedBy?: string | null }
 
 export type ShiftReportFigures = {
   invoices: number
@@ -1353,9 +1360,16 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     // in half either.
     labeled('shift', cleanLine(shift.shift_code, 80)),
   ]
-  // A report re-sent after an amendment says who amended it (owner rule: a change
-  // notification names who did it). One row, with the other who/which rows; absent
-  // when the send is not an amendment or the account has no username.
+  // A report sent for an event someone else may have done says who did it (owner
+  // rule: a change notification names who did it): one row, with the other who/which
+  // rows, absent when the send is not that event or the account has no name.
+  const cashier = cleanLine(shift.user_name, 60).toLowerCase()
+  const closedBy = cleanLine(options.closedBy, 60)
+  // A cashier closing their own till is already on the Cashier row; naming them
+  // again would be noise on the commonest close of all.
+  if (closedBy && closedBy.toLowerCase() !== cashier) lines.push(labeled('closedBy', closedBy))
+  const reopenedBy = cleanLine(options.reopenedBy, 60)
+  if (reopenedBy) lines.push(labeled('reopenedBy', reopenedBy))
   const amendedBy = cleanLine(options.amendedBy, 60)
   if (amendedBy) lines.push(labeled('amendedBy', amendedBy))
   if (cancelled) {

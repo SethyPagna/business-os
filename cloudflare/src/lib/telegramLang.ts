@@ -193,6 +193,14 @@ const LABELS = {
   // `shift_amended_by`; the Khmer is the packs' "<verb>ដោយ" shape (shift_opened_by,
   // recorded_by) over the verb of shift_edited / shift_amend (កែប្រែ).
   amendedBy: { en: 'Amended by', km: 'កែប្រែដោយ' },
+  // The same rule for the other two events that re-send a shift report on someone
+  // else's behalf (refuter S3, 13 Oct 2026): a REOPEN, which otherwise reads as a
+  // fresh open under the original cashier's name, and a CLOSE by an account other
+  // than the cashier. en.json/km.json `shift_reopened_by` / `shift_closed_by`; the
+  // Khmer is "<verb>ដោយ" like shift_opened_by (បើកដោយ), with the app's reopen verb
+  // (បើក...ឡើងវិញ, shift_action_reopen) and its close verb (បិទ).
+  closedBy: { en: 'Closed by', km: 'បិទដោយ' },
+  reopenedBy: { en: 'Reopened by', km: 'បើកឡើងវិញដោយ' },
   from: { en: 'From', km: 'ពី' },
   to: { en: 'To', km: 'ទៅ' },
   totalMoved: { en: 'Total moved', km: 'បានផ្ទេរសរុប', localizeValue: true },
