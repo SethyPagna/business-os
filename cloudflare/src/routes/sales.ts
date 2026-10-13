@@ -154,7 +154,7 @@ import { canonicalMoney4, SaleMoneyContractError, hasRecordedSaleMoneyPrecision 
 import { quoteSaleMutationHeader, compareSaleHeaderQuote, SaleHeaderQuoteError } from '../lib/saleMutationHeaderQuote'
 import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/nativeSaleChange'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
-import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
+import { resolveClientCreatedAt } from '../lib/clientTimestamp'
 import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { formatSaleStatusTelegramLines, formatSaleTelegramLines, sendTelegramEvent } from '../lib/telegram'
@@ -568,6 +568,8 @@ app.post('/', async (c) => {
     }
   }
   if (body.money_precision_version !== 1) return c.json({ error: 'Keep the original pending sale and review it with the current app before recording it.', code: 'money_precision_review_needed' }, 409)
+  const clientTime = resolveClientCreatedAt(body.created_at)
+  if (clientTime.tooOld) return c.json({ error: 'This sale was saved on this device at an earlier time and is kept there. Nothing was recorded.', code: 'sale_created_at_too_old', claimed_created_at: clientTime.claimed }, 409)
   if (!await saleMoneySchemaReady(db)) return c.json({ error: 'Sale precision schema is not ready.', code: 'money_precision_schema_not_ready' }, 503)
   // Every atomic create needs a stable identity that later statements in the
   // D1 batch can resolve before the auto-generated sale id is available to JS.
@@ -1167,12 +1169,11 @@ app.post('/', async (c) => {
   const receiptNumberTaken = async (candidate: string) =>
     !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate]))
   let receiptNumber = normalizeClientReceiptNumber(body.receipt_number) || await uniqueBusinessDateTimeNumber('', receiptNumberTaken)
-  // An offline replay carries the sale's own queue-time moment (stamped in
-  // saleWriteTransport); honored with bounded trust so day-ranged reports
-  // put the sale on the day it happened, not the day it synced. Online
-  // checkouts send no created_at and keep the server clock. See
-  // lib/clientTimestamp.ts for the bounds and the storage format.
-  const clientCreatedAt = sanitizeClientCreatedAt(body.created_at)
+  // A client created_at is honored only inside the short window of
+  // lib/clientTimestamp.ts (which also holds the storage format). An older
+  // claim was refused above; a future or unparseable one keeps the server
+  // clock and is recorded on the creation audit row.
+  const clientCreatedAt = clientTime.value
 
   // isDelivery / deliveryFeeUsd / deliveryFeeKhr / deliveryFeePaidBy are
   // computed with the totals above, since the customer-paid portion is part
@@ -1409,6 +1410,7 @@ app.post('/', async (c) => {
     totalUsd,
     saleStatus,
     origin: clientCreatedAt ? 'offline_replay' : 'pos',
+    ...(clientTime.adjusted ? { claimed_created_at: clientTime.claimed, received_at: snapshotRecordedAt, created_at_adjusted: true } : {}),
   })
   const saleCreationAuditStatement = {
     sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)

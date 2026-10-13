@@ -147,8 +147,26 @@ check('a caller that needs an older client time must opt in with maxPastMs; the 
 
 check('wiring: the sales INSERT COALESCEs the sanitized client stamp, updated_at stays server-clock', () => {
   const salesRoute = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'sales.ts'), 'utf8')
-  assert.match(salesRoute, /sanitizeClientCreatedAt\(body\.created_at\)/)
+  assert.match(salesRoute, /resolveClientCreatedAt\(body\.created_at\)/)
+  assert.match(salesRoute, /const clientCreatedAt = clientTime\.value/)
   assert.match(salesRoute, /COALESCE\(@created_at, CURRENT_TIMESTAMP\), CURRENT_TIMESTAMP\s+WHERE @customer_guard_id/)
+})
+
+check('wiring: an old claim is refused after the owner fence, the duplicate lookup and the precision check, before any other work', () => {
+  const salesRoute = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'sales.ts'), 'utf8')
+  const create = salesRoute.slice(salesRoute.indexOf("app.post('/', async (c) => {"))
+  const at = needle => { const index = create.indexOf(needle); assert.ok(index > 0, 'missing ' + needle); return index }
+  const owner = at('offlineSaleOwnerError(body.offline_owner, offlineOwner)')
+  const duplicate = at('duplicate: true, offline_owner: offlineOwner')
+  const precision = at("code: 'money_precision_review_needed'")
+  const refusal = at("code: 'sale_created_at_too_old'")
+  const schema = at('await saleMoneySchemaReady(db)')
+  assert.ok(owner < duplicate && duplicate < precision && precision < refusal && refusal < schema, 'refusal sits after the owner, duplicate and precision checks and before the schema probe and every write')
+  assert.match(create.slice(refusal - 260, refusal), /if \(clientTime\.tooOld\) return c\.json\(/)
+  assert.match(create.slice(refusal, refusal + 120), /claimed_created_at: clientTime\.claimed/)
+  assert.match(create, /\.\.\.\(clientTime\.adjusted \? \{ claimed_created_at: clientTime\.claimed, received_at: snapshotRecordedAt, created_at_adjusted: true \} : \{\}\)/)
+  const message = create.slice(refusal - 200, refusal)
+  assert.doesNotMatch(message, /network|abort|timed out|server is offline|server unavailable/i, 'the refusal text must not look like a retryable network error to the till')
 })
 
 check('wiring: online-only sales do not mint offline timestamps; manual recovery still sends the original stamp, which the Worker no longer trusts', () => {
