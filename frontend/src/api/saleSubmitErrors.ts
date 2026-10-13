@@ -10,6 +10,9 @@ const SALE_SUBMIT_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   // amendments, and by the till's own pricing before it ever asks.
   sale_discount_exceeds_price: 'sale_discount_exceeds_price',
   sale_discount_exceeds_subtotal: 'sale_discount_exceeds_subtotal',
+  // Stock moved (a Remove, another till's sale) between the sale's reads and its write: the Worker aborts the whole
+  // write, so nothing was recorded and the same checkout can simply be sent again. Not a pricing change.
+  sale_stock_changed: 'sale_stock_changed',
 }
 
 /**

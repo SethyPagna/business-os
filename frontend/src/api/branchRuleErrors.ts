@@ -32,6 +32,7 @@ export const BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> 
   // after the cutover, each the English of the pack key named after its code.
   ['The sale and all of its lines must use the same branch.', 'sale_branch_mismatch'],
   ['The branch or received date changed while this sale was being recorded. Refresh the sale and pick the current received date before trying again.', 'sale_identity_conflict'],
+  ['Stock changed while this sale was being saved. Nothing was recorded. Try again.', 'sale_stock_changed'],
   ['Stock without a received date must be a regular sale line with a branch.', 'unrecorded_stock_line_invalid'],
   ['Every expense must use an active selling branch.', 'fee_branch_invalid'],
   ['Choose an existing sale recorded at a selling branch.', 'fee_sale_invalid'],
@@ -96,6 +97,7 @@ export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   transfer_too_many_lots: 'transfer_too_many_lots',
   sale_branch_mismatch: 'sale_branch_mismatch',
   sale_identity_conflict: 'sale_identity_conflict',
+  sale_stock_changed: 'sale_stock_changed',
   unrecorded_stock_line_invalid: 'unrecorded_stock_line_invalid',
   fee_branch_invalid: 'fee_branch_invalid',
   fee_sale_invalid: 'fee_sale_invalid',

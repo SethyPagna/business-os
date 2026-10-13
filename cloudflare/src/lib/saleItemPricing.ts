@@ -1,5 +1,6 @@
 import { divideMoney4, multiplyMoney4, percentageMoney4, roundMoney4, sellingPriceCeilCent, subtractMoney4, sumMoney4 } from './moneyPrecision'
 import { evaluateCartPromotionAdjustments, type PromotionRule } from './promotionRules'
+import type { D1Compat } from './db'
 
 /** Pure server-owned capture evaluator. Routes must supply authorized captured
  * rows and guard those rows/rule membership in their mutation transaction.
@@ -331,6 +332,27 @@ export function materializeCapturedPricingRow(row: Record<string,unknown>, pool:
     manual_discount_type:capture.manual.type==='none'?null:capture.manual.type,manual_discount_value:capture.manual.value,price_mode:capture.source}
 }
 
+// D1 limits expression depth to 100. Keep every captured column comparison but balance the boolean AST instead of growing a
+// left-deep OR chain.
+function anyOf(terms: readonly string[]): string {
+  if(!terms.length)return '0'
+  if(terms.length===1)return terms[0]
+  const midpoint=Math.floor(terms.length/2)
+  return `(${anyOf(terms.slice(0,midpoint))} OR ${anyOf(terms.slice(midpoint))})`
+}
+/** EXISTS(a captured row whose stored row is gone or differs in any captured column) over the rows bound as JSON in @param. */
+function capturedRowsConflict(rows: readonly Record<string,unknown>[], table: string, param: string): string {
+  if (!rows.length) return '0'
+  const keys=Object.keys(rows[0]).sort(), ids=new Set<number>()
+  if (!keys.includes('id') || keys.some(name => !/^[a-z][a-z0-9_]*$/.test(name))) invalid()
+  for (const row of rows) {
+    if (!Number.isSafeInteger(row.id) || Number(row.id)<=0 || ids.has(Number(row.id))
+      || JSON.stringify(Object.keys(row).sort()) !== JSON.stringify(keys)) invalid()
+    ids.add(Number(row.id))
+  }
+  return `EXISTS (SELECT 1 FROM json_each(@${param}) expected LEFT JOIN ${table} current ON current.id=json_extract(expected.value,'$.id') WHERE ${anyOf(['current.id IS NULL',...keys.map(name => `current.${name} IS NOT json_extract(expected.value,'$.${name}')`)])})`
+}
+
 /** Guard the exact authorized SELECT * capture, including newly inserted active
  * rules. Execute in the same batch BEFORE any sale/stock/audit mutation. The
  * caller must read all active rules (not just the winner or currently in-window
@@ -338,29 +360,34 @@ export function materializeCapturedPricingRow(row: Record<string,unknown>, pool:
 export function pricingSourceGuard(products: readonly Record<string,unknown>[], activeRules: readonly Record<string,unknown>[]): {sql:string;params:Record<string,unknown>} {
   if (!products.length || products.length > MAX_PRICING_LINES || activeRules.length > MAX_PRICING_RULES) invalid()
   if (activeRules.some(row => row.is_active !== 1)) invalid()
-  // D1 limits expression depth to 100. Keep every captured column comparison
-  // but balance the boolean AST instead of growing a left-deep OR chain.
-  const any=(terms:readonly string[]):string=>{
-    if(!terms.length)return '0'
-    if(terms.length===1)return terms[0]
-    const midpoint=Math.floor(terms.length/2)
-    return `(${any(terms.slice(0,midpoint))} OR ${any(terms.slice(midpoint))})`
-  }
-  const make = (rows:readonly Record<string,unknown>[],table:string,param:string) => {
-    if (!rows.length) return '0'
-    const keys=Object.keys(rows[0]).sort(), ids=new Set<number>()
-    if (!keys.includes('id') || keys.some(name => !/^[a-z][a-z0-9_]*$/.test(name))) invalid()
-    for (const row of rows) {
-      if (!Number.isSafeInteger(row.id) || Number(row.id)<=0 || ids.has(Number(row.id))
-        || JSON.stringify(Object.keys(row).sort()) !== JSON.stringify(keys)) invalid()
-      ids.add(Number(row.id))
-    }
-    return `EXISTS (SELECT 1 FROM json_each(@${param}) expected LEFT JOIN ${table} current ON current.id=json_extract(expected.value,'$.id') WHERE ${any(['current.id IS NULL',...keys.map(name => `current.${name} IS NOT json_extract(expected.value,'$.${name}')`)])})`
-  }
-  const productConflict=make(products,'products','pricing_products'), ruleConflict=make(activeRules,'promotion_rules','pricing_rules')
+  const productConflict=capturedRowsConflict(products,'products','pricing_products'), ruleConflict=capturedRowsConflict(activeRules,'promotion_rules','pricing_rules')
   const params={pricing_products:JSON.stringify(products),pricing_rules:JSON.stringify(activeRules),pricing_rule_count:activeRules.length}
   if (new TextEncoder().encode(params.pricing_products+params.pricing_rules).length>512_000) invalid()
   return {sql:`SELECT CASE WHEN ${productConflict} OR ${ruleConflict} OR (SELECT COUNT(*) FROM promotion_rules WHERE is_active=1)<>@pricing_rule_count THEN json_extract('sale_pricing_source_conflict','$') ELSE 1 END`,params}
+}
+
+/** The refusal a sale write answers when a stock movement (and nothing that prices a line) landed between its reads and its write. */
+export const SALE_STOCK_CHANGED_ERROR = 'Stock changed while this sale was being saved. Nothing was recorded. Try again.'
+export const SALE_STOCK_CHANGED_CODE = 'sale_stock_changed'
+
+/** Why a sale write whose batch opened with pricingSourceGuard aborted. That guard compares EVERY column of the product rows
+ * read before the write, so it also fires when only the stock moved (a Remove, another till's sale: stock_quantity,
+ * updated_at) -- and the routes answered "Pricing changed" for that too. This is the same comparison as ONE read-only
+ * statement that answers instead of raising: 'pricing' when a column that prices a line (capturePricingProduct's subset) or the
+ * active rules differ, 'stock' when only the other columns differ, null when nothing differs any more (the abort came from
+ * another guard of the batch). One statement, so a refused sale costs the D1 budget it always did. */
+export async function classifyPricingSourceConflict(
+  db: D1Compat, products: readonly Record<string,unknown>[], activeRules: readonly Record<string,unknown>[],
+): Promise<'pricing' | 'stock' | null> {
+  try {
+    const priced=products.map(row=>capturePricingProduct(row))
+    const row=await db.prepare(`SELECT CASE
+        WHEN ${capturedRowsConflict(priced,'products','pricing_columns')} OR ${capturedRowsConflict(activeRules,'promotion_rules','pricing_rules')}
+          OR (SELECT COUNT(*) FROM promotion_rules WHERE is_active=1)<>@pricing_rule_count THEN 'pricing'
+        WHEN ${capturedRowsConflict(products,'products','pricing_products')} THEN 'stock'
+        ELSE 'none' END AS verdict`).get({pricing_columns:JSON.stringify(priced),pricing_products:JSON.stringify(products),pricing_rules:JSON.stringify(activeRules),pricing_rule_count:activeRules.length}) as {verdict?: string} | null
+    return row?.verdict==='pricing' ? 'pricing' : row?.verdict==='stock' ? 'stock' : null
+  } catch { return null }
 }
 
 /** Quantity/stock changes are separate guarded plans. This updates only the

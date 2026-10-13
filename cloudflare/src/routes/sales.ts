@@ -5,7 +5,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { getDb } from '../lib/db'
 import { ordinaryBusinessMaintenanceGuard, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
 import { hasColumn, tableColumnSet } from '../lib/schemaProbe'
-import { capturedPricingMetadata, capturePricingProduct, evaluateCapturedPricingPool, materializeCapturedPricingRow, parseSaleItemPricing, pricingRowsStatement, pricingSourceGuard, serializeSaleItemPricing, validateCapturedSaleBasket, SaleDiscountRefusedError, SaleItemPricingError, type CapturedPricingPool, type PricingSource } from '../lib/saleItemPricing'
+import { capturedPricingMetadata, capturePricingProduct, evaluateCapturedPricingPool, materializeCapturedPricingRow, parseSaleItemPricing, pricingRowsStatement, pricingSourceGuard, classifyPricingSourceConflict, SALE_STOCK_CHANGED_CODE, SALE_STOCK_CHANGED_ERROR, serializeSaleItemPricing, validateCapturedSaleBasket, SaleDiscountRefusedError, SaleItemPricingError, type CapturedPricingPool, type PricingSource } from '../lib/saleItemPricing'
 import { planHistoricalSaleLine, recordedHistoricalLineTotal, HistoricalSalePricingError } from '../lib/historicalSalePricing'
 import { normalizePromotionRule } from '../lib/promotionRules'
 import { resolveProductMergeLineage, ProductMergeLineageError, findSaleItemsRequiringIdentityReview } from '../lib/productMergeLineage'
@@ -1800,8 +1800,10 @@ app.post('/', async (c) => {
         }, 409)
       }
       if (/malformed JSON/i.test(message)) {
-        try { await db.prepare(capturedSourceGuard.sql).get(capturedSourceGuard.params) }
-        catch { return c.json({error:'Pricing changed before the sale was saved. Review the current quote.',code:'sale_pricing_quote_conflict'},409) }
+        // The guard compares every column of the product rows, so stock that moved in the window trips it too: say which.
+        const sourceConflict = await classifyPricingSourceConflict(db, products, pricingRuleRows)
+        if (sourceConflict === 'pricing') return c.json({error:'Pricing changed before the sale was saved. Review the current quote.',code:'sale_pricing_quote_conflict'},409)
+        if (sourceConflict === 'stock') return c.json({error:SALE_STOCK_CHANGED_ERROR,code:SALE_STOCK_CHANGED_CODE},409)
       }
       if (redemptionGuard && /malformed JSON/i.test(message)) {
         return c.json({ error: 'Membership points or checkout state changed before the sale was recorded. Refresh and try again.', code: 'loyalty_redemption_conflict' }, 409)
@@ -3789,8 +3791,9 @@ app.post('/:id/items', async (c) => {
     if (retry) return c.json({ error: 'client_request_id was already used with different added items.', code: 'idempotency_conflict' }, 409)
     const message = (error as Error).message || ''
     if (/malformed JSON/i.test(message)) {
-      try { await db.prepare(addSourceGuard.sql).get(addSourceGuard.params) }
-      catch { return c.json({error:'Pricing changed before the added items were saved.',code:'sale_pricing_quote_conflict'},409) }
+      const sourceConflict = await classifyPricingSourceConflict(db, products, addRuleRows)
+      if (sourceConflict === 'pricing') return c.json({error:'Pricing changed before the added items were saved.',code:'sale_pricing_quote_conflict'},409)
+      if (sourceConflict === 'stock') return c.json({error:SALE_STOCK_CHANGED_ERROR,code:SALE_STOCK_CHANGED_CODE},409)
     }
     if (/CHECK constraint|constraint failed/i.test(message)) {
       return c.json({ error: 'The sale, stock, or monetary settings changed. Refresh and review the added items again.', code: 'write_conflict' }, 409)
