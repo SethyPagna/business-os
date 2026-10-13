@@ -95,6 +95,7 @@ const SCHEMA = `
 
 const noop = async () => {}
 const adapt = (raw) => ({
+  batch: (items) => raw.batch(items),
   prepare(sql) {
     const stmt = raw.prepare(sql)
     return {
