@@ -95,7 +95,7 @@ runTest('F2: Add queues editable lines; completion writes through the one D4 ker
   assert.match(modalSource, /const removeLine = \(key: string\)/)
   // a saved Add shows its received date; remove / set say what they did
   assert.match(modalSource, /const describeLineResult = \(line: StockSessionLine, result[^)]*\): string => \(\s*line\.mode === 'remove'[^]*?: line\.mode === 'set'[^]*?: result\?\.lotCode/)
-  assert.equal((modalSource.match(/detail: describeLineResult\(line, result/g) || []).length, 2, 'both the batched-result branch and the sequential fallback report through the same function')
+  assert.equal((modalSource.match(/detail: describeLineResult\(line, result/g) || []).length, 3, 'the batched-result branch, the sequential fallback and answers kept after an owner change all report through the same function')
   // every failure detail goes through one helper (a guard refusal is a translated sentence)
   assert.match(modalSource, /const failureText = \(error: unknown, fallback: string\): string => \{[^]*?stockFailureText\(error, tr, fallback\)/)
   assert.ok((modalSource.match(/detail: failureText\(/g) || []).length >= 3, 'sequential, batched and creation failures all report through one helper')

@@ -125,7 +125,7 @@ await check('another tab signing in locks the identity, and the same owner confi
 
 // ---- the transport: route() + commitFastStockIn extracted from source, real authority ----
 function transportFixture(mode: 'normal' | 'late-success' | 'late-404' | 'fresh-404' | 'settlement-switch' | 'before-dispatch', change: () => void | Promise<void>) {
-  const calls: string[][] = [], settled: number[][] = [], invalidations: string[] = [], events: unknown[] = []
+  const calls: string[][] = [], settled: number[][] = [], invalidations: string[] = [], events: unknown[] = [], answered: unknown[] = []
   const route = extract(http, 'route', {
     ...actor, getSyncServerUrl: () => 'https://fixture.invalid',
     getReadServerBaseUrl: () => 'https://fixture.invalid', hasStoredAuthSession: () => true, getSameOriginApiBaseUrl: () => '',
@@ -150,8 +150,8 @@ function transportFixture(mode: 'normal' | 'late-success' | 'late-404' | 'fresh-
   const run = (writeIdentity?: unknown) => commit(lines, async (rows: any[]) => {
     settled.push(rows.map(row => row.index))
     if (mode === 'settlement-switch') await change()
-  }, writeIdentity ? { writeIdentity } : undefined)
-  return { calls, settled, invalidations, events, run }
+  }, { ...(writeIdentity ? { writeIdentity } : {}), onAnsweredAfterOwnerChange: (rows: unknown) => answered.push(rows) })
+  return { calls, settled, invalidations, events, answered, run }
 }
 const refused = (error: any) => ['actor_owner_changed', 'actor_session_quarantined'].includes(error.code)
 
@@ -167,6 +167,10 @@ for (const [name, change] of Object.entries(REAL_CHANGE)) {
       await assert.rejects(f.run(), refused)
       assert.equal(f.calls.length, mode === 'before-dispatch' ? 0 : 1)
       assert.deepEqual(f.settled, []); assert.deepEqual(f.invalidations, []); assert.deepEqual(f.events, [])
+      // F2: the server's answer for the original owner is handed over to be kept, never settled or shown.
+      assert.deepEqual(f.answered, mode === 'late-success'
+        ? [[{ key: 'existing', result: { key: 'existing', ok: true } }, { key: 'new', result: { key: 'new', ok: false, code: 'deferred' } }]]
+        : [])
     })
   }
 }
@@ -174,6 +178,7 @@ for (const [name, change] of Object.entries(SAME_USER)) {
   await check(`${name}, late success and late 404: the same owner's rounds continue`, async () => {
     const f = transportFixture('late-success', change), results = await f.run()
     assert.deepEqual(f.calls, [['existing', 'new'], ['new']]); assert(results.every((row: any) => row.ok)); assert.deepEqual(f.settled, [[0], [1]])
+    assert.deepEqual(f.answered, [], 'the same owner settles normally')
     freshTab()
     const fallback = transportFixture('late-404', change)
     assert.equal(await fallback.run(), null, 'the old-Worker fallback stays available to the same owner')
@@ -195,7 +200,7 @@ await check('an identity captured before product preparation is not recaptured a
 // ---- the modal: performCommit and friends extracted from source, real authority ----
 function modalFixture(boundary: string, change: () => void | Promise<void>) {
   const receivingIdentity = actor.captureActorWriteIdentity()
-  const effects: Array<{ name: string; current: boolean }> = [], requests: number[] = []
+  const effects: Array<{ name: string; current: boolean }> = [], requests: number[] = [], drafts: Array<{ current: boolean; lines: any[] }> = []
   const effect = (name: string) => effects.push({ name, current: actor.isActorWriteIdentityCurrent(receivingIdentity) })
   let saving = false, switched = false
   const received = [1, 2].map(id => ({ key: String(id), product: { id }, mode: 'add', status: 'queued', quantity: 1, freeQuantity: 0, createPayload: boundary.startsWith('create') && id === 1 ? { name: 'New' } : null }))
@@ -213,19 +218,28 @@ function modalFixture(boundary: string, change: () => void | Promise<void>) {
     setCreatedProductIds: () => effect('created-ids'),
     setStep: () => effect('step'), notify: () => effect('notify'), tr,
     finishSession: () => effect('finish'), onDone: () => effect('done'),
-    persistSessionDraft: () => effect('draft'), persistSubmissionDraft: () => effect('submission'),
+    persistSessionDraft: (lines: any[] = []) => { drafts.push({ current: actor.isActorWriteIdentityCurrent(receivingIdentity), lines: structuredClone(lines) }); effect('draft') },
+    persistSubmissionDraft: () => effect('submission'),
     applyLineOutcome: (lines: any[], key: string, patch: any) => lines.map(line => line.key === key ? { ...line, ...patch } : line),
     createHeldProduct: async () => { await change(); if (boundary.endsWith('error')) throw Error('Late create failure'); return 72 }, failureText: () => 'Failed', stockLineNeedsRemoval: () => false,
     describeLineResult: () => 'Received', commitSessionBlock: () => ({}), captureReceivingRequest() {},
     buildLineRequest: (line: any) => ({ key: line.key, wire: 'receive', body: { productId: line.product.id } }),
     isDeferredStockInResult: () => false,
-    commitFastStockIn: async (_lines: unknown, settled: (rows: unknown[]) => void) => {
+    commitFastStockIn: async (_lines: unknown, settled: (rows: unknown[]) => void, options: any) => {
       if (boundary === 'round-settle') {
         await change()
         settled([{ index: 0, result: { ok: true } }, { index: 1, result: { ok: true } }])
         return [{ ok: true }, { ok: true }]
       }
-      if (boundary.startsWith('commit')) { await change(); if (boundary.endsWith('error')) throw Error('Late commit failure') }
+      if (boundary.startsWith('commit')) {
+        await change()
+        if (boundary.endsWith('error')) throw Error('Late commit failure')
+        if (!actor.isActorWriteIdentityCurrent(options.writeIdentity)) {
+          // What the real transport hands over when the server answered the original owner (transport cases above).
+          options.onAnsweredAfterOwnerChange?.([{ key: '1', result: { ok: true } }, { key: '2', result: { ok: false, code: 'deferred' } }])
+          throw Object.assign(new Error('The signed-in account changed'), { code: 'actor_owner_changed' })
+        }
+      }
       return boundary.startsWith('fallback') ? null : []
     },
     receiveBatchStock: async (body: any) => {
@@ -242,7 +256,7 @@ function modalFixture(boundary: string, change: () => void | Promise<void>) {
   dependencies.performCommitSequential = extract(modal, 'performCommitSequential', dependencies)
   const performCommit = extract(modal, 'performCommit', dependencies)
   const perform = async () => { if (boundary === 'before') await change(); await performCommit() }
-  return { perform, effects, requests, saving: () => saving, receivingIdentity }
+  return { perform, effects, requests, drafts, saving: () => saving, receivingIdentity }
 }
 const exits = (saving: boolean, receivingIdentity: unknown) => {
   const reached: string[] = []
@@ -277,14 +291,23 @@ for (const [name, change] of Object.entries(SAME_USER)) {
     })
   }
 }
-// The owner really changed: nothing is applied, saving clears, the message shows.
+// The owner really changed: nothing is applied or shown, saving clears, the message shows. F2: what the
+// server already confirmed for the original owner is written to that owner's pinned draft, and nothing else.
 const STOP = new Set(['saving:false', 'sign-in-changed:true'])
+const KEPT: Record<string, (lines: any[]) => void> = {
+  create: (lines) => assert.deepEqual(lines.map(line => [line.key, line.product.id, line.status]), [['1', 72, 'queued'], ['2', 2, 'queued']], 'the created product keeps its id'),
+  commit: (lines) => assert.deepEqual(lines.map(line => [line.key, line.status]), [['1', 'saved'], ['2', 'saving']], 'only the confirmed line is saved'),
+  fallback: (lines) => assert.deepEqual(lines.map(line => [line.key, line.status]), [['1', 'saved'], ['2', 'saving']], 'the line sent before the change is saved'),
+}
 for (const [name, change] of Object.entries(REAL_CHANGE)) {
   for (const boundary of ['before', 'create', 'create-error', 'commit', 'commit-error', 'fallback', 'fallback-error', 'fallback-between', 'round-settle']) {
     await check(`actual modal, ${name} at ${boundary}: applies nothing, clears saving and says how to continue`, async () => {
       const f = modalFixture(boundary, change); await f.perform()
       const stale = f.effects.filter(effect => !effect.current).map(effect => effect.name)
-      assert.deepEqual(new Set(stale), STOP, stale.join(','))
+      const staleDrafts = f.drafts.filter(draft => !draft.current)
+      if (KEPT[boundary]) { assert.equal(staleDrafts.length, 1, 'kept once'); KEPT[boundary](staleDrafts[0].lines) }
+      else assert.deepEqual(staleDrafts, [], 'nothing unconfirmed is written')
+      assert.deepEqual(new Set(stale), KEPT[boundary] ? new Set([...STOP, 'draft']) : STOP, stale.join(','))
       assert.equal(f.saving(), false, 'saving is cleared, so close and minimize work')
       assert.equal(f.effects.some(effect => effect.name === 'finish'), false)
       if (boundary.startsWith('fallback')) assert.deepEqual(f.requests, [1])

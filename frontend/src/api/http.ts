@@ -1711,7 +1711,11 @@ export async function route<T = any>(
     // decide whether the operation is valid.
     const result = await serverFn()
     if (writeScope) assertActorReadScope(writeScope, false)
-    if (writeIdentity && !isActorWriteIdentityCurrent(writeIdentity)) assertActorWriteIdentity(writeIdentity, 'unknown')
+    // The server answered for an owner who has since changed: nothing is published here, but the answer travels
+    // with the refusal so the caller can keep it for that owner.
+    if (writeIdentity && !isActorWriteIdentityCurrent(writeIdentity)) {
+      try { assertActorWriteIdentity(writeIdentity, 'unknown') } catch (refusal) { throw Object.assign(refusal as Error, { confirmedResult: result }) }
+    }
     cacheInvalidateWithDerived(channel.split(':')[0])
     setServerHealth(true)
     logCall(channel, 'server', Date.now() - t0)

@@ -123,7 +123,9 @@ async function controller(createdRows: boolean[], creationOutcomes: CreationOutc
       stockLineReason: (entry: StockSessionLine) => entry.reason,
       describeLineResult: () => 'Received', isDeferredStockInResult: (result: { code?: string }) => result.code === 'deferred',
       commitFastStockIn: async (lines: FastStockInCommitLine[], settled: (value: FastStockInCommitSettled) => void, options: unknown) => {
-        requests.push(structuredClone({ lines, options }))
+        const { onAnsweredAfterOwnerChange, ...rest } = options as { onAnsweredAfterOwnerChange?: unknown }
+        assert.equal(typeof onAnsweredAfterOwnerChange, 'function', 'answers after an owner change are kept for the original owner')
+        requests.push(structuredClone({ lines, options: rest }))
         const results = lines.map(entry => ({ ok: true, key: entry.key }))
         settled(results.map((result, index) => ({ index, result })))
         return results

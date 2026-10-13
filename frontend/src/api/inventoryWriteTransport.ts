@@ -191,7 +191,12 @@ export function fastStockInCommitPayload<L>(batch: L[], session: FastStockInSess
 export async function commitFastStockIn(
   lines: FastStockInCommitLine[],
   onSettled?: (settled: FastStockInCommitSettled) => void,
-  options?: { session?: FastStockInSessionBlock | null; writeIdentity?: ActorWriteIdentity },
+  options?: {
+    session?: FastStockInSessionBlock | null
+    writeIdentity?: ActorWriteIdentity
+    // Answers the server gave the original owner after it changed: never settled or shown, only kept for that owner.
+    onAnsweredAfterOwnerChange?: (answered: Array<{ key: string; result: FastStockInCommitLineResult | undefined }>) => void
+  },
 ): Promise<FastStockInCommitLineResult[] | null> {
   const identity = options?.writeIdentity ?? captureActorWriteIdentity()
   const wireLines = lines.map((line) => (
@@ -201,12 +206,19 @@ export async function commitFastStockIn(
   const send = async (batch: typeof wireLines): Promise<FastStockInCommitLineResult[]> => {
     const payload = fastStockInCommitPayload(batch, options?.session, firstRequest)
     firstRequest = false
-    const result = await route(
-      'inventory:fastStockIn:commit',
-      () => apiFetch('POST', '/api/inventory/fast-stock-in/commit', { ...getDevicePayload(), ...payload }),
-      null,
-      { isWrite: true, writeIdentity: identity },
-    ) as { results?: FastStockInCommitLineResult[] } | null
+    let result: { results?: FastStockInCommitLineResult[] } | null
+    try {
+      result = await route(
+        'inventory:fastStockIn:commit',
+        () => apiFetch('POST', '/api/inventory/fast-stock-in/commit', { ...getDevicePayload(), ...payload }),
+        null,
+        { isWrite: true, writeIdentity: identity },
+      ) as { results?: FastStockInCommitLineResult[] } | null
+    } catch (error) {
+      const answered = (error as { confirmedResult?: { results?: unknown } } | null)?.confirmedResult?.results
+      if (Array.isArray(answered)) options?.onAnsweredAfterOwnerChange?.(batch.map((line, index) => ({ key: line.key, result: answered[index] as FastStockInCommitLineResult | undefined })))
+      throw error
+    }
     return result?.results ?? []
   }
   try {

@@ -53,7 +53,7 @@ runTest('the modal imports the batched commit transport', () => {
 
 runTest('performCommit issues ONE commitFastStockIn call for the whole pending list, not a per-line request loop', () => {
   const body = performCommitBody()
-  assert.match(body, /batched = await commitFastStockIn\(toCommit\.map\(buildLineRequest\), foldRound, \{ session, writeIdentity: receivingIdentity \}\)/, 'exactly one call, covering every pending line (the transport re-sends only deferred lines)')
+  assert.match(body, /batched = await commitFastStockIn\(toCommit\.map\(buildLineRequest\), foldRound, \{ session, writeIdentity: receivingIdentity, onAnsweredAfterOwnerChange: keepAnsweredForOwner \}\)/, 'exactly one call, covering every pending line (the transport re-sends only deferred lines)')
   // Positive control: the pre-fix shape awaited adjustStock/receiveBatchStock
   // directly inside a `for (const line of pending)` loop as the PRIMARY path.
   // That loop must survive only as the named 404 fallback below, not as
@@ -75,7 +75,7 @@ runTest('one line-building function feeds both the batched request and the seque
   assert.match(modal, /try \{ persistSubmissionDraft\(lines\) \} catch \(error\) \{[\s\S]*?return/, 'failed durable capture refuses dispatch')
   assert.match(draftUtil, /export function buildStockLineRequest\(line: StockSessionLine, ctx: LineRequestContext\): FastStockInCommitLine \{/)
   // Both call sites reuse it.
-  assert.match(modal, /batched = await commitFastStockIn\(toCommit\.map\(buildLineRequest\), foldRound, \{ session, writeIdentity: receivingIdentity \}\)/)
+  assert.match(modal, /batched = await commitFastStockIn\(toCommit\.map\(buildLineRequest\), foldRound, \{ session, writeIdentity: receivingIdentity, onAnsweredAfterOwnerChange: keepAnsweredForOwner \}\)/)
   assert.match(modal, /const request = buildLineRequest\(line\)/)
 })
 

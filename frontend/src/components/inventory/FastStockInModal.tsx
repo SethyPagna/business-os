@@ -904,8 +904,8 @@ export default function FastStockInModal({
         const result = request.wire === 'adjust'
           ? await adjustStock(request.body) as { lotCode?: string | null } | null
           : await receiveBatchStock(request.body)
-        if (!isActorWriteIdentityCurrent(receivingIdentity)) return { failed, lines }
         lines = applyLineOutcome(lines, line.key, { status: 'saved', detail: describeLineResult(line, result) })
+        if (!isActorWriteIdentityCurrent(receivingIdentity)) { persistSessionDraft(lines); return { failed, lines } }
       } catch (error) {
         if (!isActorWriteIdentityCurrent(receivingIdentity)) return { failed, lines }
         failed += 1
@@ -956,8 +956,8 @@ export default function FastStockInModal({
       setReceived(lines)
       try {
         const id = await createHeldProduct(line, lines)
-        if (!isActorWriteIdentityCurrent(receivingIdentity)) { stopForSignInChange(); return }
         lines = lines.map((entry) => (entry.key === line.key ? { ...entry, product: { ...entry.product, id }, status: 'queued', detail: '' } : entry))
+        if (!isActorWriteIdentityCurrent(receivingIdentity)) { persistSessionDraft(lines); stopForSignInChange(); return }
         setCreatedProductIds((prev) => [...prev, String(id)])
       } catch (error) {
         if (!isActorWriteIdentityCurrent(receivingIdentity)) { stopForSignInChange(); return }
@@ -1020,8 +1020,15 @@ export default function FastStockInModal({
         persistSessionDraft(lines)
         setReceived(lines.map((item) => (unsettled.has(item.key) ? { ...item, status: 'saving' as const } : item)))
       }
+      const keepAnsweredForOwner = (answered: Array<{ key: string; result: FastStockInCommitLineResult | undefined }>) => {
+        for (const { key, result } of answered) {
+          const line = toCommit.find((entry) => entry.key === key)
+          if (line && result?.ok) lines = applyLineOutcome(lines, key, { status: 'saved', detail: describeLineResult(line, result as { lotCode?: string | null }) })
+        }
+        persistSessionDraft(lines)
+      }
       try {
-        batched = await commitFastStockIn(toCommit.map(buildLineRequest), foldRound, { session, writeIdentity: receivingIdentity })
+        batched = await commitFastStockIn(toCommit.map(buildLineRequest), foldRound, { session, writeIdentity: receivingIdentity, onAnsweredAfterOwnerChange: keepAnsweredForOwner })
         if (!isActorWriteIdentityCurrent(receivingIdentity)) { stopForSignInChange(); return }
       } catch (error) {
         if (!isActorWriteIdentityCurrent(receivingIdentity)) { stopForSignInChange(); return }
