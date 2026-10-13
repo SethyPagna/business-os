@@ -7956,8 +7956,8 @@ to match).
   Now 48/page + Previous/Page x of y/Next + reset-to-page-1 on search/filter
   change; the guard test pins the new fetch shape and the reset.
 - Q4 (data, read-only): production's 4,652 customers checked — phones are unique
-  except TWO pairs (`010 229 119` R_Lara #19728 vs Phopph #22853; `010 868 888`
-  Nay Nay #19911 vs Nay Naysochivy #19912) left for the USER to merge in the
+  except TWO pairs (`[phone]` [customer] #19728 vs [customer] #22853; `[phone]`
+  [customer] #19911 vs [customer] #19912) left for the USER to merge in the
   Duplicates tab, never auto-merged. 9,796 receipts match exactly one current
   customer by phone; **6,548 names re-spelled to the current system's version**;
   the 18 rows on the two ambiguous phones untouched; xlsx twins regenerated and
@@ -8770,7 +8770,7 @@ special characters, brand name, barcode no scientific notation, phone number etc
   if a file ever diverges.
 - One documented source artifact: sales-2025 row 7991 customer_name '8.55E+11' is
   the OLD system's own damage (a number typed in the name field, sci-mangled before
-  export); its customer_phone (012 860 695) is intact and phone-first matching never
+  export); its customer_phone ([phone]) is intact and phone-first matching never
   reads the name. Preserved, and pinned as a known artifact in the validator.
 
 **Verified (really run).** `node validate-pack.cjs` (full, twins included):
@@ -15357,7 +15357,7 @@ membership-existence oracle on POST /submissions (404 vs success, rate-limited).
 `RCP-20260831-081431` (completed, $9.99, 1× Auto Apply Test A from B2 —
 cancel via Sales UI if unwanted; the permission classifier blocked this
 session from cancelling it), portal account "C8 Sweep Tester"
-(LCMN-KC543RW0, phone 012999888) + its customer row + 1 wishlist item.
+([membership-id], phone [phone]) + its customer row + 1 wishlist item.
 
 **Contract diff (ops tooling, paths patched to the current layout):** 246
 frontend call sites vs 289 backend routes — no real orphan endpoints beyond
@@ -16001,10 +16001,10 @@ compared row-for-row against remote production (read-only battery + a
 1. Importer paths broke once the reports were archived into `27th-30th/` —
    now falls back there (folder also holds a copy of the 56MB all-time
    report, so it is a self-contained rerun archive).
-2. Phone links were leading-zero-sensitive: reports print `70856070`,
-   contacts store `070856070`. Fixed (zero-stripped, unambiguous-only), and
-   sale 16725 (4362@2026-08-29 "Srey Pich") linked to customer 23331
-   "Srey Pich (Page)" — was NULL, per the phone-first matching rule.
+2. Phone links were leading-zero-sensitive: reports print `[phone without leading zero]`,
+   contacts store `[phone with leading zero]`. Fixed (zero-stripped, unambiguous-only), and
+   sale 16725 (4362@2026-08-29 "[customer]") linked to customer 23331
+   "[customer] (Page)" — was NULL, per the phone-first matching rule.
 3. Walk-in 4361@2026-08-29 was linked to driver 1 (importer hardcoded the
    link; `contacts.ts:434` counts deliveries WITHOUT an is_delivery filter,
    so it inflated driver 1). Importer now links only delivery receipts;
