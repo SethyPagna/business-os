@@ -300,7 +300,7 @@ const baseSettings = [
     globalThis.fetch = realFetch
   }
 
-  // ---- review alerts (slice C of the review-queue completion plan, 13 Oct 2026) ------
+  // ---- review alerts ------
   // A `reviews` event goes to telegram_topic_alerts, follows the topic setting it finds (never a number of its own),
   // is on when its switch is unset, and is the only kind of send that may retry -- once, on a 429 or a 5xx only.
   const reviewEnv = { TELEGRAM_BOT_TOKEN: 'test-token-not-a-real-one', BUSINESS_OS_ADMIN_URL: 'https://admin.example.com' }

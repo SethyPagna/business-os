@@ -32,8 +32,6 @@ const branchHistoryNameSql = (snapshot: string, fallback: string): string =>
 // `returns` (owner, 27 Sep 2026): customer returns -- recorded, cancelled and
 // restored -- get their own switch and their own forum topic. Until then a
 // customer return was sent as a `sales` event, into the Sale invoices topic.
-// `reviews` (owner, 13 Oct 2026): the review queue's four events -- a request created, approved, rejected or
-// resubmitted (lib/reviewAlert.ts). Its own switch, on when unset, routed to the Alerts topic.
 export type TelegramEventType = 'sales' | 'status' | 'returns' | 'fees' | 'stock_in' | 'stock_out' | 'products' | 'reviews'
 // `heading` lets a route name the event (a return is not a sale, a transfer
 // is not a plain stock-out) while `type` stays the user's enable switch.
@@ -273,7 +271,6 @@ async function getTelegramConfig(env: Env): Promise<TelegramConfig> {
       fees: isEnabled(values.telegram_fees_enabled, true), stock_in: isEnabled(values.telegram_stock_in_enabled, true), stock_out: isEnabled(values.telegram_stock_out_enabled, true),
       // Owner, 5 Oct 2026: a non-admin's product edit is always announced unless this switch is set off.
       products: isEnabled(values.telegram_products_enabled, true),
-      // Owner, 13 Oct 2026: review requests and decisions are announced unless this switch is set off.
       reviews: isEnabled(values.telegram_reviews_enabled, true),
     },
     topics: Object.fromEntries(TELEGRAM_TOPIC_KEYS.map((key) => [key, parseTelegramTopicId(values[key])])) as Record<TelegramTopicKey, number | undefined>,
@@ -328,10 +325,8 @@ function sendTelegramApi(config: TelegramConfig, chatId: string, part: string, m
 }
 
 /**
- * `retryOnce` is for an alert sent from inside a user's request (lib/reviewAlert.ts): ONE more try after HTTP 429
- * (waiting Telegram's own retry_after, at most 3 s) or a 5xx, because those answers say the message was not delivered.
- * Never after a thrown error -- a network failure or the attempt timeout: Telegram may already have accepted the
- * message, and a second send would show the group the same alert twice. Every other send keeps its single attempt.
+ * `retryOnce`: one more try after a 429 (waiting retry_after, at most 3 s) or a 5xx. Never after a thrown error or the
+ * attempt timeout: Telegram may already have accepted the message, and a second send would show it twice.
  */
 export type TelegramSendOptions = { retryOnce?: boolean }
 const RETRY_WAIT_CAP_MS = 3000
@@ -361,7 +356,6 @@ async function postTelegram(config: TelegramConfig, text: string, chatId = confi
   const timeoutMs = options.retryOnce ? RETRYING_ATTEMPT_TIMEOUT_MS : undefined
   for (const part of splitTelegramMessage(text)) {
     let retriesLeft = options.retryOnce ? 1 : 0
-    // One send, plus -- for a retrying message -- the single further send a 429 or 5xx answer earns.
     const attempt = async (thread?: number): Promise<Response> => {
       const answered = await sendTelegramApi(config, chatId, part, thread, timeoutMs)
       if (retriesLeft <= 0 || !isTransientTelegramStatus(answered.status)) return answered
@@ -390,12 +384,7 @@ export async function sendTelegramEvent(env: Env, event: TelegramEvent, options:
   return deliverTelegramEvent(await getTelegramConfig(env), event, options)
 }
 
-/**
- * An event whose lines are only worth building once its switch is known to be on: the review alerts read the
- * record's name, and that read must not happen for a shop that turned the alerts off. ONE settings read; `compose`
- * runs after it, only when automation, the category and the chat id are all set, and may answer null for "nothing
- * to say".
- */
+/** For events whose lines cost a read: one settings read, then `compose` runs only if the switches and chat id are set; null means nothing to send. */
 export async function sendTelegramEventWhenOn(
   env: Env, type: TelegramEventType, compose: () => Promise<Omit<TelegramEvent, 'type'> | null>, options: TelegramSendOptions = {},
 ): Promise<boolean> {

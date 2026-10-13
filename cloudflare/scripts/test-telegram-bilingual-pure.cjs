@@ -273,7 +273,7 @@ assert.deepEqual(
 assert.ok(Object.keys(SENSE_EXEMPT).length <= 3, 'too many glossary exemptions -- the Worker is drifting from the app\'s Khmer')
 console.log(`PASS glossary: ${checked} Worker terms also exist in the language packs and use the pack's Khmer (${Object.keys(SENSE_EXEMPT).length} documented sense exemption)`)
 
-// The review alerts (owner, 13 Oct 2026; slice C of the review-queue completion plan). The `Request:` row opens with a
+// The review alerts. The `Request:` row opens with a
 // fixed phrase the generic glossary scan above cannot see (it is not a label and not a VALUE_PHRASE, so a record named
 // like a phrase is never rewritten), so each phrase is held to the pack key it was copied from, by name -- the stricter
 // test, as for the sale statuses. The one phrase with no single pack key is composed from three pack words.
@@ -285,7 +285,7 @@ const REVIEW_PHRASE_PACK_KEYS = {
   'Edit branch': 'perm_act_branches_edit',
 }
 assert.deepEqual(Object.keys(lang.TELEGRAM_REVIEW_REQUEST_PHRASES).sort(),
-  [...Object.keys(REVIEW_PHRASE_PACK_KEYS), 'Edit stock reasons'].sort(), 'the plan (section 3.2, Q10) names exactly six request phrases')
+  [...Object.keys(REVIEW_PHRASE_PACK_KEYS), 'Edit stock reasons'].sort(), 'exactly six request phrases')
 for (const [english, key] of Object.entries(REVIEW_PHRASE_PACK_KEYS)) {
   assert.ok(kmPack[key], `${key} must exist in km.json`)
   assert.equal(lang.TELEGRAM_REVIEW_REQUEST_PHRASES[english], kmPack[key], `request phrase "${english}" must say what km.json ${key} says`)
@@ -297,9 +297,9 @@ assert.ok(kmPack.reset_admin_request_send.includes(lang.TELEGRAM_LABELS.request.
 assert.deepEqual(
   ['🕒 Review requested', '✅ Review approved', '❌ Review rejected', '🔁 Review resubmitted'].map((heading) => lang.TELEGRAM_HEADINGS[heading]),
   ['សំណើរង់ចាំការត្រួតពិនិត្យ', 'បានអនុម័តសំណើ', 'បានបដិសេធសំណើ', 'បានដាក់ស្នើឡើងវិញ'],
-  'the four review headings carry the plan\'s Khmer (section 3.2)',
+  'the four review headings carry their Khmer',
 )
-console.log('PASS review alert wording: six request phrases and two labels held to their pack keys, four headings as planned')
+console.log('PASS review alert wording: six request phrases and two labels held to their pack keys, four headings with their Khmer')
 
 // The check above transitively covers every Worker term that HAS a pack
 // counterpart. The terms that do not -- 'SRET', the command
@@ -518,7 +518,7 @@ assert.equal(lang.localizeTelegramLine(lang.RULE), lang.RULE, 'a divider is not 
 assert.equal(lang.localizeTelegramLine('Mystery: 12'), 'Mystery: 12', 'an unknown label passes through instead of throwing')
 console.log('PASS safety: free-text values, item bullets and unknown labels are never rewritten')
 
-// --- 4b. the review alert rows (slice C) --------------------------------------
+// --- 4b. the review alert rows --------------------------------------
 // Only the fixed phrase at the START of a `Request:` row is translated; the record's name after " · " is a value.
 for (const [mode, expected] of [
   ['both', '· Request/សំណើ: Edit product/កែប្រែផលិតផល · Rice 5kg'],
@@ -1060,7 +1060,7 @@ const lastSent = () => sent[sent.length - 1].body.text
   assert.equal(wired.formatBusinessDay(''), '', 'a missing date degrades quietly')
   console.log('PASS dates: report headers render dd/mm/yyyy, the project-wide convention')
 
-  // --- review alerts through the real send path (slice C) ----------------------
+  // --- review alerts through the real send path ----------------------
   // The composed text the group would receive for each of the four events, in the three language modes. The fetch is the
   // capture above; nothing leaves this machine, and the bot token is a placeholder.
   const reviewMessage = async (event, mode) => {

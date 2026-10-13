@@ -1,32 +1,9 @@
-// One Telegram alert per review event (owner, 13 Oct 2026; slice C of the review-queue completion plan,
-// OPUS-PLAN-REVIEW-QUEUE-COMPLETION.md section 3).
-//
-// THE FOUR EVENTS, and where each is fired -- always by the request whose write COMMITTED, so a replay, a refusal or
-// a 409 sends nothing and two racing approvals send one message:
-//   created      lib/reviewGate.ts maybeQueueForReview, after the pending row is inserted
-//   approved     routes/reviewQueue.ts POST /:id/approve, after the transition (not for replayed answers)
-//   rejected     routes/reviewQueue.ts POST /:id/reject, after markPendingActionRejected said it changed the row
-//   resubmitted  routes/reviewQueue.ts POST /:id/resubmit, after resubmitPendingAction said it changed the row
-//
-// WHAT A MESSAGE CONTAINS: a heading and at most four rows, in this order --
-//   Request: <fixed phrase> · <the record's name>
-//   Merged:  <retired> → <kept>           (an approved merge only)
-//   Reason:  <the reviewer's reason>      (a rejection only, cut at 120 characters)
-//   Requested by: <username>              (and, for a decision)
-//   By:           <username>
-// Account USERNAMES only (actorSnapshot, N13) -- never a full name, a phone, an email, money or cost, and never the
-// request's own `summary` (it holds amounts). The fixed phrases and every label are bilingual (telegramLang.ts).
-//
-// DELIVERY: the Alerts topic (event type `reviews`), the telegram_reviews_enabled switch (on when unset), the chat id
-// and topic from THIS deployment's own settings and nothing else (one organization per deployment). Deferred through
-// lib/requestDefer.ts so the user's response never waits on Telegram; one retry after a 429 or 5xx and none after a
-// network error or a timeout (lib/telegram.ts). A Telegram failure never fails the request.
-//
-// HOW THE ROUTES REACH THIS FILE: through a global hook, not an import. lib/reviewGate.ts and routes/reviewQueue.ts
-// are loaded in isolation, with hand-written require tables, by dozens of existing tests; one new relative import in
-// either would break each of them. The Symbol.for hook is the same arrangement lib/requestMetrics.ts uses toward
-// lib/db.ts for the same reason: a hook that is simply absent is a no-op, so those tests are unchanged. index.ts
-// installs it with installReviewAlerts(). The key must stay identical in all three files (the native test pins it).
+// One Telegram alert per review event (created, approved, rejected, resubmitted), sent after the write it announces
+// committed. At most once: a replay, a refusal or a 409 sends nothing, and neither does a committed decision whose reply
+// was lost. A message is a heading and up to four rows (Request, Merged, Reason, Requested by / By): usernames only,
+// never money, a phone, an email or the request summary.
+// Reached through a global hook (installReviewAlerts, called from index.ts), not an import: reviewGate, reviewQueue and
+// the products route are loaded in isolation by many tests, and an absent hook is a no-op.
 
 import { getDb } from './db'
 import { sendTelegramEventWhenOn } from './telegram'
@@ -63,9 +40,8 @@ export type ReviewAlertHook = {
   nameBeforeChange(env: Env, row: ReviewAlertRow): Promise<string | null>
 }
 
-// section:action:entity -> the fixed phrase. Every other queued kind is skipped (nothing is sent), and
-// scripts/test-review-telegram-alerts-native.cjs pins that every applier in lib/reviewApply.ts is either here or listed
-// there as never approvable (branches create/delete are refused at approval).
+// section:action:entity -> the fixed phrase; any other kind sends nothing. A native test pins that every applier in
+// lib/reviewApply.ts is here or never approvable.
 const REQUEST_PHRASES = new Map<string, ReviewRequestPhrase>([
   ['products:create:product', 'New product'],
   ['products:update:product', 'Edit product'],
@@ -82,7 +58,7 @@ export function reviewRequestPhrase(row: Pick<ReviewAlertRow, 'section' | 'actio
   return REQUEST_PHRASES.get(requestKey(row)) ?? null
 }
 
-// Each heading is a key of telegramLang.ts HEADINGS (emoji in front of both languages); the native test pins it.
+// Each heading is a key of telegramLang.ts HEADINGS.
 export const REVIEW_ALERT_HEADINGS: Record<ReviewAlertKind, string> = {
   created: '🕒 Review requested',
   approved: '✅ Review approved',
@@ -137,10 +113,7 @@ async function readRecordName(env: Env, row: ReviewAlertRow): Promise<string | n
   } catch { return null }
 }
 
-/**
- * The record's name, with at most one read. A create has no record yet (the name is in the request); an approved merge
- * names the kept product from the applier; a removal's name was read before the change and handed in.
- */
+/** The record's name with at most one read: a create's is in the request, a merge's is the kept product, a removal's was read before the change. */
 async function recordNameFor(env: Env, event: ReviewAlertEvent): Promise<string | null> {
   const given = reviewAlertName(event.recordName)
   if (given) return given

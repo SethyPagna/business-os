@@ -195,9 +195,6 @@ const LABELS = {
   // A merge of duplicate products: "Merged: <the product folded in>".
   merged: { en: 'Merged', km: 'បញ្ចូលគ្នា' },
   changed: { en: 'Changed', km: 'បានផ្លាស់ប្ដូរ' },
-  // The review alerts (owner, 13 Oct 2026). `By`, `Reason` and `Merged` above are reused as they are; these two are
-  // new. សំណើ is the packs' own word for a request (requests_per_minute, reset_admin_request_send) and the other is
-  // km.json requested_by, copied.
   request: { en: 'Request', km: 'សំណើ' },
   requestedBy: { en: 'Requested by', km: 'បានស្នើសុំដោយ' },         // km.json requested_by
 
@@ -393,8 +390,6 @@ const HEADINGS = {
   '♻️ Return restored': 'បានស្ដារការប្រគល់មកវិញ',
   '🚫 Supplier return cancelled': 'បានបោះបង់ការប្រគល់ទៅអ្នកផ្គត់ផ្គង់',
   '♻️ Supplier return restored': 'បានស្ដារការប្រគល់ទៅអ្នកផ្គត់ផ្គង់',
-  // The review queue's four events (owner, 13 Oct 2026; lib/reviewAlert.ts). The Khmer is the plan's table
-  // (OPUS-PLAN-REVIEW-QUEUE-COMPLETION.md section 3.2), built from the packs' ត្រួតពិនិត្យ / បានអនុម័ត / បានបដិសេធ.
   '🕒 Review requested': 'សំណើរង់ចាំការត្រួតពិនិត្យ',
   '✅ Review approved': 'បានអនុម័តសំណើ',
   '❌ Review rejected': 'បានបដិសេធសំណើ',
@@ -484,10 +479,8 @@ const VALUE_PHRASES: Record<string, ValuePhrase> = {
 /** Exported for the pure test. */
 export const TELEGRAM_VALUE_PHRASES = VALUE_PHRASES
 
-// The fixed phrase that opens a review alert's `Request:` row (owner Q10, 13 Oct 2026), followed by " · " and the
-// record's name. It is NOT a VALUE_PHRASE: those are rewritten wherever they occur inside a value, and a record
-// named "Edit product" or "none" must come out as typed. Only the phrase at the START of the row is translated
-// (localizeReviewRequest below), and only on a `Request` row. Every Khmer is the packs' own wording:
+// The fixed phrase that opens a review alert's `Request:` row. Not a VALUE_PHRASE (those are rewritten anywhere in a
+// value): a record named "Edit product" must come out as typed, so only the start of a `Request` row is translated.
 const REVIEW_REQUEST_PHRASES = {
   'New product': 'ផលិតផលថ្មី',                 // km.json new_products_count
   'Edit product': 'កែប្រែផលិតផល',              // km.json perm_act_products_edit
@@ -497,9 +490,7 @@ const REVIEW_REQUEST_PHRASES = {
   'Edit branch': 'កែប្រែសាខា',                 // km.json perm_act_branches_edit
 } as const
 export type ReviewRequestPhrase = keyof typeof REVIEW_REQUEST_PHRASES
-/** Exported for the pure test. */
 export const TELEGRAM_REVIEW_REQUEST_PHRASES: Record<string, string> = REVIEW_REQUEST_PHRASES
-/** Between the phrase and the record's name. The name is a value and is never translated. */
 export const REVIEW_REQUEST_SEPARATOR = ' · '
 
 /** `Edit product · Rice 5kg` -> `Edit product/កែប្រែផលិតផល · Rice 5kg` (the phrase only, and only at the start). */

@@ -68,29 +68,21 @@ const REVIEW_SECTION_FULL_CODE = 'review_section_full_required'
 const reviewSectionFullMessage = (section: string): string =>
   `Approving this request needs Full access to ${section}. Ask a reviewer who has it.`
 
-// The Telegram alert per review event (owner, 13 Oct 2026; lib/reviewAlert.ts). It is reached through a global hook, not
-// an import: this route is loaded in isolation by many existing tests, and a hook that is absent is a no-op. Every call
-// sits AFTER the write it announces committed -- never on a replayed answer, a refusal or a 409 -- and an alert never
-// changes what the route answers.
+// A global hook, not an import: many tests load this route with hand-written require tables, and an absent hook is a no-op.
+// Every alert is sent after the write it announces committed, never on a replay, a refusal or a 409.
 const reviewAlertHook = (): ReviewAlertHook | undefined =>
   (globalThis as unknown as Record<symbol, ReviewAlertHook | undefined>)[Symbol.for('business-os.review-alert.v1')]
 async function announceReview(env: Env, event: ReviewAlertEvent): Promise<void> {
   try { await reviewAlertHook()?.announce(env, event) } catch { /* an alert never fails the decision it announces */ }
 }
-// The one record name an approval is about to remove (an expense delete) has to be read BEFORE the change; every other
-// request returns null with no read (its name is read after the commit, off the response path).
+// An expense delete removes the record the alert names, so its name is read before the change; other kinds read none.
 async function reviewNameBeforeChange(env: Env, row: PendingActionRow): Promise<string | null> {
   try { return (await reviewAlertHook()?.nameBeforeChange(env, row)) ?? null } catch { return null }
 }
 
-// The two contracts the approve-performs-the-merge work (slice A, lib/reviewApply.ts) relies on this route for.
-//
-// 1. A refusal it raises on purpose: an Error named 'ReviewCodedRefusal' with a string `code`, an HTTP `status` of 403,
-//    409 or 503 and, optionally, extra response fields (a merge preview, the permission that is missing) in a plain-object
-//    `details`. It becomes `{ success: false, error, code, ...details }` with that status. Matched by NAME and shape, not by
-//    class, so this route imports nothing from slice A and an unrelated error (or a ReviewCodedRefusal with any other
-//    status or no code) is never mistaken for one: it falls through to the generic 500 exactly as before.
-// 2. An approval that merged two products reports it as `outcome.mergedInto` (optional): its names are the alert's Merged row.
+// An applier refuses on purpose with an Error named 'ReviewCodedRefusal' (string `code`, `status` 403/409/503, optional
+// plain-object `details`). Matched by name and shape, not class, so an unrelated error is never mistaken for one and still
+// falls through to the generic 500. `details` is spread first so it cannot overwrite success, error or code.
 type ReviewMergedInto = { survivorId?: number; survivorName?: string | null; mergedName?: string | null }
 function reviewCodedRefusal(err: unknown): { body: Record<string, unknown>; status: 403 | 409 | 503 } | null {
   if (!(err instanceof Error) || err.name !== 'ReviewCodedRefusal') return null
@@ -216,8 +208,7 @@ app.post('/:id/resubmit', async (c) => {
   // Same channel the approve/reject handlers broadcast on, so an admin with
   // the Review page open sees it return to their queue without a refresh.
   c.executionCtx.waitUntil(broadcast(c.env, 'pendingActions', { id, status: 'open' }))
-  // resubmitPendingAction changed the row (its UPDATE is guarded on the requester and on 'rejected'), so this request
-  // alone put it back in front of the reviewers: one "Review resubmitted" alert. A 404 above sent nothing.
+  // Its UPDATE is guarded on the requester and on 'rejected', so only the request that reopened the row gets here.
   if (row) await announceReview(c.env, { kind: 'resubmitted', row })
   return c.json({ success: true, data: row })
 })
@@ -307,10 +298,9 @@ app.post('/:id/approve', async (c) => {
     }
 
     recordNameBefore = await reviewNameBeforeChange(c.env, row)
-    // An approval that would merge two products states the survivor the reviewer saw: { "confirm_merge_into": <product id> }
-    // in the body. Anything else (no body, not JSON, not a positive integer) reads as "not confirmed" and is passed on as
-    // absent -- slice A's applier answers 409 review_merge_confirm_required with a preview. Held in a variable of an
-    // extended type so the extra property is not an excess-property error against ReviewerInfo, which slice A widens.
+    // { "confirm_merge_into": <product id> } names the survivor the reviewer saw; anything else (no body, not JSON, not a
+    // positive integer) is "not confirmed" and passed on as absent. The extended type keeps the extra property from being
+    // an excess-property error against ReviewerInfo.
     const confirmBody = await c.req.json<{ confirm_merge_into?: unknown }>().catch(() => null)
     const stated = confirmBody?.confirm_merge_into
     const confirmed = typeof stated === 'number' ? stated : typeof stated === 'string' && /^\d+$/.test(stated.trim()) ? Number(stated.trim()) : NaN
@@ -372,9 +362,7 @@ app.post('/:id/approve', async (c) => {
   const updatedRow = await getPendingAction(c.env, id)
   await audit(c.env, user.id, actorSnapshot(user), 'approve', 'pending_action', id, updatedRow)
   c.executionCtx.waitUntil(broadcast(c.env, 'pendingActions', { id, status: 'approved' }))
-  // Reached only by the request whose approval committed: the atomic appliers raise ReviewDecisionConflictError for the
-  // loser, and markPendingActionApproved answers false for it -- both returned a 409 above. Replayed answers returned
-  // earlier still. So two racing approvals announce once.
+  // Only the request whose approval committed gets here: the loser of a race, and every replay, returned above.
   await announceReview(c.env, {
     kind: 'approved', row: updatedRow ?? row, by: actorSnapshot(user), recordName: recordNameBefore,
     merged: mergedInto ? { retired: mergedInto.mergedName, kept: mergedInto.survivorName } : null,
@@ -411,8 +399,7 @@ app.post('/:id/reject', async (c) => {
   const row = await getPendingAction(c.env, id)
   await audit(c.env, user.id, actorSnapshot(user), 'reject', 'pending_action', id, row)
   c.executionCtx.waitUntil(broadcast(c.env, 'pendingActions', { id, status: 'rejected' }))
-  // markPendingActionRejected only changes a row that is still 'open', so two racing rejections (or a reject after an
-  // approval) reach the 409 above and only the winner announces.
+  // markPendingActionRejected only changes a row that is still 'open', so only the winner gets here.
   if (row) await announceReview(c.env, { kind: 'rejected', row, by: actorSnapshot(user), reason })
   return c.json({ success: true, data: row })
 })

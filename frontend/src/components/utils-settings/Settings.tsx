@@ -2255,8 +2255,6 @@ export default function Settings() {
                 // Owner, 5 Oct 2026 (evening): an edit or a merge of a product by anyone who is not an administrator is
                 // announced unless this is off. Same unset-means-on default; the form only carries the key once it is toggled.
                 ['telegram_products_enabled', t('telegram_cat_products') || 'Product edits and merges', t('telegram_cat_products_desc') || 'Product, what changed, and who did it, for edits and merges by staff who are not administrators'],
-                // Owner, 13 Oct 2026: one alert per review event (a request sent, approved, rejected or resubmitted),
-                // routed to the Alerts topic. Same unset-means-on default as the switches above.
                 ['telegram_reviews_enabled', t('telegram_cat_reviews') || 'Review requests and decisions', t('telegram_cat_reviews_desc') || "Request sent, approved, rejected or resubmitted: what was asked, the record’s name, who asked, who decided, and any rejection reason (never amounts or costs)"],
                 // T10: the Worker reads this key (lib/telegram.ts getTelegramConfig)
                 // with the same unset-means-on default as the switches above.

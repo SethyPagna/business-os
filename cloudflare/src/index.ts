@@ -198,16 +198,13 @@ const app = new Hono<{ Bindings: Env }>()
 // wraps every /api/* middleware and handler below; adds no I/O to the request.
 app.use('/api/*', requestMetricsMiddleware)
 
-// Slice C (review-queue Telegram alerts): the request's own waitUntil, registered ONCE here so lib code with no Hono
-// context (lib/reviewGate.ts queueing a request) can defer a side effect past the response -- lib/requestDefer.ts. Where
-// the request has no ExecutionContext (a test calling app.request) there is no scope and the work is awaited instead.
+// Opens the request's waitUntil scope for lib code that has no Hono context (lib/requestDefer.ts); no ExecutionContext, no scope.
 app.use('/api/*', async (c, next) => {
   let waitUntil: ((work: Promise<unknown>) => void) | null = null
   try { const ctx = c.executionCtx; waitUntil = (work) => ctx.waitUntil(work) } catch { /* no ExecutionContext */ }
   if (!waitUntil) return next()
   return runWithRequestDefer(waitUntil, () => next())
 })
-// The review queue reaches its Telegram alert through a global hook (lib/reviewAlert.ts says why); installed here.
 installReviewAlerts()
 
 // Global safety net: most routes in this Worker (compat.ts, auth.ts, etc.)

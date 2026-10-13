@@ -1,10 +1,10 @@
 'use strict'
 // ============================================================================================
-// REVIEW QUEUE -- ONE TELEGRAM ALERT PER REVIEW EVENT (slice C of the review-queue completion plan, 13 Oct 2026).
+// REVIEW QUEUE -- ONE TELEGRAM ALERT PER REVIEW EVENT.
 //
-// Owner ruling (13 Oct 2026, OPUS-PLAN-REVIEW-QUEUE-COMPLETION.md section 3): a request created, approved, rejected or
-// resubmitted is announced ONCE in the Alerts topic, in Khmer and English, naming accounts by USERNAME, never an amount,
-// a cost, a phone, an email or the request's own summary. This file proves it against the REAL Worker.
+// A request created, approved, rejected or resubmitted is announced AT MOST ONCE in the Alerts topic, in Khmer and English,
+// naming accounts by USERNAME, never an amount, a cost, a phone, an email or the request's own summary. This file proves
+// it against the REAL Worker.
 //
 // What it runs: the real cloudflare/src/index.ts (every middleware, route and lib) bundled with esbuild and executed in
 // workerd under Miniflare, on a D1 migrated with every file in cloudflare/migrations, with a real session cookie per user.
@@ -368,7 +368,7 @@ const PATCHES = {
   'reason-uncut': [
     { name: 'reason-uncut', file: ALERT, from: 'return characters.length <= REVIEW_REASON_ALERT_MAX ? text :', to: 'return characters.length <= 100000 ? text :' },
   ],
-  // The contracts slice A relies on this route for.
+  // The approve route's contracts with the appliers.
   'confirm-not-passed': [
     { name: 'confirm-not-passed', file: QUEUE, from: '      ...(confirmMergeInto !== undefined ? { confirmMergeInto } : {}),\n', to: '' },
   ],
@@ -414,12 +414,11 @@ const PATCHES = {
 const WRONG = OPTIONS.wrong || ''
 if (WRONG && !PATCHES[WRONG]) { console.error('unknown --wrong=' + WRONG + '; known: ' + Object.keys(PATCHES).join(', ')); process.exit(2) }
 
-// Test-only fixtures (NOT mutants; applied in every run). Slice A's approval will (1) report the merge it performed as
-// `outcome.mergedInto`, (2) read the survivor the reviewer confirmed as `reviewer.confirmMergeInto` and (3) raise
-// 'ReviewCodedRefusal' errors. None of that exists in today's appliers, so two fixtures stand in for it:
+// Test-only fixtures (NOT mutants; applied in every run). No applier yet reports `outcome.mergedInto`, reads
+// `reviewer.confirmMergeInto` or raises 'ReviewCodedRefusal', so two fixtures stand in for them:
 //   * a product edit whose name carries the marker [merged-fixture] reports a merge into "Rice 5kg" (retired "Rice 1kg");
 //   * the stock-reasons applier records the confirmMergeInto it was handed (settings key rt_confirm_seen) and, for a reason
-//     labelled [refuse:<status>:<code>[:variant]], throws an error shaped like slice A's refusal.
+//     labelled [refuse:<status>:<code>[:variant]], throws an error shaped like a coded refusal.
 const FIXTURE_PATCHES = [
   { name: 'merged-fixture', file: 'src/lib/reviewApply.ts',
     from: "  await notify(env, waitUntil, 'products', { action: 'update', id })\n})",
@@ -593,7 +592,7 @@ async function main() {
     t.ok('found the appliers', appliers.length >= 8, appliers)
     for (const applier of appliers) t.ok('applier ' + applier + ' has a request phrase or is never approvable', lib.REVIEW_ALERT_REQUEST_KEYS.includes(applier) || NEVER_APPROVABLE.includes(applier), applier)
     for (const mapped of lib.REVIEW_ALERT_REQUEST_KEYS) t.ok('phrase key ' + mapped + ' is a real applier', appliers.includes(mapped), mapped)
-    t.eq('six phrases, as the plan lists them', lib.REVIEW_ALERT_REQUEST_KEYS.length, 6)
+    t.eq('six request phrases', lib.REVIEW_ALERT_REQUEST_KEYS.length, 6)
   })
 
   // ---- the Worker --------------------------------------------------------------------------

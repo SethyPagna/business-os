@@ -6,11 +6,6 @@
 // file's only job is to connect the two for a write route without that
 // route needing to know pending_actions' schema itself.
 //
-// A queued request also announces itself (owner, 13 Oct 2026): ONE "Review requested" Telegram alert per row, sent
-// here -- the single place every Review-Required-gated write route queues through -- right after the insert, so a
-// request that was not queued (Full tier, a refusal, a failed insert) sends nothing. It reaches lib/reviewAlert.ts
-// through a global hook rather than an import, for the reason that file's header gives.
-//
 // Deliberately generic, same "no entity-specific knowledge" discipline
 // pendingActions.ts already holds itself to: this file doesn't know what
 // a fee/product/contact looks like, only that a section+action+entity
@@ -35,6 +30,7 @@ import type { Env } from '../index'
 import { actorSnapshot } from './actorSnapshot'
 import type { ReviewAlertHook } from './reviewAlert'
 
+// A global hook, not an import: many tests load this file with hand-written require tables, and an absent hook is a no-op.
 const reviewAlertHook = (): ReviewAlertHook | undefined =>
   (globalThis as unknown as Record<symbol, ReviewAlertHook | undefined>)[Symbol.for('business-os.review-alert.v1')]
 
@@ -76,8 +72,7 @@ export async function maybeQueueForReview(
     requestedBy: user?.id ?? null,
     requestedByName,
   })
-  // The row exists: announce it. The alert reads nothing from the request's summary (it holds amounts) -- only the
-  // fixed phrase for this kind of request, the record's name and the account USERNAME.
+  // After the insert, so a request that was not queued sends nothing. Never reads the summary (it holds amounts).
   try {
     await reviewAlertHook()?.announce(env, {
       kind: 'created',
