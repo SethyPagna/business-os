@@ -66,7 +66,8 @@ async function checkEnvelopeRoutes(api) {
     '../lib/actorSnapshot': pure('actorSnapshot'), '../lib/pendingActions': pure('pendingActions'),
     '../lib/branchWrites': pure('branchWrites'),
     '../lib/auth': { requireAuth: async (c, next) => { if (!user) return c.json({ error: 'Unauthorized' }, 401); c.set('user', user); return next() } },
-    '../lib/audit': { audit: async () => { auditWrites++ } }, '../durable-objects/broadcastHub': { broadcast: async () => { broadcasts++ } },
+    // K9a: a legacy Undo/Redo writes its audit row inside the status-flip batch (buildAuditStatement), counted like audit().
+    '../lib/audit': { audit: async () => { auditWrites++ }, buildAuditStatement: () => { auditWrites++; return { sql: 'SELECT 1 AS audit_row_stub', params: {} } } }, '../durable-objects/broadcastHub': { broadcast: async () => { broadcasts++ } },
     '../lib/productWrites': { hasProductMoneyPolicy: unused },
     '../lib/branchRedirectWrite': { branchRedirectTarget: () => null },
     '../lib/reviewApply': { productRemovePendingPointer: () => false, applyApprovedPendingAction: unused },
