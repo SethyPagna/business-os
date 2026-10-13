@@ -89,7 +89,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { VALID_SALE_STATUSES, RETURN_STATUSES, normalizeSaleStatus } from './salesStatus'
 import { dateToBatchCode, normalizeToIsoDate, readBatchDateCell } from './batchCode'
 import { normalizeSearchText, compactSearchText } from './searchMatch'
-import { getActionTier, hasPermission, isActionBlocked } from './permissions'
+import { getActionTier, hasPermission, isActionBlocked, type PermissionUser } from './permissions'
 import type { SessionUser } from './auth'
 import { sanitizeMediaPath } from './media'
 import { resolveProductImagePathIdentities } from './productImagePermission'
@@ -386,6 +386,10 @@ export async function assertCurrentImportApplyAuthority(
   }
   if (isActionBlocked(actor, section, 'import')) {
     throw new ImportApplyAuthorizationError(`${section}:import`, `The user who authorized this import no longer has ${section}:import permission.`)
+  }
+  const destructivePermission = missingDestructiveImportPermission(actor, job.type, job.policy_json)
+  if (destructivePermission) {
+    throw new ImportApplyAuthorizationError(destructivePermission, `The user who authorized this import no longer has ${destructivePermission} permission.`)
   }
 
   const allowProductImageWrites = job.type !== 'products' || getActionTier(actor, 'products', 'image') === 'full'
@@ -1459,6 +1463,31 @@ export function getProductImportMode(policyJson: string | null | undefined): Pro
   } catch (_) {
     return 'merge'
   }
+}
+
+// A products import in replace_all or replace_columns mode is more destructive
+// than an ordinary merge: replace_all soft-deactivates every active product the
+// run does not touch, and replace_columns overwrites the picked fields on every
+// matched row. The mode lives in the client-supplied policy blob, so the
+// frontend's mode picker is a convenience, not a security boundary. Those modes
+// therefore need the existing 'destructive_delete' permission on top of the
+// import grant, and a role can still switch the per-action
+// 'products:import_replace_all' off even when destructive_delete is granted
+// (Part 546).
+//
+// This is the single definition of that rule, shared by every boundary that
+// establishes or exercises authority over such a job (see its callers), so no
+// boundary can drift from another. It returns the missing permission, or null
+// when the job is not destructive or the user holds both permissions.
+function isDestructiveProductImport(type: string, policyJson: string | null | undefined): boolean {
+  const mode = getProductImportMode(policyJson)
+  return type === 'products' && (mode === 'replace_all' || mode === 'replace_columns')
+}
+
+export function missingDestructiveImportPermission(user: PermissionUser, type: string, policyJson: string | null | undefined): string | null {
+  if (!isDestructiveProductImport(type, policyJson)) return null
+  if (!hasPermission(user, 'destructive_delete')) return 'destructive_delete'
+  return isActionBlocked(user, 'products', 'import_replace_all') ? 'products:import_replace_all' : null
 }
 
 // Column-replace's own column selection, read the same way decisions/
