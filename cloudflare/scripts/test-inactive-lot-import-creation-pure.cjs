@@ -54,6 +54,8 @@ function loadProductWrites(db) {
     if (request === './catalogCostRecompute') return catalogCostModule.exports
     if (['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request)) return moneyPrecision
     if (request === './db') return { getDb: () => db }
+    // Only a create-fold that carries its request receipt writes one (lib/createFold.ts); this test creates and imports.
+    if (request === './stockMutationReceipt') return { completedStockMutationReceiptStatement: () => { throw new Error('this test passes no stock-mutation receipt') } }
     if (request === './media') return { sanitizeMediaList: (value) => Array.isArray(value) ? value : [] }
     if (request === './batchCode') return { dateToBatchCode: () => '11092026' }
     if (request === './searchMatch') return { normalizeSearchText: String, compactSearchText: String }

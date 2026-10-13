@@ -310,7 +310,7 @@ const WRONG = [
   {
     name: 'keeps-nothing', fails: c => c.tag === 'keeps',
     patches: [
-      { name: 'keeps-nothing', file: 'lib/importEngine.ts', apply: text => text.replace(/const keepProductIds = await readSkippedProductIds\(db, jobId\)/, 'const keepProductIds: number[] = []') },
+      { name: 'keeps-nothing', file: 'lib/importEngine.ts', apply: text => text.replace(/const skippedProductIds = await readSkippedProductIds\(db, jobId\)/, 'const skippedProductIds: number[] = []') },
       { name: 'keeps-nothing-finalizer', file: 'lib/importEngine.ts', apply: text => text.replace(/const keepIds = JSON\.stringify\(\[[^\n]*\)\]\)/, "const keepIds = '[]'") },
     ],
   },
