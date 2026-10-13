@@ -33,6 +33,9 @@
 //   --wrong=confirm-not-passed    the approve body's confirm_merge_into never reaches the applier
 //   --wrong=coded-refusal-500     a ReviewCodedRefusal falls through to the generic 500
 //   --wrong=refusal-any-status    any status is accepted as a coded refusal (a 418 would be sent as such)
+//   --wrong=removal-created-dropped    a queued product removal announces nothing
+//   --wrong=removal-announce-first     a queued product removal announces before its batch (a failed insert still sends)
+//   --wrong=removal-alert-on-replay    a replayed removal request announces again
 //   --wrong=created-before-insertcreated announces before the pending row is inserted (a failed insert still sends)
 //   --wrong=bidi-kept            a typed name keeps its direction-control characters
 //   --wrong=targets-ignored      ?fields=targets is ignored: the full rows (payloads included) come back
@@ -311,6 +314,7 @@ const QUEUE = 'src/routes/reviewQueue.ts'
 const GATE = 'src/lib/reviewGate.ts'
 const TELEGRAM = 'src/lib/telegram.ts'
 const ALERT = 'src/lib/reviewAlert.ts'
+const PRODUCTS = 'src/routes/products.ts'
 const APPROVED_ANNOUNCE = "  await announceReview(c.env, {\n    kind: 'approved', row: updatedRow ?? row, by: actorSnapshot(user), recordName: recordNameBefore,\n    merged: mergedInto ? { retired: mergedInto.mergedName, kept: mergedInto.survivorName } : null,\n  })\n"
 const APPLY_CALL = '    const outcome = await applyApprovedPendingAction('
 const PATCHES = {
@@ -377,6 +381,17 @@ const PATCHES = {
   'details-last': [
     { name: 'details-last', file: QUEUE, from: '  return { body: { ...extra, success: false, error: err.message, code }, status }', to: '  return { body: { success: false, error: err.message, code, ...extra }, status }' },
   ],
+  'removal-created-dropped': [
+    { name: 'removal-drop', file: PRODUCTS, from: '    await announceQueuedProductRemoval(c.env, user, id)\n', to: '' },
+  ],
+  'removal-announce-first': [
+    { name: 'removal-first', file: PRODUCTS, from: '    try { await db.batch(productRemoveQueueStatements({ plan, operationId, requestId, user, planDigest })) }\n',
+      to: '    await announceQueuedProductRemoval(c.env, user, id)\n    try { await db.batch(productRemoveQueueStatements({ plan, operationId, requestId, user, planDigest })) }\n' },
+    { name: 'removal-late-gone', file: PRODUCTS, from: '    await announceQueuedProductRemoval(c.env, user, id)\n    const queued = ', to: '    const queued = ' },
+  ],
+  'removal-alert-on-replay': [
+    { name: 'removal-replay', file: PRODUCTS, from: "    if (existingOperation.status === 'approval_pending') {\n", to: "    if (existingOperation.status === 'approval_pending') {\n      await announceQueuedProductRemoval(c.env, user, id)\n" },
+  ],
   'created-before-insert': [
     { name: 'created-announce-first', file: GATE, from: '  const pendingId = await createPendingAction(env, {\n',
       to: '  try { await reviewAlertHook()?.announce(env, { kind: \'created\', row: { section, action_type: input.actionType, entity_type: input.entityType, entity_id: input.entityId ?? null, payload_json: JSON.stringify(input.payload ?? {}), requested_by_name: requestedByName } }) } catch {}\n  const pendingId = await createPendingAction(env, {\n' },
@@ -387,10 +402,10 @@ const PATCHES = {
     { name: 'bidi-kept', file: ALERT, from: "return String(value ?? '').replace(BIDI_CONTROLS, '').replace(", to: "return String(value ?? '').replace(" },
   ],
   'targets-ignored': [
-    { name: 'targets-all', file: QUEUE, from: '  const options = { status, section }\n  const rows = fields === \'targets\' ? await listPendingActionTargets(c.env, options) : await listPendingActions(c.env, options)',
-      to: '  const options = { status, section }\n  const rows = await listPendingActions(c.env, options)' },
-    { name: 'targets-mine', file: QUEUE, from: '  const options = { status, requestedBy: Number(user.id) }\n  const rows = fields === \'targets\' ? await listPendingActionTargets(c.env, options) : await listPendingActions(c.env, options)',
-      to: '  const options = { status, requestedBy: Number(user.id) }\n  const rows = await listPendingActions(c.env, options)' },
+    { name: 'targets-all', file: QUEUE, from: '  const options: ListPendingActionsOptions = { status, section }\n  const rows = fields === \'targets\' ? await listPendingActionTargets(c.env, options) : await listPendingActions(c.env, options)',
+      to: '  const options: ListPendingActionsOptions = { status, section }\n  const rows = await listPendingActions(c.env, options)' },
+    { name: 'targets-mine', file: QUEUE, from: '  const options: ListPendingActionsOptions = { status, requestedBy: Number(user.id) }\n  const rows = fields === \'targets\' ? await listPendingActionTargets(c.env, options) : await listPendingActions(c.env, options)',
+      to: '  const options: ListPendingActionsOptions = { status, requestedBy: Number(user.id) }\n  const rows = await listPendingActions(c.env, options)' },
   ],
   'refusal-any-status': [
     { name: 'refusal-any-status', file: QUEUE, from: '  if (status !== 403 && status !== 409 && status !== 503) return null\n', to: '' },
@@ -559,11 +574,12 @@ async function main() {
     const key = "Symbol.for('business-os.review-alert.v1')"
     t.ok('reviewGate reads the hook key', read(GATE).includes(key))
     t.ok('reviewQueue reads the hook key', read(QUEUE).includes(key))
+    t.ok('products.ts (removal requests are queued by its own insert) reads the hook key', read(PRODUCTS).includes(key))
     t.ok('reviewAlert defines the same key', read(ALERT).includes("export const REVIEW_ALERT_HOOK_KEY = 'business-os.review-alert.v1'"))
     t.ok('index.ts installs the alerts', /^installReviewAlerts\(\)$/m.test(read('src/index.ts')))
     t.ok('index.ts registers the request scope', read('src/index.ts').includes('runWithRequestDefer(waitUntil'))
     // The two route files must not import the alert module (they are loaded in isolation by many tests); a type import is erased.
-    for (const rel of [GATE, QUEUE]) {
+    for (const rel of [GATE, QUEUE, PRODUCTS]) {
       t.ok(rel + ' has no value import of reviewAlert', !/^import (?!type )[^\n]*['"][./]+\/?(lib\/)?reviewAlert['"]/m.test(read(rel)), rel)
       t.ok(rel + ' has no value import of requestDefer', !/^import (?!type )[^\n]*requestDefer['"]/m.test(read(rel)), rel)
     }
@@ -922,6 +938,54 @@ async function main() {
         '· Requested by/បានស្នើសុំដោយ: sokha',
         '· By/ដោយ: dara',
       ])
+    })
+
+    await check('C8c', 'product removal queued: one "Review requested" alert; a replay, a refusal and a failed insert send nothing', 'high', async t => {
+      await reset()
+      const product = await seedProduct(H, 'Removal Alert Pen')
+      const requestId = 'rt-remove-' + (++seq) + '-abcdef'
+      const remove = (id, body, as = 'sokha') => H.api('DELETE', '/api/products/' + id, body, { as })
+      const queued = await remove(product, { reason: 'Discontinued line', client_request_id: requestId })
+      t.eq('removal queued', queued.status, 202)
+      const call = only(await H.tg.calls(), t, 'removal request')
+      t.eq('removal request text', lines(call), [
+        '🕒 Review requested/សំណើរង់ចាំការត្រួតពិនិត្យ',
+        '· Request/សំណើ: Remove product/លុបផលិតផល · Removal Alert Pen',
+        '· Requested by/បានស្នើសុំដោយ: sokha',
+      ])
+      t.eq('to the Alerts topic', call && call.body.message_thread_id, TOPIC)
+
+      await reset()
+      const replay = await remove(product, { reason: 'Discontinued line', client_request_id: requestId })
+      t.eq('the replay answers 202 with the same request', [replay.status, replay.body && replay.body.pendingActionId], [202, queued.body.pendingActionId])
+      t.eq('the replay sends nothing', (await H.tg.calls()).length, 0)
+      const reused = await remove(product, { reason: 'A different reason', client_request_id: requestId })
+      t.eq('the same request id for another reason is refused 409', reused.status, 409)
+      t.eq('no reason is refused 400', (await remove(product, { client_request_id: 'rt-remove-' + (++seq) + '-abcdef' })).status, 400)
+      t.eq('a user without product removal is refused 403', (await remove(product, { reason: 'No right', client_request_id: 'rt-remove-' + (++seq) + '-abcdef' }, 'plain')).status, 403)
+      t.eq('none of those sent anything', (await H.tg.calls()).length, 0)
+
+      // The pending row could not be written: nothing is announced, and the same request works once the insert does.
+      const other = await seedProduct(H, 'Removal Alert Brush')
+      const otherId = 'rt-remove-' + (++seq) + '-abcdef'
+      await H.db.prepare("CREATE TRIGGER rt_fail_removal_insert BEFORE INSERT ON pending_actions BEGIN SELECT RAISE(ABORT, 'rt insert refused'); END").run()
+      try {
+        const failed = await remove(other, { reason: 'Slow seller', client_request_id: otherId })
+        t.ok('the removal request failed', failed.status >= 400, failed.status)
+        t.eq('a failed insert announced nothing', (await H.tg.calls()).length, 0)
+      } finally {
+        await H.db.prepare('DROP TRIGGER rt_fail_removal_insert').run()
+      }
+      const retried = await remove(other, { reason: 'Slow seller', client_request_id: otherId })
+      t.eq('the retry queues', retried.status, 202)
+      t.eq('and announces exactly once', (await H.tg.calls()).length, 1)
+
+      // A Full-tier user removes directly: nothing is queued, so nothing is announced.
+      await reset()
+      const direct = await seedProduct(H, 'Removal Alert Direct')
+      const removed = await remove(direct, { reason: 'Owner decision', client_request_id: 'rt-remove-' + (++seq) + '-abcdef' }, 'admin')
+      t.eq('a direct removal succeeds', removed.status, 200)
+      t.eq('and sends no review alert', (await H.tg.calls()).length, 0)
     })
 
     await check('C9', 'switches: telegram_reviews_enabled (on when unset), automation, the chat id', 'high', async t => {
