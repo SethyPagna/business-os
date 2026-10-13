@@ -21,16 +21,16 @@ import type { Env } from '../index'
 // holding one of your sessions, filled YOUR allowance and your own password
 // change answered 429. The key is now:
 //   - acting on your own account: the SIGN-IN the session descends from
-//     (lib/auth.ts currentSessionLimitFamily). A cookie alone was not
+//     (lib/auth.ts currentSessionLimitFamily). A cookie alone is not
 //     enough (S-auth4): POST /api/auth/session-duration mints a new
-//     session from an existing one with no password and leaves the old
-//     cookie valid, so a per-cookie key handed a stolen session 10 more
-//     guesses per session it minted. Re-issued sessions now carry their
-//     sign-in's id (user_sessions.limit_family_id, migration 0201), so a
-//     stolen or unattended session and everything minted from it share ONE
-//     allowance of 10 guesses per 15 minutes. A new family needs a real
-//     sign-in -- the password, an OTP sign-in, or a linked Google account --
-//     and every other sign-in of yours keeps its full allowance.
+//     session from an existing one, so a per-cookie key would hand a stolen
+//     session 10 more guesses for every session it minted. Re-issued
+//     sessions carry their sign-in's id (user_sessions.limit_family_id,
+//     migration 0201), so a stolen or unattended session and everything
+//     minted from it share ONE allowance of 10 guesses per 15 minutes. A new
+//     family needs a real sign-in -- the password, an OTP sign-in, or a linked
+//     Google account -- and every other sign-in of yours keeps its full
+//     allowance.
 //   - acting on someone else (an admin on your profile): the actor + target
 //     pair, so that admin exhausts only their own allowance against you.
 // No account-wide ceiling on top: it would hand back exactly the lockout X5

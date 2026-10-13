@@ -54,7 +54,7 @@ function isSessionTouchDue(lastSeenAt, nowMs) {
 
 // Mirrors slideSessionExpiry's decision. Returns the new expiry, or null for
 // "leave it alone". The renewal length is the chosen duration (duration_ms),
-// never expires_at - created_at, which grew with every renewal.
+// not expires_at - created_at, which only equals it until the first renewal.
 function nextExpiryFor(session, now) {
   const expiresAt = asUtc(session.expires_at)
   if (!Number.isFinite(expiresAt)) return null
