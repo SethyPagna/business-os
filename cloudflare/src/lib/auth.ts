@@ -38,18 +38,41 @@ const ALWAYS_SESSION_MS = 10 * 365 * 24 * 60 * 60 * 1000
 // duration got silently logged out every 24h -- now matches the new
 // default so "haven't touched the setting" behaves the same as "picked
 // Always stay signed in" instead of the shortest possible option.
-const DEFAULT_SESSION_MS = ALWAYS_SESSION_MS
+const DEFAULT_SESSION_DURATION = 'always'
+const BROWSER_SESSION_DURATION = 'session'
 const SESSION_DURATIONS_MS: Record<string, number> = {
   always: ALWAYS_SESSION_MS,
   // Deliberately short -- "Until I close the browser" is the shared-device
   // security option, must stay the shortest choice, not get folded into
   // the new long default.
-  session: 24 * 60 * 60 * 1000,
+  [BROWSER_SESSION_DURATION]: 24 * 60 * 60 * 1000,
   '1d': 24 * 60 * 60 * 1000,
   '3d': 3 * 24 * 60 * 60 * 1000,
   '7d': 7 * 24 * 60 * 60 * 1000,
   '14d': 14 * 24 * 60 * 60 * 1000,
   '30d': 30 * 24 * 60 * 60 * 1000,
+}
+
+function isNamedDuration(key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(SESSION_DURATIONS_MS, key)
+}
+
+export function resolveSessionDuration(requested: unknown): { key: string; ms: number } {
+  const asked = String(requested ?? '')
+  const key = isNamedDuration(asked) ? asked : DEFAULT_SESSION_DURATION
+  return { key, ms: SESSION_DURATIONS_MS[key] }
+}
+
+// The chosen duration travels inside the token (`<random>.<duration>`). Only
+// the token's hash is stored, so the suffix cannot be edited without
+// producing a token that matches no session, and it needs no schema change.
+// 'session' and '1d' last the same 24 hours, so the server-side window alone
+// cannot tell them apart; the token can.
+function durationOfToken(token: string): string | null {
+  const dot = token.lastIndexOf('.')
+  if (dot < 0) return null
+  const key = token.slice(dot + 1)
+  return isNamedDuration(key) ? key : null
 }
 
 // SHA-256 via Web Crypto (crypto.subtle) -- a Workers-native standard API,
@@ -153,11 +176,11 @@ export async function createSession(
   // current-password allowance (see currentSessionLimitFamily below). A real
   // sign-in omits it: the column stays NULL and the row is its own family.
   options: { sessionDuration?: string; deviceName?: string; deviceTz?: string; userAgent?: string; ip?: string; deviceId?: string | null; limitFamilyId?: number | null } = {},
-): Promise<{ token: string; expiresAt: string }> {
-  const token = randomToken()
+): Promise<{ token: string; expiresAt: string; sessionDuration: string }> {
+  const duration = resolveSessionDuration(options.sessionDuration)
+  const token = `${randomToken()}.${duration.key}`
   const tokenHash = await hashToken(token)
-  const ttlMs = SESSION_DURATIONS_MS[options.sessionDuration || ''] || DEFAULT_SESSION_MS
-  const expiresAt = new Date(Date.now() + ttlMs).toISOString()
+  const expiresAt = new Date(Date.now() + duration.ms).toISOString()
 
   const db = getDb(env)
   const limitFamilyId = Number(options.limitFamilyId || 0)
@@ -185,7 +208,7 @@ export async function createSession(
     `).run(params)
   }
 
-  return { token, expiresAt }
+  return { token, expiresAt, sessionDuration: duration.key }
 }
 
 // Called from routes/devices.ts when an admin rejects a pending device or
@@ -228,6 +251,13 @@ export async function revokeSessionsForDevice(env: Env, userId: number, deviceId
 const MAX_COOKIE_AGE_MS = 399 * 24 * 60 * 60 * 1000
 
 export function setSessionCookie<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>, token: string, expiresAt: string): void {
+  const attributes = { httpOnly: true, secure: true, sameSite: 'Lax', path: '/' } as const
+  // "Until I close the browser" gets a browser-session cookie: no Expires and
+  // no Max-Age, so it ends with the browser instead of outliving it.
+  if (durationOfToken(token) === BROWSER_SESSION_DURATION) {
+    setCookie(c, SESSION_COOKIE_NAME, token, attributes)
+    return
+  }
   const requested = new Date(expiresAt)
   // The cookie is only a transport for an opaque token; user_sessions expiry
   // remains the authentication authority. Keep it long enough for server-side
@@ -238,13 +268,7 @@ export function setSessionCookie<E extends { Bindings: Env } = { Bindings: Env }
   const cookieExpires = requested.getTime() > Date.now()
     ? new Date(Date.now() + MAX_COOKIE_AGE_MS)
     : requested
-  setCookie(c, SESSION_COOKIE_NAME, token, {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'Lax',
-    path: '/',
-    expires: cookieExpires,
-  })
+  setCookie(c, SESSION_COOKIE_NAME, token, { ...attributes, expires: cookieExpires })
 }
 
 export function clearSessionCookie<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): void {
