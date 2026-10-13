@@ -585,8 +585,28 @@ test('the transport asks for the slim projection and falls back to the whole lis
   await scenarioSlimReadWithFallback()
 })
 
+// The owner can switch a review grant off at any time; the client's cached permission may be a read behind.
+async function scenarioGrantSwitchedOff(transport: typeof realTransport = realTransport): Promise<void> {
+  reset()
+  nextRows = [open('products', 'product', 7)]
+  answers.push(async () => new Response(JSON.stringify({ success: false, error: 'Forbidden' }), { status: 403, headers: { 'Content-Type': 'application/json' } }))
+  const rows = await transport.getOpenPendingReviewRows('all')
+  assert.deepEqual(sent, ['GET /api/review?status=open&fields=targets', 'GET /api/review/mine?status=open&fields=targets'], "a refused reviewer list falls back to the person's own requests")
+  assert.equal(rows[0].entity_id, 7)
+}
+
+test('a review grant switched off on the server leaves the person their own tags', async () => {
+  await scenarioGrantSwitchedOff()
+})
+
+test('MUTANT a refused reviewer list is an error: the person loses their own tags too', async () => {
+  const code = transportSource.replace("    if (status === 403 && scope === 'all') return getOpenPendingReviewRows('mine')\n", '')
+  assert.notEqual(code, transportSource, 'negative control anchor must match the live transport')
+  await assert.rejects(scenarioGrantSwitchedOff(loadTransport(code)))
+})
+
 test('MUTANT no fallback: a Worker that refuses fields=targets leaves the tags unread', async () => {
-  const code = transportSource.replace("    if ((error as { status?: number } | null)?.status !== 400) throw error\n    response = await readRows(scope, channel, false)\n", '    throw error\n')
+  const code = transportSource.replace("    if (status !== 400) throw error\n    response = await readRows(scope, channel, false)\n", '    throw error\n')
   assert.notEqual(code, transportSource, 'negative control anchor must match the live transport')
   await assert.rejects(scenarioSlimReadWithFallback(loadTransport(code)))
 })

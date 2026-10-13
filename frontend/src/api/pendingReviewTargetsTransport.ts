@@ -48,7 +48,11 @@ export async function getOpenPendingReviewRows(scope: PendingReviewScope): Promi
   try {
     response = await readRows(scope, channel, true)
   } catch (error) {
-    if ((error as { status?: number } | null)?.status !== 400) throw error
+    const status = (error as { status?: number } | null)?.status
+    // The review grant was switched off on the server after this screen last read it: the reviewer list is
+    // refused (403), but the person's own requests are still theirs to see, so their tags keep working.
+    if (status === 403 && scope === 'all') return getOpenPendingReviewRows('mine')
+    if (status !== 400) throw error
     response = await readRows(scope, channel, false)
   }
   // route() stores every answer in the read cache (bypassCache only skips READING it) and
