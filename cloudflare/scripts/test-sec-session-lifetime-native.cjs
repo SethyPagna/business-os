@@ -66,7 +66,7 @@ async function boot() {
   const adminRole = await db.prepare("SELECT id FROM roles WHERE code = 'admin'").first()
   const org = await db.prepare('SELECT id FROM organizations ORDER BY id LIMIT 1').first()
   const hash = bcrypt.hashSync(PASSWORD, 4)
-  for (const username of ['owner_a', 'owner_b', 'owner_c', 'owner_otp', 'owner_net']) {
+  for (const username of ['owner_a', 'owner_b', 'owner_c', 'owner_otp', 'owner_net', 'owner_race', 'owner_boom']) {
     await db.prepare("INSERT INTO users (username, name, password, role_id, permissions, is_active, organization_id) VALUES (?, ?, ?, ?, '{}', 1, ?)")
       .bind(username, username, hash, adminRole.id, org.id).run()
   }
@@ -143,6 +143,21 @@ async function main() {
       assert.equal(res.status, 200, JSON.stringify(res.body))
       const days = cookieLifetimeDays(res.setCookie)
       assert.ok(days !== null && days > 398 && days <= 399, `${choice}: persistent cookie, ${days} days`)
+    }
+  })
+
+  await check('S1a: the choice is trimmed and lower-cased; empty or unknown keeps the default', async () => {
+    for (const choice of [' SESSION ', 'Session']) {
+      const res = await signIn('owner_a', choice)
+      assert.equal(res.status, 200, JSON.stringify(res.body))
+      assert.doesNotMatch(res.setCookie, /expires=|max-age=/i, `"${choice}" is the browser-session choice`)
+    }
+    for (const choice of ['', '   ', 'forever', '__proto__', 'toString']) {
+      const res = await signIn('owner_a', choice)
+      assert.equal(res.status, 200, JSON.stringify(res.body))
+      const days = cookieLifetimeDays(res.setCookie)
+      assert.ok(days > 398 && days <= 399, `"${choice}": the default keeps the persistent cookie`)
+      assert.ok(Date.parse((await sessionRow(res.cookie)).expires_at) - Date.now() > 3000 * DAY, `"${choice}": the default is the long window`)
     }
   })
 
@@ -339,6 +354,70 @@ async function main() {
     }
     assert.ok(reset.slice(0, 25).every((res) => res.status === 401), 'the first 25 are answered')
     assert.equal(reset[25].status, 429)
+  })
+
+  await check('SR-2: parallel duration changes from one cookie give exactly one new session', async () => {
+    const first = await signIn('owner_race', 'always')
+    assert.equal(await liveRows('owner_race'), 1)
+    const answers = await Promise.all(Array.from({ length: 5 }, () => changeDuration(first.cookie, { sessionDuration: '7d' })))
+    const won = answers.filter((answer) => answer.status === 200)
+    assert.equal(won.length, 1, `statuses ${answers.map((answer) => answer.status)}`)
+    for (const lost of answers.filter((answer) => answer.status !== 200)) {
+      assert.ok([401, 409].includes(lost.status), `a refused call is a conflict, or a request that arrived after the claim: ${lost.status}`)
+      assert.ok(['session_duration_conflict', 'invalid_session'].includes(lost.body.code), lost.body.code)
+      assert.equal(lost.cookie, null, 'a refused call issues no cookie')
+    }
+    assert.equal(await liveRows('owner_race'), 1, 'one live session before, one after')
+    assert.equal(await isSignedIn(first.cookie), false)
+    assert.equal(await isSignedIn(won[0].cookie), true)
+    const lengthened = await Promise.all(Array.from({ length: 5 }, () => changeDuration(won[0].cookie, { sessionDuration: 'always', currentPassword: PASSWORD })))
+    assert.equal(lengthened.filter((answer) => answer.status === 200).length, 1, `with the password: statuses ${lengthened.map((answer) => answer.status)}`)
+    assert.equal(await liveRows('owner_race'), 1)
+  })
+
+  await check('SR-2: a failed insert leaves the old session live', async () => {
+    const first = await signIn('owner_boom', 'always')
+    await db.prepare("UPDATE user_sessions SET device_name = 'boom' WHERE id = ?").bind((await sessionRow(first.cookie)).id).run()
+    await db.prepare("CREATE TRIGGER sessions_boom BEFORE INSERT ON user_sessions WHEN NEW.device_name = 'boom' BEGIN SELECT RAISE(ABORT, 'boom'); END").run()
+    try {
+      const failed = await changeDuration(first.cookie, { sessionDuration: '7d' })
+      assert.ok(failed.status >= 500, `the insert is refused: ${failed.status}`)
+      assert.equal(failed.cookie, null)
+    } finally {
+      await db.prepare('DROP TRIGGER sessions_boom').run()
+    }
+    assert.equal((await sessionRow(first.cookie)).revoked_at, null, 'the claim rolled back with the insert')
+    assert.equal(await isSignedIn(first.cookie), true)
+    assert.equal(await liveRows('owner_boom'), 1)
+  })
+
+  const adminRoleId = (await db.prepare("SELECT id FROM roles WHERE code = 'admin'").first()).id
+  const addUsers = async (prefix, count) => {
+    for (let i = 1; i <= count; i += 1) {
+      await db.prepare("INSERT INTO users (username, name, password, role_id, permissions, is_active, email) VALUES (?, ?, ?, ?, '{}', 1, ?)")
+        .bind(`${prefix}_${i}`, `${prefix}_${i}`, 'x', adminRoleId, `${prefix}_${i}@sessions.example`).run()
+    }
+  }
+
+  await check('S3b: the administrator-approval request ceiling counts a /64 as one network', async () => {
+    await addUsers('approve', 6)
+    for (let i = 1; i <= 6; i += 1) {
+      const res = await request('/api/auth/password-reset/admin-request', { method: 'POST', ip: inNetwork('2001:db8:5:6:0:0:0', i), body: { identifier: `approve_${i}` } })
+      assert.equal(res.status, 200)
+    }
+    const recorded = (await db.prepare("SELECT COUNT(*) AS n FROM password_reset_requests r JOIN users u ON u.id = r.user_id WHERE u.username LIKE 'approve%'").first()).n
+    assert.equal(recorded, 5, 'the sixth request from the same /64 within the hour records nothing')
+  })
+
+  await check('S3b: the e-mailed reset link ceiling counts a /64 as one network', async () => {
+    await addUsers('mail', 9)
+    for (let i = 1; i <= 9; i += 1) {
+      const res = await request('/api/auth/password-reset/email', { method: 'POST', ip: inNetwork('2001:db8:7:8:0:0:0', i), body: { identifier: `mail_${i}` } })
+      assert.equal(res.status, 200)
+    }
+    const rows = (await db.prepare("SELECT requester_ip FROM verification_codes WHERE target LIKE 'mail%'").all()).results
+    assert.equal(rows.length, 8, 'the ninth link from the same /64 is not issued')
+    assert.deepEqual([...new Set(rows.map((row) => row.requester_ip))], ['2001:db8:7:8::/64'])
   })
 
   console.log(`\n${passed} passed, ${failed} failed`)

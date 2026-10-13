@@ -58,7 +58,7 @@ function isNamedDuration(key: string): boolean {
 }
 
 export function resolveSessionDuration(requested: unknown): { key: string; ms: number } {
-  const asked = String(requested ?? '')
+  const asked = String(requested ?? '').trim().toLowerCase()
   const key = isNamedDuration(asked) ? asked : DEFAULT_SESSION_DURATION
   return { key, ms: SESSION_DURATIONS_MS[key] }
 }
@@ -181,6 +181,37 @@ function isSessionTouchDue(lastSeenAt: string | null, nowMs: number): boolean {
   return !Number.isFinite(lastSeenMs) || lastSeenMs < nowMs - SESSION_TOUCH_INTERVAL_MS
 }
 
+type NewSessionOptions = {
+  sessionDuration?: string
+  deviceName?: string
+  deviceTz?: string
+  userAgent?: string
+  ip?: string
+  deviceId?: string | null
+  limitFamilyId?: number | null
+}
+
+async function prepareSession(userId: number, options: NewSessionOptions) {
+  const duration = resolveSessionDuration(options.sessionDuration)
+  const token = `${randomToken()}.${duration.key}`
+  const expiresAt = new Date(Date.now() + duration.ms).toISOString()
+  const limitFamilyId = Number(options.limitFamilyId || 0)
+  return {
+    session: { token, expiresAt, sessionDuration: duration.key },
+    limitFamilyId: Number.isSafeInteger(limitFamilyId) && limitFamilyId > 0 ? limitFamilyId : null,
+    params: {
+      user_id: userId,
+      token_hash: await hashToken(token),
+      device_name: options.deviceName || null,
+      device_tz: options.deviceTz || null,
+      user_agent: options.userAgent || null,
+      ip: options.ip || null,
+      device_id: options.deviceId || null,
+      expires_at: expiresAt,
+    },
+  }
+}
+
 export async function createSession(
   env: Env,
   userId: number,
@@ -194,30 +225,15 @@ export async function createSession(
   // one that a future device revoke can't immediately terminate.
   //
   // `limitFamilyId`: pass ONLY when this session is re-issued from an existing
-  // one without a fresh sign-in (POST /session-duration). It is the id of
+  // one without a fresh sign-in (reissueSession). It is the id of
   // the sign-in's own session row, so the child shares that sign-in's
   // current-password allowance (see currentSessionLimitFamily below). A real
   // sign-in omits it: the column stays NULL and the row is its own family.
-  options: { sessionDuration?: string; deviceName?: string; deviceTz?: string; userAgent?: string; ip?: string; deviceId?: string | null; limitFamilyId?: number | null } = {},
+  options: NewSessionOptions = {},
 ): Promise<{ token: string; expiresAt: string; sessionDuration: string }> {
-  const duration = resolveSessionDuration(options.sessionDuration)
-  const token = `${randomToken()}.${duration.key}`
-  const tokenHash = await hashToken(token)
-  const expiresAt = new Date(Date.now() + duration.ms).toISOString()
-
+  const { session, limitFamilyId, params } = await prepareSession(userId, options)
   const db = getDb(env)
-  const limitFamilyId = Number(options.limitFamilyId || 0)
-  const params = {
-    user_id: userId,
-    token_hash: tokenHash,
-    device_name: options.deviceName || null,
-    device_tz: options.deviceTz || null,
-    user_agent: options.userAgent || null,
-    ip: options.ip || null,
-    device_id: options.deviceId || null,
-    expires_at: expiresAt,
-  }
-  if (Number.isSafeInteger(limitFamilyId) && limitFamilyId > 0) {
+  if (limitFamilyId) {
     // Only the re-issue path names limit_family_id (migration 0201), so the
     // sign-in INSERT below never depends on it.
     await db.prepare(`
@@ -231,7 +247,41 @@ export async function createSession(
     `).run(params)
   }
 
-  return { token, expiresAt, sessionDuration: duration.key }
+  return session
+}
+
+// POST /session-duration: replaces the request's session with a new one in the
+// sign-in's family. Claiming the old session and inserting the new one are one
+// D1 batch (one transaction), and the INSERT only selects a row while the
+// claim changed exactly one, so of any number of calls made with the same
+// cookie exactly one gets a session; the others get null and nothing is
+// written. A failed insert rolls the claim back with it, so the old session
+// is never revoked without a replacement.
+export async function reissueSession<E extends { Bindings: Env } = { Bindings: Env }>(
+  c: Context<E>,
+  userId: number,
+  options: NewSessionOptions & { limitFamilyId: number },
+): Promise<{ token: string; expiresAt: string; sessionDuration: string } | null> {
+  const sourceToken = getCookie(c, SESSION_COOKIE_NAME)
+  if (!sourceToken) return null
+  const { session, limitFamilyId, params } = await prepareSession(userId, options)
+  if (!limitFamilyId) throw new Error('A re-issued session needs the sign-in family it descends from')
+  sessionLookupMemo.delete(c)
+  const [claim] = await getDb(c.env).batch([
+    {
+      sql: 'UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE token_hash = @source_hash AND user_id = @user_id AND revoked_at IS NULL',
+      params: { source_hash: await hashToken(sourceToken), user_id: userId },
+    },
+    {
+      sql: `
+        INSERT INTO user_sessions (user_id, token_hash, device_name, device_tz, user_agent, last_ip, device_id, expires_at, limit_family_id)
+        SELECT @user_id, @token_hash, @device_name, @device_tz, @user_agent, @ip, @device_id, @expires_at, @limit_family_id
+        WHERE changes() = 1
+      `,
+      params: { ...params, limit_family_id: limitFamilyId },
+    },
+  ])
+  return claim?.meta?.changes === 1 ? session : null
 }
 
 // Called from routes/devices.ts when an admin rejects a pending device or
@@ -430,9 +480,9 @@ const SESSION_SLIDE_AFTER_FRACTION = 0.5
  * means and what the wording ("Keep me signed in for 30 days") implies.
  *
  * The renewal length is the duration chosen at sign-in (sessionDurationMs),
- * never `expires_at - created_at`: created_at does not move, so that interval
- * grew with every renewal. A session whose duration cannot be determined is
- * not renewed.
+ * not `expires_at - created_at`: created_at never moves, so that interval only
+ * equals the chosen duration until the first renewal. A session whose
+ * duration cannot be determined is not renewed.
  * The browser retains newly issued transport cookies for at most 399 days;
  * longer/"always" sessions still need an explicit auth operation by that cap.
  *

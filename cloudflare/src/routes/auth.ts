@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { hashPassword, spendFailedSignInFloor, upgradePasswordHash, verifyPassword, verifySignInPassword } from '../lib/passwordHash'
 import { failedSignInFloor, noteLegacyBcryptSeen, noteLegacyBcryptUpgraded } from '../lib/failedSignInCost'
-import { createSession, currentSessionReissueSource, lengthensSession, resolveSessionDuration, setSessionCookie, clearSessionCookie, getSessionUser, hasSessionCookie, revokeSession, revokeUserSessions, requireAuth } from '../lib/auth'
+import { createSession, currentSessionReissueSource, lengthensSession, reissueSession, resolveSessionDuration, setSessionCookie, clearSessionCookie, getSessionUser, hasSessionCookie, revokeSession, revokeUserSessions, requireAuth } from '../lib/auth'
 import type { SessionUser } from '../lib/auth'
 import { issuePasswordResetLink, consumePasswordResetLink, normalizeEmail, isEmailConfigured } from '../lib/verification'
 import { audit } from '../lib/audit'
@@ -883,14 +883,20 @@ app.post('/otp/verify', async (c) => {
 })
 
 // POST /api/auth/session-duration -- re-issues the current session's
-// cookie with a new expiry/remember-me duration and revokes the session it was
-// re-issued from, so a call replaces the session instead of adding a second
-// live one. Asking for a longer duration than the current session was signed
-// in for (lib/auth.ts lengthensSession) needs the current password: a stolen or
+// cookie with a new expiry/remember-me duration. The old session is claimed
+// and the new one inserted in one batch (lib/auth.ts reissueSession), so of
+// any number of parallel calls with one cookie exactly one succeeds and the
+// rest are answered 409 session_duration_conflict (never 401, which signs the
+// app out); a call replaces the session and never adds a second live one.
+// Asking for a longer duration than the current session was signed in for
+// (lib/auth.ts lengthensSession) needs the current password: a stolen or
 // unattended session must not be able to promote itself to "Always"; a shorter
-// or equal choice needs nothing. The app fences its other requests while a
-// cookie-changing request is pending (frontend api/actorReadScope.ts
-// beginActorCookieMutation), so revoking the old token cannot strand one.
+// or equal choice needs nothing.
+//
+// The app fences the requests it dispatches while a cookie-changing request is
+// pending (frontend api/actorReadScope.ts beginActorCookieMutation). A request
+// another tab already has in flight when the old token is revoked is answered
+// 401 and applies nothing.
 //
 // The new session inherits the caller's sign-in family (lib/auth.ts
 // currentSessionLimitFamily) so it shares, not renews, that sign-in's
@@ -932,7 +938,7 @@ app.post('/session-duration', requireAuth, async (c) => {
     if (!verdict.ok) return c.json({ error: 'Your current password is incorrect.', code: 'incorrect_password' }, 400)
   }
 
-  const session = await createSession(c.env, user.id, {
+  const session = await reissueSession(c, user.id, {
     sessionDuration: body.sessionDuration,
     deviceName: source.deviceName || undefined,
     deviceId: source.deviceId,
@@ -941,8 +947,10 @@ app.post('/session-duration', requireAuth, async (c) => {
     ip: c.req.header('cf-connecting-ip') || undefined,
     limitFamilyId,
   })
+  if (!session) {
+    return c.json({ error: 'The login duration was just changed from another window. Reload and check it before changing it again.', code: 'session_duration_conflict' }, 409)
+  }
   setSessionCookie(c, session.token, session.expiresAt)
-  await revokeSession(c)
 
   await audit(c.env, user.id, user.username, 'session_duration_updated', 'user', user.id, {
     sessionDuration: session.sessionDuration,

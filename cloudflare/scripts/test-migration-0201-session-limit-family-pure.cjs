@@ -1,12 +1,12 @@
 // S-auth4: the current-password allowance cannot be multiplied by minting
 // sessions through POST /api/auth/session-duration.
 //
-// /session-duration creates a NEW session from an existing one with no
-// password. It used to leave the old cookie valid (it now revokes it, so a
-// family has one live session per re-issue chain; sessions minted before that
-// stay live beside each other, which mintSibling reproduces). The guard used
-// to key per cookie, so one stolen session could mint N more and get 10
-// guesses from each.
+// /session-duration creates a NEW session from an existing one and revokes the
+// source, so a re-issue chain has one live session. Live siblings of one
+// family still exist wherever sessions were minted before the route revoked
+// its source; mintSibling builds them. The guard keys on the sign-in family,
+// not the cookie: keyed per cookie, one stolen session could mint N more and
+// get 10 guesses from each.
 //
 // Drives the REAL lib/auth.ts (createSession, requireAuth's session lookup,
 // currentSessionLimitFamily), the real lib/currentPasswordGuard.ts and
@@ -109,6 +109,7 @@ const noop = async () => {}
 // lib/db.ts answers run() with { changes }; the harness answers D1's raw
 // { meta: { changes } }. Every call is async, as on D1.
 const adapt = (raw) => ({
+  batch: (items) => raw.batch(items),
   prepare(sql) {
     const stmt = raw.prepare(sql)
     return {
@@ -217,9 +218,8 @@ async function mint(token) {
   return res.minted
 }
 
-// A session of the same sign-in family that stays live beside `token`: what a
-// /session-duration re-issue left behind before the route revoked its source,
-// and what any such session minted earlier still is.
+// A session of the same sign-in family that stays live beside `token`: the
+// shape of every session re-issued before the route revoked its source.
 async function mintSibling(token) {
   const row = db.prepare('SELECT user_id, COALESCE(limit_family_id, id) AS family FROM user_sessions WHERE token_hash = @hash')
     .get({ hash: createHash('sha256').update(token).digest('hex') })
@@ -255,7 +255,7 @@ async function check(name, fn) {
     assert.deepEqual(families, rows.map((r) => r.id), 'each existing row is its own sign-in')
   })
 
-  await check('minting 5 sessions through /session-duration does not multiply the allowance: at most 10 compares in total', async () => {
+  await check('a sign-in and its live re-issued sessions share one allowance: at most 10 compares in total', async () => {
     const stolen = await signIn(2)
     // A session minted from a minted session is still the same sign-in.
     const child = await mint(stolen)

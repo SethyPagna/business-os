@@ -16,12 +16,13 @@
 // Pins:
 //   - a re-issue carries the caller's session device_id and device_name,
 //     whatever the body says (none, or another device's id);
+//   - a call that loses the claim on the session it re-issues from is
+//     answered 409 session_duration_conflict and mints nothing;
 //   - Devices -> Revoke and Reject kill the sign-in AND every re-issued
-//     session of it, including one minted from a minted one. The route now
-//     revokes the session it re-issues from, so re-issues that stay live beside
-//     their sign-in (liveReissue: what it left before, and still left by
-//     sessions minted earlier) are built directly, and one chain is built
-//     through the real route;
+//     session of it, including one minted from a minted one. The route revokes
+//     the session it re-issues from, so re-issues that stay live beside their
+//     sign-in (liveReissue: the shape of every session re-issued before that)
+//     are built directly, and one chain is built through the real route;
 //   - a row re-issued before this fix (device_id NULL, limit_family_id set)
 //     is revoked with its family too;
 //   - controls: the same account's session on another device, and another
@@ -72,13 +73,13 @@ const rateLimit = load('lib/rateLimit.ts', { './db': libDb, '../index': {} })
 const authLib = load('lib/auth.ts', { './db': libDb, 'hono/cookie': cookie, '../index': {} })
 const isAdminControlUser = (u) => Number(u?.id) === 1
 
-const authRoute = load('routes/auth.ts', {
+const loadAuthRoute = (authModule) => load('routes/auth.ts', {
   hono: require('hono'),
   '../lib/passwordHash': passwordHashStub,
   '../lib/failedSignInCost': failedSignInCostStub,
   '../lib/requestBodyGuard': credentialGuardPassThrough,
   '../lib/db': libDb,
-  '../lib/auth': authLib,
+  '../lib/auth': authModule,
   '../lib/verification': {
     issuePasswordResetLink: noop, consumePasswordResetLink: noop, isEmailConfigured: () => false,
     normalizeEmail: (v) => String(v || '').trim().toLowerCase(),
@@ -99,6 +100,20 @@ const authRoute = load('routes/auth.ts', {
   '../lib/googleOauth': {},
   '../index': {},
 }).default
+
+const authRoute = loadAuthRoute(authLib)
+
+// requireAuth that does not ask whether the session is still live: what a
+// call that authenticated before a parallel call won the claim has behind it.
+const looseAuthRoute = loadAuthRoute({
+  ...authLib,
+  requireAuth: async (c, next) => {
+    const token = cookie.getCookie(c, 'bos_session')
+    const row = db.prepare('SELECT user_id FROM user_sessions WHERE token_hash = @hash').get({ hash: createHash('sha256').update(token).digest('hex') })
+    c.set('user', { id: row.user_id, username: 'cashier' })
+    return next()
+  },
+})
 
 const devicesRoute = load('routes/devices.ts', {
   hono: require('hono'),
@@ -152,9 +167,9 @@ async function reissue(token, body = APP_BODY) {
   return res.minted
 }
 
-// A re-issue that leaves its source live: what POST /session-duration produced
-// before it revoked the session it re-issues from, and what any such session
-// minted earlier still is. Same family and the source's device, as the route sets.
+// A re-issue that leaves its source live: the shape of every session re-issued
+// before POST /session-duration revoked its source. Same family and the
+// source's device, as the route sets.
 async function liveReissue(token) {
   const row = db.prepare('SELECT user_id, device_id, device_name, COALESCE(limit_family_id, id) AS family FROM user_sessions WHERE token_hash = @hash')
     .get({ hash: createHash('sha256').update(token).digest('hex') })
@@ -184,6 +199,20 @@ async function check(name, fn) {
     const row = lastRow()
     assert.equal(row.device_id, 'phone-D', 're-issued row carries the device id')
     assert.equal(row.device_name, 'Cashier phone', 're-issued row carries the device name')
+  })
+
+  await check('a call that loses the claim is answered 409 and mints nothing', async () => {
+    const signedIn = await signIn(2, 'phone-D', 'Cashier phone')
+    const won = await send(looseAuthRoute, 'POST', '/session-duration', signedIn, { ...APP_BODY, sessionDuration: '7d' })
+    assert.equal(won.status, 200, won.text)
+    const rows = rowCount()
+    const lost = await send(looseAuthRoute, 'POST', '/session-duration', signedIn, { ...APP_BODY, sessionDuration: '7d' })
+    assert.equal(lost.status, 409, lost.text)
+    assert.equal(lost.body.code, 'session_duration_conflict')
+    assert.equal(lost.minted, null, 'a refused call issues no cookie')
+    assert.equal(rowCount(), rows, 'the losing call inserted nothing')
+    assert.equal(await alive(won.minted), true)
+    assert.equal(await alive(signedIn), false)
   })
 
   await check('the body cannot re-home a re-issue onto another device id or name', async () => {
