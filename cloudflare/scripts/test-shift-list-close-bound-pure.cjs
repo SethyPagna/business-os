@@ -120,6 +120,7 @@ function harness(sqlite, routeSource = source) {
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', state.user); await next() } },
     '../lib/permissions': loadReal('lib/permissions.ts'),
     '../lib/shiftReconciliation': {
+      shiftLastActivityMs: async () => null, SHIFT_REVIEW: { earlierClose: 'closed_at_earlier_time' },
       loadShiftReconciliation: async () => ({ marker: 'reconciliation' }),
       loadShiftFigures: async () => ({ marker: 'figures' }),
     },
@@ -277,7 +278,12 @@ async function main() {
 
   // What the seeded form sends: a minute before the stated bound.
   const seeded = new Date(Date.parse(`${bound.replace(' ', 'T')}Z`) - 60_000).toISOString()
+  // Only an administrator picks a past close time; the shift's own cashier closes now.
+  const owner = app.state.user
+  eq((await app.json('POST', `/${stale.id}/close`, { expected_revision: 0, closed_at: seeded })).body.code, 'shift_close_too_early', 'the cashier cannot pick the stated bound')
+  app.as(ADMIN)
   const seededClose = await app.json('POST', `/${stale.id}/close`, { expected_revision: 0, closed_at: seeded })
+  app.as(owner)
   eq(seededClose.status, 200, 'and closing it a minute before the STATED bound is accepted')
   eq(seededClose.body.shift.closed_at, seeded, 'at exactly the moment the form offered')
   eq(seededClose.body.shift.close_before, null, 'after which the row is closed and states no bound at all')

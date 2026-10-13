@@ -109,6 +109,8 @@ export const SHIFT_REVIEW = {
   limit: 'sale_limit_reached',
   /** No configured payment method resolves to cash -- see paymentMethodRegistry. */
   cashMethod: 'cash_method_unresolved',
+  /** An administrator closed the shift at a time a cashier could not have chosen (see shiftLastActivityMs). */
+  earlierClose: 'closed_at_earlier_time',
 } as const
 
 export type ShiftReconciliationInput = {
@@ -465,12 +467,42 @@ export async function shiftCourierPayouts(env: Env, shift: ShiftReconciliationSe
   return courierPayoutsWhere(env, clauses, params)
 }
 
+/**
+ * The latest money record in a shift's drawer window, the window held open to
+ * now and a day beyond so a sale stamped ahead by a device clock still counts:
+ * the newest sale rung, customer return issued or expense paid out of this
+ * drawer -- the same records, filters and second resolution as the
+ * reconciliation below -- as epoch ms, or null when the drawer holds none.
+ *
+ * A close at or before the second of that record leaves it outside the
+ * drawer's half-open window, so it is counted in no shift's expected cash.
+ */
+export async function shiftLastActivityMs(env: Env, shift: ShiftReconciliationSession, nowMs: number = Date.now()): Promise<number | null> {
+  const open = { ...shift, closed_at: null, cancelled_at: null }
+  const horizon = nowMs + 24 * 60 * 60 * 1000
+  const sales = shiftWindowWhere('sales', shiftFilters(open, horizon))
+  if (shift.branch_id) { sales.clauses.push('sales.branch_id = @branchId'); sales.params.branchId = shift.branch_id }
+  sales.clauses.push("COALESCE(NULLIF(sales.sale_status, ''), 'completed') <> 'cancelled'")
+  const returns = shiftWindowWhere('returns', shiftFilters(open, horizon))
+  if (shift.branch_id) { returns.clauses.push('returns.branch_id = @branchId'); returns.params.branchId = shift.branch_id }
+  returns.clauses.push("COALESCE(returns.status, 'completed') <> 'cancelled'", "COALESCE(returns.return_scope, 'customer') = 'customer'")
+  const fees = shiftFeeWhere(open, horizon)
+  const db = getDb(env)
+  const latest = await Promise.all([
+    db.prepare(`SELECT MAX(datetime(created_at)) AS at FROM sales WHERE ${sales.clauses.join(' AND ')}`).get<{ at: string | null }>(sales.params),
+    db.prepare(`SELECT MAX(datetime(created_at)) AS at FROM returns WHERE ${returns.clauses.join(' AND ')}`).get<{ at: string | null }>(returns.params),
+    db.prepare(`SELECT MAX(datetime(created_at)) AS at FROM fees WHERE ${fees.clauses.join(' AND ')}`).get<{ at: string | null }>(fees.params),
+  ])
+  const times = latest.map((row) => (row?.at ? Date.parse(`${row.at.replace(' ', 'T')}Z`) : Number.NaN)).filter(Number.isFinite)
+  return times.length ? Math.max(...times) : null
+}
+
 /** The reconciliation for one shift, read from D1. */
 export async function loadShiftReconciliation(
   env: Env,
   shift: ShiftReconciliationSession,
   nowMs: number = Date.now(),
-  options: { overflowLabel?: string } = {},
+  options: { overflowLabel?: string; extraReviewCodes?: readonly string[] } = {},
 ): Promise<ShiftReconciliation> {
   const cashConfig = await readCashConfig(env)
   const [cash, expenses, refunds, courier] = await Promise.all([
@@ -487,7 +519,7 @@ export async function loadShiftReconciliation(
     expenses,
     courier,
     counted: { usd: shift.closing_counted_usd ?? null, khr: shift.closing_counted_khr ?? null },
-    reviewCodes: cash.reviewCodes,
+    reviewCodes: [...cash.reviewCodes, ...(options.extraReviewCodes ?? [])],
   })
 }
 
@@ -782,10 +814,11 @@ export async function loadShiftCloseFigures(
   env: Env,
   shift: ShiftReconciliationSession,
   nowMs: number = Date.now(),
+  options: { extraReviewCodes?: readonly string[] } = {},
 ): Promise<ShiftCloseFigures> {
   const config = await readCashConfig(env)
   const [reconciliation, sales] = await Promise.all([
-    loadShiftReconciliation(env, shift, nowMs),
+    loadShiftReconciliation(env, shift, nowMs, options),
     shiftSaleTenders(env, shift, nowMs, config),
   ])
   return buildShiftCloseFigures({ takenAt: new Date(nowMs).toISOString(), openedAt: shift.opened_at,

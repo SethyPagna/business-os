@@ -9,7 +9,7 @@ import { scheduleTelegramShiftOverview, sendTelegramShiftReport } from '../lib/t
 import { firstCharacters } from '../lib/telegramLang'
 import {
   loadShiftCloseDrift, loadShiftCloseFigures, loadShiftFigures, loadShiftReconciliation, parseShiftCloseFigures,
-  readShiftCloseInputsDigest, shiftCloseInputsDigestSql,
+  readShiftCloseInputsDigest, shiftCloseInputsDigestSql, shiftLastActivityMs, SHIFT_REVIEW,
   type ShiftCloseDrift, type ShiftCloseFigures, type ShiftCloseInputsDigest, type ShiftFigures, type ShiftReconciliation,
 } from '../lib/shiftReconciliation'
 import type { Env } from '../index'
@@ -332,22 +332,47 @@ async function branchExists(db: D1Compat, branchId: number): Promise<boolean> {
 /**
  * ---- Device clocks are not the time authority ---------------------------
  *
- * The POS End Shift button used to stamp the closing moment with the phone's
- * own clock and the route refused anything even one second ahead of the
- * Worker's clock ("Closing time cannot be in the future."). A device running
- * a few seconds fast therefore could never end its shift from POS at all,
- * while the Shifts popup -- where the operator picks an earlier minute --
- * still worked. Production shift 20 (2026-09-21) was closed exactly that way.
- *
- * A requested time within the shared client-clock tolerance (lib/clientTimestamp,
- * the same window offline sale timestamps get) ahead of the server is what the client
- * meant by "now" and is clamped to the server's now; only a time further
- * ahead is a genuine future timestamp and is still refused. A missing
- * closed_at on the close route means "now" and is stamped server-side.
+ * A device clock a few seconds fast must not stop a shift from being ended, so
+ * a requested time up to CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS (lib/clientTimestamp)
+ * ahead of the server is what the client meant by "now" and is clamped to the
+ * server's now; only a time further ahead is a genuine future timestamp and is
+ * still refused. A missing closed_at on the close route means "now" and is
+ * stamped server-side. Who may choose an EARLIER time is closeTimeVerdict's rule.
  */
 function withinServerClock(requestedMs: number, now: number): number | null {
   if (!Number.isFinite(requestedMs) || requestedMs > now + CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS) return null
   return Math.min(requestedMs, now)
+}
+/**
+ * ---- Who may choose an earlier close time --------------------------------
+ *
+ * A shift's drawer is the sales, returns and expenses recorded between its
+ * opening and its closing (lib/shiftReconciliation), at second resolution and
+ * half open. A close at or before the second of one of those records leaves it
+ * in no shift's expected cash, so choosing such a time hides money. A cashier's
+ * close therefore may not fall at or before the drawer's latest record, nor more
+ * than the client-clock tolerance before the server's now (409 with a code the
+ * app translates, nothing written). An administrator may pick any time from the
+ * opening on; that close is stored with the review code `closed_at_earlier_time`
+ * and the Telegram report says it was closed at an earlier time by them.
+ *
+ * Owner, 14 Oct 2026: an employee closes now and never picks a past time, however
+ * old the shift is.
+ * `moveOnly` is the amend of an already closed shift: only moving the close
+ * EARLIER can hide a record, and there is no "now" to compare against.
+ */
+const CLOSE_TIME_REFUSALS = {
+  beforeActivity: { code: 'shift_close_before_last_activity', error: 'Close the shift after its last sale, return or expense. An earlier time is not allowed.' },
+  tooEarly: { code: 'shift_close_too_early', error: 'Close the shift now. A close time more than 5 minutes in the past needs an administrator.' },
+} as const
+type CloseTimeVerdict = { earlier: boolean; refusal: (typeof CLOSE_TIME_REFUSALS)[keyof typeof CLOSE_TIME_REFUSALS] | null }
+async function closeTimeVerdict(env: Env, user: SessionUser, shift: ShiftRow, closedAtMs: number, nowMs: number, moveOnly = false): Promise<CloseTimeVerdict> {
+  const last = await shiftLastActivityMs(env, shift, nowMs)
+  const beforeActivity = last != null && Math.floor(closedAtMs / 1000) <= Math.floor(last / 1000)
+  const tooEarly = !moveOnly && closedAtMs < nowMs - CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS
+  if (!beforeActivity && !tooEarly) return { earlier: false, refusal: null }
+  if (canManageShifts(user)) return { earlier: true, refusal: null }
+  return { earlier: true, refusal: beforeActivity ? CLOSE_TIME_REFUSALS.beforeActivity : CLOSE_TIME_REFUSALS.tooEarly }
 }
 function utcMs(value: string): number {
   const text = value.trim()
@@ -800,14 +825,14 @@ async function drawerFor(env: Env, user: SessionUser, shift: ShiftRow, options: 
  * close without stored figures reads exactly like a pre-0237 one ("computed").
  */
 type CloseFigures = { json: string; digest: ShiftCloseInputsDigest; digestValue: string }
-async function closeFiguresFor(env: Env, closing: ShiftRow): Promise<CloseFigures | null> {
+async function closeFiguresFor(env: Env, closing: ShiftRow, extraReviewCodes: readonly string[] = []): Promise<CloseFigures | null> {
   try {
     const nowMs = Date.now()
     // The digest FIRST: whatever moves after this read is caught at commit
     // (writeClose's inputs guard), including a write landing mid-computation.
     const digest = shiftCloseInputsDigestSql(closing, nowMs)
     const digestValue = await readShiftCloseInputsDigest(env, digest)
-    const figures = await loadShiftCloseFigures(env, closing, nowMs)
+    const figures = await loadShiftCloseFigures(env, closing, nowMs, { extraReviewCodes })
     if (!figures || typeof figures !== 'object' || !digestValue) return null
     const json = JSON.stringify(figures)
     // D1 rows stay well under its size limit: past ~512 KB keep the drawer and drop the fingerprint.
@@ -1205,14 +1230,15 @@ async function writeClose(db: D1Compat, user: SessionUser, row: ShiftDbRow, inpu
  */
 const CLOSE_FIGURE_ATTEMPTS = 3
 async function closeWithFigures(env: Env, db: D1Compat, user: SessionUser, row: ShiftDbRow, closing: ShiftRow,
-  input: Omit<Parameters<typeof writeClose>[3], 'figures'>) {
+  input: Omit<Parameters<typeof writeClose>[3], 'figures'> & { extraReviewCodes?: readonly string[] }) {
+  const { extraReviewCodes, ...closeInput } = input
   for (let attempt = 0; attempt < CLOSE_FIGURE_ATTEMPTS; attempt += 1) {
-    const figures = await closeFiguresFor(env, closing)
-    try { return await writeClose(db, user, row, { ...input, figures }) } catch (error) {
+    const figures = await closeFiguresFor(env, closing, extraReviewCodes)
+    try { return await writeClose(db, user, row, { ...closeInput, figures }) } catch (error) {
       if (!figures || !isCloseInputsChangedError(error)) throw error
     }
   }
-  return writeClose(db, user, row, { ...input, figures: null })
+  return writeClose(db, user, row, { ...closeInput, figures: null })
 }
 
 /**
@@ -1255,6 +1281,8 @@ app.post('/close', async (c) => {
   const additionalUsd = additionalMoney(body.additional_cash_usd); const additionalKhr = additionalMoney(body.additional_cash_khr)
   if (!additionalUsd.ok || !additionalKhr.ok) return c.json({ error: 'Additional change used must be 0 or more, or left blank.' }, 400)
   const closedAt = new Date().toISOString()
+  const timing = await closeTimeVerdict(c.env, user, shift, Date.parse(closedAt), Date.parse(closedAt))
+  if (timing.refusal) return c.json(timing.refusal, 409)
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
   if (overlap) return c.json({ error: overlap }, 409)
   const closing = { ...storedShift(shift), closed_at: closedAt,
@@ -1263,11 +1291,12 @@ app.post('/close', async (c) => {
   const result = await closeWithFigures(c.env, db, user, shift, closing, { closedAt, recordedAt: closedAt,
     countedUsd: countedUsd.value, countedKhr: countedKhr.value,
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
-    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Manual shift close', request: mutationRequest(body, shift.id) })
+    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Manual shift close', request: mutationRequest(body, shift.id),
+    extraReviewCodes: timing.earlier ? [SHIFT_REVIEW.earlierClose] : [] })
   if (result.changed) {
     // The report names the closer when it is not the cashier (an administrator closing a till):
     // the stored closer's name and account id, which the close just wrote.
-    const report = sendTelegramShiftReport(c.env, shift.id, Date.now(), { closedBy: result.shift?.closed_by_user_name ?? displayName(user), closedById: result.shift?.closed_by_user_id ?? user.id })
+    const report = sendTelegramShiftReport(c.env, shift.id, Date.now(), { closedBy: result.shift?.closed_by_user_name ?? displayName(user), closedById: result.shift?.closed_by_user_id ?? user.id, ...(timing.earlier ? { closedEarlier: true } : {}) })
     try { c.executionCtx.waitUntil(report) } catch { void report }
     scheduleOverviewAfterClose(c, shift.id)
     return c.json({ shift: result.shift ? await reconciledShift(c.env, user, result.shift) : null, already_closed: false, is_open: false }, 200)
@@ -1302,6 +1331,8 @@ app.post('/:id/close', async (c) => {
   if (shift.closed_at) return c.json({ error: 'Shift is already closed.' }, 409)
   if (expectedRevision !== shift.revision) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   if (closedAtMs < utcMs(shift.opened_at)) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
+  const timing = await closeTimeVerdict(c.env, user, shift, closedAtMs, now)
+  if (timing.refusal) return c.json(timing.refusal, 409)
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
   if (overlap) return c.json({ error: overlap }, 409)
   const closing = { ...storedShift(shift), closed_at: closedAt,
@@ -1310,9 +1341,10 @@ app.post('/:id/close', async (c) => {
   const result = await closeWithFigures(c.env, db, user, shift, closing, { closedAt, recordedAt: new Date().toISOString(),
     countedUsd: countedUsd.value, countedKhr: countedKhr.value,
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
-    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Historic manual close', request: mutationRequest(body, id) })
+    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Historic manual close', request: mutationRequest(body, id),
+    extraReviewCodes: timing.earlier ? [SHIFT_REVIEW.earlierClose] : [] })
   if (!result.changed || !result.shift) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
-  const report = sendTelegramShiftReport(c.env, shift.id, Date.now(), { closedBy: result.shift.closed_by_user_name ?? displayName(user), closedById: result.shift.closed_by_user_id ?? user.id })
+  const report = sendTelegramShiftReport(c.env, shift.id, Date.now(), { closedBy: result.shift.closed_by_user_name ?? displayName(user), closedById: result.shift.closed_by_user_id ?? user.id, ...(timing.earlier ? { closedEarlier: true } : {}) })
   try { c.executionCtx.waitUntil(report) } catch { void report }
   scheduleOverviewAfterClose(c, shift.id)
   return c.json({ shift: await reconciledShift(c.env, user, result.shift), already_closed: false, is_open: false }, 200)
@@ -1435,6 +1467,10 @@ app.patch('/:id', async (c) => {
   if (before.closed_at && !closedAt) return c.json({ error: 'Closed shifts cannot be reopened.' }, 400)
   if (!before.closed_at && closedAt) return c.json({ error: 'Open shifts must be closed through the close action.' }, 400)
   if (closedAt && utcMs(closedAt) < utcMs(openedAt)) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
+  if (before.closed_at && closedAt && utcMs(closedAt) < utcMs(before.closed_at)) {
+    const timing = await closeTimeVerdict(c.env, user, before, utcMs(closedAt), now, true)
+    if (timing.refusal) return c.json(timing.refusal, 409)
+  }
   const openingUsdParsed = 'opening_float_usd' in body
     ? countedMoney(body.opening_float_usd) : { ok: true as const, value: before.opening_float_usd }
   const openingKhrParsed = 'opening_float_khr' in body

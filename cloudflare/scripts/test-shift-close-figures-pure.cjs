@@ -476,7 +476,10 @@ async function gapChecks() {
       const shifts = routeOf(shiftsRoute(mutate))
       const { f, id, at, revision } = await dayWithSales(shifts, late)
       const closedAt = new Date(Date.parse(at(25).replace(' ', 'T') + 'Z')).toISOString()
+      // Only an administrator may pick a close time before a recorded sale; that close is stored flagged for review.
+      const opener = user; user = ADMIN
       const close = await f.call(shifts, `/${id}/close`, { expected_revision: revision, closed_at: closedAt, closing_counted_usd: 40, closing_counted_khr: 0 })
+      user = opener
       assert.equal(close.status, 200, JSON.stringify(close.body))
       return storedFigures(f, id)
     }

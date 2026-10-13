@@ -82,6 +82,7 @@ async function main() {
     // purpose: a reporting failure must never turn a committed close into a
     // 500 the cashier retries, and the assertions below prove it does not.
     '../lib/shiftReconciliation': {
+      shiftLastActivityMs: async () => null,
       loadShiftReconciliation: async () => { throw new Error('no sales tables in this fixture') },
     },
   })

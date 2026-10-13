@@ -123,7 +123,7 @@ function scenario() {
     '../lib/permissions': loadReal('lib/permissions.ts'),
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
     '../lib/telegram': { sendTelegramShiftReport: async () => true },
-    '../lib/shiftReconciliation': { ...recon, loadShiftReconciliation: reconciliationFor },
+    '../lib/shiftReconciliation': { ...recon, loadShiftReconciliation: reconciliationFor, shiftLastActivityMs: async () => null },
   })
   const app = route.default || route
   const call = (method, url, body) => app.fetch(new Request(`http://test${url}`, {
