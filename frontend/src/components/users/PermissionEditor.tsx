@@ -6,25 +6,15 @@ import { normalizePermissionState, type PermissionValue } from '../../utils/perm
 import { actionsForKey, isActionOverriddenOff, isViewImpliedByWrite, outcomeAt, toggleActionOverrideMap, type ActionOutcome } from '../../utils/permissionActions.ts'
 
 type PermissionState = Record<string, PermissionValue>
-// 'view' (Part 557) is the READ-ONLY middle tier for VIEW_TIER_KEYS sections
-// (Settings, ...): the page is visible but every write is blocked. It sits
-// where 'review' does for REVIEW_TIER_KEYS; a section offers exactly one of
-// the two middle flavors (permissionDefinitions.ts's `middleTier`).
+// 'view' is the read-only middle tier for VIEW_TIER_KEYS sections (Settings, ...):
+// the page is visible but every write is blocked. It sits where 'review' does for
+// REVIEW_TIER_KEYS; a section offers exactly one of the two middle flavors
+// (permissionDefinitions.ts's `middleTier`).
 type Tier = 'full' | 'review' | 'view' | 'none'
-// Section-level picker added per explicit user request ("page permission
-// none, full access, and custom at top -- choose custom to allow check
-// the breakdown permission below"). This is deliberately a UI-only
-// aggregation over the SAME per-key data this editor already reads/writes
-// -- no new permission keys, no new storage shape, no backend change.
-// 'none'/'full' bulk-set every key already defined for that section (see
-// setSectionMode below); 'custom' just reveals the section's existing
-// per-key controls (the tier 3-way toggle and/or individual checkboxes)
-// that used to always be shown -- for a section with only one permission
-// key, Custom therefore shows exactly the one control that was always
-// there, nothing invented. Deeper per-action/per-button/per-stat
-// breakdown than the keys already defined in permissionDefinitions.ts
-// does not exist yet for most pages -- adding that is a separate,
-// larger backend-and-frontend wiring job per page (see progress.md).
+// Section-level picker: 'none'/'full' bulk-set every key the section defines
+// (setSectionMode) and 'custom' reveals the section's own per-key controls. It
+// aggregates the same per-key data those controls edit, so it adds no permission
+// key and no storage shape.
 type SectionMode = 'none' | 'full' | 'custom'
 
 interface PermissionEditorProps {
@@ -154,9 +144,8 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
     section.permissions.length > 1 || section.permissions.some((permission) => permission.tier)
   )
 
-  // 7.2: the at-a-glance read. One state per section -- what an admin
-  // scanning the list needs before opening anything -- computed from the
-  // SAME per-key data the controls edit, purely presentational.
+  // The at-a-glance read: one state per section, computed from the same per-key
+  // data the controls edit, so an admin can scan the list before opening anything.
   const sectionGlance = (section: PermissionSection): { label: string; tone: 'full' | 'none' | 'partial' } => {
     const keys = section.permissions
     const granted = keys.filter((permission) => tierOf(perms[permission.key]) !== 'none').length
@@ -225,14 +214,6 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
     onChange(next)
   }
 
-  // Tier-aware setter for a REVIEW_TIER_KEYS permission (see
-  // permissionDefinitions.ts's `tier: true` flag). 'none' clears the key
-  // entirely (same shape as an unchecked plain permission), 'full' sets a
-  // plain `true` (identical to the old checkbox-on state, so nothing about
-  // a Full Access grant changes for keys that already worked that way),
-  // and 'review' sets the literal string 'review' that
-  // getPermissionTierFromMap()/getPermissionTier() (frontend and backend,
-  // kept in sync) and lib/reviewGate.ts's maybeQueueForReview() branch on.
   // Switches ONE action off for this role, or hands it back to the tier.
   //
   // Stored as an explicit `false` under a `section:action` key rather than
@@ -249,6 +230,12 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
     onChange(next)
   }
 
+  // Tier-aware setter for a REVIEW_TIER_KEYS permission (see
+  // permissionDefinitions.ts's `tier: true` flag). 'none' clears the key
+  // entirely (same shape as an unchecked plain permission), 'full' sets a
+  // plain `true`, and 'review' sets the literal string 'review' that
+  // getPermissionTierFromMap()/getPermissionTier() (frontend and backend,
+  // kept in sync) and lib/reviewGate.ts's maybeQueueForReview() branch on.
   const setTier = (key: string, tier: Tier) => {
     const next: PermissionState = { ...perms }
     if (tier === 'none') delete next[key]
@@ -259,10 +246,9 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
     delete next.all
 
     // Granting real (Full or Review Required) access to this tier
-    // overrides -- and is never allowed to coexist with -- any boolean
-    // permission elsewhere that declared `exclusiveWithTier: key`. Clear
-    // it (and whatever it lists in `alsoClearsKeys`) the moment that
-    // happens, per explicit user request that the two never both be set.
+    // overrides -- and must never coexist with -- any boolean permission
+    // elsewhere that declared `exclusiveWithTier: key`. Clear it (and
+    // whatever it lists in `alsoClearsKeys`) the moment that happens.
     if (tier !== 'none') {
       for (const definition of Object.values(exclusivityByKey)) {
         if (definition.exclusiveWithTier !== key) continue
@@ -274,13 +260,10 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
     onChange(next)
   }
 
-  // Per-action breakdown under a permission -- "show the selected permissions for
-  // buttons/actions like edit, adjust, stock, discounts, import, export, delete".
-  // Reads utils/permissionActions.ts, the same table that gates the real buttons at
-  // runtime, so what an admin is shown here and what the page actually does cannot
-  // drift apart. Shared by the three-way sections (the tier picks the baseline) and
-  // the on/off sections (on = Full, off = None). Only the CURRENTLY selected
-  // level is shown (one badge per row, not a 3-column grid) to keep it scannable.
+  // Per-action rows under a permission, read from utils/permissionActions.ts: the same table that gates
+  // the real buttons at runtime, so the editor and the pages cannot drift apart. Three-way sections pass
+  // their tier; on/off sections read on as Full and off as None. Each row shows one badge, for the
+  // selected level only, to stay scannable.
   const renderActionRows = (permission: PermissionDefinition, tier: Tier, className: string) => {
     const actions = actionsForKey(permission.key)
     if (!actions.length) return null
@@ -289,15 +272,9 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
         <div className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
           {translate('perm_actions_heading', 'Buttons and actions on this page')}
         </div>
-        {/* Each row is now a real control, not a readout.
-            The tier sets the baseline; clicking a row
-            switches that single action OFF for this role,
-            and clicking again hands it back to the tier.
-            Deliberately one-way: an override can only
-            REMOVE what the tier granted, never add what it
-            withheld -- see permissionActions.ts for why
-            that is what makes it safe to enforce. A row
-            the tier already blocks is therefore inert. */}
+        {/* Each row is a control: the tier sets the baseline, clicking a row switches that single action off
+            for this role, and clicking again hands it back. An override only removes what the tier grants
+            and never adds (see permissionActions.ts), so a row the tier blocks is inert. */}
         {permission.key === 'sales' ? (
           <label className="mb-2 block px-1 text-xs text-gray-700 dark:text-gray-200">
             {translate('perm_sales_customer_mode', 'Edit customer mode')}
@@ -392,7 +369,7 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
         </div>
       </div>
 
-      {/* 7.2: the whole role in one line before any scrolling. */}
+      {/* The whole role in one line before any scrolling. */}
       {(() => {
         const scanned = PERMISSION_SECTIONS.filter((section) => section.key !== 'full_access')
         const counts = { full: 0, none: 0, partial: 0 }
@@ -419,10 +396,8 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
           const showBreakdown = isMasterSection || !customizable || effectiveMode === 'custom'
           return (
           <section key={section.key} className="rounded-2xl border border-gray-200 bg-gray-50/70 p-3 dark:border-zinc-700 dark:bg-zinc-800/60">
-            {/* 7.2: header on ONE row -- the description lives in the
-                info hint instead of an always-on paragraph under every
-                title, and a live state chip makes the whole role readable
-                top-to-bottom without opening a single section. */}
+            {/* Header on one row: the description lives in the info hint, and a live state chip
+                makes the whole role readable top to bottom without opening a section. */}
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <div className="flex min-w-0 items-center gap-1.5">
                 <InfoHint
@@ -479,7 +454,7 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                   const tier = tierOf(perms[permission.key])
                   // The middle option is the section's declared flavor: a
                   // read-only "View only" (VIEW_TIER_KEYS) or the amber
-                  // "Partial Access" that queues writes (default). Part 557.
+                  // "Partial Access" that queues writes (default).
                   const isViewTier = permission.middleTier === 'view'
                   const middleOption: { value: Tier; label: string } = isViewTier
                     ? { value: 'view', label: translate('view_only', 'View only') }
@@ -500,11 +475,7 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                     >
                       <div className="flex w-full flex-wrap items-center gap-3">
                         <span className={`inline-flex min-w-0 flex-1 items-center gap-1.5 text-sm font-medium ${tier !== 'none' ? 'text-blue-700 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'}`}>
-                          {/* Part 207: info icon moved before the label it
-                              explains, matching MergeDuplicatesReviewModal.tsx's
-                              and BulkImportModal.tsx's "Information" toggle --
-                              the two call sites in the app that already put
-                              Info first rather than last. */}
+                          {/* The info icon leads the label it explains, as in MergeDuplicatesReviewModal.tsx and BulkImportModal.tsx. */}
                           <InfoHint
                             className="flex-shrink-0"
                             label={labelFor(permission)}
@@ -545,13 +516,8 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                           ))}
                         </div>
                       </div>
-                      {/* Explicit request: under Review Required, show what
-                          that tier actually includes inline, not just via
-                          the (i) tooltip above -- same text, just always
-                          visible once this tier is picked so an admin
-                          reviewing an existing role's Custom breakdown
-                          doesn't have to hover/click to understand the
-                          scope. */}
+                      {/* The picked tier's scope is shown inline, not only in the (i) tooltip above, so
+                          reviewing a role's Custom breakdown needs no hover or tap. */}
                       {tier === 'review' ? (
                         <p className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
                           {reviewDescriptionFor(permission)}

@@ -75,48 +75,22 @@ export interface PermissionSection {
   permissions: PermissionDefinition[]
 }
 
-// Reorganized (this session) to mirror the real sidebar, one section per
-// nav page, in the same top-to-bottom order NAV_ITEMS
-// (components/shared/navigationConfig.ts) renders them -- replacing the
-// old thematic Administration/Operations/Sensitive-settings buckets, per
-// explicit user instruction: "separate it according to pages in the
-// sidebar, then go into detail in their sections." Every permission key
-// that existed before still exists below with its `key`/`tier`/
-// `reviewTKey`/`reviewDescription` unchanged -- this is a regrouping, not
-// a behavior change, so nothing about what Full/Review Required/None
-// actually does was touched. PermissionEditor.tsx itself needed no
-// changes: it only iterates PERMISSION_SECTIONS -> section.permissions,
-// so this data reshuffle is enough to change the rendered layout.
+// One section per sidebar page, in the order NAV_ITEMS
+// (components/shared/navigationConfig.ts) renders them. PermissionEditor.tsx
+// only iterates PERMISSION_SECTIONS -> section.permissions, so this data
+// decides the rendered layout. A section's label is the page's real name in
+// lang/en.json, the string the sidebar itself renders, and per-tab detail
+// lives in its `description`.
 //
-// Two label corrections made while moving these, both confirmed against
-// the real page name in lang/en.json (the same string the sidebar itself
-// renders), not guessed:
-//   - 'products' was "Products and variants" -> now "Products" (the nav
-//     item, App.tsx page header, and en.json's own `products` key all say
-//     "Products"; "and variants" was describing the page's contents, not
-//     its name, and had caused real confusion per the user's own report).
-//   - 'contacts' was "Customers, suppliers, delivery contacts" -> now
-//     "Contacts" (matches the `contacts` nav item/page name; the
-//     Customers/Suppliers/Delivery-tab detail now lives in this section's
-//     `description` instead of doubling as the permission's label).
-//   - 'library' was "Library (uploaded files and assets)" -> now
-//     "Library" (matches the `files` nav item's real sidebar label,
-//     "Library", confirmed in en.json; the parenthetical detail moved to
-//     this section's `description`).
-//
-// Two keys moved to the page that actually enforces them, confirmed by
-// grep against real usage rather than assumed from the old bucket names:
-//   - `destructive_delete` was filed under "Sensitive settings" but only gates the
-//     replace-all and replace-columns product imports (the import picker and the
-//     Worker's import jobs) -- it belongs under Products, not Settings, and is
-//     listed there now.
+// A key sits under the page that enforces it:
+//   - `destructive_delete` gates only the replace-all and replace-columns
+//     product imports (the import picker and the Worker's import jobs), so it
+//     is listed under Products, not Settings.
 //   - `business_identity`/`sales_policy`/`security_settings`/
-//     `drive_credentials` have no frontend call site of their own today
-//     (cloudflare/src/lib/permissions.ts falls each of them back to the
-//     plain `settings` grant -- confirmed by reading that file, not
-//     assumed) -- these stay grouped under Settings as that page's own
-//     finer-grained detail, since that IS the page whose sub-areas they
-//     name.
+//     `drive_credentials` have no frontend call site of their own;
+//     cloudflare/src/lib/permissions.ts falls each of them back to the plain
+//     `settings` grant, so they stay grouped under Settings, the page whose
+//     sub-areas they name.
 export const PERMISSION_SECTIONS: PermissionSection[] = [
   {
     key: 'full_access',

@@ -83,12 +83,10 @@ for (const key of [
 
 console.log('PASS PermissionEditor exposes page/action-sensitive permission groups with English/Khmer labels')
 
-// Permissions step (4): the per-section Review Required tier picker.
-// PermissionEditor.tsx must actually render a 3-way control (None/Review/
-// Full) for a `tier: true` permission instead of falling back to the plain
-// checkbox -- and must preserve a stored 'review' value through
-// parsePermissionState instead of collapsing it to Boolean(value), the
-// same bug class Users.tsx's normalizePermissionState was fixed for.
+// The per-section tier picker. PermissionEditor.tsx must render a 3-way control
+// (None/Review/Full) for a `tier: true` permission instead of the plain checkbox,
+// and must keep a stored 'review' value through parsePermissionState instead of
+// collapsing it to Boolean(value), as Users.tsx's normalizePermissionState does.
 assert.match(source, /from '\.\.\/\.\.\/utils\/permissions\.ts'/)
 assert.match(source, /normalizePermissionState/)
 assert.match(source, /permission\.tier/)
@@ -156,12 +154,9 @@ for (const key of ['view_only']) {
 
 console.log('PASS PermissionEditor renders None/Partial Access|View only/Full Access tier pickers, kept in sync with REVIEW_/VIEW_TIER_KEYS')
 
-// Per-row explanation, now through the shared InfoHint rather than a 4x4
-// button carrying a `title`. The old affordance was the browser's own black
-// tooltip: it does not open on tap at all, so on a touch device the
-// explanation was simply unreachable, and the target was well under the
-// minimum comfortable hit size. InfoHint opens on hover AND tap and
-// deliberately carries no `title`, so there is no second overlapping panel.
+// The per-row explanation goes through the shared InfoHint, which opens on hover and
+// on tap and carries no `title`: a native tooltip never opens on touch, so the
+// explanation would be unreachable there, and a second panel would overlap InfoHint's.
 assert.match(source, /import InfoHint from '\.\.\/shared\/InfoHint\.tsx'/)
 assert.match(source, /reviewDescriptionFor/)
 assert.match(source, /text=\{reviewDescriptionFor\(permission\)\}/)
@@ -189,13 +184,10 @@ for (const key of ['review_required_generic_desc', 'perm_fees_review_desc']) {
 
 console.log('PASS PermissionEditor shows an info hint per tiered permission explaining exactly what Partial Access restricts for that section')
 
-// Dashboard permission gate (previously PAGE_PERMISSIONS['dashboard'] was
-// null -- any authenticated user, any role, could view it, and there was
-// no separate control over the export button at all). Two plain boolean
-// keys, not a tier:true/REVIEW_TIER_KEYS section -- Dashboard has no
-// create/edit/delete workflow to queue for review, so 'dashboard' (page
-// access) and 'dashboard_export' (export button) are independent
-// Full/None grants, same shape as 'backup' vs 'backup_restore'.
+// Dashboard has two plain boolean keys, not a tier:true section: it has no
+// create/edit/delete workflow to queue for review, so 'dashboard' (page access)
+// and 'dashboard_export' (export button) are independent Full/None grants, the
+// same shape as 'backup' vs 'backup_restore'.
 assert.match(definitions, /key:\s*'dashboard'/)
 assert.match(definitions, /key:\s*'dashboard_export'/)
 assert.doesNotMatch(
@@ -229,8 +221,8 @@ assert.match(source, /min-w-0 break-words text-xs \$\{overriddenOff/, 'an action
 assert.doesNotMatch(source, /min-w-0 truncate text-xs \$\{overriddenOff/)
 console.log('PASS both editor branches share one action panel')
 
-// Plan 4.2 stale copy. The English fallback in the tables must be the pack's English, or the editor reads
-// differently with and without a translator.
+// The English fallback in the tables must be the pack's English, or the editor reads differently with and
+// without a translator.
 const sectionOf = (key: string) => PERMISSION_SECTIONS.find((section) => section.key === key)!
 const permissionOf = (key: string) => PERMISSION_SECTIONS.flatMap((section) => section.permissions).find((permission) => permission.key === key)!
 const actionOf = (section: string, key: string) => PERMISSION_ACTIONS[section].find((action) => action.key === key)!

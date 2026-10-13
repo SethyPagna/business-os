@@ -6,10 +6,17 @@
 //   Worker action  (section:action)  -> needs an editor row, or a reason in ALWAYS_REFUSED / SECTION_LEVEL
 //   Editor row     (section:action)  -> needs a Worker check, or a place in BROWSER_ONLY
 //   Editor key     (top-level)       -> needs a Worker check, or a place in BROWSER_ONLY / PENDING_OWNER / MASTER_KEY
+//   Worker key     (top-level)       -> needs an editor key, or a reason in WORKER_ONLY_KEYS
 //
 // Worker actions are read from the comment-free emit of every cloudflare/src file: each literal
-// getActionTier/isActionBlocked(user, 'section', 'action') call, plus the call sites whose section or action is a
-// variable (DYNAMIC_SITES). A variable call site that is not registered fails, so a new one cannot slip in.
+// getActionTier/isActionBlocked(user, 'section', 'action') call (under its own name or an import or local alias),
+// plus the call sites whose section or action is a variable (DYNAMIC_SITES) and the literals passed to the
+// registered wrappers (WRAPPERS). A variable call site, a wrapper call with a variable, or a use of either helper
+// other than a direct call fails, so a new one cannot slip in.
+//
+// Each editor row's Partial Access outcome is also compared with how the Worker's getActionTier gates treat a
+// Partial Access caller (passesPartial): a row cannot show Hidden where the Worker only stops 'none', nor Allowed
+// where every gate demands Full Access.
 //
 // Run: node scripts/test-permission-catalog-parity-pure.cjs [--table]
 // Test-only override: PARITY_REPO_ROOT points at a copy of the tree (used to prove the test goes RED).
@@ -37,11 +44,12 @@ function check(name, fn) {
 // ---------------------------------------------------------------------------
 // Source readers
 // ---------------------------------------------------------------------------
-// The emit drops every comment, so a call named in a comment is never read as a check.
+// The emit drops every comment, so a call named in a comment is never read as a check, and every plain string is
+// single-quoted, so 'archive' and "archive" read alike.
 const emit = (file) => ts.transpileModule(fs.readFileSync(file, 'utf8'), {
   fileName: file,
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, removeComments: true, jsx: ts.JsxEmit.Preserve },
-}).outputText
+}).outputText.replace(/"([^"'`\\\n]*)"/g, "'$1'")
 
 const loadModule = (file) => {
   const js = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText
@@ -74,9 +82,25 @@ for (const file of workerFiles) {
 // ---------------------------------------------------------------------------
 // Worker actions
 // ---------------------------------------------------------------------------
-const CALLEE = /\b(getActionTier|isActionBlocked)\s*\(/g
+const HELPERS = ['getActionTier', 'isActionBlocked']
 const LITERAL_ARGS = /^\(\s*[^,()]+(?:\([^()]*\))?\s*,\s*'([a-z_]+)'\s*,\s*'([a-z_]+)'\s*\)/
 const HELPERS_FILE = 'lib/permissions.ts'
+const IMPORT_CLAUSE = /import\s*(?:type\s*)?\{[^}]*\}\s*from\s*'[^']*';?/g
+const ALIAS_DECLARATION = /\b(?:const|let|var)\s+(\w+)\s*=\s*(getActionTier|isActionBlocked)\b(?!\s*\()/g
+
+// The names a file calls the two helpers by: their own, an import alias, or a local alias.
+function calleeNames(text) {
+  const names = new Map(HELPERS.map((name) => [name, name]))
+  for (const clause of text.matchAll(/import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*'[^']*'/g)) {
+    for (const part of clause[1].split(',')) {
+      const [original, alias] = part.trim().split(/\s+as\s+/)
+      if (alias && HELPERS.includes(original.trim())) names.set(alias.trim(), original.trim())
+    }
+  }
+  for (const declaration of text.matchAll(ALIAS_DECLARATION)) names.set(declaration[1], declaration[2])
+  return names
+}
+const calleePattern = (names) => new RegExp(`\\b(${[...names.keys()].join('|')})\\s*\\(`, 'g')
 
 function snippetAt(text, open) {
   let depth = 0
@@ -109,20 +133,27 @@ function passesPartial(text, callStart, callEnd) {
 const literalPairs = new Map()
 const partialSites = new Map()
 const variableSites = []
+const indirectUses = []
 for (const [file, text] of workerText) {
   if (file === HELPERS_FILE) continue
-  for (const match of text.matchAll(CALLEE)) {
+  const names = calleeNames(text)
+  for (const match of text.matchAll(calleePattern(names))) {
+    const helper = names.get(match[1])
     const open = match.index + match[0].length - 1
     const literal = LITERAL_ARGS.exec(text.slice(open, open + 300))
     if (literal) {
       const pair = `${literal[1]}:${literal[2]}`
       literalPairs.set(pair, [...(literalPairs.get(pair) || []), file])
-      if (match[1] === 'getActionTier') {
+      if (helper === 'getActionTier') {
         partialSites.set(pair, [...(partialSites.get(pair) || []), { file, passes: passesPartial(text, match.index, open + literal[0].length) }])
       }
     } else {
-      variableSites.push({ file, text: `${match[1]}${snippetAt(text, open)}` })
+      variableSites.push({ file, text: `${helper}${snippetAt(text, open)}` })
     }
+  }
+  const bare = text.replace(IMPORT_CLAUSE, '').replace(ALIAS_DECLARATION, '')
+  for (const use of bare.matchAll(new RegExp(`\\b(${[...names.keys()].join('|')})\\b(?!\\s*\\()`, 'g'))) {
+    indirectUses.push(`${file}: ${collapse(bare.slice(Math.max(0, use.index - 40), use.index + 60))}`)
   }
 }
 
@@ -150,6 +181,12 @@ const SALE_BULK_ACTIONS = () => {
     pairs.push(`sales:${found[1]}`, `sales:${found[2]}`)
   }
   return pairs
+}
+// Wrappers that forward a literal action to getActionTier. Every call must pass literals the scan can read: a
+// call with a variable would hide its action, and fails.
+const WRAPPERS = {
+  denyUnlessFullContactAction: { file: 'routes/contacts.ts', literal: /denyUnlessFullContactAction\(\s*c\s*,\s*'([a-z_]+)'\s*\)/g },
+  requireAction: { file: 'routes/promotions.ts', literal: /requireAction\(\s*'([a-z_]+)'\s*,\s*'([a-z_]+)'\s*\)/g },
 }
 const DYNAMIC_SITES = [
   { file: 'lib/importEngine.ts', needle: "isActionBlocked(actor, section, 'import')", reach: IMPORT_SECTIONS('lib/importEngine.ts') },
@@ -179,12 +216,12 @@ const DYNAMIC_SITES = [
   {
     file: 'routes/contacts.ts',
     needle: "getActionTier(c.get('user'), 'contacts', action)",
-    reach: () => quoted(textOf('routes/contacts.ts'), /denyUnlessFullContactAction\(c, '([a-z_]+)'\)/g).map((m) => `contacts:${m[1]}`),
+    reach: () => quoted(textOf('routes/contacts.ts'), WRAPPERS.denyUnlessFullContactAction.literal).map((m) => `contacts:${m[1]}`),
   },
   {
     file: 'routes/promotions.ts',
     needle: "getActionTier(c.get('user'), key, action)",
-    reach: () => quoted(textOf('routes/promotions.ts'), /requireAction\('([a-z_]+)',\s*'([a-z_]+)'\)/g).map((m) => `${m[1]}:${m[2]}`),
+    reach: () => quoted(textOf('routes/promotions.ts'), WRAPPERS.requireAction.literal).map((m) => `${m[1]}:${m[2]}`),
   },
   {
     file: 'routes/reports.ts',
@@ -221,19 +258,63 @@ for (const entry of DYNAMIC_SITES) {
 // ---------------------------------------------------------------------------
 // The helper file holds the key sets and fallbacks, and the invariants file the default seeds: neither is a check.
 const NOT_EVIDENCE = new Set([HELPERS_FILE, 'lib/coreDataInvariants.ts'])
-const checkStatements = []
+
+// Which argument of each helper carries the permission key (hasAnyPermission takes an array, denyUnless a list).
+const KEY_ARGUMENTS = {
+  hasPermission: (args) => args.slice(1, 2),
+  getPermissionTier: (args) => args.slice(1, 2),
+  isReviewRequired: (args) => args.slice(1, 2),
+  hasAnyPermission: (args) => args.slice(1, 2),
+  denyUnless: (args) => args.slice(1),
+  requireReadKey: (args) => args.slice(0, 1),
+  requireKey: (args) => args.slice(0, 1),
+  requirePermission: (args) => args.slice(0, 1),
+  getActionTier: (args) => args.slice(1, 2),
+  isActionBlocked: (args) => args.slice(1, 2),
+}
+
+function topLevelArguments(text, open) {
+  const args = []
+  let depth = 0
+  let start = open + 1
+  let quote = ''
+  for (let i = open; i < text.length && i < open + 600; i += 1) {
+    const ch = text[i]
+    if (quote) {
+      if (ch === '\\') i += 1
+      else if (ch === quote) quote = ''
+    } else if (ch === "'" || ch === '`') {
+      quote = ch
+    } else if (ch === '(' || ch === '[' || ch === '{') {
+      depth += 1
+    } else if (ch === ')' || ch === ']' || ch === '}') {
+      depth -= 1
+      if (depth === 0) { args.push(text.slice(start, i)); return args }
+    } else if (ch === ',' && depth === 1) {
+      args.push(text.slice(start, i))
+      start = i + 1
+    }
+  }
+  return args
+}
+
+const checkedKeys = new Map()
 for (const [file, text] of workerText) {
   if (NOT_EVIDENCE.has(file)) continue
-  for (const match of text.matchAll(new RegExp(`\\b(?:${CHECK_CALLEES})\\s*\\(`, 'g'))) {
-    const end = text.indexOf(';', match.index)
-    checkStatements.push({ file, text: text.slice(match.index, Math.min(end < 0 ? Infinity : end, match.index + 200)) })
+  const names = new Map([...Object.keys(KEY_ARGUMENTS).map((name) => [name, name]), ...calleeNames(text)])
+  for (const match of text.matchAll(new RegExp(`\\b(${[...names.keys()].join('|')})\\s*\\(`, 'g'))) {
+    const helper = names.get(match[1])
+    const args = topLevelArguments(text, match.index + match[0].length - 1)
+    for (const argument of KEY_ARGUMENTS[helper](args)) {
+      const literals = /^\s*(?:\[[^\]]*\]|'[a-z_]+')\s*$/.test(argument) ? [...argument.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]) : []
+      for (const key of literals) checkedKeys.set(key, [...(checkedKeys.get(key) || []), `${file} ${helper}`])
+    }
   }
 }
 
 function workerChecksKey(key) {
-  const quotedKey = [`'${key}'`, `"${key}"`]
-  const call = checkStatements.find((statement) => quotedKey.some((form) => statement.text.includes(form)))
-  if (call) return `${call.file} (check call)`
+  const call = checkedKeys.get(key)
+  if (call) return `${call[0].split(' ')[0]} (check call)`
   const table = new RegExp(`(?:'${key}'|"${key}"|\\.${key}\\b|(?:^|[\\s,{(])${key}\\s*:)`)
   const tableFile = TABLE_FILES.find((file) => table.test(workerText.get(file) || ''))
   return tableFile ? `${tableFile} (table)` : null
@@ -260,16 +341,21 @@ const SECTION_LEVEL = {
   'promotions:view': 'The section tier is the switch (None / View only / Full), so a separate row would say the same thing twice.',
 }
 const BROWSER_ONLY = {
-  dashboard_export: { gate: ['frontend/src/components/dashboard/Dashboard.tsx', /hasPermission\('dashboard_export'\)/], why: 'The export file is built in the browser from data already loaded.' },
-  'products:export': { gate: ['frontend/src/components/products/Products.tsx', /can\('products',\s*'export'\)/], why: 'The export file is built from rows the page already loaded.' },
-  'contacts:export': { gate: ['frontend/src/components/contacts/CustomersTab.tsx', /can\('contacts',\s*'export'\)/], why: 'The export file is built from rows the page already loaded.' },
-  'branches:export': { gate: ['frontend/src/components/branches/Branches.tsx', /can\('branches',\s*'export'\)/], why: 'The export file is built from rows the page already loaded.' },
+  dashboard_export: { gates: [['frontend/src/components/dashboard/Dashboard.tsx', /hasPermission\('dashboard_export'\)/]], why: 'The export file is built in the browser from data already loaded.' },
+  'products:export': { gates: [['frontend/src/components/products/Products.tsx', /can\('products',\s*'export'\)/]], why: 'The export file is built from rows the page already loaded.' },
+  'contacts:export': {
+    gates: ['CustomersTab', 'SuppliersTab', 'DeliveryTab'].map((tab) => [`frontend/src/components/contacts/${tab}.tsx`, /can\('contacts',\s*'export'\)/]),
+    why: 'The export file is built from rows the page already loaded, on each of the three contact tabs.',
+  },
+  'branches:export': { gates: [['frontend/src/components/branches/Branches.tsx', /can\('branches',\s*'export'\)/]], why: 'The export file is built from rows the page already loaded.' },
 }
 const PENDING_OWNER = {
-  security_settings: 'Owner question Q6: the row grants nothing today because no Worker route checks it; hide it or give it a feature.',
-  drive_credentials: 'Owner question Q6: the only trace is a fallback to the Settings grant in lib/permissions.ts; every Settings save is refused for it.',
+  security_settings: 'Owner decision pending: the row grants nothing today because no Worker route checks it; hide it or give it a feature.',
+  drive_credentials: 'Owner decision pending: the only trace is a fallback to the Settings grant in lib/permissions.ts; every Settings save is refused for it.',
 }
 const MASTER_KEY = { all: 'The administrator override, evaluated by isAdminControlUser in lib/permissions.ts.' }
+// Keys the Worker checks that the editor has no key for.
+const WORKER_ONLY_KEYS = {}
 // Rows that show Partial Access as blocked although a gate on the same action only stops 'none': the route first
 // refuses a Partial Access caller outright, then honours the switch for a Full Access one.
 const REFUSED_AT_PARTIAL = {
@@ -291,6 +377,22 @@ check('every Worker action check is either a literal pair or a registered variab
   const stale = DYNAMIC_SITES.filter((entry) => !matchedSites.has(entry)).map((entry) => `${entry.file}: ${entry.needle}`)
   assert.deepEqual(stale, [], `DYNAMIC_SITES entries that match no call site any more (remove them):\n${stale.join('\n')}`)
   assert.ok(workerActions.size > 55, `only ${workerActions.size} Worker actions found; the scan is broken`)
+})
+
+check('every use of the two action helpers is a direct call the scan can read', () => {
+  assert.deepEqual(indirectUses, [], `getActionTier / isActionBlocked (or an alias of them) is used other than as a direct call, so its actions are invisible to this test:\n${indirectUses.join('\n')}`)
+})
+
+check('every call to an action wrapper passes literals', () => {
+  const problems = []
+  for (const [name, wrapper] of Object.entries(WRAPPERS)) {
+    const text = textOf(wrapper.file)
+    const calls = [...text.matchAll(new RegExp(`(?<!function\\s)\\b${name}\\s*\\(`, 'g'))].length
+    const readable = [...text.matchAll(wrapper.literal)].length
+    if (!calls) problems.push(`${name} is registered in WRAPPERS but ${wrapper.file} never calls it; remove it`)
+    else if (calls !== readable) problems.push(`${wrapper.file}: ${calls - readable} of ${calls} calls to ${name} pass something other than literals, so the action they check is invisible`)
+  }
+  assert.deepEqual(problems, [])
 })
 
 check('every editor row belongs to a permission key the editor renders', () => {
@@ -346,6 +448,15 @@ check('every top-level editor key has a Worker check, or is listed', () => {
   assert.deepEqual(unexplained, [], `The editor lists these keys but no Worker code checks them:\n${unexplained.join('\n')}`)
 })
 
+check('every permission key the Worker checks has an editor key, or is listed', () => {
+  const sections = new Set([...workerActions.keys()].map((pair) => pair.split(':')[0]))
+  const keys = new Set([...checkedKeys.keys(), ...sections])
+  const unexplained = [...keys].filter((key) => !definitionByKey.has(key) && !WORKER_ONLY_KEYS[key]).sort()
+  assert.deepEqual(unexplained, [], `The Worker checks these permission keys but the editor has no key an administrator could switch off.\nAdd the key to PERMISSION_SECTIONS (frontend/src/components/users/permissionDefinitions.ts) or list it in WORKER_ONLY_KEYS with its reason:\n${unexplained.map((key) => `${key}  <- ${(checkedKeys.get(key) || ['an action check']).join(', ')}`).join('\n')}`)
+  const stale = Object.keys(WORKER_ONLY_KEYS).filter((key) => definitionByKey.has(key) || !keys.has(key))
+  assert.deepEqual(stale, [], `WORKER_ONLY_KEYS entries the editor now has or the Worker no longer checks (remove them):\n${stale.join('\n')}`)
+})
+
 check('a listed exception is still true (no stale listing)', () => {
   const problems = []
   for (const pair of Object.keys(ALWAYS_REFUSED)) {
@@ -362,9 +473,10 @@ check('a listed exception is still true (no stale listing)', () => {
     const isAction = name.includes(':')
     if (isAction ? workerActions.has(name) : workerChecksKey(name)) problems.push(`${name} is listed as browser-only but the Worker now checks it; remove it from BROWSER_ONLY`)
     if (isAction ? !editorRows.has(name) : !definitionByKey.has(name)) problems.push(`${name} is listed as browser-only but the editor has no such row`)
-    const [file, pattern] = entry.gate
-    const gateFile = path.join(ROOT, file)
-    if (!fs.existsSync(gateFile) || !pattern.test(emit(gateFile))) problems.push(`${name} is listed as browser-only but ${file} no longer gates on it`)
+    for (const [file, pattern] of entry.gates) {
+      const gateFile = path.join(ROOT, file)
+      if (!fs.existsSync(gateFile) || !pattern.test(emit(gateFile))) problems.push(`${name} is listed as browser-only but ${file} no longer gates on it`)
+    }
   }
   for (const key of Object.keys(PENDING_OWNER)) {
     if (!definitionByKey.has(key)) problems.push(`${key} is listed as pending Q6 but the editor no longer has the row; remove it from PENDING_OWNER`)
