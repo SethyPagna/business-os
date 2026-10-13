@@ -27,6 +27,12 @@ export type DraftAuthority = {
   identity: ActorWriteIdentity
 }
 
+// The sentence every surface says once its frozen authority is gone: the forms' notice (shared/DraftAuthorityNotice)
+// and the hosting pages' toast. In both packs as product_draft_authority_changed.
+export function draftAuthorityChangedText(t: (key: string) => string | undefined): string {
+  return t('product_draft_authority_changed') || 'The account or server changed. Reopen this form to continue. Its draft stays with the original account and server.'
+}
+
 export function openDraftAuthority(baseKey: string): DraftAuthority {
   return { baseKey, draftKey: scopedWorkDraftKey(baseKey), identity: captureActorWriteIdentity() }
 }

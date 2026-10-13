@@ -68,7 +68,8 @@ import {
   type MinimizedWorkEntry,
 } from '../../utils/minimizedWork.ts'
 import { clearWorkDraft, flushPendingWorkDraft } from '../../utils/workDrafts.ts'
-import { isDraftAuthorityCurrent, openDraftAuthority, type DraftAuthority } from '../../utils/draftAuthority.ts'
+import { draftAuthorityChangedText, isDraftAuthorityCurrent } from '../../utils/draftAuthority.ts'
+import { useFrozenDraftAuthority } from '../../utils/useFrozenDraftAuthority.ts'
 
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'fees-export-options')
 const ExpenseLabelManagerModal = lazyRetry(() => import('./ExpenseLabelManagerModal'), 'expense-label-manager-modal')
@@ -548,13 +549,8 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   // (draftAuthority.ts): minimize and Reload must act on the draft the form
   // wrote, not on whatever account or server is current by then.
   const feeFormIdentity = `${selected?.id ?? 'new'}:${selected?.updated_at ?? ''}:${user?.id ?? 'anonymous'}`
-  const feeAuthorityRef = useRef<{ identity: string; authority: DraftAuthority } | null>(null)
-  if (modal !== 'form') feeAuthorityRef.current = null
-  else if (feeAuthorityRef.current?.identity !== feeFormIdentity) {
-    feeAuthorityRef.current = { identity: feeFormIdentity, authority: openDraftAuthority(feeFormDraftBaseKey(selected?.id)) }
-  }
-  const feeAuthority = feeAuthorityRef.current?.authority ?? null
-  const feeAuthorityNotice = () => notify(tr('product_draft_authority_changed', 'The account or server changed. Reopen this form to continue. Its draft stays with the original account and server.'), 'warning')
+  const feeAuthority = useFrozenDraftAuthority(modal === 'form' ? feeFormDraftBaseKey(selected?.id) : null, { formIdentity: feeFormIdentity }).authority
+  const feeAuthorityNotice = () => notify(draftAuthorityChangedText((key) => tr(key, '')), 'warning')
 
   // A refused edit keeps the version its fields came from and says so; only
   // an explicit Reload reopens the form on the latest row, without the draft.

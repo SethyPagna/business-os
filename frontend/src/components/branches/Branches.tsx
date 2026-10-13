@@ -59,7 +59,8 @@ import {
   peekPendingRestore,
 } from '../../utils/minimizedWork.ts'
 import { clearWorkDraft, flushPendingWorkDraft, readWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
-import { isDraftAuthorityCurrent, openDraftAuthority, type DraftAuthority } from '../../utils/draftAuthority.ts'
+import { draftAuthorityChangedText, isDraftAuthorityCurrent } from '../../utils/draftAuthority.ts'
+import { useFrozenDraftAuthority } from '../../utils/useFrozenDraftAuthority.ts'
 import { stockSessionHasItems, stockSessionSavedScope } from '../../utils/stockSessionBusy.ts'
 import {
   beginTrackedRequest,
@@ -1070,12 +1071,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   // The account and server the open form was opened under, frozen with it
   // (draftAuthority.ts): minimize must park the draft the form wrote, not the
   // one the current account and server would resolve to.
-  const branchAuthorityRef = useRef<{ id: string; authority: DraftAuthority } | null>(null)
-  if (modal !== 'form' || !selected) branchAuthorityRef.current = null
-  else if (branchAuthorityRef.current?.id !== String(selected.id)) {
-    branchAuthorityRef.current = { id: String(selected.id), authority: openDraftAuthority(branchFormDraftBaseKey(selected.id)) }
-  }
-  const branchAuthority = branchAuthorityRef.current?.authority ?? null
+  const branchAuthority = useFrozenDraftAuthority(modal === 'form' && selected ? branchFormDraftBaseKey(selected.id) : null, { formIdentity: String(selected?.id ?? '') }).authority
   const canMinimizeBranchForm = selected != null && canEditBranch
   const preserveBranchForm = () => {
     if (!branchAuthority) return
@@ -1083,7 +1079,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
     // A chip parked now would sit in the new account's list pointing at the
     // old account's draft, and dismissing it would delete that draft.
     if (!isDraftAuthorityCurrent(branchAuthority)) {
-      notify(tr('product_draft_authority_changed', 'The account or server changed. Reopen this form to continue. Its draft stays with the original account and server.'), 'warning')
+      notify(draftAuthorityChangedText((key) => tr(key, '')), 'warning')
       return
     }
     minimizeWork({

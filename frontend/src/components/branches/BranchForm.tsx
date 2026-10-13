@@ -8,7 +8,9 @@ import {
   readWorkDraft,
   scheduleWorkDraftWrite,
 } from '../../utils/workDrafts.ts'
-import { isDraftAuthorityCurrent, openDraftAuthority, type DraftAuthority } from '../../utils/draftAuthority.ts'
+import { isDraftAuthorityCurrent, type DraftAuthority } from '../../utils/draftAuthority.ts'
+import { useFrozenDraftAuthority } from '../../utils/useFrozenDraftAuthority.ts'
+import DraftAuthorityNotice from '../shared/DraftAuthorityNotice.ts'
 import { useModalClose } from '../shared/modalCloseContext.ts'
 
 // S4-21: the registry key for this form's unsaved work. Exported so the
@@ -97,10 +99,8 @@ export default function BranchForm({ branch, onSave, onClose, draftAuthority }: 
   // Frozen when the form opens: the draft key is never recomputed from the
   // live account and server, so a sync-server switch under an open form cannot
   // move this form's typed work (or its Save) onto the other server.
-  const [authority] = useState(() => draftAuthority ?? openDraftAuthority(branchFormDraftBaseKey(branch.id)))
+  const { authority, current: authorityCurrent, locked: authorityLocked, setRefused: setAuthorityRefused } = useFrozenDraftAuthority(branchFormDraftBaseKey(branch.id), { adopt: draftAuthority })
   const draftKey = authority.draftKey
-  const authorityCurrent = isDraftAuthorityCurrent(authority)
-  const [authorityRefused, setAuthorityRefused] = useState(false)
   const restoredDraftRef = useRef<ReturnType<typeof readWorkDraft<Partial<BranchFormState>>> | undefined>(undefined)
   if (restoredDraftRef.current === undefined) {
     restoredDraftRef.current = readWorkDraft<Partial<BranchFormState>>(draftKey)
@@ -178,9 +178,7 @@ export default function BranchForm({ branch, onSave, onClose, draftAuthority }: 
         void handleSave()
       }}
     >
-      {!authorityCurrent || authorityRefused ? (
-        <p role="alert" data-draft-authority-changed="" className="text-sm text-red-700 dark:text-red-300">{t('product_draft_authority_changed') || 'The account or server changed. Reopen this form to continue. Its draft stays with the original account and server.'}</p>
-      ) : null}
+      {authorityLocked ? <DraftAuthorityNotice t={t} /> : null}
       <div>
         <label htmlFor="branch-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
           {t('branch_name') || 'Branch Name'} *
