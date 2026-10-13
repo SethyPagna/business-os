@@ -73,7 +73,8 @@ const NAMED_ADMIN = { id: 3, username: 'admin', role_code: 'employee', permissio
 
 const permissions = loadReal('lib/permissions.ts')
 
-const app = loadReal('routes/system.ts', {
+const { withStepUp } = require('./harness/step_up_lib.cjs')
+const app = withStepUp(loadReal, 'routes/system.ts', {
   hono: require('hono'),
   '../lib/planTier': loadReal('lib/planTier.ts'),
   '../lib/actorSnapshot': { actorSnapshot: (u) => u?.username || null },

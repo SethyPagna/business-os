@@ -197,7 +197,7 @@ interface BackupApi {
   disconnectGoogleDriveSync?(): Promise<unknown>
   forgetGoogleDriveSyncCredentials?(payload: { confirm: boolean }): Promise<unknown>
   queueBackupFolderExport?(destinationDir: string): Promise<QueuedJobResponse>
-  queueBackupFolderRestore?(sourceDir: string): Promise<QueuedJobResponse>
+  queueBackupFolderRestore?(sourceDir: string, confirmation: { currentPassword: string }): Promise<QueuedJobResponse>
 }
 
 interface JobProgressCardProps {
@@ -1711,6 +1711,7 @@ export default function Backup() {
   const [loading, setLoading] = useState<BackupAction>('')
   const [folderExportPath, setFolderExportPath] = useState('')
   const [folderImportPath, setFolderImportPath] = useState('')
+  const [restorePassword, setRestorePassword] = useState('')
   const [activeJob, setActiveJob] = useState<BackupJob | null>(null)
   const [advancedMaintenanceOpen, setAdvancedMaintenanceOpen] = useState(false)
   const [maintenanceTier, setMaintenanceTier] = useState<'section' | 'data' | 'migration' | 'factory'>('section')
@@ -1841,6 +1842,7 @@ export default function Backup() {
     // database restore power; fixed both sides together this session.
     if (!hasPermission('backup_restore')) return notify(copy('no_permission', 'No permission'), 'error')
     if (!folderImportPath) return notify(copy('choose_folder_first', 'Choose a folder first'), 'error')
+    if (!restorePassword) return notify(copy('current_password_required', 'Enter your current password to confirm. No data was changed.'), 'error')
     if (!(await askToConfirm({
       title: copy('import_backup', 'Import Backup'),
       message: copy('import_backup_warning', 'This validates a backup package before any restore can replace live data.'),
@@ -1853,7 +1855,7 @@ export default function Backup() {
     try {
       await yieldToBrowser()
       const queued = await withLoaderTimeout(
-        () => getBackupApi().queueBackupFolderRestore?.(folderImportPath),
+        () => getBackupApi().queueBackupFolderRestore?.(folderImportPath, { currentPassword: restorePassword }),
         'Queue backup restore',
         BACKUP_JOB_QUEUE_TIMEOUT_MS,
       )
@@ -1909,6 +1911,7 @@ export default function Backup() {
     } catch (error) {
       notify(`${copy('import_failed', 'Import failed')}: ${getErrorMessage(error, copy('unknown_error', 'Unknown error'))}`, 'error')
     } finally {
+      setRestorePassword('')
       finishBackupAction('folder-import')
     }
   }
@@ -2040,6 +2043,19 @@ export default function Backup() {
           </p>
 
           <div className="grid gap-3 rounded-2xl border border-amber-100 bg-amber-50/70 p-4 dark:border-amber-900/40 dark:bg-amber-900/10">
+            <input type="text" name="username" autoComplete="username" value={String(user?.username || '')} readOnly className="sr-only" tabIndex={-1} aria-hidden="true" />
+            <label className="block text-sm text-gray-700 dark:text-gray-300" htmlFor="backup-restore-password">
+              {copy('current_password', 'Current password')}
+              <input
+                id="backup-restore-password"
+                name="current_password"
+                type="password"
+                autoComplete="current-password"
+                className="input mt-1 text-sm"
+                value={restorePassword}
+                onChange={(event) => setRestorePassword(event.target.value)}
+              />
+            </label>
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               <PrimaryActionButton data-testid="backup-restore-start" onClick={handleFolderImport} disabled={!!loading || activeBackupJobRunning}>
                 <Download className="h-4 w-4" />

@@ -30,7 +30,8 @@ const core = load('lib/coreDataInvariants.ts', {
 })
 const backup = async()=>{backupCalls++; if(backupFails) throw new Error('fixture backup refused')}
 const noop = async()=>{}
-const app = load('routes/system.ts', {
+const { withStepUp } = require('./harness/step_up_lib.cjs')
+const app = withStepUp(load, 'routes/system.ts', {
  hono:require('hono'), '../lib/auth':{requireAuth:async(c,next)=>{c.set('user',actor);return next()}},
  '../lib/permissions':load('lib/permissions.ts'), '../lib/db':{getDb:()=>db}, '../lib/audit':{audit:noop},
  '../lib/dataIntegrity':{}, '../lib/productStockGuard':guard,

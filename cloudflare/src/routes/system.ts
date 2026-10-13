@@ -17,6 +17,7 @@ import { bumpVersion, bumpVersions } from '../lib/cache'
 import { reportError } from '../lib/errorReporting'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { denyUnlessCurrentPassword, denyUnlessDefaultAdmin } from '../lib/destructiveStepUp'
 import { getPlanLimits, resolvePlanTier } from '../lib/planTier'
 
 // Each R2 delete is its own subrequest, and a Worker invocation has a
@@ -149,45 +150,6 @@ app.post('/client-error', async (c) => {
 function denyUnlessRestorePermission(c: any) {
   const user = c.get('user')
   if (!hasPermission(user, 'backup_restore')) return c.json({ error: 'You do not have permission to perform this action' }, 403)
-  return null
-}
-
-async function denyUnlessDefaultAdmin(c: any) {
-  const actorId = Number(c.get('user')?.id)
-  const account = Number.isSafeInteger(actorId) && actorId > 0
-    ? await getDb(c.env).prepare(`SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
-        WHERE u.id = @id AND lower(trim(u.username)) = 'admin' AND u.is_active = 1
-          AND u.deleted_at IS NULL AND r.code = 'admin' AND r.is_system = 1`)
-      .get<{ id: number }>({ id: actorId })
-    : null
-  if (!account) return c.json({ success: false, error: 'Only the active built-in default admin account can reset data.', code: 'reset_builtin_admin_only' }, 403)
-  return null
-}
-
-// Step-up for every route that wipes data (SEC-4 / audit B2): the caller's
-// current password, checked through the shared rate-limited guard that profile
-// saves and Google unlink use, so an unattended or hijacked session cannot wipe
-// data on its own. Runs after the cheap validation and before any backup or
-// delete, so a refusal changes nothing. factory-reset answers a refusal with
-// 400 (its pinned contract) and the resets with 403; never 401, which the
-// client reads as a dead session.
-async function denyUnlessCurrentPassword(c: any, body: { currentPassword?: unknown }, refusalStatus: 400 | 403) {
-  const currentPassword = typeof body.currentPassword === 'string' ? body.currentPassword : ''
-  if (!currentPassword) {
-    return c.json({ success: false, error: 'Enter your current password to confirm. No data was changed.', code: 'current_password_required' }, refusalStatus)
-  }
-  const actorId = Number(c.get('user')?.id || 0)
-  const account = actorId
-    ? await getDb(c.env).prepare('SELECT password FROM users WHERE id = @id AND deleted_at IS NULL').get<{ password: string | null }>({ id: actorId })
-    : null
-  if (!account) return c.json({ error: 'Please sign in again to continue.' }, 403)
-  // Lazy, like the repair modules below: only the routes that ask for a password need it.
-  const guard = await import('../lib/currentPasswordGuard')
-  const verdict = await guard.verifyCurrentPassword(c, { actorId, targetId: actorId }, currentPassword, String(account.password || ''))
-  if (!verdict.ok && verdict.rateLimited) {
-    return c.json({ success: false, error: guard.CURRENT_PASSWORD_RATE_LIMITED_ERROR, code: 'current_password_rate_limited', retryAfterSeconds: verdict.retryAfterSeconds }, 429)
-  }
-  if (!verdict.ok) return c.json({ success: false, error: 'Current password is incorrect. No data was changed.', code: 'incorrect_password' }, refusalStatus)
   return null
 }
 

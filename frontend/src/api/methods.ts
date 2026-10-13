@@ -1046,13 +1046,13 @@ export async function exportBackupFolder(destinationDir) {
   return queueBackupFolderExport(destinationDir)
 }
 
-export async function queueBackupFolderRestore(sourceDir) {
+export async function queueBackupFolderRestore(sourceDir, confirmation) {
   const { queueBackupFolderRestore: queueBackupFolderRestoreRequest } = await loadSystemJobsTransport()
-  return queueBackupFolderRestoreRequest(sourceDir)
+  return queueBackupFolderRestoreRequest(sourceDir, confirmation)
 }
 
-export async function importBackupFolder(sourceDir) {
-  return queueBackupFolderRestore(sourceDir)
+export async function importBackupFolder(sourceDir, confirmation) {
+  return queueBackupFolderRestore(sourceDir, confirmation)
 }
 
 // ─── Data reset ───────────────────────────────────────────────────────────────

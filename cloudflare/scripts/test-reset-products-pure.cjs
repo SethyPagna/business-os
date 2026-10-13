@@ -151,7 +151,8 @@ const imageVariantStore = loadReal('lib/imageVariantStore.ts', {
 })
 const planTier = loadReal('lib/planTier.ts')
 
-const systemRoute = loadReal('routes/system.ts', {
+const { withStepUp } = require('./harness/step_up_lib.cjs')
+const systemRoute = withStepUp(loadReal, 'routes/system.ts', {
   // planTier.ts is pure (only `import type`) and holds the free-vs-paid
   // image-delete cap the reset path now reads -- real, not an inert stub,
   // which would make that cap undefined and slice(0, undefined) empty.

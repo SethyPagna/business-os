@@ -12,13 +12,14 @@ async function main() {
     audit: `export const audit=async(env,...args)=>{env.events.push({kind:'audit',args})};
       export const auditOrThrow=async(env,...args)=>{if(env.auditDown)throw new Error('audit store unavailable');env.events.push({kind:'audit',args})}`,
     permissions: `export const hasPermission=()=>true`,
+    destructiveStepUp: `export const denyUnlessDefaultAdmin=async()=>null;export const denyUnlessCurrentPassword=async()=>null`,
     acquisitionCostAccess: `export const canViewAcquisitionCosts=()=>true;export const canEditAcquisitionCosts=()=>true`,
     backup: `export const CLOUDFLARE_BACKUP_KEEP=1;export const createCloudflareBackup=()=>{};export const getSystemJob=()=>{};export const linkCloudflareBackupJob=()=>{};export const listCloudflareBackups=()=>{};export const pruneCloudflareBackups=()=>{};export const validateCloudflareBackup=()=>{};
       export const storeSystemJob=async(env,job)=>{env.events.push({kind:'job',job});return job};
       export const restoreCloudflareBackup=async(env,key,progress)=>{env.restoreCalls++;await progress({phase:'assets'});if(env.replaceAfterRestore)env.replace();return {key}};`,
   }
   const bundle = await build({ entryPoints: [path.join(root, 'src/routes/backups.ts')], bundle: true, write: false, format: 'cjs', platform: 'node', external: ['hono'], plugins: [{ name: 'route-boundaries', setup(b) {
-    b.onResolve({ filter: /\/lib\/(auth|audit|permissions|acquisitionCostAccess|backup)$/ }, args => ({ path: args.path.split('/').pop(), namespace: 'stub' }))
+    b.onResolve({ filter: /\/lib\/(auth|audit|permissions|acquisitionCostAccess|backup|destructiveStepUp)$/ }, args => ({ path: args.path.split('/').pop(), namespace: 'stub' }))
     b.onLoad({ filter: /.*/, namespace: 'stub' }, args => ({ contents: stubs[args.path], loader: 'js' }))
   } }] })
   const mod = new Module(path.join(root, 'maintenance-route-test.cjs')); mod.filename = mod.id; mod.paths = Module._nodeModulePaths(root)

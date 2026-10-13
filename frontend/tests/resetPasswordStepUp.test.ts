@@ -24,6 +24,9 @@ const resetData = read('../src/components/utils-settings/ResetData.tsx')
 const runtime = read('../src/api/systemRuntime.ts')
 const methods = read('../src/api/methods.ts')
 const system = read('../../cloudflare/src/routes/system.ts')
+const stepUp = read('../../cloudflare/src/lib/destructiveStepUp.ts')
+const backupsRoute = read('../../cloudflare/src/routes/backups.ts')
+const backupPanel = read('../src/components/utils-settings/Backup.tsx')
 const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
 const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
 
@@ -94,12 +97,19 @@ await runTest('the transport sends the password with reset-data and reset-sectio
 
 await runTest('the Worker answers with the codes the packs translate, in both languages', () => {
   for (const code of ['current_password_required', 'incorrect_password']) {
-    assert.ok(system.includes(`code: '${code}'`), `${code} must be a code system.ts returns`)
+    assert.ok(stepUp.includes(`'${code}'`), `${code} must be a code the step-up returns`)
     assert.ok(en[code] && km[code], `${code} needs text in both packs`)
     assert.notEqual(en[code], km[code])
   }
   assert.ok(en.reset_password_hint && km.reset_password_hint, 'the dialog hint needs both packs')
   assert.ok(/No data was changed/.test(en.incorrect_password) && /No data was changed/.test(en.current_password_required))
+})
+
+await runTest('a backup restore asks for the built-in admin and the password after the dry run returns, and the dialog sends it', () => {
+  const restoreBranch = between(backupsRoute, "if (type === 'import-folder') {", 'beginMaintenance(c.env')
+  assert.ok(restoreBranch.indexOf('body.dryRun === true') < restoreBranch.indexOf("denyUnlessDefaultAdmin(c, 'restore')"), 'a dry-run validation stays under the plain backup gate')
+  assert.ok(restoreBranch.indexOf("denyUnlessDefaultAdmin(c, 'restore')") < restoreBranch.indexOf('denyUnlessCurrentPassword(c, body, 403)'))
+  assert.match(backupPanel, /queueBackupFolderRestore\?\.\(folderImportPath, \{ currentPassword: restorePassword \}\)/)
 })
 
 await runTest('reset-data and reset-section share one phrase-and-acknowledgement check, phrase first', () => {

@@ -4,6 +4,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, auditOrThrow } from '../lib/audit'
 import { hasPermission } from '../lib/permissions'
 import { canViewAcquisitionCosts, canEditAcquisitionCosts } from '../lib/acquisitionCostAccess'
+import { denyUnlessCurrentPassword, denyUnlessDefaultAdmin } from '../lib/destructiveStepUp'
 import {
   CLOUDFLARE_BACKUP_KEEP,
   createCloudflareBackup,
@@ -177,6 +178,12 @@ app.post('/', async (c) => {
         }))
         return c.json({ job_id: job.id, item: job })
       }
+      // A restore rolls the whole database back, users included, so it is
+      // held to what a reset is: the built-in admin and that account's password.
+      const adminDenied = await denyUnlessDefaultAdmin(c, 'restore')
+      if (adminDenied) return adminDenied
+      const passwordDenied = await denyUnlessCurrentPassword(c, body, 403)
+      if (passwordDenied) return passwordDenied
       // Slice C (Part-77): the restore runs under a write-blocking
       // maintenance flag (lib/maintenance.ts + the index.ts gate) with its
       // progress persisted into the flag -- a crash mid-restore leaves

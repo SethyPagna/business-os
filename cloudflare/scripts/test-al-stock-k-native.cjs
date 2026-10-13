@@ -808,7 +808,7 @@ async function main() {
     await check('K10b', 'a restore that cannot be audited is not reported done: maintenance holds until it is cleared and the same restore is retried, which records it', 'high', async (t) => {
       const bk = await backupName()
       await withTrigger(R, 'al_restore_audit_down', "CREATE TRIGGER al_restore_audit_down BEFORE INSERT ON audit_logs WHEN NEW.action='restore' BEGIN SELECT RAISE(ABORT,'al: audit store unavailable'); END", async () => {
-        const restored = await R.api('POST', '/api/backups', { type: 'import-folder', sourceDir: bk.name })
+        const restored = await R.api('POST', '/api/backups', { type: 'import-folder', sourceDir: bk.name, currentPassword: 'al-repro-admin-password-1' })
         const audited = (await R.q("SELECT COUNT(*) n FROM audit_logs WHERE entity='backup' AND action='restore'"))[0].n > 0
         t.eq('a restore reported done with no audit row', restored.status === 200 && !audited, false)
         t.eq('the refusal says the data was restored but not recorded', [restored.body && restored.body.code, restored.body && restored.body.data_restored], ['restore_audit_not_recorded', true])
@@ -817,7 +817,7 @@ async function main() {
       })
       // Recovery, with the audit store back: clear maintenance (force), retry the same restore; this time it is recorded.
       const clearedHold = await R.api('POST', '/api/backups/maintenance/clear', { force: true })
-      const retried = await R.api('POST', '/api/backups', { type: 'import-folder', sourceDir: bk.name })
+      const retried = await R.api('POST', '/api/backups', { type: 'import-folder', sourceDir: bk.name, currentPassword: 'al-repro-admin-password-1' })
       t.eq('recovery: clear, then retry the same restore', [clearedHold.status, retried.status], [200, 200])
       t.eq('the retried restore is on record exactly once', (await R.q("SELECT COUNT(*) n FROM audit_logs WHERE entity='backup' AND action='restore'"))[0].n, 1)
       t.eq('maintenance is released once the restore is recorded', await maintenanceFlag(), false)
@@ -832,7 +832,7 @@ async function main() {
       const e = await R.api('PUT', '/api/fees/' + fee.id, { expected_updated_at: fee.updated_at, amount_usd: 77 })
       const editRows = async () => (await R.q("SELECT COUNT(*) n FROM audit_logs WHERE entity='fee' AND action='update' AND CAST(entity_id AS REAL)=?", Number(fee.id)))[0].n
       const editAudit0 = await editRows()
-      const restored = await R.api('POST', '/api/backups', { type: 'import-folder', sourceDir: bk.name })
+      const restored = await R.api('POST', '/api/backups', { type: 'import-folder', sourceDir: bk.name, currentPassword: 'al-repro-admin-password-1' })
       t.eq('fixture: create, backup, edit, restore all succeeded', [created.status, bk.status, e.status, restored.status], [201, 200, 200, 200])
       t.eq('fixture: the edit was audited before the restore', editAudit0, 1)
       t.eq('the fee is back to the backed-up amount', (await R.q1('SELECT amount_usd a FROM fees WHERE id=?', fee.id)).a, 10)
