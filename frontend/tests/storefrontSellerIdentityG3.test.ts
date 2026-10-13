@@ -129,6 +129,16 @@ runTest('the editor warns when legal name, address or e-mail is empty, and never
   assert.match(source, new RegExp(en.portalSellerIdentityWarning.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'the call-site fallback matches the pack')
 })
 
+runTest('the Website Editor preview footer gets the same social links as the live storefront, so the preview shows what visitors see', () => {
+  for (const file of ['CatalogPage.tsx', 'PublicCatalogPage.tsx']) {
+    const source = read('components', 'catalog', file)
+    const footers = source.match(/<PortalFooter\b[^\n]*\/>/g) || []
+    assert.equal(footers.length, 1, `${file} renders exactly one PortalFooter`)
+    assert.match(footers[0], /\bsocialLinks=\{socialLinks\}/, `${file}: the footer must receive socialLinks (the Telegram fallback of the concerns line depends on it)`)
+    assert.match(footers[0], /email={displayConfig.businessEmail}/)
+  }
+})
+
 if (failed > 0) {
   console.error(`\n${failed} failing test(s)`)
   process.exit(1)
