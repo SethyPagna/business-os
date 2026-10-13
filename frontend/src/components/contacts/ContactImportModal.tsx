@@ -395,9 +395,13 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
   }
 
   const handlePickFile = async (): Promise<void> => {
-    const picked = await getContactImportApi().openCSVDialog?.()
-    if (!picked?.content) return
-    await loadCsvText(picked.content, picked.name || 'contacts.csv')
+    try {
+      const picked = await getContactImportApi().openCSVDialog?.()
+      if (!picked?.content) return
+      await loadCsvText(picked.content, picked.name || 'contacts.csv')
+    } catch (error) {
+      notify(getErrorMessage(error, tr('contacts_import_drop_failed', 'Could not read that file.')), 'error')
+    }
   }
 
   // Drag-and-drop counterpart to handlePickFile: same loadCsvText analysis

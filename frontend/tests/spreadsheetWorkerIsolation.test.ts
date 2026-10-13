@@ -74,4 +74,27 @@ check('the worker entry is a thin adapter over the workbook module', () => {
   assert.doesNotMatch(worker, /from\s+'react|document\.|window\./, 'a worker has no DOM and no React')
 })
 
+check('a refused Excel file reaches the person in every import dialog (nothing hangs or fails silently)', () => {
+  const dialogs = stripComments(fs.readFileSync(path.join(srcRoot, 'api', 'browserDialogs.ts'), 'utf8'))
+  assert.match(dialogs, /try \{\s*resolve\(await parseImportFile\(file\)\)\s*\} catch \(error\) \{\s*reject\(error\)/, 'the file picker rejects instead of leaving its promise pending')
+
+  const surfaces: [string, RegExp][] = [
+    ['components/sales/SalesImportModal.tsx', /handlePickFile = async \(\) => \{\s*try \{\s*const picked = await getImportApi\(\)\.openCSVDialog\?\.\(\)[\s\S]{0,300}\} catch \(error\) \{\s*notify\(/],
+    ['components/sales/SalesImportModal.tsx', /handleDropFile = async \(file: File\) => \{\s*try \{\s*const parsed = await parseImportFile\(file\)[\s\S]{0,300}\} catch \(error\) \{\s*notify\(/],
+    ['components/inventory/InventoryImportModal.tsx', /handlePickFile = async \(\) => \{\s*try \{\s*const picked = await getImportApi\(\)\.openCSVDialog\?\.\(\)[\s\S]{0,300}\} catch \(error\) \{\s*notify\(/],
+    ['components/inventory/InventoryImportModal.tsx', /handleDropFile = async \(file: File\) => \{\s*try \{\s*const parsed = await parseImportFile\(file\)[\s\S]{0,300}\} catch \(error\) \{\s*notify\(/],
+    ['components/contacts/ContactImportModal.tsx', /handlePickFile = async \(\): Promise<void> => \{\s*try \{\s*const picked = await getContactImportApi\(\)\.openCSVDialog\?\.\(\)[\s\S]{0,300}\} catch \(error\) \{\s*notify\(/],
+    ['components/contacts/ContactImportModal.tsx', /handleDropFile = async \(file: File\): Promise<void> => \{\s*try \{\s*const parsed = await parseImportFile\(file\)[\s\S]{0,300}\} catch \(error\) \{\s*notify\(/],
+    ['components/products/import/BulkImportModal.tsx', /handlePickCSV = async \(\) => \{[\s\S]{0,200}try \{\s*const picked = await getProductImportApi\(\)\.openCSVDialog\(\)[\s\S]{0,300}\} catch \(error\) \{\s*notify\(/],
+    ['components/products/import/BulkImportModal.tsx', /handleDropCSV = async \(file: File\) => \{[\s\S]{0,200}try \{\s*const parsed = await parseImportFile\(file\)[\s\S]{0,400}\} catch \(error\) \{\s*notify\(/],
+    ['components/products/import/ImportHub.tsx', /try \{\s*const parsed = await parseImportFile\(file\)[\s\S]{0,900}\} catch \(error\) \{\s*entries\.push\(\{[\s\S]{0,200}status: 'error', error: error instanceof Error \? error\.message/],
+    ['components/products/import/StockActionImportModal.tsx', /try \{\s*const parsed = await parseImportFile\(file\)[\s\S]{0,400}\} catch \(err\) \{\s*setError\(err instanceof Error \? err\.message/],
+    ['components/products/import/DatedStockReconciliationModal.tsx', /try \{\s*const result = await openCSVDialog\(\)[\s\S]{0,900}\} catch \(e\) \{\s*setError\(e instanceof Error \? e\.message/],
+  ]
+  for (const [relative, pattern] of surfaces) {
+    const source = stripComments(fs.readFileSync(path.join(srcRoot, relative), 'utf8'))
+    assert.match(source, pattern, `${relative}: ${pattern.source.slice(0, 60)}`)
+  }
+})
+
 console.log(`ALL PASS spreadsheetWorkerIsolation (${passed} checks)`)

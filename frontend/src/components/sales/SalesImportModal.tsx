@@ -168,9 +168,13 @@ export default function SalesImportModal({ onClose, onDone }: ImportModalProps) 
   }
 
   const handlePickFile = async () => {
-    const picked = await getImportApi().openCSVDialog?.()
-    if (!picked?.content) return
-    setSalesCsvText(picked.content, picked.name || 'sales.csv')
+    try {
+      const picked = await getImportApi().openCSVDialog?.()
+      if (!picked?.content) return
+      setSalesCsvText(picked.content, picked.name || 'sales.csv')
+    } catch (error) {
+      notify(getErrorMessage(error, tr('sales_import_drop_failed', 'Could not read that file.', 'មិនអាចអានឯកសារនោះបានទេ។')), 'error')
+    }
   }
 
   const handleDropFile = async (file: File) => {

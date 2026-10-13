@@ -193,9 +193,13 @@ export default function InventoryImportModal({ onClose, onDone }: ImportModalPro
   }
 
   const handlePickFile = async () => {
-    const picked = await getImportApi().openCSVDialog?.()
-    if (!picked?.content) return
-    setInventoryCsvText(picked.content, picked.name || 'inventory.csv')
+    try {
+      const picked = await getImportApi().openCSVDialog?.()
+      if (!picked?.content) return
+      setInventoryCsvText(picked.content, picked.name || 'inventory.csv')
+    } catch (error) {
+      notify(getErrorMessage(error, tr('inventory_import_drop_failed', 'Could not read that file.', 'មិនអាចអានឯកសារនោះបានទេ។')), 'error')
+    }
   }
 
   const handleDropFile = async (file: File) => {
