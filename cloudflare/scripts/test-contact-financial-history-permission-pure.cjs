@@ -68,6 +68,7 @@ const forbiddenDb = {
 }
 const routeDependencies = {
   '../lib/acquisitionCostAccess': load('lib/acquisitionCostAccess.ts', { './permissions': permissionHelpers }),
+  '../lib/courierCostAccess': load('lib/courierCostAccess.ts', { './permissions': permissionHelpers }),
   '../lib/auth': {
     requireAuth: async (c, next) => {
       c.set('user', employee)
