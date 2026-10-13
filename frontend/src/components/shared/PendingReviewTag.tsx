@@ -6,31 +6,12 @@ import {
   type PendingReviewId,
 } from '../../utils/pendingReviewTargets.ts'
 
-// The mini "waiting for review" tag (owner, 13 Oct 2026): "do a mini small tag to
-// show the row needs review. minimize without taking used spaces or breaking UI.
-// utilize empty space can be the empty margin."
-//
-// So the tag takes NO space. It is absolutely positioned inside a container its
-// caller already made `relative`, and it is placed in a gutter the row already has
-// (a table cell's start padding, a card's start padding), so the row, the name
-// cell and every column keep the box they had before the tag existed. An hourglass
-// drawn at 10px in that gutter is narrower than the gutter (the glyph spans ~58% of
-// its 24-unit box), so it does not touch the text beside it either.
-//
-// `pointer-events-none`: a tap on the tag falls through to the row, so the tag can
-// never steal the click that opens the product or the card. The accessible name
-// lives on role="img" (aria-label, read by a screen reader); `title` carries the same
-// words for the platform, though a box that takes no pointer events cannot show a
-// hover tooltip, which is the price of never stealing a tap.
-//
-// Where it goes (the caller passes the offset; the container is `relative`):
-//   Products table row     image cell, top-left   (children keep the empty cell)
-//   Products card          card, top-left gutter
-//   Inventory row / card   first cell / card, top-left gutter
-//   Expenses row / card    time cell / card, top-left gutter
-//   Branch card            card, top-left gutter
-//   Reasons window         a 10px slot beside the title
-// Sales, returns, contacts and stock sessions never queue, so they get no tag.
+// The mini "waiting for review" tag: it takes NO space. It is absolutely positioned inside a
+// container its caller already made `relative`, in a gutter the row already has (a cell's start
+// padding, a card's start padding), so no row, cell or column changes box when it appears.
+// `pointer-events-none` keeps a tap going to the row; the accessible name is on role="img"
+// (a box that takes no pointer events cannot show a `title` tooltip). The caller passes the offset.
+// Sales, returns, contacts and stock sessions never queue, so they draw no tag.
 
 const useApp = useAppHook as unknown as () => { t: (key: string) => string }
 

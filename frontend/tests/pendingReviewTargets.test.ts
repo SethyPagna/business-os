@@ -200,7 +200,7 @@ async function scenarioFiveHundredRowsOneRequest(loaded = loadStore()): Promise<
   const { rows } = await visitPage(loaded, { rows: 500, reviewTier: 'full' })
   assert.equal(transportCalls.length, 1, `500 rows must share one request, the transport was asked ${transportCalls.length} times`)
   assert.equal(sent.length, 1, `500 rows must share one request, saw ${sent.length} on the wire`)
-  assert.deepEqual(sent, ['GET /api/review?status=open'])
+  assert.deepEqual(sent, ['GET /api/review?status=open&fields=targets'])
   assert.equal(rows.filter((row) => row.result === true).length, 1, 'exactly the one pending row reads true')
   assert.equal(rows[16].result, true)
 }
@@ -216,13 +216,13 @@ async function scenarioRequesterNeverReadsTheReviewerList(loaded = loadStore()):
   for (const tier of ['none', 'review', undefined, '']) {
     reset()
     await visitPage(loaded, { rows: 5, reviewTier: tier as string })
-    assert.deepEqual(sent, ['GET /api/review/mine?status=open'], `a ${JSON.stringify(tier)} review tier reads only its own requests`)
+    assert.deepEqual(sent, ['GET /api/review/mine?status=open&fields=targets'], `a ${JSON.stringify(tier)} review tier reads only its own requests`)
     assert.ok(!sent.some((line) => /\/api\/review(\?|$)/.test(line)), 'GET /api/review is the reviewer list; a requester must not call it')
   }
   for (const tier of ['full', 'view']) {
     reset()
     await visitPage(loaded, { rows: 5, reviewTier: tier })
-    assert.deepEqual(sent, ['GET /api/review?status=open'], `a ${tier} reviewer reads every open request`)
+    assert.deepEqual(sent, ['GET /api/review?status=open&fields=targets'], `a ${tier} reviewer reads every open request`)
   }
 }
 
@@ -305,7 +305,7 @@ async function scenarioScopeChangeWithReadInFlight(loaded = loadStore()): Promis
   answers.push(() => new Promise((resolve) => { releaseAll = () => resolve(jsonResponse([open('products', 'product', 2)])) }))
   const allReading = store.refreshPendingReviewTargets('all')
   await settle()
-  assert.deepEqual(sent, ['GET /api/review/mine?status=open', 'GET /api/review?status=open'], 'the reviewer list is read, not answered by the requester read')
+  assert.deepEqual(sent, ['GET /api/review/mine?status=open&fields=targets', 'GET /api/review?status=open&fields=targets'], 'the reviewer list is read, not answered by the requester read')
   releaseAll()
   await allReading
   assert.equal(tagged(store, 2), true)
@@ -564,6 +564,31 @@ test('one announcement is one re-read however many pages are mounted', async () 
 
 test('the transport keeps no cached copy of the review list', async () => {
   await scenarioNoPayloadsRetained()
+})
+
+// fields=targets sends just the columns the tags use; a Worker that refuses it is asked again for the whole list.
+async function scenarioSlimReadWithFallback(transport: typeof realTransport = realTransport): Promise<void> {
+  reset()
+  nextRows = [open('products', 'product', 5)]
+  const slim = await transport.getOpenPendingReviewRows('all')
+  assert.deepEqual(sent, ['GET /api/review?status=open&fields=targets'], 'the slim projection is asked for first')
+  assert.equal(slim.length, 1)
+  reset()
+  nextRows = [open('products', 'product', 6)]
+  answers.push(async () => new Response(JSON.stringify({ success: false, code: 'invalid_fields' }), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+  const rows = await transport.getOpenPendingReviewRows('mine')
+  assert.deepEqual(sent, ['GET /api/review/mine?status=open&fields=targets', 'GET /api/review/mine?status=open'], 'a refused projection falls back to the whole list')
+  assert.equal(rows[0].entity_id, 6, 'and its rows are used')
+}
+
+test('the transport asks for the slim projection and falls back to the whole list when it is refused', async () => {
+  await scenarioSlimReadWithFallback()
+})
+
+test('MUTANT no fallback: a Worker that refuses fields=targets leaves the tags unread', async () => {
+  const code = transportSource.replace("    if ((error as { status?: number } | null)?.status !== 400) throw error\n    response = await readRows(scope, channel, false)\n", '    throw error\n')
+  assert.notEqual(code, transportSource, 'negative control anchor must match the live transport')
+  await assert.rejects(scenarioSlimReadWithFallback(loadTransport(code)))
 })
 
 // ---- negative controls: the same source with one rule removed must fail its scenario ----
