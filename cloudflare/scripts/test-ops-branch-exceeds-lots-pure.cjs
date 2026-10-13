@@ -8,23 +8,26 @@
 // (getTrackedProductIds): a lot row at THAT branch that is active or holds stock.
 //   healthy tracked      lots 5+5, branch 10                 -> counted as having lots, not split
 //   the split            lots 0+3, branch 10                 -> split (what a pre-fix Revert left)
-//   untracked aggregate  no lot row at all, branch 10        -> NOT split: the till sells branch_stock
-//   undated beside lots  lot 5, branch 8                     -> split (3 units the till cannot see)
+//   no live lot          no lot row at all, branch 10        -> NOT split: the till sells branch_stock
+//   undated beside lots  lot 5, branch 8                     -> split (3 units that sell only as "Received date not recorded")
 //   float residue        lot 1, branch 1.0000000005          -> residue, not split
-//   inactive empty lot   only an inactive lot at 0, branch 4 -> untracked (the till ignores it)
+//   inactive empty lot   only an inactive lot at 0, branch 4 -> no live lot (the till ignores it)
 //   active empty lot     an active lot at 0, branch 4        -> split (the till shows 0)
 //   no branch stock      lots 5, branch_stock 0              -> not a pair at all
-//   lot at the OTHER branch only                             -> untracked at this branch
+//   lot at the OTHER branch only                             -> no live lot at this branch
 // Part 2, batch-less removals ('remove' / CSV 'out', not a Revert counter): reverted or not, on a
-// product with lots or not, with recorded lot shares or not.
+// product with lots or not, with a record (lot shares or the zero row) or not, and the open ones a Revert now refuses:
+// no record, not a dated-count row, and a lot of the product created BEFORE the removal.
 // Part 3, open held (damaged) rows made by a Remove with no lot, on a product that has lot rows: counted;
 // a held row on a lot, a returns-made one, a fully restored one and one on a product with no lots: not.
 // Negative controls (--wrong=<name>) rewrite the canonical SQL in memory and fail loudly if the anchor is missing; each must turn
 // exactly the checks it targets RED:
 //   --wrong=redo-counted         the root-removal filter is dropped: a Redo counter is counted as a removal (part 2)
-//   --wrong=untracked-is-split   a pair with no lot row counts as split: untracked aggregate stock is not a split (part 1)
+//   --wrong=untracked-is-split   a pair with no lot row counts as split: stock with no live lot is not a split (part 1)
 //   --wrong=dead-lot-tracks      an inactive empty lot makes a pair "have lots": the till ignores such a lot (part 1)
 //   --wrong=held-any-source      a returns-made held row is counted as a Remove's (part 3)
+//   --wrong=refused-ignores-time a removal that predates every lot of its product counts as refused (part 2)
+//   --wrong=refused-counts-dated a dated-count removal counts as refused (part 2)
 // No network, no wrangler.
 'use strict'
 
@@ -69,15 +72,15 @@ function branchStock(productId, branchId, quantity) {
 }
 function lot(productId, branchId, quantity, { active = 1 } = {}) {
   nextLot += 1
-  db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, unit_cost_usd, received_quantity)
-    VALUES (?, ?, ?, ?, '2026-09-05', ?, 2, ?)`).run(nextLot, productId, `k${nextLot}`, `k${nextLot}`, active, quantity)
+  db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, unit_cost_usd, received_quantity, created_at)
+    VALUES (?, ?, ?, ?, '2026-09-05', ?, 2, ?, '2026-09-01 00:00:00')`).run(nextLot, productId, `k${nextLot}`, `k${nextLot}`, active, quantity)
   db.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, ?, ?)').run(nextLot, branchId, quantity)
   return nextLot
 }
 let lastMovement = 0
-function movement(productId, branchId, type, quantity, { batchId = null, reference = null } = {}) {
-  lastMovement = Number(db.prepare(`INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, reason, reference_id, batch_id)
-    VALUES (?, 'fixture', ?, ?, ?, 'fixture', ?, ?)`).run(productId, branchId, type, quantity, reference, batchId).lastInsertRowid)
+function movement(productId, branchId, type, quantity, { batchId = null, reference = null, reason = 'fixture', createdAt = '2026-09-20 10:00:00' } = {}) {
+  lastMovement = Number(db.prepare(`INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, reason, reference_id, batch_id, created_at)
+    VALUES (?, 'fixture', ?, ?, ?, ?, ?, ?, ?)`).run(productId, branchId, type, quantity, reason, reference, batchId, createdAt).lastInsertRowid)
   return lastMovement
 }
 const reverted = (productId, id, type = 'add') => movement(productId, 1, type, 1, { reference: `revert:${id}` })
@@ -91,7 +94,7 @@ const pResidue = product('float residue'); lot(pResidue, 1, 1); branchStock(pRes
 const pInactive = product('inactive empty lot'); lot(pInactive, 1, 0, { active: 0 }); branchStock(pInactive, 1, 4)
 const pActiveEmpty = product('active empty lot'); lot(pActiveEmpty, 1, 0); branchStock(pActiveEmpty, 1, 4)
 const pNoBranch = product('lots but no branch stock'); lot(pNoBranch, 1, 5); branchStock(pNoBranch, 1, 0)
-const pOther = product('lot at the other branch only'); lot(pOther, 2, 3); branchStock(pOther, 2, 3); branchStock(pOther, 1, 6)
+const pOther = product('lot at the other branch only'); const otherLot = lot(pOther, 2, 3); branchStock(pOther, 2, 3); branchStock(pOther, 1, 6)
 
 // ---- Part 2 fixture ----------------------------------------------------------------------
 const rSplit = movement(pSplit, 1, 'remove', 7); const rSplitRevert = reverted(pSplit, rSplit)   // reverted, lots, on a split pair
@@ -102,6 +105,10 @@ db.prepare('INSERT INTO dated_stock_count_batch_actions (movement_id, batch_id, 
 movement(pHealthy, 1, 'remove', 1, { batchId: healthyLot })                         // names one lot: not batch-less
 movement(pInactive, 1, 'remove', 1)                                                  // open, the product has a (dead) lot row
 const redo = reverted(pSplit, rSplitRevert, 'remove')                                  // a Redo counter: not a root removal
+movement(pActiveEmpty, 1, 'remove', 1, { createdAt: '2026-08-01 10:00:00' })          // open, written BEFORE the product's lot existed: drew on none
+movement(pResidue, 1, 'remove', 1, { reason: 'Dated stock count import' })            // open dated-count row: records its own lot effects
+const rZero = movement(pOther, 1, 'remove', 1)                                       // open, WITH the zero record (it took nothing from lots)
+db.prepare('INSERT INTO dated_stock_count_batch_actions (movement_id, batch_id, quantity) VALUES (?, ?, 0)').run(rZero, otherLot)
 
 // ---- Part 3 fixture ----------------------------------------------------------------------
 function held(productId, { source, batchId = null, remaining, quantity = 5 }) {
@@ -123,6 +130,8 @@ held(pUntracked, { source: 'remove', remaining: 4 })                      // the
     'untracked-is-split': ['FROM pairs WHERE has_lots = 1 AND branch_quantity - lot_quantity > 0.000001', 'FROM pairs WHERE branch_quantity - lot_quantity > 0.000001'],
     'dead-lot-tracks': ['MAX(CASE WHEN pb.is_active = 1 OR bbs.quantity > 0 THEN 1 ELSE 0 END)', 'MAX(1)'],
     'held-any-source': ["d.source = 'remove' AND d.batch_id IS NULL", 'd.batch_id IS NULL'],
+    'refused-ignores-time': [' AND lot_before = 1) AS removals_open_revert_refused', ' AND product_has_lots = 1) AS removals_open_revert_refused'],
+    'refused-counts-dated': [' AND has_shares = 0 AND is_dated_count = 0 AND lot_before = 1', ' AND has_shares = 0 AND lot_before = 1'],
   }
   let sql = q.sql
   if (wrong) {
@@ -142,28 +151,28 @@ held(pUntracked, { source: 'remove', remaining: 4 })                      // the
     }
   })
 
-  await check('part 1: pairs with lots, the split, the float residue and untracked aggregate stock', () => {
+  await check('part 1: pairs with lots, the split, the float residue and stock with no live lot', () => {
     const row = rows[0]
     assert.strictEqual(row.pairs_with_branch_stock, 9, 'the pair with branch_stock 0 is not counted')
     assert.strictEqual(row.pairs_with_lots, 6, 'healthy, split, undated, residue, active-empty and the other branch lot')
     assert.strictEqual(row.pairs_with_lots_branch_exceeds_lots, 3, 'the split, the undated units beside a lot, the active empty lot')
     assert.strictEqual(row.products_with_lots_branch_exceeds_lots, 3)
     assert.strictEqual(row.pairs_with_lots_float_residue, 1, 'over by 5e-10 is noise, apart from the split')
-    assert.strictEqual(row.pairs_untracked_aggregate_stock, 3, 'no lot row, an inactive empty lot, or lots only at the other branch')
+    assert.strictEqual(row.pairs_without_live_lot, 3, 'no lot row, an inactive empty lot, or lots only at the other branch')
   })
 
   await check('part 2: batch-less removals, their Reverts, shares and the ones a Revert now refuses', () => {
     const row = rows[0]
-    assert.strictEqual(row.removals_batchless, 5, 'split, plain, open CSV, shared, inactive-lot; not the named-lot one, not the Redo counter, not the Revert counters')
-    assert.strictEqual(row.removals_batchless_with_shares, 1)
+    assert.strictEqual(row.removals_batchless, 8, 'split, plain, open CSV, shared, inactive-lot, before-the-lot, dated count, zero record; not the named-lot one, not the Redo counter, not the Revert counters')
+    assert.strictEqual(row.removals_batchless_with_shares, 2, 'the lot shares and the zero record')
     assert.strictEqual(row.removals_batchless_reverted, 2)
     assert.strictEqual(row.removals_batchless_reverted_lot_product, 1, 'the plain removal is on a product that never had a lot')
     assert.strictEqual(row.removals_batchless_reverted_on_split_pairs, 1)
-    assert.strictEqual(row.removals_batchless_open_lot_product_no_shares, 2, 'the open CSV removal and the one beside an inactive lot; the shared one is excluded')
+    assert.strictEqual(row.removals_open_revert_refused, 2, 'the open CSV removal and the one beside an inactive lot; not the shared, zero-record, dated-count or before-the-lot ones')
   })
 
   await check('part 3: only an open, lot-less, Remove-made held row on a product with lots is counted', () => {
-    assert.strictEqual(rows[0].held_rows_open_remove_batchless_lot_product, 1)
+    assert.strictEqual(rows[0].held_rows_open_remove_no_lot_upper_bound, 1)
   })
 
   await check('a Revert counter of a Revert counter does not make its root look reverted twice', () => {

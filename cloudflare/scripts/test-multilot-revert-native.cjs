@@ -318,7 +318,8 @@ function finish(finding) {
 // Four ledgers must move together on every step: the lot ledger (branch_batch_stock), branch_stock, products.stock_quantity
 // and the movement ledger (inventory_movements). Before the fix a multi-lot removal wrote a movement with no lot (0084) and
 // no record of what it took from each lot, so its Revert put the units back on branch_stock and the product total only:
-// the lots stayed drained and the till, which reads lots, could not see them.
+// the lots stayed drained: the units came back as stock with no received date (the till sells them as "Received date not
+// recorded"), and their lot identity -- FIFO order, expiry, cost, supplier -- was lost.
 //
 // The fix records the per-lot shares of any removal whose movement names no single lot, in the same batch as the stock
 // change (dated_stock_count_batch_actions, the table a dated count already uses; negative quantity = taken). Revert reads
