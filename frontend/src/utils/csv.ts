@@ -27,7 +27,7 @@ export function escapeCsvValue(value: unknown): string {
 
 // RFC4180 quoting ONLY -- no Excel-formula-injection apostrophe. For
 // delimited text bound for THIS APP'S OWN PARSERS (the xlsx→text bridge in
-// spreadsheetImport.ts), never for a file a person will open in Excel.
+// spreadsheetWorkbook.ts), never for a file a person will open in Excel.
 // escapeCsvValue's leading-' guard is right for human-bound downloads, but
 // on a machine path it would rewrite real values -- an Excel cell holding
 // -5 (a negative adjustment) or "+855 12..." must reach the import

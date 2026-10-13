@@ -102,7 +102,7 @@ const FIXTURE = [
   const importJobs = fs.readFileSync(path.join(backendRoot, 'src', 'routes', 'importJobs.ts'), 'utf8')
   assert.match(importJobs, /String\.fromCharCode\(0xFEFF\) \+ csv/, 'errors.csv ships with the UTF-8 BOM')
 
-  const bridge = fs.readFileSync(path.join(frontendRoot, 'src', 'utils', 'spreadsheetImport.ts'), 'utf8')
+  const bridge = fs.readFileSync(path.join(frontendRoot, 'src', 'utils', 'spreadsheetWorkbook.ts'), 'utf8')
   assert.ok(bridge.includes('csvFieldForMachine'), 'the xlsx→text bridge uses machine quoting')
   assert.ok(!/\bescapeCsvValue\b/.test(bridge.replace(/\/\/[^\n]*/g, '')), 'the injection-guard escape is out of the machine path (comments aside)')
 
