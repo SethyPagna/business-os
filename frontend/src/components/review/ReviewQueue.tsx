@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import EntityLink from '../shared/EntityLink.tsx'
+import ConfirmDialog from '../shared/ConfirmDialog'
 import { getHubDestinations, hubAnchor } from '../shared/hubNavigation.ts'
 import { REVIEW_TIER_KEYS } from '../../utils/permissions.ts'
 import { entityFieldLabel } from '../../utils/entityRecords.ts'
@@ -18,7 +19,15 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { beginKeyedAction, finishKeyedAction } from '../../utils/actionGuards.ts'
-import { isBranchReviewUpdate, localizeBranchReviewError, reviewApprovalRefusalText } from '../../api/branchRuleErrors.ts'
+import {
+  REVIEW_REASON_MAX_LENGTH,
+  isBranchReviewUpdate,
+  localizeBranchReviewError,
+  reviewApprovalRefusalText,
+  reviewRejectReasonRefusalText,
+  reviewStaleDecision,
+  reviewStaleDecisionText,
+} from '../../api/branchRuleErrors.ts'
 import { cacheInvalidate } from '../../api/http.ts'
 import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
 import { isConfirmedProductCreateApproval, isProductCreateReviewState } from '../../utils/productCreateOutcome.ts'
@@ -59,6 +68,10 @@ const REVIEW_LOAD_TIMEOUT_MS = 12000
 const REVIEW_MUTATION_TIMEOUT_MS = 12000
 
 type StatusFilter = PendingActionStatus | 'all'
+
+// The reject dialog's state: the request being rejected, the reason typed so far, and the Worker's refusal of
+// that reason (reason_too_long / invalid_reason) once it has been sent, shown beside the field.
+type RejectDraft = { row: PendingActionRow; reason: string; refusal: string }
 
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return '--'
@@ -113,12 +126,16 @@ export default function ReviewQueue() {
   const [sectionFilter, setSectionFilter] = useState('')
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
+  const [rejectDraft, setRejectDraft] = useState<RejectDraft | null>(null)
 
   const loadRequestRef = useRef(0)
   const actionRef = useRef<Set<string>>(new Set())
   const productReviewEpochRef = useRef(0)
 
-  const load = useCallback(async (silent = false) => {
+  // `fresh` clears the read cache first. A refusal that says the queue is out of date (reviewStaleDecision) did
+  // not go through the write path that normally clears it, and a cached list would show the same dead row again.
+  const load = useCallback(async (silent = false, fresh = false) => {
+    if (fresh) cacheInvalidate('review')
     const actorScope = captureActorReadScope('review')
     const requestId = beginTrackedRequest(loadRequestRef)
     if (!silent) setLoading(true)
@@ -159,6 +176,23 @@ export default function ReviewQueue() {
     invalidateTrackedRequest(loadRequestRef)
     productReviewEpochRef.current++
   }, [])
+
+  // The reject dialog goes with the page, and Escape closes it: ConfirmDialog leaves Escape to its host
+  // (useConfirmDialog answers it for the awaitable form; this dialog holds state, so the same lives here).
+  const rejectOpen = rejectDraft !== null
+  useEffect(() => {
+    if (!isActive) setRejectDraft(null)
+  }, [isActive])
+  useEffect(() => {
+    if (!rejectOpen) return undefined
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      event.preventDefault()
+      setRejectDraft(null)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [rejectOpen])
 
   // N12: the server (POST /review/:id/approve) refuses self-approval and a reviewer
   // without Full access to the request's section, with these codes. Mirrored here so the
@@ -251,6 +285,14 @@ export default function ReviewQueue() {
       notify(tr('pending_action_approved', 'Approved -- the change has been applied'), 'success')
       await load(true)
     } catch (error) {
+      // K3 / K6: the request changed under the reviewer or was decided by someone else. Say which, and re-read
+      // the queue from the server so the row is not left on screen with live buttons.
+      const stale = reviewStaleDecision(error)
+      if (stale) {
+        notify(reviewStaleDecisionText(stale, (key) => tr(key, '')), 'warning')
+        await load(true, true)
+        return
+      }
       notify(reviewApprovalRefusalText((error as { code?: unknown } | null)?.code, row.section, (key) => tr(key, '')) ?? localizeBranchReviewError(row, error, (key) => tr(key, '')), 'error')
     } finally {
       finishKeyedAction(actionRef, row.id)
@@ -258,10 +300,21 @@ export default function ReviewQueue() {
     }
   }
 
-  const handleReject = async (row: PendingActionRow) => {
+  // Reject asks for its optional reason in the shared compact dialog (the browser's prompt() could neither be
+  // translated, nor show a counter, nor be capped). The dialog renders its real content -- the request, its status
+  // before and after, and the reason field with its counter -- from first paint.
+  const handleReject = (row: PendingActionRow) => {
     if (!canReview) { notify(tr('perm_view_only_generic', 'View only: you do not have permission to make this change.'), 'error'); return }
-    const reason = window.prompt(tr('reject_reason_prompt', 'Reason for rejecting (optional):')) ?? undefined
-    if (reason === undefined) return
+    setRejectDraft({ row, reason: '', refusal: '' })
+  }
+
+  const submitReject = async () => {
+    const draft = rejectDraft
+    if (!draft) return
+    const { row } = draft
+    if (!canReview) { setRejectDraft(null); notify(tr('perm_view_only_generic', 'View only: you do not have permission to make this change.'), 'error'); return }
+    // Trimmed, and never longer than the field allows; blank is "no reason" (optional), sent as null.
+    const reason = draft.reason.trim()
     if (!beginKeyedAction(actionRef, row.id)) return
     setBusyId(row.id)
     try {
@@ -270,15 +323,31 @@ export default function ReviewQueue() {
         'review:reject',
         REVIEW_MUTATION_TIMEOUT_MS,
       )
+      setRejectDraft(null)
       notify(tr('pending_action_rejected', 'Rejected'), 'success')
       await load(true)
     } catch (error) {
+      // K7: a reason the Worker refused leaves the request open -- keep the dialog and the typed text, and say why.
+      const reasonRefusal = reviewRejectReasonRefusalText(error, (key) => tr(key, ''))
+      if (reasonRefusal) {
+        setRejectDraft((current) => (current && current.row.id === row.id ? { ...current, refusal: reasonRefusal } : current))
+        return
+      }
+      setRejectDraft(null)
+      const stale = reviewStaleDecision(error)
+      if (stale) {
+        notify(reviewStaleDecisionText(stale, (key) => tr(key, '')), 'warning')
+        await load(true, true)
+        return
+      }
       notify(error instanceof Error ? error.message : String(error || ''), 'error')
     } finally {
       finishKeyedAction(actionRef, row.id)
       setBusyId(null)
     }
   }
+
+  const rowTitle = (row: PendingActionRow): string => row.summary || `${entityFieldLabel(row.entity_type, tr)}${row.entity_id != null ? ` #${row.entity_id}` : ''}`
 
   return (
     <div className="page-scroll flex min-w-0 flex-col p-3 sm:p-6">
@@ -346,7 +415,7 @@ export default function ReviewQueue() {
                       </span>
                     </div>
                     <p className="mt-1 detail-scroll-text text-sm font-medium text-slate-700 dark:text-slate-200">
-                      {row.summary || `${entityFieldLabel(row.entity_type, tr)}${row.entity_id != null ? ` #${row.entity_id}` : ''}`}
+                      {rowTitle(row)}
                       {canNavigate && destination ? <> · <EntityLink page={destination.page} anchor={hubAnchor(destination.page, destination.section)} search={search} navigate={navigateTo}>{tr('view_details', 'View details')}</EntityLink></> : null}
                     </p>
                     <p className="mt-0.5 text-xs text-slate-400">
@@ -402,6 +471,52 @@ export default function ReviewQueue() {
           })}
         </div>
       )}
+
+      {rejectDraft ? (
+        <ConfirmDialog
+          t={t}
+          title={tr('reject', 'Reject')}
+          message={rowTitle(rejectDraft.row)}
+          items={[{ label: tr('status', 'Status'), value: `${tr('open', 'Open')} \u2192 ${tr('rejected', 'Rejected')}` }]}
+          confirmLabel={tr('reject', 'Reject')}
+          danger
+          working={busyId === rejectDraft.row.id}
+          onConfirm={() => { void submitReject() }}
+          onClose={() => setRejectDraft(null)}
+        >
+          <div>
+            <label htmlFor="review-reject-reason" className="mb-1 block text-xs font-medium leading-relaxed text-gray-600 dark:text-gray-300">
+              {tr('reject_reason_prompt', 'Reason for rejecting (optional):')}
+            </label>
+            <textarea
+              id="review-reject-reason"
+              name="review_reject_reason"
+              className="input resize-none leading-relaxed"
+              rows={2}
+              autoFocus
+              maxLength={REVIEW_REASON_MAX_LENGTH}
+              value={rejectDraft.reason}
+              disabled={busyId === rejectDraft.row.id}
+              aria-describedby="review-reject-reason-count"
+              onChange={(event) => {
+                const reason = event.target.value.slice(0, REVIEW_REASON_MAX_LENGTH)
+                setRejectDraft((current) => (current ? { ...current, reason, refusal: '' } : current))
+              }}
+            />
+            <div className="mt-1 flex items-start gap-2">
+              {rejectDraft.refusal ? (
+                <p role="alert" className="min-w-0 flex-1 text-xs leading-relaxed text-red-600 dark:text-red-300">{rejectDraft.refusal}</p>
+              ) : null}
+              <span
+                id="review-reject-reason-count"
+                className={`ml-auto shrink-0 text-xs leading-relaxed tabular-nums ${rejectDraft.reason.length >= REVIEW_REASON_MAX_LENGTH ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-gray-400'}`}
+              >
+                {`${rejectDraft.reason.length}/${REVIEW_REASON_MAX_LENGTH}`}
+              </span>
+            </div>
+          </div>
+        </ConfirmDialog>
+      ) : null}
     </div>
   )
 }

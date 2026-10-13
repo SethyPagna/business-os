@@ -239,3 +239,52 @@ export function reviewApprovalRefusalText(code: unknown, section: unknown, t: (k
   }
   return null
 }
+
+/**
+ * K7: a reviewer's reject reason is capped like every stock reason. The Worker refuses a longer one
+ * (400 reason_too_long) and never truncates it; the Review Queue's field stops at the same number.
+ * cloudflare/src/lib/pendingActions.ts REVIEW_REASON_MAX_LENGTH, pinned equal by
+ * tests/reviewQueueRejectReason.test.ts. Counted in UTF-16 code units (string.length), the Worker's
+ * measure, which is also what the field's maxLength counts.
+ */
+export const REVIEW_REASON_MAX_LENGTH = 512
+
+export type ReviewStaleDecision = 'entity_changed' | 'already_decided'
+
+/**
+ * K3 / K6: an approval or rejection the Worker refused because the queue on screen is out of date.
+ * `review_entity_changed` -- the record was edited after the request was made, nothing was applied
+ * and the request stays open; `review_already_decided` -- another reviewer (or the requester) got
+ * there first. The two plain "Already reviewed" 409s of POST /review/:id/approve and /reject carry
+ * no code, only that sentence, so exactly that sentence is recognised too; any other uncoded 409
+ * (for example a requester whose permission was revoked) is NOT a stale queue.
+ * The caller says which it is (reviewStaleDecisionText) and re-reads the queue from the server.
+ */
+export function reviewStaleDecision(error: unknown): ReviewStaleDecision | null {
+  if (!error || typeof error !== 'object') return null
+  const { code, status, message } = error as { code?: unknown; status?: unknown; message?: unknown }
+  if (code === 'review_entity_changed') return 'entity_changed'
+  if (code === 'review_already_decided') return 'already_decided'
+  if (!code && Number(status) === 409 && /^Already reviewed( or not found)?$/.test(String(message ?? '').trim())) return 'already_decided'
+  return null
+}
+
+export function reviewStaleDecisionText(kind: ReviewStaleDecision, t: (key: string) => string | undefined): string {
+  return kind === 'entity_changed'
+    ? t('review_entity_changed') || 'This record changed after the request was made, so nothing was applied. The request is still open: reject it, or ask for it again.'
+    : t('review_already_decided') || 'This request was already decided, or changed, by someone else. The queue has been refreshed.'
+}
+
+/**
+ * K7: POST /review/:id/reject refuses a reason that is too long (`reason_too_long`) or is not text
+ * (`invalid_reason`) and leaves the request open. Returns the sentence for the dialog to show beside
+ * the reason, in the operator's language, or null for any other error.
+ */
+export function reviewRejectReasonRefusalText(error: unknown, t: (key: string) => string | undefined): string | null {
+  const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : null
+  if (code === 'reason_too_long') {
+    return (t('reason_too_long') || 'The reason is too long. Use {max} characters or fewer.').replace('{max}', String(REVIEW_REASON_MAX_LENGTH))
+  }
+  if (code === 'invalid_reason') return t('invalid_reason') || 'The reason must be text. Edit it and try again.'
+  return null
+}
