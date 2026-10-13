@@ -8,6 +8,7 @@
 // A confirmed branch is sent back on the SAME request in the X-Branch-Redirect header, so every writer in the app gets
 // the same flow without wiring of its own. Before the cutover the Worker never sends this code and nothing here runs.
 
+import { captureActorWriteIdentity, isActorWriteIdentityCurrent, type ActorWriteIdentity } from './actorReadScope.ts'
 import { branchIsActive, branchRole, type BranchLike } from '../utils/branchRoles.ts'
 
 export const BRANCH_REDIRECT_HEADER = 'X-Branch-Redirect'
@@ -25,8 +26,8 @@ export type BranchRedirectDetail = {
   requested_target_id: number | null
 }
 export type BranchRedirectRequest = { code: string; detail: BranchRedirectDetail }
-/** Resolves the branch id the operator confirmed, or null for Back. */
-export type BranchRedirectHandler = (request: BranchRedirectRequest) => Promise<number | null>
+/** Resolves the branch id the operator confirmed, or null for Back. The owner is who the question was asked for. */
+export type BranchRedirectHandler = (request: BranchRedirectRequest, owner: ActorWriteIdentity) => Promise<number | null>
 
 let handler: BranchRedirectHandler | null = null
 let queue: Promise<unknown> = Promise.resolve()
@@ -116,7 +117,9 @@ export function defaultRedirectTarget(detail: BranchRedirectDetail): number {
 export function askBranchRedirect(request: BranchRedirectRequest): Promise<number | null> {
   const current = handler
   if (!current) return Promise.resolve(null)
-  const answer = queue.then(() => current(request))
+  // A queued question is never shown once another account signed in: it names the previous owner's branches.
+  const owner = captureActorWriteIdentity()
+  const answer = queue.then(() => (isActorWriteIdentityCurrent(owner, true) ? current(request, owner) : null))
   queue = answer.catch(() => null)
   return answer.then((value) => (value !== null && request.detail.targets.some((row) => row.id === value) ? value : null))
 }

@@ -70,3 +70,19 @@ export async function restateBranchRefusal<T extends Error & { code?: unknown }>
   }
   return error
 }
+
+// The browser's own sign-in guards (api/actorReadScope.ts), restated the same way by code. English is the guard's own
+// sentence, word for word, so only a Khmer UI loads the pack.
+export const ACTOR_GUARD_KEYS: Readonly<Record<string, string>> = {
+  actor_session_quarantined: 'actor_session_quarantined',
+  actor_owner_changed: 'actor_owner_changed',
+  stale_read_scope: 'stale_read_scope',
+}
+
+export async function restateActorGuard<T extends Error & { code?: unknown }>(error: T): Promise<T> {
+  const code = typeof error?.code === 'string' ? error.code : ''
+  if (!code || !Object.prototype.hasOwnProperty.call(ACTOR_GUARD_KEYS, code)) return error
+  const value = await kmPackValue(ACTOR_GUARD_KEYS[code])
+  if (value) error.message = value
+  return error
+}

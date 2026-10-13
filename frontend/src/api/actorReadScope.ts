@@ -6,6 +6,10 @@ const runtimeId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.ran
 let localSession = 0
 let observedIdentity = ''
 let authorityId = 0
+let lastWriteOwner = ''
+let writeOwnerEpoch = 0
+let parsedUserRaw: string | null = null
+let parsedUser: Record<string, unknown> = {}
 let allRevision = 0
 const revisions = new Map<string, number>()
 const resultScopes = new WeakMap<object, ActorReadScope>()
@@ -282,6 +286,7 @@ if (typeof window !== 'undefined') {
       quarantineListeners.forEach((listener) => listener())
     }
     if (event.key === SESSION_MARKER || event.key === AUTH_PENDING_OWNER || event.key === null) observeSessionMarker()
+    if (event.key === STORED_USER || event.key === null) observeWriteOwner()
   })
   window.addEventListener(SIGNOUT_INTENT_EVENT, () => {
     if (isSignoutBlocked()) quarantined = true
@@ -295,9 +300,12 @@ export function subscribeActorSessionQuarantine(listener: () => void): () => voi
 }
 
 export function isActorSessionQuarantined(): boolean { observeSessionMarker(); return quarantined || isSignoutBlocked() }
+export const ACTOR_SESSION_QUARANTINED_MESSAGE = 'The sign-in changed. Resolve the locked session before retrying this action.'
+export const STALE_READ_SCOPE_MESSAGE = 'Read belongs to an earlier account or refresh. Please try again.'
+export const ACTOR_OWNER_CHANGED_MESSAGE = 'The signed-in account changed, so nothing was sent. Sign back in as the original account to continue.'
 export function assertActorSessionDispatchAllowed(scope?: ActorReadScope): void {
   if (isActorSessionQuarantined() || isActorCookieMutationPending() || (scope && !isActorReadScopeCurrent(scope, false))) {
-    throw Object.assign(new Error('The sign-in changed. Resolve the locked session before retrying this action.'), {
+    throw Object.assign(new Error(ACTOR_SESSION_QUARANTINED_MESSAGE), {
       code: 'actor_session_quarantined', status: 409, outcome: 'not_dispatched',
     })
   }
@@ -336,7 +344,7 @@ function authority(): string {
       ])
     }
   } catch { identity += ':storage-unavailable' }
-  if (identity !== observedIdentity) { observedIdentity = identity; authorityId++ }
+  if (identity !== observedIdentity) { observedIdentity = identity; authorityId++; observeWriteOwner() }
   return `${runtimeId}:${localSession}:${authorityId}`
 }
 
@@ -369,7 +377,63 @@ export function isActorReadScopeCurrent(scope: ActorReadScope, includeInvalidati
 
 export function assertActorReadScope(scope: ActorReadScope, includeInvalidation = true, allowQuarantine = false): void {
   if (!isActorReadScopeCurrent(scope, includeInvalidation, allowQuarantine)) {
-    throw Object.assign(new Error('Read belongs to an earlier account or refresh. Please try again.'), { name: 'AbortError', code: 'stale_read_scope' })
+    throw Object.assign(new Error(STALE_READ_SCOPE_MESSAGE), { name: 'AbortError', code: 'stale_read_scope' })
+  }
+}
+
+// Who a write belongs to: the server, the origin, and the signed-in user id and
+// organization -- the identity that also scopes work drafts. Unlike the read
+// authority above it does not move on same-user churn (a session reset, a
+// permission, profile or expiry rewrite, a reconnect); the Worker checks
+// permissions on every write. A change to another signed-in owner bumps an
+// epoch that only increases, so A -> B -> A never passes as unchanged.
+export type ActorWriteIdentity = { owner: string; epoch: number }
+
+const STORED_USER = 'businessos_user'
+
+function storedWriteOwner(): { owner: string; signedIn: boolean } {
+  const raw = readScopeStorage('session', STORED_USER) || readScopeStorage('local', STORED_USER)
+  if (raw !== parsedUserRaw) {
+    parsedUserRaw = raw
+    try {
+      const value: unknown = raw ? JSON.parse(raw) : null
+      parsedUser = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+    } catch { parsedUser = {} }
+  }
+  let origin = ''
+  try { origin = String(window.location?.origin || '') } catch { origin = '' }
+  const id = parsedUser.id == null ? '' : String(parsedUser.id)
+  const organization = String(parsedUser.organization_id || parsedUser.organization_slug || '')
+  return { owner: JSON.stringify([getSyncServerUrl(), origin, id, organization]), signedIn: id !== '' }
+}
+
+function observeWriteOwner(): string {
+  const { owner, signedIn } = storedWriteOwner()
+  if (signedIn && owner !== lastWriteOwner) {
+    if (lastWriteOwner) writeOwnerEpoch++
+    lastWriteOwner = owner
+  }
+  return owner
+}
+
+export function captureActorWriteIdentity(): ActorWriteIdentity {
+  const owner = observeWriteOwner()
+  return { owner, epoch: writeOwnerEpoch }
+}
+
+/** False once another owner signed in after capture, or while the session is
+ *  locked; allowQuarantine asks about the owner alone. */
+export function isActorWriteIdentityCurrent(identity: ActorWriteIdentity, allowQuarantine = false): boolean {
+  const owner = observeWriteOwner()
+  return (allowQuarantine || !isActorSessionQuarantined()) && owner === identity.owner && writeOwnerEpoch === identity.epoch
+}
+
+export function assertActorWriteIdentity(identity: ActorWriteIdentity, outcome: 'not_dispatched' | 'unknown' = 'not_dispatched'): void {
+  if (isActorSessionQuarantined() || isActorCookieMutationPending()) {
+    throw Object.assign(new Error(ACTOR_SESSION_QUARANTINED_MESSAGE), { code: 'actor_session_quarantined', status: 409, outcome })
+  }
+  if (!isActorWriteIdentityCurrent(identity, true)) {
+    throw Object.assign(new Error(ACTOR_OWNER_CHANGED_MESSAGE), { code: 'actor_owner_changed', status: 409, outcome })
   }
 }
 

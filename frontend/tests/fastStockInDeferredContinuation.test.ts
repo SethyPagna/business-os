@@ -160,7 +160,7 @@ await runTest('old client + new Worker: pressing Complete again sends only the l
 
 await runTest('the modal folds each round durably before the next round, and returns never-attempted lines to queued', () => {
   const body = performCommitBody()
-  assert.match(body, /batched = await commitFastStockIn\(toCommit\.map\(buildLineRequest\), foldRound, \{ session, writeScope: receivingScope \}\)/)
+  assert.match(body, /batched = await commitFastStockIn\(toCommit\.map\(buildLineRequest\), foldRound, \{ session, writeIdentity: receivingIdentity \}\)/)
   assert.match(body, /\} else if \(isDeferredStockInResult\(result\)\) \{\s*failed \+= 1\s*lines = applyLineOutcome\(lines, line\.key, \{ status: 'queued', detail: '' \}\)/,
     'a deferred leftover is queued (no new UI text) and still keeps the modal open')
   assert.match(body, /persistSessionDraft\(lines\)\s*\n\s*setReceived\(lines\.map\(\(item\) => \(unsettled\.has\(item\.key\)/,

@@ -15,7 +15,7 @@ import { SYNC } from '../constants.ts'
 import { getClientMetaHeaders as sharedGetClientMetaHeaders } from '../utils/deviceInfo.ts'
 import { createSyncErrorId } from '../utils/syncProblemLifecycle.ts'
 import { assertNoUnresolvedSignout, assertSignoutIntentCurrent, confirmSignoutIntent, setSignoutStatus, signoutError, type SignoutIntent } from './unresolvedSignout.ts'
-import { assertActorReadScope, assertActorSessionDispatchAllowed, beginActorCookieMutation, finishActorCookieMutation, prepareActorOauthCookieRedirect, isActorCookieMutationPending, captureActorReadScope, invalidateActorReadChannel, isActorReadScopeCurrent, markActorReadResult, type ActorReadScope } from './actorReadScope.ts'
+import { assertActorReadScope, assertActorSessionDispatchAllowed, assertActorWriteIdentity, beginActorCookieMutation, finishActorCookieMutation, prepareActorOauthCookieRedirect, isActorCookieMutationPending, captureActorReadScope, captureActorWriteIdentity, invalidateActorReadChannel, isActorReadScopeCurrent, isActorWriteIdentityCurrent, markActorReadResult, type ActorReadScope, type ActorWriteIdentity } from './actorReadScope.ts'
 import {
   getSyncServerUrl,
   getSyncToken,
@@ -108,6 +108,8 @@ export async function recoverUnresolvedSignout(intent: SignoutIntent, retryLogou
 type RouteOptions = {
   isWrite?: boolean
   writeScope?: ActorReadScope
+  // The Stock Session's writes: refused only when the owner changes, not on same-user churn.
+  writeIdentity?: ActorWriteIdentity
   raceLocalFallback?: boolean
   staleWhileRevalidate?: boolean
   signal?: AbortSignal
@@ -858,7 +860,7 @@ export const WRITE_REQUEST_TIMEOUT_MS = 45_000
  * before the branch consolidation no Worker sends that refusal.
  */
 export async function apiFetch(method: unknown, path: string, body?: unknown, timeoutMs?: number, options: ApiFetchOptions = {}): Promise<any> {
-  const scope = captureActorReadScope()
+  const owner = captureActorWriteIdentity()
   try {
     return await apiFetchOnce(method, path, body, timeoutMs, options)
   } catch (error) {
@@ -866,11 +868,11 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
     const refusedCode = String((error as { code?: unknown } | null)?.code || '')
     if (verb === 'GET' || verb === 'HEAD' || verb === 'OPTIONS' || !BRANCH_REDIRECT_CODES.has(refusedCode)) throw error
     const redirectModule = await import('./branchRedirect.ts')
-    assertActorSessionDispatchAllowed(scope)
+    await assertRedirectOwner(owner)
     const request = redirectModule.branchRedirectRequestOf(error)
     if (!request || !redirectModule.hasBranchRedirectHandler()) throw error
     const target = await redirectModule.askBranchRedirect(request)
-    assertActorSessionDispatchAllowed(scope)
+    await assertRedirectOwner(owner)
     if (target === null) {
       const declined = new Error(`Nothing was changed. ${request.detail.addressed_branch_name || ''} is disabled.`) as ApiRuntimeError
       declined.status = 409
@@ -880,6 +882,14 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
       throw await (await import('./branchRefusalLanguage.ts')).restateRedirectDeclined(declined, request.detail.addressed_branch_name || '')
     }
     return apiFetch(method, path, body, timeoutMs, { ...options, skipWriteDedupe: true, branchRedirect: target })
+  }
+}
+
+// The operator's answer is resent only for the owner who was asked: a session
+// reset or a same-user profile rewrite keeps it, another account or server does not.
+async function assertRedirectOwner(owner: ActorWriteIdentity): Promise<void> {
+  try { assertActorWriteIdentity(owner) } catch (error) {
+    throw await (await import('./branchRefusalLanguage.ts')).restateActorGuard(error as Error & { code?: unknown })
   }
 }
 
@@ -1515,6 +1525,7 @@ export async function route<T = any>(
   const readServerBaseUrl = getReadServerBaseUrl()
   const isWrite = typeof options === 'boolean' ? options : !!options?.isWrite
   const writeScope = typeof options === 'boolean' ? undefined : options.writeScope
+  const writeIdentity = typeof options === 'boolean' ? undefined : options.writeIdentity
   // An authenticated read must observe the server's permission decision before
   // considering offline data; a fast mirror must not beat a later 401/403.
   // Cookie-authenticated cold starts may not have recreated their JS session
@@ -1662,6 +1673,7 @@ export async function route<T = any>(
 
   // ?€?€ Writes ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
   if (writeScope) assertActorSessionDispatchAllowed(writeScope)
+  if (writeIdentity) assertActorWriteIdentity(writeIdentity)
   if (!syncServerUrl) {
     const message = 'Server is not connected. Changes are invalid until a live server is configured.'
     logCall(channel, 'local-write-skipped', 0, false)
@@ -1699,12 +1711,13 @@ export async function route<T = any>(
     // decide whether the operation is valid.
     const result = await serverFn()
     if (writeScope) assertActorReadScope(writeScope, false)
+    if (writeIdentity && !isActorWriteIdentityCurrent(writeIdentity)) assertActorWriteIdentity(writeIdentity, 'unknown')
     cacheInvalidateWithDerived(channel.split(':')[0])
     setServerHealth(true)
     logCall(channel, 'server', Date.now() - t0)
     return result
   } catch (e: any) {
-    if (writeScope && !isActorReadScopeCurrent(writeScope, false)) {
+    if ((writeScope && !isActorReadScopeCurrent(writeScope, false)) || (writeIdentity && !isActorWriteIdentityCurrent(writeIdentity))) {
       if (e && typeof e === 'object') e.outcome = 'unknown'
       throw e
     }

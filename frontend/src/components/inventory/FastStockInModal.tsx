@@ -5,7 +5,7 @@
 // (per-line 0192 ids, deferred rounds), with the per-line fallback for an old
 // Worker.
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { assertActorReadScope, captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
+import { captureActorWriteIdentity, isActorWriteIdentityCurrent, subscribeActorSessionQuarantine } from '../../api/actorReadScope.ts'
 import { createPortal } from 'react-dom'
 import { useApp } from '../../AppContext'
 import { canEditAcquisitionCosts, canViewAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../../utils/acquisitionCostAccess.ts'
@@ -180,7 +180,9 @@ export default function FastStockInModal({
   useVisualViewportInset()
   const app = useApp() as { user: any; exchangeRate: number; usdSymbol: string; khrSymbol: string }
   const { user, usdSymbol, khrSymbol } = app
-  const receivingScope = useRef(captureActorReadScope('inventory')).current
+  // The owner this session writes for, fixed when it opens. Same-user churn (a
+  // session reset, a permission or profile rewrite, a reconnect) keeps it.
+  const [receivingIdentity] = useState(captureActorWriteIdentity)
   const exchangeRate = exchangeRateOverride ?? app.exchangeRate
   const canViewCosts = canViewAcquisitionCosts(user)
   const canEditCosts = canEditAcquisitionCosts(user)
@@ -381,11 +383,20 @@ export default function FastStockInModal({
   // Keystrokes ride the debounced autosave. No dirtyWork registration: with the
   // draft persisting, leaving is safe -- everything is here on reopen.
   useEffect(() => {
-    if (!isActorReadScopeCurrent(receivingScope, false)) { setSignInChanged(true); return }
+    const current = isActorWriteIdentityCurrent(receivingIdentity)
+    setSignInChanged(!current)
+    if (!current) return
     return scheduleWorkDraftWrite<StockSessionDraft>(fastStockInDraftKey, currentDraft())
   },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [mode, currentStep, brand, branchId, receivedDate, supplier, paymentStatus, creditDueDate, paidAmount, query, picked, quantity, protectedUnitCost, sellingPrice, expiryDate, reason, conditionTag, batchChoice, createPayload, createRequestId, scannedBarcode, createdProductIds, received])
+
+  // A locked session (another tab signed in or out) shows the message; the same
+  // owner confirmed again clears it. The notice can fire inside another
+  // component's render, so the state update waits for a microtask.
+  useEffect(() => subscribeActorSessionQuarantine(() => {
+    queueMicrotask(() => setSignInChanged(!isActorWriteIdentityCurrent(receivingIdentity)))
+  }), [receivingIdentity])
 
   // Facts (a queued line's id, a committed line's status, a created product id)
   // are written synchronously, before React renders them.
@@ -768,11 +779,20 @@ export default function FastStockInModal({
     setCreateForm({ name: looksLikeBarcode ? '' : text, barcode: looksLikeBarcode ? text : '' })
   }
 
+  // Another account signed in (or the session is locked): nothing more is sent
+  // or applied for this session, and it says so instead of failing silently.
+  const ownerChangedText = () => tr('stock_session_sign_in_changed', 'The signed-in account changed, so nothing more was sent. This session is kept for the account that started it: close it, then open it again while signed in as that account.')
+  const assertReceivingOwner = () => {
+    if (isActorWriteIdentityCurrent(receivingIdentity)) return
+    setSignInChanged(true)
+    throw Object.assign(new Error(ownerChangedText()), { code: 'actor_owner_changed' })
+  }
+
   const holdNewProduct = async (payload: Record<string, unknown> = {}) => {
-    assertActorReadScope(receivingScope, false)
+    assertReceivingOwner()
     const cleaned = omitUnauthorizedCatalogCosts(payload, user)
     const prepared = onPrepareProduct ? await onPrepareProduct(cleaned) : withoutInlineImages(cleaned)
-    assertActorReadScope(receivingScope, false)
+    assertReceivingOwner()
     const held: Record<string, unknown> = { ...prepared, stock_quantity: 0 }
     const name = String(held.name || '').trim()
     const openingQuantity = Math.max(0, Math.floor(Number(payload.stock_quantity) || 0))
@@ -785,7 +805,7 @@ export default function FastStockInModal({
     try { await registerReceivingProductAttempt(user?.id, requestId) } catch (error) {
       throw Object.assign(new Error(stockFailureText(error, tr, tr('failed', 'Failed'))), { code: (error as { code?: string })?.code })
     }
-    assertActorReadScope(receivingScope, false)
+    assertReceivingOwner()
     applyEntry({
       picked: product, query: name, quantity: canReceive ? String(openingQuantity || 1) : '0',
       unitCost: canViewCosts && held.cost_price_usd != null ? String(held.cost_price_usd) : '', sellingPrice: priceText(held.selling_price_usd),
@@ -876,7 +896,7 @@ export default function FastStockInModal({
     let failed = 0
     let lines = start
     for (const line of pending) {
-      if (!isActorReadScopeCurrent(receivingScope, false)) return { failed, lines }
+      if (!isActorWriteIdentityCurrent(receivingIdentity)) return { failed, lines }
       lines = applyLineOutcome(lines, line.key, { status: 'saving' })
       setReceived(lines)
       const request = buildLineRequest(line)
@@ -884,10 +904,10 @@ export default function FastStockInModal({
         const result = request.wire === 'adjust'
           ? await adjustStock(request.body) as { lotCode?: string | null } | null
           : await receiveBatchStock(request.body)
-        if (!isActorReadScopeCurrent(receivingScope, false)) return { failed, lines }
+        if (!isActorWriteIdentityCurrent(receivingIdentity)) return { failed, lines }
         lines = applyLineOutcome(lines, line.key, { status: 'saved', detail: describeLineResult(line, result) })
       } catch (error) {
-        if (!isActorReadScopeCurrent(receivingScope, false)) return { failed, lines }
+        if (!isActorWriteIdentityCurrent(receivingIdentity)) return { failed, lines }
         failed += 1
         lines = applyLineOutcome(lines, line.key, {
           status: 'error',
@@ -901,15 +921,15 @@ export default function FastStockInModal({
     return { failed, lines }
   }
 
-  // The sign-in changed under this session: nothing more is sent or applied, the
-  // pinned draft is kept for reopening, and close and minimize stay reachable.
+  // The owner changed under a running commit: saving clears so close and minimize
+  // work, and the pinned draft is kept for the original owner.
   const stopForSignInChange = () => {
     setSaving(false)
     setSignInChanged(true)
   }
 
   const finishSession = () => {
-    if (!isActorReadScopeCurrent(receivingScope, false)) { stopForSignInChange(); return }
+    if (!isActorWriteIdentityCurrent(receivingIdentity)) { stopForSignInChange(); return }
     onDone()
     clearWorkDraft(fastStockInDraftKey)
     onClose()
@@ -917,7 +937,7 @@ export default function FastStockInModal({
 
   const performCommit = async () => {
     if (saving) return
-    if (!isActorReadScopeCurrent(receivingScope, false)) { stopForSignInChange(); return }
+    if (!isActorWriteIdentityCurrent(receivingIdentity)) { stopForSignInChange(); return }
     let lines = received
     const pending = lines.filter((line) => line.status !== 'saved')
     if (!pending.length) { finishSession(); return }
@@ -936,11 +956,11 @@ export default function FastStockInModal({
       setReceived(lines)
       try {
         const id = await createHeldProduct(line, lines)
-        if (!isActorReadScopeCurrent(receivingScope, false)) { stopForSignInChange(); return }
+        if (!isActorWriteIdentityCurrent(receivingIdentity)) { stopForSignInChange(); return }
         lines = lines.map((entry) => (entry.key === line.key ? { ...entry, product: { ...entry.product, id }, status: 'queued', detail: '' } : entry))
         setCreatedProductIds((prev) => [...prev, String(id)])
       } catch (error) {
-        if (!isActorReadScopeCurrent(receivingScope, false)) { stopForSignInChange(); return }
+        if (!isActorWriteIdentityCurrent(receivingIdentity)) { stopForSignInChange(); return }
         failed += 1
         const reviewPending = (error as { code?: string } | null)?.code === 'product_pending_review'
         lines = applyLineOutcome(lines, line.key, { status: 'error', detail: failureText(error, tr('error', 'Error')), ...(reviewPending ? { needsRemoval: true } : {}) })
@@ -979,7 +999,7 @@ export default function FastStockInModal({
       lines = lines.map((line) => (unsettled.has(line.key) ? { ...line, status: 'saving' as const } : line))
       setReceived(lines)
       const foldRound = (settled: FastStockInCommitSettled) => {
-        assertActorReadScope(receivingScope, false)
+        assertReceivingOwner()
         for (const { index, result } of settled) {
           const line = toCommit[index]
           unsettled.delete(line.key)
@@ -1001,10 +1021,10 @@ export default function FastStockInModal({
         setReceived(lines.map((item) => (unsettled.has(item.key) ? { ...item, status: 'saving' as const } : item)))
       }
       try {
-        batched = await commitFastStockIn(toCommit.map(buildLineRequest), foldRound, { session, writeScope: receivingScope })
-        if (!isActorReadScopeCurrent(receivingScope, false)) { stopForSignInChange(); return }
+        batched = await commitFastStockIn(toCommit.map(buildLineRequest), foldRound, { session, writeIdentity: receivingIdentity })
+        if (!isActorWriteIdentityCurrent(receivingIdentity)) { stopForSignInChange(); return }
       } catch (error) {
-        if (!isActorReadScopeCurrent(receivingScope, false)) { stopForSignInChange(); return }
+        if (!isActorWriteIdentityCurrent(receivingIdentity)) { stopForSignInChange(); return }
         requestFailure = String((error as { code?: unknown } | null)?.code || 'request')
         const message = failureText(error, error instanceof Error ? error.message : tr('error', 'Error'))
         // Only lines no round has answered: a line already saved must stay saved.
@@ -1016,7 +1036,7 @@ export default function FastStockInModal({
       }
       if (batched === null) {
         const sequential = await performCommitSequential(toCommit, lines)
-        if (!isActorReadScopeCurrent(receivingScope, false)) { stopForSignInChange(); return }
+        if (!isActorWriteIdentityCurrent(receivingIdentity)) { stopForSignInChange(); return }
         failed = sequential.failed
         lines = sequential.lines
       }
@@ -1108,6 +1128,13 @@ export default function FastStockInModal({
   const preserveAndMinimize = () => {
     if (saving || !onMinimize) return
     flushPendingWorkDraft(fastStockInDraftKey)
+    // A chip would reopen the new owner's session, and "nothing was lost" would
+    // be untrue: the draft stays with the original owner, so say that instead.
+    if (!isActorWriteIdentityCurrent(receivingIdentity)) {
+      notify(tr('stock_session_kept_for_owner', 'Closed. This session is kept for the account that started it and opens again when that account signs in. Changes made after the account changed were not saved.'), 'info')
+      onClose()
+      return
+    }
     onMinimize(sessionLabel)
     onClose()
   }
@@ -1173,6 +1200,9 @@ export default function FastStockInModal({
     : undefined
   const footerTotal = canViewCosts && received.some((line) => line.mode === 'add') ? `${usdSymbol}${itemsTotal.toFixed(2)}` : null
   const busy = saving
+  // Once the owner changed, edits would no longer be saved: lock them, but keep
+  // the header's close and minimize (they use busy alone).
+  const editLocked = busy || signInChanged
 
   if (createForm) {
     return (
@@ -1220,7 +1250,7 @@ export default function FastStockInModal({
           onMinimize={onMinimize ? preserveAndMinimize : undefined}
           onClose={requestCloseIfIdle}
         />
-        <StockSessionSteps steps={steps} current={currentStep} onStep={(next) => { if (next === 'items' || !refuseDestination(pendingLines)) setStep(next) }} disabled={busy} tr={tr} />
+        <StockSessionSteps steps={steps} current={currentStep} onStep={(next) => { if (next === 'items' || !refuseDestination(pendingLines)) setStep(next) }} disabled={editLocked} tr={tr} />
 
         <div className="modal-scroll space-y-2 px-3 pb-3 pt-1 sm:px-4 sm:pb-4">
           {currentStep === 'items' ? (
@@ -1246,13 +1276,13 @@ export default function FastStockInModal({
                 submissionMessage={stockFailureText({ code: submissionLockCode }, tr, '')}
                 receivedDate={receivedDate}
                 onReceivedDate={setReceivedDate}
-                disabled={busy || detailsLocked}
+                disabled={editLocked || detailsLocked}
               />
               <StockSessionLineEntry
                 tr={tr}
                 packLookup={packLookup}
                 mode={mode}
-                busy={busy || detailsLocked}
+                busy={editLocked || detailsLocked}
                 searchInputRef={searchInputRef}
                 query={query}
                 onQuery={(text) => { setQuery(text); setPicked(null); setScannedBarcode(''); setCreatePayload(null) }}
@@ -1305,7 +1335,7 @@ export default function FastStockInModal({
                 tr={tr}
                 usdSymbol={usdSymbol}
                 canViewCosts={canViewCosts}
-                busy={busy}
+                busy={editLocked}
                 editingKey={editingKey}
                 freeEditKey={freeEditKey}
                 invalidKey={linesInvalidKey}
@@ -1321,7 +1351,7 @@ export default function FastStockInModal({
               tr={tr}
               packLookup={packLookup}
               usdSymbol={usdSymbol}
-              busy={busy || detailsLocked}
+              busy={editLocked || detailsLocked}
               paymentStatus={paymentStatus}
               onPaymentStatus={(next) => { setPaymentStatus(next); if (next === 'paid') setCreditDueDate('') }}
               creditDueDate={creditDueDate}
@@ -1346,7 +1376,7 @@ export default function FastStockInModal({
           )}
         </div>
 
-        {signInChanged ? <p role="alert" className="border-t border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 sm:px-4 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{tr('stock_session_sign_in_changed', 'Your sign-in changed. Close this session and open it again to continue.')}</p> : null}
+        {signInChanged ? <p role="alert" className="border-t border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 sm:px-4 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{ownerChangedText()}</p> : null}
         <StockSessionFooter
           tr={tr}
           onBack={goBack}

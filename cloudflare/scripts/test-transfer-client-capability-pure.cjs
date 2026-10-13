@@ -15,8 +15,9 @@ function load(name) {
     if (id === './http.ts') return { route: (_key, online) => online(), apiFetch: async (_method,path,body) => { calls.push({path,body}); return { success:true } } }
     if (id === './requestIds.ts') return { ensureClientRequestId: body => ({...body,client_request_id:body.client_request_id || 'capability-test-key'}) }
     if (id === './actorReadScope.ts') return {
-      captureActorReadScope: () => { throw new Error('Receiving scope must not run in this transfer fixture') },
-      assertActorReadScope: () => { throw new Error('Receiving scope must not run in this transfer fixture') },
+      captureActorWriteIdentity: () => { throw new Error('Receiving identity must not run in this transfer fixture') },
+      assertActorWriteIdentity: () => { throw new Error('Receiving identity must not run in this transfer fixture') },
+      isActorWriteIdentityCurrent: () => { throw new Error('Receiving identity must not run in this transfer fixture') },
     }
     if (id === '../utils/deviceInfo.ts') return { getClientDeviceInfo: () => ({device_name:'fixture'}) }
     if (id === './branchTransport.ts') return branch
