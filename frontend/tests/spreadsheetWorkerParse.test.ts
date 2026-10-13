@@ -1,8 +1,7 @@
-// D1 (OPUS-SECURITY-AUDIT-WHOLE-APP): an imported .xlsx/.xls is parsed by
-// SheetJS 0.18.5 (prototype-pollution and ReDoS advisories) only inside a
-// per-file worker that is terminated after the result, a timeout or a cancel,
-// and only a string crosses back. This is the behavioural half;
-// spreadsheetWorkerIsolation.test.ts is the source half.
+// An imported .xlsx/.xls is parsed by SheetJS only inside a per-file worker
+// that is terminated after the result, a timeout or a cancel, and only a string
+// crosses back. This is the behavioural half; spreadsheetWorkerIsolation.test.ts
+// is the source half.
 //
 // The browser's Worker is replaced by a node:worker_threads adapter that runs
 // the REAL src/utils/spreadsheetParse.worker.ts (real SheetJS, real structured
@@ -303,13 +302,13 @@ await check('a file over the size cap is refused before it is read or a worker i
   const bytesError = await failureOf(parseSpreadsheetInWorker(new ArrayBuffer(SPREADSHEET_MAX_BYTES + 1), undefined, { createWorker: () => { created += 1; return hangingWorker() } }))
   assert.equal(bytesError.code, 'spreadsheet_import_too_large')
   assert.equal(created, 0)
+
   let madeAtCap = 0
   const atCapAbort = new AbortController()
   const atCapBytes = parseSpreadsheetInWorker(new ArrayBuffer(SPREADSHEET_MAX_BYTES), undefined, { signal: atCapAbort.signal, createWorker: () => { madeAtCap += 1; return hangingWorker() } })
   assert.equal(madeAtCap, 1, 'bytes exactly at the cap are handed to a worker')
   atCapAbort.abort()
   await failureOf(atCapBytes)
-
 
   const atCap = { name: 'edge.xlsx', size: SPREADSHEET_MAX_BYTES, arrayBuffer() { return Promise.resolve(fixtureBytes()) } } as unknown as File
   const parsed = await parseImportFile(atCap, undefined, { createWorker: realWorker })

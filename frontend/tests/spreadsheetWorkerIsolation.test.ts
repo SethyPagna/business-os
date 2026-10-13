@@ -1,8 +1,7 @@
-// D1 (OPUS-SECURITY-AUDIT-WHOLE-APP): SheetJS 0.18.5 has prototype-pollution
-// and ReDoS advisories and no fixed npm release, so an untrusted .xlsx/.xls
-// must never be parsed on the UI thread. Every read of one happens inside a
-// per-file module worker that is terminated after the result, a timeout or a
-// cancel; the main thread only ever receives a string.
+// SheetJS reads untrusted bytes, so an .xlsx/.xls is never parsed on the UI
+// thread. Every read of one happens inside a per-file module worker that is
+// terminated after the result, a timeout or a cancel; the main thread only ever
+// receives a string.
 //
 // This file is the source-level half of that guarantee (the behavioural half is
 // spreadsheetWorkerParse.test.ts). It reads files and imports nothing under
@@ -100,7 +99,7 @@ check('a refused Excel file reaches the person in every import dialog (nothing h
   }
 })
 
-check('a file still being read holds the Inventory, Sales and Contacts dialogs still (SF-1)', () => {
+check('a file still being read holds the Inventory, Sales and Contacts dialogs still', () => {
   const source = (relative: string) => stripComments(fs.readFileSync(path.join(srcRoot, relative), 'utf8'))
   const hook = source('components/shared/useImportFileRead.ts')
   assert.match(hook, /useSyncExternalStore\(subscribeToImportFileReads, isImportFileReadInFlight\)/, 'the busy flag comes from the file-read store, which also covers the native picker')

@@ -1,9 +1,8 @@
-// SF-1 (SONNET-REFUTE-SHEET-WORKER): the Excel parse runs off the UI thread, so
-// the Inventory, Sales and Contacts import dialogs stay interactive while a file
-// is read. The gate each of them reads through must drop a result that is no
-// longer the latest pick (a newer pick, a mode switch, the dialog closing) and
-// must abort the worker behind it, so the last pick wins and a late file can
-// never land under a changed choice.
+// The Excel parse runs off the UI thread, so the Inventory, Sales and Contacts
+// import dialogs stay interactive while a file is read. The gate each of them
+// reads through drops a result that is no longer the latest pick (a newer pick,
+// a mode switch, the dialog closing) and aborts the worker behind it, so the
+// last pick wins and a late file never lands under a changed choice.
 //
 // Run: node tests/importFileReadGate.test.ts
 import assert from 'node:assert/strict'
@@ -92,6 +91,7 @@ await check('a read that cannot be aborted (the native file picker) is still dro
   await pending
   assert.deepEqual(out.applied, [])
 })
+
 await check('a replaced read that settles late leaves the newer read abortable', async () => {
   const gate = createImportFileReadGate()
   const out = recorder()
@@ -108,7 +108,6 @@ await check('a replaced read that settles late leaves the newer read abortable',
   await second
   assert.deepEqual(out.applied, [])
 })
-
 
 await check('only the current read reports a failure; an aborted or stale one stays silent', async () => {
   const gate = createImportFileReadGate()
