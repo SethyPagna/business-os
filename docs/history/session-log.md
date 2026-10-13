@@ -7956,8 +7956,8 @@ to match).
   Now 48/page + Previous/Page x of y/Next + reset-to-page-1 on search/filter
   change; the guard test pins the new fetch shape and the reset.
 - Q4 (data, read-only): production's 4,652 customers checked — phones are unique
-  except TWO pairs (`010 229 119` R_Lara #19728 vs Phopph #22853; `010 868 888`
-  Nay Nay #19911 vs Nay Naysochivy #19912) left for the USER to merge in the
+  except TWO pairs (`[phone]` [customer] #19728 vs [customer] #22853; `[phone]`
+  [customer] #19911 vs [customer] #19912) left for the USER to merge in the
   Duplicates tab, never auto-merged. 9,796 receipts match exactly one current
   customer by phone; **6,548 names re-spelled to the current system's version**;
   the 18 rows on the two ambiguous phones untouched; xlsx twins regenerated and
@@ -8770,7 +8770,7 @@ special characters, brand name, barcode no scientific notation, phone number etc
   if a file ever diverges.
 - One documented source artifact: sales-2025 row 7991 customer_name '8.55E+11' is
   the OLD system's own damage (a number typed in the name field, sci-mangled before
-  export); its customer_phone (012 860 695) is intact and phone-first matching never
+  export); its customer_phone ([phone]) is intact and phone-first matching never
   reads the name. Preserved, and pinned as a known artifact in the validator.
 
 **Verified (really run).** `node validate-pack.cjs` (full, twins included):
@@ -12639,8 +12639,8 @@ write on production plus a decision about the import path; not done unilaterally
 The old system's own two independent sources agree exactly: `suppliers-from-po.csv`
 per-supplier totals and `later/stock_in_invoice_lines.csv` net totals both sum to
 **$1,311,701.46**. The report computes **$1,462,395.81** — **+$150,694.35**, wrong per
-supplier in both directions (bong long +$37,330, dane japan +$24,460, srun
-−$1,805, piset exact). Mechanism, confirmed in `lib/stockActionCommit.ts`:
+supplier in both directions ([supplier] +$37,330, [supplier] +$24,460, [supplier]
+−$1,805, [supplier] exact). Mechanism, confirmed in `lib/stockActionCommit.ts`:
 `received_quantity` accumulates on every add to a lot, while `unit_cost_usd` and the
 supplier are fill-if-NULL "first attribution sticks". Same product, same day, two
 receipts at different costs ⇒ the second receipt's units are valued at the first's
@@ -12678,8 +12678,8 @@ and the per-supplier Purchases drill showed **$1,462,395.81** of supplier spend 
 an old-system truth of **$1,311,701.46** — and that truth is not a guess, it is two
 independent exports agreeing to the cent (`suppliers-from-po.csv`'s per-supplier
 `total_purchased_usd` and `later/stock_in_invoice_lines.csv`'s summed
-`net_total_usd`). Wrong per supplier in both directions: bong long +$37,330, dane
-japan +$24,460, srun **−**$1,805, piset exact.
+`net_total_usd`). Wrong per supplier in both directions: [supplier] +$37,330, [supplier]
++$24,460, [supplier] **−**$1,805, [supplier] exact.
 
 **Cause.** `product_batches.batch_key` is the date code, so two receipts of one product
 on one calendar day land on the SAME lot. `received_quantity` accumulates both (0067),
@@ -12818,7 +12818,7 @@ must use Create separately / Force create on a future clean run.
 **What was found.** The 12,093-row main product file contains 6,034 raw name+barcode
 pairs but correctly created 6,031 identities: CK/Ck One EDP, Olay Recovery/ReCovery,
 and Shiseido Lx/LX are the three case-only pairs. The optional customer job recorded
-45 creates + 8 same-name skips (`Ah Pich`, `L`, `Srey Pich`), contradicting the old
+45 creates + 8 same-name skips (`[customer]`, `[customer]`, `[customer]`), contradicting the old
 "no duplicates possible" wording; final production nevertheless contains all 53/53
 source phones and all ten sales using those eight phones link to the right customer
 IDs. The eight stock skips are exactly eight source rows whose shop change is 0, not
@@ -13323,7 +13323,7 @@ barcode product groups (EDP/EDT and shade pairs plus naming twins like "Rare
 Beauty X"/"Rare X"; the 238-product barcode "0" group is the old system's
 no-barcode placeholder, distinct products), 54 duplicate-name groups (distinct
 barcodes = distinct SKUs, e.g. Yukazan patch ×7 scents), 2 duplicate customer
-phones (R_Lara/Phopph, Nay Nay/Nay Naysochivy), 5 same-minute same-total sale
+phones ([customer]/[customer], [customer]/[customer]), 5 same-minute same-total sale
 pairs with CONSECUTIVE receipt numbers (genuine back-to-back ring-ups, not
 doubles). No loss anywhere.
 
@@ -15357,7 +15357,7 @@ membership-existence oracle on POST /submissions (404 vs success, rate-limited).
 `RCP-20260831-081431` (completed, $9.99, 1× Auto Apply Test A from B2 —
 cancel via Sales UI if unwanted; the permission classifier blocked this
 session from cancelling it), portal account "C8 Sweep Tester"
-(LCMN-KC543RW0, phone 012999888) + its customer row + 1 wishlist item.
+([membership-id], phone [phone]) + its customer row + 1 wishlist item.
 
 **Contract diff (ops tooling, paths patched to the current layout):** 246
 frontend call sites vs 289 backend routes — no real orphan endpoints beyond
@@ -15971,7 +15971,7 @@ compared row-for-row against remote production (read-only battery + a
   2356@2024-11-19 ($176) — 10 lines, 10 units, $220 total. 36,027 imported
   lines = 36,037 source-backed corrections − those 10.
 - All 79 supplemental sale lines equal source on qty/price/base/discount/
-  cost, branch 2, 57 new lines batch-linked; headers (cashier Aza, payment,
+  cost, branch 2, 57 new lines batch-linked; headers (cashier [staff], payment,
   delivery fees, credit/commission notes) equal source.
 - Stock: products = branch = active-lot = **23,115**; 0 product×branch or
   branch×lot mismatches, 0 negatives, 0 FK violations; Charlotte Hollywood
@@ -15980,8 +15980,8 @@ compared row-for-row against remote production (read-only battery + a
   stock-in report added nothing, as designed.
 - Transfers 12 groups / 20 rows / 117 units; effects 97 rows, net −59.
 - AP: 1,591 invoices, 1,311,701.4626 total / 1,311,212.4626 paid / 489.00
-  outstanding on exactly source rows 28, 244 (ចែ USA), 325 (Dane japan),
-  526 (naomi) — all supplier-linked, warehouse outstanding 0.
+  outstanding on exactly source rows 28, 244 ([supplier]), 325 ([supplier]),
+  526 ([supplier]) — all supplier-linked, warehouse outstanding 0.
 - Deleted-items ledger: 618 events / 2,234 lines / 4,630 units /
   $10,156,840.41 incl. the preserved 9,999,999 audit row; range runs to
   Aug 31 08:54 Bangkok (file exported 09:00 that morning — old system's
@@ -16001,10 +16001,10 @@ compared row-for-row against remote production (read-only battery + a
 1. Importer paths broke once the reports were archived into `27th-30th/` —
    now falls back there (folder also holds a copy of the 56MB all-time
    report, so it is a self-contained rerun archive).
-2. Phone links were leading-zero-sensitive: reports print `70856070`,
-   contacts store `070856070`. Fixed (zero-stripped, unambiguous-only), and
-   sale 16725 (4362@2026-08-29 "Srey Pich") linked to customer 23331
-   "Srey Pich (Page)" — was NULL, per the phone-first matching rule.
+2. Phone links were leading-zero-sensitive: reports print `[phone without leading zero]`,
+   contacts store `[phone with leading zero]`. Fixed (zero-stripped, unambiguous-only), and
+   sale 16725 (4362@2026-08-29 "[customer]") linked to customer 23331
+   "[customer] (Page)" — was NULL, per the phone-first matching rule.
 3. Walk-in 4361@2026-08-29 was linked to driver 1 (importer hardcoded the
    link; `contacts.ts:434` counts deliveries WITHOUT an is_delivery filter,
    so it inflated driver 1). Importer now links only delivery receipts;
@@ -16012,12 +16012,12 @@ compared row-for-row against remote production (read-only battery + a
    Read-only importer re-run after the fixes: every gate passes,
    saleDateCorrections 0 — fully idempotent against production.
 
-**Flagged, deliberately untouched** — 4353 "Sakura" and 4370 "Yaa" are
+**Flagged, deliberately untouched** — 4353 "[customer]" and 4370 "[customer]" are
 name-links whose source phones differ from the linked contact's phone
-(4370's source phone actually belongs to contact "Roth Na") — ambiguous in
+(4370's source phone actually belongs to contact "[customer]") — ambiguous in
 the old system itself; user to adjudicate. 8 supplemental customers
-(Asa Icool, soy chiva, EEvee Dee, MK Cambodia, Samphors San, Srey mab,
-oun phil rigo, Chan Nathy) have no contact record — name+phone preserved as
+([customer], [customer], [customer], [customer], [customer], [customer],
+[customer], [customer]) have no contact record — name+phone preserved as
 receipt text; creating them (Step-3c style) is optional.
 
 **Not done** — no UI click-through this session (DB-level + engine-level
@@ -16084,8 +16084,8 @@ needs deploy)**
 - **Sale links** — a fourth chip inside the Contacts Conflicts tab, showing
   the audit's two open issue classes computed LIVE (so new occurrences keep
   surfacing): (1) sales linked to a customer whose phone differs from the
-  phone on the sale (amber; the two audit finds 4353 "Sakura" and 4370
-  "Yaa" appear here, 4370 suggesting Roth Na who owns that phone), and
+  phone on the sale (amber; the two audit finds 4353 "[customer]" and 4370
+  "[customer]" appear here, 4370 suggesting [customer] who owns that phone), and
   (2) sales naming a customer with no contact record (blue; the 8 optional
   supplemental customers + the ~40 historical unlinked groups appear here).
   Actions: two-tap **Relink** to the phone-suggested contact,
@@ -17351,7 +17351,7 @@ left as written. Nothing to deploy (docs + package.json scripts only).
 
 **Ask** — the user's single opening message (two screenshots): audit the Sep-2 latest-data
 reconciliation that ChatGPT/Codex ran ("without getting the results wrong … losing data, over
-reading data": cashier map Aza→Za and Rout/Routh/Rath→Rath, date AND time, stock = the Item
+reading data": cashier map [staff]→[staff] and [staff]/[staff]/[staff]→[staff], date AND time, stock = the Item
 Exports of both branches, every branch/supplier/cashier/customer/delivery/label/fee link
 connected); a rename link-over feature ("full linkover or show past record … saved in
 conflict"); fully scoped permissions down to buttons/columns such as cost price; a reports plan
@@ -17394,7 +17394,7 @@ the other sessions.
   80 and d9): Worker `fd496449` = `57d8f1a2` + the still-uncommitted fees lane, migration
   `0105_fee_delivery_contacts.sql` applied 17:23Z, manifest sealed 17:55Z, pre-change Time-Travel
   bookmark `0000118e-00000000-000050da-cc9020285126934365b0d5b839948385`. Right: the cashier map
-  (Za on 14,995 receipts, Rath on 5), receipt timestamps (legacy checkout time, ICT→UTC), the
+  ([staff] on 14,995 receipts, [staff] on 5), receipt timestamps (legacy checkout time, ICT→UTC), the
   delivery-fee split, the per-branch totals (warehouse 10,621 / shop 12,431, re-summed from both
   Item Exports). Wrong: (1) identity keyed on name + barcode + COST while the two exports disagree
   on cost for 4,004 of 6,047 legacy items → 3,881 twin products, 356 holding stock in both
@@ -18842,7 +18842,7 @@ $131). Both were **held out of the paid flip on purpose**: marking a short invoi
 visible exception into a closed record.
 
 *The count that looked wrong and wasn't.* `sales` moved 15,012 → 15,035, which is +23 against +22 written.
-The extra row is live business: sale 16841 (`20260904-102300`, cashier Rath) was rung up between the
+The extra row is live business: sale 16841 (`20260904-102300`, cashier [staff]) was rung up between the
 baseline snapshot and the apply. `MAX(sales.id)` is 16863 — this batch's last row — and nothing exists
 above it.
 
@@ -18859,7 +18859,7 @@ above it.
   `customers` 4,970 → 4,970 (nothing created, as instructed).
 - Integrity query after apply: `my_sales = 22`, `my_items = 56`, `bad_rows = 0`, `my_value = 3462`,
   `total_vs_lines_mismatch = 0`. `sep23_not_completed = 3` — the two held invoices plus one genuinely
-  cancelled POS sale (16834, "Srey Pich"), all accounted for.
+  cancelled POS sale (16834, "[customer]"), all accounted for.
 - D1 rejected `BEGIN TRANSACTION` ("please use `state.storage.transaction()`"); removed, since a `--file`
   batch is already atomic. `last_insert_rowid()` was replaced pre-emptively with
   `(SELECT id FROM sales WHERE receipt_number = ...)` so a parent lookup cannot drift.
@@ -19193,7 +19193,7 @@ made. Final provenance and recovery are in the membership/bulk release note.
 
 Ask: accelerate with appropriate Sol agents, verify the priority usability slices,
 deploy a bounded checkpoint, retain every remaining task in progress, and close
-Roune Rath's September4 shift at23:44 Cambodia with133700KHR cash.
+[staff]'s September4 shift at23:44 Cambodia with133700KHR cash.
 
 Changed: integrated separately committed draft/session/layering, shift lifecycle,
 report/Telegram/date, sale picker/bulk/payment/replay and branch-scoped products
@@ -19445,7 +19445,7 @@ Deploy: branch pushed a8036506..4b20bd68 (80 sliced commits, main untouched); `n
 
 **How the program ran.** One coordinator session; four sonnet lanes in isolated scratchpad worktrees (`lane-p4-supplier`, `-returns`, `-worker-perf`, `-fe-perf`) pushing `p4/supplier-automerge`, `p4/returns-tag`, `p4/worker-perf`, `p4/fe-perf`. The host session died once mid-lanes; all four were resumed from their intact worktrees with nothing lost. Each lane was verified by the coordinator against its own claims before merge; the merges went into a detached integration worktree `final-p4` in the order returns-tag → supplier-automerge → fe-perf → worker-perf.
 
-**Migration 0164 defect caught before apply.** The lane pinned the "lang" cluster as ids 23–37 from a compaction summary; a read-only production query showed 24–32 are nine distinct suppliers (japen, kaka, UTB, Malaysia, naomi, autralia, france, srun, piset). Corrected to 33–37 with a name guard on every statement (`LOWER(TRIM(name of loser)) = LOWER(TRIM(name of keeper))`) and a verify script that seeds the neighbours (7db5f8fc). Lesson kept: re-read production id lists before pinning; verify scripts must seed neighbours.
+**Migration 0164 defect caught before apply.** The lane pinned the "lang" cluster as ids 23–37 from a compaction summary; a read-only production query showed 24–32 are nine distinct suppliers ([supplier] ×9). Corrected to 33–37 with a name guard on every statement (`LOWER(TRIM(name of loser)) = LOWER(TRIM(name of keeper))`) and a verify script that seeds the neighbours (7db5f8fc). Lesson kept: re-read production id lists before pinning; verify scripts must seed neighbours.
 
 **Union defects caught at merge, not in any lane.** (1) km.json damaged-return hint used a non-canonical Khmer word for cost (99043794). (2) fastStockInReasons test pinned the pre-fold movement reason (9a2c875e). (3) actor-snapshot test pinned the hand-rolled damaged-lot INSERT that P4-3 replaced with the shared kernel (103e2c25). (4) P4-3 emitted `condition_tag`/`damaged_disposition: null` into every legacy return-create intent, changing the digest bytes an in-flight retry relies on; the keys now appear only when sent (38a3eb5e). (5) fe-perf committed a stale `public/sw.js` (checked out after the build); the regenerated file was committed (a2f61dca).
 
