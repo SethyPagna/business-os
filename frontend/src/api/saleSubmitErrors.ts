@@ -10,6 +10,8 @@ const SALE_SUBMIT_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   // amendments, and by the till's own pricing before it ever asks.
   sale_discount_exceeds_price: 'sale_discount_exceeds_price',
   sale_discount_exceeds_subtotal: 'sale_discount_exceeds_subtotal',
+  // A queued sale older than the Worker's window (B1-R): refused, kept on the device for the owner.
+  sale_created_at_too_old: 'server_sale_kept_on_device',
 }
 
 /**

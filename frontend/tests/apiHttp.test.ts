@@ -681,6 +681,7 @@ await runTest('pending sync preview serializes only the compact visible queue sl
     retry_count: 0,
     retry_at: null,
     error: null,
+    error_code: null,
   })
   assert.equal(preview.at(-1)?._seq, PENDING_SYNC_PREVIEW_LIMIT)
 })

@@ -3788,6 +3788,7 @@
   "server_clear_reviewed_message": "Only the pending sales reviewed in this account are cleared, and their local recovery copies are removed. Other accounts and unidentified records are kept.",
   "server_reviewed_sales_count": "Reviewed sales in this account",
   "server_clear_reviewed_sales": "Clear reviewed sales",
+  "server_sale_kept_on_device": "This sale is too old to upload automatically. Keep it on this device for the owner.",
   "pending_action_approved": "Approved -- the change has been applied",
   "review_self_approval": "You cannot approve your own request. Another reviewer must approve it.",
   "review_section_full_required": "Approving this request needs Full access to {section}. Ask a reviewer who has it.",
