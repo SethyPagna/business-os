@@ -116,7 +116,7 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // batches.ts's write routes (receive batch stock, fast stock-in,
     // edit/deactivate a lot) -- all strict Full-Access writes that mutate
     // the same live stock this action names.
-    { key: 'adjust', tKey: 'perm_act_inventory_adjust', label: 'Adjust / receive stock, including opening stock on an existing product', review: 'block' },
+    { key: 'adjust', tKey: 'perm_act_inventory_adjust', label: 'Adjust / receive stock', review: 'block' },
     // POST /transfer -> 403 for review (inventory.ts ~1583)
     { key: 'transfer', tKey: 'perm_act_inventory_transfer', label: 'Transfer stock', review: 'block' },
     // POST /move-row -> 403 for review (inventory.ts ~1655)

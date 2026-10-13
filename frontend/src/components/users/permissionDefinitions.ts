@@ -212,7 +212,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         sensitivity: 'normal',
         tier: true,
         reviewTKey: 'perm_products_review_desc',
-        reviewDescription: 'Under Partial Access, viewing and searching products works directly. Adding, editing, or deleting a product goes to the Review/Approval queue for an admin to approve or reject. So does an edit that would merge this product into another one, unless Merge duplicates is switched off for the role, which refuses that edit. Approving a merge needs the reviewer to hold Merge duplicates. Import, export, merge-duplicates, and the zero-quantity cleanup tool all require Full Access.',
+        reviewDescription: 'Under Partial Access, viewing and searching products works directly. Adding, editing, or deleting a product goes to the Review/Approval queue for an admin to approve or reject. So does an edit that would merge this product into another one, unless Merge duplicates is switched off for the role, which refuses that edit. Import, export, merge-duplicates, and the zero-quantity cleanup tool all require Full Access.',
       },
       { key: 'product_cost_view', tKey: 'perm_product_cost_view', label: 'View product costs', sensitivity: 'high' },
       { key: 'product_cost_edit', tKey: 'perm_product_cost_edit', label: 'Edit product costs', sensitivity: 'high' },
@@ -467,7 +467,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'review',
     tKey: 'perm_section_review',
     label: 'Review',
-    description: 'None / View only / Full. The Review/Approval queue for every section’s Partial Access tier above. View only shows the pending queue read-only. Approving needs Full Review access and Full access to the request’s own section and its exact action (for example Products: Edit product), plus the price, image or cost permission when the request changes one, plus Merge duplicates when it merges two products. Nobody can approve their own request. Rejecting needs only Full Review access.',
+    description: 'None / View only / Full. The Review/Approval queue for every section’s Partial Access tier above. View only shows the pending queue read-only. Approving needs Full Review access and Full access to the request’s own section and its exact action (for example Products: Edit product), plus the price, image or cost permission when the request changes one. Nobody can approve their own request. Rejecting needs only Full Review access.',
     permissions: [
       // View-tier section (Part 557 slice 5): reading the pending queue
       // (routes/reviewQueue.ts GET / and GET /:id) admits a 'view' grant; the
