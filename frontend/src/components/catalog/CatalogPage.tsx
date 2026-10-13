@@ -1033,16 +1033,16 @@ async function readImageFilesAsDataUrls(
   return results.filter(Boolean)
 }
 
-/** Open picker for one image and return data URL for immediate preview/save. */
-/** Open picker for multiple images and return data URLs. */
-async function pickMultipleImagesAsDataUrls(): Promise<string[]> {
-  const files = await new Promise<File[]>((resolve) => {
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = 'image/*'
-    input.multiple = true
-    input.onchange = () => resolve(Array.from(input.files || []))
-    input.click()
+/**
+ * Open the shared picker for several images and return them as data URLs. A cancelled picker settles with none (the old
+ * one waited for `change` forever), and screenshots that arrive after that -- a camera returning late -- go to
+ * `onLateImages` as a read in progress, so they are not dropped.
+ */
+async function pickMultipleImagesAsDataUrls(onLateImages?: (images: Promise<string[]>) => void): Promise<string[]> {
+  const files = await pickFiles({
+    accept: 'image/*',
+    maxCount: CATALOG_SUBMISSION_MAX_SCREENSHOTS,
+    onLateChange: onLateImages ? (late) => onLateImages(readImageFilesAsDataUrls(late)) : undefined,
   })
   return readImageFilesAsDataUrls(files)
 }
@@ -3225,7 +3225,9 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const questionCharLimit = Math.max(280, Math.min(1500, Number(assistantRequestPolicy?.questionMaxChars || 700) || 700))
   const handleUploadSubmissionImages = async () => {
     try {
-      const images = await pickMultipleImagesAsDataUrls()
+      const images = await pickMultipleImagesAsDataUrls((late) => {
+        late.then(addSubmissionImages).catch((error: unknown) => notify(getCatalogErrorMessage(error, 'Image upload failed'), 'error'))
+      })
       await addSubmissionImages(images)
     } catch (error) {
       notify(getCatalogErrorMessage(error, 'Image upload failed'), 'error')

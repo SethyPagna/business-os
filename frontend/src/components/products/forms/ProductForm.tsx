@@ -664,7 +664,11 @@ function ProductFormContent({
   const nameLocked = isGroupedProduct && !nameUnlocked
   const canManageImages = canManageProductImages(user)
   const aliveRef = useRef(true)
+  // An upload is running (the lock behind imageUploading). Waiting on the OS picker is NOT an upload and holds only
+  // imagePickerWaitingRef: some browsers never say a picker was dismissed, so a form locked on the wait could only
+  // be left by a reload. A tap on the page ends the wait (utils/filePicker.ts) and Save, Cancel and Close never wait on it.
   const imageUploadInFlightRef = useRef(false)
+  const imagePickerWaitingRef = useRef(false)
   const lateImageFilesRef = useRef<File[][]>([])
   const saveInFlightRef = useRef(false)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
@@ -1088,9 +1092,10 @@ function ProductFormContent({
     }
   }
 
-  // Android returns a camera photo through `change` after the focus fallback already released the lock.
+  // Photos from the picker, whether chosen while it was open or handed over later (Android returns a camera photo
+  // through `change` after the focus fallback already ended the wait). They upload now, or queue behind a running upload.
   // A save already in flight has taken its gallery snapshot, so a photo that arrives now could not be linked to it.
-  function receiveLateImageFiles(files: File[]): void {
+  function receiveImageFiles(files: File[]): void {
     if (!aliveRef.current || saveInFlightRef.current) return
     if (imageUploadInFlightRef.current) lateImageFilesRef.current.push(files)
     else void withImageLock(() => uploadImageFiles(files))
@@ -1123,12 +1128,17 @@ function ProductFormContent({
   }
 
   async function uploadPickedImages(options: PickImageFilesOptions = {}): Promise<void> {
-    if (!canManageImages || imageUploading || imageUploadInFlightRef.current) return
+    if (!canManageImages || imageUploading || imageUploadInFlightRef.current || imagePickerWaitingRef.current) return
     const remaining = Math.max(0, imageLimit - imageListRef.current.length - pendingImagesRef.current.length)
     if (!remaining) return
-    await withImageLock(async () => {
-      await uploadImageFiles(await pickFiles({ ...options, maxCount: remaining, onLateChange: receiveLateImageFiles }))
-    })
+    imagePickerWaitingRef.current = true
+    let picked: File[] = []
+    try {
+      picked = await pickFiles({ ...options, maxCount: remaining, onLateChange: receiveImageFiles })
+    } finally {
+      imagePickerWaitingRef.current = false
+    }
+    if (picked.length) receiveImageFiles(picked)
   }
 
   async function retryPendingImage(id: string): Promise<void> {

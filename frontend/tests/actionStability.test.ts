@@ -253,12 +253,18 @@ await runTest('product form image upload and save keep synchronous guards', () =
 
   assert.match(source, /const imageUploadInFlightRef = useRef\(false\)/)
   assert.match(source, /const saveInFlightRef = useRef\(false\)/)
-  assert.match(source, /if \(!canManageImages \|\| imageUploading \|\| imageUploadInFlightRef\.current\) return/)
+  // Waiting on the OS picker has its OWN flag (review finding 7): it stops a second picker opening, but it is not the
+  // upload lock, so it can never be what holds Save, Cancel or Close shut.
+  assert.match(source, /const imagePickerWaitingRef = useRef\(false\)/)
+  assert.match(source, /if \(!canManageImages \|\| imageUploading \|\| imageUploadInFlightRef\.current \|\| imagePickerWaitingRef\.current\) return/)
+  assert.doesNotMatch(source, /(?:disabled|closeDisabled)=\{[^}\n]*imagePickerWaitingRef/, 'no control is disabled by the picker wait')
+  assert.doesNotMatch(source, /if \(saving \|\| saveInFlightRef\.current[^)\n]*imagePickerWaitingRef/, 'and saveForm does not wait for it')
   assert.match(source, /imageUploadInFlightRef\.current = true/)
   assert.match(source, /finally \{[\s\S]*imageUploadInFlightRef\.current = false[\s\S]*setImageUploading\(false\)/)
-  // Both React state and the synchronous ref must block save while upload is
-  // opening the picker or posting bytes. The ref closes the same-tick gap
-  // before imageUploading has rendered.
+  // Both React state and the synchronous ref must block save while photos are
+  // being posted. The ref closes the same-tick gap before imageUploading has
+  // rendered. (Until review finding 7 this also covered the picker being open;
+  // a picker that never reports its dismissal then locked the form for good.)
   assert.match(source, /if \(saving \|\| saveInFlightRef\.current \|\| imageUploading \|\| imageUploadInFlightRef\.current\) return/)
   // Payload construction now passes through the independent cost-edit gate.
   // Keep requiring the synchronous lock before construction, and require the

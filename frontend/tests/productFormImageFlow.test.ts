@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { act } from 'react'
-import { createHarness, propsOf, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
+import { createHarness, expireWaitsSince, propsOf, timerMark, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
 import { classesOf, dimension, gapPx, horizontalPadding } from './tailwindPixels.ts'
 
 // Daily-use A items 3-5, run against the real ProductForm. The photo picker
@@ -23,17 +23,31 @@ document.createElement = ((name: string) => {
   if (name.toLowerCase() === 'input') pickers.push(node)
   return node
 }) as typeof document.createElement
-const focusListeners = new Set<Listener>()
+// What the picker watches the page for: the window regaining focus, a restored page, the first tap (pointer or touch)
+// and the document becoming visible again. The test fires them by hand, the way a browser would, and nothing else.
+const PICKER_WINDOW_EVENTS = new Set(['focus', 'pageshow', 'pointerdown', 'touchstart'])
+const pageListeners = new Map<string, Set<Listener>>()
+const listenersFor = (type: string): Set<Listener> => pageListeners.get(type) ?? pageListeners.set(type, new Set()).get(type)!
 const realAddListener = window.addEventListener
 const realRemoveListener = window.removeEventListener
+const realDocumentAdd = document.addEventListener
+const realDocumentRemove = document.removeEventListener
 window.addEventListener = ((type: string, listener: Listener, ...rest: unknown[]) => {
-  if (type === 'focus') focusListeners.add(listener)
+  if (PICKER_WINDOW_EVENTS.has(type)) listenersFor(type).add(listener)
   else (realAddListener as (...args: unknown[]) => void)(type, listener, ...rest)
 }) as typeof window.addEventListener
 window.removeEventListener = ((type: string, listener: Listener, ...rest: unknown[]) => {
-  if (type === 'focus') focusListeners.delete(listener)
+  if (PICKER_WINDOW_EVENTS.has(type)) listenersFor(type).delete(listener)
   else (realRemoveListener as (...args: unknown[]) => void)(type, listener, ...rest)
 }) as typeof window.removeEventListener
+document.addEventListener = ((type: string, listener: Listener, ...rest: unknown[]) => {
+  if (type === 'visibilitychange') listenersFor(type).add(listener)
+  else (realDocumentAdd as (...args: unknown[]) => void)(type, listener, ...rest)
+}) as typeof document.addEventListener
+document.removeEventListener = ((type: string, listener: Listener, ...rest: unknown[]) => {
+  if (type === 'visibilitychange') listenersFor(type).delete(listener)
+  else (realDocumentRemove as (...args: unknown[]) => void)(type, listener, ...rest)
+}) as typeof document.removeEventListener
 
 const listenersOf = (input: MemoryNode, type: string): Listener[] => [...((input as unknown as { listeners: Map<string, Set<Listener>> }).listeners.get(type) ?? [])]
 async function fire(input: Pending['input'], type: 'change' | 'cancel'): Promise<void> {
@@ -42,7 +56,13 @@ async function fire(input: Pending['input'], type: 'change' | 'cancel'): Promise
     ;(type === 'change' ? input.onchange : input.oncancel)?.({ type })
   })
 }
-const focusWindow = async (): Promise<void> => { await act(async () => { for (const listener of [...focusListeners]) listener() }) }
+const emitPageEvent = async (...types: string[]): Promise<void> => { await act(async () => { for (const type of types) for (const listener of [...listenersFor(type)]) listener({ type }) }) }
+const focusWindow = (): Promise<void> => emitPageEvent('focus')
+// The first touch or click on the page: pointer events where there are any, touch events on the old iOS this is for.
+const tapPage = (): Promise<void> => emitPageEvent('pointerdown', 'touchstart')
+// The page visible again, as after a camera app or a restored page.
+const showPage = (): Promise<void> => emitPageEvent('visibilitychange', 'pageshow')
+const heldPageListeners = (): number => [...pageListeners.values()].reduce((sum, set) => sum + set.size, 0)
 const photo = (name: string): File => new File(['pixels'], name, { type: 'image/jpeg' })
 
 const objectUrls = { created: [] as string[], revoked: [] as string[] }
@@ -87,12 +107,14 @@ try {
     const input = pickers[before]
     assert.ok(input, 'Take Photo opens a picker')
     assert.equal(input.getAttribute('capture'), 'environment', 'Take Photo asks for the rear camera')
-    assert.ok(surface.text().includes('Uploading...'), 'the form is locked while the picker is open')
-    assert.equal(propsOf(saveButton(surface)).disabled, true, 'Save waits for the picker')
+    // Waiting on the picker is not an upload: nothing claims to be uploading and Save, Cancel and Close stay usable
+    // (review finding 7), because some browsers never say the picker was dismissed.
+    assert.ok(!surface.text().includes('Uploading...'), 'waiting on the picker is not shown as an upload')
+    assert.notEqual(propsOf(saveButton(surface)).disabled, true, 'Save does not wait for the picker')
     await fire(input, 'cancel')
     await surface.settle()
-    assert.ok(!surface.text().includes('Uploading...'), 'cancelling the picker releases the form')
-    assert.equal(propsOf(saveButton(surface)).disabled, false, 'Save works again')
+    assert.ok(!surface.text().includes('Uploading...'), 'cancelling the picker leaves the form as it was')
+    assert.notEqual(propsOf(saveButton(surface)).disabled, true, 'Save still works')
     await surface.click(pickerButton(surface, 'Take Photo'))
     assert.equal(pickers.length, before + 2, 'the next tap opens a fresh picker')
     await fire(pickers[before + 1], 'cancel')
@@ -156,7 +178,82 @@ try {
     uploads.length = 0
   }
 
+  // Review finding 7. iOS before 16.4 fires neither `cancel` nor a window `focus` when the picker is dismissed. The form was
+  // held by "Uploading..." the whole time (Save, Cancel and the header Close disabled) and could only be left by a reload.
+  // Waiting on the picker never locks Close, Cancel or Save now; only an upload in flight does, and that is bounded.
+  {
+    const closed: number[] = []
+    const surface = await mountForm('en', { onClose() { closed.push(1) }, onMinimize() {} })
+    const close = surface.find((node) => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === packs.en.close, 'the header Close')
+    const before = pickers.length
+    // The app's own focus and visibility listeners are in the same registry; the picker's are what appears on top of them.
+    const appListeners = heldPageListeners()
+    await surface.click(pickerButton(surface, 'Take Photo'))
+    const first = pickers[before]
+    assert.ok(first, 'Take Photo opens a picker, and the browser reports nothing: no cancel, no focus')
+    assert.ok(heldPageListeners() > appListeners, 'the picker is waiting on the page')
+    for (const [name, control] of [['Close', close], ['Cancel', surface.button(packs.en.cancel)], ['Save', saveButton(surface)], ['Minimize', surface.button(packs.en.minimize)]] as const) {
+      assert.notEqual(propsOf(control).disabled, true, `${name} is not locked by a picker that never reports`)
+    }
+    assert.ok(!surface.text().includes('Uploading...'), 'and the form does not claim an upload is running')
+    await surface.click(pickerButton(surface, 'Take Photo'))
+    assert.equal(pickers.length, before + 1, 'a second press with no tap in between does not open a second picker')
+    // The next real press arrives as a tap first: that ends the wait, and the same press opens a fresh picker.
+    await tapPage()
+    assert.equal(heldPageListeners(), appListeners, 'the tap ended the wait and the picker let go of the page')
+    await surface.click(pickerButton(surface, 'Take Photo'))
+    assert.equal(pickers.length, before + 2, 'the press that follows a tap opens a fresh picker')
+    // A photo the first picker still delivers is attached, not dropped.
+    first.files = [photo('late-after-tap.jpg')]
+    await fire(first, 'change')
+    await surface.waitFor(() => uploads.length === 1, 'the late photo upload')
+    await surface.settle()
+    assert.equal(uploads[0].file.name, 'late-after-tap.jpg')
+    assert.ok(galleryImages(surface).map(pathOf).includes('/uploads/products/probe-1.jpg'), 'and the stored photo lands in the gallery')
+    await fire(pickers[before + 1], 'cancel')
+    await surface.unmount()
+    uploads.length = 0
+  }
+
+  // Cancel and the header Close both leave the form while a picker that never reported is still waiting.
+  for (const control of ['Cancel', 'Close'] as const) {
+    const closed: number[] = []
+    const surface = await mountForm('en', { onClose() { closed.push(1) } })
+    const before = pickers.length
+    await surface.click(pickerButton(surface, 'Choose File'))
+    assert.equal(pickers.length, before + 1)
+    const target = control === 'Close'
+      ? surface.find((node) => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === packs.en.close, 'the header Close')
+      : surface.button(packs.en.cancel)
+    await surface.click(target)
+    assert.deepEqual(closed, [1], `${control} closes the form while the picker is still waiting`)
+    await surface.unmount()
+    await fire(pickers[before], 'cancel')
+  }
+
+  // The page coming back (a camera app, a restored page) ends the wait too, after the same short settle as a focus.
+  {
+    const surface = await mountForm()
+    const before = pickers.length
+    const appListeners = heldPageListeners()
+    await surface.click(pickerButton(surface, 'Choose File'))
+    await showPage()
+    await surface.settle()
+    assert.equal(heldPageListeners(), appListeners, 'the page returning ended the wait')
+    await surface.click(pickerButton(surface, 'Choose File'))
+    assert.equal(pickers.length, before + 2, 'the next press opens a fresh picker without a tap')
+    pickers[before].files = [photo('from-camera.jpg')]
+    await fire(pickers[before], 'change')
+    await surface.waitFor(() => uploads.length === 1, 'the late photo upload')
+    await surface.settle()
+    assert.equal(uploads[0].file.name, 'from-camera.jpg', 'a photo that arrives after the page returned still attaches')
+    await fire(pickers[before + 1], 'cancel')
+    await surface.unmount()
+    uploads.length = 0
+  }
+
   console.log('PASS the product form releases the picker on cancel or focus and uploads a late camera photo')
+  console.log('PASS waiting on a picker that reports nothing never locks Close, Cancel or Save, a tap or the page returning ends the wait, and a late photo attaches')
 
   const tile = (surface: MountedSurface, status: string): MemoryNode | undefined => surface.findAll((node) => node.getAttribute('data-image-tile') === status)[0]
   const alerts = (surface: MountedSurface): string[] => surface.findAll((node) => node.getAttribute('role') === 'alert').map((node) => node.textContent)
@@ -384,12 +481,40 @@ try {
     await surface.unmount()
   }
 
+  // An upload that is really running does lock Save, Cancel and Close, and that lock is bounded: an upload that never
+  // answers fails at its timeout, shows the failed tile, and the form is usable again (review finding 7).
+  {
+    resetProbes()
+    uploadImpl = () => new Promise(() => undefined)
+    const surface = await mountForm('en', { onMinimize() {} })
+    const close = surface.find((node) => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === packs.en.close, 'the header Close')
+    const mark = timerMark()
+    await pickOne(surface, 'slow.jpg')
+    await surface.waitFor(() => uploads.length === 1, 'the upload to start')
+    await surface.settle()
+    for (const [name, control] of [['Close', close], ['Cancel', surface.button(packs.en.cancel)], ['Save', saveButton(surface)], ['Minimize', surface.button(packs.en.minimize)]] as const) {
+      assert.equal(propsOf(control).disabled, true, `${name} waits for an upload that is really running`)
+    }
+    assert.ok(surface.text().includes('Uploading...'))
+    expireWaitsSince(mark)
+    await surface.waitFor(() => Boolean(tile(surface, 'failed')), 'the timed-out upload to fail')
+    await surface.settle()
+    assert.ok(alerts(surface).some((text) => text.includes('took longer')), 'the failure says the upload took too long')
+    for (const [name, control] of [['Close', close], ['Cancel', surface.button(packs.en.cancel)], ['Save', saveButton(surface)], ['Minimize', surface.button(packs.en.minimize)]] as const) {
+      assert.notEqual(propsOf(control).disabled, true, `${name} is usable again once the upload has timed out`)
+    }
+    await surface.unmount()
+  }
+
   console.log('PASS a failed photo tile has icon-only 44 px Retry and Remove that fit a phone, and Save and Minimize refuse until it is retried or removed')
+  console.log('PASS only an upload that is really running locks the form, and an upload that never answers times out and unlocks it')
 } finally {
   URL.createObjectURL = realCreateObjectURL
   URL.revokeObjectURL = realRevokeObjectURL
   window.addEventListener = realAddListener
   window.removeEventListener = realRemoveListener
+  document.addEventListener = realDocumentAdd
+  document.removeEventListener = realDocumentRemove
   document.createElement = realCreateElement as typeof document.createElement
   await harness.close()
 }
