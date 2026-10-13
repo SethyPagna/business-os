@@ -76,6 +76,7 @@ import ProductsHeaderActions from './src/components/products/surfaces/HeaderActi
 import PendingReviewTag from './src/components/shared/PendingReviewTag.tsx'
 import PendingReviewSync from './src/components/shared/PendingReviewSync.tsx'
 import { refreshPendingReviewTargets } from './src/utils/pendingReviewTargets.ts'
+import { AppContext, FALLBACK_APP_CONTEXT } from './src/app/AppContextCore.tsx'
 
 const H = ${JSON.stringify(hosts)}
 const packs = ${JSON.stringify({ en, km })}
@@ -89,8 +90,7 @@ const t = (key) => packs[lang][key] || key
 const rows = waiting ? [
   { section: 'products', entity_type: 'product', entity_id: 2, status: 'open' },
   { section: 'products', entity_type: 'product', entity_id: 7, status: 'open' },
-  { section: 'products', entity_type: 'product', entity_id: null, status: 'open' },
-  { section: 'products', entity_type: 'product', entity_id: null, status: 'open' },
+  ...Array.from({ length: Number(query.get('creates') || 2) }, () => ({ section: 'products', entity_type: 'product', entity_id: null, status: 'open' })),
   { section: 'fees', entity_type: 'fee', entity_id: 1, status: 'open' },
   { section: 'branches', entity_type: 'branch', entity_id: 1, status: 'open' },
 ] : []
@@ -191,16 +191,19 @@ function Page() {
     // The page-level read, as every host page does it, then the rows are measured.
     void refreshPendingReviewTargets('mine').then(() => setReady(true))
   }, [])
+  // The app's own context, in the page's language: the tags and the Add button name read their words from it.
   return (
-    <main style={{ padding: 12, maxWidth: 1180 }} data-ready={ready ? '1' : '0'}>
-      <Toolbar />
-      <InventoryTable />
-      <ProductsRow indented={false} />
-      <ProductsRow indented />
-      <div className="flex flex-wrap gap-3"><ProductsCard indented={false} /><ProductsCard indented /></div>
-      <FeesRow />
-      <div className="flex flex-wrap gap-3"><FeesCard /><BranchCard /></div>
-    </main>
+    <AppContext.Provider value={{ ...FALLBACK_APP_CONTEXT, t, language: lang }}>
+      <main style={{ padding: 12, maxWidth: 1180 }} data-ready={ready ? '1' : '0'}>
+        <Toolbar />
+        <InventoryTable />
+        <ProductsRow indented={false} />
+        <ProductsRow indented />
+        <div className="flex flex-wrap gap-3"><ProductsCard indented={false} /><ProductsCard indented /></div>
+        <FeesRow />
+        <div className="flex flex-wrap gap-3"><FeesCard /><BranchCard /></div>
+      </main>
+    </AppContext.Provider>
   )
 }
 createRoot(document.getElementById('root')).render(<Page />)
@@ -228,10 +231,12 @@ const executablePath = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
 type Box = { left: number; top: number; right: number; bottom: number; width: number; height: number }
 type Measured = {
   boxes: Array<[string, Box]>
-  tags: Array<{ fixture: string; box: Box; svg: Box; position: string; pointerEvents: string; host: Box; contentLeft: number; coveredBy: string; visible: boolean }>
+  tags: Array<{ fixture: string; box: Box; svg: Box; position: string; pointerEvents: string; host: Box; contentLeft: number; coveredBy: string; visible: boolean; name: string | null }>
   scrollWidth: number
   strip: { scrollWidth: number; clientWidth: number; scrollHeight: number; clientHeight: number } | null
-  add: { button: Box; badge: Box | null; label: Box; icon: Box; badgeText: string | null; badgePointerEvents: string | null; badgeLabel: string | null } | null
+  add: { button: Box; badge: Box | null; label: Box; icon: Box; badgeText: string | null; badgePointerEvents: string | null; badgeHidden: string | null; buttonName: string | null } | null
+  /** The browser's accessibility-tree line for the Add button: its accessible NAME, which is what a screen reader says. */
+  addAria: string
 }
 
 // Run in the page: every element that is not the tag (or inside it) is recorded with its box.
@@ -281,10 +286,11 @@ function measureInPage(): Measured {
           contentLeft: Number.isFinite(contentLeft) ? round(contentLeft) : round(box(host).right),
           coveredBy: top ? (top === el || el.contains(top) ? 'the tag' : top.tagName.toLowerCase()) : 'nothing',
           visible: tagBox.width > 0 && (el as HTMLElement).offsetParent !== null,
+          name: el.getAttribute('aria-label'),
         })
         continue
       }
-      if (el.closest('[role="img"][aria-label]')) continue
+      if (el.closest('[role="img"][aria-label], [data-pending-review-count]')) continue
       boxes.push([`${name}#${index++}:${el.tagName.toLowerCase()}`, box(el)])
     }
   }
@@ -292,7 +298,7 @@ function measureInPage(): Measured {
   const addButton = document.querySelector('[data-fixture="toolbar"] button.btn-primary')
   let add: Measured['add'] = null
   if (addButton) {
-    const badge = addButton.querySelector('[role="img"][aria-label]')
+    const badge = addButton.querySelector('[data-pending-review-count]')
     add = {
       button: box(addButton),
       badge: badge ? box(badge) : null,
@@ -300,10 +306,12 @@ function measureInPage(): Measured {
       icon: box(addButton.querySelector('svg') as Element),
       badgeText: badge ? badge.textContent : null,
       badgePointerEvents: badge ? getComputedStyle(badge).pointerEvents : null,
-      badgeLabel: badge ? badge.getAttribute('aria-label') : null,
+      badgeHidden: badge ? badge.getAttribute('aria-hidden') : null,
+      buttonName: addButton.getAttribute('aria-label'),
     }
   }
   return {
+    addAria: '',
     boxes,
     tags,
     scrollWidth: document.documentElement.scrollWidth,
@@ -320,16 +328,17 @@ try {
   for (const language of ['en', 'km'] as const) for (const width of [375, 1280]) {
     const label = `${language} ${width}px`
     try {
-      const measure = async (waiting: boolean): Promise<Measured> => {
+      const measure = async (waiting: boolean, creates = 2): Promise<Measured> => {
         const context = await browser!.newContext({ viewport: { width, height: 900 } })
         const page = await context.newPage()
         const errors: string[] = []
         page.on('pageerror', (error) => errors.push(error.message))
-        await page.goto(`http://127.0.0.1:${address.port}/?lang=${language}&pending=${waiting ? 1 : 0}`)
+        await page.goto(`http://127.0.0.1:${address.port}/?lang=${language}&pending=${waiting ? 1 : 0}&creates=${creates}`)
         await page.locator('main[data-ready="1"]').waitFor({ timeout: 15000 })
         // Let the tags paint (they appear when the store's list lands).
         await page.waitForTimeout(150)
         const result = await page.evaluate(measureInPage)
+        result.addAria = await page.locator('[data-fixture="toolbar"] button.btn-primary').ariaSnapshot()
         assert.deepEqual(errors, [], `${label}: no page errors`)
         await context.close()
         return result
@@ -362,6 +371,7 @@ try {
       assert.equal(byFixture('inventory').length, 2, `${label}: the two tags of the visible layout are on screen`)
       for (const tag of visible) {
         const where = `${label} ${tag.fixture}`
+        assert.equal(tag.name, (language === 'km' ? km : en).pending_review_tag, `${where}: the tag is named in the page's language`)
         assert.equal(tag.position, 'absolute', `${where}: out of the flow`)
         assert.equal(tag.pointerEvents, 'none', `${where}: a tap goes to the row`)
         assert.ok(Math.abs(tag.box.width - 10) < 0.01 && Math.abs(tag.box.height - 10) < 0.01, `${where}: a 10px box, was ${tag.box.width} x ${tag.box.height}`)
@@ -378,8 +388,16 @@ try {
       const add = withTags.add
       assert.ok(add && add.badge, `${label}: the Add button shows a badge for two waiting creates`)
       assert.equal(add.badgeText, '2')
-      assert.match(add.badgeLabel || '', /^.+: 2$/)
       assert.equal(add.badgePointerEvents, 'none')
+      // The count reaches a screen reader through the button's NAME (a button's children are presentational),
+      // read from the browser's own accessibility tree, in the user's language.
+      const plain = without.add!.buttonName || ''
+      assert.ok(plain.length > 0 && !/\d/.test(plain), `${label}: the Add button has a plain name while nothing waits (${plain})`)
+      assert.equal(add.badgeHidden, 'true', `${label}: the badge is decoration, hidden from the accessibility tree`)
+      const waitingLabel = (language === 'km' ? km : en).pending_review_tag
+      assert.equal(add.buttonName, `${plain}, ${waitingLabel}: 2`, `${label}: the name carries the count (saw ${JSON.stringify(add.buttonName)})`)
+      assert.ok(withTags.addAria.includes(`button "${add.buttonName}"`), `${label}: the accessibility tree names the button "${add.buttonName}", saw ${withTags.addAria}`)
+      assert.ok(without.addAria.includes(`button "${plain}"`) && !without.addAria.includes(waitingLabel), `${label}: ${without.addAria}`)
       assert.deepEqual(add.button, without.add!.button, `${label}: the Add button keeps its exact box`)
       assert.deepEqual(add.label, without.add!.label, `${label}: the label keeps its place`)
       assert.deepEqual(add.icon, without.add!.icon, `${label}: the icon keeps its place`)
@@ -388,6 +406,16 @@ try {
       assert.equal(withTags.strip!.scrollWidth, withTags.strip!.clientWidth, `${label}: no horizontal scrollbar appears in the toolbar strip`)
       assert.equal(withTags.strip!.scrollHeight, withTags.strip!.clientHeight, `${label}: nothing is clipped vertically in the toolbar strip`)
       assert.deepEqual(withTags.strip, without.strip, `${label}: the strip keeps its scroll geometry`)
+
+      // 4. Past nine the badge reads "9+", the widest it gets: it must still clear the label and the button's edge.
+      const many = await measure(true, 12)
+      const wide = many.add!
+      assert.equal(wide.badgeText, '9+')
+      assert.equal(wide.buttonName, `${plain}, ${waitingLabel}: 12`, `${label}: the name carries the real count, not 9+`)
+      assert.deepEqual(wide.button, without.add!.button, `${label}: "9+" does not change the button's size`)
+      assert.ok(wide.badge!.left >= wide.button.left && wide.badge!.right <= wide.button.right && wide.badge!.top >= wide.button.top && wide.badge!.bottom <= wide.button.bottom, `${label}: "9+" stays inside the button`)
+      assert.ok(wide.badge!.left >= wide.label.right, `${label}: "9+" starts after the label ends ${JSON.stringify({ badge: wide.badge, label: wide.label })}`)
+      assert.equal(many.strip!.scrollWidth, many.strip!.clientWidth, `${label}: "9+" adds no scrollbar to the strip`)
 
       results.push(`PASS ${label}: ${without.boxes.length} boxes identical with and without ${withTags.tags.length} tags + badge; add button ${add.button.width}x${add.button.height}, badge ${add.badge.width}x${add.badge.height} at ${add.badge.left - add.button.left}px from the button's left`)
     } catch (error) {

@@ -108,7 +108,7 @@ test('the tag appears for a waiting record: a 10px amber hourglass named in the 
   assert.match(html, /^<span role="img" aria-label="Waiting for review" title="Waiting for review" class="/)
   assert.match(html, GLYPH, 'the 10px hourglass icon')
   const tokens = classOf(html)
-  for (const token of ['pointer-events-none', 'absolute', 'h-2.5', 'w-2.5', 'text-amber-600', 'dark:text-amber-400', 'left-0', 'top-1']) {
+  for (const token of ['pointer-events-none', 'absolute', 'h-2.5', 'w-2.5', 'text-amber-700', 'dark:text-amber-400', 'left-0', 'top-1']) {
     assert.ok(tokens.includes(token), `tag class carries ${token}: ${tokens.join(' ')}`)
   }
   language = 'km'
@@ -124,7 +124,7 @@ test('the tag is out of the flow and takes no box of its own', async () => {
   await waiting(open('products', 'product', 7))
   assertOutOfFlow(tagMarkup(tagModule()), 'PendingReviewTag')
   const source = read('components/shared/PendingReviewTag.tsx')
-  assert.match(source, /export const PENDING_REVIEW_TAG_CLASS = 'pointer-events-none absolute h-2\.5 w-2\.5 text-amber-600 dark:text-amber-400'/)
+  assert.match(source, /export const PENDING_REVIEW_TAG_CLASS = 'pointer-events-none absolute h-2\.5 w-2\.5 text-amber-700 dark:text-amber-400'/)
 })
 
 test('a tag answers only for its own record, section and type; a merged row answers for any of its ids', async () => {
@@ -144,7 +144,8 @@ test('product creates have no record yet: they are counted on the Add button, ne
   await waiting(open('products', 'product', null))
   assert.equal(tagMarkup(tagModule()), '', 'a create waiting does not tag product 7')
   const one = badge(tagModule())
-  assert.match(one, /role="img" aria-label="Waiting for review: 1" title="Waiting for review: 1"/)
+  assert.match(one, /^<span aria-hidden="true" data-pending-review-count="1" class="/, 'decoration only: the count is spoken through the button\'s name')
+  assert.doesNotMatch(one, /role="img"|aria-label|title=/, 'a role="img" inside a button is never announced, so the badge carries none')
   assert.match(one, />1<\/span>$/)
   await waiting(open('products', 'product', null), open('products', 'product', null), open('products', 'product', 5))
   assert.match(badge(tagModule()), />2<\/span>$/, 'edits of existing products are not creates')
@@ -152,6 +153,74 @@ test('product creates have no record yet: they are counted on the Add button, ne
   assert.match(badge(tagModule()), />9\+<\/span>$/)
   await waiting(open('fees', 'fee', null))
   assert.equal(badge(tagModule()), '', 'another section\'s requests are not product creates')
+})
+
+// A button's accessible name replaces its content, so the count must be IN the name (refuter S3; the
+// browser's accessibility tree for the real header is read in tests/pendingReviewTagLayout.test.ts).
+test('the Add button\'s accessible name carries the waiting count, in the user\'s language', async () => {
+  const name = (api: Record<string, any>) => render(React.createElement(function Probe() {
+    return React.createElement('button', { 'aria-label': api.usePendingReviewName('products', 'product', 'Adjust stock') })
+  }))
+  await nothingWaiting()
+  assert.equal(name(tagModule()), '<button aria-label="Adjust stock"></button>', 'nothing waiting: the name is unchanged')
+  await waiting(open('products', 'product', null), open('products', 'product', null), open('products', 'product', 5))
+  assert.equal(name(tagModule()), '<button aria-label="Adjust stock, Waiting for review: 2"></button>', 'edits of existing products are not creates')
+  await waiting(...Array.from({ length: 12 }, () => open('products', 'product', null)))
+  assert.match(name(tagModule()), /aria-label="Adjust stock, Waiting for review: 12"/, 'the name carries the real count even where the badge shows 9+')
+  language = 'km'
+  try {
+    assert.match(name(tagModule()), new RegExp(`aria-label="Adjust stock, ${km.pending_review_tag}: 12"`))
+  } finally { language = 'en' }
+  await waiting(open('fees', 'fee', null))
+  assert.equal(name(tagModule()), '<button aria-label="Adjust stock"></button>', 'another section\'s requests are not product creates')
+})
+
+// WCAG 1.4.11: the parts of the tag that carry meaning need 3:1 against what they sit on. The colours are read
+// out of the class constants, so changing a class changes this test's input.
+const palette = require('tailwindcss/colors') as Record<string, Record<string, string>>
+const luminance = (hex: string): number => {
+  const [r, g, b] = [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4))
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+const contrast = (a: string, b: string): number => {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x)
+  return (hi + 0.05) / (lo + 0.05)
+}
+const colourOf = (classes: string, prefix: string): string => {
+  const match = new RegExp(`(?:^|\\s)${prefix}-(\\w+)-(\\d+)(?:\\s|$)`).exec(classes)
+  assert.ok(match, `${prefix} colour in: ${classes}`)
+  return palette[match[1]][match[2]]
+}
+function colourContract(source = read('components/shared/PendingReviewTag.tsx')) {
+  const tagClass = /PENDING_REVIEW_TAG_CLASS = '([^']*)'/.exec(source)![1]
+  const badgeClass = /PENDING_REVIEW_BADGE_CLASS = '([^']*)'/.exec(source)![1]
+  const brass = /--ui-accent:\s*(#[0-9a-fA-F]{6})/.exec(read('styles/main.css'))![1]
+  const lightGlyph = colourOf(tagClass.replace(/dark:\S+/g, ''), 'text')
+  const darkGlyph = colourOf(tagClass.split(' ').filter((token) => token.startsWith('dark:')).map((token) => token.slice(5)).join(' '), 'text')
+  return {
+    glyphOnWhite: contrast(lightGlyph, '#ffffff'),
+    glyphOnBlueHover: contrast(lightGlyph, palette.blue[50]),
+    glyphOnDark: Math.min(contrast(darkGlyph, palette.slate[900]), contrast(darkGlyph, palette.slate[800])),
+    badgeOnBrass: contrast(colourOf(badgeClass, 'bg'), brass),
+    countOnBadge: contrast(colourOf(badgeClass, 'text'), colourOf(badgeClass, 'bg')),
+  }
+}
+
+test('the hourglass and the count dot keep 3:1 against what they sit on (and the count 4.5:1 on its dot)', () => {
+  const c = colourContract()
+  assert.ok(c.glyphOnWhite >= 3, `hourglass on a white row: ${c.glyphOnWhite.toFixed(2)}`)
+  assert.ok(c.glyphOnBlueHover >= 3, `hourglass on the blue hover row: ${c.glyphOnBlueHover.toFixed(2)}`)
+  assert.ok(c.glyphOnDark >= 3, `hourglass on the dark rows: ${c.glyphOnDark.toFixed(2)}`)
+  assert.ok(c.badgeOnBrass >= 3, `count dot on the brass Add button: ${c.badgeOnBrass.toFixed(2)}`)
+  assert.ok(c.countOnBadge >= 4.5, `count on its dot: ${c.countOnBadge.toFixed(2)}`)
+})
+
+test('MUTANT the old colours (amber-400 dot, amber-600 hourglass) fail the contrast contract', () => {
+  const source = read('components/shared/PendingReviewTag.tsx')
+  const dot = colourContract(source.replace('bg-amber-200', 'bg-amber-400'))
+  assert.ok(dot.badgeOnBrass < 3, `amber-400 on brass is ${dot.badgeOnBrass.toFixed(2)}, the 2.39:1 the refuter measured`)
+  const glyph = colourContract(source.replace("h-2.5 w-2.5 text-amber-700", 'h-2.5 w-2.5 text-amber-600'))
+  assert.ok(glyph.glyphOnBlueHover < 3, `amber-600 on the blue hover row is ${glyph.glyphOnBlueHover.toFixed(2)}`)
 })
 
 test('the Add-button badge stays inside the button\'s own box', async () => {
@@ -293,10 +362,13 @@ test('Products: one loader per page, and every product write that is answered "q
 })
 
 test('Products Add button: a pending-create count badge inside the button\'s own box', () => {
-  assert.match(header, /import \{ PendingReviewCountBadge \} from '\.\.\/\.\.\/shared\/PendingReviewTag'/)
+  assert.match(header, /import \{ PendingReviewCountBadge, usePendingReviewName \} from '\.\.\/\.\.\/shared\/PendingReviewTag'/)
   const add = header.slice(header.indexOf('{onAdd ? ('), header.indexOf('{primaryActionSlot}'))
   assert.match(add, /className=\{`\$\{primaryToolbarButtonClassName\} relative min-w-max`\}/)
   assert.match(add, /<PendingReviewCountBadge section="products" entityType="product" \/>/)
+  assert.match(header, /const addName = usePendingReviewName\('products', 'product', addLabel\)/)
+  assert.match(add, /aria-label=\{addName\}/, 'the badge is announced because the count is in the button\'s name')
+  assert.doesNotMatch(add, /aria-label=\{addLabel\}/)
   assert.ok(add.indexOf('<PendingReviewCountBadge') > add.indexOf('<span className="min-w-0 truncate">'), 'the badge follows the label, so it never reorders the icon and text')
 })
 
