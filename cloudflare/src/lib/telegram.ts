@@ -1188,9 +1188,11 @@ export type ShiftReportSession = {
  *  - `closedBy`: the account that closed it (closed_by_user_name). Shown only when
  *    it is not the cashier, who is already on the Cashier row. `closedById` is that
  *    account's id: when given the two are compared by account, so a cashier renamed
- *    since opening is still the cashier; without it, by name.
+ *    since opening is still the cashier; without it, by name. `closedEarlier` marks an
+ *    administrator's close at a time a cashier could not have chosen: the row then reads
+ *    "Closed at an earlier time by" and is shown whoever the closer is.
  */
-export type ShiftReportOptions = { amendedBy?: string | null; reopenedBy?: string | null; closedBy?: string | null; closedById?: number | null }
+export type ShiftReportOptions = { amendedBy?: string | null; reopenedBy?: string | null; closedBy?: string | null; closedById?: number | null; closedEarlier?: boolean }
 
 export type ShiftReportFigures = {
   invoices: number
@@ -1312,6 +1314,7 @@ const REVIEW_LABELS: Partial<Record<string, TelegramLabelKey>> = {
   change_ambiguous: 'reviewChange',
   sale_limit_reached: 'reviewLimit',
   cash_method_unresolved: 'reviewCashMethod',
+  closed_at_earlier_time: 'reviewEarlierClose',
 }
 /** A cash review's reasons, from lib/shiftReconciliation.ts's codes, in the chat's words. */
 function reviewReasons(codes: readonly string[]): string {
@@ -1370,7 +1373,8 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // A cashier closing their own till is already on the Cashier row; naming them
   // again would be noise on the commonest close of all.
   const closerIsCashier = options.closedById != null ? options.closedById === shift.user_id : closedBy.toLowerCase() === cashier
-  if (closedBy && !closerIsCashier) lines.push(labeled('closedBy', closedBy))
+  if (closedBy && options.closedEarlier) lines.push(labeled('closedEarlierBy', closedBy))
+  else if (closedBy && !closerIsCashier) lines.push(labeled('closedBy', closedBy))
   const reopenedBy = cleanLine(options.reopenedBy, 60)
   if (reopenedBy) lines.push(labeled('reopenedBy', reopenedBy))
   const amendedBy = cleanLine(options.amendedBy, 60)

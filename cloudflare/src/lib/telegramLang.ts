@@ -201,6 +201,7 @@ const LABELS = {
   // (បើក...ឡើងវិញ, shift_action_reopen) and its close verb (បិទ).
   closedBy: { en: 'Closed by', km: 'បិទដោយ' },
   reopenedBy: { en: 'Reopened by', km: 'បើកឡើងវិញដោយ' },
+  closedEarlierBy: { en: 'Closed at an earlier time by', km: 'បិទនៅម៉ោងមុនដោយ' },
   from: { en: 'From', km: 'ពី' },
   to: { en: 'To', km: 'ទៅ' },
   totalMoved: { en: 'Total moved', km: 'បានផ្ទេរសរុប', localizeValue: true },
@@ -313,6 +314,7 @@ const LABELS = {
   reviewChange: { en: 'Change given is ambiguous', km: 'ប្រាក់អាប់មិនច្បាស់' },
   reviewLimit: { en: 'Too many sales to total', km: 'ការលក់ច្រើនពេកមិនអាចបូកសរុប' },
   reviewCashMethod: { en: 'No payment method is set as cash', km: 'គ្មានវិធីទូទាត់ណាកំណត់ជាសាច់ប្រាក់' },
+  reviewEarlierClose: { en: 'Closed at an earlier time', km: 'បិទនៅម៉ោងមុន' },
   // The sale's unpaid amount stays a positive memo -- see formatShiftReport
   // and formatDaySummary. This label is deliberately separate from supplier
   // and store credit, which are different financial concepts.
