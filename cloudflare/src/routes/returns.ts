@@ -49,7 +49,7 @@ import { isAnonymousCustomer } from '../lib/anonymousCustomer'
 import {
   assertReturnCreateCapacity, assertReturnCreatePlanBounds, canonicalReturnCreateIntent,
   projectedSaleStatusForReturnCreate, projectedSaleStatusForReturnCreateV1, replacementSaleIdSql, returnCreateGuardStatement,
-  returnCreateIdSql, RETURN_CREATE_REQUEST_BYTES, type ReturnCreateResponse,
+  returnCreateIdSql, returnCreateOwnMovementCountSql, RETURN_CREATE_REQUEST_BYTES, type ReturnCreateResponse,
 } from '../lib/returnCreateAction'
 // RET-B F4: units an imported sale's row says already came back
 // (sale_items.returned_quantity) count as returned in every capacity read.
@@ -1429,13 +1429,20 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   // of an already-recorded return still answers with what was recorded: the
   // version gate below is about NEW writes, not about re-reading history.
   let occupiedRequestId: number | null = null
+  // The newest stock movement before this request writes anything: the
+  // postcondition counts only rows above it as this return's own (see
+  // returnCreateOwnMovementCountSql). Read in the same statement as the
+  // receipt, so it costs no extra D1 query; MAX(id) is one rowid seek.
+  let movementIdFloor: number | null = null
   const readReceipt = async () => {
-    const row = await db.prepare(`SELECT r.return_id,r.sale_id,r.request_digest,r.response_json,o.id AS occupied_id
+    const row = await db.prepare(`SELECT r.return_id,r.sale_id,r.request_digest,r.response_json,o.id AS occupied_id,
+      (SELECT COALESCE(MAX(id),0) FROM inventory_movements) AS movement_id_floor
       FROM (SELECT 1) seed
       LEFT JOIN return_create_receipts r ON r.actor_id=? AND r.request_id=?
       LEFT JOIN returns o ON o.client_request_id=? AND o.client_request_id<>'' LIMIT 1`)
-      .get<{ return_id: number | null; sale_id: number | null; request_digest: string; response_json: string; occupied_id: number | null }>([authenticatedActorId, clientRequestId, clientRequestId])
+      .get<{ return_id: number | null; sale_id: number | null; request_digest: string; response_json: string; occupied_id: number | null; movement_id_floor: number }>([authenticatedActorId, clientRequestId, clientRequestId])
     occupiedRequestId = row?.occupied_id ?? null
+    if (movementIdFloor == null) movementIdFloor = Number(row?.movement_id_floor ?? 0)
     return row?.return_id == null ? undefined : { ...row, return_id: row.return_id }
   }
   const priorReceipt = await readReceipt()
@@ -2418,8 +2425,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     AND (SELECT COUNT(*) FROM return_replacement_items WHERE return_id=${returnIdExpression})=json_extract(@expectedJson,'$.replacement_items')
     AND (SELECT COUNT(*) FROM sale_item_batch_allocations WHERE sale_item_id IN(
       SELECT id FROM sale_items WHERE sale_id=${replacementLines.length ? replacementSaleExpression : 'NULL'}))=json_extract(@expectedJson,'$.sale_allocations')
-    AND (SELECT COUNT(*) FROM inventory_movements WHERE reference_id=${returnIdExpression}
-      AND movement_type IN ('return','${DAMAGE_IN_MOVEMENT}','${REPLACEMENT_OUT_MOVEMENT}','${TAGGED_DISPOSAL_MOVEMENT_TYPE}'))=json_extract(@expectedJson,'$.movements')
+    AND ${returnCreateOwnMovementCountSql(returnIdExpression, ['return', DAMAGE_IN_MOVEMENT, REPLACEMENT_OUT_MOVEMENT, TAGGED_DISPOSAL_MOVEMENT_TYPE])}=json_extract(@expectedJson,'$.movements')
     AND (SELECT COUNT(*) FROM sale_record_events WHERE source_kind='return_create' AND source_id=@receiptId
       AND generation=0)=json_extract(@expectedJson,'$.event')
     AND EXISTS(SELECT 1 FROM audit_logs WHERE entity='return_create' AND entity_id=@receiptId)
@@ -2450,6 +2456,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   `
   statements.push(returnCreateGuardStatement(operationId, 'postcondition', postcondition, {
     ...commonGuardParams, expectedJson, saleId: requestedSaleId, returnClientRequestId: clientRequestId,
+    movementIdFloor: Number(movementIdFloor ?? 0),
   }))
   statements.push({ sql: 'DELETE FROM return_create_guards WHERE operation_id=@operationId', params: { operationId } })
 

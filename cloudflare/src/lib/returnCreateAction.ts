@@ -399,6 +399,31 @@ export function returnCreateGuardStatement(
   }
 }
 
+/**
+ * The number of stock movements THIS create batch wrote for the new return.
+ *
+ * inventory_movements.reference_id has no reference kind: a sale's
+ * cancellation, line decrease, add-items Undo or grouped status writes
+ * 'return' / 'damage_in' rows keyed by the SALE id, and two AUTOINCREMENT
+ * sequences collide freely. Counting by reference_id alone made return id N
+ * uncreatable once sale N had such a row -- and a refused insert does not
+ * consume the id, so every later customer return got the same id and the
+ * same refusal (AL-MONEY-REPRO.md side finding M). Product membership cannot
+ * separate them (the cancelled sale and the return may share the product),
+ * and the reason text is caller-supplied.
+ *
+ * What does separate them exactly: every row this batch inserts gets an id
+ * above the table's MAX(id) read before the batch (AUTOINCREMENT never reuses
+ * or goes back), and every row that already existed is at or below it. A
+ * same-id row another writer commits between that read and this batch is
+ * counted, so the postcondition refuses and the request is retried -- it
+ * fails closed, never over-counts silently.
+ */
+export function returnCreateOwnMovementCountSql(returnIdSql: string, movementTypes: readonly string[], floorParam = '@movementIdFloor'): string {
+  return `(SELECT COUNT(*) FROM inventory_movements WHERE reference_id=${returnIdSql} AND id>${floorParam}
+      AND movement_type IN (${movementTypes.map((type) => `'${type}'`).join(',')}))`
+}
+
 export function returnCreateIdSql(requestParam = '@returnClientRequestId'): string {
   return `(SELECT id FROM returns WHERE client_request_id=${requestParam} AND client_request_id<>'')`
 }
