@@ -3213,64 +3213,16 @@ export async function getBusinessSummaryPeriodRows(env: Env, f: SalesFilters, gr
 }
 
 export async function getBusinessSummaryDayRows(env: Env, f: SalesFilters): Promise<BusinessSummaryDayRow[]> {
-  {
-    const snapshot = await readSalesReportSnapshot(env, f)
-    const dateFor = (sale: ReportScalarRow) => {
-      const raw = String(sale.created_at || '')
-      const parsed = new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`)
-      return new Date(parsed.getTime() + 7 * 3_600_000).toISOString().slice(0, 10)
-    }
-    return [...aggregateReportSnapshot(snapshot, dateFor).entries()].map(([date, bucket]) => {
-      const totals = exactReportTotals(bucket, snapshot, BUCKET_MONEY_PLACES)
-      const diagnostic = reportMoneyDiagnostic(totals)!
-      return attachReportDiagnostic({ date, cost_missing_snapshot_lines: diagnostic.unknown_cost_lines, ...totals }, diagnostic)
-    }).sort((a, b) => a.date.localeCompare(b.date))
+  const snapshot = await readSalesReportSnapshot(env, f)
+  const dateFor = (sale: ReportScalarRow) => {
+    const raw = String(sale.created_at || '')
+    const parsed = new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`)
+    return new Date(parsed.getTime() + 7 * 3_600_000).toISOString().slice(0, 10)
   }
-  const db = getDb(env)
-  const periodExprS = localDateExpr('sales.created_at')
-  const periodExprJoined = localDateExpr('s.created_at')
-  const { sql: whereLevel, params: paramsLevel } = whereActiveSales('sales', f)
-  const { sql: whereCost, params: paramsCost } = whereActiveSales('s', f)
-
-  const [levelRows, costRows, returnedByPeriod, cancelledByPeriod] = await Promise.all([
-    db.prepare(`
-      SELECT ${periodExprS} AS period, COUNT(*) AS tx_count,
-             COALESCE(SUM(subtotal_usd), 0) AS gross_sales_usd,
-             COALESCE(SUM(discount_usd), 0) AS store_discount_usd,
-             COALESCE(SUM(membership_discount_usd), 0) AS membership_discount_usd,
-             COALESCE(SUM(tax_usd), 0) AS tax_usd,
-             COALESCE(SUM(CASE WHEN COALESCE(delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE delivery_fee_usd END), 0) AS delivery_usd,
-             COALESCE(SUM(CASE WHEN delivery_fee_paid_by = 'store' THEN delivery_fee_usd ELSE 0 END), 0) AS store_delivery_usd,
-             ${RECOGNIZED_LEVEL_COLUMNS}
-      FROM sales
-      ${CUSTOMER_REFUND_JOIN}sales.id
-      WHERE ${whereLevel}
-      GROUP BY ${periodExprS}
-    `).all<Record<string, number> & { period: string }>(paramsLevel),
-    db.prepare(`
-      SELECT ${periodExprJoined} AS period,
-             ${ITEM_COST_COLUMNS}
-      FROM sale_items si
-      JOIN sales s ON s.id = si.sale_id
-      WHERE ${whereCost} AND ${ITEM_COST_STATUS_CLAUSE}
-      GROUP BY ${periodExprJoined}
-    `).all<ItemCostRow & { period: string }>(paramsCost),
-    returnedCostByBucket(env, f, periodExprJoined),
-    cancelledCountByBucket(env, f, periodExprS),
-  ])
-
-  const costByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.cost_usd)]))
-  const missingByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.missing_snapshot_lines)]))
-  const pendingCostByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.pending_cost_usd)]))
-  const itemDiscountByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.item_discount_usd)]))
-  const pendingItemDiscountByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.pending_item_discount_usd)]))
-  const unvaluedCostByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.unvalued_cost_usd)]))
-  const levelByPeriod = new Map((levelRows || []).map((r) => [r.period, r as Record<string, number>]))
-  const rows = unionBuckets(levelByPeriod.keys(), cancelledByPeriod).map((period) => ({
-    date: period,
-    cost_missing_snapshot_lines: missingByPeriod.get(period) || 0,
-    ...deriveTotals(levelByPeriod.get(period) || VOID_ONLY_LEVEL, costByPeriod.get(period) || 0, returnedByPeriod.get(period) || 0, { costUsd: pendingCostByPeriod.get(period) || 0, itemDiscountUsd: itemDiscountByPeriod.get(period) || 0, pendingItemDiscountUsd: pendingItemDiscountByPeriod.get(period) || 0, cancelledTxCount: cancelledByPeriod.get(period) || 0, unvaluedCostUsd: unvaluedCostByPeriod.get(period) || 0 }),
-  }))
-  return rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+  return [...aggregateReportSnapshot(snapshot, dateFor).entries()].map(([date, bucket]) => {
+    const totals = exactReportTotals(bucket, snapshot, BUCKET_MONEY_PLACES)
+    const diagnostic = reportMoneyDiagnostic(totals)!
+    return attachReportDiagnostic({ date, cost_missing_snapshot_lines: diagnostic.unknown_cost_lines, ...totals }, diagnostic)
+  }).sort((a, b) => a.date.localeCompare(b.date))
 }
 

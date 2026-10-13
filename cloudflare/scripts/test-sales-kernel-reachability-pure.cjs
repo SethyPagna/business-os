@@ -1,21 +1,16 @@
 'use strict'
-// getSalesDayReport, getSalesGroupedTotals and getProductSalesRanking answer from the
-// verified snapshot (readSalesReportSnapshot / getSalesGroupedReport / getProductSalesReport).
-// Until 6.0.120 / 6.0.161 each ALSO carried 50-100 lines of the retired SQL path after an
-// unconditional `return`, so the file read as if two implementations existed and a fix
-// applied to the wrong one looked right in review (Sonnet area review of release 2,
-// finding 10; Opus correctness hunt H6).
+// getSalesDayReport, getSalesGroupedTotals, getProductSalesRanking and getBusinessSummaryDayRows answer from
+// the verified snapshot (readSalesReportSnapshot / getSalesGroupedReport / getProductSalesReport). None may
+// carry a second, retired SQL path after an unconditional `return`: the file would read as if two
+// implementations existed and a fix applied to the wrong one would look right in review.
 //
 // The proof is the compiler's own control-flow analysis, not a grep: with
 // allowUnreachableCode:false it reports TS7027 on every statement that cannot run.
 //   1. positive control: the same instrument DOES flag a function with a dead tail, so
 //      "no diagnostics" below cannot be an instrument that sees nothing;
-//   2. no TS7027 inside any of the three functions;
+//   2. no TS7027 anywhere in the module and none inside any of the four functions;
 //   3. each function names only its snapshot path: no `.prepare(` of its own and none of
 //      the retired helpers is called from it.
-//
-// getBusinessSummaryDayRows still carries the same kind of dead tail; it is deliberately not
-// asserted here (not part of this lane) -- see the lane report.
 //
 // Run (from cloudflare/): node scripts/test-sales-kernel-reachability-pure.cjs
 const assert = require('node:assert/strict')
@@ -71,7 +66,16 @@ const SNAPSHOT_FUNCTIONS = {
     retired: ['whereActiveSales(', 'recognizedExpr('],
     minStatements: 1,
   },
+  getBusinessSummaryDayRows: {
+    live: ['readSalesReportSnapshot(', 'aggregateReportSnapshot(', 'exactReportTotals('],
+    retired: ['deriveTotals(', 'returnedCostByBucket(', 'cancelledCountByBucket(', 'unionBuckets(', 'whereActiveSales(', 'localDateExpr('],
+    minStatements: 2,
+  },
 }
+
+check('no statement anywhere in the module is unreachable', () => {
+  assert.deepEqual(hits.map((d) => source.getLineAndCharacterOfPosition(d.start).line + 1), [])
+})
 
 for (const [name, expectation] of Object.entries(SNAPSHOT_FUNCTIONS)) {
   const declaration = functionNamed(source, name)
