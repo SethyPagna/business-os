@@ -343,11 +343,17 @@ async function main() {
 
   await section('5. an amend by another account (already shipped) goes through the same route-driven path', async () => {
     const revision = (await (await call('owner', 'GET', `/${opened.dara.id}/history`)).json()).shift.revision
-    const sent = await act('sok', 'PATCH', `/${opened.dara.id}`, { expected_revision: revision, reason: 'Recount', closing_counted_usd: 77 }, 200)
-    assert.equal(sent.options.amendedBy, 'sok')
-    assert.deepEqual(anyActorRow(sent.text), [actorRow('both', 'shift_amended_by', 'sok')], sent.text)
-    for (const mode of ['en', 'km']) assert.deepEqual(anyActorRow(await replay(sent, mode)), [actorRow(mode, 'shift_amended_by', 'sok')])
-    for (const secret of ['+85522222222', 'sok@example.com', 'Sok Full Name']) assert.ok(!sent.text.includes(secret), `${secret} must not reach the chat`)
+    const amendment = { expected_revision: revision, reason: 'Recount', closing_counted_usd: 77 }
+    // Another cashier cannot reach dara's shift under per_account (audit A1): not found, and no report goes out.
+    const sendsBefore = sends.length
+    assert.equal((await call('sok', 'PATCH', `/${opened.dara.id}`, amendment)).status, 404)
+    assert.equal(sends.length, sendsBefore, 'a refused amend sends nothing')
+    // The shift-review administrator reaches every shift, and the report names them.
+    const sent = await act('owner', 'PATCH', `/${opened.dara.id}`, amendment, 200)
+    assert.equal(sent.options.amendedBy, 'owner')
+    assert.deepEqual(anyActorRow(sent.text), [actorRow('both', 'shift_amended_by', 'owner')], sent.text)
+    for (const mode of ['en', 'km']) assert.deepEqual(anyActorRow(await replay(sent, mode)), [actorRow(mode, 'shift_amended_by', 'owner')])
+    for (const secret of ['+85533333333', 'owner@example.com', 'Owner Full Name']) assert.ok(!sent.text.includes(secret), `${secret} must not reach the chat`)
   })
 
   await section('6. a replacement opening after a cancel is a fresh open, not a reopen: no actor row', async () => {

@@ -43,6 +43,10 @@ app.use('*', async (c, next) => {
   }
   const db = getDb(c.env); const target = await readShiftById(db, legacyClose ? Number(body.shift_id) : Number(match?.[1]))
   if (!target) return c.json({ error: 'Shift not found.' }, 404)
+  // Visibility first, and before the replay lookup: a receipt this account earned while the
+  // shift was visible (shop_wide, since switched back) must not hand the row back (A1).
+  // Cancel is administrator-only and an administrator sees every shift, so it skips this.
+  if (action !== 'cancel' && !canSeeShift(user, await readShiftPolicy(db), target)) return c.json({ error: 'Shift not found.' }, 404)
   // The same split the handlers enforce, applied before the replay lookup so
   // a caller who may not act cannot probe a receipt: amend follows
   // canAmendShift (any shifts user), cancel is administrator-only, and the
@@ -426,6 +430,12 @@ export function canManageShifts(user: SessionUser): boolean {
  * The clause is SQL, not a filter applied after the read, so a hidden row
  * never leaves D1; and a caller-supplied `user_id` narrows within it and can
  * never widen it.
+ *
+ * Every route that addresses ONE shift by id holds the same line (audit A1):
+ * history, amend, close, live close and reopen answer 404 "Shift not found."
+ * for a shift canSeeShift refuses -- never 403, which would confirm the id
+ * exists -- and do so before the action's own permission or state checks.
+ * Cancel is administrator-only and an administrator sees every shift.
  */
 function shiftVisibility(user: SessionUser, policy: ShiftPolicy) {
   const reviewer = canManageShifts(user)
@@ -1232,6 +1242,7 @@ app.post('/close', async (c) => {
   if (branchId != null && !(await branchExists(db, branchId))) return c.json({ error: 'Branch not found.' }, 400)
   const shift = await readShiftById(db, Number(body.shift_id))
   if (!shift) return c.json({ error: 'Shift not found.' }, 404)
+  if (!canSeeShift(user, await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
   if (body.branch_id != null && shift.branch_id !== branchId) return c.json({ error: 'Shift branch does not match the requested branch.' }, 400)
   if (shift.cancelled_at) return c.json({ error: 'This shift was cancelled. Register a replacement opening first.' }, 409)
   if (!canMutateShift(user, shift)) return c.json({ error: 'Only the shift owner or an administrator can close this shift.' }, 403)
@@ -1282,6 +1293,7 @@ app.post('/:id/close', async (c) => {
   if (!additionalUsd.ok || !additionalKhr.ok) return c.json({ error: 'Additional change used must be 0 or more, or left blank.' }, 400)
   const db = getDb(c.env); const shift = await readShiftById(db, id)
   if (!shift) return c.json({ error: 'Shift not found.' }, 404)
+  if (!canSeeShift(user, await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
   // No branch-activity check: closing is allowed on a retired branch (N7).
   if (!canMutateShift(user, shift)) return c.json({ error: 'Only the shift owner or an administrator can close this shift.' }, 403)
   if (shift.cancelled_at) return c.json({ error: 'A cancelled shift cannot be closed.' }, 409)
@@ -1356,6 +1368,7 @@ app.post('/:id/reopen', async (c) => {
   const floatUsd = floatUsdParsed.value; const floatKhr = floatKhrParsed.value
   const db = getDb(c.env); const parent = await readShiftById(db, id)
   if (!parent) return c.json({ error: 'Shift not found.' }, 404)
+  if (!canSeeShift(user, await readShiftPolicy(db), parent)) return c.json({ error: 'Shift not found.' }, 404)
   if (!canMutateShift(user, parent)) return c.json({ error: 'Only the shift owner or an administrator can reopen this shift.' }, 403)
   // A reopen opens a new drawer segment on the parent's branch -- the same
   // thing POST /open refuses on a retired branch.
@@ -1391,6 +1404,9 @@ app.patch('/:id', async (c) => {
   if (!reason) return c.json({ error: 'A reason is required.' }, 400)
   const db = getDb(c.env); const before = await readShiftById(db, id)
   if (!before) return c.json({ error: 'Shift not found.' }, 404)
+  // Amending is open to any POS account (14 Sep ruling) but only over a record it can see; a
+  // shift it cannot see answers as if absent, before its state is revealed by the checks below.
+  if (!canSeeShift(user, await readShiftPolicy(db), before)) return c.json({ error: 'Shift not found.' }, 404)
   if (before.cancelled_at) return c.json({ error: 'A cancelled shift cannot be amended.' }, 409)
   if (!canAmendShift(user, before)) return c.json({ error: 'Shift permission is required to amend this shift.' }, 403)
   // A record on a retired branch is read-only (N7): amending it would rewrite
