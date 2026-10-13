@@ -92,6 +92,23 @@ await check('a read that cannot be aborted (the native file picker) is still dro
   await pending
   assert.deepEqual(out.applied, [])
 })
+await check('a replaced read that settles late leaves the newer read abortable', async () => {
+  const gate = createImportFileReadGate()
+  const out = recorder()
+  const stale = deferred<string>()
+  const current = deferred<string>()
+  let currentSignal!: AbortSignal
+  const first = gate.read(() => stale.promise, out.apply, out.fail)
+  const second = gate.read((signal) => { currentSignal = signal; return current.promise }, out.apply, out.fail)
+  stale.resolve('stale')
+  await first
+  gate.cancel()
+  assert.equal(currentSignal.aborted, true, 'cancel() still reaches the read that is in flight')
+  current.resolve('late')
+  await second
+  assert.deepEqual(out.applied, [])
+})
+
 
 await check('only the current read reports a failure; an aborted or stale one stays silent', async () => {
   const gate = createImportFileReadGate()
