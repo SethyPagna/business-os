@@ -75,7 +75,8 @@ const recordFor = (entity: string, before: unknown, after: unknown) => auditRows
  * audits (products.ts PRODUCT_FIELD_AUDIT_COLUMNS, fees.ts FEE_AUDIT_COLUMNS,
  * contacts.ts contactDiffKeys, returns.ts returnUpdateValues, promotions.ts
  * the rule input, users.ts the user/role diffs, settings.ts the key list,
- * lib/telegramTopicSetting.ts the /settopic save of one topic key).
+ * lib/telegramTopicSetting.ts the /settopic save of one topic key,
+ * lib/reviewApply.ts an approved expense delete's before-image).
  */
 const BEFORE_AFTER: Array<{
   entity: string
@@ -88,7 +89,8 @@ const BEFORE_AFTER: Array<{
    */
   dir?: 'routes' | 'lib'
   before: Record<string, unknown>
-  after: Record<string, unknown>
+  /** null for a delete: the removed record is the before-image. */
+  after: Record<string, unknown> | null
   /** A label that must appear once the pair is rendered. */
   expects: string
 }> = [
@@ -113,6 +115,8 @@ const BEFORE_AFTER: Array<{
   // not say it is WHERE shift reports go.
   { entity: 'settings', writtenBy: 'telegramTopicSetting.ts', dir: 'lib', before: { telegram_topic_shift: '' }, after: { telegram_topic_shift: '12' }, expects: `${en.telegram_topics_title} - ${en.telegram_topic_shift_label}` },
   { entity: 'fee', writtenBy: 'fees.ts', before: { amount_usd: 5 }, after: { amount_usd: 6 }, expects: en.amount_usd },
+  // A reviewer approving a queued expense delete writes the removed expense (FEE_DELETE_AUDIT_COLUMNS).
+  { entity: 'fee', writtenBy: 'reviewApply.ts', dir: 'lib', before: { amount_usd: 5 }, after: null, expects: en.amount_usd },
   { entity: 'return', writtenBy: 'returns.ts', before: { reason: 'Damaged box' }, after: { reason: 'Wrong item' }, expects: en.reason },
 ]
 
