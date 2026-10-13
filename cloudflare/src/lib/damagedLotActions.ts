@@ -129,6 +129,14 @@ export type HoldAsTaggedInput = {
   /** The lot the units were taken from, when one lot covered the whole move. */
   batchId: number | null
   quantity: number
+  /**
+   * A removal no single lot covered (spread across lots, or one lot plus units that sit under no lot): what
+   * each source came to, one held row each with its own lot and USD unit cost. A later Restore then puts every
+   * unit back on the lot it came from -- one batch-less row would restore branch_stock only and split the
+   * lot ledger from it. `batchId: null` is the part no lot held. The parts must add up to `quantity`; absent,
+   * the whole move is one row on `batchId`.
+   */
+  lotSplit?: ReadonlyArray<{ batchId: number | null; quantity: number; unitCostUsd: number | null }>
   tag: StockConditionTag
   source: Extract<StockConditionSource, 'remove' | 'restock'>
   reason: string | null
@@ -152,22 +160,26 @@ export type HoldAsTaggedInput = {
 export function planHoldAsTagged(input: HoldAsTaggedInput): StockWriteStatement[] {
   const quantity = Number(input.quantity)
   if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Held quantity must be positive')
+  const rows = input.lotSplit?.length ? input.lotSplit : [{ batchId: input.batchId, quantity, unitCostUsd: input.cost.unitCostUsd }]
+  if (Math.abs(rows.reduce((sum, row) => sum + Number(row.quantity), 0) - quantity) > 0.000000001 || rows.some((row) => !(Number(row.quantity) > 0))) {
+    throw new Error('The held rows must add up to the held quantity')
+  }
   return [
     productStockGuardStatement([input.productId], 'active'),
-    createDamagedLotStatement({
+    ...rows.map((row) => createDamagedLotStatement({
       productId: input.productId,
       productName: input.productName,
       branchId: input.branchId,
-      batchId: input.batchId,
+      batchId: row.batchId,
       returnIdSql: 'NULL',
-      quantity,
+      quantity: Number(row.quantity),
       reason: input.reason,
       userId: input.actor.userId,
       userName: input.actor.userName,
       conditionTag: input.tag,
       source: input.source,
-      unitCostUsd: input.cost.unitCostUsd,
-    }),
+      unitCostUsd: row.unitCostUsd,
+    })),
     movementStatement({
       productId: input.productId,
       productName: input.productName,

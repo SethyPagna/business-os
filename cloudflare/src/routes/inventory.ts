@@ -36,7 +36,7 @@ import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, identityBarcodeKey, type ProductIdentityRow } from '../lib/productIdentity'
 import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery, parseRankedIds } from '../lib/productSearchQuery'
-import { fifoRemovalAllocations, isStockRemovalConflict, listBatchesForProduct, parseReceiptSellingPrice, planBranchStockRemoval, planReceiptSellingPrice, planReceiveBatchStock, planRemoveStockAcrossBatches, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptSellingPriceRow, type StockWriteStatement } from '../lib/productBatches'
+import { fifoRemovalAllocations, isStockRemovalConflict, listBatchesForProduct, parseReceiptSellingPrice, planBranchStockRemoval, planMovementLotShares, planReceiptSellingPrice, planReceiveBatchStock, planRemoveStockAcrossBatches, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptSellingPriceRow, type StockWriteStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
 import { normalizeTypedDate } from '../lib/batchCode'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, FREE_QUANTITY_NOT_RECEIPT, parseFreeQuantity, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
@@ -2008,6 +2008,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   let resolvedBatchId: number | null = batchIdRequested
   let lotCode: string | null = null
   let removedBatchQuantities: Array<{ batchId: number; quantity: number }> = []
+  // Units of the removal that no lot held (stock that predates lots); with removedBatchQuantities, the whole quantity.
+  let removedRemainder = 0
   let removalCostByBatch = new Map<number, number | null>()
   let addMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = preflightAddMovementCost
   let removeMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = null
@@ -2028,9 +2030,13 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // changing the cost recorded for stock that was already removed.
   try {
   if (useBatchLedger && type === 'remove') {
+    // A named lot that is no longer active holds nothing that can be removed: the removal batch's lot guard
+    // (productBatches.planRemoveStockAcrossBatches) requires pb.is_active = 1, so the same fact is read here and
+    // answered "only 0 available" -- never passed on to be refused in the batch as a "refresh and try again" 409
+    // that a refresh cannot fix.
     const costRows = batchIdRequested != null
       ? await db.prepare(`
-          SELECT pb.id, pb.unit_cost_usd, COALESCE(bbs.quantity, 0) AS available
+          SELECT pb.id, pb.unit_cost_usd, CASE WHEN pb.is_active = 1 THEN COALESCE(bbs.quantity, 0) ELSE 0 END AS available
           FROM product_batches pb
           LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=@branchId
           WHERE pb.id = @batchId AND pb.variant_product_id = @productId
@@ -2124,6 +2130,14 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
       fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
     })
+    // A removal no single lot covered is held as one row per source lot (each with its own lot and cost) plus one
+    // for units no lot held, so a later Restore puts every unit back where it came from.
+    const lotSplit = useBatchLedger && resolvedBatchId == null && removedBatchQuantities.length
+      ? [
+        ...removedBatchQuantities.map((entry) => ({ batchId: entry.batchId as number | null, quantity: entry.quantity, unitCostUsd: removalCostByBatch.get(entry.batchId) ?? null })),
+        ...(removedRemainder > 0.000000001 ? [{ batchId: null, quantity: removedRemainder, unitCostUsd: productCostSnapshot?.cost_price_usd ?? null }] : []),
+      ]
+      : undefined
     return planHoldAsTagged({
       productId: targetProductId,
       productName: targetProductName,
@@ -2131,6 +2145,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       branchName: branch?.name || null,
       batchId: useBatchLedger ? resolvedBatchId : null,
       quantity: Math.abs(delta),
+      lotSplit,
       tag,
       source: 'remove',
       reason,
@@ -2456,6 +2471,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       const allocations = batchIdRequested != null ? [{ batchId: batchIdRequested, quantity }] : capturedRemovalAllocations ?? []
       const plan = planRemoveStockAcrossBatches({ productId: targetProductId, branchId, quantity, allocations })
       removedBatchQuantities = plan.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) }))
+      removedRemainder = plan.remainder
       if (batchIdRequested != null) {
         resolvedBatchId = batchIdRequested
       } else {
@@ -2470,7 +2486,10 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         // one relies on assertProductsActive above, as it always has.
         ...(conditionTag && batchIdRequested != null ? [productStockGuardStatement([targetProductId], 'active')] : []),
         ...plan.statements,
-        ...(conditionTag ? holdRemovedStatements(conditionTag) : [movementRowStatement()]),
+        // A movement that names no single lot also records what it took from each lot,
+        // directly after it, so a Revert can put the units back on those lots.
+        ...(conditionTag ? holdRemovedStatements(conditionTag)
+          : [movementRowStatement(), ...(resolvedBatchId == null ? planMovementLotShares(plan.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) }))) : [])]),
       ]), atomicMark, { status: 200, body: adjustResponseBody() })
     } catch (err) {
       if (err instanceof StockMutationBudgetError) throw err
@@ -3068,6 +3087,8 @@ app.post('/move-row', async (c) => {
               VALUES (@productId, @productName, @branchId, @branchName, 'move_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
         params: { productId: sourceProductId, productName: source.name, branchId, branchName: branch?.name || null, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: removal.batchIds.length === 1 && removal.remainder === 0 ? removal.batchIds[0] : null },
       },
+      // A move that names no single source lot records what it took from each, directly after its movement.
+      ...(removal.batchIds.length === 1 && removal.remainder === 0 ? [] : planMovementLotShares(removal.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) })))),
       {
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
               VALUES (@productId, @productName, @branchId, @branchName, 'move_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP,

@@ -1331,3 +1331,32 @@ export function planRemoveStockAcrossBatches(input: {
     remainder: remaining,
   }
 }
+
+/**
+ * What a removal took from each lot, recorded against its movement. 0084 stamps a
+ * movement's batch_id only when ONE lot covers every unit, so a removal spread across
+ * lots (or one lot plus units that sit under no lot) is a batch-less movement; without
+ * this record its Revert could only move branch_stock and the product total, leaving the
+ * lots drained and the till (which reads lots) blind to the restored units.
+ *
+ * The rows go in dated_stock_count_batch_actions, the table a dated count already uses
+ * for exactly this (migration 0035: movement, lot, signed quantity -- negative is taken).
+ * lib/stockRevert.ts reads them from the ROOT movement of a chain, so Revert, Redo and
+ * Revert-of-Redo all move the same lots.
+ *
+ * The statement MUST directly follow its movement INSERT in the caller's db.batch: it
+ * names the movement as the highest id, which inside one batch is the row just written.
+ * Callers pass the takes of a removal whose movement has no batch_id; an empty list
+ * (nothing came off a lot) writes nothing.
+ */
+export function planMovementLotShares(takes: ReadonlyArray<{ batchId: number; quantity: number }>): StockWriteStatement[] {
+  const shares = takes.filter((take) => Number(take.quantity) > 0).map((take) => ({ batchId: Number(take.batchId), quantity: Math.abs(Number(take.quantity)) }))
+  if (!shares.length) return []
+  if (shares.some((share) => !Number.isSafeInteger(share.batchId) || share.batchId <= 0)) throw new Error('A recorded lot share needs a valid received date.')
+  return [{
+    sql: `INSERT INTO dated_stock_count_batch_actions (movement_id, batch_id, quantity)
+          SELECT (SELECT MAX(id) FROM inventory_movements), json_extract(s.value, '$.batchId'), -json_extract(s.value, '$.quantity')
+          FROM json_each(@lotShares) s ORDER BY s.key`,
+    params: { lotShares: JSON.stringify(shares) },
+  }]
+}
