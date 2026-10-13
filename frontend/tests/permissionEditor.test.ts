@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import ts from 'typescript'
-import { isActionOverriddenOff } from '../src/utils/permissionActions.ts'
+import { PERMISSION_ACTIONS, isActionOverriddenOff } from '../src/utils/permissionActions.ts'
+import { PERMISSION_SECTIONS } from '../src/components/users/permissionDefinitions.ts'
 import { normalizePermissionState } from '../src/utils/permissions.ts'
 
 const source = fs.readFileSync(new URL('../src/components/users/PermissionEditor.tsx', import.meta.url), 'utf8')
@@ -217,3 +218,58 @@ const dashboardSource = fs.readFileSync(new URL('../src/components/dashboard/Das
 assert.match(dashboardSource, /hasPermission\('dashboard_export'\)/, 'Dashboard export menu must stay gated behind the dashboard_export permission')
 
 console.log('PASS Dashboard has its own page-access permission (default None for every non-admin role) plus an independent export-button permission')
+
+// Action rows render under on/off keys (POS) through the same helper as under three-way sections, so the two
+// branches cannot drift. Behaviour is pinned by the render cases in permissionEditorKhmer.test.ts.
+assert.equal((source.match(/const renderActionRows = /g) || []).length, 1, 'one definition of the action panel')
+assert.match(source, /renderActionRows\(permission, tier, 'mt-2'\)/, 'the three-way branch uses it')
+assert.match(source, /renderActionRows\(permission, active \? 'full' : 'none'/, 'the on/off branch uses it, reading on as Full and off as None')
+assert.equal((source.match(/renderActionRows\(permission, /g) || []).length, 2, 'exactly the two branches call it')
+assert.match(source, /min-w-0 break-words text-xs \$\{overriddenOff/, 'an action label wraps: the row carries no other copy of it, so an ellipsis would hide the words that explain the action')
+assert.doesNotMatch(source, /min-w-0 truncate text-xs \$\{overriddenOff/)
+console.log('PASS both editor branches share one action panel')
+
+// Plan 4.2 stale copy. The English fallback in the tables must be the pack's English, or the editor reads
+// differently with and without a translator.
+const sectionOf = (key: string) => PERMISSION_SECTIONS.find((section) => section.key === key)!
+const permissionOf = (key: string) => PERMISSION_SECTIONS.flatMap((section) => section.permissions).find((permission) => permission.key === key)!
+const actionOf = (section: string, key: string) => PERMISSION_ACTIONS[section].find((action) => action.key === key)!
+
+assert.equal(en.perm_destructive_delete, 'Destructive imports: replace all and replace columns')
+assert.equal(permissionOf('destructive_delete').label, en.perm_destructive_delete)
+assert.equal(en.perm_act_products_import_replace_all, 'Import: replace all and replace columns')
+assert.equal(actionOf('products', 'import_replace_all').label, en.perm_act_products_import_replace_all)
+for (const key of ['perm_destructive_delete', 'perm_act_products_import_replace_all']) {
+  assert.ok(km[key].includes('ជំនួសទាំងអស់') && km[key].includes('ជំនួសជួរឈរ'), `${key}: Khmer names both replace-all and replace-columns`)
+}
+
+assert.match(en.perm_act_inventory_adjust, /opening stock on an existing product/)
+assert.equal(actionOf('inventory', 'adjust').label, en.perm_act_inventory_adjust)
+assert.ok(km.perm_act_inventory_adjust.includes('ស្តុកដើម') && km.perm_act_inventory_adjust.includes('ផលិតផលដែលមានស្រាប់'), 'Khmer uses the pack’s words for opening stock and existing product')
+
+assert.match(en.perm_act_products_merge_duplicates, /edits that merge/)
+assert.equal(actionOf('products', 'merge_duplicates').label, en.perm_act_products_merge_duplicates)
+assert.ok(km.perm_act_products_merge_duplicates.includes('បញ្ចូលគ្នាទិន្នន័យស្ទួន'), 'the Khmer row keeps the pack’s merge-duplicates name')
+
+// The Products description says a merging edit is queued, and what approving it needs, without promising the
+// approval succeeds (until the approve-performs-merge slice ships, approving a merging edit is refused).
+assert.equal(permissionOf('products').reviewDescription, en.perm_products_review_desc)
+assert.match(en.perm_products_review_desc, /edit that would merge this product into another one/)
+assert.match(en.perm_products_review_desc, /unless Merge duplicates is switched off/)
+assert.match(en.perm_products_review_desc, /Approving a merge needs the reviewer to hold Merge duplicates/)
+assert.doesNotMatch(en.perm_products_review_desc, /approving it (?:performs|completes|applies)/i, 'must not promise the merge happens on approval')
+assert.ok(km.perm_products_review_desc.includes('បញ្ចូលគ្នាទិន្នន័យស្ទួន') && km.perm_products_review_desc.includes('សិទ្ធិមួយផ្នែក'))
+
+// The Review description states what approving needs.
+assert.equal(sectionOf('review').description, en.perm_section_review_desc)
+assert.equal(permissionOf('review').reviewDescription, en.perm_review_view_desc)
+for (const fragment of [/Full Review access/, /own section and its exact action/, /price, image or cost permission/, /Merge duplicates/, /approve their own request/, /Rejecting needs only Full Review access/]) {
+  assert.match(en.perm_section_review_desc, fragment)
+}
+assert.match(en.perm_review_view_desc, /approving also needs Full access to each request’s own section and action/)
+for (const key of ['perm_section_review_desc', 'perm_review_view_desc']) {
+  assert.ok(km[key].includes('សិទ្ធិពេញលេញ'), `${key}: Khmer keeps Full Access as សិទ្ធិពេញលេញ`)
+}
+assert.ok(km.perm_section_review_desc.includes('ថ្លៃដើម') && !km.perm_section_review_desc.includes('តម្លៃដើម'), 'cost is ថ្លៃដើម, as the pack’s glossary pins')
+assert.ok(km.perm_section_review_desc.includes('បញ្ចូលគ្នាទិន្នន័យស្ទួន'))
+console.log('PASS the stale permission copy from the plan’s audit is corrected in both packs and in the table fallbacks')
