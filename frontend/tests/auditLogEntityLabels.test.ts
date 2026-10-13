@@ -189,6 +189,23 @@ test('every field label a fixture produces is readable in the Khmer pack too', (
   }
 })
 
+test('every column an expense audit records reads in Khmer', () => {
+  // Found, not listed: a delete records the whole expense, so each column the
+  // Worker audits must have a pack word, not a Title-Cased English column.
+  const columns = new Set<string>()
+  for (const [file, name] of [['routes/fees.ts', 'FEE_AUDIT_COLUMNS'], ['lib/reviewApply.ts', 'FEE_DELETE_AUDIT_COLUMNS']]) {
+    const list = stripComments(read(`../../cloudflare/src/${file}`)).match(new RegExp(`const ${name} = \\[([\\s\\S]*?)\\] as const`))
+    assert.ok(list, `${file} no longer declares ${name}`)
+    for (const match of list[1].matchAll(/'([a-z_]+)'/g)) columns.add(match[1])
+  }
+  assert.ok(columns.size >= 9, `expected the nine expense columns, found ${[...columns].join(', ')}`)
+  for (const column of columns) {
+    assert.match(entityFieldLabel(column, labelKm), /[\u1780-\u17FF]/, `expense column ${column} reads '${entityFieldLabel(column, labelKm)}' in the Khmer pack`)
+  }
+  // POSITIVE CONTROL: a column with no pack word has no Khmer, so the loop above can fail.
+  assert.doesNotMatch(entityFieldLabel('fee_teleporter_id', labelKm), /[\u1780-\u17FF]/)
+})
+
 test('every Telegram topic key the Worker writes reads as its Settings words, in both packs', () => {
   // Found, not listed: the fixed list both writers draw from (routes/settings.ts
   // and the /settopic save validate against it). A family added there without a
