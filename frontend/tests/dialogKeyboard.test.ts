@@ -36,7 +36,7 @@ const useDialogKeyboard = exportsBag.useDialogKeyboard!
 
 const first = makeButton('first')
 const last = makeButton('last')
-const panel = { querySelector: () => first, querySelectorAll: () => [first, last] }
+const panel = { querySelector: () => first, querySelectorAll: () => [first, last], closest: () => null }
 const press = (key: string, extra: Record<string, unknown> = {}) => {
   const event = { key, shiftKey: false, defaultPrevented: false, preventDefault() { this.defaultPrevented = true }, ...extra }
   for (const fn of [...listeners]) fn(event)
@@ -72,6 +72,20 @@ assert.equal(escapes, 1, 'the older dialog stays silent while another is above i
 cleanups.pop()!()
 press('Escape')
 assert.equal(escapes, 2, 'the older dialog answers again once the top one is gone')
+
+// A dialog made inert (a confirm opened from inside it) sits under another surface: it must not answer the keyboard.
+let underneathEscapes = 0
+let underneathInert = true
+const underneath = { querySelector: () => first, querySelectorAll: () => [first, last], closest: (selector: string) => (selector === '[inert]' && underneathInert ? {} : null) }
+useDialogKeyboard({ current: underneath }, { enabled: true, promptOpen: false, onEscape: () => { underneathEscapes += 1 }, onPromptEscape: () => {} })
+press('Escape')
+assert.equal(underneathEscapes, 0, 'an inert dialog ignores Escape, so the surface above it can keep it')
+doc.activeElement = last
+assert.equal(press('Tab').defaultPrevented, false, 'and ignores Tab')
+underneathInert = false
+press('Escape')
+assert.equal(underneathEscapes, 1, 'once the surface above is gone the dialog answers again')
+cleanups.pop()!()
 
 cleanups.pop()!()
 assert.equal(listeners.length, 0, 'closing removes the listener')

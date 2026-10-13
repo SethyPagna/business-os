@@ -29,6 +29,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
+import { pickFiles } from '../../utils/filePicker.ts'
 import { SectionShell } from './catalogUi'
 import CatalogPreviewSurface from './CatalogPreviewSurface'
 import PortalFooter from './legal/LegalPages.tsx'
@@ -1327,6 +1328,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const publicPortalNavRef = useRef<HTMLElement | null>(null)
   const mediaUploadControllersRef = useRef(new Map<string, AbortController>())
   const mediaUploadInFlightTargetsRef = useRef(new Set<string>())
+  const lateMediaFilesRef = useRef(new Map<string, File>())
   const mediaUploadPreviewUrlsRef = useRef(new Map<string, string>())
   const mediaUploadOriginalValuesRef = useRef(new Map<string, string>())
   const aliveRef = useRef(true)
@@ -2226,18 +2228,17 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     updateMediaUploadState(targetKey, { type: 'success', publicPath: '', processingStatus: 'idle' })
   }
 
-  async function uploadPortalMedia(target: unknown, accept = 'image/*'): Promise<string> {
+  // A file that reaches the picker after its fallback released the target (Android camera) is uploaded here as `lateFile`.
+  async function uploadPortalMedia(target: unknown, accept = 'image/*', lateFile?: File): Promise<string> {
     const targetKey = String(target || '').trim()
     if (!targetKey) return ''
-    if (!beginKeyedAction(mediaUploadInFlightTargetsRef, targetKey)) return ''
+    if (lateFile && !aliveRef.current) return ''
+    if (!beginKeyedAction(mediaUploadInFlightTargetsRef, targetKey)) {
+      if (lateFile) lateMediaFilesRef.current.set(targetKey, lateFile)
+      return ''
+    }
     try {
-      const file = await new Promise<File | null>((resolve) => {
-        const input = document.createElement('input')
-        input.type = 'file'
-        input.accept = accept
-        input.onchange = () => resolve(input.files?.[0] || null)
-        input.click()
-      })
+      const file = lateFile ?? (await pickFiles({ accept, onLateChange: ([late]) => { void uploadPortalMedia(targetKey, accept, late) } }))[0]
       if (!file) return ''
 
       const previousValue = getPortalMediaValue(targetKey)
@@ -2295,6 +2296,11 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       finishKeyedAction(mediaUploadInFlightTargetsRef, targetKey)
       mediaUploadControllersRef.current.delete(targetKey)
       mediaUploadOriginalValuesRef.current.delete(targetKey)
+      const queued = lateMediaFilesRef.current.get(targetKey)
+      if (queued) {
+        lateMediaFilesRef.current.delete(targetKey)
+        void uploadPortalMedia(targetKey, accept, queued)
+      }
     }
   }
 

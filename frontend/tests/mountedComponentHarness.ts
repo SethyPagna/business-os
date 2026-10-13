@@ -508,7 +508,10 @@ export function propsOf(node: MemoryNode): Record<string, unknown> {
 }
 
 export function accessibleText(node: MemoryNode): string {
-  return [node.textContent, node.getAttribute('aria-label'), node.getAttribute('title')].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
+  // A tooltip that repeats the aria-label or the visible text is the same name once, not a second word: an icon-only
+  // button that names itself in both places reads 'Close', not 'Close Close'.
+  const parts = [node.textContent, node.getAttribute('aria-label'), node.getAttribute('title')].filter((part): part is string => Boolean(part))
+  return [...new Set(parts)].join(' ').replace(/\s+/g, ' ').trim()
 }
 
 export interface MountOptions {
