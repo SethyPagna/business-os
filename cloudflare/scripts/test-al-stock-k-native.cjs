@@ -411,6 +411,18 @@ const PATCHES = {
         '        CASE WHEN @request_user_id IS NOT NULL AND @request_user_id = @user_id THEN @request_device_tz ELSE s.device_tz END'].join('\n'),
       to: '        s.device_name,\n        s.device_tz' },
   ],
+  // A legacy Undo flips the status whatever it was (the pre-fix flip). Must turn K9a RED.
+  'undo-unconditional': [
+    { name: 'undo-unconditional', file: ACTION_HISTORY,
+      from: '            WHERE id = @id AND status IS @fromStatus`, params: { status: nextStatus, id: existing.id, fromStatus: existing.status } },',
+      to: '            WHERE id = @id`, params: { status: nextStatus, id: existing.id } },' },
+  ],
+  // The restore's audit row is a swallowed best-effort write again. Must turn K10b RED.
+  'restore-audit-swallowed': [
+    { name: 'restore-audit-swallowed', file: 'src/routes/backups.ts',
+      from: "        await auditOrThrow(c.env, user.id, user.username || null, 'restore', 'backup', sourceDir, {",
+      to: "        await audit(c.env, user.id, user.username || null, 'restore', 'backup', sourceDir, {" },
+  ],
   // The reject reason is taken as-is again. Must turn K7 and K7b RED.
   'no-reason-cap': [
     { name: 'no-reason-cap-type', file: REVIEW_QUEUE,
@@ -751,27 +763,40 @@ async function main() {
       return { status: bk.status, name: bk.body && bk.body.item && bk.body.item.result && bk.body.item.result.packageId }
     }
     // K10b runs first: a restore re-inserts every audit row of its backup, so the fault injected for the restore audit must not exist in the snapshot.
-    await check('K10b', 'a restore that cannot be audited does not report success (the audit write is part of the operation)', 'high', async (t) => {
+    const maintenanceFlag = async () => !!(await R.q1("SELECT value FROM system_flags WHERE key='maintenance'"))
+    await check('K10b', 'a restore that cannot be audited is not reported done: maintenance holds until it is cleared and the same restore is retried, which records it', 'high', async (t) => {
       const bk = await backupName()
       await withTrigger(R, 'al_restore_audit_down', "CREATE TRIGGER al_restore_audit_down BEFORE INSERT ON audit_logs WHEN NEW.action='restore' BEGIN SELECT RAISE(ABORT,'al: audit store unavailable'); END", async () => {
         const restored = await R.api('POST', '/api/backups', { type: 'import-folder', sourceDir: bk.name })
         const audited = (await R.q("SELECT COUNT(*) n FROM audit_logs WHERE entity='backup' AND action='restore'"))[0].n > 0
         t.eq('a restore reported done with no audit row', restored.status === 200 && !audited, false)
-        t.note('restore status ' + restored.status + '; audited=' + audited)
+        t.eq('the refusal says the data was restored but not recorded', [restored.body && restored.body.code, restored.body && restored.body.data_restored], ['restore_audit_not_recorded', true])
+        t.eq('maintenance still holds every other write while the restore is unrecorded', await maintenanceFlag(), true)
+        t.note('restore status ' + restored.status + '; audited=' + audited + '; D1 statements: ' + restored.d1)
       })
+      // Recovery, with the audit store back: clear maintenance (force), retry the same restore; this time it is recorded.
+      const clearedHold = await R.api('POST', '/api/backups/maintenance/clear', { force: true })
+      const retried = await R.api('POST', '/api/backups', { type: 'import-folder', sourceDir: bk.name })
+      t.eq('recovery: clear, then retry the same restore', [clearedHold.status, retried.status], [200, 200])
+      t.eq('the retried restore is on record exactly once', (await R.q("SELECT COUNT(*) n FROM audit_logs WHERE entity='backup' AND action='restore'"))[0].n, 1)
+      t.eq('maintenance is released once the restore is recorded', await maintenanceFlag(), false)
     })
-    await check('K10a', 'a restore does not erase the audit trail of what happened after the backup (the edit that was rolled back stays on record)', 'high', async (t) => {
+    // K10a was NEEDS-OWNER-DECISION in the reproduction. Owner, 13 Oct (relayed by the coordinator): "replace with the backup".
+    // A restore replacing the audit trail with the backup's is the chosen design, so it is pinned here as an expectation.
+    await check('K10a', 'owner ruling 13 Oct ("replace with the backup"): a restore replaces the audit trail with the backup\'s and records itself', 'owner-ruling', async (t) => {
       const created = await mkFee('Rent', 10)
       const fee = created.body.fee
       const bk = await backupName()
+      const restoresInBackup = (await R.q("SELECT COUNT(*) n FROM audit_logs WHERE entity='backup' AND action='restore'"))[0].n
       const e = await R.api('PUT', '/api/fees/' + fee.id, { expected_updated_at: fee.updated_at, amount_usd: 77 })
-      const editAudit0 = (await R.q("SELECT COUNT(*) n FROM audit_logs WHERE entity='fee' AND action='update'"))[0].n
+      const editRows = async () => (await R.q("SELECT COUNT(*) n FROM audit_logs WHERE entity='fee' AND action='update' AND CAST(entity_id AS REAL)=?", Number(fee.id)))[0].n
+      const editAudit0 = await editRows()
       const restored = await R.api('POST', '/api/backups', { type: 'import-folder', sourceDir: bk.name })
       t.eq('fixture: create, backup, edit, restore all succeeded', [created.status, bk.status, e.status, restored.status], [201, 200, 200, 200])
       t.eq('fixture: the edit was audited before the restore', editAudit0, 1)
       t.eq('the fee is back to the backed-up amount', (await R.q1('SELECT amount_usd a FROM fees WHERE id=?', fee.id)).a, 10)
-      t.eq('the pre-restore edit audit row is still on record', (await R.q("SELECT COUNT(*) n FROM audit_logs WHERE entity='fee' AND action='update'"))[0].n, 1)
-      t.eq('the restore itself is on record', (await R.q("SELECT COUNT(*) n FROM audit_logs WHERE entity='backup' AND action='restore'"))[0].n, 1)
+      t.eq('the audit trail is the backup\'s: the rolled-back edit\'s row went with it', await editRows(), 0)
+      t.eq('the restore itself is on record (one more restore row than the backup holds)', (await R.q("SELECT COUNT(*) n FROM audit_logs WHERE entity='backup' AND action='restore'"))[0].n, restoresInBackup + 1)
       t.note('restore: ' + restored.status + '; D1 statements of the restore request: ' + restored.d1)
     })
     }

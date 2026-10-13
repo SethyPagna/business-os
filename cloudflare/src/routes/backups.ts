@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import type { Env } from '../index'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { audit } from '../lib/audit'
+import { audit, auditOrThrow } from '../lib/audit'
 import { hasPermission } from '../lib/permissions'
 import { canViewAcquisitionCosts, canEditAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import {
@@ -224,14 +224,34 @@ app.post('/', async (c) => {
         await updateMaintenance(c.env, maintenance.token, { phase: 'failed', error: message })
         throw error
       }
-      const maintenanceReleased = await endMaintenance(c.env, maintenance.token)
       // The whole database just rolled back to this backup -- the single most
-      // consequential action in the app, and until now the one with no trail.
-      await audit(c.env, user.id, user.username || null, 'restore', 'backup', sourceDir, {
-        restored_key: restore.key,
-        maintenance_released: maintenanceReleased,
-      })
+      // consequential action in the app. K10b: its record is part of the
+      // operation, written while maintenance still holds every other write
+      // (the restored audit_logs are the backup's; owner, 13 Oct: a restore
+      // replaces with the backup, so this row is the trail of the restore
+      // itself). If it cannot be written the restore is NOT reported done:
+      // maintenance stays on (phase failed) until an administrator clears it
+      // (POST /maintenance/clear, force) and retries the same restore, a full
+      // delete+reinsert that writes the row.
+      try {
+        await auditOrThrow(c.env, user.id, user.username || null, 'restore', 'backup', sourceDir, {
+          restored_key: restore.key,
+        })
+      } catch (error) {
+        const message = 'Backup data was restored, but the restore could not be recorded in the audit log. Maintenance stays on: clear maintenance, then retry the same restore.'
+        await updateMaintenance(c.env, maintenance.token, { phase: 'failed', error: message })
+        const job = await storeSystemJob(c.env, { id: crypto.randomUUID(), status: 'failed', progress: 100,
+          message, error: message, result: { success: false, data_restored: true, audit_recorded: false, maintenance_released: false, restore },
+          created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        console.error('[backups] restore audit failed', (error as Error)?.message || error)
+        return c.json({ job_id: job.id, item: job, error: message, code: 'restore_audit_not_recorded', data_restored: true }, 503)
+      }
+      const maintenanceReleased = await endMaintenance(c.env, maintenance.token)
       if (!maintenanceReleased) {
+        await audit(c.env, user.id, user.username || null, 'maintenance_release_failed', 'backup', sourceDir, {
+          restored_key: restore.key,
+          maintenance_released: false,
+        })
         const message = 'Backup data was restored, but maintenance could not be released. Inspect maintenance before allowing writes or retrying the restore.'
         const job = await storeSystemJob(c.env, { id: crypto.randomUUID(), status: 'failed', progress: 100,
           message, error: message, result: { success: false, data_restored: true, maintenance_released: false, restore },

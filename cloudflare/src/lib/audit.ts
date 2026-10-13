@@ -319,11 +319,27 @@ export async function audit(
   change?: AuditFieldChange | null,
 ): Promise<void> {
   try {
-    const statement = buildAuditStatement(userId, userName, action, entity, entityId, details, change)
-    await getDb(env).prepare(statement.sql).run(statement.params)
+    await auditOrThrow(env, userId, userName, action, entity, entityId, details, change)
   } catch (_) {
     // Swallow -- see comment above.
   }
+}
+
+// The same row as audit(), for an operation that must not report success
+// without its record (K10b: a database restore, which cannot ride in one
+// batch with the change it records). A failure is the caller's to handle.
+export async function auditOrThrow(
+  env: Env,
+  userId: number | null,
+  userName: string | null,
+  action: string,
+  entity: string,
+  entityId: string | number | null,
+  details: unknown = null,
+  change?: AuditFieldChange | null,
+): Promise<void> {
+  const statement = buildAuditStatement(userId, userName, action, entity, entityId, details, change)
+  await getDb(env).prepare(statement.sql).run(statement.params)
 }
 
 // The same INSERT as audit(), as a statement a route can put INSIDE the D1 batch
