@@ -24,6 +24,17 @@ export type ActionOutcome =
   // Rejected. The backend 403s; the UI should not offer the control.
   | 'block'
 
+/**
+ * A second grant the Worker demands on top of a row's own tier. `key` is either a top-level permission
+ * (`product_cost_edit`) or another action held at Full Access (`sales:customer`); `tKey` and `label` name it in the
+ * "Also needs" hint.
+ */
+export interface ActionRequirement {
+  key: string
+  tKey: string
+  label: string
+}
+
 export interface PermissionAction {
   /** Stable id, unique within its permission key. */
   key: string
@@ -34,22 +45,31 @@ export interface PermissionAction {
   /**
    * Outcome under Full Access. Omitted means 'allow' -- the overwhelmingly
    * common case. Set explicitly only where Full Access alone is genuinely
-   * not enough (see `requiresKey`).
+   * not enough (see `requires`).
    */
   full?: ActionOutcome
   /**
-   * A SECOND permission key that must also be granted, on top of this
-   * section's own tier, even at Full Access. Only Products' replace-all and
-   * replace-columns imports use it: they also require `destructive_delete`
-   * (cloudflare/src/lib/importEngine.ts, missingDestructiveImportPermission).
+   * Second grants the Worker also demands, even at Full Access. The row is unavailable until every one is held, in
+   * the editor badge and in `can()`.
    */
-  requiresKey?: string
+  requires?: ActionRequirement[]
   /**
    * Review Required outcome of the page control behind this row, when that control is stricter than the badge: an
    * edit that merges or changes an image queues, but the merge and image tools themselves need Full Access.
    */
   controlReview?: ActionOutcome
+  /**
+   * Marks a page control that rides another row's switch but is gated more tightly than that row. It has no row of
+   * its own in the editor: the parent row names it in a note, and `can()` answers for it.
+   */
+  follows?: string
 }
+
+const COST_EDIT: ActionRequirement = { key: 'product_cost_edit', tKey: 'perm_product_cost_edit', label: 'Edit product costs' }
+const COST_VIEW: ActionRequirement = { key: 'product_cost_view', tKey: 'perm_product_cost_view', label: 'View product costs' }
+// A products, inventory or sales import file carries costs: the Worker creates the job with Edit product costs and
+// reads it back with View product costs (routes/importJobs.ts, requireImportPermission).
+const IMPORT_COSTS = [COST_EDIT, COST_VIEW]
 
 /**
  * Actions per permission key, in the order they appear on the page.
@@ -77,9 +97,13 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // Also needs the Add action at Full.
     { key: 'variant', tKey: 'perm_act_products_variant', label: 'Add variant', review: 'block' },
     { key: 'image', tKey: 'perm_act_products_image', label: 'Upload product images and edits that change them', review: 'queue', controlReview: 'block' },
-    { key: 'import', tKey: 'perm_act_products_import', label: 'Import', review: 'block' },
-    // Covers replace-all and replace-columns imports; both also need destructive_delete.
-    { key: 'import_replace_all', tKey: 'perm_act_products_import_replace_all', label: 'Import: replace all and replace columns', review: 'block', requiresKey: 'destructive_delete' },
+    { key: 'import', tKey: 'perm_act_products_import', label: 'Import', review: 'block', requires: IMPORT_COSTS },
+    // Covers replace-all and replace-columns imports, which are products imports that also need destructive_delete.
+    { key: 'import_replace_all', tKey: 'perm_act_products_import_replace_all', label: 'Import: replace all and replace columns', review: 'block', requires: [
+      { key: 'products:import', tKey: 'perm_act_products_import', label: 'Import' },
+      ...IMPORT_COSTS,
+      { key: 'destructive_delete', tKey: 'perm_destructive_delete', label: 'Destructive imports: replace all and replace columns' },
+    ] },
     // Browser-only: the file is built from rows the page already loaded, so this hides the button but is not a data
     // boundary; the products API returns the same rows to anyone who can view.
     { key: 'export', tKey: 'perm_act_products_export', label: 'Export', review: 'block' },
@@ -103,6 +127,8 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // PUT /reasons queues (maybeQueueForReview). The only Inventory write with
     // no live-state staleness risk, so the only one that queues.
     { key: 'edit_reasons', tKey: 'perm_act_inventory_edit_reasons', label: 'Edit saved reasons list', review: 'queue' },
+    // POST /reasons/replace answers 403 full_access_required for Partial Access.
+    { key: 'rename_reasons', tKey: 'perm_control_rename_reasons', label: 'Renaming a saved reason', review: 'block', follows: 'edit_reasons' },
     // POST /adjust answers 403 for Partial Access. Also covers batches.ts's
     // write routes (receive batch stock, fast stock-in, edit/deactivate a
     // lot): strict Full Access writes that mutate the same live stock this
@@ -117,7 +143,7 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // routes/importJobs.ts: the 'inventory' and 'stock_actions' import
     // types -- strict full-grant checks there ('stock_actions' needs
     // products+inventory+sales all at Full Access).
-    { key: 'import', tKey: 'perm_act_inventory_import', label: 'Stock imports (inventory / stock-action files)', review: 'block' },
+    { key: 'import', tKey: 'perm_act_inventory_import', label: 'Stock imports (inventory / stock-action files)', review: 'block', requires: IMPORT_COSTS },
   ],
 
   // cloudflare/src/routes/branches.ts
@@ -174,7 +200,7 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     { key: 'add', tKey: 'perm_act_contacts_add', label: 'Add contact', review: 'allow' },
     // PUT applies directly, but every column except `name` is dropped for a
     // Partial Access user.
-    { key: 'edit', tKey: 'perm_act_contacts_edit', label: 'Edit contact (name only)', review: 'limited' },
+    { key: 'edit', tKey: 'perm_act_contacts_edit', label: 'Edit contact (name only; more in POS/sales)', review: 'limited' },
     // DELETE answers 403 for Partial Access.
     { key: 'delete', tKey: 'perm_act_contacts_delete', label: 'Delete contact', review: 'block' },
     // Selection mode, multi-row mutations, merge/import workflows, and their
@@ -190,6 +216,12 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // explicit Full-only capability instead of exposing buttons that a
     // review-tier user can click only to receive a 403.
     { key: 'resolve_conflicts', tKey: 'perm_act_contacts_resolve_conflicts', label: 'Resolve contact and sale-link conflicts', review: 'block' },
+    // Keeping or reopening a conflict and merging need only the row above; rewriting sale-to-customer links is a
+    // sales write, so POST /customers/link-conflicts/relink and /resolve-missing also demand these two.
+    { key: 'relink_sales', tKey: 'perm_control_relink_sales', label: 'Relinking sales to another customer', review: 'block', follows: 'resolve_conflicts', requires: [
+      { key: 'sales:customer', tKey: 'perm_req_sales_customer', label: 'Sales: change linked customer' },
+      { key: 'sales:customer_reassign', tKey: 'perm_req_sales_customer_reassign', label: 'Sales: edit customer mode, choose another customer' },
+    ] },
     // routes/importJobs.ts: the customers/suppliers/delivery_contacts
     // import types -- strict full-grant checks there.
     { key: 'import', tKey: 'perm_act_contacts_import', label: 'Import contacts', review: 'block' },
@@ -216,7 +248,7 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // switches it off. review:'allow' keeps the View tier reading.
     { key: 'view', tKey: 'perm_act_sales_view', label: 'View sales and reports', review: 'allow' },
     { key: 'export', tKey: 'perm_act_sales_export', label: 'Export sales', review: 'allow' },
-    { key: 'import', tKey: 'perm_act_sales_import', label: 'Import sales', review: 'block' },
+    { key: 'import', tKey: 'perm_act_sales_import', label: 'Import sales', review: 'block', requires: IMPORT_COSTS },
     { key: 'status', tKey: 'perm_act_sales_status', label: 'Change or cancel sale status', review: 'block' },
     { key: 'customer', tKey: 'perm_act_sales_customer', label: 'Change linked customer', review: 'block' },
     { key: 'customer_reassign', tKey: 'perm_act_sales_customer_reassign', label: 'Reassign customer (off: sale name only)', review: 'block' },
@@ -232,7 +264,7 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // a forgotten item but cannot take one back off a paid sale. Like
     // add_items it can never be queued for review: the stock movement is
     // immediate.
-    { key: 'amend', tKey: 'perm_act_sales_amend', label: 'Amend a recorded sale (change quantities, remove or replace lines, correct delivery fee or actual delivery cost)', review: 'block' },
+    { key: 'amend', tKey: 'perm_act_sales_amend', label: 'Amend a recorded sale', review: 'block' },
     // Multi-sale status/field updates and their grouped Undo/Redo share this
     // explicit capability. Individual actions above remain independently
     // grantable to front-line staff.
@@ -279,29 +311,28 @@ export function outcomeAt(action: PermissionAction, tier: PermissionTierValue): 
  * caller needs to tell those apart, e.g. to label a button "Submit for
  * approval" instead of "Save".
  *
- * `hasKey` resolves any additional `requiresKey` grant -- pass the app's
- * own `hasPermission`, which is already strict about the 'review' string.
+ * `meets` resolves each `requires` grant, a top-level key or another action
+ * (`section:action`) -- see `effectivePermissions` in permissions.ts.
  */
 export function actionAllowed(
   permissionKey: string,
   actionKey: string,
   tier: PermissionTierValue,
-  hasKey: (key: string) => boolean = () => false,
+  meets: (requirement: string) => boolean = () => false,
   isBlocked: (permissionKey: string, actionKey: string) => boolean = () => false,
 ): boolean {
   const action = actionsForKey(permissionKey).find((entry) => entry.key === actionKey)
   // A per-action override switched off by an admin wins over everything
   // else -- checked BEFORE the missing-row fallback below so that an
   // override on an action this table does not model still takes effect.
-  if (isBlocked(permissionKey, actionKey)) return false
+  if (isBlocked(permissionKey, action?.follows ?? actionKey)) return false
   // An action with no row defined is not silently denied -- that would
   // turn a typo in a call site into an invisible permission bug. Fall back
   // to the plain tier check: anything but 'none' may proceed.
   if (!action) return tier !== 'none'
   const outcome = tier === 'review' && action.controlReview ? action.controlReview : outcomeAt(action, tier)
   if (outcome === 'block') return false
-  if (action.requiresKey && !hasKey(action.requiresKey)) return false
-  return true
+  return !action.requires?.some((requirement) => !meets(requirement.key))
 }
 
 // ---------------------------------------------------------------------------

@@ -2,8 +2,8 @@ import { Fragment, useState } from 'react'
 import InfoHint from '../shared/InfoHint.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import { PERMISSION_SECTIONS, type PermissionDefinition, type PermissionSection, type PermissionSensitivity } from './permissionDefinitions'
-import { normalizePermissionState, type PermissionValue } from '../../utils/permissions.ts'
-import { actionsForKey, isActionOverriddenOff, isViewImpliedByWrite, outcomeAt, toggleActionOverrideMap, type ActionOutcome } from '../../utils/permissionActions.ts'
+import { effectivePermissions, normalizePermissionState, type PermissionValue } from '../../utils/permissions.ts'
+import { actionsForKey, isActionOverriddenOff, isViewImpliedByWrite, outcomeAt, toggleActionOverrideMap, type ActionOutcome, type ActionRequirement } from '../../utils/permissionActions.ts'
 
 type PermissionState = Record<string, PermissionValue>
 // 'view' is the read-only middle tier for VIEW_TIER_KEYS sections (Settings, ...):
@@ -267,6 +267,8 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
   const renderActionRows = (permission: PermissionDefinition, tier: Tier, className: string) => {
     const actions = actionsForKey(permission.key)
     if (!actions.length) return null
+    const effective = effectivePermissions({ permissions: perms })
+    const needsList = (requirements: ActionRequirement[]) => requirements.map((requirement) => translate(requirement.tKey, requirement.label)).join(', ')
     return (
       <div className={`${className} rounded-lg border border-gray-200 bg-white/70 p-1.5 dark:border-zinc-700 dark:bg-zinc-900/40`}>
         <div className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
@@ -296,15 +298,37 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
           </label>
         ) : null}
         <ul className="grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
-          {actions.filter((action) => permission.key !== 'sales' || action.key !== 'customer_reassign').map((action) => {
+          {actions.filter((action) => !action.follows && (permission.key !== 'sales' || action.key !== 'customer_reassign')).map((action) => {
             const tierOutcome = outcomeAt(action, tier)
             const overriddenOff = isActionOverriddenOff(perms as Record<string, unknown>, permission.key, action.key)
-            const meta = outcomeMeta(overriddenOff ? 'block' : tierOutcome)
+            const missing = (requirements: ActionRequirement[] = []) => requirements.some((requirement) => !effective.meets(requirement.key))
+            const rowUnavailable = overriddenOff || (tierOutcome !== 'block' && missing(action.requires))
+            const meta = outcomeMeta(rowUnavailable ? 'block' : tierOutcome)
+            const controls = actions.filter((entry) => entry.follows === action.key)
+            const needs: Array<{ text: string; missing: boolean }> = []
+            if (tierOutcome !== 'block') {
+              if (action.requires?.length) {
+                needs.push({ text: translate('perm_action_also_needs', 'Also needs: {list}').replace('{list}', needsList(action.requires)), missing: missing(action.requires) })
+              }
+              for (const control of controls) {
+                if (outcomeAt(control, tier) === 'block' || !control.requires?.length) continue
+                needs.push({
+                  text: translate('perm_action_control_also_needs', '{control} also needs: {list}')
+                    .replace('{control}', translate(control.tKey, control.label)).replace('{list}', needsList(control.requires)),
+                  missing: missing(control.requires),
+                })
+              }
+            }
             const viewLocked = tierOutcome !== 'block' && isViewImpliedByWrite(perms as Record<string, unknown>, permission.key, action.key)
             const canToggle = tierOutcome !== 'block' && !viewLocked
-            const toolNote = canToggle && tier === 'review' && action.controlReview === 'block'
-              ? translate('perm_action_review_tool_full', 'Under Partial Access an edit waits for approval. The tool itself needs Full Access.')
-              : ''
+            const toolNotes: string[] = []
+            if (canToggle && !overriddenOff && tier === 'review') {
+              if (action.controlReview === 'block') toolNotes.push(translate('perm_action_review_tool_full', 'Under Partial Access an edit waits for approval. The tool itself needs Full Access.'))
+              for (const control of controls) {
+                if (outcomeAt(control, tier) === 'block') toolNotes.push(translate('perm_action_control_needs_full', '{control} needs Full Access.').replace('{control}', translate(control.tKey, control.label)))
+              }
+            }
+            const toolNote = toolNotes.join(' ')
             const toggleHint = overriddenOff
               ? translate('perm_action_restore', 'Switched off for this role. Click to hand it back to the tier.')
               : translate('perm_action_switch_off', 'Click to switch this single action off for this role.')
@@ -327,8 +351,15 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                       : 'cursor-default opacity-60'
                   }`}
                 >
-                  <span className={`min-w-0 break-words text-xs ${overriddenOff ?'text-gray-400 line-through dark:text-gray-500' : 'text-gray-600 dark:text-gray-300'}`}>
-                    {translate(action.tKey, action.label)}
+                  <span className="min-w-0">
+                    <span className={`block break-words text-xs ${overriddenOff ?'text-gray-400 line-through dark:text-gray-500' : 'text-gray-600 dark:text-gray-300'}`}>
+                      {translate(action.tKey, action.label)}
+                    </span>
+                    {needs.map((need) => (
+                      <span key={need.text} className={`block break-words text-[10px] ${need.missing ? 'text-amber-700 dark:text-amber-300' : 'text-gray-400 dark:text-gray-500'}`}>
+                        {need.text}
+                      </span>
+                    ))}
                   </span>
                   <span className={`flex-shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${meta.className}`}>
                     {overriddenOff ? translate('perm_action_off', 'Off') : meta.label}
@@ -338,14 +369,6 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
             )
           })}
         </ul>
-        {/* The one action that needs a second grant even
-            at Full Access -- called out rather than left
-            to look like a plain "Allowed" row. */}
-        {actions.some((action) => action.requiresKey && outcomeAt(action, tier) !== 'block') ? (
-          <p className="mt-1 px-1 text-[10px] text-gray-400 dark:text-gray-500">
-            {translate('perm_actions_requires_extra', 'Some actions above also need their own separate permission, listed in this section.')}
-          </p>
-        ) : null}
       </div>
     )
   }

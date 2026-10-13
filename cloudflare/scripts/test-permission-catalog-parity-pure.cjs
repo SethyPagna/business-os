@@ -326,7 +326,10 @@ function workerChecksKey(key) {
 const { PERMISSION_ACTIONS, outcomeAt, actionAllowed } = loadModule(path.join(ROOT, 'frontend', 'src', 'utils', 'permissionActions.ts'))
 const { PERMISSION_SECTIONS } = loadModule(path.join(ROOT, 'frontend', 'src', 'components', 'users', 'permissionDefinitions.ts'))
 const definitionByKey = new Map(PERMISSION_SECTIONS.flatMap((section) => section.permissions.map((permission) => [permission.key, permission])))
-const editorAction = new Map(Object.entries(PERMISSION_ACTIONS).flatMap(([key, actions]) => actions.map((action) => [`${key}:${action.key}`, action])))
+const allActions = new Map(Object.entries(PERMISSION_ACTIONS).flatMap(([key, actions]) => actions.map((action) => [`${key}:${action.key}`, action])))
+// A followed control rides another row's switch and has no row of its own.
+const editorAction = new Map([...allActions].filter(([, action]) => !action.follows))
+const followedControl = new Map([...allActions].filter(([, action]) => action.follows))
 const editorRows = new Set(editorAction.keys())
 
 // ---------------------------------------------------------------------------
@@ -368,6 +371,57 @@ const REFUSED_AT_PARTIAL = {
   },
   'returns:edit': { file: 'routes/returns.ts', proof: [/Editing a return requires Full Access to Returns -- Partial Access support for this action is not built yet/] },
 }
+// Page controls that ride an editor row's switch but are gated more tightly (a followed control in
+// PERMISSION_ACTIONS), each proved against the route that refuses a weaker caller.
+const FOLLOWED_CONTROLS = {
+  'contacts:relink_sales': {
+    file: 'routes/contacts.ts',
+    proof: [
+      /app\.post\('\/customers\/link-conflicts\/relink'[\s\S]{0,700}?denyUnlessFullContactAction\(c, 'resolve_conflicts'\)/,
+      /app\.post\('\/customers\/link-conflicts\/resolve-missing'[\s\S]{0,700}?denyUnlessFullContactAction\(c, 'resolve_conflicts'\)/,
+    ],
+  },
+  'inventory:rename_reasons': {
+    file: 'routes/inventory.ts',
+    proof: [/app\.post\('\/reasons\/replace'[\s\S]{0,700}?getActionTier\(user, 'inventory', 'edit_reasons'\) === 'none'[\s\S]{0,400}?getPermissionTier\(user, 'inventory'\) !== 'full'[\s\S]{0,300}?full_access_required/],
+  },
+}
+// Second grants a row or followed control names (`requires`), each proved against the Worker code that demands it.
+const SALE_LINK_GRANTS = [
+  /app\.post\('\/customers\/link-conflicts\/relink'[\s\S]{0,900}?getActionTier\(user, 'sales', 'customer'\) !== 'full' \|\| getActionTier\(user, 'sales', 'customer_reassign'\) !== 'full'/,
+  /app\.post\('\/customers\/link-conflicts\/resolve-missing'[\s\S]{0,900}?getActionTier\(user, 'sales', 'customer'\) !== 'full' \|\| getActionTier\(user, 'sales', 'customer_reassign'\) !== 'full'/,
+]
+const REQUIREMENT_PROOFS = {
+  product_cost_edit: { file: 'routes/importJobs.ts', proof: [/const allowed = isRead \? canViewAcquisitionCosts\(user\) : canEditAcquisitionCosts\(user\)/, /code: isRead \? 'product_cost_view_required' : 'product_cost_edit_required'/] },
+  product_cost_view: { file: 'routes/importJobs.ts', proof: [/const isRead = c\.req\.method === 'GET' \|\| c\.req\.method === 'HEAD'/, /const allowed = isRead \? canViewAcquisitionCosts\(user\) : canEditAcquisitionCosts\(user\)/] },
+  destructive_delete: { file: 'lib/importEngine.ts', proof: [/!hasPermission\(user, 'destructive_delete'\)\)\s*return 'destructive_delete'/] },
+  'products:import': { file: 'routes/importJobs.ts', proof: [/requireImportPermission\(c, undefined, type\)[\s\S]{0,300}?missingDestructiveImportPermission\(/, /isActionBlocked\(user, overrideSection, 'import'\)/] },
+  'sales:customer': { file: 'routes/contacts.ts', proof: SALE_LINK_GRANTS },
+  'sales:customer_reassign': { file: 'routes/contacts.ts', proof: SALE_LINK_GRANTS },
+}
+// Every Worker refusal that names a cost grant, and what it means for the editor. `row`: the grant is a `requires`
+// on an import row. `input`: only a request that carries a cost field is refused, so a role without the grant just
+// leaves the field out and no row is affected. `unmodelled`: refuses a whole control for a role without the grant and
+// the editor does not say so yet (listed so it is a decision, not an oversight).
+const COST_GATES = [
+  { text: 'Cost-entry permission is required for this import format', how: 'row' },
+  { text: 'Cost-view permission is required to read financial import data', how: 'row' },
+  { text: 'Cost-entry permission is required to enter receipt costs', how: 'input' },
+  { text: 'Cost-entry permission is required to change receipt costs', how: 'input' },
+  { text: 'Cost-entry permission is required to change stored receipt costs', how: 'input' },
+  { text: 'Cost-entry permission is required to reverse a cost change', how: 'input' },
+  { text: 'Cost-entry permission is required to change catalog costs', how: 'input' },
+  { text: 'Cost-entry permission is required to set catalog costs', how: 'input' },
+  { text: 'Cost-entry permission is required to submit return cost overrides', how: 'input' },
+  { text: 'Cost-entry permission is required to submit cost changes', how: 'input' },
+  { text: 'Changing the cost needs the cost edit permission', how: 'input' },
+  { text: 'Cost-entry permission is required to record supplier return costs and settlement', how: 'unmodelled', why: 'POST /returns/supplier (a supplier return, under returns:add) also needs Edit and View product costs.' },
+  { text: 'Cost-view permission is required to review supplier return compensation and settlement', how: 'unmodelled', why: 'POST /returns/supplier (a supplier return, under returns:add) also needs Edit and View product costs.' },
+  { text: 'Cost-view permission is required to export an unredacted database backup', how: 'unmodelled', why: 'Creating a backup needs View product costs on top of the backup key.' },
+  { text: 'Cost-entry permission is required to restore database costs', how: 'unmodelled', why: 'Restoring a backup needs Edit product costs on top of backup_restore.' },
+  { text: 'Cost-view permission is required to export database backups', how: 'unmodelled', why: 'Drive sync needs View product costs on top of the backup key.' },
+  { text: 'Cost-entry permission is required to prepare a database restore', how: 'unmodelled', why: 'Staging a Drive restore needs Edit product costs on top of backup_restore.' },
+]
 
 // ---------------------------------------------------------------------------
 // Checks
@@ -499,6 +553,87 @@ check('always-refused branch actions really are refused after the switch check',
   }
 })
 
+const costImportTypes = () => {
+  const found = /function isAcquisitionCostImport\([^)]*\) \{\s*return \[([^\]]*)\]\.includes/.exec(textOf('lib/acquisitionCostAccess.ts'))
+  assert.ok(found, 'lib/acquisitionCostAccess.ts no longer lists the cost import types in isAcquisitionCostImport')
+  return [...found[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1])
+}
+const importSectionFor = (type) => {
+  const text = textOf('routes/importJobs.ts')
+  const start = text.indexOf('function importActionSection(')
+  assert.ok(start >= 0, 'routes/importJobs.ts no longer defines importActionSection')
+  const body = text.slice(start, text.indexOf('\n}', start))
+  const rule = [...body.matchAll(/if \(([^\n]*)\)\s*return '([a-z_]+)'/g)].find((entry) => entry[1].includes(`'${type}'`))
+  return rule ? rule[2] : [...body.matchAll(/return '([a-z_]+)'/g)].pop()[1]
+}
+
+check('every second grant a row names is one the Worker demands', () => {
+  const problems = []
+  const used = new Set()
+  for (const [pair, action] of allActions) {
+    for (const requirement of action.requires ?? []) {
+      used.add(requirement.key)
+      const entry = REQUIREMENT_PROOFS[requirement.key]
+      if (!entry) { problems.push(`${pair} requires ${requirement.key} but REQUIREMENT_PROOFS has no Worker proof for it`); continue }
+      for (const proof of entry.proof) if (!proof.test(textOf(entry.file))) problems.push(`${pair} requires ${requirement.key} but ${entry.file} no longer demands it (${proof})`)
+    }
+  }
+  for (const key of Object.keys(REQUIREMENT_PROOFS)) if (!used.has(key)) problems.push(`${key} is in REQUIREMENT_PROOFS but no editor row requires it any more; remove it`)
+  assert.deepEqual(problems, [], 'The role editor and the Worker disagree about a second grant.\nFix the `requires` on the row in PERMISSION_ACTIONS (frontend/src/utils/permissionActions.ts), or update REQUIREMENT_PROOFS:')
+})
+
+check('every import type the Worker treats as a cost import has an import row that names both cost grants', () => {
+  const problems = []
+  const types = costImportTypes()
+  assert.ok(types.length >= 3, `only ${types.length} cost import types found; the scan is broken`)
+  const sections = new Set()
+  for (const type of types) {
+    const section = importSectionFor(type)
+    sections.add(section)
+    const keys = (allActions.get(`${section}:import`)?.requires ?? []).map((requirement) => requirement.key)
+    for (const grant of ['product_cost_edit', 'product_cost_view']) {
+      if (!keys.includes(grant)) problems.push(`import type '${type}' is a cost import in the Worker, but the ${section}:import row does not require ${grant}`)
+    }
+  }
+  for (const [pair, action] of allActions) {
+    if (pair.endsWith(':import') && (action.requires ?? []).some((requirement) => requirement.key === 'product_cost_edit') && !sections.has(pair.split(':')[0])) {
+      problems.push(`${pair} requires the cost grants but the Worker does not treat ${pair.split(':')[0]} imports as cost imports`)
+    }
+  }
+  assert.deepEqual(problems, [])
+})
+
+check('every followed control rides a row the Worker checks, is stricter than it, and is proved against its route', () => {
+  const problems = []
+  for (const [pair, action] of followedControl) {
+    const parent = `${pair.split(':')[0]}:${action.follows}`
+    if (!editorRows.has(parent)) problems.push(`${pair} follows ${parent}, which is not an editor row`)
+    else if (!workerActions.has(parent)) problems.push(`${pair} follows ${parent}, which the Worker never checks`)
+    if (action.review !== 'block') problems.push(`${pair}: a followed control is the Full Access part of its row, so review must be 'block'`)
+    const entry = FOLLOWED_CONTROLS[pair]
+    if (!entry) { problems.push(`${pair} is a followed control but FOLLOWED_CONTROLS has no Worker proof for it`); continue }
+    for (const proof of entry.proof) if (!proof.test(textOf(entry.file))) problems.push(`${pair}: ${entry.file} no longer refuses a weaker caller (${proof})`)
+  }
+  for (const pair of Object.keys(FOLLOWED_CONTROLS)) if (!followedControl.has(pair)) problems.push(`${pair} is in FOLLOWED_CONTROLS but the editor table has no such followed control; remove it`)
+  assert.deepEqual(problems, [])
+})
+
+check('every Worker refusal that names a cost grant is classified', () => {
+  const seen = new Map()
+  for (const file of workerFiles) {
+    if (!/permission is required|needs the cost edit permission/.test(fs.readFileSync(file, 'utf8'))) continue
+    const text = workerText.get(rel(file)) ?? emit(file)
+    for (const match of text.matchAll(/'((?:Cost-entry|Cost-view) permission is required[^']*|Changing the cost needs the cost edit permission[^']*)'/g)) {
+      seen.set(match[1], [...(seen.get(match[1]) || []), rel(file)])
+    }
+  }
+  const known = (message) => COST_GATES.some((gate) => message.startsWith(gate.text))
+  const unclassified = [...seen.keys()].filter((message) => !known(message))
+  assert.deepEqual(unclassified, [], `A Worker route refuses a role for lacking a cost grant and COST_GATES does not say what that means for the editor (a \`requires\` on a row, an input-only refusal, or a listed gap):\n${unclassified.map((message) => `${message}  <- ${[...new Set(seen.get(message))].join(', ')}`).join('\n')}`)
+  const stale = COST_GATES.filter((gate) => ![...seen.keys()].some((message) => message.startsWith(gate.text))).map((gate) => gate.text)
+  assert.deepEqual(stale, [], `COST_GATES entries no Worker route refuses with any more (remove them):\n${stale.join('\n')}`)
+})
+
 check('control: the scan sees known checks and misses a known gap', () => {
   assert.ok(workerActions.has('pos:manage_address_presets'), 'literal pair in routes/pos.ts')
   assert.ok(workerActions.has('contacts:resolve_conflicts'), 'variable site: denyUnlessFullContactAction')
@@ -536,6 +671,12 @@ if (SHOW_TABLE) {
     const gates = sites.length ? `${sites.filter((site) => site.passes).length} let it through / ${sites.filter((site) => !site.passes).length} Full only` : 'no literal gate'
     console.log(pair.padEnd(43) + outcome('none').padEnd(7) + outcome(middle).padEnd(9) + tool.padEnd(13) + outcome('full').padEnd(7) + gates)
   }
+  console.log('\nrow or control'.padEnd(44) + 'second grants the Worker also demands')
+  for (const [pair, action] of allActions) {
+    if (action.requires?.length) console.log(pair.padEnd(43) + (action.follows ? `(rides ${action.follows}) ` : '') + action.requires.map((requirement) => requirement.key).join(', '))
+  }
+  console.log('\ncost grant refusals the editor does not state'.padEnd(44) + 'why')
+  for (const gate of COST_GATES.filter((entry) => entry.how === 'unmodelled')) console.log(gate.text.slice(0, 42).padEnd(43) + gate.why)
 }
 
 const counts = { matched: 0, workerOnly: 0, editorOnly: 0 }
@@ -544,7 +685,7 @@ for (const pair of new Set([...workerActions.keys(), ...editorRows])) {
   else if (workerActions.has(pair)) counts.workerOnly += 1
   else counts.editorOnly += 1
 }
-console.log(`\n${workerActions.size} Worker actions, ${editorRows.size} editor rows: ${counts.matched} matched, ${counts.workerOnly} Worker-only (listed), ${counts.editorOnly} editor-only (listed)`)
+console.log(`\n${workerActions.size} Worker actions, ${editorRows.size} editor rows: ${counts.matched} matched, ${counts.workerOnly} Worker-only (listed), ${counts.editorOnly} editor-only (listed); ${followedControl.size} followed controls, ${[...allActions.values()].filter((action) => action.requires?.length).length} rows or controls with second grants`)
 if (failed) {
   console.log(`\n${failed} check(s) FAILED`)
   process.exitCode = 1

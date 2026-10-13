@@ -40,6 +40,7 @@ export type SaleLinkToolbarControls = { loading: boolean; refresh: () => void; s
 export default function SaleLinkConflictsSection({ t, notify, renderToolbar }: { t: TranslateFn; notify: NotifyFn; renderToolbar: (controls: SaleLinkToolbarControls) => ReactNode }) {
   const { can } = useApp() as { can: (permissionKey: string, actionKey: string) => boolean }
   const canResolveConflicts = can('contacts', 'resolve_conflicts')
+  const canRelinkSales = can('contacts', 'relink_sales')
   // Spend and sale counts per group are contact financial history: the server
   // omits both without this action (GET /customers/link-conflicts), so the card
   // shows only the date range and count-free action labels.
@@ -275,7 +276,7 @@ export default function SaleLinkConflictsSection({ t, notify, renderToolbar }: {
                     </div>
                   ) : null}
                 </div>
-                {canResolveConflicts && suggestion ? (
+                {canRelinkSales && suggestion ? (
                   <div className="mt-1.5">
                     <button
                       type="button"
@@ -346,7 +347,7 @@ export default function SaleLinkConflictsSection({ t, notify, renderToolbar }: {
                     </div>
                   ) : null}
                 </div>
-                {canResolveConflicts ? <div className="mt-1.5">
+                {canRelinkSales ? <div className="mt-1.5">
                   <button
                     type="button"
                     onClick={() => void handleResolveMissing(row)}

@@ -217,8 +217,8 @@ assert.equal((source.match(/const renderActionRows = /g) || []).length, 1, 'one 
 assert.match(source, /renderActionRows\(permission, tier, 'mt-2'\)/, 'the three-way branch uses it')
 assert.match(source, /renderActionRows\(permission, active \? 'full' : 'none'/, 'the on/off branch uses it, reading on as Full and off as None')
 assert.equal((source.match(/renderActionRows\(permission, /g) || []).length, 2, 'exactly the two branches call it')
-assert.match(source, /min-w-0 break-words text-xs \$\{overriddenOff/, 'an action label wraps: the row carries no other copy of it, so an ellipsis would hide the words that explain the action')
-assert.doesNotMatch(source, /min-w-0 truncate text-xs \$\{overriddenOff/)
+assert.match(source, /block break-words text-xs \$\{overriddenOff/, 'an action label wraps: the row carries no other copy of it, so an ellipsis would hide the words that explain the action')
+assert.doesNotMatch(source, /truncate text-xs \$\{overriddenOff/)
 console.log('PASS both editor branches share one action panel')
 
 // The English fallback in the tables must be the pack's English, or the editor reads differently with and
