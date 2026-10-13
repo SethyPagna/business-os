@@ -2218,10 +2218,10 @@ assert.match(
   /'Portal AI request',\s*CATALOG_PORTAL_AI_REQUEST_TIMEOUT_MS,/,
   'catalog portal AI requests should use the explicit timeout',
 )
-assert.match(
+assert.doesNotMatch(
   catalogPage,
-  /const CATALOG_PORTAL_MEDIA_UPLOAD_TIMEOUT_MS = 30000/,
-  'catalog portal media uploads should use an explicit timeout constant',
+  /CATALOG_PORTAL_MEDIA_UPLOAD_TIMEOUT_MS|'Upload portal media'/,
+  'catalog portal media upload timeout belongs to the transport, which aborts the request',
 )
 assert.match(
   catalogPage,
@@ -2261,8 +2261,8 @@ assert.doesNotMatch(
 )
 assert.match(
   catalogPage,
-  /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.uploadFileAsset\(\{[\s\S]*signal: controller\.signal,[\s\S]*onProgress: \(\{ percent \}[\s\S]*\) => updateMediaUploadState\(targetKey, \{ type: 'progress', progress: percent \}\),[\s\S]*\}\),\s*'Upload portal media',\s*CATALOG_PORTAL_MEDIA_UPLOAD_TIMEOUT_MS,\s*\)/,
-  'catalog portal media uploads should timeout slow file uploads',
+  /await getCatalogApi\(\)\.uploadFileAsset\(\{[\s\S]*signal: controller\.signal,[\s\S]*onProgress: \(\{ percent \}[\s\S]*\) => updateMediaUploadState\(targetKey, \{ type: 'progress', progress: percent \}\),\s*\}\)/,
+  'catalog portal media uploads should hand the transport an abort signal so a slow upload is stopped, not abandoned',
 )
 assert.match(
   catalogPage,
@@ -2644,15 +2644,15 @@ assert.doesNotMatch(
 // tab/PWA icon is app default -- so there is no favicon preview to time out
 // or defer. The consolidated guard below asserts the whole preview path is
 // gone.
-assert.match(
+assert.doesNotMatch(
   settingsPage,
-  /const SETTINGS_IMAGE_UPLOAD_TIMEOUT_MS = 30000/,
-  'settings image uploads should use an explicit timeout constant',
+  /SETTINGS_IMAGE_UPLOAD_TIMEOUT_MS|'Upload settings image'/,
+  'settings image upload timeout belongs to the transport, which aborts the request',
 )
 assert.match(
   settingsPage,
-  /withLoaderTimeout\(\s*\(\) => getSettingsApi\(\)\.uploadFileAsset\?\.\(\{[\s\S]*signal: controller\.signal,[\s\S]*onProgress: \(\{ percent \}\) => updateUploadState\(key, \{ type: 'progress', progress: percent \}\),[\s\S]*\}\),\s*'Upload settings image',\s*SETTINGS_IMAGE_UPLOAD_TIMEOUT_MS,\s*\)/,
-  'settings image uploads should timeout slow file uploads',
+  /await getSettingsApi\(\)\.uploadFileAsset\?\.\(\{[\s\S]*signal: controller\.signal,[\s\S]*onProgress: \(\{ percent \}\) => updateUploadState\(key, \{ type: 'progress', progress: percent \}\),\s*\}\)/,
+  'settings image uploads should hand the transport an abort signal so a slow upload is stopped, not abandoned',
 )
 assert.doesNotMatch(
   settingsPage,
@@ -3099,10 +3099,10 @@ assert.doesNotMatch(
   /window\.setTimeout\(\(\) => \{\s*loadFiles\(\)\s*\},\s*180\)/,
   'file picker should not add a delayed duplicate reload after the immediate open/search load',
 )
-assert.match(
+assert.doesNotMatch(
   filePickerModal,
-  /const FILE_PICKER_UPLOAD_TIMEOUT_MS = 30000/,
-  'file picker uploads should use an explicit timeout',
+  /FILE_PICKER_UPLOAD_TIMEOUT_MS|'Upload picker file asset'/,
+  'file picker upload timeout belongs to the transport, which aborts the request',
 )
 assert.match(
   filePickerModal,
@@ -3111,8 +3111,8 @@ assert.match(
 )
 assert.match(
   filePickerModal,
-  /withLoaderTimeout<FileAsset>\(\s*\(\) => uploadFileAssetRequest\(\{ file, userId: user\?\.id, userName: user\?\.name \}\),\s*'Upload picker file asset',\s*FILE_PICKER_UPLOAD_TIMEOUT_MS,\s*\)/,
-  'file picker uploads should timeout slow upload requests',
+  /await uploadFileAssetRequest\(\{ file, userId: user\?\.id, userName: user\?\.name, signal: controller\.signal \}\)/,
+  'file picker uploads should hand the transport an abort signal so closing the picker or a timeout stops the request',
 )
 assert.match(
   filePickerModal,
@@ -3194,10 +3194,10 @@ assert.doesNotMatch(
   /window\.setTimeout\(\(\) => \{\s*void loadFiles\(\)\s*\},\s*120\)/,
   'files page library should not add a fixed delay before the real file read',
 )
-assert.match(
+assert.doesNotMatch(
   filesPage,
-  /const FILES_ASSET_UPLOAD_TIMEOUT_MS = 30000/,
-  'files page uploads should use an explicit timeout',
+  /FILES_ASSET_UPLOAD_TIMEOUT_MS|'Upload file asset'/,
+  'files page upload timeout belongs to the transport, which aborts the request',
 )
 assert.match(
   filesPage,
@@ -3222,8 +3222,8 @@ assert.match(
 )
 assert.match(
   filesPage,
-  /withLoaderTimeout\(\s*(?:\/\/[^\n]*\n\s*)*\(\) => filesApi\.uploadFileAsset\(\{ file, userId: user\?\.id, userName: user\?\.name, compressOptions: LIBRARY_IMAGE_COMPRESS_OPTIONS \}\),\s*'Upload file asset',\s*FILES_ASSET_UPLOAD_TIMEOUT_MS,\s*\)/,
-  'files page uploads should timeout slow upload requests',
+  /await filesApi\.uploadFileAsset\(\{\s*file,\s*userId: user\?\.id,\s*userName: user\?\.name,\s*compressOptions: LIBRARY_IMAGE_COMPRESS_OPTIONS,\s*signal: controller\.signal,\s*\}\)/,
+  'files page uploads should hand the transport an abort signal so unmounting or a timeout stops the request',
 )
 assert.match(
   filesPage,

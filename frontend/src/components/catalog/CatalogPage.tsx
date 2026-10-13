@@ -123,7 +123,6 @@ const CATALOG_PORTAL_BOOTSTRAP_TIMEOUT_MS = 15000
 const CATALOG_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS = 12000
 const CATALOG_PORTAL_AI_REQUEST_TIMEOUT_MS = 25000
 const CATALOG_MEMBERSHIP_LOOKUP_TIMEOUT_MS = 12000
-const CATALOG_PORTAL_MEDIA_UPLOAD_TIMEOUT_MS = 30000
 const CATALOG_PORTAL_SUBMISSION_TIMEOUT_MS = 12000
 const CATALOG_SUBMISSION_MAX_SCREENSHOTS = 8
 const CATALOG_IMAGE_READ_CONCURRENCY = 2
@@ -2256,17 +2255,13 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         previewUrl: localPreview,
       })
 
-      const uploaded = await withLoaderTimeout(
-        () => getCatalogApi().uploadFileAsset({
-          file,
-          userId: user?.id,
-          userName: user?.name,
-          signal: controller.signal,
-          onProgress: ({ percent }: { percent: number }) => updateMediaUploadState(targetKey, { type: 'progress', progress: percent }),
-        }),
-        'Upload portal media',
-        CATALOG_PORTAL_MEDIA_UPLOAD_TIMEOUT_MS,
-      )
+      const uploaded = await getCatalogApi().uploadFileAsset({
+        file,
+        userId: user?.id,
+        userName: user?.name,
+        signal: controller.signal,
+        onProgress: ({ percent }: { percent: number }) => updateMediaUploadState(targetKey, { type: 'progress', progress: percent }),
+      })
       if (!uploaded?.public_path) throw new Error(uploaded?.error || 'Image upload failed')
       if (!aliveRef.current || controller.signal.aborted) return ''
 

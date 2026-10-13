@@ -131,6 +131,20 @@ const MAX_UPLOAD_BYTES = MAX_UPLOAD_MEGABYTES * 1024 * 1024
 const UPLOAD_TOO_LARGE_ENGLISH = 'This file is larger than {mb} MB. Choose a smaller file, or trim or compress the video first.'
 const WORKER_TOO_LARGE_MESSAGE = /^File is too large \(max \d+MB\)$/
 
+const UPLOAD_TIMEOUT_BASE_MS = 30_000
+const UPLOAD_TIMEOUT_PER_MEGABYTE_MS = 4_000
+const UPLOAD_TIMEOUT_CAP_MS = 180_000
+const UPLOAD_TIMED_OUT_ENGLISH = 'The upload took too long and was stopped. Check your connection and try again.'
+
+export function uploadTimeoutMs(bytes: number): number {
+  const megabytes = Math.ceil(Math.max(0, Number(bytes) || 0) / (1024 * 1024))
+  return Math.min(UPLOAD_TIMEOUT_CAP_MS, UPLOAD_TIMEOUT_BASE_MS + megabytes * UPLOAD_TIMEOUT_PER_MEGABYTE_MS)
+}
+
+function uploadCancelled(): Error {
+  return Object.assign(new Error('Upload cancelled'), { code: 'upload_cancelled' })
+}
+
 // The message in the UI language AppContext applies to <html lang>, read from
 // the same language pack the screens use. Callers show error.message as is.
 // productImageUploadTransport.ts's productImageTypeRefusal is the product
@@ -155,6 +169,11 @@ async function avatarTypeRefusal(): Promise<Error> {
 async function uploadTooLargeRefusal(): Promise<Error> {
   const template = await packMessage('upload_file_too_large', UPLOAD_TOO_LARGE_ENGLISH)
   return Object.assign(new Error(template.replace('{mb}', String(MAX_UPLOAD_MEGABYTES))), { code: 'upload_too_large' })
+}
+
+async function uploadTimedOutRefusal(): Promise<Error> {
+  const message = await packMessage('upload_timed_out', UPLOAD_TIMED_OUT_ENGLISH)
+  return Object.assign(new Error(message), { code: 'upload_timeout' })
 }
 
 function isAvatarTypeRefusal(serverMessage: unknown): boolean {
@@ -261,10 +280,18 @@ export async function uploadFileAsset(payload: FileUploadPayload = {}): Promise<
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     let settled = false
+    let timedOut = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    const clearTimer = (): void => {
+      if (timer !== undefined) clearTimeout(timer)
+      timer = undefined
+    }
 
     const finish = (handler: (value: unknown) => void, value: unknown): void => {
       if (settled) return
       settled = true
+      clearTimer()
       if (signal) signal.removeEventListener('abort', abortListener)
       handler(value)
     }
@@ -289,8 +316,12 @@ export async function uploadFileAsset(payload: FileUploadPayload = {}): Promise<
     }
 
     xhr.onerror = () => finish(reject, new Error('File upload failed. Check your server connection and try again.'))
-    xhr.onabort = () => finish(reject, new Error('Upload cancelled'))
+    xhr.onabort = () => {
+      if (timedOut) void uploadTimedOutRefusal().then((refusal) => finish(reject, refusal))
+      else finish(reject, uploadCancelled())
+    }
     xhr.onload = () => {
+      clearTimer()
       const parsed = parseJsonResponse(xhr.responseText)
       if (xhr.status < 200 || xhr.status >= 300) {
         if (xhr.status === 413 || WORKER_TOO_LARGE_MESSAGE.test(String(parsed?.error || '').trim())) {
@@ -308,13 +339,17 @@ export async function uploadFileAsset(payload: FileUploadPayload = {}): Promise<
 
     if (signal) {
       if (signal.aborted) {
-        finish(reject, new Error('Upload cancelled'))
+        finish(reject, uploadCancelled())
         return
       }
       signal.addEventListener('abort', abortListener, { once: true })
     }
 
     try { assertActorSessionDispatchAllowed(scope) } catch (error) { finish(reject, error); return }
+    timer = setTimeout(() => {
+      timedOut = true
+      try { xhr.abort() } catch (_) {}
+    }, uploadTimeoutMs(uploadFile.size))
     xhr.send(form)
   })
 }

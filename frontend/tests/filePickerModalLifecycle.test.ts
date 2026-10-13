@@ -134,8 +134,8 @@ const vite = await createServer({
         return null
       },
       load(id) {
-        if (id === '\0file-picker-app-context') return `export const useApp = () => ({ notify() {}, user: null, t: (key) => key })`
-        if (id === '\0file-picker-transport') return `export const getFiles = async () => ({ items: [], total: 0 }); export const uploadFileAsset = async () => ({}); export const deleteFileAsset = async () => ({})`
+        if (id === '\0file-picker-app-context') return `export const useApp = () => ({ notify: (message, type) => { (globalThis.__pickerNotes ||= []).push([message, type]) }, user: null, t: (key) => key })`
+        if (id === '\0file-picker-transport') return `export const getFiles = async () => ({ items: [], total: 0 }); export const uploadFileAsset = (payload) => (globalThis.__pickerUploadHook ? globalThis.__pickerUploadHook(payload) : Promise.resolve({})); export const deleteFileAsset = async () => ({})`
         if (id === '\0file-picker-pagination') return `export const DEFAULT_PAGE_SIZE = 48; export const clampPage = () => 1; export default function PaginationControls() { return null }`
         return null
       },
@@ -157,6 +157,71 @@ try {
   assert.equal(dialogs.length, 1, 'opening the picker must mount one shared dialog instead of crashing in the close guard')
   assert.match(memoryDocument.body.textContent, /Mounted file picker/)
   await act(async () => root.unmount())
+
+  type PickerUpload = { signal: AbortSignal | undefined; resolve: (asset: unknown) => void }
+  const uploads: PickerUpload[] = []
+  const notes: Array<[string, string]> = []
+  ;(globalThis as unknown as Record<string, unknown>).__pickerNotes = notes
+  ;(globalThis as unknown as Record<string, unknown>).__pickerUploadHook = (payload: { signal?: AbortSignal }) => new Promise((resolve, reject) => {
+    uploads.push({ signal: payload.signal, resolve })
+    payload.signal?.addEventListener('abort', () => reject(Object.assign(new Error('Upload cancelled'), { code: 'upload_cancelled' })))
+  })
+  const findFileInput = (node: MemoryNode): MemoryNode | null => {
+    if (node.tagName === 'INPUT' && node.getAttribute('type') === 'file') return node
+    for (const child of node.childNodes) {
+      const found = findFileInput(child)
+      if (found) return found
+    }
+    return null
+  }
+  const pickFile = async (name: string) => {
+    const input = findFileInput(memoryDocument.body)
+    assert.ok(input, 'the picker has no file input')
+    const propsKey = Object.keys(input).find((key) => key.startsWith('__reactProps$'))
+    assert.ok(propsKey, 'the file input has no React props')
+    const props = (input as unknown as Record<string, { onChange: (event: unknown) => unknown }>)[propsKey]
+    await act(async () => {
+      props.onChange({ target: { files: [new File([new Uint8Array(8)], name, { type: 'video/mp4' })], value: name } })
+      await Promise.resolve()
+    })
+  }
+  const selected: string[] = []
+  let closes = 0
+  const pickerElement = (open: boolean) => React.createElement(module.default, {
+    open,
+    onClose() { closes += 1 },
+    onSelect(path: string) { selected.push(path) },
+    title: 'Upload picker',
+  })
+  const uploadRoot = createRoot(memoryDocument.createElement('div') as unknown as Element)
+  await act(async () => { uploadRoot.render(pickerElement(true)); await Promise.resolve() })
+
+  await pickFile('first.mp4')
+  assert.equal(uploads.length, 1, 'picking a file should start one upload')
+  assert.ok(uploads[0].signal, 'the upload was started without an abort signal: closing or a timeout could not stop it')
+  assert.equal(uploads[0].signal?.aborted, false)
+
+  await pickFile('second.mp4')
+  assert.equal(uploads.length, 1, 'a second pick during an upload must be ignored until the first settles')
+
+  await act(async () => { uploadRoot.render(pickerElement(false)); await Promise.resolve() })
+  assert.equal(uploads[0].signal?.aborted, true, 'closing the picker must abort the request in flight')
+  await act(async () => { await Promise.resolve() })
+  assert.deepEqual(notes.filter(([, type]) => type === 'error'), [], 'an upload the person closed away must not raise an error toast')
+
+  await act(async () => { uploadRoot.render(pickerElement(true)); await Promise.resolve() })
+  await pickFile('third.mp4')
+  assert.equal(uploads.length, 2, 'once the aborted upload settled the picker must accept a new one')
+  assert.equal(uploads[1].signal?.aborted, false)
+  await act(async () => { uploads[1].resolve({ public_path: '/uploads/third.mp4' }); await Promise.resolve() })
+  assert.deepEqual(selected, ['/uploads/third.mp4'])
+  assert.equal(closes, 1)
+
+  await act(async () => { uploadRoot.render(pickerElement(true)); await Promise.resolve() })
+  await pickFile('fourth.mp4')
+  assert.equal(uploads.length, 3)
+  await act(async () => uploadRoot.unmount())
+  assert.equal(uploads[2].signal?.aborted, true, 'unmounting the picker must abort the request in flight')
 } finally {
   await vite.close()
 }
