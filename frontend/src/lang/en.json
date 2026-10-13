@@ -3792,6 +3792,8 @@
   "review_self_approval": "You cannot approve your own request. Another reviewer must approve it.",
   "review_section_full_required": "Approving this request needs Full access to {section}. Ask a reviewer who has it.",
   "review_identity_conflict": "This request now matches an existing product. Approving it would create a duplicate, so nothing was applied. Reject it and make the change yourself; it will merge into the existing product.",
+  "review_action_full_required": "Approving this request needs full permission for \"{permission}\". Ask a reviewer who has it.",
+  "no_review_applier": "This kind of request has no approval rule, so it cannot be approved. Reject it, or ask an administrator.",
   "reason_too_long": "The reason is too long. Use {max} characters or fewer.",
   "invalid_reason": "The reason must be text. Edit it and try again.",
   "review_entity_changed": "This record changed after the request was made, so nothing was applied. The request is still open: reject it, or ask for it again.",

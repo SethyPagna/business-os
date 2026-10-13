@@ -454,6 +454,9 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   error.conflict = !!parsed?.conflict || parsed?.code === 'write_conflict'
   error.entity = parsed?.entity || null
   error.reason = parsed?.reason || null
+  // 403 review_action_full_required names the grant the reviewer lacks (fees:delete, product_cost_edit, ...), so the
+  // refusal can be restated in the operator's language (api/branchRuleErrors.ts reviewApprovalRefusalText).
+  error.permission = typeof parsed?.permission === 'string' ? parsed.permission : null
   // RET-D: the record that blocked a stock Revert / Undo / line edit, and
   // where to open it (cloudflare/src/lib/stockRefusalBlocker.ts ->
   // utils/stockRefusal.ts), so the refusal can say WHY and link WHERE.

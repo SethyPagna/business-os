@@ -217,13 +217,44 @@ export function localizeBranchReviewError(row: BranchReviewIdentity, error: unkn
 }
 
 /**
- * N12: POST /review/:id/approve refuses a requester approving their own request
- * (`review_self_approval`) and a reviewer without Full access to the request's
- * section (`review_section_full_required`). Returns the translated sentence for
- * either code, or null for any other error so the caller falls through to its
- * normal localisation.
+ * The permission a refused reviewer lacks, named the way the Users screen names it: `fees:delete` is the action
+ * "Delete expense" (perm_act_<section>_<action>), `product_cost_edit` is "Edit product costs" (perm_<name>). An
+ * unknown grant is shown as the Worker named it; a refusal that names none falls back to the request's section.
  */
-export function reviewApprovalRefusalText(code: unknown, section: unknown, t: (key: string) => string | undefined): string | null {
+function reviewPermissionName(permission: unknown, section: unknown, t: (key: string) => string | undefined): string {
+  const name = typeof permission === 'string' ? permission.trim() : ''
+  if (name) {
+    const [permissionSection, action] = name.split(':')
+    return t(action ? `perm_act_${permissionSection}_${action}` : `perm_${name}`) || name
+  }
+  const fallback = String(section ?? '')
+  return t(fallback) || fallback
+}
+
+/**
+ * Every refusal POST /review/:id/approve and /reject can answer, as one sentence in the operator's language, or
+ * null for any other error so the caller falls through to its normal localisation:
+ *   N12  review_self_approval, review_section_full_required, Finding I  review_identity_conflict
+ *   H    review_action_full_required -- the reviewer lacks the grant the direct route demands (`permission` names it)
+ *   K3 / K6  review_entity_changed, review_already_decided -- the queue on screen is out of date (reviewStaleDecisionText)
+ *   K7   reason_too_long, invalid_reason -- the reject reason (reviewRejectReasonRefusalText)
+ *   no_review_applier -- a kind of request with no approval rule (501)
+ * `permission` is only read for review_action_full_required.
+ */
+export function reviewApprovalRefusalText(code: unknown, section: unknown, t: (key: string) => string | undefined, permission?: unknown): string | null {
+  if (code === 'review_action_full_required') {
+    return (t('review_action_full_required') || 'Approving this request needs full permission for "{permission}". Ask a reviewer who has it.')
+      .replace('{permission}', reviewPermissionName(permission, section, t))
+  }
+  if (code === 'review_entity_changed') return reviewStaleDecisionText('entity_changed', t)
+  if (code === 'review_already_decided') return reviewStaleDecisionText('already_decided', t)
+  if (code === 'reason_too_long') {
+    return (t('reason_too_long') || 'The reason is too long. Use {max} characters or fewer.').replace('{max}', String(REVIEW_REASON_MAX_LENGTH))
+  }
+  if (code === 'invalid_reason') return t('invalid_reason') || 'The reason must be text. Edit it and try again.'
+  if (code === 'no_review_applier') {
+    return t('no_review_applier') || 'This kind of request has no approval rule, so it cannot be approved. Reject it, or ask an administrator.'
+  }
   if (code === 'review_self_approval') {
     return t('review_self_approval') || 'You cannot approve your own request. Another reviewer must approve it.'
   }
@@ -282,9 +313,5 @@ export function reviewStaleDecisionText(kind: ReviewStaleDecision, t: (key: stri
  */
 export function reviewRejectReasonRefusalText(error: unknown, t: (key: string) => string | undefined): string | null {
   const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : null
-  if (code === 'reason_too_long') {
-    return (t('reason_too_long') || 'The reason is too long. Use {max} characters or fewer.').replace('{max}', String(REVIEW_REASON_MAX_LENGTH))
-  }
-  if (code === 'invalid_reason') return t('invalid_reason') || 'The reason must be text. Edit it and try again.'
-  return null
+  return code === 'reason_too_long' || code === 'invalid_reason' ? reviewApprovalRefusalText(code, null, t) : null
 }

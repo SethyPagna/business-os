@@ -233,7 +233,7 @@ export default function ReviewQueue() {
         if (isProductCreateReviewState(pendingId, response?.data, 'approved')) await publish('approved')
         else if (isProductCreateReviewState(pendingId, response?.data, 'rejected')) await publish('rejected')
         else {
-          const refusal = reviewApprovalRefusalText((failure as { code?: string } | undefined)?.code, row.section, (key) => tr(key, ''))
+          const refusal = reviewApprovalRefusalText((failure as { code?: string } | undefined)?.code, row.section, (key) => tr(key, ''), (failure as { permission?: unknown } | undefined)?.permission)
           notify(refusal ? refusal : (failure as { code?: string } | undefined)?.code === 'receiving_branch_inactive'
             ? tr('receiving_branch_inactive', 'This branch is inactive. Choose an active branch for new stock. Previously submitted lines keep their original branch.')
             : unconfirmed(), 'error')
@@ -293,7 +293,10 @@ export default function ReviewQueue() {
         await load(true, true)
         return
       }
-      notify(reviewApprovalRefusalText((error as { code?: unknown } | null)?.code, row.section, (key) => tr(key, '')) ?? localizeBranchReviewError(row, error, (key) => tr(key, '')), 'error')
+      // Every other refusal the Worker codes (self-approval, a missing grant and which one, no approval rule, ...) reads
+      // in the operator's language; anything uncoded keeps its own text.
+      const detail = error as { code?: unknown; permission?: unknown } | null
+      notify(reviewApprovalRefusalText(detail?.code, row.section, (key) => tr(key, ''), detail?.permission) ?? localizeBranchReviewError(row, error, (key) => tr(key, '')), 'error')
     } finally {
       finishKeyedAction(actionRef, row.id)
       setBusyId(null)
@@ -340,7 +343,8 @@ export default function ReviewQueue() {
         await load(true, true)
         return
       }
-      notify(error instanceof Error ? error.message : String(error || ''), 'error')
+      const detail = error as { code?: unknown; permission?: unknown } | null
+      notify(reviewApprovalRefusalText(detail?.code, row.section, (key) => tr(key, ''), detail?.permission) ?? (error instanceof Error ? error.message : String(error || '')), 'error')
     } finally {
       finishKeyedAction(actionRef, row.id)
       setBusyId(null)
