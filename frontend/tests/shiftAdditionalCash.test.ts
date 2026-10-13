@@ -35,6 +35,7 @@ import {
   type ShiftFiguresShape,
 } from '../src/components/shifts/shiftReportModel.ts'
 import { buildCSV } from '../src/utils/csv.ts'
+import { buildPrintDocument } from '../src/utils/exportOptions.ts'
 
 const nodeRequire = createRequire(import.meta.url)
 const React = nodeRequire('react')
@@ -289,6 +290,15 @@ test('the CSV and the print carry the additional row as a zero line', () => {
     'Registered cash,Additional change used,0,0',
     `Registered cash,${en.shift_registered_end},120,50000`,
   ])
+  // The print goes through the SAME rows into the real document builder: a 0 must
+  // survive as a printed 0 in its own table row, not be dropped or blanked.
+  const html = buildPrintDocument({ title: 'Shift Report · S-20261013-0807-Za', headers: ['Section', 'Line', 'USD', 'KHR'], rows, autoPrint: false })
+  const tableRows = [...html.matchAll(/<tr>(.*?)<\/tr>/g)].map((match) => [...match[1].matchAll(/<td[^>]*>(.*?)<\/td>/g)].map((cell) => cell[1])).filter((cells) => cells.length)
+  assert.deepEqual(tableRows, [
+    ['Registered cash', en.shift_registered_open, '10', '10000'],
+    ['Registered cash', 'Additional change used', '0', '0'],
+    ['Registered cash', en.shift_registered_end, '120', '50000'],
+  ], 'the printed table carries the Additional change used row as 0 / 0')
 })
 
 // ---- what the drawer should hold BEFORE the close is written --------------
