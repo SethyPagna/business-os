@@ -214,7 +214,8 @@ assert.equal(pendingUser, null)
 // Confirmed sign-out runs the old logout's account cleanup, before the UI drops
 // the actor, while retaining queued offline sales and device settings.
 assert.equal(accountResets.length, 1, 'confirmed sign-out must clear the signed-out account state')
-assert.deepEqual(accountResets[0].options, { clearAuth: true, preserveSyncServer: true, preserveSessionDuration: true, preserveRuntimeMeta: true, preserveOfflineWork: true })
+// A till checkout sent with no confirmed answer is kept, bound to its account (utils/posUnresolvedCheckout.ts).
+assert.deepEqual(accountResets[0].options, { clearAuth: true, preserveSyncServer: true, preserveSessionDuration: true, preserveRuntimeMeta: true, preserveOfflineWork: true, preserveUnresolvedCheckouts: true })
 assert.equal(accountResets[0].userAtReset, undefined, 'cleanup completes under the lock before setUser(null)')
 assert.equal(signout.isSignoutBlocked(), true, 'setUser scheduling alone cannot unhide mounted actor')
 mounted.effects[0]()

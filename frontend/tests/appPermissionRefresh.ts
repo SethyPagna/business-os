@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { STORAGE_KEYS } from '../src/constants.ts'
+import { keepUnresolvedPosCheckouts } from '../src/utils/posUnresolvedCheckout.ts'
 
 // The app's own storage resets, for tests: AppContext's clearLocalBusinessState
 // and resetLocalBusinessState read from its source, over the real runtime reset
@@ -51,7 +52,7 @@ export function appStorageResets(actor: Actor) {
     throw new Error(`Unexpected production dependency: ${request}`)
   }, runtimeModule, runtimeModule.exports)
   const useCallback = <T>(fn: T) => fn
-  const resetLocalBusinessState = appDeclaration('resetLocalBusinessState', { useCallback, resetClientRuntimeState: runtimeModule.exports.resetClientRuntimeState, cacheClearAll() {} })
+  const resetLocalBusinessState = appDeclaration('resetLocalBusinessState', { useCallback, resetClientRuntimeState: runtimeModule.exports.resetClientRuntimeState, cacheClearAll() {}, keepUnresolvedPosCheckouts })
   const clearLocalBusinessState = appDeclaration('clearLocalBusinessState', { useCallback, isActorSessionQuarantined: actor.isActorSessionQuarantined, resetActorReadSession: actor.resetActorReadSession, resetLocalBusinessState })
   const options = {
     // refreshPermissions: users/roles pushes, a reconnect after a network blip.
@@ -60,6 +61,8 @@ export function appStorageResets(actor: Actor) {
     sessionExpiry: appCallOptions('clearLocalBusinessState', (o) => o.clearAuth === true),
     // The confirmed sign-out.
     signOut: appCallOptions('resetLocalBusinessState', (o) => o.clearAuth === true),
+    // applyBootstrapPayload: the runtime changed (on Cloudflare, the organization).
+    datasetChange: appCallOptions('clearLocalBusinessState', (o) => o.clearAuth === false && o.preserveUiDrafts !== true),
   }
   const run = async (reset: () => Promise<void>, during?: () => void | Promise<void>) => {
     inside = during ?? null
@@ -67,9 +70,12 @@ export function appStorageResets(actor: Actor) {
   }
   return {
     options,
+    /** The real runtime reset itself, for callers that pass their own options (api/methods.ts). */
+    runtimeReset: runtimeModule.exports.resetClientRuntimeState,
     /** The same-user permission refresh, up to where it waits for the bootstrap. */
     permissionRefresh: (during?: () => void | Promise<void>) => run(() => clearLocalBusinessState(options.permissionRefresh), during),
     sessionExpiry: (during?: () => void | Promise<void>) => run(() => clearLocalBusinessState(options.sessionExpiry), during),
     signOut: (during?: () => void | Promise<void>) => run(() => resetLocalBusinessState(options.signOut), during),
+    datasetChange: (during?: () => void | Promise<void>) => run(() => clearLocalBusinessState(options.datasetChange), during),
   }
 }

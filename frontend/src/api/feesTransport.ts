@@ -4,6 +4,7 @@ import { dispatchResolvedSyncError } from '../utils/syncProblemLifecycle.ts'
 import { directMutationRefusedBeforeWrite } from '../utils/directMutationRefusal.ts'
 import { MoneyPrecisionError, nativeChangeAmounts, type DecimalInput } from '../utils/moneyPrecision.ts'
 import { reportUtcBound } from '../utils/businessTimeBounds.ts'
+import { adoptLegacyRetryRecord, retryRecordKey } from './retryRecordScope.ts'
 
 // Frontend transport for the Fees page (cloudflare/src/routes/fees.ts).
 // No local/offline mirror -- same reasoning as notesTransport.ts: a failed
@@ -163,7 +164,7 @@ function feeCreateActorId(value: number | string | null | undefined): string | n
 }
 
 export function pendingFeeCreateStorageKey(actorId: number | string): string {
-  return `${PENDING_FEE_CREATE_PREFIX}${encodeURIComponent(String(actorId).trim())}`
+  return retryRecordKey(PENDING_FEE_CREATE_PREFIX, encodeURIComponent(String(actorId).trim()))
 }
 
 function feeCreateStorage(): FeeCreateStorage | null {
@@ -227,6 +228,7 @@ export function normalizeFeeCreateBody(payload: FeePayload): FeeCreateBody {
 }
 
 function readPendingFeeCreate(storage: FeeCreateStorage, actorId: string): PendingFeeCreate | null {
+  adoptLegacyRetryRecord(storage, `${PENDING_FEE_CREATE_PREFIX}${encodeURIComponent(actorId)}`, pendingFeeCreateStorageKey(actorId))
   try {
     const parsed = JSON.parse(storage.getItem(pendingFeeCreateStorageKey(actorId)) || 'null') as PendingFeeCreate | null
     const requestId = String(parsed?.client_request_id || '').trim()

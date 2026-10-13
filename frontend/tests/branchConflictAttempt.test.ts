@@ -27,6 +27,7 @@ const dependencies: Record<string, any> = {
   '../utils/deviceInfo.ts': { getClientDeviceInfo: () => ({ device_id: 'private-device' }) },
   './requestIds.ts': {},
   '../utils/syncProblemLifecycle.ts': {},
+  './retryRecordScope.ts': {},
 }
 const mod = { exports: {} as any }
 new Function('require', 'module', 'exports', compiled)((id: string) => {

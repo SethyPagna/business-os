@@ -24,6 +24,7 @@ import { authErrorDetail } from './utils/authErrorText.ts'
 import { getAuthStorage } from './utils/authStorage.ts'
 import { getDirtyWork, hasDirtyWork, type DirtyWorkEntry } from './utils/dirtyWork.ts'
 import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
+import { keepUnresolvedPosCheckouts } from './utils/posUnresolvedCheckout.ts'
 import { effectivePermissions, type PermissionTier } from './utils/permissions.ts'
 import { normalizePriceValue } from './utils/pricing.ts'
 import { fmtDayFirst } from './utils/formatters.ts'
@@ -881,12 +882,16 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     preserveSyncServer?: boolean
     preserveOfflineWork?: boolean
     preserveUiDrafts?: boolean
+    preserveUnresolvedCheckouts?: boolean
   }
   // Storage/cache reset without the quarantine guard or a new read-session
   // marker. Only the confirmed sign-out path calls it directly, under the
   // cookie-admission lock (see prepareConfirmedSignoutUi); everything else goes
   // through clearLocalBusinessState below.
   const resetLocalBusinessState = useCallback(async (options: LocalBusinessStateResetOptions = {}) => {
+    // A till checkout sent with no confirmed answer outlives its orders:
+    // re-ringing it after this reset would record the sale twice.
+    if (options.preserveUnresolvedCheckouts === true) keepUnresolvedPosCheckouts()
     await resetClientRuntimeState({
       // Only an explicit clearAuth: false keeps the signed-in account: a
       // permission or runtime refresh is the same user, so its stored account
@@ -901,6 +906,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       preserveOfflineWork: options.preserveOfflineWork === true,
       preserveServiceWorker: options.preserveOfflineWork === true,
       preserveUiDrafts: options.preserveUiDrafts === true,
+      preserveUnresolvedCheckouts: options.preserveUnresolvedCheckouts === true,
     }).catch(() => {})
     cacheClearAll()
   }, [])
@@ -951,10 +957,15 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     const runtimeDescriptor = buildRuntimeDescriptorFromBootstrap(safePayload)
     const storedRuntimeDescriptor = readStoredRuntimeDescriptor()
     if (shouldResetForRuntimeChange(storedRuntimeDescriptor, runtimeDescriptor)) {
+      // On Cloudflare only the organization changes the runtime: another
+      // organization's account signed in here. The previous account's
+      // unresolved checkouts stay theirs (bound to account, organization and
+      // server) for when they sign back in.
       await clearLocalBusinessState({
         clearAuth: false,
         preserveSyncServer: true,
         preserveSessionDuration: true,
+        preserveUnresolvedCheckouts: true,
       })
       if (isActorSessionQuarantined()) throw new Error('Session reconciliation is required.')
     }
@@ -1087,6 +1098,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
               preserveSessionDuration: true,
               preserveRuntimeMeta: true,
               preserveOfflineWork: true,
+              preserveUnresolvedCheckouts: true,
             }).catch(() => {})
             if (disposed) return
             clearPersistedAuthState()

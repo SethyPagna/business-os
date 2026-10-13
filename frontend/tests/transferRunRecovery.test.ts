@@ -26,6 +26,7 @@ import fs from 'node:fs'
 import test from 'node:test'
 import ts from 'typescript'
 import { ensureClientRequestId } from '../src/api/requestIds.ts'
+import * as retryRecordScope from '../src/api/retryRecordScope.ts'
 
 const read = (path: string) => fs.readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const compile = (code: string) => ts.transpileModule(code, {
@@ -50,6 +51,7 @@ const branchTransport = load('../src/api/branchTransport.ts', (id) => ({
   '../utils/deviceInfo.ts': { getClientDeviceInfo: () => ({ device_name: 'test' }) },
   './requestIds.ts': { ensureClientRequestId },
   '../utils/syncProblemLifecycle.ts': { dispatchResolvedSyncError: () => {} },
+  './retryRecordScope.ts': retryRecordScope,
 } as Record<string, unknown>)[id])
 const refusal = load('../src/api/transferRunRefusal.ts', (id) => (id === './branchRuleErrors.ts' ? rules : null))
 const recovery = load('../src/api/transferRunRecovery.ts', (id) => (
@@ -442,7 +444,8 @@ test('(b) an unknown-result run keeps the Retry lock and discards only through t
 
 test('an unreadable saved run can be discarded too (it locked the form just as permanently)', () => {
   const storage = store()
-  storage.setItem('businessos_pending_transfer_v1:7', '{"version":1,"broken":true}')
+  const key = retryRecordScope.retryRecordKey('businessos_pending_transfer_v1:', 7)
+  storage.setItem(key, '{"version":1,"broken":true}')
   assert.throws(() => loadTransferRun(7, storage), /cannot be read/)
   const h = modalHarness(null, storage)
   h.state.retryStorageError = 'The saved transfer cannot be read.'
@@ -450,7 +453,7 @@ test('an unreadable saved run can be discarded too (it locked the form just as p
   h.run('discardSavedTransfer')
   assert.equal(h.state.retryStorageError, '')
   assert.equal(h.formDisabled(), false)
-  assert.equal(storage.getItem('businessos_pending_transfer_v1:7'), null)
+  assert.equal(storage.getItem(key), null)
 })
 
 // ---------------------------------------------------------------------------

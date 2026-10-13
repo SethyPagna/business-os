@@ -1,6 +1,7 @@
 import { apiFetch, cacheInvalidate, route } from './http.ts'
 import { parseServerTimestampMs } from '../utils/formatters.ts'
 import { dispatchResolvedSyncError, type SyncProblemReference } from '../utils/syncProblemLifecycle.ts'
+import { adoptLegacyRetryRecord, retryRecordKey } from './retryRecordScope.ts'
 
 const unresolvedShiftWrites = new Map<string, SyncProblemReference>()
 async function shiftWrite<T>(channel: string, send: () => Promise<T>, local: null, isWrite: true, actorId?: number | string): Promise<T | null> {
@@ -67,6 +68,13 @@ function clearShiftRequest(key: string, expected: string): void {
   }
 }
 
+const SHIFT_REQUEST_PREFIX = 'businessos_shift_request_v1:'
+function shiftRequestKey(actorId: number | string, method: string, path: string): string {
+  const key = retryRecordKey(SHIFT_REQUEST_PREFIX, actorId, method, path)
+  adoptLegacyRetryRecord(shiftRequestStore(), `${SHIFT_REQUEST_PREFIX}${actorId}:${method}:${path}`, key)
+  return key
+}
+
 export function freezeShiftMutation(body: ShiftMutationBody): ShiftMutationBody {
   return JSON.parse(JSON.stringify({ ...body, client_request_id: body.client_request_id || crypto.randomUUID() }))
 }
@@ -76,7 +84,7 @@ export function pendingShiftMutation(actorId: number | string | undefined, id: n
   for (const action of ['edit', 'close', 'reopen', 'cancel'] as const) {
     const method = action === 'edit' ? 'PATCH' : 'POST'
     const path = `/api/shifts/${id}${action === 'edit' ? '' : `/${action}`}`
-    const raw = readShiftRequest(`businessos_shift_request_v1:${actorId}:${method}:${path}`)
+    const raw = readShiftRequest(shiftRequestKey(actorId, method, path))
     if (raw) return { action, body: JSON.parse(raw) as ShiftMutationBody }
   }
   return null
@@ -86,7 +94,7 @@ export function pendingShiftMutation(actorId: number | string | undefined, id: n
  * draft cannot replace a request whose acknowledgement has been lost. */
 async function shiftMutationFetch(method: string, path: string, body: ShiftMutationBody, actorId?: number | string) {
   if (!actorId) throw new Error('The signed-in shift operator is required')
-  const key = `businessos_shift_request_v1:${actorId}:${method}:${path}`
+  const key = shiftRequestKey(actorId, method, path)
   const prior = readShiftRequest(key)
   const frozen = prior ? JSON.parse(prior) as ShiftMutationBody : freezeShiftMutation(body)
   const serialized = JSON.stringify(frozen)

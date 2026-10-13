@@ -25,6 +25,7 @@ import {
 import { STORAGE_KEYS }            from './constants.ts'
 import { FOREGROUND_RESUME_GAP_REASON, FOREGROUND_RESUME_REASON } from './utils/permissionRefreshAccumulator.ts'
 import { sanitizeSyncServerUrl }   from './platform/runtime/clientRuntime.ts'
+import { noteRetryRecordServer } from './api/retryRecordScope.ts'
 import {
   shouldSuppressRuntimeError,
   shouldSuppressSecurityPolicyViolation,
@@ -833,6 +834,8 @@ if (typeof window !== 'undefined') {
 
     if (url) {
       setSyncServerUrl(url)
+      // The server this tab starts with owns its old-format retry records.
+      noteRetryRecordServer()
       if (hasStoredUserSession()) {
         ensureSessionRecoveryListeners()
         scheduleConnectWS()
