@@ -274,6 +274,7 @@ function readStorageValue(storage: Storage | null | undefined, key: string): str
   }
 }
 
+// The stored expiry is not read: the Worker renews a session on use, so the bootstrap decides, not the sign-in time.
 function hasUsableStoredAuthSession(): boolean {
   if (typeof window === 'undefined') return false
   const userJson = readStorageValue(getAuthStorage('session'), STORAGE_KEYS.USER)
@@ -285,11 +286,7 @@ function hasUsableStoredAuthSession(): boolean {
   } catch {
     return false
   }
-  const expiry = readStorageValue(getAuthStorage('session'), STORAGE_KEYS.USER_EXPIRY)
-    || readStorageValue(getAuthStorage('local'), STORAGE_KEYS.USER_EXPIRY)
-  if (!expiry) return true
-  const expiresAt = Number.parseInt(expiry, 10)
-  return Number.isFinite(expiresAt) && Date.now() <= expiresAt
+  return true
 }
 
 function getConnection(): NetworkConnectionLike | null {

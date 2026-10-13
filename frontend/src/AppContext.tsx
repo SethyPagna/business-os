@@ -452,6 +452,22 @@ function getStoredUserExpiry() {
   return safeStorageGet(getAuthStorage('session'), STORAGE_KEYS.USER_EXPIRY) || safeStorageGet(getAuthStorage('local'), STORAGE_KEYS.USER_EXPIRY)
 }
 
+function readStoredUser(): AppUser | null {
+  try {
+    const stored = getStoredUserPayload()
+    return stored ? JSON.parse(stored) as AppUser : null
+  } catch (_) {
+    return null
+  }
+}
+
+// The Worker renews a session each time it is used and tells the app its expiry only at sign-in, so the stored expiry
+// is a hint: past it the stored session is kept, not shown, and the bootstrap decides.
+function storedExpiryHasPassed(): boolean {
+  const expiry = getStoredUserExpiry()
+  return !!expiry && Date.now() > parseInt(expiry, 10)
+}
+
 function clearPersistedAuthState() {
   SESSION_ONLY_STORAGE_KEYS.forEach((key) => {
     safeStorageRemove(getAuthStorage('local'), key)
@@ -691,22 +707,10 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   // The provider owns the app session lifecycle and hands lightweight helpers
   // to page components so business workflows do not duplicate global state.
   const [user,                setUser]                = useState<AppUser | null>(() => {
-    if (publicMode) return null
+    if (publicMode || storedExpiryHasPassed()) return null
     // Recover the signed-in user from sessionStorage/localStorage depending on
     // the last chosen login duration.
-    try {
-      const stored = getStoredUserPayload()
-      const expiry = getStoredUserExpiry()
-      if (stored && expiry) {
-        if (Date.now() > parseInt(expiry, 10)) {
-          clearPersistedAuthState()
-          return null
-        }
-        return JSON.parse(stored) as AppUser
-      }
-      if (stored) return JSON.parse(stored) as AppUser
-    } catch (_) {}
-    return null
+    return readStoredUser()
   })
   const [settings,            setSettings]            = useState<AppSettings>({})
   // From the device record, not 'en': starting on 'en' rendered a Khmer
@@ -1619,6 +1623,11 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
     // Non-blocking async sync URL discovery activates the sync server
     // connection without blocking the initial render.
+    const adoptHeldSession = () => {
+      const heldSession = isActorSessionQuarantined() ? null : readStoredUser()
+      if (heldSession) setUser((current) => current || heldSession)
+    }
+
     const discoverSyncUrl = async () => {
       try {
         const storedUser = getStoredUserPayload()
@@ -1694,12 +1703,15 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
               .finally(() => {
                 settled = true
                 window.clearTimeout(authReadyWatchdog)
+                adoptHeldSession()
                 setAuthReady(true)
               })
           } else {
+            adoptHeldSession()
             runStartupHealthProbe()
           }
         } else {
+          adoptHeldSession()
           setAuthReady(true)
         }
         if (!hasStoredSession && !canProbeServerSession) {
@@ -1708,6 +1720,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
         return
       } catch (e: unknown) {
         console.debug('[AppContext] discoverSyncUrl error:', getErrorMessage(e, 'unknown error'))
+        adoptHeldSession()
         setAuthReady(true)
       }
 
