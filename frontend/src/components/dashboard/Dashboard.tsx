@@ -34,6 +34,8 @@ import { finishDashboardStockAlertRequest, invalidateDashboardStockAlertRequest 
 import { dashboardRangeQuery, dashboardRangeLabel, type DashboardRangeQuery } from './dashboardRange.ts'
 import { showsBranchComparison } from '../../utils/branchScope.ts'
 import { useBranchRows } from '../../utils/useBranchRows.ts'
+import { soleActiveBranch } from '../../utils/branchCollapse.ts'
+import SoleBranchLabel from '../shared/SoleBranchLabel.tsx'
 
 const ImportReportModal = lazyRetry(() => import('../shared/ImportReportModal'), 'ImportReportModal')
 const ExportChoiceDialog = lazyRetry(() => import('../shared/ExportChoiceDialog'), 'dashboard-export-choices')
@@ -854,6 +856,8 @@ export default function Dashboard() {
   // from the branch rows and the data, never from a name or a flag.
   const branchRows = useBranchRows()
   const showBranchPerformance = showsBranchComparison(branchRows, analytics?.byBranch?.length ?? 0)
+  // The card it replaces: with one branch the totals are that branch's, so say which.
+  const soleBranchName = showBranchPerformance ? '' : String(soleActiveBranch(branchRows)?.name || '')
   const [activeChart, setActiveChart] = useState<DashboardChartMode>('revenue')
   const [topMode, setTopMode]         = useState<DashboardTopMode>('revenue')
   const [customerDetail, setCustomerDetail]     = useState<DashboardCustomer | null>(null)
@@ -2024,6 +2028,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
           below and every change writes the same dates used by fetches and
           export context. */}
       <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-2 dark:border-blue-900/40 dark:bg-blue-950/20 sm:p-2.5">
+        {soleBranchName ? <SoleBranchLabel name={soleBranchName} label={t('branch') || 'Branch'} className="mb-1.5 px-1 text-xs text-slate-600 dark:text-slate-300" /> : null}
         <StatsStrip
           t={(key: string) => t(key)}
           range={dashboardRange}

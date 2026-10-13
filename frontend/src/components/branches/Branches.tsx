@@ -44,7 +44,8 @@ import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
 import { branchRoleFromName } from '../../utils/branchRoles.ts'
-import { hasTransferPair } from '../../utils/branchCollapse.ts'
+import { hasTransferPair, soleActiveBranch } from '../../utils/branchCollapse.ts'
+import SoleBranchLabel from '../shared/SoleBranchLabel.tsx'
 import { branchHistoryLabel, showsBranchHistoryFilter } from '../../utils/branchScope.ts'
 import {
   FAST_STOCK_IN_RESTORE_HOST,
@@ -760,6 +761,8 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   const transferBlockedReason = tr('transfer_single_branch', 'Only one active branch, so there is nothing to transfer.')
   // The overview's "Branches" count tile: only worth a tile while it can say more than one.
   const showBranchCountTile = branchSummary?.branch_count == null || Number(branchSummary.branch_count) > 1
+  // The tile it replaces: with one active branch its name is shown instead of a count of one.
+  const soleBranchName = showBranchCountTile ? '' : String(soleActiveBranch(branches)?.name || '')
   // The Stock Session's AppSelect option shape ({value,label}), distinct
   // from TransferModal's ({id,name}) above.
   const receiveBranchSelectOptions = useMemo(
@@ -1356,7 +1359,10 @@ export default function Branches({ embedded = false, view, showSectionNavigation
 
       {tab === 'branches' && statsOpen ? (
         <section id="branch-overview-stats" className="mb-3 space-y-2" aria-label={tr('current_stock', 'Current Stock')}>
-          <p className="text-xs text-slate-500">{tr('current_stock', 'Current Stock')}</p>
+          <div className="flex min-w-0 items-center justify-between gap-2">
+            <p className="text-xs text-slate-500">{tr('current_stock', 'Current Stock')}</p>
+            {soleBranchName ? <SoleBranchLabel name={soleBranchName} label={tr('branch', 'Branch')} className="text-xs text-slate-500" /> : null}
+          </div>
           {statsLoading ? <p role="status">{tr('loading', 'Loading')}…</p> : statsError ? (
             <div role="status"><p>{statsError}</p><button type="button" className="btn-secondary h-10" onClick={() => setStatsRefresh((value) => value + 1)}>{tr('retry', 'Retry')}</button></div>
           ) : branchSummary ? (
