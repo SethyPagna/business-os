@@ -316,7 +316,7 @@ async function workerBundle() {
         export default app`,
       resolveDir: root, loader: 'ts',
     },
-    bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022',
+    bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'],
     plugins: [{
       name: 'orphan-native-fixtures',
       setup(builder) {
@@ -442,7 +442,7 @@ async function main() {
   const [kernel, bundle] = await Promise.all([pricingKernel(), workerBundle()])
   const mf = new Miniflare({
     modules: true, script: bundle.outputFiles[0].text, d1Databases: ['DB'],
-    compatibilityDate: '2026-08-01', log: new Log(LogLevel.ERROR),
+    compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'], log: new Log(LogLevel.ERROR),
   })
   try {
     const db = await mf.getD1Database('DB')

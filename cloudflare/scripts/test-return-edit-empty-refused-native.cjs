@@ -86,7 +86,7 @@ export default {
 async function workerBundle() {
   return build({ stdin: { contents: `import { Hono } from 'hono'; import returns from './src/routes/returns';
       const app=new Hono(); app.route('/api/returns',returns);${COUNTING_ENTRY}`, resolveDir: root, loader: 'ts' },
-    bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022',
+    bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'],
     plugins: [{ name: 'return-edit-empty-fixtures', setup(b) {
       const fixtures = {
         auth: `export const requireAuth=async(c,next)=>{const raw=c.req.header('x-test-permissions');

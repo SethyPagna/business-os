@@ -52,11 +52,11 @@ async function main() {
       try { result=await restoreCloudflareBackup(env,key,async p=>events.push('progress-'+p.phase)) } catch(e){error=e.message}
       return Response.json({calls,events,reads,error,result});
     }}
-  ` }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', plugins: [{ name: 'private-discovery-test-access', setup(b) {
+  ` }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'], plugins: [{ name: 'private-discovery-test-access', setup(b) {
     b.onLoad({ filter: /[/\\]src[/\\]lib[/\\]backup\.ts$/ }, args => ({ contents: fs.readFileSync(args.path, 'utf8')
       + '\nexport { discoverRestoreSchema, restoreDependencyError };', loader: 'ts' }))
   } }] })
-  const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01',
+  const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'],
     d1Databases: ['DB', 'SMALL'], r2Buckets: ['ASSETS'], log: new Log(LogLevel.ERROR) })
   try {
     const db = await mf.getD1Database('DB'), small = await mf.getD1Database('SMALL')

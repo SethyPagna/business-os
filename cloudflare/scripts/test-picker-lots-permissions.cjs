@@ -10,7 +10,7 @@ async function main() {
     stdin: { contents: `import { Hono } from 'hono'; import batches from './src/routes/batches';
       const app = new Hono(); app.route('/api/batches', batches); export default app;`,
       resolveDir: path.join(__dirname, '..'), loader: 'ts' },
-    bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022',
+    bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022', external: ['node:*', 'cloudflare:*'],
     plugins: [{ name: 'fixture-auth', setup(b) {
       b.onResolve({ filter: /lib\/auth$/ }, () => ({ path: 'auth', namespace: 'fixture' }))
       b.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: `
@@ -21,7 +21,7 @@ async function main() {
         };`, loader: 'ts' }))
     } }],
   })
-  const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, d1Databases: ['DB'], compatibilityDate: '2026-08-01' })
+  const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, d1Databases: ['DB'], compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'] })
   try {
     const db = await mf.getD1Database('DB')
     // Include sensitive fields and an inactive-positive legacy lot so that

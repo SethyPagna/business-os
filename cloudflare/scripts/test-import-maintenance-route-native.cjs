@@ -17,11 +17,11 @@ async function main() {
       await env.DB.prepare('INSERT INTO dispatch_probe(job_id,kind) VALUES(?,?)').bind(message.jobId,message.kind).run();
     });
     export default { fetch(request,env,ctx) { return app.fetch(request,env,ctx); } };
-  ` }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', plugins: [{ name: 'route-auth-and-audit', setup(b) {
+  ` }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'], plugins: [{ name: 'route-auth-and-audit', setup(b) {
     b.onResolve({ filter: /\/lib\/(auth|audit)$/ }, args => ({ path: args.path.split('/').pop(), namespace: 'stub' }))
     b.onLoad({ filter: /.*/, namespace: 'stub' }, args => ({ contents: stubs[args.path], loader: 'js' }))
   } }] })
-  const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', d1Databases: ['DB', 'IMPORT_DB'], log: new Log(LogLevel.ERROR) })
+  const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'], d1Databases: ['DB', 'IMPORT_DB'], log: new Log(LogLevel.ERROR) })
   try {
     const db = await mf.getD1Database('DB')
     await db.prepare('CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT)').run()

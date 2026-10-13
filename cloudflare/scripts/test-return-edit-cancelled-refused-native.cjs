@@ -31,7 +31,7 @@ const root = path.resolve(__dirname, '..')
 async function workerBundle() {
   return build({ stdin: { contents: `import { Hono } from 'hono'; import returns from './src/routes/returns';
       const app=new Hono(); app.route('/api/returns',returns); export default app;`, resolveDir: root, loader: 'ts' },
-    bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022',
+    bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'],
     plugins: [{ name: 'return-edit-cancelled-fixtures', setup(b) {
       const fixtures = {
         auth: `export const requireAuth=async(c,next)=>{const raw=c.req.header('x-test-permissions');
@@ -66,7 +66,7 @@ async function migrate(db) {
 async function main() {
   const bundle = await workerBundle()
   const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, d1Databases: ['DB'],
-    compatibilityDate: '2026-08-01', log: new Log(LogLevel.ERROR) })
+    compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'], log: new Log(LogLevel.ERROR) })
   try {
     const db = await mf.getD1Database('DB')
     await migrate(db)

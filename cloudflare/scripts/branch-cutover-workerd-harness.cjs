@@ -76,8 +76,8 @@ const WORKER = `
 `
 
 async function start() {
-  const bundle = await build({ stdin: { resolveDir: root, loader: 'ts', contents: WORKER }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', logLevel: 'silent' })
-  const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', port: 0, d1Databases: ['DB'], log: new Log(LogLevel.ERROR) })
+  const bundle = await build({ stdin: { resolveDir: root, loader: 'ts', contents: WORKER }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'], logLevel: 'silent' })
+  const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'], port: 0, d1Databases: ['DB'], log: new Log(LogLevel.ERROR) })
   const call = async (body) => { const response = await mf.dispatchFetch('http://cutover.local/', { method: 'POST', body: JSON.stringify(body) }); return response.json() }
   return { mf, call }
 }
