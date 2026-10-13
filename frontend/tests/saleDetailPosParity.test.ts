@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict'
-import './saleSettlementUi.test.ts'
-import './paymentMethodRename.test.ts'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { sanitizeSaleDetailText } from '../src/components/sales/saleDetailText.ts'
+
+// One after the other: both await at top level and share the API client's
+// server, so run together they would interleave.
+await import('./saleSettlementUi.test.ts')
+await import('./paymentMethodRename.test.ts')
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const read = (relative: string) => fs.readFileSync(path.resolve(here, relative), 'utf8')
