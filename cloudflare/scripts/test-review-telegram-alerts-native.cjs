@@ -33,6 +33,7 @@
 //   --wrong=confirm-not-passed    the approve body's confirm_merge_into never reaches the applier
 //   --wrong=coded-refusal-500     a ReviewCodedRefusal falls through to the generic 500
 //   --wrong=refusal-any-status    any status is accepted as a coded refusal (a 418 would be sent as such)
+//   --wrong=targets-ignored      ?fields=targets is ignored: the full rows (payloads included) come back
 //   --wrong=details-last          the refusal's details are spread after success / error / code and can overwrite them
 //   --wrong=merged-ignored        outcome.mergedInto is never read: the Merged row is missing
 //   --only=<ids>                  run only these case ids
@@ -373,6 +374,12 @@ const PATCHES = {
   ],
   'details-last': [
     { name: 'details-last', file: QUEUE, from: '  return { body: { ...extra, success: false, error: err.message, code }, status }', to: '  return { body: { success: false, error: err.message, code, ...extra }, status }' },
+  ],
+  'targets-ignored': [
+    { name: 'targets-all', file: QUEUE, from: '  const options = { status, section }\n  const rows = fields === \'targets\' ? await listPendingActionTargets(c.env, options) : await listPendingActions(c.env, options)',
+      to: '  const options = { status, section }\n  const rows = await listPendingActions(c.env, options)' },
+    { name: 'targets-mine', file: QUEUE, from: '  const options = { status, requestedBy: Number(user.id) }\n  const rows = fields === \'targets\' ? await listPendingActionTargets(c.env, options) : await listPendingActions(c.env, options)',
+      to: '  const options = { status, requestedBy: Number(user.id) }\n  const rows = await listPendingActions(c.env, options)' },
   ],
   'refusal-any-status': [
     { name: 'refusal-any-status', file: QUEUE, from: '  if (status !== 403 && status !== 409 && status !== 503) return null\n', to: '' },
@@ -1076,6 +1083,52 @@ async function main() {
       }
       t.eq('no body at all (what the Review page sends today)', await seenBy(undefined), 'undefined')
       t.eq('a body that is not JSON', await seenBy(undefined, { raw: 'not json at all' }), 'undefined')
+    })
+
+    await check('C19', 'review list: ?fields=targets returns only what the pending tag needs (both lists); the default answer is unchanged', 'high', async t => {
+      await reset()
+      const feeA = await queueFeeDelete('Tag fee A')
+      const feeB = await queueFeeDelete('Tag fee B')
+      const product = await H.api('POST', '/api/products', { name: 'Tag product', barcode: '8850000' + String(100000 + (++seq)), selling_price_usd: 4.5 }, { as: 'sokha' })
+      t.eq('three requests queued', [feeA.status, feeB.status, product.status], [202, 202, 202])
+      const TARGET_KEYS = ['action_type', 'created_at', 'entity_id', 'entity_type', 'id', 'requested_by', 'requested_by_name', 'section', 'status']
+      const keysOf = row => Object.keys(row).sort()
+
+      const full = await H.api('GET', '/api/review', undefined, { as: 'dara' })
+      const slim = await H.api('GET', '/api/review?fields=targets', undefined, { as: 'dara' })
+      t.eq('default list: 200', full.status, 200)
+      t.eq('targets list: 200', slim.status, 200)
+      const fullRows = (full.body && full.body.data) || [], slimRows = (slim.body && slim.body.data) || []
+      t.ok('default list still carries the payload and the summary (the queue screen reads them)', fullRows.length >= 3 && fullRows.every(r => 'payload_json' in r && 'summary' in r && 'expected_entity_state_json' in r), fullRows[0] && keysOf(fullRows[0]))
+      t.eq('targets rows hold exactly the target columns', slimRows.map(keysOf), slimRows.map(() => TARGET_KEYS))
+      t.eq('same rows in the same order as the default list', slimRows.map(r => r.id), fullRows.map(r => r.id))
+      t.eq('every target field equals the value in the default list', slimRows.map(r => TARGET_KEYS.map(k => r[k])), fullRows.map(r => TARGET_KEYS.map(k => r[k])))
+      t.ok('the targets answer is the smaller one', JSON.stringify(slim.body).length < JSON.stringify(full.body).length)
+
+      const feesOnly = await H.api('GET', '/api/review?fields=targets&section=fees', undefined, { as: 'dara' })
+      const feeIds = fullRows.filter(r => r.section === 'fees').map(r => r.id)
+      t.ok('section filter still applies: the fee rows only, all of them', feeIds.length >= 2 && fullRows.some(r => r.section !== 'fees'), feeIds)
+      t.eq('section filter result', (feesOnly.body.data || []).map(r => r.id), feeIds)
+      const approved = await H.api('GET', '/api/review?fields=targets&status=approved', undefined, { as: 'dara' })
+      t.eq('status filter still applies', (approved.body.data || []).length, 0)
+
+      const viewer = await H.api('GET', '/api/review?fields=targets', undefined, { as: 'viewer' })
+      t.eq('a view-only reviewer may read it', viewer.status, 200)
+      const plain = await H.api('GET', '/api/review?fields=targets', undefined, { as: 'plain' })
+      t.eq('a user without review is still refused', plain.status, 403)
+
+      const mine = await H.api('GET', '/api/review/mine?fields=targets', undefined, { as: 'sokha' })
+      const mineFull = await H.api('GET', '/api/review/mine', undefined, { as: 'sokha' })
+      t.eq('mine: 200', mine.status, 200)
+      t.eq('mine: target columns only', ((mine.body && mine.body.data) || []).map(keysOf), ((mine.body && mine.body.data) || []).map(() => TARGET_KEYS))
+      t.eq('mine: same rows as the default', ((mine.body && mine.body.data) || []).map(r => r.id), ((mineFull.body && mineFull.body.data) || []).map(r => r.id))
+      t.ok('mine: only the requester own rows', ((mine.body && mine.body.data) || []).length >= 3 && mine.body.data.every(r => r.requested_by_name === 'sokha'))
+
+      for (const url of ['/api/review?fields=all', '/api/review/mine?fields=payload_json,id']) {
+        const bad = await H.api('GET', url, undefined, { as: url.includes('mine') ? 'sokha' : 'dara' })
+        t.eq(url + ': refused 400 invalid_fields', [bad.status, bad.body && bad.body.code], [400, 'invalid_fields'])
+      }
+      t.eq('listing sends nothing to Telegram beyond the three created alerts', (await H.tg.calls()).length, 3)
     })
   } finally {
     await H.dispose()

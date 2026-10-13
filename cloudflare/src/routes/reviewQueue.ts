@@ -9,6 +9,7 @@ import { audit } from '../lib/audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import {
   listPendingActions,
+  listPendingActionTargets,
   getPendingAction,
   type PendingActionRow,
   markPendingActionApproved,
@@ -126,7 +127,10 @@ app.get('/mine', async (c) => {
   // submitter's question is "what happened to my requests?", and the
   // rejected ones -- the only place the reviewer's reason is visible -- are
   // exactly the rows they most need to see.
-  const rows = await listPendingActions(c.env, { status, requestedBy: Number(user.id) })
+  const fields = c.req.query('fields')
+  if (fields && fields !== 'targets') return c.json({ success: false, code: 'invalid_fields', error: "fields must be 'targets' or left out." }, 400)
+  const options = { status, requestedBy: Number(user.id) }
+  const rows = fields === 'targets' ? await listPendingActionTargets(c.env, options) : await listPendingActions(c.env, options)
   return c.json({ success: true, data: rows })
 })
 
@@ -236,7 +240,10 @@ app.get('/', async (c) => {
     ? (statusParam as PendingActionStatus | 'all')
     : 'open'
   const section = c.req.query('section') || null
-  const rows = await listPendingActions(c.env, { status, section })
+  const fields = c.req.query('fields')
+  if (fields && fields !== 'targets') return c.json({ success: false, code: 'invalid_fields', error: "fields must be 'targets' or left out." }, 400)
+  const options = { status, section }
+  const rows = fields === 'targets' ? await listPendingActionTargets(c.env, options) : await listPendingActions(c.env, options)
   return c.json({ success: true, data: rows })
 })
 
