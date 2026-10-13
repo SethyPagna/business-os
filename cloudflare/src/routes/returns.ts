@@ -49,7 +49,7 @@ import { isAnonymousCustomer } from '../lib/anonymousCustomer'
 import {
   assertReturnCreateCapacity, assertReturnCreatePlanBounds, canonicalReturnCreateIntent,
   projectedSaleStatusForReturnCreate, projectedSaleStatusForReturnCreateV1, replacementSaleIdSql, returnCreateGuardStatement,
-  returnCreateIdSql, returnCreateOwnMovementCountSql, RETURN_CREATE_REQUEST_BYTES, type ReturnCreateResponse,
+  returnCreateIdSql, returnCreateOwnMovementCountSql, returnQuantityExceeds, returnQuantityRemaining, RETURN_CREATE_REQUEST_BYTES, type ReturnCreateResponse,
 } from '../lib/returnCreateAction'
 // RET-B F4: units an imported sale's row says already came back
 // (sale_items.returned_quantity) count as returned in every capacity read.
@@ -451,39 +451,14 @@ function canonicalReturnEditIntent(returnId: number, expectedUpdatedAt: string, 
   }
 }
 
+// The edit's projection is the create's over the whole proposed set (it was a
+// line-for-line copy with the same binary-float sums); one exact rule.
 function projectedSaleStatusForReturnEdit(
   saleItems: Array<{ id: number; product_id: number | null; quantity: number }>,
   returnLines: Array<{ sale_item_id?: number | null; product_id?: number | null; quantity: number }>,
   statusBeforeReturn: string | null,
 ): string {
-  const saleItemIds = new Set(saleItems.map((item) => Number(item.id)))
-  const returnedByItem = new Map<number, number>()
-  const fallbackByProduct = new Map<number, number>()
-  let hasAny = false
-  for (const line of returnLines) {
-    const quantity = Number(line.quantity) || 0
-    if (!(quantity > 0)) continue
-    hasAny = true
-    const saleItemId = Number(line.sale_item_id) || 0
-    if (saleItemId && saleItemIds.has(saleItemId)) {
-      returnedByItem.set(saleItemId, (returnedByItem.get(saleItemId) || 0) + quantity)
-      continue
-    }
-    const productId = Number(line.product_id) || 0
-    if (productId) fallbackByProduct.set(productId, (fallbackByProduct.get(productId) || 0) + quantity)
-  }
-  for (const item of saleItems) {
-    const productId = Number(item.product_id) || 0
-    let fallback = fallbackByProduct.get(productId) || 0
-    if (!(fallback > 0)) continue
-    const outstanding = Math.max(0, (Number(item.quantity) || 0) - (returnedByItem.get(item.id) || 0))
-    const allocated = Math.min(outstanding, fallback)
-    if (allocated > 0) returnedByItem.set(item.id, (returnedByItem.get(item.id) || 0) + allocated)
-    fallback -= allocated
-    fallbackByProduct.set(productId, fallback)
-  }
-  const fullyReturned = hasAny && saleItems.every((item) => (returnedByItem.get(item.id) || 0) >= (Number(item.quantity) || 0))
-  return fullyReturned ? 'returned' : hasAny ? 'partial_return' : (statusBeforeReturn || 'completed')
+  return projectedSaleStatusForReturnCreate(saleItems, returnLines, [], statusBeforeReturn)
 }
 
 function normalizeScope(value: unknown, fallback: string = CUSTOMER_SCOPE): string {
@@ -714,56 +689,57 @@ async function assertReturnableItems(
       const saleItem = await db.prepare('SELECT id, quantity, product_name, returned_quantity FROM sale_items WHERE id = ? AND sale_id = ?').get<{ id: number; quantity: number; product_name: string | null; returned_quantity: number | null }>([item.sale_item_id, saleId])
       if (!saleItem) throw new Error('Sale item not found for this return')
 
-      const returnedRow = excludeReturnId
+      const returnedRows = excludeReturnId
         ? await db.prepare(`
-            SELECT COALESCE(SUM(ri.quantity), 0) AS qty
+            SELECT ri.quantity AS qty
             FROM return_items ri
             JOIN returns r ON r.id = ri.return_id
             WHERE r.sale_id = ? AND ri.sale_item_id = ?
               AND COALESCE(r.status, 'completed') != 'cancelled'
               AND COALESCE(r.return_scope, 'customer') = 'customer'
               AND r.id != ?
-          `).get<{ qty: number }>([saleId, item.sale_item_id, excludeReturnId])
+          `).all<{ qty: number }>([saleId, item.sale_item_id, excludeReturnId])
         : await db.prepare(`
-            SELECT COALESCE(SUM(ri.quantity), 0) AS qty
+            SELECT ri.quantity AS qty
             FROM return_items ri
             JOIN returns r ON r.id = ri.return_id
             WHERE r.sale_id = ? AND ri.sale_item_id = ?
               AND COALESCE(r.status, 'completed') != 'cancelled'
               AND COALESCE(r.return_scope, 'customer') = 'customer'
-          `).get<{ qty: number }>([saleId, item.sale_item_id])
+          `).all<{ qty: number }>([saleId, item.sale_item_id])
       // The import already restocked the line's returned_quantity; counting it
-      // here is what stops a second restock of the same units.
-      const returned = (returnedRow?.qty || 0) + importedReturnedQuantity(saleItem)
-      const remaining = Math.max(0, (saleItem.quantity || 0) - returned)
-      if (qty > remaining) throw new Error(`Cannot return ${qty} of ${saleItem.product_name || 'this item'} — only ${remaining} remaining`)
+      // here is what stops a second restock of the same units. Summed as exact
+      // decimals (0.2 + 0.1 is exactly 0.3 here, not 0.30000000000000004).
+      const remaining = returnQuantityRemaining(saleItem.quantity || 0,
+        [...returnedRows.map((row) => Number(row.qty) || 0), importedReturnedQuantity(saleItem)])
+      if (returnQuantityExceeds(qty, remaining)) throw new Error(`Cannot return ${qty} of ${saleItem.product_name || 'this item'} — only ${remaining} remaining`)
       continue
     }
 
     if (item.product_id) {
-      const soldRow = await db.prepare(`SELECT COALESCE(SUM(quantity), 0) AS qty,
-          COALESCE(SUM(${importedReturnedQuantitySql('sale_items')}), 0) AS imported
-        FROM sale_items WHERE sale_id = ? AND product_id = ?`).get<{ qty: number; imported: number }>([saleId, item.product_id])
-      const returnedRow = excludeReturnId
+      const soldRows = await db.prepare(`SELECT quantity AS qty, ${importedReturnedQuantitySql('sale_items')} AS imported
+        FROM sale_items WHERE sale_id = ? AND product_id = ?`).all<{ qty: number; imported: number }>([saleId, item.product_id])
+      const returnedRows = excludeReturnId
         ? await db.prepare(`
-            SELECT COALESCE(SUM(ri.quantity), 0) AS qty
+            SELECT ri.quantity AS qty
             FROM return_items ri
             JOIN returns r ON r.id = ri.return_id
             WHERE r.sale_id = ? AND ri.product_id = ?
               AND COALESCE(r.status, 'completed') != 'cancelled'
               AND COALESCE(r.return_scope, 'customer') = 'customer'
               AND r.id != ?
-          `).get<{ qty: number }>([saleId, item.product_id, excludeReturnId])
+          `).all<{ qty: number }>([saleId, item.product_id, excludeReturnId])
         : await db.prepare(`
-            SELECT COALESCE(SUM(ri.quantity), 0) AS qty
+            SELECT ri.quantity AS qty
             FROM return_items ri
             JOIN returns r ON r.id = ri.return_id
             WHERE r.sale_id = ? AND ri.product_id = ?
               AND COALESCE(r.status, 'completed') != 'cancelled'
               AND COALESCE(r.return_scope, 'customer') = 'customer'
-          `).get<{ qty: number }>([saleId, item.product_id])
-      const remaining = Math.max(0, (soldRow?.qty || 0) - (returnedRow?.qty || 0) - (soldRow?.imported || 0))
-      if (qty > remaining) throw new Error(`Cannot return ${qty} of this product — only ${remaining} remaining`)
+          `).all<{ qty: number }>([saleId, item.product_id])
+      const remaining = returnQuantityRemaining(soldRows.map((row) => Number(row.qty) || 0),
+        [...returnedRows.map((row) => Number(row.qty) || 0), ...soldRows.map((row) => Number(row.imported) || 0)])
+      if (returnQuantityExceeds(qty, remaining)) throw new Error(`Cannot return ${qty} of this product — only ${remaining} remaining`)
     }
   }
 }

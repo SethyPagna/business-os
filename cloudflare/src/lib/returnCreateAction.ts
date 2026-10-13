@@ -248,6 +248,49 @@ export function canonicalReturnCreateIntent(body: Record<string, unknown>): Reco
   }
 }
 
+// Return quantities are decimal facts. Summed as JS numbers, 0.2 + 0.1 is
+// 0.30000000000000004, which refused the last 0.1 of a 0.3 line ("Cannot
+// return 0.30000000000000004 of ... -- only 0.3 sold") and left a fully
+// returned 0.7 + 0.1 of 0.8 'partial_return'. Every quantity sum and
+// comparison of the legacy (v0) capacity and status reads goes through
+// moneyPrecision's exact subtractDecimalSum -- the kernel the v1 entitlement
+// already uses -- and never an epsilon: a genuine excess of 1e-10 is refused.
+// A value is a stored quantity (a JS number) or an exact decimal string.
+type ExactQuantity = number | string
+
+function exactDifference(left: ExactQuantity, right: ExactQuantity): string {
+  try { return subtractDecimalSum(left, [right]) } catch { throw new Error('Return quantities must be plain decimal numbers') }
+}
+function exactSum(values: readonly ExactQuantity[]): string {
+  let negated: string
+  try { negated = subtractDecimalSum(0, values) } catch { throw new Error('Return quantities must be plain decimal numbers') }
+  return negated === '0' ? '0' : negated.startsWith('-') ? negated.slice(1) : `-${negated}`
+}
+function exactPositive(value: string): boolean { return value !== '0' && !value.startsWith('-') }
+function exactGreater(left: ExactQuantity, right: ExactQuantity): boolean { return exactPositive(exactDifference(left, right)) }
+function exactMin(left: ExactQuantity, right: ExactQuantity): ExactQuantity { return exactGreater(left, right) ? right : left }
+function exactAtLeastZero(value: string): string { return exactPositive(value) ? value : '0' }
+// A stored quantity that is not a finite number (never written by the app)
+// counts as zero, the way the status projection always read it.
+function storedQuantity(value: unknown): number { return Number(value) || 0 }
+function addPart(parts: Map<number, ExactQuantity[]>, key: number, value: ExactQuantity): void {
+  const list = parts.get(key)
+  if (list) list.push(value)
+  else parts.set(key, [value])
+}
+
+/** Units of a sale line (or of all a product's lines: pass every sold
+ *  quantity) still returnable after `returned`, exactly; never below 0. */
+export function returnQuantityRemaining(sold: number | readonly number[], returned: readonly number[]): number {
+  const soldTotal = typeof sold === 'number' ? exactSum([storedQuantity(sold)]) : exactSum(sold.map(storedQuantity))
+  return Number(exactAtLeastZero(exactDifference(soldTotal, exactSum(returned.map(storedQuantity)))))
+}
+
+/** True when `requested` is more than `remaining`, compared as exact decimals. */
+export function returnQuantityExceeds(requested: number, remaining: number): boolean {
+  return exactGreater(storedQuantity(requested), storedQuantity(remaining))
+}
+
 export function projectedSaleStatusForReturnCreate(
   saleItems: Array<{ id: number; product_id: number | null; quantity: number }>,
   committedReturnLines: Array<{ sale_item_id?: number | null; product_id?: number | null; quantity: number }>,
@@ -255,8 +298,8 @@ export function projectedSaleStatusForReturnCreate(
   statusBeforeReturn: string | null,
 ): string {
   const saleItemIds = new Set(saleItems.map((item) => Number(item.id)))
-  const returnedByItem = new Map<number, number>()
-  const fallbackByProduct = new Map<number, number>()
+  const returnedByItem = new Map<number, ExactQuantity[]>()
+  const fallbackByProduct = new Map<number, ExactQuantity[]>()
   const allLines = [...committedReturnLines, ...requestLines]
   let hasAny = false
   for (const line of allLines) {
@@ -265,22 +308,24 @@ export function projectedSaleStatusForReturnCreate(
     hasAny = true
     const saleItemId = Number(line.sale_item_id) || 0
     if (saleItemId && saleItemIds.has(saleItemId)) {
-      returnedByItem.set(saleItemId, (returnedByItem.get(saleItemId) || 0) + quantity)
+      addPart(returnedByItem, saleItemId, quantity)
       continue
     }
     const productId = Number(line.product_id) || 0
-    if (productId) fallbackByProduct.set(productId, (fallbackByProduct.get(productId) || 0) + quantity)
+    if (productId) addPart(fallbackByProduct, productId, quantity)
   }
   for (const item of saleItems) {
     const productId = Number(item.product_id) || 0
-    const fallback = fallbackByProduct.get(productId) || 0
-    if (!(fallback > 0)) continue
-    const capacity = Math.max(0, Number(item.quantity) - (returnedByItem.get(item.id) || 0))
-    const allocated = Math.min(capacity, fallback)
-    if (allocated > 0) returnedByItem.set(item.id, (returnedByItem.get(item.id) || 0) + allocated)
-    fallbackByProduct.set(productId, fallback - allocated)
+    const fallback = exactSum(fallbackByProduct.get(productId) || [])
+    if (!exactPositive(fallback)) continue
+    const returned = exactSum(returnedByItem.get(item.id) || [])
+    const capacity = exactAtLeastZero(exactDifference(storedQuantity(item.quantity), returned))
+    const allocated = exactMin(capacity, fallback)
+    if (exactGreater(allocated, 0)) returnedByItem.set(item.id, [returned, allocated])
+    fallbackByProduct.set(productId, [exactDifference(fallback, allocated)])
   }
-  const fullyReturned = hasAny && saleItems.every((item) => (returnedByItem.get(item.id) || 0) >= Number(item.quantity))
+  const fullyReturned = hasAny && saleItems.every((item) =>
+    !exactGreater(storedQuantity(item.quantity), exactSum(returnedByItem.get(item.id) || [])))
   return fullyReturned ? 'returned' : hasAny ? 'partial_return' : (statusBeforeReturn || 'completed')
 }
 
@@ -328,13 +373,11 @@ export class ReturnCapacityError extends Error {
   }
 }
 
-// Quantities are summed as binary floats; the counts a person reads carry
-// none of that noise.
-const capacityCount = (value: number): number => Math.round(value * 1e6) / 1e6
-
-function capacityParams(product: string | null | undefined, productId: number, returned: number, sold: number): ReturnCapacityParams | null {
+// The counts are exact decimals (see exactSum above), so the sentence and the
+// params carry no binary-float noise without any rounding of their own.
+function capacityParams(product: string | null | undefined, productId: number, returned: string, sold: number): ReturnCapacityParams | null {
   const name = String(product ?? '').trim() || (productId ? `#${productId}` : '')
-  return name ? { product: name, returned: capacityCount(returned), sold: capacityCount(Math.max(0, sold)) } : null
+  return name ? { product: name, returned: Number(returned), sold: Math.max(0, sold) } : null
 }
 
 export function assertReturnCreateCapacity(
@@ -343,8 +386,8 @@ export function assertReturnCreateCapacity(
   requestLines: Array<{ sale_item_id?: number | null; product_id?: number | null; quantity: number }>,
 ): void {
   const byId = new Map(saleItems.map((item) => [Number(item.id), item]))
-  const usedByItem = new Map<number, number>()
-  const fallbackByProduct = new Map<number, number>()
+  const usedByItem = new Map<number, ExactQuantity[]>()
+  const fallbackByProduct = new Map<number, ExactQuantity[]>()
   for (const line of [...committedReturnLines, ...requestLines]) {
     const quantity = Number(line.quantity) || 0
     if (!(quantity > 0)) continue
@@ -352,37 +395,39 @@ export function assertReturnCreateCapacity(
     if (saleItemId) {
       const item = byId.get(saleItemId)
       if (!item) throw new Error('Sale item not found for this return')
-      usedByItem.set(saleItemId, (usedByItem.get(saleItemId) || 0) + quantity)
+      addPart(usedByItem, saleItemId, quantity)
       continue
     }
     const productId = Number(line.product_id) || 0
     if (!productId) throw new Error('Each return line needs a sale item or product')
-    fallbackByProduct.set(productId, (fallbackByProduct.get(productId) || 0) + quantity)
+    addPart(fallbackByProduct, productId, quantity)
   }
   for (const item of saleItems) {
-    const used = usedByItem.get(item.id) || 0
-    if (used > Number(item.quantity)) {
-      throw new ReturnCapacityError(`Cannot return ${used} of ${item.product_name || 'this item'} — only ${Math.max(0, Number(item.quantity))} sold`,
-        capacityParams(item.product_name, Number(item.product_id) || 0, used, Number(item.quantity)))
+    const sold = storedQuantity(item.quantity)
+    const used = exactSum(usedByItem.get(item.id) || [])
+    if (exactGreater(used, sold)) {
+      throw new ReturnCapacityError(`Cannot return ${Number(used)} of ${item.product_name || 'this item'} — only ${Math.max(0, sold)} sold`,
+        capacityParams(item.product_name, Number(item.product_id) || 0, used, sold))
     }
     const productId = Number(item.product_id) || 0
-    let fallback = fallbackByProduct.get(productId) || 0
-    if (!(fallback > 0)) continue
-    const remaining = Math.max(0, Number(item.quantity) - used)
-    const allocated = Math.min(remaining, fallback)
-    usedByItem.set(item.id, used + allocated)
-    fallbackByProduct.set(productId, fallback - allocated)
+    const fallback = exactSum(fallbackByProduct.get(productId) || [])
+    if (!exactPositive(fallback)) continue
+    const allocated = exactMin(exactAtLeastZero(exactDifference(sold, used)), fallback)
+    usedByItem.set(item.id, [used, allocated])
+    fallbackByProduct.set(productId, [exactDifference(fallback, allocated)])
   }
-  const overflow = [...fallbackByProduct.entries()].find(([, quantity]) => quantity > 0)
+  const overflow = [...fallbackByProduct.entries()]
+    .map(([productId, parts]) => [productId, exactSum(parts)] as const)
+    .find(([, quantity]) => exactPositive(quantity))
   if (overflow) {
     // Every sale line of this product is full by now (the allocation above
     // fills each before any quantity is left over), so what would count as
     // returned is everything the sale sold of it plus the overflow.
     const [productId, extra] = overflow
     const lines = saleItems.filter((item) => (Number(item.product_id) || 0) === productId)
-    const sold = lines.reduce((sum, item) => sum + Math.max(0, Number(item.quantity) || 0), 0)
-    throw new ReturnCapacityError(`Cannot return ${extra} additional unit(s) of product #${productId} — only the unreturned sold quantity is eligible`,
-      capacityParams(lines.find((item) => String(item.product_name ?? '').trim())?.product_name, productId, sold + extra, sold))
+    const sold = exactSum(lines.map((item) => Math.max(0, storedQuantity(item.quantity))))
+    throw new ReturnCapacityError(`Cannot return ${Number(extra)} additional unit(s) of product #${productId} — only the unreturned sold quantity is eligible`,
+      capacityParams(lines.find((item) => String(item.product_name ?? '').trim())?.product_name, productId, exactSum([sold, extra]), Number(sold)))
   }
 }
 
