@@ -405,6 +405,24 @@ test('Saved reasons window: a slot beside the title tags a waiting list edit and
   assert.match(catalog, /if \(result\?\.pending\) \{\s*noteQueuedForReview\(result\)/)
 })
 
+// The Inventory page is kept mounted while another page is shown; the three other pages' loaders already stop
+// then (refuter S6), and so does this one, through the same `active` the page uses for its own product reads.
+const inventoryGateWired = (surface: string, page: string): boolean =>
+  /<PendingReviewSync active=\{active\} \/>/.test(surface)
+  && /statsError, t, active = true,\s*\}: Props\)/.test(surface)
+  && /<InventoryProductsSurface\s+active=\{isActive\}/.test(page)
+
+test('Inventory products: the loader stops while the page is mounted but not shown', () => {
+  const page = read('components/inventory/Inventory.tsx')
+  assert.ok(inventoryGateWired(surfaceSource, page), 'the surface passes `active` to its loader and the page passes `isActive` to the surface')
+  assert.match(page, /const isActive = useIsPageActive\(/, 'the same flag the page gates its product reads on')
+  assert.ok(/\bactive\?: boolean/.test(surfaceSource), 'the prop is optional, so a caller that does not pass it (the tests, a standalone use) still reads')
+  const withoutPageFlag = page.replace(/(<InventoryProductsSurface\s+)active=\{isActive\}\s+/, '$1')
+  assert.notEqual(withoutPageFlag, page)
+  assert.equal(inventoryGateWired(surfaceSource, withoutPageFlag), false, 'MUTANT the page forgets to pass isActive')
+  assert.equal(inventoryGateWired(surfaceSource.replace('<PendingReviewSync active={active} />', '<PendingReviewSync />'), page), false, 'MUTANT the surface ignores `active`')
+})
+
 test('every surface the plan names is wired, and no other list is tagged', () => {
   const tagged = ['components/products/Products.tsx', 'components/fees/FeesPage.tsx', 'components/branches/Branches.tsx', 'components/inventory/InventoryProductsSurface.tsx', 'components/shared/StockReasonsManagerModal.tsx']
   for (const file of tagged) assert.match(read(file), /PendingReviewTag/, `${file} draws the tag`)

@@ -117,12 +117,14 @@ type Props = InventoryProductsPayload & {
   statsLoading: boolean
   statsError?: string | null
   t: (key: string) => string | undefined
+  /** False while the Inventory page is kept mounted but not shown: the waiting tags are not read then. */
+  active?: boolean
 }
 
 export default function InventoryProductsSurface({
   items, total, page, pageSize, loading, error, branchFilter,
   onPageChange, onPageSizeChange, onOpenDetail, onOpenInCatalogue, onAdjust, fmtUSD, fmtKHR,
-  serverStats, statsLoading, statsError, t,
+  serverStats, statsLoading, statsError, t, active = true,
 }: Props) {
   const groups = useMemo(() => groupInventoryProducts(items), [items])
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
@@ -226,7 +228,7 @@ export default function InventoryProductsSurface({
   return (
     <section aria-label={t('products') || 'Products'} className="min-w-0 max-w-full space-y-2">
       {/* ONE read of the open review requests for this table, shared by every row's tag (renders nothing). */}
-      <PendingReviewSync />
+      <PendingReviewSync active={active} />
       <div className="flex flex-wrap gap-x-4 gap-y-1 rounded-lg border border-slate-200 p-2 text-xs dark:border-slate-700" aria-busy={statsLoading}>
         {summaryFields.map(([field, label]) => <div key={field}>{t(label) || label}: <strong>{statsLoading ? '…' : inventoryMoney(serverStats?.[field]) === null ? '—' : field === 'stock_value_usd' ? fmtUSD(Number(serverStats?.[field])) : Number(serverStats?.[field])}</strong></div>)}
       </div>

@@ -2414,6 +2414,7 @@ ${inventoryFeesFormulaText}`,
       {showProductsSection ? (
         <Suspense fallback={<div className="card p-8 text-center text-sm text-slate-500">{t('loading') || 'Loading'}...</div>}>
           <InventoryProductsSurface
+            active={isActive}
             items={productsResultScope === productsScope ? productsItems : []}
             loading={productsLoading || productsResultScope !== productsScope}
             error={productsResultScope === productsScope ? productsError : null}
