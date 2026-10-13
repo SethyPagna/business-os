@@ -124,6 +124,11 @@ function buildDashboardKpiRows(ctx: DashboardExportContext): Row[] {
   const metricTotals = totals(ctx)
   const returns = periodReturns(ctx)
   const supplierReturns = periodSupplierReturns(ctx)
+  // cost_usd / profit_usd are OMITTED by the Worker for a caller without the cost
+  // grant (never sent as 0), so an absent key is left out of the file instead of
+  // being written as a $0.00 that reads as a period that broke even.
+  const hasCost = typeof metricTotals.cost_usd === 'number'
+  const hasProfit = typeof metricTotals.profit_usd === 'number'
   return [
     { Section: 'KPI', Metric: 'Period', Value: ctx.periodShort, Period: ctx.rangeLabel },
     { Section: 'KPI', Metric: 'Gross Sales (USD)', Value: priceCsv(metricTotals.gross_sales_usd), Period: ctx.rangeLabel },
@@ -134,9 +139,9 @@ function buildDashboardKpiRows(ctx: DashboardExportContext): Row[] {
     { Section: 'KPI', Metric: 'Delivery (USD)', Value: priceCsv(metricTotals.delivery_usd), Period: ctx.rangeLabel },
     { Section: 'KPI', Metric: 'Products', Value: ctx.summary?.product_count || 0, Period: 'current inventory' },
     { Section: 'KPI', Metric: 'Stock Value (USD)', Value: priceCsv(ctx.summary?.stock_value_usd), Period: 'current inventory' },
-    { Section: 'KPI', Metric: 'COGS (USD)', Value: priceCsv(metricTotals.cost_usd), Period: ctx.rangeLabel },
+    ...(hasCost ? [{ Section: 'KPI', Metric: 'COGS (USD)', Value: priceCsv(metricTotals.cost_usd), Period: ctx.rangeLabel }] : []),
     // L4: a cost viewer's profit arrives on goods alone (revenue - cost), and is named so.
-    { Section: 'KPI', Metric: (metricTotals as Record<string, unknown>).profit_excludes_delivery === true ? 'Est. Profit excl. delivery (USD)' : 'Est. Profit (USD)', Value: priceCsv(metricTotals.profit_usd), Period: ctx.rangeLabel },
+    ...(hasProfit ? [{ Section: 'KPI', Metric: (metricTotals as Record<string, unknown>).profit_excludes_delivery === true ? 'Est. Profit excl. delivery (USD)' : 'Est. Profit (USD)', Value: priceCsv(metricTotals.profit_usd), Period: ctx.rangeLabel }] : []),
     { Section: 'KPI', Metric: 'Transactions', Value: metricTotals.tx_count || 0, Period: ctx.rangeLabel },
     { Section: 'KPI', Metric: 'Avg Order (USD)', Value: priceCsv(metricTotals.avg_order_usd), Period: ctx.rangeLabel },
     { Section: 'KPI', Metric: 'Returns', Value: returns.return_count || 0, Period: ctx.rangeLabel },
@@ -156,12 +161,12 @@ function buildDashboardFormulaRows(ctx: DashboardExportContext): Row[] {
     { Section: 'Calculation', Metric: 'Selected Range', Formula: ctx.rangeLabel, Example: ctx.periodShort },
     { Section: 'Calculation', Metric: 'Net revenue', Formula: ctx.revenueFormulaText, Example: ctx.revenueExampleText },
     { Section: 'Calculation', Metric: 'Collected total', Formula: ctx.collectedFormulaText, Example: ctx.collectedExampleText },
-    {
+    ...(typeof metricTotals.profit_usd === 'number' && typeof metricTotals.cost_usd === 'number' ? [{
       Section: 'Calculation',
       Metric: 'Estimated profit',
       Formula: 'Profit = Net revenue - COGS',
       Example: `${ctx.fmtUSD(metricTotals.profit_usd)} = ${ctx.fmtUSD(metricTotals.revenue_usd)} - ${ctx.fmtUSD(metricTotals.cost_usd)}`,
-    },
+    }] : []),
     {
       Section: 'Calculation',
       Metric: 'Average order',
@@ -210,8 +215,8 @@ function buildDashboardSalesRows(ctx: DashboardExportContext): Row[] {
     Delivery_USD: splitCsv(d.delivery_usd),
     Refund_USD: splitCsv(d.refund_usd),
     Revenue_USD: splitCsv(d.revenue_usd),
-    COGS_USD: splitCsv(d.cost_usd),
-    Profit_USD: splitCsv(d.profit_usd),
+    ...(typeof d.cost_usd === 'number' ? { COGS_USD: splitCsv(d.cost_usd) } : {}),
+    ...(typeof d.profit_usd === 'number' ? { Profit_USD: splitCsv(d.profit_usd) } : {}),
     Tx: d.count || 0,
   }))
 }
@@ -351,8 +356,8 @@ export function exportDashboardSalesChart(ctx: DashboardExportContext): void {
     Delivery_USD: d.delivery_usd || 0,
     Refund_USD: d.refund_usd || 0,
     Revenue_USD: d.revenue_usd || 0,
-    COGS_USD: d.cost_usd || 0,
-    Profit_USD: d.profit_usd || 0,
+    ...(typeof d.cost_usd === 'number' ? { COGS_USD: d.cost_usd } : {}),
+    ...(typeof d.profit_usd === 'number' ? { Profit_USD: d.profit_usd } : {}),
     Tx: d.count || 0,
   }))
   downloadXLSX(`dashboard-sales-${ctx.exportStamp}.xlsx`, rows)
@@ -434,8 +439,8 @@ export async function exportDashboardPackage(ctx: DashboardExportContext): Promi
           ],
         },
       },
-      {
-        type: 'line',
+      ...(ctx.chartData.some((row) => typeof row.profit_usd === 'number') ? [{
+        type: 'line' as const,
         title: 'Revenue vs COGS vs Profit',
         subtitle: 'Visible period comparison',
         props: {
@@ -446,7 +451,7 @@ export async function exportDashboardPackage(ctx: DashboardExportContext): Promi
             { key: 'profit_usd', color: '#16a34a', label: ctx.profitLabel },
           ],
         },
-      },
+      }] : []),
       {
         type: 'bar',
         title: 'Sales count over time',

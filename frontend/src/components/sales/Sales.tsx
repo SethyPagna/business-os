@@ -1804,6 +1804,15 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       : itemDiscountUsd + invoiceDiscountUsd
     const returnCount = Number(stripReturns.count) || 0
     const refundUsd = Number(stripReturns.refund_usd) || 0
+    // cost_usd / profit_usd travel only to a cost reader: the Worker's gateTotals
+    // (routes/reports.ts) OMITS them for every other caller and never sends 0 for
+    // "hidden". `|| 0` on an absent key printed $0.00 COGS and a $0.00 profit at 0.0%
+    // margin, which reads as a period that broke even. The two cards are left out
+    // instead (the Dashboard's Gross Profit card does the same). Before the totals
+    // arrive nothing says which it will be, so the placeholders follow the grant.
+    const costReader = canViewAcquisitionCosts(user)
+    const showCogs = stripStatus === 'ready' ? typeof totals.cost_usd === 'number' : costReader
+    const showProfit = stripStatus === 'ready' ? typeof totals.profit_usd === 'number' : costReader
     const cogsUsd = Number(totals.cost_usd) || 0
     const profitUsd = Number(totals.profit_usd) || 0
     // AL finding L4 (13 Oct 2026): a cost viewer who is not an administrator
@@ -1883,7 +1892,7 @@ ${buildEquation({ key: 'revenue', fallback: 'Revenue', usd: revenueUsd }, revenu
           ] : []),
         ],
       },
-      {
+      ...(showCogs ? [{
         key: 'cogs',
         label: t('cogs') || 'COGS',
         value: fmtUSD(cogsUsd),
@@ -1894,8 +1903,8 @@ ${buildEquation({ key: 'revenue', fallback: 'Revenue', usd: revenueUsd }, revenu
           { label: t('revenue') || 'Revenue', value: fmtUSD(revenueUsd) },
           { label: profitCardLabel, value: fmtUSD(profitUsd), tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const) },
         ],
-      },
-      {
+      }] : []),
+      ...(showProfit ? [{
         key: 'profit',
         label: profitExclDelivery ? profitCardLabel : (t('gross_profit') || 'Gross Profit'),
         value: fmtUSD(profitUsd),
@@ -1924,7 +1933,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
             { label: translateOr('rpt_profit_after_losses', 'Profit incl. losses'), value: fmtUSD(profitInclLosses), tone: profitInclLosses < 0 ? ('crit' as const) : undefined },
           ] : []),
         ],
-      },
+      }] : []),
       {
         key: 'payments',
         label: translateOr('stats_payments', 'Payments'),
@@ -1972,7 +1981,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
       })
     }
     return stripStatus === 'ready' ? cards : cards.map(({ key, label, hint }) => ({ key, label, hint, value: '—' }))
-  }, [canViewFees, feeStripData, fmtKHR, fmtUSD, settings?.currency_usd_symbol, stripData, stripHasTime, stripStatus, t, translateOr])
+  }, [canViewFees, feeStripData, fmtKHR, fmtUSD, settings?.currency_usd_symbol, stripData, stripHasTime, stripStatus, t, translateOr, user])
 
   // A sale "counts" toward the headline figures only when it contributes to
   // the money shown (user, Aug 31: "count only what the money counts"), and

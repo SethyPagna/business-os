@@ -6,6 +6,8 @@ import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent 
 // not stubbed, so a card that prints an equation that does not foot fails here.
 import { buildEquation, revenueTerms, profitTerms, equationResidual } from '../src/utils/statsFormulas.ts'
 import { formatUsd4 } from '../src/utils/reportMoney.ts'
+// The REAL client mirror of the Worker's cost gate, injected like the formulas above.
+import { canViewAcquisitionCosts } from '../src/utils/acquisitionCostAccess.ts'
 
 const source = readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const lifecycleStart = source.indexOf('  type SalesStripPayload =')
@@ -23,7 +25,7 @@ function render(hooks: any, props: any, api: any, helpers: any) {
   const { useState, useRef, useMemo, useCallback, useEffect } = hooks
   const { stripRange, isActive, user, canViewSales, canViewFees, getPermissionTier } = props
   const { getSalesStatsStrip, getFeesReport } = api
-  const { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, buildEquation, revenueTerms, profitTerms, formatUsd4 } = helpers
+  const { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, buildEquation, revenueTerms, profitTerms, formatUsd4, canViewAcquisitionCosts } = helpers
   const settings = props.settings
   const withLoaderTimeout = (load: () => unknown) => load()
   const t = (key: string) => key
@@ -61,7 +63,7 @@ const fees = { totals: { amount_usd: 3, amount_khr: 4000 }, by_type: [{ fee_type
 function harness() {
   const props = {
     stripRange: { ...range }, isActive: true,
-    user: { id: 1, username: 'staff', role_code: 'staff', permissions: { sales: 'full' } } as Record<string, unknown> | null,
+    user: { id: 1, username: 'staff', role_code: 'staff', permissions: { sales: 'full', product_cost_view: true } } as Record<string, unknown> | null,
     canViewSales: true, canViewFees: true, getPermissionTier: (_key: string) => 'full', language: 'en',
     search: '', statusFilter: 'all', userFilter: 'all',
   }
@@ -93,7 +95,7 @@ function harness() {
   const enqueue = (queue: Pending[], params: Record<string, unknown>) => new Promise((resolve, reject) => queue.push({ params, resolve, reject }))
   const api = { getSalesStatsStrip: (params: Record<string, unknown>) => enqueue(requests.sales, params), getFeesReport: (params: Record<string, unknown>) => enqueue(requests.fees, params) }
   let view: View
-  const render = () => { cursor = 0; dirty = false; view = run(hooks, props, api, { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, buildEquation, revenueTerms, profitTerms, formatUsd4 }); return view }
+  const render = () => { cursor = 0; dirty = false; view = run(hooks, props, api, { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, buildEquation, revenueTerms, profitTerms, formatUsd4, canViewAcquisitionCosts }); return view }
   const commit = () => {
     for (const [index, effect] of effects) { slots[index].cleanup?.(); slots[index].cleanup = effect() || undefined }
     effects.clear()
@@ -109,7 +111,9 @@ function masked(view: View, status: string) {
   assert.equal(view.status, status)
   assert.equal(view.data, null)
   assert.equal(view.fees, null)
-  assert.ok(view.cards.length >= 6)
+  // Sales, Revenue, Payments, Returns and Expenses always; COGS and Profit only for a cost reader
+  // (a permission change away from the grant takes them out, see the finding-5 test below).
+  assert.ok(view.cards.length >= 5)
   for (const card of view.cards) {
     assert.equal(card.value, '—')
     assert.equal(card.sub, undefined)
@@ -162,6 +166,39 @@ await test('ready cards retain existing financial formulas and distinct expense 
   // keep cents.
   assert.equal(card(view, 'payments').sub, '2 · $42.0000')
   assert.deepEqual(card(view, 'payments').details, [{ label: 'cash', value: '2 · $42.0000' }])
+})
+
+// Finding 5 of the R2 area review (13 Oct 2026): the Worker OMITS cost_usd / profit_usd for a caller
+// without the cost grant (gateTotals) and never sends 0 for "hidden"; `|| 0` printed a $0.00 COGS
+// card and a $0.00 profit at 0.0% margin, which reads as a period that broke even.
+const withoutCost = (amount = 42) => {
+  const { cost_usd: _cost, profit_usd: _profit, ...rest } = sales(amount).totals
+  return { ...sales(amount), totals: rest }
+}
+await test('a reader without the cost grant gets no COGS or profit card, ready or loading; a cost reader keeps both', async () => {
+  const plain = harness(); plain.props.user = { id: 3, username: 'reader', role_code: 'staff', permissions: { sales: 'view' } }
+  const loading = plain.render(); plain.commit()
+  assert.equal(loading.status, 'loading')
+  assert.deepEqual(loading.cards.map((entry) => entry.key), ['sales', 'revenue', 'payments', 'returns', 'expenses'], 'no cost placeholders while loading')
+  plain.requests.sales[0].resolve(withoutCost()); plain.requests.fees[0].resolve(fees)
+  const ready = await plain.flush()
+  assert.equal(ready.status, 'ready')
+  assert.deepEqual(ready.cards.map((entry) => entry.key), ['sales', 'revenue', 'payments', 'returns', 'expenses'])
+  assert.equal(card(ready, 'revenue').value, '$42.00', 'the money a reader may see is untouched')
+  const everything = JSON.stringify(ready.cards)
+  assert.doesNotMatch(everything, /COGS|cogs|Gross profit|Gross Profit|margin/, 'nothing prints a cost or profit figure, zero or otherwise')
+  const cost = harness(); const costLoading = cost.render(); cost.commit()
+  assert.ok(costLoading.cards.some((entry) => entry.key === 'cogs') && costLoading.cards.some((entry) => entry.key === 'profit'), 'control: a cost reader sees the placeholders')
+  const costReady = await cost.succeed(0)
+  assert.equal(card(costReady, 'cogs').value, '$12.00'); assert.equal(card(costReady, 'profit').value, '$28.00')
+})
+
+await test('a cost reader whose window is genuinely free of cost still sees $0.00 (presence, not value, decides)', async () => {
+  const h = harness(); h.render(); h.commit()
+  const zero = sales(0); zero.totals.cost_usd = 0; zero.totals.profit_usd = 0
+  h.requests.sales[0].resolve(zero); h.requests.fees[0].resolve(fees)
+  const view = await h.flush()
+  assert.equal(card(view, 'cogs').value, '$0.00'); assert.equal(card(view, 'profit').value, '$0.00')
 })
 
 for (const change of ['date', 'time', 'user', 'logout', 'role', 'permissions', 'sales grant', 'fees grant', 'tier', 'inactive', 'clear range']) {
