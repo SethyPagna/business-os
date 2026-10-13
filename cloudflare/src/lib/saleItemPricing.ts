@@ -1,6 +1,5 @@
 import { divideMoney4, multiplyMoney4, percentageMoney4, roundMoney4, sellingPriceCeilCent, subtractMoney4, sumMoney4 } from './moneyPrecision'
 import { evaluateCartPromotionAdjustments, type PromotionRule } from './promotionRules'
-import type { D1Compat } from './db'
 
 /** Pure server-owned capture evaluator. Routes must supply authorized captured
  * rows and guard those rows/rule membership in their mutation transaction.
@@ -332,6 +331,19 @@ export function materializeCapturedPricingRow(row: Record<string,unknown>, pool:
     manual_discount_type:capture.manual.type==='none'?null:capture.manual.type,manual_discount_value:capture.manual.value,price_mode:capture.source}
 }
 
+/** Guard the exact authorized SELECT * capture, including newly inserted active
+ * rules. Execute in the same batch BEFORE any sale/stock/audit mutation. The
+ * caller must read all active rules (not just the winner or currently in-window
+ * rules); omission would make a newly applicable discount invisible. */
+export function pricingSourceGuard(products: readonly Record<string,unknown>[], activeRules: readonly Record<string,unknown>[]): {sql:string;params:Record<string,unknown>} {
+  if (!products.length || products.length > MAX_PRICING_LINES || activeRules.length > MAX_PRICING_RULES) invalid()
+  if (activeRules.some(row => row.is_active !== 1)) invalid()
+  const productConflict=capturedRowsConflict(products,'products','pricing_products'), ruleConflict=capturedRowsConflict(activeRules,'promotion_rules','pricing_rules')
+  const params={pricing_products:JSON.stringify(products),pricing_rules:JSON.stringify(activeRules),pricing_rule_count:activeRules.length}
+  if (new TextEncoder().encode(params.pricing_products+params.pricing_rules).length>512_000) invalid()
+  return {sql:`SELECT CASE WHEN ${productConflict} OR ${ruleConflict} OR (SELECT COUNT(*) FROM promotion_rules WHERE is_active=1)<>@pricing_rule_count THEN json_extract('sale_pricing_source_conflict','$') ELSE 1 END`,params}
+}
+
 // D1 limits expression depth to 100. Keep every captured column comparison but balance the boolean AST instead of growing a
 // left-deep OR chain.
 function anyOf(terms: readonly string[]): string {
@@ -353,19 +365,6 @@ function capturedRowsConflict(rows: readonly Record<string,unknown>[], table: st
   return `EXISTS (SELECT 1 FROM json_each(@${param}) expected LEFT JOIN ${table} current ON current.id=json_extract(expected.value,'$.id') WHERE ${anyOf(['current.id IS NULL',...keys.map(name => `current.${name} IS NOT json_extract(expected.value,'$.${name}')`)])})`
 }
 
-/** Guard the exact authorized SELECT * capture, including newly inserted active
- * rules. Execute in the same batch BEFORE any sale/stock/audit mutation. The
- * caller must read all active rules (not just the winner or currently in-window
- * rules); omission would make a newly applicable discount invisible. */
-export function pricingSourceGuard(products: readonly Record<string,unknown>[], activeRules: readonly Record<string,unknown>[]): {sql:string;params:Record<string,unknown>} {
-  if (!products.length || products.length > MAX_PRICING_LINES || activeRules.length > MAX_PRICING_RULES) invalid()
-  if (activeRules.some(row => row.is_active !== 1)) invalid()
-  const productConflict=capturedRowsConflict(products,'products','pricing_products'), ruleConflict=capturedRowsConflict(activeRules,'promotion_rules','pricing_rules')
-  const params={pricing_products:JSON.stringify(products),pricing_rules:JSON.stringify(activeRules),pricing_rule_count:activeRules.length}
-  if (new TextEncoder().encode(params.pricing_products+params.pricing_rules).length>512_000) invalid()
-  return {sql:`SELECT CASE WHEN ${productConflict} OR ${ruleConflict} OR (SELECT COUNT(*) FROM promotion_rules WHERE is_active=1)<>@pricing_rule_count THEN json_extract('sale_pricing_source_conflict','$') ELSE 1 END`,params}
-}
-
 /** The refusal a sale write answers when a stock movement (and nothing that prices a line) landed between its reads and its write. */
 export const SALE_STOCK_CHANGED_ERROR = 'Stock changed while this sale was being saved. Nothing was recorded. Try again.'
 export const SALE_STOCK_CHANGED_CODE = 'sale_stock_changed'
@@ -377,7 +376,7 @@ export const SALE_STOCK_CHANGED_CODE = 'sale_stock_changed'
  * active rules differ, 'stock' when only the other columns differ, null when nothing differs any more (the abort came from
  * another guard of the batch). One statement, so a refused sale costs the D1 budget it always did. */
 export async function classifyPricingSourceConflict(
-  db: D1Compat, products: readonly Record<string,unknown>[], activeRules: readonly Record<string,unknown>[],
+  db: { prepare(sql: string): { get(params?: Record<string,unknown>): Promise<unknown> } }, products: readonly Record<string,unknown>[], activeRules: readonly Record<string,unknown>[],
 ): Promise<'pricing' | 'stock' | null> {
   try {
     const priced=products.map(row=>capturePricingProduct(row))
