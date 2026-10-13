@@ -1345,7 +1345,19 @@ function reportV1RefundReversal(
   return { merchandise, tax }
 }
 
+// Every view of one snapshot (totals, period series, each grouping, the product split) walks the same per-sale
+// facts, which are the expensive part (exact decimals, return cohorts). They are derived once per snapshot and
+// shared; callers read them and never write to them.
+const SALE_FACTS = new WeakMap<SalesReportSnapshot, ReportSaleFacts[]>()
 function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
+  const known = SALE_FACTS.get(snapshot)
+  if (known) return known
+  const facts = deriveReportSaleFacts(snapshot)
+  SALE_FACTS.set(snapshot, facts)
+  return facts
+}
+
+function deriveReportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
   const items = new Map<number, ReportScalarRow[]>()
   for (const row of snapshot.items) { const id = Number(row.sale_id); items.set(id, [...(items.get(id) || []), row]) }
   const returns = new Map<number, ReportScalarRow[]>()
