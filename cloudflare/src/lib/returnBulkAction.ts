@@ -11,6 +11,7 @@ import { validateCustomerReturnRestorationCohortV1, validateCustomerReturnRestor
   type CustomerReturnRestorationV1 } from './customerReturnEntitlement'
 import { subtractDecimalSum } from './moneyPrecision'
 import { assertReturnCreateCapacity, ReturnCapacityError, type ReturnCapacityParams } from './returnCreateAction'
+import { importedReturnLines } from './saleTransitions'
 import {
   BRANCH_RETIRED_DAMAGED_CODE, BRANCH_RETIRED_DAMAGED_ERROR, BranchEffectResolver, BranchRetiredNoSuccessorError,
   branchEffectGuardPredicate, foldedLotSurvivors, readBranchDirectory,
@@ -406,7 +407,7 @@ async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'bef
   }
   const override = new Map(changed.map(member => [member.id, member[target].status]))
   const saleLines = await db.prepare(`SELECT s.id AS sale_id,s.sale_status,s.status_before_return,
-    si.id AS sale_item_id,si.product_id,si.product_name,si.quantity FROM sales s JOIN sale_items si ON si.sale_id=s.id
+    si.id AS sale_item_id,si.product_id,si.product_name,si.quantity,si.returned_quantity FROM sales s JOIN sale_items si ON si.sale_id=s.id
     WHERE EXISTS(SELECT 1 FROM json_each(@saleIds) ids WHERE CAST(ids.value AS INTEGER)=s.id)
     ORDER BY s.id,si.id`).all<Row>({ saleIds: entitlementSaleIds })
   const exactStatuses: SaleStatusSnapshot[] = []
@@ -431,9 +432,15 @@ async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'bef
         const soldLines = saleLines.filter(row => Number(row.sale_id) === saleId).map(row => ({
           id: Number(row.sale_item_id), product_id: row.product_id == null ? null : Number(row.product_id),
           quantity: Number(row.quantity), product_name: row.product_name == null ? null : String(row.product_name),
+          returned_quantity: row.returned_quantity,
         }))
+        // RET-B F4: the units the import recorded as already returned count
+        // too. RET-B E1 refuses every cancel/restore on a stock-skipped sale
+        // (every sales-import:% sale, since F4 and migration 0235), so this
+        // guards sales 0235 does not mark (ops legacy-sale:% imports) and any
+        // future relaxing of E1.
         try {
-          assertReturnCreateCapacity(soldLines, [], activeLines)
+          assertReturnCreateCapacity(soldLines, importedReturnLines(soldLines), activeLines)
         } catch (error) {
           fail(`Restoring this return would count more units as returned than the sale sold. ${(error as Error).message}`, 409, 'return_restore_over_capacity',
             error instanceof ReturnCapacityError ? error.params ?? undefined : undefined)

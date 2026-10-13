@@ -49,8 +49,11 @@ import { isAnonymousCustomer } from '../lib/anonymousCustomer'
 import {
   assertReturnCreateCapacity, assertReturnCreatePlanBounds, canonicalReturnCreateIntent,
   projectedSaleStatusForReturnCreate, projectedSaleStatusForReturnCreateV1, replacementSaleIdSql, returnCreateGuardStatement,
-  returnCreateIdSql, RETURN_CREATE_REQUEST_BYTES, type ReturnCreateResponse,
+  returnCreateIdSql, returnCreateOwnMovementCountSql, returnQuantityExceeds, returnQuantityRemaining, RETURN_CREATE_REQUEST_BYTES, type ReturnCreateResponse,
 } from '../lib/returnCreateAction'
+// RET-B F4: units an imported sale's row says already came back
+// (sale_items.returned_quantity) count as returned in every capacity read.
+import { importedReturnedQuantity, importedReturnedQuantitySql, importedReturnLines } from '../lib/saleTransitions'
 import {
   buildCustomerReturnQuoteV1, CUSTOMER_RETURN_MAX_SALE_LINES,
   type CustomerReturnPrior, type CustomerReturnQuoteV1, type CustomerReturnSaleLine,
@@ -448,39 +451,14 @@ function canonicalReturnEditIntent(returnId: number, expectedUpdatedAt: string, 
   }
 }
 
+// The edit's projection is the create's over the whole proposed set (it was a
+// line-for-line copy with the same binary-float sums); one exact rule.
 function projectedSaleStatusForReturnEdit(
   saleItems: Array<{ id: number; product_id: number | null; quantity: number }>,
   returnLines: Array<{ sale_item_id?: number | null; product_id?: number | null; quantity: number }>,
   statusBeforeReturn: string | null,
 ): string {
-  const saleItemIds = new Set(saleItems.map((item) => Number(item.id)))
-  const returnedByItem = new Map<number, number>()
-  const fallbackByProduct = new Map<number, number>()
-  let hasAny = false
-  for (const line of returnLines) {
-    const quantity = Number(line.quantity) || 0
-    if (!(quantity > 0)) continue
-    hasAny = true
-    const saleItemId = Number(line.sale_item_id) || 0
-    if (saleItemId && saleItemIds.has(saleItemId)) {
-      returnedByItem.set(saleItemId, (returnedByItem.get(saleItemId) || 0) + quantity)
-      continue
-    }
-    const productId = Number(line.product_id) || 0
-    if (productId) fallbackByProduct.set(productId, (fallbackByProduct.get(productId) || 0) + quantity)
-  }
-  for (const item of saleItems) {
-    const productId = Number(item.product_id) || 0
-    let fallback = fallbackByProduct.get(productId) || 0
-    if (!(fallback > 0)) continue
-    const outstanding = Math.max(0, (Number(item.quantity) || 0) - (returnedByItem.get(item.id) || 0))
-    const allocated = Math.min(outstanding, fallback)
-    if (allocated > 0) returnedByItem.set(item.id, (returnedByItem.get(item.id) || 0) + allocated)
-    fallback -= allocated
-    fallbackByProduct.set(productId, fallback)
-  }
-  const fullyReturned = hasAny && saleItems.every((item) => (returnedByItem.get(item.id) || 0) >= (Number(item.quantity) || 0))
-  return fullyReturned ? 'returned' : hasAny ? 'partial_return' : (statusBeforeReturn || 'completed')
+  return projectedSaleStatusForReturnCreate(saleItems, returnLines, [], statusBeforeReturn)
 }
 
 function normalizeScope(value: unknown, fallback: string = CUSTOMER_SCOPE): string {
@@ -708,55 +686,60 @@ async function assertReturnableItems(
     const qty = Number(item.quantity) || 0
 
     if (item.sale_item_id) {
-      const saleItem = await db.prepare('SELECT id, quantity, product_name FROM sale_items WHERE id = ? AND sale_id = ?').get<{ id: number; quantity: number; product_name: string | null }>([item.sale_item_id, saleId])
+      const saleItem = await db.prepare('SELECT id, quantity, product_name, returned_quantity FROM sale_items WHERE id = ? AND sale_id = ?').get<{ id: number; quantity: number; product_name: string | null; returned_quantity: number | null }>([item.sale_item_id, saleId])
       if (!saleItem) throw new Error('Sale item not found for this return')
 
-      const returnedRow = excludeReturnId
+      const returnedRows = excludeReturnId
         ? await db.prepare(`
-            SELECT COALESCE(SUM(ri.quantity), 0) AS qty
+            SELECT ri.quantity AS qty
             FROM return_items ri
             JOIN returns r ON r.id = ri.return_id
             WHERE r.sale_id = ? AND ri.sale_item_id = ?
               AND COALESCE(r.status, 'completed') != 'cancelled'
               AND COALESCE(r.return_scope, 'customer') = 'customer'
               AND r.id != ?
-          `).get<{ qty: number }>([saleId, item.sale_item_id, excludeReturnId])
+          `).all<{ qty: number }>([saleId, item.sale_item_id, excludeReturnId])
         : await db.prepare(`
-            SELECT COALESCE(SUM(ri.quantity), 0) AS qty
+            SELECT ri.quantity AS qty
             FROM return_items ri
             JOIN returns r ON r.id = ri.return_id
             WHERE r.sale_id = ? AND ri.sale_item_id = ?
               AND COALESCE(r.status, 'completed') != 'cancelled'
               AND COALESCE(r.return_scope, 'customer') = 'customer'
-          `).get<{ qty: number }>([saleId, item.sale_item_id])
-      const returned = returnedRow?.qty || 0
-      const remaining = Math.max(0, (saleItem.quantity || 0) - returned)
-      if (qty > remaining) throw new Error(`Cannot return ${qty} of ${saleItem.product_name || 'this item'} — only ${remaining} remaining`)
+          `).all<{ qty: number }>([saleId, item.sale_item_id])
+      // The import already restocked the line's returned_quantity; counting it
+      // here is what stops a second restock of the same units. Summed as exact
+      // decimals (0.2 + 0.1 is exactly 0.3 here, not 0.30000000000000004).
+      const remaining = returnQuantityRemaining(saleItem.quantity || 0,
+        [...returnedRows.map((row) => Number(row.qty) || 0), importedReturnedQuantity(saleItem)])
+      if (returnQuantityExceeds(qty, remaining)) throw new Error(`Cannot return ${qty} of ${saleItem.product_name || 'this item'} — only ${remaining} remaining`)
       continue
     }
 
     if (item.product_id) {
-      const soldRow = await db.prepare('SELECT COALESCE(SUM(quantity), 0) AS qty FROM sale_items WHERE sale_id = ? AND product_id = ?').get<{ qty: number }>([saleId, item.product_id])
-      const returnedRow = excludeReturnId
+      const soldRows = await db.prepare(`SELECT quantity AS qty, ${importedReturnedQuantitySql('sale_items')} AS imported
+        FROM sale_items WHERE sale_id = ? AND product_id = ?`).all<{ qty: number; imported: number }>([saleId, item.product_id])
+      const returnedRows = excludeReturnId
         ? await db.prepare(`
-            SELECT COALESCE(SUM(ri.quantity), 0) AS qty
+            SELECT ri.quantity AS qty
             FROM return_items ri
             JOIN returns r ON r.id = ri.return_id
             WHERE r.sale_id = ? AND ri.product_id = ?
               AND COALESCE(r.status, 'completed') != 'cancelled'
               AND COALESCE(r.return_scope, 'customer') = 'customer'
               AND r.id != ?
-          `).get<{ qty: number }>([saleId, item.product_id, excludeReturnId])
+          `).all<{ qty: number }>([saleId, item.product_id, excludeReturnId])
         : await db.prepare(`
-            SELECT COALESCE(SUM(ri.quantity), 0) AS qty
+            SELECT ri.quantity AS qty
             FROM return_items ri
             JOIN returns r ON r.id = ri.return_id
             WHERE r.sale_id = ? AND ri.product_id = ?
               AND COALESCE(r.status, 'completed') != 'cancelled'
               AND COALESCE(r.return_scope, 'customer') = 'customer'
-          `).get<{ qty: number }>([saleId, item.product_id])
-      const remaining = Math.max(0, (soldRow?.qty || 0) - (returnedRow?.qty || 0))
-      if (qty > remaining) throw new Error(`Cannot return ${qty} of this product — only ${remaining} remaining`)
+          `).all<{ qty: number }>([saleId, item.product_id])
+      const remaining = returnQuantityRemaining(soldRows.map((row) => Number(row.qty) || 0),
+        [...returnedRows.map((row) => Number(row.qty) || 0), ...soldRows.map((row) => Number(row.imported) || 0)])
+      if (returnQuantityExceeds(qty, remaining)) throw new Error(`Cannot return ${qty} of this product — only ${remaining} remaining`)
     }
   }
 }
@@ -1422,13 +1405,20 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   // of an already-recorded return still answers with what was recorded: the
   // version gate below is about NEW writes, not about re-reading history.
   let occupiedRequestId: number | null = null
+  // The newest stock movement before this request writes anything: the
+  // postcondition counts only rows above it as this return's own (see
+  // returnCreateOwnMovementCountSql). Read in the same statement as the
+  // receipt, so it costs no extra D1 query; MAX(id) is one rowid seek.
+  let movementIdFloor: number | null = null
   const readReceipt = async () => {
-    const row = await db.prepare(`SELECT r.return_id,r.sale_id,r.request_digest,r.response_json,o.id AS occupied_id
+    const row = await db.prepare(`SELECT r.return_id,r.sale_id,r.request_digest,r.response_json,o.id AS occupied_id,
+      (SELECT COALESCE(MAX(id),0) FROM inventory_movements) AS movement_id_floor
       FROM (SELECT 1) seed
       LEFT JOIN return_create_receipts r ON r.actor_id=? AND r.request_id=?
       LEFT JOIN returns o ON o.client_request_id=? AND o.client_request_id<>'' LIMIT 1`)
-      .get<{ return_id: number | null; sale_id: number | null; request_digest: string; response_json: string; occupied_id: number | null }>([authenticatedActorId, clientRequestId, clientRequestId])
+      .get<{ return_id: number | null; sale_id: number | null; request_digest: string; response_json: string; occupied_id: number | null; movement_id_floor: number }>([authenticatedActorId, clientRequestId, clientRequestId])
     occupiedRequestId = row?.occupied_id ?? null
+    if (movementIdFloor == null) movementIdFloor = Number(row?.movement_id_floor ?? 0)
     return row?.return_id == null ? undefined : { ...row, return_id: row.return_id }
   }
   const priorReceipt = await readReceipt()
@@ -1515,6 +1505,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     id: number; product_id: number | null; product_name: string | null; quantity: number
     branch_id: number | null; cost_price_usd: number | null; cost_price_khr: number | null
     applied_price_usd: number | null; applied_price_khr: number | null
+    returned_quantity?: number | null
   }> = []
   let committedReturnLines: Array<{ sale_item_id: number | null; product_id: number | null; quantity: number }> = []
   if (requestedSaleId) {
@@ -1538,7 +1529,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     if (!isMoneyV1 && Number(saleMeta.sale_money_precision_version) === 1) {
       return c.json({ ...MONEY_PRECISION_REVIEW_NEEDED }, 409)
     }
-    soldLines = customerReturnV1Plan ? customerReturnV1Plan.authority.sale_items as typeof soldLines : await db.prepare('SELECT id,product_id,product_name,quantity,branch_id,cost_price_usd,cost_price_khr,applied_price_usd,applied_price_khr FROM sale_items WHERE sale_id=? ORDER BY id')
+    soldLines = customerReturnV1Plan ? customerReturnV1Plan.authority.sale_items as typeof soldLines : await db.prepare('SELECT id,product_id,product_name,quantity,branch_id,cost_price_usd,cost_price_khr,applied_price_usd,applied_price_khr,returned_quantity FROM sale_items WHERE sale_id=? ORDER BY id')
       .all<typeof soldLines[number]>([requestedSaleId])
     const soldById = new Map(soldLines.map((line) => [Number(line.id), line]))
     returnItems = body.items.map((item) => {
@@ -1560,6 +1551,11 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
       WHERE r.sale_id=? AND COALESCE(r.status,'completed')!='cancelled'
         AND COALESCE(r.return_scope,'customer')='customer' ORDER BY r.id,ri.id`)
       .all<{ sale_item_id: number | null; product_id: number | null; quantity: number }>([requestedSaleId])
+    // Only the sales import writes sale_items.returned_quantity, and it writes
+    // legacy (v0) sales only, so the v1 authority above never carries it. On
+    // the v0 path the imported units are committed returns of their line, for
+    // capacity and for the status projection alike.
+    if (!customerReturnV1Plan) committedReturnLines = [...committedReturnLines, ...importedReturnLines(soldLines)]
     if (!isMoneyV1) {
       try {
         assertReturnCreateCapacity(soldLines, committedReturnLines, returnItems)
@@ -2405,8 +2401,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     AND (SELECT COUNT(*) FROM return_replacement_items WHERE return_id=${returnIdExpression})=json_extract(@expectedJson,'$.replacement_items')
     AND (SELECT COUNT(*) FROM sale_item_batch_allocations WHERE sale_item_id IN(
       SELECT id FROM sale_items WHERE sale_id=${replacementLines.length ? replacementSaleExpression : 'NULL'}))=json_extract(@expectedJson,'$.sale_allocations')
-    AND (SELECT COUNT(*) FROM inventory_movements WHERE reference_id=${returnIdExpression}
-      AND movement_type IN ('return','${DAMAGE_IN_MOVEMENT}','${REPLACEMENT_OUT_MOVEMENT}','${TAGGED_DISPOSAL_MOVEMENT_TYPE}'))=json_extract(@expectedJson,'$.movements')
+    AND ${returnCreateOwnMovementCountSql(returnIdExpression, ['return', DAMAGE_IN_MOVEMENT, REPLACEMENT_OUT_MOVEMENT, TAGGED_DISPOSAL_MOVEMENT_TYPE])}=json_extract(@expectedJson,'$.movements')
     AND (SELECT COUNT(*) FROM sale_record_events WHERE source_kind='return_create' AND source_id=@receiptId
       AND generation=0)=json_extract(@expectedJson,'$.event')
     AND EXISTS(SELECT 1 FROM audit_logs WHERE entity='return_create' AND entity_id=@receiptId)
@@ -2437,6 +2432,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   `
   statements.push(returnCreateGuardStatement(operationId, 'postcondition', postcondition, {
     ...commonGuardParams, expectedJson, saleId: requestedSaleId, returnClientRequestId: clientRequestId,
+    movementIdFloor: Number(movementIdFloor ?? 0),
   }))
   statements.push({ sql: 'DELETE FROM return_create_guards WHERE operation_id=@operationId', params: { operationId } })
 
@@ -3180,14 +3176,17 @@ app.patch('/:id', async (c) => {
 
   let projectedSaleStatus: string | null = null
   if (linkedSale) {
-    const soldLines = await db.prepare('SELECT id,product_id,quantity FROM sale_items WHERE sale_id=? ORDER BY id')
-      .all<{ id: number; product_id: number | null; quantity: number }>([existing.sale_id])
-    const siblingLines = await db.prepare(`SELECT ri.sale_item_id,ri.product_id,ri.quantity
+    const soldLines = await db.prepare('SELECT id,product_id,quantity,returned_quantity FROM sale_items WHERE sale_id=? ORDER BY id')
+      .all<{ id: number; product_id: number | null; quantity: number; returned_quantity: number | null }>([existing.sale_id])
+    // The sibling returns plus the units the import recorded as already
+    // returned (RET-B F4), exactly as POST / counts them.
+    const siblingLines = [...await db.prepare(`SELECT ri.sale_item_id,ri.product_id,ri.quantity
       FROM return_items ri JOIN returns r ON r.id=ri.return_id
       WHERE r.sale_id=@sale AND r.id<>@return
         AND COALESCE(r.status,'completed')!='cancelled'
         AND COALESCE(r.return_scope,'customer')='customer'
-      ORDER BY r.id,ri.id`).all<{ sale_item_id: number | null; product_id: number | null; quantity: number }>({ sale: existing.sale_id, return: returnId })
+      ORDER BY r.id,ri.id`).all<{ sale_item_id: number | null; product_id: number | null; quantity: number }>({ sale: existing.sale_id, return: returnId }),
+    ...importedReturnLines(soldLines)]
     const proposedLines = String(existing.status || 'completed') === 'cancelled' ? [] : newItems.map((item) => ({
       sale_item_id: item.sale_item_id ?? null,
       product_id: item.product_id ?? null,

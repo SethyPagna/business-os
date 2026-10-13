@@ -86,6 +86,10 @@ interface SaleItemRow {
   cost_price_khr?: number | string | null
   purchase_price_khr?: number | string | null
   branch_id?: number | string | null
+  // RET-B F4: units the sales import recorded as already returned (GET
+  // /api/sales imported_returned_quantity). The return history read below
+  // does not hold them, so they are added on their own.
+  imported_returned_quantity?: number | string | null
   // Which lot this line was sold from: one lot on batch_id, or several
   // recorded as allocations (batch_id NULL, lot_allocation_count > 0). Zero
   // of both means the sale genuinely cannot say -- the only case where the
@@ -310,6 +314,23 @@ function exactReturnQuantity(total: number, parts: number[]): number {
   const quantity = Number(exact)
   if (!Number.isFinite(quantity) || subtractDecimalSum(quantity, [exact]) !== '0') throw new Error('return_v1_review_required')
   return quantity
+}
+
+// Legacy (v0) sales: the same exact decimal sum (0.2 + 0.1 is 0.3, so the
+// last 0.1 of a 0.3 line stays selectable), without the v1 review refusal --
+// an old row's float-noise quantity must not block the screen; the server's
+// capacity check decides either way.
+function legacyReturnQuantity(total: number, parts: number[]): number {
+  return Number(subtractDecimalSum(total, parts))
+}
+
+// One sale line on the return screen: what already came back -- the recorded
+// returns plus the units the import recorded (RET-B F4) -- and what is still
+// returnable. The same terms the server's capacity check counts.
+function lineReturnQuantities(item: SaleItemRow, recorded: number, v1: boolean): { alreadyQty: number; remaining: number } {
+  const exact = v1 ? exactReturnQuantity : legacyReturnQuantity
+  const alreadyQty = exact(recorded, [-toNumber(item.imported_returned_quantity)])
+  return { alreadyQty, remaining: Math.max(0, exact(toNumber(item.quantity), [alreadyQty])) }
 }
 
 export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, initialReceiptQuery }: NewReturnModalProps) {
@@ -595,7 +616,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
               const key = ri.sale_item_id || `p_${ri.product_id}`
               alreadyReturned[key] = Number(found.money_precision_version) === 1
                 ? exactReturnQuantity(alreadyReturned[key] || 0, [-toNumber(ri.quantity)])
-                : (alreadyReturned[key] || 0) + toNumber(ri.quantity)
+                : legacyReturnQuantity(alreadyReturned[key] || 0, [-toNumber(ri.quantity)])
             })
           })
         } catch (error) {
@@ -610,10 +631,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
         setFoundSale(found)
         setSelectedItems(items.map((item) => {
           const key = getSaleItemKey(item)
-          const alreadyQty = alreadyReturned[key] || 0
-          const remaining = Math.max(0, Number(found.money_precision_version) === 1
-            ? exactReturnQuantity(toNumber(item.quantity), [alreadyQty])
-            : toNumber(item.quantity) - alreadyQty)
+          const { alreadyQty, remaining } = lineReturnQuantities(item, alreadyReturned[key] || 0, Number(found.money_precision_version) === 1)
           return {
             ...item,
             alreadyQty,

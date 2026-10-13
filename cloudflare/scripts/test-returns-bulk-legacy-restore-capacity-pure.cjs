@@ -19,7 +19,7 @@ const root = path.join(__dirname, '..')
 const cache = new Map()
 const actual = new Set(['branchEffect', 'branchRoles', 'sqlBinding', 'saleStatusResolution', 'actorSnapshot', 'movementBranchName', 'db', 'permissions', 'saleRecords', 'saleRecordEvents',
   'moneyPrecision', 'saleMoneyPrecision', 'refundMoneyPrecision', 'promotionRules', 'saleItemPricing',
-  'customerReturnEntitlement', 'returnBulkAction', 'returnCreateAction'])
+  'customerReturnEntitlement', 'returnBulkAction', 'returnCreateAction', 'saleTransitions'])
 
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
@@ -72,14 +72,18 @@ function fixture() {
 
 // Legacy sale 1: one line of 2 units of product 1. Returns are stock-neutral
 // ('none') so the only thing under test is the returned-quantity cap.
-function seed(f, returns) {
+// importedReturned: sale_items.returned_quantity, the units an imported row
+// says already came back (RET-B F4), on a sale that is NOT stock-skipped (an
+// ops legacy-sale:% import migration 0235 does not mark), so RET-B E1 does
+// not refuse the restore before the cap is read.
+function seed(f, returns, { importedReturned = 0 } = {}) {
   f.sql.exec(`
     INSERT INTO branches(id,name) VALUES(1,'Shop');
     INSERT INTO products(id,name,stock_quantity) VALUES(1,'Serum',10);
     INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,10);
     INSERT INTO sales(id,receipt_number,sale_status,status_before_return,money_precision_version,updated_at)
       VALUES(1,'SALE-1','returned','completed',0,'sale-v0');
-    INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id) VALUES(1,1,1,'Serum',2,1);
+    INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,returned_quantity) VALUES(1,1,1,'Serum',2,1,${Number(importedReturned)});
   `)
   for (const r of returns) {
     f.sql.prepare(`INSERT INTO returns(id,return_number,sale_id,return_scope,status,return_type,branch_id,updated_at,
@@ -166,7 +170,26 @@ async function run() {
     assert.deepEqual(receipt.changedIds, [10], 'a repair-direction cancel stays possible')
     assert.equal(activeReturned(f), 2)
   }
-  console.log('PASS legacy return restore capacity: restoring a cancelled return on a v0 sale is refused (writing nothing) when it would count more units as returned than were sold, by sale_item_id or product match; in-cap restores and every cancel still succeed')
+  // 7. Imported returned quantity (finding C): 1 of the 2 units came back with
+  // the import, so restoring a cancelled return of 2 would make 3 of 2.
+  {
+    const f = fixture(); seed(f, [{ id: 10, status: 'cancelled', quantity: 2 }], { importedReturned: 1 })
+    assert.equal(f.sql.prepare('SELECT stock_skipped FROM sales WHERE id=1').get().stock_skipped, 0, 'fixture: E1 does not apply')
+    const before = state(f)
+    await assert.rejects(helper.applyReturnBulkAction(f.env, user, restoreRequest(f, 10, 'legacy-restore-imported-over')),
+      error => error.statusCode === 409 && error.code === 'return_restore_over_capacity'
+        && JSON.stringify(error.params) === JSON.stringify({ product: 'Serum', returned: 3, sold: 2 }),
+      'imported units count as returned when a restore is checked')
+    assert.equal(state(f), before, 'a refused restore writes nothing')
+  }
+  // 8. Its control: the same imported unit plus a restored 1 exactly fills the line.
+  {
+    const f = fixture(); seed(f, [{ id: 10, status: 'cancelled', quantity: 1 }], { importedReturned: 1 })
+    const receipt = await helper.applyReturnBulkAction(f.env, user, restoreRequest(f, 10, 'legacy-restore-imported-ok'))
+    assert.deepEqual(receipt.changedIds, [10])
+    assert.equal(f.sql.prepare('SELECT status FROM returns WHERE id=10').get().status, 'completed')
+  }
+  console.log('PASS legacy return restore capacity: restoring a cancelled return on a v0 sale is refused (writing nothing) when it would count more units as returned than were sold, by sale_item_id or product match, counting units the import recorded as returned; in-cap restores and every cancel still succeed')
 }
 
 run().catch(error => { console.error(error); process.exitCode = 1 })

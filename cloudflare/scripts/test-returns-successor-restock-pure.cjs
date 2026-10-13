@@ -238,6 +238,8 @@ const returnsRouteOverrides = {
   '../lib/saleBulkStatus': saleBulkStatusKernel,
   '../lib/saleRecordEvents': saleRecordEventsKernel,
   '../lib/returnCreateAction': returnCreateActionKernel,
+  // routes/returns.ts counts imported returned units through saleTransitions (N1 / finding C).
+  '../lib/saleTransitions': loadReal('lib/saleTransitions.ts', { './salesStatus': loadReal('lib/salesStatus.ts'), './productBatches': productBatches }),
   // The records reader (GET /:id/records); this file exercises the write paths.
   '../lib/returnRecords': { loadReturnRecords: async () => null },
   '../lib/customerReturnEntitlement': customerReturnEntitlementKernel,
@@ -418,13 +420,23 @@ const returnBody = (extra = {}) => ({
 })
 
 // Statement capture normalised for comparison: ids and clocks differ per run.
+// Two intentional changes since the oracle are folded back, nothing else: the
+// receipt's RETURNING clause, and 6.0.83's own-movement scope on the create
+// postcondition (N1 / side finding M: count only movements above the MAX(id)
+// read before the batch, so a sale-keyed row on the same id is not counted).
+const OWN_MOVEMENT_SCOPE = ' AND id>@movementIdFloor'
 function normalised(batches) {
-  const writes = batches.map(batch => batch.map(statement => ({
-    ...statement,
-    sql: /^INSERT INTO return_create_receipts\(/.test(statement.sql)
-      ? statement.sql.replace(/ RETURNING return_id,sale_id,request_digest,response_json$/, '')
-      : statement.sql,
-  })))
+  const writes = batches.map(batch => batch.map(statement => {
+    const scoped = statement.sql.includes(OWN_MOVEMENT_SCOPE)
+    const params = scoped && statement.params ? Object.fromEntries(Object.entries(statement.params).filter(([key]) => key !== 'movementIdFloor')) : statement.params
+    return {
+      ...statement,
+      ...(params === undefined ? {} : { params }),
+      sql: /^INSERT INTO return_create_receipts\(/.test(statement.sql)
+        ? statement.sql.replace(/ RETURNING return_id,sale_id,request_digest,response_json$/, '')
+        : statement.sql.split(OWN_MOVEMENT_SCOPE).join(''),
+    }
+  }))
   const text = JSON.stringify(writes)
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<uuid>')
     .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g, '<ts>')

@@ -14,8 +14,14 @@ assert.ok(begin > 0 && end > begin)
 // The sale-line branch label is snapshot-first (CUTOVER-LD): expand the inlined helper the way TypeScript would.
 const helper = /const branchHistoryNameSql = \(snapshot: string, fallback: string\): string =>\r?\n\s*`([^`]*)`/.exec(source)
 assert.ok(helper, 'routes/sales.ts carries the snapshot-first expression')
+// returned_quantity adds the units a sales import recorded (N1 / finding C):
+// expand lib/saleTransitions.ts importedReturnedQuantitySql the same way.
+const transitions = fs.readFileSync(path.join(__dirname, '../src/lib/saleTransitions.ts'), 'utf8')
+const imported = /export function importedReturnedQuantitySql\(alias: string\): string \{\r?\n\s*return `([^`]*)`/.exec(transitions)
+assert.ok(imported, 'lib/saleTransitions.ts carries the imported returned-quantity expression')
 const query = source.slice(begin, end).replace("${chunk.map(() => '?').join(',')}", '?')
   .replace(/\$\{branchHistoryNameSql\('([^']*)', '([^']*)'\)\}/g, (_, snapshot, fallback) => helper[1].replaceAll('${snapshot}', snapshot).replaceAll('${fallback}', fallback))
+  .replace(/\$\{importedReturnedQuantitySql\('([^']*)'\)\}/g, (_, alias) => imported[1].replaceAll('${alias}', alias))
 assert.doesNotMatch(query, /\$\{/, 'every template expression was expanded')
 assert.match(query, /AS batch_received_at/)
 const db = new Database(':memory:')
