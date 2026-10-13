@@ -222,7 +222,8 @@ new Function('require', 'module', 'exports', compiled)((name: string) => {
   if (name.includes('ShiftCountFields')) return { default: () => null, ShiftSubmitRow: SubmitMarker }
   if (name.includes('shiftReportModel')) return {
     shiftCountedPairText: () => '—',
-    shiftAdditionalCash: () => null,
+    // The real rule never answers null since 13 Oct 2026 (owner, item 14: the additional row is always there, $0 included).
+    shiftAdditionalCash: () => ({ usd: 0, khr: 0 }),
     shiftExpectedWithTypedAdditional: () => ({ usd: null, khr: null }),
   }
   return { default: () => null }

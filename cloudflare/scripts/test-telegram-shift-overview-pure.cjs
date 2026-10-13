@@ -390,7 +390,7 @@ async function main() {
       JSON.stringify(sectionAfterHeader(unregistered, 'en').slice(1, 3)) === JSON.stringify([`· ${pack.en.shift_opening_cash}: N/A · N/A`, `· ${pack.en.shift_additional_cash}: $0.00 · 0៛`]), unregistered.join('\n'))
   }
 
-  const longName =closedShift({ branch_name: 'Branch with a very long name that wraps', branch_id: 1 })
+  const longName = closedShift({ branch_name: 'Branch with a very long name that wraps', branch_id: 1 })
   const longFigures = { ...figures, paymentMethods: [{ method: 'ABA Pay merchant QR for the Toul Kork branch', count: 3, usd: 45 }] }
   telegramLang.setTelegramLanguage('en')
   const longRows = telegram.formatShiftOverview('Leang Cosmetics', longName, longFigures, undefined, T0).split('\n')
