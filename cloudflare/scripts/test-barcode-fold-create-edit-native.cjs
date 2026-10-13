@@ -136,6 +136,8 @@ const productsRoute = loadReal('routes/products.ts', {
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/audit': { audit: async () => {} },
   '../lib/cache': { cachedJsonResponse: async () => null, getVersionWithFallback: async () => 1, bumpVersion: async () => {}, bumpVersions: async () => {} },
+  // lib/createFold.ts (the create-fold helper, moved out of the route 13 Oct 2026) imports it relative to lib/.
+  './cache': { bumpVersion: async () => {}, bumpVersions: async () => {} },
   '../lib/imageAudit': { enqueueImageNormalization: async () => {} },
   '../lib/familyPagination': { paginateProductFamilies: async () => ({ items: [], total: 0, page: 1, pageCount: 0 }) },
   '../lib/importImageMatch': { matchLibraryImagesStrict: async () => [], ADMIN_MAX_IMAGES_PER_PRODUCT: 20, MAX_IMAGES_PER_PRODUCT: 10 },

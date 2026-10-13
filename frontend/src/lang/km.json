@@ -4057,6 +4057,7 @@
   "product_expiry_alerts": "ការជូនដំណឹងផុតកំណត់",
   "product_expiry_date": "ថ្ងៃផុតកំណត់",
   "product_folded_into_existing": "បានបន្ថែមទៅផលិតផលដែលមានស្រាប់ {name}",
+  "product_folded_into_existing_stock": "បានបន្ថែមស្តុក {qty} ទៅផលិតផលដែលមានស្រាប់ {name}",
   "product_form": "ទម្រង់ផលិតផល",
   "product_group": "ក្រុមផលិតផល",
   "product_group_parent": "កំណត់ផលិតផលនេះជាក្រុមមេ",

@@ -52,8 +52,10 @@ const isComment = (line) => /^\s*(?:\/\/|\*|\/\*)/.test(line)
 // ---- Routes: nothing awaits a broadcast directly. -------------------------
 // Named, not fixed here: products.ts is owned by another lane (U-broadcast
 // lane report, 26 Sep 2026). A stale entry is reported, not failed, so that
-// lane's fix does not turn this test red.
-const ROUTE_PENDING = { 'products.ts': ['foldCreateIntoExisting'] }
+// lane's fix does not turn this test red. (The create-fold's blocking broadcast
+// that lived here moved to lib/createFold.ts with the helper, 13 Oct 2026; it is
+// the PENDING entry below.)
+const ROUTE_PENDING = {}
 const routes = tsFiles(path.join(src, 'routes'))
 const blocking = []
 const routeSeen = new Set()
@@ -98,6 +100,7 @@ const NOTIFIERS = {
 const THREADED = {
   'generalCustomerMembershipRepair.ts': ['refreshGeneralCustomerMembershipRepair'],
   'generalCustomerRepair.ts': ['refreshGeneralCustomerRepair'],
+  'createFold.ts': ['foldCreateWithStockInWrite'],
   'reviewApply.ts': ['notify'],
   'telegramTopicSetting.ts': ['saveTelegramTopicSetting'],
 }
@@ -105,6 +108,10 @@ const PENDING = {
   // Undo/redo replays run inside POST /api/action-history/:id/{undo,redo};
   // UndoApplierContext carries no waitUntil yet.
   'undoAppliers.ts': ['replayProductMergeGroup', 'replayProductRemove', 'APPLIERS'],
+  // The create-fold without a starting quantity (POST /api/products and an approved queued create) awaits its
+  // cache bump and broadcast; it moved here from routes/products.ts unchanged. The fold WITH a quantity
+  // (foldCreateWithStockInWrite) is threaded.
+  'createFold.ts': ['foldCreateIntoExisting'],
 }
 const classes = { QUEUE_ONLY, NOTIFIERS, THREADED, PENDING }
 const classOf = (file, unit) => Object.keys(classes).find((name) => (classes[name][file] || []).includes(unit))
@@ -169,6 +176,8 @@ const THREADED_ENTRY_POINTS = [
   ['system.ts', 'refreshGeneralCustomerRepair'],
   // saveTelegramTopicSetting reaches the route as the webhook's writer, with the request's waitUntil beside it.
   ['telegram.ts', 'handleTelegramWebhook'],
+  // The create-fold with a starting quantity: the route hands the request's waitUntil to the helper that announces it.
+  ['products.ts', 'foldCreateWithStockInResponse'],
 ]
 for (const [file, fn] of THREADED_ENTRY_POINTS) {
   const lines = routes.find((route) => route.file === file).lines

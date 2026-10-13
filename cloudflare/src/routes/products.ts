@@ -29,16 +29,16 @@ import { admitRequestBody } from '../lib/requestBodyGuard'
 import { audit, buildAuditStatement, changedFields, isSecretShapedAuditKey } from '../lib/audit'
 import { getPlanLimits } from '../lib/planTier'
 import { absorbedBarcodes, keeperFollowsBarcode, productIdsInOneCluster } from '../lib/productIdentity'
-import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, findSameIdentityProduct, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeLeadingZeroBarcodeForCleanup, normalizeProductClusterKey, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
+import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, findSameIdentityProduct, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeProductClusterKey, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { lotRemainingSql } from '../lib/lotRemaining'
-import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail } from '../lib/productDetailRule'
+import { compareCosts, normalizeProductGroupName } from '../lib/productDetailRule'
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { buildAtomicMergeHistoryStatements, closeStockSessionsStatements, readOpenStockSessions, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition, type ProductMergeKeeperChoice } from '../lib/undoAppliers'
 import { INVALID_RESOLVE_CHOICES_CODE, KEEPER_CHOICE_BEFORE_SQL, MERGE_APPLIED_PROBE_SQL, ProductResolveChoiceError, RESOLVE_EDIT_PERMISSION_CODE, keeperChoiceBefore, keeperChoiceStatements, mergeFailedBody, parseProductResolveChoices, resolveChoicesTypeValues, resolveChoiceValues, type ProductResolveChoices, type ResolveChoiceValues } from '../lib/productResolveChoices'
 import { createProductMergeClusterPlan, isMergePriceEditError, MERGE_COST_FIELDS, MERGE_PRICE_EDIT_CODE, MERGE_PRICE_EDIT_MESSAGE, MERGE_PRICE_FIELDS, mergePriceEditError, mergePriceOverrides, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergeSourceUnmovedAssertion, MERGE_CONFLICT_RETRY, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
 import { sendTelegramEvent } from '../lib/telegram'
 import { PRODUCT_EDIT_ALERT_HEADING, PRODUCT_MERGE_ALERT_HEADING, formatProductEditAlertLines, formatProductMergeAlertLines, productEditAlertFields } from '../lib/productEditAlert'
-import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedSql, costEntryActorParams, typedCostEntriesBeforeWriteSql, typedCostEntryBeforeWriteStatement } from '../lib/catalogCostRecompute'
+import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedSql, costEntryActorParams, typedCostEntriesBeforeWriteSql } from '../lib/catalogCostRecompute'
 import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, productMergeSourceExtent, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
 import type { ProductMergeCaseSnapshot, ProductMergeLotSnapshot } from '../lib/productMergeSnapshot'
 import {
@@ -2029,74 +2029,10 @@ async function findSameProductIdentityProduct(
   return findSameIdentityProduct(getDb(env), name, barcode, excludeId)
 }
 
-// The Sep 16 2026 create-fold: a create request that identifies as the SAME
-// product as an existing active row (findSameProductIdentityProduct) never
-// mints a twin and never 409s -- it folds straight into the existing row.
-// Keeps the existing row's id (every reference to it -- branch_stock, lots,
-// sales -- stays valid), cleans the stored barcode to the real zero-stripped
-// code when the incoming one is real and the stored one was padded or a
-// wildcard, and merges in a non-zero incoming cost through the same
-// distinct-cost averaging every other fold uses (resolveMergedCostDetail).
-// Returns 200, never 409 -- the whole point of the ruling is that this is
-// not an error the operator has to resolve.
-async function foldCreateIntoExisting(
-  env: Env,
-  user: SessionUser | null,
-  duplicate: { id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number },
-  name: string,
-  body: Record<string, unknown>,
-): Promise<{ item: unknown; product: unknown; id: number; folded_into: number; success: true }> {
-  const db = getDb(env)
-  const updates: Record<string, unknown> = {}
-  const incomingBarcodeRaw = body.barcode
-  if (isRealBarcode(incomingBarcodeRaw)) {
-    const cleanedIncoming = normalizeLeadingZeroBarcodeForCleanup(String(incomingBarcodeRaw).trim().toLowerCase())
-    const existingReal = isRealBarcode(duplicate.barcode)
-    const existingStored = String(duplicate.barcode ?? '').trim()
-    // Only rewrite the stored barcode when it is padded (its own clean form
-    // differs) or it was a wildcard/broken value being replaced by a real
-    // one -- never overwrite an already-clean real code with a different
-    // spelling of the same identity.
-    if (!existingReal || (existingStored.toLowerCase() !== cleanedIncoming
-      && normalizeLeadingZeroBarcodeForCleanup(existingStored.toLowerCase()) === cleanedIncoming)) {
-      updates.barcode = cleanedIncoming
-    }
-  }
-  const incomingCostUsd = Number(body.cost_price_usd) || 0
-  const incomingCostKhr = Number(body.cost_price_khr) || 0
-  let costOutliers: MergedCostOutlier[] = []
-  if (incomingCostUsd > 0 || incomingCostKhr > 0) {
-    const { merged, outliers } = resolveMergedCostDetail([
-      { cost_price_usd: duplicate.cost_price_usd, cost_price_khr: duplicate.cost_price_khr },
-      { cost_price_usd: incomingCostUsd, cost_price_khr: incomingCostKhr },
-    ])
-    costOutliers = outliers
-    if (merged.cost_price_usd !== undefined) updates.cost_price_usd = merged.cost_price_usd
-    if (merged.cost_price_khr !== undefined) updates.cost_price_khr = merged.cost_price_khr
-  }
-  if (Object.keys(updates).length) {
-    const setSql = Object.keys(updates).map((key) => `${key} = @${key}`).join(', ')
-    const write = { sql: `UPDATE products SET ${setSql}, updated_at = CURRENT_TIMESTAMP WHERE id = @id`, params: { ...updates, id: duplicate.id } }
-    // U-cost: the folded cost was typed into the product form, so it records
-    // the form's product_cost_entries row -- the 0195 triggers re-derive
-    // cost_price_usd at every stock movement and honour only a cost with
-    // one, so a bare write held until the next sale. Before the UPDATE (it
-    // reads the preimage) in one batch; nothing when the cost is unmoved.
-    const costEntry = typedCostEntryBeforeWriteStatement(duplicate.id, {
-      ...(updates.cost_price_usd !== undefined ? { usd: updates.cost_price_usd as number } : {}),
-      ...(updates.cost_price_khr !== undefined ? { khr: updates.cost_price_khr as number } : {}),
-    }, { id: actorId(user), name: actorSnapshot(user) })
-    if (costEntry) await db.batch([costEntry, write])
-    else await db.prepare(write.sql).run(write.params)
-  }
-  await audit(env, user?.id ?? null, actorSnapshot(user), 'fold', 'product', duplicate.id, {
-    reason: 'create_identity_fold', requestedName: name, incomingBarcode: body.barcode, updates, costOutliers,
-  })
-  const item = await db.prepare('SELECT * FROM products WHERE id = @id').get({ id: duplicate.id })
-  await bumpVersion(env, 'products')
-  await broadcast(env, 'products', { action: 'update', id: duplicate.id }).catch(() => {})
-  return { item, product: item, id: duplicate.id, folded_into: duplicate.id, success: true }
-}
+// The Sep 16 2026 create-fold (a create that identifies as the SAME product as an existing active row folds into
+// it) lives in lib/createFold.ts so the review applier folds a queued create the same way. Owner ruling 16 (13 Oct
+// 2026): a starting quantity typed on a fold is recorded as a normal stock-in, never dropped.
+import { foldCreateIntoExisting, foldCreateWithStockInResponse, startingStockFingerprint } from '../lib/createFold'
 
 function productStatusInputRefusal(c: any, body: Record<string, unknown>) {
   try { assertProductStatusInput(body) } catch (error) {
@@ -2142,7 +2078,8 @@ app.post('/', async (c) => {
   // merges such rows, so manual create must not mint a silent twin the
   // import path would never allow. Same name with a DIFFERENT REAL barcode
   // stays a legitimate child row and passes through untouched.
-  try { await productCreateDestination(c.env, body, () => branchRedirectTarget(c)) } catch (error) {
+  let destination: Awaited<ReturnType<typeof productCreateDestination>>
+  try { destination = await productCreateDestination(c.env, body, () => branchRedirectTarget(c)) } catch (error) {
     const response = productCreateErrorResponse(error)
     if (response) return c.json(response.body, response.status)
     throw error
@@ -2155,6 +2092,16 @@ app.post('/', async (c) => {
     ? null
     : await findSameProductIdentityProduct(c.env, name, body.barcode, null)
   if (duplicate) {
+    // Owner ruling 16 (13 Oct 2026): a starting quantity typed on a fold is recorded as a normal stock-in in the
+    // same D1 batch as the fold; refused, never silently dropped (lib/createFold.ts).
+    if (destination.quantity > 0 && destination.branchId != null) {
+      const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as import('../lib/requestMetrics').RequestMetrics | undefined
+      const folded = await foldCreateWithStockInResponse(c.env, user, duplicate, name, body, { ...destination, branchId: destination.branchId }, {
+        waitUntil: (promise) => c.executionCtx.waitUntil(promise),
+        invocation: metrics?.invocation ? { used: () => metrics.invocation.attemptedStatements, limit: getPlanLimits(c.env).d1QueriesPerInvocation } : undefined,
+      })
+      return c.json(folded.body, folded.status as 200 | 400 | 403 | 409 | 503)
+    }
     return c.json(await foldCreateIntoExisting(c.env, user, duplicate, name, body))
   }
 
@@ -2208,7 +2155,10 @@ app.post('/', async (c) => {
   if (normalizedBrands !== undefined) body.brands = normalizedBrands
 
   let created
-  try { created = await createProductWithInitialStock(c.env, body, { name, is_active: 1 }, imageLimitForUser(user), undefined, () => branchRedirectTarget(c)) } catch (error) {
+  try {
+    created = await createProductWithInitialStock(c.env, body, { name, is_active: 1 }, imageLimitForUser(user), undefined, () => branchRedirectTarget(c),
+      { actorId: user.id, fingerprint: startingStockFingerprint(body, destination) })
+  } catch (error) {
     const response = productCreateErrorResponse(error)
     if (response) return c.json(response.body, response.status)
     throw error

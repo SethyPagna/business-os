@@ -34,7 +34,7 @@ function deferred() {
   return { promise, resolve }
 }
 type Row = Record<string, unknown>
-function fixture(options: { edit?: boolean; granted?: boolean; pending?: boolean; failure?: 'api' | 'response' | 'upload' | 'refresh'; hold?: ReturnType<typeof deferred>; holdUpload?: ReturnType<typeof deferred>; holdRefresh?: ReturnType<typeof deferred> } = {}) {
+function fixture(options: { edit?: boolean; granted?: boolean; pending?: boolean; folded?: 'stock' | 'plain'; failure?: 'api' | 'response' | 'upload' | 'refresh'; hold?: ReturnType<typeof deferred>; holdUpload?: ReturnType<typeof deferred>; holdRefresh?: ReturnType<typeof deferred> } = {}) {
   const calls: Array<{ kind: string; payload?: Row }> = []
   const notices: unknown[] = [], history: unknown[] = []
   const guard = { current: false }
@@ -47,6 +47,8 @@ function fixture(options: { edit?: boolean; granted?: boolean; pending?: boolean
     if (options.hold) await options.hold.promise
     if (options.failure === 'api') throw new Error('403 permission denied')
     if (options.pending) return { success: true, pending: true, pendingActionId: 9 }
+    if (options.folded === 'stock') return { success: true, id: 12, folded_into: 12, item: { id: 12, name: 'Existing' }, stock_in: { quantity: 6, branch_id: 2, lot_code: 'L1', unit_cost_usd: 2.5 } }
+    if (options.folded === 'plain') return { success: true, id: 12, folded_into: 12, item: { id: 12, name: 'Existing' } }
     return options.failure === 'response' ? { success: false, error: 'write refused' } : { success: true, id: 12 }
   }
   const scope = {
@@ -154,6 +156,24 @@ await direct.save(form)
 for (let i = 0; i < 5; i++) await tick()
 assert.deepEqual(direct.notices, [['product_updated']])
 assert.equal(direct.history.length, 1)
+// Owner ruling 16 (13 Oct 2026): a create that folds into an existing product records its typed quantity as a stock-in.
+// The notice names the quantity and the product, and no "Add product" Undo entry is pushed -- that Undo is a product
+// delete, which would remove the pre-existing survivor together with its stock.
+for (const [folded, expected] of [['stock', 'Added 6 to existing product Existing'], ['plain', 'Added to existing product Existing']] as const) {
+  const f = fixture({ folded })
+  await f.save(form)
+  for (let i = 0; i < 5; i++) await tick()
+  assert.deepEqual(f.notices, [[expected]], 'fold notice (' + folded + ')')
+  assert.equal(f.history.length, 0, 'a create that folded pushes no create-Undo entry (' + folded + ')')
+  assert.equal(f.guard.current, false)
+}
+const unfolded = fixture()
+await unfolded.save(form)
+for (let i = 0; i < 5; i++) await tick()
+assert.deepEqual(unfolded.notices, [['product_created']])
+assert.equal(unfolded.history.length, 1, 'control: a create that did NOT fold keeps its Undo entry')
+console.log('PASS create-fold: quantity in the notice, no create-Undo for a product that was not created')
+
 console.log('PASS queued (202) product create/edit: submitted-for-review notice, no Undo entry, form resolves')
 
 
