@@ -41,8 +41,6 @@ type RuntimeResetOptions = {
   mirrorTables?: string[]
 }
 
-type StorageEntry = [string, string | null]
-
 const BUSINESS_OS_STORAGE_PREFIXES = ['businessos_', 'business_os_']
 // Older POS builds wrote these account-owned values without our standard
 // prefix. Clear only their known names: other pos_/bos_ settings may belong
@@ -207,19 +205,6 @@ async function clearServiceWorkersAndCaches(): Promise<void> {
   } catch (_) {}
 }
 
-function snapshotStorage(storage: Storage | null, preserveKeys: Set<string>): StorageEntry[] {
-  if (!storage) return []
-  const kept: StorageEntry[] = []
-  try {
-    for (let index = 0; index < storage.length; index += 1) {
-      const key = storage.key(index)
-      if (!key || !preserveKeys.has(key)) continue
-      kept.push([key, storage.getItem(key)])
-    }
-  } catch (_) {}
-  return kept
-}
-
 function clearStorage(storage: Storage | null, preserveKeys: Set<string>, keepInPlace: readonly string[] = []): void {
   if (!storage) return
   const toDelete: string[] = []
@@ -235,16 +220,6 @@ function clearStorage(storage: Storage | null, preserveKeys: Set<string>, keepIn
     }
     toDelete.forEach((key) => storage.removeItem(key))
   } catch (_) {}
-}
-
-function restoreStorage(storage: Storage | null, entries: StorageEntry[]): void {
-  if (!storage || !Array.isArray(entries)) return
-  entries.forEach(([key, value]) => {
-    try {
-      if (value == null) storage.removeItem(key)
-      else storage.setItem(key, value)
-    } catch (_) {}
-  })
 }
 
 export async function resetClientRuntimeState(options: RuntimeResetOptions = {}): Promise<void> {
@@ -288,18 +263,12 @@ export async function resetClientRuntimeState(options: RuntimeResetOptions = {})
     sessionPreserveKeys.add(STORAGE_KEYS.USER_EXPIRY)
   }
 
-  // Live coordination keys are never removed, and must never be restored from a
-  // snapshot after asynchronous cleanup: their owner may have changed. The
-  // signed-in account is one -- another tab can sign in or out meanwhile, and
-  // writing the old account back would hand it the new account's session.
-  const liveKeys = new Set(['businessos_read_session', 'businessos_auth_cookie_pending', 'businessos_unresolved_signout_v1', STORAGE_KEYS.USER, STORAGE_KEYS.USER_EXPIRY])
-  const keptLocal = canUseBrowserStorage() ? snapshotStorage(window.localStorage, localPreserveKeys).filter(([key]) => !liveKeys.has(key)) : []
-  const keptSession = canUseBrowserStorage() ? snapshotStorage(window.sessionStorage, sessionPreserveKeys).filter(([key]) => !liveKeys.has(key)) : []
-
-  // Kept in place, never snapshotted and restored, so a value another tab writes
-  // during the asynchronous cleanup below survives byte for byte: the device's
-  // write-owner generation, which only ever increases (api/actorReadScope.ts),
-  // and, when drafts are kept, the drafts themselves -- a Stock Session writes
+  // Every kept key stays in place; nothing is snapshotted and written back after
+  // the asynchronous cleanup below, so whatever another tab writes meanwhile --
+  // a sign-in or sign-out, the language, the server, the login duration --
+  // survives byte for byte. Besides the keys above: the device's write-owner
+  // generation, which only ever increases (api/actorReadScope.ts), and, when
+  // drafts are kept, the drafts themselves -- a Stock Session writes
   // its request ids into its draft before sending -- and the receiving Stock
   // Session's product-attempt records, which belong to its draft
   // (utils/receivingProductAttempt.ts).
@@ -322,7 +291,4 @@ export async function resetClientRuntimeState(options: RuntimeResetOptions = {})
     const { resetLocalMirrorDb } = await import('../../api/localDb.ts')
     await resetLocalMirrorDb()
   }
-
-  restoreStorage(canUseBrowserStorage() ? window.localStorage : null, keptLocal)
-  restoreStorage(canUseBrowserStorage() ? window.sessionStorage : null, keptSession)
 }

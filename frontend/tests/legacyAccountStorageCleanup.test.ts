@@ -146,6 +146,30 @@ try {
   assert.deepEqual(stored(), [['{"id":7}', '111'], ['{"id":7}', '111']], 'and keeps the signed-in account')
   assert.equal(local.getItem(STORAGE_KEYS.DEVICE_SETTINGS), '{"language":"km"}', 'and the device settings')
   console.log('PASS a drafts-keeping reset keeps drafts in place, as written during the cleanup; the admin resets still clear them')
+
+  // The kept device keys stay in place too: another tab's newer language,
+  // server or login duration is never reverted by this tab's cleanup.
+  const device = [STORAGE_KEYS.DEVICE_SETTINGS, STORAGE_KEYS.SYNC_SERVER, STORAGE_KEYS.SESSION_DURATION]
+  const deviceValues = () => device.map((key) => local.getItem(key))
+  const older = ['{"language":"en"}', 'https://old.example.test', '30d'], newer = ['{"language":"km"}', 'https://new.example.test', '7d']
+  const resets: Array<[string, Record<string, unknown>]> = [
+    ['same-user refresh', { clearAuth: false, preserveServiceWorker: true, preserveOfflineWork: true, preserveUiDrafts: true }],
+    ['session expiry', { clearAuth: true, preserveSyncServer: true, preserveSessionDuration: true, preserveRuntimeMeta: true, preserveServiceWorker: true, preserveOfflineWork: true, preserveUiDrafts: true }],
+    ['admin reset', adminOptions],
+  ]
+  for (const [name, options] of resets) {
+    device.forEach((key, index) => local.setItem(key, older[index]))
+    duringMirrorReset = () => device.forEach((key, index) => local.setItem(key, newer[index]))
+    await runtimeModule.exports.resetClientRuntimeState(options)
+    assert.deepEqual(deviceValues(), newer, `${name}: another tab's newer language, server and login duration are not reverted`)
+    device.forEach((key, index) => local.setItem(key, older[index])); duringMirrorReset = () => {}
+    await runtimeModule.exports.resetClientRuntimeState(options)
+    assert.deepEqual(deviceValues(), older, `${name}: nobody wrote, they stay`)
+  }
+  device.forEach((key, index) => local.setItem(key, older[index])); duringMirrorReset = () => {}
+  await runtimeModule.exports.resetClientRuntimeState({ preserveDeviceSettings: false, preserveSyncServer: false, preserveSessionDuration: false, preserveServiceWorker: true, preserveOfflineWork: true })
+  assert.deepEqual(deviceValues(), [null, null, null], 'a reset that does not keep them still clears them')
+  console.log('PASS the kept device keys stay in place: language, server and login duration written during the cleanup are not reverted')
 } finally {
   if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow)
   else Reflect.deleteProperty(globalThis, 'window')
