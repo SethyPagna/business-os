@@ -33,6 +33,10 @@
 //      same-origin and a Safari < 16.4 sign-in there work, header-less
 //      text/plain there is refused, and a page on one host posting to the
 //      other is refused in both directions.
+//   6. The shop host never shows admin however the path is spelled (review
+//      F4): %73ubmissions, %2F, double encoding, other letter case and
+//      malformed escapes are 404 there, while the admin host's router still
+//      decodes %73 to the staff review (401 without a session).
 //
 // PORTAL_CSRF_SRC_ROOT=<dir holding src/ and migrations/> runs the same
 // checks against another tree (the fail-on-base proof); packages still
@@ -319,6 +323,29 @@ async function main() {
         assert.deepEqual([response.status, response.body && response.body.code], [403, 'cross_origin_write_refused'], `${headers.origin} -> ${base}: ${response.text}`)
         assert.equal(portalCookie(response.setCookie), null)
       }
+    })
+
+    // --- 6. the shop host never shows admin, however the path is spelled ----
+    await check('shop host: encoded staff paths are 404 through the real router; the admin host still routes them (control)', async () => {
+      const control = await send(ADMIN, '/api/portal/%73ubmissions/review', { method: 'GET' })
+      assert.equal(control.status, 401, `the router decodes %73 and reaches the staff review on the admin host: ${control.text}`)
+      for (const [method, pathname] of [
+        ['GET', '/api/portal/%73ubmissions/review'],
+        ['PATCH', '/api/portal/%73ubmissions/1/review'],
+        ['GET', '/api/portal/%73ubmissions/1/screenshot/0'],
+        ['GET', '/api/portal/submissions%2F1%2Freview'],
+        ['GET', '/api/portal/%2573ubmissions/review'],
+        ['GET', '/api/portal/%53ubmissions/review'],
+        ['GET', '/API/auth/login'],
+        ['GET', '/api/%61uth/me'],
+        ['GET', '/api/portal/%zz/review'],
+        ['GET', '/api/portal/config%'],
+      ]) {
+        const response = await send(SHOP, pathname, { method, origin: 'self', site: 'same-origin', type: method === 'GET' ? undefined : 'application/json', body: method === 'GET' ? undefined : JSON.stringify({ status: 'approved' }) })
+        assert.deepEqual([response.status, response.body], [404, { error: 'Not found' }], `${method} ${pathname} on the shop host: ${response.text}`)
+      }
+      const encodedStorefront = await send(SHOP, '/api/portal/%63onfig', { method: 'GET' })
+      assert.equal(encodedStorefront.status, 200, `an encoded storefront path is still the storefront: ${encodedStorefront.text}`)
     })
 
     await check('same-origin JSON sign-out (the storefront sends {}) works', async () => {
