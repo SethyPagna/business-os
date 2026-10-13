@@ -2028,9 +2028,13 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // changing the cost recorded for stock that was already removed.
   try {
   if (useBatchLedger && type === 'remove') {
+    // A named lot that is no longer active holds nothing that can be removed: the removal batch's lot guard
+    // (productBatches.planRemoveStockAcrossBatches) requires pb.is_active = 1, so the same fact is read here and
+    // answered "only 0 available" -- never passed on to be refused in the batch as a "refresh and try again" 409
+    // that a refresh cannot fix.
     const costRows = batchIdRequested != null
       ? await db.prepare(`
-          SELECT pb.id, pb.unit_cost_usd, COALESCE(bbs.quantity, 0) AS available
+          SELECT pb.id, pb.unit_cost_usd, CASE WHEN pb.is_active = 1 THEN COALESCE(bbs.quantity, 0) ELSE 0 END AS available
           FROM product_batches pb
           LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=@branchId
           WHERE pb.id = @batchId AND pb.variant_product_id = @productId

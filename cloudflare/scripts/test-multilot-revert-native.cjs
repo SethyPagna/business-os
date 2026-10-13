@@ -331,6 +331,7 @@ function finish(finding) {
 //   --wrong=no-import-shares    mutant: the CSV import writes the movement but not its shares (M2, M5, M9b go RED)
 //   --wrong=ignore-shares       mutant: Revert ignores recorded shares (the pre-fix, aggregate-only Revert) (M1..M7, M9b go RED)
 //   --wrong=no-old-refusal      mutant: an old share-less removal on a lot-tracked product is reverted aggregate-only (M6 goes RED)
+//   --wrong=active-blind-precheck  mutant: the named-lot pre-check ignores pb.is_active again (R2 F8)           (M10 goes RED)
 //   --only=M1,M2                run just those cases (debugging aid)
 // Every mutant rewrites source text IN MEMORY at bundle time and fails loudly if its anchor is missing.
 // ============================================================================================
@@ -358,6 +359,11 @@ const PATCHES = {
     NO_OLD_REFUSAL,
   ],
   'no-old-refusal': [NO_OLD_REFUSAL],
+  'active-blind-precheck': [
+    { name: 'active-blind-precheck', file: 'src/routes/inventory.ts',
+      from: 'CASE WHEN pb.is_active = 1 THEN COALESCE(bbs.quantity, 0) ELSE 0 END AS available',
+      to: 'COALESCE(bbs.quantity, 0) AS available' },
+  ],
 }
 
 let seq = 0
@@ -685,6 +691,37 @@ async function main() {
         t.ok('Free ' + lotsCount + ' lots: every request inside the Free limit of 50', Math.max(removed.d1, rev.d1, redo.d1) <= 50, free[free.length - 1])
       }
       t.note('Free, statements per request: ' + JSON.stringify(free))
+    })
+
+    // ------------------------------------------------------------------ M10 (R2 review F8): a named lot that is not active
+    // Last in this world: it drops migration 0154's "cannot deactivate a lot that holds stock" trigger to build the state the
+    // removal batch's guard (pb.is_active = 1) was written for, which the trigger otherwise makes unreachable.
+    await check('M10', 'F8: Remove from a NAMED lot that is not active is answered "only 0 available" (400, nothing written), not as a "refresh and try again" 409', 'medium', async (t) => {
+      const emptied = await seed(H, { lots: [5, 5] })
+      // The ordinary way a picker goes stale: the lot was emptied and left the pickers (inactive, nothing in it).
+      await H.db.batch([
+        H.db.prepare('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=? AND branch_id=?').bind(emptied.ids[1], LC),
+        H.db.prepare('UPDATE branch_stock SET quantity=5 WHERE product_id=? AND branch_id=?').bind(emptied.p, LC),
+        H.db.prepare('UPDATE products SET stock_quantity=5 WHERE id=?').bind(emptied.p),
+        H.db.prepare('UPDATE product_batches SET is_active=0 WHERE id=?').bind(emptied.ids[1]),
+      ])
+      const stale = await adjustRemove(H, emptied, 2, 'a', { batchId: emptied.ids[1] })
+      t.eq('an emptied inactive lot: 400 with the shortage answer', [stale.status, stale.body && stale.body.error], [400, 'Only 0 available under this received date at this branch'])
+
+      const s = await seed(H, { lots: [5, 5] })
+      await H.db.exec('DROP TRIGGER positive_lot_reject_inactive_update_0154')
+      await H.db.prepare('UPDATE product_batches SET is_active=0 WHERE id=?').bind(s.ids[1]).run()
+      const before = await snap(H, s)
+      const r = await adjustRemove(H, s, 2, 'b', { batchId: s.ids[1] })
+      const after = await snap(H, s)
+      const marks = await H.q('SELECT written w FROM stock_mutation_receipts WHERE request_id=?', 'ml-' + s.p + '-b')
+      t.eq('an inactive lot that still holds stock answers 400 with the shortage, not the 409 conflict', [r.status, r.body && r.body.code, r.body && r.body.error], [400, undefined, 'Only 0 available under this received date at this branch'])
+      t.eq('nothing was written (lots, branch, total, movements)', [after.lots, after.branch, after.product, after.movements.length], [before.lots, before.branch, before.product, 0])
+      t.eq('the refused request left no written mark', marks.filter(x => x.w === 1).length, 0)
+      // The same state through the auto-routed path is unaffected: it already skips inactive lots, and drains the active one.
+      const auto = await adjustRemove(H, s, 4, 'c')
+      const drained = await snap(H, s)
+      t.eq('an auto-routed Remove skips the inactive lot and takes the active one', [auto.status, drained.lots], [200, [1, 5]])
     })
   } finally {
     await H.disarm().catch(() => {})
