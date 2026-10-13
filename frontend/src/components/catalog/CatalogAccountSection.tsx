@@ -37,7 +37,8 @@ export default function CatalogAccountSection({
   consentLocale = 'en',
   cartCount,
   wishlistCount,
-  signupEnabled = true,
+  signupEnabled = false,
+  errorCode = '',
 }: {
   copy: CopyFn
   account: PortalAccountProfile | null
@@ -51,12 +52,24 @@ export default function CatalogAccountSection({
   consentLocale?: string
   cartCount: number
   wishlistCount: number
-  /** Owner switch customer_portal_signup_enabled (G38 P0): false pauses new accounts. */
+  /**
+   * Owner switch customer_portal_signup_enabled. Sign-up is OFF unless the
+   * server said exactly true (owner ruling 6 Oct), so a missing answer (first
+   * paint, a failed bootstrap) shows the paused state, never a dead Sign up tab.
+   */
   signupEnabled?: boolean
+  /** The Worker's refusal code for `error` (usePortalAccount errorCode). */
+  errorCode?: string
 }) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [reminderOpen, setReminderOpen] = useState(false)
-  const showSignup = signupEnabled && mode === 'signup'
+  const signupPausedText = copy('signupPaused', 'New accounts are paused for now. Existing members can sign in below.', 'ការបង្កើតគណនីថ្មីត្រូវបានផ្អាកសិន។ សមាជិកដែលមានស្រាប់អាចចូលគណនីខាងក្រោម។')
+  // The server is the authority: a sign-up it refused as paused closes the
+  // Sign up tab as well, and the refusal is said in the visitor's language.
+  const pausedByServer = errorCode === 'portal_signup_paused'
+  const signupOpen = signupEnabled && !pausedByServer
+  const showSignup = signupOpen && mode === 'signup'
+  const errorText = pausedByServer ? signupPausedText : error
   // Sign-in fields
   const [identifier, setIdentifier] = useState('')
   const [signinPhone, setSigninPhone] = useState('')
@@ -176,7 +189,7 @@ export default function CatalogAccountSection({
           </div>
         ) : (
           <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm dark:border-neutral-700 dark:bg-neutral-900">
-            {signupEnabled ? (
+            {signupOpen ? (
             <div className="mb-4 inline-flex rounded-2xl bg-slate-100 p-1 text-sm dark:bg-white/5">
               <button
                 type="button"
@@ -195,13 +208,14 @@ export default function CatalogAccountSection({
                 {copy('signUp', 'Sign up')}
               </button>
             </div>
-            ) : (
+            ) : pausedByServer ? null : (
+              // Said once: after a paused refusal the alert below carries it.
               <p data-portal-signup-paused="true" className="mb-4 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600 dark:bg-white/5 dark:text-neutral-300">
-                {copy('signupPaused', 'New accounts are paused for now. Existing members can sign in below.', 'ការបង្កើតគណនីថ្មីត្រូវបានផ្អាកសិន។ សមាជិកដែលមានស្រាប់អាចចូលគណនីខាងក្រោម។')}
+                {signupPausedText}
               </p>
             )}
 
-            {error ? (
+            {errorText ? (
               // A sign-in failure used to be colour only: the box appeared below
               // the tabs with no announcement, so a screen-reader user pressed
               // Sign in, heard nothing, and had no idea the attempt had failed.
@@ -210,7 +224,7 @@ export default function CatalogAccountSection({
                 aria-live="assertive"
                 className="mb-4 rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-200"
               >
-                {error}
+                {errorText}
               </div>
             ) : null}
 

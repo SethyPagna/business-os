@@ -42,6 +42,14 @@ function readProfile(result: unknown): PortalAccountProfile | null {
   return { membershipId, name, email: account.email == null ? null : String(account.email) }
 }
 
+// The Worker's refusal code (portalPublicTransport sets error.code from the
+// JSON body), so the drawer can say a known refusal in the visitor's language
+// instead of showing the server's English sentence.
+export function readPortalErrorCode(error: unknown): string {
+  const code = (error as { code?: unknown } | null)?.code
+  return typeof code === 'string' ? code : ''
+}
+
 function readItems(result: unknown): unknown[] {
   const items = (result as { items?: unknown })?.items
   return Array.isArray(items) ? items : []
@@ -55,6 +63,7 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike) {
   const [ready, setReady] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [errorCode, setErrorCode] = useState('')
 
   // Live refs so the debounced saver always reads the latest lists/account
   // without re-subscribing the effect on every keystroke.
@@ -138,9 +147,10 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike) {
   ): Promise<boolean> => {
     const a = api()
     const fn = a[method]
-    if (!fn) { setError('Accounts are unavailable right now.'); return false }
+    if (!fn) { setError('Accounts are unavailable right now.'); setErrorCode(''); return false }
     setBusy(true)
     setError('')
+    setErrorCode('')
     try {
       const result = await fn(payload)
       const profile = readProfile(result)
@@ -150,6 +160,7 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike) {
       return true
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
+      setErrorCode(readPortalErrorCode(err))
       return false
     } finally {
       setBusy(false)
@@ -167,7 +178,7 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike) {
     // The local list stays as the guest's list — it is not cleared on sign-out.
   }, [])
 
-  const clearError = useCallback(() => setError(''), [])
+  const clearError = useCallback(() => { setError(''); setErrorCode('') }, [])
 
-  return { account, ready, busy, error, signIn, signUp, signOut, clearError }
+  return { account, ready, busy, error, errorCode, signIn, signUp, signOut, clearError }
 }

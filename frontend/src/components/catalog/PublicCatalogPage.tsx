@@ -1483,6 +1483,7 @@ export default function PublicCatalogPage() {
               ready={portalAccount.ready}
               busy={portalAccount.busy}
               error={portalAccount.error}
+              errorCode={portalAccount.errorCode}
               signIn={portalAccount.signIn}
               signUp={portalAccount.signUp}
               signOut={portalAccount.signOut}
@@ -1490,7 +1491,7 @@ export default function PublicCatalogPage() {
               consentLocale={String(displayConfig.language || 'en')}
               cartCount={bucket.count}
               wishlistCount={wishlist.count}
-              signupEnabled={displayConfig.signupEnabled !== false}
+              signupEnabled={displayConfig.signupEnabled === true}
             />
           </Suspense>
         </div>

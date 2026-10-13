@@ -234,7 +234,9 @@ function submissionBody(extra = {}) {
   return JSON.stringify({ platform: 'Facebook', note: 'shared it', screenshots: [PNG_DATA_URL], rightsConsent: true, privacyConsent: true, consentLocale: 'en', ...extra })
 }
 
-const JSON_HEADERS = { 'content-type': 'application/json' }
+// The storefront page's own request shape: POST /submissions is behind the
+// same-origin JSON credential guard (test-portal-credential-post-guard-pure.cjs).
+const JSON_HEADERS = { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }
 
 let passed = 0
 async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${name}`) }

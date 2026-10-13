@@ -11,6 +11,14 @@
 // and must fail. SECURITY_TEST_BASE=<sha> checks that commit (bb639041d has
 // no gate, so it must FAIL).
 //
+// Review F4 (13 Oct): Hono decodes the path before routing, so a gate that
+// judged the RAW pathname let /api/portal/%73ubmissions/review reach the staff
+// review route on the shop host (401, not 404). The gate now judges the path
+// decoded as far as any decoder could take it (%2F, double encoding,
+// backslashes, dot segments, any letter case) and fails closed (404) on a
+// malformed escape. 0baa53f2f must FAIL the encoded suite; a raw-path mutant of
+// the current gate, loaded in the same run, must fail it too.
+//
 // Run: node scripts/test-public-host-api-gate-pure.cjs
 'use strict'
 const assert = require('node:assert/strict')
@@ -101,6 +109,56 @@ check('parity: every /api path the storefront bundle calls is reachable on the s
   for (const p of paths) assert.equal(gate.isBlockedOnStorefrontHost(`https://leangbeauty.com${p.endsWith('/') ? `${p}LC-00001` : p}`), false, `storefront call ${p} must not be blocked`)
 })
 
+// What a router or a later decoder could turn into a staff path, and the
+// malformed escapes nothing should guess at. All 404 on the shop host.
+const ENCODED_STAFF = [
+  '/api/portal/%73ubmissions/review', // %73 = s: Hono routes this to the staff review
+  '/api/portal/%73ubmissions/1/review',
+  '/api/portal/%73ubmissions/7/screenshot/0',
+  '/api/portal/submissions%2F1%2Freview', // %2F
+  '/api/portal/submissions%2f1%2freview', // lower-case hex
+  '/api/portal%2Fsubmissions/1/review',
+  '/api%2Fauth/login',
+  '/api/%61uth/login', // %61 = a
+  '/%61pi/products',
+  '/api/portal/%2573ubmissions/1/review', // double encoding
+  '/api/portal/%25%37%33ubmissions/review',
+  '/api/portal/%252e%252e/auth/login', // double-encoded dot segments
+  '/api/portal/%2e%2e/auth/login',
+  '/api/portal/submissions%5C1%5Creview', // backslash
+  '/api/portal/%53ubmissions/1/review', // %53 = S: mixed case
+  '/api/portal/SUBMISSIONS/1/review',
+  '/API/auth/login',
+  '/Api/portal/config',
+  '/%77s', // %77 = w: the socket
+  '/WS',
+]
+const MALFORMED = ['/api/portal/%zz/review', '/api/portal/config%', '/api/portal/%E0%A4%A/x', '/%E0%A4%A', '/products/%zz']
+// Encoded but harmless: decoding must not over-block the storefront.
+const ENCODED_STOREFRONT = ['/api/portal/membership/LC%2D00001', '/api/portal/catalog/products/search', '/uploads/products/a%20b.jpg', '/uploads/products/50%25off.jpg', '/products/%E1%9E%80%E1%9E%B6']
+
+function encodedSuite(gate) {
+  for (const host of ['leangbeauty.com', 'business-os.example.workers.dev']) {
+    for (const p of ENCODED_STAFF) assert.equal(gate.isBlockedOnStorefrontHost(`https://${host}${p}`), true, `${host}${p} must be 404 on the shop host (encoded)`)
+    for (const p of MALFORMED) assert.equal(gate.isBlockedOnStorefrontHost(`https://${host}${p}`), true, `${host}${p} must fail closed on the shop host (malformed)`)
+    for (const p of ENCODED_STOREFRONT) assert.equal(gate.isBlockedOnStorefrontHost(`https://${host}${p}`), false, `${host}${p} must stay reachable on the shop host`)
+  }
+  for (const p of [...ENCODED_STAFF, ...MALFORMED, ...ENCODED_STOREFRONT]) {
+    assert.equal(gate.isBlockedOnStorefrontHost(`https://admin.leangbeauty.com${p}`), false, `admin.leangbeauty.com${p} is unchanged on the staff host`)
+  }
+}
+
+check('shop host: encoded, double-encoded, backslash, dot-segment and any-case staff paths are 404; malformed escapes fail closed', () => {
+  assert.ok(gate, 'gate loaded')
+  encodedSuite(gate)
+})
+
+check('control: a gate that judges the raw pathname fails the encoded suite', () => {
+  assert.ok(gateSource, 'gate source loaded')
+  const raw = inject(gateSource, '  const path = gatePath(parsed.pathname)\n', '  const path = parsed.pathname\n')
+  assert.throws(() => encodedSuite(loadGate(raw)), /must be 404 on the shop host \(encoded\)/)
+})
+
 check('control: a host-blind gate and a deny-list gate both fail the suite, from LF and CRLF checkouts', () => {
   assert.ok(gateSource, 'gate source loaded')
   for (const [label, source] of [['LF', gateSource], ['CRLF', gateSource.replace(/\n/g, '\r\n')]]) {
@@ -108,7 +166,7 @@ check('control: a host-blind gate and a deny-list gate both fail the suite, from
     assert.doesNotThrow(() => gateSuite(loadGate(source)), `the unmutated ${label} gate passes`)
     const hostBlind = inject(source, '  if (isStaffHostname(parsed.hostname)) return false\n', '')
     assert.throws(() => gateSuite(loadGate(hostBlind)), /unchanged on the staff host/, `${label}: a host-blind gate must fail`)
-    const denyList = inject(source, "if (path === '/api' || path.startsWith('/api/')) return !isStorefrontApiPath(path)", "if (path.startsWith('/api/auth/')) return true")
+    const denyList = inject(source, "if (lower === '/api' || lower.startsWith('/api/')) return !isStorefrontApiPath(path)", "if (lower.startsWith('/api/auth/')) return true")
     assert.throws(() => gateSuite(loadGate(denyList)), /must be 404 on the shop host/, `${label}: a deny-list gate must fail`)
   }
 })

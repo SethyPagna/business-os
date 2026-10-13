@@ -2,7 +2,7 @@ import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { buildInClause, inlineIntegerIds, selectInChunks } from '../lib/sqlBinding'
 import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
-import { admitRequestBody, SMALL_BODY_BYTES, PORTAL_SCREENSHOT_BODY_BYTES } from '../lib/requestBodyGuard'
+import { admitRequestBody, SMALL_BODY_BYTES, PORTAL_SCREENSHOT_BODY_BYTES, requireJsonSameOriginCredentialPost } from '../lib/requestBodyGuard'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission } from '../lib/permissions'
 import { audit } from '../lib/audit'
@@ -525,10 +525,11 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     language: languageSetting === AUTOMATIC_PORTAL_LANGUAGE ? 'en' : languageSetting,
     translations: normalizePortalTranslations(settings.customer_portal_translations),
     aiEnabled: normalizeBoolean(settings.customer_portal_ai_enabled, true),
-    // G38 P0 owner answer (5 Oct): new phone + password sign-ups stay open
-    // until Telegram verification ships (Phase 3); this switch lets the owner
-    // pause them without a deploy. Existing accounts always sign in.
-    signupEnabled: normalizeBoolean(settings.customer_portal_signup_enabled, true),
+    // G38 owner ruling (6 Oct, superseding the 5 Oct answer): phone + password
+    // sign-ups are OFF until the owner turns them on. An unset setting
+    // therefore means paused; a saved value keeps its meaning, so only an
+    // explicit true opens sign-up. Existing accounts always sign in.
+    signupEnabled: normalizeBoolean(settings.customer_portal_signup_enabled, false),
     aiTitle: settings.customer_portal_ai_title || 'Beauty Assistant',
     aiIntro: capPortalText(settings.customer_portal_ai_intro, MAX_PORTAL_AI_INTRO_LENGTH),
     aiDisclaimer: settings.customer_portal_ai_disclaimer
@@ -1769,6 +1770,20 @@ async function loadAccountProfile(env: Env, accountId: number): Promise<{ member
     .get<{ membership_id: string; name: string; email: string | null }>([accountId])
   return row ? { membershipId: row.membership_id, name: row.name, email: row.email ?? null } : null
 }
+
+// G38 E5 (login CSRF): every storefront write that rides the bos_portal
+// cookie or plants one -- sign-up, sign-in, sign-out, the saved cart and
+// wishlist, and a screenshot submission -- must be a same-origin JSON
+// request, exactly as staff /api/auth/login is (lib/requestBodyGuard
+// credentialPostRefusal). The global originGuard lets a write through when it
+// carries neither Origin nor Sec-Fetch-Site, and these handlers parse a
+// text/plain body as JSON, so without this a cross-site form could sign a
+// victim's browser into an attacker's account. Registered before every
+// handler below so Hono runs it first; GETs (/auth/me, the saved buckets)
+// pass untouched. /ai/chat reads no cookie and stays open.
+app.use('/auth/*', requireJsonSameOriginCredentialPost)
+app.use('/account/*', requireJsonSameOriginCredentialPost)
+app.use('/submissions', requireJsonSameOriginCredentialPost)
 
 app.post('/auth/signup', async (c) => {
   const ip = getClientNetworkKey(c.req.raw)
