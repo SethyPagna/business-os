@@ -332,17 +332,19 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdm
     ELSE 0
   END`
   const [
-    { totals, periodSeries: periodData },
+    { totals, periodSeries: periodData, byPayment, byBranch },
     prevTotals,
     periodReturns,
     periodSupplierReturns,
-    byPayment,
-    byBranch,
     topProducts,
     topProductsQty,
     topCustomers,
     hourlyDist,
   ] = await Promise.all([
+    // The payment-method and branch cards are two more views of that one snapshot
+    // (kernel buckets, 4 places) -- not their own SQL, which left every sale's
+    // rounding adjustment out and disagreed with the headline and with Reports.
+    //
     // P11-14: totals and periodData are the SAME window read twice through
     // independent full snapshot fetches before this change -- readSalesReportSnapshot
     // keyset-pages sales/sale_items/returns/return_items TWICE each as a
@@ -375,27 +377,6 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdm
         AND COALESCE(r.return_scope, 'customer') = 'supplier'
         AND COALESCE(r.status, 'completed') <> 'cancelled'${branchClause('r')}
     `).get(analyticsParams),
-    db.prepare(`
-      SELECT COALESCE(NULLIF(TRIM(s.payment_method), ''), 'Unknown') AS method,
-             COALESCE(NULLIF(TRIM(s.payment_method), ''), 'Unknown') AS payment_method,
-             COUNT(*) AS count,
-             COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS revenue_usd
-      FROM sales s
-      ${CUSTOMER_REFUND_JOIN}s.id
-      WHERE ${activeSalesClause('s')}
-      GROUP BY COALESCE(NULLIF(TRIM(s.payment_method), ''), 'Unknown')
-      ORDER BY revenue_usd DESC
-    `).all(analyticsParams),
-    db.prepare(`
-      SELECT s.branch_id, COALESCE(s.branch_name, 'Unassigned') AS branch_name,
-             COUNT(*) AS tx_count, COUNT(*) AS count,
-             COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS revenue_usd
-      FROM sales s
-      ${CUSTOMER_REFUND_JOIN}s.id
-      WHERE ${activeSalesClause('s')}
-      GROUP BY s.branch_id, COALESCE(s.branch_name, 'Unassigned')
-      ORDER BY revenue_usd DESC
-    `).all(analyticsParams),
     // Grouped by product_id (COALESCE(si.product_id, 0), falling back to a
     // normalized name key only for the NULL-id/no-link legacy rows) -- NOT
     // by (product_id, product_name). A product merge (migration 0165+) keeps

@@ -53,8 +53,8 @@ import {
   type SaleSettlementSnapshot,
 } from '../lib/saleSettlementAction'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from '../lib/saleRecordEvents'
-import { CUSTOMER_REFUND_JOIN, getCustomerSalesTotals, getDeliveryContactTotals, getSalesDayReport, getSalesPeriodSeries, getSalesTotals, netRefundExpr, netSaleExpr, recognizedExpr, saleStatusExpr, whereActiveSales } from '../lib/salesAnalytics'
-import { readSalesReportSnapshot, salesListFilterReportScope, salesTotalsFromSnapshot, paymentMethodBreakdownFromSnapshot, removalLossesFor, withRemovalLosses } from '../lib/salesAnalytics'
+import { getCustomerSalesTotals, getDeliveryContactTotals, getSalesDayReport, getSalesPeriodSeries, saleStatusExpr, whereActiveSales } from '../lib/salesAnalytics'
+import { exportProductSplitFromSnapshot, exportStatusSplitFromSnapshot, readSalesReportSnapshot, salesListFilterReportScope, salesTotalsFromSnapshot, paymentMethodBreakdownFromSnapshot, removalLossesFor, withRemovalLosses } from '../lib/salesAnalytics'
 import { ReportExactDecimal, ReportMoneyPrecisionError, REPORT_MONEY_MAX_ROWS, REPORT_MONEY_PAGE_SIZE } from '../lib/reportMoneyPrecision'
 import { allocateAcrossLots, decrementBatchStockStrictStatement, readFifoLotAvailabilityForCart, type FifoLotTake } from '../lib/productBatches'
 // S4-24b: adding lines to an EXISTING sale. The rules (which statuses accept
@@ -6631,7 +6631,11 @@ app.get('/export', async (c) => {
   `).get<{ total: number; completed: number }>(snapshotParams)
   const totalMatching = Number(totalMatchingRow?.total) || 0
 
-  const salesTotals = await getSalesTotals(c.env, {
+  // ONE verified snapshot of the frozen cohort backs the headline and both splits.
+  // The headline is the kernel's revenue in cents; by_status and by_product are
+  // slices of that same revenue at 4 places (salesAnalytics.ts), so they add up to
+  // it exactly instead of being reconciled to the cent after the fact.
+  const exportSnapshot = await readSalesReportSnapshot(c.env, {
     startDate: query.startDate || null,
     endDate: query.endDate || null,
     startTime: timeRange?.startTime || null,
@@ -6639,119 +6643,9 @@ app.get('/export', async (c) => {
     branchId: query.branchId || null,
     maxSaleId: snapshotMaxId,
   })
-
-  // Full-snapshot product allocation. Sale-level discounts and customer
-  // refunds belong to the receipt, so joining that receipt to several item
-  // rows and summing either the header or the raw lines would duplicate or
-  // omit money. Aggregate each product's lines first, then allocate the ONE
-  // canonical per-sale revenue value by its share of that sale's recorded
-  // line value. `sale_line_totals` is the allocation denominator rather than
-  // the header subtotal: healthy receipts have the same value in both places,
-  // while a damaged historical receipt can still be partitioned without the
-  // product rows inventing or losing part of the canonical header value.
-  type ProductBreakdownRow = {
-    product_id: number | null; product_name: string | null
-    qty_sold: number; revenue_usd: number
-  }
-  const productRows = await db.prepare(`
-    WITH sale_product_lines AS (
-      SELECT si.sale_id, si.product_id, si.product_name,
-             COALESCE(SUM(si.quantity), 0) AS qty_sold,
-             COALESCE(SUM(si.total_usd), 0) AS line_value_usd
-      FROM sale_items si
-      JOIN sales s ON s.id = si.sale_id
-      WHERE ${snapshotWhere.join(' AND ')}
-        AND ${recognizedExpr('s.')}
-      GROUP BY si.sale_id, si.product_id, si.product_name
-    ), sale_line_totals AS (
-      SELECT sale_id, COALESCE(SUM(line_value_usd), 0) AS line_value_usd
-      FROM sale_product_lines
-      GROUP BY sale_id
-    -- Grouped by product_id (COALESCE(pl.product_id, 0), falling back to a
-    -- normalized name key only for NULL-id/no-link legacy lines) -- NOT by
-    -- (product_id, product_name). sale_product_lines groups within one sale,
-    -- where a product's name snapshot is stable, but a product merge
-    -- (migration 0165+) keeps one keeper id while different sales still
-    -- carry different pre-merge product_name snapshots; grouping across
-    -- sales by the pair split one merged product's export row back into N.
-    -- The display name is read live from products (COALESCE(MAX(p.name),
-    -- MAX(pl.product_name))) so a renamed/merged product exports its
-    -- current name; the snapshot is only a fallback for a deleted
-    -- product_id. Same id-only grouping shape as this file's dashboard
-    -- sibling (routes/compat.ts's topProducts/topProductsQty) and
-    -- lib/salesAnalytics.ts's top-products kernel.
-    ), product_totals AS (
-      SELECT pl.product_id, COALESCE(MAX(p.name), MAX(pl.product_name)) AS product_name,
-           COALESCE(SUM(pl.qty_sold), 0) AS qty_sold,
-           COALESCE(SUM(
-             CASE WHEN lt.line_value_usd <> 0
-               THEN pl.line_value_usd / lt.line_value_usd
-                 * (${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')})
-               ELSE 0
-             END
-           ), 0) AS revenue_usd
-      FROM sales s
-      JOIN sale_product_lines pl ON pl.sale_id = s.id
-      JOIN sale_line_totals lt ON lt.sale_id = s.id
-      LEFT JOIN products p ON p.id = pl.product_id
-      ${CUSTOMER_REFUND_JOIN}s.id
-      WHERE ${snapshotWhere.join(' AND ')}
-        AND ${recognizedExpr('s.')}
-      GROUP BY COALESCE(pl.product_id, 0), CASE WHEN pl.product_id IS NULL THEN lower(trim(COALESCE(pl.product_name, ''))) ELSE '' END
-    ), unallocated_sales AS (
-    -- A recognized legacy receipt can have no usable line-value denominator.
-    -- Its header revenue remains real and visible in the canonical summary,
-    -- so preserve it explicitly instead of shrinking the product breakdown.
-    SELECT NULL AS product_id, 'Unallocated sales' AS product_name,
-           0 AS qty_sold,
-           COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS revenue_usd
-    FROM sales s
-    LEFT JOIN sale_line_totals lt ON lt.sale_id = s.id
-    ${CUSTOMER_REFUND_JOIN}s.id
-    WHERE ${snapshotWhere.join(' AND ')}
-      AND ${recognizedExpr('s.')}
-      AND COALESCE(lt.line_value_usd, 0) = 0
-    HAVING COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) <> 0
-    ), ranked_products AS (
-      SELECT product_id, product_name, qty_sold, revenue_usd,
-             ROW_NUMBER() OVER (
-               ORDER BY revenue_usd DESC, qty_sold DESC,
-                        COALESCE(product_name, ''), COALESCE(product_id, 0)
-             ) AS rank
-      FROM product_totals
-    ), product_limit AS (
-      -- Keep the response at 100 rows. Reserve one row for Unallocated when
-      -- it exists, then one for the overflow aggregate when it is needed.
-      SELECT CASE WHEN EXISTS (SELECT 1 FROM unallocated_sales) THEN 98 ELSE 99 END AS named_limit
-    )
-    SELECT rp.product_id, rp.product_name, rp.qty_sold, rp.revenue_usd
-    FROM ranked_products rp
-    CROSS JOIN product_limit lim
-    WHERE rp.rank <= lim.named_limit
-    UNION ALL
-    SELECT NULL AS product_id, 'Other products' AS product_name,
-           COALESCE(SUM(rp.qty_sold), 0) AS qty_sold,
-           COALESCE(SUM(rp.revenue_usd), 0) AS revenue_usd
-    FROM ranked_products rp
-    CROSS JOIN product_limit lim
-    WHERE rp.rank > lim.named_limit
-    HAVING COUNT(*) > 0
-    UNION ALL
-    SELECT product_id, product_name, qty_sold, revenue_usd
-    FROM unallocated_sales
-    ORDER BY revenue_usd DESC, qty_sold DESC
-  `).all<ProductBreakdownRow>(snapshotParams)
-
-  const byStatusRows = await db.prepare(`
-    SELECT ${saleStatusExpr('s.')} AS status, COUNT(*) AS count,
-           COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')}
-             THEN ${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}
-             ELSE 0 END), 0) AS revenue
-    FROM sales s
-    ${CUSTOMER_REFUND_JOIN}s.id
-    WHERE ${snapshotWhere.join(' AND ')}
-    GROUP BY ${saleStatusExpr('s.')}
-  `).all<{ status: string; count: number; revenue: number }>(snapshotParams)
+  const salesTotals = salesTotalsFromSnapshot(exportSnapshot)
+  const byStatus = exportStatusSplitFromSnapshot(exportSnapshot)
+  const byProduct = await exportProductSplitFromSnapshot(c.env, exportSnapshot)
 
   // Canonical SalesTotals.revenue_usd is already NET of customer refunds.
   // Export's accounting view displays the pre-refund net-sales line, refunds,
@@ -6788,37 +6682,6 @@ app.get('/export', async (c) => {
     gross_profit_usd: goodsProfitUsd,
     gross_margin_pct: netRevenueUsd > 0 ? round2((goodsProfitUsd / netRevenueUsd) * 100) : 0,
     profit_excludes_delivery: true }
-
-  // SQL allocates at full precision. The JSON contract is cents, so rounding
-  // every bucket independently can make the displayed buckets miss the
-  // displayed headline by a cent. Largest-remainder allocation changes no
-  // underlying value: it only decides which buckets receive the residual
-  // cents already present in the rounded canonical total.
-  const reconcileRevenueCents = <T extends Record<string, unknown>>(
-    rows: T[], key: keyof T, targetUsd: number,
-  ): T[] => {
-    if (!rows.length) return rows
-    const parts = rows.map((row, index) => {
-      const rawCents = Number(row[key] || 0) * 100
-      const cents = Math.floor(rawCents)
-      return { row, index, cents, remainder: rawCents - cents }
-    })
-    const residual = Math.round(targetUsd * 100) - parts.reduce((sum, part) => sum + part.cents, 0)
-    const ranked = [...parts].sort((a, b) => residual >= 0
-      ? b.remainder - a.remainder || a.index - b.index
-      : a.remainder - b.remainder || a.index - b.index)
-    const step = residual >= 0 ? 1 : -1
-    for (let i = 0; i < Math.abs(residual); i += 1) ranked[i % ranked.length].cents += step
-    return parts.map((part) => ({ ...part.row, [key]: part.cents / 100 }))
-  }
-  const byStatus = reconcileRevenueCents(
-    byStatusRows.map((row) => ({ status: row.status, count: Number(row.count) || 0, revenue: Number(row.revenue) || 0 })),
-    'revenue', netRevenueUsd,
-  )
-  const byProduct = reconcileRevenueCents(
-    productRows.map((row) => ({ ...row, qty_sold: round2(Number(row.qty_sold) || 0), revenue_usd: Number(row.revenue_usd) || 0 })),
-    'revenue_usd', netRevenueUsd,
-  )
 
   return c.json({
     period, summary: summaryView,

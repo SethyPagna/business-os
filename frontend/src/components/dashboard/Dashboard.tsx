@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useLowStockConfig, useSync as useSyncHook } from '../../AppContext.tsx'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
+import { formatUsd4 } from '../../utils/reportMoney.ts'
 import { useMemo } from 'react'
 import { useRef } from 'react'
 import StatsStrip, { statsPresetRange, type StatCardDef, type StatsPresetKey } from '../shared/StatsStrip.tsx'
@@ -70,6 +71,7 @@ interface AppContextValue {
   t: TranslateFn
   fmtUSD: FormatMoneyFn
   fmtKHR: FormatMoneyFn
+  settings?: { currency_usd_symbol?: string } | null
   navigateTo: NavigateFn
   user?: AppUser | null
   hasPermission: (key: string) => boolean
@@ -784,7 +786,11 @@ function normalizeDashboardAnalyticsPayload(value: unknown): DashboardAnalytics 
 }
 
 export default function Dashboard() {
-  const { t, fmtUSD, fmtKHR, navigateTo, user, hasPermission } = useApp()
+  const { t, fmtUSD, fmtKHR, navigateTo, user, hasPermission, settings } = useApp()
+  // The payment-method and branch cards are split rows: 4 places so they add up to
+  // the window figure exactly (owner, 13 Oct 2026); the headline KPI cards keep cents.
+  const usdSymbol = String(settings?.currency_usd_symbol || '$')
+  const fmtSplitUsd = useCallback((value: unknown): string => formatUsd4(Number(value) || 0, usdSymbol), [usdSymbol])
   // Settings > Stock Alerts -- the number the low-stock card's rows were
   // judged by, shown in the drill panel and carried into the export.
   const lowStockConfig = useLowStockConfig()
@@ -1562,12 +1568,12 @@ export default function Dashboard() {
       id: `branch-${branch.branch_id || branch.branch_name || 'branch'}`,
       label: branch.branch_name || translateOr('branch', 'Branch'),
       details: [
-        { label: translateOr('revenue', 'Revenue'), value: fmtUSD(branch.revenue_usd || 0) },
+        { label: translateOr('revenue', 'Revenue'), value: fmtSplitUsd(branch.revenue_usd || 0) },
         { label: translateOr('transactions', 'Transactions'), value: Number(branch.count ?? branch.tx_count ?? 0) },
         { label: translateOr('share_of_total', 'Share of total', 'ចំណែក'), value: `${share.toFixed(1)}%` },
       ],
     })
-  }, [analytics?.byBranch, fmtUSD, translateOr])
+  }, [analytics?.byBranch, fmtSplitUsd, translateOr])
 
   const openPaymentDetail = useCallback((payment: DashboardPaymentRow) => {
     const payments = analytics?.byPayment || []
@@ -1577,12 +1583,12 @@ export default function Dashboard() {
       id: `payment-${payment.payment_method || payment.method || 'payment'}`,
       label: payment.payment_method || payment.method || translateOr('payment_method', 'Payment Method', 'វិធីទូទាត់'),
       details: [
-        { label: translateOr('revenue', 'Revenue'), value: fmtUSD(payment.revenue_usd || 0) },
+        { label: translateOr('revenue', 'Revenue'), value: fmtSplitUsd(payment.revenue_usd || 0) },
         { label: translateOr('transactions', 'Transactions'), value: Number(payment.count || 0) },
         { label: translateOr('share_of_total', 'Share of total', 'ចំណែក'), value: `${share.toFixed(1)}%` },
       ],
     })
-  }, [analytics?.byPayment, fmtUSD, translateOr])
+  }, [analytics?.byPayment, fmtSplitUsd, translateOr])
 
   const openExpiryDetail = useCallback((item: DashboardProduct) => {
     const days = Number(item.days_until_expiry ?? NaN)
@@ -2455,7 +2461,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
             analyticsError={analyticsError}
             t={t}
             translateOr={translateOr}
-            fmtUSD={fmtUSD}
+            fmtUSD={fmtSplitUsd}
             onOpen={openBranchDetail}
             onViewMore={() => setBranchPerformanceListOpen(true)}
           />
@@ -2524,7 +2530,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
           analyticsUnavailable={analyticsUnavailable}
           analyticsError={analyticsError}
           translateOr={translateOr}
-          fmtUSD={fmtUSD}
+          fmtUSD={fmtSplitUsd}
           onOpen={openPaymentDetail}
         />
       </div>
@@ -2632,7 +2638,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
             onClick={() => { setBranchPerformanceListOpen(false); openBranchDetail(branch) }}
           >
             <div className="min-w-0 text-sm text-gray-700 dark:text-gray-300">{branch.branch_name}</div>
-            <div className="shrink-0 text-right"><div className="text-sm font-semibold text-gray-900 dark:text-white">{fmtUSD(branch.revenue_usd || 0)}</div><div className="text-xs text-gray-400">{branch.count} {t('sale')}</div></div>
+            <div className="shrink-0 text-right"><div className="text-sm font-semibold text-gray-900 dark:text-white">{fmtSplitUsd(branch.revenue_usd || 0)}</div><div className="text-xs text-gray-400">{branch.count} {t('sale')}</div></div>
           </button>
         ))}
       </DashboardListModal>

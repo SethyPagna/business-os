@@ -9,6 +9,7 @@ import StatusBadge from './StatusBadge'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { fmtDateOnly } from '../../utils/formatters.ts'
 import { SALES_IMPORT_COLUMNS } from '../../utils/salesImportContract.ts'
+import { formatUsd4 } from '../../utils/reportMoney.ts'
 import { useApp, type AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import { primaryToolbarButtonClassName, toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 
@@ -97,7 +98,10 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
   const [range, setRange] = useState<DateTimeRange>(todayDateTimeRange)
   const [loading, setLoading] = useState(false)
   const [previewResult, setPreview] = useState<{ owner: string; data: SalesExportData } | null>(null)
-  const { user, getPermissions, notify } = useApp() as AppContextCoreValue
+  const { user, getPermissions, notify, settings } = useApp() as AppContextCoreValue
+  // The status and product rows are splits of the headline: 4 places so they add up to it
+  // exactly (owner, 13 Oct 2026); the summary figures above keep cents.
+  const fmtSplitUsd = (value: number): string => formatUsd4(Number(value) || 0, String(settings?.currency_usd_symbol || '$'))
   const owner = JSON.stringify([user, getPermissions()])
   const ownerRef = useRef(owner)
   ownerRef.current = owner
@@ -312,7 +316,7 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
                   {preview.by_status.map((row) => (
                     <div key={String(row.status || 'status')} className="flex items-center justify-between border-b border-gray-100 py-1 text-sm dark:border-gray-700">
                       <StatusBadge status={row.status} t={t} />
-                      <span className="text-gray-500">{tr('export_status_sales_count', '{count} sales').replace('{count}', String(row.count ?? 0))} · {fmtUSD(row.revenue || 0)}</span>
+                      <span className="text-gray-500">{tr('export_status_sales_count', '{count} sales').replace('{count}', String(row.count ?? 0))} · {fmtSplitUsd(row.revenue || 0)}</span>
                     </div>
                   ))}
                 </div>
@@ -326,7 +330,7 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
                   {preview.by_product.slice(0, 8).map((row, index) => (
                     <div key={`${row.product_id || row.product_name}-${index}`} className="flex items-center justify-between border-b border-gray-100 py-1 text-sm dark:border-gray-700">
                       <span className="mr-2 min-w-0 flex-1 detail-scroll-text text-gray-700 dark:text-gray-300">{row.product_name}</span>
-                      <span className="shrink-0 text-gray-500">{tr('export_product_qty_sold', '{count} sold').replace('{count}', String(row.qty_sold ?? 0))} · {fmtUSD(row.revenue_usd || 0)}</span>
+                      <span className="shrink-0 text-gray-500">{tr('export_product_qty_sold', '{count} sold').replace('{count}', String(row.qty_sold ?? 0))} · {fmtSplitUsd(row.revenue_usd || 0)}</span>
                     </div>
                   ))}
                 </div>

@@ -1974,7 +1974,7 @@ export async function getSalesTotalsAndPeriodSeries(
   env: Env,
   f: SalesFilters,
   granularity: 'day' | 'week' | 'month',
-): Promise<{ totals: SalesTotals; periodSeries: SalesPeriodRow[] }> {
+): Promise<{ totals: SalesTotals; periodSeries: SalesPeriodRow[]; byPayment: DashboardPaymentRow[]; byBranch: DashboardBranchRow[] }> {
   const [snapshot, loss] = await Promise.all([
     readSalesReportSnapshot(env, f),
     removalLossesFor(env, f),
@@ -1982,7 +1982,133 @@ export async function getSalesTotalsAndPeriodSeries(
   return {
     totals: withRemovalLosses(salesTotalsFromSnapshot(snapshot), loss),
     periodSeries: salesPeriodRowsFromSnapshot(snapshot, granularity),
+    ...dashboardSplitsFromSnapshot(snapshot),
   }
+}
+
+// The Dashboard's payment-method and branch cards. They used to be their own SQL
+// (net sale minus refund per method / branch), which left every sale's rounding
+// adjustment out and so disagreed with the Reports buckets and the Dashboard's
+// own headline by a few cents. They now come from the SAME snapshot and the SAME
+// grouped buckets as Reports, at 4 places (owner, 13 Oct 2026: split rows carry
+// 4 decimals; a single headline keeps cents).
+export interface DashboardPaymentRow { method: string; payment_method: string; count: number; revenue_usd: number }
+export interface DashboardBranchRow { branch_id: number | null; branch_name: string; tx_count: number; count: number; revenue_usd: number }
+
+function revenueFirst(a: SalesGroupedRow, b: SalesGroupedRow): number {
+  return b.revenue_usd - a.revenue_usd || b.tx_count - a.tx_count || a.label.localeCompare(b.label)
+}
+
+export function dashboardSplitsFromSnapshot(snapshot: SalesReportSnapshot): { byPayment: DashboardPaymentRow[]; byBranch: DashboardBranchRow[] } {
+  // A group that only ever held voided sales has no revenue and no count to show.
+  const live = (groupBy: SalesGroupKey) => groupedRowsFromSnapshot(snapshot, groupBy).filter((row) => row.tx_count > 0).sort(revenueFirst)
+  return {
+    byPayment: live('payment_method').map((row) => ({
+      method: row.label || 'Unknown', payment_method: row.label || 'Unknown', count: row.tx_count, revenue_usd: row.revenue_usd,
+    })),
+    byBranch: live('branch').map((row) => ({
+      branch_id: row.entity_id, branch_name: row.label || 'Unassigned', tx_count: row.tx_count, count: row.tx_count, revenue_usd: row.revenue_usd,
+    })),
+  }
+}
+
+// The Sales export preview's two splits. Same rule as the Dashboard cards above:
+// they used to be SQL of their own (net sale minus refund, rounding adjustments
+// left out) reconciled to the cent by largest remainder, so a row could be a cent
+// off the money it stood for and the whole split a few cents off the kernel
+// revenue. They now come from the export's own verified snapshot, per sale at the
+// kernel's revenue, at 4 places, so the rows add up to the window revenue exactly;
+// only the single headline stays in cents.
+export interface ExportStatusRow { status: string; count: number; revenue: number }
+export interface ExportProductRow { product_id: number | null; product_name: string; qty_sold: number; revenue_usd: number }
+
+export function exportStatusSplitFromSnapshot(snapshot: SalesReportSnapshot): ExportStatusRow[] {
+  return [...aggregateReportSnapshot(snapshot, (sale) => reportStatus(sale)).entries()].map(([status, bucket]) => ({
+    status,
+    // Voided sales keep their count and a zero revenue.
+    count: bucket.tx + bucket.cancelledTx,
+    revenue: exactReportTotals(bucket, snapshot, BUCKET_MONEY_PLACES).revenue_usd,
+  })).sort((a, b) => b.revenue - a.revenue || a.status.localeCompare(b.status))
+}
+
+const MONEY_UNITS = 10 ** BUCKET_MONEY_PLACES
+const EXPORT_PRODUCT_ROWS = 99
+const toUnits = (value: ReportExactDecimal): number => Math.round(value.toNumber(BUCKET_MONEY_PLACES) * MONEY_UNITS)
+
+/** `total` units split across `weights` with no unit lost or invented (largest remainder, ties to the earlier line); null when no weight can carry it. */
+function allocateUnits(total: number, weights: number[]): number[] | null {
+  const sum = weights.reduce((acc, weight) => acc + weight, 0)
+  if (!(sum > 0)) return null
+  const abs = Math.abs(total)
+  const raw = weights.map((weight) => (abs * weight) / sum)
+  const parts = raw.map((value) => Math.floor(value))
+  const left = abs - parts.reduce((acc, part) => acc + part, 0)
+  const order = raw.map((value, index) => ({ index, rest: value - Math.floor(value) })).sort((a, b) => b.rest - a.rest || a.index - b.index)
+  for (let i = 0; i < left; i += 1) parts[order[i % order.length].index] += 1
+  return parts.map((part) => (total < 0 ? -part : part))
+}
+
+/**
+ * Revenue and quantity per product over the recognized sales of the snapshot.
+ * Each sale's revenue (net + rounding adjustment - refund, the kernel's one
+ * definition) is split across that sale's product lines by their share of the
+ * line value. A sale with no line value cannot be split and is kept whole as
+ * "Unallocated sales"; its quantities still count. The preview stays bounded:
+ * the top products, one "Other products" row for the overflow, and the
+ * unallocated row when there is one.
+ */
+export async function exportProductSplitFromSnapshot(env: Env, snapshot: SalesReportSnapshot): Promise<ExportProductRow[]> {
+  const itemsBySale = new Map<number, ReportScalarRow[]>()
+  for (const item of snapshot.items) { const id = Number(item.sale_id); itemsBySale.set(id, [...(itemsBySale.get(id) || []), item]) }
+  type Group = { id: number | null; name: string; qty: number; units: number }
+  const groups = new Map<string, Group>()
+  let unallocated = 0
+  for (const fact of reportSaleFacts(snapshot)) {
+    if (!fact.recognized) continue
+    const lines = new Map<string, { key: string; id: number | null; name: string; weight: number; qty: number }>()
+    for (const item of itemsBySale.get(Number(fact.sale.id)) || []) {
+      const id = item.product_id == null ? null : Number(item.product_id)
+      const name = String(item.product_name || '')
+      const key = id == null ? `name:${name.trim().toLowerCase()}` : `id:${id}`
+      const line = lines.get(key) || { key, id, name, weight: 0, qty: 0 }
+      line.weight += Math.max(0, toUnits(reportMoney(item, 'total_usd', fact.version)))
+      line.qty += Number(item.quantity) || 0
+      line.name = name || line.name
+      lines.set(key, line)
+    }
+    const list = [...lines.values()]
+    const units = toUnits(fact.net.add(fact.adjustment).subtract(fact.refund))
+    const shares = allocateUnits(units, list.map((line) => line.weight))
+    if (!shares) unallocated += units
+    list.forEach((line, index) => {
+      const group = groups.get(line.key) || { id: line.id, name: line.name, qty: 0, units: 0 }
+      group.qty += line.qty
+      group.units += shares ? shares[index] : 0
+      group.name = line.name || group.name
+      groups.set(line.key, group)
+    })
+  }
+  const ranked = [...groups.values()].sort((a, b) => b.units - a.units || b.qty - a.qty || a.name.localeCompare(b.name) || (a.id ?? 0) - (b.id ?? 0))
+  const named = ranked.slice(0, unallocated !== 0 ? EXPORT_PRODUCT_ROWS - 1 : EXPORT_PRODUCT_ROWS)
+  const rest = ranked.slice(named.length)
+  // A renamed or merged product exports under its current name; the sale's own
+  // snapshot name is the fallback for a product that no longer exists.
+  const ids = named.map((group) => group.id).filter((id): id is number => id != null)
+  const live = new Map<number, string>()
+  if (ids.length) {
+    const rows = await getDb(env).prepare(`SELECT id, name FROM products WHERE id IN (${ids.map(() => '?').join(',')})`).all<{ id: number; name: string | null }>(ids)
+    for (const row of rows || []) if (row.name) live.set(Number(row.id), String(row.name))
+  }
+  const rows: ExportProductRow[] = named.map((group) => ({
+    product_id: group.id, product_name: (group.id != null && live.get(group.id)) || group.name,
+    qty_sold: round2(group.qty), revenue_usd: group.units / MONEY_UNITS,
+  }))
+  if (rest.length) {
+    rows.push({ product_id: null, product_name: 'Other products', qty_sold: round2(rest.reduce((acc, group) => acc + group.qty, 0)),
+      revenue_usd: rest.reduce((acc, group) => acc + group.units, 0) / MONEY_UNITS })
+  }
+  if (unallocated !== 0) rows.push({ product_id: null, product_name: 'Unallocated sales', qty_sold: 0, revenue_usd: unallocated / MONEY_UNITS })
+  return rows.sort((a, b) => b.revenue_usd - a.revenue_usd || b.qty_sold - a.qty_sold || a.product_name.localeCompare(b.product_name))
 }
 
 // ---- Phase X (Part 395): daily report + per-contact delivery totals -------
@@ -2828,6 +2954,21 @@ export interface SalesGroupedReport {
   totals: SalesTotals
 }
 
+/** One grouping of a verified snapshot, unsorted, at BUCKET_MONEY_PLACES. The
+ *  Reports views and the Dashboard's payment and branch cards all read their
+ *  buckets here, so a card can never disagree with the report it summarises. */
+function groupedRowsFromSnapshot(snapshot: SalesReportSnapshot, groupBy: SalesGroupKey): SalesGroupedRow[] {
+  const identity = (row: ReportScalarRow) => reportGroupIdentity(row, groupBy)
+  const metadata = new Map([...snapshot.sales, ...snapshot.voidSales].map((row) => [identity(row).key, identity(row)]))
+  return [...aggregateReportSnapshot(snapshot, (sale) => identity(sale).key).entries()].map(([key, bucket]) => {
+    const totals = exactReportTotals(bucket, snapshot, BUCKET_MONEY_PLACES)
+    const meta = metadata.get(key) || { key, label: '', entity_id: null }
+    const row = { key, label: meta.label, entity_id: meta.entity_id,
+      cost_missing_snapshot_lines: bucket.missingCostLines, ...totals } as SalesGroupedRow
+    return attachReportDiagnostic(row, reportMoneyDiagnostic(totals)!)
+  })
+}
+
 /** Grouped rows plus what a capped response needs to stay honest: how many
  *  groups exist and the window's own totals. An already-read snapshot (the
  *  Overview's) is reused rather than read a second time. */
@@ -2835,15 +2976,7 @@ export async function getSalesGroupedReport(
   env: Env, f: SalesFilters, groupBy: SalesGroupKey, limit = 500, read?: SalesReportSnapshot,
 ): Promise<SalesGroupedReport> {
   const snapshot = read ?? await readSalesReportSnapshot(env, f)
-  const identity = (row: ReportScalarRow) => reportGroupIdentity(row, groupBy)
-  const metadata = new Map([...snapshot.sales, ...snapshot.voidSales].map((row) => [identity(row).key, identity(row)]))
-  const rows = [...aggregateReportSnapshot(snapshot, (sale) => identity(sale).key).entries()].map(([key, bucket]) => {
-    const totals = exactReportTotals(bucket, snapshot, BUCKET_MONEY_PLACES)
-    const meta = metadata.get(key) || { key, label: '', entity_id: null }
-    const row = { key, label: meta.label, entity_id: meta.entity_id,
-      cost_missing_snapshot_lines: bucket.missingCostLines, ...totals } as SalesGroupedRow
-    return attachReportDiagnostic(row, reportMoneyDiagnostic(totals)!)
-  })
+  const rows = groupedRowsFromSnapshot(snapshot, groupBy)
   const level = salesGroupExprs('sales', groupBy)
   const joined = salesGroupExprs('s', groupBy)
   if (groupBy === 'customer') {

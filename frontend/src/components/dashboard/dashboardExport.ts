@@ -242,7 +242,7 @@ function buildDashboardPaymentRows(ctx: DashboardExportContext): Row[] {
   return (ctx.analytics?.byPayment || []).map((p) => ({
     Method: p.payment_method || '',
     Count: p.count || 0,
-    Revenue: priceCsv(p.revenue_usd),
+    Revenue: splitCsv(p.revenue_usd),
   }))
 }
 
@@ -250,7 +250,7 @@ function buildDashboardBranchRows(ctx: DashboardExportContext): Row[] {
   return (ctx.analytics?.byBranch || []).map((b) => ({
     Branch: b.branch_name || '',
     Tx: b.count || 0,
-    Revenue: priceCsv(b.revenue_usd),
+    Revenue: splitCsv(b.revenue_usd),
   }))
 }
 
