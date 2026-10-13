@@ -40,6 +40,7 @@ import {
   deleteFileAsset as deleteFileAssetRequest,
   getFiles as getFilesRequest,
   LIBRARY_IMAGE_COMPRESS_OPTIONS,
+  MAX_UPLOAD_MEGABYTES,
   renameFileAsset as renameFileAssetRequest,
   getFileUsage as getFileUsageRequest,
   rewireFileAsset as rewireFileAssetRequest,
@@ -1557,8 +1558,8 @@ export default function FilesPage() {
                     videos; the Worker refuses documents (lib/uploadSecurity.ts). */}
                 <input id="library-upload-file" name="library_upload_file" type="file" accept="image/*,video/mp4,video/quicktime,video/webm" className="hidden" onChange={handleUpload} disabled={uploading || deletingAssetId != null} />
               </label>
-              <p className="basis-full text-right text-xs text-slate-500 dark:text-slate-400">
-                {tr('library_upload_media_hint', 'Images (JPEG, PNG, WebP, GIF, AVIF) and videos (MP4, MOV, WebM) only.')}
+              <p className="basis-full text-right text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                {tr('library_upload_media_hint', 'Images (JPEG, PNG, WebP, GIF, AVIF) and videos (MP4, MOV, WebM) only. Up to {mb} MB each.').replace('{mb}', String(MAX_UPLOAD_MEGABYTES))}
               </p>
             </div>
           ) : (

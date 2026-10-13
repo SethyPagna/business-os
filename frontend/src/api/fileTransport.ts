@@ -126,7 +126,7 @@ const AVATAR_TYPE_REFUSALS: ReadonlySet<string> = new Set([
 // value (the test pins it).
 const AVATAR_UNSUPPORTED_TYPE_ENGLISH = 'Avatars must be JPEG, PNG, WebP, GIF or AVIF images. Choose another image.'
 
-const MAX_UPLOAD_MEGABYTES = 25
+export const MAX_UPLOAD_MEGABYTES = 25
 const MAX_UPLOAD_BYTES = MAX_UPLOAD_MEGABYTES * 1024 * 1024
 type UploadKind = 'video' | 'image' | 'other'
 const UPLOAD_TOO_LARGE_MESSAGES: Record<UploadKind, { key: string; english: string }> = {

@@ -238,6 +238,22 @@ await runCase('other upload failures keep their own message', async () => {
   assert.equal((await rejection(files.uploadFileAsset({ file: video }))).message, 'File upload failed: Uploaded file is empty')
 })
 
+await runCase('the Library upload hint states the limit the transport and the Worker enforce, in both languages', () => {
+  assert.equal(files.MAX_UPLOAD_MEGABYTES, workerLimitMegabytes, 'the hint reads the transport limit, which must equal the Worker limit')
+  const page = fs.readFileSync(path.join(FRONTEND, 'src', 'components', 'files', 'FilesPage.tsx'), 'utf8').replace(/\r\n/g, '\n')
+  const english = String(EN.library_upload_media_hint)
+  const khmer = String(KM.library_upload_media_hint)
+  for (const [language, hint] of [['en', english], ['km', khmer]]) {
+    assert.equal(hint.split('{mb}').length, 2, language + ': the hint needs exactly one {mb} slot')
+    assert.doesNotMatch(hint, /\b25\b/, language + ': the limit is hard-coded in the pack and will drift from the transport')
+    assert.match(hint.replace('{mb}', String(files.MAX_UPLOAD_MEGABYTES)), /\b25 MB/, language)
+  }
+  assert.match(khmer, /[ក-៿]/)
+  assert.match(page, /MAX_UPLOAD_MEGABYTES,\n  renameFileAsset as renameFileAssetRequest,/)
+  assert.ok(page.includes(`tr('library_upload_media_hint', '${english}').replace('{mb}', String(MAX_UPLOAD_MEGABYTES))`), 'FilesPage does not fill the {mb} slot from the transport limit, or its English fallback differs from en.json')
+  assert.match(page, /<p className="basis-full text-right text-xs leading-relaxed [^"]*">\n\s*\{tr\('library_upload_media_hint'/, 'the hint line box needs leading-relaxed so Khmer glyphs are not clipped')
+})
+
 await runCase('both packs carry every size message with the same {mb} slot, Khmer in km, and each code fallback equals en.json', () => {
   const source = fs.readFileSync(TRANSPORT_SOURCE, 'utf8')
   const seen = new Set<string>()
