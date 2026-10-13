@@ -61,6 +61,8 @@ import { broadcastHubStub } from './durable-objects/broadcastHub'
 import { originGuard } from './lib/originGuard'
 import { isBlockedOnStorefrontHost } from './lib/publicHostGate'
 import { requestMetricsMiddleware, runBackground } from './lib/requestMetrics'
+import { runWithRequestDefer } from './lib/requestDefer'
+import { installReviewAlerts } from './lib/reviewAlert'
 
 export type Env = {
   DB: D1Database
@@ -195,6 +197,18 @@ const app = new Hono<{ Bindings: Env }>()
 // C3v2 A0: per-request D1/cache metrics (lib/requestMetrics.ts). First, so it
 // wraps every /api/* middleware and handler below; adds no I/O to the request.
 app.use('/api/*', requestMetricsMiddleware)
+
+// Slice C (review-queue Telegram alerts): the request's own waitUntil, registered ONCE here so lib code with no Hono
+// context (lib/reviewGate.ts queueing a request) can defer a side effect past the response -- lib/requestDefer.ts. Where
+// the request has no ExecutionContext (a test calling app.request) there is no scope and the work is awaited instead.
+app.use('/api/*', async (c, next) => {
+  let waitUntil: ((work: Promise<unknown>) => void) | null = null
+  try { const ctx = c.executionCtx; waitUntil = (work) => ctx.waitUntil(work) } catch { /* no ExecutionContext */ }
+  if (!waitUntil) return next()
+  return runWithRequestDefer(waitUntil, () => next())
+})
+// The review queue reaches its Telegram alert through a global hook (lib/reviewAlert.ts says why); installed here.
+installReviewAlerts()
 
 // Global safety net: most routes in this Worker (compat.ts, auth.ts, etc.)
 // have no per-route try/catch. Without this, Hono's default behavior for

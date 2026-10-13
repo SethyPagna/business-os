@@ -6,6 +6,11 @@
 // file's only job is to connect the two for a write route without that
 // route needing to know pending_actions' schema itself.
 //
+// A queued request also announces itself (owner, 13 Oct 2026): ONE "Review requested" Telegram alert per row, sent
+// here -- the single place every Review-Required-gated write route queues through -- right after the insert, so a
+// request that was not queued (Full tier, a refusal, a failed insert) sends nothing. It reaches lib/reviewAlert.ts
+// through a global hook rather than an import, for the reason that file's header gives.
+//
 // Deliberately generic, same "no entity-specific knowledge" discipline
 // pendingActions.ts already holds itself to: this file doesn't know what
 // a fee/product/contact looks like, only that a section+action+entity
@@ -28,6 +33,10 @@ import { createPendingAction } from './pendingActions'
 import { getPermissionTier, type PermissionUser } from './permissions'
 import type { Env } from '../index'
 import { actorSnapshot } from './actorSnapshot'
+import type { ReviewAlertHook } from './reviewAlert'
+
+const reviewAlertHook = (): ReviewAlertHook | undefined =>
+  (globalThis as unknown as Record<symbol, ReviewAlertHook | undefined>)[Symbol.for('business-os.review-alert.v1')]
 
 export interface MaybeQueueForReviewInput {
   actionType: string
@@ -55,7 +64,8 @@ export async function maybeQueueForReview(
 ): Promise<number | null> {
   const tier = getPermissionTier(user, section)
   if (tier !== 'review') return null
-  return createPendingAction(env, {
+  const requestedByName = actorSnapshot(user)
+  const pendingId = await createPendingAction(env, {
     section,
     actionType: input.actionType,
     entityType: input.entityType,
@@ -64,6 +74,18 @@ export async function maybeQueueForReview(
     expectedEntityStateJson: input.expectedEntityStateJson,
     summary: input.summary ?? null,
     requestedBy: user?.id ?? null,
-    requestedByName: actorSnapshot(user),
+    requestedByName,
   })
+  // The row exists: announce it. The alert reads nothing from the request's summary (it holds amounts) -- only the
+  // fixed phrase for this kind of request, the record's name and the account USERNAME.
+  try {
+    await reviewAlertHook()?.announce(env, {
+      kind: 'created',
+      row: {
+        section, action_type: input.actionType, entity_type: input.entityType, entity_id: input.entityId ?? null,
+        payload_json: JSON.stringify(input.payload ?? {}), requested_by_name: requestedByName,
+      },
+    })
+  } catch { /* an alert never fails the write that queued it */ }
+  return pendingId
 }

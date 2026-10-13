@@ -10,6 +10,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import {
   listPendingActions,
   getPendingAction,
+  type PendingActionRow,
   markPendingActionApproved,
   markPendingActionRejected,
   resubmitPendingAction,
@@ -17,6 +18,7 @@ import {
   type PendingActionStatus,
 } from '../lib/pendingActions'
 import { applyApprovedPendingAction, FeeReviewStaleError, NoReviewApplierError, productRemovePendingPointer, ReviewDecisionConflictError, ReviewRequesterPermissionError, recoverApprovedBranchAction } from '../lib/reviewApply'
+import type { ReviewAlertEvent, ReviewAlertHook } from '../lib/reviewAlert'
 import { ProductImageAssetError } from '../lib/productImagePermission'
 import { ProductRemoveError } from '../lib/productDelete'
 import type { Env } from '../index'
@@ -63,6 +65,21 @@ const REVIEW_SELF_APPROVAL_MESSAGE = 'You cannot approve your own request. Anoth
 const REVIEW_SECTION_FULL_CODE = 'review_section_full_required'
 const reviewSectionFullMessage = (section: string): string =>
   `Approving this request needs Full access to ${section}. Ask a reviewer who has it.`
+
+// The Telegram alert per review event (owner, 13 Oct 2026; lib/reviewAlert.ts). It is reached through a global hook, not
+// an import: this route is loaded in isolation by many existing tests, and a hook that is absent is a no-op. Every call
+// sits AFTER the write it announces committed -- never on a replayed answer, a refusal or a 409 -- and an alert never
+// changes what the route answers.
+const reviewAlertHook = (): ReviewAlertHook | undefined =>
+  (globalThis as unknown as Record<symbol, ReviewAlertHook | undefined>)[Symbol.for('business-os.review-alert.v1')]
+async function announceReview(env: Env, event: ReviewAlertEvent): Promise<void> {
+  try { await reviewAlertHook()?.announce(env, event) } catch { /* an alert never fails the decision it announces */ }
+}
+// The one record name an approval is about to remove (an expense delete) has to be read BEFORE the change; every other
+// request returns null with no read (its name is read after the commit, off the response path).
+async function reviewNameBeforeChange(env: Env, row: PendingActionRow): Promise<string | null> {
+  try { return (await reviewAlertHook()?.nameBeforeChange(env, row)) ?? null } catch { return null }
+}
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -176,6 +193,9 @@ app.post('/:id/resubmit', async (c) => {
   // Same channel the approve/reject handlers broadcast on, so an admin with
   // the Review page open sees it return to their queue without a refresh.
   c.executionCtx.waitUntil(broadcast(c.env, 'pendingActions', { id, status: 'open' }))
+  // resubmitPendingAction changed the row (its UPDATE is guarded on the requester and on 'rejected'), so this request
+  // alone put it back in front of the reviewers: one "Review resubmitted" alert. A 404 above sent nothing.
+  if (row) await announceReview(c.env, { kind: 'resubmitted', row })
   return c.json({ success: true, data: row })
 })
 
@@ -236,6 +256,7 @@ app.post('/:id/approve', async (c) => {
     return c.json({ error: 'Full product removal permission is required to approve this request.' }, 403)
   }
   let pendingActionMarkedAtomically = false
+  let recordNameBefore: string | null = null
   try {
     // Finding H: the reviewer's CURRENT grant for this exact action and for each of its effects (price,
     // cost, image), checked before any receipt replay or write (lib/reviewApprovalPermission.ts).
@@ -258,6 +279,7 @@ app.post('/:id/approve', async (c) => {
       return c.json({ error: 'Already reviewed' }, 409)
     }
 
+    recordNameBefore = await reviewNameBeforeChange(c.env, row)
     const outcome = await applyApprovedPendingAction(c.env, row, { id: user.id, name: actorSnapshot(user), redirectTarget: () => branchRedirectTarget(c) }, user,
       (promise) => c.executionCtx.waitUntil(promise))
     if (outcome.replayedBranchAction) return c.json({ success: true, data: outcome.replayedBranchAction, replayed: true })
@@ -309,6 +331,10 @@ app.post('/:id/approve', async (c) => {
   const updatedRow = await getPendingAction(c.env, id)
   await audit(c.env, user.id, actorSnapshot(user), 'approve', 'pending_action', id, updatedRow)
   c.executionCtx.waitUntil(broadcast(c.env, 'pendingActions', { id, status: 'approved' }))
+  // Reached only by the request whose approval committed: the atomic appliers raise ReviewDecisionConflictError for the
+  // loser, and markPendingActionApproved answers false for it -- both returned a 409 above. Replayed answers returned
+  // earlier still. So two racing approvals announce once.
+  await announceReview(c.env, { kind: 'approved', row: updatedRow ?? row, by: actorSnapshot(user), recordName: recordNameBefore })
   return c.json({ success: true, data: updatedRow })
 })
 
@@ -341,6 +367,9 @@ app.post('/:id/reject', async (c) => {
   const row = await getPendingAction(c.env, id)
   await audit(c.env, user.id, actorSnapshot(user), 'reject', 'pending_action', id, row)
   c.executionCtx.waitUntil(broadcast(c.env, 'pendingActions', { id, status: 'rejected' }))
+  // markPendingActionRejected only changes a row that is still 'open', so two racing rejections (or a reject after an
+  // approval) reach the 409 above and only the winner announces.
+  if (row) await announceReview(c.env, { kind: 'rejected', row, by: actorSnapshot(user), reason })
   return c.json({ success: true, data: row })
 })
 
