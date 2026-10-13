@@ -532,14 +532,16 @@ export function sessionLotChoices<T extends SessionLot>(mode: StockMode, lots: r
   return sortLotsForDisplay(narrowed)
 }
 
-/** Which lot was received first (negative = `lot`), read from the lots and never from list position: day, time of day, id. */
+/** Which lot was received first (negative = `lot`), read from the lots and never from list position: day, time of day, batch number, id. */
 function compareReceiptOrder(lot: SessionLot, other: SessionLot): number {
   const day = lotIsoDate(lot)
   const otherDay = lotIsoDate(other)
   if (day !== otherDay) return day < otherDay ? -1 : 1
   const gap = (batchReceivedInstant(lot) ?? 0) - (batchReceivedInstant(other) ?? 0)
   if (gap !== 0) return gap
-  return Number(lot.id) - Number(other.id)
+  // A merge gives the lots it moves later numbers but keeps their older ids, so the number comes first (the sale FIFO does too).
+  const numberGap = (Number(lot.batch_number) || 0) - (Number(other.batch_number) || 0)
+  return numberGap !== 0 ? numberGap : Number(lot.id) - Number(other.id)
 }
 
 /**

@@ -1,5 +1,4 @@
-// Lots for one product at one branch, in the Worker's order (oldest first, undated last), with the lot a new
-// Remove or Set line must start on. Shared by stockSessionDefaultLot.test.ts and the base-versus-fixed comparison.
+// Lots for one product at one branch, with the lot a new Remove or Set line must start on.
 // Rule: Remove starts on the oldest lot, Set on the newest (by received time, never list position); a lot with stock beats an empty one.
 
 export type ScenarioLot = {
@@ -90,6 +89,49 @@ export const LOT_SCENARIOS: LotScenario[] = [
     ],
     remove: 11,
     set: 13,
+  },
+  {
+    name: 'merged lots, same day: moved lots keep older ids but take later numbers',
+    lots: [
+      { id: 10, quantity: 3, received_at: '2026-10-10', batch_number: 1 },
+      { id: 11, quantity: 3, received_at: '2026-10-10', batch_number: 2 },
+      { id: 12, quantity: 3, received_at: '2026-10-10', batch_number: 3 },
+      { id: 5, quantity: 3, received_at: '2026-10-10', batch_number: 4 },
+      { id: 6, quantity: 3, received_at: '2026-10-10', batch_number: 5 },
+    ],
+    remove: 10,
+    set: 6,
+  },
+  {
+    name: 'merged lots, same day, newest moved lot empty',
+    lots: [
+      { id: 10, quantity: 3, received_at: '2026-10-10', batch_number: 1 },
+      { id: 12, quantity: 3, received_at: '2026-10-10', batch_number: 3 },
+      { id: 5, quantity: 3, received_at: '2026-10-10', batch_number: 4 },
+      { id: 6, quantity: 0, received_at: '2026-10-10', batch_number: 5 },
+    ],
+    remove: 10,
+    set: 5,
+  },
+  {
+    name: 'merged lots, undated',
+    lots: [
+      { id: 10, quantity: 3, lot_code: 'RECON-10', batch_number: 1 },
+      { id: 12, quantity: 3, lot_code: 'RECON-12', batch_number: 3 },
+      { id: 5, quantity: 3, lot_code: 'RECON-5', batch_number: 4 },
+      { id: 6, quantity: 3, lot_code: 'RECON-6', batch_number: 5 },
+    ],
+    remove: 10,
+    set: 6,
+  },
+  {
+    name: 'same day, times run against the batch numbers',
+    lots: [
+      { id: 1, quantity: 5, received_at: '2026-10-10 09:00:00', batch_number: 1 },
+      { id: 2, quantity: 5, received_at: '2026-10-10 05:00:00', batch_number: 2 },
+    ],
+    remove: 2,
+    set: 1,
   },
   {
     name: 'undated only, first lot empty',
