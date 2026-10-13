@@ -102,7 +102,7 @@ runTest('a listed failure reopens the session in its mode with its lines queued'
 
 runTest('closing with unsaved work asks through the ONE shared close guard', () => {
   assert.match(fastStockIn, /const closeGuard = useCloseGuard\(\{ dirty: closeDirty \}, discardAndClose, onMinimize \? preserveAndMinimize : undefined\)/)
-  assert.match(fastStockIn, /const preserveAndMinimize = \(\) => \{\s*if \(saving \|\| !onMinimize\) return\s*flushPendingWorkDraft\(fastStockInDraftKey\)/, 'minimize persists exact typed values before the host hides the float')
+  assert.match(fastStockIn, /const preserveAndMinimize = \(\) => \{\s*if \(saving \|\| !onMinimize\) return[\s\S]*?writeWorkDraft<StockSessionDraft>\(fastStockInDraftKey, currentDraft\(\)\)\s*onMinimize\(sessionLabel\)/, 'minimize persists exact typed values before the host hides the float')
   assert.doesNotMatch(fastStockIn, /window\.confirm\(/)
 })
 

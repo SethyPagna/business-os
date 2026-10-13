@@ -978,7 +978,7 @@ async function apiFetchOnce(method: unknown, path: string, body?: unknown, timeo
       requestInit.body = JSON.stringify(body)
     }
     if (oauthLogin || (normalizedMethod === 'POST' && ['/api/auth/login', '/api/auth/otp/verify', '/api/auth/logout', '/api/auth/session-duration'].includes(path))) {
-      cookieMutation = await beginActorCookieMutation(signoutWrite ? options.signoutRecovery : undefined)
+      cookieMutation = await beginActorCookieMutation(signoutWrite ? options.signoutRecovery : undefined, path === '/api/auth/session-duration')
     }
     if (oauthLogin && cookieMutation) {
       const payload = (body || {}) as Record<string, unknown>

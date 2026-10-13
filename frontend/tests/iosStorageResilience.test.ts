@@ -157,13 +157,8 @@ const KNOWN_UNGUARDED: Record<string, string[]> = {
     "const storage = typeof window !== 'undefined' ? window.localStorage : null",
   ],
   "platform/runtime/clientRuntime.ts": [
-    "...snapshotStorage(window.localStorage, localPreserveKeys).filter(([key]) => key !== 'businessos_read_session' && key !== 'businessos_auth_cookie_pending' && key !== 'businessos_unresolved_signout_v1'),",
-    "...(options.preserveUiDrafts === true ? snapshotStoragePrefixes(window.localStorage, ['businessos_draft_']) : []),",
-    "const keptSession = canUseBrowserStorage() ? snapshotStorage(window.sessionStorage, sessionPreserveKeys) : []",
     "clearStorage(canUseBrowserStorage() ? window.localStorage : null, localPreserveKeys, keepInPlace)",
-    "clearStorage(canUseBrowserStorage() ? window.sessionStorage : null, sessionPreserveKeys)",
-    "restoreStorage(canUseBrowserStorage() ? window.localStorage : null, keptLocal)",
-    "restoreStorage(canUseBrowserStorage() ? window.sessionStorage : null, keptSession)",
+    "clearStorage(canUseBrowserStorage() ? window.sessionStorage : null, sessionPreserveKeys, keepInPlace)",
   ],
   "utils/actionHistory.ts": [
     "if (typeof window === 'undefined' || !window.sessionStorage) return []",

@@ -1,4 +1,4 @@
-import { assertActorSessionDispatchAllowed, captureActorWriteIdentity } from '../api/actorReadScope.ts'
+import { actorWriteAccount, assertActorSessionDispatchAllowed, captureActorWriteIdentity } from '../api/actorReadScope.ts'
 import { getSyncServerUrl } from '../api/httpState.ts'
 import { authenticatedOrganizationId } from '../api/offlineQueueOwnership.ts'
 import type { ReceivingSubmissions } from './receivingDestination.ts'
@@ -22,11 +22,14 @@ const MAX_BYTES = 128 * 1024
 const failure = (code = 'receiving_submission_not_saved') => Object.assign(new Error(code), { code })
 const positiveId = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0
 
-function identity(actorId: unknown, requestId: unknown): CurrentIdentity {
-  assertActorSessionDispatchAllowed()
+// allowLocked: recording what this tab's own request did is still allowed while
+// the session is locked for a check; reading to send is not.
+function identity(actorId: unknown, requestId: unknown, allowLocked = false): CurrentIdentity {
+  if (!allowLocked) assertActorSessionDispatchAllowed()
   try {
     if (!positiveId(Number(actorId)) || typeof requestId !== 'string' || !/^[A-Za-z0-9_-]{1,120}$/.test(requestId)) throw failure()
-    const user = JSON.parse(window.sessionStorage.getItem('businessos_user') || window.localStorage.getItem('businessos_user') || 'null')
+    // The account writes are signed for: a refresh that briefly leaves no stored user is still that account.
+    const user = actorWriteAccount()
     if (!user || Number(user.id) !== Number(actorId)) throw failure('receiving_submission_locked')
     const origin = window.location.origin
     const server = new URL(getSyncServerUrl() || origin, origin)
@@ -101,10 +104,10 @@ function write(current: AttemptIdentity, value: ReceivingProductAttempt): void {
 
 // Re-checked inside the lock against the write identity, never a read scope
 // captured before the wait: a same-user reset while waiting does not refuse.
-async function locked<T>(current: AttemptIdentity, action: () => T): Promise<T> {
+async function locked<T>(current: AttemptIdentity, action: () => T, allowLocked = false): Promise<T> {
   if (typeof navigator === 'undefined' || !navigator.locks?.request) throw failure()
   return navigator.locks.request(keyOf(current), { mode: 'exclusive' }, () => {
-    if (!sameIdentity(current, identity(current.actor, current.requestId))) throw failure('receiving_submission_locked')
+    if (!sameIdentity(current, identity(current.actor, current.requestId, allowLocked))) throw failure('receiving_submission_locked')
     return action()
   })
 }
@@ -149,7 +152,7 @@ export async function finishReceivingProductAttempt(attempt: ReceivingProductAtt
     const saved = read(attempt)
     if (!saved || saved.state !== 'attempting' || saved.owner !== attempt.owner || saved.bodyJson !== attempt.bodyJson) throw failure('product_create_outcome_unknown')
     write(attempt, { ...saved, state, productId })
-  })
+  }, true)
 }
 
 export function overlayReceivingProductAttempts(actorId: unknown, state: ReceivingSubmissions, lines: readonly StockSessionLine[]): void {

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, startTransition } fr
 import type { ReactNode } from 'react'
 import { BUSINESS_TIME_ZONE, STORAGE_KEYS, SYNC } from './constants'
 import { cacheClearAll, ensureSyncUpdateCacheListener, FRONTEND_BUILD_INFO, isTransientGatewayError, pingServerHealth, primeServerHealthFromRuntime, startHealthCheck } from './api/http.ts'
-import { ACTOR_SESSION_RETRY_EVENT, acknowledgeActorCookieUser, actorCookieMutationPendingStatus, actorSessionReconciliationMarker, captureActorReadScope, isActorReadScopeCurrent, completeActorSessionReconciliation, isActorCookieMutationPending, isActorSessionQuarantined, resetActorReadSession, setActorSessionQuarantineStatus, subscribeActorSessionQuarantine } from './api/actorReadScope.ts'
+import { ACTOR_SESSION_RETRY_EVENT, acknowledgeActorCookieUser, actorCookieMutationPendingStatus, actorSessionReconciliationMarker, captureActorReadScope, isActorReadScopeCurrent, completeActorSessionReconciliation, forgetActorWriteAccount, isActorCookieMutationPending, isActorSessionQuarantined, resetActorReadSession, setActorSessionQuarantineStatus, subscribeActorSessionQuarantine } from './api/actorReadScope.ts'
 import { readActorSessionRecoveryBootstrap } from './api/http.ts'
 import { PASSWORD_CHANGE_REQUIRED_EVENT, currentApiRequestSequence, recoverUnresolvedSignout } from './api/http.ts'
 import { SIGNOUT_RETRY_EVENT, acknowledgeConfirmedSignout, assertNoUnresolvedSignout, beginUnresolvedSignout, isSignoutBlocked, prepareConfirmedSignoutUi, readSignoutIntent } from './api/unresolvedSignout.ts'
@@ -71,6 +71,10 @@ const APP_LOGIN_TIMEOUT_MS = 15000
 const APP_GOOGLE_OAUTH_COMPLETE_TIMEOUT_MS = 20000
 const APP_SETTINGS_SAVE_TIMEOUT_MS = 15000
 const APP_SESSION_DURATION_TIMEOUT_MS = 12000
+// The login duration when none is chosen or stored: the sign-in form's and the
+// Worker's default. Every writer of the stored user falls back to the same one,
+// so none moves it to the other storage behind another tab's back.
+const DEFAULT_SESSION_DURATION = 'always'
 const INITIAL_SYNC_URL_PERSIST_DELAY_MS = 1500
 const INITIAL_SYNC_URL_PERSIST_IDLE_TIMEOUT_MS = 8000
 
@@ -884,7 +888,11 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   // through clearLocalBusinessState below.
   const resetLocalBusinessState = useCallback(async (options: LocalBusinessStateResetOptions = {}) => {
     await resetClientRuntimeState({
-  // Authentication helpers.
+      // Only an explicit clearAuth: false keeps the signed-in account: a
+      // permission or runtime refresh is the same user, so its stored account
+      // stays put. Sign-out and session expiry pass true. (ee4e9a3f3 dropped
+      // this line, so every refresh deleted the stored user until bootstrap.)
+      clearAuth: options.clearAuth !== false,
       preserveDeviceSettings: true,
       preserveSyncServer: options.preserveSyncServer !== false,
       preserveSessionDuration: options.preserveSessionDuration !== false,
@@ -893,7 +901,6 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       preserveOfflineWork: options.preserveOfflineWork === true,
       preserveServiceWorker: options.preserveOfflineWork === true,
       preserveUiDrafts: options.preserveUiDrafts === true,
-  // Authentication helpers.
     }).catch(() => {})
     cacheClearAll()
   }, [])
@@ -907,6 +914,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   const handleUnauthorizedSession = useCallback(async (message = 'Please sign in again to continue.'): Promise<void> => {
     if (isActorSessionQuarantined()) return
     disconnectWS()
+    forgetActorWriteAccount()
     await clearLocalBusinessState({
       clearAuth: true,
       preserveSyncServer: true,
@@ -983,7 +991,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       const sessionDuration = String(
         mergedSettings.login_session_duration
         || safeStorageGet(getAuthStorage('local'), STORAGE_KEYS.SESSION_DURATION)
-        || 'session',
+        || DEFAULT_SESSION_DURATION,
       )
       const storedExpiry = Number(getStoredUserExpiry())
       const expiryTime = Number.isFinite(storedExpiry) && storedExpiry > Date.now()
@@ -1071,6 +1079,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
           // resetActorReadSession here: logout already rotated the marker, and
           // rotating it again from each tab would re-quarantine the others.
           const prepared = await prepareConfirmedSignoutUi(signout.token, async () => {
+            // Signed out: from now a missing stored user is nobody, as on expiry.
+            forgetActorWriteAccount()
             await resetLocalBusinessState({
               clearAuth: true,
               preserveSyncServer: true,
@@ -1554,7 +1564,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     const persistUser = (next: AppUser) => {
       const expiry = getStoredUserExpiry()
       const expiryTime = expiry ? Number(expiry) : null
-      const currentMode = safeStorageGet(getAuthStorage('local'), STORAGE_KEYS.SESSION_DURATION) || '30d'
+      const currentMode = safeStorageGet(getAuthStorage('local'), STORAGE_KEYS.SESSION_DURATION) || DEFAULT_SESSION_DURATION
       persistAuthState({
         user: next,
         expiryTime: Number.isFinite(expiryTime) ? expiryTime : null,

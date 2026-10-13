@@ -384,15 +384,19 @@ export default function FastStockInModal({
   }
 
   // Keystrokes ride the debounced autosave. No dirtyWork registration: with the
-  // draft persisting, leaving is safe -- everything is here on reopen.
+  // draft persisting, leaving is safe -- everything is here on reopen. The key is
+  // the opening owner's: while the owner differs nothing new is scheduled, but a
+  // write already pending (made while it was current) is kept -- only unmount
+  // cancels it. The app's user changing (the bootstrap after a refresh) re-checks.
+  const autosaveCancelRef = useRef<() => void>(() => {})
   useEffect(() => {
     const current = isActorWriteIdentityCurrent(receivingIdentity)
     setSignInChanged(!current)
-    if (!current) return
-    return scheduleWorkDraftWrite<StockSessionDraft>(fastStockInDraftKey, currentDraft())
+    if (current) autosaveCancelRef.current = scheduleWorkDraftWrite<StockSessionDraft>(fastStockInDraftKey, currentDraft())
   },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mode, currentStep, brand, branchId, receivedDate, supplier, paymentStatus, creditDueDate, paidAmount, query, picked, quantity, protectedUnitCost, sellingPrice, expiryDate, reason, conditionTag, batchChoice, createPayload, createRequestId, scannedBarcode, createdProductIds, received])
+    [mode, currentStep, brand, branchId, receivedDate, supplier, paymentStatus, creditDueDate, paidAmount, query, picked, quantity, protectedUnitCost, sellingPrice, expiryDate, reason, conditionTag, batchChoice, createPayload, createRequestId, scannedBarcode, createdProductIds, received, user])
+  useEffect(() => () => autosaveCancelRef.current(), [])
 
   // A locked session (another tab signed in or out) shows the message; the same
   // owner confirmed again clears it. The notice can fire inside another
@@ -859,14 +863,23 @@ export default function FastStockInModal({
     }
     let result: CreateProductResult
     try { result = await createProduct(JSON.parse(attempt.bodyJson!), assertDispatch, receivingIdentity) as CreateProductResult } catch (error) {
-      const failure = error as { code?: string; outcome?: string } | null
+      const failure = error as { code?: string; outcome?: string; confirmedResult?: unknown } | null
       if (failure?.code === 'write_requires_live_server' && failure.outcome !== 'unknown') {
         await finishReceivingProductAttempt(attempt, 'not_dispatched')
         overlayReceivingProductAttempts(user?.id, submissionsRef.current, [line])
         throw error
       }
-      try { await finishReceivingProductAttempt(attempt, 'unknown') } catch { }
-      throw unknownError()
+      // The sign-in fence refused before sending: known not sent, so it stays sendable for its owner.
+      if ((failure?.code === 'actor_owner_changed' || failure?.code === 'actor_session_quarantined') && failure.outcome === 'not_dispatched') {
+        await finishReceivingProductAttempt(attempt, 'not_dispatched').catch(() => {})
+        throw error
+      }
+      // The server answered for this session's owner after the sign-in changed or locked: that answer is theirs.
+      if (failure?.confirmedResult && typeof failure.confirmedResult === 'object') result = failure.confirmedResult as CreateProductResult
+      else {
+        try { await finishReceivingProductAttempt(attempt, 'unknown') } catch { }
+        throw unknownError()
+      }
     }
     if (result?.pending) {
       try { await finishReceivingProductAttempt(attempt, 'pending') } catch { throw unknownError() }
@@ -934,8 +947,10 @@ export default function FastStockInModal({
   }
 
   // The owner changed under a running commit: saving clears so close and minimize
-  // work, and the pinned draft is kept for the original owner.
-  const stopForSignInChange = () => {
+  // work, the pinned draft is kept for the original owner, and the screen shows
+  // what the server already confirmed, so a later Complete does not resend it.
+  const stopForSignInChange = (lines?: StockSessionLine[]) => {
+    if (lines) setReceived(lines.map((line) => (line.status === 'saving' ? { ...line, status: 'queued' as const } : line)))
     setSaving(false)
     setSignInChanged(true)
   }
@@ -969,10 +984,10 @@ export default function FastStockInModal({
       try {
         const id = await createHeldProduct(line, lines)
         lines = lines.map((entry) => (entry.key === line.key ? { ...entry, product: { ...entry.product, id }, status: 'queued', detail: '' } : entry))
-        if (!isActorWriteIdentityCurrent(receivingIdentity)) { persistSessionDraft(lines); stopForSignInChange(); return }
+        if (!isActorWriteIdentityCurrent(receivingIdentity)) { persistSessionDraft(lines); stopForSignInChange(lines); return }
         setCreatedProductIds((prev) => [...prev, String(id)])
       } catch (error) {
-        if (!isActorWriteIdentityCurrent(receivingIdentity)) { stopForSignInChange(); return }
+        if (!isActorWriteIdentityCurrent(receivingIdentity)) { stopForSignInChange(lines); return }
         failed += 1
         const reviewPending = (error as { code?: string } | null)?.code === 'product_pending_review'
         lines = applyLineOutcome(lines, line.key, { status: 'error', detail: failureText(error, tr('error', 'Error')), ...(reviewPending ? { needsRemoval: true } : {}) })
@@ -1041,9 +1056,9 @@ export default function FastStockInModal({
       }
       try {
         batched = await commitFastStockIn(toCommit.map(buildLineRequest), foldRound, { session, writeIdentity: receivingIdentity, onAnsweredAfterOwnerChange: keepAnsweredForOwner })
-        if (!isActorWriteIdentityCurrent(receivingIdentity)) { stopForSignInChange(); return }
+        if (!isActorWriteIdentityCurrent(receivingIdentity)) { stopForSignInChange(lines); return }
       } catch (error) {
-        if (!isActorWriteIdentityCurrent(receivingIdentity)) { stopForSignInChange(); return }
+        if (!isActorWriteIdentityCurrent(receivingIdentity)) { stopForSignInChange(lines); return }
         requestFailure = String((error as { code?: unknown } | null)?.code || 'request')
         const message = failureText(error, error instanceof Error ? error.message : tr('error', 'Error'))
         // Only lines no round has answered: a line already saved must stay saved.
@@ -1055,7 +1070,7 @@ export default function FastStockInModal({
       }
       if (batched === null) {
         const sequential = await performCommitSequential(toCommit, lines)
-        if (!isActorWriteIdentityCurrent(receivingIdentity)) { stopForSignInChange(); return }
+        if (!isActorWriteIdentityCurrent(receivingIdentity)) { stopForSignInChange(sequential.lines); return }
         failed = sequential.failed
         lines = sequential.lines
       }
@@ -1146,19 +1161,23 @@ export default function FastStockInModal({
   const closeDirty = fastStockInHasUnsavedWork({ ...currentDraft(), sessionId: 0 }, { ...init.pristine, sessionId: 0 })
   const preserveAndMinimize = () => {
     if (saving || !onMinimize) return
-    flushPendingWorkDraft(fastStockInDraftKey)
     // A chip would reopen the new owner's session, and "nothing was lost" would
     // be untrue: the draft stays with the original owner, so say that instead.
     if (!isActorWriteIdentityCurrent(receivingIdentity)) {
+      flushPendingWorkDraft(fastStockInDraftKey)
       notify(tr('stock_session_kept_for_owner', 'Closed. This session is kept for the account that started it and opens again when that account signs in. Changes made after the account changed were not saved.'), 'info')
       onClose()
       return
     }
+    // The chip reopens exactly this screen, so "nothing was lost" holds.
+    writeWorkDraft<StockSessionDraft>(fastStockInDraftKey, currentDraft())
     onMinimize(sessionLabel)
     onClose()
   }
   const discardAndClose = () => {
-    clearWorkDraft(fastStockInDraftKey)
+    // After the account changed, the draft is the original owner's: never this account's to discard.
+    if (isActorWriteIdentityCurrent(receivingIdentity)) clearWorkDraft(fastStockInDraftKey)
+    else notify(tr('stock_session_kept_for_owner', 'Closed. This session is kept for the account that started it and opens again when that account signs in. Changes made after the account changed were not saved.'), 'info')
     if (received.some((line) => line.status === 'saved')) onDone()
     onClose()
   }
@@ -1220,8 +1239,10 @@ export default function FastStockInModal({
   const footerTotal = canViewCosts && received.some((line) => line.mode === 'add') ? `${usdSymbol}${itemsTotal.toFixed(2)}` : null
   const busy = saving
   // Once the owner changed, edits would no longer be saved: lock them, but keep
-  // the header's close and minimize (they use busy alone).
-  const editLocked = busy || signInChanged
+  // the header's close and minimize (they use busy alone). A stop raises the
+  // banner and the locks; any render that finds the opening owner current drops them.
+  const ownerDiffers = signInChanged && !isActorWriteIdentityCurrent(receivingIdentity)
+  const editLocked = busy || ownerDiffers
 
   if (createForm) {
     return (
@@ -1395,7 +1416,7 @@ export default function FastStockInModal({
           )}
         </div>
 
-        {signInChanged ? <p role="alert" className="border-t border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 sm:px-4 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{ownerChangedText()}</p> : null}
+        {ownerDiffers ? <p role="alert" className="border-t border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 sm:px-4 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{ownerChangedText()}</p> : null}
         <StockSessionFooter
           tr={tr}
           onBack={goBack}
@@ -1403,7 +1424,7 @@ export default function FastStockInModal({
           total={footerTotal}
           primaryLabel={footerPrimary}
           onPrimary={goNext}
-          primaryDisabled={footerDisabled || signInChanged}
+          primaryDisabled={footerDisabled || ownerDiffers}
           primaryTitle={footerTitle}
           saving={saving}
         />

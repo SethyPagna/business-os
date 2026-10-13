@@ -27,15 +27,16 @@ const minimizeStart = modal.indexOf('  const preserveAndMinimize = () => {')
 const minimizeEnd = modal.indexOf('  const discardAndClose', minimizeStart)
 assert.ok(minimizeStart >= 0 && minimizeEnd > minimizeStart)
 const minimizeBody = modal.slice(minimizeStart, minimizeEnd)
-assert.ok(minimizeBody.indexOf('flushPendingWorkDraft(fastStockInDraftKey)') >= 0, 'minimize flushes the draft')
-assert.ok(minimizeBody.indexOf('flushPendingWorkDraft(fastStockInDraftKey)') < minimizeBody.indexOf('onMinimize(sessionLabel)'), 'minimize must flush before parking the chip')
+assert.ok(minimizeBody.indexOf('writeWorkDraft<StockSessionDraft>(fastStockInDraftKey, currentDraft())') >= 0, 'minimize writes exactly what the screen shows')
+assert.ok(minimizeBody.indexOf('writeWorkDraft<StockSessionDraft>(fastStockInDraftKey, currentDraft())') < minimizeBody.indexOf('onMinimize(sessionLabel)'), 'minimize must write before parking the chip')
 assert.ok(minimizeBody.indexOf('onMinimize(sessionLabel)') < minimizeBody.lastIndexOf('onClose()'), 'chip must be parked before the modal unmounts')
-assert.match(minimizeBody, /if \(!isActorWriteIdentityCurrent\(receivingIdentity\)\) \{\s*notify\([\s\S]*?\)\s*onClose\(\)\s*return\s*\}\s*onMinimize\(sessionLabel\)\s*onClose\(\)/, 'another owner gets no chip: the session closes with the draft kept for its owner')
+assert.match(minimizeBody, /if \(!isActorWriteIdentityCurrent\(receivingIdentity\)\) \{\s*flushPendingWorkDraft\(fastStockInDraftKey\)\s*notify\([\s\S]*?\)\s*onClose\(\)\s*return\s*\}[\s\S]*?writeWorkDraft<StockSessionDraft>\(fastStockInDraftKey, currentDraft\(\)\)\s*onMinimize\(sessionLabel\)\s*onClose\(\)/, 'another owner gets no chip: the session closes with the draft kept for its owner')
 
 const discardStart = modal.indexOf('  const discardAndClose = () => {')
 const discardEnd = modal.indexOf('  const closeGuard', discardStart)
 const discardBody = modal.slice(discardStart, discardEnd)
 assert.ok(discardBody.indexOf('clearWorkDraft(fastStockInDraftKey)') >= 0 && discardBody.indexOf('clearWorkDraft(fastStockInDraftKey)') < discardBody.indexOf('onClose()'), 'Discard clears the exact draft before unmount')
+assert.match(discardBody, /if \(isActorWriteIdentityCurrent\(receivingIdentity\)\) clearWorkDraft\(fastStockInDraftKey\)/, 'only the owner who opened it can discard the draft')
 assert.doesNotMatch(discardBody, /onMinimize/, 'Discard must not park a minimized chip')
 
 // The receipt cost restores into protected state and displays only through
@@ -47,7 +48,7 @@ assert.match(modal, /const currentDraft = \(lines: StockSessionLine\[\] = receiv
 assert.match(modal, /receivingSubmissions: retainReceivingSubmissions\(submissionsRef\.current, lines\)/, 'the saved draft retains exact submitted wires alongside protected values')
 assert.match(modal, /const submissions = restoreReceivingSubmissions\(storedRaw, opened\.lines\)/, 'reload recovers submission facts alongside the unchanged core normalizer')
 assert.match(modal, /overlayReceivingProductAttempts\(user\?\.id, submissions, opened\.lines\)\s*if \(rewrite\) writeWorkDraft/, 'authoritative attempt outcomes overlay before a restored draft is rewritten')
-assert.match(modal, /useEffect\(\(\) => \{\s*const current = isActorWriteIdentityCurrent\(receivingIdentity\)\s*setSignInChanged\(!current\)\s*if \(!current\) return\s*return scheduleWorkDraftWrite<StockSessionDraft>\(fastStockInDraftKey, currentDraft\(\)\)/, 'the debounced autosave snapshots the live queue only for its original owner')
+assert.match(modal, /useEffect\(\(\) => \{\s*const current = isActorWriteIdentityCurrent\(receivingIdentity\)\s*setSignInChanged\(!current\)\s*if \(current\) autosaveCancelRef\.current = scheduleWorkDraftWrite<StockSessionDraft>\(fastStockInDraftKey, currentDraft\(\)\)/, 'the debounced autosave snapshots the live queue only for its original owner')
 assert.match(modal, /const persistSessionDraft = \(lines: StockSessionLine\[\] = received\) => \{\s*writeWorkDraft<StockSessionDraft>\(fastStockInDraftKey, currentDraft\(lines\)\)/, 'the synchronous writer defaults to the live queue')
 assert.match(modal, /const pendingBatchRestoreRef = useRef<LotChoice \| null>\(init\.draft\.picked \? init\.draft\.batchChoice : null\)/, 'a parked lot choice must be revalidated by the options effect')
 

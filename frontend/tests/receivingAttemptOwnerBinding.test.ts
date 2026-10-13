@@ -6,12 +6,14 @@ import ts from 'typescript'
 import type * as AttemptModule from '../src/utils/receivingProductAttempt.ts'
 import type * as ScopeModule from '../src/api/actorReadScope.ts'
 import type * as HttpStateModule from '../src/api/httpState.ts'
+import { appStorageResets } from './appPermissionRefresh.ts'
 
 // F3: a receiving product-attempt record belongs to who signs the write -- the
 // server, origin, account and organization -- and to the device's owner
 // generation, not to the read-session marker. A same-user reset keeps it: a held,
 // never-sent product stays sendable and a confirmed one stays confirmed. Another
-// account, organization or server, or A -> B -> A, refuses it.
+// account, organization or server, or A -> B -> A seen by this tab or a reload,
+// refuses it.
 //
 // Every "tab" is a fresh graph of the production modules over one shared
 // localStorage, so a reload and a second tab are real, and the reset is the real
@@ -19,17 +21,10 @@ import type * as HttpStateModule from '../src/api/httpState.ts'
 
 const src = resolve(dirname(fileURLToPath(import.meta.url)), '../src')
 const js = (text: string) => ts.transpileModule(text, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText
-const mirrorResets: string[] = []
-const localDb = {
-  async resetLocalMirrorDbPreservingOfflineWork() { mirrorResets.push('preserve') },
-  async resetLocalMirrorDb() { mirrorResets.push('reset') },
-  async clearLocalMirrorTables() { mirrorResets.push('scoped') },
-}
 type Tab = {
   attempts: typeof AttemptModule
   scope: typeof ScopeModule
   http: typeof HttpStateModule
-  runtime: { resetClientRuntimeState(options: Record<string, unknown>): Promise<void> }
 }
 function openTab(): Tab {
   const cache = new Map<string, { exports: Record<string, unknown> }>()
@@ -40,7 +35,6 @@ function openTab(): Tab {
     cache.set(file, mod)
     new Function('require', 'module', 'exports', js(readFileSync(file, 'utf8')))((name: string) => {
       const target = resolve(dirname(file), name)
-      if (target === resolve(src, 'api/localDb.ts')) return localDb
       assert(name.startsWith('.') && target.startsWith(src), `unexpected dependency ${name}`)
       return load(target)
     }, mod, mod.exports)
@@ -50,7 +44,6 @@ function openTab(): Tab {
     attempts: load(resolve(src, 'utils/receivingProductAttempt.ts')) as unknown as Tab['attempts'],
     scope: load(resolve(src, 'api/actorReadScope.ts')) as unknown as Tab['scope'],
     http: load(resolve(src, 'api/httpState.ts')) as unknown as Tab['http'],
-    runtime: load(resolve(src, 'platform/runtime/clientRuntime.ts')) as unknown as Tab['runtime'],
   }
 }
 
@@ -94,28 +87,22 @@ const reconcile = (tab: Tab) => {
   // Another tab's sign-in or reset locks this one until the app confirms the owner (App.tsx reconciliation).
   if (tab.scope.isActorSessionQuarantined()) assert.equal(tab.scope.completeActorSessionReconciliation(tab.scope.actorSessionReconciliationMarker()), true)
 }
-// AppContext.clearLocalBusinessState -> resetLocalBusinessState, with the exact
-// options the permission refresh passes, then the bootstrap writing the same
-// account back (resetLocalBusinessState never forwards clearAuth, so the stored
-// account is cleared by the reset and restored by applyBootstrapPayload).
-async function permissionRefresh(tab: Tab, id = 7) {
-  tab.scope.resetActorReadSession()
-  await tab.runtime.resetClientRuntimeState({
-    preserveDeviceSettings: true, preserveSyncServer: true, preserveSessionDuration: true, preserveRuntimeMeta: false,
-    preserveOrganization: false, preserveOfflineWork: true, preserveServiceWorker: true, preserveUiDrafts: true,
-  })
-  local.setItem(USER, account(id))
-}
+// AppContext's own resets, read from its source, over the real runtime reset of
+// the tab doing it. A permission refresh is checked where it waits for the
+// bootstrap (or where a failed bootstrap leaves it); bootstrapBack() is
+// applyBootstrapPayload writing the same account back.
+const appResets = new WeakMap<Tab, ReturnType<typeof appStorageResets>>()
+const resetsOf = (tab: Tab) => { let resets = appResets.get(tab); if (!resets) appResets.set(tab, resets = appStorageResets(tab.scope)); return resets }
+const permissionRefresh = (tab: Tab, during?: () => void) => resetsOf(tab).permissionRefresh(during)
+const bootstrapBack = (id = 7) => local.setItem(USER, account(id))
 // handleUnauthorizedSession: the session expired; the account is signed out with drafts kept.
 async function sessionExpiry(tab: Tab) {
-  tab.scope.resetActorReadSession()
-  await tab.runtime.resetClientRuntimeState({
-    preserveDeviceSettings: true, preserveSyncServer: true, preserveSessionDuration: true, preserveRuntimeMeta: true,
-    preserveOrganization: false, preserveOfflineWork: true, preserveServiceWorker: true, preserveUiDrafts: true,
-  })
-  local.removeItem(USER)
+  ;(tab.scope as { forgetActorWriteAccount?: () => void }).forgetActorWriteAccount?.()
+  await resetsOf(tab).sessionExpiry()
+  assert.equal(local.getItem(USER), null, 'the expired account is cleared')
 }
 const state = (tab: Tab, id: string, actor = 7) => tab.attempts.readReceivingProductAttempt(actor, id)?.state
+const tryState = (tab: Tab, id: string) => { try { return state(tab, id) } catch (error) { return (error as { code?: string }).code } }
 
 // ---------------------------------------------------------------------------
 // 1. A real owner change still refuses (green before and after F3)
@@ -138,23 +125,27 @@ const state = (tab: Tab, id: string, actor = 7) => tab.attempts.readReceivingPro
   console.log('PASS another account or organization, and A -> B -> A in the same tab, refuse without clearing the record')
 }
 {
+  // An owner only another tab saw does not move this tab's owner: a stale tab
+  // holding B reloads, then reconciles to A. This tab was locked meanwhile.
   signIn(7)
   const holder = openTab()
   const held = nextId()
   await holder.attempts.registerReceivingProductAttempt(7, held)
-  // A second tab signs B in and A back; the holding tab never sees B.
+  const identity = holder.scope.captureActorWriteIdentity()
   const other = openTab()
   signIn(8); other.scope.captureActorWriteIdentity()
   signIn(7); other.scope.captureActorWriteIdentity()
   reconcile(holder)
-  await assert.rejects(holder.attempts.reserveReceivingProductAttempt(7, held, body(held), noop), code('product_create_outcome_unknown'), 'A -> B -> A in another tab refuses')
+  assert.equal(holder.scope.isActorWriteIdentityCurrent(identity), true, 'this tab\'s owner is unchanged')
+  assert.equal(state(holder, held), 'prepared', 'its held product stays')
+  assert.equal((await holder.attempts.reserveReceivingProductAttempt(7, held, body(held), noop)).state, 'attempting', 'and sendable')
   // Across reloads: a fresh tab sees B, a later fresh tab sees A again.
   const reloaded = nextId()
   await openTab().attempts.registerReceivingProductAttempt(7, reloaded)
   signIn(8); openTab().scope.captureActorWriteIdentity()
   signIn(7)
   await assert.rejects(openTab().attempts.reserveReceivingProductAttempt(7, reloaded, body(reloaded), noop), code('product_create_outcome_unknown'), 'A -> B -> A across reloads refuses')
-  console.log('PASS A -> B -> A refuses when another tab or a reload saw B, not only this tab')
+  console.log('PASS another tab\'s owner change leaves this tab\'s owner and held product alone; A -> B -> A across reloads refuses')
 }
 
 // ---------------------------------------------------------------------------
@@ -168,7 +159,10 @@ const state = (tab: Tab, id: string, actor = 7) => tab.attempts.readReceivingPro
   await tab.attempts.registerReceivingProductAttempt(7, done)
   const ticket = await tab.attempts.reserveReceivingProductAttempt(7, done, body(done), noop)
   await tab.attempts.finishReceivingProductAttempt(ticket, 'confirmed', 81)
-  await permissionRefresh(tab)
+  let inside: unknown
+  await permissionRefresh(tab, () => { inside = [tryState(tab, held), tryState(tab, done)] })
+  assert.deepEqual(inside, ['prepared', 'confirmed'], 'inside the reset')
+  // The bootstrap has not answered, or failed:
   assert.equal(state(tab, held), 'prepared', 'a held, never-sent product survives a same-user permission refresh')
   assert.equal(state(tab, done), 'confirmed', 'a confirmed product stays confirmed')
   assert.equal(tab.attempts.readReceivingProductAttempt(7, done)?.productId, 81)
@@ -178,7 +172,10 @@ const state = (tab: Tab, id: string, actor = 7) => tab.attempts.readReceivingPro
   assert.deepEqual(outcomes.unknown, [])
   const sent = await tab.attempts.reserveReceivingProductAttempt(7, held, body(held), noop)
   assert.equal(sent.state, 'attempting', 'and it is still sendable')
-  console.log('PASS same-user permission refresh in this tab: held stays sendable, confirmed stays confirmed')
+  bootstrapBack()
+  await tab.attempts.finishReceivingProductAttempt(sent, 'confirmed', 82)
+  assert.equal(state(tab, held), 'confirmed', 'the bootstrap writing the account back changes nothing')
+  console.log('PASS same-user permission refresh in this tab: inside it, before its bootstrap and after, held stays sendable and confirmed stays confirmed')
 }
 {
   signIn(7)
@@ -190,6 +187,20 @@ const state = (tab: Tab, id: string, actor = 7) => tab.attempts.readReceivingPro
   reconcile(holder)
   assert.equal((await holder.attempts.reserveReceivingProductAttempt(7, held, body(held), noop)).state, 'attempting')
   console.log('PASS same-user reset in another tab: once the same owner is confirmed the held product is sendable')
+}
+{
+  // Defence in depth: whatever leaves no stored user for a moment, the record is still this account's.
+  signIn(7)
+  const tab = openTab()
+  const held = nextId()
+  await tab.attempts.registerReceivingProductAttempt(7, held)
+  local.removeItem(USER)
+  assert.equal(state(tab, held), 'prepared', 'no stored user for a moment: still readable')
+  const sent = await tab.attempts.reserveReceivingProductAttempt(7, held, body(held), noop)
+  await tab.attempts.finishReceivingProductAttempt(sent, 'confirmed', 83)
+  bootstrapBack()
+  assert.equal(state(tab, held), 'confirmed', 'sent and confirmed for the same account')
+  console.log('PASS no stored user for a moment: the held product is read, sent and confirmed for the same account')
 }
 {
   signIn(7)
@@ -287,4 +298,3 @@ const state = (tab: Tab, id: string, actor = 7) => tab.attempts.readReceivingPro
   }
   console.log('PASS legacy records: accepted only under their own marker and owner, then upgraded; otherwise unknown and never sent')
 }
-assert(mirrorResets.length >= 4 && mirrorResets.every(call => call === 'preserve'), 'the real runtime reset ran, keeping offline work')
