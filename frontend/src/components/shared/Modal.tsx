@@ -194,7 +194,9 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
           onPointerUp={handlePointerUp}
         >
           <h2 id={titleId} className="detail-scroll-text min-w-0 flex-1 text-base font-bold text-gray-900 dark:text-white sm:text-lg" title={typeof title === 'string' ? title : undefined}>{title}</h2>
-          <div className="flex shrink-0 items-center gap-1">
+          {/* gap-2, not gap-1: the Close below reaches 6 px past its own box (-m-1.5) to be a 44 px target, so a 4 px gap
+              left its hit area 2 px over a neighbouring header control such as Minimize. 8 px clears it by 2 px. */}
+          <div className="flex shrink-0 items-center gap-2">
           {headerExtra}
           {closeAffordance === 'visible' ? (
             <button
@@ -209,7 +211,11 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
                  The target is 44x44 px (a thumb), but the -m-1.5 bleed hands
                  6 px back on every side, so the header keeps the 32 px
                  footprint it always had: the same title position and dialog
-                 height, with the icon where it was. */
+                 height, with the icon where it was.
+                 The control is icon-only, so its one accessible name is the
+                 aria-label; the title repeats it word for word as the owner's
+                 tooltip (button policy), which is the same name once, not a
+                 second one (tests/modalCloseTarget.test.ts). */
               className="-m-1.5 text-gray-600 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-300 dark:hover:text-white w-11 h-11 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
             ><X className="h-4 w-4" /></button>
           ) : null}
