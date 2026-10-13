@@ -14,6 +14,7 @@ import { canonicalizePersistedMediaPath } from '../../utils/mediaUpload.ts'
 import {
   deleteFileAsset as deletePickerFileAsset,
   getFiles as fetchPickerFiles,
+  isUploadTooLarge,
   uploadFileAsset as uploadPickerFileAsset,
 } from '../../api/fileTransport.ts'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
@@ -227,11 +228,19 @@ export default function FilePickerModal({
     try {
       const uploadedAssets: FileAsset[] = []
       for (const file of selectedFiles) {
-        const asset = await uploadFileAssetRequest({ file, userId: user?.id, userName: user?.name, signal: controller.signal })
+        let asset: FileAsset
+        try {
+          asset = await uploadFileAssetRequest({ file, userId: user?.id, userName: user?.name, signal: controller.signal })
+        } catch (error) {
+          if (!isUploadTooLarge(error)) throw error
+          notify(`${file.name}: ${getErrorMessage(error, 'Upload failed')}`, 'error')
+          continue
+        }
         const publicPath = canonicalizePersistedMediaPath(asset?.public_path)
         if (!publicPath) throw new Error('Upload completed without a stored file path.')
         uploadedAssets.push({ ...asset, public_path: publicPath })
       }
+      if (!uploadedAssets.length) return
       notify(tr('upload_complete', 'Upload complete'), 'success')
       await loadFiles()
       if (!multiple) {

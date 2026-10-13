@@ -135,7 +135,7 @@ const vite = await createServer({
       },
       load(id) {
         if (id === '\0file-picker-app-context') return `export const useApp = () => ({ notify: (message, type) => { (globalThis.__pickerNotes ||= []).push([message, type]) }, user: null, t: (key) => key })`
-        if (id === '\0file-picker-transport') return `export const getFiles = async () => ({ items: [], total: 0 }); export const uploadFileAsset = (payload) => (globalThis.__pickerUploadHook ? globalThis.__pickerUploadHook(payload) : Promise.resolve({})); export const deleteFileAsset = async () => ({})`
+        if (id === '\0file-picker-transport') return `export const getFiles = async () => ({ items: [], total: 0 }); export const isUploadTooLarge = (error) => error?.code === 'upload_too_large'; export const uploadFileAsset = (payload) => (globalThis.__pickerUploadHook ? globalThis.__pickerUploadHook(payload) : Promise.resolve({})); export const deleteFileAsset = async () => ({})`
         if (id === '\0file-picker-pagination') return `export const DEFAULT_PAGE_SIZE = 48; export const clampPage = () => 1; export default function PaginationControls() { return null }`
         return null
       },
@@ -174,17 +174,18 @@ try {
     }
     return null
   }
-  const pickFile = async (name: string) => {
+  const pickFiles = async (names: string[]) => {
     const input = findFileInput(memoryDocument.body)
     assert.ok(input, 'the picker has no file input')
     const propsKey = Object.keys(input).find((key) => key.startsWith('__reactProps$'))
     assert.ok(propsKey, 'the file input has no React props')
     const props = (input as unknown as Record<string, { onChange: (event: unknown) => unknown }>)[propsKey]
     await act(async () => {
-      props.onChange({ target: { files: [new File([new Uint8Array(8)], name, { type: 'video/mp4' })], value: name } })
+      props.onChange({ target: { files: names.map((name) => new File([new Uint8Array(8)], name, { type: 'video/mp4' })), value: names[0] } })
       await Promise.resolve()
     })
   }
+  const pickFile = (name: string) => pickFiles([name])
   const selected: string[] = []
   let closes = 0
   const pickerElement = (open: boolean) => React.createElement(module.default, {
@@ -222,6 +223,43 @@ try {
   assert.equal(uploads.length, 3)
   await act(async () => uploadRoot.unmount())
   assert.equal(uploads[2].signal?.aborted, true, 'unmounting the picker must abort the request in flight')
+
+  const outcomes: Record<string, 'ok' | 'big' | 'down'> = {}
+  const attempted: string[] = []
+  ;(globalThis as unknown as Record<string, unknown>).__pickerUploadHook = async (payload: { file: File }) => {
+    attempted.push(payload.file.name)
+    if (outcomes[payload.file.name] === 'big') throw Object.assign(new Error('This file is larger than 25 MB. Choose a smaller file.'), { code: 'upload_too_large' })
+    if (outcomes[payload.file.name] === 'down') throw new Error('File upload failed. Check your server connection and try again.')
+    return { public_path: '/uploads/' + payload.file.name }
+  }
+  const batchRoot = createRoot(memoryDocument.createElement('div') as unknown as Element)
+  const batchElement = React.createElement(module.default, { open: true, multiple: true, onClose() { closes += 1 }, title: 'Batch picker' })
+  await act(async () => { batchRoot.render(batchElement); await Promise.resolve() })
+  const toasts = () => notes.map(([message, type]) => type + ': ' + message)
+
+  notes.length = 0
+  Object.assign(outcomes, { 'a.mp4': 'ok', 'big.mp4': 'big', 'c.mp4': 'ok' })
+  await pickFiles(['a.mp4', 'big.mp4', 'c.mp4'])
+  assert.deepEqual(attempted, ['a.mp4', 'big.mp4', 'c.mp4'], 'one oversized file ended the whole batch')
+  assert.deepEqual(toasts(), ['error: big.mp4: This file is larger than 25 MB. Choose a smaller file.', 'success: Upload complete'])
+
+  notes.length = 0
+  attempted.length = 0
+  Object.assign(outcomes, { 'big1.mp4': 'big', 'big2.mp4': 'big' })
+  await pickFiles(['big1.mp4', 'big2.mp4'])
+  assert.deepEqual(attempted, ['big1.mp4', 'big2.mp4'])
+  assert.deepEqual(toasts(), [
+    'error: big1.mp4: This file is larger than 25 MB. Choose a smaller file.',
+    'error: big2.mp4: This file is larger than 25 MB. Choose a smaller file.',
+  ], 'a batch where every file was refused for size must not announce an upload')
+
+  notes.length = 0
+  attempted.length = 0
+  Object.assign(outcomes, { 'd.mp4': 'ok', 'offline.mp4': 'down', 'e.mp4': 'ok' })
+  await pickFiles(['d.mp4', 'offline.mp4', 'e.mp4'])
+  assert.deepEqual(attempted, ['d.mp4', 'offline.mp4'], 'a connection failure should still stop the batch')
+  assert.deepEqual(toasts(), ['error: File upload failed. Check your server connection and try again.'])
+  await act(async () => batchRoot.unmount())
 } finally {
   await vite.close()
 }

@@ -50,6 +50,7 @@ class FixtureXhr {
 Object.assign(globalThis, { XMLHttpRequest: FixtureXhr })
 
 let imageCompressions: File[] = []
+let compressedBytes = 8
 const COMPRESSED_NAME = 'photo-compressed.webp'
 const trap = (what: string) => new Proxy({}, { get() { throw new Error(`${what} was loaded: client-side video compression is back`) } })
 
@@ -67,7 +68,7 @@ const STUBS: Record<string, unknown> = {
     isCompressibleImageFile: (file: File) => /^image\//i.test(file.type),
     compressImageFile: async (file: File) => {
       imageCompressions.push(file)
-      return new File([new Uint8Array(8)], COMPRESSED_NAME, { type: 'image/webp' })
+      return new File([new Uint8Array(compressedBytes)], COMPRESSED_NAME, { type: 'image/webp' })
     },
     createImageThumbnails: async () => [],
     appendImageThumbnails: () => {},
@@ -118,6 +119,7 @@ async function runCase(name: string, body: () => Promise<void> | void): Promise<
   xhrSends = 0
   sent = null
   imageCompressions = []
+  compressedBytes = 8
   xhrReply = { status: 200, body: JSON.stringify({ id: 1, public_path: '/uploads/x', media_type: 'image' }) }
   try {
     await body()
@@ -168,7 +170,7 @@ await runCase('a video over the Worker limit is refused on the device, in Englis
     uiLanguage = language
     const error = await rejection(files.uploadFileAsset({ file: video }))
     const pack = language === 'en' ? EN : KM
-    assert.equal(error.message, String(pack.upload_file_too_large).replace('{mb}', '25'), language)
+    assert.equal(error.message, String(pack.upload_video_too_large).replace('{mb}', '25'), language)
     assert.equal(error.code, 'upload_too_large')
     assert.match(error.message, /25/)
     assert.equal(xhrSends, 0, `${language}: the oversized video was sent`)
@@ -189,12 +191,45 @@ await runCase('if the Worker or the edge still refuses for size, the person gets
   for (const language of ['en', 'km']) {
     uiLanguage = language
     const pack = language === 'en' ? EN : KM
-    const expected = String(pack.upload_file_too_large).replace('{mb}', '25')
+    const expected = String(pack.upload_video_too_large).replace('{mb}', '25')
     xhrReply = { status: 400, body: JSON.stringify({ error: workerMessage }) }
     assert.equal((await rejection(files.uploadFileAsset({ file: video }))).message, expected, `${language}: Worker 400`)
     xhrReply = { status: 413, body: '' }
     assert.equal((await rejection(files.uploadFileAsset({ file: video }))).message, expected, `${language}: edge 413`)
   }
+})
+
+await runCase('an oversized image is told to pick a smaller image, never to compress a video', async () => {
+  compressedBytes = 25 * MB + 1
+  const photo = new File([new Uint8Array(4 * MB)], 'shelf.jpg', { type: 'image/jpeg' })
+  for (const language of ['en', 'km']) {
+    uiLanguage = language
+    const error = await rejection(files.uploadFileAsset({ file: photo }))
+    const pack = language === 'en' ? EN : KM
+    assert.equal(error.message, String(pack.upload_image_too_large).replace('{mb}', '25'), language)
+    assert.equal(error.code, 'upload_too_large')
+    assert.equal(xhrSends, 0, language + ': the oversized image was sent')
+  }
+  uiLanguage = 'en'
+  assert.doesNotMatch((await rejection(files.uploadFileAsset({ file: photo }))).message, /video/i)
+  compressedBytes = 8
+  xhrReply = { status: 413, body: '' }
+  uiLanguage = 'km'
+  assert.equal((await rejection(files.uploadFileAsset({ file: photo }))).message, String(KM.upload_image_too_large).replace('{mb}', '25'), 'edge 413 on an image')
+})
+
+await runCase('any other oversized file gets the plain size message, and a video is recognised by its name when the browser gives no type', async () => {
+  const sheet = new File([new Uint8Array(25 * MB + 1)], 'prices.pdf', { type: 'application/pdf' })
+  for (const language of ['en', 'km']) {
+    uiLanguage = language
+    const pack = language === 'en' ? EN : KM
+    assert.equal((await rejection(files.uploadFileAsset({ file: sheet }))).message, String(pack.upload_file_too_large).replace('{mb}', '25'), language)
+  }
+  uiLanguage = 'en'
+  assert.doesNotMatch(String(EN.upload_file_too_large), /video/i)
+  const untyped = videoFile('promo.MOV', '', 25 * MB + 1)
+  assert.equal((await rejection(files.uploadFileAsset({ file: untyped }))).message, String(EN.upload_video_too_large).replace('{mb}', '25'))
+  assert.equal(xhrSends, 0)
 })
 
 await runCase('other upload failures keep their own message', async () => {
@@ -203,13 +238,22 @@ await runCase('other upload failures keep their own message', async () => {
   assert.equal((await rejection(files.uploadFileAsset({ file: video }))).message, 'File upload failed: Uploaded file is empty')
 })
 
-await runCase('both packs carry the size message with the same {mb} slot, Khmer in km, and the code fallback equals en.json', () => {
-  const english = String(EN.upload_file_too_large)
-  const khmer = String(KM.upload_file_too_large)
-  assert.ok(english.includes('{mb}') && khmer.includes('{mb}'))
-  assert.match(khmer, /[ក-៿]/)
-  assert.notEqual(english, khmer)
-  assert.ok(fs.readFileSync(TRANSPORT_SOURCE, 'utf8').includes(`'${english}'`), 'fileTransport.ts English fallback differs from en.json')
+await runCase('both packs carry every size message with the same {mb} slot, Khmer in km, and each code fallback equals en.json', () => {
+  const source = fs.readFileSync(TRANSPORT_SOURCE, 'utf8')
+  const seen = new Set<string>()
+  for (const key of ['upload_file_too_large', 'upload_image_too_large', 'upload_video_too_large']) {
+    const english = String(EN[key])
+    const khmer = String(KM[key])
+    assert.ok(english.includes('{mb}') && khmer.includes('{mb}'), key)
+    assert.match(khmer, /[ក-៿]/, key)
+    assert.notEqual(english, khmer, key)
+    assert.ok(source.includes(`'${english}'`), key + ': fileTransport.ts English fallback differs from en.json')
+    seen.add(english)
+  }
+  assert.equal(seen.size, 3, 'two size messages are the same sentence, so the file type changes nothing')
+  assert.match(String(EN.upload_video_too_large), /video/i)
+  assert.match(String(EN.upload_image_too_large), /image/i)
+  assert.doesNotMatch(String(EN.upload_image_too_large), /video/i)
 })
 
 await runCase('the ffmpeg packages, their loader and their runtime download are gone from the app', () => {

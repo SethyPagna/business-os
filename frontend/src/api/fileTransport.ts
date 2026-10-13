@@ -128,7 +128,14 @@ const AVATAR_UNSUPPORTED_TYPE_ENGLISH = 'Avatars must be JPEG, PNG, WebP, GIF or
 
 const MAX_UPLOAD_MEGABYTES = 25
 const MAX_UPLOAD_BYTES = MAX_UPLOAD_MEGABYTES * 1024 * 1024
-const UPLOAD_TOO_LARGE_ENGLISH = 'This file is larger than {mb} MB. Choose a smaller file, or trim or compress the video first.'
+type UploadKind = 'video' | 'image' | 'other'
+const UPLOAD_TOO_LARGE_MESSAGES: Record<UploadKind, { key: string; english: string }> = {
+  video: { key: 'upload_video_too_large', english: 'This file is larger than {mb} MB. Choose a smaller file, or trim or compress the video first.' },
+  image: { key: 'upload_image_too_large', english: 'This image is larger than {mb} MB. Choose a smaller image.' },
+  other: { key: 'upload_file_too_large', english: 'This file is larger than {mb} MB. Choose a smaller file.' },
+}
+const VIDEO_FILE_NAME = /\.(mp4|m4v|mov|webm|mkv|avi)$/i
+const IMAGE_FILE_NAME = /\.(jpe?g|png|webp|gif|avif|heic|heif|bmp|svg)$/i
 const WORKER_TOO_LARGE_MESSAGE = /^File is too large \(max \d+MB\)$/
 
 const UPLOAD_TIMEOUT_BASE_MS = 30_000
@@ -139,6 +146,10 @@ const UPLOAD_TIMED_OUT_ENGLISH = 'The upload took too long and was stopped. Chec
 export function uploadTimeoutMs(bytes: number): number {
   const megabytes = Math.ceil(Math.max(0, Number(bytes) || 0) / (1024 * 1024))
   return Math.min(UPLOAD_TIMEOUT_CAP_MS, UPLOAD_TIMEOUT_BASE_MS + megabytes * UPLOAD_TIMEOUT_PER_MEGABYTE_MS)
+}
+
+export function isUploadTooLarge(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === 'upload_too_large'
 }
 
 function uploadCancelled(): Error {
@@ -166,8 +177,16 @@ async function avatarTypeRefusal(): Promise<Error> {
   return Object.assign(new Error(message), { code: 'unsupported_image_type' })
 }
 
-async function uploadTooLargeRefusal(): Promise<Error> {
-  const template = await packMessage('upload_file_too_large', UPLOAD_TOO_LARGE_ENGLISH)
+function uploadKind(file: File): UploadKind {
+  const type = String(file.type || '').toLowerCase()
+  if (type.startsWith('video/') || VIDEO_FILE_NAME.test(file.name)) return 'video'
+  if (type.startsWith('image/') || IMAGE_FILE_NAME.test(file.name)) return 'image'
+  return 'other'
+}
+
+async function uploadTooLargeRefusal(file: File): Promise<Error> {
+  const { key, english } = UPLOAD_TOO_LARGE_MESSAGES[uploadKind(file)]
+  const template = await packMessage(key, english)
   return Object.assign(new Error(template.replace('{mb}', String(MAX_UPLOAD_MEGABYTES))), { code: 'upload_too_large' })
 }
 
@@ -267,7 +286,7 @@ export async function uploadFileAsset(payload: FileUploadPayload = {}): Promise<
   })
 
   const uploadFile = isCompressibleImageFile(file) ? await compressImageFile(file, compressOptions) : file
-  if (uploadFile.size > MAX_UPLOAD_BYTES) throw await uploadTooLargeRefusal()
+  if (uploadFile.size > MAX_UPLOAD_BYTES) throw await uploadTooLargeRefusal(uploadFile)
 
   const base = getSyncServerUrl().replace(/\/$/, '')
   const form = new FormData()
@@ -325,7 +344,7 @@ export async function uploadFileAsset(payload: FileUploadPayload = {}): Promise<
       const parsed = parseJsonResponse(xhr.responseText)
       if (xhr.status < 200 || xhr.status >= 300) {
         if (xhr.status === 413 || WORKER_TOO_LARGE_MESSAGE.test(String(parsed?.error || '').trim())) {
-          void uploadTooLargeRefusal().then((refusal) => finish(reject, refusal))
+          void uploadTooLargeRefusal(uploadFile).then((refusal) => finish(reject, refusal))
           return
         }
         const message = parsed?.error || parsed?.message || xhr.responseText || xhr.status
