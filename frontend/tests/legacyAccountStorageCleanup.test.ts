@@ -116,6 +116,36 @@ try {
   await runtimeModule.exports.resetClientRuntimeState({ preserveServiceWorker: true, preserveOfflineWork: true })
   assert.deepEqual(stored(), [[null, null], [null, null]], 'a reset that clears auth still clears it')
   console.log('PASS a same-user reset keeps the signed-in account in place and never restores an older one over a newer sign-in or sign-out')
+
+  // A Stock Session writes its request ids into its draft, and reads it back,
+  // before sending. A draft written or removed while a drafts-keeping reset
+  // awaits its cleanup stays exactly as written.
+  const draft = 'businessos_draft_v2_%5B%22a%22%5D_fast_stockin'
+  const before = '{"lines":[{"key":"l1","requestId":"r-1"}]}'
+  const submitted = '{"lines":[{"key":"l1","requestId":"r-1"},{"key":"l2","requestId":"r-2"}],"receivingSubmissions":{"requests":{"l2":{"client_request_id":"r-2"}}}}'
+  account(7, '111')
+  local.setItem(draft, before); duringMirrorReset = () => local.setItem(draft, submitted)
+  await sameUserReset()
+  assert.equal(local.getItem(draft), submitted, 'the draft submitted during the cleanup keeps its request ids; the older one is not written back')
+  local.setItem(draft, before); duringMirrorReset = () => local.removeItem(draft)
+  await sameUserReset()
+  assert.equal(local.getItem(draft), null, 'a session finished during the cleanup is not brought back')
+  local.setItem(draft, before); duringMirrorReset = () => {}
+  await sameUserReset()
+  assert.equal(local.getItem(draft), before, 'nobody wrote: the draft stays')
+  // The admin resets (data reset, factory reset, data path) pass these exact
+  // options (api/methods.ts): drafts are still cleared, the account and the
+  // device's settings stay.
+  const methods = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
+  const adminLiteral = /async function invalidateClientRuntimeState[\s\S]*?resetClientRuntimeState\((\{[\s\S]*?\})\)\.catch/.exec(methods)?.[1]
+  assert.ok(adminLiteral, 'invalidateClientRuntimeState options')
+  const adminOptions = new Function('mirrorTables', `return (${adminLiteral})`)(undefined) as Record<string, unknown>
+  local.setItem(draft, before); local.setItem(STORAGE_KEYS.DEVICE_SETTINGS, '{"language":"km"}'); duringMirrorReset = () => {}
+  await runtimeModule.exports.resetClientRuntimeState(adminOptions)
+  assert.equal(local.getItem(draft), null, 'an admin reset still clears drafts')
+  assert.deepEqual(stored(), [['{"id":7}', '111'], ['{"id":7}', '111']], 'and keeps the signed-in account')
+  assert.equal(local.getItem(STORAGE_KEYS.DEVICE_SETTINGS), '{"language":"km"}', 'and the device settings')
+  console.log('PASS a drafts-keeping reset keeps drafts in place, as written during the cleanup; the admin resets still clear them')
 } finally {
   if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow)
   else Reflect.deleteProperty(globalThis, 'window')

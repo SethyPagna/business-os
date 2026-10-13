@@ -220,19 +220,6 @@ function snapshotStorage(storage: Storage | null, preserveKeys: Set<string>): St
   return kept
 }
 
-function snapshotStoragePrefixes(storage: Storage | null, prefixes: readonly string[]): StorageEntry[] {
-  if (!storage) return []
-  const kept: StorageEntry[] = []
-  try {
-    for (let index = 0; index < storage.length; index += 1) {
-      const key = storage.key(index)
-      if (!key || !prefixes.some((prefix) => key.startsWith(prefix))) continue
-      kept.push([key, storage.getItem(key)])
-    }
-  } catch (_) {}
-  return kept
-}
-
 function clearStorage(storage: Storage | null, preserveKeys: Set<string>, keepInPlace: readonly string[] = []): void {
   if (!storage) return
   const toDelete: string[] = []
@@ -306,18 +293,17 @@ export async function resetClientRuntimeState(options: RuntimeResetOptions = {})
   // signed-in account is one -- another tab can sign in or out meanwhile, and
   // writing the old account back would hand it the new account's session.
   const liveKeys = new Set(['businessos_read_session', 'businessos_auth_cookie_pending', 'businessos_unresolved_signout_v1', STORAGE_KEYS.USER, STORAGE_KEYS.USER_EXPIRY])
-  const keptLocal = canUseBrowserStorage() ? [
-    ...snapshotStorage(window.localStorage, localPreserveKeys).filter(([key]) => !liveKeys.has(key)),
-    ...(options.preserveUiDrafts === true ? snapshotStoragePrefixes(window.localStorage, ['businessos_draft_']) : []),
-  ] : []
+  const keptLocal = canUseBrowserStorage() ? snapshotStorage(window.localStorage, localPreserveKeys).filter(([key]) => !liveKeys.has(key)) : []
   const keptSession = canUseBrowserStorage() ? snapshotStorage(window.sessionStorage, sessionPreserveKeys).filter(([key]) => !liveKeys.has(key)) : []
 
   // Kept in place, never snapshotted and restored, so a value another tab writes
   // during the asynchronous cleanup below survives byte for byte: the device's
   // write-owner generation, which only ever increases (api/actorReadScope.ts),
-  // and -- with the drafts -- the receiving Stock Session's product-attempt
-  // records, which belong to its draft (utils/receivingProductAttempt.ts).
-  const keepInPlace = ['businessos_write_owner_v1', ...(options.preserveUiDrafts === true ? ['businessos_receiving_product_attempt_v1:'] : [])]
+  // and, when drafts are kept, the drafts themselves -- a Stock Session writes
+  // its request ids into its draft before sending -- and the receiving Stock
+  // Session's product-attempt records, which belong to its draft
+  // (utils/receivingProductAttempt.ts).
+  const keepInPlace = ['businessos_write_owner_v1', ...(options.preserveUiDrafts === true ? ['businessos_draft_', 'businessos_receiving_product_attempt_v1:'] : [])]
   clearStorage(canUseBrowserStorage() ? window.localStorage : null, localPreserveKeys, keepInPlace)
   clearStorage(canUseBrowserStorage() ? window.sessionStorage : null, sessionPreserveKeys)
 
