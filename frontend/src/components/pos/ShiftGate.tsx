@@ -971,11 +971,12 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                 // extra change put in when the float ran out, then what was
                 // counted out of it at the close -- on the same cell shape as
                 // "Opened with" so the three are read as one comparison.
-                // Only when some was actually put in -- the SAME rule the
-                // report rows and the Reports export use (shiftAdditionalCash),
-                // so a shift that never needed more change does not print
-                // "+ $0.00 · 0៛" here and nothing there.
-                !!closedAdditional && { label: t('shift_recon_additional_cash'), value: `+ ${shiftCountedPairText(closedAdditional.usd, closedAdditional.khr, fmtUSD, fmtKHR)}` },
+                // Always, once the close is written -- the SAME rule the report
+                // rows and the Reports export use (shiftAdditionalCash; owner,
+                // 13 Oct 2026: Opening -> Additional -> Closing, $0 included).
+                // The (+) of an inflow only marks an amount: a shift that needed
+                // no more change reads "$0.00 · 0៛", not "+ $0.00 · 0៛".
+                !!closedAdditional && { label: t('shift_recon_additional_cash'), value: `${closedAdditional.usd || closedAdditional.khr ? '+ ' : ''}${shiftCountedPairText(closedAdditional.usd, closedAdditional.khr, fmtUSD, fmtKHR)}` },
                 !!closed && { label: t('shift_counted_close'), value: shiftCountedPairText(closed.closing_counted_usd, closed.closing_counted_khr, fmtUSD, fmtKHR) },
                 !!closed?.closing_note && { label: t('note'), value: closed.closing_note },
               ]}
