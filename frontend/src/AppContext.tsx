@@ -1335,6 +1335,10 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       // The open sale detail states a refused line edit beside the edit and
       // reloads that exact sale itself; a second dialog would cover it.
       if (['sales:amend', 'sales:addItems'].includes(String(detail.channel || ''))) return
+      // Likewise a fee delete refused as stale (fees-k K2): the Expense page says what happened to that
+      // expense, in the operator's language, and reloads itself. A generic "Item changed on another
+      // device" dialog over its own confirmation would only contradict that.
+      if (['fees:delete'].includes(String(detail.channel || ''))) return
       const entity = String(detail.entity || '').trim().toLowerCase()
       let message = detail.message || 'This item changed on another device. Refresh and try again.'
       let entityLabel = 'Item'

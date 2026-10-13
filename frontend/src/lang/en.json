@@ -2240,6 +2240,8 @@
   "fee_created": "Expense added",
   "fee_date": "Date",
   "fee_deleted": "Expense deleted",
+  "fee_delete_conflict": "This expense changed on another device, so it was not deleted. The latest version is shown. Check it, then delete it again if you still want to.",
+  "fee_delete_gone": "This expense was already removed on another device. The list has been refreshed.",
   "fee_label": "Label",
   "fee_label_placeholder": "e.g. Delivery charge, Staff salary",
   "fee_label_limit_hint": "Short reusable tag — up to 6 words. Details go in Notes.",
