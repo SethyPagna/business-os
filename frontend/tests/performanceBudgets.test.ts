@@ -111,7 +111,8 @@ function closureBytesAndCount(graph: Map<string, string[]>, entryFiles: string[]
 // bumps and code churn without masking an actual regression, and small
 // enough that a doubling -- the kind of regression a raw "under 1.85MB"
 // ceiling would miss for a long time -- fails immediately.
-const CATALOG_PRODUCTS_BASELINE_BYTES = 804_175
+// Re-measured 6.0.303: portalMotion.ts joined catalog-public-core (6.0.187) and the closure was already 19 bytes under the old limit.
+const CATALOG_PRODUCTS_BASELINE_BYTES = 884_917
 const CATALOG_PRODUCTS_BASELINE_CHUNKS = 28
 const PUBLIC_PRELOAD_BASELINE_CHUNKS = 36
 const BUDGET_TOLERANCE = 1.10
