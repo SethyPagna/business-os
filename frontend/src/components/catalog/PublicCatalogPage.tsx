@@ -47,6 +47,7 @@ import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { mergePortalCatalogProducts } from './portalProductGrouping.ts'
 import { DEFAULT_PORTAL_BROWSE_SORT, isDefaultPortalBrowse, isPortalPriceSort, portalBrowseParams, usePortalBrowse } from './portalBrowse.ts'
 import { normalizeGoogleMapsEmbed } from './portalEditorUtils.ts'
+import { portalScrollBehavior } from './portalMotion.ts'
 import { resolveCatalogAssetUrl } from './catalogAssetUrls'
 import { usePortalBucket, usePortalWishlist, formatPortalBucketText, downloadPortalBucketFile } from './portalBucket.ts'
 import { usePortalAccount } from './portalAccount.ts'
@@ -1242,7 +1243,7 @@ export default function PublicCatalogPage() {
 
   const scrollPublicPortal = (direction: 'top' | 'bottom') => {
     const top = direction === 'bottom' ? Math.max(document.documentElement.scrollHeight, document.body.scrollHeight) : 0
-    window.scrollTo({ top, behavior: 'smooth' })
+    window.scrollTo({ top, behavior: portalScrollBehavior() })
   }
 
   const bucketBusinessName = String(displayConfig.businessName || displayConfig.title || STOREFRONT_NAME).trim()

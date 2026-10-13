@@ -480,7 +480,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
           <PortalEmbedConsent
             copy={copy}
             src={mapEmbedUrl}
-            title="portal-about-map"
+            title={copy('portal_a11y_map_title', "Map showing the shop's location", 'ផែនទីបង្ហាញទីតាំងហាង')}
             address={addressFact?.value || ''}
           />
         </div>

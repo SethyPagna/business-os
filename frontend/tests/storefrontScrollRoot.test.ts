@@ -133,9 +133,9 @@ runTest('the document is the sole public vertical scroll owner', () => {
   assert.doesNotMatch(shell, /(?<![\w-])h-screen\b/, 'a fixed-height shell cannot grow with the catalog and pins the page')
   assert.match(shell, /min-h-screen/, 'the shell must still fill at least the viewport')
   assert.doesNotMatch(shell, /overflow-hidden/, 'a hidden shell clips the whole storefront below the fold')
-  assert.match(mainCss, /html\[data-public-portal='true'\]\s*\{[\s\S]*?overflow-y:\s*auto\s*!important;[\s\S]*?touch-action:\s*pan-y;/,
-    'the document root owns vertical scrolling and touch panning')
-  assert.match(mainCss, /body\[data-public-portal='true'\]\s*\{[\s\S]*?overflow:\s*visible;[\s\S]*?touch-action:\s*pan-y;/,
+  assert.match(mainCss, /html\[data-public-portal='true'\]\s*\{[\s\S]*?overflow-y:\s*auto\s*!important;[\s\S]*?touch-action:\s*pan-x pan-y pinch-zoom;/,
+    'the document root owns vertical scrolling and touch panning, and leaves pinch-zoom to the visitor')
+  assert.match(mainCss, /body\[data-public-portal='true'\]\s*\{[\s\S]*?overflow:\s*visible;[\s\S]*?touch-action:\s*pan-x pan-y pinch-zoom;/,
     'the body grows with content instead of becoming a nested scrollport')
 })
 

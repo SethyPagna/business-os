@@ -72,7 +72,7 @@ html[data-public-portal='true'] {
   overflow-x: hidden;
   overscroll-behavior-y: auto;
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-y;
+  touch-action: pan-x pan-y pinch-zoom;
 }
 
 body[data-public-portal='true'] {
@@ -80,7 +80,12 @@ body[data-public-portal='true'] {
   min-height: 100%;
   overflow: visible;
   overscroll-behavior-y: auto;
-  touch-action: pan-y;
+  touch-action: pan-x pan-y pinch-zoom;
+}
+
+html[data-business-os-initial-route='public'],
+html[data-business-os-initial-route='public'] body {
+  touch-action: pan-x pan-y pinch-zoom;
 }
 
 /* Khmer line-heights (user, Aug 31: "khmer versions are not compact enough...
@@ -1410,6 +1415,8 @@ body.lang-km .dense-data-table td { line-height: var(--km-line-height, 1.6); }
 /* Accent color overrides */
 .btn-primary { background-color: var(--ui-accent,#9c7a3c) !important; border-color: color-mix(in srgb, var(--ui-accent,#9c7a3c) 78%, #0f172a 22%) !important; }
 .btn-primary:hover { filter: brightness(0.94); }
+html[data-public-portal='true'] .btn-primary,
+html[data-business-os-initial-route='public'] .btn-primary { background-color: #856833 !important; border-color: color-mix(in srgb, #856833 78%, #0f172a 22%) !important; }
 .btn-secondary:hover { border-color: color-mix(in srgb, var(--ui-accent,#9c7a3c) 42%, #94a3b8 58%) !important; }
 .sidebar-item.active { color: var(--ui-accent,#9c7a3c) !important; }
 

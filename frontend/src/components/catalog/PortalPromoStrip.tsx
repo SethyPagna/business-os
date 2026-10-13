@@ -7,6 +7,7 @@ import {
   ensureAccessibleSurface,
   readableInkOn,
 } from './portalContrast.ts'
+import { portalScrollBehavior } from './portalMotion.ts'
 import {
   evaluatePromotionPricing,
   isProductPromoted,
@@ -125,7 +126,7 @@ export default function PortalPromoStrip({
     const child = track?.children[index] as HTMLElement | undefined
     if (!track || !child) return
     pausedRef.current = true
-    track.scrollTo({ left: child.offsetLeft, behavior: 'smooth' })
+    track.scrollTo({ left: child.offsetLeft, behavior: portalScrollBehavior() })
     // resume the drift shortly after the jump settles
     window.setTimeout(() => { pausedRef.current = false }, 2500)
   }

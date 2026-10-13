@@ -158,7 +158,7 @@ runTest('public portal About tab keeps the story on the right, the map full-widt
   // future session can't make the same stale-carry-forward mistake again.
   assert.match(publicCatalogPageSource, /messenger: MessengerIcon,/, 'public contact icon map should use the stylized MessengerIcon, not a generic MessageSquare stand-in')
   assert.match(catalogSecondaryTabsSource, /the business story\/description on the right per the requested/, 'About tab facts\\/contact card should stay on the left and the story on the right')
-  assert.match(catalogSecondaryTabsSource, /title="portal-about-map"/, 'About tab map should render as its own full-width section')
+  assert.match(catalogSecondaryTabsSource, /<PortalEmbedConsent[\s\S]*?title=\{copy\('portal_a11y_map_title'/, 'About tab map should render as its own full-width section')
   assert.match(catalogSecondaryTabsSource, /onClick=\{\(\) => openPortalImage\(previewConfig\.businessName \|\| copy\('logoImage', 'Logo image'\), \[versionedBusinessLogo\]\)\}/, 'About tab logo should open the image lightbox on click')
   // 6.2 (Part 399, user): the LOGO left the top bar entirely -- social
   // links took its side, language + light/dark the other. The clickable

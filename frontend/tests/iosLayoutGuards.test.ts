@@ -100,10 +100,14 @@ runTest('D3 -- the date-entry field keeps its own rule instead of tying with the
   assert.match(mainCss, /input\.date-entry-input \{\s*font-size: max\(16px, calc\(13px \* var\(--ui-text-scale, 1\)\)\) !important;/)
 })
 
-runTest('D3 -- index.html still caps browser zoom as belt and braces', () => {
-  // Catches: removing maximum-scale while believing the CSS floor replaced
-  // it. It did not -- it replaced it as the PRIMARY mechanism only.
-  assert.match(indexHtml, /name="viewport"[^>]*maximum-scale=1[^>]*user-scalable=no/)
+runTest('D3 -- the staff app still caps browser zoom as belt and braces; the storefront does not', () => {
+  // Catches: removing maximum-scale from the admin routes while believing the
+  // CSS floor replaced it. It did not -- it replaced it as the PRIMARY
+  // mechanism only. The cap is written by the bootstrap on admin routes; the
+  // static meta is what the storefront serves and stays zoomable (owner,
+  // 27 Sep 2026; tests/mobileViewportGuard.test.ts runs both hosts).
+  assert.doesNotMatch(indexHtml, /<meta name="viewport" content="[^"]*(?:maximum-scale|user-scalable)/)
+  assert.match(indexHtml, /adminViewport\.setAttribute\('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover'\)/)
 })
 
 // ---------------------------------------------------------------------------

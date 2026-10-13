@@ -67,7 +67,7 @@ export function LegalInlineLink({ page, label, className }: { page: LegalPageKey
 
 type LegalOpenDetail = { page: LegalPageKey; handled: boolean }
 
-const INLINE_LINK_CLASS = 'font-semibold text-emerald-700 underline underline-offset-2 transition hover:text-emerald-600 dark:text-emerald-300'
+const INLINE_LINK_CLASS = 'font-semibold text-emerald-700 underline underline-offset-2 transition hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200'
 
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 
