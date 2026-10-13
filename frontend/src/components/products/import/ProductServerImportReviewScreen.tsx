@@ -90,6 +90,10 @@ function ProductServerImportReviewBody({ jobId, jobRevision, t, notify, onApprov
     return value && value !== key ? value : fallback
   }
   const [status, setStatus] = useState('queued')
+  // Replace entire catalog: a skipped row keeps its product (owner ruling 17),
+  // which the decision menu and the note under the title say in the person's
+  // language. Read from the job's own policy, never inferred from the rows.
+  const [replaceAll, setReplaceAll] = useState(false)
   const [jobError, setJobError] = useState('')
   const [rows, setRows] = useState<ReviewRow[]>([])
   const [total, setTotal] = useState(0)
@@ -126,6 +130,7 @@ function ProductServerImportReviewBody({ jobId, jobRevision, t, notify, onApprov
         const job = unwrapJob(raw)
         const nextStatus = String(job?.status || 'queued').toLowerCase()
         setStatus(nextStatus)
+        setReplaceAll((job?.policy as { import_mode?: unknown } | null | undefined)?.import_mode === 'replace_all')
         setJobError(String(job?.last_error || job?.error_message || ''))
         if (job) onJob?.(job)
         if (!['awaiting_review', 'failed', 'cancelled', 'completed', 'completed_with_errors'].includes(nextStatus)) {
@@ -257,7 +262,7 @@ function ProductServerImportReviewBody({ jobId, jobRevision, t, notify, onApprov
   }
 
   return <div className="space-y-4">
-    <div><h3 className="text-sm font-semibold">{tr('import_review_title', 'Review before importing')} — Products</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{summary || tr('import_review_no_actions', 'No actionable rows were found.')}</p></div>
+    <div><h3 className="text-sm font-semibold">{tr('import_review_title', 'Review before importing')} — Products</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{summary || tr('import_review_no_actions', 'No actionable rows were found.')}</p>{replaceAll ? <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{tr('import_replace_skip_note', 'Replace entire catalog: a row you skip keeps its product. Only products the file never mentions are removed.')}</p> : null}</div>
     {unresolved > 0 ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"><strong>{unresolved} flagged row(s) still need a decision.</strong> Barcode/SKU collisions stay separate by default; negative stock becomes 0. Confirm that safe result or skip the row.</div> : null}
     <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
       <label className="relative block"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input type="search" value={queryDraft} onChange={(event) => setQueryDraft(event.target.value)} placeholder={tr('search_rows', 'Search rows')} className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-8 pr-3 text-sm dark:border-slate-700 dark:bg-slate-900" /></label>
@@ -272,7 +277,7 @@ function ProductServerImportReviewBody({ jobId, jobRevision, t, notify, onApprov
         const options = [
           ...(requiresDecision ? [{ value: 'needs_decision', label: 'Choose a safe result…', disabled: true }] : []),
           { value: 'apply', label: applyLabel },
-          { value: 'skip', label: 'Skip row' },
+          { value: 'skip', label: replaceAll ? tr('import_skip_row_kept', 'Skip row (product kept)') : 'Skip row' },
         ]
         if (row.action === 'update') options.splice(1, 0, { value: 'merge_stock', label: 'Stock only' }, { value: 'override_add', label: 'Update + add stock' }, { value: 'override_replace', label: 'Update details; keep stock' })
         return <tr key={row.rowNumber} className="border-t border-slate-100 align-top dark:border-slate-800"><td className="px-3 py-2">{row.rowNumber}</td><td className="px-3 py-2 font-medium">{row.identifier || String(row.data?.name || '—')}<div className="mt-0.5 font-normal text-slate-400">{String(row.data?.barcode || row.data?.sku || '')}</div></td><td className="px-3 py-2">{row.action}</td><td className="max-w-sm px-3 py-2 text-slate-500 dark:text-slate-400">{row.message || (row.warnings || []).map((warning) => warning.message).filter(Boolean).join(' · ') || '—'}</td><td className="w-52 px-3 py-2"><AppSelect value={choiceFor(row)} onChange={(value) => void saveDecision(row, value)} ariaLabel={`Decision for row ${row.rowNumber}`} buttonClassName="w-full px-2 py-1.5 text-xs" options={options} disabled={!canEditCosts || savingRow !== null} /></td></tr>

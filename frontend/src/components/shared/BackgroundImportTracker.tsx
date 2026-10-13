@@ -72,6 +72,9 @@ type ImportJobSummary = {
   created?: unknown
   updated?: unknown
   skipped?: unknown
+  // Replace-all only: how many skipped rows kept their matched product (owner
+  // ruling 17, 13 Oct). A subset of `skipped`: both count rows.
+  skippedKept?: unknown
   errored?: unknown
   warned?: unknown
   imported?: unknown
@@ -146,7 +149,7 @@ type ProgressLabels = Partial<Record<
   string
 >>
 
-type ResultLabels = Partial<Record<'created' | 'updated' | 'duplicate' | 'imageMatched' | 'imageSkipped' | 'rowIssue' | 'needsReview', string>>
+type ResultLabels = Partial<Record<'created' | 'updated' | 'duplicate' | 'skippedKept' | 'imageMatched' | 'imageSkipped' | 'rowIssue' | 'needsReview', string>>
 
 type TrackerAction = {
   jobId: string
@@ -566,7 +569,12 @@ function getJobResultParts(job: ImportJob, labels: ResultLabels = {}): string[] 
   // name that happened to match by coincidence.
   add('created', labels.created || 'created')
   add('updated', labels.updated || 'updated')
-  add('skipped', labels.duplicate || 'skipped')
+  // Skipped rows whose product a replace-all import kept are shown on their own
+  // chip, and taken out of the plain "skipped" tally so no row is counted twice.
+  const skippedKept = Math.min(Math.max(0, Number(summary?.skippedKept || 0)), Math.max(0, Number(summary?.skipped || 0)))
+  const skippedPlain = Math.max(0, Number(summary?.skipped || 0)) - skippedKept
+  if (skippedPlain > 0) parts.push(`${skippedPlain.toLocaleString()} ${labels.duplicate || 'skipped'}`)
+  if (skippedKept > 0) parts.push(`${skippedKept.toLocaleString()} ${labels.skippedKept || 'skipped (kept)'}`)
   add('errored', labels.rowIssue || 'row issue')
   // Non-blocking notices (barcode reused by a different product, negative
   // stock reset to 0 -- see classifyProducts in importEngine.ts) that
@@ -1152,6 +1160,7 @@ export default function BackgroundImportTracker() {
     created: t('created') || 'created',
     updated: t('updated') || 'updated',
     duplicate: t('skipped') || 'skipped',
+    skippedKept: t('import_skipped_kept') || 'skipped (kept)',
     imageMatched: t('image_matched') || 'image matched',
     imageSkipped: t('image_skipped') || 'image skipped',
     rowIssue: t('row_issue') || 'row issue',

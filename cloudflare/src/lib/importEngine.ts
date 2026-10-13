@@ -5410,6 +5410,7 @@ export async function finalizeImportApply(
   deactivatedCount: number,
   unifiedGroupCount = 0,
   aggregatedSnapshotGroupCount = 0,
+  skippedKeptCount = 0,
 ): Promise<{ applied: number; failed: number }> {
   const finalCounts = await db.staging.prepare(`SELECT action, COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'apply' GROUP BY action`)
     .all<{ action: RowAction; n: number }>({ id: jobId })
@@ -5445,6 +5446,11 @@ export async function finalizeImportApply(
   summary.total = totalUnits
   delete summary.replacement_refused
   if (deactivatedCount > 0) summary.deactivated = deactivatedCount
+  // Replace-all only: how many skipped rows kept their matched product (owner
+  // ruling 17) -- a subset of `skipped`. Reset first so a retried final phase
+  // never reports a stale count.
+  delete summary.skippedKept
+  if (skippedKeptCount > 0) summary.skippedKept = skippedKeptCount
   if (unifiedGroupCount > 0) summary.groupsUnified = unifiedGroupCount
   if (aggregatedSnapshotGroupCount > 0) summary.snapshotGroupsAggregated = aggregatedSnapshotGroupCount
   summary.timings = {
@@ -6203,22 +6209,44 @@ export class ProductReplacementIncompleteError extends Error {
   }
 }
 
+// Owner ruling 17 (13 Oct): a row the operator skipped in a replace-all import
+// keeps its matched product -- a skipped row is never deactivated. The ids come
+// from the apply-phase row log (import_job_rows, the staging database), which
+// records `existingId` for every row the run classified, skipped or not. Both
+// ways of skipping land here: the reviewer's per-row decision
+// (decisionsByRowNumber) and the `skip_row` mode baked into the row's `_action`.
+// A skipped row that matched nothing (it would have created a product) has no
+// existingId and keeps nothing. One entry per skipped row that matched a
+// product (a product skipped twice appears twice, so the length is the row
+// count the summary reports). Pure read; the deactivation itself is
+// finalizeProductReplacement.
+export async function readSkippedProductIds(db: D1Compat, jobId: string): Promise<number[]> {
+  const rows = await db.staging.prepare(`SELECT CAST(json_extract(result_json, '$.existingId') AS INTEGER) AS id
+      FROM import_job_rows
+      WHERE job_id = @id AND phase = 'apply' AND action = 'skip' AND json_extract(result_json, '$.existingId') IS NOT NULL`)
+    .all<{ id: number | null }>({ id: jobId })
+  return rows.map((row) => Number(row.id)).filter((id) => Number.isSafeInteger(id) && id > 0)
+}
+
 export async function finalizeProductReplacement(db: D1Compat, cutoff: string,
-  context: { jobId?: string; actor?: { id: number | null; name: string | null } } = {},
+  context: { jobId?: string; actor?: { id: number | null; name: string | null }; keepProductIds?: number[] } = {},
 ): Promise<number> {
-  const candidates = `p.is_active=1 AND (p.updated_at IS NULL OR p.updated_at < @cutoff)`
-  const params = { cutoff, jobId: context.jobId ?? null, actorId: context.actor?.id ?? null, actorName: context.actor?.name ?? null }
+  // One JSON-array parameter rather than one placeholder per id: a catalog-sized
+  // keep list would blow past D1's bound-parameter ceiling.
+  const keepIds = JSON.stringify([...new Set((context.keepProductIds || []).map(Number).filter((id) => Number.isSafeInteger(id) && id > 0))])
+  const candidates = `p.is_active=1 AND (p.updated_at IS NULL OR p.updated_at < @cutoff) AND p.id NOT IN (SELECT value FROM json_each(@keepIds))`
+  const params = { cutoff, keepIds, jobId: context.jobId ?? null, actorId: context.actor?.id ?? null, actorName: context.actor?.name ?? null }
   try {
     const result = await db.batch([
       { sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products p WHERE ${candidates} AND ${productHasStockSql()})
-          THEN json_extract('[]','$[product_has_stock]') ELSE 1 END`, params: { cutoff } },
+          THEN json_extract('[]','$[product_has_stock]') ELSE 1 END`, params: { cutoff, keepIds } },
       { sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
           SELECT @actorId,@actorName,'delete','product',p.id,
             json_object('source','replace_all','importJobId',@jobId,'cutoff',@cutoff,'productName',p.name,
               'membership','removed','priorMembership','present'), 'product',p.id,NULL
           FROM products p WHERE ${candidates}`, params },
       { sql: `UPDATE products SET is_active=0,updated_at=CURRENT_TIMESTAMP
-          WHERE is_active=1 AND (updated_at IS NULL OR updated_at < @cutoff)`, params: { cutoff } },
+          WHERE is_active=1 AND (updated_at IS NULL OR updated_at < @cutoff) AND id NOT IN (SELECT value FROM json_each(@keepIds))`, params: { cutoff, keepIds } },
     ])
     return Number(result[2]?.meta?.changes || 0)
   } catch (error) { throw productStockGuardError(error) || error }
@@ -7291,14 +7319,17 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // path already refreshes updated_at on every create/update
     // unconditionally (see the two UPDATE/INSERT statements above), so no
     // extra bookkeeping is needed to know what this run actually wrote.
-    // A row an operator explicitly marked 'skip' during review never
-    // reaches the write path, so its matched product (if any) is treated
-    // the same as any other untouched product and gets deactivated too --
-    // 'skip' means "don't act on this row", and under replace_all
-    // semantics "not part of the new file's data" and "not acted on" are
-    // the same thing; there's no separate "explicitly keep this out of
-    // the replace" signal today.
+    // A row marked 'skip' never reaches the write path, so its matched
+    // product keeps its old updated_at -- but owner ruling 17 (13 Oct) says
+    // a skipped row is never deactivated: "skip" is the operator's explicit
+    // keep-this-one signal. readSkippedProductIds lists the matched
+    // products of every skipped row (reviewer decision or skip_row mode),
+    // and finalizeProductReplacement leaves exactly those out of the
+    // deactivation AND out of the product_has_stock refusal. Genuinely
+    // untouched products are deactivated, and refused when they hold
+    // stock, exactly as before.
     let deactivatedCount = 0
+    let skippedKeptCount = 0
     if (job.type === 'products' && getProductImportMode(job.policy_json) === 'replace_all') {
       // Rows are already committed. Save their cursor before the final phase:
       // a refused replacement retries only this phase, never stock receipts.
@@ -7307,7 +7338,9 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       const refusedRows = await db.staging.prepare(`SELECT COUNT(*) AS n FROM import_job_rows
         WHERE job_id=@id AND phase='apply' AND action='error'`).get<{ n: number }>({ id: jobId })
       if (Number(refusedRows?.n || 0) > 0) throw new ProductReplacementIncompleteError()
-      deactivatedCount = await finalizeProductReplacement(db, jobRow.started_at || nowIso, { jobId, actor: importCostActor })
+      const skippedProductIds = await readSkippedProductIds(db, jobId)
+      deactivatedCount = await finalizeProductReplacement(db, jobRow.started_at || nowIso, { jobId, actor: importCostActor, keepProductIds: skippedProductIds })
+      skippedKeptCount = skippedProductIds.length
     }
 
     // Full product snapshots can contain multiple source rows that resolve to
@@ -7370,7 +7403,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // EVERY chunk (not just this last one) -- see runImportAnalyze's
     // finalize step for the same reasoning. Shared so the dedicated
     // stock-actions apply path can never disagree with this one.
-    const outcome = await finalizeImportApply(env, db, jobId, totalUnits, state.startedAtMs, sw.marks, queueLatencyMs, deactivatedCount, unifiedGroupCount, aggregatedSnapshotGroupCount)
+    const outcome = await finalizeImportApply(env, db, jobId, totalUnits, state.startedAtMs, sw.marks, queueLatencyMs, deactivatedCount, unifiedGroupCount, aggregatedSnapshotGroupCount, skippedKeptCount)
     console.log('[import-timing] apply done', jobId, outcome)
     return outcome
   } catch (error) {
