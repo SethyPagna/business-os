@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
+import { buildSalesExportCsv } from '../src/utils/salesImportContract.ts'
 
 const source = readFileSync(new URL('../src/components/sales/ExportModal.tsx', import.meta.url), 'utf8')
 function load(text: string, dependencies: Record<string, unknown>) {
@@ -38,7 +39,7 @@ function mount(api: (params: any) => Promise<any>, timeout = 1000) {
     '../shared/DateTimeRangePicker.tsx': { __esModule: true, default: 'Picker', todayDateTimeRange: () => ({ ...fullDay }) },
     '../../utils/loaders.ts': { withLoaderTimeout: (fn: () => Promise<any>, label: string) => loaders.withLoaderTimeout(fn, label, timeout) },
     '../../utils/formatters.ts': { fmtDateOnly: (value: string) => value },
-    '../../utils/salesImportContract.ts': { SALES_IMPORT_COLUMNS: ['receipt_number', 'sale_date', 'name'] },
+    '../../utils/salesImportContract.ts': { buildSalesExportCsv },
   })
   const prior = { window: globalThis.window, alert: globalThis.alert, document: globalThis.document, URL: globalThis.URL }
   Object.assign(globalThis, { window: { api: { getSalesExport: api } }, alert: () => { throw new Error('native alert() must not be used; errors go through notify') }, document: { createElement: () => ({ click() {} }) }, URL: { createObjectURL: (blob: Blob) => { downloads.push(blob); return 'blob:test' }, revokeObjectURL() {} } })

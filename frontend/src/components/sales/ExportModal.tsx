@@ -8,7 +8,7 @@ import DateTimeRangePicker, { todayDateTimeRange, type DateTimeRange } from '../
 import StatusBadge from './StatusBadge'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { fmtDateOnly } from '../../utils/formatters.ts'
-import { SALES_IMPORT_COLUMNS } from '../../utils/salesImportContract.ts'
+import { buildSalesExportCsv } from '../../utils/salesImportContract.ts'
 import { formatUsd4 } from '../../utils/reportMoney.ts'
 import { useApp, type AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import { primaryToolbarButtonClassName, toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
@@ -170,23 +170,8 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
 
   const buildCsvFallback = (data: SalesExportData): string => {
     if (!data?.sales?.length) throw new Error(tr('no_data_to_export', 'No data to export'))
-    const rows = data.sales
-    const headers = [...SALES_IMPORT_COLUMNS]
-    const escape = (value: unknown): string => {
-      if (value == null) return ''
-      const text = String(value)
-      return text.includes(',') || text.includes('"') || text.includes('\n')
-        ? `"${text.replace(/"/g, '""')}"`
-        : text
-    }
-    // Deliberately no report-title/summary preamble: this CSV is the
-    // authoritative import-compatible detail file. The accounting summary
-    // stays in Preview, while the downloaded file can round-trip directly
-    // through Sales Import without deleting decorative rows by hand.
-    return '\uFEFF' + [
-      headers.join(','),
-      ...rows.map((row) => headers.map((header) => escape(row[header])).join(',')),
-    ].join('\n')
+    // The authoritative import-compatible detail file; the accounting summary stays in Preview.
+    return buildSalesExportCsv(data.sales)
   }
 
   const handlePreview = async () => {
