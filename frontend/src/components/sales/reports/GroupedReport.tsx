@@ -30,6 +30,7 @@ import {
   normalizeTotals,
   num,
   pct,
+  profitLabel,
   receiptLineKind,
   REPORT_NOUNS,
   reportFileName,
@@ -419,11 +420,11 @@ export default function GroupedReport(p: ReportViewProps) {
     ...(showProfit
       ? [
           { key: 'cost_usd', label: tr('cost', 'Cost'), kind: 'money', value: (r: GroupRow) => r.cost_usd ?? null, defaultVisible: false } as ReportColumn<GroupRow>,
-          { key: 'profit_usd', label: tr('rpt_gross_profit', 'Gross profit'), kind: 'money', value: (r: GroupRow) => r.profit_usd ?? null } as ReportColumn<GroupRow>,
+          { key: 'profit_usd', label: profitLabel(totals, tr), kind: 'money', value: (r: GroupRow) => r.profit_usd ?? null } as ReportColumn<GroupRow>,
           { key: 'margin_pct', label: tr('rpt_margin', 'Margin'), kind: 'pct', value: (r: GroupRow) => pct(num(r.profit_usd), basisValue(r, options.basis)) } as ReportColumn<GroupRow>,
         ]
       : []),
-  ], [tr, view.labelKey, view.fallback, by, options.basis, totalBasis, showProfit]) // eslint-disable-line react-hooks/rules-of-hooks -- `by` is fixed per mounted instance
+  ], [tr, view.labelKey, view.fallback, by, options.basis, totalBasis, showProfit, totals.profit_excludes_delivery]) // eslint-disable-line react-hooks/rules-of-hooks -- `by` is fixed per mounted instance
   const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtRow), groupTotalsRow ? [...groupRows, groupTotalsRow] : groupRows)
   const open = groupRows.find((r) => r.key === openKey) || null
   const drill = open ? groupDrill(by, open) : null
@@ -435,7 +436,7 @@ export default function GroupedReport(p: ReportViewProps) {
       titleControl={p.titleControl}
       hint={{ label: title, text: tr('rpt_hint_grouped', 'Each row is the full revenue calculation for that group (same definition as the Overview), so the rows add up to the totals line. Share = the row’s basis figure as a percentage of the total.') }}
       menuAction={exportMenu(() => downloadCSV(reportFileName(view.id, filters, 'csv'), csv()), () => openPrintExport({ title: printTitle, subtitle, headers: columns.map((c) => c.label), rows: csv() }))}
-      summary={groupRows.length ? joinSummary([countPart(groupRows.length, REPORT_NOUNS[by]), countLabel(totals.tx_count, REPORT_NOUNS.sale, tr), `${basisLabel} ${fmtMoney(totalBasis)}`, totals.refund_usd ? `${tr('refunds', 'Refunds')} ${fmtMoney(totals.refund_usd)}` : null, hasProfit(totals) ? `${tr('rpt_gross_profit', 'Gross profit')} ${fmtMoney(totals.profit_usd)} (${fmtPct(pct(totals.profit_usd, totalBasis))})` : null]) : ''}
+      summary={groupRows.length ? joinSummary([countPart(groupRows.length, REPORT_NOUNS[by]), countLabel(totals.tx_count, REPORT_NOUNS.sale, tr), `${basisLabel} ${fmtMoney(totalBasis)}`, totals.refund_usd ? `${tr('refunds', 'Refunds')} ${fmtMoney(totals.refund_usd)}` : null, hasProfit(totals) ? `${profitLabel(totals, tr)} ${fmtMoney(totals.profit_usd)} (${fmtPct(pct(totals.profit_usd, totalBasis))})` : null]) : ''}
       error={state.error}
       onRetry={state.reload}
       retryLabel={tr('retry', 'Retry')}

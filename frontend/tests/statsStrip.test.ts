@@ -241,9 +241,12 @@ test('Part 548: report figures remain visible on every viewport without duplicat
     'src/components/sales/reports/GroupedReport.tsx',
   ]) {
     const src = read(rel)
-    assert.match(src, /tr\('rpt_gross_profit',\s*'[^']+'\)/, `${rel} renders the shared profit label in its summary`)
+    // profitLabel (reportModel.ts) is the shared label: rpt_gross_profit, or
+    // the goods-only name when the server flagged a cost viewer's profit (L4).
+    assert.match(src, /profitLabel\((totals|r), tr\)/, `${rel} renders the shared profit label in its summary`)
     assert.ok(!/hidden sm:inline/.test(src), `${rel} never hides a figure below the sm breakpoint`)
   }
+  assert.match(read('src/components/sales/reports/reportModel.ts'), /: tr\('rpt_gross_profit', 'Gross profit'\)\r?\n\}/, 'profitLabel falls back to the shared rpt_gross_profit label')
   const overview = read('src/components/sales/reports/OverviewReport.tsx')
   assert.ok(overview.includes('buildIncomeStatement('), 'Overview retains the canonical profit statement')
   assert.ok(overview.includes('lines.map((l)'), 'Overview renders all permitted statement rows on every viewport')

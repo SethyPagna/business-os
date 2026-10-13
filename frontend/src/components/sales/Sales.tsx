@@ -1806,6 +1806,11 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     const refundUsd = Number(stripReturns.refund_usd) || 0
     const cogsUsd = Number(totals.cost_usd) || 0
     const profitUsd = Number(totals.profit_usd) || 0
+    // AL finding L4 (13 Oct 2026): a cost viewer who is not an administrator
+    // gets profit on goods alone (revenue - cost) and no courier cost, so the
+    // card names it that way and leaves the delivery pair out of its drill.
+    const profitExclDelivery = (stripData?.totals as Record<string, unknown> | undefined)?.profit_excludes_delivery === true
+    const profitCardLabel = profitExclDelivery ? translateOr('rpt_profit_excl_delivery', 'Profit (excl. delivery)') : (t('gross_profit') || 'Gross profit')
     // Stock removed entirely, at cost (owner, Sep 14 2026), wired into this
     // strip's kernel call (F2, Sep 15 2026) the same way the Dashboard cards
     // already carry it. PRESENCE-signalled like cost_usd itself: the server
@@ -1887,27 +1892,31 @@ ${buildEquation({ key: 'revenue', fallback: 'Revenue', usd: revenueUsd }, revenu
         details: [
           { label: t('cogs') || 'COGS', value: fmtUSD(cogsUsd) },
           { label: t('revenue') || 'Revenue', value: fmtUSD(revenueUsd) },
-          { label: t('gross_profit') || 'Gross profit', value: fmtUSD(profitUsd), tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const) },
+          { label: profitCardLabel, value: fmtUSD(profitUsd), tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const) },
         ],
       },
       {
         key: 'profit',
-        label: t('gross_profit') || 'Gross Profit',
+        label: profitExclDelivery ? profitCardLabel : (t('gross_profit') || 'Gross Profit'),
         value: fmtUSD(profitUsd),
         tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const),
         sub: revenueUsd > 0 ? `${((profitUsd / revenueUsd) * 100).toFixed(1)}% ${translateOr('profit_margin_short', 'margin')}` : undefined,
-        hint: `${translateOr('stats_profit_hint', 'Profit = revenue − cost of goods sold + delivery fees charged − actual delivery cost. Includes Not Paid sales.', 'ចំណេញ = ចំណូល − ថ្លៃដើមទំនិញលក់ + ថ្លៃដឹកគិតពីអតិថិជន − ថ្លៃដឹកដើម។ រួមបញ្ចូលការលក់ជាប្រាក់ជំពាក់។')}
+        hint: `${profitExclDelivery
+          ? translateOr('rpt_hint_profit_excl_delivery', 'Revenue − cost of goods sold. Delivery fees and actual delivery cost are not included. Includes Not Paid sales; operating expenses are separate.')
+          : translateOr('stats_profit_hint', 'Profit = revenue − cost of goods sold + delivery fees charged − actual delivery cost. Includes Not Paid sales.', 'ចំណេញ = ចំណូល − ថ្លៃដើមទំនិញលក់ + ថ្លៃដឹកគិតពីអតិថិជន − ថ្លៃដឹកដើម។ រួមបញ្ចូលការលក់ជាប្រាក់ជំពាក់។')}
 
-${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd }, profitTerms(formulaTotals), fmtUSD, translateOr)}`,
+${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback: 'Profit (excl. delivery)', usd: profitUsd } : { key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd }, profitTerms({ ...formulaTotals, profit_excludes_delivery: profitExclDelivery }), fmtUSD, translateOr)}`,
         details: [
           { label: t('revenue') || 'Revenue', value: fmtUSD(revenueUsd) },
           { label: t('cogs') || 'COGS', value: fmtUSD(cogsUsd), tone: 'warn' as const },
           // The hint has said "+ delivery fees charged − courier cost" since
           // the delivery correction; the drill still listed the WAIVED fee,
           // which profit does not subtract. These are the real two terms.
-          { label: translateOr('rpt_delivery_collected', 'Delivery fees charged'), value: fmtUSD(Number(totals.recognized_delivery_usd) || 0) },
-          { label: translateOr('rpt_delivery_paid', 'Actual delivery cost'), value: fmtUSD(Number(totals.recognized_delivery_cost_usd) || 0), tone: 'warn' as const },
-          { label: t('gross_profit') || 'Gross profit', value: fmtUSD(profitUsd), tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const) },
+          ...(profitExclDelivery ? [] : [
+            { label: translateOr('rpt_delivery_collected', 'Delivery fees charged'), value: fmtUSD(Number(totals.recognized_delivery_usd) || 0) },
+            { label: translateOr('rpt_delivery_paid', 'Actual delivery cost'), value: fmtUSD(Number(totals.recognized_delivery_cost_usd) || 0), tone: 'warn' as const },
+          ]),
+          { label: profitCardLabel, value: fmtUSD(profitUsd), tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const) },
           // Same excluding/including pair the Dashboard's Profit card shows,
           // same keys/labels (Dashboard.tsx), never a new pair of strings.
           ...(hasLosses ? [

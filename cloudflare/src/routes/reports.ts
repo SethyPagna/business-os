@@ -31,6 +31,7 @@ import {
 import { ReportMoneyPrecisionError, reportMoneyHttpError } from '../lib/reportMoneyPrecision'
 import { parseReportExport, readRecordExport, recordExportTotals, reportExportStamp, reportExportToken } from '../lib/reportExport'
 import { localRangeClockError, isLocalRangeClock, localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
+import { costViewProfit } from '../lib/reportProfitView'
 import type { Env } from '../index'
 
 // Historical label (owner rule: old records are never relabelled): the row's own branch-name snapshot
@@ -203,10 +204,11 @@ function filterError(error: unknown): string {
  */
 export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: boolean, canViewCosts = isAdmin, places: 2 | 4 = 2): Record<string, unknown> {
   if (!isAdmin && canViewCosts) {
-    // Cost grants do not confer the separate administrator-only delivery gate.
-    const { delivery_actual_cost_usd, delivery_actual_cost_count, delivery_margin_usd, delivery_net_usd,
-      recognized_delivery_cost_usd, pending_delivery_cost_usd, ...costView } = gateTotals(row, true, true, places)
-    return costView
+    // Cost grants do not confer the separate administrator-only delivery gate:
+    // the courier-cost keys leave, and profit is restated on goods so the
+    // courier cost cannot come back by subtraction either (AL finding L4,
+    // lib/reportProfitView.ts).
+    return costViewProfit(gateTotals(row, true, true, places))
   }
   const diagnostic = reportMoneyDiagnostic(row)
   // pending_cost_usd / pending_profit_usd (S4R3-6) are the awaiting-payment
@@ -294,15 +296,20 @@ export function gateProductRow(row: Record<string, unknown>, isAdmin: boolean, p
   }
 }
 
-export function gateBusinessSummarySaleRow(row: Record<string, unknown>, isAdmin: boolean): Record<string, unknown> {
+export function gateBusinessSummarySaleRow(row: Record<string, unknown>, isAdmin: boolean, canViewCosts = isAdmin): Record<string, unknown> {
   const diagnostic = reportMoneyDiagnostic(row)
   const { cost_usd, cost_before_floor_usd, cost_missing_snapshot_lines, gross_profit_usd,
     money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows, ...publicRow } = row
-  if (!isAdmin) return publicRow
-  return { ...publicRow, cost_usd, cost_before_floor_usd, cost_missing_snapshot_lines, gross_profit_usd,
+  if (!isAdmin && !canViewCosts) return publicRow
+  const adminRow = { ...publicRow, cost_usd, cost_before_floor_usd, cost_missing_snapshot_lines, gross_profit_usd,
     ...(diagnostic ? { money_precision_mode: diagnostic.precision_mode, money_complete: diagnostic.complete,
       money_unknown_cost_lines: diagnostic.unknown_cost_lines, money_contributing_rows: diagnostic.contributing_rows }
       : money_precision_mode !== undefined ? { money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows } : {}) }
+  // A receipt's gross profit carries its courier cost (fee - courier); with the
+  // fee and cost on the same row a cost viewer would read the courier off it,
+  // so a non-admin gets the receipt's goods profit instead (AL finding L4).
+  if (!isAdmin) return costViewProfit(adminRow)
+  return adminRow
 }
 
 /** The searched receipts define both detail and exact totals. Preserve the
@@ -602,7 +609,7 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
         const maximum = snapshotMaxId ?? snapshot.sales.reduce((max, row) => Math.max(max, Number(row.id)), 0)
         const cohort = salesExportCohort(snapshot, search)
         const canViewCosts = canViewAcquisitionCosts(user)
-        const rows = businessSummarySalesRowsFromSnapshot(cohort).map((row) => gateBusinessSummarySaleRow(row, canViewCosts))
+        const rows = businessSummarySalesRowsFromSnapshot(cohort).map((row) => gateBusinessSummarySaleRow(row, isAdmin, canViewCosts))
         rows.sort((left, right) => (descending ? -1 : 1) * (reportExportStamp(String(left.cursor_at)) - reportExportStamp(String(right.cursor_at))
           || Number(left.id) - Number(right.id)))
         // The export's totals row sits under 4-place receipt rows and is their
@@ -651,7 +658,7 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
           : stamp(row) > afterStamp || (stamp(row) === afterStamp && num(row.id) > afterId))
       }
       const hasMore = rows.length > pageSize
-      const page = rows.slice(0, pageSize).map((row) => gateBusinessSummarySaleRow(row, canViewAcquisitionCosts(user)))
+      const page = rows.slice(0, pageSize).map((row) => gateBusinessSummarySaleRow(row, isAdmin, canViewAcquisitionCosts(user)))
       const last = page[page.length - 1]
       return c.json({ rows: page, snapshot_max_id: snapshot, has_more: hasMore,
         next_cursor: hasMore && last ? { created_at: last.cursor_at || '', id: last.id } : null, is_admin: isAdmin })

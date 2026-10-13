@@ -28,6 +28,7 @@ import {
   num,
   pct,
   periodLabel,
+  profitLabel,
   receiptLineKind,
   REPORT_NOUNS,
   reportFileName,
@@ -102,7 +103,7 @@ export default function PeriodReport(p: ReportViewProps) {
       { key: 'collected_total_usd', label: tr('collected_total', 'Collected total'), kind: 'money', value: (r) => r.collected_total_usd, defaultVisible: options.basis === 'collected', emphasis: options.basis === 'collected' },
       { key: 'avg_order_usd', label: tr('avg_order', 'Avg order'), kind: 'money', value: (r) => r.avg_order_usd, defaultVisible: false },
       showProfit ? { key: 'cost_usd', label: tr('cost', 'Cost'), kind: 'money', value: (r) => r.cost_usd ?? null, defaultVisible: false } : null,
-      showProfit ? { key: 'profit_usd', label: tr('rpt_gross_profit', 'Gross profit'), kind: 'money', value: (r) => r.profit_usd ?? null } : null,
+      showProfit ? { key: 'profit_usd', label: profitLabel(totals, tr), kind: 'money', value: (r) => r.profit_usd ?? null } : null,
       showProfit ? { key: 'margin_pct', label: tr('rpt_margin', 'Margin'), kind: 'pct', value: (r) => pct(num(r.profit_usd), basisValue(r, options.basis)) } : null,
       // Stock removed entirely, at cost, per period -- the same three figures
       // the row's own fold and the Overview statement show, as columns so the
@@ -116,7 +117,7 @@ export default function PeriodReport(p: ReportViewProps) {
       showLosses && showProfit ? { key: 'profit_after_losses_usd', label: tr('rpt_profit_after_losses', 'Profit incl. losses'), kind: 'money', value: (r) => r.profit_after_losses_usd ?? null, defaultVisible: false } : null,
     ]
     return list.filter((c): c is ReportColumn<PeriodRow> => !!c)
-  }, [tr, g, options.basis, showProfit, showLosses])
+  }, [tr, g, options.basis, showProfit, showLosses, totals])
 
   const [sort, setSort] = useState<SortState | null>({ key: 'period', dir: 'asc' })
   const [openRow, setOpenRow] = useState<PeriodRow | null>(null)
@@ -129,7 +130,7 @@ export default function PeriodReport(p: ReportViewProps) {
         countLabel(totals.tx_count, REPORT_NOUNS.sale, tr),
         `${basisLabel} ${fmtMoney(basisValue(totals, options.basis))}`,
         totals.refund_usd ? `${tr('refunds', 'Refunds')} ${fmtMoney(totals.refund_usd)}` : null,
-        hasProfit(totals) ? `${tr('rpt_gross_profit', 'Gross profit')} ${fmtMoney(totals.profit_usd)} (${fmtPct(pct(totals.profit_usd, basisValue(totals, options.basis)))})` : null,
+        hasProfit(totals) ? `${profitLabel(totals, tr)} ${fmtMoney(totals.profit_usd)} (${fmtPct(pct(totals.profit_usd, basisValue(totals, options.basis)))})` : null,
         // Only when there was a loss: a "$0.00 removed" term on every quiet
         // range is the kind of noise the summary row exists to avoid.
         hasRemovalLosses(totals) && totals.removal_loss_usd

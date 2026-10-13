@@ -1431,6 +1431,15 @@ export default function Dashboard() {
   // Profit card is hidden below instead when this is false.
   const aHasProfit = typeof analytics?.totals?.profit_usd === 'number'
   const aProfit   = analytics?.totals?.profit_usd || 0
+  // AL finding L4 (13 Oct 2026): the courier's actual cost is administrator-
+  // only. A cost viewer who is not an administrator receives profit restated
+  // on goods alone (revenue - cost) with this flag, and no courier-cost keys,
+  // so the cards below drop the delivery terms instead of printing $0.00.
+  const aProfitExclDelivery = (analytics?.totals as Record<string, unknown> | undefined)?.profit_excludes_delivery === true
+  const aCourierCostShown = typeof analytics?.totals?.delivery_actual_cost_usd === 'number'
+  // The period rows pass the same gate as the totals, so a caller without
+  // cost and profit has no profit chart to draw: that tab is not offered.
+  const chartMode: DashboardChartMode = activeChart === 'profit' && !aHasProfit ? 'revenue' : activeChart
   // Unclamped: a period that destroyed more stock than it earned really is
   // negative here, and hiding that is the one thing this view exists to stop.
   // The no-negative rule governs the canonical aProfit above, not this.
@@ -1690,9 +1699,9 @@ ${buildEquation({ key: 'revenue_short', fallback: 'Revenue', usd: aRevenue }, re
       // really carries is the fees charged minus what the couriers were paid.
       info: `${translateOr('dash_info_profit', "What is left after subtracting what the goods cost you from what you kept, plus what delivery earned or cost.")}
 
-${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: aProfit }, profitTerms(aFormulaTotals), fmtUSD, translateOr)}
+${buildEquation(aProfitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback: 'Profit (excl. delivery)', usd: aProfit } : { key: 'gross_profit', fallback: 'Gross profit', usd: aProfit }, profitTerms({ ...aFormulaTotals, profit_excludes_delivery: aProfitExclDelivery }), fmtUSD, translateOr)}
 ${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profit')} ÷ ${translateOr('revenue_short', 'Revenue')} = ${aRevenue > 0 ? ((aProfit / aRevenue) * 100).toFixed(2) : '0.00'}%`,
-      label: translateOr('gross_profit', 'Gross Profit'),
+      label: aProfitExclDelivery ? translateOr('rpt_profit_excl_delivery', 'Profit (excl. delivery)') : translateOr('gross_profit', 'Gross Profit'),
       value: fmtUSD(aProfit),
       color: aProfit >= 0 ? 'text-blue-600' : 'text-red-600',
       sub: aRevenue > 0 ? `${((aProfit / aRevenue) * 100).toFixed(1)}% ${marginShortLabel}` : '',
@@ -1704,8 +1713,10 @@ ${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profi
         // The two delivery terms profit actually carries. Store-paid delivery
         // is NOT one of them and moved to the Delivery card, where it is a
         // memo figure rather than a subtraction nothing performs.
-        { label: translateOr('rpt_delivery_collected', 'Delivery fees charged'), value: fmtUSD(Number(aFormulaTotals.recognized_delivery_usd) || 0) },
-        { label: translateOr('rpt_delivery_paid', 'Actual delivery cost'), value: fmtUSD(Number(aFormulaTotals.recognized_delivery_cost_usd) || 0) },
+        ...(aProfitExclDelivery ? [] : [
+          { label: translateOr('rpt_delivery_collected', 'Delivery fees charged'), value: fmtUSD(Number(aFormulaTotals.recognized_delivery_usd) || 0) },
+          { label: translateOr('rpt_delivery_paid', 'Actual delivery cost'), value: fmtUSD(Number(aFormulaTotals.recognized_delivery_cost_usd) || 0) },
+        ]),
         { label: translateOr('profit_margin', 'Profit margin'), value: aRevenue > 0 ? `${((aProfit / aRevenue) * 100).toFixed(2)}%` : '0.00%' },
         ...(aHasLosses ? [
           { label: translateOr('rpt_removal_loss', 'Losses (stock removed)'), value: aRemovalLossLabel },
@@ -1762,24 +1773,31 @@ ${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profi
     // receipts, and cost never touches Profit).
     {
       id: 'delivery',
-      info: `${translateOr('dash_info_delivery', "Delivery in this period: what customers were charged, what the couriers actually cost, and the margin between them.")}
+      // The courier's cost and the margin built on it are administrator-only:
+      // a caller the server did not send them to sees the fees alone, never a
+      // $0.00 cost and a "margin" equal to the whole fee (L4, 13 Oct 2026).
+      info: aCourierCostShown ? `${translateOr('dash_info_delivery', "Delivery in this period: what customers were charged, what the couriers actually cost, and the margin between them.")}
 
-${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} = ${translateOr('delivery_fees', 'Delivery fees')} ${fmtUSD(aDelivery)} − ${translateOr('delivery_actual_cost', 'Actual delivery cost')} ${fmtUSD(aDeliveryActual)}`,
+${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} = ${translateOr('delivery_fees', 'Delivery fees')} ${fmtUSD(aDelivery)} − ${translateOr('delivery_actual_cost', 'Actual delivery cost')} ${fmtUSD(aDeliveryActual)}` : translateOr('dash_info_delivery', "Delivery in this period: what customers were charged, what the couriers actually cost, and the margin between them."),
       label: translateOr('delivery', 'Delivery'),
       value: fmtUSD(aDelivery),
       color: 'text-violet-600',
-      sub: `${translateOr('margin_short', 'Margin')} ${fmtUSD(aDeliveryMargin)}`,
+      sub: aCourierCostShown ? `${translateOr('margin_short', 'Margin')} ${fmtUSD(aDeliveryMargin)}` : '',
       details: [
         { label: translateOr('delivery_fees', 'Delivery fees'), value: fmtUSD(aDelivery) },
-        {
-          label: translateOr('delivery_actual_cost', 'Actual delivery cost'),
-          value: `${fmtUSD(aDeliveryActual)}${aDeliverySales > 0 && aDeliveryActualCount < aDeliverySales ? ` (${aDeliveryActualCount}/${aDeliverySales} ${translateOr('recorded_short', 'recorded')})` : ''}`,
-        },
-        { label: translateOr('delivery_margin', 'Delivery profit'), value: fmtUSD(aDeliveryMargin) },
+        ...(aCourierCostShown ? [
+          {
+            label: translateOr('delivery_actual_cost', 'Actual delivery cost'),
+            value: `${fmtUSD(aDeliveryActual)}${aDeliverySales > 0 && aDeliveryActualCount < aDeliverySales ? ` (${aDeliveryActualCount}/${aDeliverySales} ${translateOr('recorded_short', 'recorded')})` : ''}`,
+          },
+          { label: translateOr('delivery_margin', 'Delivery profit'), value: fmtUSD(aDeliveryMargin) },
+        ] : []),
         { label: translateOr('store_paid_delivery', 'Store-paid delivery fee'), value: fmtUSD(aStoreDelivery) },
       ],
     },
   ]), [
+    aCourierCostShown,
+    aProfitExclDelivery,
     aStoreDelivery,
     aDelivery,
     aDeliveryActual,
@@ -2099,11 +2117,11 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
               <div className="flex min-w-0 gap-1 overflow-x-auto">
               {([
                 ['revenue', revenueFlowLabel],
-                ['profit', profitVsCogsLabel],
+                ...(aHasProfit ? [['profit', profitVsCogsLabel]] as Array<[DashboardChartMode, string]> : []),
                 ['volume', salesCountLabel],
               ] satisfies Array<[DashboardChartMode, string]>).map(([id,lbl]) => (
                 <button key={id} onClick={() => setActiveChart(id)}
-                  className={`min-h-7 shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-bold transition-colors sm:min-h-8 sm:px-3 sm:text-xs ${activeChart===id ? 'bg-white text-blue-700 shadow-sm ring-1 ring-blue-100 dark:bg-slate-700 dark:text-white dark:ring-slate-600' : 'text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-white'}`}>
+                  className={`min-h-7 shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-bold transition-colors sm:min-h-8 sm:px-3 sm:text-xs ${chartMode===id ? 'bg-white text-blue-700 shadow-sm ring-1 ring-blue-100 dark:bg-slate-700 dark:text-white dark:ring-slate-600' : 'text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-white'}`}>
                   {lbl}
                 </button>
               ))}
@@ -2120,7 +2138,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
           {analyticsPending ? <div className="h-52 flex-1 min-h-[13rem] animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-700" />
           : analyticsUnavailable ? <div className="flex flex-1 min-h-[13rem] flex-col items-center justify-center rounded-2xl border border-amber-200 bg-amber-50/60 px-4 text-center text-sm text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
           : chartRenderData.length === 0 ? <div className="flex flex-1 min-h-[13rem] items-center justify-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</div>
-          : activeChart === 'revenue' ? (
+          : chartMode === 'revenue' ? (
             <>
               <div className="flex-1 min-h-[13rem]">
                 <Suspense fallback={<ChartFallback />}>
@@ -2137,7 +2155,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
                 <div className="inline-flex shrink-0 items-center gap-1 rounded-full bg-slate-50 px-1.5 py-0.5 dark:bg-slate-800/70"><div className="h-1.5 w-2.5 shrink-0 rounded-full bg-blue-600"/><span className="whitespace-nowrap text-[10px] font-semibold leading-tight text-slate-600 dark:text-slate-200">{netRevenueLabel}</span></div>
               </div>
             </>
-          ) : activeChart === 'profit' ? (
+          ) : chartMode === 'profit' ? (
             <>
               <div className="flex-1 min-h-[13rem]">
                 <Suspense fallback={<ChartFallback />}>

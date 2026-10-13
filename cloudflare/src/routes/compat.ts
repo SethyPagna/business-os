@@ -15,7 +15,7 @@ import { decodeAuditCursor } from '../lib/auditLogQuery'
 import { readAuditLogPage } from '../lib/auditLogPage'
 import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
-import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesTotalsAndPeriodSeries, identifiedCustomerExpr, reportCustomerNameExpr, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr, shiftWindowBound, shiftWindowWhere } from '../lib/salesAnalytics'
+import { BUCKET_MONEY_PLACES, CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesTotalsAndPeriodSeries, identifiedCustomerExpr, reportCustomerNameExpr, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr, shiftWindowBound, shiftWindowWhere } from '../lib/salesAnalytics'
 import { getFamilyStockAlertPage, type FamilyStockAlertState } from '../lib/familyStockStats'
 import { dashboardExpiringProductsSql, loadDashboardStockOverview, type DashboardStockOverviewContext } from '../lib/dashboardStockOverview'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
@@ -464,7 +464,10 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdm
     prevTotals: gateTotals((prevTotals || {}) as unknown as Record<string, unknown>, isAdmin, canViewCosts),
     periodReturns: periodReturns || {},
     periodSupplierReturns: periodSupplierReturns || {},
-    periodData: periodData || [],
+    // The period rows are the same money as the totals above, so they pass
+    // the same gate (AL finding L4: they used to reach every dashboard caller
+    // with cost, profit and the courier cost intact). 4-place bucket rows.
+    periodData: (periodData || []).map((row) => gateTotals(row as unknown as Record<string, unknown>, isAdmin, canViewCosts, BUCKET_MONEY_PLACES)),
     byPayment: byPayment || [],
     byBranch: byBranch || [],
     topProducts: topProducts || [],

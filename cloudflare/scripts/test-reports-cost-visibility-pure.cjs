@@ -28,7 +28,7 @@ Module._load = function(request, parent, isMain) {
     isAdminControlUser: (user) => user.role === 'admin',
   }
   if (request === '../lib/db') return { getDb: () => ({}) }
-  if (request === '../lib/acquisitionCostAccess' || request === '../lib/reportExport') return originalLoad.call(this, request, parent, isMain)
+  if (request === '../lib/acquisitionCostAccess' || request === '../lib/reportExport' || request === '../lib/reportProfitView') return originalLoad.call(this, request, parent, isMain)
   if (request === '../lib/salesAnalytics') return new Proxy({
     SALES_GROUP_KEYS: ['branch'], BUCKET_MONEY_PLACES: 4, reportMoneyDiagnostic: () => null,
     getSalesTotals: async () => ({ ...totals }), previousPeriodFilters: () => ({}),
@@ -39,9 +39,9 @@ Module._load = function(request, parent, isMain) {
       totals: { line_sales_usd: 20, ...productSensitive } }),
     getDeliveryContactTotals: async () => [{ ...courier }],
     getBusinessSummaryPeriodRows: async () => [{ period: '2026-09-13', ...totals }],
-    getBusinessSummarySalesRows: async () => [{ id: 1, cursor_at: '2026-09-13 00:00:00', receipt_number: 'R1', revenue_usd: 20, ...saleSensitive }],
+    getBusinessSummarySalesRows: async () => [{ id: 1, cursor_at: '2026-09-13 00:00:00', receipt_number: 'R1', revenue_usd: 20, net_revenue_usd: 21, delivery_usd: 2, ...saleSensitive }],
     readSalesReportSnapshot: async () => ({ sales: [{ id: 1 }], items: [], returns: [], returnItems: [] }),
-    businessSummarySalesRowsFromSnapshot: () => [{ id: 1, cursor_at: '2026-09-13 00:00:00', receipt_number: 'R1', revenue_usd: 20, ...saleSensitive }],
+    businessSummarySalesRowsFromSnapshot: () => [{ id: 1, cursor_at: '2026-09-13 00:00:00', receipt_number: 'R1', revenue_usd: 20, net_revenue_usd: 21, delivery_usd: 2, ...saleSensitive }],
     salesTotalsFromSnapshot: () => ({ ...totals }),
     whereActiveSales: () => ({ sql: '1=1', params: {} }),
   }, { get: (target, key) => key in target ? target[key] : harmless })
@@ -203,8 +203,16 @@ function assertNoSensitive(value, label) {
     assert.equal(granted.rows.length, 1)
     for (const key of Object.keys(saleSensitive)) {
       assert.equal(Object.hasOwn(denied.rows[0], key), false, `${pathname}: ungranted ${key} is absent`)
+      // AL finding L4 (13 Oct 2026): a receipt's gross profit carries its
+      // courier cost (fee - courier), so the cost viewer gets the goods profit
+      // -- net revenue 21 less cost 7 = 14, not the 13 that included delivery.
+      if (key === 'gross_profit_usd') continue
       assert.equal(granted.rows[0][key], saleSensitive[key], `${pathname}: explicit cost-view grant retains ${key}`)
     }
+    assert.equal(granted.rows[0].gross_profit_usd, 14, `${pathname}: the cost viewer's receipt profit is goods only`)
+    assert.equal(granted.rows[0].profit_excludes_delivery, true, `${pathname}: and says so`)
+    assert.equal(Object.hasOwn(denied.rows[0], 'profit_excludes_delivery'), false, `${pathname}: no profit, no flag`)
+    assert.equal((await request(pathname, true)).rows[0].gross_profit_usd, 13, `${pathname}: the administrator keeps the full receipt profit`)
     assert.equal(granted.rows[0].revenue_usd, denied.rows[0].revenue_usd, 'public revenue is unchanged by the grant')
     if (pathname.includes('intent=export')) {
       assertNoSensitive(denied.totals, 'export totals without cost authority')
@@ -215,6 +223,21 @@ function assertNoSensitive(value, label) {
       assert.notEqual(granted.export_token, denied.export_token, 'actual export tokens bind the visible cost authority')
     }
   }
+  // AL finding L4: the cost viewer's window totals carry no courier cost and a
+  // goods profit (revenue 20 - cost 0.13 at cents), flagged, so the courier
+  // cost cannot be read back as fee - (profit - revenue + cost).
+  for (const [pathname, pick] of [['/overview', (body) => body.sales.totals], ['/periods?granularity=day', (body) => body.rows[0]],
+    ['/grouped?by=branch', (body) => body.rows[0]]]) {
+    const seen = pick(await request(pathname, false, true))
+    for (const key of ['delivery_actual_cost_usd', 'delivery_margin_usd', 'delivery_net_usd', 'recognized_delivery_cost_usd', 'pending_delivery_cost_usd']) {
+      assert.equal(Object.hasOwn(seen, key), false, `${pathname}: cost view never receives ${key}`)
+    }
+    assert.equal(seen.profit_excludes_delivery, true, `${pathname}: goods profit is flagged`)
+    assert.equal(seen.profit_usd, Number((seen.revenue_usd - seen.cost_usd).toFixed(4)), `${pathname}: profit is revenue - cost`)
+    const adminSeen = pick(await request(pathname, true))
+    assert.equal(Object.hasOwn(adminSeen, 'profit_excludes_delivery'), false, `${pathname}: the administrator's profit is the full figure`)
+  }
+  console.log('PASS cost-view totals carry goods profit, flagged, and no courier cost (L4)')
   console.log('PASS mounted overview/day/group/export employee and admin payload parity')
   console.log('PASS report totals/day/group/export gates hide actual and derived delivery costs for employees and retain them for admins')
 })().catch((error) => { console.error(error); process.exitCode = 1 })

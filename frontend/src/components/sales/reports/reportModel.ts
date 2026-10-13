@@ -340,6 +340,12 @@ export function countLabel(n: number, noun: ReportNoun, tr: (key: string, fallba
 }
 
 /** "Top 500 of 501 customers": a capped list says how much of the window it holds. */
+/** The profit column / summary label: a cost viewer's goods-only profit (L4)
+ *  is named for what it is, never as the administrator's full figure. */
+export function profitLabel(t: Pick<ReportTotals, 'profit_excludes_delivery'> | null | undefined, tr: (key: string, fallback: string) => string): string {
+  return t?.profit_excludes_delivery ? tr('rpt_profit_excl_delivery', 'Profit (excl. delivery)') : tr('rpt_gross_profit', 'Gross profit')
+}
+
 export function topOfLabel(shown: number, total: number, noun: ReportNoun, tr: (key: string, fallback: string) => string): string {
   return tr('rpt_top_n_of_m', 'Top {shown} of {total} {noun}')
     .replace('{shown}', fmtInt(shown)).replace('{total}', fmtInt(total)).replace('{noun}', tr(noun[2], noun[3]).toLowerCase())
@@ -458,6 +464,15 @@ export interface ReportTotals {
   removal_loss_unvalued_rows?: number
   revenue_after_losses_usd?: number
   profit_after_losses_usd?: number
+  // ---- AL finding L4 (13 Oct 2026) ----------------------------------------
+  // The courier's actual cost is administrator-only. A cost viewer who is not
+  // an administrator receives profit restated on goods alone (revenue - cost)
+  // and this flag; the statement then drops the delivery terms and labels the
+  // figure "Profit (excl. delivery)".
+  profit_excludes_delivery?: true
+  /** The server did not send the courier's actual cost: its memo lines are
+   *  omitted rather than printed as $0.00. */
+  courier_cost_hidden?: true
 }
 
 // Every field here is copied by normalizeTotals and SUMMED by sumTotals. A
@@ -487,17 +502,24 @@ export function normalizeTotals(raw: unknown): ReportTotals | null {
   // the Sep 6 kernel does not send net_sales_usd, and a 0 there would be read
   // as "this window sold nothing net" rather than "the server did not say".
   if (typeof r.net_sales_usd === 'number') out.net_sales_usd = round4(num(r.net_sales_usd))
-  if (typeof r.cost_usd === 'number' || typeof r.profit_usd === 'number') {
+  if (typeof r.cost_usd === 'number') {
     out.cost_usd = num(r.cost_usd)
-    out.profit_usd = num(r.profit_usd)
-    out.margin_pct = typeof r.margin_pct === 'number' ? r.margin_pct : pct(out.profit_usd, out.revenue_usd)
     out.cost_missing_snapshot_lines = num(r.cost_missing_snapshot_lines)
     // The unpaid cohort's COGS and profit ride the same gate: gateTotals
     // strips them for a non-admin caller alongside cost_usd / profit_usd, so
     // their presence is the same "the server sent it" signal.
     out.pending_cost_usd = num(r.pending_cost_usd)
-    out.pending_profit_usd = num(r.pending_profit_usd)
+    // Profit has its own presence: a response carrying cost but no profit must
+    // not print a profit of $0.00 (it used to, because both keys were filled
+    // whenever either arrived).
+    if (typeof r.profit_usd === 'number') {
+      out.profit_usd = num(r.profit_usd)
+      out.margin_pct = typeof r.margin_pct === 'number' ? r.margin_pct : pct(out.profit_usd, out.revenue_usd)
+      out.pending_profit_usd = num(r.pending_profit_usd)
+    }
   }
+  if (r.profit_excludes_delivery === true) out.profit_excludes_delivery = true
+  if (typeof r.delivery_actual_cost_usd !== 'number') out.courier_cost_hidden = true
   // Its own presence signal, NOT the cost one: the server can send cost and
   // profit while withholding the removal block, because the two answer
   // different questions about different windows.
@@ -587,8 +609,10 @@ export function sumTotals(rows: ReportTotals[]): ReportTotals {
     if (k.endsWith('_usd')) (out as unknown as Record<string, number>)[k] = round4((out as unknown as Record<string, number>)[k])
   }
   out.avg_order_usd = out.tx_count > 0 ? round2(out.revenue_usd / out.tx_count) : 0
+  if (rows.some((r) => r.courier_cost_hidden)) out.courier_cost_hidden = true
   if (allNetSales) out.net_sales_usd = round4(netSales)
   if (allProfit) {
+    if (rows.some((r) => r.profit_excludes_delivery)) out.profit_excludes_delivery = true
     out.cost_usd = round4(cost)
     out.profit_usd = round4(profit)
     out.margin_pct = pct(out.profit_usd, out.revenue_usd)
@@ -751,14 +775,17 @@ function statementFigures(t: ReportTotals): Record<string, number> {
     // Each term above is round2'd independently by the server, so the chain can
     // land a cent away from profit_usd. This carries that cent EXPLICITLY
     // rather than hiding it in a labelled line; it renders only when non-zero.
+    // A goods-only profit (L4) has no delivery terms: bridging it with the fee
+    // would print the courier cost back as a "Rounding" line.
+    const goodsOnly = t.profit_excludes_delivery === true
     fig.profit_rounding = round2(
-      t.profit_usd - (t.revenue_usd - t.cost_usd + t.recognized_delivery_usd - t.recognized_delivery_cost_usd),
+      t.profit_usd - (t.revenue_usd - t.cost_usd + (goodsOnly ? 0 : t.recognized_delivery_usd - t.recognized_delivery_cost_usd)),
     )
     fig.pending_cogs = num(t.pending_cost_usd)
     fig.pending_profit = num(t.pending_profit_usd)
     fig.pending_rounding = round2(
       num(t.pending_profit_usd)
-        - (t.pending_revenue_usd - num(t.pending_cost_usd) + t.pending_delivery_usd - t.pending_delivery_cost_usd),
+        - (t.pending_revenue_usd - num(t.pending_cost_usd) + (goodsOnly ? 0 : t.pending_delivery_usd - t.pending_delivery_cost_usd)),
     )
   }
   return fig
@@ -838,12 +865,21 @@ export function buildIncomeStatement(input: StatementInput): StatementLine[] {
     lines.push(
       line('revenue_carried', 'rpt_revenue_carried', 'Revenue (from above)', 'total', 'profit', ['rpt_hint_revenue_carried', 'The revenue line repeated, so the first input of the profit calculation is on screen beside the figures taken off it.']),
       line('cogs', 'cogs', 'Cost of goods sold', 'sub', 'profit', ['rpt_hint_cogs', 'Cost snapshots of the items sold, less the cost of goods a return put back on the sellable shelf. Lines without a snapshot count as 0 and are flagged.'], cogsNote(sales)),
-      line('delivery_collected', 'rpt_delivery_collected', 'Delivery fees charged', 'add', 'profit', ['rpt_hint_delivery_collected', 'Customer-billed delivery fees, including Not Paid sales. This is revenue, not cash received. Waived fees are excluded.']),
-      line('delivery_paid', 'rpt_delivery_paid', 'Actual delivery cost', 'sub', 'profit', ['rpt_hint_delivery_paid', 'The actual delivery cost paid to the driver and recorded on recognized sales. This is the cost itself, not a residual.'], deliveryCoverageNote(sales)),
     )
+    // L4: a cost viewer's profit is goods only, so the delivery pair is not a
+    // term of it (and the courier cost was never sent).
+    const goodsOnly = sales.profit_excludes_delivery === true
+    if (!goodsOnly) {
+      lines.push(
+        line('delivery_collected', 'rpt_delivery_collected', 'Delivery fees charged', 'add', 'profit', ['rpt_hint_delivery_collected', 'Customer-billed delivery fees, including Not Paid sales. This is revenue, not cash received. Waived fees are excluded.']),
+        line('delivery_paid', 'rpt_delivery_paid', 'Actual delivery cost', 'sub', 'profit', ['rpt_hint_delivery_paid', 'The actual delivery cost paid to the driver and recorded on recognized sales. This is the cost itself, not a residual.'], deliveryCoverageNote(sales)),
+      )
+    }
     const rounding = line('profit_rounding', 'rpt_rounding', 'Rounding', 'add', 'profit', ['rpt_hint_rounding', 'Each figure above is rounded to the cent on its own, so the chain can land a cent from the total. Shown rather than absorbed into a line.'])
     if (rounding.usd !== 0) lines.push(rounding)
-    const totalProfit = line('gross_profit', 'rpt_gross_profit', 'Total profit', 'total', 'profit', ['rpt_hint_gross_profit', 'Revenue minus cost of goods sold, plus delivery fees charged, minus actual delivery cost. Includes Not Paid sales.'])
+    const totalProfit = goodsOnly
+      ? line('gross_profit', 'rpt_profit_excl_delivery', 'Profit (excl. delivery)', 'total', 'profit', ['rpt_hint_profit_excl_delivery', 'Revenue − cost of goods sold. Delivery fees and actual delivery cost are not included. Includes Not Paid sales; operating expenses are separate.'])
+      : line('gross_profit', 'rpt_gross_profit', 'Total profit', 'total', 'profit', ['rpt_hint_gross_profit', 'Revenue minus cost of goods sold, plus delivery fees charged, minus actual delivery cost. Includes Not Paid sales.'])
     lines.push({ ...totalProfit, headline: profitMode === 'gross', tone: totalProfit.usd > 0 ? 'positive' : totalProfit.usd < 0 ? 'negative' : undefined })
     // Expenses and the net result are no longer gated on the profit mode --
     // only on whether the caller may read expenses at all. `expenses` is null
@@ -925,11 +961,15 @@ function deliveryCoverageNote(t: ReportTotals): StatementNote | undefined {
 function deliveryReconciliationLines(t: ReportTotals, line: LineFactory): StatementLine[] {
   const anyDelivery = num(t.delivery_sale_count) > 0 || t.delivery_usd !== 0 || t.store_delivery_usd !== 0 || t.delivery_actual_cost_usd !== 0
   if (!anyDelivery) return []
+  // The courier's cost and the delivery profit built on it are administrator-
+  // only; a caller the server did not send them to sees no "$0.00 cost" and no
+  // "delivery profit" equal to the whole fee (L4, 13 Oct 2026).
+  const courier = t.courier_cost_hidden !== true
   return [
     line('delivery_charged', 'rpt_delivery_charged', 'Delivery fee charged', 'memo', 'delivery', ['rpt_hint_delivery_charged', 'Delivery fees charged to customers on every delivery in the range. A fee the shop paid itself is not counted here.']),
-    line('delivery_actual_cost', 'rpt_delivery_cost', 'Actual delivery cost', 'memo', 'delivery', ['rpt_hint_delivery_actual', 'The actual delivery cost recorded on the sale. It is hidden from receipts and shown here so it can be compared with the fee charged.'], deliveryCoverageNote(t)),
+    ...(courier ? [line('delivery_actual_cost', 'rpt_delivery_cost', 'Actual delivery cost', 'memo', 'delivery', ['rpt_hint_delivery_actual', 'The actual delivery cost recorded on the sale. It is hidden from receipts and shown here so it can be compared with the fee charged.'], deliveryCoverageNote(t))] : []),
     line('delivery_absorbed', 'rpt_store_delivery', 'Store-paid delivery fee', 'memo', 'delivery', ['rpt_hint_delivery_absorbed', 'Delivery fees paid by the shop instead of charged to the customer. This is revenue given up, not a cash expense, so it is reported here and does not reduce profit.']),
-    line('delivery_net', 'rpt_delivery_net', 'Delivery profit', 'memo', 'delivery', ['rpt_hint_delivery_net', 'Delivery fees charged minus recorded actual delivery costs, including Not Paid sales. This is the delivery profit included in total profit.']),
+    ...(courier ? [line('delivery_net', 'rpt_delivery_net', 'Delivery profit', 'memo', 'delivery', ['rpt_hint_delivery_net', 'Delivery fees charged minus recorded actual delivery costs, including Not Paid sales. This is the delivery profit included in total profit.'])] : []),
   ]
 }
 
