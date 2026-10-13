@@ -40,9 +40,9 @@ async function main() {
       } : env.DB;
       return app.fetch(request,{...env,DB:db,pending},{waitUntil(p){pending.push(p);ctx.waitUntil(p)},passThroughOnException(){}});
     }};
-  ` }, bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022' })
+  ` }, bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022', external: ['node:*'] })
   // Test-only scheduling: hold one request until a second request releases it.
-  const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, d1Databases: ['DB'], compatibilityDate: '2026-08-01', compatibilityFlags: ['no_handle_cross_request_promise_resolution'] })
+  const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, d1Databases: ['DB'], compatibilityDate: '2026-08-01', compatibilityFlags: ['no_handle_cross_request_promise_resolution', 'nodejs_compat'] })
   try {
     const db = await mf.getD1Database('DB')
     await db.batch([

@@ -8,8 +8,8 @@ async function main() {
   const bundle = await build({ stdin: { resolveDir: path.join(__dirname, '..'), loader: 'ts', contents: `
     import auth from './src/routes/auth';
     export default { fetch(request, env, ctx) { return auth.fetch(request, env, ctx); } };
-  ` }, bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022' })
-  const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, d1Databases: ['DB'], compatibilityDate: '2026-08-01' })
+  ` }, bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022', external: ['node:*'] })
+  const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, d1Databases: ['DB'], compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'] })
   try {
     const db = await mf.getD1Database('DB')
     await db.batch([
