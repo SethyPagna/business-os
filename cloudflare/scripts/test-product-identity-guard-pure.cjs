@@ -209,7 +209,16 @@ const createAt = source.indexOf("app.post('/', async (c) => {")
 const createGuardAt = source.indexOf('findSameProductIdentityProduct(', createAt)
 const createQueueAt = source.indexOf("actionType: 'create'", createAt)
 assert.ok(createAt > 0 && createGuardAt > createAt && createQueueAt > createGuardAt,
-  'create: the identity guard runs BEFORE maybeQueueForReview so reviewers never approve duplicates')
+  'create: the direct (Full) identity fold is decided before the create is written')
+// Owner ruling 13 Oct 2026, review is QUEUE-FIRST: a Review Required create whose name + barcode match an
+// existing product is held for approval and the existing product is not changed until then. This pin used to
+// assert the opposite ("the identity guard runs BEFORE maybeQueueForReview so reviewers never approve
+// duplicates"): the fold ran for every tier, so a review-tier create changed the existing row at once. The fold
+// is now reached only off the review tier (maybeQueueForReview's own test).
+// Behaviour: test-al-stock-i-native.cjs I-T7-review-create-queued.
+assert.match(source.slice(createAt, createGuardAt + 120),
+  /const duplicate = getPermissionTier\(user, 'products'\) === 'review'\s*\?\s*null\s*:\s*await findSameProductIdentityProduct\(c\.env, name, body\.barcode, null\)/,
+  'create: a Review Required create never reaches the fold; it is queued like any other create')
 assert.match(source, /findSameProductIdentityProduct\(c\.env, nextName, nextBarcode, Number\(id\)\)/, 'edit: name/barcode changes are judged too')
 // The edit guard's trigger, pinned at the source: it resolves the edit first and
 // only queries when the identity actually moved, and cost is nowhere in it.

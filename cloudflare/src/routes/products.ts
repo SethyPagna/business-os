@@ -2155,7 +2155,13 @@ app.post('/', async (c) => {
     if (response) return c.json(response.body, response.status)
     throw error
   }
-  const duplicate = await findSameProductIdentityProduct(c.env, name, body.barcode, null)
+  // Owner, 13 Oct 2026: review is queue-first. The fold is a DIRECT write, so
+  // a Review Required create that matches an existing product is queued like
+  // any other create below, and the existing product is not changed until a
+  // reviewer approves. The tier test is maybeQueueForReview's own.
+  const duplicate = getPermissionTier(user, 'products') === 'review'
+    ? null
+    : await findSameProductIdentityProduct(c.env, name, body.barcode, null)
   if (duplicate) {
     return c.json(await foldCreateIntoExisting(c.env, user, duplicate, name, body))
   }

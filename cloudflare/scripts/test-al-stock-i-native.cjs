@@ -332,6 +332,7 @@ function finish(finding) {
 //   --wrong=image-not-full      refuse unless the image tier is 'full' (blocks review-tier requests that may queue)
 //   --wrong=queue-before-image  T4: queue a review-tier request before the image check
 //   --wrong=no-restore          T8: a refused fold leaves the edited identity on the row
+//   --wrong=no-create-queue     T7: queue only the PUT; a review-tier create still folds at once
 //   --only=<ids>                run only these case ids
 // ============================================================================================
 const PRODUCTS = 'src/routes/products.ts'
@@ -380,6 +381,11 @@ const PATCHES = {
   'no-restore': [
     { name: 'no-restore', file: PRODUCTS, from: '          if (stateConflict || refusal || stockError) {', to: '          if (false) {' },
   ],
+  'no-create-queue': [
+    { name: 'no-create-queue', file: PRODUCTS,
+      from: "  const duplicate = getPermissionTier(user, 'products') === 'review'\n    ? null\n    : await findSameProductIdentityProduct(c.env, name, body.barcode, null)",
+      to: '  const duplicate = await findSameProductIdentityProduct(c.env, name, body.barcode, null)' },
+  ],
 }
 
 let seq = 0
@@ -394,6 +400,16 @@ async function pair(H, { shape, xImage = '/uploads/al-x.jpg', xStock = 0 } = {})
     H.db.prepare('INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active,image_path,created_at,updated_at) VALUES(?,?,?,2,0,0,1,NULL,?,?)').bind(y, nameY, barY, old, old),
   ])
   return { x, y, nameX, nameY, barX, barY }
+}
+
+// An existing product a create can land on: same name, the barcode stored with two leading zeros (the same
+// identity as the clean code under the leading-zero rule).
+async function existingForCreate(H) {
+  const n = ++seq, id = 300 + n * 2
+  const name = 'AL Create ' + n, clean = '88500' + String(id).padStart(8, '0')
+  await H.db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active,image_path,created_at,updated_at) VALUES(?,?,?,2,0,0,1,NULL,'2026-01-01 00:00:00','2026-01-01 00:00:00')")
+    .bind(id, name, '00' + clean).run()
+  return { id, name, clean }
 }
 
 async function snap(H, s) {
@@ -599,6 +615,44 @@ async function main() {
       t.eq('Y identity unchanged', [after.rows[s.y].name, after.rows[s.y].barcode, after.rows[s.y].is_active], [before.rows[s.y].name, before.rows[s.y].barcode, 1])
       t.eq('no merge history written', after.history - before.history, 0)
       t.note('revision changes left by the refused fold (Fix C gap, not asserted): ' + JSON.stringify(revisionChanges(before, after)))
+    })
+
+    // T7 (owner, 13 Oct 2026): a Review-Required create whose name + barcode match an existing product is held for
+    // approval like any other create; the existing product is not changed until then. The existing row stores its
+    // barcode with leading zeros, so the direct create-fold DOES change it (it stores the clean spelling) -- the
+    // Full-user control below proves the fixture reaches that write.
+    const createCounts = async () => ({
+      products: (await H.q1('SELECT COUNT(*) n FROM products')).n,
+      pending: (await H.q1('SELECT COUNT(*) n FROM pending_actions')).n,
+      folds: (await H.q1("SELECT COUNT(*) n FROM audit_logs WHERE action='fold'")).n,
+    })
+    await check('I-T7-review-create-queued', 'T7: a Review-Required create matching an existing product (name + barcode) is queued (202); the existing product is unchanged until approval', 'high', async (t) => {
+      const e = await existingForCreate(H)
+      const before = await H.q1('SELECT * FROM products WHERE id=?', e.id)
+      const c0 = await createCounts()
+      const r = await H.api('POST', '/api/products', { name: e.name, barcode: e.clean }, { as: 'reviewtier' })
+      await H.settle()
+      const c1 = await createCounts()
+      t.eq('HTTP status (queued = 202)', r.status, 202)
+      t.eq('pending actions added', c1.pending - c0.pending, 1)
+      t.eq('product rows added', c1.products - c0.products, 0)
+      t.eq('create-folds recorded', c1.folds - c0.folds, 0)
+      t.eq('existing product unchanged (stored barcode spelling, updated_at, every column)', await H.q1('SELECT * FROM products WHERE id=?', e.id), before)
+      const queued = await H.q1('SELECT section, action_type, entity_type, entity_id FROM pending_actions ORDER BY id DESC LIMIT 1')
+      t.eq('queued as a product create', [queued.section, queued.action_type, queued.entity_type, queued.entity_id], ['products', 'create', 'product', null])
+      t.note('status ' + r.status + ' ' + JSON.stringify(r.body).slice(0, 160))
+    })
+
+    await check('I-T7-control-full-create-folds', 'control: the SAME create by a Full user folds into the existing product (200, folded_into) and cleans its barcode, as before', 'control', async (t) => {
+      const e = await existingForCreate(H)
+      const c0 = await createCounts()
+      const r = await H.api('POST', '/api/products', { name: e.name, barcode: e.clean })
+      await H.settle()
+      const c1 = await createCounts()
+      t.eq('status', r.status, 200)
+      t.eq('folded into the existing product', r.body && r.body.folded_into, e.id)
+      t.eq('product rows added', c1.products - c0.products, 0)
+      t.eq('the fold stored the clean barcode', (await H.q1('SELECT barcode b FROM products WHERE id=?', e.id)).b, e.clean)
     })
   } finally {
     await H.disarm().catch(() => {})
