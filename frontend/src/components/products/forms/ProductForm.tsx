@@ -29,7 +29,7 @@ import {
   productMatchQueries,
   shouldSearchProductMatches,
 } from '../helpers/productNameSuggestions.ts'
-import { captureActorReadScope, isActorReadScopeCurrent } from '../../../api/actorReadScope.ts'
+import { captureActorWriteIdentity, isActorWriteIdentityCurrent } from '../../../api/actorReadScope.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, scopedWorkDraftKey, hasUnscopedWorkDraft, clearUnchangedWorkDraft } from '../../../utils/workDrafts.ts'
 import { searchProducts as searchProductsForMatch, getProductFilters } from '../../../api/methods.ts'
 import { buildCacheBustedMediaPath, canonicalizePersistedMediaPath } from '../../../utils/mediaUpload.ts'
@@ -1219,8 +1219,11 @@ function ProductFormContent({
     // disabled button. See the button's own comment for the bug this
     // closes: saving mid-upload used the stale pre-upload imageList.
     if (saving || saveInFlightRef.current || imageUploading || imageUploadInFlightRef.current) return
-    const saveScope = captureActorReadScope('product-draft-save')
-    const isSaveAuthorityCurrent = () => aliveRef.current && currentFormDraftKeyRef.current === draftKey && draftKey === scopedWorkDraftKey(productFormDraftBaseKey(product?.id, draftScope)) && isActorReadScopeCurrent(saveScope, false)
+    // Fenced by the WRITE identity (server, origin, user id, organization), as the other draft forms and the Stock
+    // Session are: the read scope also moves when the same user's session is reset or their profile rewritten, which
+    // would refuse a save (or leave a saved form open) after a network blip.
+    const saveIdentity = captureActorWriteIdentity()
+    const isSaveAuthorityCurrent = () => aliveRef.current && currentFormDraftKeyRef.current === draftKey && draftKey === scopedWorkDraftKey(productFormDraftBaseKey(product?.id, draftScope)) && isActorWriteIdentityCurrent(saveIdentity)
     const canContinueSave = () => {
       if (isSaveAuthorityCurrent()) return true
       if (aliveRef.current && currentFormDraftKeyRef.current === draftKey) {

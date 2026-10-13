@@ -1,4 +1,4 @@
-import { captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from '../api/actorReadScope.ts'
+import { captureActorWriteIdentity, isActorWriteIdentityCurrent, type ActorWriteIdentity } from '../api/actorReadScope.ts'
 import { scopedWorkDraftKey } from './workDrafts.ts'
 
 // The account and sync server a form was OPENED under. A kept-alive page (App's
@@ -12,16 +12,25 @@ import { scopedWorkDraftKey } from './workDrafts.ts'
 // the draft key is the one captured here for as long as the form lives, writes
 // and saves are allowed only while the account and server still match, and a
 // form that no longer matches keeps its draft with the original owner.
+//
+// "Match" is the WRITE identity -- server, origin, signed-in user id and
+// organization, the same one the Stock Session is fenced by -- and not the read
+// scope. The read scope also moves on same-user churn: a session reset, a
+// permission / profile / expiry rewrite, a reconnect's permission refresh. Used
+// here it locked an open form with "the account or server changed" after a
+// network blip, switched off Save and stopped the draft writer, so text typed
+// after the lock was lost (hunt finding H7). A real change of account, server
+// or organization still moves the write identity, and A -> B -> A never passes.
 export type DraftAuthority = {
   baseKey: string
   draftKey: string
-  scope: ActorReadScope
+  identity: ActorWriteIdentity
 }
 
 export function openDraftAuthority(baseKey: string): DraftAuthority {
-  return { baseKey, draftKey: scopedWorkDraftKey(baseKey), scope: captureActorReadScope('draft') }
+  return { baseKey, draftKey: scopedWorkDraftKey(baseKey), identity: captureActorWriteIdentity() }
 }
 
 export function isDraftAuthorityCurrent(authority: DraftAuthority): boolean {
-  return isActorReadScopeCurrent(authority.scope, false) && scopedWorkDraftKey(authority.baseKey) === authority.draftKey
+  return isActorWriteIdentityCurrent(authority.identity) && scopedWorkDraftKey(authority.baseKey) === authority.draftKey
 }
