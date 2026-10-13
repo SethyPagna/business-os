@@ -338,11 +338,19 @@ function normalizeRedeemValueKhr(value: unknown, fallback = 4100): number {
   return Math.max(1000, Math.ceil(raw / 1000) * 1000)
 }
 
+// Exact hosts, never a suffix pattern: google.<anything> also matches google.evil.com and
+// google.com.evil.io. Keep this list identical to frontend/src/components/catalog/portalEditorUtils.ts (a pure test pins the parity).
+const GOOGLE_MAPS_DOMAIN_SUFFIXES = ['com', 'com.kh', 'co.th', 'com.sg', 'co.uk', 'com.au', 'de', 'fr', 'co.jp']
+const GOOGLE_MAPS_EMBED_HOSTS = new Set(
+  GOOGLE_MAPS_DOMAIN_SUFFIXES.flatMap((suffix) => [`google.${suffix}`, `www.google.${suffix}`, `maps.google.${suffix}`]),
+)
+const GOOGLE_MAPS_SHARE_HOSTS = new Set(['share.google', 'maps.app.goo.gl', 'goo.gl'])
+
 // Ported from backend/src/portalUtils.ts (extractGoogleMapsEmbedUrl +
 // normalizeGoogleMapsEmbed combined). Accepts either a raw Google Maps URL
 // or an `<iframe src="...">` snippet pasted from Google's own "Share >
 // Embed a map" dialog, and only allows Google-owned hosts through.
-function normalizeGoogleMapsEmbed(value: unknown): string {
+export function normalizeGoogleMapsEmbed(value: unknown): string {
   const input = String(value || '').trim()
   if (!input) return ''
   const iframeMatch = input.match(/<iframe[^>]+src=(['"])(.*?)\1/i)
@@ -352,15 +360,12 @@ function normalizeGoogleMapsEmbed(value: unknown): string {
   try {
     const url = new URL(raw)
     const host = url.hostname.toLowerCase()
-    const hostAllowed = /^(.+\.)?google\.[a-z.]+$/i.test(host)
-      || host === 'maps.google.com'
-      || host === 'share.google'
-      || host === 'maps.app.goo.gl'
-      || host === 'goo.gl'
-    if (!hostAllowed) return ''
+    const embedHost = GOOGLE_MAPS_EMBED_HOSTS.has(host)
+    if (!embedHost && !GOOGLE_MAPS_SHARE_HOSTS.has(host)) return ''
+    if (url.username || url.password) return ''
 
     const path = url.pathname.toLowerCase()
-    if (path.startsWith('/maps/embed')) return url.toString()
+    if (embedHost && path.startsWith('/maps/embed')) return url.toString()
 
     const embedUrl = new URL('https://www.google.com/maps')
     embedUrl.searchParams.set('q', url.toString())
