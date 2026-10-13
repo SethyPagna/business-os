@@ -6632,10 +6632,9 @@ app.get('/export', async (c) => {
   `).get<{ total: number; completed: number }>(snapshotParams)
   const totalMatching = Number(totalMatchingRow?.total) || 0
 
-  // ONE verified snapshot of the frozen cohort backs the headline and both splits.
-  // The headline is the kernel's revenue in cents; by_status and by_product are
-  // slices of that same revenue at 4 places (salesAnalytics.ts), so they add up to
-  // it exactly instead of being reconciled to the cent after the fact.
+  // ONE verified snapshot of the frozen cohort backs the headline and both splits: the headline is the kernel's
+  // revenue in cents; by_status and by_product are slices of that same revenue at 4 places (salesAnalytics.ts),
+  // so they add up to it exactly.
   const exportSnapshot = await readSalesReportSnapshot(c.env, {
     startDate: query.startDate || null,
     endDate: query.endDate || null,

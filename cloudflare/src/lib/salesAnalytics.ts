@@ -1999,12 +1999,8 @@ export async function getSalesTotalsAndPeriodSeries(
   }
 }
 
-// The Dashboard's payment-method and branch cards. They used to be their own SQL
-// (net sale minus refund per method / branch), which left every sale's rounding
-// adjustment out and so disagreed with the Reports buckets and the Dashboard's
-// own headline by a few cents. They now come from the SAME snapshot and the SAME
-// grouped buckets as Reports, at 4 places (owner, 13 Oct 2026: split rows carry
-// 4 decimals; a single headline keeps cents).
+// The Dashboard's payment-method and branch cards read the SAME snapshot and the SAME grouped buckets as
+// Reports (rounding adjustment included), at 4 places: split rows carry 4 decimals, a single headline keeps cents.
 export interface DashboardPaymentRow { method: string; payment_method: string; count: number; revenue_usd: number }
 export interface DashboardBranchRow { branch_id: number | null; branch_name: string; tx_count: number; count: number; revenue_usd: number }
 
@@ -2025,13 +2021,9 @@ export function dashboardSplitsFromSnapshot(snapshot: SalesReportSnapshot): { by
   }
 }
 
-// The Dashboard's other four rankings -- top customers, busy hours, top products by
-// revenue and by quantity -- and their "view more" lists. They were SQL of their
-// own too (net sale minus refund; the rounding adjustment left out; cents), so for
-// the same rows the Dashboard said 10.004 / 5.004 where the kernel and Reports say
-// 10.0085 / 5 (release-2 refuter, SF-4). Now they come from the SAME verified
-// snapshot and the SAME buckets as Reports, at 4 places, so a ranked row is the
-// Reports row of the same key and the rows add up to the window revenue.
+// The Dashboard's other four rankings -- top customers, busy hours, top products by revenue and by quantity --
+// and their "view more" lists read the SAME verified snapshot and the SAME buckets as Reports, at 4 places, so a
+// ranked row is the Reports row of the same key and the rows add up to the window revenue.
 export interface DashboardCustomerRow {
   customer_name: string; sale_count: number; gross_revenue_usd: number
   store_discount_usd: number; membership_discount_usd: number; total_refund_usd: number; net_revenue_usd: number
@@ -2052,7 +2044,6 @@ export function dashboardRankingsFromSnapshot(snapshot: SalesReportSnapshot, lim
     .map((row) => ({
       customer_name: row.label, sale_count: row.tx_count, gross_revenue_usd: row.gross_sales_usd,
       store_discount_usd: row.store_discount_usd, membership_discount_usd: row.membership_discount_usd,
-      // The customer float's "Refunded" line used to read a field the old SQL never selected, so it always showed 0.
       total_refund_usd: row.refund_usd, net_revenue_usd: row.revenue_usd,
     }))
   const hourlyDist = groupedRowsFromSnapshot(snapshot, 'hour').filter((row) => row.tx_count > 0)
@@ -2086,12 +2077,8 @@ export async function dashboardInsightRows(
   return named
 }
 
-// The Sales export preview's two splits. Same rule as the Dashboard cards above:
-// they used to be SQL of their own (net sale minus refund, rounding adjustments
-// left out) reconciled to the cent by largest remainder, so a row could be a cent
-// off the money it stood for and the whole split a few cents off the kernel
-// revenue. They now come from the export's own verified snapshot, per sale at the
-// kernel's revenue, at 4 places, so the rows add up to the window revenue exactly;
+// The Sales export preview's two splits, by the same rule as the Dashboard cards above: the export's own verified
+// snapshot, each sale at the kernel's revenue, at 4 places, so the rows add up to the window revenue exactly;
 // only the single headline stays in cents.
 export interface ExportStatusRow { status: string; count: number; revenue: number }
 export interface ExportProductRow { product_id: number | null; product_name: string; qty_sold: number; revenue_usd: number }

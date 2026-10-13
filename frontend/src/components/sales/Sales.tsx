@@ -1804,12 +1804,10 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       : itemDiscountUsd + invoiceDiscountUsd
     const returnCount = Number(stripReturns.count) || 0
     const refundUsd = Number(stripReturns.refund_usd) || 0
-    // cost_usd / profit_usd travel only to a cost reader: the Worker's gateTotals
-    // (routes/reports.ts) OMITS them for every other caller and never sends 0 for
-    // "hidden". `|| 0` on an absent key printed $0.00 COGS and a $0.00 profit at 0.0%
-    // margin, which reads as a period that broke even. The two cards are left out
-    // instead (the Dashboard's Gross Profit card does the same). Before the totals
-    // arrive nothing says which it will be, so the placeholders follow the grant.
+    // cost_usd / profit_usd reach only a cost reader: the Worker's gateTotals (routes/reports.ts) omits them for
+    // every other caller and never sends 0 for "hidden". An absent key must not print $0.00 (it reads as a period
+    // that broke even), so the two cards are left out, as the Dashboard's Gross Profit card is. Before the totals
+    // arrive the placeholders follow the grant.
     const costReader = canViewAcquisitionCosts(user)
     const showCogs = stripStatus === 'ready' ? typeof totals.cost_usd === 'number' : costReader
     const showProfit = stripStatus === 'ready' ? typeof totals.profit_usd === 'number' : costReader

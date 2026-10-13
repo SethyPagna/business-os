@@ -320,10 +320,8 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdm
     periodReturns,
     periodSupplierReturns,
   ] = await Promise.all([
-    // The payment-method and branch cards, the top customers, top products (by
-    // revenue and by quantity) and busy hours are more views of that one snapshot
-    // (kernel buckets, 4 places) -- not SQL of their own, which left every sale's
-    // rounding adjustment out and disagreed with the headline and with Reports.
+    // The payment-method and branch cards, the top customers, top products (by revenue and by quantity) and busy
+    // hours are more views of that one snapshot (kernel buckets, 4 places), not SQL of their own.
     //
     // P11-14: totals and periodData are the SAME window read twice through
     // independent full snapshot fetches before this change -- readSalesReportSnapshot
