@@ -77,7 +77,7 @@ function defaultSessionStore(): SessionStore | null {
 
 // Sale-line actor ids already carry the page origin and server; the other
 // kinds' records are keyed by server and organization (api/retryRecordScope.ts),
-// and one saved before that moves once to the scope it is first read under.
+// and an unscoped one moves once to the scope it is first read under.
 function recordKey(kind: DirectMutationKind, tail: string, storage?: SessionStore | null): string {
   const prefix = `${STORAGE_PREFIX}${kind}_v2:`
   if (isSaleLineKind(kind)) return `${prefix}${tail}`

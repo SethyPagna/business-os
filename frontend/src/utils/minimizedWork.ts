@@ -106,8 +106,8 @@ export function writeTransferDraft<T>(kind: TransferDraftKind, actorId: unknown,
 export function hasUnresolvedTransfer(kind: TransferDraftKind, actorId: unknown): boolean {
   try {
     const prefix = kind === 'inventory_transfer' ? 'inventory:' : ''
-    // This server's run, or, on the server this tab started with, one saved
-    // before keys carried the server (api/retryRecordScope.ts).
+    // This scope's run, or, on the server this tab started with, an unscoped
+    // one (api/retryRecordScope.ts).
     const keys = [retryRecordKey('businessos_pending_transfer_v1:', actorId)]
     if (legacyRetryRecordsReadable()) keys.push(`businessos_pending_transfer_v1:${actorId}`)
     return keys.some((key) => sessionStorage.getItem(`${prefix}${key}`) != null)

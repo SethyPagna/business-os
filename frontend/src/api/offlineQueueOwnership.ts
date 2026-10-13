@@ -42,6 +42,12 @@ export function offlineSaleOwnersMatch(left: unknown, right: unknown): boolean {
   return Boolean(a && b && a.actor_id === b.actor_id && a.organization_id === b.organization_id && a.authority === b.authority && a.runtime === b.runtime)
 }
 
+/** The server writes go to now: the configured sync server, else this page's
+ *  origin; '' when neither parses. */
+export function currentWriteAuthority(): string {
+  try { return new URL(getSyncServerUrl() || window.location.origin).origin } catch { return '' }
+}
+
 // Captured synchronously BEFORE the initial request/await. Never derive a queued
 // sale's owner from whichever account happens to be signed in when a retry runs.
 export function captureOfflineSaleOwner(): OfflineSaleOwner {
@@ -52,9 +58,7 @@ export function captureOfflineSaleOwner(): OfflineSaleOwner {
     const raw = window.sessionStorage.getItem(STORAGE_KEYS.USER) || window.localStorage.getItem(STORAGE_KEYS.USER)
     user = raw ? JSON.parse(raw) : {}
   } catch { /* Deny admission when the authenticated bootstrap is unavailable. */ }
-  let authority = ''
-  try { authority = new URL(getSyncServerUrl() || window.location.origin).origin } catch { /* fail closed */ }
-  const owner = normalizeOfflineSaleOwner({ version: 1, actor_id: user.id, organization_id: authenticatedOrganizationId(user), authority, runtime: 'cloudflare-workers' })
+  const owner = normalizeOfflineSaleOwner({ version: 1, actor_id: user.id, organization_id: authenticatedOrganizationId(user), authority: currentWriteAuthority(), runtime: 'cloudflare-workers' })
   if (!owner) throw new Error(OFFLINE_OWNER_REVIEW_MESSAGE)
   return owner
 }
