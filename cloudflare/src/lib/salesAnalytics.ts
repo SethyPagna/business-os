@@ -2096,6 +2096,10 @@ export async function exportProductSplitFromSnapshot(env: Env, snapshot: SalesRe
   const ids = named.map((group) => group.id).filter((id): id is number => id != null)
   const live = new Map<number, string>()
   if (ids.length) {
+    // sql-bound-params: bounded by construction -- `named` is sliced to at most
+    // EXPORT_PRODUCT_ROWS (99) groups above, one id each, under D1's 100-parameter limit.
+    // (Not chunked on purpose: this module is compiled by tests that copy a fixed
+    // dependency list, and the lookup must stay one statement per request.)
     const rows = await getDb(env).prepare(`SELECT id, name FROM products WHERE id IN (${ids.map(() => '?').join(',')})`).all<{ id: number; name: string | null }>(ids)
     for (const row of rows || []) if (row.name) live.set(Number(row.id), String(row.name))
   }
