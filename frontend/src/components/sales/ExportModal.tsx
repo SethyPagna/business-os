@@ -46,6 +46,8 @@ interface SalesExportSummary {
   total_refunds_usd?: number
   net_revenue_usd?: number
   avg_order_usd?: number
+  /** A cost viewer who is not an administrator gets profit on goods alone (L4). */
+  profit_excludes_delivery?: boolean
   [key: string]: unknown
 }
 
@@ -280,9 +282,14 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
                   [tr('total_transactions', 'Total Transactions'), preview.summary?.total_transactions],
                   [tr('completed_sales', 'Completed Sales'), preview.summary?.completed_transactions],
                   [tr('revenue_usd', 'Revenue (USD)'), fmtUSD(preview.summary?.revenue_usd || 0)],
-                  [`${tr('cogs', 'COGS')} (USD)`, fmtUSD(preview.summary?.cogs_usd || 0)],
-                  [tr('gross_profit', 'Gross Profit'), fmtUSD(preview.summary?.gross_profit_usd || 0)],
-                  [tr('margin_pct', 'Margin %'), `${preview.summary?.gross_margin_pct || 0}%`],
+                  // Cost and profit print only when the server sent them (a caller
+                  // without the cost grant receives neither), and a cost viewer's
+                  // profit is labelled as the goods-only figure it is (L4).
+                  ...(typeof preview.summary?.gross_profit_usd === 'number' ? [
+                    [`${tr('cogs', 'COGS')} (USD)`, fmtUSD(preview.summary?.cogs_usd || 0)],
+                    [preview.summary?.profit_excludes_delivery === true ? tr('rpt_profit_excl_delivery', 'Profit (excl. delivery)') : tr('gross_profit', 'Gross Profit'), fmtUSD(preview.summary.gross_profit_usd)],
+                    [tr('margin_pct', 'Margin %'), `${preview.summary?.gross_margin_pct || 0}%`],
+                  ] satisfies Array<[string, string | number | undefined]> : []),
                   [tr('discounts', 'Discounts'), fmtUSD(preview.summary?.total_discounts_usd || 0)],
                   [tr('tax_collected', 'Tax Collected'), fmtUSD(preview.summary?.total_tax_usd || 0)],
                   [tr('delivery_fees', 'Delivery Fees'), fmtUSD(preview.summary?.total_delivery_usd || 0)],

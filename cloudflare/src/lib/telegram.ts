@@ -196,6 +196,11 @@ export function telegramRowLines(head: string, parts: string[] = [], nest = ''):
 // grow a third way of printing a dollar amount.
 const round2 = (value: number) => Math.round(value * 100) / 100
 const usd = (value: unknown) => `$${round2(Number(value) || 0).toFixed(2)}`
+// A split -- the per-cashier, per-branch, per-payment-method or per-courier
+// lines under a figure -- carries 4 places so its lines add up to that figure
+// exactly; the figure itself keeps cents (owner, 13 Oct 2026).
+const round4 = (value: number) => Math.round(value * 10_000) / 10_000
+const usd4 = (value: unknown) => `$${round4(Number(value) || 0).toFixed(4)}`
 // p5/losses (Sep 15 2026): a terse, numbers-only suffix for the "loss" line
 // when some of its rows carried no cost anywhere -- the concise-report rule
 // (no explanatory prose) means this is a bare count, not a sentence.
@@ -561,16 +566,22 @@ async function dayStats(env: Env, date: string, salesTotals: Promise<SalesTotals
 // sliced by cashier -- so a cashier's line and the Sales total above it are
 // the same number cut two ways, and the per-cashier lines sum to the total.
 // (They did not: the old query counted voided receipts and gross totals.)
-async function cashierTotals(env: Env, date: string): Promise<CashierRow[]> {
-  const rows = await getSalesGroupedTotals(env, dayFilters(date), 'cashier', 12)
+async function cashierTotals(env: Env, date: string, otherLabel: string): Promise<CashierRow[]> {
+  const rows = await getSalesGroupedTotals(env, dayFilters(date), 'cashier', 2000)
   // Receipts and money only. The per-cashier VOID count used to ride along on
   // this row; the day block above already reports the day's cancelled count,
   // and repeating it per cashier is exactly the kind of second figure the
   // owner asked us to take out of the message.
-  return rows.map((row) => ({
+  // Twelve lines at most, the tail folded into one "Other" line so the list
+  // still adds up to the Sales figure above it.
+  return foldRows(rows.map((row) => ({
     cashier: row.label || 'Unknown',
     count: row.tx_count,
     usd: row.revenue_usd,
+  })), 12, (rest) => ({
+    cashier: otherLabel,
+    count: rest.reduce((sum, row) => sum + (Number(row.count) || 0), 0),
+    usd: round4(rest.reduce((sum, row) => sum + (Number(row.usd) || 0), 0)),
   }))
 }
 
@@ -849,8 +860,8 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
   // is dropped here and only here: the section is a list of cashiers, so the
   // count needs no noun, and repeating a two-language word on every bullet is
   // what made this block long.
-  section('cashiers', cashiers.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.cashier, 60)}:`, [`${Number(row.count) || 0} · ${usd(row.usd)}`])))
-  if (extra.cashiers?.branches) section('branches', extra.cashiers.branches.flatMap((row) => countedRowLines(row, 60)), showSales)
+  section('cashiers', cashiers.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.cashier, 60)}:`, [`${Number(row.count) || 0} · ${usd4(row.usd)}`])))
+  if (extra.cashiers?.branches) section('branches', extra.cashiers.branches.flatMap((row) => countedRowLines(row, 60, 4)), showSales)
   if (extra.products) {
     section('topProducts', topProductRows(extra.products), showSales)
     section('lowStock', lowStockSectionRows(extra.products), showSales)
@@ -877,7 +888,7 @@ async function dayReport(
   const otherLabel = withLanguage(language, () => label('other'))
   const [stats, cashiers, extra] = await Promise.all([
     dayStats(env, date, totals),
-    cashierTotals(env, date),
+    cashierTotals(env, date, otherLabel),
     anySummarySection(summary)
       ? summarySectionFigures(env, summaryScope({ business_date: date, branch_id: null }, nowMs), totals, summary, { otherLabel, cashierListShown: true })
       : undefined,
@@ -1392,17 +1403,17 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   lines.push(sectionHeader('paymentMethods', SHIFT_SECTION_EDGE))
   const paymentMethods = figures.paymentMethods || []
   lines.push(...(paymentMethods.length
-    ? paymentMethods.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.method, 40)}:`, [`${Number(row.count) || 0} · ${usd(row.usd)}`]))
+    ? paymentMethods.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.method, 40)}:`, [`${Number(row.count) || 0} · ${usd4(row.usd)}`]))
     : [EMPTY_SECTION]))
 
   lines.push(sectionHeader('delivery', SHIFT_SECTION_EDGE))
   const deliveries = figures.deliveries || []
   lines.push(...(deliveries.length
     ? deliveries.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.name, 40)}:`, [
-      `${Number(row.count) || 0} · ${usd(row.feeUsd)} ${bi('fee', 'ថ្លៃដឹក')}`,
+      `${Number(row.count) || 0} · ${usd4(row.feeUsd)} ${bi('fee', 'ថ្លៃដឹក')}`,
       // An UNRECORDED courier cost is NULL, never $0.00: a "$0.00 cost" tail
       // would claim the courier worked for free, so it is left off instead.
-      Number(row.costUsd) > 0 ? `· ${usd(row.costUsd)} ${bi('cost', 'ថ្លៃដើម')}` : '',
+      Number(row.costUsd) > 0 ? `· ${usd4(row.costUsd)} ${bi('cost', 'ថ្លៃដើម')}` : '',
     ]))
     : [EMPTY_SECTION]))
 
@@ -1554,7 +1565,7 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number, 
       (rest) => ({
         method: otherLabel,
         count: rest.reduce((sum, row) => sum + (Number(row.count) || 0), 0),
-        usd: round2(rest.reduce((sum, row) => sum + (Number(row.usd) || 0), 0)),
+        usd: round4(rest.reduce((sum, row) => sum + (Number(row.usd) || 0), 0)),
       }),
     ),
     deliveries: foldRows(
@@ -1571,8 +1582,8 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number, 
       (rest) => ({
         name: otherLabel,
         count: rest.reduce((sum, row) => sum + (Number(row.count) || 0), 0),
-        feeUsd: round2(rest.reduce((sum, row) => sum + (Number(row.feeUsd) || 0), 0)),
-        costUsd: round2(rest.reduce((sum, row) => sum + (Number(row.costUsd) || 0), 0)),
+        feeUsd: round4(rest.reduce((sum, row) => sum + (Number(row.feeUsd) || 0), 0)),
+        costUsd: round4(rest.reduce((sum, row) => sum + (Number(row.costUsd) || 0), 0)),
       }),
     ),
     // Refunds and courier payouts no longer suppress the estimate: they are
@@ -1759,8 +1770,8 @@ const overviewTitle = (date: string): string => `📈 ${label('reportsOverview')
 const overviewBranch = (branchId: number | null, branchName: string | null): string =>
   (branchId == null ? bi('All branches', 'គ្រប់សាខា') : cleanLine(branchName || `#${branchId}`, 60))
 
-const countedRowLines = (row: CountedMoney, nameLength: number): string[] =>
-  telegramRowLines(`${ROW_BULLET}${cleanLine(row.name, nameLength)}:`, [`${Number(row.count) || 0} · ${usd(row.usd)}`])
+const countedRowLines = (row: CountedMoney, nameLength: number, places: 2 | 4 = 2): string[] =>
+  telegramRowLines(`${ROW_BULLET}${cleanLine(row.name, nameLength)}:`, [`${Number(row.count) || 0} · ${places === 4 ? usd4(row.usd) : usd(row.usd)}`])
 
 /** ` · +10%`: today's revenue against an earlier day's, in whole percent; nothing when that day took nothing. */
 function changeAgainst(today: number, before: number): string {
@@ -1849,10 +1860,10 @@ function overviewSections(figures: ShiftOverviewFigures, categories?: TelegramCa
   if (figures.refundUsd) sales.push(labeled('refunds', usd(figures.refundUsd)))
   section('sales', sales, showSales)
   section('invoices', [countRow([['total', Number(figures.invoices) || 0], ['cancelled', Number(figures.cancelled) || 0]])], showSales)
-  section('paymentMethods', figures.paymentMethods.flatMap((row) => countedRowLines({ name: row.method, count: row.count, usd: row.usd }, 40)), showSales)
+  section('paymentMethods', figures.paymentMethods.flatMap((row) => countedRowLines({ name: row.method, count: row.count, usd: row.usd }, 40, 4)), showSales)
   if (extra.sales) section('received', receivedRows(extra.sales.received), showSales)
-  if (extra.cashiers?.cashiers) section('cashiers', extra.cashiers.cashiers.flatMap((row) => countedRowLines(row, 60)), showSales)
-  if (extra.cashiers?.branches) section('branches', extra.cashiers.branches.flatMap((row) => countedRowLines(row, 60)), showSales)
+  if (extra.cashiers?.cashiers) section('cashiers', extra.cashiers.cashiers.flatMap((row) => countedRowLines(row, 60, 4)), showSales)
+  if (extra.cashiers?.branches) section('branches', extra.cashiers.branches.flatMap((row) => countedRowLines(row, 60, 4)), showSales)
   if (extra.products) {
     section('topProducts', topProductRows(extra.products), showSales)
     section('lowStock', lowStockSectionRows(extra.products), showSales)
@@ -1948,7 +1959,7 @@ export async function shiftOverviewFigures(
       (rest) => ({
         method: otherLabel,
         count: rest.reduce((sum, row) => sum + (Number(row.count) || 0), 0),
-        usd: round2(rest.reduce((sum, row) => sum + (Number(row.usd) || 0), 0)),
+        usd: round4(rest.reduce((sum, row) => sum + (Number(row.usd) || 0), 0)),
       }),
     ),
     expenses: {
@@ -1984,9 +1995,9 @@ async function summarySectionFigures(
   const fold = (rows: CountedMoney[]) => foldRows(rows, SUMMARY_ROWS, (rest) => ({
     name: otherLabel,
     count: rest.reduce((sum, row) => sum + (Number(row.count) || 0), 0),
-    usd: round2(rest.reduce((sum, row) => sum + (Number(row.usd) || 0), 0)),
+    usd: round4(rest.reduce((sum, row) => sum + (Number(row.usd) || 0), 0)),
   }))
-  const groupedBy = async (key: 'cashier' | 'branch') => fold((await getSalesGroupedTotals(env, filters, key, 50))
+  const groupedBy = async (key: 'cashier' | 'branch') => fold((await getSalesGroupedTotals(env, filters, key, 2000))
     .map((row) => ({ name: row.label || 'Unknown', count: row.tx_count, usd: row.revenue_usd })))
   const onDay = (offsetDays: number): SalesFilters => {
     const date = addCalendarDays(String(filters.startDate), offsetDays)

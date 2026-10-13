@@ -265,6 +265,20 @@ insRet.run(1, 3, 10, 'completed', 'customer', UTC(24, 8), 1) // customer refund 
   check('paymentMethod filter: grouped rows still reconcile to getSalesTotals (revenue 50)', near(sum(abaOnly, 'revenue_usd'), abaTotals.revenue_usd) && near(abaTotals.revenue_usd, 50))
   const limited = await kernel.getSalesGroupedTotals(env, filters, 'customer', 1)
   check('limit caps the row count (top by revenue)', limited.length === 1 && limited[0].key === 'id:2')
+  // AL L2: a capped list must say it is capped and carry the window's totals.
+  const limitedReport = await kernel.getSalesGroupedReport(env, filters, 'customer', 1)
+  const allCustomers = await kernel.getSalesGroupedReport(env, filters, 'customer')
+  const windowTotals = await kernel.getSalesTotals(env, filters)
+  check(`capped grouped report counts every group (${limitedReport.total_groups} of ${allCustomers.rows.length}) and keeps the window totals (revenue ${limitedReport.totals.revenue_usd} = ${windowTotals.revenue_usd}, not the one row's ${limitedReport.rows[0].revenue_usd})`,
+    limitedReport.rows.length === 1 && limitedReport.total_groups === allCustomers.rows.length && limitedReport.total_groups > 1
+      && near(limitedReport.totals.revenue_usd, windowTotals.revenue_usd) && !near(limitedReport.totals.revenue_usd, limitedReport.rows[0].revenue_usd)
+      && allCustomers.total_groups === allCustomers.rows.length)
+  const limitedProducts = await kernel.getProductSalesReport(env, filters, 1)
+  const allProducts = await kernel.getProductSalesReport(env, filters)
+  check(`capped product report counts every product (${limitedProducts.total_groups}) and totals the window (line sales ${limitedProducts.totals.line_sales_usd})`,
+    limitedProducts.rows.length === 1 && limitedProducts.total_groups === allProducts.rows.length && limitedProducts.total_groups > 1
+      && near(limitedProducts.totals.line_sales_usd, sum(allProducts.rows, 'line_sales_usd'))
+      && near(limitedProducts.totals.profit_usd, sum(allProducts.rows, 'profit_usd')))
 
   // ---- product ranking ----
   const products = await kernel.getProductSalesRanking(env, filters)
@@ -367,6 +381,15 @@ insRet.run(1, 3, 10, 'completed', 'customer', UTC(24, 8), 1) // customer refund 
   const productRow = { product_id: 101, product_name: 'A', qty: 3, line_sales_usd: 140, cost_usd: 50, profit_usd: 90, cost_missing_snapshot_lines: 0 }
   check('gateProductRow(non-admin): strips every admin key', SECRET.every((k) => !(k in gateProductRow(productRow, false))))
   check('gateProductRow(admin): margin on LINE sales (90/140 = 64.29%)', gateProductRow(productRow, true).margin_pct === 64.29)
+  // AL L3 (owner, 13 Oct 2026): a bucket row keeps the kernel's 4 places
+  // through the gate; a headline total still prints cents.
+  const bucketRow = { revenue_usd: 1.005, cost_usd: 0.005, profit_usd: 1.005, pending_profit_usd: 0.0025 }
+  check('gateTotals(bucket, 4 places) keeps 0.0050 cost / 1.0050 profit; a headline (default) rounds to cents',
+    gateTotals(bucketRow, true, true, 4).cost_usd === 0.005 && gateTotals(bucketRow, true, true, 4).profit_usd === 1.005
+      && gateTotals(bucketRow, true, true, 4).pending_profit_usd === 0.0025 && gateTotals(bucketRow, true).cost_usd === 0.01)
+  check('gateProductRow(bucket, 4 places) keeps 0.0050 cost',
+    gateProductRow({ line_sales_usd: 1, cost_usd: 0.005, profit_usd: 0.995 }, true, 4).cost_usd === 0.005
+      && gateProductRow({ line_sales_usd: 1, cost_usd: 0.005, profit_usd: 0.995 }, true).cost_usd === 0.01)
 
   // ---- period keys ----
   check('periodKeyFor(day) is the date itself', JSON.stringify(periodKeyFor('2026-08-20', 'day')) === JSON.stringify({ period: '2026-08-20', date_from: '2026-08-20', date_to: '2026-08-20' }))

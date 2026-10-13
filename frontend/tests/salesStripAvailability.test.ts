@@ -5,6 +5,7 @@ import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent 
 // The REAL formula module the cards build their equations from -- injected,
 // not stubbed, so a card that prints an equation that does not foot fails here.
 import { buildEquation, revenueTerms, profitTerms, equationResidual } from '../src/utils/statsFormulas.ts'
+import { formatUsd4 } from '../src/utils/reportMoney.ts'
 
 const source = readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const lifecycleStart = source.indexOf('  type SalesStripPayload =')
@@ -22,7 +23,8 @@ function render(hooks: any, props: any, api: any, helpers: any) {
   const { useState, useRef, useMemo, useCallback, useEffect } = hooks
   const { stripRange, isActive, user, canViewSales, canViewFees, getPermissionTier } = props
   const { getSalesStatsStrip, getFeesReport } = api
-  const { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, buildEquation, revenueTerms, profitTerms } = helpers
+  const { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, buildEquation, revenueTerms, profitTerms, formatUsd4 } = helpers
+  const settings = props.settings
   const withLoaderTimeout = (load: () => unknown) => load()
   const t = (key: string) => key
   const translateOr = (_key: string, en: string, km = en) => props.language === 'km' ? km : en
@@ -91,7 +93,7 @@ function harness() {
   const enqueue = (queue: Pending[], params: Record<string, unknown>) => new Promise((resolve, reject) => queue.push({ params, resolve, reject }))
   const api = { getSalesStatsStrip: (params: Record<string, unknown>) => enqueue(requests.sales, params), getFeesReport: (params: Record<string, unknown>) => enqueue(requests.fees, params) }
   let view: View
-  const render = () => { cursor = 0; dirty = false; view = run(hooks, props, api, { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, buildEquation, revenueTerms, profitTerms }); return view }
+  const render = () => { cursor = 0; dirty = false; view = run(hooks, props, api, { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, buildEquation, revenueTerms, profitTerms, formatUsd4 }); return view }
   const commit = () => {
     for (const [index, effect] of effects) { slots[index].cleanup?.(); slots[index].cleanup = effect() || undefined }
     effects.clear()
@@ -155,6 +157,11 @@ await test('ready cards retain existing financial formulas and distinct expense 
   // ... and it uses the sale-basis refund (3), never the returns desk's 5.
   assert.ok(!revenueHint.includes('$5.00'), 'the return-date total is not a term of revenue')
   assert.equal(card(view, 'expenses').value, '$3.00 · 4000 KHR')
+  // Owner, 13 Oct 2026: the per-method rows split the Collected figure, so
+  // they print 4 places and add up to it exactly; the headline cards above
+  // keep cents.
+  assert.equal(card(view, 'payments').sub, '2 · $42.0000')
+  assert.deepEqual(card(view, 'payments').details, [{ label: 'cash', value: '2 · $42.0000' }])
 })
 
 for (const change of ['date', 'time', 'user', 'logout', 'role', 'permissions', 'sales grant', 'fees grant', 'tier', 'inactive', 'clear range']) {

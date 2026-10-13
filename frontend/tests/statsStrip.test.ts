@@ -241,9 +241,12 @@ test('Part 548: report figures remain visible on every viewport without duplicat
     'src/components/sales/reports/GroupedReport.tsx',
   ]) {
     const src = read(rel)
-    assert.match(src, /tr\('rpt_gross_profit',\s*'[^']+'\)/, `${rel} renders the shared profit label in its summary`)
+    // profitLabel (reportModel.ts) is the shared label: rpt_gross_profit, or
+    // the goods-only name when the server flagged a cost viewer's profit (L4).
+    assert.match(src, /profitLabel\((totals|r), tr\)/, `${rel} renders the shared profit label in its summary`)
     assert.ok(!/hidden sm:inline/.test(src), `${rel} never hides a figure below the sm breakpoint`)
   }
+  assert.match(read('src/components/sales/reports/reportModel.ts'), /: tr\('rpt_gross_profit', 'Gross profit'\)\r?\n\}/, 'profitLabel falls back to the shared rpt_gross_profit label')
   const overview = read('src/components/sales/reports/OverviewReport.tsx')
   assert.ok(overview.includes('buildIncomeStatement('), 'Overview retains the canonical profit statement')
   assert.ok(overview.includes('lines.map((l)'), 'Overview renders all permitted statement rows on every viewport')
@@ -401,7 +404,10 @@ test('Part 553/554: report sections render selected-currency money + a CSV expor
         assert.match(source, /const exportCsv = \(\) => \{ void exporter\.prepare\(\) \}/)
         assert.match(source, /exportMenuItems\(tr, p\.canExport, exportCsv, exportPrint,/)
         assert.match(source, /onClick=\{exporter\.csv\}/)
-        assert.match(source, /document: \(result\) => \([\s\S]*?language: language \|\| 'en', fmtMoney,/,
+        // Owner, 13 Oct 2026: the receipt rows print 4 places, through the
+        // same selected-currency rules (fmtRow = fmtBucketMoney ?? fmtMoney).
+        assert.match(source, /const fmtRow = p\.fmtBucketMoney \?\? fmtMoney/)
+        assert.match(source, /document: \(result\) => \([\s\S]*?language: language \|\| 'en', fmtMoney: fmtRow,/,
           'the completed document retains the selected-currency formatter')
         assert.doesNotMatch(source, /downloadCSV\(/, 'Sales must not publish its loaded browse page directly')
       }
@@ -409,7 +415,7 @@ test('Part 553/554: report sections render selected-currency money + a CSV expor
       for (const [from, to] of [
         ['void exporter.prepare()', 'void exporter.csv()'],
         ['onClick={exporter.csv}', 'onClick={() => {}}'],
-        ["language: language || 'en', fmtMoney,", "language: language || 'en', fmtMoney: String,"],
+        ["language: language || 'en', fmtMoney: fmtRow,", "language: language || 'en', fmtMoney: String,"],
       ]) {
         const broken = src.replace(from, to)
         assert.notEqual(broken, src, 'Sales wiring negative control must apply')
@@ -423,6 +429,7 @@ test('Part 553/554: report sections render selected-currency money + a CSV expor
   // The hub threads its explicit report-currency fmtMoney into every view.
   const hub = read('src/components/sales/ReportsHub.tsx')
   assert.ok(/const viewProps[\s\S]{0,400}fmtMoney,/.test(hub), 'ReportsHub passes fmtMoney to the views')
+  assert.ok(/const viewProps[\s\S]{0,400}fmtBucketMoney,/.test(hub), 'ReportsHub passes the 4-place split-row formatter to the views')
   assert.ok(hub.includes('displayCurrency: options.currency'), 'report currency is display-only and defaults independently to USD')
   assert.ok(!hub.includes("options.currency === 'setting'"), 'the removed App setting choice cannot remain active invisibly')
 })

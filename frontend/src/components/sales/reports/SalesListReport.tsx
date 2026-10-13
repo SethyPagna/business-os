@@ -21,7 +21,7 @@ import { getStatusLabel } from '../StatusBadge.tsx'
 import ReceiptSheet from './ReceiptSheet.tsx'
 import ReportFrame from './ReportFrame.tsx'
 import ReportTable, { type ReportColumn } from './ReportTable.tsx'
-import { fmtInt, fmtPct, joinSummary, num, pct, reportFileName, reportQueryParams, round2, type SortState, countLabel, REPORT_NOUNS } from './reportModel.ts'
+import { fmtInt, fmtPct, joinSummary, num, pct, profitLabel, reportFileName, reportQueryParams, round4, type SortState, countLabel, REPORT_NOUNS } from './reportModel.ts'
 import { exportMenuItems, rangeSubtitle, tableLabels, type ReportViewProps } from './reportTypes.ts'
 import { usePagedReport } from './usePagedReport.ts'
 import { useSalesListExport } from './salesListExport.ts'
@@ -51,6 +51,8 @@ export interface SaleRow {
   cost_before_floor_usd?: number
   gross_profit_usd?: number
   cost_missing_snapshot_lines?: number
+  /** L4: a cost viewer's receipt profit is goods only (no delivery terms). */
+  profit_excludes_delivery?: true
 }
 
 const MONEY_KEYS: Array<keyof SaleRow> = [
@@ -80,6 +82,7 @@ export function mapSaleRow(raw: unknown, index: number): SaleRow {
     row.gross_profit_usd = num(r.gross_profit_usd)
     row.cost_missing_snapshot_lines = num(r.cost_missing_snapshot_lines)
   }
+  if (r.profit_excludes_delivery === true) row.profit_excludes_delivery = true
   return row
 }
 
@@ -97,20 +100,26 @@ export function sumSaleRows(rows: SaleRow[]): SaleRow {
       missing += num(r.cost_missing_snapshot_lines)
     }
   }
-  for (const k of MONEY_KEYS) (out as unknown as Record<string, number>)[k] = round2((out as unknown as Record<string, number>)[k])
+  // Receipt rows carry 4 places (owner, 13 Oct 2026), so their sum does too.
+  for (const k of MONEY_KEYS) (out as unknown as Record<string, number>)[k] = round4((out as unknown as Record<string, number>)[k])
   if (allProfit) {
     // Same aggregate floor as the canonical server totals. Flooring each
     // receipt before summing loses imported/restocked cost corrections.
-    out.cost_before_floor_usd = round2(cost)
-    out.cost_usd = round2(Math.max(0, cost))
-    out.gross_profit_usd = round2(profit - Math.max(0, cost))
+    out.cost_before_floor_usd = round4(cost)
+    out.cost_usd = round4(Math.max(0, cost))
+    out.gross_profit_usd = round4(profit - Math.max(0, cost))
     out.cost_missing_snapshot_lines = missing
+    if (rows.some((r) => r.profit_excludes_delivery)) out.profit_excludes_delivery = true
   }
   return out
 }
 
 export default function SalesListReport(p: ReportViewProps) {
   const { tr, t, fmtMoney, options, style, filters, view, search } = p
+  // Receipt rows are splits of the range: 4 places in the table, its totals
+  // row, a receipt's own detail and the Excel/print export, so they add up
+  // exactly to the Overview (owner, 13 Oct 2026). The summary line keeps cents.
+  const fmtRow = p.fmtBucketMoney ?? fmtMoney
   const { language, exchangeRate, settings, user } = (useApp() || {}) as {
     language?: string; exchangeRate?: number; settings?: { business_name?: unknown }
     user?: { id?: unknown; permissions?: unknown; role_permissions?: unknown }
@@ -138,7 +147,7 @@ export default function SalesListReport(p: ReportViewProps) {
   const basisOf = (r: SaleRow) => (options.basis === 'gross' ? r.gross_sales_usd : options.basis === 'collected' ? r.collected_total_usd : r.net_revenue_usd)
   const basisLabel = options.basis === 'gross' ? tr('gross_sales', 'Gross sales') : options.basis === 'collected' ? tr('collected_total', 'Collected total') : tr('revenue', 'Revenue')
 
-  const buildColumns = (profitVisible: boolean): Array<ReportColumn<SaleRow>> => {
+  const buildColumns = (profitVisible: boolean, goodsOnly = !!totals.profit_excludes_delivery): Array<ReportColumn<SaleRow>> => {
     const list: Array<ReportColumn<SaleRow> | null> = [
       { key: 'receipt_number', label: tr('receipt', 'Receipt'), primary: true, value: (r) => r.receipt_number },
       { key: 'id', label: tr('record_id', 'Record ID'), value: (r) => r.id ? String(r.id) : '', defaultVisible: false },
@@ -151,7 +160,7 @@ export default function SalesListReport(p: ReportViewProps) {
       { key: 'payment_method', label: tr('payment_method', 'Payment method'), value: (r) => r.payment_method },
       { key: 'status', label: tr('status', 'Status'), value: (r) => r.id ? getStatusLabel(r.status, t) : '' },
       { key: 'gross_sales_usd', label: tr('gross_sales', 'Gross sales'), kind: 'money', value: (r) => r.gross_sales_usd, defaultVisible: options.basis === 'gross', emphasis: options.basis === 'gross' },
-      { key: 'discounts', label: tr('discounts', 'Discounts'), kind: 'money', value: (r) => round2(r.store_discount_usd + r.membership_discount_usd), defaultVisible: false },
+      { key: 'discounts', label: tr('discounts', 'Discounts'), kind: 'money', value: (r) => round4(r.store_discount_usd + r.membership_discount_usd), defaultVisible: false },
       { key: 'tax_usd', label: tr('tax', 'Tax'), kind: 'money', value: (r) => r.tax_usd, defaultVisible: false },
       { key: 'delivery_usd', label: tr('delivery', 'Delivery'), kind: 'money', value: (r) => r.delivery_usd, defaultVisible: false },
       { key: 'refund_usd', label: tr('refunds', 'Refunds'), kind: 'money', value: (r) => r.refund_usd },
@@ -159,13 +168,13 @@ export default function SalesListReport(p: ReportViewProps) {
       { key: 'pending_revenue_usd', label: tr('rpt_pending_credit', 'Not Paid'), kind: 'money', value: (r) => r.pending_revenue_usd, defaultVisible: false },
       { key: 'collected_total_usd', label: tr('collected_total', 'Collected total'), kind: 'money', value: (r) => r.collected_total_usd, defaultVisible: options.basis === 'collected', emphasis: options.basis === 'collected' },
       profitVisible ? { key: 'cost_usd', label: tr('cost', 'Cost'), kind: 'money', value: (r) => r.cost_usd ?? null, defaultVisible: false } : null,
-      profitVisible ? { key: 'gross_profit_usd', label: tr('rpt_gross_profit', 'Gross profit'), kind: 'money', value: (r) => r.gross_profit_usd ?? null } : null,
+      profitVisible ? { key: 'gross_profit_usd', label: profitLabel(goodsOnly ? { profit_excludes_delivery: true } : null, tr), kind: 'money', value: (r) => r.gross_profit_usd ?? null } : null,
       profitVisible ? { key: 'margin_pct', label: tr('rpt_margin', 'Margin'), kind: 'pct', value: (r) => pct(num(r.gross_profit_usd), basisOf(r)) } : null,
       profitVisible ? { key: 'cost_missing_snapshot_lines', label: tr('rpt_missing_cost_lines', 'Lines without cost snapshot'), kind: 'int', value: (r) => r.cost_missing_snapshot_lines ?? null, defaultVisible: false } : null,
     ]
     return list.filter((c): c is ReportColumn<SaleRow> => !!c)
   }
-  const columns = useMemo(() => buildColumns(showProfit), [tr, t, options.basis, showProfit]) // eslint-disable-line react-hooks/exhaustive-deps
+  const columns = useMemo(() => buildColumns(showProfit), [tr, t, options.basis, showProfit, totals.profit_excludes_delivery]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [sort, setSort] = useState<SortState | null>(null)
   const [openRow, setOpenRow] = useState<SaleRow | null>(null)
@@ -178,7 +187,7 @@ export default function SalesListReport(p: ReportViewProps) {
         `${basisLabel} ${fmtMoney(basisOf(totals))}`,
         totals.refund_usd ? `${tr('refunds', 'Refunds')} ${fmtMoney(totals.refund_usd)}` : null,
         totals.pending_revenue_usd ? `${tr('rpt_pending_credit', 'Not Paid')} ${fmtMoney(totals.pending_revenue_usd)}` : null,
-        showProfit ? `${tr('rpt_gross_profit', 'Gross profit')} ${fmtMoney(num(totals.gross_profit_usd))} (${fmtPct(pct(num(totals.gross_profit_usd), basisOf(totals)))})` : null,
+        showProfit ? `${profitLabel(totals, tr)} ${fmtMoney(num(totals.gross_profit_usd))} (${fmtPct(pct(num(totals.gross_profit_usd), basisOf(totals)))})` : null,
       ])
     : ''
 
@@ -187,9 +196,9 @@ export default function SalesListReport(p: ReportViewProps) {
   const exporter = useSalesListExport({ key: exportKey, query: { ...base, q: search },
     canExport: () => p.canExport() && (p.exportScopeKey === undefined || p.exportScopeKey.trim() === search),
     document: (result) => ({ ...result, totals: { ...result.totals, receipt_number: labels.total },
-      columns: buildColumns(typeof result.totals.gross_profit_usd === 'number'),
+      columns: buildColumns(typeof result.totals.gross_profit_usd === 'number', result.totals.profit_excludes_delivery === true),
       title: `${tr('reports', 'Reports')} · ${tr(view.labelKey, view.fallback)}`, subtitle: rangeSubtitle(filters, tr),
-      language: language || 'en', fmtMoney, filename: reportFileName('sales', filters, '').replace(/\.$/, ''),
+      language: language || 'en', fmtMoney: fmtRow, filename: reportFileName('sales', filters, '').replace(/\.$/, ''),
       metadata: [String(settings?.business_name || ''), countLabel(result.rowCount, REPORT_NOUNS.sale, tr),
         `${tr('rpt_export_generated', 'Generated')}: ${fmtDateTime24(new Date().toISOString())} (UTC+7)`,
         ...(result.totals.cost_missing_snapshot_lines ? [`${tr('rpt_missing_cost_lines', 'Lines without cost snapshot')}: ${result.totals.cost_missing_snapshot_lines}`] : [])].filter(Boolean),
@@ -219,20 +228,20 @@ export default function SalesListReport(p: ReportViewProps) {
   ]
   const moneyLines = (r: SaleRow) => {
     const lines = [
-      { key: 'gross', label: tr('gross_sales', 'Gross sales'), value: fmtMoney(r.gross_sales_usd), kind: 'add' as const },
-      { key: 'store_disc', label: tr('rpt_store_discounts', 'Store discounts'), value: fmtMoney(r.store_discount_usd), kind: 'sub' as const },
-      { key: 'member_disc', label: tr('rpt_membership_discounts', 'Membership discounts'), value: fmtMoney(r.membership_discount_usd), kind: 'sub' as const },
-      { key: 'refund', label: tr('refunds', 'Refunds'), value: fmtMoney(r.refund_usd), kind: 'sub' as const },
-      { key: 'revenue', label: tr('revenue', 'Revenue'), value: fmtMoney(r.net_revenue_usd), kind: 'total' as const },
-      ...(r.pending_revenue_usd ? [{ key: 'pending', label: tr('rpt_pending_credit', 'Not Paid'), value: fmtMoney(r.pending_revenue_usd), kind: 'info' as const }] : []),
-      { key: 'tax', label: tr('tax', 'Tax'), value: fmtMoney(r.tax_usd), kind: 'add' as const },
-      { key: 'delivery', label: tr('rpt_delivery_charged', 'Delivery fee charged'), value: fmtMoney(r.delivery_usd), kind: 'add' as const },
-      { key: 'collected', label: tr('collected_total', 'Collected total'), value: fmtMoney(r.collected_total_usd), kind: 'total' as const },
+      { key: 'gross', label: tr('gross_sales', 'Gross sales'), value: fmtRow(r.gross_sales_usd), kind: 'add' as const },
+      { key: 'store_disc', label: tr('rpt_store_discounts', 'Store discounts'), value: fmtRow(r.store_discount_usd), kind: 'sub' as const },
+      { key: 'member_disc', label: tr('rpt_membership_discounts', 'Membership discounts'), value: fmtRow(r.membership_discount_usd), kind: 'sub' as const },
+      { key: 'refund', label: tr('refunds', 'Refunds'), value: fmtRow(r.refund_usd), kind: 'sub' as const },
+      { key: 'revenue', label: tr('revenue', 'Revenue'), value: fmtRow(r.net_revenue_usd), kind: 'total' as const },
+      ...(r.pending_revenue_usd ? [{ key: 'pending', label: tr('rpt_pending_credit', 'Not Paid'), value: fmtRow(r.pending_revenue_usd), kind: 'info' as const }] : []),
+      { key: 'tax', label: tr('tax', 'Tax'), value: fmtRow(r.tax_usd), kind: 'add' as const },
+      { key: 'delivery', label: tr('rpt_delivery_charged', 'Delivery fee charged'), value: fmtRow(r.delivery_usd), kind: 'add' as const },
+      { key: 'collected', label: tr('collected_total', 'Collected total'), value: fmtRow(r.collected_total_usd), kind: 'total' as const },
     ]
     if (typeof r.gross_profit_usd === 'number') {
       lines.push(
-        { key: 'cost', label: tr('cogs', 'Cost of goods'), value: fmtMoney(num(r.cost_usd)), kind: 'sub' as const },
-        { key: 'profit', label: tr('rpt_gross_profit', 'Gross profit'), value: `${fmtMoney(r.gross_profit_usd)} (${fmtPct(pct(r.gross_profit_usd, basisOf(r)))})`, kind: 'total' as const },
+        { key: 'cost', label: tr('cogs', 'Cost of goods'), value: fmtRow(num(r.cost_usd)), kind: 'sub' as const },
+        { key: 'profit', label: profitLabel(r, tr), value: `${fmtRow(r.gross_profit_usd)} (${fmtPct(pct(r.gross_profit_usd, basisOf(r)))})`, kind: 'total' as const },
       )
       if (r.cost_missing_snapshot_lines) lines.push({ key: 'missing', label: tr('rpt_missing_cost_lines', 'Lines without cost snapshot'), value: fmtInt(r.cost_missing_snapshot_lines), kind: 'info' as const })
     }
@@ -276,7 +285,7 @@ export default function SalesListReport(p: ReportViewProps) {
         rows={rows}
         rowKey={(r) => String(r.id)}
         style={style}
-        fmtMoney={fmtMoney}
+        fmtMoney={fmtRow}
         labels={labels}
         loading={paged.loading}
         totalsRow={rows.length > 1 ? ({ ...totals, receipt_number: labels.total, status: '' } as SaleRow) : null}

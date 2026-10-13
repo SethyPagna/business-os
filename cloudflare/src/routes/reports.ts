@@ -15,9 +15,11 @@ import {
   type SalesReportSnapshot,
   getSalesTotals,
   getDeliveryContactTotals,
-  getSalesGroupedTotals,
+  getSalesGroupedReport,
+  getSalesOverviewBlocks,
+  BUCKET_MONEY_PLACES,
   reportCustomerNameExpr,
-  getProductSalesRanking,
+  getProductSalesReport,
   previousPeriodFilters,
   SALES_GROUP_KEYS,
   type SalesGroupKey,
@@ -29,6 +31,7 @@ import {
 import { ReportMoneyPrecisionError, reportMoneyHttpError } from '../lib/reportMoneyPrecision'
 import { parseReportExport, readRecordExport, recordExportTotals, reportExportStamp, reportExportToken } from '../lib/reportExport'
 import { localRangeClockError, isLocalRangeClock, localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
+import { costViewProfit } from '../lib/reportProfitView'
 import type { Env } from '../index'
 
 // Historical label (owner rule: old records are never relabelled): the row's own branch-name snapshot
@@ -199,12 +202,13 @@ function filterError(error: unknown): string {
  * from "hidden", so absence is the contract -- same rule as
  * buildDaySummaryRow / buildSaleReportRow above).
  */
-export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: boolean, canViewCosts = isAdmin): Record<string, unknown> {
+export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: boolean, canViewCosts = isAdmin, places: 2 | 4 = 2): Record<string, unknown> {
   if (!isAdmin && canViewCosts) {
-    // Cost grants do not confer the separate administrator-only delivery gate.
-    const { delivery_actual_cost_usd, delivery_actual_cost_count, delivery_margin_usd, delivery_net_usd,
-      recognized_delivery_cost_usd, pending_delivery_cost_usd, ...costView } = gateTotals(row, true)
-    return costView
+    // Cost grants do not confer the separate administrator-only delivery gate:
+    // the courier-cost keys leave, and profit is restated on goods so the
+    // courier cost cannot come back by subtraction either (AL finding L4,
+    // lib/reportProfitView.ts).
+    return costViewProfit(gateTotals(row, true, true, places))
   }
   const diagnostic = reportMoneyDiagnostic(row)
   // pending_cost_usd / pending_profit_usd (S4R3-6) are the awaiting-payment
@@ -233,35 +237,38 @@ export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: b
     money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows, ...rest
   } = row as Record<string, unknown>
   if (!isAdmin) return rest
+  // The kernel quantizes money: 2 places for a window total, 4 for a bucket row
+  // (BUCKET_MONEY_PLACES, owner 13 Oct 2026). A bucket row keeps its 4 places.
+  const money = (value: number): number => (places === 4 ? Math.round(value * 10_000) / 10_000 : round2(value))
   const revenue = num(rest.revenue_usd)
   const profit = num(profit_usd)
   return {
     ...rest,
-    cost_usd: round2(num(cost_usd)),
-    profit_usd: round2(profit),
+    cost_usd: money(num(cost_usd)),
+    profit_usd: money(profit),
     cost_missing_snapshot_lines: num(cost_missing_snapshot_lines),
     margin_pct: revenue > 0 ? round2((profit / revenue) * 100) : null,
-    pending_cost_usd: round2(num(pending_cost_usd)),
-    pending_profit_usd: round2(num(pending_profit_usd)),
-    unvalued_cost_usd: round2(num(unvalued_cost_usd)),
-    returned_cost_usd: round2(num(returned_cost_usd)),
-    returned_cost_shortfall_usd: round2(num(returned_cost_shortfall_usd)),
-    delivery_actual_cost_usd: round2(num(delivery_actual_cost_usd)),
+    pending_cost_usd: money(num(pending_cost_usd)),
+    pending_profit_usd: money(num(pending_profit_usd)),
+    unvalued_cost_usd: money(num(unvalued_cost_usd)),
+    returned_cost_usd: money(num(returned_cost_usd)),
+    returned_cost_shortfall_usd: money(num(returned_cost_shortfall_usd)),
+    delivery_actual_cost_usd: money(num(delivery_actual_cost_usd)),
     delivery_actual_cost_count: num(delivery_actual_cost_count),
-    delivery_margin_usd: round2(num(delivery_margin_usd)),
-    delivery_net_usd: round2(num(delivery_net_usd)),
-    recognized_delivery_cost_usd: round2(num(recognized_delivery_cost_usd)),
-    pending_delivery_cost_usd: round2(num(pending_delivery_cost_usd)),
+    delivery_margin_usd: money(num(delivery_margin_usd)),
+    delivery_net_usd: money(num(delivery_net_usd)),
+    recognized_delivery_cost_usd: money(num(recognized_delivery_cost_usd)),
+    pending_delivery_cost_usd: money(num(pending_delivery_cost_usd)),
     // Absent stays absent: the kernel omits these when the window cannot be
     // matched to stock movements (a payment-method or status filter, a grouped
     // row), and turning that into 0 would print "no losses" for a question
     // that was never asked.
     ...(removal_loss_usd === undefined ? {} : {
-      removal_loss_usd: round2(num(removal_loss_usd)),
+      removal_loss_usd: money(num(removal_loss_usd)),
       removal_loss_qty: num(removal_loss_qty),
       removal_loss_unvalued_rows: num(removal_loss_unvalued_rows),
-      revenue_after_losses_usd: round2(num(revenue_after_losses_usd)),
-      profit_after_losses_usd: round2(num(profit_after_losses_usd)),
+      revenue_after_losses_usd: money(num(revenue_after_losses_usd)),
+      profit_after_losses_usd: money(num(profit_after_losses_usd)),
     }),
     ...(diagnostic ? { money_precision_mode: diagnostic.precision_mode, money_complete: diagnostic.complete,
       money_unknown_cost_lines: diagnostic.unknown_cost_lines, money_contributing_rows: diagnostic.contributing_rows }
@@ -269,17 +276,18 @@ export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: b
   }
 }
 
-export function gateProductRow(row: Record<string, unknown>, isAdmin: boolean): Record<string, unknown> {
+export function gateProductRow(row: Record<string, unknown>, isAdmin: boolean, places: 2 | 4 = 2): Record<string, unknown> {
   const diagnostic = reportMoneyDiagnostic(row)
   const { cost_usd, profit_usd, cost_missing_snapshot_lines, margin_pct,
     money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows, ...rest } = row
   if (!isAdmin) return rest
+  const money = (value: number): number => (places === 4 ? Math.round(value * 10_000) / 10_000 : round2(value))
   const lineSales = num(rest.line_sales_usd)
   const profit = num(profit_usd)
   return {
     ...rest,
-    cost_usd: round2(num(cost_usd)),
-    profit_usd: round2(profit),
+    cost_usd: money(num(cost_usd)),
+    profit_usd: money(profit),
     cost_missing_snapshot_lines: num(cost_missing_snapshot_lines),
     margin_pct: lineSales > 0 ? round2((profit / lineSales) * 100) : null,
     ...(diagnostic ? { money_precision_mode: diagnostic.precision_mode, money_complete: diagnostic.complete,
@@ -288,15 +296,20 @@ export function gateProductRow(row: Record<string, unknown>, isAdmin: boolean): 
   }
 }
 
-export function gateBusinessSummarySaleRow(row: Record<string, unknown>, isAdmin: boolean): Record<string, unknown> {
+export function gateBusinessSummarySaleRow(row: Record<string, unknown>, isAdmin: boolean, canViewCosts = isAdmin): Record<string, unknown> {
   const diagnostic = reportMoneyDiagnostic(row)
   const { cost_usd, cost_before_floor_usd, cost_missing_snapshot_lines, gross_profit_usd,
     money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows, ...publicRow } = row
-  if (!isAdmin) return publicRow
-  return { ...publicRow, cost_usd, cost_before_floor_usd, cost_missing_snapshot_lines, gross_profit_usd,
+  if (!isAdmin && !canViewCosts) return publicRow
+  const adminRow = { ...publicRow, cost_usd, cost_before_floor_usd, cost_missing_snapshot_lines, gross_profit_usd,
     ...(diagnostic ? { money_precision_mode: diagnostic.precision_mode, money_complete: diagnostic.complete,
       money_unknown_cost_lines: diagnostic.unknown_cost_lines, money_contributing_rows: diagnostic.contributing_rows }
       : money_precision_mode !== undefined ? { money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows } : {}) }
+  // A receipt's gross profit carries its courier cost (fee - courier); with the
+  // fee and cost on the same row a cost viewer would read the courier off it,
+  // so a non-admin gets the receipt's goods profit instead (AL finding L4).
+  if (!isAdmin) return costViewProfit(adminRow)
+  return adminRow
 }
 
 /** The searched receipts define both detail and exact totals. Preserve the
@@ -413,18 +426,19 @@ app.get('/overview', async (c) => {
   }
 
   if (canSales) {
-    const [totals, previous, paymentMethods, couriers] = await Promise.all([
-      getSalesTotals(c.env, f),
+    // The payments fold is the SAME grouped kernel the "Payment methods" view
+    // reads (case-insensitive method key, canonical revenue / collected
+    // figures), so the two can never disagree. It shares the totals' snapshot.
+    const [{ totals, paymentMethods: payments, couriers }, previous] = await Promise.all([
+      getSalesOverviewBlocks(c.env, f),
       prev ? getSalesTotals(c.env, prev) : Promise.resolve(null),
-      // The SAME grouped kernel the "Payment methods" view reads (case-
-      // insensitive method key, canonical revenue / collected figures), so the
-      // Overview's payments fold and that view can never disagree.
-      getSalesGroupedTotals(c.env, f, 'payment_method'),
-      getDeliveryContactTotals(c.env, f),
     ])
+    const paymentMethods = payments.rows
     out.sales = {
       totals: gateTotals(totals as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user)),
       previous: previous ? gateTotals(previous as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user)) : null,
+      payment_methods_total_groups: payments.total_groups,
+      payment_methods_truncated: payments.total_groups > paymentMethods.length,
       payment_methods: paymentMethods.map((r) => ({
         key: r.key,
         payment_method: r.label || r.key,
@@ -498,7 +512,7 @@ app.get('/periods', async (c) => {
   const granularity = parseGranularity(query.granularity)
   const isAdmin = isAdminControlUser(user)
   const periodRows = await getBusinessSummaryPeriodRows(c.env, f, granularity)
-  const rows = periodRows.map((r) => gateTotals(r as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user)))
+  const rows = periodRows.map((r) => gateTotals(r as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user), BUCKET_MONEY_PLACES))
   return c.json({ granularity, is_admin: isAdmin, filters: f, rows })
 })
 
@@ -515,17 +529,29 @@ app.get('/grouped', async (c) => {
   const by = String(query.by || '').trim().toLowerCase()
   const limit = clampInt(query.limit, 300, 1, 1000)
   const isAdmin = isAdminControlUser(user)
+  // A capped list says so: total_groups counts every group in the window,
+  // truncated flags that rows hold fewer, and totals are the whole window's
+  // (never the sum of the returned rows) so a totals line or export stays true.
   let rows: unknown[]
+  let totalGroups: number
+  let totals: Record<string, unknown> | null = null
   if (by === 'product') {
-    rows = (await getProductSalesRanking(c.env, f, limit)).map((r) => gateProductRow(r as unknown as Record<string, unknown>, canViewAcquisitionCosts(user)))
+    const report = await getProductSalesReport(c.env, f, limit)
+    rows = report.rows.map((r) => gateProductRow(r as unknown as Record<string, unknown>, canViewAcquisitionCosts(user), BUCKET_MONEY_PLACES))
+    totalGroups = report.total_groups
+    totals = gateProductRow(report.totals as unknown as Record<string, unknown>, canViewAcquisitionCosts(user), BUCKET_MONEY_PLACES)
   } else if (by === 'courier') {
     rows = (await getDeliveryContactTotals(c.env, f)).map((row) => gateCourierRow(row as unknown as Record<string, unknown>, isAdmin))
+    totalGroups = rows.length
   } else if ((SALES_GROUP_KEYS as readonly string[]).includes(by)) {
-    rows = (await getSalesGroupedTotals(c.env, f, by as SalesGroupKey, limit)).map((r) => gateTotals(r as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user)))
+    const report = await getSalesGroupedReport(c.env, f, by as SalesGroupKey, limit)
+    rows = report.rows.map((r) => gateTotals(r as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user), BUCKET_MONEY_PLACES))
+    totalGroups = report.total_groups
+    totals = gateTotals(report.totals as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user), BUCKET_MONEY_PLACES)
   } else {
     return c.json({ error: 'by must be one of customer, cashier, payment_method, hour, weekday, branch, product, courier' }, 400)
   }
-  return c.json({ by, is_admin: isAdmin, filters: f, rows })
+  return c.json({ by, is_admin: isAdmin, filters: f, rows, total_groups: totalGroups, truncated: totalGroups > rows.length, totals })
 })
 
 
@@ -583,10 +609,12 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
         const maximum = snapshotMaxId ?? snapshot.sales.reduce((max, row) => Math.max(max, Number(row.id)), 0)
         const cohort = salesExportCohort(snapshot, search)
         const canViewCosts = canViewAcquisitionCosts(user)
-        const rows = businessSummarySalesRowsFromSnapshot(cohort).map((row) => gateBusinessSummarySaleRow(row, canViewCosts))
+        const rows = businessSummarySalesRowsFromSnapshot(cohort).map((row) => gateBusinessSummarySaleRow(row, isAdmin, canViewCosts))
         rows.sort((left, right) => (descending ? -1 : 1) * (reportExportStamp(String(left.cursor_at)) - reportExportStamp(String(right.cursor_at))
           || Number(left.id) - Number(right.id)))
-        const totals = gateTotals(salesTotalsFromSnapshot(cohort) as unknown as Record<string, unknown>, isAdmin, canViewCosts)
+        // The export's totals row sits under 4-place receipt rows and is their
+        // exact sum, not a headline (owner, 13 Oct 2026).
+        const totals = gateTotals(salesTotalsFromSnapshot(cohort, BUCKET_MONEY_PLACES) as unknown as Record<string, unknown>, isAdmin, canViewCosts, BUCKET_MONEY_PLACES)
         const token = await reportExportToken({ export_version: 1, query: effective, search, order: descending ? 'desc' : 'asc',
           snapshot_max_id: maximum, authorization: { is_admin: isAdmin, can_view_costs: canViewCosts }, row_count: rows.length, rows, totals })
         if (hasToken && token !== query.exportToken) return c.json({ code: 'report_export_changed', error: 'Sales changed. Restart the export.' }, 409)
@@ -630,7 +658,7 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
           : stamp(row) > afterStamp || (stamp(row) === afterStamp && num(row.id) > afterId))
       }
       const hasMore = rows.length > pageSize
-      const page = rows.slice(0, pageSize).map((row) => gateBusinessSummarySaleRow(row, canViewAcquisitionCosts(user)))
+      const page = rows.slice(0, pageSize).map((row) => gateBusinessSummarySaleRow(row, isAdmin, canViewAcquisitionCosts(user)))
       const last = page[page.length - 1]
       return c.json({ rows: page, snapshot_max_id: snapshot, has_more: hasMore,
         next_cursor: hasMore && last ? { created_at: last.cursor_at || '', id: last.id } : null, is_admin: isAdmin })

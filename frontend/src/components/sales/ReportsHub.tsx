@@ -78,7 +78,7 @@ type ReportsHubAppContext = {
   usdToKhr: (value: unknown) => number
   getPermissionTier: (key: string) => string
   can: (permissionKey: string, actionKey: string) => boolean
-  settings?: { pos_payment_methods?: unknown }
+  settings?: { pos_payment_methods?: unknown; currency_usd_symbol?: unknown }
 }
 const useApp = useAppHook as unknown as () => ReportsHubAppContext
 
@@ -241,6 +241,13 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
     () => makeReportMoneyFormatter({ displayCurrency: options.currency, fmtUSD, fmtKHR, khrToUsd, usdToKhr }),
     [options.currency, fmtUSD, fmtKHR, khrToUsd, usdToKhr],
   )
+  // Split rows print 4 places so they add up to the window figure exactly
+  // (owner, 13 Oct 2026); headline totals keep fmtMoney's cents.
+  const usdSymbol = String(settings?.currency_usd_symbol || '$')
+  const fmtBucketMoney = useMemo(
+    () => makeReportMoneyFormatter({ displayCurrency: options.currency, fmtUSD, fmtKHR, khrToUsd, usdToKhr, usdSymbol }, 4),
+    [options.currency, fmtUSD, fmtKHR, khrToUsd, usdToKhr, usdSymbol],
+  )
   const khrToUsdNum = useCallback((khr: number) => Number(khrToUsd(khr)) || 0, [khrToUsd])
 
   // ---- drill-downs from a view into the per-receipt list ----
@@ -349,6 +356,7 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
     options,
     style,
     fmtMoney,
+    fmtBucketMoney,
     khrToUsd: khrToUsdNum,
     tr: trh,
     t: tStr,

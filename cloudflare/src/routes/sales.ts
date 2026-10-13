@@ -161,6 +161,7 @@ import { formatSaleStatusTelegramLines, formatSaleTelegramLines, sendTelegramEve
 import { contactDisplayAddress } from '../lib/contactOptions'
 import { buildSaleCreationSnapshot, SaleCreationSnapshotError } from '../lib/saleCreationSnapshot'
 import type { Env } from '../index'
+import { costViewProfit } from '../lib/reportProfitView'
 import { actorId, actorSnapshot } from '../lib/actorSnapshot'
 import { ANONYMOUS_CUSTOMER_ERROR_CODE, ANONYMOUS_CUSTOMER_MUTATION_ERROR, isAnonymousCustomer } from '../lib/anonymousCustomer'
 
@@ -6115,10 +6116,10 @@ app.get('/stats', async (c) => {
 // after shared cache reads: private cost fields must never depend on cache owner.
 export function gateSalesReportMoney(row:Record<string,unknown>,isAdmin:boolean,canViewCosts=isAdmin):Record<string,unknown> {
   if(isAdmin)return row
-  if(canViewCosts){
-    const {delivery_actual_cost_usd,delivery_actual_cost_count,delivery_margin_usd,delivery_net_usd,recognized_delivery_cost_usd,pending_delivery_cost_usd,...costView}=row
-    return costView
-  }
+  // A cost grant is not the administrator-only courier gate: the courier-cost
+  // keys leave and profit is restated on goods, so the courier cost cannot be
+  // recovered by subtraction (AL finding L4, lib/reportProfitView.ts).
+  if(canViewCosts)return costViewProfit(row)
   const {cost_usd,profit_usd,gross_profit_usd,pending_cost_usd,pending_profit_usd,unvalued_cost_usd,returned_cost_usd,
     cost,gross_profit,delivery_actual_cost_usd,delivery_actual_cost_count,delivery_margin_usd,delivery_net_usd,recognized_delivery_cost_usd,pending_delivery_cost_usd,
     returned_cost_shortfall_usd,cost_missing_snapshot_lines,margin_pct,money_precision_mode,money_complete,money_unknown_cost_lines,money_contributing_rows,
@@ -6759,6 +6760,8 @@ app.get('/export', async (c) => {
   const totalRefundsUsd = salesTotals.refund_usd
   const revenueBeforeRefunds = round2(salesTotals.revenue_usd + totalRefundsUsd)
   const netRevenueUsd = salesTotals.revenue_usd
+  const exportUser = c.get('user')
+  const exportIsAdmin = isAdminControlUser(exportUser)
   const summary = {
     total_transactions: totalMatching,
     completed_transactions: Number(totalMatchingRow?.completed) || 0,
@@ -6773,6 +6776,16 @@ app.get('/export', async (c) => {
     net_revenue_usd: netRevenueUsd,
     avg_order_usd: salesTotals.avg_order_usd,
   }
+  // AL finding L4: the summary carries COGS, the delivery fee and net revenue,
+  // so a profit that includes the courier cost would hand a non-admin cost
+  // viewer that cost by subtraction. Such a caller gets goods profit, flagged.
+  // (A caller without the cost grant loses every cost/profit key to the
+  // acquisition-cost projection, as before.)
+  const goodsProfitUsd = round2(netRevenueUsd - salesTotals.cost_usd)
+  const summaryView = exportIsAdmin || !canViewAcquisitionCosts(exportUser) ? summary : { ...summary,
+    gross_profit_usd: goodsProfitUsd,
+    gross_margin_pct: netRevenueUsd > 0 ? round2((goodsProfitUsd / netRevenueUsd) * 100) : 0,
+    profit_excludes_delivery: true }
 
   // SQL allocates at full precision. The JSON contract is cents, so rounding
   // every bucket independently can make the displayed buckets miss the
@@ -6806,7 +6819,7 @@ app.get('/export', async (c) => {
   )
 
   return c.json({
-    period, summary,
+    period, summary: summaryView,
     by_status: byStatus,
     by_product: byProduct,
     sales: detailRows,

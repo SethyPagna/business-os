@@ -250,12 +250,12 @@ assert.deepEqual(lines, [
   // 2026: "for inside each section do bullet points ·"). No em dash anywhere
   // (owner, 25 Sep 2026): "name: count · money", a colon glued to the name.
   '=====Payment methods/វិធីទូទាត់=====',
-  '· Cash: 18 · $300.00',
-  '· ABA: 6 · $186.25',
+  '· Cash: 18 · $300.0000',
+  '· ABA: 6 · $186.2500',
   '=====Delivery/ការដឹកជញ្ជូន=====',
   // Sep 23 2026: a row too wide for a phone continues on the hanging indent.
-  '· Grab: 3 · $12.00 fee/ថ្លៃដឹក',
-  `${telegramLang.HANGING_INDENT}· $7.50 cost/ថ្លៃដើម`,
+  '· Grab: 3 · $12.0000 fee/ថ្លៃដឹក',
+  `${telegramLang.HANGING_INDENT}· $7.5000 cost/ថ្លៃដើម`,
   // The courier payout is a ROW here, not just a figure inside the total:
   // the rows and the Total have to add up on the reader's own screen.
   '=====Expenses/ចំណាយ=====',
@@ -302,10 +302,13 @@ assert.deepEqual(englishReport.split('\n'), [
   '· Expected cash: $178.00 · 240,000៛',
   '· Difference: +$4.50 · 0៛',
   '=====Payment methods=====',
-  '· Cash: 18 · $300.00',
-  '· ABA: 6 · $186.25',
+  '· Cash: 18 · $300.0000',
+  '· ABA: 6 · $186.2500',
   '=====Delivery=====',
-  '· Grab: 3 · $12.00 fee · $7.50 cost',
+  // 4-place courier figures (owner, 13 Oct 2026) no longer fit on the name's
+  // row, so the figures continue on the hanging indent.
+  '· Grab:',
+  `${telegramLang.HANGING_INDENT}3 · $12.0000 fee · $7.5000 cost`,
   '=====Expenses=====',
   '· Actual delivery cost: $7.50',
   '· Rent: $9.50 · 20,000៛',
@@ -342,11 +345,11 @@ assert.deepEqual(khmerReport.split('\n'), [
   '· សាច់ប្រាក់ត្រូវមាន: $178.00 · 240,000៛',
   '· ភាពខុសគ្នា: +$4.50 · 0៛',
   '=====វិធីទូទាត់=====',
-  '· Cash: 18 · $300.00',
-  '· ABA: 6 · $186.25',
+  '· Cash: 18 · $300.0000',
+  '· ABA: 6 · $186.2500',
   '=====ការដឹកជញ្ជូន=====',
-  '· Grab: 3 · $12.00 ថ្លៃដឹក',
-  `${telegramLang.HANGING_INDENT}· $7.50 ថ្លៃដើម`,
+  '· Grab: 3 · $12.0000 ថ្លៃដឹក',
+  `${telegramLang.HANGING_INDENT}· $7.5000 ថ្លៃដើម`,
   '=====ចំណាយ=====',
   '· ថ្លៃដឹកដើម: $7.50',
   '· Rent: $9.50 · 20,000៛',
@@ -366,7 +369,7 @@ check(`no English word survives on a label position in 'km' mode (${khmerLabelPo
   khmerLabelPositions.every((labelPart) => !/[A-Za-z]/.test(labelPart)),
   khmerLabelPositions.filter((labelPart) => /[A-Za-z]/.test(labelPart)).join('\n'))
 check('...while the VALUES are untouched in every mode',
-  khmerReport.includes('Sunrise Mart') && khmerReport.includes('· Cash: 18 · $300.00')
+  khmerReport.includes('Sunrise Mart') && khmerReport.includes('· Cash: 18 · $300.0000')
   && khmerReport.includes('· Rent: $9.50 · 20,000៛'), khmerReport)
 // Every mode is the SAME report: same number of rows, same section titles in
 // the same places. That is what "one message, three renderings" means.
@@ -585,7 +588,7 @@ const noCourierCost = render('both', () => telegram.formatShiftReport('Sunrise M
   ...figures, deliveries: [{ name: 'Grab', count: 3, feeUsd: 12, costUsd: 0 }],
 }, NOW))
 check('a courier with no recorded payout shows no $0.00 cost tail',
-  noCourierCost.includes('· Grab: 3 · $12.00 fee/ថ្លៃដឹក')
+  noCourierCost.includes('· Grab: 3 · $12.0000 fee/ថ្លៃដឹក')
   && !noCourierCost.includes('$0.00 cost'), noCourierCost)
 
 // p5/losses (Sep 15 2026, owner: "i see the report says row removed has 1 no
@@ -615,7 +618,7 @@ const many = render('both', () => telegram.formatShiftReport('Sunrise Mart', shi
 }, NOW))
 check('a capped payment breakdown prints its fold row like any other row',
   many.split('\n').filter((line) => line.startsWith('· M')).length === 7
-  && many.includes('· Other/ផ្សេងទៀត: 5 · $5.00'), many)
+  && many.includes('· Other/ផ្សេងទៀត: 5 · $5.0000'), many)
 
 // ---- 4. the day summary, same treatment ------------------------------------
 // One set of numbers, two reports. The Sales section is the SAME block of
@@ -661,8 +664,8 @@ assert.deepEqual(daySections, [
   '· Stock in/ស្តុកចូល: 3 movement(s)/ចលនាស្តុក · 120 unit(s)/ឯកតា',
   '· Stock out/ស្តុកចេញ: 1 movement(s)/ចលនាស្តុក · 4 unit(s)/ឯកតា',
   '=====Cashiers/អ្នកគិតប្រាក់=====',
-  '· za01: 18 · $300.00',
-  '· sok: 6 · $186.25',
+  '· za01: 18 · $300.0000',
+  '· sok: 6 · $186.2500',
 ], daySummary)
 check(`the day summary is titled and sectioned the same way (${daySections.length} lines)`, true)
 // Since the 25 Sep 2026 unification, SHIFT_TITLE and REPORT_TITLE are the
@@ -684,7 +687,7 @@ check('the day Expenses total is the fees table plus the recorded delivery cost'
 // one header line.
 check('the day summary fits one phone screen too', daySections.length <= 21, daySummary)
 check('and its cashier rows are name, receipts, money -- nothing else',
-  daySections.includes('· za01: 18 · $300.00') && daySections.includes('· sok: 6 · $186.25'), daySummary)
+  daySections.includes('· za01: 18 · $300.0000') && daySections.includes('· sok: 6 · $186.2500'), daySummary)
 
 // THE SHARED SALES SECTION, BYTE FOR BYTE. A section runs from its title line
 // -- `=====Title=====` in the day summary, `-----Title-----` in the shift

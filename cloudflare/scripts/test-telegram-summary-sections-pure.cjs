@@ -318,7 +318,7 @@ async function main() {
   telegramLang.setTelegramLanguage('both')
   check('with only one kind of discount the total would repeat it, so it is not printed', oneCut.includes('· Discount on items: $10.00') && !oneCut.includes('Total discount'), oneCut)
 
-  check('Cashiers: the kernel\'s rows by cashier, receipts and revenue', JSON.stringify(rowsUnder(single.cashiers, '=====Cashiers=====')) === JSON.stringify(['· Za: 12 · $300.00', '· Sok: 6 · $112.50']), single.cashiers)
+  check('Cashiers: the kernel\'s rows by cashier, receipts and revenue', JSON.stringify(rowsUnder(single.cashiers, '=====Cashiers=====')) === JSON.stringify(['· Za: 12 · $300.0000', '· Sok: 6 · $112.5000']), single.cashiers)
   check('a branch overview has no Branches section (its header already names the branch)', !single.cashiers.includes('=====Branches====='))
 
   check('Top products: the kernel ranking, five rows, quantity and sales',
@@ -355,9 +355,9 @@ async function main() {
     '=====Sales=====', '· Revenue: $412.50', '· Discount on items: $12.50', '· Discount on invoices: $25.00', '· Total discount: $37.50', '· Gross sales: $450.00',
     '· Profit: $150.25', '· Delivery fee: $6.00', '· Not Paid: 3 · $40.00', '· Refunds: $10.00',
     '=====Invoices=====', '· Total: 18 · Cancelled: 1',
-    '=====Payment methods=====', '· Cash: 12 · $300.00', '· ABA Pay: 6 · $112.50',
+    '=====Payment methods=====', '· Cash: 12 · $300.0000', '· ABA Pay: 6 · $112.5000',
     '=====Received=====', '· Dollars: $23.00', '· Riel: 81,000៛', '· Bank: $30.00',
-    '=====Cashiers=====', '· Za: 12 · $300.00', '· Sok: 6 · $112.50',
+    '=====Cashiers=====', '· Za: 12 · $300.0000', '· Sok: 6 · $112.5000',
     '=====Top products=====', '· Rose Serum: 9 · $180.00', '· Lip Tint: 7 · $84.00', '· Toner: 5 · $60.00', '· Soap Bar: 4 · $12.00', '· Sunscreen: 2 · $30.00',
     '=====Low stock=====', '· OUT: Rose Serum: 0 (⚠ 5)', '· LOW: Soap Bar: 1 (⚠ 5)', '· LOW: Sunscreen: 2 (⚠ 5)', '· LOW: Lip Tint: 3 (⚠ 5)',
     '=====Expenses=====', '· Actual delivery cost: $3.00', '· Other expenses: $4.00 · 20,000៛', '· Total: $7.00 · 20,000៛', '· No branch (not in total): $2.00',
@@ -421,9 +421,18 @@ async function main() {
     `${plain.text}\n---\n${plainReport}`)
   check('Send today\'s summary, switches off: it keeps the cashier list and the stock in/out counts',
     JSON.stringify(headersOf(plain.text)) === JSON.stringify(DAY_SUMMARY_HEADERS)
-      && JSON.stringify(rowsUnder(plain.text, '=====Cashiers=====')) === JSON.stringify(['· Za: 12 · $300.00', '· Sok: 6 · $112.50'])
+      && JSON.stringify(rowsUnder(plain.text, '=====Cashiers=====')) === JSON.stringify(['· Za: 12 · $300.0000', '· Sok: 6 · $112.5000'])
       && rowsUnder(plain.text, '=====Stock=====').some((row) => row.startsWith('· Stock out: 2 movement(s)')),
     plain.text)
+  // AL finding L (13 Oct 2026): a long cashier list keeps eleven names and
+  // folds the tail into one Other line, so the lines still add up to Revenue
+  // (the old top-12 slice dropped the tail), and each line carries 4 places.
+  const cashiersBefore = KERNEL_A.grouped.cashier
+  KERNEL_A.grouped.cashier = [...Array(14)].map((_, i) => ({ key: `id:${i + 1}`, label: `C${String(i + 1).padStart(2, '0')}`, tx_count: 1, revenue_usd: 1.005 }))
+  const longCashiers = rowsUnder(await telegram.telegramCommandReply(envA, '/report', T0, 'en'), '=====Cashiers=====')
+  KERNEL_A.grouped.cashier = cashiersBefore
+  check('a long cashier list folds its tail into one Other line that keeps the sum',
+    longCashiers.length === 12 && longCashiers[10] === '· C11: 1 · $1.0050' && longCashiers[11] === '· Other: 3 · $3.0150', longCashiers.join('\n'))
   for (const key of Object.values(SWITCH)) setting(shopA, key, 'true')
 
   const todayPostsBefore = posts.length
@@ -438,10 +447,10 @@ async function main() {
     JSON.stringify(headersOf(today.text)) === JSON.stringify(['=====Sales=====', '=====Invoices=====', '=====Received=====', '=====Expenses=====', '=====Each expense=====',
       '=====Stock=====', '=====Cashiers=====', '=====Branches=====', '=====Top products=====', '=====Low stock=====', '=====Returns=====', '=====Compare====='])
       && ['=====Invoices=====', '=====Expenses=====', '=====Stock=====', '=====Cashiers====='].every((header) => JSON.stringify(rowsUnder(today.text, header)) === JSON.stringify(rowsUnder(plain.text, header)))
-      && JSON.stringify(rowsUnder(today.text, '=====Branches=====')) === JSON.stringify(['· Toul Kork: 15 · $362.50', '· Riverside: 3 · $50.00'])
+      && JSON.stringify(rowsUnder(today.text, '=====Branches=====')) === JSON.stringify(['· Toul Kork: 15 · $362.5000', '· Riverside: 3 · $50.0000'])
       && rowsUnder(today.text, '=====Sales=====').includes('· Not Paid: 3 · $40.00') && rowsUnder(today.text, '=====Sales=====').includes('· Total discount: $37.50'),
     today.text)
-  check('Send today\'s summary: the cashier list is read once, the day summary\'s own', JSON.stringify(buttonCalls.filter(([kind, , by]) => kind === 'grouped' && by === 'cashier').map(([, , , limit]) => limit)) === '[12]', JSON.stringify(buttonCalls))
+  check('Send today\'s summary: the cashier list is read once, the day summary\'s own', JSON.stringify(buttonCalls.filter(([kind, , by]) => kind === 'grouped' && by === 'cashier').map(([, , , limit]) => limit)) === '[2000]', JSON.stringify(buttonCalls))
   check('Send today\'s summary: returns and the same-time comparison for the whole shop',
     JSON.stringify(rowsUnder(today.text, '=====Returns=====')) === JSON.stringify(['· Total: 3 · $70.00', '· Riel equivalent: 287,000៛', '· Items returned: 7'])
       && rowsUnder(today.text, '=====Compare=====')[0] === '· Each day up to: 18:30',

@@ -59,6 +59,8 @@ export interface StatsFormulaTotals {
   recognized_delivery_usd?: number
   recognized_delivery_cost_usd?: number
   profit_usd?: number
+  /** The server restated profit on goods alone (a cost viewer who is not an administrator). */
+  profit_excludes_delivery?: boolean
   [key: string]: unknown
 }
 
@@ -91,9 +93,16 @@ export function revenueTerms(t: StatsFormulaTotals): FormulaTerm[] {
  * figure and never a term of this sum.
  */
 export function profitTerms(t: StatsFormulaTotals): FormulaTerm[] {
-  return [
+  const goods: FormulaTerm[] = [
     { key: 'revenue_short', fallback: 'Revenue', sign: 1, usd: num(t.revenue_usd) },
     { key: 'cogs', fallback: 'COGS', sign: -1, usd: num(t.cost_usd) },
+  ]
+  // AL finding L4 (13 Oct 2026): the courier's cost is administrator-only, so
+  // a cost viewer's profit arrives restated on goods alone -- the delivery
+  // pair is not part of it, and printing the fee as a term would not foot.
+  if (t.profit_excludes_delivery === true) return goods
+  return [
+    ...goods,
     { key: 'rpt_delivery_collected', fallback: 'Delivery fees charged', sign: 1, usd: num(t.recognized_delivery_usd) },
     { key: 'rpt_delivery_paid', fallback: 'Actual delivery cost', sign: -1, usd: num(t.recognized_delivery_cost_usd) },
   ]

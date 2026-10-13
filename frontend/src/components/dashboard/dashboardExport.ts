@@ -3,6 +3,7 @@ import { downloadXLSX } from '../../utils/xlsxExport.ts'
 import { buildStandaloneReportHtml } from '../../utils/exportReports.tsx'
 import { buildReportManifestRows, buildReportPackageFiles } from '../../utils/exportPackage.ts'
 import { formatPriceNumber } from '../../utils/pricing.ts'
+import { financialCalculationValue } from '../../utils/financialPrecision.ts'
 import { effectiveLowStockThreshold, type LowStockConfig } from '../../utils/lowStockSettings.ts'
 import { fmtDayFirst } from '../../utils/formatters.ts'
 import { BUSINESS_TIME_ZONE } from '../../constants.ts'
@@ -101,6 +102,12 @@ function priceCsv(value: unknown): string {
   return formatPriceNumber(value || 0)
 }
 
+/** A sales-period row splits the KPI total: 4 places, so the exported rows
+ *  add up to it exactly (owner, 13 Oct 2026). Headline KPIs keep priceCsv. */
+function splitCsv(value: unknown): string {
+  return financialCalculationValue(Number(value) || 0).toFixed(4)
+}
+
 function totals(ctx: DashboardExportContext): MetricMap {
   return ctx.analytics?.totals || {}
 }
@@ -128,7 +135,8 @@ function buildDashboardKpiRows(ctx: DashboardExportContext): Row[] {
     { Section: 'KPI', Metric: 'Products', Value: ctx.summary?.product_count || 0, Period: 'current inventory' },
     { Section: 'KPI', Metric: 'Stock Value (USD)', Value: priceCsv(ctx.summary?.stock_value_usd), Period: 'current inventory' },
     { Section: 'KPI', Metric: 'COGS (USD)', Value: priceCsv(metricTotals.cost_usd), Period: ctx.rangeLabel },
-    { Section: 'KPI', Metric: 'Est. Profit (USD)', Value: priceCsv(metricTotals.profit_usd), Period: ctx.rangeLabel },
+    // L4: a cost viewer's profit arrives on goods alone (revenue - cost), and is named so.
+    { Section: 'KPI', Metric: (metricTotals as Record<string, unknown>).profit_excludes_delivery === true ? 'Est. Profit excl. delivery (USD)' : 'Est. Profit (USD)', Value: priceCsv(metricTotals.profit_usd), Period: ctx.rangeLabel },
     { Section: 'KPI', Metric: 'Transactions', Value: metricTotals.tx_count || 0, Period: ctx.rangeLabel },
     { Section: 'KPI', Metric: 'Avg Order (USD)', Value: priceCsv(metricTotals.avg_order_usd), Period: ctx.rangeLabel },
     { Section: 'KPI', Metric: 'Returns', Value: returns.return_count || 0, Period: ctx.rangeLabel },
@@ -196,14 +204,14 @@ function buildDashboardManifestEntries(ctx: DashboardExportContext): Row[] {
 function buildDashboardSalesRows(ctx: DashboardExportContext): Row[] {
   return (ctx.analytics?.periodData || []).map((d) => ({
     Period: d.date || d.period || '',
-    Gross_Sales_USD: priceCsv(d.gross_sales_usd),
-    Discounts_USD: priceCsv(d.discount_usd),
-    Tax_USD: priceCsv(d.tax_usd),
-    Delivery_USD: priceCsv(d.delivery_usd),
-    Refund_USD: priceCsv(d.refund_usd),
-    Revenue_USD: priceCsv(d.revenue_usd),
-    COGS_USD: priceCsv(d.cost_usd),
-    Profit_USD: priceCsv(d.profit_usd),
+    Gross_Sales_USD: splitCsv(d.gross_sales_usd),
+    Discounts_USD: splitCsv(d.discount_usd),
+    Tax_USD: splitCsv(d.tax_usd),
+    Delivery_USD: splitCsv(d.delivery_usd),
+    Refund_USD: splitCsv(d.refund_usd),
+    Revenue_USD: splitCsv(d.revenue_usd),
+    COGS_USD: splitCsv(d.cost_usd),
+    Profit_USD: splitCsv(d.profit_usd),
     Tx: d.count || 0,
   }))
 }

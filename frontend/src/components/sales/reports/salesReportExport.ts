@@ -26,6 +26,8 @@ export function validateExportSale(raw: unknown): SaleRow & { cursor_at: string 
   for (const key of MONEY) row[key] = finite(input[key])
   const costPresent = COST.some(key => Object.hasOwn(input, key))
   if (costPresent) for (const key of COST) row[key] = key === 'cost_missing_snapshot_lines' ? integer(input[key]) : finite(input[key])
+  // L4: a cost viewer's receipt profit is goods only, and the export says so.
+  if (costPresent && input.profit_excludes_delivery === true) row.profit_excludes_delivery = true
   return row
 }
 /** Deliberate kernel-to-table mapping. No total is re-added from receipt rows. */
@@ -37,6 +39,7 @@ export function mapExportTotals(raw: unknown): SaleRow {
   if (Object.hasOwn(input, 'cost_usd') || Object.hasOwn(input, 'profit_usd')) {
     output.cost_usd = finite(input.cost_usd)
     output.gross_profit_usd = finite(input.profit_usd)
+    if (input.profit_excludes_delivery === true) output.profit_excludes_delivery = true
     if (Object.hasOwn(input, 'money_unknown_cost_lines')) output.cost_missing_snapshot_lines = integer(input.money_unknown_cost_lines)
   }
   return output
