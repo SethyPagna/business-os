@@ -17,7 +17,6 @@
 // the cases that probe the boundary or rule it removed -- so an implementation
 // that checks only at approve is rejected by the retry and apply cases, and a
 // green run proves the cases can tell the difference.
-// Scope of this revision: create, approve and retry. Apply-start is added by the following commit.
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -262,6 +261,47 @@ function addRetryCases() {
   }
 }
 
+// runImportApply : the queued message is a separate trust boundary. The
+// approving user can lose the permission while it waits, or the job can predate
+// the rule entirely.
+function addApplyCases() {
+  for (const mode of MODES) {
+    for (const permission of PERMISSIONS) {
+      add('apply', mode, permission, 'revoked-after-queue', async world => {
+        const f = fixture(world)
+        const id = f.seedJob({ policy: policyFor(mode) })
+        assert.equal((await f.call(ACTORS.full, 'POST', `/${id}/approve`, {})).status, 200)
+        assert.equal(f.pending.length, 1, 'authorized approval queued the apply')
+        f.setGrants(ACTORS.full, revoked(permission))
+        const before = f.business()
+        await assert.rejects(() => f.drain(), error => {
+          assert.equal(error.code, 'import_apply_permission_revoked', error.stack)
+          assert.equal(error.permission, permission)
+          return true
+        })
+        assert.equal(f.omittedActive(), 1, 'nothing was deactivated')
+        assert.equal(f.raw.prepare("SELECT COUNT(*) n FROM import_job_rows WHERE phase='apply'").get().n, 0, 'no row was applied')
+        assert.equal(f.raw.prepare('SELECT description FROM products WHERE id=1').get().description, null)
+        const job = f.job(id)
+        assert.equal(job.status, 'failed')
+        assert.ok(String(job.last_error).includes(permission), job.last_error)
+        assert.equal(job.lease_token, null)
+        assert.equal(f.business(), before, 'no catalog, stock, cost, audit or applied-row change')
+      })
+    }
+    add('apply', mode, '', 'approved-before-the-rule-by-a-plain-user', async world => {
+      const f = fixture(world)
+      // A job already approved by a user who never held the permission (approved
+      // before this rule existed): the worker must refuse it too.
+      const id = f.seedJob({ status: 'approved', policy: policyFor(mode), authorizedBy: ACTORS.plain })
+      f.pending.push({ jobId: id, kind: 'apply' })
+      await assert.rejects(() => f.drain(), error => error.code === 'import_apply_permission_revoked' && error.permission === 'destructive_delete')
+      assert.equal(f.omittedActive(), 1)
+      assert.equal(f.job(id).status, 'failed')
+    })
+  }
+}
+
 // Controls: the rule must not refuse what it should allow.
 function addControlCases() {
   for (const mode of MODES) {
@@ -348,6 +388,7 @@ addHelperCase()
 addCreateCases()
 addApproveCases()
 addRetryCases()
+addApplyCases()
 addControlCases()
 
 // -------------------------------------------- deliberately wrong versions ----
@@ -359,6 +400,7 @@ const removeLine = re => text => text.replace(re, '')
 // POST / check is a multi-line `if (...) {` and so is never matched here.)
 const APPROVE_CHECK = /(?<=if \(denied\) return denied\r?\n)(?:  \/\/[^\n]*\r?\n)*  const destructivePermission = [^\n]*\r?\n  if \(destructivePermission\) return [^\n]*\r?\n/
 const RETRY_CHECK = /(?<=if \(mode === 'apply'\) \{\r?\n)(?:    \/\/[^\n]*\r?\n)*    const destructivePermission = [^\n]*\r?\n    if \(destructivePermission\) return [^\n]*\r?\n/
+const APPLY_START_CHECK = /  const destructivePermission = missingDestructiveImportPermission\(actor, job\.type, job\.policy_json\)\r?\n  if \(destructivePermission\) \{\r?\n[^\n]*\r?\n  \}\r?\n/
 const WRONG = []
 WRONG.push({
   name: 'helper-ignores-per-action-override', fails: c => c.permission === 'products:import_replace_all' || c.boundary === 'helper',
@@ -375,6 +417,17 @@ WRONG.push({
 WRONG.push({
   name: 'no-retry-check', fails: c => c.boundary === 'retry',
   patches: [{ file: 'routes/importJobs.ts', apply: removeLine(RETRY_CHECK) }],
+})
+WRONG.push({
+  name: 'no-apply-start-check', fails: c => c.boundary === 'apply',
+  patches: [{ file: 'lib/importEngine.ts', apply: removeLine(APPLY_START_CHECK) }],
+})
+WRONG.push({
+  name: 'approve-only', fails: c => c.boundary === 'retry' || c.boundary === 'apply',
+  patches: [
+    { file: 'routes/importJobs.ts', apply: removeLine(RETRY_CHECK) },
+    { file: 'lib/importEngine.ts', apply: removeLine(APPLY_START_CHECK) },
+  ],
 })
 
 async function runAll(world, label) {

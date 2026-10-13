@@ -387,6 +387,10 @@ export async function assertCurrentImportApplyAuthority(
   if (isActionBlocked(actor, section, 'import')) {
     throw new ImportApplyAuthorizationError(`${section}:import`, `The user who authorized this import no longer has ${section}:import permission.`)
   }
+  const destructivePermission = missingDestructiveImportPermission(actor, job.type, job.policy_json)
+  if (destructivePermission) {
+    throw new ImportApplyAuthorizationError(destructivePermission, `The user who authorized this import no longer has ${destructivePermission} permission.`)
+  }
 
   const allowProductImageWrites = job.type !== 'products' || getActionTier(actor, 'products', 'image') === 'full'
   return { actor, allowProductImageWrites }
