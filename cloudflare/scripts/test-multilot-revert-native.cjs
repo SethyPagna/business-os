@@ -608,7 +608,7 @@ async function main() {
       const r = await revert(H, old.id)
       const after = await snap(H, s)
       t.eq('refused with a stable code', [r.status, r.body && r.body.code], [400, 'revert_lots_not_recorded'])
-      t.ok('the refusal says what to do instead', /Add stock|received date/i.test(String(r.body && r.body.error)), r.body)
+      t.ok('the refusal points at the scoped lot Set, not at Add stock (a second purchase)', /Use Set instead/.test(String(r.body && r.body.error)) && !/Add stock/i.test(String(r.body && r.body.error)), r.body)
       t.eq('nothing changed (lots, branch, total, movements, shares)', [after.lots, after.branch, after.product, after.movements.length, after.shares], [before.lots, before.branch, before.product, before.movements.length, []])
       t.eq('no lot was refilled by a guess', after.lots, [0, 3])
     })
@@ -653,6 +653,22 @@ async function main() {
       const a = await snap(H, s)
       t.eq('Revert answered', r.status, 200)
       t.eq('the 2 undated units are back, the lot is untouched', [a.lots, a.branch, a.product], [[5], 8, 8])
+    })
+
+    await check('M6f', 'the way back the refusal names works: a scoped lot Set puts each lot back, moves branch_stock with it, and books no purchase', 'high', async (t) => {
+      const s = await seed(H, { lots: [5, 5] })
+      await H.db.batch(s.ids.map((id, i) => H.db.prepare('UPDATE product_batches SET received_quantity=5, received_cost_usd=? WHERE id=?').bind(15 + 5 * i, id)))
+      const old = await oldRemoval(s, [0, 3], 3)
+      const refused = await revert(H, old.id)
+      t.eq('the Revert is refused', [refused.status, refused.body && refused.body.code], [400, 'revert_lots_not_recorded'])
+      for (const [i, target] of [[0, 5], [1, 5]]) {
+        const set = await H.api('POST', '/api/inventory/adjust', { productId: s.p, branchId: LC, type: 'set', setScope: 'lot', batchId: s.ids[i], quantity: target, reason: 'ML put back', client_request_id: 'ml-' + s.p + '-set' + i })
+        t.eq('scoped Set of lot ' + i + ' answered', set.status, 200)
+      }
+      const a = await snap(H, s)
+      t.eq('lots, branch and product are back together', [a.lots, a.branch, a.product], [[5, 5], 10, 10])
+      const lots = await H.q('SELECT received_quantity rq, received_cost_usd rc FROM product_batches WHERE id IN (' + s.ids.join(',') + ') ORDER BY id')
+      t.eq('no purchase was booked: received quantity and cost are unchanged', lots.map(x => [x.rq, x.rc]), [[5, 15], [5, 20]])
     })
 
     // ------------------------------------------------------------------ M12: a removal taken wholly from units that sit under no lot (R2 refute SF-1)

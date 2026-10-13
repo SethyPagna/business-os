@@ -5362,7 +5362,7 @@
   "revert_err_lot_stock": "Cannot revert: only {available} left under this received date at this branch, {needed} needed. Nothing was changed.",
   "revert_err_lot_moved": "This received date now belongs to another product (the products were merged), so it cannot be reverted here. Nothing was changed.",
   "revert_err_no_received_date": "This change was saved without a received date, and only {available} of the {needed} units at {branch} have none. Nothing was changed. Use Remove Stock and choose the received date instead.",
-  "revert_err_lots_not_recorded": "This removal did not record which received dates its units came from, so Revert cannot put them back on the right ones. Nothing was changed. Use Add Stock and choose the received date instead.",
+  "revert_err_lots_not_recorded": "This removal did not record which received dates its units came from, so Revert cannot put them back on the right ones. Nothing was changed. Use Set instead: choose Selected received date and set its quantity. That does not record a purchase.",
   "revert_err_forbidden": "Reverting a stock change needs Full Access to Inventory.",
   "revert_err_movement_not_found": "This change no longer exists. Refresh and try again.",
   "revert_err_session_undone": "This row belongs to a stock-in session that was undone, so its stock is already taken back. Redo that session from Stock-in Sessions first. Nothing was changed.",

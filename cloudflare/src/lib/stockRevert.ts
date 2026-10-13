@@ -275,7 +275,7 @@ const MERGED_LOT_REFUSAL = 'This change moved stock on a received date that now 
 // A removal with no recorded lot draw, written after a lot of its product existed: it may have drawn on several, and
 // putting its units back on a guess (the newest lot, the oldest, a new one) would give a delivery stock it never had.
 // branch_stock alone would restore them as undated units, losing their lot (FIFO, expiry, cost, supplier).
-const LOTS_NOT_RECORDED_REFUSAL = 'Cannot revert: this removal did not record which received dates its units came from, so they cannot be put back on the right ones. Nothing was changed. Use Add stock and choose the received date instead.'
+const LOTS_NOT_RECORDED_REFUSAL = 'Cannot revert: this removal did not record which received dates its units came from, so they cannot be put back on the right ones. Nothing was changed. Use Set instead: choose Selected received date and set its quantity. That does not record a purchase.'
 
 // True when the root removal has no record of what it drew from lots although a lot of its product already existed
 // when it was written. A dated count always records its lot effects, and a removal that predates every lot of the
