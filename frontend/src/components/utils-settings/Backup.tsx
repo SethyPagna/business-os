@@ -319,7 +319,7 @@ function RestoreMaintenanceBanner({ copy, notify, refreshSignal }: { copy: CopyF
       title: copy('restore_audit_pending_clear', 'Clear maintenance'),
       message: copy(
         'restore_audit_pending_clear_confirm',
-        'Clear maintenance now? Writes open again straight away. The data is already restored; the restore is recorded when you run it again.',
+        'Clear maintenance now? Writes open again straight away. The data is already restored; the restore is recorded when you run it again, and anything saved before you run it is replaced.',
       ),
       items: [
         { label: copy('restore_audit_pending_writes', 'Writes'), value: copy('restore_audit_pending_writes_change', 'Paused \u2192 Open') },
