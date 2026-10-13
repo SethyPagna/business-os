@@ -11,6 +11,7 @@ import {
 import { isDraftAuthorityCurrent, type DraftAuthority } from '../../utils/draftAuthority.ts'
 import { useFrozenDraftAuthority } from '../../utils/useFrozenDraftAuthority.ts'
 import DraftAuthorityNotice from '../shared/DraftAuthorityNotice.ts'
+import { parseServerTimestampMs } from '../../utils/formatters.ts'
 import { useModalClose } from '../shared/modalCloseContext.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
@@ -264,7 +265,8 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
   const restoredDraftRef = useRef<ReturnType<typeof readWorkDraft<Partial<FeeFormState>>> | undefined>(undefined)
   if (restoredDraftRef.current === undefined) {
     restoredDraftRef.current = readWorkDraft<Partial<FeeFormState>>(draftKey, {
-      notOlderThanMs: fee?.updated_at ? Date.parse(fee.updated_at) || 0 : 0,
+      // updated_at is D1's UTC stamp with no offset: parseServerTimestampMs, never a bare Date.parse (device zone).
+      notOlderThanMs: fee?.updated_at ? parseServerTimestampMs(fee.updated_at) || 0 : 0,
     })
   }
   const [form, setForm] = useState<FeeFormState>(() => initialPendingRef.current

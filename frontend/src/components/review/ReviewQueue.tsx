@@ -6,7 +6,7 @@ import { REVIEW_TIER_KEYS } from '../../utils/permissions.ts'
 import { entityFieldLabel } from '../../utils/entityRecords.ts'
 import { buildAuditFieldDiff } from '../../utils/auditLogFieldDiff.ts'
 import AuditFieldDiffLine from '../utils-settings/AuditFieldDiffLine.tsx'
-import { fmtDateTime24 } from '../../utils/formatters.ts'
+import { fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import ClipboardCheck from 'lucide-react/dist/esm/icons/clipboard-check.js'
 import XCircle from 'lucide-react/dist/esm/icons/x-circle.js'
@@ -75,11 +75,12 @@ type RejectDraft = { row: PendingActionRow; reason: string; refusal: string }
 
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return '--'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return String(value)
+  // The queue's stamps are D1's UTC with no offset; a bare new Date(value) reads them in the device zone and showed every
+  // time 7 hours early on a Cambodian till. The shared formatter takes the raw stamp and states it in the business zone.
+  if (Number.isNaN(parseServerTimestampMs(value))) return String(value)
   // Shared dd/mm/yyyy 24-hour formatter -- the old en-US call without
   // hour12:false rendered 12-hour AM/PM (Part-77 finding).
-  return fmtDateTime24(date)
+  return fmtDateTime24(value)
 }
 
 function reviewPayload(row: PendingActionRow): Record<string, unknown> {

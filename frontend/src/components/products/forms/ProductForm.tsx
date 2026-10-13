@@ -29,6 +29,7 @@ import {
   productMatchQueries,
   shouldSearchProductMatches,
 } from '../helpers/productNameSuggestions.ts'
+import { parseServerTimestampMs } from '../../../utils/formatters.ts'
 import { isDraftAuthorityCurrent } from '../../../utils/draftAuthority.ts'
 import { useFrozenDraftAuthority } from '../../../utils/useFrozenDraftAuthority.ts'
 import DraftAuthorityNotice from '../../shared/DraftAuthorityNotice.ts'
@@ -993,7 +994,8 @@ function ProductFormContent({
     // F3 slice 1: same restore, through the ONE shared store (which also
     // reads Part 388's original { form } field for existing drafts).
     {
-      const serverEditedAt = (product as Record<string, unknown> | null)?.updated_at ? Date.parse(String((product as Record<string, unknown>).updated_at)) : 0
+      // D1's UTC stamp has no offset: parseServerTimestampMs, never a bare Date.parse (read in the device zone).
+      const serverEditedAt = (product as Record<string, unknown> | null)?.updated_at ? parseServerTimestampMs(String((product as Record<string, unknown>).updated_at)) : 0
       const draft = readWorkDraft<Partial<ProductFormState> | ProductFormDraftPayload>(draftKey, { notOlderThanMs: serverEditedAt || 0 })
       const legacyDraft = !draft && legacyDraftKey
         ? readWorkDraft<Partial<ProductFormState> | ProductFormDraftPayload>(legacyDraftKey, { notOlderThanMs: serverEditedAt || 0 })
