@@ -14,7 +14,11 @@
 //
 // A caller that must keep an older client time (a one-off drain of sales
 // queued before the cancellation) passes maxPastMs explicitly; the default
-// never widens.
+// never widens, and a maxPastMs that is not a finite number between 0 and the
+// ceiling below is ignored.
+//
+// A claim without a zone ("2026-10-13 17:03:15") is read as UTC, the shape the
+// server itself stores, so the result does not depend on the host's time zone.
 //
 // The output is normalized to SQLite's CURRENT_TIMESTAMP shape
 // ("YYYY-MM-DD HH:MM:SS", UTC) -- NOT ISO-with-T: sales queries ORDER BY
@@ -27,6 +31,7 @@ export const CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000
 
 export const SALE_CREATED_AT_MAX_PAST_MS = 10 * 60 * 1000
 export const SALE_CREATED_AT_MAX_FUTURE_MS = 2 * 60 * 1000
+export const SALE_CREATED_AT_MAX_PAST_CEILING_MS = 90 * 24 * 60 * 60 * 1000
 
 export type ClientCreatedAtResolution = {
   value: string | null
@@ -37,6 +42,17 @@ export type ClientCreatedAtResolution = {
 
 type ResolveOptions = { nowMs?: number; maxPastMs?: number }
 
+const ZONELESS_DATE_TIME = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/
+
+function parseClaimMs(text: string): number {
+  return new Date(ZONELESS_DATE_TIME.test(text) ? `${text.replace(' ', 'T')}Z` : text).getTime()
+}
+
+function validMaxPastMs(value: unknown): number {
+  const usable = typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= SALE_CREATED_AT_MAX_PAST_CEILING_MS
+  return usable ? value : SALE_CREATED_AT_MAX_PAST_MS
+}
+
 function storedShape(ms: number): string | null {
   const date = new Date(ms)
   const year = date.getUTCFullYear()
@@ -46,10 +62,10 @@ function storedShape(ms: number): string | null {
 
 export function resolveClientCreatedAt(raw: unknown, options: ResolveOptions = {}): ClientCreatedAtResolution {
   const nowMs = options.nowMs ?? Date.now()
-  const maxPastMs = options.maxPastMs ?? SALE_CREATED_AT_MAX_PAST_MS
+  const maxPastMs = validMaxPastMs(options.maxPastMs)
   const text = typeof raw === 'string' ? raw.trim() : raw
   if (text === undefined || text === null || text === '') return { value: null, adjusted: false, claimed: null, tooOld: false }
-  const parsedMs = typeof text === 'string' ? new Date(text).getTime() : Number.NaN
+  const parsedMs = typeof text === 'string' ? parseClaimMs(text) : Number.NaN
   if (Number.isNaN(parsedMs)) return { value: null, adjusted: true, claimed: null, tooOld: false }
   const claimed = storedShape(parsedMs)
   const tooOld = parsedMs < nowMs - maxPastMs
