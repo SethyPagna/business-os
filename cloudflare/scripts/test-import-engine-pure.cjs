@@ -1457,8 +1457,13 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
 {
   const { classifyInventory, validateResolvedImportBranches, inventoryMovementCostSnapshot, applyAnalyzedInventoryCostSnapshots } = moduleObj.exports
   const product = { id: 1, sku: 'INV-1', barcode: 'BC-INV-1', name: 'Inventory Item', stock_quantity: 4, cost_price_usd: 1, cost_price_khr: 0 }
+  // Remove / Set rows are judged against the resolved branch's own stock (AL-STOCK B): the branch holds 4, the
+  // product's whole stock, so a Remove of 2 is an actionable row.
   const makeDb = (branches) => ({
-    prepare: (sql) => ({ all: async () => String(sql).includes('FROM products') ? [{ is_active: 1, ...product }] : String(sql).includes('FROM branches') ? branches : [] }),
+    prepare: (sql) => ({ all: async () => String(sql).includes('FROM products') ? [{ is_active: 1, ...product }]
+      : String(sql).includes('FROM branches') ? branches
+        : String(sql).includes('JOIN branch_stock') ? branches.map((branch) => ({ product_id: product.id, branch_id: branch.id, quantity: 4 }))
+          : [] }),
   })
   const input = (branch) => [{ _rowNumber: 1, sku: 'INV-1', quantity: 2, unit_cost_usd: '1', ...(branch === undefined ? {} : { branch }) }]
 
@@ -1579,7 +1584,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   )
 
   const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'importEngine.ts'), 'utf8')
-  assert.match(source, /INSERT INTO inventory_movements \(product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, created_at\)/, 'the movement insert carries the frozen plan costs in its own atomic row')
+  assert.match(source, /INSERT INTO inventory_movements \(product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, created_at, batch_id\)/, 'the movement insert carries the frozen plan costs and its lot in its own atomic row')
   const resolverBody = source.slice(source.indexOf('async function validateResolvedImportBranches'), source.indexOf('// Same-batch duplicate merge'))
   assert.ok(!/INSERT INTO branches|Main Branch|backfillBranchStockForNewBranch/.test(resolverBody), 'apply-time branch resolver must remain validation-only')
   console.log('PASS classifyInventory and apply branch validation never create unknown or synthetic branches')

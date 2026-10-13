@@ -36,7 +36,7 @@ import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, identityBarcodeKey, type ProductIdentityRow } from '../lib/productIdentity'
 import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery, parseRankedIds } from '../lib/productSearchQuery'
-import { fifoRemovalAllocations, isStockRemovalConflict, listBatchesForProduct, parseReceiptSellingPrice, planBranchStockRemoval, planReceiptSellingPrice, planReceiveBatchStock, planRemoveStockAcrossBatches, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, removeStockFromBatch, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptSellingPriceRow, type StockWriteStatement } from '../lib/productBatches'
+import { fifoRemovalAllocations, isStockRemovalConflict, listBatchesForProduct, parseReceiptSellingPrice, planBranchStockRemoval, planReceiptSellingPrice, planReceiveBatchStock, planRemoveStockAcrossBatches, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptSellingPriceRow, type StockWriteStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
 import { normalizeTypedDate } from '../lib/batchCode'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, FREE_QUANTITY_NOT_RECEIPT, parseFreeQuantity, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
@@ -1955,7 +1955,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // absent -> the original applyStockDelta path, untouched (though see
   // below -- add/remove now auto-routes through the ledger regardless).
   // Present for 'add'/'remove' -> routed
-  // through receiveBatchStock/removeStockFromBatch instead, which already
+  // through receiveBatchStock/planRemoveStockAcrossBatches instead, which already
   // do the same aggregate write (branch_stock/products.stock_quantity)
   // atomically alongside the batch ledger -- calling applyStockDelta *as
   // well* would double-count, so the two paths are mutually exclusive, not
@@ -1971,9 +1971,13 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // is always called without one, which makes it create a fresh batch on
   // targetProductId every time.
   const rawBatchId = body.batchId
-  const batchIdRequested = !unlockPricing && rawBatchId != null && rawBatchId !== '' && rawBatchId !== 'new'
-    ? Number.parseInt(String(rawBatchId), 10)
-    : null
+  const namesLot = !unlockPricing && rawBatchId != null && rawBatchId !== '' && rawBatchId !== 'new'
+  // A lot id is a positive whole number. parseInt used to read "12x" as lot 12
+  // and move stock on it (AL-STOCK A9).
+  if (namesLot && !/^[1-9][0-9]*$/.test(String(rawBatchId).trim())) {
+    return c.json({ error: 'Selected received date is not valid.', code: 'invalid_batch_id' }, 400)
+  }
+  const batchIdRequested = namesLot ? Number(String(rawBatchId).trim()) : null
   let useBatchLedger = (type === 'add' || type === 'remove') && (unlockPricing || rawBatchId != null && rawBatchId !== '')
 
   // Auto-routing for callers that omit `batchId` entirely -- undo/redo
@@ -2026,10 +2030,10 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   if (useBatchLedger && type === 'remove') {
     const costRows = batchIdRequested != null
       ? await db.prepare(`
-          SELECT pb.id, pb.unit_cost_usd, bbs.quantity AS available
+          SELECT pb.id, pb.unit_cost_usd, COALESCE(bbs.quantity, 0) AS available
           FROM product_batches pb
-          JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=@branchId
-          WHERE pb.id = @batchId AND pb.variant_product_id = @productId AND pb.is_active = 1
+          LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=@branchId
+          WHERE pb.id = @batchId AND pb.variant_product_id = @productId
         `).all<{ id: number; unit_cost_usd: number | null; available: number }>({ batchId: batchIdRequested, branchId, productId: targetProductId })
       : await db.prepare(`
           SELECT pb.id, pb.unit_cost_usd, bbs.quantity AS available
@@ -2038,6 +2042,15 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
           WHERE pb.variant_product_id = @productId AND pb.is_active = 1 AND bbs.quantity > 0
           ORDER BY (pb.expiry_date IS NULL), pb.expiry_date ASC, pb.received_at ASC, pb.id ASC
         `).all<{ id: number; unit_cost_usd: number | null; available: number }>({ branchId, productId: targetProductId })
+    // A selected lot is checked here, before anything is written: it must be
+    // this product's, and hold the quantity at this branch. The removal batch
+    // re-proves the same facts in its guards against a concurrent writer.
+    if (batchIdRequested != null) {
+      const selected = costRows[0]
+      if (!selected) return c.json({ error: 'Selected received date does not belong to this product' }, 400)
+      const available = Number(selected.available) || 0
+      if (quantity > available) return c.json({ error: new InsufficientBatchStockError(available).message }, 400)
+    }
     removalCostByBatch = new Map(costRows.map((row) => [Number(row.id), row.unit_cost_usd ?? null]))
     let unallocated = quantity
     capturedRemovalAllocations = []
@@ -2077,13 +2090,13 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // at most a sibling product row that a retry resolves to again by identity.
   // Everything below it can move stock.
   //
-  // SCAN1 STK-C / OV-6: an auto-routed removal (no lot named) is ONE db.batch
-  // -- the captured lot drain, the strict aggregate decrement for the full
-  // quantity, and its movement or held row -- so its write mark rides INSIDE
-  // that batch (atomicMark) instead of being set ahead of it. A guard that
-  // refuses the write rolls the mark back with it and the claim is released.
-  const atomicRemoval = !correctionLot && type === 'remove'
-    && (Boolean(conditionTag) || (useBatchLedger && batchIdRequested == null && (rawBatchId == null || rawBatchId === '')))
+  // SCAN1 STK-C / OV-6, AL-STOCK A: a removal -- the selected lot or the
+  // auto-routed drain when no lot is named -- is ONE db.batch: the captured lot
+  // drain, the strict aggregate decrement for the full quantity, and its
+  // movement or held row. Its write mark rides INSIDE that batch (atomicMark)
+  // instead of being set ahead of it. A guard that refuses the write rolls the
+  // mark back with it and the claim is released.
+  const atomicRemoval = !correctionLot && type === 'remove' && (Boolean(conditionTag) || useBatchLedger)
   if (conditionTag && delta !== 0) {
     try { await assertProductsActive(db, [targetProductId]) }
     catch (error) {
@@ -2126,6 +2139,28 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
     })
   }
+  // The success answer, built in one place: the final return below and a
+  // removal's receipt completion (written inside its stock batch, so a retry
+  // after a lost acknowledgement replays exactly this) must never differ.
+  // `targetProductId`/`createdSibling` only differ from the request when an
+  // unlocked add resolved to a different row than the one the request named --
+  // see resolveAddStockTarget above. The frontend uses these to tell the
+  // person which row actually received the stock.
+  const adjustResponseBody = (): Record<string, unknown> => ({
+    success: true,
+    branchId,
+    movementType,
+    quantity: Math.abs(delta),
+    productId: targetProductId,
+    productName: targetProductName,
+    createdSibling,
+    batchNumber,
+    batchId: resolvedBatchId,
+    lotCode,
+    autoBatchDrainIds,
+    freeQuantity,
+    sellingPriceUsd: sellingPricePlan ? sellingPricePlan.after.selling_price_usd : null,
+  })
   const movementRowStatement = (): { sql: string; params: Record<string, unknown> } => {
     let costComponents: MovementCostComponent[] = []
     if (type === 'add') {
@@ -2396,75 +2431,57 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     // Every LATER receipt onto this same row still recomputes normally.
     // The receipt's cost refresh now shares its physical transaction.
   } else if (useBatchLedger && type === 'remove') {
-    if (batchIdRequested != null) {
-      try {
-        removedBatchQuantities = [{ batchId: batchIdRequested, quantity }]
-        if (conditionTag) {
-          resolvedBatchId = batchIdRequested
-          const removal = planRemoveStockAcrossBatches({ productId: targetProductId, branchId, quantity,
-            allocations: [{ batchId: batchIdRequested, quantity }] })
-          const mark = atomicMark?.statement() ?? null
-          await db.batch(addressedStatements(landing, [
-            productStockGuardStatement([targetProductId], 'active'),
-            ...(mark ? [mark] : []),
-            ...removal.statements, ...holdRemovedStatements(conditionTag),
-          ]))
-          atomicMark?.committed()
-          movementWrittenAtomically = true
-        } else await removeStockFromBatch(db, { batchId: batchIdRequested, productId: targetProductId, branchId, quantity })
-      } catch (err) {
-        const stockGuard = productStockGuardError(err)
-        if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
-        if (err instanceof InsufficientBatchStockError) return c.json({ error: err.message }, 400)
-        return c.json({ error: err instanceof Error ? err.message : 'Failed to remove stock' }, 400)
-      }
-    } else if (rawBatchId != null && rawBatchId !== '') {
+    if (batchIdRequested == null && rawBatchId != null && rawBatchId !== '') {
       // An interactive picker explicitly requires a choice -- 'new' isn't
       // valid for remove (see BranchStockAdjuster.tsx/
       // InventoryStockModals.tsx's own client-side guard); this only
       // fires if that guard was somehow bypassed.
       return c.json({ error: 'A received date must be selected to remove stock' }, 400)
-    } else {
-      // Auto-routed remove (no interactive batchId at all) -- FIFO-drain
-      // across whatever active batches this branch has rather than
-      // require one named lot, since there's no picker in play here to
-      // have named one. Any shortfall the batches can't cover (mixed-
-      // provenance stock: units that predate batch tracking and ride
-      // branch_stock alone) comes off the aggregate in the SAME batch.
-      //
-      // SCAN1 STK-C / OV-6: ONE db.batch -- the write mark, the captured
-      // lot drain (guarded, strict), the strict guarded aggregate decrement
-      // for the FULL quantity, and the movement row (or the held-lot row +
-      // damage_out of a tagged removal). The remainder used to go through
-      // applyStockDelta's UPSERT after the lots had already committed in a
-      // batch of their own, and the CHECK refused it every time: lots
-      // drained, no movement, a 400.
-      try {
-        const plan = planRemoveStockAcrossBatches({
-          productId: targetProductId, branchId, quantity, allocations: capturedRemovalAllocations ?? [],
-        })
+    }
+    // ONE single-attempt db.batch for every removal (SCAN1 STK-C / OV-6,
+    // AL-STOCK A): the lot drain (the selected lot, or the FIFO allocation
+    // captured above when none is named), the strict aggregate decrement for
+    // the FULL quantity, the movement row (or the held-lot row + damage_out of
+    // a tagged removal) and the request receipt with this request's answer.
+    // Any shortfall the lots can't cover on an auto-routed removal (units that
+    // predate batch tracking and ride branch_stock alone) comes off the
+    // aggregate in the same batch. Every decrement is guarded and unclamped: a
+    // lot or branch that no longer holds the quantity -- a concurrent removal
+    // got there first -- refuses the whole batch (409, nothing written) instead
+    // of flooring at zero. The selected lot used to be drained by
+    // removeStockFromBatch's own MAX(0) batch with the movement written after
+    // it: two concurrent removals both answered 200 and a lost acknowledgement
+    // removed twice.
+    try {
+      const allocations = batchIdRequested != null ? [{ batchId: batchIdRequested, quantity }] : capturedRemovalAllocations ?? []
+      const plan = planRemoveStockAcrossBatches({ productId: targetProductId, branchId, quantity, allocations })
+      removedBatchQuantities = plan.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) }))
+      if (batchIdRequested != null) {
+        resolvedBatchId = batchIdRequested
+      } else {
         autoBatchDrainIds = plan.batchIds
-        removedBatchQuantities = plan.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) }))
         // 0084: an auto-drain that ONE lot fully covered is attributable to
         // it; a multi-lot spread or a legacy-aggregate remainder is not.
         resolvedBatchId = plan.batchIds.length === 1 && plan.remainder === 0 ? plan.batchIds[0] : null
-        const mark = atomicMark?.statement() ?? null
-        await db.batch(addressedStatements(landing, [
-          ...(mark ? [mark] : []),
-          ...plan.statements,
-          ...(conditionTag ? holdRemovedStatements(conditionTag) : [movementRowStatement()]),
-        ]))
-      } catch (err) {
-        const stockGuard = productStockGuardError(err)
-        if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
-        if (err instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
-        if (isBranchRedirectGuardError(err)) throw err
-        if (isStockRemovalConflict(err)) return c.json(STOCK_REMOVAL_CONFLICT, 409)
-        return c.json({ error: err instanceof Error ? err.message : 'Failed to remove stock' }, 400)
       }
-      atomicMark?.committed()
-      movementWrittenAtomically = true
+      await executeStockMutationBatch(db, addressedStatements(landing, [
+        // A tagged removal of a selected lot re-proves in the batch that the
+        // product is still active (held units are its stock); the auto-routed
+        // one relies on assertProductsActive above, as it always has.
+        ...(conditionTag && batchIdRequested != null ? [productStockGuardStatement([targetProductId], 'active')] : []),
+        ...plan.statements,
+        ...(conditionTag ? holdRemovedStatements(conditionTag) : [movementRowStatement()]),
+      ]), atomicMark, { status: 200, body: adjustResponseBody() })
+    } catch (err) {
+      if (err instanceof StockMutationBudgetError) throw err
+      const stockGuard = productStockGuardError(err)
+      if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+      if (err instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
+      if (isBranchRedirectGuardError(err)) throw err
+      if (isStockRemovalConflict(err)) return c.json(STOCK_REMOVAL_CONFLICT, 409)
+      return c.json({ error: err instanceof Error ? err.message : 'Failed to remove stock' }, 400)
     }
+    movementWrittenAtomically = true
   } else if (delta !== 0) {
     if (conditionTag && type === 'remove') {
       const mark = atomicMark?.statement() ?? null
@@ -2596,26 +2613,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // failure and showed an error toast on every successful adjustment. Fixed
   // here by matching the app-wide response contract instead of patching
   // around it in every caller.
-  //
-  // `targetProductId`/`createdSibling` only differ from the request when
-  // an unlocked add resolved to a different row than the one the request
-  // named -- see resolveAddStockTarget above. The frontend uses these to
-  // tell the person which row actually received the stock.
-  return c.json({
-    success: true,
-    branchId,
-    movementType,
-    quantity: Math.abs(delta),
-    productId: targetProductId,
-    productName: targetProductName,
-    createdSibling,
-    batchNumber,
-    batchId: resolvedBatchId,
-    lotCode,
-    autoBatchDrainIds,
-    freeQuantity,
-    sellingPriceUsd: sellingPricePlan ? sellingPricePlan.after.selling_price_usd : null,
-  })
+  return c.json(adjustResponseBody())
 }
 
 app.post('/adjust', async (c) => {
