@@ -10,6 +10,7 @@ import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { countCsvDataRows } from '../../utils/csvRowCounter.ts'
 import { parseImportFile } from '../../utils/spreadsheetImport.ts'
+import { useImportFileRead } from '../shared/useImportFileRead.ts'
 import { parseCsvRows } from '../../utils/csvImport.ts'
 import { getBlankCsvHeaderColumns } from '../../utils/csvImport.ts'
 import { getImportJob, approveImportJob } from '../../api/importJobsTransport.ts'
@@ -213,6 +214,7 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
   // the actual file handoff happens in handleDropFile via onDrop below.
   const [isDragActive, setIsDragActive] = useState(false)
   const aliveRef = useRef(true)
+  const { readingFile, read: readImportFile } = useImportFileRead()
   const inFlightRef = useRef(false)
   const rowCountRequestRef = useRef(0)
   // 'idle': the normal upload form (everything below, unchanged).
@@ -394,44 +396,44 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
     }
   }
 
-  const handlePickFile = async (): Promise<void> => {
-    try {
-      const picked = await getContactImportApi().openCSVDialog?.()
-      if (!picked?.content) return
-      await loadCsvText(picked.content, picked.name || 'contacts.csv')
-    } catch (error) {
-      notify(getErrorMessage(error, tr('contacts_import_drop_failed', 'Could not read that file.')), 'error')
-    }
+  const notifyReadFailed = (error: unknown): void => {
+    notify(getErrorMessage(error, tr('contacts_import_drop_failed', 'Could not read that file.')), 'error')
   }
+
+  const handlePickFile = (): Promise<void> => readImportFile(
+    async () => getContactImportApi().openCSVDialog?.(),
+    async (picked) => {
+      if (picked?.content) await loadCsvText(picked.content, picked.name || 'contacts.csv')
+    },
+    notifyReadFailed,
+  )
 
   // Drag-and-drop counterpart to handlePickFile: same loadCsvText analysis
   // path, just a File handed over by the browser's drop event instead of
   // one returned by the native file-dialog. parseImportFile handles both
   // real CSV/TSV and real Excel (.xlsx/.xls/.xlsm) drops, matching the
   // other import modals (products, inventory, sales).
-  const handleDropFile = async (file: File): Promise<void> => {
-    try {
-      const parsed = await parseImportFile(file)
-      if (!parsed?.content) return
-      await loadCsvText(parsed.content, parsed.name || file.name || 'contacts.csv')
-    } catch (error) {
-      notify(getErrorMessage(error, tr('contacts_import_drop_failed', 'Could not read that file.')), 'error')
-    }
-  }
+  const handleDropFile = async (file: File): Promise<void> => readImportFile(
+    (signal) => parseImportFile(file, undefined, { signal }),
+    async (parsed) => {
+      if (parsed?.content) await loadCsvText(parsed.content, parsed.name || file.name || 'contacts.csv')
+    },
+    notifyReadFailed,
+  )
 
   const handleDragOverCSV = (event: React.DragEvent<HTMLDivElement>) => {
-    if (loading) return
+    if (loading || readingFile) return
     event.preventDefault()
     event.stopPropagation()
     setIsDragActive(true)
   }
   const handleDragLeaveCSV = (event: React.DragEvent<HTMLDivElement>) => {
-    if (loading) return
+    if (loading || readingFile) return
     event.preventDefault()
     setIsDragActive(false)
   }
   const handleDropCSVEvent = (event: React.DragEvent<HTMLDivElement>) => {
-    if (loading) return
+    if (loading || readingFile) return
     event.preventDefault()
     event.stopPropagation()
     setIsDragActive(false)
@@ -608,10 +610,10 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
           <button type="button" className="btn-secondary text-sm" onClick={handleDownloadTemplate}>
             {t('download_template') || 'Download Template'}
           </button>
-          <button type="button" className="btn-secondary text-sm" onClick={handlePickFile}>
+          <button type="button" className="btn-secondary text-sm" onClick={handlePickFile} disabled={readingFile}>
             {tr('choose_csv_file', 'Choose CSV or Excel')}
           </button>
-          <button type="button" className="btn-secondary text-sm" onClick={() => setFilesOpen(true)}>
+          <button type="button" className="btn-secondary text-sm" onClick={() => setFilesOpen(true)} disabled={readingFile}>
             {tr('contacts_import_browse_library', 'Library')}
           </button>
           <div
@@ -749,8 +751,8 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
         ) : null}
 
         <div className="flex gap-2">
-          <button type="button" className="btn-primary flex-1" disabled={!canImportContacts || loading || analyzingCsv || !rowCount} onClick={handleImport}>
-            {loading ? (t('importing') || 'Importing...') : analyzingCsv ? tr('contacts_import_checking', 'Checking...') : tr('contacts_import_button', 'Import')}
+          <button type="button" className="btn-primary flex-1" disabled={!canImportContacts || loading || analyzingCsv || readingFile || !rowCount} onClick={handleImport}>
+            {loading ? (t('importing') || 'Importing...') : readingFile ? tr('import_reading_file', 'Reading file...') : analyzingCsv ? tr('contacts_import_checking', 'Checking...') : tr('contacts_import_button', 'Import')}
           </button>
           <button type="button" className="btn-secondary" onClick={onClose}>{t('close') || 'Close'}</button>
         </div>

@@ -167,7 +167,7 @@ await runTest('product/inventory/sales import modals accept a dropped file, not 
   const contactImportSource = fs.readFileSync(new URL('../src/components/contacts/ContactImportModal.tsx', import.meta.url), 'utf8')
   assert.match(contactImportSource, /import \{ parseImportFile \} from '\.\.\/\.\.\/utils\/spreadsheetImport\.ts'/)
   assert.match(contactImportSource, /const handleDropFile = async \(file: File\)/)
-  assert.match(contactImportSource, /await parseImportFile\(file\)/)
+  assert.match(contactImportSource, /parseImportFile\(file, undefined, \{ signal \}\)/)
   assert.match(contactImportSource, /onDrop=\{handleDropCSVEvent\}/)
 })
 
