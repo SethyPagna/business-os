@@ -44,6 +44,8 @@ INSERT INTO fees VALUES(1,'2026-09-04 03:00:00','2026-09-04',2,NULL,'expense','L
 `)
 // fees.branch_name (0236) is the last column the real table gained; added after the positional seed rows.
 sql.exec('ALTER TABLE fees ADD COLUMN branch_name TEXT')
+// sale_items.product_discount_usd is real too: an item discount moves export totals without moving a receipt row.
+sql.exec('ALTER TABLE sale_items ADD COLUMN product_discount_usd REAL DEFAULT 0')
 const db = { prepare(query) {
   reads++
   const bind = (params = {}) => {
