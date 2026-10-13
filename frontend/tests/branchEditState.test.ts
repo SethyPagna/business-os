@@ -6,6 +6,7 @@ import * as branchErrors from '../src/api/branchRuleErrors.ts'
 import { replayBranchEdit } from '../src/components/branches/branchHistoryReplay.ts'
 import { resolveReplayAction } from '../src/utils/actionReplay.ts'
 import { withLoaderTimeout } from '../src/utils/loaders.ts'
+import { noteQueuedForReview } from '../src/utils/pendingReviewTargets.ts'
 import { withWriteTimeout } from '../src/utils/writeIntent.ts'
 
 const ts = createRequire(new URL('../../cloudflare/package.json', import.meta.url))('typescript')
@@ -312,7 +313,7 @@ for (const language of ['en', 'km'] as const) {
   await check(`${language} actual mutation deadline reports uncertainty while its single write can commit late`, async () => {
     const pack = JSON.parse(read(`../src/lang/${language}.json`))
     const tr = (key: string, fallback: string) => pack[key] || fallback
-    const mutate = load(pageSource, 'runBranchMutation', { useCallback: (fn: unknown) => fn, withLoaderTimeout, withWriteTimeout, BRANCH_MUTATION_TIMEOUT_MS: 12000, tr })
+    const mutate = load(pageSource, 'runBranchMutation', { useCallback: (fn: unknown) => fn, withLoaderTimeout, withWriteTimeout, noteQueuedForReview, BRANCH_MUTATION_TIMEOUT_MS: 12000, tr })
     const timers: Array<{ fire: () => void; ms: number }> = []
     const originalSet = globalThis.setTimeout
     const originalClear = globalThis.clearTimeout

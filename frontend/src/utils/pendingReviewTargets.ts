@@ -162,15 +162,6 @@ export function noteQueuedForReview<T>(response: T): T {
   return response
 }
 
-/** Test seam: back to a store nobody has touched. */
-export function __resetPendingReviewTargetsForTests(): void {
-  snapshot = EMPTY
-  listeners.clear()
-  scope = 'mine'
-  inflight = null
-  rereadAfterInflight = false
-}
-
 // ---- hooks ----------------------------------------------------------------
 
 /**

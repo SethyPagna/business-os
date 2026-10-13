@@ -58,6 +58,9 @@ import {
   ProductDiscountBadge,
 } from './surfaces/ProductRowParts'
 import { useIsPageActive } from '../shared/pageActivity'
+import PendingReviewSync from '../shared/PendingReviewSync'
+import PendingReviewTag from '../shared/PendingReviewTag'
+import { noteQueuedForReview } from '../../utils/pendingReviewTargets.ts'
 import { buildProductCategorySections, hideZeroStockGroupedChildRows } from '../../utils/productGrouping.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId, resolveCreatedHistorySnapshot } from '../../utils/historyHelpers.ts'
@@ -900,7 +903,17 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
             to line up) -- it is the image inside that is dropped, so every
             child row's name starts at exactly the same x as the group
             title's. */}
-        <td className="px-2 py-2">
+        {/* The "waiting for review" tag (owner, 13 Oct 2026: a mini tag in the
+            empty margin, taking no space) lives in THIS cell's 8px start gutter,
+            top-left of the thumbnail, for standalone and grouped child rows
+            alike: a child's image cell is empty, but it is still the column the
+            tag sits in, so the tag lines up down the whole table and the name
+            cell is left exactly as it was. `relative` is on the cell with or
+            without a tag, so the tag never changes the cell's box; it only
+            reads the shared store, so the memoised row does not re-render when
+            the pending list changes. */}
+        <td className="relative px-2 py-2">
+          <PendingReviewTag section="products" entityType="product" ids={rowScopeIds} className="-left-px top-1" />
           {indented ? null : (
             <button
                 type="button"
@@ -1135,9 +1148,11 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
     // group instead, matching Inventory's mobile grouped-row treatment
     // (InventoryProductsSurface.tsx) for parity between the two pages.
     // Ungrouped single products are untouched, still their own card.
+    // `relative` on both shapes is the container the "waiting for review" tag
+    // is positioned in (below); it adds no box and no stacking context.
     const rowClassName = indented
-      ? `min-w-0 max-w-full cursor-pointer select-none border-t border-gray-100 px-3 py-2.5 dark:border-gray-800 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : ''}`
-      : `card min-w-0 max-w-full cursor-pointer select-none px-3 py-2.5 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : ''}`
+      ? `relative min-w-0 max-w-full cursor-pointer select-none border-t border-gray-100 px-3 py-2.5 dark:border-gray-800 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : ''}`
+      : `card relative min-w-0 max-w-full cursor-pointer select-none px-3 py-2.5 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : ''}`
 
     // Same long-press/select-mode rules as renderDesktopProductRow -- see
     // its comment for the full reasoning. Not a hook; shares the same
@@ -1187,6 +1202,11 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
             `card`). An extra left-padding indent on top of that was
             redundant, and it also meant a child row's text started to the
             right of the group title above it instead of lining up with it. */}
+        {/* The "waiting for review" tag sits in the card's 12px start gutter,
+            beside the thumbnail (not over it: the discount badge keeps the
+            thumbnail's top-right). A grouped child card has no thumbnail and
+            uses the same gutter. Out of the flow, so neither card shape grows. */}
+        <PendingReviewTag section="products" entityType="product" ids={rowScopeIds} className="left-px top-1" />
         <div className="flex min-w-0 items-start gap-3">
           {selectionModeActive ? (
             <input
@@ -1897,11 +1917,16 @@ function ProductsFullEditor() {
     [cleanedSearchQuery, searchMode, searchIndexGeneration],
   )
   const effectiveStockState = stockFilter !== 'all' ? stockFilter : (parsedSearch.hasZeroStockToken ? 'out' : 'all')
+  // Every product create, edit, bulk edit, restore and removal goes through one of
+  // these two wrappers. A Review Required save answers 202 { pending: true } and
+  // applies nothing; noteQueuedForReview then refreshes the "waiting for review"
+  // tags at once, so the request the person just made shows on its row (or on the
+  // Add button, for a create) without waiting for the next page visit.
   const runProductWriteMutation = useCallback(<T,>(loader: Loader<T>, label: string, timeoutMs = PRODUCT_WRITE_MUTATION_TIMEOUT_MS): Promise<T> => (
-    withLoaderTimeout(loader, label, timeoutMs)
+    withLoaderTimeout(loader, label, timeoutMs).then(noteQueuedForReview)
   ), [])
   const runProductDeleteMutation = useCallback(<T,>(loader: Loader<T>, label: string): Promise<T> => (
-    withLoaderTimeout(loader, label, PRODUCT_DELETE_MUTATION_TIMEOUT_MS)
+    withLoaderTimeout(loader, label, PRODUCT_DELETE_MUTATION_TIMEOUT_MS).then(noteQueuedForReview)
   ), [])
   const runProductStockMutation = useCallback(<T,>(loader: Loader<T>, label: string): Promise<T> => (
     withLoaderTimeout(loader, label, PRODUCT_STOCK_MUTATION_TIMEOUT_MS)
@@ -4861,6 +4886,9 @@ function ProductsFullEditor() {
   // top and nothing bleeds above it.
   return (
     <div className="page-scroll px-3 pb-3 sm:px-6 sm:pb-6">
+      {/* ONE read of the open review requests for this page, shared by every
+          row's "waiting for review" tag (renders nothing). */}
+      <PendingReviewSync active={isActive} />
       {/* Page title + section switcher on the left; Manage / History / Add
           product on the right of the SAME row (Y15/Y16: the header actions
           join the section-chip row instead of getting their own toolbar

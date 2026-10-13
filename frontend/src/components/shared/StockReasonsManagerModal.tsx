@@ -6,7 +6,10 @@ import {
   useStockReasonCatalog,
   type StockReasonType,
 } from '../../utils/useStockReasonCatalog.ts'
+import { PENDING_REVIEW_NEW } from '../../utils/pendingReviewTargets.ts'
 import Modal from './Modal.tsx'
+import PendingReviewSync from './PendingReviewSync.tsx'
+import PendingReviewTag from './PendingReviewTag.tsx'
 import ReasonListEditor, { useAskConfirm } from './ReasonListEditor.tsx'
 
 // The one manager for saved stock reasons, opened from the Products and
@@ -46,9 +49,24 @@ export default function StockReasonsManagerModal({ initialTab = 'adjust', onClos
   const [draft, setDraft] = useState('')
   const [dirty, setDirty] = useState(false)
   const rows = useMemo(() => stockReasonsOfType(catalog.items, tab), [catalog.items, tab])
+  // A Review Required edit of the saved reasons waits for approval and the list
+  // below keeps its old content until then, so the title says so: a 10px slot
+  // beside the words holds the "waiting for review" tag. The slot is the one
+  // thing here that is in the flow, and it is a title, not a data row; the
+  // tag itself stays out of the flow inside it, and renders nothing unless a
+  // list edit is waiting. One request covers the whole list (not per type).
+  const reasonsTitle = (
+    <>
+      {tr('reasons', 'Reasons')}
+      <span className="relative ml-1.5 inline-block h-2.5 w-2.5 align-middle">
+        <PendingReviewTag section="inventory" entityType="inventory_reason" ids={[PENDING_REVIEW_NEW]} className="left-0 top-0" />
+      </span>
+    </>
+  )
 
   return (
-    <Modal title={tr('reasons', 'Reasons')} onClose={onClose} size="sm" layer={layer} unsavedChanges={{ dirty }}>
+    <Modal title={reasonsTitle} onClose={onClose} size="sm" layer={layer} unsavedChanges={{ dirty }}>
+      <PendingReviewSync />
       <div className="space-y-2.5">
         <div role="tablist" aria-label={tr('reasons', 'Reasons')} className="grid grid-cols-4 gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
           {STOCK_REASON_TYPES.map((type) => (

@@ -34,6 +34,9 @@ import { continuousRangeParams } from '../../utils/continuousRangeParams.ts'
 import BarChart3 from 'lucide-react/dist/esm/icons/bar-chart-3.js'
 import MinimizeButton from '../shared/MinimizeButton.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
+import PendingReviewSync from '../shared/PendingReviewSync'
+import PendingReviewTag from '../shared/PendingReviewTag'
+import { noteQueuedForReview } from '../../utils/pendingReviewTargets.ts'
 import BranchForm, { branchFormDraftBaseKey, branchFormWorkKey } from './BranchForm'
 import { replayBranchEdit, type BranchReplayRequest } from './branchHistoryReplay.ts'
 import { localizeBranchSaveError } from '../../api/branchRuleErrors.ts'
@@ -852,8 +855,11 @@ export default function Branches({ embedded = false, view, showSectionNavigation
     userName: user?.name,
   }), [user?.id, user?.name])
 
+  // A Review Required branch edit answers 202 { pending: true } and applies
+  // nothing; noteQueuedForReview refreshes the "waiting for review" tag on the
+  // card at once instead of at the next page visit.
   const runBranchMutation = useCallback((loader: () => Promise<BranchMutationResult>, label: string) => (
-    withWriteTimeout(loader, label, BRANCH_MUTATION_TIMEOUT_MS, (key) => tr(key, ''))
+    withWriteTimeout(loader, label, BRANCH_MUTATION_TIMEOUT_MS, (key) => tr(key, '')).then(noteQueuedForReview)
   ), [tr])
 
   // The in-tab Undo / Redo of a branch edit (the history row has no server id
@@ -1225,6 +1231,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
 
   return (
     <div className={`flex min-h-0 flex-col ${embedded ? 'flex-1 px-3 pb-3 pt-1 sm:px-6 sm:pb-6 sm:pt-2' : 'page-scroll p-3 sm:p-6'}`}>
+      <PendingReviewSync active={isActive} />
       {/* Current stock totals stay independent of the transfer-history range. */}
 
       {loadError && !loading && !branches.length && !transfers.length ? (
@@ -1427,8 +1434,11 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             return (
               <div
                 key={branch.id}
-                className="card overflow-hidden transition-all"
+                className="card relative overflow-hidden transition-all"
               >
+                {/* "Waiting for review" tag in the card's start gutter (the
+                    p-3 / sm:p-4 padding below), out of the flow. */}
+                <PendingReviewTag section="branches" entityType="branch" ids={[branch.id]} className="left-px top-1" />
                 <div className="p-3 sm:p-4">
                   <div className="flex items-start gap-2">
                     <div className="min-w-0 flex-1">

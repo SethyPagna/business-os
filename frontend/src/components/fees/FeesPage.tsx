@@ -24,6 +24,8 @@ import FilterMenu, { type FilterOption } from '../shared/FilterMenu'
 import PaginationControls, { DEFAULT_PAGE_SIZE, clampPage } from '../shared/PaginationControls'
 import PagerActionRow from '../shared/PagerActionRow.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
+import PendingReviewSync from '../shared/PendingReviewSync'
+import PendingReviewTag from '../shared/PendingReviewTag'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -708,6 +710,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <div className={`${embedded ? '' : 'page-scroll '}flex flex-col p-3 sm:p-6`}>
+      <PendingReviewSync active={isActive} />
       {/* Page title removed (Aug 19 2026 UI request): no other page in the
           app repeats its own name in an h1 here -- the sidebar nav item
           already names the page -- so Fees having one was the odd one out,
@@ -870,7 +873,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                   </tr>
                   {group.rows.map((fee) => (
                   <tr key={fee.id} data-clickable="true" tabIndex={0} onClick={() => openDetail(fee)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openDetail(fee) } }}>
-                    <td className="whitespace-nowrap text-slate-500 dark:text-slate-400">{fmtClock24(fee.created_at)}</td>
+                    <td className="relative whitespace-nowrap text-slate-500 dark:text-slate-400"><PendingReviewTag section="fees" entityType="fee" ids={[fee.id]} className="-left-px top-1" />{fmtClock24(fee.created_at)}</td>
                     <td className="whitespace-nowrap">
                       <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${feeTypeToneClass(fee.fee_type)}`}>
                         {feeTypeLabel(fee.fee_type)}
@@ -916,7 +919,8 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                   {formatFeeDate(group.date)}
                 </div>
                 {group.rows.map((fee) => (
-              <button type="button" key={fee.id} data-expense-card="" onClick={() => openDetail(fee)} className="block w-full rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-700 dark:hover:bg-blue-950/20">
+              <button type="button" key={fee.id} data-expense-card="" onClick={() => openDetail(fee)} className="relative block w-full rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-700 dark:hover:bg-blue-950/20">
+                <PendingReviewTag section="fees" entityType="fee" ids={[fee.id]} className="left-0 top-1" />
                 <div data-expense-line="primary" className="flex min-w-0 items-center gap-1.5">
                   <span className="shrink-0 text-xs text-slate-400">{fmtClock24(fee.created_at)}</span>
                   <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-xs font-semibold ${feeTypeToneClass(fee.fee_type)}`}>

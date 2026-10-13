@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getInventoryReasons, saveInventoryReasons } from '../api/methods.ts'
 import type { ConfirmRequest } from '../components/shared/useConfirmDialog.tsx'
+import { noteQueuedForReview } from './pendingReviewTargets.ts'
 
 // The saved stock-reason catalog (settings.inventory_saved_reasons) behind
 // StockReasonsManagerModal: load, add, rename with a linked-record preview, delete.
@@ -72,6 +73,7 @@ export function useStockReasonCatalog({ notify, tr, askToConfirm, onChanged }: {
       const result = await saveInventoryReasons(next) as { pending?: boolean; items?: unknown } | null
       // Review Required queues the write: nothing changed yet, so the list stays as it was.
       if (result?.pending) {
+        noteQueuedForReview(result)
         notify(tr('reason_submitted_for_review', 'Submitted for review -- changes will appear once approved.'))
         return true
       }
