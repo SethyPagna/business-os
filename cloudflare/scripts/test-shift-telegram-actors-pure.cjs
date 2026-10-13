@@ -1,23 +1,22 @@
 const productStockGuard = require('./harness/product_stock_guard.cjs')
-// 13 Oct 2026, owner item 14 follow-up (refuter S3): "A status-change notification
-// names who did it." Amending a shift already did (Amended by). The same rule now
-// covers the two other events that re-send the shift report on someone else's
-// behalf:
+// Owner rule (13 Oct 2026, item 14 follow-up): "A status-change notification names who
+// did it." The shift report names the account behind each event that re-sends it on
+// someone else's behalf:
 //
-//   * a REOPEN posted as a plain "Shift report: Open" under the original cashier's
-//     name -- indistinguishable from a fresh open. It now carries
-//     `Reopened by: <who>` (the stored reopened_by_user_name);
-//   * a CLOSE done by someone other than the cashier (an administrator closing a
-//     till) carried no trace of it. It now carries `Closed by: <who>` (the stored
-//     closed_by_user_name) -- only when the closer is not the cashier, so a cashier
-//     closing their own till is not told what the Cashier row already says.
+//   * an AMEND: `Amended by: <who>`;
+//   * a REOPEN, posted under the original cashier's name and otherwise identical to a
+//     fresh open: `Reopened by: <who>` (the stored reopened_by_user_name), even when it
+//     is the cashier;
+//   * a CLOSE by someone other than the cashier (an administrator closing a till):
+//     `Closed by: <who>` (the stored closed_by_user_name). The cashier is told from the
+//     closer by account id, so a cashier closing their own till is not told what the
+//     Cashier row already says.
 //
-// This test is ROUTE-DRIVEN. The refuter showed the first amend test only matched
-// the route's source text. Here the real routes/shifts.ts handlers run on the real
-// migrations, a real session user for each actor, and every report they send goes
-// through the real lib/telegram.ts sender into a local recorder that stands in for
-// the Telegram API -- nothing leaves this process. What is asserted is the text the
-// chat would receive, in en, km and both, plus the options the route handed over.
+// ROUTE-DRIVEN: the real routes/shifts.ts handlers run on the real migrations, a real
+// session user for each actor, and every report goes through the real lib/telegram.ts
+// sender into a local recorder that stands in for the Telegram API -- nothing leaves
+// this process. What is asserted is the text the chat would receive, in en, km and
+// both, plus the options the route handed over.
 //
 // Run (from cloudflare/): node scripts/test-shift-telegram-actors-pure.cjs
 const assert = require('node:assert/strict')
@@ -361,10 +360,10 @@ async function main() {
     assert.deepEqual(anyActorRow(bySelf.text), [actorRow('both', 'shift_reopened_by', 'sok')], bySelf.text)
   })
 
-  await section('5. an amend by another account (already shipped) goes through the same route-driven path', async () => {
+  await section('5. an amend by the administrator names them', async () => {
     const revision = (await (await call('owner', 'GET', `/${opened.dara.id}/history`)).json()).shift.revision
     const amendment = { expected_revision: revision, reason: 'Recount', closing_counted_usd: 77 }
-    // Another cashier cannot reach dara's shift under per_account (audit A1): not found, and no report goes out.
+    // Another cashier cannot reach dara's shift under per_account: not found, and no report goes out.
     const sendsBefore = sends.length
     assert.equal((await call('sok', 'PATCH', `/${opened.dara.id}`, amendment)).status, 404)
     assert.equal(sends.length, sendsBefore, 'a refused amend sends nothing')

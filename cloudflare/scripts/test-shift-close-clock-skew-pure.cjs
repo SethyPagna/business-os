@@ -18,7 +18,7 @@
 //   5. two identical requests in flight at once    -> both 200, ONE commit
 //      (duplicate clicks / two tabs)
 //   6. a different pos-only account on the same shift -> 404 (per_account
-//      hides it, audit A1; under shop_wide it is visible and the close stays
+//      hides it; under shop_wide it is visible and the close stays
 //      403 for a non-owner -- test-shift-security-pure.cjs)
 //   7. a counted drawer far from expected           -> 200 (reconciliation is
 //      informational, never a gate)
@@ -236,7 +236,7 @@ async function main() {
     const shift = await open()
     actAs(otherCashier)
     const res = await call('POST', `/${shift.id}/close`, closeBody(shift))
-    assert.equal(res.status, 404, 'per_account hides the shift from another account, so it is not found (audit A1)')
+    assert.equal(res.status, 404, 'per_account hides the shift from another account, so it is not found')
     assert.equal(row(shift.id).closed_at, null)
     actAs(owner)
     const stale = await call('POST', `/${shift.id}/close`, closeBody(shift, { expected_revision: shift.revision + 5 }))

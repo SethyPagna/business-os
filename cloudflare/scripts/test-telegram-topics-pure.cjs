@@ -305,7 +305,7 @@ const baseSettings = [
   // test-telegram-shift-report-pure.cjs and test-telegram-shift-overview-pure.cjs.
   // The overview's own routing (Summary topic, else Shift) is driven end to end there.
   const telegramSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')
-  // `options` is what an amend adds to the send (who amended, 13 Oct 2026); the topic is what this pins.
+  // `options` is what an event adds to the send (who amended, reopened or closed); the topic is what this pins.
   assert.match(telegramSource, /shiftReportFor\(env, shift, nowMs, config\.language(?:, options)?\), config\.chatId, config\.topics\.telegram_topic_shift, 'telegram_topic_shift'\)/, 'sendTelegramShiftReport must pass telegram_topic_shift')
   assert.match(telegramSource, /return config\.topics\.telegram_topic_reports \? 'telegram_topic_reports' : 'telegram_topic_shift'/, 'the overview goes to the Summary topic, else the Shift topic')
   console.log('PASS sendTelegramShiftReport stays on telegram_topic_shift; the overview prefers telegram_topic_reports')

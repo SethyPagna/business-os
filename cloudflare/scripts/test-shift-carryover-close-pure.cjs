@@ -409,7 +409,7 @@ async function main() {
   const otherClose = await scope.json('POST', `/${scopeCarry.id}/close`, {
     expected_revision: scopeCarry.revision, closed_at: new Date().toISOString(),
   })
-  assert.equal(otherClose.status, 404, 'another cashier cannot close it either: a shift they cannot see answers 404, like the detail route (audit A1)')
+  assert.equal(otherClose.status, 404, 'another cashier cannot close it either: a shift they cannot see answers 404, like the detail route')
   // DISCRIMINATING POSITIVE CONTROL: the owner, on the same database, sees
   // and closes it -- so the two nulls above are scope, not a dead query.
   scope.as(CASHIER)

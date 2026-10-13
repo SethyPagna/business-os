@@ -158,9 +158,8 @@ export type ShiftRegisteredRow = { key: string; fallback: string; usd: number | 
  *
  * ALWAYS a figure, zero when nothing was added (owner, 13 Oct 2026, item 14:
  * Opening -> Additional change used -> Closing are shown everywhere, always,
- * $0 included). It used to answer NULL for "none" and each surface turned that
- * into "no row", which left Opening and Closing with the middle line missing --
- * the same gap the owner found in Telegram. None added is a fact, not an
+ * $0 included), because a surface that skips a missing figure leaves Opening and
+ * Closing with the middle line missing. None added is a fact, not an
  * unknown: the column is NOT NULL DEFAULT 0 (migration 0147), so a row that does
  * not carry it is a response from before the field existed, and the Worker's
  * Telegram report reads that the same way (`?? 0`). The opening and closing

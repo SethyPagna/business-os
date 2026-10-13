@@ -495,7 +495,7 @@ function openCarryOverPanel(source: string, saved: unknown, shiftState: object =
     if (name.includes('ShiftCountFields')) return { default: PairMarker, ShiftSubmitRow: SubmitMarker, shiftCountBlockerKey: (key: string) => key }
     if (name.includes('shiftReportModel')) return {
       shiftCountedPairText: (usd: unknown, khr: unknown) => `${usd}|${khr}`,
-      // The real rule never answers null since 13 Oct 2026 (owner, item 14: the additional row is always there, $0 included).
+      // The real rule never answers null (owner, 13 Oct 2026, item 14: the additional row is always there, $0 included).
       shiftAdditionalCash: () => ({ usd: 0, khr: 0 }),
       shiftExpectedWithTypedAdditional: () => ({ usd: null, khr: null }),
     }

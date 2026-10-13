@@ -1,7 +1,6 @@
 // The compact shift card (ShiftSummary, used by the shift history list and the
 // segment list): Before -> Additional -> After, ALWAYS all three, $0 included
-// (owner, 13 Oct 2026, item 14: the shift cash lines are shown everywhere; refuter S1
-// found the card still showed Before and After with the middle figure missing).
+// (owner, 13 Oct 2026, item 14: the shift cash lines are shown everywhere).
 //
 // The real ShiftSummary is rendered (react-dom/server) with the real shiftReportModel;
 // only the app context, the heavy detail blocks, the hint popover and the icons are

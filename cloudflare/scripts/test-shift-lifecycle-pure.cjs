@@ -210,7 +210,7 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
   user = { id: 8, name: 'Other', username: 'other', permissions: JSON.stringify({ pos: true }) }
   assert.equal((await call('POST', `/${rootShift.id}/reopen`, {
     expected_revision: closedRoot.revision, reason: 'Not owner', opening_float_usd: 3, opening_float_khr: 3000,
-  })).status, 404, 'another POS user cannot reopen the owner shift: per_account hides it, so it is not found (audit A1)')
+  })).status, 404, 'another POS user cannot reopen the owner shift: per_account hides it, so it is not found')
   user = { id: 9, name: 'Settings', username: 'settings', permissions: JSON.stringify({ settings: true }) }
   assert.equal((await call('POST', `/${rootShift.id}/reopen`, {
     expected_revision: closedRoot.revision, reason: 'Settings', opening_float_usd: 3, opening_float_khr: 3000,

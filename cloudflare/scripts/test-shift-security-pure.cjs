@@ -132,10 +132,10 @@ async function main() {
   // below, in the shop_wide section, where another cashier's shift IS
   // reachable): a before/after row whose actor is the caller, plus an audit line.
   //
-  // "Reach" is the O8 visibility rule (audit A1, 13 Oct 2026). Under the
-  // default per_account policy another cashier's shift is not reachable, so
-  // the amend answers 404 exactly as GET /:id/history does above -- 200 here
-  // was the hole: any POS account could rewrite a colleague's float and drawer.
+  // "Reach" is the O8 visibility rule. Under the default per_account policy
+  // another cashier's shift is not reachable, so the amend answers 404 exactly
+  // as GET /:id/history does above: a POS account must not rewrite a
+  // colleague's float and drawer.
   const foreignAmend = await call('PATCH', `/${foreignId}`, { expected_revision: 0, reason: 'Counted the float again', opening_float_usd: 6 })
   assert.equal(foreignAmend.status, 404, 'a POS user cannot amend a shift per_account hides from them')
   assert.deepEqual(await foreignAmend.json(), { error: 'Shift not found.' }, 'and the body is the history route\'s, not a 403 that confirms the id exists')
@@ -197,7 +197,7 @@ async function main() {
   assert.equal(ownAmendment.status, 200, 'owner can amend own shift without Settings permission')
   assert.equal((await call('POST', `/${foreignId}/close`, { expected_revision: 0,
     closed_at: new Date().toISOString(), closing_counted_usd: 1, closing_counted_khr: 1 })).status, 404,
-  'non-owner cannot close another cashier shift by id: per_account hides it, so it is not found (audit A1)')
+  'non-owner cannot close another cashier shift by id: per_account hides it, so it is not found')
   const historicBadRevision = await call('POST', `/${id}/close`, { expected_revision: 0,
     closed_at: new Date().toISOString(), closing_counted_usd: 20, closing_counted_khr: 3000 })
   assert.equal(historicBadRevision.status, 409, 'historic close requires the current revision')

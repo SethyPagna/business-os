@@ -1,8 +1,9 @@
-// Security audit A1 (13 Oct 2026): a shift row is cash, so a route that takes a shift id must
-// answer for a shift the caller cannot see exactly as it answers for a shift that does not exist.
-// GET /:id/history always did (404); PATCH /:id, POST /:id/close, POST /close and POST /:id/reopen
-// loaded the row by id and checked only the action's own permission, so cashier B could rewrite
-// cashier A's float and counted drawer (200, whole row back) under the default per_account policy.
+// A shift row is cash, so a route that takes a shift id answers for a shift the caller cannot see
+// exactly as it answers for one that does not exist: 404 "Shift not found." (as GET /:id/history
+// does), never a 403 that confirms the id. That covers PATCH /:id, POST /:id/close, POST /close,
+// POST /:id/reopen and the receipt-replay middleware, before the action's own permission or state
+// checks (a hidden cancelled shift is 404, not the 409 that names its state). POST /:id/cancel is
+// administrator-only: a non-administrator gets one 403 for a missing and a hidden id alike.
 //
 // The real Worker (src/index.ts, real auth and sessions) on a Miniflare D1 with every migration
 // applied, three plain POS cashiers and one administrator. Nothing leaves the process: outbound
@@ -205,8 +206,8 @@ async function main() {
     })
     await check('nothing left the process', async () => assert.deepEqual(outbound, []))
     assert.deepEqual(failures, [], `\n${failures.join('\n')}`)
-    console.log('PASS A1 shift object check: per_account 404 (amend, amend+identity, close, live close, reopen) with no row, amendment or audit change; '
-      + 'owner and administrator unchanged; shop_wide amend allowed; scope switches and receipt replay stay hidden')
+    console.log('PASS shift visibility: per_account 404 (amend, amend+identity, close, live close, reopen, cancelled) with no row, amendment or audit change; '
+      + 'cancel 403 alike for a missing and a hidden id; owner and administrator unchanged; shop_wide amend allowed; scope switches and receipt replay stay hidden')
   } finally { await mf.dispose() }
 }
 main().catch((error) => { console.error(error); process.exitCode = 1 })

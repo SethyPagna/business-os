@@ -432,11 +432,12 @@ export function canManageShifts(user: SessionUser): boolean {
  * never leaves D1; and a caller-supplied `user_id` narrows within it and can
  * never widen it.
  *
- * Every route that addresses ONE shift by id holds the same line (audit A1):
- * history, amend, close, live close and reopen answer 404 "Shift not found."
- * for a shift canSeeShift refuses -- never 403, which would confirm the id
- * exists -- and do so before the action's own permission or state checks.
- * Cancel is administrator-only and an administrator sees every shift.
+ * Every route that addresses ONE shift by id holds the same line: history,
+ * amend, close, live close and reopen answer 404 "Shift not found." for a shift
+ * canSeeShift refuses -- never 403, which would confirm the id exists -- and do
+ * so before the action's own permission or state checks. Cancel is
+ * administrator-only and refused before any row is read; an administrator sees
+ * every shift.
  */
 function shiftVisibility(user: SessionUser, policy: ShiftPolicy) {
   const reviewer = canManageShifts(user)

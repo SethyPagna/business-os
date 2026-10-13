@@ -253,7 +253,7 @@ const SWITCH = {
   sales: 'telegram_summary_sales_enabled', cashiers: 'telegram_summary_cashiers_enabled', products: 'telegram_summary_products_enabled',
   returns: 'telegram_summary_returns_enabled', expenses: 'telegram_summary_expenses_enabled', compare: 'telegram_summary_compare_enabled',
 }
-// The default overview is SIX sections since 13 Oct 2026 (owner, item 14: the shift
+// The default overview is SIX sections (owner, 13 Oct 2026, item 14: the shift
 // cash lines Opening -> Additional change used -> Closing are shown everywhere,
 // always, $0 included). The sixth is the Cash count of the shift that just closed:
 // it is that shift's own count and not a day-wide extra, so it is not one of the

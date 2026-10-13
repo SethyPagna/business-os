@@ -312,14 +312,14 @@ async function main() {
 
   // ---- 1b. Cash count: the closing shift's drawer (owner, 13 Oct 2026) -------
   // Item 14: "Opening -> Additional change used -> Closing are always shown,
-  // including a $0 additional ... the after-shift Summary overview". The overview
-  // carried no cash figures at all. It now follows the Payment methods with the
-  // closing shift's drawer: the three registered rows. Every other section is the
-  // whole day on the branch and a day holds several shifts (one per cashier, plus
-  // reopened segments), so the drawer is ONE of them -- the shift the header names
-  // (Cashier, ID, Open, Close). The ID is not repeated in the section: the header
-  // carries it in every variant (refuter S4, 13 Oct). The rows are composed from
-  // the pack keys here, not re-typed, so a drifting label fails against the app.
+  // including a $0 additional ... the after-shift Summary overview". The section
+  // follows the Payment methods with the closing shift's drawer: the three
+  // registered rows. Every other section is the whole day on the branch and a day
+  // holds several shifts (one per cashier, plus reopened segments), so the drawer
+  // is ONE of them -- the shift the header names (Cashier, ID, Open, Close). The
+  // ID is not repeated in the section: the header carries it in every variant. The
+  // rows are composed from the pack keys here, not re-typed, so a drifting label
+  // fails against the app.
   {
     const word = (mode, key) => (mode === 'en' ? pack.en[key] : mode === 'km' ? pack.km[key] : `${pack.en[key]}${telegramLang.BILINGUAL_SEPARATOR}${pack.km[key]}`)
     const cashRows = (mode, additional) => [
@@ -627,7 +627,7 @@ async function main() {
       (await telegram.deliverTelegramShiftOverview(envFree, neverKey, T0 + 60_000)) === 'sent'
       && posts[posts.length - 1].text.split('\n').includes(`· ${additionalLabel}: $0.00 · 0៛`), posts[posts.length - 1].text)
 
-    // ---- two tills on one branch-day, through the REAL delivery path (refuter S2, 13 Oct) ----
+    // ---- two tills on one branch-day, through the REAL delivery path ----
     // Till A (Za) and till B (Sok) are the same branch and business day, with DIFFERENT drawers,
     // and both have closed before either overview is sent (the queue's minute, or the drain's
     // five). A delivery that read "the day's latest closed shift" would give A's message B's
