@@ -6904,7 +6904,7 @@
   "portal_legal_privacy_sharing_b": "This site has no advertising trackers, and we use your details only for what this policy describes.",
   "portal_legal_privacy_sharing_list": "Cloudflare hosts the site, its data, images and security records. Error reports go to Sentry, and Cloudinary resizes some product photos. Assistant questions go to a third-party AI provider for the answer. Google receives the request if you choose to load the store map. Social media links open those apps, which follow their own policies.",
   "portal_legal_privacy_security_h": "How we protect it",
-  "portal_legal_privacy_security_b": "Your password is stored only as a one-way code and needs at least six characters. The sign-in cookie cannot be read by scripts, stays on this site and travels over HTTPS, and repeated wrong attempts are slowed down. Please use a password you do not use anywhere else.",
+  "portal_legal_privacy_security_b": "Your password is stored only as a one-way code and needs at least ten characters. The sign-in cookie cannot be read by scripts, stays on this site and travels over HTTPS, and repeated wrong attempts are slowed down. Please use a password you do not use anywhere else.",
   "portal_legal_privacy_scam_h": "Watch out for scams",
   "portal_legal_privacy_scam_b": "Payment details are never collected through this site, and we will never ask for them. Please never give your bank details, card numbers or passwords to anyone who asks, even someone who says they are from our shop. If that happens, it is a scam: do not reply, and let us know using the business details above.",
   "portal_legal_privacy_rights_h": "Your choices",

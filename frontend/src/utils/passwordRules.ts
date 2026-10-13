@@ -2,7 +2,7 @@
 // (cloudflare/src/lib/passwordPolicy.ts newPasswordProblem; parity test
 // tests/passwordRules.test.ts). The server stays the authority; this only
 // saves a round trip and says the problem in the operator's language.
-export const MIN_PASSWORD_LENGTH = 6
+export const MIN_PASSWORD_LENGTH = 10
 export const MAX_PASSWORD_BYTES = 72
 const KHMER_LETTER_BYTES = 3
 

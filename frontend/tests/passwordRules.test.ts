@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import {
   MAX_PASSWORD_BYTES,
   MIN_PASSWORD_LENGTH,
@@ -36,7 +37,7 @@ const server = await import(new URL('../../cloudflare/src/lib/passwordPolicy.ts'
 
 const KHMER_KA = 'ក'
 const FIXTURES: string[] = [
-  '', 'a', 'abcde', 'abcdef', 'abc def', ' abcdef', 'abcdef ', '\tabcdef', 'abcdef\n', ' abcdef', '      ',
+  '', 'a', 'abcde', 'abcdef', 'abcdefghi', 'abcdefghij', 'abc def ghij', ' abcdefghij', 'abcdefghij ', '\tabcdefghij', 'abcdefghij\n', '\u00a0abcdefghij', '          ',
   'a'.repeat(72), 'a'.repeat(73), KHMER_KA.repeat(2), KHMER_KA.repeat(24), KHMER_KA.repeat(25),
   '\u{1F511}'.repeat(18), '\u{1F511}'.repeat(19), 'abcd-EFGH-2345-jkmn',
 ]
@@ -50,16 +51,16 @@ await runTest('the app and the Worker give the same answer for every fixture', (
   }
 })
 
-await runTest('the minimum stays 6 until the owner rules (Q4): 5 refused, 6 accepted', () => {
-  assert.equal(MIN_PASSWORD_LENGTH, 6)
-  assert.equal(newPasswordProblem('abcde'), 'password_too_short')
-  assert.equal(newPasswordProblem('abcdef'), null)
+await runTest('the minimum is 10 (owner, 14 Oct 2026): 9 refused, 10 accepted', () => {
+  assert.equal(MIN_PASSWORD_LENGTH, 10)
+  assert.equal(newPasswordProblem('abcdefghi'), 'password_too_short')
+  assert.equal(newPasswordProblem('abcdefghij'), null)
 })
 
 await runTest('edge whitespace is refused, never trimmed; inner spaces are fine', () => {
-  assert.equal(newPasswordProblem(' abcdef'), 'password_edge_whitespace')
-  assert.equal(newPasswordProblem('abcdef '), 'password_edge_whitespace')
-  assert.equal(newPasswordProblem('abc def'), null)
+  assert.equal(newPasswordProblem(' abcdefghij'), 'password_edge_whitespace')
+  assert.equal(newPasswordProblem('abcdefghij '), 'password_edge_whitespace')
+  assert.equal(newPasswordProblem('abc def ghij'), null)
 })
 
 await runTest('the 72 limit is UTF-8 bytes: 24 Khmer letters pass, 25 do not', () => {
@@ -68,11 +69,11 @@ await runTest('the 72 limit is UTF-8 bytes: 24 Khmer letters pass, 25 do not', (
 })
 
 await runTest('each problem has a message that names the number it enforces', () => {
-  assert.match(passwordProblemMessage('password_too_short', tr), /6/)
+  assert.match(passwordProblemMessage('password_too_short', tr), /10/)
   assert.match(passwordProblemMessage('password_too_long', tr), /72/)
   assert.ok(passwordProblemMessage('password_edge_whitespace', tr).length > 10)
   const khmer = (key: string, fallback: string) => (key === 'password_too_short' ? 'យ៉ាងតិច {min} តួ' : fallback)
-  assert.equal(passwordProblemMessage('password_too_short', khmer), 'យ៉ាងតិច 6 តួ', 'the translated text gets the number too')
+  assert.equal(passwordProblemMessage('password_too_short', khmer), 'យ៉ាងតិច 10 តួ', 'the translated text gets the number too')
 })
 
 await runTest('a server refusal code is recognised so the screen can say it in the operator\'s language', () => {
@@ -87,6 +88,22 @@ await runTest('every refusal of a new password reads the same on every screen, f
   assert.match(newPasswordRefusalMessage({ code: 'password_known_leaked' }, tr) || '', /^password_known_leaked: /)
   for (const other of [{ code: 'incorrect_password' }, { code: 'current_password_rate_limited' }, { error: 'x' }, null, undefined, 'password_too_short']) {
     assert.equal(newPasswordRefusalMessage(other, tr), null, `not a new-password refusal: ${JSON.stringify(other)}`)
+  }
+})
+
+await runTest('the storefront sign-up form and the public privacy text state the same minimum as the Worker', () => {
+  const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), 'utf8')
+  const khmerDigits = (n: number) => [...String(n)].map((d) => '០១២៣៤៥៦៧៨៩'[Number(d)]).join('')
+  const form = read('../src/components/catalog/CatalogAccountSection.tsx')
+  assert.ok(form.includes(`PORTAL_MIN_PASSWORD_LENGTH = ${server.MIN_PASSWORD_LENGTH}`))
+  assert.ok(form.includes(`At least ${server.MIN_PASSWORD_LENGTH} characters.`))
+  assert.ok(form.includes(`យ៉ាងតិច ${khmerDigits(server.MIN_PASSWORD_LENGTH)} តួអក្សរ។`))
+  const words: Record<number, string> = { 10: 'ten' }
+  for (const rel of ['../src/lang/en.json', '../src/components/catalog/legal/legalContent.ts']) {
+    assert.ok(read(rel).includes(`needs at least ${words[server.MIN_PASSWORD_LENGTH]} characters`), rel)
+  }
+  for (const rel of ['../src/lang/km.json', '../src/components/catalog/legal/legalContent.ts']) {
+    assert.ok(read(rel).includes(`ហើយត្រូវមានយ៉ាងតិច ${khmerDigits(server.MIN_PASSWORD_LENGTH)} តួអក្សរ`), rel)
   }
 })
 

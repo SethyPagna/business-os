@@ -279,7 +279,7 @@ await runTest('the new-password rule: refused before any request, in the operato
   let spies = createSpies(async () => ({ success: true }))
   let screen = loadForcedScreen(spies)
   assert.equal(await withWindowEvents(spies, () => screen.changeForcedPassword(input({ newPassword: ' Brand-New-9x', confirmPassword: ' Brand-New-9x', tr }))), 'KM-EDGE')
-  assert.equal(await withWindowEvents(spies, () => screen.changeForcedPassword(input({ newPassword: 'abcde', confirmPassword: 'abcde', tr }))), 'KM-SHORT 6')
+  assert.equal(await withWindowEvents(spies, () => screen.changeForcedPassword(input({ newPassword: 'abcde', confirmPassword: 'abcde', tr }))), 'KM-SHORT 10')
   assert.equal(await withWindowEvents(spies, () => screen.changeForcedPassword(input({ confirmPassword: 'Brand-New-9y', tr }))), 'KM-MISMATCH')
   assert.deepEqual(spies.calls, [], 'no request, no save, no dispatch')
 
