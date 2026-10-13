@@ -81,8 +81,8 @@ type ConfirmResetProps = {
   whatKept?: string
   confirmWord: string
   onConfirm: (confirmation: ResetSubmission) => void
-  // Every data wipe asks for the account's current password (the Worker
-  // enforces it); the migration-finalize steps only zero counts and do not.
+  // Asks for the account's current password before the request goes out; the
+  // Worker enforces it either way.
   requirePassword?: boolean
   username?: string
   working: boolean

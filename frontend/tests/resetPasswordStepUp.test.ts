@@ -1,4 +1,4 @@
-// SEC-4 / audit B2: every data wipe (Sales/Full Data Reset, the Products reset, the four page resets and both
+// Every data wipe (Sales/Full Data Reset, the Products reset, the four page resets and both
 // migration-finalize steps) asks for the signed-in account's current password, and the Worker refuses without it
 // (cloudflare/scripts/test-reset-password-step-up-native.cjs drives the real routes). This pins the browser half:
 // the confirm dialog's password field, the values it forwards, and the two language packs' wording for the refusal

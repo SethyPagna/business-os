@@ -1,5 +1,5 @@
 'use strict'
-// SEC-4 / audit B2: POST /api/system/reset-data (sales, products, all) and POST /api/system/reset-section needed
+// POST /api/system/reset-data (sales, products, all) and POST /api/system/reset-section needed
 // only the typed phrase, never the caller's password, so a hijacked or unattended admin session could wipe data
 // without re-authenticating. Both now demand the current password (and so do the other destructive maintenance
 // routes: finalize-migration zero_stock / park_lots and the forced import-orphan cleanup), checked through lib/currentPasswordGuard.ts

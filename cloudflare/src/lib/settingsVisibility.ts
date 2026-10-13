@@ -1,11 +1,13 @@
 import { getPermissionTier, hasPermission, type PermissionUser } from './permissions'
 
-// SEC-4 (whole-app audit A2). GET /api/settings and the settings block of
-// GET /api/auth/bootstrap hand the settings table to every signed-in account,
+// GET /api/settings hands the settings table to every signed-in account,
 // because the POS, receipts, sales, returns, shifts, the notification bell, the
 // theme and the storefront-loyalty displays all read the same map. So this is a
-// DENYLIST of rows that only the Settings screen (and the Worker itself) reads:
-// adding a key here can never break a surface that was not checked for it.
+// DENYLIST of rows that only the Settings screen (and the Worker itself) reads.
+// A key goes on the list only after its readers were checked, because listing it
+// hides it from every account without Settings access; a key left off stays
+// visible. The settings block of GET /api/auth/bootstrap (routes/auth.ts) has to
+// go through settingsReadableBy as well, or it hands the same rows out.
 //
 //   - telegram_*        where reports go (chat and topic ids), what is sent, in which language
 //   - drive_sync_*      Google Drive sync configuration; the Backup screen reads a curated

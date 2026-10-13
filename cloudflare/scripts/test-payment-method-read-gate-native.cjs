@@ -1,5 +1,5 @@
 'use strict'
-// SEC-4 / audit A2 (part 1): GET /api/settings/payment-methods/unregistered and GET .../impact answered any
+// GET /api/settings/payment-methods/unregistered and GET .../impact answered any
 // signed-in account, while their write twins (POST .../backfill and .../replace) need `sales_policy` or `settings`.
 // The reads disclose which payment labels the shop's sales use and the count and ids of sales with malformed payment
 // details, so they now ask for at least the VIEW tier of `sales_policy` or `settings`. The writes keep needing the full grant.

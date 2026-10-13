@@ -1,5 +1,5 @@
 'use strict'
-// SEC-4 / audit A2: lib/settingsVisibility.ts decides which settings rows an account may READ. The rule is a
+// lib/settingsVisibility.ts decides which settings rows an account may READ. The rule is a
 // denylist, so the contract worth pinning is both halves: rows only the Settings screen reads are withheld from
 // accounts without Settings access (tier full or view), and EVERY other key passes untouched, including keys that
 // merely look related (a lookalike prefix, a longer name, the notification-bell switches).

@@ -1,5 +1,5 @@
 'use strict'
-// SEC-4 / audit A2 (part 2): GET /api/settings returned the whole settings table (minus secret-suffixed keys) to
+// GET /api/settings returned the whole settings table (minus secret-suffixed keys) to
 // any signed-in account, so a role with nothing granted read the Telegram chat and topic ids, the Telegram report
 // switches, the audit-retention window, Google Drive sync configuration and the website assistant's prompt.
 //
