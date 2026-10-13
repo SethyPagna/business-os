@@ -247,7 +247,10 @@ const deriveCalls = [...src.matchAll(/deriveTotals\([\s\S]{0,700}?itemDiscountUs
 // ever reach. 1da983cb deleted that unreachable half. The count here was
 // therefore counting a dead entry point; the two survivors (the grouped and
 // day-row queries) are the only ones a request can actually run through.
-check('every legacy deriveTotals entry point passes required item discount', deriveCalls.length === 2)
+// One, since 6.0.161: the grouped query's tail was the same kind of dead half
+// (getSalesGroupedTotals returns getSalesGroupedReport's snapshot rows); the
+// survivor is getBusinessSummaryDayRows' still-unreachable tail.
+check('every legacy deriveTotals entry point passes required item discount', deriveCalls.length === 1)
 check('the exact snapshot totals include item discounts in total discount',
   /const totalDiscount = discount\.add\(m\.itemDiscount\)/.test(src))
 

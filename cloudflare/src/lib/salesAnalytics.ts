@@ -2940,109 +2940,12 @@ export async function getSalesGroupedReport(
 }
 
 /**
- * Canonical SalesTotals per group. Same two-query shape as
- * getBusinessSummaryDayRows (sale level + item-level COGS, merged through
- * deriveTotals), only the bucket expression differs. Sorted by revenue
- * (desc) except hour/weekday which come back in clock order.
+ * Canonical SalesTotals per group, read through getSalesGroupedReport (the
+ * verified snapshot) so a group can never disagree with the Reports buckets.
+ * Sorted by revenue (desc) except hour/weekday which come back in clock order.
  */
 export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: SalesGroupKey, limit = 500): Promise<SalesGroupedRow[]> {
-  {
-    return (await getSalesGroupedReport(env, f, groupBy, limit)).rows
-  }
-  const db = getDb(env)
-  const level = salesGroupExprs('sales', groupBy)
-  const joined = salesGroupExprs('s', groupBy)
-  const { sql: whereLevel, params: paramsLevel } = whereActiveSales('sales', f)
-  const { sql: whereCost, params: paramsCost } = whereActiveSales('s', f)
-
-  const [levelRows, costRows, returnedByKey, cancelledByKey] = await Promise.all([
-    db.prepare(`
-      SELECT ${level.key} AS grp_key, ${level.label} AS grp_label, ${level.id} AS grp_id,
-             COUNT(*) AS tx_count,
-             COALESCE(SUM(subtotal_usd), 0) AS gross_sales_usd,
-             COALESCE(SUM(discount_usd), 0) AS store_discount_usd,
-             COALESCE(SUM(membership_discount_usd), 0) AS membership_discount_usd,
-             COALESCE(SUM(tax_usd), 0) AS tax_usd,
-             COALESCE(SUM(CASE WHEN COALESCE(delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE delivery_fee_usd END), 0) AS delivery_usd,
-             COALESCE(SUM(CASE WHEN delivery_fee_paid_by = 'store' THEN delivery_fee_usd ELSE 0 END), 0) AS store_delivery_usd,
-             ${RECOGNIZED_LEVEL_COLUMNS}
-      FROM sales
-      ${CUSTOMER_REFUND_JOIN}sales.id
-      WHERE ${whereLevel}
-      GROUP BY grp_key
-    `).all<Record<string, number> & { grp_key: string | number | null; grp_label: string | null; grp_id: number | null }>(paramsLevel),
-    db.prepare(`
-      SELECT ${joined.key} AS grp_key,
-             ${ITEM_COST_COLUMNS}
-      FROM sale_items si
-      JOIN sales s ON s.id = si.sale_id
-      WHERE ${whereCost} AND ${ITEM_COST_STATUS_CLAUSE}
-      GROUP BY grp_key
-    `).all<ItemCostRow & { grp_key: string | number | null }>(paramsCost),
-    returnedCostByBucket(env, f, joined.key),
-    cancelledGroupCounts(env, f, level),
-  ])
-
-  const keyOf = (v: string | number | null | undefined): string => (v == null ? '' : String(v))
-  const costByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.cost_usd)]))
-  const missingByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.missing_snapshot_lines)]))
-  const pendingCostByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.pending_cost_usd)]))
-  const itemDiscountByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.item_discount_usd)]))
-  const pendingItemDiscountByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.pending_item_discount_usd)]))
-  const unvaluedCostByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.unvalued_cost_usd)]))
-  const levelByKey = new Map((levelRows || []).map((r) => [keyOf(r.grp_key), r]))
-  const keys = new Set<string>(levelByKey.keys())
-  // A group whose every sale in this window was VOIDED has no level row --
-  // it used to vanish, taking its void count with it. It belongs in the list
-  // at zero money, which is exactly what the voids are worth.
-  for (const k of cancelledByKey.keys()) if (k !== '') keys.add(k)
-  const rows: SalesGroupedRow[] = [...keys].map((key) => {
-    const r = levelByKey.get(key)
-    const voided = cancelledByKey.get(key)
-    return {
-      key,
-      label: r && r.grp_label != null ? String(r.grp_label) : (voided ? voided.label : ''),
-      entity_id: r ? (r.grp_id == null ? null : Number(r.grp_id)) : (voided ? voided.entity_id : null),
-      cost_missing_snapshot_lines: missingByKey.get(key) || 0,
-      ...deriveTotals(r || VOID_ONLY_LEVEL, costByKey.get(key) || 0, returnedByKey.get(key) || 0, { costUsd: pendingCostByKey.get(key) || 0, itemDiscountUsd: itemDiscountByKey.get(key) || 0, pendingItemDiscountUsd: pendingItemDiscountByKey.get(key) || 0, cancelledTxCount: voided ? voided.count : 0, unvaluedCostUsd: unvaluedCostByKey.get(key) || 0 }),
-    }
-  })
-  // ---- the additive per-group columns ------------------------------------
-  // One extra query for the groupings that carry them, none for the rest.
-  // They are attached AFTER deriveTotals so they cannot reach a money field,
-  // which is the whole contract with the reports lane: additive only.
-  if (groupBy === 'customer') {
-    const identity = await customerIdentityByGroup(env, f, level.key)
-    for (const row of rows) {
-      const hit = identity.get(row.key) || { is_new: false, gender: '', phone: '' }
-      row.is_new = hit.is_new
-      row.gender = hit.gender
-      row.phone = hit.phone
-    }
-  } else if (groupBy === 'cashier') {
-    const cohorts = await cohortCountsByGroup(env, f, level.key)
-    for (const row of rows) {
-      const hit = cohorts.get(row.key)
-      row.new_customer_count = hit?.new_customer_count || 0
-      row.return_customer_count = hit?.return_customer_count || 0
-      row.unregistered_count = hit?.unregistered_count || 0
-      row.paid_tx_count = hit?.paid_tx_count || 0
-    }
-  } else if (groupBy === 'branch') {
-    const activity = await branchActivityByGroup(env, f, level.key, joined.key)
-    for (const row of rows) {
-      const hit = activity.get(row.key)
-      row.customer_count = hit?.customer_count || 0
-      row.items_sold_qty = hit?.items_sold_qty || 0
-    }
-  }
-  if (groupBy === 'hour' || groupBy === 'weekday') {
-    rows.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
-  } else {
-    rows.sort((a, b) => b.revenue_usd - a.revenue_usd || b.tx_count - a.tx_count || (a.label < b.label ? -1 : a.label > b.label ? 1 : 0))
-  }
-  const cap = Math.max(1, Math.min(2000, Math.trunc(limit) || 500))
-  return rows.length > cap ? rows.slice(0, cap) : rows
+  return (await getSalesGroupedReport(env, f, groupBy, limit)).rows
 }
 
 export interface ProductSalesRankingRow {
@@ -3145,60 +3048,10 @@ export async function getProductSalesReport(env: Env, f: SalesFilters, limit = 2
 /**
  * Products ranked by line sales over RECOGNIZED sales only (the same
  * population revenue and COGS are computed from), respecting every
- * SalesFilters field through whereActiveSales.
+ * SalesFilters field through the verified snapshot getProductSalesReport reads.
  */
 export async function getProductSalesRanking(env: Env, f: SalesFilters, limit = 200): Promise<ProductSalesRankingRow[]> {
-  {
-    return (await getProductSalesReport(env, f, limit)).rows
-  }
-  const db = getDb(env)
-  const { sql: whereSql, params } = whereActiveSales('s', f)
-  const cap = Math.max(1, Math.min(1000, Math.trunc(limit) || 200))
-  // Two stock ledgers, never mixed: branch_stock when the report is scoped to
-  // a branch, products.stock_quantity when it is not.
-  const onHandExpr = f.branchId
-    ? `COALESCE((SELECT SUM(bs.quantity) FROM branch_stock bs WHERE bs.product_id = si.product_id AND bs.branch_id = @branchId), 0)`
-    : `COALESCE(p.stock_quantity, 0)`
-  const rows = await db.prepare(`
-    SELECT si.product_id AS product_id,
-           MAX(COALESCE(si.product_name, '')) AS product_name,
-           COUNT(DISTINCT s.id) AS sale_count,
-           COALESCE(SUM(si.quantity), 0) AS qty,
-           COALESCE(SUM(si.total_usd), 0) AS line_sales_usd,
-           COALESCE(SUM(si.cost_price_usd * si.quantity), 0) AS cost_usd,
-           COALESCE(SUM(CASE WHEN si.cost_price_usd IS NULL THEN 1 ELSE 0 END), 0) AS cost_missing_snapshot_lines,
-           MAX(COALESCE(p.barcode, '')) AS barcode,
-           MAX(COALESCE(p.category, '')) AS category_name,
-           MAX(cat.id) AS category_id,
-           MAX(${onHandExpr}) AS on_hand_qty
-    FROM sale_items si
-    JOIN sales s ON s.id = si.sale_id
-    LEFT JOIN products p ON p.id = si.product_id
-    LEFT JOIN categories cat ON lower(trim(cat.name)) = lower(trim(COALESCE(p.category, ''))) AND COALESCE(p.category, '') <> ''
-    WHERE ${whereSql} AND ${recognizedExpr('s.')}
-    GROUP BY COALESCE(si.product_id, 0), CASE WHEN si.product_id IS NULL THEN lower(trim(COALESCE(si.product_name, ''))) ELSE '' END
-    ORDER BY line_sales_usd DESC, qty DESC
-    LIMIT @limit
-  `).all<{ product_id: number | null; product_name: string; sale_count: number; qty: number; line_sales_usd: number; cost_usd: number; cost_missing_snapshot_lines: number; barcode: string | null; category_name: string | null; category_id: number | null; on_hand_qty: number }>({ ...params, limit: cap })
-  const r2 = (v: number) => Math.round(v * 100) / 100
-  return (rows || []).map((r) => {
-    const lineSales = r2(num(r.line_sales_usd))
-    const cost = r2(num(r.cost_usd))
-    return {
-      product_id: r.product_id == null ? null : Number(r.product_id),
-      product_name: String(r.product_name || ''),
-      sale_count: num(r.sale_count),
-      qty: num(r.qty),
-      line_sales_usd: lineSales,
-      cost_usd: cost,
-      profit_usd: r2(lineSales - cost),
-      cost_missing_snapshot_lines: num(r.cost_missing_snapshot_lines),
-      category_id: r.category_id == null ? null : Number(r.category_id),
-      category_name: String(r.category_name || ''),
-      barcode: String(r.barcode || ''),
-      on_hand_qty: num(r.on_hand_qty),
-    }
-  })
+  return (await getProductSalesReport(env, f, limit)).rows
 }
 
 // Ported with the reports lane (S4-26): /periods builds its day rows from

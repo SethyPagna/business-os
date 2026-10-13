@@ -231,17 +231,19 @@ test('the level columns carry the whole pending cohort, and every cost query use
   // snapshot-derived series, so the SQL path below it -- this fragment's
   // third use included -- was unreachable from any input. Deleting dead
   // code is what moved this count, not a report losing its shared basis.
+  // 6.0.161 removed the grouped query's unreachable tail the same way
+  // (getSalesGroupedTotals returns getSalesGroupedReport's snapshot rows), so
+  // one use is left: getBusinessSummaryDayRows' still-unreachable tail.
   const uses = src.match(/\$\{ITEM_COST_COLUMNS\}/g) || []
-  assert.equal(uses.length, 2, 'grouped + day rows all use ITEM_COST_COLUMNS')
-  // getProductSalesRanking keeps its own COGS sum ON PURPOSE: it measures a
-  // different thing (per-product `line_sales_usd - cost_usd`, no delivery
-  // term, line-sales basis rather than net-sales revenue) and never feeds
-  // deriveTotals. Exactly one such copy is allowed to exist; a second would
-  // mean a deriveTotals path had drifted back to a hand-rolled sum.
+  assert.equal(uses.length, 1, 'the one remaining cost query uses ITEM_COST_COLUMNS')
+  // getProductSalesRanking used to keep its own COGS sum ON PURPOSE (per-product
+  // `line_sales_usd - cost_usd`, line-sales basis); since 6.0.161 it answers from
+  // getProductSalesReport's exact snapshot sums and that SQL copy was unreachable
+  // and is gone. No hand-rolled COGS sum may come back: one would mean a
+  // deriveTotals path had drifted back to a hand-rolled sum.
   const handRolled = src.match(/COALESCE\(SUM\(si\.cost_price_usd \* si\.quantity\), 0\) AS cost_usd/g) || []
-  assert.equal(handRolled.length, 1, 'only the product-ranking query keeps its own COGS sum')
-  const rankingStart = src.indexOf('export async function getProductSalesRanking')
-  assert.ok(rankingStart > 0 && src.indexOf(handRolled[0], rankingStart) > rankingStart, 'and that one copy lives inside getProductSalesRanking')
+  assert.equal(handRolled.length, 0, 'no query keeps its own COGS sum; the product ranking reads the snapshot')
+  assert.ok(/export async function getProductSalesRanking[^{]*\{\s*return \(await getProductSalesReport\(env, f, limit\)\)\.rows\s*\}/.test(src), 'getProductSalesRanking delegates to getProductSalesReport')
 })
 
 // ---- the permission gate --------------------------------------------------
