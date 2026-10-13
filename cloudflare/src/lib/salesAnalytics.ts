@@ -2578,100 +2578,40 @@ export async function getSalesDayReport(
   opts: Pick<SalesFilters, 'branchId' | 'startTime' | 'endTime' | 'tzOffsetMinutes' | 'status' | 'paymentMethod'> = {},
 ): Promise<SalesDayReport> {
   const f: SalesFilters = { startDate: day, endDate: day, ...opts }
-  {
-    const [snapshot, loss] = await Promise.all([
-      readSalesReportSnapshot(env, f, true),
-      removalLossesFor(env, f),
-    ])
-    const facts = reportSaleFacts(snapshot)
-    const totals = withRemovalLosses(
-      exactReportTotals(aggregateReportSnapshot(snapshot, () => '').get('') || reportBucket(), snapshot),
-      loss,
-    )
-    const paymentMethods = paymentMethodBreakdownFromSnapshot(snapshot)
-    let storeTx = 0, membershipTx = 0
-    for (const fact of facts) {
-      const sale = fact.sale; const version = fact.version
-      if (reportMoney(sale, 'discount_usd', version).isPositive()) storeTx += 1
-      if (reportMoney(sale, 'membership_discount_usd', version).isPositive()) membershipTx += 1
-    }
-    const sales = facts.slice().sort((a, b) => String(b.sale.created_at).localeCompare(String(a.sale.created_at)) || Number(b.sale.id) - Number(a.sale.id))
-      .slice(0, 1000).map((fact) => {
-        const sale = fact.sale
-        const discount = reportMoney(sale, 'discount_usd', fact.version).add(reportMoney(sale, 'membership_discount_usd', fact.version))
-        const payable = Number(sale.source_return_id || 0) !== 0
-          ? reportMoney(sale, 'amount_paid_usd', fact.version) : reportMoney(sale, 'total_usd', fact.version)
-        const collected = fact.recognized && !fact.awaiting ? payable.subtract(fact.refundPaid) : ReportExactDecimal.zero()
-        return { id: Number(sale.id), receipt_number: String(sale.receipt_number || ''), created_at: String(sale.created_at || ''),
-          customer_name: Number(sale.customer_is_anonymous) !== 0 ? '' : String(sale.customer_name || ''),
-          payment_method: String(sale.payment_method || '').trim() || 'Unknown', sale_status: reportStatus(sale),
-          revenue_usd: fact.recognized ? fact.net.add(fact.adjustment).subtract(fact.refund).toNumber(BUCKET_MONEY_PLACES) : 0,
-          discount_usd: discount.toNumber(BUCKET_MONEY_PLACES), collected_usd: collected.toNumber(BUCKET_MONEY_PLACES) }
-      })
-    return { date: day, totals,
-      payment_methods: paymentMethods,
-      delivery_contacts: deliveryContactTotalsFromSnapshot(snapshot, f),
-      discounts: { store_usd: totals.store_discount_usd, membership_usd: totals.membership_discount_usd,
-        store_tx_count: storeTx, membership_tx_count: membershipTx }, sales }
-  }
-  const db = getDb(env)
-  const { sql: whereSql, params } = whereActiveSales('sales', f)
-  const [totals, paymentMethods, deliveryContacts, discountCounts, saleRows] = await Promise.all([
-    getSalesTotals(env, f),
-    getPaymentMethodBreakdown(env, f),
-    getDeliveryContactTotals(env, f),
-    db.prepare(`
-      SELECT COALESCE(SUM(CASE WHEN COALESCE(discount_usd, 0) > 0 THEN 1 ELSE 0 END), 0) AS store_tx_count,
-             COALESCE(SUM(CASE WHEN COALESCE(membership_discount_usd, 0) > 0 THEN 1 ELSE 0 END), 0) AS membership_tx_count
-      FROM sales
-      WHERE ${whereSql}
-    `).get<Record<string, number>>(params),
-    // Per-sale rows for the drill. Same date/branch/status/payment scope as
-    // every figure above (whereActiveSales), and revenue computed identically
-    // to deriveTotals so SUM(revenue_usd) == totals.revenue_usd. Capped: a
-    // single day of one shop never approaches 1000 receipts.
-    db.prepare(`
-      SELECT sales.id AS id, receipt_number, created_at,
-             ${reportCustomerNameExpr('sales.')} AS customer_name,
-             COALESCE(NULLIF(TRIM(payment_method), ''), 'Unknown') AS payment_method,
-             COALESCE(sale_status, 'completed') AS sale_status,
-             -- Canonical net-sales revenue, per sale: recognized sales only
-             -- (cancelled contributes 0; awaiting_payment remains positive), net of THIS sale's
-             -- own customer refunds -- identical basis to deriveTotals, so
-             -- SUM(revenue_usd) over the day == totals.revenue_usd.
-             ROUND(CASE WHEN ${recognizedExpr('')} THEN ${netSaleExpr('')} - ${netRefundExpr('', 'rf.')} ELSE 0 END, 2) AS revenue_usd,
-             ROUND(COALESCE(discount_usd, 0) + COALESCE(membership_discount_usd, 0), 2) AS discount_usd,
-             ROUND(${collectedExpr('')}, 2) AS collected_usd
-      FROM sales
-      ${CUSTOMER_REFUND_JOIN}sales.id
-      WHERE ${whereSql}
-      ORDER BY datetime(created_at) DESC, id DESC
-      LIMIT 1000
-    `).all<Record<string, unknown>>(params),
+  const [snapshot, loss] = await Promise.all([
+    readSalesReportSnapshot(env, f, true),
+    removalLossesFor(env, f),
   ])
-  return {
-    date: day,
-    totals,
-    payment_methods: paymentMethods,
-    delivery_contacts: deliveryContacts,
-    discounts: {
-      store_usd: totals.store_discount_usd,
-      membership_usd: totals.membership_discount_usd,
-      store_tx_count: num(discountCounts?.store_tx_count),
-      membership_tx_count: num(discountCounts?.membership_tx_count),
-    },
-    sales: (saleRows || []).map((r) => ({
-      id: Number(r.id),
-      receipt_number: String(r.receipt_number || ''),
-      created_at: String(r.created_at || ''),
-      customer_name: String(r.customer_name || ''),
-      payment_method: String(r.payment_method || ''),
-      sale_status: String(r.sale_status || 'completed'),
-      revenue_usd: num(r.revenue_usd),
-      discount_usd: num(r.discount_usd),
-      collected_usd: num(r.collected_usd),
-    })),
+  const facts = reportSaleFacts(snapshot)
+  const totals = withRemovalLosses(
+    exactReportTotals(aggregateReportSnapshot(snapshot, () => '').get('') || reportBucket(), snapshot),
+    loss,
+  )
+  const paymentMethods = paymentMethodBreakdownFromSnapshot(snapshot)
+  let storeTx = 0, membershipTx = 0
+  for (const fact of facts) {
+    const sale = fact.sale; const version = fact.version
+    if (reportMoney(sale, 'discount_usd', version).isPositive()) storeTx += 1
+    if (reportMoney(sale, 'membership_discount_usd', version).isPositive()) membershipTx += 1
   }
+  const sales = facts.slice().sort((a, b) => String(b.sale.created_at).localeCompare(String(a.sale.created_at)) || Number(b.sale.id) - Number(a.sale.id))
+    .slice(0, 1000).map((fact) => {
+      const sale = fact.sale
+      const discount = reportMoney(sale, 'discount_usd', fact.version).add(reportMoney(sale, 'membership_discount_usd', fact.version))
+      const payable = Number(sale.source_return_id || 0) !== 0
+        ? reportMoney(sale, 'amount_paid_usd', fact.version) : reportMoney(sale, 'total_usd', fact.version)
+      const collected = fact.recognized && !fact.awaiting ? payable.subtract(fact.refundPaid) : ReportExactDecimal.zero()
+      return { id: Number(sale.id), receipt_number: String(sale.receipt_number || ''), created_at: String(sale.created_at || ''),
+        customer_name: Number(sale.customer_is_anonymous) !== 0 ? '' : String(sale.customer_name || ''),
+        payment_method: String(sale.payment_method || '').trim() || 'Unknown', sale_status: reportStatus(sale),
+        revenue_usd: fact.recognized ? fact.net.add(fact.adjustment).subtract(fact.refund).toNumber(BUCKET_MONEY_PLACES) : 0,
+        discount_usd: discount.toNumber(BUCKET_MONEY_PLACES), collected_usd: collected.toNumber(BUCKET_MONEY_PLACES) }
+    })
+  return { date: day, totals,
+    payment_methods: paymentMethods,
+    delivery_contacts: deliveryContactTotalsFromSnapshot(snapshot, f),
+    discounts: { store_usd: totals.store_discount_usd, membership_usd: totals.membership_discount_usd,
+      store_tx_count: storeTx, membership_tx_count: membershipTx }, sales }
 }
 
 // Shifts [startDate, endDate] back by its own length, for a same-length
