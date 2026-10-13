@@ -1,5 +1,5 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react'
-import { captureActorReadScope, isActorReadScopeCurrent } from '../api/actorReadScope.ts'
+import { captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from '../api/actorReadScope.ts'
 import {
   getOpenPendingReviewRows,
   type PendingReviewScope,
@@ -86,8 +86,12 @@ export function pendingReviewScopeFor(reviewTier: string | null | undefined): Pe
 let snapshot: PendingReviewSnapshot = EMPTY
 const listeners = new Set<() => void>()
 let scope: PendingReviewScope = 'mine'
-let inflight: Promise<void> | null = null
-let rereadAfterInflight = false
+
+/** The read now on the wire, and whose list it is: one account, one scope. */
+type Reading = { key: string; again: boolean; promise: Promise<void> }
+let reading: Reading | null = null
+/** The queue change the last forced re-read answered, so one announcement costs one read. */
+let lastChange: { id: unknown; key: string } | null = null
 
 function publish(next: PendingReviewSnapshot): void {
   snapshot = next
@@ -104,61 +108,77 @@ export function subscribePendingReviewTargets(listener: () => void): () => void 
   return () => { listeners.delete(listener) }
 }
 
-async function readOnce(): Promise<void> {
-  const actor = captureActorReadScope('review')
-  // Another account never inherits the previous account's list, not even while
-  // its own is still on the wire.
-  if (snapshot.authority !== actor.authority) publish({ authority: actor.authority, counts: new Map() })
-  const rows = await getOpenPendingReviewRows(scope)
-  if (!isActorReadScopeCurrent(actor, false)) return
-  publish(buildPendingReviewSnapshot(rows, actor.authority))
+async function readLoop(run: Reading, actor: ActorReadScope, readScope: PendingReviewScope): Promise<void> {
+  try {
+    do {
+      run.again = false
+      try {
+        const rows = await getOpenPendingReviewRows(readScope)
+        // An answer is published only by the read that is still the current one, for the
+        // account still signed in: a superseded read belongs to nobody now.
+        if (reading === run && isActorReadScopeCurrent(actor, false)) publish(buildPendingReviewSnapshot(rows, actor.authority))
+      } catch { /* keep the last list; see refreshPendingReviewTargets */ }
+    } while (run.again && reading === run)
+  } finally {
+    if (reading === run) reading = null
+  }
 }
 
 /**
- * Re-reads the list. Calls that arrive while a read is on the wire share it, so a
- * page and a modal opening in the same moment cost one request.
+ * Re-reads the list. Calls that arrive while a read of the SAME account and scope is
+ * on the wire share it, so a page and a modal opening in the same moment cost one
+ * request. A call for another account or another scope never joins that read: its
+ * answer is somebody else's list, so the caller starts its own and the old answer is
+ * dropped when it lands. The previous account's tags are cleared at the call, not
+ * when the new answer arrives.
  *
  * afterChange: the review queue has changed since a read now on the wire began (the
  * caller's own write was just answered "queued for review", or the queue announced
  * a change). That read may have been answered before the change committed, so one
  * more read follows it; without that the new request's tag would be missing until
- * the next page visit.
+ * the next page visit. changeId names the announcement, so the several pages that
+ * hear the same one cost a single re-read between them.
  *
  * A failed read keeps the last list and the next trigger tries again: the tag is a
  * hint beside a row, never a gate on it, so it must not raise an error over one.
  */
 export function refreshPendingReviewTargets(
   nextScope?: PendingReviewScope,
-  options: { afterChange?: boolean } = {},
+  options: { afterChange?: boolean; changeId?: unknown } = {},
 ): Promise<void> {
   if (nextScope) scope = nextScope
-  if (inflight) {
-    if (options.afterChange) rereadAfterInflight = true
-    return inflight
+  const actor = captureActorReadScope('review')
+  const key = `${actor.authority}|${scope}`
+  if (options.afterChange && options.changeId !== undefined) {
+    if (lastChange?.id === options.changeId && lastChange.key === key) return reading?.key === key ? reading.promise : Promise.resolve()
+    lastChange = { id: options.changeId, key }
   }
-  const run = (async () => {
-    try {
-      do {
-        rereadAfterInflight = false
-        try { await readOnce() } catch { /* keep the last list; see above */ }
-      } while (rereadAfterInflight)
-    } finally {
-      inflight = null
-    }
-  })()
-  inflight = run
-  return run
+  if (reading?.key === key) {
+    if (options.afterChange) reading.again = true
+    return reading.promise
+  }
+  if (snapshot.authority !== actor.authority) publish({ authority: actor.authority, counts: new Map() })
+  const run: Reading = { key, again: false, promise: Promise.resolve() }
+  reading = run
+  run.promise = readLoop(run, actor, scope)
+  return run.promise
 }
 
 /**
- * For a write wrapper: a response that says { pending: true } was queued for
- * review instead of applied, so the tags must learn about it now. Returns the
- * response untouched, so it chains onto the wrapper's promise.
+ * For a write wrapper: the review queue has just changed because of the caller's own
+ * write (it was queued for review instead of applied), so the tags must learn about
+ * it now rather than at the next page visit.
+ */
+export function refreshPendingReviewAfterWrite(): void {
+  void refreshPendingReviewTargets(undefined, { afterChange: true })
+}
+
+/**
+ * For a write wrapper that holds the response: { pending: true } means queued for
+ * review. Returns the response untouched, so it chains onto the wrapper's promise.
  */
 export function noteQueuedForReview<T>(response: T): T {
-  if ((response as { pending?: unknown } | null | undefined)?.pending === true) {
-    void refreshPendingReviewTargets(undefined, { afterChange: true })
-  }
+  if ((response as { pending?: unknown } | null | undefined)?.pending === true) refreshPendingReviewAfterWrite()
   return response
 }
 
@@ -208,6 +228,6 @@ export function usePendingReviewTargetsLoader(input: {
   useEffect(() => {
     if (!active || syncChannel !== 'pendingActions' || syncTs === seenTs.current) return
     seenTs.current = syncTs
-    void refreshPendingReviewTargets(readScope, { afterChange: true })
+    void refreshPendingReviewTargets(readScope, { afterChange: true, changeId: syncTs })
   }, [active, readScope, syncChannel, syncTs])
 }

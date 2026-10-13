@@ -1,4 +1,4 @@
-import { apiFetch, route } from './http.ts'
+import { apiFetch, cacheSet, route } from './http.ts'
 import { appendQuery, buildQueryString } from './query.ts'
 
 // The one read behind the "waiting for review" tags (components/shared/
@@ -30,14 +30,19 @@ export type PendingReviewTargetRow = {
 
 export async function getOpenPendingReviewRows(scope: PendingReviewScope): Promise<PendingReviewTargetRow[]> {
   const path = appendQuery(PENDING_REVIEW_PATHS[scope], buildQueryString({ status: 'open' }))
-  // No local fallback and no cache: a fallback answering "nothing is pending"
+  const channel = `review:targets:${scope}`
+  // No local fallback and no cached answer: a fallback answering "nothing is pending"
   // would erase tags that are still true, and the store decides when to re-read.
   const response = await route(
-    `review:targets:${scope}`,
+    channel,
     () => apiFetch('GET', path),
     null,
     { raceLocalFallback: false, bypassCache: true },
   ) as { data?: unknown } | null
+  // route() stores every answer in the read cache (bypassCache only skips READING it) and
+  // nothing ever serves this channel from there, so the copy -- every open request's whole
+  // payload -- would sit in memory for nothing. The rows below are all the store keeps.
+  cacheSet(channel, null)
   if (!Array.isArray(response?.data)) throw new Error('The review queue answered without a list of requests.')
   return response.data as PendingReviewTargetRow[]
 }

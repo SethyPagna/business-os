@@ -9,7 +9,11 @@
 //     `pendingActions` sync channel) and straight after the user's own write was
 //     answered "queued for review".
 //   - A row re-renders only when ITS answer flips (the Products memo boundaries stay).
-//   - A failed read keeps the last list; another account never inherits the list.
+//   - A failed read keeps the last list; another account never inherits the list, not even
+//     when the old account's read is still on the wire (the new account starts its own).
+//   - A scope change (the review permission arriving) never rides the read of the other scope.
+//   - One announcement is one re-read, however many pages are mounted and hear it.
+//   - The transport keeps no cached copy of the list (every open request's whole payload).
 //
 // The store is compiled from its source and run through a four-hook React stand-in so
 // the real hooks (useSyncExternalStore, useEffect, useRef) execute their real code, and
@@ -22,11 +26,14 @@ import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import test from 'node:test'
 import { transformSync } from 'esbuild'
-import { __resetApiWriteDedupeForTests, setSyncServerUrl } from '../src/api/http.ts'
+import * as realHttp from '../src/api/http.ts'
+import { __resetApiWriteDedupeForTests, cacheClearAll, cacheGet, cacheGetStale, setSyncServerUrl } from '../src/api/http.ts'
+import * as realQuery from '../src/api/query.ts'
 import * as realTransport from '../src/api/pendingReviewTargetsTransport.ts'
 
 const require = createRequire(import.meta.url)
 const storeSource = fs.readFileSync(new URL('../src/utils/pendingReviewTargets.ts', import.meta.url), 'utf8')
+const transportSource = fs.readFileSync(new URL('../src/api/pendingReviewTargetsTransport.ts', import.meta.url), 'utf8')
 
 // ---- a React stand-in: just enough hook semantics for the three hooks the store uses ----
 type HookSlot = { value?: unknown; deps?: unknown[]; cleanup?: () => void }
@@ -150,6 +157,17 @@ function loadStore(code = storeSource): { store: Store; react: ReactStandIn } {
   return { store: module.exports as unknown as Store, react }
 }
 
+function loadTransport(code = transportSource): typeof realTransport {
+  const module: { exports: Record<string, unknown> } = { exports: {} }
+  const compiled = transformSync(code, { loader: 'ts', format: 'cjs' }).code
+  new Function('require', 'module', 'exports', compiled)((id: string) => {
+    if (id.endsWith('http.ts')) return realHttp
+    if (id.endsWith('query.ts')) return realQuery
+    throw new Error(`Unexpected transport dependency: ${id}`)
+  }, module, module.exports)
+  return module.exports as unknown as typeof realTransport
+}
+
 function reset(): void {
   sent.length = 0
   transportCalls.length = 0
@@ -157,6 +175,8 @@ function reset(): void {
   nextRows = []
   authority = 'account-1'
   __resetApiWriteDedupeForTests()
+  // A mutant that fails its scenario leaves a read hanging on the wire; the next scenario must not share it.
+  cacheClearAll()
 }
 const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 15))
 
@@ -237,6 +257,103 @@ async function scenarioRereadAfterOwnQueuedWrite(loaded = loadStore()): Promise<
   releaseSecond()
   await Promise.all([a, b])
   assert.equal(sent.length, 3, 'two callers in one moment cost one request')
+}
+
+const tagged = (store: Store, id: number) => store.isPendingReview(store.getPendingReviewSnapshot(), 'products', 'product', [id])
+
+// Account 1's read is slow and still on the wire when account 2 signs in on the same till.
+async function scenarioAccountSwitchWithReadInFlight(loaded = loadStore()): Promise<void> {
+  reset()
+  const { store } = loaded
+  nextRows = [open('products', 'product', 5)]
+  await store.refreshPendingReviewTargets('mine')
+  assert.equal(tagged(store, 5), true)
+
+  let releaseOld!: () => void
+  answers.push(() => new Promise((resolve) => { releaseOld = () => resolve(jsonResponse([open('products', 'product', 5)])) }))
+  const oldReading = store.refreshPendingReviewTargets('mine')
+  await settle()
+  assert.equal(sent.length, 2, "account 1's second read is on the wire")
+
+  authority = 'account-2'
+  cacheClearAll() // what the app does when the signed-in user changes: no read is shared across accounts
+  let releaseNew!: () => void
+  answers.push(() => new Promise((resolve) => { releaseNew = () => resolve(jsonResponse([open('products', 'product', 6)])) }))
+  const newReading = store.refreshPendingReviewTargets('mine')
+  await settle()
+  assert.equal(sent.length, 3, "account 2 asks for its own list; it does not wait on account 1's read")
+  assert.equal(tagged(store, 5), false, "account 1's tag is gone for account 2 while account 2's read is still on the wire")
+
+  releaseOld()
+  await oldReading
+  assert.equal(tagged(store, 5), false, "account 1's late answer is dropped")
+  releaseNew()
+  await newReading
+  assert.equal(tagged(store, 6), true, 'account 2 sees its own request')
+  assert.equal(tagged(store, 5), false, "and never account 1's")
+}
+
+// The review permission arrives after the page first asked: the 'all' list must not be answered by the 'mine' read.
+async function scenarioScopeChangeWithReadInFlight(loaded = loadStore()): Promise<void> {
+  reset()
+  const { store } = loaded
+  let releaseMine!: () => void
+  let releaseAll!: () => void
+  answers.push(() => new Promise((resolve) => { releaseMine = () => resolve(jsonResponse([open('products', 'product', 1)])) }))
+  const mineReading = store.refreshPendingReviewTargets('mine')
+  await settle()
+  answers.push(() => new Promise((resolve) => { releaseAll = () => resolve(jsonResponse([open('products', 'product', 2)])) }))
+  const allReading = store.refreshPendingReviewTargets('all')
+  await settle()
+  assert.deepEqual(sent, ['GET /api/review/mine?status=open', 'GET /api/review?status=open'], 'the reviewer list is read, not answered by the requester read')
+  releaseAll()
+  await allReading
+  assert.equal(tagged(store, 2), true)
+  releaseMine()
+  await mineReading
+  assert.equal(tagged(store, 2), true, 'the superseded requester read does not overwrite the reviewer list')
+  assert.equal(tagged(store, 1), false)
+}
+
+// Several pages mounted at once all hear the same pendingActions announcement.
+async function scenarioOneAnnouncementOneRead(loaded = loadStore()): Promise<void> {
+  const { store, react } = loaded
+  const props = { active: true, reviewTier: 'full' as string, syncChannel: 'pendingActions' as string | null, syncTs: 100 as number | null }
+  const mountLoaders = () => Array.from({ length: 4 }, () => react.mount(() => store.usePendingReviewTargetsLoader(props)))
+  const announce = (loaders: Mounted[], ts: number) => { props.syncTs = ts; for (const loader of loaders) react.rerender(loader) }
+
+  // Idle when the announcement lands: the first page reads once, the other three have nothing to add.
+  reset()
+  let loaders = mountLoaders()
+  await settle()
+  assert.equal(sent.length, 1, 'four pages visited in one moment cost one read')
+  announce(loaders, 101)
+  await settle()
+  assert.equal(sent.length, 2, `one announcement with four pages mounted is ONE read, saw ${sent.length - 1}`)
+  for (const loader of loaders) loader.unmount()
+
+  // A read was already on the wire when it landed: that read may predate the change, so exactly one more follows it.
+  reset()
+  props.syncTs = 200
+  let releaseVisit!: () => void
+  answers.push(() => new Promise((resolve) => { releaseVisit = () => resolve(jsonResponse([])) }))
+  loaders = mountLoaders()
+  await settle()
+  announce(loaders, 201)
+  releaseVisit()
+  await settle()
+  assert.equal(sent.length, 2, `the visit read plus ONE re-read for the announcement, saw ${sent.length}`)
+  for (const loader of loaders) loader.unmount()
+}
+
+// route() caches every answer; nothing serves this channel from the cache, so the payloads must not stay there.
+async function scenarioNoPayloadsRetained(transport: typeof realTransport = realTransport): Promise<void> {
+  reset()
+  nextRows = [{ ...open('products', 'product', 5), payload_json: JSON.stringify({ cost_usd: 1.25, description: 'x'.repeat(200) }) } as Row]
+  const rows = await transport.getOpenPendingReviewRows('all')
+  assert.equal(rows.length, 1, 'the caller still gets the rows')
+  assert.equal(cacheGet('review:targets:all'), null, "the open requests' payloads are not retained in the read cache")
+  assert.equal(cacheGetStale('review:targets:all').data, null)
 }
 
 // ---- the tests ----
@@ -433,6 +550,22 @@ test('another account never inherits the list, and an answer for the old account
   assert.equal(store.isPendingReview(store.getPendingReviewSnapshot(), 'products', 'product', [99]), false, 'a stale answer is not published')
 })
 
+test("an account that signs in while another account's read is on the wire starts its own read and never shows the old tags", async () => {
+  await scenarioAccountSwitchWithReadInFlight()
+})
+
+test('a scope change while a read is on the wire reads the new scope, and the old read cannot overwrite it', async () => {
+  await scenarioScopeChangeWithReadInFlight()
+})
+
+test('one announcement is one re-read however many pages are mounted', async () => {
+  await scenarioOneAnnouncementOneRead()
+})
+
+test('the transport keeps no cached copy of the review list', async () => {
+  await scenarioNoPayloadsRetained()
+})
+
 // ---- negative controls: the same source with one rule removed must fail its scenario ----
 
 function mutant(from: string | RegExp, to: string): string {
@@ -452,7 +585,7 @@ test('MUTANT one request per row: a reader that fetches its own copy fails the 5
 })
 
 test('MUTANT no read sharing: callers that do not share an in-flight read fail the StrictMode scenario', async () => {
-  const code = mutant('  if (inflight) {', '  if (false as boolean) {')
+  const code = mutant('  if (reading?.key === key) {', '  if (false as boolean) {')
   await assert.rejects(scenarioStrictModeStillOneRequest(loadStore(code)), /ONE read/)
 })
 
@@ -462,8 +595,39 @@ test('MUTANT requester reads the reviewer list: every tier asking for "all" fail
 })
 
 test('MUTANT no re-read after a queued write: the new request\'s tag would be missing', async () => {
-  const code = mutant('    if (options.afterChange) rereadAfterInflight = true\n', '')
+  const code = mutant('    if (options.afterChange) reading.again = true\n', '')
   await assert.rejects(scenarioRereadAfterOwnQueuedWrite(loadStore(code)), /one more read/)
+})
+
+test("MUTANT joins any read on the wire: a new account borrows the old account's read and keeps its tags", async () => {
+  const code = mutant('  if (reading?.key === key) {', '  if (reading) {')
+  await assert.rejects(scenarioAccountSwitchWithReadInFlight(loadStore(code)), /asks for its own list/)
+})
+
+test('MUTANT the read key ignores the scope: the reviewer list is answered by the requester read', async () => {
+  const code = mutant('const key = `${actor.authority}|${scope}`', 'const key = actor.authority')
+  await assert.rejects(scenarioScopeChangeWithReadInFlight(loadStore(code)), /reviewer list is read/)
+})
+
+test("MUTANT a superseded read publishes: the old scope's late answer overwrites the new list", async () => {
+  const code = mutant('if (reading === run && isActorReadScopeCurrent(actor, false))', 'if (isActorReadScopeCurrent(actor, false))')
+  await assert.rejects(scenarioScopeChangeWithReadInFlight(loadStore(code)), /does not overwrite/)
+})
+
+test("MUTANT the previous account's tags stay until the new answer lands", async () => {
+  const code = mutant('  if (snapshot.authority !== actor.authority) publish({ authority: actor.authority, counts: new Map() })\n', '')
+  await assert.rejects(scenarioAccountSwitchWithReadInFlight(loadStore(code)), /gone for account 2 while/)
+})
+
+test('MUTANT announcements are not coalesced: every page that hears one forces its own re-read', async () => {
+  const code = mutant('    if (lastChange?.id === options.changeId && lastChange.key === key) return reading?.key === key ? reading.promise : Promise.resolve()\n', '')
+  await assert.rejects(scenarioOneAnnouncementOneRead(loadStore(code)), /is ONE read/)
+})
+
+test('MUTANT the transport leaves the answer in the read cache', async () => {
+  const code = transportSource.replace('  cacheSet(channel, null)\n', '')
+  assert.notEqual(code, transportSource, 'negative control anchor must match the live transport')
+  await assert.rejects(scenarioNoPayloadsRetained(loadTransport(code)), /payloads are not retained/)
 })
 
 test('the controls above really exercise the live source (each anchor exists once, the live scenarios pass)', async () => {
@@ -471,6 +635,11 @@ test('the controls above really exercise the live source (each anchor exists onc
   await scenarioStrictModeStillOneRequest()
   await scenarioRequesterNeverReadsTheReviewerList()
   await scenarioRereadAfterOwnQueuedWrite()
+  await scenarioAccountSwitchWithReadInFlight()
+  await scenarioScopeChangeWithReadInFlight()
+  await scenarioOneAnnouncementOneRead()
+  await scenarioNoPayloadsRetained()
+  await scenarioNoPayloadsRetained(loadTransport())
 })
 
 test.after(() => {
