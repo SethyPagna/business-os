@@ -33,6 +33,7 @@
 //   --wrong=confirm-not-passed    the approve body's confirm_merge_into never reaches the applier
 //   --wrong=coded-refusal-500     a ReviewCodedRefusal falls through to the generic 500
 //   --wrong=refusal-any-status    any status is accepted as a coded refusal (a 418 would be sent as such)
+//   --wrong=created-before-insertcreated announces before the pending row is inserted (a failed insert still sends)
 //   --wrong=bidi-kept            a typed name keeps its direction-control characters
 //   --wrong=targets-ignored      ?fields=targets is ignored: the full rows (payloads included) come back
 //   --wrong=details-last          the refusal's details are spread after success / error / code and can overwrite them
@@ -376,6 +377,12 @@ const PATCHES = {
   'details-last': [
     { name: 'details-last', file: QUEUE, from: '  return { body: { ...extra, success: false, error: err.message, code }, status }', to: '  return { body: { success: false, error: err.message, code, ...extra }, status }' },
   ],
+  'created-before-insert': [
+    { name: 'created-announce-first', file: GATE, from: '  const pendingId = await createPendingAction(env, {\n',
+      to: '  try { await reviewAlertHook()?.announce(env, { kind: \'created\', row: { section, action_type: input.actionType, entity_type: input.entityType, entity_id: input.entityId ?? null, payload_json: JSON.stringify(input.payload ?? {}), requested_by_name: requestedByName } }) } catch {}\n  const pendingId = await createPendingAction(env, {\n' },
+    { name: 'created-drop-late', file: GATE, from: '  try {\n    await reviewAlertHook()?.announce(env, {\n      kind: \'created\',\n',
+      to: '  try {\n    if (false) await reviewAlertHook()?.announce(env, {\n      kind: \'created\',\n' },
+  ],
   'bidi-kept': [
     { name: 'bidi-kept', file: ALERT, from: "return String(value ?? '').replace(BIDI_CONTROLS, '').replace(", to: "return String(value ?? '').replace(" },
   ],
@@ -652,6 +659,26 @@ async function main() {
       await reset()
       t.eq('a missing expense 404s', (await H.api('DELETE', '/api/fees/999999', {}, { as: 'sokha' })).status, 404)
       t.eq('a refusal sends nothing', (await H.tg.calls()).length, 0)
+    })
+
+    await check('C2b', 'created: the alert follows the insert; a pending row that could not be written sends nothing', 'high', async t => {
+      await reset()
+      const fee = await seedFee(H, 'Insert fails')
+      const rows = async () => (await H.q1('SELECT COUNT(*) AS n FROM pending_actions')).n
+      const before = await rows()
+      await H.db.prepare("CREATE TRIGGER rt_fail_pending_insert BEFORE INSERT ON pending_actions BEGIN SELECT RAISE(ABORT, 'rt insert refused'); END").run()
+      try {
+        const failed = await H.api('DELETE', '/api/fees/' + fee, {}, { as: 'sokha' })
+        t.ok('the request failed', failed.status >= 500, failed.status)
+        t.eq('no pending row was written', await rows(), before)
+        t.eq('nothing was announced for a row that does not exist', (await H.tg.calls()).length, 0)
+      } finally {
+        await H.db.prepare('DROP TRIGGER rt_fail_pending_insert').run()
+      }
+      await reset()
+      const retried = await H.api('DELETE', '/api/fees/' + fee, {}, { as: 'sokha' })
+      t.eq('the same request queues once the insert works', retried.status, 202)
+      t.eq('and announces exactly once', (await H.tg.calls()).length, 1)
     })
 
     await check('C3', 'approved: one message naming the request, who asked and who decided (usernames), an expense\'s name read before it is removed', 'high', async t => {
