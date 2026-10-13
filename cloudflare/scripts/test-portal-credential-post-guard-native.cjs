@@ -25,6 +25,14 @@
 //      portal_signup_paused, writes nothing and /config says signupEnabled
 //      false; an explicit 'true' opens it; an explicit 'false' stays paused;
 //      an existing member still signs in while sign-up is paused.
+//   4. The guard runs BEFORE the sign-in rate limiter and lockout: 45 refused
+//      header-less sign-ins with a wrong password from one network spend
+//      neither, so the member's own same-origin sign-in from that network
+//      still gets 200 (a guard placed after them would answer 429).
+//   5. The admin host (tills, no redirect) serves the storefront API too: a
+//      same-origin and a Safari < 16.4 sign-in there work, header-less
+//      text/plain there is refused, and a page on one host posting to the
+//      other is refused in both directions.
 //
 // PORTAL_CSRF_SRC_ROOT=<dir holding src/ and migrations/> runs the same
 // checks against another tree (the fail-on-base proof); packages still
@@ -107,8 +115,8 @@ async function main() {
 
     let ipSeq = 0
     // One request through workerd's HTTP layer. `origin: 'self'` = this host.
-    async function send(base, pathname, { method = 'POST', origin, site, type, body, cookie } = {}) {
-      const headers = { 'CF-Connecting-IP': `198.51.100.${(ipSeq++ % 250) + 1}` }
+    async function send(base, pathname, { method = 'POST', origin, site, type, body, cookie, ip } = {}) {
+      const headers = { 'CF-Connecting-IP': ip || `198.51.100.${(ipSeq++ % 250) + 1}` }
       if (origin !== undefined) headers.Origin = origin === 'self' ? base : origin
       if (site !== undefined) headers['Sec-Fetch-Site'] = site
       if (type !== undefined) headers['Content-Type'] = type
@@ -266,6 +274,52 @@ async function main() {
         assert.equal(me.body && me.body.account && me.body.account.name, 'Csrf Member', 'a refused sign-out leaves the session signed in')
       })
     }
+
+    // --- 4. the guard runs before the rate limiter and the lockout ----------
+    await check('45 refused header-less wrong-password sign-ins spend neither the rate limit nor the lockout', async () => {
+      const ip = '203.0.113.77'
+      const wrong = JSON.stringify({ ...signinPayload, password: 'not-the-password' })
+      const answers = new Map()
+      for (let i = 0; i < 45; i += 1) {
+        const response = await send(SHOP, '/api/portal/auth/signin', { type: 'text/plain', body: wrong, ip })
+        const key = `${response.status} ${response.body && response.body.code}`
+        answers.set(key, (answers.get(key) || 0) + 1)
+      }
+      assert.deepEqual([...answers], [['403 credential_origin_refused', 45]], 'every forged attempt stops at the guard')
+      const own = await send(SHOP, '/api/portal/auth/signin', { origin: 'self', site: 'same-origin', type: 'application/json', body: JSON.stringify(signinPayload), ip })
+      assert.equal(own.status, 200, `the member's own sign-in from the same network: ${own.text}`)
+      assert.ok(portalCookie(own.setCookie))
+    })
+
+    // --- 5. the admin host --------------------------------------------------
+    await check('admin host: same-origin JSON and the Safari < 16.4 shape sign in to the storefront API', async () => {
+      const same = await send(ADMIN, '/api/portal/auth/signin', { origin: 'self', site: 'same-origin', type: 'application/json', body: JSON.stringify(signinPayload) })
+      assert.equal(same.status, 200, same.text)
+      assert.ok(portalCookie(same.setCookie))
+      const safari = await send(ADMIN, '/api/portal/auth/signin', { origin: 'self', type: 'application/json', body: JSON.stringify(signinPayload) })
+      assert.equal(safari.status, 200, safari.text)
+      assert.ok(portalCookie(safari.setCookie))
+    })
+
+    await check('admin host: header-less text/plain is refused like on the shop host', async () => {
+      const response = await send(ADMIN, '/api/portal/auth/signin', { type: 'text/plain', body: JSON.stringify(signinPayload) })
+      assert.deepEqual([response.status, response.body && response.body.code], [403, 'credential_origin_refused'], response.text)
+      assert.equal(portalCookie(response.setCookie), null)
+    })
+
+    await check('cross-host: a shop page posting to the admin host, and an admin page posting to the shop host, are refused', async () => {
+      const cases = [
+        [ADMIN, { origin: SHOP, site: 'same-site' }],
+        [ADMIN, { origin: SHOP }],
+        [SHOP, { origin: ADMIN, site: 'same-site' }],
+        [SHOP, { origin: ADMIN }],
+      ]
+      for (const [base, headers] of cases) {
+        const response = await send(base, '/api/portal/auth/signin', { ...headers, type: 'application/json', body: JSON.stringify(signinPayload) })
+        assert.deepEqual([response.status, response.body && response.body.code], [403, 'cross_origin_write_refused'], `${headers.origin} -> ${base}: ${response.text}`)
+        assert.equal(portalCookie(response.setCookie), null)
+      }
+    })
 
     await check('same-origin JSON sign-out (the storefront sends {}) works', async () => {
       const response = await storefront('/auth/signout', 'POST', {}, member.cookie)
