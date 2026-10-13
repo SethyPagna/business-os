@@ -18,6 +18,7 @@ const BLOCKED_SUFFIXES = [
   '.internal',
   '.internal.',
   '.local',
+  '.localhost',
   '.localdomain',
   '.lan',
   '.home',
@@ -92,17 +93,29 @@ function isPrivateIpv4(hostname: string): boolean {
   return false
 }
 
+function embeddedIpv4IsPrivate(high: number, low: number): boolean {
+  return isPrivateIpv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`)
+}
+
 // A text that has a ':' but is not a well-formed literal cannot be a DNS name,
-// so it is refused rather than treated as a public host.
+// so it is refused rather than treated as a public host. Forms that carry an
+// IPv4 address (::ffff:a.b.c.d, ::ffff:0:a.b.c.d, ::a.b.c.d, 64:ff9b::/96,
+// 2002::/16) are judged by that address.
 function isPrivateIpv6(hostname: string): boolean {
   const groups = parseIpv6(normalizeHostname(hostname))
   if (!groups) return true
-  if (groups.slice(0, 7).every((group) => group === 0) && groups[7] <= 1) return true
-  if (groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff) {
-    return isPrivateIpv4(`${groups[6] >> 8}.${groups[6] & 255}.${groups[7] >> 8}.${groups[7] & 255}`)
-  }
-  if ((groups[0] & 0xffc0) === 0xfe80) return true
-  if ((groups[0] & 0xfe00) === 0xfc00) return true
+  const [first, second, third, fourth, fifth, sixth, seventh, eighth] = groups
+  const zeroThrough = (count: number) => groups.slice(0, count).every((group) => group === 0)
+  if (zeroThrough(7) && eighth <= 1) return true
+  if (zeroThrough(5) && sixth === 0xffff) return embeddedIpv4IsPrivate(seventh, eighth)
+  if (zeroThrough(4) && fifth === 0xffff && sixth === 0) return embeddedIpv4IsPrivate(seventh, eighth)
+  if (zeroThrough(6)) return embeddedIpv4IsPrivate(seventh, eighth)
+  if (first === 0x64 && second === 0xff9b && third === 0 && fourth === 0 && fifth === 0 && sixth === 0) return embeddedIpv4IsPrivate(seventh, eighth)
+  if (first === 0x2002) return embeddedIpv4IsPrivate(second, third)
+  if ((first & 0xffc0) === 0xfe80) return true
+  if ((first & 0xffc0) === 0xfec0) return true
+  if ((first & 0xfe00) === 0xfc00) return true
+  if ((first & 0xff00) === 0xff00) return true
   return false
 }
 
