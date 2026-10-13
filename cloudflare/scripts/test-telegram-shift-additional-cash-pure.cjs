@@ -8,9 +8,10 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 // report printed the additional row ONLY when it was non-zero, so every shift
 // that never needed more change showed Opening and Closing with the middle line
 // missing -- the owner saw "opening, closing" and no additional. The Summary
-// topic overview that follows a close carries no cash figures at all (its default
-// shape is the owner's 29 Sep ruling, so adding a section is the owner's call;
-// section 8a below only stops it ever growing a partial set).
+// topic overview that follows a close carried no cash figures at all; the owner's
+// 13 Oct ruling (item 14: "Both: overview + app") gave it the closing shift's Cash
+// count, so section 8a below now requires all three rows there, $0 included
+// (test-telegram-shift-overview-pure.cjs pins the section's exact text).
 //
 // This pins, for every shift report the chat receives:
 //   * the three rows are ALWAYS there, in that order, in the existing money
@@ -22,7 +23,7 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 // Paths covered (the matrix is in the lane record):
 //   shift OPEN, CLOSE (both routes), AMEND, REOPEN, CANCEL -> sendTelegramShiftReport
 //   `/shift [date]`                                           -> telegramCommandReply
-//   the Summary-topic overview after a close                  -> formatShiftOverview (carries no shift cash)
+//   the Summary-topic overview after a close                  -> formatShiftOverview (the closing shift's Cash count)
 //   `/report` and "Send today's summary"                      -> formatDaySummary (carries no shift cash)
 //
 // Nothing is sent: the Telegram API is a local recorder installed before any
@@ -327,11 +328,11 @@ function registeredRowsOk(text, { closing, mode } = {}) {
   })
 
   // The Summary-topic overview (T10) is the DAY's Reports overview for the closing shift's
-  // branch, and its default shape is pinned at five sections by the owner's 29 Sep 2026
-  // ruling (test-telegram-summary-sections-pure.cjs: "overview only by default"). It carries
-  // no drawer rows today; whether it should carry the closing shift's Cash count is the
-  // owner's call, not an inference. If it ever does, it must carry all three rows.
-  await section('8a. Summary-topic overview: no shift cash row, or all three (never a partial set)', async () => {
+  // branch. Its default shape was five sections (the owner's 29 Sep 2026 "overview only by
+  // default"); the owner's 13 Oct ruling (item 14) added the closing shift's Cash count as
+  // the sixth, so the three drawer rows are ALWAYS there, $0 included -- never none, never
+  // a partial set.
+  await section('8a. Summary-topic overview: always all three rows (the closing shift\'s Cash count)', async () => {
     const text = telegram.formatShiftOverview('Fixture Shop', zero, {
       revenueUsd: 412.5, profitUsd: 150.25, grossSalesUsd: 450, itemDiscountUsd: 0, invoiceDiscountUsd: 0,
       deliveryFeeUsd: 0, creditUsd: 0, refundUsd: 0, invoices: 18, cancelled: 1,
@@ -340,7 +341,8 @@ function registeredRowsOk(text, { closing, mode } = {}) {
       unbranchedFees: null, returns: { count: 0, refundUsd: 0 },
     }, undefined, NOW)
     const present = KEYS.filter((key) => rowFor(text, key) !== undefined)
-    assert.ok(present.length === 0 || (present.length === 3 && registeredRowsOk(text, { closing: true })), text)
+    assert.equal(present.length, 3, `all three drawer rows, none missing:\n${text}`)
+    assert.ok(registeredRowsOk(text, { closing: true }), text)
   })
 
   // They are the shop-wide day summary: no single drawer to describe. If a later change

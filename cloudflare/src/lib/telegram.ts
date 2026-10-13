@@ -1693,6 +1693,9 @@ export async function sendTelegramShiftReport(env: Env, shiftId: number, nowMs: 
 // "Expenses" is expenseTotals(), the one delivery/other split
 // (composeShiftFigures) the shift report and the day summary print under that
 // word, over the day's fees and the courier money paid on the day's sales.
+// The one part that is the SHIFT's and not the day's is its Cash count (13 Oct
+// 2026): Opening, Additional change used and Closing for the shift that just
+// closed, the rows the shift report prints (registeredCashRows).
 //
 // HOW IT IS SCHEDULED (the same on both plans; the plan is not the axis).
 //   1. The close commits. Then a `telegram_scheduled_sends` row (migration
@@ -1845,6 +1848,17 @@ function compareRows(revenueUsd: number, compare: NonNullable<SummarySectionFigu
  * the rows that say whose shift and where, then `=====Name=====` sections of
  * `·` rows, long rows on the hanging indent. `categories` is the owner's
  * per-category switch set, applied the way formatDaySummary applies it.
+ *
+ * Cash count (owner, 13 Oct 2026: shift cash lines everywhere). Every section
+ * here is the whole day on the branch EXCEPT this one: Opening, Additional
+ * change used and Closing are one drawer, the CLOSING SHIFT's, and a day can
+ * hold several (one per cashier, plus reopened segments). Adding the drawers up
+ * would be a number no cashier counted -- and wrong while another till is still
+ * open -- so the section names the shift it belongs to (its ID row, the same
+ * code the header prints) and prints that drawer's three registered rows, as
+ * the shift report does (registeredCashRows). It is a count, not takings, so
+ * the Sales and Fees switches leave it, and it is part of the default overview
+ * rather than a Settings extra: three rows, not a fresh query.
  */
 export function formatShiftOverview(shopName: string, shift: ShiftReportSession, figures: ShiftOverviewFigures, categories?: TelegramCategories, nowMs: number = Date.now()): string {
   return [
@@ -1859,11 +1873,11 @@ export function formatShiftOverview(shopName: string, shift: ShiftReportSession,
     // and these two rows say which close sent them.
     labeled('open', formatBusinessDateTime(shift.opened_at, nowMs)),
     labeled('close', shift.closed_at ? formatBusinessDateTime(shift.closed_at, nowMs) : NOT_APPLICABLE),
-    ...overviewSections(figures, categories),
+    ...overviewSections(shift, figures, categories),
   ].join('\n')
 }
 
-function overviewSections(figures: ShiftOverviewFigures, categories?: TelegramCategories): string[] {
+function overviewSections(shift: ShiftReportSession, figures: ShiftOverviewFigures, categories?: TelegramCategories): string[] {
   const lines: string[] = []
   const section = (key: TelegramLabelKey, rows: string[], enabled = true): void => {
     if (enabled) lines.push(sectionHeader(key, REPORT_SECTION_EDGE), ...(rows.length ? rows : [EMPTY_SECTION]))
@@ -1885,6 +1899,12 @@ function overviewSections(figures: ShiftOverviewFigures, categories?: TelegramCa
   section('invoices', [countRow([['total', Number(figures.invoices) || 0], ['cancelled', Number(figures.cancelled) || 0]])], showSales)
   section('paymentMethods', figures.paymentMethods.flatMap((row) => countedRowLines({ name: row.method, count: row.count, usd: row.usd }, 40, 4)), showSales)
   if (extra.sales) section('received', receivedRows(extra.sales.received), showSales)
+  // The closing shift's drawer: always Opening, Additional change used, Closing
+  // (owner, 13 Oct 2026), $0 included, whatever the Sales and Fees switches say.
+  // The ID row first, so these three rows are read as that shift's and not as
+  // the day's. Expected and Difference are not repeated: they are derived from
+  // the shift's own sales, and this message reports the whole day.
+  section('cashCount', [labeled('shift', cleanLine(shift.shift_code, 80)), ...registeredCashRows(shift)])
   if (extra.cashiers?.cashiers) section('cashiers', extra.cashiers.cashiers.flatMap((row) => countedRowLines(row, 60, 4)), showSales)
   if (extra.cashiers?.branches) section('branches', extra.cashiers.branches.flatMap((row) => countedRowLines(row, 60, 4)), showSales)
   if (extra.products) {

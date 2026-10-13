@@ -225,7 +225,9 @@ function closeShift(db, extra = {}) {
   insert(db, 'shift_sessions', {
     id: nextShiftId, revision: 3, shift_code: `S-20260923-${nextShiftId}-Za`, scope_mode: 'per_account', user_id: nextShiftId, user_name: 'Za',
     branch_id: 1, branch_name: 'Toul Kork', business_date: DAY, opened_at: '2026-09-23T01:07:00.000Z', closed_at: CLOSED_AT,
-    opening_float_usd: 10, opening_float_khr: 10000, closing_counted_usd: 120, closing_counted_khr: 50000, ...extra,
+    // The opening was registered (migration 0132 defaults the flags to 0 = never counted, which reads N/A).
+    opening_float_usd: 10, opening_float_khr: 10000, opening_float_usd_registered: 1, opening_float_khr_registered: 1,
+    closing_counted_usd: 120, closing_counted_khr: 50000, ...extra,
   })
   return nextShiftId
 }
@@ -251,7 +253,13 @@ const SWITCH = {
   sales: 'telegram_summary_sales_enabled', cashiers: 'telegram_summary_cashiers_enabled', products: 'telegram_summary_products_enabled',
   returns: 'telegram_summary_returns_enabled', expenses: 'telegram_summary_expenses_enabled', compare: 'telegram_summary_compare_enabled',
 }
-const DEFAULT_HEADERS = ['=====Sales=====', '=====Invoices=====', '=====Payment methods=====', '=====Expenses=====', '=====Returns=====']
+// The default overview is SIX sections since 13 Oct 2026 (owner, item 14: the shift
+// cash lines Opening -> Additional change used -> Closing are shown everywhere,
+// always, $0 included). The sixth is the Cash count of the shift that just closed:
+// it is that shift's own count and not a day-wide extra, so it is not one of the
+// Settings switches below and the 29 Sep "overview only by default" rule still holds
+// for them -- they add to these six, they never remove one.
+const DEFAULT_HEADERS = ['=====Sales=====', '=====Invoices=====', '=====Payment methods=====', '=====Cash count=====', '=====Expenses=====', '=====Returns=====']
 
 async function main() {
   const shopA = openShop()
@@ -260,7 +268,11 @@ async function main() {
 
   kernelCalls.length = 0
   const quiet = await overview(envA)
-  check('switches unset: the overview is the short default, five sections', JSON.stringify(headersOf(quiet.text)) === JSON.stringify(DEFAULT_HEADERS), quiet.text)
+  check('switches unset: the overview is the short default, six sections (the Cash count of the closing shift included, 13 Oct 2026)', JSON.stringify(headersOf(quiet.text)) === JSON.stringify(DEFAULT_HEADERS), quiet.text)
+  const quietLines = quiet.text.split('\n')
+  check('switches unset: the Cash count is the closing shift\'s ID, Opening, Additional change used ($0.00 · 0៛, a measured zero) and Closing',
+    JSON.stringify(rowsUnder(quiet.text, '=====Cash count=====')) === JSON.stringify([quietLines[4], '· Opening cash: $10.00 · 10,000៛', '· Additional change used: $0.00 · 0៛', '· Closing cash: $120.00 · 50,000៛'])
+      && quietLines[4].startsWith('· ID: S-20260923-'), rowsUnder(quiet.text, '=====Cash count=====').join('\n'))
   check('switches unset: the kernel is asked only what the default needs', kernelCalls.length === 2 && kernelCalls[1][2] === 'payment_method', JSON.stringify(kernelCalls))
   check('switches unset: no extra query runs', !preparedSql.some((sql) => /return_items|inventory_movements|payment_details/.test(sql)), preparedSql.filter((sql) => /return_items|inventory_movements|payment_details/.test(sql)).join('\n---\n'))
   check('the overview carries the Summary topic and the shop\'s own chat', quiet.chat_id === CHAT_A && quiet.message_thread_id === SUMMARY_TOPIC_A, JSON.stringify(quiet))
@@ -357,6 +369,7 @@ async function main() {
     '=====Invoices=====', '· Total: 18 · Cancelled: 1',
     '=====Payment methods=====', '· Cash: 12 · $300.0000', '· ABA Pay: 6 · $112.5000',
     '=====Received=====', '· Dollars: $23.00', '· Riel: 81,000៛', '· Bank: $30.00',
+    '=====Cash count=====', full.text.split('\n')[4], '· Opening cash: $10.00 · 10,000៛', '· Additional change used: $0.00 · 0៛', '· Closing cash: $120.00 · 50,000៛',
     '=====Cashiers=====', '· Za: 12 · $300.0000', '· Sok: 6 · $112.5000',
     '=====Top products=====', '· Rose Serum: 9 · $180.00', '· Lip Tint: 7 · $84.00', '· Toner: 5 · $60.00', '· Soap Bar: 4 · $12.00', '· Sunscreen: 2 · $30.00',
     '=====Low stock=====', '· OUT: Rose Serum: 0 (⚠ 5)', '· LOW: Soap Bar: 1 (⚠ 5)', '· LOW: Sunscreen: 2 (⚠ 5)', '· LOW: Lip Tint: 3 (⚠ 5)',
@@ -367,7 +380,7 @@ async function main() {
   ])
   check('every switch on: the whole message, line for line', true)
   check('every switch on: the sections in their fixed order', JSON.stringify(headersOf(full.text)) === JSON.stringify([
-    '=====Sales=====', '=====Invoices=====', '=====Payment methods=====', '=====Received=====', '=====Cashiers=====',
+    '=====Sales=====', '=====Invoices=====', '=====Payment methods=====', '=====Received=====', '=====Cash count=====', '=====Cashiers=====',
     '=====Top products=====', '=====Low stock=====', '=====Expenses=====', '=====Each expense=====', '=====Returns=====', '=====Compare=====',
   ]), full.text)
   check('every switch on: still one message into the Summary topic', full.message_thread_id === SUMMARY_TOPIC_A && full.text.length < 3900, `${full.text.length}`)
@@ -379,16 +392,19 @@ async function main() {
   const salesOff = await overview(envA)
   check('the Sales category off takes every sales-built section out, switched on or not',
     ['Received', 'Cashiers', 'Top products', 'Low stock', 'Compare'].every((name) => !salesOff.text.includes(`=====${name}=====`)), salesOff.text)
+  check('the Sales category off keeps the Cash count: the drawer is a count of the closing shift, not takings (13 Oct 2026)',
+    rowsUnder(salesOff.text, '=====Cash count=====')?.length === 4 && !salesOff.text.includes('=====Sales====='), salesOff.text)
   clearSetting(shopA, 'telegram_sales_enabled')
   setting(shopA, 'telegram_fees_enabled', 'false')
   const feesOff = await overview(envA)
   check('the Fees category off takes Each expense out with Expenses', !feesOff.text.includes('=====Each expense=====') && !feesOff.text.includes('=====Expenses====='), feesOff.text)
+  check('the Fees category off keeps the Cash count too (13 Oct 2026)', rowsUnder(feesOff.text, '=====Cash count=====')?.length === 4, feesOff.text)
   clearSetting(shopA, 'telegram_fees_enabled')
 
   setting(shopA, 'telegram_language', 'km')
   const khmer = await overview(envA)
   check('Khmer: the new section titles and labels come out in Khmer',
-    ['=====បានទទួល=====', '=====ទំនិញលក់ដាច់=====', '=====ប្រៀបធៀប=====', '· ដុល្លារ: $23.00', '· រៀល: 81,000៛', '· ធនាគារ: $30.00', '· ម្សិលមិញ: $375.00 · +10%',
+    ['=====បានទទួល=====', '=====ទំនិញលក់ដាច់=====', '=====ប្រៀបធៀប=====', '=====ការរាប់សាច់ប្រាក់=====', '· សាច់ប្រាក់ដើមវេន: $10.00 · 10,000៛', '· ប្រាក់អាប់បន្ថែមដែលបានប្រើ: $0.00 · 0៛', '· សាច់ប្រាក់បិទវេន: $120.00 · 50,000៛', '· ដុល្លារ: $23.00', '· រៀល: 81,000៛', '· ធនាគារ: $30.00', '· ម្សិលមិញ: $375.00 · +10%',
       '· ចំនួនស្មើជារៀល: 41,000៛', '· ថ្ងៃនីមួយៗរហូតដល់: 18:31'].every((line) => khmer.text.split('\n').includes(line)) && !khmer.text.split('\n').includes('· រៀល: 41,000៛'),
     khmer.text)
   const packs = Object.fromEntries(['en', 'km'].map((pack) => [pack, JSON.parse(fs.readFileSync(path.join(root, '..', 'frontend', 'src', 'lang', `${pack}.json`), 'utf8'))]))
@@ -403,7 +419,7 @@ async function main() {
   const both = await overview(envA)
   const previousMode = telegramLang.getTelegramLanguage()
   telegramLang.setTelegramLanguage('both')
-  const drawn = ['sales', 'invoices', 'paymentMethods', 'received', 'cashiers', 'topProducts', 'lowStock', 'expenses', 'eachExpense', 'returns', 'compare']
+  const drawn = ['sales', 'invoices', 'paymentMethods', 'received', 'cashCount', 'cashiers', 'topProducts', 'lowStock', 'expenses', 'eachExpense', 'returns', 'compare']
     .map((key) => telegram.sectionHeader(key, telegramLang.REPORT_SECTION_EDGE))
   telegramLang.setTelegramLanguage(previousMode)
   check('both: every section header is the shared one-row sectionHeader', JSON.stringify(headersOf(both.text)) === JSON.stringify(drawn) && drawn.includes('=====Received/បានទទួល====='), headersOf(both.text).join('\n'))

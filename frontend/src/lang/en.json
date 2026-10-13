@@ -5592,7 +5592,7 @@
   "telegram_cat_products": "Product edits and merges",
   "telegram_cat_products_desc": "Product, what changed, and who did it, for edits and merges by staff who are not administrators",
   "telegram_reports_overview": "Reports overview",
-  "telegram_reports_overview_desc": "One minute after a shift closes: that day's overview for the shift's branch",
+  "telegram_reports_overview_desc": "One minute after a shift closes: that day's overview for the shift's branch, with the shift's cash count (opening, additional change used, closing)",
   "telegram_summary_sections": "Overview extras",
   "telegram_summary_sections_hint": "Optional sections added to the overview after each shift, to Send today's summary and to /report. All off keeps each one as it is.",
   "telegram_summary_sales": "Payments",
