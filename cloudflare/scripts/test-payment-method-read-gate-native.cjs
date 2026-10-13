@@ -2,7 +2,7 @@
 // SEC-4 / audit A2 (part 1): GET /api/settings/payment-methods/unregistered and GET .../impact answered any
 // signed-in account, while their write twins (POST .../backfill and .../replace) need `sales_policy` or `settings`.
 // The reads disclose which payment labels the shop's sales use and the count and ids of sales with malformed payment
-// details, so they now ask for the same permission as the writes.
+// details, so they now ask for at least the VIEW tier of `sales_policy` or `settings`. The writes keep needing the full grant.
 //
 // Drives the REAL Worker under Miniflare on a fully migrated D1, with a zero-permission account, the seeded Employee
 // preset, a `sales_policy` holder, a `settings` holder and the built-in admin.
@@ -22,6 +22,8 @@ async function main() {
     await world.account('cashier', { roleCode: 'employee' })
     await world.account('pricer', { roleCode: 'pm_sales_policy', permissions: { sales_policy: true } })
     await world.account('configurer', { roleCode: 'pm_settings', permissions: { settings: true } })
+    await world.account('auditor', { roleCode: 'pm_settings_view', permissions: { settings: 'view' } })
+    await world.account('pricer_view', { roleCode: 'pm_sales_policy_view', permissions: { sales_policy: 'view' } })
     await world.run("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('pos_payment_methods', '[\"Cash\",\"ABA\"]', '2026-10-01 00:00:00')")
     await world.run("INSERT INTO sales (receipt_number, payment_method, total_usd) VALUES ('PM-1', 'Wing', 5)")
 
@@ -37,7 +39,7 @@ async function main() {
       })
     }
 
-    for (const [label, as] of [['a sales_policy holder', 'pricer'], ['a settings holder', 'configurer'], ['the built-in admin', 'admin']]) {
+    for (const [label, as] of [['a sales_policy holder', 'pricer'], ['a settings holder', 'configurer'], ['a view-only settings account', 'auditor'], ['the built-in admin', 'admin']]) {
       await check(`${label} still lists unregistered payment methods`, async (t) => {
         const response = await world.api('GET', UNREGISTERED, undefined, { as })
         t.eq('status', response.status, 200)
@@ -51,6 +53,20 @@ async function main() {
         t.eq('to', response.json && response.json.to, 'Bank')
       })
     }
+
+    await check('a view-only settings account still cannot change payment methods', async (t) => {
+      const backfill = await world.api('POST', '/api/settings/payment-methods/backfill', {}, { as: 'auditor' })
+      t.eq('backfill status', backfill.status, 403)
+      const replace = await world.api('POST', '/api/settings/payment-methods/replace', { from: 'Cash', to: 'Bank', scope: 'settings_only' }, { as: 'auditor' })
+      t.eq('replace status', replace.status, 403)
+      const stored = await world.first("SELECT value FROM settings WHERE key = 'pos_payment_methods'")
+      t.eq('configured list untouched', stored && stored.value, '["Cash","ABA"]')
+    })
+
+    await check('sales_policy has no view tier, so a stored view value grants nothing', async (t) => {
+      const response = await world.api('GET', UNREGISTERED, undefined, { as: 'pricer_view' })
+      t.eq('status', response.status, 403)
+    })
   } finally {
     finish('payment-method read gate')
     await world.dispose()

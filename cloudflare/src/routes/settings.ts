@@ -2,7 +2,7 @@ import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, changedFields, auditChangeColumns, isSecretShapedAuditKey } from '../lib/audit'
-import { hasPermission, isAdminControlUser } from '../lib/permissions'
+import { getPermissionTier, hasPermission, isAdminControlUser } from '../lib/permissions'
 import { firstChangedAdminOnlySettingKey } from '../lib/settingsAdminKeys'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -288,11 +288,20 @@ const SALES_POLICY_KEYS = new Set([
   'loyalty_points_enabled',
 ])
 
-// The payment-method reads below disclose which labels sales use and which sales
-// carry malformed payment details, so they need what their write twins need.
-function denyUnlessPaymentMethodPermission(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>) {
+type PaymentMethodContext = Context<{ Bindings: Env; Variables: { user: SessionUser } }>
+
+function denyUnlessPaymentMethodPermission(c: PaymentMethodContext) {
   const user = c.get('user')
   if (!hasPermission(user, 'sales_policy') && !hasPermission(user, 'settings')) return c.json({ error: 'No permission' }, 403)
+  return null
+}
+
+// The payment-method reads disclose which labels sales use and which sales carry
+// malformed payment details. A read-only Settings account (the VIEW tier) is
+// shown what it cannot change, so the reads ask for any tier above none.
+function denyUnlessPaymentMethodRead(c: PaymentMethodContext) {
+  const user = c.get('user')
+  if (getPermissionTier(user, 'sales_policy') === 'none' && getPermissionTier(user, 'settings') === 'none') return c.json({ error: 'No permission' }, 403)
   return null
 }
 
@@ -620,7 +629,7 @@ async function loadPaymentMethodCandidates(
  * scan of the JSON would, without reading 15k JSON blobs.
  */
 app.get('/payment-methods/unregistered', async (c) => {
-  const denied = denyUnlessPaymentMethodPermission(c)
+  const denied = denyUnlessPaymentMethodRead(c)
   if (denied) return denied
   const rows = await getDb(c.env).prepare(
     "SELECT DISTINCT payment_method FROM sales WHERE payment_method IS NOT NULL AND trim(payment_method) != ''",
@@ -660,7 +669,7 @@ app.post('/payment-methods/backfill', async (c) => {
 // evidence is explicit: linked mode updates the live sales reporting dimension
 // and itemized tender JSON, while audit logs remain immutable.
 app.get('/payment-methods/impact', async (c) => {
-  const denied = denyUnlessPaymentMethodPermission(c)
+  const denied = denyUnlessPaymentMethodRead(c)
   if (denied) return denied
   const from = String(c.req.query('from') || '').trim()
   const to = String(c.req.query('to') || '').trim()
