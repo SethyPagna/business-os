@@ -175,6 +175,15 @@ held(pUntracked, { source: 'remove', remaining: 4 })                      // the
     assert.strictEqual(rows[0].held_rows_open_remove_no_lot_upper_bound, 1)
   })
 
+  await check('the dated-count reason is the same literal in the importer, the Revert and the query', () => {
+    const src = (rel) => require('fs').readFileSync(path.join(ROOT, rel), 'utf8')
+    const importer = /export const DATED_STOCK_COUNT_REASON = '([^']+)'/.exec(src('cloudflare/src/lib/datedStockCountImport.ts'))
+    const revert = /const DATED_STOCK_COUNT_REASON = '([^']+)'/.exec(src('cloudflare/src/lib/stockRevert.ts'))
+    assert.ok(importer && revert, 'both constants must exist')
+    assert.strictEqual(revert[1], importer[1])
+    assert.ok(q.sql.includes("= '" + importer[1] + "' AS is_dated_count"), 'the ops query uses the same literal')
+  })
+
   await check('a Revert counter of a Revert counter does not make its root look reverted twice', () => {
     // Reverting the Redo counter must not change the root counts: still one reverted root on the split pair.
     reverted(pSplit, redo)

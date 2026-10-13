@@ -25,7 +25,6 @@ import {
   decrementBatchStockStrictStatement, planReceiveBatchStock, planRemoveStockFromBatch, planUnreceiveBatchStock,
   restoreBatchStockStatements, type StockWriteStatement,
 } from './productBatches'
-import { DATED_STOCK_COUNT_REASON } from './datedStockCountImport'
 import { multiplyMoney4 } from './moneyPrecision'
 import { MOVEMENT_RETURN_REFERENCE_TYPES, movementReferenceKindSql } from './movementReference'
 import { STOCK_RECEIPT_MOVEMENT_TYPES, isStockInEditReference, stockInEditRange } from './stockInSessionsQuery'
@@ -276,6 +275,10 @@ const MERGED_LOT_REFUSAL = 'This change moved stock on a received date that now 
 // putting its units back on a guess (the newest lot, the oldest, a new one) would give a delivery stock it never had.
 // branch_stock alone would restore them as undated units, losing their lot (FIFO, expiry, cost, supplier).
 const LOTS_NOT_RECORDED_REFUSAL = 'Cannot revert: this removal did not record which received dates its units came from, so they cannot be put back on the right ones. Nothing was changed. Use Set instead: choose Selected received date and set its quantity. That does not record a purchase.'
+
+// Byte-identical to datedStockCountImport.ts's DATED_STOCK_COUNT_REASON, duplicated so this module imports nothing new
+// (pinned by test-ops-branch-exceeds-lots-pure.cjs).
+const DATED_STOCK_COUNT_REASON = 'Dated stock count import'
 
 // True when the root removal has no record of what it drew from lots although a lot of its product already existed
 // when it was written. A dated count always records its lot effects, and a removal that predates every lot of the
