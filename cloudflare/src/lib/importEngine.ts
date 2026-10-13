@@ -27,7 +27,7 @@ import { canEditAcquisitionCosts, isAcquisitionCostImport } from './acquisitionC
 import { COST_OUTLIER_RATIO, identityBarcodeKey, normalizeProductGroupName, productIdentitySignature, resolveMergedCostDetail, resolveMergedPricing, barcodeIdentityMatches, clusterRowsByBarcodeIdentity, rankBarcodeIdentityWinner, isRealBarcode } from './productDetailRule'
 import type { MergedCostOutlier } from './productDetailRule'
 import { sanitizeImportedDescription } from './productDescriptionSections'
-import { planImportCountIncrease, planReconcileBranchSnapshot, planReceiveBatchStock, resolveReceiptLotTarget, type ReceiptLotCandidate } from './productBatches'
+import { planImportCountIncrease, planMovementLotShares, planReconcileBranchSnapshot, planReceiveBatchStock, resolveReceiptLotTarget, type ReceiptLotCandidate } from './productBatches'
 import { catalogCostRecomputeStatement, typedCostEntryBeforeWriteStatement } from './catalogCostRecompute'
 import { actorId, actorSnapshot } from './actorSnapshot'
 import { multiplyMoney4 } from './moneyPrecision'
@@ -2992,7 +2992,7 @@ export async function planInventoryImportStockGroups(
   let current: StockGroupEntry[] = []
   let estimate = 0
   for (const entry of planned) {
-    const cost = 2 + (entry.increase ? entry.increase.statements.length : 0)
+    const cost = 2 + (entry.increase ? entry.increase.statements.length : 0) + (entry.takes.length ? 1 : 0)
     if (current.length && estimate + cost > STOCK_GROUP_STATEMENT_CAP) {
       groups.push(inventoryStockGroupStatements(current, rowGuardStatement, nowIso))
       current = []
@@ -3099,6 +3099,9 @@ function inventoryStockGroupStatements(entries: StockGroupEntry[], rowGuardState
       // supplied one; `nowIso` is only the fallback for a blank/unparseable cell.
       params: { ...d, created_at: (d.created_at as string | null | undefined) || nowIso, movement_batch_id: singleLot, ...(entry.increase ? entry.increase.batchIdParams : {}) },
     }], d))
+    // A removal that names no single lot records what it took from each, directly after its movement, so a Revert
+    // can put the units back on those lots (the same record /adjust writes).
+    if (singleLot == null) statements.push(...planMovementLotShares(entry.takes).map(asStatement))
   }
   return statements
 }
