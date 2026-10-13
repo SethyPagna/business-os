@@ -17,13 +17,18 @@
 //   - a re-issue carries the caller's session device_id and device_name,
 //     whatever the body says (none, or another device's id);
 //   - Devices -> Revoke and Reject kill the sign-in AND every re-issued
-//     session of it, including one minted from a minted one;
+//     session of it, including one minted from a minted one. The route now
+//     revokes the session it re-issues from, so re-issues that stay live beside
+//     their sign-in (liveReissue: what it left before, and still left by
+//     sessions minted earlier) are built directly, and one chain is built
+//     through the real route;
 //   - a row re-issued before this fix (device_id NULL, limit_family_id set)
 //     is revoked with its family too;
 //   - controls: the same account's session on another device, and another
 //     account's session with the same device id, stay signed in.
 
 const assert = require('node:assert/strict')
+const { createHash } = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
@@ -147,6 +152,17 @@ async function reissue(token, body = APP_BODY) {
   return res.minted
 }
 
+// A re-issue that leaves its source live: what POST /session-duration produced
+// before it revoked the session it re-issues from, and what any such session
+// minted earlier still is. Same family and the source's device, as the route sets.
+async function liveReissue(token) {
+  const row = db.prepare('SELECT user_id, device_id, device_name, COALESCE(limit_family_id, id) AS family FROM user_sessions WHERE token_hash = @hash')
+    .get({ hash: createHash('sha256').update(token).digest('hex') })
+  return (await authLib.createSession(env, row.user_id, {
+    sessionDuration: 'always', deviceId: row.device_id, deviceName: row.device_name || undefined, limitFamilyId: row.family,
+  })).token
+}
+
 const alive = async (token) => (await send(authRoute, 'GET', '/me', token)).status === 200
 const rowCount = () => db.prepare('SELECT COUNT(*) AS n FROM user_sessions').get({}).n
 const lastRow = () => db.prepare('SELECT * FROM user_sessions ORDER BY id DESC LIMIT 1').get({})
@@ -181,19 +197,22 @@ async function check(name, fn) {
   await check('Devices -> Revoke kills the sign-in and every re-issued session of it', async () => {
     addDevice(1, 2, 'phone-D', 'approved')
     const signedIn = await signIn(2, 'phone-D', 'Cashier phone')
-    const child = await reissue(signedIn)
-    const grandchild = await reissue(child, { sessionDuration: '7d' })
-    const renamed = await reissue(signedIn, { ...APP_BODY, deviceId: 'somewhere-else' })
+    const child = await liveReissue(signedIn)
+    const grandchild = await liveReissue(child)
+    const second = await liveReissue(signedIn)
+    const chainRoot = await signIn(2, 'phone-D', 'Cashier phone')
+    const chained = await reissue(chainRoot, { sessionDuration: '7d' })
+    assert.equal(await alive(chainRoot), false, 'the route revoked the session it re-issued from')
     const otherDevice = await signIn(2, 'tablet-E', 'Shop tablet')
-    const otherDeviceChild = await reissue(otherDevice)
+    const otherDeviceChild = await liveReissue(otherDevice)
     const otherUser = await signIn(3, 'phone-D', 'Cashier phone')
     const admin = await signIn(1, 'owner-laptop', 'Owner laptop')
-    for (const t of [signedIn, child, grandchild, renamed]) assert.equal(await alive(t), true, 'live before the revoke')
+    for (const t of [signedIn, child, grandchild, second, chained]) assert.equal(await alive(t), true, 'live before the revoke')
 
     const res = await send(devicesRoute, 'POST', '/1/revoke', admin)
     assert.equal(res.status, 200, res.text)
-    assert.equal(res.body.revokedSessions, 4, `the audit count names every session of the device: ${res.text}`)
-    for (const [label, t] of [['sign-in', signedIn], ['re-issue', child], ['re-issue of a re-issue', grandchild], ['re-issue with a body device id', renamed]]) {
+    assert.equal(res.body.revokedSessions, 5, `the audit count names every live session of the device: ${res.text}`)
+    for (const [label, t] of [['sign-in', signedIn], ['re-issue', child], ['re-issue of a re-issue', grandchild], ['second re-issue', second], ['re-issue minted through the route', chained]]) {
       assert.equal(await alive(t), false, `${label} is signed out by the device revoke`)
     }
     assert.equal(await alive(otherDevice), true, 'control: same account, another device, still signed in')
@@ -205,7 +224,7 @@ async function check(name, fn) {
   await check('Devices -> Reject kills the re-issued session too', async () => {
     addDevice(2, 2, 'phone-D', 'pending')
     const signedIn = await signIn(2, 'phone-D', 'Cashier phone')
-    const child = await reissue(signedIn)
+    const child = await liveReissue(signedIn)
     const admin = await signIn(1, 'owner-laptop', 'Owner laptop')
     const res = await send(devicesRoute, 'POST', '/2/reject', admin)
     assert.equal(res.status, 200, res.text)
@@ -218,13 +237,13 @@ async function check(name, fn) {
     addDevice(3, 2, 'phone-D', 'approved')
     const signedIn = await signIn(2, 'phone-D', 'Cashier phone')
     const root = lastRow()
-    const orphanChild = await reissue(signedIn)
-    const orphanGrandchild = await reissue(orphanChild)
+    const orphanChild = await liveReissue(signedIn)
+    const orphanGrandchild = await liveReissue(orphanChild)
     // Rewrite both to the shape the old route stored: no device id or name.
     db.prepare('UPDATE user_sessions SET device_id = NULL, device_name = NULL WHERE limit_family_id = @root').run({ root: root.id })
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM user_sessions WHERE limit_family_id = @root AND device_id IS NULL').get({ root: root.id }).n, 2)
     const otherFamily = await signIn(2, 'tablet-E', 'Shop tablet')
-    const otherFamilyChild = await reissue(otherFamily)
+    const otherFamilyChild = await liveReissue(otherFamily)
     db.prepare("UPDATE user_sessions SET device_id = NULL WHERE device_id = 'tablet-E' AND limit_family_id IS NOT NULL").run({})
     const admin = await signIn(1, 'owner-laptop', 'Owner laptop')
 

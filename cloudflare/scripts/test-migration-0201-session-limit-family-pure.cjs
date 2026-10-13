@@ -2,8 +2,11 @@
 // sessions through POST /api/auth/session-duration.
 //
 // /session-duration creates a NEW session from an existing one with no
-// password and leaves the old cookie valid. The guard used to key per cookie,
-// so one stolen session could mint N more and get 10 guesses from each.
+// password. It used to leave the old cookie valid (it now revokes it, so a
+// family has one live session per re-issue chain; sessions minted before that
+// stay live beside each other, which mintSibling reproduces). The guard used
+// to key per cookie, so one stolen session could mint N more and get 10
+// guesses from each.
 //
 // Drives the REAL lib/auth.ts (createSession, requireAuth's session lookup,
 // currentSessionLimitFamily), the real lib/currentPasswordGuard.ts and
@@ -14,8 +17,10 @@
 // Pins:
 //   - migration 0201 is LF-only, schema-only, and leaves existing rows alone:
 //     their family is their own id (NULL column), no backfill needed;
-//   - one sign-in plus 5 minted sessions (and a session minted from a minted
-//     one) get at most 10 password compares in total, not 10 each;
+//   - one sign-in plus its re-issued sessions (live beside each other, as
+//     those minted before the route revoked its source still are) get at most
+//     10 password compares in total, not 10 each, and the allowance a stolen
+//     session spent carries over to the session re-issued from it;
 //   - the right password from ANY session of that family is refused once the
 //     family is spent;
 //   - control (X5 kept): a fresh sign-in of the same account keeps its full
@@ -26,6 +31,7 @@
 //     and a fresh sign-in is not affected by another family's cap.
 
 const assert = require('node:assert/strict')
+const { createHash } = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
@@ -211,6 +217,15 @@ async function mint(token) {
   return res.minted
 }
 
+// A session of the same sign-in family that stays live beside `token`: what a
+// /session-duration re-issue left behind before the route revoked its source,
+// and what any such session minted earlier still is.
+async function mintSibling(token) {
+  const row = db.prepare('SELECT user_id, COALESCE(limit_family_id, id) AS family FROM user_sessions WHERE token_hash = @hash')
+    .get({ hash: createHash('sha256').update(token).digest('hex') })
+  return (await authLib.createSession(env, row.user_id, { sessionDuration: '7d', limitFamilyId: row.family })).token
+}
+
 const changePassword = (token, id, currentPassword, newPassword) =>
   send(usersRoute, 'POST', `/users/${id}/change-password`, token, { currentPassword, newPassword })
 const saveProfile = (token, id, currentPassword) =>
@@ -242,11 +257,12 @@ async function check(name, fn) {
 
   await check('minting 5 sessions through /session-duration does not multiply the allowance: at most 10 compares in total', async () => {
     const stolen = await signIn(2)
-    const family = [stolen]
-    for (let i = 0; i < 5; i += 1) family.push(await mint(stolen))
     // A session minted from a minted session is still the same sign-in.
-    family.push(await mint(family[family.length - 1]))
-    assert.equal(new Set(family).size, 7, 'seven distinct live cookies')
+    const child = await mint(stolen)
+    const family = [child]
+    for (let i = 0; i < 5; i += 1) family.push(await mintSibling(child))
+    assert.equal(new Set(family).size, 6, 'six distinct live cookies')
+    assert.equal((await changePassword(stolen, 2, 'wrong', 'x')).status, 401, 'the session it was minted from is revoked')
     let compared = 0
     let refused = 0
     for (const token of family) {
@@ -257,9 +273,9 @@ async function check(name, fn) {
         else assert.fail(`unexpected ${res.status}: ${res.text}`)
       }
     }
-    console.log(`  7 sessions x 10 wrong guesses: ${compared} compared, ${refused} refused`)
+    console.log(`  6 sessions x 10 wrong guesses: ${compared} compared, ${refused} refused`)
     assert.ok(compared <= 10, `one sign-in got ${compared} password compares across its minted sessions; the allowance is 10`)
-    assert.equal(compared + refused, 70)
+    assert.equal(compared + refused, 60)
     for (const token of family) {
       const right = await changePassword(token, 2, 'p0', 'p1')
       assert.equal(right.status, 429, `every session of the spent family is refused: ${right.text}`)
@@ -267,9 +283,19 @@ async function check(name, fn) {
     assert.equal(passwordOf(2), 'hash:p0', 'nothing changed')
   })
 
+  await check('re-issuing through the route carries the spent allowance to the new session and revokes the old one', async () => {
+    const stolen = await signIn(2)
+    for (let i = 0; i < 6; i += 1) assert.equal((await changePassword(stolen, 2, 'wrong', 'x')).status, 400)
+    const child = await mint(stolen)
+    assert.equal((await changePassword(stolen, 2, 'p0', 'p1')).status, 401, 'the old token is revoked, not a second allowance')
+    for (let i = 0; i < 4; i += 1) assert.equal((await changePassword(child, 2, 'wrong', 'x')).status, 400)
+    assert.equal((await changePassword(child, 2, 'p0', 'p1')).status, 429, 'ten guesses in all, across the re-issue')
+    assert.equal(passwordOf(2), 'hash:p0')
+  })
+
   await check('control (X5 kept): a fresh sign-in keeps its full allowance after the stolen family is spent', async () => {
     const stolen = await signIn(2)
-    const child = await mint(stolen)
+    const child = await mintSibling(stolen)
     for (let i = 0; i < 10; i += 1) assert.equal((await changePassword(i % 2 ? child : stolen, 2, 'wrong', 'x')).status, 400)
     assert.equal((await changePassword(child, 2, 'p0', 'p1')).status, 429)
     const own = await signIn(2)
@@ -281,7 +307,7 @@ async function check(name, fn) {
 
   await check('an admin on another user keeps the actor+target key: admin limited, target untouched', async () => {
     const admin = await signIn(1)
-    const adminChild = await mint(admin)
+    const adminChild = await mintSibling(admin)
     for (let i = 0; i < 10; i += 1) {
       const res = await saveProfile(i % 2 ? adminChild : admin, 2, 'wrong')
       assert.equal(res.status, 400, res.text)
@@ -297,7 +323,7 @@ async function check(name, fn) {
   await check('/session-duration is capped at 10 per 15 minutes per sign-in; another sign-in is unaffected', async () => {
     const stolen = await signIn(2)
     let token = stolen
-    for (let i = 0; i < 10; i += 1) token = await mint(i % 2 ? stolen : token)
+    for (let i = 0; i < 10; i += 1) token = await mint(token)
     const over = await send(authRoute, 'POST', '/session-duration', token, { sessionDuration: '7d' })
     assert.equal(over.status, 429, over.text)
     assert.equal(over.body.code, 'session_duration_rate_limited')

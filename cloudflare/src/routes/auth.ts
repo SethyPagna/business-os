@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { hashPassword, spendFailedSignInFloor, upgradePasswordHash, verifyPassword, verifySignInPassword } from '../lib/passwordHash'
 import { failedSignInFloor, noteLegacyBcryptSeen, noteLegacyBcryptUpgraded } from '../lib/failedSignInCost'
-import { createSession, currentSessionReissueSource, setSessionCookie, clearSessionCookie, getSessionUser, hasSessionCookie, revokeSession, revokeUserSessions, requireAuth } from '../lib/auth'
+import { createSession, currentSessionReissueSource, lengthensSession, resolveSessionDuration, setSessionCookie, clearSessionCookie, getSessionUser, hasSessionCookie, revokeSession, revokeUserSessions, requireAuth } from '../lib/auth'
 import type { SessionUser } from '../lib/auth'
 import { issuePasswordResetLink, consumePasswordResetLink, normalizeEmail, isEmailConfigured } from '../lib/verification'
 import { audit } from '../lib/audit'
@@ -881,18 +881,20 @@ app.post('/otp/verify', async (c) => {
 })
 
 // POST /api/auth/session-duration -- re-issues the current session's
-// cookie with a new expiry/remember-me duration, without re-entering a
-// password. Matches backend/src/routes/auth.ts's grace-period rotation:
-// the caller's *current* cookie is left valid (no revoke) since the
-// response also sets the new cookie in the same round trip and there's no
-// second in-flight request racing to hand off here in the Workers port.
+// cookie with a new expiry/remember-me duration and revokes the session it was
+// re-issued from, so a call replaces the session instead of adding a second
+// live one. Asking for a longer duration than the current session was signed
+// in for (lib/auth.ts lengthensSession) needs the current password: a stolen or
+// unattended session must not be able to promote itself to "Always"; a shorter
+// or equal choice needs nothing. The app fences its other requests while a
+// cookie-changing request is pending (frontend api/actorReadScope.ts
+// beginActorCookieMutation), so revoking the old token cannot strand one.
 //
-// Because the old cookie stays valid, every call yields one more live
-// session with no password. The new session therefore inherits the caller's
-// sign-in family (lib/auth.ts currentSessionLimitFamily) so it shares, not
-// renews, that sign-in's current-password allowance (S-auth4), and the route
-// itself is capped per family as defence in depth. The frontend calls it
-// only when someone saves the "Default login duration" setting.
+// The new session inherits the caller's sign-in family (lib/auth.ts
+// currentSessionLimitFamily) so it shares, not renews, that sign-in's
+// current-password allowance (S-auth4), and the route itself is capped per
+// family as defence in depth. The frontend calls it only when someone saves
+// the "Default login duration" setting.
 //
 // The new session also keeps the caller's device id and name, read from the
 // session row and never from the body (SEC1-01): the app sends no device id
@@ -901,7 +903,7 @@ const SESSION_DURATION_LIMIT_BUCKET = 'auth:session_duration'
 const SESSION_DURATION_LIMIT_MAX = 10
 const SESSION_DURATION_LIMIT_WINDOW_MS = 15 * 60 * 1000
 app.post('/session-duration', requireAuth, async (c) => {
-  const body = await c.req.json<{ sessionDuration?: string; deviceTz?: string; clientTime?: string }>().catch(() => ({} as { sessionDuration?: string; deviceTz?: string; clientTime?: string }))
+  const body = await c.req.json<{ sessionDuration?: string; currentPassword?: string; deviceTz?: string; clientTime?: string }>().catch(() => ({} as { sessionDuration?: string; currentPassword?: string; deviceTz?: string; clientTime?: string }))
   const user = c.get('user')
   if (!user?.id) return c.json({ error: 'Please sign in again to continue.' }, 401)
 
@@ -915,6 +917,19 @@ app.post('/session-duration', requireAuth, async (c) => {
     return c.json({ error: 'Too many login duration changes. Please try again later.', code: 'session_duration_rate_limited', retryAfterSeconds: cap.retryAfterSeconds }, 429)
   }
 
+  if (lengthensSession(source.duration, resolveSessionDuration(body.sessionDuration))) {
+    const currentPassword = String(body.currentPassword ?? '')
+    if (!currentPassword.trim()) {
+      return c.json({ error: 'Enter your current password to stay signed in for longer.', code: 'session_duration_password_required' }, 400)
+    }
+    const account = await getDb(c.env).prepare('SELECT password FROM users WHERE id = ?').get<{ password: string }>([user.id])
+    const verdict = await verifyCurrentPassword(c, { actorId: user.id, targetId: user.id }, currentPassword, account?.password || '')
+    if (!verdict.ok && verdict.rateLimited) {
+      return c.json({ error: CURRENT_PASSWORD_RATE_LIMITED_ERROR, code: 'current_password_rate_limited', retryAfterSeconds: verdict.retryAfterSeconds }, 429)
+    }
+    if (!verdict.ok) return c.json({ error: 'Your current password is incorrect.', code: 'incorrect_password' }, 400)
+  }
+
   const session = await createSession(c.env, user.id, {
     sessionDuration: body.sessionDuration,
     deviceName: source.deviceName || undefined,
@@ -925,9 +940,10 @@ app.post('/session-duration', requireAuth, async (c) => {
     limitFamilyId,
   })
   setSessionCookie(c, session.token, session.expiresAt)
+  await revokeSession(c)
 
   await audit(c.env, user.id, user.username, 'session_duration_updated', 'user', user.id, {
-    sessionDuration: String(body.sessionDuration || 'session').trim().toLowerCase() || 'session',
+    sessionDuration: session.sessionDuration,
   })
 
   return c.json({ sessionExpiresAt: session.expiresAt, authMode: 'cookie' })

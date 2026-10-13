@@ -225,6 +225,82 @@ async function main() {
     assert.ok(Math.abs(remaining - 3 * DAY) < 5000, `74 h window renews by 3 days, not 74 h: ${(remaining / HOUR).toFixed(2)} h left`)
   })
 
+  const changeDuration = (cookie, body) =>
+    request('/api/auth/session-duration', { method: 'POST', cookie, body: { deviceTz: 'Asia/Phnom_Penh', clientTime: new Date().toISOString(), ...body } })
+  const liveRows = async (username) =>
+    (await db.prepare('SELECT COUNT(*) AS n FROM user_sessions s JOIN users u ON u.id = s.user_id WHERE u.username = ? AND s.revoked_at IS NULL').bind(username).first()).n
+  const isSignedIn = async (cookie) => (await request('/api/auth/me', { cookie })).status === 200
+
+  await check('S1c: a duration change replaces the session it was made from', async () => {
+    const first = await signIn('owner_a', '1d')
+    const change = await changeDuration(first.cookie, { sessionDuration: '1d' })
+    assert.equal(change.status, 200, JSON.stringify(change.body))
+    assert.ok(change.cookie && change.cookie !== first.cookie, 'a new cookie is issued')
+    assert.ok((await sessionRow(first.cookie)).revoked_at, 'the old token is revoked')
+    assert.equal(await isSignedIn(first.cookie), false, 'the old cookie is refused')
+    assert.equal(await isSignedIn(change.cookie), true, 'the new cookie signs in')
+  })
+
+  await check('S1c: lengthening asks for the current password and changes nothing without it', async () => {
+    const first = await signIn('owner_a', '1d')
+    const before = await liveRows('owner_a')
+    for (const body of [{ sessionDuration: 'always' }, { sessionDuration: '7d' }, { sessionDuration: 'not-a-duration' }, {}]) {
+      const refused = await changeDuration(first.cookie, body)
+      assert.equal(refused.status, 400, JSON.stringify(body))
+      assert.equal(refused.body.code, 'session_duration_password_required')
+      assert.equal(refused.cookie, null, 'no cookie is issued')
+    }
+    assert.equal(await liveRows('owner_a'), before, 'no session was minted or revoked')
+    assert.equal(await isSignedIn(first.cookie), true, 'the session it was asked from is untouched')
+    const wrong = await changeDuration(first.cookie, { sessionDuration: 'always', currentPassword: 'not-the-password' })
+    assert.equal(wrong.status, 400)
+    assert.equal(wrong.body.code, 'incorrect_password')
+    assert.equal(await isSignedIn(first.cookie), true)
+    const right = await changeDuration(first.cookie, { sessionDuration: 'always', currentPassword: PASSWORD })
+    assert.equal(right.status, 200, JSON.stringify(right.body))
+    assert.equal(await isSignedIn(first.cookie), false, 'the old token is revoked once the change is accepted')
+    assert.equal(await isSignedIn(right.cookie), true)
+    const days = cookieLifetimeDays(right.setCookie)
+    assert.ok(days > 398 && days <= 399, 'a long choice keeps the persistent transport cookie')
+  })
+
+  await check('S1c: a shorter or equal choice needs no password; "until I close the browser" is the shortest', async () => {
+    const always = await signIn('owner_a', 'always')
+    const sevenDays = await changeDuration(always.cookie, { sessionDuration: '7d' })
+    assert.equal(sevenDays.status, 200, JSON.stringify(sevenDays.body))
+    assert.equal(await isSignedIn(always.cookie), false)
+    const sameLength = await changeDuration(sevenDays.cookie, { sessionDuration: '7d' })
+    assert.equal(sameLength.status, 200, JSON.stringify(sameLength.body))
+    const browserSession = await changeDuration(sameLength.cookie, { sessionDuration: 'session' })
+    assert.equal(browserSession.status, 200, JSON.stringify(browserSession.body))
+    assert.doesNotMatch(browserSession.setCookie, /expires=|max-age=/i, 'the re-issue honours the browser-session choice too')
+    assert.equal(await isSignedIn(sameLength.cookie), false)
+    const oneDay = await changeDuration(browserSession.cookie, { sessionDuration: '1d' })
+    assert.equal(oneDay.status, 400, '"1d" survives a browser restart, "session" does not, though both last 24 hours')
+    assert.equal(oneDay.body.code, 'session_duration_password_required')
+    assert.equal(await isSignedIn(browserSession.cookie), true)
+  })
+
+  await check('S1c: a token issued before the duration suffix is shortened without a password, and lengthened only with one', async () => {
+    const userId = (await db.prepare("SELECT id FROM users WHERE username = 'owner_c'").first()).id
+    const legacy = async (token, windowMs) => {
+      const now = Date.now()
+      await db.prepare('INSERT INTO user_sessions (user_id, token_hash, device_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?)')
+        .bind(userId, createHash('sha256').update(token).digest('hex'), 'dev-owner_c', sqliteStamp(now - HOUR), new Date(now - HOUR + windowMs).toISOString()).run()
+      return `bos_session=${token}`
+    }
+    const tenYears = await legacy(`legacy-always-${Date.now()}`, 10 * 365 * DAY)
+    const shortened = await changeDuration(tenYears, { sessionDuration: '30d' })
+    assert.equal(shortened.status, 200, JSON.stringify(shortened.body))
+    assert.equal(await isSignedIn(tenYears), false)
+    const oneDay = await legacy(`legacy-day-${Date.now()}`, DAY)
+    const refused = await changeDuration(oneDay, { sessionDuration: '30d' })
+    assert.equal(refused.status, 400)
+    assert.equal(refused.body.code, 'session_duration_password_required')
+    const allowed = await changeDuration(oneDay, { sessionDuration: '30d', currentPassword: PASSWORD })
+    assert.equal(allowed.status, 200, JSON.stringify(allowed.body))
+  })
+
   console.log(`\n${passed} passed, ${failed} failed`)
 }
 

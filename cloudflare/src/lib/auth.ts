@@ -502,18 +502,43 @@ export async function currentSessionLimitFamily<E extends { Bindings: Env } = { 
 // What a session re-issued from the request's session inherits: its sign-in
 // family and its device. The device comes from the row, never the request
 // body, so Devices -> Revoke / Reject still reaches the new session.
-export type SessionReissueSource = { limitFamilyId: number; deviceId: string | null; deviceName: string | null }
+// `duration` is what the session was signed in for; null when it cannot be
+// determined (a token from before the duration suffix, with a window shorter
+// than every named duration).
+export type SessionReissueSource = {
+  limitFamilyId: number
+  deviceId: string | null
+  deviceName: string | null
+  duration: { key: string | null; ms: number } | null
+}
 
 export async function currentSessionReissueSource<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): Promise<SessionReissueSource | null> {
   const token = getCookie(c, SESSION_COOKIE_NAME)
   if (!token) return null
   const tokenHash = await hashToken(token)
   const row = await getDb(c.env).prepare(
-    'SELECT COALESCE(limit_family_id, id) AS family, device_id, device_name FROM user_sessions WHERE token_hash = @token_hash LIMIT 1',
-  ).get<{ family: number | null; device_id: string | null; device_name: string | null }>({ token_hash: tokenHash })
+    'SELECT COALESCE(limit_family_id, id) AS family, device_id, device_name, created_at, expires_at FROM user_sessions WHERE token_hash = @token_hash LIMIT 1',
+  ).get<{ family: number | null; device_id: string | null; device_name: string | null; created_at: string | null; expires_at: string | null }>({ token_hash: tokenHash })
   const family = Number(row?.family || 0)
   if (!row || !Number.isSafeInteger(family) || family <= 0) return null
-  return { limitFamilyId: family, deviceId: row.device_id || null, deviceName: row.device_name || null }
+  const ms = sessionDurationMs(token, row.created_at, row.expires_at)
+  return {
+    limitFamilyId: family,
+    deviceId: row.device_id || null,
+    deviceName: row.device_name || null,
+    duration: ms === null ? null : { key: durationOfToken(token), ms },
+  }
+}
+
+// "Until I close the browser" reaches less than '1d' although both last 24
+// hours on the server: it ends with the browser, '1d' survives a restart.
+const durationReach = (key: string | null, ms: number): number => (key === BROWSER_SESSION_DURATION ? ms - 1 : ms)
+
+// True when `requested` keeps someone signed in for longer than the session it
+// is chosen from. An unknown current duration counts as shorter, so asking
+// for more is never waved through.
+export function lengthensSession(current: SessionReissueSource['duration'], requested: { key: string; ms: number }): boolean {
+  return !current || durationReach(requested.key, requested.ms) > durationReach(current.key, current.ms)
 }
 
 export async function revokeSession<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): Promise<void> {
