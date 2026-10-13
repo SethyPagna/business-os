@@ -78,8 +78,8 @@ async function main() {
       }));
       throw new Error('Unknown mode');
     }};
-  ` }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022' })
-  const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', d1Databases: ['DB', 'IMPORT_DB'], log: new Log(LogLevel.ERROR) })
+  ` }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'] })
+  const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'], d1Databases: ['DB', 'IMPORT_DB'], log: new Log(LogLevel.ERROR) })
   try {
     const db = await mf.getD1Database('DB')
     const staging = await mf.getD1Database('IMPORT_DB')

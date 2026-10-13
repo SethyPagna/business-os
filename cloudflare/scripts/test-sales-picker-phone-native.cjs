@@ -4,13 +4,13 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
 const {build}=require('esbuild'),{Miniflare}=require('miniflare'),Database=require('better-sqlite3')
 async function main(){
   const root=path.join(__dirname,'..')
-  const bundled=await build({stdin:{contents:"import contacts from './src/routes/contacts';export default contacts",resolveDir:root,loader:'ts'},bundle:true,write:false,format:'esm',platform:'browser',target:'es2022',plugins:[{name:'fixture-auth',setup(b){
+  const bundled=await build({stdin:{contents:"import contacts from './src/routes/contacts';export default contacts",resolveDir:root,loader:'ts'},bundle:true,write:false,format:'esm',platform:'browser',target:'es2022',external:['node:*','cloudflare:*'],plugins:[{name:'fixture-auth',setup(b){
     b.onResolve({filter:/lib\/auth$/},()=>({path:'auth',namespace:'fixture'}))
     b.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:"export const requireAuth=async(c,next)=>{const permissions=c.req.header('x-test-permissions');if(!permissions)return c.json({error:'Unauthorized'},401);c.set('user',{id:7,username:'employee',role_code:'employee',permissions});return next()};",loader:'ts'}))
   }}]})
   const schema=new Database(':memory:')
   for(const file of fs.readdirSync(path.join(root,'migrations')).filter(f=>f.endsWith('.sql')).sort())schema.exec(fs.readFileSync(path.join(root,'migrations',file),'utf8'))
-  const mf=new Miniflare({modules:true,script:bundled.outputFiles[0].text,compatibilityDate:'2026-08-01',d1Databases:['DB']})
+  const mf=new Miniflare({modules:true,script:bundled.outputFiles[0].text,compatibilityDate:'2026-08-01',compatibilityFlags:['nodejs_compat'],d1Databases:['DB']})
   try{
     const db=await mf.getD1Database('DB')
     await db.prepare(schema.prepare("SELECT sql FROM sqlite_master WHERE name='customers'").get().sql).run()

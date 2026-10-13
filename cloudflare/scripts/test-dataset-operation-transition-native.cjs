@@ -20,14 +20,14 @@ async function main(){
  else if(input.action==='chunk')result=await journal.executeDatasetChunk(db,input.value);
  else result=await journal.transitionDatasetGeneration(db,input.value);
  return Response.json({result,batches});}catch(error){return Response.json({error:error.message,batches},{status:409})}
- }};`},bundle:true,write:false,format:'esm',platform:'browser',target:'es2022'})
+ }};`},bundle:true,write:false,format:'esm',platform:'browser',target:'es2022',external:['node:*','cloudflare:*']})
  const source=new SQLite(':memory:'),dir=path.join(root,'migrations')
  // 0185/0186/0188/0190/0191 are HELD (parked out of the applied chain,
  // ops/scripts/migration/held/README.md), read from heldDir instead.
  const heldDir=path.join(root,'..','ops','scripts','migration','held')
  for(const file of fs.readdirSync(dir).filter(f=>f.endsWith('.sql')&&f<'0185_').sort())source.exec(fs.readFileSync(path.join(dir,file),'utf8'))
  const schema=source.prepare("SELECT sql FROM sqlite_schema WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name NOT IN(SELECT name FROM pragma_table_list WHERE type='shadow') ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END,rowid").all();source.close()
- const mf=new Miniflare({modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-08-01',d1Databases:['DB'],log:new Log(LogLevel.ERROR)})
+ const mf=new Miniflare({modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-08-01',compatibilityFlags:['nodejs_compat'],d1Databases:['DB'],log:new Log(LogLevel.ERROR)})
  try{
   const db=await mf.getD1Database('DB')
   for(let i=0;i<schema.length;i+=25)await db.batch(schema.slice(i,i+25).map(r=>db.prepare(r.sql)))

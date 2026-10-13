@@ -53,8 +53,12 @@ Module._load = function(request, parent, isMain) {
   if (request === '../lib/businessDateWindow') return new Proxy({}, { get: () => harmless })
   if (request === '../lib/salesAnalytics') {
     const { ReportMoneyPrecisionError } = originalLoad.call(this, path.join(root, 'src', 'lib', 'reportMoneyPrecision.ts'), parent, isMain)
+    // /overview reads its totals through getSalesOverviewBlocks (one snapshot
+    // for totals + payment + courier folds); both readers refuse identically.
+    const tooManyRows = async () => { throw new ReportMoneyPrecisionError('too_many_rows') }
     return new Proxy({
-      getSalesTotals: async () => { throw new ReportMoneyPrecisionError('too_many_rows') },
+      getSalesTotals: tooManyRows,
+      getSalesOverviewBlocks: tooManyRows,
       SALES_GROUP_KEYS: ['branch'],
       reportMoneyDiagnostic: () => null,
     }, { get: (target, key) => key in target ? target[key] : harmless })

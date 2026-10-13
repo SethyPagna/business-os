@@ -11,7 +11,7 @@ async function main() {
   const bundle = await build({
     stdin: { contents: `import {Hono} from 'hono'; import products from './src/routes/products';
       const app=new Hono();app.route('/api/products',products);export default app;`, resolveDir: root, loader: 'ts' },
-    bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022',
+    bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022', external: ['node:*', 'cloudflare:*'],
     plugins: [{ name: 'fixture-auth', setup(b) {
       b.onResolve({ filter: /lib\/auth$/ }, () => ({ path: 'auth', namespace: 'fixture' }))
       b.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: `export const requireAuth=async(c,next)=>{
@@ -19,7 +19,7 @@ async function main() {
     } }],
   })
   const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text,
-    compatibilityDate: '2026-08-01', d1Databases: ['DB'], kvNamespaces: ['CACHE'] })
+    compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'], d1Databases: ['DB'], kvNamespaces: ['CACHE'] })
   try {
     const db = await mf.getD1Database('DB')
     const schema = fs.readFileSync(path.join(root, 'migrations/0001_init.sql'), 'utf8')

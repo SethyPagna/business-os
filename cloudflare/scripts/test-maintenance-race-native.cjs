@@ -46,8 +46,8 @@ async function main() {
       }else result=await endMaintenance(wrapped,old.token,{force:input.mode==='force-end-race'||input.mode==='corrupt-force-race'});
       return Response.json({result,old,replacement,current:await getMaintenance(env)});
     }}
-  ` }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022' })
-  const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', d1Databases: ['DB'], log: new Log(LogLevel.ERROR) })
+  ` }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'] })
+  const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'], d1Databases: ['DB'], log: new Log(LogLevel.ERROR) })
   try {
     const db = await mf.getD1Database('DB')
     await db.prepare('CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT)').run()

@@ -299,6 +299,12 @@ const ENTITY_FIELD_LABEL_KEYS: Record<string, [string, string]> = {
   amount_usd: ['amount_usd', 'Amount (USD)'],
   amount_khr: ['amount_khr', 'Amount (KHR)'],
   fee_type: ['fee_type', 'Type'],
+  // The rest of an expense's audited columns, in the words the Expenses form
+  // and list already show: a delete records every one of them.
+  label: ['fee_label', 'Label'],
+  fee_date: ['fee_date', 'Date'],
+  sale_id: ['sale', 'Sale'],
+  delivery_contact_id: ['courier', 'Courier'],
   title: ['title', 'Title'],
   return_type: ['return_type', 'Return type'],
   exchange_rate: ['exchange_rate', 'Exchange Rate'],

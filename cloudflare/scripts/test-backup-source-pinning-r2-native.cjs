@@ -35,8 +35,8 @@ async function main() {
       return Response.json({mode,reads,deletes,value,conditional,error});
     }};
   `
-  const bundle = await build({ stdin: { contents: code, resolveDir: path.join(__dirname, '..'), loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022' })
-  const mf = new Miniflare({ modules: true, compatibilityDate: '2026-08-01', r2Buckets: ['ASSETS'], script: bundle.outputFiles[0].text })
+  const bundle = await build({ stdin: { contents: code, resolveDir: path.join(__dirname, '..'), loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022', external: ['node:*', 'cloudflare:*'] })
+  const mf = new Miniflare({ modules: true, compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'], r2Buckets: ['ASSETS'], script: bundle.outputFiles[0].text })
   try {
     for (const mode of ['unchanged', 'changed', 'same', 'deleted', 'held', 'callback']) {
       const response = await mf.dispatchFetch('http://local.test/?mode=' + mode)

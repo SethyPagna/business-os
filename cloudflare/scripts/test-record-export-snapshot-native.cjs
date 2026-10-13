@@ -33,14 +33,14 @@ export default { async fetch(request, env) {
 
 async function main() {
   const bundle = await build({ stdin: { contents: worker, resolveDir: path.resolve(__dirname, '..'), loader: 'ts' },
-    bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022', logLevel: 'silent',
+    bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022', external: ['node:*', 'cloudflare:*'], logLevel: 'silent',
     plugins: [{ name: 'test-auth-only', setup(build) {
       build.onResolve({ filter: /^\.\.\/lib\/auth$/ }, () => ({ path: 'test-auth', namespace: 'test-auth' }))
       build.onLoad({ filter: /.*/, namespace: 'test-auth' }, () => ({ contents:
         `export async function requireAuth(c, next) { c.set('user', c.env.TEST_ACTOR); return next(); }`, loader: 'ts' }))
     } }],
   })
-  const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', port: 0,
+  const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'], port: 0,
     d1Databases: ['DB'], log: new Log(LogLevel.ERROR) })
   const h = fixture()
   const call = async input => {
