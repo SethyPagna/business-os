@@ -1,9 +1,8 @@
-import type { ComponentType, FormEvent } from 'react'
+import type { FormEvent } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left.js'
 import Building2 from 'lucide-react/dist/esm/icons/building-2.js'
 import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up.js'
-import Chrome from 'lucide-react/dist/esm/icons/chrome.js'
 import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
@@ -13,6 +12,7 @@ import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import QuickPreferenceToggles from '../shared/QuickPreferenceToggles'
 import InfoHint from '../shared/InfoHint.tsx'
+import GoogleSignInButton from '../shared/GoogleSignInButton.tsx'
 import { STORAGE_KEYS } from '../../constants'
 import { getClientDeviceInfo } from '../../utils/deviceInfo.ts'
 import { localizeAuthError } from '../../utils/authErrorText.ts'
@@ -186,14 +186,6 @@ interface AuthApi {
   }) => Promise<StartOauthResult>
 }
 
-interface OauthButtonProps {
-  icon: ComponentType<{ className?: string }>
-  label: string
-  onClick: () => void
-  disabled: boolean
-  loading: boolean
-}
-
 interface ModeBackButtonProps {
   label: string
   onClick: () => void
@@ -251,20 +243,6 @@ function clearOauthCallbackResult(): void {
   try {
     localStorage.removeItem(STORAGE_KEYS.OAUTH_CALLBACK_RESULT)
   } catch (_) {}
-}
-
-function OauthButton({ icon: Icon, label, onClick, disabled, loading }: OauthButtonProps) {
-  return (
-    <button
-      type="button"
-      className="btn-secondary flex w-full items-center justify-center gap-2 py-2.5"
-      onClick={onClick}
-      disabled={disabled}
-    >
-      {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
-      <span>{label}</span>
-    </button>
-  )
 }
 
 function ModeBackButton({ label, onClick }: ModeBackButtonProps) {
@@ -1271,13 +1249,13 @@ export default function Login() {
                 <div className="flex items-center gap-3">
                   <div className="h-px flex-1 bg-gray-200 dark:bg-slate-700" />
                   <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                    {tr('login_with', 'Login with')}
+                    {tr('login_or', 'or')}
                   </span>
                   <div className="h-px flex-1 bg-gray-200 dark:bg-slate-700" />
                 </div>
-                <OauthButton
-                  icon={Chrome}
-                  label={tr('login_with_google', 'Google')}
+                <GoogleSignInButton
+                  className="h-11 w-full"
+                  label={tr('login_with_google', 'Sign in with Google')}
                   disabled={!verificationCaps.googleOauth || !!oauthLoading || loading}
                   loading={oauthLoading === 'google'}
                   onClick={() => handleStartOauth('google')}

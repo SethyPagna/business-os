@@ -1,7 +1,6 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, ComponentType, ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import Chrome from 'lucide-react/dist/esm/icons/chrome.js'
 import KeyRound from 'lucide-react/dist/esm/icons/key-round.js'
 import Link2 from 'lucide-react/dist/esm/icons/link-2.js'
 import Mail from 'lucide-react/dist/esm/icons/mail.js'
@@ -13,6 +12,7 @@ import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import type { OtpModalProps } from '../utils-settings/OtpModal'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import InfoHint from '../shared/InfoHint.tsx'
+import GoogleSignInButton, { GoogleGMark } from '../shared/GoogleSignInButton.tsx'
 import { STORAGE_KEYS } from '../../constants'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
 import { beginTrackedRequest, getFirstLoaderError, invalidateTrackedRequest, isTrackedRequestCurrent, settleLoaderMap, withLoaderTimeout } from '../../utils/loaders.ts'
@@ -322,6 +322,7 @@ const PROFILE_KM_FALLBACKS: Record<string, string> = {
   connecting: 'កំពុងភ្ជាប់...',
   disconnecting: 'កំពុងផ្ដាច់...',
   connect_google: 'ភ្ជាប់ Google',
+  continue_with_google: 'បន្តជាមួយ Google',
   provider_email_match_note: 'នៅពេលភ្ជាប់រួច Google នឹងនៅតែភ្ជាប់ជាមួយគណនីមូលដ្ឋាននេះ។ អ្នកប្រើដែលត្រូវបានបិទ ឬលុប មិនអាចចូលប្រើកម្មវិធីបានទេ។',
   provider_change_note: 'បើចង់ប្តូរទៅគណនី Google ផ្សេង សូមផ្ដាច់គណនីបច្ចុប្បន្នជាមុន ហើយបន្ទាប់មកភ្ជាប់គណនីថ្មី។',
   profile_security_desc: 'គ្រប់គ្រងពាក្យសម្ងាត់ ការការពារ OTP និងរយៈពេលចូលប្រើលំនាំដើម។',
@@ -1275,7 +1276,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
 
                 <div className="rounded-xl border border-gray-200 p-2.5 dark:border-zinc-700">
                   <div className="mb-1.5 flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-200">
-                    <Chrome className="h-4 w-4 text-gray-400" />
+                    <GoogleGMark className="h-4 w-4 shrink-0" />
                     <span>{tr('google_signin', 'Google')}</span>
                     <InfoHint
                       label={tr('google_signin', 'Google')}
@@ -1342,9 +1343,13 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                       {disconnectingProvider === 'google' ? tr('disconnecting', 'Disconnecting...') : tr('disconnect_google', 'Disconnect Google')}
                     </button>
                   ) : verificationCaps.googleOauth && authMethods?.google_ready ? (
-                    <button type="button" className="btn-secondary mt-3 px-3 py-1 text-xs" disabled={oauthConnecting === 'google'} onClick={() => handleStartOauthLink('google')}>
-                      {oauthConnecting === 'google' ? tr('connecting', 'Connecting...') : tr('connect_google', 'Connect Google')}
-                    </button>
+                    <GoogleSignInButton
+                      className="mt-3"
+                      label={tr('continue_with_google', 'Continue with Google')}
+                      disabled={oauthConnecting === 'google'}
+                      loading={oauthConnecting === 'google'}
+                      onClick={() => handleStartOauthLink('google')}
+                    />
                   ) : null}
                 </div>
 

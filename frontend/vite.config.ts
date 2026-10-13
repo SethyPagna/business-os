@@ -583,7 +583,6 @@ const appShellIconNames = new Set([
 
 const authLoginIconNames = new Set([
   'arrow-left',
-  'chrome',
   'key-round',
   'loader-2',
   'lock-keyhole',
