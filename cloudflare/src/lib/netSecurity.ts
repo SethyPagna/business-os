@@ -2,7 +2,7 @@
 // dependency was `net.isIP()`, used purely as a literal-string IPv4/IPv6
 // classifier (no DNS resolution happens anywhere in this file) -- so unlike
 // the SSRF check dropped in portal.ts (checkpoint 10, which really did rely
-// on DNS resolution), this one ports directly. `isIPv4Literal`/`isIPv6Literal`
+// on DNS resolution), this one ports directly. `isIPv4Literal`/`parseIpv6`
 // below reimplement just enough of `net.isIP()`'s literal-matching behavior
 // for this module's needs.
 
@@ -31,18 +31,47 @@ function trim(value: unknown): string {
   return String(value || '').trim()
 }
 
+// URL.hostname keeps the brackets of an IPv6 literal ('[::1]').
 function normalizeHostname(hostname: unknown): string {
-  return trim(hostname).toLowerCase().replace(/\.+$/, '')
+  return trim(hostname).toLowerCase().replace(/^\[|\]$/g, '').replace(/\.+$/, '')
 }
 
 function isIPv4Literal(hostname: string): boolean {
   return /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)
 }
 
-function isIPv6Literal(hostname: string): boolean {
-  // Loose literal check: hex groups and ':', at least one '::' or enough
-  // groups -- sufficient here since we only branch on it, never parse further.
-  return hostname.includes(':') && /^[0-9a-f:]+$/i.test(hostname)
+function parseIpv6Part(part: string): number[] | null {
+  if (!part) return []
+  const groups: number[] = []
+  const pieces = part.split(':')
+  for (let i = 0; i < pieces.length; i += 1) {
+    const piece = pieces[i]
+    if (piece.includes('.')) {
+      if (i !== pieces.length - 1 || !isIPv4Literal(piece)) return null
+      const octets = piece.split('.').map(Number)
+      if (octets.some((octet) => octet > 255)) return null
+      groups.push((octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3])
+    } else {
+      if (!/^[0-9a-f]{1,4}$/.test(piece)) return null
+      groups.push(parseInt(piece, 16))
+    }
+  }
+  return groups
+}
+
+// Eight 16-bit groups, or null when the text is not a well-formed IPv6 literal.
+function parseIpv6(hostname: string): number[] | null {
+  if (!hostname.includes(':') || !/^[0-9a-f:.]+$/.test(hostname)) return null
+  const halves = hostname.split('::')
+  if (halves.length > 2) return null
+  const head = parseIpv6Part(halves[0])
+  if (!head) return null
+  if (halves.length === 1) return head.length === 8 ? head : null
+  const tail = parseIpv6Part(halves[1])
+  if (!tail) return null
+  const missing = 8 - head.length - tail.length
+  if (missing < 1) return null
+  return [...head, ...new Array<number>(missing).fill(0), ...tail]
 }
 
 function isPrivateIpv4(hostname: string): boolean {
@@ -63,15 +92,18 @@ function isPrivateIpv4(hostname: string): boolean {
   return false
 }
 
+// A text that has a ':' but is not a well-formed literal cannot be a DNS name,
+// so it is refused rather than treated as a public host.
 function isPrivateIpv6(hostname: string): boolean {
-  const value = normalizeHostname(hostname)
-  return (
-    value === '::1'
-    || value === '::'
-    || value.startsWith('fc')
-    || value.startsWith('fd')
-    || value.startsWith('fe80:')
-  )
+  const groups = parseIpv6(normalizeHostname(hostname))
+  if (!groups) return true
+  if (groups.slice(0, 7).every((group) => group === 0) && groups[7] <= 1) return true
+  if (groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff) {
+    return isPrivateIpv4(`${groups[6] >> 8}.${groups[6] & 255}.${groups[7] >> 8}.${groups[7] & 255}`)
+  }
+  if ((groups[0] & 0xffc0) === 0xfe80) return true
+  if ((groups[0] & 0xfe00) === 0xfc00) return true
+  return false
 }
 
 export function isBlockedHostname(hostname: unknown): boolean {
@@ -82,7 +114,7 @@ export function isBlockedHostname(hostname: unknown): boolean {
     if (normalized.endsWith(suffix)) return true
   }
   if (isIPv4Literal(normalized)) return isPrivateIpv4(normalized)
-  if (isIPv6Literal(normalized)) return isPrivateIpv6(normalized)
+  if (normalized.includes(':')) return isPrivateIpv6(normalized)
   return false
 }
 
