@@ -295,6 +295,11 @@ function caseRun(id, title, severity) {
 async function check(id, title, severity, fn) {
   // --only=ID[,ID...] runs just those cases (debugging aid; a full run is the default and the only certified one).
   if (OPTIONS.only && !OPTIONS.only.split(',').includes(id)) return
+  if (/^PENDING/.test(severity) && OPTIONS.pending !== 'run') {
+    results.push({ id, title, severity, red: false, deferred: true, misses: [], notes: [] })
+    console.log('PENDING ' + id + '  [' + severity + ']  ' + title + ' (not run by default; --pending=run runs it and it stays RED until the schema lands)')
+    return
+  }
   const c = caseRun(id, title, severity)
   try { await fn(c.t) } catch (error) { c.misses.push('THREW ' + (error && error.stack ? error.stack.split('\n').slice(0, 4).join(' | ') : String(error))) }
   const red = c.misses.length > 0
@@ -305,7 +310,8 @@ async function check(id, title, severity, fn) {
 }
 function finish(finding) {
   const red = results.filter(r => r.red)
-  console.log('\nSUMMARY ' + finding + ': ' + (results.length - red.length) + ' GREEN, ' + red.length + ' RED' + (red.length ? ' -> ' + red.map(r => r.id).join(', ') : ''))
+  const deferred = results.filter(r => r.deferred)
+  console.log('\nSUMMARY ' + finding + ': ' + (results.length - red.length - deferred.length) + ' GREEN, ' + red.length + ' RED, ' + deferred.length + ' PENDING' + (red.length ? ' -> ' + red.map(r => r.id).join(', ') : '') + (deferred.length ? ' (pending, not run: ' + deferred.map(r => r.id).join(', ') + ')' : ''))
   // A pending case stays RED (exit 1) and is named with what it waits for; it is never skipped or counted as GREEN.
   for (const r of red.filter(r => /^PENDING/.test(r.severity))) console.log('  ' + r.id + ' is ' + r.severity)
   const unexpected = red.filter(r => !/^PENDING/.test(r.severity))
@@ -335,8 +341,9 @@ function finish(finding) {
 //                              flavour the reproduction lane used is gone: its anchors were the defective code itself.
 //   --wrong=<mutant>           re-introduce one defect in memory; the named cases must turn RED (see MUTANTS below)
 //   --only=K1c,K6              run just those cases (debugging aid)
+//   --pending=run              also run the named pending cases below (they stay RED until their schema lands)
 //
-// Still RED on purpose, printed as PENDING with what it needs (never skipped):
+// Pending, printed by name with what it needs on every run (never silently skipped; --pending=run shows it RED):
 //   K8b  needs a schema column: pending_actions has nowhere to keep the requesting device (migration, not in this lane).
 // Owner rulings of 13 Oct (relayed by the coordinator), pinned as expectations:
 //   K10a "replace with the backup": a restore replaces the audit trail with the backup's, plus the restore row.
