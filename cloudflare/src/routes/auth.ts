@@ -11,7 +11,7 @@ import { generateTotpSecret, verifyTotpStep } from '../lib/totp'
 import { isOtpStepReplayed, markOtpStepUsed } from '../lib/otpReplay'
 import { isAdminControlUser } from '../lib/permissions'
 import { resolvePlanTier } from '../lib/planTier'
-import { checkRateLimit, getClientIp, peekRateLimit, recordRateLimitEvent, releaseRateLimitSlot } from '../lib/rateLimit'
+import { checkRateLimit, clientNetworkKey, getClientIp, peekRateLimit, recordRateLimitEvent, releaseRateLimitSlot } from '../lib/rateLimit'
 import { newPasswordProblem, newPasswordProblemError, passwordKnownLeaked, setPasswordMustChange, KNOWN_LEAKED_PASSWORD_CODE, KNOWN_LEAKED_PASSWORD_ERROR } from '../lib/passwordPolicy'
 import { CURRENT_PASSWORD_RATE_LIMITED_ERROR, verifyCurrentPassword } from '../lib/currentPasswordGuard'
 import { stripSensitiveSettings } from '../lib/settingsSensitive'
@@ -207,12 +207,13 @@ app.post('/login', async (c) => {
   }
 
   const ip = getClientIp(c.req.raw)
+  const network = clientNetworkKey(ip)
 
   // Checked before touching the DB for credentials so a saturated bucket
   // can't be worked around by varying the username -- the per-IP limit
   // below the username lookup would otherwise still let an attacker burn
   // through the per-user bucket for many different usernames in parallel.
-  const ipLimit = await checkRateLimit(c.env, 'auth:login_ip', ip, LOGIN_IP_LIMIT_MAX, LOGIN_IP_LIMIT_WINDOW_MS)
+  const ipLimit = await checkRateLimit(c.env, 'auth:login_ip', network, LOGIN_IP_LIMIT_MAX, LOGIN_IP_LIMIT_WINDOW_MS)
   if (!ipLimit.allowed) {
     return c.json({ error: 'Too many login attempts from this network. Please try again later.', code: 'login_rate_limited_network' }, 429)
   }
@@ -291,7 +292,7 @@ app.post('/login', async (c) => {
     if (candidates && candidates.length === 1) user = candidates[0]
   }
 
-  const userLimitKey = `user:${body.username.trim().toLowerCase()}@${ip}`
+  const userLimitKey = `user:${body.username.trim().toLowerCase()}@${network}`
   const userLimit = await peekRateLimit(c.env, 'auth:login_user', userLimitKey, LOGIN_USER_LIMIT_MAX, LOGIN_USER_LIMIT_WINDOW_MS)
   if (!userLimit.allowed) {
     return c.json({ error: 'Too many login attempts for this account. Please try again later.', code: 'login_rate_limited_account' }, 429)
@@ -303,7 +304,7 @@ app.post('/login', async (c) => {
   // is resolved, the same limiter and lockout are ALSO keyed on its id,
   // which every alias shares. The answers are the same shapes as above.
   const resolvedLockoutKey = user ? perNetworkLockoutKey(userIdLockoutKey(user.id), ip) : null
-  const accountLimitKey = user ? `uid:${user.id}@${ip}` : null
+  const accountLimitKey = user ? `uid:${user.id}@${network}` : null
   const accountWideKey = user ? `uid:${user.id}` : null
   if (user && resolvedLockoutKey && accountLimitKey && accountWideKey) {
     const accountWide = await peekRateLimit(c.env, 'auth:login_account', accountWideKey, LOGIN_ACCOUNT_WIDE_MAX, LOGIN_ACCOUNT_WIDE_WINDOW_MS)
@@ -394,7 +395,7 @@ app.post('/login', async (c) => {
 
   // A right password is not a guess: hand back the network slot reserved
   // above, so shared tills behind one IP never fill the per-IP ceiling.
-  await releaseRateLimitSlot(c.env, 'auth:login_ip', ip, ipLimit.slot)
+  await releaseRateLimitSlot(c.env, 'auth:login_ip', network, ipLimit.slot)
 
   // Password matched -- clear the lockout counter here (not only at full
   // session creation further down) so an OTP-enabled account's counter
@@ -608,7 +609,8 @@ app.post('/password-reset/email', async (c) => {
     LIMIT 1
   `).get<{ id: number; email: string | null }>({ identifier })
 
-  const requesterIp = c.req.header('cf-connecting-ip') || null
+  const connectingIp = c.req.header('cf-connecting-ip')
+  const requesterIp = connectingIp ? clientNetworkKey(connectingIp) : null
   if (user?.email) {
     await issuePasswordResetLink(c.env, user.id, normalizeEmail(user.email), String(body.redirectTo || ''), requesterIp)
     // Deliberately not branching on { issued, sent } here -- see comment
@@ -646,7 +648,7 @@ app.post('/password-reset/admin-request', async (c) => {
   if (!identifier || identifier.length > 200) return c.json(ADMIN_RESET_REQUEST_RESPONSE)
 
   const ip = getClientIp(c.req.raw)
-  const ipLimit = await checkRateLimit(c.env, 'auth:password_reset_admin_ip', ip, ADMIN_RESET_REQUEST_IP_MAX, ADMIN_RESET_REQUEST_WINDOW_MS)
+  const ipLimit = await checkRateLimit(c.env, 'auth:password_reset_admin_ip', clientNetworkKey(ip), ADMIN_RESET_REQUEST_IP_MAX, ADMIN_RESET_REQUEST_WINDOW_MS)
   if (!ipLimit.allowed) return c.json(ADMIN_RESET_REQUEST_RESPONSE)
   const identifierLimit = await checkRateLimit(c.env, 'auth:password_reset_admin_identifier', identifier.toLowerCase(), ADMIN_RESET_REQUEST_IDENTIFIER_MAX, ADMIN_RESET_REQUEST_WINDOW_MS)
   if (!identifierLimit.allowed) return c.json(ADMIN_RESET_REQUEST_RESPONSE)
@@ -762,7 +764,7 @@ app.post('/otp/verify', async (c) => {
   if (!body.userId || !body.token) return c.json({ error: 'userId and token required', code: 'otp_code_required' }, 400)
 
   const ip = getClientIp(c.req.raw)
-  const ipLimit = await checkRateLimit(c.env, 'auth:otp_ip', ip, OTP_IP_LIMIT_MAX, OTP_IP_LIMIT_WINDOW_MS)
+  const ipLimit = await checkRateLimit(c.env, 'auth:otp_ip', clientNetworkKey(ip), OTP_IP_LIMIT_MAX, OTP_IP_LIMIT_WINDOW_MS)
   if (!ipLimit.allowed) return c.json({ error: 'Too many OTP attempts from this network.', code: 'otp_rate_limited_network' }, 429)
 
   // The first factor must have run, recently, for THIS user -- checked
@@ -1110,7 +1112,7 @@ app.post('/password-reset/otp', async (c) => {
   // its whole validity window; and the three failure answers differed, so
   // the endpoint told a caller which accounts exist and which have 2FA.
   const ip = getClientIp(c.req.raw)
-  const ipLimit = await checkRateLimit(c.env, 'auth:password_reset_otp_ip', ip, OTP_IP_LIMIT_MAX, OTP_IP_LIMIT_WINDOW_MS)
+  const ipLimit = await checkRateLimit(c.env, 'auth:password_reset_otp_ip', clientNetworkKey(ip), OTP_IP_LIMIT_MAX, OTP_IP_LIMIT_WINDOW_MS)
   if (!ipLimit.allowed) return c.json({ error: 'Too many OTP reset attempts.' }, 429)
 
   const db = getDb(c.env)

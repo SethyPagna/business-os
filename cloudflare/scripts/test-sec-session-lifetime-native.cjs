@@ -66,7 +66,7 @@ async function boot() {
   const adminRole = await db.prepare("SELECT id FROM roles WHERE code = 'admin'").first()
   const org = await db.prepare('SELECT id FROM organizations ORDER BY id LIMIT 1').first()
   const hash = bcrypt.hashSync(PASSWORD, 4)
-  for (const username of ['owner_a', 'owner_b', 'owner_c', 'owner_otp']) {
+  for (const username of ['owner_a', 'owner_b', 'owner_c', 'owner_otp', 'owner_net']) {
     await db.prepare("INSERT INTO users (username, name, password, role_id, permissions, is_active, organization_id) VALUES (?, ?, ?, ?, '{}', 1, ?)")
       .bind(username, username, hash, adminRole.id, org.id).run()
   }
@@ -299,6 +299,46 @@ async function main() {
     assert.equal(refused.body.code, 'session_duration_password_required')
     const allowed = await changeDuration(oneDay, { sessionDuration: '30d', currentPassword: PASSWORD })
     assert.equal(allowed.status, 200, JSON.stringify(allowed.body))
+  })
+
+  const wrongPassword = (username, ip) =>
+    request('/api/auth/login', { method: 'POST', ip, body: { username, password: 'not-the-password', deviceId: 'dev-net', deviceName: 'Session probe' } })
+  const inNetwork = (prefix, host) => `${prefix}:${host.toString(16)}`
+
+  await check('S3b: failed sign-ins from three addresses of one IPv6 /64 lock that network together', async () => {
+    const addresses = ['2001:db8:a:b::1', '2001:0db8:000a:000b:0000:0000:0000:0002', '2001:db8:a:b:dead:beef:cafe:3']
+    const answers = []
+    for (let i = 0; i < 6; i += 1) answers.push(await wrongPassword('owner_net', addresses[i % 3]))
+    for (let i = 0; i < 5; i += 1) assert.equal(answers[i].status, 401, `failure ${i + 1} is a plain wrong-password answer`)
+    assert.equal(answers[5].status, 429, 'the sixth failure from the shared /64 locks it')
+    assert.equal(answers[5].body.code, 'login_locked')
+    const sameNetworkRight = await signIn('owner_net', 'session', '2001:db8:a:b:1:2:3:4')
+    assert.equal(sameNetworkRight.status, 429, 'a fourth address of the same /64 is locked too, even with the right password')
+    const otherNetwork = await signIn('owner_net', 'session', '2001:db8:a:c::1')
+    assert.equal(otherNetwork.status, 200, 'the owner on another network is not locked out by it')
+  })
+
+  await check('S3b: the per-network sign-in ceiling counts a /64 as one network', async () => {
+    const answers = []
+    for (let i = 0; i < 21; i += 1) answers.push(await wrongPassword(`ghost-${i}`, inNetwork('2001:db8:c:d:0:0:0', i + 1)))
+    for (let i = 0; i < 20; i += 1) assert.equal(answers[i].status, 401, `attempt ${i + 1}`)
+    assert.equal(answers[20].status, 429)
+    assert.equal(answers[20].body.code, 'login_rate_limited_network')
+    assert.equal((await wrongPassword('ghost-other', '2001:db8:c:e::1')).status, 401, 'another /64 is unaffected')
+  })
+
+  await check('S3b: the authenticator and reset ceilings count a /64 as one network', async () => {
+    const otp = []
+    for (let i = 0; i < 26; i += 1) otp.push(await request('/api/auth/otp/verify', { method: 'POST', ip: inNetwork('2001:db8:e:f:0:0:0', i + 1), body: { userId: 987654, token: '000000' } }))
+    assert.ok(otp.slice(0, 25).every((res) => res.status === 401), 'the first 25 are answered')
+    assert.equal(otp[25].status, 429)
+    assert.equal(otp[25].body.code, 'otp_rate_limited_network')
+    const reset = []
+    for (let i = 0; i < 26; i += 1) {
+      reset.push(await request('/api/auth/password-reset/otp', { method: 'POST', ip: inNetwork('2001:db8:1:2:0:0:0', i + 1), body: { identifier: `nobody-${i}`, otp: '000000', newPassword: 'a-long-new-password-1' } }))
+    }
+    assert.ok(reset.slice(0, 25).every((res) => res.status === 401), 'the first 25 are answered')
+    assert.equal(reset[25].status, 429)
   })
 
   console.log(`\n${passed} passed, ${failed} failed`)

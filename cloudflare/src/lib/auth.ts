@@ -93,7 +93,7 @@ function inferDurationMs(createdAt: string | null, expiresAt: string | null): nu
   return inferred
 }
 
-export function sessionDurationMs(token: string, createdAt: string | null, expiresAt: string | null): number | null {
+function sessionDurationMs(token: string, createdAt: string | null, expiresAt: string | null): number | null {
   const key = durationOfToken(token)
   return key ? SESSION_DURATIONS_MS[key] : inferDurationMs(createdAt, expiresAt)
 }
