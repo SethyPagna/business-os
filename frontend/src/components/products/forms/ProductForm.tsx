@@ -1620,7 +1620,7 @@ function ProductFormContent({
                     {tr('drag_to_reorder_images', 'Drag to reorder, or use the arrows on each photo.', 'អូសដើម្បីរៀបលំដាប់ ឬប្រើព្រួញនៅលើរូបនីមួយៗ។')}
                   </p>
                 ) : null}
-                <div className="grid grid-cols-2 gap-2 min-[340px]:grid-cols-3 sm:grid-cols-5">
+                <div className="grid grid-cols-2 gap-2 min-[344px]:grid-cols-3 sm:grid-cols-5">
                   {imageList.map((image, index) => (
                     <div
                       key={`${image}-${index}`}
@@ -1700,7 +1700,7 @@ function ProductFormContent({
                           <Loader2 className="h-5 w-5 animate-spin text-white" />
                         </div>
                       ) : (
-                        // Two 44 px targets (88 px) need a tile of at least 90 px: 3 columns from 340 px, 2 below (the test sums it).
+                        // Two 44 px targets (88 px) need a 90 px tile: 3 columns from 344 px (342 is the least), 2 below (the test sums it).
                         <div className="absolute inset-x-0 bottom-0 flex items-center justify-around bg-black/60">
                           <button
                             ref={image.id === firstFailedImageId ? firstFailedRetryRef : undefined}

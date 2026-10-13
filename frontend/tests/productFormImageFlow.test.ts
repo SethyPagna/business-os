@@ -415,23 +415,33 @@ try {
     }
 
     // Panel = viewport less the Modal root's side padding (main.css .modal-viewport-safe); the body pads it again.
+    // Below 768 px main.css forces the grid gap, so the gap-2 class is not the real one.
     const grid = failed.parentNode!
     const body = surface.find((node) => classesOf(node.className).includes('modal-scroll'), 'the modal body')
     const rootRem = Number(/\.modal-viewport-safe\s*\{[^}]*padding-left:\s*calc\(\s*([\d.]+)rem/.exec(readFileSync(new URL('../src/styles/main.css', import.meta.url), 'utf8'))?.[1])
     assert.ok(rootRem > 0, 'the Modal root padding is read from main.css')
+    const css = readFileSync(new URL('../src/styles/main.css', import.meta.url), 'utf8')
+    const phoneGapRem = Number(/@media\s*\(max-width:\s*767px\)\s*\{[\s\S]*?\.grid\s*\{\s*gap:\s*([\d.]+)rem\s*!important/.exec(css)?.[1])
+    assert.ok(phoneGapRem > 0, 'the phone grid gap is read from main.css')
     const footerClasses = classesOf(retry.parentNode!.className)
     const needed = dimension(classesOf(retry.className), 'w') + dimension(classesOf(remove.className), 'w') + horizontalPadding(footerClasses) + gapPx(footerClasses)
-    const tilePx = (viewport: number): { columns: number; inner: number } => {
-      const columns = gridColumns(classesOf(grid.className), viewport)
+    const tilePx = (viewport: number, forcedColumns?: number): { columns: number; inner: number } => {
+      const columns = forcedColumns ?? gridColumns(classesOf(grid.className), viewport)
       const content = viewport - 2 * rootRem * 16 - horizontalPadding(classesOf(body.className))
-      return { columns, inner: (content - (columns - 1) * gapPx(classesOf(grid.className))) / columns - 2 }
+      const gap = viewport < 768 ? phoneGapRem * 16 : gapPx(classesOf(grid.className))
+      return { columns, inner: (content - (columns - 1) * gap) / columns - 2 }
     }
-    for (const viewport of [360, 340, 339, 320, 300]) {
+    for (const viewport of [360, 345, 344, 343, 342, 341, 340, 339, 330, 325, 320, 300]) {
       const { columns, inner } = tilePx(viewport)
       assert.ok(needed <= inner, `${lang}: Retry and Remove need ${needed} px but a tile is ${inner.toFixed(1)} px wide in ${columns} columns on a ${viewport} px phone`)
     }
     assert.equal(tilePx(360).columns, 3, `${lang}: a 360 px phone keeps three columns`)
     assert.equal(tilePx(320).columns, 2, `${lang}: and a 320 px phone drops to two`)
+    // The least width that fits three columns, found by scanning, must not be above the width the grid switches at.
+    let leastForThree = 200
+    while (tilePx(leastForThree, 3).inner < needed) leastForThree += 1
+    const switchesAt = Number(/min-\[(\d+)px\]:grid-cols-3/.exec(grid.className)?.[1])
+    assert.ok(switchesAt >= leastForThree, `${lang}: three columns start at ${switchesAt} px but need ${leastForThree} px`)
 
     // The inline alert has room for Khmer lines.
     const alertText = surface.find((node) => node.getAttribute('role') === 'alert' && node.textContent.includes(words.image_upload_failed), 'the failed-upload alert')
