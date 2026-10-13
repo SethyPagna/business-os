@@ -13,7 +13,7 @@ async function operationWritesReady(db: ReturnType<typeof getDb>): Promise<boole
   }
 }
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { audit, changedFields } from '../lib/audit'
+import { audit, buildAuditStatement, changedFields } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { assertRequiredUpdatedAtMatch, EXPECTED_UPDATED_AT_REQUIRED, getExpectedUpdatedAt, hasExpectedUpdatedAtField, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
@@ -786,45 +786,61 @@ app.put('/:id', async (c) => {
   }
   const notes = body.notes !== undefined ? normalizeText(body.notes, 2000) : existing.notes
   const now = new Date().toISOString()
+  // The branch-name snapshot is decided here and bound, not derived inside the
+  // UPDATE, so the audit row's after-image below is the stored row by
+  // construction: the same branch keeps the name it was recorded under, a
+  // different branch is stamped with that branch's current name.
+  const branchName = existing.branch_id === branchId
+    ? (existing.branch_name ?? null)
+    : ((await db.prepare('SELECT name FROM branches WHERE id = @id').get<{ name: string | null }>({ id: branchId }))?.name ?? null)
 
   const updateSql = `
     UPDATE fees SET fee_type = @feeType, label = @label, amount_usd = @amountUsd, amount_khr = @amountKhr,
-      fee_date = @feeDate, sale_id = @saleId, branch_id = @branchId,
-      branch_name = CASE WHEN branch_id IS @branchId THEN branch_name ELSE (SELECT name FROM branches WHERE id = @branchId) END,
+      fee_date = @feeDate, sale_id = @saleId, branch_id = @branchId, branch_name = @branchName,
       delivery_contact_id = @deliveryContactId, notes = @notes, updated_at = @now
     WHERE id = @id AND updated_at IS @expectedUpdatedAt
   `
-  const updateParams = { feeType, label, amountUsd, amountKhr, feeDate, saleId, branchId, deliveryContactId, notes, now, id, expectedUpdatedAt }
+  const updateParams = { feeType, label, amountUsd, amountKhr, feeDate, saleId, branchId, branchName, deliveryContactId, notes, now, id, expectedUpdatedAt }
+  const fee: FeeRow = {
+    ...existing,
+    fee_type: feeType, label, amount_usd: amountUsd, amount_khr: amountKhr, fee_date: feeDate, sale_id: saleId,
+    branch_id: branchId, branch_name: branchName, delivery_contact_id: deliveryContactId, notes, updated_at: now,
+  }
   // An edit moved onto a retired branch's expense is booked to the confirmed branch, re-proved inside the commit.
   const editGuard = editRedirect ? effectGuardStatement([{ ...editRedirect, sells: 1 }]) : null
-  const updateResult = editGuard
-    ? { changes: Number((await db.batch([editGuard, { sql: 'DELETE FROM sale_bulk_guards', params: {} }, { sql: updateSql, params: updateParams }]))[2]?.meta?.changes ?? 0) }
-    : await db.prepare(updateSql).run(updateParams)
-
-  // The pre-read check gives callers an immediate conflict response, while
-  // this predicate closes the interval between that read and the write. A
-  // concurrent editor can change the row in that interval; zero affected
-  // rows means this request lost that race and must not emit audit/broadcast
-  // side effects for a write that never happened.
-  if (updateResult.changes === 0) {
+  // K5a: the edit and its record are ONE commit. The audit row used to be a
+  // best-effort second call after the UPDATE, so an edit could land with no
+  // record of it. Now the UPDATE (still predicated on the version the editor
+  // read), a guard that it changed exactly that row, and the audit row ride in
+  // the same batch: an edit that lost the race, or whose record cannot be
+  // written, changes nothing. details keeps its { before, after } shape for
+  // the consumers that read it; old_value/new_value hold the fields that moved.
+  try {
+    await db.batch([
+      ...(editGuard ? [editGuard, { sql: 'DELETE FROM sale_bulk_guards', params: {} }] : []),
+      { sql: updateSql, params: updateParams },
+      { sql: `SELECT CASE WHEN changes() = 1 THEN 1 ELSE json_extract('fee_changed_since_read', '$') END AS fee_edit_guard`, params: {} },
+      buildAuditStatement(user.id, user.username || null, 'update', 'fee', id, {
+        before: existing,
+        after: fee,
+        sale_id: saleId,
+        branch_id: branchId,
+      }, changedFields(existing as unknown as Record<string, unknown>, fee as unknown as Record<string, unknown>, { keys: FEE_AUDIT_COLUMNS })),
+    ])
+  } catch (error) {
+    // The pre-read check gives callers an immediate conflict response, while
+    // the predicate closes the interval between that read and the write. A
+    // concurrent editor (or delete) in that interval is a conflict; any other
+    // failure rolled the whole batch back and is reported as such.
     const current = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id })
-    const conflict = new WriteConflictError('fee', current || null, expectedUpdatedAt, current ? 'updated' : 'deleted')
-    const { body: conflictBody, status } = writeConflictResponse(conflict)
-    return c.json(conflictBody, status)
+    if (!current || (current.updated_at ?? null) !== (expectedUpdatedAt ?? null)) {
+      const conflict = new WriteConflictError('fee', current || null, expectedUpdatedAt, current ? 'updated' : 'deleted')
+      const { body: conflictBody, status } = writeConflictResponse(conflict)
+      return c.json(conflictBody, status)
+    }
+    throw error
   }
 
-  const fee = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id })
-  // The before/after was already computed here, but it lived only inside
-  // `details`, where the Audit Log's Field | Before | After renderer never
-  // looks. `details` is unchanged for the consumers that read it; the same
-  // pair now also lands in old_value/new_value, reduced to the fields that
-  // actually moved.
-  await audit(c.env, user.id, user.username || null, 'update', 'fee', id, {
-    before: existing,
-    after: fee,
-    sale_id: saleId,
-    branch_id: branchId,
-  }, changedFields(existing as unknown as Record<string, unknown>, fee as unknown as Record<string, unknown>, { keys: FEE_AUDIT_COLUMNS }))
   c.executionCtx.waitUntil(broadcast(c.env, 'fees', { type: 'updated', id }))
   return c.json({ fee })
 })
@@ -843,24 +859,63 @@ app.delete('/:id', async (c) => {
   const db = getDb(c.env)
   const id = Number(c.req.param('id'))
   if (!Number.isFinite(id)) return c.json({ error: 'Invalid fee id' }, 400)
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
   const existing = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id })
   if (!existing) return c.json({ error: 'Fee not found' }, 404)
+  // K2: a delete is admitted only against a version, like the edit. When the
+  // client states the version it is looking at (expected_updated_at, the PUT's
+  // field), an expense edited since is refused here, before anything is queued
+  // or removed. A client that does not send it yet is held to the version THIS
+  // request read: the DELETE below is predicated on it, so a concurrent edit
+  // between that read and the delete refuses the delete instead of removing a
+  // record whose before-image was never recorded.
+  if (hasExpectedUpdatedAtField(body)) {
+    try {
+      assertRequiredUpdatedAtMatch('fee', existing, getExpectedUpdatedAt(body))
+    } catch (err) {
+      if (err instanceof WriteConflictError) {
+        const { body: conflictBody, status } = writeConflictResponse(err)
+        return c.json(conflictBody, status)
+      }
+      throw err
+    }
+  }
+  const deleteVersion = existing.updated_at ?? null
 
   const pendingId = await maybeQueueForReview(c.env, user, 'fees', {
     actionType: 'delete',
     entityType: 'fee',
     entityId: id,
     payload: { id },
+    // K3: the reviewer approves the removal of THIS version. An edit in between
+    // makes the approval stale (lib/reviewApply.ts refuses it, the request stays open).
+    expectedEntityStateJson: JSON.stringify({ updated_at: deleteVersion }),
     summary: `Delete fee #${id}: ${existing.label || existing.fee_type} (${existing.fee_type}); USD ${existing.amount_usd}; KHR ${existing.amount_khr}; ${existing.fee_date.split('-').reverse().join('/')}`,
   })
   if (pendingId != null) {
     return c.json({ success: true, pending: true, pendingActionId: pendingId }, 202)
   }
 
-  await db.prepare(`DELETE FROM fees WHERE id = @id`).run({ id })
-  // after === null records every field of the deleted expense as removed.
-  await audit(c.env, user.id, user.username || null, 'delete', 'fee', id, { before: existing, after: null },
-    changedFields(existing as unknown as Record<string, unknown>, null, { keys: FEE_AUDIT_COLUMNS }))
+  // K2 + K5b: the delete, a guard that it removed exactly the version read,
+  // and its audit row are ONE commit, so the before-image is the record that
+  // was actually removed and no expense disappears without its record.
+  try {
+    await db.batch([
+      { sql: `DELETE FROM fees WHERE id = @id AND updated_at IS @deleteVersion`, params: { id, deleteVersion } },
+      { sql: `SELECT CASE WHEN changes() = 1 THEN 1 ELSE json_extract('fee_changed_since_read', '$') END AS fee_delete_guard`, params: {} },
+      // after === null records every field of the deleted expense as removed.
+      buildAuditStatement(user.id, user.username || null, 'delete', 'fee', id, { before: existing, after: null },
+        changedFields(existing as unknown as Record<string, unknown>, null, { keys: FEE_AUDIT_COLUMNS })),
+    ])
+  } catch (error) {
+    const current = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id })
+    if (!current || (current.updated_at ?? null) !== deleteVersion) {
+      const conflict = new WriteConflictError('fee', current || null, deleteVersion, current ? 'updated' : 'deleted')
+      const { body: conflictBody, status } = writeConflictResponse(conflict)
+      return c.json(conflictBody, status)
+    }
+    throw error
+  }
   c.executionCtx.waitUntil(broadcast(c.env, 'fees', { type: 'deleted', id }))
   return c.json({ success: true })
 })

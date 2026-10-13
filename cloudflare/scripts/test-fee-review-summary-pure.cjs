@@ -6,7 +6,7 @@ const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 const root = path.resolve(__dirname, '..')
 const raw = openDb(loadAll())
-const db = { prepare(sql) { const stmt=raw.prepare(sql);return {get:p=>stmt.get(p),all:p=>stmt.all(p),run:p=>{const r=stmt.run(p);return {changes:r.meta?.changes||0,lastInsertRowid:Number(r.meta?.last_row_id||0)}}}} }
+const db = { prepare(sql) { const stmt=raw.prepare(sql);return {get:p=>stmt.get(p),all:p=>stmt.all(p),run:p=>{const r=stmt.run(p);return {changes:r.meta?.changes||0,lastInsertRowid:Number(r.meta?.last_row_id||0)}}}}, batch:items=>raw.batch(items) }
 const cache=new Map()
 function load(file) {
  const absolute=path.resolve(root,'src',file)
@@ -18,14 +18,17 @@ function load(file) {
 }
 const permissions=load('lib/permissions.ts')
 const {maybeQueueForReview}=load('lib/reviewGate.ts')
+// K2/K5b: the handler now admits a stated version through the shared conflict helpers and writes its audit row inside the batch.
+const conflictControl=load('lib/conflictControl.ts')
+const {buildAuditStatement}=load('lib/audit.ts')
 const source=fs.readFileSync(path.join(root,'src/routes/fees.ts'),'utf8')
 const tree=ts.createSourceFile('fees.ts',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TS)
 let callback, columns
 function visit(node){if(ts.isVariableDeclaration(node)&&node.name.getText(tree)==='FEE_AUDIT_COLUMNS')columns='const '+node.getText(tree)+';';if(ts.isCallExpression(node)&&node.expression.getText(tree)==='app.delete'&&node.arguments[0].text==='/:id')callback=node.arguments[1].getText(tree);ts.forEachChild(node,visit)}visit(tree);assert(callback)
 const output=ts.transpileModule(columns+'const handler='+callback,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText
 const audits=[],broadcasts=[]
-const handler=new Function('getActionTier','getDb','maybeQueueForReview','audit','changedFields','broadcast',output+';return handler')(permissions.getActionTier,()=>db,maybeQueueForReview,async(...args)=>audits.push(args),()=>[],async(...args)=>broadcasts.push(args))
-function context(user,id){return {env:{},get:()=>user,req:{param:()=>String(id)},json:(body,status=200)=>({body,status}),executionCtx:{waitUntil:()=>{}}}}
+const handler=new Function('getActionTier','getDb','maybeQueueForReview','audit','changedFields','broadcast','hasExpectedUpdatedAtField','assertRequiredUpdatedAtMatch','getExpectedUpdatedAt','WriteConflictError','writeConflictResponse','buildAuditStatement',output+';return handler')(permissions.getActionTier,()=>db,maybeQueueForReview,async(...args)=>audits.push(args),()=>null,async(...args)=>broadcasts.push(args),conflictControl.hasExpectedUpdatedAtField,conflictControl.assertRequiredUpdatedAtMatch,conflictControl.getExpectedUpdatedAt,conflictControl.WriteConflictError,conflictControl.writeConflictResponse,buildAuditStatement)
+function context(user,id){return {env:{},get:()=>user,req:{param:()=>String(id),json:async()=>{throw new SyntaxError('no body')}},json:(body,status=200)=>({body,status}),executionCtx:{waitUntil:()=>{}}}}
 function seed(id,label='Synthetic shop rent',type='rent'){raw.prepare('INSERT INTO fees(id,fee_type,label,amount_usd,amount_khr,fee_date) VALUES(@id,@type,@label,12.35,4100,\'2026-10-09\')').run({id,type,label})}
 async function main(){
  seed(90000801)
@@ -39,7 +42,7 @@ async function main(){
  const before=raw.prepare('SELECT COUNT(*) n FROM pending_actions').get().n
  for(const permissions of [{fees:false},{fees:'review','fees:delete':false}]){const denied=await handler(context({...user,permissions:JSON.stringify(permissions)},90000801));assert.equal(denied.status,403)}
  assert.equal(raw.prepare('SELECT COUNT(*) n FROM pending_actions').get().n,before);console.log('PASS section/action denied never queue or delete')
- const full=await handler(context({...user,permissions:JSON.stringify({fees:true})},90000801));assert.equal(full.status,200);assert.equal(raw.prepare('SELECT id FROM fees WHERE id=90000801').get(),undefined);assert.equal(raw.prepare('SELECT COUNT(*) n FROM pending_actions').get().n,before);assert.equal(audits.length,1);assert.equal(audits[0][6].before.label,'Synthetic shop rent');assert.equal(audits[0][6].after,null);console.log('PASS full access retains original physical delete/audit and no pending insert')
+ const full=await handler(context({...user,permissions:JSON.stringify({fees:true})},90000801));assert.equal(full.status,200);assert.equal(raw.prepare('SELECT id FROM fees WHERE id=90000801').get(),undefined);assert.equal(raw.prepare('SELECT COUNT(*) n FROM pending_actions').get().n,before);assert.equal(audits.length,0,'no best-effort audit call after the commit');const deleted=raw.prepare("SELECT details FROM audit_logs WHERE entity='fee' AND action='delete' AND CAST(entity_id AS REAL)=90000801").all();assert.equal(deleted.length,1,'one delete audit row, written in the same batch');assert.equal(JSON.parse(deleted[0].details).before.label,'Synthetic shop rent');assert.equal(JSON.parse(deleted[0].details).after,null);console.log('PASS full access retains original physical delete/audit and no pending insert')
  const missing=await handler(context(user,9999));assert.equal(missing.status,404);assert.equal(raw.prepare('SELECT COUNT(*) n FROM pending_actions').get().n,before);console.log('PASS missing record cannot create invented summary')
 }
 main().catch(error=>{console.error(error);process.exitCode=1})

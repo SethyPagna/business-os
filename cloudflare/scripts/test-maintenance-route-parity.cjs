@@ -8,7 +8,9 @@ const root = path.resolve(__dirname, '..')
 async function main() {
   const stubs = {
     auth: `export const requireAuth=async(c,next)=>{c.set('user',{id:1,username:'admin'});return next()}`,
-    audit: `export const audit=async(env,...args)=>{env.events.push({kind:'audit',args})}`,
+    // K10b: the restore row is written with auditOrThrow; env.auditDown makes that write fail.
+    audit: `export const audit=async(env,...args)=>{env.events.push({kind:'audit',args})};
+      export const auditOrThrow=async(env,...args)=>{if(env.auditDown)throw new Error('audit store unavailable');env.events.push({kind:'audit',args})}`,
     permissions: `export const hasPermission=()=>true`,
     acquisitionCostAccess: `export const canViewAcquisitionCosts=()=>true;export const canEditAcquisitionCosts=()=>true`,
     backup: `export const CLOUDFLARE_BACKUP_KEEP=1;export const createCloudflareBackup=()=>{};export const getSystemJob=()=>{};export const linkCloudflareBackupJob=()=>{};export const listCloudflareBackups=()=>{};export const pruneCloudflareBackups=()=>{};export const validateCloudflareBackup=()=>{};
@@ -22,7 +24,7 @@ async function main() {
   const mod = new Module(path.join(root, 'maintenance-route-test.cjs')); mod.filename = mod.id; mod.paths = Module._nodeModulePaths(root)
   mod._compile(bundle.outputFiles[0].text, mod.filename)
   const app = mod.exports.default
-  for (const scenario of ['clear-ok', 'clear-replaced', 'corrupt-clear-replaced', 'restore-ok', 'restore-release-failed',
+  for (const scenario of ['clear-ok', 'clear-replaced', 'corrupt-clear-replaced', 'restore-ok', 'restore-release-failed', 'restore-audit-failed',
     'restore-import-error', 'restore-import-missing', 'restore-import-negative', 'restore-import-fractional', 'restore-import-string', 'restore-import-active',
     'restore-race-import', 'restore-race-bulk', 'restore-race-lease']) {
     const db = new Database(':memory:')
@@ -32,7 +34,7 @@ async function main() {
     if (scenario.startsWith('clear') || scenario.startsWith('corrupt')) db.prepare('INSERT INTO system_flags(key,value) VALUES(?,?)').run('maintenance', scenario.startsWith('corrupt') ? '{broken' : original)
     let reads = 0
     const replacement = JSON.stringify({ ...state, token: 'replacement', phase: 'deleting' })
-    const env = { events: [], restoreCalls: 0, replaceAfterRestore: scenario === 'restore-release-failed', replace() { db.prepare('UPDATE system_flags SET value=?').run(replacement) }, DB: { prepare(sql) {
+    const env = { events: [], restoreCalls: 0, auditDown: scenario === 'restore-audit-failed', replaceAfterRestore: scenario === 'restore-release-failed', replace() { db.prepare('UPDATE system_flags SET value=?').run(replacement) }, DB: { prepare(sql) {
       const bind = params => ({ first: async () => {
         if (sql.includes('FROM import_jobs')) {
           if (scenario === 'restore-import-error') throw new Error('D1 unavailable')
@@ -81,10 +83,19 @@ async function main() {
       assert.equal(reads, 2)
       assert.equal(env.events.length, 0, 'failed clear must not claim success in audit')
       assert.equal(db.prepare('SELECT value FROM system_flags').get().value, replacement)
+    } else if (scenario === 'restore-audit-failed') {
+      // K10b: data restored but unrecorded is not success; maintenance stays held (phase failed) for an operator.
+      assert.equal(response.status, 503); assert.equal(result.data_restored, true)
+      assert.equal(result.code, 'restore_audit_not_recorded'); assert.equal(result.item.status, 'failed')
+      assert.equal(env.events.filter(e => e.kind === 'audit').length, 0)
+      const held = JSON.parse(db.prepare('SELECT value FROM system_flags').get().value)
+      assert.equal(held.mode, 'restore'); assert.equal(held.phase, 'failed')
     } else if (scenario === 'restore-release-failed') {
       assert.equal(response.status, 409); assert.equal(result.data_restored, true)
       assert.equal(result.code, 'maintenance_not_released'); assert.equal(result.item.status, 'failed')
-      assert.equal(env.events.find(e => e.kind === 'audit').args.at(-1).maintenance_released, false)
+      // The restore is recorded first (while maintenance holds); the failed release is recorded too.
+      assert.equal(env.events.filter(e => e.kind === 'audit')[0].args[2], 'restore')
+      assert.ok(env.events.filter(e => e.kind === 'audit').some(e => e.args.at(-1).maintenance_released === false))
       assert.equal(db.prepare('SELECT value FROM system_flags').get().value, replacement)
     } else {
       assert.equal(response.status, 200); assert.equal(db.prepare('SELECT * FROM system_flags').get(), undefined)

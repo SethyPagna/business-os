@@ -56,6 +56,8 @@ const auth = load('lib/auth.ts', {
     deleteCookie: () => {},
   },
   './db': { getDb: () => fakeDb },
+  // K8a: requireAuth scopes the request to its session's device (AsyncLocalStorage, a Node/workerd built-in).
+  'node:async_hooks': require('node:async_hooks'),
   '../index': {},
 })
 

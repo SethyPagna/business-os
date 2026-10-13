@@ -160,7 +160,8 @@ for (const file of EXPECTED_READ_ONLY) {
 // drops the call (or its key detail) fails loudly.
 const backups = fs.readFileSync(path.join(routesDir, 'backups.ts'), 'utf8')
 ok(/audit\((?:[^()]|\([^()]*\))*'create',\s*'backup'/.test(backups), 'backups.ts audits backup creation')
-ok(/audit\((?:[^()]|\([^()]*\))*'restore',\s*'backup'/.test(backups), 'backups.ts audits the destructive restore')
+// K10b: the restore's row is written with auditOrThrow (a restore is not reported done without it).
+ok(/audit(?:OrThrow)?\((?:[^()]|\([^()]*\))*'restore',\s*'backup'/.test(backups), 'backups.ts audits the destructive restore')
 // The call gained a progress callback (slice C, Part 543) -- match the
 // call-site prefix, and assert it was actually FOUND so a future rename
 // can't turn this into a vacuous indexOf(-1) comparison.

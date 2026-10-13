@@ -20,7 +20,7 @@ import { assertProductStatusInput, assertProductsActive, assertProductsHaveNoSto
 
 import { getDb } from './db'
 import { ordinaryBusinessMaintenanceGuard } from './businessMaintenanceGuard'
-import { audit, buildAuditStatement } from './audit'
+import { audit, buildAuditStatement, changedFields } from './audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
 import { createProductWithInitialStock, updateRow, syncProductImageGallery, readProductMoneyPlan } from './productWrites'
@@ -166,29 +166,101 @@ async function currentProductImages(env: Env, id: number): Promise<{ image_path:
 }
 
 // --- fees / delete / fee -----------------------------------------------
-// Mirrors routes/fees.ts's own DELETE /:id direct-write branch exactly
-// (same DELETE statement, same audit/broadcast calls) -- the only
-// difference is the actor recorded on the audit row is the *reviewer*
-// approving the change, not the person who originally requested it (the
-// original requester is already on the pending_actions row itself via
-// requested_by/requested_by_name, so that context isn't lost, just not
-// duplicated into the audit log's actor field).
+// Mirrors routes/fees.ts's own DELETE /:id direct-write branch: the same
+// version-predicated DELETE and the same before-image audit row. The actor on
+// the audit row is the *reviewer* approving the change; the requester stays on
+// the pending_actions row (requested_by/requested_by_name) and is named in the
+// audit details too, with the request id, so the row is self-describing.
+//
+// The same field list as routes/fees.ts's FEE_AUDIT_COLUMNS (a route module
+// cannot be imported from lib/); scripts/test-fees-k-parity-pure.cjs pins the
+// two lists identical.
+const FEE_DELETE_AUDIT_COLUMNS = [
+  'fee_type', 'label', 'amount_usd', 'amount_khr', 'fee_date',
+  'sale_id', 'branch_id', 'delivery_contact_id', 'notes',
+] as const
+
+// K3: the expense was edited after the delete was requested. Nothing is
+// deleted and the request stays open for the reviewer to reject.
+export class FeeReviewStaleError extends Error {
+  readonly code = 'review_entity_changed'
+  constructor() {
+    super('This expense changed after the delete was requested. Nothing was deleted. Reject the request, or ask for it again.')
+    this.name = 'FeeReviewStaleError'
+  }
+}
+
+// K6: another reviewer decided (or the requester changed) the request while
+// this approval was applying. Nothing is deleted.
+export class ReviewDecisionConflictError extends Error {
+  readonly code = 'review_already_decided'
+  constructor() {
+    super('Already reviewed or not found')
+    this.name = 'ReviewDecisionConflictError'
+  }
+}
+
+// The version the requester saw. Requests queued before the delete recorded
+// one carry no expected state; they are judged against the version read at
+// approval time, which still makes the before-image the record removed.
+function reviewedFeeVersion(row: PendingActionRow): { known: boolean; updatedAt: string | null } {
+  try {
+    const state = JSON.parse(row.expected_entity_state_json || 'null') as Record<string, unknown> | null
+    if (state && typeof state === 'object' && Object.prototype.hasOwnProperty.call(state, 'updated_at')) {
+      return { known: true, updatedAt: state.updated_at == null ? null : String(state.updated_at) }
+    }
+  } catch { /* an unreadable baseline is treated as none */ }
+  return { known: false, updatedAt: null }
+}
+
 registerApplier('fees', 'delete', 'fee', async (env, row, reviewer, waitUntil) => {
   const db = getDb(env)
   const id = row.entity_id
   if (id == null) throw new Error('Pending fee delete is missing its entity id')
-  const existing = await db.prepare('SELECT id FROM fees WHERE id = @id').get<{ id: number }>({ id })
+  const existing = await db.prepare('SELECT * FROM fees WHERE id = @id').get<Record<string, unknown>>({ id })
   if (!existing) {
     // Already gone by some other path since this was queued (e.g. a
     // full-access user deleted it directly in the meantime) -- treat
     // approval as a safe no-op rather than an error, same "don't fail
     // an operation that's already effectively done" reasoning the rest
-    // of this codebase uses for idempotent cleanup paths.
+    // of this codebase uses for idempotent cleanup paths. The route marks
+    // the request approved with its own WHERE status='open' guard.
     return
   }
-  await db.prepare('DELETE FROM fees WHERE id = @id').run({ id })
-  await audit(env, reviewer.id, reviewer.name, 'delete', 'fee', id, null)
+  const reviewed = reviewedFeeVersion(row)
+  const version = (existing.updated_at ?? null) as string | null
+  if (reviewed.known && version !== reviewed.updatedAt) throw new FeeReviewStaleError()
+  // K4 + K5c + K6: the effect (the delete, a guard that it removed exactly the
+  // version read, the audit row with the before-image) and the decision (the
+  // request marked approved, conditional on it still being open and exactly
+  // as read) are ONE commit. A reject that lands first, a resubmission, or a
+  // failure marking the request leaves neither half behind.
+  try {
+    await db.batch([
+      { sql: 'DELETE FROM fees WHERE id = @id AND updated_at IS @version', params: { id, version } },
+      { sql: `SELECT CASE WHEN changes() = 1 THEN 1 ELSE json_extract('fee_changed_since_read', '$') END AS fee_delete_guard`, params: {} },
+      buildAuditStatement(reviewer.id, reviewer.name, 'delete', 'fee', id, {
+        before: existing,
+        after: null,
+        pending_action_id: row.id,
+        requested_by: row.requested_by,
+        requested_by_name: row.requested_by_name,
+      }, changedFields(existing, null, { keys: FEE_DELETE_AUDIT_COLUMNS })),
+      { sql: `UPDATE pending_actions SET status = 'approved', reviewed_by = @reviewedBy, reviewed_by_name = @reviewedByName,
+          reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE id = @pendingId AND status = 'open' AND updated_at IS @pendingVersion`,
+        params: { pendingId: row.id, pendingVersion: row.updated_at, reviewedBy: reviewer.id, reviewedByName: reviewer.name } },
+      { sql: `SELECT CASE WHEN changes() = 1 THEN 1 ELSE json_extract('review_not_open', '$') END AS review_decision_guard`, params: {} },
+    ])
+  } catch (error) {
+    const request = await db.prepare('SELECT status, updated_at FROM pending_actions WHERE id = @id').get<{ status: string; updated_at: string }>({ id: row.id })
+    if (!request || request.status !== 'open' || request.updated_at !== row.updated_at) throw new ReviewDecisionConflictError()
+    const current = await db.prepare('SELECT updated_at FROM fees WHERE id = @id').get<{ updated_at: string | null }>({ id })
+    if (!current || (current.updated_at ?? null) !== version) throw new FeeReviewStaleError()
+    throw error
+  }
   await notify(env, waitUntil, 'fees', { type: 'deleted', id })
+  return { pendingActionMarkedAtomically: true }
 })
 
 // --- products / create / product -----------------------------------

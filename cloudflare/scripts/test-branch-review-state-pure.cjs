@@ -481,11 +481,13 @@ function reviewCode() {
   const ast = tree(reviewRel)
   const registrations = ast.statements.filter(n => ts.isExpressionStatement(n) && ts.isCallExpression(n.expression) && n.expression.expression.getText(ast) === 'registerApplier'
     && ['branches/update/branch', 'fees/delete/fee'].includes(n.expression.arguments.slice(0, 3).map(a => a.text).join('/'))).map(n => n.getText(ast)).join('\n')
-  return named(reviewRel, ['NoReviewApplierError', 'ReviewRequesterPermissionError', 'notify', 'appliers', 'applierKey', 'registerApplier', 'productRemovePendingPointer', 'applyApprovedPendingAction', 'recoverApprovedBranchAction']) + '\n' + registrations
+  // The fee applier's own declarations (K3/K6 refusals, its audit field list and baseline reader) travel with it.
+  return named(reviewRel, ['NoReviewApplierError', 'ReviewRequesterPermissionError', 'FeeReviewStaleError', 'ReviewDecisionConflictError', 'FEE_DELETE_AUDIT_COLUMNS', 'reviewedFeeVersion',
+    'notify', 'appliers', 'applierKey', 'registerApplier', 'productRemovePendingPointer', 'applyApprovedPendingAction', 'recoverApprovedBranchAction']) + '\n' + registrations
 }
 function review(overrides = {}) {
   return evaluate(reviewCode(), { ...branchDeps, ...lib('productDelete'), applyApprovedProductRemove: () => { throw new Error('Out of scope product removal invoked') }, ...overrides },
-    '{ applyApprovedPendingAction, NoReviewApplierError, ReviewRequesterPermissionError, productRemovePendingPointer, recoverApprovedBranchAction }')
+    '{ applyApprovedPendingAction, NoReviewApplierError, ReviewRequesterPermissionError, FeeReviewStaleError, ReviewDecisionConflictError, productRemovePendingPointer, recoverApprovedBranchAction }')
 }
 const moneyErrors = evaluate(named('cloudflare/src/lib/productWrites.ts', ['ProductMoneyWriteError']), {}, '{ProductMoneyWriteError}')
 const imageErrors = evaluate(named('cloudflare/src/lib/productImagePermission.ts', ['ProductImageAssetError']), {}, '{ProductImageAssetError}')

@@ -4,7 +4,7 @@ import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, hasAcquisitionCostInput, projectAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { audit } from '../lib/audit'
+import { audit, buildAuditStatement } from '../lib/audit'
 import { getActionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
 import { SALE_ADD_ITEMS_ACTION_KIND, branchCutoverClosureRefusal, isUndoClosedByMerge, UNDO_CLOSED_BY_MERGE_CODE, UNDO_CLOSED_BY_MERGE_MESSAGE, PRODUCT_MERGE_GROUP_ACTION_KIND, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayChangesProductImages, mergeReplayChoicePermissionError, replayRefusalCode, UNDO_HISTORY_STALE_CODE, UNDO_NEEDS_ORIGINAL_TAB_CODE, type UndoApplierOutcome } from '../lib/undoAppliers'
 import { CUSTOMER_GENDER_RESTORATION_KIND, canRestoreCustomerGender, notifyCustomerGenderRestoration } from '../lib/customerGenderRestoration'
@@ -570,13 +570,39 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
       }, user))
     }
 
-    await db.prepare(`
-      UPDATE action_history SET status = @status, last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id
-    `).run({ status: nextStatus, id: existing.id })
+    const transitionDetails = { actionHistoryId: existing.id, scope: existing.scope, label: existing.label, status: nextStatus, serverApplied: applied, appliedBy: applier?.name || null }
+    if (applier) {
+      // A server applier already replayed the reversal (and guards its own
+      // repeats by generation/state); the flip records it, as before.
+      await db.prepare(`
+        UPDATE action_history SET status = @status, last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id
+      `).run({ status: nextStatus, id: existing.id })
 
-    await audit(c.env, user?.id ?? null, actorSnapshot(user), direction === 'undo' ? 'action_undo' : 'action_redo',
-      existing.entity || 'action_history', existing.entity_id || existing.id,
-      { actionHistoryId: existing.id, scope: existing.scope, label: existing.label, status: nextStatus, serverApplied: applied, appliedBy: applier?.name || null })
+      await audit(c.env, user?.id ?? null, actorSnapshot(user), direction === 'undo' ? 'action_undo' : 'action_redo',
+        existing.entity || 'action_history', existing.entity_id || existing.id, transitionDetails)
+    } else {
+      // K9a: with no server applier this response IS the permission for the
+      // browser to replay the reversal, so the flip must happen exactly once.
+      // It is conditional on the status that was read, and the flip, a guard
+      // that it really flipped, and the audit row are ONE commit: of two Undo
+      // requests for the same record, one succeeds and is recorded once; the
+      // other is refused stale and replays nothing.
+      try {
+        await db.batch([
+          { sql: `UPDATE action_history SET status = @status, last_error = NULL, updated_at = CURRENT_TIMESTAMP
+            WHERE id = @id AND status IS @fromStatus`, params: { status: nextStatus, id: existing.id, fromStatus: existing.status } },
+          { sql: `SELECT CASE WHEN changes() = 1 THEN 1 ELSE json_extract('undo_history_stale', '$') END AS history_transition_guard`, params: {} },
+          buildAuditStatement(user?.id ?? null, actorSnapshot(user), direction === 'undo' ? 'action_undo' : 'action_redo',
+            existing.entity || 'action_history', existing.entity_id || existing.id, transitionDetails),
+        ])
+      } catch (error) {
+        const current = await db.prepare('SELECT status FROM action_history WHERE id = @id').get<{ status: string | null }>({ id: existing.id })
+        if (!current || current.status !== existing.status) {
+          return c.json({ success: false, error: `Action is not ${direction === 'undo' ? 'undoable' : 'redoable'} right now`, code: UNDO_HISTORY_STALE_CODE }, 409)
+        }
+        throw error
+      }
+    }
 
     const row = await db.prepare('SELECT * FROM action_history WHERE id = @id').get<ActionHistoryRow>({ id: existing.id })
     return c.json(visibleHistoryReplayResponse({

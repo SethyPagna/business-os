@@ -1,7 +1,30 @@
 import type { Context } from 'hono'
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { getDb } from './db'
 import type { Env } from '../index'
+
+// K8a: the device an audit row names is the device the REQUEST arrived on.
+// lib/audit.ts used to take the user's most recently seen live session, and a
+// session is only touched every five minutes, so an edit made on the Counter
+// Tablet was recorded as made on the Owner Phone whenever the phone had been
+// seen more recently. requireAuth already holds the exact session row the
+// request authenticated with; it runs the rest of the request inside this
+// scope, and buildAuditStatement reads it. audit.ts is loaded in isolation by
+// many pure tests, so it reads the scope through this global hook instead of
+// importing auth.ts (the same arrangement as lib/requestMetrics.ts); the key
+// must stay identical in both files (scripts/test-request-device-audit-pure.cjs).
+// Outside a request (cron, queue consumers) there is no scope, and audit rows
+// keep the old freshest-session fallback.
+export type RequestDevice = { userId: number; deviceName: string | null; deviceTz: string | null }
+export const REQUEST_DEVICE_HOOK_KEY = 'business-os.request-device.v1'
+const requestDeviceScope = new AsyncLocalStorage<RequestDevice>()
+;(globalThis as unknown as Record<symbol, { current(): RequestDevice | undefined }>)[Symbol.for(REQUEST_DEVICE_HOOK_KEY)] = {
+  current: () => requestDeviceScope.getStore(),
+}
+// The session's device, kept beside the user object rather than on it: the
+// SessionUser shape is read by many surfaces and must not grow session fields.
+const sessionDevices = new WeakMap<SessionUser, { deviceName: string | null; deviceTz: string | null }>()
 
 const SESSION_COOKIE_NAME = 'bos_session'
 // "Always stay signed in" -- the new default (see createSession below).
@@ -82,6 +105,8 @@ type SessionLookupRow = SessionUser & {
   session_created_at: string | null
   session_expires_at: string | null
   session_last_seen_at: string | null
+  session_device_name?: string | null
+  session_device_tz?: string | null
 }
 
 type SessionExpiryMetadata = {
@@ -273,7 +298,8 @@ async function lookupSessionUser<E extends { Bindings: Env } = { Bindings: Env }
     SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active,
            r.code AS role_code, r.permissions AS role_permissions, r.name AS role_name,${mustChangeColumn}
            s.created_at AS session_created_at, s.expires_at AS session_expires_at,
-           s.last_seen_at AS session_last_seen_at
+           s.last_seen_at AS session_last_seen_at,
+           s.device_name AS session_device_name, s.device_tz AS session_device_tz
     FROM user_sessions s
     JOIN users u ON u.id = s.user_id
     LEFT JOIN roles r ON r.id = u.role_id
@@ -306,8 +332,11 @@ async function lookupSessionUser<E extends { Bindings: Env } = { Bindings: Env }
     session_created_at: createdAt,
     session_expires_at: expiresAt,
     session_last_seen_at: lastSeenAt,
+    session_device_name: sessionDeviceName,
+    session_device_tz: sessionDeviceTz,
     ...user
   } = row
+  sessionDevices.set(user, { deviceName: sessionDeviceName ?? null, deviceTz: sessionDeviceTz ?? null })
 
   if (isSessionTouchDue(lastSeenAt, Date.parse(nowIso))) {
     c.executionCtx.waitUntil(
@@ -533,5 +562,11 @@ export async function requireAuth(c: Context<{ Bindings: Env; Variables: { user:
     return c.json({ error: 'Your password is publicly known. Change it before continuing.', code: 'password_change_required' }, 403)
   }
   c.set('user', user)
+  const device = sessionDevices.get(user)
+  const userId = Number(user.id)
+  if (device && Number.isSafeInteger(userId)) {
+    await requestDeviceScope.run({ userId, ...device }, () => next())
+    return
+  }
   await next()
 }
