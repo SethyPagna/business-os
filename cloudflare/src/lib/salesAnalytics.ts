@@ -464,6 +464,13 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100
 }
 
+// A summed quantity leaves the kernel as the EXACT sum rounded to the nearest double: no float drift
+// (0.1 + 0.2 is 0.3, ten lines of 0.1 are 1) and no refusal when a stored quantity itself carries float noise.
+const QUANTITY_SUM_PLACES = 12
+function reportQuantity(sum: ReportExactDecimal): number {
+  return Number(sum.toText(QUANTITY_SUM_PLACES))
+}
+
 // ---- Canonical revenue = NET SALES (user directive, Sep 1 2026) ------------
 // One definition, used identically by every surface below so the Sales-page
 // header and the Reports kernel can never disagree:
@@ -1575,7 +1582,7 @@ function exactReportTotals(bucket: ReportExactBucket, snapshot: SalesReportSnaps
     collected_total_usd: m.collected.toNumber(places),
     cost_usd: netCost.toNumber(places),
     profit_usd: profit.toNumber(places),
-    avg_order_usd: bucket.tx > 0 ? revenue.divide(ReportExactDecimal.recorded(String(bucket.tx))).toNumber() : 0,
+    avg_order_usd: bucket.tx > 0 ? revenue.divide(ReportExactDecimal.recorded(String(bucket.tx))).toNumber(places) : 0,
   }, diagnostic)
 }
 
@@ -2050,7 +2057,7 @@ export function dashboardRankingsFromSnapshot(snapshot: SalesReportSnapshot, lim
     .map((row) => ({ hour: Number(row.key), count: row.tx_count, revenue_usd: row.revenue_usd })).sort((a, b) => a.hour - b.hour)
   const { groups } = productRevenueGroups(snapshot)
   const productRow = (group: ProductRevenueGroup): DashboardProductRow => ({
-    product_id: group.id, product_name: group.name, qty_sold: round2(group.qty), revenue_usd: group.units / MONEY_UNITS,
+    product_id: group.id, product_name: group.name, qty_sold: group.qty.toNumber(2), revenue_usd: group.units / MONEY_UNITS,
   })
   return {
     topCustomers, hourlyDist,
@@ -2109,7 +2116,7 @@ function allocateUnits(total: number, weights: number[]): number[] | null {
   return parts.map((part) => (total < 0 ? -part : part))
 }
 
-type ProductRevenueGroup = { key: string; id: number | null; name: string; qty: number; units: number }
+type ProductRevenueGroup = { key: string; id: number | null; name: string; qty: ReportExactDecimal; units: number }
 
 /**
  * Revenue and quantity per product over the recognized sales of the snapshot.
@@ -2126,14 +2133,14 @@ function productRevenueGroups(snapshot: SalesReportSnapshot): { groups: ProductR
   let unallocated = 0
   for (const fact of reportSaleFacts(snapshot)) {
     if (!fact.recognized) continue
-    const lines = new Map<string, { key: string; id: number | null; name: string; weight: number; qty: number }>()
+    const lines = new Map<string, { key: string; id: number | null; name: string; weight: number; qty: ReportExactDecimal }>()
     for (const item of itemsBySale.get(Number(fact.sale.id)) || []) {
       const id = item.product_id == null ? null : Number(item.product_id)
       const name = String(item.product_name || '')
       const key = id == null ? `name:${name.trim().toLowerCase()}` : `id:${id}`
-      const line = lines.get(key) || { key, id, name, weight: 0, qty: 0 }
+      const line = lines.get(key) || { key, id, name, weight: 0, qty: ReportExactDecimal.zero() }
       line.weight += Math.max(0, toUnits(reportMoney(item, 'total_usd', fact.version)))
-      line.qty += Number(item.quantity) || 0
+      line.qty = line.qty.add(ReportExactDecimal.quantity(item.quantity as string | number))
       line.name = name || line.name
       lines.set(key, line)
     }
@@ -2142,8 +2149,8 @@ function productRevenueGroups(snapshot: SalesReportSnapshot): { groups: ProductR
     const shares = allocateUnits(units, list.map((line) => line.weight))
     if (!shares) unallocated += units
     list.forEach((line, index) => {
-      const group = groups.get(line.key) || { key: line.key, id: line.id, name: line.name, qty: 0, units: 0 }
-      group.qty += line.qty
+      const group = groups.get(line.key) || { key: line.key, id: line.id, name: line.name, qty: ReportExactDecimal.zero(), units: 0 }
+      group.qty = group.qty.add(line.qty)
       group.units += shares ? shares[index] : 0
       group.name = line.name || group.name
       groups.set(line.key, group)
@@ -2153,9 +2160,9 @@ function productRevenueGroups(snapshot: SalesReportSnapshot): { groups: ProductR
 }
 
 const byProductRevenue = (a: ProductRevenueGroup, b: ProductRevenueGroup): number =>
-  b.units - a.units || b.qty - a.qty || a.name.localeCompare(b.name) || (a.id ?? 0) - (b.id ?? 0)
+  b.units - a.units || b.qty.compare(a.qty) || a.name.localeCompare(b.name) || (a.id ?? 0) - (b.id ?? 0)
 const byProductQty = (a: ProductRevenueGroup, b: ProductRevenueGroup): number =>
-  b.qty - a.qty || b.units - a.units || a.name.localeCompare(b.name) || (a.id ?? 0) - (b.id ?? 0)
+  b.qty.compare(a.qty) || b.units - a.units || a.name.localeCompare(b.name) || (a.id ?? 0) - (b.id ?? 0)
 
 /** Current names of products, one statement per 99 ids. */
 async function liveProductNames(env: Env, ids: number[]): Promise<Map<number, string>> {
@@ -2187,10 +2194,10 @@ export async function exportProductSplitFromSnapshot(env: Env, snapshot: SalesRe
   const live = ids.length ? await liveProductNames(env, ids) : new Map<number, string>()
   const rows: ExportProductRow[] = named.map((group) => ({
     product_id: group.id, product_name: (group.id != null && live.get(group.id)) || group.name,
-    qty_sold: round2(group.qty), revenue_usd: group.units / MONEY_UNITS,
+    qty_sold: group.qty.toNumber(2), revenue_usd: group.units / MONEY_UNITS,
   }))
   if (rest.length) {
-    rows.push({ product_id: null, product_name: 'Other products', qty_sold: round2(rest.reduce((acc, group) => acc + group.qty, 0)),
+    rows.push({ product_id: null, product_name: 'Other products', qty_sold: rest.reduce((acc, group) => acc.add(group.qty), ReportExactDecimal.zero()).toNumber(2),
       revenue_usd: rest.reduce((acc, group) => acc + group.units, 0) / MONEY_UNITS })
   }
   if (unallocated !== 0) rows.push({ product_id: null, product_name: 'Unallocated sales', qty_sold: 0, revenue_usd: unallocated / MONEY_UNITS })
@@ -3067,18 +3074,18 @@ export interface ProductSalesReport {
 export async function getProductSalesReport(env: Env, f: SalesFilters, limit = 200): Promise<ProductSalesReport> {
   const snapshot = await readSalesReportSnapshot(env, f)
   const saleById = new Map(snapshot.sales.map((sale) => [Number(sale.id), sale]))
-  const groups = new Map<string, { product_id: number | null; product_name: string; saleIds: Set<number>; qty: number;
+  const groups = new Map<string, { product_id: number | null; product_name: string; saleIds: Set<number>; qty: ReportExactDecimal;
     lineSales: ReportExactDecimal; cost: ReportExactDecimal; missing: number }>()
   for (const item of snapshot.items) {
     const sale = saleById.get(Number(item.sale_id)); if (!sale || reportStatus(sale) === 'cancelled') continue
     const productId = item.product_id == null ? null : Number(item.product_id)
     const name = String(item.product_name || '')
     const key = productId == null ? `name:${name.trim().toLowerCase()}` : `id:${productId}`
-    const group = groups.get(key) || { product_id: productId, product_name: name, saleIds: new Set<number>(), qty: 0,
+    const group = groups.get(key) || { product_id: productId, product_name: name, saleIds: new Set<number>(), qty: ReportExactDecimal.zero(),
       lineSales: ReportExactDecimal.zero(), cost: ReportExactDecimal.zero(), missing: 0 }
     const version = reportVersion(sale)
     const quantity = ReportExactDecimal.quantity(item.quantity as string | number)
-    group.qty += Number(item.quantity)
+    group.qty = group.qty.add(quantity)
     group.saleIds.add(Number(sale.id))
     group.lineSales = group.lineSales.add(reportMoney(item, 'total_usd', version))
     if (item.cost_price_usd == null) group.missing += 1
@@ -3108,7 +3115,7 @@ export async function getProductSalesReport(env: Env, f: SalesFilters, limit = 2
   const rows = [...groups.values()].map((group) => {
     const meta = group.product_id == null ? null : metadata.get(group.product_id)
     const row: ProductSalesRankingRow = {
-      product_id: group.product_id, product_name: String(meta?.name || group.product_name), sale_count: group.saleIds.size, qty: group.qty,
+      product_id: group.product_id, product_name: String(meta?.name || group.product_name), sale_count: group.saleIds.size, qty: reportQuantity(group.qty),
       line_sales_usd: group.lineSales.toNumber(BUCKET_MONEY_PLACES), cost_usd: group.cost.toNumber(BUCKET_MONEY_PLACES),
       profit_usd: group.lineSales.subtract(group.cost).toNumber(BUCKET_MONEY_PLACES), cost_missing_snapshot_lines: group.missing,
       category_id: meta?.category_id == null ? null : Number(meta.category_id), category_name: String(meta?.category || ''),
@@ -3117,13 +3124,13 @@ export async function getProductSalesReport(env: Env, f: SalesFilters, limit = 2
     return attachReportDiagnostic(row, { ...diagnostic, complete: group.missing === 0, unknown_cost_lines: group.missing })
   })
   rows.sort((a, b) => b.line_sales_usd - a.line_sales_usd || b.qty - a.qty)
-  const all = { sales: new Set<number>(), qty: 0, lineSales: ReportExactDecimal.zero(), cost: ReportExactDecimal.zero(), missing: 0 }
+  const all = { sales: new Set<number>(), qty: ReportExactDecimal.zero(), lineSales: ReportExactDecimal.zero(), cost: ReportExactDecimal.zero(), missing: 0 }
   for (const group of groups.values()) {
     for (const id of group.saleIds) all.sales.add(id)
-    all.qty += group.qty; all.lineSales = all.lineSales.add(group.lineSales); all.cost = all.cost.add(group.cost); all.missing += group.missing
+    all.qty = all.qty.add(group.qty); all.lineSales = all.lineSales.add(group.lineSales); all.cost = all.cost.add(group.cost); all.missing += group.missing
   }
   return { rows: rows.slice(0, Math.max(1, Math.min(1000, Math.trunc(limit) || 200))), total_groups: rows.length,
-    totals: { sale_count: all.sales.size, qty: all.qty, line_sales_usd: all.lineSales.toNumber(BUCKET_MONEY_PLACES), cost_usd: all.cost.toNumber(BUCKET_MONEY_PLACES),
+    totals: { sale_count: all.sales.size, qty: reportQuantity(all.qty), line_sales_usd: all.lineSales.toNumber(BUCKET_MONEY_PLACES), cost_usd: all.cost.toNumber(BUCKET_MONEY_PLACES),
       profit_usd: all.lineSales.subtract(all.cost).toNumber(BUCKET_MONEY_PLACES), cost_missing_snapshot_lines: all.missing } }
 }
 
