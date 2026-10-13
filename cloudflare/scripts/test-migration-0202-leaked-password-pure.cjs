@@ -14,7 +14,7 @@
 //     self change-password; a known password is refused there too; a fresh
 //     one clears the flag and the account works again;
 //   - control: signing in with an ordinary password marks nothing;
-//   - 'admin123' is refused outside local dev and tolerated in local dev
+//   - 'admin123' marks the account at sign-in outside local dev, is tolerated in local dev, and as a NEW password is below the minimum
 //     (BUSINESS_OS_LOCAL_DEV=1 on an unstamped build); 'Admin123456!' never;
 //   - every writer refuses a known password: user create, self change, admin
 //     reset, email-link reset, authenticator-code reset;
@@ -286,7 +286,7 @@ async function check(name, fn) {
     assert.equal(same.status, 400, same.text)
     assert.equal(same.body.code, 'password_known_leaked')
     const demo = await changePassword(token, 2, LEAKED, 'admin123')
-    assert.equal(demo.body.code, 'password_known_leaked', 'admin123 is refused outside local dev')
+    assert.equal(demo.body.code, 'password_too_short', 'admin123 is below the minimum, so it is refused before the leaked check')
     assert.equal(passwordOf(2), `hash:${LEAKED}`, 'nothing written yet')
     const fresh = await changePassword(token, 2, LEAKED, 'a-new-owner-pass-7')
     assert.equal(fresh.status, 200, fresh.text)
@@ -327,7 +327,7 @@ async function check(name, fn) {
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM users WHERE username = 'newbie'").get({}).n, 0)
     const adminReset = await send(usersRoute, 'POST', '/users/3/reset-password', admin, { newPassword: 'admin123' })
     assert.equal(adminReset.status, 400, adminReset.text)
-    assert.equal(adminReset.body.code, 'password_known_leaked')
+    assert.equal(adminReset.body.code, 'password_too_short')
     assert.equal(passwordOf(3), 'hash:till-pass-3')
     const cashier = (await login('cashier', 'till-pass-3')).minted
     const self = await changePassword(cashier, 3, 'till-pass-3', LEAKED)
@@ -431,11 +431,11 @@ async function check(name, fn) {
   await check('owner: old -> new needs only a password that is not publicly known (no other rule); signing in again with it shows no change screen', async () => {
     reset()
     const token = (await login('owner', LEAKED)).minted
-    const changed = await changePassword(token, 2, LEAKED, 'qwerty')
-    assert.equal(changed.status, 200, `a plain 6-character password is enough: ${changed.text}`)
+    const changed = await changePassword(token, 2, LEAKED, 'qwerty-new-1')
+    assert.equal(changed.status, 200, `a plain 12-character password is enough: ${changed.text}`)
     assert.equal(flagOf(2), 0)
     assert.equal((await send(authRoute, 'POST', '/logout', token, { expected_actor_id: 2, expected_organization_id: null })).status, 200)
-    const again = await login('owner', 'qwerty')
+    const again = await login('owner', 'qwerty-new-1')
     assert.equal(again.body.user.must_change_password, 0, 'no forced screen after signing in with the new password')
     assert.equal((await someProtectedCall(again.minted)).status, 200)
     const old = await send(authRoute, 'POST', '/login', null, { username: 'owner', password: LEAKED, deviceId: 'dev-1' })
