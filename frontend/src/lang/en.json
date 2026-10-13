@@ -3781,6 +3781,7 @@
   "review_self_approval": "You cannot approve your own request. Another reviewer must approve it.",
   "review_section_full_required": "Approving this request needs Full access to {section}. Ask a reviewer who has it.",
   "review_identity_conflict": "This request now matches an existing product. Approving it would create a duplicate, so nothing was applied. Reject it and make the change yourself; it will merge into the existing product.",
+  "product_merge_permission_required": "This edit would merge this product into another product, and you do not have permission to merge products.",
   "pending_action_rejected": "Rejected",
   "pending_devices": "Pending devices",
   "perPage": "per page",
