@@ -97,27 +97,40 @@ check('the shift-close clock tolerance keeps its own 5-minute constant', () => {
 
 check('resolve: an accepted claim is not adjusted and echoes the stored value', () => {
   assert.deepEqual(resolveClientCreatedAt(at(-3 * MINUTE), { nowMs: NOW }),
-    { value: '2026-08-31 09:57:00', adjusted: false, claimed: '2026-08-31 09:57:00' })
+    { value: '2026-08-31 09:57:00', adjusted: false, claimed: '2026-08-31 09:57:00', tooOld: false })
 })
 
-check('resolve: a rejected claim yields the server clock and keeps what was claimed for audit', () => {
+check('resolve: a rejected claim yields no value and keeps what was claimed for audit', () => {
   assert.deepEqual(resolveClientCreatedAt(at(-30 * DAY), { nowMs: NOW }),
-    { value: null, adjusted: true, claimed: '2026-08-01 10:00:00' })
+    { value: null, adjusted: true, claimed: '2026-08-01 10:00:00', tooOld: true })
   assert.deepEqual(resolveClientCreatedAt(at(60 * MINUTE), { nowMs: NOW }),
-    { value: null, adjusted: true, claimed: '2026-08-31 11:00:00' })
+    { value: null, adjusted: true, claimed: '2026-08-31 11:00:00', tooOld: false })
   assert.deepEqual(resolveClientCreatedAt('2026-08-01T16:30:00+07:00', { nowMs: NOW }),
-    { value: null, adjusted: true, claimed: '2026-08-01 09:30:00' })
+    { value: null, adjusted: true, claimed: '2026-08-01 09:30:00', tooOld: true })
+})
+
+check('tooOld is set only for a parsed claim earlier than the window; a future or unparseable claim is never tooOld', () => {
+  assert.equal(resolveClientCreatedAt(at(-10 * MINUTE), { nowMs: NOW }).tooOld, false, 'the past edge is inside the window')
+  assert.equal(resolveClientCreatedAt(at(-10 * MINUTE - SECOND), { nowMs: NOW }).tooOld, true)
+  assert.equal(resolveClientCreatedAt(at(-11 * MINUTE), { nowMs: NOW }).value, null)
+  assert.equal(resolveClientCreatedAt(at(2 * MINUTE + SECOND), { nowMs: NOW }).tooOld, false)
+  assert.equal(resolveClientCreatedAt(at(60 * MINUTE), { nowMs: NOW }).tooOld, false)
+  assert.equal(resolveClientCreatedAt('+275760-09-13T00:00:00.000Z', { nowMs: NOW }).tooOld, false)
+  assert.deepEqual(resolveClientCreatedAt('0001-01-01T00:00:00Z', { nowMs: NOW }), { value: null, adjusted: true, claimed: null, tooOld: true })
+  for (const bad of ['not-a-date', 12345, {}, ['2026-08-30'], '', '   ', null, undefined]) {
+    assert.equal(resolveClientCreatedAt(bad, { nowMs: NOW }).tooOld, false, JSON.stringify(bad))
+  }
 })
 
 check('resolve: no claim at all is not an adjustment', () => {
   for (const none of [undefined, null, '', '   ']) {
-    assert.deepEqual(resolveClientCreatedAt(none, { nowMs: NOW }), { value: null, adjusted: false, claimed: null }, JSON.stringify(none))
+    assert.deepEqual(resolveClientCreatedAt(none, { nowMs: NOW }), { value: null, adjusted: false, claimed: null, tooOld: false }, JSON.stringify(none))
   }
 })
 
 check('resolve: an unparseable claim is an adjustment with nothing to echo', () => {
   for (const bad of ['not-a-date', 12345, {}, ['2026-08-30'], '99999999-01-01']) {
-    assert.deepEqual(resolveClientCreatedAt(bad, { nowMs: NOW }), { value: null, adjusted: true, claimed: null }, JSON.stringify(bad))
+    assert.deepEqual(resolveClientCreatedAt(bad, { nowMs: NOW }), { value: null, adjusted: true, claimed: null, tooOld: false }, JSON.stringify(bad))
   }
 })
 
@@ -125,8 +138,9 @@ check('a caller that needs an older client time must opt in with maxPastMs; the 
   const old = at(-30 * DAY)
   assert.equal(resolveClientCreatedAt(old, { nowMs: NOW }).value, null)
   assert.deepEqual(resolveClientCreatedAt(old, { nowMs: NOW, maxPastMs: 60 * DAY }),
-    { value: '2026-08-01 10:00:00', adjusted: false, claimed: '2026-08-01 10:00:00' })
+    { value: '2026-08-01 10:00:00', adjusted: false, claimed: '2026-08-01 10:00:00', tooOld: false })
   assert.equal(resolveClientCreatedAt(at(-61 * DAY), { nowMs: NOW, maxPastMs: 60 * DAY }).value, null)
+  assert.equal(resolveClientCreatedAt(at(-61 * DAY), { nowMs: NOW, maxPastMs: 60 * DAY }).tooOld, true)
   assert.equal(resolveClientCreatedAt(at(10 * MINUTE), { nowMs: NOW, maxPastMs: 60 * DAY }).value, null, 'the future bound does not move with maxPastMs')
   assert.equal(resolveClientCreatedAt('not-a-date', { nowMs: NOW, maxPastMs: 60 * DAY }).value, null)
 })

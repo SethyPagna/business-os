@@ -3,9 +3,14 @@
 // Offline selling was cancelled (26 Sep 2026), so POST /api/sales has no
 // legitimate source of a past-dated sale. A claimed created_at is honored only
 // inside a short window around the server clock (device-clock skew, a slow
-// request); anything else falls back to the server clock (value null), never
-// an error. A wider window lets any POS user record today's cash on a closed
+// request). A wider window lets any POS user record today's cash on a closed
 // business day, which hides it from today's shift.
+//
+// A claim earlier than the window is flagged tooOld and the caller refuses the
+// sale: moving it to the server clock would book a genuine retained sale into
+// today's drawer and the device deletes its copy on success. A claim in the
+// future or one that does not parse falls back to the server clock (value
+// null) and is reported as adjusted.
 //
 // A caller that must keep an older client time (a one-off drain of sales
 // queued before the cancellation) passes maxPastMs explicitly; the default
@@ -27,6 +32,7 @@ export type ClientCreatedAtResolution = {
   value: string | null
   adjusted: boolean
   claimed: string | null
+  tooOld: boolean
 }
 
 type ResolveOptions = { nowMs?: number; maxPastMs?: number }
@@ -42,13 +48,14 @@ export function resolveClientCreatedAt(raw: unknown, options: ResolveOptions = {
   const nowMs = options.nowMs ?? Date.now()
   const maxPastMs = options.maxPastMs ?? SALE_CREATED_AT_MAX_PAST_MS
   const text = typeof raw === 'string' ? raw.trim() : raw
-  if (text === undefined || text === null || text === '') return { value: null, adjusted: false, claimed: null }
+  if (text === undefined || text === null || text === '') return { value: null, adjusted: false, claimed: null, tooOld: false }
   const parsedMs = typeof text === 'string' ? new Date(text).getTime() : Number.NaN
-  if (Number.isNaN(parsedMs)) return { value: null, adjusted: true, claimed: null }
+  if (Number.isNaN(parsedMs)) return { value: null, adjusted: true, claimed: null, tooOld: false }
   const claimed = storedShape(parsedMs)
-  const inWindow = parsedMs >= nowMs - maxPastMs && parsedMs <= nowMs + SALE_CREATED_AT_MAX_FUTURE_MS
-  if (!inWindow || !claimed) return { value: null, adjusted: true, claimed }
-  return { value: claimed, adjusted: false, claimed }
+  const tooOld = parsedMs < nowMs - maxPastMs
+  const inWindow = !tooOld && parsedMs <= nowMs + SALE_CREATED_AT_MAX_FUTURE_MS
+  if (!inWindow || !claimed) return { value: null, adjusted: true, claimed, tooOld }
+  return { value: claimed, adjusted: false, claimed, tooOld: false }
 }
 
 export function sanitizeClientCreatedAt(raw: unknown, nowMs: number = Date.now()): string | null {
