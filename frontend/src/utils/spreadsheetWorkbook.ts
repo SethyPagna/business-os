@@ -1,25 +1,19 @@
-// The SheetJS half of the Excel import: bytes of an .xlsx/.xls/.xlsm in, the
-// same delimited text a .csv upload produces out. It is the ONLY module that
-// reads a workbook, and it runs only inside spreadsheetParse.worker.ts (see
-// spreadsheetImport.ts for why): SheetJS 0.18.5 has prototype-pollution and
-// ReDoS advisories, so an untrusted file must never reach it on the UI thread.
+// The SheetJS half of the Excel import: workbook bytes in, the delimited text a
+// .csv upload would produce out. It is the only module that reads a workbook and
+// runs only inside spreadsheetParse.worker.ts, so untrusted bytes never reach
+// SheetJS on the UI thread.
 import * as XLSX from 'xlsx'
 import { csvFieldForMachine } from './csv.ts'
 
-// The ONE case where a numeric cell's DISPLAY text carries a digit its
-// stored value does not: a zero-padding custom format ("0000000000000"),
-// which is what an operator applies to keep a leading-zero barcode looking
-// right in Excel. The workbook then holds { t:'n', v:123, w:'0123' } and
-// reading .v alone silently drops the zero -- the second root cause behind
-// "products that actually have barcode with leading 0" (verified against
-// SheetJS: a cell written with z:'0000' round-trips exactly like that).
-//
-// Deliberately as narrow as the claim: the formatted text must be nothing
-// but digits, must be LONGER than the plain stringified number, and must
-// still parse back to the same number. That admits '0123' for 123 and
-// rejects everything else -- thousands separators, currency, percentages,
-// and above all the "8.85107E+12" scientific rendering the next case is
-// specifically written not to trust.
+const MS_PER_DAY = 86_400_000
+const SERIAL_EPOCH_UTC_MS = Date.UTC(1899, 11, 30)
+const DAYS_1900_TO_1904_SYSTEM = 1462
+
+// A zero-padding number format ("0000000000000") is how a leading-zero barcode
+// stays a number in Excel: the stored value is 123, the displayed text '0123'.
+// The displayed text is trusted only when it is digits, longer than the stored
+// value's text and parses back to the same number, so '8.85107E+12', thousands
+// separators, currency and percentages are never trusted.
 function zeroPaddedNumericText(cell: XLSX.CellObject): string {
   const formatted = typeof cell.w === 'string' ? cell.w.trim() : ''
   if (!/^0[0-9]*$/.test(formatted)) return ''
@@ -28,15 +22,63 @@ function zeroPaddedNumericText(cell: XLSX.CellObject): string {
   return Number(formatted) === Number(cell.v) ? formatted : ''
 }
 
-// Converts one cell to the text that should appear in the equivalent CSV.
-// Reads cell.v (the raw stored value), not cell.w (Excel's *display* text)
-// -- for a numeric cell, .w is what shows "8.80123E+12" in Excel's UI, but
-// .v is still the full-precision number underneath. Numbers this size (real
-// barcodes are well under JavaScript's 2^53 safe-integer ceiling) stringify
-// back to plain digits with no exponent, which is exactly what String()
-// already does for anything under 1e21. The single exception is the
-// zero-padded rendering above, where .w holds a digit .v cannot.
-function cellToText(cell: XLSX.CellObject | undefined): string {
+// The local calendar and clock fields of a Date, read back as a UTC instant, so
+// later arithmetic cannot be moved by the device's time zone.
+function wallClockUtcMs(date: Date): number {
+  const wall = new Date(0)
+  wall.setUTCFullYear(date.getFullYear(), date.getMonth(), date.getDate())
+  wall.setUTCHours(date.getHours(), date.getMinutes(), date.getSeconds(), date.getMilliseconds())
+  return wall.getTime()
+}
+
+const sheetjsDateSkewByOffset = new Map<number, number>()
+
+// SheetJS builds the Date for a date serial from a zone offset rounded to whole
+// minutes, so where a zone's offset has seconds (Asia/Phnom_Penh, Asia/Hong_Kong,
+// Asia/Kolkata ...) every date lands a few seconds before its midnight and reads
+// as the previous day. The error is constant for a zone and offset era; reading
+// one serial of that era through the same code measures it.
+function measureSheetjsDateSkewMs(serial: number): number {
+  try {
+    const probe = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(probe, { A1: { t: 'n', v: serial, z: 'yyyy-mm-dd' }, '!ref': 'A1' }, 'Probe')
+    const bytes = XLSX.write(probe, { bookType: 'xlsx', type: 'array' })
+    const cell = XLSX.read(bytes, { type: 'array', cellDates: true }).Sheets.Probe?.A1
+    if (cell?.t !== 'd') return 0
+    return Math.round(wallClockUtcMs(cell.v as Date) - (SERIAL_EPOCH_UTC_MS + serial * MS_PER_DAY))
+  } catch {
+    return 0
+  }
+}
+
+function sheetjsDateSkewMs(date: Date): number {
+  const era = date.getTimezoneOffset()
+  let skew = sheetjsDateSkewByOffset.get(era)
+  if (skew === undefined) {
+    skew = measureSheetjsDateSkewMs(Math.floor((wallClockUtcMs(date) - SERIAL_EPOCH_UTC_MS) / MS_PER_DAY))
+    sheetjsDateSkewByOffset.set(era, skew)
+  }
+  return skew
+}
+
+// A date cell is a calendar value, not an instant: its fields are read as UTC
+// after undoing the early landing, never through toISOString or the local
+// getters, so a UTC+ zone cannot step an imported 09/01 back to 08/31. A
+// 1904-system workbook counts its serials from 1904-01-01.
+function calendarDateText(date: Date, date1904: boolean): string {
+  let ms = wallClockUtcMs(date)
+  const skew = sheetjsDateSkewMs(date)
+  if (skew < 0) ms -= skew
+  if (date1904) ms += DAYS_1900_TO_1904_SYSTEM * MS_PER_DAY
+  const day = new Date(ms)
+  return `${day.getUTCFullYear()}-${String(day.getUTCMonth() + 1).padStart(2, '0')}-${String(day.getUTCDate()).padStart(2, '0')}`
+}
+
+// Reads the stored value, not the display text: .w shows a 13-digit barcode as
+// '8.80123E+12' while .v keeps every digit and String() prints it without an
+// exponent. The zero-padded rendering above is the one case .w holds a digit
+// .v cannot.
+function cellToText(cell: XLSX.CellObject | undefined, date1904: boolean): string {
   if (!cell || cell.v === undefined || cell.v === null) return ''
   switch (cell.t) {
     case 'n':
@@ -46,18 +88,9 @@ function cellToText(cell: XLSX.CellObject | undefined): string {
     case 'd': {
       const date = cell.v as Date
       if (Number.isNaN(date.getTime())) return ''
-      // Excel date cells are calendar values, not UTC instants. Converting a
-      // local-midnight cell through toISOString() can shift it to the previous
-      // day on UTC+ timezones. Preserve the calendar fields exactly as SheetJS
-      // decoded them so an imported 09/01 remains 2026-09-01 everywhere.
-      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+      return calendarDateText(date, date1904)
     }
     default:
-      // 's' (shared string) / 'str' (formula result string) -- exact
-      // Unicode text as parsed straight out of the XLSX XML. Khmer, or any
-      // other script, comes through untouched: there's no intermediate
-      // byte-encoding step for SheetJS to get wrong here the way a raw CSV
-      // byte stream can.
       return String(cell.v)
   }
 }
@@ -67,6 +100,7 @@ export function workbookToDelimitedText(workbook: XLSX.WorkBook, sheetName?: str
   const sheet = targetSheetName ? workbook.Sheets[targetSheetName] : undefined
   if (!sheet || !sheet['!ref']) return ''
 
+  const date1904 = Boolean(workbook.Workbook?.WBProps?.date1904)
   const range = XLSX.utils.decode_range(sheet['!ref'])
   const lines: string[] = []
   for (let row = range.s.r; row <= range.e.r; row += 1) {
@@ -74,25 +108,21 @@ export function workbookToDelimitedText(workbook: XLSX.WorkBook, sheetName?: str
     let rowHasValue = false
     for (let col = range.s.c; col <= range.e.c; col += 1) {
       const cell = sheet[XLSX.utils.encode_cell({ r: row, c: col })]
-      const text = cellToText(cell)
+      const text = cellToText(cell, date1904)
       if (text !== '') rowHasValue = true
-      // Machine quoting, not escapeCsvValue: this text goes straight into
-      // this app's own parsers, never Excel, and the injection guard's
-      // leading apostrophe would corrupt real cell values -- a numeric -5
-      // (negative adjustment) became the unparseable text '-5 (M7).
+      // Machine quoting: this text goes to the app's own parsers, and the
+      // injection guard's leading apostrophe would corrupt values like a
+      // numeric -5.
       cells.push(csvFieldForMachine(text))
     }
-    // Skip fully blank rows (matches parseDelimitedRows' own blank-row
-    // filtering in csvImport.ts, so behavior is identical either way a file
-    // arrives).
+    // Blank rows are skipped, as parseDelimitedRows skips them for CSV.
     if (rowHasValue) lines.push(cells.join(','))
   }
   return lines.join('\n')
 }
 
 export function spreadsheetBytesToDelimitedText(bytes: ArrayBuffer, sheetName?: string): string {
-  // cellDates: true -- date-formatted cells come back as JS Date objects
-  // (cell.t === 'd') instead of raw Excel serial numbers, so cellToText
-  // can format them sensibly rather than emitting a meaningless integer.
+  // cellDates: date-formatted cells come back as Date objects (t 'd') instead
+  // of serial numbers.
   return workbookToDelimitedText(XLSX.read(bytes, { type: 'array', cellDates: true }), sheetName)
 }
