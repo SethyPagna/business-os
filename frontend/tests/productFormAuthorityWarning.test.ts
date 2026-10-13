@@ -29,7 +29,7 @@ function Host({draftKey,lang}: {draftKey:string;lang:string}) {
  const tr=(key:string)=>packs[lang][key]
  const t=tr
  deny=new Function('isSaveAuthorityCurrent','saveInFlightRef','aliveRef','currentFormDraftKeyRef','draftKey','setSaveAuthorityWarning','alert','tr',compile(refusal)+';return canContinueSave')(()=>valid,saveInFlightRef,aliveRef,currentFormDraftKeyRef,draftKey,setSaveAuthorityWarning,()=>{popups++},tr)
- return new Function('React','DraftAuthorityNotice','t','saveAuthorityWarning','draftKey', 'return '+compile('const view='+warning).replace(/^const view = /,'').trim().replace(/;$/,''))(React,DraftAuthorityNotice,t,saveAuthorityWarning,draftKey)
+ return new Function('React','DraftAuthorityNotice','t','draftAuthority','saveAuthorityWarning','draftKey', 'return '+compile('const view='+warning).replace(/^const view = /,'').trim().replace(/;$/,''))(React,DraftAuthorityNotice,t,{current:false},saveAuthorityWarning,draftKey)
 }
 try {
  for(const lang of ['en','km']) {

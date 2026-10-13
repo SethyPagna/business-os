@@ -47,6 +47,9 @@ const blip = (): void => {
   localStorage.setItem('businessos_user_expiry', String(Date.now() + 86_400_000))
 }
 const switchTo8 = (): void => writeUser({ id: 8 })
+// Another tab signs in: the session marker moves under this tab and every form it holds locks until the same owner is confirmed.
+const otherTabSignsIn = (): void => { localStorage.setItem('businessos_read_session', 'another-tab-signed-in') }
+const sameOwnerConfirmed = (): void => { actor().completeActorSessionReconciliation(actor().actorSessionReconciliationMarker()) }
 // The scoped draft key of a base key for user 7 (the opener) or user 8 (the stranger), computed up front so a test that has
 // already switched the stored user is not put back by asking.
 const keysFor = (base: string): { seven: string; eight: string } => {
@@ -175,6 +178,27 @@ try {
       } finally { await fee.unmount() }
     })
 
+    // A sign-in check is the one lock that lifts by itself. The notice has to go with it, and Save has to work, without the
+    // operator closing the form; a Save pressed while it was locked must not leave "Reopen this form" standing.
+    await check(`${lang} Expense form, a sign-in check lifts (same owner confirmed): the notice goes with the lock and Save works`, async () => {
+      const fee = await startFee()
+      try {
+        otherTabSignsIn()
+        await fee.render(feeProps)
+        assert.ok(noticeShown(fee, warning), 'locked while the sign-in is checked')
+        assert.equal(saveDisabled(fee), true)
+        await submit(fee)
+        assert.equal(saved.length, 0, 'a Save pressed during the check is refused')
+        sameOwnerConfirmed()
+        await fee.settle()
+        assert.ok(!noticeShown(fee, warning), 'the notice leaves when the lock lifts, with no re-render from the page')
+        assert.equal(saveDisabled(fee), false)
+        await submit(fee)
+        assert.equal(saved.length, 1, 'and Save sends')
+        assert.equal(closed, 1)
+      } finally { await fee.unmount() }
+    })
+
     // ---- Branch form ----------------------------------------------------------------------------------------------
     const branchSaves: Array<Record<string, unknown>> = []
     let branchClosed = 0
@@ -224,6 +248,25 @@ try {
         assert.equal(draftOf(branchKey())?.location, '12 River Road')
         await submit(branch)
         assert.equal(branchSaves.length, 0)
+      } finally { await branch.unmount() }
+    })
+
+    await check(`${lang} Branch form, a sign-in check lifts (same owner confirmed): the notice goes with the lock and Save works`, async () => {
+      const branch = await startBranch()
+      try {
+        otherTabSignsIn()
+        await branch.render(branchProps)
+        assert.ok(noticeShown(branch, warning), 'locked while the sign-in is checked')
+        assert.equal(saveDisabled(branch), true)
+        await submit(branch)
+        assert.equal(branchSaves.length, 0, 'a Save pressed during the check is refused')
+        sameOwnerConfirmed()
+        await branch.settle()
+        assert.ok(!noticeShown(branch, warning), 'the notice leaves when the lock lifts')
+        assert.equal(saveDisabled(branch), false)
+        await submit(branch)
+        assert.equal(branchSaves.length, 1)
+        assert.equal(branchClosed, 1)
       } finally { await branch.unmount() }
     })
 
@@ -325,6 +368,23 @@ try {
         await product.click(product.button(confirmLabel))
         assert.equal(productSaves.length, 0, 'the round trip is not "unchanged"')
         assert.ok(noticeShown(product, warning), 'and the form says why')
+      } finally { await product.unmount() }
+    })
+
+    await check(`${lang} Product form, a sign-in check lifts after a refused confirm: the notice goes and a second Save sends`, async () => {
+      const product = await startProduct()
+      try {
+        otherTabSignsIn()
+        await product.click(product.button(confirmLabel))
+        assert.equal(productSaves.length, 0, 'confirmed during the check: nothing is sent')
+        assert.ok(noticeShown(product, warning), 'and the form says why')
+        sameOwnerConfirmed()
+        await product.settle()
+        assert.ok(!noticeShown(product, warning), 'the notice leaves when the lock lifts')
+        await product.click(product.button(words.save))
+        await product.click(product.button(confirmLabel))
+        assert.equal(productSaves.length, 1, 'a second Save sends')
+        assert.ok(!noticeShown(product, warning))
       } finally { await product.unmount() }
     })
   }

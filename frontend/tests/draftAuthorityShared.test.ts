@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url'
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createHarness } from './mountedComponentHarness.ts'
+import * as actor from '../src/api/actorReadScope.ts'
 import DraftAuthorityNotice from '../src/components/shared/DraftAuthorityNotice.ts'
 import { openDraftAuthority, type DraftAuthority } from '../src/utils/draftAuthority.ts'
 import { useFrozenDraftAuthority, type FrozenDraftAuthority } from '../src/utils/useFrozenDraftAuthority.ts'
@@ -101,13 +102,35 @@ try {
     await render({ baseKey: 'branch_3', adopt: hosted })
     assert.equal(probe().authority, hosted, 'the form writes the draft the page will minimize')
   })
-  await check('the hook: current follows the live owner on every render; refused latches; locked is either', async () => {
+  await check('the hook: nothing to refuse while the authority is current', async () => {
     writeUser(7)
-    await render({ baseKey: null }); await render({ baseKey: 'fee_new', formIdentity: 'locked-case' })
+    await render({ baseKey: null }); await render({ baseKey: 'fee_new', formIdentity: 'current-case' })
     assert.equal(probe().current, true)
     await act(async () => { probe().setRefused(true) })
-    assert.equal(probe().refused, true)
-    assert.equal(probe().locked, true, 'an action that found the authority gone locks the form')
+    assert.equal(probe().refused, false, 'a refusal means the authority is gone; a current one has none to show')
+    assert.equal(probe().locked, false)
+  })
+  await check('the hook: a sign-in check locks it, a refusal during the check is shown, and the lock lifts by itself with the notice', async () => {
+    writeUser(7)
+    await render({ baseKey: null }); await render({ baseKey: 'fee_new', formIdentity: 'check-case' })
+    assert.equal(probe().locked, false)
+    actor.resetActorReadSession()
+    assert.equal(actor.isActorSessionQuarantined(), false, 'premise: a reset in this tab is not a second tab')
+    localStorage.setItem('businessos_read_session', 'another-tab-signed-in') // another tab signs in
+    assert.equal(actor.isActorSessionQuarantined(), true, 'premise: the check started')
+    await act(async () => { await Promise.resolve() }) // the hook re-renders its host after the check starts, with no parent render
+    assert.equal(probe().current, false, 'locked while the sign-in is checked')
+    assert.equal(probe().locked, true)
+    await act(async () => { probe().setRefused(true) })
+    assert.equal(probe().refused, true, 'a Save pressed during the check was refused')
+    await act(async () => { actor.completeActorSessionReconciliation(actor.actorSessionReconciliationMarker()) }) // the same owner is confirmed
+    await act(async () => { await Promise.resolve() })
+    assert.equal(probe().current, true, 'released')
+    assert.equal(probe().refused, false, 'and the refusal does not outlive the lock')
+    assert.equal(probe().locked, false, 'so the notice goes with it')
+  })
+  await check('the hook: current follows the live owner on every render; a real change never lifts', async () => {
+    writeUser(7)
     await render({ baseKey: null }); await render({ baseKey: 'fee_new', formIdentity: 'owner-case' })
     assert.equal(probe().locked, false)
     writeUser(8)

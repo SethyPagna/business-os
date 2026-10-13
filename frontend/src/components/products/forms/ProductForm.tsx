@@ -1511,7 +1511,7 @@ function ProductFormContent({
         </>
       )}
       unsavedChanges={{ workKey: dirtyWorkKey }}>
-      {saveAuthorityWarning === draftKey ? <DraftAuthorityNotice t={t} className="mb-3" /> : null}
+      {saveAuthorityWarning === draftKey && !draftAuthority.current ? <DraftAuthorityNotice t={t} className="mb-3" /> : null}
       {unscopedDraftAvailable ? <p role="status" className="mb-3 text-xs text-amber-700 dark:text-amber-300">{tr('product_draft_unknown_authority', 'An older draft is preserved on this device. Its server cannot be verified, so it has not been opened here.', 'សេចក្ដីព្រាងចាស់នៅតែរក្សាទុកលើឧបករណ៍នេះ។ មិនអាចផ្ទៀងផ្ទាត់ម៉ាស៊ីនមេរបស់វាបានទេ ដូច្នេះវាមិនត្រូវបានបើកនៅទីនេះទេ។')}</p> : null}
       <div ref={productFormContentRef} className="mb-5 -mx-5 border-b border-gray-200 px-5 dark:border-gray-700">
         <div className="flex gap-1 overflow-x-auto">
