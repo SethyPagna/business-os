@@ -544,7 +544,10 @@ test('sumTotals sums additive figures, recomputes the average, and keeps profit 
   const b = normalizeTotals({ ...adminTotals, tx_count: 4, revenue_usd: 100.005, profit_usd: 30, cost_usd: 70, cost_missing_snapshot_lines: 1 }) as ReportTotals
   const both = sumTotals([a, b])
   assert.equal(both.tx_count, 10)
-  assert.equal(both.revenue_usd, 355.01, 'money re-rounded to cents')
+  // Owner, 13 Oct 2026: split rows carry 4 places and so does their sum --
+  // re-rounding it to cents (355.01) is the L3 mismatch against the Overview.
+  assert.equal(both.revenue_usd, 355.005, 'money keeps the 4 places of its rows')
+  assert.equal(sumTotals([b, normalizeTotals({ ...adminTotals, revenue_usd: 0.00004 }) as ReportTotals]).revenue_usd, 100.005, 'and rounds the sum to 4 places, never more')
   assert.equal(both.avg_order_usd, 35.5, 'average = revenue / tx, never summed')
   assert.equal(both.profit_usd, 200)
   assert.equal(both.cost_usd, 160)
@@ -1030,8 +1033,8 @@ test('sales receipt and statement cost floors match the canonical aggregate rule
   const source = read('src/components/sales/reports/SalesListReport.tsx')
   const helpers = source.slice(source.indexOf('const MONEY_KEYS'), source.indexOf('export default function'))
     .replaceAll('export function', 'function')
-  const { mapSaleRow, sumSaleRows } = new Function('num', 'round2', `${stripTypeScriptTypes(helpers)}; return {mapSaleRow,sumSaleRows}`)(
-    (v: unknown) => Number(v) || 0, (v: number) => Math.round(v * 100) / 100,
+  const { mapSaleRow, sumSaleRows } = new Function('num', 'round2', 'round4', `${stripTypeScriptTypes(helpers)}; return {mapSaleRow,sumSaleRows}`)(
+    (v: unknown) => Number(v) || 0, (v: number) => Math.round(v * 100) / 100, (v: number) => Math.round(v * 10_000) / 10_000,
   )
   const corrected = mapSaleRow({cost_usd:0,cost_before_floor_usd:-10,gross_profit_usd:85},0)
   const ordinary = mapSaleRow({cost_usd:120,cost_before_floor_usd:120,gross_profit_usd:84},1)

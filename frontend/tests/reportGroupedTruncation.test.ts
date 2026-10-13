@@ -52,7 +52,7 @@ assert.match(g, /const windowTotals = !search && state\.data\?\.totals/, 'only a
 assert.match(g, /const totals = \(windowTotals && normalizeTotals\(windowTotals\)\) \|\| sumTotals\(groupRows\)/,
   'the grouped totals line reads the response totals, falling back to the row sum only when searched or absent')
 assert.match(g, /const groupTotalsRow: GroupRow \| null = groupRows\.length > 1 \|\| truncated \? \{ \.\.\.totals, key: '__totals', label: totalLabel/)
-assert.match(g, /rowsToCsvObjects\(csvColumnsFor\(columns, fmtMoney\), groupTotalsRow \? \[\.\.\.groupRows, groupTotalsRow\] : groupRows\)/,
+assert.match(g, /rowsToCsvObjects\(csvColumnsFor\(columns, fmtRow\), groupTotalsRow \? \[\.\.\.groupRows, groupTotalsRow\] : groupRows\)/,
   'the grouped export carries the window totals row')
 assert.match(g, /totalsRow=\{groupTotalsRow\}/)
 assert.match(g, /summary=\{groupRows\.length \? joinSummary\(\[countPart\(groupRows\.length, REPORT_NOUNS\[by\]\)/)

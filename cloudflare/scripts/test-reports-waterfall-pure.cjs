@@ -259,8 +259,8 @@ test('gateTotals keeps pending COGS and pending profit admin-only', () => {
     assert.ok(new RegExp(`[{,]\\s*${key}\\s*[,}]`).test(prologue), `${key} is destructured out before the non-admin return`)
   }
   assert.ok(/\.\.\.rest\s*\}/.test(prologue), 'and what is left leaves as ...rest')
-  assert.ok(gate.indexOf('if (!isAdmin) return rest') < gate.indexOf('pending_cost_usd: round2'), 'they are re-added only after the non-admin early return')
-  assert.ok(gate.includes('pending_profit_usd: round2(num(pending_profit_usd))'), 'the admin branch re-adds pending profit')
+  assert.ok(gate.indexOf('if (!isAdmin) return rest') < gate.indexOf('pending_cost_usd: money('), 'they are re-added only after the non-admin early return')
+  assert.ok(gate.includes('pending_profit_usd: money(num(pending_profit_usd))'), 'the admin branch re-adds pending profit')
   // The rest of the pending block is sale-header money and stays readable.
   assert.ok(!gate.includes('pending_revenue_usd,') && !gate.includes('pending_gross_sales_usd,'), 'unpaid revenue/gross are not gated (they never were)')
 })

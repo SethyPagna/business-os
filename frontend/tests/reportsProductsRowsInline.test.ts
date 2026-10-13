@@ -71,7 +71,7 @@ const productsBranchStart = source.indexOf("if (by === 'product') {")
 const productsBranchEnd = source.indexOf("if (by === 'courier') {")
 assert.ok(productsBranchStart > -1 && productsBranchEnd > productsBranchStart, 'the products branch must exist')
 const productsBranch = source.slice(productsBranchStart, productsBranchEnd)
-const productsColumns = productsBranch.slice(0, productsBranch.indexOf('const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtMoney), '))
+const productsColumns = productsBranch.slice(0, productsBranch.indexOf('const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtRow), '))
 
 const columnKeys = [...productsColumns.matchAll(/key:\s*'(\w+)'/g)].map((m) => m[1])
 const wantOrder = ['product_name', 'sale_count', 'qty', 'line_sales_usd', 'cost_usd', 'profit_usd', 'margin_pct', 'share']
@@ -86,7 +86,7 @@ assert.match(costColumn, /tr\('cogs',/, 'COGS column must use the shared cogs la
 //    through ReportTable's cardBody prop.
 // ---------------------------------------------------------------------------
 
-assert.match(productsBranch, /cardBody=\{\(row\) => renderProductCard\(row, tr, fmtMoney\)\}/, 'the products ReportTable must wire the compact card renderer')
+assert.match(productsBranch, /cardBody=\{\(row\) => renderProductCard\(row, tr, fmtRow\)\}/, 'the products ReportTable must wire the compact card renderer')
 
 const cardStart = source.indexOf('function renderProductCard')
 const cardEnd = source.indexOf('export interface CourierRow')

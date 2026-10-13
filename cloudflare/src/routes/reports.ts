@@ -17,6 +17,7 @@ import {
   getDeliveryContactTotals,
   getSalesGroupedReport,
   getSalesOverviewBlocks,
+  BUCKET_MONEY_PLACES,
   reportCustomerNameExpr,
   getProductSalesReport,
   previousPeriodFilters,
@@ -200,11 +201,11 @@ function filterError(error: unknown): string {
  * from "hidden", so absence is the contract -- same rule as
  * buildDaySummaryRow / buildSaleReportRow above).
  */
-export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: boolean, canViewCosts = isAdmin): Record<string, unknown> {
+export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: boolean, canViewCosts = isAdmin, places: 2 | 4 = 2): Record<string, unknown> {
   if (!isAdmin && canViewCosts) {
     // Cost grants do not confer the separate administrator-only delivery gate.
     const { delivery_actual_cost_usd, delivery_actual_cost_count, delivery_margin_usd, delivery_net_usd,
-      recognized_delivery_cost_usd, pending_delivery_cost_usd, ...costView } = gateTotals(row, true)
+      recognized_delivery_cost_usd, pending_delivery_cost_usd, ...costView } = gateTotals(row, true, true, places)
     return costView
   }
   const diagnostic = reportMoneyDiagnostic(row)
@@ -234,35 +235,38 @@ export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: b
     money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows, ...rest
   } = row as Record<string, unknown>
   if (!isAdmin) return rest
+  // The kernel quantizes money: 2 places for a window total, 4 for a bucket row
+  // (BUCKET_MONEY_PLACES, owner 13 Oct 2026). A bucket row keeps its 4 places.
+  const money = (value: number): number => (places === 4 ? Math.round(value * 10_000) / 10_000 : round2(value))
   const revenue = num(rest.revenue_usd)
   const profit = num(profit_usd)
   return {
     ...rest,
-    cost_usd: round2(num(cost_usd)),
-    profit_usd: round2(profit),
+    cost_usd: money(num(cost_usd)),
+    profit_usd: money(profit),
     cost_missing_snapshot_lines: num(cost_missing_snapshot_lines),
     margin_pct: revenue > 0 ? round2((profit / revenue) * 100) : null,
-    pending_cost_usd: round2(num(pending_cost_usd)),
-    pending_profit_usd: round2(num(pending_profit_usd)),
-    unvalued_cost_usd: round2(num(unvalued_cost_usd)),
-    returned_cost_usd: round2(num(returned_cost_usd)),
-    returned_cost_shortfall_usd: round2(num(returned_cost_shortfall_usd)),
-    delivery_actual_cost_usd: round2(num(delivery_actual_cost_usd)),
+    pending_cost_usd: money(num(pending_cost_usd)),
+    pending_profit_usd: money(num(pending_profit_usd)),
+    unvalued_cost_usd: money(num(unvalued_cost_usd)),
+    returned_cost_usd: money(num(returned_cost_usd)),
+    returned_cost_shortfall_usd: money(num(returned_cost_shortfall_usd)),
+    delivery_actual_cost_usd: money(num(delivery_actual_cost_usd)),
     delivery_actual_cost_count: num(delivery_actual_cost_count),
-    delivery_margin_usd: round2(num(delivery_margin_usd)),
-    delivery_net_usd: round2(num(delivery_net_usd)),
-    recognized_delivery_cost_usd: round2(num(recognized_delivery_cost_usd)),
-    pending_delivery_cost_usd: round2(num(pending_delivery_cost_usd)),
+    delivery_margin_usd: money(num(delivery_margin_usd)),
+    delivery_net_usd: money(num(delivery_net_usd)),
+    recognized_delivery_cost_usd: money(num(recognized_delivery_cost_usd)),
+    pending_delivery_cost_usd: money(num(pending_delivery_cost_usd)),
     // Absent stays absent: the kernel omits these when the window cannot be
     // matched to stock movements (a payment-method or status filter, a grouped
     // row), and turning that into 0 would print "no losses" for a question
     // that was never asked.
     ...(removal_loss_usd === undefined ? {} : {
-      removal_loss_usd: round2(num(removal_loss_usd)),
+      removal_loss_usd: money(num(removal_loss_usd)),
       removal_loss_qty: num(removal_loss_qty),
       removal_loss_unvalued_rows: num(removal_loss_unvalued_rows),
-      revenue_after_losses_usd: round2(num(revenue_after_losses_usd)),
-      profit_after_losses_usd: round2(num(profit_after_losses_usd)),
+      revenue_after_losses_usd: money(num(revenue_after_losses_usd)),
+      profit_after_losses_usd: money(num(profit_after_losses_usd)),
     }),
     ...(diagnostic ? { money_precision_mode: diagnostic.precision_mode, money_complete: diagnostic.complete,
       money_unknown_cost_lines: diagnostic.unknown_cost_lines, money_contributing_rows: diagnostic.contributing_rows }
@@ -270,17 +274,18 @@ export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: b
   }
 }
 
-export function gateProductRow(row: Record<string, unknown>, isAdmin: boolean): Record<string, unknown> {
+export function gateProductRow(row: Record<string, unknown>, isAdmin: boolean, places: 2 | 4 = 2): Record<string, unknown> {
   const diagnostic = reportMoneyDiagnostic(row)
   const { cost_usd, profit_usd, cost_missing_snapshot_lines, margin_pct,
     money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows, ...rest } = row
   if (!isAdmin) return rest
+  const money = (value: number): number => (places === 4 ? Math.round(value * 10_000) / 10_000 : round2(value))
   const lineSales = num(rest.line_sales_usd)
   const profit = num(profit_usd)
   return {
     ...rest,
-    cost_usd: round2(num(cost_usd)),
-    profit_usd: round2(profit),
+    cost_usd: money(num(cost_usd)),
+    profit_usd: money(profit),
     cost_missing_snapshot_lines: num(cost_missing_snapshot_lines),
     margin_pct: lineSales > 0 ? round2((profit / lineSales) * 100) : null,
     ...(diagnostic ? { money_precision_mode: diagnostic.precision_mode, money_complete: diagnostic.complete,
@@ -500,7 +505,7 @@ app.get('/periods', async (c) => {
   const granularity = parseGranularity(query.granularity)
   const isAdmin = isAdminControlUser(user)
   const periodRows = await getBusinessSummaryPeriodRows(c.env, f, granularity)
-  const rows = periodRows.map((r) => gateTotals(r as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user)))
+  const rows = periodRows.map((r) => gateTotals(r as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user), BUCKET_MONEY_PLACES))
   return c.json({ granularity, is_admin: isAdmin, filters: f, rows })
 })
 
@@ -525,17 +530,17 @@ app.get('/grouped', async (c) => {
   let totals: Record<string, unknown> | null = null
   if (by === 'product') {
     const report = await getProductSalesReport(c.env, f, limit)
-    rows = report.rows.map((r) => gateProductRow(r as unknown as Record<string, unknown>, canViewAcquisitionCosts(user)))
+    rows = report.rows.map((r) => gateProductRow(r as unknown as Record<string, unknown>, canViewAcquisitionCosts(user), BUCKET_MONEY_PLACES))
     totalGroups = report.total_groups
-    totals = gateProductRow(report.totals as unknown as Record<string, unknown>, canViewAcquisitionCosts(user))
+    totals = gateProductRow(report.totals as unknown as Record<string, unknown>, canViewAcquisitionCosts(user), BUCKET_MONEY_PLACES)
   } else if (by === 'courier') {
     rows = (await getDeliveryContactTotals(c.env, f)).map((row) => gateCourierRow(row as unknown as Record<string, unknown>, isAdmin))
     totalGroups = rows.length
   } else if ((SALES_GROUP_KEYS as readonly string[]).includes(by)) {
     const report = await getSalesGroupedReport(c.env, f, by as SalesGroupKey, limit)
-    rows = report.rows.map((r) => gateTotals(r as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user)))
+    rows = report.rows.map((r) => gateTotals(r as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user), BUCKET_MONEY_PLACES))
     totalGroups = report.total_groups
-    totals = gateTotals(report.totals as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user))
+    totals = gateTotals(report.totals as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user), BUCKET_MONEY_PLACES)
   } else {
     return c.json({ error: 'by must be one of customer, cashier, payment_method, hour, weekday, branch, product, courier' }, 400)
   }
@@ -600,7 +605,9 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
         const rows = businessSummarySalesRowsFromSnapshot(cohort).map((row) => gateBusinessSummarySaleRow(row, canViewCosts))
         rows.sort((left, right) => (descending ? -1 : 1) * (reportExportStamp(String(left.cursor_at)) - reportExportStamp(String(right.cursor_at))
           || Number(left.id) - Number(right.id)))
-        const totals = gateTotals(salesTotalsFromSnapshot(cohort) as unknown as Record<string, unknown>, isAdmin, canViewCosts)
+        // The export's totals row sits under 4-place receipt rows and is their
+        // exact sum, not a headline (owner, 13 Oct 2026).
+        const totals = gateTotals(salesTotalsFromSnapshot(cohort, BUCKET_MONEY_PLACES) as unknown as Record<string, unknown>, isAdmin, canViewCosts, BUCKET_MONEY_PLACES)
         const token = await reportExportToken({ export_version: 1, query: effective, search, order: descending ? 'desc' : 'asc',
           snapshot_max_id: maximum, authorization: { is_admin: isAdmin, can_view_costs: canViewCosts }, row_count: rows.length, rows, totals })
         if (hasToken && token !== query.exportToken) return c.json({ code: 'report_export_changed', error: 'Sales changed. Restart the export.' }, 409)

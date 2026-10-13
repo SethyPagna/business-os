@@ -131,16 +131,16 @@ sale({ day: '2026-10-07', line: 19.9955, quantity: 2, refunds: [{ units: 1, payo
     return { totals, day: days[0], group: grouped[0], rowRevenue: rowSum(rows, 'net_revenue_usd'),
       rowProfit: rowSum(rows, 'gross_profit_usd'), drillRevenue: rowSum(report.sales, 'revenue_usd'), dayReport: report.totals }
   }
-  // rows=false: per-receipt rows are cent-rounded before they are summed, so
-  // a sub-cent residue per row (C, F) does not reach their sum (finding L3).
-  const same = (s, revenue, label, rows = true) => {
+  // A window total (totals, the day report's totals) is a headline at cents;
+  // every bucket and receipt row carries 4 places (owner, 13 Oct 2026), so
+  // the rows sum to `exact` and round to the headline.
+  const same = (s, revenue, label, exact = revenue) => {
     assert.equal(s.totals.revenue_usd, revenue, `${label}: totals revenue`)
-    assert.equal(s.day.revenue_usd, revenue, `${label}: day row revenue`)
-    assert.equal(s.group.revenue_usd, revenue, `${label}: grouped revenue`)
     assert.equal(s.dayReport.revenue_usd, revenue, `${label}: day-report revenue`)
-    if (!rows) return
-    assert.equal(Number(s.rowRevenue.toFixed(2)), revenue, `${label}: business-summary sale rows`)
-    assert.equal(Number(s.drillRevenue.toFixed(2)), revenue, `${label}: day-report sale rows`)
+    assert.equal(s.day.revenue_usd, exact, `${label}: day row revenue`)
+    assert.equal(s.group.revenue_usd, exact, `${label}: grouped revenue`)
+    assert.equal(s.rowRevenue, exact, `${label}: business-summary sale rows`)
+    assert.equal(s.drillRevenue, exact, `${label}: day-report sale rows`)
   }
 
   const a = await surfaces('2026-10-01')
@@ -159,7 +159,7 @@ sale({ day: '2026-10-07', line: 19.9955, quantity: 2, refunds: [{ units: 1, payo
   })
   const c = await surfaces('2026-10-03')
   check(`C partial refunds keep the merchandise basis: revenue $${c.totals.revenue_usd} (charging partial rounding too would give $100)`, () => {
-    same(c, 100.02, 'C', false)
+    same(c, 100.02, 'C', 100.022)
   })
   const d = await surfaces('2026-10-04')
   check(`D downward rounding fully refunded: revenue $${d.totals.revenue_usd} (bf7408b49: -$0.01)`, () => {
@@ -171,7 +171,7 @@ sale({ day: '2026-10-07', line: 19.9955, quantity: 2, refunds: [{ units: 1, payo
   })
   const f = await surfaces('2026-10-06')
   check(`F sale rounding on the unrefunded delivery fee stays: revenue $${f.totals.revenue_usd} (reversing the whole adjustment: $0)`, () => {
-    same(f, 0.02, 'F', false)
+    same(f, 0.02, 'F', 0.016)
   })
   const g = await surfaces('2026-10-07')
   check(`G two partial refunds completing the sale: revenue $${g.totals.revenue_usd}, profit $${g.totals.profit_usd}`, () => {

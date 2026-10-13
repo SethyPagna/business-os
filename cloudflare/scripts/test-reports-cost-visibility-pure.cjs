@@ -30,7 +30,7 @@ Module._load = function(request, parent, isMain) {
   if (request === '../lib/db') return { getDb: () => ({}) }
   if (request === '../lib/acquisitionCostAccess' || request === '../lib/reportExport') return originalLoad.call(this, request, parent, isMain)
   if (request === '../lib/salesAnalytics') return new Proxy({
-    SALES_GROUP_KEYS: ['branch'], reportMoneyDiagnostic: () => null,
+    SALES_GROUP_KEYS: ['branch'], BUCKET_MONEY_PLACES: 4, reportMoneyDiagnostic: () => null,
     getSalesTotals: async () => ({ ...totals }), previousPeriodFilters: () => ({}),
     getSalesGroupedReport: async () => ({ rows: [{ key: 'main', label: 'Main', ...totals }], total_groups: 1, totals: { ...totals } }),
     getSalesOverviewBlocks: async () => ({ totals: { ...totals }, couriers: [{ ...courier }],
@@ -208,7 +208,9 @@ function assertNoSensitive(value, label) {
     assert.equal(granted.rows[0].revenue_usd, denied.rows[0].revenue_usd, 'public revenue is unchanged by the grant')
     if (pathname.includes('intent=export')) {
       assertNoSensitive(denied.totals, 'export totals without cost authority')
-      assert.equal(granted.totals.cost_usd, 0.13, 'authorized totals keep the existing cent presentation')
+      // Owner, 13 Oct 2026: the export's totals row is the exact sum of its
+      // 4-place receipt rows, so it carries 4 places too (0.125, not 0.13).
+      assert.equal(granted.totals.cost_usd, 0.125, 'authorized export totals carry the 4-place sum of the rows')
       assert.match(granted.export_token, /^[a-f0-9]{64}$/)
       assert.notEqual(granted.export_token, denied.export_token, 'actual export tokens bind the visible cost authority')
     }

@@ -59,6 +59,10 @@ const GRANULARITIES: Array<{ id: ReportGranularity; key: string; fallback: strin
 
 export default function PeriodReport(p: ReportViewProps) {
   const { tr, fmtMoney, options, style, filters, view } = p
+  // Day/week/month rows are splits of the range: 4 places in the table, its
+  // totals row and the export, so they add up exactly to the Overview (owner,
+  // 13 Oct 2026). The summary line and a period's statement keep cents.
+  const fmtRow = p.fmtBucketMoney ?? fmtMoney
   const g = options.granularity
   const params = useMemo(() => ({ ...reportQueryParams(filters, view), granularity: g }), [filters, view, g])
   const depsKey = JSON.stringify(params)
@@ -134,7 +138,7 @@ export default function PeriodReport(p: ReportViewProps) {
       ])
     : ''
 
-  const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtMoney).map((c, i) => (i === 0 ? { ...c, value: (r: PeriodRow) => periodLabel(r, g, fmtDate) } : c)), rows)
+  const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtRow).map((c, i) => (i === 0 ? { ...c, value: (r: PeriodRow) => periodLabel(r, g, fmtDate) } : c)), rows)
   const exportCsv = () => downloadCSV(reportFileName(`periods-${g}`, filters, 'csv'), csv())
   const exportPrint = () => openPrintExport({ title: `${tr('reports', 'Reports')} · ${tr(view.labelKey, view.fallback)}`, subtitle: rangeSubtitle(filters, tr), headers: columns.map((c) => c.label), rows: csv() })
 
@@ -168,7 +172,7 @@ export default function PeriodReport(p: ReportViewProps) {
         rows={rows}
         rowKey={(r) => r.period}
         style={style}
-        fmtMoney={fmtMoney}
+        fmtMoney={fmtRow}
         labels={labels}
         loading={state.loading}
         totalsRow={rows.length > 1 ? ({ ...totals, period: labels.total, date_from: '', date_to: '', days: rows.reduce((n, r) => n + r.days, 0) } as PeriodRow) : null}

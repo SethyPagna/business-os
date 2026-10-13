@@ -6,7 +6,7 @@
 // (cloudflare/src/lib/salesAnalytics.ts, routes/reports.ts) -- this file
 // only arranges figures it received and never re-derives revenue.
 
-import { actualUsdValue } from '../../../utils/financialPrecision.ts'
+import { actualUsdValue, financialCalculationValue } from '../../../utils/financialPrecision.ts'
 import { reportUtcBound } from '../../../utils/businessTimeBounds.ts'
 
 export type ReportArea = 'sales' | 'returns' | 'fees'
@@ -300,6 +300,16 @@ export function round2(v: number): number {
   return actualUsdValue(v)
 }
 
+/**
+ * Split-row money (owner, 13 Oct 2026): every bucket -- day, week, customer,
+ * branch, hour, product, courier, receipt -- carries 4 places, so the rows and
+ * their sum reconcile exactly with the Overview. Sums of such rows round here,
+ * never to cents; a headline still prints at cents through fmtMoney.
+ */
+export function round4(v: number): number {
+  return financialCalculationValue(v)
+}
+
 /** A count and its noun: "1 sale", "4 sales". English needs the singular
  *  form at exactly 1; Khmer does not inflect for number, so both keys resolve
  *  to the same word there and the call stays correct in either pack. Never
@@ -476,7 +486,7 @@ export function normalizeTotals(raw: unknown): ReportTotals | null {
   // Presence-signalled, exactly like the admin keys below: a Worker older than
   // the Sep 6 kernel does not send net_sales_usd, and a 0 there would be read
   // as "this window sold nothing net" rather than "the server did not say".
-  if (typeof r.net_sales_usd === 'number') out.net_sales_usd = round2(num(r.net_sales_usd))
+  if (typeof r.net_sales_usd === 'number') out.net_sales_usd = round4(num(r.net_sales_usd))
   if (typeof r.cost_usd === 'number' || typeof r.profit_usd === 'number') {
     out.cost_usd = num(r.cost_usd)
     out.profit_usd = num(r.profit_usd)
@@ -492,11 +502,11 @@ export function normalizeTotals(raw: unknown): ReportTotals | null {
   // profit while withholding the removal block, because the two answer
   // different questions about different windows.
   if (typeof r.removal_loss_usd === 'number') {
-    out.removal_loss_usd = round2(num(r.removal_loss_usd))
+    out.removal_loss_usd = round4(num(r.removal_loss_usd))
     out.removal_loss_qty = num(r.removal_loss_qty)
     out.removal_loss_unvalued_rows = num(r.removal_loss_unvalued_rows)
-    out.revenue_after_losses_usd = round2(num(r.revenue_after_losses_usd))
-    out.profit_after_losses_usd = round2(num(r.profit_after_losses_usd))
+    out.revenue_after_losses_usd = round4(num(r.revenue_after_losses_usd))
+    out.profit_after_losses_usd = round4(num(r.profit_after_losses_usd))
   }
   return out
 }
@@ -531,7 +541,8 @@ export const BASIS_LABELS: Record<ReportBasis, { key: string; fallback: string }
   collected: { key: 'collected_total', fallback: 'Collected total' },
 }
 
-/** Sum canonical rows client-side for a totals line. Profit keys survive only when EVERY row carries them. */
+/** Sum canonical rows client-side for a totals line. Profit keys survive only when EVERY row carries them.
+ *  The rows are 4-place splits, so their sum keeps 4 places (round4), never cents. */
 export function sumTotals(rows: ReportTotals[]): ReportTotals {
   const out = {} as ReportTotals
   for (const k of TOTAL_KEYS) (out as unknown as Record<string, number>)[k] = 0
@@ -573,29 +584,29 @@ export function sumTotals(rows: ReportTotals[]): ReportTotals {
     }
   }
   for (const k of TOTAL_KEYS) {
-    if (k.endsWith('_usd')) (out as unknown as Record<string, number>)[k] = round2((out as unknown as Record<string, number>)[k])
+    if (k.endsWith('_usd')) (out as unknown as Record<string, number>)[k] = round4((out as unknown as Record<string, number>)[k])
   }
   out.avg_order_usd = out.tx_count > 0 ? round2(out.revenue_usd / out.tx_count) : 0
-  if (allNetSales) out.net_sales_usd = round2(netSales)
+  if (allNetSales) out.net_sales_usd = round4(netSales)
   if (allProfit) {
-    out.cost_usd = round2(cost)
-    out.profit_usd = round2(profit)
+    out.cost_usd = round4(cost)
+    out.profit_usd = round4(profit)
     out.margin_pct = pct(out.profit_usd, out.revenue_usd)
     out.cost_missing_snapshot_lines = missing
-    out.pending_cost_usd = round2(pendingCost)
-    out.pending_profit_usd = round2(pendingProfit)
+    out.pending_cost_usd = round4(pendingCost)
+    out.pending_profit_usd = round4(pendingProfit)
   }
   if (allLosses) {
-    out.removal_loss_usd = round2(removalLoss)
+    out.removal_loss_usd = round4(removalLoss)
     out.removal_loss_qty = round2(removalQty)
     out.removal_loss_unvalued_rows = removalUnvalued
     // Re-derived from THIS object's revenue/profit, never summed from the
-    // rows': the summed totals are round2'd independently, and re-deriving is
+    // rows': the summed totals are rounded independently, and re-deriving is
     // what keeps `revenue - losses` on screen equal to the line above it.
-    out.revenue_after_losses_usd = round2(out.revenue_usd - out.removal_loss_usd)
+    out.revenue_after_losses_usd = round4(out.revenue_usd - out.removal_loss_usd)
     // Only when profit itself survived the sum -- a profit_after_losses built
     // on an absent profit would be the loss printed as a business result.
-    if (allProfit) out.profit_after_losses_usd = round2(num(out.profit_usd) - out.removal_loss_usd)
+    if (allProfit) out.profit_after_losses_usd = round4(num(out.profit_usd) - out.removal_loss_usd)
   }
   return out
 }

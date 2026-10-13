@@ -25,19 +25,18 @@
 //                  240 s timeout.
 //   L3 2026-10-03/04  two $1 sales whose COGS is $0.0050 each. The overall
 //                  COGS is $0.01. Buckets (day rows, the week rollup, per
-//                  customer rows) must reconcile to it exactly, or carry an
-//                  explicit rounding explanation.
+//                  customer rows) carry 4-decimal money (owner, 13 Oct 2026)
+//                  and must reconcile to it exactly; a control proves the
+//                  check rejects cent-rounded buckets.
 //   L4 2026-10-05  one delivery sale (fee $2 paid by the customer, courier
 //                  actually paid $1.50). A cost-view employee is denied
 //                  delivery_actual_cost_usd; it must not be recoverable by
 //                  arithmetic from the figures the employee DOES receive.
 //
-// ROUNDING POLICY IS UNRESOLVED (round-up vs nearest-four-decimals; owner
-// conflict recorded in REQUIREMENT-GAPS.md section 4). These checks are
-// written so they hold under every plausible rule: a full refund reverses the
-// whole sale whatever the sale was rounded to, and a bucketed report either
-// adds up or says why it does not. The per-rule analysis is printed (INFO) and
-// recorded in AL-MONEY-REPRO.md.
+// Rounding: a full refund reverses the whole sale whatever the sale was
+// rounded to (L1). For bucketed reports the owner settled the rule on 13 Oct
+// 2026: split reports show 4-decimal amounts, so every bucket adds up to the
+// Overview and no rounding line is needed (L3).
 //
 // Harness: harness/al_money_native.cjs (the exported part of test-al-money-c-native.cjs). Report reads are the subject here, so
 // they count toward the D1 budget check.
@@ -169,22 +168,34 @@ async function main() {
     const weeks = (await h.call('GET', H.fresh(`/api/reports/periods?granularity=week&${l3Range}`), undefined, 'L3 periods by week')).body.rows
     const customers = (await h.call('GET', H.fresh(`/api/reports/grouped?by=customer&limit=500&${l3Range}`), undefined, 'L3 grouped by customer')).body.rows
     const sum = (rows, key) => Number(rows.reduce((total, row) => total + Number(row[key]), 0).toFixed(4))
-    const explained = rows => rows.some(row => Object.keys(row).some(key => /rounding|residual|reconcil/i.test(key)))
+    // Owner, 13 Oct 2026: split reports carry 4-decimal money, so the buckets
+    // add up to the Overview exactly and no rounding line is needed (0.0050 +
+    // 0.0050 = 0.0100; 0.9950 + 0.9950 = 1.9900).
+    const reconciles = rows => sum(rows, 'cost_usd') === l3.cost_usd && sum(rows, 'profit_usd') === l3.profit_usd
+    const toCents = rows => rows.map(row => ({ ...row, cost_usd: Number(Number(row.cost_usd).toFixed(2)), profit_usd: Number(Number(row.profit_usd).toFixed(2)) }))
     console.log(`INFO AL-L3 overview cost $${l3.cost_usd} profit $${l3.profit_usd}; day rows cost ${days.map(row => row.cost_usd).join(' + ')} = $${sum(days, 'cost_usd')}, profit ${days.map(row => row.profit_usd).join(' + ')}; week rows ${weeks.length} cost ${weeks.map(row => row.cost_usd).join(',')} profit ${weeks.map(row => row.profit_usd).join(',')}; customer rows cost ${customers.map(row => row.cost_usd).join(' + ')}`)
     r.check(`L3: the one week bucket covering both days equals the overview exactly (week cost $${weeks.map(row => row.cost_usd).join(',')} vs $${l3.cost_usd}; profit $${weeks.map(row => row.profit_usd).join(',')} vs $${l3.profit_usd})`, () => {
       assert.equal(weeks.length, 1)
       assert.equal(weeks[0].cost_usd, l3.cost_usd)
       assert.equal(weeks[0].profit_usd, l3.profit_usd)
     })
-    r.check(`L3: day buckets add up to the overview or explain the rounding (cost $${sum(days, 'cost_usd')} vs $${l3.cost_usd}; profit $${sum(days, 'profit_usd')} vs $${l3.profit_usd})`, () => {
-      if (explained(days)) return
+    r.check(`L3: day buckets carry 4 decimals and add up to the overview (cost ${days.map(row => row.cost_usd).join(' + ')} = $${sum(days, 'cost_usd')} vs $${l3.cost_usd}; profit ${days.map(row => row.profit_usd).join(' + ')} = $${sum(days, 'profit_usd')} vs $${l3.profit_usd})`, () => {
+      assert.equal(days.length, 2)
+      for (const row of days) { assert.equal(row.cost_usd, 0.005); assert.equal(row.profit_usd, 0.995) }
       assert.equal(sum(days, 'cost_usd'), l3.cost_usd)
       assert.equal(sum(days, 'profit_usd'), l3.profit_usd)
     })
-    r.check(`L3: customer buckets add up to the overview or explain the rounding (cost $${sum(customers, 'cost_usd')} vs $${l3.cost_usd}; profit $${sum(customers, 'profit_usd')} vs $${l3.profit_usd})`, () => {
-      if (explained(customers)) return
+    r.check(`L3: customer buckets carry 4 decimals and add up to the overview (cost ${customers.map(row => row.cost_usd).join(' + ')} = $${sum(customers, 'cost_usd')} vs $${l3.cost_usd}; profit $${sum(customers, 'profit_usd')} vs $${l3.profit_usd})`, () => {
+      assert.equal(customers.length, 2)
+      for (const row of customers) { assert.equal(row.cost_usd, 0.005); assert.equal(row.profit_usd, 0.995) }
       assert.equal(sum(customers, 'cost_usd'), l3.cost_usd)
       assert.equal(sum(customers, 'profit_usd'), l3.profit_usd)
+    })
+    r.check(`L3 control: the same check rejects cent-rounded buckets (days in cents sum to $${sum(toCents(days), 'cost_usd')} / $${sum(toCents(days), 'profit_usd')}, customers $${sum(toCents(customers), 'cost_usd')} / $${sum(toCents(customers), 'profit_usd')})`, () => {
+      assert.equal(reconciles(days), true)
+      assert.equal(reconciles(customers), true)
+      assert.equal(reconciles(toCents(days)), false, 'cent-rounded day buckets must not pass')
+      assert.equal(reconciles(toCents(customers)), false, 'cent-rounded customer buckets must not pass')
     })
 
     // ---- L4: hidden courier cost ----------------------------------------

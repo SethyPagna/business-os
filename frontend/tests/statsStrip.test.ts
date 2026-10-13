@@ -401,7 +401,10 @@ test('Part 553/554: report sections render selected-currency money + a CSV expor
         assert.match(source, /const exportCsv = \(\) => \{ void exporter\.prepare\(\) \}/)
         assert.match(source, /exportMenuItems\(tr, p\.canExport, exportCsv, exportPrint,/)
         assert.match(source, /onClick=\{exporter\.csv\}/)
-        assert.match(source, /document: \(result\) => \([\s\S]*?language: language \|\| 'en', fmtMoney,/,
+        // Owner, 13 Oct 2026: the receipt rows print 4 places, through the
+        // same selected-currency rules (fmtRow = fmtBucketMoney ?? fmtMoney).
+        assert.match(source, /const fmtRow = p\.fmtBucketMoney \?\? fmtMoney/)
+        assert.match(source, /document: \(result\) => \([\s\S]*?language: language \|\| 'en', fmtMoney: fmtRow,/,
           'the completed document retains the selected-currency formatter')
         assert.doesNotMatch(source, /downloadCSV\(/, 'Sales must not publish its loaded browse page directly')
       }
@@ -409,7 +412,7 @@ test('Part 553/554: report sections render selected-currency money + a CSV expor
       for (const [from, to] of [
         ['void exporter.prepare()', 'void exporter.csv()'],
         ['onClick={exporter.csv}', 'onClick={() => {}}'],
-        ["language: language || 'en', fmtMoney,", "language: language || 'en', fmtMoney: String,"],
+        ["language: language || 'en', fmtMoney: fmtRow,", "language: language || 'en', fmtMoney: String,"],
       ]) {
         const broken = src.replace(from, to)
         assert.notEqual(broken, src, 'Sales wiring negative control must apply')
@@ -423,6 +426,7 @@ test('Part 553/554: report sections render selected-currency money + a CSV expor
   // The hub threads its explicit report-currency fmtMoney into every view.
   const hub = read('src/components/sales/ReportsHub.tsx')
   assert.ok(/const viewProps[\s\S]{0,400}fmtMoney,/.test(hub), 'ReportsHub passes fmtMoney to the views')
+  assert.ok(/const viewProps[\s\S]{0,400}fmtBucketMoney,/.test(hub), 'ReportsHub passes the 4-place split-row formatter to the views')
   assert.ok(hub.includes('displayCurrency: options.currency'), 'report currency is display-only and defaults independently to USD')
   assert.ok(!hub.includes("options.currency === 'setting'"), 'the removed App setting choice cannot remain active invisibly')
 })

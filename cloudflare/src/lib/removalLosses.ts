@@ -271,6 +271,13 @@ function round2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100
 }
 
+// Bucket rows (one period of a split report) carry 4 places so they add up
+// to the window's figure exactly; a window total keeps 2 (owner, 13 Oct 2026).
+function roundTo(value: number, places: 2 | 4): number {
+  if (places === 2) return round2(value)
+  return Math.round((value + Number.EPSILON) * 10_000) / 10_000
+}
+
 function finite(value: unknown): number | null {
   if (value == null || value === '') return null
   const parsed = typeof value === 'number' ? value : Number(value)
@@ -306,7 +313,7 @@ export function removalRowLossUsd(row: RemovalLossRow): number | null {
 }
 
 /** Reduce priced removal rows to one summary. */
-export function summarizeRemovalLosses(rows: readonly RemovalLossRow[] | null | undefined): RemovalLossSummary {
+export function summarizeRemovalLosses(rows: readonly RemovalLossRow[] | null | undefined, places: 2 | 4 = 2): RemovalLossSummary {
   let usd = 0
   let qty = 0
   let unvalued = 0
@@ -319,7 +326,7 @@ export function summarizeRemovalLosses(rows: readonly RemovalLossRow[] | null | 
     else usd += value
   }
   return {
-    removal_loss_usd: round2(Math.max(0, usd)),
+    removal_loss_usd: roundTo(Math.max(0, usd), places),
     removal_loss_qty: round2(qty),
     removal_loss_unvalued_rows: unvalued,
   }
@@ -329,6 +336,7 @@ export function summarizeRemovalLosses(rows: readonly RemovalLossRow[] | null | 
 export function removalLossesByBucket(
   rows: readonly RemovalLossRow[] | null | undefined,
   bucketOf: (row: RemovalLossRow) => string,
+  places: 2 | 4 = 2,
 ): Map<string, RemovalLossSummary> {
   const grouped = new Map<string, RemovalLossRow[]>()
   for (const row of rows || []) {
@@ -338,7 +346,7 @@ export function removalLossesByBucket(
     else grouped.set(key, [row])
   }
   const out = new Map<string, RemovalLossSummary>()
-  for (const [key, list] of grouped) out.set(key, summarizeRemovalLosses(list))
+  for (const [key, list] of grouped) out.set(key, summarizeRemovalLosses(list, places))
   return out
 }
 
@@ -364,6 +372,7 @@ export function removalLossTotals(
   revenueUsd: unknown,
   profitUsd: unknown,
   loss: RemovalLossSummary,
+  places: 2 | 4 = 2,
 ): RemovalLossTotals {
   const revenue = finite(revenueUsd) ?? 0
   const profit = finite(profitUsd) ?? 0
@@ -371,7 +380,7 @@ export function removalLossTotals(
     removal_loss_usd: loss.removal_loss_usd,
     removal_loss_qty: loss.removal_loss_qty,
     removal_loss_unvalued_rows: loss.removal_loss_unvalued_rows,
-    revenue_after_losses_usd: round2(revenue - loss.removal_loss_usd),
-    profit_after_losses_usd: round2(profit - loss.removal_loss_usd),
+    revenue_after_losses_usd: roundTo(revenue - loss.removal_loss_usd, places),
+    profit_after_losses_usd: roundTo(profit - loss.removal_loss_usd, places),
   }
 }

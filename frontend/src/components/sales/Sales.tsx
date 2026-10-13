@@ -8,6 +8,7 @@ import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAp
 import { fmtClock24 } from '../../utils/formatters'
 import { buildEquation, revenueTerms, profitTerms, isRevenueCountedSale, saleListRevenueUsd, saleListCreditUsd } from '../../utils/statsFormulas'
 import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
+import { formatUsd4 } from '../../utils/reportMoney.ts'
 import type { SaleAmendmentRow } from '../../utils/saleAmendments.ts'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import type { PortalMenuItem } from '../shared/PortalMenu'
@@ -1831,6 +1832,10 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       expensesKhr > 0 ? fmtKHR(expensesKhr) : '',
     ].filter(Boolean).join(' · ') || fmtUSD(0)
     const topPayment = byPayment[0]
+    // Per-method rows split the Collected figure: 4 places so they add up to
+    // it exactly (owner, 13 Oct 2026); the headline cards keep cents.
+    const usdSymbol = String(settings?.currency_usd_symbol || '$')
+    const fmtSplitUsd = (value: number) => formatUsd4(value, usdSymbol)
     const cards: StatCardDef[] = [
       {
         key: 'sales',
@@ -1915,11 +1920,11 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
         key: 'payments',
         label: translateOr('stats_payments', 'Payments'),
         value: topPayment ? String(topPayment.payment_method || 'Unknown') : '—',
-        sub: topPayment ? `${Number(topPayment.tx_count) || 0} · ${fmtUSD(Number(topPayment.collected_usd) || 0)}` : undefined,
+        sub: topPayment ? `${Number(topPayment.tx_count) || 0} · ${fmtSplitUsd(Number(topPayment.collected_usd) || 0)}` : undefined,
         hint: translateOr('stats_payments_hint', 'Money collected per payment method, including customer-paid delivery fees. The card shows the top method for the range.'),
         details: byPayment.map((row) => ({
           label: String(row.payment_method || 'Unknown'),
-          value: `${Number(row.tx_count) || 0} · ${fmtUSD(Number((row as Record<string, unknown>).collected_usd) || 0)}`,
+          value: `${Number(row.tx_count) || 0} · ${fmtSplitUsd(Number((row as Record<string, unknown>).collected_usd) || 0)}`,
         })),
       },
       {
@@ -1958,7 +1963,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       })
     }
     return stripStatus === 'ready' ? cards : cards.map(({ key, label, hint }) => ({ key, label, hint, value: '—' }))
-  }, [canViewFees, feeStripData, fmtKHR, fmtUSD, stripData, stripHasTime, stripStatus, t, translateOr])
+  }, [canViewFees, feeStripData, fmtKHR, fmtUSD, settings?.currency_usd_symbol, stripData, stripHasTime, stripStatus, t, translateOr])
 
   // A sale "counts" toward the headline figures only when it contributes to
   // the money shown (user, Aug 31: "count only what the money counts"), and

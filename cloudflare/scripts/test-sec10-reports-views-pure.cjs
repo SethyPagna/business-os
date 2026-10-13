@@ -381,6 +381,15 @@ insRet.run(1, 3, 10, 'completed', 'customer', UTC(24, 8), 1) // customer refund 
   const productRow = { product_id: 101, product_name: 'A', qty: 3, line_sales_usd: 140, cost_usd: 50, profit_usd: 90, cost_missing_snapshot_lines: 0 }
   check('gateProductRow(non-admin): strips every admin key', SECRET.every((k) => !(k in gateProductRow(productRow, false))))
   check('gateProductRow(admin): margin on LINE sales (90/140 = 64.29%)', gateProductRow(productRow, true).margin_pct === 64.29)
+  // AL L3 (owner, 13 Oct 2026): a bucket row keeps the kernel's 4 places
+  // through the gate; a headline total still prints cents.
+  const bucketRow = { revenue_usd: 1.005, cost_usd: 0.005, profit_usd: 1.005, pending_profit_usd: 0.0025 }
+  check('gateTotals(bucket, 4 places) keeps 0.0050 cost / 1.0050 profit; a headline (default) rounds to cents',
+    gateTotals(bucketRow, true, true, 4).cost_usd === 0.005 && gateTotals(bucketRow, true, true, 4).profit_usd === 1.005
+      && gateTotals(bucketRow, true, true, 4).pending_profit_usd === 0.0025 && gateTotals(bucketRow, true).cost_usd === 0.01)
+  check('gateProductRow(bucket, 4 places) keeps 0.0050 cost',
+    gateProductRow({ line_sales_usd: 1, cost_usd: 0.005, profit_usd: 0.995 }, true, 4).cost_usd === 0.005
+      && gateProductRow({ line_sales_usd: 1, cost_usd: 0.005, profit_usd: 0.995 }, true).cost_usd === 0.01)
 
   // ---- period keys ----
   check('periodKeyFor(day) is the date itself', JSON.stringify(periodKeyFor('2026-08-20', 'day')) === JSON.stringify({ period: '2026-08-20', date_from: '2026-08-20', date_to: '2026-08-20' }))

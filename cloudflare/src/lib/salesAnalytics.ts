@@ -879,9 +879,9 @@ export async function removalLossesFor(env: Env, f: SalesFilters): Promise<Remov
  *  getSalesTotals here and routes/sales.ts's /stats-strip -- attaches the
  *  block the same way instead of each re-deriving revenue_after_losses_usd /
  *  profit_after_losses_usd by hand. */
-export function withRemovalLosses<T extends SalesTotals>(totals: T, loss: RemovalLossSummary | null): T {
+export function withRemovalLosses<T extends SalesTotals>(totals: T, loss: RemovalLossSummary | null, places: 2 | 4 = 2): T {
   if (!loss) return totals
-  return { ...totals, ...removalLossTotals(totals.revenue_usd, totals.profit_usd, loss) }
+  return { ...totals, ...removalLossTotals(totals.revenue_usd, totals.profit_usd, loss, places) }
 }
 
 type ReportScalarRow = Record<string, unknown> & { id: number }
@@ -1498,7 +1498,13 @@ function aggregateReportSnapshot(
   return buckets
 }
 
-function exactReportTotals(bucket: ReportExactBucket, snapshot: SalesReportSnapshot): SalesTotals {
+/** Owner, 13 Oct 2026: split reports carry money at 4 decimals. Every bucket
+ *  row -- day, week, month, customer, cashier, branch, hour, weekday, payment
+ *  method, product, courier, receipt -- leaves the kernel at 4 places, so its
+ *  rows add up exactly to the window total; a single headline total keeps 2. */
+export const BUCKET_MONEY_PLACES = 4
+
+function exactReportTotals(bucket: ReportExactBucket, snapshot: SalesReportSnapshot, places = 2): SalesTotals {
   const m = bucket.money
   const zero = ReportExactDecimal.zero()
   const discount = m.storeDiscount.add(m.membershipDiscount)
@@ -1518,53 +1524,53 @@ function exactReportTotals(bucket: ReportExactBucket, snapshot: SalesReportSnaps
   }
   return attachReportDiagnostic({
     tx_count: bucket.tx,
-    gross_sales_usd: m.gross.toNumber(),
-    store_discount_usd: m.storeDiscount.toNumber(),
-    membership_discount_usd: m.membershipDiscount.toNumber(),
-    discount_usd: discount.toNumber(),
-    item_discount_usd: m.itemDiscount.toNumber(),
-    total_discount_usd: totalDiscount.toNumber(),
-    tax_usd: m.tax.toNumber(),
-    delivery_usd: m.delivery.toNumber(),
-    store_delivery_usd: m.storeDelivery.toNumber(),
-    delivery_actual_cost_usd: m.deliveryActual.toNumber(),
+    gross_sales_usd: m.gross.toNumber(places),
+    store_discount_usd: m.storeDiscount.toNumber(places),
+    membership_discount_usd: m.membershipDiscount.toNumber(places),
+    discount_usd: discount.toNumber(places),
+    item_discount_usd: m.itemDiscount.toNumber(places),
+    total_discount_usd: totalDiscount.toNumber(places),
+    tax_usd: m.tax.toNumber(places),
+    delivery_usd: m.delivery.toNumber(places),
+    store_delivery_usd: m.storeDelivery.toNumber(places),
+    delivery_actual_cost_usd: m.deliveryActual.toNumber(places),
     delivery_actual_cost_count: bucket.deliveryActualCount,
     delivery_sale_count: bucket.deliverySaleCount,
-    delivery_margin_usd: m.delivery.subtract(m.deliveryActual).toNumber(),
-    delivery_net_usd: deliveryNet.toNumber(),
-    recognized_delivery_usd: m.recognizedDelivery.toNumber(),
-    recognized_delivery_cost_usd: m.recognizedDeliveryCost.toNumber(),
+    delivery_margin_usd: m.delivery.subtract(m.deliveryActual).toNumber(places),
+    delivery_net_usd: deliveryNet.toNumber(places),
+    recognized_delivery_usd: m.recognizedDelivery.toNumber(places),
+    recognized_delivery_cost_usd: m.recognizedDeliveryCost.toNumber(places),
     pending_tx_count: bucket.pendingTx,
-    pending_gross_sales_usd: m.pendingGross.toNumber(),
-    pending_store_discount_usd: m.pendingStoreDiscount.toNumber(),
-    pending_membership_discount_usd: m.pendingMembershipDiscount.toNumber(),
-    pending_delivery_usd: m.pendingDelivery.toNumber(),
-    pending_delivery_cost_usd: m.pendingDeliveryCost.toNumber(),
-    pending_cost_usd: pendingCost.toNumber(),
-    pending_profit_usd: pendingProfit.toNumber(),
-    pending_item_discount_usd: m.pendingItemDiscount.toNumber(),
+    pending_gross_sales_usd: m.pendingGross.toNumber(places),
+    pending_store_discount_usd: m.pendingStoreDiscount.toNumber(places),
+    pending_membership_discount_usd: m.pendingMembershipDiscount.toNumber(places),
+    pending_delivery_usd: m.pendingDelivery.toNumber(places),
+    pending_delivery_cost_usd: m.pendingDeliveryCost.toNumber(places),
+    pending_cost_usd: pendingCost.toNumber(places),
+    pending_profit_usd: pendingProfit.toNumber(places),
+    pending_item_discount_usd: m.pendingItemDiscount.toNumber(places),
     cancelled_tx_count: bucket.cancelledTx,
-    returned_cost_usd: m.cost.min(m.returnedCost).toNumber(),
-    returned_cost_shortfall_usd: returnedCostShortfall.toNumber(),
+    returned_cost_usd: m.cost.min(m.returnedCost).toNumber(places),
+    returned_cost_shortfall_usd: returnedCostShortfall.toNumber(places),
     unvalued_tx_count: bucket.unvaluedTx,
-    unvalued_cost_usd: m.unvaluedCost.toNumber(),
-    net_sales_usd: m.recognizedNet.toNumber(),
-    refund_usd: m.refund.toNumber(),
-    refund_charged_usd: m.refundCharged.toNumber(),
-    refund_excess_usd: m.refundExcess.toNumber(),
-    revenue_usd: revenue.toNumber(),
-    pending_revenue_usd: m.pendingRevenue.toNumber(),
-    collected_total_usd: m.collected.toNumber(),
-    cost_usd: netCost.toNumber(),
-    profit_usd: profit.toNumber(),
+    unvalued_cost_usd: m.unvaluedCost.toNumber(places),
+    net_sales_usd: m.recognizedNet.toNumber(places),
+    refund_usd: m.refund.toNumber(places),
+    refund_charged_usd: m.refundCharged.toNumber(places),
+    refund_excess_usd: m.refundExcess.toNumber(places),
+    revenue_usd: revenue.toNumber(places),
+    pending_revenue_usd: m.pendingRevenue.toNumber(places),
+    collected_total_usd: m.collected.toNumber(places),
+    cost_usd: netCost.toNumber(places),
+    profit_usd: profit.toNumber(places),
     avg_order_usd: bucket.tx > 0 ? revenue.divide(ReportExactDecimal.recorded(String(bucket.tx))).toNumber() : 0,
   }, diagnostic)
 }
 
 /** Reuse the canonical reducer when one caller needs several views of the
  * same verified snapshot. No second read and no parallel report formula. */
-export function salesTotalsFromSnapshot(snapshot: SalesReportSnapshot): SalesTotals {
-  return exactReportTotals(aggregateReportSnapshot(snapshot, () => '').get('') || reportBucket(), snapshot)
+export function salesTotalsFromSnapshot(snapshot: SalesReportSnapshot, places = 2): SalesTotals {
+  return exactReportTotals(aggregateReportSnapshot(snapshot, () => '').get('') || reportBucket(), snapshot, places)
 }
 
 export async function getBusinessSummarySalesRows(env: Env, f: SalesFilters): Promise<Array<Record<string, unknown>>> {
@@ -1592,14 +1598,14 @@ export function businessSummarySalesRowsFromSnapshot(snapshot: SalesReportSnapsh
       receipt_number: String(sale.receipt_number || ''), branch: String(sale.branch_name || ''), cashier: String(sale.cashier_name || ''),
       customer: Number(sale.customer_is_anonymous) !== 0 ? '' : String(sale.customer_name || ''),
       customer_phone: String(sale.customer_phone || ''), payment_method: String(sale.payment_method || ''), status: reportStatus(sale),
-      gross_sales_usd: reportMoney(sale, 'subtotal_usd', version).toNumber(),
-      store_discount_usd: reportMoney(sale, 'discount_usd', version).toNumber(),
-      membership_discount_usd: reportMoney(sale, 'membership_discount_usd', version).toNumber(),
-      tax_usd: reportMoney(sale, 'tax_usd', version).toNumber(), delivery_usd: fact.delivery.toNumber(),
-      refund_usd: fact.refund.toNumber(), net_revenue_usd: revenue.toNumber(),
-      pending_revenue_usd: fact.awaiting ? revenue.toNumber() : 0, collected_total_usd: collected.toNumber(),
-      cost_usd: cost.toNumber(), cost_before_floor_usd: rawCost.toNumber(), cost_missing_snapshot_lines: fact.missingCostLines,
-      gross_profit_usd: revenue.add(delivery).subtract(deliveryActual).subtract(cost).toNumber(),
+      gross_sales_usd: reportMoney(sale, 'subtotal_usd', version).toNumber(BUCKET_MONEY_PLACES),
+      store_discount_usd: reportMoney(sale, 'discount_usd', version).toNumber(BUCKET_MONEY_PLACES),
+      membership_discount_usd: reportMoney(sale, 'membership_discount_usd', version).toNumber(BUCKET_MONEY_PLACES),
+      tax_usd: reportMoney(sale, 'tax_usd', version).toNumber(BUCKET_MONEY_PLACES), delivery_usd: fact.delivery.toNumber(BUCKET_MONEY_PLACES),
+      refund_usd: fact.refund.toNumber(BUCKET_MONEY_PLACES), net_revenue_usd: revenue.toNumber(BUCKET_MONEY_PLACES),
+      pending_revenue_usd: fact.awaiting ? revenue.toNumber(BUCKET_MONEY_PLACES) : 0, collected_total_usd: collected.toNumber(BUCKET_MONEY_PLACES),
+      cost_usd: cost.toNumber(BUCKET_MONEY_PLACES), cost_before_floor_usd: rawCost.toNumber(BUCKET_MONEY_PLACES), cost_missing_snapshot_lines: fact.missingCostLines,
+      gross_profit_usd: revenue.add(delivery).subtract(deliveryActual).subtract(cost).toNumber(BUCKET_MONEY_PLACES),
     }
     return attachReportDiagnostic(row, {
       precision_mode: snapshot.precision_mode, complete: fact.missingCostLines === 0,
@@ -1937,7 +1943,7 @@ function periodKeyFor(sale: ReportScalarRow, granularity: 'day' | 'week' | 'mont
 function salesPeriodRowsFromSnapshot(snapshot: SalesReportSnapshot, granularity: 'day' | 'week' | 'month'): SalesPeriodRow[] {
   const bucketFor = (sale: ReportScalarRow) => periodKeyFor(sale, granularity)
   return [...aggregateReportSnapshot(snapshot, bucketFor).entries()].map(([period, bucket]) => {
-    const totals = exactReportTotals(bucket, snapshot)
+    const totals = exactReportTotals(bucket, snapshot, BUCKET_MONEY_PLACES)
     return { period, date: period, count: totals.tx_count, tx_count: totals.tx_count,
       revenue_usd: totals.revenue_usd, gross_sales_usd: totals.gross_sales_usd, refund_usd: totals.refund_usd,
       discount_usd: totals.discount_usd, item_discount_usd: totals.item_discount_usd,
@@ -2070,7 +2076,7 @@ export function paymentMethodBreakdownFromSnapshot(snapshot: SalesReportSnapshot
     methods.set(method, found)
   }
   return [...methods.entries()].map(([payment_method, value]) => ({
-    payment_method, tx_count: value.tx_count, collected_usd: value.collected.toNumber(), total_usd: value.total.toNumber(),
+    payment_method, tx_count: value.tx_count, collected_usd: value.collected.toNumber(BUCKET_MONEY_PLACES), total_usd: value.total.toNumber(BUCKET_MONEY_PLACES),
   })).sort((a, b) => b.collected_usd - a.collected_usd)
 }
 
@@ -2167,13 +2173,13 @@ function deliveryContactTotalsFromSnapshot(
   }
   return [...groups.values()].map((group) => ({
     delivery_contact_id: group.delivery_contact_id, delivery_contact_name: group.delivery_contact_name,
-    deliveries: group.deliveries, charged_fee_usd: group.charged.toNumber(), absorbed_fee_usd: group.absorbed.toNumber(),
-    paid_fee_usd: group.paid.toNumber(), receivable_fee_usd: group.receivable.toNumber(), actual_cost_usd: group.actual.toNumber(),
+    deliveries: group.deliveries, charged_fee_usd: group.charged.toNumber(BUCKET_MONEY_PLACES), absorbed_fee_usd: group.absorbed.toNumber(BUCKET_MONEY_PLACES),
+    paid_fee_usd: group.paid.toNumber(BUCKET_MONEY_PLACES), receivable_fee_usd: group.receivable.toNumber(BUCKET_MONEY_PLACES), actual_cost_usd: group.actual.toNumber(BUCKET_MONEY_PLACES),
     actual_cost_count: group.actual_cost_count, linked_expense_count: group.linked_expense_count,
-    linked_expense_usd: group.expenseUsd.toNumber(), linked_expense_khr: group.expenseKhr.toNumber(),
-    margin_usd: group.charged.subtract(group.actual).toNumber(), last_delivery_at: group.last_delivery_at,
+    linked_expense_usd: group.expenseUsd.toNumber(BUCKET_MONEY_PLACES), linked_expense_khr: group.expenseKhr.toNumber(BUCKET_MONEY_PLACES),
+    margin_usd: group.charged.subtract(group.actual).toNumber(BUCKET_MONEY_PLACES), last_delivery_at: group.last_delivery_at,
     last_expense_at: group.last_expense_at, paid_by_method: [...group.methods.entries()].map(([payment_method, value]) => ({
-      payment_method, count: value.count, fee_usd: value.fee.toNumber(),
+      payment_method, count: value.count, fee_usd: value.fee.toNumber(BUCKET_MONEY_PLACES),
     })).sort((a, b) => b.fee_usd - a.fee_usd || a.payment_method.localeCompare(b.payment_method)),
   })).sort((a, b) => (b.deliveries + b.linked_expense_count) - (a.deliveries + a.linked_expense_count))
 }
@@ -2473,8 +2479,8 @@ export async function getSalesDayReport(
         return { id: Number(sale.id), receipt_number: String(sale.receipt_number || ''), created_at: String(sale.created_at || ''),
           customer_name: Number(sale.customer_is_anonymous) !== 0 ? '' : String(sale.customer_name || ''),
           payment_method: String(sale.payment_method || '').trim() || 'Unknown', sale_status: reportStatus(sale),
-          revenue_usd: fact.recognized ? fact.net.add(fact.adjustment).subtract(fact.refund).toNumber() : 0,
-          discount_usd: discount.toNumber(), collected_usd: collected.toNumber() }
+          revenue_usd: fact.recognized ? fact.net.add(fact.adjustment).subtract(fact.refund).toNumber(BUCKET_MONEY_PLACES) : 0,
+          discount_usd: discount.toNumber(BUCKET_MONEY_PLACES), collected_usd: collected.toNumber(BUCKET_MONEY_PLACES) }
       })
     return { date: day, totals,
       payment_methods: paymentMethods,
@@ -2832,7 +2838,7 @@ export async function getSalesGroupedReport(
   const identity = (row: ReportScalarRow) => reportGroupIdentity(row, groupBy)
   const metadata = new Map([...snapshot.sales, ...snapshot.voidSales].map((row) => [identity(row).key, identity(row)]))
   const rows = [...aggregateReportSnapshot(snapshot, (sale) => identity(sale).key).entries()].map(([key, bucket]) => {
-    const totals = exactReportTotals(bucket, snapshot)
+    const totals = exactReportTotals(bucket, snapshot, BUCKET_MONEY_PLACES)
     const meta = metadata.get(key) || { key, label: '', entity_id: null }
     const row = { key, label: meta.label, entity_id: meta.entity_id,
       cost_missing_snapshot_lines: bucket.missingCostLines, ...totals } as SalesGroupedRow
@@ -2853,7 +2859,7 @@ export async function getSalesGroupedReport(
   if (groupBy === 'hour' || groupBy === 'weekday') rows.sort((a, b) => a.key.localeCompare(b.key))
   else rows.sort((a, b) => b.revenue_usd - a.revenue_usd || b.tx_count - a.tx_count || a.label.localeCompare(b.label))
   const cap = Math.max(1, Math.min(2000, Math.trunc(limit) || 500))
-  return { rows: rows.slice(0, cap), total_groups: rows.length, totals: salesTotalsFromSnapshot(snapshot) }
+  return { rows: rows.slice(0, cap), total_groups: rows.length, totals: salesTotalsFromSnapshot(snapshot, BUCKET_MONEY_PLACES) }
 }
 
 /**
@@ -3041,8 +3047,8 @@ export async function getProductSalesReport(env: Env, f: SalesFilters, limit = 2
     const meta = group.product_id == null ? null : metadata.get(group.product_id)
     const row: ProductSalesRankingRow = {
       product_id: group.product_id, product_name: String(meta?.name || group.product_name), sale_count: group.saleIds.size, qty: group.qty,
-      line_sales_usd: group.lineSales.toNumber(), cost_usd: group.cost.toNumber(),
-      profit_usd: group.lineSales.subtract(group.cost).toNumber(), cost_missing_snapshot_lines: group.missing,
+      line_sales_usd: group.lineSales.toNumber(BUCKET_MONEY_PLACES), cost_usd: group.cost.toNumber(BUCKET_MONEY_PLACES),
+      profit_usd: group.lineSales.subtract(group.cost).toNumber(BUCKET_MONEY_PLACES), cost_missing_snapshot_lines: group.missing,
       category_id: meta?.category_id == null ? null : Number(meta.category_id), category_name: String(meta?.category || ''),
       barcode: String(meta?.barcode || ''), on_hand_qty: num(meta?.on_hand_qty),
     }
@@ -3055,8 +3061,8 @@ export async function getProductSalesReport(env: Env, f: SalesFilters, limit = 2
     all.qty += group.qty; all.lineSales = all.lineSales.add(group.lineSales); all.cost = all.cost.add(group.cost); all.missing += group.missing
   }
   return { rows: rows.slice(0, Math.max(1, Math.min(1000, Math.trunc(limit) || 200))), total_groups: rows.length,
-    totals: { sale_count: all.sales.size, qty: all.qty, line_sales_usd: all.lineSales.toNumber(), cost_usd: all.cost.toNumber(),
-      profit_usd: all.lineSales.subtract(all.cost).toNumber(), cost_missing_snapshot_lines: all.missing } }
+    totals: { sale_count: all.sales.size, qty: all.qty, line_sales_usd: all.lineSales.toNumber(BUCKET_MONEY_PLACES), cost_usd: all.cost.toNumber(BUCKET_MONEY_PLACES),
+      profit_usd: all.lineSales.subtract(all.cost).toNumber(BUCKET_MONEY_PLACES), cost_missing_snapshot_lines: all.missing } }
 }
 
 /**
@@ -3174,7 +3180,7 @@ export async function getBusinessSummaryPeriodRows(env: Env, f: SalesFilters, gr
     ? await readRemovalLossRows(env, f).catch((): RemovalLossRow[] | null => null)
     : null
   const lossBuckets = lossRows
-    ? removalLossesByBucket(lossRows, (row) => periodFor({ id: 0, created_at: row.created_at }))
+    ? removalLossesByBucket(lossRows, (row) => periodFor({ id: 0, created_at: row.created_at }), BUCKET_MONEY_PLACES)
     : null
   const buckets = aggregateReportSnapshot(snapshot, periodFor)
   // A period whose only activity was a stock removal has no sales bucket at
@@ -3183,14 +3189,14 @@ export async function getBusinessSummaryPeriodRows(env: Env, f: SalesFilters, gr
   // the same repair unionBuckets() makes for a void-only bucket.
   if (lossBuckets) for (const period of lossBuckets.keys()) if (!buckets.has(period)) buckets.set(period, reportBucket())
   return [...buckets.entries()].map(([period, bucket]) => {
-    const totals = exactReportTotals(bucket, snapshot); const diagnostic = reportMoneyDiagnostic(totals)!
+    const totals = exactReportTotals(bucket, snapshot, BUCKET_MONEY_PLACES); const diagnostic = reportMoneyDiagnostic(totals)!
     const day = granularity === 'day' ? period : granularity === 'month' ? `${period}-01` : period
     const from = new Date(`${day}T00:00:00Z`)
     const to = granularity === 'month' ? new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + 1, 0))
       : granularity === 'week' ? new Date(from.getTime() + 6 * 86_400_000) : from
     return attachReportDiagnostic({ period, date_from: day, date_to: to.toISOString().slice(0, 10), days: daySets.get(period)?.size || 0,
       cost_missing_snapshot_lines: diagnostic.unknown_cost_lines,
-      ...withRemovalLosses(totals, lossBuckets ? lossBuckets.get(period) || EMPTY_REMOVAL_LOSS : null) }, diagnostic)
+      ...withRemovalLosses(totals, lossBuckets ? lossBuckets.get(period) || EMPTY_REMOVAL_LOSS : null, BUCKET_MONEY_PLACES) }, diagnostic)
   }).sort((a, b) => a.period.localeCompare(b.period))
 }
 
@@ -3203,7 +3209,7 @@ export async function getBusinessSummaryDayRows(env: Env, f: SalesFilters): Prom
       return new Date(parsed.getTime() + 7 * 3_600_000).toISOString().slice(0, 10)
     }
     return [...aggregateReportSnapshot(snapshot, dateFor).entries()].map(([date, bucket]) => {
-      const totals = exactReportTotals(bucket, snapshot)
+      const totals = exactReportTotals(bucket, snapshot, BUCKET_MONEY_PLACES)
       const diagnostic = reportMoneyDiagnostic(totals)!
       return attachReportDiagnostic({ date, cost_missing_snapshot_lines: diagnostic.unknown_cost_lines, ...totals }, diagnostic)
     }).sort((a, b) => a.date.localeCompare(b.date))

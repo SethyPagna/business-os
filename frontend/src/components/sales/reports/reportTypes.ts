@@ -31,6 +31,13 @@ export interface ReportViewProps {
   options: ReportOptions
   style: ReportStyle
   fmtMoney: (usd: number, khr?: number) => string
+  /**
+   * The same display-currency rules at 4 places, for split rows (a day, week,
+   * customer, branch, hour, payment method, product, courier or receipt row)
+   * so they add up exactly to the window figure (owner, 13 Oct 2026). A
+   * headline total keeps fmtMoney's cents. Absent: views fall back to fmtMoney.
+   */
+  fmtBucketMoney?: (usd: number, khr?: number) => string
   khrToUsd: (khr: number) => number
   tr: Tr
   t: (key: string) => string

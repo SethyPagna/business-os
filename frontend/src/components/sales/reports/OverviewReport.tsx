@@ -78,6 +78,10 @@ type Breakdown = 'payments' | 'couriers' | 'reasons' | 'types'
 
 export default function OverviewReport(p: ReportViewProps) {
   const { tr, t, fmtMoney, options, style, filters, view } = p
+  // The payment-method and courier folds split the window: their rows print
+  // 4 places so they add up to the statement exactly (owner, 13 Oct 2026).
+  // The statement itself and the returns/expenses folds keep cents.
+  const fmtRow = p.fmtBucketMoney ?? fmtMoney
   const params = useMemo(() => ({ ...reportQueryParams(filters, view), compare: options.compare ? '1' : '' }), [filters, view, options.compare])
   const depsKey = JSON.stringify(params)
   const state = useReportData<OverviewResponse>(() => getReportOverview(params) as Promise<OverviewResponse>, depsKey)
@@ -345,8 +349,8 @@ export default function OverviewReport(p: ReportViewProps) {
       </ReportFrame>
       <Fold className="reports-fold-panel" open={open != null} onClose={() => setOpen(null)} anchorRef={anchorRef} anchorKey={open ?? undefined} size="lg" title={chips.find((c) => c.id === open)?.label || ''}>
         <div className="p-2">
-          {open === 'payments' ? <ReportTable surfaceKey="reports-overview-payments" columns={paymentColumns} rows={payments} rowKey={(r) => r.key} style={style} fmtMoney={fmtMoney} labels={labels} footer={paymentsTruncated ? <p className="text-[length:var(--ui-size-meta)] text-[var(--ui-ink-3)]">{topOfLabel(payments.length, paymentGroups, REPORT_NOUNS.payment_method, tr)}</p> : undefined} /> : null}
-          {open === 'couriers' ? <ReportTable surfaceKey="reports-overview-couriers" columns={courierColumns} rows={couriers} rowKey={(r) => String(r.delivery_contact_id ?? r.delivery_contact_name)} style={style} fmtMoney={fmtMoney} labels={labels} /> : null}
+          {open === 'payments' ? <ReportTable surfaceKey="reports-overview-payments" columns={paymentColumns} rows={payments} rowKey={(r) => r.key} style={style} fmtMoney={fmtRow} labels={labels} footer={paymentsTruncated ? <p className="text-[length:var(--ui-size-meta)] text-[var(--ui-ink-3)]">{topOfLabel(payments.length, paymentGroups, REPORT_NOUNS.payment_method, tr)}</p> : undefined} /> : null}
+          {open === 'couriers' ? <ReportTable surfaceKey="reports-overview-couriers" columns={courierColumns} rows={couriers} rowKey={(r) => String(r.delivery_contact_id ?? r.delivery_contact_name)} style={style} fmtMoney={fmtRow} labels={labels} /> : null}
           {open === 'reasons' ? <ReportTable surfaceKey="reports-overview-reasons" columns={reasonColumns} rows={reasons} rowKey={(r) => r.reason || '—'} style={style} fmtMoney={fmtMoney} labels={labels} /> : null}
           {open === 'types' ? <ReportTable surfaceKey="reports-overview-types" columns={typeColumns} rows={types} rowKey={(r) => r.fee_type || '—'} style={style} fmtMoney={fmtMoney} labels={labels} /> : null}
         </div>

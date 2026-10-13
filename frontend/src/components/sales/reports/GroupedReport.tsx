@@ -34,7 +34,7 @@ import {
   REPORT_NOUNS,
   reportFileName,
   reportQueryParams,
-  round2,
+  round4,
   rowsToCsvObjects,
   STATEMENT_GROUPS,
   isTheoreticalGroup,
@@ -172,6 +172,10 @@ function matches(label: string, search: string): boolean {
 
 export default function GroupedReport(p: ReportViewProps) {
   const { tr, fmtMoney, options, style, filters, view, search } = p
+  // Each row is a split of the window, so rows, cards, the totals row and a
+  // row's own detail print 4 places and add up exactly (owner, 13 Oct 2026);
+  // the summary line and a group's income statement keep cents.
+  const fmtRow = p.fmtBucketMoney ?? fmtMoney
   const by: ReportGroupBy = view.groupedBy || 'customer'
   const params = useMemo(() => ({ ...reportQueryParams(filters, view), by, limit: 500 }), [filters, view, by])
   const depsKey = JSON.stringify(params)
@@ -260,12 +264,12 @@ export default function GroupedReport(p: ReportViewProps) {
   )
 
   if (by === 'product') {
-    const totalLine = windowTotals ? num(windowTotals.line_sales_usd) : round2(productRows.reduce((s, r) => s + r.line_sales_usd, 0))
+    const totalLine = windowTotals ? num(windowTotals.line_sales_usd) : round4(productRows.reduce((s, r) => s + r.line_sales_usd, 0))
     const totalQty = windowTotals ? num(windowTotals.qty) : productRows.reduce((s, r) => s + r.qty, 0)
     const totalSales = windowTotals ? num(windowTotals.sale_count) : productRows.reduce((s, r) => s + r.sale_count, 0)
     const allProfit = productRows.length > 0 && productRows.every((r) => typeof r.profit_usd === 'number')
-    const totalProfit = allProfit ? (windowTotals ? num(windowTotals.profit_usd) : round2(productRows.reduce((s, r) => s + num(r.profit_usd), 0))) : null
-    const totalCost = allProfit ? (windowTotals ? num(windowTotals.cost_usd) : round2(productRows.reduce((s, r) => s + num(r.cost_usd), 0))) : null
+    const totalProfit = allProfit ? (windowTotals ? num(windowTotals.profit_usd) : round4(productRows.reduce((s, r) => s + num(r.profit_usd), 0))) : null
+    const totalCost = allProfit ? (windowTotals ? num(windowTotals.cost_usd) : round4(productRows.reduce((s, r) => s + num(r.cost_usd), 0))) : null
     const productTotalsRow: ProductRow | null = productRows.length > 1 || truncated ? { product_id: null, product_name: totalLabel, sale_count: totalSales, qty: totalQty, line_sales_usd: totalLine, ...(allProfit ? { cost_usd: totalCost ?? 0, profit_usd: totalProfit ?? 0, margin_pct: pct(totalProfit ?? 0, totalLine) } : {}) } : null
     // Memoized like every other view's column list (PeriodReport,
     // SalesListReport): an unmemoized array here defeated ReportTable's own
@@ -288,7 +292,7 @@ export default function GroupedReport(p: ReportViewProps) {
         : []),
       { key: 'share', label: tr('rpt_share', 'Share'), kind: 'pct', value: (r) => pct(r.line_sales_usd, totalLine), defaultVisible: false },
     ], [tr, allProfit, totalLine]) // eslint-disable-line react-hooks/rules-of-hooks -- `by` is fixed per mounted instance (see comment above)
-    const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtMoney), productTotalsRow ? [...productRows, productTotalsRow] : productRows)
+    const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtRow), productTotalsRow ? [...productRows, productTotalsRow] : productRows)
     const open = productRows.find((r) => String(r.product_id ?? r.product_name) === openKey) || null
     return (
       <ReportFrame
@@ -307,11 +311,11 @@ export default function GroupedReport(p: ReportViewProps) {
           rows={productRows}
           rowKey={(r) => String(r.product_id ?? r.product_name)}
           style={style}
-          fmtMoney={fmtMoney}
+          fmtMoney={fmtRow}
           labels={labels}
           loading={state.loading}
           totalsRow={productTotalsRow}
-          cardBody={(row) => renderProductCard(row, tr, fmtMoney)}
+          cardBody={(row) => renderProductCard(row, tr, fmtRow)}
           sort={sort}
           onSortChange={setSort}
           selectedKey={openKey}
@@ -334,11 +338,11 @@ export default function GroupedReport(p: ReportViewProps) {
                   lines: [
                     { label: tr('sales', 'Sales'), value: fmtInt(open.sale_count), kind: 'info' },
                     { label: tr('quantity', 'Quantity'), value: fmtQty(open.qty), kind: 'info' },
-                    { label: tr('rpt_line_sales', 'Line sales'), value: fmtMoney(open.line_sales_usd), kind: 'total' },
+                    { label: tr('rpt_line_sales', 'Line sales'), value: fmtRow(open.line_sales_usd), kind: 'total' },
                     ...(typeof open.profit_usd === 'number'
                       ? ([
-                          { label: tr('cogs', 'Cost of goods'), value: fmtMoney(num(open.cost_usd)), kind: 'sub' },
-                          { label: tr('rpt_gross_profit', 'Gross profit'), value: `${fmtMoney(open.profit_usd)} (${fmtPct(open.margin_pct ?? null)})`, kind: 'total' },
+                          { label: tr('cogs', 'Cost of goods'), value: fmtRow(num(open.cost_usd)), kind: 'sub' },
+                          { label: tr('rpt_gross_profit', 'Gross profit'), value: `${fmtRow(open.profit_usd)} (${fmtPct(open.margin_pct ?? null)})`, kind: 'total' },
                           ...(open.cost_missing_snapshot_lines ? [{ label: tr('rpt_missing_cost_lines', 'Lines without cost snapshot'), value: fmtInt(open.cost_missing_snapshot_lines), kind: 'info' as const }] : []),
                         ] as ReceiptLine[])
                       : []),
@@ -364,8 +368,8 @@ export default function GroupedReport(p: ReportViewProps) {
       { key: 'margin_usd', label: tr('rpt_delivery_margin', 'Delivery profit'), kind: 'money', value: (r) => r.margin_usd, emphasis: true },
       { key: 'last_delivery_at', label: tr('rpt_last_delivery', 'Last delivery'), kind: 'datetime', value: (r) => r.last_delivery_at, defaultVisible: false },
     ], [tr]) // eslint-disable-line react-hooks/rules-of-hooks -- `by` is fixed per mounted instance
-    const sum = (k: keyof CourierRow) => round2(courierRows.reduce((s, r) => s + num(r[k]), 0))
-    const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtMoney), courierRows)
+    const sum = (k: keyof CourierRow) => round4(courierRows.reduce((s, r) => s + num(r[k]), 0))
+    const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtRow), courierRows)
     return (
       <ReportFrame
         title={title}
@@ -383,7 +387,7 @@ export default function GroupedReport(p: ReportViewProps) {
           rows={courierRows}
           rowKey={(r) => String(r.delivery_contact_id ?? r.delivery_contact_name)}
           style={style}
-          fmtMoney={fmtMoney}
+          fmtMoney={fmtRow}
           labels={labels}
           loading={state.loading}
           totalsRow={courierRows.length > 1 ? { delivery_contact_id: null, delivery_contact_name: labels.total, deliveries: sum('deliveries'), charged_fee_usd: sum('charged_fee_usd'), absorbed_fee_usd: sum('absorbed_fee_usd'), actual_cost_usd: sum('actual_cost_usd'), actual_cost_count: sum('actual_cost_count'), margin_usd: sum('margin_usd'), last_delivery_at: null } : null}
@@ -420,7 +424,7 @@ export default function GroupedReport(p: ReportViewProps) {
         ]
       : []),
   ], [tr, view.labelKey, view.fallback, by, options.basis, totalBasis, showProfit]) // eslint-disable-line react-hooks/rules-of-hooks -- `by` is fixed per mounted instance
-  const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtMoney), groupTotalsRow ? [...groupRows, groupTotalsRow] : groupRows)
+  const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtRow), groupTotalsRow ? [...groupRows, groupTotalsRow] : groupRows)
   const open = groupRows.find((r) => r.key === openKey) || null
   const drill = open ? groupDrill(by, open) : null
   const statement = open ? buildIncomeStatement({ sales: open, profitMode: 'gross', khrToUsd: p.khrToUsd }) : []
@@ -442,7 +446,7 @@ export default function GroupedReport(p: ReportViewProps) {
         rows={groupRows}
         rowKey={(r) => r.key}
         style={style}
-        fmtMoney={fmtMoney}
+        fmtMoney={fmtRow}
         labels={labels}
         loading={state.loading}
         totalsRow={groupTotalsRow}

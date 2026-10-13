@@ -16,7 +16,7 @@
 // MAIN exchange rate via khrToUsd/usdToKhr, exactly like every other display
 // conversion in the app.
 
-import { actualUsdValue } from './financialPrecision.ts'
+import { actualUsdValue, financialCalculationValue } from './financialPrecision.ts'
 
 export interface ReportMoneyDeps {
   /** The persisted display_currency setting, any case ('USD'|'KHR'|'BOTH'). */
@@ -25,6 +25,20 @@ export interface ReportMoneyDeps {
   fmtKHR: (value: number | string) => string
   khrToUsd: (value: unknown) => number
   usdToKhr: (value: unknown) => number
+  /** The USD symbol for the 4-place split-row format; '$' when omitted. */
+  usdSymbol?: string
+}
+
+/**
+ * Split rows -- a day, week, customer, cashier, branch, hour, payment method,
+ * product, courier or receipt row -- carry 4 places so they add up exactly to
+ * the window figure (owner, 13 Oct 2026); a single headline total keeps cents.
+ */
+export type ReportMoneyPlaces = 2 | 4
+
+/** A split row's dollar figure at 4 places: `$1,234.5678`. */
+export function formatUsd4(value: number, symbol = '$'): string {
+  return `${symbol}${financialCalculationValue(value).toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`
 }
 
 /**
@@ -36,17 +50,21 @@ export interface ReportMoneyDeps {
  * their USD figure alone. In BOTH mode nothing is converted — each non-zero
  * raw amount is shown as-is ("$X · Y៛"), so BOTH is always rate-independent.
  */
-export function formatReportMoney(usd: number, khr: number | undefined, deps: ReportMoneyDeps): string {
+export function formatReportMoney(usd: number, khr: number | undefined, deps: ReportMoneyDeps, places: ReportMoneyPlaces = 2): string {
   const u = Number(usd) || 0
   const k = Number(khr) || 0
   const cur = String(deps.displayCurrency || 'usd').trim().toLowerCase()
+  // Riel has no sub-cent problem: the KHR figure already prints finer than
+  // a 4-place dollar, so a split row in KHR mode reads the same either way.
   if (cur === 'khr') return deps.fmtKHR(k + (deps.usdToKhr(u) || 0))
+  const usdText = places === 4 ? (value: number) => formatUsd4(value, deps.usdSymbol ?? '$') : deps.fmtUSD
   if (cur === 'both') {
     const parts: string[] = []
-    if (u) parts.push(deps.fmtUSD(u))
+    if (u) parts.push(usdText(u))
     if (k) parts.push(deps.fmtKHR(k))
-    return parts.length ? parts.join(' · ') : deps.fmtUSD(0)
+    return parts.length ? parts.join(' · ') : usdText(0)
   }
+  if (places === 4) return usdText(u + (deps.khrToUsd(k) || 0))
   // usd (default): fold any KHR portion into USD at the main rate.
   // Reports use ordinary nearest-cent display rounding. Quantize the final
   // folded value exactly once, at this display boundary, before handing it to
@@ -59,6 +77,6 @@ export function formatReportMoney(usd: number, khr: number | undefined, deps: Re
 /** Curry the deps once per render so callers just pass (usd, khr?). `khr`
  * defaults to 0 so USD-canonical figures (sales revenue/profit) can call
  * `fmtMoney(x)` and still honor the setting. */
-export function makeReportMoneyFormatter(deps: ReportMoneyDeps): (usd: number, khr?: number) => string {
-  return (usd: number, khr?: number) => formatReportMoney(usd, khr, deps)
+export function makeReportMoneyFormatter(deps: ReportMoneyDeps, places: ReportMoneyPlaces = 2): (usd: number, khr?: number) => string {
+  return (usd: number, khr?: number) => formatReportMoney(usd, khr, deps, places)
 }

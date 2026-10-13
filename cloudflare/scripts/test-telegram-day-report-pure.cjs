@@ -233,7 +233,7 @@ check('each section opens with `=====Name/ឈ្មោះ=====`: no rule above i
   && !report.includes(lang.RULE) && !/^\d+\.\s/m.test(report), report)
 check('and every row inside a section is a `·` row, the cashier list included',
   report.split('\n').slice(1).every((line) => isSection(line) || line.startsWith(lang.ROW_BULLET) || line.startsWith(lang.HANGING_INDENT))
-  && report.split('\n').includes('· aza: 1 · $90.00') && !report.includes('•'), report)
+  && report.split('\n').includes('· aza: 1 · $90.0000') && !report.includes('•'), report)
 // REDESIGNED Sep 6 2026: one figure per line. The counts of the SAME thing
 // share one compact row (Sep 21 2026), under the Invoices section.
 check('and the kernel receipt count, not the count that included the void',
@@ -254,9 +254,9 @@ check('and its Sales section leads with revenue and profit, the two that always 
 check('the tax and the delivery fee are not inside the sales figure',
   !report.includes('$103.00') && !report.includes('$128.00'))
 
-check(`each cashier's line is the same kernel sliced, so aza shows $90.00 not $603.00`,
-  report.includes('aza') && report.includes('$90.00') && !report.includes('$603.00'))
-check('and sok shows the refunded sale net, $25.00', report.includes('sok') && report.includes('$25.00'))
+check(`each cashier's line is the same kernel sliced, so aza shows $90.0000 not $603.00`,
+  report.includes('aza') && report.includes('$90.0000') && !report.includes('$603.00'))
+check('and sok shows the refunded sale net, $25.0000', report.includes('sok') && report.includes('$25.0000'))
 // The strongest statement available on a rendered message: the two cashier
 // figures add up to the headline. They could not before -- one of them
 // included a void.
