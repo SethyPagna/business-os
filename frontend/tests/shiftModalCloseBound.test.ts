@@ -112,6 +112,8 @@ function openCloseForm(source: string, row: Record<string, unknown> = openRow, l
     if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'fragment' }
     if (name.includes('AppContext')) return { useApp: () => ({ t: (key: string) => key, notify: () => {}, user: { id: 7 }, fmtUSD: String, fmtKHR: String }) }
     if (name.includes('utils/formatters')) return formatters
+    // Who may pick a past close time: this popup is opened by a cashier here.
+    if (name.includes('utils/permissions')) return { isAdminControlUser: () => false }
     // The popup's search pause; nothing here searches (shiftHistorySearch.test.ts does).
     if (name.includes('useDebouncedValue')) return { useDebouncedValue: (value: unknown) => value }
     if (name.includes('shared/Modal')) return { default: () => null }

@@ -277,6 +277,7 @@ try {
     if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'fragment' }
     if (name.includes('shared/Modal')) return { default: ModalMarker }
     if (name.includes('AppContext')) return { useApp: () => ({ t: (key: string) => key, user: { id: 4 } }) }
+    if (name.includes('permissions')) return { isAdminControlUser: () => false }
     if (name.includes('constants')) return { BUSINESS_TIME_ZONE: 'Asia/Phnom_Penh' }
     if (name.includes('formatters')) return { fmtDateOnly: String }
     // The popup's search pause; nothing here searches (shiftHistorySearch.test.ts does).

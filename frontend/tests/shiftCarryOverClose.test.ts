@@ -307,9 +307,9 @@ const pins: Pin[] = [
   },
   {
     label: "a real failure still reaches the cashier verbatim -- it is the Worker's sentence that names the time",
-    holds: ({ gate: g }) => /notify\(e instanceof Error \? e\.message : t\('shift_end_failed'\), 'error'\)/.test(carryHook(g)),
+    holds: ({ gate: g }) => /notify\(shiftCloseTimeRefusalText\(e, t\) \?\? \(e instanceof Error \? e\.message : t\('shift_end_failed'\)\), 'error'\)/.test(carryHook(g)),
     mutate: (source) => editRegion(source, carryHook,
-      "notify(e instanceof Error ? e.message : t('shift_end_failed'), 'error')", "notify(t('shift_end_failed'), 'error')"),
+      "notify(shiftCloseTimeRefusalText(e, t) ?? (e instanceof Error ? e.message : t('shift_end_failed')), 'error')", "notify(t('shift_end_failed'), 'error')"),
   },
 
   // ---- 7. the already-registered case ------------------------------------

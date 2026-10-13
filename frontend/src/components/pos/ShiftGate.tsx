@@ -12,6 +12,7 @@ import ShiftCashBreakdown from '../shifts/ShiftCashBreakdown.tsx'
 import ShiftCountPair, { ShiftSubmitRow, shiftCountBlockerKey } from '../shifts/ShiftCountFields.tsx'
 import { shiftAdditionalCash, shiftCountedPairText, shiftExpectedWithTypedAdditional } from '../shifts/shiftReportModel.ts'
 import { retiredBranchNotice } from '../shifts/retiredBranchNotice.ts'
+import { shiftCloseTimeRefusalText } from '../shifts/shiftCloseTimeError.ts'
 
 function closingCountInvalid(value: string): boolean {
   return value.trim() !== '' && shiftClosingCounts(value, null).usd == null
@@ -385,7 +386,7 @@ function useCarryOverClose(shift: Shift | null, closeBefore: string | null | und
       // verbatim -- it is the one that says which time to retype.
       setPending((e as { outcome?: string })?.outcome === 'unknown')
       if ((e as { outcome?: string })?.outcome === 'unknown') return // shared banner owns the unresolved warning
-      notify(e instanceof Error ? e.message : t('shift_end_failed'), 'error')
+      notify(shiftCloseTimeRefusalText(e, t) ?? (e instanceof Error ? e.message : t('shift_end_failed')), 'error')
     } finally {
       setBusy(false)
     }
@@ -810,7 +811,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
     } catch (e) {
       setPending((e as { outcome?: string })?.outcome === 'unknown')
       if ((e as { outcome?: string })?.outcome === 'unknown') return // shared banner owns the unresolved warning
-      notify(e instanceof Error ? e.message : t('shift_end_failed'), 'error')
+      notify(shiftCloseTimeRefusalText(e, t) ?? (e instanceof Error ? e.message : t('shift_end_failed')), 'error')
     } finally {
       setBusy(false)
     }
