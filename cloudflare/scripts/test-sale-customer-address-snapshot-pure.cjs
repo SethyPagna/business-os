@@ -343,6 +343,7 @@ async function run() {
   // Offline replay is the same writer, but records the client sale moment and
   // a distinct origin. A retry returns the one already-created row and cannot
   // regenerate or alter the immutable envelope.
+  const queuedAt = new Date(Date.now() - 60 * 1000)
   const offline = fixture()
   const offlinePayload = {
     items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1 }],
@@ -353,7 +354,7 @@ async function run() {
     amount_paid_khr: 0,
     exchange_rate: 4200,
     client_request_id: 'offline-create-1',
-    created_at: '2026-09-07T09:30:00.000Z',
+    created_at: queuedAt.toISOString(),
   }
   const first = await offline.call('/', offlinePayload, 'POST')
   assert.equal(first.status, 200, JSON.stringify(first))
@@ -365,8 +366,18 @@ async function run() {
   assert.equal(offline.sql.prepare('SELECT creation_snapshot_json FROM sales WHERE id=?').get(first.body.id).creation_snapshot_json, beforeRetry)
   const offlineCreation = JSON.parse(beforeRetry)
   assert.equal(offlineCreation.origin, 'offline_replay')
-  assert.equal(offlineCreation.sale_at, '2026-09-07 09:30:00')
+  assert.equal(offlineCreation.sale_at, queuedAt.toISOString().slice(0, 19).replace('T', ' '))
   console.log('PASS offline replay keeps one immutable queue-time creation snapshot')
+
+  const stale = fixture()
+  const staleResponse = await stale.call('/', { ...offlinePayload, client_request_id: 'stale-create-1', created_at: '2026-09-07T09:30:00.000Z' }, 'POST')
+  assert.equal(staleResponse.status, 200, JSON.stringify(staleResponse))
+  const staleRow = stale.sql.prepare('SELECT created_at, creation_snapshot_json FROM sales WHERE id=?').get(staleResponse.body.id)
+  const staleCreation = JSON.parse(staleRow.creation_snapshot_json)
+  assert.equal(staleCreation.origin, 'pos')
+  assert.equal(staleCreation.sale_at, null)
+  assert.ok(Math.abs(Date.parse(`${staleRow.created_at.replace(' ', 'T')}Z`) - Date.now()) < 60 * 1000, `a month-old created_at must store the server clock, got ${staleRow.created_at}`)
+  console.log('PASS a stale client created_at is replaced by the server clock and recorded as a normal POS sale')
 
   const failed = fixture()
   failed.sql.exec("CREATE TRIGGER reject_sale_line BEFORE INSERT ON sale_items BEGIN SELECT RAISE(ABORT, 'forced sale-line failure'); END;")
