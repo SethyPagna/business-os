@@ -23,8 +23,9 @@ import type { D1Compat } from './db'
 import { LEDGER_OUT_TYPES } from './stockLedgerQuery'
 import {
   decrementBatchStockStrictStatement, planReceiveBatchStock, planRemoveStockFromBatch, planUnreceiveBatchStock,
-  productHasBatchHistory, restoreBatchStockStatements, type StockWriteStatement,
+  restoreBatchStockStatements, type StockWriteStatement,
 } from './productBatches'
+import { DATED_STOCK_COUNT_REASON } from './datedStockCountImport'
 import { multiplyMoney4 } from './moneyPrecision'
 import { MOVEMENT_RETURN_REFERENCE_TYPES, movementReferenceKindSql } from './movementReference'
 import { STOCK_RECEIPT_MOVEMENT_TYPES, isStockInEditReference, stockInEditRange } from './stockInSessionsQuery'
@@ -254,12 +255,10 @@ type LotShare = { batchId: number; quantity: number; productId: number | null }
 // forth -- read from the ROOT row, since the counters record none of their
 // own -- so the lots never drift from what the count did.
 //
-// MULTILOT-REVERT: a removal that no single lot covered -- a Remove spread across
-// lots, a CSV Remove or Set, a move out -- records its shares the same way when it is
-// written (productBatches.planMovementLotShares, in the same batch as the stock
-// change), so its Revert and Redo move the same lots. Batch-less rows WITHOUT shares are:
-// an aggregate-only add, a removal of units that sat under no lot, and any removal
-// written before shares were recorded.
+// A /adjust or CSV removal that no single lot covered records its shares the same way
+// in the same batch as the stock change (productBatches.planRemovalLotRecord), a zero
+// row when it took nothing from lots. Rows without any record are an aggregate-only add
+// and a removal written before shares were recorded (a move out is never reverted here).
 async function rootLotShares(db: D1Compat, rootId: number): Promise<LotShare[]> {
   const rows = await db.prepare(`
     SELECT a.batch_id AS batchId, ABS(a.quantity) AS quantity, pb.variant_product_id AS productId
@@ -273,11 +272,23 @@ async function rootLotShares(db: D1Compat, rootId: number): Promise<LotShare[]> 
 
 const MERGED_LOT_REFUSAL = 'This change moved stock on a received date that now belongs to another product (the products were merged), so it cannot be reverted here. Nothing was changed; correct it with a new count instead.'
 
-// An OLD removal (written before shares were recorded) that no single lot covered, on a product that uses
-// lots: which lots its units came off is not recorded, and putting them back on a guess (the newest lot, the
-// oldest, a new one) would give a delivery stock it never had. branch_stock alone would restore units the till
-// cannot see -- the split this refuses. Add stock with the received date is the way back.
+// A removal with no recorded lot draw, written after a lot of its product existed: it may have drawn on several, and
+// putting its units back on a guess (the newest lot, the oldest, a new one) would give a delivery stock it never had.
+// branch_stock alone would restore them as undated units, losing their lot (FIFO, expiry, cost, supplier).
 const LOTS_NOT_RECORDED_REFUSAL = 'Cannot revert: this removal did not record which received dates its units came from, so they cannot be put back on the right ones. Nothing was changed. Use Add stock and choose the received date instead.'
+
+// True when the root removal has no record of what it drew from lots although a lot of its product already existed
+// when it was written. A dated count always records its lot effects, and a removal that predates every lot of the
+// product drew on none, so neither is refused.
+async function lotDrawUnrecorded(db: D1Compat, rootId: number, productId: number): Promise<boolean> {
+  const row = await db.prepare(`
+    SELECT m.reason AS reason,
+      EXISTS (SELECT 1 FROM dated_stock_count_batch_actions a WHERE a.movement_id = m.id) AS recorded,
+      EXISTS (SELECT 1 FROM product_batches pb WHERE pb.variant_product_id = @productId AND datetime(pb.created_at) < datetime(m.created_at)) AS lotted
+    FROM inventory_movements m WHERE m.id = @rootId
+  `).get<{ reason: string | null; recorded: number; lotted: number }>({ rootId, productId })
+  return Boolean(row) && row!.reason !== DATED_STOCK_COUNT_REASON && !Number(row!.recorded) && Boolean(Number(row!.lotted))
+}
 
 // The aggregate-only move (branch_stock + products.stock_quantity) -- used for
 // the units of a batch-less movement that no lot holds.
@@ -547,10 +558,9 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     // left it.
     const shares = await landingShares(await rootLotShares(db, root.id))
     if (shares.some((share) => share.productId !== productId)) return refuse(400, 'revert_lot_moved', MERGED_LOT_REFUSAL)
-    // Putting back a removal puts it back on the lots it came off. One written before shares were recorded cannot
-    // say which, on a product that uses lots: refused whole, never guessed (a root that ADDED units without a lot,
-    // re-added here, is exact and passes).
-    if (!shares.length && OUT_TYPES.has(root.movement_type) && await productHasBatchHistory(db, productId)) {
+    // Putting back a removal puts it back on the lots it came off. One that recorded nothing about them cannot say
+    // which: refused whole, never guessed (a root that ADDED units without a lot, re-added here, is exact and passes).
+    if (!shares.length && OUT_TYPES.has(root.movement_type) && await lotDrawUnrecorded(db, root.id, productId)) {
       return refuse(400, 'revert_lots_not_recorded', LOTS_NOT_RECORDED_REFUSAL)
     }
     for (const share of shares) {

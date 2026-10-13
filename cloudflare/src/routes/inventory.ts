@@ -36,7 +36,7 @@ import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, identityBarcodeKey, type ProductIdentityRow } from '../lib/productIdentity'
 import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery, parseRankedIds } from '../lib/productSearchQuery'
-import { fifoRemovalAllocations, isStockRemovalConflict, listBatchesForProduct, parseReceiptSellingPrice, planBranchStockRemoval, planMovementLotShares, planReceiptSellingPrice, planReceiveBatchStock, planRemoveStockAcrossBatches, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptSellingPriceRow, type StockWriteStatement } from '../lib/productBatches'
+import { fifoRemovalAllocations, isStockRemovalConflict, listBatchesForProduct, parseReceiptSellingPrice, planBranchStockRemoval, planMovementLotShares, planReceiptSellingPrice, planRemovalLotRecord, planReceiveBatchStock, planRemoveStockAcrossBatches, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptSellingPriceRow, type StockWriteStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
 import { normalizeTypedDate } from '../lib/batchCode'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, FREE_QUANTITY_NOT_RECEIPT, parseFreeQuantity, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
@@ -2486,10 +2486,10 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         // one relies on assertProductsActive above, as it always has.
         ...(conditionTag && batchIdRequested != null ? [productStockGuardStatement([targetProductId], 'active')] : []),
         ...plan.statements,
-        // A movement that names no single lot also records what it took from each lot,
-        // directly after it, so a Revert can put the units back on those lots.
+        // A movement that names no single lot also records what it took from each lot (or that it took none),
+        // directly after it, so a Revert can put the units back where they came from.
         ...(conditionTag ? holdRemovedStatements(conditionTag)
-          : [movementRowStatement(), ...(resolvedBatchId == null ? planMovementLotShares(plan.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) }))) : [])]),
+          : [movementRowStatement(), ...(resolvedBatchId == null ? planRemovalLotRecord(targetProductId, plan.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) }))) : [])]),
       ]), atomicMark, { status: 200, body: adjustResponseBody() })
     } catch (err) {
       if (err instanceof StockMutationBudgetError) throw err

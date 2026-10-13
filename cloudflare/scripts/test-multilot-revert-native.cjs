@@ -56,6 +56,7 @@ function wrapDb(db, counter, env) {
       const sqls = statements.map(s => s.sql)
       await before(sqls, env)
       counter.n += statements.length
+      counter.maxBatch = Math.max(counter.maxBatch, statements.length)
       for (const sql of sqls) counter.log.push(sql)
       const result = await db.batch(statements.map(s => s.inner))
       await after(sqls)
@@ -107,13 +108,14 @@ async function drain(pending) {
 async function handle(request, rawEnv, ctx) {
   const url = new URL(request.url)
   if (url.pathname.startsWith('/__al/')) return control_(url, request)
-  const counter = { n: 0, log: [] }
+  const counter = { n: 0, log: [], maxBatch: 0 }
   const { env, ctx2, pending } = instrument(rawEnv, ctx, counter)
   const response = await rawFetch(request, env, ctx2)
   if (response.webSocket) return response
   await drain(pending)
   const headers = new Headers(response.headers)
   headers.set('x-al-d1', String(counter.n))
+  headers.set('x-al-maxbatch', String(counter.maxBatch))
   // The statement log rides in a response header; a request that runs hundreds of statements (a chunked import) would
   // overflow the header limit and drop the connection, so only the first 40 are carried. The count is x-al-d1.
   headers.set('x-al-sql', encodeURIComponent(JSON.stringify(counter.log.slice(0, 40).map(s => s.replace(/\\s+/g, ' ').trim().slice(0, 120)))))
@@ -243,7 +245,7 @@ async function world({ patches = [], plan = 'paid' } = {}) {
     const text = await response.text()
     let json; try { json = JSON.parse(text) } catch { json = text }
     let sql = []; try { sql = JSON.parse(decodeURIComponent(response.headers.get('x-al-sql') || '[]')) } catch { /* none */ }
-    return { status: response.status, body: json, d1: Number(response.headers.get('x-al-d1') || 0), sql }
+    return { status: response.status, body: json, d1: Number(response.headers.get('x-al-d1') || 0), maxBatch: Number(response.headers.get('x-al-maxbatch') || 0), sql }
   }
   H.multipart = async (route, field, name, content, { as = 'admin' } = {}) => {
     const form = new FormData(); form.set(field, new File([content], name, { type: 'text/csv' }))
@@ -322,15 +324,24 @@ function finish(finding) {
 // change (dated_stock_count_batch_actions, the table a dated count already uses; negative quantity = taken). Revert reads
 // them from the ROOT row of the chain, so Revert, Redo and Revert-of-Redo all move exactly those lots.
 //
-// An OLD multi-lot removal (written before the fix) has no shares. Its Revert would have to guess which lots to refill, so
-// on a product that uses lots it is REFUSED (revert_lots_not_recorded, nothing written; Add stock with a received date is
-// the way back). On a product that never had a lot the aggregate-only restore is exact and still works.
+// A removal that took NOTHING from lots (units under no lot) records a zero row on the product's newest lot, so its Revert
+// restores the aggregate exactly (M12, SF-1 of the Opus refute). A removal made before any lot of its product existed, and a
+// dated-count removal (which always records its lot effects), need no record.
+//
+// An OLD removal (written before the fix) has no record at all. If a lot of its product already existed, its Revert would
+// have to guess which lots to refill, so it is REFUSED (revert_lots_not_recorded, nothing written). Otherwise the
+// aggregate-only restore is exact and still works.
 //
 // Run (from cloudflare/):  node scripts/test-multilot-revert-native.cjs
 //   --wrong=no-adjust-shares    mutant: /adjust writes the movement but not its lot shares    (M1, M3, M4, M7, M8, M9 go RED)
 //   --wrong=no-import-shares    mutant: the CSV import writes the movement but not its shares (M2, M5, M9b go RED)
 //   --wrong=ignore-shares       mutant: Revert ignores recorded shares (the pre-fix, aggregate-only Revert) (M1..M7, M9b go RED)
 //   --wrong=no-old-refusal      mutant: an old share-less removal on a lot-tracked product is reverted aggregate-only (M6 goes RED)
+//   --wrong=no-zero-record      mutant: a removal that took nothing from lots records nothing, so its Revert is refused (M12, M12b, M12c go RED)
+//   --wrong=refuse-any-lot      mutant: the refusal fires for any lot of the product, not only lots that existed before the removal (M12d, M6d go RED)
+//   --wrong=no-dated-exemption  mutant: a dated-count removal with no record is refused too (M6e goes RED)
+//   --wrong=no-move-row-shares  mutant: /move-row writes its move_out without the per-lot shares (M14 goes RED)
+//   --wrong=import-estimate-blind  mutant: the CSV group cost estimate forgets the share statement, so a group outgrows the 300-statement chunk (M15 goes RED)
 //   --wrong=one-held-row        mutant: a multi-lot damaged hold writes ONE held row with no lot (the pre-fix shape) (M11 goes RED)
 //   --wrong=active-blind-precheck  mutant: the named-lot pre-check ignores pb.is_active again (R2 F8)           (M10 goes RED)
 //   --only=M1,M2                run just those cases (debugging aid)
@@ -339,18 +350,18 @@ function finish(finding) {
 const STOCK_REVERT = 'src/lib/stockRevert.ts'
 const NO_OLD_REFUSAL = {
   name: 'no-old-refusal', file: STOCK_REVERT,
-  from: 'if (!shares.length && OUT_TYPES.has(root.movement_type) && await productHasBatchHistory(db, productId)) {',
+  from: 'if (!shares.length && OUT_TYPES.has(root.movement_type) && await lotDrawUnrecorded(db, root.id, productId)) {',
   to: 'if (false) {',
 }
 const PATCHES = {
   'no-adjust-shares': [
     { name: 'no-adjust-shares', file: 'src/routes/inventory.ts',
-      from: 'resolvedBatchId == null ? planMovementLotShares(plan.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) }))) : []',
+      from: 'resolvedBatchId == null ? planRemovalLotRecord(targetProductId, plan.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) }))) : []',
       to: '[]' },
   ],
   'no-import-shares': [
     { name: 'no-import-shares', file: 'src/lib/importEngine.ts',
-      from: 'if (singleLot == null) statements.push(...planMovementLotShares(entry.takes).map(asStatement))',
+      from: 'if (entry.delta < 0 && singleLot == null) statements.push(...planRemovalLotRecord(entry.productId, entry.takes).map(asStatement))',
       to: 'void asStatement' },
   ],
   'ignore-shares': [
@@ -360,6 +371,23 @@ const PATCHES = {
     NO_OLD_REFUSAL,
   ],
   'no-old-refusal': [NO_OLD_REFUSAL],
+  'no-zero-record': [
+    { name: 'no-zero-record', file: 'src/lib/productBatches.ts', from: 'if (shares.length) return shares', to: 'return shares' },
+  ],
+  'refuse-any-lot': [
+    { name: 'refuse-any-lot', file: STOCK_REVERT, from: 'AND datetime(pb.created_at) < datetime(m.created_at)', to: 'AND 1' },
+  ],
+  'no-dated-exemption': [
+    { name: 'no-dated-exemption', file: STOCK_REVERT, from: 'row!.reason !== DATED_STOCK_COUNT_REASON && ', to: '' },
+  ],
+  'no-move-row-shares': [
+    { name: 'no-move-row-shares', file: 'src/routes/inventory.ts',
+      from: 'removal.remainder === 0 ? [] : planMovementLotShares(removal.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) })))',
+      to: 'removal.remainder === 0 ? [] : []' },
+  ],
+  'import-estimate-blind': [
+    { name: 'import-estimate-blind', file: 'src/lib/importEngine.ts', from: '(entry.delta < 0 && singleLotOf(entry) == null ? 1 : 0)', to: '0' },
+  ],
   'one-held-row': [
     { name: 'one-held-row', file: 'src/lib/damagedLotActions.ts',
       from: 'const rows = input.lotSplit?.length ? input.lotSplit',
@@ -560,14 +588,16 @@ async function main() {
     })
 
     // ------------------------------------------------------------------ M6: an OLD movement (written before the fix) has no shares
-    const oldRemoval = async (s, lotsNow, branchNow) => {
-      // Exactly what the pre-fix writers left behind: lots and branch already drained, one batch-less 'remove' movement, no share rows.
+    const oldRemoval = async (s, lotsNow, branchNow, { reason = 'ML old multi-lot remove', lotsExistedBefore = true } = {}) => {
+      // Exactly what the pre-fix writers left behind: lots and branch already drained, one batch-less 'remove' movement, no share rows,
+      // written (2026-09-20) after the product's lots existed unless `lotsExistedBefore` is false.
+      if (lotsExistedBefore && s.ids.length) await H.db.prepare("UPDATE product_batches SET created_at='2026-09-01 00:00:00' WHERE id IN (" + s.ids.join(',') + ')').run()
       await H.db.batch([
         ...s.ids.map((id, i) => H.db.prepare('UPDATE branch_batch_stock SET quantity=? WHERE batch_id=? AND branch_id=?').bind(lotsNow[i], id, LC)),
         H.db.prepare('UPDATE branch_stock SET quantity=? WHERE product_id=? AND branch_id=?').bind(branchNow, s.p, LC),
         H.db.prepare('UPDATE products SET stock_quantity=? WHERE id=?').bind(branchNow, s.p),
-        H.db.prepare("INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason,created_at) VALUES(?,?,?,'LC Store','remove',?,'ML old multi-lot remove','2026-09-20 10:00:00')")
-          .bind(s.p, s.name, LC, s.total - branchNow),
+        H.db.prepare("INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason,created_at) VALUES(?,?,?,'LC Store','remove',?,?,'2026-09-20 10:00:00')")
+          .bind(s.p, s.name, LC, s.total - branchNow, reason),
       ])
       return (await snap(H, s)).movements[0]
     }
@@ -606,6 +636,86 @@ async function main() {
       const a2 = await snap(H, s)
       t.eq('Revert of that Revert (re-adding the 4) is not refused', r2.status, 200)
       t.eq('lots untouched, the 4 undated units back', [a2.lots, a2.branch, a2.product], [[5, 5], 14, 14])
+    })
+
+    await check('M6d', 'control: an old removal written BEFORE any lot of its product existed drew on none, so its Revert is the exact aggregate restore even though a lot exists now', 'control', async (t) => {
+      const s = await seed(H, { lots: [5], undated: 3 })
+      const old = await oldRemoval(s, [5], 6, { lotsExistedBefore: false })
+      const r = await revert(H, old.id)
+      const a = await snap(H, s)
+      t.eq('Revert answered', r.status, 200)
+      t.eq('the 2 undated units are back, the lot is untouched', [a.lots, a.branch, a.product], [[5], 8, 8])
+    })
+    await check('M6e', 'control: a removal made by the dated stock count importer with no lot record drew nothing from lots (it always records its lot effects), so its Revert is not refused', 'control', async (t) => {
+      const s = await seed(H, { lots: [5], undated: 3 })
+      const old = await oldRemoval(s, [5], 6, { reason: 'Dated stock count import' })
+      const r = await revert(H, old.id)
+      const a = await snap(H, s)
+      t.eq('Revert answered', r.status, 200)
+      t.eq('the 2 undated units are back, the lot is untouched', [a.lots, a.branch, a.product], [[5], 8, 8])
+    })
+
+    // ------------------------------------------------------------------ M12: a removal taken wholly from units that sit under no lot (R2 refute SF-1)
+    // Written AFTER the fix, so it must say so: with no record it is indistinguishable from an old multi-lot removal and its
+    // Revert would be refused on any product that has a lot row, even a dead one.
+    const deadLot = async (s) => {
+      const id = s.p * 100 + 50
+      await H.db.prepare('INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,batch_number,unit_cost_usd,is_active) VALUES(?,?,?,?,?,1,3,0)')
+        .bind(id, s.p, 'dead' + id, 'dead' + id, '2026-08-01').run()
+      return id
+    }
+    await check('M12', '/adjust Remove 3 of 10 units under no lot (the product only has a dead lot): the removal records that it drew nothing from lots; Revert / Redo / Revert restore the aggregate exactly', 'high', async (t) => {
+      const s = await seed(H, { lots: [], undated: 10 })
+      const dead = await deadLot(s)
+      const removed = await adjustRemove(H, s, 3, 'a')
+      const after = await snap(H, s)
+      t.eq('Remove answered', removed.status, 200)
+      expectLedgers(t, 'after the Remove', after, s, { lots: [], undated: 7 })
+      t.eq('the movement names no lot', after.movements.map(m => [m.t, m.q, m.b]), [['remove', 3, null]])
+      t.eq('a zero row on the product\'s newest lot records that no lot gave a unit', after.shares.map(x => [x.m, x.b, x.q]), [[after.movements[0].id, dead, 0]])
+      await chain(t, H, s, 'M12', after, { drained: [], restored: [], undatedDrained: 7, undatedRestored: 10 })
+    })
+    await check('M12b', 'CSV Remove 3 of 10 units under no lot (dead lot only): the same zero record, and Revert / Redo / Revert restore the aggregate exactly', 'high', async (t) => {
+      const s = await seed(H, { lots: [], undated: 10 })
+      const dead = await deadLot(s)
+      const imported = await importCsv(H, 'remove', [row(s, 3)])
+      const after = await snap(H, s)
+      t.eq('import finished', imported.job.status, 'completed')
+      expectLedgers(t, 'after the import', after, s, { lots: [], undated: 7 })
+      t.eq('the zero record is written with the movement', after.shares.map(x => [x.m, x.b, x.q]), [[after.movements[0].id, dead, 0]])
+      await chain(t, H, s, 'M12b', after, { drained: [], restored: [], undatedDrained: 7, undatedRestored: 10 })
+    })
+    await check('M12c', 'a TRACKED pair (an active, empty lot beside 5 undated units): Remove 3 takes undated units only, and Revert / Redo / Revert put exactly them back', 'high', async (t) => {
+      const s = await seed(H, { lots: [0], undated: 5 })
+      const removed = await adjustRemove(H, s, 3, 'a')
+      const after = await snap(H, s)
+      t.eq('Remove answered', removed.status, 200)
+      expectLedgers(t, 'after the Remove', after, s, { lots: [0], undated: 2 })
+      t.eq('the zero record sits on that lot', after.shares.map(x => [x.m, x.b, x.q]), [[after.movements[0].id, s.ids[0], 0]])
+      await chain(t, H, s, 'M12c', after, { drained: [0], restored: [0], undatedDrained: 2, undatedRestored: 5 })
+    })
+    await check('M12d', 'a removal made while its product had no lot at all needs no record; a lot received afterwards does not make its Revert refused', 'high', async (t) => {
+      const s = await seed(H, { lots: [], undated: 10 })
+      const removed = await adjustRemove(H, s, 3, 'a')
+      const a1 = await snap(H, s)
+      t.eq('Remove answered, and there was no lot to record against', [removed.status, a1.shares], [200, []])
+      // The first lot of the product arrives later: 4 units received at the branch, dated after the removal.
+      const late = s.p * 100 + 60
+      await H.db.batch([
+        H.db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,batch_number,unit_cost_usd,is_active,created_at) VALUES(?,?,?,?,'2026-10-10',1,3,1,'2099-01-01 00:00:00')").bind(late, s.p, 'late', 'late'),
+        H.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,4)').bind(late, LC),
+        H.db.prepare('UPDATE branch_stock SET quantity=quantity+4 WHERE product_id=? AND branch_id=?').bind(s.p, LC),
+        H.db.prepare('UPDATE products SET stock_quantity=stock_quantity+4 WHERE id=?').bind(s.p),
+      ])
+      const r = await revert(H, a1.movements[0].id)
+      const a2 = await snap(H, s)
+      t.eq('Revert answered (the removal predates the lot, so it drew on none)', r.status, 200)
+      t.eq('the 3 undated units are back and the late lot is untouched', [a2.branch, a2.product], [14, 14])
+      const late2 = await H.q('SELECT quantity q FROM branch_batch_stock WHERE batch_id=? AND branch_id=?', late, LC)
+      t.eq('the late lot still holds its 4', late2[0].q, 4)
+      const redo = await revert(H, (a2.movements[1] || {}).id)
+      const a3 = await snap(H, s)
+      t.eq('Redo answered and took undated units only', [redo.status, a3.branch, a3.product], [200, 11, 11])
     })
 
     // ------------------------------------------------------------------ M7: a Redo whose lot has since been drawn down
@@ -672,6 +782,42 @@ async function main() {
       const rev = await revert(H, a.movements[0].id)
       t.eq('Revert answered', rev.status, 200)
       expectLedgers(t, 'after the Revert', await snap(H, s), s, { lots: [5, 5] })
+    })
+
+    // ------------------------------------------------------------------ M14: /move-row (a move out is not reverted here, but it records its shares)
+    await check('M14', '/move-row of 7 from lots 5+5 records the per-lot shares with its move_out; a move that one lot covers names that lot and writes none', 'medium', async (t) => {
+      const src = await seed(H, { lots: [5, 5] })
+      const dst = await seed(H, { lots: [], undated: 0 })
+      const moved = await H.api('POST', '/api/inventory/move-row', { sourceProductId: src.p, destinationProductId: dst.p, quantity: 7, branchId: LC, reason: 'ML move' })
+      const a = await snap(H, src)
+      t.eq('move answered', moved.status, 200)
+      t.eq('the move_out names no single lot', a.movements.map(m => [m.t, m.q, m.b]), [['move_out', 7, null]])
+      t.eq('the shares are recorded', a.shares.map(x => [x.m, x.b, x.q]), [[a.movements[0].id, src.ids[0], -5], [a.movements[0].id, src.ids[1], -2]])
+      const one = await seed(H, { lots: [5, 5] })
+      const dst2 = await seed(H, { lots: [], undated: 0 })
+      const single = await H.api('POST', '/api/inventory/move-row', { sourceProductId: one.p, destinationProductId: dst2.p, quantity: 4, branchId: LC, reason: 'ML move' })
+      const b = await snap(H, one)
+      t.eq('single-lot move answered', single.status, 200)
+      t.eq('it names the lot and writes no share rows', [b.movements.map(m => [m.t, m.q, m.b]), b.shares], [[['move_out', 4, one.ids[0]]], []])
+    })
+
+    // ------------------------------------------------------------------ M15: the CSV group cost estimate counts the record statement
+    // 100 removals that each spread over two lots: with the record counted (3 statements a row) a group stops at 93 rows and stays
+    // inside the 300-statement chunk; without it the estimate lets all 100 rows into one group of about 306 statements.
+    await check('M15', 'a 100-row CSV Remove (each row over two lots) is applied in groups that stay inside the 300-statement batch limit, every row once with its two shares', 'medium', async (t) => {
+      const products = []
+      for (let i = 0; i < 100; i++) products.push(await seed(H, { lots: [5, 5] }))
+      const imported = await importCsv(H, 'remove', products.map(p => row(p, 7)))
+      t.eq('import finished', imported.job.status, 'completed')
+      const ids = products.map(p => p.p).join(',')
+      const moved = await H.q1("SELECT COUNT(*) n, COALESCE(SUM(quantity),0) q FROM inventory_movements WHERE movement_type='out' AND product_id IN (" + ids + ')')
+      const shares = await H.q1('SELECT COUNT(*) n FROM dated_stock_count_batch_actions WHERE movement_id IN (SELECT id FROM inventory_movements WHERE product_id IN (' + ids + '))')
+      const lots = await H.q1('SELECT COALESCE(SUM(bbs.quantity),0) q FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id WHERE pb.variant_product_id IN (' + ids + ') AND bbs.branch_id=' + LC)
+      t.eq('one movement per row, 7 units each', [moved.n, moved.q], [100, 700])
+      t.eq('two shares per row', shares.n, 200)
+      t.eq('the lots hold the 3 units left per product', lots.q, 300)
+      t.note('largest db.batch of the apply request: ' + imported.approved.maxBatch + ' statements')
+      t.ok('no single batch outgrows the 300-statement chunk', imported.approved.maxBatch <= 300, imported.approved.maxBatch)
     })
 
     // ------------------------------------------------------------------ M8: D1 statements per request (Paid 1000, Free 50)
