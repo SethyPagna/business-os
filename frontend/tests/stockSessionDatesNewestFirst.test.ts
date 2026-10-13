@@ -11,12 +11,13 @@ for (const mode of ['add', 'remove', 'set'] as const) {
   const choices = sessionLotChoices(mode, lots, supplier)
   assert.deepEqual(choices.map(lot => lot.id), mode === 'remove' ? [3, 1] : [2, 3, 1], `${mode}: all eligible years newest first`)
   if (mode === 'remove') assert.equal(defaultLotChoice({ mode, choices }), 1, 'Remove preserves oldest default')
-  if (mode === 'set') assert.equal(defaultLotChoice({ mode, choices }), 2, 'Set preserves newest default including empty lots')
+  // Lot 2 is the newest but empty: the start skips it while a stocked lot exists (stockSessionDefaultLot.test.ts has the full table).
+  if (mode === 'set') assert.equal(defaultLotChoice({ mode, choices }), 3, 'Set starts on the newest lot that holds stock, not the empty newest one')
   assert.equal(defaultLotChoice({ mode, choices, sheetBatchId: 3 }), 3, 'explicit selection wins')
   if (mode !== 'add') assert.equal(defaultLotChoice({ mode, choices, sharedDate: '2025-01-02' }), 1, 'shared date wins')
 }
 assert.equal(defaultLotChoice({ mode: 'remove', choices: [...lots].reverse() }), 1, 'default is independent of display order')
-assert.equal(defaultLotChoice({ mode: 'set', choices: lots }), 2, 'newest is independent of input order')
+assert.equal(defaultLotChoice({ mode: 'set', choices: lots }), 3, 'newest stocked lot is independent of input order')
 const undatedLots = [lots[0], { id: 4, quantity: 2 }, lots[2], { id: 5, quantity: 3, received_at: '' }, lots[1]]
 for (const mode of ['add', 'remove', 'set'] as const) {
   assert.deepEqual(sessionLotChoices(mode, undatedLots, supplier).map(lot => lot.id),

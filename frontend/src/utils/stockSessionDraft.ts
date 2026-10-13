@@ -533,9 +533,31 @@ export function sessionLotChoices<T extends SessionLot>(mode: StockMode, lots: r
 }
 
 /**
+ * Which of two lots was received first (negative = `lot`), read from the lots
+ * themselves and never from where they sit in a list: the list is shown newest
+ * first with stocked lots ahead of empty ones, so a position says nothing about
+ * age. Day, then the time of day, then the receipt number (the later receipt has
+ * the higher one), then the id (assigned in receipt order).
+ */
+function compareReceiptOrder(lot: SessionLot, other: SessionLot): number {
+  const day = lotIsoDate(lot)
+  const otherDay = lotIsoDate(other)
+  if (day !== otherDay) return day < otherDay ? -1 : 1
+  const gap = (batchReceivedInstant(lot) ?? 0) - (batchReceivedInstant(other) ?? 0)
+  if (gap !== 0) return gap
+  const numberGap = (Number(lot.batch_number) || 0) - (Number(other.batch_number) || 0)
+  return numberGap !== 0 ? numberGap : Number(lot.id) - Number(other.id)
+}
+
+/**
  * The lot a freshly picked line starts on (S3): the option sheet's pick, else
  * the lot with the shared received date, else the oldest (Remove) or newest
- * (Set). Add starts on a new received date. No lot at all = the branch total.
+ * (Set) lot. Those two picks are the user's own and are kept even on an empty
+ * lot; the fallback never is: a lot holding stock always beats an empty one, so a
+ * count or a removal does not start on a lot with nothing in it while another has
+ * stock (all empty: Set still starts on the newest). Dated lots beat undated ones
+ * (a custom code such as RECON-1 has no age). Add starts on a new received date.
+ * No lot at all = the branch total.
  */
 export function defaultLotChoice(input: {
   mode: StockMode
@@ -551,24 +573,17 @@ export function defaultLotChoice(input: {
   if (!choices.length) return 'none'
   const sheet = input.sheetBatchId != null ? choices.find((lot) => Number(lot.id) === Number(input.sheetBatchId)) : null
   if (sheet) return Number(sheet.id)
-  const dated = input.sharedDate ? choices.find((lot) => lotIsoDate(lot) === input.sharedDate) : null
-  if (dated) return Number(dated.id)
-  const datedChoices = choices.filter((lot) => lotIsoDate(lot))
-  // Lots of one day are told apart by the time they were received, never by the
-  // order they arrive in: the list is shown newest first, so a tie broken by
-  // position would hand Remove the newest lot of the day.
-  const dayThenTime = (lot: SessionLot, other: SessionLot): number => {
-    const day = lotIsoDate(lot)
-    const otherDay = lotIsoDate(other)
-    if (day !== otherDay) return day < otherDay ? -1 : 1
-    return (batchReceivedInstant(lot) ?? 0) - (batchReceivedInstant(other) ?? 0)
-  }
-  const selected = datedChoices.reduce<SessionLot | undefined>((best, lot) => {
-    if (!best) return lot
-    const order = dayThenTime(lot, best)
+  const sharedDateLot = input.sharedDate ? choices.find((lot) => lotIsoDate(lot) === input.sharedDate) : null
+  if (sharedDateLot) return Number(sharedDateLot.id)
+  const stocked = choices.filter((lot) => toNumber(lot.quantity) > 0)
+  const pool = stocked.length ? stocked : choices
+  const datedPool = pool.filter((lot) => lotIsoDate(lot))
+  const candidates = datedPool.length ? datedPool : pool
+  const selected = candidates.reduce((best, lot) => {
+    const order = compareReceiptOrder(lot, best)
     return (mode === 'remove' ? order < 0 : order > 0) ? lot : best
-  }, undefined)
-  return Number((selected || (mode === 'set' ? choices[choices.length - 1] : choices[0])).id)
+  })
+  return Number(selected.id)
 }
 
 /** The lot-scope Set preview for the entry row, or null while the target is not a count. */
