@@ -17,6 +17,8 @@
 //   branch_retired_no_successor      409  POST /: the sale's branch is inactive and no active branch
 //                                         has taken its place (lib/branchEffect.ts); the English is
 //                                         pinned to the pack by scripts/test-cutover-li-pack-parity-pure.cjs
+//   return_edit_empty                400  PATCH /api/returns/:id with an explicit empty item list (6.0.41);
+//                                         reached by a retry an older build stored before the client refused it
 export const RETURN_REFUSAL_ERRORS: Readonly<Record<string, string>> = {
   'return_edit_cancelled': 'This return is cancelled. Restore it before editing.',
   'return_restore_over_capacity': 'Cannot restore: more units would count as returned than the sale sold. Nothing was changed.',
@@ -24,6 +26,7 @@ export const RETURN_REFUSAL_ERRORS: Readonly<Record<string, string>> = {
   'return_refund_sale_line_required': 'Each return line needs a sale item or a product.',
   'return_stock_skipped_sale': 'This sale never took stock off the shelf (e.g. an import), so nothing was changed.',
   'branch_retired_no_successor': 'This record belongs to an inactive branch, and no active branch has taken its place. Nothing was changed.',
+  'return_edit_empty': 'A return must keep at least one line. To undo the whole return, cancel it instead.',
 }
 
 // A refusal whose sentence names values the Worker sends as `params`

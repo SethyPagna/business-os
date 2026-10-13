@@ -9,10 +9,12 @@ import { buildProductSearchTerms } from '../../utils/searchTerms.ts'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
+import Modal from '../shared/Modal.tsx'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Tags from 'lucide-react/dist/esm/icons/tags.js'
+import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { fmtClock24, parseServerTimestampMs } from '../../utils/formatters'
 import ExportMenu from '../shared/ExportMenu'
@@ -245,6 +247,15 @@ function normalizeScope(value: unknown): ReturnScope {
   return value === SUPPLIER_SCOPE ? SUPPLIER_SCOPE : CUSTOMER_SCOPE
 }
 
+// A return can stand in an Undo/Redo body only with its lines. List rows have
+// none (GET /api/returns hydrates items only on request), and neither does a
+// bare {id, updated_at} write result; a body built from either sends
+// `items: []`, which would empty the return. The Worker refuses that body
+// (return_edit_empty); this keeps the client from building it.
+function hasLoadedReturnLines(ret: ReturnRow | null | undefined): ret is ReturnRow & { items: ReturnItem[] } {
+  return Array.isArray(ret?.items) && ret.items.length > 0
+}
+
 function getReturnTypeKey(ret?: ReturnRow | null): string {
   const scope = normalizeScope(ret?.return_scope)
   if (scope === SUPPLIER_SCOPE) return String(ret?.supplier_settlement || 'refund').trim().toLowerCase() || 'refund'
@@ -413,6 +424,9 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   const [showReasonManager, setShowReasonManager] = useState(false)
   const [bulkActionSnapshot, setBulkActionSnapshot] = useState<{ rows: ReturnRow[]; scope: ReturnScope } | null>(null)
   const [editRet, setEditRet] = useState<ReturnRow | null>(null)
+  // The return whose edit form could not be opened because its lines did not
+  // load. Retry reloads it; the form is never opened from the list row.
+  const [editLoadFailure, setEditLoadFailure] = useState<ReturnRow | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [returnGroupMode, setReturnGroupMode] = useState<ReturnGroupMode>('time')
@@ -874,22 +888,36 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       return
     }
     setDetailRet(null)
+    setEditLoadFailure(null)
+    // The form is built only from the return as the server holds it now,
+    // lines included. A list row has no lines: a form built from it saves --
+    // and its Undo replays -- `items: []`, which empties the return. When the
+    // detail does not load, open nothing and offer Retry.
+    let fresh: ReturnRow | null = null
     try {
-      const fresh = await withLoaderTimeout(
+      fresh = await withLoaderTimeout(
         () => fetchReturnDetail(ret.id),
         'Return details',
         RETURNS_DETAIL_TIMEOUT_MS,
-      )
-      if (!isTrackedRequestCurrent(editRequestRef, requestId)) return
-      setEditRet((fresh || ret) as ReturnRow)
+      ) as ReturnRow | null
     } catch {
-      if (!isTrackedRequestCurrent(editRequestRef, requestId)) return
-      setEditRet(ret)
+      fresh = null
     }
+    if (!isTrackedRequestCurrent(editRequestRef, requestId)) return
+    if (fresh && Array.isArray(fresh.items)) {
+      setEditRet(fresh)
+      return
+    }
+    setEditRet(null)
+    setEditLoadFailure(ret)
   }
 
   const buildReturnHistoryPayload = useCallback((snapshot: ReturnRow): ReturnHistoryPayload => {
     if (!snapshot?.id) throw new Error('Return snapshot is missing an id')
+    // Never build `items: []`: replaying it would empty the return.
+    if (!hasLoadedReturnLines(snapshot)) {
+      throw new Error(tr('return_history_lines_unavailable', 'The lines of this return were not loaded when this change was recorded, so it cannot be undone or redone here. Nothing was changed.'))
+    }
     return {
       reason: snapshot.reason || '',
       return_type: snapshot.return_type || 'restock',
@@ -897,7 +925,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       total_refund_usd: snapshot.total_refund_usd || 0,
       total_refund_khr: snapshot.total_refund_khr || 0,
       branch_id: snapshot.branch_id || null,
-      items: (Array.isArray(snapshot.items) ? snapshot.items : []).map((item) => ({
+      items: snapshot.items.map((item) => ({
         sale_item_id: item.sale_item_id || null,
         product_id: item.product_id || null,
         product_name: item.product_name || null,
@@ -909,7 +937,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         branch_id: item.branch_id || snapshot.branch_id || null,
       })),
     }
-  }, [])
+  }, [tr])
 
   const fetchReturnSnapshot = useCallback(async (returnId: number | string | null | undefined, fallback: ReturnRow | null = null): Promise<ReturnRow | null> => {
     const numericId = Number(returnId || 0)
@@ -1008,21 +1036,28 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     const previousSnapshot = cloneHistorySnapshot(mutation?.previousSnapshot || null) as ReturnRow | null
     const createdId = Number(result?.id || mutation?.id || 0)
     const effectiveId = createdId || Number(previousSnapshot?.id || 0)
+    // An edit's latest state is only what the server holds now. Falling back to
+    // the pre-edit snapshot would make Redo re-apply the old state, and the
+    // bare {id, updated_at} write result has no lines.
     const latestSnapshot = effectiveId
-      ? await fetchReturnSnapshot(effectiveId, mutation?.snapshot || previousSnapshot || result)
+      ? await fetchReturnSnapshot(effectiveId, kind === 'edit' ? null : (mutation?.snapshot || previousSnapshot || result))
       : null
 
     await loadReturns(true)
 
-    if (kind === 'edit' && previousSnapshot?.id && latestSnapshot?.id) {
-      const returnLabel = latestSnapshot.return_number || previousSnapshot.return_number || `#${latestSnapshot.id}`
+    if (kind === 'edit' && previousSnapshot?.id) {
+      const returnLabel = latestSnapshot?.return_number || previousSnapshot.return_number || `#${previousSnapshot.id}`
+      const entry = { label: `Edit return ${returnLabel}`, entity: 'return', entity_id: previousSnapshot.id, scope: 'returns' }
+      // Undo and Redo each replay a whole snapshot, so each end needs its
+      // lines. Without both, the edit is listed but offers no reversal.
+      if (!hasLoadedReturnLines(previousSnapshot) || !hasLoadedReturnLines(latestSnapshot)) {
+        actionHistory.pushAction(entry)
+        return
+      }
       const entryId = crypto.randomUUID()
       actionHistory.pushAction({
+        ...entry,
         id: entryId,
-        label: `Edit return ${returnLabel}`,
-        entity: 'return',
-        entity_id: latestSnapshot.id,
-        scope: 'returns',
         undo: () => restoreReturnSnapshot(previousSnapshot, 'Undo return edit', { entryId, direction: 'undo' }),
         redo: () => restoreReturnSnapshot(latestSnapshot, 'Redo return edit', { entryId, direction: 'redo' }),
       })
@@ -1724,6 +1759,27 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
             notify={notify}
           />
         </Suspense>
+      ) : null}
+
+      {editLoadFailure ? (
+        <Modal
+          title={`${tr('edit_return', 'Edit Return')}${editLoadFailure.return_number ? ` · ${editLoadFailure.return_number}` : ''}`}
+          onClose={() => setEditLoadFailure(null)}
+          size="sm"
+          keyboard
+          unsavedChanges="read-only"
+        >
+          <div data-return-edit-load-failure="">
+            <p role="alert" className="text-sm text-red-700 dark:text-red-300">
+              {tr('return_edit_load_failed', 'The lines of this return could not be loaded, so it cannot be edited yet. Nothing was changed.')}
+            </p>
+            <div className="mt-4 flex justify-end">
+              <button type="button" className="btn-primary inline-flex items-center gap-1.5 text-sm" onClick={() => { void handleOpenEdit(editLoadFailure) }}>
+                <RotateCcw className="h-4 w-4" /> {tr('retry', 'Retry')}
+              </button>
+            </div>
+          </div>
+        </Modal>
       ) : null}
 
       {showCustomerForm ? (

@@ -217,6 +217,11 @@ export default function EditReturnModal({ ret, onClose, onSuccess, onReloadLates
   ))
 
   const activeItems    = items.filter(it => it.returnQty > 0)
+  // A return keeps at least one line. Saving none would reverse every restock
+  // and zero the refund; the Worker refuses it too (return_edit_empty). Undoing
+  // the whole return is a cancel.
+  const keepsNoLine    = activeItems.length === 0
+  const emptyEditText  = T('return_edit_empty', 'A return must keep at least one line. To undo the whole return, cancel it instead.')
   const totalRefund    = activeItems.reduce((sum, it) => sum + toNumber(it.applied_price_usd) * it.returnQty, 0)
   const totalRefundKhr = activeItems.reduce((sum, it) => sum + toNumber(it.applied_price_khr) * it.returnQty, 0)
 
@@ -236,6 +241,8 @@ export default function EditReturnModal({ ret, onClose, onSuccess, onReloadLates
     // legacy edit request. Its original pending requests remain untouched.
     if (Number(ret.money_precision_version) === 1) return
     if (!finalReason.trim()) { notify(T('return_reason','Please provide a reason'), 'error'); return }
+    // A stored retry is resent unchanged so the Worker can replay its receipt.
+    if (!activePendingRequest && keepsNoLine) { notify(emptyEditText, 'error'); return }
     if (!beginSingleAction(submitInFlightRef)) return
     setSubmitting(true)
     try {
@@ -501,7 +508,11 @@ export default function EditReturnModal({ ret, onClose, onSuccess, onReloadLates
           </div>
 
           {/* Summary */}
-          {activeItems.length > 0 && (
+          {keepsNoLine ? (
+            <div role="alert" data-return-edit-empty="" className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200">
+              {emptyEditText}
+            </div>
+          ) : (
             <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3 flex justify-between font-bold text-gray-900 dark:text-white">
               <span>{T('total_refunded','New Total Refund')}</span>
               <span>{fmtUSD(totalRefund)}</span>
@@ -535,7 +546,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, onReloadLates
             </>
           ) : (
             <button onClick={handleSubmit}
-              disabled={submitting || !finalReason.trim()}
+              disabled={submitting || !finalReason.trim() || keepsNoLine}
               className="btn-primary text-sm flex-1 disabled:opacity-50">
               {submitting ? `⏳ ${T('saving_label','Saving…')}` : `✓ ${T('save','Save Changes')}`}
             </button>
