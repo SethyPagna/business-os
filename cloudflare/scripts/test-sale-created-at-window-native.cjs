@@ -1,20 +1,18 @@
 'use strict'
-// B1 + B1-R (whole-app security audit and the offline-drain plan, 13 Oct
-// 2026): POST /api/sales stored any past created_at a POS user sent, so a
-// cashier could take cash today and record the sale on an old, closed business
-// day -- today's shift expected-cash then excludes it. Offline selling was
-// cancelled (26 Sep), so nothing legitimate sends a past-dated sale from a
-// live till; the only genuine old claims are rows an older build left on a
-// device, and those must stay there, not be booked today.
-//
-// Drives the REAL Worker on workerd + D1 as an Employee holding only pos+sales.
-// A claim inside [server now - 10 min, server now + 2 min] is kept (positive
-// control, so a refusal cannot be a harness that never honors a claim). An older
-// claim is REFUSED with 409 sale_created_at_too_old and nothing is written
-// (no sale, no stock movement) -- on the direct route and on the
-// /api/sync/outbox replay alike. A future or unparseable claim is stored at the
-// server clock and the creation audit row records what was claimed. A repeat of
-// an already-recorded sale still returns the original sale.
+// Which client created_at POST /api/sales honors, on workerd + D1 with an
+// Employee holding only pos+sales.
+// A claim inside [server now - 10 min, server now + 2 min] is kept (the positive
+// control, so a refusal cannot come from a harness that never honors a claim).
+// An older claim is refused with 409 sale_created_at_too_old: no sale, line,
+// stock movement or stock change, and one 'sale_refused' audit row naming the
+// actor, the claim, the receive time and the request id. The same holds for a
+// sales.create replayed through /api/sync/outbox, whose result carries the
+// server's code. A future or unparseable claim is stored at the server clock
+// and the creation audit row records what was claimed. A repeat of an
+// already-recorded sale returns the original sale. The owner fence and the
+// money-precision check answer before the refusal. Claims are written with an
+// explicit Z or offset, or as zone-less UTC, so no result depends on the zone
+// of the machine running the test.
 //
 // Run (from cloudflare/): node scripts/run-native-suite.cjs sale-created-at-window
 const assert = require('node:assert/strict')
@@ -69,21 +67,35 @@ async function main() {
       assert.equal(result.body.error, TOO_OLD_ERROR)
     }
 
+    const refusalRows = async key => h.all("SELECT user_id, user_name, entity_id, details FROM audit_logs WHERE action='sale_refused' AND entity='sale_creation' AND json_extract(details,'$.client_request_id')=?", key)
+    const refusalTotal = async () => (await h.one("SELECT COUNT(*) AS n FROM audit_logs WHERE action='sale_refused'")).n
     const beforeOld = await counts()
     const thirtyDays = new Date(Date.now() - 30 * DAY)
     const month = await sell('window-30-days-0001', thirtyDays.toISOString())
     const monthRow = await read('window-30-days-0001')
     const afterMonth = await counts()
-    r.check(`an Employee claiming created_at 30 days ago is refused with 409 sale_created_at_too_old and nothing is written (got ${month.status} ${month.body.code}, row ${monthRow ? monthRow.created_at : 'none'})`, () => {
+    const monthRefusals = await refusalRows('window-30-days-0001')
+    r.check(`an Employee claiming created_at 30 days ago is refused with 409 sale_created_at_too_old, nothing is written and one audit row records the attempt (got ${month.status} ${month.body.code}, row ${monthRow ? monthRow.created_at : 'none'}, ${monthRefusals.length} audit row(s))`, () => {
       refusedAsTooOld(month, '30 days ago')
       assert.equal(month.body.claimed_created_at, storedShape(thirtyDays.getTime()))
       assert.equal(monthRow, null, 'no sale row')
       assert.deepEqual(afterMonth, beforeOld, 'no sale, line, stock movement or stock change')
+      assert.equal(monthRefusals.length, 1)
+      const [row] = monthRefusals
+      const details = JSON.parse(row.details)
+      assert.equal(row.user_id, 950)
+      assert.match(row.user_name, /window_cashier/)
+      assert.equal(row.entity_id, null)
+      assert.equal(details.kind, 'sale.creation_refused')
+      assert.equal(details.reason, 'sale_created_at_too_old')
+      assert.equal(details.claimed_created_at, storedShape(thirtyDays.getTime()))
+      assert.ok(Math.abs(Date.parse(details.received_at) - Date.now()) < 2 * MINUTE, `received_at ${details.received_at}`)
     })
 
     const jan = await sell('window-9-months-0001', '2026-01-02T03:00:00.000Z')
     const auditRow = await read('window-9-months-0001')
     const afterJan = await counts()
+    const janRefusals = await refusalRows('window-9-months-0001')
     const oldDay = await h.one("SELECT COUNT(*) AS n FROM sales WHERE date(created_at,'+7 hours')='2026-01-02'")
     r.check(`the audit's probe (created_at 2026-01-02) is refused and leaves nothing on the closed day (got ${jan.status} ${jan.body.code}, ${oldDay.n} sale(s) on 2026-01-02)`, () => {
       refusedAsTooOld(jan, '2026-01-02')
@@ -91,6 +103,8 @@ async function main() {
       assert.equal(auditRow, null)
       assert.equal(oldDay.n, 0)
       assert.deepEqual(afterJan, afterMonth)
+      assert.equal(janRefusals.length, 1)
+      assert.equal(JSON.parse(janRefusals[0].details).claimed_created_at, '2026-01-02 03:00:00')
     })
 
     const ahead = await sell('window-1-hour-ahead-0001', new Date(Date.now() + 60 * MINUTE).toISOString())
@@ -129,12 +143,14 @@ async function main() {
     const normalRow = await read('window-repeat-0001')
     const repeat = await sell('window-repeat-0001', new Date(Date.now() - 30 * DAY).toISOString())
     const sameKey = await h.one("SELECT COUNT(*) AS n FROM sales WHERE client_request_id='window-repeat-0001'")
+    const repeatRefusals = await refusalRows('window-repeat-0001')
     r.check(`a repeat of an already-recorded sale that now claims an old time returns the original sale, not 409 (first ${normal.status}, repeat ${repeat.status} duplicate=${repeat.body.duplicate} id ${repeat.body.id} vs ${normalRow && normalRow.id})`, () => {
       assert.equal(normal.status, 200, JSON.stringify(normal.body).slice(0, 200))
       assert.equal(repeat.status, 200, JSON.stringify(repeat.body).slice(0, 200))
       assert.equal(repeat.body.duplicate, true)
       assert.equal(repeat.body.id, normalRow.id)
       assert.equal(sameKey.n, 1)
+      assert.equal(repeatRefusals.length, 0, 'a recorded sale replayed with an old claim is acknowledged, not refused')
     })
 
     const beforeOrder = await counts()
@@ -144,6 +160,7 @@ async function main() {
     const legacyMoney = await H.createSale(asEmployee, { key: 'window-legacy-money-0001', createdAt: stale, lines: [{ productId: 12, quantity: 1 }],
       paymentDetails: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }], extra: { offline_owner: owner, money_precision_version: 0 }, label: 'v0 money old claim' })
     const afterOrder = await counts()
+    const orderRefusals = [...await refusalRows('window-ownerless-0001'), ...await refusalRows('window-legacy-money-0001')]
     const ownerlessRow = await read('window-ownerless-0001')
     const legacyRow = await read('window-legacy-money-0001')
     r.check(`order: the owner fence and the precision check answer before the old-claim refusal (ownerless ${ownerless.body.code}, v0 money ${legacyMoney.body.code})`, () => {
@@ -153,6 +170,7 @@ async function main() {
       assert.equal(legacyMoney.body.code, 'money_precision_review_needed')
       assert.equal(ownerlessRow, null)
       assert.equal(legacyRow, null)
+      assert.equal(orderRefusals.length, 0, 'those answers are not the old-claim refusal and leave no refusal row')
       assert.deepEqual(afterOrder, beforeOrder, 'neither refusal wrote anything')
     })
 
@@ -173,21 +191,52 @@ async function main() {
     const oldViaOutbox = await outbox('window-outbox-old-0001', stale)
     const afterOldOutbox = await counts()
     const oldOutboxRow = await read('window-outbox-old-0001')
+    const oldOutboxRefusals = await refusalRows('window-outbox-old-0001')
     const recentMs = Date.now() - 2 * MINUTE
     const recentViaOutbox = await outbox('window-outbox-recent-0001', new Date(recentMs).toISOString())
     const recentOutboxRow = await read('window-outbox-recent-0001')
-    r.check(`/api/sync/outbox replay of sales.create with an old claim is refused with the same message and nothing is written (result ${JSON.stringify(oldViaOutbox.body.results && oldViaOutbox.body.results[0]).slice(0, 220)})`, () => {
+    r.check(`/api/sync/outbox replay of sales.create with an old claim is rejected with the server's code and message and nothing is written (result ${JSON.stringify(oldViaOutbox.body.results && oldViaOutbox.body.results[0]).slice(0, 260)})`, () => {
       assert.ok(quoteProbe.body.pricing_quotes, `quote probe: ${JSON.stringify(quoteProbe.body).slice(0, 200)}`)
       const result = oldViaOutbox.body.results[0]
-      assert.notEqual(result.status, 'applied')
+      assert.equal(result.status, 'rejected')
+      assert.equal(result.code, 'sale_created_at_too_old')
       assert.equal(result.error, TOO_OLD_ERROR)
+      assert.equal(oldViaOutbox.body.success, false)
       assert.equal(oldOutboxRow, null)
       assert.deepEqual(afterOldOutbox, beforeOutbox)
+      assert.equal(oldOutboxRefusals.length, 1)
     })
     r.check(`/api/sync/outbox control: the same replay with a claim two minutes ago is applied and kept (result ${JSON.stringify(recentViaOutbox.body.results && recentViaOutbox.body.results[0]).slice(0, 220)})`, () => {
       const result = recentViaOutbox.body.results[0]
       assert.equal(result.status, 'applied', JSON.stringify(result).slice(0, 300))
       assert.equal(recentOutboxRow.created_at, storedShape(recentMs))
+    })
+
+    const utcWallMs = Date.now() - 5 * MINUTE
+    const utcWall = await sell('window-zoneless-0001', new Date(utcWallMs).toISOString().slice(0, 19).replace('T', ' '))
+    const utcWallRow = await read('window-zoneless-0001')
+    const offsetMs = Date.now() - 4 * MINUTE
+    const offsetClaim = await sell('window-offset-0001', new Date(offsetMs + 7 * 60 * MINUTE).toISOString().slice(0, 19) + '+07:00')
+    const offsetRow = await read('window-offset-0001')
+    const zonelessOld = await sell('window-zoneless-old-0001', new Date(Date.now() - 30 * DAY).toISOString().slice(0, 19).replace('T', ' '))
+    const phnomPenhWall = await sell('window-zoneless-pp-0001', new Date(Date.now() + 7 * 60 * MINUTE).toISOString().slice(0, 19).replace('T', ' '))
+    const phnomPenhRow = await read('window-zoneless-pp-0001')
+    r.check(`a claim without a zone is read as UTC whatever the machine's zone: UTC wall time five minutes ago is kept (got ${utcWall.status}, stored ${utcWallRow && utcWallRow.created_at}, expected ${storedShape(utcWallMs)}), a 30-day-old one is refused (${zonelessOld.status} ${zonelessOld.body.code}), a Phnom Penh wall clock reads seven hours ahead and gets server time (${phnomPenhWall.status}, stored ${phnomPenhRow && phnomPenhRow.created_at})`, () => {
+      assert.equal(utcWall.status, 200, JSON.stringify(utcWall.body).slice(0, 200))
+      assert.equal(utcWallRow.created_at, storedShape(utcWallMs))
+      assert.equal(utcWallRow.creation.origin, 'offline_replay')
+      refusedAsTooOld(zonelessOld, 'zone-less 30 days ago')
+      assert.equal(phnomPenhWall.status, 200, JSON.stringify(phnomPenhWall.body).slice(0, 200))
+      serverClock(phnomPenhRow, 'Phnom Penh wall clock')
+      assert.equal(phnomPenhRow.audit.created_at_adjusted, true)
+    })
+    r.check(`a claim with an explicit +07:00 offset is converted to UTC and kept (got ${offsetClaim.status}, stored ${offsetRow && offsetRow.created_at}, expected ${storedShape(offsetMs)})`, () => {
+      assert.equal(offsetClaim.status, 200, JSON.stringify(offsetClaim.body).slice(0, 200))
+      assert.equal(offsetRow.created_at, storedShape(offsetMs))
+    })
+    const refusals = await refusalTotal()
+    r.check(`every refusal wrote exactly one audit row and nothing else did (four refusals: two direct, one zone-less, one outbox; got ${refusals})`, () => {
+      assert.equal(refusals, 4)
     })
   } finally {
     await h.mf.dispose()

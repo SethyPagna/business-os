@@ -191,17 +191,22 @@ check('wiring: the sales INSERT COALESCEs the sanitized client stamp, updated_at
   assert.match(salesRoute, /COALESCE\(@created_at, CURRENT_TIMESTAMP\), CURRENT_TIMESTAMP\s+WHERE @customer_guard_id/)
 })
 
-check('wiring: an old claim is refused after the owner fence, the duplicate lookup and the precision check, before any other work', () => {
+check('wiring: an old claim is refused after the owner fence, the duplicate lookup and the precision check, before any other work, and leaves one audit row', () => {
   const salesRoute = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'sales.ts'), 'utf8')
   const create = salesRoute.slice(salesRoute.indexOf("app.post('/', async (c) => {"))
   const at = needle => { const index = create.indexOf(needle); assert.ok(index > 0, 'missing ' + needle); return index }
   const owner = at('offlineSaleOwnerError(body.offline_owner, offlineOwner)')
   const duplicate = at('duplicate: true, offline_owner: offlineOwner')
   const precision = at("code: 'money_precision_review_needed'")
+  const block = at('if (clientTime.tooOld) {')
+  const auditCall = at("'sale_refused', 'sale_creation', null")
   const refusal = at("code: 'sale_created_at_too_old'")
   const schema = at('await saleMoneySchemaReady(db)')
-  assert.ok(owner < duplicate && duplicate < precision && precision < refusal && refusal < schema, 'refusal sits after the owner, duplicate and precision checks and before the schema probe and every write')
-  assert.match(create.slice(refusal - 260, refusal), /if \(clientTime\.tooOld\) return c\.json\(/)
+  assert.ok(owner < duplicate && duplicate < precision && precision < block && block < auditCall && auditCall < refusal && refusal < schema, 'refusal sits after the owner, duplicate and precision checks and before the schema probe and every write')
+  const refusalBlock = create.slice(block, schema)
+  assert.match(refusalBlock, /await audit\(c\.env, user\?\.id \?\? null, actorSnapshot\(user\), 'sale_refused'/)
+  assert.match(refusalBlock, /client_request_id: clientRequestId \|\| null/)
+  assert.match(refusalBlock, /claimed_created_at: clientTime\.claimed, received_at: new Date\(\)\.toISOString\(\)/)
   assert.match(create.slice(refusal, refusal + 120), /claimed_created_at: clientTime\.claimed/)
   assert.match(create, /\.\.\.\(clientTime\.adjusted \? \{ claimed_created_at: clientTime\.claimed, received_at: snapshotRecordedAt, created_at_adjusted: true \} : \{\}\)/)
   const message = create.slice(refusal - 200, refusal)

@@ -477,8 +477,8 @@ app.post('/', async (c) => {
     offline_owner?: unknown
     money_precision_version?: unknown
     items: SaleItemInput[]
-    // Offline replays only: the sale's queue-time moment, honored with
-    // bounded trust (lib/clientTimestamp.ts). Online checkouts omit it.
+    // A client sale time: kept only inside the short window of
+    // lib/clientTimestamp.ts and refused (409) when older. Live checkouts omit it.
     created_at?: unknown
     branch_id?: number
     cashier_id?: number
@@ -569,7 +569,13 @@ app.post('/', async (c) => {
   }
   if (body.money_precision_version !== 1) return c.json({ error: 'Keep the original pending sale and review it with the current app before recording it.', code: 'money_precision_review_needed' }, 409)
   const clientTime = resolveClientCreatedAt(body.created_at)
-  if (clientTime.tooOld) return c.json({ error: 'This sale was saved on this device at an earlier time and is kept there. Nothing was recorded.', code: 'sale_created_at_too_old', claimed_created_at: clientTime.claimed }, 409)
+  if (clientTime.tooOld) {
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'sale_refused', 'sale_creation', null, {
+      kind: 'sale.creation_refused', reason: 'sale_created_at_too_old', client_request_id: clientRequestId || null,
+      claimed_created_at: clientTime.claimed, received_at: new Date().toISOString(),
+    })
+    return c.json({ error: 'This sale was saved on this device at an earlier time and is kept there. Nothing was recorded.', code: 'sale_created_at_too_old', claimed_created_at: clientTime.claimed }, 409)
+  }
   if (!await saleMoneySchemaReady(db)) return c.json({ error: 'Sale precision schema is not ready.', code: 'money_precision_schema_not_ready' }, 503)
   // Every atomic create needs a stable identity that later statements in the
   // D1 batch can resolve before the auto-generated sale id is available to JS.
