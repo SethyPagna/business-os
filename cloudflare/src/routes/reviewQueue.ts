@@ -10,6 +10,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import {
   listPendingActions,
   listPendingActionTargets,
+  type ListPendingActionsOptions,
   getPendingAction,
   type PendingActionRow,
   markPendingActionApproved,
@@ -129,7 +130,7 @@ app.get('/mine', async (c) => {
   // exactly the rows they most need to see.
   const fields = c.req.query('fields')
   if (fields && fields !== 'targets') return c.json({ success: false, code: 'invalid_fields', error: "fields must be 'targets' or left out." }, 400)
-  const options = { status, requestedBy: Number(user.id) }
+  const options: ListPendingActionsOptions = { status, requestedBy: Number(user.id) }
   const rows = fields === 'targets' ? await listPendingActionTargets(c.env, options) : await listPendingActions(c.env, options)
   return c.json({ success: true, data: rows })
 })
@@ -242,7 +243,7 @@ app.get('/', async (c) => {
   const section = c.req.query('section') || null
   const fields = c.req.query('fields')
   if (fields && fields !== 'targets') return c.json({ success: false, code: 'invalid_fields', error: "fields must be 'targets' or left out." }, 400)
-  const options = { status, section }
+  const options: ListPendingActionsOptions = { status, section }
   const rows = fields === 'targets' ? await listPendingActionTargets(c.env, options) : await listPendingActions(c.env, options)
   return c.json({ success: true, data: rows })
 })
