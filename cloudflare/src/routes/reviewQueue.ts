@@ -96,7 +96,7 @@ function reviewCodedRefusal(err: unknown): { body: Record<string, unknown>; stat
   if (typeof code !== 'string' || !code) return null
   if (status !== 403 && status !== 409 && status !== 503) return null
   const extra = details && typeof details === 'object' && !Array.isArray(details) ? details as Record<string, unknown> : {}
-  return { body: { success: false, error: err.message, code, ...extra }, status }
+  return { body: { ...extra, success: false, error: err.message, code }, status }
 }
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()

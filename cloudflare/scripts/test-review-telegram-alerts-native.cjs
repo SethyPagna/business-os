@@ -33,6 +33,7 @@
 //   --wrong=confirm-not-passed    the approve body's confirm_merge_into never reaches the applier
 //   --wrong=coded-refusal-500     a ReviewCodedRefusal falls through to the generic 500
 //   --wrong=refusal-any-status    any status is accepted as a coded refusal (a 418 would be sent as such)
+//   --wrong=details-last          the refusal's details are spread after success / error / code and can overwrite them
 //   --wrong=merged-ignored        outcome.mergedInto is never read: the Merged row is missing
 //   --only=<ids>                  run only these case ids
 // ============================================================================================
@@ -370,6 +371,9 @@ const PATCHES = {
   'merged-ignored': [
     { name: 'merged-ignored', file: QUEUE, from: '    merged: mergedInto ? { retired: mergedInto.mergedName, kept: mergedInto.survivorName } : null,\n', to: '    merged: null,\n' },
   ],
+  'details-last': [
+    { name: 'details-last', file: QUEUE, from: '  return { body: { ...extra, success: false, error: err.message, code }, status }', to: '  return { body: { success: false, error: err.message, code, ...extra }, status }' },
+  ],
   'refusal-any-status': [
     { name: 'refusal-any-status', file: QUEUE, from: '  if (status !== 403 && status !== 409 && status !== 503) return null\n', to: '' },
   ],
@@ -399,7 +403,9 @@ const FIXTURE_PATCHES = [
       "      const [, status, code, variant] = refuse.replace(']', '').split(':')",
       "      throw Object.assign(new Error('Fixture refusal ' + code), {",
       "        name: variant === 'othername' ? 'SomethingElse' : 'ReviewCodedRefusal', code: variant === 'nocode' ? '' : code, status: Number(status),",
-      "        details: { permission: 'products:merge_duplicates', preview: { survivorId: 9, survivorName: 'Rice 5kg' } },",
+      "        details: variant === 'clash'",
+      "          ? { success: true, error: 'forged', code: 'forged', permission: 'products:merge_duplicates', preview: { survivorId: 9, survivorName: 'Rice 5kg' } }",
+      "          : { permission: 'products:merge_duplicates', preview: { survivorId: 9, survivorName: 'Rice 5kg' } },",
       '      })',
       '    }',
       '  }',
@@ -1027,11 +1033,13 @@ async function main() {
     }
 
     await check('C17', 'contract: a ReviewCodedRefusal becomes {success:false, error, code, ...details} with its 403/409/503; nothing else does', 'high', async t => {
+      const byKey = (object) => Object.fromEntries(Object.entries(object).sort(([a], [b]) => (a < b ? -1 : 1)))
       // [thrown status, code, variant, expected HTTP status, expected to be mapped]
       const cases = [
         [403, 'review_action_full_required', '', 403, true],
         [409, 'review_merge_confirm_required', '', 409, true],
         [503, 'review_merge_unavailable', '', 503, true],
+        [409, 'review_details_clash', 'clash', 409, true], // details that carry success / error / code must not overwrite the real ones
         [418, 'review_teapot', '', 500, false],         // a status outside 403/409/503 is not a coded refusal
         [409, 'review_wrong_name', 'othername', 500, false], // another error class with the same shape is not one either
         [409, 'review_no_code', 'nocode', 500, false],  // no code, no refusal
@@ -1042,7 +1050,7 @@ async function main() {
         const r = await H.api('POST', `/api/review/${pendingId}/approve`, undefined, { as: 'dara' })
         t.eq(`${code}: HTTP status`, r.status, expected)
         if (mapped) {
-          t.eq(`${code}: body`, r.body, { success: false, error: 'Fixture refusal ' + code, code, permission: 'products:merge_duplicates', preview: { survivorId: 9, survivorName: 'Rice 5kg' } })
+          t.eq(`${code}: body`, byKey(r.body), byKey({ success: false, error: 'Fixture refusal ' + code, code, permission: 'products:merge_duplicates', preview: { survivorId: 9, survivorName: 'Rice 5kg' } }))
         } else {
           t.ok(`${code}: the generic 500 body, no code`, r.body && r.body.code === undefined && typeof r.body.error === 'string', r.body)
         }
