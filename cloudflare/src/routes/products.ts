@@ -1853,8 +1853,8 @@ function productPriceChanged(plan: { before?: Record<string, unknown> | null; af
 // price or discount and the editor may not: a Full-tier editor without Full price. A Review-tier editor is never
 // refused here -- queue-first (owner 13 Oct), the edit is held for approval and the reviewer's price grant is
 // checked then (lib/reviewApprovalPermission.ts).
-// REQUIRED ORDER in the fold branch: after the review-queue decision (finding I's identityFoldRefusal) and before
-// the identity write. Read only.
+// REQUIRED ORDER in the fold branch: after identityFoldRefusal (finding I's refusals and review-queue decision, and the
+// products:merge_duplicates refusal) and before the identity write. Read only.
 async function foldSurvivorPriceChangeDenied(env: Env, user: SessionUser, survivorId: number, body: Record<string, unknown>): Promise<boolean> {
   if (getPermissionTier(user, 'products') === 'review' || getActionTier(user, 'products', 'price') === 'full') return false
   const owns = (field: string) => Object.prototype.hasOwnProperty.call(body, field)
@@ -2327,11 +2327,29 @@ const PRODUCT_AUDIT_EXCLUDED_COLUMNS = new Set([
   'categories', 'brands', 'is_grouped_cached',
 ])
 
+// The 403 body of identityFoldRefusal's merge-permission step. The English is the pack text of the same key
+// (frontend/src/lang/en.json), word for word, so api/branchRefusalLanguage.ts can restate it by code in Khmer; a
+// frontend test pins the pair. Names no product.
+const PRODUCT_MERGE_PERMISSION_REFUSAL = {
+  error: 'This edit would merge this product into another product, and you do not have permission to merge products.',
+  code: 'product_merge_permission_required',
+} as const
+
 // Finding I (13 Oct 2026): an edit that moves this row onto another product's
 // identity folds it into that product, and the fold needs the edited identity
 // written onto the row first (see the PUT below). Every refusal of such an
 // edit is decided HERE, before that write: a refusal after it left the new
 // name, barcode, updated_at and the open stock sessions' revisions behind.
+//   0. products:merge_duplicates = none (Opus finding F1, 13 Oct 2026): the
+//      fold IS a merge -- it retires the edited row into the keeper, moves its
+//      stock, lots and history and writes the same `product.merge` undo
+//      record -- and every dedicated merge route refuses a role without the
+//      grant. Refused 403, FIRST and before the queue: a switched-off action
+//      is refused, never held for approval (a Review Required editor whose
+//      merge switch is off would otherwise queue the very merge they may not
+//      make). getActionTier is the section tier narrowed by the switch, so
+//      'review' here is exactly "Review Required, switch not off": that case
+//      falls through to step 2 and queues. 'full' falls through to the fold.
 //   1. products:image = none: refused when the fold would change an image,
 //      judged against the keeper's REAL cover -- the pair the merge routes and
 //      the fold's own atomic guard judge (a null cover refused folds that move
@@ -2350,6 +2368,9 @@ async function identityFoldRefusal(
   body: Record<string, unknown>,
   isImageOnlyEdit: boolean,
 ): Promise<Response | null> {
+  if (getActionTier(user, 'products', 'merge_duplicates') === 'none') {
+    return c.json(PRODUCT_MERGE_PERMISSION_REFUSAL, 403)
+  }
   if (getActionTier(user, 'products', 'image') === 'none') {
     const keeper = await db.prepare('SELECT id, image_path FROM products WHERE id = @id')
       .get<{ id: number; image_path: string | null }>({ id: duplicate.id })
@@ -2545,7 +2566,9 @@ app.put('/:id', async (c) => {
         // is what the operator is CHANGING, and `duplicate` is where that
         // change lands. Write the edited identity onto this row first so it
         // genuinely matches before the fold reads it back -- after every
-        // refusal (identityFoldRefusal), never before one.
+        // refusal, never before one. REQUIRED ORDER: identityFoldRefusal
+        // (merge permission, image, review queue), then the survivor-price
+        // refusal (finding H), then this identity write.
         const identityRefusal = await identityFoldRefusal(c, user, db, duplicate, dupRow, body, isImageOnlyEdit)
         if (identityRefusal) return identityRefusal
         if (await foldSurvivorPriceChangeDenied(c.env, user, duplicate.id, body)) return c.json(PRODUCT_DISCOUNT_PRICE_REFUSAL, 403)
