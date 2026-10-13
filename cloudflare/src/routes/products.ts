@@ -2,7 +2,7 @@ import { assertProductStatusInput, assertProductsActive, catalogProductSql, prod
 import { Hono } from 'hono'
 import { acquisitionCostResponses, canEditAcquisitionCosts, hasCatalogCostWrite } from '../lib/acquisitionCostAccess'
 import { roundMoney4 } from '../lib/moneyPrecision'
-import { PRODUCT_DISCOUNT_PRICE_FIELDS, PRODUCT_DISCOUNT_PRICE_REFUSAL, PRODUCT_DISCOUNT_SELECT, productDiscountChanged } from '../lib/productDiscountGate'
+import { PRODUCT_DISCOUNT_PRICE_FIELDS, PRODUCT_DISCOUNT_PRICE_REFUSAL, PRODUCT_DISCOUNT_SELECT, keepStoredDiscountRendering, normalizeProductDiscountBody, productDiscountChanged } from '../lib/productDiscountGate'
 import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { collectMergeProductIds, describeMergeFailure } from '../lib/mergeRouteLog'
@@ -1848,6 +1848,22 @@ function productPriceChanged(plan: { before?: Record<string, unknown> | null; af
   return PRODUCT_DEFAULT_PRICE_FIELDS.some((field) => Object.prototype.hasOwnProperty.call(plan.after!, field)
     && roundMoney4(Number(plan.after![field]) || 0) !== roundMoney4(Number(plan.before?.[field]) || 0))
 }
+// PUT identity fold: the edit's remaining fields are written onto the SURVIVOR (rest -> updateRow(survivor)), but
+// the PUT price gates compared them with the row being edited. True when that write would change the survivor's
+// price or discount and the editor may not: a Full-tier editor without Full price. A Review-tier editor is never
+// refused here -- queue-first (owner 13 Oct), the edit is held for approval and the reviewer's price grant is
+// checked then (lib/reviewApprovalPermission.ts).
+// REQUIRED ORDER in the fold branch: after the review-queue decision (finding I's identityFoldRefusal) and before
+// the identity write. Read only.
+async function foldSurvivorPriceChangeDenied(env: Env, user: SessionUser, survivorId: number, body: Record<string, unknown>): Promise<boolean> {
+  if (getPermissionTier(user, 'products') === 'review' || getActionTier(user, 'products', 'price') === 'full') return false
+  const owns = (field: string) => Object.prototype.hasOwnProperty.call(body, field)
+  if (![...PRODUCT_DEFAULT_PRICE_FIELDS, ...PRODUCT_DISCOUNT_PRICE_FIELDS].some(owns)) return false
+  const survivor = await getDb(env).prepare(`SELECT ${PRODUCT_DEFAULT_PRICE_FIELDS.join(', ')}, ${PRODUCT_DISCOUNT_SELECT} FROM products WHERE id = @id`)
+    .get<Record<string, unknown>>({ id: survivorId })
+  const after = Object.fromEntries(PRODUCT_DEFAULT_PRICE_FIELDS.filter(owns).map((field) => [field, body[field]]))
+  return !survivor || productPriceChanged({ before: survivor, after }) || productDiscountChanged(survivor, body)
+}
 const BULK_PRICE_FIELDS = new Set(['selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr', 'cost_price_usd', 'cost_price_khr'])
 const BULK_PRICE_REQUEST_ID = /^[A-Za-z0-9_-]{8,120}$/
 async function findBulkPriceReceipt(db: ReturnType<typeof getDb>, actorId: number, requestId: string) {
@@ -2130,6 +2146,9 @@ app.post('/', async (c) => {
   if (hasCatalogCostWrite(body, user)) {
     return c.json({ error: 'Cost-entry permission is required to set catalog costs.', code: 'product_cost_edit_required' }, 403)
   }
+  // OPUS-H-1: the discount block is stored exactly as the price gate below compares it (lib/productDiscountGate.ts).
+  const invalidDiscount = normalizeProductDiscountBody(body)
+  if (invalidDiscount) return c.json(invalidDiscount, 400)
   try { await prepareProductMoneyWrite(c.env, body, null) } catch (error) {
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error
@@ -2356,6 +2375,9 @@ app.put('/:id', async (c) => {
   // the permission check, so neither the audit diff, the edit-fold nor the
   // review queue ever sees the form's stale figure.
   delete body.stock_quantity
+  // OPUS-H-1: canonical before the money plan, the price gate, the review queue and the writer see it.
+  const invalidDiscount = normalizeProductDiscountBody(body)
+  if (invalidDiscount) return c.json(invalidDiscount, 400)
 
   // Optimistic-concurrency guard, the same one every other editable entity
   // enforces (contacts/sales/branches/notes/... via conflictControl). The
@@ -2406,6 +2428,8 @@ app.put('/:id', async (c) => {
   if (getActionTier(user, 'products', 'price') === 'none'
     && PRODUCT_DISCOUNT_PRICE_FIELDS.some((field) => Object.prototype.hasOwnProperty.call(body, field))) {
     const storedDiscount = await getDb(c.env).prepare(`SELECT ${PRODUCT_DISCOUNT_SELECT} FROM products WHERE id = @id`).get<Record<string, unknown>>({ id })
+    // OPUS-H-2: compared exactly; only the form's own 4-decimal rendering of a stored amount is dropped (kept as stored).
+    keepStoredDiscountRendering(storedDiscount, body)
     if (productDiscountChanged(storedDiscount, body)) return c.json(PRODUCT_DISCOUNT_PRICE_REFUSAL, 403)
   }
   const imageLimitError = await validateImageGalleryPayload(c.env, user, body, id)
@@ -2496,6 +2520,7 @@ app.put('/:id', async (c) => {
         // is what the operator is CHANGING, and `duplicate` is where that
         // change lands. Write the edited identity onto this row first so it
         // genuinely matches before the fold reads it back.
+        if (await foldSurvivorPriceChangeDenied(c.env, user, duplicate.id, body)) return c.json(PRODUCT_DISCOUNT_PRICE_REFUSAL, 403)
         try { await db.batch([productStockGuardStatement([Number(id), duplicate.id], 'active'), {
           sql: 'UPDATE products SET name = @name, barcode = @barcode, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND is_active=1',
           params: { name: nextName, barcode: nextBarcode, id: Number(id) },
@@ -2925,6 +2950,8 @@ app.post('/variant', async (c) => {
   if (hasCatalogCostWrite(body, user)) {
     return c.json({ error: 'Cost-entry permission is required to set catalog costs.', code: 'product_cost_edit_required' }, 403)
   }
+  const invalidDiscount = normalizeProductDiscountBody(body)
+  if (invalidDiscount) return c.json(invalidDiscount, 400)
   try { await prepareProductMoneyWrite(c.env, body, null) } catch (error) {
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error

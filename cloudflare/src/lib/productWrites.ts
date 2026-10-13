@@ -26,6 +26,7 @@ import {
 import { ordinaryBusinessMaintenanceGuard } from './businessMaintenanceGuard'
 import { pendingActionApprovalStatements, type PendingActionRow, type ReviewPendingActionInput } from './pendingActions'
 import { buildAuditStatement } from './audit'
+import { canonicalProductDiscountColumns } from './productDiscountGate'
 
 export const PRODUCT_MONEY_VERSION = 'product_money_policy_version'
 export const PRODUCT_MONEY_PLAN = '_product_money_write_plan'
@@ -216,6 +217,10 @@ export function cleanPayload(body: Record<string, unknown>, columns: Set<string>
     const boolNormalized = typeof value === 'boolean' ? (value ? 1 : 0) : value
     payload[key] = clampNegativeStockQuantity(key, boolNormalized)
   }
+  // OPUS-H-1: every product writer (create, PUT and its fold, variant, review apply, stock-session insert)
+  // passes here, so the discount columns are stored exactly as the price gate compared them; a spelling with
+  // no canonical form throws ProductDiscountInputError (400) instead of being stored raw.
+  canonicalProductDiscountColumns(payload)
   return payload
 }
 

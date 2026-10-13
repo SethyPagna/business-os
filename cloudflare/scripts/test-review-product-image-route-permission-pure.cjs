@@ -44,7 +44,7 @@ function loadMoneyDependency(name) {
       isImportMaintenanceFenceError: () => false,
       ImportMaintenanceFenceError: class ImportMaintenanceFenceError extends Error {},
     }
-    const allowed = new Set(['./permissions', './moneyPrecision', './catalogCostRecompute', './db', './media', './batchCode', './searchMatch', './schemaProbe', './receivingBranch', './businessMaintenanceGuard', './pendingActions', './audit', './branchWrites', './canonicalBranchIdentity', './branchRoles'])
+    const allowed = new Set(['./permissions', './moneyPrecision', './catalogCostRecompute', './db', './media', './batchCode', './searchMatch', './schemaProbe', './receivingBranch', './businessMaintenanceGuard', './pendingActions', './audit', './branchWrites', './canonicalBranchIdentity', './branchRoles', './productWrites', './productImagePermission', './sqlBinding', './acquisitionCostAccess', './productDiscountGate'])
     if (allowed.has(request)) return loadMoneyDependency(request.slice(2))
     throw new Error(`Unmapped money-policy dependency: ${request}`)
   }
@@ -57,7 +57,9 @@ function loadRoute(state) {
   const filePath = path.join(srcRoot, 'routes', 'reviewQueue.ts')
   const requireAuth = async (c, next) => { c.set('user', c.env.TEST_USER); await next() }
   const stubs = {
+    '../lib/reviewApprovalPermission': loadMoneyDependency('reviewApprovalPermission'),
     '../lib/acquisitionCostAccess': loadMoneyDependency('acquisitionCostAccess'),
+    '../lib/productDiscountGate': loadMoneyDependency('productDiscountGate'),
     '../lib/productWrites': productWrites,
     '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
     '../lib/db': loadMoneyDependency('db'),
@@ -111,7 +113,7 @@ async function main() {
     applyError: new ReviewRequesterPermissionError('The requester no longer has permission to change product images.'),
   }
   const response = await loadRoute(state).request('/5/approve', { method: 'POST' }, {
-    TEST_USER: { id: 99, name: 'Reviewer' },
+    TEST_USER: { id: 99, name: 'Reviewer', permissions: '{"review":true,"products":true}' },
   })
   assert.equal(response.status, 409)
   assert.deepEqual(await response.json(), {
@@ -124,7 +126,7 @@ async function main() {
 
   state.applyError = new ProductImageAssetError('/uploads/missing.png')
   const missingResponse = await loadRoute(state).request('/5/approve', { method: 'POST' }, {
-    TEST_USER: { id: 99, name: 'Reviewer' },
+    TEST_USER: { id: 99, name: 'Reviewer', permissions: '{"review":true,"products":true}' },
   })
   assert.equal(missingResponse.status, 409)
   assert.deepEqual(await missingResponse.json(), {

@@ -134,6 +134,7 @@ const productWrites = loadReal('lib/productWrites.ts', { './schemaProbe': schema
   './db': { getDb: () => dbShim },
   './media': media,
   './importImageMatch': importImageMatch,
+  './productDiscountGate': loadReal('lib/productDiscountGate.ts'),
   './batchCode': batchCode,
   './searchMatch': searchMatch,
 })

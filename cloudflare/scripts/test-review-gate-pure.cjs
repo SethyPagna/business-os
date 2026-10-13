@@ -220,6 +220,7 @@ const productWrites = loadReal('lib/productWrites.ts', { './schemaProbe': schema
   // above, not left to fall through to node's own require() (which can't
   // resolve a bare .ts file).
   './importImageMatch': { MAX_IMAGES_PER_PRODUCT: 3 },
+  './productDiscountGate': loadReal('lib/productDiscountGate.ts'),
   '../index': {},
 })
 const reviewApply = loadReal('lib/reviewApply.ts', {
@@ -271,9 +272,15 @@ const feesRoute = loadReal('routes/fees.ts', {
 })
 
 const reviewQueueRoute = loadReal('routes/reviewQueue.ts', {
+  '../lib/reviewApprovalPermission': loadReal('lib/reviewApprovalPermission.ts', {
+    ...dbStub, './permissions': permissions, './acquisitionCostAccess': acquisitionCostAccess,
+    './productWrites': productWrites, './productImagePermission': productImagePermission,
+    './moneyPrecision': loadReal('lib/moneyPrecision.ts'), './productDiscountGate': loadReal('lib/productDiscountGate.ts'),
+  }),
   '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   ...dbStub,
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
+  '../lib/productDiscountGate': loadReal('lib/productDiscountGate.ts'),
   '../lib/productWrites': productWrites,
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', CURRENT_USER); return next() } },
@@ -302,7 +309,7 @@ const fakeExecutionCtx = { waitUntil: (p) => { p?.catch?.(() => {}) }, passThrou
 let CURRENT_USER = null
 const FULL_USER = { id: 1, username: 'full', name: 'Full Access', permissions: JSON.stringify({ fees: true, review: true }) }
 const REVIEW_TIER_USER = { id: 2, username: 'reviewtier', name: 'Review Tier', permissions: JSON.stringify({ fees: 'review' }) }
-const REVIEWER_USER = { id: 3, username: 'reviewer', name: 'Reviewer', permissions: JSON.stringify({ review: true, fees: true, products: true, inventory: true, branches: true }) }
+const REVIEWER_USER = { id: 3, username: 'reviewer', name: 'Reviewer', permissions: JSON.stringify({ review: true, fees: true, products: true, inventory: true, branches: true, product_cost_edit: true }) }
 
 async function req(app, user, method, url, body) {
   CURRENT_USER = user

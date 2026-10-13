@@ -7,7 +7,8 @@
 // test-employee-products-default-native.cjs; this file pins the comparison itself and the writers.
 //
 //   COMPARE  null, '', 0, false and a missing key are all "no discount"; a real difference in any price-bearing
-//            column is a change; label and badge colour are not price
+//            column is a change, compared exactly at the stored precision (OPUS-H-2: sub-4dp noise moves the till);
+//            label and badge colour are not price
 //   WRITERS  every writer of the discount columns is either gated here or named as deliberately left alone
 //
 // Run (from cloudflare/): node scripts/test-product-discount-gate-pure.cjs
@@ -42,7 +43,8 @@ check('an unchanged block is not a change, in every spelling the editors and the
   assert.equal(productDiscountChanged({ discount_enabled: null, discount_type: null, discount_percent: null, discount_amount_usd: null, discount_amount_khr: null, discount_starts_at: null, discount_ends_at: null },
     { discount_enabled: 0, discount_type: 'percent', discount_percent: 0, discount_amount_usd: 0, discount_amount_khr: 0, discount_starts_at: '', discount_ends_at: null }), false)
   assert.equal(productDiscountChanged(NONE, { discount_enabled: false, discount_type: 'PERCENT' }), false)
-  assert.equal(productDiscountChanged(LIVE, { discount_enabled: true, discount_type: 'Fixed', discount_amount_usd: '2.50', discount_amount_khr: 10000.00001 }), false, 'string and sub-4dp noise is the same value')
+  assert.equal(productDiscountChanged(LIVE, { discount_enabled: true, discount_type: 'Fixed', discount_amount_usd: '2.50', discount_amount_khr: 10000 }), false, 'a plain decimal string is the same value')
+  assert.equal(productDiscountChanged(LIVE, { discount_amount_khr: 10000.00001 }), true, 'OPUS-H-2: sub-4dp noise is a change (the till rounds the amount up to the next cent)')
   assert.equal(productDiscountChanged(LIVE, { discount_enabled: '1' }), false)
   assert.equal(productDiscountChanged(NONE, {}), false, 'a body with no discount key writes none')
   assert.equal(productDiscountChanged(NONE, { name: 'Only the name' }), false)

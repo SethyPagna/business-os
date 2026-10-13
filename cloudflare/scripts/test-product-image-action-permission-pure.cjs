@@ -61,6 +61,7 @@ const loadProductWrites = db => loadTs('lib/productWrites.ts', {
   './searchMatch': loadTs('lib/searchMatch.ts'),
   './importImageMatch': { MAX_IMAGES_PER_PRODUCT: 3 },
   './schemaProbe': loadTs('lib/schemaProbe.ts'),
+  './productDiscountGate': loadTs('lib/productDiscountGate.ts'),
 })
 
 function permissiveModule() {

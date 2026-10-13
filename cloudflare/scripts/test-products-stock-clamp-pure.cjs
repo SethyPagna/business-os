@@ -58,7 +58,12 @@ const { outputText } = ts.transpileModule(combinedSource, {
   fileName: 'products-pure.ts',
 })
 const moduleObj = { exports: {} }
-new Function('exports', outputText)(moduleObj.exports)
+// cleanPayload canonicalises the discount columns through the real (import-free) gate module.
+const discountGate = { exports: {} }
+new Function('module', 'exports', ts.transpileModule(fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'productDiscountGate.ts'), 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+}).outputText)(discountGate, discountGate.exports)
+new Function('exports', 'canonicalProductDiscountColumns', outputText)(moduleObj.exports, discountGate.exports.canonicalProductDiscountColumns)
 const { clampNegativeStockQuantity, cleanPayload, PRODUCT_MONEY_VERSION, PRODUCT_MONEY_PLAN } = moduleObj.exports
 
 let passed = 0

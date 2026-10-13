@@ -68,7 +68,7 @@ const env = { DB }
 
 const real = new Set([
   'acquisitionCostAccess', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db',
-  'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply',
+  'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'reviewApprovalPermission', 'productDiscountGate',
   'conflictControl', 'renameCascade', 'schemaProbe', 'catalogCostRecompute', 'productBatches', 'productStockGuard',
 ])
 const noop = new Proxy(function () {}, { get: () => noop, apply: () => undefined, construct: () => ({}) })
@@ -93,7 +93,7 @@ function localRequireFor(relative) {
   return (request) => {
     if (request === 'hono') return { Hono }
     const name = request.split('/').pop()
-    if (relative === 'lib/acquisitionCostAccess.ts' && name === 'permissions') return load('lib/permissions.ts')
+    if (['lib/acquisitionCostAccess.ts', 'lib/reviewApprovalPermission.ts'].includes(relative) && name === 'permissions') return load('lib/permissions.ts')
     if (services[name]) return services[name]
     if (real.has(name)) return load(`lib/${name}.ts`)
     if (request.startsWith('.')) return noop
@@ -121,7 +121,7 @@ const products = load('routes/products.ts').default
 const reviews = load('routes/reviewQueue.ts').default
 const context = { waitUntil: () => {}, passThroughOnException: () => {} }
 const costPermissions = JSON.stringify({ product_cost_edit: true, product_cost_view: true })
-const admin = { id: 1, username: 'admin', name: 'Admin', tier: 'full', permissions: costPermissions }
+const admin = { id: 1, username: 'admin', name: 'Admin', tier: 'full', permissions: JSON.stringify({ products: true, ...JSON.parse(costPermissions) }) }
 const requester = { id: 2, username: 'requester', name: 'Requester', tier: 'review', permissions: costPermissions }
 async function request(app, method, url, body, user = admin) {
   const response = await app.request(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, { ...env, TEST_USER: user }, context)

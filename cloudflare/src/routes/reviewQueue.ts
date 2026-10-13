@@ -21,6 +21,8 @@ import { ProductRemoveError } from '../lib/productDelete'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { getDb } from '../lib/db'
+import { reviewApprovalPermissionError } from '../lib/reviewApprovalPermission'
+import { normalizeProductDiscountBody, ProductDiscountInputError } from '../lib/productDiscountGate'
 import { assertBranchExpectedState, BranchEditConflictError, BranchApprovalReceiptError } from '../lib/branchWrites'
 import type { BranchIdentitySnapshot } from '../lib/canonicalBranchIdentity'
 
@@ -136,6 +138,14 @@ app.post('/:id/resubmit', async (c) => {
           return c.json({ error: 'A saved product price plan cannot be edited. Submit a new product edit; unchanged resubmission is allowed.', code: 'product_money_plan_immutable' }, 409)
         }
       }
+      // OPUS-H-7: a resubmitted product payload is held to the same canonical discount block as a new edit
+      // (after the plan checks, which compare what the requester sent with what was saved).
+      const nextPayload = JSON.parse(payloadJson) as unknown
+      if (nextPayload && typeof nextPayload === 'object' && !Array.isArray(nextPayload)) {
+        const invalidDiscount = normalizeProductDiscountBody(nextPayload as Record<string, unknown>)
+        if (invalidDiscount) return c.json(invalidDiscount, 400)
+        payloadJson = JSON.stringify(nextPayload)
+      }
     }
   }
 
@@ -224,25 +234,29 @@ app.post('/:id/approve', async (c) => {
   if (productRemoveApproval && getActionTier(user, 'products', 'delete') !== 'full') {
     return c.json({ error: 'Full product removal permission is required to approve this request.' }, 403)
   }
-  if (row.status !== 'open') {
-    if (row.status === 'approved' && row.section === 'branches' && row.action_type === 'update' && row.entity_type === 'branch') {
-      try {
-        const receipt = await recoverApprovedBranchAction(c.env, row, user.id)
-        if (receipt) return c.json({ success: true, data: receipt, replayed: true })
-      } catch (error) {
-        if (error instanceof BranchApprovalReceiptError) return c.json({ success: false, error: error.message, code: error.code,
-          ...(error.code === 'unknown_outcome' ? { action: 'retry_same_request' } : {}) }, error.status)
-        throw error
-      }
-    }
-    if (productRemoveApproval && row.status === 'approved') {
-      return c.json({ success: true, data: row, replayed: true })
-    }
-    return c.json({ error: 'Already reviewed' }, 409)
-  }
-
   let pendingActionMarkedAtomically = false
   try {
+    // Finding H: the reviewer's CURRENT grant for this exact action and for each of its effects (price,
+    // cost, image), checked before any receipt replay or write (lib/reviewApprovalPermission.ts).
+    const refusal = await reviewApprovalPermissionError(c.env, user, row, productRemoveApproval)
+    if (refusal) return c.json(refusal.body, refusal.status)
+    if (row.status !== 'open') {
+      if (row.status === 'approved' && row.section === 'branches' && row.action_type === 'update' && row.entity_type === 'branch') {
+        try {
+          const receipt = await recoverApprovedBranchAction(c.env, row, user.id)
+          if (receipt) return c.json({ success: true, data: receipt, replayed: true })
+        } catch (error) {
+          if (error instanceof BranchApprovalReceiptError) return c.json({ success: false, error: error.message, code: error.code,
+            ...(error.code === 'unknown_outcome' ? { action: 'retry_same_request' } : {}) }, error.status)
+          throw error
+        }
+      }
+      if (productRemoveApproval && row.status === 'approved') {
+        return c.json({ success: true, data: row, replayed: true })
+      }
+      return c.json({ error: 'Already reviewed' }, 409)
+    }
+
     const outcome = await applyApprovedPendingAction(c.env, row, { id: user.id, name: actorSnapshot(user), redirectTarget: () => branchRedirectTarget(c) }, user,
       (promise) => c.executionCtx.waitUntil(promise))
     if (outcome.replayedBranchAction) return c.json({ success: true, data: outcome.replayedBranchAction, replayed: true })
@@ -258,6 +272,7 @@ app.post('/:id/approve', async (c) => {
       ...(err.code === 'unknown_outcome' ? { action: 'retry_same_request' } : {}) }, err.status)
     if (err instanceof BranchEditConflictError) return c.json({ success: false, error: err.message, code: err.code, conflict: true }, 409)
     if (err instanceof ProductMoneyWriteError) return c.json({ error: err.message, code: err.code }, err.status as 400 | 409)
+    if (err instanceof ProductDiscountInputError) return c.json({ error: err.message, code: err.code, field: err.field }, 400)
     if (err instanceof NoReviewApplierError) {
       return c.json({ error: err.message, code: 'no_review_applier' }, 501)
     }

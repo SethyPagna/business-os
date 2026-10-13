@@ -45,6 +45,8 @@ const DB = {
 }
 const env = { DB }
 const real = new Set(['acquisitionCostAccess', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db', 'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe', 'receivingBranch', 'businessMaintenanceGuard', 'catalogCostRecompute', 'branchWrites', 'canonicalBranchIdentity', 'branchRoles'])
+real.add('reviewApprovalPermission')
+real.add('productDiscountGate')
 const unavailable = name => new Proxy(function () {}, { get: (_target, key) => unavailable(`${name}.${String(key)}`), apply: () => { throw new Error(`Unexpected fixture dependency: ${name}`) }, construct: () => { throw new Error(`Unexpected fixture dependency: ${name}`) } })
 class ProductImageAssetError extends Error {}
 const services = {
@@ -72,7 +74,7 @@ function load(relative) {
   const localRequire = request => {
     if (request === 'hono') return { Hono }
     const name = request.split('/').pop()
-    if (relative === 'lib/acquisitionCostAccess.ts' && name === 'permissions') return load('lib/permissions.ts')
+    if (['lib/acquisitionCostAccess.ts', 'lib/reviewApprovalPermission.ts'].includes(relative) && name === 'permissions') return load('lib/permissions.ts')
     if (services[name]) return services[name]
     if (real.has(name)) return load(`lib/${name}.ts`)
     if (request.startsWith('.')) return unavailable(request)

@@ -70,6 +70,8 @@ async function checkEnvelopeRoutes(api) {
     '../lib/productWrites': { hasProductMoneyPolicy: unused },
     '../lib/branchRedirectWrite': { branchRedirectTarget: () => null },
     '../lib/reviewApply': { productRemovePendingPointer: () => false, applyApprovedPendingAction: unused },
+    '../lib/reviewApprovalPermission': { reviewApprovalPermissionError: unused },
+    '../lib/productDiscountGate': { normalizeProductDiscountBody: () => null, ProductDiscountInputError: class ProductDiscountInputError extends Error {} },
     '../lib/productImagePermission': {}, '../lib/productDelete': { PRODUCT_REMOVE_ACTION_KIND: 'product.remove' },
     '../lib/undoAppliers': { SALE_ADD_ITEMS_ACTION_KIND: 'sale.items.add', PRODUCT_MERGE_GROUP_ACTION_KIND: 'product.merge.group', branchCutoverClosureRefusal: () => null, ...undoModule.exports },
     '../lib/customerGenderRestoration': { CUSTOMER_GENDER_RESTORATION_KIND: 'customer.gender_restore' },

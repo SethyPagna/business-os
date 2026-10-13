@@ -32,7 +32,7 @@ function compileNamedFunctions(source, names) {
 
 function loadProductWrites(db) {
   const dependencies = new Map()
-  for (const name of ['receivingBranch', 'businessMaintenanceGuard', 'pendingActions', 'audit']) {
+  for (const name of ['receivingBranch', 'businessMaintenanceGuard', 'pendingActions', 'audit', 'productDiscountGate']) {
     const mod = { exports: {} }
     const output = ts.transpileModule(fs.readFileSync(path.join(libRoot, `${name}.ts`), 'utf8'), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
