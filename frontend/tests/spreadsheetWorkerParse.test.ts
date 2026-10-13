@@ -18,10 +18,13 @@ import { Worker as NodeWorker } from 'node:worker_threads'
 import * as XLSX from 'xlsx'
 import {
   SPREADSHEET_FAILURES,
+  SPREADSHEET_MAX_BYTES,
+  isImportFileReadInFlight,
   parseImportFile,
   parseSpreadsheetInWorker,
   readSpreadsheetReply,
   spreadsheetParseTimeoutMs,
+  subscribeToImportFileReads,
 } from '../src/utils/spreadsheetImport.ts'
 import type { SpreadsheetWorkerHandle } from '../src/utils/spreadsheetImport.ts'
 import { parseCsvRows } from '../src/utils/csvImport.ts'
@@ -260,7 +263,7 @@ await check('a worker that fails to start, fails to receive, or sends malformed 
   const created: { terminated: number }[] = []
 
   const loadFailure = await failureOf(parseSpreadsheetInWorker(new ArrayBuffer(8), undefined, { createWorker: handleOf((h) => h.onerror?.({})) }))
-  assert.equal(loadFailure.code, 'spreadsheet_import_unavailable')
+  assert.equal(loadFailure.code, 'spreadsheet_import_load_failed')
   const postFailure = await failureOf(parseSpreadsheetInWorker(new ArrayBuffer(8), undefined, { createWorker: handleOf(() => {}, true) }))
   assert.equal(postFailure.code, 'spreadsheet_import_unavailable')
   const cloneFailure = await failureOf(parseSpreadsheetInWorker(new ArrayBuffer(8), undefined, { createWorker: handleOf((h) => h.onmessageerror?.({})) }))
@@ -270,6 +273,74 @@ await check('a worker that fails to start, fails to receive, or sends malformed 
   const malformed = await failureOf(parseSpreadsheetInWorker(new ArrayBuffer(8), undefined, { createWorker: handleOf((h) => h.onmessage?.({ data: 'not a reply' })) }))
   assert.equal(malformed.code, 'spreadsheet_import_unreadable')
   assert.ok(created.every((handle) => handle.terminated === 1), 'every one of them was terminated exactly once')
+})
+
+await check('a worker file that fails to load asks for a reload, which is not the "browser cannot run workers" message', async () => {
+  const missing = adapt("import('file:///no/such/spreadsheetParse.worker.mjs')")
+  const error = await failureOf(parseSpreadsheetInWorker(new ArrayBuffer(8), undefined, { createWorker: missing }))
+  assert.equal(error.code, 'spreadsheet_import_load_failed')
+  assert.equal(error.message, enPack.spreadsheet_import_load_failed)
+  assert.match(enPack.spreadsheet_import_load_failed, /reload/i)
+  assert.notEqual(enPack.spreadsheet_import_load_failed, enPack.spreadsheet_import_unavailable)
+  const worker = spawned[spawned.length - 1]
+  assert.equal(worker.handle.terminated, true)
+  await withTimeout(worker.exited, 15_000, 'failed worker exit')
+})
+
+await check('a file over the size cap is refused before it is read or a worker is made', async () => {
+  assert.equal(SPREADSHEET_MAX_BYTES, 25 * 1024 * 1024, 'the cap matches the 25 MB upload cap')
+  assert.match(enPack.spreadsheet_import_too_large, /25 MB/)
+  assert.match(kmPack.spreadsheet_import_too_large, /25 MB/)
+  let read = 0
+  let created = 0
+  const huge = { name: 'huge.xlsx', size: SPREADSHEET_MAX_BYTES + 1, arrayBuffer() { read += 1; return Promise.resolve(new ArrayBuffer(8)) } } as unknown as File
+  const error = await failureOf(parseImportFile(huge, undefined, { createWorker: () => { created += 1; return hangingWorker() } }))
+  assert.equal(error.code, 'spreadsheet_import_too_large')
+  assert.equal(error.message, enPack.spreadsheet_import_too_large)
+  assert.equal(read, 0, 'the oversized file was never read into memory')
+  assert.equal(created, 0)
+
+  const bytesError = await failureOf(parseSpreadsheetInWorker(new ArrayBuffer(SPREADSHEET_MAX_BYTES + 1), undefined, { createWorker: () => { created += 1; return hangingWorker() } }))
+  assert.equal(bytesError.code, 'spreadsheet_import_too_large')
+  assert.equal(created, 0)
+
+  const atCap = { name: 'edge.xlsx', size: SPREADSHEET_MAX_BYTES, arrayBuffer() { return Promise.resolve(fixtureBytes()) } } as unknown as File
+  const parsed = await parseImportFile(atCap, undefined, { createWorker: realWorker })
+  assert.ok(parsed.content.startsWith('name,barcode,qty'), 'a file exactly at the cap is accepted')
+
+  const bigCsv = { name: 'big.csv', size: SPREADSHEET_MAX_BYTES * 2, arrayBuffer() { return Promise.resolve(new TextEncoder().encode('a,b\n1,2\n').buffer) } } as unknown as File
+  assert.equal((await parseImportFile(bigCsv)).content, 'a,b\n1,2\n', 'the cap is for Excel files only')
+})
+
+await check('the in-flight read flag is up while a file is read and down after a result, a failure or a refusal', async () => {
+  const seen: boolean[] = []
+  const unsubscribe = subscribeToImportFileReads(() => seen.push(isImportFileReadInFlight()))
+  assert.equal(isImportFileReadInFlight(), false)
+  const pending = parseImportFile(fileOf(fixtureBytes(), 'fixture.xlsx'), undefined, { createWorker: realWorker })
+  assert.equal(isImportFileReadInFlight(), true, 'up as soon as the read starts')
+  await pending
+  assert.equal(isImportFileReadInFlight(), false)
+
+  await failureOf(parseImportFile(fileOf(fixtureBytes(), 'fixture.xlsx')))
+  assert.equal(isImportFileReadInFlight(), false, 'down after a refusal')
+  await failureOf(parseImportFile(fileOf(new Uint8Array([0x50, 0x4b, 3, 4, 0, 0, 0, 0]), 'broken.xlsx'), undefined, { createWorker: realWorker }))
+  assert.equal(isImportFileReadInFlight(), false, 'down after a failed parse')
+  await parseImportFile(fileOf('a,b\n', 'x.csv'))
+  assert.equal(isImportFileReadInFlight(), false, 'down after a CSV')
+
+  const overlapping = [
+    parseImportFile(fileOf(fixtureBytes(), 'one.xlsx'), undefined, { createWorker: realWorker }),
+    parseImportFile(fileOf(fixtureBytes(), 'two.xlsx'), undefined, { createWorker: realWorker }),
+  ]
+  await overlapping[0]
+  await overlapping[1]
+  assert.equal(isImportFileReadInFlight(), false, 'two overlapping reads both release it')
+  unsubscribe()
+  assert.equal(seen[0], true)
+  assert.equal(seen[seen.length - 1], false)
+  const afterUnsubscribe = seen.length
+  await parseImportFile(fileOf('a\n', 'y.csv'))
+  assert.equal(seen.length, afterUnsubscribe, 'an unsubscribed listener hears nothing')
 })
 
 await check('a late second message cannot settle a finished import twice', async () => {

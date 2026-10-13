@@ -1,47 +1,20 @@
-// Universal import-file reader: CSV, TSV, and real Excel (.xlsx/.xls/.xlsm).
+// Reads the file an import dialog hands over (CSV, TSV or Excel .xlsx/.xls/.xlsm)
+// and returns the delimited text every importer already parses, so nothing
+// downstream knows an Excel file was involved.
 //
-// WHY THIS EXISTS: every import entry point in this app (products, inventory,
-// contacts, sales) ends up calling openCSVDialog() (api/browserDialogs.ts),
-// which used to only accept .csv/.tsv and read the file as raw text via
-// decodeTextBuffer. That's the root cause of two separate real-world bugs
-// reported by operators:
+// Excel is read as a workbook, not as text, because a CSV loses what Excel
+// keeps: a CSV re-saved as "CSV (Comma delimited)" is written in the system
+// ANSI code page, which cannot hold Khmer, and Excel's General format shows a
+// long barcode in scientific notation. A workbook stores text as UTF-8 and
+// gives every cell a type (see utils/xlsxExport.ts for the export side, which
+// writes barcode-shaped columns as Text).
 //
-//   1. "Khmer text turns into question marks" -- this almost never happens
-//      on the read side (decodeTextBuffer already handles UTF-8/UTF-16
-//      correctly). It happens earlier: a CSV round-tripped through Excel
-//      gets re-saved using Excel's plain "CSV (Comma delimited)" option,
-//      which writes the system ANSI codepage (e.g. Windows-1252), not UTF-8
-//      -- Windows-1252 cannot represent Khmer glyphs at all, so they become
-//      literal '?' before the file ever reaches this app. Plain CSV has no
-//      way to prevent that; it's a structural limitation of the format.
-//
-//   2. "Barcode numbers turn into scientific notation / lose digits" --
-//      Excel's default "General" number format switches to scientific
-//      notation once an integer gets long enough (which most 12-13 digit
-//      barcodes are), and CSV has no per-column type info to mark a column
-//      "Text" and stop that.
-//
-// Real .xlsx sidesteps both structurally: it always stores text as UTF-8 in
-// its underlying XML (no ANSI ambiguity, ever), and cells carry real type
-// info so a column can be explicitly typed Text (see utils/xlsxExport.ts for
-// the export side, which forces barcode-shaped columns to Text so a file
-// this app generates never re-introduces the problem on the next round
-// trip).
-//
-// A parsed .xlsx sheet is converted into the exact same delimited text shape
-// a .csv upload already produces (spreadsheetWorkbook.ts), so nothing
-// downstream -- analyzeProductImportText, parseCsvRows, the backend's
-// importCsv.ts, all of it -- needs to know or care that the original file was
-// Excel.
-//
-// WHERE IT RUNS: SheetJS 0.18.5 carries prototype-pollution and ReDoS
-// advisories with no patched npm release, and an imported workbook is
-// untrusted input. So that conversion never runs here: each Excel file gets a
-// worker of its own (spreadsheetParse.worker.ts) that is terminated after the
-// result, after a timeout, or on cancel, and the only thing that comes back
-// across the boundary is one string. A polluted or hung parser dies with its
-// worker. Where no worker can be made, the Excel file is refused, never parsed
-// on this thread.
+// SheetJS 0.18.5 has prototype-pollution and ReDoS advisories and no patched
+// npm release, and an imported workbook is untrusted input. So the conversion
+// never runs on this thread: each Excel file gets a worker of its own
+// (spreadsheetParse.worker.ts), terminated after the result, a timeout or a
+// cancel, and one string is all that comes back. Where no worker can be made,
+// the Excel file is refused rather than parsed here.
 import { decodeTextBuffer } from './csvImport.ts'
 
 export type ImportFileResult = {
@@ -59,6 +32,8 @@ export type SpreadsheetParseOptions = {
 
 const SPREADSHEET_EXTENSION_PATTERN = /\.(xlsx|xlsm|xls)$/i
 
+export const SPREADSHEET_MAX_BYTES = 25 * 1024 * 1024
+
 const SPREADSHEET_PARSE_BASE_TIMEOUT_MS = 20_000
 const SPREADSHEET_PARSE_PER_MB_TIMEOUT_MS = 3_000
 const SPREADSHEET_PARSE_MAX_TIMEOUT_MS = 120_000
@@ -70,9 +45,17 @@ export const SPREADSHEET_FAILURES = {
     key: 'spreadsheet_import_unavailable',
     english: 'This browser cannot read Excel files safely. Save the sheet as CSV and import that, or update your browser.',
   },
+  loadFailed: {
+    key: 'spreadsheet_import_load_failed',
+    english: 'The Excel reader could not be loaded. Check your connection, reload the page and try again.',
+  },
   timeout: {
     key: 'spreadsheet_import_timeout',
     english: 'That Excel file took too long to read, so it was stopped. Save the sheet as CSV and import that instead.',
+  },
+  tooLarge: {
+    key: 'spreadsheet_import_too_large',
+    english: 'That Excel file is larger than 25 MB, so it was not opened. Keep only the sheet you need, or save it as CSV, and import that.',
   },
   unreadable: {
     key: 'spreadsheet_import_unreadable',
@@ -81,6 +64,26 @@ export const SPREADSHEET_FAILURES = {
 } as const
 
 type SpreadsheetFailureKind = keyof typeof SPREADSHEET_FAILURES
+
+let importFileReadsInFlight = 0
+const importFileReadListeners = new Set<() => void>()
+
+function setImportFileReadsInFlight(count: number): void {
+  importFileReadsInFlight = count
+  importFileReadListeners.forEach((listener) => listener())
+}
+
+// Lets a dialog hold its Import button, mode switches and file inputs while a
+// file is still being read, so a late result can never land under a changed
+// choice. Shaped for useSyncExternalStore.
+export function subscribeToImportFileReads(listener: () => void): () => void {
+  importFileReadListeners.add(listener)
+  return () => { importFileReadListeners.delete(listener) }
+}
+
+export function isImportFileReadInFlight(): boolean {
+  return importFileReadsInFlight > 0
+}
 
 export function isSpreadsheetFileName(fileName: string): boolean {
   return SPREADSHEET_EXTENSION_PATTERN.test(String(fileName || '').trim())
@@ -124,11 +127,16 @@ export function readSpreadsheetReply(raw: unknown, id: string): { content: strin
 
 export function parseSpreadsheetInWorker(bytes: ArrayBuffer, sheetName?: string, options: SpreadsheetParseOptions = {}): Promise<string> {
   const { signal } = options
-  const timeoutMs = options.timeoutMs ?? spreadsheetParseTimeoutMs(bytes.byteLength)
+  const byteLength = bytes.byteLength
+  const timeoutMs = options.timeoutMs ?? spreadsheetParseTimeoutMs(byteLength)
   return new Promise<string>((resolve, reject) => {
     const cancelled = () => new DOMException('The import was cancelled.', 'AbortError')
     if (signal?.aborted) {
       reject(cancelled())
+      return
+    }
+    if (byteLength > SPREADSHEET_MAX_BYTES) {
+      void spreadsheetFailure('tooLarge').then(reject)
       return
     }
     let worker: SpreadsheetWorkerHandle
@@ -163,7 +171,7 @@ export function parseSpreadsheetInWorker(bytes: ArrayBuffer, sheetName?: string,
       else fail('unreadable')
     }
     worker.onmessageerror = () => fail('unreadable')
-    worker.onerror = () => fail('unavailable')
+    worker.onerror = () => fail('loadFailed')
     signal?.addEventListener('abort', onAbort, { once: true })
     timer = setTimeout(() => fail('timeout'), timeoutMs)
     try {
@@ -179,10 +187,16 @@ export function parseSpreadsheetInWorker(bytes: ArrayBuffer, sheetName?: string,
 // shape either way -- callers (openCSVDialog, FileDropZone, and every
 // *ImportModal.tsx that consumes their result) don't need to change at all.
 export async function parseImportFile(file: File, sheetName?: string, options?: SpreadsheetParseOptions): Promise<ImportFileResult> {
-  const name = file.name || 'import'
-  if (isSpreadsheetFileName(name)) {
-    return { content: await parseSpreadsheetInWorker(await file.arrayBuffer(), sheetName, options), name }
+  setImportFileReadsInFlight(importFileReadsInFlight + 1)
+  try {
+    const name = file.name || 'import'
+    if (isSpreadsheetFileName(name)) {
+      if (file.size > SPREADSHEET_MAX_BYTES) throw await spreadsheetFailure('tooLarge')
+      return { content: await parseSpreadsheetInWorker(await file.arrayBuffer(), sheetName, options), name }
+    }
+    const content = decodeTextBuffer(await file.arrayBuffer())
+    return { content, name }
+  } finally {
+    setImportFileReadsInFlight(importFileReadsInFlight - 1)
   }
-  const content = decodeTextBuffer(await file.arrayBuffer())
-  return { content, name }
 }
