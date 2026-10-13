@@ -145,7 +145,7 @@ async function retry(payload: Record<string, unknown> | undefined, failure: Erro
   const notifications: string[] = []
   const retained = { checkoutRequestId: 'unchanged-request', checkoutPayload: payload }
   const { handleCheckout } = evaluate(extract(posSource, 'handleCheckout'), ['handleCheckout'], {
-    ...scopes, ...money, assertPosCheckoutOwner, loading: false, user: userA,
+    ...scopes, ...money, assertPosCheckoutOwner, loading: false, user: userA, savingBlocked: false, savingBlockedText: '',
     checkoutInFlightRef: { current: false }, resolvedActiveId: 'order-1', active: retained,
     checkoutRequestIdsRef: { current: new Map([['order-1', 'unchanged-request']]) },
     getSaleWriteTransport: async () => ({ recoverSaleCreateReceipt: async () => { lookedUp++; return { committed: false } } }),

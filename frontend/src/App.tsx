@@ -1513,7 +1513,7 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
       : (t('server_back_online') || 'Server is back online. You can keep working.'))
     : reconnecting
       ? (t('server_tunnel_reconnecting') || 'Server/tunnel reconnecting. Cached data stays visible and read-only checks will refresh automatically.')
-      : (t('offline_mode_active') || 'You are offline. Writes require a connection. Keep your drafts; retained offline records are not sent automatically.')
+      : (t('offline_mode_active') || 'Saving needs a connection. Your cart and drafts stay on this screen; nothing is saved until the connection returns.')
   const statusSuffix = reconnecting && transientOutage?.status ? ` Status ${transientOutage.status}` : ''
   // appUpdate no longer feeds this banner's own "Update ready" priority
   // state -- that used to pop this floating banner on effectively every
@@ -1533,7 +1533,7 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
     : ready
       ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200'
       : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300'
-  const title = priority?.title || (reconnecting ? (t('server_reconnecting') || 'Server reconnecting') : t('offline_mode') || 'Offline mode')
+  const title = priority?.title || (reconnecting ? (t('server_reconnecting') || 'Server reconnecting') : offline ? (t('offline_saving_blocked_title') || 'No connection — saving is blocked') : t('offline_mode') || 'Offline mode')
   const message = priority?.message || `${label}${statusSuffix}`
   const shouldShowVerboseImmediately = !!priority || total > 0 || offline
   const noticeFingerprint = persistentNoticeFingerprint(
