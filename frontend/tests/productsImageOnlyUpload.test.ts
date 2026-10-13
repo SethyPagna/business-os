@@ -57,7 +57,7 @@ const saves: Array<{ id: number; image_path: string }> = []
 let gate: Promise<void> = Promise.resolve()
 let uploadFailure: unknown = null
 let saveFailure: unknown = null
-// The navigation guard's registry, so the test can ask the same question the guard asks: is any work at risk right now?
+// The navigation guard's registry: the test asks the question the guard asks.
 const dirtyWork: Array<{ key: string; label: string; isDirty: () => boolean; discard?: () => void }> = []
 const workAtRisk = (): string[] => dirtyWork.filter((entry) => entry.isDirty()).map((entry) => entry.label)
 const doubles = {
@@ -214,7 +214,7 @@ try {
     assert.equal(spinnersIn(surface, 'Synthetic serum'), 0, `${lang}: nothing claims to be uploading`)
     assert.ok(propsOf(rowButton(surface, 'Synthetic serum', pack.choose_file)).disabled !== true, `${lang}: the row is usable again`)
     assert.deepEqual(objectUrls.revoked, [], `${lang}: the preview is kept for Retry`)
-    // Review finding 6, sibling surface: the row's Retry and Discard are icon-only 44 px targets named in the pack language.
+    // The row's Retry and Discard are icon-only 44 px targets named in the pack language.
     for (const [control, name, label] of [[surface.button(pack.retry, card(surface, 'Synthetic serum')), pack.retry, 'Retry'], [surface.button(pack.discard, card(surface, 'Synthetic serum')), pack.discard, 'Discard']] as const) {
       assert.equal(control.textContent, '', `${lang}: ${label} on the failed row is icon-only`)
       assert.equal(control.getAttribute('aria-label'), name, `${lang}: ${label} is named in the pack language`)

@@ -110,10 +110,8 @@ const settledWithin = async (promise: Promise<File[]>, ms: number): Promise<File
   assert.equal(input.attached, false)
 }
 
-// Review finding 7. iOS before 16.4 fires neither `cancel` nor a window `focus` when the picker is dismissed, so
-// the picker has to notice another way. A tap on the page proves nothing is covering it; the page becoming visible
-// again (a camera app, a restored page) is read like a focus. The caller's lock is released either way, and a photo
-// that still arrives afterwards is delivered, not dropped.
+// No cancel and no focus: a tap on the page settles the picker at once, the page returning settles it like a focus,
+// and a photo that still arrives afterwards is delivered.
 {
   const late: File[][] = []
   const pending = pickFiles({ onLateChange: (files) => late.push(files) })

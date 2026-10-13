@@ -202,9 +202,7 @@ export default function ProductsImageOnlyView() {
       rowPhotosRef.current = {}
     }
   }, [])
-  // A photo that failed to upload exists only in this view's memory (its file and its preview). Leaving the page
-  // would drop it without a word, so the navigation guard asks first (Discard & Leave / Stay), the way the product
-  // form's guard does for the same failed photo. Retry and Discard on the row stay the way through.
+  // A failed photo lives only in this view's memory, so leaving the page would drop it silently: the navigation guard asks first.
   useEffect(() => registerDirtyWork({
     key: 'products-image-only-failed-photos',
     pageId: 'products',

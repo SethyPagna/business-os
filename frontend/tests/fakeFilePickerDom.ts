@@ -1,6 +1,5 @@
-// A just-enough document and window for src/utils/filePicker.ts: tests create inputs through it, fire the
-// events a browser would (cancel, change, window focus, the page becoming visible again, a tap on the page),
-// and read back what the picker did to the DOM.
+// A just-enough document and window for src/utils/filePicker.ts: tests fire the events a browser would
+// (cancel, change, focus, page shown, a tap) and read back what the picker did to the DOM.
 export type Listener = (event?: unknown) => void
 
 export class FakeInput {

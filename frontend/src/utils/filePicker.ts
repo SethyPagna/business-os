@@ -1,16 +1,7 @@
-// The OS file picker has no single "cancelled" signal on every platform: current browsers fire `cancel` on the
-// input, older ones only hand focus back to the window, and Android returns a camera photo through `change`
-// AFTER the window has already regained focus. iOS before 16.4 reports neither `cancel` nor a window `focus`
-// when the picker is dismissed. A picker that waits for `change` alone never settles when the person backs out,
-// which leaves the caller's in-flight lock held and the button dead, so every signal that proves the picker is
-// gone settles it:
-//   - `cancel` on the input (settles at once);
-//   - the window regaining focus, the page becoming visible again, or a restored page (`pageshow`), after a short
-//     wait, because Android reports the camera's `change` just after the focus;
-//   - the first touch or click anywhere on the page (settles at once): nothing can be tapped while the OS picker
-//     covers the page, so a tap means it is gone, whatever the browser did or did not report.
-// Settling without a choice never loses a photo: a caller that passes `onLateChange` still receives a `change`
-// that arrives afterwards.
+// The OS picker has no single "cancelled" signal: current browsers fire `cancel`, older ones only refocus the window, Android
+// returns a camera photo through `change` after the refocus, and iOS before 16.4 is reported to fire neither `cancel` nor `focus`.
+// So it settles on `cancel`, on focus, visibility or pageshow after a short wait, and at once on the first tap (nothing can be
+// tapped while the OS picker covers the page). A `change` after that still reaches `onLateChange`, so no photo is lost.
 const FOCUS_SETTLE_MS = 300
 const LATE_CHANGE_WINDOW_MS = 120_000
 
@@ -104,9 +95,7 @@ export function pickFiles({ accept = 'image/*', capture, maxCount = 1, onLateCha
     window.addEventListener('focus', onPageReturned)
     window.addEventListener('pageshow', onPageReturned)
     document.addEventListener('visibilitychange', onVisibilityChange)
-    // Capture phase, so a control that stops propagation cannot hide the tap; passive, so it can never hold up a
-    // scroll. Touch as well as pointer: pointer events only arrive in iOS 13, and the devices this fallback is
-    // for are the old ones.
+    // Capture, so no control can hide the tap; passive, so it never holds up a scroll. Touch too: pointer events need iOS 13.
     window.addEventListener('pointerdown', onPageTouched, { capture: true, passive: true })
     window.addEventListener('touchstart', onPageTouched, { capture: true, passive: true })
     document.body.appendChild(input)

@@ -10,12 +10,8 @@ import { bleed, bleedOnSide, classesOf, dimension, gapPx, horizontalPadding } fr
 // the header than before (the icon stays where it was), and being icon-only it
 // carries its translated name as a tooltip as well as an aria-label.
 //
-// Review finding 10, two parts. The -m-1.5 that hides the extra 12 px of target
-// reaches 6 px past the Close's own box on every side; with the 4 px gap beside
-// a header control (the Minimize button) that put its hit area 2 px over the
-// neighbour's. The gap now covers the bleed with room to spare. And the tooltip
-// repeats the aria-label word for word, so the control has ONE accessible name,
-// not two different ones.
+// The -m-1.5 reaches 6 px past the Close's box, so the gap beside a header control must be wider than that; and the
+// tooltip repeats the aria-label word for word, so the control has one accessible name.
 
 const packs = Object.fromEntries(['en', 'km'].map((lang) => [lang, JSON.parse(readFileSync(new URL(`../src/lang/${lang}.json`, import.meta.url), 'utf8'))])) as Record<string, Record<string, string>>
 
@@ -41,13 +37,12 @@ try {
     assert.equal(propsOf(close).title, words.close, `${lang}: the icon-only control names itself in a tooltip`)
     assert.equal(close.getAttribute('aria-label'), words.close)
 
-    // One accessible name: icon-only, so the name is the aria-label, and the tooltip is the same word rather than a second one.
+    // Icon-only, so the name is the aria-label, and the tooltip is the same word rather than a second name.
     assert.equal(close.textContent, '', `${lang}: Close has no visible text to add a second name`)
     assert.equal(close.getAttribute('title'), close.getAttribute('aria-label'), `${lang}: the tooltip repeats the aria-label, it does not add a different name`)
     assert.equal(accessibleText(close), words.close, `${lang}: so the control is named ${JSON.stringify(words.close)} once`)
 
-    // No overlap with the neighbouring control: its right edge, plus the gap the header puts between them, minus how far
-    // the Close's hit area reaches back over its own footprint, must still leave room.
+    // The gap between the two controls, less how far the Close's hit area reaches back over its footprint, must leave room.
     const sibling = surface.find((node) => node.getAttribute('aria-label') === 'Neighbour', 'the header neighbour')
     const row = close.parentNode!
     assert.equal(row, sibling.parentNode, `${lang}: the neighbour and Close share one header row`)

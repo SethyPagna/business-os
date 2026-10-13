@@ -111,8 +111,7 @@ for (const [name, kind] of [['Settings uploadImageSetting', 'settings'], ['Websi
   probe.uploads.length = 0
   probe.applied.length = 0
 
-  // Review finding 7: iOS before 16.4 reports neither cancel nor focus. The key must not stay locked until a reload:
-  // the first tap on the page settles the picker, and a photo that still arrives is uploaded.
+  // No cancel and no focus: the first tap on the page settles the picker and frees the key; a photo that still arrives uploads.
   const stuck = probe.open()
   assert.equal(probe.lock.current.size, 1, `${name}: the key is held while a picker that reports nothing is open`)
   assert.equal(await settled(stuck, 150), false, `${name}: and nothing releases it by itself`)

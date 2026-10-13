@@ -1033,11 +1033,7 @@ async function readImageFilesAsDataUrls(
   return results.filter(Boolean)
 }
 
-/**
- * Open the shared picker for several images and return them as data URLs. A cancelled picker settles with none (the old
- * one waited for `change` forever), and screenshots that arrive after that -- a camera returning late -- go to
- * `onLateImages` as a read in progress, so they are not dropped.
- */
+/** Shared picker for several images, as data URLs. A cancelled picker settles with none; later ones go to `onLateImages`. */
 async function pickMultipleImagesAsDataUrls(onLateImages?: (images: Promise<string[]>) => void): Promise<string[]> {
   const files = await pickFiles({
     accept: 'image/*',

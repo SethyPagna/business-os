@@ -4,11 +4,8 @@ import ts from 'typescript'
 import { pickFiles } from '../src/utils/filePicker.ts'
 import { imageFile, installFakeFilePickerDom, wait } from './fakeFilePickerDom.ts'
 
-// Review finding 8. The storefront's share-proof screenshot picker (CatalogPage.tsx pickMultipleImagesAsDataUrls) built
-// its own input: never attached to the page (some in-app webviews only fire `change` on an attached input) and
-// listening for `change` alone, so a cancelled picker left its promise pending for good and a camera photo that arrived
-// after the window refocused was missed. It now goes through the shared picker. This runs the REAL function from the
-// component source, pulled out by the TypeScript parser, against the real picker and a fake input.
+// The storefront screenshot picker (CatalogPage.tsx pickMultipleImagesAsDataUrls) uses the shared picker. This runs the real
+// function, pulled out of the component source, against the real picker and a fake input.
 
 const { inputs, tapPage, focusWindow, heldListeners } = installFakeFilePickerDom()
 const settled = async <T>(promise: Promise<T>, ms: number): Promise<T | 'pending'> => Promise.race([promise, wait(ms).then(() => 'pending' as const)])
