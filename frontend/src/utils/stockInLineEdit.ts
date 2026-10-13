@@ -7,6 +7,8 @@
 // operator did not change is not sent -- and turns the Worker's refusal codes
 // into sentences in the reader's language.
 
+import { batchReceivedIsoDay } from './batchLabel.ts'
+
 export type StockInLineEditRow = {
   id: number | null
   quantity: number
@@ -70,7 +72,7 @@ export function stockInLineDraft(row: StockInLineEditRow): StockInLineEditDraft 
   return {
     quantity: String(Math.abs(Number(row.quantity) || 0)),
     unitCostUsd: cost == null ? '' : String(cost),
-    receivedDate: String(row.batch_received_at || '').slice(0, 10),
+    receivedDate: batchReceivedIsoDay(row.batch_received_at),
     supplierId: row.batch_supplier_id == null ? null : Number(row.batch_supplier_id),
     supplierName: String(row.batch_supplier_name || ''),
     reason: '',

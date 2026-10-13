@@ -48,6 +48,12 @@ export function formatBatchReceivedDate(receivedAt: string | null | undefined): 
   return fmtDayFirst(new Date(ms), { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: BUSINESS_TIME_ZONE })
 }
 
+/** The received day as YYYY-MM-DD in the business zone (the day formatBatchReceivedDate prints); '' when there is none. */
+export function batchReceivedIsoDay(receivedAt: string | null | undefined): string {
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(formatBatchReceivedDate(receivedAt) || '')
+  return match ? `${match[3]}-${match[2]}-${match[1]}` : ''
+}
+
 // "n: dd/mm/yyyy" -- the decided default label (word "Batch" prefix is
 // added by the caller, batchDisplayLabel below, so this stays reusable
 // for a plain numeric badge too) for a batch that was never given a lot

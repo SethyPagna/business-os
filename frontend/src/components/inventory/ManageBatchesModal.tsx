@@ -12,7 +12,7 @@ import SectionCard from '../shared/SectionCard'
 import { deactivateBatch, getProductBatches, updateBatch, updateBatchBranchQuantity, type ProductBatch } from '../../api/batchesTransport.ts'
 import SupplierPickerField from '../shared/SupplierPickerField.tsx'
 import { getInventoryMovements } from '../../api/inventoryTransport.ts'
-import { batchDisplayLabel } from '../../utils/batchLabel.ts'
+import { batchDisplayLabel, batchReceivedIsoDay } from '../../utils/batchLabel.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
 import { isDepletedLot, orderLotsOnHandFirst } from '../../utils/productBatches.ts'
 import { sortLotsForDisplay } from '../../utils/lotDisplayOrder.ts'
@@ -173,7 +173,7 @@ export default function ManageBatchesModal({
 
   const startEdit = (batch: ProductBatch) => {
     setEditingId(batch.id)
-    setDraft({ expiryDate: batch.expiry_date || '', receivedAt: (batch.received_at || '').slice(0, 10), notes: batch.notes || '', quantity: String(batch.quantity ?? 0), supplierId: batch.supplier_id ?? null, supplierName: String(batch.supplier_name || '') })
+    setDraft({ expiryDate: batch.expiry_date || '', receivedAt: batchReceivedIsoDay(batch.received_at), notes: batch.notes || '', quantity: String(batch.quantity ?? 0), supplierId: batch.supplier_id ?? null, supplierName: String(batch.supplier_name || '') })
   }
 
   const cancelEdit = () => setEditingId(null)
@@ -483,9 +483,9 @@ export default function ManageBatchesModal({
                             <button
                               type="button"
                               className="text-blue-600 hover:underline dark:text-blue-300"
-                              onClick={() => setDayDetail(String(batch.received_at || '').slice(0, 10) || null)}
+                              onClick={() => setDayDetail(batchReceivedIsoDay(batch.received_at) || null)}
                             >
-                              {tr('received_on', 'Received', 'បានទទួល')} {fmtDateOnly(String(batch.received_at || '').slice(0, 10))} ›
+                              {tr('received_on', 'Received', 'បានទទួល')} {fmtDateOnly(batchReceivedIsoDay(batch.received_at))} ›
                             </button>
                           ) : null,
                           <span>{tr('expiry', 'Expiry')} {batch.expiry_date ? fmtDateOnly(batch.expiry_date) : tr('no_expiry', 'No expiry')}</span>,

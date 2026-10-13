@@ -1,3 +1,6 @@
+import { BUSINESS_TIME_ZONE } from '../constants.ts'
+import { parseServerTimestampMs } from './formatters.ts'
+
 type AnyRow = Record<string, any>
 
 export interface TimeParts {
@@ -12,23 +15,20 @@ export interface TimeParts {
   dayLabel: string
 }
 
+// A stamp with no offset is UTC (D1 writes them so); anything the shared parser cannot read is tried as a plain date string.
 function toDate(value: unknown): Date | null {
   if (!value) return null
-  const raw = String(value).trim()
-  if (!raw) return null
-  const direct = new Date(raw)
-  if (!Number.isNaN(direct.getTime())) return direct
-  const isoLike = raw.replace(' ', 'T')
-  const normalizedIso = /[+-]\d{2}$/i.test(isoLike)
-    ? `${isoLike}:00`
-    : /[+-]\d{4}$/i.test(isoLike)
-      ? isoLike.replace(/([+-]\d{2})(\d{2})$/i, '$1:$2')
-      : isoLike
-  const parsedIso = new Date(normalizedIso)
-  if (!Number.isNaN(parsedIso.getTime())) return parsedIso
-  const needsUtcSuffix = !/[zZ]$|[+-]\d{2}:\d{2}$|[+-]\d{4}$|[+-]\d{2}$/.test(normalizedIso)
-  const parsedUtc = new Date(needsUtcSuffix ? `${normalizedIso}Z` : normalizedIso)
-  return Number.isNaN(parsedUtc.getTime()) ? null : parsedUtc
+  const ms = parseServerTimestampMs(typeof value === 'string' ? value.trim() : value as Date | number)
+  if (!Number.isNaN(ms)) return new Date(ms)
+  const direct = new Date(String(value).trim())
+  return Number.isNaN(direct.getTime()) ? null : direct
+}
+
+// The year, month and day a record belongs to are the BUSINESS day (Phnom Penh), not the device's calendar.
+function businessDayOf(date: Date): { year: number; month: number; day: number } {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: BUSINESS_TIME_ZONE, year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(date)
+  const get = (type: string): number => Number(parts.find((part) => part.type === type)?.value)
+  return { year: get('year'), month: get('month'), day: get('day') }
 }
 
 export function getTimeParts(value: unknown): TimeParts {
@@ -46,9 +46,7 @@ export function getTimeParts(value: unknown): TimeParts {
     }
   }
 
-  const year = parsed.getFullYear()
-  const month = parsed.getMonth() + 1
-  const day = parsed.getDate()
+  const { year, month, day } = businessDayOf(parsed)
 
   return {
     date: parsed,
@@ -56,7 +54,7 @@ export function getTimeParts(value: unknown): TimeParts {
     month,
     day,
     yearLabel: String(year),
-    monthLabel: parsed.toLocaleString('en-US', { month: 'long', year: 'numeric' }),
+    monthLabel: parsed.toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: BUSINESS_TIME_ZONE }),
     monthKey: `${year}-${String(month).padStart(2, '0')}`,
     dayKey: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
     // dd/mm/yyyy day-first (Sep 4 2026). dayKey/monthKey above stay ISO --
