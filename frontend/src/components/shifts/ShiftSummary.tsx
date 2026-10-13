@@ -6,7 +6,7 @@ import ShiftCashBreakdown from './ShiftCashBreakdown.tsx'
 import ShiftReportFigures from './ShiftReportFigures.tsx'
 import ShiftCloseDriftNote from './ShiftCloseDriftNote.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
-import { shiftCountedPairText, shiftDrawerSourceBadge } from './shiftReportModel.ts'
+import { shiftAdditionalCash, shiftCountedPairText, shiftDrawerSourceBadge } from './shiftReportModel.ts'
 import { isAdminControlUser, type PermissionUser } from '../../utils/permissions.ts'
 
 type Props = {
@@ -46,6 +46,12 @@ export default function ShiftSummary({ shift: receivedShift, detail = false, cla
   // cashier actually wrote; now only the uncounted half is a dash, and a
   // wholly uncounted drawer is still one dash.
   const after = shiftCountedPairText(shift.closing_counted_usd, shift.closing_counted_khr, fmtUSD, fmtKHR)
+  // Between the two: the extra change put in mid-shift (owner, 13 Oct 2026, item 14:
+  // Opening -> Additional -> Closing everywhere, $0 included). The shared rule answers
+  // the figure, zero when none; the (+) of an inflow marks only an amount, as in the
+  // report block and the POS summary.
+  const additional = shiftAdditionalCash(shift)
+  const between = `${additional.usd || additional.khr ? '+ ' : ''}${shiftCountedPairText(additional.usd, additional.khr, fmtUSD, fmtKHR)}`
   const sourceBadge = shiftDrawerSourceBadge(shift)
 
   return (
@@ -89,11 +95,17 @@ export default function ShiftSummary({ shift: receivedShift, detail = false, cla
         </div>
       </div>
 
-      <dl className="mt-2 grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 text-xs sm:grid-cols-4">
-        <div><dt className="text-gray-500 dark:text-gray-400">{tr('shift_open_time', 'Open')}</dt><dd className="mt-0.5 font-medium text-gray-800 dark:text-gray-100">{fmtClock24(shift.opened_at)}</dd></div>
-        <div><dt className="text-gray-500 dark:text-gray-400">{tr('shift_close_time', 'Close')}</dt><dd className="mt-0.5 font-medium text-gray-800 dark:text-gray-100">{shift.closed_at ? fmtClock24(shift.closed_at) : status}</dd></div>
-        <div className="min-w-0"><dt className="text-gray-500 dark:text-gray-400">{tr('shift_before', 'Before')}</dt><dd className="mt-0.5 break-words font-medium text-gray-800 dark:text-gray-100">{before}</dd></div>
-        <div className="min-w-0"><dt className="text-gray-500 dark:text-gray-400">{tr('shift_after', 'After')}</dt><dd className="mt-0.5 break-words font-medium text-gray-800 dark:text-gray-100">{after}</dd></div>
+      {/* Six units on a phone: Open and Close take three each, then Before, Additional and
+          After take two each, so the card stays two short rows at 360px (the cash values
+          wrap inside their cell instead of widening it). From sm the five cells are one
+          row. The label is the short pack word; the full "Additional change used" is its
+          tooltip. */}
+      <dl className="mt-2 grid min-w-0 grid-cols-6 gap-x-3 gap-y-2 text-xs sm:grid-cols-5">
+        <div className="col-span-3 sm:col-span-1"><dt className="text-gray-500 dark:text-gray-400">{tr('shift_open_time', 'Open')}</dt><dd className="mt-0.5 font-medium text-gray-800 dark:text-gray-100">{fmtClock24(shift.opened_at)}</dd></div>
+        <div className="col-span-3 sm:col-span-1"><dt className="text-gray-500 dark:text-gray-400">{tr('shift_close_time', 'Close')}</dt><dd className="mt-0.5 font-medium text-gray-800 dark:text-gray-100">{shift.closed_at ? fmtClock24(shift.closed_at) : status}</dd></div>
+        <div className="col-span-2 min-w-0 sm:col-span-1"><dt className="text-gray-500 dark:text-gray-400">{tr('shift_before', 'Before')}</dt><dd className="mt-0.5 break-words font-medium text-gray-800 dark:text-gray-100">{before}</dd></div>
+        <div className="col-span-2 min-w-0 sm:col-span-1" title={tr('shift_recon_additional_cash', 'Additional change used')}><dt className="text-gray-500 dark:text-gray-400">{tr('shift_additional_short', 'Additional')}</dt><dd className="mt-0.5 break-words font-medium text-gray-800 dark:text-gray-100">{between}</dd></div>
+        <div className="col-span-2 min-w-0 sm:col-span-1"><dt className="text-gray-500 dark:text-gray-400">{tr('shift_after', 'After')}</dt><dd className="mt-0.5 break-words font-medium text-gray-800 dark:text-gray-100">{after}</dd></div>
       </dl>
 
       {detail ? (
