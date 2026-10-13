@@ -5,6 +5,7 @@ import { adjustBranchQuantity, receiptDeclaresFree, scopedSetPreview, STOCK_RECE
 import { multiplyMoney4, roundMoney4, sellingPriceCeilCent, subtractMoney4 } from './moneyPrecision.ts'
 import { effectiveUnitCost, estimateCatalogCostAfter, matchCostsToPaid, paidItemsTotal, supplierTotalMatches } from './stockSessionMath.ts'
 import { formatBatchReceivedDate, lotCodeAsDate } from './batchLabel.ts'
+import { batchReceivedInstant, sortLotsForDisplay } from './lotDisplayOrder.ts'
 import type { ProductRecord } from './productGrouping.ts'
 import type { FastStockInCommitLine } from '../api/inventoryWriteTransport.ts'
 
@@ -524,14 +525,11 @@ export function lotMatchesSupplier(lot: SessionLot, supplier: SessionSupplier): 
   return supplierKey(lot.supplier_name) === typed
 }
 
-/** The lots a line may name, newest first: Remove only lots holding stock; Set every lot. */
+/** The lots a line may name, newest received first (the one order every lot list uses, lotDisplayOrder.ts): Remove only lots holding stock; Set every lot. */
 export function sessionLotChoices<T extends SessionLot>(mode: StockMode, lots: readonly T[], supplier: SessionSupplier): T[] {
   const offered = mode === 'remove' ? lots.filter((lot) => toNumber(lot.quantity) > 0) : [...lots]
   const narrowed = mode === 'add' ? offered : offered.filter((lot) => lotMatchesSupplier(lot, supplier))
-  return narrowed
-    .map((lot, index) => ({ lot, index, date: lotIsoDate(lot) }))
-    .sort((a, b) => (a.date === b.date ? a.index - b.index : a.date > b.date ? -1 : 1))
-    .map(({ lot }) => lot)
+  return sortLotsForDisplay(narrowed)
 }
 
 /**
@@ -556,11 +554,19 @@ export function defaultLotChoice(input: {
   const dated = input.sharedDate ? choices.find((lot) => lotIsoDate(lot) === input.sharedDate) : null
   if (dated) return Number(dated.id)
   const datedChoices = choices.filter((lot) => lotIsoDate(lot))
+  // Lots of one day are told apart by the time they were received, never by the
+  // order they arrive in: the list is shown newest first, so a tie broken by
+  // position would hand Remove the newest lot of the day.
+  const dayThenTime = (lot: SessionLot, other: SessionLot): number => {
+    const day = lotIsoDate(lot)
+    const otherDay = lotIsoDate(other)
+    if (day !== otherDay) return day < otherDay ? -1 : 1
+    return (batchReceivedInstant(lot) ?? 0) - (batchReceivedInstant(other) ?? 0)
+  }
   const selected = datedChoices.reduce<SessionLot | undefined>((best, lot) => {
     if (!best) return lot
-    const earlier = lotIsoDate(lot) < lotIsoDate(best)
-    const later = lotIsoDate(lot) > lotIsoDate(best)
-    return (mode === 'remove' ? earlier : later) ? lot : best
+    const order = dayThenTime(lot, best)
+    return (mode === 'remove' ? order < 0 : order > 0) ? lot : best
   }, undefined)
   return Number((selected || (mode === 'set' ? choices[choices.length - 1] : choices[0])).id)
 }

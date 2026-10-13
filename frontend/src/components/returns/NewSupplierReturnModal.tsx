@@ -15,6 +15,7 @@ import { businessDateTimeId } from '../../utils/timestampId.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
+import SoleBranchLabel from '../shared/SoleBranchLabel.tsx'
 import Modal from '../shared/Modal.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
@@ -450,7 +451,9 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
           for the setup read, and the fields are inert until it lands. */}
       <fieldset disabled={loading} className="min-w-0 space-y-3 border-0 p-0">
         <div className="grid grid-cols-2 gap-2">
-          {branchChoiceSettled(branches.map((item) => item.id), branchId) ? null : (
+          {branchChoiceSettled(branches.map((item) => item.id), branchId) ? (
+            <SoleBranchLabel name={branches[0].name || String(branches[0].id)} label={tr('branch', 'Branch')} className="input h-10 px-3 text-sm" />
+          ) : (
             <AppSelect
               id="supplier-return-branch"
               className="min-w-0"

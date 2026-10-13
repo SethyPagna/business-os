@@ -66,7 +66,8 @@ import {
   reparkDeniedRestore,
   type MinimizedWorkEntry,
 } from '../../utils/minimizedWork.ts'
-import { clearWorkDraft, flushPendingWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
+import { clearWorkDraft, flushPendingWorkDraft } from '../../utils/workDrafts.ts'
+import { isDraftAuthorityCurrent, openDraftAuthority, type DraftAuthority } from '../../utils/draftAuthority.ts'
 
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'fees-export-options')
 const ExpenseLabelManagerModal = lazyRetry(() => import('./ExpenseLabelManagerModal'), 'expense-label-manager-modal')
@@ -542,16 +543,30 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
   }, [restoreFeeForm])
 
+  // The account and server the open form was opened under, frozen with it
+  // (draftAuthority.ts): minimize and Reload must act on the draft the form
+  // wrote, not on whatever account or server is current by then.
+  const feeFormIdentity = `${selected?.id ?? 'new'}:${selected?.updated_at ?? ''}:${user?.id ?? 'anonymous'}`
+  const feeAuthorityRef = useRef<{ identity: string; authority: DraftAuthority } | null>(null)
+  if (modal !== 'form') feeAuthorityRef.current = null
+  else if (feeAuthorityRef.current?.identity !== feeFormIdentity) {
+    feeAuthorityRef.current = { identity: feeFormIdentity, authority: openDraftAuthority(feeFormDraftBaseKey(selected?.id)) }
+  }
+  const feeAuthority = feeAuthorityRef.current?.authority ?? null
+  const feeAuthorityNotice = () => notify(tr('product_draft_authority_changed', 'The account or server changed. Reopen this form to continue. Its draft stays with the original account and server.'), 'warning')
+
   // A refused edit keeps the version its fields came from and says so; only
   // an explicit Reload reopens the form on the latest row, without the draft.
   const [feeConflictId, setFeeConflictId] = useState<number | null>(null)
   const reloadConflictedFee = async (): Promise<void> => {
     if (!selected) return
+    if (feeAuthority && !isDraftAuthorityCurrent(feeAuthority)) { feeAuthorityNotice(); return }
     const id = selected.id
     try {
       const result = await getFeeRequest(id)
       if (!result?.fee) return
-      clearWorkDraft(scopedWorkDraftKey(feeFormDraftBaseKey(id)))
+      if (feeAuthority && !isDraftAuthorityCurrent(feeAuthority)) { feeAuthorityNotice(); return }
+      if (feeAuthority) clearWorkDraft(feeAuthority.draftKey)
       setFeeConflictId(null)
       setSelected((current) => current && current.id === id ? result.fee : current)
     } catch {
@@ -594,11 +609,13 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     }
   }
 
-  const feeDraftKey = scopedWorkDraftKey(feeFormDraftBaseKey(selected?.id))
   const canMinimizeFeeForm = selected ? canEditFee : canAddFee
   const preserveFeeForm = () => {
-    if (feeFormLocked) return
-    flushPendingWorkDraft(feeDraftKey)
+    if (feeFormLocked || !feeAuthority) return
+    flushPendingWorkDraft(feeAuthority.draftKey)
+    // A chip parked now would sit in the new account's list pointing at the
+    // old account's draft, and dismissing it would delete that draft.
+    if (!isDraftAuthorityCurrent(feeAuthority)) { feeAuthorityNotice(); return }
     const isEdit = selected != null
     minimizeWork({
       key: feeFormWorkKey(selected?.id),
@@ -609,7 +626,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         ? `${tr('edit_fee', 'Edit Expense')} — ${selected.label || selected.id}`
         : tr('add_fee', 'Add Expense'),
       payload: { feeId: selected?.id ?? null },
-      draftKey: feeDraftKey,
+      draftKey: feeAuthority.draftKey,
       requiredPermission: { permissionKey: 'fees', actionKey: isEdit ? 'edit' : 'add' },
     })
     closeModal()
@@ -1007,7 +1024,8 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
           unsavedChanges={{ workKey: feeFormWorkKey(selected?.id) }}
         >
           <FeeForm
-            key={`${selected?.id ?? 'new'}:${selected?.updated_at ?? ''}:${user?.id ?? 'anonymous'}`}
+            key={feeFormIdentity}
+            draftAuthority={feeAuthority ?? undefined}
             fee={selected}
             conflicted={!!selected && feeConflictId === selected.id}
             onReloadLatest={() => { void reloadConflictedFee() }}

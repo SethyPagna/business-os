@@ -5,6 +5,7 @@ import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
 import { getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
+import { sortLotsForDisplay } from '../../utils/lotDisplayOrder.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import { useFormDirty } from '../../utils/formDirty.ts'
@@ -198,7 +199,7 @@ export default function InventoryStockModals({
                   optionClassName="text-sm tabular-nums"
                   options={[
                     { value: '', label: transferBatchesLoading ? (t('loading') || 'Loading...') : tr('transfer_auto_fifo', 'Automatic (FIFO)') },
-                    ...transferBatchOptions.map((batch) => ({
+                    ...sortLotsForDisplay(transferBatchOptions).map((batch) => ({
                       value: String(batch.id),
                       label: `${batchDisplayLabel(batch, tr('batch', 'Received date'))} · ${batch.quantity}`,
                     })),

@@ -35,6 +35,7 @@ import { productSearchRequest, rankedSearchOverride, useProductSearchIndex } fro
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
+import { sortLotsForDisplay } from '../../utils/lotDisplayOrder.ts'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
 import { branchCanBeTransferDestination, branchCanBeTransferSource, branchCanTransferBetween } from '../../utils/branchRoles.ts'
@@ -1604,7 +1605,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                         <span className="font-medium">{t('transfer_auto_fifo') || 'Automatic (FIFO)'}</span>
                         <span className="text-xs text-gray-500 dark:text-gray-400">{t('transfer_auto_fifo_hint') || 'Use all available received dates'}</span>
                       </button>
-                      {productBatches.map((batch) => {
+                      {sortLotsForDisplay(productBatches).map((batch) => {
                         const batchOut = Number(batch.quantity || 0) <= 0
                         return (
                           <button
@@ -1793,7 +1794,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                     const rowQuantity = selectedQuantities[id] ?? ''
                     const loadedLots = rowLots[id]
                     const lotsReady = loadedLots?.branch === fromBranch
-                    const lots = lotsReady ? loadedLots.batches : []
+                    const lots = lotsReady ? sortLotsForDisplay(loadedLots.batches) : []
                     const chosenLot = lots.find((lot) => Number(lot.id) === Number(selectedLots[id]))
                     return (
                       <div

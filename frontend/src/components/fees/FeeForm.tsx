@@ -7,8 +7,8 @@ import {
   flushPendingWorkDraft,
   readWorkDraft,
   scheduleWorkDraftWrite,
-  scopedWorkDraftKey,
 } from '../../utils/workDrafts.ts'
+import { isDraftAuthorityCurrent, openDraftAuthority, type DraftAuthority } from '../../utils/draftAuthority.ts'
 import { useModalClose } from '../shared/modalCloseContext.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
@@ -198,6 +198,9 @@ type FeeFormProps = {
   onInteractionLockChange?: (locked: boolean) => void
   conflicted?: boolean
   onReloadLatest?: () => void
+  /** The account and server this form was opened under, when the hosting page
+   *  froze them (so its minimize uses the same draft). Opened here otherwise. */
+  draftAuthority?: DraftAuthority
 }
 
 // S4-21: the registry key for this form's unsaved work, exported so the
@@ -247,10 +250,16 @@ export function feeFormInteractionLocked(saving: boolean, pending: PendingFeeCre
   return saving || pending != null
 }
 
-export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, onClose, onInteractionLockChange, conflicted = false, onReloadLatest }: FeeFormProps) {
+export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, onClose, onInteractionLockChange, conflicted = false, onReloadLatest, draftAuthority }: FeeFormProps) {
   const { t } = useApp()
   const { askToConfirm, confirmDialog } = useConfirmDialog(t)
-  const draftKey = scopedWorkDraftKey(feeFormDraftBaseKey(fee?.id))
+  // Frozen when the form opens: the draft key is never recomputed from the
+  // live account and server, so a sync-server switch under an open form cannot
+  // move this form's typed work (or its Save) onto the other server.
+  const [authority] = useState(() => draftAuthority ?? openDraftAuthority(feeFormDraftBaseKey(fee?.id)))
+  const draftKey = authority.draftKey
+  const authorityCurrent = isDraftAuthorityCurrent(authority)
+  const [authorityRefused, setAuthorityRefused] = useState(false)
   const initialPendingRef = useRef<PendingFeeCreate | null>(fee ? null : getPendingFeeCreate(actorId))
   const restoredDraftRef = useRef<ReturnType<typeof readWorkDraft<Partial<FeeFormState>>> | undefined>(undefined)
   if (restoredDraftRef.current === undefined) {
@@ -287,9 +296,11 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
   }), [draftKey, fee?.id])
   useEffect(() => () => { flushPendingWorkDraft(draftKey) }, [draftKey])
   useEffect(() => {
-    if (!dirtyRef.current) return
-    return scheduleWorkDraftWrite(draftKey, form)
-  }, [draftKey, form])
+    if (!dirtyRef.current || !isDraftAuthorityCurrent(authority)) return
+    // No cancel on cleanup: an edit still pending when the server switches
+    // must land under the original key, not be dropped by the next render.
+    scheduleWorkDraftWrite(draftKey, form)
+  }, [authority, draftKey, form])
   const [touched, setTouched] = useState(false)
   const [branches, setBranches] = useState<FeeBranchOption[]>([])
   // Every branch the directory returned, retired ones included (a sale at Old Shop still links).
@@ -434,6 +445,7 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
 
   const handleSave = async () => {
     if (savingRef.current) return
+    if (!isDraftAuthorityCurrent(authority)) { setAuthorityRefused(true); return }
     setTouched(true)
     if (!pendingCreate && (amountsInvalid || dateInvalid || !form.branch_id.trim())) return
     const saleId = form.sale_id.trim() ? Number(form.sale_id.trim()) : null
@@ -458,9 +470,13 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
       dirtyRef.current = false
       restoredDraftRef.current = null
       clearWorkDraft(draftKey)
-      onClose()
+      // A save that finishes after the account or server changed belongs to
+      // the original one: its draft is cleared above, but the surface now
+      // belongs to whoever is signed in, so it is not closed from here.
+      if (isDraftAuthorityCurrent(authority)) onClose()
+      else setAuthorityRefused(true)
     } catch {
-      if (!fee) {
+      if (!fee && isDraftAuthorityCurrent(authority)) {
         const pending = getPendingFeeCreate(actorId)
         setPendingCreate(pending)
         if (pending) setForm(feeCreateBodyToFormState(pending.body))
@@ -501,6 +517,9 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
           <span>{(t('write_conflict_older_version') || 'Your screen was holding an older version of this {entityLower}.').replace('{entityLower}', (t('expense') || 'expense').toLowerCase())}</span>
           {onReloadLatest ? <button type="button" disabled={saving} onClick={onReloadLatest} className="shrink-0 rounded border border-red-300 px-2 py-1 font-semibold dark:border-red-700">{t('write_conflict_reload_latest') || 'Reload latest'}</button> : null}
         </div>
+      ) : null}
+      {!authorityCurrent || authorityRefused ? (
+        <p role="alert" data-draft-authority-changed="" className="text-sm text-red-700 dark:text-red-300">{t('product_draft_authority_changed') || 'The account or server changed. Reopen this form to continue. Its draft stays with the original account and server.'}</p>
       ) : null}
       {pendingCreate ? (
         <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
@@ -715,7 +734,7 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
           modal's own p-5 padding so the bar spans full width and sits flush
           against the bottom edge; px-5 pb-5 pt-4 puts it back inside the bar. */}
       <div className="sticky bottom-0 -mx-5 -mb-5 flex gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
-        <button className="btn-primary flex-1" type="submit" disabled={saving}>
+        <button className="btn-primary flex-1" type="submit" disabled={saving || !authorityCurrent}>
           {saving
             ? (t('saving') || 'Saving...')
             : pendingCreate

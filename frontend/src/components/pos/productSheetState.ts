@@ -11,7 +11,7 @@
 // each of them was a regex over ProductDetailSheet.tsx's SOURCE TEXT,
 // which cannot tell you that a flat product's stock reads 0 while its
 // branch_stock says 28.
-import { sortBatchesForPicker } from './posCore.ts'
+import { sortLotsForDisplay } from '../../utils/lotDisplayOrder.ts'
 import { branchRole, branchCanSellNow, branchIsActive, type BranchRole } from '../../utils/branchRoles.ts'
 
 export type BranchStockRow = {
@@ -460,7 +460,7 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
   const isBatchTracked = mergeRowsIntoLotList
     || (resolvedProduct != null && (trackedBatchProductIds?.has(Number(resolvedProduct.id)) ?? false))
 
-  const receivedDateOptions = sortBatchesForPicker(batches as readonly SheetBatchLike[]) as SheetBatchLike[]
+  const receivedDateOptions = sortLotsForDisplay(batches as readonly SheetBatchLike[]) as SheetBatchLike[]
   const receivedDateTotal = receivedDateOptions.reduce((sum, batch) => sum + toNumber(batch.quantity), 0)
   const selectedBatch = receivedDateOptions.find((batch) => batch.id === selectedBatchId) || null
   const unlottedSourceRows = mergeRowsIntoLotList ? candidatePool : (effectiveVariant ? [effectiveVariant] : [])

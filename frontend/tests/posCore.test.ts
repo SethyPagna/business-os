@@ -17,9 +17,8 @@ import { buildVariantOptionLabels,
   isSaleRecorded,
   resolveCartPriceValues,
   resolvePosDisplayStock,
-  batchReceivedInstant,
-  sortBatchesForPicker,
 } from '../src/components/pos/posCore.ts'
+import { batchReceivedInstant, sortLotsForDisplay } from '../src/utils/lotDisplayOrder.ts'
 
 let failed = 0
 
@@ -583,63 +582,68 @@ await runTest('ProductDetailSheet preselects the card badge branch, not alphabet
 // ---------------------------------------------------------------------------
 const ids = (rows: Array<{ id: number }>) => rows.map((row) => row.id)
 
-// S4-18 (the owner's exact words): "earliest to latest, with available
-// first, not split into available/unavailable sections". This is the
-// regression guard for the "not split into sections" clause specifically --
-// a test that only checked chronological order (the next test below) would
-// stay green even if a future edit re-partitioned by availability, since a
-// partitioned list can still be internally date-sorted within each half.
-// The negative control: reverting the `if (left.available ...)` line back
-// above the date check (the 9c282599 shape) turns this red, because it
-// re-groups every available lot ahead of every empty one regardless of date.
-await runTest('lot order: date dominates -- an old empty lot still lists ahead of a fresh available one', () => {
-  const sorted = sortBatchesForPicker([
+// 12 Oct 2026 owner ruling, which SUPERSEDES the direction of S4-18 ("earliest
+// to latest"): received dates show NEWEST FIRST in the POS picker, as on every
+// other lot list (utils/lotDisplayOrder.ts, tests/lotDisplayOrder.test.ts).
+// Display only -- the Worker still deducts FIFO. S4-18's other clause, "not
+// split into available/unavailable sections", is kept: date is the single
+// dominant key and availability only breaks an exact tie. This is the
+// regression guard for that clause -- a test that only checked chronological
+// order (the next test below) would stay green even if a future edit
+// re-partitioned by availability, since a partitioned list can still be
+// internally date-sorted within each half.
+await runTest('lot order: date dominates -- a fresh empty lot still lists ahead of an older available one', () => {
+  const sorted = sortLotsForDisplay([
     { id: 1, received_at: '2026-01-05 08:00:00', quantity: 0 },
     { id: 2, received_at: '2026-06-01 08:00:00', quantity: 4 },
     { id: 3, received_at: '2026-02-01 08:00:00', quantity: 0 },
     { id: 4, received_at: '2026-03-01 08:00:00', quantity: 9 },
   ])
-  // Earliest to latest by date alone: 01-05 (empty), 02-01 (empty), 03-01
-  // (available), 06-01 (available) -- the two empty lots interleave ahead of
-  // both available ones because they were received first. Never grouped.
-  assert.deepEqual(ids(sorted), [1, 3, 4, 2])
+  // Newest to oldest by date alone: 06-01 (available), 03-01 (available),
+  // 02-01 (empty), 01-05 (empty). Never grouped by availability.
+  assert.deepEqual(ids(sorted), [2, 4, 3, 1])
+  const freshEmpty = sortLotsForDisplay([
+    { id: 1, received_at: '2026-01-05 08:00:00', quantity: 7 },
+    { id: 2, received_at: '2026-06-01 08:00:00', quantity: 0 },
+  ])
+  assert.deepEqual(ids(freshEmpty), [2, 1], 'the empty fresh lot is not pushed below the older stocked one')
 })
 
 // "Available first" is real, but only as a tie-break where the date can't
 // already decide the order -- two lots received at the exact same instant.
 await runTest('lot order: available breaks a tie on the exact same received date', () => {
-  const sorted = sortBatchesForPicker([
+  const sorted = sortLotsForDisplay([
     { id: 1, received_at: '2026-05-01 08:00:00', quantity: 0 },
     { id: 2, received_at: '2026-05-01 08:00:00', quantity: 3 },
   ])
   assert.deepEqual(ids(sorted), [2, 1])
 })
 
-await runTest('lot order: within a group it is earliest received date to latest', () => {
-  const sorted = sortBatchesForPicker([
+await runTest('lot order: within a group it is newest received date to oldest', () => {
+  const sorted = sortLotsForDisplay([
     { id: 1, received_at: '2026-08-24 10:00:00', quantity: 2 },
     { id: 2, received_at: '2026-08-24 06:00:00', quantity: 2 },
     { id: 3, received_at: '2025-12-31 23:00:00', quantity: 2 },
   ])
-  assert.deepEqual(ids(sorted), [3, 2, 1])
+  assert.deepEqual(ids(sorted), [1, 2, 3])
 })
 
 await runTest('lot order: a date-only received_at is a real date, not an undated lot', () => {
   assert.equal(batchReceivedInstant({ received_at: '2026-08-24' }), Date.UTC(2026, 7, 24))
-  const sorted = sortBatchesForPicker([
+  const sorted = sortLotsForDisplay([
     { id: 1, received_at: '2026-09-01 00:00:00', quantity: 1 },
     { id: 2, received_at: '2026-08-24', quantity: 1 },
   ])
-  assert.deepEqual(ids(sorted), [2, 1])
+  assert.deepEqual(ids(sorted), [1, 2])
 })
 
 await runTest('lot order: an MMDDYYYY lot code stands in for a missing received_at', () => {
   assert.equal(batchReceivedInstant({ lot_code: '08242026', received_at: null }), Date.UTC(2026, 7, 24))
-  const sorted = sortBatchesForPicker([
+  const sorted = sortLotsForDisplay([
     { id: 1, lot_code: '09012026', received_at: null, quantity: 3 },
     { id: 2, lot_code: '08242026', received_at: null, quantity: 3 },
   ])
-  assert.deepEqual(ids(sorted), [2, 1])
+  assert.deepEqual(ids(sorted), [1, 2])
 })
 
 await runTest('lot order: an undated or malformed lot sorts after every dated one, tied by availability', () => {
@@ -652,30 +656,30 @@ await runTest('lot order: an undated or malformed lot sorts after every dated on
   // the empty one, not behind it.
   assert.equal(batchReceivedInstant({ lot_code: 'RECON-7321', received_at: null }), null)
   assert.equal(batchReceivedInstant({ lot_code: '13992026', received_at: 'not-a-date' }), null)
-  const sorted = sortBatchesForPicker([
+  const sorted = sortLotsForDisplay([
     { id: 1, lot_code: 'RECON-7321', received_at: null, quantity: 5 },
     { id: 2, received_at: '2026-05-01 08:00:00', quantity: 0 },
     { id: 3, received_at: '2026-06-01 08:00:00', quantity: 5 },
     { id: 4, lot_code: 'RECON-7322', received_at: '', quantity: 0 },
   ])
-  assert.deepEqual(ids(sorted), [2, 3, 1, 4])
+  assert.deepEqual(ids(sorted), [3, 2, 1, 4])
 })
 
 await runTest('lot order: a RECON lot code with a real received_at still sorts by that date', () => {
-  const sorted = sortBatchesForPicker([
+  const sorted = sortLotsForDisplay([
     { id: 1, lot_code: 'RECON-7321', received_at: '2026-07-01 08:00:00', quantity: 2 },
     { id: 2, lot_code: 'RECON-7322', received_at: '2026-02-01 08:00:00', quantity: 2 },
   ])
-  assert.deepEqual(ids(sorted), [2, 1])
+  assert.deepEqual(ids(sorted), [1, 2])
 })
 
-await runTest('lot order: undated ties fall back to batch_number, then the incoming FIFO order', () => {
-  const sorted = sortBatchesForPicker([
+await runTest('lot order: undated ties fall back to the later batch_number, then the incoming FIFO order', () => {
+  const sorted = sortLotsForDisplay([
     { id: 1, received_at: null, batch_number: null, quantity: 1 },
     { id: 2, received_at: null, batch_number: 2, quantity: 1 },
     { id: 3, received_at: null, batch_number: 1, quantity: 1 },
   ])
-  assert.deepEqual(ids(sorted), [3, 2, 1])
+  assert.deepEqual(ids(sorted), [2, 3, 1])
 })
 
 await runTest('lot order: the input array is never mutated', () => {
@@ -683,7 +687,7 @@ await runTest('lot order: the input array is never mutated', () => {
     { id: 1, received_at: '2026-06-01 08:00:00', quantity: 0 },
     { id: 2, received_at: '2026-01-01 08:00:00', quantity: 7 },
   ]
-  sortBatchesForPicker(input)
+  sortLotsForDisplay(input)
   assert.deepEqual(ids(input), [1, 2])
 })
 
@@ -697,7 +701,7 @@ await runTest('ProductDetailSheet drops the duplicate row-id option step and ord
   assert.match(sheet, /const optionStepShown = !mergeRowsIntoLotList/, 'the option step must be hidden when the lot list absorbs it')
   assert.match(sheet, /\{optionStepShown \? \(/, 'the option pills must actually be gated on it')
   assert.match(sheet, /const visibleBatches = loadedLotScope === currentLotScope \? batches : \[\]/, 'only current-scope lot responses are visible')
-  assert.match(sheet, /sortBatchesForPicker\(visibleBatches\)/, 'the current-scope lot list must be rendered in picker order')
+  assert.match(sheet, /sortLotsForDisplay\(visibleBatches\)/, 'the current-scope lot list must be rendered in the shared newest-first lot order')
   assert.doesNotMatch(sheet, /pagedBatches = batches\.slice/, 'the lot pills must page over the ORDERED list')
   assert.match(sheet, /lotSourceProductIds/, 'merged mode must fetch every indistinguishable row\'s lots')
   assert.doesNotMatch(sheet, /'3\. Batch'/, 'the lot step number must be counted, not hardcoded')

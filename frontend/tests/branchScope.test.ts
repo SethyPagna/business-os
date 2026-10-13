@@ -335,8 +335,8 @@ await runTest('write pickers collapse through the shared settled test (stale dra
   for (const [file, pattern] of [
     [['components', 'products', 'forms', 'ProductForm.tsx'], /const initialBranchSettled = branchChoiceSettled\(branches\.map\(\(branch\) => branch\.id\), form\.branch_id \|\| defaultBranchId\)/],
     [['components', 'products', 'forms', 'VariantFormModal.tsx'], /const branchSettled = branchChoiceSettled\(branches\.map\(\(branch\) => branch\.id\), form\.branch_id \|\| \(branches\.length === 1 \? branches\[0\]\.id : ''\)\)/],
-    [['components', 'returns', 'NewSupplierReturnModal.tsx'], /branchChoiceSettled\(branches\.map\(\(item\) => item\.id\), branchId\) \? null/],
-    [['components', 'inventory', 'ManageBatchesModal.tsx'], /branchChoiceSettled\(branchSelectOptions\.map\(\(option\) => option\.value\), branchId\) \? null/],
+    [['components', 'returns', 'NewSupplierReturnModal.tsx'], /branchChoiceSettled\(branches\.map\(\(item\) => item\.id\), branchId\) \? \(\s*<SoleBranchLabel/],
+    [['components', 'inventory', 'ManageBatchesModal.tsx'], /branchChoiceSettled\(branchSelectOptions\.map\(\(option\) => option\.value\), branchId\) \? branchSelectOptions\[0\] : null/],
     [['components', 'stock-session', 'StockSessionSharedDetails.tsx'], /branchChoiceSettled\(branchOptions\.map\(\(option\) => option\.value\), branchId\)/],
   ] as const) {
     const text = src(...file)

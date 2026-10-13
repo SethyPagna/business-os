@@ -7,8 +7,8 @@ import {
   flushPendingWorkDraft,
   readWorkDraft,
   scheduleWorkDraftWrite,
-  scopedWorkDraftKey,
 } from '../../utils/workDrafts.ts'
+import { isDraftAuthorityCurrent, openDraftAuthority, type DraftAuthority } from '../../utils/draftAuthority.ts'
 import { useModalClose } from '../shared/modalCloseContext.ts'
 
 // S4-21: the registry key for this form's unsaved work. Exported so the
@@ -52,6 +52,9 @@ interface BranchFormProps {
   branch: BranchRecord
   onSave: (form: BranchFormState) => Promise<boolean> | boolean
   onClose: () => void
+  /** The account and server this form was opened under, when the hosting page
+   *  froze them (so its minimize uses the same draft). Opened here otherwise. */
+  draftAuthority?: DraftAuthority
 }
 
 const useApp = useAppHook as () => {
@@ -89,9 +92,15 @@ function restoreBranchForm(base: BranchFormState, draft?: Partial<BranchFormStat
   }
 }
 
-export default function BranchForm({ branch, onSave, onClose }: BranchFormProps) {
+export default function BranchForm({ branch, onSave, onClose, draftAuthority }: BranchFormProps) {
   const { t } = useApp()
-  const draftKey = scopedWorkDraftKey(branchFormDraftBaseKey(branch.id))
+  // Frozen when the form opens: the draft key is never recomputed from the
+  // live account and server, so a sync-server switch under an open form cannot
+  // move this form's typed work (or its Save) onto the other server.
+  const [authority] = useState(() => draftAuthority ?? openDraftAuthority(branchFormDraftBaseKey(branch.id)))
+  const draftKey = authority.draftKey
+  const authorityCurrent = isDraftAuthorityCurrent(authority)
+  const [authorityRefused, setAuthorityRefused] = useState(false)
   const restoredDraftRef = useRef<ReturnType<typeof readWorkDraft<Partial<BranchFormState>>> | undefined>(undefined)
   if (restoredDraftRef.current === undefined) {
     restoredDraftRef.current = readWorkDraft<Partial<BranchFormState>>(draftKey)
@@ -129,15 +138,18 @@ export default function BranchForm({ branch, onSave, onClose }: BranchFormProps)
   }, [draftKey])
 
   useEffect(() => {
-    if (!dirtyRef.current) return
-    return scheduleWorkDraftWrite(draftKey, form)
-  }, [draftKey, form])
+    if (!dirtyRef.current || !isDraftAuthorityCurrent(authority)) return
+    // No cancel on cleanup: an edit still pending when the server switches
+    // must land under the original key, not be dropped by the next render.
+    scheduleWorkDraftWrite(draftKey, form)
+  }, [authority, draftKey, form])
 
   const set = <Key extends keyof BranchFormState>(key: Key, value: BranchFormState[Key]) => {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
   const handleSave = async () => {
+    if (!isDraftAuthorityCurrent(authority)) { setAuthorityRefused(true); return }
     try {
       setSaving(true)
       if (await onSave(form) !== true) return
@@ -148,7 +160,11 @@ export default function BranchForm({ branch, onSave, onClose }: BranchFormProps)
       dirtyRef.current = false
       restoredDraftRef.current = null
       clearWorkDraft(draftKey)
-      onClose()
+      // A save that finishes after the account or server changed belongs to
+      // the original one: its draft is cleared above, but the surface now
+      // belongs to whoever is signed in, so it is not closed from here.
+      if (isDraftAuthorityCurrent(authority)) onClose()
+      else setAuthorityRefused(true)
     } finally {
       setSaving(false)
     }
@@ -162,6 +178,9 @@ export default function BranchForm({ branch, onSave, onClose }: BranchFormProps)
         void handleSave()
       }}
     >
+      {!authorityCurrent || authorityRefused ? (
+        <p role="alert" data-draft-authority-changed="" className="text-sm text-red-700 dark:text-red-300">{t('product_draft_authority_changed') || 'The account or server changed. Reopen this form to continue. Its draft stays with the original account and server.'}</p>
+      ) : null}
       <div>
         <label htmlFor="branch-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
           {t('branch_name') || 'Branch Name'} *
@@ -260,7 +279,7 @@ export default function BranchForm({ branch, onSave, onClose }: BranchFormProps)
       {/* Sticky footer, same pattern as ProductForm.tsx/FeeForm.tsx's own
           fix. */}
       <div className="sticky bottom-0 -mx-5 -mb-5 flex gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
-        <button className="btn-primary flex-1" type="submit" disabled={saving}>
+        <button className="btn-primary flex-1" type="submit" disabled={saving || !authorityCurrent}>
           {saving ? t('saving') : (t('save_branch') || 'Save Branch')}
         </button>
         {/* Cancel is a dismissal too, so it goes through the modal's guard

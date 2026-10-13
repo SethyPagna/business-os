@@ -44,7 +44,8 @@ import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
 import { branchRoleFromName } from '../../utils/branchRoles.ts'
-import { hasTransferPair } from '../../utils/branchCollapse.ts'
+import { hasTransferPair, soleActiveBranch } from '../../utils/branchCollapse.ts'
+import SoleBranchLabel from '../shared/SoleBranchLabel.tsx'
 import { branchHistoryLabel, showsBranchHistoryFilter } from '../../utils/branchScope.ts'
 import {
   FAST_STOCK_IN_RESTORE_HOST,
@@ -58,6 +59,7 @@ import {
   peekPendingRestore,
 } from '../../utils/minimizedWork.ts'
 import { clearWorkDraft, flushPendingWorkDraft, readWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
+import { isDraftAuthorityCurrent, openDraftAuthority, type DraftAuthority } from '../../utils/draftAuthority.ts'
 import { stockSessionHasItems, stockSessionSavedScope } from '../../utils/stockSessionBusy.ts'
 import {
   beginTrackedRequest,
@@ -759,6 +761,8 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   const transferBlockedReason = tr('transfer_single_branch', 'Only one active branch, so there is nothing to transfer.')
   // The overview's "Branches" count tile: only worth a tile while it can say more than one.
   const showBranchCountTile = branchSummary?.branch_count == null || Number(branchSummary.branch_count) > 1
+  // The tile it replaces: with one active branch its name is shown instead of a count of one.
+  const soleBranchName = showBranchCountTile ? '' : String(soleActiveBranch(branches)?.name || '')
   // The Stock Session's AppSelect option shape ({value,label}), distinct
   // from TransferModal's ({id,name}) above.
   const receiveBranchSelectOptions = useMemo(
@@ -1063,17 +1067,32 @@ export default function Branches({ embedded = false, view, showSectionNavigation
     }
   }
 
-  const branchDraftKey = scopedWorkDraftKey(branchFormDraftBaseKey(selected?.id))
+  // The account and server the open form was opened under, frozen with it
+  // (draftAuthority.ts): minimize must park the draft the form wrote, not the
+  // one the current account and server would resolve to.
+  const branchAuthorityRef = useRef<{ id: string; authority: DraftAuthority } | null>(null)
+  if (modal !== 'form' || !selected) branchAuthorityRef.current = null
+  else if (branchAuthorityRef.current?.id !== String(selected.id)) {
+    branchAuthorityRef.current = { id: String(selected.id), authority: openDraftAuthority(branchFormDraftBaseKey(selected.id)) }
+  }
+  const branchAuthority = branchAuthorityRef.current?.authority ?? null
   const canMinimizeBranchForm = selected != null && canEditBranch
   const preserveBranchForm = () => {
-    flushPendingWorkDraft(branchDraftKey)
+    if (!branchAuthority) return
+    flushPendingWorkDraft(branchAuthority.draftKey)
+    // A chip parked now would sit in the new account's list pointing at the
+    // old account's draft, and dismissing it would delete that draft.
+    if (!isDraftAuthorityCurrent(branchAuthority)) {
+      notify(tr('product_draft_authority_changed', 'The account or server changed. Reopen this form to continue. Its draft stays with the original account and server.'), 'warning')
+      return
+    }
     minimizeWork({
       key: branchFormWorkKey(selected?.id),
       kind: 'branch_form',
       pageId: 'branches',
       label: `${tr('edit_branch', 'Edit Branch')} — ${selected?.name || selected?.id}`,
       payload: { branchId: selected?.id },
-      draftKey: branchDraftKey,
+      draftKey: branchAuthority.draftKey,
       requiredPermission: { permissionKey: 'branches', actionKey: 'edit' },
     })
     setModal(null)
@@ -1340,7 +1359,10 @@ export default function Branches({ embedded = false, view, showSectionNavigation
 
       {tab === 'branches' && statsOpen ? (
         <section id="branch-overview-stats" className="mb-3 space-y-2" aria-label={tr('current_stock', 'Current Stock')}>
-          <p className="text-xs text-slate-500">{tr('current_stock', 'Current Stock')}</p>
+          <div className="flex min-w-0 items-center justify-between gap-2">
+            <p className="text-xs text-slate-500">{tr('current_stock', 'Current Stock')}</p>
+            {soleBranchName ? <SoleBranchLabel name={soleBranchName} label={tr('branch', 'Branch')} className="text-xs text-slate-500" /> : null}
+          </div>
           {statsLoading ? <p role="status">{tr('loading', 'Loading')}…</p> : statsError ? (
             <div role="status"><p>{statsError}</p><button type="button" className="btn-secondary h-10" onClick={() => setStatsRefresh((value) => value + 1)}>{tr('retry', 'Retry')}</button></div>
           ) : branchSummary ? (
@@ -1775,7 +1797,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
           headerExtra={canMinimizeBranchForm ? <MinimizeButton tr={(key, fallback) => tr(key, fallback)} onMinimize={preserveBranchForm} /> : null}
           unsavedChanges={{ workKey: branchFormWorkKey(selected?.id) }}
         >
-          <BranchForm branch={selected} onSave={handleSaveBranch} onClose={() => setModal(null)} />
+          <BranchForm branch={selected} draftAuthority={branchAuthority ?? undefined} onSave={handleSaveBranch} onClose={() => setModal(null)} />
         </Modal>
       ) : null}
 

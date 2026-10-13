@@ -81,7 +81,8 @@ assert.match(formSource, /if \(!pendingCreate \|\| savingRef\.current \|\| !acto
 assert.match(pageSource, /closeDisabled=\{feeFormLocked\}/, 'modal close is disabled while saving or unresolved')
 assert.match(pageSource, /canMinimizeFeeForm && !feeFormLocked/, 'minimize cannot park an in-flight or unresolved request')
 assert.match(pageSource, /disabled=\{feeFormLocked\}/, 'visible minimize control reflects its disabled state')
-assert.match(pageSource, /key=\{`\$\{selected\?\.id \?\? 'new'\}:\$\{selected\?\.updated_at \?\? ''\}:\$\{user\?\.id \?\? 'anonymous'\}`\}/, 'account changes and an explicit conflict reload remount the actor-scoped recovery form')
+assert.match(pageSource, /const feeFormIdentity = `\$\{selected\?\.id \?\? 'new'\}:\$\{selected\?\.updated_at \?\? ''\}:\$\{user\?\.id \?\? 'anonymous'\}`/, 'the form identity carries the row, its version and the account')
+assert.match(pageSource, /<FeeForm\s+key=\{feeFormIdentity\}/, 'account changes and an explicit conflict reload remount the actor-scoped recovery form')
 assert.doesNotMatch(pageSource, /withLoaderTimeout\(\s*\(\) => createFeeRequest/, 'create is not detached from its outcome by an outer UI timeout')
 
 const feeFormMoney = new Function('nativeChangeAmounts', 'roundMoney2', `${extractFunction(formSource, 'feeFormMoney')}; return feeFormMoney`)(nativeChangeAmounts, roundMoney2)
@@ -90,14 +91,15 @@ for (const id of ['fee-amount-usd', 'fee-amount-khr']) {
   assert.match(input, /step="any"/, 'native input must permit the raw decimal and historical value before submit normalization')
 }
 const saveSource = stripTypeScriptTypes(formSource.slice(formSource.indexOf('  const handleSave = async () => {'), formSource.indexOf('  const discardPending = () => {')))
-const runSave = new Function('scope', `const { savingRef, setTouched, amountsInvalid, dateInvalid, form, pendingCreate, fee, money, amountUsd, amountKhr, setSaving, onSave, savedRef, dirtyRef, restoredDraftRef, clearWorkDraft, draftKey, onClose, actorId, getPendingFeeCreate, setPendingCreate, setForm, feeCreateBodyToFormState } = scope; ${saveSource}; return handleSave()`)
+const runSave = new Function('scope', `const { savingRef, setTouched, amountsInvalid, dateInvalid, form, pendingCreate, fee, money, amountUsd, amountKhr, setSaving, onSave, savedRef, dirtyRef, restoredDraftRef, clearWorkDraft, draftKey, onClose, actorId, getPendingFeeCreate, setPendingCreate, setForm, feeCreateBodyToFormState, authority, isDraftAuthorityCurrent, setAuthorityRefused } = scope; ${saveSource}; return handleSave()`)
 async function submitAmounts(usd: string, khr: string, existing: any = null, pending: any = null) {
   const form = { fee_type: 'expense', label: 'Physical expense', amount_usd: usd, amount_khr: khr, fee_date: '2026-09-13', sale_id: '', branch_id: '2', notes: 'Unchanged details' }
   const money = feeFormMoney(form, existing), payloads: any[] = []
   await runSave({ savingRef: { current: false }, setTouched() {}, amountsInvalid: !money.valid || (money.amountUsd <= 0 && money.amountKhr <= 0), dateInvalid: false,
     form, pendingCreate: pending, fee: existing, money, amountUsd: money.amountUsd, amountKhr: money.amountKhr, setSaving() {}, onSave(payload: any) { payloads.push(payload) },
     savedRef: { current: false }, dirtyRef: { current: true }, restoredDraftRef: { current: null }, clearWorkDraft() {}, draftKey: 'fixture', onClose() {}, actorId: 7,
-    getPendingFeeCreate() { return pending }, setPendingCreate() {}, setForm() {}, feeCreateBodyToFormState: formHelpers.feeCreateBodyToFormState })
+    getPendingFeeCreate() { return pending }, setPendingCreate() {}, setForm() {}, feeCreateBodyToFormState: formHelpers.feeCreateBodyToFormState,
+    authority: {}, isDraftAuthorityCurrent: () => true, setAuthorityRefused() {} })
   return payloads
 }
 assert.equal((await submitAmounts('1.2301', '0'))[0].amount_usd, 1.23, 'actual submit uses physical nearest cents, not selling ceil')

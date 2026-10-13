@@ -8,6 +8,7 @@ import { extractHistoryResultId } from '../../../utils/historyHelpers.ts'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
 import { withLoaderTimeout } from '../../../utils/loaders.ts'
 import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
+import SoleBranchLabel from '../../shared/SoleBranchLabel.tsx'
 import SuggestionTextInput from '../../shared/SuggestionTextInput.tsx'
 import { loadSupplierNames } from '../../shared/SupplierPickerField.tsx'
 import { suggestionEmptyState } from '../../../utils/suggestionMatching.ts'
@@ -441,7 +442,14 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
             />
           </div>
 
-          {branchSettled ? null : (
+          {branchSettled ? (
+            <div className="min-w-0">
+              <span className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {tr('assign_to_branch', 'Assign to Branch', 'កំណត់ទៅសាខា')}
+              </span>
+              <SoleBranchLabel name={branches[0].name} label={tr('branch', 'Branch', 'សាខា')} className="input min-h-11 text-sm" />
+            </div>
+          ) : (
             <div className="min-w-0">
               <label htmlFor="variant-form-branch" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                 {tr('assign_to_branch', 'Assign to Branch', 'កំណត់ទៅសាខា')}
