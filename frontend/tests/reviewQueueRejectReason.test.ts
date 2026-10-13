@@ -1,4 +1,4 @@
-// Review Queue against the K3 / K6 / K7 Worker (fees-k). The REAL queue is mounted over a transport whose answers
+// Review Queue against the Worker's reject-reason cap and stale-decision refusals. The REAL queue is mounted over a transport whose answers
 // the test controls, in both language packs.
 //
 //   reject dialog   the reason is asked in the shared compact dialog (never the browser's prompt()), capped at the

@@ -1,7 +1,6 @@
-// H7 (OPUS-CORRECTNESS-HUNT-R2): the frozen draft authority and its "the account or server changed" notice are defined
-// ONCE -- useFrozenDraftAuthority and <DraftAuthorityNotice /> -- and every site uses them: the Expense form and page,
-// the Branch form and page, the Product form. Before, each carried its own copy of the freeze block and of the notice,
-// and the read-scope -> write-identity fix had to be found in five places.
+// The frozen draft authority and its "the account or server changed" notice are defined once -- useFrozenDraftAuthority
+// and <DraftAuthorityNotice /> -- and every site uses them: the Expense form and page, the Branch form and page, the
+// Product form.
 //
 //   the sites      a scan of src/: nothing but the hook opens an authority, nothing but draftAuthority.ts holds the
 //                  sentence, nothing but the notice renders the alert -- a sixth copy-pasted form fails here

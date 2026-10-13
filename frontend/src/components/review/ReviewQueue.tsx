@@ -75,8 +75,8 @@ type RejectDraft = { row: PendingActionRow; reason: string; refusal: string }
 
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return '--'
-  // The queue's stamps are D1's UTC with no offset; a bare new Date(value) reads them in the device zone and showed every
-  // time 7 hours early on a Cambodian till. The shared formatter takes the raw stamp and states it in the business zone.
+  // The queue's stamps are D1's UTC with no offset: validate with the shared parser and pass the raw stamp to the shared
+  // formatter, which states it in the business zone (a bare new Date(value) would read it in the device zone).
   if (Number.isNaN(parseServerTimestampMs(value))) return String(value)
   // Shared dd/mm/yyyy 24-hour formatter -- the old en-US call without
   // hour12:false rendered 12-hour AM/PM (Part-77 finding).
@@ -286,7 +286,7 @@ export default function ReviewQueue() {
       notify(tr('pending_action_approved', 'Approved -- the change has been applied'), 'success')
       await load(true)
     } catch (error) {
-      // K3 / K6: the request changed under the reviewer or was decided by someone else. Say which, and re-read
+      // The request changed under the reviewer or was decided by someone else. Say which, and re-read
       // the queue from the server so the row is not left on screen with live buttons.
       const stale = reviewStaleDecision(error)
       if (stale) {
@@ -331,7 +331,7 @@ export default function ReviewQueue() {
       notify(tr('pending_action_rejected', 'Rejected'), 'success')
       await load(true)
     } catch (error) {
-      // K7: a reason the Worker refused leaves the request open -- keep the dialog and the typed text, and say why.
+      // A reason the Worker refused leaves the request open -- keep the dialog and the typed text, and say why.
       const reasonRefusal = reviewRejectReasonRefusalText(error, (key) => tr(key, ''))
       if (reasonRefusal) {
         setRejectDraft((current) => (current && current.row.id === row.id ? { ...current, refusal: reasonRefusal } : current))

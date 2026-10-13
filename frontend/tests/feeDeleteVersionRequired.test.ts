@@ -10,7 +10,7 @@ const feeDeleteStaleKind = (error: unknown): unknown => {
   return classify!(error)
 }
 
-// K2 (Worker, fees-k): DELETE /api/fees/:id refuses an expense edited since the caller read it, but only
+// DELETE /api/fees/:id refuses an expense edited since the caller read it, but only
 // when the DELETE states the version it read (expected_updated_at, the PUT's field). A DELETE with no body
 // is held to the version the Worker itself read, so a stale screen still removes the newer record. The
 // client must therefore ALWAYS put the field on the wire, and must recognise the two answers a stale

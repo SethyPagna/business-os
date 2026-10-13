@@ -1226,8 +1226,7 @@ function ProductFormContent({
     // closes: saving mid-upload used the stale pre-upload imageList.
     if (saving || saveInFlightRef.current || imageUploading || imageUploadInFlightRef.current) return
     // Fenced by the frozen draft authority (the write identity: server, origin, user id, organization), as the other
-    // draft forms and the Stock Session are -- not the read scope, which also moves when the same user's session is
-    // reset or their profile rewritten and would refuse a save (or leave a saved form open) after a network blip.
+    // draft forms and the Stock Session are -- not the read scope, which also moves on same-user churn.
     const isSaveAuthorityCurrent = () => aliveRef.current && currentFormDraftKeyRef.current === draftKey && draftKey === scopedWorkDraftKey(productFormDraftBaseKey(product?.id, draftScope)) && isDraftAuthorityCurrent(draftAuthority.authority)
     const canContinueSave = () => {
       if (isSaveAuthorityCurrent()) return true

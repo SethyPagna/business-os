@@ -14,13 +14,10 @@ import { scopedWorkDraftKey } from './workDrafts.ts'
 // form that no longer matches keeps its draft with the original owner.
 //
 // "Match" is the WRITE identity -- server, origin, signed-in user id and
-// organization, the same one the Stock Session is fenced by -- and not the read
-// scope. The read scope also moves on same-user churn: a session reset, a
-// permission / profile / expiry rewrite, a reconnect's permission refresh. Used
-// here it locked an open form with "the account or server changed" after a
-// network blip, switched off Save and stopped the draft writer, so text typed
-// after the lock was lost (hunt finding H7). A real change of account, server
-// or organization still moves the write identity, and A -> B -> A never passes.
+// organization, the same one the Stock Session is fenced by -- not the read
+// scope, which also moves on same-user churn (a session reset, a permission,
+// profile or expiry rewrite, a reconnect's refresh). A change of account, server
+// or organization retires it, and A -> B -> A never passes.
 export type DraftAuthority = {
   baseKey: string
   draftKey: string

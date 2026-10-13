@@ -1,4 +1,4 @@
-// Fee delete against the K2 Worker (fees-k): DELETE /api/fees/:id refuses an expense edited since the caller read it.
+// Fee delete against a Worker that refuses an expense edited since the caller read it (DELETE /api/fees/:id).
 // The REAL Expense page is mounted over a transport whose answers the test controls. Both language packs.
 //
 //   sent version    the page passes the version of the row the operator is looking at to deleteFee

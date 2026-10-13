@@ -1,6 +1,5 @@
-// SF-4 (SONNET-REFUTE-UI-POLISH-R2B): D1's datetime('now') / CURRENT_TIMESTAMP write "YYYY-MM-DD HH:MM:SS" in UTC with no
-// offset. V8 reads a bare Date.parse / new Date of that shape as LOCAL time, so a Cambodian till (UTC+7) saw every server
-// stamp 7 hours early and a US device 7 hours late. Three sites in this lane's files did that and now use the shared
+// D1's datetime('now') / CURRENT_TIMESTAMP write "YYYY-MM-DD HH:MM:SS" in UTC with no offset, and V8 reads a bare
+// Date.parse / new Date of that shape as LOCAL time. A server stamp therefore goes through the shared
 // parseServerTimestampMs (utils/formatters.ts), which treats an offset-less stamp as UTC:
 //
 //   FeeForm      the draft-restore floor: a draft older than the expense's updated_at must not come back over newer server data

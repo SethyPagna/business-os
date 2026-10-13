@@ -1,4 +1,4 @@
-// A restore whose audit row could not be written (Worker, fees-k K10b): the data IS restored, but the Worker answers
+// A restore whose audit row could not be written: the data IS restored, but the Worker answers
 // 503 restore_audit_not_recorded and leaves maintenance ON until an administrator clears it and runs the same restore
 // again. The REAL Backup page is mounted over a transport whose answers the test controls, in both language packs.
 //
