@@ -38,8 +38,8 @@ async function main() {
     app.post('/api/probe/write', async (c) => { await c.env.DB.prepare('INSERT INTO probe_writes DEFAULT VALUES').run(); return c.json({ ok: true }) })
     app.route('/api/internal/branch-cutover', route)
     export default { fetch: (request, env, ctx) => app.fetch(request, env, ctx) }`
-  const bundle = await build({ stdin: { contents: entry, resolveDir: root, loader: 'ts' }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', logLevel: 'silent' })
-  const make = (bindings) => new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', port: 0, d1Databases: ['DB'], bindings, log: new Log(LogLevel.ERROR) })
+  const bundle = await build({ stdin: { contents: entry, resolveDir: root, loader: 'ts' }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'], logLevel: 'silent' })
+  const make = (bindings) => new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'], port: 0, d1Databases: ['DB'], bindings, log: new Log(LogLevel.ERROR) })
   const dark = make({})
   const mf = make({ BRANCH_CUTOVER_OPERATOR_TOKEN: TOKEN })
   try {
