@@ -47,6 +47,8 @@ globalThis.window = Object.assign(new EventTarget(), { localStorage: createReada
   setItem: (key: string, value: string) => { sessionValues.set(key, value) },
   removeItem: (key: string) => { sessionValues.delete(key) },
 } }) as unknown as Window & typeof globalThis
+// Shift requests are saved only for a signed-in account (api/retryRecordScope.ts).
+window.localStorage.setItem('businessos_user', JSON.stringify({ id: 4, organization_id: 3 }))
 const originalServerUrl = getSyncServerUrl()
 const postedBodies: Array<Record<string, unknown>> = []
 globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {

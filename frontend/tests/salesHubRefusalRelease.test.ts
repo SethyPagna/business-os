@@ -15,6 +15,7 @@ console.log('PASS only a definite handler refusal counts as refused before the w
 const rows = new Map<string, string>()
 const storage = { get length() { return rows.size }, key: (index: number) => [...rows.keys()][index] ?? null,
   getItem: (key: string) => rows.get(key) ?? null, setItem: (key: string, value: string) => { rows.set(key, value) }, removeItem: (key: string) => { rows.delete(key) }, clear: () => rows.clear() }
+storage.setItem('businessos_user', JSON.stringify({ id: 7, organization_id: 3 }))
 const oldWindow = globalThis.window, oldFetch = globalThis.fetch, oldUrl = getSyncServerUrl()
 const fixture = Object.assign(new EventTarget(), { sessionStorage: storage, localStorage: storage, location: { origin: 'https://hub-refusal.test', hostname: 'hub-refusal.test' }, setTimeout })
 const payload: FeePayload = { fee_money_version: 1, fee_type: 'expense', label: 'Fuel', amount_usd: 2, amount_khr: 0, fee_date: '2026-10-05', branch_id: 1, sale_id: null, delivery_contact_id: null, notes: null }

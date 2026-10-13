@@ -26,6 +26,7 @@ const { __resetApiHealthForTests, __resetApiWriteDedupeForTests } = await import
 const direct = await import('../src/utils/directMutationRequest.ts')
 const { hasUnresolvedTransfer } = await import('../src/utils/minimizedWork.ts')
 const { noteRetryRecordServer } = await import('../src/api/retryRecordScope.ts')
+const { forgetActorWriteAccount, completeActorSessionReconciliation, actorSessionReconciliationMarker } = await import('../src/api/actorReadScope.ts')
 
 const X = 'https://x.example.test', Y = 'https://y.example.test'
 const on = (server: string, organization = 3) => { setSyncServerUrl(server); local.setItem('businessos_user', JSON.stringify({ id: 7, organization_id: organization })) }
@@ -54,11 +55,16 @@ const loadAll = () => ({
 })
 const none = { transfer: undefined, inventory: undefined, fee: undefined, status: undefined, edit: undefined, history: undefined }
 // A shift cancel whose answer is lost keeps its exact request for a retry.
-async function saveShiftCancel(): Promise<string> {
+async function sendShiftCancel(shiftId = 9): Promise<number> {
   __resetApiHealthForTests(); __resetApiWriteDedupeForTests()
   const realFetch = globalThis.fetch
-  globalThis.fetch = async () => { throw new TypeError('Failed to fetch') }
-  try { await assert.rejects(cancelShift(9, 1, 'opened by mistake', 7)) } finally { globalThis.fetch = realFetch }
+  let sent = 0
+  globalThis.fetch = async () => { sent += 1; throw new TypeError('Failed to fetch') }
+  try { await assert.rejects(cancelShift(shiftId, 1, 'opened by mistake', 7)) } finally { globalThis.fetch = realFetch }
+  return sent
+}
+async function saveShiftCancel(): Promise<string> {
+  await sendShiftCancel()
   const requestId = pendingShiftMutation(7, 9)?.body.client_request_id
   assert.equal(typeof requestId, 'string', 'the shift request is kept')
   return String(requestId)
@@ -167,6 +173,52 @@ await check('an unscoped record never replaces a scoped one, and is removed only
   const writesDoNotStick = { getItem: (key: string) => rows.get(key) ?? null, setItem: () => {}, removeItem: (key: string) => { rows.delete(key) } }
   assert.equal(loadTransferRun(7, writesDoNotStick), null)
   assert.equal(rows.get('businessos_pending_transfer_v1:7'), unscoped, 'a move that did not stick leaves the record where it was')
+})
+
+await check('a shift request is bound to its organization and server like the others', async () => {
+  local.clear(); session.clear(); on(X)
+  await sendShiftCancel()
+  on(X, 4)
+  assert.equal(pendingShiftMutation(7, 9), null, 'the same id in another organization never loads it')
+  on(Y)
+  assert.equal(pendingShiftMutation(7, 9), null, 'nor does another server')
+  on(X)
+  assert.equal(typeof pendingShiftMutation(7, 9)?.body.client_request_id, 'string', 'its own organization on its own server does')
+})
+
+await check('a refresh that briefly leaves no stored account still finds its records', () => {
+  local.clear(); session.clear(); on(X); const ids = saveAll()
+  local.removeItem('businessos_user')
+  assert.deepEqual(loadAll(), ids)
+})
+
+await check('organization fields that disagree read, move and save nothing', () => {
+  local.clear(); session.clear(); on(X); const ids = saveAll()
+  const oldKeys = asSavedBeforeScopes()
+  local.setItem('businessos_user', JSON.stringify({ id: 7, organizationId: 3, organization_id: 4 }))
+  assert.deepEqual(loadAll(), none)
+  assert.deepEqual(oldKeys.map((key) => session.getItem(key) != null), oldKeys.map(() => true), 'nothing is moved')
+  assert.throws(() => saveTransferRun(7, prepareTransferRun(7, [{ bulk: false, body: transferBody }]), session), /Sign in again/, 'nothing is saved')
+  on(X)
+  assert.deepEqual(loadAll(), ids, 'the account with one organization finds every record')
+})
+
+await check('with no account known nothing is read, moved, saved or sent; signing back in finds every record', async () => {
+  local.clear(); session.clear(); on(X); const ids = saveAll()
+  const oldKeys = asSavedBeforeScopes()
+  local.removeItem('businessos_user'); forgetActorWriteAccount()
+  assert.deepEqual(loadAll(), none, 'signed out, no record loads')
+  assert.equal(pendingShiftMutation(7, 9), null)
+  assert.deepEqual(oldKeys.map((key) => session.getItem(key) != null), oldKeys.map(() => true), 'and none is moved')
+  assert.throws(() => saveTransferRun(7, prepareTransferRun(7, [{ bulk: false, body: transferBody }]), session), /Sign in again/, 'a transfer is not saved')
+  assert.throws(() => prepareFeeCreatePayload({ fee_type: 'expense', label: 'Rent', amount_usd: 10 }, 7, session), /not sent/, 'nor an expense')
+  assert.throws(() => direct.savePendingDirectMutation('return-edit', 7, 58, { client_request_id: 'req-late' }, session), /not sent/, 'nor a return edit')
+  assert.equal(await sendShiftCancel(10), 0, 'nor a shift request, and nothing is sent')
+  on(X)
+  assert.deepEqual(loadAll(), ids, 'signed back in, the account loads every one')
+  assert.deepEqual(pendingShiftMutation(7, 9)?.body, { client_request_id: 'req-shift' })
+  assert.equal(pendingShiftMutation(7, 10), null)
+  completeActorSessionReconciliation(actorSessionReconciliationMarker())
 })
 
 if (failed) process.exit(1)

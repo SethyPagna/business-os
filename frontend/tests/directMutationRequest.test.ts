@@ -167,6 +167,11 @@ await test('actual full runtime reset preserves exact sale/return-create evidenc
   } finally { if (original) Object.defineProperty(globalThis, 'window', original); else Reflect.deleteProperty(globalThis, 'window') }
 })
 
+// Scoped records are saved only for a signed-in account (api/retryRecordScope.ts).
+const signedIn = new MemoryStorage()
+signedIn.setItem('businessos_user', JSON.stringify({ id: 7, organization_id: 3 }))
+Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage: signedIn, sessionStorage: signedIn } })
+
 await test('pending bodies are frozen and scoped by actor plus entity', () => {
   const storage = new MemoryStorage()
   const source = { expected_updated_at: 'rev-1', client_request_id: 'same-request', nested: [{ quantity: 2 }] }

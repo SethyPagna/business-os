@@ -29,6 +29,9 @@ const paymentSettlementSource = read('../../cloudflare/src/lib/paymentSettlement
 // Screenshot: sale 20260910-171258, Not Paid -> Completed, ABA $7.
 const storageRows = new Map<string, string>()
 const storage = { get length() { return storageRows.size }, key: (index: number) => [...storageRows.keys()][index] ?? null, getItem: (key: string) => storageRows.get(key) ?? null, setItem: (key: string, value: string) => { storageRows.set(key, value) }, removeItem: (key: string) => { storageRows.delete(key) } }
+// Retry records are saved only for a signed-in account (api/retryRecordScope.ts).
+storage.setItem('businessos_user', JSON.stringify({ id: 7, organization_id: 3 }))
+if (typeof window === 'undefined') Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage: storage, sessionStorage: storage } })
 const frozen = freezeDirectMutationBody({ client_request_id: 'screenshot-aba-seven', sale_status: 'completed', expected_updated_at: '2026-09-10 10:12:58', expected_exchange_rate: 4100, payment_details: [{ method: 'ABA', amount_usd: 7, amount_khr: 0 }] })
 savePendingDirectMutationSlot('sale-status', 7, 171258, frozen, storage)
 assert.equal(loadPendingDirectMutationSlot('sale-status', 8, storage), null, 'another actor cannot inherit the request')

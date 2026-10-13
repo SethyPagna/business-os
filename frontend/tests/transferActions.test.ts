@@ -4,6 +4,8 @@ import test from 'node:test'
 import ts from 'typescript'
 import { ensureClientRequestId } from '../src/api/requestIds.ts'
 import * as retryRecordScope from '../src/api/retryRecordScope.ts'
+// No account is signed in here; the account rule for saving is pinned by retryRecordServerBinding.
+const retryRecordScopeSignedIn = { ...retryRecordScope, assertRetryRecordAccount: () => {} }
 
 const calls: Array<{ path: string; body: unknown; timeout?: number }> = []
 const source = fs.readFileSync(new URL('../src/api/branchTransport.ts', import.meta.url), 'utf8')
@@ -17,7 +19,7 @@ new Function('exports', 'require', 'module', ts.transpileModule(source, {
   if (id === '../utils/deviceInfo.ts') return { getClientDeviceInfo: () => ({ device_name: 'test' }) }
   if (id === '../utils/syncProblemLifecycle.ts') return { dispatchResolvedSyncError: () => {} }
   if (id === './query.ts') return {}
-  if (id === './retryRecordScope.ts') return retryRecordScope
+  if (id === './retryRecordScope.ts') return retryRecordScopeSignedIn
   throw new Error(`Unexpected import ${id}`)
 }, module)
 const { prepareTransferRun, loadTransferRun, saveTransferRun, executeTransferRun, transferStock, transferStockBulk, getBranchSummary } = module.exports

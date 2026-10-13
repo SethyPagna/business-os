@@ -27,6 +27,8 @@ import test from 'node:test'
 import ts from 'typescript'
 import { ensureClientRequestId } from '../src/api/requestIds.ts'
 import * as retryRecordScope from '../src/api/retryRecordScope.ts'
+// No account is signed in here; the account rule for saving is pinned by retryRecordServerBinding.
+const retryRecordScopeSignedIn = { ...retryRecordScope, assertRetryRecordAccount: () => {} }
 
 const read = (path: string) => fs.readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const compile = (code: string) => ts.transpileModule(code, {
@@ -51,7 +53,7 @@ const branchTransport = load('../src/api/branchTransport.ts', (id) => ({
   '../utils/deviceInfo.ts': { getClientDeviceInfo: () => ({ device_name: 'test' }) },
   './requestIds.ts': { ensureClientRequestId },
   '../utils/syncProblemLifecycle.ts': { dispatchResolvedSyncError: () => {} },
-  './retryRecordScope.ts': retryRecordScope,
+  './retryRecordScope.ts': retryRecordScopeSignedIn,
 } as Record<string, unknown>)[id])
 const refusal = load('../src/api/transferRunRefusal.ts', (id) => (id === './branchRuleErrors.ts' ? rules : null))
 const recovery = load('../src/api/transferRunRecovery.ts', (id) => (

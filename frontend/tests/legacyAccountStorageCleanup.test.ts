@@ -204,12 +204,16 @@ try {
   ]
   for (const [name, options] of everyReset) {
     for (const store of [local, session]) for (let index = store.length - 1; index >= 0; index -= 1) { const key = store.key(index); if (['businessos_pending_', 'businessos_shift_request_v1:', 'businessos_sale_line_sent_v1:'].some((prefix) => key?.startsWith(prefix))) store.removeItem(String(key)) }
+    const signedIn = (id: number) => local.setItem('businessos_user', JSON.stringify({ id, organization_id: 3 }))
+    signedIn(7)
     const ids = sentWrites()
     duringMirrorReset = () => {}
     await runtimeModule.exports.resetClientRuntimeState({ preserveServiceWorker: true, ...options })
+    signedIn(7)
     assert.deepEqual(loaded(7), ids, `${name}: A's transfer, sale-status and expense requests load back with their request ids`)
     assert.deepEqual(pendingShiftMutation(7, 9)?.body, { client_request_id: 'req-shift' }, `${name}: A's shift request too`)
     assert.equal(session.getItem('businessos_sale_line_sent_v1:sale-add-items:7:55'), '{"request":"req-line","at":1}', `${name}: and when A's sale-line request was last sent`)
+    signedIn(8)
     assert.deepEqual(loaded(8), { transfer: undefined, status: undefined, fee: undefined }, `${name}: B never loads A's records`)
     assert.equal(pendingShiftMutation(8, 9), null, `${name}: nor A's shift request`)
   }

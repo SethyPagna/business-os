@@ -177,6 +177,7 @@ const memoryStorage = {
   key: (index: number) => [...sessionItems.keys()][index] ?? null,
   get length() { return sessionItems.size },
 }
+memoryStorage.setItem('businessos_user', JSON.stringify({ id: 7, organization_id: 3 }))
 const fakeWindow = new EventTarget() as EventTarget & {
   sessionStorage: Storage
   localStorage: Storage

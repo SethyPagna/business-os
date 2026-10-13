@@ -8,23 +8,30 @@ import { authenticatedOrganizationId, currentWriteAuthority } from './offlineQue
 // (captureOfflineSaleOwner), read from the account writes are signed for: the
 // numeric organization id, which every stored shape of one account carries
 // (sign-in, bootstrap, own-profile save), so the scope never changes under it.
+// With no account known (signed out, a session that just expired, or
+// organization fields that disagree) there is no scope: nothing is read, moved
+// or saved until the account is known again.
 
 function pageOrigin(): string {
   try { return window.location?.origin || '' } catch { return '' }
 }
 
-function retryRecordScope(): string {
-  let organization = ''
+function retryRecordScope(): string | null {
   try {
     const account = actorWriteAccount()
-    const id = account ? authenticatedOrganizationId(account) : null
-    if (id != null) organization = String(id)
-  } catch { /* conflicting organization fields: no organization part */ }
-  return encodeURIComponent(JSON.stringify([pageOrigin(), currentWriteAuthority(), organization]))
+    if (!account) return null
+    const organization = authenticatedOrganizationId(account)
+    return encodeURIComponent(JSON.stringify([pageOrigin(), currentWriteAuthority(), organization == null ? '' : String(organization)]))
+  } catch { return null }
 }
 
+/** Under no account the key names a scope nothing is ever saved in. */
 export function retryRecordKey(prefix: string, ...parts: unknown[]): string {
-  return `${prefix}${retryRecordScope()}:${parts.map(String).join(':')}`
+  return `${prefix}${retryRecordScope() ?? 'no-account'}:${parts.map(String).join(':')}`
+}
+
+export function assertRetryRecordAccount(): void {
+  if (retryRecordScope() == null) throw new Error('Sign in again before sending this request.')
 }
 
 // A record whose key names no scope names no server either. Retry records live
@@ -56,7 +63,7 @@ export function legacyRetryRecordsReadable(store: TabStore | null | undefined = 
  *  server it stays where it is, unread. */
 export function adoptLegacyRetryRecord(storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null | undefined, legacyKey: string, scopedKey: string): void {
   try {
-    if (!storage || storage.getItem(scopedKey) != null || !legacyRetryRecordsReadable()) return
+    if (!storage || retryRecordScope() == null || storage.getItem(scopedKey) != null || !legacyRetryRecordsReadable()) return
     const legacy = storage.getItem(legacyKey)
     if (legacy == null) return
     storage.setItem(scopedKey, legacy)
