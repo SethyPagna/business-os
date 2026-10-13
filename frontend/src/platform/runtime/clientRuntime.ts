@@ -51,6 +51,12 @@ const LEGACY_ACCOUNT_STORAGE_KEYS = new Set([
   'bos_pos_orders', 'bos_pos_active', 'bos_pos_counter',
 ])
 const LEGACY_DASHBOARD_FILTER_PREFIX = 'bos_dashboard_filters:'
+// Records of writes that may already have reached the server: each frozen
+// request with its client_request_id (sales, returns, transfers, expenses,
+// shifts) and when a sale-line request was last sent. Losing one lets a retry
+// mint a new id and write twice, so no reset deletes them. Each is keyed by
+// its actor, and its loader refuses another actor's record.
+const SENT_WRITE_RECORD_PREFIXES = ['businessos_pending_', 'businessos_sale_line_sent_v1:', 'businessos_shift_request_v1:']
 const RUNTIME_CLEANUP_CONCURRENCY = 2
 
 function canUseBrowserStorage(): boolean {
@@ -212,10 +218,9 @@ function clearStorage(storage: Storage | null, preserveKeys: Set<string>, keepIn
     for (let index = 0; index < storage.length; index += 1) {
       const key = storage.key(index)
       if (!key || preserveKeys.has(key) || keepInPlace.some((prefix) => key.startsWith(prefix))) continue
-      // These exact frozen financial attempts outlive logout/runtime refresh.
-      // Do not parse, snapshot or restore them: malformed evidence and a newer
-      // cross-tab value must survive asynchronous cleanup byte-for-byte.
-      if (key.startsWith('businessos_pending_sale-add-items_v2:') || key.startsWith('businessos_pending_sale-amendment_v2:') || key.startsWith('businessos_pending_return_create_v1:')) continue
+      // Never parsed: malformed evidence and a newer cross-tab value survive
+      // the asynchronous cleanup byte for byte.
+      if (SENT_WRITE_RECORD_PREFIXES.some((prefix) => key.startsWith(prefix))) continue
       if (isBusinessOsStorageKey(key)) toDelete.push(key)
     }
     toDelete.forEach((key) => storage.removeItem(key))
@@ -268,13 +273,16 @@ export async function resetClientRuntimeState(options: RuntimeResetOptions = {})
   // a sign-in or sign-out, the language, the server, the login duration --
   // survives byte for byte. Besides the keys above: the device's write-owner
   // generation, which only ever increases (api/actorReadScope.ts), and, when
-  // drafts are kept, the drafts themselves -- a Stock Session writes
-  // its request ids into its draft before sending -- and the receiving Stock
-  // Session's product-attempt records, which belong to its draft
-  // (utils/receivingProductAttempt.ts).
-  const keepInPlace = ['businessos_write_owner_v1', ...(options.preserveUiDrafts === true ? ['businessos_draft_', 'businessos_receiving_product_attempt_v1:'] : [])]
+  // drafts are kept, in either store: the drafts themselves -- a Stock Session
+  // writes its request ids into its draft before sending -- the POS orders,
+  // which hold a checkout's request id until its receipt is confirmed, and the
+  // receiving Stock Session's product-attempt records, which belong to its
+  // draft (utils/receivingProductAttempt.ts).
+  const keepInPlace = ['businessos_write_owner_v1', ...(options.preserveUiDrafts === true ? [
+    'businessos_draft_', 'businessos_pos_orders_', 'businessos_pos_active_', 'businessos_pos_counter_', 'businessos_receiving_product_attempt_v1:',
+  ] : [])]
   clearStorage(canUseBrowserStorage() ? window.localStorage : null, localPreserveKeys, keepInPlace)
-  clearStorage(canUseBrowserStorage() ? window.sessionStorage : null, sessionPreserveKeys)
+  clearStorage(canUseBrowserStorage() ? window.sessionStorage : null, sessionPreserveKeys, keepInPlace)
 
   if (options.preserveServiceWorker !== true) await clearServiceWorkersAndCaches()
   if (Array.isArray(options.mirrorTables)) {

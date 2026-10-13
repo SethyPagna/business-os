@@ -158,7 +158,7 @@ const KNOWN_UNGUARDED: Record<string, string[]> = {
   ],
   "platform/runtime/clientRuntime.ts": [
     "clearStorage(canUseBrowserStorage() ? window.localStorage : null, localPreserveKeys, keepInPlace)",
-    "clearStorage(canUseBrowserStorage() ? window.sessionStorage : null, sessionPreserveKeys)",
+    "clearStorage(canUseBrowserStorage() ? window.sessionStorage : null, sessionPreserveKeys, keepInPlace)",
   ],
   "utils/actionHistory.ts": [
     "if (typeof window === 'undefined' || !window.sessionStorage) return []",
