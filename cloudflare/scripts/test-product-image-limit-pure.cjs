@@ -47,6 +47,8 @@ const productWrites = load('lib/productWrites.ts', {
   './moneyPrecision': load('lib/moneyPrecision.ts'),
   './catalogCostRecompute': load('lib/catalogCostRecompute.ts', { './moneyPrecision': load('lib/moneyPrecision.ts') }),
   './db': { getDb: () => { throw new Error('DB must not be touched by pure gallery validation') } },
+  // Only a create-fold that carries its request receipt writes one (lib/createFold.ts); this test never folds a create.
+  './stockMutationReceipt': { completedStockMutationReceiptStatement: () => { throw new Error('this test passes no stock-mutation receipt') } },
   './media': media,
   './batchCode': { dateToBatchCode: () => '' },
   './searchMatch': { normalizeSearchText: String, compactSearchText: String },
