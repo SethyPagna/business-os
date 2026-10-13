@@ -2,7 +2,7 @@ import { assertProductStatusInput, assertProductsActive, catalogProductSql, prod
 import { Hono } from 'hono'
 import { acquisitionCostResponses, canEditAcquisitionCosts, hasCatalogCostWrite } from '../lib/acquisitionCostAccess'
 import { roundMoney4 } from '../lib/moneyPrecision'
-import { PRODUCT_DISCOUNT_PRICE_FIELDS, PRODUCT_DISCOUNT_PRICE_REFUSAL, PRODUCT_DISCOUNT_SELECT, normalizeProductDiscountBody, productDiscountChanged } from '../lib/productDiscountGate'
+import { PRODUCT_DISCOUNT_PRICE_FIELDS, PRODUCT_DISCOUNT_PRICE_REFUSAL, PRODUCT_DISCOUNT_SELECT, keepStoredDiscountRendering, normalizeProductDiscountBody, productDiscountChanged } from '../lib/productDiscountGate'
 import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { collectMergeProductIds, describeMergeFailure } from '../lib/mergeRouteLog'
@@ -2412,6 +2412,8 @@ app.put('/:id', async (c) => {
   if (getActionTier(user, 'products', 'price') === 'none'
     && PRODUCT_DISCOUNT_PRICE_FIELDS.some((field) => Object.prototype.hasOwnProperty.call(body, field))) {
     const storedDiscount = await getDb(c.env).prepare(`SELECT ${PRODUCT_DISCOUNT_SELECT} FROM products WHERE id = @id`).get<Record<string, unknown>>({ id })
+    // OPUS-H-2: compared exactly; only the form's own 4-decimal rendering of a stored amount is dropped (kept as stored).
+    keepStoredDiscountRendering(storedDiscount, body)
     if (productDiscountChanged(storedDiscount, body)) return c.json(PRODUCT_DISCOUNT_PRICE_REFUSAL, 403)
   }
   const imageLimitError = await validateImageGalleryPayload(c.env, user, body, id)

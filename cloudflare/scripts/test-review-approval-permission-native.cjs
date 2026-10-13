@@ -494,6 +494,168 @@ async function main() {
     t.done(8)
   })
 
+  // ===================================================== OPUS-H-2/H-3: discount amounts at stored precision (6.0.38)
+  await group('OPUS-H-2: a sub-4dp discount change is a price change on review and direct PUT; the price grant stores it exactly', async w => {
+    const pid = await makeProduct(w, 'Precision')
+    const t = cases()
+    for (const [label, d, payload] of [
+      ['percent 10 -> 10.00004', { enabled: 1, percent: 10 }, { discount_percent: 10.00004 }],
+      ['percent 10 -> "10.00004"', { enabled: 1, percent: 10 }, { discount_percent: '10.00004' }],
+      ['percent 10 -> 9.99999', { enabled: 1, percent: 10 }, { discount_percent: 9.99999 }],
+      ['fixed usd 1 -> 1.00004', { enabled: 1, type: 'fixed', usd: 1 }, { discount_amount_usd: 1.00004 }],
+      ['fixed khr 4000 -> 4000.00004', { enabled: 1, type: 'fixed', khr: 4000 }, { discount_amount_khr: 4000.00004 }],
+      ['percent 10 -> 10.0001 (a real 4dp change)', { enabled: 1, percent: 10 }, { discount_percent: 10.0001 }],
+    ]) {
+      setDiscount(w, pid, d)
+      grants(w, NOPRICE)
+      const before = effect(w, pid)
+      const id = queue(w, 'products', 'update', 'product', payload, pid)
+      const snap = snapshot(w)
+      const r = await approve(w, id)
+      t.check(`review ${label}`, r.status === 403 && r.body?.permission === 'products:price' && snapshot(w) === snap, { r, before: before.till, after: till(w, pid) })
+      const p = await request(w, 'products', 'PUT', `/${pid}`, payload, 3)
+      t.check(`PUT ${label}`, p.status === 403 && snapshot(w) === snap, p)
+      const ok = await request(w, 'products', 'PUT', `/${pid}`, payload, 4)
+      const after = effect(w, pid)
+      const key = Object.keys(payload)[0]
+      const stored = w.raw.prepare(`SELECT ${key} v, typeof(${key}) t FROM products WHERE id=?`).get(pid)
+      t.check(`price grant ${label} stores the exact number`, ok.status === 200 && stored.t === 'real' && stored.v === Number(payload[key]), { ok, stored, after: after.till })
+    }
+    for (const [label, d, payload] of [
+      ['percent 10 vs 10', { enabled: 1, percent: 10 }, { discount_percent: 10 }],
+      ['percent 10 vs "10.0000"', { enabled: 1, percent: 10 }, { discount_percent: '10.0000' }],
+      ['percent 12.5 vs 12.5', { enabled: 1, percent: 12.5 }, { discount_percent: 12.5 }],
+      ['legacy 10.00004 vs 10.00004', { enabled: 1, percent: 10.00004 }, { discount_percent: 10.00004 }],
+      ['percent 0 vs null', { enabled: 0, percent: 0 }, { discount_percent: null }],
+      ['usd 0 vs ""', { enabled: 0, usd: 0 }, { discount_amount_usd: '' }],
+    ]) {
+      setDiscount(w, pid, d)
+      const before = effect(w, pid)
+      grants(w, NOPRICE)
+      const r = await approve(w, queue(w, 'products', 'update', 'product', payload, pid))
+      const after = effect(w, pid)
+      t.check(`review unchanged ${label}`, r.status === 200 && JSON.stringify(after.till) === JSON.stringify(before.till) && after.sql === before.sql, { r, before, after })
+      setDiscount(w, pid, d)
+      const p = await request(w, 'products', 'PUT', `/${pid}`, payload, 3)
+      const after2 = effect(w, pid)
+      t.check(`PUT unchanged ${label}`, p.status === 200 && JSON.stringify(after2.till) === JSON.stringify(before.till) && after2.sql === before.sql && after2.row.pt !== 'text', { p, before, after2 })
+    }
+    t.done(6 * 3 + 6 * 2)
+  })
+  await group('OPUS-H-2 form rendering: a 4-decimal rendering of a stored amount keeps the stored value; it is never written', async w => {
+    const pid = await makeProduct(w, 'Rendering')
+    const t = cases()
+    for (const [label, d, payload, kept] of [
+      ['percent 12.34565 posted as 12.3456', { enabled: 1, percent: 12.34565 }, { discount_percent: 12.3456 }, ['discount_percent', 12.34565]],
+      ['usd 1.00004 posted as 1 (ProductForm roundMoney4)', { enabled: 1, type: 'fixed', usd: 1.00004 }, { discount_amount_usd: 1 }, ['discount_amount_usd', 1.00004]],
+      ['khr float noise posted rounded, whole form', { enabled: 1, type: 'fixed', usd: 1.1, khr: 4510.000000000001 },
+        { description: 'Employee edit', discount_enabled: 1, discount_type: 'fixed', discount_percent: 0, discount_amount_usd: 1.1, discount_amount_khr: 4510 },
+        ['discount_amount_khr', 4510.000000000001]],
+    ]) {
+      setDiscount(w, pid, d)
+      const before = effect(w, pid)
+      grants(w, NOPRICE)
+      const id = queue(w, 'products', 'update', 'product', payload, pid)
+      const snap = snapshot(w)
+      const r = await approve(w, id)
+      t.check(`review ${label} -> 403 (exact at approval)`, r.status === 403 && r.body?.permission === 'products:price' && snapshot(w) === snap, r)
+      const p = await request(w, 'products', 'PUT', `/${pid}`, payload, 3)
+      const stored = w.raw.prepare(`SELECT ${kept[0]} v FROM products WHERE id=?`).get(pid).v
+      t.check(`no-price PUT ${label} -> 200, stored value kept`, p.status === 200 && stored === kept[1]
+        && JSON.stringify(till(w, pid)) === JSON.stringify(before.till), { status: p.status, code: p.body?.code, stored, before: before.till, after: till(w, pid) })
+    }
+    setDiscount(w, pid, { enabled: 1, type: 'fixed', usd: 1.00004 })
+    const real = await request(w, 'products', 'PUT', `/${pid}`, { discount_amount_usd: 1.0001 }, 3)
+    t.check('1.00004 posted as 1.0001 is not its rendering -> 403', real.status === 403 && real.body?.code === 'product_price_edit_required', real)
+    t.done(7)
+  })
+  await group('OPUS-H-3: discount amounts never store as TEXT, so the SQL promoted predicate and the till agree', async w => {
+    const pid = await makeProduct(w, 'Representation')
+    const t = cases()
+    for (const [label, d, payload, code] of [
+      ['percent "" on enabled', { enabled: 1, percent: 0 }, { discount_percent: '' }, null],
+      ['percent "0x0A"', { enabled: 1, percent: 10 }, { discount_percent: '0x0A' }, 'invalid_discount_value'],
+      ['percent " 10"', { enabled: 1, percent: 10 }, { discount_percent: ' 10' }, 'invalid_discount_value'],
+      ['percent "10 "', { enabled: 1, percent: 10 }, { discount_percent: '10 ' }, 'invalid_discount_value'],
+      ['percent "NaN"', { enabled: 1, percent: 10 }, { discount_percent: 'NaN' }, 'invalid_discount_value'],
+      ['usd true', { enabled: 1, type: 'fixed', usd: 1 }, { discount_amount_usd: true }, 'invalid_discount_value'],
+      ['khr [1]', { enabled: 1, type: 'fixed', khr: 1 }, { discount_amount_khr: [1] }, 'invalid_discount_value'],
+      ['starts_at number', { enabled: 1, percent: 10 }, { discount_starts_at: 5 }, 'invalid_discount_window'],
+      ['ends_at object', { enabled: 1, percent: 10 }, { discount_ends_at: {} }, 'invalid_discount_window'],
+    ]) {
+      setDiscount(w, pid, d)
+      const snap = snapshot(w)
+      const p = await request(w, 'products', 'PUT', `/${pid}`, payload, 4)
+      if (code) {
+        t.check(`PUT ${label} -> 400 ${code}`, p.status === 400 && p.body?.code === code && snapshot(w) === snap, p)
+        grants(w, FULL)
+        const id = queue(w, 'products', 'update', 'product', payload, pid)
+        const snap2 = snapshot(w)
+        const r = await approve(w, id)
+        t.check(`review ${label} -> 400 ${code}`, r.status === 400 && r.body?.code === code && snapshot(w) === snap2, r)
+      } else {
+        const e = effect(w, pid)
+        t.check(`PUT ${label} stores no TEXT and readers agree`, p.status === 200 && e.row.pt !== 'text' && e.sql === (e.till.active ? 1 : 0), { p, e })
+      }
+    }
+    t.done(17)
+  })
+  await group('OPUS-H discount window: a respelt start/end date is a change for no-price roles; the identical date is not', async w => {
+    const pid = await makeProduct(w, 'Window')
+    const t = cases()
+    for (const [label, stored, value, change] of [
+      ['identical', '2026-10-01', '2026-10-01', false], ['lead space', '2026-10-01', ' 2026-10-01', true],
+      ['NBSP trail', '2026-10-01', '2026-10-01 ', true], ['null vs ""', null, '', false], ['"" vs null', '', null, false],
+      ['date to datetime', '2026-10-01', '2026-10-01T00:00:00Z', true], ['null to date', null, '2026-12-31', true],
+    ]) {
+      setDiscount(w, pid, { enabled: 1, percent: 10, starts: stored })
+      grants(w, NOPRICE)
+      const r = await approve(w, queue(w, 'products', 'update', 'product', { discount_starts_at: value }, pid))
+      t.check(`review ${label}`, change ? r.status === 403 : r.status === 200, r)
+      setDiscount(w, pid, { enabled: 1, percent: 10, starts: stored })
+      const p = await request(w, 'products', 'PUT', `/${pid}`, { discount_starts_at: value }, 3)
+      t.check(`PUT ${label}`, change ? p.status === 403 : p.status === 200, p)
+    }
+    t.done(14)
+  })
+
+  // ============================================================== OPUS-H hunt: discount table, both paths
+  await group('OPUS-H hunt: 22 discount cases on review and direct PUT never change the till or SQL predicate without products:price', async w => {
+    const pid = await makeProduct(w, 'Discount hunt')
+    const DISCOUNT_CASES = [
+      ['enabled 2', 0, 'percent', 50, 0, { discount_enabled: 2 }], ['enabled "2"', 0, 'percent', 50, 0, { discount_enabled: '2' }],
+      ['enabled " 1"', 0, 'percent', 50, 0, { discount_enabled: ' 1' }], ['enabled "1.0"', 0, 'percent', 50, 0, { discount_enabled: '1.0' }],
+      ['enabled "01"', 0, 'percent', 50, 0, { discount_enabled: '01' }], ['enabled "+1"', 0, 'percent', 50, 0, { discount_enabled: '+1' }],
+      ['enabled "1e0"', 0, 'percent', 50, 0, { discount_enabled: '1e0' }], ['enabled "false"', 0, 'percent', 50, 0, { discount_enabled: 'false' }],
+      ['enabled "no"', 0, 'percent', 50, 0, { discount_enabled: 'no' }], ['enabled "yes"', 0, 'percent', 50, 0, { discount_enabled: 'yes' }],
+      ['enabled "0x1"', 0, 'percent', 50, 0, { discount_enabled: '0x1' }], ['enabled -1', 0, 'percent', 50, 0, { discount_enabled: -1 }],
+      ['enabled 0.5', 0, 'percent', 50, 0, { discount_enabled: 0.5 }],
+      ['control enabled 1 (must refuse)', 0, 'percent', 50, 0, { discount_enabled: 1 }],
+      ['control enabled "true" (must refuse)', 0, 'percent', 50, 0, { discount_enabled: 'true' }],
+      ['control unchanged 0', 0, 'percent', 50, 0, { discount_enabled: 0 }],
+      ['active TRUE text', 1, 'percent', 50, 0, { discount_enabled: 'TRUE' }],
+      ['percent 0x0A vs 10', 1, 'percent', 10, 0, { discount_percent: '0x0A' }], ['percent 10.00004', 1, 'percent', 10, 0, { discount_percent: 10.00004 }],
+      ['percent empty vs 0', 1, 'percent', 0, 0, { discount_percent: '' }],
+      ['type fixed+NBSP', 1, 'fixed', 50, 1, { discount_type: 'fixed ' }], ['type pct vs percent', 1, 'percent', 50, 1, { discount_type: 'pct' }],
+    ]
+    assert.equal(DISCOUNT_CASES.length, 22)
+    const t = cases()
+    for (const [label, en, type, pct, amt, payload] of DISCOUNT_CASES) {
+      for (const actor of ['review', 'direct']) {
+        setDiscount(w, pid, { enabled: en, type, percent: pct, usd: amt })
+        const before = effect(w, pid)
+        let res
+        if (actor === 'review') { grants(w, NOPRICE); res = await approve(w, queue(w, 'products', 'update', 'product', payload, pid)) }
+        else res = await request(w, 'products', 'PUT', `/${pid}`, payload, 3)
+        const after = effect(w, pid)
+        const effectChanged = before.till.active !== after.till.active || before.till.unit_price_usd !== after.till.unit_price_usd || before.sql !== after.sql
+        const mustRefuse = label.startsWith('control enabled')
+        t.check(`${actor} ${label}`, mustRefuse ? res.status === 403 : !(res.status === 200 && effectChanged), { status: res.status, code: res.body?.code, before: before.till, after: after.till, sql: [before.sql, after.sql] })
+      }
+    }
+    t.done(44)
+  })
+
   // ================================================================================ OPUS-H hunt: flow cases
   await group('OPUS-H hunt: 7 flow cases (revocation, self approval, forged pointer, case variant, mixed sequence, re-approval)', async w => {
     const pid = await makeProduct(w, 'Flow hunt')
