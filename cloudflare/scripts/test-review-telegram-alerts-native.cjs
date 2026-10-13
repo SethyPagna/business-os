@@ -30,6 +30,10 @@
 //   --wrong=reject-announce-first reject announces before it knows the row was still open
 //   --wrong=summary-leak          the request's raw summary (it holds amounts) is printed in the message
 //   --wrong=reason-uncut          a rejection reason is not cut at 120 characters
+//   --wrong=confirm-not-passed    the approve body's confirm_merge_into never reaches the applier
+//   --wrong=coded-refusal-500     a ReviewCodedRefusal falls through to the generic 500
+//   --wrong=refusal-any-status    any status is accepted as a coded refusal (a 418 would be sent as such)
+//   --wrong=merged-ignored        outcome.mergedInto is never read: the Merged row is missing
 //   --only=<ids>                  run only these case ids
 // ============================================================================================
 const assert = require('node:assert/strict')
@@ -303,7 +307,7 @@ const QUEUE = 'src/routes/reviewQueue.ts'
 const GATE = 'src/lib/reviewGate.ts'
 const TELEGRAM = 'src/lib/telegram.ts'
 const ALERT = 'src/lib/reviewAlert.ts'
-const APPROVED_ANNOUNCE = "  await announceReview(c.env, { kind: 'approved', row: updatedRow ?? row, by: actorSnapshot(user), recordName: recordNameBefore })\n"
+const APPROVED_ANNOUNCE = "  await announceReview(c.env, {\n    kind: 'approved', row: updatedRow ?? row, by: actorSnapshot(user), recordName: recordNameBefore,\n    merged: mergedInto ? { retired: mergedInto.mergedName, kept: mergedInto.survivorName } : null,\n  })\n"
 const APPLY_CALL = '    const outcome = await applyApprovedPendingAction('
 const PATCHES = {
   'alert-before-commit': [
@@ -333,6 +337,8 @@ const PATCHES = {
       to: "          if (receipt) { await announceReview(c.env, { kind: 'approved', row, by: actorSnapshot(user) }); return c.json({ success: true, data: receipt, replayed: true }) }" },
     { name: 'already-reviewed', file: QUEUE, from: "      return c.json({ error: 'Already reviewed' }, 409)",
       to: "      await announceReview(c.env, { kind: 'approved', row, by: actorSnapshot(user) })\n      return c.json({ error: 'Already reviewed' }, 409)" },
+    { name: 'removal-replay', file: QUEUE, from: "        return c.json({ success: true, data: row, replayed: true })",
+      to: "        await announceReview(c.env, { kind: 'approved', row, by: actorSnapshot(user) })\n        return c.json({ success: true, data: row, replayed: true })" },
   ],
   'not-deferred': [
     { name: 'not-deferred', file: ALERT, from: '  return deferRequestWork(() => runBackground(env, \'review-alert\', () => sendReviewAlert(env, event)))',
@@ -354,9 +360,51 @@ const PATCHES = {
   'reason-uncut': [
     { name: 'reason-uncut', file: ALERT, from: 'return characters.length <= REVIEW_REASON_ALERT_MAX ? text :', to: 'return characters.length <= 100000 ? text :' },
   ],
+  // The contracts slice A relies on this route for.
+  'confirm-not-passed': [
+    { name: 'confirm-not-passed', file: QUEUE, from: '      ...(confirmMergeInto !== undefined ? { confirmMergeInto } : {}),\n', to: '' },
+  ],
+  'coded-refusal-500': [
+    { name: 'coded-refusal-500', file: QUEUE, from: '    const coded = reviewCodedRefusal(err)\n    if (coded) return c.json(coded.body, coded.status)\n', to: '' },
+  ],
+  'merged-ignored': [
+    { name: 'merged-ignored', file: QUEUE, from: '    merged: mergedInto ? { retired: mergedInto.mergedName, kept: mergedInto.survivorName } : null,\n', to: '    merged: null,\n' },
+  ],
+  'refusal-any-status': [
+    { name: 'refusal-any-status', file: QUEUE, from: '  if (status !== 403 && status !== 409 && status !== 503) return null\n', to: '' },
+  ],
 }
 const WRONG = OPTIONS.wrong || ''
 if (WRONG && !PATCHES[WRONG]) { console.error('unknown --wrong=' + WRONG + '; known: ' + Object.keys(PATCHES).join(', ')); process.exit(2) }
+
+// Test-only fixtures (NOT mutants; applied in every run). Slice A's approval will (1) report the merge it performed as
+// `outcome.mergedInto`, (2) read the survivor the reviewer confirmed as `reviewer.confirmMergeInto` and (3) raise
+// 'ReviewCodedRefusal' errors. None of that exists in today's appliers, so two fixtures stand in for it:
+//   * a product edit whose name carries the marker [merged-fixture] reports a merge into "Rice 5kg" (retired "Rice 1kg");
+//   * the stock-reasons applier records the confirmMergeInto it was handed (settings key rt_confirm_seen) and, for a reason
+//     labelled [refuse:<status>:<code>[:variant]], throws an error shaped like slice A's refusal.
+const FIXTURE_PATCHES = [
+  { name: 'merged-fixture', file: 'src/lib/reviewApply.ts',
+    from: "  await notify(env, waitUntil, 'products', { action: 'update', id })\n})",
+    to: "  await notify(env, waitUntil, 'products', { action: 'update', id })\n  if (String(body.name || '').includes('[merged-fixture]')) return { pendingActionMarkedAtomically: false, mergedInto: { survivorId: 9, survivorName: 'Rice 5kg', mergedName: 'Rice 1kg' } } as never\n})" },
+  { name: 'contract-fixture', file: 'src/lib/reviewApply.ts',
+    from: '  const items = Array.isArray(payload.items) ? payload.items : []\n',
+    to: [
+      '  const items = Array.isArray(payload.items) ? payload.items : []',
+      '  {',
+      '    const seen = (reviewer as { confirmMergeInto?: number }).confirmMergeInto',
+      `    await getDb(env).prepare("INSERT INTO settings(key,value,updated_at) VALUES('rt_confirm_seen',@v,CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run({ v: String(seen) })`,
+      "    const refuse = items.map((item) => String((item as { label?: unknown })?.label ?? '')).find((label) => label.startsWith('[refuse:'))",
+      '    if (refuse) {',
+      "      const [, status, code, variant] = refuse.replace(']', '').split(':')",
+      "      throw Object.assign(new Error('Fixture refusal ' + code), {",
+      "        name: variant === 'othername' ? 'SomethingElse' : 'ReviewCodedRefusal', code: variant === 'nocode' ? '' : code, status: Number(status),",
+      "        details: { permission: 'products:merge_duplicates', preview: { survivorId: 9, survivorName: 'Rice 5kg' } },",
+      '      })',
+      '    }',
+      '  }',
+      ''].join('\n') },
+]
 
 // ------------------------------------------------------------------------------------------------
 // The pure half: the composed rows, the deferral primitive and the static guarantees (no Worker needed).
@@ -379,16 +427,17 @@ let seq = 0
 const alertSql = sql => /FROM settings WHERE key IN \((\?,){25,}/.test(sql) || /^\s*SELECT (name FROM (products|branches) WHERE id|COALESCE\(NULLIF\(trim\(label\))/.test(sql)
 const statementsOf = async H => { const log = await H.lastLog(); return { total: log.length, alert: log.filter(alertSql).length } }
 
+// The database assigns the ids: a product the Worker creates (an approved create) takes the next id after the highest, so a
+// hand-picked id would collide with it later.
 async function seedFee(H, label, { amount = 12.35 } = {}) {
-  const id = 7000 + (++seq)
-  await H.db.prepare("INSERT INTO fees(id,fee_type,label,amount_usd,amount_khr,fee_date,updated_at) VALUES(?,?,?,?,0,'2026-10-09','2026-10-09 08:00:00')").bind(id, 'rent', label, amount).run()
-  return id
+  const r = await H.db.prepare("INSERT INTO fees(fee_type,label,amount_usd,amount_khr,fee_date,updated_at) VALUES(?,?,?,0,'2026-10-09','2026-10-09 08:00:00')").bind('rent', label, amount).run()
+  return r.meta.last_row_id
 }
 async function seedProduct(H, name, { barcode } = {}) {
-  const id = 7100 + (++seq)
-  await H.db.prepare('INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active,created_at,updated_at) VALUES(?,?,?,2.5,0,0,1,?,?)')
-    .bind(id, name, barcode || '88500' + String(id).padStart(8, '0'), '2026-01-01 00:00:00', '2026-01-01 00:00:00').run()
-  return id
+  const code = barcode || '88500' + String(900000000 + (++seq))
+  const r = await H.db.prepare('INSERT INTO products(name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active,created_at,updated_at) VALUES(?,?,2.5,0,0,1,?,?)')
+    .bind(name, code, '2026-01-01 00:00:00', '2026-01-01 00:00:00').run()
+  return r.meta.last_row_id
 }
 const pendingOf = (H, id) => H.q1('SELECT * FROM pending_actions WHERE id = ?', id)
 const only = (calls, t, label) => {
@@ -498,7 +547,7 @@ async function main() {
   })
 
   // ---- the Worker --------------------------------------------------------------------------
-  const H = await world({ patches: WRONG ? PATCHES[WRONG] : [] })
+  const H = await world({ patches: [...FIXTURE_PATCHES, ...(WRONG ? PATCHES[WRONG] : [])] })
   try {
     await H.addUser(21, 'sokha', { fees: 'review', products: 'review', branches: 'review', inventory: 'review' }, { name: 'Sok Dara Longname' })
     await H.addUser(22, 'dara', FULL_REVIEWER, { name: 'Dara Reviewer Fullname' })
@@ -615,6 +664,29 @@ async function main() {
       t.eq('reasons approval text', lines((await H.tg.calls())[0]).slice(1), ['· Request/សំណើ: Edit stock reasons/កែប្រែមូលហេតុស្តុក', '· Requested by/បានស្នើសុំដោយ: sokha', '· By/ដោយ: dara'])
       // the actors are usernames, never the account's full name
       for (const text of [call, editCall, createCall].map(c => c.body.text)) t.ok('no full name', !/Fullname|Longname|Reviewer/.test(text), text)
+    })
+
+    await check('C3b', 'approved: an approval that merged two products prints the Merged row (outcome.mergedInto, optional)', 'high', async t => {
+      const product = await seedProduct(H, 'Rice 1kg')
+      const edit = await H.api('PUT', '/api/products/' + product, { name: 'Rice 1kg [merged-fixture]', selling_price_usd: 3 }, { as: 'sokha' })
+      t.eq('queued', edit.status, 202)
+      await reset()
+      t.eq('approved', (await H.api('POST', `/api/review/${edit.body.pendingActionId}/approve`, undefined, { as: 'dara' })).status, 200)
+      const call = only(await H.tg.calls(), t, 'merge approval')
+      t.eq('merge approval text', lines(call), [
+        '✅ Review approved/បានអនុម័តសំណើ',
+        '· Request/សំណើ: Edit product/កែប្រែផលិតផល · Rice 5kg',
+        '· Merged/បញ្ចូលគ្នា: Rice 1kg → Rice 5kg',
+        '· Requested by/បានស្នើសុំដោយ: sokha',
+        '· By/ដោយ: dara',
+      ])
+      t.ok('four rows under the heading, no more', lines(call).length === 5)
+      // and an approval that did not merge has no Merged row
+      const plain = await seedProduct(H, 'Plain Edit')
+      const plainEdit = await H.api('PUT', '/api/products/' + plain, { name: 'Plain Edit', selling_price_usd: 3 }, { as: 'sokha' })
+      await reset()
+      await H.api('POST', `/api/review/${plainEdit.body.pendingActionId}/approve`, undefined, { as: 'dara' })
+      t.ok('no merge, no Merged row', !lines((await H.tg.calls())[0]).some(l => l.includes('Merged')))
     })
 
     await check('C4', 'approved: two approvals racing send exactly one message (atomic path: an expense delete)', 'high', async t => {
@@ -761,6 +833,41 @@ async function main() {
       t.eq('resubmitting an open request is a 404', (await H.api('POST', `/api/review/${queued.pendingId}/resubmit`, {}, { as: 'sokha' })).status, 404)
       t.eq('resubmitting a request that never existed is a 404', (await H.api('POST', '/api/review/987656/resubmit', {}, { as: 'sokha' })).status, 404)
       t.eq('neither announced', (await H.tg.calls()).length, 0)
+    })
+
+    await check('C8b', 'product removal: approval says "Remove product" with the name (the row survives, retired); a replay sends nothing; a rejection carries its reason', 'high', async t => {
+      const product = await seedProduct(H, 'Old Lip Balm')
+      const queued = await H.api('DELETE', '/api/products/' + product, { reason: 'Discontinued line', client_request_id: 'rt-remove-' + (++seq) + '-abcdef' }, { as: 'sokha' })
+      t.eq('removal queued', queued.status, 202)
+      const pendingId = queued.body && queued.body.pendingActionId
+      await reset()
+      const approved = await H.api('POST', `/api/review/${pendingId}/approve`, undefined, { as: 'dara' })
+      t.eq('removal approved', approved.status, 200)
+      const call = only(await H.tg.calls(), t, 'removal approval')
+      t.eq('removal approval text', lines(call), [
+        '✅ Review approved/បានអនុម័តសំណើ',
+        '· Request/សំណើ: Remove product/លុបផលិតផល · Old Lip Balm',
+        '· Requested by/បានស្នើសុំដោយ: sokha',
+        '· By/ដោយ: dara',
+      ])
+      t.eq('the product is retired', (await H.q1('SELECT is_active FROM products WHERE id = ?', product)).is_active, 0)
+      await reset()
+      const replay = await H.api('POST', `/api/review/${pendingId}/approve`, undefined, { as: 'dara' })
+      t.eq('the replay answers 200', replay.status, 200)
+      t.eq('and says it is a replay', replay.body && replay.body.replayed, true)
+      t.eq('the replay announced nothing', (await H.tg.calls()).length, 0)
+      // a rejected removal
+      const other = await seedProduct(H, 'Old Lip Gloss')
+      const second = await H.api('DELETE', '/api/products/' + other, { reason: 'Slow seller', client_request_id: 'rt-remove-' + (++seq) + '-abcdef' }, { as: 'sokha' })
+      await reset()
+      t.eq('removal rejected', (await H.api('POST', `/api/review/${second.body.pendingActionId}/reject`, { reason: 'still on the shelf' }, { as: 'dara' })).status, 200)
+      t.eq('removal rejection text', lines((await H.tg.calls())[0]), [
+        '❌ Review rejected/បានបដិសេធសំណើ',
+        '· Request/សំណើ: Remove product/លុបផលិតផល · Old Lip Gloss',
+        '· Reason/មូលហេតុ: still on the shelf',
+        '· Requested by/បានស្នើសុំដោយ: sokha',
+        '· By/ដោយ: dara',
+      ])
     })
 
     await check('C9', 'switches: telegram_reviews_enabled (on when unset), automation, the chat id', 'high', async t => {
@@ -912,6 +1019,55 @@ async function main() {
       t.eq('list answers', (await H.api('GET', '/api/review?status=open', undefined, { as: 'dara' })).status, 200)
       t.eq('an invalid id', (await H.api('POST', '/api/review/abc/approve', undefined, { as: 'dara' })).status, 400)
       t.eq('mine answers', (await H.api('GET', '/api/review/mine', undefined, { as: 'sokha' })).status, 200)
+    })
+
+    const queueReason = async label => {
+      const r = await H.api('PUT', '/api/inventory/reasons', { items: [{ type: 'adjust', label }] }, { as: 'sokha' })
+      return r.body && r.body.pendingActionId
+    }
+
+    await check('C17', 'contract: a ReviewCodedRefusal becomes {success:false, error, code, ...details} with its 403/409/503; nothing else does', 'high', async t => {
+      // [thrown status, code, variant, expected HTTP status, expected to be mapped]
+      const cases = [
+        [403, 'review_action_full_required', '', 403, true],
+        [409, 'review_merge_confirm_required', '', 409, true],
+        [503, 'review_merge_unavailable', '', 503, true],
+        [418, 'review_teapot', '', 500, false],         // a status outside 403/409/503 is not a coded refusal
+        [409, 'review_wrong_name', 'othername', 500, false], // another error class with the same shape is not one either
+        [409, 'review_no_code', 'nocode', 500, false],  // no code, no refusal
+      ]
+      for (const [status, code, variant, expected, mapped] of cases) {
+        const pendingId = await queueReason(`[refuse:${status}:${code}${variant ? ':' + variant : ''}]`)
+        await reset()
+        const r = await H.api('POST', `/api/review/${pendingId}/approve`, undefined, { as: 'dara' })
+        t.eq(`${code}: HTTP status`, r.status, expected)
+        if (mapped) {
+          t.eq(`${code}: body`, r.body, { success: false, error: 'Fixture refusal ' + code, code, permission: 'products:merge_duplicates', preview: { survivorId: 9, survivorName: 'Rice 5kg' } })
+        } else {
+          t.ok(`${code}: the generic 500 body, no code`, r.body && r.body.code === undefined && typeof r.body.error === 'string', r.body)
+        }
+        t.eq(`${code}: the request is still open`, (await pendingOf(H, pendingId)).status, 'open')
+        t.eq(`${code}: nothing announced`, (await H.tg.calls()).length, 0)
+      }
+    })
+
+    await check('C18', 'contract: confirm_merge_into is read from the approve body and handed to the applier as confirmMergeInto', 'high', async t => {
+      const seenBy = async (body, { raw } = {}) => {
+        const pendingId = await queueReason('Confirm ' + (++seq))
+        await H.setting('rt_confirm_seen', null)
+        const r = raw !== undefined
+          ? await H.mf.dispatchFetch(`http://localhost/api/review/${pendingId}/approve`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: 'bos_session=' + H.tokens.dara }, body: raw })
+          : await H.api('POST', `/api/review/${pendingId}/approve`, body, { as: 'dara' })
+        t.eq('approval answered 200 for ' + JSON.stringify(raw ?? body), r.status, 200)
+        return (await H.q1("SELECT value FROM settings WHERE key = 'rt_confirm_seen'")).value
+      }
+      t.eq('a positive integer', await seenBy({ confirm_merge_into: 9 }), '9')
+      t.eq('a numeric string', await seenBy({ confirm_merge_into: '9' }), '9')
+      for (const unusable of [{}, { confirm_merge_into: 0 }, { confirm_merge_into: -3 }, { confirm_merge_into: 1.5 }, { confirm_merge_into: 'abc' }, { confirm_merge_into: null }, { confirm_merge_into: [9] }, { confirm_merge_into: true }, { confirm_merge_into: '9.5' }, { confirm_merge_into: '-9' }, { other: 9 }]) {
+        t.eq('not confirmed: ' + JSON.stringify(unusable), await seenBy(unusable), 'undefined')
+      }
+      t.eq('no body at all (what the Review page sends today)', await seenBy(undefined), 'undefined')
+      t.eq('a body that is not JSON', await seenBy(undefined, { raw: 'not json at all' }), 'undefined')
     })
   } finally {
     await H.dispose()

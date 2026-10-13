@@ -348,7 +348,7 @@ console.log(`PASS rival spellings: ${everyWorkerKhmer.length} Worker Khmer strin
 const known = new Set(englishLabels)
 const LINE_LABEL = /[`'"]([A-Z][A-Za-z ]{1,24}): \$\{/g
 const scanned = []
-for (const rel of ['src/lib/telegram.ts', 'src/routes/sales.ts', 'src/routes/fees.ts']) {
+for (const rel of ['src/lib/telegram.ts', 'src/routes/sales.ts', 'src/routes/fees.ts', 'src/lib/reviewAlert.ts']) {
   const source = fs.readFileSync(path.join(__dirname, '..', rel), 'utf8')
   // Scan line by line so an HTTP error body can be excluded. The 500 returned
   // by POST /:id/items builds its message with exactly the same shape as a
@@ -364,6 +364,10 @@ for (const rel of ['src/lib/telegram.ts', 'src/routes/sales.ts', 'src/routes/fee
 const unknownLabels = [...new Set(scanned.filter(([, name]) => !known.has(name)).map(([rel, name]) => `${name} (${rel})`))].sort()
 assert.deepEqual(unknownLabels, [], 'these Telegram line labels have no entry in telegramLang.ts, so they would ship English-only:\n  ' + unknownLabels.join('\n  '))
 assert.ok(scanned.length >= 20, `expected to scan real label sites, found ${scanned.length}`)
+// The review alerts compose their rows in lib/reviewAlert.ts: the scan must really have read it, or a label added there
+// later would ship English-only without this test noticing.
+assert.deepEqual([...new Set(scanned.filter(([rel]) => rel === 'src/lib/reviewAlert.ts').map(([, name]) => name))].sort(),
+  ['By', 'Merged', 'Reason', 'Request', 'Requested by'], 'the scan found the five rows the review alerts emit')
 console.log(`PASS coverage: all ${new Set(scanned.map(([, name]) => name)).size} emitted line labels resolve in the dictionary`)
 
 // --- 4. composed event payloads: both languages on every labelled line ------

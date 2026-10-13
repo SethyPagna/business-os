@@ -17,7 +17,7 @@ import {
   REVIEW_REASON_MAX_LENGTH,
   type PendingActionStatus,
 } from '../lib/pendingActions'
-import { applyApprovedPendingAction, FeeReviewStaleError, NoReviewApplierError, productRemovePendingPointer, ReviewDecisionConflictError, ReviewRequesterPermissionError, recoverApprovedBranchAction } from '../lib/reviewApply'
+import { applyApprovedPendingAction, FeeReviewStaleError, NoReviewApplierError, productRemovePendingPointer, ReviewDecisionConflictError, ReviewRequesterPermissionError, recoverApprovedBranchAction, type ReviewerInfo } from '../lib/reviewApply'
 import type { ReviewAlertEvent, ReviewAlertHook } from '../lib/reviewAlert'
 import { ProductImageAssetError } from '../lib/productImagePermission'
 import { ProductRemoveError } from '../lib/productDelete'
@@ -79,6 +79,24 @@ async function announceReview(env: Env, event: ReviewAlertEvent): Promise<void> 
 // request returns null with no read (its name is read after the commit, off the response path).
 async function reviewNameBeforeChange(env: Env, row: PendingActionRow): Promise<string | null> {
   try { return (await reviewAlertHook()?.nameBeforeChange(env, row)) ?? null } catch { return null }
+}
+
+// The two contracts the approve-performs-the-merge work (slice A, lib/reviewApply.ts) relies on this route for.
+//
+// 1. A refusal it raises on purpose: an Error named 'ReviewCodedRefusal' with a string `code`, an HTTP `status` of 403,
+//    409 or 503 and, optionally, extra response fields (a merge preview, the permission that is missing) in a plain-object
+//    `details`. It becomes `{ success: false, error, code, ...details }` with that status. Matched by NAME and shape, not by
+//    class, so this route imports nothing from slice A and an unrelated error (or a ReviewCodedRefusal with any other
+//    status or no code) is never mistaken for one: it falls through to the generic 500 exactly as before.
+// 2. An approval that merged two products reports it as `outcome.mergedInto` (optional): its names are the alert's Merged row.
+type ReviewMergedInto = { survivorId?: number; survivorName?: string | null; mergedName?: string | null }
+function reviewCodedRefusal(err: unknown): { body: Record<string, unknown>; status: 403 | 409 | 503 } | null {
+  if (!(err instanceof Error) || err.name !== 'ReviewCodedRefusal') return null
+  const { code, status, details } = err as Error & { code?: unknown; status?: unknown; details?: unknown }
+  if (typeof code !== 'string' || !code) return null
+  if (status !== 403 && status !== 409 && status !== 503) return null
+  const extra = details && typeof details === 'object' && !Array.isArray(details) ? details as Record<string, unknown> : {}
+  return { body: { success: false, error: err.message, code, ...extra }, status }
 }
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -257,6 +275,7 @@ app.post('/:id/approve', async (c) => {
   }
   let pendingActionMarkedAtomically = false
   let recordNameBefore: string | null = null
+  let mergedInto: ReviewMergedInto | undefined
   try {
     // Finding H: the reviewer's CURRENT grant for this exact action and for each of its effects (price,
     // cost, image), checked before any receipt replay or write (lib/reviewApprovalPermission.ts).
@@ -280,11 +299,25 @@ app.post('/:id/approve', async (c) => {
     }
 
     recordNameBefore = await reviewNameBeforeChange(c.env, row)
-    const outcome = await applyApprovedPendingAction(c.env, row, { id: user.id, name: actorSnapshot(user), redirectTarget: () => branchRedirectTarget(c) }, user,
-      (promise) => c.executionCtx.waitUntil(promise))
+    // An approval that would merge two products states the survivor the reviewer saw: { "confirm_merge_into": <product id> }
+    // in the body. Anything else (no body, not JSON, not a positive integer) reads as "not confirmed" and is passed on as
+    // absent -- slice A's applier answers 409 review_merge_confirm_required with a preview. Held in a variable of an
+    // extended type so the extra property is not an excess-property error against ReviewerInfo, which slice A widens.
+    const confirmBody = await c.req.json<{ confirm_merge_into?: unknown }>().catch(() => null)
+    const stated = confirmBody?.confirm_merge_into
+    const confirmed = typeof stated === 'number' ? stated : typeof stated === 'string' && /^\d+$/.test(stated.trim()) ? Number(stated.trim()) : NaN
+    const confirmMergeInto = Number.isSafeInteger(confirmed) && confirmed > 0 ? confirmed : undefined
+    const reviewer: ReviewerInfo & { confirmMergeInto?: number } = {
+      id: user.id, name: actorSnapshot(user), redirectTarget: () => branchRedirectTarget(c),
+      ...(confirmMergeInto !== undefined ? { confirmMergeInto } : {}),
+    }
+    const outcome = await applyApprovedPendingAction(c.env, row, reviewer, user, (promise) => c.executionCtx.waitUntil(promise))
     if (outcome.replayedBranchAction) return c.json({ success: true, data: outcome.replayedBranchAction, replayed: true })
     pendingActionMarkedAtomically = outcome.pendingActionMarkedAtomically
+    mergedInto = (outcome as { mergedInto?: ReviewMergedInto }).mergedInto
   } catch (err) {
+    const coded = reviewCodedRefusal(err)
+    if (coded) return c.json(coded.body, coded.status)
     const stockError = productStockGuardError(err)
     if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
     // Finding I (lib/reviewApply.ts ReviewIdentityConflictError, matched by its code): the request would mint a
@@ -334,7 +367,10 @@ app.post('/:id/approve', async (c) => {
   // Reached only by the request whose approval committed: the atomic appliers raise ReviewDecisionConflictError for the
   // loser, and markPendingActionApproved answers false for it -- both returned a 409 above. Replayed answers returned
   // earlier still. So two racing approvals announce once.
-  await announceReview(c.env, { kind: 'approved', row: updatedRow ?? row, by: actorSnapshot(user), recordName: recordNameBefore })
+  await announceReview(c.env, {
+    kind: 'approved', row: updatedRow ?? row, by: actorSnapshot(user), recordName: recordNameBefore,
+    merged: mergedInto ? { retired: mergedInto.mergedName, kept: mergedInto.survivorName } : null,
+  })
   return c.json({ success: true, data: updatedRow })
 })
 
