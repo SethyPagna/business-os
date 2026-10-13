@@ -10,7 +10,6 @@ import {
 } from './http.ts'
 import { buildMultipartHeaders } from './multipartHeaders.ts'
 import { appendImageThumbnails, compressImageFile, createImageThumbnails, isCompressibleImageFile, type CompressImageOptions } from '../utils/imageCompression.ts'
-import { compressVideoFile, isCompressibleVideoFile } from '../utils/videoCompression.ts'
 
 type FileListResponse = {
   items?: unknown[]
@@ -127,21 +126,35 @@ const AVATAR_TYPE_REFUSALS: ReadonlySet<string> = new Set([
 // value (the test pins it).
 const AVATAR_UNSUPPORTED_TYPE_ENGLISH = 'Avatars must be JPEG, PNG, WebP, GIF or AVIF images. Choose another image.'
 
+const MAX_UPLOAD_MEGABYTES = 25
+const MAX_UPLOAD_BYTES = MAX_UPLOAD_MEGABYTES * 1024 * 1024
+const UPLOAD_TOO_LARGE_ENGLISH = 'This file is larger than {mb} MB. Choose a smaller file, or trim or compress the video first.'
+const WORKER_TOO_LARGE_MESSAGE = /^File is too large \(max \d+MB\)$/
+
 // The message in the UI language AppContext applies to <html lang>, read from
 // the same language pack the screens use. Callers show error.message as is.
 // productImageUploadTransport.ts's productImageTypeRefusal is the product
 // surface's twin (that transport may not import this one).
-async function avatarTypeRefusal(): Promise<Error> {
-  let message = AVATAR_UNSUPPORTED_TYPE_ENGLISH
+async function packMessage(key: string, english: string): Promise<string> {
   try {
     const language = typeof document !== 'undefined' ? String(document.documentElement?.getAttribute('lang') || '').trim().toLowerCase() : ''
     const pack = (language.startsWith('km') ? (await import('../lang/km.json')).default : (await import('../lang/en.json')).default) as Record<string, unknown>
-    const value = pack['avatar_unsupported_type']
-    if (typeof value === 'string' && value.trim()) message = value
+    const value = pack[key]
+    if (typeof value === 'string' && value.trim()) return value
   } catch {
     // Keep the English.
   }
+  return english
+}
+
+async function avatarTypeRefusal(): Promise<Error> {
+  const message = await packMessage('avatar_unsupported_type', AVATAR_UNSUPPORTED_TYPE_ENGLISH)
   return Object.assign(new Error(message), { code: 'unsupported_image_type' })
+}
+
+async function uploadTooLargeRefusal(): Promise<Error> {
+  const template = await packMessage('upload_file_too_large', UPLOAD_TOO_LARGE_ENGLISH)
+  return Object.assign(new Error(template.replace('{mb}', String(MAX_UPLOAD_MEGABYTES))), { code: 'upload_too_large' })
 }
 
 function isAvatarTypeRefusal(serverMessage: unknown): boolean {
@@ -234,17 +247,8 @@ export async function uploadFileAsset(payload: FileUploadPayload = {}): Promise<
     notConfiguredMessage: 'Server is not connected. File uploads are invalid until a live server is configured.',
   })
 
-  // Images get re-encoded/resized client-side before leaving the browser --
-  // the Workers backend has no `sharp` and can't compress on its end (see
-  // routes/files.ts). Video now gets the same treatment via ffmpeg.wasm
-  // (utils/videoCompression.ts) -- automatic settings, no manual
-  // codec/bitrate picker. Documents still pass through untouched; there is
-  // no meaningful client-side compression to do for those file types.
-  const uploadFile = isCompressibleImageFile(file)
-    ? await compressImageFile(file, compressOptions)
-    : isCompressibleVideoFile(file)
-      ? await compressVideoFile(file)
-      : file
+  const uploadFile = isCompressibleImageFile(file) ? await compressImageFile(file, compressOptions) : file
+  if (uploadFile.size > MAX_UPLOAD_BYTES) throw await uploadTooLargeRefusal()
 
   const base = getSyncServerUrl().replace(/\/$/, '')
   const form = new FormData()
@@ -289,6 +293,10 @@ export async function uploadFileAsset(payload: FileUploadPayload = {}): Promise<
     xhr.onload = () => {
       const parsed = parseJsonResponse(xhr.responseText)
       if (xhr.status < 200 || xhr.status >= 300) {
+        if (xhr.status === 413 || WORKER_TOO_LARGE_MESSAGE.test(String(parsed?.error || '').trim())) {
+          void uploadTooLargeRefusal().then((refusal) => finish(reject, refusal))
+          return
+        }
         const message = parsed?.error || parsed?.message || xhr.responseText || xhr.status
         // serverMessage: the Worker's own sentence, so a surface that is not
         // the Library (uploadUserAvatar) can tell a type refusal apart.

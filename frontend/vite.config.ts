@@ -199,9 +199,9 @@ function emitBuildManifest(): Plugin {
 }
 
 const routePreloadChunkNames = {
-  // I6-2 (Sep 25 2026): no generic 'vendor' here. It is html2canvas, qrcode
-  // and @ffmpeg/ffmpeg (241 KB raw / 63 KB gz), and no startup chunk imports
-  // it: Receipt, printReceipt, file-api and settings-otp-modal import() it,
+  // I6-2 (Sep 25 2026): no generic 'vendor' here. It is html2canvas and
+  // qrcode, and no startup chunk imports it: Receipt, printReceipt and
+  // settings-otp-modal import() it,
   // and only the lazy scanner chunk (vendor-zxing) imports it statically
   // (measured in the emitted graph) -- yet it was preloaded at
   // fetchpriority=high on every admin cold load. It stays in the eager
@@ -1142,10 +1142,8 @@ export default defineConfig({
   // a named key; AppContext only ever reads `default`. stringify emits
   // `export default JSON.parse('...')` instead: the pack is its own JSON
   // text again, and JSON.parse is faster to parse than an object literal of
-  // the same size. The option is global, so @ffmpeg/ffmpeg's package.json in
-  // the lazy `vendor` chunk is now carried whole (+2 KB raw, measured) -- a
-  // trade kept for the simpler config. The chunks keep their names (lang-en /
-  // lang-km), so the precache and the early head preload above still find them.
+  // the same size. The chunks keep their names (lang-en / lang-km), so the
+  // precache and the early head preload above still find them.
   json: {
     stringify: true,
   },
