@@ -232,6 +232,7 @@ async function main() {
     assert.equal(posts.length, postsBefore + 1, 'and it reached the (local) Telegram stand-in once')
     return { json: await response.json(), text: posts[posts.length - 1].text, options: sends[sends.length - 1].options, shiftId: sends[sends.length - 1].shiftId }
   }
+  const setScope = (mode) => sqlite.prepare("INSERT INTO settings(key,value) VALUES('shift_scope_mode', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(mode)
   const setLanguage = (mode) => sqlite.prepare("INSERT INTO settings(key,value) VALUES('telegram_language', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(mode)
   /** The same report again, in a given language, with the options the route sent. */
   async function replay(sent, mode) {
@@ -375,6 +376,20 @@ async function main() {
     for (const secret of ['+85533333333', 'owner@example.com', 'Owner Full Name']) assert.ok(!sent.text.includes(secret), `${secret} must not reach the chat`)
   })
 
+  await section('5b. a cashier amending another cashier\'s shift under shop_wide is named in the chat too', async () => {
+    setScope('shop_wide')
+    try {
+      const wide = await act('dara', 'POST', '/open', TODAY_OPEN, 201)
+      assert.equal(wide.json.shift.scope_mode, 'shop_wide', 'a shift opened under shop_wide belongs to the branch')
+      const sent = await act('sok', 'PATCH', `/${wide.json.shift.id}`, { expected_revision: wide.json.shift.revision, reason: 'Recount', opening_float_usd: 60 }, 200)
+      assert.equal(sent.options.amendedBy, 'sok', 'the amender is a plain POS account, not an administrator')
+      assert.deepEqual(anyActorRow(sent.text), [actorRow('both', 'shift_amended_by', 'sok')], sent.text)
+      assert.ok(sent.text.includes('dara'), 'under the cashier who opened it, dara')
+      for (const mode of ['en', 'km']) assert.deepEqual(anyActorRow(await replay(sent, mode)), [actorRow(mode, 'shift_amended_by', 'sok')])
+      for (const secret of ['+85522222222', 'sok@example.com', 'Sok Full Name']) assert.ok(!sent.text.includes(secret), `${secret} must not reach the chat`)
+    } finally { setScope('per_account') }
+  })
+
   await section('6. a replacement opening after a cancel is a fresh open, not a reopen: no actor row', async () => {
     const cancelled = await act('owner', 'POST', `/${opened.lee.id}/cancel`, { expected_revision: opened.lee.revision, reason: 'Opened by mistake' }, 200)
     assert.ok(/Cancelled by/.test(cancelled.text), 'cancel still says who cancelled')
@@ -388,9 +403,9 @@ async function main() {
     const closeSends = sends.filter((send) => send.options)
     assert.deepEqual(closeSends.map((send) => Object.keys(send.options).sort()), [
       ['closedBy', 'closedById'], ['closedBy', 'closedById'], ['closedBy', 'closedById'], ['closedBy', 'closedById'],
-      ['reopenedBy'], ['reopenedBy'], ['amendedBy'],
-    ].map((keys) => keys.sort()), 'one actor per event: close x4 (name and account id), reopen x2, amend x1')
-    assert.equal(sends.filter((send) => !send.options).length, 7, 'open x5 + cancel + replacement open pass no options')
+      ['reopenedBy'], ['reopenedBy'], ['amendedBy'], ['amendedBy'],
+    ].map((keys) => keys.sort()), 'one actor per event: close x4 (name and account id), reopen x2, amend x2')
+    assert.equal(sends.filter((send) => !send.options).length, 8, 'open x6 + cancel + replacement open pass no options')
   })
 
   if (failures.length) {
