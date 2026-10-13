@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import InfoHint from '../shared/InfoHint.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import { PERMISSION_SECTIONS, type PermissionDefinition, type PermissionSection, type PermissionSensitivity } from './permissionDefinitions'
@@ -274,6 +274,100 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
     onChange(next)
   }
 
+  // Per-action breakdown under a permission -- "show the selected permissions for
+  // buttons/actions like edit, adjust, stock, discounts, import, export, delete".
+  // Reads utils/permissionActions.ts, the same table that gates the real buttons at
+  // runtime, so what an admin is shown here and what the page actually does cannot
+  // drift apart. Shared by the three-way sections (the tier picks the baseline) and
+  // the on/off sections (on = Full, off = None). Only the CURRENTLY selected
+  // level is shown (one badge per row, not a 3-column grid) to keep it scannable.
+  const renderActionRows = (permission: PermissionDefinition, tier: Tier, className: string) => {
+    const actions = actionsForKey(permission.key)
+    if (!actions.length) return null
+    return (
+      <div className={`${className} rounded-lg border border-gray-200 bg-white/70 p-1.5 dark:border-zinc-700 dark:bg-zinc-900/40`}>
+        <div className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+          {translate('perm_actions_heading', 'Buttons and actions on this page')}
+        </div>
+        {/* Each row is now a real control, not a readout.
+            The tier sets the baseline; clicking a row
+            switches that single action OFF for this role,
+            and clicking again hands it back to the tier.
+            Deliberately one-way: an override can only
+            REMOVE what the tier granted, never add what it
+            withheld -- see permissionActions.ts for why
+            that is what makes it safe to enforce. A row
+            the tier already blocks is therefore inert. */}
+        {permission.key === 'sales' ? (
+          <label className="mb-2 block px-1 text-xs text-gray-700 dark:text-gray-200">
+            {translate('perm_sales_customer_mode', 'Edit customer mode')}
+            <AppSelect
+              className="mt-1 w-full"
+              buttonClassName="input w-full text-xs"
+              ariaLabel={translate('perm_sales_customer_mode', 'Edit customer mode')}
+              disabled={tier !== 'full' || isActionOverriddenOff(perms as Record<string, unknown>, 'sales', 'customer')}
+              value={isActionOverriddenOff(perms as Record<string, unknown>, 'sales', 'customer_reassign') ? 'name-only' : 'assignment'}
+              onChange={(value) => {
+                const nameOnly = isActionOverriddenOff(perms as Record<string, unknown>, 'sales', 'customer_reassign')
+                if ((value === 'name-only') !== nameOnly) toggleActionOverride('sales', 'customer_reassign')
+              }}
+              options={[
+                { value: 'assignment', label: translate('perm_sales_customer_assignment', 'Choose another customer (default)') },
+                { value: 'name-only', label: translate('perm_sales_customer_name_only', 'Edit this sale’s name only') },
+              ]}
+            />
+          </label>
+        ) : null}
+        <ul className="grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
+          {actions.filter((action) => permission.key !== 'sales' || action.key !== 'customer_reassign').map((action) => {
+            const tierOutcome = outcomeAt(action, tier)
+            const overriddenOff = isActionOverriddenOff(perms as Record<string, unknown>, permission.key, action.key)
+            const meta = outcomeMeta(overriddenOff ? 'block' : tierOutcome)
+            const viewLocked = tierOutcome !== 'block' && isViewImpliedByWrite(perms as Record<string, unknown>, permission.key, action.key)
+            const canToggle = tierOutcome !== 'block' && !viewLocked
+            return (
+              <li key={action.key}>
+                <button
+                  type="button"
+                  disabled={!canToggle}
+                  aria-pressed={!overriddenOff}
+                  onClick={() => toggleActionOverride(permission.key, action.key)}
+                  title={viewLocked
+                    ? translate('perm_view_implied', 'On while Add or Edit is on.')
+                    : canToggle
+                    ? (overriddenOff
+                      ? translate('perm_action_restore', 'Switched off for this role. Click to hand it back to the tier.')
+                      : translate('perm_action_switch_off', 'Click to switch this single action off for this role.'))
+                    : translate('perm_action_tier_blocked', 'Already blocked by the selected tier.')}
+                  className={`flex w-full items-center justify-between gap-2 rounded-md px-1.5 py-1 text-left transition-colors ${
+                    canToggle
+                      ? 'hover:bg-gray-100 dark:hover:bg-zinc-800'
+                      : 'cursor-default opacity-60'
+                  }`}
+                >
+                  <span className={`min-w-0 break-words text-xs ${overriddenOff ?'text-gray-400 line-through dark:text-gray-500' : 'text-gray-600 dark:text-gray-300'}`}>
+                    {translate(action.tKey, action.label)}
+                  </span>
+                  <span className={`flex-shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${meta.className}`}>
+                    {overriddenOff ? translate('perm_action_off', 'Off') : meta.label}
+                  </span>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+        {/* The one action that needs a second grant even
+            at Full Access -- called out rather than left
+            to look like a plain "Allowed" row. */}
+        {actions.some((action) => action.requiresKey && outcomeAt(action, tier) !== 'block') ? (
+          <p className="mt-1 px-1 text-[10px] text-gray-400 dark:text-gray-500">
+            {translate('perm_actions_requires_extra', 'Some actions above also need their own separate permission, listed in this section.')}
+          </p>
+        ) : null}
+      </div>
+    )
+  }
+
   const activeCount = Object.keys(perms).filter((key) => perms[key]).length
 
   return (
@@ -462,98 +556,7 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                           {reviewDescriptionFor(permission)}
                         </p>
                       ) : null}
-                      {/* Per-action breakdown -- "show the selected
-                          permissions for buttons/actions like edit,
-                          adjust, stock, discounts, import, export,
-                          delete". Reads utils/permissionActions.ts, the
-                          same table that gates the real buttons at
-                          runtime, so what an admin is shown here and what
-                          the page actually does cannot drift apart. Only
-                          the CURRENTLY selected tier's column is shown
-                          (one badge per row, not a 3-column grid) to keep
-                          it scannable rather than a wall of text. */}
-                      {actionsForKey(permission.key).length ? (
-                        <div className="mt-2 rounded-lg border border-gray-200 bg-white/70 p-1.5 dark:border-zinc-700 dark:bg-zinc-900/40">
-                          <div className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                            {translate('perm_actions_heading', 'Buttons and actions on this page')}
-                          </div>
-                          {/* Each row is now a real control, not a readout.
-                              The tier sets the baseline; clicking a row
-                              switches that single action OFF for this role,
-                              and clicking again hands it back to the tier.
-                              Deliberately one-way: an override can only
-                              REMOVE what the tier granted, never add what it
-                              withheld -- see permissionActions.ts for why
-                              that is what makes it safe to enforce. A row
-                              the tier already blocks is therefore inert. */}
-                          {permission.key === 'sales' ? (
-                            <label className="mb-2 block px-1 text-xs text-gray-700 dark:text-gray-200">
-                              {translate('perm_sales_customer_mode', 'Edit customer mode')}
-                              <AppSelect
-                                className="mt-1 w-full"
-                                buttonClassName="input w-full text-xs"
-                                ariaLabel={translate('perm_sales_customer_mode', 'Edit customer mode')}
-                                disabled={tier !== 'full' || isActionOverriddenOff(perms as Record<string, unknown>, 'sales', 'customer')}
-                                value={isActionOverriddenOff(perms as Record<string, unknown>, 'sales', 'customer_reassign') ? 'name-only' : 'assignment'}
-                                onChange={(value) => {
-                                  const nameOnly = isActionOverriddenOff(perms as Record<string, unknown>, 'sales', 'customer_reassign')
-                                  if ((value === 'name-only') !== nameOnly) toggleActionOverride('sales', 'customer_reassign')
-                                }}
-                                options={[
-                                  { value: 'assignment', label: translate('perm_sales_customer_assignment', 'Choose another customer (default)') },
-                                  { value: 'name-only', label: translate('perm_sales_customer_name_only', 'Edit this sale’s name only') },
-                                ]}
-                              />
-                            </label>
-                          ) : null}
-                          <ul className="grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
-                            {actionsForKey(permission.key).filter((action) => permission.key !== 'sales' || action.key !== 'customer_reassign').map((action) => {
-                              const tierOutcome = outcomeAt(action, tier)
-                              const overriddenOff = isActionOverriddenOff(perms as Record<string, unknown>, permission.key, action.key)
-                              const meta = outcomeMeta(overriddenOff ? 'block' : tierOutcome)
-                              const viewLocked = tierOutcome !== 'block' && isViewImpliedByWrite(perms as Record<string, unknown>, permission.key, action.key)
-                              const canToggle = tierOutcome !== 'block' && !viewLocked
-                              return (
-                                <li key={action.key}>
-                                  <button
-                                    type="button"
-                                    disabled={!canToggle}
-                                    aria-pressed={!overriddenOff}
-                                    onClick={() => toggleActionOverride(permission.key, action.key)}
-                                    title={viewLocked
-                                      ? translate('perm_view_implied', 'On while Add or Edit is on.')
-                                      : canToggle
-                                      ? (overriddenOff
-                                        ? translate('perm_action_restore', 'Switched off for this role. Click to hand it back to the tier.')
-                                        : translate('perm_action_switch_off', 'Click to switch this single action off for this role.'))
-                                      : translate('perm_action_tier_blocked', 'Already blocked by the selected tier.')}
-                                    className={`flex w-full items-center justify-between gap-2 rounded-md px-1.5 py-1 text-left transition-colors ${
-                                      canToggle
-                                        ? 'hover:bg-gray-100 dark:hover:bg-zinc-800'
-                                        : 'cursor-default opacity-60'
-                                    }`}
-                                  >
-                                    <span className={`min-w-0 truncate text-xs ${overriddenOff ? 'text-gray-400 line-through dark:text-gray-500' : 'text-gray-600 dark:text-gray-300'}`}>
-                                      {translate(action.tKey, action.label)}
-                                    </span>
-                                    <span className={`flex-shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${meta.className}`}>
-                                      {overriddenOff ? translate('perm_action_off', 'Off') : meta.label}
-                                    </span>
-                                  </button>
-                                </li>
-                              )
-                            })}
-                          </ul>
-                          {/* The one action that needs a second grant even
-                              at Full Access -- called out rather than left
-                              to look like a plain "Allowed" row. */}
-                          {actionsForKey(permission.key).some((action) => action.requiresKey && outcomeAt(action, tier) !== 'block') ? (
-                            <p className="mt-1 px-1 text-[10px] text-gray-400 dark:text-gray-500">
-                              {translate('perm_actions_requires_extra', 'Some actions above also need their own separate permission, listed in this section.')}
-                            </p>
-                          ) : null}
-                        </div>
-                      ) : null}
+                      {renderActionRows(permission, tier, 'mt-2')}
                     </div>
                   )
                 }
@@ -564,10 +567,9 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                 const blockedTierLabel = blockedByTier
                   ? (tierOf(perms[exclusivity as string]) === 'review' ? translate('review_required', 'Partial Access') : translate('label_full_access', 'Full Access'))
                   : ''
-                return (
+                const toggleButton = (
                   <button
                     type="button"
-                    key={permission.key}
                     onClick={() => toggle(permission.key)}
                     disabled={blockedByTier}
                     title={blockedByTier ? translate('perm_overridden_by_tier', `Already covered by this role's ${blockedTierLabel} Products access -- turn that down to None first to use this instead.`) : undefined}
@@ -607,6 +609,13 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                       </span>
                     ) : null}
                   </button>
+                )
+                // An on/off switch reads as Full when on and None when off.
+                return (
+                  <Fragment key={permission.key}>
+                    {toggleButton}
+                    {renderActionRows(permission, active ? 'full' : 'none', 'ml-4')}
+                  </Fragment>
                 )
               })}
             </div>

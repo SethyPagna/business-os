@@ -52,10 +52,10 @@ for (const section of PERMISSION_SECTIONS) {
 }
 Object.assign(permissions, { contacts: true, 'contacts:add': true, 'contacts:view': false })
 
-function render(pack: Record<string, string> | null) {
+function render(pack: Record<string, string> | null, overrides: Record<string, unknown> = {}) {
   const missing = new Set<string>()
   const html = renderToStaticMarkup(React.createElement(PermissionEditor, {
-    permissions, onChange: () => {},
+    permissions: { ...permissions, ...overrides }, onChange: () => {},
     ...(pack ? { t: (key: string) => { if (!(key in pack)) missing.add(key); return pack[key] } } : {}),
   }))
   return { html, missing }
@@ -110,6 +110,40 @@ test('every per-action key in permissionActions.ts has an entry in both packs', 
     const absent = keys.filter((key) => !pack[key])
     assert.deepEqual(absent, [], `${name} pack lacks action labels: ${absent.join(', ')}`)
   }
+})
+
+// POS is an on/off key, not a three-way section. The editor used to draw action rows only under three-way
+// sections, so the Worker's pos:manage_address_presets switch had no row. The row's own markup is cut out of
+// the rendered editor so each assertion reads that one control.
+const posRow = (html: string): string => {
+  const label = en.manage_address_presets
+  const found = html.match(new RegExp(`<button(?:(?!</button>)[\\s\\S])*?${label}(?:(?!</button>)[\\s\\S])*?</button>`))
+  assert.ok(found, `the editor renders no "${label}" row`)
+  return found[0]
+}
+
+test('POS, an on/off key, lists its saved-address action row in Khmer and in English', () => {
+  assert.ok(render(km).html.includes(km.manage_address_presets), 'the Khmer row label is rendered')
+  assert.ok(!render(km).html.includes(en.manage_address_presets), 'no English label remains in the Khmer editor')
+  assert.ok(render(en).html.includes(en.manage_address_presets), 'the English row label is rendered')
+})
+
+test('the POS row follows the POS switch and an explicit false on the role', () => {
+  const on = posRow(render(en).html)
+  assert.ok(on.includes(`>${en.perm_outcome_allow}<`) && !on.includes('disabled'), 'POS on: the row is Allowed and can be switched off')
+  assert.ok(on.includes('aria-pressed="true"'))
+  const off = posRow(render(en, { pos: false }).html)
+  assert.ok(off.includes(`>${en.perm_outcome_block}<`) && off.includes('disabled'), 'POS off: the row is Hidden and inert')
+  const narrowed = posRow(render(en, { 'pos:manage_address_presets': false }).html)
+  assert.ok(narrowed.includes(`>${en.perm_action_off}<`) && narrowed.includes('line-through'), 'an explicit false is shown as switched off')
+  assert.ok(narrowed.includes('aria-pressed="false"'))
+  assert.ok(!narrowed.includes('disabled'), 'a switched-off row can be handed back')
+})
+
+test('CONTROL: an on/off key with no action table gets no action panel', () => {
+  const library = render(en).html.match(/<section[^>]*>(?:(?!<\/section>)[\s\S])*?Library(?:(?!<\/section>)[\s\S])*?<\/section>/)
+  assert.ok(library, 'the Library section renders')
+  assert.ok(!library[0].includes(en.perm_actions_heading), 'Library has no action rows, so it must not grow an empty panel')
 })
 
 test('the Users role form passes the translator to the lazy editor', () => {

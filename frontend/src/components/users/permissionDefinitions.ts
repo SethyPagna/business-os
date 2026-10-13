@@ -106,10 +106,10 @@ export interface PermissionSection {
 //
 // Two keys moved to the page that actually enforces them, confirmed by
 // grep against real usage rather than assumed from the old bucket names:
-//   - `destructive_delete` was filed under "Sensitive settings" but is
-//     only ever checked in components/products/import/BulkImportModal.tsx
-//     (gates the "replace all" bulk-import action) -- it belongs under
-//     Products, not Settings, and is listed there now.
+//   - `destructive_delete` was filed under "Sensitive settings" but only gates the
+//     replace-all and replace-columns product imports (the import picker and the
+//     Worker's import jobs) -- it belongs under Products, not Settings, and is
+//     listed there now.
 //   - `business_identity`/`sales_policy`/`security_settings`/
 //     `drive_credentials` have no frontend call site of their own today
 //     (cloudflare/src/lib/permissions.ts falls each of them back to the
@@ -202,16 +202,9 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     label: 'Products',
     description: 'The Products page, including its bulk-import tools. "Products (conditions hidden)" below is a separate, narrower way into this same page -- a role can have real Products access (Full or Partial Access) OR that narrower option, never both at once; granting real access always overrides and disables the narrower one.',
     permissions: [
-      // tier: true -- Products' Review Required tier is wired end to end:
-      // create/update/delete all queue via lib/reviewGate.ts's
-      // maybeQueueForReview() (unlike Fees, nothing applies directly under
-      // this tier -- every write goes to the queue). Import/export are
-      // gated by the strict `hasPermission()` used in routes/importJobs.ts
-      // and the export routes, which already rejects the 'review' string
-      // value (not === true), so they're correctly unreachable without any
-      // extra code. Merge-duplicates and zero-quantity-cleanup are
-      // separate maintenance tools, also strict-`hasPermission()`-gated
-      // (Full Access only), not part of this tier's add/edit/delete scope.
+      // tier: true -- add, edit and delete queue via maybeQueueForReview() (lib/reviewGate.ts); an edit that
+      // would merge two products queues too. Every other action is Full only (utils/permissionActions.ts lists
+      // them), and export is enforced in the browser.
       {
         key: 'products',
         tKey: 'perm_products',
@@ -219,15 +212,13 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         sensitivity: 'normal',
         tier: true,
         reviewTKey: 'perm_products_review_desc',
-        reviewDescription: 'Under Partial Access, viewing and searching products works directly. Adding, editing, or deleting a product goes to the Review/Approval queue for an admin to approve or reject. Import, export, merge-duplicates, and the zero-quantity cleanup tool all require Full Access.',
+        reviewDescription: 'Under Partial Access, viewing and searching products works directly. Adding, editing, or deleting a product goes to the Review/Approval queue for an admin to approve or reject. So does an edit that would merge this product into another one, unless Merge duplicates is switched off for the role, which refuses that edit. Approving a merge needs the reviewer to hold Merge duplicates. Import, export, merge-duplicates, and the zero-quantity cleanup tool all require Full Access.',
       },
-      // Moved here from the old "Sensitive settings" bucket -- confirmed
-      // by source (components/products/import/BulkImportModal.tsx) that
-      // this only gates the bulk-import "replace all" action on Products,
-      // nothing settings-related. See this file's header comment.
       { key: 'product_cost_view', tKey: 'perm_product_cost_view', label: 'View product costs', sensitivity: 'high' },
       { key: 'product_cost_edit', tKey: 'perm_product_cost_edit', label: 'Edit product costs', sensitivity: 'high' },
-      { key: 'destructive_delete', tKey: 'perm_destructive_delete', label: 'Bulk import: "replace all" (destructive)', sensitivity: 'critical' },
+      // Gates the replace-all and replace-columns product imports, in the import picker and in the Worker
+      // (lib/importEngine.ts missingDestructiveImportPermission).
+      { key: 'destructive_delete', tKey: 'perm_destructive_delete', label: 'Destructive imports: replace all and replace columns', sensitivity: 'critical' },
       // Part 241: a genuinely different SHAPE of access than the
       // Full/Review/None tier above (field-restricted, not a gradient on
       // the same full view) -- deliberately a plain boolean, not part of
@@ -476,7 +467,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'review',
     tKey: 'perm_section_review',
     label: 'Review',
-    description: 'None / View only / Full. The Review/Approval queue for every section’s Partial Access tier above. View only shows the pending queue read-only; approving and rejecting require Full Access.',
+    description: 'None / View only / Full. The Review/Approval queue for every section’s Partial Access tier above. View only shows the pending queue read-only. Approving needs Full Review access and Full access to the request’s own section and its exact action (for example Products: Edit product), plus the price, image or cost permission when the request changes one, plus Merge duplicates when it merges two products. Nobody can approve their own request. Rejecting needs only Full Review access.',
     permissions: [
       // View-tier section (Part 557 slice 5): reading the pending queue
       // (routes/reviewQueue.ts GET / and GET /:id) admits a 'view' grant; the
@@ -492,7 +483,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         tier: true,
         middleTier: 'view',
         reviewTKey: 'perm_review_view_desc',
-        reviewDescription: 'View only: watch the pending approval queue, but Approve and Reject are hidden and refused. Full Access is required to act on submissions.',
+        reviewDescription: 'View only: watch the pending approval queue, but Approve and Reject are hidden and refused. Acting on requests needs Full Access here; approving also needs Full access to each request’s own section and action.',
       },
     ],
   },

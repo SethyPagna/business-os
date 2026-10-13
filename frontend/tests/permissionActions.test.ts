@@ -7,15 +7,26 @@ import {
   outcomeAt,
   actionAllowed,
 } from '../src/utils/permissionActions.ts'
-import { REVIEW_TIER_KEYS, VIEW_TIER_KEYS } from '../src/utils/permissions.ts'
+import { REVIEW_TIER_KEYS, VIEW_TIER_KEYS, effectivePermissions } from '../src/utils/permissions.ts'
+import { PERMISSION_SECTIONS } from '../src/components/users/permissionDefinitions.ts'
 
 // --- 1. structural invariants ------------------------------------------
 
+// A table is either for a tiered key (Partial Access / View only / Full) or for an on/off key, where on reads as
+// Full and off as None. An on/off key has no middle tier, so none of its rows may promise an outcome there.
+const onOffKeys = new Set(PERMISSION_SECTIONS.flatMap((section) => section.permissions).filter((permission) => !permission.tier).map((permission) => permission.key))
 for (const [permissionKey, actions] of Object.entries(PERMISSION_ACTIONS)) {
+  const tiered = REVIEW_TIER_KEYS.has(permissionKey) || VIEW_TIER_KEYS.has(permissionKey)
   assert.ok(
-    REVIEW_TIER_KEYS.has(permissionKey) || VIEW_TIER_KEYS.has(permissionKey),
-    `PERMISSION_ACTIONS has a per-action table for '${permissionKey}', which is not a tiered key -- the tier column would be meaningless there`,
+    tiered || onOffKeys.has(permissionKey),
+    `PERMISSION_ACTIONS has a per-action table for '${permissionKey}', which is neither a tiered key nor an on/off editor key -- its rows would never render`,
   )
+  if (!tiered) {
+    for (const action of actions) {
+      assert.equal(action.review, 'block', `${permissionKey}.${action.key}: an on/off key has no middle tier, so its review outcome must be 'block'`)
+      assert.equal(action.full ?? 'allow', 'allow', `${permissionKey}.${action.key}: an on/off key's on state is Full Access`)
+    }
+  }
   assert.ok(actions.length > 0, `'${permissionKey}' has an empty action list`)
   const seen = new Set<string>()
   for (const action of actions) {
@@ -117,6 +128,22 @@ for (const section of ['fees', 'branches']) {
 assert.equal(outcomeAt(actionsForKey('returns').find((a) => a.key === 'add')!, 'review'), 'allow')
 
 console.log('PASS tier semantics match each route\'s real behavior')
+
+// --- 2b. an on/off key carries action rows too ---------------------------
+//
+// POS has no middle tier, yet the Worker checks pos:manage_address_presets. The row must exist so an
+// administrator can switch it off, and it must be one-way like every other override.
+assert.deepEqual(actionsForKey('pos').map((action) => action.key), ['manage_address_presets'])
+assert.equal(actionsForKey('pos')[0].tKey, 'manage_address_presets', 'the row reuses the existing saved-address wording')
+assert.equal(actionAllowed('pos', 'manage_address_presets', 'full'), true, 'POS on keeps the action')
+assert.equal(actionAllowed('pos', 'manage_address_presets', 'none'), false, 'POS off blocks it')
+assert.equal(actionAllowed('pos', 'manage_address_presets', 'full', () => false, (section, action) => section === 'pos' && action === 'manage_address_presets'), false, 'an explicit false narrows it')
+const posAuthority = (permissions: Record<string, unknown>) => effectivePermissions({ role_code: 'staff', permissions }).can('pos', 'manage_address_presets')
+assert.equal(posAuthority({ pos: true }), true, 'a stored POS role with no override is unchanged by the new row')
+assert.equal(posAuthority({ pos: true, 'pos:manage_address_presets': false }), false, 'an explicit false on a stored role survives and narrows')
+assert.equal(posAuthority({ pos: false, 'pos:manage_address_presets': true }), false, 'an override can never grant what the on/off key withholds')
+assert.equal(posAuthority({ 'pos:manage_address_presets': true }), false)
+console.log('PASS the POS on/off key carries its saved-address action row, one-way and unchanged for existing roles')
 
 // --- 3. requiresKey ------------------------------------------------------
 
@@ -247,6 +274,9 @@ const branchesRoute = routeSource('branches.ts')
 assert.equal((branchesRoute.match(/getActionTier\(user, 'branches', 'transfer'\)/g) || []).length, 2, 'single and bulk branch transfers must share branches.transfer')
 const branchesUi = readFileSync(new URL('../src/components/branches/Branches.tsx', import.meta.url), 'utf8')
 assert.equal((branchesUi.match(/can\('branches', 'transfer'\)/g) || []).length, 1, 'all Branches transfer entry points must derive from one shared capability')
+
+const posRoute = routeSource('pos.ts')
+assert.match(posRoute, /getActionTier\(user, 'pos', 'manage_address_presets'\) !== 'full'/, 'saving saved addresses must enforce the pos action server-side')
 
 console.log('PASS per-action table still matches the real route guards')
 console.log('permissionActions tests passed')

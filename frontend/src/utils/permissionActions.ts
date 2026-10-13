@@ -71,45 +71,24 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
   // section's label on every sibling row the moment the packs translate it.
   products: [
     { key: 'view', tKey: 'perm_act_products_view', label: 'View and search', review: 'allow' },
-    // POST / -> maybeQueueForReview (products.ts ~844)
     { key: 'add', tKey: 'perm_act_products_add', label: 'Add product', review: 'queue' },
-    // PUT /:id -> maybeQueueForReview (products.ts ~920)
+    // An edit that would merge two products is queued too; switching merge_duplicates off refuses it instead.
     { key: 'edit', tKey: 'perm_act_products_edit', label: 'Edit product', review: 'queue' },
-    // DELETE /:id -> maybeQueueForReview (products.ts ~1013)
     { key: 'delete', tKey: 'perm_act_products_delete', label: 'Delete product', review: 'queue' },
-    // POST /bulk-delete-jobs -> explicit 403 for the review tier
-    // (products.ts ~1077), NOT queued: a 10k-row delete is not something
-    // the queue replays.
+    // Refused, never queued: the review queue cannot replay a delete of thousands of rows.
     { key: 'bulk_delete', tKey: 'perm_act_products_bulk_delete', label: 'Bulk delete', review: 'block' },
-    // POST /variant -> strict hasPermission() (products.ts ~1139)
+    // Also needs the Add action at Full.
     { key: 'variant', tKey: 'perm_act_products_variant', label: 'Add variant', review: 'block' },
-    // POST /upload-image -> strict hasPermission() (products.ts ~1809)
     { key: 'image', tKey: 'perm_act_products_image', label: 'Upload product image', review: 'block' },
-    // importJobs.ts ~58 -> strict hasPermission()
     { key: 'import', tKey: 'perm_act_products_import', label: 'Import', review: 'block' },
-    // importJobs.ts ~200 -> additionally requires destructive_delete
-    { key: 'import_replace_all', tKey: 'perm_act_products_import_replace_all', label: 'Import: replace all', review: 'block', requiresKey: 'destructive_delete' },
-    // Export was, until this change, gated by NOTHING at all, despite the
-    // Products section's own reviewDescription claiming "export requires
-    // Full Access" ever since the tier shipped -- documented policy and
-    // enforced behavior simply disagreed.
-    //
-    // Honest scope of the fix: export is assembled client-side from rows
-    // ALREADY loaded into the page (buildProductExportScopes reads
-    // products/filtered/selectedProducts -- it never calls the server), and
-    // a review-tier user is legitimately allowed to view those rows. So
-    // hiding the button enforces the stated policy and stops the accidental
-    // path, but it is NOT a confidentiality boundary: the same rows remain
-    // readable through the products API that populated the page. Making
-    // export a genuine security boundary would mean moving it behind a
-    // server route that re-checks the tier and streams the file -- a real
-    // change, not a checkbox, and deliberately not attempted here.
+    // Covers replace-all and replace-columns imports; both also need destructive_delete.
+    { key: 'import_replace_all', tKey: 'perm_act_products_import_replace_all', label: 'Import: replace all and replace columns', review: 'block', requiresKey: 'destructive_delete' },
+    // Browser-only: the file is built from rows the page already loaded, so this hides the button but is not a data
+    // boundary; the products API returns the same rows to anyone who can view.
     { key: 'export', tKey: 'perm_act_products_export', label: 'Export', review: 'block' },
-    // POST /merge-duplicates -> strict hasPermission() (products.ts ~1277)
-    { key: 'merge_duplicates', tKey: 'perm_act_products_merge_duplicates', label: 'Merge duplicates', review: 'block' },
-    // POST /zero-quantity-delete -> strict hasPermission() (products.ts ~1560)
+    // Also gates an edit that merges the product into another one.
+    { key: 'merge_duplicates', tKey: 'perm_act_products_merge_duplicates', label: 'Merge duplicates and edits that merge', review: 'block' },
     { key: 'zero_qty_cleanup', tKey: 'perm_act_products_zero_qty', label: 'Zero-quantity cleanup', review: 'block' },
-    // POST /lookups/replace -> strict hasPermission() (products.ts ~1639)
     { key: 'manage_lookups', tKey: 'perm_act_products_manage_lookups', label: 'Manage brands, categories, units', review: 'block' },
     // Owner, 5 Oct 2026 (evening): the DEFAULT selling and wholesale price. Off for the Employee default; PUT /:id,
     // /bulk-price-adjust, the receipt-time selling price and a merge price choice other than the rule all require it.
@@ -133,7 +112,7 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // batches.ts's write routes (receive batch stock, fast stock-in,
     // edit/deactivate a lot) -- all strict Full-Access writes that mutate
     // the same live stock this action names.
-    { key: 'adjust', tKey: 'perm_act_inventory_adjust', label: 'Adjust / receive stock', review: 'block' },
+    { key: 'adjust', tKey: 'perm_act_inventory_adjust', label: 'Adjust / receive stock, including opening stock on an existing product', review: 'block' },
     // POST /transfer -> 403 for review (inventory.ts ~1583)
     { key: 'transfer', tKey: 'perm_act_inventory_transfer', label: 'Transfer stock', review: 'block' },
     // POST /move-row -> 403 for review (inventory.ts ~1655)
@@ -274,6 +253,11 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
 
   promotions: [
     { key: 'manage', tKey: 'perm_act_promotions_manage', label: 'Create, edit, and delete promotion rules', review: 'block' },
+  ],
+
+  // POS is an on/off key: on reads as Full, off as None.
+  pos: [
+    { key: 'manage_address_presets', tKey: 'manage_address_presets', label: 'Manage saved address options', review: 'block' },
   ],
 }
 
