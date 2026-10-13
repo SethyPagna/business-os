@@ -185,6 +185,73 @@ async function main() {
     assert.match(shown, /shown on the product card/, 'positive control: shown mode keeps the original instruction')
   })
 
+  const candidates = () => new Map([[7, selectCandidateProducts([product()], {}, '')[0]]])
+  const serve = (reply) => parseAssistantPayload(JSON.stringify(reply), candidates(), 'disclaimer', true)
+  const NOTICE = 'For directions, cautions and ingredients, please read the product label or ask the store team.'
+
+  await check('model-written label facts in summary, reason, fit_summary, follow-ups and contact note are dropped sentence by sentence', async () => {
+    const served = serve({
+      summary: 'Here is a good match for oily skin. Apply twice daily after cleansing.',
+      contact_note: 'Contact the store for more help. Safe for pregnancy and children.',
+      follow_up_questions: ['Do you prefer a gel texture?', 'Is it safe during pregnancy?'],
+      recommendations: [{
+        product_id: 7,
+        reason: 'Lightweight and good for oily skin. Contains niacinamide and zinc oxide. Avoid contact with eyes.',
+        fit_summary: 'Fast-absorbing finish. Use it every morning before makeup; not for use during pregnancy.',
+      }],
+    })
+    assert.strictEqual(served.summary, 'Here is a good match for oily skin.')
+    assert.strictEqual(served.contact_note, 'Contact the store for more help.')
+    assert.deepStrictEqual(served.follow_up_questions, ['Do you prefer a gel texture?'])
+    assert.strictEqual(served.recommendations[0].reason, 'Lightweight and good for oily skin.')
+    assert.strictEqual(served.recommendations[0].fit_summary, 'Fast-absorbing finish.')
+  })
+
+  await check('a field made only of label facts is replaced by the read-the-label notice (summary) or emptied (reason)', async () => {
+    const served = serve({
+      summary: 'Apply twice daily. Safe for pregnancy.',
+      recommendations: [{ product_id: 7, reason: 'Ingredients: niacinamide, zinc oxide. Do not use near the eyes.', fit_summary: 'light texture' }],
+    })
+    assert.strictEqual(served.summary, NOTICE)
+    assert.strictEqual(served.recommendations[0].reason, '')
+    assert.strictEqual(served.recommendations[0].fit_summary, 'light texture')
+  })
+
+  await check('unparseable model text is filtered the same way', async () => {
+    const served = parseAssistantPayload('Great pick. Apply a pea-sized amount at night.', candidates(), 'disclaimer', true)
+    assert.strictEqual(served.summary, 'Great pick.')
+    assert.strictEqual(parseAssistantPayload('Ingredients: niacinamide.', candidates(), 'disclaimer', true).summary, NOTICE)
+  })
+
+  await check('Khmer label facts are dropped too', async () => {
+    const served = serve({
+      summary: 'សមស្របសម្រាប់ស្បែកប្រៃ។ ស្ត្រីមានផ្ទៃពោះមិនគួរប្រើ។ គ្រឿងផ្សំមាន niacinamide។',
+      recommendations: [{ product_id: 7, reason: 'ស្រាលនិងស្រូបលឿន។ របៀបប្រើ៖ លាបរៀងរាល់ព្រឹក។' }],
+    })
+    assert.strictEqual(served.summary, 'សមស្របសម្រាប់ស្បែកប្រៃ។')
+    assert.strictEqual(served.recommendations[0].reason, 'ស្រាលនិងស្រូបលឿន។')
+  })
+
+  await check('controls: the medical-advice redirect and ordinary product copy are served untouched', async () => {
+    const redirect = 'I am an automated shopping assistant and cannot give medical advice about pregnancy. Please ask a pharmacist or doctor.'
+    const served = serve({
+      summary: redirect,
+      recommendations: [{ product_id: 7, reason: 'A light, fast-absorbing daily sunscreen that suits oily skin.', fit_summary: 'Pairs well with the matching cleanser. Please read the product label for directions.' }],
+    })
+    assert.strictEqual(served.summary, redirect, 'the clinician redirect must survive the filter')
+    assert.strictEqual(served.recommendations[0].reason, 'A light, fast-absorbing daily sunscreen that suits oily skin.')
+    assert.strictEqual(served.recommendations[0].fit_summary, 'Pairs well with the matching cleanser. Please read the product label for directions.')
+  })
+
+  await check('the prompt no longer invites usage directions or ingredient talk, and says the filter exists', async () => {
+    const { prompt } = await ask(true)
+    assert.ok(!/how to use\/care/.test(prompt), 'SCOPE no longer offers how-to-use')
+    assert.ok(!/and how it is used/.test(prompt), 'the NO HEALTH line no longer asks for how a product is used')
+    assert.match(prompt, /do not write directions for use/)
+    assert.match(prompt, /point to the product label or the store team/)
+    assert.match(prompt, /Keep summary, reason and fit_summary to why the product fits/)
+  })
+
   if (failed) {
     console.error(`\n${failed} check(s) failed.`)
     process.exit(1)
