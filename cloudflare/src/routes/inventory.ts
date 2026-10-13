@@ -2008,6 +2008,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   let resolvedBatchId: number | null = batchIdRequested
   let lotCode: string | null = null
   let removedBatchQuantities: Array<{ batchId: number; quantity: number }> = []
+  // Units of the removal that no lot held (stock that predates lots); with removedBatchQuantities, the whole quantity.
+  let removedRemainder = 0
   let removalCostByBatch = new Map<number, number | null>()
   let addMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = preflightAddMovementCost
   let removeMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = null
@@ -2128,6 +2130,14 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
       fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
     })
+    // A removal no single lot covered is held as one row per source lot (each with its own lot and cost) plus one
+    // for units no lot held, so a later Restore puts every unit back where it came from.
+    const lotSplit = useBatchLedger && resolvedBatchId == null && removedBatchQuantities.length
+      ? [
+        ...removedBatchQuantities.map((entry) => ({ batchId: entry.batchId as number | null, quantity: entry.quantity, unitCostUsd: removalCostByBatch.get(entry.batchId) ?? null })),
+        ...(removedRemainder > 0.000000001 ? [{ batchId: null, quantity: removedRemainder, unitCostUsd: productCostSnapshot?.cost_price_usd ?? null }] : []),
+      ]
+      : undefined
     return planHoldAsTagged({
       productId: targetProductId,
       productName: targetProductName,
@@ -2135,6 +2145,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       branchName: branch?.name || null,
       batchId: useBatchLedger ? resolvedBatchId : null,
       quantity: Math.abs(delta),
+      lotSplit,
       tag,
       source: 'remove',
       reason,
@@ -2460,6 +2471,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       const allocations = batchIdRequested != null ? [{ batchId: batchIdRequested, quantity }] : capturedRemovalAllocations ?? []
       const plan = planRemoveStockAcrossBatches({ productId: targetProductId, branchId, quantity, allocations })
       removedBatchQuantities = plan.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) }))
+      removedRemainder = plan.remainder
       if (batchIdRequested != null) {
         resolvedBatchId = batchIdRequested
       } else {

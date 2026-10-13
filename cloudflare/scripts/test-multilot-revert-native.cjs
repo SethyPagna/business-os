@@ -331,6 +331,7 @@ function finish(finding) {
 //   --wrong=no-import-shares    mutant: the CSV import writes the movement but not its shares (M2, M5, M9b go RED)
 //   --wrong=ignore-shares       mutant: Revert ignores recorded shares (the pre-fix, aggregate-only Revert) (M1..M7, M9b go RED)
 //   --wrong=no-old-refusal      mutant: an old share-less removal on a lot-tracked product is reverted aggregate-only (M6 goes RED)
+//   --wrong=one-held-row        mutant: a multi-lot damaged hold writes ONE held row with no lot (the pre-fix shape) (M11 goes RED)
 //   --wrong=active-blind-precheck  mutant: the named-lot pre-check ignores pb.is_active again (R2 F8)           (M10 goes RED)
 //   --only=M1,M2                run just those cases (debugging aid)
 // Every mutant rewrites source text IN MEMORY at bundle time and fails loudly if its anchor is missing.
@@ -359,6 +360,11 @@ const PATCHES = {
     NO_OLD_REFUSAL,
   ],
   'no-old-refusal': [NO_OLD_REFUSAL],
+  'one-held-row': [
+    { name: 'one-held-row', file: 'src/lib/damagedLotActions.ts',
+      from: 'const rows = input.lotSplit?.length ? input.lotSplit',
+      to: 'const rows = false ? input.lotSplit' },
+  ],
   'active-blind-precheck': [
     { name: 'active-blind-precheck', file: 'src/routes/inventory.ts',
       from: 'CASE WHEN pb.is_active = 1 THEN COALESCE(bbs.quantity, 0) ELSE 0 END AS available',
@@ -385,7 +391,7 @@ async function seed(H, { lots = [5, 5], undated = 0 } = {}) {
   return { p, ids, name, barcode, total }
 }
 
-const OUT = new Set(['out', 'remove']), IN = new Set(['in', 'add'])
+const OUT = new Set(['out', 'remove', 'damage_out']), IN = new Set(['in', 'add'])
 const netMoved = movements => movements.reduce((sum, m) => sum + (OUT.has(m.t) ? -Number(m.q) : IN.has(m.t) ? Number(m.q) : 0), 0)
 
 async function snap(H, s) {
@@ -413,6 +419,10 @@ function expectLedgers(t, label, x, s, { lots, undated = 0 }) {
   t.eq(label + ': opening stock + signed movements', Math.round((s.total + netMoved(x.movements)) * 1e9) / 1e9, branch)
 }
 
+const held = async (H, s) => (await H.q('SELECT batch_id b, quantity q, quantity_remaining r, unit_cost_usd c FROM damaged_stock_lots WHERE product_id=? ORDER BY id', s.p))
+const heldRemaining = rows => rows.reduce((sum, row) => sum + row.r, 0)
+const taggedAction = (H, s, action, quantity, id) => H.api('POST', '/api/inventory/tagged-lots/' + action,
+  { productId: s.p, branchId: LC, conditionTag: 'damaged', quantity, reason: 'ML ' + action, client_request_id: 'ml-' + s.p + '-' + id })
 const revert = (H, id) => H.api('POST', '/api/inventory/movements/' + id + '/revert', {})
 const adjustRemove = (H, s, quantity, id, extra = {}) => H.api('POST', '/api/inventory/adjust',
   { productId: s.p, branchId: LC, type: 'remove', quantity, reason: 'ML remove', client_request_id: 'ml-' + s.p + '-' + id, ...extra })
@@ -665,7 +675,7 @@ async function main() {
     })
 
     // ------------------------------------------------------------------ M8: D1 statements per request (Paid 1000, Free 50)
-    await check('M8', 'D1 statement counts: 2, 5 and 10 lots on Paid, and 2 and 5 lots on Free, stay inside the invocation limit', 'medium', async (t) => {
+    await check('M8', 'D1 statement counts: Remove, Revert, Redo, damaged hold and Restore at 2, 5 and 10 lots on Paid, and 2 and 5 lots on Free, stay inside the invocation limit', 'medium', async (t) => {
       const counts = []
       for (const lotsCount of [2, 5, 10]) {
         const s = await seed(H, { lots: Array(lotsCount).fill(2) })
@@ -673,9 +683,13 @@ async function main() {
         const m1 = (await snap(H, s)).movements[0]
         const rev = await revert(H, m1.id)
         const redo = await revert(H, (await snap(H, s)).movements[1].id)
-        counts.push({ lots: lotsCount, remove: removed.d1, revert: rev.d1, redo: redo.d1 })
-        t.eq(lotsCount + ' lots: all three answered 200', [removed.status, rev.status, redo.status], [200, 200, 200])
-        t.ok(lotsCount + ' lots: inside the Paid limit of 1000', Math.max(removed.d1, rev.d1, redo.d1) <= 1000, counts[counts.length - 1])
+        // The damaged (kept-as-tagged) spread of the same size: the hold and the Restore.
+        const tagSeed = await seed(H, { lots: Array(lotsCount).fill(2) })
+        const hold = await adjustRemove(H, tagSeed, lotsCount * 2 - 1, 't' + lotsCount, { conditionTag: 'damaged' })
+        const restore = await taggedAction(H, tagSeed, 'restore', lotsCount * 2 - 1, 'tr' + lotsCount)
+        counts.push({ lots: lotsCount, remove: removed.d1, revert: rev.d1, redo: redo.d1, damagedHold: hold.d1, damagedRestore: restore.d1 })
+        t.eq(lotsCount + ' lots: all five answered 200', [removed.status, rev.status, redo.status, hold.status, restore.status], [200, 200, 200, 200, 200])
+        t.ok(lotsCount + ' lots: inside the Paid limit of 1000', Math.max(removed.d1, rev.d1, redo.d1, hold.d1, restore.d1) <= 1000, counts[counts.length - 1])
       }
       t.note('Paid, statements per request: ' + JSON.stringify(counts))
       F = await world({ plan: 'free', patches })
@@ -686,11 +700,75 @@ async function main() {
         const m1 = (await snap(F, s)).movements[0]
         const rev = await revert(F, m1.id)
         const redo = await revert(F, (await snap(F, s)).movements[1].id)
-        free.push({ lots: lotsCount, remove: removed.d1, revert: rev.d1, redo: redo.d1 })
-        t.eq('Free ' + lotsCount + ' lots: all three answered 200', [removed.status, rev.status, redo.status], [200, 200, 200])
-        t.ok('Free ' + lotsCount + ' lots: every request inside the Free limit of 50', Math.max(removed.d1, rev.d1, redo.d1) <= 50, free[free.length - 1])
+        const tagSeed = await seed(F, { lots: Array(lotsCount).fill(2) })
+        const hold = await adjustRemove(F, tagSeed, lotsCount * 2 - 1, 'ft' + lotsCount, { conditionTag: 'damaged' })
+        const restore = await taggedAction(F, tagSeed, 'restore', lotsCount * 2 - 1, 'ftr' + lotsCount)
+        free.push({ lots: lotsCount, remove: removed.d1, revert: rev.d1, redo: redo.d1, damagedHold: hold.d1, damagedRestore: restore.d1 })
+        t.eq('Free ' + lotsCount + ' lots: all five answered 200', [removed.status, rev.status, redo.status, hold.status, restore.status], [200, 200, 200, 200, 200])
+        t.ok('Free ' + lotsCount + ' lots: every request inside the Free limit of 50', Math.max(removed.d1, rev.d1, redo.d1, hold.d1, restore.d1) <= 50, free[free.length - 1])
       }
       t.note('Free, statements per request: ' + JSON.stringify(free))
+    })
+
+    // ------------------------------------------------------------------ M11: a damaged (kept-as-tagged) Remove spread across lots
+    // The held stock is a fourth place the units can sit, so the units are conserved across lot ledger + held rows:
+    // branch_stock = lot sum, and branch_stock + held = the opening 10 at every step. A Restore puts held units back where they came from.
+    await check('M11', 'a damaged Remove 7 across lots 5+5 holds one row per source lot (with its own cost); Restore puts each unit back on its lot', 'high', async (t) => {
+      const s = await seed(H, { lots: [5, 5] })
+      const tagged = await adjustRemove(H, s, 7, 'a', { conditionTag: 'damaged' })
+      const a1 = await snap(H, s)
+      const h1 = await held(H, s)
+      t.eq('tagged Remove answered', tagged.status, 200)
+      t.eq('the units left the lots and branch_stock (lot A first)', [a1.lots, a1.branch, a1.product], [[0, 3], 3, 3])
+      t.eq('the movement is the damage_out of 7 and names no single lot', a1.movements.map(m => [m.t, m.q, m.b]), [['damage_out', 7, null]])
+      t.eq('one held row per source lot, each carrying its own lot and cost', h1.map(r => [r.b, r.q, r.r, r.c]), [[s.ids[0], 5, 5, 3], [s.ids[1], 2, 2, 4]])
+      t.eq('held units + sellable units = the opening 10', a1.branch + heldRemaining(h1), 10)
+
+      const restored = await taggedAction(H, s, 'restore', 7, 'r')
+      const a2 = await snap(H, s)
+      const h2 = await held(H, s)
+      t.eq('Restore answered', restored.status, 200)
+      t.eq('every unit is back on the lot it came from: lots 5/5, branch 10, product 10', [a2.lots, a2.branch, a2.product], [[5, 5], 10, 10])
+      t.eq('lot ledger = branch_stock after the Restore', a2.lotsSum, a2.branch)
+      t.eq('nothing is held any more', heldRemaining(h2), 0)
+      t.eq('the same Restore again is a replay, not a second Restore', [(await taggedAction(H, s, 'restore', 7, 'r')).body.replayed, (await snap(H, s)).branch], [true, 10])
+    })
+    await check('M11b', 'a PARTIAL Restore of a multi-lot hold takes the oldest held row first and moves that lot, branch_stock and the product total together', 'high', async (t) => {
+      const s = await seed(H, { lots: [5, 5] })
+      await adjustRemove(H, s, 7, 'a', { conditionTag: 'damaged' })
+      const restored = await taggedAction(H, s, 'restore', 3, 'r')
+      const a = await snap(H, s)
+      const h = await held(H, s)
+      t.eq('Restore answered', restored.status, 200)
+      t.eq('3 units went back on lot A (the first held row), lot B untouched', [a.lots, a.branch, a.product], [[3, 3], 6, 6])
+      t.eq('lot ledger = branch_stock', a.lotsSum, a.branch)
+      t.eq('held rows: lot A 2 left, lot B 2', h.map(r => [r.b, r.r]), [[s.ids[0], 2], [s.ids[1], 2]])
+      t.eq('held units + sellable units = the opening 10', a.branch + heldRemaining(h), 10)
+      const disposed = await taggedAction(H, s, 'dispose', 2, 'd')
+      const a2 = await snap(H, s)
+      t.eq('Dispose answered and moved no sellable stock', [disposed.status, a2.lots, a2.branch, a2.product], [200, [3, 3], 6, 6])
+      t.eq('the 2 disposed came off the oldest held row', (await held(H, s)).map(r => [r.b, r.r]), [[s.ids[0], 0], [s.ids[1], 2]])
+    })
+    await check('M11c', 'control: a damaged Remove from a NAMED lot is one held row on that lot and its Restore already put the units back', 'control', async (t) => {
+      const s = await seed(H, { lots: [5, 5] })
+      const tagged = await adjustRemove(H, s, 3, 'a', { conditionTag: 'damaged', batchId: s.ids[1] })
+      const h = await held(H, s)
+      t.eq('tagged Remove answered', tagged.status, 200)
+      t.eq('one held row on the named lot', h.map(r => [r.b, r.q]), [[s.ids[1], 3]])
+      const restored = await taggedAction(H, s, 'restore', 3, 'r')
+      const a = await snap(H, s)
+      t.eq('Restore answered, lots back', [restored.status, a.lots, a.branch, a.product], [200, [5, 5], 10, 10])
+    })
+    await check('M11d', 'a damaged Remove of lot 5 + 3 undated units holds a lot row and an undated row; Restore puts the lot units on the lot and the rest branch-only', 'high', async (t) => {
+      const s = await seed(H, { lots: [5], undated: 3 })
+      const tagged = await adjustRemove(H, s, 7, 'a', { conditionTag: 'damaged' })
+      const h = await held(H, s)
+      t.eq('tagged Remove answered', tagged.status, 200)
+      t.eq('a held row for the lot units and one for the 2 undated units', h.map(r => [r.b, r.q]), [[s.ids[0], 5], [null, 2]])
+      const restored = await taggedAction(H, s, 'restore', 7, 'r')
+      const a = await snap(H, s)
+      t.eq('Restore answered', restored.status, 200)
+      expectLedgers(t, 'after the Restore', a, s, { lots: [5], undated: 3 })
     })
 
     // ------------------------------------------------------------------ M10 (R2 review F8): a named lot that is not active

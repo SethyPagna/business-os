@@ -17,11 +17,14 @@
 //   lot at the OTHER branch only                             -> untracked at this branch
 // Part 2, batch-less removals ('remove' / CSV 'out', not a Revert counter): reverted or not, on a
 // product with lots or not, with recorded lot shares or not.
+// Part 3, open held (damaged) rows made by a Remove with no lot, on a product that has lot rows: counted;
+// a held row on a lot, a returns-made one, a fully restored one and one on a product with no lots: not.
 // Negative controls (--wrong=<name>) rewrite the canonical SQL in memory and fail loudly if the anchor is missing; each must turn
 // exactly the checks it targets RED:
 //   --wrong=redo-counted         the root-removal filter is dropped: a Redo counter is counted as a removal (part 2)
 //   --wrong=untracked-is-split   a pair with no lot row counts as split: untracked aggregate stock is not a split (part 1)
 //   --wrong=dead-lot-tracks      an inactive empty lot makes a pair "have lots": the till ignores such a lot (part 1)
+//   --wrong=held-any-source      a returns-made held row is counted as a Remove's (part 3)
 // No network, no wrangler.
 'use strict'
 
@@ -100,6 +103,17 @@ movement(pHealthy, 1, 'remove', 1, { batchId: healthyLot })                     
 movement(pInactive, 1, 'remove', 1)                                                  // open, the product has a (dead) lot row
 const redo = reverted(pSplit, rSplitRevert, 'remove')                                  // a Redo counter: not a root removal
 
+// ---- Part 3 fixture ----------------------------------------------------------------------
+function held(productId, { source, batchId = null, remaining, quantity = 5 }) {
+  db.prepare(`INSERT INTO damaged_stock_lots (product_id, product_name, branch_id, batch_id, quantity, quantity_remaining, condition_tag, source)
+    VALUES (?, 'fixture', 1, ?, ?, ?, 'damaged', ?)`).run(productId, batchId, quantity, remaining, source)
+}
+held(pSplit, { source: 'remove', remaining: 3 })                          // counted: a Remove kept it, no lot, the product has lots
+held(pSplit, { source: 'remove', batchId: healthyLot, remaining: 2 })     // names a lot
+held(pHealthy, { source: 'return', remaining: 2 })                        // made by a return, not a Remove
+held(pHealthy, { source: 'remove', remaining: 0 })                        // fully restored or disposed
+held(pUntracked, { source: 'remove', remaining: 4 })                      // the product never had a lot
+
 ;(async () => {
   const guard = await load('ops/scripts/ops-sql-guard.mjs')
   const q = guard.loadQuery('branch-exceeds-lots')
@@ -108,6 +122,7 @@ const redo = reverted(pSplit, rSplitRevert, 'remove')                           
     'redo-counted': ["AND COALESCE(CAST(m.reference_id AS TEXT), '') NOT LIKE 'revert:%'", "AND COALESCE(CAST(m.reference_id AS TEXT), '') NOT LIKE 'zzz:%'"],
     'untracked-is-split': ['FROM pairs WHERE has_lots = 1 AND branch_quantity - lot_quantity > 0.000001', 'FROM pairs WHERE branch_quantity - lot_quantity > 0.000001'],
     'dead-lot-tracks': ['MAX(CASE WHEN pb.is_active = 1 OR bbs.quantity > 0 THEN 1 ELSE 0 END)', 'MAX(1)'],
+    'held-any-source': ["d.source = 'remove' AND d.batch_id IS NULL", 'd.batch_id IS NULL'],
   }
   let sql = q.sql
   if (wrong) {
@@ -122,7 +137,7 @@ const redo = reverted(pSplit, rSplitRevert, 'remove')                           
     assert.deepStrictEqual(q.rules, { minRows: 1, maxRows: 1, expectZero: null })
     assert.strictEqual(rows.length, 1)
     for (const [column, value] of Object.entries(rows[0])) {
-      assert.match(column, /^(pairs|products|removals)_[a-z0-9_]+$/, `only count columns: ${column}`)
+      assert.match(column, /^(pairs|products|removals|held_rows)_[a-z0-9_]+$/, `only count columns: ${column}`)
       assert.ok(Number.isInteger(value) && value >= 0, `${column} is a count: ${value}`)
     }
   })
@@ -145,6 +160,10 @@ const redo = reverted(pSplit, rSplitRevert, 'remove')                           
     assert.strictEqual(row.removals_batchless_reverted_lot_product, 1, 'the plain removal is on a product that never had a lot')
     assert.strictEqual(row.removals_batchless_reverted_on_split_pairs, 1)
     assert.strictEqual(row.removals_batchless_open_lot_product_no_shares, 2, 'the open CSV removal and the one beside an inactive lot; the shared one is excluded')
+  })
+
+  await check('part 3: only an open, lot-less, Remove-made held row on a product with lots is counted', () => {
+    assert.strictEqual(rows[0].held_rows_open_remove_batchless_lot_product, 1)
   })
 
   await check('a Revert counter of a Revert counter does not make its root look reverted twice', () => {

@@ -36,6 +36,14 @@
 --                                           with revert_lots_not_recorded (Add stock with
 --                                           the received date is the way back)
 --
+-- Part 3: kept-as-tagged (damaged) holds. A Remove that kept its units as a tagged row now writes one
+-- held row per source lot, so Restore puts every unit back on its lot. A held row written BEFORE
+-- that has no lot (batch_id NULL): its Restore adds the units to branch_stock only.
+--   held_rows_open_remove_batchless_lot_product  open (quantity_remaining > 0) held rows made by a
+--                                           Remove (source 'remove') with no lot, on a product that
+--                                           has lot rows: a Restore of one of these still leaves
+--                                           branch_stock above the lots (old rows are not rewritten)
+--
 -- One row of counts; no names, phones or amounts per row, and the counts reach only the
 -- encrypted artifact.
 -- ops:min-rows 1
@@ -84,4 +92,6 @@ SELECT
   (SELECT COUNT(*) FROM removals WHERE is_reverted = 1) AS removals_batchless_reverted,
   (SELECT COUNT(*) FROM removals WHERE is_reverted = 1 AND product_has_lots = 1) AS removals_batchless_reverted_lot_product,
   (SELECT COUNT(*) FROM removals WHERE is_reverted = 1 AND product_has_lots = 1 AND on_split_pair = 1) AS removals_batchless_reverted_on_split_pairs,
-  (SELECT COUNT(*) FROM removals WHERE is_reverted = 0 AND product_has_lots = 1 AND has_shares = 0) AS removals_batchless_open_lot_product_no_shares
+  (SELECT COUNT(*) FROM removals WHERE is_reverted = 0 AND product_has_lots = 1 AND has_shares = 0) AS removals_batchless_open_lot_product_no_shares,
+  (SELECT COUNT(*) FROM damaged_stock_lots d WHERE d.source = 'remove' AND d.batch_id IS NULL AND d.quantity_remaining > 0
+    AND EXISTS (SELECT 1 FROM product_batches pb WHERE pb.variant_product_id = d.product_id)) AS held_rows_open_remove_batchless_lot_product
