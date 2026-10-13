@@ -145,6 +145,7 @@ import {
   type CancelReason,
   type SaleItemAllocation,
   addImportedReturnedQuantities,
+  importedReturnedQuantitySql,
 } from '../lib/saleTransitions'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
 import { computeSaleTotals, round2, newSaleMoney4, assertCanonicalSaleChildren } from '../lib/saleTotals'
@@ -5871,6 +5872,11 @@ app.get('/', async (c) => {
             AND allocated_batch.variant_product_id = si.product_id
           WHERE sia.sale_item_id = si.id AND sia.quantity > 0
         )) AS batch_received_at,
+        -- Recorded returns of this line plus the units the sales import says
+        -- already came back (RET-B F4: sale_items.returned_quantity, restocked
+        -- by the import itself). The alias shadows the raw column, so the
+        -- imported part is also sent on its own for the return screen, which
+        -- re-reads the recorded returns and adds only this.
         COALESCE((
           SELECT SUM(ri.quantity)
           FROM return_items ri
@@ -5878,7 +5884,8 @@ app.get('/', async (c) => {
           WHERE ri.sale_item_id = si.id
             AND COALESCE(item_return.status, 'completed') != 'cancelled'
             AND COALESCE(item_return.return_scope, 'customer') = 'customer'
-        ), 0) AS returned_quantity,
+        ), 0) + ${importedReturnedQuantitySql('si')} AS returned_quantity,
+        ${importedReturnedQuantitySql('si')} AS imported_returned_quantity,
         -- Does this line still know which lot(s) it drew from? A multi-lot
         -- line carries batch_id NULL and keeps the answer here instead, so a
         -- return of it must NOT be treated as "lot unknown" and asked to pick

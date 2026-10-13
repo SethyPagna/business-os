@@ -10,7 +10,7 @@ const root = path.join(__dirname, '..')
 const cache = new Map()
 const actual = new Set(['branchEffect', 'branchRoles', 'sqlBinding', 'saleStatusResolution','actorSnapshot','movementBranchName','db', 'permissions', 'saleRecords', 'saleRecordEvents',
   'moneyPrecision', 'saleMoneyPrecision', 'refundMoneyPrecision', 'promotionRules', 'saleItemPricing',
-  'customerReturnEntitlement', 'returnBulkAction', 'returnCreateAction'])
+  'customerReturnEntitlement', 'returnBulkAction', 'returnCreateAction', 'saleTransitions'])
 
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
