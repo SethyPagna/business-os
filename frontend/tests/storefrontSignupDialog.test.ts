@@ -4,7 +4,13 @@
 //      the account is created only from the dialog's Confirm;
 //   2. the owner's sign-up switch (customer_portal_signup_enabled, public
 //      config signupEnabled) hides the Sign up tab and says so, EN and KM,
-//      while sign-in stays;
+//      while sign-in stays. Sign-up is OFF unless the server says exactly
+//      true (owner ruling 6 Oct): no prop or a config without the field (first
+//      paint, a failed bootstrap) shows no Sign up tab;
+//   2b. a sign-up the server refused as paused (403 portal_signup_paused)
+//      carries its code through the real transport and usePortalAccount,
+//      closes the Sign up tab and is announced in the visitor's language,
+//      not server English;
 //   3. an AI chat refused by the daily budget carries its code to the page,
 //      which shows the EN/KM "today's limit" line instead of server English.
 //
@@ -65,26 +71,100 @@ const PAUSED = {
   km: 'ការបង្កើតគណនីថ្មីត្រូវបានផ្អាកសិន។ សមាជិកដែលមានស្រាប់អាចចូលគណនីខាងក្រោម។',
 }
 
+const SERVER_PAUSED_EN = 'New accounts are paused. Existing members can still sign in.'
 for (const language of ['en', 'km'] as const) {
   const copy = copyFor(language)
   const signUpLabel = copy('signUp', 'Sign up')
   const signInLabel = copy('signIn', 'Sign in')
-  await check(`${language}: the Sign up tab shows by default and disappears when the owner pauses sign-ups`, () => {
-    const open = renderToStaticMarkup(React.createElement(CatalogAccountSection, { ...baseProps, copy }))
-    assert.ok(visibleText(open).includes(signUpLabel), 'Sign up tab present by default')
+  const assertPaused = (html: string, why: string) => {
+    const text = visibleText(html)
+    assert.ok(!text.includes(signUpLabel), `no Sign up tab: ${why}`)
+    assert.ok(text.includes(PAUSED[language]), `the ${language} paused line is shown: ${why}`)
+    assert.ok(text.includes(signInLabel), `sign-in stays: ${why}`)
+    assert.match(html, /autoComplete="current-password"|autocomplete="current-password"/i, `the sign-in form is rendered: ${why}`)
+  }
+  await check(`${language}: no Sign up tab unless the owner turned sign-up on (missing or false)`, () => {
+    assertPaused(renderToStaticMarkup(React.createElement(CatalogAccountSection, { ...baseProps, copy })), 'no signupEnabled prop (config without the field)')
+    assertPaused(renderToStaticMarkup(React.createElement(CatalogAccountSection, { ...baseProps, copy, signupEnabled: false })), 'signupEnabled false')
+    const open = renderToStaticMarkup(React.createElement(CatalogAccountSection, { ...baseProps, copy, signupEnabled: true }))
+    assert.ok(visibleText(open).includes(signUpLabel), 'Sign up tab present when the owner turned it on')
     assert.doesNotMatch(open, /data-portal-signup-paused/)
-    const paused = renderToStaticMarkup(React.createElement(CatalogAccountSection, { ...baseProps, copy, signupEnabled: false }))
-    const text = visibleText(paused)
-    assert.ok(!text.includes(signUpLabel), 'no Sign up tab while paused')
-    assert.ok(text.includes(PAUSED[language]), `the ${language} paused line is shown`)
-    assert.ok(text.includes(signInLabel), 'sign-in stays')
-    assert.match(paused, /autoComplete="current-password"|autocomplete="current-password"/i, 'the sign-in form is rendered')
+  })
+  await check(`${language}: a sign-up refused as paused closes the Sign up tab and is announced in the visitor's language`, () => {
+    const html = renderToStaticMarkup(React.createElement(CatalogAccountSection, { ...baseProps, copy, signupEnabled: true, error: SERVER_PAUSED_EN, errorCode: 'portal_signup_paused' }))
+    assertPaused(html, 'server answered portal_signup_paused')
+    const alert = /<div[^>]*role="alert"[^>]*>([\s\S]*?)<\/div>/.exec(html)
+    assert.ok(alert, 'the refusal is announced (role=alert)')
+    assert.equal(visibleText(alert[1]), PAUSED[language], 'the alert says the paused line, translated')
+    if (language === 'km') assert.ok(!visibleText(html).includes(SERVER_PAUSED_EN), 'no server English on a Khmer page')
+    assert.equal(visibleText(html).split(PAUSED[language]).length - 1, 1, 'said once, not twice')
+    const other = renderToStaticMarkup(React.createElement(CatalogAccountSection, { ...baseProps, copy, signupEnabled: true, error: 'Invalid sign-in details. Please check and try again.', errorCode: 'invalid_credentials' }))
+    assert.ok(visibleText(other).includes('Invalid sign-in details. Please check and try again.'), 'other refusals keep their message')
+    assert.ok(visibleText(other).includes(signUpLabel), 'and leave the Sign up tab alone')
   })
 }
 
-await check('the storefront passes the public signupEnabled to the drawer', () => {
-  const page = fs.readFileSync(path.join(SRC, 'components/catalog/PublicCatalogPage.tsx'), 'utf8')
-  assert.match(page, /signupEnabled=\{displayConfig\.signupEnabled !== false\}/)
+await check('the storefront opens sign-up only on an explicit true and hands the refusal code to the drawer', () => {
+  const page = fs.readFileSync(path.join(SRC, 'components/catalog/PublicCatalogPage.tsx'), 'utf8').replace(/\r\n/g, '\n')
+  assert.match(page, /signupEnabled=\{displayConfig\.signupEnabled === true\}/)
+  assert.match(page, /errorCode=\{portalAccount\.errorCode\}/)
+  const start = page.indexOf('const DEFAULT_PUBLIC_CONFIG')
+  const defaults = page.slice(start, page.indexOf('\n}\n', start))
+  assert.ok(start > 0 && defaults.length > 0, 'DEFAULT_PUBLIC_CONFIG found')
+  assert.doesNotMatch(defaults, /signupEnabled\s*:/, 'the page default has no sign-up answer of its own')
+  const paint = fs.readFileSync(path.join(SRC, 'components/catalog/publicFirstPaint.ts'), 'utf8').replace(/\r\n/g, '\n')
+  assert.doesNotMatch(paint, /signupEnabled\s*:/, 'first paint carries no sign-up answer, so it paints the paused state until /bootstrap says true')
+})
+
+await check('usePortalAccount keeps the server refusal code from the real transport, and clearError drops it', async () => {
+  const bundle = buildSync({
+    entryPoints: [path.join(SRC, 'components/catalog/portalAccount.ts')],
+    bundle: true, platform: 'node', format: 'cjs', external: ['react'], write: false, logLevel: 'silent',
+  })
+  // A minimal hook runtime: state cells keyed by call order, re-read by calling the hook again.
+  const cells: unknown[] = []
+  let cursor = 0
+  const reactStub = {
+    useState: (init: unknown) => {
+      const at = cursor++
+      if (!(at in cells)) cells[at] = typeof init === 'function' ? (init as () => unknown)() : init
+      return [cells[at], (next: unknown) => { cells[at] = typeof next === 'function' ? (next as (v: unknown) => unknown)(cells[at]) : next }]
+    },
+    useRef: (value: unknown) => { const at = cursor++; if (!(at in cells)) cells[at] = { current: value }; return cells[at] },
+    useCallback: (fn: unknown) => { cursor++; return fn },
+    useEffect: () => { cursor++ },
+  }
+  const mod = { exports: {} as Record<string, unknown> }
+  new Function('require', 'module', 'exports', bundle.outputFiles[0].text)((id: string) => { assert.equal(id, 'react'); return reactStub }, mod, mod.exports)
+  const usePortalAccount = mod.exports.usePortalAccount as (b: unknown, w: unknown) => Record<string, unknown>
+  const bucket = { items: [], setAll() {} }
+  const wishlist = { items: [], setAll() {} }
+  const render = () => { cursor = 0; return usePortalAccount(bucket, wishlist) }
+
+  const realFetch = globalThis.fetch
+  const globals = globalThis as Record<string, unknown>
+  const realWindow = globals.window
+  let answer = { status: 403, body: { error: SERVER_PAUSED_EN, code: 'portal_signup_paused' } as Record<string, unknown> }
+  globalThis.fetch = (async () => new Response(JSON.stringify(answer.body), { status: answer.status, headers: { 'Content-Type': 'application/json' } })) as typeof fetch
+  try {
+    const transport = await import('../src/api/portalPublicTransport.ts')
+    globals.window = { location: { origin: 'https://shop.example' }, api: transport }
+    const first = render()
+    assert.equal(await (first.signUp as (p: unknown) => Promise<boolean>)({ name: 'x' }), false)
+    let state = render()
+    assert.equal(state.errorCode, 'portal_signup_paused', 'the paused code reaches the drawer')
+    assert.equal(state.error, SERVER_PAUSED_EN)
+    ;(state.clearError as () => void)()
+    state = render()
+    assert.equal(state.errorCode, '', 'clearError drops the code with the message')
+    answer = { status: 401, body: { error: 'Invalid sign-in details. Please check and try again.', code: 'invalid_credentials' } }
+    await (state.signIn as (p: unknown) => Promise<boolean>)({ phone: 'x' })
+    state = render()
+    assert.equal(state.errorCode, 'invalid_credentials')
+  } finally {
+    globalThis.fetch = realFetch
+    globals.window = realWindow
+  }
 })
 
 await check('an AI chat refused by the daily budget keeps its code and is shown in the visitor\'s language', async () => {
