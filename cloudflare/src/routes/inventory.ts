@@ -2131,10 +2131,11 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
     })
     // A removal no single lot covered is held as one row per source lot (each with its own lot and cost) plus one
-    // for units no lot held, so a later Restore puts every unit back where it came from.
+    // for units no lot held, so a later Restore puts every unit back where it came from. A lot with no unit cost takes
+    // the product cost of today, as the remainder row does; otherwise Dispose prices it at the catalog cost of that later day.
     const lotSplit = useBatchLedger && resolvedBatchId == null && removedBatchQuantities.length
       ? [
-        ...removedBatchQuantities.map((entry) => ({ batchId: entry.batchId as number | null, quantity: entry.quantity, unitCostUsd: removalCostByBatch.get(entry.batchId) ?? null })),
+        ...removedBatchQuantities.map((entry) => ({ batchId: entry.batchId as number | null, quantity: entry.quantity, unitCostUsd: removalCostByBatch.get(entry.batchId) ?? productCostSnapshot?.cost_price_usd ?? null })),
         ...(removedRemainder > 0.000000001 ? [{ batchId: null, quantity: removedRemainder, unitCostUsd: productCostSnapshot?.cost_price_usd ?? null }] : []),
       ]
       : undefined
