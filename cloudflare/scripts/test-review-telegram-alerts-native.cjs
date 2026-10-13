@@ -33,6 +33,7 @@
 //   --wrong=confirm-not-passed    the approve body's confirm_merge_into never reaches the applier
 //   --wrong=coded-refusal-500     a ReviewCodedRefusal falls through to the generic 500
 //   --wrong=refusal-any-status    any status is accepted as a coded refusal (a 418 would be sent as such)
+//   --wrong=bidi-kept            a typed name keeps its direction-control characters
 //   --wrong=targets-ignored      ?fields=targets is ignored: the full rows (payloads included) come back
 //   --wrong=details-last          the refusal's details are spread after success / error / code and can overwrite them
 //   --wrong=merged-ignored        outcome.mergedInto is never read: the Merged row is missing
@@ -375,6 +376,9 @@ const PATCHES = {
   'details-last': [
     { name: 'details-last', file: QUEUE, from: '  return { body: { ...extra, success: false, error: err.message, code }, status }', to: '  return { body: { success: false, error: err.message, code, ...extra }, status }' },
   ],
+  'bidi-kept': [
+    { name: 'bidi-kept', file: ALERT, from: "return String(value ?? '').replace(BIDI_CONTROLS, '').replace(", to: "return String(value ?? '').replace(" },
+  ],
   'targets-ignored': [
     { name: 'targets-all', file: QUEUE, from: '  const options = { status, section }\n  const rows = fields === \'targets\' ? await listPendingActionTargets(c.env, options) : await listPendingActions(c.env, options)',
       to: '  const options = { status, section }\n  const rows = await listPendingActions(c.env, options)' },
@@ -498,6 +502,16 @@ async function main() {
     t.ok('and never ends on a bare coeng', !/្…?$/.test(khmer))
     t.eq('a blank reason is no row', lib.reviewAlertReason('   '), null)
     t.eq('a name is one line of at most 80', Array.from(lib.reviewAlertName('n'.repeat(200) + '\nsecond')).length, 80)
+    // Direction controls would let a typed name reorder the row around it; all of them go, other text (Khmer, a zero-width space) stays.
+    const bidi = ['\u061c', '\u200e', '\u200f', '\u202a', '\u202b', '\u202c', '\u202d', '\u202e', '\u2066', '\u2067', '\u2068', '\u2069']
+    for (const mark of bidi) {
+      t.eq('name: U+' + mark.charCodeAt(0).toString(16) + ' is dropped', lib.reviewAlertName('Lip' + mark + 'Tint'), 'LipTint')
+      t.eq('reason: U+' + mark.charCodeAt(0).toString(16) + ' is dropped', lib.reviewAlertReason('dup' + mark + 'licate'), 'duplicate')
+    }
+    t.eq('a name made only of direction controls is no name', lib.reviewAlertName('\u202e\u2066'), null)
+    t.eq('Khmer with a zero-width space is kept whole', lib.reviewAlertName('ស្រី\u200bស្អាត'), 'ស្រី\u200bស្អាត')
+    const flipped = lib.formatReviewAlert({ kind: 'created', row: row({ requested_by_name: 'so\u202ekha' }) }, lib.reviewAlertName('Tint\u202e'))
+    t.eq('no direction control reaches any row', flipped.lines.filter(line => /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/.test(line)), [])
   })
 
   await check('P2', 'requestDefer: deferred inside a request scope, awaited outside one, never rejects', 'high', async t => {
@@ -1002,6 +1016,15 @@ async function main() {
         t.ok('no summary text', !/Delete fee #|Update product #|Create product/.test(text), text)
         t.ok('no full name', !/Longname|Fullname|Sok Dara|Dara Reviewer/.test(text), text)
       }
+      // A direction control typed into a name or a reason is dropped before it reaches the group.
+      await reset()
+      const bidiFee = await queueFeeDelete('Pay\u202e Rent')
+      await H.api('POST', `/api/review/${bidiFee.pendingId}/reject`, { reason: 'dup\u2067licate' }, { as: 'dara' })
+      const bidiTexts = await H.tg.texts()
+      t.eq('a created and a rejected message', bidiTexts.length, 2)
+      for (const text of bidiTexts) t.ok('no direction control in the message', !/[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/.test(text), text)
+      t.ok('the name survives without the control', bidiTexts.every(text => text.includes('Pay Rent')), bidiTexts)
+      t.ok('the reason survives without the control', bidiTexts[1] && bidiTexts[1].includes('duplicate'), bidiTexts[1])
     })
 
     await check('C15', 'D1 statements: what each alert costs a request (printed; asserted at most 2)', 'high', async t => {

@@ -93,9 +93,11 @@ export const REVIEW_ALERT_HEADINGS: Record<ReviewAlertKind, string> = {
 export const REVIEW_NAME_MAX = 80
 export const REVIEW_REASON_ALERT_MAX = 120
 
-/** One line of plain text: control characters and runs of whitespace become one space. Null when nothing is left. */
+const BIDI_CONTROLS = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g
+
+/** One line of plain text: direction controls are dropped (one could flip the row's order), other control characters and runs of whitespace become one space. */
 function singleLine(value: unknown): string {
-  return String(value ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').replace(/\s+/g, ' ').trim()
+  return String(value ?? '').replace(BIDI_CONTROLS, '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
 /** An account name or a record name: one line, at most REVIEW_NAME_MAX characters. */
