@@ -12,7 +12,8 @@ new Function('exports', 'require', compiled)(apiModule.exports, (name: string) =
   route: (_key: string, run: () => unknown) => run(),
 } : { SYNC: { REQUEST_TIMEOUT_MS: 12000 } })
 for (const mode of ['sales', 'products', 'all']) {
-  for (const options of [{}, { confirm: 'WRONG', acknowledged: true }, { confirm: { sales: 'RESET SALES', products: 'RESET PRODUCTS', all: 'DELETE ALL DATA' }[mode] }]) {
+  const phrase = { sales: 'RESET SALES', products: 'RESET PRODUCTS', all: 'DELETE ALL DATA' }[mode]
+  for (const options of [{}, { confirm: 'WRONG', acknowledged: true }, { confirm: 'WRONG', acknowledged: true, currentPassword: 'fixture' }, { confirm: phrase }, { confirm: phrase, currentPassword: 'fixture' }, { confirm: phrase, acknowledged: true }, { confirm: phrase, acknowledged: true, currentPassword: '' }]) {
     await assert.rejects(apiModule.exports.resetData(mode, options))
     assert.equal(calls.length, 0, 'invalid acknowledgement never sends a request')
   }
@@ -20,13 +21,20 @@ for (const mode of ['sales', 'products', 'all']) {
 await assert.rejects(apiModule.exports.factoryReset({ confirm: 'FACTORY RESET', currentPassword: 'fixture' }))
 assert.equal(calls.length, 0)
 for (const [mode, confirm] of [['sales', 'RESET SALES'], ['products', 'RESET PRODUCTS'], ['all', 'DELETE ALL DATA']]) {
-  await apiModule.exports.resetData(mode, { confirm, acknowledged: true })
-  assert.deepEqual(calls.at(-1)?.[2], { mode, confirm, acknowledged: true })
+  await apiModule.exports.resetData(mode, { confirm, acknowledged: true, currentPassword: 'fixture' })
+  assert.deepEqual(calls.at(-1)?.[2], { mode, confirm, acknowledged: true, currentPassword: 'fixture' })
 }
-await assert.rejects(apiModule.exports.resetData('unknown', { confirm: 'RESET SALES', acknowledged: true }))
+await assert.rejects(apiModule.exports.resetData('unknown', { confirm: 'RESET SALES', acknowledged: true, currentPassword: 'fixture' }))
+const sentBeforeSection = calls.length
+for (const confirmation of [{}, { confirm: 'RESET CUSTOMERS' }, { confirm: 'RESET CUSTOMERS', acknowledged: true }, { confirm: 'RESET CUSTOMERS', currentPassword: 'fixture' }, { acknowledged: true, currentPassword: 'fixture' }, { confirm: 'RESET CUSTOMERS', acknowledged: true, currentPassword: '' }]) {
+  await assert.rejects(apiModule.exports.resetSection('customers', confirmation))
+}
+assert.equal(calls.length, sentBeforeSection, 'a page reset missing the phrase, acknowledgement or password never sends a request')
+await apiModule.exports.resetSection('customers', { confirm: 'RESET CUSTOMERS', acknowledged: true, currentPassword: 'fixture' })
+assert.deepEqual(calls.at(-1)?.[2], { section: 'customers', confirm: 'RESET CUSTOMERS', acknowledged: true, currentPassword: 'fixture' })
 await apiModule.exports.factoryReset({ confirm: 'FACTORY RESET', acknowledged: true, currentPassword: 'fixture' })
 assert.equal((calls.at(-1)?.[2] as any).acknowledged, true)
-console.log('PASS reset API refuses missing acknowledgement/wrong phrases; valid mode/factory payloads preserve acknowledgement')
+console.log('PASS reset API refuses missing acknowledgement/wrong phrases/missing password; valid mode/section/factory payloads preserve acknowledgement and password')
 
 let states: any[] = [], cursor = 0
 const react = {
@@ -61,7 +69,7 @@ for (const account of [{ username: 'other', role_code: 'admin' }, { username: 'a
     states = []
     const prompt = confirmation(render(panel))
     assert.equal(prompt.props.allowed, false)
-    await prompt.props.onConfirm({ confirm: panel === 'ResetData' ? 'RESET SALES' : 'RESET PRODUCTS', acknowledged: true })
+    await prompt.props.onConfirm({ confirm: panel === 'ResetData' ? 'RESET SALES' : 'RESET PRODUCTS', acknowledged: true, currentPassword: 'fixture' })
     assert.equal(requests.length, 0, 'other admin/full-grant account cannot reset stock')
   }
   states = [2, 'FACTORY RESET', true, 'fixture']
@@ -72,18 +80,24 @@ for (const account of [{ username: 'other', role_code: 'admin' }, { username: 'a
 user = { username: ' ADMIN ', role_code: ' Admin ' }
 for (const panel of ['ResetData', 'SectionReset']) {
   states = []
-  await confirmation(render(panel)).props.onConfirm({ confirm: panel === 'ResetData' ? 'RESET SALES' : 'RESET PRODUCTS' })
+  await confirmation(render(panel)).props.onConfirm({ confirm: panel === 'ResetData' ? 'RESET SALES' : 'RESET PRODUCTS', currentPassword: 'fixture' })
   assert.equal(requests.length, 0)
 }
+for (const panel of ['ResetData', 'SectionReset']) {
+  states = []
+  assert.equal(confirmation(render(panel)).props.requirePassword, true, 'the reset dialog asks for the current password')
+  await confirmation(render(panel)).props.onConfirm({ confirm: panel === 'ResetData' ? 'RESET SALES' : 'RESET PRODUCTS', acknowledged: true })
+  assert.equal(requests.length, 0, 'a submit without the password never reaches the API')
+}
 states = []
-await confirmation(render('ResetData')).props.onConfirm({ confirm: 'RESET SALES', acknowledged: true })
-assert.deepEqual(requests.pop(), ['sales', { confirm: 'RESET SALES', acknowledged: true }])
+await confirmation(render('ResetData')).props.onConfirm({ confirm: 'RESET SALES', acknowledged: true, currentPassword: 'fixture' })
+assert.deepEqual(requests.pop(), ['sales', { confirm: 'RESET SALES', acknowledged: true, currentPassword: 'fixture' }])
 states = ['all']
-await confirmation(render('ResetData')).props.onConfirm({ confirm: 'DELETE ALL DATA', acknowledged: true })
-assert.deepEqual(requests.pop(), ['all', { confirm: 'DELETE ALL DATA', acknowledged: true }])
+await confirmation(render('ResetData')).props.onConfirm({ confirm: 'DELETE ALL DATA', acknowledged: true, currentPassword: 'fixture' })
+assert.deepEqual(requests.pop(), ['all', { confirm: 'DELETE ALL DATA', acknowledged: true, currentPassword: 'fixture' }])
 states = []
-await confirmation(render('SectionReset')).props.onConfirm({ confirm: 'RESET PRODUCTS', acknowledged: true })
-assert.deepEqual(requests.pop(), ['products', { includeMovements: false, includeSales: false, includeImages: false, confirm: 'RESET PRODUCTS', acknowledged: true }])
+await confirmation(render('SectionReset')).props.onConfirm({ confirm: 'RESET PRODUCTS', acknowledged: true, currentPassword: 'fixture' })
+assert.deepEqual(requests.pop(), ['products', { includeMovements: false, includeSales: false, includeImages: false, confirm: 'RESET PRODUCTS', acknowledged: true, currentPassword: 'fixture' }])
 for (const ack of [false, true]) {
   states = [2, 'FACTORY RESET', ack, 'fixture']
   const button = nodes(render('FactoryReset')).find(node => node.type === 'button' && node.props.onClick?.name === 'doFactoryReset')
@@ -94,7 +108,9 @@ for (const ack of [false, true]) {
 user = { username: 'other', role_code: 'manager' }
 states = ['customers']
 await confirmation(render('SectionReset')).props.onConfirm({ confirm: 'RESET CUSTOMERS', acknowledged: true })
-assert.deepEqual(requests.pop(), ['customers'], 'ordinary resetSection permission behavior remains unchanged')
+assert.equal(requests.length, 0, 'a page reset without the password never reaches the API')
+await confirmation(render('SectionReset')).props.onConfirm({ confirm: 'RESET CUSTOMERS', acknowledged: true, currentPassword: 'fixture' })
+assert.deepEqual(requests.pop(), ['customers', { confirm: 'RESET CUSTOMERS', acknowledged: true, currentPassword: 'fixture' }], 'ordinary resetSection permission behavior remains unchanged: no built-in-admin gate, the password rides along')
 console.log('PASS real reset components reject other admins/full grants and admit normalized built-in account')
 
 let accepted: any
@@ -118,4 +134,22 @@ assert.equal(button.props.disabled, false)
 button.props.onClick()
 assert.deepEqual(accepted, { confirm: 'RESET SALES', acknowledged: true })
 console.log('PASS existing warning→typed stage records first acknowledgement without extra modal')
+
+accepted = undefined
+const passwordProps = { ...props, requirePassword: true, username: 'admin' }
+states = [2, 'RESET SALES', true, '']
+button = nodes(render('ConfirmReset', passwordProps)).find(node => node.type === 'button' && node.props.className.includes('text-white'))
+assert.equal(button.props.disabled, true, 'phrase and acknowledgement alone do not enable a password-requiring reset')
+button.props.onClick()
+assert.equal(accepted, undefined)
+tree = render('ConfirmReset', passwordProps)
+const passwordInput = nodes(tree).find(node => node.type === 'input' && node.props.type === 'password')
+assert.ok(passwordInput, 'the dialog asks for the current password')
+passwordInput.props.onChange({ target: { value: 'fixture' } })
+tree = render('ConfirmReset', passwordProps)
+button = nodes(tree).find(node => node.type === 'button' && node.props.className.includes('text-white'))
+assert.equal(button.props.disabled, false)
+button.props.onClick()
+assert.deepEqual(accepted, { confirm: 'RESET SALES', acknowledged: true, currentPassword: 'fixture' })
+console.log('PASS password-requiring confirmation stays disabled until the password is typed and forwards it')
 ;(globalThis as any).window = originalWindow
