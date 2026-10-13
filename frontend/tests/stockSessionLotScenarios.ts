@@ -1,13 +1,6 @@
-// The lots a Stock Session line can start on, as the Worker sends them for one
-// product at one branch (oldest received first, undated lots last), with the lot
-// a freshly picked Remove or Set line must start on. Shared by
-// stockSessionDefaultLot.test.ts and by a base-versus-fixed comparison, so the
-// table printed for a review is the table the test asserts.
-//
-// The rule behind every row: Remove starts on the OLDEST lot (it mirrors FIFO),
-// Set on the NEWEST, told apart by the received timestamp and never by where the
-// lot sits in a list; a lot holding stock always beats an empty one, so a count
-// never silently starts on a lot with nothing in it unless every lot is empty.
+// Lots for one product at one branch, in the Worker's order (oldest first, undated last), with the lot a new
+// Remove or Set line must start on. Shared by stockSessionDefaultLot.test.ts and the base-versus-fixed comparison.
+// Rule: Remove starts on the oldest lot, Set on the newest (by received time, never list position); a lot with stock beats an empty one.
 
 export type ScenarioLot = {
   id: number
@@ -22,6 +15,8 @@ export type LotStart = number | 'none'
 export type LotScenario = {
   name: string
   lots: ScenarioLot[]
+  /** The session's shared received date; it defaults to today, so it is not a choice the person made. */
+  sharedDate?: string
   remove: LotStart
   set: LotStart
 }
@@ -65,6 +60,16 @@ export const LOT_SCENARIOS: LotScenario[] = [
     ],
     remove: 1,
     set: 3,
+  },
+  {
+    name: 'same day, times run against the ids',
+    lots: [
+      { id: 1, quantity: 5, received_at: '2026-10-10 09:00:00' },
+      { id: 2, quantity: 5, received_at: '2026-10-10 05:00:00' },
+      { id: 3, quantity: 5, received_at: '2026-10-10 01:00:00' },
+    ],
+    remove: 3,
+    set: 1,
   },
   {
     name: 'same day, newest lot empty',
@@ -155,6 +160,67 @@ export const LOT_SCENARIOS: LotScenario[] = [
     ],
     remove: 5,
     set: 5,
+  },
+  {
+    name: 'shared date is the day of an empty lot, an older lot has stock',
+    lots: [
+      { id: 1, quantity: 4, received_at: '2026-08-20 03:00:00' },
+      { id: 7, quantity: 0, received_at: '2026-09-01 03:00:00' },
+    ],
+    sharedDate: '2026-09-01',
+    remove: 1,
+    set: 1,
+  },
+  {
+    name: 'shared date, two stocked lots the same day',
+    lots: [
+      { id: 6, quantity: 3, received_at: '2026-09-01 02:00:00' },
+      { id: 7, quantity: 3, received_at: '2026-09-01 10:00:00' },
+    ],
+    sharedDate: '2026-09-01',
+    remove: 6,
+    set: 7,
+  },
+  {
+    name: 'shared date, same-day newest lot empty',
+    lots: [
+      { id: 6, quantity: 3, received_at: '2026-09-01 02:00:00' },
+      { id: 7, quantity: 0, received_at: '2026-09-01 10:00:00' },
+    ],
+    sharedDate: '2026-09-01',
+    remove: 6,
+    set: 6,
+  },
+  {
+    name: 'shared date names the middle day',
+    lots: [
+      { id: 1, quantity: 5, received_at: '2026-10-01 01:00:00' },
+      { id: 2, quantity: 5, received_at: '2026-10-05 01:00:00' },
+      { id: 3, quantity: 5, received_at: '2026-10-09 01:00:00' },
+    ],
+    sharedDate: '2026-10-05',
+    remove: 2,
+    set: 2,
+  },
+  {
+    name: 'shared date matches no lot',
+    lots: [
+      { id: 1, quantity: 5, received_at: '2026-10-01 01:00:00' },
+      { id: 3, quantity: 5, received_at: '2026-10-09 01:00:00' },
+    ],
+    sharedDate: '2026-12-25',
+    remove: 1,
+    set: 3,
+  },
+  {
+    name: 'shared date, every lot empty',
+    lots: [
+      { id: 1, quantity: 0, received_at: '2026-10-01 01:00:00' },
+      { id: 2, quantity: 0, received_at: '2026-10-09 01:00:00' },
+    ],
+    sharedDate: '2026-10-01',
+    remove: 'none',
+    set: 1,
   },
 ]
 

@@ -532,32 +532,19 @@ export function sessionLotChoices<T extends SessionLot>(mode: StockMode, lots: r
   return sortLotsForDisplay(narrowed)
 }
 
-/**
- * Which of two lots was received first (negative = `lot`), read from the lots
- * themselves and never from where they sit in a list: the list is shown newest
- * first with stocked lots ahead of empty ones, so a position says nothing about
- * age. Day, then the time of day, then the receipt number (the later receipt has
- * the higher one), then the id (assigned in receipt order).
- */
+/** Which lot was received first (negative = `lot`), read from the lots and never from list position: day, time of day, id. */
 function compareReceiptOrder(lot: SessionLot, other: SessionLot): number {
   const day = lotIsoDate(lot)
   const otherDay = lotIsoDate(other)
   if (day !== otherDay) return day < otherDay ? -1 : 1
   const gap = (batchReceivedInstant(lot) ?? 0) - (batchReceivedInstant(other) ?? 0)
   if (gap !== 0) return gap
-  const numberGap = (Number(lot.batch_number) || 0) - (Number(other.batch_number) || 0)
-  return numberGap !== 0 ? numberGap : Number(lot.id) - Number(other.id)
+  return Number(lot.id) - Number(other.id)
 }
 
 /**
- * The lot a freshly picked line starts on (S3): the option sheet's pick, else
- * the lot with the shared received date, else the oldest (Remove) or newest
- * (Set) lot. Those two picks are the user's own and are kept even on an empty
- * lot; the fallback never is: a lot holding stock always beats an empty one, so a
- * count or a removal does not start on a lot with nothing in it while another has
- * stock (all empty: Set still starts on the newest). Dated lots beat undated ones
- * (a custom code such as RECON-1 has no age). Add starts on a new received date.
- * No lot at all = the branch total.
+ * The lot a new line starts on: the option sheet's pick, else the oldest (Remove) or newest (Set) lot of the shared
+ * received date, else of all dated lots. A lot holding stock always beats an empty one. Add starts new; no lots = 'none'.
  */
 export function defaultLotChoice(input: {
   mode: StockMode
@@ -573,12 +560,11 @@ export function defaultLotChoice(input: {
   if (!choices.length) return 'none'
   const sheet = input.sheetBatchId != null ? choices.find((lot) => Number(lot.id) === Number(input.sheetBatchId)) : null
   if (sheet) return Number(sheet.id)
-  const sharedDateLot = input.sharedDate ? choices.find((lot) => lotIsoDate(lot) === input.sharedDate) : null
-  if (sharedDateLot) return Number(sharedDateLot.id)
   const stocked = choices.filter((lot) => toNumber(lot.quantity) > 0)
   const pool = stocked.length ? stocked : choices
-  const datedPool = pool.filter((lot) => lotIsoDate(lot))
-  const candidates = datedPool.length ? datedPool : pool
+  const onSharedDate = input.sharedDate ? pool.filter((lot) => lotIsoDate(lot) === input.sharedDate) : []
+  const dated = pool.filter((lot) => lotIsoDate(lot))
+  const candidates = onSharedDate.length ? onSharedDate : dated.length ? dated : pool
   const selected = candidates.reduce((best, lot) => {
     const order = compareReceiptOrder(lot, best)
     return (mode === 'remove' ? order < 0 : order > 0) ? lot : best
