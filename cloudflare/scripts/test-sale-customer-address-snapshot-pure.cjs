@@ -38,7 +38,7 @@ const cache = new Map()
 // resolve to undefined -- a test that agrees with itself and proves nothing.
 const actual = new Set(['businessDateWindow', 'continuousReadWindow', 'businessMaintenanceGuard',
   'offlineSaleOwnership',
-  'acquisitionCostAccess',
+  'acquisitionCostAccess','courierCostAccess',
   'saleCustomerAssignmentGuard','customerPointsReturn',
   'actorSnapshot', 'movementBranchName', 'db', 'permissions', 'saleBulkStatus', 'saleBulkUpdate',
   'saleTransitions', 'saleTotals', 'sqlBinding', 'productBatches', 'batchCode', 'salesStatus','saleStatusResolution',
