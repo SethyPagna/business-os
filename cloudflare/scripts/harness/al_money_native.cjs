@@ -165,7 +165,7 @@ async function startWorker({ returnIdFloor = 100000, patches = [] } = {}) {
 // POST /api/sales the way the POS does: v1 money, captured pricing quote, and
 // the owner stamp. A first pricing-quote refusal is answered once with the
 // server's own quote (the till's review step); anything else is returned.
-async function createSale(h, { key, lines, status = 'completed', paymentDetails = null, createdAt, customerId, extra = {}, label }) {
+async function createSale(h, { key, lines, status = 'completed', paymentDetails = null, createdAt, customerId, extra = {}, label, cookie }) {
   const body = { branch_id: 1, money_precision_version: 1, sale_status: status, exchange_rate: 4000, payment_currency: 'USD',
     client_request_id: key, offline_owner: h.owner, ...(createdAt ? { created_at: createdAt } : {}),
     ...(customerId ? { customer_id: customerId } : {}),
@@ -179,14 +179,15 @@ async function createSale(h, { key, lines, status = 'completed', paymentDetails 
       // A caller that already knows the exact quote saves the review round trip.
       pricing_quote: line.quote || { gross_usd: 0, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 0, total_khr: 0 } })),
     ...extra }
-  let result = await h.call('POST', '/api/sales', body, label || `POST /api/sales ${key}`)
+  const options = cookie ? { cookie } : {}
+  let result = await h.call('POST', '/api/sales', body, label || `POST /api/sales ${key}`, options)
   if (result.status === 409 && result.body.code === 'sale_pricing_quote_conflict') {
     const quotes = new Map(result.body.pricing_quotes.map(quote => [quote.client_line_key, quote]))
     for (const item of body.items) {
       const { client_line_key: _key, ...amounts } = quotes.get(item.client_line_key)
       item.pricing_quote = Object.fromEntries(['gross_usd', 'product_discount_usd', 'manual_discount_usd', 'total_usd', 'total_khr'].map(name => [name, amounts[name]]))
     }
-    result = await h.call('POST', '/api/sales', body, label || `POST /api/sales ${key}`)
+    result = await h.call('POST', '/api/sales', body, label || `POST /api/sales ${key}`, options)
   }
   return result
 }
@@ -208,11 +209,11 @@ async function customerReturn(h, { key, saleId, lines, label }) {
 // POST /api/sales/:id/amendments with the till's two review answers: the
 // recalculated line quote and the exact header quote, each taken from the
 // server's own uncommitted refusal.
-async function amendSale(h, saleId, body, label) {
+async function amendSale(h, saleId, body, label, cookie) {
   const request = { money_precision_version: 1, expected_exchange_rate: 4000, ...body }
   let result
   for (let attempt = 0; attempt < 4; attempt++) {
-    result = await h.call('POST', `/api/sales/${saleId}/amendments`, request, label || `amend ${saleId} ${body.kind}`)
+    result = await h.call('POST', `/api/sales/${saleId}/amendments`, request, label || `amend ${saleId} ${body.kind}`, cookie ? { cookie } : {})
     if (result.status === 409 && result.body.code === 'sale_pricing_quote_conflict' && Array.isArray(result.body.pricing_quotes)) {
       const target = result.body.pricing_quotes.find(quote => quote.client_line_key === body.client_line_key) || result.body.pricing_quotes[0]
       request.pricing_quote = Object.fromEntries(['gross_usd', 'product_discount_usd', 'manual_discount_usd', 'total_usd', 'total_khr'].map(name => [name, target[name]]))
@@ -226,14 +227,14 @@ async function amendSale(h, saleId, body, label) {
 
 // POST /api/sales/:id/items (the Sales page "Add items"), with the same two
 // review answers taken from the server's own uncommitted refusals.
-async function addSaleItems(h, saleId, key, lines, label) {
+async function addSaleItems(h, saleId, key, lines, label, cookie) {
   const request = { money_precision_version: 1, expected_exchange_rate: 4000, client_request_id: key,
     items: lines.map((line, index) => ({ product_id: line.productId, quantity: line.quantity, branch_id: 1, batch_id: line.productId + 5000,
       client_line_key: `${key}-line-${index + 1}`, pricing_source: 'selling',
       pricing_quote: { gross_usd: 0, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 0, total_khr: 0 } })) }
   let result
   for (let attempt = 0; attempt < 4; attempt++) {
-    result = await h.call('POST', `/api/sales/${saleId}/items`, request, label || `add items ${saleId}`)
+    result = await h.call('POST', `/api/sales/${saleId}/items`, request, label || `add items ${saleId}`, cookie ? { cookie } : {})
     if (result.status === 409 && result.body.code === 'sale_pricing_quote_conflict' && Array.isArray(result.body.pricing_quotes)) {
       const quotes = new Map(result.body.pricing_quotes.map(quote => [quote.client_line_key, quote]))
       for (const item of request.items) {

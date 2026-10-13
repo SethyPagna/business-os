@@ -162,7 +162,7 @@ import { contactDisplayAddress } from '../lib/contactOptions'
 import { buildSaleCreationSnapshot, SaleCreationSnapshotError } from '../lib/saleCreationSnapshot'
 import type { Env } from '../index'
 import { costViewProfit } from '../lib/reportProfitView'
-import { redactAmendmentEntries, redactSaleRecords } from '../lib/courierCostAccess'
+import { canViewSaleCourierCost, courierCostResponses, redactAmendmentEntries, redactSaleRecords } from '../lib/courierCostAccess'
 import { actorId, actorSnapshot } from '../lib/actorSnapshot'
 import { ANONYMOUS_CUSTOMER_ERROR_CODE, ANONYMOUS_CUSTOMER_MUTATION_ERROR, isAnonymousCustomer } from '../lib/anonymousCustomer'
 
@@ -204,6 +204,7 @@ async function saleAllowsPaymentCorrection(db: ReturnType<typeof getDb>, saleId:
 }
 app.use('*', requireAuth)
 app.use('*', acquisitionCostResponses)
+app.use('*', courierCostResponses)
 
 const SALES_READ_CACHE_TTL_SECONDS = 20
 
@@ -6010,7 +6011,7 @@ export function projectOperationalSaleCosts(row:Record<string,unknown>,user:Sess
   const {creation_snapshot_json,items,...publicRow}=row
   // The opaque historical envelope is not needed by the editor and must not
   // become an alternative disclosure path. Never mutate the shared cache row.
-  if(getActionTier(user,'sales','amend')!=='full'){
+  if(!canViewSaleCourierCost(user)){
     delete publicRow.delivery_actual_cost_usd
     delete publicRow.delivery_actual_cost_khr
   }

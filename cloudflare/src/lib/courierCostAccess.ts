@@ -1,33 +1,46 @@
-import { isAdminControlUser, type PermissionUser } from './permissions'
+import type { Context, MiddlewareHandler } from 'hono'
+import { getActionTier, isAdminControlUser, type PermissionUser } from './permissions'
 import type { SaleRecord } from './saleRecords'
 
-// The courier's actual cost -- what the SHOP paid the driver -- is an
-// administrator-only figure, the same gate every report applies. A cost-view
-// grant does not open it (the generic cost-key matcher in acquisitionCostAccess
-// skips delivery and courier keys on purpose, so the customer's delivery FEE,
-// which is revenue, is never hidden). This module is that gate for the sale's
-// own history: the Records trail and the amendment ledger, which carry the
-// figure as before/after values, as snapshots and written into summary text.
+// The courier's actual cost (what the shop paid the driver) is not the customer's
+// delivery fee. The generic cost-key matcher in acquisitionCostAccess skips delivery
+// and courier keys on purpose, so fees (revenue) are never hidden; this module is the
+// gate for the cost itself.
+
+/** A sale's history (Records, amendment ledger, audit log) shows the cost to administrators only, like every report. */
 export function canViewCourierCost(user: PermissionUser): boolean {
   return isAdminControlUser(user)
+}
+
+/** A sale's current row also shows it to a full amender, who enters and corrects it. */
+export function canViewSaleCourierCost(user: PermissionUser): boolean {
+  return isAdminControlUser(user) || getActionTier(user, 'sales', 'amend') === 'full'
 }
 
 /** The ledger kind whose whole content is the courier cost. */
 export const COST_LEDGER_KIND = 'delivery_actual_cost_changed'
 
+const fingerprint = (key: string): string => key.toLowerCase().replace(/[\s_-]/g, '')
+
+// Matched on the fingerprint so camelCase twins (deliveryActualCostUsd) leave with the snake_case keys.
 const COURIER_COST_KEYS = new Set([
   'delivery_actual_cost_usd', 'delivery_actual_cost_khr', 'actual_delivery_cost_usd', 'actual_delivery_cost_khr',
-  // The audit row of a cost amendment names its two sides this way.
   'actual_cost_before', 'actual_cost_after',
-])
+].map(fingerprint))
+
+const isCourierCostKey = (key: string): boolean => COURIER_COST_KEYS.has(fingerprint(key))
 
 /** The one summary saleRecords.ts writes for a cost change: "Actual delivery cost $0.83 to $1.37" (an unset side is "-"). */
 const COURIER_COST_SUMMARY = /^(Actual delivery cost) (?:\$-?\d+(?:\.\d+)?|-) to (?:\$-?\d+(?:\.\d+)?|-)/
 
+const MAX_STRIP_DEPTH = 12
+
 type Stripped<T> = { value: T; touched: boolean }
 
+/** Past the depth cap a subtree cannot be inspected, so it is dropped (null) rather than passed through. */
 function stripCourierCost(input: unknown, depth = 0): Stripped<unknown> {
-  if (depth > 12 || input === null || typeof input !== 'object') return { value: input, touched: false }
+  if (input === null || typeof input !== 'object') return { value: input, touched: false }
+  if (depth > MAX_STRIP_DEPTH) return { value: null, touched: true }
   if (Array.isArray(input)) {
     let touched = false
     const value = input.map((item) => {
@@ -40,7 +53,7 @@ function stripCourierCost(input: unknown, depth = 0): Stripped<unknown> {
   let touched = false
   const value: Record<string, unknown> = {}
   for (const [key, child] of Object.entries(input as Record<string, unknown>)) {
-    if (COURIER_COST_KEYS.has(key)) { touched = true; continue }
+    if (isCourierCostKey(key)) { touched = true; continue }
     const inner = stripCourierCost(child, depth + 1)
     touched = touched || inner.touched
     value[key] = inner.value
@@ -58,11 +71,10 @@ function stripSnapshot(raw: unknown): Stripped<unknown> {
 }
 
 /**
- * The amendment ledger as a caller may read it. A cost-change entry keeps its
- * id, actor, time and note but loses the three amount columns (the delta would
- * give the cost back by subtraction), and every snapshot loses the courier-cost
- * keys. An entry that was redacted says so with `courier_cost_hidden`, so a
- * screen can print a dash instead of a zero or "Not recorded".
+ * The amendment ledger as a caller may read it. A cost-change entry keeps id, actor,
+ * time and note but loses the three amount columns (the delta would give the cost back
+ * by subtraction); every snapshot loses the cost keys. `courier_cost_hidden` lets a
+ * screen print a dash instead of a zero or "Not recorded".
  */
 export function redactAmendmentEntries<T extends { kind?: unknown }>(entries: T[], user: PermissionUser): T[] {
   if (canViewCourierCost(user)) return entries
@@ -84,13 +96,7 @@ export function redactAmendmentEntries<T extends { kind?: unknown }>(entries: T[
 
 const AUDIT_COST_HINT = /actual_cost_|delivery_actual_cost|actual_delivery_cost/
 
-/**
- * Audit-log rows as a caller may read them. A sale amendment's audit row holds
- * the courier cost in `details` and `new_value` (a cost change names it
- * actual_cost_before / actual_cost_after; adding delivery nests the full
- * before/after snapshot), so the same keys leave those columns. A row without
- * the figure is returned as it was.
- */
+/** Audit-log rows without the cost in `details`, `old_value` and `new_value`; a row without the figure is returned as it was. */
 export function redactAuditRows<T extends object>(rows: T[], user: PermissionUser): T[] {
   if (canViewCourierCost(user)) return rows
   return rows.map((entry) => {
@@ -106,12 +112,7 @@ export function redactAuditRows<T extends object>(rows: T[], user: PermissionUse
   })
 }
 
-/**
- * One sale's Records trail as a caller may read it. No record disappears and
- * no count changes: the courier-cost change is still listed with its actor and
- * time, only the amounts leave -- the field rows, the amounts inside the
- * creation and delivery snapshots, and the figures written into summary text.
- */
+/** One sale's Records trail: no record disappears and no count changes; the field rows, snapshot amounts and summary figures leave. */
 export function redactSaleRecords(records: SaleRecord[], user: PermissionUser): SaleRecord[] {
   if (canViewCourierCost(user)) return records
   return records.map((record) => {
@@ -123,11 +124,44 @@ export function redactSaleRecords(records: SaleRecord[], user: PermissionUser): 
         const before = stripCourierCost(change.before)
         const after = stripCourierCost(change.after)
         if (!before.touched && !after.touched) return [change]
-        // A row whose only difference was the courier cost is not a change a
-        // reader may see.
+        // A row whose only difference was the courier cost is not a change a reader may see.
         if (JSON.stringify(before.value) === JSON.stringify(after.value)) return []
         return [{ ...change, before: before.value as typeof change.before, after: after.value as typeof change.after }]
       })
     return { ...record, summary, changes }
   })
+}
+
+const SERIALIZED_COLUMN = /(?:_json|^details|^old_value|^new_value)$/i
+
+/** Any response body for a caller who may not read a sale's cost: cost keys leave at every depth, JSON held in strings included. */
+export function projectCourierCostResponse(body: unknown, user: PermissionUser): unknown {
+  if (canViewSaleCourierCost(user)) return body
+  const project = (input: unknown, depth: number): unknown => {
+    if (input === null || typeof input !== 'object') return input
+    if (depth > MAX_STRIP_DEPTH) return null
+    if (Array.isArray(input)) return input.map((item) => project(item, depth + 1))
+    const out: Record<string, unknown> = {}
+    for (const [key, child] of Object.entries(input as Record<string, unknown>)) {
+      if (isCourierCostKey(key)) continue
+      out[key] = typeof child === 'string' && SERIALIZED_COLUMN.test(key) ? stripSnapshot(child).value : project(child, depth + 1)
+    }
+    return out
+  }
+  return project(body, 0)
+}
+
+/**
+ * Installed on the sales router. A mutation response (add items, amend, status, create
+ * and its replay) carries the sale's canonical row, cost columns included, so it leaves
+ * through the same rule as the list. Plain reads are projected by their own handlers.
+ */
+export const courierCostResponses: MiddlewareHandler = async (c, next) => {
+  const json: Function = c.json
+  const mutation = c.req.method !== 'GET' || c.req.path.endsWith('/create-receipt')
+  c.json = ((...args: Parameters<Context['json']>) => {
+    if (mutation) args[0] = projectCourierCostResponse(args[0], c.get('user')) as typeof args[0]
+    return Reflect.apply(json, c, args)
+  }) as Context['json']
+  await next()
 }

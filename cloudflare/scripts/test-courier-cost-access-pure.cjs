@@ -1,6 +1,8 @@
 'use strict'
 // The courier's actual cost is administrator-only on the sale's own history
-// (lib/courierCostAccess.ts): the Records trail and the amendment ledger.
+// (lib/courierCostAccess.ts): the Records trail and the amendment ledger. On the
+// sale's current row (the list, and every write response that returns the sale's
+// canonical snapshot) it is shown to an administrator and a full amender.
 //
 // The records are built by the REAL builder (lib/saleRecords.ts), so a change to
 // the summary wording or to the change-field names that the redaction relies on
@@ -232,10 +234,11 @@ const mutate = (from, to) => {
   assert.equal(gateSource.split(from).length - 1, 1, `mutant anchor must occur once: ${from}`)
   return load('src/lib/courierCostAccess.ts', gateSource.replace(from, to))
 }
+const HISTORY_GATE = 'export function canViewCourierCost(user: PermissionUser): boolean {\n  return isAdminControlUser(user)'
 const wrongGate = { 'every caller': 'return true', 'cost grant opens it': 'return isAdminControlUser(user) || /product_cost_view/.test(String(user && user.role_permissions))' }
 for (const [name, body] of Object.entries(wrongGate)) {
   check(`mutant (${name}): the cost viewer's records leak and this file notices`, () => {
-    const bad = mutate('return isAdminControlUser(user)', body)
+    const bad = mutate(HISTORY_GATE, HISTORY_GATE.replace('return isAdminControlUser(user)', body))
     assert.notDeepEqual(leaks(bad.redactSaleRecords(built, COST_VIEWER)), [])
     assert.notDeepEqual(leaks(bad.redactAmendmentEntries(ledger, COST_VIEWER)), [])
   })
@@ -251,6 +254,57 @@ check('mutant (ledger amounts kept): the cost-change entry amounts are caught', 
 check('mutant (khr key kept): the converted riel amount is caught', () => {
   const bad = mutate("'delivery_actual_cost_usd', 'delivery_actual_cost_khr', 'actual_delivery_cost_usd', 'actual_delivery_cost_khr',", "'delivery_actual_cost_usd', 'actual_delivery_cost_usd',")
   assert.ok(leaks(bad.redactAmendmentEntries(ledger, PLAIN)).some((hit) => hit.includes('delivery_actual_cost_khr')))
+})
+
+// ---- a write response: the sale's canonical row leaves by the list's rule ----
+const saleSnapshot = () => ({
+  id: 7, saleStatus: 'completed', deliveryActualCostUsd: 1.37, deliveryActualCostKhr: 5480,
+  sale: { id: 7, delivery_fee_usd: 2, delivery_actual_cost_usd: 1.37, delivery_actual_cost_khr: 5480, items: [{ id: 1, total_usd: 10, cost_price_usd: 4 }],
+    snapshot_json: JSON.stringify({ delivery: { delivery_fee_usd: 2, actual_delivery_cost_usd: 0.83 } }) },
+})
+for (const [who, user] of [['a plain reader', PLAIN], ['a cost viewer', COST_VIEWER]]) {
+  check(`${who} gets a write response without the cost keys, camelCase and snake_case, at any depth and inside JSON strings`, () => {
+    const out = access.projectCourierCostResponse(saleSnapshot(), user)
+    assert.deepEqual(leaks(out), [])
+    assert.equal(out.sale.delivery_fee_usd, 2, 'the customer delivery fee stays')
+    assert.equal(out.sale.items[0].total_usd, 10, 'the rest of the snapshot stays')
+    assert.equal(out.id, 7)
+  })
+}
+for (const [who, user] of [['an administrator', ADMIN], ['a full amender', AMENDER]]) {
+  check(`control: ${who} gets the write response untouched`, () => {
+    const body = saleSnapshot()
+    assert.equal(access.projectCourierCostResponse(body, user), body)
+    assert.notDeepEqual(leaks(body), [], 'the instrument sees the figure in the untouched body')
+  })
+}
+const deep = (levels, leaf) => { let node = leaf; for (let i = 0; i < levels; i += 1) node = { wrap: node }; return node }
+const deepRecord = () => ({ ...built.find((entry) => entry.changes && entry.changes.length), changes: [{ field: 'delivery', before: deep(20, { actual_delivery_cost_usd: 0.83 }), after: deep(20, { actual_delivery_cost_usd: 1.37 }) }] })
+check('past the depth cap the response projector drops the subtree instead of passing it through', () => {
+  const body = { sale: deep(20, { delivery_actual_cost_usd: 1.37, note: 'x' }) }
+  assert.notDeepEqual(leaks(body), [], 'control: the figure is in the deep body')
+  assert.deepEqual(leaks(access.projectCourierCostResponse(body, PLAIN)), [])
+})
+check('past the depth cap a records snapshot is dropped, not passed through', () => {
+  assert.notDeepEqual(leaks(deepRecord()), [], 'control: the figures are in the deep snapshot')
+  assert.deepEqual(leaks(access.redactSaleRecords([deepRecord()], PLAIN)), [])
+})
+check('mutant (gate removed): the administrator no longer gets the write response untouched and this file notices', () => {
+  const bad = mutate('  if (canViewSaleCourierCost(user)) return body\n', '')
+  const body = saleSnapshot()
+  assert.notEqual(bad.projectCourierCostResponse(body, ADMIN), body)
+})
+check('mutant (projector cap passes the subtree through): a response nested past the cap leaks and this file notices', () => {
+  const bad = mutate('    if (depth > MAX_STRIP_DEPTH) return null\n', '    if (depth > MAX_STRIP_DEPTH) return input\n')
+  assert.notDeepEqual(leaks(bad.projectCourierCostResponse({ sale: deep(20, { delivery_actual_cost_usd: 1.37 }) }, PLAIN)), [])
+})
+check('mutant (records cap passes through): a snapshot nested past the cap leaks and this file notices', () => {
+  const bad = mutate('if (depth > MAX_STRIP_DEPTH) return { value: null, touched: true }', 'if (depth > MAX_STRIP_DEPTH) return { value: input, touched: false }')
+  assert.notDeepEqual(leaks(bad.redactSaleRecords([deepRecord()], PLAIN)), [])
+})
+check('mutant (camelCase twin kept): the camelCase cost keys of a write response are caught', () => {
+  const bad = mutate('const fingerprint = (key: string): string => key.toLowerCase().replace(/[\\s_-]/g, \'\')', 'const fingerprint = (key: string): string => key')
+  assert.notDeepEqual(leaks(bad.projectCourierCostResponse(saleSnapshot(), PLAIN)), [])
 })
 
 console.log(`GREEN courier cost access: ${passed} checks hold`)
