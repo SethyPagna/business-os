@@ -1193,6 +1193,9 @@ app.post('/finalize-migration', async (c) => {
     }
   }
 
+  const passwordDenied = await denyUnlessCurrentPassword(c, body, 403)
+  if (passwordDenied) return passwordDenied
+
   // Same hard prerequisite as every reset: a fresh, scoped backup must
   // succeed before any write runs, so the operation is always undoable.
   const backupTables = step === 'zero_stock' ? ['branch_stock', 'products'] : ['branch_batch_stock']
@@ -1406,6 +1409,10 @@ app.post('/import-retention/orphans', async (c) => {
   const user = c.get('user')
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>
   const apply = body?.dry_run === false && body?.force === true
+  if (apply) {
+    const passwordDenied = await denyUnlessCurrentPassword(c, body, 403)
+    if (passwordDenied) return passwordDenied
+  }
   const report = await cleanOrphanImportStaging(c.env, { apply })
   if (apply) {
     await audit(c.env, user?.id ?? null, actorSnapshot(user), 'import_orphan_staging_clean', 'system', null, {
@@ -1418,7 +1425,7 @@ app.post('/import-retention/orphans', async (c) => {
   return c.json({
     success: true,
     dry_run: !apply,
-    ...(apply ? {} : { note: 'Dry run only. Take a backup, then re-send with dry_run:false and force:true to delete these rows.' }),
+    ...(apply ? {} : { note: 'Dry run only. Take a backup, then re-send with dry_run:false, force:true and your currentPassword to delete these rows.' }),
     ...report,
   })
 })

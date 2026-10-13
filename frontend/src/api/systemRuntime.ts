@@ -87,10 +87,11 @@ export async function factoryReset(confirmation: { confirm: string; acknowledged
 // /finalize-migration. Same long timeout as the resets above: each takes a
 // fresh scoped backup before the UPDATE, which can run past apiFetch's
 // generic default before the Worker responds.
-export async function finalizeMigration(step: 'zero_stock' | 'park_lots'): Promise<unknown> {
+export async function finalizeMigration(step: 'zero_stock' | 'park_lots', confirmation: { currentPassword: string }): Promise<unknown> {
+  if (!confirmation?.currentPassword) throw new Error('Finalizing the migration requires the current password.')
   return route(
     'data:finalizeMigration',
-    () => apiFetch('POST', '/api/system/finalize-migration', { step }, LONG_SYSTEM_ACTION_TIMEOUT_MS),
+    () => apiFetch('POST', '/api/system/finalize-migration', { step, currentPassword: confirmation.currentPassword }, LONG_SYSTEM_ACTION_TIMEOUT_MS),
     null,
     true,
   )

@@ -1,7 +1,8 @@
 'use strict'
 // SEC-4 / audit B2: POST /api/system/reset-data (sales, products, all) and POST /api/system/reset-section needed
 // only the typed phrase, never the caller's password, so a hijacked or unattended admin session could wipe data
-// without re-authenticating. Both now demand the current password, checked through lib/currentPasswordGuard.ts
+// without re-authenticating. Both now demand the current password (and so do the other destructive maintenance
+// routes: finalize-migration zero_stock / park_lots and the forced import-orphan cleanup), checked through lib/currentPasswordGuard.ts
 // (the same rate-limited helper factory-reset, profile saves and Google unlink use) AFTER the cheap validation and
 // BEFORE the backup and any delete. reset-section also checks the typed phrase and the acknowledgement on the
 // server, in the same order and with the same error codes as reset-data (phrase, acknowledgement, password).
@@ -171,6 +172,129 @@ async function main() {
       await clearRequestLimits()
       const response = await world.api('POST', '/api/system/reset-section', sectionBody('users', { currentPassword: adminPassword }), { as: 'restorer' })
       t.eq('status', response.status, 400)
+    })
+
+
+    const FINALIZE = '/api/system/finalize-migration'
+    const ORPHANS = '/api/system/import-retention/orphans'
+    const seedFinalize = async () => {
+      await clearRequestLimits()
+      await world.run("DELETE FROM branch_batch_stock WHERE batch_id IN (SELECT id FROM product_batches WHERE batch_key = 'BK-STEPUP-HIST')")
+      await world.run("DELETE FROM product_batches WHERE batch_key = 'BK-STEPUP-HIST'")
+      await world.run("UPDATE products SET stock_quantity = 0 WHERE name = 'Finalize product'")
+      await world.run("DELETE FROM branch_stock WHERE product_id IN (SELECT id FROM products WHERE name = 'Finalize product')")
+      await world.run("DELETE FROM products WHERE name = 'Finalize product'")
+      const branch = await world.first('SELECT id FROM branches ORDER BY id LIMIT 1')
+      await world.run("INSERT INTO products (name, stock_quantity) VALUES ('Finalize product', 9)")
+      const product = await world.first("SELECT id FROM products WHERE name = 'Finalize product'")
+      await world.run('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?, ?, 9)', product.id, branch.id)
+      await world.run("INSERT INTO product_batches (variant_product_id, batch_key, lot_code, notes, is_active) VALUES (?, 'BK-STEPUP-HIST', 'LOT-STEPUP', 'Unified stock import job-1, row 1', 1)", product.id)
+      const batch = await world.first("SELECT id FROM product_batches WHERE batch_key = 'BK-STEPUP-HIST'")
+      await world.run('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, ?, 8)', batch.id, branch.id)
+    }
+    const stockSnapshot = async () => ({
+      branchStock: (await world.first('SELECT COALESCE(SUM(quantity), 0) AS n FROM branch_stock')).n,
+      productStock: (await world.first('SELECT COALESCE(SUM(stock_quantity), 0) AS n FROM products')).n,
+      lot: (await world.first("SELECT quantity FROM branch_batch_stock WHERE batch_id = (SELECT id FROM product_batches WHERE batch_key = 'BK-STEPUP-HIST')")).quantity,
+    })
+    async function finalizeRefused(t, label, step, extra, code) {
+      await seedFinalize()
+      const before = await stockSnapshot()
+      t.ok(`${label}: the seeded stock is non-zero`, before.branchStock > 0 && before.productStock > 0 && before.lot > 0, before)
+      const response = await world.api('POST', FINALIZE, { step, ...extra }, { as: 'restorer' })
+      t.eq(`${label}: status`, response.status, 403)
+      t.eq(`${label}: code`, response.json && response.json.code, code)
+      t.eq(`${label}: nothing zeroed`, await stockSnapshot(), before)
+    }
+
+    await check('finalize-migration zero_stock: no password is refused and no stock is zeroed', async (t) => {
+      await finalizeRefused(t, 'no password', 'zero_stock', {}, 'current_password_required')
+    })
+
+    await check('finalize-migration zero_stock: a wrong password is refused and no stock is zeroed', async (t) => {
+      await finalizeRefused(t, 'wrong password', 'zero_stock', { currentPassword: 'not-the-password' }, 'incorrect_password')
+    })
+
+    await check('finalize-migration park_lots: no password is refused and no lot is parked', async (t) => {
+      await finalizeRefused(t, 'no password', 'park_lots', {}, 'current_password_required')
+    })
+
+    await check('finalize-migration park_lots: a wrong password is refused and no lot is parked', async (t) => {
+      await finalizeRefused(t, 'wrong password', 'park_lots', { currentPassword: 'not-the-password' }, 'incorrect_password')
+    })
+
+    await check('finalize-migration: an unknown step is still a plain 400 before any password check', async (t) => {
+      await clearRequestLimits()
+      const response = await world.api('POST', FINALIZE, { step: 'nuke_everything' }, { as: 'restorer' })
+      t.eq('status', response.status, 400)
+    })
+
+    await check('finalize-migration park_lots: the right password still parks the historical lot', async (t) => {
+      await seedFinalize()
+      const before = await stockSnapshot()
+      const response = await world.api('POST', FINALIZE, { step: 'park_lots', currentPassword: adminPassword }, { as: 'restorer' })
+      t.eq('status', response.status, 200)
+      t.eq('success', response.json && response.json.success, true)
+      t.eq('lot parked', (await stockSnapshot()).lot, 0)
+      t.eq('live stock untouched', { branchStock: (await stockSnapshot()).branchStock, productStock: (await stockSnapshot()).productStock }, { branchStock: before.branchStock, productStock: before.productStock })
+    })
+
+    await check('finalize-migration zero_stock: the right password still zeroes the live counts', async (t) => {
+      await seedFinalize()
+      const response = await world.api('POST', FINALIZE, { step: 'zero_stock', currentPassword: adminPassword }, { as: 'restorer' })
+      t.eq('status', response.status, 200)
+      t.eq('success', response.json && response.json.success, true)
+      const after = await stockSnapshot()
+      t.eq('branch stock zeroed', after.branchStock, 0)
+      t.eq('product stock zeroed', after.productStock, 0)
+    })
+
+    const seedOrphan = async () => {
+      await clearRequestLimits()
+      await world.run("DELETE FROM import_job_files WHERE job_id = 'orphan-stepup-job'")
+      await world.run("INSERT INTO import_job_files (job_id, kind, stored_path) VALUES ('orphan-stepup-job', 'upload', 'imports/orphan-stepup-job/a.csv')")
+    }
+    const orphanRows = async () => (await world.first("SELECT COUNT(*) AS n FROM import_job_files WHERE job_id = 'orphan-stepup-job'")).n
+
+    await check('import-retention orphans: the dry-run report needs no password and deletes nothing', async (t) => {
+      await seedOrphan()
+      for (const body of [{}, { dry_run: true, force: true }, { force: true }, { dry_run: false }]) {
+        const response = await world.api('POST', ORPHANS, body, { as: 'restorer' })
+        t.eq(`${JSON.stringify(body)}: status`, response.status, 200)
+        t.eq(`${JSON.stringify(body)}: stays a dry run`, response.json && response.json.dry_run, true)
+      }
+      t.eq('the orphan is still there', await orphanRows(), 1)
+    })
+
+    await check('import-retention orphans: the forced delete without a password is refused and deletes nothing', async (t) => {
+      await seedOrphan()
+      const response = await world.api('POST', ORPHANS, { dry_run: false, force: true }, { as: 'restorer' })
+      t.eq('status', response.status, 403)
+      t.eq('code', response.json && response.json.code, 'current_password_required')
+      t.eq('the orphan is still there', await orphanRows(), 1)
+    })
+
+    await check('import-retention orphans: the forced delete with a wrong password is refused and deletes nothing', async (t) => {
+      await seedOrphan()
+      const response = await world.api('POST', ORPHANS, { dry_run: false, force: true, currentPassword: 'not-the-password' }, { as: 'restorer' })
+      t.eq('status', response.status, 403)
+      t.eq('code', response.json && response.json.code, 'incorrect_password')
+      t.eq('the orphan is still there', await orphanRows(), 1)
+    })
+
+    await check('import-retention orphans: the forced delete with the right password still clears the orphan', async (t) => {
+      await seedOrphan()
+      const response = await world.api('POST', ORPHANS, { dry_run: false, force: true, currentPassword: adminPassword }, { as: 'restorer' })
+      t.eq('status', response.status, 200)
+      t.eq('applied', response.json && response.json.dry_run, false)
+      t.eq('the orphan is gone', await orphanRows(), 0)
+    })
+
+    await check('import-retention orphans: an account without backup_restore is refused before anything else', async (t) => {
+      await seedOrphan()
+      const response = await world.api('POST', ORPHANS, { dry_run: false, force: true, currentPassword: adminPassword }, { as: 'nobody' })
+      t.eq('status', response.status, 403)
+      t.eq('the orphan is still there', await orphanRows(), 1)
     })
 
   } finally {

@@ -866,7 +866,7 @@ function FactoryReset({ actionHistory = null }: ResetPanelProps) {
 type FinalizeStep = 'zero_stock' | 'park_lots'
 type FinalizeApiResult = ResetApiResult & { affected?: Record<string, number> }
 type FinalizeApi = {
-  finalizeMigration?: (step: FinalizeStep) => Promise<FinalizeApiResult>
+  finalizeMigration?: (step: FinalizeStep, confirmation: { currentPassword: string }) => Promise<FinalizeApiResult>
 }
 type FinalizeStage = 'zero' | 'reimport' | 'park' | 'done'
 
@@ -875,7 +875,7 @@ function getFinalizeApi(): FinalizeApi {
 }
 
 function MigrationFinalize({ actionHistory = null }: ResetPanelProps) {
-  const { t, notify, hasPermission } = useApp()
+  const { t, notify, hasPermission, user } = useApp()
   const T = (key: string, fallback: string) => (typeof t === 'function' ? t(key, fallback) || fallback : fallback)
   const [stage, setStage] = useState<FinalizeStage>('zero')
   const [working, setWorking] = useState(false)
@@ -883,13 +883,14 @@ function MigrationFinalize({ actionHistory = null }: ResetPanelProps) {
   const inFlightRef = useRef(false)
   const [reimportAck, setReimportAck] = useState(false)
 
-  const runStep = async (step: FinalizeStep, onSuccess: () => void) => {
+  const runStep = async (step: FinalizeStep, { currentPassword }: ResetSubmission, onSuccess: () => void) => {
+    if (!currentPassword) return
     if (!hasPermission('backup_restore')) return notify(T('access_denied', 'No permission'), 'error')
     if (!beginSingleAction(inFlightRef, { blocked: working })) return
     setWorking(true)
     try {
       const result = await withLoaderTimeout(
-        () => getFinalizeApi().finalizeMigration?.(step) || Promise.resolve({ success: false, error: 'Migration finalize API is unavailable' }),
+        () => getFinalizeApi().finalizeMigration?.(step, { currentPassword }) || Promise.resolve({ success: false, error: 'Migration finalize API is unavailable' }),
         step === 'zero_stock' ? 'Zero live stock' : 'Park historical received dates',
         RESET_DATA_TIMEOUT_MS,
       )
@@ -972,7 +973,9 @@ function MigrationFinalize({ actionHistory = null }: ResetPanelProps) {
           whatDeleted={T('finalize_zero_what', 'All branch_stock quantities and all products.stock_quantity values')}
           whatKept={T('finalize_zero_kept', 'Products, received dates, suppliers, sales, and received-date costs — only the live counts are zeroed')}
           confirmWord="ZERO STOCK"
-          onConfirm={() => runStep('zero_stock', () => { setReimportAck(false); setStage('reimport') })}
+          onConfirm={(confirmation) => runStep('zero_stock', confirmation, () => { setReimportAck(false); setStage('reimport') })}
+          requirePassword
+          username={String(user?.username || '')}
           working={working}
           elapsedSeconds={elapsedSeconds}
           buttonLabel={T('finalize_zero_button', 'Zero live stock')}
@@ -1021,7 +1024,9 @@ function MigrationFinalize({ actionHistory = null }: ResetPanelProps) {
           whatDeleted={T('finalize_park_what', "The remaining quantity on every 'Unified stock import' historical received date")}
           whatKept={T('finalize_park_kept', 'The received dates themselves and their received/cost data (the supplier Purchases view still reads them); the product-import opening received dates are untouched')}
           confirmWord="PARK LOTS"
-          onConfirm={() => runStep('park_lots', () => setStage('done'))}
+          onConfirm={(confirmation) => runStep('park_lots', confirmation, () => setStage('done'))}
+          requirePassword
+          username={String(user?.username || '')}
           working={working}
           elapsedSeconds={elapsedSeconds}
           buttonLabel={T('finalize_park_button', 'Park historical received dates')}

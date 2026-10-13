@@ -1,5 +1,5 @@
-// SEC-4 / audit B2: every data wipe (Sales/Full Data Reset, the Products reset, and the four page resets) asks for
-// the signed-in account's current password, and the Worker refuses without it
+// SEC-4 / audit B2: every data wipe (Sales/Full Data Reset, the Products reset, the four page resets and both
+// migration-finalize steps) asks for the signed-in account's current password, and the Worker refuses without it
 // (cloudflare/scripts/test-reset-password-step-up-native.cjs drives the real routes). This pins the browser half:
 // the confirm dialog's password field, the values it forwards, and the two language packs' wording for the refusal
 // codes the Worker answers with.
@@ -56,10 +56,12 @@ await runTest('the typed password never survives a finished, cancelled or failed
   assert.match(confirmReset, /onClick=\{\(\) => \{ setStep\(0\); setTyped\(''\); setAcknowledged\(false\); setCurrentPassword\(''\) \}\}/)
 })
 
-await runTest('Data Reset and the page resets require the password; the migration-finalize steps do not', () => {
+await runTest('Data Reset, the page resets and both migration-finalize steps require the password', () => {
   assert.match(dataResetPanel, /<ConfirmReset[\s\S]*?\brequirePassword\b[\s\S]*?\/>/)
   assert.match(sectionResetPanel, /<ConfirmReset[\s\S]*?\brequirePassword\b[\s\S]*?\/>/)
-  assert.ok(!/requirePassword/.test(finalizePanel), 'migration finalize only zeroes counts and keeps its own dialog')
+  assert.equal((finalizePanel.match(/<ConfirmReset\b/g) || []).length, 2, 'the finalize panel has the zero-stock and the park-lots dialogs')
+  assert.equal((finalizePanel.match(/^\s*requirePassword$/gm) || []).length, 2, 'both finalize dialogs ask for the password')
+  assert.equal((finalizePanel.match(/username=\{String\(user\?\.username \|\| ''\)\}/g) || []).length, 2, 'and give the browser the account name to pair it with')
 })
 
 await runTest('both resets refuse to call the API without a password and forward the one typed', () => {
@@ -67,6 +69,10 @@ await runTest('both resets refuse to call the API without a password and forward
   assert.match(dataResetPanel, /resetData\?\.\(mode, \{ \.\.\.confirmation, currentPassword \}\)/)
   assert.match(sectionResetPanel, /if \(!currentPassword\) return/)
   assert.match(sectionResetPanel, /resetData\?\.\('products', \{ \.\.\.productToggles, \.\.\.confirmation, currentPassword \}\)/)
+  assert.match(finalizePanel, /\{ currentPassword \}: ResetSubmission, onSuccess: \(\) => void\) => \{\s*if \(!currentPassword\) return/)
+  assert.match(finalizePanel, /finalizeMigration\?\.\(step, \{ currentPassword \}\)/)
+  assert.match(finalizePanel, /onConfirm=\{\(confirmation\) => runStep\('zero_stock', confirmation,/)
+  assert.match(finalizePanel, /onConfirm=\{\(confirmation\) => runStep\('park_lots', confirmation,/)
   assert.match(sectionResetPanel, /resetSection\?\.\(selected\.id as SectionMode, \{ \.\.\.confirmation, currentPassword \}\)/)
   assert.match(sectionResetPanel, /confirmation\?\.acknowledged !== true \|\| confirmation\?\.confirm !== selected\.word\) return/, 'every page reset, not only Products, sends the phrase it was asked for')
 })
@@ -80,6 +86,10 @@ await runTest('the transport sends the password with reset-data and reset-sectio
   assert.match(resetSectionFn, /confirmation\?\.acknowledged !== true \|\| !confirmation\?\.confirm \|\| !confirmation\?\.currentPassword\) throw new Error/)
   assert.match(resetSectionFn, /\{ section, confirm: confirmation\.confirm, acknowledged: true, currentPassword: confirmation\.currentPassword \}/)
   assert.match(methods, /export async function resetSection\(section, confirmation\) \{\s*const result = await callSystemRuntimeMethod\('resetSection', section, confirmation\)/)
+  const finalizeFn = between(runtime, 'export async function finalizeMigration(', 'export async function openPath(')
+  assert.match(finalizeFn, /if \(!confirmation\?\.currentPassword\) throw new Error/)
+  assert.match(finalizeFn, /\{ step, currentPassword: confirmation\.currentPassword \}/)
+  assert.match(methods, /export async function finalizeMigration\(step, confirmation\) \{\s*const result = await callSystemRuntimeMethod\('finalizeMigration', step, confirmation\)/)
 })
 
 await runTest('the Worker answers with the codes the packs translate, in both languages', () => {
@@ -112,6 +122,11 @@ await runTest('the Worker asks for the password after the cheap checks and befor
   assert.ok(resetSectionRoute.indexOf('RESETTABLE_SECTIONS.includes(section)') < resetSectionRoute.indexOf('denyUnlessResetConfirmed(c, body, config.phrase)'))
   assert.ok(resetSectionRoute.indexOf('denyUnlessResetConfirmed(c, body, config.phrase)') < resetSectionRoute.indexOf('denyUnlessCurrentPassword(c, body, 403)'))
   assert.match(system, /denyUnlessCurrentPassword\(c, body, 400\)/, 'factory-reset keeps its pinned 400 refusal through the same helper')
+  const finalizeRoute = between(system, "app.post('/finalize-migration'", 'createSectionBackup(c.env, backupTables')
+  assert.equal(finalizeRoute.split('denyUnlessCurrentPassword(c, body, 403)').length - 1, 1, 'finalize-migration asks once, for the two stock steps only')
+  assert.ok(finalizeRoute.indexOf('if (step === LEGACY_SUBTOTAL_REPAIR_STEP)') < finalizeRoute.indexOf('denyUnlessCurrentPassword(c, body, 403)'), 'the one-off repair steps keep their own contracts and return before it')
+  const orphanRoute = between(system, "app.post('/import-retention/orphans'", 'cleanOrphanImportStaging(c.env')
+  assert.ok(orphanRoute.indexOf('if (apply) {') > -1 && orphanRoute.indexOf('if (apply) {') < orphanRoute.indexOf('denyUnlessCurrentPassword(c, body, 403)'), 'only the forced delete asks; the dry-run report does not')
 })
 
 if (failed > 0) {

@@ -1169,8 +1169,8 @@ const FINALIZE_MIGRATION_MIRROR_TABLES = {
   park_lots: [],
 }
 
-export async function finalizeMigration(step) {
-  const result = await callSystemRuntimeMethod('finalizeMigration', step)
+export async function finalizeMigration(step, confirmation) {
+  const result = await callSystemRuntimeMethod('finalizeMigration', step, confirmation)
   await invalidateClientRuntimeState(`finalize-migration-${step}`, FINALIZE_MIGRATION_MIRROR_TABLES[step] || [])
   return result
 }
