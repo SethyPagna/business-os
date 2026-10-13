@@ -1042,7 +1042,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.doesNotMatch(productReadTransportSource, /requireLiveServerWrite\([^)]*,\s*apiFetch/)
   assert.match(
     productWriteTransportSource,
-    /export async function createProduct\(payload: ProductPayload = \{\}, assertCurrent\?: \(\) => void\)[\s\S]*const body = ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, 'product'\)[\s\S]*\{ check\(\); return apiFetch\('POST', '\/api\/products', body\) \}/,
+    /export async function createProduct\(payload: ProductPayload = \{\}, assertCurrent\?: \(\) => void, writeIdentity\?: ActorWriteIdentity\)[\s\S]*const body = ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, 'product'\)[\s\S]*\{ check\(\); return apiFetch\('POST', '\/api\/products', body\) \}/,
     'product create sends the caller payload directly to the product route, behind the actor-scope fence (43f656d3)',
   )
   assert.match(

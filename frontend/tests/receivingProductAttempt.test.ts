@@ -74,8 +74,10 @@ function controller(id: string, response: (payload: Record<string, unknown>) => 
   const submissionsRef = { current: restoreReceivingSubmissions(null, []) }
   const destinationRef = { current: { branchId: '1', options: [{ value: '1', label: 'Active' }] } }
   let calls = 0, failDraft = false
-  const deps = { ...api, submissionsRef, destinationRef, productCreationRefusal, activeReceivingDestination, branchId: '1', user: { id: 7, name: 'Actor' },
-    require: () => ({ createProduct: async (payload: Record<string, unknown>, check?: () => void) => {
+  const receivingIdentity = { owner: 'receiving-owner', epoch: 0 }
+  const deps = { ...api, submissionsRef, destinationRef, productCreationRefusal, activeReceivingDestination, branchId: '1', user: { id: 7, name: 'Actor' }, receivingIdentity,
+    require: () => ({ createProduct: async (payload: Record<string, unknown>, check?: () => void, identity?: unknown) => {
+      assert.equal(identity, receivingIdentity, 'the receiving create carries the session write identity')
       check?.()
       assert.equal(lockDepth, 0, 'network must run outside the Web Lock')
       calls++

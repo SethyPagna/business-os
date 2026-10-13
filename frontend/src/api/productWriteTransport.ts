@@ -1,7 +1,8 @@
 import { apiFetch, cacheInvalidate, route } from './http.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
-import { captureActorReadScope, assertActorReadScope } from './actorReadScope.ts'
+import { captureActorReadScope, assertActorReadScope, assertActorWriteIdentity } from './actorReadScope.ts'
+import type { ActorWriteIdentity } from './actorReadScope.ts'
 import type { SelectedConflictGroupFinalizeRequest, SelectedConflictGroupReviewRequest } from '../utils/selectedConflictActionReview.ts'
 
 type ProductPayload = Record<string, unknown>
@@ -267,9 +268,16 @@ function encodeId(id: string | number): string {
   return encodeURIComponent(String(id))
 }
 
-export async function createProduct(payload: ProductPayload = {}, assertCurrent?: () => void): Promise<unknown> {
-  const scope = captureActorReadScope('products')
-  const check = () => { assertActorReadScope(scope, false); assertCurrent?.() }
+// writeIdentity: the receiving Stock Session's create, refused only when the
+// signed-in owner changes -- a same-user session reset mid-request keeps the
+// confirmed product, as its stock writes do. Every other caller keeps the read fence.
+export async function createProduct(payload: ProductPayload = {}, assertCurrent?: () => void, writeIdentity?: ActorWriteIdentity): Promise<unknown> {
+  const scope = writeIdentity ? null : captureActorReadScope('products')
+  const check = () => {
+    if (writeIdentity) assertActorWriteIdentity(writeIdentity)
+    else assertActorReadScope(scope!, false)
+    assertCurrent?.()
+  }
   check()
   const body = ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'product')
   delete body.is_active
@@ -277,9 +285,11 @@ export async function createProduct(payload: ProductPayload = {}, assertCurrent?
     'products:create',
     () => { check(); return apiFetch('POST', '/api/products', body) },
     null,
-    true,
+    writeIdentity ? { isWrite: true, writeIdentity } : true,
   )
-  check()
+  // With writeIdentity, route() has already refused an answer for another owner.
+  if (scope) assertActorReadScope(scope, false)
+  assertCurrent?.()
   return result
 }
 

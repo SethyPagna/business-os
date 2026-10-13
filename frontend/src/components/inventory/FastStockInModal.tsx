@@ -6,6 +6,7 @@
 // Worker.
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { captureActorWriteIdentity, isActorWriteIdentityCurrent, subscribeActorSessionQuarantine } from '../../api/actorReadScope.ts'
+import { ACTOR_GUARD_KEYS } from '../../api/branchRefusalLanguage.ts'
 import { createPortal } from 'react-dom'
 import { useApp } from '../../AppContext'
 import { canEditAcquisitionCosts, canViewAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../../utils/acquisitionCostAccess.ts'
@@ -787,11 +788,22 @@ export default function FastStockInModal({
     setSignInChanged(true)
     throw Object.assign(new Error(ownerChangedText()), { code: 'actor_owner_changed' })
   }
+  // A sign-in guard's English sentence is its pack key word for word: say it in the UI language.
+  const actorGuardText = (error: unknown): string | null => {
+    const code = String((error as { code?: unknown } | null)?.code || '')
+    return Object.prototype.hasOwnProperty.call(ACTOR_GUARD_KEYS, code)
+      ? tr(ACTOR_GUARD_KEYS[code], String((error as { message?: unknown }).message || '')) : null
+  }
 
   const holdNewProduct = async (payload: Record<string, unknown> = {}) => {
     assertReceivingOwner()
     const cleaned = omitUnauthorizedCatalogCosts(payload, user)
-    const prepared = onPrepareProduct ? await onPrepareProduct(cleaned) : withoutInlineImages(cleaned)
+    const prepared = onPrepareProduct
+      ? await onPrepareProduct(cleaned).catch((error: unknown) => {
+        const text = actorGuardText(error)
+        throw text && error instanceof Error ? Object.assign(error, { message: text }) : error
+      })
+      : withoutInlineImages(cleaned)
     assertReceivingOwner()
     const held: Record<string, unknown> = { ...prepared, stock_quantity: 0 }
     const name = String(held.name || '').trim()
@@ -803,7 +815,7 @@ export default function FastStockInModal({
     }
     const requestId = createClientRequestId('product')
     try { await registerReceivingProductAttempt(user?.id, requestId) } catch (error) {
-      throw Object.assign(new Error(stockFailureText(error, tr, tr('failed', 'Failed'))), { code: (error as { code?: string })?.code })
+      throw Object.assign(new Error(failureText(error, tr('failed', 'Failed'))), { code: (error as { code?: string })?.code })
     }
     assertReceivingOwner()
     applyEntry({
@@ -846,7 +858,7 @@ export default function FastStockInModal({
         || !activeReceivingDestination(destinationRef.current.branchId, destinationRef.current.options)) throw unknownError()
     }
     let result: CreateProductResult
-    try { result = await createProduct(JSON.parse(attempt.bodyJson!), assertDispatch) as CreateProductResult } catch (error) {
+    try { result = await createProduct(JSON.parse(attempt.bodyJson!), assertDispatch, receivingIdentity) as CreateProductResult } catch (error) {
       const failure = error as { code?: string; outcome?: string } | null
       if (failure?.code === 'write_requires_live_server' && failure.outcome !== 'unknown') {
         await finishReceivingProductAttempt(attempt, 'not_dispatched')
@@ -888,7 +900,7 @@ export default function FastStockInModal({
   const failureText = (error: unknown, fallback: string): string => {
     const code = String((error as { code?: unknown } | null)?.code || '')
     const key = STOCK_SESSION_FAILURE_KEYS[code]
-    return key ? tr(key, fallback) : stockFailureText(error, tr, fallback)
+    return key ? tr(key, fallback) : actorGuardText(error) || stockFailureText(error, tr, fallback)
   }
 
   // Fallback: one POST per line, reached only when the batched route 404s (old Worker).

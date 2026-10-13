@@ -155,10 +155,12 @@ const controller = (source: string, response: (payload: Record<string, unknown>,
   const ready = attempts.registerReceivingProductAttempt(7, entry.createRequestId!)
   const submissionsRef = { current: empty() }
   let calls = 0, storageFails = false, options = active, persisted: unknown
+  const receivingIdentity = { owner: 'receiving-owner', epoch: 0 }
   const deps = {
     ...attempts, activeReceivingDestination, destinationRef: { current: { branchId: '1', get options() { return options } } },
-    submissionsRef, productCreationRefusal, branchId: '1', user: { id: 7, name: 'Actor' },
-    require: () => ({ createProduct: async (payload: Record<string, unknown>, check: () => void) => {
+    submissionsRef, productCreationRefusal, branchId: '1', user: { id: 7, name: 'Actor' }, receivingIdentity,
+    require: () => ({ createProduct: async (payload: Record<string, unknown>, check: () => void, identity: unknown) => {
+      assert.equal(identity, receivingIdentity)
       check()
       calls++
       assert.equal(attempts.readReceivingProductAttempt(7, entry.createRequestId)?.state, 'attempting')

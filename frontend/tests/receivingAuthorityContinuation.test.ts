@@ -4,6 +4,9 @@ import ts from 'typescript'
 import * as actor from '../src/api/actorReadScope.ts'
 import { __resetApiHealthForTests, pingServerHealth, setSyncServerUrl } from '../src/api/http.ts'
 import { permissionRefreshIntent } from '../src/utils/permissionRefreshAccumulator.ts'
+import { ACTOR_GUARD_KEYS } from '../src/api/branchRefusalLanguage.ts'
+import { STOCK_SESSION_FAILURE_KEYS } from '../src/utils/stockSessionDraft.ts'
+import { stockFailureText } from '../src/utils/stockAdjustOutcome.ts'
 
 // The Stock Session writes for the owner who opened it: server, origin, user id
 // and organization. Every case below runs the REAL authority module in one fake
@@ -416,5 +419,73 @@ await check('F4: an owner change while the product attempt registers cannot hold
   const fenced = await run(REAL_CHANGE['another user'])
   await assert.rejects(fenced.promise, (error: any) => error.code === 'actor_owner_changed' && /signed-in account changed/.test(error.message))
   assert.deepEqual(fenced.applied, []); assert.deepEqual(fenced.flags, [true])
+})
+
+// ---- the receiving create: productWriteTransport.createProduct over the real route() ----
+const products = source('api/productWriteTransport.ts')
+function createFixture(mode: 'mid-request' | 'before-dispatch', change: () => void | Promise<void>) {
+  const sent: unknown[] = []
+  const route = extract(http, 'route', {
+    ...actor, getSyncServerUrl: () => 'https://fixture.invalid',
+    getReadServerBaseUrl: () => 'https://fixture.invalid', hasStoredAuthSession: () => true, getSameOriginApiBaseUrl: () => '',
+    throwIfRequestAborted() {}, _serverOnline: true, cacheInvalidateWithDerived() {}, setServerHealth() {}, logCall() {},
+    isConnectivityError: () => false, isWriteConflictError: () => false, isInvalidSessionError: () => false,
+    createSyncErrorId: () => 'event', window: { dispatchEvent: () => true },
+  })
+  const createProduct = extract(products, 'createProduct', {
+    ...actor, ensureClientRequestId: (body: unknown) => body, getDevicePayload: () => ({}),
+    route: async (...args: unknown[]) => { if (mode === 'before-dispatch') await change(); return route(...args) },
+    apiFetch: async (_method: string, _url: string, body: unknown) => { sent.push(body); if (mode === 'mid-request') await change(); return { id: 72 } },
+  })
+  return { sent, createProduct }
+}
+await check('the receiving create keeps a confirmed product through same-user churn; a real change refuses it', async () => {
+  for (const [name, change] of Object.entries(SAME_USER)) {
+    freshTab()
+    const f = createFixture('mid-request', change)
+    assert.deepEqual(await f.createProduct({ name: 'New' }, undefined, actor.captureActorWriteIdentity()), { id: 72 }, name)
+    freshTab()
+    const control = createFixture('mid-request', change)
+    await assert.rejects(control.createProduct({ name: 'New' }), { code: 'stale_read_scope' }, `${name}: every other caller keeps the read fence`)
+  }
+  for (const [name, change] of Object.entries(REAL_CHANGE)) {
+    freshTab()
+    const late = createFixture('mid-request', change)
+    await assert.rejects(late.createProduct({ name: 'New' }, undefined, actor.captureActorWriteIdentity()),
+      (error: any) => error.code === 'actor_owner_changed' && error.outcome === 'unknown' && error.confirmedResult?.id === 72, name)
+    freshTab()
+    const early = createFixture('before-dispatch', change)
+    await assert.rejects(early.createProduct({ name: 'New' }, undefined, actor.captureActorWriteIdentity()), { code: 'actor_owner_changed' }, name)
+    assert.deepEqual(early.sent, [], `${name}: nothing was sent`)
+  }
+})
+
+await check('the receiving flow says the sign-in guards in the UI language', async () => {
+  const km = JSON.parse(source('lang/km.json')) as Record<string, string>
+  const tr = (key: string, fallback: string) => km[key] ?? fallback
+  const actorGuardText = extract(modal, 'actorGuardText', { ACTOR_GUARD_KEYS, tr })
+  const failureText = extract(modal, 'failureText', { STOCK_SESSION_FAILURE_KEYS, actorGuardText, stockFailureText, tr })
+  for (const code of Object.keys(ACTOR_GUARD_KEYS)) {
+    assert.ok(km[code], `${code} is in the Khmer pack`)
+    assert.equal(failureText(Object.assign(new Error('English sentence'), { code }), 'Error'), km[code], code)
+  }
+  assert.equal(failureText(Object.assign(new Error('Another refusal'), { code: 'other' }), 'Error'), 'Another refusal', 'control: other refusals are unchanged')
+  // Holding a new product: an image upload refused mid-preparation, and the attempt registration refused.
+  for (const [step, code] of [['prepare', 'stale_read_scope'], ['register', 'actor_session_quarantined']] as const) {
+    freshTab()
+    const refusal = Object.assign(new Error('English sentence'), { code, name: 'AbortError' })
+    const dependencies: Record<string, any> = {
+      isActorWriteIdentityCurrent: actor.isActorWriteIdentityCurrent, receivingIdentity: actor.captureActorWriteIdentity(), setSignInChanged() {},
+      omitUnauthorizedCatalogCosts: (value: unknown) => value, user: { id: 7 },
+      onPrepareProduct: async (value: unknown) => { if (step === 'prepare') throw refusal; return value },
+      createClientRequestId: () => 'product-1', registerReceivingProductAttempt: async () => { if (step === 'register') throw refusal },
+      actorGuardText, failureText, stockFailureText, tr, priceText: (value: unknown) => String(value ?? ''),
+      applyEntry() {}, setBatchChoice() {}, setSupplier() {}, supplier: { supplierName: '' }, brand: '', canReceive: true, canViewCosts: true,
+    }
+    dependencies.ownerChangedText = extract(modal, 'ownerChangedText', { tr })
+    dependencies.assertReceivingOwner = extract(modal, 'assertReceivingOwner', dependencies)
+    const hold = extract(modal, 'holdNewProduct', dependencies)
+    await assert.rejects(hold({ name: 'New' }), (error: any) => error.message === km[code] && error.code === code, step)
+  }
 })
 if (failed) process.exitCode = 1

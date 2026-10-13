@@ -177,7 +177,7 @@ runTest('STK-06: creation reuses ProductForm and resumes without losing the stoc
     const start = source.indexOf('  const createHeldProduct = ')
     const end = source.indexOf('  // ---- commit ----', start)
     assert.ok(start > 0 && end > start)
-    assert.match(source.slice(start, end), /const payload = \{[\s\S]*?client_request_id: line\.createRequestId,[\s\S]*?stock_quantity: 0,[\s\S]*?const attempt = await reserveReceivingProductAttempt\(user\?\.id, line\.createRequestId, payload, validateDestination\)[\s\S]*?result = await createProduct\(JSON\.parse\(attempt\.bodyJson!\), assertDispatch\)/)
+    assert.match(source.slice(start, end), /const payload = \{[\s\S]*?client_request_id: line\.createRequestId,[\s\S]*?stock_quantity: 0,[\s\S]*?const attempt = await reserveReceivingProductAttempt\(user\?\.id, line\.createRequestId, payload, validateDestination\)[\s\S]*?result = await createProduct\(JSON\.parse\(attempt\.bodyJson!\), assertDispatch, receivingIdentity\)/)
   }
   assertCapturedCreation(modalSource)
   for (const [before, after] of [

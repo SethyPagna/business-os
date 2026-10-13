@@ -79,7 +79,7 @@ function assertReviewCreatePaths(modal: string, appliers: string, writers: strin
   const create = modal.slice(start, end)
   assert.match(create, /const payload = \{[\s\S]*?client_request_id: line\.createRequestId,[\s\S]*?stock_quantity: 0,/)
   assert.match(create, /const attempt = await reserveReceivingProductAttempt\(user\?\.id, line\.createRequestId, payload, validateDestination\)/)
-  assert.match(create, /result = await createProduct\(JSON\.parse\(attempt\.bodyJson!\), assertDispatch\)/)
+  assert.match(create, /result = await createProduct\(JSON\.parse\(attempt\.bodyJson!\), assertDispatch, receivingIdentity\)/)
   assert.match(create, /if \(result\?\.pending\) \{\s*try \{ await finishReceivingProductAttempt\(attempt, 'pending'\) \} catch \{ throw unknownError\(\) \}\s*submissionsRef\.current\.productOutcomes\[line\.key\] = 'pending'\s*throw Object\.assign\(new Error\([^\n]+\), \{ code: 'product_pending_review' \}\)/)
   const applierAst = ts.createSourceFile('reviewApply.ts', appliers, ts.ScriptTarget.Latest, true)
   const registration = applierAst.statements.find(item => ts.isExpressionStatement(item) && ts.isCallExpression(item.expression)

@@ -7,6 +7,7 @@ import * as destination from '../src/utils/receivingDestination.ts'
 import * as draft from '../src/utils/stockSessionDraft.ts'
 import * as outcome from '../src/utils/stockAdjustOutcome.ts'
 import { extractHistoryResultId } from '../src/utils/historyHelpers.ts'
+import { ACTOR_GUARD_KEYS } from '../src/api/branchRefusalLanguage.ts'
 import type { StockSessionLine } from '../src/utils/stockSessionDraft.ts'
 import type { FastStockInCommitLine, FastStockInCommitSettled } from '../src/api/inventoryWriteTransport.ts'
 import type * as AttemptModule from '../src/utils/receivingProductAttempt.ts'
@@ -22,6 +23,7 @@ function section(start: string, end: string): string {
 const controllerSource = [
   section('function applyLineOutcome(', 'interface FastStockInModalProps'),
   section('  const destinationError = ', '  const changeBranch = '),
+  section('  // A sign-in guard', '  const holdNewProduct = '),
   section('  const createHeldProduct = ', '  // ---- commit ----'),
   section('  const buildLineRequest = ', '  // Fallback:'),
   section('  const performCommit = ', '  // ---- payment ----'),
@@ -99,13 +101,14 @@ async function controller(createdRows: boolean[], creationOutcomes: CreationOutc
     const renderedReceived = received
     const dependencies = {
       ...api, ...destination, ...draft, ...outcome, extractHistoryResultId,
-      receivingIdentity, isActorWriteIdentityCurrent: () => true, assertReceivingOwner: () => {}, stopForSignInChange: () => { throw Error('unexpected owner change') },
+      receivingIdentity, ACTOR_GUARD_KEYS, isActorWriteIdentityCurrent: () => true, assertReceivingOwner: () => {}, stopForSignInChange: () => { throw Error('unexpected owner change') },
       submissionsRef, destinationRef, received, branchId: '1', user: { id: 7, name: 'Actor' }, saving,
       canEditCosts: true, canEditPrice: true, canViewCosts: true, paidAmount: '', paymentStatus: 'paid', creditDueDate: '',
       receivedDate: '2026-10-12', supplier: { supplierId: null, supplierName: 'Supplier' }, sessionIdRef: { current: 123 },
       require(name: string) {
         assert.equal(name, '../../api/productWriteTransport.ts')
-        return { createProduct: async (_payload: Record<string, unknown>, check: () => void) => {
+        return { createProduct: async (_payload: Record<string, unknown>, check: () => void, identity: unknown) => {
+          assert.equal(identity, receivingIdentity, 'the create is fenced by the session\'s write identity')
           check()
           creates++
           const creationOutcome = Array.isArray(creationOutcomes) ? creationOutcomes[creates - 1] : creationOutcomes
