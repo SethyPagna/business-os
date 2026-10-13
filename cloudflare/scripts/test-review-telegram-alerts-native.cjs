@@ -1222,8 +1222,11 @@ async function main() {
       const feeIds = fullRows.filter(r => r.section === 'fees').map(r => r.id)
       t.ok('section filter still applies: the fee rows only, all of them', feeIds.length >= 2 && fullRows.some(r => r.section !== 'fees'), feeIds)
       t.eq('section filter result', (feesOnly.body.data || []).map(r => r.id), feeIds)
-      const approved = await H.api('GET', '/api/review?fields=targets&status=approved', undefined, { as: 'dara' })
-      t.eq('status filter still applies', (approved.body.data || []).length, 0)
+      const approvedSlim = await H.api('GET', '/api/review?fields=targets&status=approved', undefined, { as: 'dara' })
+      const approvedFull = await H.api('GET', '/api/review?status=approved', undefined, { as: 'dara' })
+      t.eq('status filter result matches the default list', (approvedSlim.body.data || []).map(r => r.id), (approvedFull.body.data || []).map(r => r.id))
+      t.ok('and holds approved rows only', (approvedSlim.body.data || []).every(r => r.status === 'approved'))
+      t.ok('none of the open rows leak into it', !(approvedSlim.body.data || []).some(r => fullRows.some(open => open.id === r.id)))
 
       const viewer = await H.api('GET', '/api/review?fields=targets', undefined, { as: 'viewer' })
       t.eq('a view-only reviewer may read it', viewer.status, 200)
