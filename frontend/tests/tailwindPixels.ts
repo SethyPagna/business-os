@@ -1,6 +1,5 @@
-// Reads the sizes a layout test cares about straight from the Tailwind classes a component renders, because the
-// in-memory DOM has no layout engine. Only plain spacing utilities (w-11, -m-1.5, gap-2, p-3, px-px) are understood;
-// anything else answers null so a test never invents a number. One step of Tailwind's default scale is 4 px.
+// Reads sizes from the Tailwind classes a component renders (the in-memory DOM has no layout). Only plain spacing utilities
+// are understood (w-11, -m-1.5, gap-2, p-3); anything else answers null. One step of the default scale is 4 px.
 
 export const classesOf = (className: string): string[] => className.split(/\s+/).filter(Boolean)
 
@@ -47,6 +46,19 @@ export function bleedOnSide(classes: string[], side: 'l' | 'r' | 't' | 'b'): num
 /** The `gap-*` (or `gap-x-*`) the classes set, in px. */
 export function gapPx(classes: string[]): number {
   return Math.max(0, ...classes.filter((name) => /^gap(?:-x)?-/.test(name)).map(pixels).filter((value): value is number => value !== null))
+}
+
+/** How many columns `grid-cols-N`, `sm:grid-cols-N` and `min-[Wpx]:grid-cols-N` give at this viewport width. */
+export function gridColumns(classes: string[], viewport: number): number {
+  let columns = 1
+  let from = -1
+  for (const name of classes) {
+    const match = /^(?:(sm|min-\[(\d+)px\]):)?grid-cols-(\d+)$/.exec(name)
+    if (!match) continue
+    const minWidth = match[1] === undefined ? 0 : match[1] === 'sm' ? 640 : Number(match[2])
+    if (viewport >= minWidth && minWidth >= from) { columns = Number(match[3]); from = minWidth }
+  }
+  return columns
 }
 
 /** Horizontal padding on both sides together, from p-N, px-N, pl-N and pr-N. */

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { act } from 'react'
 import { createHarness, expireWaitsSince, propsOf, timerMark, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
-import { classesOf, dimension, gapPx, horizontalPadding } from './tailwindPixels.ts'
+import { classesOf, dimension, gapPx, gridColumns, horizontalPadding } from './tailwindPixels.ts'
 
 // Daily-use A items 3-5, run against the real ProductForm. The photo picker
 // has to give the form back when the person backs out (iOS and some Android
@@ -62,6 +62,7 @@ const focusWindow = (): Promise<void> => emitPageEvent('focus')
 const tapPage = (): Promise<void> => emitPageEvent('pointerdown', 'touchstart')
 // The page visible again, as after a camera app or a restored page.
 const showPage = (): Promise<void> => emitPageEvent('visibilitychange', 'pageshow')
+const notices: string[] = []
 const heldPageListeners = (): number => [...pageListeners.values()].reduce((sum, set) => sum + set.size, 0)
 const photo = (name: string): File => new File(['pixels'], name, { type: 'image/jpeg' })
 
@@ -82,7 +83,7 @@ async function mountForm(lang = 'en', overrides: Record<string, unknown> = {}): 
   localStorage.clear()
   const words = packs[lang]
   const user = { id: 42, organization_id: 1, organization_public_id: 'org-1', role_code: 'admin', role_permissions: { all: true } }
-  const app = { user, page: 'products', t: (key: string) => words[key] || '', notify() {}, settings: {}, formatDateTime: String }
+  const app = { user, page: 'products', t: (key: string) => words[key] || '', notify: (message: unknown) => { notices.push(String(message)) }, settings: {}, formatDateTime: String }
   return harness.mount({
     component: 'components/products/forms/ProductForm.tsx',
     props: {
@@ -107,8 +108,7 @@ try {
     const input = pickers[before]
     assert.ok(input, 'Take Photo opens a picker')
     assert.equal(input.getAttribute('capture'), 'environment', 'Take Photo asks for the rear camera')
-    // Waiting on the picker is not an upload: nothing claims to be uploading and Save, Cancel and Close stay usable
-    // (review finding 7), because some browsers never say the picker was dismissed.
+    // Waiting on the picker is not an upload: nothing says "Uploading..." and Save, Cancel and Close stay usable.
     assert.ok(!surface.text().includes('Uploading...'), 'waiting on the picker is not shown as an upload')
     assert.notEqual(propsOf(saveButton(surface)).disabled, true, 'Save does not wait for the picker')
     await fire(input, 'cancel')
@@ -178,15 +178,13 @@ try {
     uploads.length = 0
   }
 
-  // Review finding 7. iOS before 16.4 fires neither `cancel` nor a window `focus` when the picker is dismissed. The form was
-  // held by "Uploading..." the whole time (Save, Cancel and the header Close disabled) and could only be left by a reload.
-  // Waiting on the picker never locks Close, Cancel or Save now; only an upload in flight does, and that is bounded.
+  // A picker that reports neither cancel nor focus must not lock the form; only an upload in flight does, and that is bounded.
   {
     const closed: number[] = []
     const surface = await mountForm('en', { onClose() { closed.push(1) }, onMinimize() {} })
     const close = surface.find((node) => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === packs.en.close, 'the header Close')
     const before = pickers.length
-    // The app's own focus and visibility listeners are in the same registry; the picker's are what appears on top of them.
+    // The app's own page listeners share this registry; the picker's are the ones added on top.
     const appListeners = heldPageListeners()
     await surface.click(pickerButton(surface, 'Take Photo'))
     const first = pickers[before]
@@ -383,9 +381,8 @@ try {
 
   console.log('PASS a picked photo shows at once with an uploading indicator, a failure shows an inline alert with Retry, and preview URLs are revoked')
 
-  // Review finding 6. A photo that failed to upload is not part of the product, so Save used to drop it without a word.
-  // Its tile now offers icon-only Retry and Remove that are real touch targets and fit the 3-column grid on a phone,
-  // and Save (or Minimize) refuses, in the pack language, until the person has retried or removed it.
+  // A failed photo's tile has icon-only 44 px Retry and Remove that fit at every phone width; Save and Minimize refuse until
+  // it is retried or removed.
   for (const lang of ['en', 'km']) {
     resetProbes()
     const words = packs[lang]
@@ -415,18 +412,24 @@ try {
       assert.ok(dimension(classes, 'w') >= 44 && dimension(classes, 'h') >= 44, `${lang}: ${label} is at least 44 x 44 px (${control.className})`)
     }
 
-    // Both targets fit the tile on a 360 px and a 320 px phone: the Modal body pads the grid, the grid has 3 columns and a gap.
+    // Panel = viewport less the Modal root's side padding (main.css .modal-viewport-safe); the body pads it again.
     const grid = failed.parentNode!
     const body = surface.find((node) => classesOf(node.className).includes('modal-scroll'), 'the modal body')
-    assert.ok(classesOf(grid.className).includes('grid-cols-3'), `${lang}: the photos sit in a 3-column grid on a phone`)
+    const rootRem = Number(/\.modal-viewport-safe\s*\{[^}]*padding-left:\s*calc\(\s*([\d.]+)rem/.exec(readFileSync(new URL('../src/styles/main.css', import.meta.url), 'utf8'))?.[1])
+    assert.ok(rootRem > 0, 'the Modal root padding is read from main.css')
     const footerClasses = classesOf(retry.parentNode!.className)
     const needed = dimension(classesOf(retry.className), 'w') + dimension(classesOf(remove.className), 'w') + horizontalPadding(footerClasses) + gapPx(footerClasses)
-    for (const viewport of [360, 320]) {
-      const content = viewport - horizontalPadding(classesOf(body.className))
-      const tileWidth = (content - 2 * gapPx(classesOf(grid.className))) / 3
-      const inner = tileWidth - 2
-      assert.ok(needed <= inner, `${lang}: Retry and Remove need ${needed} px but a tile is ${inner.toFixed(1)} px wide on a ${viewport} px phone`)
+    const tilePx = (viewport: number): { columns: number; inner: number } => {
+      const columns = gridColumns(classesOf(grid.className), viewport)
+      const content = viewport - 2 * rootRem * 16 - horizontalPadding(classesOf(body.className))
+      return { columns, inner: (content - (columns - 1) * gapPx(classesOf(grid.className))) / columns - 2 }
     }
+    for (const viewport of [360, 340, 339, 320, 300]) {
+      const { columns, inner } = tilePx(viewport)
+      assert.ok(needed <= inner, `${lang}: Retry and Remove need ${needed} px but a tile is ${inner.toFixed(1)} px wide in ${columns} columns on a ${viewport} px phone`)
+    }
+    assert.equal(tilePx(360).columns, 3, `${lang}: a 360 px phone keeps three columns`)
+    assert.equal(tilePx(320).columns, 2, `${lang}: and a 320 px phone drops to two`)
 
     // The inline alert has room for Khmer lines.
     const alertText = surface.find((node) => node.getAttribute('role') === 'alert' && node.textContent.includes(words.image_upload_failed), 'the failed-upload alert')
@@ -481,8 +484,7 @@ try {
     await surface.unmount()
   }
 
-  // An upload that is really running does lock Save, Cancel and Close, and that lock is bounded: an upload that never
-  // answers fails at its timeout, shows the failed tile, and the form is usable again (review finding 7).
+  // A running upload locks Save, Cancel and Close, and an upload that never answers times out and unlocks them.
   {
     resetProbes()
     uploadImpl = () => new Promise(() => undefined)
@@ -506,7 +508,41 @@ try {
     await surface.unmount()
   }
 
+  // A photo that arrives after Save started, or after the form closed, cannot join the product: it is reported, not dropped.
+  for (const lang of ['en', 'km']) {
+    resetProbes()
+    notices.length = 0
+    const words = packs[lang]
+    const saved: unknown[] = []
+    const surface = await mountForm(lang, { onSave: async (payload: unknown) => { saved.push(payload) } })
+    await surface.type(surface.find((node) => node.id === 'product-name', 'name'), 'Probe serum')
+    const before = pickers.length
+    await surface.click(pickerButton(surface, words.take_photo))
+    const duringSave = pickers[before]
+    await tapPage()
+    await surface.click(saveButton(surface))
+    surface.find((node) => node.getAttribute('role') === 'dialog' && node.textContent.includes(words.label_selling_price), `${lang}: the save review`)
+    duringSave.files = [photo('during-save.jpg')]
+    await fire(duringSave, 'change')
+    await surface.settle()
+    assert.deepEqual(notices, [words.image_arrived_too_late], `${lang}: a photo that arrives while the save review is open is reported in the pack language`)
+    assert.equal(uploads.length, 0, `${lang}: and not uploaded to a product whose gallery was already taken`)
+    assert.deepEqual(saved, [])
+    await surface.unmount()
+    notices.length = 0
+    const afterClose = await mountForm(lang)
+    const second = pickers.length
+    await afterClose.click(pickerButton(afterClose, words.take_photo))
+    await tapPage()
+    await afterClose.unmount()
+    pickers[second].files = [photo('after-close.jpg')]
+    await fire(pickers[second], 'change')
+    assert.deepEqual(notices, [words.image_arrived_too_late], `${lang}: a photo that arrives after the form closed is reported too`)
+    assert.equal(uploads.length, 0)
+  }
+
   console.log('PASS a failed photo tile has icon-only 44 px Retry and Remove that fit a phone, and Save and Minimize refuse until it is retried or removed')
+  console.log('PASS a photo that arrives after Save started or the form closed is reported in English and Khmer, never dropped silently')
   console.log('PASS only an upload that is really running locks the form, and an upload that never answers times out and unlocks it')
 } finally {
   URL.createObjectURL = realCreateObjectURL

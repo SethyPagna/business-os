@@ -6980,6 +6980,7 @@
   "stored_files": "stored files",
   "image_upload_missing_path": "Image upload completed without a stored file path.",
   "image_failed_before_save": "A photo didn't upload — Retry or remove it first",
+  "image_arrived_too_late": "A photo arrived too late to be added — open the product to add it",
   "sale_payment_correction_hint": "Correct the recorded tender method or amount. This creates an audited correction receipt.",
   "fee_sale_search_placeholder": "Search receipt, customer, phone, product, SKU or barcode",
   "portalPublicationReadinessWarning": "These seller details are shown on the storefront's legal and contact pages, so complete them when you can.",

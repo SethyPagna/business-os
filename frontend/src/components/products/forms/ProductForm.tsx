@@ -2,6 +2,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType, Dispatch, DragEvent, SetStateAction } from 'react'
 import { lazyRetry, preloadLazy } from '../../../utils/lazyImport.ts'
 import { registerDirtyWork } from '../../../utils/dirtyWork.ts'
+import { useApp as useAppHook } from '../../../AppContext.tsx'
 import ScanLine from 'lucide-react/dist/esm/icons/scan-line.js'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -47,6 +48,8 @@ import { effectivePermissions, isAdminControlUser } from '../../../utils/permiss
 import { canChangeProductPrices } from '../../../utils/productMergePriceAccess.ts'
 import { canViewAcquisitionCosts, canEditAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../../../utils/acquisitionCostAccess.ts'
 import { branchChoiceSettled } from '../../../utils/branchScope.ts'
+
+const useApp = useAppHook as unknown as () => { notify: (message: string, type?: string) => void }
 
 const importBarcodeScannerModal = () => import('../scanning/BarcodeScannerModal')
 const BarcodeScannerModal = lazyRetry(importBarcodeScannerModal, 'product-form-barcode-scanner-modal')
@@ -583,8 +586,7 @@ function ProductFormContent({
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([])
   const pendingImagesRef = useRef<PendingImage[]>([])
   const nextPendingImageIdRef = useRef(0)
-  // How many times Save or Minimize has been refused because a photo failed to upload. A count, not a flag, so a
-  // second refusal moves focus to Retry again; it returns to 0 once no failed photo is left.
+  // Times Save or Minimize was refused for a failed photo (a count, so each refusal refocuses Retry); 0 once none is left.
   const [failedPhotoRefusals, setFailedPhotoRefusals] = useState(0)
   const firstFailedRetryRef = useRef<HTMLButtonElement>(null)
   // Which gallery tile is currently being drag-reordered, if any (Part 242) --
@@ -664,9 +666,9 @@ function ProductFormContent({
   const nameLocked = isGroupedProduct && !nameUnlocked
   const canManageImages = canManageProductImages(user)
   const aliveRef = useRef(true)
-  // An upload is running (the lock behind imageUploading). Waiting on the OS picker is NOT an upload and holds only
-  // imagePickerWaitingRef: some browsers never say a picker was dismissed, so a form locked on the wait could only
-  // be left by a reload. A tap on the page ends the wait (utils/filePicker.ts) and Save, Cancel and Close never wait on it.
+  const { notify } = useApp()
+  // imageUploadInFlightRef is the upload lock. Waiting on the OS picker holds only imagePickerWaitingRef, so a picker
+  // that never reports cannot lock Save, Cancel or Close.
   const imageUploadInFlightRef = useRef(false)
   const imagePickerWaitingRef = useRef(false)
   const lateImageFilesRef = useRef<File[][]>([])
@@ -1092,11 +1094,13 @@ function ProductFormContent({
     }
   }
 
-  // Photos from the picker, whether chosen while it was open or handed over later (Android returns a camera photo
-  // through `change` after the focus fallback already ended the wait). They upload now, or queue behind a running upload.
-  // A save already in flight has taken its gallery snapshot, so a photo that arrives now could not be linked to it.
+  // Picked or late photos upload now or queue behind a running upload. After a save started (or the form closed) the
+  // gallery is already taken, so the photo cannot be linked: say so rather than drop it.
   function receiveImageFiles(files: File[]): void {
-    if (!aliveRef.current || saveInFlightRef.current) return
+    if (!aliveRef.current || saveInFlightRef.current) {
+      if (files.length) notify(tr('image_arrived_too_late', 'A photo arrived too late to be added — open the product to add it', 'រូបភាពមួយមកដល់យឺតពេល មិនអាចបន្ថែមបានទេ — សូមបើកផលិតផលដើម្បីបន្ថែមវា'), 'warning')
+      return
+    }
     if (imageUploadInFlightRef.current) lateImageFilesRef.current.push(files)
     else void withImageLock(() => uploadImageFiles(files))
   }
@@ -1116,10 +1120,7 @@ function ProductFormContent({
     commitPendingImages(pendingImagesRef.current.filter((entry) => entry.id !== id))
   }
 
-  // A photo that failed to upload is not part of the product: Save would write the product without it and Minimize
-  // would park a draft without it, either one silently. Refuse both instead. The photos live on Basic Info, so go
-  // there; the message sits in the footer where the person just pressed, and focus lands on Retry (see the effect
-  // below), so there is always a way through (Retry), a way to give the photo up (Remove) and a way out (Close).
+  // A failed photo is not part of the product, so Save and Minimize would drop it silently: refuse, go to Basic Info, focus Retry.
   function refuseWhileAPhotoFailed(): boolean {
     if (!pendingImagesRef.current.some((image) => image.status === 'failed')) return false
     setActiveTab('basic')
@@ -1616,7 +1617,7 @@ function ProductFormContent({
                     {tr('drag_to_reorder_images', 'Drag to reorder, or use the arrows on each photo.', 'អូសដើម្បីរៀបលំដាប់ ឬប្រើព្រួញនៅលើរូបនីមួយៗ។')}
                   </p>
                 ) : null}
-                <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+                <div className="grid grid-cols-2 gap-2 min-[340px]:grid-cols-3 sm:grid-cols-5">
                   {imageList.map((image, index) => (
                     <div
                       key={`${image}-${index}`}
@@ -1696,8 +1697,7 @@ function ProductFormContent({
                           <Loader2 className="h-5 w-5 animate-spin text-white" />
                         </div>
                       ) : (
-                        // Two icon-only 44 px targets (88 px) side by side: they fit the 3-column grid down to a 310 px phone
-                        // (tests/productFormImageFlow.test.ts does the sum). The words live in the tooltip and aria-label.
+                        // Two 44 px targets (88 px) need a tile of at least 90 px: 3 columns from 340 px, 2 below (the test sums it).
                         <div className="absolute inset-x-0 bottom-0 flex items-center justify-around bg-black/60">
                           <button
                             ref={image.id === firstFailedImageId ? firstFailedRetryRef : undefined}
@@ -2238,8 +2238,7 @@ function ProductFormContent({
           and sits flush against the bottom edge; px-5 pb-5 pt-4 puts it
           back inside the bar. */}
       <div className="sticky bottom-0 -mx-5 -mb-5 mt-6 flex flex-col gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
-        {/* The reason Save or Minimize was refused while a photo has failed (refuseWhileAPhotoFailed). It sits here, not by the
-            photo, because this bar is on screen on every tab. */}
+        {/* Why Save or Minimize was refused (refuseWhileAPhotoFailed); here because this bar shows on every tab. */}
         {failedPhotoRefusals > 0 && firstFailedImageId ? (
           <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm leading-relaxed text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
             {tr('image_failed_before_save', 'A photo didn\'t upload — Retry or remove it first', 'រូបភាពមួយមិនបានផ្ទុកឡើងទេ — សូមព្យាយាមម្ដងទៀត ឬលុបវាសិន')}
