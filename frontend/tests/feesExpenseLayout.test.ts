@@ -125,16 +125,20 @@ const successEnd = page.indexOf('      onError:', successStart)
 const successExpression = page.slice(successStart + 'onSuccess: '.length, successEnd).trim().replace(/,$/, '')
 const notices: string[] = []
 let reloads = 0
-const successCallback = new Function('notify', 'tr', 'load', `return (${stripTypeScriptTypes(successExpression)})`)(
+let tagRefreshes = 0
+const successCallback = new Function('notify', 'tr', 'load', 'refreshPendingReviewAfterWrite', `return (${stripTypeScriptTypes(successExpression)})`)(
   (message: string) => notices.push(message), (key: string) => key, async (silent: boolean) => { assert.equal(silent, true); reloads++ },
+  () => { tagRefreshes++ },
 )
 assert.equal(await performExpenseDelete(deleteOperation({ remove: async () => ({ success: true, pending: true, pendingActionId: 93 }), onSuccess: successCallback })), true)
 assert.deepEqual(notices, ['reason_submitted_for_review'])
 assert.equal(reloads, 1, 'queued row remains server-owned; no optimistic deletion')
+assert.equal(tagRefreshes, 1, 'a delete queued for review refreshes the waiting tags at once')
 notices.length = 0
 assert.equal(await performExpenseDelete(deleteOperation({ remove: async () => ({ success: true }), onSuccess: successCallback })), true)
 assert.deepEqual(notices, ['fee_deleted'])
 assert.equal(reloads, 2)
+assert.equal(tagRefreshes, 1, 'a delete that was applied has nothing waiting to refresh')
 notices.length = 0
 assert.equal(await performExpenseDelete(deleteOperation({ remove: async () => ({ success: false }), onSuccess: successCallback })), false)
 assert.deepEqual(notices, [], 'unconfirmed response never emits a completion toast or permits close')

@@ -26,6 +26,7 @@ import PagerActionRow from '../shared/PagerActionRow.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import PendingReviewSync from '../shared/PendingReviewSync'
 import PendingReviewTag from '../shared/PendingReviewTag'
+import { refreshPendingReviewAfterWrite } from '../../utils/pendingReviewTargets.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -656,6 +657,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         FEES_MUTATION_TIMEOUT_MS,
       ),
       onSuccess: async (outcome) => {
+        if (outcome === 'pending') refreshPendingReviewAfterWrite()
         notify(outcome === 'pending'
           ? tr('reason_submitted_for_review', 'Submitted for review -- changes will appear once approved.')
           : tr('fee_deleted', 'Expense deleted'), 'success')

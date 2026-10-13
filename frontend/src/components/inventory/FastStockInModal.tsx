@@ -23,6 +23,7 @@ import { stockFailureText, stockLineNeedsRemoval } from '../../utils/stockAdjust
 import { activeReceivingDestination, captureReceivingRequest, productCreationRefusal, receivingDestinationRefusal, receivingDetailsLocked, restoreReceivingSubmissions, retainReceivingSubmissions, type ReceivingSubmissions } from '../../utils/receivingDestination.ts'
 import { assertReceivingProductAttemptDispatch, finishReceivingProductAttempt, overlayReceivingProductAttempts, registerReceivingProductAttempt, reserveReceivingProductAttempt } from '../../utils/receivingProductAttempt.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { refreshPendingReviewAfterWrite } from '../../utils/pendingReviewTargets.ts'
 import { batchDisplayLabel, formatBatchReceivedDate, lotCodeAsDate } from '../../utils/batchLabel.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { buildProductGroups, type ProductGroup, type ProductRecord } from '../../utils/productGrouping.ts'
@@ -975,6 +976,7 @@ export default function FastStockInModal({
         if (!isActorWriteIdentityCurrent(receivingIdentity)) { stopForSignInChange(); return }
         failed += 1
         const reviewPending = (error as { code?: string } | null)?.code === 'product_pending_review'
+        if (reviewPending) refreshPendingReviewAfterWrite()
         lines = applyLineOutcome(lines, line.key, { status: 'error', detail: failureText(error, tr('error', 'Error')), ...(reviewPending ? { needsRemoval: true } : {}) })
       }
       persistSessionDraft(lines)

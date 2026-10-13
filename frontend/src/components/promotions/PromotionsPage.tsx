@@ -36,6 +36,7 @@ import { searchProducts, getProductFilters, updateProduct } from '../../api/meth
 import { productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
 import { promotionAutoLabel, normalizePromotionRule } from '../../utils/promotionRules.ts'
 import { calculateProductDiscount, isProductDiscountActive } from '../../utils/pricing.ts'
+import { noteQueuedForReview } from '../../utils/pendingReviewTargets.ts'
 
 // Same minimal-context cast pattern as FeesPage/LoyaltyPointsPage --
 // AppContext's useApp is untyped, each page names just what it reads.
@@ -416,7 +417,7 @@ export default function PromotionsPage() {
       // Partial update: updateRow only writes the keys sent, so nothing
       // else on the product is touched (same contract the bulk editor
       // relies on).
-      await updateProduct(discountDraft.product.id, {
+      const result = await updateProduct(discountDraft.product.id, {
         // The version this editor opened with, so the save is checked against
         // the row it showed and never against a stale local mirror.
         expectedUpdatedAt: typeof discountDraft.product.updated_at === 'string' ? discountDraft.product.updated_at : undefined,
@@ -430,7 +431,12 @@ export default function PromotionsPage() {
         discount_starts_at: discountDraft.discount_starts_at || null,
         discount_ends_at: discountDraft.discount_ends_at || null,
       })
-      notify(t('promo_discount_saved') || 'Product discount saved.')
+      // A Review Required user's edit is QUEUED (202 { pending: true }), not stored: say so, and let the
+      // reload below show the discount that is really on the product -- never the draft as if it were saved.
+      const queued = (noteQueuedForReview(result) as { pending?: unknown } | null | undefined)?.pending === true
+      notify(queued
+        ? (t('reason_submitted_for_review') || 'Submitted for review -- changes will appear once approved.')
+        : (t('promo_discount_saved') || 'Product discount saved.'))
       setDiscountDraft(null)
       setProductQuery('')
       setProductResults([])
