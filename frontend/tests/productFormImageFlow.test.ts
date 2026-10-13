@@ -418,9 +418,9 @@ try {
     // Below 768 px main.css forces the grid gap, so the gap-2 class is not the real one.
     const grid = failed.parentNode!
     const body = surface.find((node) => classesOf(node.className).includes('modal-scroll'), 'the modal body')
-    const rootRem = Number(/\.modal-viewport-safe\s*\{[^}]*padding-left:\s*calc\(\s*([\d.]+)rem/.exec(readFileSync(new URL('../src/styles/main.css', import.meta.url), 'utf8'))?.[1])
-    assert.ok(rootRem > 0, 'the Modal root padding is read from main.css')
     const css = readFileSync(new URL('../src/styles/main.css', import.meta.url), 'utf8')
+    const rootRem = Number(/\.modal-viewport-safe\s*\{[^}]*padding-left:\s*calc\(\s*([\d.]+)rem/.exec(css)?.[1])
+    assert.ok(rootRem > 0, 'the Modal root padding is read from main.css')
     const phoneGapRem = Number(/@media\s*\(max-width:\s*767px\)\s*\{[\s\S]*?\.grid\s*\{\s*gap:\s*([\d.]+)rem\s*!important/.exec(css)?.[1])
     assert.ok(phoneGapRem > 0, 'the phone grid gap is read from main.css')
     const footerClasses = classesOf(retry.parentNode!.className)

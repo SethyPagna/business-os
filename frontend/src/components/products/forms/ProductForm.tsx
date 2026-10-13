@@ -2248,15 +2248,7 @@ function ProductFormContent({
           </p>
         ) : null}
         <div className="flex gap-3">
-          {/* Disabled while imageUploading, not just `saving`: previously a
-              fast Save click during an in-flight image upload would save the
-              product with the pre-upload imageList (the just-picked file
-              hadn't landed in state yet), silently orphaning the freshly
-              uploaded asset in the Files library instead of linking it to
-              the product -- the exact "shows uploaded but didn't connect,
-              had to go re-link it via Files" bug reported. Save now can't
-              fire until uploadPickedImages's setImageList has actually
-              landed. */}
+          {/* Disabled while a photo uploads as well as while saving: Save would otherwise take the pre-upload gallery. */}
           <button type="button" className="btn-primary min-h-11 flex-1" onClick={saveForm} disabled={saving || imageUploading}>
             {saving ? (t('saving') || 'Saving...') : imageUploading ? (tr('uploading', 'Uploading...', 'កំពុងបង្ហោះ...')) : t('save')}
           </button>
@@ -2267,15 +2259,7 @@ function ProductFormContent({
               </button>
             )}
           </ModalCloseContext.Consumer>
-          {/* Delete lives in this same row now (was only reachable from the
-              separate read-only detail sheet before) -- deliberately NOT
-              flex-1 like Save, and icon-only with no text label, so its tap
-              target stays small and off to the side rather than competing
-              with Save for thumb space and inviting an accidental hit.
-              onDelete already routes through Products.tsx's own
-              DeleteConfirmModal (impact summary + explicit confirm), so no
-              second confirmation is added here -- this button only opens
-              that flow, it never deletes directly itself. */}
+          {/* Delete is icon-only and not flex-1, so it stays off to the side; onDelete opens Products.tsx's own DeleteConfirmModal. */}
           {isEditMode && onDelete ? (
             <button
               type="button"
