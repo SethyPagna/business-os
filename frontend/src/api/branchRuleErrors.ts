@@ -232,5 +232,10 @@ export function reviewApprovalRefusalText(code: unknown, section: unknown, t: (k
     return (t('review_section_full_required') || 'Approving this request needs Full access to {section}. Ask a reviewer who has it.')
       .replace('{section}', t(name) || name)
   }
+  // Finding I (13 Oct 2026): a queued product create or identity edit that now lands on another product's
+  // identity is refused at approval (it would mint a duplicate); the request stays open.
+  if (code === 'review_identity_conflict') {
+    return t('review_identity_conflict') || 'This request now matches an existing product. Approving it would create a duplicate, so nothing was applied. Reject it and make the change yourself; it will merge into the existing product.'
+  }
   return null
 }

@@ -279,6 +279,53 @@ export function pickSameIdentityRow<T extends { id?: number; barcode?: string | 
   return rankBarcodeIdentityWinner(realRows.length ? realRows : rows)
 }
 
+/**
+ * The manual-path identity lookup: the ACTIVE product, other than
+ * `excludeId`, that `name` + `barcode` identify as the same product, or null.
+ * Used by POST /api/products and PUT /api/products/:id (which fold into it)
+ * and by the review applier (lib/reviewApply.ts), which refuses to approve a
+ * queued create or edit that lands on it. It lives here, not in the route, so
+ * approval judges by exactly the rule the direct write folds by (finding I,
+ * 13 Oct 2026; lib cannot import a route).
+ *
+ * Cost is NO LONGER part of this guard. It was, and that contradicted the
+ * Sep-4 identity ruling head-on: the form happily minted a second row for one
+ * article bought at a second price, which is the exact duplicate the merge
+ * tool then had to clean up. The inflow is the fix; the merge is the repair.
+ *
+ * The SQL narrows to the name group and nothing else; the barcode is compared
+ * in JS through identityBarcodeKey, because folding leading zeros in SQL would
+ * mean a THIRD hand-copy of the fold (searchMatch.ts already carries the
+ * deliberately-looser search one) and this codebase has been bitten by
+ * exactly that before. live_stock_quantity feeds pickSameIdentityRow's
+ * wildcard-attachment ranking (most stock, then lowest id --
+ * rankBarcodeIdentityWinner) for the case this name group already holds two
+ * or more DIFFERENT real barcodes and a broken/empty incoming value has to
+ * pick one to wildcard against.
+ */
+export async function findSameIdentityProduct(
+  db: D1Compat,
+  name: string,
+  barcode: unknown,
+  excludeId: number | null,
+): Promise<{ id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number } | null> {
+  const nameKey = normalizeProductGroupName(name)
+  if (!nameKey) return null
+  const rows = await db.prepare(`
+    SELECT p.id, p.name, p.barcode, p.cost_price_usd, p.cost_price_khr,
+           COALESCE((SELECT SUM(bs.quantity) FROM branch_stock bs WHERE bs.product_id = p.id), 0) AS live_stock_quantity
+    FROM products p
+    WHERE p.is_active = 1
+      AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(p.name, '  ', ' '), '  ', ' '), '  ', ' '))) = @nameKey
+      AND (@excludeId IS NULL OR p.id != @excludeId)
+    ORDER BY p.id ASC
+    LIMIT 200
+  `).all<{ id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number; live_stock_quantity: number }>({
+    nameKey, excludeId,
+  })
+  return pickSameIdentityRow(rows, barcode)
+}
+
 // Finds another ACTIVE product row that is genuinely the same item as
 // `source` (excluding source itself): same name_key, cost, and barcode.
 // Selling/special prices are mergeable fields and never identity. Returns

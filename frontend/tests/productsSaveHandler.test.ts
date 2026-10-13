@@ -34,7 +34,7 @@ function deferred() {
   return { promise, resolve }
 }
 type Row = Record<string, unknown>
-function fixture(options: { edit?: boolean; granted?: boolean; failure?: 'api' | 'response' | 'upload' | 'refresh'; hold?: ReturnType<typeof deferred>; holdUpload?: ReturnType<typeof deferred>; holdRefresh?: ReturnType<typeof deferred> } = {}) {
+function fixture(options: { edit?: boolean; granted?: boolean; pending?: boolean; failure?: 'api' | 'response' | 'upload' | 'refresh'; hold?: ReturnType<typeof deferred>; holdUpload?: ReturnType<typeof deferred>; holdRefresh?: ReturnType<typeof deferred> } = {}) {
   const calls: Array<{ kind: string; payload?: Row }> = []
   const notices: unknown[] = [], history: unknown[] = []
   const guard = { current: false }
@@ -46,6 +46,7 @@ function fixture(options: { edit?: boolean; granted?: boolean; failure?: 'api' |
     calls.push({ kind, payload })
     if (options.hold) await options.hold.promise
     if (options.failure === 'api') throw new Error('403 permission denied')
+    if (options.pending) return { success: true, pending: true, pendingActionId: 9 }
     return options.failure === 'response' ? { success: false, error: 'write refused' } : { success: true, id: 12 }
   }
   const scope = {
@@ -133,6 +134,27 @@ await assert.rejects(empty.save({ name: '  ' }), /required/)
 assert.equal(empty.calls.length, 0)
 assert.equal(empty.guard.current, false)
 console.log('PASS actual wired product save: single-flight create/edit, failure propagation, upload refusal, cost grants and post-commit refresh isolation')
+
+// Owner, 13 Oct 2026 (review is queue-first): a Review Required save answers 202 { pending: true } and nothing is
+// applied. The person is told it was submitted for review (not "updated"/"created"), the form still resolves so it
+// closes, and no Undo entry is pushed for a change that has not happened (an Undo would PUT the old snapshot back).
+for (const edit of [false, true]) {
+  const queued = fixture({ edit, pending: true })
+  await queued.save(form)
+  for (let i = 0; i < 5; i++) await tick()
+  assert.deepEqual(queued.calls.map(call => call.kind), [edit ? 'update' : 'create'])
+  assert.deepEqual(queued.notices, [['Submitted for review -- changes will appear once approved.']], 'queued save says submitted for review')
+  assert.equal(queued.history.length, 0, 'a queued save pushes no Undo entry')
+  assert.equal(queued.guard.current, false)
+}
+// Control: the same fixture answering a direct save still reports it and keeps its Undo entry, so the assertions
+// above discriminate the pending branch rather than a fixture that never pushes history.
+const direct = fixture({ edit: true })
+await direct.save(form)
+for (let i = 0; i < 5; i++) await tick()
+assert.deepEqual(direct.notices, [['product_updated']])
+assert.equal(direct.history.length, 1)
+console.log('PASS queued (202) product create/edit: submitted-for-review notice, no Undo entry, form resolves')
 
 
 for (const edit of [false, true]) for (const change of ['switchActor', 'revoke'] as const) {

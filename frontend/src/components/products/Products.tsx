@@ -2485,10 +2485,16 @@ function ProductsFullEditor() {
       // only thing missing was telling the person their product landed on
       // an existing row instead of a new one.
       let foldedIntoName: string | null = null
+      // Owner, 13 Oct 2026 (review is queue-first): a Review Required save
+      // answers 202 { pending: true } and nothing is applied until a reviewer
+      // approves -- say so, and push no Undo entry for a change that has not
+      // happened.
+      let pendingReview = false
       if (!selected) {
         const res = await runProductWriteMutation(() => productApi.createProduct(payload, assertCurrent), 'Create product')
         assertCurrent()
         if (!res?.success) throw new Error(res?.error || 'Failed to create product')
+        pendingReview = (res as { pending?: unknown })?.pending === true
         createdProductId = extractHistoryResultId(res)
         if ((res as { folded_into?: unknown })?.folded_into) {
           foldedIntoName = String((res as { item?: { name?: unknown } })?.item?.name || form.name || '')
@@ -2497,9 +2503,14 @@ function ProductsFullEditor() {
         const res = await runProductWriteMutation(() => productApi.updateProduct(selected.id || 0, payload, assertCurrent), 'Update product')
         assertCurrent()
         if (res?.success === false) throw new Error(res.error || 'Failed to update product')
+        pendingReview = (res as { pending?: unknown })?.pending === true
         if ((res as { merged_into?: unknown })?.merged_into) {
           foldedIntoName = String((res as { item?: { name?: unknown } })?.item?.name || form.name || '')
         }
+      }
+      if (pendingReview) {
+        notify(tr('reason_submitted_for_review', 'Submitted for review -- changes will appear once approved.'))
+        return
       }
 
       // The write itself is now confirmed done -- tell the person right

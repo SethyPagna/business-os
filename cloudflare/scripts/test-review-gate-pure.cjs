@@ -238,6 +238,9 @@ const reviewApply = loadReal('lib/reviewApply.ts', {
   './branchRoleGuards': branchRoleGuards,
   './permissions': permissions,
   './productImagePermission': productImagePermission,
+  // Real module: approval judges a queued create/edit by the route's own identity lookup (finding I).
+  './productIdentity': loadReal('lib/productIdentity.ts', { './sqlBinding': sqlBinding,
+    './productDetailRule': loadReal('lib/productDetailRule.ts', { './moneyPrecision': loadReal('lib/moneyPrecision.ts') }) }),
   './cache': { bumpVersion: async () => {} },
   './productDelete': productDeleteStub,
   '../index': {},

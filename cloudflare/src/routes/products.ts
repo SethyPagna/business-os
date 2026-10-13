@@ -29,7 +29,7 @@ import { admitRequestBody } from '../lib/requestBodyGuard'
 import { audit, buildAuditStatement, changedFields, isSecretShapedAuditKey } from '../lib/audit'
 import { getPlanLimits } from '../lib/planTier'
 import { absorbedBarcodes, keeperFollowsBarcode, productIdsInOneCluster } from '../lib/productIdentity'
-import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeLeadingZeroBarcodeForCleanup, normalizeProductClusterKey, pickSameIdentityRow, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
+import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, findSameIdentityProduct, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeLeadingZeroBarcodeForCleanup, normalizeProductClusterKey, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { lotRemainingSql } from '../lib/lotRemaining'
 import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail } from '../lib/productDetailRule'
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
@@ -2023,37 +2023,10 @@ async function findSameProductIdentityProduct(
   barcode: unknown,
   excludeId: number | null,
 ): Promise<{ id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number } | null> {
-  const nameKey = normalizeProductGroupName(name)
-  if (!nameKey) return null
-  // Cost is NO LONGER part of this guard. It was, and that contradicted the
-  // Sep-4 identity ruling head-on: the form happily minted a second row for
-  // one article bought at a second price, which is the exact duplicate the
-  // merge tool then had to clean up. The inflow is the fix; the merge is the
-  // repair.
-  //
-  // The SQL narrows to the name group and nothing else; the barcode is
-  // compared in JS through identityBarcodeKey, because folding leading zeros
-  // in SQL would mean a THIRD hand-copy of the fold (searchMatch.ts already
-  // carries the deliberately-looser search one) and this codebase has been
-  // bitten by exactly that before.
-  // live_stock_quantity feeds pickSameIdentityRow's wildcard-attachment
-  // ranking (most stock, then lowest id -- rankBarcodeIdentityWinner) for
-  // the case this name group already holds two or more DIFFERENT real
-  // barcodes and a broken/empty incoming value has to pick one to wildcard
-  // against.
-  const rows = await getDb(env).prepare(`
-    SELECT p.id, p.name, p.barcode, p.cost_price_usd, p.cost_price_khr,
-           COALESCE((SELECT SUM(bs.quantity) FROM branch_stock bs WHERE bs.product_id = p.id), 0) AS live_stock_quantity
-    FROM products p
-    WHERE p.is_active = 1
-      AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(p.name, '  ', ' '), '  ', ' '), '  ', ' '))) = @nameKey
-      AND (@excludeId IS NULL OR p.id != @excludeId)
-    ORDER BY p.id ASC
-    LIMIT 200
-  `).all<{ id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number; live_stock_quantity: number }>({
-    nameKey, excludeId,
-  })
-  return pickSameIdentityRow(rows, barcode)
+  // The lookup itself (the name-group SQL narrow + pickSameIdentityRow) lives
+  // in lib/productIdentity.ts so the review applier judges a queued create or
+  // edit at approval by this very rule.
+  return findSameIdentityProduct(getDb(env), name, barcode, excludeId)
 }
 
 // The Sep 16 2026 create-fold: a create request that identifies as the SAME
@@ -2174,7 +2147,13 @@ app.post('/', async (c) => {
     if (response) return c.json(response.body, response.status)
     throw error
   }
-  const duplicate = await findSameProductIdentityProduct(c.env, name, body.barcode, null)
+  // Owner, 13 Oct 2026: review is queue-first. The fold is a DIRECT write, so
+  // a Review Required create that matches an existing product is queued like
+  // any other create below, and the existing product is not changed until a
+  // reviewer approves. The tier test is maybeQueueForReview's own.
+  const duplicate = getPermissionTier(user, 'products') === 'review'
+    ? null
+    : await findSameProductIdentityProduct(c.env, name, body.barcode, null)
   if (duplicate) {
     return c.json(await foldCreateIntoExisting(c.env, user, duplicate, name, body))
   }
@@ -2348,6 +2327,52 @@ const PRODUCT_AUDIT_EXCLUDED_COLUMNS = new Set([
   'categories', 'brands', 'is_grouped_cached',
 ])
 
+// Finding I (13 Oct 2026): an edit that moves this row onto another product's
+// identity folds it into that product, and the fold needs the edited identity
+// written onto the row first (see the PUT below). Every refusal of such an
+// edit is decided HERE, before that write: a refusal after it left the new
+// name, barcode, updated_at and the open stock sessions' revisions behind.
+//   1. products:image = none: refused when the fold would change an image,
+//      judged against the keeper's REAL cover -- the pair the merge routes and
+//      the fold's own atomic guard judge (a null cover refused folds that move
+//      no image). Before the queue, as on the plain edit path, so an
+//      image-blocked request is refused rather than queued.
+//   2. Review Required (owner, 13 Oct 2026: review is queue-first, and an
+//      edit that would merge two products waits for approval): queued with
+//      the payload the plain edit queues; nothing is applied.
+// Returns the response to send, or null to go on with the fold.
+async function identityFoldRefusal(
+  c: any,
+  user: SessionUser,
+  db: ReturnType<typeof getDb>,
+  duplicate: { id: number },
+  dupRow: { id: number; image_path: string | null },
+  body: Record<string, unknown>,
+  isImageOnlyEdit: boolean,
+): Promise<Response | null> {
+  if (getActionTier(user, 'products', 'image') === 'none') {
+    const keeper = await db.prepare('SELECT id, image_path FROM products WHERE id = @id')
+      .get<{ id: number; image_path: string | null }>({ id: duplicate.id })
+    // A keeper that vanished meanwhile is judged coverless: the strict reading.
+    if (await productMergeChangesImages(db, [{ keeper: keeper ?? { id: duplicate.id, image_path: null }, discarded: dupRow }])) {
+      return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    }
+  }
+  if (!isImageOnlyEdit) {
+    const payload: Record<string, unknown> = { ...body }
+    delete payload.__rename_scope
+    const pendingId = await maybeQueueForReview(c.env, user, 'products', {
+      actionType: 'update',
+      entityType: 'product',
+      entityId: dupRow.id,
+      payload,
+      summary: `Update product #${dupRow.id}`,
+    })
+    if (pendingId != null) return c.json({ success: true, pending: true, pendingActionId: pendingId }, 202)
+  }
+  return null
+}
+
 app.put('/:id', async (c) => {
   const user = c.get('user')
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
@@ -2519,7 +2544,10 @@ app.put('/:id', async (c) => {
         // duplicates) but NOT yet true here: this row's stored name/barcode
         // is what the operator is CHANGING, and `duplicate` is where that
         // change lands. Write the edited identity onto this row first so it
-        // genuinely matches before the fold reads it back.
+        // genuinely matches before the fold reads it back -- after every
+        // refusal (identityFoldRefusal), never before one.
+        const identityRefusal = await identityFoldRefusal(c, user, db, duplicate, dupRow, body, isImageOnlyEdit)
+        if (identityRefusal) return identityRefusal
         if (await foldSurvivorPriceChangeDenied(c.env, user, duplicate.id, body)) return c.json(PRODUCT_DISCOUNT_PRICE_REFUSAL, 403)
         try { await db.batch([productStockGuardStatement([Number(id), duplicate.id], 'active'), {
           sql: 'UPDATE products SET name = @name, barcode = @barcode, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND is_active=1',
@@ -2528,11 +2556,6 @@ app.put('/:id', async (c) => {
           const refusal = productStockGuardError(error)
           if (refusal) return c.json({ error: refusal.message, code: refusal.code }, refusal.status)
           throw error
-        }
-        if (getActionTier(user, 'products', 'image') !== 'full' && await productMergeChangesImages(
-          db, [{ keeper: { id: duplicate.id, image_path: null }, discarded: dupRow }],
-        )) {
-          return c.json({ error: 'You do not have permission to perform this action' }, 403)
         }
         let foldResult: Awaited<ReturnType<typeof foldDuplicateProductInto>>
         try {
