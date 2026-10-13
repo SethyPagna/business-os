@@ -270,9 +270,9 @@ async function main() {
   const quiet = await overview(envA)
   check('switches unset: the overview is the short default, six sections (the Cash count of the closing shift included, 13 Oct 2026)', JSON.stringify(headersOf(quiet.text)) === JSON.stringify(DEFAULT_HEADERS), quiet.text)
   const quietLines = quiet.text.split('\n')
-  check('switches unset: the Cash count is the closing shift\'s ID, Opening, Additional change used ($0.00 · 0៛, a measured zero) and Closing',
-    JSON.stringify(rowsUnder(quiet.text, '=====Cash count=====')) === JSON.stringify([quietLines[4], '· Opening cash: $10.00 · 10,000៛', '· Additional change used: $0.00 · 0៛', '· Closing cash: $120.00 · 50,000៛'])
-      && quietLines[4].startsWith('· ID: S-20260923-'), rowsUnder(quiet.text, '=====Cash count=====').join('\n'))
+  check('switches unset: the Cash count is Opening, Additional change used ($0.00 · 0៛, a measured zero) and Closing, and the shift ID is printed once, in the header',
+    JSON.stringify(rowsUnder(quiet.text, '=====Cash count=====')) === JSON.stringify(['· Opening cash: $10.00 · 10,000៛', '· Additional change used: $0.00 · 0៛', '· Closing cash: $120.00 · 50,000៛'])
+      && quietLines[4].startsWith('· ID: S-20260923-') && quietLines.filter((line) => line.includes(quietLines[4].slice('· ID: '.length))).length === 1, quiet.text)
   check('switches unset: the kernel is asked only what the default needs', kernelCalls.length === 2 && kernelCalls[1][2] === 'payment_method', JSON.stringify(kernelCalls))
   check('switches unset: no extra query runs', !preparedSql.some((sql) => /return_items|inventory_movements|payment_details/.test(sql)), preparedSql.filter((sql) => /return_items|inventory_movements|payment_details/.test(sql)).join('\n---\n'))
   check('the overview carries the Summary topic and the shop\'s own chat', quiet.chat_id === CHAT_A && quiet.message_thread_id === SUMMARY_TOPIC_A, JSON.stringify(quiet))
@@ -369,7 +369,7 @@ async function main() {
     '=====Invoices=====', '· Total: 18 · Cancelled: 1',
     '=====Payment methods=====', '· Cash: 12 · $300.0000', '· ABA Pay: 6 · $112.5000',
     '=====Received=====', '· Dollars: $23.00', '· Riel: 81,000៛', '· Bank: $30.00',
-    '=====Cash count=====', full.text.split('\n')[4], '· Opening cash: $10.00 · 10,000៛', '· Additional change used: $0.00 · 0៛', '· Closing cash: $120.00 · 50,000៛',
+    '=====Cash count=====', '· Opening cash: $10.00 · 10,000៛', '· Additional change used: $0.00 · 0៛', '· Closing cash: $120.00 · 50,000៛',
     '=====Cashiers=====', '· Za: 12 · $300.0000', '· Sok: 6 · $112.5000',
     '=====Top products=====', '· Rose Serum: 9 · $180.00', '· Lip Tint: 7 · $84.00', '· Toner: 5 · $60.00', '· Soap Bar: 4 · $12.00', '· Sunscreen: 2 · $30.00',
     '=====Low stock=====', '· OUT: Rose Serum: 0 (⚠ 5)', '· LOW: Soap Bar: 1 (⚠ 5)', '· LOW: Sunscreen: 2 (⚠ 5)', '· LOW: Lip Tint: 3 (⚠ 5)',
@@ -393,12 +393,12 @@ async function main() {
   check('the Sales category off takes every sales-built section out, switched on or not',
     ['Received', 'Cashiers', 'Top products', 'Low stock', 'Compare'].every((name) => !salesOff.text.includes(`=====${name}=====`)), salesOff.text)
   check('the Sales category off keeps the Cash count: the drawer is a count of the closing shift, not takings (13 Oct 2026)',
-    rowsUnder(salesOff.text, '=====Cash count=====')?.length === 4 && !salesOff.text.includes('=====Sales====='), salesOff.text)
+    rowsUnder(salesOff.text, '=====Cash count=====')?.length === 3 && !salesOff.text.includes('=====Sales====='), salesOff.text)
   clearSetting(shopA, 'telegram_sales_enabled')
   setting(shopA, 'telegram_fees_enabled', 'false')
   const feesOff = await overview(envA)
   check('the Fees category off takes Each expense out with Expenses', !feesOff.text.includes('=====Each expense=====') && !feesOff.text.includes('=====Expenses====='), feesOff.text)
-  check('the Fees category off keeps the Cash count too (13 Oct 2026)', rowsUnder(feesOff.text, '=====Cash count=====')?.length === 4, feesOff.text)
+  check('the Fees category off keeps the Cash count too (13 Oct 2026)', rowsUnder(feesOff.text, '=====Cash count=====')?.length === 3, feesOff.text)
   clearSetting(shopA, 'telegram_fees_enabled')
 
   setting(shopA, 'telegram_language', 'km')

@@ -1868,11 +1868,12 @@ function compareRows(revenueUsd: number, compare: NonNullable<SummarySectionFigu
  * change used and Closing are one drawer, the CLOSING SHIFT's, and a day can
  * hold several (one per cashier, plus reopened segments). Adding the drawers up
  * would be a number no cashier counted -- and wrong while another till is still
- * open -- so the section names the shift it belongs to (its ID row, the same
- * code the header prints) and prints that drawer's three registered rows, as
- * the shift report does (registeredCashRows). It is a count, not takings, so
- * the Sales and Fees switches leave it, and it is part of the default overview
- * rather than a Settings extra: three rows, not a fresh query.
+ * open -- so the section is the drawer of the shift the header names (the
+ * Cashier, ID, Open and Close rows under the title are that shift's, and the ID
+ * is not repeated here) and prints its three registered rows, as the shift
+ * report does (registeredCashRows). It is a count, not takings, so the Sales and
+ * Fees switches leave it, and it is part of the default overview rather than a
+ * Settings extra: three rows, not a fresh query.
  */
 export function formatShiftOverview(shopName: string, shift: ShiftReportSession, figures: ShiftOverviewFigures, categories?: TelegramCategories, nowMs: number = Date.now()): string {
   return [
@@ -1915,10 +1916,11 @@ function overviewSections(shift: ShiftReportSession, figures: ShiftOverviewFigur
   if (extra.sales) section('received', receivedRows(extra.sales.received), showSales)
   // The closing shift's drawer: always Opening, Additional change used, Closing
   // (owner, 13 Oct 2026), $0 included, whatever the Sales and Fees switches say.
-  // The ID row first, so these three rows are read as that shift's and not as
-  // the day's. Expected and Difference are not repeated: they are derived from
-  // the shift's own sales, and this message reports the whole day.
-  section('cashCount', [labeled('shift', cleanLine(shift.shift_code, 80)), ...registeredCashRows(shift)])
+  // The shift is the one the header names (its ID row is printed there, in every
+  // variant, so it is not repeated). Expected and Difference are not repeated
+  // either: they are derived from the shift's own sales, and this message reports
+  // the whole day.
+  section('cashCount', registeredCashRows(shift))
   if (extra.cashiers?.cashiers) section('cashiers', extra.cashiers.cashiers.flatMap((row) => countedRowLines(row, 60, 4)), showSales)
   if (extra.cashiers?.branches) section('branches', extra.cashiers.branches.flatMap((row) => countedRowLines(row, 60, 4)), showSales)
   if (extra.products) {
