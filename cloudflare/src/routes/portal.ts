@@ -1397,6 +1397,7 @@ app.post('/ai/chat', async (c) => {
         aiProviderId: config.aiProviderId,
         aiDisclaimer: config.aiDisclaimer,
         aiPrompt: config.aiPrompt,
+        showPrices: config.showPrices,
       },
       profile,
       question,
