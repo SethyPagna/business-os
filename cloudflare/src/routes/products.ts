@@ -1848,6 +1848,20 @@ function productPriceChanged(plan: { before?: Record<string, unknown> | null; af
   return PRODUCT_DEFAULT_PRICE_FIELDS.some((field) => Object.prototype.hasOwnProperty.call(plan.after!, field)
     && roundMoney4(Number(plan.after![field]) || 0) !== roundMoney4(Number(plan.before?.[field]) || 0))
 }
+// PUT identity fold: the edit's remaining fields are written onto the SURVIVOR (rest -> updateRow(survivor)), but
+// the PUT price gates compared them with the row being edited. So the price and discount effect is judged against
+// the survivor too, with the same tier rule as those gates: a role without the price action is refused; a Review
+// tier edit is held for approval instead (queue-first, owner 13 Oct). Read only; called before the fold writes.
+async function foldSurvivorPriceRefusal(env: Env, user: SessionUser, survivorId: number, body: Record<string, unknown>) {
+  if (getActionTier(user, 'products', 'price') !== 'none') return null
+  const owns = (field: string) => Object.prototype.hasOwnProperty.call(body, field)
+  if (![...PRODUCT_DEFAULT_PRICE_FIELDS, ...PRODUCT_DISCOUNT_PRICE_FIELDS].some(owns)) return null
+  const survivor = await getDb(env).prepare(`SELECT ${PRODUCT_DEFAULT_PRICE_FIELDS.join(', ')}, ${PRODUCT_DISCOUNT_SELECT} FROM products WHERE id = @id`)
+    .get<Record<string, unknown>>({ id: survivorId })
+  const after = Object.fromEntries(PRODUCT_DEFAULT_PRICE_FIELDS.filter(owns).map((field) => [field, body[field]]))
+  return !survivor || productPriceChanged({ before: survivor, after }) || productDiscountChanged(survivor, body)
+    ? { error: 'You do not have permission to change product prices', code: 'product_price_edit_required' } : null
+}
 const BULK_PRICE_FIELDS = new Set(['selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr', 'cost_price_usd', 'cost_price_khr'])
 const BULK_PRICE_REQUEST_ID = /^[A-Za-z0-9_-]{8,120}$/
 async function findBulkPriceReceipt(db: ReturnType<typeof getDb>, actorId: number, requestId: string) {
@@ -2497,6 +2511,8 @@ app.put('/:id', async (c) => {
           .get<{ id: number; name: string | null; barcode: string | null; updated_at: string | null; image_path: string | null; is_group: number }>({ id: Number(id) })
         if (!dupRow) return c.json({ error: 'Product not found' }, 404)
         if (dupRow.is_group) return c.json({ error: 'Group rows cannot be merged — merge the variant products instead' }, 400)
+        const foldPriceRefusal = await foldSurvivorPriceRefusal(c.env, user, duplicate.id, body)
+        if (foldPriceRefusal) return c.json(foldPriceRefusal, 403)
         // foldDuplicateProductInto's own guard (productsShareExactIdentity)
         // requires the two rows to ALREADY carry the same identity in the
         // DB -- true for the admin merge tools (both rows are pre-existing

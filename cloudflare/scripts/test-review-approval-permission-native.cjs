@@ -656,6 +656,45 @@ async function main() {
     t.done(44)
   })
 
+  // ======================================================= edit-fold survivor: price authority on the row that changes
+  await group('Edit fold: a no-price editor moving a row onto a twin cannot rewrite the survivor price or discount; the grant can', async w => {
+    const t = cases()
+    const twin = (barcode, extra = '') => {
+      w.raw.prepare(`INSERT INTO products(name, barcode, selling_price_usd, wholesale_price_usd, discount_enabled, discount_type, discount_percent, is_active)
+        VALUES('Fold twin', ?, 9, 8, 1, 'percent', 50, 1)`).run(barcode)
+      const id = w.raw.prepare('SELECT id FROM products WHERE barcode=?').get(barcode).id
+      w.raw.prepare('INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(?,1,0),(?,2,0)').run(id, id)
+      return id
+    }
+    const pick = id => w.raw.prepare('SELECT selling_price_usd s, wholesale_price_usd ws, discount_enabled e, discount_percent p, is_active a FROM products WHERE id=?').get(id)
+    for (const [label, payload] of [
+      ['prices and discount', { selling_price_usd: 5, wholesale_price_usd: 0, discount_enabled: 0, discount_percent: 0 }],
+      ['selling price only', { selling_price_usd: 5 }],
+      ['discount only', { discount_enabled: 0 }],
+    ]) {
+      const a = await makeProduct(w, `Fold source ${label}`, { barcode: String(8850000000000 + label.length) })
+      const b = twin(String(8860000000000 + label.length))
+      const snap = snapshot(w)
+      const tillB = till(w, b)
+      const r = await request(w, 'products', 'PUT', `/${a}`, { name: 'Fold twin', barcode: String(8860000000000 + label.length), ...payload }, 3)
+      t.check(`no-price ${label} -> 403 before any write`, r.status === 403 && r.body?.code === 'product_price_edit_required' && snapshot(w) === snap
+        && JSON.stringify(till(w, b)) === JSON.stringify(tillB), { r: { status: r.status, code: r.body?.code, merged_into: r.body?.merged_into }, b: pick(b), till: till(w, b) })
+    }
+    // A Review-tier editor's identity fold is finding I's (it will be queued, owner 13 Oct); not asserted here.
+    // Unchanged survivor values: the fold itself is not a price edit.
+    const a = await makeProduct(w, 'Fold source same', { barcode: '8870000000001' })
+    w.raw.prepare("UPDATE products SET selling_price_usd=9, wholesale_price_usd=8, discount_enabled=1, discount_percent=50 WHERE id=?").run(a)
+    const b = twin('8870000000002')
+    const same = await request(w, 'products', 'PUT', `/${a}`, { name: 'Fold twin', barcode: '8870000000002', selling_price_usd: 9, wholesale_price_usd: 8, discount_enabled: 1, discount_percent: 50 }, 3)
+    t.check('no-price fold with the survivor values unchanged -> 200 merged', same.status === 200 && same.body?.merged_into === b && JSON.stringify(till(w, b)) === JSON.stringify({ active: true, unit_price_usd: 4.5 }), same.body?.error ?? same.status)
+    // The price grant may fold and reprice.
+    const a2 = await makeProduct(w, 'Fold source grant', { barcode: '8880000000001' })
+    const b2 = twin('8880000000002')
+    const ok = await request(w, 'products', 'PUT', `/${a2}`, { name: 'Fold twin', barcode: '8880000000002', selling_price_usd: 5, discount_enabled: 0 }, 4)
+    t.check('price editor fold reprices the survivor -> 200', ok.status === 200 && ok.body?.merged_into === b2 && pick(b2).s === 5 && pick(b2).e === 0, { status: ok.status, b: pick(b2) })
+    t.done(5)
+  })
+
   // ================================================================================ OPUS-H hunt: flow cases
   await group('OPUS-H hunt: 7 flow cases (revocation, self approval, forged pointer, case variant, mixed sequence, re-approval)', async w => {
     const pid = await makeProduct(w, 'Flow hunt')
