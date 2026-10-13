@@ -23,6 +23,9 @@ type RuntimeResetOptions = {
   preserveOfflineWork?: boolean
   preserveServiceWorker?: boolean
   preserveUiDrafts?: boolean
+  // POS checkouts sent with no confirmed answer, kept by the caller
+  // (utils/posUnresolvedCheckout.ts) while the till's orders are cleared.
+  preserveUnresolvedCheckouts?: boolean
   // When omitted/undefined, every local IndexedDB mirror table is wiped
   // (the original, unscoped behavior -- still correct for factory-reset and
   // the data-path switch/restore flows, which really do invalidate
@@ -280,7 +283,7 @@ export async function resetClientRuntimeState(options: RuntimeResetOptions = {})
   // draft (utils/receivingProductAttempt.ts).
   const keepInPlace = ['businessos_write_owner_v1', ...(options.preserveUiDrafts === true ? [
     'businessos_draft_', 'businessos_pos_orders_', 'businessos_pos_active_', 'businessos_pos_counter_', 'businessos_receiving_product_attempt_v1:',
-  ] : [])]
+  ] : []), ...(options.preserveUiDrafts === true || options.preserveUnresolvedCheckouts === true ? ['businessos_pos_checkout_unresolved_v1:'] : [])]
   clearStorage(canUseBrowserStorage() ? window.localStorage : null, localPreserveKeys, keepInPlace)
   clearStorage(canUseBrowserStorage() ? window.sessionStorage : null, sessionPreserveKeys, keepInPlace)
 

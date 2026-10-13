@@ -17,6 +17,7 @@
 
 import { Suspense, useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { restoreUnresolvedPosCheckouts } from '../../utils/posUnresolvedCheckout.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { paymentCoversSaleTotal, resolvePaidSaleStatus } from '../../utils/saleStatusResolution.ts'
@@ -862,6 +863,7 @@ export default function POS() {
   // Restore orders from sessionStorage so navigating away and back preserves
   // all open orders, carts, customer info, and delivery details.
   const [orders, setOrders] = useState<PosOrder[]>(() => {
+    restoreUnresolvedPosCheckouts(user, posStorageScope)
     try {
       const saved = readPosDraft(posOrdersStorageKey, 'bos_pos_orders')
       if (saved) {
@@ -930,6 +932,7 @@ export default function POS() {
   useEffect(() => {
     if (loadedDraftScopeRef.current === posStorageScope) return
     loadedDraftScopeRef.current = posStorageScope
+    restoreUnresolvedPosCheckouts(user, posStorageScope)
     let nextOrders: PosOrder[] = [normalizeOrder({}, 1)]
     try {
       const saved = readPosDraft(posOrdersStorageKey, 'bos_pos_orders')
