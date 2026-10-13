@@ -23,6 +23,7 @@ export const BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> 
   ["This stock file is too large to check against one stock snapshot on the current plan. Split it into smaller files, then try again.", 'stock_import_reconcile_over_tier_budget'],
   ["Stock imports are temporarily unavailable. Ask an administrator to check the import service, then retry this job. Saved stock actions will not be applied again.", 'import_queue_required'],
   ['Products with stock cannot be removed. Stock can only be added to products that have not been removed.', 'product_has_stock'],
+  ['This edit would merge this product into an existing product. Change the name or barcode, or ask someone who can merge products.', 'product_merge_permission_required'],
   ['This branch edit can no longer be verified. Refresh Branches and submit a new edit.', 'branch_edit_conflict'],
   ['Branch review is not ready. Refresh after the update and try again.', 'branch_review_schema_required'],
   ['Sales can only be recorded at a selling branch.', 'branch_not_sellable'],

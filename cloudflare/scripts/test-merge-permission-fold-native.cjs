@@ -324,6 +324,7 @@ function finish(finding) {
 //   --wrong=tier-not-full               copy of the merge routes' `!== 'full'`: refuses a Review-tier editor instead of queueing
 //   --wrong=queue-before-merge-check    queue a review-tier request before the grant is read (merge-off + review gets 202)
 //   --wrong=merge-after-survivor-price  read the grant after finding H's survivor-price refusal
+//   --wrong=no-next-step                the refusal explains why but not what to do next (the 6.0.111 wording)
 //   --only=<ids>                        run only these case ids
 // ============================================================================================
 const PRODUCTS = 'src/routes/products.ts'
@@ -346,6 +347,11 @@ const PATCHES = {
         "  if (!isImageOnlyEdit) { const early = await maybeQueueForReview(c.env, user, 'products', { actionType: 'update', entityType: 'product', entityId: dupRow.id, payload: body, summary: 'Update product #' + dupRow.id })",
         '    if (early != null) return c.json({ success: true, pending: true, pendingActionId: early }, 202) }',
         MERGE_GATE_OPEN].join('\n') },
+  ],
+  // The first wording (6.0.111): says why, not what to do next.
+  'no-next-step': [
+    { name: 'no-next-step', file: PRODUCTS, from: "error: 'This edit would merge this product into an existing product. Change the name or barcode, or ask someone who can merge products.',",
+      to: "error: 'This edit would merge this product into another product, and you do not have permission to merge products.'," },
   ],
   'merge-after-survivor-price': [
     { name: 'gate-off-inside', file: PRODUCTS, from: MERGE_TIER, to: 'false' },
@@ -419,7 +425,11 @@ function assertNothingHappened(t, before, after, H) {
 function assertRefusedForMerge(t, r, s) {
   t.eq('HTTP status', r.status, 403)
   t.eq('refusal code', r.body && r.body.code, CODE)
+  t.eq('body keys are exactly code and error', Object.keys(r.body || {}).sort(), ['code', 'error'])
+  t.ok('the refusal says what to do next (change the identity, or ask someone who can merge)',
+    /Change the name or barcode, or ask someone who can merge products\.$/.test(String(r.body && r.body.error)), r.body)
   t.ok('the refusal does not name the survivor product', !JSON.stringify(r.body).includes(String(s.y)), r.body)
+  t.ok('the refusal carries neither product name nor barcode', !JSON.stringify(r.body).includes(s.nameX) && !JSON.stringify(r.body).includes(s.nameY) && !JSON.stringify(r.body).includes(s.barX) && !JSON.stringify(r.body).includes(s.barY), r.body)
 }
 
 async function main() {

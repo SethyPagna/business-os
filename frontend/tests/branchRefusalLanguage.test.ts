@@ -113,6 +113,14 @@ await runTest('the merge-permission refusal is the Worker\'s own coded 403, with
   assert.ok(route.includes('return c.json(PRODUCT_MERGE_PERMISSION_REFUSAL, 403)'), 'refused with 403, not queued')
 })
 
+await runTest('the merge-permission refusal says what to do next, in both languages, and a text-only surface maps it too', () => {
+  // The refusal pattern: why it was refused AND the way forward (change the identity, or ask someone who can merge).
+  assert.match(EN.product_merge_permission_required, /Change the name or barcode, or ask someone who can merge products\.$/)
+  assert.match(KM.product_merge_permission_required, /សូមប្ដូរឈ្មោះ ឬបាកូដ ឬសុំអ្នកដែលអាចបញ្ចូលផលិតផលចូលគ្នាបាន។$/)
+  assert.equal(branchRuleMessageKey(EN.product_merge_permission_required), 'product_merge_permission_required')
+  assert.equal(localizeBranchRuleError(`Could not update the product: ${EN.product_merge_permission_required}`, key => KM[key]), KM.product_merge_permission_required)
+})
+
 await runTest('on a Khmer screen each refusal becomes the Khmer pack text, keeping its code and status', async () => {
   uiLanguage = 'km'; packServed = KM
   for (const code of CODES) {
