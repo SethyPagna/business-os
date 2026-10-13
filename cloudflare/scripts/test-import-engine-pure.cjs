@@ -367,6 +367,8 @@ new Function('exports', 'require', 'module', ts.transpileModule(
 const originalResolve = Module._resolveFilename
 const stubbable = new Set(['../index', './db', './importCsv', './cache', './stockActionCatalog', './stockActionSeal', './stockActionCommit', './stockActionResolver', './stockActionImport', '../durable-objects/broadcastHub'])
 const originalLoad = Module._load
+// The './db' stub below is one object so the errors.csv block can give it a getDb.
+const dbStub = { isImportMaintenanceFenceError: () => false }
 Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './stockReceiptGate') return stockReceiptGateModule.exports
   if (request === './catalogCostRecompute') return catalogCostRecomputeModule.exports
@@ -425,7 +427,7 @@ Module._load = function patchedLoad(request, parent, isMain) {
   }
   if (request === './planTier') return planTierModule
   if (request === './actorSnapshot') return actorSnapshotModuleObj.exports
-  if (request === './db') return { isImportMaintenanceFenceError: () => false }
+  if (request === './db') return dbStub
   if (request === './queueDispatch') return queueDispatchModule
   // S-uploads: the temporary-import-file purge is R2 work, not engine logic.
   if (request === './importIncomingFiles') return { purgeImportIncomingFiles: async () => ({ deleted: 0, errors: [] }) }
@@ -1665,6 +1667,44 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   assert.ok(source.includes('after the rows before it -- cannot remove ${need}.`'), 'the Worker apply-time sentence is the pack English')
   assert.ok(ruleKeys.size >= 15, 'every coded sentence of the family was exercised')
   console.log('PASS inventory import rows: stable codes, params, English pack parity and Khmer placeholders for the whole family')
+}
+
+// -- buildErrorsCsv (GET /api/import-jobs/:id/errors.csv): the file name of a ZIP entry and the message that quotes it come
+// from the uploaded file, and the CSV is opened in Excel, which evaluates a cell that starts with = + - @ (or a tab / CR) even
+// when it is quoted. Every cell of the file gets the leading single quote frontend/src/utils/csv.ts escapeCsvValue uses.
+{
+  const { buildErrorsCsv } = moduleObj.exports
+  const FORMULAS = ['=1+1', '+SUM(A1:A9)', '-2+3', '@SUM(1,1)', '\t=1+1', '\r=1+1', '=HYPERLINK("http://example.test/x","click")']
+  const stored = [
+    { row_number: 1, file_name: '=1+1', code: 'import_file_skipped', message: '=1+1' },
+    ...FORMULAS.map((value, index) => ({ row_number: index + 2, file_name: value, code: 'bad_row', message: `x ${value}` })),
+    ...FORMULAS.map((value, index) => ({ row_number: index + 20, file_name: `safe-${index}.csv`, code: value, message: value })),
+    { row_number: 40, file_name: 'products.csv', code: 'bad_row', message: 'Row 3: price "9,5" is not a number' },
+    { row_number: 41, file_name: null, code: 'bad_row', message: null },
+    { row_number: 42, file_name: 'ផលិតផល.csv', code: 'bad_row', message: 'ស្តុកមិនគ្រប់' },
+  ]
+  dbStub.getDb = () => ({ prepare: () => ({ all: async () => stored }) })
+  const csv = await buildErrorsCsv({}, 'job-formula')
+  const [header, ...lines] = csv.split('\n')
+  assert.strictEqual(header, 'row_number,file_name,code,message', 'the header is unchanged')
+  // Every data cell is quoted; a cell can hold a CR but this fixture holds no LF, so one line is one stored row.
+  const cells = (line) => [...line.matchAll(/"((?:[^"]|"")*)"/g)].map((m) => m[1].replace(/""/g, '"'))
+  const parsed = lines.map(cells)
+  assert.strictEqual(parsed.length, stored.length, 'one line per stored row')
+  assert.ok(parsed.every((row) => row.length === 4), 'four cells per row')
+  for (const row of parsed) for (const cell of row) assert.ok(!/^[=+\-@\t\r]/.test(cell), `no cell starts with a formula character: ${JSON.stringify(cell)}`)
+  // The file name AND the message of the stored row are both neutralised, by exactly one leading quote.
+  assert.deepStrictEqual(parsed[0], ['1', "'=1+1", 'import_file_skipped', "'=1+1"])
+  FORMULAS.forEach((value, index) => {
+    assert.deepStrictEqual(parsed[index + 1], [String(index + 2), `'${value}`, 'bad_row', `x ${value}`], `file_name ${JSON.stringify(value)}`)
+    assert.deepStrictEqual(parsed[index + 1 + FORMULAS.length], [String(index + 20), `safe-${index}.csv`, `'${value}`, `'${value}`], `code and message ${JSON.stringify(value)}`)
+  })
+  // Everything else is exactly what it was: quotes doubled, null empty, a formula character that is not first is not touched.
+  assert.deepStrictEqual(parsed[parsed.length - 3], ['40', 'products.csv', 'bad_row', 'Row 3: price "9,5" is not a number'])
+  assert.deepStrictEqual(parsed[parsed.length - 2], ['41', '', 'bad_row', ''])
+  assert.deepStrictEqual(parsed[parsed.length - 1], ['42', 'ផលិតផល.csv', 'bad_row', 'ស្តុកមិនគ្រប់'])
+  assert.ok(lines[0].startsWith(`"1","'=1+1","import_file_skipped","'=1+1"`), 'the raw line shape: every cell quoted, one apostrophe')
+  console.log('PASS buildErrorsCsv neutralises formula-leading cells in every column and changes nothing else')
 }
 
 // -- classifyContacts: customer membership-number auto-assignment

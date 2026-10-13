@@ -7490,10 +7490,20 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
   }
 }
 
+// One quoted errors.csv cell. A cell Excel would evaluate as a formula (a leading = + - @, tab or CR) gets a leading single
+// quote, the neutralisation frontend/src/utils/csv.ts escapeCsvValue applies to every human-bound download: the file name of a
+// ZIP entry, and a message that quotes it, come from the uploaded file, and quoting a cell does not stop Excel evaluating it.
+// (importCsv.ts stripExcelTextGuard removes the quote again if the file is imported.)
+function errorsCsvCell(value: unknown): string {
+  let text = String(value ?? '')
+  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`
+  return `"${text.replace(/"/g, '""')}"`
+}
+
 export async function buildErrorsCsv(env: Env, jobId: string): Promise<string> {
   const db = getDb(env)
   const rows = await db.prepare(`SELECT row_number, file_name, code, message FROM import_job_errors WHERE job_id = @id ORDER BY row_number ASC`).all<{ row_number: number; file_name: string; code: string; message: string }>({ id: jobId })
   const header = 'row_number,file_name,code,message'
-  const lines = rows.map((r) => [r.row_number, r.file_name, r.code, r.message].map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))
+  const lines = rows.map((r) => [r.row_number, r.file_name, r.code, r.message].map(errorsCsvCell).join(','))
   return [header, ...lines].join('\n')
 }
