@@ -234,6 +234,8 @@ async function replayWorkflow(language: 'en' | 'km', direction: 'undo' | 'redo')
     setUndoStack: (update: (current: any[]) => any[]) => { undoStack = update(undoStack) },
     setRedoStack: (update: (current: any[]) => any[]) => { redoStack = update(redoStack) },
     notify: (...args: unknown[]) => notices.push(args), getErrorMessage: load(historySource, 'getErrorMessage'),
+    // runEntry leaves a stale-history refusal (409 undo_history_stale) to the server row; the real classifier, with its real code.
+    isStaleHistoryRefusal: load(historySource, 'isStaleHistoryRefusal', { UNDO_HISTORY_STALE_CODE: 'undo_history_stale' }),
   })(action)
   if (direction === 'redo') assert.equal(await run('undo'), true)
   return {
