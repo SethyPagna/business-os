@@ -8,17 +8,25 @@
 // closing 0, additional 10k. It is neither sales cash nor a second closing
 // count, and (like the whole registration) it is report-only.
 //
-// Two defects this locks:
+// Three things this locks:
 //   1. one field, three names -- the form said "Additional cash added" with
 //      "USD added" / "KHR added" inputs while the report row said "Additional
 //      cash", so nothing on screen said what the figure is for;
 //   2. every surface listed it AFTER the closing count, which is not the order
-//      the drawer moves in or the order the cashier knows the figures.
+//      the drawer moves in or the order the cashier knows the figures;
+//   3. (owner, 13 Oct 2026, item 14: "shift cash lines everywhere") the row is
+//      ALWAYS there. It used to print only when some change was actually added,
+//      so a shift that never needed more showed Opening and Closing with the
+//      middle line missing -- the same gap the owner found in Telegram. None
+//      added is a fact, `$0.00 · 0៛`, on the on-screen report, the CSV, the
+//      print and the summary after a close.
 //
 // Run: node tests/shiftAdditionalCash.test.ts
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { createRequire } from 'node:module'
 import test from 'node:test'
+import { transformSync } from 'esbuild'
 import type { Shift } from '../src/api/shiftTransport.ts'
 import {
   shiftAdditionalCash,
@@ -26,6 +34,12 @@ import {
   shiftRegisteredRows,
   type ShiftFiguresShape,
 } from '../src/components/shifts/shiftReportModel.ts'
+import { buildCSV } from '../src/utils/csv.ts'
+import { buildPrintDocument } from '../src/utils/exportOptions.ts'
+
+const nodeRequire = createRequire(import.meta.url)
+const React = nodeRequire('react')
+const renderToStaticMarkup = nodeRequire('react-dom/server').renderToStaticMarkup as (node: unknown) => string
 
 const read = (rel: string): string => fs.readFileSync(new URL(rel, import.meta.url), 'utf8')
 const enText = read('../src/lang/en.json')
@@ -65,12 +79,32 @@ test('registration rows run opening -> additional -> closing', () => {
   assert.equal(rows[0].added, undefined)
 })
 
-test('a shift that never needed more change prints only open and end', () => {
+test('a shift that never needed more change still prints open, additional ($0) and end', () => {
+  // Owner, 13 Oct 2026 (item 14): the middle row is always there. Both shapes of
+  // "none": the admin figures block without an additional, and one that says 0.
   for (const figures of [figuresWith(), figuresWith({ usd: 0, khr: 0 })]) {
-    assert.deepEqual(shiftRegisteredRows(shiftWith(figures)).map((row) => row.key), [
-      'shift_registered_open', 'shift_registered_end',
-    ])
+    const rows = shiftRegisteredRows(shiftWith(figures))
+    assert.deepEqual(rows.map((row) => row.key), ['shift_registered_open', 'shift_recon_additional_cash', 'shift_registered_end'])
+    assert.equal(rows[1].usd, 0, 'a measured zero, not a missing value')
+    assert.equal(rows[1].khr, 0)
+    assert.equal(rows[1].added, undefined, 'nothing was added, so the row is not rendered as an inflow (+)')
   }
+  // A cashier's response has no admin figures block; the shift row's own columns decide.
+  const cashier = shiftRegisteredRows({ shift_code: 'S-1', opening_float_usd: 10, opening_float_khr: 40000, additional_cash_usd: 0, additional_cash_khr: 0, closing_counted_usd: 0, closing_counted_khr: 0 } as unknown as Shift)
+  assert.deepEqual(cashier.map((row) => [row.key, row.usd, row.khr]), [
+    ['shift_registered_open', 10, 40000], ['shift_recon_additional_cash', 0, 0], ['shift_registered_end', 0, 0],
+  ])
+  // ... and a row that does not carry the columns at all is none added too
+  // (stored NOT NULL DEFAULT 0), the way the Worker's Telegram report reads it.
+  const bare = shiftRegisteredRows({ shift_code: 'S-2' } as unknown as Shift)
+  assert.deepEqual(bare.map((row) => [row.key, row.usd, row.khr]), [
+    ['shift_registered_open', null, null], ['shift_recon_additional_cash', 0, 0], ['shift_registered_end', null, null],
+  ], 'unknown opening/closing stay unknown; the additional is a zero')
+})
+
+test('a one-currency top-up keeps its (+) and its zero half', () => {
+  const rows = shiftRegisteredRows(shiftWith(figuresWith({ usd: 0, khr: 5000 })))
+  assert.deepEqual([rows[1].usd, rows[1].khr, rows[1].added], [0, 5000, true])
 })
 
 test('the figures block and the Reports export share that one order', () => {
@@ -159,21 +193,112 @@ test('the owner\'s example and the report-only rule live behind the InfoHint, no
 
 // ---- one rule for "was there a top-up" ------------------------------------
 
-test('a shift with no top-up has no additional line anywhere', () => {
-  // ONE rule, shared. The POS close summary strip used to print the row
-  // unconditionally with `?? 0`, so a shift that never needed extra change
-  // showed "+ $0.00 · 0៛" on the till while the report block beside it and
-  // the Reports export showed no such row at all.
-  assert.equal(shiftAdditionalCash({ additional_cash_usd: 0, additional_cash_khr: 0 } as Shift), null)
-  assert.equal(shiftAdditionalCash({} as Shift), null, 'a row that does not carry the field has nothing to print')
+test('a shift with no top-up has an additional of zero everywhere, never a missing line', () => {
+  // ONE rule, shared. It used to answer NULL for "none", which each surface
+  // turned into "no row" -- and the POS strip once printed its own `?? 0`, so
+  // the till and the report disagreed. Since 13 Oct 2026 (owner, item 14) it
+  // answers the figure itself, zero when nothing was added, and every surface
+  // prints it.
+  assert.deepEqual(shiftAdditionalCash({ additional_cash_usd: 0, additional_cash_khr: 0 } as Shift), { usd: 0, khr: 0 })
+  assert.deepEqual(shiftAdditionalCash({} as Shift), { usd: 0, khr: 0 }, 'a row that does not carry the field is none added')
   assert.deepEqual(shiftAdditionalCash({ additional_cash_usd: 0, additional_cash_khr: 5000 } as Shift), { usd: 0, khr: 5000 },
-    'one currency is enough for the line to exist')
+    'one currency is enough for a non-zero line')
   // The cashier's own close response carries no admin `figures` block, so the
   // rule has to fall back to the shift row or their top-up would vanish.
   assert.deepEqual(shiftAdditionalCash({ additional_cash_usd: 3, additional_cash_khr: 0, figures: null } as unknown as Shift), { usd: 3, khr: 0 })
+  assert.deepEqual(shiftAdditionalCash(shiftWith(figuresWith({ usd: 7, khr: 0 }))), { usd: 7, khr: 0 }, 'the admin figures win when present')
   const gate = read('../src/components/pos/ShiftGate.tsx')
   assert.match(gate, /closedAdditional = closed \? shiftAdditionalCash\(closed\)/, 'the POS strip reads the shared rule')
   assert.doesNotMatch(gate, /additional_cash_usd \?\? 0/, 'and never prints a fabricated zero of its own')
+})
+
+test('the POS summary after a close always carries the additional row, with (+) only for an amount', () => {
+  const gate = read('../src/components/pos/ShiftGate.tsx')
+  // closedAdditional is null only while the shift is still open (no summary yet).
+  assert.match(gate, /!!closedAdditional && \{ label: t\('shift_recon_additional_cash'\)/, 'the row is gated on the close, not on an amount')
+  assert.match(gate, /closedAdditional\.usd \|\| closedAdditional\.khr \? '\+ ' : ''/, 'the (+) marks an inflow only when something was added')
+  assert.doesNotMatch(gate, /Only when some was actually put in/, 'the retired "only when some was added" rule is gone from the comment')
+})
+
+// ---- the rendered report, the CSV and the print --------------------------------
+
+let pack: Record<string, string> = en
+function loadTsx(url: URL): any {
+  const compiled = transformSync(fs.readFileSync(url, 'utf8'), { loader: url.pathname.endsWith('.tsx') ? 'tsx' : 'ts', format: 'cjs', jsx: 'automatic' }).code
+  const mod = { exports: {} as Record<string, unknown> }
+  const shim = (id: string): unknown => {
+    if (id.includes('AppContext')) {
+      return {
+        useApp: () => ({
+          t: (key: string) => pack[key] ?? key,
+          fmtUSD: (value: unknown) => `$${Number(value).toFixed(2)}`,
+          fmtKHR: (value: unknown) => `${Math.round(Number(value)).toLocaleString('en-US')}៛`,
+        }),
+      }
+    }
+    if (id.includes('InfoHint')) return { __esModule: true, default: () => null }
+    if (id.startsWith('.')) return loadTsx(new URL(id, url))
+    return nodeRequire(id)
+  }
+  new Function('require', 'module', 'exports', compiled)(shim, mod, mod.exports)
+  return mod.exports
+}
+const ShiftReportFigures = loadTsx(new URL('../src/components/shifts/ShiftReportFigures.tsx', import.meta.url)).default
+
+const closedShiftRow = (additional: { usd: number; khr: number }): Shift => ({
+  shift_code: 'S-20261013-0807-Za', opening_float_usd: 10, opening_float_khr: 10000,
+  additional_cash_usd: additional.usd, additional_cash_khr: additional.khr,
+  closing_counted_usd: 120, closing_counted_khr: 50000, closed_at: '2026-10-13T11:30:00.000Z',
+} as unknown as Shift)
+const registeredBlock = (shift: Shift): string[] => {
+  const html = renderToStaticMarkup(React.createElement(ShiftReportFigures, { shift }))
+  // The three rows of the Registered cash block: label span then value span.
+  return [...html.matchAll(/<span class="shrink-0[^"]*">([^<]*)<\/span><span class="min-w-0[^"]*">([^<]*)<\/span>/g)].map((m) => `${m[1]}: ${m[2]}`)
+}
+
+test('the on-screen report prints Open -> Additional change used -> End, with $0 when nothing was added (EN and KM)', () => {
+  pack = en
+  assert.deepEqual(registeredBlock(closedShiftRow({ usd: 0, khr: 0 })), [
+    `${en.shift_registered_open}: $10.00 · 10,000៛`,
+    `${en.shift_recon_additional_cash}: $0.00 · 0៛`,
+    `${en.shift_registered_end}: $120.00 · 50,000៛`,
+  ])
+  assert.deepEqual(registeredBlock(closedShiftRow({ usd: 12.5, khr: 8000 })).map((row) => row.replace(/^[^:]*: /, '')), [
+    '$10.00 · 10,000៛', '+ $12.50 · 8,000៛', '$120.00 · 50,000៛',
+  ], 'an amount keeps its (+) and its own figures')
+  pack = km
+  try {
+    const rows = registeredBlock(closedShiftRow({ usd: 0, khr: 0 }))
+    assert.equal(rows.length, 3, 'the Khmer report has all three rows too')
+    assert.equal(rows[1], `${km.shift_recon_additional_cash}: $0.00 · 0៛`)
+    assert.match(rows[1], /ប្រាក់អាប់បន្ថែមដែលបានប្រើ/)
+  } finally { pack = en }
+})
+
+test('the CSV and the print carry the additional row as a zero line', () => {
+  // ShiftReport.tsx builds one `rows` list for both exports from shiftRegisteredRows.
+  // `row.usd ?? ''` keeps a 0 as 0 -- the same expression is asserted in the source below.
+  const source = read('../src/components/sales/reports/ShiftReport.tsx')
+  assert.match(source, /\.\.\.shiftRegisteredRows\(shift\)\.map\(\(row\) => \(\{[\s\S]*?USD: row\.usd \?\? '',[\s\S]*?KHR: row\.khr \?\? '',/, 'a zero stays a zero in the export rows')
+  const rows = shiftRegisteredRows(closedShiftRow({ usd: 0, khr: 0 })).map((row) => ({
+    Section: 'Registered cash', Line: en[row.key] ?? row.fallback, USD: row.usd ?? '', KHR: row.khr ?? '',
+  }))
+  const csv = buildCSV(rows).split('\n')
+  assert.deepEqual(csv, [
+    'Section,Line,USD,KHR',
+    `Registered cash,${en.shift_registered_open},10,10000`,
+    'Registered cash,Additional change used,0,0',
+    `Registered cash,${en.shift_registered_end},120,50000`,
+  ])
+  // The print goes through the SAME rows into the real document builder: a 0 must
+  // survive as a printed 0 in its own table row, not be dropped or blanked.
+  const html = buildPrintDocument({ title: 'Shift Report · S-20261013-0807-Za', headers: ['Section', 'Line', 'USD', 'KHR'], rows, autoPrint: false })
+  const tableRows = [...html.matchAll(/<tr>(.*?)<\/tr>/g)].map((match) => [...match[1].matchAll(/<td[^>]*>(.*?)<\/td>/g)].map((cell) => cell[1])).filter((cells) => cells.length)
+  assert.deepEqual(tableRows, [
+    ['Registered cash', en.shift_registered_open, '10', '10000'],
+    ['Registered cash', 'Additional change used', '0', '0'],
+    ['Registered cash', en.shift_registered_end, '120', '50000'],
+  ], 'the printed table carries the Additional change used row as 0 / 0')
 })
 
 // ---- what the drawer should hold BEFORE the close is written --------------

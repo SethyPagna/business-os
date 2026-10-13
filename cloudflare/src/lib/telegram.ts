@@ -1174,6 +1174,15 @@ export type ShiftReportSession = {
   cancel_reason?: string | null
 }
 
+/**
+ * What a particular SEND adds to the shift report beyond the shift's own row.
+ * `amendedBy` is the account that just amended the shift (PATCH /api/shifts/:id):
+ * the report is re-sent as a new message, and a status-style message names who
+ * did it. The name the amendment record stores (the account username, from the
+ * route's displayName) -- never a phone number or an email.
+ */
+export type ShiftReportOptions = { amendedBy?: string | null }
+
 export type ShiftReportFigures = {
   invoices: number
   cancelled: number
@@ -1310,7 +1319,7 @@ function reviewReasons(codes: readonly string[]): string {
  * scripts/test-shift-report-pure.cjs drives it directly, so the shape and the
  * arithmetic are pinned without a database.
  */
-export function formatShiftReport(shopName: string, shift: ShiftReportSession, figures: ShiftReportFigures, nowMs: number = Date.now()): string {
+export function formatShiftReport(shopName: string, shift: ShiftReportSession, figures: ShiftReportFigures, nowMs: number = Date.now(), options: ShiftReportOptions = {}): string {
   const cancelled = !!shift.cancelled_at
   // The TITLE states the shift's state, the way the owner's reference does
   // ("Shift Report - Open or Closed"), after a colon since Sep 23 2026. An
@@ -1344,6 +1353,11 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     // in half either.
     labeled('shift', cleanLine(shift.shift_code, 80)),
   ]
+  // A report re-sent after an amendment says who amended it (owner rule: a change
+  // notification names who did it). One row, with the other who/which rows; absent
+  // when the send is not an amendment or the account has no username.
+  const amendedBy = cleanLine(options.amendedBy, 60)
+  if (amendedBy) lines.push(labeled('amendedBy', amendedBy))
   if (cancelled) {
     lines.push(row(bi('Cancelled at', 'បោះបង់នៅ'), formatBusinessDateTime(shift.cancelled_at, nowMs)))
     lines.push(row(bi('Cancelled by', 'បោះបង់ដោយ'), cleanLine(shift.cancelled_by_user_name || 'Unknown', 60)))
@@ -1623,9 +1637,9 @@ async function shopName(env: Env): Promise<string> {
   return cleanLine(row?.value || 'Business OS', 80)
 }
 
-async function shiftReportFor(env: Env, shift: ShiftReportSession, nowMs: number, language: TelegramLanguage): Promise<string> {
+async function shiftReportFor(env: Env, shift: ShiftReportSession, nowMs: number, language: TelegramLanguage, options: ShiftReportOptions = {}): Promise<string> {
   const [name, figures] = await Promise.all([shopName(env), shiftFigures(env, shift, nowMs, language)])
-  return withLanguage(language, () => formatShiftReport(name, shift, figures, nowMs))
+  return withLanguage(language, () => formatShiftReport(name, shift, figures, nowMs, options))
 }
 
 /**
@@ -1666,13 +1680,13 @@ async function shiftReport(env: Env, date: string, nowMs: number, language: Tele
  * the id is unknown, so it can never turn a successful close into a failed
  * request.
  */
-export async function sendTelegramShiftReport(env: Env, shiftId: number, nowMs: number = Date.now()): Promise<boolean> {
+export async function sendTelegramShiftReport(env: Env, shiftId: number, nowMs: number = Date.now(), options: ShiftReportOptions = {}): Promise<boolean> {
   try {
     const config = await getTelegramConfig(env)
     if (!config.enabled || configurationProblem(config)) return false
     const shift = await getDb(env).prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE id = @id`).get<ShiftReportSession>({ id: shiftId })
     if (!shift) return false
-    await postTelegram(config, await shiftReportFor(env, shift, nowMs, config.language), config.chatId, config.topics.telegram_topic_shift, 'telegram_topic_shift')
+    await postTelegram(config, await shiftReportFor(env, shift, nowMs, config.language, options), config.chatId, config.topics.telegram_topic_shift, 'telegram_topic_shift')
     return true
   } catch (error) {
     console.error('[telegram] shift report could not be sent', error)
@@ -1693,6 +1707,9 @@ export async function sendTelegramShiftReport(env: Env, shiftId: number, nowMs: 
 // "Expenses" is expenseTotals(), the one delivery/other split
 // (composeShiftFigures) the shift report and the day summary print under that
 // word, over the day's fees and the courier money paid on the day's sales.
+// The one part that is the SHIFT's and not the day's is its Cash count (13 Oct
+// 2026): Opening, Additional change used and Closing for the shift that just
+// closed, the rows the shift report prints (registeredCashRows).
 //
 // HOW IT IS SCHEDULED (the same on both plans; the plan is not the axis).
 //   1. The close commits. Then a `telegram_scheduled_sends` row (migration
@@ -1845,6 +1862,17 @@ function compareRows(revenueUsd: number, compare: NonNullable<SummarySectionFigu
  * the rows that say whose shift and where, then `=====Name=====` sections of
  * `·` rows, long rows on the hanging indent. `categories` is the owner's
  * per-category switch set, applied the way formatDaySummary applies it.
+ *
+ * Cash count (owner, 13 Oct 2026: shift cash lines everywhere). Every section
+ * here is the whole day on the branch EXCEPT this one: Opening, Additional
+ * change used and Closing are one drawer, the CLOSING SHIFT's, and a day can
+ * hold several (one per cashier, plus reopened segments). Adding the drawers up
+ * would be a number no cashier counted -- and wrong while another till is still
+ * open -- so the section names the shift it belongs to (its ID row, the same
+ * code the header prints) and prints that drawer's three registered rows, as
+ * the shift report does (registeredCashRows). It is a count, not takings, so
+ * the Sales and Fees switches leave it, and it is part of the default overview
+ * rather than a Settings extra: three rows, not a fresh query.
  */
 export function formatShiftOverview(shopName: string, shift: ShiftReportSession, figures: ShiftOverviewFigures, categories?: TelegramCategories, nowMs: number = Date.now()): string {
   return [
@@ -1859,11 +1887,11 @@ export function formatShiftOverview(shopName: string, shift: ShiftReportSession,
     // and these two rows say which close sent them.
     labeled('open', formatBusinessDateTime(shift.opened_at, nowMs)),
     labeled('close', shift.closed_at ? formatBusinessDateTime(shift.closed_at, nowMs) : NOT_APPLICABLE),
-    ...overviewSections(figures, categories),
+    ...overviewSections(shift, figures, categories),
   ].join('\n')
 }
 
-function overviewSections(figures: ShiftOverviewFigures, categories?: TelegramCategories): string[] {
+function overviewSections(shift: ShiftReportSession, figures: ShiftOverviewFigures, categories?: TelegramCategories): string[] {
   const lines: string[] = []
   const section = (key: TelegramLabelKey, rows: string[], enabled = true): void => {
     if (enabled) lines.push(sectionHeader(key, REPORT_SECTION_EDGE), ...(rows.length ? rows : [EMPTY_SECTION]))
@@ -1885,6 +1913,12 @@ function overviewSections(figures: ShiftOverviewFigures, categories?: TelegramCa
   section('invoices', [countRow([['total', Number(figures.invoices) || 0], ['cancelled', Number(figures.cancelled) || 0]])], showSales)
   section('paymentMethods', figures.paymentMethods.flatMap((row) => countedRowLines({ name: row.method, count: row.count, usd: row.usd }, 40, 4)), showSales)
   if (extra.sales) section('received', receivedRows(extra.sales.received), showSales)
+  // The closing shift's drawer: always Opening, Additional change used, Closing
+  // (owner, 13 Oct 2026), $0 included, whatever the Sales and Fees switches say.
+  // The ID row first, so these three rows are read as that shift's and not as
+  // the day's. Expected and Difference are not repeated: they are derived from
+  // the shift's own sales, and this message reports the whole day.
+  section('cashCount', [labeled('shift', cleanLine(shift.shift_code, 80)), ...registeredCashRows(shift)])
   if (extra.cashiers?.cashiers) section('cashiers', extra.cashiers.cashiers.flatMap((row) => countedRowLines(row, 60, 4)), showSales)
   if (extra.cashiers?.branches) section('branches', extra.cashiers.branches.flatMap((row) => countedRowLines(row, 60, 4)), showSales)
   if (extra.products) {

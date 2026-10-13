@@ -2257,7 +2257,7 @@ export default function Settings() {
                 ['telegram_products_enabled', t('telegram_cat_products') || 'Product edits and merges', t('telegram_cat_products_desc') || 'Product, what changed, and who did it, for edits and merges by staff who are not administrators'],
                 // T10: the Worker reads this key (lib/telegram.ts getTelegramConfig)
                 // with the same unset-means-on default as the switches above.
-                ['telegram_shift_overview_enabled', t('telegram_reports_overview') || 'Reports overview', t('telegram_reports_overview_desc') || "One minute after a shift closes: that day's overview for the shift's branch"],
+                ['telegram_shift_overview_enabled', t('telegram_reports_overview') || 'Reports overview', t('telegram_reports_overview_desc') || "One minute after a shift closes: that day's overview for the shift's branch, with the shift's cash count (opening, additional change used, closing)"],
               ].map(([key, label, description]) => (
                 <label key={key} className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
                   <div className="pr-3">

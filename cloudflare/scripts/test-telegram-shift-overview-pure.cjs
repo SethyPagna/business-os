@@ -28,6 +28,13 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 //      overview prints the day's on their own row beside -- never inside --
 //      its expense total and delivery split; the all-branches overview counts
 //      them in its own totals and prints no such row.
+//   8. Cash count (owner, 13 Oct 2026, item 14: "we have the opening closing
+//      and additional used", shown everywhere and always, $0 included): the
+//      closing shift's drawer -- its ID, then Opening, Additional change used
+//      and Closing, in that order and in the packs' words -- with nothing
+//      added (`$0.00 · 0៛`), with an amount, a NULL column, and read from the
+//      stored row at send time. The section is the SHIFT's, not the day's, so
+//      it names its shift; it is not summed across the day's tills.
 //
 // Run (from cloudflare/): node scripts/test-telegram-shift-overview-pure.cjs
 const fs = require('fs')
@@ -239,6 +246,13 @@ async function main() {
     '=====Payment methods=====',
     '· Cash: 12 · $300.0000',
     '· ABA Pay: 6 · $112.5000',
+    // The closing shift's drawer (owner, 13 Oct 2026): its ID, then Opening,
+    // Additional change used, Closing -- always all three, even with nothing added.
+    '=====Cash count=====',
+    '· ID: S-20260923-0807-Za',
+    '· Opening cash: $10.00 · 10,000៛',
+    '· Additional change used: $0.00 · 0៛',
+    '· Closing cash: $120.00 · 50,000៛',
     '=====Expenses=====',
     '· Actual delivery cost: $4.50',
     '· Other expenses: $5.00 · 4,000៛',
@@ -270,6 +284,11 @@ async function main() {
     '=====វិធីទូទាត់=====',
     '· Cash: 12 · $300.0000',
     '· ABA Pay: 6 · $112.5000',
+    '=====ការរាប់សាច់ប្រាក់=====',
+    '· សម្គាល់: S-20260923-0807-Za',
+    '· សាច់ប្រាក់ដើមវេន: $10.00 · 10,000៛',
+    '· ប្រាក់អាប់បន្ថែមដែលបានប្រើ: $0.00 · 0៛',
+    '· សាច់ប្រាក់បិទវេន: $120.00 · 50,000៛',
     '=====ចំណាយ=====',
     '· ថ្លៃដឹកដើម: $4.50',
     '· ចំណាយផ្សេងទៀត: $5.00 · 4,000៛',
@@ -281,15 +300,97 @@ async function main() {
   check('KM: the overview text, line for line, Khmer labels from the packs', true)
   check('both: the title carries both languages', both[0] === '📈 Reports overview/ទិដ្ឋភាពរួមរបាយការណ៍: 23/09/2026', both[0])
   const headers = both.filter((line) => /^=+[^=].*[^=]=+$/.test(line))
-  const expectedHeaders = ['sales', 'invoices', 'paymentMethods', 'expenses', 'returns'].map((key) => telegram.sectionHeader(key, telegramLang.REPORT_SECTION_EDGE))
-  check('both: five `=====Name=====` sections, drawn by the shared sectionHeader (fewer marks when five would wrap)',
+  const expectedHeaders = ['sales', 'invoices', 'paymentMethods', 'cashCount', 'expenses', 'returns'].map((key) => telegram.sectionHeader(key, telegramLang.REPORT_SECTION_EDGE))
+  check('both: six `=====Name=====` sections (Cash count of the closing shift among them), drawn by the shared sectionHeader (fewer marks when six would wrap)',
     JSON.stringify(headers) === JSON.stringify(expectedHeaders) && headers.includes('=====Payment methods/វិធីទូទាត់====='), headers.join('\n'))
   check('both: every other row is a `·` row', both.slice(1).every((line) => line.startsWith('· ') || headers.includes(line) || line.startsWith('     ')))
   const pack = { en: require(path.join(root, '..', 'frontend', 'src', 'lang', 'en.json')), km: require(path.join(root, '..', 'frontend', 'src', 'lang', 'km.json')) }
   check('the title words are the pack key telegram_reports_overview in both packs',
     pack.en.telegram_reports_overview === 'Reports overview' && pack.km.telegram_reports_overview === telegramLang.TELEGRAM_LABELS.reportsOverview.km)
 
-  const longName = closedShift({ branch_name: 'Branch with a very long name that wraps', branch_id: 1 })
+  // ---- 1b. Cash count: the closing shift's drawer (owner, 13 Oct 2026) -------
+  // Item 14: "Opening -> Additional change used -> Closing are always shown,
+  // including a $0 additional ... the after-shift Summary overview". The overview
+  // carried no cash figures at all. It now follows the Payment methods with the
+  // closing shift's drawer: its ID row, then the three registered rows. The ID
+  // row is there because every other section is the whole day on the branch and
+  // a day holds several shifts (one per cashier, plus reopened segments): the
+  // drawer is ONE of them, and the section says which. The rows are composed from
+  // the pack keys here, not re-typed, so a drifting label fails against the app.
+  {
+    const word = (mode, key) => (mode === 'en' ? pack.en[key] : mode === 'km' ? pack.km[key] : `${pack.en[key]}${telegramLang.BILINGUAL_SEPARATOR}${pack.km[key]}`)
+    // The ID row is the one label joined by a plain space in `both` (owner, 25 Sep 2026: `ID សម្គាល់`, no slash).
+    const idWord = (mode) => (mode === 'en' ? telegramLang.TELEGRAM_LABELS.shift.en : mode === 'km' ? telegramLang.TELEGRAM_LABELS.shift.km
+      : `${telegramLang.TELEGRAM_LABELS.shift.en} ${telegramLang.TELEGRAM_LABELS.shift.km}`)
+    const cashRows = (mode, additional, code = 'S-20260923-0807-Za') => [
+      `· ${idWord(mode)}: ${code}`,
+      `· ${word(mode, 'shift_opening_cash')}: $10.00 · 10,000៛`,
+      `· ${word(mode, 'shift_additional_cash')}: ${additional}`,
+      `· ${word(mode, 'shift_counted_cash')}: $120.00 · 50,000៛`,
+    ]
+    const overviewFor = (shiftRow, mode, categories) => {
+      const previous = telegramLang.getTelegramLanguage()
+      telegramLang.setTelegramLanguage(mode)
+      try { return telegram.formatShiftOverview('Leang Cosmetics', shiftRow, figures, categories, T0 + 60_000).split('\n') } finally { telegramLang.setTelegramLanguage(previous) }
+    }
+    // The section title in a mode's own words (its mark count depends on the language).
+    const cashHeader = (mode) => {
+      const previous = telegramLang.getTelegramLanguage()
+      telegramLang.setTelegramLanguage(mode)
+      try { return telegram.sectionHeader('cashCount', telegramLang.REPORT_SECTION_EDGE) } finally { telegramLang.setTelegramLanguage(previous) }
+    }
+    const sectionAfterHeader = (rows, mode, length = 4) => {
+      const at = rows.indexOf(cashHeader(mode))
+      return at < 0 ? null : rows.slice(at + 1, at + 1 + length)
+    }
+    for (const mode of ['en', 'km', 'both']) {
+      // Nothing added: the row is still there, as zero in the existing money format.
+      const zeroRows = overviewFor(shift, mode)
+      assert.deepStrictEqual(sectionAfterHeader(zeroRows, mode), cashRows(mode, '$0.00 · 0៛'), `[${mode}] additional = 0\n${zeroRows.join('\n')}`)
+      // Something added: its own amounts, per currency.
+      const added = { ...shift, additional_cash_usd: 12.5, additional_cash_khr: 8000 }
+      assert.deepStrictEqual(sectionAfterHeader(overviewFor(added, mode), mode), cashRows(mode, '$12.50 · 8,000៛'), `[${mode}] additional > 0`)
+      const usdOnly = { ...shift, additional_cash_usd: 7.5, additional_cash_khr: 0 }
+      const khrOnly = { ...shift, additional_cash_usd: 0, additional_cash_khr: 20000 }
+      assert.deepStrictEqual(sectionAfterHeader(overviewFor(usdOnly, mode), mode), cashRows(mode, '$7.50 · 0៛'))
+      assert.deepStrictEqual(sectionAfterHeader(overviewFor(khrOnly, mode), mode), cashRows(mode, '$0.00 · 20,000៛'))
+      // A NULL column (a caller that never set it) is none added, not unknown.
+      assert.deepStrictEqual(sectionAfterHeader(overviewFor({ ...shift, additional_cash_usd: null, additional_cash_khr: null }, mode), mode), cashRows(mode, '$0.00 · 0៛'))
+    }
+    check('Cash count: ID, then Opening -> Additional change used -> Closing, always all four rows, with the packs\' words (en, km, both; zero, USD, KHR, NULL)', true)
+
+    const rows = overviewFor(shift, 'both')
+    const at = (prefix) => rows.findIndex((line) => line.startsWith(prefix))
+    check('Cash count sits after Payment methods and before Expenses, so the day\'s money reads first and the drawer next',
+      at('=====Payment methods') < at(cashHeader('both')) && at(cashHeader('both')) < at('=====Expenses'), rows.join('\n'))
+    check('the section is exactly the shift\'s ID and its three registered rows: Expected and Difference are sales-derived and not repeated here',
+      !rows.some((line) => /^· (Expected cash|Difference)\//.test(line)) && sectionAfterHeader(rows, 'both', 5).length === 5 && rows[rows.indexOf(cashHeader('both')) + 5].startsWith('=====Expenses'))
+    // The drawer is a count, not takings: the Sales / Fees switches leave it.
+    const switchedOff = overviewFor(shift, 'both', { sales: false, fees: false })
+    check('the Sales and Fees category switches do not remove the drawer counts (they are counts, not revenue)',
+      JSON.stringify(sectionAfterHeader(switchedOff, 'both')) === JSON.stringify(cashRows('both', '$0.00 · 0៛')) && !switchedOff.some((line) => line.startsWith('· Revenue')), switchedOff.join('\n'))
+    // A day with two tills: the overview is the whole day's, the drawer is the closing shift's.
+    // Each close sends its own overview and each carries ITS drawer -- neither the other's,
+    // and not the two added together.
+    const second = { ...shift, id: shift.id + 500, shift_code: 'S-20260923-1130-Sok', user_name: 'Sok', opening_float_usd: 40, opening_float_khr: 0,
+      additional_cash_usd: 5, additional_cash_khr: 0, closing_counted_usd: 90, closing_counted_khr: 1000 }
+    const secondRows = overviewFor(second, 'en')
+    assert.deepStrictEqual(sectionAfterHeader(secondRows, 'en'), [
+      '· ID: S-20260923-1130-Sok', '· Opening cash: $40.00 · 0៛', '· Additional change used: $5.00 · 0៛', '· Closing cash: $90.00 · 1,000៛',
+    ], secondRows.join('\n'))
+    check('two tills on one day: each overview carries its own closing shift\'s ID and drawer, never the other\'s and never the two summed', true)
+    // An overview is only ever sent for a closed shift; handed an open one it must not invent a closing row.
+    const openRows = overviewFor({ ...shift, closed_at: null, closing_counted_usd: null, closing_counted_khr: null }, 'both')
+    check('an open shift (composed defensively) has the ID, opening and additional rows and no closing row',
+      JSON.stringify(sectionAfterHeader(openRows, 'both', 3)) === JSON.stringify(cashRows('both', '$0.00 · 0៛').slice(0, 3))
+      && !openRows.some((line) => line.startsWith(`· ${word('both', 'shift_counted_cash')}:`)), openRows.join('\n'))
+    // An opening nobody registered stays unknown (N/A), while the additional row stays a measured zero.
+    const unregistered = overviewFor({ ...shift, opening_float_usd: null, opening_float_khr: null }, 'en')
+    check('an unregistered opening reads N/A and does not hide the additional row',
+      JSON.stringify(sectionAfterHeader(unregistered, 'en').slice(1, 3)) === JSON.stringify([`· ${pack.en.shift_opening_cash}: N/A · N/A`, `· ${pack.en.shift_additional_cash}: $0.00 · 0៛`]), unregistered.join('\n'))
+  }
+
+  const longName =closedShift({ branch_name: 'Branch with a very long name that wraps', branch_id: 1 })
   const longFigures = { ...figures, paymentMethods: [{ method: 'ABA Pay merchant QR for the Toul Kork branch', count: 3, usd: 45 }] }
   telegramLang.setTelegramLanguage('en')
   const longRows = telegram.formatShiftOverview('Leang Cosmetics', longName, longFigures, undefined, T0).split('\n')
@@ -499,6 +600,29 @@ async function main() {
   const summaryOnly = await deliverOne()
   check('a Summary topic alone is used without a Shift topic', summaryOnly.message_thread_id === SUMMARY_TOPIC, JSON.stringify(summaryOnly))
 
+  // The data path (owner, 13 Oct 2026): the delivery re-reads the shift row from D1
+  // at send time, so the Cash count carries what is stored THEN -- an additional
+  // saved with the close, or amended inside the minute, and a NULL column as none.
+  {
+    const idLabel = `${telegramLang.TELEGRAM_LABELS.shift.en} ${telegramLang.TELEGRAM_LABELS.shift.km}`
+    const additionalLabel = `${pack.en.shift_additional_cash}${telegramLang.BILINGUAL_SEPARATOR}${pack.km.shift_additional_cash}`
+    const stored = closedShift({ additional_cash_usd: 12.5, additional_cash_khr: 8000 })
+    const storedKey = telegram.shiftOverviewKey(stored.id, stored.revision)
+    await telegram.scheduleTelegramShiftOverview(envFree, stored.id, T0)
+    sqlite.prepare('UPDATE shift_sessions SET additional_cash_usd = 15, additional_cash_khr = 30000 WHERE id = ?').run(stored.id)
+    check('the overview delivery reads the additional from the stored row at send time (amended inside the minute: $15.00 · 30,000៛)',
+      (await telegram.deliverTelegramShiftOverview(envFree, storedKey, T0 + 60_000)) === 'sent'
+      && posts[posts.length - 1].text.split('\n').includes(`· ${additionalLabel}: $15.00 · 30,000៛`), posts[posts.length - 1].text)
+    check('and names the shift it came from, in the Cash count section',
+      posts[posts.length - 1].text.split('\n').includes(`· ${idLabel}: ${stored.shift_code}`))
+    const never = closedShift()
+    const neverKey = telegram.shiftOverviewKey(never.id, never.revision)
+    await telegram.scheduleTelegramShiftOverview(envFree, never.id, T0)
+    check('a stored row with no additional (NULL column) is delivered with a zero Additional change used row',
+      (await telegram.deliverTelegramShiftOverview(envFree, neverKey, T0 + 60_000)) === 'sent'
+      && posts[posts.length - 1].text.split('\n').includes(`· ${additionalLabel}: $0.00 · 0៛`), posts[posts.length - 1].text)
+  }
+
   const warnings = []
   const realWarn = console.warn
   const stubFetch = globalThis.fetch
@@ -530,6 +654,8 @@ async function main() {
   const migration = fs.readFileSync(path.join(root, 'migrations', '0194_telegram_scheduled_sends.sql'), 'utf8')
   check('0194 is LF-only', !migration.includes('\r'))
   check('every post was a real overview message', posts.every((post) => post.text.startsWith('📈 ')))
+  check('and every one of them carries the Additional change used row (the drawer is never missing a line)',
+    posts.every((post) => post.text.split('\n').some((line) => line.startsWith(`· ${pack.en.shift_additional_cash}${telegramLang.BILINGUAL_SEPARATOR}${pack.km.shift_additional_cash}: `))))
 
   console.log(`\n${passed} checks passed; ${posts.length} overview messages composed and handed to the local Telegram stand-in (none sent anywhere).`)
 }

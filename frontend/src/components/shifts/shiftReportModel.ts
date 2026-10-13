@@ -152,24 +152,27 @@ export function shiftFiguresOf(shift: Shift): ShiftFiguresShape | null {
 export type ShiftRegisteredRow = { key: string; fallback: string; usd: number | null; khr: number | null; added?: true }
 
 /**
- * The extra change actually put into the drawer during a shift, or NULL when
- * none was -- the ONE rule for "was there a top-up".
+ * The extra change put into the drawer during a shift -- the ONE source of that
+ * figure for every surface that prints it: the report figures block, the Reports
+ * CSV/print export and the POS summary after a close.
  *
- * Every surface that prints this figure must agree on when the line exists:
- * the report figures block, the Reports CSV/print export and the POS close
- * summary strip. The strip used to print `?? 0` unconditionally, so a shift
- * that never needed more change showed "+ $0.00 · 0៛" on the till while the
- * report beside it showed no such row at all.
+ * ALWAYS a figure, zero when nothing was added (owner, 13 Oct 2026, item 14:
+ * Opening -> Additional change used -> Closing are shown everywhere, always,
+ * $0 included). It used to answer NULL for "none" and each surface turned that
+ * into "no row", which left Opening and Closing with the middle line missing --
+ * the same gap the owner found in Telegram. None added is a fact, not an
+ * unknown: the column is NOT NULL DEFAULT 0 (migration 0147), so a row that does
+ * not carry it is a response from before the field existed, and the Worker's
+ * Telegram report reads that the same way (`?? 0`). The opening and closing
+ * counts are different: an uncounted drawer stays unknown (`—`).
  *
  * Reads the admin `figures` when the response carries them and the shift row
  * otherwise: a cashier's close response has no figures block (admin only) but
  * does carry the amount they just typed.
  */
-export function shiftAdditionalCash(shift: Shift): { usd: number; khr: number } | null {
+export function shiftAdditionalCash(shift: Shift): { usd: number; khr: number } {
   const figures = shiftFiguresOf(shift)?.additional_cash
-  const usd = figures?.usd ?? shift.additional_cash_usd ?? 0
-  const khr = figures?.khr ?? shift.additional_cash_khr ?? 0
-  return usd || khr ? { usd, khr } : null
+  return { usd: figures?.usd ?? shift.additional_cash_usd ?? 0, khr: figures?.khr ?? shift.additional_cash_khr ?? 0 }
 }
 
 /**
@@ -206,17 +209,20 @@ export function shiftExpectedWithTypedAdditional(
  * show the additional after the closing count on one screen and before it on
  * another. Report-only, like every figure here.
  *
- * The additional row appears only when some was actually added: a shift that
- * never needed more change has nothing to say on that line.
+ * All three rows are ALWAYS there (owner, 13 Oct 2026, item 14), the additional
+ * included when nothing was added: `$0.00 · 0៛`, the same line the Telegram shift
+ * report prints. `added` -- the (+) of an inflow -- is set only for an amount,
+ * so a shift that needed no more change reads "$0.00 · 0៛" and not "+ $0.00 · 0៛".
  */
 export function shiftRegisteredRows(shift: Shift): ShiftRegisteredRow[] {
   const registered = shiftRegisteredCash(shift)
   const additional = shiftAdditionalCash(shift)
   return [
     { key: 'shift_registered_open', fallback: 'OPEN', usd: registered.open.usd, khr: registered.open.khr },
-    ...(additional
-      ? [{ key: 'shift_recon_additional_cash', fallback: 'Additional change used', usd: additional.usd, khr: additional.khr, added: true as const }]
-      : []),
+    {
+      key: 'shift_recon_additional_cash', fallback: 'Additional change used', usd: additional.usd, khr: additional.khr,
+      ...(additional.usd || additional.khr ? { added: true as const } : {}),
+    },
     { key: 'shift_registered_end', fallback: 'END', usd: registered.end.usd, khr: registered.end.khr },
   ]
 }

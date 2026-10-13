@@ -187,6 +187,12 @@ const LABELS = {
   // later in-app display of "who changed this status"; that persistence is
   // a separate item (S4-11b) and does not gate this line.
   by: { en: 'By', km: 'ដោយ' },
+  // The shift report re-sent after an amendment (PATCH /api/shifts/:id) names the
+  // account that made it. A bare `By:` under the report's Cashier row would read
+  // as who closed the shift, so the verb is in the label. en.json/km.json
+  // `shift_amended_by`; the Khmer is the packs' "<verb>ដោយ" shape (shift_opened_by,
+  // recorded_by) over the verb of shift_edited / shift_amend (កែប្រែ).
+  amendedBy: { en: 'Amended by', km: 'កែប្រែដោយ' },
   from: { en: 'From', km: 'ពី' },
   to: { en: 'To', km: 'ទៅ' },
   totalMoved: { en: 'Total moved', km: 'បានផ្ទេរសរុប', localizeValue: true },

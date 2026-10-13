@@ -1492,7 +1492,10 @@ app.patch('/:id', async (c) => {
   if (changed !== 1) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const saved = await readShiftById(db, id)
   if (!saved || saved.revision !== after.revision) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
-  const report = sendTelegramShiftReport(c.env, saved.id)
+  // The re-sent report names the account that amended it: the same name the amendment
+  // record and the audit row above carry (displayName: the username), so the chat and
+  // the app agree -- never a phone number or an email.
+  const report = sendTelegramShiftReport(c.env, saved.id, Date.now(), { amendedBy: actorName })
   try { c.executionCtx.waitUntil(report) } catch { void report }
   // An amendment that CLOSES an open shift is a close; one that edits an
   // already closed shift is not, and schedules no second overview.
