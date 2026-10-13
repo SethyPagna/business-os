@@ -206,6 +206,10 @@ async function main() {
     // Real module too, for the same reason: A0's per-request metrics
     // middleware is mounted first on /api/* and must call next().
     './lib/requestMetrics': load('lib/requestMetrics.ts', { './analytics': load('lib/analytics.ts'), 'node:async_hooks': require('node:async_hooks') }),
+    // Real module too: the review-alert deferral scope is /api middleware that must call next(). The alert installer is
+    // called once at module scope and this test sends no review alert, so it is a no-op here.
+    './lib/requestDefer': load('lib/requestDefer.ts', { 'node:async_hooks': require('node:async_hooks') }),
+    './lib/reviewAlert': { installReviewAlerts() {} },
     './lib/requestBodyGuard': guard, './lib/auth': auth, './lib/permissions': permissions,
     './lib/coreInvariantsGate': { ensureCoreDataInvariantsForRequest: async () => { calls.bootstrap++ } },
     './lib/maintenance': { isMaintenanceGatedRequest: () => true, getMaintenance: async () => { calls.maintenance++; return null } },

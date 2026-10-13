@@ -110,6 +110,7 @@ function resubmitHandler() {
   return evaluate(`const handler=${statement.expression.arguments[1].getText(tree)}`, {
     ...writes, ...load('pendingActions'), getDb: () => adapter(currentDb), hasAcquisitionCostInput: () => false,
     productRemovePendingPointer: () => null, audit: async () => {}, broadcast: async () => {}, actorSnapshot: () => 'Requester',
+    announceReview: async () => {},
   }, 'handler')
 }
 
@@ -491,9 +492,13 @@ function review(overrides = {}) {
 }
 const moneyErrors = evaluate(named('cloudflare/src/lib/productWrites.ts', ['ProductMoneyWriteError']), {}, '{ProductMoneyWriteError}')
 const imageErrors = evaluate(named('cloudflare/src/lib/productImagePermission.ts', ['ProductImageAssetError']), {}, '{ProductImageAssetError}')
+// The handlers call the route file's own module-level helpers (the review-alert hook accessors and the coded-refusal
+// mapper); they are taken from the real source, so the hook-absent no-op path is the one exercised here.
+const reviewRouteHelpers = evaluate(named('cloudflare/src/routes/reviewQueue.ts', ['reviewAlertHook', 'announceReview', 'reviewNameBeforeChange', 'reviewCodedRefusal']), {},
+  '{ announceReview, reviewNameBeforeChange, reviewCodedRefusal }')
 function reviewRoute(route, overrides = {}, reviewOverrides = {}) {
   return evaluate(`const handler=${selectRoute('cloudflare/src/routes/reviewQueue.ts', 'post', route)}`, {
-    ...branchDeps, ...lib('pendingActions'), ...lib('reviewApprovalPermission'), ...lib('productDiscountGate'), ...review(reviewOverrides), ...moneyErrors, ...imageErrors, ...lib('productDelete'), ...lib('productStockGuard'),
+    ...branchDeps, ...reviewRouteHelpers, ...lib('pendingActions'), ...lib('reviewApprovalPermission'), ...lib('productDiscountGate'), ...review(reviewOverrides), ...moneyErrors, ...imageErrors, ...lib('productDelete'), ...lib('productStockGuard'),
     ...lib('acquisitionCostAccess'), hasProductMoneyPolicy: () => { throw new Error('Out of scope product money path invoked') }, ...overrides,
   }, 'handler')
 }
