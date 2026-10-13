@@ -53,7 +53,7 @@ const PARTIAL_ACCESS: Array<{ action: string; label: string; badge: ActionOutcom
   },
   {
     action: 'history', label: 'perm_act_products_history', badge: 'allow', tool: 'same',
-    proof: [/getActionTier\(user, 'products', 'history'\) !== 'none'/],
+    proof: [/getPermissionTier\(user, 'products'\) !== 'none' && getActionTier\(user, 'products', 'history'\) === 'none'\) return false/],
   },
 ]
 

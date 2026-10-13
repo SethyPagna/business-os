@@ -1486,10 +1486,11 @@ app.get('/:id/detail-report', async (c) => {
 // Owner, 5 Oct 2026 (evening): an Employee sees ONLY the main Products page (information and images). Everything
 // below the list is a sub-page: the Stock Changes ledger, Stock-in Sessions and a product's sales / supplier / merge
 // history. The products route to read them needs the products:history action (off for the Employee default, and a
-// manual override can only narrow it); an Inventory view grant remains its own way in.
+// manual override can only narrow it). A role that holds Products and has switched history off is refused even with an
+// Inventory view grant; Inventory view alone is the way in for a role that holds no Products section.
 function canReadProductDetail(user: SessionUser): boolean {
-  const productsRead = getActionTier(user, 'products', 'view') !== 'none' && getActionTier(user, 'products', 'history') !== 'none'
-  return productsRead || getActionTier(user, 'inventory', 'view') !== 'none'
+  if (getPermissionTier(user, 'products') !== 'none' && getActionTier(user, 'products', 'history') === 'none') return false
+  return getActionTier(user, 'products', 'view') !== 'none' || getActionTier(user, 'inventory', 'view') !== 'none'
 }
 
 // Individual sales of this product within ONE day or month (the period a row on
