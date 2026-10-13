@@ -32,6 +32,7 @@ import { refreshAppData } from './utils/appRefresh.ts'
 import { normalizeSettingsWriteOptions } from './utils/settingsWriteOptions.ts'
 import { isOwnSettingsWrite, sendChangedSettings } from './utils/settingsSave.ts'
 import { presentWriteError, type WriteErrorDetail } from './utils/writeErrorPresentation.ts'
+import { changeSessionDuration as applySessionDurationChange, normalizeSessionDuration, sessionDurationRefusalMessage, type SessionDurationOutcome } from './utils/sessionDurationChange.ts'
 import type { SettingsWriteOptions } from './types/settingsContracts.ts'
 import {
   beginPermissionRefresh,
@@ -192,6 +193,7 @@ type AppContextValue = {
   authReady: boolean
   canAccessPage: (pageId: string) => boolean
   canWriteToServer: boolean
+  changeSessionDuration: (sessionDuration: unknown, currentPassword?: string) => Promise<SessionDurationOutcome>
   deviceTimezone: string
   dismissNotification: () => void
   dismissWriteConflict: () => void
@@ -557,7 +559,7 @@ function writeDeviceSettings(value: AppSettings): void {
 }
 
 function writeStoredSessionDuration(value: unknown): string {
-  const normalized = String(value || '').trim() || 'session'
+  const normalized = normalizeSessionDuration(value)
   try {
     localStorage.setItem(STORAGE_KEYS.SESSION_DURATION, normalized)
   } catch (_) {}
@@ -2236,11 +2238,64 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     }
   }, [])
 
+  const changeSessionDuration = useCallback((requested: unknown, currentPassword = ''): Promise<SessionDurationOutcome> => {
+    const api = getAppApi()
+    const canRefresh = !!user?.id && typeof api.updateSessionDuration === 'function'
+    return applySessionDurationChange({
+      sessionDuration: requested,
+      currentPassword,
+      refresh: canRefresh
+        ? (normalizedSessionDuration, password) => {
+          const device = getClientDeviceInfo()
+          return withLoaderTimeout(
+            () => api.updateSessionDuration?.({
+              sessionDuration: normalizedSessionDuration,
+              clientTime: new Date().toISOString(),
+              deviceTz: device.deviceTz,
+              deviceName: device.deviceName,
+              ...(password ? { currentPassword: password } : {}),
+            }),
+            'Refresh session duration',
+            APP_SESSION_DURATION_TIMEOUT_MS,
+          )
+        }
+        : null,
+      persist: ({ sessionDuration, sessionExpiresAt }) => {
+        applyDeviceSettings({ login_session_duration: sessionDuration })
+        if (user?.id) {
+          persistAuthState({
+            user,
+            expiryTime: computeSessionExpiryMs(sessionDuration, sessionExpiresAt),
+            sessionDuration,
+          })
+        }
+      },
+    })
+  }, [applyDeviceSettings, user])
+
   // Settings save.
   const saveSettings = useCallback(async (newSettings: AppSettings, options: SettingsWriteOptions = {}) => {
     const normalizedOptions = normalizeSettingsWriteOptions(options)
     try {
-      const nextSettings = newSettings || {}
+      const { login_session_duration: requestedSessionDuration, ...nextSettings } = newSettings || {}
+      const changesSessionDuration = !!newSettings && Object.prototype.hasOwnProperty.call(newSettings, 'login_session_duration')
+      if (changesSessionDuration) {
+        const durationOutcome = await changeSessionDuration(requestedSessionDuration)
+        if (!durationOutcome.success) {
+          const reason = sessionDurationRefusalMessage(durationOutcome, (key, fallback) => {
+            const translated = t(key)
+            return translated && translated !== key ? translated : fallback
+          })
+          if (!normalizedOptions.silentToast) {
+            if (reason) notify(reason, 'error')
+            else {
+              const presentation = presentWriteError(durationOutcome, t)
+              notify(`${presentation.title}: ${presentation.detail}`, 'error')
+            }
+          }
+          return { success: false, error: Object.assign(new Error(durationOutcome.error || durationOutcome.code), { code: durationOutcome.code }) }
+        }
+      }
       const requestedServerUpdates: AppSettings = {}
       const deviceUpdates: AppSettings = {}
       Object.entries(nextSettings).forEach(([key, value]) => {
@@ -2277,36 +2332,6 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
           })
         }
       }
-      const mergedUpdates = { ...requestedServerUpdates, ...deviceUpdates }
-      if (Object.prototype.hasOwnProperty.call(mergedUpdates, 'login_session_duration')) {
-        const normalizedSessionDuration = writeStoredSessionDuration(mergedUpdates.login_session_duration)
-        const api = getAppApi()
-        if (user?.id && typeof api.updateSessionDuration === 'function') {
-          const device = getClientDeviceInfo()
-          const refreshed = await withLoaderTimeout(
-            () => api.updateSessionDuration?.({
-              sessionDuration: normalizedSessionDuration,
-              clientTime: new Date().toISOString(),
-              deviceTz: device.deviceTz,
-              deviceName: device.deviceName,
-            }),
-            'Refresh session duration',
-            APP_SESSION_DURATION_TIMEOUT_MS,
-          )
-          if (refreshed?.success === false) {
-            throw new Error(refreshed.error || 'Failed to refresh login session duration')
-          }
-          const nextExpiryTime = computeSessionExpiryMs(
-            normalizedSessionDuration,
-            refreshed?.sessionExpiresAt || '',
-          )
-          persistAuthState({
-            user,
-            expiryTime: nextExpiryTime,
-            sessionDuration: normalizedSessionDuration,
-          })
-        }
-      }
       if (sentKeys.length) {
         // The saved values -- and any text the Worker normalised -- are adopted
         // here, in the ref at once (a save made before the next render must diff
@@ -2315,7 +2340,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
         settingsRef.current = { ...settingsRef.current, ...adopted }
         setSettings((prev) => ({ ...prev, ...adopted }))
       }
-      const nothingChanged = !sentKeys.length && !Object.keys(deviceUpdates).length
+      const nothingChanged = !sentKeys.length && !Object.keys(deviceUpdates).length && !changesSessionDuration
       if (!normalizedOptions.silentToast) {
         if (nothingChanged) notify(t('settings_no_changes'), 'info')
         else notify(t('settings_saved'))
@@ -2342,7 +2367,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       }
       return { success: false, error }
     }
-  }, [applyDeviceSettings, notify, t, user]) // eslint-disable-line
+  }, [applyDeviceSettings, changeSessionDuration, notify, t]) // eslint-disable-line
 
   const toggleTheme = useCallback(() => {
     applyDeviceSettings({ theme: theme === 'dark' ? 'light' : 'dark' })
@@ -2718,7 +2743,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     authReady,
     page, setPage, navigateTo,
     navGuard, resolveNavGuard,
-    settings, loadSettings, saveSettings,
+    settings, loadSettings, saveSettings, changeSessionDuration,
     language, theme, t,
     toggleTheme, toggleLanguage,
     notify, notification,
@@ -2741,7 +2766,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     authReady,
     page, setPage, navigateTo,
     navGuard, resolveNavGuard,
-    settings, loadSettings, saveSettings,
+    settings, loadSettings, saveSettings, changeSessionDuration,
     language, theme, t,
     toggleTheme, toggleLanguage,
     notify, notification,

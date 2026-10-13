@@ -24,6 +24,8 @@ import { UserAvatarImage } from './UserAvatar.tsx'
 import { createAvatarRemoveFlow, uploadAndAttachAvatar } from './avatarFlow.ts'
 import { currentPasswordRateLimitMessage } from './currentPasswordErrors.ts'
 import { settingsSaveSucceeded } from '../../utils/settingsSave.ts'
+import { sessionDurationRefusalMessage, SESSION_DURATION_PASSWORD_REQUIRED, type SessionDurationOutcome, type SessionDurationRefusal } from '../../utils/sessionDurationChange.ts'
+import SessionDurationPasswordDialog from './SessionDurationPasswordDialog.tsx'
 
 const PROFILE_LOAD_TIMEOUT_MS = 10000
 const PROFILE_OTP_STATUS_TIMEOUT_MS = 8000
@@ -80,7 +82,7 @@ interface AppContextValue {
   user?: ProfileUser | null
   notify: NotifyFn
   hasPermission: (permission: string) => boolean
-  saveSettings?: (settings: Record<string, unknown>) => unknown | Promise<unknown>
+  changeSessionDuration?: (sessionDuration: unknown, currentPassword?: string) => Promise<SessionDurationOutcome>
   settings?: ProfileSettings | null
   t: TranslateFn
 }
@@ -524,7 +526,7 @@ function AvatarViewerModal({
 }
 
 export default function UserProfileModal({ onClose }: UserProfileModalProps) {
-  const { user, notify, hasPermission, saveSettings, settings, t } = useApp()
+  const { user, notify, hasPermission, changeSessionDuration, settings, t } = useApp()
   const actionHistory = useActionHistory({ limit: 3, notify, scope: 'profile', user })
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = (key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
@@ -569,6 +571,8 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
       return 'always'
     }
   })
+  const savedSessionDurationRef = useRef(sessionDuration)
+  const [durationPrompt, setDurationPrompt] = useState<{ duration: string; password: string; error: string; working: boolean } | null>(null)
   const [avatarZoom, setAvatarZoom] = useState(100)
   const [avatarPositionX, setAvatarPositionX] = useState(50)
   const [avatarPositionY, setAvatarPositionY] = useState(50)
@@ -700,6 +704,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
   useEffect(() => {
     const preferred = String(settings?.login_session_duration || '').trim()
     if (!preferred) return
+    savedSessionDurationRef.current = preferred
     setSessionDuration(preferred)
   }, [settings?.login_session_duration])
 
@@ -846,10 +851,46 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
     }
   }
 
-  const handleSessionSave = () => {
-    if (saveSessionInFlightRef.current) return
+  const sessionDurationOptions = [
+    { value: 'always', label: tr('always_stay_signed_in', 'Always stay signed in') },
+    { value: 'session', label: tr('until_browser_closes', 'Until browser closes') },
+    { value: '1d', label: tr('for_1_day', 'For 1 day') },
+    { value: '3d', label: tr('for_3_days', 'For 3 days') },
+    { value: '7d', label: tr('for_7_days', 'For 7 days') },
+    { value: '14d', label: tr('for_14_days', 'For 14 days') },
+    { value: '30d', label: tr('for_30_days', 'For 30 days') },
+  ]
+
+  // A longer duration is first sent without a password; the Worker answers
+  // session_duration_password_required and only then is the password asked.
+  // The setting changes only after the Worker accepted; every refusal leaves it as it was.
+  const settleSessionDuration = (result: SessionDurationOutcome | undefined, attempted: string, withPassword: boolean): SessionDurationOutcome | undefined => {
+    if (result?.success) {
+      savedSessionDurationRef.current = result.sessionDuration
+      setDurationPrompt(null)
+      notify(tr('settings_saved', 'Settings saved'), 'success')
+      return result
+    }
+    const refusal: SessionDurationRefusal | undefined = result
+    if (refusal?.code === SESSION_DURATION_PASSWORD_REQUIRED && !withPassword) {
+      setDurationPrompt({ duration: attempted, password: '', error: '', working: false })
+      return result
+    }
+    const reason = (refusal && sessionDurationRefusalMessage(refusal, tr)) || tr('session_duration_not_changed', 'The login duration was not changed. Check the connection and try again.')
+    if (withPassword) {
+      setDurationPrompt((prompt) => ({ duration: attempted, password: refusal?.code === 'incorrect_password' ? '' : prompt?.password || '', error: reason, working: false }))
+    } else {
+      setSessionDuration(savedSessionDurationRef.current)
+      notify(reason, 'error')
+    }
+    return result
+  }
+
+  const submitSessionDuration = (duration: string, password = ''): Promise<void> => {
+    if (saveSessionInFlightRef.current) return Promise.resolve()
     saveSessionInFlightRef.current = true
-    Promise.resolve(saveSettings?.({ login_session_duration: sessionDuration }))
+    return Promise.resolve(changeSessionDuration?.(duration, password))
+      .then((result) => settleSessionDuration(result, duration, !!password))
       .then((result) => {
         // A failed save has already been reported; it leaves no undo entry.
         if (!settingsSaveSucceeded(result)) return
@@ -862,10 +903,25 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
       })
       .catch((error: unknown) => {
         notify(getErrorMessage(error, 'Failed to save login duration preference'), 'error')
+        setDurationPrompt((prompt) => (prompt ? { ...prompt, working: false } : prompt))
       })
       .finally(() => {
         saveSessionInFlightRef.current = false
       })
+  }
+
+  const handleSessionSave = () => { void submitSessionDuration(sessionDuration) }
+
+  const submitSessionDurationPassword = () => {
+    if (!durationPrompt || durationPrompt.working || !durationPrompt.password.trim()) return
+    setDurationPrompt({ ...durationPrompt, error: '', working: true })
+    void submitSessionDuration(durationPrompt.duration, durationPrompt.password)
+  }
+
+  const cancelSessionDurationPrompt = () => {
+    if (durationPrompt?.working) return
+    setDurationPrompt(null)
+    setSessionDuration(savedSessionDurationRef.current)
   }
 
   const refreshOtpState = async () => {
@@ -1447,15 +1503,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                     className="w-full"
                     buttonClassName="h-9 w-full text-xs"
                     menuClassName="min-w-[13rem]"
-                    options={[
-                      { value: 'always', label: tr('always_stay_signed_in', 'Always stay signed in') },
-                      { value: 'session', label: tr('until_browser_closes', 'Until browser closes') },
-                      { value: '1d', label: tr('for_1_day', 'For 1 day') },
-                      { value: '3d', label: tr('for_3_days', 'For 3 days') },
-                      { value: '7d', label: tr('for_7_days', 'For 7 days') },
-                      { value: '14d', label: tr('for_14_days', 'For 14 days') },
-                      { value: '30d', label: tr('for_30_days', 'For 30 days') },
-                    ]}
+                    options={sessionDurationOptions}
                   />
                 </div>
                 <button className="btn-secondary h-9 whitespace-nowrap px-3 text-xs" onClick={handleSessionSave}>{tr('save_login_duration', 'Save login duration')}</button>
@@ -1572,6 +1620,19 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
           onConfirm={() => { void avatarRemoveFlow.confirm() }}
           onClose={avatarRemoveFlow.dismiss}
           t={t}
+        />
+      ) : null}
+      {durationPrompt ? (
+        <SessionDurationPasswordDialog
+          tr={tr}
+          t={t}
+          durationLabel={sessionDurationOptions.find((option) => option.value === durationPrompt.duration)?.label || durationPrompt.duration}
+          password={durationPrompt.password}
+          error={durationPrompt.error}
+          working={durationPrompt.working}
+          onPasswordChange={(password) => setDurationPrompt((prompt) => (prompt ? { ...prompt, password, error: '' } : prompt))}
+          onSubmit={submitSessionDurationPassword}
+          onCancel={cancelSessionDurationPrompt}
         />
       ) : null}
       {renameChoiceOpen && profile ? (
