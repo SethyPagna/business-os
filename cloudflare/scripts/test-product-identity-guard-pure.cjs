@@ -28,6 +28,9 @@ const Database = require('better-sqlite3')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'products.ts'), 'utf8')
+// Finding I (13 Oct 2026): the lookup's SQL and comparison moved to lib/productIdentity.ts (findSameIdentityProduct)
+// so the review applier judges a queued create/edit by the same rule; the route delegates to it.
+const identitySource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'productIdentity.ts'), 'utf8')
 
 // ---- Load the REAL comparison the route uses ----
 function loadTs(relPath, requireShim) {
@@ -72,8 +75,8 @@ assert.equal(canonicalProductBarcode([
 // pickSameIdentityRow's wildcard-attachment ranking when this name group
 // already holds 2+ distinct real barcodes and the incoming one is broken),
 // so it is no longer the plain "SELECT id, name, barcode, ..." shape.
-const sqlMatch = source.match(/`\s*\n\s*(SELECT p\.id, p\.name, p\.barcode, p\.cost_price_usd, p\.cost_price_khr,[\s\S]*?LIMIT 200)\s*\n\s*`/)
-assert.ok(sqlMatch, 'products.ts still contains the identity-guard query')
+const sqlMatch = identitySource.match(/`\s*\n\s*(SELECT p\.id, p\.name, p\.barcode, p\.cost_price_usd, p\.cost_price_khr,[\s\S]*?LIMIT 200)\s*\n\s*`/)
+assert.ok(sqlMatch, 'lib/productIdentity.ts contains the identity-guard query')
 assert.ok(!/ROUND\(COALESCE\(cost_price_usd/.test(sqlMatch[1]),
   'cost must NOT be part of the identity guard any more -- it stopped being identity on Sep 4 2026')
 
@@ -214,8 +217,9 @@ assert.ok(createAt > 0 && createGuardAt > createAt && createQueueAt > createGuar
 // existing product is held for approval and the existing product is not changed until then. This pin used to
 // assert the opposite ("the identity guard runs BEFORE maybeQueueForReview so reviewers never approve
 // duplicates"): the fold ran for every tier, so a review-tier create changed the existing row at once. The fold
-// is now reached only off the review tier (maybeQueueForReview's own test).
-// Behaviour: test-al-stock-i-native.cjs I-T7-review-create-queued.
+// is now reached only off the review tier (maybeQueueForReview's own test); approval refuses a create that would
+// mint a twin (lib/reviewApply.ts, review_identity_conflict).
+// Behaviour: test-al-stock-i-native.cjs I-T7-review-create-queued, I-T5-*.
 assert.match(source.slice(createAt, createGuardAt + 120),
   /const duplicate = getPermissionTier\(user, 'products'\) === 'review'\s*\?\s*null\s*:\s*await findSameProductIdentityProduct\(c\.env, name, body\.barcode, null\)/,
   'create: a Review Required create never reaches the fold; it is queued like any other create')
@@ -231,7 +235,9 @@ assert.ok(!/cost_price_(usd|khr)/.test(editTrigger),
 const editLookupAt = source.indexOf('findSameProductIdentityProduct(c.env, nextName, nextBarcode, Number(id))', editGuardAt)
 assert.match(source.slice(editGuardAt, editLookupAt), /if \(changesIdentity\) \{/,
   'edit: the lookup runs ONLY when the edit moves the row onto a different identity')
-assert.match(source, /return pickSameIdentityRow\(rows, barcode\)/, 'the guard compares through the shared fold, not a local one')
+assert.match(identitySource, /return pickSameIdentityRow\(rows, barcode\)/, 'the guard compares through the shared fold, not a local one')
+assert.match(source, /return findSameIdentityProduct\(getDb\(env\), name, barcode, excludeId\)/,
+  'the route delegates to the one lookup the review applier also uses (lib/reviewApply.ts)')
 // DISCRIMINATING (Sep 16 2026, N-P10-5): an identity match on create now
 // folds into the existing row (foldCreateIntoExisting) and returns 200 --
 // it must NOT hit the merge-duplicates 409 refusal any more.

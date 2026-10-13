@@ -250,6 +250,12 @@ app.post('/:id/approve', async (c) => {
   } catch (err) {
     const stockError = productStockGuardError(err)
     if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
+    // Finding I (lib/reviewApply.ts ReviewIdentityConflictError, matched by its code): the request would mint a
+    // duplicate product; nothing was written and it stays open.
+    if (err instanceof Error && (err as { code?: unknown }).code === 'review_identity_conflict') {
+      return c.json({ success: false, error: err.message, code: 'review_identity_conflict',
+        existing_product_id: (err as { existingProductId?: unknown }).existingProductId ?? null }, 409)
+    }
     if (row.section === 'products' && row.action_type === 'create' && row.entity_type === 'product') {
       const response = productCreateErrorResponse(err)
       if (response) return c.json(response.body, response.status)

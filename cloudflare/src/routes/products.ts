@@ -29,7 +29,7 @@ import { admitRequestBody } from '../lib/requestBodyGuard'
 import { audit, buildAuditStatement, changedFields, isSecretShapedAuditKey } from '../lib/audit'
 import { getPlanLimits } from '../lib/planTier'
 import { absorbedBarcodes, keeperFollowsBarcode, productIdsInOneCluster } from '../lib/productIdentity'
-import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeLeadingZeroBarcodeForCleanup, normalizeProductClusterKey, pickSameIdentityRow, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
+import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, findSameIdentityProduct, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeLeadingZeroBarcodeForCleanup, normalizeProductClusterKey, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { lotRemainingSql } from '../lib/lotRemaining'
 import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail } from '../lib/productDetailRule'
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
@@ -2007,37 +2007,10 @@ async function findSameProductIdentityProduct(
   barcode: unknown,
   excludeId: number | null,
 ): Promise<{ id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number } | null> {
-  const nameKey = normalizeProductGroupName(name)
-  if (!nameKey) return null
-  // Cost is NO LONGER part of this guard. It was, and that contradicted the
-  // Sep-4 identity ruling head-on: the form happily minted a second row for
-  // one article bought at a second price, which is the exact duplicate the
-  // merge tool then had to clean up. The inflow is the fix; the merge is the
-  // repair.
-  //
-  // The SQL narrows to the name group and nothing else; the barcode is
-  // compared in JS through identityBarcodeKey, because folding leading zeros
-  // in SQL would mean a THIRD hand-copy of the fold (searchMatch.ts already
-  // carries the deliberately-looser search one) and this codebase has been
-  // bitten by exactly that before.
-  // live_stock_quantity feeds pickSameIdentityRow's wildcard-attachment
-  // ranking (most stock, then lowest id -- rankBarcodeIdentityWinner) for
-  // the case this name group already holds two or more DIFFERENT real
-  // barcodes and a broken/empty incoming value has to pick one to wildcard
-  // against.
-  const rows = await getDb(env).prepare(`
-    SELECT p.id, p.name, p.barcode, p.cost_price_usd, p.cost_price_khr,
-           COALESCE((SELECT SUM(bs.quantity) FROM branch_stock bs WHERE bs.product_id = p.id), 0) AS live_stock_quantity
-    FROM products p
-    WHERE p.is_active = 1
-      AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(p.name, '  ', ' '), '  ', ' '), '  ', ' '))) = @nameKey
-      AND (@excludeId IS NULL OR p.id != @excludeId)
-    ORDER BY p.id ASC
-    LIMIT 200
-  `).all<{ id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number; live_stock_quantity: number }>({
-    nameKey, excludeId,
-  })
-  return pickSameIdentityRow(rows, barcode)
+  // The lookup itself (the name-group SQL narrow + pickSameIdentityRow) lives
+  // in lib/productIdentity.ts so the review applier judges a queued create or
+  // edit at approval by this very rule.
+  return findSameIdentityProduct(getDb(env), name, barcode, excludeId)
 }
 
 // The Sep 16 2026 create-fold: a create request that identifies as the SAME

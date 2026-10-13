@@ -33,6 +33,7 @@ import { omitUnchangedProductImageFields, productImageFieldsChanged, productImag
 import { parseProductRemovePendingPointer, parseProductRemovePlan, productRemoveApprovalStatements, productRemovePlanDigest,
   ProductRemoveError, type ProductRemoveOperationRow } from './productDelete'
 import { catalogCostRecomputeStatement, typedCostEntryAfterWriteStatement } from './catalogCostRecompute'
+import { findSameIdentityProduct, resolveProductIdentityEdit } from './productIdentity'
 import type { SessionUser } from './auth'
 import type { PendingActionRow } from './pendingActions'
 import type { Env } from '../index'
@@ -81,6 +82,25 @@ export class ReviewRequesterPermissionError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'ReviewRequesterPermissionError'
+  }
+}
+
+// Finding I (13 Oct 2026): approving a queued product create, or an edit that
+// moves a row's identity, must never mint a second active row with another
+// product's identity (no index stops it). The direct routes fold such a write
+// into the existing product; the applier does not run that fold -- for an edit
+// it is a product merge (merge_duplicates Full, its own preflight, undo
+// receipt and stock disposition), and a create-fold would drop the queued
+// initial stock. Approval is refused instead: nothing is written and the
+// request stays open, to be rejected and redone directly (which folds under
+// the reviewer's own authority). routes/reviewQueue.ts answers 409.
+export class ReviewIdentityConflictError extends Error {
+  readonly code = 'review_identity_conflict'
+  readonly existingProductId: number
+  constructor(existingProductId: number) {
+    super('This request now matches an existing product. Approving it would create a duplicate, so nothing was applied. Reject it and make the change yourself; it will merge into the existing product.')
+    this.name = 'ReviewIdentityConflictError'
+    this.existingProductId = existingProductId
   }
 }
 
@@ -180,6 +200,9 @@ registerApplier('products', 'create', 'product', async (env, row, reviewer, wait
   await resolveProductImageFields(getDb(env), body)
   const name = String(body.name || '').trim()
   if (!name) throw new Error('Pending product create is missing a name')
+  // Finding I: a create the direct route would fold into an existing product.
+  const createTwin = await findSameIdentityProduct(getDb(env), name, body.barcode, null)
+  if (createTwin) throw new ReviewIdentityConflictError(createTwin.id)
   const changesImages = productImageFieldsChanged(body)
   if (changesImages) await assertPendingProductImagePermission(env, row)
   else omitUnchangedProductImageFields(body)
@@ -202,6 +225,17 @@ registerApplier('products', 'update', 'product', async (env, row, reviewer, wait
   delete body.is_active
   await assertProductsActive(getDb(env), [Number(id)])
   readProductMoneyPlan(body)
+  // Finding I: an edit that moves this row onto ANOTHER active product's
+  // identity is the fold the direct route runs; refused here. The route's own
+  // trigger: only when the identity actually moves (a whole-form save of an
+  // unchanged name and barcode never looks).
+  if (body.name !== undefined || body.barcode !== undefined) {
+    const current = await getDb(env).prepare('SELECT name, barcode FROM products WHERE id = @id')
+      .get<{ name: string | null; barcode: string | null }>({ id })
+    const { nextName, nextBarcode, changesIdentity } = resolveProductIdentityEdit(current, body)
+    const identityTwin = changesIdentity ? await findSameIdentityProduct(getDb(env), nextName, nextBarcode, Number(id)) : null
+    if (identityTwin) throw new ReviewIdentityConflictError(identityTwin.id)
+  }
   const submittedImageFields = Object.prototype.hasOwnProperty.call(body, 'image_path')
     || Object.prototype.hasOwnProperty.call(body, 'image_gallery')
   if (submittedImageFields) {

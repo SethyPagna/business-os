@@ -333,9 +333,14 @@ function finish(finding) {
 //   --wrong=queue-before-image  T4: queue a review-tier request before the image check
 //   --wrong=no-restore          T8: a refused fold leaves the edited identity on the row
 //   --wrong=no-create-queue     T7: queue only the PUT; a review-tier create still folds at once
+//   --wrong=no-approval-identity         T5: queue the edit but approve it with a plain update (mints a twin)
+//   --wrong=no-create-approval-identity  T5: approve a queued create without the identity check (mints a twin)
+//   --wrong=approval-any-twin            refuse an approval whenever the row has any twin, moved identity or not
+//   --wrong=survivor-price-before-queue  judge the survivor's price ("not Full") before the review queue
 //   --only=<ids>                run only these case ids
 // ============================================================================================
 const PRODUCTS = 'src/routes/products.ts'
+const REVIEW_APPLY = 'src/lib/reviewApply.ts'
 const REFUSAL_CALL = [
   '        const identityRefusal = await identityFoldRefusal(c, user, db, duplicate, dupRow, body, isImageOnlyEdit)',
   '        if (identityRefusal) return identityRefusal',
@@ -385,6 +390,28 @@ const PATCHES = {
     { name: 'no-create-queue', file: PRODUCTS,
       from: "  const duplicate = getPermissionTier(user, 'products') === 'review'\n    ? null\n    : await findSameProductIdentityProduct(c.env, name, body.barcode, null)",
       to: '  const duplicate = await findSameProductIdentityProduct(c.env, name, body.barcode, null)' },
+  ],
+  'no-approval-identity': [
+    { name: 'no-approval-identity', file: REVIEW_APPLY, from: '    if (identityTwin) throw new ReviewIdentityConflictError(identityTwin.id)\n', to: '' },
+  ],
+  'no-create-approval-identity': [
+    { name: 'no-create-approval-identity', file: REVIEW_APPLY, from: '  if (createTwin) throw new ReviewIdentityConflictError(createTwin.id)\n', to: '' },
+  ],
+  'approval-any-twin': [
+    { name: 'approval-any-twin', file: REVIEW_APPLY, from: 'const identityTwin = changesIdentity ? await', to: 'const identityTwin = true ? await' },
+  ],
+  // A survivor-price refusal judged before the queue with "not Full price" (the H-main lane's uncommitted
+  // foldSurvivorPriceRefusal placement, 13 Oct): a review-tier user's price tier is 'review', so the whole-form
+  // identity edit is refused instead of queued.
+  'survivor-price-before-queue': [
+    { name: 'survivor-price-before-queue', file: PRODUCTS,
+      from: '        const identityRefusal = await identityFoldRefusal(c, user, db, duplicate, dupRow, body, isImageOnlyEdit)',
+      to: [
+        "        if (getActionTier(user, 'products', 'price') !== 'full' && Object.prototype.hasOwnProperty.call(body, 'selling_price_usd')",
+        "          && Number(body.selling_price_usd) !== Number((await db.prepare('SELECT selling_price_usd FROM products WHERE id = @id').get({ id: duplicate.id }))?.selling_price_usd)) {",
+        "          return c.json({ error: 'You do not have permission to change product prices', code: 'product_price_edit_required' }, 403)",
+        '        }',
+        '        const identityRefusal = await identityFoldRefusal(c, user, db, duplicate, dupRow, body, isImageOnlyEdit)'].join('\n') },
   ],
 }
 
@@ -653,6 +680,132 @@ async function main() {
       t.eq('folded into the existing product', r.body && r.body.folded_into, e.id)
       t.eq('product rows added', c1.products - c0.products, 0)
       t.eq('the fold stored the clean barcode', (await H.q1('SELECT barcode b FROM products WHERE id=?', e.id)).b, e.clean)
+    })
+
+    // T5. Approval half. A reviewer (the admin here; never the requester) approves a queued request that lands on an
+    // existing product's identity. The applier must never mint a twin: it refuses with 409 review_identity_conflict,
+    // writes nothing and leaves the request open (lib/reviewApply.ts). "Window" cases queue a request that collides
+    // with nothing and create the collision before approval, so they test the applier alone (RED on 0baa53f2 too).
+    const approve = (pendingId) => H.api('POST', '/api/review/' + pendingId + '/approve', {})
+    const pendingStatus = async (pendingId) => (await H.q1('SELECT status FROM pending_actions WHERE id=?', pendingId)).status
+    const activeWithIdentity = async (name, barcode) => (await H.q1('SELECT COUNT(*) n FROM products WHERE is_active=1 AND name=? AND barcode=?', name, barcode)).n
+    const refusedClean = (t, r) => {
+      t.eq('approval HTTP status', r.status, 409)
+      t.eq('refusal code', r.body && r.body.code, 'review_identity_conflict')
+    }
+
+    await check('I-T5-edit-approve', 'T5: approving a queued identity edit onto an existing product is refused (409); exactly one active row keeps that identity', 'high', async (t) => {
+      const s = await pair(H, { shape: 'both', xImage: null })
+      const before = await snap(H, s)
+      const queued = await H.api('PUT', '/api/products/' + s.x, { name: s.nameY, barcode: s.barY }, { as: 'reviewtier' })
+      t.eq('the edit is queued (202)', queued.status, 202)
+      const pendingId = queued.body && queued.body.pendingActionId
+      const r = await approve(pendingId)
+      await H.settle()
+      const after = await snap(H, s)
+      refusedClean(t, r)
+      t.eq('the request stays open', await pendingStatus(pendingId), 'open')
+      t.eq('exactly one active row has the target identity', await activeWithIdentity(s.nameY, s.barY), 1)
+      t.eq('both rows unchanged', changedColumns(before, after), {})
+      t.note('approve ' + r.status + ' ' + JSON.stringify(r.body).slice(0, 200) + '; D1 statements ' + r.d1)
+    })
+
+    // The editor posts the WHOLE form, prices included, and the edited row's prices differ from the survivor's. A
+    // review-tier request must still be queued (any refusal judged before the queue would have to use the 'none'
+    // tier the plain edit path uses), and its approval refused like the bare identity move above.
+    await check('I-T5-edit-whole-form', 'T5: a Review-Required whole-form identity edit (prices differ from the survivor) is queued (202), and its approval is refused (409)', 'high', async (t) => {
+      const s = await pair(H, { shape: 'both', xImage: null })
+      await H.db.prepare('UPDATE products SET selling_price_usd=5, wholesale_price_usd=4 WHERE id=?').bind(s.y).run()
+      const before = await snap(H, s)
+      const queued = await H.api('PUT', '/api/products/' + s.x, { name: s.nameY, barcode: s.barY, selling_price_usd: 0, selling_price_khr: 0,
+        wholesale_price_usd: 0, wholesale_price_khr: 0, description: 'AL whole form ' + s.x }, { as: 'reviewtier' })
+      t.eq('the edit is queued (202)', queued.status, 202)
+      const pendingId = queued.body && queued.body.pendingActionId
+      const r = pendingId ? await approve(pendingId) : { status: null, body: null }
+      await H.settle()
+      const after = await snap(H, s)
+      refusedClean(t, r)
+      t.eq('the request stays open', pendingId ? await pendingStatus(pendingId) : null, 'open')
+      t.eq('exactly one active row has the target identity', await activeWithIdentity(s.nameY, s.barY), 1)
+      t.eq('both rows unchanged', changedColumns(before, after), {})
+      t.note('queue ' + queued.status + ' ' + JSON.stringify(queued.body).slice(0, 120))
+    })
+
+    await check('I-T5-edit-window','T5: an edit queued onto a FREE identity, which another product takes before approval, is refused at approval (409); no twin', 'high', async (t) => {
+      const s = await pair(H, { shape: 'both', xImage: null })
+      const target = { name: 'AL Window ' + s.x, barcode: '77100' + String(s.x).padStart(8, '0') }
+      const queued = await H.api('PUT', '/api/products/' + s.x, target, { as: 'reviewtier' })
+      t.eq('the edit is queued (202)', queued.status, 202)
+      const pendingId = queued.body && queued.body.pendingActionId
+      const moved = await H.api('PUT', '/api/products/' + s.y, target)
+      t.eq('meanwhile Y takes that identity directly (200)', moved.status, 200)
+      const xBefore = await H.q1('SELECT * FROM products WHERE id=?', s.x)
+      const r = await approve(pendingId)
+      await H.settle()
+      refusedClean(t, r)
+      t.eq('the request stays open', await pendingStatus(pendingId), 'open')
+      t.eq('exactly one active row has the identity', await activeWithIdentity(target.name, target.barcode), 1)
+      t.eq('X unchanged', await H.q1('SELECT * FROM products WHERE id=?', s.x), xBefore)
+    })
+
+    await check('I-T5-create-approve', 'T5: approving a queued create that matches an existing product is refused (409); no new row, existing unchanged', 'high', async (t) => {
+      const e = await existingForCreate(H)
+      const queued = await H.api('POST', '/api/products', { name: e.name, barcode: e.clean }, { as: 'reviewtier' })
+      t.eq('the create is queued (202)', queued.status, 202)
+      const pendingId = queued.body && queued.body.pendingActionId
+      const before = await H.q1('SELECT * FROM products WHERE id=?', e.id)
+      const c0 = await createCounts()
+      const r = await approve(pendingId)
+      await H.settle()
+      refusedClean(t, r)
+      t.eq('the request stays open', await pendingStatus(pendingId), 'open')
+      t.eq('product rows added', (await createCounts()).products - c0.products, 0)
+      t.eq('existing product unchanged', await H.q1('SELECT * FROM products WHERE id=?', e.id), before)
+    })
+
+    await check('I-T5-create-window', 'T5: a create queued for a FREE identity, created directly before approval, is refused at approval (409); no twin', 'high', async (t) => {
+      const n = ++seq
+      const target = { name: 'AL Create Window ' + n, barcode: '77200' + String(n).padStart(8, '0') }
+      const queued = await H.api('POST', '/api/products', target, { as: 'reviewtier' })
+      t.eq('the create is queued (202)', queued.status, 202)
+      const pendingId = queued.body && queued.body.pendingActionId
+      const direct = await H.api('POST', '/api/products', target)
+      t.eq('meanwhile a Full user creates it directly (200)', direct.status, 200)
+      const r = await approve(pendingId)
+      await H.settle()
+      refusedClean(t, r)
+      t.eq('the request stays open', await pendingStatus(pendingId), 'open')
+      t.eq('exactly one active row has the identity', await activeWithIdentity(target.name, target.barcode), 1)
+    })
+
+    // Controls: approval still applies what lands on no other product. A refusal on every identity move, or on any
+    // row that merely HAS a twin, would fail these.
+    await check('I-T5-control-approvals-apply', 'control: approval applies a queued rename to a free identity, a queued create of a new product, and a whole-form edit of a row that already has a twin', 'control', async (t) => {
+      const s = await pair(H, { shape: 'both', xImage: null })
+      const free = { name: 'AL Free ' + s.x, barcode: '77300' + String(s.x).padStart(8, '0') }
+      const rename = await H.api('PUT', '/api/products/' + s.x, free, { as: 'reviewtier' })
+      t.eq('rename queued', rename.status, 202)
+      const renameApproved = await approve(rename.body.pendingActionId)
+      t.eq('rename approved', renameApproved.status, 200)
+      t.eq('X renamed', [(await H.q1('SELECT name FROM products WHERE id=?', s.x)).name, await pendingStatus(rename.body.pendingActionId)], [free.name, 'approved'])
+
+      const fresh = { name: 'AL Fresh ' + s.x, barcode: '77400' + String(s.x).padStart(8, '0') }
+      const create = await H.api('POST', '/api/products', fresh, { as: 'reviewtier' })
+      t.eq('create queued', create.status, 202)
+      const createApproved = await approve(create.body.pendingActionId)
+      t.eq('create approved', createApproved.status, 200)
+      t.eq('created once', await activeWithIdentity(fresh.name, fresh.barcode), 1)
+
+      // Y and a pre-existing twin T share one identity; a whole-form save of Y (same name and barcode) moves nothing.
+      const twinId = s.y + 100000
+      const y = await H.q1('SELECT name, barcode FROM products WHERE id=?', s.y)
+      await H.db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active,created_at,updated_at) VALUES(?,?,?,2,0,0,1,'2026-01-01 00:00:00','2026-01-01 00:00:00')").bind(twinId, y.name, y.barcode).run()
+      const wholeForm = await H.api('PUT', '/api/products/' + s.y, { name: y.name, barcode: y.barcode, description: 'AL approved edit' }, { as: 'reviewtier' })
+      t.eq('whole-form edit queued', wholeForm.status, 202)
+      const wholeApproved = await approve(wholeForm.body.pendingActionId)
+      t.eq('whole-form edit approved', wholeApproved.status, 200)
+      t.eq('description applied', (await H.q1('SELECT description d FROM products WHERE id=?', s.y)).d, 'AL approved edit')
+      t.note('approve statuses ' + [renameApproved.status, createApproved.status, wholeApproved.status].join('/') + '; ' + JSON.stringify(wholeApproved.body).slice(0, 160))
     })
   } finally {
     await H.disarm().catch(() => {})

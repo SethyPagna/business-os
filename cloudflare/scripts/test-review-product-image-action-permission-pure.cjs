@@ -183,6 +183,12 @@ function loadReviewApply(state, updateChanges = 1) {
     './businessMaintenanceGuard': loadTs('lib/businessMaintenanceGuard.ts'),
     './permissions': permissions,
     './productImagePermission': imagePermission,
+    // Real module: approval judges a queued create/edit by the route's identity lookup (finding I); this
+    // file's db stub answers it with no rows, so nothing here lands on another product.
+    './productIdentity': loadTs('lib/productIdentity.ts', {
+      './sqlBinding': loadTs('lib/sqlBinding.ts'),
+      './productDetailRule': loadTs('lib/productDetailRule.ts', { './moneyPrecision': loadTs('lib/moneyPrecision.ts') }),
+    }),
     './productDelete': {
       parseProductRemovePendingPointer: () => null,
       parseProductRemovePlan: () => { throw new Error('unrelated product removal') },

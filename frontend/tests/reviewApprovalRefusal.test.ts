@@ -17,8 +17,12 @@ for (const language of ['en', 'km'] as const) {
   assert.ok(section.includes(strings.fees || 'fees'), `${language} names the translated section`)
   assert.equal(reviewApprovalRefusalText('write_conflict', 'fees', t), null, 'other codes pass through')
   assert.equal(reviewApprovalRefusalText(undefined, 'fees', t), null)
+  // Finding I: an approval that would mint a duplicate product is refused with its own code (request stays open).
+  assert.ok(strings.review_identity_conflict, `${language} pack carries review_identity_conflict`)
+  assert.equal(reviewApprovalRefusalText('review_identity_conflict', 'products', t), strings.review_identity_conflict, `${language} identity-conflict text`)
 }
 // An untranslated pack still gets a readable sentence, never the bare key.
 assert.match(reviewApprovalRefusalText('review_self_approval', 'fees', () => undefined) || '', /own request/)
 assert.match(reviewApprovalRefusalText('review_section_full_required', 'products', () => undefined) || '', /Full access to products/)
+assert.match(reviewApprovalRefusalText('review_identity_conflict', 'products', () => undefined) || '', /existing product/)
 console.log('PASS review approval refusals localise in EN and KM')
