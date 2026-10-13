@@ -18,11 +18,12 @@ function compileTs(filePath) {
   }).outputText
 }
 
-function loadTs(relativePath, stubs = {}) {
+function loadTs(relativePath, stubs = {}, unrelatedDependency) {
   const filePath = path.join(srcRoot, relativePath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
+    if (unrelatedDependency && (request.startsWith('./') || request.startsWith('../durable-objects/'))) return unrelatedDependency
     return originalLoad.call(this, request, parent, isMain)
   }
   try {
@@ -37,6 +38,14 @@ function loadTs(relativePath, stubs = {}) {
 }
 
 const permissions = loadTs('lib/permissions.ts')
+// The route's destructive-import check is the engine's real shared helper, so
+// this stubbed-engine fixture exercises the one definition rather than a copy.
+// Every other engine dependency is unrelated and must not be reached.
+const authorityEngine = loadTs('lib/importEngine.ts', {
+  './permissions': permissions, './queueDispatch': loadTs('lib/queueDispatch.ts'),
+}, new Proxy({}, {
+  get(_target, property) { return () => { throw new Error(`Unexpected authority dependency: ${String(property)}`) } },
+}))
 const acquisitionCostAccess = loadTs('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const media = loadTs('lib/media.ts')
 const sqlBinding = loadTs('lib/sqlBinding.ts')
@@ -133,6 +142,7 @@ function loadImportRoute(state) {
   }
   const requireAuth = async (c, next) => { c.set('user', c.env.TEST_USER); await next() }
   const importEngine = new Proxy({
+    missingDestructiveImportPermission: authorityEngine.missingDestructiveImportPermission,
     PREFLIGHT_MAX_ROWS: 1000,
     // CUTOVER-LR: no fixture here addresses a disabled branch, so the approve/retry redirect gate lets it through.
     importBranchRedirectGate: async () => ({ target: null, addressedBranchId: null }),
@@ -240,7 +250,8 @@ async function request(state, routePath, method = 'POST', body = {}) {
 }
 
 async function main() {
-  const blocked = () => role({ products: true, product_cost_edit: true, 'products:image': false })
+  // Holds the destructive permission so the replace_columns cases below isolate the image gate.
+  const blocked = () => role({ products: true, product_cost_edit: true, destructive_delete: true, 'products:image': false })
   {
     const state = freshState(role({ products: true, 'products:image': true }))
     const response = await request(state, '/job-1/approve')

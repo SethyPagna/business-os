@@ -17,8 +17,7 @@
 // the cases that probe the boundary or rule it removed -- so an implementation
 // that checks only at approve is rejected by the retry and apply cases, and a
 // green run proves the cases can tell the difference.
-// Scope of this revision: the shared definition and POST / (create). Approve, retry and
-// apply-start are added by the following commits.
+// Scope of this revision: create, approve and retry. Apply-start is added by the following commit.
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -136,6 +135,7 @@ const ACTORS = {
 const revoked = permission => ({ ...IMPORTER, destructive_delete: true, [permission]: false })
 
 function fixture(world) {
+  world.audits.length = 0 // the world is shared by every case; the audit sink is per case
   const raw = openCase()
   const db = {
     prepare(sql) {
@@ -227,6 +227,41 @@ function addCreateCases() {
   }
 }
 
+// POST /:id/approve : a job created by someone else can be approved by anyone
+// holding only the base import grant.
+function addApproveCases() {
+  for (const mode of MODES) for (const permission of PERMISSIONS) {
+    add('approve', mode, permission, '', async world => {
+      const f = fixture(world)
+      const id = f.seedJob({ policy: policyFor(mode) })
+      const before = f.snapshot()
+      assertForbidden(await f.call(lackingFor(permission), 'POST', `/${id}/approve`, {}), permission)
+      assert.equal(f.snapshot(), before, 'refused approval leaves the job, policy and catalog untouched')
+      assert.equal(f.pending.length, 0, 'refused approval queues nothing')
+      assert.equal(world.audits.length, 0)
+      assert.equal(f.omittedActive(), 1)
+    })
+  }
+}
+
+// POST /:id/retry in apply mode (status approved): retry re-stamps the approver.
+function addRetryCases() {
+  for (const mode of MODES) for (const permission of PERMISSIONS) {
+    add('retry', mode, permission, '', async world => {
+      const f = fixture(world)
+      // Approved earlier by a user who held the permission, then stalled: the
+      // retry re-stamps the approver, so a lacking caller must not be able to
+      // take it over and queue the destructive apply.
+      const id = f.seedJob({ status: 'approved', policy: policyFor(mode), authorizedBy: ACTORS.full })
+      const before = f.snapshot()
+      assertForbidden(await f.call(lackingFor(permission), 'POST', `/${id}/retry`, {}), permission)
+      assert.equal(f.snapshot(), before, 'refused retry does not re-stamp the approver or change the job')
+      assert.equal(f.pending.length, 0, 'refused retry queues nothing')
+      assert.equal(JSON.parse(f.job(id).policy_json).apply_authorized_by_id, ACTORS.full.id)
+    })
+  }
+}
+
 // Controls: the rule must not refuse what it should allow.
 function addControlCases() {
   for (const mode of MODES) {
@@ -311,6 +346,8 @@ function addHelperCase() {
 
 addHelperCase()
 addCreateCases()
+addApproveCases()
+addRetryCases()
 addControlCases()
 
 // -------------------------------------------- deliberately wrong versions ----
@@ -318,6 +355,10 @@ addControlCases()
 // `fails` names the cases that must catch it: no more (the other boundaries
 // still hold) and no fewer (the cases are not decorative).
 const removeLine = re => text => text.replace(re, '')
+// (An explanatory comment may sit between the anchor line and the check; the
+// POST / check is a multi-line `if (...) {` and so is never matched here.)
+const APPROVE_CHECK = /(?<=if \(denied\) return denied\r?\n)(?:  \/\/[^\n]*\r?\n)*  const destructivePermission = [^\n]*\r?\n  if \(destructivePermission\) return [^\n]*\r?\n/
+const RETRY_CHECK = /(?<=if \(mode === 'apply'\) \{\r?\n)(?:    \/\/[^\n]*\r?\n)*    const destructivePermission = [^\n]*\r?\n    if \(destructivePermission\) return [^\n]*\r?\n/
 const WRONG = []
 WRONG.push({
   name: 'helper-ignores-per-action-override', fails: c => c.permission === 'products:import_replace_all' || c.boundary === 'helper',
@@ -326,6 +367,14 @@ WRONG.push({
 WRONG.push({
   name: 'helper-covers-replace-all-only', fails: c => (c.mode === 'replace_columns' && ['create', 'approve', 'retry', 'apply'].includes(c.boundary)) || c.boundary === 'helper',
   patches: [{ file: 'lib/importEngine.ts', apply: text => text.replace(/\(mode === 'replace_all' \|\| mode === 'replace_columns'\)/, "(mode === 'replace_all')") }],
+})
+WRONG.push({
+  name: 'no-approve-check', fails: c => c.boundary === 'approve',
+  patches: [{ file: 'routes/importJobs.ts', apply: removeLine(APPROVE_CHECK) }],
+})
+WRONG.push({
+  name: 'no-retry-check', fails: c => c.boundary === 'retry',
+  patches: [{ file: 'routes/importJobs.ts', apply: removeLine(RETRY_CHECK) }],
 })
 
 async function runAll(world, label) {

@@ -1450,6 +1450,11 @@ app.post('/:id/approve', async (c) => {
   if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
+  // The job's mode was fixed when it was created, possibly by someone else.
+  // Approving it is what authorises the apply, so the approver needs the
+  // destructive permission too -- the check at create time does not cover them.
+  const destructivePermission = missingDestructiveImportPermission(c.get('user'), String(job.type), job.policy_json as string | null)
+  if (destructivePermission) return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: destructivePermission }, 403)
   const status = String(job.status || '').toLowerCase()
   if (job.cancel_requested || status === 'cancelled' || status === 'cancelling') {
     return c.json({ success: false, error: 'A cancelled import cannot be approved. Use Retry to analyze it again.' }, 409)
@@ -1666,6 +1671,10 @@ app.post('/:id/retry', async (c) => {
   const mode = retryMode
   const policy = safeJsonParse<Record<string, any>>(job.policy_json as string, {})
   if (mode === 'apply') {
+    // Retry re-stamps the approving actor below, so the caller becomes the
+    // authority the apply runs under: they must hold the destructive permission.
+    const destructivePermission = missingDestructiveImportPermission(c.get('user'), String(job.type), job.policy_json as string | null)
+    if (destructivePermission) return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: destructivePermission }, 403)
     const imageDenied = await requireChangedProductImportImageAction(c as any, job)
     if (imageDenied) return imageDenied
     // A re-apply is a fresh confirmation point (CUTOVER-LR): the same gate as /approve, before anything is queued.
