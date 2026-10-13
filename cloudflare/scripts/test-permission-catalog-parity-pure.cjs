@@ -87,7 +87,27 @@ function snippetAt(text, open) {
   return collapse(text.slice(open, open + 160))
 }
 
+// Whether a Partial Access caller gets past one getActionTier call: true when only 'none' stops it or it queues,
+// false when the call demands Full Access (or the result is tested for it, or a 'review' branch refuses with 403),
+// null when the result is used some other way.
+function passesPartial(text, callStart, callEnd) {
+  const compare = /^\s*(===|!==)\s*'(none|full|review|view)'/.exec(text.slice(callEnd, callEnd + 40))
+  if (compare) {
+    if (compare[2] === 'full') return false
+    if (compare[2] === 'none') return true
+    return compare[2] === 'review' && compare[1] === '===' ? true : null
+  }
+  const assigned = /(?:const|let)\s+(\w+)\s*=\s*$/.exec(text.slice(Math.max(0, callStart - 60), callStart))
+  if (!assigned) return null
+  const name = assigned[1]
+  const after = text.slice(callEnd, callEnd + 1500)
+  if (new RegExp(`\\b${name}\\s*!==\\s*'full'`).test(after)) return false
+  if (new RegExp(`\\b${name}\\s*===\\s*'review'\\)\\s*\\{(?:(?!maybeQueueForReview|pending)[\\s\\S]){0,400}?\\b403\\b`).test(after)) return false
+  return new RegExp(`\\b${name}\\s*(?:===|!==)\\s*'(?:none|review)'`).test(after) ? true : null
+}
+
 const literalPairs = new Map()
+const partialSites = new Map()
 const variableSites = []
 for (const [file, text] of workerText) {
   if (file === HELPERS_FILE) continue
@@ -97,6 +117,9 @@ for (const [file, text] of workerText) {
     if (literal) {
       const pair = `${literal[1]}:${literal[2]}`
       literalPairs.set(pair, [...(literalPairs.get(pair) || []), file])
+      if (match[1] === 'getActionTier') {
+        partialSites.set(pair, [...(partialSites.get(pair) || []), { file, passes: passesPartial(text, match.index, open + literal[0].length) }])
+      }
     } else {
       variableSites.push({ file, text: `${match[1]}${snippetAt(text, open)}` })
     }
@@ -219,10 +242,11 @@ function workerChecksKey(key) {
 // ---------------------------------------------------------------------------
 // The role editor
 // ---------------------------------------------------------------------------
-const { PERMISSION_ACTIONS } = loadModule(path.join(ROOT, 'frontend', 'src', 'utils', 'permissionActions.ts'))
+const { PERMISSION_ACTIONS, outcomeAt, actionAllowed } = loadModule(path.join(ROOT, 'frontend', 'src', 'utils', 'permissionActions.ts'))
 const { PERMISSION_SECTIONS } = loadModule(path.join(ROOT, 'frontend', 'src', 'components', 'users', 'permissionDefinitions.ts'))
 const definitionByKey = new Map(PERMISSION_SECTIONS.flatMap((section) => section.permissions.map((permission) => [permission.key, permission])))
-const editorRows = new Set(Object.entries(PERMISSION_ACTIONS).flatMap(([key, actions]) => actions.map((action) => `${key}:${action.key}`)))
+const editorAction = new Map(Object.entries(PERMISSION_ACTIONS).flatMap(([key, actions]) => actions.map((action) => [`${key}:${action.key}`, action])))
+const editorRows = new Set(editorAction.keys())
 
 // ---------------------------------------------------------------------------
 // Listed differences, each with the reason it is allowed
@@ -246,6 +270,18 @@ const PENDING_OWNER = {
   drive_credentials: 'Owner question Q6: the only trace is a fallback to the Settings grant in lib/permissions.ts; every Settings save is refused for it.',
 }
 const MASTER_KEY = { all: 'The administrator override, evaluated by isAdminControlUser in lib/permissions.ts.' }
+// Rows that show Partial Access as blocked although a gate on the same action only stops 'none': the route first
+// refuses a Partial Access caller outright, then honours the switch for a Full Access one.
+const REFUSED_AT_PARTIAL = {
+  'contacts:delete': { file: 'routes/contacts.ts', proof: [/Deleting a \$\{config\.entity\} requires Full Access to Contacts -- Partial Access support for this action is not built/] },
+  'contacts:merge': { file: 'routes/contacts.ts', proof: [/Merging \$\{config\.entity\}s requires Full Access to Contacts -- Partial Access support for this action is not built/] },
+  'contacts:bulk_delete': { file: 'routes/contacts.ts', proof: [/Bulk delete requires Full Access to Contacts -- Partial Access support for this action is not built/] },
+  'contacts:bulk': {
+    file: 'routes/contacts.ts',
+    proof: [/Merging \$\{config\.entity\}s requires Full Access to Contacts -- Partial Access support/, /Bulk delete requires Full Access to Contacts -- Partial Access support/],
+  },
+  'returns:edit': { file: 'routes/returns.ts', proof: [/Editing a return requires Full Access to Returns -- Partial Access support for this action is not built yet/] },
+}
 
 // ---------------------------------------------------------------------------
 // Checks
@@ -265,6 +301,35 @@ check('every editor row belongs to a permission key the editor renders', () => {
 check('every Worker action has an editor row, or is listed with its reason', () => {
   const unexplained = [...workerActions.keys()].filter((pair) => !editorRows.has(pair) && !ALWAYS_REFUSED[pair] && !SECTION_LEVEL[pair]).sort()
   assert.deepEqual(unexplained, [], `Worker checks these actions but the editor cannot switch them off.\nAdd a row to PERMISSION_ACTIONS (frontend/src/utils/permissionActions.ts) or list a reason here:\n${unexplained.map((pair) => `${pair}  <- ${workerActions.get(pair).join(', ')}`).join('\n')}`)
+})
+
+check('every row shows the Partial Access outcome the Worker gives its switch', () => {
+  const problems = []
+  for (const [pair, action] of editorAction) {
+    const sites = (partialSites.get(pair) || []).filter((site) => site.passes !== null)
+    const passes = sites.filter((site) => site.passes)
+    const refuses = sites.filter((site) => !site.passes)
+    const where = (list) => [...new Set(list.map((site) => site.file))].join(', ')
+    if (action.controlReview) {
+      if (!passes.length || !refuses.length) problems.push(`${pair}: the row separates its badge from its page tool, but the Worker has ${passes.length} lenient and ${refuses.length} Full-only gates`)
+    } else if (action.review === 'block') {
+      if (passes.length && !REFUSED_AT_PARTIAL[pair]) problems.push(`${pair}: the editor shows Partial Access as blocked, but the Worker lets it through (only 'none' stops it) in ${where(passes)}`)
+    } else if (sites.length && !passes.length) {
+      problems.push(`${pair}: the editor shows ${action.review} at Partial Access, but every Worker gate demands Full Access (${where(refuses)})`)
+    }
+  }
+  assert.deepEqual(problems, [], `The role editor and the Worker disagree about Partial Access.\nFix the row in PERMISSION_ACTIONS (frontend/src/utils/permissionActions.ts), or list a refusal in REFUSED_AT_PARTIAL:\n${problems.join('\n')}`)
+})
+
+check('a listed Partial Access refusal is still true', () => {
+  const problems = []
+  for (const [pair, entry] of Object.entries(REFUSED_AT_PARTIAL)) {
+    const action = editorAction.get(pair)
+    if (!action || action.review !== 'block') problems.push(`${pair} is listed as refused at Partial Access but the editor row is ${action ? action.review : 'gone'}`)
+    if (!(partialSites.get(pair) || []).some((site) => site.passes === true)) problems.push(`${pair}: no Worker gate lets Partial Access through any more; remove it from REFUSED_AT_PARTIAL`)
+    for (const proof of entry.proof) if (!proof.test(textOf(entry.file))) problems.push(`${pair}: ${entry.file} no longer refuses a Partial Access caller (${proof})`)
+  }
+  assert.deepEqual(problems, [])
 })
 
 check('every editor action row has a Worker check, or is listed as browser-only', () => {
@@ -348,6 +413,16 @@ if (SHOW_TABLE) {
   for (const key of definitionByKey.keys()) {
     const listing = BROWSER_ONLY[key] ? 'browser-only' : PENDING_OWNER[key] ? 'pending owner Q6' : MASTER_KEY[key] ? 'master key' : workerChecksKey(key) || 'UNEXPLAINED'
     console.log(key.padEnd(43) + listing)
+  }
+  console.log('\nsection:action'.padEnd(44) + 'off    middle   (page tool)  full   Worker gates at the middle tier')
+  for (const [pair, action] of editorAction) {
+    const definition = definitionByKey.get(pair.split(':')[0])
+    const middle = !definition?.tier ? '-' : definition.middleTier === 'view' ? 'view' : 'review'
+    const outcome = (tier) => (tier === '-' ? '-' : outcomeAt(action, tier))
+    const tool = middle === '-' ? '-' : actionAllowed(pair.split(':')[0], action.key, middle) ? 'usable' : 'blocked'
+    const sites = (partialSites.get(pair) || []).filter((site) => site.passes !== null)
+    const gates = sites.length ? `${sites.filter((site) => site.passes).length} let it through / ${sites.filter((site) => !site.passes).length} Full only` : 'no literal gate'
+    console.log(pair.padEnd(43) + outcome('none').padEnd(7) + outcome(middle).padEnd(9) + tool.padEnd(13) + outcome('full').padEnd(7) + gates)
   }
 }
 

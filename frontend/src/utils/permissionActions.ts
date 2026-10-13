@@ -52,6 +52,11 @@ export interface PermissionAction {
    * (enforced in cloudflare/src/routes/importJobs.ts).
    */
   requiresKey?: string
+  /**
+   * Review Required outcome of the page control behind this row, when that control is stricter than the badge: an
+   * edit that merges or changes an image queues, but the merge and image tools themselves need Full Access.
+   */
+  controlReview?: ActionOutcome
 }
 
 /**
@@ -79,23 +84,22 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     { key: 'bulk_delete', tKey: 'perm_act_products_bulk_delete', label: 'Bulk delete', review: 'block' },
     // Also needs the Add action at Full.
     { key: 'variant', tKey: 'perm_act_products_variant', label: 'Add variant', review: 'block' },
-    { key: 'image', tKey: 'perm_act_products_image', label: 'Upload product image', review: 'block' },
+    { key: 'image', tKey: 'perm_act_products_image', label: 'Upload product images and edits that change them', review: 'queue', controlReview: 'block' },
     { key: 'import', tKey: 'perm_act_products_import', label: 'Import', review: 'block' },
     // Covers replace-all and replace-columns imports; both also need destructive_delete.
     { key: 'import_replace_all', tKey: 'perm_act_products_import_replace_all', label: 'Import: replace all and replace columns', review: 'block', requiresKey: 'destructive_delete' },
     // Browser-only: the file is built from rows the page already loaded, so this hides the button but is not a data
     // boundary; the products API returns the same rows to anyone who can view.
     { key: 'export', tKey: 'perm_act_products_export', label: 'Export', review: 'block' },
-    // Also gates an edit that merges the product into another one.
-    { key: 'merge_duplicates', tKey: 'perm_act_products_merge_duplicates', label: 'Merge duplicates and edits that merge', review: 'block' },
+    { key: 'merge_duplicates', tKey: 'perm_act_products_merge_duplicates', label: 'Merge duplicates and edits that merge', review: 'queue', controlReview: 'block' },
     { key: 'zero_qty_cleanup', tKey: 'perm_act_products_zero_qty', label: 'Zero-quantity cleanup', review: 'block' },
     { key: 'manage_lookups', tKey: 'perm_act_products_manage_lookups', label: 'Manage brands, categories, units', review: 'block' },
     // Owner, 5 Oct 2026 (evening): the DEFAULT selling and wholesale price. Off for the Employee default; PUT /:id,
     // /bulk-price-adjust, the receipt-time selling price and a merge price choice other than the rule all require it.
-    { key: 'price', tKey: 'perm_act_products_price', label: 'Change selling and wholesale price', review: 'block' },
+    { key: 'price', tKey: 'perm_act_products_price', label: 'Change selling and wholesale price', review: 'queue' },
     // Owner, 5 Oct 2026 (evening): the Products sub-pages -- Stock Changes, Stock-in Sessions and a product's sales and
     // supplier history. Off for the Employee default, who see only the main Products page.
-    { key: 'history', tKey: 'perm_act_products_history', label: 'Stock changes, sessions and product history', review: 'block' },
+    { key: 'history', tKey: 'perm_act_products_history', label: 'Stock changes, sessions and product history', review: 'allow' },
   ],
 
   // cloudflare/src/routes/inventory.ts, plus routes/batches.ts (receive/
@@ -310,7 +314,8 @@ export function actionAllowed(
   // turn a typo in a call site into an invisible permission bug. Fall back
   // to the plain tier check: anything but 'none' may proceed.
   if (!action) return tier !== 'none'
-  if (outcomeAt(action, tier) === 'block') return false
+  const outcome = tier === 'review' && action.controlReview ? action.controlReview : outcomeAt(action, tier)
+  if (outcome === 'block') return false
   if (action.requiresKey && !hasKey(action.requiresKey)) return false
   return true
 }

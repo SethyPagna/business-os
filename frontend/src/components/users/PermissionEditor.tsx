@@ -325,19 +325,24 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
             const meta = outcomeMeta(overriddenOff ? 'block' : tierOutcome)
             const viewLocked = tierOutcome !== 'block' && isViewImpliedByWrite(perms as Record<string, unknown>, permission.key, action.key)
             const canToggle = tierOutcome !== 'block' && !viewLocked
+            const toolNote = canToggle && tier === 'review' && action.controlReview === 'block'
+              ? translate('perm_action_review_tool_full', 'Under Partial Access an edit waits for approval. The tool itself needs Full Access.')
+              : ''
+            const toggleHint = overriddenOff
+              ? translate('perm_action_restore', 'Switched off for this role. Click to hand it back to the tier.')
+              : translate('perm_action_switch_off', 'Click to switch this single action off for this role.')
             return (
               <li key={action.key}>
                 <button
                   type="button"
                   disabled={!canToggle}
-                  aria-pressed={!overriddenOff}
+                  aria-disabled={canToggle ? undefined : true}
+                  aria-pressed={tierOutcome === 'block' ? undefined : !overriddenOff}
                   onClick={() => toggleActionOverride(permission.key, action.key)}
                   title={viewLocked
                     ? translate('perm_view_implied', 'On while Add or Edit is on.')
                     : canToggle
-                    ? (overriddenOff
-                      ? translate('perm_action_restore', 'Switched off for this role. Click to hand it back to the tier.')
-                      : translate('perm_action_switch_off', 'Click to switch this single action off for this role.'))
+                    ? (toolNote ? `${toolNote} ${toggleHint}` : toggleHint)
                     : translate('perm_action_tier_blocked', 'Already blocked by the selected tier.')}
                   className={`flex w-full items-center justify-between gap-2 rounded-md px-1.5 py-1 text-left transition-colors ${
                     canToggle
