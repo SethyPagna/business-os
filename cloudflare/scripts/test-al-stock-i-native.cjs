@@ -341,17 +341,20 @@ function finish(finding) {
 // ============================================================================================
 const PRODUCTS = 'src/routes/products.ts'
 const REVIEW_APPLY = 'src/lib/reviewApply.ts'
+const SURVIVOR_PRICE_CALL = '        if (await foldSurvivorPriceChangeDenied(c.env, user, duplicate.id, body)) return c.json(PRODUCT_DISCOUNT_PRICE_REFUSAL, 403)'
+const IDENTITY_WRITE = "        try { await db.batch([productStockGuardStatement([Number(id), duplicate.id], 'active'), {"
 const REFUSAL_CALL = [
   '        const identityRefusal = await identityFoldRefusal(c, user, db, duplicate, dupRow, body, isImageOnlyEdit)',
   '        if (identityRefusal) return identityRefusal',
-  "        try { await db.batch([productStockGuardStatement([Number(id), duplicate.id], 'active'), {"].join('\n')
+  SURVIVOR_PRICE_CALL,
+  IDENTITY_WRITE].join('\n')
 const FOLD_DECLARATION = '        let foldResult: Awaited<ReturnType<typeof foldDuplicateProductInto>>'
 const IMAGE_GATE = "  if (getActionTier(user, 'products', 'image') === 'none') {\n    const keeper = await db.prepare('SELECT id, image_path FROM products WHERE id = @id')"
 const IMAGE_JUDGEMENT = 'await productMergeChangesImages(db, [{ keeper: keeper ?? { id: duplicate.id, image_path: null }, discarded: dupRow }])'
 const PATCHES = {
   'restore-then-403': [
     { name: 'write-first', file: PRODUCTS, from: REFUSAL_CALL,
-      to: "        try { await db.batch([productStockGuardStatement([Number(id), duplicate.id], 'active'), {" },
+      to: [SURVIVOR_PRICE_CALL, IDENTITY_WRITE].join('\n') },
     { name: 'refuse-then-restore', file: PRODUCTS, from: FOLD_DECLARATION,
       to: [
         '        const identityRefusal = await identityFoldRefusal(c, user, db, duplicate, dupRow, body, isImageOnlyEdit)',
