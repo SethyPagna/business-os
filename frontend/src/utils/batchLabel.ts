@@ -12,7 +12,7 @@
 // it never invents or recomputes a number on its own.
 
 import { BUSINESS_TIME_ZONE } from '../constants.ts'
-import { fmtDayFirst } from './formatters.ts'
+import { fmtDayFirst, parseServerTimestampMs } from './formatters.ts'
 
 export type BatchLike = {
   id: number | string
@@ -43,10 +43,9 @@ export function formatBatchReceivedDate(receivedAt: string | null | undefined): 
     if (candidate.getUTCFullYear() !== yyyy || candidate.getUTCMonth() + 1 !== mm || candidate.getUTCDate() !== dd) return null
     return `${dateOnly[3]}/${dateOnly[2]}/${dateOnly[1]}`
   }
-  const isoish = raw.includes('T') ? raw : `${raw.replace(' ', 'T')}Z`
-  const date = new Date(isoish)
-  if (Number.isNaN(date.getTime())) return null
-  return fmtDayFirst(date, { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: BUSINESS_TIME_ZONE })
+  const ms = parseServerTimestampMs(raw)
+  if (Number.isNaN(ms)) return null
+  return fmtDayFirst(new Date(ms), { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: BUSINESS_TIME_ZONE })
 }
 
 // "n: dd/mm/yyyy" -- the decided default label (word "Batch" prefix is
