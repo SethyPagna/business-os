@@ -10,8 +10,9 @@
 // real runImportAnalyze / runImportApply. Covered for each job type that moves stock or records a sale
 // (products, inventory, sales, stock_actions):
 //   * before the cutover (both branches active) the new code writes byte-identical business statements and ends
-//     in identical rows -- an ORACLE world loads the import files exactly as they were at eb5dd0ba3 (the one
-//     documented exception: the stock-action add batch gains its in-batch landing-branch guard, the closed loophole);
+//     in identical rows -- an ORACLE world loads the import files exactly as they were at eb5dd0ba3 (the documented
+//     exceptions: the stock-action add batch gains its in-batch landing-branch guard, the closed loophole; and the
+//     inventory row also moves its branch and counted lot, AL-STOCK B, so it is held to the oracle's rows plus that);
 //   * after the cutover with no header: 409 branch_redirect_required with the redirect detail, the job stays in
 //     review, and not one business row is written;
 //   * an invalid target (the disabled branch itself, an unknown id): 409 branch_redirect_target_invalid;
@@ -289,7 +290,7 @@ async function main() {
 
   for (const type of TYPES) {
     // ---- before the cutover: inert ------------------------------------------------------------------------------
-    await check(`${type}: before the cutover the approve + apply writes byte-identical business statements and rows (oracle eb5dd0ba3)`, async () => {
+    await check(`${type}: before the cutover the approve + apply writes ${type === 'inventory' ? 'the oracle\'s rows plus the AL-STOCK B branch and lot halves' : 'byte-identical business statements and rows'} (oracle eb5dd0ba3)`, async () => {
       const results = []
       for (const oracle of [false, true]) {
         const w = await world('before', { oracle })
@@ -304,6 +305,40 @@ async function main() {
         results.push({ writes: businessWrites(w.capture.slice(mark)), rows: businessRows(w.sql) })
       }
       const [fresh, old] = results
+      if (type === 'inventory') {
+        // AL-STOCK B (6.0.56) is the one deliberate difference: the oracle's inventory row (+2 at Shop) moved only
+        // the product total and wrote a movement under no lot; it now also moves Shop's branch_stock and lands in
+        // Shop's counted lot, which the movement names. Every other row is the oracle's.
+        const SHOP = 2
+        const added = fresh.rows.product_batches.filter((batch) => !old.rows.product_batches.some((prior) => prior.id === batch.id))
+        assert.equal(added.length, 1, 'the counted increase opens exactly one lot')
+        const [lot] = added
+        assert.deepEqual([lot.variant_product_id, lot.received_branch_id, lot.is_active, lot.notes, lot.batch_key.startsWith(` snapshot:${SHOP}:`)],
+          [10, SHOP, 1, 'Stock counted up by an inventory import', true], 'the lot is Shop\'s dated snapshot lot')
+        const lotStock = fresh.rows.branch_batch_stock.filter((row) => row.batch_id === lot.id)
+        assert.deepEqual(lotStock.map((row) => [row.branch_id, row.quantity]), [[SHOP, 2]], 'the lot holds the 2 units at Shop')
+        assert.equal(old.rows.inventory_movements.length, 1, 'the oracle wrote one movement')
+        const expected = JSON.parse(JSON.stringify(old.rows))
+        expected.branch_stock.find((row) => row.product_id === 10 && row.branch_id === SHOP).quantity += 2
+        expected.product_batches.push(lot)
+        expected.branch_batch_stock.push(...lotStock)
+        expected.inventory_movements[0].batch_id = lot.id
+        assert.deepEqual(fresh.rows, expected, `${type}: the oracle's rows plus the branch and lot halves of the same +2`)
+        const shopLots = fresh.rows.branch_batch_stock.filter((row) => row.branch_id === SHOP).reduce((sum, row) => sum + row.quantity, 0)
+        const shopStock = fresh.rows.branch_stock.find((row) => row.product_id === 10 && row.branch_id === SHOP).quantity
+        assert.deepEqual([shopLots, shopStock, fresh.rows.products.find((row) => row.id === 10).stock_quantity], [5, 5, 10], 'lots = branch_stock at Shop; the total is unchanged from the oracle')
+        // Still inert before the cutover: no redirect pair is re-proved and no stock write is clamped; the row's
+        // stock writes and movement travel in one batch.
+        const flat = fresh.writes.flat()
+        assert.ok(!flat.some((text) => /"addressed\\?":/.test(text)), 'no redirect pair while every branch is active')
+        // (The counted lot's MAX(0, branch - lots) only measures units held under no lot; it never sets a quantity.)
+        assert.ok(!flat.some((text) => /quantity\s*=\s*MAX\(0/i.test(text)), 'no clamped stock write')
+        const withMovement = fresh.writes.filter((batch) => batch.some((text) => /INSERT INTO inventory_movements/.test(text)))
+        assert.equal(withMovement.length, 1, 'one batch carries the movement')
+        assert.ok(['UPDATE products SET stock_quantity', 'INSERT INTO branch_stock', 'INSERT INTO branch_batch_stock'].every((head) => withMovement[0].some((text) => text.includes(head))),
+          'the same batch moves the product total, branch_stock and the lot')
+        return
+      }
       assert.deepEqual(fresh.rows, old.rows, `${type}: identical business rows`)
       if (type === 'stock_actions') {
         // The one deliberate addition: the add batch's in-batch guard that its landing branch is still active (the

@@ -15,7 +15,8 @@
 //     a planned payload and a plan-less historical queue row;
 //   - a product import (the ACTUAL write loop of runImportApply, extracted
 //     from lib/importEngine.ts: default, override_replace, fill_blank and
-//     replace_columns updates) and a legacy inventory import 'add' row;
+//     replace_columns updates); an inventory import row writes no bare cost at
+//     all (its Add is a receipt that prices its lot);
 // plus the negative controls that make the fixture discriminating: a bare
 // UPDATE of the cost reverts at the sale (so "holds" is not the trigger doing
 // nothing), an import receipt row (override_add with stock) still prices by
@@ -176,9 +177,6 @@ const productLoop = extract(engineSource,
   engineSource.includes(receiptPrescanStart) ? receiptPrescanStart : productLoopStart,
   '\n        finishProductRowWriteGroup()\n      }\n')
 assert.ok(productLoop.includes(productLoopStart), 'the extracted text contains the product write loop')
-const inventoryLoop = extract(engineSource,
-  '      for (const r of actionable) {\n        const d = r.data as Record<string, unknown> & { cost_price_usd?: number; cost_price_khr?: number }',
-  '\n        guardedGroups.push(labelAddressedMovements(group, d))\n      }\n')
 const composerMod = { exports: {} }
 new Function('require', 'module', 'exports', transpile(`
   import { planReconcileBranchSnapshot, resolveReceiptLotTarget } from './productBatches'
@@ -202,14 +200,8 @@ new Function('require', 'module', 'exports', transpile(`
     ${productLoop}
     return [...productStatementGroups, ...statements.map((s: any) => [s]), ...guardedGroups]
   }
-  export function composeInventory(ctx: any) {
-    let { actionable, appliedRowGuards, rowGuardStatement, nowIso, importCostActor, INVENTORY_RECEIPT_PLAN_VERSION } = ctx
-    const guardedGroups: any[] = []
-    ${inventoryLoop}
-    return guardedGroups
-  }
 `, 'importComposer.ts'))(localRequireFor('lib/importComposer.ts'), composerMod, composerMod.exports)
-const { composeProducts, composeInventory } = composerMod.exports
+const { composeProducts } = composerMod.exports
 
 const importCtx = (rows, extra = {}) => ({
   actionable: rows, receiptCosts: new Map(rows.map((r) => [r.rowNumber, r.receiptCost ?? null])), autoMergeRecords: [],
@@ -434,15 +426,15 @@ async function main() {
     assert.equal(cost(p.id), 0, 'as a clear in the form: a typed 0 holds')
   })
 
-  await check('inventory import (legacy add row with a unit cost): the cost records the entry and holds past a sale', async () => {
-    const p = seed()
-    const row = { rowNumber: 2, data: { product_id: p.id, product_name: 'x', branch_id: 1, branch_name: 'Shop', movement_type: 'add', quantity: 1, signedQuantity: 1,
-      unit_cost_usd: 9, unit_cost_khr: 0, total_cost_usd: 9, total_cost_khr: 0, reason: 'import', cost_price_usd: 9 } }
-    await runGroups(composeInventory(importCtx([row])))
-    assert.equal(cost(p.id), 9)
-    assert.equal(entries(p.id).length, 1)
-    sell(p)
-    assert.equal(cost(p.id), 9)
+  // The legacy inventory 'add' row with a scalar unit cost is gone: since bbbc1b66a an inventory Add is a versioned
+  // receipt that prices its lot, classifyInventory stopped putting cost_price_* on any row, and 6.0.56 (AL-STOCK B)
+  // removed the unreachable cost write from the Remove / Set apply. Pin that no inventory row can write a bare cost.
+  await check('inventory import: no Remove / Set / legacy row writes a product cost (an Add with a unit cost is a receipt that prices its lot)', async () => {
+    const classify = extract(engineSource, 'export async function classifyInventory(', '\n  return results\n}\n')
+    assert.ok(!/data\.cost_price_(usd|khr)\s*=/.test(classify), 'classifyInventory never puts a scalar cost on a row')
+    const stockGroup = extract(engineSource, 'function inventoryStockGroupStatements(', '\n  return statements\n}\n')
+    assert.ok(stockGroup.includes('INSERT INTO inventory_movements'), 'the extracted text is the Remove / Set write group')
+    assert.ok(!/cost_price_(usd|khr)/.test(stockGroup), 'the Remove / Set write group touches no product cost')
   })
 
   console.log(`${checks} checks passed`)
