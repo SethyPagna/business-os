@@ -63,7 +63,7 @@ async function main() {
     h.sql.exec("UPDATE sales SET total_usd=999 WHERE id=4")
     assert.equal((await h.get(frozen(first, { q: 'alice', verifyOnly: '1' }))).status, 200)
   })
-  await check('fractional money aggregates before rounding and receipt costs floor only at aggregate totals', async h => {
+  await check('fractional receipt rows keep 4 places and the totals row is their exact sum; receipt costs floor only at aggregate totals', async h => {
     h.sql.exec(`INSERT INTO sales(id,created_at,sale_status,customer_name,subtotal_usd,total_usd) VALUES
       (10,'2026-09-04 01:00:00','completed','fraction',.0044,.0044),
       (11,'2026-09-04 01:00:00','completed','fraction',.0044,.0044),
@@ -73,8 +73,10 @@ async function main() {
       INSERT INTO returns(id,sale_id,total_refund_usd) VALUES(12,12,0);
       INSERT INTO return_items VALUES(12,12,3,1,'restock',1);`)
     const fraction = (await h.get({ q: 'fraction' })).body
-    assert.equal(fraction.rows.reduce((sum, row) => sum + row.net_revenue_usd, 0), 0)
-    assert.equal(fraction.totals.revenue_usd, .01); assert.equal(fraction.totals.cost_usd, .01)
+    // Owner 13 Oct (L3): split rows carry 4 places so the totals row adds up, with no cents residue.
+    assert.deepEqual(fraction.rows.map(row => row.net_revenue_usd), [.0044, .0044])
+    assert.equal(fraction.totals.revenue_usd, fraction.rows.reduce((sum, row) => sum + row.net_revenue_usd, 0))
+    assert.equal(fraction.totals.revenue_usd, .0088); assert.equal(fraction.totals.cost_usd, .0088)
     const floor = (await h.get({ q: 'floor' })).body
     assert.equal(floor.rows.reduce((sum, row) => sum + row.cost_usd, 0), 5)
     assert.equal(floor.totals.cost_usd, 3, 'one exact cohort cost floor, not sum of receipt floors')
@@ -196,15 +198,17 @@ async function main() {
     assert.equal(Object.hasOwn(refused.body, 'rows'), false)
   })
   await check('a totals-only fractional edit changes token even when every rounded output row is identical', async h => {
+    // Receipt rows carry 4 places (owner 13 Oct, L3), so only a legacy fifth
+    // decimal can move the exact totals while every output row stays identical.
     h.sql.exec(`INSERT INTO sales(id,created_at,sale_status,customer_name,subtotal_usd,total_usd) VALUES
-      (10,'2026-09-04 01:00:00','completed','tiny',.0024,.0024),
-      (11,'2026-09-04 01:00:00','completed','tiny',.0024,.0024);`)
+      (10,'2026-09-04 01:00:00','completed','tiny',.00242,.00242),
+      (11,'2026-09-04 01:00:00','completed','tiny',.00242,.00242);`)
     const first = (await h.get({ q: 'tiny' })).body
-    assert.equal(first.totals.revenue_usd, 0)
-    h.sql.exec('UPDATE sales SET subtotal_usd=.0027,total_usd=.0027 WHERE id=10')
+    assert.equal(first.totals.revenue_usd, .0048)
+    h.sql.exec('UPDATE sales SET subtotal_usd=.00244,total_usd=.00244 WHERE id=10')
     const next = (await h.get({ q: 'tiny' })).body
     assert.deepEqual(next.rows, first.rows)
-    assert.equal(next.totals.revenue_usd, .01)
+    assert.equal(next.totals.revenue_usd, .0049)
     assert.notEqual(next.export_token, first.export_token)
     assert.equal((await h.get(frozen(first, { q: 'tiny', verifyOnly: '1' }))).status, 409)
   })
