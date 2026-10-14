@@ -97,7 +97,7 @@ import { classifyUnifiedStockActions, type StockActionImportResult } from './sto
 import { countUnifiedStockConfirmationRows, sealUnifiedStockAnalyzeConflicts } from './stockActionSeal'
 import { applyUnifiedStockAdd, applyUnifiedStockSale, ensureUnifiedStockProduct, unifiedStockReceiptRefusal, type UnifiedStockSaleLine } from './stockActionCommit'
 import { parseStockAction, saleGroupKeyFor } from './stockActionResolver'
-import { applyHistoricalSaleImport, MAX_HISTORICAL_SALE_LINES } from './salesImportCommit'
+import { applyHistoricalSaleImport, MAX_HISTORICAL_SALE_LINES, planHistoricalSaleReceiptNumbers } from './salesImportCommit'
 import { getUnifiedStockMode, type UnifiedStockResolvedRow } from './stockActionImport'
 import { branchCanSell, branchRole } from './branchRoles'
 import { WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
@@ -5763,11 +5763,13 @@ const STOCK_POISON_MESSAGE = 'This sale group has a line that could not be resol
  */
 const STOCK_QUERY_BUDGET = Symbol('stockQueryBudget')
 class StockQueryBudgetDeferred extends Error {}
-type StockQueryBudget = { used: number; limit: number; reserve: number; enabled: boolean; physicalBatches: number }
+// 'statement' charges every statement of a batch (the stock-actions path's conservative count). 'call' charges one per
+// db round trip, which is what the D1 binding sends (one fetch per batch) and what the per-invocation limit counts.
+type StockQueryBudget = { used: number; limit: number; reserve: number; enabled: boolean; physicalBatches: number; unit: 'statement' | 'call' }
 type BudgetDb = D1Compat & { [STOCK_QUERY_BUDGET]?: StockQueryBudget; readonly importWriteFenceStatements?: 0 | 1 }
 function stockQueryBudgetDb(db: D1Compat, limit: number, factoryQueries = 0): BudgetDb {
   if ((db as BudgetDb)[STOCK_QUERY_BUDGET]) return db
-  const budget: StockQueryBudget = { used: factoryQueries, limit, reserve: 0, enabled: false, physicalBatches: 0 }
+  const budget: StockQueryBudget = { used: factoryQueries, limit, reserve: 0, enabled: false, physicalBatches: 0, unit: 'statement' }
   const wrap = (source: D1Compat): BudgetDb => {
     const result = Object.create(source) as BudgetDb
     Object.defineProperty(result, STOCK_QUERY_BUDGET, { value: budget })
@@ -5798,7 +5800,7 @@ function stockQueryBudgetDb(db: D1Compat, limit: number, factoryQueries = 0): Bu
       }
     }) as D1Compat['prepare']
     const execute = (statements: Parameters<D1Compat['batch']>[0]) => {
-      charge(statements.length + ((source as BudgetDb).importWriteFenceStatements ?? 0))
+      charge(budget.unit === 'call' ? 1 : statements.length + ((source as BudgetDb).importWriteFenceStatements ?? 0))
       if (statements.some(statement => /(?:UPDATE|INSERT INTO|INSERT OR IGNORE INTO)\s+(?:branch_stock|branch_batch_stock|products|sales)\b/i.test(statement.sql))) budget.physicalBatches++
       if (source.batchOnce) return source.batchOnce(statements)
       if ((source as BudgetDb).importWriteFenceStatements != null) throw new Error('Budgeted import adapter requires single-attempt batches')
@@ -5812,6 +5814,90 @@ function stockQueryBudgetDb(db: D1Compat, limit: number, factoryQueries = 0): Bu
   result.staging = db.staging === db ? result : wrap(db.staging)
   return result
 }
+
+// A historical sale import commits one receipt per atomic db.batch() after about five reads, so a window of receipts
+// costs round trips in proportion to its size. Every receipt of a window runs inside one queue invocation, and an
+// invocation may make only d1QueriesPerInvocation calls (50 Free / 1000 Paid), so the receipt loop is bounded by the
+// same call budget instead of by a row count: it stops at a receipt boundary, the cursor is checkpointed and the
+// continuation runs in a fresh invocation. Each receipt writes and seals itself in ONE batch (salesImportCommit.ts),
+// so a receipt is either fully committed and sealed or untouched, and a replay skips sealed receipts.
+const SALES_APPLY_CALL_ESTIMATE = 8
+// What the invocation still spends AFTER the receipt loop: persisting results, the cursor and progress counters or, on
+// the last window, finalising the job (measured: 8 database calls plus the KV, R2 and Durable Object calls that end a job).
+export const SALES_APPLY_TAIL_RESERVE = 14
+
+export function salesApplyBlockSize(remainingCalls: number, concurrency: number): number {
+  return Math.max(1, Math.min(concurrency, Math.floor(remainingCalls / SALES_APPLY_CALL_ESTIMATE)))
+}
+
+// How far a concurrent block got. Only receipts committed in order from the front of the block count as done:
+// a later sibling that happened to commit is sealed too and replays as an already-applied no-op.
+export function resolveSalesApplyBlock(outcomes: ReadonlyArray<PromiseSettledResult<unknown>>): { prefix: number; deferred: boolean; failed: boolean; failure: unknown } {
+  let prefix = 0
+  while (prefix < outcomes.length && outcomes[prefix].status === 'fulfilled') prefix++
+  let deferred = false
+  let failed = false
+  let failure: unknown
+  for (const outcome of outcomes) {
+    if (outcome.status !== 'rejected') continue
+    if (outcome.reason instanceof StockQueryBudgetDeferred) deferred = true
+    else if (!failed) { failed = true; failure = outcome.reason }
+  }
+  return { prefix, deferred, failed, failure }
+}
+
+// Where a window that stopped early ends. `results` holds one entry per receipt group of the window in order,
+// `actionable` is the subset that was committed in order, and `applied` of them are done. The window ends at the first
+// receipt group that is not: everything before it (including groups that failed review) is final, everything from it on
+// is read again by the next invocation.
+export function cutSalesWindowAtFirstUnapplied<T extends { rowNumber: number }>(
+  results: T[], actionable: T[], applied: number, groupIndexByRowNumber: ReadonlyMap<number, number>, cursor: number, windowUnitCount: number,
+): { processedUnits: number; persisted: T[] } {
+  if (applied >= actionable.length) return { processedUnits: windowUnitCount, persisted: results }
+  const resumeAtGroup = groupIndexByRowNumber.get(actionable[applied].rowNumber)!
+  return {
+    processedUnits: resumeAtGroup - cursor,
+    persisted: results.filter((result) => (groupIndexByRowNumber.get(result.rowNumber) ?? Infinity) < resumeAtGroup),
+  }
+}
+
+type SalesApplyReceipt = { rowNumber: number; data: unknown }
+
+/** Commits receipts in concurrent blocks. Returns how many, from the front, are committed (all of them unless the call budget ran out). */
+export async function applyHistoricalSalesReceipts(
+  db: D1Compat,
+  receipts: SalesApplyReceipt[],
+  input: { jobId: string; nowIso: string; actor: SessionUser; accrueLoyalty: boolean; concurrency: number; receiptNumbers?: ReadonlyMap<number, string> },
+): Promise<number> {
+  const budget = (db as BudgetDb)[STOCK_QUERY_BUDGET]
+  let done = 0
+  while (done < receipts.length) {
+    // The first receipt of an invocation runs alone, so siblings can never spend the budget it needs: every invocation
+    // therefore commits at least one receipt, or proves that one receipt does not fit a whole invocation.
+    const size = !budget?.enabled ? input.concurrency
+      : done === 0 ? 1
+        : salesApplyBlockSize(budget.limit - budget.reserve - budget.used, input.concurrency)
+    const settled = await Promise.allSettled(receipts.slice(done, done + size).map((receipt) => applyHistoricalSaleImport(db, {
+      jobId: input.jobId,
+      rowNumber: receipt.rowNumber,
+      data: receipt.data as Record<string, unknown> & { items: Array<Record<string, unknown>>; sale_status: string; receipt_number: string | null; created_at: string | null },
+      nowIso: input.nowIso,
+      actor: input.actor,
+      plannedReceiptNumber: input.receiptNumbers?.get(receipt.rowNumber),
+      accrueLoyalty: input.accrueLoyalty,
+    })))
+    const block = resolveSalesApplyBlock(settled)
+    // The whole block has settled before anything is thrown: siblings that committed are sealed, so the queue's retry
+    // no-ops them and resumes without duplicate receipts.
+    if (block.failed) throw block.failure
+    done += block.prefix
+    if (!block.deferred) continue
+    if (done === 0) throw new Error('One sales receipt exceeds the deployment query budget; split the file.')
+    return done
+  }
+  return done
+}
+
 async function persistStockResults(db: D1Compat, jobId: string, results: ImportRowResult[], groups?: Map<number, number>): Promise<void> {
   if (!results.length) return
   const rows = results.map(row => ({ rowNumber: row.rowNumber, groupIndex: groups?.get(row.rowNumber) ?? null,
@@ -7317,37 +7403,37 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // or all roll back. The deterministic client_request_id resolves the
     // parent id inside SQL, removing the concurrency-unsafe "latest N sale
     // ids" lookup that could attach one user's lines to another sale.
+    let appliedReceipts = actionable.length
     if (job.type === 'sales' && actionable.length) {
+      appliedReceipts = 0
       // Loyalty accrual is the operator's import-time choice (default OFF for
       // historical data). Read it once per chunk from the reviewed policy.
       const accrueLoyalty = getSalesImportAccrueLoyalty(job.policy_json)
       // Tier-aware: paid 12, free 6 -- see lib/planTier.ts. The module-level
       // export keeps its Paid value for existing readers.
-      const historicalSalesConcurrency = limits.historicalSalesImportConcurrency
-      for (let offset = 0; offset < actionable.length; offset += historicalSalesConcurrency) {
-        const receiptWindow = actionable.slice(offset, offset + historicalSalesConcurrency)
-        const settled = await Promise.allSettled(receiptWindow.map(async (r) => {
-          await applyHistoricalSaleImport(db, {
-            jobId,
-            rowNumber: r.rowNumber,
-            data: r.data as Record<string, unknown> & { items: Array<Record<string, unknown>>; sale_status: string; receipt_number: string | null; created_at: string | null },
-            nowIso,
-            actor: authority.actor,
-            accrueLoyalty,
-          })
-        }))
-        const failedReceipt = settled.find((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected')
-        // Wait for the whole bounded window before throwing. Any siblings
-        // that committed are sealed, so the queue's retry safely no-ops
-        // them and resumes the same chunk without duplicate receipts.
-        if (failedReceipt) throw failedReceipt.reason
+      // Receipts of one moment commit concurrently: number the whole window first so they cannot race for one number.
+      const receiptNumbers = await planHistoricalSaleReceiptNumbers(db, jobId, actionable, nowIso)
+      // Bounded by the per-invocation call budget, not by the row window: see applyHistoricalSalesReceipts.
+      const callBudget = (db as BudgetDb)[STOCK_QUERY_BUDGET]
+      if (callBudget) Object.assign(callBudget, { unit: 'call', enabled: true, reserve: SALES_APPLY_TAIL_RESERVE })
+      try {
+        appliedReceipts = await applyHistoricalSalesReceipts(db, actionable, {
+          jobId, nowIso, actor: authority.actor, accrueLoyalty, concurrency: limits.historicalSalesImportConcurrency, receiptNumbers,
+        })
+      } finally {
+        if (callBudget) Object.assign(callBudget, { unit: 'statement', enabled: false, reserve: 0 })
       }
     }
     sw.lap('salesItemsMs')
 
-    await persistChunkResults(db, jobId, 'apply', results, groupIndexByRowNumber)
-    const chunkFailed = results.filter((r) => r.action === 'error').length
-    const nextCursor = cursor + windowUnitCount
+    // A window cut short by the call budget ends at the first uncommitted receipt: only the receipts (and the rows
+    // that failed review) before it are final; the next invocation re-reads from there.
+    const { processedUnits, persisted: persistedResults } = appliedReceipts < actionable.length && groupIndexByRowNumber
+      ? cutSalesWindowAtFirstUnapplied(results, actionable, appliedReceipts, groupIndexByRowNumber, cursor, windowUnitCount)
+      : { processedUnits: windowUnitCount, persisted: results }
+    await persistChunkResults(db, jobId, 'apply', persistedResults, groupIndexByRowNumber)
+    const chunkFailed = persistedResults.filter((r) => r.action === 'error').length
+    const nextCursor = cursor + processedUnits
 
     if (nextCursor < totalUnits) {
       await saveChunkState(db, jobId, nextCursor, state)
@@ -7355,10 +7441,10 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       // analyze's total_rows/processed_rows, which is one number computed
       // fresh each chunk from a stable denominator).
       await db.prepare(`UPDATE import_jobs SET processed_rows = processed_rows + @applied, failed_rows = failed_rows + @failed, updated_at = CURRENT_TIMESTAMP WHERE id = @id`)
-        .run({ id: jobId, applied: actionable.length, failed: chunkFailed })
+        .run({ id: jobId, applied: appliedReceipts, failed: chunkFailed })
       console.log('[import-timing] apply chunk', jobId, { cursor, nextCursor, totalUnits, ...sw.marks })
       await dispatchImportWork(env, { jobId, kind: 'apply' })
-      return { applied: actionable.length, failed: chunkFailed }
+      return { applied: appliedReceipts, failed: chunkFailed }
     }
 
     // Replace-all mode: this import is the complete, current catalog --
