@@ -1,0 +1,92 @@
+import Hourglass from 'lucide-react/dist/esm/icons/hourglass.js'
+import { useApp as useAppHook } from '../../app/AppContextCore.tsx'
+import {
+  useIsPendingReview,
+  usePendingReviewCount,
+  type PendingReviewId,
+} from '../../utils/pendingReviewTargets.ts'
+
+// The mini "waiting for review" tag: it takes NO space. It is absolutely positioned inside a
+// container its caller already made `relative`, in a gutter the row already has (a cell's start
+// padding, a card's start padding), so no row, cell or column changes box when it appears.
+// `pointer-events-none` keeps a tap going to the row; the accessible name is on role="img"
+// (a box that takes no pointer events cannot show a `title` tooltip). The caller passes the offset.
+// Sales, returns, contacts and stock sessions never queue, so they draw no tag.
+
+const useApp = useAppHook as unknown as () => { t: (key: string) => string }
+
+/** The tag's own box. Position is the caller's: it adds `left-*` / `top-*`. */
+export const PENDING_REVIEW_TAG_CLASS = 'pointer-events-none absolute h-2.5 w-2.5 text-amber-700 dark:text-amber-400'
+/**
+ * The Add button's count badge: a 10px corner dot that lives wholly inside the button's
+ * own 12px end padding. Inside the button because the toolbar strip around it is
+ * overflow-x-auto (a badge poking out would be clipped on top and add a scrollbar on the
+ * right); inside the PADDING because the button is only as wide as its icon and label, so
+ * a bigger badge sits on the last letter (measured in tests/pendingReviewTagLayout.test.ts).
+ * No horizontal padding: "9+" is then 10.3px wide and still clears the label by a pixel.
+ * Colours: amber-200 is the lightest amber that keeps 3:1 against the brass button
+ * (amber-400 was 2.39:1), amber-700 the row hourglass on white and the blue hover row
+ * (amber-600 was 2.93:1 there); tests/pendingReviewTag.test.ts computes both.
+ */
+export const PENDING_REVIEW_BADGE_CLASS = 'pointer-events-none absolute right-px top-px flex h-2.5 min-w-[0.625rem] items-center justify-center rounded-full bg-amber-200 text-[8px] font-bold leading-none text-amber-950'
+
+function useLabel(): string {
+  const { t } = useApp()
+  const value = t('pending_review_tag')
+  return value && value !== 'pending_review_tag' ? value : 'Waiting for review'
+}
+
+// Split from the smart tag below on purpose: the outer component is mounted once
+// per row and reads only the store, so a language or notification change does not
+// re-render hundreds of them. Only a row that IS waiting mounts this and reads
+// the app context for its label.
+function PendingReviewGlyph({ className }: { className: string }) {
+  const label = useLabel()
+  return (
+    <span role="img" aria-label={label} title={label} className={`${PENDING_REVIEW_TAG_CLASS} ${className}`}>
+      <Hourglass aria-hidden="true" className="block h-2.5 w-2.5" strokeWidth={2.25} />
+    </span>
+  )
+}
+
+type PendingReviewTagProps = {
+  section: string
+  entityType: string
+  /** Every record this row stands for (a merged display row stands for several). */
+  ids: readonly PendingReviewId[]
+  /** Offset inside the caller's `relative` container, e.g. `left-0 top-1`. */
+  className?: string
+}
+
+/** Renders nothing unless one of `ids` has an open review request. Never fetches. */
+export default function PendingReviewTag({ section, entityType, ids, className = '' }: PendingReviewTagProps) {
+  const waiting = useIsPendingReview(section, entityType, ids)
+  return waiting ? <PendingReviewGlyph className={className} /> : null
+}
+
+/**
+ * A count of requests that point at no record yet (product creates waiting for
+ * approval), for the corner of the button that creates them. Renders nothing at 0.
+ *
+ * Decoration only: the button's accessible name replaces its content, so a role="img"
+ * inside it would never be announced. The count is spoken through the button's own
+ * name (usePendingReviewName).
+ */
+export function PendingReviewCountBadge({ section, entityType }: { section: string; entityType: string }) {
+  const count = usePendingReviewCount(section, entityType)
+  return count > 0 ? (
+    <span aria-hidden="true" data-pending-review-count={count} className={PENDING_REVIEW_BADGE_CLASS}>
+      {count > 9 ? '9+' : count}
+    </span>
+  ) : null
+}
+
+/**
+ * The accessible name for a control that wears the count badge: its own name, then how
+ * many requests are waiting ("Adjust stock, Waiting for review: 2"). Unchanged at 0.
+ */
+export function usePendingReviewName(section: string, entityType: string, name: string): string {
+  const count = usePendingReviewCount(section, entityType)
+  const label = useLabel()
+  return count > 0 ? `${name}, ${label}: ${count}` : name
+}

@@ -4,6 +4,8 @@ import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
 import PaginationControls from '../shared/PaginationControls.tsx'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
 import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
+import PendingReviewSync from '../shared/PendingReviewSync.tsx'
+import PendingReviewTag from '../shared/PendingReviewTag.tsx'
 
 export type InventoryProductRow = Record<string, any> & {
   id?: number | string
@@ -115,12 +117,14 @@ type Props = InventoryProductsPayload & {
   statsLoading: boolean
   statsError?: string | null
   t: (key: string) => string | undefined
+  /** False while the Inventory page is kept mounted but not shown: the waiting tags are not read then. */
+  active?: boolean
 }
 
 export default function InventoryProductsSurface({
   items, total, page, pageSize, loading, error, branchFilter,
   onPageChange, onPageSizeChange, onOpenDetail, onOpenInCatalogue, onAdjust, fmtUSD, fmtKHR,
-  serverStats, statsLoading, statsError, t,
+  serverStats, statsLoading, statsError, t, active = true,
 }: Props) {
   const groups = useMemo(() => groupInventoryProducts(items), [items])
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
@@ -223,6 +227,8 @@ export default function InventoryProductsSurface({
 
   return (
     <section aria-label={t('products') || 'Products'} className="min-w-0 max-w-full space-y-2">
+      {/* ONE read of the open review requests for this table, shared by every row's tag (renders nothing). */}
+      <PendingReviewSync active={active} />
       <div className="flex flex-wrap gap-x-4 gap-y-1 rounded-lg border border-slate-200 p-2 text-xs dark:border-slate-700" aria-busy={statsLoading}>
         {summaryFields.map(([field, label]) => <div key={field}>{t(label) || label}: <strong>{statsLoading ? '…' : inventoryMoney(serverStats?.[field]) === null ? '—' : field === 'stock_value_usd' ? fmtUSD(Number(serverStats?.[field])) : Number(serverStats?.[field])}</strong></div>)}
       </div>
@@ -265,7 +271,8 @@ export default function InventoryProductsSurface({
                 {!collapsed.has(group.key) && group.rows.map((product) => (
                   <tr key={String(product.id)} className="border-t border-slate-100 hover:bg-blue-50/60 dark:border-slate-800 dark:hover:bg-blue-900/10" onClick={() => { if (product.__mergedProductIds?.length <= 1) onOpenDetail(product) }}>
                     {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
-                    <td className="max-w-[18rem] px-3 py-1.5"><div className="flex min-w-0 items-start gap-1"><div className="min-w-0 flex-1"><div className="min-w-0 font-medium text-slate-800 dark:text-slate-100"><ProductNameRail name={String((product.name || '—') ?? '')} /></div><div className="truncate text-[10px] text-slate-400">{[product.brand, product.category].filter(Boolean).join(' · ')}</div></div>{productMenu(product)}</div></td>
+                    {/* "Waiting for review" tag: in this cell's 12px start gutter, out of the flow; `relative` is on the cell with or without a tag. */}
+                    <td className="relative max-w-[18rem] px-3 py-1.5"><PendingReviewTag section="products" entityType="product" ids={product.__mergedProductIds || [product.id]} className="left-px top-1" /><div className="flex min-w-0 items-start gap-1"><div className="min-w-0 flex-1"><div className="min-w-0 font-medium text-slate-800 dark:text-slate-100"><ProductNameRail name={String((product.name || '—') ?? '')} /></div><div className="truncate text-[10px] text-slate-400">{[product.brand, product.category].filter(Boolean).join(' · ')}</div></div>{productMenu(product)}</div></td>
                     <td className="px-3 py-1.5 font-mono text-slate-500">{product.barcode || '—'}</td>
                     <td className="px-3 py-1.5 text-right font-semibold">{quantity(product)}</td>
                     <td className="min-w-28 px-3 py-1.5 text-[11px]">{branchLines(product)}</td>
@@ -291,7 +298,8 @@ export default function InventoryProductsSurface({
               : groups.map((group) => <div key={group.key} className="min-w-0 space-y-1">
                 {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
                 {group.items.length > 1 ? <button type="button" className="min-h-11 w-full min-w-0 text-left text-sm font-semibold" aria-expanded={!collapsed.has(group.key)} onClick={() => toggle(group.key)}>{collapsed.has(group.key) ? '▸' : '▾'} <ProductNameRail name={`${group.label} (${group.items.length})`} /></button> : null}
-                {!collapsed.has(group.key) && group.rows.map((product) => <div key={String(product.id)} className="card min-w-0 p-2 text-sm">
+                {!collapsed.has(group.key) && group.rows.map((product) => <div key={String(product.id)} className="card relative min-w-0 p-2 text-sm">
+                  <PendingReviewTag section="products" entityType="product" ids={product.__mergedProductIds || [product.id]} className="-left-px top-1" />
                   {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
                   <div className="flex min-w-0 items-start justify-between gap-2"><span className="min-w-0 font-medium"><ProductNameRail name={String((product.name || '—') ?? '')} /></span><strong>{quantity(product)}</strong></div>
                   {/* Barcode only -- the SKU half of this line went with the column. */}

@@ -13,6 +13,7 @@ import type { ReactNode } from 'react'
 import type { PortalMenuItem } from '../../shared/PortalMenu'
 import LazyPortalMenu from '../../shared/LazyPortalMenu'
 import ButtonGuidePopover from '../../shared/ButtonGuidePopover'
+import { PendingReviewCountBadge, usePendingReviewName } from '../../shared/PendingReviewTag'
 import { TOOLBAR_BUTTON_WIDTH, manageToolbarButtonClassName, primaryToolbarButtonClassName } from '../../shared/toolbarButtonStyles'
 
 type Translate = (key: string) => string | undefined
@@ -109,6 +110,7 @@ export default function ProductsHeaderActions({
   const exportLabel = tr('export', 'Export')
   const exportHint = tr('export_button_hint', 'Download products as a customizable XLSX file')
   const addLabel = tr('adjust_stock', 'Adjust stock')
+  const addName = usePendingReviewName('products', 'product', addLabel)
   const productHint = tr('add_products_button_hint', 'Add new products or receive stock for products you already have')
   const mergeDuplicatesLabel = tr('merge_duplicate_products', 'Merge duplicate products')
   const mergeDuplicatesHint = tr('merge_duplicates_button_hint', 'Combine branch-only duplicate rows of the same item into one')
@@ -235,12 +237,19 @@ export default function ProductsHeaderActions({
         <button
           type="button"
           onClick={onAdd}
-          className={`${primaryToolbarButtonClassName} min-w-max`}
-          aria-label={addLabel}
+          className={`${primaryToolbarButtonClassName} relative min-w-max`}
+          aria-label={addName}
           title={productHint}
         >
           <Boxes className="h-4 w-4 shrink-0" />
           <span className="min-w-0 truncate">{addLabel}</span>
+          {/* Product creates a Review Required user has submitted and nobody
+              has decided yet: a count in the button's own top-right corner.
+              Inside the button's box on purpose -- this strip is
+              overflow-x-auto, so a badge poking out of it would be clipped on
+              top and would add a scrollbar on the right. Absolute, so the
+              button keeps its size; nothing renders at 0. */}
+          <PendingReviewCountBadge section="products" entityType="product" />
         </button>
       ) : null}
       {primaryActionSlot}

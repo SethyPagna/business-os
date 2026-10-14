@@ -101,7 +101,7 @@ async function controller(createdRows: boolean[], creationOutcomes: CreationOutc
     const renderedReceived = received
     const dependencies = {
       ...api, ...destination, ...draft, ...outcome, extractHistoryResultId,
-      receivingIdentity, ACTOR_GUARD_KEYS, isActorWriteIdentityCurrent: () => true, assertReceivingOwner: () => {}, stopForSignInChange: () => { throw Error('unexpected owner change') },
+      receivingIdentity, ACTOR_GUARD_KEYS, refreshPendingReviewAfterWrite: () => {}, isActorWriteIdentityCurrent: () => true, assertReceivingOwner: () => {}, stopForSignInChange: () => { throw Error('unexpected owner change') },
       submissionsRef, destinationRef, received, branchId: '1', user: { id: 7, name: 'Actor' }, saving,
       canEditCosts: true, canEditPrice: true, canViewCosts: true, paidAmount: '', paymentStatus: 'paid', creditDueDate: '',
       receivedDate: '2026-10-12', supplier: { supplierId: null, supplierName: 'Supplier' }, sessionIdRef: { current: 123 },
