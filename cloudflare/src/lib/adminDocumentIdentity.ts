@@ -34,6 +34,9 @@ export const ADMIN_DOCUMENT_DESCRIPTION = 'Till, stock and sales for Leang Cosme
 export const ADMIN_DOCUMENT_THEME_COLOR = '#fffdf8'
 export const ADMIN_DOCUMENT_MANIFEST_HREF = '/manifest.json'
 export const ADMIN_DOCUMENT_APPLE_TOUCH_ICON_HREF = '/admin-apple-touch-icon-v1.png'
+// The staff app is a till, not a page to pinch: the locked viewport index.html's bootstrap sets on admin routes. The
+// storefront keeps the zoomable one the static head carries.
+export const ADMIN_DOCUMENT_VIEWPORT = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover'
 
 // Keyed by the <link rel="icon"> tag's own sizes attribute, exactly as
 // index.html's admin branch keys it. '' is the unsized favicon.
@@ -120,7 +123,7 @@ const ADMIN_DOCUMENT_OG_IMAGE = '/icon-512.png'
 const ADMIN_DOCUMENT_SELF_URL = '/'
 
 /** The six tags iOS reads when it installs a home-screen app, the colour the
- * browser paints its own chrome, the Open Graph tags a link preview reads and
+ * browser paints its own chrome, the locked viewport, the Open Graph tags a link preview reads and
  * the canonical URL a search crawler reads. */
 export const ADMIN_DOCUMENT_REWRITES: readonly DocumentElementRewrite[] = [
   {
@@ -134,6 +137,10 @@ export const ADMIN_DOCUMENT_REWRITES: readonly DocumentElementRewrite[] = [
   {
     selector: 'meta[name="theme-color"]',
     element(element) { element.setAttribute('content', ADMIN_DOCUMENT_THEME_COLOR) },
+  },
+  {
+    selector: 'meta[name="viewport"]',
+    element(element) { element.setAttribute('content', ADMIN_DOCUMENT_VIEWPORT) },
   },
   {
     selector: 'meta[name="description"]',

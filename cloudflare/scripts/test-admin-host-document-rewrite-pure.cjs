@@ -302,6 +302,23 @@ check('every identity tag the page bootstrap swaps on the admin host is also rew
   }
 })
 
+check('the admin host serves the locked viewport the page sets, and the storefront keeps the zoomable one', () => {
+  const html = read(path.join(REPO, 'frontend', 'index.html'))
+  const staticViewport = /<meta name="viewport" content="([^"]*)"/.exec(html)
+  assert.ok(staticViewport, 'the static head carries a viewport')
+  assert.doesNotMatch(staticViewport[1], /user-scalable=no|maximum-scale/, 'the storefront viewport stays zoomable')
+  const pageSwap = /adminViewport\.setAttribute\('content', '([^']+)'\)/.exec(html)
+  assert.ok(pageSwap, 'the page bootstrap locks the viewport on admin routes')
+  const rule = identity.ADMIN_DOCUMENT_REWRITES.find((entry) => entry.selector === 'meta[name="viewport"]')
+  assert.ok(rule, 'the raw admin HTML has a viewport rule')
+  const element = stubElement({ content: staticViewport[1] })
+  rule.element(element)
+  assert.deepStrictEqual(element.writes, [pageSwap[1]], 'the rule writes exactly the value the page sets')
+  assert.match(pageSwap[1], /maximum-scale=1/)
+  assert.match(pageSwap[1], /user-scalable=no/)
+  assert.strictEqual(identity.shouldRewriteAdminDocument({ hostname: 'leangbeauty.com', method: 'GET', accept: 'text/html', contentType: 'text/html', ok: true }), false, 'the storefront document is not rewritten, so it keeps the zoomable viewport')
+})
+
 // --- how the handler runs it ------------------------------------------------
 
 check('the document is streamed, never buffered', () => {
