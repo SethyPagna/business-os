@@ -60,7 +60,7 @@ const uploadStart = modal.indexOf('api.uploadImportJobCsv')
 const startCall = modal.indexOf('api.startImportJob', uploadStart)
 assert.ok(uploadStart >= 0 && startCall > uploadStart)
 assert.match(modal.slice(uploadStart, startCall), /if \(!ensureContactImportPermission\(\)\) return/, 'permission is rechecked after upload and before starting the job')
-assert.match(modal, /disabled=\{!canImportContacts \|\| loading \|\| analyzingCsv \|\| !rowCount\}/, 'the import button is unavailable unless both action gates allow it')
+assert.match(modal, /disabled=\{!canImportContacts \|\| loading \|\| analyzingCsv \|\| readingFile \|\| !rowCount\}/, 'the import button is unavailable unless both action gates allow it')
 assert.equal((modal.match(/approveImportJob\(/g) || []).length, 1, 'authorized approval behavior remains wired')
 assert.equal((modal.match(/api\.startImportJob\(/g) || []).length, 1, 'authorized start behavior remains wired')
 

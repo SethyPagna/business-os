@@ -1,154 +1,202 @@
-// Universal import-file reader: CSV, TSV, and real Excel (.xlsx/.xls/.xlsm).
+// Reads the file an import dialog hands over (CSV, TSV or Excel .xlsx/.xls/.xlsm)
+// and returns the delimited text every importer already parses, so nothing
+// downstream knows an Excel file was involved.
 //
-// WHY THIS EXISTS: every import entry point in this app (products, inventory,
-// contacts, sales) ends up calling openCSVDialog() (api/browserDialogs.ts),
-// which used to only accept .csv/.tsv and read the file as raw text via
-// decodeTextBuffer. That's the root cause of two separate real-world bugs
-// reported by operators:
+// Excel is read as a workbook, not as text, because a CSV loses what Excel
+// keeps: a CSV re-saved as "CSV (Comma delimited)" is written in the system
+// ANSI code page, which cannot hold Khmer, and Excel's General format shows a
+// long barcode in scientific notation. A workbook stores text as UTF-8 and
+// gives every cell a type (see utils/xlsxExport.ts for the export side, which
+// writes barcode-shaped columns as Text).
 //
-//   1. "Khmer text turns into question marks" -- this almost never happens
-//      on the read side (decodeTextBuffer already handles UTF-8/UTF-16
-//      correctly). It happens earlier: a CSV round-tripped through Excel
-//      gets re-saved using Excel's plain "CSV (Comma delimited)" option,
-//      which writes the system ANSI codepage (e.g. Windows-1252), not UTF-8
-//      -- Windows-1252 cannot represent Khmer glyphs at all, so they become
-//      literal '?' before the file ever reaches this app. Plain CSV has no
-//      way to prevent that; it's a structural limitation of the format.
-//
-//   2. "Barcode numbers turn into scientific notation / lose digits" --
-//      Excel's default "General" number format switches to scientific
-//      notation once an integer gets long enough (which most 12-13 digit
-//      barcodes are), and CSV has no per-column type info to mark a column
-//      "Text" and stop that.
-//
-// Real .xlsx sidesteps both structurally: it always stores text as UTF-8 in
-// its underlying XML (no ANSI ambiguity, ever), and cells carry real type
-// info so a column can be explicitly typed Text (see utils/xlsxExport.ts for
-// the export side, which forces barcode-shaped columns to Text so a file
-// this app generates never re-introduces the problem on the next round
-// trip).
-//
-// This module converts a parsed .xlsx sheet into the exact same delimited
-// text shape a .csv upload already produces, so nothing downstream --
-// analyzeProductImportText, parseCsvRows, the backend's importCsv.ts, all of
-// it -- needs to know or care that the original file was Excel.
-import * as XLSX from 'xlsx'
+// SheetJS 0.18.5 has prototype-pollution and ReDoS advisories and no patched
+// npm release, and an imported workbook is untrusted input. So the conversion
+// never runs on this thread: each Excel file gets a worker of its own
+// (spreadsheetParse.worker.ts), terminated after the result, a timeout or a
+// cancel, and one string is all that comes back. Where no worker can be made,
+// the Excel file is refused rather than parsed here.
 import { decodeTextBuffer } from './csvImport.ts'
-import { csvFieldForMachine } from './csv.ts'
 
 export type ImportFileResult = {
   content: string
   name: string
 }
 
+export type SpreadsheetWorkerHandle = Pick<Worker, 'postMessage' | 'terminate' | 'onmessage' | 'onerror' | 'onmessageerror'>
+
+export type SpreadsheetParseOptions = {
+  createWorker?: () => SpreadsheetWorkerHandle
+  timeoutMs?: number
+  signal?: AbortSignal
+}
+
 const SPREADSHEET_EXTENSION_PATTERN = /\.(xlsx|xlsm|xls)$/i
+
+export const SPREADSHEET_MAX_BYTES = 25 * 1024 * 1024
+
+const SPREADSHEET_PARSE_BASE_TIMEOUT_MS = 20_000
+const SPREADSHEET_PARSE_PER_MB_TIMEOUT_MS = 3_000
+const SPREADSHEET_PARSE_MAX_TIMEOUT_MS = 120_000
+
+// English only when the language pack cannot be loaded; equal to en.json's
+// values (spreadsheetWorkerParse.test.ts pins them).
+export const SPREADSHEET_FAILURES = {
+  unavailable: {
+    key: 'spreadsheet_import_unavailable',
+    english: 'This browser cannot read Excel files safely. Save the sheet as CSV and import that, or update your browser.',
+  },
+  loadFailed: {
+    key: 'spreadsheet_import_load_failed',
+    english: 'The Excel reader could not be loaded. Check your connection, reload the page and try again.',
+  },
+  timeout: {
+    key: 'spreadsheet_import_timeout',
+    english: 'That Excel file took too long to read, so it was stopped. Save the sheet as CSV and import that instead.',
+  },
+  tooLarge: {
+    key: 'spreadsheet_import_too_large',
+    english: 'That Excel file is larger than 25 MB, so it was not opened. Keep only the sheet you need, or save it as CSV, and import that.',
+  },
+  unreadable: {
+    key: 'spreadsheet_import_unreadable',
+    english: 'Could not read that Excel file. Check that it is a valid .xlsx or .xls file, or save the sheet as CSV.',
+  },
+} as const
+
+type SpreadsheetFailureKind = keyof typeof SPREADSHEET_FAILURES
+
+let importFileReadsInFlight = 0
+const importFileReadListeners = new Set<() => void>()
+
+function setImportFileReadsInFlight(count: number): void {
+  importFileReadsInFlight = count
+  importFileReadListeners.forEach((listener) => listener())
+}
+
+// Lets a dialog hold its Import button, mode switches and file inputs while a
+// file is still being read, so a late result can never land under a changed
+// choice. Shaped for useSyncExternalStore.
+export function subscribeToImportFileReads(listener: () => void): () => void {
+  importFileReadListeners.add(listener)
+  return () => { importFileReadListeners.delete(listener) }
+}
+
+export function isImportFileReadInFlight(): boolean {
+  return importFileReadsInFlight > 0
+}
 
 export function isSpreadsheetFileName(fileName: string): boolean {
   return SPREADSHEET_EXTENSION_PATTERN.test(String(fileName || '').trim())
 }
 
-// The ONE case where a numeric cell's DISPLAY text carries a digit its
-// stored value does not: a zero-padding custom format ("0000000000000"),
-// which is what an operator applies to keep a leading-zero barcode looking
-// right in Excel. The workbook then holds { t:'n', v:123, w:'0123' } and
-// reading .v alone silently drops the zero -- the second root cause behind
-// "products that actually have barcode with leading 0" (verified against
-// SheetJS: a cell written with z:'0000' round-trips exactly like that).
-//
-// Deliberately as narrow as the claim: the formatted text must be nothing
-// but digits, must be LONGER than the plain stringified number, and must
-// still parse back to the same number. That admits '0123' for 123 and
-// rejects everything else -- thousands separators, currency, percentages,
-// and above all the "8.85107E+12" scientific rendering the next case is
-// specifically written not to trust.
-function zeroPaddedNumericText(cell: XLSX.CellObject): string {
-  const formatted = typeof cell.w === 'string' ? cell.w.trim() : ''
-  if (!/^0[0-9]*$/.test(formatted)) return ''
-  const plain = String(cell.v)
-  if (formatted.length <= plain.length) return ''
-  return Number(formatted) === Number(cell.v) ? formatted : ''
+export function spreadsheetParseTimeoutMs(byteLength: number): number {
+  const megabytes = Math.ceil(Math.max(0, byteLength) / 1_048_576)
+  return Math.min(SPREADSHEET_PARSE_MAX_TIMEOUT_MS, SPREADSHEET_PARSE_BASE_TIMEOUT_MS + megabytes * SPREADSHEET_PARSE_PER_MB_TIMEOUT_MS)
 }
 
-// Converts one cell to the text that should appear in the equivalent CSV.
-// Reads cell.v (the raw stored value), not cell.w (Excel's *display* text)
-// -- for a numeric cell, .w is what shows "8.80123E+12" in Excel's UI, but
-// .v is still the full-precision number underneath. Numbers this size (real
-// barcodes are well under JavaScript's 2^53 safe-integer ceiling) stringify
-// back to plain digits with no exponent, which is exactly what String()
-// already does for anything under 1e21. The single exception is the
-// zero-padded rendering above, where .w holds a digit .v cannot.
-function cellToText(cell: XLSX.CellObject | undefined): string {
-  if (!cell || cell.v === undefined || cell.v === null) return ''
-  switch (cell.t) {
-    case 'n':
-      return zeroPaddedNumericText(cell) || String(cell.v)
-    case 'b':
-      return cell.v ? 'TRUE' : 'FALSE'
-    case 'd': {
-      const date = cell.v as Date
-      if (Number.isNaN(date.getTime())) return ''
-      // Excel date cells are calendar values, not UTC instants. Converting a
-      // local-midnight cell through toISOString() can shift it to the previous
-      // day on UTC+ timezones. Preserve the calendar fields exactly as SheetJS
-      // decoded them so an imported 09/01 remains 2026-09-01 everywhere.
-      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-    }
-    default:
-      // 's' (shared string) / 'str' (formula result string) -- exact
-      // Unicode text as parsed straight out of the XLSX XML. Khmer, or any
-      // other script, comes through untouched: there's no intermediate
-      // byte-encoding step for SheetJS to get wrong here the way a raw CSV
-      // byte stream can.
-      return String(cell.v)
+// The message in the UI language AppContext applies to <html lang>, read from
+// the same language pack the screens use. Callers show error.message as is.
+async function spreadsheetFailure(kind: SpreadsheetFailureKind): Promise<Error> {
+  const { key, english } = SPREADSHEET_FAILURES[kind]
+  let message: string = english
+  try {
+    const language = typeof document !== 'undefined' ? String(document.documentElement?.getAttribute('lang') || '').trim().toLowerCase() : ''
+    const pack = (language.startsWith('km') ? (await import('../lang/km.json')).default : (await import('../lang/en.json')).default) as Record<string, unknown>
+    const value = pack[key]
+    if (typeof value === 'string' && value.trim()) message = value
+  } catch {
+    // Keep the English.
   }
+  return Object.assign(new Error(message), { code: key })
 }
 
-export function workbookToDelimitedText(workbook: XLSX.WorkBook, sheetName?: string): string {
-  const targetSheetName = sheetName && workbook.Sheets[sheetName] ? sheetName : workbook.SheetNames[0]
-  const sheet = targetSheetName ? workbook.Sheets[targetSheetName] : undefined
-  if (!sheet || !sheet['!ref']) return ''
+function createSpreadsheetWorker(): SpreadsheetWorkerHandle {
+  return new Worker(new URL('./spreadsheetParse.worker.ts', import.meta.url), { type: 'module' })
+}
 
-  const range = XLSX.utils.decode_range(sheet['!ref'])
-  const lines: string[] = []
-  for (let row = range.s.r; row <= range.e.r; row += 1) {
-    const cells: string[] = []
-    let rowHasValue = false
-    for (let col = range.s.c; col <= range.e.c; col += 1) {
-      const cell = sheet[XLSX.utils.encode_cell({ r: row, c: col })]
-      const text = cellToText(cell)
-      if (text !== '') rowHasValue = true
-      // Machine quoting, not escapeCsvValue: this text goes straight into
-      // this app's own parsers, never Excel, and the injection guard's
-      // leading apostrophe would corrupt real cell values -- a numeric -5
-      // (negative adjustment) became the unparseable text '-5 (M7).
-      cells.push(csvFieldForMachine(text))
+// Copies the one field this module accepts out of a worker reply into a fresh
+// object. Nothing else the message carries (a __proto__ or constructor key, a
+// function, a nested object) is read, let alone copied.
+export function readSpreadsheetReply(raw: unknown, id: string): { content: string } | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
+  const own = (key: string): unknown => (Object.prototype.hasOwnProperty.call(raw, key) ? Reflect.get(raw, key) : undefined)
+  if (own('id') !== id || own('type') !== 'result') return null
+  const content = own('content')
+  return typeof content === 'string' ? { content } : null
+}
+
+export function parseSpreadsheetInWorker(bytes: ArrayBuffer, sheetName?: string, options: SpreadsheetParseOptions = {}): Promise<string> {
+  const { signal } = options
+  const byteLength = bytes.byteLength
+  const timeoutMs = options.timeoutMs ?? spreadsheetParseTimeoutMs(byteLength)
+  return new Promise<string>((resolve, reject) => {
+    const cancelled = () => new DOMException('The import was cancelled.', 'AbortError')
+    if (signal?.aborted) {
+      reject(cancelled())
+      return
     }
-    // Skip fully blank rows (matches parseDelimitedRows' own blank-row
-    // filtering in csvImport.ts, so behavior is identical either way a file
-    // arrives).
-    if (rowHasValue) lines.push(cells.join(','))
-  }
-  return lines.join('\n')
-}
+    if (byteLength > SPREADSHEET_MAX_BYTES) {
+      void spreadsheetFailure('tooLarge').then(reject)
+      return
+    }
+    let worker: SpreadsheetWorkerHandle
+    try {
+      worker = (options.createWorker ?? createSpreadsheetWorker)()
+    } catch {
+      void spreadsheetFailure('unavailable').then(reject)
+      return
+    }
+    const id = `spreadsheet-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    let finished = false
+    let timer: ReturnType<typeof setTimeout> | undefined
 
-export async function readWorkbook(file: File): Promise<XLSX.WorkBook> {
-  const buffer = await file.arrayBuffer()
-  // cellDates: true -- date-formatted cells come back as JS Date objects
-  // (cell.t === 'd') instead of raw Excel serial numbers, so cellToText
-  // can format them sensibly rather than emitting a meaningless integer.
-  return XLSX.read(buffer, { type: 'array', cellDates: true })
+    function finish(settle: () => void): void {
+      if (finished) return
+      finished = true
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      worker.terminate()
+      settle()
+    }
+    function fail(kind: SpreadsheetFailureKind): void {
+      finish(() => { void spreadsheetFailure(kind).then(reject) })
+    }
+    function onAbort(): void {
+      finish(() => reject(cancelled()))
+    }
+
+    worker.onmessage = (event: MessageEvent<unknown>) => {
+      const reply = readSpreadsheetReply(event.data, id)
+      if (reply) finish(() => resolve(reply.content))
+      else fail('unreadable')
+    }
+    worker.onmessageerror = () => fail('unreadable')
+    worker.onerror = () => fail('loadFailed')
+    signal?.addEventListener('abort', onAbort, { once: true })
+    timer = setTimeout(() => fail('timeout'), timeoutMs)
+    try {
+      worker.postMessage({ id, bytes, sheetName }, [bytes])
+    } catch {
+      fail('unavailable')
+    }
+  })
 }
 
 // Single entry point every import dialog/drop-zone should call. Detects
 // CSV/TSV vs. Excel by extension and returns the same { content, name }
 // shape either way -- callers (openCSVDialog, FileDropZone, and every
 // *ImportModal.tsx that consumes their result) don't need to change at all.
-export async function parseImportFile(file: File, sheetName?: string): Promise<ImportFileResult> {
-  const name = file.name || 'import'
-  if (isSpreadsheetFileName(name)) {
-    const workbook = await readWorkbook(file)
-    return { content: workbookToDelimitedText(workbook, sheetName), name }
+export async function parseImportFile(file: File, sheetName?: string, options?: SpreadsheetParseOptions): Promise<ImportFileResult> {
+  setImportFileReadsInFlight(importFileReadsInFlight + 1)
+  try {
+    const name = file.name || 'import'
+    if (isSpreadsheetFileName(name)) {
+      if (file.size > SPREADSHEET_MAX_BYTES) throw await spreadsheetFailure('tooLarge')
+      return { content: await parseSpreadsheetInWorker(await file.arrayBuffer(), sheetName, options), name }
+    }
+    const content = decodeTextBuffer(await file.arrayBuffer())
+    return { content, name }
+  } finally {
+    setImportFileReadsInFlight(importFileReadsInFlight - 1)
   }
-  const content = decodeTextBuffer(await file.arrayBuffer())
-  return { content, name }
 }

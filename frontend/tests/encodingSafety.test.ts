@@ -6,7 +6,7 @@
 //   - escapeCsvValue's Excel-injection guard ('-5, '+855...) is exactly
 //     inverted by parseCsvRows, so exporting and re-importing this app's
 //     own CSV is the identity for every value
-//   - the xlsx→delimited-text bridge (spreadsheetImport) uses MACHINE
+//   - the xlsx→delimited-text bridge (spreadsheetWorkbook) uses MACHINE
 //     quoting -- a numeric -5 cell reaches the analyzers as -5, never '-5
 //   - xlsxExport writes barcode-shaped columns as real Text cells and the
 //     whole xlsx round-trip (buildWorksheet → write → read → parse) is the
@@ -25,7 +25,7 @@ import * as XLSX from 'xlsx'
 import { UTF8_BOM, buildCSV, csvFieldForMachine, escapeCsvValue, normalizeZipFile } from '../src/utils/csv.ts'
 import { decodeTextBuffer, parseCsvRows } from '../src/utils/csvImport.ts'
 import { buildWorksheet } from '../src/utils/xlsxExport.ts'
-import { workbookToDelimitedText } from '../src/utils/spreadsheetImport.ts'
+import { workbookToDelimitedText } from '../src/utils/spreadsheetWorkbook.ts'
 import {
   BLOCKING_PRODUCT_IMPORT_ISSUES,
   getProductImportBarcodeIssue,

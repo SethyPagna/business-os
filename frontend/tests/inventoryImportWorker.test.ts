@@ -31,7 +31,7 @@ await runTest('inventory import modal analyzes rows in a worker with a sync fall
   assert.match(source, /INVENTORY_IMPORT_ROW_COUNT_TIMEOUT_MS = 5000/)
   assert.match(source, /catch \(_\) \{[\s\S]*nextCount = countCsvDataRows\(nextText\)/)
   assert.match(source, /rowCountRequestRef/, 'stale worker results should not overwrite newer inventory CSV text')
-  assert.match(source, /disabled=\{loading \|\| analyzingCsv \|\| !String\(csvText \|\| ''\)\.trim\(\)\}/)
+  assert.match(source, /disabled=\{loading \|\| analyzingCsv \|\| readingFile \|\| !String\(csvText \|\| ''\)\.trim\(\)\}/)
   assert.match(worker, /countCsvDataRows\(text\)/)
 })
 

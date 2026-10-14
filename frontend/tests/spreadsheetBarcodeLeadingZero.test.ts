@@ -6,7 +6,7 @@
 // A matcher can only find the zero if the catalog still HAS it. Barcodes
 // arrive through the xlsx/csv import, and Excel stores a zero-padded
 // barcode as a NUMBER with a display format: the cell is
-// { t:'n', v:748485110011, w:'0748485110011' }. utils/spreadsheetImport.ts
+// { t:'n', v:748485110011, w:'0748485110011' }. utils/spreadsheetWorkbook.ts
 // deliberately reads cell.v and never cell.w -- correct for the case that
 // rule was written for (.w renders large numbers as "8.80123E+12" while .v
 // keeps full precision), but it is exactly what silently drops the leading
@@ -25,7 +25,7 @@
 
 import assert from 'node:assert/strict'
 import * as XLSX from 'xlsx'
-import { workbookToDelimitedText } from '../src/utils/spreadsheetImport.ts'
+import { workbookToDelimitedText } from '../src/utils/spreadsheetWorkbook.ts'
 
 let passed = 0
 function check(name: string, fn: () => void) {

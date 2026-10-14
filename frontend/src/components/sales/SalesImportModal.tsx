@@ -10,6 +10,7 @@ import {
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { countCsvDataRows } from '../../utils/csvRowCounter.ts'
 import { parseImportFile } from '../../utils/spreadsheetImport.ts'
+import { useImportFileRead } from '../shared/useImportFileRead.ts'
 import CsvImportPreview from '../shared/CsvImportPreview.tsx'
 import ServerImportReviewScreen from '../imports/ServerImportReviewScreen.tsx'
 import { SALES_TEMPLATE_COLUMNS_TEXT } from '../../utils/salesImportContract.ts'
@@ -126,6 +127,7 @@ export default function SalesImportModal({ onClose, onDone }: ImportModalProps) 
   const importInFlightRef = useRef(false)
   const rowCountRequestRef = useRef(0)
   const aliveRef = useRef(true)
+  const { readingFile, read: readImportFile } = useImportFileRead()
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = (key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const value = typeof t === 'function' ? t(key) : null
@@ -167,21 +169,25 @@ export default function SalesImportModal({ onClose, onDone }: ImportModalProps) 
     void analyzeCsvText(nextText)
   }
 
-  const handlePickFile = async () => {
-    const picked = await getImportApi().openCSVDialog?.()
-    if (!picked?.content) return
-    setSalesCsvText(picked.content, picked.name || 'sales.csv')
+  const notifyReadFailed = (error: unknown): void => {
+    notify(getErrorMessage(error, tr('sales_import_drop_failed', 'Could not read that file.', 'មិនអាចអានឯកសារនោះបានទេ។')), 'error')
   }
 
-  const handleDropFile = async (file: File) => {
-    try {
-      const parsed = await parseImportFile(file)
-      if (!parsed?.content) return
-      setSalesCsvText(parsed.content, parsed.name || file.name || 'sales.csv')
-    } catch (error) {
-      notify(getErrorMessage(error, tr('sales_import_drop_failed', 'Could not read that file.', 'មិនអាចអានឯកសារនោះបានទេ។')), 'error')
-    }
-  }
+  const handlePickFile = () => readImportFile(
+    async () => getImportApi().openCSVDialog?.(),
+    (picked) => {
+      if (picked?.content) setSalesCsvText(picked.content, picked.name || 'sales.csv')
+    },
+    notifyReadFailed,
+  )
+
+  const handleDropFile = async (file: File) => readImportFile(
+    (signal) => parseImportFile(file, undefined, { signal }),
+    (parsed) => {
+      if (parsed?.content) setSalesCsvText(parsed.content, parsed.name || file.name || 'sales.csv')
+    },
+    notifyReadFailed,
+  )
 
   const handleDownloadTemplate = () => {
     getImportApi().downloadImportTemplate('sales')
@@ -286,6 +292,7 @@ export default function SalesImportModal({ onClose, onDone }: ImportModalProps) 
           csvText={csvText}
           rowCount={previewRowCount}
           analyzing={analyzingCsv}
+          loading={readingFile}
           onDownloadTemplate={handleDownloadTemplate}
           onPickFile={handlePickFile}
           onDropFile={handleDropFile}
@@ -331,8 +338,8 @@ export default function SalesImportModal({ onClose, onDone }: ImportModalProps) 
         ) : null}
         <div className="flex gap-2">
           <button type="button" className="btn-secondary flex-1" onClick={onClose} disabled={loading}>{t('close') || 'Close'}</button>
-          <button type="button" className="btn-primary flex-1" disabled={loading || analyzingCsv || !String(csvText || '').trim()} onClick={handleImport}>
-            {loading ? tr('importing', 'Importing...', 'កំពុងនាំចូល...') : tr('import_sales_button', 'Import sales', 'នាំចូលការលក់')}
+          <button type="button" className="btn-primary flex-1" disabled={loading || analyzingCsv || readingFile || !String(csvText || '').trim()} onClick={handleImport}>
+            {loading ? tr('importing', 'Importing...', 'កំពុងនាំចូល...') : readingFile ? tr('import_reading_file', 'Reading file...', 'កំពុងអានឯកសារ...') : tr('import_sales_button', 'Import sales', 'នាំចូលការលក់')}
           </button>
         </div>
       </div>}

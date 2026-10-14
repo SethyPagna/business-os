@@ -12,7 +12,7 @@ export type CsvDialogResult = {
 export const IMPORT_FILE_ACCEPT = '.csv,.tsv,.xlsx,.xls,.xlsm,text/csv,text/tab-separated-values,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel'
 
 export function openCSVDialog(): Promise<CsvDialogResult | null> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const input = document.createElement('input')
     input.type = 'file'
     input.accept = IMPORT_FILE_ACCEPT
@@ -23,7 +23,11 @@ export function openCSVDialog(): Promise<CsvDialogResult | null> {
         resolve(null)
         return
       }
-      resolve(await parseImportFile(file))
+      try {
+        resolve(await parseImportFile(file))
+      } catch (error) {
+        reject(error)
+      }
     }
     input.oncancel = () => resolve(null)
     input.click()

@@ -32,7 +32,7 @@ await runTest('sales import modal analyzes rows in a worker with a sync fallback
   assert.match(source, /SALES_IMPORT_ROW_COUNT_TIMEOUT_MS = 5000/)
   assert.match(source, /catch \(_\) \{[\s\S]*nextCount = countCsvDataRows\(nextText\)/)
   assert.match(source, /rowCountRequestRef/, 'stale worker results should not overwrite newer sales CSV text')
-  assert.match(source, /disabled=\{loading \|\| analyzingCsv \|\| !String\(csvText \|\| ''\)\.trim\(\)\}/)
+  assert.match(source, /disabled=\{loading \|\| analyzingCsv \|\| readingFile \|\| !String\(csvText \|\| ''\)\.trim\(\)\}/)
   assert.match(worker, /countCsvDataRows\(text\)/)
 })
 

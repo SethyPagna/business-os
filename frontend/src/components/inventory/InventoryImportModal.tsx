@@ -10,6 +10,7 @@ import {
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { countCsvDataRows } from '../../utils/csvRowCounter.ts'
 import { parseImportFile } from '../../utils/spreadsheetImport.ts'
+import { useImportFileRead } from '../shared/useImportFileRead.ts'
 import CsvImportPreview from '../shared/CsvImportPreview.tsx'
 import ServerImportReviewScreen from '../imports/ServerImportReviewScreen.tsx'
 
@@ -150,6 +151,7 @@ export default function InventoryImportModal({ onClose, onDone }: ImportModalPro
   const importInFlightRef = useRef(false)
   const rowCountRequestRef = useRef(0)
   const aliveRef = useRef(true)
+  const { readingFile, read: readImportFile, cancel: cancelFileRead } = useImportFileRead()
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = (key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const value = typeof t === 'function' ? t(key) : null
@@ -192,21 +194,25 @@ export default function InventoryImportModal({ onClose, onDone }: ImportModalPro
     void analyzeCsvText(nextText)
   }
 
-  const handlePickFile = async () => {
-    const picked = await getImportApi().openCSVDialog?.()
-    if (!picked?.content) return
-    setInventoryCsvText(picked.content, picked.name || 'inventory.csv')
+  const notifyReadFailed = (error: unknown): void => {
+    notify(getErrorMessage(error, tr('inventory_import_drop_failed', 'Could not read that file.', 'មិនអាចអានឯកសារនោះបានទេ។')), 'error')
   }
 
-  const handleDropFile = async (file: File) => {
-    try {
-      const parsed = await parseImportFile(file)
-      if (!parsed?.content) return
-      setInventoryCsvText(parsed.content, parsed.name || file.name || 'inventory.csv')
-    } catch (error) {
-      notify(getErrorMessage(error, tr('inventory_import_drop_failed', 'Could not read that file.', 'មិនអាចអានឯកសារនោះបានទេ។')), 'error')
-    }
-  }
+  const handlePickFile = () => readImportFile(
+    async () => getImportApi().openCSVDialog?.(),
+    (picked) => {
+      if (picked?.content) setInventoryCsvText(picked.content, picked.name || 'inventory.csv')
+    },
+    notifyReadFailed,
+  )
+
+  const handleDropFile = async (file: File) => readImportFile(
+    (signal) => parseImportFile(file, undefined, { signal }),
+    (parsed) => {
+      if (parsed?.content) setInventoryCsvText(parsed.content, parsed.name || file.name || 'inventory.csv')
+    },
+    notifyReadFailed,
+  )
 
   const handleDownloadTemplate = () => {
     const type = inventoryAction === 'add' ? 'inventoryAdd' : inventoryAction === 'remove' ? 'inventoryRemove' : 'inventorySet'
@@ -215,6 +221,7 @@ export default function InventoryImportModal({ onClose, onDone }: ImportModalPro
 
   const handleSelectAction = (nextAction: InventoryImportAction) => {
     if (nextAction === inventoryAction) return
+    cancelFileRead()
     setInventoryAction(nextAction)
     // Columns (and what a positive quantity means) differ per action --
     // a file picked for one action isn't valid input for another, so
@@ -327,7 +334,7 @@ export default function InventoryImportModal({ onClose, onDone }: ImportModalPro
                 type="button"
                 onClick={() => handleSelectAction(action)}
                 aria-pressed={isActive}
-                disabled={loading}
+                disabled={loading || readingFile}
                 className={`rounded-lg border px-3 py-2 text-left text-xs transition-colors ${isActive ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800'}`}
               >
                 <span className="block font-semibold">{labels[action].title}</span>
@@ -343,6 +350,7 @@ export default function InventoryImportModal({ onClose, onDone }: ImportModalPro
           csvText={csvText}
           rowCount={previewRowCount}
           analyzing={analyzingCsv}
+          loading={readingFile}
           onDownloadTemplate={handleDownloadTemplate}
           onPickFile={handlePickFile}
           onDropFile={handleDropFile}
@@ -367,8 +375,8 @@ export default function InventoryImportModal({ onClose, onDone }: ImportModalPro
         ) : null}
         <div className="flex gap-2">
           <button type="button" className="btn-secondary flex-1" onClick={onClose} disabled={loading}>{t('close') || 'Close'}</button>
-          <button type="button" className="btn-primary flex-1" disabled={loading || analyzingCsv || !String(csvText || '').trim()} onClick={handleImport}>
-            {loading ? tr('importing', 'Importing...', 'កំពុងនាំចូល...') : analyzingCsv ? tr('inventory_import_checking', 'Checking...', 'កំពុងពិនិត្យ...') : tr('import_inventory_button', 'Import inventory', 'នាំចូលស្តុក')}
+          <button type="button" className="btn-primary flex-1" disabled={loading || analyzingCsv || readingFile || !String(csvText || '').trim()} onClick={handleImport}>
+            {loading ? tr('importing', 'Importing...', 'កំពុងនាំចូល...') : readingFile ? tr('import_reading_file', 'Reading file...', 'កំពុងអានឯកសារ...') : analyzingCsv ? tr('inventory_import_checking', 'Checking...', 'កំពុងពិនិត្យ...') : tr('import_inventory_button', 'Import inventory', 'នាំចូលស្តុក')}
           </button>
         </div>
       </div>}
