@@ -223,7 +223,8 @@ new Function('require', 'module', 'exports', compiled)((name: string) => {
   if (name.includes('ShiftCountFields')) return { default: () => null, ShiftSubmitRow: SubmitMarker }
   if (name.includes('shiftReportModel')) return {
     shiftCountedPairText: () => '—',
-    shiftAdditionalCash: () => null,
+    // The real rule never answers null (owner, 13 Oct 2026, item 14: the additional row is always there, $0 included).
+    shiftAdditionalCash: () => ({ usd: 0, khr: 0 }),
     shiftExpectedWithTypedAdditional: () => ({ usd: null, khr: null }),
   }
   return { default: () => null }
@@ -277,6 +278,7 @@ try {
     if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'fragment' }
     if (name.includes('shared/Modal')) return { default: ModalMarker }
     if (name.includes('AppContext')) return { useApp: () => ({ t: (key: string) => key, user: { id: 4 } }) }
+    if (name.includes('permissions')) return { isAdminControlUser: () => false }
     if (name.includes('constants')) return { BUSINESS_TIME_ZONE: 'Asia/Phnom_Penh' }
     if (name.includes('formatters')) return { fmtDateOnly: String }
     // The popup's search pause; nothing here searches (shiftHistorySearch.test.ts does).

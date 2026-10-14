@@ -11,6 +11,8 @@ import SearchInput from '../shared/SearchInput.tsx'
 import { DateTimeEntryInput } from '../shared/DateEntryInput.tsx'
 import { SHIFT_BRANCH_CHANGED_EVENT, SHIFT_STATE_CHANGED_EVENT } from '../pos/ShiftGate.tsx'
 import ShiftSummary from './ShiftSummary.tsx'
+import { shiftCloseTimeRefusalText } from './shiftCloseTimeError.ts'
+import { isAdminControlUser } from '../../utils/permissions.ts'
 import ShiftCountPair, { ShiftSubmitRow, shiftCountBlockerKey } from './ShiftCountFields.tsx'
 import {
   amendShift,
@@ -196,6 +198,8 @@ export function AmendmentList({ rows, segments = [] }: { rows: ShiftAmendment[];
 export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PAGE_SIZE, layer = 'default', label, buttonClassName = 'btn-secondary min-h-11 text-xs', notify }: Props) {
   const app = useApp() as { user?: { id: number | string; username?: unknown; role_code?: unknown; permissions?: unknown; role_permissions?: unknown }; t: (key: string) => string; notify?: (message: string, tone?: string) => void }
   const { t } = app
+  // Owner, 14 Oct 2026: only an administrator chooses a past close time; an employee closes now.
+  const canPickCloseTime = () => isAdminControlUser(app.user)
   const sendNotice = notify || app.notify
   const listRequest = useRef(0)
   const detailsRequest = useRef(0)
@@ -396,7 +400,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
   const reportSaveError = (cause: unknown, fallbackKey: string) => {
     setPending((cause as { outcome?: string })?.outcome === 'unknown')
     if ((cause as { outcome?: string })?.outcome === 'unknown') return // shared banner owns the unresolved warning
-    const message = cause instanceof Error ? cause.message : t(fallbackKey)
+    const message = shiftCloseTimeRefusalText(cause, t) ?? (cause instanceof Error ? cause.message : t(fallbackKey))
     if ((cause as { outcome?: string })?.outcome !== 'unknown' && Number((cause as { status?: unknown } | null)?.status) === 409) setDetailsError(message)
     sendNotice?.(message, 'error')
   }
@@ -612,7 +616,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
                       <div><h3 className="text-sm font-semibold">{t('shift_close_title')}</h3><p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300">{t('shift_close_time_hint')}</p>
                         {selected.close_before ? <p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300"><span className="font-medium">{t('shift_previous_open_close_before')}</span> · {fmtDateTime24(selected.close_before)}</p> : null}</div>
                       <fieldset disabled={saving || pending} className="grid min-w-0 gap-3 sm:grid-cols-2 [&_input]:min-w-0 [&_input]:max-w-full">
-                        <div className="text-xs font-semibold sm:col-span-2"><span className="block">{t('shift_close_time_required')}</span><DateTimeEntryInput className="mt-1" value={close.closedAt} onChange={(next) => setClose({ ...close, closedAt: next })} t={t} dateAriaLabel={`${t('shift_close_time_required')} · ${t('date')}`} timeAriaLabel={`${t('shift_close_time_required')} · ${t('time')}`} /></div>
+                        <div className="text-xs font-semibold sm:col-span-2"><span className="block">{t('shift_close_time_required')}</span><DateTimeEntryInput className="mt-1" value={close.closedAt} disabled={!canPickCloseTime()} onChange={(next) => setClose({ ...close, closedAt: next })} t={t} dateAriaLabel={`${t('shift_close_time_required')} · ${t('date')}`} timeAriaLabel={`${t('shift_close_time_required')} · ${t('time')}`} />{canPickCloseTime() ? null : <span className="mt-1 block font-normal text-gray-600 dark:text-gray-300">{t('shift_close_time_admin_only')}</span>}</div>
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')} hint={t('shift_additional_cash_hint')} hintDetail={t('shift_additional_cash_example')} usd={close.additionalUsd} khr={close.additionalKhr} onUsd={(value) => setClose({ ...close, additionalUsd: value })} onKhr={(value) => setClose({ ...close, additionalKhr: value })} />
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')} hint={t('shift_registered_cash_hint')} usd={close.closingUsd} khr={close.closingKhr} onUsd={(value) => setClose({ ...close, closingUsd: value })} onKhr={(value) => setClose({ ...close, closingKhr: value })} />
                         <label className="text-xs sm:col-span-2">{t('shift_closing_note')}<input className="input mt-1" value={close.closingNote} onChange={(event) => setClose({ ...close, closingNote: event.target.value })} /></label>

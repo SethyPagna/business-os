@@ -17,8 +17,9 @@
 //      second amendment (lost acknowledgement, Retry button)
 //   5. two identical requests in flight at once    -> both 200, ONE commit
 //      (duplicate clicks / two tabs)
-//   6. a different pos-only account on the same shift -> 403 (permission
-//      model preserved; shop_wide close stays with owner or admin)
+//   6. a different pos-only account on the same shift -> 404 (per_account
+//      hides it; under shop_wide it is visible and the close stays
+//      403 for a non-owner -- test-shift-security-pure.cjs)
 //   7. a counted drawer far from expected           -> 200 (reconciliation is
 //      informational, never a gate)
 //   8. PATCH /:id with a closed_at seconds ahead    -> 200 clamped;
@@ -122,7 +123,7 @@ function scenario() {
     '../lib/permissions': loadReal('lib/permissions.ts'),
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
     '../lib/telegram': { sendTelegramShiftReport: async () => true },
-    '../lib/shiftReconciliation': { ...recon, loadShiftReconciliation: reconciliationFor },
+    '../lib/shiftReconciliation': { ...recon, loadShiftReconciliation: reconciliationFor, shiftLastActivityMs: async () => null },
   })
   const app = route.default || route
   const call = (method, url, body) => app.fetch(new Request(`http://test${url}`, {
@@ -235,7 +236,7 @@ async function main() {
     const shift = await open()
     actAs(otherCashier)
     const res = await call('POST', `/${shift.id}/close`, closeBody(shift))
-    assert.equal(res.status, 403)
+    assert.equal(res.status, 404, 'per_account hides the shift from another account, so it is not found')
     assert.equal(row(shift.id).closed_at, null)
     actAs(owner)
     const stale = await call('POST', `/${shift.id}/close`, closeBody(shift, { expected_revision: shift.revision + 5 }))

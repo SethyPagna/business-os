@@ -1,10 +1,10 @@
 const productStockGuard = require('./harness/product_stock_guard.cjs')
-// 13 Oct 2026, owner item 14 follow-up: "A status-change notification names who
-// did it." Amending a shift (PATCH /api/shifts/:id) re-sends the whole shift
-// report as a NEW message in the Shift topic. That message used to carry nothing
-// about the amendment: the chat could not tell a fresh close from a corrected
-// one, nor who corrected it. It now carries ONE row, `Amended by: <username>`,
-// in both languages, with the other who/which rows under the title.
+// Owner rule (13 Oct 2026, item 14 follow-up): "A status-change notification names
+// who did it." Amending a shift (PATCH /api/shifts/:id) re-sends the whole shift
+// report as a NEW message in the Shift topic, so that message carries ONE row,
+// `Amended by: <username>`, in both languages, with the other who/which rows under
+// the title: the chat can tell a fresh close from a corrected one, and who
+// corrected it.
 //
 // What this pins, on the composed text only (the Telegram API is a local
 // recorder installed before any module runs; nothing is sent anywhere):

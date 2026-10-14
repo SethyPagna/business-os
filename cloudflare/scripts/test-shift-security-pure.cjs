@@ -82,6 +82,7 @@ async function main() {
     // purpose: a reporting failure must never turn a committed close into a
     // 500 the cashier retries, and the assertions below prove it does not.
     '../lib/shiftReconciliation': {
+      shiftLastActivityMs: async () => null,
       loadShiftReconciliation: async () => { throw new Error('no sales tables in this fixture') },
     },
   })
@@ -127,25 +128,21 @@ async function main() {
   //
   // "shift should be aditable for employees ... like sales record for any
   // change, before and after." A cashier holding the plain POS permission may
-  // CORRECT any shift record, including one another cashier opened, exactly as
-  // they may edit a sale they did not ring up. What makes that safe is the
-  // record it leaves, so this asserts the record too: a before/after row whose
-  // actor is the caller, not the shift's owner, and an audit line to match.
+  // CORRECT any shift record it can REACH, exactly as they may edit a sale they
+  // did not ring up. What makes that safe is the record it leaves (asserted
+  // below, in the shop_wide section, where another cashier's shift IS
+  // reachable): a before/after row whose actor is the caller, plus an audit line.
+  //
+  // "Reach" is the O8 visibility rule. Under the default per_account policy
+  // another cashier's shift is not reachable, so the amend answers 404 exactly
+  // as GET /:id/history does above: a POS account must not rewrite a
+  // colleague's float and drawer.
   const foreignAmend = await call('PATCH', `/${foreignId}`, { expected_revision: 0, reason: 'Counted the float again', opening_float_usd: 6 })
-  assert.equal(foreignAmend.status, 200, 'a POS user can amend another cashier shift')
-  const foreignAmendBody = await foreignAmend.json()
-  assert.equal(foreignAmendBody.shift.opening_float_usd, 6, 'the amendment is applied')
-  assert.equal(foreignAmendBody.shift.amendment_count, 1, 'and the row reports itself as edited')
-  const foreignRecord = sqlite.prepare('SELECT actor_user_id, reason, before_json, after_json FROM shift_session_amendments WHERE shift_session_id=?').get(foreignId)
-  assert.equal(foreignRecord.actor_user_id, 7, 'the before/after record names the ACTOR, not the shift owner')
-  // Null, not 5: this fixture row was inserted without the registration
-  // flags (migration 0132), so the float had never been REGISTERED -- and the
-  // before half records exactly that rather than inventing the stored number.
-  assert.equal(JSON.parse(foreignRecord.before_json).opening_float_usd, null, 'the before half is the value that was there')
-  assert.equal(JSON.parse(foreignRecord.after_json).opening_float_usd, 6, 'the after half is the value that replaced it')
-  assert.equal(JSON.parse(foreignRecord.before_json).amendment_count, undefined, 'a derived count is never written into a snapshot')
-  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='shift.amend' AND user_id=7 AND entity_id=CAST(? AS TEXT)").get(foreignId).n, 1,
-    'and the amendment is audited under the acting account')
+  assert.equal(foreignAmend.status, 404, 'a POS user cannot amend a shift per_account hides from them')
+  assert.deepEqual(await foreignAmend.json(), { error: 'Shift not found.' }, 'and the body is the history route\'s, not a 403 that confirms the id exists')
+  assert.equal(sqlite.prepare('SELECT opening_float_usd, revision FROM shift_sessions WHERE id=?').get(foreignId).opening_float_usd, 5, 'the row is untouched')
+  assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM shift_session_amendments WHERE shift_session_id=?').get(foreignId).n, 0, 'no amendment was written')
+  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='shift.amend' AND entity_id=CAST(? AS TEXT)").get(foreignId).n, 0, 'and nothing was audited')
   // A shift filed under a branch that is no longer active is READ-ONLY (N7):
   // it stays visible as history, but an amendment is refused with the why
   // (branch inactive) rather than a 404 that pretends the record is gone.
@@ -188,9 +185,9 @@ async function main() {
     call('PATCH', `/${id}`, { expected_revision: openedBody.shift.revision, reason: 'race B', opening_float_usd: 12 }),
   ])
   assert.deepEqual([a.status, b.status].sort(), [200, 409], 'only one concurrent amendment reports success')
-  // Both counts are scoped to the raced shift: the foreign-amendment case
-  // above legitimately wrote one record and one audit line of its own, and a
-  // bare table count would mistake those for the loser's.
+  // Both counts are scoped to the raced shift: other shifts write amendment
+  // records and audit lines of their own, and a bare table count would mistake
+  // those for the loser's.
   assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM shift_session_amendments WHERE shift_session_id=?').get(id).n, 1, 'loser writes no false amendment')
   assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='shift.amend' AND entity_id=CAST(? AS TEXT)").get(id).n, 1,
     'only the winning amendment is audited')
@@ -200,8 +197,8 @@ async function main() {
   const ownAmendment = await call('PATCH', `/${id}`, { expected_revision: revisionAfterRace, reason: 'owner correction', opening_float_khr: 2500 })
   assert.equal(ownAmendment.status, 200, 'owner can amend own shift without Settings permission')
   assert.equal((await call('POST', `/${foreignId}/close`, { expected_revision: 0,
-    closed_at: new Date().toISOString(), closing_counted_usd: 1, closing_counted_khr: 1 })).status, 403,
-  'non-owner cannot close another cashier shift by id')
+    closed_at: new Date().toISOString(), closing_counted_usd: 1, closing_counted_khr: 1 })).status, 404,
+  'non-owner cannot close another cashier shift by id: per_account hides it, so it is not found')
   const historicBadRevision = await call('POST', `/${id}/close`, { expected_revision: 0,
     closed_at: new Date().toISOString(), closing_counted_usd: 20, closing_counted_khr: 3000 })
   assert.equal(historicBadRevision.status, 409, 'historic close requires the current revision')
@@ -256,6 +253,24 @@ async function main() {
   const shopCloseInput = { shift_id: shopShift.id, expected_revision: shopShift.revision, client_request_id: 'legacy-shop-close-0001', branch_id: 1, closing_counted_usd: 10, closing_counted_khr: 10000 }
   assert.equal((await call('POST', '/close', shopCloseInput)).status, 403,
     'shop-wide current close no longer lets another POS user close the opener shift')
+  // The Sep 14 ruling in action: the shift is the branch's, so another POS account reaches it and may amend it,
+  // and the amendment is the accountable record -- it names the ACTOR, not the shift's owner.
+  const wideAmend = await call('PATCH', `/${shopShift.id}`, { expected_revision: shopShift.revision, reason: 'Counted the float again', opening_float_usd: 6 })
+  assert.equal(wideAmend.status, 200, 'a POS user can amend a shift that shop_wide makes visible to them')
+  const wideAmendBody = await wideAmend.json()
+  assert.equal(wideAmendBody.shift.opening_float_usd, 6, 'the amendment is applied')
+  assert.equal(wideAmendBody.shift.amendment_count, 1, 'and the row reports itself as edited')
+  const wideRecord = sqlite.prepare('SELECT actor_user_id, reason, before_json, after_json FROM shift_session_amendments WHERE shift_session_id=?').get(shopShift.id)
+  assert.equal(wideRecord.actor_user_id, 7, 'the before/after record names the ACTOR, not the shift owner')
+  // Null, not 9: this fixture row was inserted without the registration
+  // flags (migration 0132), so the float had never been REGISTERED -- and the
+  // before half records exactly that rather than inventing the stored number.
+  assert.equal(JSON.parse(wideRecord.before_json).opening_float_usd, null, 'the before half is the value that was there')
+  assert.equal(JSON.parse(wideRecord.after_json).opening_float_usd, 6, 'the after half is the value that replaced it')
+  assert.equal(JSON.parse(wideRecord.before_json).amendment_count, undefined, 'a derived count is never written into a snapshot')
+  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='shift.amend' AND user_id=7 AND entity_id=CAST(? AS TEXT)").get(shopShift.id).n, 1,
+    'and the amendment is audited under the acting account')
+  shopCloseInput.expected_revision = wideAmendBody.shift.revision
   user = { id: 1, username: 'admin', role_code: 'admin' }
   const adminShopClose = await call('POST', '/close', shopCloseInput)
   assert.equal(adminShopClose.status, 200, 'admin override can close a shop-wide shift even when admin-exempt')

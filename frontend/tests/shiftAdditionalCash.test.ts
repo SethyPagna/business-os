@@ -15,11 +15,10 @@
 //   2. every surface listed it AFTER the closing count, which is not the order
 //      the drawer moves in or the order the cashier knows the figures;
 //   3. (owner, 13 Oct 2026, item 14: "shift cash lines everywhere") the row is
-//      ALWAYS there. It used to print only when some change was actually added,
-//      so a shift that never needed more showed Opening and Closing with the
-//      middle line missing -- the same gap the owner found in Telegram. None
-//      added is a fact, `$0.00 · 0៛`, on the on-screen report, the CSV, the
-//      print and the summary after a close.
+//      ALWAYS there, so a shift that never needed more change does not show
+//      Opening and Closing with the middle line missing. None added is a fact,
+//      `$0.00 · 0៛`, on the on-screen report, the CSV, the print and the summary
+//      after a close.
 //
 // Run: node tests/shiftAdditionalCash.test.ts
 import assert from 'node:assert/strict'
@@ -194,11 +193,9 @@ test('the owner\'s example and the report-only rule live behind the InfoHint, no
 // ---- one rule for "was there a top-up" ------------------------------------
 
 test('a shift with no top-up has an additional of zero everywhere, never a missing line', () => {
-  // ONE rule, shared. It used to answer NULL for "none", which each surface
-  // turned into "no row" -- and the POS strip once printed its own `?? 0`, so
-  // the till and the report disagreed. Since 13 Oct 2026 (owner, item 14) it
-  // answers the figure itself, zero when nothing was added, and every surface
-  // prints it.
+  // ONE rule, shared by every surface, so the till and the report cannot disagree
+  // (owner, 13 Oct 2026, item 14): it answers the figure itself, zero when nothing
+  // was added, and every surface prints it.
   assert.deepEqual(shiftAdditionalCash({ additional_cash_usd: 0, additional_cash_khr: 0 } as Shift), { usd: 0, khr: 0 })
   assert.deepEqual(shiftAdditionalCash({} as Shift), { usd: 0, khr: 0 }, 'a row that does not carry the field is none added')
   assert.deepEqual(shiftAdditionalCash({ additional_cash_usd: 0, additional_cash_khr: 5000 } as Shift), { usd: 0, khr: 5000 },

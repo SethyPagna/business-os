@@ -2,13 +2,11 @@
 // at close, ALWAYS all three (owner, 13 Oct 2026, item 14: the shift cash lines are
 // shown everywhere, always, $0 included).
 //
-// The summary used to leave the middle line out when nothing was added
-// (`!!closedAdditional && ...` over a shiftAdditionalCash that answered null for
-// "none"), so the cashier who had just ended a shift that never needed more change
-// read Opened with and Counted at close with a gap between them -- the same gap the
-// owner found in Telegram. This test RUNS the real EndShiftButton: it presses End,
-// presses End again to write the close, and reads the fact strip the summary renders
-// once the server's row comes back. Only the shell is stubbed (hooks, app context,
+// A summary that left the middle line out when nothing was added would show the
+// cashier who had just ended a shift that never needed more change Opened with and
+// Counted at close with a gap between them. This test RUNS the real EndShiftButton:
+// it presses End, presses End again to write the close, and reads the fact strip the
+// summary renders once the server's row comes back. Only the shell is stubbed (hooks, app context,
 // the modal frame, the form fields, the transport); the rule that decides the rows
 // (shiftReportModel.ts) and the component's own flow are the real code.
 //

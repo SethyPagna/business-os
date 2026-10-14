@@ -9,7 +9,7 @@ import { scheduleTelegramShiftOverview, sendTelegramShiftReport } from '../lib/t
 import { firstCharacters } from '../lib/telegramLang'
 import {
   loadShiftCloseDrift, loadShiftCloseFigures, loadShiftFigures, loadShiftReconciliation, parseShiftCloseFigures,
-  readShiftCloseInputsDigest, shiftCloseInputsDigestSql,
+  readShiftCloseInputsDigest, shiftCloseInputsDigestSql, shiftLastActivityMs, SHIFT_REVIEW,
   type ShiftCloseDrift, type ShiftCloseFigures, type ShiftCloseInputsDigest, type ShiftFigures, type ShiftReconciliation,
 } from '../lib/shiftReconciliation'
 import type { Env } from '../index'
@@ -41,15 +41,20 @@ app.use('*', async (c, next) => {
   if (typeof body.client_request_id !== 'string' || !/^[a-zA-Z0-9_-]{16,128}$/.test(body.client_request_id)) {
     return c.json({ error: 'Invalid shift request identity.' }, 400)
   }
+  // Cancel is administrator-only, refused before any row is read (as in the handler), so a missing
+  // id and a hidden one get the same answer.
+  if (action === 'cancel' && !canManageShifts(user)) return c.json({ error: 'Shift permission is required.' }, 403)
   const db = getDb(c.env); const target = await readShiftById(db, legacyClose ? Number(body.shift_id) : Number(match?.[1]))
   if (!target) return c.json({ error: 'Shift not found.' }, 404)
+  // Visibility comes before the replay lookup: a receipt this account earned while the shift was
+  // visible (shop_wide, since switched back) must not hand the row back. Cancel is skipped: only
+  // an administrator reaches it here, and an administrator sees every shift.
+  if (action !== 'cancel' && !canSeeShift(user, await readShiftPolicy(db), target)) return c.json({ error: 'Shift not found.' }, 404)
   // The same split the handlers enforce, applied before the replay lookup so
   // a caller who may not act cannot probe a receipt: amend follows
-  // canAmendShift (any shifts user), cancel is administrator-only, and the
-  // close/reopen transitions stay with the owner or an administrator.
-  const permitted = action === 'amend' ? canAmendShift(user, target)
-    : action === 'cancel' ? canManageShifts(user) && canMutateShift(user, target)
-      : canMutateShift(user, target)
+  // canAmendShift (any shifts user), and close, reopen and cancel stay with
+  // the owner or an administrator.
+  const permitted = action === 'amend' ? canAmendShift(user, target) : canMutateShift(user, target)
   if (!permitted) return c.json({ error: 'Shift permission is required.' }, 403)
   // No branch-activity check here: a committed receipt replays even after its
   // branch was retired, and each handler decides what an inactive branch
@@ -327,22 +332,47 @@ async function branchExists(db: D1Compat, branchId: number): Promise<boolean> {
 /**
  * ---- Device clocks are not the time authority ---------------------------
  *
- * The POS End Shift button used to stamp the closing moment with the phone's
- * own clock and the route refused anything even one second ahead of the
- * Worker's clock ("Closing time cannot be in the future."). A device running
- * a few seconds fast therefore could never end its shift from POS at all,
- * while the Shifts popup -- where the operator picks an earlier minute --
- * still worked. Production shift 20 (2026-09-21) was closed exactly that way.
- *
- * A requested time within the shared client-clock tolerance (lib/clientTimestamp,
- * the same window offline sale timestamps get) ahead of the server is what the client
- * meant by "now" and is clamped to the server's now; only a time further
- * ahead is a genuine future timestamp and is still refused. A missing
- * closed_at on the close route means "now" and is stamped server-side.
+ * A device clock a few seconds fast must not stop a shift from being ended, so
+ * a requested time up to CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS (lib/clientTimestamp)
+ * ahead of the server is what the client meant by "now" and is clamped to the
+ * server's now; only a time further ahead is a genuine future timestamp and is
+ * still refused. A missing closed_at on the close route means "now" and is
+ * stamped server-side. Who may choose an EARLIER time is closeTimeVerdict's rule.
  */
 function withinServerClock(requestedMs: number, now: number): number | null {
   if (!Number.isFinite(requestedMs) || requestedMs > now + CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS) return null
   return Math.min(requestedMs, now)
+}
+/**
+ * ---- Who may choose an earlier close time --------------------------------
+ *
+ * A shift's drawer is the sales, returns and expenses recorded between its
+ * opening and its closing (lib/shiftReconciliation), at second resolution and
+ * half open. A close at or before the second of one of those records leaves it
+ * in no shift's expected cash, so choosing such a time hides money. A cashier's
+ * close therefore may not fall at or before the drawer's latest record, nor more
+ * than the client-clock tolerance before the server's now (409 with a code the
+ * app translates, nothing written). An administrator may pick any time from the
+ * opening on; that close is stored with the review code `closed_at_earlier_time`
+ * and the Telegram report says it was closed at an earlier time by them.
+ *
+ * Owner, 14 Oct 2026: an employee closes now and never picks a past time, however
+ * old the shift is.
+ * `moveOnly` is the amend of an already closed shift: only moving the close
+ * EARLIER can hide a record, and there is no "now" to compare against.
+ */
+const CLOSE_TIME_REFUSALS = {
+  beforeActivity: { code: 'shift_close_before_last_activity', error: 'Close the shift after its last sale, return or expense. An earlier time is not allowed.' },
+  tooEarly: { code: 'shift_close_too_early', error: 'Close the shift now. A close time more than 5 minutes in the past needs an administrator.' },
+} as const
+type CloseTimeVerdict = { earlier: boolean; refusal: (typeof CLOSE_TIME_REFUSALS)[keyof typeof CLOSE_TIME_REFUSALS] | null }
+async function closeTimeVerdict(env: Env, user: SessionUser, shift: ShiftRow, closedAtMs: number, nowMs: number, moveOnly = false): Promise<CloseTimeVerdict> {
+  const last = await shiftLastActivityMs(env, shift, nowMs)
+  const beforeActivity = last != null && Math.floor(closedAtMs / 1000) <= Math.floor(last / 1000)
+  const tooEarly = !moveOnly && closedAtMs < nowMs - CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS
+  if (!beforeActivity && !tooEarly) return { earlier: false, refusal: null }
+  if (canManageShifts(user)) return { earlier: true, refusal: null }
+  return { earlier: true, refusal: beforeActivity ? CLOSE_TIME_REFUSALS.beforeActivity : CLOSE_TIME_REFUSALS.tooEarly }
 }
 function utcMs(value: string): number {
   const text = value.trim()
@@ -426,6 +456,13 @@ export function canManageShifts(user: SessionUser): boolean {
  * The clause is SQL, not a filter applied after the read, so a hidden row
  * never leaves D1; and a caller-supplied `user_id` narrows within it and can
  * never widen it.
+ *
+ * Every route that addresses ONE shift by id holds the same line: history,
+ * amend, close, live close and reopen answer 404 "Shift not found." for a shift
+ * canSeeShift refuses -- never 403, which would confirm the id exists -- and do
+ * so before the action's own permission or state checks. Cancel is
+ * administrator-only and refused before any row is read; an administrator sees
+ * every shift.
  */
 function shiftVisibility(user: SessionUser, policy: ShiftPolicy) {
   const reviewer = canManageShifts(user)
@@ -788,14 +825,14 @@ async function drawerFor(env: Env, user: SessionUser, shift: ShiftRow, options: 
  * close without stored figures reads exactly like a pre-0237 one ("computed").
  */
 type CloseFigures = { json: string; digest: ShiftCloseInputsDigest; digestValue: string }
-async function closeFiguresFor(env: Env, closing: ShiftRow): Promise<CloseFigures | null> {
+async function closeFiguresFor(env: Env, closing: ShiftRow, extraReviewCodes: readonly string[] = []): Promise<CloseFigures | null> {
   try {
     const nowMs = Date.now()
     // The digest FIRST: whatever moves after this read is caught at commit
     // (writeClose's inputs guard), including a write landing mid-computation.
     const digest = shiftCloseInputsDigestSql(closing, nowMs)
     const digestValue = await readShiftCloseInputsDigest(env, digest)
-    const figures = await loadShiftCloseFigures(env, closing, nowMs)
+    const figures = await loadShiftCloseFigures(env, closing, nowMs, { extraReviewCodes })
     if (!figures || typeof figures !== 'object' || !digestValue) return null
     const json = JSON.stringify(figures)
     // D1 rows stay well under its size limit: past ~512 KB keep the drawer and drop the fingerprint.
@@ -1193,14 +1230,15 @@ async function writeClose(db: D1Compat, user: SessionUser, row: ShiftDbRow, inpu
  */
 const CLOSE_FIGURE_ATTEMPTS = 3
 async function closeWithFigures(env: Env, db: D1Compat, user: SessionUser, row: ShiftDbRow, closing: ShiftRow,
-  input: Omit<Parameters<typeof writeClose>[3], 'figures'>) {
+  input: Omit<Parameters<typeof writeClose>[3], 'figures'> & { extraReviewCodes?: readonly string[] }) {
+  const { extraReviewCodes, ...closeInput } = input
   for (let attempt = 0; attempt < CLOSE_FIGURE_ATTEMPTS; attempt += 1) {
-    const figures = await closeFiguresFor(env, closing)
-    try { return await writeClose(db, user, row, { ...input, figures }) } catch (error) {
+    const figures = await closeFiguresFor(env, closing, extraReviewCodes)
+    try { return await writeClose(db, user, row, { ...closeInput, figures }) } catch (error) {
       if (!figures || !isCloseInputsChangedError(error)) throw error
     }
   }
-  return writeClose(db, user, row, { ...input, figures: null })
+  return writeClose(db, user, row, { ...closeInput, figures: null })
 }
 
 /**
@@ -1232,6 +1270,7 @@ app.post('/close', async (c) => {
   if (branchId != null && !(await branchExists(db, branchId))) return c.json({ error: 'Branch not found.' }, 400)
   const shift = await readShiftById(db, Number(body.shift_id))
   if (!shift) return c.json({ error: 'Shift not found.' }, 404)
+  if (!canSeeShift(user, await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
   if (body.branch_id != null && shift.branch_id !== branchId) return c.json({ error: 'Shift branch does not match the requested branch.' }, 400)
   if (shift.cancelled_at) return c.json({ error: 'This shift was cancelled. Register a replacement opening first.' }, 409)
   if (!canMutateShift(user, shift)) return c.json({ error: 'Only the shift owner or an administrator can close this shift.' }, 403)
@@ -1242,6 +1281,8 @@ app.post('/close', async (c) => {
   const additionalUsd = additionalMoney(body.additional_cash_usd); const additionalKhr = additionalMoney(body.additional_cash_khr)
   if (!additionalUsd.ok || !additionalKhr.ok) return c.json({ error: 'Additional change used must be 0 or more, or left blank.' }, 400)
   const closedAt = new Date().toISOString()
+  const timing = await closeTimeVerdict(c.env, user, shift, Date.parse(closedAt), Date.parse(closedAt))
+  if (timing.refusal) return c.json(timing.refusal, 409)
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
   if (overlap) return c.json({ error: overlap }, 409)
   const closing = { ...storedShift(shift), closed_at: closedAt,
@@ -1250,9 +1291,12 @@ app.post('/close', async (c) => {
   const result = await closeWithFigures(c.env, db, user, shift, closing, { closedAt, recordedAt: closedAt,
     countedUsd: countedUsd.value, countedKhr: countedKhr.value,
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
-    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Manual shift close', request: mutationRequest(body, shift.id) })
+    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Manual shift close', request: mutationRequest(body, shift.id),
+    extraReviewCodes: timing.earlier ? [SHIFT_REVIEW.earlierClose] : [] })
   if (result.changed) {
-    const report = sendTelegramShiftReport(c.env, shift.id)
+    // The report names the closer when it is not the cashier (an administrator closing a till):
+    // the stored closer's name and account id, which the close just wrote.
+    const report = sendTelegramShiftReport(c.env, shift.id, Date.now(), { closedBy: result.shift?.closed_by_user_name ?? displayName(user), closedById: result.shift?.closed_by_user_id ?? user.id, ...(timing.earlier ? { closedEarlier: true } : {}) })
     try { c.executionCtx.waitUntil(report) } catch { void report }
     scheduleOverviewAfterClose(c, shift.id)
     return c.json({ shift: result.shift ? await reconciledShift(c.env, user, result.shift) : null, already_closed: false, is_open: false }, 200)
@@ -1280,12 +1324,15 @@ app.post('/:id/close', async (c) => {
   if (!additionalUsd.ok || !additionalKhr.ok) return c.json({ error: 'Additional change used must be 0 or more, or left blank.' }, 400)
   const db = getDb(c.env); const shift = await readShiftById(db, id)
   if (!shift) return c.json({ error: 'Shift not found.' }, 404)
+  if (!canSeeShift(user, await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
   // No branch-activity check: closing is allowed on a retired branch (N7).
   if (!canMutateShift(user, shift)) return c.json({ error: 'Only the shift owner or an administrator can close this shift.' }, 403)
   if (shift.cancelled_at) return c.json({ error: 'A cancelled shift cannot be closed.' }, 409)
   if (shift.closed_at) return c.json({ error: 'Shift is already closed.' }, 409)
   if (expectedRevision !== shift.revision) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   if (closedAtMs < utcMs(shift.opened_at)) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
+  const timing = await closeTimeVerdict(c.env, user, shift, closedAtMs, now)
+  if (timing.refusal) return c.json(timing.refusal, 409)
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
   if (overlap) return c.json({ error: overlap }, 409)
   const closing = { ...storedShift(shift), closed_at: closedAt,
@@ -1294,9 +1341,10 @@ app.post('/:id/close', async (c) => {
   const result = await closeWithFigures(c.env, db, user, shift, closing, { closedAt, recordedAt: new Date().toISOString(),
     countedUsd: countedUsd.value, countedKhr: countedKhr.value,
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
-    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Historic manual close', request: mutationRequest(body, id) })
+    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Historic manual close', request: mutationRequest(body, id),
+    extraReviewCodes: timing.earlier ? [SHIFT_REVIEW.earlierClose] : [] })
   if (!result.changed || !result.shift) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
-  const report = sendTelegramShiftReport(c.env, shift.id)
+  const report = sendTelegramShiftReport(c.env, shift.id, Date.now(), { closedBy: result.shift.closed_by_user_name ?? displayName(user), closedById: result.shift.closed_by_user_id ?? user.id, ...(timing.earlier ? { closedEarlier: true } : {}) })
   try { c.executionCtx.waitUntil(report) } catch { void report }
   scheduleOverviewAfterClose(c, shift.id)
   return c.json({ shift: await reconciledShift(c.env, user, result.shift), already_closed: false, is_open: false }, 200)
@@ -1354,6 +1402,7 @@ app.post('/:id/reopen', async (c) => {
   const floatUsd = floatUsdParsed.value; const floatKhr = floatKhrParsed.value
   const db = getDb(c.env); const parent = await readShiftById(db, id)
   if (!parent) return c.json({ error: 'Shift not found.' }, 404)
+  if (!canSeeShift(user, await readShiftPolicy(db), parent)) return c.json({ error: 'Shift not found.' }, 404)
   if (!canMutateShift(user, parent)) return c.json({ error: 'Only the shift owner or an administrator can reopen this shift.' }, 403)
   // A reopen opens a new drawer segment on the parent's branch -- the same
   // thing POST /open refuses on a retired branch.
@@ -1370,7 +1419,10 @@ app.post('/:id/reopen', async (c) => {
     afterCancellation: false, auditAction: 'shift.reopen', request: mutationRequest(body, id) })
   if (!continuation.changed || !continuation.shift) return c.json({ error: 'This shift segment was already reopened or changed concurrently.' }, 409)
   const reopened = continuation.shift
-  const report = sendTelegramShiftReport(c.env, reopened.id)
+  // A reopen is posted under the original cashier's name, so it names who reopened it: the
+  // stored reopened_by_user_name (what writeContinuation just wrote). The open push that
+  // replaces a CANCELLED shift goes through a different route and says nothing of the kind.
+  const report = sendTelegramShiftReport(c.env, reopened.id, Date.now(), { reopenedBy: reopened.reopened_by_user_name ?? displayName(user) })
   try { c.executionCtx.waitUntil(report) } catch { void report }
   return c.json({ shift: await presentShift(db, user, reopened), reopened_from_shift_id: parent.id }, 201)
 })
@@ -1386,6 +1438,9 @@ app.patch('/:id', async (c) => {
   if (!reason) return c.json({ error: 'A reason is required.' }, 400)
   const db = getDb(c.env); const before = await readShiftById(db, id)
   if (!before) return c.json({ error: 'Shift not found.' }, 404)
+  // Amending is open to any POS account (14 Sep ruling) but only over a record it can see; a
+  // shift it cannot see answers as if absent, before its state is revealed by the checks below.
+  if (!canSeeShift(user, await readShiftPolicy(db), before)) return c.json({ error: 'Shift not found.' }, 404)
   if (before.cancelled_at) return c.json({ error: 'A cancelled shift cannot be amended.' }, 409)
   if (!canAmendShift(user, before)) return c.json({ error: 'Shift permission is required to amend this shift.' }, 403)
   // A record on a retired branch is read-only (N7): amending it would rewrite
@@ -1412,6 +1467,10 @@ app.patch('/:id', async (c) => {
   if (before.closed_at && !closedAt) return c.json({ error: 'Closed shifts cannot be reopened.' }, 400)
   if (!before.closed_at && closedAt) return c.json({ error: 'Open shifts must be closed through the close action.' }, 400)
   if (closedAt && utcMs(closedAt) < utcMs(openedAt)) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
+  if (before.closed_at && closedAt && utcMs(closedAt) < utcMs(before.closed_at)) {
+    const timing = await closeTimeVerdict(c.env, user, before, utcMs(closedAt), now, true)
+    if (timing.refusal) return c.json(timing.refusal, 409)
+  }
   const openingUsdParsed = 'opening_float_usd' in body
     ? countedMoney(body.opening_float_usd) : { ok: true as const, value: before.opening_float_usd }
   const openingKhrParsed = 'opening_float_khr' in body

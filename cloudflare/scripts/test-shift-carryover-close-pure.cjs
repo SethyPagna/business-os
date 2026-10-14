@@ -118,6 +118,7 @@ function harness(sqlite) {
   // surface which attaches them shows up as a present key. The carry-over
   // banner must never carry one (see figuresFor's comment in the route).
   const shiftReconciliation = {
+    shiftLastActivityMs: async () => null, SHIFT_REVIEW: { earlierClose: 'closed_at_earlier_time' },
     loadShiftReconciliation: async () => ({ marker: 'reconciliation-was-computed' }),
     loadShiftFigures: async () => ({ marker: 'figures-were-computed' }),
   }
@@ -409,7 +410,7 @@ async function main() {
   const otherClose = await scope.json('POST', `/${scopeCarry.id}/close`, {
     expected_revision: scopeCarry.revision, closed_at: new Date().toISOString(),
   })
-  assert.equal(otherClose.status, 403, 'another cashier cannot close it either')
+  assert.equal(otherClose.status, 404, 'another cashier cannot close it either: a shift they cannot see answers 404, like the detail route')
   // DISCRIMINATING POSITIVE CONTROL: the owner, on the same database, sees
   // and closes it -- so the two nulls above are scope, not a dead query.
   scope.as(CASHIER)
@@ -564,10 +565,14 @@ async function main() {
 
   // Close the offered (older) day AT THE BOUND THE SERVER SAID minus a
   // minute; the offer then moves to the nearer day.
-  const closeOlder = await order.json('POST', `/${olderDay.id}/close`, {
-    expected_revision: olderDay.revision,
-    closed_at: new Date(Date.parse(firstOffer.body.previous_open_close_before) - 60_000).toISOString(),
-  })
+  // Only an administrator picks a past close time; the shift's own cashier closes now.
+  const olderClose = { expected_revision: olderDay.revision, closed_at: new Date(Date.parse(firstOffer.body.previous_open_close_before) - 60_000).toISOString() }
+  const cashierGuess = await order.json('POST', `/${olderDay.id}/close`, olderClose)
+  assert.equal(cashierGuess.body.code, 'shift_close_too_early', 'the cashier cannot pick the stated bound')
+  const cashierNow = order.state.user
+  order.as(ADMIN)
+  const closeOlder = await order.json('POST', `/${olderDay.id}/close`, olderClose)
+  order.as(cashierNow)
   assert.equal(closeOlder.status, 200, `closing the offered older day at its own bound succeeds: ${JSON.stringify(closeOlder.body)}`)
   const secondOffer = await order.json('GET', '/current?branch_id=1')
   assert.equal(secondOffer.body.previous_open_shift.id, newerDay.id,

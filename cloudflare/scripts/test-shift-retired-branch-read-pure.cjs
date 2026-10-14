@@ -78,7 +78,7 @@ async function scenario({ retired, mutate }) {
     '../lib/audit': { audit: async () => { throw new Error('shift writes must use the atomic audit batch') } },
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
     '../lib/telegram': { sendTelegramShiftReport: async () => true },
-    '../lib/shiftReconciliation': { loadShiftReconciliation: async () => { throw new Error('no sales tables in this fixture') } },
+    '../lib/shiftReconciliation': { loadShiftReconciliation: async () => { throw new Error('no sales tables in this fixture') }, shiftLastActivityMs: async () => null },
   }, mutate)
   const app = route.default || route
   const call = (method, url, body, headers = {}) => app.fetch(new Request(`http://test${url}`, {
