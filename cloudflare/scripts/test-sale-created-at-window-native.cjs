@@ -287,6 +287,30 @@ async function main() {
       assert.deepEqual(afterLoop, beforeLoop, 'no sale, line, stock movement or stock change')
     })
 
+    const beforeShapes = await counts()
+    const refusalsBeforeShapes = await refusalTotal()
+    const badIds = [{ toString: null }, { a: 1 }, ['a', 'b'], [], 12345, true, false]
+    const shapeResults = []
+    for (const [index, value] of badIds.entries()) {
+      shapeResults.push(await H.createSale(asEmployee, { key: 'ignored-shape-' + index, createdAt: stalePast, lines: [{ productId: 12, quantity: 1 }],
+        paymentDetails: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }], extra: { offline_owner: owner, client_request_id: value }, label: 'non-string client_request_id ' + JSON.stringify(value) }))
+    }
+    const afterShapes = await counts()
+    const refusalsAfterShapes = await refusalTotal()
+    r.check(`N2: a client_request_id that is not text (object, {"toString":null}, array, number, boolean) is a 400 with a code, never a 500, and writes nothing (statuses ${shapeResults.map(result => result.status).join(',')})`, () => {
+      shapeResults.forEach((result, index) => {
+        assert.equal(result.status, 400, `${JSON.stringify(badIds[index])}: ${JSON.stringify(result.body).slice(0, 200)}`)
+        assert.equal(result.body.code, 'invalid_client_request_id')
+      })
+      assert.deepEqual(afterShapes, beforeShapes)
+      assert.equal(refusalsAfterShapes, refusalsBeforeShapes, 'a malformed identity is not a refused stale sale')
+    })
+    const nullId = await H.createSale(asEmployee, { key: 'ignored-null-id', lines: [{ productId: 12, quantity: 1 }],
+      paymentDetails: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }], extra: { offline_owner: owner, client_request_id: null }, label: 'null client_request_id' })
+    r.check(`N2 control: a null client_request_id is still a normal sale (got ${nullId.status})`, () => {
+      assert.equal(nullId.status, 200, JSON.stringify(nullId.body).slice(0, 200))
+    })
+
     const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
     const shiftWindow = id => h.one('SELECT id, opened_at, closed_at, revision FROM shift_sessions WHERE id=?', id)
     const shiftFigures = async id => {

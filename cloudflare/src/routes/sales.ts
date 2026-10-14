@@ -344,7 +344,7 @@ type NormalizedItem = Omit<SaleItemInput, 'branch_id'> & { product_id: number; q
 // duplicate sale. Reproduced inline rather than shared, matching returns.ts's
 // own reasoning for keeping this as a two-line normalizer per file.
 function normalizeClientRequestId(value: unknown): string | null {
-  const normalized = String(value ?? '').trim()
+  const normalized = typeof value === 'string' || typeof value === 'number' ? String(value).trim() : ''
   if (!normalized) return null
   return normalized.length > 120 ? normalized.slice(0, 120) : normalized
 }
@@ -539,7 +539,7 @@ app.post('/', async (c) => {
     change_khr?: number | string
     change_is_actual?: boolean
     receipt_number?: string
-    client_request_id?: string
+    client_request_id?: unknown
     sale_status?: string
     // Membership/loyalty -- see MIGRATION.md POS section: these were being
     // computed and shown to the cashier by POS.tsx (checked out against the
@@ -566,6 +566,10 @@ app.post('/', async (c) => {
     delivery_actual_cost_usd?: number | string | null
     delivery_actual_cost_khr?: number | string | null
   }>()
+
+  if (body.client_request_id != null && typeof body.client_request_id !== 'string') {
+    return c.json({ error: 'client_request_id must be text.', code: 'invalid_client_request_id' }, 400)
+  }
 
   // Every create requires the captured owner, including online requests and
   // legacy retries without created_at. A fresh preflight cannot close a cookie
