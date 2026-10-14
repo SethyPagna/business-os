@@ -184,7 +184,7 @@ sqlite.prepare('DELETE FROM sales WHERE id = ?').run(future.lastInsertRowid)
 assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM sales WHERE id = ?').get(future.lastInsertRowid).n, 0, 'compensation may delete the whole sale')
 
 for (const [file, origin] of [
-  ['routes/sales.ts', /origin:\s*clientCreatedAt\s*\?\s*'offline_replay'\s*:\s*'pos'/],
+  ['routes/sales.ts', /origin:\s*'pos'/],
   ['routes/returns.ts', /origin:\s*'return_replacement'/],
   ['lib/salesImportCommit.ts', /origin:\s*'sales_import'/],
   ['lib/stockActionCommit.ts', /origin:\s*'stock_action_import'/],

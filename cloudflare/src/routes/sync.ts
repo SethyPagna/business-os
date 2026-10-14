@@ -181,7 +181,7 @@ async function replayOperation(
 
   const body = await response.json().catch(() => ({} as Record<string, unknown>)) as Record<string, unknown>
   if (response.status === 409) {
-    if (body.code === 'offline_owner_required' || body.code === 'offline_owner_mismatch') {
+    if (body.code === 'offline_owner_required' || body.code === 'offline_owner_mismatch' || body.code === 'sale_created_at_too_old') {
       return { status: 'rejected', code: body.code, error: String(body.error || 'Keep the pending sale for ownership review.') }
     }
     return { status: 'conflict', code: 'write_conflict', error: String(body?.error || 'Server data changed.') }

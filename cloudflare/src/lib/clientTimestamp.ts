@@ -1,32 +1,53 @@
-// Bounded trust for a client-supplied sale timestamp (offline replays).
+// A client-supplied sale time is never stored.
 //
-// Offline POS sales already mint their receipt id at QUEUE time from the
-// device clock (the sale's own moment -- frontend/src/api/saleWriteTransport
-// stamps payload.created_at the same way). Without this, the server wrote
-// CURRENT_TIMESTAMP at SYNC time, so a sale made at 23:50 that synced at
-// 00:10 landed on the wrong day in every date-ranged report (the Part-77
-// "offline sale timestamps" finding). Online checkouts send no created_at
-// and keep the server clock.
+// Offline selling was cancelled (26 Sep 2026) and no queued sale exists, so
+// POST /api/sales has no legitimate source of a back- or forward-dated sale.
+// Every sale is stamped with the server clock. The claim is still read so the
+// route can tell a stale client and keep an audit trail:
+//   - a claim older than SALE_CREATED_AT_MAX_PAST_MS is flagged tooOld and the
+//     caller refuses the sale (409): the device keeps its copy and nothing is
+//     booked into today's drawer;
+//   - any other claim is flagged adjusted and recorded, with what was claimed,
+//     on the creation audit row; the sale takes the server time. A claim that
+//     does not parse is adjusted with nothing to echo.
 //
-// Trust is bounded the same way client receipt numbers already are (an
-// authenticated cashier's device): the value must parse, and may not be in
-// the future beyond small device-clock skew -- anything else falls back to
-// the server clock (return null), never an error. No lower bound: a device
-// legitimately offline for days still owns its sale moment.
-//
-// The output is normalized to SQLite's CURRENT_TIMESTAMP shape
-// ("YYYY-MM-DD HH:MM:SS", UTC) -- NOT ISO-with-T: sales queries ORDER BY
-// created_at lexicographically, and at position 10 "T" sorts after " ", so
-// a mixed format would pin every ISO row after all same-day rows.
+// A claim without a zone ("2026-10-13 17:03:15") is read as UTC, the shape the
+// server itself stores, so the result does not depend on the host's time zone.
+// The claim is echoed in SQLite's CURRENT_TIMESTAMP shape ("YYYY-MM-DD HH:MM:SS",
+// UTC).
 
+// Shift close (routes/shifts.ts) clamps a slightly-ahead closed_at with this
+// tolerance.
 export const CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000
 
-export function sanitizeClientCreatedAt(raw: unknown, nowMs: number = Date.now()): string | null {
-  if (typeof raw !== 'string') return null
-  const value = raw.trim()
-  if (!value) return null
-  const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) return null
-  if (parsed.getTime() > nowMs + CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS) return null
-  return parsed.toISOString().slice(0, 19).replace('T', ' ')
+export const SALE_CREATED_AT_MAX_PAST_MS = 10 * 60 * 1000
+
+export type ClientCreatedAtResolution = {
+  adjusted: boolean
+  claimed: string | null
+  tooOld: boolean
+}
+
+type ResolveOptions = { nowMs?: number }
+
+const ZONELESS_DATE_TIME = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/
+
+function parseClaimMs(text: string): number {
+  return new Date(ZONELESS_DATE_TIME.test(text) ? `${text.replace(' ', 'T')}Z` : text).getTime()
+}
+
+function storedShape(ms: number): string | null {
+  const date = new Date(ms)
+  const year = date.getUTCFullYear()
+  if (year < 1000 || year > 9999) return null
+  return date.toISOString().slice(0, 19).replace('T', ' ')
+}
+
+export function resolveClientCreatedAt(raw: unknown, options: ResolveOptions = {}): ClientCreatedAtResolution {
+  const nowMs = options.nowMs ?? Date.now()
+  const text = typeof raw === 'string' ? raw.trim() : raw
+  if (text === undefined || text === null || text === '') return { adjusted: false, claimed: null, tooOld: false }
+  const parsedMs = typeof text === 'string' ? parseClaimMs(text) : Number.NaN
+  if (Number.isNaN(parsedMs)) return { adjusted: true, claimed: null, tooOld: false }
+  return { adjusted: true, claimed: storedShape(parsedMs), tooOld: parsedMs < nowMs - SALE_CREATED_AT_MAX_PAST_MS }
 }

@@ -99,5 +99,79 @@ await runTest('a non-applied outbox result keeps the sale queued (thrown -> mark
   assert.doesNotMatch(markBody, /deleteQueueRow/)
 })
 
+// A 'rejected' outbox result (the server refused the operation for good, for
+// example sale_created_at_too_old) must quarantine the row -- failed, carrying
+// the server's code, retry_at null -- and never reach markQueueFailure, whose
+// backoff would resend it forever. Drives the real replayQueuedSale and
+// isReplayEligible source with stubbed storage and network.
+const replayFunction = swSource.match(/async function replayQueuedSale[\s\S]*?\n\}/)?.[0] || ''
+const eligibleFunction = swSource.match(/function isReplayEligible[\s\S]*?\n\}/)?.[0] || ''
+const stubOwner = { authority: 'https://app.test', actor_id: 7 }
+
+async function replayAgainst(results: unknown[], httpStatus = 200) {
+  const seen = { updates: [] as Record<string, unknown>[], deleted: 0, failures: 0 }
+  const factory = new Function(
+    'normalizeOfflineSaleOwner', 'saleReplayAuthorityUnchanged', 'currentSaleReplayOwner', 'offlineSaleOwnersMatch',
+    'putQueueRow', 'sha256', 'fetch', 'deleteQueueRow', 'broadcastSyncEvent', 'markQueueFailure', 'OFFLINE_OWNER_REVIEW_MESSAGE',
+    `${replayFunction}\nreturn replayQueuedSale`,
+  )
+  const replay = factory(
+    () => stubOwner, async () => true, async () => stubOwner, () => true,
+    async (_db: unknown, row: Record<string, unknown>, updates: Record<string, unknown>) => { seen.updates.push(updates); return { ...row, ...updates } },
+    async () => 'digest',
+    async () => ({ ok: httpStatus < 400, status: httpStatus, text: async () => JSON.stringify({ success: false, results }) }),
+    async () => { seen.deleted += 1; return true }, () => {}, async () => { seen.failures += 1 }, 'owner review',
+  )
+  const row = { _seq: 1, id: 'row-1', client_request_id: 'req-1', payload: { offline_owner: stubOwner }, status: 'pending' }
+  const returned = await replay({}, row, 'https://app.test')
+  return { returned, seen, final: seen.updates.reduce((merged, update) => ({ ...merged, ...update }), { ...row }) }
+}
+const eligible = (row: Record<string, unknown>): boolean => new Function('SYNC_LEASE_MS', `${eligibleFunction}\nreturn isReplayEligible`)(60_000)(row)
+
+await runTest('a rejected outbox result quarantines the queued sale: failed with the server code, no retry, never deleted', async () => {
+  assert.ok(replayFunction && eligibleFunction, 'both functions must exist')
+  const refusal = { client_request_id: 'req-1', operation_id: 'sales.create', status: 'rejected', code: 'sale_created_at_too_old', error: 'Nothing was recorded.' }
+  const { returned, seen, final } = await replayAgainst([refusal])
+  assert.equal(returned, false)
+  assert.equal(seen.failures, 0, 'a rejected result must not go through markQueueFailure and its retry backoff')
+  assert.equal(seen.deleted, 0, 'a rejected sale is kept, never deleted as synced')
+  assert.equal(final.status, 'failed')
+  assert.equal(final.retry_at, null)
+  assert.equal(final.retryable, false)
+  assert.equal(final.reason, 'sale_created_at_too_old')
+  assert.equal(final.error, 'Nothing was recorded.')
+  assert.equal(eligible(final), false, 'a quarantined row is not replay-eligible again')
+})
+
+await runTest('a rejected result without a code is still quarantined, and a transient failure still retries with backoff (controls)', async () => {
+  const bare = await replayAgainst([{ client_request_id: 'req-1', operation_id: 'sales.create', status: 'rejected' }])
+  assert.equal(bare.seen.failures, 0)
+  assert.equal(bare.final.status, 'failed')
+  assert.equal(bare.final.retry_at, null)
+  assert.equal(bare.final.reason, 'rejected')
+  assert.equal(eligible(bare.final), false)
+
+  const transient = await replayAgainst([{ client_request_id: 'req-1', operation_id: 'sales.create', status: 'failed', code: 'transient_replay_error', error: 'network' }])
+  assert.equal(transient.seen.failures, 1, 'a transient failure still reaches markQueueFailure')
+  assert.equal(transient.seen.deleted, 0)
+
+  assert.equal(eligible({ status: 'failed', retry_at: null }), true, 'a plain failed row without the quarantine flag stays eligible')
+  assert.equal(eligible({ status: 'failed', retry_at: null, retryable: false }), false)
+})
+
+await runTest('the generic outbox loop quarantines a rejected result too', () => {
+  const generic = swSource.match(/async function syncOutbox\(\)[\s\S]*?\n\}/)?.[0] || ''
+  const rejectedAt = generic.indexOf("result?.status === 'rejected'")
+  const retryAt = generic.indexOf('...nextRetryAt(row)')
+  assert.ok(rejectedAt > 0 && retryAt > rejectedAt, 'the rejected branch must come before the retry-with-backoff branch')
+  const branch = generic.slice(rejectedAt, retryAt)
+  assert.match(branch, /status: 'failed'/)
+  assert.match(branch, /retry_at: null/)
+  assert.match(branch, /retryable: false/)
+  assert.match(branch, /reason: String\(result\.code \|\| 'rejected'\)/)
+  assert.match(builtSw, /result\?\.status === 'rejected'/, 'the generated sw.js carries the same branch')
+  assert.match(builtSw, /if \(row\?\.retryable === false\)\s+return false/)
+})
+
 if (failed) { console.error(`\n${failed} test(s) failed`); process.exit(1) }
 console.log('\nAll service-worker offline-sale-replay tests passed')

@@ -46,6 +46,15 @@ const H = require('./harness/al_money_native.cjs')
 const day = (date, hourUtc = 3) => `${date}T${String(hourUtc).padStart(2, '0')}:00:00.000Z` // 10:00 Cambodia
 const range = date => `startDate=${date}&endDate=${date}`
 
+// POST /api/sales stores a client created_at only within minutes of the server
+// clock (lib/clientTimestamp.ts), so a fixture sale is dated onto its report
+// day by a direct write right after the real POST.
+const sellOn = async (h, date, args) => {
+  const sale = await H.createSale(h, args)
+  if (sale.status === 200) await h.db.prepare('UPDATE sales SET created_at=? WHERE id=?').bind(day(date).slice(0, 19).replace('T', ' '), sale.body.id).run()
+  return sale
+}
+
 const totalsOf = async (h, query, label, cookie) => {
   const result = await h.call('GET', H.fresh(`/api/reports/overview?${query}`), undefined, label, cookie ? { cookie } : {})
   assert.equal(result.status, 200, JSON.stringify(result.body).slice(0, 200))
@@ -71,7 +80,7 @@ async function main() {
     // same RET-YYYYMMDD-HHMMSS candidate and the second is refused with
     // write_conflict (a separate, retryable race noted in the report).
     for (let i = 1; i <= 100; i++) {
-      const sale = await H.createSale(h, { key: `al-l1-${i}`, status: 'completed', createdAt: day('2026-10-01'),
+      const sale = await sellOn(h, '2026-10-01', { key: `al-l1-${i}`, status: 'completed',
         lines: [{ productId: 7100, quantity: 1, manualPrice: 10, fixedDiscount: 0.0045,
           quote: { gross_usd: 10, product_discount_usd: 0, manual_discount_usd: 0.0045, total_usd: 9.9955, total_khr: 39982 } }],
         paymentDetails: [{ method: 'Cash', amount_usd: 10, amount_khr: 0 }], label: 'L1 sale $9.9955 paid $10' })
@@ -98,7 +107,7 @@ async function main() {
       assert.equal(l1.collected_total_usd, 0)
     })
     for (let i = 1; i <= 3; i++) {
-      const sale = await H.createSale(h, { key: `al-l1-control-${i}`, status: 'completed', createdAt: day('2026-10-06'),
+      const sale = await sellOn(h, '2026-10-06', { key: `al-l1-control-${i}`, status: 'completed',
         lines: [{ productId: 7100, quantity: 1, manualPrice: 10, fixedDiscount: 0.0045,
           quote: { gross_usd: 10, product_discount_usd: 0, manual_discount_usd: 0.0045, total_usd: 9.9955, total_khr: 39982 } }],
         paymentDetails: [{ method: 'Cash', amount_usd: 10, amount_khr: 0 }], label: 'L1 control sale' })
@@ -117,7 +126,7 @@ async function main() {
     // ---- L2: 501 customers x $1 ------------------------------------------
     await h.db.batch(Array.from({ length: 501 }, (_, index) => h.db.prepare('INSERT INTO customers(id,name,phone) VALUES(?,?,?)')
       .bind(10001 + index, `AL-L2 Customer ${index + 1}`, `0123${String(index + 1).padStart(5, '0')}`)))
-    const template = await H.createSale(h, { key: 'al-l2-1', status: 'completed', createdAt: day('2026-10-02'), customerId: 10001,
+    const template = await sellOn(h, '2026-10-02', { key: 'al-l2-1', status: 'completed', customerId: 10001,
       lines: [{ productId: 702, quantity: 1, quote: { gross_usd: 1, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 1, total_khr: 4000 } }],
       paymentDetails: [{ method: 'Cash', amount_usd: 1, amount_khr: 0 }], label: 'L2 $1 sale (real, cloned 500 times)' })
     assert.equal(template.status, 200, JSON.stringify(template.body).slice(0, 300))
@@ -157,7 +166,7 @@ async function main() {
     // ---- L3: two $1 sales, $0.0050 COGS each, different days -------------
     for (const [index, date] of ['2026-10-03', '2026-10-04'].entries()) {
       await h.db.prepare('INSERT INTO customers(id,name,phone) VALUES(?,?,?)').bind(20001 + index, `AL-L3 Customer ${index + 1}`, `0124${index + 1}`).run()
-      const sale = await H.createSale(h, { key: `al-l3-${index + 1}`, status: 'completed', createdAt: day(date), customerId: 20001 + index,
+      const sale = await sellOn(h, date, { key: `al-l3-${index + 1}`, status: 'completed', customerId: 20001 + index,
         lines: [{ productId: 703, quantity: 1, quote: { gross_usd: 1, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 1, total_khr: 4000 } }],
         paymentDetails: [{ method: 'Cash', amount_usd: 1, amount_khr: 0 }], label: 'L3 $1 sale, COGS $0.005' })
       assert.equal(sale.status, 200, JSON.stringify(sale.body).slice(0, 300))
@@ -200,7 +209,7 @@ async function main() {
 
     // ---- L4: hidden courier cost ----------------------------------------
     await h.db.prepare("INSERT INTO delivery_contacts(id,name,phone) VALUES(1,'AL-L4 Driver','012000444')").run()
-    const delivery = await H.createSale(h, { key: 'al-l4', status: 'completed', createdAt: day('2026-10-05'),
+    const delivery = await sellOn(h, '2026-10-05', { key: 'al-l4', status: 'completed',
       lines: [{ productId: 704, quantity: 1, quote: { gross_usd: 10, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 10, total_khr: 40000 } }],
       paymentDetails: [{ method: 'Cash', amount_usd: 12, amount_khr: 0 }], label: 'L4 delivery sale',
       extra: { is_delivery: true, delivery_contact_id: 1, delivery_fee_usd: 2, delivery_fee_paid_by: 'customer', delivery_actual_cost_usd: 1.5 } })

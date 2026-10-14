@@ -340,9 +340,10 @@ async function run() {
   }
   console.log('PASS a sale created by a stale client stores the display address')
 
-  // Offline replay is the same writer, but records the client sale moment and
-  // a distinct origin. A retry returns the one already-created row and cannot
-  // regenerate or alter the immutable envelope.
+  // A request carrying a client created_at is the same writer: the sale takes
+  // the server clock and is a normal POS sale. A retry returns the one
+  // already-created row and cannot regenerate or alter the immutable envelope.
+  const queuedAt = new Date(Date.now() - 60 * 1000)
   const offline = fixture()
   const offlinePayload = {
     items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1 }],
@@ -353,7 +354,7 @@ async function run() {
     amount_paid_khr: 0,
     exchange_rate: 4200,
     client_request_id: 'offline-create-1',
-    created_at: '2026-09-07T09:30:00.000Z',
+    created_at: queuedAt.toISOString(),
   }
   const first = await offline.call('/', offlinePayload, 'POST')
   assert.equal(first.status, 200, JSON.stringify(first))
@@ -364,9 +365,31 @@ async function run() {
   assert.equal(offline.sql.prepare('SELECT COUNT(*) n FROM sales WHERE client_request_id=?').get('offline-create-1').n, 1)
   assert.equal(offline.sql.prepare('SELECT creation_snapshot_json FROM sales WHERE id=?').get(first.body.id).creation_snapshot_json, beforeRetry)
   const offlineCreation = JSON.parse(beforeRetry)
-  assert.equal(offlineCreation.origin, 'offline_replay')
-  assert.equal(offlineCreation.sale_at, '2026-09-07 09:30:00')
-  console.log('PASS offline replay keeps one immutable queue-time creation snapshot')
+  assert.equal(offlineCreation.origin, 'pos')
+  assert.equal(offlineCreation.sale_at, null)
+  const offlineRow = offline.sql.prepare('SELECT created_at FROM sales WHERE id=?').get(first.body.id)
+  assert.ok(Math.abs(Date.parse(`${offlineRow.created_at.replace(' ', 'T')}Z`) - Date.now()) < 30 * 1000, `a recent client created_at must store the server clock, got ${offlineRow.created_at}`)
+  console.log('PASS a request with a recent client created_at stores the server clock and keeps one immutable creation snapshot')
+
+  const stale = fixture()
+  const staleCounts = () => ({ sales: stale.sql.prepare('SELECT COUNT(*) n FROM sales').get().n, items: stale.sql.prepare('SELECT COUNT(*) n FROM sale_items').get().n, movements: stale.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n })
+  const staleBefore = staleCounts()
+  const staleResponse = await stale.call('/', { ...offlinePayload, client_request_id: 'stale-create-1', created_at: '2026-09-07T09:30:00.000Z' }, 'POST')
+  assert.equal(staleResponse.status, 409, JSON.stringify(staleResponse))
+  assert.equal(staleResponse.body.code, 'sale_created_at_too_old')
+  assert.equal(staleResponse.body.claimed_created_at, '2026-09-07 09:30:00')
+  assert.deepEqual(staleCounts(), staleBefore)
+  console.log('PASS a client created_at older than the window is refused with 409 and writes nothing')
+
+  const future = fixture()
+  const futureResponse = await future.call('/', { ...offlinePayload, client_request_id: 'future-create-1', created_at: new Date(Date.now() + 3600 * 1000).toISOString() }, 'POST')
+  assert.equal(futureResponse.status, 200, JSON.stringify(futureResponse))
+  const futureRow = future.sql.prepare('SELECT created_at, creation_snapshot_json FROM sales WHERE id=?').get(futureResponse.body.id)
+  const futureCreation = JSON.parse(futureRow.creation_snapshot_json)
+  assert.equal(futureCreation.origin, 'pos')
+  assert.equal(futureCreation.sale_at, null)
+  assert.ok(Math.abs(Date.parse(`${futureRow.created_at.replace(' ', 'T')}Z`) - Date.now()) < 60 * 1000, `a future created_at must store the server clock, got ${futureRow.created_at}`)
+  console.log('PASS a future client created_at is replaced by the server clock and recorded as a normal POS sale')
 
   const failed = fixture()
   failed.sql.exec("CREATE TRIGGER reject_sale_line BEFORE INSERT ON sale_items BEGIN SELECT RAISE(ABORT, 'forced sale-line failure'); END;")

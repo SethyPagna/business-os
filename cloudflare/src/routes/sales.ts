@@ -154,7 +154,7 @@ import { canonicalMoney4, SaleMoneyContractError, hasRecordedSaleMoneyPrecision 
 import { quoteSaleMutationHeader, compareSaleHeaderQuote, SaleHeaderQuoteError } from '../lib/saleMutationHeaderQuote'
 import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/nativeSaleChange'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
-import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
+import { resolveClientCreatedAt } from '../lib/clientTimestamp'
 import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { formatSaleStatusTelegramLines, formatSaleTelegramLines, sendTelegramEvent } from '../lib/telegram'
@@ -346,9 +346,43 @@ type NormalizedItem = Omit<SaleItemInput, 'branch_id'> & { product_id: number; q
 // duplicate sale. Reproduced inline rather than shared, matching returns.ts's
 // own reasoning for keeping this as a two-line normalizer per file.
 function normalizeClientRequestId(value: unknown): string | null {
-  const normalized = String(value ?? '').trim()
+  const normalized = typeof value === 'string' || typeof value === 'number' ? String(value).trim() : ''
   if (!normalized) return null
   return normalized.length > 120 ? normalized.slice(0, 120) : normalized
+}
+
+const SALE_REFUSAL_COLLAPSE_WINDOW = '-1 day'
+
+// A refused sale (stale client claim) is audited once per account and request
+// id: a repeat bumps the count and last-seen time on that row instead of
+// writing another, so a looping client cannot grow audit_logs.
+async function auditSaleRefusal(
+  env: Env, db: ReturnType<typeof getDb>, user: SessionUser | undefined,
+  reason: string, clientRequestId: string | null, claimedCreatedAt: string | null,
+): Promise<void> {
+  const receivedAt = new Date().toISOString()
+  try {
+    const prior = await db.prepare(`SELECT id FROM audit_logs
+      WHERE action = 'sale_refused' AND entity = 'sale_creation' AND user_id IS @user_id
+        AND json_extract(details, '$.reason') = @reason AND json_extract(details, '$.client_request_id') IS @client_request_id
+        AND created_at >= datetime('now', @window)
+      ORDER BY id DESC LIMIT 1`).get<{ id: number }>({
+      user_id: user?.id ?? null, reason, client_request_id: clientRequestId, window: SALE_REFUSAL_COLLAPSE_WINDOW,
+    })
+    if (prior) {
+      await db.prepare(`UPDATE audit_logs SET
+        details = json_set(details, '$.count', COALESCE(json_extract(details, '$.count'), 1) + 1, '$.last_received_at', @received_at),
+        new_value = json_set(details, '$.count', COALESCE(json_extract(details, '$.count'), 1) + 1, '$.last_received_at', @received_at)
+        WHERE id = @id`).run({ id: prior.id, received_at: receivedAt })
+      return
+    }
+  } catch (_) {
+    // A failed lookup falls through to a plain audit row, as audit() itself never throws.
+  }
+  await audit(env, user?.id ?? null, actorSnapshot(user), 'sale_refused', 'sale_creation', null, {
+    kind: 'sale.creation_refused', reason, client_request_id: clientRequestId,
+    claimed_created_at: claimedCreatedAt, received_at: receivedAt, count: 1, last_received_at: receivedAt,
+  })
 }
 
 async function saleMutationDigest(value: unknown): Promise<string> {
@@ -479,8 +513,8 @@ app.post('/', async (c) => {
     offline_owner?: unknown
     money_precision_version?: unknown
     items: SaleItemInput[]
-    // Offline replays only: the sale's queue-time moment, honored with
-    // bounded trust (lib/clientTimestamp.ts). Online checkouts omit it.
+    // A client sale time: never stored, audited, and refused (409) when older
+    // than the window of lib/clientTimestamp.ts. Live checkouts omit it.
     created_at?: unknown
     branch_id?: number
     cashier_id?: number
@@ -507,7 +541,7 @@ app.post('/', async (c) => {
     change_khr?: number | string
     change_is_actual?: boolean
     receipt_number?: string
-    client_request_id?: string
+    client_request_id?: unknown
     sale_status?: string
     // Membership/loyalty -- see MIGRATION.md POS section: these were being
     // computed and shown to the cashier by POS.tsx (checked out against the
@@ -534,6 +568,10 @@ app.post('/', async (c) => {
     delivery_actual_cost_usd?: number | string | null
     delivery_actual_cost_khr?: number | string | null
   }>()
+
+  if (body.client_request_id != null && typeof body.client_request_id !== 'string') {
+    return c.json({ error: 'client_request_id must be text.', code: 'invalid_client_request_id' }, 400)
+  }
 
   // Every create requires the captured owner, including online requests and
   // legacy retries without created_at. A fresh preflight cannot close a cookie
@@ -570,6 +608,11 @@ app.post('/', async (c) => {
     }
   }
   if (body.money_precision_version !== 1) return c.json({ error: 'Keep the original pending sale and review it with the current app before recording it.', code: 'money_precision_review_needed' }, 409)
+  const clientTime = resolveClientCreatedAt(body.created_at)
+  if (clientTime.tooOld) {
+    await auditSaleRefusal(c.env, db, user, 'sale_created_at_too_old', clientRequestId || null, clientTime.claimed)
+    return c.json({ error: 'This sale was saved on this device at an earlier time and is kept there. Nothing was recorded.', code: 'sale_created_at_too_old', claimed_created_at: clientTime.claimed }, 409)
+  }
   if (!await saleMoneySchemaReady(db)) return c.json({ error: 'Sale precision schema is not ready.', code: 'money_precision_schema_not_ready' }, 503)
   // Every atomic create needs a stable identity that later statements in the
   // D1 batch can resolve before the auto-generated sale id is available to JS.
@@ -1169,12 +1212,8 @@ app.post('/', async (c) => {
   const receiptNumberTaken = async (candidate: string) =>
     !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate]))
   let receiptNumber = normalizeClientReceiptNumber(body.receipt_number) || await uniqueBusinessDateTimeNumber('', receiptNumberTaken)
-  // An offline replay carries the sale's own queue-time moment (stamped in
-  // saleWriteTransport); honored with bounded trust so day-ranged reports
-  // put the sale on the day it happened, not the day it synced. Online
-  // checkouts send no created_at and keep the server clock. See
-  // lib/clientTimestamp.ts for the bounds and the storage format.
-  const clientCreatedAt = sanitizeClientCreatedAt(body.created_at)
+  // The sale is always stamped with the server clock; a client created_at is
+  // only audited (lib/clientTimestamp.ts). An older claim was refused above.
 
   // isDelivery / deliveryFeeUsd / deliveryFeeKhr / deliveryFeePaidBy are
   // computed with the totals above, since the customer-paid portion is part
@@ -1192,9 +1231,8 @@ app.post('/', async (c) => {
   const snapshotRecordedAt = new Date().toISOString()
   const buildCreationSnapshotFor = (snapshotReceiptNumber: string) => buildSaleCreationSnapshot({
       moneyPrecisionVersion: 1, calculatedTotalUsd, roundingAdjustmentUsd,
-      origin: clientCreatedAt ? 'offline_replay' : 'pos',
+      origin: 'pos',
       recordedAt: snapshotRecordedAt,
-      saleAt: clientCreatedAt,
       receiptNumber: snapshotReceiptNumber,
       actor: user,
       cashierId: actorId(user) ?? (body.cashier_id || null),
@@ -1270,7 +1308,7 @@ app.post('/', async (c) => {
         @is_delivery, @delivery_contact_id, @delivery_contact_name, @delivery_contact_phone, @delivery_contact_address,
         @delivery_fee_usd, @delivery_fee_khr, @delivery_fee_paid_by,
         @delivery_actual_cost_usd, @delivery_actual_cost_khr,
-        @loyalty_accrual, @sale_status, @search_normalized, @items, @creation_snapshot_json, COALESCE(@created_at, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP
+        @loyalty_accrual, @sale_status, @search_normalized, @items, @creation_snapshot_json, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
       WHERE @customer_guard_id IS NULL OR EXISTS (
         SELECT 1 FROM customers
         WHERE id = @customer_guard_id
@@ -1281,7 +1319,6 @@ app.post('/', async (c) => {
       receipt_number: receiptNumber,
       calculated_total_usd: calculatedTotalUsd,
       rounding_adjustment_usd: roundingAdjustmentUsd,
-      created_at: clientCreatedAt,
       client_request_id: saleWriteKey,
       // N13: the cashier snapshot is the AUTHENTICATED session's account, not
       // whatever the client put in the body. Before this, POST /api/sales was
@@ -1410,7 +1447,8 @@ app.post('/', async (c) => {
     itemCount: priced.length,
     totalUsd,
     saleStatus,
-    origin: clientCreatedAt ? 'offline_replay' : 'pos',
+    origin: 'pos',
+    ...(clientTime.adjusted ? { claimed_created_at: clientTime.claimed, received_at: snapshotRecordedAt, created_at_adjusted: true } : {}),
   })
   const saleCreationAuditStatement = {
     sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
@@ -1860,7 +1898,6 @@ app.post('/', async (c) => {
     // delivery service, total / discount / net / paid, driver.
     lines: formatSaleTelegramLines({
       status: saleStatus,
-      createdAt: clientCreatedAt,
       receiptNumber,
       cashier: actorSnapshot(user),
       customer: saleCustomerName,
@@ -6506,9 +6543,8 @@ app.get('/export', async (c) => {
   const afterId = Number(query.afterId)
   if (afterCreatedAt && Number.isSafeInteger(afterId) && afterId > 0) {
     // sales.created_at is NOT one consistent shape: live inserts are
-    // 'YYYY-MM-DD HH:MM:SS' (sanitizeClientCreatedAt normalizes offline
-    // replays to match the server's CURRENT_TIMESTAMP shape -- see
-    // lib/clientTimestamp.ts) but legacy-import rows are ISO
+    // 'YYYY-MM-DD HH:MM:SS' (the server's CURRENT_TIMESTAMP shape) but
+    // legacy-import rows are ISO
     // 'YYYY-MM-DDTHH:MM:SS.sssZ' (lib/*legacy-reports.mjs's
     // bangkokToUtc/legacyToUtc write .toISOString()), and both eras coexist
     // on the same calendar days. A raw string compares 'T' (0x54) after ' '
