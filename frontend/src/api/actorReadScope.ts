@@ -452,9 +452,10 @@ function storedUserId(): string {
   return parsedUser.id == null ? '' : String(parsedUser.id)
 }
 
-/** POST /login answers organizationId; the bootstrap row carries organization_id. */
+/** POST /login answers organizationId; the bootstrap row carries organization_id.
+ *  Reads and writes both name the organization through this one lookup. */
 function storedOrganization(user: Record<string, unknown>): string {
-  return String(user.organization_id ?? user.organizationId ?? user.organization_slug ?? '')
+  return String(user.organization_id || user.organizationId || user.organization_slug || '')
 }
 
 // The grants the app merges into effective permissions, in one spelling: the
@@ -496,7 +497,7 @@ function storedWriteOwner(): { owner: string; signedIn: boolean } {
   let origin = ''
   try { origin = String(window.location?.origin || '') } catch { origin = '' }
   const id = user.id == null ? '' : String(user.id)
-  const organization = String(user.organization_id || user.organization_slug || '')
+  const organization = storedOrganization(user)
   return { owner: JSON.stringify([getSyncServerUrl(), origin, id, organization]), signedIn: id !== '' }
 }
 
