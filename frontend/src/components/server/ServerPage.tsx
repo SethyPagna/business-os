@@ -24,6 +24,7 @@ import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from '../../api/actorReadScope.ts'
 import { captureOfflineSaleOwner, offlineSaleOwnersMatch, type OfflineSaleOwner } from '../../api/offlineQueueOwnership.ts'
 import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
+import { timeoutSignal } from '../../utils/abortTimeout.ts'
 
 const SERVER_PENDING_SYNC_TIMEOUT_MS = 8000
 const SERVER_DIAGNOSTICS_TIMEOUT_MS = 10000
@@ -244,9 +245,10 @@ function InfoTab({ syncUrl, syncConnected, active = true }: InfoTabProps) {
     setFetching(true)
     setServerErr(null)
     const startedAt = Date.now()
+    const timeout = timeoutSignal(5000)
     try {
       const res = await fetch(`${syncUrl}/health`, {
-        signal: AbortSignal.timeout(5000),
+        signal: timeout.signal,
         headers: { 'bypass-tunnel-reminder': 'true' },
       })
       const rtt = Date.now() - startedAt
@@ -268,6 +270,8 @@ function InfoTab({ syncUrl, syncConnected, active = true }: InfoTabProps) {
       if (!isTrackedRequestCurrent(fetchRequestRef, requestId)) return
       setServerErr(getErrorMessage(error, 'Fetch failed'))
       setServerTime(null)
+    } finally {
+      timeout.clear()
     }
     if (!isTrackedRequestCurrent(fetchRequestRef, requestId)) return
     setLastFetch(new Date())
@@ -751,9 +755,10 @@ export default function ServerPage() {
 
     const check = async () => {
       const requestId = beginTrackedRequest(onlineCheckRequestRef)
+      const timeout = timeoutSignal(4000)
       try {
         const res = await fetch(`${syncUrl}/health`, {
-          signal: AbortSignal.timeout?.(4000),
+          signal: timeout.signal,
           headers: { 'bypass-tunnel-reminder': 'true' },
         })
         if (res.ok) {
@@ -761,7 +766,9 @@ export default function ServerPage() {
           if (!isTrackedRequestCurrent(onlineCheckRequestRef, requestId)) return
           setOnlineCount(typeof data?.clients === 'number' ? data.clients : null)
         }
-      } catch {}
+      } catch {} finally {
+        timeout.clear()
+      }
     }
 
     const initialTimer = window.setTimeout(check, SERVER_ONLINE_CHECK_READY_DELAY_MS)
