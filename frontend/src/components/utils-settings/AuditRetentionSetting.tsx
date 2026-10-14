@@ -90,7 +90,7 @@ export default function AuditRetentionSetting({ t, notify, username, value, onSa
         </>
       ) : null}
       <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-        {T('audit_log_retention_days_desc', 'Entries older than this are deleted automatically once a day. Default and minimum is 21 days. Changing it asks for your password. Never deleted: the records of sales, payments, returns, stock changes, permission changes, reverts, undo and redo, and expenses.')}
+        {T('audit_log_retention_days_desc', 'Entries older than this are deleted automatically once a day. Default and minimum is 21 days. Changing it asks for your password. Never deleted: sales, payments, returns, stock changes, permission and account changes, reverts, expenses, resets, restores and data repairs, customer and supplier merges and sales reassignments, cost and price edits, shift open and close records, approved stock, price, return and contact reviews, and the undo or redo of these. Sign-ins, device approvals, settings changes and every other entry are deleted after the days above.')}
       </p>
     </div>
   )
