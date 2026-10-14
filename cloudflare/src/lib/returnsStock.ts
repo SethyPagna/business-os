@@ -353,8 +353,8 @@ export function planDamagedReturnLine(input: {
       unitCostUsd: input.unitCostUsd,
     }),
     {
-      sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id)
-            VALUES(@dmg_product_id,@dmg_product_name,@dmg_branch_id,'${DAMAGE_IN_MOVEMENT}',@dmg_quantity,@dmg_unit_cost_usd,@dmg_unit_cost_khr,@dmg_reason,${input.returnIdSql},@dmg_user_id,@dmg_user_name,@dmg_batch_id)`,
+      sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id)
+            VALUES(@dmg_product_id,@dmg_product_name,@dmg_branch_id,'${DAMAGE_IN_MOVEMENT}',@dmg_quantity,@dmg_unit_cost_usd,@dmg_unit_cost_khr,ROUND(@dmg_unit_cost_usd*@dmg_quantity,4),ROUND(@dmg_unit_cost_khr*@dmg_quantity,4),@dmg_reason,${input.returnIdSql},@dmg_user_id,@dmg_user_name,@dmg_batch_id)`,
       params: {
         dmg_product_id: input.productId, dmg_product_name: input.productName, dmg_branch_id: input.branchId,
         dmg_quantity: quantity, dmg_unit_cost_usd: input.unitCostUsd, dmg_unit_cost_khr: input.unitCostKhr,
@@ -383,8 +383,8 @@ export function planDamagedReturnLine(input: {
         // this write_off is not reachable from the generic Stock Change
         // ledger revert in the first place ('write_off' is not on
         // stockRevert.ts's REVERTIBLE_MOVEMENT_TYPES allowlist at all).
-        sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id)
-              VALUES(@wo_product_id,@wo_product_name,@wo_branch_id,'${TAGGED_DISPOSAL_MOVEMENT_TYPE}',@wo_quantity,@wo_unit_cost_usd,@wo_unit_cost_khr,@wo_reason,${input.returnIdSql},@wo_user_id,@wo_user_name,@wo_batch_id)`,
+        sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id)
+              VALUES(@wo_product_id,@wo_product_name,@wo_branch_id,'${TAGGED_DISPOSAL_MOVEMENT_TYPE}',@wo_quantity,@wo_unit_cost_usd,@wo_unit_cost_khr,ROUND(@wo_unit_cost_usd*@wo_quantity,4),ROUND(@wo_unit_cost_khr*@wo_quantity,4),@wo_reason,${input.returnIdSql},@wo_user_id,@wo_user_name,@wo_batch_id)`,
         params: {
           wo_product_id: input.productId, wo_product_name: input.productName, wo_branch_id: input.branchId,
           wo_quantity: quantity, wo_unit_cost_usd: input.unitCostUsd, wo_unit_cost_khr: input.unitCostKhr,
@@ -403,11 +403,11 @@ export function planDamagedReturnLine(input: {
 export async function reverseDamagedLots(
   db: D1Compat,
   returnId: number | string,
-): Promise<Array<{ product_id: number; product_name: string | null; branch_id: number | null; batch_id: number | null; quantity: number; reason: string | null; created_by_user_id: number | string | null; created_by_user_name: string | null }>> {
+): Promise<Array<{ product_id: number; product_name: string | null; branch_id: number | null; batch_id: number | null; quantity: number; unit_cost_usd: number | null; reason: string | null; created_by_user_id: number | string | null; created_by_user_name: string | null }>> {
   const lots = await db.prepare(`
-    SELECT id, product_id, product_name, branch_id, batch_id, quantity, quantity_remaining, reason, created_by_user_id, created_by_user_name
+    SELECT id, product_id, product_name, branch_id, batch_id, quantity, quantity_remaining, unit_cost_usd, reason, created_by_user_id, created_by_user_name
     FROM damaged_stock_lots WHERE return_id = @return_id
-  `).all<{ id: number; product_id: number; product_name: string | null; branch_id: number | null; batch_id: number | null; quantity: number; quantity_remaining: number; reason: string | null; created_by_user_id: number | string | null; created_by_user_name: string | null }>({ return_id: returnId })
+  `).all<{ id: number; product_id: number; product_name: string | null; branch_id: number | null; batch_id: number | null; quantity: number; quantity_remaining: number; unit_cost_usd: number | null; reason: string | null; created_by_user_id: number | string | null; created_by_user_name: string | null }>({ return_id: returnId })
   if (!lots.length) return []
   for (const lot of lots) {
     if (Number(lot.quantity_remaining) < Number(lot.quantity)) {
@@ -420,7 +420,7 @@ export async function reverseDamagedLots(
   // ride along so a failed EDIT can re-create these rows faithfully -- the
   // validation above guarantees quantity_remaining === quantity, so a
   // re-creation via createDamagedLot loses nothing.
-  return lots.map((lot) => ({ product_id: lot.product_id, product_name: lot.product_name, branch_id: lot.branch_id, batch_id: lot.batch_id ?? null, quantity: Number(lot.quantity), reason: lot.reason ?? null, created_by_user_id: lot.created_by_user_id ?? null, created_by_user_name: lot.created_by_user_name ?? null }))
+  return lots.map((lot) => ({ product_id: lot.product_id, product_name: lot.product_name, branch_id: lot.branch_id, batch_id: lot.batch_id ?? null, quantity: Number(lot.quantity), unit_cost_usd: lot.unit_cost_usd ?? null, reason: lot.reason ?? null, created_by_user_id: lot.created_by_user_id ?? null, created_by_user_name: lot.created_by_user_name ?? null }))
 }
 
 export class InsufficientReplacementStockError extends Error {
@@ -436,8 +436,8 @@ export function planReplacementStock(input: {
   branchId: number
   batchId: number | null
   quantity: number
-  unitCostUsd: number
-  unitCostKhr: number
+  unitCostUsd: number | null
+  unitCostKhr: number | null
   returnIdSql: string
   returnNumber: string | null
   userId: number | string | null
@@ -475,10 +475,10 @@ export function planReplacementStock(input: {
   statements.push({
     sql: `INSERT INTO inventory_movements (
       product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,
-      unit_cost_khr,reason,reference_id,user_id,user_name,batch_id
+      unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id
     ) VALUES (
       @product_id,@product_name,@branch_id,'${REPLACEMENT_OUT_MOVEMENT}',-@quantity,
-      @unit_cost_usd,@unit_cost_khr,@reason,${input.returnIdSql},@user_id,@user_name,@batch_id
+      @unit_cost_usd,@unit_cost_khr,ROUND(@unit_cost_usd*@quantity,4),ROUND(@unit_cost_khr*@quantity,4),@reason,${input.returnIdSql},@user_id,@user_name,@batch_id
     )`,
     params: shared,
   })
@@ -497,8 +497,8 @@ export async function applyReplacementStock(db: D1Compat, input: {
   branchId: number
   batchId: number | null
   quantity: number
-  unitCostUsd: number
-  unitCostKhr: number
+  unitCostUsd: number | null
+  unitCostKhr: number | null
   returnId: number | string
   returnNumber: string | null
   userId: number | string | null
@@ -599,7 +599,7 @@ export async function restoreDamagedLot(db: D1Compat, input: {
 
 // Open damaged lots for one product (optionally one branch) -- the product
 // detail's damage entries (D3) and, next part, POS's damage source option.
-// Never exposes cost; damaged lots carry none by design.
+// Never exposes cost: unit_cost_usd on a held lot is for cost-viewers only.
 export async function listOpenDamagedLots(db: D1Compat, input: {
   productId: number
   branchId?: number | null

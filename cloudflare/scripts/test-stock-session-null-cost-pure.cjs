@@ -88,6 +88,11 @@ check('the commit writer keeps an unrecorded cost unrecorded and a declared zero
     { unit_cost_usd: null, total_cost_usd: null },
     { unit_cost_usd: 0, total_cost_usd: 0 },
   ])
+  // The session records USD only: a KHR cost nobody captured is unknown, not a recorded 0.
+  assert.deepEqual(sql.prepare('SELECT unit_cost_khr,total_cost_khr FROM inventory_movements WHERE id > 102 ORDER BY id').all(), [
+    { unit_cost_khr: null, total_cost_khr: null },
+    { unit_cost_khr: null, total_cost_khr: null },
+  ])
 })
 
 check('the undo/redo writer keeps the same distinction, in both directions', () => {

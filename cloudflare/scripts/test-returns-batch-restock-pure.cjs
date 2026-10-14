@@ -928,6 +928,78 @@ async function main() {
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM sale_bulk_guards').get().n, 0)
   })
 
+  // Cost-unknown S6 (owner, 14 Oct 2026): "if cost is 0$ then it is 0 for loss. if it is none, it should also be
+  // unknown." A supplier return line with no recorded cost used to be coerced to 0 on the return line, the
+  // movement, the return's total and the supplier loss (a loss of $0 for goods whose cost nobody knows).
+  await check('cost-unknown S6: a supplier return keeps an unrecorded cost, its totals and its loss unknown; $0 stays 0', async () => {
+    const supplierReturn = async (key, item, extra = {}) => {
+      seed()
+      await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, receivedDate: '2026-02-10' })
+      const response = await req('POST', '/supplier', {
+        client_request_id: key, items: [{ product_id: 1, quantity: 4, branch_id: 1, ...item }], branch_id: 1,
+        reason: 'Cost test', settlement: 'refund', supplier_name: 'Acme', ...extra,
+      })
+      assert.strictEqual(response.status, 200, JSON.stringify(response.json))
+      return {
+        header: rawDb.prepare('SELECT supplier_compensation_usd, supplier_compensation_khr, supplier_loss_usd, supplier_loss_khr FROM returns WHERE id = ?').get([response.json.id]),
+        line: rawDb.prepare('SELECT applied_price_usd, cost_price_usd, cost_price_khr, total_usd, total_khr FROM return_items WHERE return_id = ?').get([response.json.id]),
+        movement: rawDb.prepare("SELECT unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr FROM inventory_movements WHERE reference_id = ? AND movement_type = 'supplier_return'").get([response.json.id]),
+      }
+    }
+    const unknown = await supplierReturn('cost-s6-supplier-null', {})
+    assert.deepStrictEqual({ ...unknown.line }, { applied_price_usd: null, cost_price_usd: null, cost_price_khr: null, total_usd: null, total_khr: null }, 'the return line keeps an unrecorded cost NULL (old: 0)')
+    assert.deepStrictEqual({ ...unknown.movement }, { unit_cost_usd: null, unit_cost_khr: null, total_cost_usd: null, total_cost_khr: null }, 'the stock-out movement keeps it NULL, totals included (old: 0 and a DEFAULT 0 total)')
+    assert.deepStrictEqual({ ...unknown.header }, { supplier_compensation_usd: null, supplier_compensation_khr: null, supplier_loss_usd: null, supplier_loss_khr: null }, 'with no cost the default compensation and the loss are unknown, not $0 (old: loss 0)')
+    const explicit = await supplierReturn('cost-s6-supplier-null-comp', {}, { supplier_compensation_usd: 3, supplier_compensation_khr: 12000 })
+    assert.deepStrictEqual({ ...explicit.header }, { supplier_compensation_usd: 3, supplier_compensation_khr: 12000, supplier_loss_usd: null, supplier_loss_khr: null }, 'a compensation the supplier really paid is kept, the loss against an unknown cost stays unknown')
+    const free = await supplierReturn('cost-s6-supplier-zero', { cost_price_usd: 0, cost_price_khr: 0 })
+    assert.deepStrictEqual({ ...free.line }, { applied_price_usd: 0, cost_price_usd: 0, cost_price_khr: 0, total_usd: 0, total_khr: 0 }, 'a recorded $0 cost stays 0 on the line')
+    assert.deepStrictEqual({ ...free.movement }, { unit_cost_usd: 0, unit_cost_khr: 0, total_cost_usd: 0, total_cost_khr: 0 }, 'and on the movement')
+    assert.deepStrictEqual({ ...free.header }, { supplier_compensation_usd: 0, supplier_compensation_khr: 0, supplier_loss_usd: 0, supplier_loss_khr: 0 }, 'a recorded $0 cost loses $0: "if cost is 0$ then it is 0 for loss"')
+    const costed = await supplierReturn('cost-s6-supplier-cost', { cost_price_usd: 2, cost_price_khr: 8000 })
+    assert.deepStrictEqual({ ...costed.movement }, { unit_cost_usd: 2, unit_cost_khr: 8000, total_cost_usd: 8, total_cost_khr: 32000 }, 'a recorded cost carries its unit and its total')
+    assert.deepStrictEqual({ ...costed.header }, { supplier_compensation_usd: 8, supplier_compensation_khr: 32000, supplier_loss_usd: 0, supplier_loss_khr: 0 }, 'a refunded recorded cost is fully compensated')
+    const short = await supplierReturn('cost-s6-supplier-short', { cost_price_usd: 2, cost_price_khr: 8000 }, { supplier_compensation_usd: 5, supplier_compensation_khr: 20000 })
+    assert.deepStrictEqual({ ...short.header }, { supplier_compensation_usd: 5, supplier_compensation_khr: 20000, supplier_loss_usd: 3, supplier_loss_khr: 12000 }, 'a part-paid known cost keeps a known loss')
+    const mixed = await (async () => {
+      seed()
+      await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, receivedDate: '2026-02-10' })
+      const response = await req('POST', '/supplier', {
+        client_request_id: 'cost-s6-supplier-mixed', items: [{ product_id: 1, quantity: 2, branch_id: 1, cost_price_usd: 2, cost_price_khr: 8000 }, { product_id: 1, quantity: 2, branch_id: 1 }],
+        branch_id: 1, reason: 'Cost test', settlement: 'refund', supplier_name: 'Acme',
+      })
+      assert.strictEqual(response.status, 200, JSON.stringify(response.json))
+      return rawDb.prepare('SELECT supplier_loss_usd, supplier_loss_khr FROM returns WHERE id = ?').get([response.json.id])
+    })()
+    assert.deepStrictEqual({ ...mixed }, { supplier_loss_usd: null, supplier_loss_khr: null }, 'one line without a cost makes the whole return loss unknown, never a partial number')
+  })
+
+  await check('cost-unknown S6: a replacement hand-out of a product with no recorded cost is unknown, a recorded $0 stays 0', async () => {
+    const replace = async (productCost) => {
+      seed()
+      seedReplacementStock()
+      rawDb.prepare('UPDATE products SET cost_price_usd = @usd, cost_price_khr = @khr WHERE id = 2').run({ usd: productCost, khr: productCost == null ? null : productCost * 4000 })
+      const { status, json } = await req('POST', '/', {
+        items: [{ product_id: 1, quantity: 2, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
+        replacement_items: [{ product_id: 2, quantity: 2, branch_id: 1, applied_price_usd: 10 }],
+        customer_name: 'Walk-in Dara', reason: 'Cost test swap',
+      })
+      assert.strictEqual(status, 200, JSON.stringify(json))
+      return {
+        movement: { ...rawDb.prepare("SELECT unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr FROM inventory_movements WHERE movement_type = 'replacement_out' AND reference_id = ?").get([json.id]) },
+        saleLine: { ...rawDb.prepare('SELECT cost_price_usd, cost_price_khr FROM sale_items WHERE sale_id = ?').get([json.replacementSaleId]) },
+      }
+    }
+    const unknown = await replace(null)
+    assert.deepStrictEqual(unknown.movement, { unit_cost_usd: null, unit_cost_khr: null, total_cost_usd: null, total_cost_khr: null }, 'replacement stock-out of a product with no cost: NULL movement (old: 0)')
+    assert.deepStrictEqual(unknown.saleLine, { cost_price_usd: null, cost_price_khr: null }, 'the replacement sale line snapshots the unknown cost as NULL (old: 0)')
+    const free = await replace(0)
+    assert.deepStrictEqual(free.movement, { unit_cost_usd: 0, unit_cost_khr: 0, total_cost_usd: 0, total_cost_khr: 0 }, 'a product recorded at $0 hands out at $0')
+    assert.deepStrictEqual(free.saleLine, { cost_price_usd: 0, cost_price_khr: 0 }, 'and snapshots $0')
+    const costed = await replace(3)
+    assert.deepStrictEqual(costed.movement, { unit_cost_usd: 3, unit_cost_khr: 12000, total_cost_usd: 6, total_cost_khr: 24000 }, 'a product with a recorded cost carries it with its total')
+  })
+
   await check('supplier return of a batch-tracked product deducts from the lot ledger, not just the aggregate', async () => {
     seed()
     const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, receivedDate: '2026-02-10' })

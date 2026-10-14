@@ -129,7 +129,7 @@ app.get('/tracked-product-ids', async (c) => {
 // the POS picker lists a product's OPEN damaged lots beside its sellable
 // ones ("Damage alongside batch/branch/barcode/SP/VIP" -- locked note).
 // Registered on this router because it shares the POS-readable gate above;
-// carries no cost by construction (damaged lots never store money terms).
+// carries no cost by construction (the reader selects no cost column).
 app.get('/damaged-lots', async (c) => {
   const db = getDb(c.env)
   const productId = Number(c.req.query('productId'))
@@ -367,12 +367,12 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
         sql: `
           INSERT INTO inventory_movements (
             product_id, product_name, branch_id, branch_name, movement_type, quantity,
-            unit_cost_usd, total_cost_usd, reason, reference_id, user_id, user_name,
+            unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name,
             created_at, batch_id${movementFreeColumn ? ', free_quantity' : ''}
           )
           VALUES (
             @productId, @productName, @branchId, @branchName, 'add', @quantity,
-            @unitCostUsd, @totalCostUsd, @reason, @referenceId, @userId, @userName,
+            @unitCostUsd, NULL, @totalCostUsd, NULL, @reason, @referenceId, @userId, @userName,
             CURRENT_TIMESTAMP, ${resolvedBatchIdSql}${movementFreeColumn ? ', @freeQuantity' : ''}
           )
         `,

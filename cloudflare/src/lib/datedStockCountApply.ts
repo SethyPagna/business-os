@@ -339,12 +339,14 @@ export async function applyDatedStockCountPlan(
     // 0084: stamp the movement's batch_id when exactly ONE lot covered its
     // whole quantity; a multi-lot spread or a shortfall stays NULL.
     const batchIdSql = single ? lotIdSql(refFor(movement, single), 'lot', params) : 'NULL'
+    // The count's own lot cost when ONE lot covers the whole movement; several lots or none stay unknown.
+    const lotCostSql = single ? `(SELECT unit_cost_usd FROM product_batches WHERE id = ${batchIdSql})` : 'NULL'
     // A count redirected from a disabled branch also names it (CUTOVER-LR); absent while every branch is active.
     const addressed = movement.addressedBranchName != null
     if (addressed) params.addressedBranchName = movement.addressedBranchName
     statements.push({
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name${addressed ? ', addressed_branch_name' : ''}, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
-            VALUES (@productId, @productName, @branchId, @branchName${addressed ? ', @addressedBranchName' : ''}, @movementType, @quantity, @reason, @userId, @userName, @createdAt, ${batchIdSql})`,
+      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name${addressed ? ', addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_id, user_name, created_at, batch_id)
+            VALUES (@productId, @productName, @branchId, @branchName${addressed ? ', @addressedBranchName' : ''}, @movementType, @quantity, ${lotCostSql}, NULL, ROUND(${lotCostSql} * ABS(@quantity), 4), NULL, @reason, @userId, @userName, @createdAt, ${batchIdSql})`,
       params,
     })
     movement.batchActions.forEach((action, index) => {

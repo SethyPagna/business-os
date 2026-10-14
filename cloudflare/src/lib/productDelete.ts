@@ -256,6 +256,17 @@ function exactRowsSql(args: {
       ))`
 }
 
+/** The recorded cost of the one lot that holds a branch's whole sellable quantity, else null.
+  *
+  * A branch spread over several lots, or over a lot with no recorded cost, has no single honest unit
+  * cost: the movement then stores NULL (unknown) rather than a blend or the catalog cost. */
+function singleLotUnitCostUsd(plan: ProductRemovePlan, branchRow: Record<string, unknown>): number | null {
+  const held = plan.branch_batch_stock.filter((row) => Number(row.branch_id) === Number(branchRow.branch_id) && Number(row.quantity) > 0)
+  if (held.length !== 1 || Math.abs(Number(held[0].quantity) - Number(branchRow.quantity)) > 1e-6) return null
+  const lot = plan.batches.find((row) => Number(row.id) === Number(held[0].batch_id))
+  return lot?.unit_cost_usd == null || !Number.isFinite(Number(lot.unit_cost_usd)) ? null : Number(lot.unit_cost_usd)
+}
+
 /** The held lots a plan governs, or null when the plan predates P3-L6.
   *
   * null is NOT the same as []. A legacy plan never snapshotted these rows, so
@@ -300,9 +311,9 @@ function damagedLotWriteOffStatements(args: {
       const unitCostUsd = row.unit_cost_usd != null ? Number(row.unit_cost_usd) : null
       return {
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity,
-          unit_cost_usd, total_cost_usd, reason, reference_id, user_id, user_name, created_at, batch_id)
+          unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, created_at, batch_id)
           VALUES (@productId, @productName, @branchId, @movementType, @quantity,
-            @unitCostUsd, @totalCostUsd, @reason, @referenceId, @userId, @userName, @stamp, @batchId)`,
+            @unitCostUsd, NULL, @totalCostUsd, NULL, @reason, @referenceId, @userId, @userName, @stamp, @batchId)`,
         params: {
           productId: args.plan.product_id,
           productName: (args.plan.product.name as string) ?? null,
@@ -732,14 +743,16 @@ export function productRemoveReplayStatements(args: {
       generation: args.expectedGeneration, snapshot: operation.undo_snapshot_id, history: args.historyId,
       kind: PRODUCT_REMOVE_ACTION_KIND, snapshotStatus: snapshotFrom, historyStatus: historyFrom },
   }, ...productRemoveGraphGuards(plan, undo ? 'deleted' : 'source', snapshot.transition_stamp), ...mutation, {
-    sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason,reference_id,user_id,user_name,created_at)
+    sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,created_at)
       SELECT @product,@productName,CAST(json_extract(value,'$.branch_id') AS INTEGER),json_extract(value,'$.branch_name'),
-        @movement,CAST(json_extract(value,'$.quantity') AS REAL),@reason,@referenceId,@actor,@actorName,@stamp
+        @movement,CAST(json_extract(value,'$.quantity') AS REAL),json_extract(value,'$.unit_cost_usd'),NULL,
+        ROUND(json_extract(value,'$.unit_cost_usd')*CAST(json_extract(value,'$.quantity') AS REAL),4),NULL,
+        @reason,@referenceId,@actor,@actorName,@stamp
       FROM json_each(@rows) WHERE @undo=1 AND CAST(json_extract(value,'$.quantity') AS REAL)>0`,
     params: { undo: undo ? 1 : 0, product: plan.product_id, productName: plan.product.name ?? null, movement: undo ? 'add' : 'write_off',
       reason: `${undo ? 'Undo' : 'Redo'}: ${plan.reason}`, referenceId: writeOffReferenceId,
       actor: args.user.id, actorName, stamp: args.transitionStamp,
-      rows: JSON.stringify(plan.branch_stock) },
+      rows: JSON.stringify(plan.branch_stock.map((row) => ({ ...row, unit_cost_usd: singleLotUnitCostUsd(plan, row) }))) },
   }, ...(undo ? damagedLotWriteOffStatements({
     plan, movementType: undo ? 'add' : 'write_off', referenceId: writeOffReferenceId,
     reason: `${undo ? 'Undo' : 'Redo'}: ${plan.reason}`, stamp: args.transitionStamp,

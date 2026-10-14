@@ -160,7 +160,10 @@ function build(state) {
 
 const LEDGER_TABLES = ['branch_stock', 'branch_batch_stock', 'products', 'product_batches', 'inventory_movements', 'damaged_stock_lots',
   'stock_session_operations', 'stock_session_members', 'stock_lot_adjustment_operations', 'action_history', 'shift_sessions']
-const ledger = (db) => JSON.stringify(LEDGER_TABLES.map((table) => [table, db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]))
+// The eb5dd0ba3 oracle stores DEFAULT 0 in the KHR cost columns of movements whose KHR cost nobody captured; the
+// unknown-cost rule (14 Oct 2026) writes NULL there. Everything else is compared exactly.
+const legacyKhr = (table, row) => table === 'inventory_movements' ? { ...row, unit_cost_khr: row.unit_cost_khr ?? 0, total_cost_khr: row.total_cost_khr ?? 0 } : row
+const ledger = (db) => JSON.stringify(LEDGER_TABLES.map((table) => [table, db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all().map((row) => legacyKhr(table, row))]))
 const plain = (value) => JSON.parse(JSON.stringify(value))
 const oldShop = (db) => plain(db.prepare(`SELECT 'branch_stock' t, product_id k, quantity FROM branch_stock WHERE branch_id=2
   UNION ALL SELECT 'branch_batch_stock', batch_id, quantity FROM branch_batch_stock WHERE branch_id=2 ORDER BY 1,2`).all())

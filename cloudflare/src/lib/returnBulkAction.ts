@@ -71,6 +71,24 @@ type DamagedLot = Row & {
   quantity_remaining: number
 }
 
+// A recorded cost, or null when none was recorded. Zero is a real cost.
+function recordedCost(value: unknown): number | null {
+  if (value == null || value === '') return null
+  const cost = Number(value)
+  return Number.isFinite(cost) && cost >= 0 ? cost : null
+}
+
+// Quantity-weighted cost of a group of return lines; any line without a recorded cost makes the group unknown.
+function groupedRecordedCost(items: ReturnItem[], field: 'cost_price_usd' | 'cost_price_khr', totalQuantity: number): number | null {
+  let sum = 0
+  for (const candidate of items) {
+    const cost = recordedCost(candidate[field])
+    if (cost === null) return null
+    sum += cost * (Number(candidate.quantity) || 0)
+  }
+  return sum / totalQuantity
+}
+
 type StockDelta = {
   productId: number
   productName: string | null
@@ -78,8 +96,8 @@ type StockDelta = {
   batchId: number | null
   damagedLotId: number | null
   quantity: number
-  costUsd: number
-  costKhr: number
+  costUsd: number | null
+  costKhr: number | null
   movementType: string
   // Present only when the line was recorded at a branch that has since been retired and the stock moved at its
   // active successor (branchId is then the successor; older snapshots simply lack these): the branch the stock
@@ -243,8 +261,8 @@ function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, s
       }
     }
     out.push({
-      sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id${delta.addressed ? ',branch_name,addressed_branch_name' : ''},movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id)
-            VALUES(@product,@name,@branch${delta.addressed ? ',@branchName,@addressed' : ''},@type,@quantity,@usd,@khr,@reason,@returnId,@userId,@userName,@batch)`,
+      sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id${delta.addressed ? ',branch_name,addressed_branch_name' : ''},movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id)
+            VALUES(@product,@name,@branch${delta.addressed ? ',@branchName,@addressed' : ''},@type,@quantity,@usd,@khr,ROUND(@usd*ABS(@quantity),4),ROUND(@khr*ABS(@quantity),4),@reason,@returnId,@userId,@userName,@batch)`,
       params: {
         product: delta.productId,
         name: delta.productName,
@@ -634,8 +652,8 @@ async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: 
           const itemQuantity = groupedItems.reduce((sum, candidate) => sum + (Number(candidate.quantity) || 0), 0)
           const lotQuantity = lots.reduce((sum, lot) => sum + (Number(lot.quantity) || 0), 0)
           if (Math.abs(itemQuantity - lotQuantity) > 0.000001) fail(`Return ${expected.id} has incomplete damaged-stock provenance.`, 400)
-          const costUsd = groupedItems.reduce((sum, candidate) => sum + (Number(candidate.cost_price_usd) || 0) * (Number(candidate.quantity) || 0), 0) / itemQuantity
-          const costKhr = groupedItems.reduce((sum, candidate) => sum + (Number(candidate.cost_price_khr) || 0) * (Number(candidate.quantity) || 0), 0) / itemQuantity
+          const costUsd = groupedRecordedCost(groupedItems, 'cost_price_usd', itemQuantity)
+          const costKhr = groupedRecordedCost(groupedItems, 'cost_price_khr', itemQuantity)
           for (const lot of lots) {
             if (cancelling && Number(lot.quantity_remaining) !== Number(lot.quantity)) fail(`Damaged stock from return ${expected.id} has already been consumed.`, 409)
             if (restoring && Number(lot.quantity_remaining) !== 0) fail(`Damaged stock from return ${expected.id} is not fully cancelled.`, 409)
@@ -649,14 +667,14 @@ async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: 
           if (Math.abs(allocated - quantity) > 0.000001) fail(`Return ${expected.id} has incomplete received-date provenance.`, 400)
           for (const allocation of ownAllocations) {
             if (Number(allocation.branch_id) !== recordedBranchId) fail(`Return ${expected.id} has a lot allocation for a different branch.`, 400)
-            member.stock.push({ productId, productName: item.product_name, branchId, batchId: Number(allocation.batch_id), damagedLotId: null, quantity: (scope === 'customer' ? (cancelling ? -1 : 1) : (cancelling ? 1 : -1)) * Number(allocation.quantity), costUsd: Number(item.cost_price_usd) || 0, costKhr: Number(item.cost_price_khr) || 0, movementType: '' })
+            member.stock.push({ productId, productName: item.product_name, branchId, batchId: Number(allocation.batch_id), damagedLotId: null, quantity: (scope === 'customer' ? (cancelling ? -1 : 1) : (cancelling ? 1 : -1)) * Number(allocation.quantity), costUsd: recordedCost(item.cost_price_usd), costKhr: recordedCost(item.cost_price_khr), movementType: '' })
           }
         } else if (item.batch_id) {
-          member.stock.push({ productId, productName: item.product_name, branchId, batchId: Number(item.batch_id), damagedLotId: null, quantity: (scope === 'customer' ? (cancelling ? -1 : 1) : (cancelling ? 1 : -1)) * quantity, costUsd: Number(item.cost_price_usd) || 0, costKhr: Number(item.cost_price_khr) || 0, movementType: '' })
+          member.stock.push({ productId, productName: item.product_name, branchId, batchId: Number(item.batch_id), damagedLotId: null, quantity: (scope === 'customer' ? (cancelling ? -1 : 1) : (cancelling ? 1 : -1)) * quantity, costUsd: recordedCost(item.cost_price_usd), costKhr: recordedCost(item.cost_price_khr), movementType: '' })
         } else if (trackedProducts.has(productId)) {
           fail(`Return ${expected.id} predates exact received-date tracking. Its stock cannot be changed safely in bulk; edit stock with the recorded received-date details first.`, 400)
         } else {
-          member.stock.push({ productId, productName: item.product_name, branchId, batchId: null, damagedLotId: null, quantity: (scope === 'customer' ? (cancelling ? -1 : 1) : (cancelling ? 1 : -1)) * quantity, costUsd: Number(item.cost_price_usd) || 0, costKhr: Number(item.cost_price_khr) || 0, movementType: '' })
+          member.stock.push({ productId, productName: item.product_name, branchId, batchId: null, damagedLotId: null, quantity: (scope === 'customer' ? (cancelling ? -1 : 1) : (cancelling ? 1 : -1)) * quantity, costUsd: recordedCost(item.cost_price_usd), costKhr: recordedCost(item.cost_price_khr), movementType: '' })
         }
       }
       for (const [landingBranchId, { effectName, label }] of landings) {

@@ -1195,7 +1195,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     // P3-L2: the line's own reason (as typed) is the movement reason; a line
     // without one keeps the generated session label.
     const movement: StockWriteStatement = { sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id)
-      SELECT m.product_id,p.name,m.branch_id,b.name,'add',m.quantity,m.unit_cost_usd,0,CASE WHEN m.unit_cost_usd IS NULL THEN NULL ELSE @totalCostUsd END,0,@reason,o.rowid,@actor,@actorName,m.batch_id
+      SELECT m.product_id,p.name,m.branch_id,b.name,'add',m.quantity,m.unit_cost_usd,NULL,CASE WHEN m.unit_cost_usd IS NULL THEN NULL ELSE @totalCostUsd END,NULL,@reason,o.rowid,@actor,@actorName,m.batch_id
       FROM stock_session_members m JOIN products p ON p.id=m.product_id JOIN branches b ON b.id=m.branch_id JOIN stock_session_operations o ON o.id=m.operation_id
       WHERE m.operation_id=@operationId AND m.line_id=@lineId`, params: { reason: line.reason || `Stock-in session ${operationId}`, actor: user.id, actorName: actorSnapshot(user), operationId, lineId: line.line_id, totalCostUsd: plan.params.receivedCostUsd } }
     const lineLanding = landings.get(line.line_id)
@@ -1608,7 +1608,7 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
           const rq = sign * (num(row.received_quantity) - num(original?.received_quantity))
           const rc = sign * (num(row.received_cost_usd) - num(original?.received_cost_usd))
           if (Math.abs(rq) > 1e-9) { sets.push('received_quantity=MAX(0,COALESCE(received_quantity,0)+@rq)'); params.rq = rq }
-          if (Math.abs(rc) > 0.00005) { sets.push('received_cost_usd=MAX(0,ROUND(COALESCE(received_cost_usd,0)+@rc,4))'); params.rc = roundMoney4(rc) }
+          if (Math.abs(rc) > 0.00005) { sets.push('received_cost_usd=CASE WHEN received_cost_usd IS NULL THEN NULL ELSE MAX(0,ROUND(received_cost_usd+@rc,4)) END'); params.rc = roundMoney4(rc) }
           // Migration 0154: activate before the redo puts stock back on the lot.
           if (direction === 'redo' && num(row.is_active) === 1) sets.push('is_active=1')
         }

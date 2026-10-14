@@ -352,8 +352,8 @@ export type ExistingSaleLine = {
   product_name: string | null
   quantity: number
   applied_price_usd: number
-  cost_price_usd: number
-  cost_price_khr: number
+  cost_price_usd: number | null
+  cost_price_khr: number | null
   branch_id: number | null
   // Set only when the line was made at a branch that has since been retired and its stock effect was redirected
   // to the active successor (branch_id is then the successor): the movement rows name where the stock really
@@ -745,8 +745,8 @@ function saleMovementStatement(input: {
   batchId: number | null
 }): StockStatement {
   return {
-    sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${input.line.effect ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-          VALUES (@product_id, @product_name, @branch_id${input.line.effect ? ', @branch_name, @addressed_branch_name' : ''}, @movement_type, @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
+    sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${input.line.effect ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+          VALUES (@product_id, @product_name, @branch_id${input.line.effect ? ', @branch_name, @addressed_branch_name' : ''}, @movement_type, @quantity, @unit_cost_usd, @unit_cost_khr, ROUND(@unit_cost_usd * ABS(@quantity), 4), ROUND(@unit_cost_khr * ABS(@quantity), 4), @reason, @reference_id, @user_id, @user_name, @batch_id)`,
     params: {
       product_id: input.line.product_id,
       product_name: input.line.product_name,
@@ -754,8 +754,8 @@ function saleMovementStatement(input: {
       ...(input.line.effect ? { branch_name: input.line.effect.branchName, addressed_branch_name: input.line.effect.addressedName } : {}),
       movement_type: input.movementType,
       quantity: input.quantity,
-      unit_cost_usd: Number(input.line.cost_price_usd) || 0,
-      unit_cost_khr: Number(input.line.cost_price_khr) || 0,
+      unit_cost_usd: input.line.cost_price_usd ?? null,
+      unit_cost_khr: input.line.cost_price_khr ?? null,
       reason: input.reason,
       reference_id: input.saleId,
       user_id: input.userId,

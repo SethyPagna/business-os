@@ -429,8 +429,8 @@ export function planSaleLineAddition(input: {
       params: { product_id: line.productId, quantity: line.heldUnits },
     })
     statements.push({
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${line.effect ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-            VALUES (@product_id, @product_name, @branch_id${line.effect ? ', @branch_name, @addressed_branch_name' : ''}, 'sale', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
+      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${line.effect ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+            VALUES (@product_id, @product_name, @branch_id${line.effect ? ', @branch_name, @addressed_branch_name' : ''}, 'sale', @quantity, @unit_cost_usd, @unit_cost_khr, ROUND(@unit_cost_usd * ABS(@quantity), 4), ROUND(@unit_cost_khr * ABS(@quantity), 4), @reason, @reference_id, @user_id, @user_name, @batch_id)`,
       params: {
         product_id: line.productId,
         product_name: line.productName,
@@ -800,8 +800,8 @@ export function planSaleLineRemoval(input: {
         params: { product_id: line.productId, quantity: line.heldUnits },
       })
       statements.push({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-              VALUES (@product_id, @product_name, @branch_id, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+              VALUES (@product_id, @product_name, @branch_id, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, ROUND(@unit_cost_usd * ABS(@quantity), 4), ROUND(@unit_cost_khr * ABS(@quantity), 4), @reason, @reference_id, @user_id, @user_name, @batch_id)`,
         params: {
           product_id: line.productId,
           product_name: line.productName,

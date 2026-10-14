@@ -468,8 +468,8 @@ function buildStatements(manifest: CanonicalManifest, request: SaleNotPaidStockR
           WHERE id=@product_id AND stock_quantity=@before AND stock_quantity>=1 AND updated_at=@updated_at`,
         params: { product_id: line.product_id, before: line.stock_before, updated_at: line.product_updated_at },
       }, {
-        sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id)
-          VALUES(@product_id,@product_name,2,'sale',-1,@cost_price_usd,0,'Awaiting payment stock hold correction',@sale_id,@actor_id,@actor_name,@batch_id)`,
+        sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id)
+          VALUES(@product_id,@product_name,2,'sale',-1,@cost_price_usd,0,@cost_price_usd,0,'Awaiting payment stock hold correction',@sale_id,@actor_id,@actor_name,@batch_id)`,
         params: {
           product_id: line.product_id, product_name: line.product_name, cost_price_usd: line.cost_price_usd,
           sale_id: target.id, actor_id: actor.id, actor_name: actor.name, batch_id: line.batch_id,
