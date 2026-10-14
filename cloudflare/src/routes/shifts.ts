@@ -733,7 +733,10 @@ async function readPreviousOpen(db: D1Compat, policy: ShiftPolicy, userId: numbe
  */
 async function readStaleDrawersToAlert(db: D1Compat, policy: ShiftPolicy, userId: number, branchId: number | null, newShiftId: number) {
   const accountClause = policy.scope_mode === 'per_account' ? 'AND user_id = @userId' : ''
-  const seenClause = policy.scope_mode === 'per_account' ? 'AND seen.user_id = shift_sessions.user_id' : ''
+  // Shop-wide, a registration on another branch is not the registration that left THIS branch's drawer behind.
+  const seenClause = policy.scope_mode === 'per_account'
+    ? 'AND seen.user_id = shift_sessions.user_id'
+    : `AND (seen.branch_id IS shift_sessions.branch_id OR (${BRANCH_ACTIVE_SQL}) = 0)`
   return db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions
     WHERE scope_mode = @scopeMode
       AND business_date < ${localTodayExpr()}
