@@ -32,7 +32,7 @@ const branchHistoryNameSql = (snapshot: string, fallback: string): string =>
 // `returns` (owner, 27 Sep 2026): customer returns -- recorded, cancelled and
 // restored -- get their own switch and their own forum topic. Until then a
 // customer return was sent as a `sales` event, into the Sale invoices topic.
-export type TelegramEventType = 'sales' | 'status' | 'returns' | 'fees' | 'stock_in' | 'stock_out' | 'products'
+export type TelegramEventType = 'sales' | 'status' | 'returns' | 'fees' | 'stock_in' | 'stock_out' | 'products' | 'reviews'
 // `heading` lets a route name the event (a return is not a sale, a transfer
 // is not a plain stock-out) while `type` stays the user's enable switch.
 export type TelegramEvent = { type: TelegramEventType; lines: string[]; heading?: string }
@@ -105,7 +105,7 @@ export function isTelegramSwitchValue(raw: string): boolean {
 const SETTING_KEYS = [
   'telegram_automation_enabled', 'telegram_chat_id', 'telegram_language',
   'telegram_sales_enabled', 'telegram_status_enabled', 'telegram_returns_enabled', 'telegram_fees_enabled', 'telegram_stock_in_enabled', 'telegram_stock_out_enabled',
-  'telegram_shift_overview_enabled', 'telegram_products_enabled',
+  'telegram_shift_overview_enabled', 'telegram_products_enabled', 'telegram_reviews_enabled',
   ...Object.values(TELEGRAM_SUMMARY_SWITCHES),
   ...TELEGRAM_TOPIC_KEYS,
 ] as const
@@ -271,6 +271,7 @@ async function getTelegramConfig(env: Env): Promise<TelegramConfig> {
       fees: isEnabled(values.telegram_fees_enabled, true), stock_in: isEnabled(values.telegram_stock_in_enabled, true), stock_out: isEnabled(values.telegram_stock_out_enabled, true),
       // Owner, 5 Oct 2026: a non-admin's product edit is always announced unless this switch is set off.
       products: isEnabled(values.telegram_products_enabled, true),
+      reviews: isEnabled(values.telegram_reviews_enabled, true),
     },
     topics: Object.fromEntries(TELEGRAM_TOPIC_KEYS.map((key) => [key, parseTelegramTopicId(values[key])])) as Record<TelegramTopicKey, number | undefined>,
   }
@@ -312,14 +313,34 @@ export function splitTelegramMessage(text: string): string[] {
   return chunks
 }
 
-function sendTelegramApi(config: TelegramConfig, chatId: string, part: string, messageThreadId?: number): Promise<Response> {
+function sendTelegramApi(config: TelegramConfig, chatId: string, part: string, messageThreadId?: number, timeoutMs?: number): Promise<Response> {
   return fetch(`https://api.telegram.org/bot${config.token}/sendMessage`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId, text: part, disable_web_page_preview: true,
       ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
     }),
+    ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
   })
+}
+
+/**
+ * `retryOnce`: one more try after a 429 (waiting retry_after, at most 3 s) or a 5xx. Never after a thrown error or the
+ * attempt timeout: Telegram may already have accepted the message, and a second send would show it twice.
+ */
+export type TelegramSendOptions = { retryOnce?: boolean }
+const RETRY_WAIT_CAP_MS = 3000
+const RETRY_WAIT_DEFAULT_MS = 500
+const RETRYING_ATTEMPT_TIMEOUT_MS = 8000
+const isTransientTelegramStatus = (status: number): boolean => status === 429 || (status >= 500 && status <= 599)
+
+async function transientRetryWaitMs(response: Response): Promise<number> {
+  if (response.status !== 429) return RETRY_WAIT_DEFAULT_MS
+  try {
+    const seconds = Number(JSON.parse(await response.text())?.parameters?.retry_after)
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(RETRY_WAIT_CAP_MS, Math.round(seconds * 1000))
+  } catch { /* an unreadable answer waits the default */ }
+  return RETRY_WAIT_DEFAULT_MS
 }
 
 // A forum topic the owner deleted or closed answers every send into it with
@@ -331,14 +352,24 @@ function sendTelegramApi(config: TelegramConfig, chatId: string, part: string, m
 // behaviour -- it throws, unretried.
 const DELETED_TOPIC_MESSAGE = /message thread not found|topic_deleted|topic closed/i
 
-async function postTelegram(config: TelegramConfig, text: string, chatId = config.chatId, messageThreadId?: number, topicKey?: TelegramTopicKey): Promise<void> {
+async function postTelegram(config: TelegramConfig, text: string, chatId = config.chatId, messageThreadId?: number, topicKey?: TelegramTopicKey, options: TelegramSendOptions = {}): Promise<void> {
+  const timeoutMs = options.retryOnce ? RETRYING_ATTEMPT_TIMEOUT_MS : undefined
   for (const part of splitTelegramMessage(text)) {
-    let response = await sendTelegramApi(config, chatId, part, messageThreadId)
+    let retriesLeft = options.retryOnce ? 1 : 0
+    const attempt = async (thread?: number): Promise<Response> => {
+      const answered = await sendTelegramApi(config, chatId, part, thread, timeoutMs)
+      if (retriesLeft <= 0 || !isTransientTelegramStatus(answered.status)) return answered
+      retriesLeft -= 1
+      const waitMs = await transientRetryWaitMs(answered)
+      await new Promise<void>((resolve) => setTimeout(resolve, waitMs))
+      return sendTelegramApi(config, chatId, part, thread, timeoutMs)
+    }
+    let response = await attempt(messageThreadId)
     if (!response.ok) {
       let body = await response.text().catch(() => '')
       if (response.status === 400 && messageThreadId && DELETED_TOPIC_MESSAGE.test(body)) {
         console.warn(`Telegram: the topic for "${topicKey || 'message_thread_id'}" (chat ${chatId}, thread ${messageThreadId}) looks deleted or closed; retrying in General. Fix ${topicKey ? `the ${topicKey} setting` : 'the topic setting'} in Settings.`)
-        response = await sendTelegramApi(config, chatId, part)
+        response = await attempt()
         if (!response.ok) body = await response.text().catch(() => '')
       }
       if (!response.ok) throw new TelegramError('telegram_rejected', `Telegram rejected the message (${response.status})${body ? `: ${body.slice(0, 160)}` : ''}`)
@@ -346,9 +377,25 @@ async function postTelegram(config: TelegramConfig, text: string, chatId = confi
   }
 }
 
-export async function sendTelegramEvent(env: Env, event: TelegramEvent): Promise<boolean> {
+const telegramEventIsOn = (config: TelegramConfig, type: TelegramEventType): boolean =>
+  config.enabled && config.categories[type] && !configurationProblem(config)
+
+export async function sendTelegramEvent(env: Env, event: TelegramEvent, options: TelegramSendOptions = {}): Promise<boolean> {
+  return deliverTelegramEvent(await getTelegramConfig(env), event, options)
+}
+
+/** For events whose lines cost a read: one settings read, then `compose` runs only if the switches and chat id are set; null means nothing to send. */
+export async function sendTelegramEventWhenOn(
+  env: Env, type: TelegramEventType, compose: () => Promise<Omit<TelegramEvent, 'type'> | null>, options: TelegramSendOptions = {},
+): Promise<boolean> {
   const config = await getTelegramConfig(env)
-  if (!config.enabled || !config.categories[event.type] || configurationProblem(config)) return false
+  if (!telegramEventIsOn(config, type)) return false
+  const composed = await compose()
+  return composed ? deliverTelegramEvent(config, { ...composed, type }, options) : false
+}
+
+async function deliverTelegramEvent(config: TelegramConfig, event: TelegramEvent, options: TelegramSendOptions): Promise<boolean> {
+  if (!telegramEventIsOn(config, event.type)) return false
   // No default for `sales` or `status`: those alerts' headings name their
   // receipt number (owner's Sep 23 2026 samples, "🛍️ Sale Invoice /
   // វិក្កយបត្រការលក់: 20260923-153527" and "🧾 Invoice / វិក្កយបត្រ:
@@ -362,7 +409,7 @@ export async function sendTelegramEvent(env: Env, event: TelegramEvent): Promise
   const eventTopic: Record<TelegramEventType, TelegramTopicKey> = {
     sales: 'telegram_topic_sales', status: 'telegram_topic_status', returns: 'telegram_topic_returns',
     fees: 'telegram_topic_expenses', stock_in: 'telegram_topic_stock', stock_out: 'telegram_topic_stock',
-    products: 'telegram_topic_alerts',
+    products: 'telegram_topic_alerts', reviews: 'telegram_topic_alerts',
   }
   // S4-8: the ONE place every event message becomes bilingual. Doing it on
   // the composed line (rather than in each builder) means the one route that
@@ -383,7 +430,7 @@ export async function sendTelegramEvent(env: Env, event: TelegramEvent): Promise
       : line.startsWith(EVENT_SECTION_MARKER)
         ? sectionHeader(line.slice(EVENT_SECTION_MARKER.length) as TelegramLabelKey, REPORT_SECTION_EDGE)
         : localizeTelegramLine(cleanLine(line, 400)))),
-  ].filter(Boolean).join('\n')), config.chatId, config.topics[eventTopic[event.type]], eventTopic[event.type])
+  ].filter(Boolean).join('\n')), config.chatId, config.topics[eventTopic[event.type]], eventTopic[event.type], options)
   return true
 }
 

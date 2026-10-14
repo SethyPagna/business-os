@@ -300,6 +300,129 @@ const baseSettings = [
     globalThis.fetch = realFetch
   }
 
+  // ---- review alerts ------
+  // A `reviews` event goes to telegram_topic_alerts, follows the topic setting it finds (never a number of its own),
+  // is on when its switch is unset, and is the only kind of send that may retry -- once, on a 429 or a 5xx only.
+  const reviewEnv = { TELEGRAM_BOT_TOKEN: 'test-token-not-a-real-one', BUSINESS_OS_ADMIN_URL: 'https://admin.example.com' }
+  const reviewEvent = { type: 'reviews', heading: '🕒 Review requested', lines: ['Request: Edit branch · Main', 'Requested by: sokha'] }
+  const okAnswer = { ok: true, status: 200, text: async () => '', json: async () => ({ ok: true }) }
+  const answer = (status, body = '') => ({ ok: false, status, text: async () => body, json: async () => (body ? JSON.parse(body) : {}) })
+  const realSetTimeout = globalThis.setTimeout
+  try {
+    const attempts = []
+    let script = []
+    globalThis.fetch = async (url, init) => {
+      assert.match(String(url), /^https:\/\/api\.telegram\.org\/bot/, 'a review alert goes to the Telegram API and nothing else')
+      attempts.push({ body: JSON.parse(init.body), hasSignal: Boolean(init.signal) })
+      const next = script[attempts.length - 1]
+      if (next instanceof Error) throw next
+      return next || okAnswer
+    }
+    const waits = []
+    globalThis.setTimeout = (fn, ms) => { waits.push(ms); fn(); return 0 }
+    const run = async (settings, options, answers = []) => {
+      attempts.length = 0; waits.length = 0; script = answers
+      return wireTelegram(settings).sendTelegramEvent(reviewEnv, reviewEvent, options)
+    }
+
+    // -- the topic: the Alerts setting this deployment holds, whatever it is ------
+    assert.equal(await run(baseSettings), true)
+    assert.equal(attempts.length, 1)
+    assert.equal(attempts[0].body.message_thread_id, 77, 'reviews routes to telegram_topic_alerts')
+    assert.equal(attempts[0].body.chat_id, '-100999')
+    const moved = baseSettings.map((row) => (row.key === 'telegram_topic_alerts' ? { ...row, value: '4242' } : row.key === 'telegram_chat_id' ? { ...row, value: '-100888' } : row))
+    await run(moved)
+    assert.equal(attempts[0].body.message_thread_id, 4242, 'the topic follows the setting: no id of its own')
+    assert.equal(attempts[0].body.chat_id, '-100888', 'and so does the chat')
+    await run(baseSettings.filter((row) => row.key !== 'telegram_topic_alerts'))
+    assert.ok(!('message_thread_id' in attempts[0]), 'no Alerts topic configured: General, no thread key at all')
+    assert.ok(!attempts[0].hasSignal, 'a plain send carries no timeout signal')
+
+    // -- the switch: on when unset, off only when set to false -----------------------
+    for (const [value, expected] of [[undefined, true], ['true', true], ['', true], ['false', false], ['FALSE', false], [' false ', false]]) {
+      const settings = value === undefined ? baseSettings : [...baseSettings, { key: 'telegram_reviews_enabled', value }]
+      assert.equal(await run(settings), expected, `telegram_reviews_enabled=${JSON.stringify(value)}`)
+      assert.equal(attempts.length, expected ? 1 : 0, `telegram_reviews_enabled=${JSON.stringify(value)} sends ${expected ? 'one message' : 'nothing'}`)
+    }
+    assert.equal(await run([...baseSettings, { key: 'telegram_automation_enabled', value: 'false' }]), false, 'automation off: nothing')
+    assert.equal(attempts.length, 0)
+    assert.equal(await run(baseSettings.filter((row) => row.key !== 'telegram_chat_id')), false, 'no chat id: nothing')
+    assert.equal(attempts.length, 0)
+    // The review switch is its own: the product-edit switch and the sales switch do not govern it, and it governs neither.
+    assert.equal(await run([...baseSettings, { key: 'telegram_products_enabled', value: 'false' }, { key: 'telegram_sales_enabled', value: 'false' }]), true)
+    assert.equal(await run([...baseSettings, { key: 'telegram_reviews_enabled', value: 'false' }]), false)
+    assert.equal(await wireTelegram([...baseSettings, { key: 'telegram_reviews_enabled', value: 'false' }]).sendTelegramEvent(reviewEnv, { type: 'sales', lines: ['x'] }), true, 'turning reviews off leaves sales on')
+
+    // -- the lazy form: nothing is composed (nothing read) while the alerts are off ------
+    let composed = 0
+    const compose = async () => { composed += 1; return { heading: reviewEvent.heading, lines: reviewEvent.lines } }
+    for (const settings of [
+      [...baseSettings, { key: 'telegram_reviews_enabled', value: 'false' }],
+      [...baseSettings, { key: 'telegram_automation_enabled', value: 'false' }],
+      baseSettings.filter((row) => row.key !== 'telegram_chat_id'),
+    ]) {
+      attempts.length = 0; composed = 0
+      assert.equal(await wireTelegram(settings).sendTelegramEventWhenOn(reviewEnv, 'reviews', compose), false)
+      assert.equal(composed, 0, 'compose (the record-name read) must not run while the alerts are off')
+      assert.equal(attempts.length, 0)
+    }
+    attempts.length = 0; composed = 0
+    assert.equal(await wireTelegram(baseSettings).sendTelegramEventWhenOn(reviewEnv, 'reviews', compose), true)
+    assert.equal(composed, 1, 'compose runs once while the alerts are on')
+    assert.equal(attempts.length, 1)
+    assert.equal(attempts[0].body.message_thread_id, 77)
+    attempts.length = 0
+    assert.equal(await wireTelegram(baseSettings).sendTelegramEventWhenOn(reviewEnv, 'reviews', async () => null), false, 'compose may decline')
+    assert.equal(attempts.length, 0)
+    console.log('PASS review alerts: reviews routes to telegram_topic_alerts as configured, on when unset, off only on false, and the lazy form composes nothing while off')
+
+    // -- one retry on 429 / 5xx, never on a thrown error --------------------------
+    const retry = { retryOnce: true }
+    assert.equal(await run(baseSettings, retry, [answer(429, '{"ok":false,"error_code":429,"parameters":{"retry_after":0}}')]), true)
+    assert.equal(attempts.length, 2, 'a 429 is retried once')
+    assert.ok(attempts.every((attempt) => attempt.hasSignal), 'a retrying send carries a timeout signal on every attempt')
+    assert.deepEqual(attempts[1].body, attempts[0].body, 'the retry is the same message')
+    assert.equal(await run(baseSettings, retry, [answer(500)]), true)
+    assert.equal(attempts.length, 2, 'a 500 is retried once')
+    assert.equal(await run(baseSettings, retry, [answer(502)]), true)
+    assert.equal(attempts.length, 2, 'a 502 is retried once')
+    await assert.rejects(() => run(baseSettings, retry, [answer(503), answer(503)]), /Telegram rejected the message \(503\)/)
+    assert.equal(attempts.length, 2, 'only ONE retry: a second 503 is final')
+    await assert.rejects(() => run(baseSettings, retry, [answer(429, '{"parameters":{"retry_after":0}}'), answer(429, '{"parameters":{"retry_after":0}}')]), /\(429\)/)
+    assert.equal(attempts.length, 2, 'only ONE retry: a second 429 is final')
+    assert.equal(await run(baseSettings, retry, [answer(429, '{"ok":false,"parameters":{"retry_after":2}}')]), true)
+    assert.deepEqual(waits, [2000], 'the wait is Telegram\'s retry_after')
+    await run(baseSettings, retry, [answer(429, '{"ok":false,"parameters":{"retry_after":9}}')])
+    assert.deepEqual(waits, [3000], 'the wait is capped at 3 s')
+    await run(baseSettings, retry, [answer(429, 'not json')])
+    assert.equal(waits.length, 1, 'an unreadable 429 still waits and retries once')
+    assert.ok(waits[0] <= 3000)
+    // An AMBIGUOUS failure -- Telegram may already have taken the message -- is never retried.
+    await assert.rejects(() => run(baseSettings, retry, [new TypeError('Network connection lost')]), /Network connection lost/)
+    assert.equal(attempts.length, 1, 'a network error is not retried')
+    await assert.rejects(() => run(baseSettings, retry, [Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' })]), /timeout/)
+    assert.equal(attempts.length, 1, 'a timeout is not retried')
+    await assert.rejects(() => run(baseSettings, retry, [answer(400, '{"description":"Bad Request: chat not found"}')]), /\(400\)/)
+    assert.equal(attempts.length, 1, 'a 400 is not retried')
+    // The default is unchanged: no flag, no retry, no signal.
+    await assert.rejects(() => run(baseSettings, {}, [answer(429, '{"parameters":{"retry_after":0}}')]), /\(429\)/)
+    assert.equal(attempts.length, 1, 'without retryOnce a 429 is final, as before')
+    await assert.rejects(() => run(baseSettings, undefined, [answer(500)]), /\(500\)/)
+    assert.equal(attempts.length, 1, 'without retryOnce a 500 is final, as before')
+    assert.ok(!attempts[0].hasSignal)
+    // The deleted-topic fallback still works for a retrying send, and a retry is not spent on it.
+    assert.equal(await run(baseSettings, retry, [answer(400, '{"description":"Bad Request: message thread not found"}')]), true)
+    assert.equal(attempts.length, 2)
+    assert.ok(!('message_thread_id' in attempts[1].body), 'the fallback drops the topic')
+    // ONE retry per message in total, the General fallback included: 503, then a deleted topic, then 503 again is final.
+    await assert.rejects(() => run(baseSettings, retry, [answer(503), answer(400, '{"description":"Bad Request: message thread not found"}'), answer(503), okAnswer]), /\(503\)/)
+    assert.equal(attempts.length, 3, 'the fallback send is not retried once the one retry has been spent')
+    console.log('PASS retry: one retry on 429 (retry_after, capped at 3 s) and on 5xx, none on a network error, a timeout or a 400, none by default')
+  } finally {
+    globalThis.fetch = realFetch
+    globalThis.setTimeout = realSetTimeout
+  }
+
   // ---- shift report and shift overview: source-pinned, since a full close/
   // reopen fixture is already exercised end-to-end by
   // test-telegram-shift-report-pure.cjs and test-telegram-shift-overview-pure.cjs.

@@ -97,7 +97,20 @@ export interface ListPendingActionsOptions {
   requestedBy?: number | null
 }
 
-export async function listPendingActions(env: Env, options: ListPendingActionsOptions = {}): Promise<PendingActionRow[]> {
+/** What the pending-review tag needs to point at a record: no payload, expected state, summary or reason. */
+export type PendingActionTarget = Pick<PendingActionRow,
+  'id' | 'section' | 'action_type' | 'entity_type' | 'entity_id' | 'status' | 'requested_by' | 'requested_by_name' | 'created_at'>
+const TARGET_COLUMNS = 'id, section, action_type, entity_type, entity_id, status, requested_by, requested_by_name, created_at'
+
+export function listPendingActions(env: Env, options: ListPendingActionsOptions = {}): Promise<PendingActionRow[]> {
+  return selectPendingActions<PendingActionRow>(env, options, '*')
+}
+
+export function listPendingActionTargets(env: Env, options: ListPendingActionsOptions = {}): Promise<PendingActionTarget[]> {
+  return selectPendingActions<PendingActionTarget>(env, options, TARGET_COLUMNS)
+}
+
+async function selectPendingActions<Row>(env: Env, options: ListPendingActionsOptions, columns: string): Promise<Row[]> {
   const db = getDb(env)
   const status = options.status ?? 'open'
   const clauses: string[] = []
@@ -116,8 +129,8 @@ export async function listPendingActions(env: Env, options: ListPendingActionsOp
   }
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
   const rows = await db.prepare(`
-    SELECT * FROM pending_actions ${where} ORDER BY created_at DESC, id DESC
-  `).all<PendingActionRow>(params)
+    SELECT ${columns} FROM pending_actions ${where} ORDER BY created_at DESC, id DESC
+  `).all<Row>(params)
   return rows ?? []
 }
 

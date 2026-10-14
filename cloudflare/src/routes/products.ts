@@ -106,6 +106,7 @@ import {
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery, parseRankedIds } from '../lib/productSearchQuery'
 import { omitUnchangedProductImageFields, productImageFieldsChanged, productImageFieldsChangedResolved, resolveProductImageFields, ProductImageAssetError } from '../lib/productImagePermission'
 import type { Env } from '../index'
+import type { ReviewAlertHook } from '../lib/reviewAlert'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -159,6 +160,17 @@ function announceProductAlert(c: { env: Env; executionCtx: { waitUntil(promise: 
   if (!user || isAdminControlUser(user)) return
   c.executionCtx.waitUntil(Promise.resolve(sendTelegramEvent(c.env, { type: 'products', heading, lines }))
     .catch((error) => console.error('[telegram] product alert failed', error)))
+}
+// A removal request is queued by its own insert, not through maybeQueueForReview, so it announces itself here, only
+// after its batch committed (never for a replayed request). The hook is absent in tests that do not install it.
+async function announceQueuedProductRemoval(env: Env, user: SessionUser, productId: number): Promise<void> {
+  const hook = (globalThis as unknown as Record<symbol, ReviewAlertHook | undefined>)[Symbol.for('business-os.review-alert.v1')]
+  try {
+    await hook?.announce(env, {
+      kind: 'created',
+      row: { section: 'products', action_type: 'delete', entity_type: 'product', entity_id: productId, payload_json: '{}', requested_by_name: actorSnapshot(user) },
+    })
+  } catch { /* an alert never fails the request it announces */ }
 }
 const MERGE_ROUTE_PATH = /\/(?:merge-duplicates|possible-duplicates\/merge)(?:\/|$|-)/
 const MERGE_JSON_BODY_PATH = /\/(?:merge-duplicates|possible-duplicates\/merge)$/
@@ -2861,6 +2873,7 @@ app.delete('/:id', async (c) => {
       }
       return c.json({ success: false, code: 'review_state_conflict', error: 'The product changed before the removal request was queued.' }, 409)
     }
+    await announceQueuedProductRemoval(c.env, user, id)
     const queued = await db.prepare('SELECT pending_action_id FROM product_remove_operations WHERE operation_id=@operation')
       .get<{ pending_action_id: number }>({ operation: operationId })
     return c.json({ success: true, pending: true, pendingActionId: Number(queued?.pending_action_id),
@@ -8424,6 +8437,7 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
         await db.batch(productRemoveReviewQueueStatements({ operation, plan, user }))
         const pending = await db.prepare('SELECT pending_action_id FROM product_remove_operations WHERE operation_id=@operation')
           .get<{ pending_action_id: number | null }>({ operation: operation.operation_id })
+        await announceQueuedProductRemoval(c.env, user, Number(operation.product_id))
         deltaRemovals.push({ action_ordinal: Number(operation.action_ordinal), product_id: Number(operation.product_id),
           status: 'approval_pending', pending_action_id: pending?.pending_action_id ?? null, undo_availability: 'unavailable', generation: 0 })
       } else {

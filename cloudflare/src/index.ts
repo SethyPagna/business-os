@@ -61,6 +61,8 @@ import { broadcastHubStub } from './durable-objects/broadcastHub'
 import { originGuard } from './lib/originGuard'
 import { isBlockedOnStorefrontHost } from './lib/publicHostGate'
 import { requestMetricsMiddleware, runBackground } from './lib/requestMetrics'
+import { runWithRequestDefer } from './lib/requestDefer'
+import { installReviewAlerts } from './lib/reviewAlert'
 
 export type Env = {
   DB: D1Database
@@ -195,6 +197,15 @@ const app = new Hono<{ Bindings: Env }>()
 // C3v2 A0: per-request D1/cache metrics (lib/requestMetrics.ts). First, so it
 // wraps every /api/* middleware and handler below; adds no I/O to the request.
 app.use('/api/*', requestMetricsMiddleware)
+
+// Opens the request's waitUntil scope for lib code that has no Hono context (lib/requestDefer.ts); no ExecutionContext, no scope.
+app.use('/api/*', async (c, next) => {
+  let waitUntil: ((work: Promise<unknown>) => void) | null = null
+  try { const ctx = c.executionCtx; waitUntil = (work) => ctx.waitUntil(work) } catch { /* no ExecutionContext */ }
+  if (!waitUntil) return next()
+  return runWithRequestDefer(waitUntil, () => next())
+})
+installReviewAlerts()
 
 // Global safety net: most routes in this Worker (compat.ts, auth.ts, etc.)
 // have no per-route try/catch. Without this, Hono's default behavior for

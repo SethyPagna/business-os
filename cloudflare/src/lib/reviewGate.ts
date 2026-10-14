@@ -28,6 +28,11 @@ import { createPendingAction } from './pendingActions'
 import { getPermissionTier, type PermissionUser } from './permissions'
 import type { Env } from '../index'
 import { actorSnapshot } from './actorSnapshot'
+import type { ReviewAlertHook } from './reviewAlert'
+
+// A global hook, not an import: many tests load this file with hand-written require tables, and an absent hook is a no-op.
+const reviewAlertHook = (): ReviewAlertHook | undefined =>
+  (globalThis as unknown as Record<symbol, ReviewAlertHook | undefined>)[Symbol.for('business-os.review-alert.v1')]
 
 export interface MaybeQueueForReviewInput {
   actionType: string
@@ -55,7 +60,8 @@ export async function maybeQueueForReview(
 ): Promise<number | null> {
   const tier = getPermissionTier(user, section)
   if (tier !== 'review') return null
-  return createPendingAction(env, {
+  const requestedByName = actorSnapshot(user)
+  const pendingId = await createPendingAction(env, {
     section,
     actionType: input.actionType,
     entityType: input.entityType,
@@ -64,6 +70,17 @@ export async function maybeQueueForReview(
     expectedEntityStateJson: input.expectedEntityStateJson,
     summary: input.summary ?? null,
     requestedBy: user?.id ?? null,
-    requestedByName: actorSnapshot(user),
+    requestedByName,
   })
+  // After the insert, so a request that was not queued sends nothing. Never reads the summary (it holds amounts).
+  try {
+    await reviewAlertHook()?.announce(env, {
+      kind: 'created',
+      row: {
+        section, action_type: input.actionType, entity_type: input.entityType, entity_id: input.entityId ?? null,
+        payload_json: JSON.stringify(input.payload ?? {}), requested_by_name: requestedByName,
+      },
+    })
+  } catch { /* an alert never fails the write that queued it */ }
+  return pendingId
 }

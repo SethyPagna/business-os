@@ -9,14 +9,18 @@ import { audit } from '../lib/audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import {
   listPendingActions,
+  listPendingActionTargets,
+  type ListPendingActionsOptions,
   getPendingAction,
+  type PendingActionRow,
   markPendingActionApproved,
   markPendingActionRejected,
   resubmitPendingAction,
   REVIEW_REASON_MAX_LENGTH,
   type PendingActionStatus,
 } from '../lib/pendingActions'
-import { applyApprovedPendingAction, FeeReviewStaleError, NoReviewApplierError, productRemovePendingPointer, ReviewDecisionConflictError, ReviewRequesterPermissionError, recoverApprovedBranchAction } from '../lib/reviewApply'
+import { applyApprovedPendingAction, FeeReviewStaleError, NoReviewApplierError, productRemovePendingPointer, ReviewDecisionConflictError, ReviewRequesterPermissionError, recoverApprovedBranchAction, type ReviewerInfo } from '../lib/reviewApply'
+import type { ReviewAlertEvent, ReviewAlertHook } from '../lib/reviewAlert'
 import { ProductImageAssetError } from '../lib/productImagePermission'
 import { ProductRemoveError } from '../lib/productDelete'
 import type { Env } from '../index'
@@ -64,6 +68,31 @@ const REVIEW_SECTION_FULL_CODE = 'review_section_full_required'
 const reviewSectionFullMessage = (section: string): string =>
   `Approving this request needs Full access to ${section}. Ask a reviewer who has it.`
 
+// A global hook, not an import: many tests load this route with hand-written require tables, and an absent hook is a no-op.
+// Every alert is sent after the write it announces committed, never on a replay, a refusal or a 409.
+const reviewAlertHook = (): ReviewAlertHook | undefined =>
+  (globalThis as unknown as Record<symbol, ReviewAlertHook | undefined>)[Symbol.for('business-os.review-alert.v1')]
+async function announceReview(env: Env, event: ReviewAlertEvent): Promise<void> {
+  try { await reviewAlertHook()?.announce(env, event) } catch { /* an alert never fails the decision it announces */ }
+}
+// An expense delete removes the record the alert names, so its name is read before the change; other kinds read none.
+async function reviewNameBeforeChange(env: Env, row: PendingActionRow): Promise<string | null> {
+  try { return (await reviewAlertHook()?.nameBeforeChange(env, row)) ?? null } catch { return null }
+}
+
+// An applier refuses on purpose with an Error named 'ReviewCodedRefusal' (string `code`, `status` 403/409/503, optional
+// plain-object `details`). Matched by name and shape, not class, so an unrelated error is never mistaken for one and still
+// falls through to the generic 500. `details` is spread first so it cannot overwrite success, error or code.
+type ReviewMergedInto = { survivorId?: number; survivorName?: string | null; mergedName?: string | null }
+function reviewCodedRefusal(err: unknown): { body: Record<string, unknown>; status: 403 | 409 | 503 } | null {
+  if (!(err instanceof Error) || err.name !== 'ReviewCodedRefusal') return null
+  const { code, status, details } = err as Error & { code?: unknown; status?: unknown; details?: unknown }
+  if (typeof code !== 'string' || !code) return null
+  if (status !== 403 && status !== 409 && status !== 503) return null
+  const extra = details && typeof details === 'object' && !Array.isArray(details) ? details as Record<string, unknown> : {}
+  return { body: { ...extra, success: false, error: err.message, code }, status }
+}
+
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
 app.use('*', acquisitionCostResponses)
@@ -91,7 +120,10 @@ app.get('/mine', async (c) => {
   // submitter's question is "what happened to my requests?", and the
   // rejected ones -- the only place the reviewer's reason is visible -- are
   // exactly the rows they most need to see.
-  const rows = await listPendingActions(c.env, { status, requestedBy: Number(user.id) })
+  const fields = c.req.query('fields')
+  if (fields && fields !== 'targets') return c.json({ success: false, code: 'invalid_fields', error: "fields must be 'targets' or left out." }, 400)
+  const options: ListPendingActionsOptions = { status, requestedBy: Number(user.id) }
+  const rows = fields === 'targets' ? await listPendingActionTargets(c.env, options) : await listPendingActions(c.env, options)
   return c.json({ success: true, data: rows })
 })
 
@@ -176,6 +208,8 @@ app.post('/:id/resubmit', async (c) => {
   // Same channel the approve/reject handlers broadcast on, so an admin with
   // the Review page open sees it return to their queue without a refresh.
   c.executionCtx.waitUntil(broadcast(c.env, 'pendingActions', { id, status: 'open' }))
+  // Its UPDATE is guarded on the requester and on 'rejected', so only the request that reopened the row gets here.
+  if (row) await announceReview(c.env, { kind: 'resubmitted', row })
   return c.json({ success: true, data: row })
 })
 
@@ -198,7 +232,10 @@ app.get('/', async (c) => {
     ? (statusParam as PendingActionStatus | 'all')
     : 'open'
   const section = c.req.query('section') || null
-  const rows = await listPendingActions(c.env, { status, section })
+  const fields = c.req.query('fields')
+  if (fields && fields !== 'targets') return c.json({ success: false, code: 'invalid_fields', error: "fields must be 'targets' or left out." }, 400)
+  const options: ListPendingActionsOptions = { status, section }
+  const rows = fields === 'targets' ? await listPendingActionTargets(c.env, options) : await listPendingActions(c.env, options)
   return c.json({ success: true, data: rows })
 })
 
@@ -236,6 +273,8 @@ app.post('/:id/approve', async (c) => {
     return c.json({ error: 'Full product removal permission is required to approve this request.' }, 403)
   }
   let pendingActionMarkedAtomically = false
+  let recordNameBefore: string | null = null
+  let mergedInto: ReviewMergedInto | undefined
   try {
     // Finding H: the reviewer's CURRENT grant for this exact action and for each of its effects (price,
     // cost, image), checked before any receipt replay or write (lib/reviewApprovalPermission.ts).
@@ -258,11 +297,25 @@ app.post('/:id/approve', async (c) => {
       return c.json({ error: 'Already reviewed' }, 409)
     }
 
-    const outcome = await applyApprovedPendingAction(c.env, row, { id: user.id, name: actorSnapshot(user), redirectTarget: () => branchRedirectTarget(c) }, user,
-      (promise) => c.executionCtx.waitUntil(promise))
+    recordNameBefore = await reviewNameBeforeChange(c.env, row)
+    // { "confirm_merge_into": <product id> } names the survivor the reviewer saw; anything else (no body, not JSON, not a
+    // positive integer) is "not confirmed" and passed on as absent. The extended type keeps the extra property from being
+    // an excess-property error against ReviewerInfo.
+    const confirmBody = await c.req.json<{ confirm_merge_into?: unknown }>().catch(() => null)
+    const stated = confirmBody?.confirm_merge_into
+    const confirmed = typeof stated === 'number' ? stated : typeof stated === 'string' && /^\d+$/.test(stated.trim()) ? Number(stated.trim()) : NaN
+    const confirmMergeInto = Number.isSafeInteger(confirmed) && confirmed > 0 ? confirmed : undefined
+    const reviewer: ReviewerInfo & { confirmMergeInto?: number } = {
+      id: user.id, name: actorSnapshot(user), redirectTarget: () => branchRedirectTarget(c),
+      ...(confirmMergeInto !== undefined ? { confirmMergeInto } : {}),
+    }
+    const outcome = await applyApprovedPendingAction(c.env, row, reviewer, user, (promise) => c.executionCtx.waitUntil(promise))
     if (outcome.replayedBranchAction) return c.json({ success: true, data: outcome.replayedBranchAction, replayed: true })
     pendingActionMarkedAtomically = outcome.pendingActionMarkedAtomically
+    mergedInto = (outcome as { mergedInto?: ReviewMergedInto }).mergedInto
   } catch (err) {
+    const coded = reviewCodedRefusal(err)
+    if (coded) return c.json(coded.body, coded.status)
     const stockError = productStockGuardError(err)
     if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
     // Finding I (lib/reviewApply.ts ReviewIdentityConflictError, matched by its code): the request would mint a
@@ -309,6 +362,11 @@ app.post('/:id/approve', async (c) => {
   const updatedRow = await getPendingAction(c.env, id)
   await audit(c.env, user.id, actorSnapshot(user), 'approve', 'pending_action', id, updatedRow)
   c.executionCtx.waitUntil(broadcast(c.env, 'pendingActions', { id, status: 'approved' }))
+  // Only the request whose approval committed gets here: the loser of a race, and every replay, returned above.
+  await announceReview(c.env, {
+    kind: 'approved', row: updatedRow ?? row, by: actorSnapshot(user), recordName: recordNameBefore,
+    merged: mergedInto ? { retired: mergedInto.mergedName, kept: mergedInto.survivorName } : null,
+  })
   return c.json({ success: true, data: updatedRow })
 })
 
@@ -341,6 +399,8 @@ app.post('/:id/reject', async (c) => {
   const row = await getPendingAction(c.env, id)
   await audit(c.env, user.id, actorSnapshot(user), 'reject', 'pending_action', id, row)
   c.executionCtx.waitUntil(broadcast(c.env, 'pendingActions', { id, status: 'rejected' }))
+  // markPendingActionRejected only changes a row that is still 'open', so only the winner gets here.
+  if (row) await announceReview(c.env, { kind: 'rejected', row, by: actorSnapshot(user), reason })
   return c.json({ success: true, data: row })
 })
 

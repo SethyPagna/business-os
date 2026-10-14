@@ -273,6 +273,34 @@ assert.deepEqual(
 assert.ok(Object.keys(SENSE_EXEMPT).length <= 3, 'too many glossary exemptions -- the Worker is drifting from the app\'s Khmer')
 console.log(`PASS glossary: ${checked} Worker terms also exist in the language packs and use the pack's Khmer (${Object.keys(SENSE_EXEMPT).length} documented sense exemption)`)
 
+// The review alerts. The `Request:` row opens with a
+// fixed phrase the generic glossary scan above cannot see (it is not a label and not a VALUE_PHRASE, so a record named
+// like a phrase is never rewritten), so each phrase is held to the pack key it was copied from, by name -- the stricter
+// test, as for the sale statuses. The one phrase with no single pack key is composed from three pack words.
+const REVIEW_PHRASE_PACK_KEYS = {
+  'New product': 'new_products_count',
+  'Edit product': 'perm_act_products_edit',
+  'Remove product': 'perm_act_products_delete',
+  'Delete expense': 'perm_act_fees_delete',
+  'Edit branch': 'perm_act_branches_edit',
+}
+assert.deepEqual(Object.keys(lang.TELEGRAM_REVIEW_REQUEST_PHRASES).sort(),
+  [...Object.keys(REVIEW_PHRASE_PACK_KEYS), 'Edit stock reasons'].sort(), 'exactly six request phrases')
+for (const [english, key] of Object.entries(REVIEW_PHRASE_PACK_KEYS)) {
+  assert.ok(kmPack[key], `${key} must exist in km.json`)
+  assert.equal(lang.TELEGRAM_REVIEW_REQUEST_PHRASES[english], kmPack[key], `request phrase "${english}" must say what km.json ${key} says`)
+}
+assert.equal(lang.TELEGRAM_REVIEW_REQUEST_PHRASES['Edit stock reasons'], kmPack.shift_action_edit + kmPack.reasons + kmPack.stock,
+  '"Edit stock reasons" is the pack\'s Edit + Reasons + Stock')
+assert.equal(lang.TELEGRAM_LABELS.requestedBy.km, kmPack.requested_by, 'the Requested by label is km.json requested_by')
+assert.ok(kmPack.reset_admin_request_send.includes(lang.TELEGRAM_LABELS.request.km), 'the Request label is the pack\'s own word for a request')
+assert.deepEqual(
+  ['🕒 Review requested', '✅ Review approved', '❌ Review rejected', '🔁 Review resubmitted'].map((heading) => lang.TELEGRAM_HEADINGS[heading]),
+  ['សំណើរង់ចាំការត្រួតពិនិត្យ', 'បានអនុម័តសំណើ', 'បានបដិសេធសំណើ', 'បានដាក់ស្នើឡើងវិញ'],
+  'the four review headings carry their Khmer',
+)
+console.log('PASS review alert wording: six request phrases and two labels held to their pack keys, four headings with their Khmer')
+
 // The check above transitively covers every Worker term that HAS a pack
 // counterpart. The terms that do not -- 'SRET', the command
 // descriptions -- are where a rival spelling could still be born, so hold
@@ -297,6 +325,7 @@ const everyWorkerKhmer = [
   ...Object.entries(lang.TELEGRAM_LABELS).map(([key, entry]) => [`label ${key}`, entry.km]),
   ...Object.entries(lang.TELEGRAM_HEADINGS).map(([heading, km]) => [`heading ${heading}`, km]),
   ...Object.entries(lang.TELEGRAM_VALUE_PHRASES).map(([english, phrase]) => [`phrase ${english}`, typeof phrase === 'string' ? phrase : phrase.km]),
+  ...Object.entries(lang.TELEGRAM_REVIEW_REQUEST_PHRASES).map(([english, khmer]) => [`review request ${english}`, khmer]),
   ...lang.TELEGRAM_COMMANDS.map((doc) => [`reference ${doc.command}`, doc.km]),
 ]
 const forked = []
@@ -319,7 +348,7 @@ console.log(`PASS rival spellings: ${everyWorkerKhmer.length} Worker Khmer strin
 const known = new Set(englishLabels)
 const LINE_LABEL = /[`'"]([A-Z][A-Za-z ]{1,24}): \$\{/g
 const scanned = []
-for (const rel of ['src/lib/telegram.ts', 'src/routes/sales.ts', 'src/routes/fees.ts']) {
+for (const rel of ['src/lib/telegram.ts', 'src/routes/sales.ts', 'src/routes/fees.ts', 'src/lib/reviewAlert.ts']) {
   const source = fs.readFileSync(path.join(__dirname, '..', rel), 'utf8')
   // Scan line by line so an HTTP error body can be excluded. The 500 returned
   // by POST /:id/items builds its message with exactly the same shape as a
@@ -335,6 +364,10 @@ for (const rel of ['src/lib/telegram.ts', 'src/routes/sales.ts', 'src/routes/fee
 const unknownLabels = [...new Set(scanned.filter(([, name]) => !known.has(name)).map(([rel, name]) => `${name} (${rel})`))].sort()
 assert.deepEqual(unknownLabels, [], 'these Telegram line labels have no entry in telegramLang.ts, so they would ship English-only:\n  ' + unknownLabels.join('\n  '))
 assert.ok(scanned.length >= 20, `expected to scan real label sites, found ${scanned.length}`)
+// The review alerts compose their rows in lib/reviewAlert.ts: the scan must really have read it, or a label added there
+// later would ship English-only without this test noticing.
+assert.deepEqual([...new Set(scanned.filter(([rel]) => rel === 'src/lib/reviewAlert.ts').map(([, name]) => name))].sort(),
+  ['By', 'Merged', 'Reason', 'Request', 'Requested by'], 'the scan found the five rows the review alerts emit')
 console.log(`PASS coverage: all ${new Set(scanned.map(([, name]) => name)).size} emitted line labels resolve in the dictionary`)
 
 // --- 4. composed event payloads: both languages on every labelled line ------
@@ -484,6 +517,28 @@ assert.equal(lang.localizeTelegramLine('1. Rice 5kg 2 × $1.00 = $2.00'), '1. Ri
 assert.equal(lang.localizeTelegramLine(lang.RULE), lang.RULE, 'a divider is not a label row and gains no bullet')
 assert.equal(lang.localizeTelegramLine('Mystery: 12'), 'Mystery: 12', 'an unknown label passes through instead of throwing')
 console.log('PASS safety: free-text values, item bullets and unknown labels are never rewritten')
+
+// --- 4b. the review alert rows --------------------------------------
+// Only the fixed phrase at the START of a `Request:` row is translated; the record's name after " · " is a value.
+for (const [mode, expected] of [
+  ['both', '· Request/សំណើ: Edit product/កែប្រែផលិតផល · Rice 5kg'],
+  ['en', '· Request: Edit product · Rice 5kg'],
+  ['km', '· សំណើ: កែប្រែផលិតផល · Rice 5kg'],
+]) {
+  assert.equal(inMode(mode, () => lang.localizeTelegramLine('Request: Edit product · Rice 5kg')), expected, `${mode}: the Request row`)
+}
+assert.equal(inMode('both', () => lang.localizeTelegramLine('Request: Edit stock reasons')), '· Request/សំណើ: Edit stock reasons/កែប្រែមូលហេតុស្តុក', 'a phrase with no record name')
+assert.equal(inMode('both', () => lang.localizeTelegramLine('Request: Edit product · Edit branch')), '· Request/សំណើ: Edit product/កែប្រែផលិតផល · Edit branch',
+  'a record named like another phrase keeps its own name')
+assert.equal(inMode('both', () => lang.localizeTelegramLine('Request: New product · none')), '· Request/សំណើ: New product/ផលិតផលថ្មី · none', 'a record named "none" is not rewritten')
+assert.equal(inMode('both', () => lang.localizeTelegramLine('Request: Edit products · Rice')), '· Request/សំណើ: Edit products · Rice', 'a phrase is a whole phrase, not a prefix of a word')
+assert.equal(inMode('both', () => lang.localizeTelegramLine('Note: Edit product · Rice')), '· Note/កំណត់ចំណាំ: Edit product · Rice', 'only the Request row translates a phrase')
+assert.equal(inMode('both', () => lang.localizeTelegramLine('Requested by: sokha')), '· Requested by/បានស្នើសុំដោយ: sokha')
+assert.equal(inMode('both', () => lang.localizeTelegramLine('By: sokha')), '· By/ដោយ: sokha')
+assert.equal(inMode('both', () => lang.localizeTelegramLine('Reason: wrong barcode')), '· Reason/មូលហេតុ: wrong barcode')
+assert.equal(inMode('both', () => lang.localizeTelegramLine('Merged: Rice 1kg → Rice 5kg')), '· Merged/បញ្ចូលគ្នា: Rice 1kg → Rice 5kg')
+assertAllBilingual(['Request: Delete expense · Rent', 'Merged: A → B', 'Reason: duplicate', 'Requested by: sokha', 'By: dara'], 'review alert rows')
+console.log('PASS review rows: the phrase translates only at the start of a Request row, names and reasons stay as typed')
 
 // A cap cuts BETWEEN two characters, never inside one (Sep 23 2026). `slice`
 // counts UTF-16 units and an emoji is two of them, so a cut between the two
@@ -1004,6 +1059,64 @@ const lastSent = () => sent[sent.length - 1].body.text
   assert.equal(wired.formatBusinessDay('2026-12-25'), '25/12/2026', 'and a day past the 12th proves the order')
   assert.equal(wired.formatBusinessDay(''), '', 'a missing date degrades quietly')
   console.log('PASS dates: report headers render dd/mm/yyyy, the project-wide convention')
+
+  // --- review alerts through the real send path ----------------------
+  // The composed text the group would receive for each of the four events, in the three language modes. The fetch is the
+  // capture above; nothing leaves this machine, and the bot token is a placeholder.
+  const reviewMessage = async (event, mode) => {
+    const extra = mode ? [{ key: 'telegram_language', value: mode }] : []
+    settingsRows.push(...extra)
+    const count = sent.length
+    try {
+      assert.equal(await wired.sendTelegramEvent(env, event), true, 'the review event is sent')
+      assert.equal(sent.length, count + 1, 'one review event is one message')
+      return sent[sent.length - 1].body.text
+    } finally { for (let n = 0; n < extra.length; n += 1) settingsRows.pop() }
+  }
+  const created = { type: 'reviews', heading: '🕒 Review requested', lines: ['Request: Edit product · Rice 5kg', 'Requested by: sokha'] }
+  const approvedMerge = { type: 'reviews', heading: '✅ Review approved', lines: ['Request: Edit product · Rice 5kg', 'Merged: Rice 1kg → Rice 5kg', 'Requested by: sokha', 'By: dara'] }
+  const rejected = { type: 'reviews', heading: '❌ Review rejected', lines: ['Request: Delete expense · Rent', 'Reason: duplicate of the 9 Oct entry', 'Requested by: sokha', 'By: dara'] }
+  const resubmitted = { type: 'reviews', heading: '🔁 Review resubmitted', lines: ['Request: New product · Lip Tint 05', 'Requested by: sokha'] }
+  assert.equal(await reviewMessage(created), [
+    '🕒 Review requested/សំណើរង់ចាំការត្រួតពិនិត្យ',
+    '· Request/សំណើ: Edit product/កែប្រែផលិតផល · Rice 5kg',
+    '· Requested by/បានស្នើសុំដោយ: sokha',
+  ].join('\n'))
+  assert.equal(await reviewMessage(approvedMerge), [
+    '✅ Review approved/បានអនុម័តសំណើ',
+    '· Request/សំណើ: Edit product/កែប្រែផលិតផល · Rice 5kg',
+    '· Merged/បញ្ចូលគ្នា: Rice 1kg → Rice 5kg',
+    '· Requested by/បានស្នើសុំដោយ: sokha',
+    '· By/ដោយ: dara',
+  ].join('\n'))
+  assert.equal(await reviewMessage(rejected), [
+    '❌ Review rejected/បានបដិសេធសំណើ',
+    '· Request/សំណើ: Delete expense/លុបចំណាយ · Rent',
+    '· Reason/មូលហេតុ: duplicate of the 9 Oct entry',
+    '· Requested by/បានស្នើសុំដោយ: sokha',
+    '· By/ដោយ: dara',
+  ].join('\n'))
+  assert.equal(await reviewMessage(resubmitted), [
+    '🔁 Review resubmitted/បានដាក់ស្នើឡើងវិញ',
+    '· Request/សំណើ: New product/ផលិតផលថ្មី · Lip Tint 05',
+    '· Requested by/បានស្នើសុំដោយ: sokha',
+  ].join('\n'))
+  assert.equal(await reviewMessage(approvedMerge, 'km'), [
+    '✅ បានអនុម័តសំណើ',
+    '· សំណើ: កែប្រែផលិតផល · Rice 5kg',
+    '· បញ្ចូលគ្នា: Rice 1kg → Rice 5kg',
+    '· បានស្នើសុំដោយ: sokha',
+    '· ដោយ: dara',
+  ].join('\n'))
+  assert.equal(await reviewMessage(rejected, 'en'), [
+    '❌ Review rejected',
+    '· Request: Delete expense · Rent',
+    '· Reason: duplicate of the 9 Oct entry',
+    '· Requested by: sokha',
+    '· By: dara',
+  ].join('\n'))
+  assert.equal(lang.getTelegramLanguage(), 'both', 'the compose scope restored the module mode')
+  console.log('PASS review alerts: created, approved (with a merge), rejected and resubmitted compose in both, km and en')
 
   console.log('\ntelegram bilingual + commands tests passed')
 })().catch((error) => { console.error(error); process.exit(1) })

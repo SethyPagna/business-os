@@ -210,6 +210,8 @@ const LABELS = {
   // A merge of duplicate products: "Merged: <the product folded in>".
   merged: { en: 'Merged', km: 'បញ្ចូលគ្នា' },
   changed: { en: 'Changed', km: 'បានផ្លាស់ប្ដូរ' },
+  request: { en: 'Request', km: 'សំណើ' },
+  requestedBy: { en: 'Requested by', km: 'បានស្នើសុំដោយ' },         // km.json requested_by
 
   // --- returns ---
   ret: { en: 'RET', km: 'លេខប្រគល់មកវិញ' },
@@ -404,6 +406,10 @@ const HEADINGS = {
   '♻️ Return restored': 'បានស្ដារការប្រគល់មកវិញ',
   '🚫 Supplier return cancelled': 'បានបោះបង់ការប្រគល់ទៅអ្នកផ្គត់ផ្គង់',
   '♻️ Supplier return restored': 'បានស្ដារការប្រគល់ទៅអ្នកផ្គត់ផ្គង់',
+  '🕒 Review requested': 'សំណើរង់ចាំការត្រួតពិនិត្យ',
+  '✅ Review approved': 'បានអនុម័តសំណើ',
+  '❌ Review rejected': 'បានបដិសេធសំណើ',
+  '🔁 Review resubmitted': 'បានដាក់ស្នើឡើងវិញ',
 } as const
 /** Exported for the pure test. */
 export const TELEGRAM_HEADINGS: Record<string, string> = HEADINGS
@@ -488,6 +494,28 @@ const VALUE_PHRASES: Record<string, ValuePhrase> = {
 }
 /** Exported for the pure test. */
 export const TELEGRAM_VALUE_PHRASES = VALUE_PHRASES
+
+// The fixed phrase that opens a review alert's `Request:` row. Not a VALUE_PHRASE (those are rewritten anywhere in a
+// value): a record named "Edit product" must come out as typed, so only the start of a `Request` row is translated.
+const REVIEW_REQUEST_PHRASES = {
+  'New product': 'ផលិតផលថ្មី',                 // km.json new_products_count
+  'Edit product': 'កែប្រែផលិតផល',              // km.json perm_act_products_edit
+  'Remove product': 'លុបផលិតផល',               // km.json perm_act_products_delete (Delete product) and remove (លុប)
+  'Delete expense': 'លុបចំណាយ',                // km.json perm_act_fees_delete
+  'Edit stock reasons': 'កែប្រែមូលហេតុស្តុក',   // កែប្រែ (shift_action_edit) + មូលហេតុ (reason) + ស្តុក (stock)
+  'Edit branch': 'កែប្រែសាខា',                 // km.json perm_act_branches_edit
+} as const
+export type ReviewRequestPhrase = keyof typeof REVIEW_REQUEST_PHRASES
+export const TELEGRAM_REVIEW_REQUEST_PHRASES: Record<string, string> = REVIEW_REQUEST_PHRASES
+export const REVIEW_REQUEST_SEPARATOR = ' · '
+
+/** `Edit product · Rice 5kg` -> `Edit product/កែប្រែផលិតផល · Rice 5kg` (the phrase only, and only at the start). */
+function localizeReviewRequest(value: string): string {
+  for (const [english, khmer] of Object.entries(REVIEW_REQUEST_PHRASES)) {
+    if (value === english || value.startsWith(`${english}${REVIEW_REQUEST_SEPARATOR}`)) return `${pair(english, khmer)}${value.slice(english.length)}`
+  }
+  return value
+}
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 // Longest-first alternation so 'awaiting payment' wins over 'payment', and a
@@ -700,6 +728,7 @@ export function localizeTelegramLine(line: string): string {
   // other message uses dd/mm/yyyy. Normalising the one unambiguous shape here
   // gives the whole feed ONE date convention without editing that route.
   if (entry.en === 'Date') value = value.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$3/$2/$1')
+  if (entry.en === 'Request') value = localizeReviewRequest(value)
   if (entry.localizeValue) value = localizeTelegramValue(value)
   // Recognising the label is also what earns the bullet: a line this table
   // has no word for is not a label row and keeps its own shape (an item
