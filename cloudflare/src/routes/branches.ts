@@ -188,6 +188,8 @@ app.get('/summary', async (c) => {
     low_stock: familyStats.low_stock,
     out_of_stock: familyStats.out_of_stock,
     stock_value_usd: familyStats.stock_value_usd,
+    stock_value_unknown_products: familyStats.stock_value_unknown_products,
+    stock_value_unknown_quantity: familyStats.stock_value_unknown_quantity,
     branch_count: Number(branchCount?.count || 0),
   })
 })
@@ -934,6 +936,10 @@ app.get('/:id/stock', async (c) => {
   // products existed. positive_products/positive_value_usd are a distinct
   // "has any stock at all" metric (no family-grouped equivalent shown
   // elsewhere to reconcile against) and stay row-based, unchanged.
+  // purchase_price_usd mirrors cost_price_usd but is DEFAULT 0, so a 0 there is
+  // an unfilled mirror, not a recorded cost; the catalog cost decides then. A
+  // recorded $0 (cost_price_usd = 0) is a real $0 and a NULL cost stays unknown.
+  const positiveUnitCostSql = 'CASE WHEN p.purchase_price_usd > 0 THEN p.purchase_price_usd ELSE p.cost_price_usd END'
   const [familyStats, positiveRow] = await Promise.all([
     getFamilyStockStats({
       db,
@@ -946,7 +952,8 @@ app.get('/:id/stock', async (c) => {
     db.prepare(`
       SELECT
         SUM(CASE WHEN COALESCE(bs.quantity, 0) > 0 THEN 1 ELSE 0 END) AS positive_products,
-        COALESCE(SUM(CASE WHEN COALESCE(bs.quantity, 0) > 0 THEN COALESCE(bs.quantity, 0) * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0) ELSE 0 END), 0) AS positive_value_usd
+        COALESCE(SUM(CASE WHEN COALESCE(bs.quantity, 0) > 0 AND ${positiveUnitCostSql} IS NOT NULL THEN bs.quantity * ${positiveUnitCostSql} END), 0) AS positive_value_usd,
+        SUM(CASE WHEN COALESCE(bs.quantity, 0) > 0 AND ${positiveUnitCostSql} IS NULL THEN 1 ELSE 0 END) AS positive_stock_value_unknown_products
       FROM products p
       LEFT JOIN branch_stock bs ON bs.product_id = p.id AND bs.branch_id = @branchId
       ${summaryWhereSql}
@@ -961,6 +968,9 @@ app.get('/:id/stock', async (c) => {
     positive_products: Number((positiveRow as Record<string, unknown>)?.positive_products || 0),
     positive_value_usd: Number((positiveRow as Record<string, unknown>)?.positive_value_usd || 0),
     total_value_usd: familyStats.stock_value_usd,
+    stock_value_unknown_products: familyStats.stock_value_unknown_products,
+    stock_value_unknown_quantity: familyStats.stock_value_unknown_quantity,
+    positive_stock_value_unknown_products: Number((positiveRow as Record<string, unknown>)?.positive_stock_value_unknown_products || 0),
   }
 
   // Grouped products (parent_id families) are treated as a single unit for

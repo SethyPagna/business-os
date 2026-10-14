@@ -39,24 +39,14 @@
  *   'out'                     inventory CSV import remove -- a data
  *                             correction, not a business event (see
  *                             importEngine.ts classifyInventory)
- *   'delete'                  bulkDeleteEngine.ts's bulk product delete. IN
- *                             the set (p5/losses, Sep 15 2026): stock drained
- *                             by a bulk delete is destroyed exactly as
- *                             finally as a single product delete's
- *                             'write_off' is, and the owner's ruling ("if
- *                             remove directly it also counts toward losses")
- *                             draws no distinction by which UI action did the
- *                             removing. bulkDeleteEngine.ts now stamps
- *                             `reference_id = 'bulk_delete:<jobId>'` on every
- *                             row from one job (bulkDeleteWriteOffReferenceId),
- *                             the same shared-string-per-event shape
- *                             productRemoveWriteOffReferenceId uses below, so
- *                             the write_off-shaped revert guard (clause 5)
- *                             covers it too. There is currently no undo for a
- *                             bulk-delete job at all, so that guard never
- *                             actually excludes a 'delete' row today -- it is
- *                             wired ahead of an undo landing rather than
- *                             creating a gap once one does.
+ *   'delete'                  IN the set, but no writer posts a movement of this
+ *                             type today (bulkDeleteEngine.ts drains stock
+ *                             through productDelete's 'write_off' rows and
+ *                             only logs an audit row named 'delete'). Kept so
+ *                             a row of this shape, if one is ever written, is a
+ *                             loss like a single delete's 'write_off' is, with
+ *                             the same shared-reference revert guard (clause 5)
+ *                             covering it.
  *   'adjustment'              duplicate-product merge write-off
  *                             (routes/products.ts, the `writeOffStock` branch)
  *                             -- a NEGATIVE-quantity row cleaning up a phantom
@@ -88,19 +78,15 @@
  * not `id`, for 'write_off'/'delete' rows, because unlike every other writer
  * here these can post more than one loss-bearing row per real-world event.
  *
- * VALUATION IS AT READ TIME, not at write time. Several removal writers book
- * no cost columns at all (productDelete.ts, datedStockCountApply.ts, the
- * products.ts merge write-off), and `inventory_movements.unit_cost_usd` is
- * DEFAULT 0 since migration 0001, so a stored 0 means ABSENCE, not free goods.
- * removalRowLossUsd therefore treats 0 as missing and falls through to a
- * four-tier chain -- lot cost, product cost, the product's own latest costed
- * lot, then a same-name twin product's latest costed lot -- see
- * REMOVAL_LOSS_SELECT below (p5/losses, Sep 15 2026: extended past the first
- * two tiers after a production row valued a real removal at $0 because its
- * lot and its product row were both uncosted while a same-name duplicate
- * product carried the true cost). Nothing needs cost columns added at write
- * time, and a row that is uncostable everywhere is counted in
- * `unvalued_rows` rather than being silently valued at zero.
+ * VALUATION IS AT READ TIME, from the cost the removal itself carried (owner,
+ * 14 Oct 2026: "if cost is 0$ then it is 0 for loss. if it is none, it should
+ * also be unknown. flag it."). A recorded cost of 0 is a real $0 loss. A cost
+ * that was never recorded is UNKNOWN: the row is counted in `unvalued_rows`
+ * and contributes nothing to the dollar figure. It is never priced from the
+ * catalog, from another lot of the product, or from a same-name product -- the
+ * four-tier substitution this module used to apply (p5/losses, Sep 15 2026)
+ * is gone. The only source beyond the movement's own snapshot is the lot the
+ * units were actually drawn from, because that is the removed item's own cost.
  */
 export const REMOVAL_LOSS_MOVEMENT_TYPES = ['remove', 'write_off', 'delete'] as const
 
@@ -190,30 +176,12 @@ export function removalLossMovementWhere(alias = 'm'): string {
 }
 
 /**
- * The SELECT list this module's reducer expects. `fallback_unit_cost_usd` is
- * a chain of increasingly indirect sources, tried in order, used only when
- * the movement itself carries no (non-zero) cost snapshot:
- *
- *   1. the lot the units actually came from (`product_batches.unit_cost_usd`)
- *   2. the product's own cost price (`products.cost_price_usd`)
- *   3. the product's OWN most-recently-received costed lot, i.e. a different
- *      batch than the one this movement drew from actually carries a price
- *      (writers that never stamp a lot cost, or a lot whose cost was left 0)
- *   4. the most-recently-received costed lot of a SAME-NAME product row --
- *      a "twin" catalog row for the identical item (see productIdentity.ts's
- *      productRowIdentityKey; matched here on normalized name only, since
- *      SQL has no access to the JS barcode fold) whose stock was priced
- *      while this row's was not. This is exactly the production case the
- *      owner reported: `inventory_movements` id 47026 (product 2556
- *      "Girlactik Face Glow Goldie", a leading-zero-barcode duplicate of the
- *      product that actually carries the real cost) priced at $0 while its
- *      same-name twin held the true cost the whole time.
- *
- * Every tier is NULLIF'd against 0 (see removalRowLossUsd's own comment: a
- * stored/joined 0 means "no source", not "free"), so a lot or product row
- * that is itself uncosted correctly falls through to the next tier instead
- * of freezing the chain at zero. Only when NONE of the four sources exist is
- * the row `unvalued`.
+ * The SELECT list this module's reducer expects. `own_lot_unit_cost_usd` is
+ * the cost recorded on the lot the units were drawn from
+ * (`product_batches.unit_cost_usd`), NULL when the movement names no lot or the
+ * lot's cost was never recorded. It is the removed item's own cost, so it may
+ * price a movement that carries no snapshot of its own; a recorded 0 on the lot
+ * is a real $0 and is selected as 0, not folded into NULL.
  */
 export const REMOVAL_LOSS_SELECT = `
   m.id AS id,
@@ -221,25 +189,13 @@ export const REMOVAL_LOSS_SELECT = `
   m.quantity AS quantity,
   m.unit_cost_usd AS unit_cost_usd,
   m.total_cost_usd AS total_cost_usd,
-  COALESCE(
-    NULLIF(pb.unit_cost_usd, 0),
-    NULLIF(p.cost_price_usd, 0),
-    (SELECT NULLIF(pb2.unit_cost_usd, 0) FROM product_batches pb2
-       WHERE pb2.variant_product_id = p.id AND pb2.unit_cost_usd IS NOT NULL AND pb2.unit_cost_usd > 0
-       ORDER BY pb2.received_at DESC, pb2.id DESC LIMIT 1),
-    (SELECT NULLIF(pb3.unit_cost_usd, 0) FROM product_batches pb3
-       JOIN products p3 ON p3.id = pb3.variant_product_id
-       WHERE p3.id != p.id AND LOWER(TRIM(p3.name)) = LOWER(TRIM(p.name))
-         AND pb3.unit_cost_usd IS NOT NULL AND pb3.unit_cost_usd > 0
-       ORDER BY pb3.received_at DESC, pb3.id DESC LIMIT 1)
-  ) AS fallback_unit_cost_usd
+  pb.unit_cost_usd AS own_lot_unit_cost_usd
 `
 
 /** The FROM/JOIN this module's SELECT list is written against. */
 export const REMOVAL_LOSS_FROM = `
   FROM inventory_movements m
   LEFT JOIN product_batches pb ON pb.id = m.batch_id
-  LEFT JOIN products p ON p.id = m.product_id
 `
 
 export type RemovalLossRow = {
@@ -248,7 +204,7 @@ export type RemovalLossRow = {
   quantity?: number | string | null
   unit_cost_usd?: number | string | null
   total_cost_usd?: number | string | null
-  fallback_unit_cost_usd?: number | string | null
+  own_lot_unit_cost_usd?: number | string | null
 }
 
 export type RemovalLossSummary = {
@@ -256,8 +212,8 @@ export type RemovalLossSummary = {
   removal_loss_usd: number
   /** Units removed. */
   removal_loss_qty: number
-  /** Removal rows that carried no cost anywhere -- the loss is understated by
-   *  whatever they were worth, and this says so instead of hiding it. */
+  /** Removal rows whose cost was never recorded (unknown, not $0) -- the loss is
+   *  understated by whatever they were worth, and this says so instead of hiding it. */
   removal_loss_unvalued_rows: number
 }
 
@@ -288,27 +244,25 @@ function finite(value: unknown): number | null {
  * Price ONE removal row.
  *
  * Order: the movement's own total snapshot, then its unit snapshot x quantity,
- * then the lot/product cost x quantity. A stored cost of exactly 0 is treated
- * as ABSENT rather than as "these goods were free": inventory_movements'
- * cost columns are `DEFAULT 0` (migration 0001) and the writers that predate
- * resolveMovementCostSnapshot left them at that default, so honouring the zero
- * would silently value a real removal at nothing. The only case this changes
- * is a genuinely free item that has a non-zero carried cost -- it is then
- * valued at that carried cost, which is the figure the owner reads as "what it
- * cost me".
+ * then the cost of the lot it was drawn from x quantity. A recorded cost of 0
+ * is a real $0 (it is returned as 0, not skipped). A cost that is absent
+ * everywhere is UNKNOWN and returns null, which the caller counts as unvalued.
  *
- * Returns null when no source can price the row (the caller counts it as
- * unvalued).
+ * One consistency rule: the total and unit snapshots are two columns of one
+ * recording. When one is positive and the other is 0, the 0 is the column the
+ * writer never filled (both default to 0), so the positive one prices the row.
+ * A 0 beside a 0, or a 0 beside NULL, is a recorded $0.
  */
 export function removalRowLossUsd(row: RemovalLossRow): number | null {
   const quantity = finite(row.quantity) ?? 0
   if (!(quantity > 0)) return 0
   const total = finite(row.total_cost_usd)
-  if (total != null && total !== 0) return Math.abs(total)
   const unit = finite(row.unit_cost_usd)
+  if (total != null && total !== 0) return Math.abs(total)
   if (unit != null && unit !== 0) return Math.abs(unit) * quantity
-  const fallback = finite(row.fallback_unit_cost_usd)
-  if (fallback != null && fallback !== 0) return Math.abs(fallback) * quantity
+  if (total != null || unit != null) return 0
+  const own = finite(row.own_lot_unit_cost_usd)
+  if (own != null) return Math.abs(own) * quantity
   return null
 }
 
@@ -330,6 +284,11 @@ export function summarizeRemovalLosses(rows: readonly RemovalLossRow[] | null | 
     removal_loss_qty: round2(qty),
     removal_loss_unvalued_rows: unvalued,
   }
+}
+
+/** True when every removal row in the summary had a recorded cost. */
+export function isRemovalLossComplete(loss: Pick<RemovalLossSummary, 'removal_loss_unvalued_rows'>): boolean {
+  return loss.removal_loss_unvalued_rows === 0
 }
 
 /** Bucket removal rows by a caller-supplied period key, then reduce each. */

@@ -68,6 +68,11 @@ export interface FamilyStockStats {
   stock_quantity: number
   stock_value_usd: number
   stock_value_khr: number
+  // Products with stock on hand and no recorded cost. They are NOT in the
+  // value above (an unknown cost is never priced), so the value is "known
+  // cost only" and these two say how much of the shelf it leaves out.
+  stock_value_unknown_products: number
+  stock_value_unknown_quantity: number
 }
 
 export type FamilyStockAlertState = 'low' | 'out'
@@ -108,8 +113,8 @@ export async function getFamilyStockStats(opts: FamilyStockStatsOptions): Promis
         ${qtyExpr} AS qty,
         COALESCE(p.out_of_stock_threshold, 0) AS out_threshold,
         ${lowThresholdSql} AS low_threshold,
-        COALESCE(p.cost_price_usd, 0) AS unit_cost_usd,
-        COALESCE(p.cost_price_khr, 0) AS unit_cost_khr
+        p.cost_price_usd AS unit_cost_usd,
+        p.cost_price_khr AS unit_cost_khr
       FROM products p
       LEFT JOIN products parent ON parent.id = p.parent_id
       ${joinSql}
@@ -129,8 +134,10 @@ export async function getFamilyStockStats(opts: FamilyStockStatsOptions): Promis
         MAX(CASE WHEN qty > out_threshold AND qty > low_threshold THEN 1 ELSE 0 END) AS has_healthy,
         MAX(CASE WHEN qty > out_threshold AND qty <= low_threshold THEN 1 ELSE 0 END) AS has_low,
         SUM(qty) AS total_qty,
-        SUM(MAX(qty, 0) * unit_cost_usd) AS value_usd,
-        SUM(MAX(qty, 0) * unit_cost_khr) AS value_khr
+        SUM(CASE WHEN unit_cost_usd IS NOT NULL THEN MAX(qty, 0) * unit_cost_usd END) AS value_usd,
+        SUM(CASE WHEN unit_cost_khr IS NOT NULL THEN MAX(qty, 0) * unit_cost_khr END) AS value_khr,
+        SUM(CASE WHEN unit_cost_usd IS NULL AND qty > 0 THEN 1 ELSE 0 END) AS unknown_products,
+        SUM(CASE WHEN unit_cost_usd IS NULL AND qty > 0 THEN qty ELSE 0 END) AS unknown_quantity
       FROM members
       GROUP BY family_root_id
     )
@@ -156,7 +163,9 @@ export async function getFamilyStockStats(opts: FamilyStockStatsOptions): Promis
       COALESCE(SUM(CASE WHEN has_healthy = 0 AND has_low = 0 THEN 1 ELSE 0 END), 0) AS out_of_stock,
       COALESCE(SUM(total_qty), 0) AS stock_quantity,
       COALESCE(SUM(value_usd), 0) AS stock_value_usd,
-      COALESCE(SUM(value_khr), 0) AS stock_value_khr
+      COALESCE(SUM(value_khr), 0) AS stock_value_khr,
+      COALESCE(SUM(unknown_products), 0) AS stock_value_unknown_products,
+      COALESCE(SUM(unknown_quantity), 0) AS stock_value_unknown_quantity
     FROM family_agg
   `).get<Record<string, number>>(params)
 
@@ -169,6 +178,8 @@ export async function getFamilyStockStats(opts: FamilyStockStatsOptions): Promis
     stock_quantity: Number(row?.stock_quantity || 0),
     stock_value_usd: Number(row?.stock_value_usd || 0),
     stock_value_khr: Number(row?.stock_value_khr || 0),
+    stock_value_unknown_products: Number(row?.stock_value_unknown_products || 0),
+    stock_value_unknown_quantity: Number(row?.stock_value_unknown_quantity || 0),
   }
 }
 
@@ -340,8 +351,8 @@ export async function getFamilyStockOverview(opts: {
         ${lowThresholdSql} AS low_threshold,
         COALESCE(p.is_group, 0) AS is_group,
         COALESCE(p.parent_id, 0) AS parent_id,
-        COALESCE(p.cost_price_usd, 0) AS unit_cost_usd,
-        COALESCE(p.cost_price_khr, 0) AS unit_cost_khr
+        p.cost_price_usd AS unit_cost_usd,
+        p.cost_price_khr AS unit_cost_khr
       FROM products p
       LEFT JOIN products parent ON parent.id = p.parent_id
       WHERE ${stockVisibleProductSql()}
@@ -363,8 +374,10 @@ export async function getFamilyStockOverview(opts: {
         COUNT(*) AS family_size,
         MAX(CASE WHEN qty > out_threshold AND qty > low_threshold THEN 1 ELSE 0 END) AS has_healthy,
         MAX(CASE WHEN qty > out_threshold AND qty <= low_threshold THEN 1 ELSE 0 END) AS has_low,
-        SUM(MAX(qty, 0) * unit_cost_usd) AS value_usd,
-        SUM(MAX(qty, 0) * unit_cost_khr) AS value_khr
+        SUM(CASE WHEN unit_cost_usd IS NOT NULL THEN MAX(qty, 0) * unit_cost_usd END) AS value_usd,
+        SUM(CASE WHEN unit_cost_khr IS NOT NULL THEN MAX(qty, 0) * unit_cost_khr END) AS value_khr,
+        SUM(CASE WHEN unit_cost_usd IS NULL AND qty > 0 THEN 1 ELSE 0 END) AS unknown_products,
+        SUM(CASE WHEN unit_cost_usd IS NULL AND qty > 0 THEN qty ELSE 0 END) AS unknown_quantity
       FROM members
       GROUP BY family_root_id
     ),
@@ -408,7 +421,9 @@ export async function getFamilyStockOverview(opts: {
       COALESCE(SUM(CASE WHEN has_healthy = 0 AND has_low = 0 THEN 1 ELSE 0 END), 0) AS out_of_stock,
       COALESCE(SUM(total_qty), 0) AS total_stock_quantity,
       COALESCE(SUM(value_usd), 0) AS stock_value_usd,
-      COALESCE(SUM(value_khr), 0) AS stock_value_khr
+      COALESCE(SUM(value_khr), 0) AS stock_value_khr,
+      COALESCE(SUM(unknown_products), 0) AS stock_value_unknown_products,
+      COALESCE(SUM(unknown_quantity), 0) AS stock_value_unknown_quantity
     FROM family_agg
     UNION ALL
     SELECT
@@ -416,7 +431,7 @@ export async function getFamilyStockOverview(opts: {
       r.id, r.name, r.category, r.unit,
       r.qty, r.low_stock_threshold, r.out_of_stock_threshold,
       e.total_qty, e.family_size,
-      NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+      NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
     FROM representatives r
     JOIN eligible e ON e.family_root_id = r.family_root_id
     WHERE r.representative_rank = 1
@@ -433,6 +448,8 @@ export async function getFamilyStockOverview(opts: {
     stock_quantity: Number(statsRow.total_stock_quantity || 0),
     stock_value_usd: Number(statsRow.stock_value_usd || 0),
     stock_value_khr: Number(statsRow.stock_value_khr || 0),
+    stock_value_unknown_products: Number(statsRow.stock_value_unknown_products || 0),
+    stock_value_unknown_quantity: Number(statsRow.stock_value_unknown_quantity || 0),
   }
   const page = (state: FamilyStockAlertState, total: number): FamilyStockAlertPage => {
     const items: FamilyStockAlertRow[] = list

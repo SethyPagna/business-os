@@ -1,5 +1,6 @@
 // Ported from backend/src/helpers.ts's verifyAndRepairStockQuantities /
-// verifyAndRepairSaleStatuses / verifyAndRepairCostPrices / runDataIntegrityCheck.
+// verifyAndRepairSaleStatuses / verifyAndRepairCostPrices / runDataIntegrityCheck
+// (the cost-price half is report-only now, see checkCostPrices).
 //
 // The original ran these inside a better-sqlite3 db.transaction() and, for
 // the read-only "verify" mode, deliberately threw at the end to roll the
@@ -128,63 +129,37 @@ async function checkSaleStatuses(env: Env, repair: boolean): Promise<IntegrityRe
   return { errors, repairs: statements.length, summary: `${repair ? 'Verified and repaired' : 'Checked'} sale statuses: ${statements.length} ${repair ? 'repairs made' : 'issues found'}` }
 }
 
-async function checkCostPrices(env: Env, repair: boolean): Promise<IntegrityResult> {
+// Cost prices are REPORTED here, never repaired. A missing snapshot is an
+// UNKNOWN cost (owner, 14 Oct 2026: "if it is none, it should also be unknown.
+// flag it.") and a recorded 0 is a real $0, so the old repair -- which wrote
+// today's catalog cost over both a NULL and a real $0 snapshot -- invented
+// history. The counts below are the flag; the way to resolve an unknown cost
+// is to enter it, not to copy a later catalog price onto a past line.
+async function checkCostPrices(env: Env, repair: boolean): Promise<IntegrityResult & { saleItemsUnknownCost: number; movementsUnknownCost: number }> {
   const db = getDb(env)
   const errors: string[] = []
-  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = []
+  let saleItemsUnknownCost = 0
+  let movementsUnknownCost = 0
 
   try {
-    const nullCostItems = await db.prepare(`
-      SELECT si.id, p.cost_price_usd, p.cost_price_khr
-      FROM sale_items si
-      LEFT JOIN products p ON p.id = si.product_id
-      WHERE (si.cost_price_usd IS NULL OR si.cost_price_usd = 0)
-         OR (si.cost_price_khr IS NULL OR si.cost_price_khr = 0)
-    `).all<{ id: number; cost_price_usd: number; cost_price_khr: number }>()
-
-    for (const item of nullCostItems) {
-      const costUsd = item.cost_price_usd || 0
-      const costKhr = item.cost_price_khr || 0
-      if (costUsd > 0 || costKhr > 0) {
-        errors.push(`Sale item ${item.id}: cost prices ${repair ? 'filled' : 'missing'} from product data`)
-        statements.push({
-          sql: `UPDATE sale_items SET
-                  cost_price_usd = CASE WHEN cost_price_usd IS NULL OR cost_price_usd = 0 THEN @cost_usd ELSE cost_price_usd END,
-                  cost_price_khr = CASE WHEN cost_price_khr IS NULL OR cost_price_khr = 0 THEN @cost_khr ELSE cost_price_khr END
-                WHERE id = @id`,
-          params: { cost_usd: costUsd, cost_khr: costKhr, id: item.id },
-        })
-      }
-    }
-
-    const nullMovements = await db.prepare(`
-      SELECT im.id, p.cost_price_usd, p.cost_price_khr
-      FROM inventory_movements im
-      LEFT JOIN products p ON p.id = im.product_id
-      WHERE (im.unit_cost_usd IS NULL OR im.unit_cost_usd = 0)
-        AND im.movement_type IN ('sale', 'return')
-    `).all<{ id: number; cost_price_usd: number; cost_price_khr: number }>()
-
-    for (const mov of nullMovements) {
-      const costUsd = mov.cost_price_usd || 0
-      const costKhr = mov.cost_price_khr || 0
-      if (costUsd > 0 || costKhr > 0) {
-        statements.push({
-          sql: `UPDATE inventory_movements SET
-                  unit_cost_usd = CASE WHEN unit_cost_usd IS NULL OR unit_cost_usd = 0 THEN @cost_usd ELSE unit_cost_usd END,
-                  unit_cost_khr = CASE WHEN unit_cost_khr IS NULL OR unit_cost_khr = 0 THEN @cost_khr ELSE unit_cost_khr END
-                WHERE id = @id`,
-          params: { cost_usd: costUsd, cost_khr: costKhr, id: mov.id },
-        })
-      }
-    }
-
-    if (repair && statements.length) await db.batch(statements)
+    const saleItems = await db.prepare('SELECT COUNT(*) AS n FROM sale_items WHERE cost_price_usd IS NULL').get<{ n: number }>()
+    saleItemsUnknownCost = Number(saleItems?.n || 0)
+    const movements = await db.prepare(`
+      SELECT COUNT(*) AS n FROM inventory_movements
+      WHERE unit_cost_usd IS NULL AND movement_type IN ('sale', 'return')
+    `).get<{ n: number }>()
+    movementsUnknownCost = Number(movements?.n || 0)
   } catch (e) {
     errors.push(`Cost price verification error: ${(e as Error).message}`)
   }
 
-  return { errors, repairs: statements.length, summary: `${repair ? 'Verified and repaired' : 'Checked'} cost prices: ${statements.length} items ${repair ? 'filled' : 'missing'}` }
+  return {
+    errors,
+    repairs: 0,
+    saleItemsUnknownCost,
+    movementsUnknownCost,
+    summary: `${repair ? 'Cost prices are never repaired' : 'Checked cost prices'}: ${saleItemsUnknownCost} sale lines and ${movementsUnknownCost} movements have an unknown cost (flagged, not filled)`,
+  }
 }
 
 export async function runDataIntegrityCheck(env: Env, repair: boolean) {
@@ -200,6 +175,8 @@ export async function runDataIntegrityCheck(env: Env, repair: boolean) {
     errors: allErrors,
     repairs: totalRepairs,
     details: { stock: stockCheck, saleStatus: statusCheck, costPrices: costCheck },
+    sale_items_unknown_cost: costCheck.saleItemsUnknownCost,
+    movements_unknown_cost: costCheck.movementsUnknownCost,
     action: repair ? 'repair-and-verify' : 'verify-only',
     timestamp: new Date().toISOString(),
   }
