@@ -342,6 +342,7 @@ try {
       if (name === 'react') return hooks
       if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx }
       if (name.includes('AppContext')) return { useApp: () => ({ t: (key: string) => key, user: actor, notify: (...args: any[]) => notices.push(args) }) }
+      if (name.includes('permissions')) return { isAdminControlUser: (user: any) => user?.role_code === 'admin' }
       if (name.includes('constants')) return { BUSINESS_TIME_ZONE: 'Asia/Phnom_Penh' }
       if (name.includes('formatters')) return { fmtDateOnly: String }
       if (name.includes('useDebouncedValue')) return { useDebouncedValue: (value: unknown) => value }

@@ -202,9 +202,9 @@ ok(/const blankClose = \(shift\?: Shift \| null\): CloseDraft => \(\{/.test(moda
   && /closedAt: shift && !shift\.closed_at\s*\n\s*\? shiftLocalDateTimeFromMs\(carryOverCloseSeedMs\(shift\.close_before, shift\.opened_at, Date\.now\(\)\)\)\s*\n\s*: dateTimeLocal\(new Date\(\)\.toISOString\(\)\),/.test(modal),
   'historic close pre-fills its required timestamp from the server-stated bound, leaving report-only counts blank')
 ok(/const seed = blankClose\(selected\); setCloseBase\(seed\); setClose\(seed\); setAction\('close'\)/.test(modal), 'and the Close action seeds that draft (and the dirty baseline) from the SELECTED row, not from an empty one')
-ok(/\{selected\.close_before \? <p[^>]*>[\s\S]{0,200}?t\('shift_previous_open_close_before'\)[\s\S]{0,120}?fmtDateTime24\(selected\.close_before\)\}<\/p> : null\}/.test(modal),
+ok(/\{canChooseShiftTime\(\) && selected\.close_before \? <p[^>]*>[\s\S]{0,200}?t\('shift_previous_open_close_before'\)[\s\S]{0,120}?fmtDateTime24\(selected\.close_before\)\}<\/p> : null\}/.test(modal),
   'the close form shows that bound -- only when the server stated one -- with the same key and formatter the POS strip uses')
-ok(/const closeReason = !close\.closedAt \? t\('shift_close_time_required'\)/.test(modal), 'only a missing/invalid close timestamp blocks the save; drawer counts never gate it')
+ok(/const closeReason = action !== 'close' \? null\s*: canChooseShiftTime\(\) && !close\.closedAt \? t\('shift_close_time_required'\)/.test(modal), 'only a missing/invalid close timestamp blocks the save; drawer counts never gate it')
 ok(!/type="datetime-local"/.test(modal), 'no shift timestamp may fall back to the native control that rejects a typed 9032026')
 ok(/shiftLocalDateTimeToIso\(close\.closedAt\)/.test(modal), 'entered historical close time is converted from Phnom Penh wall time to explicit ISO')
 ok(/row\.id !== result\.shift\.id/.test(modal) && /setSelected\(result\.shift\)/.test(modal), 'reopen adds the linked child without replacing the preserved parent')

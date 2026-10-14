@@ -43,7 +43,7 @@ assert.ok(!/new Date\(\)\.toISOString\(\)/.test(posClose), 'no device timestamp 
 
 // 2. Historic close keeps the chosen time and its client-side future guard.
 const historic = section(transport, /export async function closeShiftById\(/, /export type ReopenShiftInput/)
-assert.match(historic, /closed_at: input\.closedAt,/, 'the Shifts popup still sends the exact chosen time')
+assert.match(historic, /\.\.\.\(input\.closedAt \? \{ closed_at: input\.closedAt \} : \{\}\),/, 'the Shifts popup still sends the exact chosen time, and none for an employee')
 assert.match(historic, /shiftTimestampIsFuture\(input\.closedAt\)/, 'a clearly future chosen time is still refused before the network')
 
 // 3. Worker parity: one clamp, applied on close and amend.

@@ -446,7 +446,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
   }
 
   const saveClose = async () => {
-    if (!selected || !close.closedAt || saving) return
+    if (!selected || (canChooseShiftTime() && !close.closedAt) || saving) return
     const closing = shiftClosingCounts(close.closingUsd, close.closingKhr)
     if (closingCountInvalid(close.closingUsd) || closingCountInvalid(close.closingKhr)
       || closingCountInvalid(close.additionalUsd) || closingCountInvalid(close.additionalKhr)) return
@@ -456,7 +456,9 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
       const result = await closeShiftById(selected.id, {
         actorId: app.user?.id,
         expectedRevision: selected.revision,
-        closedAt: shiftLocalDateTimeToIso(close.closedAt),
+        // An employee sends no time at all: the Worker stamps its own clock. The draft's seed is the minute the
+        // form opened, which a close in the same minute as the last sale would be refused for.
+        closedAt: canChooseShiftTime() ? shiftLocalDateTimeToIso(close.closedAt) : undefined,
         // The accounting transport accepts null as "not counted". Casts
         // preserve compatibility with the pre-integration transport type.
         closingCountedUsd: closing.usd as number,
@@ -540,7 +542,8 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
         : edit.closedAt && (closingCountInvalid(edit.additionalUsd) || closingCountInvalid(edit.additionalKhr)) ? t(shiftCountBlockerKey('invalid'))
         : !edit.reason.trim() ? t('shift_reason_required')
           : null
-  const closeReason = !close.closedAt ? t('shift_close_time_required')
+  const closeReason = action !== 'close' ? null
+    : canChooseShiftTime() && !close.closedAt ? t('shift_close_time_required')
     : closingCountInvalid(close.closingUsd) || closingCountInvalid(close.closingKhr)
       || closingCountInvalid(close.additionalUsd) || closingCountInvalid(close.additionalKhr) ? t(shiftCountBlockerKey('invalid'))
       : null
@@ -618,10 +621,10 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
                           and the 409 naming "the next shift segment" names a
                           segment they never saw. One row, with the same key and
                           formatter the POS carry-over strip uses. */}
-                      <div><h3 className="text-sm font-semibold">{t('shift_close_title')}</h3><p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300">{t('shift_close_time_hint')}</p>
-                        {selected.close_before ? <p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300"><span className="font-medium">{t('shift_previous_open_close_before')}</span> · {fmtDateTime24(selected.close_before)}</p> : null}</div>
+                      <div><h3 className="text-sm font-semibold">{t('shift_close_title')}</h3><p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300">{canChooseShiftTime() ? t('shift_close_time_hint') : t('shift_close_time_admin_only')}</p>
+                        {canChooseShiftTime() && selected.close_before ? <p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300"><span className="font-medium">{t('shift_previous_open_close_before')}</span> · {fmtDateTime24(selected.close_before)}</p> : null}</div>
                       <fieldset disabled={saving || pending} className="grid min-w-0 gap-3 sm:grid-cols-2 [&_input]:min-w-0 [&_input]:max-w-full">
-                        <div className="text-xs font-semibold sm:col-span-2"><span className="block">{t('shift_close_time_required')}</span><DateTimeEntryInput className="mt-1" value={close.closedAt} disabled={!canChooseShiftTime()} onChange={(next) => setClose({ ...close, closedAt: next })} t={t} dateAriaLabel={`${t('shift_close_time_required')} · ${t('date')}`} timeAriaLabel={`${t('shift_close_time_required')} · ${t('time')}`} />{canChooseShiftTime() ? null : <span className="mt-1 block font-normal text-gray-600 dark:text-gray-300">{t('shift_close_time_admin_only')}</span>}</div>
+                        {canChooseShiftTime() ? <div className="text-xs font-semibold sm:col-span-2"><span className="block">{t('shift_close_time_required')}</span><DateTimeEntryInput className="mt-1" value={close.closedAt} onChange={(next) => setClose({ ...close, closedAt: next })} t={t} dateAriaLabel={`${t('shift_close_time_required')} · ${t('date')}`} timeAriaLabel={`${t('shift_close_time_required')} · ${t('time')}`} /></div> : null}
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')} hint={t('shift_additional_cash_hint')} hintDetail={t('shift_additional_cash_example')} usd={close.additionalUsd} khr={close.additionalKhr} onUsd={(value) => setClose({ ...close, additionalUsd: value })} onKhr={(value) => setClose({ ...close, additionalKhr: value })} />
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')} hint={t('shift_registered_cash_hint')} usd={close.closingUsd} khr={close.closingKhr} onUsd={(value) => setClose({ ...close, closingUsd: value })} onKhr={(value) => setClose({ ...close, closingKhr: value })} />
                         <label className="text-xs sm:col-span-2">{t('shift_closing_note')}<input className="input mt-1" value={close.closingNote} onChange={(event) => setClose({ ...close, closingNote: event.target.value })} /></label>

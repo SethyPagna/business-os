@@ -4,6 +4,7 @@ import { accessibleText, createHarness, propsOf, type MemoryNode } from './mount
 
 // Owner, 14 Oct 2026: an employee never picks a shift's opening or closing time; they close now. An
 // administrator may. The Shifts popup, mounted for real with the Worker transport doubled:
+//   - the Close form: an employee is offered no time and posts none (the Worker stamps now); an administrator picks one;
 //   - the Edit form: both time fields are disabled for an employee, with the translated hint, and an amend
 //     sends no opened_at/closed_at; an administrator's fields are enabled and a changed time is sent, an
 //     untouched one is not re-stamped.
@@ -20,7 +21,8 @@ const EMPLOYEE = { id: 7, username: 'sokha', name: 'Sokha', role_code: 'cashier'
 const ADMIN = { id: 1, username: 'owner', name: 'Owner', role_code: 'admin', permissions: { all: true } }
 const capabilities = { can_edit: true, can_close: true, can_reopen: false, can_cancel: false }
 
-const closedShift = {
+type FixtureShift = Record<string, unknown> & { shift_code: string; closed_at: string | null }
+const closedShift: FixtureShift = {
   id: 41, shift_code: 'S-20261014-0937-sokha', scope_mode: 'per_account', user_id: 7, user_name: 'sokha', branch_id: 1, branch_name: 'Shop',
   business_date: '2026-10-14', opened_at: '2026-10-14T01:57:13.776Z', opening_float_usd: 50, opening_float_khr: 0, opening_note: null,
   closed_at: '2026-10-14T05:10:00.000Z', closing_counted_usd: 60, closing_counted_khr: 0, closing_note: null,
@@ -33,7 +35,7 @@ const openShift = { ...closedShift, id: 42, shift_code: 'S-20261014-1100-sokha',
 const harness = await createHarness({ localStorage: { businessos_user: JSON.stringify(ADMIN), businessos_read_session: 'read-session-of-owner' } })
 
 type Calls = { amend: Array<Record<string, unknown>>; close: Array<Record<string, unknown>> }
-async function mountPopup(user: typeof EMPLOYEE | typeof ADMIN, shift: typeof closedShift, answers: { amend?: () => unknown; close?: () => unknown } = {}, language: 'en' | 'km' = 'en') {
+async function mountPopup(user: typeof EMPLOYEE | typeof ADMIN, shift: FixtureShift, answers: { amend?: () => unknown; close?: () => unknown } = {}, language: 'en' | 'km' = 'en') {
   const calls: Calls = { amend: [], close: [] }
   const notices: Array<{ message: string; tone?: string }> = []
   const pack = language === 'km' ? km : en
@@ -105,6 +107,42 @@ await runTest('the Edit form: an administrator can change a time, and an untouch
     assert.equal('openedAt' in sent, false, 'the untouched opening time is not sent')
     assert.equal(typeof sent.closedAt, 'string', 'the changed closing time is sent')
     assert.notEqual(sent.closedAtUnchanged, true)
+  } finally {
+    await popup.page.unmount()
+  }
+})
+
+const closeButtons = (popup: Awaited<ReturnType<typeof mountPopup>>): MemoryNode[] =>
+  popup.page.findAll((node) => node.tagName === 'BUTTON' && accessibleText(node).includes(popup.pack.shift_action_close))
+
+await runTest('the Close form: an employee has no time to pick, is told the shift closes now, and the request carries no closed_at', async () => {
+  const popup = await mountPopup(EMPLOYEE, openShift)
+  try {
+    await popup.page.click(closeButtons(popup)[0])
+    assert.equal(popup.page.findAll((node) => node.tagName === 'INPUT' && (node.getAttribute('aria-label') ?? '').startsWith(en.shift_close_time_required)).length, 0,
+      'no closing-time field is offered to an employee')
+    assert.ok(popup.page.text().includes(en.shift_close_time_admin_only), 'the translated line says the shift closes now')
+    const buttons = closeButtons(popup)
+    await popup.page.click(buttons[buttons.length - 1])
+    assert.equal(popup.calls.close.length, 1, 'one close request')
+    assert.equal(popup.calls.close[0].closedAt, undefined, 'the stale, minute-floored draft time is not posted: the Worker stamps now')
+    assert.equal(popup.calls.close[0].expectedRevision, 0)
+  } finally {
+    await popup.page.unmount()
+  }
+})
+
+await runTest('the Close form: an administrator picks the time and the request carries it', async () => {
+  const popup = await mountPopup(ADMIN, openShift)
+  try {
+    await popup.page.click(closeButtons(popup)[0])
+    for (const part of [en.date, en.time]) {
+      assert.equal(popup.isDisabled(popup.input(en.shift_close_time_required, part)), false, `Closing ${part} is enabled for an administrator`)
+    }
+    const buttons = closeButtons(popup)
+    await popup.page.click(buttons[buttons.length - 1])
+    assert.equal(popup.calls.close.length, 1)
+    assert.match(String(popup.calls.close[0].closedAt), /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, 'the chosen time is sent as an instant')
   } finally {
     await popup.page.unmount()
   }
