@@ -47,9 +47,9 @@ async function main() {
     const db = await mf.getD1Database('DB')
     await db.batch([
       db.prepare('CREATE TABLE roles(id INTEGER PRIMARY KEY,code TEXT,permissions TEXT,name TEXT)'),
-      db.prepare('CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT,name TEXT,organization_id INTEGER,role_id INTEGER,permissions TEXT,is_active INTEGER,deleted_at TEXT)'),
+      db.prepare('CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT,name TEXT,organization_id INTEGER,role_id INTEGER,permissions TEXT,is_active INTEGER,deleted_at TEXT,avatar_path TEXT,updated_at TEXT)'),
       db.prepare(`CREATE TABLE user_sessions(id INTEGER PRIMARY KEY,user_id INTEGER,token_hash TEXT,device_name TEXT,device_tz TEXT,user_agent TEXT,last_ip TEXT,device_id TEXT,expires_at TEXT,revoked_at TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP)`),
-      db.prepare(`INSERT INTO users VALUES(1,'admin-a','A',NULL,NULL,'{"all":true}',1,NULL),(2,'employee-b','B',NULL,NULL,'{"pos":true}',1,NULL)`),
+      db.prepare(`INSERT INTO users(id,username,name,organization_id,role_id,permissions,is_active,deleted_at) VALUES(1,'admin-a','A',NULL,NULL,'{"all":true}',1,NULL),(2,'employee-b','B',NULL,NULL,'{"pos":true}',1,NULL)`),
     ])
     const hash = token => createHash('sha256').update(token).digest('hex')
     const day = 86400000

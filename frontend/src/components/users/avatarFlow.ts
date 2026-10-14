@@ -46,6 +46,16 @@ export async function uploadAndAttachAvatar(
   return { avatar_path: String(saved.avatar_path || path), updated_at: saved.updated_at ?? fallbackUpdatedAt }
 }
 
+// The user:updated detail after the signed-in account's photo changes. The
+// revision travels with the path: the header appends updated_at as ?v=, so a
+// path change without it would reuse the old cache entry key.
+export function profileAvatarEventDetail(
+  userId: number | string,
+  avatar: { avatar_path: string | null; updated_at?: string | null },
+): { id: number | string; avatar_path: string | null; updated_at: string | null } {
+  return { id: userId, avatar_path: avatar.avatar_path, updated_at: avatar.updated_at ?? null }
+}
+
 // Remove is two steps: asking opens the shared confirm dialog and nothing
 // else; only confirming removes. Dismissing while the removal runs is ignored
 // so the dialog cannot vanish mid-request.

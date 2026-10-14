@@ -21,7 +21,7 @@ import NewPasswordFields from '../auth/password/NewPasswordFields.tsx'
 import { changeOwnPassword } from '../auth/password/ownPasswordChange.ts'
 import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 import { UserAvatarImage } from './UserAvatar.tsx'
-import { createAvatarRemoveFlow, uploadAndAttachAvatar } from './avatarFlow.ts'
+import { createAvatarRemoveFlow, profileAvatarEventDetail, uploadAndAttachAvatar } from './avatarFlow.ts'
 import { currentPasswordRateLimitMessage } from './currentPasswordErrors.ts'
 import { settingsSaveSucceeded } from '../../utils/settingsSave.ts'
 import { sessionDurationRefusalMessage, SESSION_DURATION_PASSWORD_REQUIRED, type SessionDurationOutcome, type SessionDurationRefusal } from '../../utils/sessionDurationChange.ts'
@@ -1122,7 +1122,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
       )
       setProfile((current) => ({ ...(current || {}), ...nextAvatar }))
       setSavedProfile((current) => ({ ...(current || {}), ...nextAvatar }))
-      window.dispatchEvent(new CustomEvent('user:updated', { detail: { id: requireCurrentUserId(), avatar_path: nextAvatar.avatar_path } }))
+      window.dispatchEvent(new CustomEvent('user:updated', { detail: profileAvatarEventDetail(requireCurrentUserId(), nextAvatar) }))
       notify(tr('avatar_uploaded', 'Avatar uploaded'), 'success')
       actionHistory.pushAction({
         scope: 'profile',
@@ -1148,7 +1148,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
       const cleared = { avatar_path: null, updated_at: result?.updated_at ?? profile?.updated_at ?? null }
       setProfile((current) => ({ ...(current || {}), ...cleared }))
       setSavedProfile((current) => ({ ...(current || {}), ...cleared }))
-      window.dispatchEvent(new CustomEvent('user:updated', { detail: { id: requireCurrentUserId(), avatar_path: null } }))
+      window.dispatchEvent(new CustomEvent('user:updated', { detail: profileAvatarEventDetail(requireCurrentUserId(), cleared) }))
       setAvatarRemoveConfirmOpen(false)
       notify(tr('avatar_removed', 'Profile photo removed'), 'success')
       actionHistory.pushAction({

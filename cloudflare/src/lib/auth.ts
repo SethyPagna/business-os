@@ -145,6 +145,12 @@ export type SessionUser = {
   // everything but the self password change; /bootstrap and /me carry it so
   // the client shows the forced change screen. Absent before 0202.
   must_change_password?: number | null
+  // The signed-in account's own photo (users.avatar_path, "/uploads/NAME") and
+  // the row revision the client appends as ?v= so a replaced photo is not
+  // served from cache. /me and /bootstrap return this object, so the top bar
+  // and the profile menu have a photo to show after every reload. Own row only.
+  avatar_path?: string | null
+  updated_at?: string | null
 }
 
 type SessionLookupRow = SessionUser & {
@@ -401,6 +407,7 @@ async function lookupSessionUser<E extends { Bindings: Env } = { Bindings: Env }
   const db = getDb(c.env)
   const lookupSql = (mustChangeColumn: string) => `
     SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active,
+           u.avatar_path, u.updated_at,
            r.code AS role_code, r.permissions AS role_permissions, r.name AS role_name,${mustChangeColumn}
            s.created_at AS session_created_at, s.expires_at AS session_expires_at,
            s.last_seen_at AS session_last_seen_at,
