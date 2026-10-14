@@ -1,7 +1,7 @@
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { businessDateTimeId } from '../utils/timestampId.ts'
 import { buildAttemptedReturnItems } from './conflicts.ts'
-import { apiFetch, route } from './http.ts'
+import { apiFetch, confirmServerReachable, route } from './http.ts'
 import { getLocalDb } from './lazyLocalDb.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { getReturn, getReturns } from './returnsReadTransport.ts'
@@ -104,7 +104,7 @@ function requireReturnCapability(value: unknown): void {
 export async function getReturnQuoteV1(saleId: number, items: Array<{ sale_item_id: number; quantity: number }>): Promise<ReturnQuoteV1> {
   const scope = captureActorReadScope('returns')
   assertActorReadScope(scope)
-  if (navigator.onLine === false) throw returnV1Error('return_v1_unavailable')
+  if (navigator.onLine === false && !(await confirmServerReachable())) throw returnV1Error('return_v1_unavailable')
   // POST is a read: never route through write invalidation or the offline queue.
   const result = await apiFetch('POST', '/api/returns/quote', { sale_id: saleId, items }) as Record<string, unknown>
   assertActorReadScope(scope)
@@ -217,7 +217,7 @@ const returnCreateFlights = new Set<string>()
 export async function submitReturnCreateV1(actorId: unknown, pending: PendingReturnCreateV1, recovery?: ReturnCreateRecovery): Promise<unknown> {
   const scope: ActorReadScope = captureActorReadScope('returns')
   assertActorReadScope(scope, false)
-  if (navigator.onLine === false) throw returnV1Error('return_v1_unavailable')
+  if (navigator.onLine === false && !(await confirmServerReachable())) throw returnV1Error('return_v1_unavailable')
   assertReturnCreateAdmission(actorId, pending, recovery)
   if (loadPendingReturnCreateV1(actorId)?.bodyJson !== pending.bodyJson) throw returnV1Error('return_v1_session_changed')
   const body = pendingReturnCreateBody(pending)
@@ -314,8 +314,8 @@ export function createSupplierReturn(payload: ReturnPayload = {}): Promise<unkno
 // They are optimistic-concurrency guarded against live stock and return
 // revisions, so replaying them later from an offline snapshot would turn a
 // safe all-or-none action into an unknowable partial-time action.
-export function bulkUpdateReturns(payload: ReturnBulkPayload): Promise<ReturnBulkResult> {
-  if (navigator.onLine === false) return Promise.reject(new Error('Connect to the server before changing returns in bulk.'))
+export async function bulkUpdateReturns(payload: ReturnBulkPayload): Promise<ReturnBulkResult> {
+  if (navigator.onLine === false && !(await confirmServerReachable())) throw new Error('Connect to the server before changing returns in bulk.')
   return apiFetch('POST', '/api/returns/bulk', payload) as Promise<ReturnBulkResult>
 }
 
