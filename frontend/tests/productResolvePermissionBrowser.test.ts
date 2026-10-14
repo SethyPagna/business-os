@@ -22,7 +22,7 @@ const fixture = String.raw`
     preview: async () => ({ choicesSupported: true, groupProducts: products, reviewedDigest: 'a'.repeat(64), stockImpact: { totalQuantity: 0, branches: [] }, keeperStock: { totalQuantity: 0, branches: [] } }),
     merge: async () => ({ keeper: products[0] }),
   } })
-  const value = { ...FALLBACK_APP_CONTEXT, t, language }
+  const value = { ...FALLBACK_APP_CONTEXT, canWriteToServer: true, t, language }
   createRoot(document.getElementById('root')).render(React.createElement(AppContext.Provider, { value }, React.createElement(ResolveModal, { title: t('resolve'), adapter, onClose() {} })))
 `
 const browser = await launchResolveFixture('resolve-permission-browser', fixture)

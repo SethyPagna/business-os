@@ -380,7 +380,7 @@ export default function ActionHistoryBar({
                     key={`recorded-${item.id || item.label}`}
                     type="button"
                     className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-slate-800"
-                    disabled={!!history.busy || (typeof navigator !== 'undefined' && navigator.onLine === false)}
+                    disabled={!!history.busy}
                     onClick={() => { closeMenu(); runServer!(item.id!, doneLabel) }}
                   >
                     <span className="min-w-0 whitespace-normal break-words text-slate-700 dark:text-slate-200" title={displayLabel}>{displayLabel}</span>

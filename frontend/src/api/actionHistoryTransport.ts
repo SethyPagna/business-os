@@ -1,4 +1,5 @@
 import { apiFetch, route } from './http.ts'
+export { confirmServerReachable } from './http.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 
