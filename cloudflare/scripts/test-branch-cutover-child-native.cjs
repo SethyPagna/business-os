@@ -275,7 +275,7 @@ async function main() {
     const movements = w.raw.prepare('SELECT movement_type,batch_id,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr FROM inventory_movements ORDER BY id').all()
     const direction = value => movements.filter(m => m.movement_type === value).map(({ movement_type, ...m }) => m)
     assert.deepEqual(direction('transfer_out'), direction('transfer_in'))
-    for (const movement of movements) assert.equal(movement.unit_cost_usd, movement.batch_id ?? 2.5)
+    for (const movement of movements) assert.equal(movement.unit_cost_usd, movement.batch_id ?? null, "a lot moves at its own cost; units no lot holds are an unknown cost, never today's catalog cost (S5)")
     console.log(JSON.stringify({ scenario: name, reads: w.stats.reads, statements: w.stats.statements, maxBindings: w.stats.binds }))
     await assert.rejects(journal.abortEffectFreeBranchCutoverJournal(w.db, p.proof, result.row.revision, 'No effects'))
     w.raw.close()
@@ -318,7 +318,7 @@ async function main() {
     assert.equal(w.raw.prepare('SELECT COUNT(*) n FROM transfer_operation_receipts').get().n, 1)
     assert.equal(w.raw.prepare('SELECT next_sequence FROM branch_cutovers').get().next_sequence, 1); w.raw.close()
   })
-  for (const mutation of ["UPDATE branch_stock SET quantity=quantity+1 WHERE branch_id=1", "UPDATE branch_stock SET quantity=quantity+1 WHERE branch_id=2", "UPDATE product_batches SET received_at='2020-01-01'", 'UPDATE product_batches SET unit_cost_usd=99', 'DELETE FROM branch_batch_stock', 'UPDATE products SET cost_price_usd=99', 'UPDATE branches SET is_active=0 WHERE id=2', "INSERT INTO branches(name,is_active) VALUES('Shop',1)", "UPDATE users SET permissions='{}' WHERE id=7", 'UPDATE users SET organization_id=NULL WHERE id=7']) await check('batch-time race refused: ' + mutation, async () => {
+  for (const mutation of ["UPDATE branch_stock SET quantity=quantity+1 WHERE branch_id=1", "UPDATE branch_stock SET quantity=quantity+1 WHERE branch_id=2", "UPDATE product_batches SET received_at='2020-01-01'", 'UPDATE product_batches SET unit_cost_usd=99', 'DELETE FROM branch_batch_stock', 'UPDATE branches SET is_active=0 WHERE id=2', "INSERT INTO branches(name,is_active) VALUES('Shop',1)", "UPDATE users SET permissions='{}' WHERE id=7", 'UPDATE users SET organization_id=NULL WHERE id=7']) await check('batch-time race refused: ' + mutation, async () => {
     const w = world(); const p = await planned(w); let raced
     w.stats.before = raw => { raw.exec(mutation); raced = snapshot(w) }
     await assert.rejects(execute(w, p)); assert.equal(snapshot(w), raced); assert.equal(w.stats.batches, 1); w.raw.close()
@@ -400,7 +400,7 @@ async function main() {
   await check('actual query budget exact limit and one over; Free is explicitly refused', async () => {
     for (const [used, allowed] of [[931, true], [932, false]]) {
       const w = world(); const p = await planned(w)
-      if (allowed) { await execute(w, p, { budget: { ...budget, alreadyUsed: used } }); assert.equal(w.stats.statements, 31) }
+      if (allowed) { await execute(w, p, { budget: { ...budget, alreadyUsed: used } }); assert.equal(w.stats.statements, 30) }
       else { await assert.rejects(execute(w, p, { budget: { ...budget, alreadyUsed: used } })); assert.equal(w.stats.batches, 0) }
       w.raw.close()
     }
