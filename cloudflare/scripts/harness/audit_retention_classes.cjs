@@ -1,10 +1,11 @@
 'use strict'
 // Every audit_logs row the Worker writes, as [entity, action, kept], read from the writers in cloudflare/src (the
 // audit()/auditOrThrow()/buildAuditStatement() call sites, the write-receipt keys, the raw INSERT INTO audit_logs
-// statements and the migrations that seeded audit rows). `kept` is the owner's 14 Oct 2026 ruling: the audit rows of
-// sales, payments (settle and refunds), returns, every stock change, permission/role/user changes and reverts, undo and
-// redo are kept forever; every other row follows the retention setting (floor 21 days). The 13 Oct ruling that old
-// expenses are kept still holds.
+// statements and the migrations that seeded audit rows). `kept` is the owner's 14 Oct 2026 ruling (sales, payments,
+// returns, every stock change, permission/role/user changes and reverts; expenses from 13 Oct) plus the lead decision
+// that where deletion cannot be undone the record stays (system-wide writes, sales ownership and receivables, cost and
+// price edits, shift and cash records, review approvals that apply stock or money). Every other row follows the
+// retention setting (floor 21 days).
 //
 // test-audit-retention-pure.cjs fails when the source writes an entity/action pair this table does not classify, and
 // test-audit-retention-keep-forever-native.cjs seeds every row at 400 days and asserts the exact survivors.
@@ -130,15 +131,19 @@ const ROWS = [
   ['user', 'device_reapproval_reset', PURGED],
   ['user', 'device_login_new_country', PURGED],
   ['system', 'step_up_refused', PURGED],
-  ['system', 'factory_reset', PURGED],
-  ['system', 'reset_data', PURGED],
-  ['system', 'finalize_migration', PURGED],
+  ['system', 'factory_reset', KEPT],
+  ['system', 'reset_data', KEPT],
+  ['system', 'finalize_migration', KEPT],
   ['system', 'import_orphan_staging_clean', PURGED],
-  ['data-integrity', 'repair', PURGED],
+  ['data-integrity', 'repair', KEPT],
   ['settings', 'update', PURGED],
   ['pos_address_presets', 'update', PURGED],
-  ['shift_session', 'shift.open', PURGED],
-  ['shift_session', 'shift.close', PURGED],
+  ['shift_session', 'shift.open', KEPT],
+  ['shift_session', 'shift.close', KEPT],
+  ['shift_session', 'shift.open_after_cancel', KEPT],
+  ['shift_session', 'shift.reopen', KEPT],
+  ['shift_session', 'shift.amend', KEPT],
+  ['shift_session', 'shift.cancel', KEPT],
   ['promotion', 'create', PURGED],
   ['promotion', 'update', PURGED],
   ['promotion', 'delete', PURGED],
@@ -146,15 +151,15 @@ const ROWS = [
   ['promotion_rule', 'create', PURGED],
   ['promotion_rule', 'update', PURGED],
   ['promotion_rule', 'delete', PURGED],
-  ['product', 'update', PURGED],
+  ['product', 'update', KEPT],
   ['product', 'delete', PURGED],
-  ['product', 'cost_override', PURGED],
+  ['product', 'cost_override', KEPT],
   ['product', 'lookup_replace', PURGED],
   ['product', 'supplier_backfill', PURGED],
   ['product', 'wire_images', PURGED],
   ['product', 'unwire_images', PURGED],
   ['product', 'zero_quantity_delete', PURGED],
-  ['product', 'catalog_cost_recompute_backfill', PURGED],
+  ['product', 'catalog_cost_recompute_backfill', KEPT],
   ['product_group', 'rename', PURGED],
   ['product_image', 'upload', PURGED],
   ['brand', 'rename', PURGED],
@@ -165,27 +170,51 @@ const ROWS = [
   ['customer', 'create', PURGED],
   ['customer', 'update', PURGED],
   ['customer', 'delete', PURGED],
-  ['customer', 'merge', PURGED],
+  ['customer', 'merge', KEPT],
   ['customer', 'portal_reset', PURGED],
   ['customer', 'award_points', PURGED],
-  ['customer', 'link_sales', PURGED],
-  ['customer', 'relink_sales', PURGED],
-  ['customer', 'create_and_link_sales', PURGED],
+  ['customer', 'link_sales', KEPT],
+  ['customer', 'relink_sales', KEPT],
+  ['customer', 'create_and_link_sales', KEPT],
   ['customer', 'customer_gender_restore', PURGED],
   ['customer', 'repair_legacy_membership_number', PURGED],
-  ['customer', 'customer_same_name_phone_merge', PURGED],
+  ['customer', 'customer_same_name_phone_merge', KEPT],
+  ['customer', 'mark_anonymous_customer', KEPT],
+  ['customer', 'clear_shared_general_membership', KEPT],
   ['supplier', 'create', PURGED],
   ['supplier', 'update', PURGED],
-  ['supplier', 'supplier_duplicate_cluster_merge', PURGED],
+  ['supplier', 'supplier_duplicate_cluster_merge', KEPT],
+  ['supplier', 'merge', KEPT],
+  ['delivery_contact', 'merge', KEPT],
   ['supplier_cascade', 'rename', PURGED],
   ['delivery_contact', 'delete', PURGED],
   ['branch', 'create', PURGED],
   ['branch', 'update', PURGED],
   ['branch', 'delete', PURGED],
   ['pending_action', 'resubmit', PURGED, '{"section":"products"}'],
-  ['pending_action', 'approve', PURGED, '{"section":"products"}'],
+  ['pending_action', 'approve', KEPT, '{"section":"products"}'],
+  ['pending_action', 'approve', KEPT, '{"section":"inventory"}'],
+  ['pending_action', 'approve', KEPT, '{"section":"returns"}'],
+  ['pending_action', 'approve', KEPT, '{"section":"contacts"}'],
+  ['pending_action', 'approve', PURGED, '{"section":"branches"}'],
+  ['pending_action', 'reject', PURGED, '{"section":"products"}'],
+  ['pending_action', 'reject', PURGED, '{"section":"branches"}'],
   ['pending_action', 'reject', PURGED, '{"section":"inventory"}'],
   ['import_job', 'import_job_create', PURGED],
+  ['import_job', 'import_job_approve', KEPT],
+  ['import_job', 'import_job_retry', KEPT],
+  ['import_job', 'import_job_decisions', PURGED],
+  ['import_job', 'import_job_image_assign', PURGED],
+  ['import_job', 'import_job_image_assign_existing', PURGED],
+  ['import_job', 'import_job_image_limit_resolve', PURGED],
+  ['import_job', 'import_job_preflight', PURGED],
+  ['import_job', 'import_job_upload', PURGED],
+  ['import_job', 'import_job_start_blocked', PURGED],
+  ['import_job', 'import_job_start', PURGED],
+  ['import_job', 'import_job_approve_blocked', PURGED],
+  ['import_job', 'import_job_dismiss', PURGED],
+  ['import_job', 'import_job_cancel', PURGED],
+  ['import_job', 'import_job_delete', PURGED],
   ['import_job', 'import_retention_auto_clean', PURGED],
   ['file', 'upload', PURGED],
   ['file', 'rename', PURGED],
@@ -194,7 +223,7 @@ const ROWS = [
   ['note', 'create', PURGED],
   ['note', 'delete', PURGED],
   ['backup', 'create', PURGED],
-  ['backup', 'restore', PURGED],
+  ['backup', 'restore', KEPT],
   ['backup', 'update', PURGED],
   ['backup', 'maintenance_release_failed', PURGED],
   ['audit_log', 'audit_log_retention_auto_delete', PURGED],
@@ -207,6 +236,36 @@ const ROWS = [
   ['telegram_summary', 'send', PURGED],
   ['telegram_webhook', 'connect', PURGED],
   ['portal_submission', 'review', PURGED],
+]
+
+// The rule itself, written by hand and NOT derived from ROWS or from the SQL, so a table that drifts from the rule is
+// caught instead of re-checked against itself. OWNER_KEPT: pairs the rule keeps forever. OWNER_PRUNED: controls that must
+// still expire. [entity, action, details?]
+const OWNER_KEPT = [
+  ['system', 'reset_data'], ['system', 'factory_reset'], ['system', 'finalize_migration'], ['data-integrity', 'repair'],
+  ['backup', 'restore'], ['import_job', 'import_job_approve'], ['import_job', 'import_job_retry'],
+  ['customer', 'link_sales'], ['customer', 'relink_sales'], ['customer', 'create_and_link_sales'], ['customer', 'merge'],
+  ['customer', 'customer_same_name_phone_merge'], ['customer', 'mark_anonymous_customer'],
+  ['customer', 'clear_shared_general_membership'], ['supplier', 'merge'], ['supplier', 'supplier_duplicate_cluster_merge'],
+  ['delivery_contact', 'merge'],
+  ['product', 'cost_override'], ['product', 'catalog_cost_recompute_backfill'], ['product', 'update'],
+  ['product_batch', 'batch_update'], ['product', 'stock_set'],
+  ['shift_session', 'shift.open'], ['shift_session', 'shift.close'], ['shift_session', 'shift.amend'],
+  ['pending_action', 'approve', '{"section":"products"}'], ['pending_action', 'approve', '{"section":"inventory"}'],
+  ['pending_action', 'approve', '{"section":"returns"}'], ['pending_action', 'approve', '{"section":"contacts"}'],
+  ['pending_action', 'approve', '{"section":"fees"}'], ['pending_action', 'reject', '{"section":"fees"}'],
+  ['sale', 'sale_settlement'], ['payment_method', 'replace'], ['return', 'update'], ['role', 'update'], ['user', 'update'],
+  ['stock', 'move'], ['fee', 'create'],
+]
+const OWNER_PRUNED = [
+  ['user', 'login'], ['user', 'device_approved'], ['user', 'device_rejected'], ['user', 'session_revoked'],
+  ['system', 'step_up_refused'], ['system', 'import_orphan_staging_clean'], ['settings', 'update'],
+  ['import_job', 'import_job_create'], ['import_job', 'import_job_start'], ['import_job', 'import_job_upload'],
+  ['pending_action', 'approve', '{"section":"branches"}'], ['pending_action', 'reject', '{"section":"products"}'],
+  ['pending_action', 'resubmit', '{"section":"products"}'],
+  ['customer', 'create'], ['customer', 'update'], ['customer', 'award_points'], ['supplier', 'update'],
+  ['brand', 'rename'], ['branch', 'update'], ['promotion', 'update'], ['backup', 'create'], ['file', 'upload'],
+  ['product', 'delete'], ['product', 'wire_images'],
 ]
 
 // Entity values written by a variable (the call site names a config/kind, not a literal), so the source scan cannot
@@ -233,4 +292,4 @@ const RAW_SQL_WRITERS = {
   'routes/shifts.ts': 3, 'routes/users.ts': 1,
 }
 
-module.exports = { ROWS, KEPT, PURGED, DYNAMIC_ENTITIES, FAMILY_ACTION, RAW_SQL_WRITERS }
+module.exports = { ROWS, KEPT, PURGED, OWNER_KEPT, OWNER_PRUNED, DYNAMIC_ENTITIES, FAMILY_ACTION, RAW_SQL_WRITERS }

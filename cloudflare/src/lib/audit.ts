@@ -17,20 +17,20 @@ const AUDIT_LOG_RETENTION_LAST_RUN_KEY = 'audit_log_retention_last_run'
 // to not do needless work on every tick.
 const AUDIT_LOG_RETENTION_MIN_INTERVAL_MS = 24 * 60 * 60 * 1000
 
-// Owner, 14 Oct 2026: the audit rows of sales, payments (settle and refunds), returns,
-// every stock change, permission, role and user changes, and reverts, undo and redo are
-// kept forever. Every other row follows the retention setting. The 13 Oct ruling that
-// old expenses are kept still holds.
+// Owner, 14 Oct 2026: the audit rows of sales, payments (settle and refunds), returns, every stock change,
+// permission, role and user changes, and reverts are kept forever. The 13 Oct ruling that old expenses are
+// kept still holds. Where the ruling is silent and deletion cannot be undone, the record stays (lead decision,
+// 14 Oct): the rows of every system-wide write that changes sales, stock, returns, payments or permissions
+// (reset, factory reset, migration finalize, integrity repair, restore, import approval), of anything that
+// moves sales ownership or receivables (customer and supplier link, merge, reassign), of every cost and price
+// edit, of shift open/close and cash records, and the review decisions that apply stock or money changes.
+// Any action ending in _undo or _redo is kept for now (the round-5 commit that follows scopes it). Logins, device
+// approvals, settings changes, refused step-ups and every row not named here follow the retention setting.
 //
 // The classes are the entity and action values the writers use, not a guess:
 // scripts/harness/audit_retention_classes.cjs lists every writer and
-// test-audit-retention-pure.cjs fails when the source writes an entity/action pair
-// that list does not classify, or when the list and the SQL below disagree.
-// What stays besides these lists: the exact Shift lifecycle receipts, the validated
-// completed bulk price-adjust receipts, and the expense review decisions
-// ('pending_action' rows whose section is 'fees'). Any action ending in _undo or
-// _redo is kept, which covers the Return bulk replays whose actor and time exist
-// nowhere else.
+// test-audit-retention-pure.cjs fails when the source writes an entity/action pair that list does not
+// classify, or when the list and the SQL below disagree.
 // The ledgers themselves (sales, returns, fees, inventory_movements) are never touched
 // by this sweep; it deletes from audit_logs only.
 export const AUDIT_RETENTION_KEPT_SALE_PAYMENT_ENTITIES = [
@@ -43,12 +43,33 @@ export const AUDIT_RETENTION_KEPT_STOCK_ENTITIES = [
 ] as const
 export const AUDIT_RETENTION_KEPT_PERMISSION_ENTITIES = ['role', 'roles'] as const
 export const AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES = ['fee', 'fee_label'] as const
-// An account row is kept when it creates or changes the account (role, permissions, active flag);
-// its sign-ins, password resets and device approvals follow the retention setting.
-export const AUDIT_RETENTION_KEPT_ACCOUNT_ENTITIES = ['user', 'users'] as const
-export const AUDIT_RETENTION_KEPT_ACCOUNT_ACTIONS = ['create', 'update'] as const
-export const AUDIT_RETENTION_KEPT_PRODUCT_ENTITIES = ['product', 'products'] as const
-export const AUDIT_RETENTION_KEPT_PRODUCT_ACTIONS = ['create'] as const
+export const AUDIT_RETENTION_KEPT_CASH_ENTITIES = ['shift_session'] as const
+// Entities kept only for some actions. An account row is kept when it creates or changes the account (role,
+// permissions, active flag); its sign-ins, password resets and device approvals follow the retention setting.
+// A product row is kept when it creates the product or edits its price or cost.
+const AUDIT_RETENTION_ACCOUNT_ACTIONS = ['create', 'update'] as const
+const AUDIT_RETENTION_PRODUCT_ACTIONS = ['create', 'update', 'cost_override', 'catalog_cost_recompute_backfill'] as const
+export const AUDIT_RETENTION_KEPT_ENTITY_ACTIONS: Readonly<Record<string, readonly string[]>> = {
+  user: AUDIT_RETENTION_ACCOUNT_ACTIONS,
+  users: AUDIT_RETENTION_ACCOUNT_ACTIONS,
+  product: AUDIT_RETENTION_PRODUCT_ACTIONS,
+  products: AUDIT_RETENTION_PRODUCT_ACTIONS,
+  system: ['reset_data', 'factory_reset', 'finalize_migration'],
+  'data-integrity': ['repair'],
+  backup: ['restore'],
+  import_job: ['import_job_approve', 'import_job_retry'],
+  customer: [
+    'merge', 'link_sales', 'relink_sales', 'create_and_link_sales', 'customer_same_name_phone_merge',
+    'mark_anonymous_customer', 'clear_shared_general_membership',
+  ],
+  supplier: ['merge', 'supplier_duplicate_cluster_merge'],
+  delivery_contact: ['merge'],
+}
+// Review decisions: every decision on an expense is kept; an approval is kept when the section it applies
+// changes stock, prices, returns or contacts. Rejections, resubmissions and branch approvals expire.
+export const AUDIT_RETENTION_KEPT_REVIEW_SECTIONS = ['fees'] as const
+export const AUDIT_RETENTION_KEPT_APPROVED_REVIEW_SECTIONS = ['products', 'inventory', 'returns', 'contacts'] as const
+
 // Stock changes that are written on the product (or on a legacy row with no entity).
 export const AUDIT_RETENTION_KEPT_STOCK_ACTIONS = [
   'stock_add', 'stock_remove', 'stock_set', 'stock_adjust', 'stock_in_line_edit', 'stock_movement_reason_edit',
@@ -64,15 +85,17 @@ export const AUDIT_RETENTION_KEPT_LEGACY_ACTIONS = ['sale', 'sale_settlement', '
 const sqlList = (values: readonly string[]): string => values.map((value) => `'${value}'`).join(', ')
 const AUDIT_ENTITY_KEY_SQL = "LOWER(TRIM(COALESCE(NULLIF(TRIM(entity), ''), table_name, '')))"
 const AUDIT_ACTION_SQL = "COALESCE(action, '')"
+const AUDIT_REVIEW_SECTION_SQL = "COALESCE(CASE WHEN json_valid(details) THEN json_extract(details, '$.section') END, '')"
 const AUDIT_RETENTION_KEPT_FOREVER_SQL = `${AUDIT_ENTITY_KEY_SQL} IN (${sqlList([
   ...AUDIT_RETENTION_KEPT_SALE_PAYMENT_ENTITIES,
   ...AUDIT_RETENTION_KEPT_RETURN_ENTITIES,
   ...AUDIT_RETENTION_KEPT_STOCK_ENTITIES,
   ...AUDIT_RETENTION_KEPT_PERMISSION_ENTITIES,
   ...AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES,
+  ...AUDIT_RETENTION_KEPT_CASH_ENTITIES,
 ])})
-        OR (${AUDIT_ENTITY_KEY_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_ACCOUNT_ENTITIES)}) AND ${AUDIT_ACTION_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_ACCOUNT_ACTIONS)}))
-        OR (${AUDIT_ENTITY_KEY_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_PRODUCT_ENTITIES)}) AND ${AUDIT_ACTION_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_PRODUCT_ACTIONS)}))
+${Object.entries(AUDIT_RETENTION_KEPT_ENTITY_ACTIONS).map(([entity, actions]) =>
+  `        OR (${AUDIT_ENTITY_KEY_SQL} = '${entity}' AND ${AUDIT_ACTION_SQL} IN (${sqlList(actions)}))`).join('\n')}
         OR (${AUDIT_ENTITY_KEY_SQL} = '' AND ${AUDIT_ACTION_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_LEGACY_ACTIONS)}))
         OR ${AUDIT_ACTION_SQL} IN (${sqlList([...AUDIT_RETENTION_KEPT_STOCK_ACTIONS, ...AUDIT_RETENTION_KEPT_REVERT_ACTIONS])})
         OR ${AUDIT_ACTION_SQL} LIKE '%\\_undo' ESCAPE '\\'
@@ -84,48 +107,8 @@ export function buildAuditLogRetentionDeleteSql(): string {
     WHERE created_at < @cutoff
       AND NOT (${AUDIT_RETENTION_KEPT_FOREVER_SQL})
       AND NOT (COALESCE(entity, '') = 'pending_action'
-        AND COALESCE(CASE WHEN json_valid(details) THEN json_extract(details, '$.section') END, '') = 'fees')
-      AND NOT COALESCE(CASE WHEN json_valid(details) THEN (
-        (
-          entity = 'shift_session'
-          AND action IN ('shift.close','shift.reopen','shift.amend','shift.cancel')
-          AND json_type(details, '$.request.id') = 'text'
-          AND length(json_extract(details, '$.request.id')) BETWEEN 16 AND 128
-          AND json_extract(details, '$.request.id') NOT GLOB '*[^a-zA-Z0-9_-]*'
-          AND json_type(details, '$.request.target') = 'integer'
-          AND json_extract(details, '$.request.target') > 0
-          AND json_type(details, '$.request.canonical') = 'text'
-          AND CASE WHEN json_valid(json_extract(details, '$.request.canonical')) THEN
-            json_extract(json_extract(details, '$.request.canonical'), '$.client_request_id') = json_extract(details, '$.request.id')
-          ELSE 0 END
-        ) OR (
-          entity = 'product' AND entity_id = 'bulk-price-adjust' AND action = 'update'
-          AND user_id > 0
-          AND json_extract(details, '$.kind') = 'product.bulk-price-adjust'
-          AND json_extract(details, '$.version') = 1
-          AND json_type(details, '$.client_request_id') = 'text'
-          AND length(json_extract(details, '$.client_request_id')) BETWEEN 8 AND 120
-          AND json_extract(details, '$.client_request_id') NOT GLOB '*[^a-zA-Z0-9_-]*'
-          AND json_type(details, '$.rowsTouched') = 'integer'
-          AND json_extract(details, '$.rowsTouched') >= 0
-          AND json_type(details, '$.claim_nonce') = 'text'
-          AND length(json_extract(details, '$.claim_nonce')) = 36
-          AND json_type(details, '$.request') = 'text'
-          AND CASE WHEN json_valid(json_extract(details, '$.request')) THEN
-            json_extract(json_extract(details, '$.request'), '$.direction') IN ('increase','decrease')
-            AND json_type(json_extract(details, '$.request'), '$.amount') IN ('integer','real')
-            AND json_extract(json_extract(details, '$.request'), '$.amount') > 0
-            AND json_type(json_extract(details, '$.request'), '$.fields') = 'array'
-            AND json_array_length(json_extract(details, '$.request'), '$.fields') BETWEEN 1 AND 6
-            AND NOT EXISTS (SELECT 1 FROM json_each(json_extract(details, '$.request'), '$.fields')
-              WHERE value NOT IN ('selling_price_usd','selling_price_khr','wholesale_price_usd','wholesale_price_khr','cost_price_usd','cost_price_khr') OR type <> 'text')
-            AND json_type(json_extract(details, '$.request'), '$.skip_zero') IN ('true','false')
-          ELSE 0 END
-          AND json_valid(old_value) AND json_valid(new_value)
-          AND json_type(new_value, '$.rows_touched') = 'integer'
-          AND json_extract(new_value, '$.rows_touched') = json_extract(details, '$.rowsTouched')
-        )
-      ) ELSE 0 END, 0)
+        AND (${AUDIT_REVIEW_SECTION_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_REVIEW_SECTIONS)})
+          OR (${AUDIT_ACTION_SQL} = 'approve' AND ${AUDIT_REVIEW_SECTION_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_APPROVED_REVIEW_SECTIONS)}))))
     LIMIT 5000
   )`
 }

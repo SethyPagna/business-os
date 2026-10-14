@@ -1,16 +1,19 @@
 'use strict'
 // Owner, 14 Oct 2026: the audit rows of sales, payments (settle and refunds), returns, every stock change,
-// permission/role/user changes and reverts, undo and redo are kept forever; every other row follows the retention
-// setting (floor 21 days). This seeds a 400-day-old row for EVERY entity/action pair the Worker writes
-// (scripts/harness/audit_retention_classes.cjs, read from the writers) plus a recent row of each, runs the daily
-// purge (the scheduled handler) and the password-gated DELETE, and asserts the exact survivors of each.
+// permission/role/user changes and reverts are kept forever; every other row follows the retention setting (floor 21
+// days). Lead decision, 14 Oct: where deletion cannot be undone the record stays too (system-wide writes, sales
+// ownership and receivables, cost and price edits, shift and cash records, review approvals that apply stock or money).
+// This seeds a 400-day-old row for EVERY entity/action pair the Worker writes (scripts/harness/audit_retention_classes.cjs,
+// read from the writers) AND for every pair of the rule as written by hand (OWNER_KEPT / OWNER_PRUNED in the same
+// file, independent of the table), plus a recent row of each, runs the daily purge (the scheduled handler) and the
+// password-gated DELETE, and asserts the exact survivors of each.
 //
 // Drives the REAL Worker (every middleware, route and lib) under Miniflare on a fully migrated D1.
 //
 // Run (from cloudflare/): node scripts/test-audit-retention-keep-forever-native.cjs
 const { randomBytes } = require('node:crypto')
 const { bootWorld, createReporter } = require('./harness/real_worker_world.cjs')
-const { ROWS } = require('./harness/audit_retention_classes.cjs')
+const { ROWS, OWNER_KEPT, OWNER_PRUNED } = require('./harness/audit_retention_classes.cjs')
 
 const PURGE = '/api/system/audit-logs/retention'
 
@@ -32,9 +35,12 @@ const SPECIAL = [
   { label: 'an action that only contains undo', entity: 'brand', table: 'brand', action: 'undo_nothing', kept: false },
 ]
 
+const pairCase = (kept, prefix) => ([entity, action, details]) => ({ label: `${prefix}${entity}/${action}${details ? ' ' + details : ''}`, entity, table: entity, action, details, kept })
 const cases = [
   ...ROWS.map(([entity, action, kept, details]) => ({ label: `${entity}/${action}${details ? ' ' + details : ''}`, entity, table: entity, action, details, kept })),
   ...SPECIAL,
+  ...OWNER_KEPT.map(pairCase(true, 'rule (kept): ')),
+  ...OWNER_PRUNED.map(pairCase(false, 'rule (control, expires): ')),
 ]
 
 async function seed(world, tag) {
