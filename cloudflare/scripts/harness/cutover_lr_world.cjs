@@ -160,7 +160,14 @@ function build(state) {
 
 const LEDGER_TABLES = ['branch_stock', 'branch_batch_stock', 'products', 'product_batches', 'inventory_movements', 'damaged_stock_lots',
   'stock_session_operations', 'stock_session_members', 'stock_lot_adjustment_operations', 'action_history', 'shift_sessions']
-const ledger = (db) => JSON.stringify(LEDGER_TABLES.map((table) => [table, db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]))
+// The oracle (da200493) predates release 3's unknown-cost rule (S5, 14 Oct 2026): it priced a movement from the catalog
+// when a lot had no cost, and left the KHR cost columns at their DEFAULT 0. These worlds prove branch-redirect
+// behaviour, so the cost snapshots on a movement are masked here; test-cost-s5-stock-side-native.cjs,
+// test-adjust-received-date-pure.cjs and test-transfer-cost-snapshot-native.cjs pin them.
+const COST_SNAPSHOT_COLUMNS = new Set(['unit_cost_usd', 'unit_cost_khr', 'total_cost_usd', 'total_cost_khr'])
+const maskCosts = (table, rows) => table !== 'inventory_movements' ? rows
+  : rows.map((row) => Object.fromEntries(Object.entries(row).filter(([column]) => !COST_SNAPSHOT_COLUMNS.has(column))))
+const ledger = (db) => JSON.stringify(LEDGER_TABLES.map((table) => [table, maskCosts(table, db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())]))
 const plain = (value) => JSON.parse(JSON.stringify(value))
 const oldShop = (db) => plain(db.prepare(`SELECT 'branch_stock' t, product_id k, quantity FROM branch_stock WHERE branch_id=2
   UNION ALL SELECT 'branch_batch_stock', batch_id, quantity FROM branch_batch_stock WHERE branch_id=2 ORDER BY 1,2`).all())

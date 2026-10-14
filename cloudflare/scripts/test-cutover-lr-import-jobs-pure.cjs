@@ -339,7 +339,12 @@ async function main() {
           'the same batch moves the product total, branch_stock and the lot')
         return
       }
-      assert.deepEqual(fresh.rows, old.rows, `${type}: identical business rows`)
+      // S5 (14 Oct 2026): the stock-action movements now state their KHR cost columns as unknown (NULL) instead of
+      // taking the DEFAULT 0 the oracle's INSERT left them with. Every other column is still compared as it was.
+      const expectedRows = type === 'stock_actions'
+        ? { ...old.rows, inventory_movements: old.rows.inventory_movements.map((row) => ({ ...row, unit_cost_khr: null, total_cost_khr: null })) }
+        : old.rows
+      assert.deepEqual(fresh.rows, expectedRows, `${type}: identical business rows`)
       if (type === 'stock_actions') {
         // The one deliberate addition: the add batch's in-batch guard that its landing branch is still active (the
         // closed loophole). Remove it and the rest is byte-identical.
@@ -347,7 +352,22 @@ async function main() {
         const added = fresh.writes.flat().filter(isLandingGuard)
         const adds = fresh.rows.inventory_movements.filter((movement) => movement.movement_type === 'add').length
         assert.ok(adds === 2 && added.length === adds, 'exactly one landing guard per applied add (shop 2 -> Shop, warehouse 1 -> Warehouse)')
-        assert.deepEqual(withoutProductAdmission(fresh.writes).map((batch) => batch.filter((text) => !isLandingGuard(text))), withoutProductAdmission(old.writes), `${type}: otherwise byte-identical`)
+        // S5 (14 Oct 2026) rewrote two statement shapes on purpose: the movement INSERT states its KHR cost columns (NULL,
+        // not the DEFAULT 0), and a lot's received-money running sum stays unknown when a receipt's money is. Those keep
+        // every bound parameter the oracle had; every other statement is still byte-identical.
+        const S5_REWRITTEN = /INSERT INTO inventory_movements|received_cost_usd = /
+        const now = withoutProductAdmission(fresh.writes).map((batch) => batch.filter((text) => !isLandingGuard(text)))
+        const then = withoutProductAdmission(old.writes)
+        assert.equal(now.length, then.length, `${type}: same batches`)
+        now.forEach((batch, b) => {
+          assert.equal(batch.length, then[b].length, `${type}: batch ${b} has the same statements`)
+          batch.forEach((text, s) => {
+            if (!S5_REWRITTEN.test(then[b][s])) return assert.equal(text, then[b][s], `${type}: batch ${b} statement ${s} byte-identical`)
+            const after = JSON.parse(text), before = JSON.parse(then[b][s])
+            assert.match(after.sql, S5_REWRITTEN, `${type}: batch ${b} statement ${s} is the same writer`)
+            assert.deepEqual(after.params, before.params, `${type}: batch ${b} statement ${s} binds the same values`)
+          })
+        })
       } else {
         assert.deepEqual(withoutProductAdmission(fresh.writes), withoutProductAdmission(old.writes), `${type}: byte-identical business statements`)
       }

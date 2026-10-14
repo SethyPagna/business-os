@@ -29,6 +29,7 @@ import { multiplyMoney4 } from './moneyPrecision'
 import { MOVEMENT_RETURN_REFERENCE_TYPES, movementReferenceKindSql } from './movementReference'
 import { STOCK_RECEIPT_MOVEMENT_TYPES, isStockInEditReference, stockInEditRange } from './stockInSessionsQuery'
 import { STOCK_CONDITION_TAGS, isDamagedLotReference, taggedReasonText } from './stockCondition'
+import { FREE_GOODS_REASON_NOTE } from './stockReceiptGate'
 import { findConsumingBlocker, type StockRefusalDetails } from './stockRefusalBlocker'
 import { addressedStatements, landingLotId, requestBranchEffect, type RedirectTarget } from './branchRedirectWrite'
 
@@ -554,9 +555,13 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
       'SELECT id, received_cost_usd FROM product_batches WHERE id = @batchId AND variant_product_id = @productId',
     ).get<{ id: number; received_cost_usd: number | null }>({ batchId, productId })
     if (!before) return refuse(400, 'revert_lot_moved', 'Selected received date does not belong to this product')
-    // Both cost columns default to 0 (0001), so a row with neither priced (a
-    // dated count) carries no cost and must not turn the lot's NULL into $0.
-    const unitCostUsd = !Number(m.unit_cost_usd) && !Number(m.total_cost_usd) ? null : m.unit_cost_usd ?? null
+    // The original's recorded cost is copied as it stands: a priced receipt keeps its price, and a recorded
+    // $0 keeps being $0 when the row says so in words (a declared free-goods receipt). Both cost columns
+    // default to 0 (0001), so a 0/0 row with no such declaration (a dated count) never recorded a cost and
+    // must not turn the lot's NULL into $0.
+    const priced = Number(m.unit_cost_usd) > 0 || Number(m.total_cost_usd) > 0
+    const declaredFree = String(m.reason ?? '').includes(FREE_GOODS_REASON_NOTE)
+    const unitCostUsd = m.unit_cost_usd == null || !(priced || declaredFree) ? null : Number(m.unit_cost_usd)
     try {
       statements.push(...planReceiveBatchStock({
         productId, branchId, quantity: magnitude, batchId, unitCostUsd,

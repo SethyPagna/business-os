@@ -12,16 +12,16 @@ import { productStockGuardStatement } from './productStockGuard'
 // second call posts a second movement rather than silently re-applying.
 //
 //   HOLD      keep-as-tagged on a remove, or a tagged restock
-//             S -= q, D += q     movement damage_out (cost filled) + lot row
+//             S -= q, D += q     movement damage_out (own lot cost, NULL if unknown) + lot row
 //             NOT a loss: the goods are still owned, still countable, still
 //             disposable or restorable. See stockCondition.ts.
 //   DISPOSE   the tagged row's "Remove entirely"
-//             S unchanged, D -= q    movement write_off (cost filled)
+//             S unchanged, D -= q    movement write_off (held lot's own cost, NULL if unknown)
 //             THIS is the loss, booked once, at cost. S is untouched because
 //             the units already left sellable stock at HOLD time -- moving S
 //             again here is the double-count this split exists to prevent.
 //   RESTORE   the tagged row's "Restore to sellable"
-//             S += q, D -= q     movement 'in' (cost filled)
+//             S += q, D -= q     movement 'in' (held lot's own cost, NULL if unknown)
 //             The exact reversal of HOLD.
 //
 // A plain untagged removal (no HOLD at all) keeps its existing 'remove'
@@ -245,10 +245,6 @@ export type TaggedLotChangeInput = {
   tag: StockConditionTag
   takes: TaggedLotTake[]
   reason: string | null
-  /** Catalog cost, read before the write, for a held lot with no stamped cost
-   *  (a returns-flow lot, or anything written before migration 0162). */
-  fallbackUnitCostUsd: number | null
-  fallbackUnitCostKhr: number | null
   actor: TaggedLotActor
 }
 
@@ -256,12 +252,13 @@ function takenQuantity(takes: TaggedLotTake[]): number {
   return takes.reduce((sum, take) => sum + Number(take.quantity || 0), 0)
 }
 
+// A held lot is valued at its OWN stamped cost. One with none (a returns-flow lot,
+// or anything written before migration 0162) is unknown: the movement says so
+// rather than borrowing the catalog cost of the day it is disposed or restored.
 function costForTakes(input: TaggedLotChangeInput): MovementCostPair {
   return resolveMovementCostSnapshot({
     quantity: takenQuantity(input.takes),
     components: input.takes.map((take) => ({ quantity: take.quantity, unitCostUsd: take.unitCostUsd })),
-    fallbackUnitCostUsd: input.fallbackUnitCostUsd,
-    fallbackUnitCostKhr: input.fallbackUnitCostKhr,
   })
 }
 

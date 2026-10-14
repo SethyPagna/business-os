@@ -227,14 +227,29 @@ type InventoryFilterQuery = Record<string, string | undefined>
 type InventoryProductMetricRow = {
   product_id: number
   display_quantity: number
-  stock_value_usd: number
-  stock_value_khr: number
+  stock_value_usd: number | null
+  stock_value_khr: number | null
+  stock_value_unknown: number
   qty_sold: number
   revenue_usd: number
   revenue_khr: number
   cogs_usd: number
   cogs_khr: number
+  cogs_unknown_lines: number
 }
+
+// One product's unit cost for valuing the stock it holds. purchase_price_* mirrors
+// cost_price_* but is DEFAULT 0, so a 0 there is an unfilled mirror and the catalog
+// cost decides; a recorded $0 (cost_price = 0) is a real $0 and a NULL cost stays
+// NULL (unknown) -- it is never priced as 0 or borrowed from another row.
+const stockUnitCostSql = (currency: 'usd' | 'khr', alias = 'p') =>
+  `CASE WHEN ${alias}.purchase_price_${currency} > 0 THEN ${alias}.purchase_price_${currency} ELSE ${alias}.cost_price_${currency} END`
+// Stock value of `quantity` units: NULL while the cost is unknown and units are held,
+// so a total can skip it and count it instead of summing an invented $0.
+const stockValueSql = (currency: 'usd' | 'khr', quantity: string, alias = 'p') =>
+  `CASE WHEN ${stockUnitCostSql(currency, alias)} IS NULL AND ${quantity} <> 0 THEN NULL ELSE ${quantity} * COALESCE(${stockUnitCostSql(currency, alias)}, 0) END`
+const stockValueUnknownSql = (quantity: string, alias = 'p') =>
+  `CASE WHEN ${stockUnitCostSql('usd', alias)} IS NULL AND ${quantity} > 0 THEN 1 ELSE 0 END`
 
 /**
  * Enrich only the rows already admitted by family-aware pagination. The one
@@ -288,13 +303,15 @@ export async function attachInventoryProductMetrics(
     ledger AS (${buildProductSalesLedgerSql({ requestedIds: true, branchScoped, saleClauses })})
     SELECT ids.product_id,
            ${stockQuantitySql} AS display_quantity,
-           ${stockQuantitySql} * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0) AS stock_value_usd,
-           ${stockQuantitySql} * COALESCE(NULLIF(p.purchase_price_khr, 0), p.cost_price_khr, 0) AS stock_value_khr,
+           ${stockValueSql('usd', stockQuantitySql)} AS stock_value_usd,
+           ${stockValueSql('khr', stockQuantitySql)} AS stock_value_khr,
+           ${stockValueUnknownSql(stockQuantitySql)} AS stock_value_unknown,
            COALESCE(ledger.qty_sold, 0) AS qty_sold,
            COALESCE(ledger.revenue_usd, 0) AS revenue_usd,
            COALESCE(ledger.revenue_khr, 0) AS revenue_khr,
            COALESCE(ledger.cogs_usd, 0) AS cogs_usd,
-           COALESCE(ledger.cogs_khr, 0) AS cogs_khr
+           COALESCE(ledger.cogs_khr, 0) AS cogs_khr,
+           COALESCE(ledger.cogs_unknown_lines, 0) AS cogs_unknown_lines
     FROM requested_ids ids
     JOIN products p ON p.id = ids.product_id
     ${stockJoinSql}
@@ -309,8 +326,10 @@ export async function attachInventoryProductMetrics(
     const cogsUsd = num(metric.cogs_usd)
     Object.assign(item, {
       display_quantity: num(metric.display_quantity),
-      stock_value_usd: num(metric.stock_value_usd),
-      stock_value_khr: num(metric.stock_value_khr),
+      stock_value_usd: metric.stock_value_usd == null ? null : num(metric.stock_value_usd),
+      stock_value_khr: metric.stock_value_khr == null ? null : num(metric.stock_value_khr),
+      stock_value_unknown: Number(metric.stock_value_unknown) === 1,
+      cogs_unknown_lines: num(metric.cogs_unknown_lines),
       qty_sold: num(metric.qty_sold),
       revenue_usd: revenueUsd,
       revenue_khr: num(metric.revenue_khr),
@@ -730,6 +749,8 @@ app.get('/bootstrap', async (c) => {
       out_of_stock_count: familyStats.out_of_stock,
       stock_value_usd: familyStats.stock_value_usd,
       stock_value_khr: familyStats.stock_value_khr,
+      stock_value_unknown_products: familyStats.stock_value_unknown_products,
+      stock_value_unknown_quantity: familyStats.stock_value_unknown_quantity,
     },
     movements: {
       items: (movements || []).map((row) => withResolvedActorName(withResolvedBranchName(row))),
@@ -764,8 +785,9 @@ app.get('/summary', async (c) => {
     const rows = await db.prepare(`
       SELECT p.*,
         COALESCE(bs.quantity, 0) AS display_quantity,
-        COALESCE(bs.quantity * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0), 0) AS stock_value_usd,
-        COALESCE(bs.quantity * COALESCE(NULLIF(p.purchase_price_khr, 0), p.cost_price_khr, 0), 0) AS stock_value_khr,
+        ${stockValueSql('usd', 'COALESCE(bs.quantity, 0)')} AS stock_value_usd,
+        ${stockValueSql('khr', 'COALESCE(bs.quantity, 0)')} AS stock_value_khr,
+        ${stockValueUnknownSql('COALESCE(bs.quantity, 0)')} AS stock_value_unknown,
         COALESCE(fin.qty_sold, 0) AS qty_sold,
         COALESCE(fin.store_discount_usd, 0) AS store_discount_usd,
         COALESCE(fin.store_discount_khr, 0) AS store_discount_khr,
@@ -819,8 +841,9 @@ app.get('/summary', async (c) => {
   const rows = await db.prepare(`
     SELECT p.*,
       p.stock_quantity AS display_quantity,
-      COALESCE(p.stock_quantity * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0), 0) AS stock_value_usd,
-      COALESCE(p.stock_quantity * COALESCE(NULLIF(p.purchase_price_khr, 0), p.cost_price_khr, 0), 0) AS stock_value_khr,
+      ${stockValueSql('usd', 'COALESCE(p.stock_quantity, 0)')} AS stock_value_usd,
+      ${stockValueSql('khr', 'COALESCE(p.stock_quantity, 0)')} AS stock_value_khr,
+      ${stockValueUnknownSql('COALESCE(p.stock_quantity, 0)')} AS stock_value_unknown,
       COALESCE(fin.qty_sold, 0) AS qty_sold,
       COALESCE(fin.store_discount_usd, 0) AS store_discount_usd,
       COALESCE(fin.store_discount_khr, 0) AS store_discount_khr,
@@ -931,7 +954,8 @@ app.get('/stats', async (c) => {
         COALESCE(SUM(COALESCE(fin.gross_revenue_usd, 0)), 0) AS revenue_usd,
         COALESCE(SUM(COALESCE(fin.gross_revenue_khr, 0)), 0) AS revenue_khr,
         COALESCE(SUM(COALESCE(fin.gross_cogs_usd, 0)), 0) AS cogs_usd,
-        COALESCE(SUM(COALESCE(fin.gross_cogs_khr, 0)), 0) AS cogs_khr
+        COALESCE(SUM(COALESCE(fin.gross_cogs_khr, 0)), 0) AS cogs_khr,
+        COALESCE(SUM(COALESCE(fin.cogs_unknown_lines, 0)), 0) AS cogs_unknown_lines
       FROM products p
       ${joinSql}
       ${financialJoinSql}
@@ -950,6 +974,8 @@ app.get('/stats', async (c) => {
       stock_quantity: familyStats.stock_quantity,
       stock_value_usd: familyStats.stock_value_usd,
       stock_value_khr: familyStats.stock_value_khr,
+      stock_value_unknown_products: familyStats.stock_value_unknown_products,
+      stock_value_unknown_quantity: familyStats.stock_value_unknown_quantity,
       net_sold_qty: Number(row.net_sold_qty || 0),
       store_discount_usd: Number(row.store_discount_usd || 0),
       store_discount_khr: Number(row.store_discount_khr || 0),
@@ -959,6 +985,7 @@ app.get('/stats', async (c) => {
       revenue_khr: Number(row.revenue_khr || 0),
       cogs_usd: Number(row.cogs_usd || 0),
       cogs_khr: Number(row.cogs_khr || 0),
+      cogs_unknown_lines: Number(row.cogs_unknown_lines || 0),
       // Back-compat aliases for the unfiltered shape above, so existing
       // callers reading product_count/low_stock_count/out_of_stock_count
       // keep working whether or not a filter was applied.
@@ -1319,8 +1346,10 @@ const STOCK_ROW_COLUMNS = `id, name, sku, barcode, category, brand, unit, descri
 // "Cost" input the frontend now sends. Kept as its own function (rather
 // than inlined at each write site) so every write path that used to ask
 // for "cost" and "purchase" separately stays in sync from one place.
-function mirrorCostFields(usd: number, khr: number) {
-  return { purchase_price_usd: usd, purchase_price_khr: khr, cost_price_usd: usd, cost_price_khr: khr }
+// An unknown cost stays NULL on cost_price_*; the purchase_price_* mirror is
+// DEFAULT 0 (0 there means "unfilled"), so it takes 0 rather than NULL.
+function mirrorCostFields(usd: number | null, khr: number | null) {
+  return { purchase_price_usd: usd ?? 0, purchase_price_khr: khr ?? 0, cost_price_usd: usd, cost_price_khr: khr }
 }
 
 // "Add stock with pricing unlocked": the receiving-different-stock case
@@ -1343,7 +1372,7 @@ async function resolveAddStockTarget(
     sellingUsd: number; sellingKhr: number
     wholesaleUsd: number; wholesaleKhr: number
     discountEnabled: boolean; discountType: string; discountPercent: number; discountAmountUsd: number; discountAmountKhr: number
-    costUsd: number; costKhr: number
+    costUsd: number | null; costKhr: number | null
     barcode: string | null
   },
   preflightReceiptCost: (target: Pick<ProductIdentityRow, 'id' | 'cost_price_usd' | 'cost_price_khr'>) => void | Promise<void>,
@@ -1837,7 +1866,6 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   let preflightAddMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = null
   let unlockedReceiptCostPreimage: ReceiptCostPreimage | undefined
   let unlockedReceiptLotTarget: Awaited<ReturnType<typeof prepareReceiptLotTarget>> | undefined
-  let unlockedProductSnapshot: Awaited<ReturnType<typeof resolveAddStockTarget>>['product'] | undefined
   let mergedPricingStatement: { sql: string; params: Record<string, unknown> } | null = null
   if (unlockPricing) {
     const pricing = body.pricing as Record<string, unknown>
@@ -1872,8 +1900,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       discountPercent: pricing.discount_percent != null ? Number(pricing.discount_percent) || 0 : Number(source.discount_percent) || 0,
       discountAmountUsd: pricing.discount_amount_usd != null ? Number(pricing.discount_amount_usd) || 0 : Number(source.discount_amount_usd) || 0,
       discountAmountKhr: pricing.discount_amount_khr != null ? Number(pricing.discount_amount_khr) || 0 : Number(source.discount_amount_khr) || 0,
-      costUsd: explicitCostUsd ?? (Number(source.cost_price_usd) || 0),
-      costKhr: explicitCostKhr ?? (Number(source.cost_price_khr) || 0),
+      costUsd: explicitCostUsd ?? source.cost_price_usd ?? null,
+      costKhr: explicitCostKhr ?? source.cost_price_khr ?? null,
       barcode: pricing.barcode != null ? (String(pricing.barcode).trim() || null) : source.barcode,
     }
     // The unlocked block is the same price edit as the single sellingPrice field above: a changed selling or wholesale
@@ -1895,21 +1923,19 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     let resolved: Awaited<ReturnType<typeof resolveAddStockTarget>>
     try {
       resolved = await resolveAddStockTarget(c.env, source, overrides, async (target) => {
-        const targetCostUsd = target.cost_price_usd ?? null
-        const targetCostKhr = target.cost_price_khr ?? null
+        // The receipt's cost is the one the operator entered for it. The row it lands on may carry a
+        // different catalog cost; that is never read back as this receipt's cost.
         preflightAddMovementCost = resolveMovementCostSnapshot({
           quantity,
           components: [{
             quantity,
-            unitCostUsd: unitCostUsd ?? targetCostUsd,
-            unitCostKhr: unitCostUsd === 0 && freeGoods ? 0 : targetCostKhr,
+            unitCostUsd: unitCostUsd ?? null,
+            unitCostKhr: unitCostUsd === 0 && freeGoods ? 0 : null,
           }],
-          fallbackUnitCostUsd: targetCostUsd,
-          fallbackUnitCostKhr: targetCostKhr,
         })
         if (target.id > 0) {
           unlockedReceiptLotTarget = await prepareReceiptLotTarget(db, { productId: target.id, receivedDate,
-            unitCostUsd: unitCostUsd ?? targetCostUsd, preserveHistoricalUnitCost: unitCostUsd == null })
+            unitCostUsd: unitCostUsd ?? null, preserveHistoricalUnitCost: unitCostUsd == null })
           const batchExists = unlockedReceiptLotTarget.existingBatchId != null
           const receivedCostUsd = unlockedReceiptLotTarget.existingReceivedCostUsd
           unlockedReceiptCostPreimage = { batchExists, receivedCostUsd }
@@ -1922,7 +1948,6 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       if (error instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
       throw error
     }
-    unlockedProductSnapshot = resolved.product
     targetProductId = resolved.product.id
     targetProductName = resolved.product.name ?? source.name
     createdSibling = resolved.created
@@ -1942,11 +1967,9 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     }
   }
 
-  // Snapshot catalog cost before moving stock. It is only the fallback for a
-  // receipt/removal that has no more specific entered/lot cost; it is never
-  // consulted later when this historical row is displayed or reverted.
-  const productCostSnapshot = unlockedProductSnapshot ?? product
-  const receiptUnitCostUsd = correctionLot ? correctionLot.unit_cost_usd : unitCostUsd ?? productCostSnapshot?.cost_price_usd ?? null
+  // A receipt costs what the operator entered for it, or the selected lot's own cost on a correction. With
+  // neither it is unknown (NULL): the product's catalog cost is a different fact and never stands in for it.
+  const receiptUnitCostUsd = correctionLot ? correctionLot.unit_cost_usd : unitCostUsd ?? null
 
   // Mandatory batch selection (InventoryStockModals.tsx, add/remove on flat
   // rows) rides on this same endpoint rather than a separate one, so undo/
@@ -2073,15 +2096,11 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         quantity: allocation.quantity,
         unitCostUsd: removalCostByBatch.get(allocation.batchId) ?? null,
       })),
-      fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
-      fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
     })
   } else if (type === 'add' && !addMovementCost) {
     addMovementCost = resolveMovementCostSnapshot({
       quantity,
       components: [{ quantity, unitCostUsd: receiptUnitCostUsd, unitCostKhr: unitCostUsd === 0 && freeGoods ? 0 : null }],
-      fallbackUnitCostUsd: correctionLot ? null : productCostSnapshot?.cost_price_usd ?? null,
-      fallbackUnitCostKhr: correctionLot ? null : productCostSnapshot?.cost_price_khr ?? null,
     })
   }
   } catch (error) {
@@ -2127,16 +2146,15 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         quantity: entry.quantity,
         unitCostUsd: removalCostByBatch.get(entry.batchId) ?? null,
       })),
-      fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
-      fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
     })
     // A removal no single lot covered is held as one row per source lot (each with its own lot and cost) plus one
-    // for units no lot held, so a later Restore puts every unit back where it came from. A lot with no unit cost takes
-    // the product cost of today, as the remainder row does; otherwise Dispose prices it at the catalog cost of that later day.
+    // for units no lot held, so a later Restore puts every unit back where it came from. A lot with no unit cost is
+    // held with none (and so are the units no lot held): Dispose then books an unknown loss, never the catalog cost
+    // of that later day.
     const lotSplit = useBatchLedger && resolvedBatchId == null && removedBatchQuantities.length
       ? [
-        ...removedBatchQuantities.map((entry) => ({ batchId: entry.batchId as number | null, quantity: entry.quantity, unitCostUsd: removalCostByBatch.get(entry.batchId) ?? productCostSnapshot?.cost_price_usd ?? null })),
-        ...(removedRemainder > 0.000000001 ? [{ batchId: null, quantity: removedRemainder, unitCostUsd: productCostSnapshot?.cost_price_usd ?? null }] : []),
+        ...removedBatchQuantities.map((entry) => ({ batchId: entry.batchId as number | null, quantity: entry.quantity, unitCostUsd: removalCostByBatch.get(entry.batchId) ?? null })),
+        ...(removedRemainder > 0.000000001 ? [{ batchId: null, quantity: removedRemainder, unitCostUsd: null }] : []),
       ]
       : undefined
     return planHoldAsTagged({
@@ -2182,8 +2200,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     if (type === 'add') {
       // An entered receipt cost, including an explicit free-goods zero, is
       // the strongest action-time fact. KHR has no request/lot field; zero
-      // is defensible for explicitly free goods, otherwise use the catalog
-      // KHR snapshot without inventing an exchange conversion.
+      // is defensible for explicitly free goods, otherwise it stays unknown
+      // rather than borrowing the catalog KHR or inventing an exchange conversion.
       costComponents = [{
         quantity: Math.abs(delta),
         unitCostUsd: receiptUnitCostUsd,
@@ -2198,8 +2216,6 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     const movementCost = addMovementCost || removeMovementCost || resolveMovementCostSnapshot({
         quantity: Math.abs(delta),
         components: costComponents,
-        fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
-        fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
       })
     return {
       sql: `
@@ -2292,8 +2308,6 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         })
         const receiptCost = addMovementCost || resolveMovementCostSnapshot({
           quantity, components: [{ quantity, unitCostUsd: receiptUnitCostUsd }],
-          fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
-          fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
         })
         const removal = planRemoveStockAcrossBatches({ productId: targetProductId, branchId, quantity,
           allocations: [{ batchId: receiptBatchId, quantity }] })
@@ -2576,8 +2590,6 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       cost: addMovementCost || resolveMovementCostSnapshot({
         quantity: Math.abs(delta),
         components: [{ quantity: Math.abs(delta), unitCostUsd: receiptUnitCostUsd }],
-        fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
-        fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
       }),
       referenceId: sessionId,
       actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
@@ -3059,6 +3071,7 @@ app.post('/move-row', async (c) => {
   const sourceLots = await listBatchesForProduct(db, sourceProductId, branchId, { onlyAvailable: true })
   let removal: ReturnType<typeof planRemoveStockAcrossBatches>
   let receipt: ReturnType<typeof planReceiveBatchStock>
+  let moveCost: ReturnType<typeof resolveMovementCostSnapshot>
   try {
     removal = planRemoveStockAcrossBatches({
       productId: sourceProductId, branchId, quantity, allocations: fifoRemovalAllocations(sourceLots, quantity),
@@ -3068,6 +3081,19 @@ app.post('/move-row', async (c) => {
       branchId,
       quantity,
       receiptLotTarget: await prepareReceiptLotTarget(db, { productId: destinationProductId }),
+    })
+    // Both movements carry what the moved units cost: each source lot's OWN cost, unknown (NULL) when any lot
+    // taken from, or any unit no lot held, has none. Never the catalog cost, and never the DEFAULT 0 the columns
+    // would otherwise take, which would read as a recorded $0.
+    const takenLotIds = removal.batchQuantities.map((entry) => entry.batchId)
+    const takenLotCosts = takenLotIds.length
+      ? await db.prepare('SELECT id, unit_cost_usd FROM product_batches WHERE id IN (SELECT value FROM json_each(@ids))')
+        .all<{ id: number; unit_cost_usd: number | null }>({ ids: JSON.stringify(takenLotIds) })
+      : []
+    const lotCostById = new Map(takenLotCosts.map((row) => [Number(row.id), row.unit_cost_usd ?? null]))
+    moveCost = resolveMovementCostSnapshot({
+      quantity,
+      components: removal.batchQuantities.map((entry) => ({ quantity: Math.abs(entry.quantity), unitCostUsd: lotCostById.get(entry.batchId) ?? null })),
     })
   } catch (err) {
     const stockGuard = productStockGuardError(err)
@@ -3084,17 +3110,17 @@ app.post('/move-row', async (c) => {
         // 0084 batch attribution: out is stampable only when ONE source lot
         // covered the whole move; in always lands on exactly the lot the
         // receipt resolved.
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
-              VALUES (@productId, @productName, @branchId, @branchName, 'move_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-        params: { productId: sourceProductId, productName: source.name, branchId, branchName: branch?.name || null, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: removal.batchIds.length === 1 && removal.remainder === 0 ? removal.batchIds[0] : null },
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_id, user_name, created_at, batch_id)
+              VALUES (@productId, @productName, @branchId, @branchName, 'move_out', @quantity, @unitCostUsd, @unitCostKhr, @totalCostUsd, @totalCostKhr, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
+        params: { productId: sourceProductId, productName: source.name, branchId, branchName: branch?.name || null, quantity, ...moveCost, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: removal.batchIds.length === 1 && removal.remainder === 0 ? removal.batchIds[0] : null },
       },
       // A move that names no single source lot records what it took from each, directly after its movement.
       ...(removal.batchIds.length === 1 && removal.remainder === 0 ? [] : planMovementLotShares(removal.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) })))),
       {
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
-              VALUES (@productId, @productName, @branchId, @branchName, 'move_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP,
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_id, user_name, created_at, batch_id)
+              VALUES (@productId, @productName, @branchId, @branchName, 'move_in', @quantity, @unitCostUsd, @unitCostKhr, @totalCostUsd, @totalCostKhr, @reason, @userId, @userName, CURRENT_TIMESTAMP,
                 (SELECT id FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey))`,
-        params: { productId: destinationProductId, productName: destination.name, branchId, branchName: branch?.name || null, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchKey: receipt.batchKey },
+        params: { productId: destinationProductId, productName: destination.name, branchId, branchName: branch?.name || null, quantity, ...moveCost, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchKey: receipt.batchKey },
       },
     ]))
   } catch (err) {
@@ -3280,8 +3306,7 @@ async function runTaggedLotActionKernel(c: InventoryContext, action: 'dispose' |
   if (!reason) return c.json({ error: 'A reason is required for stock adjustments' }, 400)
 
   const db = getDb(c.env)
-  const product = await db.prepare('SELECT id, name, cost_price_usd, cost_price_khr FROM products WHERE id = @id')
-    .get<{ id: number; name: string; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: productId })
+  const product = await db.prepare('SELECT id, name FROM products WHERE id = @id').get<{ id: number; name: string }>({ id: productId })
   if (!product) return c.json({ error: 'Product not found' }, 404)
   // The held lots stay the record of the branch they were held at; the units a Restore puts back on sale and the
   // movement of either action land on the active branch the operator confirmed once that branch is disabled.
@@ -3305,8 +3330,6 @@ async function runTaggedLotActionKernel(c: InventoryContext, action: 'dispose' |
     tag: tagResult.tag,
     takes: landingTakes,
     reason,
-    fallbackUnitCostUsd: product.cost_price_usd ?? null,
-    fallbackUnitCostKhr: product.cost_price_khr ?? null,
     actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
   }
   try {

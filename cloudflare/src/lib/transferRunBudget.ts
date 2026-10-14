@@ -24,7 +24,9 @@ export function transferStatementAllowance(budget: TransferInvocationBudget): nu
 export function transferStatementEstimate(lines: number, allocations: number, clones: number): number {
   if ([lines, allocations, clones].some(value => !Number.isSafeInteger(value) || value < 0)
     || clones > allocations) throw new Error('Invalid transfer statement counts')
-  const result = 19 + 2 * lines + allocations + clones
+  // Per line: the member row. Per allocation: its lot guard. (The per-line catalog-cost guard went with the catalog
+  // fallback: the plan no longer reads a product's cost, so there is nothing for it to pin.)
+  const result = 19 + lines + allocations + clones
   if (!Number.isSafeInteger(result)) throw new Error('Statement estimate overflow')
   return result
 }

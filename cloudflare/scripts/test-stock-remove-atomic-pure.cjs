@@ -199,6 +199,8 @@ const stockLedgerQuery = loadReal('lib/stockLedgerQuery.ts', {
   './stockInSessionsQuery': stockInSessionsQuery,
 })
 const stockRevert = loadReal('lib/stockRevert.ts', {
+  // S5: a revert reads the free-goods declaration a receipt's reason carries.
+  './stockReceiptGate': stockReceiptGate,
   // p3/supplier: the receipt allowlist the revert mirror keys off.
   './stockInSessionsQuery': stockInSessionsQuery,
   './stockLedgerQuery': stockLedgerQuery,
@@ -456,7 +458,10 @@ const hold = async (tag, quantity) => {
     assert.equal(removed.length, 1, 'exactly one movement for one request')
     assert.equal(Number(removed[0].quantity), 4)
     assert.equal(removed[0].batch_id, null, 'no single lot owns a movement that also took unlotted units')
-    assert.ok(Number(removed[0].total_cost_usd) > 0, 'the removal is valued at cost')
+    // The lot's 3 units have a cost but the 1 unlotted unit has none, so the one movement is unknown (never the catalog
+    // price for that unit, never a blend of the known part with it).
+    assert.equal(removed[0].total_cost_usd, null, 'a removal that includes units no lot held has no recorded cost')
+    assert.equal(removed[0].unit_cost_usd, null)
   })
 
   await check('STK-C: clearing mixed stock to zero (remove 5 of lot 3 + unlotted 2)', async () => {

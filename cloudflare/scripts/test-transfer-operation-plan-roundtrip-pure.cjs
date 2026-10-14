@@ -160,14 +160,11 @@ async function oldPlanTransferOperation(db, args) {
   const members = []
   const pendingLots = new Map()
   for (const [ordinal, line] of args.lines.entries()) {
-    const sourceProduct = await db.prepare(`SELECT ${productSnapshotSql} AS snapshot,cost_price_usd,cost_price_khr FROM products WHERE id=@id AND is_active=1`).get({ id: line.productId })
+    const sourceProduct = await db.prepare(`SELECT ${productSnapshotSql} AS snapshot FROM products WHERE id=@id AND is_active=1`).get({ id: line.productId })
     const destinationProduct = line.productId === line.destProductId ? sourceProduct
       : await db.prepare(`SELECT ${productSnapshotSql} AS snapshot FROM products WHERE id=@id AND is_active=1`).get({ id: line.destProductId })
     const snapshots = [sourceProduct, destinationProduct]
     if (snapshots.some(row => !row)) throw new transferOperation.TransferConflictError('A transfer product changed. Refresh and try again.')
-    const fallback = { fallbackUnitCostUsd: sourceProduct.cost_price_usd, fallbackUnitCostKhr: sourceProduct.cost_price_khr }
-    statements.push(assertStmt(`EXISTS(SELECT 1 FROM products WHERE id=@product AND cost_price_usd IS @usd AND cost_price_khr IS @khr)`,
-      { product: line.productId, usd: sourceProduct.cost_price_usd, khr: sourceProduct.cost_price_khr }))
     const lots = await productBatches.readFifoLotAvailability(db, line.productId, args.fromBranchId)
     const selected = line.batchId == null ? lots : lots.filter(lot => lot.batchId === line.batchId)
     const { takes, uncovered } = productBatches.allocateAcrossLots(selected, line.quantity)
@@ -177,7 +174,7 @@ async function oldPlanTransferOperation(db, args) {
       const source = await db.prepare(`SELECT ${lotSnapshotSql} AS snapshot,unit_cost_usd FROM product_batches WHERE id=@id AND is_active=1`).get({ id: take.batchId })
       if (!source) throw new transferOperation.TransferConflictError('The source received date changed.')
       const costSnapshot = movementCostSnapshot.resolveMovementCostSnapshot({ quantity: take.quantity,
-        components: [{ quantity: take.quantity, unitCostUsd: source.unit_cost_usd }], ...fallback })
+        components: [{ quantity: take.quantity, unitCostUsd: source.unit_cost_usd }] })
       statements.push(assertStmt(`EXISTS(SELECT 1 FROM product_batches WHERE id=@batch AND unit_cost_usd IS @usd)`,
         { batch: take.batchId, usd: source.unit_cost_usd }))
       const sourceLot = JSON.parse(source.snapshot)
@@ -204,7 +201,7 @@ async function oldPlanTransferOperation(db, args) {
     const member = { ordinal, source_product_id: line.productId, destination_product_id: line.destProductId,
       source_branch_id: args.fromBranchId, destination_branch_id: args.toBranchId, quantity: line.quantity,
       untracked_quantity: uncovered, source_snapshot: JSON.stringify({ ...JSON.parse(snapshots[0].snapshot),
-        untracked_cost_snapshot: uncovered > 0 ? movementCostSnapshot.resolveMovementCostSnapshot({ quantity: uncovered, ...fallback }) : null }),
+        untracked_cost_snapshot: uncovered > 0 ? movementCostSnapshot.resolveMovementCostSnapshot({ quantity: uncovered }) : null }),
       destination_snapshot: snapshots[1].snapshot, allocations_json: JSON.stringify(allocations) }
     members.push(member)
     statements.push({ sql: `INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_branch_id,destination_branch_id,quantity,untracked_quantity,source_snapshot,destination_snapshot,allocations_json)

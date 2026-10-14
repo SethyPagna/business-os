@@ -223,6 +223,8 @@ const stockLedgerQuery = loadReal('lib/stockLedgerQuery.ts', {
   './stockInSessionsQuery': stockInSessionsQuery,
 })
 const stockRevert = loadReal('lib/stockRevert.ts', {
+  // S5: a revert reads the free-goods declaration a receipt's reason carries.
+  './stockReceiptGate': stockReceiptGate,
   // p3/supplier: the receipt allowlist the revert mirror keys off.
   './stockInSessionsQuery': stockInSessionsQuery,
   './stockLedgerQuery': stockLedgerQuery,

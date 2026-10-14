@@ -26,10 +26,12 @@ async function main() {
       assert.equal(result.status,200,JSON.stringify(result))
       const first = costs()
       assert.equal(first.length,untracked ? 4 : 2)
-      for (const row of first) assert.deepEqual(fields(row),row.batch_id === null ? [12.5,51000,18.75,76500] : [0,51000,0,(untracked?1:2.5)*51000])
+      // A lot carries a recorded $0 here, the catalog says $12.50/51000: the recorded $0 is the cost, and the units
+      // no lot held have no recorded cost at all, so they are unknown -- never the catalog price of the day.
+      for (const row of first) assert.deepEqual(fields(row),row.batch_id === null ? [null,null,null,null] : [0,null,0,null])
       const member = db().prepare('SELECT * FROM transfer_operation_members').get()
       assert.equal(JSON.parse(member.allocations_json)[0].cost_snapshot.unitCostUsd,0)
-      if (untracked) assert.equal(JSON.parse(member.source_snapshot).untracked_cost_snapshot.unitCostUsd,12.5)
+      if (untracked) assert.equal(JSON.parse(member.source_snapshot).untracked_cost_snapshot.unitCostUsd,null)
       db().exec('UPDATE products SET cost_price_usd=888,cost_price_khr=777; UPDATE product_batches SET unit_cost_usd=666')
       assert.equal((await h.request(app,'/transfer',body)).status,200)
       assert.deepEqual(costs(),first,'exact retry does not duplicate or reprice movements')
@@ -51,12 +53,23 @@ async function main() {
     const allocation = JSON.parse(db().prepare('SELECT allocations_json FROM transfer_operation_members').get().allocations_json)[0]
     const lot = db().prepare('SELECT unit_cost_usd FROM product_batches WHERE id=?').get(allocation.destination_batch_id)
     assert.deepEqual(lot,existing ? {unit_cost_usd:99} : {unit_cost_usd:0})
-    for (const row of costs()) assert.deepEqual(fields(row),[0,51000,0,127500])
+    for (const row of costs()) assert.deepEqual(fields(row),[0,null,0,null])
     db().exec('UPDATE products SET cost_price_usd=4,cost_price_khr=5; UPDATE product_batches SET unit_cost_usd=6')
     for (const [direction,generation] of [['undo',0],['redo',1]]) {
       assert.equal((await reverse(result.body.action_history_id,direction,generation)).status,200)
-      for (const row of costs()) assert.deepEqual(fields(row),[0,51000,0,127500])
+      for (const row of costs()) assert.deepEqual(fields(row),[0,null,0,null])
     }
+  })
+  await check('merge from a lot with NO recorded cost: destination lot is NULL, never the catalog cost',async()=>{
+    seed(1,{unknown:true})
+    db().exec('UPDATE products SET cost_price_usd=12.5,cost_price_khr=51000 WHERE id=1')
+    h.setMerge({id:2,name:'Product 2'})
+    const result = await h.request('branches','/transfer',{...h.intent(1,1,'merge_unknown_lot_cost',false),batchId:1})
+    assert.equal(result.status,200,JSON.stringify(result))
+    const allocation = JSON.parse(db().prepare('SELECT allocations_json FROM transfer_operation_members').get().allocations_json)[0]
+    assert.equal(allocation.cost_snapshot.unitCostUsd,null)
+    assert.deepEqual(db().prepare('SELECT unit_cost_usd FROM product_batches WHERE id=?').get(allocation.destination_batch_id),{unit_cost_usd:null})
+    for (const row of costs()) assert.deepEqual(fields(row),[null,null,null,null])
   })
   await check('unknown costs and legacy provenance stay unknown through replay', async () => {
     seed(1,{untracked:true,unknown:true})
@@ -75,33 +88,37 @@ async function main() {
     for (const [direction,generation] of [['undo',0],['redo',1]]) assert.equal((await reverse(result.body.action_history_id,direction,generation)).status,200)
     for (const row of costs()) assert.deepEqual(fields(row),[null,null,null,null])
   })
-  await check('multiple FIFO lots retain separate nonzero costs and missing lot USD uses source product fallback',async()=>{
+  await check('multiple FIFO lots retain separate nonzero costs and a lot with no recorded USD cost is unknown, not the source product cost',async()=>{
     seed(1)
     db().exec(`UPDATE branch_batch_stock SET quantity=1 WHERE batch_id=1;
       UPDATE product_batches SET unit_cost_usd=4 WHERE id=1;
       INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at) VALUES(3,1,'second','second','2026-09-02');
       INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(3,1,9);
       -- U-cost 0195 triggers re-derive the catalog cost from on-hand lots when the
-      -- stock row above lands (only lot 1 has a cost: 4). Re-stamp the fixture figure
-      -- so the check still proves the planning-time product fallback, not derivation.
+      -- stock row above lands (only lot 1 has a cost: 4). Re-stamp the catalog figure
+      -- so the check proves the catalog price is ignored, not just absent.
       UPDATE products SET cost_price_usd=12.5 WHERE id=1;`)
     const result=await h.request('branches','/transfer',h.intent(1,1,'multiple_cost_snapshot',false))
     assert.equal(result.status,200,JSON.stringify(result))
-    assert.deepEqual(costs().map(fields),[[4,51000,4,51000],[12.5,51000,18.75,76500],[4,51000,4,51000],[12.5,51000,18.75,76500]])
+    assert.deepEqual(costs().map(fields),[[4,null,4,null],[null,null,null,null],[4,null,4,null],[null,null,null,null]])
     db().exec('UPDATE products SET cost_price_usd=99; UPDATE product_batches SET unit_cost_usd=88')
     assert.equal((await reverse(result.body.action_history_id,'undo',0)).status,200)
     assert.deepEqual(costs().slice(-4).map(fields),costs().slice(0,4).map(fields))
   })
-  for (const mutation of ['UPDATE products SET cost_price_usd=13 WHERE id=1','UPDATE product_batches SET unit_cost_usd=1 WHERE id=1']) {
-    await check('cost changes between planning and commit reject atomically',async()=>{
-      seed(1); h.beforeBatch(()=>db().exec(mutation))
-      const result=await h.request('branches','/transfer',h.intent(1,1,'raced_cost_snapshot',false))
-      assert.equal(result.status,409,JSON.stringify(result)); assert.equal(result.body.code,'transfer_stock_changed')
-      assert.equal(costs().length,0)
-      assert.equal(db().prepare('SELECT COUNT(*) n FROM transfer_operation_receipts').get().n,0)
-      assert.equal(db().prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity,10)
-    })
-  }
+  await check('a source LOT cost change between planning and commit rejects atomically',async()=>{
+    seed(1); h.beforeBatch(()=>db().exec('UPDATE product_batches SET unit_cost_usd=1 WHERE id=1'))
+    const result=await h.request('branches','/transfer',h.intent(1,1,'raced_cost_snapshot',false))
+    assert.equal(result.status,409,JSON.stringify(result)); assert.equal(result.body.code,'transfer_stock_changed')
+    assert.equal(costs().length,0)
+    assert.equal(db().prepare('SELECT COUNT(*) n FROM transfer_operation_receipts').get().n,0)
+    assert.equal(db().prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity,10)
+  })
+  await check('a CATALOG cost edit between planning and commit is irrelevant: it neither rejects the transfer nor reaches a movement',async()=>{
+    seed(1,{untracked:true}); h.beforeBatch(()=>db().exec('UPDATE products SET cost_price_usd=13 WHERE id=1'))
+    const result=await h.request('branches','/transfer',{...h.intent(1,1,'catalog_edit_during_transfer',false)})
+    assert.equal(result.status,200,JSON.stringify(result))
+    for (const row of costs()) assert.deepEqual(fields(row),row.batch_id === null ? [null,null,null,null] : [0,null,0,null])
+  })
   await check('movement write failure rolls back cloned costs, quantities, receipt, and history',async()=>{
     seed(1); h.setMerge({id:2,name:'Product 2'}); h.failAt('INSERT INTO inventory_movements')
     const result=await h.request('branches','/transfer',h.intent(1,1,'failed_cost_snapshot',false))

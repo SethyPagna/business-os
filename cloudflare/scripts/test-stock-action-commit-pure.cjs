@@ -69,7 +69,7 @@ function setup() {
       updated_at TEXT, UNIQUE(batch_id, branch_id));
     CREATE TABLE inventory_movements (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER,
       product_name TEXT, branch_id INTEGER, branch_name TEXT, movement_type TEXT, quantity REAL,
-      unit_cost_usd REAL DEFAULT 0, total_cost_usd REAL DEFAULT 0,
+      unit_cost_usd REAL DEFAULT 0, unit_cost_khr REAL DEFAULT 0, total_cost_usd REAL DEFAULT 0, total_cost_khr REAL DEFAULT 0,
       reason TEXT, reference_id INTEGER, created_at TEXT, batch_id INTEGER);
     CREATE TABLE product_cost_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER NOT NULL,
       cost_usd REAL NOT NULL, cost_khr REAL, source TEXT NOT NULL, user_id INTEGER, user_name TEXT,

@@ -69,7 +69,7 @@ function setup() {
       batch_id INTEGER, branch_id INTEGER, quantity REAL, lot_code TEXT, expiry_date TEXT);
     CREATE TABLE inventory_movements (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER,
       product_name TEXT, branch_id INTEGER, branch_name TEXT, movement_type TEXT, quantity REAL,
-      unit_cost_usd REAL, total_cost_usd REAL, reason TEXT, reference_id INTEGER, created_at TEXT,
+      unit_cost_usd REAL, unit_cost_khr REAL DEFAULT 0, total_cost_usd REAL, total_cost_khr REAL DEFAULT 0, reason TEXT, reference_id INTEGER, created_at TEXT,
       batch_id INTEGER);
   `)
   sqlite.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', '0056_import_stock_action_commits.sql'), 'utf8'))
@@ -148,6 +148,19 @@ const base = {
   assert.equal(creation.total_usd, 64)
   assert.equal(creation.customer, null)
   assert.equal(creation.membership, null)
+
+  // S5 (14 Oct 2026): the sheet's own cost cell is the line's cost. A blank cell is UNKNOWN (NULL) even though the
+  // product's catalog cost is 4.25 -- today's catalog price is not what a past sale's goods cost; a typed $0 stays 0.
+  assert.deepStrictEqual(sqlite.prepare('SELECT cost_price_usd FROM sale_items ORDER BY id').all().map((row) => row.cost_price_usd), [null, 5],
+    'blank sheet cost -> NULL, typed cost kept')
+  assert.deepStrictEqual(sqlite.prepare('SELECT unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr FROM inventory_movements ORDER BY id').all().map((row) => ({ ...row })), [
+    { unit_cost_usd: null, unit_cost_khr: null, total_cost_usd: null, total_cost_khr: null },
+    { unit_cost_usd: 5, unit_cost_khr: null, total_cost_usd: 20, total_cost_khr: null },
+  ], 'the sale movements carry the line cost: unknown stays NULL, KHR is stated NULL (never the DEFAULT 0)')
+  const freeLine = setup()
+  await subject.applyUnifiedStockSale(freeLine.db, { ...base, jobId: 'job-free-line', saleGroupKey: 'free', lines: [{ ...base.lines[0], quantity: 2, costPriceUsd: 0 }] })
+  assert.deepStrictEqual(freeLine.sqlite.prepare('SELECT cost_price_usd FROM sale_items').get(), { cost_price_usd: 0 }, 'a typed $0 cost is a recorded $0')
+  assert.deepStrictEqual({ ...freeLine.sqlite.prepare('SELECT unit_cost_usd, total_cost_usd FROM inventory_movements').get() }, { unit_cost_usd: 0, total_cost_usd: 0 })
 
   const explicit = setup()
   await subject.applyUnifiedStockSale(explicit.db, {
