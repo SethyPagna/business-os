@@ -313,7 +313,15 @@ async function waitFor(H, id, wanted, timeoutMs) {
   let job
   while (Date.now() - t0 < timeoutMs) {
     job = (await H.api('GET', `/api/import-jobs/${id}`)).body?.job
-    if (job && (wanted.includes(job.status) || ['failed', 'cancelled'].includes(job.status))) return job
+    if (job && wanted.includes(job.status)) return job
+    // A transient error marks the job failed until the queue redelivers the message (retryDelay 0) and resumes it:
+    // only a status that is still failed after the redelivery had time to start is final.
+    if (job && ['failed', 'cancelled'].includes(job.status)) {
+      await sleep(3000)
+      const again = (await H.api('GET', `/api/import-jobs/${id}`)).body?.job
+      if (again && again.status === job.status) return again
+      continue
+    }
     await sleep(150)
   }
   return job
