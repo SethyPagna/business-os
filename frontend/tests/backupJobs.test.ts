@@ -65,7 +65,7 @@ await (async function backupUiShouldPollJobsInsteadOfWaitingSilently() {
   assert.match(source, /withLoaderTimeout\(\s*\(\) => getBackupApi\(\)\.disconnectGoogleDriveSync\?\.\(\),\s*'Disconnect Google Drive sync',\s*DRIVE_SYNC_ACTION_TIMEOUT_MS,\s*\)/)
   assert.match(source, /withLoaderTimeout\(\s*\(\) => getBackupApi\(\)\.forgetGoogleDriveSyncCredentials\?\.\(\{ confirm: true \}\),\s*'Forget Google Drive credentials',\s*DRIVE_SYNC_ACTION_TIMEOUT_MS,\s*\)/)
   assert.match(source, /withLoaderTimeout\(\s*\(\) => getBackupApi\(\)\.queueBackupFolderExport\?\.\(exportDestination\),\s*'Queue backup export',\s*BACKUP_JOB_QUEUE_TIMEOUT_MS,\s*\)/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => getBackupApi\(\)\.queueBackupFolderRestore\?\.\(folderImportPath, \{ currentPassword: restorePassword \}\),\s*'Queue backup restore',\s*BACKUP_JOB_QUEUE_TIMEOUT_MS,\s*\)/)
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => Promise\.resolve\(getBackupApi\(\)\.queueBackupFolderRestore\?\.\(folderImportPath, \{ currentPassword: restorePassword \}\)\)\s*\.catch\(\(error: unknown\) => \{ throw translateStepUpRefusal\(error, copy\) \}\),\s*'Queue backup restore',\s*BACKUP_JOB_QUEUE_TIMEOUT_MS,\s*\)/)
   assert.match(source, /if \(!restorePassword\) return notify\(/, 'a restore never starts without the current password')
   assert.match(source, /id="backup-restore-password"[\s\S]{0,200}type="password"[\s\S]{0,120}autoComplete="current-password"/)
   assert.match(source, /consecutiveFailures >= SYSTEM_JOB_STATUS_MAX_FAILURES/)

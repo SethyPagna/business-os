@@ -20,6 +20,7 @@ import Layers from 'lucide-react/dist/esm/icons/layers.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { isStandaloneDisplayMode } from '../../utils/standaloneDisplay.ts'
+import { isBuiltInAdmin } from '../../utils/builtInAdmin.ts'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
   beginTrackedRequest,
@@ -1871,21 +1872,26 @@ export default function Backup() {
     // granting someone "Backup export" also silently gave them full
     // database restore power; fixed both sides together this session.
     if (!hasPermission('backup_restore')) return notify(copy('no_permission', 'No permission'), 'error')
+    if (!isBuiltInAdmin(user)) return notify(copy('restore_builtin_admin_only', 'Only the built-in admin account can restore a backup.'), 'error')
     if (!folderImportPath) return notify(copy('choose_folder_first', 'Choose a folder first'), 'error')
     if (!restorePassword) return notify(copy('current_password_required', 'Enter your current password to confirm. No data was changed.'), 'error')
     if (!(await askToConfirm({
       title: copy('import_backup', 'Import Backup'),
-      message: copy('import_backup_warning', 'This validates a backup package before any restore can replace live data.'),
+      message: copy('import_backup_warning', 'This will replace existing data. Export a fresh backup first if you want to keep your current data.'),
       items: [{ label: copy('backup_folder', 'Folder'), value: folderImportPath }],
       confirmLabel: copy('continue', 'Continue'),
       cancelLabel: copy('cancel', 'Cancel'),
-    }))) return
+    }))) {
+      setRestorePassword('')
+      return
+    }
 
     if (!beginBackupAction('folder-import')) return
     try {
       await yieldToBrowser()
       const queued = await withLoaderTimeout(
-        () => getBackupApi().queueBackupFolderRestore?.(folderImportPath, { currentPassword: restorePassword }),
+        () => Promise.resolve(getBackupApi().queueBackupFolderRestore?.(folderImportPath, { currentPassword: restorePassword }))
+          .catch((error: unknown) => { throw translateStepUpRefusal(error, copy) }),
         'Queue backup restore',
         BACKUP_JOB_QUEUE_TIMEOUT_MS,
       )
@@ -2072,6 +2078,11 @@ export default function Backup() {
             {copy('import_backup_desc', 'Restore a full Business OS backup from R2. This overwrites current D1 data including settings, users, portal records, products, stock, sales, returns, and custom tables.')}
           </p>
 
+          {!isBuiltInAdmin(user) ? (
+            <p className="rounded-2xl border border-amber-100 bg-amber-50/70 p-4 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-200" data-testid="backup-restore-builtin-admin-only">
+              {copy('restore_builtin_admin_only', 'Only the built-in admin account can restore a backup.')}
+            </p>
+          ) : (
           <div className="grid gap-3 rounded-2xl border border-amber-100 bg-amber-50/70 p-4 dark:border-amber-900/40 dark:bg-amber-900/10">
             <input type="text" name="username" autoComplete="username" value={String(user?.username || '')} readOnly className="sr-only" tabIndex={-1} aria-hidden="true" />
             <label className="block text-sm text-gray-700 dark:text-gray-300" htmlFor="backup-restore-password">
@@ -2119,6 +2130,7 @@ export default function Backup() {
               </div>
             </details>
           </div>
+          )}
 
         </div>
         ) : null}

@@ -47,6 +47,8 @@ let user: any = { username: 'admin', role_code: 'admin' }
 const requests: any[] = []
 const notifications: any[] = []
 const componentSource = readFileSync(new URL('../src/components/utils-settings/ResetData.tsx', import.meta.url), 'utf8')
+const builtInAdminModule = { exports: {} as any }
+new Function('exports', ts.transpileModule(readFileSync(new URL('../src/utils/builtInAdmin.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(builtInAdminModule.exports)
 const componentModule = { exports: {} as any }
 const code = ts.transpileModule(componentSource + '\nexport { ConfirmReset };', { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText
 new Function('exports', 'require', code)(componentModule.exports, (name: string) => {
@@ -56,6 +58,7 @@ new Function('exports', 'require', code)(componentModule.exports, (name: string)
   if (name.includes('actionGuards')) return { beginSingleAction: () => true, finishSingleAction() {} }
   if (name.includes('appRefresh')) return { refreshAppData() {} }
   if (name.includes('loaders')) return { withLoaderTimeout: (run: () => unknown) => run() }
+  if (name.includes('builtInAdmin')) return builtInAdminModule.exports
   if (name.includes('permissions')) return { isAdminControlUser: () => true }
   return { default: () => null }
 })

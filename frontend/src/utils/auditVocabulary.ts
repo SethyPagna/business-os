@@ -60,6 +60,8 @@ export const AUDIT_ACTION_LABELS: Record<string, [string, string]> = {
   // owned both words since the sale float shipped.
   action_undo: ['undo', 'Undo'],
   action_redo: ['redo', 'Redo'],
+  // A protected action (restore, reset, retention change, forced maintenance clear) that the admin or password check refused.
+  step_up_refused: ['step_up_refused', 'Protected action refused'],
 }
 
 /**

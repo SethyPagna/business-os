@@ -14,6 +14,7 @@ import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.
 import { refreshAppData } from '../../utils/appRefresh'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import type { PermissionUser } from '../../utils/permissions.ts'
+import { isBuiltInAdmin } from '../../utils/builtInAdmin.ts'
 import LegacySubtotalRepair from './LegacySubtotalRepair.tsx'
 import GeneralCustomerRepair from './GeneralCustomerRepair.tsx'
 import GeneralCustomerMembershipRepair from './GeneralCustomerMembershipRepair.tsx'
@@ -58,11 +59,6 @@ type ResetApi = {
 
 type ResetConfirmation = { confirm: string; acknowledged: true }
 type ResetSubmission = ResetConfirmation & { currentPassword?: string }
-
-function isBuiltInResetAdmin(user: PermissionUser): boolean {
-  return String(user?.username || '').trim().toLowerCase() === 'admin'
-    && String(user?.role_code || '').trim().toLowerCase() === 'admin'
-}
 
 type ActionHistory = {
   pushAction?: (action: {
@@ -404,7 +400,7 @@ function ResetData({ actionHistory = null }: ResetPanelProps) {
   const selected = MODES.find((entry) => entry.id === mode) || MODES[0]
 
   const doReset = async (confirmation: ResetSubmission) => {
-    if (!isBuiltInResetAdmin(user)) return notify(T('reset_builtin_admin_only', 'Only the built-in admin account can reset business data.'), 'error')
+    if (!isBuiltInAdmin(user)) return notify(T('reset_builtin_admin_only', 'Only the built-in admin account can reset business data.'), 'error')
     const { currentPassword } = confirmation
     if (confirmation?.acknowledged !== true || confirmation?.confirm !== selected.word || !currentPassword) return
     if (!hasPermission('backup_restore')) return notify(T('access_denied', 'No permission'), 'error')
@@ -476,7 +472,7 @@ function ResetData({ actionHistory = null }: ResetPanelProps) {
 
       <ConfirmReset
         key={selected.id}
-        allowed={isBuiltInResetAdmin(user)}
+        allowed={isBuiltInAdmin(user)}
         title={selected.label}
         description={selected.desc}
         whatDeleted={selected.deleted}
@@ -618,7 +614,7 @@ function SectionReset({ actionHistory = null }: ResetPanelProps) {
   const whatKept = isProducts ? keptParts.join(', ') : selected.kept
 
   const doReset = async (confirmation: ResetSubmission) => {
-    if (isProducts && !isBuiltInResetAdmin(user)) return notify(T('reset_builtin_admin_only', 'Only the built-in admin account can reset business data.'), 'error')
+    if (isProducts && !isBuiltInAdmin(user)) return notify(T('reset_builtin_admin_only', 'Only the built-in admin account can reset business data.'), 'error')
     const { currentPassword } = confirmation
     if (!currentPassword) return
     if (confirmation?.acknowledged !== true || confirmation?.confirm !== selected.word) return
@@ -687,7 +683,7 @@ function SectionReset({ actionHistory = null }: ResetPanelProps) {
 
       <ConfirmReset
         key={`${selected.id}:${isProducts ? JSON.stringify(productToggles) : ''}`}
-        allowed={!isProducts || isBuiltInResetAdmin(user)}
+        allowed={!isProducts || isBuiltInAdmin(user)}
         title={selected.label}
         description={selected.desc}
         whatDeleted={whatDeleted}
@@ -715,7 +711,7 @@ function FactoryReset({ actionHistory = null }: ResetPanelProps) {
   const [acknowledged, setAcknowledged] = useState(false)
   const [currentPassword, setCurrentPassword] = useState('')
   const [working, setWorking] = useState(false)
-  const canFactoryReset = isBuiltInResetAdmin(user) && hasPermission('backup_restore')
+  const canFactoryReset = isBuiltInAdmin(user) && hasPermission('backup_restore')
   const elapsedSeconds = useElapsedSeconds(working)
   const showSlowHint = working && elapsedSeconds * 1000 >= SLOW_ACTION_HINT_AFTER_MS
   const factoryResetInFlightRef = useRef(false)
