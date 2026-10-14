@@ -36,6 +36,7 @@ import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { fmtDateOnly } from '../../utils/formatters'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { pickFiles } from '../../utils/filePicker.ts'
+import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 
 // Same lazyRetry pattern ProductForm.tsx already uses for this modal --
 // keeps it out of this view's own (deliberately tiny, per Part 241) bundle
@@ -201,6 +202,16 @@ export default function ProductsImageOnlyView() {
       rowPhotosRef.current = {}
     }
   }, [])
+  // A failed photo lives only in this view's memory, so leaving the page would drop it silently: the navigation guard asks first.
+  useEffect(() => registerDirtyWork({
+    key: 'products-image-only-failed-photos',
+    pageId: 'products',
+    label: t('image_upload_failed') || 'Image upload failed',
+    isDirty: () => Object.values(rowPhotosRef.current).some((photo) => photo.status === 'failed'),
+    discard: () => {
+      for (const [productId, photo] of Object.entries(rowPhotosRef.current)) if (photo.status === 'failed') setRowPhoto(Number(productId), null)
+    },
+  }), [t])
   // Which row's "choose an existing library file" picker is open, if any --
   // a single shared FilePickerModal instance (same "one at a time" reasoning
   // as the hidden file input above), targeted at whichever row opened it.
@@ -653,23 +664,24 @@ export default function ProductsImageOnlyView() {
                   // give it up. The line wraps and grows with the text, so Khmer is not clipped.
                   <div className="flex basis-full items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 dark:border-red-900/40 dark:bg-red-950/30">
                     <p role="alert" className="min-w-0 flex-1 break-words text-xs leading-relaxed text-red-700 dark:text-red-300">{photo.error}</p>
+                    {/* Icon-only 44 px targets (owner button policy); the words are the tooltip and the aria-label. */}
                     <button
                       type="button"
-                      className="btn-secondary flex shrink-0 items-center gap-1 px-2 py-1 text-xs"
+                      className="btn-secondary flex h-11 w-11 shrink-0 items-center justify-center p-0"
                       onClick={() => retryRowPhoto(product)}
                       title={t('retry') || 'Retry'}
+                      aria-label={t('retry') || 'Retry'}
                     >
-                      <RotateCcw className="h-3 w-3" />
-                      {t('retry') || 'Retry'}
+                      <RotateCcw className="h-4 w-4" aria-hidden="true" />
                     </button>
                     <button
                       type="button"
-                      className="btn-secondary shrink-0 p-1.5"
+                      className="btn-secondary flex h-11 w-11 shrink-0 items-center justify-center p-0"
                       onClick={() => setRowPhoto(product.id, null)}
                       title={t('discard') || 'Discard'}
                       aria-label={t('discard') || 'Discard'}
                     >
-                      <X className="h-3.5 w-3.5" />
+                      <X className="h-4 w-4" aria-hidden="true" />
                     </button>
                   </div>
                 ) : null}

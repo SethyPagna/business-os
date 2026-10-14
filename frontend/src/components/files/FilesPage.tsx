@@ -1,6 +1,6 @@
 import type { ChangeEvent, ComponentProps, ComponentType, ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import { fmtDateTime24 } from '../../utils/formatters.ts'
+import { fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CheckSquare from 'lucide-react/dist/esm/icons/check-square.js'
 import Copy from 'lucide-react/dist/esm/icons/copy.js'
@@ -588,12 +588,9 @@ function AssetCardSkeleton() {
 
 function formatDateTime(value: string | number | Date | null | undefined): string {
   if (!value) return '-'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return String(value)
-  // dd/mm/yyyy + 24-hour Phnom Penh via the shared formatter -- the viewer-
-  // locale Intl form rendered dd/mm + 12-hour on non-US devices (Part-77
-  // finding, cross-surface date rule).
-  return fmtDateTime24(date)
+  // A stamp with no offset is UTC (parseServerTimestampMs); shown as dd/mm/yyyy 24-hour Phnom Penh.
+  const ms = parseServerTimestampMs(value)
+  return Number.isNaN(ms) ? String(value) : fmtDateTime24(ms)
 }
 
 function formatFileSize(bytes: number | string | null | undefined): string {

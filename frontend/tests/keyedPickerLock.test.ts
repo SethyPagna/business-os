@@ -14,7 +14,7 @@ import { imageFile, installFakeFilePickerDom, wait } from './fakeFilePickerDom.t
 // source, pulled out of the components by the TypeScript parser, against the
 // real picker and a fake input.
 
-const { inputs, focusWindow } = installFakeFilePickerDom()
+const { inputs, focusWindow, tapPage, heldListeners } = installFakeFilePickerDom()
 
 function extract(path: string, name: string): string {
   const source = readFileSync(new URL(`../src/components/${path}`, import.meta.url), 'utf8')
@@ -108,6 +108,26 @@ for (const [name, kind] of [['Settings uploadImageSetting', 'settings'], ['Websi
   assert.deepEqual(probe.uploads.map((file) => file.name), ['camera.png'], `${name}: a photo that arrives after the fallback is uploaded, not dropped`)
   assert.ok(probe.applied.some((value) => value.includes('camera.png')), `${name}: its stored path is applied`)
   assert.equal(probe.lock.current.size, 0, `${name}: the key is free again`)
+  probe.uploads.length = 0
+  probe.applied.length = 0
+
+  // No cancel and no focus: the first tap on the page settles the picker and frees the key; a photo that still arrives uploads.
+  const stuck = probe.open()
+  assert.equal(probe.lock.current.size, 1, `${name}: the key is held while a picker that reports nothing is open`)
+  assert.equal(await settled(stuck, 150), false, `${name}: and nothing releases it by itself`)
+  tapPage()
+  assert.equal(await settled(stuck, 100), true, `${name}: a tap on the page settles the upload`)
+  assert.equal(probe.lock.current.size, 0, `${name}: and releases the key`)
+  assert.equal(heldListeners(), 0, `${name}: no page listener is left behind`)
+  const reopened = probe.open()
+  assert.equal(inputs.at(-1) !== undefined && probe.lock.current.size === 1, true, `${name}: Upload opens a fresh picker after the tap`)
+  const stale = inputs.at(-2)!
+  inputs.at(-1)!.fire('cancel')
+  await reopened
+  stale.files = [imageFile('after-tap.png')]
+  stale.fire('change')
+  await wait(50)
+  assert.deepEqual(probe.uploads.map((file) => file.name), ['after-tap.png'], `${name}: a photo that arrives after the tap is uploaded`)
   probe.uploads.length = 0
   probe.applied.length = 0
 

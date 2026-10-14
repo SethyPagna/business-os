@@ -194,7 +194,9 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
           onPointerUp={handlePointerUp}
         >
           <h2 id={titleId} className="detail-scroll-text min-w-0 flex-1 text-base font-bold text-gray-900 dark:text-white sm:text-lg" title={typeof title === 'string' ? title : undefined}>{title}</h2>
-          <div className="flex shrink-0 items-center gap-1">
+          {/* gap-2, not gap-1: the Close below reaches 6 px past its own box (-m-1.5) to be a 44 px target, so a 4 px gap
+              left its hit area 2 px over a neighbouring header control such as Minimize. 8 px clears it by 2 px. */}
+          <div className="flex shrink-0 items-center gap-2">
           {headerExtra}
           {closeAffordance === 'visible' ? (
             <button

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { act } from 'react'
 import { createHarness, propsOf, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
+import { classesOf, dimension } from './tailwindPixels.ts'
 
 // Daily-use A items 3-5 on the image-only Products view (the role whose one
 // job is attaching photos). Same contract as the full product form: a cancelled
@@ -13,7 +14,7 @@ type PickerInput = MemoryNode & { files?: File[] | null; parentNode: MemoryNode 
 
 const packs = Object.fromEntries(['en', 'km'].map((lang) => [lang, JSON.parse(readFileSync(new URL(`../src/lang/${lang}.json`, import.meta.url), 'utf8'))])) as Record<string, Record<string, string>>
 const words = packs.en
-const harness = await createHarness()
+const harness = await createHarness({ observe: ['utils/dirtyWork.ts'] })
 
 const pickers: PickerInput[] = []
 const realCreateElement = document.createElement.bind(document)
@@ -56,7 +57,11 @@ const saves: Array<{ id: number; image_path: string }> = []
 let gate: Promise<void> = Promise.resolve()
 let uploadFailure: unknown = null
 let saveFailure: unknown = null
+// The navigation guard's registry: the test asks the question the guard asks.
+const dirtyWork: Array<{ key: string; label: string; isDirty: () => boolean; discard?: () => void }> = []
+const workAtRisk = (): string[] => dirtyWork.filter((entry) => entry.isDirty()).map((entry) => entry.label)
 const doubles = {
+  'utils/dirtyWork.ts': { registerDirtyWork: (entry: (typeof dirtyWork)[number]) => { dirtyWork.push(entry); return () => { dirtyWork.splice(dirtyWork.indexOf(entry), 1) } } },
   'api/productReadTransport.ts': { searchProducts: async () => ({ items: rows, total: rows.length }), getProductFilters: async () => ({ categories: [], brands: [] }) },
   'api/productWriteTransport.ts': {
     updateProduct: async (id: number, patch: { image_path: string }) => { saves.push({ id, image_path: patch.image_path }); if (saveFailure) { const failure = saveFailure; saveFailure = null; throw failure } return { success: true, item: { id, image_path: patch.image_path, updated_at: '2026-10-12T00:00:00Z' } } },
@@ -209,6 +214,17 @@ try {
     assert.equal(spinnersIn(surface, 'Synthetic serum'), 0, `${lang}: nothing claims to be uploading`)
     assert.ok(propsOf(rowButton(surface, 'Synthetic serum', pack.choose_file)).disabled !== true, `${lang}: the row is usable again`)
     assert.deepEqual(objectUrls.revoked, [], `${lang}: the preview is kept for Retry`)
+    // The row's Retry and Discard are icon-only 44 px targets named in the pack language.
+    for (const [control, name, label] of [[surface.button(pack.retry, card(surface, 'Synthetic serum')), pack.retry, 'Retry'], [surface.button(pack.discard, card(surface, 'Synthetic serum')), pack.discard, 'Discard']] as const) {
+      assert.equal(control.textContent, '', `${lang}: ${label} on the failed row is icon-only`)
+      assert.equal(control.getAttribute('aria-label'), name, `${lang}: ${label} is named in the pack language`)
+      assert.equal(control.getAttribute('title'), name, `${lang}: ${label} carries its name as a tooltip`)
+      const classes = classesOf(control.className)
+      assert.ok(dimension(classes, 'w') >= 44 && dimension(classes, 'h') >= 44, `${lang}: ${label} is at least 44 x 44 px (${control.className})`)
+    }
+    assert.ok(classesOf(surface.find((node) => node.getAttribute('role') === 'alert', 'the row alert').className).includes('leading-relaxed'), `${lang}: the alert uses leading-relaxed`)
+    // A failed photo is work at risk: leaving the page now would drop it, so the navigation guard must ask first.
+    assert.deepEqual(workAtRisk(), [pack.image_upload_failed], `${lang}: the guard sees the failed photo`)
     await surface.click(surface.button(pack.retry, card(surface, 'Synthetic serum')))
     await surface.waitFor(() => saves.length === 1 && alertsIn(surface, 'Synthetic serum').length === 0, 'the retried photo to land')
     await surface.settle()
@@ -216,7 +232,9 @@ try {
     assert.ok(uploads[1].file === uploads[0].file, `${lang}: the same photo, without picking it twice`)
     assert.deepEqual(saves, [{ id: 1, image_path: '/uploads/products/one.jpg' }])
     assert.deepEqual(objectUrls.revoked, ['blob:probe-1-one.jpg'], `${lang}: the preview is revoked once the stored photo replaces it`)
+    assert.deepEqual(workAtRisk(), [], `${lang}: nothing is at risk once the photo is stored`)
     await surface.unmount()
+    assert.deepEqual(dirtyWork, [], `${lang}: closing the view unregisters its guard`)
   }
 
   // When the upload worked but linking it to the product failed, Retry links the stored file instead of uploading again.
@@ -247,6 +265,7 @@ try {
     await surface.click(surface.button(words.discard, card(surface, 'Synthetic serum')))
     assert.deepEqual(alertsIn(surface, 'Synthetic serum'), [])
     assert.deepEqual(objectUrls.revoked, ['blob:probe-1-first.jpg'], 'discarding a failed photo revokes its preview URL')
+    assert.deepEqual(workAtRisk(), [], 'a discarded failed photo is no longer at risk')
 
     uploadFailure = 'offline'
     await pickFor(surface, 'Synthetic serum', 'second.jpg')

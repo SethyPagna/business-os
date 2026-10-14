@@ -10,6 +10,8 @@
 // field again flips direction; each kind starts with the direction people
 // expect (dates/numbers: newest/biggest first; text: A→Z).
 
+import { parseServerTimestampMs } from './formatters.ts'
+
 export type SortKind = 'date' | 'number' | 'text'
 
 export type SortField<T> = {
@@ -47,7 +49,7 @@ function comparableValue(raw: unknown, kind: SortKind): number | string | null {
     return Number.isFinite(value) ? value : null
   }
   if (kind === 'date') {
-    const value = Date.parse(String(raw))
+    const value = parseServerTimestampMs(raw as string | number | Date)
     return Number.isFinite(value) ? value : null
   }
   return String(raw).trim().toLowerCase()

@@ -2,10 +2,13 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType, Dispatch, DragEvent, SetStateAction } from 'react'
 import { lazyRetry, preloadLazy } from '../../../utils/lazyImport.ts'
 import { registerDirtyWork } from '../../../utils/dirtyWork.ts'
+import { useApp as useAppHook } from '../../../AppContext.tsx'
 import ScanLine from 'lucide-react/dist/esm/icons/scan-line.js'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Trash2Icon from 'lucide-react/dist/esm/icons/trash-2.js'
+import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
+import X from 'lucide-react/dist/esm/icons/x.js'
 import LockIcon from 'lucide-react/dist/esm/icons/lock.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
@@ -48,6 +51,8 @@ import { effectivePermissions, isAdminControlUser } from '../../../utils/permiss
 import { canChangeProductPrices } from '../../../utils/productMergePriceAccess.ts'
 import { canViewAcquisitionCosts, canEditAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../../../utils/acquisitionCostAccess.ts'
 import { branchChoiceSettled } from '../../../utils/branchScope.ts'
+
+const useApp = useAppHook as unknown as () => { notify: (message: string, type?: string) => void }
 
 const importBarcodeScannerModal = () => import('../scanning/BarcodeScannerModal')
 const BarcodeScannerModal = lazyRetry(importBarcodeScannerModal, 'product-form-barcode-scanner-modal')
@@ -586,6 +591,9 @@ function ProductFormContent({
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([])
   const pendingImagesRef = useRef<PendingImage[]>([])
   const nextPendingImageIdRef = useRef(0)
+  // Times Save or Minimize was refused for a failed photo (a count, so each refusal refocuses Retry); 0 once none is left.
+  const [failedPhotoRefusals, setFailedPhotoRefusals] = useState(0)
+  const firstFailedRetryRef = useRef<HTMLButtonElement>(null)
   // Which gallery tile is currently being drag-reordered, if any (Part 242) --
   // see reorderImage/moveImage above.
   const [dragImageIndex, setDragImageIndex] = useState<number | null>(null)
@@ -663,7 +671,11 @@ function ProductFormContent({
   const nameLocked = isGroupedProduct && !nameUnlocked
   const canManageImages = canManageProductImages(user)
   const aliveRef = useRef(true)
+  const { notify } = useApp()
+  // imageUploadInFlightRef is the upload lock. Waiting on the OS picker holds only imagePickerWaitingRef, so a picker
+  // that never reports cannot lock Save, Cancel or Close.
   const imageUploadInFlightRef = useRef(false)
+  const imagePickerWaitingRef = useRef(false)
   const lateImageFilesRef = useRef<File[][]>([])
   const saveInFlightRef = useRef(false)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
@@ -1088,10 +1100,13 @@ function ProductFormContent({
     }
   }
 
-  // Android returns a camera photo through `change` after the focus fallback already released the lock.
-  // A save already in flight has taken its gallery snapshot, so a photo that arrives now could not be linked to it.
-  function receiveLateImageFiles(files: File[]): void {
-    if (!aliveRef.current || saveInFlightRef.current) return
+  // Picked or late photos upload now or queue behind a running upload. After a save started (or the form closed) the
+  // gallery is already taken, so the photo cannot be linked: say so rather than drop it.
+  function receiveImageFiles(files: File[]): void {
+    if (!aliveRef.current || saveInFlightRef.current) {
+      if (files.length) notify(tr('image_arrived_too_late', 'A photo arrived too late to be added — open the product to add it', 'រូបភាពមួយមកដល់យឺតពេល មិនអាចបន្ថែមបានទេ — សូមបើកផលិតផលដើម្បីបន្ថែមវា'), 'warning')
+      return
+    }
     if (imageUploadInFlightRef.current) lateImageFilesRef.current.push(files)
     else void withImageLock(() => uploadImageFiles(files))
   }
@@ -1111,13 +1126,26 @@ function ProductFormContent({
     commitPendingImages(pendingImagesRef.current.filter((entry) => entry.id !== id))
   }
 
+  // A failed photo is not part of the product, so Save and Minimize would drop it silently: refuse, go to Basic Info, focus Retry.
+  function refuseWhileAPhotoFailed(): boolean {
+    if (!pendingImagesRef.current.some((image) => image.status === 'failed')) return false
+    setActiveTab('basic')
+    setFailedPhotoRefusals((count) => count + 1)
+    return true
+  }
+
   async function uploadPickedImages(options: PickImageFilesOptions = {}): Promise<void> {
-    if (!canManageImages || imageUploading || imageUploadInFlightRef.current) return
+    if (!canManageImages || imageUploading || imageUploadInFlightRef.current || imagePickerWaitingRef.current) return
     const remaining = Math.max(0, imageLimit - imageListRef.current.length - pendingImagesRef.current.length)
     if (!remaining) return
-    await withImageLock(async () => {
-      await uploadImageFiles(await pickFiles({ ...options, maxCount: remaining, onLateChange: receiveLateImageFiles }))
-    })
+    imagePickerWaitingRef.current = true
+    let picked: File[] = []
+    try {
+      picked = await pickFiles({ ...options, maxCount: remaining, onLateChange: receiveImageFiles })
+    } finally {
+      imagePickerWaitingRef.current = false
+    }
+    if (picked.length) receiveImageFiles(picked)
   }
 
   async function retryPendingImage(id: string): Promise<void> {
@@ -1237,6 +1265,7 @@ function ProductFormContent({
       return false
     }
     if (!canContinueSave()) return
+    if (refuseWhileAPhotoFailed()) return
     if (!String(form.name || '').trim()) {
       alert(tr('name_required_alert', 'Name is required', 'ត្រូវការឈ្មោះ'))
       return
@@ -1274,7 +1303,10 @@ function ProductFormContent({
     if (isCreateMode && createVerdict.kind && createVerdict.kind !== 'exact_twin') {
       const ackKey = `${String(form.name || '').trim().toLowerCase()}|${String(form.barcode || '').trim()}`
       if (createMatchAckRef.current !== ackKey) {
+        // The verdict dialog is part of the save: a photo arriving while it is open cannot join the product (receiveImageFiles).
+        saveInFlightRef.current = true
         const choice = await askCreateVerdict()
+        saveInFlightRef.current = false
         if (!canContinueSave()) return
         if (choice === 'back') return
         if (choice === 'group' && createVerdict.canonicalName) {
@@ -1453,8 +1485,18 @@ function ProductFormContent({
     [isCreateMode, nameLocked, createMatches, product?.id],
   )
   const failedImageMessages = [...new Set(pendingImages.filter((image) => image.status === 'failed').map((image) => image.error))]
+  const firstFailedImageId = pendingImages.find((image) => image.status === 'failed')?.id
+  useEffect(() => {
+    if (!firstFailedImageId) setFailedPhotoRefusals(0)
+  }, [firstFailedImageId])
+  useEffect(() => {
+    if (!failedPhotoRefusals) return
+    firstFailedRetryRef.current?.focus()
+    firstFailedRetryRef.current?.scrollIntoView?.({ block: 'nearest' })
+  }, [failedPhotoRefusals])
   const preserveAndMinimize = onMinimize ? () => {
     if (imageUploading || imageUploadInFlightRef.current) return
+    if (refuseWhileAPhotoFailed()) return
     // The shared unsaved prompt may offer Minimize only through an explicit
     // preservation capability. Finish this form's pending debounce before the
     // parent parks/closes it; an already-fired debounce is already durable.
@@ -1574,7 +1616,7 @@ function ProductFormContent({
               </p>
             )}
             {failedImageMessages.length ? (
-              <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
+              <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
                 {failedImageMessages.join(' ')}
               </p>
             ) : null}
@@ -1585,7 +1627,7 @@ function ProductFormContent({
                     {tr('drag_to_reorder_images', 'Drag to reorder, or use the arrows on each photo.', 'អូសដើម្បីរៀបលំដាប់ ឬប្រើព្រួញនៅលើរូបនីមួយៗ។')}
                   </p>
                 ) : null}
-                <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+                <div className="grid grid-cols-2 gap-2 min-[344px]:grid-cols-3 sm:grid-cols-5">
                   {imageList.map((image, index) => (
                     <div
                       key={`${image}-${index}`}
@@ -1665,17 +1707,27 @@ function ProductFormContent({
                           <Loader2 className="h-5 w-5 animate-spin text-white" />
                         </div>
                       ) : (
-                        <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-black/60 px-1.5 py-1 text-[11px] leading-snug text-white">
+                        // Two 44 px targets (88 px) need a 90 px tile: 3 columns from 344 px (342 is the least), 2 below (the test sums it).
+                        <div className="absolute inset-x-0 bottom-0 flex items-center justify-around bg-black/60">
                           <button
+                            ref={image.id === firstFailedImageId ? firstFailedRetryRef : undefined}
                             type="button"
-                            className="rounded px-1 py-0.5 hover:bg-white/20 disabled:opacity-40"
+                            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-white hover:bg-white/20 disabled:opacity-40"
                             onClick={() => void retryPendingImage(image.id)}
                             disabled={saving || imageUploading}
+                            aria-label={tr('retry', 'Retry', 'ព្យាយាមម្ដងទៀត')}
+                            title={tr('retry', 'Retry', 'ព្យាយាមម្ដងទៀត')}
                           >
-                            {tr('retry', 'Retry', 'ព្យាយាមម្ដងទៀត')}
+                            <RotateCcw className="h-4 w-4" aria-hidden="true" />
                           </button>
-                          <button type="button" className="rounded px-1 py-0.5 hover:bg-white/20" onClick={() => dropPendingImage(image.id)}>
-                            {tr('remove', 'Remove', 'លុប')}
+                          <button
+                            type="button"
+                            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-white hover:bg-white/20"
+                            onClick={() => dropPendingImage(image.id)}
+                            aria-label={tr('remove', 'Remove', 'លុប')}
+                            title={tr('remove', 'Remove', 'លុប')}
+                          >
+                            <X className="h-4 w-4" aria-hidden="true" />
                           </button>
                         </div>
                       )}
@@ -2195,47 +2247,39 @@ function ProductFormContent({
           cancels the modal's own p-5 padding so the bar spans full width
           and sits flush against the bottom edge; px-5 pb-5 pt-4 puts it
           back inside the bar. */}
-      <div className="sticky bottom-0 -mx-5 -mb-5 mt-6 flex gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
-        {/* Disabled while imageUploading, not just `saving`: previously a
-            fast Save click during an in-flight image upload would save the
-            product with the pre-upload imageList (the just-picked file
-            hadn't landed in state yet), silently orphaning the freshly
-            uploaded asset in the Files library instead of linking it to
-            the product -- the exact "shows uploaded but didn't connect,
-            had to go re-link it via Files" bug reported. Save now can't
-            fire until uploadPickedImages's setImageList has actually
-            landed. */}
-        <button type="button" className="btn-primary min-h-11 flex-1" onClick={saveForm} disabled={saving || imageUploading}>
-          {saving ? (t('saving') || 'Saving...') : imageUploading ? (tr('uploading', 'Uploading...', 'កំពុងបង្ហោះ...')) : t('save')}
-        </button>
-        <ModalCloseContext.Consumer>
-          {(requestClose) => (
-            <button type="button" className="btn-secondary min-h-11" onClick={requestClose || onClose} disabled={saving || imageUploading}>
-              {t('cancel')}
-            </button>
-          )}
-        </ModalCloseContext.Consumer>
-        {/* Delete lives in this same row now (was only reachable from the
-            separate read-only detail sheet before) -- deliberately NOT
-            flex-1 like Save, and icon-only with no text label, so its tap
-            target stays small and off to the side rather than competing
-            with Save for thumb space and inviting an accidental hit.
-            onDelete already routes through Products.tsx's own
-            DeleteConfirmModal (impact summary + explicit confirm), so no
-            second confirmation is added here -- this button only opens
-            that flow, it never deletes directly itself. */}
-        {isEditMode && onDelete ? (
-          <button
-            type="button"
-            className="btn-danger min-h-11 shrink-0 px-2.5"
-            onClick={onDelete}
-            disabled={saving || imageUploading}
-            aria-label={t('delete') || 'Delete'}
-            title={t('delete') || 'Delete'}
-          >
-            <Trash2Icon className="h-4 w-4" />
-          </button>
+      <div className="sticky bottom-0 -mx-5 -mb-5 mt-6 flex flex-col gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
+        {/* Why Save or Minimize was refused (refuseWhileAPhotoFailed); here because this bar shows on every tab. */}
+        {failedPhotoRefusals > 0 && firstFailedImageId ? (
+          <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm leading-relaxed text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
+            {tr('image_failed_before_save', 'A photo didn\'t upload — Retry or remove it first', 'រូបភាពមួយមិនបានផ្ទុកឡើងទេ — សូមព្យាយាមម្ដងទៀត ឬលុបវាសិន')}
+          </p>
         ) : null}
+        <div className="flex gap-3">
+          {/* Disabled while a photo uploads as well as while saving: Save would otherwise take the pre-upload gallery. */}
+          <button type="button" className="btn-primary min-h-11 flex-1" onClick={saveForm} disabled={saving || imageUploading}>
+            {saving ? (t('saving') || 'Saving...') : imageUploading ? (tr('uploading', 'Uploading...', 'កំពុងបង្ហោះ...')) : t('save')}
+          </button>
+          <ModalCloseContext.Consumer>
+            {(requestClose) => (
+              <button type="button" className="btn-secondary min-h-11" onClick={requestClose || onClose} disabled={saving || imageUploading}>
+                {t('cancel')}
+              </button>
+            )}
+          </ModalCloseContext.Consumer>
+          {/* Delete is icon-only and not flex-1, so it stays off to the side; onDelete opens Products.tsx's own DeleteConfirmModal. */}
+          {isEditMode && onDelete ? (
+            <button
+              type="button"
+              className="btn-danger min-h-11 shrink-0 px-2.5"
+              onClick={onDelete}
+              disabled={saving || imageUploading}
+              aria-label={t('delete') || 'Delete'}
+              title={t('delete') || 'Delete'}
+            >
+              <Trash2Icon className="h-4 w-4" />
+            </button>
+          ) : null}
+        </div>
       </div>
       {((filePickerOpen && canManageImages) || scannerField) ? (
         <Suspense fallback={null}>

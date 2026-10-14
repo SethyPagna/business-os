@@ -7,6 +7,7 @@
 // selecting a lot for staff because of its new order.
 
 import { lotCodeToIsoDate } from './batchLabel.ts'
+import { parseServerTimestampMs } from './formatters.ts'
 
 // Structural on purpose, so a pure comparator needs no transport import.
 export type LotOrderLike = {
@@ -19,17 +20,9 @@ export type LotOrderLike = {
 
 export type LotListContext = 'received' | 'expiry'
 
-// A `received_at` as D1 stores it ("YYYY-MM-DD HH:MM:SS", UTC, no offset) as a
-// sortable instant. A date-only value ("2026-08-24") is a real received date,
-// so it is read at 00:00Z instead of failing the "add a Z" parse.
+// A stored date or timestamp as a sortable instant. One without an offset is UTC (D1 writes it so), never the device's zone.
 function parseDateInstant(value: unknown): number | null {
-  const raw = String(value ?? '').trim()
-  if (!raw) return null
-  const hasClockTime = /\d{1,2}:\d{2}/.test(raw)
-  const isoish = raw.includes('T')
-    ? raw
-    : (hasClockTime ? `${raw.replace(' ', 'T')}Z` : `${raw}T00:00:00Z`)
-  const ms = Date.parse(isoish)
+  const ms = parseServerTimestampMs(typeof value === 'string' ? value : null)
   return Number.isFinite(ms) ? ms : null
 }
 
@@ -47,10 +40,7 @@ export function batchReceivedInstant(batch: LotOrderLike | null | undefined): nu
   const stored = parseDateInstant(batch?.received_at)
   if (stored != null) return stored
   const iso = lotCodeToIsoDate(batch?.lot_code)
-  if (!iso) return null
-  const [yyyy, mm, dd] = iso.split('-').map((part) => Number(part))
-  if (!Number.isFinite(mm) || !Number.isFinite(dd) || !Number.isFinite(yyyy)) return null
-  return Date.UTC(yyyy, mm - 1, dd)
+  return iso ? parseDateInstant(iso) : null
 }
 
 function isNumberedBatch(value: unknown): boolean {
