@@ -95,8 +95,8 @@
 //   1. A figure inside a window is scoped by the SALE's business day (UTC+7).
 //      A refund and the cost it puts back on the shelf reverse the sale they
 //      belong to, in THAT sale's bucket -- never in the return's own bucket.
-//      (CUSTOMER_REFUND_JOIN carries no date filter of its own; returnedCostSql
-//      joins through `sales`.) A count of returns PROCESSED in a window is a
+//      (CUSTOMER_REFUND_JOIN carries no date filter of its own; the snapshot
+//      kernel reads a return through its sale.) A count of returns PROCESSED in a window is a
 //      legitimate but different question -- an ACTIVITY figure, scoped by the
 //      return's date -- and it may never be subtracted from a figure measured
 //      by this rule. Doing so subtracts the same refunds twice, on two
@@ -572,13 +572,6 @@ export function collectedExpr(p: string): string {
 export function customerDeliveryFeeExpr(p: string): string {
   return `CASE WHEN COALESCE(${p}delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE COALESCE(${p}delivery_fee_usd, 0) END`
 }
-// The delivery fee the SHOP absorbed (customer not charged). Revenue FORGONE,
-// not cash paid out -- see correction (a) in the header. Reported because the
-// shop wants to see what it gives away; never subtracted from profit, because
-// the income figure already excludes it.
-function storeDeliveryExpr(p: string): string {
-  return `CASE WHEN COALESCE(${p}delivery_fee_paid_by, 'customer') = 'store' THEN COALESCE(${p}delivery_fee_usd, 0) ELSE 0 END`
-}
 // The courier money actually paid out, as recorded ON THE SALE. Cash out.
 //
 // The NOT EXISTS is the anti-double-count: a sale whose courier payment was
@@ -649,54 +642,6 @@ export function refundExcessExpr(p: string, rf: string): string {
 // so if the two ever disagree the books say one thing and the shelf another.
 // An explicit stock_action wins; absent, the historical return_to_stock boolean
 // keeps its meaning (default TRUE).
-// The sale-level revenue block, written ONCE.
-//
-// Every query that feeds deriveTotals must measure revenue on the same basis or
-// the trend chart stops summing back to the headline above it. They were four
-// separate copies and they had already diverged; interpolating one constant is
-// what makes "the Dashboard and the Sales page agree" a property of the code
-// rather than a thing someone re-checks.
-//
-// Every query using it selects FROM sales unaliased, which is why the prefix is
-// '' and the correlated cost lookup says sales.id.
-export const RECOGNIZED_LEVEL_COLUMNS = `
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS recognized_net_usd,
-             COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS pending_revenue_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN tax_usd ELSE 0 END), 0) AS recognized_tax_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${customerDeliveryFeeExpr('')} ELSE 0 END), 0) AS recognized_delivery_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${storeDeliveryExpr('')} ELSE 0 END), 0) AS recognized_store_delivery_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${deliveryActualCostExpr('sales.')} ELSE 0 END), 0) AS recognized_delivery_cost_usd,
-             COALESCE(SUM(CASE WHEN ${collectedSaleExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS collected_net_usd,
-             COALESCE(SUM(CASE WHEN ${collectedSaleExpr('')} THEN tax_usd ELSE 0 END), 0) AS collected_tax_usd,
-             COALESCE(SUM(CASE WHEN ${collectedSaleExpr('')} THEN ${customerDeliveryFeeExpr('')} ELSE 0 END), 0) AS collected_delivery_usd,
-             -- The refund on the NET basis revenue is measured on (see the
-             -- header); refund_paid_out_usd keeps the cash figure beside it.
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${netRefundExpr('', 'rf.')} ELSE 0 END), 0) AS refund_usd,
-             COALESCE(SUM(CASE WHEN ${collectedSaleExpr('')} THEN COALESCE(rf.refund_usd, 0) ELSE 0 END), 0) AS refund_paid_out_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN COALESCE(rf.refund_usd, 0) ELSE 0 END), 0) AS refund_charged_usd,
-             -- Money a refund could not take back out of the sale it belongs to
-             -- (netRefundExpr's cap, owner rule N6). Non-zero means a data
-             -- defect in the window -- a receipt refunded for more than it ever
-             -- recognised -- reported rather than absorbed.
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${refundExcessExpr('', 'rf.')} ELSE 0 END), 0) AS refund_excess_usd,
-             -- Recognized receipts whose header value was never recorded (see
-             -- valuedSaleExpr). They contribute 0 revenue and are held out of
-             -- COGS so profit stays a difference over one population; counted
-             -- here so the repair backlog is a number, not an absence.
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} AND NOT ${valuedSaleExpr('')} THEN 1 ELSE 0 END), 0) AS unvalued_tx_count,
-             -- The awaiting-payment cohort, split the same way (S4R3-6). Each
-             -- of these is the pending twin of a recognized column above.
-             -- Clause 4 of the scoping rule: this cohort is INSIDE
-             -- revenue_usd / cost_usd / profit_usd as well, so the pending
-             -- block is a subset that isolates the unpaid part -- never a
-             -- complement, and never added to the realised figures.
-             COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN 1 ELSE 0 END), 0) AS pending_tx_count,
-             COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN COALESCE(subtotal_usd, 0) ELSE 0 END), 0) AS pending_gross_sales_usd,
-             COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN COALESCE(discount_usd, 0) ELSE 0 END), 0) AS pending_store_discount_usd,
-             COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN COALESCE(membership_discount_usd, 0) ELSE 0 END), 0) AS pending_membership_discount_usd,
-             COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN ${customerDeliveryFeeExpr('')} ELSE 0 END), 0) AS pending_delivery_usd,
-             COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN ${deliveryActualCostExpr('sales.')} ELSE 0 END), 0) AS pending_delivery_cost_usd`
-
 export const RESTOCKED_RETURN_LINE = `CASE
     WHEN LOWER(TRIM(COALESCE(ri.stock_action, ''))) IN ('restock', 'damaged', 'none')
       THEN LOWER(TRIM(ri.stock_action)) = 'restock'
@@ -1633,9 +1578,8 @@ export function businessSummarySalesRowsFromSnapshot(snapshot: SalesReportSnapsh
   })
 }
 
-// The item-level cost columns, written ONCE for the same reason
-// RECOGNIZED_LEVEL_COLUMNS is: four queries measure COGS and they have to
-// measure it identically. Each caller supplies its own bucket column and
+// The item-level cost columns, written ONCE so every query that measured
+// COGS measured it identically. Each caller supplies its own bucket column and
 // GROUP BY; these are the money columns. Aliased `si` (sale_items) joined to
 // `s` (sales).
 //
@@ -1660,48 +1604,6 @@ export const ITEM_COST_COLUMNS = `
 export const ITEM_COST_STATUS_CLAUSE = `(${recognizedExpr('s.')} OR ${awaitingExpr('s.')})`
 
 interface ItemCostRow { cost_usd: number; unvalued_cost_usd: number; missing_snapshot_lines: number; pending_cost_usd: number; item_discount_usd: number; pending_item_discount_usd: number }
-
-// Cost of the goods a return put BACK on the sellable shelf, over the same
-// window and the same recognized sales as salesCost. Scoped to non-cancelled
-// CUSTOMER returns, matching CUSTOMER_REFUND_JOIN exactly -- an internal
-// (supplier) return never touched a customer sale's revenue and must not touch
-// its cost either.
-//
-// Joined through the sale, not the return's own date: a return that lands in a
-// later month reverses the cost in the month the sale was booked, which is what
-// keeps revenue and cost a matched pair inside every bucket. The refund is
-// attributed to the sale's bucket for the same reason.
-//
-// Gated on recognizedValuedExpr, exactly like the cost it reverses: a return
-// against an unvalued receipt cannot take back a cost that was never counted.
-// `bucketExpr` is any expression over the sale (aliased s) -- a local day, a
-// customer key -- or null for the whole window in one row. It has to be the
-// SAME expression the cost query buckets by, or a return lands in a different
-// row from the sale whose cost it reverses.
-function returnedCostSql(bucketExpr: string | null, whereSql: string): string {
-  return `
-    SELECT ${bucketExpr ? `${bucketExpr} AS bucket,` : `'' AS bucket,`}
-           COALESCE(SUM(CASE WHEN ${RESTOCKED_RETURN_LINE} THEN ri.cost_price_usd * ri.quantity ELSE 0 END), 0) AS returned_cost_usd
-    FROM return_items ri
-    JOIN returns r ON r.id = ri.return_id
-    JOIN sales s ON s.id = r.sale_id
-    WHERE ${whereSql}
-      AND ${recognizedValuedExpr('s.')}
-      AND COALESCE(r.status, 'completed') <> 'cancelled'
-      AND COALESCE(r.return_scope, 'customer') = 'customer'
-    ${bucketExpr ? 'GROUP BY bucket' : ''}
-  `
-}
-
-// Same aggregate, bucketed. Returns a Map keyed the way the caller's cost query
-// is keyed, so a missing bucket is simply zero reversal.
-async function returnedCostByBucket(env: Env, f: SalesFilters, bucketExpr: string): Promise<Map<string, number>> {
-  const db = getDb(env)
-  const { sql: whereSql, params } = whereActiveSales('s', f)
-  const rows = await db.prepare(returnedCostSql(bucketExpr, whereSql))
-    .all<{ bucket: string | number | null; returned_cost_usd: number }>(params)
-  return new Map((rows || []).map((r) => [r.bucket == null ? '' : String(r.bucket), num(r.returned_cost_usd)]))
-}
 
 /**
  * Receipts VOIDED in the window, bucketed the same way everything else is.
@@ -1842,9 +1744,9 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
   // reversal can never manufacture profit.
   //
   // CORRECTED Sep 6 2026. The floor's stated reason was "a return against a
-  // sale outside the range" -- which cannot happen: returnedCostSql joins
-  // `JOIN sales s ON s.id = r.sale_id` under the same whereActiveSales window,
-  // so a return only ever reverses cost in its own sale's bucket. The reachable
+  // sale outside the range" -- which cannot happen: a return is read through
+  // its own sale (the retired returnedCostSql joined `JOIN sales s ON s.id = r.sale_id`;
+  // the snapshot kernel does the same), so a return only ever reverses cost in its own sale's bucket. The reachable
   // cause is the opposite one: a SOLD line with a NULL cost_price_usd snapshot
   // contributes $0 to costUsd while the return_items row for the same goods
   // carries a real cost. The floor then silently absorbed the difference and

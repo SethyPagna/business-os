@@ -218,10 +218,12 @@ test('the shared item-cost columns count every non-cancelled sale and identify N
   assert.ok(clause.includes("<> 'cancelled'") && clause.includes("= 'awaiting_payment'"), 'the WHERE admits business sales and identifies Not Paid')
 })
 
-test('the level columns carry the whole pending cohort, and no query keeps a second cost basis', () => {
+test('the totals carry the whole pending cohort, and no query keeps a second cost basis', () => {
   for (const col of ['pending_tx_count', 'pending_gross_sales_usd', 'pending_store_discount_usd', 'pending_membership_discount_usd', 'pending_delivery_usd', 'pending_delivery_cost_usd']) {
-    assert.ok(lib.RECOGNIZED_LEVEL_COLUMNS.includes(`AS ${col}`), `RECOGNIZED_LEVEL_COLUMNS emits ${col}`)
+    assert.ok(col in totals, `the totals emit ${col}`)
   }
+  // The SQL level-column fragment is retired: the snapshot kernel is the one producer of these figures.
+  assert.equal(lib.RECOGNIZED_LEVEL_COLUMNS, undefined, 'the retired SQL level fragment stays gone')
   // Every report measures COGS from the verified snapshot (reachability is pinned in
   // test-sales-kernel-reachability-pure), so the shared item-cost fragment has no query left to feed. A query
   // that comes back on it, or a hand-rolled COGS sum, would be a second cost basis beside the snapshot's.

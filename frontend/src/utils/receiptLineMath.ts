@@ -239,7 +239,7 @@ export interface ReceiptDeliveryFigures {
 }
 
 /**
- * Matches the Worker's `customerDeliveryFeeExpr` / `storeDeliveryExpr` exactly:
+ * Matches the Worker's `customerDeliveryFeeExpr` and the report kernel's store-delivery rule exactly:
  * only the literal 'store' means absorbed, and a missing value is a
  * customer-paid fee (the column's own default). Any other spelling is treated
  * as customer-paid rather than guessed at -- the receipt must never invent a
