@@ -31,6 +31,7 @@ import { planImportCountIncrease, planRemovalLotRecord, planReconcileBranchSnaps
 import { catalogCostRecomputeStatement, typedCostEntryBeforeWriteStatement } from './catalogCostRecompute'
 import { actorId, actorSnapshot } from './actorSnapshot'
 import { multiplyMoney4 } from './moneyPrecision'
+import { resolveMovementCostSnapshot, type MovementCostComponent, type MovementCostPair } from './movementCostSnapshot'
 import { PRODUCT_HAS_STOCK_CODE, PRODUCT_HAS_STOCK_MESSAGE, productHasStockSql,
   productStockGuardStatement, productStockGuardError, assertProductStatusInput } from './productStockGuard'
 import { stockReceiptGateCode, stockReceiptGateMessage, appendReceiptNotes, FREE_GOODS_REASON_NOTE } from './stockReceiptGate'
@@ -1703,13 +1704,14 @@ export async function classifyProducts(
       // purchase_price_usd/khr and cost_usd/khr headers from files
       // exported before the product-cost fields were consolidated (see
       // migration 0016) -- an old export must still re-import cleanly.
-      cost_price_usd: normalizeImportCost4(rawCostUsd),
-      cost_price_khr: normalizeImportCost4(rawCostKhr),
-      // Internal receipt-evidence flags: normalized product columns use 0
-      // for a blank money cell, but batch/movement history must distinguish
+      // A blank cell, or a file with no cost column, is an UNKNOWN cost (null), never 0: a typed 0 is a recorded
+      // free cost and stays 0.
+      cost_price_usd: normalizeImportCost4(rawCostUsd, null),
+      cost_price_khr: normalizeImportCost4(rawCostKhr, null),
+      // Internal receipt-evidence flags: batch/movement history distinguishes
       // "no recorded receipt cost" from an actual zero-cost receipt.
       __costPriceUsdProvided: str(rawCostUsd) !== '' ? 1 : 0,
-      __receiptCostUsd: str(rawCostUsd) !== '' ? normalizeImportCost4(rawCostUsd) : null,
+      __receiptCostUsd: str(rawCostUsd) !== '' ? normalizeImportCost4(rawCostUsd, null) : null,
       __costPriceKhrProvided: str(rawCostKhr) !== '' ? 1 : 0,
       stock_quantity: parseImportNumericValue(row.stock_quantity ?? row.quantity, 0, { allowNegative: false, field: 'stock_quantity' }),
       low_stock_threshold: parseImportNumericValue(row.low_stock_threshold, 10),
@@ -2165,9 +2167,13 @@ export async function classifyProducts(
     // branch's quantity outright, which would throw the earlier receipt's
     // units away. A row with a BLANK cost states nothing, so it keeps the
     // long-standing replace semantics a stock-count file relies on.
+    const costsDiffer = (incoming: unknown, stored: unknown): boolean => {
+      if (incoming == null) return false
+      if (stored == null) return true
+      return Number(incoming) !== Number(stored)
+    }
     const statesADifferentCost = Boolean(match) && !costWasBlank
-      && ((Number(data.cost_price_usd) || 0) !== (Number(match?.cost_price_usd) || 0)
-        || (Number(data.cost_price_khr) || 0) !== (Number(match?.cost_price_khr) || 0))
+      && (costsDiffer(data.cost_price_usd, match?.cost_price_usd) || costsDiffer(data.cost_price_khr, match?.cost_price_khr))
     const plannedMode = match && (requestedRowMode === 'merge_stock' || requestedRowMode === 'override_add' || requestedRowMode === 'override_replace')
       ? (requestedRowMode as 'merge_stock' | 'override_add' | 'override_replace')
       : matchedByLotEvidence || statesADifferentCost
@@ -2910,6 +2916,8 @@ type StockGroupEntry = {
   takes: Array<{ batchId: number; quantity: number }>
   /** Increase only: the counted lot it lands in (planImportCountIncrease). */
   increase: ReturnType<typeof planImportCountIncrease> | null
+  /** Removal only: the cost of the lots it drains (each lot's OWN recorded cost); null when any unit has none. */
+  cost: MovementCostPair | null
 }
 
 // 0084: a movement names its lot only when ONE lot covers every unit it removes.
@@ -2949,15 +2957,15 @@ export async function planInventoryImportStockGroups(
   if (!rows.length) return { groups: [], refused }
   const pairs = uniqueStockPairs(rows.map((row) => row.data))
   const onHand = await readBranchOnHand(db, pairs)
-  const lotRows = await db.prepare(`SELECT pb.variant_product_id AS product_id, bbs.branch_id, pb.id AS batch_id, bbs.quantity
+  const lotRows = await db.prepare(`SELECT pb.variant_product_id AS product_id, bbs.branch_id, pb.id AS batch_id, bbs.quantity, pb.unit_cost_usd
     FROM json_each(@pairs) pair
     JOIN product_batches pb ON pb.variant_product_id = json_extract(pair.value, '$[0]') AND pb.is_active = 1
     JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = json_extract(pair.value, '$[1]') AND bbs.quantity > 0
     ORDER BY pb.variant_product_id, bbs.branch_id, (pb.expiry_date IS NULL), pb.expiry_date, pb.received_at, pb.id`)
-    .all<{ product_id: number; branch_id: number; batch_id: number; quantity: number }>({ pairs: JSON.stringify(pairs) })
-  const state = new Map<string, { onHand: number; lots: Array<{ batchId: number; quantity: number }>; direction: number }>()
+    .all<{ product_id: number; branch_id: number; batch_id: number; quantity: number; unit_cost_usd: number | null }>({ pairs: JSON.stringify(pairs) })
+  const state = new Map<string, { onHand: number; lots: Array<{ batchId: number; quantity: number; unitCostUsd: number | null }>; direction: number }>()
   for (const [productId, branchId] of pairs) state.set(`${productId}:${branchId}`, { onHand: onHand.get(`${productId}:${branchId}`) ?? 0, lots: [], direction: 0 })
-  for (const lot of lotRows) state.get(`${Number(lot.product_id)}:${Number(lot.branch_id)}`)?.lots.push({ batchId: Number(lot.batch_id), quantity: Number(lot.quantity) || 0 })
+  for (const lot of lotRows) state.get(`${Number(lot.product_id)}:${Number(lot.branch_id)}`)?.lots.push({ batchId: Number(lot.batch_id), quantity: Number(lot.quantity) || 0, unitCostUsd: lot.unit_cost_usd == null ? null : Number(lot.unit_cost_usd) })
 
   const planned: StockGroupEntry[] = []
   for (const row of rows) {
@@ -2980,22 +2988,24 @@ export async function planInventoryImportStockGroups(
         continue
       }
       const takes: Array<{ batchId: number; quantity: number }> = []
+      const costComponents: MovementCostComponent[] = []
       let remaining = need
       for (const lot of pair.lots) {
         if (!(remaining > 0)) break
         const take = Math.min(remaining, lot.quantity)
         if (!(take > 0)) continue
         takes.push({ batchId: lot.batchId, quantity: take })
+        costComponents.push({ quantity: take, unitCostUsd: lot.unitCostUsd })
         lot.quantity -= take
         remaining -= take
       }
       pair.onHand -= need
-      planned.push({ row, productId, branchId, delta, takes, increase: null })
+      planned.push({ row, productId, branchId, delta, takes, increase: null, cost: resolveMovementCostSnapshot({ quantity: need, components: costComponents }) })
     } else {
       // A Set above the count. receivedDate: the row's own date, else today (the Add import's convention).
       pair.onHand += delta
       const increase = delta > 0 ? planImportCountIncrease({ productId, branchId, quantity: delta, receivedDate: String(data.created_at || nowIso).slice(0, 10) }) : null
-      planned.push({ row, productId, branchId, delta, takes: [], increase })
+      planned.push({ row, productId, branchId, delta, takes: [], increase, cost: null })
     }
     if (direction) pair.direction = direction
   }
@@ -3107,7 +3117,13 @@ function inventoryStockGroupStatements(entries: StockGroupEntry[], rowGuardState
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, created_at, batch_id) VALUES (@product_id, @product_name, @branch_id, @branch_name, @movement_type, @quantity, @unit_cost_usd, @unit_cost_khr, @total_cost_usd, @total_cost_khr, @reason, @created_at, ${batchSql})`,
       // Honor an imported date (classifyInventory's `movementDate`, spread in via `d.created_at`) when the row
       // supplied one; `nowIso` is only the fallback for a blank/unparseable cell.
-      params: { ...d, created_at: (d.created_at as string | null | undefined) || nowIso, movement_batch_id: singleLot, ...(entry.increase ? entry.increase.batchIdParams : {}) },
+      params: {
+        ...d,
+        // A removal is valued at the lots it drained (each lot's own recorded cost, unknown when any unit has none);
+        // never at today's catalog cost.
+        ...(entry.cost ? { unit_cost_usd: entry.cost.unitCostUsd, unit_cost_khr: entry.cost.unitCostKhr, total_cost_usd: entry.cost.totalCostUsd, total_cost_khr: entry.cost.totalCostKhr } : {}),
+        created_at: (d.created_at as string | null | undefined) || nowIso, movement_batch_id: singleLot, ...(entry.increase ? entry.increase.batchIdParams : {}),
+      },
     }], d))
     // A removal that names no single lot records what it took from each (or that it took none), directly after its
     // movement, so a Revert can put the units back where they came from (the same record /adjust writes).
@@ -3134,8 +3150,8 @@ function pickIdentityClusterWinner<T extends { barcode?: unknown; id?: unknown; 
 
 export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inventoryAction?: InventoryImportAction | null, branchOptions: ImportBranchRequestOptions | null = {}): Promise<ImportRowResult[]> {
   const products = await db
-    .prepare(`SELECT id, sku, barcode, name, stock_quantity, cost_price_usd, cost_price_khr FROM products`)
-    .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; stock_quantity: number; cost_price_usd: number | null; cost_price_khr: number | null }>()
+    .prepare(`SELECT id, sku, barcode, name, stock_quantity FROM products`)
+    .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; stock_quantity: number }>()
   const branches = await db.prepare(`SELECT ${IMPORT_BRANCH_COLUMNS_SQL} FROM branches`).all<CanonicalImportBranchRow>()
   // Identity rule (same shape as classifyProducts): an sku/barcode can be
   // legitimately reused across DIFFERENT-name products, so these maps hold
@@ -3368,8 +3384,6 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     const movementCosts = (inventoryAction === 'add' ? inventoryReceiptCostSnapshot : inventoryMovementCostSnapshot)({
       explicitUsd: explicitCostUsd,
       explicitKhr: explicitCostKhr,
-      fallbackUsd: product.cost_price_usd,
-      fallbackKhr: product.cost_price_khr,
       quantity: Math.abs(signedQuantity),
     })
     data.unit_cost_usd = movementCosts.unitCostUsd
@@ -3395,7 +3409,7 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
       data,
     }
     results.push(result)
-    if (inventoryAction === 'set' || signedQuantity < 0) judged.push({ result, row, quantity, costs: { usd: product.cost_price_usd, khr: product.cost_price_khr } })
+    if (inventoryAction === 'set' || signedQuantity < 0) judged.push({ result, row, quantity })
   }
   await judgeAgainstBranchStock(db, inventoryAction, judged)
   return results
@@ -3424,7 +3438,7 @@ export const INVENTORY_IMPORT_ROW_CODES = {
   alreadyAtCount: 'inventory_import_already_at_count',
 } as const
 
-type BranchStockJudgedRow = { result: ImportRowResult; row: ParsedCsvRow; quantity: number; costs: { usd: number | null; khr: number | null } }
+type BranchStockJudgedRow = { result: ImportRowResult; row: ParsedCsvRow; quantity: number }
 
 function refuseInventoryRow(target: ImportRowResult, code: string, message: string, data?: Record<string, unknown>, params?: Record<string, string | number>): void {
   target.action = 'error'
@@ -3465,7 +3479,7 @@ async function judgeAgainstBranchStock(db: D1Compat, inventoryAction: InventoryI
   if (!judged.length) return
   const onHand = await readBranchOnHand(db, uniqueStockPairs(judged.map(({ result }) => result.data)))
   const firstCountRow = new Map<string, number>()
-  for (const { result, row, quantity, costs } of judged) {
+  for (const { result, row, quantity } of judged) {
     const data = result.data
     const pair = `${Number(data.product_id)}:${Number(data.branch_id)}`
     const here = onHand.get(pair) ?? 0
@@ -3482,7 +3496,7 @@ async function judgeAgainstBranchStock(db: D1Compat, inventoryAction: InventoryI
         Object.assign(result, { action: 'skip', message: `Already at ${quantity} -- no movement needed.`, code: INVENTORY_IMPORT_ROW_CODES.alreadyAtCount, params: { quantity }, data: row })
         continue
       }
-      const movementCosts = inventoryMovementCostSnapshot({ fallbackUsd: costs.usd, fallbackKhr: costs.khr, quantity: Math.abs(signedQuantity) })
+      const movementCosts = inventoryMovementCostSnapshot({ quantity: Math.abs(signedQuantity) })
       Object.assign(data, {
         movement_type: signedQuantity > 0 ? 'in' : 'out', quantity: Math.abs(signedQuantity), signedQuantity,
         unit_cost_usd: movementCosts.unitCostUsd, unit_cost_khr: movementCosts.unitCostKhr,
@@ -3594,8 +3608,8 @@ export function parseSalesImportDateTime(value: unknown): string | null {
 
 export async function classifySales(db: D1Compat, rows: ParsedCsvRow[], branchOptions: ImportBranchRequestOptions | null = {}): Promise<ImportRowResult[]> {
   const products = await db
-    .prepare(`SELECT id, sku, barcode, name, stock_quantity, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr FROM products`)
-    .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; stock_quantity: number; selling_price_usd: number; selling_price_khr: number; cost_price_usd: number | null; cost_price_khr: number | null }>()
+    .prepare(`SELECT id, sku, barcode, name, stock_quantity, selling_price_usd, selling_price_khr FROM products`)
+    .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; stock_quantity: number; selling_price_usd: number; selling_price_khr: number }>()
   // Same collision-aware identity resolution as classifyInventory above
   // (and classifyProducts): sku maps keep every candidate, and a row that
   // names its product only attaches to a name-compatible one -- the old
@@ -3938,8 +3952,8 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[], branchOp
 
       const priceUsd = row.unit_price_usd != null && str(row.unit_price_usd) !== '' ? normalizeImportMoney(row.unit_price_usd) : product.selling_price_usd
       const priceKhr = row.unit_price_khr != null && str(row.unit_price_khr) !== '' ? normalizeImportMoney(row.unit_price_khr) : product.selling_price_khr
-      let costPriceUsd = product.cost_price_usd || 0
-      let costPriceKhr = product.cost_price_khr || 0
+      let costPriceUsd: number | null = null
+      let costPriceKhr: number | null = null
       let basePriceUsd = priceUsd
       let basePriceKhr = priceKhr
       let productDiscountUsd = 0
@@ -3952,8 +3966,13 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[], branchOp
           if (raw == null || str(raw) === '') return fallback
           return normalizeImportMoney(parseImportNumericValue(raw, fallback, { allowNegative: false, field, strict: true }))
         }
-        costPriceUsd = optionalMoney(row.cost_price_usd, costPriceUsd, 'cost_price_usd')
-        costPriceKhr = optionalMoney(row.cost_price_khr, costPriceKhr, 'cost_price_khr')
+        const optionalCost = (raw: unknown, field: string): number | null => {
+          if (raw == null || str(raw) === '') return null
+          const cost = normalizeImportMoney(parseImportNumericValue(raw, 0, { allowNegative: false, field, strict: true }))
+          return cost === 0 ? 0 : cost
+        }
+        costPriceUsd = optionalCost(row.cost_price_usd, 'cost_price_usd')
+        costPriceKhr = optionalCost(row.cost_price_khr, 'cost_price_khr')
         basePriceUsd = optionalMoney(row.base_price_usd, basePriceUsd, 'base_price_usd')
         basePriceKhr = optionalMoney(row.base_price_khr, basePriceKhr, 'base_price_khr')
         productDiscountUsd = optionalMoney(row.product_discount_usd, 0, 'product_discount_usd')
@@ -3993,7 +4012,7 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[], branchOp
         // product's real cost, understating COGS and overstating margin on
         // any historical/imported sales data. A round-trip export carries
         // the original per-line snapshot; a hand-built file that leaves it
-        // blank safely falls back to the product's current cost.
+        // blank records an UNKNOWN cost (null), never today's catalog cost.
         cost_price_usd: costPriceUsd, cost_price_khr: costPriceKhr,
         base_price_usd: basePriceUsd, base_price_khr: basePriceKhr,
         product_discount_type: str(row.product_discount_type) || null,
@@ -4280,7 +4299,10 @@ export function preserveExistingMoneyOnBlankCells(
     const provided = sources.some((key) => !isBlankFieldValue(row[key]))
     if (provided) continue
     const existing = match[field]
-    if (existing === null || existing === undefined) continue
+    if (existing === null || existing === undefined) {
+      if (field === 'cost_price_usd' || field === 'cost_price_khr') data[field] = null
+      continue
+    }
     data[field] = existing
   }
 }
@@ -7094,7 +7116,9 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                   sql: `UPDATE product_batches SET received_at = COALESCE(NULLIF(received_at,''), @receivedAt), is_active = 1,
                           unit_cost_usd = COALESCE(unit_cost_usd, @unitCostUsd),
                           received_quantity = COALESCE(received_quantity, 0) + @qty,
-                          received_cost_usd = ROUND(COALESCE(received_cost_usd, 0) + COALESCE(@receiptTotalCostUsd, 0), 4),
+                          received_cost_usd = CASE WHEN @receiptTotalCostUsd IS NULL THEN NULL
+                            WHEN received_cost_usd IS NULL AND COALESCE(received_quantity, 0) > 0 THEN NULL
+                            ELSE ROUND(COALESCE(received_cost_usd, 0) + @receiptTotalCostUsd, 4) END,
                           received_branch_id = COALESCE(received_branch_id, @branchId),
                           received_branch_name = CASE WHEN received_branch_id IS NULL THEN (SELECT name FROM branches WHERE id = @branchId) ELSE received_branch_name END,
                           updated_at = @updatedAt WHERE id = @id`,
@@ -7115,7 +7139,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                 // price/baseline identity for receipt matching.
                 group.push({
                   sql: `INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, unit_cost_usd, received_quantity, received_cost_usd, received_branch_id, received_branch_name, created_at, updated_at)
-                        VALUES (@batchId, @productId, @batchKey, @lotCode, NULL, @receivedAt, 1, @notes, (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id = @productId), @unitCostUsd, @qty, COALESCE(@receiptTotalCostUsd, 0), @branchId, (SELECT name FROM branches WHERE id = @branchId), @createdAt, @createdAt)`,
+                        VALUES (@batchId, @productId, @batchKey, @lotCode, NULL, @receivedAt, 1, @notes, (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id = @productId), @unitCostUsd, @qty, @receiptTotalCostUsd, @branchId, (SELECT name FROM branches WHERE id = @branchId), @createdAt, @createdAt)`,
                   params: {
                     batchId,
                     productId: r.existingId,
@@ -7159,11 +7183,11 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
               group.push({
                 sql: `INSERT INTO inventory_movements
                         (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-                         unit_cost_usd, total_cost_usd, reason, created_at, batch_id)
+                         unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, created_at, batch_id)
                       VALUES (@productId, @productName, @branchId,
                         (SELECT name FROM branches WHERE id = @branchId), 'add', @qty,
-                        @unitCostUsd,
-                        @receiptTotalCostUsd,
+                        @unitCostUsd, NULL,
+                        @receiptTotalCostUsd, NULL,
                         @reason, @receivedAt, @batchId)`,
                 params: {
                   productId: r.existingId, productName: d.name, branchId: d.branch_id,
@@ -7274,7 +7298,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             const batchId = nextBatchId
             rowWriteGroup.push({
                 sql: `INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, unit_cost_usd, received_quantity, received_cost_usd, received_branch_id, received_branch_name, created_at, updated_at)
-                      VALUES (@batchId, @productId, @batchKey, @lotCode, NULL, @receivedAt, 1, @notes, 1, @unitCostUsd, @qty, COALESCE(@receiptTotalCostUsd, 0), @branchId, (SELECT name FROM branches WHERE id = @branchId), @createdAt, @createdAt)`,
+                      VALUES (@batchId, @productId, @batchKey, @lotCode, NULL, @receivedAt, 1, @notes, 1, @unitCostUsd, @qty, @receiptTotalCostUsd, @branchId, (SELECT name FROM branches WHERE id = @branchId), @createdAt, @createdAt)`,
                 params: {
                   batchId,
                   productId: newId,

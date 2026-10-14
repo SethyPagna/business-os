@@ -237,7 +237,8 @@ export function resolveRowStockAction(
  *
  * Pricing that only differs in SELLING / WHOLESALE price is NOT a conflict: those
  * both resolve to the selling price for a sale, so they never force a
- * choice. Only cost + batch multiplicity does.
+ * choice. Only cost + batch multiplicity does. A recorded cost of 0 is a cost (free goods at $0 against stock at $5
+ * is two costs); only a blank, unknown cost (null) is left out.
  *
  * `identityKey` groups the rows (typically `${nameKey}|${barcode}`). Returns
  * one reason per conflicting group, keyed by every row number in it, so the
@@ -258,7 +259,7 @@ export function detectCostBatchConflicts(
     if (group.length < 2) continue
     const distinctCosts = new Set(
       group
-        .map((r) => (r.costPriceUsd == null || r.costPriceUsd === 0 ? null : roundQty(r.costPriceUsd)))
+        .map((r) => (r.costPriceUsd == null ? null : roundQty(r.costPriceUsd)))
         .filter((v) => v != null),
     )
     const distinctBatches = new Set(

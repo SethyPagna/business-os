@@ -57,10 +57,17 @@ add(303, 'product:B', 6, 'AUG')
 const warning = { kind: 'stock_action_conflict', message: resolver.COST_BATCH_CONFLICT_MESSAGE }
 add(4, 'product:C', 5, 'AUG', [warning])
 add(5, 'product:C', 6, 'SEP', [warning])
+// Cost-unknown S8: a recorded $0 is a cost, an unknown cost (null) is not.
+add(6, 'product:D', 0, 'AUG')
+add(306, 'product:D', 5, 'SEP')
+add(7, 'product:E', null, 'AUG')
+add(307, 'product:E', 5, 'SEP')
+add(8, 'product:F', 0, 'AUG')
+add(308, 'product:F', 0, 'SEP')
 
 ;(async () => {
-  assert.strictEqual(await subject.sealUnifiedStockAnalyzeConflicts(db, 'job-1'), 2)
-  assert.strictEqual(await subject.countUnifiedStockConfirmationRows(db, 'job-1'), 4)
+  assert.strictEqual(await subject.sealUnifiedStockAnalyzeConflicts(db, 'job-1'), 4, 'product:A and product:D ($0 against $5) are sealed; B, E (unknown), F ($0 twice) are not')
+  assert.strictEqual(await subject.countUnifiedStockConfirmationRows(db, 'job-1'), 6)
   assert.strictEqual(await subject.sealUnifiedStockAnalyzeConflicts(db, 'job-1'), 0, 'retry must not duplicate warnings')
 
   const rows = sqlite.prepare(`SELECT row_number, result_json FROM import_job_rows ORDER BY row_number`).all()
@@ -69,6 +76,10 @@ add(5, 'product:C', 6, 'SEP', [warning])
   assert.strictEqual(parsed.get(302).warnings.length, 1)
   assert.strictEqual(parsed.get(3).warnings.length, 0)
   assert.strictEqual(parsed.get(4).warnings.length, 1)
+  assert.strictEqual(parsed.get(6).warnings.length, 1, '$0 against $5 across two batches is sealed')
+  assert.strictEqual(parsed.get(306).warnings.length, 1)
+  assert.strictEqual(parsed.get(7).warnings.length, 0, 'an unknown cost against $5 is not two costs')
+  assert.strictEqual(parsed.get(8).warnings.length, 0, '$0 twice is one cost')
   assert.ok(parsed.get(2).data.conflicts.includes(resolver.COST_BATCH_CONFLICT_MESSAGE))
   console.log('PASS stock-action final seal catches cross-window cost/batch conflicts once and leaves safe identities untouched')
 })().catch((error) => {

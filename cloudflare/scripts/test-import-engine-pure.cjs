@@ -364,6 +364,7 @@ new Function('exports', 'require', 'module', ts.transpileModule(
   { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } },
 ).outputText)(catalogCostRecomputeModule.exports,
   request => request === './moneyPrecision' ? moneyPrecisionModule.exports : require(request), catalogCostRecomputeModule)
+const movementCostSnapshotModule = loadPureSibling('movementCostSnapshot', request => request === './moneyPrecision' ? moneyPrecisionModule.exports : require(request))
 const originalResolve = Module._resolveFilename
 const stubbable = new Set(['../index', './db', './importCsv', './cache', './stockActionCatalog', './stockActionSeal', './stockActionCommit', './stockActionResolver', './stockActionImport', '../durable-objects/broadcastHub'])
 const originalLoad = Module._load
@@ -372,6 +373,7 @@ const dbStub = { isImportMaintenanceFenceError: () => false }
 Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './stockReceiptGate') return stockReceiptGateModule.exports
   if (request === './catalogCostRecompute') return catalogCostRecomputeModule.exports
+  if (request === './movementCostSnapshot') return movementCostSnapshotModule
   if (request === './moneyPrecision') return moneyPrecisionModule.exports
   if (request === './importImageMatch') {
     return imageMatchModuleObj.exports // real module -- resolveRowImagePath actually calls into it
@@ -856,8 +858,8 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
 
   assert.ok(/resolveReceiptLotTarget\(plannedLots, String\(d\.received_date\), receiptUnitCostUsd, receiptBaselines\.get\(productId\)/.test(block), 'restocks use the shared date/price/override identity, not a display-label-only match')
   assert.ok(/UPDATE product_batches SET received_at = COALESCE\(NULLIF\(received_at,''\), @receivedAt\), is_active = 1,[\s\S]*updated_at = @updatedAt WHERE id = @id/.test(block), 'exact-lot top-ups retain first received date, filling only a missing value')
-  assert.ok(/received_cost_usd = ROUND\(COALESCE\(received_cost_usd, 0\) \+ COALESCE\(@receiptTotalCostUsd, 0\), 4\)/.test(block), 'top-ups accumulate each rounded receipt cost')
-  assert.ok(/INSERT INTO inventory_movements[\s\S]*unit_cost_usd, total_cost_usd/.test(block), 'each receipt row must retain its own historical cost movement')
+  assert.ok(/received_cost_usd = CASE WHEN @receiptTotalCostUsd IS NULL THEN NULL[\s\S]*received_cost_usd IS NULL AND COALESCE\(received_quantity, 0\) > 0 THEN NULL[\s\S]*ELSE ROUND\(COALESCE\(received_cost_usd, 0\) \+ @receiptTotalCostUsd, 4\) END/.test(block), 'top-ups accumulate each rounded receipt cost, and an unknown receipt or an unknown lot total stays unknown')
+  assert.ok(/INSERT INTO inventory_movements[\s\S]*unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr/.test(block), 'each receipt row must retain its own historical cost movement, KHR columns named (unknown, never the DEFAULT 0)')
   assert.ok(/ON CONFLICT\(batch_id, branch_id\) DO UPDATE SET quantity = quantity \+ excluded\.quantity/.test(block), 'a matched lot code must ADD to its existing branch_batch_stock row, not insert a second row for the same batch+branch')
 
   assert.ok(/batchKey: target\.batchKey/.test(block), 'new lot identity comes from the shared receipt resolver')
@@ -1520,8 +1522,8 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   }, 'the planned cost remains immutable when the catalogue changes before apply')
 
   const remove = await classifyInventory(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), input(undefined), 'remove')
-  assert.strictEqual(remove[0].data.unit_cost_usd, 99, 'non-receipt actions still snapshot their plan-time product cost')
-  assert.strictEqual(remove[0].data.total_cost_usd, 198)
+  assert.strictEqual(remove[0].data.unit_cost_usd, null, 'a removal is never priced at the catalogue cost (99): the lots it drains value it at apply')
+  assert.strictEqual(remove[0].data.total_cost_usd, null)
 
   const reviewed = { ...remove[0], data: { ...remove[0].data, unit_cost_usd: 1, unit_cost_khr: 0, total_cost_usd: 2, total_cost_khr: 0 } }
   const reclassifiedAtApply = { ...remove[0], data: { ...remove[0].data, unit_cost_usd: 99, unit_cost_khr: 400000, total_cost_usd: 198, total_cost_khr: 800000 } }
@@ -2408,8 +2410,13 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const db = makeFakeDb()
     const results = await classifySales(db, [row({ receipt_number: 'R-11', sku: 'SKU-1', quantity: 3 }, 1)], null)
     const item = results[0].data.items[0]
-    assert.strictEqual(item.cost_price_usd, 6, 'imported sale item must carry the matched product\'s cost_price_usd -- COGS/profit reporting reads this column directly')
-    assert.strictEqual(item.cost_price_khr, 24600, 'imported sale item must carry the matched product\'s cost_price_khr')
+    // S8 (15 Oct 2026): a line whose sheet states no cost is UNKNOWN (null), never today's catalogue cost (6 / 24600),
+    // which is not what the goods cost when the sale happened; a stated cost, a stated 0 included, is kept.
+    assert.strictEqual(item.cost_price_usd, null, 'a blank sheet cost is unknown, not the matched product\'s cost_price_usd')
+    const freeLine = await classifySales(db, [row({ receipt_number: 'R-11a', sku: 'SKU-1', quantity: 1, cost_price_usd: '0', cost_price_khr: '0' }, 1)], null)
+    assert.strictEqual(freeLine[0].data.items[0].cost_price_usd, 0, 'a typed 0 is a recorded free cost and stays 0')
+    assert.strictEqual(freeLine[0].data.items[0].cost_price_khr, 0)
+    assert.strictEqual(item.cost_price_khr, null, 'a blank sheet cost is unknown, not the matched product\'s cost_price_khr')
 
     const preserved = await classifySales(db, [row({
       receipt_number: 'R-11b', sku: 'SKU-1', quantity: 1,
@@ -3065,7 +3072,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
       _rowNumber: 1, name: 'Cost Keeper', sku: 'SKU-COST',
       selling_price_usd: '45', cost_price_usd: '', _action: 'override_replace',
     }], 'job-override-respected', null, new Map())
-    assert.ok(results[0].data.cost_price_usd === 0, 'a reviewer-chosen override_replace takes the row as-is (blank -> 0)')
+    assert.strictEqual(results[0].data.cost_price_usd, null, 'a reviewer-chosen override_replace takes the row as-is (blank -> unknown, never 0)')
   }
 
   console.log('PASS preserveExistingMoneyOnBlankCells -- blank money cells on matched merge rows keep existing values (61-product cost-wipe regression)')

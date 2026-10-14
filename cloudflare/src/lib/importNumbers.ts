@@ -92,7 +92,16 @@ export function normalizeImportMoney(value: unknown, fallbackValue = 0): number 
   return parsed >= 0 ? Math.ceil(parsed * 100 - 1e-9) / 100 : Math.floor(parsed * 100 + 1e-9) / 100
 }
 
-export function normalizeImportCost4(value: unknown, fallbackValue = 0): number {
+// A cost cell that is blank, absent or unreadable is UNKNOWN: pass fallbackValue null to get null back (never
+// 0, which is a recorded free cost). A typed 0 still returns 0.
+export function normalizeImportCost4(value: unknown, fallbackValue: number): number
+export function normalizeImportCost4(value: unknown, fallbackValue: null): number | null
+export function normalizeImportCost4(value: unknown): number
+export function normalizeImportCost4(value: unknown, fallbackValue: number | null = 0): number | null {
+  if (fallbackValue === null) {
+    const parsed = parseImportNumericValue(value, Number.NaN)
+    return Number.isFinite(parsed) ? roundMoney4(parsed) : null
+  }
   return roundMoney4(parseImportNumericValue(value, fallbackValue))
 }
 

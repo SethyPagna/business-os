@@ -541,8 +541,11 @@ export async function applyHistoricalSaleImport(
       // 0084: the historical line's recorded lot (when it had one) is the
       // lot the restock above bumped -- stamp it; NULL otherwise.
       sql: `INSERT INTO inventory_movements
-              (product_id, product_name, branch_id${redirected ? ', addressed_branch_name' : ''}, movement_type, quantity, reason, created_at, batch_id)
-            SELECT @product_id, @product_name, @branch_id${redirected ? ', @addressed_branch_name' : ''}, 'return', @returned_quantity, @reason, @updated_at, @batch_id
+              (product_id, product_name, branch_id${redirected ? ', addressed_branch_name' : ''}, movement_type, quantity,
+               unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, created_at, batch_id)
+            SELECT @product_id, @product_name, @branch_id${redirected ? ', @addressed_branch_name' : ''}, 'return', @returned_quantity,
+              @cost_price_usd, @cost_price_khr, ROUND(@cost_price_usd * @returned_quantity, 4), ROUND(@cost_price_khr * @returned_quantity, 4),
+              @reason, @updated_at, @batch_id
             WHERE ${writeGuard}`,
       params: stockParams,
     })

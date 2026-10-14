@@ -323,6 +323,9 @@ async function main() {
         expected.product_batches.push(lot)
         expected.branch_batch_stock.push(...lotStock)
         expected.inventory_movements[0].batch_id = lot.id
+        // S8 (15 Oct 2026): the +2 is a count, not a receipt; it carries no cost of its own, so the movement is unknown
+        // (NULL) instead of being priced at the catalog cost (4) the oracle used.
+        Object.assign(expected.inventory_movements[0], { unit_cost_usd: null, unit_cost_khr: null, total_cost_usd: null, total_cost_khr: null })
         assert.deepEqual(fresh.rows, expected, `${type}: the oracle's rows plus the branch and lot halves of the same +2`)
         const shopLots = fresh.rows.branch_batch_stock.filter((row) => row.branch_id === SHOP).reduce((sum, row) => sum + row.quantity, 0)
         const shopStock = fresh.rows.branch_stock.find((row) => row.product_id === 10 && row.branch_id === SHOP).quantity
@@ -341,9 +344,24 @@ async function main() {
       }
       // S5 (14 Oct 2026): the stock-action movements now state their KHR cost columns as unknown (NULL) instead of
       // taking the DEFAULT 0 the oracle's INSERT left them with. Every other column is still compared as it was.
+      // S8 (15 Oct 2026): the imported Toner row has no KHR cost cell, so it now stores an unknown cost (NULL) instead of the 0
+      // the oracle wrote, and the product-import receipt movement names its KHR cost columns as unknown.
+      const unknownCost = (row, columns) => row.name !== 'Toner' ? row : ({ ...row, ...Object.fromEntries(columns.filter((column) => row[column] === 0).map((column) => [column, null])) })
       const expectedRows = type === 'stock_actions'
         ? { ...old.rows, inventory_movements: old.rows.inventory_movements.map((row) => ({ ...row, unit_cost_khr: null, total_cost_khr: null })) }
-        : old.rows
+        : type === 'products'
+          ? { ...old.rows, products: old.rows.products.map((row) => unknownCost(row, ['cost_price_khr'])) }
+          : type === 'sales'
+            // The sales sheet states no line cost, so the imported line is unknown (NULL), not the catalog's 4, and its
+            // return restock movement carries that same unknown cost instead of the DEFAULT 0 the oracle left.
+            ? {
+              ...old.rows,
+              sales: old.rows.sales.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, typeof value === 'string'
+                ? value.replace(/"cost_price_usd":[^,]*,"cost_price_khr":[^,}]*/g, '"cost_price_usd":null,"cost_price_khr":null') : value]))),
+              sale_items: old.rows.sale_items.map((row) => ({ ...row, cost_price_usd: null, cost_price_khr: null })),
+              inventory_movements: old.rows.inventory_movements.map((row) => ({ ...row, unit_cost_usd: null, unit_cost_khr: null, total_cost_usd: null, total_cost_khr: null })),
+            }
+            : old.rows
       assert.deepEqual(fresh.rows, expectedRows, `${type}: identical business rows`)
       if (type === 'stock_actions') {
         // The one deliberate addition: the add batch's in-batch guard that its landing branch is still active (the
@@ -367,6 +385,34 @@ async function main() {
             assert.match(after.sql, S5_REWRITTEN, `${type}: batch ${b} statement ${s} is the same writer`)
             assert.deepEqual(after.params, before.params, `${type}: batch ${b} statement ${s} binds the same values`)
           })
+        })
+      } else if (type === 'products') {
+        // S8 (15 Oct 2026) rewrote two statement shapes on purpose: a new product states the cost its sheet left blank as
+        // NULL (the oracle bound 0), and a new lot's received money is the receipt's own (NULL when unknown, not
+        // COALESCE(x, 0)). Everything else is byte-identical.
+        const asOracleWrote = (text) => {
+          const statement = JSON.parse(text)
+          if (statement.sql.startsWith('INSERT INTO products (')) {
+            const columns = statement.sql.slice(statement.sql.indexOf('(') + 1, statement.sql.indexOf(')')).split(',').map((column) => column.trim())
+            statement.params[columns.indexOf('cost_price_khr')] = null
+          }
+          return JSON.stringify(statement)
+        }
+        const oldLotMoney = (text) => text.replace('COALESCE(?9, 0)', '?9')
+        const now = withoutProductAdmission(fresh.writes)
+        const then = withoutProductAdmission(old.writes).map((batch) => batch.map((text) => oldLotMoney(asOracleWrote(text))))
+        assert.deepEqual(now, then, `${type}: byte-identical business statements apart from the S8 unknown-cost rewrites`)
+      } else if (type === 'sales') {
+        // S8 (15 Oct 2026): the imported line's cost (a bound value) and the return restock movement's cost columns (its
+        // statement text) changed on purpose; the business rows above pin their values. Every other statement is
+        // byte-identical, in the same order.
+        const costBound = /^{"sql":"INSERT INTO (sales|sale_items|inventory_movements)/
+        const now = withoutProductAdmission(fresh.writes)
+        const then = withoutProductAdmission(old.writes)
+        assert.equal(now.length, then.length, `${type}: same batches`)
+        now.forEach((batch, b) => {
+          assert.deepEqual(batch.filter((text) => !costBound.test(text)), then[b].filter((text) => !costBound.test(text)), `${type}: batch ${b} apart from the cost-bearing inserts`)
+          assert.deepEqual(batch.map((text) => (costBound.exec(text) || [])[1]), then[b].map((text) => (costBound.exec(text) || [])[1]), `${type}: batch ${b} writes the same tables in the same order`)
         })
       } else {
         assert.deepEqual(withoutProductAdmission(fresh.writes), withoutProductAdmission(old.writes), `${type}: byte-identical business statements`)

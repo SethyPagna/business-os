@@ -190,6 +190,22 @@ check('multiple batches at multiple cost prices IS a conflict, flagged on every 
   assert.ok(/different cost prices/.test(reasons.get(2)))
 })
 
+check('a recorded $0 is a cost: $0 against $5 in two batches IS a conflict (cost-unknown S8)', () => {
+  const reasons = detectCostBatchConflicts([
+    { rowNumber: 1, identityKey: 'a|b', costPriceUsd: 0, batchLabel: 'AUG2026' },
+    { rowNumber: 2, identityKey: 'a|b', costPriceUsd: 5, batchLabel: 'SEP2026' },
+  ])
+  assert.strictEqual(reasons.size, 2, 'free goods at $0 and stock at $5 are two costs')
+})
+
+check('an unknown cost (null / absent) is not a cost: it never makes a conflict, and $0 twice is one cost', () => {
+  const rows = (...costs) => costs.map((costPriceUsd, index) => ({ rowNumber: index + 1, identityKey: 'a|b', costPriceUsd, batchLabel: `B${index}` }))
+  assert.strictEqual(detectCostBatchConflicts(rows(null, 5)).size, 0, 'unknown against $5')
+  assert.strictEqual(detectCostBatchConflicts(rows(undefined, 5)).size, 0, 'absent against $5')
+  assert.strictEqual(detectCostBatchConflicts(rows(0, 0)).size, 0, '$0 twice is one cost')
+  assert.strictEqual(detectCostBatchConflicts(rows(0, null)).size, 0, '$0 against unknown')
+})
+
 check('multiple cost prices but only ONE batch is not flagged (nothing to choose between)', () => {
   const reasons = detectCostBatchConflicts([
     { rowNumber: 1, identityKey: 'a|b', costPriceUsd: 5, batchLabel: 'AUG2026' },

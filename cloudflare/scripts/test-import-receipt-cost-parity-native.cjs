@@ -62,8 +62,8 @@ function setup() {
     CREATE TABLE branch_batch_stock(batch_id INTEGER, branch_id INTEGER, quantity REAL,
       updated_at TEXT, UNIQUE(batch_id,branch_id));
     CREATE TABLE inventory_movements(product_id INTEGER, product_name TEXT, branch_id INTEGER,
-      branch_name TEXT, movement_type TEXT, quantity REAL, unit_cost_usd REAL,
-      total_cost_usd REAL, reason TEXT, created_at TEXT, batch_id INTEGER);
+      branch_name TEXT, movement_type TEXT, quantity REAL, unit_cost_usd REAL, unit_cost_khr REAL,
+      total_cost_usd REAL, total_cost_khr REAL, reason TEXT, created_at TEXT, batch_id INTEGER);
     CREATE TABLE product_cost_entries(id INTEGER PRIMARY KEY, product_id INTEGER, cost_usd REAL,
       baseline_batch_id INTEGER);
     CREATE TABLE row_guards(row_number INTEGER PRIMARY KEY);
@@ -105,6 +105,25 @@ function setup() {
   assert.equal(fixture.sqlite.prepare('SELECT stock_quantity FROM products').get().stock_quantity, 5)
   await assert.rejects(() => fixture.db.batch(groups[0]), /UNIQUE/)
   assert.equal(fixture.sqlite.prepare('SELECT stock_quantity FROM products').get().stock_quantity, 5, 'journal replay cannot double count')
+
+  // Cost-unknown S8: a receipt whose sheet states no cost is an unknown lot total and an unknown movement, never 0;
+  // a stated 0 is a recorded 0 (control); an unknown top-up of a costed lot and a costed top-up of an unknown lot
+  // both leave the lot total unknown, a costed top-up of a costed lot still sums.
+  const unknown = setup()
+  await runD1BatchGroupsInChunks(unknown.db, [unknown.plan(null), unknown.plan(null), unknown.plan(0), unknown.plan(4), unknown.plan(4), unknown.plan(null, 2)])
+  assert.deepEqual(unknown.sqlite.prepare('SELECT unit_cost_usd, received_quantity, received_cost_usd FROM product_batches ORDER BY id').all(), [
+    { unit_cost_usd: null, received_quantity: 3, received_cost_usd: null },
+    { unit_cost_usd: 0, received_quantity: 1, received_cost_usd: 0 },
+    { unit_cost_usd: 4, received_quantity: 2, received_cost_usd: 8 },
+  ], 'unknown lot total stays unknown through a top-up; $0 and $4 lots are recorded')
+  assert.deepEqual(unknown.sqlite.prepare('SELECT unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr FROM inventory_movements ORDER BY rowid').all(), [
+    { unit_cost_usd: null, unit_cost_khr: null, total_cost_usd: null, total_cost_khr: null },
+    { unit_cost_usd: null, unit_cost_khr: null, total_cost_usd: null, total_cost_khr: null },
+    { unit_cost_usd: 0, unit_cost_khr: null, total_cost_usd: 0, total_cost_khr: null },
+    { unit_cost_usd: 4, unit_cost_khr: null, total_cost_usd: 4, total_cost_khr: null },
+    { unit_cost_usd: 4, unit_cost_khr: null, total_cost_usd: 4, total_cost_khr: null },
+    { unit_cost_usd: null, unit_cost_khr: null, total_cost_usd: null, total_cost_khr: null },
+  ], 'each receipt movement carries its own cost: unknown stays NULL (old: the KHR columns took DEFAULT 0 and an unknown lot total became 0)')
 
   const wide = setup()
   await runD1BatchGroupsInChunks(wide.db, [wide.plan(2), wide.plan(200)])

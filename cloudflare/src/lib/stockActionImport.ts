@@ -66,13 +66,9 @@ export interface UnifiedStockResolvedRow {
   wholesalePriceUsd: number | null
   costPriceUsd: number | null
   /**
-   * The sheet's OWN cost_price cell, with no catalog fallback (unlike
-   * costPriceUsd, which inherits an existing product's cost_price_usd so the
-   * product-price columns stay filled). The receipt gate must see what the
-   * operator actually typed on THIS row -- an existing product's catalog
-   * cost is not a cost this receipt states, and feeding it to the gate let a
-   * sheet with a supplier column but no cost_price column mint a real
-   * receipt cost the operator never typed (sibling:F13 verifier round 2).
+   * The sheet's OWN cost_price cell. costPriceUsd above is the same value: a blank cell is an unknown cost (null),
+   * never the catalog cost of the matched product, and a typed 0 stays 0. The receipt gate must see what the
+   * operator actually typed on THIS row (sibling:F13 verifier round 2).
    */
   sheetCostPriceUsd: number | null
   batchLabel: string | null
@@ -327,7 +323,7 @@ export function resolveUnifiedStockImportRows(
       action,
       sellingPriceUsd: selling.value ?? matched.product?.selling_price_usd ?? null,
       wholesalePriceUsd: wholesale.value ?? matched.product?.wholesale_price_usd ?? null,
-      costPriceUsd: cost.value ?? matched.product?.cost_price_usd ?? null,
+      costPriceUsd: cost.value,
       sheetCostPriceUsd: cost.value,
       batchLabel: batchLabel || null,
       supplier: text(raw.supplier).replace(/\s{2,}/g, ' ').slice(0, 120),

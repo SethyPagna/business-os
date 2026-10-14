@@ -17,7 +17,7 @@ export async function sealUnifiedStockAnalyzeConflicts(db: D1Compat, jobId: stri
         AND json_extract(result_json, '$.data.identityKey') IS NOT NULL
       GROUP BY identity_key
       HAVING COUNT(DISTINCT CASE
-               WHEN COALESCE(CAST(json_extract(result_json, '$.data.costPriceUsd') AS REAL), 0) != 0
+               WHEN json_extract(result_json, '$.data.costPriceUsd') IS NOT NULL
                THEN ROUND(CAST(json_extract(result_json, '$.data.costPriceUsd') AS REAL), 3)
              END) > 1
          AND COUNT(DISTINCT CASE
