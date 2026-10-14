@@ -241,10 +241,10 @@ export async function ensureUnifiedStockProduct(db: D1Compat, input: UnifiedStoc
   if (!product) {
     const inserted = await db.prepare(`
       INSERT OR IGNORE INTO products (
-        name, name_normalized, barcode, unit, selling_price_usd, wholesale_price_usd, cost_price_usd,
+        name, name_normalized, barcode, unit, selling_price_usd, wholesale_price_usd, cost_price_usd, cost_price_khr,
         stock_quantity, is_active, client_request_id, created_at, updated_at
       ) VALUES (
-        @productName, @nameNormalized, @barcode, 'pcs', @sellingPriceUsd, @wholesalePriceUsd, @costPriceUsd,
+        @productName, @nameNormalized, @barcode, 'pcs', @sellingPriceUsd, @wholesalePriceUsd, @costPriceUsd, NULL,
         0, 1, @clientRequestId, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
       )
     `).run({
@@ -253,7 +253,7 @@ export async function ensureUnifiedStockProduct(db: D1Compat, input: UnifiedStoc
       barcode: String(input.barcode || '').trim() || null,
       sellingPriceUsd: optionalMoney(input.sellingPriceUsd, true) ?? 0,
       wholesalePriceUsd: optionalMoney(input.wholesalePriceUsd, true) ?? 0,
-      costPriceUsd: optionalMoney(input.costPriceUsd) ?? 0,
+      costPriceUsd: optionalMoney(input.costPriceUsd),
       clientRequestId,
     })
     created = inserted.changes === 1
@@ -435,10 +435,14 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
       // and since batch_key is the date code, a second receipt of the same
       // product on the same day tops THIS lot up, so its units were valued
       // at the FIRST receipt's cost. @costPriceUsd is NULL whenever the
-      // source row recorded no price; COALESCE makes that contribute 0
-      // instead of borrowing a sibling receipt's price.
+      // source row recorded no price. That receipt's money is then unknown,
+      // so the running total is unknown too: neither a $0 contribution nor a
+      // sibling receipt's price, and a lot whose earlier receipt was unknown
+      // does not become "known" by adding a priced top-up to it.
       sql: `UPDATE product_batches SET received_quantity = COALESCE(received_quantity, 0) + @quantity,
-              received_cost_usd = ROUND(COALESCE(received_cost_usd, 0) + COALESCE(@totalCostUsd, 0), 4),
+              received_cost_usd = CASE WHEN @totalCostUsd IS NULL THEN NULL
+                WHEN received_cost_usd IS NULL AND COALESCE(received_quantity, 0) > 0 THEN NULL
+                ELSE ROUND(COALESCE(received_cost_usd, 0) + @totalCostUsd, 4) END,
               received_branch_id = CASE WHEN received_quantity = 0 THEN @branchId ELSE COALESCE(received_branch_id, @branchId) END,
               received_branch_name = CASE WHEN received_quantity = 0 OR received_branch_id IS NULL THEN (SELECT name FROM branches WHERE id=@branchId) ELSE received_branch_name END
             WHERE variant_product_id = @productId AND batch_key = @batchKey AND ${guard}`,
@@ -476,10 +480,10 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
       // productId+batchKey above), so the movement records it.
       sql: `INSERT INTO inventory_movements
               (product_id, product_name, branch_id, branch_name${redirect ? ', addressed_branch_name' : ''}, movement_type, quantity,
-               unit_cost_usd, total_cost_usd, reason, created_at, batch_id)
+               unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, created_at, batch_id)
             SELECT @productId, @productName, @branchId, @branchName${redirect ? ', @addressedBranchName' : ''}, 'add', @quantity,
-              @costPriceUsd,
-              @totalCostUsd,
+              @costPriceUsd, NULL,
+              @totalCostUsd, NULL,
               @reason, @receivedAt,
               (SELECT id FROM product_batches WHERE variant_product_id = @productId AND batch_key = @batchKey)
             WHERE ${guard}`,
@@ -514,7 +518,6 @@ interface AvailableBatch {
   expiry_date: string | null
   received_at: string | null
   quantity: number
-  cost_price_usd: number
 }
 
 interface SaleAllocation {
@@ -613,14 +616,12 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
   // in row order. The live quantities are asserted again *inside* db.batch;
   // these reads decide allocation shape, not transaction safety.
   const pools = new Map<string, AvailableBatch[]>()
-  const productCosts = new Map<number, number>()
   const poolKeys = [...new Set(lines.map((line) => `${line.productId}:${line.branchId}`))]
   for (const poolKey of poolKeys) {
     const [productId, branchId] = poolKey.split(':').map(Number)
     const rows = await db.prepare(`
       SELECT pb.id, pb.batch_key, pb.lot_code, pb.expiry_date, pb.received_at,
-             COALESCE(bbs.quantity, 0) AS quantity,
-             COALESCE(p.cost_price_usd, 0) AS cost_price_usd
+             COALESCE(bbs.quantity, 0) AS quantity
       FROM products p
       LEFT JOIN product_batches pb ON pb.variant_product_id = p.id AND pb.is_active = 1
       LEFT JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
@@ -630,7 +631,6 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
       LIMIT 25
     `).all<AvailableBatch>({ productId, branchId })
     if (rows.length === 0) throw new Error(`Product ${productId} does not exist`)
-    productCosts.set(productId, Number(rows[0]?.cost_price_usd || 0))
     pools.set(poolKey, rows.filter((row) => Number(row.id) > 0).map((row) => ({ ...row, quantity: Math.max(0, Number(row.quantity || 0)) })))
   }
 
@@ -807,7 +807,9 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
   })
 
   for (const line of lines) {
-    const costPriceUsd = line.costPriceUsd ?? productCosts.get(line.productId) ?? 0
+    // The sheet's own cost cell, $0 included. A blank cell is an unknown cost (NULL): the catalog cost of the day
+    // this file is imported is not what a past sale's goods cost.
+    const costPriceUsd = line.costPriceUsd ?? null
     const totalUsd = Math.round(line.quantity * line.sellingPriceUsd * 100) / 100
     const primaryAllocation = line.allocations[0]
     statements.push({
@@ -853,15 +855,15 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
       // sale_item_batch_allocations), blank-honest.
       sql: `INSERT INTO inventory_movements (
               product_id, product_name, branch_id, branch_name${lineRedirected ? ', addressed_branch_name' : ''}, movement_type,
-              quantity, unit_cost_usd, total_cost_usd, reason, reference_id, created_at, batch_id
+              quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, created_at, batch_id
             )
             SELECT @productId, @productName, @branchId, @branchName${lineRedirected ? ', @addressedBranchName' : ''}, 'sale',
-              -@quantity, @costPriceUsd, @totalCostUsd, @reason,
+              -@quantity, @costPriceUsd, NULL, @totalCostUsd, NULL, @reason,
               (SELECT id FROM sales WHERE client_request_id = @clientRequestId AND client_request_id <> ''), @soldAt, @movementBatchId
             WHERE ${guard}`,
       params: {
         ...common, ...line, costPriceUsd,
-        totalCostUsd: multiplyMoney4(costPriceUsd, line.quantity),
+        totalCostUsd: costPriceUsd == null ? null : multiplyMoney4(costPriceUsd, line.quantity),
         reason: `Unified stock import ${jobId}, group ${saleGroupKey}, row ${line.rowNumber}${addressedSuffix(line.addressedBranchName, line.branchName)}`,
         soldAt,
         // Full coverage required: a single allocation that covers only part

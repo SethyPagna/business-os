@@ -355,7 +355,8 @@ function finish(finding) {
 //   --wrong=no-move-row-shares  mutant: /move-row writes its move_out without the per-lot shares (M14 goes RED)
 //   --wrong=import-record-on-add  mutant: the CSV import writes the record after Add rows too, past the group estimate (M15b goes RED)
 //   --wrong=import-estimate-blind  mutant: the CSV group cost estimate forgets the share statement, so a group outgrows the 300-statement chunk (M15 goes RED)
-//   --wrong=hold-cost-null      mutant: a held row of a lot with no unit cost carries no cost, so Dispose books it at the later catalog cost (M13 goes RED)
+//   --wrong=hold-cost-stand-in  mutant: a held row of a lot with no unit cost is stamped with a stand-in price (the old catalog fallback), so Dispose books a loss nobody recorded (M13 goes RED)
+//   --wrong=zero-as-missing     mutant: a lot whose recorded cost is $0 is read as having none, so a free lot's hold and Dispose turn unknown (M13b goes RED)
 //   --wrong=one-held-row        mutant: a multi-lot damaged hold writes ONE held row with no lot (the pre-fix shape) (M11 goes RED)
 //   --wrong=active-blind-precheck  mutant: the named-lot pre-check ignores pb.is_active again (R2 F8)           (M10 goes RED)
 //   --only=M1,M2                run just those cases (debugging aid)
@@ -432,10 +433,15 @@ const PATCHES = {
   'import-estimate-blind': [
     { name: 'import-estimate-blind', file: 'src/lib/importEngine.ts', from: '(entry.delta < 0 && singleLotOf(entry) == null ? 1 : 0)', to: '0' },
   ],
-  'hold-cost-null': [
-    { name: 'hold-cost-null', file: 'src/routes/inventory.ts',
-      from: 'unitCostUsd: removalCostByBatch.get(entry.batchId) ?? productCostSnapshot?.cost_price_usd ?? null }))',
-      to: 'unitCostUsd: removalCostByBatch.get(entry.batchId) ?? null }))' },
+  'hold-cost-stand-in': [
+    { name: 'hold-cost-stand-in', file: 'src/routes/inventory.ts',
+      from: 'quantity: entry.quantity, unitCostUsd: removalCostByBatch.get(entry.batchId) ?? null }))',
+      to: 'quantity: entry.quantity, unitCostUsd: removalCostByBatch.get(entry.batchId) ?? 2 }))' },
+  ],
+  'zero-as-missing': [
+    { name: 'zero-as-missing', file: 'src/routes/inventory.ts',
+      from: 'removalCostByBatch = new Map(costRows.map((row) => [Number(row.id), row.unit_cost_usd ?? null]))',
+      to: 'removalCostByBatch = new Map(costRows.map((row) => [Number(row.id), row.unit_cost_usd || null]))' },
   ],
   'one-held-row': [
     { name: 'one-held-row', file: 'src/lib/damagedLotActions.ts',
@@ -1113,22 +1119,35 @@ async function main() {
       t.eq('Dispose answered and moved no sellable stock', [disposed.status, a2.lots, a2.branch, a2.product], [200, [3, 3], 6, 6])
       t.eq('the 2 disposed came off the oldest held row', (await held(H, s)).map(r => [r.b, r.r]), [[s.ids[0], 0], [s.ids[1], 2]])
     })
-    await check('M13', 'a damaged hold over lots 5+5 where lot A has no unit cost: its held row is stamped at the product cost of the day it was held, so a later catalog price change does not move the Dispose loss', 'high', async (t) => {
+    await check('M13', 'a damaged hold over lots 5+5 where lot A has no unit cost: its held row carries NO cost (never the product cost), the hold and its later Dispose are an unknown cost, and a catalog price change moves nothing', 'high', async (t) => {
       const s = await seed(H, { lots: [5, 5] })
       await H.db.prepare('UPDATE product_batches SET unit_cost_usd=NULL WHERE id=?').bind(s.ids[0]).run()
-      const holdCost = (await H.q1('SELECT cost_price_usd c FROM products WHERE id=?', s.p)).c
+      const catalogCost = (await H.q1('SELECT cost_price_usd c FROM products WHERE id=?', s.p)).c
       const tagged = await adjustRemove(H, s, 7, 'a', { conditionTag: 'damaged' })
       const h = await held(H, s)
       t.eq('tagged Remove answered', tagged.status, 200)
-      const total = Math.round((5 * holdCost + 2 * 4) * 10000) / 10000
-      t.ok('the product has a cost of its own to fall back on, different from what a later price will be', holdCost > 0 && holdCost !== 9, holdCost)
-      t.eq('lot A (no cost) is held at the product cost of the day it was held, lot B at its own (4)', h.map(r => [r.b, r.q, r.c]), [[s.ids[0], 5, holdCost], [s.ids[1], 2, 4]])
-      const costs = async () => (await H.q('SELECT movement_type t, total_cost_usd c FROM inventory_movements WHERE product_id=? ORDER BY id', s.p)).map(r => [r.t, Math.round(Number(r.c) * 10000) / 10000])
-      t.eq('the hold books 5 x product cost + 2 x 4', (await costs()).filter(r => r[0] === 'damage_out'), [['damage_out', total]])
+      t.ok('the product has a catalog cost that could have stood in, different from what a later price will be', catalogCost > 0 && catalogCost !== 9, catalogCost)
+      t.eq('lot A (no cost) is held with NO cost, lot B at its own (4)', h.map(r => [r.b, r.q, r.c]), [[s.ids[0], 5, null], [s.ids[1], 2, 4]])
+      const costs = async () => (await H.q('SELECT movement_type t, unit_cost_usd u, total_cost_usd c FROM inventory_movements WHERE product_id=? ORDER BY id', s.p)).map(r => [r.t, r.u, r.c == null ? null : Math.round(Number(r.c) * 10000) / 10000])
+      t.eq('the hold spans an unknown lot, so the movement is an unknown cost, not a blend', (await costs()).filter(r => r[0] === 'damage_out'), [['damage_out', null, null]])
       await H.db.prepare('UPDATE products SET cost_price_usd=9 WHERE id=?').bind(s.p).run()
       const disposed = await taggedAction(H, s, 'dispose', 7, 'd')
       t.eq('Dispose answered', disposed.status, 200)
-      t.eq('the loss is booked at what the goods cost when they were held, not at the new catalog cost (9 a unit)', (await costs()).filter(r => r[0] === 'write_off'), [['write_off', total]])
+      t.eq('the loss is unknown: neither the old catalog cost nor the new one (9 a unit) is booked', (await costs()).filter(r => r[0] === 'write_off'), [['write_off', null, null]])
+    })
+    await check('M13b', 'control: a damaged hold over lots 5+5 where lot A has a RECORDED $0 cost: its held row is $0, the hold and its Dispose are known (2 x 4), and a catalog price change moves nothing', 'control', async (t) => {
+      const s = await seed(H, { lots: [5, 5] })
+      await H.db.prepare('UPDATE product_batches SET unit_cost_usd=0 WHERE id=?').bind(s.ids[0]).run()
+      const tagged = await adjustRemove(H, s, 7, 'a', { conditionTag: 'damaged' })
+      const h = await held(H, s)
+      t.eq('tagged Remove answered', tagged.status, 200)
+      t.eq('lot A is held at its recorded $0, lot B at 4', h.map(r => [r.b, r.q, r.c]), [[s.ids[0], 5, 0], [s.ids[1], 2, 4]])
+      const costs = async () => (await H.q('SELECT movement_type t, total_cost_usd c FROM inventory_movements WHERE product_id=? ORDER BY id', s.p)).map(r => [r.t, r.c == null ? null : Math.round(Number(r.c) * 10000) / 10000])
+      t.eq('the hold books 5 x $0 + 2 x 4 = 8', (await costs()).filter(r => r[0] === 'damage_out'), [['damage_out', 8]])
+      await H.db.prepare('UPDATE products SET cost_price_usd=9 WHERE id=?').bind(s.p).run()
+      const disposed = await taggedAction(H, s, 'dispose', 7, 'd')
+      t.eq('Dispose answered', disposed.status, 200)
+      t.eq('the loss is what the goods cost (8), not at the new catalog cost (9 a unit)', (await costs()).filter(r => r[0] === 'write_off'), [['write_off', 8]])
     })
     await check('M11c', 'control: a damaged Remove from a NAMED lot is one held row on that lot and its Restore already put the units back', 'control', async (t) => {
       const s = await seed(H, { lots: [5, 5] })

@@ -64,9 +64,10 @@ function ok(label) { checks += 1; console.log(`PASS ${label}`) }
 //   verdict: 'loss' | 'not-loss' | 'excluded-by-reason'
 //   writer:  file:function the row actually comes from
 //   costed:  'write-time' (the writer itself stamps unit_cost_usd/
-//            total_cost_usd), 'read-time' (relies on removalLosses.ts's
-//            fallback chain -- lot / product / product's other lot / a
-//            same-name twin's lot), or 'n/a' (not a loss, cost irrelevant)
+//            total_cost_usd; NULL when the cost is unknown), 'read-time'
+//            (the movement carries no snapshot and removalLosses.ts reads the
+//            removed lot's OWN recorded cost -- there is no catalog, other-lot
+//            or same-name-twin tier any more), or 'n/a' (not a loss)
 // ---------------------------------------------------------------------------
 const MATRIX = {
   remove: {
@@ -74,16 +75,17 @@ const MATRIX = {
     writer: 'routes/inventory.ts (stock-change remove action)',
     costed: 'write-time',
     note: 'resolveMovementCostSnapshot stamps unit/total cost at write time; ' +
-      'the read-time chain is the safety net for legacy/unmarked rows.',
+      'a row with no snapshot is read from its own lot, and is UNKNOWN when ' +
+      'that has no recorded cost either.',
   },
   write_off: {
     verdict: 'loss',
     writer: 'damagedLotActions.ts planDisposeTagged (DISPOSE); productDelete.ts (product delete draining held/sellable stock)',
     costed: 'write-time+read-time',
     note: 'DISPOSE stamps its own lot cost via resolveMovementCostSnapshot; ' +
-      'productDelete stamps the lot\'s own unit_cost_usd where the lot has ' +
-      'one and otherwise leaves it at the column default, relying on the ' +
-      'read-time chain (product cost, then the same-name-twin fallback).',
+      'productDelete stamps the lot\'s own unit_cost_usd for held lots; its ' +
+      'sellable-stock write_off still omits the cost columns (see writer ' +
+      'check 5b), which read as a recorded $0 until that writer stores NULL.',
   },
   delete: {
     verdict: 'loss',
@@ -91,10 +93,9 @@ const MATRIX = {
     costed: 'write-time',
     note: 'p5/losses (Sep 15 2026): folded into the loss set -- draining ' +
       'stock via a bulk delete destroys it exactly as finally as a single ' +
-      'delete\'s write_off. Its own SQL already computes a cost (product ' +
-      'cost_price_usd, else a weighted average of the branch\'s costed ' +
-      'lots) at write time; the read-time chain still covers a product ' +
-      'that has neither.',
+      'delete\'s write_off. No writer posts this movement type today ' +
+      '(bulkDeleteEngine.ts only logs an audit row); a row of this shape ' +
+      'with no cost is unknown, never priced from the catalog.',
   },
   sale: {
     verdict: 'not-loss',
@@ -226,12 +227,16 @@ const RECONCILIATION_REMOVE = {
 
 // ---------------------------------------------------------------------------
 // 5. Every loss-bearing writer's own source stamps unit_cost_usd/
-//    total_cost_usd in the same INSERT it writes the movement row from (or
-//    is explicitly documented here as relying on the read-time chain because
-//    its own lot may legitimately be uncosted) -- so a change that quietly
-//    drops the cost columns from a loss-bearing writer's INSERT is caught
-//    even though test-removal-losses-pure.cjs only exercises the SQL chain
-//    reading rows that already exist.
+//    total_cost_usd in the same INSERT it writes the movement row from -- so a
+//    change that quietly drops the cost columns from a loss-bearing writer's
+//    INSERT is caught even though test-removal-losses-pure.cjs only exercises
+//    the SQL reading rows that already exist.
+//
+//    Why it matters more now (owner, 14 Oct 2026: "if cost is 0$ then it is 0
+//    for loss. if it is none, it should also be unknown"): the columns are
+//    DEFAULT 0, so an INSERT that omits them stores a RECORDED $0, and the
+//    reader no longer rescues it from the catalog. 5b counts the loss-type
+//    INSERTs that omit the cost columns, per writer file.
 // ---------------------------------------------------------------------------
 {
   const writerChecks = [
@@ -244,6 +249,33 @@ const RECONCILIATION_REMOVE = {
     const text = source(check.file)
     assert.ok(check.pattern.test(text), `${check.file} no longer appears to stamp a cost snapshot for "${check.type}" -- if this is intentional, the read-time fallback chain must cover it and this test's writerChecks entry must be updated deliberately`)
   }
+  // 5b. Count the INSERT INTO inventory_movements statements in each loss-bearing
+  //     writer file that list no cost column at all. A statement that names
+  //     neither unit_cost_usd nor total_cost_usd stores DEFAULT 0 = a recorded
+  //     $0 loss. productDelete.ts's sellable-stock write_off is the one known
+  //     case (cost-unknown slice S6 makes it write NULL or the lot cost, which
+  //     takes this budget to 0); the budget can only go down, never up.
+  const insertsWithoutCost = (text) => {
+    const found = []
+    const re = /INSERT INTO inventory_movements\s*\(([^)]*)\)/gi
+    let match
+    while ((match = re.exec(text))) {
+      if (!/\b(unit_cost_usd|total_cost_usd)\b/.test(match[1])) found.push(match[1].replace(/\s+/g, ' ').trim())
+    }
+    return found
+  }
+  const UNCOSTED_INSERT_BUDGET = { [path.join('lib', 'productDelete.ts')]: 1, [path.join('lib', 'damagedLotActions.ts')]: 0 }
+  for (const [rel, budget] of Object.entries(UNCOSTED_INSERT_BUDGET)) {
+    const found = insertsWithoutCost(source(rel))
+    assert.ok(found.length <= budget, `${rel} has ${found.length} INSERT INTO inventory_movements without a cost column (budget ${budget}): ${JSON.stringify(found)}`)
+  }
+  const deleteUncosted = insertsWithoutCost(source(path.join('lib', 'productDelete.ts')))
+  assert.equal(deleteUncosted.length, 1, 'the sellable write_off INSERT in productDelete.ts is still the one uncosted writer -- lower the budget to 0 when it stores a cost')
+  assert.match(deleteUncosted[0], /movement_type/, 'and it is the movement INSERT, not another statement')
+  // The control: the matcher DOES flag an INSERT that omits the cost columns and
+  // does NOT flag one that lists them, so the count above is not vacuous.
+  assert.equal(insertsWithoutCost('INSERT INTO inventory_movements(product_id,quantity,reason) VALUES (1,2,3)').length, 1)
+  assert.equal(insertsWithoutCost('INSERT INTO inventory_movements (product_id, unit_cost_usd, total_cost_usd) VALUES (1,2,3)').length, 0)
   assert.doesNotMatch(source(path.join('lib', 'bulkDeleteEngine.ts')), /INSERT INTO inventory_movements/, 'zero-stock bulk identity removal does not invent a loss')
   assert.match(source(path.join('lib', 'bulkDeleteEngine.ts')), /stockedProductIds/, 'bulk deletion refuses physical stock')
   ok('every loss-bearing writer\'s own source still stamps (or documents deferring to) a cost snapshot')

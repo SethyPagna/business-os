@@ -92,8 +92,8 @@ export async function planTransferOperation(db: D1Compat, args: {
   const productIds = [...new Set(args.lines.flatMap(line => [line.productId, line.destProductId]))]
   const productRows = await selectInChunks(productIds, 0, chunk => {
     const { sql, params: inParams } = buildInClause('id', chunk)
-    return db.prepare(`SELECT id,${productSnapshotSql} AS snapshot,cost_price_usd,cost_price_khr FROM products WHERE id IN (${sql}) AND is_active=1`)
-      .all<{ id: number; snapshot: string; cost_price_usd: number | null; cost_price_khr: number | null }>(inParams)
+    return db.prepare(`SELECT id,${productSnapshotSql} AS snapshot FROM products WHERE id IN (${sql}) AND is_active=1`)
+      .all<{ id: number; snapshot: string }>(inParams)
   })
   const productById = new Map(productRows.map(row => [Number(row.id), row]))
 
@@ -182,20 +182,16 @@ export async function planTransferOperation(db: D1Compat, args: {
     const destinationProduct = line.productId === line.destProductId ? sourceProduct : productById.get(line.destProductId)
     const snapshots = [sourceProduct, destinationProduct]
     if (snapshots.some(row => !row)) throw refuse('transfer_stock_changed')
-    // Only planning reads mutable catalog costs. Both movement directions and
-    // every later replay consume the same immutable source-cost provenance.
-    const fallback = { fallbackUnitCostUsd: sourceProduct!.cost_price_usd, fallbackUnitCostKhr: sourceProduct!.cost_price_khr }
-    statements.push(assert(`EXISTS(SELECT 1 FROM products WHERE id=@product AND cost_price_usd IS @usd AND cost_price_khr IS @khr)`,
-      { product: line.productId, usd: sourceProduct!.cost_price_usd, khr: sourceProduct!.cost_price_khr }))
+    // Both movement directions and every later replay consume the same immutable source-cost provenance:
+    // each source lot's OWN cost, NULL (unknown) when it has none. The catalog cost is never read.
     const { takes, uncovered } = linePlans[ordinal]
     const allocations: Allocation[] = []
     for (const take of takes) {
       const source = lotById.get(take.batchId)
       if (!source) throw refuse('transfer_stock_changed')
       const costSnapshot = resolveMovementCostSnapshot({ quantity: take.quantity,
-        // Lots store USD only. KHR uses the captured source product currency,
-        // never a guessed exchange rate or destination product's cost.
-        components: [{ quantity: take.quantity, unitCostUsd: source.unit_cost_usd }], ...fallback })
+        // Lots store USD only: KHR stays unknown, never a guessed exchange rate or a product's cost.
+        components: [{ quantity: take.quantity, unitCostUsd: source.unit_cost_usd }] })
       statements.push(assert(`EXISTS(SELECT 1 FROM product_batches WHERE id=@batch AND unit_cost_usd IS @usd)`,
         { batch: take.batchId, usd: source.unit_cost_usd }))
       const sourceLot = JSON.parse(source.snapshot) as Lot
@@ -230,7 +226,7 @@ export async function planTransferOperation(db: D1Compat, args: {
     const member: Member = { ordinal, source_product_id: line.productId, destination_product_id: line.destProductId,
       source_branch_id: args.fromBranchId, destination_branch_id: args.toBranchId, quantity: line.quantity,
       untracked_quantity: uncovered, source_snapshot: JSON.stringify({ ...JSON.parse(snapshots[0]!.snapshot),
-        untracked_cost_snapshot: uncovered > 0 ? resolveMovementCostSnapshot({ quantity: uncovered, ...fallback }) : null }),
+        untracked_cost_snapshot: uncovered > 0 ? resolveMovementCostSnapshot({ quantity: uncovered }) : null }),
       destination_snapshot: snapshots[1]!.snapshot, allocations_json: JSON.stringify(allocations) }
     members.push(member)
     statements.push({ sql: `INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_branch_id,destination_branch_id,quantity,untracked_quantity,source_snapshot,destination_snapshot,allocations_json)

@@ -1,3 +1,10 @@
+-- SUPERSEDED 14 Oct 2026 -- DO NOT APPLY (comment-only note; the SQL below is unchanged).
+-- Owner rule, 14 Oct 2026: "if cost is 0$ then it is 0 for loss. if it is none, it should
+-- also be unknown. flag it." This audit mirrors the held 0200 repair, which counts only cost > 0 as recorded.
+-- A recorded $0 is a real $0 and a missing cost is UNKNOWN; neither may be filled from a
+-- later catalog price, another lot or a same-name product. Any replacement must be
+-- re-derived from that rule (plan: Records/Lanes/2026-10-14/OPUS-PLAN-COST-UNKNOWN-CONFLICTS.md, section 2.4).
+--
 -- Sale and return line cost audit for held migration 0200 (U-cost; owner
 -- decisions 2026-09-26 and 2026-09-27).
 -- READ-ONLY: every statement is a single SELECT. Run it AFTER migration 0195

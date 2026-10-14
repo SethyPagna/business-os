@@ -168,13 +168,13 @@ async function main() {
     id: 1, name: 'Serum', display_quantity: 5,
     stock_value_usd: 10, stock_value_khr: 40000,
     qty_sold: 6, revenue_usd: 60, revenue_khr: 240000,
-    cogs_usd: 18, cogs_khr: 72000, profit_usd: 42,
+    cogs_usd: 18, cogs_khr: 72000, profit_usd: 42, stock_value_unknown: false, cogs_unknown_lines: 0,
   }, 'Branch A recognizes awaiting-payment revenue and cost, subtracts customer returns, and excludes cancelled/other-branch rows')
   assert.deepEqual(firstPage.items[1], {
     id: 2, name: 'Serum', display_quantity: 3,
     stock_value_usd: 12, stock_value_khr: 48000,
     qty_sold: 1, revenue_usd: 10, revenue_khr: 40000,
-    cogs_usd: 4, cogs_khr: 16000, profit_usd: 6,
+    cogs_usd: 4, cogs_khr: 16000, profit_usd: 6, stock_value_unknown: false, cogs_unknown_lines: 0,
   }, 'store discount is allocated from the sale snapshot and Branch B return does not leak into Branch A')
 
   const metricQueries = trace.filter((entry) => entry.kind === 'all')
@@ -224,8 +224,24 @@ async function main() {
     id: 1, name: 'Serum', display_quantity: 9,
     stock_value_usd: 18, stock_value_khr: 72000,
     qty_sold: 1, revenue_usd: 10, revenue_khr: 40000,
-    cogs_usd: 3, cogs_khr: 12000, profit_usd: 7,
+    cogs_usd: 3, cogs_khr: 12000, profit_usd: 7, stock_value_unknown: false, cogs_unknown_lines: 0,
   }, 'Branch B receives only its own stock, sale, and return scope')
+
+  // S5: a product whose cost is unknown holds units it cannot value. Its stock value is NULL (not 0) and flagged, so a
+  // total can leave it out and count it; a recorded $0 cost is a known 0, and a positive purchase price still overrides.
+  d1.exec('UPDATE products SET cost_price_usd = NULL, cost_price_khr = NULL, purchase_price_usd = 0, purchase_price_khr = 0 WHERE id = 3')
+  const unknownCost = [{ id: 3, name: 'Toner' }]
+  await attachInventoryProductMetrics(db, unknownCost, { branchId: '1' })
+  assert.deepEqual([unknownCost[0].display_quantity, unknownCost[0].stock_value_usd, unknownCost[0].stock_value_khr, unknownCost[0].stock_value_unknown], [6, null, null, true],
+    'six units at an unknown cost: not valued at 0, flagged unknown')
+  d1.exec('UPDATE products SET cost_price_usd = 0, cost_price_khr = 0, purchase_price_usd = 0, purchase_price_khr = 0 WHERE id = 3')
+  const recordedZero = [{ id: 3, name: 'Toner' }]
+  await attachInventoryProductMetrics(db, recordedZero, { branchId: '1' })
+  assert.deepEqual([recordedZero[0].stock_value_usd, recordedZero[0].stock_value_khr, recordedZero[0].stock_value_unknown], [0, 0, false], 'a recorded $0 cost is a known 0')
+  d1.exec('UPDATE products SET cost_price_usd = NULL, purchase_price_usd = 7 WHERE id = 3')
+  const overridden = [{ id: 3, name: 'Toner' }]
+  await attachInventoryProductMetrics(db, overridden, { branchId: '1' })
+  assert.deepEqual([overridden[0].stock_value_usd, overridden[0].stock_value_unknown], [42, false], 'a positive purchase price values the stock even when the catalog cost is NULL')
 
   const empty = []
   const beforeEmptyQueries = trace.length

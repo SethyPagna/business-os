@@ -104,7 +104,7 @@ async function main() {
     await db.prepare('CREATE TABLE audit_logs(user_id INTEGER,user_name TEXT,action TEXT,entity TEXT,entity_id TEXT,details TEXT,table_name TEXT,record_id TEXT,new_value TEXT)').run()
     await db.prepare(`CREATE TABLE inventory_movements(id INTEGER PRIMARY KEY AUTOINCREMENT,product_id INTEGER,
       product_name TEXT,branch_id INTEGER,branch_name TEXT,movement_type TEXT,quantity REAL,
-      unit_cost_usd REAL DEFAULT 0,total_cost_usd REAL DEFAULT 0,reason TEXT,reference_id INTEGER,
+      unit_cost_usd REAL DEFAULT 0,unit_cost_khr REAL DEFAULT 0,total_cost_usd REAL DEFAULT 0,total_cost_khr REAL DEFAULT 0,reason TEXT,reference_id INTEGER,
       created_at TEXT,batch_id INTEGER)`).run()
     await db.prepare(`CREATE TABLE product_cost_entries(id INTEGER PRIMARY KEY AUTOINCREMENT,product_id INTEGER NOT NULL,
       cost_usd REAL NOT NULL,cost_khr REAL,source TEXT NOT NULL,user_id INTEGER,user_name TEXT,

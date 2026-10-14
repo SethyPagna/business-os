@@ -28,22 +28,17 @@ function resolveCurrency(
   quantity: number,
   components: MovementCostComponent[],
   field: 'unitCostUsd' | 'unitCostKhr',
-  fallback: unknown,
   remainder: string,
 ): { unit: number | null; total: number | null } {
-  const fallbackCost = money(fallback)
   const terms: { amount: number; factor: number | string }[] = []
   for (const component of components) {
     const componentQuantity = Number(component.quantity)
     if (!(componentQuantity > 0)) continue
-    const cost = money(component[field]) ?? fallbackCost
+    const cost = money(component[field])
     if (cost == null) return { unit: null, total: null }
     terms.push({ amount: cost, factor: componentQuantity })
   }
-  if (remainder !== '0') {
-    if (fallbackCost == null) return { unit: null, total: null }
-    terms.push({ amount: fallbackCost, factor: remainder })
-  }
+  if (remainder !== '0') return { unit: null, total: null }
   const roundedTotal = sumProductsMoney4(terms)
   const distinctCosts = new Set(terms.map(term => term.amount))
   const unit = distinctCosts.size === 1
@@ -55,16 +50,16 @@ function resolveCurrency(
 /**
  * Resolve the immutable cost recorded on one stock movement.
  *
- * A component's lot cost wins when present. Missing lot/untracked cost may use
- * the product cost captured by the caller before the write. Zero is data, not
- * absence. If neither source can support a currency, that currency stays NULL
- * rather than being invented from an exchange rate or another currency.
+ * Every unit must be covered by a component that carries its OWN recorded cost
+ * (the lot it came from, or the cost the operator entered on a receipt). Zero
+ * is data: a recorded $0 stays 0. A unit with no recorded cost, or units no
+ * component covers, make that currency NULL (unknown) for the whole movement:
+ * never today's catalog price, another lot's cost, a blend of known and unknown
+ * costs, or one currency converted into the other.
  */
 export function resolveMovementCostSnapshot(input: {
   quantity: number
   components?: MovementCostComponent[]
-  fallbackUnitCostUsd?: number | null
-  fallbackUnitCostKhr?: number | null
 }): MovementCostPair {
   const quantity = Number(input.quantity)
   if (!Number.isFinite(quantity) || !(quantity > 0)) throw new RangeError('Movement quantity must be a finite positive number')
@@ -86,9 +81,7 @@ export function resolveMovementCostSnapshot(input: {
   // so subtraction does not introduce a binary error before valuation.
   const remainder = subtractDecimalSum(quantity, quantities)
   if (remainder.startsWith('-')) throw new RangeError('Movement cost components cannot exceed the movement quantity')
-  money(input.fallbackUnitCostUsd)
-  money(input.fallbackUnitCostKhr)
-  const usd = resolveCurrency(quantity, components, 'unitCostUsd', input.fallbackUnitCostUsd, remainder)
-  const khr = resolveCurrency(quantity, components, 'unitCostKhr', input.fallbackUnitCostKhr, remainder)
+  const usd = resolveCurrency(quantity, components, 'unitCostUsd', remainder)
+  const khr = resolveCurrency(quantity, components, 'unitCostKhr', remainder)
   return { unitCostUsd: usd.unit, unitCostKhr: khr.unit, totalCostUsd: usd.total, totalCostKhr: khr.total }
 }

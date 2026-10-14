@@ -214,7 +214,8 @@ export function buildProductSalesLedgerSql(options: ProductSalesLedgerOptions = 
              MAX(0, SUM(si.total_usd - ${allDiscountUsd})) AS net_usd,
              MAX(0, SUM(si.total_khr - ${allDiscountKhr})) AS net_khr,
              SUM(si.cost_price_usd * si.quantity) AS cogs_usd,
-             SUM(si.cost_price_khr * si.quantity) AS cogs_khr
+             SUM(si.cost_price_khr * si.quantity) AS cogs_khr,
+             SUM(CASE WHEN si.cost_price_usd IS NULL THEN 1 ELSE 0 END) AS cogs_unknown_lines
       FROM sale_items si
       ${soldIdsJoin}
       JOIN sales s ON s.id = si.sale_id
@@ -424,7 +425,10 @@ export function buildProductSalesLedgerSql(options: ProductSalesLedgerOptions = 
            SUM(sold.net_usd) AS gross_revenue_usd,
            SUM(sold.net_khr) AS gross_revenue_khr,
            SUM(sold.cogs_usd) AS gross_cogs_usd,
-           SUM(sold.cogs_khr) AS gross_cogs_khr
+           SUM(sold.cogs_khr) AS gross_cogs_khr,
+           -- Sold lines with no recorded cost. SUM() above skips them, so the
+           -- COGS is the sum of the KNOWN lines; this is how many were left out.
+           SUM(sold.cogs_unknown_lines) AS cogs_unknown_lines
     FROM (${soldLinesSql(soldScope, branchScoped)}
     ) sold
     LEFT JOIN (${retSql}

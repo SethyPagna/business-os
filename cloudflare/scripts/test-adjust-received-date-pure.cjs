@@ -483,10 +483,6 @@ async function main() {
         label: 'explicit USD total', unitCostUsd: 1e9, quantity: 1e9,
         pricing: { selling_price_usd: 4, cost_usd: 1, cost_khr: 0, barcode: 'OVERFLOW-USD' },
       },
-      {
-        label: 'new sibling KHR fallback total', unitCostUsd: 1, quantity: 1e9,
-        pricing: { selling_price_usd: 4, cost_usd: 1, cost_khr: 1e9, barcode: 'OVERFLOW-KHR' },
-      },
     ]
     for (const item of cases) {
       seed()
@@ -523,6 +519,19 @@ async function main() {
     })
     assert.strictEqual(topUp.status, 400, JSON.stringify(topUp.json))
     assert.deepStrictEqual(durableState(), beforeTopUp, 'cumulative overflow must precede the unlocked catalog-price update')
+  })
+
+  await check('a new sibling row catalog KHR cost never prices the receipt movement KHR (no catalog fallback, so no KHR overflow)', async () => {
+    seed()
+    const response = await req('POST', '/adjust', {
+      productId: 1, type: 'add', supplierName: 'Fixture Supplier', reason: 'sibling khr', unitCostUsd: 1, quantity: 1e9,
+      branchId: 1, receivedDate: '2026-09-13', unlockPricing: true,
+      pricing: { selling_price_usd: 4, cost_usd: 1, cost_khr: 1e9, barcode: 'SIBLING-KHR' },
+    })
+    assert.strictEqual(response.status, 200, JSON.stringify(response.json))
+    assert.strictEqual(response.json.createdSibling, true)
+    const movement = rawDb.prepare("SELECT unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr FROM inventory_movements WHERE movement_type='add'").get()
+    assert.deepStrictEqual({ ...movement }, { unit_cost_usd: 1, unit_cost_khr: null, total_cost_usd: 1e9, total_cost_khr: null })
   })
 
   await check('unlocked existing-target receipt, pricing and movement roll back together and retry once', async () => {
@@ -869,7 +878,7 @@ async function main() {
     )
   })
 
-  await check('adjustment cost snapshots preserve explicit zero and distinguish a blank correction fallback', async () => {
+  await check('adjustment cost snapshots preserve explicit zero; a blank correction cost is unknown, never the catalog cost', async () => {
     seed()
     const free = await req('POST', '/adjust', {
       productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 0, freeGoods: true,
@@ -885,13 +894,13 @@ async function main() {
       rawDb.prepare("SELECT unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr FROM inventory_movements WHERE movement_type='add' ORDER BY id").all().map((row) => ({ ...row })),
       [
         { unit_cost_usd: 0, unit_cost_khr: 0, total_cost_usd: 0, total_cost_khr: 0 },
-        { unit_cost_usd: 10, unit_cost_khr: 40000, total_cost_usd: 20, total_cost_khr: 80000 },
+        { unit_cost_usd: null, unit_cost_khr: null, total_cost_usd: null, total_cost_khr: null },
       ],
-      'zero is an explicit action fact; blank correction uses the product cost captured before the write',
+      'zero is an explicit action fact; a correction that names no lot and no cost is unknown, not the catalog 10 / 40000',
     )
   })
 
-  await check('an omitted correction cost preserves the captured historical unit while extending it exactly', async () => {
+  await check('an omitted correction cost records NO cost on the new lot or its movement, whatever the catalog says', async () => {
     seed()
     rawDb.prepare('UPDATE products SET cost_price_usd=2.345678 WHERE id=1').run()
     const correction = await req('POST', '/adjust', {
@@ -900,14 +909,14 @@ async function main() {
     })
     assert.strictEqual(correction.status, 200, JSON.stringify(correction.json))
     assert.deepStrictEqual({ ...rawDb.prepare('SELECT unit_cost_usd,received_cost_usd FROM product_batches').get() }, {
-      unit_cost_usd: 2.345678, received_cost_usd: 4.6914,
+      unit_cost_usd: null, received_cost_usd: null,
     })
     assert.deepStrictEqual({ ...rawDb.prepare('SELECT unit_cost_usd,total_cost_usd FROM inventory_movements').get() }, {
-      unit_cost_usd: 2.345678, total_cost_usd: 4.6914,
+      unit_cost_usd: null, total_cost_usd: null,
     })
   })
 
-  await check('remove snapshots the quantity-weighted FIFO lot cost and catalog KHR fallback', async () => {
+  await check('remove snapshots the quantity-weighted FIFO lot cost; lots hold no KHR, so KHR stays unknown', async () => {
     seed()
     for (const receipt of [
       { quantity: 2, unitCostUsd: 4, receivedDate: '2026-07-01' },
@@ -921,7 +930,7 @@ async function main() {
     const removed = await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 3, reason: 'damaged', branchId: 1 })
     assert.strictEqual(removed.status, 200, JSON.stringify(removed.json))
     const movement = rawDb.prepare("SELECT unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr FROM inventory_movements WHERE movement_type='remove' ORDER BY id DESC LIMIT 1").get()
-    assert.deepStrictEqual({ ...movement }, { unit_cost_usd: 6, unit_cost_khr: 40000, total_cost_usd: 18, total_cost_khr: 120000 })
+    assert.deepStrictEqual({ ...movement }, { unit_cost_usd: 6, unit_cost_khr: null, total_cost_usd: 18, total_cost_khr: null })
   })
 
   await check('remove cost is captured before the lot decrement and cannot race a later lot-cost edit', async () => {
@@ -1001,7 +1010,7 @@ async function main() {
     assert.strictEqual(rawDb.prepare("SELECT COUNT(*) AS n FROM inventory_movements WHERE movement_type='remove'").get().n, beforeMovements, 'failed exact plan published no movement')
   })
 
-  await check('set-down and set-up store the plan-time product cost on their converted movements', async () => {
+  await check('set-down is priced at its lot cost; a set-up correction naming no lot has no recorded cost', async () => {
     seed()
     const seeded = await req('POST', '/adjust', { productId: 1, type: 'add', quantity: 5, supplierName: 'Fixture Supplier', unitCostUsd: 10, reason: 'seed count', branchId: 1 })
     assert.strictEqual(seeded.status, 200, JSON.stringify(seeded.json))
@@ -1013,8 +1022,8 @@ async function main() {
     assert.deepStrictEqual(
       rawDb.prepare("SELECT movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr FROM inventory_movements ORDER BY id").all().map((row) => ({ ...row })),
       [
-        { movement_type: 'remove', quantity: 3, unit_cost_usd: 10, unit_cost_khr: 40000, total_cost_usd: 30, total_cost_khr: 120000 },
-        { movement_type: 'add', quantity: 5, unit_cost_usd: 10, unit_cost_khr: 40000, total_cost_usd: 50, total_cost_khr: 200000 },
+        { movement_type: 'remove', quantity: 3, unit_cost_usd: 10, unit_cost_khr: null, total_cost_usd: 30, total_cost_khr: null },
+        { movement_type: 'add', quantity: 5, unit_cost_usd: null, unit_cost_khr: null, total_cost_usd: null, total_cost_khr: null },
       ],
     )
   })
@@ -1064,6 +1073,145 @@ async function main() {
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 2 AND branch_id = 1').get().quantity, 4, 'destination aggregate is the moved 4')
     const destLotTotal = (rawDb.prepare('SELECT COALESCE(SUM(bbs.quantity), 0) AS q FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id WHERE pb.variant_product_id = 2 AND bbs.branch_id = 1').get() || {}).q
     assert.strictEqual(Number(destLotTotal), 4, 'destination received a lot -- its ledger equals its aggregate (invariant held on both sides)')
+  })
+
+  // ---- S5: no catalog price stands in for an unknown stock cost (owner, 14 Oct 2026) -------------------------------
+  // A lot with NO recorded cost is unknown (NULL); a recorded $0 stays 0. The catalog price (9 here) is a different
+  // fact and must never be stamped on a movement, a held lot or a later disposal.
+  const seedNullLotWithCatalog = (catalogUsd = 9) => {
+    seed()
+    rawDb.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd)
+      VALUES(501,1,'0501','0501','2026-05-01',1,1,NULL)`).run()
+    rawDb.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(501,1,10)').run()
+    rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,10)').run()
+    rawDb.prepare('UPDATE products SET stock_quantity=10, cost_price_usd=?, cost_price_khr=? WHERE id=1').run([catalogUsd, catalogUsd * 4000])
+  }
+  const costCols = (row) => ({ u: row.unit_cost_usd, uk: row.unit_cost_khr, t: row.total_cost_usd, tk: row.total_cost_khr })
+  const UNKNOWN = { u: null, uk: null, t: null, tk: null }
+
+  await check('S5: removing from a lot with no cost records an UNKNOWN cost, not the catalog price of 9', async () => {
+    seedNullLotWithCatalog()
+    const removed = await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 3, reason: 'thrown away', branchId: 1, batchId: 501 })
+    assert.strictEqual(removed.status, 200, JSON.stringify(removed.json))
+    const movement = rawDb.prepare("SELECT * FROM inventory_movements WHERE movement_type='remove'").get()
+    assert.deepStrictEqual(costCols(movement), UNKNOWN)
+  })
+
+  await check('S5: removing from a recorded $0 lot stays $0 beside a catalog price of 9 (control: the recorded zero is data)', async () => {
+    seedNullLotWithCatalog()
+    rawDb.prepare('UPDATE product_batches SET unit_cost_usd=0 WHERE id=501').run()
+    const removed = await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 3, reason: 'thrown away', branchId: 1, batchId: 501 })
+    assert.strictEqual(removed.status, 200, JSON.stringify(removed.json))
+    const movement = rawDb.prepare("SELECT * FROM inventory_movements WHERE movement_type='remove'").get()
+    assert.deepStrictEqual({ u: movement.unit_cost_usd, t: movement.total_cost_usd }, { u: 0, t: 0 })
+  })
+
+  await check('S5: stock that predates lots (no lot holds it) is removed at an UNKNOWN cost, not the catalog price', async () => {
+    seed()
+    rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,5)').run()
+    rawDb.prepare('UPDATE products SET stock_quantity=5 WHERE id=1').run()
+    const removed = await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 2, reason: 'legacy stock', branchId: 1 })
+    assert.strictEqual(removed.status, 200, JSON.stringify(removed.json))
+    assert.deepStrictEqual(costCols(rawDb.prepare("SELECT * FROM inventory_movements WHERE movement_type='remove'").get()), UNKNOWN)
+  })
+
+  await check('S5: a tagged removal from a lot with no cost holds it at NULL (lot row and damage_out movement), not the catalog price', async () => {
+    seedNullLotWithCatalog()
+    const held = await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 3, reason: 'dropped', branchId: 1, batchId: 501, conditionTag: 'damaged' })
+    assert.strictEqual(held.status, 200, JSON.stringify(held.json))
+    const lot = rawDb.prepare('SELECT unit_cost_usd, quantity_remaining FROM damaged_stock_lots').get()
+    assert.deepStrictEqual({ ...lot }, { unit_cost_usd: null, quantity_remaining: 3 })
+    assert.deepStrictEqual(costCols(rawDb.prepare("SELECT * FROM inventory_movements WHERE movement_type='damage_out'").get()), UNKNOWN)
+  })
+
+  await check('S5: a multi-lot removal over lots {none, 4} holds rows {NULL, 4} and records one UNKNOWN movement (no blend with the catalog 9)', async () => {
+    seedNullLotWithCatalog()
+    rawDb.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd)
+      VALUES(502,1,'0502','0502','2026-05-02',1,2,4)`).run()
+    rawDb.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(502,1,2)').run()
+    rawDb.prepare('UPDATE branch_stock SET quantity=12 WHERE product_id=1').run()
+    rawDb.prepare('UPDATE products SET stock_quantity=12 WHERE id=1').run()
+    // FIFO drains lot 501 (no cost, 10 units) first, then lot 502 ($4): removing 12 takes both whole.
+    const held = await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 12, reason: 'flood', branchId: 1, conditionTag: 'damaged' })
+    assert.strictEqual(held.status, 200, JSON.stringify(held.json))
+    const rows = rawDb.prepare('SELECT batch_id, quantity, unit_cost_usd FROM damaged_stock_lots ORDER BY batch_id').all().map((row) => ({ ...row }))
+    assert.deepStrictEqual(rows, [{ batch_id: 501, quantity: 10, unit_cost_usd: null }, { batch_id: 502, quantity: 2, unit_cost_usd: 4 }])
+    assert.deepStrictEqual(costCols(rawDb.prepare("SELECT * FROM inventory_movements WHERE movement_type='damage_out'").get()), UNKNOWN)
+  })
+
+  await check('S5: disposing a held lot with NO cost books an UNKNOWN write_off, not the catalog price of the day it is disposed', async () => {
+    seedNullLotWithCatalog(9)
+    const held = await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 3, reason: 'dropped', branchId: 1, batchId: 501, conditionTag: 'damaged' })
+    assert.strictEqual(held.status, 200, JSON.stringify(held.json))
+    rawDb.prepare('UPDATE products SET cost_price_usd=77, cost_price_khr=308000 WHERE id=1').run()
+    const disposed = await req('POST', '/tagged-lots/dispose', withAdjustId({ productId: 1, branchId: 1, conditionTag: 'damaged', quantity: 3, reason: 'binned' }))
+    assert.strictEqual(disposed.status, 200, JSON.stringify(disposed.json))
+    assert.deepStrictEqual(costCols(rawDb.prepare("SELECT * FROM inventory_movements WHERE movement_type='write_off'").get()), UNKNOWN)
+  })
+
+  await check('S5: disposing and restoring a held lot with a recorded cost uses that cost (control: kept both before and after)', async () => {
+    seedNullLotWithCatalog(9)
+    rawDb.prepare('UPDATE product_batches SET unit_cost_usd=4 WHERE id=501').run()
+    const held = await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 5, reason: 'dropped', branchId: 1, batchId: 501, conditionTag: 'damaged' })
+    assert.strictEqual(held.status, 200, JSON.stringify(held.json))
+    assert.strictEqual((await req('POST', '/tagged-lots/restore', withAdjustId({ productId: 1, branchId: 1, conditionTag: 'damaged', quantity: 2, reason: 'fine after all' }))).status, 200)
+    assert.strictEqual((await req('POST', '/tagged-lots/dispose', withAdjustId({ productId: 1, branchId: 1, conditionTag: 'damaged', quantity: 3, reason: 'binned' }))).status, 200)
+    const usdOnly = (type) => { const row = rawDb.prepare('SELECT * FROM inventory_movements WHERE movement_type=?').get([type]); return { u: row.unit_cost_usd, t: row.total_cost_usd } }
+    assert.deepStrictEqual(usdOnly('in'), { u: 4, t: 8 })
+    assert.deepStrictEqual(usdOnly('write_off'), { u: 4, t: 12 })
+  })
+
+  await check('S5: an Add with no entered cost is still refused by the receipt gate (control: unchanged)', async () => {
+    seedNullLotWithCatalog(9)
+    const refused = await req('POST', '/adjust', { productId: 1, type: 'add', quantity: 2, supplierName: 'Fixture Supplier', reason: 'no cost typed', branchId: 1 })
+    assert.strictEqual(refused.status, 400, JSON.stringify(refused.json))
+    assert.strictEqual(refused.json.code, 'cost_required')
+    assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM inventory_movements WHERE movement_type='add'").get().n, 0)
+  })
+
+  await check('S5: move-row stamps both movements with the source lot cost (explicit columns, never the DEFAULT 0), unknown when a lot has none', async () => {
+    seed()
+    rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (2, 'Destination', 1, 0)").run()
+    assert.strictEqual((await req('POST', '/adjust', { productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 2, quantity: 10, reason: 'stock in', branchId: 1, batchId: 'new' })).status, 200)
+    const moved = await req('POST', '/move-row', { sourceProductId: 1, destinationProductId: 2, quantity: 4, branchId: 1, reason: 'relabel' })
+    assert.strictEqual(moved.status, 200, JSON.stringify(moved.json))
+    const rows = rawDb.prepare("SELECT movement_type, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr FROM inventory_movements WHERE movement_type IN ('move_out','move_in') ORDER BY id").all().map((row) => ({ ...row }))
+    assert.deepStrictEqual(rows, [
+      { movement_type: 'move_out', unit_cost_usd: 2, unit_cost_khr: null, total_cost_usd: 8, total_cost_khr: null },
+      { movement_type: 'move_in', unit_cost_usd: 2, unit_cost_khr: null, total_cost_usd: 8, total_cost_khr: null },
+    ])
+    seedNullLotWithCatalog(9)
+    rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (2, 'Destination', 1, 0)").run()
+    assert.strictEqual((await req('POST', '/move-row', { sourceProductId: 1, destinationProductId: 2, quantity: 4, branchId: 1, reason: 'relabel' })).status, 200)
+    const unknownRows = rawDb.prepare("SELECT * FROM inventory_movements WHERE movement_type IN ('move_out','move_in')").all()
+    assert.strictEqual(unknownRows.length, 2)
+    for (const row of unknownRows) assert.deepStrictEqual(costCols(row), UNKNOWN)
+  })
+
+  await check('S5: stock value per product leaves an unknown cost out (NULL + a flag), values a recorded $0 as 0, and honours a purchase-price override', async () => {
+    seed()
+    const insert = rawDb.prepare('INSERT INTO products (id, name, is_active, stock_quantity, cost_price_usd, cost_price_khr, purchase_price_usd, purchase_price_khr) VALUES (?,?,1,5,?,?,?,?)')
+    insert.run([11, 'Unknown cost', null, null, 0, 0])
+    insert.run([12, 'Recorded zero', 0, 0, 0, 0])
+    insert.run([13, 'Costed two', 2, 8000, 0, 0])
+    insert.run([14, 'Purchase override', 2, 8000, 3, 12000])
+    const summary = await req('GET', '/summary')
+    assert.strictEqual(summary.status, 200, JSON.stringify(summary.json))
+    const byId = new Map(summary.json.map((row) => [row.id, row]))
+    const pick = (id) => ({ v: byId.get(id).stock_value_usd, k: byId.get(id).stock_value_khr, unknown: byId.get(id).stock_value_unknown })
+    assert.deepStrictEqual(pick(11), { v: null, k: null, unknown: 1 }, 'cost unknown: not valued at 0, flagged')
+    assert.deepStrictEqual(pick(12), { v: 0, k: 0, unknown: 0 }, 'a recorded $0 is a known 0')
+    assert.deepStrictEqual(pick(13), { v: 10, k: 40000, unknown: 0 })
+    assert.deepStrictEqual(pick(14), { v: 15, k: 60000, unknown: 0 }, 'a positive purchase price overrides the catalog cost')
+    rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(11,1,3),(12,1,3),(13,1,3)').run()
+    const scoped = await req('GET', '/summary?branchId=1')
+    assert.strictEqual(scoped.status, 200, JSON.stringify(scoped.json))
+    const scopedById = new Map(scoped.json.map((row) => [row.id, row]))
+    assert.deepStrictEqual(
+      [11, 12, 13, 14].map((id) => [scopedById.get(id).stock_value_usd, scopedById.get(id).stock_value_unknown]),
+      [[null, 1], [0, 0], [6, 0], [0, 0]],
+      'branch-scoped: only units held at the branch count, and no units is a known 0 whatever the cost',
+    )
   })
 
   console.log(`\n${passed} check(s) passed.`)

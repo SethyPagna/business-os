@@ -136,8 +136,21 @@ async function main() {
     const guards = addNow.filter((text) => /landing_branch_guard/.test(text))
     assert.equal(guards.length, 1)
     assert.equal(addNow.filter(text => /product_has_stock/.test(text)).length, 1, 'one product admission guard')
-    assert.deepEqual(addNow.filter((text) => !/landing_branch_guard|product_has_stock/.test(text)), addThen, 'add: otherwise byte-identical')
-    assert.deepEqual(saleNow, saleThen, 'sale: byte-identical')
+    // S5 (14 Oct 2026) rewrote two statement shapes on purpose: the movement INSERT now states its KHR cost columns
+    // (NULL, not the DEFAULT 0), and a lot's received-money running sum stays unknown when a receipt's money is. Those
+    // statements must keep every BOUND PARAMETER the oracle had; every other statement is still byte-identical.
+    const S5_REWRITTEN = /INSERT INTO inventory_movements|received_cost_usd = /
+    const sameButS5 = (now, then, label) => {
+      assert.equal(now.length, then.length, `${label}: same statement count`)
+      now.forEach((text, index) => {
+        if (!S5_REWRITTEN.test(then[index])) return assert.equal(text, then[index], `${label}: statement ${index} byte-identical`)
+        const after = JSON.parse(text), before = JSON.parse(then[index])
+        assert.match(after.sql, S5_REWRITTEN, `${label}: statement ${index} is the same writer`)
+        assert.deepEqual(after.params, before.params, `${label}: statement ${index} binds the same values`)
+      })
+    }
+    sameButS5(addNow.filter((text) => !/landing_branch_guard|product_has_stock/.test(text)), addThen, 'add: otherwise identical')
+    sameButS5(saleNow, saleThen, 'sale: identical')
   })
 
   await check('a column redirected from Old Shop onto LC Store: the add movement is labelled; Old Shop re-enabled before the write aborts it', async () => {
