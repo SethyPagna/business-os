@@ -488,6 +488,7 @@ function openCarryOverPanel(source: string, saved: unknown, shiftState: object =
       isActorReadScopeCurrent: () => true,
     }
     if (name.includes('permissions')) return { isAdminControlUser: () => false }
+    if (name.includes('useSavingGate')) return { useSavingGate: () => ({ blocked: false, reason: '' }) }
     if (name.includes('shared/Modal')) return { default: () => null }
     if (name.includes('AppContext')) return { useApp: () => ({ t: (key: string) => key, notify: (...args: any[]) => notices.push(args), user: { id: 4 }, settings: {}, fmtUSD: String, fmtKHR: String }) }
     if (name.includes('formatters')) return { fmtDate: String, fmtDateTime24: String, parseServerTimestampMs: Date.parse }

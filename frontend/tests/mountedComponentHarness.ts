@@ -516,6 +516,7 @@ export function accessibleText(node: MemoryNode): string {
 
 export interface MountOptions {
   component: string
+  exportName?: string
   props?: Record<string, unknown>
   app: Record<string, unknown>
   doubles: ModuleDoubles
@@ -626,7 +627,8 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
   async function mount(options: MountOptions): Promise<MountedSurface> {
     doubles = options.doubles
     const core = await server.ssrLoadModule(`/src/${APP_CONTEXT_CORE}`) as { AppContext: React.Context<unknown> }
-    const module = await server.ssrLoadModule(`/src/${options.component}`) as { default: React.ComponentType<Record<string, unknown>> }
+    const loaded = await server.ssrLoadModule(`/src/${options.component}`) as Record<string, React.ComponentType<Record<string, unknown>>>
+    const module = { default: loaded[options.exportName ?? 'default'] }
     const container = memoryDocument.createElement('div')
     memoryDocument.body.appendChild(container)
     const root = createRoot(container as unknown as Element)

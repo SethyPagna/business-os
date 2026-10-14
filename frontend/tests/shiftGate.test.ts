@@ -138,7 +138,7 @@ ok(/shiftOpeningCounts\(floatUsd, floatKhr\)/.test(gate)
   && /blankMeansUncounted: true/.test(gate),
   'a new day preserves blank opening counts as unknown and still rejects invalid entries')
 ok(!/disabled=\{busy \|\| parseShiftCount\(floatUsd\) == null \|\| parseShiftCount\(floatKhr\) == null\}/.test(registerBlock)
-  && /<ShiftSubmitRow[\s\S]{0,200}reason=\{startBlocker \? t\(shiftCountBlockerKey\(startBlocker\)\) : null\}/.test(registerBlock),
+  && /<ShiftSubmitRow[\s\S]{0,200}reason=\{savingGate\.blocked \? savingGate\.reason : startBlocker \? t\(shiftCountBlockerKey\(startBlocker\)\) : null\}/.test(registerBlock),
   'the Start Shift control is never disabled without the reason printed beside it')
 ok(/const counts = shiftClosingCounts\(countedUsd, countedKhr\)/.test(endBody)
   && /closingCountedUsd: counts\.usd/.test(endBody)

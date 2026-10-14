@@ -4,6 +4,7 @@ import CustomerFormModal from './CustomerFormModal'
 import { readContactDuplicateDecisionError, type ContactDuplicateMatch } from './contactDuplicates'
 import { getCustomerIdentityById, invalidateCustomerReadCache } from '../../api/contactReadTransport.ts'
 import { createCustomer, updateCustomer } from '../../api/contactWriteTransport.ts'
+import { useSavingGate } from '../../utils/useSavingGate.ts'
 import { buildCustomerSourcePayload, customerSourceRestorePayload, type CustomerSource } from './customerSource.ts'
 
 type TranslateFn = (key: string) => string | undefined
@@ -47,6 +48,7 @@ export default function CustomerSourceModal({ customerId = null, source, t, noti
   const [loaded, setLoaded] = useState<CustomerRow | null>(null)
   const [loadError, setLoadError] = useState('')
   const editing = customerId != null
+  const savingGate = useSavingGate()
 
   useEffect(() => {
     if (!editing) return undefined
@@ -74,6 +76,10 @@ export default function CustomerSourceModal({ customerId = null, source, t, noti
   }
 
   const save = async (form: Record<string, unknown>) => {
+    if (savingGate.blocked) {
+      notify(savingGate.reason, 'error')
+      return { success: false }
+    }
     try {
       const payload = buildCustomerSourcePayload(form, loaded, source)
       const record = (editing
@@ -110,6 +116,7 @@ export default function CustomerSourceModal({ customerId = null, source, t, noti
     <CustomerFormModal
       customer={loaded}
       onSave={save}
+      savingBlockedText={savingGate.reason}
       onUseExisting={async (match) => { await onUseExisting?.(match) }}
       onClose={onClose}
       t={t}

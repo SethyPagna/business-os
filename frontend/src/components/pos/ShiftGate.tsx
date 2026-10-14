@@ -5,6 +5,7 @@ import Modal from '../shared/Modal'
 import { actorReadStorageKey, captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from '../../api/actorReadScope.ts'
 import { useApp } from '../../AppContext'
 import { isAdminControlUser, type PermissionUser } from '../../utils/permissions.ts'
+import { useSavingGate } from '../../utils/useSavingGate.ts'
 import { fmtDate, fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
 import { carryOverCloseSeedMs, closeShift, closeShiftById, fetchCurrentShift, openShift, pendingShiftMutation, shiftClosingCounts, shiftCountPairBlocker, shiftLocalDateTimeFromMs, shiftLocalDateTimeToIso, shiftOpeningCounts, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
 import { DateTimeEntryInput } from '../shared/DateEntryInput.tsx'
@@ -314,6 +315,7 @@ type CarryOverCloseForm = {
 function useCarryOverClose(shift: Shift | null, closeBefore: string | null | undefined, onClosed: () => void): CarryOverCloseForm {
   const { t, notify, fmtUSD, fmtKHR, user } = useApp() as ShiftGateContext
   const actorId = user?.id ?? undefined
+  const savingGate = useSavingGate()
   const [draft, setDraft] = useState<CarryOverCloseDraft>(
     { closedAt: '', countedUsd: '', countedKhr: '', additionalUsd: '', additionalKhr: '', note: '' })
   const [busy, setBusy] = useState(false)
@@ -351,6 +353,7 @@ function useCarryOverClose(shift: Shift | null, closeBefore: string | null | und
 
   const submit = async () => {
     if (busy || !shift || blocker) return
+    if (savingGate.blocked) return notify(savingGate.reason, 'error')
     const counts = shiftClosingCounts(draft.countedUsd, draft.countedKhr)
     setBusy(true)
     try {
@@ -396,7 +399,7 @@ function useCarryOverClose(shift: Shift | null, closeBefore: string | null | und
     set: (patch) => setDraft((current) => ({ ...current, ...patch })),
     dirty: draft.countedUsd.trim() !== '' || draft.countedKhr.trim() !== ''
       || draft.additionalUsd.trim() !== '' || draft.additionalKhr.trim() !== '' || draft.note.trim() !== '',
-    reason: blocker === 'time' ? t('shift_close_time_required')
+    reason: savingGate.blocked ? savingGate.reason : blocker === 'time' ? t('shift_close_time_required')
       : blocker ? t(shiftCountBlockerKey(blocker)) : null,
   }
 }
@@ -517,6 +520,7 @@ export default function ShiftGate({ children, branchId = null, branchName = null
   // legacy unscoped behavior without inventing a branch from unrelated state.
   const { t, notify, fmtUSD, fmtKHR, user, settings } = useApp() as ShiftGateContext
   const { state, publish } = useSharedShift(branchId, user?.id, settings?.shift_scope_mode)
+  const savingGate = useSavingGate()
   const [busy, setBusy] = useState(false)
   const [floatUsd, setFloatUsd] = useState('')
   const [floatKhr, setFloatKhr] = useState('')
@@ -558,6 +562,7 @@ export default function ShiftGate({ children, branchId = null, branchName = null
     if (busy) return
     const opening = shiftOpeningCounts(floatUsd, floatKhr)
     if (startBlocker) return
+    if (savingGate.blocked) return notify(savingGate.reason, 'error')
     setBusy(true)
     try {
       const next = await openShift({
@@ -699,7 +704,7 @@ export default function ShiftGate({ children, branchId = null, branchName = null
                 buttons-at-the-bottom rule. There is no Cancel: the prompt is
                 not dismissible. When Start cannot proceed, the row says why. */}
             <ShiftSubmitRow
-              reason={startBlocker ? t(shiftCountBlockerKey(startBlocker)) : null}
+              reason={savingGate.blocked ? savingGate.reason : startBlocker ? t(shiftCountBlockerKey(startBlocker)) : null}
               busy={busy} label={t('shift_start')} onClick={() => void submitOpen()}
               buttonClassName={DENSE_BUTTON}
             />
@@ -770,12 +775,14 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
 
   const endBlocker = closingCountInvalid(countedUsd) || closingCountInvalid(countedKhr)
     || closingCountInvalid(additionalUsd) || closingCountInvalid(additionalKhr) ? 'invalid' as const : null
-  const endReason = endBlocker ? t(shiftCountBlockerKey(endBlocker)) : null
+  const savingGate = useSavingGate()
+  const endReason = savingGate.blocked ? savingGate.reason : endBlocker ? t(shiftCountBlockerKey(endBlocker)) : null
 
   const submitClose = async () => {
     if (busy || !target) return
     const counts = shiftClosingCounts(countedUsd, countedKhr)
     if (endBlocker) return
+    if (savingGate.blocked) return notify(savingGate.reason, 'error')
     setBusy(true)
     try {
       // The live close sends NO closed_at: the server stamps its own clock,

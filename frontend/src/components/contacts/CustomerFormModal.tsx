@@ -45,6 +45,7 @@ interface CustomerFormModalProps {
   onSave: (payload: CustomerFormState & { address: string | null; duplicateDecision?: ContactDuplicateDecision }) => unknown | Promise<unknown>
   onUseExisting: (match: ContactDuplicateMatch) => void | Promise<void>
   onClose: () => void
+  savingBlockedText?: string
   t?: TranslateFn
 }
 
@@ -111,7 +112,7 @@ function OptionEditor({ option, index, total, onChange, onRemove, t }: OptionEdi
   )
 }
 
-export default function CustomerFormModal({ customer, onSave, onUseExisting, onClose, t }: CustomerFormModalProps) {
+export default function CustomerFormModal({ customer, onSave, onUseExisting, onClose, savingBlockedText = '', t }: CustomerFormModalProps) {
   const initial = customer
     ? {
       ...customer,
@@ -161,6 +162,7 @@ export default function CustomerFormModal({ customer, onSave, onUseExisting, onC
   // one on-brand confirmation instead of a native popup plus a save.
   const handleSubmit = () => {
     if (saving) return
+    if (savingBlockedText) return
     const name = String(form.name || '').trim()
     const membershipNumber = String(form.membership_number || '').trim()
     if (!name) {
@@ -198,6 +200,7 @@ export default function CustomerFormModal({ customer, onSave, onUseExisting, onC
   const commitCustomer = async () => {
     if (saving) return
     setConfirmOpen(false)
+    if (savingBlockedText) return
     const name = String(form.name || '').trim()
     const membershipNumber = String(form.membership_number || '').trim()
     setSaving(true)
@@ -328,12 +331,14 @@ export default function CustomerFormModal({ customer, onSave, onUseExisting, onC
           </div>
         ) : null}
 
+        {savingBlockedText ? <p id="customer-saving-blocked" role="status" className="text-xs leading-relaxed text-amber-700 dark:text-amber-300">{savingBlockedText}</p> : null}
+
         {/* Sticky footer, same reasoning/pattern as ProductForm.tsx and
             FeeForm.tsx's own fix (see their comments): pinned to the
             bottom of Modal.tsx's scrollable area so Save/Cancel stay
             reachable without scrolling to the end of a long form. */}
         <div className="sticky bottom-0 -mx-5 -mb-5 flex flex-col gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800 sm:flex-row">
-          <button className="btn-primary flex-1" onClick={handleSubmit} disabled={saving}>{saving ? tr(t, 'saving', 'Saving...') : tr(t, 'save', 'Save')}</button>
+          <button className="btn-primary flex-1" onClick={handleSubmit} disabled={saving || !!savingBlockedText} aria-describedby={savingBlockedText ? 'customer-saving-blocked' : undefined}>{saving ? tr(t, 'saving', 'Saving...') : tr(t, 'save', 'Save')}</button>
           <button className="btn-secondary" onClick={onClose} disabled={saving}>{tr(t, 'cancel', 'Cancel')}</button>
         </div>
       </div>
