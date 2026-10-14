@@ -347,8 +347,9 @@ function finish(finding) {
 //   K8b  needs a schema column: pending_actions has nowhere to keep the requesting device (migration, not in this lane).
 // Owner rulings of 13 Oct (relayed by the coordinator), pinned as expectations:
 //   K10a "replace with the backup": a restore replaces the audit trail with the backup's, plus the restore row.
-//   K11  "keep old expenses ... the revert, yes ... undo redo history no need": retention keeps expense evidence and revert
-//        records, and still prunes Undo/Redo history and ordinary rows.
+//   K11  "keep old expenses ... the revert, yes": retention keeps expense evidence and revert records. The owner's 14 Oct ruling
+//        supersedes "undo redo history no need": Undo/Redo rows are kept forever too, with sales, payments, returns, stock
+//        changes and permission changes (pinned in test-audit-retention-keep-forever-native.cjs). Ordinary rows still age out.
 // ============================================================================================
 const FEES = 'src/routes/fees.ts', REVIEW_QUEUE = 'src/routes/reviewQueue.ts', REVIEW_APPLY = 'src/lib/reviewApply.ts', ACTION_HISTORY = 'src/routes/actionHistory.ts'
 // MUTANTS: each re-introduces ONE defect the lane fixed (or a plausible wrong fix) in memory. The cases named in its comment
@@ -434,20 +435,17 @@ const PATCHES = {
       from: "        await auditOrThrow(c.env, user.id, user.username || null, 'restore', 'backup', sourceDir, {",
       to: "        await audit(c.env, user.id, user.username || null, 'restore', 'backup', sourceDir, {" },
   ],
-  // Retention without the K11 exemptions (the blanket 21-day sweep). Must turn K11 RED.
+  // Retention without the kept-forever classes (the blanket 21-day sweep). Must turn K11 RED.
   'retention-blanket': [
     { name: 'retention-blanket', file: 'src/lib/audit.ts',
-      from: "      AND COALESCE(action, '') NOT IN (${sqlList(AUDIT_RETENTION_KEPT_REVERT_ACTIONS)})\n",
-      to: '' },
-    { name: 'retention-blanket-expense', file: 'src/lib/audit.ts',
-      from: "      AND NOT (COALESCE(entity, '') IN (${sqlList(AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES)})\n        AND COALESCE(action, '') NOT IN ('action_undo', 'action_redo'))\n",
+      from: '      AND NOT (${AUDIT_RETENTION_KEPT_FOREVER_SQL})\n',
       to: '' },
   ],
   // A sweep that deletes nothing (keeps everything). Must turn K11 RED.
   'retention-off': [
     { name: 'retention-off', file: 'src/lib/audit.ts',
-      from: "    SELECT id FROM audit_logs\n    WHERE created_at < @cutoff\n      AND NOT (COALESCE(entity, '')",
-      to: "    SELECT id FROM audit_logs\n    WHERE 0\n      AND NOT (COALESCE(entity, '')" },
+      from: '    SELECT id FROM audit_logs\n    WHERE created_at < @cutoff\n      AND NOT (${AUDIT_RETENTION_KEPT_FOREVER_SQL})',
+      to: '    SELECT id FROM audit_logs\n    WHERE 0\n      AND NOT (${AUDIT_RETENTION_KEPT_FOREVER_SQL})' },
   ],
   // The reject reason is taken as-is again. Must turn K7 and K7b RED.
   'no-reason-cap': [
@@ -764,11 +762,11 @@ async function main() {
     })
 
     // ------------------------------------------------------------------ K11: evidence vs the audit-log retention window
-    // NEEDS-OWNER-DECISION in the reproduction. Owner, 13 Oct (relayed by the coordinator): "keep old expenses ... for the revert,
-    // yes, as it is same with stock changes ... for undo redo history no need." Expense evidence and revert records never age
-    // out; the Undo/Redo history may. The sweep must still run (an ordinary old row and the old undo row are deleted), so a
+    // Owner, 13 Oct (relayed by the coordinator): "keep old expenses ... for the revert, yes, as it is same with stock changes."
+    // Owner, 14 Oct: reverts, undo and redo are kept forever too (the 13 Oct "undo redo history no need" is superseded). Expense
+    // evidence, revert records and Undo/Redo rows never age out. The sweep must still run (an ordinary old row is deleted), so a
     // sweep that is switched off, or keeps everything, fails here as surely as the blanket 21-day sweep.
-    await check('K11', 'owner ruling 13 Oct: the retention sweep keeps old expense evidence and revert records, and still prunes Undo/Redo history', 'owner-ruling', async (t) => {
+    await check('K11', 'owner rulings 13 and 14 Oct: the retention sweep keeps old expense evidence, revert records and Undo/Redo history, and still prunes ordinary rows', 'owner-ruling', async (t) => {
       const f = await seedFee(H)
       const e = await putFee(H, f, { amount_usd: 15 })
       const g = await seedFee(H, { label: 'Water' })
@@ -788,7 +786,7 @@ async function main() {
       t.eq('the 30-day-old expense edit row is kept', (await feeAudits(H, f.id, 'update')).length, 1)
       t.eq('the 30-day-old expense delete row (its before-image) is kept', (await feeAudits(H, g.id, 'delete')).length, 1)
       t.eq('the 30-day-old revert record is kept', await left("SELECT COUNT(*) n FROM audit_logs WHERE entity_id='al-k11-revert'"), 1)
-      t.eq('the 30-day-old Undo history row is pruned ("no need")', (await feeAudits(H, f.id, 'action_undo')).length, 0)
+      t.eq('the 30-day-old Undo history row is kept (14 Oct)', (await feeAudits(H, f.id, 'action_undo')).length, 1)
       t.eq('positive control: the 30-day-old ordinary row is pruned', await left("SELECT COUNT(*) n FROM audit_logs WHERE entity_id='al-k11-control'"), 0)
       t.note('deleted by the sweep: ' + (cleared.body && cleared.body.deleted) + '; D1 statements of the sweep request: ' + cleared.d1)
     })

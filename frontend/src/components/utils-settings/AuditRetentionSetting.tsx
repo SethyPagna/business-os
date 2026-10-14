@@ -90,7 +90,7 @@ export default function AuditRetentionSetting({ t, notify, username, value, onSa
         </>
       ) : null}
       <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-        {T('audit_log_retention_days_desc', 'Entries older than this are deleted automatically on a daily schedule. Default and minimum is 21 days. Changing it asks for your password.')}
+        {T('audit_log_retention_days_desc', 'Entries older than this are deleted automatically once a day. Default and minimum is 21 days. Changing it asks for your password. Never deleted: the records of sales, payments, returns, stock changes, permission changes, reverts, undo and redo, and expenses.')}
       </p>
     </div>
   )

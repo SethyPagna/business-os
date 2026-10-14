@@ -1,6 +1,14 @@
-// Audit retention must preserve the only actor/time evidence for Return bulk
-// undo/redo while continuing to delete every unrelated old audit row. Both the
-// scheduled path and the legacy/manual clear route use the same SQL builder.
+// Audit retention: one shared SQL builder (the daily purge and the password-gated DELETE both use it).
+// Owner, 14 Oct 2026: the audit rows of sales, payments (settle and refunds), returns, every stock change,
+// permission/role/user changes and reverts, undo and redo are kept forever; every other row follows the retention
+// setting, floor 21 days. The 13 Oct ruling that old expenses are kept still holds. The exact Shift lifecycle receipts
+// and the validated completed bulk price-adjust receipts are kept too (they are replay receipts).
+//
+// Pins:
+//   - the shipped SQL against every entity/action pair the Worker writes (scripts/harness/audit_retention_classes.cjs);
+//   - DRIFT: the source writes no entity/action pair that table does not classify;
+//   - discrimination: each plausible wrong policy gives a different answer on the same fixture;
+//   - the stored-value floor and the policy parser.
 //
 // Run (from cloudflare/): node scripts/test-audit-retention-pure.cjs
 const fs = require('fs')
@@ -8,15 +16,16 @@ const path = require('path')
 const ts = require('typescript')
 const assert = require('assert/strict')
 const Database = require('better-sqlite3')
+const { ROWS, DYNAMIC_ENTITIES, FAMILY_ACTION, RAW_SQL_WRITERS } = require('./harness/audit_retention_classes.cjs')
 
-const auditPath = path.join(__dirname, '..', 'src', 'lib', 'audit.ts')
-const auditSource = fs.readFileSync(auditPath, 'utf8')
+const srcRoot = path.join(__dirname, '..', 'src')
+const auditSource = fs.readFileSync(path.join(srcRoot, 'lib', 'audit.ts'), 'utf8')
 const output = ts.transpileModule(auditSource, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 }).outputText
 const moduleObj = { exports: {} }
 let storedRetention = null
-const policyOutput = ts.transpileModule(fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'auditRetentionPolicy.ts'), 'utf8'), {
+const policyOutput = ts.transpileModule(fs.readFileSync(path.join(srcRoot, 'lib', 'auditRetentionPolicy.ts'), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 }).outputText
 const policyModule = { exports: {} }
@@ -30,176 +39,257 @@ new Function('exports', 'require', 'module', output)(moduleObj.exports, localReq
 const { buildAuditLogRetentionDeleteSql } = moduleObj.exports
 
 assert.equal(typeof buildAuditLogRetentionDeleteSql, 'function')
-const sql = buildAuditLogRetentionDeleteSql()
+const shipped = buildAuditLogRetentionDeleteSql()
 
-const sqlite = new Database(':memory:')
-sqlite.exec(`
-  CREATE TABLE audit_logs (
-    id INTEGER PRIMARY KEY,
-    action TEXT,
-    entity TEXT,
-    details TEXT,
-    entity_id TEXT,
-    user_id INTEGER,
-    old_value TEXT,
-    new_value TEXT,
-    created_at TEXT
-  );
-`)
-const insert = sqlite.prepare('INSERT INTO audit_logs(id,action,entity,details,created_at) VALUES(?,?,?,?,?)')
-const old = '2026-01-01 00:00:00'
-insert.run(1, 'update', 'sale', '{}', old)
-insert.run(2, 'action_undo', 'return', '{"kind":"something.else"}', old)
-insert.run(3, 'return_fields_bulk', 'return', '{"kind":"return.fields.bulk"}', old)
-insert.run(4, 'action_undo', 'return', '{"kind":"return.fields.bulk"}', old)
-insert.run(5, 'action_redo', 'return', '{"kind":"return.fields.bulk"}', old)
-insert.run(6, 'action_redo', 'product', '{"kind":"return.fields.bulk"}', old)
-insert.run(7, 'update', 'sale', '{}', '2026-09-07 00:00:00')
-const requestId = 'shift_request_123456'
-const request = { id: requestId, target: 17, canonical: JSON.stringify({ client_request_id: requestId, expected_revision: 2 }) }
-for (const [offset, action] of ['shift.close', 'shift.reopen', 'shift.amend', 'shift.cancel'].entries()) {
-  insert.run(8 + offset, action, 'shift_session', JSON.stringify({ request }), old)
+const SCHEMA = `CREATE TABLE audit_logs (id INTEGER PRIMARY KEY, action TEXT, entity TEXT, table_name TEXT, details TEXT, entity_id TEXT,
+  user_id INTEGER, old_value TEXT, new_value TEXT, created_at TEXT)`
+const OLD = '2026-01-01 00:00:00'
+const CUTOFF = '2026-09-01 00:00:00'
+
+// ---- the narrow receipts: exact Shift lifecycle and validated completed price adjustments --------------------------
+{
+  const sqlite = new Database(':memory:')
+  sqlite.exec(SCHEMA)
+  const insert = sqlite.prepare('INSERT INTO audit_logs(id,action,entity,details,created_at) VALUES(?,?,?,?,?)')
+  insert.run(1, 'update', 'settings', '{}', OLD)
+  insert.run(2, 'update', 'settings', '{}', '2026-09-07 00:00:00')
+  const requestId = 'shift_request_123456'
+  const request = { id: requestId, target: 17, canonical: JSON.stringify({ client_request_id: requestId, expected_revision: 2 }) }
+  for (const [offset, action] of ['shift.close', 'shift.reopen', 'shift.amend', 'shift.cancel'].entries()) {
+    insert.run(8 + offset, action, 'shift_session', JSON.stringify({ request }), OLD)
+  }
+  // The route accepts numeric-string revisions too. Retention recognizes its receipt envelope, not a stricter
+  // reimplementation of request validation.
+  insert.run(99, 'shift.close', 'shift_session', JSON.stringify({ request: { ...request,
+    canonical: JSON.stringify({ client_request_id: requestId, expected_revision: '2' }),
+  } }), OLD)
+  const ordinaryShiftRows = [
+    ['shift.close', 'shift_session', '{}'],
+    ['shift.open', 'shift_session', JSON.stringify({ request })],
+    ['shift.open_after_cancel', 'shift_session', JSON.stringify({ request })],
+    ['shift.close', 'settings', JSON.stringify({ request })],
+    ['shift.close', 'shift_session', '{broken'],
+    ['shift.close', 'shift_session', null],
+    ...[
+      { ...request, id: 'short' },
+      { ...request, id: 'invalid request id' },
+      { ...request, target: null },
+      { ...request, target: 0 },
+      { ...request, canonical: null },
+      { ...request, canonical: '{broken' },
+      { ...request, canonical: '{}' },
+      { ...request, canonical: JSON.stringify({ client_request_id: 'different_request_id', expected_revision: 2 }) },
+      { ...request, canonical: JSON.stringify({ client_request_id: null }) },
+    ].map(request => ['shift.close', 'shift_session', JSON.stringify({ request })]),
+  ]
+  for (const [offset, row] of ordinaryShiftRows.entries()) insert.run(12 + offset, ...row, OLD)
+
+  const priceReceipt = { kind: 'product.bulk-price-adjust', version: 1, client_request_id: 'price_adjust_aged001',
+    claim_nonce: '11111111-1111-1111-1111-111111111111', rowsTouched: 2,
+    request: JSON.stringify({ direction: 'increase', amount: 1, fields: ['selling_price_usd'], skip_zero: false }) }
+  const insertPrice = (id, details, overrides = {}) => sqlite.prepare(`INSERT INTO audit_logs
+    (id,action,entity,entity_id,user_id,details,old_value,new_value,created_at) VALUES(@id,@action,@entity,@entityId,@actor,@details,@before,@after,@created)`)
+    .run({id,action:'update',entity:'product',entityId:'bulk-price-adjust',actor:21,details:JSON.stringify(details),before:'{"rows_touched":0}',after:'{"rows_touched":2}',created:OLD,...overrides})
+  insertPrice(100,priceReceipt)
+  const malformedPrices = [
+    { ...priceReceipt, kind: 'other' }, { ...priceReceipt, version: 2 }, { ...priceReceipt, client_request_id: 'short' },
+    { ...priceReceipt, client_request_id: 'bad id x' }, { ...priceReceipt, claim_nonce: 'short' },
+    { ...priceReceipt, rowsTouched: null }, { ...priceReceipt, rowsTouched: -1 }, { ...priceReceipt, rowsTouched: 1.5 },
+    { ...priceReceipt, request: '{broken' }, { ...priceReceipt, request: '{}' },
+    ...[{direction:'sideways'},{amount:0},{amount:'1'},{fields:[]},{fields:['unsafe_field']},{fields:[1]},{skip_zero:1}]
+      .map(change=>({...priceReceipt,request:JSON.stringify({direction:'increase',amount:1,fields:['selling_price_usd'],skip_zero:false,...change})})),
+  ]
+  for (const [offset,details] of malformedPrices.entries()) insertPrice(101+offset,details)
+  const unrelatedPrices = [{entity:'settings'},{entityId:'another'},{action:'delete'},{actor:0},{after:'{"rows_touched":3}'},{after:null},{before:'{broken'}]
+  for (const [offset,overrides] of unrelatedPrices.entries()) insertPrice(200+offset,priceReceipt,overrides)
+
+  const result = sqlite.prepare(shipped).run({ cutoff: CUTOFF })
+  assert.equal(result.changes, 1 + ordinaryShiftRows.length + malformedPrices.length + unrelatedPrices.length,
+    'ordinary, legacy, malformed and unrelated operational audits still expire')
+  assert.deepEqual(
+    sqlite.prepare('SELECT id FROM audit_logs ORDER BY id').all().map((row) => row.id),
+    [2, 8, 9, 10, 11, 99, 100],
+    'only exact Shift receipts and validated completed price receipts bypass age retention here',
+  )
+  for (const id of [8, 9, 10, 11]) {
+    assert.deepEqual(JSON.parse(sqlite.prepare('SELECT details FROM audit_logs WHERE id=?').get(id).details).request, request,
+      'retention preserves byte-equivalent request identity for later exact replay')
+  }
+  sqlite.close()
 }
-// The route accepts numeric-string revisions too. Retention recognizes its
-// receipt envelope, not a stricter reimplementation of request validation.
-insert.run(99, 'shift.close', 'shift_session', JSON.stringify({ request: { ...request,
-  canonical: JSON.stringify({ client_request_id: requestId, expected_revision: '2' }),
-} }), old)
-const ordinaryShiftRows = [
-  ['shift.close', 'shift_session', '{}'],
-  ['shift.open', 'shift_session', JSON.stringify({ request })],
-  ['shift.open_after_cancel', 'shift_session', JSON.stringify({ request })],
-  ['shift.close', 'sale', JSON.stringify({ request })],
-  ['shift.close', 'shift_session', '{broken'],
-  ['shift.close', 'shift_session', null],
-  ...[
-    { ...request, id: 'short' },
-    { ...request, id: 'invalid request id' },
-    { ...request, target: null },
-    { ...request, target: 0 },
-    { ...request, canonical: null },
-    { ...request, canonical: '{broken' },
-    { ...request, canonical: '{}' },
-    { ...request, canonical: JSON.stringify({ client_request_id: 'different_request_id', expected_revision: 2 }) },
-    { ...request, canonical: JSON.stringify({ client_request_id: null }) },
-  ].map(request => ['shift.close', 'shift_session', JSON.stringify({ request })]),
-]
-for (const [offset, row] of ordinaryShiftRows.entries()) insert.run(12 + offset, ...row, old)
 
-const priceReceipt = { kind: 'product.bulk-price-adjust', version: 1, client_request_id: 'price_adjust_aged001',
-  claim_nonce: '11111111-1111-1111-1111-111111111111', rowsTouched: 2,
-  request: JSON.stringify({ direction: 'increase', amount: 1, fields: ['selling_price_usd'], skip_zero: false }) }
-const insertPrice = (id, details, overrides = {}) => sqlite.prepare(`INSERT INTO audit_logs
-  (id,action,entity,entity_id,user_id,details,old_value,new_value,created_at) VALUES(@id,@action,@entity,@entityId,@actor,@details,@before,@after,@created)`)
-  .run({id,action:'update',entity:'product',entityId:'bulk-price-adjust',actor:21,details:JSON.stringify(details),before:'{"rows_touched":0}',after:'{"rows_touched":2}',created:old,...overrides})
-insertPrice(100,priceReceipt)
-const malformedPrices = [
-  { ...priceReceipt, kind: 'other' }, { ...priceReceipt, version: 2 }, { ...priceReceipt, client_request_id: 'short' },
-  { ...priceReceipt, client_request_id: 'bad id x' }, { ...priceReceipt, claim_nonce: 'short' },
-  { ...priceReceipt, rowsTouched: null }, { ...priceReceipt, rowsTouched: -1 }, { ...priceReceipt, rowsTouched: 1.5 },
-  { ...priceReceipt, request: '{broken' }, { ...priceReceipt, request: '{}' },
-  ...[{direction:'sideways'},{amount:0},{amount:'1'},{fields:[]},{fields:['unsafe_field']},{fields:[1]},{skip_zero:1}]
-    .map(change=>({...priceReceipt,request:JSON.stringify({direction:'increase',amount:1,fields:['selling_price_usd'],skip_zero:false,...change})})),
-]
-for (const [offset,details] of malformedPrices.entries()) insertPrice(101+offset,details)
-const unrelatedPrices = [{entity:'sale'},{entityId:'another'},{action:'create'},{actor:0},{after:'{"rows_touched":3}'},{after:null},{before:'{broken'}]
-for (const [offset,overrides] of unrelatedPrices.entries()) insertPrice(200+offset,priceReceipt,overrides)
-
-const result = sqlite.prepare(sql).run({ cutoff: '2026-09-01 00:00:00' })
-assert.equal(result.changes, 4 + ordinaryShiftRows.length + malformedPrices.length + unrelatedPrices.length, 'ordinary, legacy, malformed and unrelated operational audits still expire')
-assert.deepEqual(
-  sqlite.prepare('SELECT id FROM audit_logs ORDER BY id').all().map((row) => row.id),
-  [4, 5, 7, 8, 9, 10, 11, 99, 100],
-  'only Return replay, exact Shift receipts and validated completed price receipts bypass age retention',
-)
-for (const id of [8, 9, 10, 11]) {
-  assert.deepEqual(JSON.parse(sqlite.prepare('SELECT details FROM audit_logs WHERE id=?').get(id).details).request, request,
-    'retention preserves byte-equivalent request identity for later exact replay')
-}
-sqlite.close()
-
-const compatSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'compat.ts'), 'utf8')
+const compatSource = fs.readFileSync(path.join(srcRoot, 'routes', 'compat.ts'), 'utf8')
 assert.match(auditSource, /prepare\(buildAuditLogRetentionDeleteSql\(\)\)/,
-  'scheduled retention must use the shared narrow deletion SQL')
+  'scheduled retention must use the shared deletion SQL')
 assert.match(compatSource, /import \{ audit, buildAuditLogRetentionDeleteSql \} from '\.\.\/lib\/audit'/,
   'manual retention must import the same policy')
 assert.match(compatSource, /prepare\(buildAuditLogRetentionDeleteSql\(\)\)/,
-  'manual retention must use the same narrow deletion SQL')
+  'manual retention must use the same deletion SQL')
 assert.doesNotMatch(compatSource, /DELETE FROM audit_logs WHERE id IN \(SELECT id FROM audit_logs WHERE created_at < @cutoff LIMIT 5000\)/,
   'manual retention must not retain its old blanket deletion path')
 
-// ---------------------------------------------------------------------------------------------------------------
-// K11, owner ruling 13 Oct (relayed): "keep old expenses ... for the revert, yes, as it is same with stock changes ...
-// for undo redo history no need." Expense evidence and revert records never age out; Undo/Redo history still does.
-// The same fixture is run against the shipped SQL and against three wrong policies (sweep off, no K11 exemptions,
-// keep every expense row including its undo history); each wrong policy must give a different answer.
-// ---------------------------------------------------------------------------------------------------------------
+// ---- owner 14 Oct: the kept-forever classes, against every pair the Worker writes ---------------------------------------
+const runPolicy = (deleteSql, rows) => {
+  const db = new Database(':memory:')
+  db.exec(SCHEMA)
+  const ins = db.prepare('INSERT INTO audit_logs(id,action,entity,table_name,details,created_at) VALUES(?,?,?,?,?,?)')
+  rows.forEach((row, index) => {
+    ins.run(index * 2 + 1, row.action, row.entity, row.table ?? row.entity, row.details ?? null, '2026-08-01 00:00:00')
+    ins.run(index * 2 + 2, row.action, row.entity, row.table ?? row.entity, row.details ?? null, '2026-09-30 00:00:00')
+  })
+  db.prepare(deleteSql).run({ cutoff: CUTOFF })
+  const left = new Set(db.prepare('SELECT id FROM audit_logs').all().map((row) => row.id))
+  db.close()
+  return rows.map((row, index) => ({ label: `${row.entity}/${row.action}${row.details ? ' ' + row.details : ''}`, old: left.has(index * 2 + 1), recent: left.has(index * 2 + 2), kept: row.kept }))
+}
+const wrongRows = (outcome) => outcome.filter((row) => !row.recent || row.old !== row.kept).map((row) => row.label)
 {
-  const { AUDIT_RETENTION_KEPT_REVERT_ACTIONS, AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES } = moduleObj.exports
-  assert.deepEqual([...AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES], ['fee', 'fee_label'])
-  const rows = [
-    // [id, action, entity, details, keep]
-    [1, 'create', 'fee', '{"after":{"amount_usd":5}}', true],
-    [2, 'update', 'fee', '{"before":{},"after":{}}', true],
-    [3, 'delete', 'fee', '{"before":{},"after":null}', true],
-    [4, 'delete', 'fee', null, true],                        // the pre-fix approved delete wrote details = NULL
-    [5, 'replace', 'fee_label', '{"from":"a","to":"b"}', true],
-    [6, 'classify', 'fee_label', '{"label":"Grab"}', true],
-    [7, 'approve', 'pending_action', '{"section":"fees","action_type":"delete"}', true],
-    [8, 'reject', 'pending_action', '{"section":"fees","action_type":"delete"}', true],
-    [9, 'stock_revert', 'product', '{"movementId":1}', true],
-    [10, 'stock_revert_repair', 'product', '{}', true],
-    [11, 'stock_revert_repair_before', 'product', '{}', true],
-    [12, 'action_undo', 'fee', '{"actionHistoryId":1}', false],  // Undo/Redo history: "no need"
-    [13, 'action_redo', 'fee', '{"actionHistoryId":1}', false],
-    [14, 'action_undo', 'product', '{"actionHistoryId":2}', false],
-    [15, 'approve', 'pending_action', '{"section":"products"}', false],
-    [16, 'reject', 'pending_action', '{broken', false],
-    [17, 'update', 'settings', '{}', false],
-    [18, null, null, null, false],                           // NULL entity/action must not be kept by accident
-    [19, 'adjust', 'product', '{"note":"stock_revert"}', false],
-  ]
-  const recent = [[100, 'update', 'settings', '{}'], [101, 'action_undo', 'fee', '{}']]
-  const run = (deleteSql) => {
-    const db = new Database(':memory:')
-    db.exec('CREATE TABLE audit_logs (id INTEGER PRIMARY KEY, action TEXT, entity TEXT, details TEXT, entity_id TEXT, user_id INTEGER, old_value TEXT, new_value TEXT, created_at TEXT)')
-    const ins = db.prepare('INSERT INTO audit_logs(id,action,entity,details,created_at) VALUES(?,?,?,?,?)')
-    for (const [id, action, entity, details] of rows) ins.run(id, action, entity, details, '2026-08-01 00:00:00')
-    for (const [id, action, entity, details] of recent) ins.run(id, action, entity, details, '2026-09-30 00:00:00')
-    db.prepare(deleteSql).run({ cutoff: '2026-09-01 00:00:00' })
-    const left = db.prepare('SELECT id FROM audit_logs ORDER BY id').all().map((row) => row.id)
-    db.close()
-    return left
-  }
-  const expected = [...rows.filter((row) => row[4]).map((row) => row[0]), ...recent.map((row) => row[0])]
-  const shipped = buildAuditLogRetentionDeleteSql()
-  assert.deepEqual(run(shipped), expected, 'K11: expense evidence and revert records survive; Undo/Redo history and ordinary rows age out')
+  const rows = ROWS.map(([entity, action, kept, details]) => ({ entity, action, kept, details }))
+  assert.ok(rows.length >= 150, `the table lists the writers (${rows.length} pairs)`)
+  assert.ok(rows.filter((row) => row.kept).length >= 60 && rows.filter((row) => !row.kept).length >= 60, 'both classes are populated')
+  assert.deepEqual(wrongRows(runPolicy(shipped, rows)), [], 'the shipped SQL keeps exactly the kept-forever pairs and deletes the other old rows')
 
-  // Discrimination: the fixture tells the ruling apart from the plausible wrong policies.
-  const k11 = /\n\s*AND NOT \(COALESCE\(entity, ''\) IN \('fee', 'fee_label'\)[\s\S]*?AND COALESCE\(action, ''\) NOT IN \('stock_revert', 'stock_revert_repair', 'stock_revert_repair_before'\)/
-  assert.match(shipped, k11, 'the K11 predicate is where this test expects it')
+  // Legacy rows and spelling variants.
+  const special = [
+    { entity: null, table: 'sales', action: 'update', kept: true },
+    { entity: '', table: 'roles', action: 'update', kept: true },
+    { entity: null, table: null, action: 'sale_settlement', kept: true },
+    { entity: '', table: '', action: 'return', kept: true },
+    { entity: null, table: null, action: 'stock_adjust', kept: true },
+    { entity: null, table: null, action: 'login', kept: false },
+    { entity: null, table: null, action: null, kept: false },
+    { entity: ' SALE ', table: null, action: 'update', kept: true },
+    { entity: 'brand', action: 'brand_rename_undo', kept: true },
+    { entity: 'brand', action: 'brand_rename_redo', kept: true },
+    { entity: 'brand', action: 'undo_nothing', kept: false },
+    { entity: 'brand', action: 'redo', kept: false },
+    { entity: 'pending_action', action: 'approve', details: '{"section":"fees"}', kept: true },
+    { entity: 'pending_action', action: 'approve', details: '{"section":"products"}', kept: false },
+    { entity: 'pending_action', action: 'reject', details: '{broken', kept: false },
+    { entity: 'settings', action: 'adjust', details: '{"note":"stock_revert"}', kept: false },
+    { entity: 'users', action: 'update', kept: true },
+    { entity: 'user', action: 'login', kept: false },
+  ]
+  assert.deepEqual(wrongRows(runPolicy(shipped, special)), [], 'legacy rows, spelling variants, undo/redo suffixes and review decisions')
+
+  // Discrimination: the same fixture tells the ruling apart from each plausible wrong policy.
+  const clause = /\n\s*AND NOT \(LOWER\(TRIM\(COALESCE\(NULLIF\(TRIM\(entity\), ''\), table_name, ''\)\)\) IN [\s\S]*?\n(?=\s*AND NOT \(COALESCE\(entity, ''\) = 'pending_action')/
+  assert.match(shipped, clause, 'the kept-forever predicate is where this test expects it')
+  const mutate = (replacement) => shipped.replace(clause, replacement)
   const wrong = {
     'sweep disabled (keeps everything)': shipped.replace('WHERE created_at < @cutoff', 'WHERE 0'),
-    'no K11 exemptions (blanket 21-day sweep)': shipped.replace(k11, ''),
-    'every expense row kept, its Undo/Redo history too': shipped.replace("AND COALESCE(action, '') NOT IN ('action_undo', 'action_redo'))", ')'),
+    'blanket sweep (no kept classes)': mutate('\n'),
+    'only the 13 Oct expense/revert rule': mutate(`\n      AND NOT (COALESCE(entity, '') IN ('fee', 'fee_label') OR COALESCE(action, '') IN ('stock_revert', 'stock_revert_repair', 'stock_revert_repair_before'))\n`),
+    'sales and returns only': mutate(`\n      AND NOT (COALESCE(entity, '') IN ('sale', 'sale_creation', 'return', 'return_create', 'fee', 'fee_label'))\n`),
+    'every user row kept (sign-ins included)': mutate(`\n      AND NOT (${shipped.match(clause)[0].replace(/AND NOT \(/, '').replace(/\)\s*$/, '')} OR entity IN ('user', 'users'))\n`),
   }
   for (const [name, sql] of Object.entries(wrong)) {
-    assert.notEqual(sql, shipped, name + ': the mutation applied')
-    assert.notDeepEqual(run(sql), expected, name + ' must not satisfy the ruling')
+    assert.notEqual(sql, shipped, `${name}: the mutation applied`)
+    assert.notDeepEqual(wrongRows(runPolicy(sql, rows)), [], `${name} must not satisfy the ruling`)
   }
+  console.log('audit retention 14 Oct: every kept-forever class survives, every other old row expires; 5 wrong policies rejected')
+}
 
-  // Every revert action the source writes is on the kept list (a new 'stock_revert*' action cannot silently age out).
-  const srcRoot = path.join(__dirname, '..', 'src')
-  const written = new Set()
-  const walk = (dir) => { for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name)
-    if (entry.isDirectory()) walk(full)
-    else if (entry.name.endsWith('.ts')) for (const m of fs.readFileSync(full, 'utf8').matchAll(/'(stock_revert[a-z_]*)'/g)) written.add(m[1])
-  } }
-  walk(srcRoot)
-  assert.ok(written.has('stock_revert'), 'the stock Revert route still writes stock_revert')
-  for (const action of written) assert.ok(AUDIT_RETENTION_KEPT_REVERT_ACTIONS.includes(action), 'revert action ' + action + ' must be kept by retention')
-  console.log('audit retention K11: expense evidence + revert records kept, Undo/Redo history pruned; 3 wrong policies rejected')
+// ---- DRIFT: every entity/action pair the source writes is classified in the table ---------------------------------------
+{
+  const walk = (dir, out = []) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) walk(full, out)
+      else if (entry.name.endsWith('.ts')) out.push(full)
+    }
+    return out
+  }
+  const splitArgs = (source, start) => {
+    let depth = 0
+    let current = ''
+    const args = []
+    let quote = null
+    for (let i = start; i < source.length; i += 1) {
+      const ch = source[i]
+      if (quote) {
+        current += ch
+        if (ch === '\\') { current += source[i + 1]; i += 1; continue }
+        if (ch === quote) quote = null
+        continue
+      }
+      if (ch === "'" || ch === '"' || ch === '`') { quote = ch; current += ch; continue }
+      if ('([{'.includes(ch)) { depth += 1; current += ch; continue }
+      if (')]}'.includes(ch)) {
+        if (depth === 0) { args.push(current.trim()); return args }
+        depth -= 1
+        current += ch
+        continue
+      }
+      if (ch === ',' && depth === 0) { args.push(current.trim()); current = ''; continue }
+      current += ch
+    }
+    return args
+  }
+  const literal = (arg) => /^'([^']*)'$/.exec(arg || '')?.[1]
+  const classified = new Set(ROWS.map(([entity, action]) => `${entity}/${action}`))
+  const classifiedEntities = new Set(ROWS.map(([entity]) => entity))
+  const found = new Map()
+  const rawWriters = {}
+  const files = walk(srcRoot)
+  for (const file of files) {
+    const source = fs.readFileSync(file, 'utf8')
+    const rel = path.relative(srcRoot, file).replace(/\\/g, '/')
+    const raw = (source.match(/INSERT INTO audit_logs/g) || []).length
+    if (raw) rawWriters[rel] = raw
+    for (const [pattern, actionAt, entityAt] of [[/\b(?:audit|auditOrThrow)\(/g, 3, 4], [/\bbuildAuditStatement\(/g, 2, 3]]) {
+      let match
+      while ((match = pattern.exec(source))) {
+        const args = splitArgs(source, match.index + match[0].length)
+        const action = literal(args[actionAt])
+        const entity = literal(args[entityAt])
+        if (action && entity) found.set(`${entity}/${action}`, rel)
+        else if (entity && !action && args.length >= 5) found.set(`${entity}/<dynamic action>`, rel)
+        else if (action && !entity && args.length >= 5 && !DYNAMIC_ENTITIES.length) found.set(`<dynamic entity>/${action}`, rel)
+        else if (action && !entity && args.length >= 5) found.set(`<dynamic entity>/${action}`, rel)
+      }
+    }
+    for (const m of source.matchAll(/key: \{ actorId: [^}]*?action: '([^']+)', entity: '([^']+)'/g)) found.set(`${m[2]}/${m[1]}`, rel)
+  }
+  assert.ok(found.size >= 80, `the scan found the audit call sites (${found.size} distinct pairs)`)
+  const unclassified = []
+  for (const [pair, rel] of found) {
+    const [entity, action] = pair.split('/')
+    if (entity === '<dynamic entity>') {
+      assert.ok(classified.has(`customer/${action}`) || classified.has(`brand/${action}`) || [...DYNAMIC_ENTITIES].some((e) => classified.has(`${e}/${action}`)),
+        `${rel}: ${pair} is written for a variable entity and no entity in DYNAMIC_ENTITIES classifies it`)
+      continue
+    }
+    if (action === '<dynamic action>') {
+      assert.ok(classifiedEntities.has(entity), `${rel}: entity ${entity} writes a variable action and the table does not mention the entity`)
+      continue
+    }
+    if (!classified.has(pair) && !FAMILY_ACTION.test(action)) unclassified.push(`${pair} (${rel})`)
+  }
+  assert.deepEqual(unclassified, [], 'every entity/action pair the source writes is classified as kept or expiring in scripts/harness/audit_retention_classes.cjs')
+  assert.deepEqual(rawWriters, RAW_SQL_WRITERS,
+    'a raw INSERT INTO audit_logs appeared or moved: classify its entity/action pairs in the table, then update RAW_SQL_WRITERS')
+
+  // Every undo/redo and revert action is kept by shape or by name.
+  const { AUDIT_RETENTION_KEPT_REVERT_ACTIONS, AUDIT_RETENTION_KEPT_STOCK_ACTIONS, AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES } = moduleObj.exports
+  assert.deepEqual([...AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES], ['fee', 'fee_label'])
+  const writtenActions = new Set()
+  for (const file of files) {
+    const source = fs.readFileSync(file, 'utf8')
+    for (const m of source.matchAll(/'(stock_revert[a-z_]*)'/g)) writtenActions.add(m[1])
+  }
+  assert.ok(writtenActions.has('stock_revert'), 'the stock Revert route still writes stock_revert')
+  for (const action of writtenActions) assert.ok(AUDIT_RETENTION_KEPT_REVERT_ACTIONS.includes(action), `revert action ${action} must be kept by retention`)
+  const cutoverActions = new Set()
+  for (const file of files) {
+    for (const m of fs.readFileSync(file, 'utf8').matchAll(/export const (BRANCH_CUTOVER_[A-Z_]*AUDIT_ACTION|BRANCH_CUTOVER_[A-Z_]*FOLD_ACTION|STOCK_SESSION_CLOSED_AUDIT_ACTION)\s*=\s*'([^']+)'/g)) cutoverActions.add(m[2])
+  }
+  assert.ok(cutoverActions.size >= 6, `the branch-cutover audit actions were found (${cutoverActions.size})`)
+  for (const action of cutoverActions) {
+    assert.ok(AUDIT_RETENTION_KEPT_STOCK_ACTIONS.includes(action) || /_undo$|_redo$/.test(action) || ROWS.some(([entity, rowAction, kept]) => rowAction === action && kept),
+      `branch cutover / stock session action ${action} is a stock change and must be kept`)
+  }
+  console.log(`audit retention drift: ${found.size} written pairs all classified; ${Object.keys(rawWriters).length} raw-SQL writer files unchanged`)
 }
 
 {
@@ -218,4 +308,4 @@ assert.doesNotMatch(compatSource, /DELETE FROM audit_logs WHERE id IN \(SELECT i
   })().catch((error) => { console.error(error); process.exit(1) })
 }
 
-console.log('audit retention: Return bulk provenance and exact Shift lifecycle receipts preserved narrowly')
+console.log('audit retention: kept-forever classes, exact Shift receipts and validated price receipts preserved narrowly')

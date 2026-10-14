@@ -5,8 +5,8 @@ import type { Env } from '../index'
 // replaced a manual "Clear 30d" button in the Audit Logs UI -- retention is
 // now enforced automatically on the cron schedule (see maybeRunScheduledAuditLogRetention
 // below) instead of requiring an admin to remember to click something.
-// Admins can override this via the "audit_log_retention_days" row in the
-// settings table (exposed as a Settings-page field).
+// An administrator changes it through PUT /api/settings/audit-log-retention,
+// which needs the current password and refuses anything under this 21-day floor.
 export const DEFAULT_AUDIT_LOG_RETENTION_DAYS = 21
 const AUDIT_LOG_RETENTION_SETTING_KEY = 'audit_log_retention_days'
 const AUDIT_LOG_RETENTION_LAST_RUN_KEY = 'audit_log_retention_last_run'
@@ -17,48 +17,76 @@ const AUDIT_LOG_RETENTION_LAST_RUN_KEY = 'audit_log_retention_last_run'
 // to not do needless work on every tick.
 const AUDIT_LOG_RETENTION_MIN_INTERVAL_MS = 24 * 60 * 60 * 1000
 
-// Return bulk undo/redo audit rows are the only durable source of the actor
-// and timestamp for those replays. The operation receipt retains the status
-// transition and generation, but it cannot identify who replayed it or when.
-// Shift lifecycle requests also use their atomic audit row as the durable
-// replay receipt. Only the four exact-request lifecycle actions qualify;
-// ordinary Shift logs and legacy writes without request identity still age out.
-// Keep this predicate narrow: ordinary audit data, the original bulk receipt,
-// and unrelated undo/redo rows continue to follow the configured retention.
+// Owner, 14 Oct 2026: the audit rows of sales, payments (settle and refunds), returns,
+// every stock change, permission, role and user changes, and reverts, undo and redo are
+// kept forever. Every other row follows the retention setting. The 13 Oct ruling that
+// old expenses are kept still holds.
 //
-// K11, owner 13 Oct (relayed): "keep old expenses. ... for the revert, yes, as
-// it is same with stock changes ... for undo redo history no need." So, kept
-// forever regardless of age:
-//   - expense evidence: every row about an expense record (entity 'fee': create,
-//     edit, delete, approved delete) or an expense label rewrite ('fee_label':
-//     replace, classify), and the review decisions on expense requests
-//     ('pending_action' rows whose request section is 'fees');
-//   - revert records: the audit rows of a stock Revert (a compensating
-//     counter-movement, kept like the stock change itself) and of the one-off
-//     repairs of a revert. scripts/test-audit-retention-pure.cjs fails if the
-//     source writes a 'stock_revert*' action this list does not name.
-// Undo/Redo history ('action_undo'/'action_redo' rows, including those about an
-// expense) still ages out, as does everything else not named here. The
-// expense and revert ledgers themselves (fees, fee_operation_receipts,
-// inventory_movements) are never touched by this sweep.
+// The classes are the entity and action values the writers use, not a guess:
+// scripts/harness/audit_retention_classes.cjs lists every writer and
+// test-audit-retention-pure.cjs fails when the source writes an entity/action pair
+// that list does not classify, or when the list and the SQL below disagree.
+// What stays besides these lists: the exact Shift lifecycle receipts, the validated
+// completed bulk price-adjust receipts, and the expense review decisions
+// ('pending_action' rows whose section is 'fees'). Any action ending in _undo or
+// _redo is kept, which covers the Return bulk replays whose actor and time exist
+// nowhere else.
+// The ledgers themselves (sales, returns, fees, inventory_movements) are never touched
+// by this sweep; it deletes from audit_logs only.
+export const AUDIT_RETENTION_KEPT_SALE_PAYMENT_ENTITIES = [
+  'sale', 'sale_creation', 'sale_item', 'sales', 'payment_method', 'customer_receivables', 'supplier_invoices',
+] as const
+export const AUDIT_RETENTION_KEPT_RETURN_ENTITIES = ['return', 'returns', 'return_create', 'return_reason', 'supplier_return'] as const
+export const AUDIT_RETENTION_KEPT_STOCK_ENTITIES = [
+  'stock', 'stock_transfer', 'stock_transfers', 'stock_session', 'stock_session_operations', 'inventory', 'inventory_movements',
+  'inventory_reason', 'product_batch', 'product_batches', 'branch_stock_integrity', 'branch_cutover',
+] as const
+export const AUDIT_RETENTION_KEPT_PERMISSION_ENTITIES = ['role', 'roles'] as const
 export const AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES = ['fee', 'fee_label'] as const
+// An account row is kept when it creates or changes the account (role, permissions, active flag);
+// its sign-ins, password resets and device approvals follow the retention setting.
+export const AUDIT_RETENTION_KEPT_ACCOUNT_ENTITIES = ['user', 'users'] as const
+export const AUDIT_RETENTION_KEPT_ACCOUNT_ACTIONS = ['create', 'update'] as const
+export const AUDIT_RETENTION_KEPT_PRODUCT_ENTITIES = ['product', 'products'] as const
+export const AUDIT_RETENTION_KEPT_PRODUCT_ACTIONS = ['create'] as const
+// Stock changes that are written on the product (or on a legacy row with no entity).
+export const AUDIT_RETENTION_KEPT_STOCK_ACTIONS = [
+  'stock_add', 'stock_remove', 'stock_set', 'stock_adjust', 'stock_in_line_edit', 'stock_movement_reason_edit',
+  'stock_tagged_dispose', 'stock_tagged_restore', 'transfer', 'transfer_intent',
+  'merge_duplicate', 'fold', 'product_same_name_merge', 'product_transfer_aware_merge', 'product_leading_zero_twin_merge',
+  'received_date_saleability_repair', 'stale_receipt_revert_mirror', 'recompute_stock_cache',
+  'branch_cutover_inactive_stock', 'branch_cutover_approved_fold', 'branch_cutover_inactive_fold', 'branch_cutover_lot_fold',
+  'branch_cutover_completed', 'undo_closed_branch_cutover',
+] as const
 export const AUDIT_RETENTION_KEPT_REVERT_ACTIONS = ['stock_revert', 'stock_revert_repair', 'stock_revert_repair_before'] as const
+// Rows written before audit rows carried an entity: only their action says what they were.
+export const AUDIT_RETENTION_KEPT_LEGACY_ACTIONS = ['sale', 'sale_settlement', 'return'] as const
 const sqlList = (values: readonly string[]): string => values.map((value) => `'${value}'`).join(', ')
+const AUDIT_ENTITY_KEY_SQL = "LOWER(TRIM(COALESCE(NULLIF(TRIM(entity), ''), table_name, '')))"
+const AUDIT_ACTION_SQL = "COALESCE(action, '')"
+const AUDIT_RETENTION_KEPT_FOREVER_SQL = `${AUDIT_ENTITY_KEY_SQL} IN (${sqlList([
+  ...AUDIT_RETENTION_KEPT_SALE_PAYMENT_ENTITIES,
+  ...AUDIT_RETENTION_KEPT_RETURN_ENTITIES,
+  ...AUDIT_RETENTION_KEPT_STOCK_ENTITIES,
+  ...AUDIT_RETENTION_KEPT_PERMISSION_ENTITIES,
+  ...AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES,
+])})
+        OR (${AUDIT_ENTITY_KEY_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_ACCOUNT_ENTITIES)}) AND ${AUDIT_ACTION_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_ACCOUNT_ACTIONS)}))
+        OR (${AUDIT_ENTITY_KEY_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_PRODUCT_ENTITIES)}) AND ${AUDIT_ACTION_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_PRODUCT_ACTIONS)}))
+        OR (${AUDIT_ENTITY_KEY_SQL} = '' AND ${AUDIT_ACTION_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_LEGACY_ACTIONS)}))
+        OR ${AUDIT_ACTION_SQL} IN (${sqlList([...AUDIT_RETENTION_KEPT_STOCK_ACTIONS, ...AUDIT_RETENTION_KEPT_REVERT_ACTIONS])})
+        OR ${AUDIT_ACTION_SQL} LIKE '%\\_undo' ESCAPE '\\'
+        OR ${AUDIT_ACTION_SQL} LIKE '%\\_redo' ESCAPE '\\'`
 
 export function buildAuditLogRetentionDeleteSql(): string {
   return `DELETE FROM audit_logs WHERE id IN (
     SELECT id FROM audit_logs
     WHERE created_at < @cutoff
-      AND NOT (COALESCE(entity, '') IN (${sqlList(AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES)})
-        AND COALESCE(action, '') NOT IN ('action_undo', 'action_redo'))
+      AND NOT (${AUDIT_RETENTION_KEPT_FOREVER_SQL})
       AND NOT (COALESCE(entity, '') = 'pending_action'
         AND COALESCE(CASE WHEN json_valid(details) THEN json_extract(details, '$.section') END, '') = 'fees')
-      AND COALESCE(action, '') NOT IN (${sqlList(AUDIT_RETENTION_KEPT_REVERT_ACTIONS)})
       AND NOT COALESCE(CASE WHEN json_valid(details) THEN (
-        (entity = 'return'
-        AND action IN ('action_undo','action_redo')
-        AND json_extract(details, '$.kind') = 'return.fields.bulk'
-        ) OR (
+        (
           entity = 'shift_session'
           AND action IN ('shift.close','shift.reopen','shift.amend','shift.cancel')
           AND json_type(details, '$.request.id') = 'text'

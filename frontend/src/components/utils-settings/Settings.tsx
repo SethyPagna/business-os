@@ -2368,7 +2368,7 @@ export default function Settings() {
         {isAdmin && showSettingsSection('security') ? (
           <SettingsSection
             title={t('audit_log_retention') || 'Audit log retention'}
-            description={t('audit_log_retention_desc') || 'Audit log entries older than this are cleared automatically. There is no manual "Clear" action anymore.'}
+            description={t('audit_log_retention_desc') || 'Older audit log entries are cleared automatically, except the records that are kept forever. There is no manual "Clear" action anymore.'}
           >
             <AuditRetentionSetting
               t={t}
