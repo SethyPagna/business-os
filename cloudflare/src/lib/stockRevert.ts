@@ -23,7 +23,7 @@ import type { D1Compat } from './db'
 import { LEDGER_OUT_TYPES } from './stockLedgerQuery'
 import {
   decrementBatchStockStrictStatement, planReceiveBatchStock, planRemoveStockFromBatch, planUnreceiveBatchStock,
-  productHasBatchHistory, restoreBatchStockStatements, type StockWriteStatement,
+  restoreBatchStockStatements, type StockWriteStatement,
 } from './productBatches'
 import { multiplyMoney4 } from './moneyPrecision'
 import { MOVEMENT_RETURN_REFERENCE_TYPES, movementReferenceKindSql } from './movementReference'
@@ -254,12 +254,10 @@ type LotShare = { batchId: number; quantity: number; productId: number | null }
 // forth -- read from the ROOT row, since the counters record none of their
 // own -- so the lots never drift from what the count did.
 //
-// MULTILOT-REVERT: a removal that no single lot covered -- a Remove spread across
-// lots, a CSV Remove or Set, a move out -- records its shares the same way when it is
-// written (productBatches.planMovementLotShares, in the same batch as the stock
-// change), so its Revert and Redo move the same lots. Batch-less rows WITHOUT shares are:
-// an aggregate-only add, a removal of units that sat under no lot, and any removal
-// written before shares were recorded.
+// A /adjust or CSV removal that no single lot covered records its shares the same way
+// in the same batch as the stock change (productBatches.planRemovalLotRecord), a zero
+// row when it took nothing from lots. Rows without any record are an aggregate-only add
+// and a removal written before shares were recorded (a move out is never reverted here).
 async function rootLotShares(db: D1Compat, rootId: number): Promise<LotShare[]> {
   const rows = await db.prepare(`
     SELECT a.batch_id AS batchId, ABS(a.quantity) AS quantity, pb.variant_product_id AS productId
@@ -273,11 +271,55 @@ async function rootLotShares(db: D1Compat, rootId: number): Promise<LotShare[]> 
 
 const MERGED_LOT_REFUSAL = 'This change moved stock on a received date that now belongs to another product (the products were merged), so it cannot be reverted here. Nothing was changed; correct it with a new count instead.'
 
-// An OLD removal (written before shares were recorded) that no single lot covered, on a product that uses
-// lots: which lots its units came off is not recorded, and putting them back on a guess (the newest lot, the
-// oldest, a new one) would give a delivery stock it never had. branch_stock alone would restore units the till
-// cannot see -- the split this refuses. Add stock with the received date is the way back.
-const LOTS_NOT_RECORDED_REFUSAL = 'Cannot revert: this removal did not record which received dates its units came from, so they cannot be put back on the right ones. Nothing was changed. Use Add stock and choose the received date instead.'
+// A removal with no recorded lot draw, written after a lot of its product existed: it may have drawn on several, and
+// putting its units back on a guess (the newest lot, the oldest, a new one) would give a delivery stock it never had.
+// branch_stock alone would restore them as undated units, losing their lot (FIFO, expiry, cost, supplier).
+const LOTS_NOT_RECORDED_REFUSAL = 'Cannot revert: this removal did not record which received dates its units came from, so they cannot be put back on the right ones. Nothing was changed. Use Set instead: choose Selected received date and set its quantity. That does not record a purchase.'
+
+// Byte-identical to datedStockCountImport.ts's DATED_STOCK_COUNT_REASON, duplicated so this module imports nothing new
+// (pinned by test-ops-branch-exceeds-lots-pure.cjs).
+const DATED_STOCK_COUNT_REASON = 'Dated stock count import'
+
+// A dated count stamps every movement it writes at midnight of its count day (datedStockCountApply.ts, `${date} 00:00:00`), so the
+// reason text alone is not enough: /adjust and the CSV import take a free-text reason, and an old removal typed with this exact text
+// must still be refused. A typed row carries a real clock time. Left open: an old row typed with this text AND stamped at
+// midnight (a CSV date-only cell, or /adjust in the 07:00:00 Cambodia second).
+const DATED_STOCK_COUNT_STAMP_TIME = '00:00:00'
+
+// Migration 0250 stores, in system_flags, the highest inventory_movements.id that existed when removals began to record what
+// they drew from lots. Only a movement at or below it can be a record-less removal that drew on lots; every later one wrote
+// its record (lot shares, or a zero row when it took nothing from a lot) or had no lot to record against.
+// Pinned to the migration and to ops/queries/branch-exceeds-lots.sql by test-ops-branch-exceeds-lots-pure.cjs.
+const MULTILOT_WATERMARK_KEY = 'multilot_revert_watermark'
+
+// True when the root removal has no record of what it drew from lots although a lot of its product already existed
+// when it was written, and it was written before removals recorded (at or below the watermark). A dated count always
+// records its lot effects (and is recognised by its reason AND its midnight stamp), and a removal that predates every lot of the
+// product drew on none, so neither is refused.
+// Lot and movement times are whole seconds (CURRENT_TIMESTAMP) or ISO text, so they are compared through datetime() and a
+// tie counts as "the lot existed": that refuses, which fails safe. Without a watermark row (a database not yet migrated)
+// the timestamps alone decide, as before.
+// A pre-fix CSV removal stored the user's business date in created_at, which can be long before the lots it drew on (the write
+// time is what matters). Ids are written in order, so the newest created_at among LOWER ids (never in the future) is a lower bound
+// of its write time: a lot at or before that bound existed when the row was written.
+async function lotDrawUnrecorded(db: D1Compat, rootId: number, productId: number): Promise<boolean> {
+  const row = await db.prepare(`
+    SELECT m.id AS id, m.reason AS reason, time(m.created_at) AS stampTime,
+      EXISTS (SELECT 1 FROM dated_stock_count_batch_actions a WHERE a.movement_id = m.id) AS recorded,
+      EXISTS (SELECT 1 FROM product_batches pb WHERE pb.variant_product_id = @productId AND datetime(pb.created_at) <= datetime(m.created_at)) AS lotted,
+      (SELECT value FROM system_flags WHERE key = @watermarkKey) AS watermark
+    FROM inventory_movements m WHERE m.id = @rootId
+  `).get<{ id: number; reason: string | null; stampTime: string | null; recorded: number; lotted: number; watermark: string | null }>({ rootId, productId, watermarkKey: MULTILOT_WATERMARK_KEY })
+  if (!row || (row.reason === DATED_STOCK_COUNT_REASON && row.stampTime === DATED_STOCK_COUNT_STAMP_TIME) || Number(row.recorded)) return false
+  const watermark = typeof row.watermark === 'string' && /^\d+$/.test(row.watermark) ? Number(row.watermark) : null
+  if (watermark != null && Number(row.id) > watermark) return false
+  if (Number(row.lotted)) return true
+  const earlier = await db.prepare(`
+    SELECT EXISTS (SELECT 1 FROM product_batches pb WHERE pb.variant_product_id = @productId AND datetime(pb.created_at) <= (
+      SELECT MAX(datetime(created_at)) FROM inventory_movements WHERE id < @rootId AND datetime(created_at) <= datetime('now'))) AS existed
+  `).get<{ existed: number }>({ rootId, productId })
+  return Boolean(Number(earlier?.existed))
+}
 
 // The aggregate-only move (branch_stock + products.stock_quantity) -- used for
 // the units of a batch-less movement that no lot holds.
@@ -547,10 +589,9 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     // left it.
     const shares = await landingShares(await rootLotShares(db, root.id))
     if (shares.some((share) => share.productId !== productId)) return refuse(400, 'revert_lot_moved', MERGED_LOT_REFUSAL)
-    // Putting back a removal puts it back on the lots it came off. One written before shares were recorded cannot
-    // say which, on a product that uses lots: refused whole, never guessed (a root that ADDED units without a lot,
-    // re-added here, is exact and passes).
-    if (!shares.length && OUT_TYPES.has(root.movement_type) && await productHasBatchHistory(db, productId)) {
+    // Putting back a removal puts it back on the lots it came off. One that recorded nothing about them cannot say
+    // which: refused whole, never guessed (a root that ADDED units without a lot, re-added here, is exact and passes).
+    if (!shares.length && OUT_TYPES.has(root.movement_type) && await lotDrawUnrecorded(db, root.id, productId)) {
       return refuse(400, 'revert_lots_not_recorded', LOTS_NOT_RECORDED_REFUSAL)
     }
     for (const share of shares) {

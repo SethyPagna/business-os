@@ -36,7 +36,7 @@ import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, identityBarcodeKey, type ProductIdentityRow } from '../lib/productIdentity'
 import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery, parseRankedIds } from '../lib/productSearchQuery'
-import { fifoRemovalAllocations, isStockRemovalConflict, listBatchesForProduct, parseReceiptSellingPrice, planBranchStockRemoval, planMovementLotShares, planReceiptSellingPrice, planReceiveBatchStock, planRemoveStockAcrossBatches, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptSellingPriceRow, type StockWriteStatement } from '../lib/productBatches'
+import { fifoRemovalAllocations, isStockRemovalConflict, listBatchesForProduct, parseReceiptSellingPrice, planBranchStockRemoval, planMovementLotShares, planReceiptSellingPrice, planRemovalLotRecord, planReceiveBatchStock, planRemoveStockAcrossBatches, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptSellingPriceRow, type StockWriteStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
 import { normalizeTypedDate } from '../lib/batchCode'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, FREE_QUANTITY_NOT_RECEIPT, parseFreeQuantity, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
@@ -2131,10 +2131,11 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
     })
     // A removal no single lot covered is held as one row per source lot (each with its own lot and cost) plus one
-    // for units no lot held, so a later Restore puts every unit back where it came from.
+    // for units no lot held, so a later Restore puts every unit back where it came from. A lot with no unit cost takes
+    // the product cost of today, as the remainder row does; otherwise Dispose prices it at the catalog cost of that later day.
     const lotSplit = useBatchLedger && resolvedBatchId == null && removedBatchQuantities.length
       ? [
-        ...removedBatchQuantities.map((entry) => ({ batchId: entry.batchId as number | null, quantity: entry.quantity, unitCostUsd: removalCostByBatch.get(entry.batchId) ?? null })),
+        ...removedBatchQuantities.map((entry) => ({ batchId: entry.batchId as number | null, quantity: entry.quantity, unitCostUsd: removalCostByBatch.get(entry.batchId) ?? productCostSnapshot?.cost_price_usd ?? null })),
         ...(removedRemainder > 0.000000001 ? [{ batchId: null, quantity: removedRemainder, unitCostUsd: productCostSnapshot?.cost_price_usd ?? null }] : []),
       ]
       : undefined
@@ -2486,10 +2487,10 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         // one relies on assertProductsActive above, as it always has.
         ...(conditionTag && batchIdRequested != null ? [productStockGuardStatement([targetProductId], 'active')] : []),
         ...plan.statements,
-        // A movement that names no single lot also records what it took from each lot,
-        // directly after it, so a Revert can put the units back on those lots.
+        // A movement that names no single lot also records what it took from each lot (or that it took none),
+        // directly after it, so a Revert can put the units back where they came from.
         ...(conditionTag ? holdRemovedStatements(conditionTag)
-          : [movementRowStatement(), ...(resolvedBatchId == null ? planMovementLotShares(plan.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) }))) : [])]),
+          : [movementRowStatement(), ...(resolvedBatchId == null ? planRemovalLotRecord(targetProductId, plan.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) }))) : [])]),
       ]), atomicMark, { status: 200, body: adjustResponseBody() })
     } catch (err) {
       if (err instanceof StockMutationBudgetError) throw err

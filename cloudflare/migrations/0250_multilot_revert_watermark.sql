@@ -1,0 +1,30 @@
+-- MULTILOT-REVERT round 3: remember which stock movements were written BEFORE removals began to record what they drew from lots.
+--
+-- A removal written from now on records its per-lot shares (or one zero row when it drew on no lot) in the same batch as the
+-- movement, so its Revert is exact. A removal written before that has no record: if it drew on several lots, putting its units back
+-- on branch_stock alone would split the lot ledger from branch_stock, so Revert refuses it (revert_lots_not_recorded).
+-- To tell the two apart WITHOUT guessing from timestamps (a product merge brings older lots onto a product whose new, record-less
+-- removal drew on none), this row stores the highest inventory_movements.id that exists when this migration is applied.
+-- stockRevert.lotDrawUnrecorded refuses only a record-less removal whose id is at or below it.
+--
+-- system_flags (0089), not settings: it is not editable through the settings API, not shown to cashiers, and survives a backup
+-- restore. inventory_movements.id is AUTOINCREMENT (never reused, never lowered by a restore), so the mark stays true.
+--
+-- INSERT OR IGNORE: applying it twice (or after a hand-written row) changes nothing. An empty movements table stores '0'.
+-- No business row is read for update and none is changed.
+--
+-- PRE:  SELECT COUNT(*) FROM system_flags WHERE key = 'multilot_revert_watermark';   -- 0
+--       SELECT COALESCE(MAX(id), 0) FROM inventory_movements;                        -- note it: the value stored below
+-- POST: SELECT value FROM system_flags WHERE key = 'multilot_revert_watermark';      -- exactly that number, as text
+--       SELECT COUNT(*) FROM inventory_movements WHERE id > CAST((SELECT value FROM system_flags WHERE key = 'multilot_revert_watermark') AS INTEGER);
+--                                                                                    -- 0 at apply time; later rows are the new, recording ones
+-- RECOVERY: nothing else depends on the row. Raising the value is safe: a removal that recorded is never refused whatever the mark says
+--       (lotDrawUnrecorded returns as soon as a record row exists), so a higher mark only adds record-less rows to the refused set. Raise it
+--       to the highest movement id after any period in which a Worker older than this one wrote removals above the mark (the migration
+--       applied but the publish failed; a Worker-only rollback; the minutes between migration and publish):
+--         UPDATE system_flags SET value = CAST((SELECT COALESCE(MAX(id), 0) FROM inventory_movements) AS TEXT), updated_at = CURRENT_TIMESTAMP
+--         WHERE key = 'multilot_revert_watermark';
+--       Do it only once that older Worker has stopped writing. Never lower it. DELETE FROM system_flags WHERE key = 'multilot_revert_watermark';
+--       makes Revert decide by timestamps alone (the previous rule).
+INSERT OR IGNORE INTO system_flags (key, value, updated_at)
+SELECT 'multilot_revert_watermark', CAST(COALESCE(MAX(id), 0) AS TEXT), CURRENT_TIMESTAMP FROM inventory_movements;

@@ -27,7 +27,7 @@ import { canEditAcquisitionCosts, isAcquisitionCostImport } from './acquisitionC
 import { COST_OUTLIER_RATIO, identityBarcodeKey, normalizeProductGroupName, productIdentitySignature, resolveMergedCostDetail, resolveMergedPricing, barcodeIdentityMatches, clusterRowsByBarcodeIdentity, rankBarcodeIdentityWinner, isRealBarcode } from './productDetailRule'
 import type { MergedCostOutlier } from './productDetailRule'
 import { sanitizeImportedDescription } from './productDescriptionSections'
-import { planImportCountIncrease, planMovementLotShares, planReconcileBranchSnapshot, planReceiveBatchStock, resolveReceiptLotTarget, type ReceiptLotCandidate } from './productBatches'
+import { planImportCountIncrease, planRemovalLotRecord, planReconcileBranchSnapshot, planReceiveBatchStock, resolveReceiptLotTarget, type ReceiptLotCandidate } from './productBatches'
 import { catalogCostRecomputeStatement, typedCostEntryBeforeWriteStatement } from './catalogCostRecompute'
 import { actorId, actorSnapshot } from './actorSnapshot'
 import { multiplyMoney4 } from './moneyPrecision'
@@ -2912,6 +2912,12 @@ type StockGroupEntry = {
   increase: ReturnType<typeof planImportCountIncrease> | null
 }
 
+// 0084: a movement names its lot only when ONE lot covers every unit it removes.
+function singleLotOf(entry: StockGroupEntry): number | null {
+  const takenFromLots = entry.takes.reduce((sum, take) => sum + take.quantity, 0)
+  return entry.takes.length === 1 && takenFromLots === -entry.delta ? entry.takes[0].batchId : null
+}
+
 // Keep each atomic group inside one import batch (runD1BatchGroupsInChunks packs to
 // D1_IMPORT_BATCH_CHUNK_SIZE statements), leaving room for the branch and fence guards it prepends.
 const STOCK_GROUP_STATEMENT_CAP = 280
@@ -2998,7 +3004,7 @@ export async function planInventoryImportStockGroups(
   let current: StockGroupEntry[] = []
   let estimate = 0
   for (const entry of planned) {
-    const cost = 2 + (entry.increase ? entry.increase.statements.length : 0) + (entry.takes.length ? 1 : 0)
+    const cost = 2 + (entry.increase ? entry.increase.statements.length : 0) + (entry.delta < 0 && singleLotOf(entry) == null ? 1 : 0)
     if (current.length && estimate + cost > STOCK_GROUP_STATEMENT_CAP) {
       groups.push(inventoryStockGroupStatements(current, rowGuardStatement, nowIso))
       current = []
@@ -3095,9 +3101,7 @@ function inventoryStockGroupStatements(entries: StockGroupEntry[], rowGuardState
 
   for (const entry of entries) {
     const d = entry.row.data
-    // 0084: the movement names its lot when ONE lot covers it; a spread or a part from stock under no lot does not.
-    const takenFromLots = entry.takes.reduce((sum, take) => sum + take.quantity, 0)
-    const singleLot = entry.takes.length === 1 && takenFromLots === -entry.delta ? entry.takes[0].batchId : null
+    const singleLot = singleLotOf(entry)
     const batchSql = entry.increase ? entry.increase.batchIdSql : '@movement_batch_id'
     statements.push(...labelAddressedMovements([{
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, created_at, batch_id) VALUES (@product_id, @product_name, @branch_id, @branch_name, @movement_type, @quantity, @unit_cost_usd, @unit_cost_khr, @total_cost_usd, @total_cost_khr, @reason, @created_at, ${batchSql})`,
@@ -3105,9 +3109,9 @@ function inventoryStockGroupStatements(entries: StockGroupEntry[], rowGuardState
       // supplied one; `nowIso` is only the fallback for a blank/unparseable cell.
       params: { ...d, created_at: (d.created_at as string | null | undefined) || nowIso, movement_batch_id: singleLot, ...(entry.increase ? entry.increase.batchIdParams : {}) },
     }], d))
-    // A removal that names no single lot records what it took from each, directly after its movement, so a Revert
-    // can put the units back on those lots (the same record /adjust writes).
-    if (singleLot == null) statements.push(...planMovementLotShares(entry.takes).map(asStatement))
+    // A removal that names no single lot records what it took from each (or that it took none), directly after its
+    // movement, so a Revert can put the units back where they came from (the same record /adjust writes).
+    if (entry.delta < 0 && singleLot == null) statements.push(...planRemovalLotRecord(entry.productId, entry.takes).map(asStatement))
   }
   return statements
 }

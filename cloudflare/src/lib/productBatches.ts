@@ -1332,23 +1332,9 @@ export function planRemoveStockAcrossBatches(input: {
   }
 }
 
-/**
- * What a removal took from each lot, recorded against its movement. 0084 stamps a
- * movement's batch_id only when ONE lot covers every unit, so a removal spread across
- * lots (or one lot plus units that sit under no lot) is a batch-less movement; without
- * this record its Revert could only move branch_stock and the product total, leaving the
- * lots drained and the till (which reads lots) blind to the restored units.
- *
- * The rows go in dated_stock_count_batch_actions, the table a dated count already uses
- * for exactly this (migration 0035: movement, lot, signed quantity -- negative is taken).
- * lib/stockRevert.ts reads them from the ROOT movement of a chain, so Revert, Redo and
- * Revert-of-Redo all move the same lots.
- *
- * The statement MUST directly follow its movement INSERT in the caller's db.batch: it
- * names the movement as the highest id, which inside one batch is the row just written.
- * Callers pass the takes of a removal whose movement has no batch_id; an empty list
- * (nothing came off a lot) writes nothing.
- */
+// A removal that no single lot covers has no batch_id (0084), so its Revert needs what it took from each lot. The
+// rows go in dated_stock_count_batch_actions (0035, negative = taken); lib/stockRevert.ts reads them from the chain's
+// root. The statement MUST directly follow its movement INSERT in the same db.batch: it names the highest movement id.
 export function planMovementLotShares(takes: ReadonlyArray<{ batchId: number; quantity: number }>): StockWriteStatement[] {
   const shares = takes.filter((take) => Number(take.quantity) > 0).map((take) => ({ batchId: Number(take.batchId), quantity: Math.abs(Number(take.quantity)) }))
   if (!shares.length) return []
@@ -1358,5 +1344,18 @@ export function planMovementLotShares(takes: ReadonlyArray<{ batchId: number; qu
           SELECT (SELECT MAX(id) FROM inventory_movements), json_extract(s.value, '$.batchId'), -json_extract(s.value, '$.quantity')
           FROM json_each(@lotShares) s ORDER BY s.key`,
     params: { lotShares: JSON.stringify(shares) },
+  }]
+}
+
+// A removal that took nothing from lots still records that, as a zero row on the product's newest lot, so its Revert can
+// tell "drew 0 from lots" from "written before shares were recorded". A product with no lot yet needs no record.
+export function planRemovalLotRecord(productId: number, takes: ReadonlyArray<{ batchId: number; quantity: number }>): StockWriteStatement[] {
+  const shares = planMovementLotShares(takes)
+  if (shares.length) return shares
+  return [{
+    sql: `INSERT INTO dated_stock_count_batch_actions (movement_id, batch_id, quantity)
+          SELECT (SELECT MAX(id) FROM inventory_movements), newest.id, 0
+          FROM (SELECT MAX(id) AS id FROM product_batches WHERE variant_product_id = @productId) newest WHERE newest.id IS NOT NULL`,
+    params: { productId },
   }]
 }

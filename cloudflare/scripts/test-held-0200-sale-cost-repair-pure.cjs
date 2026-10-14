@@ -768,8 +768,20 @@ check('held: outside deploy chain, after dependencies including0195; independent
   }
   const admissionGuards = chain.filter(file=>file==='0242_product_active_stock_invariant.sql' && stockGuardOnly(chainText(file)))
   assert.deepEqual(admissionGuards, ['0242_product_active_stock_invariant.sql'])
+  // MULTILOT-REVERT 0250 writes one system_flags row from a read of inventory_movements and nothing else. The repair reads
+  // inventory_movements but never writes it and never names system_flags, so the two orders cannot interact.
+  const systemMarkFile = text => {
+    const statements = sqlCode(text).split(';').map(v => v.trim()).filter(Boolean)
+    return statements.length === 1
+      && /^INSERT OR IGNORE INTO system_flags \(key, value, updated_at\) SELECT '[a-z_]+', CAST\(COALESCE\(MAX\(id\), 0\) AS TEXT\), CURRENT_TIMESTAMP FROM inventory_movements$/i.test(statements[0].replace(/\s+/g, ' '))
+      && !namedIn(migrationText)('system_flags') && !repairWrites(migrationText).includes('inventory_movements')
+  }
+  const systemMark = chain.filter(file => file === '0250_multilot_revert_watermark.sql' && systemMarkFile(chainText(file)))
+  assert.deepEqual(systemMark, ['0250_multilot_revert_watermark.sql'])
+  assert.equal(systemMarkFile(chainText(systemMark[0]) + '\nUPDATE inventory_movements SET quantity = 0;'), false, 'control: a business mutation cannot masquerade as mark-only independence')
+  assert.equal(systemMarkFile(chainText(systemMark[0]).replaceAll('FROM inventory_movements', 'FROM sale_items')), false, 'control: a mark read from a table the repair writes is a dependency')
   assert.equal(stockGuardOnly(chainText(admissionGuards[0])+'\nUPDATE sale_items SET cost_price_usd=123;'), false, 'a business mutation cannot masquerade as guard-only independence')
-  const dependencies = chain.filter((f) => !admissionGuards.includes(f) && !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && !revisionTriggers.includes(f) && touched.some(namedIn(chainText(f))))
+  const dependencies = chain.filter((f) => !admissionGuards.includes(f) && !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && !revisionTriggers.includes(f) && !systemMark.includes(f) && touched.some(namedIn(chainText(f))))
   assert.ok(['sale_items', 'return_items', 'catalog_cost_repair_0195_backup'].every((t) => touched.includes(t)), 'control: the scan sees the two tables it writes and the 0195 backup it reads')
   assert.ok(dependencies.includes('0195_catalog_cost_on_hand.sql'), 'control: the scan finds 0195')
   assert.ok(indexOnly('-- x\nCREATE INDEX IF NOT EXISTS i ON sale_items(id);\nCREATE UNIQUE INDEX j ON sale_items(id);'), 'control: an index-only file is skipped')
