@@ -41,11 +41,15 @@ export function effectivePermissions(user: PermissionUser) {
     return merged[normalized] === true
       || (['drive_credentials', 'business_identity', 'sales_policy'].includes(normalized) && merged.settings === true)
   }
+  const meets = (requirement: string): boolean => {
+    const [section, action] = requirement.split(':')
+    return action ? can(section, action) : hasPermission(requirement)
+  }
   const can = (section: string, action: string): boolean => !!user && (isAdmin || actionAllowed(
-    section, action, getPermissionTier(section), hasPermission,
+    section, action, getPermissionTier(section), meets,
     (key, operation) => isActionOverriddenOff(merged, key, operation),
   ))
-  return { merged, isAdmin, getPermissionTier, hasPermission, can }
+  return { merged, isAdmin, getPermissionTier, hasPermission, can, meets }
 }
 
 function isPermissionMap(value: unknown): value is PermissionMap {

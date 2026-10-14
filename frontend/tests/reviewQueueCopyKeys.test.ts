@@ -1,6 +1,5 @@
-// Pins the language keys the review-queue completion slices consume (pending tag, Telegram category,
-// approve-performs-merge refusals and the merge-confirm dialog). The keys land first, in one commit, so
-// the slices that use them never touch the packs and cannot collide on them.
+// Pins the language keys the review queue consumes (pending tag, Telegram category, approve-performs-merge
+// refusals and the merge-confirm dialog).
 //
 // verify:i18n only proves a referenced key exists; it cannot see an English sentence left in km.json,
 // a placeholder one pack lacks, or a Khmer sentence that forked a term the pack already settled. The
@@ -46,7 +45,7 @@ for (const [key, slots] of Object.entries(SLOTS)) {
 }
 console.log(`PASS ${Object.keys(SLOTS).length} review-queue keys exist in both packs, in Khmer, with the documented placeholders`)
 
-// The owner's own wording for the tag (plan section 2.2) is exact.
+// The owner's own wording for the tag is exact.
 assert.equal(en.pending_review_tag, 'Waiting for review')
 assert.equal(km.pending_review_tag, 'កំពុងរង់ចាំការត្រួតពិនិត្យ')
 console.log('PASS the pending tag carries the owner’s wording in both packs')

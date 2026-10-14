@@ -58,6 +58,13 @@ for (const key of ['sales', 'promotions']) {
   assert.ok(PERMISSION_ACTIONS[key], `audited view-tier key '${key}' has no per-action table`)
 }
 
+const enPack = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
+for (const [permissionKey, actions] of Object.entries(PERMISSION_ACTIONS)) {
+  for (const action of actions) {
+    assert.equal(enPack[action.tKey], action.label, `${permissionKey}.${action.key}: the English fallback must equal the pack text, or a missing translation would show other words`)
+  }
+}
+
 console.log('PASS per-action tables are structurally sound and cover every review-tier key')
 
 // --- 2. tier semantics --------------------------------------------------
@@ -145,28 +152,34 @@ assert.equal(posAuthority({ pos: false, 'pos:manage_address_presets': true }), f
 assert.equal(posAuthority({ 'pos:manage_address_presets': true }), false)
 console.log('PASS the POS on/off key carries its saved-address action row, one-way and unchanged for existing roles')
 
-// --- 3. requiresKey ------------------------------------------------------
+// --- 3. requires ---------------------------------------------------------
 
 // Full Access to Products is NOT enough for "replace all" -- it also needs
 // destructive_delete, matching routes/importJobs.ts.
+const replaceAllGrants = ['products:import', 'product_cost_edit', 'product_cost_view', 'destructive_delete']
 assert.equal(
   actionAllowed('products', 'import_replace_all', 'full', () => false),
   false,
-  'replace-all must be denied without the destructive_delete grant, even at Full Access',
+  'replace-all must be denied without its second grants, even at Full Access',
 )
 assert.equal(
-  actionAllowed('products', 'import_replace_all', 'full', (key) => key === 'destructive_delete'),
-  true,
-  'replace-all must be allowed at Full Access once destructive_delete is granted',
+  actionAllowed('products', 'import_replace_all', 'full', (key) => key !== 'destructive_delete'),
+  false,
+  'replace-all must be denied without the destructive_delete grant',
 )
-// requiresKey must never resurrect a blocked action.
+assert.equal(
+  actionAllowed('products', 'import_replace_all', 'full', (key) => replaceAllGrants.includes(key)),
+  true,
+  'replace-all must be allowed at Full Access once every second grant is held',
+)
+// requires must never resurrect a blocked action.
 assert.equal(
   actionAllowed('products', 'import_replace_all', 'review', () => true),
   false,
-  'replace-all stays blocked under Review Required regardless of destructive_delete',
+  'replace-all stays blocked under Review Required regardless of its second grants',
 )
 
-console.log('PASS requiresKey is enforced on top of the tier, never instead of it')
+console.log('PASS requires is enforced on top of the tier, never instead of it')
 
 // --- 4. unknown action keys ---------------------------------------------
 

@@ -20,6 +20,7 @@ import ReasonListEditor, { useAskConfirm } from './ReasonListEditor.tsx'
 const useApp = useAppHook as unknown as () => {
   t: (key: string) => string
   notify: (message: string, type?: string) => void
+  can: (section: string, action: string) => boolean
 }
 
 const TAB_LABELS: Record<StockReasonType, [key: string, fallback: string]> = {
@@ -38,7 +39,7 @@ export type StockReasonsManagerModalProps = {
 }
 
 export default function StockReasonsManagerModal({ initialTab = 'adjust', onClose, onChanged, layer = 'default' }: StockReasonsManagerModalProps) {
-  const { t, notify } = useApp()
+  const { t, notify, can } = useApp()
   const tr = useCallback((key: string, fallback: string) => {
     const value = t(key)
     return value && value !== key ? value : fallback
@@ -91,7 +92,7 @@ export default function StockReasonsManagerModal({ initialTab = 'adjust', onClos
           draft={draft}
           onDraftChange={setDraft}
           onAdd={async (label) => { if (await catalog.add(tab, label)) setDraft('') }}
-          onRename={(entry, to) => catalog.rename(entry, to)}
+          onRename={can('inventory', 'rename_reasons') ? (entry, to) => catalog.rename(entry, to) : undefined}
           onDelete={async (entry) => { await catalog.remove(entry) }}
           onDirtyChange={setDirty}
         />

@@ -1,9 +1,7 @@
-// RC2-HOTFIX: the Users role editor rendered <PermissionEditor> without the
-// translator, so in Khmer the whole permission list (section headers, None /
-// Full Access / Custom, every action row, the View-is-on lock tooltip) fell back
-// to English. The editor is rendered for real here in Khmer and English with a
-// translator that records every key the pack cannot answer; the Users call site
-// must pass that translator.
+// The role editor must read in Khmer: section headers, None / Full Access / Custom, every
+// action row and the View-is-on lock tooltip. It is rendered for real here in Khmer and
+// English with a translator that records every key the pack cannot answer, and the Users
+// call site must pass that translator.
 //
 // Run: node tests/permissionEditorKhmer.test.ts
 import assert from 'node:assert/strict'
@@ -66,14 +64,14 @@ function test(name: string, fn: () => void): void {
   try { fn(); console.log(`PASS ${name}`) } catch (error) { failed += 1; console.error(`FAIL ${name}`); console.error(error) }
 }
 
-const ENGLISH_ONLY = ['None', 'Full Access', 'Custom', 'View and search', 'Add contact', 'Edit contact (name only)', 'On while Add or Edit is on.']
+const ENGLISH_ONLY = ['None', 'Full Access', 'Custom', 'View and search', 'Add contact', 'Edit contact (name only; more in POS/sales)', 'On while Add or Edit is on.']
 
-test('CONTROL: without a translator the editor is English in any language (the reported bug)', () => {
+test('CONTROL: without a translator the editor is English in any language', () => {
   const { html } = render(null)
   for (const phrase of ENGLISH_ONLY) assert.ok(html.includes(phrase), `the fallback text "${phrase}" is what an untranslated editor shows`)
 })
 
-test('Khmer: no English fallback string from the report is rendered', () => {
+test('Khmer: no English fallback string is rendered', () => {
   const { html } = render(km)
   for (const phrase of ENGLISH_ONLY) {
     assert.ok(!html.includes(`>${phrase}<`) && !html.includes(`"${phrase}`) && !html.includes(`${phrase}"`), `Khmer render still shows English "${phrase}"`)
@@ -112,9 +110,9 @@ test('every per-action key in permissionActions.ts has an entry in both packs', 
   }
 })
 
-// POS is an on/off key, not a three-way section. The editor used to draw action rows only under three-way
-// sections, so the Worker's pos:manage_address_presets switch had no row. The row's own markup is cut out of
-// the rendered editor so each assertion reads that one control.
+// POS is an on/off key, not a three-way section, and the Worker checks pos:manage_address_presets, so the
+// editor draws its action row too. The row's own markup is cut out of the rendered editor so each assertion
+// reads that one control.
 const posRow = (html: string): string => {
   const label = en.manage_address_presets
   const found = html.match(new RegExp(`<button(?:(?!</button>)[\\s\\S])*?${label}(?:(?!</button>)[\\s\\S])*?</button>`))

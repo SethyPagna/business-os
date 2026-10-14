@@ -83,12 +83,10 @@ for (const key of [
 
 console.log('PASS PermissionEditor exposes page/action-sensitive permission groups with English/Khmer labels')
 
-// Permissions step (4): the per-section Review Required tier picker.
-// PermissionEditor.tsx must actually render a 3-way control (None/Review/
-// Full) for a `tier: true` permission instead of falling back to the plain
-// checkbox -- and must preserve a stored 'review' value through
-// parsePermissionState instead of collapsing it to Boolean(value), the
-// same bug class Users.tsx's normalizePermissionState was fixed for.
+// The per-section tier picker. PermissionEditor.tsx must render a 3-way control
+// (None/Review/Full) for a `tier: true` permission instead of the plain checkbox,
+// and must keep a stored 'review' value through parsePermissionState instead of
+// collapsing it to Boolean(value), as Users.tsx's normalizePermissionState does.
 assert.match(source, /from '\.\.\/\.\.\/utils\/permissions\.ts'/)
 assert.match(source, /normalizePermissionState/)
 assert.match(source, /permission\.tier/)
@@ -156,12 +154,9 @@ for (const key of ['view_only']) {
 
 console.log('PASS PermissionEditor renders None/Partial Access|View only/Full Access tier pickers, kept in sync with REVIEW_/VIEW_TIER_KEYS')
 
-// Per-row explanation, now through the shared InfoHint rather than a 4x4
-// button carrying a `title`. The old affordance was the browser's own black
-// tooltip: it does not open on tap at all, so on a touch device the
-// explanation was simply unreachable, and the target was well under the
-// minimum comfortable hit size. InfoHint opens on hover AND tap and
-// deliberately carries no `title`, so there is no second overlapping panel.
+// The per-row explanation goes through the shared InfoHint, which opens on hover and
+// on tap and carries no `title`: a native tooltip never opens on touch, so the
+// explanation would be unreachable there, and a second panel would overlap InfoHint's.
 assert.match(source, /import InfoHint from '\.\.\/shared\/InfoHint\.tsx'/)
 assert.match(source, /reviewDescriptionFor/)
 assert.match(source, /text=\{reviewDescriptionFor\(permission\)\}/)
@@ -189,13 +184,10 @@ for (const key of ['review_required_generic_desc', 'perm_fees_review_desc']) {
 
 console.log('PASS PermissionEditor shows an info hint per tiered permission explaining exactly what Partial Access restricts for that section')
 
-// Dashboard permission gate (previously PAGE_PERMISSIONS['dashboard'] was
-// null -- any authenticated user, any role, could view it, and there was
-// no separate control over the export button at all). Two plain boolean
-// keys, not a tier:true/REVIEW_TIER_KEYS section -- Dashboard has no
-// create/edit/delete workflow to queue for review, so 'dashboard' (page
-// access) and 'dashboard_export' (export button) are independent
-// Full/None grants, same shape as 'backup' vs 'backup_restore'.
+// Dashboard has two plain boolean keys, not a tier:true section: it has no
+// create/edit/delete workflow to queue for review, so 'dashboard' (page access)
+// and 'dashboard_export' (export button) are independent Full/None grants, the
+// same shape as 'backup' vs 'backup_restore'.
 assert.match(definitions, /key:\s*'dashboard'/)
 assert.match(definitions, /key:\s*'dashboard_export'/)
 assert.doesNotMatch(
@@ -225,12 +217,12 @@ assert.equal((source.match(/const renderActionRows = /g) || []).length, 1, 'one 
 assert.match(source, /renderActionRows\(permission, tier, 'mt-2'\)/, 'the three-way branch uses it')
 assert.match(source, /renderActionRows\(permission, active \? 'full' : 'none'/, 'the on/off branch uses it, reading on as Full and off as None')
 assert.equal((source.match(/renderActionRows\(permission, /g) || []).length, 2, 'exactly the two branches call it')
-assert.match(source, /min-w-0 break-words text-xs \$\{overriddenOff/, 'an action label wraps: the row carries no other copy of it, so an ellipsis would hide the words that explain the action')
-assert.doesNotMatch(source, /min-w-0 truncate text-xs \$\{overriddenOff/)
+assert.match(source, /block break-words text-xs \$\{overriddenOff/, 'an action label wraps: the row carries no other copy of it, so an ellipsis would hide the words that explain the action')
+assert.doesNotMatch(source, /truncate text-xs \$\{overriddenOff/)
 console.log('PASS both editor branches share one action panel')
 
-// Plan 4.2 stale copy. The English fallback in the tables must be the pack's English, or the editor reads
-// differently with and without a translator.
+// The English fallback in the tables must be the pack's English, or the editor reads differently with and
+// without a translator.
 const sectionOf = (key: string) => PERMISSION_SECTIONS.find((section) => section.key === key)!
 const permissionOf = (key: string) => PERMISSION_SECTIONS.flatMap((section) => section.permissions).find((permission) => permission.key === key)!
 const actionOf = (section: string, key: string) => PERMISSION_ACTIONS[section].find((action) => action.key === key)!
@@ -243,33 +235,42 @@ for (const key of ['perm_destructive_delete', 'perm_act_products_import_replace_
   assert.ok(km[key].includes('ជំនួសទាំងអស់') && km[key].includes('ជំនួសជួរឈរ'), `${key}: Khmer names both replace-all and replace-columns`)
 }
 
-assert.match(en.perm_act_inventory_adjust, /opening stock on an existing product/)
+assert.equal(en.perm_act_inventory_adjust, 'Adjust / receive stock')
 assert.equal(actionOf('inventory', 'adjust').label, en.perm_act_inventory_adjust)
-assert.ok(km.perm_act_inventory_adjust.includes('ស្តុកដើម') && km.perm_act_inventory_adjust.includes('ផលិតផលដែលមានស្រាប់'), 'Khmer uses the pack’s words for opening stock and existing product')
+assert.equal(km.perm_act_inventory_adjust, 'កែតម្រូវ / ទទួលស្តុក')
+assert.doesNotMatch(en.perm_act_inventory_adjust, /opening stock/i, 'a create that folds into an existing product ignores typed stock on this branch, so the label must not promise it')
 
 assert.match(en.perm_act_products_merge_duplicates, /edits that merge/)
 assert.equal(actionOf('products', 'merge_duplicates').label, en.perm_act_products_merge_duplicates)
 assert.ok(km.perm_act_products_merge_duplicates.includes('បញ្ចូលគ្នាទិន្នន័យស្ទួន'), 'the Khmer row keeps the pack’s merge-duplicates name')
 
-// The Products description says a merging edit is queued, and what approving it needs, without promising the
-// approval succeeds (until the approve-performs-merge slice ships, approving a merging edit is refused).
+// The Products description says a merging edit is queued and what switching Merge duplicates off does, and says
+// nothing about what approving it needs or does: the reviewer's merge permission is not checked on approval here.
 assert.equal(permissionOf('products').reviewDescription, en.perm_products_review_desc)
 assert.match(en.perm_products_review_desc, /edit that would merge this product into another one/)
 assert.match(en.perm_products_review_desc, /unless Merge duplicates is switched off/)
-assert.match(en.perm_products_review_desc, /Approving a merge needs the reviewer to hold Merge duplicates/)
+assert.doesNotMatch(en.perm_products_review_desc, /Approving a merge|reviewer to hold/i)
 assert.doesNotMatch(en.perm_products_review_desc, /approving it (?:performs|completes|applies)/i, 'must not promise the merge happens on approval')
 assert.ok(km.perm_products_review_desc.includes('បញ្ចូលគ្នាទិន្នន័យស្ទួន') && km.perm_products_review_desc.includes('សិទ្ធិមួយផ្នែក'))
+assert.ok(!km.perm_products_review_desc.includes('ការអនុម័តការបញ្ចូលគ្នា'), 'the Khmer text drops the approval requirement too')
 
 // The Review description states what approving needs.
 assert.equal(sectionOf('review').description, en.perm_section_review_desc)
 assert.equal(permissionOf('review').reviewDescription, en.perm_review_view_desc)
-for (const fragment of [/Full Review access/, /own section and its exact action/, /price, image or cost permission/, /Merge duplicates/, /approve their own request/, /Rejecting needs only Full Review access/]) {
+for (const fragment of [/Full Review access/, /own section and its exact action/, /price, image or cost permission/, /approve their own request/, /Rejecting needs only Full Review access/]) {
   assert.match(en.perm_section_review_desc, fragment)
 }
+assert.doesNotMatch(en.perm_section_review_desc, /Merge duplicates/, 'approval does not check the merge permission on this branch')
 assert.match(en.perm_review_view_desc, /approving also needs Full access to each request’s own section and action/)
 for (const key of ['perm_section_review_desc', 'perm_review_view_desc']) {
   assert.ok(km[key].includes('សិទ្ធិពេញលេញ'), `${key}: Khmer keeps Full Access as សិទ្ធិពេញលេញ`)
 }
 assert.ok(km.perm_section_review_desc.includes('ថ្លៃដើម') && !km.perm_section_review_desc.includes('តម្លៃដើម'), 'cost is ថ្លៃដើម, as the pack’s glossary pins')
-assert.ok(km.perm_section_review_desc.includes('បញ្ចូលគ្នាទិន្នន័យស្ទួន'))
-console.log('PASS the stale permission copy from the plan’s audit is corrected in both packs and in the table fallbacks')
+assert.ok(!km.perm_section_review_desc.includes('បញ្ចូលគ្នាទិន្នន័យស្ទួន'))
+
+// The replace-import refusal names the permission by the label the editor shows for it.
+assert.ok(en.csv_replace_permission_required.includes(`“${en.perm_destructive_delete}”`), 'the English message quotes the editor label')
+assert.ok(km.csv_replace_permission_required.includes(`«${km.perm_destructive_delete}»`), 'the Khmer message quotes the editor label')
+assert.doesNotMatch(en.csv_replace_permission_required, /destructive-data/)
+assert.ok(!km.csv_replace_permission_required.includes('សិទ្ធិលុបទិន្នន័យ'))
+console.log('PASS the permission copy describes what ships in both packs and in the table fallbacks')

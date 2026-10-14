@@ -34,8 +34,8 @@ const employeeAuthority = effectivePermissions(employeeUser)
 for (const action of PERMISSION_ACTIONS.products) {
   assert.equal(employeeAuthority.can('products', action.key), ALLOWED_PRODUCT_ACTIONS.includes(action.key), 'Employee products action ' + action.key)
 }
-// The POS action row added for pos:manage_address_presets narrows nothing by default: an absent key leaves
-// the POS grant standing, so the Employee preset (and the Employee already stored) keeps managing saved addresses.
+// The POS action row for pos:manage_address_presets narrows nothing by default: an absent key leaves the POS
+// grant standing, so the Employee preset (and the Employee already stored) keeps managing saved addresses.
 assert.equal(Object.hasOwn(employee.permissions, 'pos:manage_address_presets'), false)
 assert.equal(employeeAuthority.can('pos', 'manage_address_presets'), true)
 assert.equal(employee.permissions.all, undefined)
