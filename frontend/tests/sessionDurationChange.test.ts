@@ -82,7 +82,7 @@ const km = JSON.parse(fs.readFileSync(new URL('../src/lang/km.json', import.meta
 
 await check('every coded refusal has a sentence in both packs, Khmer in km; an unknown code has none', () => {
   const refusal = (code: string): SessionDurationRefusal => ({ success: false, code, error: 'English from the Worker', status: 400, retryAfterSeconds: null })
-  for (const code of ['session_duration_password_required', 'incorrect_password', 'current_password_rate_limited', 'session_duration_rate_limited']) {
+  for (const code of ['session_duration_password_required', 'incorrect_password', 'current_password_rate_limited', 'session_duration_rate_limited', 'session_duration_conflict', 'invalid_session']) {
     const english = sessionDurationRefusalMessage(refusal(code), (key, fallback) => en[key] ?? fallback)
     const khmer = sessionDurationRefusalMessage(refusal(code), (key, fallback) => km[key] ?? fallback)
     assert.ok(english && !/English from the Worker/.test(english), code)
@@ -90,7 +90,7 @@ await check('every coded refusal has a sentence in both packs, Khmer in km; an u
     assert.notEqual(khmer, english)
   }
   assert.equal(sessionDurationRefusalMessage(refusal('anything_else'), (_key, fallback) => fallback), null)
-  for (const key of ['session_duration_password_title', 'session_duration_password_required', 'session_duration_rate_limited', 'session_duration_not_changed']) {
+  for (const key of ['session_duration_password_title', 'session_duration_password_required', 'session_duration_rate_limited', 'session_duration_not_changed', 'session_duration_changed_elsewhere']) {
     assert.ok(en[key] && km[key] && /[ក-៿]/.test(km[key]), key)
   }
 })

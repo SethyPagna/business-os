@@ -5146,6 +5146,7 @@
   "server_url": "Server URL",
   "session_id": "Session ID",
   "session_duration": "Default Session Duration",
+  "session_duration_changed_elsewhere": "Changed from another window — reload to continue",
   "session_duration_hint": "Applied as default on login screen (can be overridden per login)",
   "session_duration_not_changed": "The login duration was not changed. Check the connection and try again.",
   "session_duration_password_required": "Enter your current password to stay signed in for longer.",

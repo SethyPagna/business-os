@@ -2,6 +2,7 @@
 // changes only after it accepted; a refusal comes back as a value and never signs anybody out (only a 401 does, in the transport).
 
 export const SESSION_DURATION_PASSWORD_REQUIRED = 'session_duration_password_required'
+export const SESSION_DURATION_CONFLICT = 'session_duration_conflict'
 
 export type SessionDurationApplied = {
   success: true
@@ -76,6 +77,9 @@ export function sessionDurationRefusalMessage(refusal: SessionDurationRefusal, t
       return tr('current_password_incorrect', 'The current password is not correct.')
     case 'current_password_rate_limited':
       return tr('current_password_rate_limited', 'Too many wrong current-password attempts. Wait 15 minutes, then try again.')
+    case SESSION_DURATION_CONFLICT:
+    case 'invalid_session':
+      return tr('session_duration_changed_elsewhere', 'Changed from another window — reload to continue')
     case 'session_duration_rate_limited':
       return tr('session_duration_rate_limited', 'Too many login duration changes. Try again later.')
     default:
