@@ -47,6 +47,7 @@ interface PreviewConfig {
   logoSize?: number
   logoZoom?: number
   priceDisplay?: string
+  showPrices?: boolean
   showCover?: boolean
   showLogo?: boolean
   title?: string
@@ -139,9 +140,6 @@ interface AssistantRecommendation {
   selling_price_usd?: number
   reason?: string
   fit_summary?: string
-  how_to_use?: string
-  cautions?: string
-  ingredients_focus?: string[]
 }
 
 interface AssistantResponse {
@@ -482,7 +480,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
           <PortalEmbedConsent
             copy={copy}
             src={mapEmbedUrl}
-            title="portal-about-map"
+            title={copy('portal_a11y_map_title', "Map showing the shop's location", 'ផែនទីបង្ហាញទីតាំងហាង')}
             address={addressFact?.value || ''}
           />
         </div>
@@ -800,6 +798,12 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
           <div className="space-y-3">
             {assistantResponse.recommendations.map((item) => {
               const open = assistantExpandedProductId === item.product_id
+              const servedPrice = previewConfig.showPrices === true
+                ? (previewConfig.priceDisplay === 'KHR' ? item.selling_price_khr : item.selling_price_usd)
+                : undefined
+              const priceLabel = typeof servedPrice === 'number' && Number.isFinite(servedPrice)
+                ? (previewConfig.priceDisplay === 'KHR' ? `${servedPrice.toLocaleString()}៛` : `$${servedPrice.toFixed(2)}`)
+                : ''
               return (
                 <article key={item.product_id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900/90">
                   <button type="button" className="flex w-full items-start gap-3 px-4 py-4 text-left" onClick={() => setAssistantExpandedProductId((current) => current === item.product_id ? null : item.product_id)}>
@@ -815,7 +819,15 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                         <div translate="no" className="notranslate text-sm font-semibold text-slate-900 dark:text-neutral-100">{item.name}</div>
                         <span translate={item.brand ? 'no' : undefined} className={`${item.brand ? 'notranslate ' : ''}rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600 dark:bg-neutral-800 dark:text-neutral-200`}>{item.brand || copy('noBrand', 'No brand', 'គ្មានម៉ាក')}</span>
                       </div>
-                      <div className="mt-1 text-xs text-slate-500 dark:text-neutral-400">{item.category || copy('noCategory', 'No category', 'គ្មានប្រភេទ')} | <span translate="no" className="notranslate">{previewConfig.priceDisplay === 'KHR' ? `${Number(item.selling_price_khr || 0).toLocaleString()}៛` : `$${Number(item.selling_price_usd || 0).toFixed(2)}`}</span></div>
+                      <div className="mt-1 text-xs text-slate-500 dark:text-neutral-400">
+                        {item.category || copy('noCategory', 'No category', 'គ្មានប្រភេទ')}
+                        {priceLabel ? (
+                          <>
+                            {' | '}
+                            <span translate="no" className="notranslate">{priceLabel}</span>
+                          </>
+                        ) : null}
+                      </div>
                       {item.reason ? <div className="mt-2 text-sm text-slate-600 dark:text-neutral-300">{item.reason}</div> : null}
                     </div>
                     <span className="rounded-full bg-slate-100 p-2 text-slate-500 dark:bg-neutral-800 dark:text-neutral-300">{open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>
@@ -823,9 +835,6 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                   {open ? (
                     <div className="border-t border-slate-100 px-4 py-4 text-sm text-slate-700 dark:border-neutral-800 dark:text-neutral-300">
                       {item.fit_summary ? <div><span className="font-semibold text-slate-900 dark:text-neutral-100">{copy('assistantWhy', 'Why this match')}:</span> {item.fit_summary}</div> : null}
-                      {item.how_to_use ? <div className="mt-2"><span className="font-semibold text-slate-900 dark:text-neutral-100">{copy('assistantUse', 'How to use')}:</span> {item.how_to_use}</div> : null}
-                      {item.cautions ? <div className="mt-2"><span className="font-semibold text-slate-900 dark:text-neutral-100">{copy('assistantCaution', 'Caution')}:</span> {item.cautions}</div> : null}
-                      {item.ingredients_focus?.length ? <div className="mt-2"><span className="font-semibold text-slate-900 dark:text-neutral-100">{copy('assistantIngredients', 'Ingredients focus')}:</span> {item.ingredients_focus.join(', ')}</div> : null}
                     </div>
                   ) : null}
                 </article>

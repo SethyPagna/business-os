@@ -426,6 +426,7 @@ function CatalogEditorSurfaceContent() {
     [editorDraft.business_phone, ed('web_editor_phone', 'Phone', 'ទូរស័ព្ទ')],
     [editorDraft.business_email, ed('web_editor_email', 'Email', 'អ៊ីមែល')],
   ].filter(([value]) => !String(value || '').trim()).map(([, label]) => label)
+  const sellerIdentityGap = [editorDraft.business_legal_name, editorDraft.business_address, editorDraft.business_email].some((value) => !String(value || '').trim())
 
   return (
     <aside id="portal-editor-top" className="min-h-0 max-w-full space-y-4 overflow-x-hidden pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0">
@@ -1447,6 +1448,14 @@ function CatalogEditorSurfaceContent() {
                   <span className="font-semibold">
                     {copy('portalPublicationMissingFields', 'Missing: {fields}').replace('{fields}', missingSellerFieldLabels.join(', '))}
                   </span>
+                  {sellerIdentityGap ? (
+                    <span data-testid="portal-seller-identity-warning" className="mt-1 block">
+                      {copy(
+                        'portalSellerIdentityWarning',
+                        "The footer's seller details show the registered business name, the address and an e-mail. Fill in the ones left empty; without an e-mail, the line for concerns about site content shows your Telegram or phone instead.",
+                      )}
+                    </span>
+                  ) : null}
                 </p>
               ) : null}
               <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2">

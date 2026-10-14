@@ -3652,8 +3652,8 @@
           "question": "Why does the assistant sometimes suggest several options instead of one product?"
         },
         "20": {
-          "answer": "Yes. Open a suggested product to see the reason, use case, and any extra online reference notes the provider returned for that answer.",
-          "question": "Can the assistant explain why a product was recommended?"
+          "answer": "Yes. Open a suggested product to see the catalogue-based reason and why it matched your question. The assistant does not give usage directions, cautions or ingredient lists, so read the product label. It does not browse for reviews or prove product claims.",
+          "question": "Can the assistant explain why a product was suggested?"
         },
         "21": {
           "answer": "We support delivery in select areas along with in-store pickup. Message the store on Facebook, Instagram, or Telegram with your location so we can confirm delivery options and timing.",
@@ -6927,6 +6927,7 @@
   "portal_a11y_skip_to_content": "Skip to products",
   "portal_a11y_zoom_in": "Zoom in",
   "portal_a11y_zoom_out": "Zoom out",
+  "portal_a11y_map_title": "Map showing the shop's location",
   "portal_legal_policies": "Policies",
   "portal_legal_privacy_title": "Privacy Policy",
   "portal_legal_terms_title": "Terms & Conditions",
@@ -7041,6 +7042,8 @@
   "fee_sale_search_placeholder": "Search receipt, customer, phone, product, SKU or barcode",
   "portalPublicationReadinessWarning": "These seller details are shown on the storefront's legal and contact pages, so complete them when you can.",
   "portalPublicationMissingFields": "Missing: {fields}",
+  "portalSellerIdentityWarning": "The footer's seller details show the registered business name, the address and an e-mail. Fill in the ones left empty; without an e-mail, the line for concerns about site content shows your Telegram or phone instead.",
+  "portalFooterConcernsContact": "If something on this site is about you, or you are concerned about an image, contact us on {contact}. We review every request and ask only for the information needed to identify the content and the person making the request.",
   "productDefaultsUseSuggested": "Use suggested text",
   "shareProofTitle": "Send share proof",
   "shareProofInstructions": "Upload screenshots for staff review. A submission does not guarantee points or approval.",

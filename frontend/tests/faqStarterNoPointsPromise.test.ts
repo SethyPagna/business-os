@@ -51,7 +51,7 @@ check('faqStarterText: no item promises points, rewards or history, and none hed
 check('the en/km packs the Website Editor shows carry the same clean text', () => {
   for (const [index, item] of Object.entries(en)) assertEnglishClean(`en.json starterFaq.${index}`, `${item.question} ${item.answer}`)
   for (const [index, item] of Object.entries(km)) assertKhmerClean(`km.json starterFaq.${index}`, `${item.question}។${item.answer}`)
-  for (const index of ['3', '4', '19']) {
+  for (const index of ['3', '4', '19', '20']) {
     const source = [...FAQ_STARTER_TEXT, ...AI_FAQ_STARTER_TEXT].find(([i]) => i === index)
     assert.ok(source, `starter ${index} exists`)
     assert.deepEqual([en[index].question, en[index].answer], [source[1], source[2]], `en.json starterFaq.${index} matches faqStarterText (the pack wins in the editor)`)
@@ -59,7 +59,7 @@ check('the en/km packs the Website Editor shows carry the same clean text', () =
 })
 
 check('the storefront shows the new starter text in Khmer', () => {
-  for (const index of ['3', '4', '19']) {
+  for (const index of ['3', '4', '19', '20']) {
     const source = [...FAQ_STARTER_TEXT, ...AI_FAQ_STARTER_TEXT].find(([i]) => i === index)!
     for (const text of [source[1], source[2]]) {
       const khmer = String(localizePortalFaqText(text, 'km'))
@@ -69,10 +69,23 @@ check('the storefront shows the new starter text in Khmer', () => {
   }
 })
 
+const EN_LABEL_PROMISE = /use instructions|reference notes|use case|include[^.]*cautions/i
+const KM_LABEL_PROMISE = /ករណីប្រើប្រាស់|កំណត់សម្គាល់យោង|ដាក់ការប្រុងប្រយ័ត្ន/
+
+check('no starter FAQ item promises label facts or web references the AI card no longer shows', () => {
+  for (const [index, question, answer] of [...FAQ_STARTER_TEXT, ...AI_FAQ_STARTER_TEXT]) assert.doesNotMatch(`${question} ${answer}`, EN_LABEL_PROMISE, `starter ${index} promises label facts`)
+  for (const [index, item] of Object.entries(en)) assert.doesNotMatch(`${item.question} ${item.answer}`, EN_LABEL_PROMISE, `en.json starterFaq.${index} promises label facts`)
+  for (const [index, item] of Object.entries(km)) assert.doesNotMatch(`${item.question} ${item.answer}`, KM_LABEL_PROMISE, `km.json starterFaq.${index} promises label facts`)
+  assert.match(km['20'].answer, /ស្លាកផលិតផល/, 'km item 20 sends the visitor to the product label')
+  assert.match(en['20'].answer, /read the product label/)
+})
+
 check('control: the retired wording fails the same checks', () => {
   assert.throws(() => assertEnglishClean('old 3', 'Open the Membership section, enter your membership number, and you can review purchase history, returns, and current points from your customer account.'))
   assert.throws(() => assertEnglishClean('old 4', 'Approved submissions can receive reward points in your membership account.'))
   assert.throws(() => assertEnglishClean('old 19', 'so it may show a short list'))
+  assert.match('A suggestion can include a catalogue-based reason, use instructions and cautions.', EN_LABEL_PROMISE)
+  assert.match('Yes. Open a suggested product to see the reason, use case, and any extra online reference notes', EN_LABEL_PROMISE)
   assert.throws(() => assertKhmerClean('old km 4', 'ការដាក់ស្នើដែលអនុម័តអាចទទួលបានពិន្ទុរង្វាន់ក្នុងគណនីសមាជិកភាព'))
 })
 

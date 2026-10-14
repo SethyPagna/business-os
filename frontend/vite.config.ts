@@ -878,6 +878,9 @@ function manualChunks(id: string): string | undefined {
       // CatalogProductsSection (catalog-products), PublicCatalogPage (catalog-public) and
       // the admin CatalogPage (catalog), so it lives in the shared core chunk.
       || normalized.includes('/src/components/catalog/portalBrowse.ts')
+      // portalMotion.ts (reduced-motion scroll behaviour) is imported by PublicCatalogPage,
+      // PortalPromoStrip and the admin CatalogPage; same shared-core reason.
+      || normalized.includes('/src/components/catalog/portalMotion.ts')
       // BrandIcons.tsx lives under components/shared/ but is only ever imported by
       // two catalog surfaces (CatalogEditorSurface -> catalog-editor,
       // PublicCatalogPage -> catalog-public). Left to the generic

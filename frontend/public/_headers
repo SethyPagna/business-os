@@ -19,7 +19,7 @@
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: geolocation=(), microphone=(), camera=(self), payment=(), usb=()
   Strict-Transport-Security: max-age=15552000; includeSubDomains
-  Content-Security-Policy-Report-Only: default-src 'self'; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-src https://www.google.com https://maps.google.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self'
+  Content-Security-Policy-Report-Only: default-src 'self'; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-src https://www.google.com https://maps.google.com https://google.com https://www.google.com.kh https://maps.google.com.kh https://google.com.kh https://www.google.co.th https://maps.google.co.th https://google.co.th https://www.google.com.sg https://maps.google.com.sg https://google.com.sg https://www.google.co.uk https://maps.google.co.uk https://google.co.uk https://www.google.com.au https://maps.google.com.au https://google.com.au https://www.google.de https://maps.google.de https://google.de https://www.google.fr https://maps.google.fr https://google.fr https://www.google.co.jp https://maps.google.co.jp https://google.co.jp; frame-ancestors 'self'; base-uri 'self'; form-action 'self'
 
 /assets/*
   Cache-Control: public, max-age=31536000, immutable

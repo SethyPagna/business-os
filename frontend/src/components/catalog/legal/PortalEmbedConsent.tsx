@@ -131,7 +131,7 @@ export default function PortalEmbedConsent({
         <button
           type="button"
           onClick={accept}
-          className="inline-flex items-center justify-center rounded-2xl bg-emerald-500 px-4 py-2 text-xs font-semibold text-white transition hover:bg-emerald-400"
+          className="inline-flex items-center justify-center rounded-2xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white transition hover:bg-emerald-800"
         >
           {copy('portal_legal_map_consent_load', MAP_CONSENT_LOAD_EN, MAP_CONSENT_LOAD_KM)}
         </button>
@@ -139,7 +139,7 @@ export default function PortalEmbedConsent({
           href={mapFallbackHref(address, src)}
           target="_blank"
           rel="noreferrer noopener"
-          className="text-xs font-semibold text-emerald-700 underline underline-offset-2 transition hover:text-emerald-600 dark:text-emerald-300"
+          className="text-xs font-semibold text-emerald-700 underline underline-offset-2 transition hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200"
         >
           {copy('portal_legal_map_consent_link', MAP_CONSENT_LINK_EN, MAP_CONSENT_LINK_KM)}
         </a>

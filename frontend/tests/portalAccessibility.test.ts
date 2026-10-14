@@ -512,15 +512,16 @@ runTest('the storefront offers a skip-to-content link', () => {
   assert.match(css, /\.portal-skip-link:focus/, 'and visible once it is')
 })
 
-runTest('browser pinch zoom is disabled while image zoom stays explicit', () => {
-  // The app layout must stay at the device width so iOS cannot scale the
-  // whole interface and push action rows outside the viewport. Product image
-  // inspection still has its own explicit lightbox zoom controls.
+runTest('browser pinch zoom is allowed on the storefront while image zoom stays explicit', () => {
+  // WCAG 1.4.4 and the owner's 27 Sep 2026 decision: pinch-zoom on the public
+  // site only. The static viewport is the storefront's, so it carries no cap;
+  // the staff app gets its lock from the bootstrap (tests/mobileViewportGuard
+  // runs both hosts). The product-image lightbox keeps its own zoom controls.
   const html = readFrontend('index.html')
   const viewport = /<meta name="viewport" content="([^"]+)"/.exec(html)
   assert.ok(viewport, 'the viewport meta must exist')
-  assert.match(viewport[1], /user-scalable\s*=\s*no/)
-  assert.match(viewport[1], /maximum-scale\s*=\s*1\b/)
+  assert.doesNotMatch(viewport[1], /user-scalable/)
+  assert.doesNotMatch(viewport[1], /maximum-scale/)
   assert.match(viewport[1], /width=device-width/)
 })
 

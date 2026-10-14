@@ -44,6 +44,7 @@ import {
   serializeAboutBlocks,
   serializePromoItems,
 } from './portalEditorUtils.ts'
+import { portalScrollBehavior } from './portalMotion.ts'
 import {
   clampToRange,
   getPortalGridClass,
@@ -3453,7 +3454,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       // !publicView is untouched: the admin editor keeps `.page-scroll`.
       className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-visible' : 'page-scroll flex-1 overflow-y-auto'}`}
       style={{
-        ...(publicView ? { touchAction: 'pan-y' } : {}),
+        ...(publicView ? { touchAction: 'pan-x pan-y pinch-zoom' } : {}),
         background: portalBackground,
       }}
     >
@@ -3475,7 +3476,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     const top = direction === 'bottom'
       ? Math.max(document.documentElement?.scrollHeight || 0, document.body?.scrollHeight || 0)
       : 0
-    window.scrollTo({ top, behavior: 'smooth' })
+    window.scrollTo({ top, behavior: portalScrollBehavior() })
   }
 
   const previewSurface = (
@@ -3489,7 +3490,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
           // document is the scroll owner, so it must not declare one there either.
           className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-visible' : 'w-full'}`}
           style={{
-            ...(publicView ? { touchAction: 'pan-y' } : {}),
+            ...(publicView ? { touchAction: 'pan-x pan-y pinch-zoom' } : {}),
             background: portalBackground,
           }}
         >
@@ -3523,7 +3524,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         catalogSection={renderCatalogSection()}
         secondaryTabSection={renderSecondaryTabSection()}
         promotionsSection={promotionsSection}
-        footer={<PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} />}
+        footer={<PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} socialLinks={socialLinks} />}
         productDetailView={productDetailView}
         closeProductDetailView={closeProductDetailView}
         productDetailShopName={displayConfig.businessName || displayConfig.title || ''}
