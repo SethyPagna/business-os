@@ -16,7 +16,8 @@ import { readAuditLogPage } from '../lib/auditLogPage'
 import { COURIER_COST_TEXT_PATTERN, canViewCourierCost, redactAuditRows } from '../lib/courierCostAccess'
 import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
-import { BUCKET_MONEY_PLACES, applyLiveProductNames, dashboardInsightRows, getSalesTotals, getSalesTotalsAndPeriodSeries, reportCustomerNameExpr, previousPeriodFilters, shiftWindowBound, shiftWindowWhere } from '../lib/salesAnalytics'
+import { BUCKET_MONEY_PLACES, DASHBOARD_TOP_ROWS, applyLiveProductNames, dashboardRankingRows, getSalesTotalsAndPeriodSeries, getSalesTotalsWithoutLosses, reportCustomerNameExpr, previousPeriodFilters, shiftWindowBound, shiftWindowWhere, type DashboardProductRow } from '../lib/salesAnalytics'
+import { DASHBOARD_RANKING_ROWS, openDashboardRankingsCache, type DashboardRankingsCacheContext } from '../lib/dashboardRankingsCache'
 import { getFamilyStockAlertPage, type FamilyStockAlertState } from '../lib/familyStockStats'
 import { dashboardExpiringProductsSql, loadDashboardStockOverview, type DashboardStockOverviewContext } from '../lib/dashboardStockOverview'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
@@ -307,7 +308,7 @@ async function dashboardSummary(env: Env, query: Record<string, string>, overvie
   }
 }
 
-async function dashboardAnalytics(env: Env, query: Record<string, string>, user: PermissionUser) {
+async function dashboardAnalytics(env: Env, query: Record<string, string>, user: PermissionUser, rankingsContext: DashboardRankingsCacheContext) {
   const isAdmin = isAdminControlUser(user)
   const canViewCosts = canViewAcquisitionCosts(user)
   const canViewCourier = canViewCourierCost(user)
@@ -317,8 +318,10 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, user:
   const filters = { startDate, endDate, createdFrom, createdTo, branchId: query.branchId || null }
   const analyticsParams = dashboardRangeParams(range, filters.branchId)
   const branchClause = (alias: string) => filters.branchId ? ` AND ${alias}.branch_id = @branchId` : ''
+  // Opened first: the versions it keys on must not be newer than the snapshot the rankings come from.
+  const rankingsCache = await openDashboardRankingsCache(env, rankingsContext, filters)
   const [
-    { totals, periodSeries: periodData, byPayment, byBranch, topCustomers, hourlyDist, topProducts: rankedProducts, topProductsQty: rankedProductsQty },
+    { totals, periodSeries: periodData, byPayment, byBranch, topCustomers: rankedCustomers = [], hourlyDist, topProducts: rankedProducts = [], topProductsQty: rankedProductsQty = [] },
     prevTotals,
     periodReturns,
     periodSupplierReturns,
@@ -334,8 +337,9 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, user:
     // round trips to exceed the request budget before finishing, which showed
     // up as a hang rather than a fast, honest error. One shared snapshot read
     // now backs both figures (see getSalesTotalsAndPeriodSeries).
-    getSalesTotalsAndPeriodSeries(env, filters, granularity as 'day' | 'week' | 'month'),
-    range.allTime ? Promise.resolve({}) : getSalesTotals(env, previousPeriodFilters(filters)),
+    getSalesTotalsAndPeriodSeries(env, filters, granularity as 'day' | 'week' | 'month', DASHBOARD_RANKING_ROWS),
+    // The card compares revenue and sale count with the previous period; the removal-loss block is not part of that.
+    range.allTime ? Promise.resolve({}) : getSalesTotalsWithoutLosses(env, previousPeriodFilters(filters)),
     db.prepare(`
       WITH matching_returns AS (
         SELECT r.id, r.total_refund_usd
@@ -359,8 +363,13 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, user:
         AND COALESCE(r.status, 'completed') <> 'cancelled'${branchClause('r')}
     `).get(analyticsParams),
   ])
+  // The "view more" lists are these same rankings, deeper: hand them on, keep the card's top rows.
+  rankingsCache?.write('top_customers', rankedCustomers)
+  rankingsCache?.write('top_products', rankedProducts)
+  rankingsCache?.write('top_products_qty', rankedProductsQty)
+  const topCustomers = rankedCustomers.slice(0, DASHBOARD_TOP_ROWS)
   // Products show under their CURRENT name (a merged or renamed product), one lookup for both lists.
-  const [topProducts, topProductsQty] = await applyLiveProductNames(env, [rankedProducts || [], rankedProductsQty || []])
+  const [topProducts, topProductsQty] = await applyLiveProductNames(env, [rankedProducts.slice(0, DASHBOARD_TOP_ROWS), rankedProductsQty.slice(0, DASHBOARD_TOP_ROWS)])
   return {
     // cost_usd / profit_usd and the removal-loss pair are the SAME admin-only
     // money reports.ts's gateTotals already gates -- reused rather than
@@ -380,7 +389,7 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, user:
     byBranch: byBranch || [],
     topProducts: topProducts || [],
     topProductsQty: topProductsQty || [],
-    topCustomers: topCustomers || [],
+    topCustomers,
     hourlyDist: hourlyDist || [],
   }
 }
@@ -394,9 +403,9 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, user:
 // (not literally unbounded -- see DASHBOARD_INSIGHT_LIST_LIMIT) so a float
 // can never trigger the kind of unbounded scan P11-14 removed elsewhere.
 type DashboardInsightKind = 'recent_sales' | 'expiring_products' | 'top_products' | 'top_products_qty' | 'top_customers'
-const DASHBOARD_INSIGHT_LIST_LIMIT = 300
+const DASHBOARD_INSIGHT_LIST_LIMIT = DASHBOARD_RANKING_ROWS
 
-async function dashboardInsightList(env: Env, query: Record<string, string>, kind: DashboardInsightKind) {
+async function dashboardInsightList(env: Env, query: Record<string, string>, kind: DashboardInsightKind, rankingsContext: DashboardRankingsCacheContext) {
   const db = getDb(env)
   const range = dateRange(query)
   const branchId = query.branchId || null
@@ -426,20 +435,24 @@ async function dashboardInsightList(env: Env, query: Record<string, string>, kin
 
   // top_products / top_products_qty / top_customers: the same verified snapshot
   // and the same kernel rankings dashboardAnalytics reads for these three cards,
-  // just with more rows kept, so the list can never disagree with its card.
-  const rows = await dashboardInsightRows(
-    env,
-    { startDate: range.startDate, endDate: range.endDate, createdFrom: range.createdFrom, createdTo: range.createdTo, branchId },
-    kind,
-    DASHBOARD_INSIGHT_LIST_LIMIT,
-  )
-  return { items: rows, truncated: rows.length >= DASHBOARD_INSIGHT_LIST_LIMIT }
+  // just with more rows kept, so the list can never disagree with its card. The
+  // card has just stored them (lib/dashboardRankingsCache.ts); with nothing stored
+  // the list reads one snapshot and builds only the ranking it shows.
+  const filters = { startDate: range.startDate, endDate: range.endDate, createdFrom: range.createdFrom, createdTo: range.createdTo, branchId }
+  const rankingsCache = await openDashboardRankingsCache(env, rankingsContext, filters)
+  let rows = await rankingsCache?.read(kind) ?? null
+  if (!rows) {
+    rows = await dashboardRankingRows(env, filters, kind, DASHBOARD_INSIGHT_LIST_LIMIT)
+    rankingsCache?.write(kind, rows)
+  }
+  const items = kind === 'top_customers' ? rows : (await applyLiveProductNames(env, [rows as DashboardProductRow[]]))[0]
+  return { items, truncated: items.length >= DASHBOARD_INSIGHT_LIST_LIMIT }
 }
 
 // The shared stock overview's cache key lives on this request's origin, and
 // its cache write runs after the response (waitUntil). A context without an
 // execution context (a pure test calling app.request) simply skips the wait.
-function dashboardOverviewContext(c: { req: { url: string }; executionCtx: { waitUntil(promise: Promise<unknown>): void } }): DashboardStockOverviewContext {
+function dashboardOverviewContext(c: { req: { url: string }; executionCtx: { waitUntil(promise: Promise<unknown>): void } }): DashboardStockOverviewContext & DashboardRankingsCacheContext {
   return {
     requestUrl: c.req.url,
     waitUntil(promise) {
@@ -486,7 +499,7 @@ app.get('/analytics', async (c) => {
   if (denied) return denied
   const rangeError = dashboardRangeError(c.req.query())
   if (rangeError) return c.json({ error: rangeError }, 400)
-  return c.json(await dashboardAnalytics(c.env, c.req.query(), c.get('user')))
+  return c.json(await dashboardAnalytics(c.env, c.req.query(), c.get('user'), dashboardOverviewContext(c)))
 })
 app.get('/dashboard/insight-list', async (c) => {
   const denied = denyUnless(c, 'dashboard')
@@ -498,7 +511,7 @@ app.get('/dashboard/insight-list', async (c) => {
   if (!validKinds.includes(kind as DashboardInsightKind)) {
     return c.json({ error: 'insight must be one of ' + validKinds.join(', ') }, 400)
   }
-  return c.json(await dashboardInsightList(c.env, c.req.query(), kind as DashboardInsightKind))
+  return c.json(await dashboardInsightList(c.env, c.req.query(), kind as DashboardInsightKind, dashboardOverviewContext(c)))
 })
 app.get('/dashboard/startup', async (c) => {
   const denied = denyUnless(c, 'dashboard')
@@ -507,7 +520,7 @@ app.get('/dashboard/startup', async (c) => {
   if (rangeError) return c.json({ error: rangeError }, 400)
   const [summary, analytics] = await Promise.all([
     dashboardSummary(c.env, c.req.query(), dashboardOverviewContext(c)),
-    dashboardAnalytics(c.env, c.req.query(), c.get('user')),
+    dashboardAnalytics(c.env, c.req.query(), c.get('user'), dashboardOverviewContext(c)),
   ])
   return c.json({ summary, analytics })
 })

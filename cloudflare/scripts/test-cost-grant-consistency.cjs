@@ -17,7 +17,7 @@ function load(file) {
     if (name === '../lib/auth') return { requireAuth: async (c, next) => { c.set('user', user); return next() } }
     if (name === '../lib/db') return { getDb: () => { dbReads++; return { prepare: () => ({ get: async () => ({}), all: async () => [] }) } } }
     if (name === '../lib/salesAnalytics') return { ...load(path.join(root, 'lib/salesAnalytics.ts')),
-      getSalesTotals: async () => ({ ...data }), getBusinessSummaryPeriodRows: async () => [{ ...data }],
+      getSalesTotals: async () => ({ ...data }), getSalesTotalsWithoutLosses: async () => ({ ...data }), getBusinessSummaryPeriodRows: async () => [{ ...data }],
       getSalesTotalsAndPeriodSeries: async () => ({ totals: { ...data }, periodSeries: [] }),
       getProductSalesRanking: async () => [{ ...data }], getSalesGroupedTotals: async () => [{ ...data }],
       getProductSalesReport: async () => ({ rows: [{ ...data }], total_groups: 1, totals: { ...data } }),
@@ -89,7 +89,7 @@ async function main() {
     assert.equal(dbReads, 0, url)
   }
   const compat = fs.readFileSync(path.join(root, 'routes/compat.ts'), 'utf8')
-  assert.equal((compat.match(/dashboardAnalytics\(c.env, c.req.query\(\), c.get\('user'\)\)/g) || []).length, 2)
+  assert.equal((compat.match(/dashboardAnalytics\(c.env, c.req.query\(\), c.get\('user'\), dashboardOverviewContext\(c\)\)/g) || []).length, 2)
   console.log('PASS explicit cost-view report grants, inherited grants, false overrides, edit-only denial, admins, delivery isolation, action authorization')
 }
 main().catch(e => { console.error(e); process.exitCode = 1 })

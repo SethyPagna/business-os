@@ -226,6 +226,13 @@ async function reconcile(world, { cards = 'new' } = {}) {
   assert.equal(sum(ranked.topProducts, 'revenue_usd'), sum(reportsPay, 'revenue_usd'), 'top products add up to the Reports buckets, 4 places')
   assert.deepEqual(ranked.topProducts.map((row) => [row.product_id, row.qty_sold, row.revenue_usd]).sort(),
     byProduct.map((row) => [row.product_id, row.qty_sold, row.revenue_usd]).sort(), 'the Dashboard and the export preview share one product allocation')
+  // the "view more" list builds only the ranking it shows: each kind is the card's own ranking, in the card's order, nothing else
+  for (const [kind, expected, order] of [['top_customers', ranked.topCustomers, 'net_revenue_usd'], ['top_products', ranked.topProducts, 'revenue_usd'], ['top_products_qty', ranked.topProductsQty, 'qty_sold']]) {
+    const single = analytics.dashboardRankingFromSnapshot(snapshot, kind, 1000)
+    assert.deepEqual(single, expected, `the ${kind} list is the ${kind} card ranking`)
+    assert.ok(single.every((row, index) => index === 0 || single[index - 1][order] >= row[order]), `the ${kind} list is ordered by ${order}`)
+    assert.deepEqual(analytics.dashboardRankingFromSnapshot(snapshot, kind, 3), expected.slice(0, 3), `the ${kind} list keeps the first rows of the same ranking`)
+  }
   assert.deepEqual(dashboard.topCustomers, ranked.topCustomers.slice(0, 20), 'the Dashboard path returns the first 20 of the same ranking')
   assert.deepEqual(dashboard.hourlyDist, ranked.hourlyDist)
   return { headline, byPayment, byBranch, byStatus, byProduct, dashboardStatements, totalsStatements }
@@ -280,6 +287,8 @@ async function main() {
     { name: 'product allocation drops its remainder', patches: [{ file: SA, from: 'for (let i = 0; i < left; i += 1) parts[order[i % order.length].index] += 1', to: '' }] },
     { name: 'product revenue without the rounding adjustment', patches: [{ file: SA, from: 'const units = toUnits(fact.net.add(fact.adjustment).subtract(fact.refund))', to: 'const units = toUnits(fact.net.subtract(fact.refund))' }] },
     { name: 'top customers rounded to cents', patches: [{ file: SA, from: 'total_refund_usd: row.refund_usd, net_revenue_usd: row.revenue_usd,', to: 'total_refund_usd: row.refund_usd, net_revenue_usd: Math.round(row.revenue_usd * 100) / 100,' }] },
+    { name: 'view-more list ranks quantity by revenue', patches: [{ file: SA, from: "productRanking(productRevenueGroups(snapshot).groups, kind, limit)", to: "productRanking(productRevenueGroups(snapshot).groups, 'top_products', limit)" }] },
+    { name: 'view-more list returns the wrong ranking for customers', patches: [{ file: SA, from: "kind === 'top_customers' ? customerRanking(snapshot, limit)", to: "kind === 'top_customers' ? customerRanking(snapshot, limit + 1)" }] },
     { name: 'busy hours rounded to cents', patches: [{ file: SA, from: '.map((row) => ({ hour: Number(row.key), count: row.tx_count, revenue_usd: row.revenue_usd }))', to: '.map((row) => ({ hour: Number(row.key), count: row.tx_count, revenue_usd: Math.round(row.revenue_usd * 100) / 100 }))' }] },
     { name: 'status revenue taken from the legacy basis', patches: [{ file: SA, from: 'revenue: exactReportTotals(bucket, snapshot, BUCKET_MONEY_PLACES).revenue_usd,', to: 'revenue: exactReportTotals(bucket, snapshot, 2).revenue_usd,' }] },
   ]

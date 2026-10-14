@@ -1934,6 +1934,11 @@ function unionBuckets(levelKeys: Iterable<string>, cancelled: Map<string, number
  *  falls back to the gross-minus-discount basis and reports a phantom. */
 const VOID_ONLY_LEVEL: Record<string, number> = { tx_count: 0, recognized_net_usd: 0 }
 
+/** The totals of one verified window without the removal-loss block, for a comparison that reads revenue and sale count only. */
+export async function getSalesTotalsWithoutLosses(env: Env, f: SalesFilters): Promise<SalesTotals> {
+  return salesTotalsFromSnapshot(await readSalesReportSnapshot(env, f))
+}
+
 export async function getSalesTotals(env: Env, f: SalesFilters): Promise<SalesTotals> {
   const [snapshot, loss] = await Promise.all([
     readSalesReportSnapshot(env, f),
@@ -1993,6 +1998,7 @@ export async function getSalesTotalsAndPeriodSeries(
   env: Env,
   f: SalesFilters,
   granularity: 'day' | 'week' | 'month',
+  rankingLimit = DASHBOARD_TOP_ROWS,
 ): Promise<{ totals: SalesTotals; periodSeries: SalesPeriodRow[]; byPayment: DashboardPaymentRow[]; byBranch: DashboardBranchRow[] } & DashboardRankings> {
   const [snapshot, loss] = await Promise.all([
     readSalesReportSnapshot(env, f),
@@ -2002,7 +2008,7 @@ export async function getSalesTotalsAndPeriodSeries(
     totals: withRemovalLosses(salesTotalsFromSnapshot(snapshot), loss),
     periodSeries: salesPeriodRowsFromSnapshot(snapshot, granularity),
     ...dashboardSplitsFromSnapshot(snapshot),
-    ...dashboardRankingsFromSnapshot(snapshot),
+    ...dashboardRankingsFromSnapshot(snapshot, rankingLimit),
   }
 }
 
@@ -2045,25 +2051,37 @@ export interface DashboardRankings {
 }
 export const DASHBOARD_TOP_ROWS = 20
 
-/** Pure: the four rankings of one verified snapshot. Product names are the sale lines' own; applyLiveProductNames swaps in the current ones. */
-export function dashboardRankingsFromSnapshot(snapshot: SalesReportSnapshot, limit = DASHBOARD_TOP_ROWS): DashboardRankings {
-  const topCustomers = groupedRowsFromSnapshot(snapshot, 'customer').filter((row) => row.tx_count > 0).sort(revenueFirst).slice(0, limit)
+export type DashboardRankKind = 'top_customers' | 'top_products' | 'top_products_qty'
+
+function customerRanking(snapshot: SalesReportSnapshot, limit: number): DashboardCustomerRow[] {
+  return groupedRowsFromSnapshot(snapshot, 'customer').filter((row) => row.tx_count > 0).sort(revenueFirst).slice(0, limit)
     .map((row) => ({
       customer_name: row.label, sale_count: row.tx_count, gross_revenue_usd: row.gross_sales_usd,
       store_discount_usd: row.store_discount_usd, membership_discount_usd: row.membership_discount_usd,
       total_refund_usd: row.refund_usd, net_revenue_usd: row.revenue_usd,
     }))
+}
+
+function productRanking(groups: ProductRevenueGroup[], kind: 'top_products' | 'top_products_qty', limit: number): DashboardProductRow[] {
+  return [...groups].sort(kind === 'top_products' ? byProductRevenue : byProductQty).slice(0, limit).map((group) => ({
+    product_id: group.id, product_name: group.name, qty_sold: group.qty.toNumber(2), revenue_usd: group.units / MONEY_UNITS,
+  }))
+}
+
+/** Pure: the four rankings of one verified snapshot. Product names are the sale lines' own; applyLiveProductNames swaps in the current ones. */
+export function dashboardRankingsFromSnapshot(snapshot: SalesReportSnapshot, limit = DASHBOARD_TOP_ROWS): DashboardRankings {
   const hourlyDist = groupedRowsFromSnapshot(snapshot, 'hour').filter((row) => row.tx_count > 0)
     .map((row) => ({ hour: Number(row.key), count: row.tx_count, revenue_usd: row.revenue_usd })).sort((a, b) => a.hour - b.hour)
   const { groups } = productRevenueGroups(snapshot)
-  const productRow = (group: ProductRevenueGroup): DashboardProductRow => ({
-    product_id: group.id, product_name: group.name, qty_sold: group.qty.toNumber(2), revenue_usd: group.units / MONEY_UNITS,
-  })
   return {
-    topCustomers, hourlyDist,
-    topProducts: [...groups].sort(byProductRevenue).slice(0, limit).map(productRow),
-    topProductsQty: [...groups].sort(byProductQty).slice(0, limit).map(productRow),
+    topCustomers: customerRanking(snapshot, limit), hourlyDist,
+    topProducts: productRanking(groups, 'top_products', limit), topProductsQty: productRanking(groups, 'top_products_qty', limit),
   }
+}
+
+/** Pure: ONE ranking of a verified snapshot, the rows the card of the same kind keeps, without building the other three. */
+export function dashboardRankingFromSnapshot(snapshot: SalesReportSnapshot, kind: DashboardRankKind, limit: number): Array<DashboardCustomerRow | DashboardProductRow> {
+  return kind === 'top_customers' ? customerRanking(snapshot, limit) : productRanking(productRevenueGroups(snapshot).groups, kind, limit)
 }
 
 /** The product rows under their CURRENT names (a renamed or merged product shows its current name; the sale line's name is the fallback). One lookup for every list given. */
@@ -2074,14 +2092,11 @@ export async function applyLiveProductNames<T extends { product_id: number | nul
   return lists.map((list) => list.map((row) => ({ ...row, product_name: (row.product_id != null && live.get(row.product_id)) || row.product_name })))
 }
 
-/** The Dashboard "view more" list of one ranking: the same snapshot, the same buckets, just more rows than the card keeps. */
-export async function dashboardInsightRows(
-  env: Env, f: SalesFilters, kind: 'top_customers' | 'top_products' | 'top_products_qty', limit: number,
+/** The Dashboard "view more" list of one ranking: the same snapshot, the same buckets, just more rows than the card keeps. Product names are the sale lines' own (see applyLiveProductNames). */
+export async function dashboardRankingRows(
+  env: Env, f: SalesFilters, kind: DashboardRankKind, limit: number,
 ): Promise<Array<DashboardCustomerRow | DashboardProductRow>> {
-  const ranked = dashboardRankingsFromSnapshot(await readSalesReportSnapshot(env, f), limit)
-  if (kind === 'top_customers') return ranked.topCustomers
-  const [named] = await applyLiveProductNames(env, [kind === 'top_products_qty' ? ranked.topProductsQty : ranked.topProducts])
-  return named
+  return dashboardRankingFromSnapshot(await readSalesReportSnapshot(env, f), kind, limit)
 }
 
 // The Sales export preview's two splits, by the same rule as the Dashboard cards above: the export's own verified

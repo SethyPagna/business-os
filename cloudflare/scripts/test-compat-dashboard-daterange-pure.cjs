@@ -281,7 +281,7 @@ const NEW_TODAY = `date(created_at, '+7 hours') = date('now', '+7 hours') AND cr
   // Every revenue breakdown (payment, branch, customers, hours, products and their view-more lists) is a view of the
   // kernel's verified snapshot; compat.ts keeps no net-sale SQL of its own (release-2 refuter SF-4, 13 Oct 2026).
   check('compat.ts breakdowns come from the canonical kernel, with no net-sale SQL of their own',
-    /getSalesTotalsAndPeriodSeries\(env, filters, granularity/.test(src) && /dashboardInsightRows\(/.test(src) && /applyLiveProductNames\(/.test(src)
+    /getSalesTotalsAndPeriodSeries\(env, filters, granularity/.test(src) && /dashboardRankingRows\(/.test(src) && /applyLiveProductNames\(/.test(src)
       && !/netSaleExpr|netRefundExpr|CUSTOMER_REFUND_JOIN|attributedLineRevenue/.test(src))
   // The default window is the business day itself, matching every list page
   // (user, 2026-09-03) -- not a rolling seven days, not all history.
