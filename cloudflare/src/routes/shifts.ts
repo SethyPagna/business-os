@@ -374,6 +374,12 @@ async function closeTimeVerdict(env: Env, user: SessionUser, shift: ShiftRow, cl
   if (canManageShifts(user)) return { earlier: true, refusal: null }
   return { earlier: true, refusal: beforeActivity ? CLOSE_TIME_REFUSALS.beforeActivity : CLOSE_TIME_REFUSALS.tooEarly }
 }
+const SHIFT_TIME_ADMIN_ONLY = { code: 'shift_time_admin_only', error: 'Only an administrator can change the opening or closing time of a shift.' } as const
+/** Whether an amend asks for a different opening or closing instant (second resolution, the stored text's own). */
+function timesChanged(before: ShiftRow, requestedOpenedAt: string, requestedClosedAt: string | null): boolean {
+  const sameSecond = (a: string | null, b: string | null) => (a == null || b == null ? a === b : Math.floor(utcMs(a) / 1000) === Math.floor(utcMs(b) / 1000))
+  return !sameSecond(requestedOpenedAt, before.opened_at) || !sameSecond(requestedClosedAt, before.closed_at)
+}
 function utcMs(value: string): number {
   const text = value.trim()
   return Date.parse(/[zZ]|[+-]\d{2}:?\d{2}$/.test(text) ? text.replace(' ', 'T') : `${text.replace(' ', 'T')}Z`)
@@ -1454,6 +1460,7 @@ app.patch('/:id', async (c) => {
   }
   const requestedOpenedAt = iso('opened_at', before.opened_at); const requestedClosedAt = iso('closed_at', before.closed_at)
   if (!requestedOpenedAt || requestedClosedAt === undefined) return c.json({ error: 'Invalid shift timestamp.' }, 400)
+  if (!canManageShifts(user) && timesChanged(before, requestedOpenedAt, requestedClosedAt)) return c.json(SHIFT_TIME_ADMIN_ONLY, 409)
   const now = Date.now()
   const openedMs = withinServerClock(utcMs(requestedOpenedAt), now)
   const closedMs = requestedClosedAt ? withinServerClock(utcMs(requestedClosedAt), now) : null

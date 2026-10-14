@@ -198,8 +198,8 @@ export function AmendmentList({ rows, segments = [] }: { rows: ShiftAmendment[];
 export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PAGE_SIZE, layer = 'default', label, buttonClassName = 'btn-secondary min-h-11 text-xs', notify }: Props) {
   const app = useApp() as { user?: { id: number | string; username?: unknown; role_code?: unknown; permissions?: unknown; role_permissions?: unknown }; t: (key: string) => string; notify?: (message: string, tone?: string) => void }
   const { t } = app
-  // Owner, 14 Oct 2026: only an administrator chooses a past close time; an employee closes now.
-  const canPickCloseTime = () => isAdminControlUser(app.user)
+  // Owner, 14 Oct 2026: only an administrator chooses or changes a shift's opening or closing time; an employee closes now.
+  const canChooseShiftTime = () => isAdminControlUser(app.user)
   const sendNotice = notify || app.notify
   const listRequest = useRef(0)
   const detailsRequest = useRef(0)
@@ -362,7 +362,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
           if (saved.action === 'close') setClose({ closedAt: dateTimeLocal(value('closed_at')), closingUsd: value('closing_counted_usd'), closingKhr: value('closing_counted_khr'), additionalUsd: value('additional_cash_usd'), additionalKhr: value('additional_cash_khr'), closingNote: value('closing_note') })
           if (saved.action === 'reopen') setReopen({ reason: value('reason'), openingUsd: value('opening_float_usd'), openingKhr: value('opening_float_khr'), openingNote: value('opening_note') })
           if (saved.action === 'cancel') setCancelReason(value('reason'))
-          if (saved.action === 'edit') setEdit({ expectedRevision: Number(saved.body.expected_revision), reason: value('reason'), openedAt: dateTimeLocal(value('opened_at')), closedAt: dateTimeLocal(value('closed_at')), openingUsd: value('opening_float_usd'), openingKhr: value('opening_float_khr'), additionalUsd: value('additional_cash_usd'), additionalKhr: value('additional_cash_khr'), closingUsd: value('closing_counted_usd'), closingKhr: value('closing_counted_khr'), openingNote: value('opening_note'), closingNote: value('closing_note') })
+          if (saved.action === 'edit') setEdit({ expectedRevision: Number(saved.body.expected_revision), reason: value('reason'), openedAt: 'opened_at' in saved.body ? dateTimeLocal(value('opened_at')) : dateTimeLocal(result.shift.opened_at), closedAt: 'closed_at' in saved.body ? dateTimeLocal(value('closed_at')) : dateTimeLocal(result.shift.closed_at), openingUsd: value('opening_float_usd'), openingKhr: value('opening_float_khr'), additionalUsd: value('additional_cash_usd'), additionalKhr: value('additional_cash_khr'), closingUsd: value('closing_counted_usd'), closingKhr: value('closing_counted_khr'), openingNote: value('opening_note'), closingNote: value('closing_note') })
         } else setPending(false)
       }
     } catch (cause) {
@@ -412,6 +412,9 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
     if (closingCountInvalid(edit.openingUsd) || closingCountInvalid(edit.openingKhr)
       || (edit.closedAt && (closingCountInvalid(edit.closingUsd) || closingCountInvalid(edit.closingKhr)
         || closingCountInvalid(edit.additionalUsd) || closingCountInvalid(edit.additionalKhr)))) return
+    const base = editDraft(selected)
+    const openedChanged = edit.openedAt !== base.openedAt
+    const closedChanged = edit.closedAt !== base.closedAt
     const isCurrent = beginMutation()
     if (!isCurrent) return
     try {
@@ -419,13 +422,14 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
         actorId: app.user?.id,
         expectedRevision: edit.expectedRevision,
         reason: edit.reason.trim(),
-        openedAt: shiftLocalDateTimeToIso(edit.openedAt),
+        ...(openedChanged ? { openedAt: shiftLocalDateTimeToIso(edit.openedAt) } : {}),
         openingFloatUsd: opening.usd,
         openingFloatKhr: opening.khr,
         additionalCashUsd: edit.additionalUsd.trim() === '' ? undefined : Number(edit.additionalUsd),
         additionalCashKhr: edit.additionalKhr.trim() === '' ? undefined : Number(edit.additionalKhr),
         openingNote: edit.openingNote.trim() || null,
-        closedAt: edit.closedAt ? shiftLocalDateTimeToIso(edit.closedAt) : null,
+        closedAt: !edit.closedAt ? null : closedChanged ? shiftLocalDateTimeToIso(edit.closedAt) : selected.closed_at,
+        closedAtUnchanged: !!edit.closedAt && !closedChanged,
         closingCountedUsd: closing.usd,
         closingCountedKhr: closing.khr,
         closingNote: edit.closedAt ? edit.closingNote.trim() || null : null,
@@ -591,8 +595,9 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
                     <div className="space-y-3 rounded-xl border border-gray-200 p-3 dark:border-zinc-700">
                       <h3 className="text-sm font-semibold">{t('shift_amend')}</h3>
                       <fieldset disabled={saving || pending} className="grid min-w-0 gap-3 sm:grid-cols-2 [&_input]:min-w-0 [&_input]:max-w-full">
-                        <div className="text-xs"><span className="block">{t('shift_opened_at')}</span><DateTimeEntryInput className="mt-1" value={edit.openedAt} onChange={(next) => setEdit({ ...edit, openedAt: next })} t={t} dateAriaLabel={`${t('shift_opened_at')} · ${t('date')}`} timeAriaLabel={`${t('shift_opened_at')} · ${t('time')}`} /></div>
-                        <div className="text-xs"><span className="block">{t('shift_closed_at')}</span><DateTimeEntryInput className="mt-1" value={edit.closedAt} disabled={!selected.closed_at} onChange={(next) => setEdit({ ...edit, closedAt: next })} t={t} dateAriaLabel={`${t('shift_closed_at')} · ${t('date')}`} timeAriaLabel={`${t('shift_closed_at')} · ${t('time')}`} /></div>
+                        <div className="text-xs"><span className="block">{t('shift_opened_at')}</span><DateTimeEntryInput className="mt-1" value={edit.openedAt} disabled={!canChooseShiftTime()} onChange={(next) => setEdit({ ...edit, openedAt: next })} t={t} dateAriaLabel={`${t('shift_opened_at')} · ${t('date')}`} timeAriaLabel={`${t('shift_opened_at')} · ${t('time')}`} /></div>
+                        <div className="text-xs"><span className="block">{t('shift_closed_at')}</span><DateTimeEntryInput className="mt-1" value={edit.closedAt} disabled={!selected.closed_at || !canChooseShiftTime()} onChange={(next) => setEdit({ ...edit, closedAt: next })} t={t} dateAriaLabel={`${t('shift_closed_at')} · ${t('date')}`} timeAriaLabel={`${t('shift_closed_at')} · ${t('time')}`} /></div>
+                        {canChooseShiftTime() ? null : <p className="text-xs leading-relaxed text-gray-600 dark:text-gray-300 sm:col-span-2">{t('shift_time_admin_only')}</p>}
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_opening_cash')} usdLabel={t('shift_float_usd')} khrLabel={t('shift_float_khr')} usd={edit.openingUsd} khr={edit.openingKhr} onUsd={(value) => setEdit({ ...edit, openingUsd: value })} onKhr={(value) => setEdit({ ...edit, openingKhr: value })} />
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')} hint={t('shift_additional_cash_hint')} hintDetail={t('shift_additional_cash_example')} usd={edit.additionalUsd} khr={edit.additionalKhr} disabled={!edit.closedAt} onUsd={(value) => setEdit({ ...edit, additionalUsd: value })} onKhr={(value) => setEdit({ ...edit, additionalKhr: value })} />
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')} hint={t('shift_registered_cash_hint')} usd={edit.closingUsd} khr={edit.closingKhr} disabled={!edit.closedAt} onUsd={(value) => setEdit({ ...edit, closingUsd: value })} onKhr={(value) => setEdit({ ...edit, closingKhr: value })} />
@@ -616,7 +621,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
                       <div><h3 className="text-sm font-semibold">{t('shift_close_title')}</h3><p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300">{t('shift_close_time_hint')}</p>
                         {selected.close_before ? <p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300"><span className="font-medium">{t('shift_previous_open_close_before')}</span> · {fmtDateTime24(selected.close_before)}</p> : null}</div>
                       <fieldset disabled={saving || pending} className="grid min-w-0 gap-3 sm:grid-cols-2 [&_input]:min-w-0 [&_input]:max-w-full">
-                        <div className="text-xs font-semibold sm:col-span-2"><span className="block">{t('shift_close_time_required')}</span><DateTimeEntryInput className="mt-1" value={close.closedAt} disabled={!canPickCloseTime()} onChange={(next) => setClose({ ...close, closedAt: next })} t={t} dateAriaLabel={`${t('shift_close_time_required')} · ${t('date')}`} timeAriaLabel={`${t('shift_close_time_required')} · ${t('time')}`} />{canPickCloseTime() ? null : <span className="mt-1 block font-normal text-gray-600 dark:text-gray-300">{t('shift_close_time_admin_only')}</span>}</div>
+                        <div className="text-xs font-semibold sm:col-span-2"><span className="block">{t('shift_close_time_required')}</span><DateTimeEntryInput className="mt-1" value={close.closedAt} disabled={!canChooseShiftTime()} onChange={(next) => setClose({ ...close, closedAt: next })} t={t} dateAriaLabel={`${t('shift_close_time_required')} · ${t('date')}`} timeAriaLabel={`${t('shift_close_time_required')} · ${t('time')}`} />{canChooseShiftTime() ? null : <span className="mt-1 block font-normal text-gray-600 dark:text-gray-300">{t('shift_close_time_admin_only')}</span>}</div>
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')} hint={t('shift_additional_cash_hint')} hintDetail={t('shift_additional_cash_example')} usd={close.additionalUsd} khr={close.additionalKhr} onUsd={(value) => setClose({ ...close, additionalUsd: value })} onKhr={(value) => setClose({ ...close, additionalKhr: value })} />
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')} hint={t('shift_registered_cash_hint')} usd={close.closingUsd} khr={close.closingKhr} onUsd={(value) => setClose({ ...close, closingUsd: value })} onKhr={(value) => setClose({ ...close, closingKhr: value })} />
                         <label className="text-xs sm:col-span-2">{t('shift_closing_note')}<input className="input mt-1" value={close.closingNote} onChange={(event) => setClose({ ...close, closingNote: event.target.value })} /></label>

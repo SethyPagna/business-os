@@ -6621,6 +6621,7 @@
   "shift_close_before_last_activity": "Close the shift after its last sale, return or expense. An earlier time is not allowed.",
   "shift_close_too_early": "Close the shift now. A close time more than 5 minutes in the past needs an administrator.",
   "shift_close_time_admin_only": "Only an administrator can choose an earlier time. The shift closes now.",
+  "shift_time_admin_only": "Only an administrator can change the opening or closing time of a shift.",
   "shift_branch_inactive": "Branch inactive",
   "shift_branch_inactive_hint": "This branch no longer trades. The shift stays here as a read-only record; a shift still open there can only be closed.",
   "shift_branch_closed_title": "This branch is closed",

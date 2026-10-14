@@ -140,7 +140,7 @@ async function main() {
     await check('employee amending the closed shift\'s close time to before its last sale is refused', () => unwritten('amend closed_at earlier', emp, async () => {
       const revision = (await rowOf(emp)).revision
       const amended = await call('emp', 'PATCH', `/${emp}`, { expected_revision: revision, reason: 'Earlier please', closed_at: new Date(Date.now() - 15 * MIN).toISOString() })
-      refusal('amend closed_at earlier', amended, 'shift_close_before_last_activity')
+      refusal('amend closed_at earlier', amended, 'shift_time_admin_only')
     }))
 
     // ---- a second cashier: the same early close, by an administrator -------------------

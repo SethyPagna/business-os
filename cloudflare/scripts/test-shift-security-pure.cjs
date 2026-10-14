@@ -289,7 +289,7 @@ async function main() {
   // 16:00 UTC close then appears to run past. This is a POSITIVE CONTROL --
   // reverting intervalError's utcMs() calls back to bare `new Date()` makes
   // this print 400, not 200; keep it that way if this ever needs re-checking.
-  user = { id: 60, name: 'TZ owner', username: 'tzowner', permissions: JSON.stringify({ pos: true }) }
+  user = { id: 60, name: 'TZ owner', username: 'tzowner', role_code: 'admin', permissions: JSON.stringify({ pos: true }) }
   sqlite.prepare(`INSERT INTO shift_sessions
     (shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at,closed_at)
     VALUES ('TZ-CURRENT','per_account',60,'TZ owner',1,'Canonical Shop','2026-09-14','2026-09-14 08:00:00','2026-09-14T10:00:00.000Z')`).run()

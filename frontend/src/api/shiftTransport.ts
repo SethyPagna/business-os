@@ -685,20 +685,24 @@ export type AmendShiftInput = {
   actorId?: number | string
   expectedRevision: number
   reason: string
-  openedAt: string
+  /** Left out when the opening time is not being changed: only an administrator may change it. */
+  openedAt?: string
   openingFloatUsd: number | null
   openingFloatKhr: number | null
   additionalCashUsd?: number | null
   additionalCashKhr?: number | null
   openingNote?: string | null
+  /** The shift's closing time (null on an open shift). */
   closedAt?: string | null
+  /** True when closedAt is only here to say the shift is closed and its time is not being changed: it is not sent. */
+  closedAtUnchanged?: boolean
   closingCountedUsd?: number | null
   closingCountedKhr?: number | null
   closingNote?: string | null
 }
 
 export async function amendShift(id: number, input: AmendShiftInput): Promise<{ shift: Shift }> {
-  if (shiftTimestampIsFuture(input.openedAt) || (input.closedAt && shiftTimestampIsFuture(input.closedAt))) throw new Error('Shift time cannot be in the future.')
+  if ((input.openedAt && shiftTimestampIsFuture(input.openedAt)) || (input.closedAt && shiftTimestampIsFuture(input.closedAt))) throw new Error('Shift time cannot be in the future.')
   const openingFloatUsd = optionalShiftCount(input.openingFloatUsd, 'Opening USD count')
   const openingFloatKhr = optionalShiftCount(input.openingFloatKhr, 'Opening KHR count')
   // Optional even on a closed shift: a shift ended without a count keeps that
@@ -714,13 +718,13 @@ export async function amendShift(id: number, input: AmendShiftInput): Promise<{ 
     () => shiftMutationFetch('PATCH', `/api/shifts/${id}`, {
       expected_revision: input.expectedRevision,
       reason: input.reason,
-      opened_at: input.openedAt,
+      ...(input.openedAt ? { opened_at: input.openedAt } : {}),
       opening_float_usd: openingFloatUsd,
       opening_float_khr: openingFloatKhr,
       ...(input.additionalCashUsd !== undefined ? { additional_cash_usd: optionalShiftCount(input.additionalCashUsd, 'Additional change used (USD)') } : {}),
       ...(input.additionalCashKhr !== undefined ? { additional_cash_khr: optionalShiftCount(input.additionalCashKhr, 'Additional change used (KHR)') } : {}),
       opening_note: input.openingNote ?? null,
-      closed_at: input.closedAt ?? null,
+      ...(input.closedAtUnchanged ? {} : { closed_at: input.closedAt ?? null }),
       closing_counted_usd: closingCountedUsd,
       closing_counted_khr: closingCountedKhr,
       closing_note: input.closingNote ?? null,

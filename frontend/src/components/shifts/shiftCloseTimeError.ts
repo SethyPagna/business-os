@@ -1,8 +1,13 @@
-// The Worker refuses a cashier's close time that would leave a recorded sale, return or expense
-// outside the drawer (409, a code). The app shows its own translated sentence, not the English fallback.
+// The Worker refuses a shift time that would leave a recorded sale, return or expense outside the drawer, or
+// that only an administrator may choose (409, a code). The app shows its own translated sentence, never the
+// English fallback; each code is the pack key of its sentence.
+const TIME_REFUSAL_CODES = new Set([
+  'shift_close_before_last_activity',
+  'shift_close_too_early',
+  'shift_time_admin_only',
+])
+
 export function shiftCloseTimeRefusalText(error: unknown, t: (key: string) => string): string | null {
   const code = (error as { code?: unknown } | null)?.code
-  if (code === 'shift_close_before_last_activity') return t('shift_close_before_last_activity')
-  if (code === 'shift_close_too_early') return t('shift_close_too_early')
-  return null
+  return typeof code === 'string' && TIME_REFUSAL_CODES.has(code) ? t(code) : null
 }
