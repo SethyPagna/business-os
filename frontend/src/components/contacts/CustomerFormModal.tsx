@@ -14,6 +14,7 @@ import { useContactDuplicateFlag } from './useContactDuplicateFlag'
 import DuplicateFlagBanner from './DuplicateFlagBanner'
 import { createSeparateContactDecision, resolveContactDuplicateSyncError, type ContactDuplicateCheck, type ContactDuplicateDecision, type ContactDuplicateMatch } from './contactDuplicates'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
+import SavingBlockedNote from '../shared/SavingBlockedNote.tsx'
 import { formatPhoneInputElement, handlePhoneInputBeforeInput, handlePhoneInputKeyDown } from '../../utils/phoneInput.ts'
 
 type TranslateFn = (key: string) => string | undefined
@@ -331,7 +332,7 @@ export default function CustomerFormModal({ customer, onSave, onUseExisting, onC
           </div>
         ) : null}
 
-        {savingBlockedText ? <p id="customer-saving-blocked" role="status" className="text-xs leading-relaxed text-amber-700 dark:text-amber-300">{savingBlockedText}</p> : null}
+        <SavingBlockedNote id="customer-saving-blocked" text={savingBlockedText} />
 
         {/* Sticky footer, same reasoning/pattern as ProductForm.tsx and
             FeeForm.tsx's own fix (see their comments): pinned to the

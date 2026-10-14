@@ -36,6 +36,7 @@ import { captureOfflineSaleOwner, offlineSaleOwnersMatch, type OfflineSaleOwner 
 import { hasLocalSyncProblemPresentation, subscribeSyncProblemPresentation, shouldClearResolvedSyncError, SYNC_ERROR_RESOLVED_EVENT, type SyncProblemReference } from './utils/syncProblemLifecycle.ts'
 import { presentWriteError } from './utils/writeErrorPresentation.ts'
 import { runWhenVisible } from './utils/visibilityPolling.ts'
+import { CheckConnectionButton } from './components/shared/SavingBlockedNote.tsx'
 import { createPendingSyncPoll } from './app/pendingSyncPolling.ts'
 
 declare const __FRONTEND_BUILD_HASH__: string | undefined
@@ -1613,6 +1614,7 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
             </button>
           ) : null}
             <div className="flex shrink-0 items-center gap-2">
+            {offline ? <CheckConnectionButton /> : null}
             {total ? (
               <button
                 type="button"

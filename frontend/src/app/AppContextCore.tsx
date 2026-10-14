@@ -18,6 +18,7 @@ export type AppContextCoreValue = {
   authReady: boolean
   canAccessPage: (pageId: string) => boolean
   canWriteToServer: boolean
+  recheckConnection: () => Promise<boolean>
   deviceTimezone: string
   dismissWriteConflict: () => void
   displayCurrency: string
@@ -128,6 +129,7 @@ export const FALLBACK_APP_CONTEXT: AppContextCoreValue = {
   syncChannel: null,
   syncServerUnreachable: false,
   canWriteToServer: false,
+  recheckConnection: async () => false,
   AccessDenied: () => null,
 }
 

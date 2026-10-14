@@ -1247,6 +1247,13 @@ export async function pingServerHealth(force = false): Promise<ServerHealthProbe
   }
 }
 
+// The browser's navigator.onLine can be wrong in either direction; this asks the server itself.
+export async function confirmServerReachable(): Promise<boolean> {
+  if (!getSyncServerUrl()) return false
+  const result = await pingServerHealth(true)
+  return result.online && !result.runtimeMismatch && !result.cloudflareAccessRequired
+}
+
 export function primeServerHealthFromRuntime(serverRuntime: LooseRecord = {}): ServerHealthProbeResult {
   const runtime = serverRuntime && typeof serverRuntime === 'object' ? serverRuntime : {}
   checkRuntimeVersionFromHealth({ runtime })

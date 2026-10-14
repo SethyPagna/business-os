@@ -17,6 +17,7 @@
 
 import { Suspense, useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useSavingGate } from '../../utils/useSavingGate.ts'
+import SavingBlockedNote from '../shared/SavingBlockedNote.tsx'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
@@ -4453,7 +4454,7 @@ export default function POS() {
             <button className="btn-success w-full py-3 text-sm font-bold" onClick={openStatusPicker} disabled={loading || showStatusPicker || active.cart.length === 0 || savingBlocked} aria-describedby={savingBlocked ? 'pos-saving-blocked' : undefined}>
               {loading ? t('loading') : (t('complete_sale') || 'Complete Sale')}
             </button>
-            {savingBlocked ? <p id="pos-saving-blocked" role="status" className="mt-1.5 text-center text-xs leading-relaxed text-amber-700 dark:text-amber-300">{savingBlockedText}</p> : null}
+            {savingBlocked ? <SavingBlockedNote id="pos-saving-blocked" text={savingBlockedText} className="mt-1.5" textClassName="text-center" /> : null}
           </div>
 
         </div>{/* end cart panel */}
@@ -4469,7 +4470,7 @@ export default function POS() {
             </div>
             <div className="p-4 space-y-2">
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">{t('pos_status_choose_desc')||'Choose how this sale is being processed. This will appear in Sales history.'}</p>
-              {savingBlocked ? <p role="status" className="mb-3 text-xs leading-relaxed text-amber-700 dark:text-amber-300">{savingBlockedText}</p> : null}
+              {savingBlocked ? <SavingBlockedNote text={savingBlockedText} className="mb-3" /> : null}
               {([
                 ['completed',         getPosStatusLabel('completed',         t), t('pos_status_completed_desc')||'Payment received - stock deducted now'],
                 ['awaiting_payment',  getPosStatusLabel('awaiting_payment',  t), t('pos_status_awaiting_payment_desc')||'Not Paid - stock deducted'],

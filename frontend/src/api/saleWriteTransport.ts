@@ -2,6 +2,7 @@ import type { IndexableType, Table } from 'dexie'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import {
   apiFetch,
+  confirmServerReachable,
   isNetErr,
   isTransientGatewayError,
   isWriteBlockedError,
@@ -273,7 +274,7 @@ export function syncPendingSalesQueue(options: QueueSyncOptions = {}): Promise<R
 export async function createSale(payload: SalePayload = {}): Promise<unknown> {
   const scope = captureActorReadScope()
   const salePayload = ensureSaleClientRequestId(stampOfflineSaleOwner({ ...getClientDeviceInfo(), ...payload }), 'sale')
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false && !(await confirmServerReachable())) {
     throw Object.assign(new Error('Connect to the server before recording this sale. Your draft is retained; no sale was queued.'), { code: 'online_required' })
   }
   try {

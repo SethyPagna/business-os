@@ -166,6 +166,30 @@ try {
     }
   })
 
+  await check('Check connection: the reason carries an icon-only button with the translated tooltip, it asks the app, and the same cart is live once the block clears', async () => {
+    for (const language of ['en', 'km'] as const) {
+      let asked = 0
+      const till = await mountTill(language, { canWriteToServer: false, recheckConnection: async () => { asked += 1; return true } })
+      const label = packs[language].check_connection
+      assert.ok(label && (language === 'en' || /[ក-៿]/.test(label)), 'the tooltip is a real pack sentence')
+      const buttons = till.page.findAll((node) => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === label)
+      assert.ok(buttons.length >= 1, 'the retry sits beside the reason')
+      const [button] = buttons
+      assert.equal(button.getAttribute('title'), label, 'the tooltip is the same translated text')
+      assert.equal(button.getAttribute('type'), 'button')
+      assert.equal(button.textContent.trim(), '', 'icon-only')
+      await till.page.click(button)
+      assert.equal(asked, 1, 'it asked the app to re-check the connection')
+      till.app.canWriteToServer = true
+      await till.page.render({})
+      assert.ok(!propsOf(completeButton(till.page, language)).disabled, 'the checkout is live again')
+      assert.equal(till.page.findAll((node) => node.getAttribute('aria-label') === label).length, 0, 'and the retry is gone')
+      assert.ok(till.page.text().includes('Synthetic serum'), 'the cart was never lost')
+      await till.page.unmount()
+      mounted.length = 0
+    }
+  })
+
   await check('quick-add customer offline: Save is disabled beside the reason, a handler call notifies it and creates nothing; online it creates', async () => {
     const offline = await mountTill('en', { canWriteToServer: false })
     await offline.page.click(addNewCustomer(offline.page))

@@ -22,7 +22,7 @@ import { APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage, resolv
 import { getClientDeviceInfo } from './utils/deviceInfo.ts'
 import { authErrorDetail } from './utils/authErrorText.ts'
 import { getAuthStorage } from './utils/authStorage.ts'
-import { watchConnection } from './utils/connectionWatch.ts'
+import { watchConnection, type ConnectionWatch } from './utils/connectionWatch.ts'
 import { getDirtyWork, hasDirtyWork, type DirtyWorkEntry } from './utils/dirtyWork.ts'
 import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
 import { effectivePermissions, type PermissionTier } from './utils/permissions.ts'
@@ -194,6 +194,7 @@ type AppContextValue = {
   authReady: boolean
   canAccessPage: (pageId: string) => boolean
   canWriteToServer: boolean
+  recheckConnection: () => Promise<boolean>
   changeSessionDuration: (sessionDuration: unknown, currentPassword?: string) => Promise<SessionDurationOutcome>
   deviceTimezone: string
   dismissNotification: () => void
@@ -758,6 +759,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   const [syncConnected,       setSyncConnected]       = useState(() => isWSConnected())
   const [syncChannel,         setSyncChannel]         = useState<SyncChannelUpdate | null>(null)
   const [syncServerUnreachable, setSyncServerUnreachable] = useState(false)
+  const connectionWatchRef = useRef<ConnectionWatch | null>(null)
 
   useEffect(() => {
     settingsRef.current = settings || {}
@@ -810,8 +812,14 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   // probe) blocks saving at once; the banner and every gate read canWriteToServer.
   useEffect(() => {
     if (publicMode || typeof window === 'undefined') return undefined
-    return watchConnection(window, setSyncServerUnreachable, () => navigator.onLine !== false)
+    const watch = watchConnection(window, setSyncServerUnreachable, () => navigator.onLine !== false, () => pingServerHealth(true))
+    connectionWatchRef.current = watch
+    return () => {
+      watch.dispose()
+      if (connectionWatchRef.current === watch) connectionWatchRef.current = null
+    }
   }, [publicMode])
+  const recheckConnection = useCallback(() => connectionWatchRef.current?.recheck() ?? Promise.resolve(false), [])
 
   // Define translation lookup before any hook dependency arrays or callbacks
   // reference it, avoiding render-time TDZ crashes in production bundles.
@@ -2781,6 +2789,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     syncChannel,
     syncServerUnreachable,
     canWriteToServer,
+    recheckConnection,
     storagePersisted,
     AccessDenied: AccessDeniedConnected,
   }), [
@@ -2803,6 +2812,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     syncChannel,
     syncServerUnreachable,
     canWriteToServer,
+    recheckConnection,
     storagePersisted,
   ])
 

@@ -6,6 +6,7 @@ import { actorReadStorageKey, captureActorReadScope, isActorReadScopeCurrent, ty
 import { useApp } from '../../AppContext'
 import { isAdminControlUser, type PermissionUser } from '../../utils/permissions.ts'
 import { useSavingGate } from '../../utils/useSavingGate.ts'
+import { CheckConnectionButton } from '../shared/SavingBlockedNote.tsx'
 import { fmtDate, fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
 import { carryOverCloseSeedMs, closeShift, closeShiftById, fetchCurrentShift, openShift, pendingShiftMutation, shiftClosingCounts, shiftCountPairBlocker, shiftLocalDateTimeFromMs, shiftLocalDateTimeToIso, shiftOpeningCounts, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
 import { DateTimeEntryInput } from '../shared/DateEntryInput.tsx'
@@ -451,6 +452,7 @@ function CarryOverIntro({ shift, closeBefore }: { shift: Shift; closeBefore?: st
  */
 function CarryOverCloseFields({ form, secondary }: { form: CarryOverCloseForm; secondary?: React.ReactNode }) {
   const { t } = useApp() as ShiftGateContext
+  const savingGate = useSavingGate()
   const frozen = form.busy || form.pending
   return (
     <>
@@ -504,7 +506,7 @@ function CarryOverCloseFields({ form, secondary }: { form: CarryOverCloseForm; s
         busy={form.busy} label={form.pending ? t('retry') : t('shift_action_close')}
         onClick={() => void form.submit()}
         buttonClassName={DENSE_BUTTON}
-        secondary={secondary}
+        secondary={<>{savingGate.blocked ? <CheckConnectionButton /> : null}{secondary}</>}
       />
     </>
   )
@@ -707,6 +709,7 @@ export default function ShiftGate({ children, branchId = null, branchName = null
               reason={savingGate.blocked ? savingGate.reason : startBlocker ? t(shiftCountBlockerKey(startBlocker)) : null}
               busy={busy} label={t('shift_start')} onClick={() => void submitOpen()}
               buttonClassName={DENSE_BUTTON}
+              secondary={savingGate.blocked ? <CheckConnectionButton /> : undefined}
             />
           </div>
           )}
@@ -1039,6 +1042,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                 reason={endReason}
                 busy={busy} label={pending ? t('retry') : t('shift_end')} onClick={() => void submitClose()}
                 buttonClassName={DENSE_BUTTON}
+                secondary={savingGate.blocked ? <CheckConnectionButton /> : undefined}
               />
             )}
           </div>

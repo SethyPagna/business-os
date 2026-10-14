@@ -1,5 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react'
 import QuickAddModal from './QuickAddModal'
+import SavingBlockedNote from '../shared/SavingBlockedNote.tsx'
 import { formatPhoneInputElement, handlePhoneInputBeforeInput, handlePhoneInputKeyDown } from '../../utils/phoneInput.ts'
 import type { ContactDuplicateCheck, ContactDuplicateMatch } from '../contacts/contactDuplicates.ts'
 
@@ -113,7 +114,7 @@ export default function POSQuickAddModals({
     <>
       {showAddCustomer ? (
         <QuickAddModal title={t('add_new_customer')} saving={savingCustomer} saveDisabled={!!customerDuplicateCheck || !!savingBlockedText} onSave={handleAddCustomer} t={t} onClose={closeAddCustomerModal}>
-          {savingBlockedText ? <p role="status" className="text-xs leading-relaxed text-amber-700 dark:text-amber-300">{savingBlockedText}</p> : null}
+          <SavingBlockedNote text={savingBlockedText} />
           <DuplicateDecisionPanel check={customerDuplicateCheck} entityLabel="customer" saving={savingCustomer} onUseExisting={handleUseExistingCustomer} onCreateSeparate={handleCreateSeparateCustomer} onBack={clearCustomerDuplicateCheck} t={t} />
           <div>
             <label htmlFor="pos-quick-customer-name" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('name')} *</label>
@@ -145,7 +146,7 @@ export default function POSQuickAddModals({
 
       {showAddDelivery ? (
         <QuickAddModal title={t('add_delivery_contact') || 'Add Delivery Contact'} saving={savingDelivery} saveDisabled={!!deliveryDuplicateCheck || !!savingBlockedText} onSave={handleAddDelivery} t={t} onClose={closeAddDeliveryModal}>
-          {savingBlockedText ? <p role="status" className="text-xs leading-relaxed text-amber-700 dark:text-amber-300">{savingBlockedText}</p> : null}
+          <SavingBlockedNote text={savingBlockedText} />
           <DuplicateDecisionPanel check={deliveryDuplicateCheck} entityLabel="delivery contact" saving={savingDelivery} onUseExisting={handleUseExistingDelivery} onCreateSeparate={handleCreateSeparateDelivery} onBack={clearDeliveryDuplicateCheck} t={t} />
           <div>
             <label htmlFor="pos-quick-delivery-name" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
