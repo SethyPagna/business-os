@@ -67,6 +67,7 @@ async function main() {
     for (const [index, key] of ['b1', 'b2', 'b3', 'b4'].entries()) await addPerson(key, 41 + index, employeeRole, '{"pos":true,"sales":true}')
     for (let index = 1; index <= 8; index += 1) await addPerson('tie' + index, 50 + index, employeeRole, '{"pos":true,"sales":true}')
     for (const [index, key] of ['r1', 'r2'].entries()) await addPerson(key, 61 + index, employeeRole, '{"pos":true,"sales":true}')
+    await addPerson('s2a', 71, employeeRole, '{"pos":true,"sales":true}')
     await db.prepare("INSERT INTO branches(id,name,role,is_default,is_active) VALUES(1,'Shop','shop',1,1)").run()
     await db.prepare("INSERT INTO settings(key,value) VALUES('pos_payment_methods','[\"Cash\",\"ABA\"]') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
     const setting = (key, value) => db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind(key, value).run()
@@ -356,6 +357,42 @@ async function main() {
       assert.equal(figures.reconciliation.cash_sales.usd, 7, 'the in-between sale is in the child drawer')
       const parentFigures = JSON.parse((await first('SELECT figures_json FROM shift_close_figures WHERE shift_session_id=?', parent)).figures_json)
       assert.equal(parentFigures.reconciliation.cash_sales.usd, 5, 'and not in the parent drawer')
+    })
+
+    // ---- S2: an earlier day's drawer left open behind today's shift ---------------------------------------
+    await check('S2: the cashier cannot close the stale drawer (translated code, nothing written); the administrator is told once, with no amount, and can close it', async () => {
+      await setting('telegram_language', 'both')
+      const staleOpened = new Date(Date.now() - 26 * 60 * MIN).toISOString()
+      await db.prepare(`INSERT INTO shift_sessions(shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at,opening_float_usd,opening_float_khr,
+          opening_float_usd_registered,opening_float_khr_registered)
+        VALUES('S-STALE-S2','per_account',?,?,1,'Shop',date(?, '+7 hours'),?,50,0,1,1)`)
+        .bind(people.s2a.id, 'cashier_s2a', staleOpened, staleOpened).run()
+      const stale = (await first("SELECT id FROM shift_sessions WHERE shift_code='S-STALE-S2'")).id
+      const before = await call('s2a', 'GET', '/current?branch_id=1')
+      assert.equal(before.json.previous_open_shift.id, stale)
+      assert.equal(before.json.previous_open_close_before, null, 'nothing follows the stale drawer yet: closing now is possible')
+      const mark = telegramSent.length
+      const registered = await call('s2a', 'POST', '/open', { branch_id: 1, opening_float_usd: 20, opening_float_khr: 0 })
+      assert.equal(registered.status, 201, registered.text)
+      await waitFor('the administrator alert', () => telegramSent.slice(mark).some((message) => message.text.includes('S-STALE-S2')))
+      const alert = telegramSent.slice(mark).map((message) => message.text).find((text) => text.includes('S-STALE-S2') && /administrator must close it/.test(text))
+      assert.ok(alert, 'the alert says an administrator must close the earlier shift')
+      assert.ok(alert.includes('អ្នកគ្រប់គ្រងត្រូវមកបិទ'), 'in Khmer too')
+      assert.equal(/[$៛]/.test(alert), false, 'and carries no amount')
+      assert.equal((await call('s2a', 'POST', '/open', { branch_id: 1, opening_float_usd: 20, opening_float_khr: 0 })).status, 200, 'a second open call is only the existing registration')
+      await new Promise((done) => setTimeout(done, 400))
+      assert.equal(telegramSent.slice(mark).filter((message) => message.text.includes('S-STALE-S2') && /administrator must close it/.test(message.text)).length, 1, 'said once')
+
+      await db.prepare("UPDATE shift_sessions SET opened_at=? WHERE user_id=? AND shift_code != 'S-STALE-S2'").bind(new Date(Date.now() - 30 * MIN).toISOString(), people.s2a.id).run()
+      const after = await call('s2a', 'GET', '/current?branch_id=1')
+      const closeBefore = after.json.previous_open_close_before
+      assert.ok(closeBefore, 'now today\'s shift follows the stale drawer and the server states the bound')
+      await untouched('stale close by the cashier', stale, async () => {
+        refused('close now', await call('s2a', 'POST', `/${stale}/close`, { expected_revision: 0, closing_counted_usd: 50, closing_counted_khr: 0 }), 'shift_overlaps_next_segment')
+        refused('close at the seed', await call('s2a', 'POST', `/${stale}/close`, { expected_revision: 0, closed_at: new Date(Date.parse(closeBefore) - MIN).toISOString(), closing_counted_usd: 50, closing_counted_khr: 0 }), 'shift_close_too_early')
+      })
+      const closed = await call('admin', 'POST', `/${stale}/close`, { expected_revision: 0, closed_at: new Date(Date.parse(closeBefore) - MIN).toISOString(), closing_counted_usd: 50, closing_counted_khr: 0 })
+      assert.equal(closed.status, 200, closed.text)
     })
 
     // (later rounds of this file append their scenarios here)

@@ -5,7 +5,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { BUSINESS_TZ_FORWARD, BUSINESS_UTC_OFFSET_MINUTES, localTodayExpr } from '../lib/businessDateWindow'
 import { parseContinuousReadWindow, continuousReadWindowSql } from '../lib/continuousReadWindow'
 import { hasAnyPermission, isAdminControlUser } from '../lib/permissions'
-import { scheduleTelegramShiftOverview, sendTelegramShiftReport } from '../lib/telegram'
+import { scheduleTelegramShiftOverview, sendTelegramShiftReport, sendTelegramStaleShiftAlert } from '../lib/telegram'
 import { firstCharacters } from '../lib/telegramLang'
 import {
   loadShiftCloseDrift, loadShiftCloseFigures, loadShiftFigures, loadShiftReconciliation, parseShiftCloseFigures,
@@ -431,6 +431,10 @@ const SHIFT_TIME_ADMIN_ONLY = { code: 'shift_time_admin_only', error: 'Only an a
 function timesChanged(before: ShiftRow, requestedOpenedAt: string, requestedClosedAt: string | null): boolean {
   const sameSecond = (a: string | null, b: string | null) => (a == null || b == null ? a === b : Math.floor(utcMs(a) / 1000) === Math.floor(utcMs(b) / 1000))
   return !sameSecond(requestedOpenedAt, before.opened_at) || !sameSecond(requestedClosedAt, before.closed_at)
+}
+/** The overlap sentence intervalError gives, with the code the app translates. */
+function overlapRefusal(message: string) {
+  return { error: message, code: message.startsWith('Opening') ? 'shift_overlaps_previous_segment' : 'shift_overlaps_next_segment' }
 }
 function utcMs(value: string): number {
   const text = value.trim()
@@ -1222,6 +1226,17 @@ app.post('/open', async (c) => {
   if (!shift) return c.json({ error: 'Shift registration could not be read back.' }, 500)
   const report = sendTelegramShiftReport(c.env, shift.id)
   try { c.executionCtx.waitUntil(report) } catch { void report }
+  // An employee who registers today while an earlier day's drawer is still open leaves it behind the new segment:
+  // closing it now overlaps today's, so only an administrator can end it. Said once, here, when it becomes true.
+  if (!canManageShifts(user)) {
+    try {
+      const stale = await readPreviousOpen(db, policy, user.id, branchId)
+      if (stale) {
+        const alert = sendTelegramStaleShiftAlert(c.env, stale.id)
+        try { c.executionCtx.waitUntil(alert) } catch { void alert }
+      }
+    } catch (error) { console.error('[shifts] the stale-drawer alert could not be raised', error) }
+  }
   return c.json({ ...currentResponse(user, shift, policy, false), already_registered: false }, 201)
 })
 
@@ -1350,7 +1365,7 @@ app.post('/close', async (c) => {
   if (timing.refusal) return c.json(timing.refusal, 409)
   const closedAt = new Date(timing.closedAtMs).toISOString()
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
-  if (overlap) return c.json({ error: overlap }, 409)
+  if (overlap) return c.json(overlapRefusal(overlap), 409)
   const closing = { ...storedShift(shift), closed_at: closedAt,
     closing_counted_usd: countedUsd.value, closing_counted_khr: countedKhr.value,
     additional_cash_usd: additionalUsd.value, additional_cash_khr: additionalKhr.value }
@@ -1400,7 +1415,7 @@ app.post('/:id/close', async (c) => {
   if (timing.refusal) return c.json(timing.refusal, 409)
   const closedAt = new Date(timing.closedAtMs).toISOString()
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
-  if (overlap) return c.json({ error: overlap }, 409)
+  if (overlap) return c.json(overlapRefusal(overlap), 409)
   const closing = { ...storedShift(shift), closed_at: closedAt,
     closing_counted_usd: countedUsd.value, closing_counted_khr: countedKhr.value,
     additional_cash_usd: additionalUsd.value, additional_cash_khr: additionalKhr.value }
@@ -1482,7 +1497,7 @@ app.post('/:id/reopen', async (c) => {
   // belongs to this drawer, not to no drawer at all.
   const reopenedAt = new Date(utcMs(parent.closed_at)).toISOString()
   const overlap = await intervalError(db, storedShift(parent), reopenedAt, null)
-  if (overlap) return c.json({ error: overlap }, 409)
+  if (overlap) return c.json(overlapRefusal(overlap), 409)
   const continuation = await writeContinuation(db, user, parent, { reason, floatUsd, floatKhr, openedAt: reopenedAt,
     note: optionalText(body.opening_note), deviceName: c.req.header('X-Device-Name') || null,
     afterCancellation: false, auditAction: 'shift.reopen', request: mutationRequest(body, id) })
@@ -1584,7 +1599,7 @@ app.patch('/:id', async (c) => {
   }
   if (openedAt !== before.opened_at || closedAt !== before.closed_at) {
     const overlap = await intervalError(db, beforeStored, openedAt, closedAt)
-    if (overlap) return c.json({ error: overlap }, 400)
+    if (overlap) return c.json(overlapRefusal(overlap), 400)
   }
   const timeReview = canManageShifts(user) ? await timeReviewAfterEdit(c.env, db, reviewerName(user), before, openedAt, closedAt, now) : null
   const comparableBefore = { ...beforeStored }; delete (comparableBefore as Partial<ShiftRow>).revision

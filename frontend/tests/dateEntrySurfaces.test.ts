@@ -315,7 +315,7 @@ runTest('an unreadable half withdraws the shift timestamp instead of banking the
   // shift forms; assert it here so the two halves cannot drift apart.
   const modal = read('components/shifts/ShiftHistoryModal.tsx')
   assert.ok(
-    /const closeReason = action !== 'close' \? null\s*: canChooseShiftTime\(\) && !close\.closedAt \?/.test(modal) && /!edit\.openedAt \?/.test(modal),
+    /const closeReason = action !== 'close' \? null\s*: !canChooseShiftTime\(\) && selected\?\.close_before \? t\('shift_stale_admin_must_close'\)\s*: canChooseShiftTime\(\) && !close\.closedAt \?/.test(modal) && /!edit\.openedAt \?/.test(modal),
     'both shift forms must print a reason when their timestamp is withdrawn',
   )
 })

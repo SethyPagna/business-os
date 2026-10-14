@@ -317,6 +317,7 @@ const LABELS = {
   reviewCashMethod: { en: 'No payment method is set as cash', km: 'គ្មានវិធីទូទាត់ណាកំណត់ជាសាច់ប្រាក់' },
   reviewEarlierClose: { en: 'Closed at an earlier time', km: 'បិទនៅម៉ោងមុន' },
   reviewLaterOpen: { en: 'Opened at a later time', km: 'បើកនៅម៉ោងក្រោយ' },
+  staleShiftNeedsAdmin: { en: 'An earlier shift is still open: an administrator must close it', km: 'វេនមុនមួយនៅបើក៖ អ្នកគ្រប់គ្រងត្រូវមកបិទ' },
   // The sale's unpaid amount stays a positive memo -- see formatShiftReport
   // and formatDaySummary. This label is deliberately separate from supplier
   // and store credit, which are different financial concepts.

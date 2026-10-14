@@ -1730,6 +1730,35 @@ export async function sendTelegramShiftReport(env: Env, shiftId: number, nowMs: 
   }
 }
 
+/**
+ * An earlier day's drawer is still open behind the cashier's new shift, so only an administrator can end it: who
+ * left it, which shift and when it opened -- no amount. Posted once, when the cashier registers today's shift.
+ */
+export function formatStaleShiftAlert(shopName: string, shift: ShiftReportSession, nowMs: number = Date.now()): string {
+  return [
+    `⚠️ ${label('staleShiftNeedsAdmin')}`,
+    labeled('shop', cleanLine(shopName || 'Business OS', 80)),
+    labeled('cashier', localizeTelegramValue(cleanLine(shift.user_name || 'No cashier', 60))),
+    labeled('shift', cleanLine(shift.shift_code, 80)),
+    labeled('open', formatBusinessDateTime(shift.opened_at, nowMs)),
+  ].join('\n')
+}
+
+export async function sendTelegramStaleShiftAlert(env: Env, shiftId: number, nowMs: number = Date.now()): Promise<boolean> {
+  try {
+    const config = await getTelegramConfig(env)
+    if (!config.enabled || configurationProblem(config)) return false
+    const shift = await getDb(env).prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE id = @id`).get<ShiftReportSession>({ id: shiftId })
+    if (!shift || shift.closed_at || shift.cancelled_at) return false
+    const name = await shopName(env)
+    await postTelegram(config, withLanguage(config.language, () => formatStaleShiftAlert(name, shift, nowMs)), config.chatId, config.topics.telegram_topic_shift, 'telegram_topic_shift')
+    return true
+  } catch (error) {
+    console.error('[telegram] stale shift alert could not be sent', error)
+    return false
+  }
+}
+
 // ---- T10: the Reports overview, one minute after a shift closes -----------
 // Owner, 23 Sep 2026: "One minute after a shift closes, the Reports overview
 // is sent to Telegram too" -- with a Free-plan path, a Paid path with

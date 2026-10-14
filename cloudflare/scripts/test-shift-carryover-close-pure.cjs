@@ -132,7 +132,7 @@ function harness(sqlite) {
     '../lib/permissions': loadReal('lib/permissions.ts'),
     '../lib/shiftReconciliation': shiftReconciliation,
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
-    '../lib/telegram': { sendTelegramShiftReport: async (_env, id) => { state.reports.push(id); return true } },
+    '../lib/telegram': { sendTelegramShiftReport: async (_env, id) => { state.reports.push(id); return true }, sendTelegramStaleShiftAlert: async () => true },
   })
   const app = route.default || route
   const call = (method, url, body) => app.fetch(new Request(`http://test${url}`, {

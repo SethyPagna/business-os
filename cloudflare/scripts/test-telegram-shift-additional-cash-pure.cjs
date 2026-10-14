@@ -369,7 +369,7 @@ function registeredRowsOk(text, { closing, mode } = {}) {
     assert.match(columns, /additional_cash_usd,\s*additional_cash_khr/, 'SHIFT_COLUMNS selects both additional-cash columns')
     assert.match(telegramSource, /OVERVIEW_SHIFT_COLUMNS = `revision, \$\{SHIFT_COLUMNS\}`/, 'the overview reads the same columns')
     assert.equal(occurrences(telegramSource, /SELECT \$\{OVERVIEW_SHIFT_COLUMNS\} FROM shift_sessions/g), 1, 'the overview delivery selects the overview column list')
-    assert.equal(occurrences(telegramSource, /SELECT \$\{SHIFT_COLUMNS\} FROM shift_sessions/g), 2, 'the close push and /shift read through SHIFT_COLUMNS')
+    assert.equal(occurrences(telegramSource, /SELECT \$\{SHIFT_COLUMNS\} FROM shift_sessions/g), 3, 'the close push, the stale-drawer alert and /shift read through SHIFT_COLUMNS')
     // Every route that announces a shift hands the report the saved shift's id AFTER its write.
     const calls = routesSource.split('\n').filter((line) => /sendTelegramShiftReport\(c\.env, /.test(line))
     assert.equal(calls.length, 7, 'open x2, close x2, cancel, reopen, amend')

@@ -148,6 +148,36 @@ await runTest('the Close form: an administrator picks the time and the request c
   }
 })
 
+await runTest('the Close form: an employee cannot close a drawer another segment follows; the line says an administrator must, and the button is off', async () => {
+  const behind = { ...openShift, id: 43, shift_code: 'S-20261013-0800-sokha', close_before: '2026-10-14T01:00:00.000Z' }
+  const popup = await mountPopup(EMPLOYEE, behind)
+  try {
+    await popup.page.click(closeButtons(popup)[0])
+    assert.ok(popup.page.text().includes(en.shift_stale_admin_must_close), 'the translated line is shown')
+    const buttons = closeButtons(popup)
+    assert.equal(propsOf(buttons[buttons.length - 1]).disabled, true, 'the submit is off: it could only fail')
+    assert.deepEqual(popup.calls.close, [])
+    assert.equal(popup.page.text().includes(en.shift_previous_open_close_before), false, 'no bound row for an employee: they pick no time')
+  } finally {
+    await popup.page.unmount()
+  }
+})
+
+await runTest('the Close form: an administrator is not blocked by a later segment, and sees the bound', async () => {
+  const behind = { ...openShift, id: 43, shift_code: 'S-20261013-0800-sokha', close_before: '2026-10-14T01:00:00.000Z' }
+  const popup = await mountPopup(ADMIN, behind)
+  try {
+    await popup.page.click(closeButtons(popup)[0])
+    assert.equal(popup.page.text().includes(en.shift_stale_admin_must_close), false)
+    assert.ok(popup.page.text().includes(en.shift_previous_open_close_before), 'the bound row is shown to the administrator')
+    const buttons = closeButtons(popup)
+    await popup.page.click(buttons[buttons.length - 1])
+    assert.equal(popup.calls.close.length, 1)
+  } finally {
+    await popup.page.unmount()
+  }
+})
+
 await harness.close()
 if (failed) {
   console.error(`${failed} shift time check(s) failed`)

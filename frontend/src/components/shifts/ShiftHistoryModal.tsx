@@ -543,6 +543,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
         : !edit.reason.trim() ? t('shift_reason_required')
           : null
   const closeReason = action !== 'close' ? null
+    : !canChooseShiftTime() && selected?.close_before ? t('shift_stale_admin_must_close')
     : canChooseShiftTime() && !close.closedAt ? t('shift_close_time_required')
     : closingCountInvalid(close.closingUsd) || closingCountInvalid(close.closingKhr)
       || closingCountInvalid(close.additionalUsd) || closingCountInvalid(close.additionalKhr) ? t(shiftCountBlockerKey('invalid'))

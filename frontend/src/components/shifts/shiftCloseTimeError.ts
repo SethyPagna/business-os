@@ -5,6 +5,8 @@ const TIME_REFUSAL_CODES = new Set([
   'shift_close_before_last_activity',
   'shift_close_too_early',
   'shift_time_admin_only',
+  'shift_overlaps_next_segment',
+  'shift_overlaps_previous_segment',
 ])
 
 export function shiftCloseTimeRefusalText(error: unknown, t: (key: string) => string): string | null {
