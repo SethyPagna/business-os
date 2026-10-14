@@ -219,6 +219,8 @@ async function verifyRealSettlementRoute(migration) {
   try {
     const db = await mf.getD1Database('DB')
     await db.batch(objects.filter(o => o.type === 'table').map(o => db.prepare(o.sql)))
+    // The return edit reads the held lot's own cost (0162 added it after this historical schema).
+    if (required.has('damaged_stock_lots') && !original.prepare('PRAGMA table_info(damaged_stock_lots)').all().some(column => column.name === 'unit_cost_usd')) await db.prepare('ALTER TABLE damaged_stock_lots ADD COLUMN unit_cost_usd REAL').run()
     // Current settlement queries and seed rows include the additive money
     // contract. Apply its exact migration while retaining the old pattern
     // CHECKs so the before/after 0156 regression remains meaningful. The

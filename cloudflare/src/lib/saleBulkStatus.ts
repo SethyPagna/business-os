@@ -354,6 +354,13 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
     const items = await rowsIn<Item>(db, sourceMatchedIds, m => `SELECT si.*, dl.unit_cost_usd AS damaged_lot_unit_cost_usd FROM sale_items si LEFT JOIN damaged_stock_lots dl ON dl.id=si.damaged_lot_id WHERE si.sale_id IN (${m}) ORDER BY si.id LIMIT 151`);
     if (items.length > 150)
         throw new SaleBulkError('Select fewer sale lines (maximum 150).', 400);
+    // The held lot's own cost is read with the lines but kept out of them: the saved undo snapshot stores the lines as they were.
+    const heldLotCostUsd = new Map<number, number | null>();
+    for (const item of items) {
+        if (item.damaged_lot_id)
+            heldLotCostUsd.set(item.id, item.damaged_lot_unit_cost_usd ?? null);
+        delete item.damaged_lot_unit_cost_usd;
+    }
     const allocations = await rowsIn<Allocation>(db, sourceMatchedIds, m => `SELECT a.* FROM sale_item_batch_allocations a JOIN sale_items si ON si.id=a.sale_item_id WHERE si.sale_id IN (${m}) ORDER BY a.id LIMIT 301`);
     if (allocations.length > 300)
         throw new SaleBulkError('Select fewer received-date allocations (maximum 300).', 400);
@@ -515,7 +522,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
                 if (!item.product_id || !item.branch_id)
                     fail('A stock-moving line has no product or branch.');
                 if (item.damaged_lot_id)
-                    member.stock.push({ product: item.product_id, branch: item.branch_id, quantity: delta, batch: null, lot: item.damaged_lot_id, name: item.product_name, costUsd: item.damaged_lot_unit_cost_usd ?? null, costKhr: null, sale: expected.id });
+                    member.stock.push({ product: item.product_id, branch: item.branch_id, quantity: delta, batch: null, lot: item.damaged_lot_id, name: item.product_name, costUsd: heldLotCostUsd.get(item.id) ?? null, costKhr: null, sale: expected.id });
                 else if (item.allocations?.length) {
                     const capacity = item.allocations.reduce((n, a) => n + (delta > 0 ? a.quantity - a.released_quantity : a.released_quantity), 0);
                     if (capacity < Math.abs(delta) || item.allocations.some(a => a.released_quantity < 0 || a.released_quantity > a.quantity))

@@ -1,4 +1,5 @@
 const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
+const { legacyCostSql } = require('./harness/legacy_cost_sql.cjs')
 // CUTOVER-LC item 4: returns of a sale made at a branch that has since been
 // retired (Shop -> "Old Shop", successor "LC Store").
 //
@@ -425,7 +426,12 @@ const returnBody = (extra = {}) => ({
 // postcondition (N1 / side finding M: count only movements above the MAX(id)
 // read before the batch, so a sale-keyed row on the same id is not counted).
 const OWN_MOVEMENT_SCOPE = ' AND id>@movementIdFloor'
+// Takes the unknown-cost rule's two statement changes back out of the new text (see harness/legacy_cost_sql.cjs).
 function normalised(batches) {
+  return legacyCostSql(normalisedBase(batches))
+}
+
+function normalisedBase(batches) {
   const writes = batches.map(batch => batch.map(statement => {
     const scoped = statement.sql.includes(OWN_MOVEMENT_SCOPE)
     const params = scoped && statement.params ? Object.fromEntries(Object.entries(statement.params).filter(([key]) => key !== 'movementIdFloor')) : statement.params
@@ -944,7 +950,7 @@ async function residualChecks() {
       seedWorld('before'); seedLots('before', 3)
       captured = []
       try {
-        const made = await withRoute(appToUse, () => reqExact('POST', '/supplier', supplierBody({ client_request_id: 'supplier-inert' })))
+        const made = await withRoute(appToUse, () => reqExact('POST', '/supplier', supplierBody({ client_request_id: 'supplier-inert', items: [{ product_id: 1, quantity: 4, branch_id: 2, cost_price_usd: 2, cost_price_khr: 0 }] })))
         assert.strictEqual(made.status, 200, JSON.stringify(made.json))
         return normalisedRun(captured)
       } finally { captured = null }
