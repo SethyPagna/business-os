@@ -516,6 +516,8 @@ export function accessibleText(node: MemoryNode): string {
 
 export interface MountOptions {
   component: string
+  /** A named export of the module instead of its default one. */
+  exportName?: string
   props?: Record<string, unknown>
   app: Record<string, unknown>
   doubles: ModuleDoubles
@@ -626,7 +628,8 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
   async function mount(options: MountOptions): Promise<MountedSurface> {
     doubles = options.doubles
     const core = await server.ssrLoadModule(`/src/${APP_CONTEXT_CORE}`) as { AppContext: React.Context<unknown> }
-    const module = await server.ssrLoadModule(`/src/${options.component}`) as { default: React.ComponentType<Record<string, unknown>> }
+    const loaded = await server.ssrLoadModule(`/src/${options.component}`) as Record<string, React.ComponentType<Record<string, unknown>>>
+    const Component = loaded[options.exportName ?? 'default']
     const container = memoryDocument.createElement('div')
     memoryDocument.body.appendChild(container)
     const root = createRoot(container as unknown as Element)
@@ -638,7 +641,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
     mountedSurfaces.add(unmount)
     const render = async (props: Record<string, unknown>): Promise<void> => {
       await act(async () => {
-        root.render(React.createElement(core.AppContext.Provider, { value: options.app }, React.createElement(module.default, props)))
+        root.render(React.createElement(core.AppContext.Provider, { value: options.app }, React.createElement(Component, props)))
       })
       await settle()
     }

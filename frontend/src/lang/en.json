@@ -6626,6 +6626,7 @@
   "shift_time_admin_only": "Only an administrator can change the opening or closing time of a shift.",
   "shift_overlaps_next_segment": "The closing time overlaps the next shift segment.",
   "shift_overlaps_previous_segment": "The opening time overlaps the previous shift segment.",
+  "shift_earlier_admin_must_close_first": "An administrator must close the earlier shift first.",
   "shift_stale_admin_must_close": "An administrator must close this shift.",
   "shift_branch_inactive": "Branch inactive",
   "shift_branch_inactive_hint": "This branch no longer trades. The shift stays here as a read-only record; a shift still open there can only be closed.",

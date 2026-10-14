@@ -68,6 +68,7 @@ async function main() {
     for (let index = 1; index <= 8; index += 1) await addPerson('tie' + index, 50 + index, employeeRole, '{"pos":true,"sales":true}')
     for (const [index, key] of ['r1', 'r2'].entries()) await addPerson(key, 61 + index, employeeRole, '{"pos":true,"sales":true}')
     await addPerson('s2a', 71, employeeRole, '{"pos":true,"sales":true}')
+    await addPerson('s2b', 72, employeeRole, '{"pos":true,"sales":true}')
     await db.prepare("INSERT INTO branches(id,name,role,is_default,is_active) VALUES(1,'Shop','shop',1,1)").run()
     await db.prepare("INSERT INTO settings(key,value) VALUES('pos_payment_methods','[\"Cash\",\"ABA\"]') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
     const setting = (key, value) => db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind(key, value).run()
@@ -391,8 +392,39 @@ async function main() {
         refused('close now', await call('s2a', 'POST', `/${stale}/close`, { expected_revision: 0, closing_counted_usd: 50, closing_counted_khr: 0 }), 'shift_overlaps_next_segment')
         refused('close at the seed', await call('s2a', 'POST', `/${stale}/close`, { expected_revision: 0, closed_at: new Date(Date.parse(closeBefore) - MIN).toISOString(), closing_counted_usd: 50, closing_counted_khr: 0 }), 'shift_overlaps_next_segment')
       })
+      const todays = (await first("SELECT id, revision FROM shift_sessions WHERE user_id=? AND shift_code != 'S-STALE-S2'", people.s2a.id))
+      await untouched('end of today while the earlier drawer is open', todays.id, async () => {
+        const ended = await call('s2a', 'POST', `/${todays.id}/close`, { expected_revision: todays.revision, closing_counted_usd: 20, closing_counted_khr: 0 })
+        refused('employee ends today', ended, 'shift_earlier_admin_must_close_first')
+        assert.equal(ended.json.error, 'An administrator must close the earlier shift first.')
+        const adminEnds = await call('admin', 'POST', `/${todays.id}/close`, { expected_revision: todays.revision, closing_counted_usd: 20, closing_counted_khr: 0 })
+        refused('administrator ends today', adminEnds, 'shift_overlaps_previous_segment')
+      })
       const closed = await call('admin', 'POST', `/${stale}/close`, { expected_revision: 0, closed_at: new Date(Date.parse(closeBefore) - MIN).toISOString(), closing_counted_usd: 50, closing_counted_khr: 0 })
       assert.equal(closed.status, 200, closed.text)
+    })
+
+    // ---- F3: said once per stale drawer, not once per registration ------------------------------------------
+    await check('F3: a drawer left open across two registrations is announced once; the second registration says nothing about it', async () => {
+      await setting('telegram_language', 'both')
+      const staleOpened = new Date(Date.now() - 50 * 60 * MIN).toISOString()
+      await db.prepare(`INSERT INTO shift_sessions(shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at,opening_float_usd,opening_float_khr,
+          opening_float_usd_registered,opening_float_khr_registered)
+        VALUES('S-STALE-F3','per_account',?,?,1,'Shop',date(?, '+7 hours'),?,50,0,1,1)`)
+        .bind(people.s2b.id, 'cashier_s2b', staleOpened, staleOpened).run()
+      const announced = () => telegramSent.filter((message) => message.text.includes('S-STALE-F3') && /administrator must close it/.test(message.text)).length
+      const firstRegistration = await call('s2b', 'POST', '/open', { branch_id: 1, opening_float_usd: 20, opening_float_khr: 0 })
+      assert.equal(firstRegistration.status, 201, firstRegistration.text)
+      await waitFor('the first announcement', () => announced() === 1)
+      // The day passes: that registration becomes yesterday's, already finished, and the cashier registers again today.
+      const dayOne = new Date(Date.now() - 25 * 60 * MIN).toISOString()
+      await db.prepare("UPDATE shift_sessions SET opened_at=?, closed_at=?, business_date=date(?, '+7 hours') WHERE id=?")
+        .bind(dayOne, new Date(Date.parse(dayOne) + 10 * MIN).toISOString(), dayOne, firstRegistration.json.shift.id).run()
+      const secondRegistration = await call('s2b', 'POST', '/open', { branch_id: 1, opening_float_usd: 20, opening_float_khr: 0 })
+      assert.equal(secondRegistration.status, 201, secondRegistration.text)
+      assert.notEqual(secondRegistration.json.shift.id, firstRegistration.json.shift.id)
+      await new Promise((done) => setTimeout(done, 600))
+      assert.equal(announced(), 1, 'still one announcement: the drawer was already announced at the first registration')
     })
 
     // (later rounds of this file append their scenarios here)

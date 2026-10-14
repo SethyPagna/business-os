@@ -550,7 +550,17 @@ async function main() {
     expected_revision: newerDay.revision, closed_at: new Date().toISOString(),
   })
   assert.equal(closeNewerFirst.status, 409, 'closing the nearer day first is refused while an older day is still open')
-  assert.equal(closeNewerFirst.body.error, 'Opening time overlaps the previous shift segment.')
+  assert.equal(closeNewerFirst.body.error, 'An administrator must close the earlier shift first.',
+    'the cashier is told whose move it is, not that two times overlap')
+  assert.equal(closeNewerFirst.body.code, 'shift_earlier_admin_must_close_first')
+  order.as(ADMIN)
+  const adminNewerFirst = await order.json('POST', `/${newerDay.id}/close`, {
+    expected_revision: newerDay.revision, closed_at: new Date().toISOString(),
+  })
+  order.as(CASHIER)
+  assert.equal(adminNewerFirst.status, 409, 'an administrator is refused the same close too')
+  assert.equal(adminNewerFirst.body.error, 'Opening time overlaps the previous shift segment.', 'and keeps the overlap sentence, which names the times')
+  assert.equal(adminNewerFirst.body.code, 'shift_overlaps_previous_segment')
 
   const firstOffer = await order.json('GET', '/current?branch_id=1')
   assert.equal(firstOffer.body.previous_open_shift.id, olderDay.id,

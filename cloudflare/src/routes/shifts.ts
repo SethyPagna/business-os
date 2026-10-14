@@ -432,9 +432,17 @@ function timesChanged(before: ShiftRow, requestedOpenedAt: string, requestedClos
   const sameSecond = (a: string | null, b: string | null) => (a == null || b == null ? a === b : Math.floor(utcMs(a) / 1000) === Math.floor(utcMs(b) / 1000))
   return !sameSecond(requestedOpenedAt, before.opened_at) || !sameSecond(requestedClosedAt, before.closed_at)
 }
-/** The overlap sentence intervalError gives, with the code the app translates. */
-function overlapRefusal(message: string) {
-  return { error: message, code: message.startsWith('Opening') ? 'shift_overlaps_previous_segment' : 'shift_overlaps_next_segment' }
+/**
+ * The overlap sentence intervalError gives, with the code the app translates. A close refused because an earlier
+ * segment is still there is not something an employee can mend (they pick no time and may not close that drawer), so
+ * they are told whose move it is.
+ */
+function overlapRefusal(message: string, closer?: SessionUser) {
+  if (!message.startsWith('Opening')) return { error: message, code: 'shift_overlaps_next_segment' }
+  if (closer && !canManageShifts(closer)) {
+    return { error: 'An administrator must close the earlier shift first.', code: 'shift_earlier_admin_must_close_first' }
+  }
+  return { error: message, code: 'shift_overlaps_previous_segment' }
 }
 function utcMs(value: string): number {
   const text = value.trim()
@@ -701,6 +709,26 @@ async function readPreviousOpen(db: D1Compat, policy: ShiftPolicy, userId: numbe
         OR (user_id = @userId AND branch_id IS NOT NULL AND (${BRANCH_ACTIVE_SQL}) = 0))
     ORDER BY business_date ASC, opened_at ASC, id ASC LIMIT 1`)
     .get<ShiftDbRow>({ scopeMode: policy.scope_mode, userId, branchId })
+}
+/**
+ * The earlier-day drawers this registration leaves behind for the first time. A drawer that another registration
+ * (not a reopen or replacement) already followed was announced then, so staying open another day says nothing more.
+ */
+async function readStaleDrawersToAlert(db: D1Compat, policy: ShiftPolicy, userId: number, branchId: number | null, newShiftId: number) {
+  const accountClause = policy.scope_mode === 'per_account' ? 'AND user_id = @userId' : ''
+  const seenClause = policy.scope_mode === 'per_account' ? 'AND seen.user_id = shift_sessions.user_id' : ''
+  return db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions
+    WHERE scope_mode = @scopeMode
+      AND business_date < ${localTodayExpr()}
+      AND closed_at IS NULL AND cancelled_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM shift_sessions later WHERE later.parent_shift_id = shift_sessions.id)
+      AND ((((@branchId IS NULL AND branch_id IS NULL) OR branch_id = @branchId) ${accountClause})
+        OR (user_id = @userId AND branch_id IS NOT NULL AND (${BRANCH_ACTIVE_SQL}) = 0))
+      AND NOT EXISTS (SELECT 1 FROM shift_sessions seen
+        WHERE seen.id != @newShiftId AND seen.parent_shift_id IS NULL AND seen.scope_mode = shift_sessions.scope_mode
+          AND seen.opened_at > shift_sessions.opened_at ${seenClause})
+    ORDER BY business_date ASC, opened_at ASC, id ASC LIMIT 5`)
+    .all<ShiftDbRow>({ scopeMode: policy.scope_mode, userId, branchId, newShiftId })
 }
 async function readShiftById(db: D1Compat, id: number) {
   return db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE id = @id`).get<ShiftDbRow>({ id })
@@ -1227,11 +1255,11 @@ app.post('/open', async (c) => {
   const report = sendTelegramShiftReport(c.env, shift.id)
   try { c.executionCtx.waitUntil(report) } catch { void report }
   // An employee who registers today while an earlier day's drawer is still open leaves it behind the new segment:
-  // closing it now overlaps today's, so only an administrator can end it. Said once, here, when it becomes true.
+  // closing it now overlaps today's, so only an administrator can end it. Said once per drawer, here, when it becomes
+  // true: a drawer that an earlier registration already left behind was said at that registration.
   if (!canManageShifts(user)) {
     try {
-      const stale = await readPreviousOpen(db, policy, user.id, branchId)
-      if (stale) {
+      for (const stale of await readStaleDrawersToAlert(db, policy, user.id, branchId, shift.id)) {
         const alert = sendTelegramStaleShiftAlert(c.env, stale.id)
         try { c.executionCtx.waitUntil(alert) } catch { void alert }
       }
@@ -1365,7 +1393,7 @@ app.post('/close', async (c) => {
   if (timing.refusal) return c.json(timing.refusal, 409)
   const closedAt = new Date(timing.closedAtMs).toISOString()
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
-  if (overlap) return c.json(overlapRefusal(overlap), 409)
+  if (overlap) return c.json(overlapRefusal(overlap, user), 409)
   const closing = { ...storedShift(shift), closed_at: closedAt,
     closing_counted_usd: countedUsd.value, closing_counted_khr: countedKhr.value,
     additional_cash_usd: additionalUsd.value, additional_cash_khr: additionalKhr.value }
@@ -1417,7 +1445,7 @@ app.post('/:id/close', async (c) => {
   if (timing.refusal) return c.json(timing.refusal, 409)
   const closedAt = new Date(timing.closedAtMs).toISOString()
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
-  if (overlap) return c.json(overlapRefusal(overlap), 409)
+  if (overlap) return c.json(overlapRefusal(overlap, user), 409)
   const closing = { ...storedShift(shift), closed_at: closedAt,
     closing_counted_usd: countedUsd.value, closing_counted_khr: countedKhr.value,
     additional_cash_usd: additionalUsd.value, additional_cash_khr: additionalKhr.value }

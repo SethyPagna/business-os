@@ -794,10 +794,14 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
 
   const endBlocker = closingCountInvalid(countedUsd) || closingCountInvalid(countedKhr)
     || closingCountInvalid(additionalUsd) || closingCountInvalid(additionalKhr) ? 'invalid' as const : null
-  const endReason = endBlocker ? t(shiftCountBlockerKey(endBlocker)) : null
+  // Today's shift cannot end while an earlier day's drawer is still open behind it, and an employee can close neither
+  // (they pick no time): say whose move it is instead of offering an End that can only fail.
+  const earlierMustCloseFirst = carryOver != null && !isAdminControlUser(user)
+  const endReason = earlierMustCloseFirst ? t('shift_earlier_admin_must_close_first')
+    : endBlocker ? t(shiftCountBlockerKey(endBlocker)) : null
 
   const submitClose = async () => {
-    if (busy || !target) return
+    if (busy || !target || earlierMustCloseFirst) return
     const counts = shiftClosingCounts(countedUsd, countedKhr)
     if (endBlocker) return
     setBusy(true)
