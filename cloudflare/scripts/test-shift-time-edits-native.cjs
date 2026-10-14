@@ -66,6 +66,7 @@ async function main() {
     await addPerson('admin', 90, adminRole, '{"all":true}')
     for (const [index, key] of ['b1', 'b2', 'b3', 'b4'].entries()) await addPerson(key, 41 + index, employeeRole, '{"pos":true,"sales":true}')
     for (let index = 1; index <= 8; index += 1) await addPerson('tie' + index, 50 + index, employeeRole, '{"pos":true,"sales":true}')
+    for (const [index, key] of ['r1', 'r2'].entries()) await addPerson(key, 61 + index, employeeRole, '{"pos":true,"sales":true}')
     await db.prepare("INSERT INTO branches(id,name,role,is_default,is_active) VALUES(1,'Shop','shop',1,1)").run()
     await db.prepare("INSERT INTO settings(key,value) VALUES('pos_payment_methods','[\"Cash\",\"ABA\"]') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
     const setting = (key, value) => db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind(key, value).run()
@@ -331,6 +332,30 @@ async function main() {
       const figures = JSON.parse((await first('SELECT figures_json FROM shift_close_figures WHERE shift_session_id=?', observed.id)).figures_json)
       assert.equal(figures.reconciliation.cash_sales.usd, 5, 'and counted in its drawer')
       assert.deepEqual(await timeReviewOf(observed.id), [], 'a bumped close is not an earlier-time close')
+    })
+
+    // ---- S3: a reopened segment opens where the closed one ended -----------------------------------------
+    await check('S3: a sale rung between the close and the reopen lands in the reopened segment, and no sale is left outside', async () => {
+      const parent = await openShift('r1', 30)
+      await sell('r1', 20)
+      const closed = await call('r1', 'POST', `/${parent}/close`, { expected_revision: 0, closing_counted_usd: 55, closing_counted_khr: 0 })
+      assert.equal(closed.status, 200, closed.text)
+      const parentRow = await rowOf(parent)
+      await new Promise((done) => setTimeout(done, 1200))
+      await db.prepare(`INSERT INTO sales(created_at,sale_status,branch_id,cashier_id,payment_method,amount_paid_usd,amount_paid_khr,total_usd,exchange_rate)
+        VALUES(?,'completed',1,?, 'Cash',7,0,7,4000)`).bind(stored(Date.now()), people.r1.id).run()
+      await new Promise((done) => setTimeout(done, 1200))
+      const reopened = await call('r1', 'POST', `/${parent}/reopen`, { expected_revision: parentRow.revision, reason: 'Late customer', opening_float_usd: 0, opening_float_khr: 0 })
+      assert.equal(reopened.status, 201, reopened.text)
+      const child = reopened.json.shift
+      assert.equal(child.opened_at, parentRow.closed_at, 'the child opens at the parent close, not at the moment of the press')
+      assert.equal(await orphanCount('r1'), 0, 'the sale rung in between is inside a shift')
+      const childClosed = await call('r1', 'POST', `/${child.id}/close`, { expected_revision: 0, closing_counted_usd: 7, closing_counted_khr: 0 })
+      assert.equal(childClosed.status, 200, childClosed.text)
+      const figures = JSON.parse((await first('SELECT figures_json FROM shift_close_figures WHERE shift_session_id=?', child.id)).figures_json)
+      assert.equal(figures.reconciliation.cash_sales.usd, 7, 'the in-between sale is in the child drawer')
+      const parentFigures = JSON.parse((await first('SELECT figures_json FROM shift_close_figures WHERE shift_session_id=?', parent)).figures_json)
+      assert.equal(parentFigures.reconciliation.cash_sales.usd, 5, 'and not in the parent drawer')
     })
 
     // (later rounds of this file append their scenarios here)

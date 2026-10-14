@@ -761,15 +761,18 @@ async function intervalError(db: D1Compat, shift: ShiftRow, openedAt: string, cl
 }
 async function writeContinuation(db: D1Compat, user: SessionUser, parent: ShiftDbRow, input: {
   reason: string; floatUsd: number | null; floatKhr: number | null; note: string | null; deviceName: string | null
+  /** The instant the new segment opens at; the moment of writing when absent. */
+  openedAt?: string
   afterCancellation: boolean; auditAction: 'shift.reopen' | 'shift.open_after_cancel'
   request?: ReturnType<typeof mutationRequest>
 }): Promise<{ changed: boolean; shift?: ShiftDbRow; conflict: boolean }> {
   const nowIso = new Date().toISOString(); const actorName = displayName(user)
+  const openedAt = input.openedAt ?? nowIso
   // The child is the parent's cashier's shift (the INSERT copies user_id and
   // user_name from the parent), so its ID names that cashier, not the actor.
-  const childCode = await nextShiftCode(db, nowIso, parent.user_name, parent.user_id)
+  const childCode = await nextShiftCode(db, openedAt, parent.user_name, parent.user_id)
   const child = { shiftCode: childCode, parentId: parent.id, expectedRevision: parent.revision, reason: input.reason,
-    actorId: user.id, actorName, openedAt: nowIso, floatUsd: input.floatUsd, floatKhr: input.floatKhr,
+    actorId: user.id, actorName, openedAt, floatUsd: input.floatUsd, floatKhr: input.floatKhr,
     storedFloatUsd: input.floatUsd ?? 0, storedFloatKhr: input.floatKhr ?? 0,
     floatUsdRegistered: input.floatUsd == null ? 0 : 1, floatKhrRegistered: input.floatKhr == null ? 0 : 1,
     note: input.note, deviceName: input.deviceName, afterCancellation: input.afterCancellation ? 1 : 0 }
@@ -1475,9 +1478,12 @@ app.post('/:id/reopen', async (c) => {
   if (parent.revision !== expectedRevision) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   if (parent.business_date !== businessDateFor(new Date().toISOString())) return c.json({ error: 'Only a shift closed today can be reopened.' }, 409)
   if (parent.has_reopened_child) return c.json({ error: 'This shift segment was already reopened.' }, 409)
-  const nowIso = new Date().toISOString(); const overlap = await intervalError(db, storedShift(parent), nowIso, null)
+  // The reopened segment opens where the closed one ended, not at the moment of the press: a sale rung in between
+  // belongs to this drawer, not to no drawer at all.
+  const reopenedAt = new Date(utcMs(parent.closed_at)).toISOString()
+  const overlap = await intervalError(db, storedShift(parent), reopenedAt, null)
   if (overlap) return c.json({ error: overlap }, 409)
-  const continuation = await writeContinuation(db, user, parent, { reason, floatUsd, floatKhr,
+  const continuation = await writeContinuation(db, user, parent, { reason, floatUsd, floatKhr, openedAt: reopenedAt,
     note: optionalText(body.opening_note), deviceName: c.req.header('X-Device-Name') || null,
     afterCancellation: false, auditAction: 'shift.reopen', request: mutationRequest(body, id) })
   if (!continuation.changed || !continuation.shift) return c.json({ error: 'This shift segment was already reopened or changed concurrently.' }, 409)
