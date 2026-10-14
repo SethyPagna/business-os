@@ -34,11 +34,21 @@
 --                                           removal may have drawn on several lots)
 --   removals_batchless_reverted_on_split_pairs  of those, rows whose (product, branch)
 --                                           pair is in the split set above today
---   removals_open_revert_refused            not reverted, no record, not a dated-count row and a
---                                           lot of the product was created before the removal:
---                                           exactly the rows a Revert now answers with
+--   removals_open_revert_refused            not reverted, no record, not a dated-count row, a
+--                                           lot of the product was created at or before the removal
+--                                           (a tie counts: times are whole seconds) and the movement
+--                                           id is at or below the mark migration 0250 stored in
+--                                           system_flags (every id counts while no mark row exists):
+--                                           exactly the rows a Revert answers with
 --                                           revert_lots_not_recorded (Set on the received date
 --                                           is the way back; it records no purchase)
+--   removals_open_after_mark_lot_before     not reverted, no record, not a dated-count row, a lot
+--                                           created at or before it, but the id is ABOVE the mark, so
+--                                           a Revert is allowed. Normally a removal on a product that
+--                                           had no lot when it was written (a merge gave it older
+--                                           lots later); also any removal the previous code wrote
+--                                           between the migration and the deploy, the only ones that
+--                                           could have drawn on several lots. 0 while no mark exists
 --
 -- Part 3: kept-as-tagged (damaged) holds. A Remove that kept its units as a tagged row now writes one
 -- held row per source lot, so Restore puts every unit back on its lot. A held row written BEFORE
@@ -70,6 +80,10 @@ pairs AS (
 split_pairs AS (
   SELECT product_id, branch_id FROM pairs WHERE has_lots = 1 AND branch_quantity - lot_quantity > 0.000001
 ),
+mark AS (
+  SELECT CAST(value AS INTEGER) AS id FROM system_flags
+  WHERE key = 'multilot_revert_watermark' AND value <> '' AND value NOT GLOB '*[^0-9]*'
+),
 reverted AS (
   SELECT DISTINCT CAST(SUBSTR(CAST(reference_id AS TEXT), 8) AS INTEGER) AS original_id
   FROM inventory_movements
@@ -81,7 +95,8 @@ removals AS (
     m.id IN (SELECT movement_id FROM dated_stock_count_batch_actions) AS has_shares,
     COALESCE(m.reason, '') = 'Dated stock count import' AS is_dated_count,
     EXISTS (SELECT 1 FROM product_batches pb WHERE pb.variant_product_id = m.product_id) AS product_has_lots,
-    EXISTS (SELECT 1 FROM product_batches pb WHERE pb.variant_product_id = m.product_id AND datetime(pb.created_at) < datetime(m.created_at)) AS lot_before,
+    EXISTS (SELECT 1 FROM product_batches pb WHERE pb.variant_product_id = m.product_id AND datetime(pb.created_at) <= datetime(m.created_at)) AS lot_before,
+    (NOT EXISTS (SELECT 1 FROM mark) OR m.id <= (SELECT id FROM mark)) AS before_mark,
     EXISTS (SELECT 1 FROM split_pairs sp WHERE sp.product_id = m.product_id AND sp.branch_id = m.branch_id) AS on_split_pair
   FROM inventory_movements m
   WHERE m.movement_type IN ('remove', 'out') AND m.batch_id IS NULL
@@ -99,6 +114,7 @@ SELECT
   (SELECT COUNT(*) FROM removals WHERE is_reverted = 1) AS removals_batchless_reverted,
   (SELECT COUNT(*) FROM removals WHERE is_reverted = 1 AND product_has_lots = 1) AS removals_batchless_reverted_lot_product,
   (SELECT COUNT(*) FROM removals WHERE is_reverted = 1 AND product_has_lots = 1 AND on_split_pair = 1) AS removals_batchless_reverted_on_split_pairs,
-  (SELECT COUNT(*) FROM removals WHERE is_reverted = 0 AND has_shares = 0 AND is_dated_count = 0 AND lot_before = 1) AS removals_open_revert_refused,
+  (SELECT COUNT(*) FROM removals WHERE is_reverted = 0 AND has_shares = 0 AND is_dated_count = 0 AND lot_before = 1 AND before_mark = 1) AS removals_open_revert_refused,
+  (SELECT COUNT(*) FROM removals WHERE is_reverted = 0 AND has_shares = 0 AND is_dated_count = 0 AND lot_before = 1 AND before_mark = 0) AS removals_open_after_mark_lot_before,
   (SELECT COUNT(*) FROM damaged_stock_lots d WHERE d.source = 'remove' AND d.batch_id IS NULL AND d.quantity_remaining > 0
     AND EXISTS (SELECT 1 FROM product_batches pb WHERE pb.variant_product_id = d.product_id)) AS held_rows_open_remove_no_lot_upper_bound
