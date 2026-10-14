@@ -7,7 +7,9 @@
 //
 // Pins:
 //   - the shipped SQL against every entity/action pair the Worker writes (scripts/harness/audit_retention_classes.cjs);
-//   - DRIFT: the source writes no entity/action pair that table does not classify;
+//   - DRIFT: the source writes no entity/action pair that table does not classify, read from the syntax tree (calls, receipt
+//     keys and raw INSERT INTO audit_logs columns); a write with a non-literal entity or action must be listed with a class in
+//     DYNAMIC_WRITERS; mutants that move a kept write out of its class or hide it behind a variable must fail;
 //   - discrimination: each plausible wrong policy gives a different answer on the same fixture;
 //   - the stored-value floor and the policy parser.
 //
@@ -17,9 +19,11 @@ const path = require('path')
 const ts = require('typescript')
 const assert = require('assert/strict')
 const Database = require('better-sqlite3')
-const { ROWS, OWNER_KEPT, OWNER_PRUNED, DYNAMIC_ENTITIES, FAMILY_ACTION, RAW_SQL_WRITERS } = require('./harness/audit_retention_classes.cjs')
+const { ROWS, OWNER_KEPT, OWNER_PRUNED, DYNAMIC_WRITERS } = require('./harness/audit_retention_classes.cjs')
+const { scanAuditWriters } = require('./harness/audit_writer_scan.cjs')
 
-const srcRoot = path.join(__dirname, '..', 'src')
+// AUDIT_RETENTION_SRC points the test at another copy of cloudflare/src (a mutant tree, to prove the guard fails on it).
+const srcRoot = process.env.AUDIT_RETENTION_SRC || path.join(__dirname, '..', 'src')
 const auditSource = fs.readFileSync(path.join(srcRoot, 'lib', 'audit.ts'), 'utf8')
 const output = ts.transpileModule(auditSource, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
@@ -184,93 +188,110 @@ const wrongRows = (outcome) => outcome.filter((row) => !row.recent || row.old !=
   console.log('audit retention 14 Oct: every kept-forever class survives, every other old row expires; 8 wrong policies rejected')
 }
 
-// ---- DRIFT: every entity/action pair the source writes is classified in the table ---------------------------------------
+/// ---- DRIFT: every audit write in the source is classified, read from the syntax tree --------------------------------------
+// The scan (harness/audit_writer_scan.cjs) reads the entity and action of every audit()/auditOrThrow()/buildAuditStatement()/
+// auditImportEvent() call, every write-receipt key and every raw `INSERT INTO audit_logs`, column by column. A pair must be a
+// row of the table. An entity or action that is not a literal (a bound parameter, a variable, a template) must be listed in
+// DYNAMIC_WRITERS with a stated class and the pairs it can write; an unlisted one fails here, so a variable entity can no
+// longer hide a kept class from this test.
+const driftReport = (overrides = {}) => {
+  const { writes, problems } = scanAuditWriters(ts, srcRoot, overrides)
+  const classified = new Set(ROWS.map(([entity, action]) => `${entity}/${action}`))
+  const unclassified = []
+  const unlisted = []
+  const used = new Set()
+  const part = (set, text) => (set ? (set.size === 1 ? `'${[...set][0]}'` : `{${[...set].sort().join('|')}}`) : text)
+  for (const write of writes) {
+    const where = `${write.rel}:${write.line} ${write.via}`
+    if (write.entity && write.action) {
+      for (const entity of write.entity) {
+        for (const action of write.action) if (!classified.has(`${entity}/${action}`)) unclassified.push(`${entity}/${action} (${where})`)
+      }
+      continue
+    }
+    const entityKey = part(write.entity, write.entityText)
+    const actionKey = part(write.action, write.actionText)
+    const index = DYNAMIC_WRITERS.findIndex((entry) => entry.file === write.rel && entry.entity === entityKey && entry.action === actionKey)
+    if (index < 0) unlisted.push(`${where}: entity ${entityKey} / action ${actionKey} is not a literal and is not in DYNAMIC_WRITERS`)
+    else used.add(index)
+  }
+  return { writes, problems, unclassified, unlisted, used }
+}
 {
-  const walk = (dir, out = []) => {
+  const report = driftReport()
+  assert.ok(report.writes.length >= 200, `the scan found the audit writes (${report.writes.length})`)
+  assert.deepEqual(report.problems, [], 'every audit write can be read from the syntax tree')
+  assert.deepEqual(report.unclassified, [], 'every entity/action pair the source writes is a row of scripts/harness/audit_retention_classes.cjs')
+  assert.deepEqual(report.unlisted, [], 'every write with a non-literal entity or action is listed in DYNAMIC_WRITERS')
+  assert.deepEqual(DYNAMIC_WRITERS.map((entry, index) => report.used.has(index) ? null : `${entry.file} ${entry.entity} / ${entry.action}`).filter(Boolean), [],
+    'every DYNAMIC_WRITERS entry is used by a write (a stale entry would excuse a future one)')
+
+  const keptOf = new Map()
+  for (const [entity, action, kept] of ROWS) keptOf.set(`${entity}/${action}`, [...(keptOf.get(`${entity}/${action}`) || []), kept])
+  const staticSide = (text) => (/^'[^']*'$/.test(text) ? [text.slice(1, -1)] : /^\{[^}]*\}$/.test(text) ? text.slice(1, -1).split('|') : null)
+  for (const entry of DYNAMIC_WRITERS) {
+    const label = `${entry.file} ${entry.entity} / ${entry.action}`
+    assert.ok(typeof entry.cls === 'string' && entry.cls.length > 3, `${label}: states its class`)
+    assert.ok([true, false, 'by-entity', 'delegated'].includes(entry.kept), `${label}: states kept / prunable / by-entity / delegated`)
+    if (entry.kept === 'delegated') { assert.deepEqual(entry.pairs, [], `${label}: a pass-through helper lists no pairs; its callers are classified`); continue }
+    assert.ok(entry.pairs.length > 0, `${label}: lists the pairs it can write`)
+    const entities = staticSide(entry.entity)
+    const actions = staticSide(entry.action)
+    for (const [entity, action] of entry.pairs) {
+      const verdicts = keptOf.get(`${entity}/${action}`)
+      assert.ok(verdicts, `${label}: ${entity}/${action} is a row of the table`)
+      if (entities) assert.ok(entities.includes(entity), `${label}: ${entity} is not the entity the write names`)
+      if (actions) assert.ok(actions.includes(action), `${label}: ${action} is not the action the write names`)
+      if (entry.kept === true) assert.ok(verdicts.every(Boolean), `${label}: ${entity}/${action} is stated as kept but the table expires it`)
+      if (entry.kept === false) assert.ok(verdicts.every((kept) => !kept), `${label}: ${entity}/${action} is stated as expiring but the table keeps it`)
+      if (entry.kept === 'by-entity') assert.match(action, /^action_(undo|redo)$/, `${label}: only an undo or redo is classified by the entity it replayed`)
+    }
+  }
+
+  // The drift check must catch what it exists to catch: each mutant moves one write out of a kept class or hides it.
+  const source = (rel) => fs.readFileSync(path.join(srcRoot, rel), 'utf8').split('\r\n').join('\n')
+  const once = (text, from, to) => {
+    assert.equal(text.split(from).length - 1, 1, `mutant anchor occurs once: ${from.slice(0, 50)}`)
+    return text.replace(from, to)
+  }
+  const settleRaw = "'sale_settlement','sale',@saleId"
+  const returnCall = "'update', 'return', id, {"
+  const mutants = {
+    'a raw settle INSERT writes the entity sale_payment': { 'routes/sales.ts': once(source('routes/sales.ts'), settleRaw, "'sale_settlement','sale_payment',@saleId") },
+    'a return audit names its entity through a constant holding another literal': { 'routes/returns.ts': once(source('routes/returns.ts'), returnCall, "'update', RETURN_AUDIT_ENTITY, id, {") + "\nconst RETURN_AUDIT_ENTITY: string = 'refund'\n" },
+    'a return audit names its entity through a computed value': { 'routes/returns.ts': once(source('routes/returns.ts'), returnCall, "'update', RETURN_AUDIT_ENTITY, id, {") + "\nconst RETURN_AUDIT_ENTITY = ['return'].join('')\n" },
+    'a raw INSERT takes its entity from a bound parameter': { 'routes/sales.ts': once(source('routes/sales.ts'), settleRaw, "'sale_settlement',@entity,@saleId") },
+    'a raw INSERT has no column list': { 'routes/sales.ts': once(source('routes/sales.ts'), 'INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)\n            VALUES(@actor,@actorName,\'sale_settlement\'', 'INSERT INTO audit_logs\n            VALUES(@actor,@actorName,\'sale_settlement\'') },
+    'the audit helper is aliased before it is called': { 'routes/returns.ts': source('routes/returns.ts') + "\nconst writeAudit = audit\n" },
+  }
+  for (const [name, overrides] of Object.entries(mutants)) {
+    const mutated = driftReport(overrides)
+    const caught = mutated.problems.length + mutated.unclassified.length + mutated.unlisted.length
+    assert.ok(caught > 0, `drift guard must fail when ${name}`)
+  }
+  const named = driftReport(mutants['a raw settle INSERT writes the entity sale_payment'])
+  assert.deepEqual(named.unclassified.map((line) => line.split(' ')[0]), ['sale_payment/sale_settlement'], 'the moved settle entity is named')
+  const viaConst = driftReport(mutants['a return audit names its entity through a constant holding another literal'])
+  assert.deepEqual(viaConst.unclassified.map((line) => line.split(' ')[0]), ['refund/update'], 'the constant is followed to the entity it holds')
+  const viaCompute = driftReport(mutants['a return audit names its entity through a computed value'])
+  assert.equal(viaCompute.unlisted.length, 1, 'a computed entity is refused unless it is listed')
+  assert.match(viaCompute.unlisted[0], /routes\/returns\.ts.*RETURN_AUDIT_ENTITY.*not in DYNAMIC_WRITERS/)
+
+  // Every undo/redo and revert action is kept by shape or by name.
+  const files = (function walkFiles(dir, out = []) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name)
-      if (entry.isDirectory()) walk(full, out)
+      if (entry.isDirectory()) walkFiles(full, out)
       else if (entry.name.endsWith('.ts')) out.push(full)
     }
     return out
-  }
-  const splitArgs = (source, start) => {
-    let depth = 0
-    let current = ''
-    const args = []
-    let quote = null
-    for (let i = start; i < source.length; i += 1) {
-      const ch = source[i]
-      if (quote) {
-        current += ch
-        if (ch === '\\') { current += source[i + 1]; i += 1; continue }
-        if (ch === quote) quote = null
-        continue
-      }
-      if (ch === "'" || ch === '"' || ch === '`') { quote = ch; current += ch; continue }
-      if ('([{'.includes(ch)) { depth += 1; current += ch; continue }
-      if (')]}'.includes(ch)) {
-        if (depth === 0) { args.push(current.trim()); return args }
-        depth -= 1
-        current += ch
-        continue
-      }
-      if (ch === ',' && depth === 0) { args.push(current.trim()); current = ''; continue }
-      current += ch
-    }
-    return args
-  }
-  const literal = (arg) => /^'([^']*)'$/.exec(arg || '')?.[1]
-  const classified = new Set(ROWS.map(([entity, action]) => `${entity}/${action}`))
-  const classifiedEntities = new Set(ROWS.map(([entity]) => entity))
-  const found = new Map()
-  const rawWriters = {}
-  const files = walk(srcRoot)
-  for (const file of files) {
-    const source = fs.readFileSync(file, 'utf8')
-    const rel = path.relative(srcRoot, file).replace(/\\/g, '/')
-    const raw = (source.match(/INSERT INTO audit_logs/g) || []).length
-    if (raw) rawWriters[rel] = raw
-    for (const [pattern, actionAt, entityAt] of [[/\b(?:audit|auditOrThrow)\(/g, 3, 4], [/\bbuildAuditStatement\(/g, 2, 3]]) {
-      let match
-      while ((match = pattern.exec(source))) {
-        const args = splitArgs(source, match.index + match[0].length)
-        const action = literal(args[actionAt])
-        const entity = literal(args[entityAt])
-        if (action && entity) found.set(`${entity}/${action}`, rel)
-        else if (entity && !action && args.length >= 5) found.set(`${entity}/<dynamic action>`, rel)
-        else if (action && !entity && args.length >= 5 && !DYNAMIC_ENTITIES.length) found.set(`<dynamic entity>/${action}`, rel)
-        else if (action && !entity && args.length >= 5) found.set(`<dynamic entity>/${action}`, rel)
-      }
-    }
-    for (const m of source.matchAll(/key: \{ actorId: [^}]*?action: '([^']+)', entity: '([^']+)'/g)) found.set(`${m[2]}/${m[1]}`, rel)
-  }
-  assert.ok(found.size >= 80, `the scan found the audit call sites (${found.size} distinct pairs)`)
-  const unclassified = []
-  for (const [pair, rel] of found) {
-    const [entity, action] = pair.split('/')
-    if (entity === '<dynamic entity>') {
-      assert.ok(classified.has(`customer/${action}`) || classified.has(`brand/${action}`) || [...DYNAMIC_ENTITIES].some((e) => classified.has(`${e}/${action}`)),
-        `${rel}: ${pair} is written for a variable entity and no entity in DYNAMIC_ENTITIES classifies it`)
-      continue
-    }
-    if (action === '<dynamic action>') {
-      assert.ok(classifiedEntities.has(entity), `${rel}: entity ${entity} writes a variable action and the table does not mention the entity`)
-      continue
-    }
-    if (!classified.has(pair) && !FAMILY_ACTION.test(action)) unclassified.push(`${pair} (${rel})`)
-  }
-  assert.deepEqual(unclassified, [], 'every entity/action pair the source writes is classified as kept or expiring in scripts/harness/audit_retention_classes.cjs')
-  assert.deepEqual(rawWriters, RAW_SQL_WRITERS,
-    'a raw INSERT INTO audit_logs appeared or moved: classify its entity/action pairs in the table, then update RAW_SQL_WRITERS')
-
-  // Every undo/redo and revert action is kept by shape or by name.
+  })(srcRoot)
   const { AUDIT_RETENTION_KEPT_REVERT_ACTIONS, AUDIT_RETENTION_KEPT_STOCK_ACTIONS, AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES } = moduleObj.exports
   assert.deepEqual([...AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES], ['fee', 'fee_label'])
   const writtenActions = new Set()
   for (const file of files) {
-    const source = fs.readFileSync(file, 'utf8')
-    for (const m of source.matchAll(/'(stock_revert[a-z_]*)'/g)) writtenActions.add(m[1])
+    const text = fs.readFileSync(file, 'utf8')
+    for (const m of text.matchAll(/'(stock_revert[a-z_]*)'/g)) writtenActions.add(m[1])
   }
   assert.ok(writtenActions.has('stock_revert'), 'the stock Revert route still writes stock_revert')
   for (const action of writtenActions) assert.ok(AUDIT_RETENTION_KEPT_REVERT_ACTIONS.includes(action), `revert action ${action} must be kept by retention`)
@@ -280,10 +301,12 @@ const wrongRows = (outcome) => outcome.filter((row) => !row.recent || row.old !=
   }
   assert.ok(cutoverActions.size >= 6, `the branch-cutover audit actions were found (${cutoverActions.size})`)
   for (const action of cutoverActions) {
-    assert.ok(AUDIT_RETENTION_KEPT_STOCK_ACTIONS.includes(action) || /_undo$|_redo$/.test(action) || ROWS.some(([entity, rowAction, kept]) => rowAction === action && kept),
+    assert.ok(AUDIT_RETENTION_KEPT_STOCK_ACTIONS.includes(action) || ROWS.some(([entity, rowAction, kept]) => rowAction === action && kept),
       `branch cutover / stock session action ${action} is a stock change and must be kept`)
   }
-  console.log(`audit retention drift: ${found.size} written pairs all classified; ${Object.keys(rawWriters).length} raw-SQL writer files unchanged`)
+  const literalPairs = new Set()
+  for (const write of report.writes) if (write.entity && write.action) for (const e of write.entity) for (const a of write.action) literalPairs.add(`${e}/${a}`)
+  console.log(`audit retention drift: ${report.writes.length} audit writes, ${literalPairs.size} literal pairs all classified, ${DYNAMIC_WRITERS.length} non-literal writers listed with a class; ${Object.keys(mutants).length} mutants caught`)
 }
 
 {

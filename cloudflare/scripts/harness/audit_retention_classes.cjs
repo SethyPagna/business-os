@@ -7,7 +7,9 @@
 // price edits, shift and cash records, review approvals that apply stock or money). Every other row follows the
 // retention setting (floor 21 days).
 //
-// test-audit-retention-pure.cjs fails when the source writes an entity/action pair this table does not classify, and
+// test-audit-retention-pure.cjs fails when the source writes an entity/action pair this table does not classify (the pairs are
+// read from the syntax tree by audit_writer_scan.cjs; a write whose entity or action is not a literal must be listed in
+// DYNAMIC_WRITERS below, with a class), and
 // test-audit-retention-keep-forever-native.cjs seeds every row at 400 days and asserts the exact survivors.
 
 const KEPT = true
@@ -96,6 +98,7 @@ const ROWS = [
   ['branch', 'action_undo', PURGED],
   ['branch', 'action_redo', PURGED],
   ['fee', 'action_undo', KEPT],
+  ['fee', 'action_redo', KEPT],
   ['action_history', 'action_undo', KEPT],
   ['action_history', 'action_redo', KEPT],
   ['customer', 'customer_gender_restore_undo', PURGED],
@@ -165,13 +168,25 @@ const ROWS = [
   ['brand', 'rename', PURGED],
   ['brand', 'create', PURGED],
   ['category', 'update', PURGED],
+  ['category', 'create', PURGED],
+  ['category', 'merge', PURGED],
+  ['category', 'delete', PURGED],
+  ['category', 'action_undo', PURGED],
+  ['category', 'action_redo', PURGED],
   ['unit', 'delete', PURGED],
+  ['unit', 'create', PURGED],
+  ['unit', 'update', PURGED],
+  ['unit', 'merge', PURGED],
+  ['unit', 'action_undo', PURGED],
+  ['unit', 'action_redo', PURGED],
   ['return_reason_presets', 'update', PURGED],
   ['customer', 'create', PURGED],
   ['customer', 'update', PURGED],
   ['customer', 'delete', PURGED],
   ['customer', 'merge', KEPT],
   ['customer', 'portal_reset', PURGED],
+  ['customer', 'action_undo', PURGED],
+  ['customer', 'action_redo', PURGED],
   ['customer', 'award_points', PURGED],
   ['customer', 'link_sales', KEPT],
   ['customer', 'relink_sales', KEPT],
@@ -183,11 +198,18 @@ const ROWS = [
   ['customer', 'clear_shared_general_membership', KEPT],
   ['supplier', 'create', PURGED],
   ['supplier', 'update', PURGED],
+  ['supplier', 'delete', PURGED],
+  ['supplier', 'action_undo', PURGED],
+  ['supplier', 'action_redo', PURGED],
   ['supplier', 'supplier_duplicate_cluster_merge', KEPT],
   ['supplier', 'merge', KEPT],
   ['delivery_contact', 'merge', KEPT],
   ['supplier_cascade', 'rename', PURGED],
   ['delivery_contact', 'delete', PURGED],
+  ['delivery_contact', 'create', PURGED],
+  ['delivery_contact', 'update', PURGED],
+  ['delivery_contact', 'action_undo', PURGED],
+  ['delivery_contact', 'action_redo', PURGED],
   ['branch', 'create', PURGED],
   ['branch', 'update', PURGED],
   ['branch', 'delete', PURGED],
@@ -268,28 +290,68 @@ const OWNER_PRUNED = [
   ['product', 'delete'], ['product', 'wire_images'],
 ]
 
-// Entity values written by a variable (the call site names a config/kind, not a literal), so the source scan cannot
-// see them: contacts.ts config.entity, lookups.ts kind, bulkDeleteEngine config.auditEntity, actionHistory.ts
-// existing.entity.
-const DYNAMIC_ENTITIES = ['customer', 'supplier', 'delivery_contact', 'brand', 'category', 'unit', 'product']
+/// Writes whose entity or action is not a literal in the source (a bound SQL parameter, a variable, a template). The scan
+// in audit_writer_scan.cjs cannot read their pair from the tree, so each is listed here with where it is, the pairs it
+// can write, and what the retention does with them. A write that is neither literal nor listed fails
+// test-audit-retention-pure.cjs, and so does an entry that no write uses any more.
+//
+//   file      path under cloudflare/src
+//   entity    the entity expression exactly as written (normalised spaces), or {a|b} for a conditional of literals
+//   action    the action expression, same rules
+//   cls       the class the owner rule puts these rows in
+//   kept      true: every pair is kept forever | false: every pair follows the retention window |
+//             'by-entity': an undo/redo of whatever entity the history row names, kept when that entity is kept |
+//             'delegated': a helper that only passes its arguments on; its callers are scanned and classified themselves
+//   pairs     the entity/action pairs the write can produce; each must be a row of the table above
+const DYNAMIC_WRITERS = [
+  { file: 'lib/audit.ts', entity: 'entity', action: 'action', cls: 'audit helper', kept: 'delegated', pairs: [] },
+  { file: 'lib/audit.ts', entity: '@entity', action: '@action', cls: 'audit helper', kept: 'delegated', pairs: [] },
+  { file: 'lib/auditWriteReceipt.ts', entity: '@receiptEntity', action: '@receiptAction', cls: 'write receipts (their keys are scanned)', kept: 'delegated', pairs: [] },
+  { file: 'routes/importJobs.ts', entity: "'import_job'", action: 'action', cls: 'auditImportEvent helper (its callers are scanned)', kept: 'delegated', pairs: [] },
 
-// Pairs the scan finds in the source that this table deliberately does not seed (the action is a variable family):
-// auditImportEvent writes import_job_<step>; the shift routes write shift.<step>; undo/redo wrappers write
-// action_undo/action_redo on whatever entity the history row names.
-const FAMILY_ACTION = /^(import_job_[a-z_]+|shift\.[a-z_]+|action_(undo|redo))$/
+  { file: 'lib/branchCutoverHistory.ts', entity: "'action_history'", action: '@action', cls: 'stock changes', kept: true, pairs: [['action_history', 'undo_closed_branch_cutover']] },
+  { file: 'lib/branchCutoverInactiveStock.ts', entity: "'product'", action: '@action', cls: 'stock changes', kept: true,
+    pairs: [['product', 'branch_cutover_approved_fold'], ['product', 'branch_cutover_inactive_fold'], ['product', 'recompute_stock_cache']] },
+  { file: 'lib/branchCutoverInactiveStock.ts', entity: "'branch_cutover'", action: '@action', cls: 'stock changes', kept: true, pairs: [['branch_cutover', 'branch_cutover_inactive_stock']] },
+  { file: 'lib/branchCutoverParent.ts', entity: "'product_batch'", action: '@action', cls: 'stock changes', kept: true, pairs: [['product_batch', 'branch_cutover_lot_fold']] },
+  { file: 'lib/branchCutoverParent.ts', entity: '@entity', action: '@action', cls: 'stock changes', kept: true, pairs: [['branch_cutover', 'branch_cutover_completed']] },
 
-// Files with raw INSERT INTO audit_logs statements, and how many each holds. A new raw writer changes a count and
-// fails test-audit-retention-pure.cjs until its pairs are classified above.
-const RAW_SQL_WRITERS = {
-  'lib/audit.ts': 2, 'lib/auditWriteReceipt.ts': 1, 'lib/branchCutoverHistory.ts': 1, 'lib/branchCutoverInactiveStock.ts': 3,
-  'lib/branchCutoverParent.ts': 2, 'lib/bulkDeleteEngine.ts': 2, 'lib/contactMerge.ts': 1, 'lib/customerGenderRestoration.ts': 1,
-  'lib/feeOperationReceipt.ts': 1, 'lib/generalCustomerMembershipRepair.ts': 1, 'lib/generalCustomerRepair.ts': 1,
-  'lib/importEngine.ts': 1, 'lib/legacySubtotalRepair.ts': 1, 'lib/productDelete.ts': 2, 'lib/productWrites.ts': 1,
-  'lib/returnBulkAction.ts': 1, 'lib/saleBulkStatus.ts': 1, 'lib/saleBulkUpdate.ts': 1, 'lib/saleNotPaidStockRecovery.ts': 1,
-  'lib/saleSettlementAction.ts': 1, 'lib/sk2CleanserRepair.ts': 2, 'lib/stockInLineEdit.ts': 2, 'lib/stockSession.ts': 3,
-  'lib/transferOperation.ts': 1, 'lib/transferOperationReceipt.ts': 1, 'lib/undoAppliers.ts': 4, 'routes/contacts.ts': 1,
-  'routes/pos.ts': 1, 'routes/products.ts': 1, 'routes/returns.ts': 1, 'routes/sales.ts': 4, 'routes/settings.ts': 1,
-  'routes/shifts.ts': 3, 'routes/users.ts': 1,
-}
+  { file: 'lib/contactMerge.ts', entity: '@entity', action: "'merge'", cls: 'sales ownership and receivables', kept: true,
+    pairs: [['customer', 'merge'], ['supplier', 'merge'], ['delivery_contact', 'merge']] },
+  { file: 'lib/generalCustomerRepair.ts', entity: "'customer'", action: '@audit_action', cls: 'sales ownership and receivables', kept: true, pairs: [['customer', 'mark_anonymous_customer']] },
+  { file: 'lib/generalCustomerMembershipRepair.ts', entity: "'customer'", action: '@audit_action', cls: 'sales ownership and receivables', kept: true, pairs: [['customer', 'clear_shared_general_membership']] },
+  { file: 'lib/customerGenderRestoration.ts', entity: "'customer'", action: '@action', cls: 'contact edits', kept: false,
+    pairs: [['customer', 'customer_gender_restore'], ['customer', 'customer_gender_restore_undo'], ['customer', 'customer_gender_restore_redo']] },
+  { file: 'lib/bulkDeleteEngine.ts', entity: '@entity', action: "'delete'", cls: 'catalog and contact deletes', kept: false,
+    pairs: [['product', 'delete'], ['customer', 'delete'], ['supplier', 'delete'], ['delivery_contact', 'delete']] },
 
-module.exports = { ROWS, KEPT, PURGED, OWNER_KEPT, OWNER_PRUNED, DYNAMIC_ENTITIES, FAMILY_ACTION, RAW_SQL_WRITERS }
+  { file: 'lib/productDelete.ts', entity: "'product'", action: '@action', cls: 'undo/redo of a product (kept: it may have undone stock or a price)', kept: true, pairs: [['product', 'action_undo'], ['product', 'action_redo']] },
+  { file: 'lib/stockInLineEdit.ts', entity: "'product'", action: '@action', cls: 'undo/redo of a stock change', kept: true, pairs: [['product', 'action_undo'], ['product', 'action_redo']] },
+  { file: 'lib/undoAppliers.ts', entity: "'product'", action: '@action', cls: 'undo/redo of a product', kept: true, pairs: [['product', 'action_undo'], ['product', 'action_redo']] },
+  { file: 'lib/undoAppliers.ts', entity: "'sale'", action: '@action', cls: 'undo/redo of a sale', kept: true, pairs: [['sale', 'action_undo'], ['sale', 'action_redo']] },
+  { file: 'lib/undoAppliers.ts', entity: "'stock_session'", action: '@closeAction', cls: 'stock changes', kept: true, pairs: [['stock_session', 'stock_session_undo_closed']] },
+  { file: 'lib/stockSession.ts', entity: "'stock_session'", action: '@action', cls: 'undo/redo of a stock session', kept: true, pairs: [['stock_session', 'stock_session_undo'], ['stock_session', 'stock_session_redo']] },
+  { file: 'lib/transferOperation.ts', entity: "'stock_transfer'", action: '@action', cls: 'undo/redo of a stock transfer', kept: true, pairs: [['stock_transfer', 'action_undo'], ['stock_transfer', 'action_redo']] },
+  { file: 'lib/returnBulkAction.ts', entity: "'return'", action: '@action', cls: 'returns', kept: true,
+    pairs: [['return', 'return_fields_bulk'], ['return', 'action_undo'], ['return', 'action_redo']] },
+  { file: 'lib/saleBulkStatus.ts', entity: "'sale'", action: '@action', cls: 'sales', kept: true,
+    pairs: [['sale', 'sale_status_bulk'], ['sale', 'action_undo'], ['sale', 'action_redo']] },
+  { file: 'lib/saleBulkUpdate.ts', entity: "'sale'", action: '@event', cls: 'sales', kept: true,
+    pairs: [['sale', 'sale_fields_bulk'], ['sale', 'action_undo'], ['sale', 'action_redo']] },
+  { file: 'lib/saleSettlementAction.ts', entity: "'sale'", action: '@action', cls: 'payments', kept: true, pairs: [['sale', 'sale_settlement']] },
+  { file: 'routes/shifts.ts', entity: "'shift_session'", action: '@action', cls: 'shift and cash records', kept: true,
+    pairs: ['shift.open', 'shift.open_after_cancel', 'shift.close', 'shift.reopen', 'shift.amend', 'shift.cancel'].map((action) => ['shift_session', action]) },
+
+  { file: 'routes/actionHistory.ts', entity: "existing.entity || 'action_history'", action: '{action_redo|action_undo}', cls: 'undo/redo of the history row\'s own entity', kept: 'by-entity',
+    pairs: ['action_history', 'product', 'sale', 'return', 'stock_transfer', 'fee', 'branch', 'customer', 'supplier', 'delivery_contact', 'category', 'unit']
+      .flatMap((entity) => [[entity, 'action_undo'], [entity, 'action_redo']]) },
+  { file: 'routes/contacts.ts', entity: 'config.entity', action: "'create'", cls: 'contact edits', kept: false, pairs: [['customer', 'create'], ['supplier', 'create'], ['delivery_contact', 'create']] },
+  { file: 'routes/contacts.ts', entity: 'config.entity', action: "'update'", cls: 'contact edits', kept: false, pairs: [['customer', 'update'], ['supplier', 'update'], ['delivery_contact', 'update']] },
+  { file: 'routes/contacts.ts', entity: 'config.entity', action: "'delete'", cls: 'contact edits', kept: false, pairs: [['customer', 'delete'], ['supplier', 'delete'], ['delivery_contact', 'delete']] },
+  { file: 'routes/contacts.ts', entity: 'config.entity', action: "'portal_reset'", cls: 'contact edits', kept: false, pairs: [['customer', 'portal_reset']] },
+  { file: 'routes/lookups.ts', entity: 'kind', action: "'create'", cls: 'catalog lookups', kept: false, pairs: [['category', 'create'], ['unit', 'create']] },
+  { file: 'routes/lookups.ts', entity: 'kind', action: "{merge|update}", cls: 'catalog lookups', kept: false, pairs: [['category', 'merge'], ['category', 'update'], ['unit', 'merge'], ['unit', 'update']] },
+  { file: 'routes/lookups.ts', entity: 'kind', action: "'delete'", cls: 'catalog lookups', kept: false, pairs: [['category', 'delete'], ['unit', 'delete']] },
+]
+
+module.exports = { ROWS, KEPT, PURGED, OWNER_KEPT, OWNER_PRUNED, DYNAMIC_WRITERS }
