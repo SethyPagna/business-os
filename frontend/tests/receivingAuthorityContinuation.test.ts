@@ -596,7 +596,9 @@ await check('the receiving create keeps a confirmed product through same-user ch
     assert.deepEqual(await f.createProduct({ name: 'New' }, undefined, actor.captureActorWriteIdentity()), { id: 72 }, name)
     freshTab()
     const control = createFixture('mid-request', change)
-    await assert.rejects(control.createProduct({ name: 'New' }), { code: 'stale_read_scope' }, `${name}: every other caller keeps the read fence`)
+    // An avatar or expiry rewrite of the same account is not a read-fence change (login refresh, 14 Oct).
+    if (name === 'avatar rewrite' || name === 'expiry rewrite') assert.deepEqual(await control.createProduct({ name: 'New' }), { id: 72 }, name)
+    else await assert.rejects(control.createProduct({ name: 'New' }), { code: 'stale_read_scope' }, `${name}: every other caller keeps the read fence`)
   }
   for (const [name, change] of Object.entries(REAL_CHANGE)) {
     freshTab()

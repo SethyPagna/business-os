@@ -338,6 +338,11 @@ export function completeActorSessionReconciliation(marker: string | null): boole
 
 export type ActorReadScope = { authority: string; channel: string; revision: string }
 
+// Whom a read belongs to: server, origin, the signed-in user id, organization
+// and grants, and the session marker every sign-in, sign-out and reset rotates.
+// Not the stored profile text or its expiry: sign-in stores the login answer
+// and the bootstrap then rewrites the same account, grants unchanged, with more
+// fields -- which refused every Dashboard read in flight (owner, 14 Oct).
 function authority(): string {
   observeSessionMarker()
   let identity = getSyncServerUrl()
@@ -345,10 +350,12 @@ function authority(): string {
     if (typeof window !== 'undefined') {
       // Never serialize credentials into cache keys. A per-runtime opaque id
       // names this identity; local/session storage values are comparison only.
+      const id = storedUserId()
       identity += JSON.stringify([
         window.location?.origin,
-        window.sessionStorage?.getItem('businessos_user') || window.localStorage?.getItem('businessos_user'),
-        window.sessionStorage?.getItem('businessos_user_expiry') || window.localStorage?.getItem('businessos_user_expiry'),
+        id,
+        id ? storedOrganization(parsedUser) : '',
+        id ? storedGrants() : '',
         window.localStorage?.getItem(SESSION_MARKER),
       ])
     }
@@ -445,6 +452,36 @@ function storedUserId(): string {
   return parsedUser.id == null ? '' : String(parsedUser.id)
 }
 
+/** POST /login answers organizationId; the bootstrap row carries organization_id.
+ *  Reads and writes both name the organization through this one lookup. */
+function storedOrganization(user: Record<string, unknown>): string {
+  return String(user.organization_id || user.organizationId || user.organization_slug || '')
+}
+
+// The grants the app merges into effective permissions, in one spelling: the
+// login answer and the bootstrap row carry the same values, as JSON text or parsed.
+function canonicalGrant(value: unknown): unknown {
+  if (typeof value === 'string') {
+    try { return canonicalGrant(JSON.parse(value)) } catch { return value }
+  }
+  if (Array.isArray(value)) return value.map(canonicalGrant)
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    return Object.fromEntries(Object.keys(record).sort().map((key) => [key, canonicalGrant(record[key])]))
+  }
+  return value ?? null
+}
+
+let grantsRaw: string | null = null
+let grants = ''
+function storedGrants(): string {
+  if (parsedUserRaw !== grantsRaw) {
+    grantsRaw = parsedUserRaw
+    grants = JSON.stringify([parsedUser.role_code ?? null, canonicalGrant(parsedUser.permissions), canonicalGrant(parsedUser.role_permissions)])
+  }
+  return grants
+}
+
 function storedAccount(): Record<string, unknown> | null {
   if (storedUserId()) {
     // A forgotten account stays forgotten until a sign-in is confirmed: an old
@@ -460,7 +497,7 @@ function storedWriteOwner(): { owner: string; signedIn: boolean } {
   let origin = ''
   try { origin = String(window.location?.origin || '') } catch { origin = '' }
   const id = user.id == null ? '' : String(user.id)
-  const organization = String(user.organization_id || user.organization_slug || '')
+  const organization = storedOrganization(user)
   return { owner: JSON.stringify([getSyncServerUrl(), origin, id, organization]), signedIn: id !== '' }
 }
 

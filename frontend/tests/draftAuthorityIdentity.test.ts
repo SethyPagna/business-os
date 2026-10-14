@@ -66,7 +66,8 @@ for (const [name, change] of Object.entries(SAME_USER)) {
     change()
     assert.equal(isDraftAuthorityCurrent(authority), true, 'the form stays open, saving and writing its draft')
     assert.equal(openDraftAuthority('fee_new').draftKey, authority.draftKey, 'and the key it would be reopened under is the same')
-    if (name.startsWith('session reset') || name.includes('rewrite')) assert.equal(actor.isActorReadScopeCurrent(read, false), false, 'control: the READ scope did move -- the old fence would have locked here')
+    // An avatar or expiry rewrite of the same account keeps the read scope (login refresh, 14 Oct).
+    if (name.startsWith('session reset') || name.startsWith('permissions')) assert.equal(actor.isActorReadScopeCurrent(read, false), false, 'control: the READ scope did move -- the old fence would have locked here')
   })
 }
 for (const [name, change] of Object.entries(REAL_CHANGE)) {
