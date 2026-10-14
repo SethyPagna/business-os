@@ -442,6 +442,27 @@ async function check(name, fn) {
     assert.equal(old.status, 401, 'the old password is gone')
   })
 
+  await check('R2-S1: a short seeded admin password (flagged at seed, not by sign-in) has a way through, a way out, and no loop', async () => {
+    reset()
+    db.prepare('UPDATE users SET password = @password, must_change_password = 1 WHERE id = 1').run({ password: 'hash:Short1' })
+    const signIn = await login('admin', 'Short1')
+    assert.equal(signIn.body.user.must_change_password, 1, 'sign-in reports the seeded flag')
+    assert.equal((await someProtectedCall(signIn.minted)).body.code, 'password_change_required')
+    const tooShort = await changePassword(signIn.minted, 1, 'Short1', 'Short2')
+    assert.equal(tooShort.status, 400, 'a new password under 10 is refused')
+    assert.equal(flagOf(1), 1, 'a refused change keeps the screen, it does not loop or sign out')
+    const changed = await changePassword(signIn.minted, 1, 'Short1', 'a-better-secret-1')
+    assert.equal(changed.status, 200, changed.text)
+    assert.equal(flagOf(1), 0)
+    const again = await login('admin', 'a-better-secret-1')
+    assert.equal(again.body.user.must_change_password, 0, 'no change screen the second time')
+    assert.equal((await someProtectedCall(again.minted)).status, 200)
+    reset()
+    db.prepare('UPDATE users SET password = @password, must_change_password = 1 WHERE id = 1').run({ password: 'hash:Short1' })
+    const out = (await login('admin', 'Short1')).minted
+    assert.equal((await send(authRoute, 'POST', '/logout', out, { expected_actor_id: 1, expected_organization_id: null })).status, 200, 'Sign out is the way out')
+  })
+
   await check('before 0202 is applied, sign-in and ordinary calls still work (no 500)', async () => {
     reset({ migrated: false })
     const signIn = await login('owner', LEAKED)

@@ -78,7 +78,7 @@ function transpile(relPath) {
 const REAL_LOAD_DEFAULTS = {
   'lib/currentPasswordGuard.ts': { './auth': { currentSessionLimitFamily: async () => null } },
   // lib/coreDataInvariants.ts hashes a seeded admin password through it.
-  'lib/coreDataInvariants.ts': { './passwordHash': loadRealPasswordHash() },
+  'lib/coreDataInvariants.ts': { './passwordHash': loadRealPasswordHash(), get './passwordPolicy'() { return loadReal('lib/passwordPolicy.ts') } },
 }
 
 function loadReal(relPath, requireOverrides = {}) {

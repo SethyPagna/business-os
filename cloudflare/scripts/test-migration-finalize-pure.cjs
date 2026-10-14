@@ -94,6 +94,7 @@ const systemRoute = loadReal('routes/system.ts', {
     './db': { getDb: () => db },
     './sqlBinding': loadReal('lib/sqlBinding.ts', {}),
     './passwordHash': loadReal('lib/passwordHash.ts'),
+    './passwordPolicy': loadReal('lib/passwordPolicy.ts'),
   }),
   '../lib/backup': {
     createCloudflareBackup: async () => { backupCallLog.push('full'); if (backupShouldFail) throw new Error('simulated backup failure'); return { name: 'fake-backup' } },

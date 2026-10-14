@@ -56,6 +56,7 @@ function loadCore(legacy = false) {
     './sqlBinding': load('lib/sqlBinding.ts'),
     './customTableName': load('lib/customTableName.ts'),
     './passwordHash': { hashPassword: async () => 'focused-test-hash' },
+    './passwordPolicy': load('lib/passwordPolicy.ts'),
   }, text + '\nexport { tryFastPath }\n')
 }
 const core = loadCore()

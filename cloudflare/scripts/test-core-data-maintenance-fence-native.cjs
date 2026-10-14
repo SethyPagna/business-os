@@ -40,6 +40,7 @@ function world({ through } = {}) {
   const core = load('coreDataInvariants', {
     './db': dbModule, './customTableName': load('customTableName'), './sqlBinding': load('sqlBinding'),
     './passwordHash': { hashPassword: async () => 'synthetic-test-hash' },
+    './passwordPolicy': load('passwordPolicy'),
   })
   return { raw, control, core, env: { DB: { prepare: prepared }, BUSINESS_OS_ADMIN_PASSWORD: 'synthetic-test-password' } }
 }
