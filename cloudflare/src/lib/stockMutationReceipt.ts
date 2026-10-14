@@ -143,6 +143,30 @@ type StockMutationClaim =
   | { state: 'in_flight' }
   | { state: 'partial' }
 
+/**
+ * A COMPLETED receipt row for a request whose answer is known at the instant its batch commits -- a product create
+ * that carries a starting quantity -- as one statement for that batch. A resend of the same request (same actor, same
+ * client_request_id, same fingerprint) then finds this row and replays instead of repeating the request; without
+ * it, the resend of a create whose acknowledgement was lost would find the product it just made, fold into it, and
+ * record the starting quantity a second time. `responseJsonSql` builds the stored answer inside the batch (it can read
+ * the row the batch just inserted, using the caller's params). Null when the request carries no usable id.
+ */
+export function completedStockMutationReceiptStatement(
+  actorId: number | null | undefined,
+  body: Record<string, unknown>,
+  responseJsonSql: string,
+  params: Record<string, unknown>,
+): StockWriteStatement | null {
+  const requestId = normalizeStockMutationRequestId(body.client_request_id ?? body.clientRequestId)
+  if (!requestId || actorId == null) return null
+  return {
+    sql: `INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json,written,response_status,response_json,completed_at)
+      VALUES(@receiptActor,@receiptRequest,'receive',@receiptCanonical,1,200,${responseJsonSql},CURRENT_TIMESTAMP)
+      ON CONFLICT(actor_id,request_id) DO NOTHING`,
+    params: { ...params, receiptActor: actorId, receiptRequest: requestId, receiptCanonical: canonicalStockMutationRequest(body) },
+  }
+}
+
 /** Accept only a stable, bounded id. */
 function normalizeStockMutationRequestId(value: unknown): string | null {
   if (typeof value !== 'string') return null

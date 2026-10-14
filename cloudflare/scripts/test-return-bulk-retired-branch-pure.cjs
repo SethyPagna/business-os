@@ -157,6 +157,23 @@ const stockOf = (f) => ({
 const state = (f) => JSON.stringify(tables.map((table) => [table, f.sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]))
 const scrub = (text) => text.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<uuid>')
   .replace(/\d{4}-\d{2}-\d{2}[ T][\d:.Z]+/g, '<ts>').replace(/-\d{12,}/g, '<id>')
+// The ONE deliberate difference from the oracle (6.0.134): the sale-status derivation also counts the units a sales import
+// recorded as already returned (sale_items.returned_quantity), as the single return path does. On a sale with none (every
+// fixture here) it changes no row, so the INERT check compares the statements with exactly those two terms taken out of the
+// new kernel's -- and requires that they were there to take out, so a status statement that lost them still fails.
+// test-returns-bulk-imported-status-native.cjs pins what the terms do.
+const IMPORTED_RETURNED_TERMS = [
+  /(?:\\n|\s)*AND NOT EXISTS\(SELECT 1 FROM sale_items si WHERE si\.sale_id=[^ ]+ AND MAX\(COALESCE\(si\.returned_quantity, 0\), 0\) > 0\)/g,
+  /(?:\\n|\s)*\+ MAX\(COALESCE\(si\.returned_quantity, 0\), 0\)/g,
+]
+function withoutImportedReturnedTerms(statements) {
+  let text = statements
+  for (const term of IMPORTED_RETURNED_TERMS) {
+    assert.ok(new RegExp(term.source).test(text), `the status statement carries the imported returned-quantity term ${term}`)
+    text = text.replace(term, '')
+  }
+  return text
+}
 const movements = (f) => f.sql.prepare("SELECT movement_type, branch_id, branch_name, addressed_branch_name, quantity, batch_id FROM inventory_movements ORDER BY id").all().map((row) => ({ ...row }))
 async function replay(kernel, f, receipt, direction, generation) {
   const row = f.sql.prepare('SELECT undo_payload,redo_payload FROM action_history WHERE id=?').get(receipt.actionHistoryId)
@@ -260,7 +277,7 @@ async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${na
     ]) {
       const a = fixture('before'); const b = fixture('before')
       await run(fresh, a); await run(old, b)
-      const statementsA = scrub(JSON.stringify(withoutProductAdmission(a.capture))); const statementsB = scrub(JSON.stringify(withoutProductAdmission(b.capture)))
+      const statementsA = withoutImportedReturnedTerms(scrub(JSON.stringify(withoutProductAdmission(a.capture)))); const statementsB = scrub(JSON.stringify(withoutProductAdmission(b.capture)))
       let at = 0
       while (at < statementsA.length && statementsA[at] === statementsB[at]) at++
       assert.equal(statementsA === statementsB, true, `${name}: equal business statements apart from verified admission; first difference near ${statementsA.slice(Math.max(0, at - 120), at + 120)} <> ${statementsB.slice(Math.max(0, at - 120), at + 120)}`)

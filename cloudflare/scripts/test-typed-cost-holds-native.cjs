@@ -7,7 +7,7 @@
 // holds:
 //   - the product form (PUT /:id) -- the reference behaviour;
 //   - the product form's CREATE that folds into an existing product (POST /
-//     -> foldCreateIntoExisting, which averages the typed cost in);
+//     -> foldCreateIntoExisting in lib/createFold.ts, which averages the typed cost in);
 //   - the catalog-wide bulk price adjust (POST /bulk-price-adjust);
 //   - the per-selection bulk adjust (frontend buildProductBulkUpdatePayload
 //     -> the same PUT /:id, one product at a time);
@@ -71,6 +71,7 @@ const real = new Set([
   'acquisitionCostAccess', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db',
   'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'reviewApprovalPermission', 'productDiscountGate',
   'conflictControl', 'renameCascade', 'schemaProbe', 'catalogCostRecompute', 'productBatches', 'productStockGuard',
+  'createFold', // the create-fold helper moved out of routes/products.ts (13 Oct 2026); an unloaded module would be a no-op
 ])
 const noop = new Proxy(function () {}, { get: () => noop, apply: () => undefined, construct: () => ({}) })
 class ProductImageAssetError extends Error {}

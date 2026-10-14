@@ -11,7 +11,7 @@ import { validateCustomerReturnRestorationCohortV1, validateCustomerReturnRestor
   type CustomerReturnRestorationV1 } from './customerReturnEntitlement'
 import { subtractDecimalSum } from './moneyPrecision'
 import { assertReturnCreateCapacity, ReturnCapacityError, type ReturnCapacityParams } from './returnCreateAction'
-import { importedReturnLines } from './saleTransitions'
+import { importedReturnLines, importedReturnedQuantitySql } from './saleTransitions'
 import {
   BRANCH_RETIRED_DAMAGED_CODE, BRANCH_RETIRED_DAMAGED_ERROR, BranchEffectResolver, BranchRetiredNoSuccessorError,
   branchEffectGuardPredicate, foldedLotSurvivors, readBranchDirectory,
@@ -277,18 +277,25 @@ function memberStatements(member: Member, direction: 1 | -1, user: SessionUser, 
   ]
 }
 
+// The units a sales import recorded as already returned (sale_items.returned_quantity, restocked by the import itself) are
+// committed returns of their line for the status, exactly as the single return create / edit count them
+// (routes/returns.ts importedReturnLines -> projectedSaleStatusForReturnCreate / ...ForReturnEdit). The in-batch capacity
+// guards use the SQL twin importedReturnedQuantitySql (lib/saleTransitions.ts); this status derivation, and the pre-read
+// that records it (saleStatusSnapshots), must too, or restoring a return would leave a sale one imported unit short of
+// 'returned' and cancelling the last recorded return would forget the imported unit and report the sale as not returned.
 function saleStatusStatement(saleId: number, stamp: string, exactStatus?: string): Statement {
   if (exactStatus) return { sql: 'UPDATE sales SET sale_status=@status,updated_at=@stamp WHERE id=@saleId', params: { saleId, stamp, status: exactStatus } }
   return {
     sql: `UPDATE sales SET sale_status = CASE
-            WHEN NOT EXISTS(SELECT 1 FROM returns r WHERE r.sale_id=@saleId AND COALESCE(r.status,'completed')!='cancelled' AND COALESCE(r.return_scope,'customer')='customer') THEN COALESCE(status_before_return,'completed')
+            WHEN NOT EXISTS(SELECT 1 FROM returns r WHERE r.sale_id=@saleId AND COALESCE(r.status,'completed')!='cancelled' AND COALESCE(r.return_scope,'customer')='customer')
+              AND NOT EXISTS(SELECT 1 FROM sale_items si WHERE si.sale_id=@saleId AND ${importedReturnedQuantitySql('si')} > 0) THEN COALESCE(status_before_return,'completed')
             WHEN NOT EXISTS(
               SELECT 1 FROM sale_items si
               WHERE si.sale_id=@saleId AND COALESCE((
                 SELECT SUM(ri.quantity) FROM return_items ri JOIN returns r ON r.id=ri.return_id
                 WHERE r.sale_id=@saleId AND COALESCE(r.status,'completed')!='cancelled' AND COALESCE(r.return_scope,'customer')='customer'
                   AND (ri.sale_item_id=si.id OR (ri.sale_item_id IS NULL AND ri.product_id=si.product_id))
-              ),0) < si.quantity
+              ),0) + ${importedReturnedQuantitySql('si')} < si.quantity
             ) THEN 'returned'
             ELSE 'partial_return' END,
           updated_at=@stamp WHERE id=@saleId`,
@@ -324,13 +331,14 @@ async function saleStatusSnapshots(db: D1Compat, members: Member[]): Promise<Sal
     SELECT s.id AS saleId,COALESCE(s.sale_status,'completed') AS beforeStatus,
       CASE
         WHEN NOT EXISTS(SELECT 1 FROM returns r WHERE r.sale_id=s.id AND ${effective}!='cancelled'
-          AND COALESCE(r.return_scope,'customer')='customer') THEN COALESCE(s.status_before_return,'completed')
+          AND COALESCE(r.return_scope,'customer')='customer')
+          AND NOT EXISTS(SELECT 1 FROM sale_items si WHERE si.sale_id=s.id AND ${importedReturnedQuantitySql('si')} > 0) THEN COALESCE(s.status_before_return,'completed')
         WHEN NOT EXISTS(
           SELECT 1 FROM sale_items si WHERE si.sale_id=s.id AND COALESCE((
             SELECT SUM(ri.quantity) FROM return_items ri JOIN returns r ON r.id=ri.return_id
             WHERE r.sale_id=s.id AND ${effective}!='cancelled' AND COALESCE(r.return_scope,'customer')='customer'
               AND (ri.sale_item_id=si.id OR (ri.sale_item_id IS NULL AND ri.product_id=si.product_id))
-          ),0) < si.quantity
+          ),0) + ${importedReturnedQuantitySql('si')} < si.quantity
         ) THEN 'returned' ELSE 'partial_return' END AS afterStatus
     FROM sales s
     WHERE EXISTS(SELECT 1 FROM json_each(@saleIds) ids WHERE CAST(ids.value AS INTEGER)=s.id)

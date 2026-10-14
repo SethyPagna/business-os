@@ -1915,7 +1915,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     if (mode === 'products' && importMode === 'replace_all') {
       const confirmed = await askToConfirm({
         title: T('csv_mode_replace_title', 'Replace entire catalog'),
-        message: T('confirm_replace_all_import', 'Products omitted from this file will be removed only if they hold no stock. If any omitted product holds stock, the removal step is refused; imported rows already saved remain. Continue?'),
+        message: T('confirm_replace_all_import', 'Products omitted from this file will be removed only if they hold no stock. If any omitted product holds stock, the removal step is refused; imported rows already saved remain. A row you skip keeps its product. Continue?'),
         items: importFileReviewItems(totalCount),
         confirmLabel: T('continue', 'Continue'),
         cancelLabel: T('cancel', 'Cancel'),
@@ -2909,7 +2909,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
               <p className="mt-3 flex items-start gap-2 rounded-lg border border-red-200 bg-red-100/60 p-2 text-xs text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 <span>
-                  {T('csv_mode_replace_warning', 'Omitted products are removed only when every omitted product has zero stock. If any holds stock, the removal step is refused; imported rows already saved remain. Matched products update in place. Sales and stock history are kept. Check that this is the complete catalog before importing.')}
+                  {T('csv_mode_replace_warning', 'Omitted products are removed only when every omitted product has zero stock. If any holds stock, the removal step is refused; imported rows already saved remain. A row you skip keeps its product. Matched products update in place. Sales and stock history are kept. Check that this is the complete catalog before importing.')}
                 </span>
               </p>
             ) : null}

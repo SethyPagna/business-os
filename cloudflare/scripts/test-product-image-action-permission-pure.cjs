@@ -56,6 +56,8 @@ const loadProductWrites = db => loadTs('lib/productWrites.ts', {
   './moneyPrecision': moneyPrecision,
   './catalogCostRecompute': loadTs('lib/catalogCostRecompute.ts', { './moneyPrecision': moneyPrecision }),
   './db': db,
+  // Only a create-fold that carries its request receipt writes one (lib/createFold.ts); this test never folds a create.
+  './stockMutationReceipt': { completedStockMutationReceiptStatement: () => { throw new Error('this test passes no stock-mutation receipt') } },
   './media': media,
   './batchCode': loadTs('lib/batchCode.ts'),
   './searchMatch': loadTs('lib/searchMatch.ts'),

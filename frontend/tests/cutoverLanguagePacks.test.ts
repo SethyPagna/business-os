@@ -151,11 +151,14 @@ runTest('a warning without its code, with an unknown code, or with any param mis
   assert.equal(importWarningText({ kind: 'other', message: english, code: 'stock_import_branch_routing', params }, (_key, fallback) => fallback), english)
 })
 
-runTest('the row message restates the reworded quantity sentence in place and leaves every other sentence alone', () => {
+runTest('the row message restates the unified import\'s known sentences in place and leaves every other sentence alone', () => {
   const sentence = 'Enter a shop, warehouse or store quantity.'
   assert.equal(importRowMessageText(sentence, trFrom(en)), sentence)
   assert.equal(importRowMessageText(sentence, trFrom(km)), km.stock_import_quantity_required)
-  assert.equal(importRowMessageText(`Name or barcode is required. ${sentence}`, trFrom(km)), `Name or barcode is required. ${km.stock_import_quantity_required}`)
+  // The name/barcode sentence is restated too since the review rendering covers the whole import row family; the
+  // sentence beside it is restated independently and a sentence the helper does not know is left as the Worker wrote it.
+  assert.equal(importRowMessageText(`Name or barcode is required. ${sentence}`, trFrom(km)), `${km.stock_import_name_or_barcode_required} ${km.stock_import_quantity_required}`)
+  assert.equal(importRowMessageText(`Name or barcode is required. ${sentence} Invalid shop quantity`, trFrom(km)), `${km.stock_import_name_or_barcode_required} ${km.stock_import_quantity_required} Invalid shop quantity`)
   assert.equal(importRowMessageText('Prices must be non-negative numbers.', trFrom(km)), 'Prices must be non-negative numbers.')
   assert.equal(importRowMessageText(null, trFrom(km)), '')
   assert.ok(km.stock_import_quantity_required.includes('shop, warehouse'), 'the column names stay as the sheet spells them')
@@ -164,7 +167,8 @@ runTest('the row message restates the reworded quantity sentence in place and le
 runTest('the Details cell: an error message wins, else the warnings joined, else a dash', () => {
   const routing = { kind: 'other', message: 'Shop 1 + Warehouse 2 -> LC Store 3', code: 'stock_import_branch_routing', params: { columns: 'shop 1 + warehouse 2', branch: 'LC Store', total: 3 } }
   assert.equal(importRowDetailText({ message: null, warnings: [routing] }, trFrom(km)), km.stock_import_branch_routing.replace('{branch}', 'LC Store').replace('{columns}', 'shop 1 + warehouse 2').replace('{total}', '3'))
-  assert.equal(importRowDetailText({ message: 'Name or barcode is required.', warnings: [routing] }, trFrom(km)), 'Name or barcode is required.')
+  assert.equal(importRowDetailText({ message: 'Name or barcode is required.', warnings: [routing] }, trFrom(km)), km.stock_import_name_or_barcode_required)
+  assert.equal(importRowDetailText({ message: 'Name or barcode is required.', warnings: [routing] }, trFrom(en)), 'Name or barcode is required.')
   assert.equal(importRowDetailText({ message: null, warnings: [routing, { kind: 'stock_action_conflict', message: 'Stock changed.' }] }, trFrom(en)),
     'Columns combined at LC Store: shop 1 + warehouse 2 = 3 · Stock changed.')
   assert.equal(importRowDetailText({ message: '', warnings: [] }, trFrom(km)), '—')

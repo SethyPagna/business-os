@@ -397,8 +397,11 @@ const PATCHES = {
   'no-approval-identity': [
     { name: 'no-approval-identity', file: REVIEW_APPLY, from: '    if (identityTwin) throw new ReviewIdentityConflictError(identityTwin.id)\n', to: '' },
   ],
+  // Owner rulings 9 and 16 (13 Oct): a queued create that now matches an existing product is FOLDED at approval
+  // (lib/reviewApply.ts applyApprovedCreateFold) instead of refused. The wrong implementation skips the fold and goes
+  // on to create, minting the twin the identity rule exists to stop.
   'no-create-approval-identity': [
-    { name: 'no-create-approval-identity', file: REVIEW_APPLY, from: '  if (createTwin) throw new ReviewIdentityConflictError(createTwin.id)\n', to: '' },
+    { name: 'no-create-approval-identity', file: REVIEW_APPLY, from: '  if (createTwin) return applyApprovedCreateFold(env, row, reviewer, createTwin, name, body, waitUntil)\n', to: '' },
   ],
   'approval-any-twin': [
     { name: 'approval-any-twin', file: REVIEW_APPLY, from: 'const identityTwin = changesIdentity ? await', to: 'const identityTwin = true ? await' },
@@ -686,9 +689,12 @@ async function main() {
     })
 
     // T5. Approval half. A reviewer (the admin here; never the requester) approves a queued request that lands on an
-    // existing product's identity. The applier must never mint a twin: it refuses with 409 review_identity_conflict,
-    // writes nothing and leaves the request open (lib/reviewApply.ts). "Window" cases queue a request that collides
-    // with nothing and create the collision before approval, so they test the applier alone (RED on 0baa53f2 too).
+    // existing product's identity. The applier must never mint a twin. For an EDIT that moves the identity it refuses
+    // with 409 review_identity_conflict, writes nothing and leaves the request open (lib/reviewApply.ts). For a CREATE
+    // it folds into the existing product (owner rulings 9 and 16, 13 Oct: the refusal existed only because the fold
+    // dropped the queued starting quantity, which test-create-fold-stock-in-native.cjs now proves it records).
+    // "Window" cases queue a request that collides with nothing and create the collision before approval, so they test
+    // the applier alone (RED on 0baa53f2 too).
     const approve = (pendingId) => H.api('POST', '/api/review/' + pendingId + '/approve', {})
     const pendingStatus = async (pendingId) => (await H.q1('SELECT status FROM pending_actions WHERE id=?', pendingId)).status
     const activeWithIdentity = async (name, barcode) => (await H.q1('SELECT COUNT(*) n FROM products WHERE is_active=1 AND name=? AND barcode=?', name, barcode)).n
@@ -751,22 +757,22 @@ async function main() {
       t.eq('X unchanged', await H.q1('SELECT * FROM products WHERE id=?', s.x), xBefore)
     })
 
-    await check('I-T5-create-approve', 'T5: approving a queued create that matches an existing product is refused (409); no new row, existing unchanged', 'high', async (t) => {
+    await check('I-T5-create-approve', 'T5: approving a queued create that matches an existing product folds it into that product (200); no new row, exactly one active row keeps the identity', 'high', async (t) => {
       const e = await existingForCreate(H)
       const queued = await H.api('POST', '/api/products', { name: e.name, barcode: e.clean }, { as: 'reviewtier' })
       t.eq('the create is queued (202)', queued.status, 202)
       const pendingId = queued.body && queued.body.pendingActionId
-      const before = await H.q1('SELECT * FROM products WHERE id=?', e.id)
       const c0 = await createCounts()
       const r = await approve(pendingId)
       await H.settle()
-      refusedClean(t, r)
-      t.eq('the request stays open', await pendingStatus(pendingId), 'open')
+      t.eq('approval HTTP status', r.status, 200)
+      t.eq('the request is approved', await pendingStatus(pendingId), 'approved')
       t.eq('product rows added', (await createCounts()).products - c0.products, 0)
-      t.eq('existing product unchanged', await H.q1('SELECT * FROM products WHERE id=?', e.id), before)
+      t.eq('exactly one active row has the identity (the existing one, barcode cleaned by the fold)', await activeWithIdentity(e.name, e.clean), 1)
+      t.eq('and it is the existing row', (await H.q1('SELECT id FROM products WHERE is_active=1 AND name=? AND barcode=?', e.name, e.clean)).id, e.id)
     })
 
-    await check('I-T5-create-window', 'T5: a create queued for a FREE identity, created directly before approval, is refused at approval (409); no twin', 'high', async (t) => {
+    await check('I-T5-create-window', 'T5: a create queued for a FREE identity, created directly before approval, is folded at approval (200); no twin', 'high', async (t) => {
       const n = ++seq
       const target = { name: 'AL Create Window ' + n, barcode: '77200' + String(n).padStart(8, '0') }
       const queued = await H.api('POST', '/api/products', target, { as: 'reviewtier' })
@@ -776,8 +782,8 @@ async function main() {
       t.eq('meanwhile a Full user creates it directly (200)', direct.status, 200)
       const r = await approve(pendingId)
       await H.settle()
-      refusedClean(t, r)
-      t.eq('the request stays open', await pendingStatus(pendingId), 'open')
+      t.eq('approval HTTP status', r.status, 200)
+      t.eq('the request is approved', await pendingStatus(pendingId), 'approved')
       t.eq('exactly one active row has the identity', await activeWithIdentity(target.name, target.barcode), 1)
     })
 

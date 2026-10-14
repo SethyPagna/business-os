@@ -203,6 +203,7 @@ const branchWrites = loadReal('lib/branchWrites.ts', {
 const branchRoleGuards = loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRoles })
 const schemaProbeReal = loadReal('lib/schemaProbe.ts')
 const productWrites = loadReal('lib/productWrites.ts', { './schemaProbe': schemaProbeReal,
+  './stockMutationReceipt': loadReal('lib/stockMutationReceipt.ts'),
   './receivingBranch': loadReal('lib/receivingBranch.ts'),
   './branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   './businessMaintenanceGuard': loadReal('lib/businessMaintenanceGuard.ts'),
@@ -231,6 +232,8 @@ const reviewApply = loadReal('lib/reviewApply.ts', {
   ...broadcastStub,
   './pendingActions': pendingActions,
   './productWrites': productWrites,
+  // The approved create-fold (owner ruling 16) is exercised by test-create-fold-stock-in-native.cjs; no case here queues a twin.
+  './createFold': { foldCreateIntoExisting: async () => { throw new Error('createFold is not part of this test') }, foldCreateWithStockInWrite: async () => { throw new Error('createFold is not part of this test') } },
   './branchWrites': branchWrites,
   './canonicalBranchIdentity': canonicalBranchIdentity,
   './conflictControl': loadReal('lib/conflictControl.ts'),
@@ -275,6 +278,9 @@ const reviewQueueRoute = loadReal('routes/reviewQueue.ts', {
   '../lib/reviewApprovalPermission': loadReal('lib/reviewApprovalPermission.ts', {
     ...dbStub, './permissions': permissions, './acquisitionCostAccess': acquisitionCostAccess,
     './productWrites': productWrites, './productImagePermission': productImagePermission,
+    // The create branch asks whether a same-identity product exists (owner ruling 16: a stock-in needs inventory:adjust).
+    './productIdentity': loadReal('lib/productIdentity.ts', { './sqlBinding': sqlBinding,
+      './productDetailRule': loadReal('lib/productDetailRule.ts', { './moneyPrecision': loadReal('lib/moneyPrecision.ts') }) }),
     './moneyPrecision': loadReal('lib/moneyPrecision.ts'), './productDiscountGate': loadReal('lib/productDiscountGate.ts'),
   }),
   '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR

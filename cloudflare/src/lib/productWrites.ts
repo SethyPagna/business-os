@@ -26,6 +26,7 @@ import {
 import { ordinaryBusinessMaintenanceGuard } from './businessMaintenanceGuard'
 import { pendingActionApprovalStatements, type PendingActionRow, type ReviewPendingActionInput } from './pendingActions'
 import { buildAuditStatement } from './audit'
+import { completedStockMutationReceiptStatement } from './stockMutationReceipt'
 import { canonicalProductDiscountColumns } from './productDiscountGate'
 
 export const PRODUCT_MONEY_VERSION = 'product_money_policy_version'
@@ -351,6 +352,10 @@ export async function createProductWithInitialStock(
   env: Env, body: Record<string, unknown>, required: Record<string, unknown>, maxImages = MAX_IMAGES_PER_PRODUCT,
   approval?: { row: PendingActionRow; reviewer: ReviewPendingActionInput },
   redirectTarget: RedirectTarget = null,
+  // A create that carries a starting quantity and a usable client_request_id records a completed stock receipt in
+  // this same batch (lib/createFold.ts startingStockFingerprint), so a resend of the SAME request replays this
+  // create instead of folding into it and recording the quantity twice.
+  receipt?: { actorId: number | null; fingerprint: Record<string, unknown> },
 ) {
   const db = getDb(env)
   const { branchId, quantity, landing } = await productCreateDestination(env, body, redirectTarget)
@@ -373,6 +378,11 @@ export async function createProductWithInitialStock(
     sql: `INSERT INTO product_images(product_id,image_path,sort_order) SELECT id,@path,@order FROM products WHERE client_request_id=@key`,
     params: { key, path, order },
   })
+  const startingReceipt = receipt && quantity > 0
+    ? completedStockMutationReceiptStatement(receipt.actorId, receipt.fingerprint,
+      "json_object('success',json('true'),'id',(SELECT id FROM products WHERE client_request_id=@key))", { key })
+    : null
+  if (startingReceipt) statements.push(startingReceipt)
   if (approval) {
     statements.push(...pendingActionApprovalStatements(approval.row, approval.reviewer))
     const audit = buildAuditStatement(approval.reviewer.reviewedBy ?? null, approval.reviewer.reviewedByName ?? null, 'create', 'product', null)

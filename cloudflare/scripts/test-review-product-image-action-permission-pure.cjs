@@ -51,6 +51,7 @@ const dbLib = loadTs('lib/db.ts', { './importMaintenanceFence': {
     ImportMaintenanceFenceError: class ImportMaintenanceFenceError extends Error {},
   } })
 const realProductWrites = loadTs('lib/productWrites.ts', {
+  './stockMutationReceipt': loadTs('lib/stockMutationReceipt.ts'),
   './catalogCostRecompute': loadTs('lib/catalogCostRecompute.ts', { './moneyPrecision': loadTs('lib/moneyPrecision.ts') }),
   './db': dbLib,
   './receivingBranch': loadTs('lib/receivingBranch.ts'),
@@ -178,6 +179,8 @@ function loadReviewApply(state, updateChanges = 1) {
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
     './cache': { bumpVersion: async () => {} },
     './productWrites': productWrites,
+    // The approved create-fold (owner ruling 16) has its own native test; no case here queues a twin.
+    './createFold': { foldCreateIntoExisting: async () => { throw new Error('createFold is not part of this test') }, foldCreateWithStockInWrite: async () => { throw new Error('createFold is not part of this test') } },
     './branchWrites': { branchUpdateStatements: () => [] },
     './canonicalBranchIdentity': canonicalBranchIdentity,
     './conflictControl': loadTs('lib/conflictControl.ts'),

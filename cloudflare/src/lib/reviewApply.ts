@@ -23,7 +23,8 @@ import { ordinaryBusinessMaintenanceGuard } from './businessMaintenanceGuard'
 import { audit, buildAuditStatement, changedFields } from './audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
-import { createProductWithInitialStock, updateRow, syncProductImageGallery, readProductMoneyPlan } from './productWrites'
+import { createProductWithInitialStock, productCreateDestination, updateRow, syncProductImageGallery, readProductMoneyPlan } from './productWrites'
+import { foldCreateIntoExisting, foldCreateWithStockInWrite, type FoldDuplicate } from './createFold'
 import type { RedirectTarget } from './branchRedirectWrite'
 import { branchUpdateStatements, assertBranchExpectedState, BranchEditConflictError, isBranchEditGuardError, BranchApprovalReceiptError } from './branchWrites'
 import { assertCanonicalBranchSetMutationAllowed, type BranchIdentitySnapshot } from './canonicalBranchIdentity'
@@ -85,15 +86,19 @@ export class ReviewRequesterPermissionError extends Error {
   }
 }
 
-// Finding I (13 Oct 2026): approving a queued product create, or an edit that
-// moves a row's identity, must never mint a second active row with another
-// product's identity (no index stops it). The direct routes fold such a write
-// into the existing product; the applier does not run that fold -- for an edit
-// it is a product merge (merge_duplicates Full, its own preflight, undo
-// receipt and stock disposition), and a create-fold would drop the queued
-// initial stock. Approval is refused instead: nothing is written and the
+// Finding I (13 Oct 2026): approving a queued product EDIT that moves a row's
+// identity must never mint a second active row with another product's identity
+// (no index stops it). The direct route folds such an edit into the existing
+// product; the applier does not run that fold -- it is a product merge
+// (merge_duplicates Full, its own preflight, undo receipt and stock
+// disposition). Approval is refused instead: nothing is written and the
 // request stays open, to be rejected and redone directly (which folds under
 // the reviewer's own authority). routes/reviewQueue.ts answers 409.
+//
+// A queued CREATE that now matches an existing product no longer takes that
+// refusal: it was only refused because the create-fold dropped the queued
+// starting quantity. Since owner ruling 16 (13 Oct 2026) the fold records that
+// quantity as a normal stock-in, so approval runs the fold (applyApprovedCreateFold).
 export class ReviewIdentityConflictError extends Error {
   readonly code = 'review_identity_conflict'
   readonly existingProductId: number
@@ -263,6 +268,35 @@ registerApplier('fees', 'delete', 'fee', async (env, row, reviewer, waitUntil) =
   return { pendingActionMarkedAtomically: true }
 })
 
+// An approved create that matches an existing product: the direct route's fold, under the reviewer's authority. With
+// a starting quantity the fold, the stock-in (lot, branch lot stock, branch_stock, product total, 'add' movement,
+// catalog cost) and the request's own approved mark are ONE D1 batch, so a request decided meanwhile (or any failure)
+// rolls all of it back and a retry cannot add the stock twice. Without one it is the cost/barcode fold, and the
+// generic queue marks the request approved. Images on the queued create are not applied, as on the direct fold.
+async function applyApprovedCreateFold(
+  env: Env,
+  row: PendingActionRow,
+  reviewer: ReviewerInfo,
+  twin: FoldDuplicate,
+  name: string,
+  body: Record<string, unknown>,
+  waitUntil?: ReviewWaitUntil,
+): Promise<ReviewApplyOutcome> {
+  const destination = await productCreateDestination(env, body, reviewer.redirectTarget ?? null)
+  if (destination.quantity > 0 && destination.branchId != null) {
+    await foldCreateWithStockInWrite(env, twin, name, body, { ...destination, branchId: destination.branchId }, {
+      approval: { row, reviewer: { reviewedBy: reviewer.id, reviewedByName: reviewer.name } },
+      source: 'review_create_identity_fold',
+      actor: { id: reviewer.id, name: reviewer.name },
+      waitUntil,
+    })
+    return { pendingActionMarkedAtomically: true }
+  }
+  await foldCreateIntoExisting(env, { id: reviewer.id, username: reviewer.name }, twin, name, body,
+    { id: row.requested_by, username: row.requested_by_name })
+  return { pendingActionMarkedAtomically: false }
+}
+
 // --- products / create / product -----------------------------------
 registerApplier('products', 'create', 'product', async (env, row, reviewer, waitUntil) => {
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
@@ -272,9 +306,10 @@ registerApplier('products', 'create', 'product', async (env, row, reviewer, wait
   await resolveProductImageFields(getDb(env), body)
   const name = String(body.name || '').trim()
   if (!name) throw new Error('Pending product create is missing a name')
-  // Finding I: a create the direct route would fold into an existing product.
+  // Owner rulings 9 and 16 (13 Oct 2026): a create the direct route would fold into an existing product is folded
+  // here too, with its starting quantity recorded as a normal stock-in.
   const createTwin = await findSameIdentityProduct(getDb(env), name, body.barcode, null)
-  if (createTwin) throw new ReviewIdentityConflictError(createTwin.id)
+  if (createTwin) return applyApprovedCreateFold(env, row, reviewer, createTwin, name, body, waitUntil)
   const changesImages = productImageFieldsChanged(body)
   if (changesImages) await assertPendingProductImagePermission(env, row)
   else omitUnchangedProductImageFields(body)

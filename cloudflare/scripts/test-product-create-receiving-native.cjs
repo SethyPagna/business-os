@@ -45,6 +45,8 @@ const env = { DB }
 const real = new Set(['acquisitionCostAccess', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db', 'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe', 'receivingBranch', 'businessMaintenanceGuard', 'media', 'audit', 'permissions', 'productImagePermission', 'importImageMatch'])
 real.add('reviewApprovalPermission')
 real.add('productDiscountGate')
+// 13 Oct 2026 (owner ruling 16): the create-fold helper and the stock-receipt table module are part of the create path.
+for (const name of ['createFold', 'stockMutationReceipt', 'productBatches', 'catalogCostRecompute']) real.add(name)
 const unavailable = name => new Proxy(function () {}, { get: (_target, property) => unavailable(`${name}.${String(property)}`), apply: () => { throw new Error(`Unexpected fixture dependency: ${name}`) }, construct: () => { throw new Error(`Unexpected fixture dependency: ${name}`) } })
 const services = {
   // CUTOVER-LR: the real disabled-branch redirect helper (with its branchEffect/branchRoles/sqlBinding deps).
@@ -178,14 +180,17 @@ async function run(){
  const directReplay={name:'Same key direct',branch_id:2,stock_quantity:3,client_request_id:'same-direct-create-key'}
  loseAck=true;res=await request(products,'POST','/',directReplay);assert.equal(res.status,503)
  const directOriginal=raw.prepare("SELECT id FROM products WHERE name='Same key direct'").get().id
- res=await request(products,'POST','/',directReplay);assert.equal(res.status,200,JSON.stringify(res));assert.equal(res.body.folded_into,directOriginal)
- assert.equal(raw.prepare("SELECT COUNT(*) n FROM audit_logs WHERE entity='product' AND entity_id=? AND action='fold'").get(directOriginal).n,1)
+ // 13 Oct 2026 (owner ruling 16): the create wrote a completed stock receipt in its own batch, so the resend of the SAME
+ // request replays that create -- it is not a fold and it does not record the typed quantity a second time.
+ res=await request(products,'POST','/',directReplay);assert.equal(res.status,200,JSON.stringify(res));assert.equal(res.body.replayed,true);assert.equal(res.body.id,directOriginal);assert.equal(res.body.folded_into,undefined)
+ assert.equal(raw.prepare("SELECT COUNT(*) n FROM audit_logs WHERE entity='product' AND entity_id=? AND action='fold'").get(directOriginal).n,0)
+ assert.equal(raw.prepare("SELECT SUM(quantity) n FROM branch_stock WHERE product_id=?").get(directOriginal).n,3)
  raw.exec('UPDATE branches SET is_active=0 WHERE id=2')
  // CUTOVER-LR: disabled destination with another active branch -> redirect required, not a flat inactive refusal.
  res=await request(products,'POST','/',directReplay);assert.equal(res.status,409);assert.equal(res.body.code,'branch_redirect_required')
  raw.exec('UPDATE branches SET is_active=1 WHERE id=2')
  res=await request(products,'POST','/',{...directReplay,name:'Changed intent same direct key'});assert.equal(res.status,200,JSON.stringify(res));assert.notEqual(res.body.id,directOriginal)
- pass('direct repeated key performs identity fold, refuses retired destination, and accepts changed intent: NOT receipt replay')
+ pass('direct repeated key replays the create (no second stock-in), refuses retired destination, and accepts changed intent')
  console.log('COMPLETE 15 native groups at SQLite expression depth100; no runtime service')
  database.close?.()
 }

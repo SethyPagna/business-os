@@ -66,22 +66,34 @@ async function main() {
       ['redeemed100',"UPDATE sales SET membership_points_redeemed=100 WHERE id=1","UPDATE sales SET membership_points_redeemed=0 WHERE id=1"],
       ['earned50',"UPDATE sales SET loyalty_accrual=1,total_usd=50 WHERE id=1","UPDATE sales SET loyalty_accrual=0,total_usd=0 WHERE id=1"],
       ['earned100',"UPDATE sales SET loyalty_accrual=1,total_usd=100 WHERE id=1","UPDATE sales SET loyalty_accrual=0,total_usd=0 WHERE id=1"],
-      ['return50',"UPDATE returns SET total_refund_usd=50 WHERE id=1","UPDATE returns SET total_refund_usd=0 WHERE id=1"],
+      // A refund takes points back only from a sale that earned them (13 Oct 2026: customerPointsReturnSql), so the refund that
+      // must block a reassignment is the refund of an ACCRUING sale; the refund of a sale that earned nothing is checked below.
+      ['return50',["UPDATE sales SET loyalty_accrual=1 WHERE id=1","UPDATE returns SET total_refund_usd=50 WHERE id=1"],["UPDATE returns SET total_refund_usd=0 WHERE id=1","UPDATE sales SET loyalty_accrual=0 WHERE id=1"]],
     ]) {
-      await db.prepare(setup).run()
+      for(const statement of [].concat(setup)) await db.prepare(statement).run()
       if(label.startsWith('earned')) await db.prepare('UPDATE sales SET membership_points_redeemed=? WHERE id=2').bind(Number(label.slice(6))).run()
       before=await readAll()
       r=await call(sales,'/bulk-update',await request({kind:'customer',source_id:1,target_id:3},'blocked-'+label))
       assert.equal(r.status,409,JSON.stringify(r));assert.equal(r.body.code,'loyalty_reassignment_requires_reconciliation');assert.equal(await readAll(),before)
       r=await call(sales,'/1/customer',{client_request_id:'legacy-'+label,expected_updated_at:(await row()).updated_at,customerId:3},'PATCH')
-      assert.equal(r.status,409,JSON.stringify(r));assert.equal(await readAll(),before);await db.prepare(clear).run()
+      assert.equal(r.status,409,JSON.stringify(r));assert.equal(await readAll(),before);for(const statement of [].concat(clear)) await db.prepare(statement).run()
       await db.prepare('UPDATE sales SET membership_points_redeemed=0 WHERE id=2').run()
     }
+    // A refund of a sale that earned nothing (loyalty_accrual=0, the migrated-history shape) takes no points back, so it is not a
+    // loyalty fact: the reassignment the accruing refund above blocks goes through, and Undo restores it exactly.
+    await db.prepare('UPDATE returns SET total_refund_usd=50 WHERE id=1').run()
+    r=await call(sales,'/bulk-update',await request({kind:'customer',source_id:1,target_id:3},'unearned-refund-moves'))
+    assert.equal(r.status,200,JSON.stringify(r));assert.equal((await row()).customer_id,3)
+    assert.equal((await call(history,`/${r.body.actionHistoryId}/undo`,{require_applied:true,expected_generation:0})).status,200)
+    assert.equal((await row()).customer_id,1)
+    await db.prepare('UPDATE returns SET total_refund_usd=0 WHERE id=1').run()
     // A separate committed return lands after preflight; the batch must roll
     // back. Independently exercise the loyalty assertion without a revision
     // guard to prove containment is not merely the existing revision trigger.
     const compat=load('lib/db.ts').getDb({DB:db})
     const helper=load('lib/saleCustomerAssignmentGuard.ts')
+    // The racing refund must be one that takes points back, i.e. a refund of an accruing sale.
+    await db.prepare('UPDATE sales SET loyalty_accrual=1 WHERE id=1').run()
     const independentPlan=await helper.prepareCustomerAssignments(compat,[{id:1,sourceId:1,targetId:3}])
     const race=await request({kind:'customer',source_id:1,target_id:3},'return-race-request')
     barrier=async()=>db.prepare('UPDATE returns SET total_refund_usd=100 WHERE id=1').run()
@@ -90,6 +102,7 @@ async function main() {
     await assert.rejects(()=>compat.batch([{sql:"UPDATE sales SET customer_name='must roll back' WHERE id=1",params:{}},independentPlan.pre]))
     assert.equal(await readAll(),before)
     await db.prepare('UPDATE returns SET total_refund_usd=0 WHERE id=1').run()
+    await db.prepare('UPDATE sales SET loyalty_accrual=0 WHERE id=1').run()
     console.log('PASS 50/100 earned/redeemed/refund blocks preserve every financial ledger; native preflight-to-commit return race rolls back')
     setUser({...employee,permissions:JSON.stringify({sales:true,contacts:true,'sales:customer_reassign':false})})
     r=await call(contacts,'/customers/link-conflicts/relink',{customer_id:1,target_customer_id:3,phone_key:'11'})

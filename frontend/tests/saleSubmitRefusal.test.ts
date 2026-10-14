@@ -82,6 +82,47 @@ for (const [language, pack] of [['en', EN], ['km', KM]] as const) {
   })
 }
 
+// 13 Oct 2026: a stock movement that lands between a sale's reads and its write aborts the write (the batch's source guard
+// compares every column of the product rows). The Worker used to answer that "Pricing changed ... Review the current
+// quote."; it now says the stock changed, under its own code.
+const STOCK_CHANGED_ENGLISH = 'Stock changed while this sale was being saved. Nothing was recorded. Try again.'
+await runCase('the Worker answers a stock movement in the write window with this code and this English, from the create and the add-items routes', () => {
+  const pricing = fs.readFileSync(path.join(WORKER, 'src', 'lib', 'saleItemPricing.ts'), 'utf8')
+  assert.ok(pricing.includes(`SALE_STOCK_CHANGED_ERROR = '${STOCK_CHANGED_ENGLISH}'`), 'the pinned English')
+  assert.ok(pricing.includes("SALE_STOCK_CHANGED_CODE = 'sale_stock_changed'"), 'the pinned code')
+  const sales = fs.readFileSync(path.join(WORKER, 'src', 'routes', 'sales.ts'), 'utf8')
+  assert.equal((sales.match(/error:SALE_STOCK_CHANGED_ERROR,code:SALE_STOCK_CHANGED_CODE\},409/g) || []).length, 2, 'POST /sales and POST /sales/:id/items both answer it')
+  assert.ok(!/pric/i.test(STOCK_CHANGED_ENGLISH), 'it does not say pricing changed')
+})
+
+await runCase('both packs carry sale_stock_changed; en restates the Worker sentence, km is Khmer and says nothing was recorded', () => {
+  assert.equal(EN.sale_stock_changed, STOCK_CHANGED_ENGLISH)
+  const khmer = String(KM.sale_stock_changed || '')
+  assert.match(khmer, /[ក-៿]/, 'km is Khmer')
+  assert.notEqual(khmer, EN.sale_stock_changed)
+  assert.ok(khmer.includes('ស្តុក'), 'km names the stock')
+  assert.ok(khmer.includes('គ្មានអ្វីត្រូវបានកត់ត្រាទេ'), 'km says nothing was recorded')
+  assert.ok(!khmer.includes('តម្លៃ'), 'km does not say the price changed')
+})
+
+for (const [language, pack] of [['en', EN], ['km', KM]] as const) {
+  await runCase(`${language}: a sale_stock_changed refusal is restated from the ${language} pack on the till and by the generic localizer`, () => {
+    assert.ok(!helper.loadError, String(helper.loadError))
+    const refusal = apiError(STOCK_CHANGED_ENGLISH, 409, 'sale_stock_changed')
+    assert.equal(helper.saleSubmitRefusalText(refusal, translator(pack)), pack.sale_stock_changed)
+    // Paths that only reach the shared branch-rule localizer (the Sales page "Add items" modal) get it by code and by message.
+    assert.equal(branchRules.localizeBranchRuleError(refusal, translator(pack)), pack.sale_stock_changed)
+    assert.equal(branchRules.localizeBranchRuleError(STOCK_CHANGED_ENGLISH, translator(pack)), pack.sale_stock_changed)
+  })
+}
+
+await runCase('a pricing change keeps its own refusal: it is still not restated as a stock change', () => {
+  const t = translator(KM)
+  const pricing = apiError('Pricing changed before the sale was saved. Review the current quote.', 409, 'sale_pricing_quote_conflict')
+  assert.equal(helper.saleSubmitRefusalText(pricing, t), null)
+  assert.notEqual(branchRules.localizeBranchRuleError(pricing, t), KM.sale_stock_changed)
+})
+
 await runCase('any other error is left to the path\'s own localizing (null)', () => {
   assert.ok(!helper.loadError, String(helper.loadError))
   const t = translator(KM)

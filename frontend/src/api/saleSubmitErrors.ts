@@ -12,6 +12,9 @@ const SALE_SUBMIT_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   sale_discount_exceeds_subtotal: 'sale_discount_exceeds_subtotal',
   // A queued sale older than the Worker's window (B1-R): refused, kept on the device for the owner.
   sale_created_at_too_old: 'server_sale_kept_on_device',
+  // Stock moved (a Remove, another till's sale) between the sale's reads and its write: the Worker aborts the whole
+  // write, so nothing was recorded and the same checkout can simply be sent again. Not a pricing change.
+  sale_stock_changed: 'sale_stock_changed',
 }
 
 /**

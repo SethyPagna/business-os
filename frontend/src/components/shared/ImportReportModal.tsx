@@ -75,7 +75,7 @@ type ImportJobFileRow = {
 }
 
 type ImportReport = {
-  job?: { id?: string; type?: string; status?: string; created_at?: string; created_by_name?: string | null }
+  job?: { id?: string; type?: string; status?: string; created_at?: string; created_by_name?: string | null; summary?: { skippedKept?: number } | null }
   files?: ImportJobFileRow[]
   counts?: { create?: number; update?: number; skip?: number; error?: number }
   totalRows?: number
@@ -201,6 +201,10 @@ export default function ImportReportModal({ jobId, onClose, title }: ImportRepor
             <StatTile label={t('import_report_stat_errors')} value={counts.error ?? 0} tone={counts.error ? 'red' : undefined} />
           </div>
           <p className="text-xs text-gray-500 dark:text-gray-400">{t('import_report_warning_rows_hint')}</p>
+          {/* Replace entire catalog only: the server reports how many skipped rows kept their product. */}
+          {Number(report?.job?.summary?.skippedKept) > 0 && (
+            <p className="text-xs text-gray-500 dark:text-gray-400">{t('import_report_skipped_kept').replace('{n}', String(Number(report?.job?.summary?.skippedKept)))}</p>
+          )}
 
           {/* Serious warnings, grouped as "kind: rows r, r, r" */}
           {seriousGroups.length > 0 && (

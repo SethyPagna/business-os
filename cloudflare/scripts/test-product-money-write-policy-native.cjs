@@ -47,6 +47,9 @@ const env = { DB }
 const real = new Set(['acquisitionCostAccess', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db', 'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe', 'receivingBranch', 'businessMaintenanceGuard', 'catalogCostRecompute', 'branchWrites', 'canonicalBranchIdentity', 'branchRoles'])
 real.add('reviewApprovalPermission')
 real.add('productDiscountGate')
+// 6.0.132: the products route folds a create through lib/createFold.ts, which writes its request receipt.
+real.add('createFold')
+real.add('stockMutationReceipt')
 const unavailable = name => new Proxy(function () {}, { get: (_target, key) => unavailable(`${name}.${String(key)}`), apply: () => { throw new Error(`Unexpected fixture dependency: ${name}`) }, construct: () => { throw new Error(`Unexpected fixture dependency: ${name}`) } })
 class ProductImageAssetError extends Error {}
 const services = {

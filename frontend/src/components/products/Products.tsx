@@ -2510,6 +2510,9 @@ function ProductsFullEditor() {
       // only thing missing was telling the person their product landed on
       // an existing row instead of a new one.
       let foldedIntoName: string | null = null
+      // Owner ruling 16 (13 Oct 2026): a create that folds into an existing product records the typed starting
+      // quantity as a normal stock-in and answers it as `stock_in`; say how much landed, not just that it folded.
+      let foldedStockInQuantity = 0
       // Owner, 13 Oct 2026 (review is queue-first): a Review Required save
       // answers 202 { pending: true } and nothing is applied until a reviewer
       // approves -- say so, and push no Undo entry for a change that has not
@@ -2523,6 +2526,7 @@ function ProductsFullEditor() {
         createdProductId = extractHistoryResultId(res)
         if ((res as { folded_into?: unknown })?.folded_into) {
           foldedIntoName = String((res as { item?: { name?: unknown } })?.item?.name || form.name || '')
+          foldedStockInQuantity = Number((res as { stock_in?: { quantity?: unknown } })?.stock_in?.quantity) || 0
         }
       } else {
         const res = await runProductWriteMutation(() => productApi.updateProduct(selected.id || 0, payload, assertCurrent), 'Update product')
@@ -2552,7 +2556,10 @@ function ProductsFullEditor() {
       // happen again.
       const targetProductId = selected ? Number(selected.id || 0) : createdProductId
       notify(foldedIntoName
-        ? tr('product_folded_into_existing', 'Added to existing product {name}', 'បានបន្ថែមទៅផលិតផលដែលមានស្រាប់ {name}').replace('{name}', foldedIntoName)
+        ? (foldedStockInQuantity > 0
+          ? tr('product_folded_into_existing_stock', 'Added {qty} to existing product {name}', 'បានបន្ថែមស្តុក {qty} ទៅផលិតផលដែលមានស្រាប់ {name}')
+            .replace('{qty}', String(foldedStockInQuantity)).replace('{name}', foldedIntoName)
+          : tr('product_folded_into_existing', 'Added to existing product {name}', 'បានបន្ថែមទៅផលិតផលដែលមានស្រាប់ {name}').replace('{name}', foldedIntoName))
         : (selected ? t('product_updated') || 'Product updated' : t('product_created') || 'Product created'))
 
       // Do not keep ProductForm mounted behind best-effort enrichment, but do
@@ -2581,7 +2588,9 @@ function ProductsFullEditor() {
               undo: () => restoreProductSnapshots([previousSnapshot]),
               redo: () => restoreProductSnapshots([latestProductSnapshot]),
             })
-          } else if (latestProductSnapshot?.id) {
+          } else if (latestProductSnapshot?.id && !foldedIntoName) {
+            // Not for a create that folded into an existing product: nothing was created, and the create's Undo is a
+            // product delete that would remove the pre-existing survivor together with its stock.
             pushCreatedProductHistory(latestProductSnapshot, `Add product ${latestProductSnapshot.name || ''}`.trim())
           }
 

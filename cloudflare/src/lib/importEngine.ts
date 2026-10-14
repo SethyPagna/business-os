@@ -233,6 +233,10 @@ export type ImportRowResult = {
   existingId: number | null
   message: string | null
   code?: string
+  // The values `code`'s sentence names (a count, a branch, a row number), so the review can restate the sentence in the
+  // operator's language from the pack key named after the code (frontend importRowText.ts, IMPORT_ROW_CODES). `message`
+  // stays the English the errors CSV and an older client read. Absent on a row whose message is not coded.
+  params?: Record<string, string | number>
   // Structured form of `message` -- same content, kept as an array so a
   // row with more than one warning (e.g. negative stock AND a barcode
   // collision) doesn't lose the boundary between them the way joining into
@@ -2934,8 +2938,8 @@ export async function planInventoryImportStockGroups(
   rows: ImportRowResult[],
   rowGuardStatement: (rowNumber: number) => ImportStatement,
   nowIso: string,
-): Promise<{ groups: ImportStatement[][]; refused: Array<{ row: ImportRowResult; code: string; message: string }> }> {
-  const refused: Array<{ row: ImportRowResult; code: string; message: string }> = []
+): Promise<{ groups: ImportStatement[][]; refused: Array<{ row: ImportRowResult; code: string; message: string; params: Record<string, string | number> }> }> {
+  const refused: Array<{ row: ImportRowResult; code: string; message: string; params: Record<string, string | number> }> = []
   if (!rows.length) return { groups: [], refused }
   const pairs = uniqueStockPairs(rows.map((row) => row.data))
   const onHand = await readBranchOnHand(db, pairs)
@@ -2958,13 +2962,15 @@ export async function planInventoryImportStockGroups(
     const pair = state.get(`${productId}:${branchId}`)!
     const direction = Math.sign(delta)
     if (pair.direction && direction && direction !== pair.direction) {
-      refused.push({ row, code: INVENTORY_IMPORT_MIXED_DIRECTION_CODE, message: `An earlier row of this file moves ${String(data.product_name)} at ${String(data.branch_name)} the other way. Import additions and removals of one product separately.` })
+      refused.push({ row, code: INVENTORY_IMPORT_MIXED_DIRECTION_CODE, message: `An earlier row of this file moves ${String(data.product_name)} at ${String(data.branch_name)} the other way. Import additions and removals of one product separately.`,
+        params: { product: String(data.product_name), branch: String(data.branch_name) } })
       continue
     }
     if (delta < 0) {
       const need = -delta
       if (need > pair.onHand) {
-        refused.push({ row, code: INVENTORY_IMPORT_INSUFFICIENT_STOCK_CODE, message: `Only ${pair.onHand} on hand at ${String(data.branch_name)} after the rows before it -- cannot remove ${need}.` })
+        refused.push({ row, code: INVENTORY_IMPORT_INSUFFICIENT_STOCK_CODE, message: `Only ${pair.onHand} on hand at ${String(data.branch_name)} after the rows before it -- cannot remove ${need}.`,
+          params: { onHand: pair.onHand, branch: String(data.branch_name), quantity: need, afterEarlierRows: 1 } })
         continue
       }
       const takes: Array<{ batchId: number; quantity: number }> = []
@@ -3148,16 +3154,23 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
   }
   const canonicalImportBranches = indexCanonicalImportBranches(branches)
 
-  const pickCompatible = (candidates: (typeof products)[number][] | undefined, rowName: string): { product: (typeof products)[number] | null; message: string | null } => {
+  // A refusal names the sentence by `code` and the values it mentions by `params`; the caller prefixes the field it matched
+  // on (sku / barcode) as the English `SKU "x": ` and as the `field` / `value` params.
+  type PickRefusal = { code: string; params: Record<string, string | number> }
+  const pickCompatible = (candidates: (typeof products)[number][] | undefined, rowName: string): { product: (typeof products)[number] | null; message: string | null; refusal?: PickRefusal } => {
     if (!candidates?.length) return { product: null, message: null }
     if (!rowName) {
       if (candidates.length === 1) return { product: candidates[0], message: null }
-      return { product: null, message: `Matches ${candidates.length} different products -- add the product name so the right one is chosen.` }
+      return { product: null, message: `Matches ${candidates.length} different products -- add the product name so the right one is chosen.`,
+        refusal: { code: INVENTORY_IMPORT_ROW_CODES.matchManyProducts, params: { count: candidates.length } } }
     }
     const compatible = candidates.filter((candidate) => normalizeProductGroupName(candidate.name) === normalizeProductGroupName(rowName))
     if (compatible.length === 1) return { product: compatible[0], message: null }
-    if (compatible.length > 1) return { product: null, message: `Matches ${compatible.length} duplicate products with this same name -- merge them before importing.` }
-    return { product: null, message: `Belongs to a different product ("${candidates[0].name || 'unnamed'}") -- not "${rowName}". Stock adjustments never attach across names.` }
+    if (compatible.length > 1) return { product: null, message: `Matches ${compatible.length} duplicate products with this same name -- merge them before importing.`,
+      refusal: { code: INVENTORY_IMPORT_ROW_CODES.matchDuplicateProducts, params: { count: compatible.length } } }
+    const found = candidates[0].name || 'unnamed'
+    return { product: null, message: `Belongs to a different product ("${found}") -- not "${rowName}". Stock adjustments never attach across names.`,
+      refusal: { code: INVENTORY_IMPORT_ROW_CODES.matchOtherName, params: { found, given: rowName } } }
   }
 
   const results: ImportRowResult[] = []
@@ -3169,10 +3182,14 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     const rowName = str(row.name || row.product_name)
     let product: (typeof products)[number] | null = null
     let resolveError: string | null = null
+    let resolveRefusal: PickRefusal | null = null
     if (sku) {
       const picked = pickCompatible(bySku.get(lower(sku)), rowName)
       product = picked.product
-      if (picked.message) resolveError = `SKU "${sku}": ${picked.message}`
+      if (picked.message) {
+        resolveError = `SKU "${sku}": ${picked.message}`
+        if (picked.refusal) resolveRefusal = { code: picked.refusal.code, params: { ...picked.refusal.params, field: 'sku', value: sku } }
+      }
     }
     if (!product && !resolveError && barcode) {
       // Wildcard-aware (Sep 15 2026 ruling): scans by IDENTITY match, not a
@@ -3192,7 +3209,10 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
         : products.filter((candidate) => identityBarcodeKey(candidate.barcode) === identityBarcodeKey(barcode) && identityBarcodeKey(barcode))
       const picked = pickCompatible(barcodeMatches, rowName)
       product = picked.product
-      if (picked.message) resolveError = `Barcode "${barcode}": ${picked.message}`
+      if (picked.message) {
+        resolveError = `Barcode "${barcode}": ${picked.message}`
+        if (picked.refusal) resolveRefusal = { code: picked.refusal.code, params: { ...picked.refusal.params, field: 'barcode', value: barcode } }
+      }
     }
     // Name-only fallback, unambiguous matches only -- same as classifySales.
     // Only for rows with NO sku/barcode at all: a row that carries one which
@@ -3213,11 +3233,14 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
           product = pickIdentityClusterWinner(clusters[0])
         } else {
           resolveError = `Name "${rowName}" matches several products -- add the barcode so the right one is chosen.`
+          resolveRefusal = { code: INVENTORY_IMPORT_ROW_CODES.nameMatchesSeveral, params: { name: rowName } }
         }
       }
     }
     if (!product) {
-      results.push({ rowNumber: row._rowNumber, action: 'error', identifier: sku || barcode || rowName || null, existingId: null, message: resolveError || 'Product not found for sku/barcode', changes: {}, data: row })
+      const refusal = resolveRefusal ?? (resolveError ? null : { code: INVENTORY_IMPORT_ROW_CODES.productNotFound, params: undefined })
+      results.push({ rowNumber: row._rowNumber, action: 'error', identifier: sku || barcode || rowName || null, existingId: null, message: resolveError || 'Product not found for sku/barcode',
+        ...(refusal ? { code: refusal.code, ...(refusal.params ? { params: refusal.params } : {}) } : {}), changes: {}, data: row })
       continue
     }
     // 'add'/'remove' templates always carry a plain positive quantity (how
@@ -3232,7 +3255,8 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     try {
       quantity = parseImportNumericValue(row.quantity, 0, { allowNegative: !requireNonNegative, field: 'quantity', strict: true })
     } catch (error) {
-      results.push({ rowNumber: row._rowNumber, action: 'error', identifier: sku || barcode, existingId: product.id, message: (error as Error).message, changes: {}, data: row })
+      results.push({ rowNumber: row._rowNumber, action: 'error', identifier: sku || barcode, existingId: product.id, message: (error as Error).message,
+        code: (error as Error).message === 'quantity cannot be negative' ? INVENTORY_IMPORT_ROW_CODES.quantityNegative : INVENTORY_IMPORT_ROW_CODES.quantityInvalid, changes: {}, data: row })
       continue
     }
     if (requireNonNegative && quantity < 0) {
@@ -3243,7 +3267,8 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     let movementType: string
     let signedQuantity: number
     if ((inventoryAction === 'add' || inventoryAction === 'remove') && quantity === 0) {
-      results.push({ rowNumber: row._rowNumber, action: 'skip', identifier: sku || barcode, existingId: product.id, message: `Zero quantity: no ${inventoryAction === 'add' ? 'receipt' : 'removal'} needed.`, changes: {}, data: row })
+      results.push({ rowNumber: row._rowNumber, action: 'skip', identifier: sku || barcode, existingId: product.id, message: `Zero quantity: no ${inventoryAction === 'add' ? 'receipt' : 'removal'} needed.`,
+        code: inventoryAction === 'add' ? INVENTORY_IMPORT_ROW_CODES.zeroReceipt : INVENTORY_IMPORT_ROW_CODES.zeroRemoval, changes: {}, data: row })
       continue
     }
     if (inventoryAction === 'add') {
@@ -3261,7 +3286,7 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     } else {
       // Legacy combined-template path, unchanged.
       if (quantity === 0) {
-        results.push({ rowNumber: row._rowNumber, action: 'error', identifier: sku || barcode, existingId: product.id, message: 'Quantity must be non-zero', changes: {}, data: row })
+        results.push({ rowNumber: row._rowNumber, action: 'error', identifier: sku || barcode, existingId: product.id, message: 'Quantity must be non-zero', code: INVENTORY_IMPORT_ROW_CODES.quantityZero, changes: {}, data: row })
         continue
       }
       movementType = lower(row.movement_type) || (quantity >= 0 ? 'in' : 'out')
@@ -3280,6 +3305,9 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
         message: branchName
           ? `Branch "${branchName}" must uniquely match an existing active Shop or Warehouse.`
           : 'A blank branch requires exactly one active canonical default Shop or Warehouse.',
+        ...(branchName
+          ? { code: INVENTORY_IMPORT_ROW_CODES.branchUnmatched, params: { branch: branchName } }
+          : { code: INVENTORY_IMPORT_ROW_CODES.branchRequired }),
         changes: {},
         data: row,
       })
@@ -3373,13 +3401,32 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
 export const INVENTORY_IMPORT_INSUFFICIENT_STOCK_CODE = 'import_insufficient_branch_stock'
 export const INVENTORY_IMPORT_DUPLICATE_COUNT_CODE = 'import_duplicate_count_row'
 export const INVENTORY_IMPORT_MIXED_DIRECTION_CODE = 'import_mixed_direction_rows'
+// The rest of the inventory import's own row sentences (the classifier below). Each is a pack key of the same name
+// (frontend importRowText.ts); the parse errors the numeric / cost helpers throw are shared with other imports and stay
+// the Worker's English.
+export const INVENTORY_IMPORT_ROW_CODES = {
+  productNotFound: 'inventory_import_product_not_found',
+  matchManyProducts: 'inventory_import_match_many_products',
+  matchDuplicateProducts: 'inventory_import_match_duplicate_products',
+  matchOtherName: 'inventory_import_match_other_name',
+  nameMatchesSeveral: 'inventory_import_name_matches_several',
+  zeroReceipt: 'inventory_import_zero_receipt',
+  zeroRemoval: 'inventory_import_zero_removal',
+  quantityZero: 'inventory_import_quantity_zero',
+  quantityInvalid: 'inventory_import_quantity_invalid',
+  quantityNegative: 'inventory_import_quantity_negative',
+  branchUnmatched: 'inventory_import_branch_unmatched',
+  branchRequired: 'inventory_import_branch_required',
+  alreadyAtCount: 'inventory_import_already_at_count',
+} as const
 
 type BranchStockJudgedRow = { result: ImportRowResult; row: ParsedCsvRow; quantity: number; costs: { usd: number | null; khr: number | null } }
 
-function refuseInventoryRow(target: ImportRowResult, code: string, message: string, data?: Record<string, unknown>): void {
+function refuseInventoryRow(target: ImportRowResult, code: string, message: string, data?: Record<string, unknown>, params?: Record<string, string | number>): void {
   target.action = 'error'
   target.code = code
   target.message = message
+  if (params) target.params = params
   if (data) target.data = data
 }
 
@@ -3421,13 +3468,14 @@ async function judgeAgainstBranchStock(db: D1Compat, inventoryAction: InventoryI
     if (inventoryAction === 'set') {
       const earlier = firstCountRow.get(pair)
       if (earlier != null) {
-        refuseInventoryRow(result, INVENTORY_IMPORT_DUPLICATE_COUNT_CODE, `Row ${earlier} already counts this product at ${String(data.branch_name)}. Keep one count per product and branch.`, row)
+        refuseInventoryRow(result, INVENTORY_IMPORT_DUPLICATE_COUNT_CODE, `Row ${earlier} already counts this product at ${String(data.branch_name)}. Keep one count per product and branch.`, row,
+          { row: earlier, branch: String(data.branch_name) })
         continue
       }
       firstCountRow.set(pair, result.rowNumber)
       const signedQuantity = quantity - here
       if (signedQuantity === 0) {
-        Object.assign(result, { action: 'skip', message: `Already at ${quantity} -- no movement needed.`, data: row })
+        Object.assign(result, { action: 'skip', message: `Already at ${quantity} -- no movement needed.`, code: INVENTORY_IMPORT_ROW_CODES.alreadyAtCount, params: { quantity }, data: row })
         continue
       }
       const movementCosts = inventoryMovementCostSnapshot({ fallbackUsd: costs.usd, fallbackKhr: costs.khr, quantity: Math.abs(signedQuantity) })
@@ -3437,7 +3485,8 @@ async function judgeAgainstBranchStock(db: D1Compat, inventoryAction: InventoryI
         total_cost_usd: movementCosts.totalCostUsd, total_cost_khr: movementCosts.totalCostKhr,
       })
     } else if (-Number(data.signedQuantity) > here) {
-      refuseInventoryRow(result, INVENTORY_IMPORT_INSUFFICIENT_STOCK_CODE, `Only ${here} on hand at ${String(data.branch_name)} -- cannot remove ${-Number(data.signedQuantity)}.`, row)
+      refuseInventoryRow(result, INVENTORY_IMPORT_INSUFFICIENT_STOCK_CODE, `Only ${here} on hand at ${String(data.branch_name)} -- cannot remove ${-Number(data.signedQuantity)}.`, row,
+        { onHand: here, branch: String(data.branch_name), quantity: -Number(data.signedQuantity) })
     }
   }
 }
@@ -5413,6 +5462,7 @@ export async function finalizeImportApply(
   deactivatedCount: number,
   unifiedGroupCount = 0,
   aggregatedSnapshotGroupCount = 0,
+  skippedKeptCount = 0,
 ): Promise<{ applied: number; failed: number }> {
   const finalCounts = await db.staging.prepare(`SELECT action, COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'apply' GROUP BY action`)
     .all<{ action: RowAction; n: number }>({ id: jobId })
@@ -5448,6 +5498,11 @@ export async function finalizeImportApply(
   summary.total = totalUnits
   delete summary.replacement_refused
   if (deactivatedCount > 0) summary.deactivated = deactivatedCount
+  // Replace-all only: how many skipped rows kept their matched product (owner
+  // ruling 17) -- a subset of `skipped`. Reset first so a retried final phase
+  // never reports a stale count.
+  delete summary.skippedKept
+  if (skippedKeptCount > 0) summary.skippedKept = skippedKeptCount
   if (unifiedGroupCount > 0) summary.groupsUnified = unifiedGroupCount
   if (aggregatedSnapshotGroupCount > 0) summary.snapshotGroupsAggregated = aggregatedSnapshotGroupCount
   summary.timings = {
@@ -6206,22 +6261,44 @@ export class ProductReplacementIncompleteError extends Error {
   }
 }
 
+// Owner ruling 17 (13 Oct): a row the operator skipped in a replace-all import
+// keeps its matched product -- a skipped row is never deactivated. The ids come
+// from the apply-phase row log (import_job_rows, the staging database), which
+// records `existingId` for every row the run classified, skipped or not. Both
+// ways of skipping land here: the reviewer's per-row decision
+// (decisionsByRowNumber) and the `skip_row` mode baked into the row's `_action`.
+// A skipped row that matched nothing (it would have created a product) has no
+// existingId and keeps nothing. One entry per skipped row that matched a
+// product (a product skipped twice appears twice, so the length is the row
+// count the summary reports). Pure read; the deactivation itself is
+// finalizeProductReplacement.
+export async function readSkippedProductIds(db: D1Compat, jobId: string): Promise<number[]> {
+  const rows = await db.staging.prepare(`SELECT CAST(json_extract(result_json, '$.existingId') AS INTEGER) AS id
+      FROM import_job_rows
+      WHERE job_id = @id AND phase = 'apply' AND action = 'skip' AND json_extract(result_json, '$.existingId') IS NOT NULL`)
+    .all<{ id: number | null }>({ id: jobId })
+  return rows.map((row) => Number(row.id)).filter((id) => Number.isSafeInteger(id) && id > 0)
+}
+
 export async function finalizeProductReplacement(db: D1Compat, cutoff: string,
-  context: { jobId?: string; actor?: { id: number | null; name: string | null } } = {},
+  context: { jobId?: string; actor?: { id: number | null; name: string | null }; keepProductIds?: number[] } = {},
 ): Promise<number> {
-  const candidates = `p.is_active=1 AND (p.updated_at IS NULL OR p.updated_at < @cutoff)`
-  const params = { cutoff, jobId: context.jobId ?? null, actorId: context.actor?.id ?? null, actorName: context.actor?.name ?? null }
+  // One JSON-array parameter rather than one placeholder per id: a catalog-sized
+  // keep list would blow past D1's bound-parameter ceiling.
+  const keepIds = JSON.stringify([...new Set((context.keepProductIds || []).map(Number).filter((id) => Number.isSafeInteger(id) && id > 0))])
+  const candidates = `p.is_active=1 AND (p.updated_at IS NULL OR p.updated_at < @cutoff) AND p.id NOT IN (SELECT value FROM json_each(@keepIds))`
+  const params = { cutoff, keepIds, jobId: context.jobId ?? null, actorId: context.actor?.id ?? null, actorName: context.actor?.name ?? null }
   try {
     const result = await db.batch([
       { sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products p WHERE ${candidates} AND ${productHasStockSql()})
-          THEN json_extract('[]','$[product_has_stock]') ELSE 1 END`, params: { cutoff } },
+          THEN json_extract('[]','$[product_has_stock]') ELSE 1 END`, params: { cutoff, keepIds } },
       { sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
           SELECT @actorId,@actorName,'delete','product',p.id,
             json_object('source','replace_all','importJobId',@jobId,'cutoff',@cutoff,'productName',p.name,
               'membership','removed','priorMembership','present'), 'product',p.id,NULL
           FROM products p WHERE ${candidates}`, params },
       { sql: `UPDATE products SET is_active=0,updated_at=CURRENT_TIMESTAMP
-          WHERE is_active=1 AND (updated_at IS NULL OR updated_at < @cutoff)`, params: { cutoff } },
+          WHERE is_active=1 AND (updated_at IS NULL OR updated_at < @cutoff) AND id NOT IN (SELECT value FROM json_each(@keepIds))`, params: { cutoff, keepIds } },
     ])
     return Number(result[2]?.meta?.changes || 0)
   } catch (error) { throw productStockGuardError(error) || error }
@@ -6475,7 +6552,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           && (r.data as Record<string, unknown>).inventory_receipt_plan_version !== INVENTORY_RECEIPT_PLAN_VERSION
           && !appliedRowGuards.has(`row:${r.rowNumber}`)), rowGuardStatement, nowIso)
       : null
-    for (const { row, code, message } of inventoryStockPlan?.refused ?? []) refuseInventoryRow(row, code, message)
+    for (const { row, code, message, params } of inventoryStockPlan?.refused ?? []) refuseInventoryRow(row, code, message, undefined, params)
     const actionable = results.filter((r) => r.action === 'create' || r.action === 'update')
     let importWriteDb = db
     // CUTOVER-LR: rows addressed to a retired branch and landed on the branch the operator confirmed re-prove that
@@ -7294,14 +7371,17 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // path already refreshes updated_at on every create/update
     // unconditionally (see the two UPDATE/INSERT statements above), so no
     // extra bookkeeping is needed to know what this run actually wrote.
-    // A row an operator explicitly marked 'skip' during review never
-    // reaches the write path, so its matched product (if any) is treated
-    // the same as any other untouched product and gets deactivated too --
-    // 'skip' means "don't act on this row", and under replace_all
-    // semantics "not part of the new file's data" and "not acted on" are
-    // the same thing; there's no separate "explicitly keep this out of
-    // the replace" signal today.
+    // A row marked 'skip' never reaches the write path, so its matched
+    // product keeps its old updated_at -- but owner ruling 17 (13 Oct) says
+    // a skipped row is never deactivated: "skip" is the operator's explicit
+    // keep-this-one signal. readSkippedProductIds lists the matched
+    // products of every skipped row (reviewer decision or skip_row mode),
+    // and finalizeProductReplacement leaves exactly those out of the
+    // deactivation AND out of the product_has_stock refusal. Genuinely
+    // untouched products are deactivated, and refused when they hold
+    // stock, exactly as before.
     let deactivatedCount = 0
+    let skippedKeptCount = 0
     if (job.type === 'products' && getProductImportMode(job.policy_json) === 'replace_all') {
       // Rows are already committed. Save their cursor before the final phase:
       // a refused replacement retries only this phase, never stock receipts.
@@ -7310,7 +7390,9 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       const refusedRows = await db.staging.prepare(`SELECT COUNT(*) AS n FROM import_job_rows
         WHERE job_id=@id AND phase='apply' AND action='error'`).get<{ n: number }>({ id: jobId })
       if (Number(refusedRows?.n || 0) > 0) throw new ProductReplacementIncompleteError()
-      deactivatedCount = await finalizeProductReplacement(db, jobRow.started_at || nowIso, { jobId, actor: importCostActor })
+      const skippedProductIds = await readSkippedProductIds(db, jobId)
+      deactivatedCount = await finalizeProductReplacement(db, jobRow.started_at || nowIso, { jobId, actor: importCostActor, keepProductIds: skippedProductIds })
+      skippedKeptCount = skippedProductIds.length
     }
 
     // Full product snapshots can contain multiple source rows that resolve to
@@ -7373,7 +7455,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // EVERY chunk (not just this last one) -- see runImportAnalyze's
     // finalize step for the same reasoning. Shared so the dedicated
     // stock-actions apply path can never disagree with this one.
-    const outcome = await finalizeImportApply(env, db, jobId, totalUnits, state.startedAtMs, sw.marks, queueLatencyMs, deactivatedCount, unifiedGroupCount, aggregatedSnapshotGroupCount)
+    const outcome = await finalizeImportApply(env, db, jobId, totalUnits, state.startedAtMs, sw.marks, queueLatencyMs, deactivatedCount, unifiedGroupCount, aggregatedSnapshotGroupCount, skippedKeptCount)
     console.log('[import-timing] apply done', jobId, outcome)
     return outcome
   } catch (error) {
@@ -7411,10 +7493,20 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
   }
 }
 
+// One quoted errors.csv cell. A cell Excel would evaluate as a formula (a leading = + - @, tab or CR) gets a leading single
+// quote, the neutralisation frontend/src/utils/csv.ts escapeCsvValue applies to every human-bound download: the file name of a
+// ZIP entry, and a message that quotes it, come from the uploaded file, and quoting a cell does not stop Excel evaluating it.
+// (importCsv.ts stripExcelTextGuard removes the quote again if the file is imported.)
+function errorsCsvCell(value: unknown): string {
+  let text = String(value ?? '')
+  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`
+  return `"${text.replace(/"/g, '""')}"`
+}
+
 export async function buildErrorsCsv(env: Env, jobId: string): Promise<string> {
   const db = getDb(env)
   const rows = await db.prepare(`SELECT row_number, file_name, code, message FROM import_job_errors WHERE job_id = @id ORDER BY row_number ASC`).all<{ row_number: number; file_name: string; code: string; message: string }>({ id: jobId })
   const header = 'row_number,file_name,code,message'
-  const lines = rows.map((r) => [r.row_number, r.file_name, r.code, r.message].map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))
+  const lines = rows.map((r) => [r.row_number, r.file_name, r.code, r.message].map(errorsCsvCell).join(','))
   return [header, ...lines].join('\n')
 }
