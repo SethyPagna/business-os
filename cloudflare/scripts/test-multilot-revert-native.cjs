@@ -336,7 +336,7 @@ function finish(finding) {
 // whatever a product merge did to its product's lots since. Without a mark row the timestamps alone decide (M6k).
 //
 // Run (from cloudflare/):  node scripts/test-multilot-revert-native.cjs
-//   --wrong=no-adjust-shares    mutant: /adjust writes the movement but not its lot shares    (M1, M3, M4, M7, M8, M9 go RED)
+//   --wrong=no-adjust-shares    mutant: /adjust writes the movement but not its lot shares    (M1, M3, M4, M7, M9 go RED; M8 only counts statements)
 //   --wrong=no-import-shares    mutant: the CSV import writes the movement but not its shares (M2, M5, M9b go RED)
 //   --wrong=ignore-shares       mutant: Revert ignores recorded shares (the pre-fix, aggregate-only Revert) (M1..M7, M9b go RED)
 //   --wrong=no-old-refusal      mutant: an old share-less removal on a lot-tracked product is reverted aggregate-only (M6 goes RED)
@@ -808,6 +808,7 @@ async function main() {
     })
     await check('M16c', 'a NEW removal on the DUPLICATE (no lot) before the merge, whose movement moves to a keeper that has older lots: Revert puts its units back', 'high', async (t) => {
       const k = await seed(H, { lots: [5], undated: 0 })
+      await H.db.prepare("UPDATE product_batches SET created_at='2026-08-01 00:00:00' WHERE id=?").bind(k.ids[0]).run()
       const d = await duplicateOf(k, { undated: 4 })
       await setWatermark(await maxMovementId())
       const removed = await adjustRemove(H, d, 2, 'q2c')
@@ -888,6 +889,7 @@ async function main() {
       t.eq('Revert answered 200 and put the 3 undated units back', [r.status, await branchQty(s.p)], [200, 10])
     })
     await check('M12d', 'a removal made while its product had no lot at all needs no record; a lot received afterwards does not make its Revert refused', 'high', async (t) => {
+      await setWatermark(null) // no mark: the time rule alone decides, so a lot dated after the removal is what this case exercises
       const s = await seed(H, { lots: [], undated: 10 })
       const removed = await adjustRemove(H, s, 3, 'a')
       const a1 = await snap(H, s)
