@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { acquisitionCostResponses } from '../lib/acquisitionCostAccess'
+import { acquisitionCostResponses, canViewAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
 import { assertProductsActive, stockVisibleProductSql } from '../lib/productStockGuard'
 import { ordinaryBusinessMaintenanceGuard } from '../lib/businessMaintenanceGuard'
@@ -959,6 +959,8 @@ app.get('/:id/stock', async (c) => {
       ${summaryWhereSql}
     `).get(summaryWhere.params),
   ])
+  // The key names carry no "cost"/"stock_value" token, so the response projection would not redact them.
+  const costViewer = canViewAcquisitionCosts(c.get('user'))
   const summary = {
     total_products: familyStats.total_products,
     in_stock_products: familyStats.in_stock,
@@ -966,8 +968,10 @@ app.get('/:id/stock', async (c) => {
     low_stock_products: familyStats.low_stock,
     out_of_stock_products: familyStats.out_of_stock,
     positive_products: Number((positiveRow as Record<string, unknown>)?.positive_products || 0),
-    positive_value_usd: Number((positiveRow as Record<string, unknown>)?.positive_value_usd || 0),
-    total_value_usd: familyStats.stock_value_usd,
+    ...(costViewer ? {
+      positive_value_usd: Number((positiveRow as Record<string, unknown>)?.positive_value_usd || 0),
+      total_value_usd: familyStats.stock_value_usd,
+    } : {}),
     stock_value_unknown_products: familyStats.stock_value_unknown_products,
     stock_value_unknown_quantity: familyStats.stock_value_unknown_quantity,
     positive_stock_value_unknown_products: Number((positiveRow as Record<string, unknown>)?.positive_stock_value_unknown_products || 0),
