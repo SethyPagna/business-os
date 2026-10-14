@@ -245,6 +245,8 @@ function isReplayEligible(row) {
         if (Number.isFinite(claimedAt) && Date.now() - claimedAt < SYNC_LEASE_MS)
             return false;
     }
+    if (row?.retryable === false)
+        return false;
     const retryAt = row?.retry_at ? Date.parse(String(row.retry_at)) : 0;
     return !Number.isFinite(retryAt) || retryAt <= Date.now();
 }
@@ -582,6 +584,20 @@ async function replayQueuedSale(db, row, base) {
             await quarantine(row);
             return false;
         }
+        // The server refused this sale for good (for example a claim older than its
+        // window). Keep the row, mark it failed with the server's code and stop: a
+        // rejected result is not a transient error, so it must never reach the
+        // retry-with-backoff path below.
+        if (result?.status === 'rejected') {
+            await putQueueRow(db, row, {
+                status: 'failed',
+                retry_at: null,
+                retryable: false,
+                reason: String(result.code || 'rejected'),
+                error: result.error || result.code || 'The server refused this sale.',
+            });
+            return false;
+        }
         if (status === 409 || result?.status === 'conflict' || result?.code === 'write_conflict') {
             await putQueueRow(db, row, {
                 status: 'conflict',
@@ -683,6 +699,15 @@ async function syncOutbox() {
                     reason: 'auth_required',
                 });
                 broadcastSyncEvent('BUSINESS_OS_OUTBOX_AUTH_REQUIRED', { channel: row.operation_id });
+            }
+            else if (result?.status === 'rejected') {
+                await putBusinessOutboxRow(db, row, {
+                    status: 'failed',
+                    retry_at: null,
+                    retryable: false,
+                    reason: String(result.code || 'rejected'),
+                    error: result.error || result.code || 'The server refused this operation.',
+                });
             }
             else {
                 await putBusinessOutboxRow(db, row, {
