@@ -1392,9 +1392,11 @@ app.post('/:id/close', async (c) => {
   const expectedRevision = Number(body.expected_revision)
   if (body.expected_revision == null || !Number.isInteger(expectedRevision) || expectedRevision < 0) return c.json({ error: 'A valid expected revision is required.' }, 400)
   const now = Date.now()
-  // Absent closed_at is the live POS close: the server stamps the moment.
-  const parsedClosedAt = body.closed_at == null || body.closed_at === '' ? new Date(now)
-    : typeof body.closed_at === 'string' ? new Date(body.closed_at) : new Date(Number.NaN)
+  // Absent closed_at is the live POS close: the server stamps the moment. Only an administrator chooses a time; an
+  // employee's request carries none the Worker would honour, so a closed_at they send is ignored and the close is now.
+  const chosenClosedAt = canManageShifts(user) ? body.closed_at : undefined
+  const parsedClosedAt = chosenClosedAt == null || chosenClosedAt === '' ? new Date(now)
+    : typeof chosenClosedAt === 'string' ? new Date(chosenClosedAt) : new Date(Number.NaN)
   if (Number.isNaN(parsedClosedAt.getTime())) return c.json({ error: 'A valid closing time is required.' }, 400)
   const requestedMs = withinServerClock(parsedClosedAt.getTime(), now)
   if (requestedMs == null) return c.json({ error: 'Closing time cannot be in the future.' }, 400)

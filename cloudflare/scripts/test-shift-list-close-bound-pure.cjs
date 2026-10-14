@@ -280,7 +280,7 @@ async function main() {
   const seeded = new Date(Date.parse(`${bound.replace(' ', 'T')}Z`) - 60_000).toISOString()
   // Only an administrator picks a past close time; the shift's own cashier closes now.
   const owner = app.state.user
-  eq((await app.json('POST', `/${stale.id}/close`, { expected_revision: 0, closed_at: seeded })).body.code, 'shift_close_too_early', 'the cashier cannot pick the stated bound')
+  eq((await app.json('POST', `/${stale.id}/close`, { expected_revision: 0, closed_at: seeded })).body.code, 'shift_overlaps_next_segment', 'the cashier cannot pick the stated bound: the sent time is ignored and the close is now')
   app.as(ADMIN)
   const seededClose = await app.json('POST', `/${stale.id}/close`, { expected_revision: 0, closed_at: seeded })
   app.as(owner)

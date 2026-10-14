@@ -220,10 +220,11 @@ async function main() {
     assert.equal(current.body.previous_open_shift?.id, fx.openId, 'the stale retired-branch drawer is the carry-over at LC Store')
     assert.equal(current.body.previous_open_shift.capabilities.can_close, true)
     assert.equal(current.body.previous_open_shift.branch_name, 'Shop')
-    const closed = await call('POST', `/${fx.openId}/close`, { expected_revision: 0, closed_at: new Date().toISOString(), closing_counted_usd: 9, client_request_id: 'inactive-close-000001' })
+    const closeInput = { expected_revision: 0, closing_counted_usd: 9, client_request_id: 'inactive-close-000001' }
+    const closed = await call('POST', `/${fx.openId}/close`, closeInput)
     assert.equal(closed.status, 200, 'closing a drawer on a retired branch is allowed')
     assert.ok(fx.db.prepare('SELECT closed_at FROM shift_sessions WHERE id=?').get(fx.openId).closed_at)
-    const replay = await call('POST', `/${fx.openId}/close`, { expected_revision: 0, closed_at: closed.body.shift.closed_at, closing_counted_usd: 9, client_request_id: 'inactive-close-000001' })
+    const replay = await call('POST', `/${fx.openId}/close`, closeInput)
     assert.equal(replay.status, 200, 'an exact retry replays the committed receipt')
     assert.equal(replay.body.mutation_committed, true)
     const after = await call('GET', '/current?branch_id=2')

@@ -389,7 +389,7 @@ async function main() {
       assert.ok(closeBefore, 'now today\'s shift follows the stale drawer and the server states the bound')
       await untouched('stale close by the cashier', stale, async () => {
         refused('close now', await call('s2a', 'POST', `/${stale}/close`, { expected_revision: 0, closing_counted_usd: 50, closing_counted_khr: 0 }), 'shift_overlaps_next_segment')
-        refused('close at the seed', await call('s2a', 'POST', `/${stale}/close`, { expected_revision: 0, closed_at: new Date(Date.parse(closeBefore) - MIN).toISOString(), closing_counted_usd: 50, closing_counted_khr: 0 }), 'shift_close_too_early')
+        refused('close at the seed', await call('s2a', 'POST', `/${stale}/close`, { expected_revision: 0, closed_at: new Date(Date.parse(closeBefore) - MIN).toISOString(), closing_counted_usd: 50, closing_counted_khr: 0 }), 'shift_overlaps_next_segment')
       })
       const closed = await call('admin', 'POST', `/${stale}/close`, { expected_revision: 0, closed_at: new Date(Date.parse(closeBefore) - MIN).toISOString(), closing_counted_usd: 50, closing_counted_khr: 0 })
       assert.equal(closed.status, 200, closed.text)

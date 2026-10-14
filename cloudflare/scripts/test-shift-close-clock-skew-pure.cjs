@@ -205,16 +205,28 @@ async function main() {
     assert.equal(row(shift.id).revision, shift.revision + 1)
   }
 
-  // 3. Positive control: a genuinely future time is still refused.
+  // 3. Positive control: a genuinely future time is still refused (an administrator is the one who sends a time).
   {
-    const { call, row, open } = scenario()
+    const { call, row, open, actAs } = scenario()
     const shift = await open()
+    actAs({ ...owner, role_code: 'admin' })
     const res = await call('POST', `/${shift.id}/close`, closeBody(shift, { closed_at: new Date(Date.now() + 10 * 60_000).toISOString() }))
     assert.equal(res.status, 400)
     assert.match((await res.json()).error, /future/)
     assert.equal(row(shift.id).closed_at, null, 'refused close leaves the shift open')
     const garbage = await call('POST', `/${shift.id}/close`, closeBody(shift, { closed_at: 'not a time' }))
     assert.equal(garbage.status, 400, 'an unparseable time is still refused, not silently replaced by now')
+  }
+
+  // 3b. An employee's closed_at is ignored altogether: the Worker stamps now, however far ahead or behind they say.
+  for (const sent of [new Date(Date.now() + 10 * 60_000).toISOString(), new Date(Date.now() - 4 * 60_000).toISOString(), 'not a time']) {
+    const { call, row, open } = scenario()
+    const shift = await open()
+    const before = Date.now()
+    const res = await call('POST', `/${shift.id}/close`, closeBody(shift, { closed_at: sent }))
+    await expect(res, 200, `an employee's closed_at (${sent}) is ignored`)
+    const stored = row(shift.id)
+    assert.ok(ms(stored.closed_at) >= before && ms(stored.closed_at) <= Date.now(), `the close is stamped now, not ${sent}: ${stored.closed_at}`)
   }
 
   // 5. Duplicate clicks: two identical requests in flight together.
