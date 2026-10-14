@@ -23,6 +23,10 @@
 --                                           that is active or holds stock (no lot row at all,
 --                                           or only inactive empty ones)
 --
+-- A pre-fix CSV removal stored the user's business date in created_at, possibly long before the lots it drew on. "A lot existed" is
+-- therefore judged against the later of the row's own created_at and the newest created_at (never in the future) among LOWER ids:
+-- ids are written in order, so that is a lower bound of its write time (stockRevert.lotDrawUnrecorded does the same).
+--
 -- Part 2: batch-less removals ('remove' and the CSV import's 'out' with no batch_id, not
 -- themselves a Revert counter) and what became of them. Removals written since the fix
 -- carry a record in dated_stock_count_batch_actions: lot shares, or one zero row when
@@ -84,6 +88,11 @@ mark AS (
   SELECT CAST(value AS INTEGER) AS id FROM system_flags
   WHERE key = 'multilot_revert_watermark' AND value <> '' AND value NOT GLOB '*[^0-9]*'
 ),
+prior AS (
+  SELECT id, MAX(CASE WHEN datetime(created_at) <= datetime('now') THEN datetime(created_at) END)
+    OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prior_max
+  FROM inventory_movements
+),
 reverted AS (
   SELECT DISTINCT CAST(SUBSTR(CAST(reference_id AS TEXT), 8) AS INTEGER) AS original_id
   FROM inventory_movements
@@ -95,10 +104,11 @@ removals AS (
     m.id IN (SELECT movement_id FROM dated_stock_count_batch_actions) AS has_shares,
     (COALESCE(m.reason, '') = 'Dated stock count import' AND time(m.created_at) = '00:00:00') AS is_dated_count,
     EXISTS (SELECT 1 FROM product_batches pb WHERE pb.variant_product_id = m.product_id) AS product_has_lots,
-    EXISTS (SELECT 1 FROM product_batches pb WHERE pb.variant_product_id = m.product_id AND datetime(pb.created_at) <= datetime(m.created_at)) AS lot_before,
+    EXISTS (SELECT 1 FROM product_batches pb WHERE pb.variant_product_id = m.product_id AND datetime(pb.created_at) <= MAX(datetime(m.created_at), COALESCE(pm.prior_max, ''))) AS lot_before,
     (NOT EXISTS (SELECT 1 FROM mark) OR m.id <= (SELECT id FROM mark)) AS before_mark,
     EXISTS (SELECT 1 FROM split_pairs sp WHERE sp.product_id = m.product_id AND sp.branch_id = m.branch_id) AS on_split_pair
   FROM inventory_movements m
+  LEFT JOIN prior pm ON pm.id = m.id
   WHERE m.movement_type IN ('remove', 'out') AND m.batch_id IS NULL
     AND COALESCE(CAST(m.reference_id AS TEXT), '') NOT LIKE 'revert:%'
 )

@@ -32,6 +32,7 @@
 //   --wrong=refused-counts-dated a dated-count removal counts as refused (part 2)
 //   --wrong=refused-ignores-mark a removal above the mark counts as refused (part 2)
 //   --wrong=refused-reason-only  a typed dated-count reason on an ordinary removal counts as a dated count (part 2)
+//   --wrong=refused-own-time-only a back-dated row is judged by its own business date, not its write-time bound (part 2)
 //   --wrong=refused-strict-time  a removal written in the same second as its lot does not count as refused (part 2)
 // No network, no wrangler.
 'use strict'
@@ -102,6 +103,9 @@ const pNoBranch = product('lots but no branch stock'); lot(pNoBranch, 1, 5); bra
 const pOther = product('lot at the other branch only'); const otherLot = lot(pOther, 2, 3); branchStock(pOther, 2, 3); branchStock(pOther, 1, 6)
 
 // ---- Part 2 fixture ----------------------------------------------------------------------
+movement(pActiveEmpty, 1, 'remove', 1, { createdAt: '2026-08-01 10:00:00' })          // open, written BEFORE the product's lot existed: drew on none (the first movement: nothing earlier bounds its write time)
+const pTie = product('tie'); lot(pTie, 1, 0)                                         // no branch stock: not a pair
+movement(pTie, 1, 'remove', 1, { createdAt: '2026-09-01 00:00:00' })                 // open, written in the same second as its lot (first movements: no earlier row bounds its write time): refused
 const rSplit = movement(pSplit, 1, 'remove', 7); const rSplitRevert = reverted(pSplit, rSplit)   // reverted, lots, on a split pair
 const rPlain = movement(pUntracked, 1, 'remove', 3); reverted(pUntracked, rPlain)         // reverted, product never had a lot
 movement(pHealthy, 1, 'out', 2)                                                      // open CSV removal, lots, no shares
@@ -110,14 +114,13 @@ db.prepare('INSERT INTO dated_stock_count_batch_actions (movement_id, batch_id, 
 movement(pHealthy, 1, 'remove', 1, { batchId: healthyLot })                         // names one lot: not batch-less
 movement(pInactive, 1, 'remove', 1)                                                  // open, the product has a (dead) lot row
 const redo = reverted(pSplit, rSplitRevert, 'remove')                                  // a Redo counter: not a root removal
-movement(pActiveEmpty, 1, 'remove', 1, { createdAt: '2026-08-01 10:00:00' })          // open, written BEFORE the product's lot existed: drew on none
 movement(pResidue, 1, 'remove', 1, { reason: 'Dated stock count import', createdAt: '2026-09-20 00:00:00' })   // open dated-count row (reason + midnight stamp): records its own lot effects
 const pTyped = product('typed reason'); lot(pTyped, 1, 0)                            // no branch stock: not a pair
 movement(pTyped, 1, 'remove', 1, { reason: 'Dated stock count import' })               // open, the dated-count text typed on an ordinary removal at 10:00: refused
 const rZero = movement(pOther, 1, 'remove', 1)                                       // open, WITH the zero record (it took nothing from lots)
 db.prepare('INSERT INTO dated_stock_count_batch_actions (movement_id, batch_id, quantity) VALUES (?, ?, 0)').run(rZero, otherLot)
-const pTie = product('tie'); lot(pTie, 1, 0)                                         // no branch stock: not a pair
-movement(pTie, 1, 'remove', 1, { createdAt: '2026-09-01 00:00:00' })                 // open, written in the same second as its lot: refused
+const pBack = product('back-dated csv'); lot(pBack, 1, 0)                          // no branch stock: not a pair
+movement(pBack, 1, 'out', 1, { createdAt: '2026-01-15 00:00:00' })                    // open, a CSV removal dated long before its lot, written after the movements above: refused
 // The mark: every movement so far was written before removals recorded. What follows is written by recording code.
 const MARK_KEY = 'multilot_revert_watermark'
 const setMark = (value) => db.prepare('UPDATE system_flags SET value = ? WHERE key = ?').run(String(value), MARK_KEY)
@@ -149,7 +152,8 @@ held(pUntracked, { source: 'remove', remaining: 4 })                      // the
     'refused-counts-dated': [' AND has_shares = 0 AND is_dated_count = 0 AND lot_before = 1 AND before_mark = 1', ' AND has_shares = 0 AND lot_before = 1 AND before_mark = 1'],
     'refused-ignores-mark': [' AND lot_before = 1 AND before_mark = 1) AS removals_open_revert_refused', ' AND lot_before = 1) AS removals_open_revert_refused'],
     'refused-reason-only': ["AND time(m.created_at) = '00:00:00') AS is_dated_count", ") AS is_dated_count"],
-    'refused-strict-time': ['AND datetime(pb.created_at) <= datetime(m.created_at)) AS lot_before', 'AND datetime(pb.created_at) < datetime(m.created_at)) AS lot_before'],
+    'refused-strict-time': ['AND datetime(pb.created_at) <= MAX(', 'AND datetime(pb.created_at) < MAX('],
+    'refused-own-time-only': ["MAX(datetime(m.created_at), COALESCE(pm.prior_max, ''))", 'datetime(m.created_at)'],
   }
   let sql = q.sql
   if (wrong) {
@@ -181,12 +185,12 @@ held(pUntracked, { source: 'remove', remaining: 4 })                      // the
 
   await check('part 2: batch-less removals, their Reverts, shares and the ones a Revert now refuses', () => {
     const row = rows[0]
-    assert.strictEqual(row.removals_batchless, 11, 'split, plain, open CSV, shared, inactive-lot, before-the-lot, dated count, typed reason, zero record, tie, above-the-mark; not the named-lot one, not the Redo counter, not the Revert counters')
+    assert.strictEqual(row.removals_batchless, 12, 'split, plain, open CSV, shared, inactive-lot, before-the-lot, dated count, typed reason, zero record, back-dated CSV, tie, above-the-mark; not the named-lot one, not the Redo counter, not the Revert counters')
     assert.strictEqual(row.removals_batchless_with_shares, 2, 'the lot shares and the zero record')
     assert.strictEqual(row.removals_batchless_reverted, 2)
     assert.strictEqual(row.removals_batchless_reverted_lot_product, 1, 'the plain removal is on a product that never had a lot')
     assert.strictEqual(row.removals_batchless_reverted_on_split_pairs, 1)
-    assert.strictEqual(row.removals_open_revert_refused, 4, 'the open CSV removal, the one beside an inactive lot, the same-second tie and the typed dated-count text; not the shared, zero-record, dated-count, before-the-lot or above-the-mark ones')
+    assert.strictEqual(row.removals_open_revert_refused, 5, 'the open CSV removal, the one beside an inactive lot, the back-dated CSV removal, the same-second tie and the typed dated-count text; not the shared, zero-record, dated-count, before-the-lot or above-the-mark ones')
     assert.strictEqual(row.removals_open_after_mark_lot_before, 1, 'the record-less removal above the mark, allowed because it was written by recording code')
   })
 
@@ -195,15 +199,15 @@ held(pUntracked, { source: 'remove', remaining: 4 })                      // the
     db.prepare('DELETE FROM system_flags WHERE key = ?').run(MARK_KEY)
     try {
       const row = run()[0]
-      assert.strictEqual(row.removals_open_revert_refused, 5, 'every record-less removal after a lot counts, the above-the-mark one included')
+      assert.strictEqual(row.removals_open_revert_refused, 6, 'every record-less removal after a lot counts, the above-the-mark one included')
       assert.strictEqual(row.removals_open_after_mark_lot_before, 0)
       db.prepare("INSERT INTO system_flags (key, value) VALUES (?, 'not a number')").run(MARK_KEY)
-      assert.strictEqual(run()[0].removals_open_revert_refused, 5, 'an unreadable mark is no mark')
+      assert.strictEqual(run()[0].removals_open_revert_refused, 6, 'an unreadable mark is no mark')
     } finally {
       db.prepare('DELETE FROM system_flags WHERE key = ?').run(MARK_KEY)
       db.prepare('INSERT INTO system_flags (key, value) VALUES (?, ?)').run(MARK_KEY, kept)
     }
-    assert.strictEqual(run()[0].removals_open_revert_refused, 4)
+    assert.strictEqual(run()[0].removals_open_revert_refused, 5)
   })
 
   await check('the mark key is the same literal in the migration, the Revert and the query', () => {
