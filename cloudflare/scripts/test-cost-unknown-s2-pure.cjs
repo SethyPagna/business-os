@@ -211,7 +211,7 @@ async function main() {
     assert.doesNotMatch(query, /,\s*0\)\s*\*/, 'no ", 0" fallback on the cost')
     assert.match(query, /positive_stock_value_unknown_products/)
     assert.equal(query.split('${positiveUnitCostSql}').length - 1, 3, 'one expression drives the value and the count')
-    assert.match(source, /total_value_usd: familyStats\.stock_value_usd,\s*stock_value_unknown_products: familyStats\.stock_value_unknown_products,\s*stock_value_unknown_quantity: familyStats\.stock_value_unknown_quantity/)
+    assert.match(source, /total_value_usd: familyStats\.stock_value_usd,\s*\} : \{\}\),\s*stock_value_unknown_products: familyStats\.stock_value_unknown_products,\s*stock_value_unknown_quantity: familyStats\.stock_value_unknown_quantity/)
     assert.match(source, /stock_value_usd: familyStats\.stock_value_usd,\s*stock_value_unknown_products: familyStats\.stock_value_unknown_products,\s*stock_value_unknown_quantity: familyStats\.stock_value_unknown_quantity,\s*branch_count/)
 
     const d1 = openDb([])
