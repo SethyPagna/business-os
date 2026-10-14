@@ -232,7 +232,7 @@ async function main() {
     assert.equal(JSON.parse(audit.details).shift_code, first.shift_code, 'the open audit row quotes the ID it wrote')
     assert.equal(JSON.parse(audit.new_value).shift_code, first.shift_code)
 
-    const closed = await call('POST', `/${first.id}/close`, { expected_revision: first.revision })
+    const closed = await call('POST', `/${first.id}/close`, { expected_revision: first.revision, closing_counted_usd: 20 })
     assert.equal(closed.status, 200)
     actAs(BOSS)
     const reopened = await call('POST', `/${first.id}/reopen`, { expected_revision: first.revision + 1, reason: 'Recount drawer' })
@@ -284,7 +284,7 @@ async function main() {
     const { sqlite, call, open, actAs, racePeerAfterTakenRead } = scenario()
     actAs(ZA)
     const parent = await open(1)
-    assert.equal((await call('POST', `/${parent.id}/close`, { expected_revision: parent.revision })).status, 200)
+    assert.equal((await call('POST', `/${parent.id}/close`, { expected_revision: parent.revision, closing_counted_usd: 20 })).status, 200)
     const race = racePeerAfterTakenRead((code) => {
       sqlite.prepare(`INSERT INTO shift_sessions (shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at,
         parent_shift_id,reopen_reason,reopened_by_user_id,reopened_by_user_name)

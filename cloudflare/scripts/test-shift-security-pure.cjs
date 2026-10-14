@@ -206,12 +206,16 @@ async function main() {
     closed_at: new Date().toISOString(), closing_counted_usd: 20, closing_counted_khr: 3000 })
   assert.equal(historicBadRevision.status, 409, 'historic close requires the current revision')
   const currentRevision = (await ownAmendment.json()).shift.revision
+  // Only an administrator sends a time; the owner's own closed_at is ignored (test-shift-close-clock-skew-pure).
+  const owner = user
+  user = { id: 1, username: 'admin', role_code: 'admin' }
   assert.equal((await call('POST', `/${id}/close`, { expected_revision: currentRevision,
     closed_at: new Date(Date.now() + 10 * 60_000).toISOString(), closing_counted_usd: 20, closing_counted_khr: 3000 })).status, 400,
   'historic close rejects a future timestamp beyond the device clock-skew tolerance')
   assert.equal((await call('POST', `/${id}/close`, { expected_revision: currentRevision,
     closed_at: new Date(Date.now() - 60_000).toISOString(), closing_counted_usd: 20, closing_counted_khr: 3000 })).status, 400,
   'historic close rejects a timestamp before opening')
+  user = owner
   const historicClose = await call('POST', `/${id}/close`, { expected_revision: currentRevision,
     closed_at: new Date().toISOString(), closing_counted_usd: 20, closing_counted_khr: 3000 })
   assert.equal(historicClose.status, 200, 'owner can close own historic shift by exact id and revision')

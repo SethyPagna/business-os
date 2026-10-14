@@ -1,9 +1,9 @@
 // Who may choose the time a shift closes at. A shift's drawer is the sales, returns and expenses
 // recorded between its opening and its closing, so a close at or before the second of one of those
-// records leaves it in no shift's expected cash: choosing such a time hides money. A cashier's close
-// may not fall at or before the drawer's latest record, nor more than five minutes before now (409,
-// a code the app translates, nothing written); an administrator may pick any past time, and that
-// close is stored with the review code closed_at_earlier_time.
+// records leaves it in no shift's expected cash: choosing such a time hides money. A cashier never
+// picks a time: whatever closed_at they send is ignored and the close is stamped now (owner, 14 Oct
+// 2026); an administrator may pick any past time, and that close is stored with the review code
+// closed_at_earlier_time.
 //
 // The real Worker (src/index.ts, real auth and sessions) on a Miniflare D1 with every migration
 // applied. Sales are written straight into D1 with the created_at the scenario needs. Nothing leaves
@@ -46,7 +46,8 @@ async function main() {
     const adminRole = await roleId('admin', '{"all":true}')
     const people = {}
     for (const [key, id, role, permissions] of [['emp', 31, employeeRole, '{"pos":true,"sales":true}'], ['emp2', 32, employeeRole, '{"pos":true,"sales":true}'],
-      ['emp3', 34, employeeRole, '{"pos":true,"sales":true}'], ['admin', 33, adminRole, '{"all":true}']]) {
+      ['emp3', 34, employeeRole, '{"pos":true,"sales":true}'], ['emp4', 35, employeeRole, '{"pos":true,"sales":true}'],
+      ['emp5', 36, employeeRole, '{"pos":true,"sales":true}'], ['emp6', 37, employeeRole, '{"pos":true,"sales":true}'], ['admin', 33, adminRole, '{"all":true}']]) {
       const token = `shift-close-time-${key}`
       await db.prepare("INSERT INTO users(id,username,name,password,role_id,permissions,is_active) VALUES(?,?,?,'fixture',?,?,1)")
         .bind(id, `cashier_${key}`, `Cashier ${key}`, role, permissions).run()
@@ -108,19 +109,31 @@ async function main() {
       assert.ok(response.json.error, `${label}: carries an English fallback`)
     }
 
-    await check('employee closing at the opening time (the cash-hiding close) is refused, nothing written', () => unwritten('closed_at = opened_at', emp, async () => {
-      refusal('closed_at = opened_at', await call('emp', 'POST', `/${emp}/close`, early({ closed_at: empOpenedAt })), 'shift_close_before_last_activity')
-    }))
-    await check('employee closing between the two sales is refused', () => unwritten('between the sales', emp, async () => {
-      refusal('between the sales', await call('emp', 'POST', `/${emp}/close`, early({ closed_at: new Date(Date.now() - 10 * MIN).toISOString() })), 'shift_close_before_last_activity')
-    }))
-    await check('employee closing after the last sale but more than 5 minutes ago is refused', () => unwritten('too early', emp, async () => {
-      refusal('too early', await call('emp', 'POST', `/${emp}/close`, early({ closed_at: new Date(Date.now() - 7 * MIN).toISOString() })), 'shift_close_too_early')
-    }))
-    await check('the sales are still in the open drawer after the refusals', async () => {
-      const inWindow = await first(`SELECT COUNT(*) AS n FROM sales WHERE cashier_id=? AND datetime(created_at) >= datetime(?)`, people.emp.id, empOpenedAt)
-      assert.equal(inWindow.n, 2)
-    })
+    // N1: an employee never picks a time. Whatever closed_at they send -- the opening (the cash-hiding close), a moment
+    // between the sales, or more than five minutes ago -- is ignored: the Worker stamps now, both sales are in the
+    // drawer, and nothing is flagged.
+    for (const [who, label, sent] of [
+      ['emp4', 'the opening time', (opened) => opened],
+      ['emp5', 'between the two sales', () => new Date(Date.now() - 10 * MIN).toISOString()],
+      ['emp6', 'more than 5 minutes ago', () => new Date(Date.now() - 7 * MIN).toISOString()],
+    ]) {
+      await check(`employee sending closed_at = ${label}: the time is ignored, the close is stamped now and keeps both sales`, async () => {
+        const id = await openShift(who, 20)
+        await sell(who, 12)
+        await sell(who, 8)
+        const before = Date.now()
+        const closed = await call(who, 'POST', `/${id}/close`, early({ closed_at: sent((await rowOf(id)).opened_at), closing_counted_usd: 60 }))
+        assert.equal(closed.status, 200, closed.text)
+        const closedAt = Date.parse((await rowOf(id)).closed_at)
+        assert.ok(closedAt >= before - 1000 && closedAt <= Date.now() + 1000, `stamped now, not the sent time: ${(await rowOf(id)).closed_at}`)
+        const figures = await figuresOf(id)
+        assert.equal(figures.reconciliation.cash_sales.usd, 10, 'both sales are in the stored drawer')
+        assert.equal(figures.reconciliation.difference.usd, 0)
+        assert.deepEqual(figures.reconciliation.review_codes, [], 'nothing is flagged: the employee chose no time')
+        assert.equal((await first(`SELECT COUNT(*) AS n FROM sales s WHERE s.cashier_id=? AND NOT EXISTS (SELECT 1 FROM shift_sessions h WHERE h.user_id=s.cashier_id
+          AND datetime(s.created_at) >= datetime(h.opened_at) AND datetime(s.created_at) < datetime(COALESCE(h.closed_at, '9999-12-31')))`, people[who].id)).n, 0, 'no sale sits outside every shift')
+      })
+    }
 
     await check('employee closing now (no closed_at) is accepted and stores both cash sales', async () => {
       const closed = await call('emp', 'POST', `/${emp}/close`, early({ closing_counted_usd: 60 }))
@@ -175,7 +188,7 @@ async function main() {
 
     await check('nothing left the process', async () => assert.deepEqual(outbound, []))
     assert.deepEqual(failures, [], `\n${failures.join('\n')}`)
-    console.log('PASS shift close time: a cashier cannot close at or before the last sale, return or expense nor 5 minutes into the past (409, nothing written, amend too); '
+    console.log('PASS shift close time: a closed_at sent by a cashier is ignored (the close is stamped now and keeps every sale; an amend of the time is refused); '
       + 'a normal close keeps every sale in the drawer; an administrator may pick a past time and the close is flagged closed_at_earlier_time')
   } finally { await mf.dispose() }
 }

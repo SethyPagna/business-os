@@ -640,7 +640,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
     mountedSurfaces.add(unmount)
     const render = async (props: Record<string, unknown>): Promise<void> => {
       await act(async () => {
-        root.render(React.createElement(core.AppContext.Provider, { value: options.app }, React.createElement(module.default, props)))
+        root.render(React.createElement(core.AppContext.Provider, { value: options.app }, React.createElement(Component, props)))
       })
       await settle()
     }

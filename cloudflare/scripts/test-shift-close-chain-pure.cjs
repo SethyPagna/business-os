@@ -173,7 +173,7 @@ const round2 = (n) => Math.round(n * 100) / 100
     VALUES (1,?,'completed',1,21,'Cash USD',40,0,40,4100,NULL,NULL),
            (2,?,'completed',1,21,'ABA',25,0,25,4100,NULL,NULL),
            (3,?,'completed',1,21,'Cash USD',0,82000,20,4100,NULL,NULL),
-           (4,?,'completed',1,21,'Cash USD',10,0,10,4100,3,4000)`).run(at(5), at(10), at(15), at(20))
+           (4,?,'completed',1,21,'Cash USD',10,0,10,4100,3,12300)`).run(at(5), at(10), at(15), at(20))
   sqlite.prepare(`INSERT INTO fees(id,created_at,branch_id,sale_id,fee_type,label,amount_usd,amount_khr,created_by)
     VALUES (1,?,1,NULL,'expense','Ice',4,0,21), (2,?,NULL,NULL,'expense','Moto',0,20000,21)`).run(at(6), at(7))
   // Paired like production: total_refund_khr = usd x rate, the SAME refund.
@@ -211,17 +211,17 @@ const round2 = (n) => Math.round(n * 100) / 100
   // By hand from the fixture, per currency, nothing converted:
   //   USD: 50 opening + 50 cash (40 + 10; ABA is not cash) - 6 refunds (4 + 2)
   //        - 4 expenses - 3 courier = 87.00
-  //   KHR: 100,000 + 82,000 - 20,000 - 4,000 = 158,000. The refunds' riel
+  //   KHR: 100,000 + 82,000 - 20,000 = 162,000. The courier's 12,300 riel is the twin of its $3, and the refunds' riel
   //        figures (16,400 + 8,200) are the same refunds, not riel paid out.
   assert.deepEqual(recon.opening, { usd: 50, khr: 100000 })
   assert.deepEqual(recon.cash_sales, { usd: 50, khr: 82000 })
   assert.deepEqual(recon.refunds, { usd: 6, khr: 0 })
   assert.deepEqual(recon.expenses, { usd: 4, khr: 20000 })
-  assert.deepEqual(recon.courier, { usd: 3, khr: 4000 })
-  assert.deepEqual(recon.expected, { usd: 87, khr: 158000 })
+  assert.deepEqual(recon.courier, { usd: 3, khr: 0 })
+  assert.deepEqual(recon.expected, { usd: 87, khr: 162000 })
   assert.deepEqual(recon.counted, { usd: 100, khr: 150000 })
-  // A real 8,000 riel shortage; the double subtraction reported +16,600.
-  assert.deepEqual(recon.difference, { usd: 13, khr: -8000 })
+  // A real 12,000 riel shortage; subtracting the courier's riel twin as well would show it as 24,300.
+  assert.deepEqual(recon.difference, { usd: 13, khr: -12000 })
   assert.equal(recon.needs_review, false)
   assert.equal(round2(50 + 50 - 6 - 4 - 3), 87)
 

@@ -76,8 +76,8 @@ INSERT INTO sales(id,created_at,sale_status,branch_id,cashier_id,payment_method,
  (3,'2026-09-06 03:30:00','completed',2,7,'Cash',0,82000,20,4100,NULL,NULL),
  (4,'2026-09-06 03:40:00','cancelled',2,7,'Cash',999,0,999,4100,NULL,NULL),
  (5,'2026-09-06 06:00:00','completed',2,7,'Cash',777,0,777,4100,NULL,NULL),
- (6,'2026-09-06 04:00:00','completed',2,7,'Cash',10,0,10,4100,3,4000),
- (7,'2026-09-06 04:30:00','completed',2,7,'Cash',8,0,8,4100,5,20000),
+ (6,'2026-09-06 04:00:00','completed',2,7,'Cash',10,0,10,4100,3,12300),
+ (7,'2026-09-06 04:30:00','completed',2,7,'Cash',8,0,8,4100,5,20500),
  (8,'2026-09-06 04:40:00','completed',3,7,'Cash',500,0,500,4100,NULL,NULL),
  (9,'2026-09-06 04:45:00','completed',2,8,'Cash',600,0,600,4100,NULL,NULL);
 
@@ -126,6 +126,17 @@ pairedReturn(5, '2026-09-06 05:10:00', 2, 8, 'completed', 'customer', 22)
 pairedReturn(6, '2026-09-06 06:00:00', 2, 7, 'completed', 'customer', 11)
 assert.deepEqual(sql.prepare('SELECT total_refund_khr AS khr FROM returns WHERE id IN (1,4) ORDER BY id').all().map((r) => r.khr), [24_600, 10_000],
   'the fixture carries the riel twin every live writer stores')
+// A courier paid $1.50 on a delivery sale, stored the way routes/sales.ts stores
+// it: the dollar cost and its riel twin at the sale's rate. The drawer holds
+// $12 and 20,000 riel of cash sales; the payout left it in dollars once.
+const insertPayoutSale = sql.prepare(`INSERT INTO sales(id,created_at,sale_status,branch_id,cashier_id,payment_method,
+  amount_paid_usd,amount_paid_khr,total_usd,exchange_rate,delivery_actual_cost_usd,delivery_actual_cost_khr) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+insertPayoutSale.run(20, '2026-09-07 03:00:00', 'completed', 9, 11, 'Cash', 12, 0, 12, 4000, null, null)
+insertPayoutSale.run(21, '2026-09-07 03:10:00', 'completed', 9, 11, 'Cash', 0, 20000, 5, 4000, null, null)
+insertPayoutSale.run(22, '2026-09-07 03:20:00', 'completed', 9, 11, 'ABA', 9, 0, 9, 4000, 1.5, moneyPrecision.multiplyMoney4(1.5, 4000))
+insertPayoutSale.run(23, '2026-09-07 03:30:00', 'completed', 9, 11, 'ABA', 0, 0, 4, 4000, null, 8000)
+assert.equal(sql.prepare('SELECT delivery_actual_cost_khr AS khr FROM sales WHERE id = 22').get().khr, 6_000,
+  'the fixture carries the riel twin the writer stores')
 const reportMoneyPrecision = load('lib/reportMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
 const promotionRules = load('lib/promotionRules.ts', { './moneyPrecision': moneyPrecision })
 const saleItemPricing = load('lib/saleItemPricing.ts', { './moneyPrecision': moneyPrecision, './promotionRules': promotionRules })
@@ -186,8 +197,28 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
     'refunds are the completed CUSTOMER returns issued in the window ($6 + $2.50), each taken out ONCE in dollars -- their riel twins (24,600 + 10,000) are the same money; cancelled, supplier-scope, another cashier and the closing second are out')
 
   const courier = await recon.shiftCourierPayouts({}, SHIFT, NOW)
-  assert.deepEqual(courier, { usd: 3, khr: 4_000 },
-    'courier payouts count sale 6 only -- sale 7 already has a delivery FEE row, so its $5/20,000 is not subtracted twice')
+  assert.deepEqual(courier, { usd: 3, khr: 0 },
+    'courier payouts count sale 6 only, in dollars: its 12,300 riel is the twin of the $3 the writer stores, not a second payout; sale 7 already has a delivery FEE row, so its $5 is not subtracted twice')
+
+  // A payout reduces only the drawer currency it was paid in.
+  const PAYOUT_SHIFT = {
+    scope_mode: 'per_account', user_id: 11, branch_id: 9,
+    opened_at: '2026-09-07T02:00:00.000Z', closed_at: '2026-09-07T06:00:00.000Z',
+    opening_float_usd: 0, opening_float_khr: 0, additional_cash_usd: 0, additional_cash_khr: 0,
+    closing_counted_usd: 10.5, closing_counted_khr: 20_000,
+  }
+  const payout = await recon.loadShiftReconciliation({}, PAYOUT_SHIFT, NOW)
+  assert.deepEqual(payout.courier, { usd: 1.5, khr: 8_000 },
+    'sale 22 counts $1.50 only (its 6,000 riel twin is the same money); sale 23 records 8,000 riel alone, an explicit riel payout')
+  assert.deepEqual(payout.expected, { usd: 10.5, khr: 12_000 })
+  sql.prepare('DELETE FROM sales WHERE id = 23').run()
+  const dollarPayout = await recon.loadShiftReconciliation({}, PAYOUT_SHIFT, NOW)
+  assert.deepEqual(dollarPayout.courier, { usd: 1.5, khr: 0 })
+  assert.deepEqual(dollarPayout.expected, { usd: 10.5, khr: 20_000 })
+  assert.deepEqual(dollarPayout.difference, { usd: 0, khr: 0 },
+    'cash 12 USD + 20,000 riel, a $1.50 courier payout, counted 10.50 USD + 20,000 riel: nothing is missing')
+  assert.equal(dollarPayout.needs_review, false)
+  console.log('PASS courier payout: a dollar payout leaves the dollar drawer once, an explicit riel payout leaves the riel drawer, difference 0 / 0')
 
   // --- 2. the reconciliation, and the answer the old formula gave -----------
 
@@ -197,13 +228,13 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
   assert.deepEqual(result.cash_sales, { usd: 58, khr: 82_000 })
   assert.deepEqual(result.refunds, { usd: 8.5, khr: 0 })
   assert.deepEqual(result.expenses, { usd: 9, khr: 20_000 })
-  assert.deepEqual(result.courier, { usd: 3, khr: 4_000 })
-  assert.deepEqual(result.expected, { usd: 97.5, khr: 163_000 })
+  assert.deepEqual(result.courier, { usd: 3, khr: 0 })
+  assert.deepEqual(result.expected, { usd: 97.5, khr: 167_000 })
   assert.deepEqual(result.counted, { usd: 97.5, khr: 160_000 })
-  // The drawer really is 3,000 riel short. Subtracting the refunds' riel
+  // The drawer really is 7,000 riel short. Subtracting the refunds' riel
   // twins as well (34,600) turned that into a +31,600 riel SURPLUS: the
   // double subtraction does not just add noise, it hides a real shortage.
-  assert.deepEqual(result.difference, { usd: 0, khr: -3_000 })
+  assert.deepEqual(result.difference, { usd: 0, khr: -7_000 })
   assert.equal(result.needs_review, false)
   assert.deepEqual(result.review_codes, [])
 
@@ -222,11 +253,11 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
 
   // --- 3. the two currencies stay apart ------------------------------------
   // The dollar side moved by 10 + 58 - 8.5 - 9 - 3 = +47.5 and the riel side
-  // by 5,000 + 82,000 - 20,000 - 4,000 = +63,000. Neither number is
+  // by 5,000 + 82,000 - 20,000 = +67,000. Neither number is
   // derivable from the other at either rate the fixture uses (4,100 or 4,000),
   // so an implementation that folded them would have to miss one.
   assert.equal(result.expected.usd - result.opening.usd, 47.5)
-  assert.equal(result.expected.khr - result.opening.khr, 63_000)
+  assert.equal(result.expected.khr - result.opening.khr, 67_000)
   for (const rate of [4100, 4000]) {
     assert.notEqual((result.expected.khr - result.opening.khr) / rate, result.expected.usd - result.opening.usd, `riel / ${rate}`)
   }
@@ -244,7 +275,7 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
   renameTo('Cash USD', ['Cash USD', 'ABA'])
   const renamed = await recon.loadShiftReconciliation({}, SHIFT, NOW)
   assert.deepEqual(renamed.cash_sales, { usd: 58, khr: 82_000 }, 'a renamed cash method is still cash')
-  assert.deepEqual(renamed.expected, { usd: 97.5, khr: 163_000 })
+  assert.deepEqual(renamed.expected, { usd: 97.5, khr: 167_000 })
   assert.equal(renamed.needs_review, false)
   assert.equal(registry.resolvePaymentMethodKind('Cash USD'), 'cash')
   assert.equal(registry.resolvePaymentMethodKind('សាច់ប្រាក់ដុល្លារ'), 'cash')
@@ -262,7 +293,7 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
   sql.prepare("INSERT INTO settings(key,value) VALUES('pos_payment_method_kinds',?)").run(JSON.stringify({ Drawer: 'cash' }))
   const pinned = await recon.loadShiftReconciliation({}, SHIFT, NOW)
   assert.deepEqual(pinned.cash_sales, { usd: 58, khr: 82_000 })
-  assert.deepEqual(pinned.expected, { usd: 97.5, khr: 163_000 })
+  assert.deepEqual(pinned.expected, { usd: 97.5, khr: 167_000 })
   assert.equal(pinned.needs_review, false)
   sql.prepare("DELETE FROM settings WHERE key='pos_payment_method_kinds'").run()
   renameTo('Cash', ['Cash', 'ABA'])

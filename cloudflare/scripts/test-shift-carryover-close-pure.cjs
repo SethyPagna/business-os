@@ -391,9 +391,17 @@ async function main() {
   assert.equal(overlap.body.error, 'Closing time overlaps the next shift segment.')
   // Closed against the bound the SERVER said, not a value this test guessed.
   const beforeToday = new Date(Date.parse(trapCurrent.body.previous_open_close_before) - 1000).toISOString()
+  // Only an administrator chooses a time: the cashier's own closed_at is ignored (the close is stamped now, and so
+  // swallows today's shift again).
+  const ignored = await trap.json('POST', `/${trapCarry.id}/close`, {
+    expected_revision: trapCarry.revision, closed_at: beforeToday,
+  })
+  assert.equal(ignored.status, 409, 'the cashier cannot pick the bound: the sent time is ignored')
+  trap.as(ADMIN)
   const tidy = await trap.json('POST', `/${trapCarry.id}/close`, {
     expected_revision: trapCarry.revision, closed_at: beforeToday,
   })
+  trap.as(CASHIER)
   assert.equal(tidy.status, 200, `closing it before today's opening is accepted: ${JSON.stringify(tidy.body)}`)
   assert.equal(trapDb.prepare('SELECT closed_at FROM shift_sessions WHERE id=?').get(trapCarry.id).closed_at, beforeToday)
   assert.equal((await trap.json('GET', '/current?branch_id=1')).body.previous_open_shift, null)
@@ -542,7 +550,17 @@ async function main() {
     expected_revision: newerDay.revision, closed_at: new Date().toISOString(),
   })
   assert.equal(closeNewerFirst.status, 409, 'closing the nearer day first is refused while an older day is still open')
-  assert.equal(closeNewerFirst.body.error, 'Opening time overlaps the previous shift segment.')
+  assert.equal(closeNewerFirst.body.error, 'An administrator must close the earlier shift first.',
+    'the cashier is told whose move it is, not that two times overlap')
+  assert.equal(closeNewerFirst.body.code, 'shift_earlier_admin_must_close_first')
+  order.as(ADMIN)
+  const adminNewerFirst = await order.json('POST', `/${newerDay.id}/close`, {
+    expected_revision: newerDay.revision, closed_at: new Date().toISOString(),
+  })
+  order.as(CASHIER)
+  assert.equal(adminNewerFirst.status, 409, 'an administrator is refused the same close too')
+  assert.equal(adminNewerFirst.body.error, 'Opening time overlaps the previous shift segment.', 'and keeps the overlap sentence, which names the times')
+  assert.equal(adminNewerFirst.body.code, 'shift_overlaps_previous_segment')
 
   const firstOffer = await order.json('GET', '/current?branch_id=1')
   assert.equal(firstOffer.body.previous_open_shift.id, olderDay.id,
@@ -568,7 +586,7 @@ async function main() {
   // Only an administrator picks a past close time; the shift's own cashier closes now.
   const olderClose = { expected_revision: olderDay.revision, closed_at: new Date(Date.parse(firstOffer.body.previous_open_close_before) - 60_000).toISOString() }
   const cashierGuess = await order.json('POST', `/${olderDay.id}/close`, olderClose)
-  assert.equal(cashierGuess.body.code, 'shift_close_too_early', 'the cashier cannot pick the stated bound')
+  assert.equal(cashierGuess.body.code, 'shift_overlaps_next_segment', 'the cashier cannot pick the stated bound: the sent time is ignored and the close is now')
   const cashierNow = order.state.user
   order.as(ADMIN)
   const closeOlder = await order.json('POST', `/${olderDay.id}/close`, olderClose)
@@ -584,10 +602,12 @@ async function main() {
 
   // Now the nearer day closes against its own bound, and nothing is left to
   // drain: the chain drains oldest to newest, every step accepted first try.
+  order.as(ADMIN)
   const closeNewerSecond = await order.json('POST', `/${newerDay.id}/close`, {
     expected_revision: newerDay.revision,
     closed_at: new Date(Date.parse(secondOffer.body.previous_open_close_before) - 60_000).toISOString(),
   })
+  order.as(cashierNow)
   assert.equal(closeNewerSecond.status, 200, `closing the nearer day succeeds once the older day is closed: ${JSON.stringify(closeNewerSecond.body)}`)
   const drained = await order.json('GET', '/current?branch_id=1')
   assert.equal(drained.body.previous_open_shift, null,
