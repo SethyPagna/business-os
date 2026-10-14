@@ -139,7 +139,7 @@ check('every active lot uncosted -> falls back to the product row own stored cos
   const lots = [lot(1, 0), lot(2, null)]
   const result = buildCatalogCostBreakdown(105, { cost_price_usd: 12.5, cost_price_khr: 0 }, lots)
   assert.deepEqual(result.distinct_usd, [])
-  assert.equal(result.mean_usd, 0)
+  assert.equal(result.mean_usd, null, 'no mean exists, and an unknown figure is never printed as 0')
   assert.equal(result.result_usd, 12.5, 'the existing figure survives, per recomputeCatalogCost')
   assert.equal(result.inputs[0].excluded, 'zero')
   assert.equal(result.inputs[1].excluded, 'zero')
@@ -151,6 +151,35 @@ check('no lots at all -> empty inputs, falls back to the stored cost', () => {
   assert.equal(result.result_usd, 3.25)
   assert.equal(result.result_khr, 13000, 'KHR is never derived from lots -- the stored scalar passes through untouched')
   assert.deepEqual(result.distinct_khr, [], 'no lot ever carries a per-lot KHR cost')
+})
+
+// ---------------------------------------------------------------------------
+// S7 (owner, 14 Oct 2026): "if it is none, it should also be unknown". A product whose cost is unknown and whose lots give
+// the formula nothing to derive has NO result: the breakdown says null, never the 0 a `Number(x) || 0` printed. A recorded
+// $0 is a real figure and stays 0.
+// ---------------------------------------------------------------------------
+check('stored cost unknown and no costed lot -> result_usd, result_khr and mean_usd are null, not 0', () => {
+  const result = buildCatalogCostBreakdown(110, { cost_price_usd: null, cost_price_khr: null }, [lot(1, null), lot(2, null)])
+  assert.equal(result.result_usd, null)
+  assert.equal(result.result_khr, null)
+  assert.equal(result.mean_usd, null)
+  assert.deepEqual(result.weighted_terms, [])
+  const noLots = buildCatalogCostBreakdown(111, { cost_price_usd: null, cost_price_khr: null }, [])
+  assert.equal(noLots.result_usd, null)
+  assert.equal(noLots.result_khr, null)
+})
+
+check('a recorded $0 stored cost with nothing to derive stays 0 (a real zero, not unknown)', () => {
+  const result = buildCatalogCostBreakdown(112, { cost_price_usd: 0, cost_price_khr: 0 }, [lot(1, null)])
+  assert.equal(result.result_usd, 0)
+  assert.equal(result.result_khr, 0)
+})
+
+check('an unknown stored cost is replaced by the figure the lots derive, and only then', () => {
+  const result = buildCatalogCostBreakdown(113, { cost_price_usd: null, cost_price_khr: null }, [lot(1, 3), lot(2, null)])
+  assert.equal(result.result_usd, 3)
+  assert.equal(result.mean_usd, 3)
+  assert.equal(result.result_khr, null, 'KHR is never derived from lots')
 })
 
 check('KHR is reported as the stored scalar, never averaged, even with several distinct USD lots', () => {

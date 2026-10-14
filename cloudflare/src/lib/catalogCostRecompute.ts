@@ -1,6 +1,7 @@
 import type { D1Compat } from './db'
 import type { MergedCostOutlier } from './productDetailRule'
 import { weightedMeanMoney4 } from './moneyPrecision'
+import { knownCost } from './costValue'
 
 // Historical label (owner rule: old records are never relabelled): the row's own branch-name snapshot
 // when it has a non-blank one, else the live directory name. The SAME expression as
@@ -179,8 +180,8 @@ export function catalogCostRepairAllSql(): string {
 
 export type CatalogCostRecomputeResult = {
   productId: number
-  before: { usd: number; khr: number }
-  after: { usd: number; khr: number }
+  before: { usd: number | null; khr: number | null }
+  after: { usd: number | null; khr: number | null }
   changed: boolean
   outliers: MergedCostOutlier[]
 }
@@ -218,7 +219,7 @@ export async function recomputeCatalogCost(db: D1Compat, productId: number): Pro
     .get<{ cost_price_usd: number | null; cost_price_khr: number | null }>({ id: productId })
   const product = await readCost()
   if (!product) return null
-  const before = { usd: Number(product.cost_price_usd) || 0, khr: Number(product.cost_price_khr) || 0 }
+  const before = { usd: knownCost(product.cost_price_usd), khr: knownCost(product.cost_price_khr) }
 
   // Same formula as catalogCostRecomputeStatement, but writes (and stamps
   // updated_at) only when the figure actually moves, so an unchanged
@@ -226,7 +227,7 @@ export async function recomputeCatalogCost(db: D1Compat, productId: number): Pro
   // always had.
   await db.prepare(catalogCostRecomputeIfChangedSql('id = @productId')).run({ productId })
   const updated = await readCost()
-  const after = { usd: Number(updated?.cost_price_usd) || 0, khr: before.khr }
+  const after = { usd: knownCost(updated?.cost_price_usd), khr: before.khr }
   const changed = after.usd !== before.usd
 
   return { productId, before, after, changed, outliers: [] }
@@ -325,12 +326,13 @@ export type CatalogCostBreakdown = {
   /** Legacy readers: the distinct counted costs. Not the calculation. */
   distinct_usd: number[]
   distinct_khr: number[]
-  /** The weighted mean (or the fallback lot's cost), 0 when there is neither. */
-  mean_usd: number
+  /** The weighted mean (or the fallback lot's cost); null when there is neither, never 0. */
+  mean_usd: number | null
   mean_khr: number
   outlier_guard: { fired: boolean; kept: number | null }
-  result_usd: number
-  result_khr: number
+  /** The cost the formula leaves on the product; null when nothing derives one and the stored cost is unknown. */
+  result_usd: number | null
+  result_khr: number | null
 }
 
 /** The label a lot shows in the breakdown: batch code, else received date, else lot code -- with its branch appended when known. */
@@ -456,7 +458,7 @@ export function buildCatalogCostBreakdown(
 
   const fallbackCost = positiveCost(fallbackLot?.unit_cost_usd)
   const derivedUsd = weightedMean ?? fallbackCost
-  const resultUsd = derivedUsd != null ? derivedUsd : (Number(product.cost_price_usd) || 0)
+  const resultUsd = derivedUsd != null ? derivedUsd : knownCost(product.cost_price_usd)
   const distinctUsd = [...new Set(weightedTerms.map((term) => term.cost_usd).concat(fallbackCost !== null ? [fallbackCost] : []))].sort((a, b) => a - b)
 
   return {
@@ -466,11 +468,11 @@ export function buildCatalogCostBreakdown(
     weighted_quantity: totalWeight,
     distinct_usd: distinctUsd,
     distinct_khr: [],
-    mean_usd: derivedUsd ?? 0,
+    mean_usd: derivedUsd,
     mean_khr: 0,
     outlier_guard: { fired: false, kept: null },
     result_usd: resultUsd,
-    result_khr: Number(product.cost_price_khr) || 0,
+    result_khr: knownCost(product.cost_price_khr),
   }
 }
 
@@ -533,12 +535,12 @@ export async function getCatalogCostBreakdown(db: D1Compat, productId: number): 
  * {@link recomputeCatalogCost} so the new manual figure immediately joins
  * the formula, same as a fresh lot would.
  */
-export function planManualCostEntry(
+export function planManualCostChange(
   productId: number,
   before: { cost_price_usd: number | null; cost_price_khr: number | null },
   body: Record<string, unknown>,
   actor: { id: number | null; name: string | null },
-): { sql: string; params: Record<string, unknown> } | null {
+): { entry: { sql: string; params: Record<string, unknown> } | null } | null {
   const hasUsd = Object.prototype.hasOwnProperty.call(body, 'cost_price_usd')
   const hasKhr = Object.prototype.hasOwnProperty.call(body, 'cost_price_khr')
   if (!hasUsd && !hasKhr) return null
@@ -557,12 +559,24 @@ export function planManualCostEntry(
   const changed = (hasUsd && afterUsd !== beforeUsd) || (hasKhr && afterKhr !== beforeKhr)
   if (!changed) return null
 
-  return { sql: `
+  // product_cost_entries records costs that were typed (cost_usd is NOT NULL), so a cleared or still-unknown USD cost
+  // has no entry: it is NULL on the product, not a $0 override. A typed 0 is a recorded $0 and keeps its entry.
+  if (afterUsd === null) return { entry: null }
+  return { entry: { sql: `
     INSERT INTO product_cost_entries (product_id, cost_usd, cost_khr, previous_cost_usd, source, user_id, user_name, baseline_batch_id)
     VALUES (@productId, @costUsd, @costKhr, @previousCostUsd, 'manual', @userId, @userName,
       (SELECT COALESCE(MAX(id),0) FROM product_batches WHERE variant_product_id=@productId))
-  `, params: { productId, costUsd: afterUsd ?? 0, costKhr: hasKhr ? afterKhr : null,
-    previousCostUsd: before.cost_price_usd, userId: actor.id, userName: actor.name } }
+  `, params: { productId, costUsd: afterUsd, costKhr: hasKhr ? afterKhr : null,
+    previousCostUsd: before.cost_price_usd, userId: actor.id, userName: actor.name } } }
+}
+
+export function planManualCostEntry(
+  productId: number,
+  before: { cost_price_usd: number | null; cost_price_khr: number | null },
+  body: Record<string, unknown>,
+  actor: { id: number | null; name: string | null },
+): { sql: string; params: Record<string, unknown> } | null {
+  return planManualCostChange(productId, before, body, actor)?.entry ?? null
 }
 
 /**
@@ -574,8 +588,9 @@ export function planManualCostEntry(
  * holds only until the next sale. This records the SAME row the form's
  * planManualCostEntry records (source 'manual', the actor, the baseline =
  * the product's highest lot id right now, previous_cost_usd, cost_khr only
- * when the write carries KHR, cost_usd NULL -> 0), and only when the write
- * actually moves a cost column, so a same-value re-import writes nothing.
+ * when the write carries KHR), and only when the write actually moves a cost
+ * column, so a same-value re-import writes nothing. A write that leaves the
+ * USD cost unknown (NULL) records no entry; a written 0 is a recorded $0.
  *
  * Set-based and evaluated against the PREIMAGE: run it in the same atomic
  * batch IMMEDIATELY BEFORE the UPDATE, with `nextUsdSql`/`nextKhrSql` the
@@ -590,12 +605,14 @@ export function typedCostEntriesBeforeWriteSql(input: { nextUsdSql: string | nul
     nextKhrSql && `(${nextKhrSql}) IS NOT products.cost_price_khr`,
   ].filter(Boolean)
   if (!moved.length) throw new Error('typedCostEntriesBeforeWriteSql needs at least one cost column')
+  const usdSql = nextUsdSql ?? 'products.cost_price_usd'
+  // cost_usd is NOT NULL and an unknown cost is not an entry: only a USD cost that will be known is recorded (0 included).
   return `INSERT INTO product_cost_entries (product_id, cost_usd, cost_khr, previous_cost_usd, source, user_id, user_name, baseline_batch_id)
-    SELECT products.id, COALESCE(${nextUsdSql ?? 'products.cost_price_usd'}, 0), ${nextKhrSql ?? 'NULL'}, products.cost_price_usd,
+    SELECT products.id, ${usdSql}, ${nextKhrSql ?? 'NULL'}, products.cost_price_usd,
       'manual', @costEntryUserId, @costEntryUserName,
       (SELECT COALESCE(MAX(pb.id), 0) FROM product_batches pb WHERE pb.variant_product_id = products.id)
     FROM products
-    WHERE (${whereSql}) AND (${moved.join(' OR ')})`
+    WHERE (${whereSql}) AND (${moved.join(' OR ')}) AND (${usdSql}) IS NOT NULL`
 }
 
 export function costEntryActorParams(actor: { id: number | null; name: string | null }): Record<string, unknown> {
@@ -648,11 +665,11 @@ export function typedCostEntryAfterWriteStatement(
   ].filter(Boolean)
   return {
     sql: `INSERT INTO product_cost_entries (product_id, cost_usd, cost_khr, previous_cost_usd, source, user_id, user_name, baseline_batch_id)
-    SELECT products.id, COALESCE(products.cost_price_usd, 0), ${written.khr ? 'products.cost_price_khr' : 'NULL'}, @costEntryBeforeUsd,
+    SELECT products.id, products.cost_price_usd, ${written.khr ? 'products.cost_price_khr' : 'NULL'}, @costEntryBeforeUsd,
       'manual', @costEntryUserId, @costEntryUserName,
       (SELECT COALESCE(MAX(pb.id), 0) FROM product_batches pb WHERE pb.variant_product_id = products.id)
     FROM products
-    WHERE products.id = @costEntryProductId AND (${moved.join(' OR ')})`,
+    WHERE products.id = @costEntryProductId AND (${moved.join(' OR ')}) AND products.cost_price_usd IS NOT NULL`,
     params: {
       costEntryProductId: productId,
       costEntryBeforeUsd: before.cost_price_usd ?? null,

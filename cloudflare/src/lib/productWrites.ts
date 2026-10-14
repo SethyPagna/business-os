@@ -17,7 +17,7 @@ import { normalizeSearchText, compactSearchText } from './searchMatch'
 import { MAX_IMAGES_PER_PRODUCT } from './importImageMatch'
 import type { Env } from '../index'
 import { roundMoney4, sellingPriceCeilCent, subtractDecimalSum } from './moneyPrecision'
-import { planManualCostEntry, catalogCostRecomputeStatement } from './catalogCostRecompute'
+import { planManualCostChange, catalogCostRecomputeStatement } from './catalogCostRecompute'
 import { requireReceivingBranch, receivingBranchAssertion, ReceivingBranchError, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from './receivingBranch'
 import {
   BRANCH_REDIRECT_TARGET_INVALID_CODE, BRANCH_REDIRECT_TARGET_INVALID_ERROR, addressedStatements, branchEffectRefusal, isBranchRedirectGuardError,
@@ -264,6 +264,18 @@ function applySearchNormalizedColumns(payload: Record<string, unknown>, body: Re
   }
 }
 
+// products.cost_price_usd/khr are DEFAULT 0, so an INSERT that leaves them out records a cost nobody entered.
+// A product created without a cost has an UNKNOWN cost (NULL); only a typed 0 is a recorded $0.
+const PRODUCT_COST_COLUMNS = ['cost_price_usd', 'cost_price_khr'] as const
+function unknownCostWhenAbsent(payload: Record<string, unknown>, columns: Set<string>): Record<string, unknown> {
+  for (const column of PRODUCT_COST_COLUMNS) {
+    if (!columns.has(column)) continue
+    const value = payload[column]
+    if (value === undefined || (typeof value === 'string' && value.trim() === '')) payload[column] = null
+  }
+  return payload
+}
+
 export function buildInsertPayload(
   body: Record<string, unknown>,
   columns: Set<string>,
@@ -288,7 +300,7 @@ export function planInsertRow(
   required: Record<string, unknown> = {},
 ): { sql: string; params: Record<string, unknown> } {
   assertProductStatusInput(body)
-  const payload = buildInsertPayload(body, columns, { ...required, is_active: 1 })
+  const payload = unknownCostWhenAbsent(buildInsertPayload(body, columns, { ...required, is_active: 1 }), columns)
   const keys = Object.keys(payload)
   if (!keys.length) throw new Error(`No writable ${table} fields were supplied`)
   const params = Object.fromEntries(keys.map((key, index) => [`value${index}`, payload[key]]))
@@ -301,7 +313,8 @@ export function planInsertRow(
 export async function insertRow(env: Env, table: string, body: Record<string, unknown>, required: Record<string, unknown> = {}) {
   const columns = await tableColumns(env, table)
   if (table === 'products') assertProductStatusInput(body)
-  const payload = buildInsertPayload(body, columns, table === 'products' ? { ...required, is_active: 1 } : required)
+  const built = buildInsertPayload(body, columns, table === 'products' ? { ...required, is_active: 1 } : required)
+  const payload = table === 'products' ? unknownCostWhenAbsent(built, columns) : built
   const keys = Object.keys(payload)
   // sql-bound-params: bounded by construction -- one parameter per COLUMN
   // of a single row, capped by the table's schema, not by any row count.
@@ -437,7 +450,7 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
   // full money preimage guard before recording an override or its baseline.
   if (costOverrideActor && (!moneyPlan || table !== 'products')) invalidMoneyPlan()
   const costBefore = moneyPlan?.before as { cost_price_usd: number | null; cost_price_khr: number | null } | null
-  const manualEntry = costOverrideActor && costBefore ? planManualCostEntry(Number(id), costBefore, body, costOverrideActor) : null
+  const costChange = costOverrideActor && costBefore ? planManualCostChange(Number(id), costBefore, body, costOverrideActor) : null
   const stockGuard = table === 'products' ? productStockGuardStatement([Number(id)], 'active') : null
   const nativeStockGuard = stockGuard ? env.DB.prepare(stockGuard.sql.replace(/@productIds/g, '?')).bind(stockGuard.params.productIds) : null
   let result
@@ -471,21 +484,30 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
       if (/malformed JSON|product_money_state_conflict/i.test(String(error))) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product changed before the group rename. Submit a new edit.')
       throw error
     }
-  } else if (manualEntry && costOverrideActor && costBefore) {
+  } else if (costChange && costOverrideActor && costBefore) {
+    const auditParams = { actorId: costOverrideActor.id, actorName: costOverrideActor.name, productId: Number(id), entityId: String(id),
+      oldValue: JSON.stringify({ cost_price_usd: costBefore.cost_price_usd, cost_price_khr: costBefore.cost_price_khr }) }
+    // A cleared cost has no product_cost_entries row (cost_usd is NOT NULL: the table records costs, not their absence),
+    // so its audit row is written from the product itself.
+    const overrideAudit = costChange.entry
+      ? { sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,old_value,new_value,details)
+            SELECT @actorId,@actorName,'cost_override','product',@entityId,@oldValue,
+              (SELECT json_object('cost_price_usd',cost_price_usd,'cost_price_khr',cost_price_khr) FROM products WHERE id=@productId),
+              json_object('cost_entry_id',id,'baseline_batch_id',baseline_batch_id,
+                'cost_price_usd',cost_usd,'cost_price_khr',cost_khr)
+            FROM product_cost_entries WHERE product_id=@productId ORDER BY id DESC LIMIT 1`, params: auditParams }
+      : { sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,old_value,new_value,details)
+            SELECT @actorId,@actorName,'cost_override','product',@entityId,@oldValue,
+              json_object('cost_price_usd',cost_price_usd,'cost_price_khr',cost_price_khr),
+              json_object('cost_entry_id',NULL,'baseline_batch_id',NULL,'cost_price_usd',cost_price_usd,'cost_price_khr',cost_price_khr)
+            FROM products WHERE id=@productId`, params: auditParams }
     try {
       const results = await getDb(env).batch([
         ...(stockGuard ? [stockGuard] : []),
         { sql: updateSql, params: updateParams },
         { sql: `SELECT CASE WHEN changes()>0 THEN 1 ELSE json('product_money_state_conflict') END` },
-        manualEntry,
-        { sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,old_value,new_value,details)
-            SELECT @actorId,@actorName,'cost_override','product',@entityId,@oldValue,
-              (SELECT json_object('cost_price_usd',cost_price_usd,'cost_price_khr',cost_price_khr) FROM products WHERE id=@productId),
-              json_object('cost_entry_id',id,'baseline_batch_id',baseline_batch_id,
-                'cost_price_usd',cost_usd,'cost_price_khr',cost_khr)
-            FROM product_cost_entries WHERE product_id=@productId ORDER BY id DESC LIMIT 1`,
-          params: { actorId: costOverrideActor.id, actorName: costOverrideActor.name, productId: Number(id), entityId: String(id),
-            oldValue: JSON.stringify({ cost_price_usd: costBefore.cost_price_usd, cost_price_khr: costBefore.cost_price_khr }) } },
+        ...(costChange.entry ? [costChange.entry] : []),
+        overrideAudit,
         catalogCostRecomputeStatement(Number(id)),
       ])
       result = results[stockGuard ? 1 : 0]
