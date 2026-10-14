@@ -36,6 +36,9 @@ assert.throws(()=>normalizeFeeCreateBody({fee_money_version:1,amount_usd:0.0049,
 
 const items=new Map<string,string>()
 const storage={getItem:(key:string)=>items.get(key)??null,setItem:(key:string,value:string)=>{items.set(key,value)},removeItem:(key:string)=>{items.delete(key)},clear:()=>items.clear(),key:(i:number)=>[...items.keys()][i]??null,get length(){return items.size}}
+// Expense requests are saved only for a signed-in account (api/retryRecordScope.ts).
+storage.setItem('businessos_user',JSON.stringify({id:7,organization_id:3}))
+Object.defineProperty(globalThis,'window',{configurable:true,writable:true,value:{sessionStorage:storage,localStorage:storage}})
 // Simulate a valid pre-upgrade pending envelope with a different property order.
 const oldBody=Object.fromEntries(Object.entries(legacy).reverse())
 const oldEnvelope=JSON.stringify({actor_id:'7',client_request_id:'legacy-frozen-0001',body:oldBody})

@@ -283,6 +283,8 @@ globalThis.window = Object.assign(new EventTarget(), { localStorage: createReada
   setItem: (key: string, value: string) => { sessionValues.set(key, value) },
   removeItem: (key: string) => { sessionValues.delete(key) },
 } }) as unknown as Window & typeof globalThis
+// Shift requests are saved only for a signed-in account (api/retryRecordScope.ts).
+window.localStorage.setItem('businessos_user', JSON.stringify({ id: 4, organization_id: 3 }))
 window.addEventListener('sync:error', (event) => warnings.push((event as CustomEvent).detail))
 window.addEventListener('sync:error-resolved', (event) => resolvedWarnings.push((event as CustomEvent).detail))
 const originalServerUrl = getSyncServerUrl()

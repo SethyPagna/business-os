@@ -1,4 +1,4 @@
-import { adoptLegacyRetryRecord, retryRecordKey } from '../api/retryRecordScope.ts'
+import { adoptLegacyRetryRecord, assertRetryRecordAccount, retryRecordKey } from '../api/retryRecordScope.ts'
 
 export type DirectMutationKind = 'sale-status' | 'return-edit' | 'return-history' | 'sale-add-items' | 'sale-amendment'
 export type SaleLineMutationKind = 'sale-add-items' | 'sale-amendment'
@@ -77,7 +77,7 @@ function defaultSessionStore(): SessionStore | null {
 
 // Sale-line actor ids already carry the page origin and server; the other
 // kinds' records are keyed by server and organization (api/retryRecordScope.ts),
-// and one saved before that moves once to the scope it is first read under.
+// and an unscoped one moves once to the scope it is first read under.
 function recordKey(kind: DirectMutationKind, tail: string, storage?: SessionStore | null): string {
   const prefix = `${STORAGE_PREFIX}${kind}_v2:`
   if (isSaleLineKind(kind)) return `${prefix}${tail}`
@@ -220,6 +220,7 @@ function persistPending<TBody extends Record<string, unknown>>(
       if (storage.getItem(key) != null) throw new Error('pending retry was not removed')
       return null
     }
+    if (!isSaleLineStorageKey(key)) assertRetryRecordAccount()
     const serialized = JSON.stringify({ ...pending, needsReconciliation: undefined })
     if (serialized.length > DIRECT_MUTATION_MAX_SERIALIZED_CHARS) {
       throw new DirectMutationPersistenceError('This request was not sent because its retry record is too large for safe browser storage. Reduce the edited return and try again.')

@@ -3,7 +3,7 @@ import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { dispatchResolvedSyncError, type SyncProblemReference } from '../utils/syncProblemLifecycle.ts'
-import { adoptLegacyRetryRecord, retryRecordKey } from './retryRecordScope.ts'
+import { adoptLegacyRetryRecord, assertRetryRecordAccount, retryRecordKey } from './retryRecordScope.ts'
 
 type BranchPayload = Record<string, unknown>
 const BRANCH_MIRROR_WRITE_DELAY_MS = 10_000
@@ -61,6 +61,7 @@ export function saveTransferRun(actorId: unknown, run: PendingTransferRun | null
   const key = transferRunKey(actorId, store)
   if (run && run.actorId !== String(actorId)) throw new Error('The saved transfer belongs to another user.')
   if (!run) { store.removeItem(key); if (store.getItem(key) != null) throw new Error('The saved transfer could not be cleared.'); return }
+  assertRetryRecordAccount()
   const serialized = JSON.stringify(run)
   const existing = loadTransferRun(actorId, store)
   if (existing && existing.requests[0].body.client_request_id !== run.requests[0].body.client_request_id) {

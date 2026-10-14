@@ -4,7 +4,7 @@ import { dispatchResolvedSyncError } from '../utils/syncProblemLifecycle.ts'
 import { directMutationRefusedBeforeWrite } from '../utils/directMutationRefusal.ts'
 import { MoneyPrecisionError, nativeChangeAmounts, type DecimalInput } from '../utils/moneyPrecision.ts'
 import { reportUtcBound } from '../utils/businessTimeBounds.ts'
-import { adoptLegacyRetryRecord, retryRecordKey } from './retryRecordScope.ts'
+import { adoptLegacyRetryRecord, assertRetryRecordAccount, retryRecordKey } from './retryRecordScope.ts'
 
 // Frontend transport for the Fees page (cloudflare/src/routes/fees.ts).
 // No local/offline mirror -- same reasoning as notesTransport.ts: a failed
@@ -308,6 +308,7 @@ export function prepareFeeCreatePayload(
     if (!/^[A-Za-z0-9_-]{8,120}$/.test(requestId)) throw new Error('invalid request id')
     const envelope: PendingFeeCreate = { actor_id: actorId, client_request_id: requestId, body }
     const serialized = JSON.stringify(envelope)
+    assertRetryRecordAccount()
     const key = pendingFeeCreateStorageKey(actorId)
     storage.setItem(key, serialized)
     if (storage.getItem(key) !== serialized) throw new Error('pending request read-back failed')

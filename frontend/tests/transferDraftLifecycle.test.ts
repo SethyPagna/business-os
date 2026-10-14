@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 
 const memory = new Map<string, string>()
 const storage = { getItem: (key: string) => memory.get(key) ?? null, setItem: (key: string, value: string) => { memory.set(key, value) }, removeItem: (key: string) => { memory.delete(key) } }
-Object.assign(globalThis, { localStorage: storage, sessionStorage: storage, window: { dispatchEvent: () => true } })
+Object.assign(globalThis, { localStorage: storage, sessionStorage: storage, window: { dispatchEvent: () => true, addEventListener() {}, removeEventListener() {} } })
 const { STORAGE_KEYS } = await import('../src/constants.ts')
 const draft = await import('../src/utils/minimizedWork.ts')
 const signIn = (id: number) => storage.setItem(STORAGE_KEYS.USER, JSON.stringify({ id, organization_public_id: 'store' }))

@@ -1,39 +1,44 @@
-import { STORAGE_KEYS } from '../constants.ts'
-import { getSyncServerUrl } from './httpState.ts'
+import { actorWriteAccount } from './actorReadScope.ts'
+import { authenticatedOrganizationId, currentWriteAuthority } from './offlineQueueOwnership.ts'
 
 // A retry record (a frozen request and its client_request_id) belongs to the
-// page origin, server and organization it was saved against, the way work
-// drafts are keyed (utils/workDrafts.ts): the same user id on another server or
-// in another organization never loads it, so it is never sent there.
+// page origin, server and organization it was saved against: the same user id on
+// another server or in another organization never loads it, so it is never sent
+// there. Server and organization are an offline sale owner's
+// (captureOfflineSaleOwner), read from the account writes are signed for: the
+// numeric organization id, which every stored shape of one account carries
+// (sign-in, bootstrap, own-profile save), so the scope never changes under it.
+// With no account known (signed out, a session that just expired, or
+// organization fields that disagree) there is no scope: nothing is read, moved
+// or saved until the account is known again.
 
 function pageOrigin(): string {
   try { return window.location?.origin || '' } catch { return '' }
 }
 
-function currentServer(origin: string): string {
-  try { return new URL(getSyncServerUrl() || origin).origin } catch { return '' }
-}
-
-function retryRecordScope(): string {
-  const origin = pageOrigin()
-  let organization = ''
+function retryRecordScope(): string | null {
   try {
-    const user = JSON.parse(window.sessionStorage.getItem(STORAGE_KEYS.USER) || window.localStorage.getItem(STORAGE_KEYS.USER) || '{}') as Record<string, unknown> | null
-    organization = String(user?.organization_public_id || user?.organizationId || user?.organization_id || '')
-  } catch { /* no stored account */ }
-  return encodeURIComponent(JSON.stringify([origin, currentServer(origin), organization]))
+    const account = actorWriteAccount()
+    if (!account) return null
+    const organization = authenticatedOrganizationId(account)
+    return encodeURIComponent(JSON.stringify([pageOrigin(), currentWriteAuthority(), organization == null ? '' : String(organization)]))
+  } catch { return null }
 }
 
+/** Under no account the key names a scope nothing is ever saved in. */
 export function retryRecordKey(prefix: string, ...parts: unknown[]): string {
-  return `${prefix}${retryRecordScope()}:${parts.map(String).join(':')}`
+  return `${prefix}${retryRecordScope() ?? 'no-account'}:${parts.map(String).join(':')}`
 }
 
-// A record saved before keys carried the scope names no server. Retry records
-// live in this tab's sessionStorage, so such a record was saved by the build
-// this tab ran before it reloaded, against the server it was started with. That
-// server is noted once per tab at bootstrap (web-api.ts) in the tab's own
-// sessionStorage, under a pending-record prefix so every reset keeps it; an old
-// record loads only there.
+export function assertRetryRecordAccount(): void {
+  if (retryRecordScope() == null) throw new Error('Sign in again before sending this request.')
+}
+
+// A record whose key names no scope names no server either. Retry records live
+// in this tab's sessionStorage, so it was saved in this tab, against the server
+// the tab was started with. That server is noted once per tab at bootstrap
+// (web-api.ts) in the tab's own sessionStorage, under a pending-record prefix so
+// every reset keeps it; an unscoped record loads only there.
 const LEGACY_SERVER = 'businessos_pending_retry_server_v1'
 type TabStore = Pick<Storage, 'getItem' | 'setItem'>
 
@@ -44,21 +49,21 @@ function tabStore(): TabStore | null {
 
 export function noteRetryRecordServer(store: TabStore | null | undefined = tabStore()): void {
   try {
-    if (store && store.getItem(LEGACY_SERVER) == null) store.setItem(LEGACY_SERVER, currentServer(pageOrigin()))
+    if (store && store.getItem(LEGACY_SERVER) == null) store.setItem(LEGACY_SERVER, currentWriteAuthority())
   } catch { /* no tab storage */ }
 }
 
 export function legacyRetryRecordsReadable(store: TabStore | null | undefined = tabStore()): boolean {
   noteRetryRecordServer(store)
-  try { return !!store && store.getItem(LEGACY_SERVER) === currentServer(pageOrigin()) } catch { return false }
+  try { return !!store && store.getItem(LEGACY_SERVER) === currentWriteAuthority() } catch { return false }
 }
 
-/** On the tab's own server, a record saved before keys carried the scope moves,
- *  byte for byte, to the scope it is first read under; from then on only that
- *  scope reads it. On any other server it stays where it is, unread. */
+/** On the tab's own server, an unscoped record moves, byte for byte, to the scope
+ *  it is first read under; from then on only that scope reads it. On any other
+ *  server it stays where it is, unread. */
 export function adoptLegacyRetryRecord(storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null | undefined, legacyKey: string, scopedKey: string): void {
   try {
-    if (!storage || storage.getItem(scopedKey) != null || !legacyRetryRecordsReadable()) return
+    if (!storage || retryRecordScope() == null || storage.getItem(scopedKey) != null || !legacyRetryRecordsReadable()) return
     const legacy = storage.getItem(legacyKey)
     if (legacy == null) return
     storage.setItem(scopedKey, legacy)

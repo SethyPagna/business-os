@@ -130,4 +130,52 @@ await check('a same-user refresh and session expiry keep the till as it is', asy
   }
 })
 
+await check('putting it back never loses or doubles it, and waits for a locked session', async () => {
+  const keptFor = (organization: number) => `businessos_pos_checkout_unresolved_v1:${encodeURIComponent(JSON.stringify([X, organization, 7]))}`
+  const tillOf = (store: typeof local) => JSON.parse(store.getItem('businessos_pos_orders_7') || '[]') as Order[]
+  // A's sign-in is confirmed (Login reconciles the read session) before the till opens.
+  const signedInAgain = () => { signIn(A); assert.equal(actor.completeActorSessionReconciliation(actor.actorSessionReconciliationMarker()), true) }
+  const signedOutWithSentOrder = async () => { local.clear(); session.clear(); signIn(A); seedTill(); await resets.signOut(); signedInAgain() }
+
+  await signedOutWithSentOrder()
+  restoreUnresolvedPosCheckouts(otherOrgA, '7')
+  assert.equal(local.getItem('businessos_pos_orders_7'), null, 'a till open for another organization than the stored account restores nothing')
+
+  const write = local.setItem
+  local.setItem = (key: string, value: string) => { if (key === 'businessos_pos_orders_7') throw new Error('QuotaExceededError'); write(key, value) }
+  try { restoreUnresolvedPosCheckouts(A, '7') } finally { local.setItem = write }
+  assert.equal(kept().length, 1, 'when the till cannot keep the orders, the kept copy stays')
+  restoreUnresolvedPosCheckouts(A, '7')
+  assert.deepEqual(pending(tillOf(local)).map((order) => order.id), ['ord-sent'], 'and the next attempt puts it back')
+  assert.deepEqual(kept(), [])
+
+  await signedOutWithSentOrder()
+  local.setItem('businessos_pos_orders_7', JSON.stringify([{ ...sentOrder, label: 'Order 1' }]))
+  restoreUnresolvedPosCheckouts(A, '7')
+  assert.deepEqual(tillOf(local).map((order) => order.id), ['ord-sent'], 'a checkout already in the till is not added again')
+  assert.deepEqual(kept(), [])
+
+  local.clear(); session.clear(); signIn(A)
+  session.setItem('businessos_pos_orders_7', JSON.stringify([cartOrder, sentOrder]))
+  await resets.signOut(); signedInAgain()
+  assert.deepEqual(pending(tillOrders(A)).map((order) => order.id), ['ord-sent'], 'a till kept only in sessionStorage keeps it too')
+
+  local.clear(); session.clear(); signedInAgain()
+  const foreign = { ...sentOrder, id: 'ord-foreign', checkoutRequestId: 'req-foreign', checkoutPayload: { client_request_id: 'req-foreign', offline_owner: { ...owner, actor_id: 8 } } }
+  local.setItem(keptFor(3), JSON.stringify([foreign]))
+  restoreUnresolvedPosCheckouts(A, '7')
+  assert.equal(local.getItem('businessos_pos_orders_7'), null, 'an order sent by another account is never put in this till, whatever key holds it')
+
+  await signedOutWithSentOrder()
+  local.setItem('businessos_read_session', 'another-tab-signed-in')
+  assert.equal(actor.isActorSessionQuarantined(), true)
+  restoreUnresolvedPosCheckouts(A, '7')
+  assert.equal(local.getItem('businessos_pos_orders_7'), null, 'nothing is put back while the session is locked for a check')
+  assert.equal(kept().length, 1, 'and the kept copy waits')
+  assert.equal(actor.completeActorSessionReconciliation('another-tab-signed-in'), true)
+  restoreUnresolvedPosCheckouts(A, '7')
+  assert.deepEqual(pending(tillOf(local)).map((order) => order.id), ['ord-sent'], 'until the check confirms the account')
+  local.removeItem('businessos_read_session'); actor.completeActorSessionReconciliation(null)
+})
+
 if (failed) process.exit(1)

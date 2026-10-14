@@ -28,6 +28,8 @@ function load(name) {
     // transfer-capability test, but the module graph still imports it.
     if (id === './batchesTransport.ts') return { receiveBatchWireBody: payload => payload }
     if (id === './query.ts') return {}
+    // Saved runs are keyed by server and organization; this fixture has one of each.
+    if (id === './retryRecordScope.ts') return { retryRecordKey: (prefix, ...parts) => `${prefix}fixture-scope:${parts.join(':')}`, adoptLegacyRetryRecord: () => {}, assertRetryRecordAccount: () => {} }
     throw new Error(`Unexpected dependency ${id}`)
   },module)
   return module.exports

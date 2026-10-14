@@ -1,7 +1,7 @@
 import { apiFetch, cacheInvalidate, route } from './http.ts'
 import { parseServerTimestampMs } from '../utils/formatters.ts'
 import { dispatchResolvedSyncError, type SyncProblemReference } from '../utils/syncProblemLifecycle.ts'
-import { adoptLegacyRetryRecord, retryRecordKey } from './retryRecordScope.ts'
+import { adoptLegacyRetryRecord, assertRetryRecordAccount, retryRecordKey } from './retryRecordScope.ts'
 
 const unresolvedShiftWrites = new Map<string, SyncProblemReference>()
 async function shiftWrite<T>(channel: string, send: () => Promise<T>, local: null, isWrite: true, actorId?: number | string): Promise<T | null> {
@@ -94,6 +94,7 @@ export function pendingShiftMutation(actorId: number | string | undefined, id: n
  * draft cannot replace a request whose acknowledgement has been lost. */
 async function shiftMutationFetch(method: string, path: string, body: ShiftMutationBody, actorId?: number | string) {
   if (!actorId) throw new Error('The signed-in shift operator is required')
+  assertRetryRecordAccount()
   const key = shiftRequestKey(actorId, method, path)
   const prior = readShiftRequest(key)
   const frozen = prior ? JSON.parse(prior) as ShiftMutationBody : freezeShiftMutation(body)
