@@ -106,8 +106,9 @@ function itemFields(item: DataRow): DataRow {
     manual_discount_value: value(item, 'manual_discount_value', 0),
     manual_discount_usd: value(item, 'manual_discount_usd', 0),
     manual_discount_khr: value(item, 'manual_discount_khr', 0),
-    cost_price_usd: value(item, 'cost_price_usd', 0),
-    cost_price_khr: value(item, 'cost_price_khr', 0),
+    // NULL (cost not recorded) exports as blank, deliberately not 0: a re-import must not turn unknown into a recorded $0.
+    cost_price_usd: value(item, 'cost_price_usd', ''),
+    cost_price_khr: value(item, 'cost_price_khr', ''),
     batch_label: value(item, 'batch_label'),
     returned_quantity: value(item, 'returned_quantity'),
   }

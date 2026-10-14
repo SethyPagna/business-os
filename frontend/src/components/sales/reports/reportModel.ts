@@ -8,6 +8,7 @@
 
 import { actualUsdValue, financialCalculationValue } from '../../../utils/financialPrecision.ts'
 import { reportUtcBound } from '../../../utils/businessTimeBounds.ts'
+import { partialCostNote, unknownCostLabel } from '../../../utils/costDisplay.ts'
 
 export type ReportArea = 'sales' | 'returns' | 'fees'
 export type ReportViewId =
@@ -388,6 +389,73 @@ export function formatSignedPct(p: number | null | undefined): string {
   return `${p > 0 ? '+' : '−'}${Math.abs(p).toFixed(1)}%`
 }
 
+// ---- unknown cost ----------------------------------------------------------
+// A missing cost snapshot is UNKNOWN, never $0.00. The wire sums the known
+// lines and counts the rest; these helpers turn that pair into one state so a
+// cell, a total, a CSV and a summary line all read the same way. A cost key that
+// is absent means the caller may not see cost at all (hidden), which is a
+// different thing from unknown and yields no state.
+
+export type CostCoverage = 'known' | 'partial' | 'unknown'
+export interface CostState {
+  coverage: CostCoverage
+  /** Sold lines (or rows) whose cost is not recorded. */
+  count: number
+}
+interface CostSource {
+  cost_usd?: unknown
+  cost_missing_snapshot_lines?: unknown
+  cost_known_lines?: unknown
+}
+
+export function costStateOf(raw: CostSource | null | undefined): CostState | null {
+  if (!raw || raw.cost_usd === undefined) return null
+  const missing = Math.max(0, Math.round(num(raw.cost_missing_snapshot_lines)))
+  if (raw.cost_usd === null) return { coverage: 'unknown', count: missing }
+  if (missing <= 0) return { coverage: 'known', count: 0 }
+  const known = typeof raw.cost_known_lines === 'number' ? raw.cost_known_lines : num(raw.cost_usd) === 0 ? 0 : 1
+  return { coverage: known <= 0 ? 'unknown' : 'partial', count: missing }
+}
+
+export function combineCostStates(states: ReadonlyArray<CostState | null | undefined>): CostState | null {
+  const real = states.filter((s): s is CostState => !!s)
+  if (!real.length || real.length !== states.length) return null
+  const count = real.reduce((n, s) => n + (s.coverage === 'unknown' ? Math.max(1, s.count) : s.count), 0)
+  if (real.every((s) => s.coverage === 'unknown')) return { coverage: 'unknown', count }
+  return real.some((s) => s.coverage !== 'known') ? { coverage: 'partial', count } : { coverage: 'known', count: 0 }
+}
+
+const costT = (tr: (key: string, fallback: string) => string) => (key: string) => tr(key, '') || undefined
+
+/** A cost figure as one string: the label when unknown, the amount with the partial note when some lines are unknown. */
+export function costText(state: CostState | null | undefined, amount: string, tr: (key: string, fallback: string) => string): string {
+  if (!state || state.coverage === 'known') return amount
+  if (state.coverage === 'unknown') return unknownCostLabel(costT(tr))
+  return `${amount} · ${partialCostNote(state.count, costT(tr))}`
+}
+
+/** The same state as an Overview/fold note, or undefined when every line is known. */
+export function costStateNote(state: CostState | null | undefined): StatementNote | undefined {
+  if (!state || state.coverage === 'known') return undefined
+  if (state.coverage === 'partial') return { key: 'cost_partial_count', fallback: 'Partial — {count} unknown cost', count: state.count }
+  return state.count > 0 ? { key: 'cost_all_unknown', fallback: 'Unknown — no cost recorded on {count}', count: state.count } : undefined
+}
+
+/** A courier row's cost state. Nobody recording a cost is unknown, not a $0.00 cost; an absent key is the permission boundary and has no state. */
+export function courierCostState(raw: { actual_cost_usd?: unknown; actual_cost_count?: unknown; deliveries?: unknown }): CostState | null {
+  if (raw.actual_cost_usd === undefined) return null
+  const deliveries = Math.max(0, Math.round(num(raw.deliveries)))
+  const costed = typeof raw.actual_cost_count === 'number' ? raw.actual_cost_count : null
+  if (raw.actual_cost_usd === null || (costed === 0 && deliveries > 0)) return { coverage: 'unknown', count: deliveries }
+  if (costed !== null && costed < deliveries) return { coverage: 'partial', count: deliveries - costed }
+  return { coverage: 'known', count: 0 }
+}
+
+/** The "Unknown-cost lines: N" line every export with a cost figure carries. */
+export function unknownCostMetadata(state: CostState | null | undefined, tr: (key: string, fallback: string) => string): string[] {
+  return state && state.coverage !== 'known' ? [`${tr('rpt_unknown_cost_lines', 'Unknown-cost lines')}: ${state.count}`] : []
+}
+
 // ---- canonical totals (as received: cost/profit keys only for admins) ----
 
 export interface ReportTotals {
@@ -448,6 +516,9 @@ export interface ReportTotals {
   profit_usd?: number
   margin_pct?: number | null
   cost_missing_snapshot_lines?: number
+  cost_known_lines?: number
+  /** Present exactly when the server sent cost; absent means hidden, never unknown. */
+  cost_state?: CostState
   pending_cost_usd?: number
   pending_profit_usd?: number
   // ---- stock removed entirely, priced at cost (owner, Sep 14 2026) ---------
@@ -502,9 +573,11 @@ export function normalizeTotals(raw: unknown): ReportTotals | null {
   // the Sep 6 kernel does not send net_sales_usd, and a 0 there would be read
   // as "this window sold nothing net" rather than "the server did not say".
   if (typeof r.net_sales_usd === 'number') out.net_sales_usd = round4(num(r.net_sales_usd))
-  if (typeof r.cost_usd === 'number') {
+  if (r.cost_usd === null || typeof r.cost_usd === 'number') {
     out.cost_usd = num(r.cost_usd)
     out.cost_missing_snapshot_lines = num(r.cost_missing_snapshot_lines)
+    if (typeof r.cost_known_lines === 'number') out.cost_known_lines = num(r.cost_known_lines)
+    out.cost_state = costStateOf(r) ?? undefined
     // The unpaid cohort's COGS and profit ride the same gate: gateTotals
     // strips them for a non-admin caller alongside cost_usd / profit_usd, so
     // their presence is the same "the server sent it" signal.
@@ -512,9 +585,9 @@ export function normalizeTotals(raw: unknown): ReportTotals | null {
     // Profit has its own presence: a response carrying cost but no profit must
     // not print a profit of $0.00 (it used to, because both keys were filled
     // whenever either arrived).
-    if (typeof r.profit_usd === 'number') {
+    if (r.profit_usd === null || typeof r.profit_usd === 'number') {
       out.profit_usd = num(r.profit_usd)
-      out.margin_pct = typeof r.margin_pct === 'number' ? r.margin_pct : pct(out.profit_usd, out.revenue_usd)
+      out.margin_pct = out.cost_state?.coverage === 'unknown' || r.profit_usd === null ? null : typeof r.margin_pct === 'number' ? r.margin_pct : pct(out.profit_usd, out.revenue_usd)
       out.pending_profit_usd = num(r.pending_profit_usd)
     }
   }
@@ -577,6 +650,7 @@ export function sumTotals(rows: ReportTotals[]): ReportTotals {
   let cost = 0
   let profit = 0
   let missing = 0
+  let knownLines = 0
   let pendingCost = 0
   let pendingProfit = 0
   // Same all-or-nothing rule the profit keys use: one row that never carried
@@ -596,6 +670,7 @@ export function sumTotals(rows: ReportTotals[]): ReportTotals {
       cost += num(r.cost_usd)
       profit += num(r.profit_usd)
       missing += num(r.cost_missing_snapshot_lines)
+      knownLines += num(r.cost_known_lines)
       pendingCost += num(r.pending_cost_usd)
       pendingProfit += num(r.pending_profit_usd)
     }
@@ -615,8 +690,10 @@ export function sumTotals(rows: ReportTotals[]): ReportTotals {
     if (rows.some((r) => r.profit_excludes_delivery)) out.profit_excludes_delivery = true
     out.cost_usd = round4(cost)
     out.profit_usd = round4(profit)
-    out.margin_pct = pct(out.profit_usd, out.revenue_usd)
     out.cost_missing_snapshot_lines = missing
+    if (rows.every((r) => typeof r.cost_known_lines === 'number')) out.cost_known_lines = knownLines
+    out.cost_state = combineCostStates(rows.map((r) => r.cost_state)) ?? undefined
+    out.margin_pct = out.cost_state?.coverage === 'unknown' ? null : pct(out.profit_usd, out.revenue_usd)
     out.pending_cost_usd = round4(pendingCost)
     out.pending_profit_usd = round4(pendingProfit)
   }
@@ -682,6 +759,8 @@ export interface StatementLine {
   hintKey?: string
   hintFallback?: string
   note?: StatementNote
+  /** Every contributing cost is unknown, so the amount is not a figure at all: render the unknown label, export a blank. */
+  unknownCost?: true
   /**
    * The figure `profitMode` selects as the bottom line ('gross' -> gross
    * profit, 'net' -> the net result). The mode no longer decides whether the
@@ -864,7 +943,7 @@ export function buildIncomeStatement(input: StatementInput): StatementLine[] {
   if (hasProfit(sales)) {
     lines.push(
       line('revenue_carried', 'rpt_revenue_carried', 'Revenue (from above)', 'total', 'profit', ['rpt_hint_revenue_carried', 'The revenue line repeated, so the first input of the profit calculation is on screen beside the figures taken off it.']),
-      line('cogs', 'cogs', 'Cost of goods sold', 'sub', 'profit', ['rpt_hint_cogs', 'Cost snapshots of the items sold, less the cost of goods a return put back on the sellable shelf. Lines without a snapshot count as 0 and are flagged.'], cogsNote(sales)),
+      line('cogs', 'cogs', 'Cost of goods sold', 'sub', 'profit', ['rpt_hint_cogs', 'Cost snapshots of the items sold, less the cost of goods a return put back on the sellable shelf. Lines without a snapshot are left out and counted.']),
     )
     // L4: a cost viewer's profit is goods only, so the delivery pair is not a
     // term of it (and the courier cost was never sent).
@@ -917,22 +996,40 @@ export function buildIncomeStatement(input: StatementInput): StatementLine[] {
   lines.push(...deliveryReconciliationLines(sales, line))
   lines.push(...pendingLines(sales, line))
   lines.push(...removalLossLines(sales, line))
-  return lines
+  return markCostLines(lines, sales, prevSales)
+}
+
+const COST_LINE_KEYS: ReadonlySet<string> = new Set(['cogs', 'gross_profit', 'net_result', 'profit_after_losses'])
+const COURIER_COST_LINE_KEYS: ReadonlySet<string> = new Set(['delivery_paid', 'delivery_actual_cost', 'delivery_net'])
+
+/** Cost, and every profit built on it, inherits the unknown state of its cost input; a Rounding term that only exists to foot a known chain goes. */
+function markCostLines(lines: StatementLine[], sales: ReportTotals, prevSales: ReportTotals | null | undefined): StatementLine[] {
+  const cur = sales.cost_state
+  const prev = prevSales?.cost_state
+  const courier = sales.courier_cost_hidden ? null : courierCostState({ actual_cost_usd: sales.delivery_actual_cost_usd, actual_cost_count: sales.delivery_actual_cost_count, deliveries: sales.delivery_sale_count })
+  const courierUnknown = courier?.coverage === 'unknown'
+  if ((!cur || cur.coverage === 'known') && (!prev || prev.coverage !== 'unknown') && !courierUnknown) return lines
+  const out: StatementLine[] = []
+  for (const l of lines) {
+    if (l.key === 'profit_rounding' && cur?.coverage === 'unknown') continue
+    if (courierUnknown && COURIER_COST_LINE_KEYS.has(l.key)) { out.push({ ...l, unknownCost: true as const, tone: undefined }); continue }
+    if (!COST_LINE_KEYS.has(l.key)) { out.push(l); continue }
+    out.push({
+      ...l,
+      prevUsd: prev?.coverage === 'unknown' ? null : l.prevUsd,
+      note: costStateNote(cur) ?? l.note,
+      ...(cur?.coverage === 'unknown' ? { unknownCost: true as const, tone: undefined } : {}),
+    })
+  }
+  return out
+}
+
+/** A statement amount as text: the unknown label when the line has no figure. */
+export function statementAmount(line: StatementLine, fmt: (usd: number, khr?: number) => string, tr: (key: string, fallback: string) => string): string {
+  return line.unknownCost ? unknownCostLabel(costT(tr)) : fmt(line.usd, line.khr)
 }
 
 type LineFactory = (key: string, labelKey: string, fallback: string, kind: StatementKind, group: StatementGroup, hint?: [string, string], note?: StatementNote) => StatementLine
-
-/**
- * "Not available" beats a silent $0.00. A period whose sold lines carry no
- * cost snapshot reports COGS of exactly 0, which reads as free goods; the
- * count is already on the wire for precisely this.
- */
-function cogsNote(t: ReportTotals): StatementNote | undefined {
-  const missing = num(t.cost_missing_snapshot_lines)
-  if (missing <= 0) return undefined
-  if (num(t.cost_usd) === 0) return { key: 'rpt_note_cost_unavailable', fallback: 'not available — no cost recorded on {count} sold lines', count: missing }
-  return { key: 'rpt_note_cost_partial', fallback: '{count} sold lines have no cost recorded', count: missing }
-}
 
 /**
  * The courier cost is NULL, not 0, when nobody recorded it -- the kernel says

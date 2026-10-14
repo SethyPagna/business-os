@@ -92,7 +92,7 @@ check('report rows, row details, the hub and the kit fold never ellipsise a name
   }
   // ...and the replacement is the shared scroller, used the same way the
   // product detail surfaces already use it (one implementation, not two).
-  assert.match(table, /<span className="detail-scroll-text">\{formatCell\(c, row, fmtMoney\)\}<\/span>/, 'text cells scroll their full value')
+  assert.match(table, /<span className="detail-scroll-text">\{formatCell\(c, row, fmtMoney, labels\.t\)\}<\/span>/, 'text cells scroll their full value')
   assert.match(sheet, /'detail-scroll-text font-medium'/, 'a card title (the record name) scrolls')
   assert.match(sheet, /\['detail-scroll-text', cellClass\]/, 'a ledger label scrolls')
   // The fold header takes the same scroller the shared Modal's header takes

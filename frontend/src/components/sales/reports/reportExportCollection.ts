@@ -9,6 +9,8 @@ export function record(raw: unknown): Record<string, unknown> {
   return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : invalid()
 }
 export function finite(raw: unknown): number { return typeof raw === 'number' && Number.isFinite(raw) ? raw : invalid() }
+/** A cost that may legitimately be unknown: null passes through, anything else must be a finite number. */
+export function nullableFinite(raw: unknown): number | null { return raw === null ? null : finite(raw) }
 export function integer(raw: unknown, minimum = 0): number { const n = finite(raw); return Number.isSafeInteger(n) && n >= minimum ? n : invalid() }
 export function timestamp(raw: unknown): number {
   if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}[T ]([01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-]([01]\d|2[0-3]):?[0-5]\d)?$/i.test(raw)) return invalid()

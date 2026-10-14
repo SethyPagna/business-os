@@ -160,10 +160,10 @@ const between = (source: string, start: string, end: string) => {
 type Column = { key: string; kind?: string; value: (row: unknown) => unknown; khr?: (row: unknown) => number }
 type Fmt = (usd: number, khr?: number) => string
 const tableSource = readReport('ReportTable.tsx')
-const table = new Function('num', 'fmtInt', 'fmtQty', 'fmtPct', 'fmtDateOnly', 'fmtDateTime24',
+const table = new Function('num', 'fmtInt', 'fmtQty', 'fmtPct', 'fmtDateOnly', 'fmtDateTime24', 'renderCostCell',
   `${between(tableSource, 'export function formatCell', 'function isNumericKind')}
    ${between(tableSource, 'export function csvColumnsFor', 'export default function ReportTable')}
-   return { formatCell, csvColumnsFor }`)(num, String, String, String, String, String) as {
+   return { formatCell, csvColumnsFor }`)(num, String, String, String, String, String, () => null) as {
   formatCell: (column: Column, row: unknown, fmtMoney: Fmt) => unknown
   csvColumnsFor: (columns: Column[], fmtMoney: Fmt) => Array<{ header: string; value: (row: unknown) => unknown }>
 }

@@ -17,9 +17,10 @@ import ColumnChooser from '../../shared/ColumnChooser.tsx'
 import { useColumnPreferences } from '../../shared/useColumnPreferences.ts'
 import type { TableColumnDef } from '../../shared/columnPreferences.ts'
 import { DenseTable, EmptyState, Skeleton } from '../../shared/kit'
+import CostValue from '../../shared/CostValue.tsx'
 import { fmtDateOnly, fmtDateTime24 } from '../../../utils/formatters.ts'
 import ReceiptSheet, { type ReceiptBlock, type ReceiptLine, type ReceiptLineKind } from './ReceiptSheet.tsx'
-import { fmtInt, fmtPct, fmtQty, num, sortRows, toggleSort, type CsvColumn, type ReportStyle, type SortState } from './reportModel.ts'
+import { fmtInt, fmtPct, fmtQty, num, sortRows, toggleSort, type CostState, type CsvColumn, type ReportStyle, type SortState } from './reportModel.ts'
 
 export type ReportCellKind = 'text' | 'money' | 'int' | 'qty' | 'pct' | 'date' | 'datetime'
 
@@ -36,6 +37,13 @@ export interface ReportColumn<Row> {
   value: (row: Row) => string | number | null | undefined
   /** Second-currency raw amount for dual-currency money (fees, returns). */
   khr?: (row: Row) => number
+  /**
+   * Money that rests on cost snapshots. Unknown shows the unknown label and
+   * sorts last, partial adds the note, and the CSV cell is blank for unknown
+   * and a 4-place number otherwise. Null (cost hidden for this caller) renders
+   * as an ordinary money column.
+   */
+  cost?: (row: Row) => CostState | null
   /** Display override (badges, links). CSV still uses `value`. */
   render?: (row: Row) => ReactNode
   /** Bold the cell (the basis column). */
@@ -50,6 +58,8 @@ export interface ReportTableLabels {
   total: string
   empty: string
   emptyText?: string
+  /** Translator for the cost labels (unknown, partial note); absent = English fallbacks. */
+  t?: (key: string) => string | undefined
 }
 
 export interface ReportTableProps<Row> {
@@ -80,12 +90,19 @@ export interface ReportTableProps<Row> {
   className?: string
 }
 
-export function formatCell<Row>(column: ReportColumn<Row>, row: Row, fmtMoney: (usd: number, khr?: number) => string): ReactNode {
+function renderCostCell(state: CostState, amount: string, t: ((key: string) => string | undefined) | undefined): ReactNode {
+  return <CostValue value={state.coverage === 'unknown' ? null : 0} fmt={() => amount} t={t ?? (() => undefined)} unknownCount={state.count} />
+}
+
+export function formatCell<Row>(column: ReportColumn<Row>, row: Row, fmtMoney: (usd: number, khr?: number) => string, t?: (key: string) => string | undefined): ReactNode {
   if (column.render) return column.render(row)
   const raw = column.value(row)
   switch (column.kind) {
-    case 'money':
+    case 'money': {
+      const state = column.cost ? column.cost(row) : null
+      if (state && state.coverage !== 'known') return renderCostCell(state, fmtMoney(num(raw)), t)
       return fmtMoney(num(raw), column.khr ? column.khr(row) : undefined)
+    }
     case 'int':
       return fmtInt(num(raw))
     case 'qty':
@@ -136,6 +153,8 @@ export function csvColumnsFor<Row>(columns: Array<ReportColumn<Row>>, fmtMoney: 
     value: (row: Row) => {
       const raw = c.value(row)
       if (c.kind === 'money') {
+        const state = c.cost ? c.cost(row) : null
+        if (state) return state.coverage === 'unknown' ? '' : num(raw).toFixed(4)
         const khr = c.khr ? c.khr(row) : 0
         return khr ? fmtMoney(num(raw), khr) : num(raw)
       }
@@ -174,7 +193,8 @@ export default function ReportTable<Row>({
     if (!sort) return rows
     const column = columns.find((c) => c.key === sort.key)
     if (!column) return rows
-    return sortRows(rows, column.value, sort.dir)
+    const sortValue = column.cost ? (row: Row) => (column.cost?.(row)?.coverage === 'unknown' ? null : column.value(row)) : column.value
+    return sortRows(rows, sortValue, sort.dir)
   }, [rows, columns, sort])
 
   if (loading && rows.length === 0) {
@@ -192,12 +212,12 @@ export default function ReportTable<Row>({
       const lines: ReceiptLine[] = lineColumns.map((c) => ({
         key: c.key,
         label: c.label,
-        value: formatCell(c, row, fmtMoney),
+        value: formatCell(c, row, fmtMoney, labels.t),
         kind: receiptLineKind(c),
       }))
       return {
         key,
-        title: formatCell(primary, row, fmtMoney),
+        title: formatCell(primary, row, fmtMoney, labels.t),
         lines,
         body: cardBody ? cardBody(row) : undefined,
         onClick: onRowClick ? (el) => onRowClick(row, el) : undefined,
@@ -215,7 +235,7 @@ export default function ReportTable<Row>({
         key: '__totals',
         summary: true,
         title: labels.total,
-        lines: lineColumns.filter((c) => isNumericKind(c.kind)).map((c) => ({ key: c.key, label: c.label, value: formatCell(c, totalsRow, fmtMoney), kind: receiptLineKind(c) })),
+        lines: lineColumns.filter((c) => isNumericKind(c.kind)).map((c) => ({ key: c.key, label: c.label, value: formatCell(c, totalsRow, fmtMoney, labels.t), kind: receiptLineKind(c) })),
         body: cardBody ? cardBody(totalsRow) : undefined,
       })
     }
@@ -289,7 +309,7 @@ export default function ReportTable<Row>({
                     // whole name on one line and scrolls it sideways, so
                     // nothing is hidden and nothing has to be hovered.
                     <td key={c.key} className={[numeric ? 'text-right whitespace-nowrap' : 'max-w-[200px]', c.emphasis ? 'font-medium' : '', !c.emphasis && isCountKind(c.kind) ? 'text-[var(--ui-ink-2)]' : ''].join(' ').trim()}>
-                      {numeric ? formatCell(c, row, fmtMoney) : <span className="detail-scroll-text">{formatCell(c, row, fmtMoney)}</span>}
+                      {numeric ? formatCell(c, row, fmtMoney, labels.t) : <span className="detail-scroll-text">{formatCell(c, row, fmtMoney, labels.t)}</span>}
                     </td>
                   )
                 })}
@@ -302,7 +322,7 @@ export default function ReportTable<Row>({
             <tr className="h-[var(--ui-row-h)] bg-[var(--ui-surface-2)] font-semibold">
               {visibleColumns.map((c, i) => (
                 <td key={c.key} className={['px-[var(--ui-cell-px,12px)] border-t border-[var(--ui-line-2)]', isNumericKind(c.kind) ? 'text-right whitespace-nowrap' : ''].join(' ').trim()}>
-                  {i === 0 ? labels.total : isNumericKind(c.kind) ? formatCell(c, totalsRow, fmtMoney) : ''}
+                  {i === 0 ? labels.total : isNumericKind(c.kind) ? formatCell(c, totalsRow, fmtMoney, labels.t) : ''}
                 </td>
               ))}
             </tr>

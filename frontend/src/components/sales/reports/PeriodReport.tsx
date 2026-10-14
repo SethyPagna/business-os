@@ -18,6 +18,7 @@ import {
   BASIS_LABELS,
   basisValue,
   buildIncomeStatement,
+  costText,
   countLabel,
   fmtInt,
   fmtPct,
@@ -37,8 +38,10 @@ import {
   STATEMENT_GROUPS,
   isTheoreticalGroup,
   statementGroupLabel,
+  statementAmount,
   statementNoteText,
   sumTotals,
+  unknownCostMetadata,
   type ReportGranularity,
   type ReportTotals,
   type SortState,
@@ -102,9 +105,9 @@ export default function PeriodReport(p: ReportViewProps) {
       { key: 'pending_revenue_usd', label: tr('rpt_pending_credit', 'Not Paid'), kind: 'money', value: (r) => r.pending_revenue_usd, defaultVisible: false },
       { key: 'collected_total_usd', label: tr('collected_total', 'Collected total'), kind: 'money', value: (r) => r.collected_total_usd, defaultVisible: options.basis === 'collected', emphasis: options.basis === 'collected' },
       { key: 'avg_order_usd', label: tr('avg_order', 'Avg order'), kind: 'money', value: (r) => r.avg_order_usd, defaultVisible: false },
-      showProfit ? { key: 'cost_usd', label: tr('cost', 'Cost'), kind: 'money', value: (r) => r.cost_usd ?? null, defaultVisible: false } : null,
-      showProfit ? { key: 'profit_usd', label: profitLabel(totals, tr), kind: 'money', value: (r) => r.profit_usd ?? null } : null,
-      showProfit ? { key: 'margin_pct', label: tr('rpt_margin', 'Margin'), kind: 'pct', value: (r) => pct(num(r.profit_usd), basisValue(r, options.basis)) } : null,
+      showProfit ? { key: 'cost_usd', label: tr('cost', 'Cost'), kind: 'money', value: (r) => r.cost_usd ?? null, defaultVisible: false, cost: (r) => r.cost_state ?? null } : null,
+      showProfit ? { key: 'profit_usd', label: profitLabel(totals, tr), kind: 'money', value: (r) => r.profit_usd ?? null, cost: (r) => r.cost_state ?? null } : null,
+      showProfit ? { key: 'margin_pct', label: tr('rpt_margin', 'Margin'), kind: 'pct', value: (r) => (r.cost_state?.coverage === 'unknown' ? null : pct(num(r.profit_usd), basisValue(r, options.basis))) } : null,
       // Stock removed entirely, at cost, per period -- the same three figures
       // the row's own fold and the Overview statement show, as columns so the
       // periods can be compared side by side. Hidden by default (the column
@@ -114,7 +117,7 @@ export default function PeriodReport(p: ReportViewProps) {
       showLosses ? { key: 'revenue_after_losses_usd', label: tr('rpt_revenue_after_losses', 'Revenue incl. losses'), kind: 'money', value: (r) => r.revenue_after_losses_usd ?? null, defaultVisible: false } : null,
       // Only when profit itself survived: a profit-including-losses built on an
       // absent profit would be the loss printed as a business result.
-      showLosses && showProfit ? { key: 'profit_after_losses_usd', label: tr('rpt_profit_after_losses', 'Profit incl. losses'), kind: 'money', value: (r) => r.profit_after_losses_usd ?? null, defaultVisible: false } : null,
+      showLosses && showProfit ? { key: 'profit_after_losses_usd', label: tr('rpt_profit_after_losses', 'Profit incl. losses'), kind: 'money', value: (r) => r.profit_after_losses_usd ?? null, defaultVisible: false, cost: (r) => r.cost_state ?? null } : null,
     ]
     return list.filter((c): c is ReportColumn<PeriodRow> => !!c)
   }, [tr, g, options.basis, showProfit, showLosses, totals])
@@ -130,7 +133,7 @@ export default function PeriodReport(p: ReportViewProps) {
         countLabel(totals.tx_count, REPORT_NOUNS.sale, tr),
         `${basisLabel} ${fmtMoney(basisValue(totals, options.basis))}`,
         totals.refund_usd ? `${tr('refunds', 'Refunds')} ${fmtMoney(totals.refund_usd)}` : null,
-        hasProfit(totals) ? `${profitLabel(totals, tr)} ${fmtMoney(totals.profit_usd)} (${fmtPct(pct(totals.profit_usd, basisValue(totals, options.basis)))})` : null,
+        hasProfit(totals) ? `${profitLabel(totals, tr)} ${costText(totals.cost_state, `${fmtMoney(totals.profit_usd)} (${fmtPct(totals.cost_state?.coverage === 'unknown' ? null : pct(totals.profit_usd, basisValue(totals, options.basis)))})`, tr)}` : null,
         // Only when there was a loss: a "$0.00 removed" term on every quiet
         // range is the kind of noise the summary row exists to avoid.
         hasRemovalLosses(totals) && totals.removal_loss_usd
@@ -141,7 +144,7 @@ export default function PeriodReport(p: ReportViewProps) {
 
   const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtRow).map((c, i) => (i === 0 ? { ...c, value: (r: PeriodRow) => periodLabel(r, g, fmtDate) } : c)), rows)
   const exportCsv = () => downloadCSV(reportFileName(`periods-${g}`, filters, 'csv'), csv())
-  const exportPrint = () => openPrintExport({ title: `${tr('reports', 'Reports')} · ${tr(view.labelKey, view.fallback)}`, subtitle: rangeSubtitle(filters, tr), headers: columns.map((c) => c.label), rows: csv() })
+  const exportPrint = () => openPrintExport({ title: `${tr('reports', 'Reports')} · ${tr(view.labelKey, view.fallback)}`, subtitle: rangeSubtitle(filters, tr), headers: columns.map((c) => c.label), rows: csv(), metadata: unknownCostMetadata(totals.cost_state, tr) })
 
   const openStatement = openRow
     ? buildIncomeStatement({ sales: openRow, profitMode: 'gross', khrToUsd: p.khrToUsd })
@@ -229,7 +232,7 @@ export default function PeriodReport(p: ReportViewProps) {
                     lines: openStatement.filter((l) => l.group === grp).map((l) => ({
                       key: l.key,
                       label: tr(l.labelKey, l.fallback),
-                      value: fmtMoney(l.usd),
+                      value: statementAmount(l, fmtMoney, tr),
                       kind: receiptLineKind(l.kind),
                       note: l.note ? statementNoteText(l.note, tr) : undefined,
                     })),

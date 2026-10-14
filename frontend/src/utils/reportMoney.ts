@@ -28,6 +28,8 @@ export interface ReportMoneyDeps {
   usdToKhr: (value: unknown) => number
   /** The USD symbol for the 4-place split-row format; '$' when omitted. */
   usdSymbol?: string
+  /** Printed for a null amount (an unknown cost, never zero); English when omitted. */
+  unknownLabel?: string
 }
 
 /**
@@ -52,7 +54,8 @@ export function formatUsd4(value: number, symbol = '$'): string {
  * their USD figure alone. In BOTH mode nothing is converted — each non-zero
  * raw amount is shown as-is ("$X · Y៛"), so BOTH is always rate-independent.
  */
-export function formatReportMoney(usd: number, khr: number | undefined, deps: ReportMoneyDeps, places: ReportMoneyPlaces = ACTUAL_USD_DECIMALS): string {
+export function formatReportMoney(usd: number | null, khr: number | undefined, deps: ReportMoneyDeps, places: ReportMoneyPlaces = ACTUAL_USD_DECIMALS): string {
+  if (usd === null) return deps.unknownLabel ?? 'Unknown cost'
   const u = Number(usd) || 0
   const k = Number(khr) || 0
   const cur = String(deps.displayCurrency || 'usd').trim().toLowerCase()
@@ -79,6 +82,6 @@ export function formatReportMoney(usd: number, khr: number | undefined, deps: Re
 /** Curry the deps once per render so callers just pass (usd, khr?). `khr`
  * defaults to 0 so USD-canonical figures (sales revenue/profit) can call
  * `fmtMoney(x)` and still honor the setting. */
-export function makeReportMoneyFormatter(deps: ReportMoneyDeps, places: ReportMoneyPlaces = ACTUAL_USD_DECIMALS): (usd: number, khr?: number) => string {
-  return (usd: number, khr?: number) => formatReportMoney(usd, khr, deps, places)
+export function makeReportMoneyFormatter(deps: ReportMoneyDeps, places: ReportMoneyPlaces = ACTUAL_USD_DECIMALS): (usd: number | null, khr?: number) => string {
+  return (usd: number | null, khr?: number) => formatReportMoney(usd, khr, deps, places)
 }

@@ -33,7 +33,7 @@ assert.match(excel, /l\.headline\s*\?\s*<span[^>]*bg-\[var\(--ui-ink\)\][\s\S]*?
 assert.match(excel, /l\.tone === 'positive' \? 'text-green-300 dark:text-green-700'/, 'a positive selected Total/Final Profit keeps a green foreground on the ink badge')
 assert.match(excel, /l\.tone === 'negative' \? 'text-red-300 dark:text-red-700'/, 'a negative selected Total/Final Profit keeps a red foreground on the ink badge')
 assert.match(excel, /: 'text-\[var\(--ui-surface\)\]'/, 'an untoned selected headline retains the neutral high-contrast foreground')
-assert.equal((excel.match(/fmtMoney\(l\.usd, l\.khr\)/g) || []).length, 1, 'one formatter call per line feeds both columns')
+assert.equal((excel.match(/statementAmount\(l, fmtMoney, tr\)/g) || []).length, 1, 'one formatter call per line feeds both columns')
 
 // Delivery keeps a caption because its memo rows need one shared heading.
 // Credit is already named by its one positive row, so a pending caption would

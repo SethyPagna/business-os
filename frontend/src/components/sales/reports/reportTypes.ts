@@ -56,6 +56,7 @@ export function tableLabels(tr: Tr): ReportTableLabels {
     total: tr('total', 'Total'),
     empty: tr('no_data', 'No data found'),
     emptyText: tr('rpt_empty_hint', 'Nothing matches the selected dates and filters.'),
+    t: (key) => tr(key, '') || undefined,
   }
 }
 

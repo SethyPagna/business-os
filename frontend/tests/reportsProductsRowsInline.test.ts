@@ -16,7 +16,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { stripTypeScriptTypes } from 'node:module'
-import { fmtInt, fmtQty, fmtPct, num } from '../src/components/sales/reports/reportModel.ts'
+import { costText, fmtInt, fmtQty, fmtPct, num } from '../src/components/sales/reports/reportModel.ts'
 
 const rootPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const read = (rel: string) => fs.readFileSync(path.join(rootPath, rel), 'utf8')
@@ -31,9 +31,9 @@ const helperEnd = source.indexOf('/** The receipt-style Products card body')
 assert.ok(helperStart > -1 && helperEnd > helperStart, 'productRowCells must exist ahead of the card renderer')
 const helperSrc = source.slice(helperStart, helperEnd).replaceAll('export function', 'function').replaceAll('export interface', 'interface')
 const productRowCells = new Function(
-  'fmtInt', 'fmtQty', 'fmtPct', 'num',
+  'fmtInt', 'fmtQty', 'fmtPct', 'num', 'costText',
   `${stripTypeScriptTypes(helperSrc)}\nreturn productRowCells;`,
-)(fmtInt, fmtQty, fmtPct, num) as (row: Record<string, unknown>, fmtMoney: (usd: number) => string) => {
+)(fmtInt, fmtQty, fmtPct, num, costText) as (row: Record<string, unknown>, fmtMoney: (usd: number) => string) => {
   sales: string; quantity: string; lineSales: string; cogs: string; profit: string; marginPct: string; hasProfit: boolean
 }
 

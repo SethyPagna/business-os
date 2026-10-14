@@ -10,6 +10,7 @@ import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { fmtDateOnly } from '../../utils/formatters.ts'
 import { buildSalesExportCsv } from '../../utils/salesImportContract.ts'
 import { formatUsd4 } from '../../utils/reportMoney.ts'
+import { costStateOf, costText } from './reports/reportModel.ts'
 import { useApp, type AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import { primaryToolbarButtonClassName, toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 
@@ -38,9 +39,11 @@ interface SalesExportSummary {
   total_transactions?: number
   completed_transactions?: number
   revenue_usd?: number
-  cogs_usd?: number
-  gross_profit_usd?: number
-  gross_margin_pct?: number
+  cogs_usd?: number | null
+  gross_profit_usd?: number | null
+  gross_margin_pct?: number | null
+  cost_missing_snapshot_lines?: number
+  cost_known_lines?: number
   total_discounts_usd?: number
   total_tax_usd?: number
   total_delivery_usd?: number
@@ -274,11 +277,14 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
                   // Cost and profit print only when the server sent them (a caller
                   // without the cost grant receives neither), and a cost viewer's
                   // profit is labelled as the goods-only figure it is (L4).
-                  ...(typeof preview.summary?.gross_profit_usd === 'number' ? [
-                    [`${tr('cogs', 'COGS')} (USD)`, fmtUSD(preview.summary?.cogs_usd || 0)],
-                    [preview.summary?.profit_excludes_delivery === true ? tr('rpt_profit_excl_delivery', 'Profit (excl. delivery)') : tr('gross_profit', 'Gross Profit'), fmtUSD(preview.summary.gross_profit_usd)],
-                    [tr('margin_pct', 'Margin %'), `${preview.summary?.gross_margin_pct || 0}%`],
-                  ] satisfies Array<[string, string | number | undefined]> : []),
+                  ...(preview.summary?.gross_profit_usd !== undefined ? (() => {
+                    const state = costStateOf({ cost_usd: preview.summary?.gross_profit_usd === null ? null : preview.summary?.cogs_usd, cost_missing_snapshot_lines: preview.summary?.cost_missing_snapshot_lines, cost_known_lines: preview.summary?.cost_known_lines })
+                    return [
+                      [`${tr('cogs', 'COGS')} (USD)`, costText(state, fmtUSD(preview.summary?.cogs_usd || 0), tr)],
+                      [preview.summary?.profit_excludes_delivery === true ? tr('rpt_profit_excl_delivery', 'Profit (excl. delivery)') : tr('gross_profit', 'Gross Profit'), costText(state, fmtUSD(preview.summary?.gross_profit_usd || 0), tr)],
+                      [tr('margin_pct', 'Margin %'), state?.coverage === 'unknown' ? '—' : `${preview.summary?.gross_margin_pct || 0}%`],
+                    ] satisfies Array<[string, string | number | undefined]>
+                  })() : []),
                   [tr('discounts', 'Discounts'), fmtUSD(preview.summary?.total_discounts_usd || 0)],
                   [tr('tax_collected', 'Tax Collected'), fmtUSD(preview.summary?.total_tax_usd || 0)],
                   [tr('delivery_fees', 'Delivery Fees'), fmtUSD(preview.summary?.total_delivery_usd || 0)],

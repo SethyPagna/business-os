@@ -20,7 +20,11 @@ import {
   BASIS_LABELS,
   basisValue,
   buildIncomeStatement,
+  combineCostStates,
+  costStateOf,
+  costText,
   countLabel,
+  courierCostState,
   fmtInt,
   fmtPct,
   fmtQty,
@@ -41,9 +45,12 @@ import {
   isTheoreticalGroup,
   statementGroupLabel,
   statementNoteText,
+  statementAmount,
   sumTotals,
   topOfLabel,
+  unknownCostMetadata,
   WEEKDAY_LABEL_KEYS,
+  type CostState,
   type ReportGroupBy,
   type ReportNoun,
   type ReportTotals,
@@ -70,6 +77,7 @@ export interface ProductRow {
   profit_usd?: number
   margin_pct?: number | null
   cost_missing_snapshot_lines?: number
+  cost_state?: CostState
 }
 /** The Products report row's own numbers, formatted -- the pure half of the
  *  compact card (Part reports-products, owner: "no need click. Arrange as
@@ -88,15 +96,15 @@ export interface ProductRowCells {
   hasProfit: boolean
 }
 
-export function productRowCells(row: ProductRow, fmtMoney: (usd: number) => string): ProductRowCells {
+export function productRowCells(row: ProductRow, fmtMoney: (usd: number) => string, tr: (key: string, fallback: string) => string = (_key, fallback) => fallback): ProductRowCells {
   const hasProfit = typeof row.profit_usd === 'number'
   return {
     sales: fmtInt(row.sale_count),
     quantity: fmtQty(row.qty),
     lineSales: fmtMoney(row.line_sales_usd),
-    cogs: hasProfit ? fmtMoney(num(row.cost_usd)) : '—',
-    profit: hasProfit ? fmtMoney(num(row.profit_usd)) : '—',
-    marginPct: hasProfit ? fmtPct(row.margin_pct ?? null) : '—',
+    cogs: hasProfit ? costText(row.cost_state, fmtMoney(num(row.cost_usd)), tr) : '—',
+    profit: hasProfit ? costText(row.cost_state, fmtMoney(num(row.profit_usd)), tr) : '—',
+    marginPct: hasProfit ? fmtPct(row.cost_state?.coverage === 'unknown' ? null : row.margin_pct ?? null) : '—',
     hasProfit,
   }
 }
@@ -106,7 +114,7 @@ export function productRowCells(row: ProductRow, fmtMoney: (usd: number) => stri
  *  and Gross profit -- replacing ReportTable's default one-line-per-column
  *  ledger for this surface only, per the owner's explicit arrangement. */
 function renderProductCard(row: ProductRow, tr: Tr, fmtMoney: (usd: number) => string) {
-  const c = productRowCells(row, fmtMoney)
+  const c = productRowCells(row, fmtMoney, tr)
   return (
     <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[length:var(--ui-size-body,12px)] leading-[var(--ui-receipt-lh,16px)] [font-variant-numeric:tabular-nums]">
       <div className="min-w-0">
@@ -147,6 +155,7 @@ export interface CourierRow {
   actual_cost_count: number
   margin_usd: number
   last_delivery_at: string | null
+  cost_state: CostState | null
 }
 
 export function groupRowLabel(by: ReportGroupBy, row: { key: string; label: string }, tr: Tr): string {
@@ -212,11 +221,12 @@ export default function GroupedReport(p: ReportViewProps) {
             .map((r) => {
               const o = (r && typeof r === 'object' ? r : {}) as Record<string, unknown>
               const row: ProductRow = { product_id: o.product_id == null ? null : num(o.product_id), product_name: String(o.product_name || ''), sale_count: num(o.sale_count), qty: num(o.qty), line_sales_usd: num(o.line_sales_usd) }
-              if (typeof o.profit_usd === 'number') {
+              if (o.profit_usd === null || typeof o.profit_usd === 'number') {
                 row.cost_usd = num(o.cost_usd)
                 row.profit_usd = num(o.profit_usd)
-                row.margin_pct = typeof o.margin_pct === 'number' ? o.margin_pct : pct(row.profit_usd, row.line_sales_usd)
                 row.cost_missing_snapshot_lines = num(o.cost_missing_snapshot_lines)
+                row.cost_state = costStateOf(o) ?? undefined
+                row.margin_pct = o.profit_usd === null || row.cost_state?.coverage === 'unknown' ? null : typeof o.margin_pct === 'number' ? o.margin_pct : pct(row.profit_usd, row.line_sales_usd)
               }
               return row
             })
@@ -241,6 +251,7 @@ export default function GroupedReport(p: ReportViewProps) {
                 actual_cost_count: num(o.actual_cost_count),
                 margin_usd: num(o.margin_usd),
                 last_delivery_at: o.last_delivery_at == null ? null : String(o.last_delivery_at),
+                cost_state: courierCostState({ ...o, deliveries: num(o.deliveries) }),
               }
             })
             .filter((r) => matches(r.delivery_contact_name, search))
@@ -271,7 +282,9 @@ export default function GroupedReport(p: ReportViewProps) {
     const allProfit = productRows.length > 0 && productRows.every((r) => typeof r.profit_usd === 'number')
     const totalProfit = allProfit ? (windowTotals ? num(windowTotals.profit_usd) : round4(productRows.reduce((s, r) => s + num(r.profit_usd), 0))) : null
     const totalCost = allProfit ? (windowTotals ? num(windowTotals.cost_usd) : round4(productRows.reduce((s, r) => s + num(r.cost_usd), 0))) : null
-    const productTotalsRow: ProductRow | null = productRows.length > 1 || truncated ? { product_id: null, product_name: totalLabel, sale_count: totalSales, qty: totalQty, line_sales_usd: totalLine, ...(allProfit ? { cost_usd: totalCost ?? 0, profit_usd: totalProfit ?? 0, margin_pct: pct(totalProfit ?? 0, totalLine) } : {}) } : null
+    const totalState = (!allProfit ? undefined : windowTotals ? costStateOf(windowTotals) : combineCostStates(productRows.map((r) => r.cost_state))) ?? undefined
+    const totalMargin = totalState?.coverage === 'unknown' ? null : pct(totalProfit ?? 0, totalLine)
+    const productTotalsRow: ProductRow | null = productRows.length > 1 || truncated ? { product_id: null, product_name: totalLabel, sale_count: totalSales, qty: totalQty, line_sales_usd: totalLine, ...(allProfit ? { cost_usd: totalCost ?? 0, profit_usd: totalProfit ?? 0, margin_pct: totalMargin, cost_state: totalState } : {}) } : null
     // Memoized like every other view's column list (PeriodReport,
     // SalesListReport): an unmemoized array here defeated ReportTable's own
     // memoization of columnDefs/visibleColumns/sortedRows downstream, so an
@@ -286,8 +299,8 @@ export default function GroupedReport(p: ReportViewProps) {
       { key: 'line_sales_usd', label: tr('rpt_line_sales', 'Line sales'), kind: 'money', value: (r) => r.line_sales_usd, emphasis: true },
       ...(allProfit
         ? [
-            { key: 'cost_usd', label: tr('cogs', 'COGS'), kind: 'money', value: (r: ProductRow) => r.cost_usd ?? null } as ReportColumn<ProductRow>,
-            { key: 'profit_usd', label: tr('rpt_gross_profit', 'Gross profit'), kind: 'money', value: (r: ProductRow) => r.profit_usd ?? null } as ReportColumn<ProductRow>,
+            { key: 'cost_usd', label: tr('cogs', 'COGS'), kind: 'money', value: (r: ProductRow) => r.cost_usd ?? null, cost: (r: ProductRow) => r.cost_state ?? null } as ReportColumn<ProductRow>,
+            { key: 'profit_usd', label: tr('rpt_gross_profit', 'Gross profit'), kind: 'money', value: (r: ProductRow) => r.profit_usd ?? null, cost: (r: ProductRow) => r.cost_state ?? null } as ReportColumn<ProductRow>,
             { key: 'margin_pct', label: tr('rpt_margin', 'Margin'), kind: 'pct', value: (r: ProductRow) => r.margin_pct ?? null } as ReportColumn<ProductRow>,
           ]
         : []),
@@ -300,8 +313,8 @@ export default function GroupedReport(p: ReportViewProps) {
         title={title}
         titleControl={p.titleControl}
         hint={{ label: title, text: tr('rpt_hint_products', 'Line sales = item line totals after line discounts, before order-level discounts, over recognized sales only. Ranked by line sales; top 500.') }}
-        menuAction={exportMenu(() => downloadCSV(reportFileName('products', filters, 'csv'), csv()), () => openPrintExport({ title: printTitle, subtitle, headers: columns.map((c) => c.label), rows: csv() }))}
-        summary={productRows.length ? joinSummary([countPart(productRows.length, REPORT_NOUNS.product), `${fmtQty(totalQty)} ${tr('quantity', 'Quantity').toLowerCase()}`, `${tr('rpt_line_sales', 'Line sales')} ${fmtMoney(totalLine)}`, totalProfit != null ? `${tr('rpt_gross_profit', 'Gross profit')} ${fmtMoney(totalProfit)} (${fmtPct(pct(totalProfit, totalLine))})` : null]) : ''}
+        menuAction={exportMenu(() => downloadCSV(reportFileName('products', filters, 'csv'), csv()), () => openPrintExport({ title: printTitle, subtitle, headers: columns.map((c) => c.label), rows: csv(), metadata: unknownCostMetadata(totalState, tr) }))}
+        summary={productRows.length ? joinSummary([countPart(productRows.length, REPORT_NOUNS.product), `${fmtQty(totalQty)} ${tr('quantity', 'Quantity').toLowerCase()}`, `${tr('rpt_line_sales', 'Line sales')} ${fmtMoney(totalLine)}`, totalProfit != null ? `${tr('rpt_gross_profit', 'Gross profit')} ${costText(totalState, `${fmtMoney(totalProfit)} (${fmtPct(totalMargin)})`, tr)}` : null]) : ''}
         error={state.error}
         onRetry={state.reload}
         retryLabel={tr('retry', 'Retry')}
@@ -342,8 +355,8 @@ export default function GroupedReport(p: ReportViewProps) {
                     { label: tr('rpt_line_sales', 'Line sales'), value: fmtRow(open.line_sales_usd), kind: 'total' },
                     ...(typeof open.profit_usd === 'number'
                       ? ([
-                          { label: tr('cogs', 'Cost of goods'), value: fmtRow(num(open.cost_usd)), kind: 'sub' },
-                          { label: tr('rpt_gross_profit', 'Gross profit'), value: `${fmtRow(open.profit_usd)} (${fmtPct(open.margin_pct ?? null)})`, kind: 'total' },
+                          { label: tr('cogs', 'Cost of goods'), value: costText(open.cost_state, fmtRow(num(open.cost_usd)), tr), kind: 'sub' },
+                          { label: tr('rpt_gross_profit', 'Gross profit'), value: costText(open.cost_state, `${fmtRow(open.profit_usd)} (${fmtPct(open.margin_pct ?? null)})`, tr), kind: 'total' },
                           ...(open.cost_missing_snapshot_lines ? [{ label: tr('rpt_missing_cost_lines', 'Lines without cost snapshot'), value: fmtInt(open.cost_missing_snapshot_lines), kind: 'info' as const }] : []),
                         ] as ReceiptLine[])
                       : []),
@@ -358,26 +371,30 @@ export default function GroupedReport(p: ReportViewProps) {
   }
 
   if (by === 'courier') {
+    const costShown = courierRows.every((r) => r.cost_state !== null)
     // Memoized for the same reason as the products branch above.
     const columns = useMemo<Array<ReportColumn<CourierRow>>>(() => [
       { key: 'name', label: tr('rpt_courier', 'Courier'), primary: true, value: (r) => r.delivery_contact_name || tr('unknown', 'Unknown') },
       { key: 'deliveries', label: tr('rpt_deliveries', 'Deliveries'), kind: 'int', value: (r) => r.deliveries },
       { key: 'charged_fee_usd', label: tr('rpt_delivery_charged', 'Delivery fee charged'), kind: 'money', value: (r) => r.charged_fee_usd },
       { key: 'absorbed_fee_usd', label: tr('rpt_store_delivery', 'Store-paid delivery fee'), kind: 'money', value: (r) => r.absorbed_fee_usd },
-      { key: 'actual_cost_usd', label: tr('rpt_delivery_cost', 'Actual delivery cost'), kind: 'money', value: (r) => r.actual_cost_usd },
-      { key: 'actual_cost_count', label: tr('rpt_costed_deliveries', 'Costed deliveries'), kind: 'int', value: (r) => r.actual_cost_count, defaultVisible: false },
-      { key: 'margin_usd', label: tr('rpt_delivery_margin', 'Delivery profit'), kind: 'money', value: (r) => r.margin_usd, emphasis: true },
+      ...(costShown ? [
+        { key: 'actual_cost_usd', label: tr('rpt_delivery_cost', 'Actual delivery cost'), kind: 'money', value: (r: CourierRow) => r.actual_cost_usd, cost: (r: CourierRow) => r.cost_state } as ReportColumn<CourierRow>,
+        { key: 'actual_cost_count', label: tr('rpt_costed_deliveries', 'Costed deliveries'), kind: 'int', value: (r: CourierRow) => r.actual_cost_count, defaultVisible: false } as ReportColumn<CourierRow>,
+        { key: 'margin_usd', label: tr('rpt_delivery_margin', 'Delivery profit'), kind: 'money', value: (r: CourierRow) => r.margin_usd, emphasis: true, cost: (r: CourierRow) => r.cost_state } as ReportColumn<CourierRow>,
+      ] : []),
       { key: 'last_delivery_at', label: tr('rpt_last_delivery', 'Last delivery'), kind: 'datetime', value: (r) => r.last_delivery_at, defaultVisible: false },
-    ], [tr]) // eslint-disable-line react-hooks/rules-of-hooks -- `by` is fixed per mounted instance
+    ], [tr, costShown]) // eslint-disable-line react-hooks/rules-of-hooks -- `by` is fixed per mounted instance
     const sum = (k: keyof CourierRow) => round4(courierRows.reduce((s, r) => s + num(r[k]), 0))
+    const courierState = costShown ? combineCostStates(courierRows.map((r) => r.cost_state)) : null
     const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtRow), courierRows)
     return (
       <ReportFrame
         title={title}
         titleControl={p.titleControl}
         hint={{ label: title, text: tr('rpt_hint_couriers', 'Delivery sales per courier: what customers were charged, what the store absorbed, the recorded actual cost (only deliveries with a cost recorded) and the resulting margin.') }}
-        menuAction={exportMenu(() => downloadCSV(reportFileName('couriers', filters, 'csv'), csv()), () => openPrintExport({ title: printTitle, subtitle, headers: columns.map((c) => c.label), rows: csv() }))}
-        summary={courierRows.length ? joinSummary([countLabel(sum('deliveries'), REPORT_NOUNS.delivery, tr), `${tr('rpt_delivery_charged', 'Delivery fee charged')} ${fmtMoney(sum('charged_fee_usd'))}`, `${tr('rpt_store_delivery', 'Store-paid delivery fee')} ${fmtMoney(sum('absorbed_fee_usd'))}`, `${tr('rpt_delivery_cost', 'Actual delivery cost')} ${fmtMoney(sum('actual_cost_usd'))}`, `${tr('rpt_delivery_margin', 'Delivery profit')} ${fmtMoney(sum('margin_usd'))}`]) : ''}
+        menuAction={exportMenu(() => downloadCSV(reportFileName('couriers', filters, 'csv'), csv()), () => openPrintExport({ title: printTitle, subtitle, headers: columns.map((c) => c.label), rows: csv(), metadata: unknownCostMetadata(courierState, tr) }))}
+        summary={courierRows.length ? joinSummary([countLabel(sum('deliveries'), REPORT_NOUNS.delivery, tr), `${tr('rpt_delivery_charged', 'Delivery fee charged')} ${fmtMoney(sum('charged_fee_usd'))}`, `${tr('rpt_store_delivery', 'Store-paid delivery fee')} ${fmtMoney(sum('absorbed_fee_usd'))}`, ...(costShown ? [`${tr('rpt_delivery_cost', 'Actual delivery cost')} ${costText(courierState, fmtMoney(sum('actual_cost_usd')), tr)}`, `${tr('rpt_delivery_margin', 'Delivery profit')} ${costText(courierState, fmtMoney(sum('margin_usd')), tr)}`] : [])]) : ''}
         error={state.error}
         onRetry={state.reload}
         retryLabel={tr('retry', 'Retry')}
@@ -391,7 +408,7 @@ export default function GroupedReport(p: ReportViewProps) {
           fmtMoney={fmtRow}
           labels={labels}
           loading={state.loading}
-          totalsRow={courierRows.length > 1 ? { delivery_contact_id: null, delivery_contact_name: labels.total, deliveries: sum('deliveries'), charged_fee_usd: sum('charged_fee_usd'), absorbed_fee_usd: sum('absorbed_fee_usd'), actual_cost_usd: sum('actual_cost_usd'), actual_cost_count: sum('actual_cost_count'), margin_usd: sum('margin_usd'), last_delivery_at: null } : null}
+          totalsRow={courierRows.length > 1 ? { delivery_contact_id: null, delivery_contact_name: labels.total, deliveries: sum('deliveries'), charged_fee_usd: sum('charged_fee_usd'), absorbed_fee_usd: sum('absorbed_fee_usd'), actual_cost_usd: sum('actual_cost_usd'), actual_cost_count: sum('actual_cost_count'), margin_usd: sum('margin_usd'), last_delivery_at: null, cost_state: courierState } : null}
           sort={sort}
           onSortChange={setSort}
           maxHeight="calc(70 * var(--app-vh))"
@@ -419,9 +436,9 @@ export default function GroupedReport(p: ReportViewProps) {
     { key: 'avg_order_usd', label: tr('avg_order', 'Avg order'), kind: 'money', value: (r) => r.avg_order_usd, defaultVisible: false },
     ...(showProfit
       ? [
-          { key: 'cost_usd', label: tr('cost', 'Cost'), kind: 'money', value: (r: GroupRow) => r.cost_usd ?? null, defaultVisible: false } as ReportColumn<GroupRow>,
-          { key: 'profit_usd', label: profitLabel(totals, tr), kind: 'money', value: (r: GroupRow) => r.profit_usd ?? null } as ReportColumn<GroupRow>,
-          { key: 'margin_pct', label: tr('rpt_margin', 'Margin'), kind: 'pct', value: (r: GroupRow) => pct(num(r.profit_usd), basisValue(r, options.basis)) } as ReportColumn<GroupRow>,
+          { key: 'cost_usd', label: tr('cost', 'Cost'), kind: 'money', value: (r: GroupRow) => r.cost_usd ?? null, defaultVisible: false, cost: (r: GroupRow) => r.cost_state ?? null } as ReportColumn<GroupRow>,
+          { key: 'profit_usd', label: profitLabel(totals, tr), kind: 'money', value: (r: GroupRow) => r.profit_usd ?? null, cost: (r: GroupRow) => r.cost_state ?? null } as ReportColumn<GroupRow>,
+          { key: 'margin_pct', label: tr('rpt_margin', 'Margin'), kind: 'pct', value: (r: GroupRow) => (r.cost_state?.coverage === 'unknown' ? null : pct(num(r.profit_usd), basisValue(r, options.basis))) } as ReportColumn<GroupRow>,
         ]
       : []),
   ], [tr, view.labelKey, view.fallback, by, options.basis, totalBasis, showProfit, totals.profit_excludes_delivery]) // eslint-disable-line react-hooks/rules-of-hooks -- `by` is fixed per mounted instance
@@ -435,8 +452,8 @@ export default function GroupedReport(p: ReportViewProps) {
       title={title}
       titleControl={p.titleControl}
       hint={{ label: title, text: tr('rpt_hint_grouped', 'Each row is the full revenue calculation for that group (same definition as the Overview), so the rows add up to the totals line. Share = the row’s basis figure as a percentage of the total.') }}
-      menuAction={exportMenu(() => downloadCSV(reportFileName(view.id, filters, 'csv'), csv()), () => openPrintExport({ title: printTitle, subtitle, headers: columns.map((c) => c.label), rows: csv() }))}
-      summary={groupRows.length ? joinSummary([countPart(groupRows.length, REPORT_NOUNS[by]), countLabel(totals.tx_count, REPORT_NOUNS.sale, tr), `${basisLabel} ${fmtMoney(totalBasis)}`, totals.refund_usd ? `${tr('refunds', 'Refunds')} ${fmtMoney(totals.refund_usd)}` : null, hasProfit(totals) ? `${profitLabel(totals, tr)} ${fmtMoney(totals.profit_usd)} (${fmtPct(pct(totals.profit_usd, totalBasis))})` : null]) : ''}
+      menuAction={exportMenu(() => downloadCSV(reportFileName(view.id, filters, 'csv'), csv()), () => openPrintExport({ title: printTitle, subtitle, headers: columns.map((c) => c.label), rows: csv(), metadata: unknownCostMetadata(totals.cost_state, tr) }))}
+      summary={groupRows.length ? joinSummary([countPart(groupRows.length, REPORT_NOUNS[by]), countLabel(totals.tx_count, REPORT_NOUNS.sale, tr), `${basisLabel} ${fmtMoney(totalBasis)}`, totals.refund_usd ? `${tr('refunds', 'Refunds')} ${fmtMoney(totals.refund_usd)}` : null, hasProfit(totals) ? `${profitLabel(totals, tr)} ${costText(totals.cost_state, `${fmtMoney(totals.profit_usd)} (${fmtPct(totals.cost_state?.coverage === 'unknown' ? null : pct(totals.profit_usd, totalBasis))})`, tr)}` : null]) : ''}
       error={state.error}
       onRetry={state.reload}
       retryLabel={tr('retry', 'Retry')}
@@ -502,7 +519,7 @@ export default function GroupedReport(p: ReportViewProps) {
                     lines: statement.filter((l) => l.group === grp).map((l) => ({
                       key: l.key,
                       label: tr(l.labelKey, l.fallback),
-                      value: fmtMoney(l.usd),
+                      value: statementAmount(l, fmtMoney, tr),
                       kind: receiptLineKind(l.kind),
                       note: l.note ? statementNoteText(l.note, tr) : undefined,
                     })),

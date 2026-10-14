@@ -8,7 +8,8 @@ const MONEY = ['gross_sales_usd', 'store_discount_usd', 'membership_discount_usd
 const TEXT = ['receipt_number', 'date', 'business_date', 'branch', 'cashier', 'customer', 'customer_phone', 'payment_method', 'status'] as const
 const COST = ['cost_usd', 'cost_before_floor_usd', 'gross_profit_usd', 'cost_missing_snapshot_lines'] as const
 const QUERY_KEYS = ['startDate', 'endDate', 'branchId', 'createdFrom', 'createdTo', 'startTime', 'endTime', 'status', 'paymentMethod', 'q']
-import { collectReportExport, ReportExportError as SalesExportError, record, finite, integer, timestamp } from './reportExportCollection.ts'
+import { collectReportExport, ReportExportError as SalesExportError, record, finite, nullableFinite, integer, timestamp } from './reportExportCollection.ts'
+import { costStateOf, type CostState } from './reportModel.ts'
 export { ReportExportError as SalesExportError } from './reportExportCollection.ts'
 function invalid(): never { throw new SalesExportError('invalid') }
 export function validateExportSale(raw: unknown): SaleRow & { cursor_at: string } {
@@ -25,7 +26,11 @@ export function validateExportSale(raw: unknown): SaleRow & { cursor_at: string 
   row.cursor_at = input.cursor_at as string
   for (const key of MONEY) row[key] = finite(input[key])
   const costPresent = COST.some(key => Object.hasOwn(input, key))
-  if (costPresent) for (const key of COST) row[key] = key === 'cost_missing_snapshot_lines' ? integer(input[key]) : finite(input[key])
+  if (costPresent) {
+    for (const key of COST) row[key] = key === 'cost_missing_snapshot_lines' ? integer(input[key]) : nullableFinite(input[key]) ?? 0
+    const state = costStateOf({ cost_usd: nullableFinite(input.cost_usd), cost_missing_snapshot_lines: input.cost_missing_snapshot_lines })
+    row.cost_state = input.gross_profit_usd === null && state?.coverage !== 'unknown' ? { coverage: 'unknown', count: Math.max(1, row.cost_missing_snapshot_lines ?? 0) } : state ?? undefined
+  }
   // L4: a cost viewer's receipt profit is goods only, and the export says so.
   if (costPresent && input.profit_excludes_delivery === true) row.profit_excludes_delivery = true
   return row
@@ -37,10 +42,14 @@ export function mapExportTotals(raw: unknown): SaleRow {
   output.id = 0
   for (const key of MONEY) output[key] = finite(input[key === 'net_revenue_usd' ? 'revenue_usd' : key])
   if (Object.hasOwn(input, 'cost_usd') || Object.hasOwn(input, 'profit_usd')) {
-    output.cost_usd = finite(input.cost_usd)
-    output.gross_profit_usd = finite(input.profit_usd)
+    output.cost_usd = nullableFinite(input.cost_usd) ?? 0
+    output.gross_profit_usd = nullableFinite(input.profit_usd) ?? 0
     if (input.profit_excludes_delivery === true) output.profit_excludes_delivery = true
-    if (Object.hasOwn(input, 'money_unknown_cost_lines')) output.cost_missing_snapshot_lines = integer(input.money_unknown_cost_lines)
+    const missingKey = Object.hasOwn(input, 'cost_missing_snapshot_lines') ? 'cost_missing_snapshot_lines' : 'money_unknown_cost_lines'
+    if (Object.hasOwn(input, missingKey)) output.cost_missing_snapshot_lines = integer(input[missingKey])
+    const known = Object.hasOwn(input, 'cost_known_lines') ? integer(input.cost_known_lines) : undefined
+    const state: CostState | null = costStateOf({ cost_usd: nullableFinite(input.cost_usd), cost_missing_snapshot_lines: output.cost_missing_snapshot_lines, cost_known_lines: known })
+    output.cost_state = input.profit_usd === null && state?.coverage !== 'unknown' ? { coverage: 'unknown', count: Math.max(1, output.cost_missing_snapshot_lines ?? 0) } : state ?? undefined
   }
   return output
 }
@@ -66,10 +75,13 @@ export interface SalesExportDocument extends CompletedSalesExport {
   metadata: string[]
   filename: string
   fmtMoney: (usd: number) => string
+  /** Printed in place of an unknown cost; the CSV leaves the cell blank. */
+  unknownLabel?: string
 }
-export function saleExportObjects(document: SalesExportDocument, display = false): Array<Record<string, unknown>> {
+export function saleExportObjects(document: SalesExportDocument, display = false, unknown: 'blank' | 'label' = 'blank'): Array<Record<string, unknown>> {
   return [...document.rows, document.totals].map(row => Object.fromEntries(document.columns.map(column => {
     const raw = column.value(row)
+    if (column.cost?.(row)?.coverage === 'unknown') return [display ? column.label : column.key, !display ? null : unknown === 'label' ? document.unknownLabel ?? 'Unknown cost' : '']
     const value = !display || raw == null || raw === '' ? raw
       : column.kind === 'money' ? document.fmtMoney(Number(raw))
         : column.kind === 'datetime' ? fmtDateTime24(String(raw))
@@ -86,7 +98,7 @@ export function saleExportWorksheet(document: SalesExportDocument): TypedWorkshe
     metadata: [document.title, document.subtitle, ...document.metadata, 'USD'] }
 }
 export function saleExportPrint(document: SalesExportDocument) {
-  const objects = saleExportObjects(document, true)
+  const objects = saleExportObjects(document, true, 'label')
   return { title: document.title, subtitle: document.subtitle, language: document.language, metadata: document.metadata,
     headers: document.columns.map(column => column.label), rows: objects.slice(0, -1), totals: objects[objects.length - 1],
     numericHeaders: document.columns.filter(column => ['money', 'qty', 'int', 'pct'].includes(column.kind || '')).map(column => column.label), landscape: true }

@@ -31,6 +31,8 @@ import {
   STATEMENT_GROUPS,
   basisValue,
   buildIncomeStatement,
+  combineCostStates,
+  costStateOf,
   defaultReportStyle,
   getReportView,
   hasProfit,
@@ -347,9 +349,10 @@ test('buildIncomeStatement: the waterfall foots to the cent, and says so when co
   // Absent cost data is LABELLED, not silently rendered as $0.00 of free goods.
   const noCost = lineMap(buildIncomeStatement({ sales: normalizeTotals({ ...adminTotals, cost_usd: 0, cost_missing_snapshot_lines: 4 }), profitMode: 'gross', khrToUsd }))
   assert.equal(noCost.cogs.usd, 0)
-  assert.equal(noCost.cogs.note?.key, 'rpt_note_cost_unavailable', 'a zero COGS with missing snapshots says "not available"')
+  assert.equal(noCost.cogs.unknownCost, true, 'a zero COGS with only missing snapshots is unknown, not a free-goods $0.00')
+  assert.equal(noCost.cogs.note?.key, 'cost_all_unknown', 'and says how many lines have no cost')
   assert.equal(noCost.cogs.note?.count, 4)
-  assert.equal(m.cogs.note?.key, 'rpt_note_cost_partial', 'a partial one says how many lines are uncosted')
+  assert.equal(m.cogs.note?.key, 'cost_partial_count', 'a partial one says how many lines are uncosted')
   assert.equal(m.delivery_paid.note?.key, 'rpt_note_delivery_partial', 'courier cost states its coverage: 2 of 4 deliveries')
   assert.equal(m.delivery_paid.note?.total, 4)
 })
@@ -1033,8 +1036,8 @@ test('sales receipt and statement cost floors match the canonical aggregate rule
   const source = read('src/components/sales/reports/SalesListReport.tsx')
   const helpers = source.slice(source.indexOf('const MONEY_KEYS'), source.indexOf('export default function'))
     .replaceAll('export function', 'function')
-  const { mapSaleRow, sumSaleRows } = new Function('num', 'round2', 'round4', `${stripTypeScriptTypes(helpers)}; return {mapSaleRow,sumSaleRows}`)(
-    (v: unknown) => Number(v) || 0, (v: number) => Math.round(v * 100) / 100, (v: number) => Math.round(v * 10_000) / 10_000,
+  const { mapSaleRow, sumSaleRows } = new Function('num', 'round2', 'round4', 'costStateOf', 'combineCostStates', `${stripTypeScriptTypes(helpers)}; return {mapSaleRow,sumSaleRows}`)(
+    (v: unknown) => Number(v) || 0, (v: number) => Math.round(v * 100) / 100, (v: number) => Math.round(v * 10_000) / 10_000, costStateOf, combineCostStates,
   )
   const corrected = mapSaleRow({cost_usd:0,cost_before_floor_usd:-10,gross_profit_usd:85},0)
   const ordinary = mapSaleRow({cost_usd:120,cost_before_floor_usd:120,gross_profit_usd:84},1)

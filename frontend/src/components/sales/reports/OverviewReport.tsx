@@ -28,6 +28,7 @@ import ReportTable, { type ReportColumn } from './ReportTable.tsx'
 import { refundColumn } from './ReturnsReport.tsx'
 import {
   buildIncomeStatement,
+  courierCostState,
   delta,
   formatSignedPct,
   normalizeTotals,
@@ -40,9 +41,11 @@ import {
   STATEMENT_GROUPS,
   isTheoreticalGroup,
   statementGroupLabel,
+  statementAmount,
   statementNoteText,
   statementOperator,
   topOfLabel,
+  type CostState,
   type StatementGroup,
   type StatementLine,
 } from './reportModel.ts'
@@ -61,6 +64,7 @@ interface CourierRow {
   actual_cost_count: number
   margin_usd: number
   last_delivery_at: string | null
+  cost_state?: CostState | null
 }
 interface ReasonRow { reason: string; count: number; refund_usd: number }
 interface TypeRow { fee_type: string; count: number; amount_usd: number; amount_khr: number }
@@ -109,7 +113,7 @@ export default function OverviewReport(p: ReportViewProps) {
 
   const groupLabel = (g: StatementGroup) => statementGroupLabel(g, tr)
   const lineLabel = (l: StatementLine) => tr(l.labelKey, l.fallback)
-  const changeOf = (l: StatementLine) => (l.prevUsd == null ? null : delta(l.usd, l.prevUsd))
+  const changeOf = (l: StatementLine) => (l.prevUsd == null || l.unknownCost ? null : delta(l.usd, l.prevUsd))
   const noteText = (l: StatementLine) => (l.note ? statementNoteText(l.note, tr) : null)
 
   // ---- exports ----
@@ -121,7 +125,7 @@ export default function OverviewReport(p: ReportViewProps) {
       Group: groupLabel(l.group),
       Op: statementOperator(l.kind),
       Line: lineLabel(l),
-      Amount_USD: l.usd,
+      Amount_USD: l.unknownCost ? '' : l.usd,
       Note: noteText(l) || '',
       ...(compare ? { Previous_USD: l.prevUsd ?? '', Change_Pct: changeOf(l)?.pct ?? '' } : {}),
     }))
@@ -145,7 +149,8 @@ export default function OverviewReport(p: ReportViewProps) {
   const paymentGroups = Math.max(num(data?.sales?.payment_methods_total_groups), payments.length)
   const paymentsTruncated = data?.sales?.payment_methods_truncated === true || paymentGroups > payments.length
   const paymentRevenue = paymentsTruncated && sales ? sales.revenue_usd : payments.reduce((s, row) => s + row.revenue_usd, 0)
-  const couriers = data?.sales?.couriers || []
+  const couriers = useMemo(() => (data?.sales?.couriers || []).map((row) => ({ ...row, cost_state: courierCostState(row) })), [data])
+  const courierCostShown = couriers.every((row) => row.cost_state !== null)
   const reasons = data?.returns?.by_reason || []
   const types = data?.expenses?.by_type || []
   const chips: Array<{ id: Breakdown; label: string; count: number }> = [
@@ -173,8 +178,10 @@ export default function OverviewReport(p: ReportViewProps) {
     { key: 'deliveries', label: tr('rpt_deliveries', 'Deliveries'), kind: 'int', value: (r) => r.deliveries },
     { key: 'charged_fee_usd', label: tr('rpt_delivery_charged', 'Delivery fee charged'), kind: 'money', value: (r) => r.charged_fee_usd },
     { key: 'absorbed_fee_usd', label: tr('rpt_store_delivery', 'Store-paid delivery fee'), kind: 'money', value: (r) => r.absorbed_fee_usd },
-    { key: 'actual_cost_usd', label: tr('rpt_delivery_cost', 'Actual delivery cost'), kind: 'money', value: (r) => r.actual_cost_usd },
-    { key: 'margin_usd', label: tr('rpt_delivery_margin', 'Delivery profit'), kind: 'money', value: (r) => r.margin_usd, emphasis: true },
+    ...(courierCostShown ? [
+      { key: 'actual_cost_usd', label: tr('rpt_delivery_cost', 'Actual delivery cost'), kind: 'money', value: (r: CourierRow) => r.actual_cost_usd, cost: (r: CourierRow) => r.cost_state ?? null } as ReportColumn<CourierRow>,
+      { key: 'margin_usd', label: tr('rpt_delivery_margin', 'Delivery profit'), kind: 'money', value: (r: CourierRow) => r.margin_usd, emphasis: true, cost: (r: CourierRow) => r.cost_state ?? null } as ReportColumn<CourierRow>,
+    ] : []),
     { key: 'last_delivery_at', label: tr('rpt_last_delivery', 'Last delivery'), kind: 'datetime', value: (r) => r.last_delivery_at, defaultVisible: false },
   ]
   const reasonColumns: Array<ReportColumn<ReasonRow>> = [
@@ -223,7 +230,7 @@ export default function OverviewReport(p: ReportViewProps) {
             // The data note wins the slot: "no cost recorded on 812 lines"
             // outranks a percentage change on a figure that is not measured.
             const note = noteText(l) || (ch && ch.pct != null ? formatSignedPct(ch.pct) : undefined)
-            return { key: l.key, label: lineLabel(l), value: fmtMoney(l.usd, l.khr), kind: receiptLineKind(l.kind), note, tone: l.tone }
+            return { key: l.key, label: lineLabel(l), value: statementAmount(l, fmtMoney, tr), kind: receiptLineKind(l.kind), note, tone: l.tone }
           }),
       }))}
     />
@@ -260,7 +267,7 @@ export default function OverviewReport(p: ReportViewProps) {
                   const ch = changeOf(l)
                   const note = noteText(l)
                   const total = l.kind === 'total'
-                  const amount = fmtMoney(l.usd, l.khr)
+                  const amount = statementAmount(l, fmtMoney, tr)
                   return (
                     <tr
                       key={l.key}
