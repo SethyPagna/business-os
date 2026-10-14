@@ -143,6 +143,7 @@ type ServerHealthProbeResult = {
   status: number
   cloudflareAccessRequired: boolean
   payload: LooseRecord | null
+  runtimeMismatch?: boolean
 }
 
 // ?€?€?€ Mutable connection state (module-level, intentionally not React state) ?€?€?€
@@ -599,11 +600,11 @@ function dispatchRuntimeVersionMismatch(serverRuntime: LooseRecord = {}): void {
   }))
 }
 
-function checkRuntimeVersionFromHealth(payload: LooseRecord = {}): void {
+function checkRuntimeVersionFromHealth(payload: LooseRecord = {}): boolean {
   const serverRuntime = payload?.runtime || {}
-  if (shouldCompareRuntimeVersions(serverRuntime)) {
-    dispatchRuntimeVersionMismatch(serverRuntime)
-  }
+  if (!shouldCompareRuntimeVersions(serverRuntime)) return false
+  dispatchRuntimeVersionMismatch(serverRuntime)
+  return true
 }
 
 function createWriteBlockedError(channel: string, message: string, detail: LooseRecord = {}): ApiRuntimeError {
@@ -1214,12 +1215,13 @@ export async function pingServerHealth(force = false): Promise<ServerHealthProbe
         }
       } else {
         const payload = res.ok ? await res.clone().json().catch(() => null) : null
-        if (payload) checkRuntimeVersionFromHealth(payload)
+        const runtimeMismatch = payload ? checkRuntimeVersionFromHealth(payload) : false
         result = {
           online: isReachableServerResponseStatus(res),
           status: res.status,
           cloudflareAccessRequired: false,
           payload,
+          runtimeMismatch,
         }
       }
     } catch {
@@ -1234,6 +1236,7 @@ export async function pingServerHealth(force = false): Promise<ServerHealthProbe
     setServerHealth(result.online)
     _lastHealthProbeResult = result
     _lastHealthProbeAt = Date.now()
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('server:probe', { detail: { online: result.online, cloudflareAccessRequired: result.cloudflareAccessRequired, runtimeMismatch: result.runtimeMismatch === true } }))
     return result
   })()
 

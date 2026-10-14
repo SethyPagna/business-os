@@ -22,6 +22,7 @@ import { APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage, resolv
 import { getClientDeviceInfo } from './utils/deviceInfo.ts'
 import { authErrorDetail } from './utils/authErrorText.ts'
 import { getAuthStorage } from './utils/authStorage.ts'
+import { watchConnection } from './utils/connectionWatch.ts'
 import { getDirtyWork, hasDirtyWork, type DirtyWorkEntry } from './utils/dirtyWork.ts'
 import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
 import { effectivePermissions, type PermissionTier } from './utils/permissions.ts'
@@ -804,6 +805,13 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       }
     }
   }, [publicMode, syncUrl])
+
+  // A plain connection drop (the browser's offline event, or a failed /health
+  // probe) blocks saving at once; the banner and every gate read canWriteToServer.
+  useEffect(() => {
+    if (publicMode || typeof window === 'undefined') return undefined
+    return watchConnection(window, setSyncServerUnreachable, () => navigator.onLine !== false)
+  }, [publicMode])
 
   // Define translation lookup before any hook dependency arrays or callbacks
   // reference it, avoiding render-time TDZ crashes in production bundles.

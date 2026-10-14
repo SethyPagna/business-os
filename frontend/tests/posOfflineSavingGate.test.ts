@@ -1,7 +1,7 @@
 // Owner rule (offline mode cancelled, 26 Sep 2026): with no connection the app shows a banner and BLOCKS saving; the cart
 // and drafts stay on the screen. The till used to keep taking the sale, because nothing at the checkout read the
-// connection. The REAL POS is mounted here with a seeded cart and the app context's `canWriteToServer` (the signal the
-// banner already uses), and with the browser's own `navigator.onLine`:
+// connection. The REAL POS is mounted here with a seeded cart and the app context's `canWriteToServer` (the one signal the
+// banner and every gate read; the app context folds the browser's offline event and the /health probe into it):
 //   - Complete Sale is disabled with the reason beside it, in the pack of the screen (EN and KM);
 //   - the status picker, the quick-add customer save and the quick-add delivery save are blocked the same way;
 //   - the handlers refuse on their own (a disabled button is not the only guard), notify the reason and send nothing;
@@ -9,7 +9,6 @@
 //   - online, the same cart checks out and the quick-add saves are live.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { act } from 'react'
 import { createHarness, propsOf, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
 
 const read = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -38,8 +37,7 @@ const realFetch = globalThis.fetch
     ? new Response(JSON.stringify({ money_precision_version: 1, schema_ready: true, historical_edit_ready: true }), { status: 200, headers: { 'content-type': 'application/json' } })
     : (realFetch as (input: unknown, init?: unknown) => Promise<Response>)(input, init)
 )
-const browser = globalThis as unknown as { window: { localStorage: Storage; sessionStorage: Storage; navigator: { onLine: boolean }; addEventListener: (type: string, listener: () => void) => void; removeEventListener: (type: string, listener: () => void) => void } }
-const originalListeners = { add: browser.window.addEventListener, remove: browser.window.removeEventListener }
+const browser = globalThis as unknown as { window: { localStorage: Storage; sessionStorage: Storage; navigator: { onLine: boolean } } }
 
 interface Till {
   page: MountedSurface
@@ -149,26 +147,22 @@ try {
     assert.ok(till.notes.some((note) => note.type === 'error' && note.message === packs.en.pos_saving_needs_connection), 'it said why')
   })
 
-  await check('the browser reports no network while the app still holds a server link: blocked, and live again when the network returns', async () => {
-    const listeners = new Map<string, Array<() => void>>()
-    browser.window.addEventListener = (type, listener) => { listeners.set(type, [...(listeners.get(type) ?? []), listener]) }
-    browser.window.removeEventListener = (type, listener) => { listeners.set(type, (listeners.get(type) ?? []).filter((entry) => entry !== listener)) }
+  await check('one signal decides: the till follows the app context and ignores the browser flag, blocking and unblocking as canWriteToServer changes', async () => {
     browser.window.navigator.onLine = false
     try {
       const till = await mountTill('en')
-      assert.equal(propsOf(completeButton(till.page, 'en')).disabled, true, 'blocked on navigator.onLine === false')
+      assert.ok(!propsOf(completeButton(till.page, 'en')).disabled, 'navigator.onLine === false alone does not block: the app context has not said so')
+      assert.equal(reasonNodes(till.page, packs.en.pos_saving_needs_connection).length, 0)
+      till.app.canWriteToServer = false
+      await till.page.render({})
+      assert.equal(propsOf(completeButton(till.page, 'en')).disabled, true, 'blocked when the app context says saving is blocked')
       assert.ok(reasonNodes(till.page, packs.en.pos_saving_needs_connection).length === 1)
-      assert.ok((listeners.get('online') ?? []).length >= 1 && (listeners.get('offline') ?? []).length >= 1, 'the till listens for the browser online and offline events')
-      browser.window.navigator.onLine = true
-      await till.page.settle()
-      await act(async () => { for (const listener of listeners.get('online') ?? []) listener() })
-      await till.page.settle()
-      assert.ok(!propsOf(completeButton(till.page, 'en')).disabled, 'live again')
+      till.app.canWriteToServer = true
+      await till.page.render({})
+      assert.ok(!propsOf(completeButton(till.page, 'en')).disabled, 'live again the moment the app context clears it')
       assert.equal(reasonNodes(till.page, packs.en.pos_saving_needs_connection).length, 0)
     } finally {
       browser.window.navigator.onLine = true
-      browser.window.addEventListener = originalListeners.add
-      browser.window.removeEventListener = originalListeners.remove
     }
   })
 
@@ -253,8 +247,6 @@ try {
     assert.ok(banner.includes(`t('offline_mode_active') || '${packs.en.offline_mode_active}'`), 'the banner fallback is the same sentence')
   })
 } finally {
-  browser.window.addEventListener = originalListeners.add
-  browser.window.removeEventListener = originalListeners.remove
   browser.window.navigator.onLine = true
   ;(globalThis as unknown as { fetch: unknown }).fetch = realFetch
   await harness.close()

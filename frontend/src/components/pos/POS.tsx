@@ -16,7 +16,7 @@
  */
 
 import { Suspense, useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { useBrowserOnline } from '../../utils/useBrowserOnline.ts'
+import { useSavingGate } from '../../utils/useSavingGate.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
@@ -733,10 +733,8 @@ function paymentMethodSummary(details: PaymentDetail[]): string {
 }
 
 export default function POS() {
-  const { t, user, authReady, notify, settings, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate: currentExchangeRate, can, canWriteToServer } = useApp() as AppContextValue
-  const browserOnline = useBrowserOnline()
-  const savingBlocked = canWriteToServer === false || !browserOnline
-  const savingBlockedText = t('pos_saving_needs_connection')
+  const { t, user, authReady, notify, settings, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate: currentExchangeRate, can } = useApp() as AppContextValue
+  const { blocked: savingBlocked, reason: savingBlockedText } = useSavingGate()
   const canAddCustomer = can('contacts', 'add')
   const canEditCustomer = can('contacts', 'edit')
   const moneyCapability = useSaleMoneyCapability(Boolean(user && authReady), saleSecurityFingerprint(user, authReady))
