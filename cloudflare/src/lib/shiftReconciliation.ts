@@ -462,13 +462,18 @@ export async function shiftRefunds(env: Env, shift: ShiftReconciliationSession, 
  * payout also recorded as a linked delivery fee would be counted twice
  * (R-telegram E2, 27 Sep 2026).
  */
-export async function courierPayoutsWhere(env: Env, clauses: string[], params: Record<string, unknown>): Promise<ShiftMoney> {
+export async function courierPayoutsWhere(
+  env: Env, clauses: string[], params: Record<string, unknown>, options: { formula?: number } = {},
+): Promise<ShiftMoney> {
   const where = [...clauses, "COALESCE(NULLIF(sales.sale_status, ''), 'completed') <> 'cancelled'"]
+  const rielTwin = (options.formula ?? SHIFT_FIGURES_FORMULA) >= 2
+    ? 'WHEN COALESCE(sales.delivery_actual_cost_usd, 0) > 0 THEN 0'
+    : ''
   const khrExpr = `CASE WHEN EXISTS (
       SELECT 1 FROM fees
       WHERE fees.sale_id = sales.id AND COALESCE(fees.fee_type, '') = 'delivery'
     ) THEN 0
-    WHEN COALESCE(sales.delivery_actual_cost_usd, 0) > 0 THEN 0
+    ${rielTwin}
     ELSE COALESCE(sales.delivery_actual_cost_khr, 0) END`
   const row = await getDb(env).prepare(`SELECT COALESCE(SUM(${deliveryActualCostExpr('sales.')}), 0) AS usd,
       COALESCE(SUM(${khrExpr}), 0) AS khr FROM sales WHERE ${where.join(' AND ')}`)
@@ -477,10 +482,12 @@ export async function courierPayoutsWhere(env: Env, clauses: string[], params: R
 }
 
 /** What couriers were actually paid inside the shift's window. */
-export async function shiftCourierPayouts(env: Env, shift: ShiftReconciliationSession, nowMs: number): Promise<ShiftMoney> {
+export async function shiftCourierPayouts(
+  env: Env, shift: ShiftReconciliationSession, nowMs: number, options: { formula?: number } = {},
+): Promise<ShiftMoney> {
   const { clauses, params } = shiftWindowWhere('sales', shiftFilters(shift, nowMs))
   if (shift.branch_id) { clauses.push('sales.branch_id = @branchId'); params.branchId = shift.branch_id }
-  return courierPayoutsWhere(env, clauses, params)
+  return courierPayoutsWhere(env, clauses, params, options)
 }
 
 /**
@@ -787,11 +794,19 @@ export type ShiftSaleTender = [number, number, number, number, number]
 /** Past this many sales in one window the per-sale fingerprint is not stored
  *  (sales: null); the component comparison still runs. */
 export const SHIFT_CLOSE_SALE_CAP = 2000
+/**
+ * The drawer formula a close was stored under. 1: a courier payout also took its riel twin off the riel drawer
+ * (retired 14 Oct 2026, 6.0.390); 2: one currency per payout. A stored row without `formula` is 1 and is
+ * never rewritten: the drift check and Telegram read it under the formula that produced it.
+ */
+export const SHIFT_FIGURES_FORMULA = 2
 /** How many drifted sales one response names. The total is always given. */
 export const SHIFT_CLOSE_DRIFT_SALE_LIMIT = 20
 
 export type ShiftCloseFigures = {
   v: 1
+  /** Which drawer formula produced `reconciliation`; a row without it was closed under formula 1. */
+  formula: number
   taken_at: string
   window: { opened_at: string; closed_at: string | null }
   reconciliation: ShiftReconciliation
@@ -817,7 +832,7 @@ export type ShiftCloseDrift = {
   sales_total: number
   /** The close or the current read passed SHIFT_CLOSE_SALE_CAP: no per-sale list. */
   sales_unavailable: boolean
-  /** Today's computed figures -- what the report would have shown without N4. */
+  /** Today's computed figures (under the formula the close was stored with) -- what the report would have shown without N4. */
   current: ShiftReconciliation
 }
 
@@ -864,6 +879,7 @@ export function buildShiftCloseFigures(input: {
 }): ShiftCloseFigures {
   return {
     v: 1,
+    formula: SHIFT_FIGURES_FORMULA,
     taken_at: input.takenAt,
     window: { opened_at: input.openedAt, closed_at: input.closedAt },
     reconciliation: input.reconciliation,
@@ -931,8 +947,10 @@ export function parseShiftCloseFigures(json: unknown): ShiftCloseFigures | null 
       .map((entry) => [Number(entry[0]), ...[1, 2, 3, 4].map((i) => Number(entry[i]) || 0)] as ShiftSaleTender)
     : null
   const window = (raw.window ?? {}) as Record<string, unknown>
+  const formula = Math.floor(Number(raw.formula))
   return {
     v: 1,
+    formula: Number.isFinite(formula) && formula >= 1 ? formula : 1,
     taken_at: String(raw.taken_at ?? ''),
     window: { opened_at: String(window.opened_at ?? ''), closed_at: window.closed_at == null ? null : String(window.closed_at) },
     reconciliation,
@@ -984,6 +1002,54 @@ export function diffShiftSaleTenders(stored: ShiftSaleTender[], current: ShiftSa
 }
 
 /**
+ * The drawer a report prints for a shift: a closed shift stored under an older formula prints what it closed on
+ * (history is immutable), every other shift the live figures. The in-app report shows the stored close the same way.
+ */
+export async function loadShiftReconciliationAsClosed(
+  env: Env, shift: ShiftReconciliationSession, nowMs: number, options: { overflowLabel?: string; extraReviewCodes?: readonly string[] } = {},
+): Promise<ShiftReconciliation> {
+  const stored = shift.closed_at && shift.id != null ? await loadLegacyStoredReconciliation(env, shift.id) : null
+  if (!stored) return loadShiftReconciliation(env, shift, nowMs, options)
+  return applyShiftTimeReview(stored, shift.id == null ? null : await readShiftTimeReview(env, shift.id))
+}
+
+/**
+ * Today's reconciliation re-read under the formula a close was stored with, so a close made before the
+ * formula changed is compared with like for like and only a record can drift it. Pure for the current formula.
+ * Only the courier riel line differs between formulas; expected and difference follow it exactly.
+ */
+export async function reconciliationUnderFormula(
+  env: Env, shift: ShiftReconciliationSession, computed: ShiftReconciliation, formula: number, nowMs: number,
+): Promise<ShiftReconciliation> {
+  if (formula >= SHIFT_FIGURES_FORMULA) return computed
+  const courier = await shiftCourierPayouts(env, shift, nowMs, { formula })
+  const gap = courier.khr - computed.courier.khr
+  if (!gap) return { ...computed, courier }
+  const expectedKhr = computed.expected.khr == null ? null : roundKhr(computed.expected.khr - gap)
+  const countedKhr = computed.counted.khr
+  return {
+    ...computed,
+    courier,
+    expected: { usd: computed.expected.usd, khr: expectedKhr },
+    difference: { usd: computed.difference.usd, khr: countedKhr == null || expectedKhr == null ? null : roundKhr(countedKhr - expectedKhr) },
+  }
+}
+
+/**
+ * The reconciliation a CLOSED shift was stored with, when it was stored under an older formula; null when there
+ * is no stored row or it is current (the live figures then are the stored ones, give or take a real record).
+ * Telegram reads this so /shift prints what the owner closed on, as the report does.
+ */
+export async function loadLegacyStoredReconciliation(env: Env, shiftId: number): Promise<ShiftReconciliation | null> {
+  try {
+    const row = await getDb(env).prepare('SELECT figures_json FROM shift_close_figures WHERE shift_session_id = @id')
+      .get<{ figures_json: string }>({ id: shiftId })
+    const figures = row ? parseShiftCloseFigures(row.figures_json) : null
+    return figures && figures.formula < SHIFT_FIGURES_FORMULA ? figures.reconciliation : null
+  } catch { return null }
+}
+
+/**
  * The drift of one closed shift: today's computed figures against the stored
  * ones. Null when nothing moved. Sale ids are labelled with their receipt
  * number for the links; at most SHIFT_CLOSE_DRIFT_SALE_LIMIT are named and
@@ -993,9 +1059,10 @@ export async function loadShiftCloseDrift(
   env: Env,
   shift: ShiftReconciliationSession,
   stored: ShiftCloseFigures,
-  current: ShiftReconciliation,
+  computed: ShiftReconciliation,
   nowMs: number = Date.now(),
 ): Promise<ShiftCloseDrift | null> {
+  const current = await reconciliationUnderFormula(env, shift, computed, stored.formula, nowMs)
   const currentSales = await shiftSaleTenders(env, shift, nowMs)
   const components = compareShiftCloseFigures(stored, current, sumOtherTenders(currentSales))
   const salesUnavailable = !stored.sales || !currentSales

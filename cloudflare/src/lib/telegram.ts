@@ -17,7 +17,7 @@ import {
 // owns it, and the close routes, the current/history reads and this message all
 // call the same function -- see the header note there for what changed and why.
 import {
-  composeShiftFigures, computeShiftReconciliation, courierPayoutsWhere, expenseRowsWhere, FEE_SPLIT_COLUMNS, loadShiftReconciliation, readShiftTimeReview,
+  composeShiftFigures, computeShiftReconciliation, courierPayoutsWhere, expenseRowsWhere, FEE_SPLIT_COLUMNS, loadShiftReconciliationAsClosed, readShiftTimeReview,
   SHIFT_REVIEW, shiftDeliveryFeeExpenses, shiftExpenses, shiftFilters, summarizeShiftCash, tenderWhere,
   type ShiftCashResult, type ShiftMoney, type ShiftReconciliation, type ShiftTimeReview,
 } from './shiftReconciliation'
@@ -1582,7 +1582,7 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number, 
     // are inside the delivery cost row, as composeShiftFigures splits them.
     shiftExpenses(env, shift, nowMs, { overflowLabel, excludeDeliveryFees: true }),
     shiftDeliveryFeeExpenses(env, shift, nowMs),
-    loadShiftReconciliation(env, shift, nowMs, { overflowLabel }),
+    loadShiftReconciliationAsClosed(env, shift, nowMs, { overflowLabel }),
     getPaymentMethodBreakdown(env, filters),
     getDeliveryContactTotals(env, filters),
   ])
