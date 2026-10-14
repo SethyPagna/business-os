@@ -345,6 +345,7 @@ insRet.run(1, 3, 10, 'completed', 'customer', UTC(24, 8), 1) // customer refund 
     extractPlain(/\nfunction ymd\([\s\S]*?\n\}\n/, 'ymd'),
     extractPlain(/const NON_ADDITIVE = [^\n]*\n/, 'NON_ADDITIVE'),
     extractFn('parseGranularity'),
+    extractPlain(/\nfunction unknownCostFields\([^]*?\n\}\n/, 'unknownCostFields'),
     extractFn('gateTotals'),
     extractFn('gateProductRow'),
     extractFn('periodKeyFor'),
@@ -366,7 +367,7 @@ insRet.run(1, 3, 10, 'completed', 'customer', UTC(24, 8), 1) // customer refund 
   // unvalued_cost_usd / returned_cost_shortfall_usd are COGS the kernel held
   // OUT of cost_usd (Sep 6 2026). Same money, same door: a non-admin who
   // could read them would be reading part of the cost base.
-  const SECRET = ['cost_usd', 'profit_usd', 'margin_pct', 'cost_missing_snapshot_lines', 'unvalued_cost_usd', 'returned_cost_shortfall_usd', 'pending_cost_usd', 'pending_profit_usd']
+  const SECRET = ['cost_usd', 'profit_usd', 'margin_pct', 'cost_missing_snapshot_lines', 'cost_known_lines', 'cost_complete', 'unvalued_cost_usd', 'returned_cost_shortfall_usd', 'pending_cost_usd', 'pending_profit_usd']
   const totalsRow = { tx_count: 5, revenue_usd: 230, cost_usd: 73, profit_usd: 154, cost_missing_snapshot_lines: 1, pending_revenue_usd: 40, unvalued_cost_usd: 12, returned_cost_shortfall_usd: 4, cancelled_tx_count: 2, pending_cost_usd: 9, pending_profit_usd: 31 }
   const gatedStaff = gateTotals(totalsRow, false)
   check('gateTotals(non-admin): no cost/profit/margin/missing keys exist at all', SECRET.every((k) => !(k in gatedStaff)))

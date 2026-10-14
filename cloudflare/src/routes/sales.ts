@@ -800,8 +800,8 @@ app.post('/', async (c) => {
         quantity: item.quantity,
         branchId: item.branch_id,
         unitPriceUsd: Number(item.applied_price_usd ?? product?.selling_price_usd ?? 0),
-        costPriceUsd: Number(product?.cost_price_usd || 0),
-        costPriceKhr: Number(product?.cost_price_khr || 0),
+        costPriceUsd: product?.cost_price_usd == null ? null : Number(product.cost_price_usd),
+        costPriceKhr: product?.cost_price_khr == null ? null : Number(product.cost_price_khr),
         batchId: item.damaged_lot_id ? null : item.batch_id,
         batchLabel: item.damaged_lot_id ? null : item.batch_label,
         batchExpiryDate: item.damaged_lot_id ? null : item.batch_expiry_date,
@@ -1679,16 +1679,20 @@ app.post('/', async (c) => {
       // deductions never apply to it.
       if (item.damaged_lot_id && item.branch_id && shouldDeductStock) {
         statements.push({
-          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reference_id, user_id, user_name)
-                VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_OUT_MOVEMENT}', @quantity, @unit_cost_usd, @unit_cost_khr,
+          // The units leave the HELD lot, so the movement carries that lot's own
+          // cost (NULL = unknown), never today's catalog cost for the product.
+          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reference_id, user_id, user_name)
+                VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_OUT_MOVEMENT}', @quantity,
+                  (SELECT unit_cost_usd FROM damaged_stock_lots WHERE id = @damaged_lot_id), NULL,
+                  (SELECT unit_cost_usd * @cost_quantity FROM damaged_stock_lots WHERE id = @damaged_lot_id), NULL,
                   (SELECT id FROM sales WHERE client_request_id = @sale_write_key AND client_request_id <> ''), @user_id, @user_name)`,
           params: {
             product_id: item.product_id,
             product_name: item.product_name,
             branch_id: item.branch_id,
             quantity: -item.quantity,
-            unit_cost_usd: item.costPriceUsd,
-            unit_cost_khr: item.costPriceKhr,
+            cost_quantity: item.quantity,
+            damaged_lot_id: Number(item.damaged_lot_id),
             sale_write_key: saleWriteKey,
             user_id: actorId(user),
             user_name: actorSnapshot(user),
@@ -1734,8 +1738,8 @@ app.post('/', async (c) => {
         const movementBatchId = item.batch_id
           || (autoTakes.length === 1 && autoTakes[0].quantity === item.quantity ? autoTakes[0].batchId : null)
         statements.push({
-          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reference_id, user_id, user_name, batch_id)
-                VALUES (@product_id, @product_name, @branch_id, 'sale', @quantity, @unit_cost_usd, @unit_cost_khr,
+          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reference_id, user_id, user_name, batch_id)
+                VALUES (@product_id, @product_name, @branch_id, 'sale', @quantity, @unit_cost_usd, @unit_cost_khr, @total_cost_usd, @total_cost_khr,
                   (SELECT id FROM sales WHERE client_request_id = @sale_write_key AND client_request_id <> ''), @user_id, @user_name, @batch_id)`,
           params: {
             product_id: item.product_id,
@@ -1744,6 +1748,8 @@ app.post('/', async (c) => {
             quantity: -item.quantity,
             unit_cost_usd: item.costPriceUsd,
             unit_cost_khr: item.costPriceKhr,
+            total_cost_usd: item.costPriceUsd == null ? null : multiplyMoney4(item.costPriceUsd, item.quantity),
+            total_cost_khr: item.costPriceKhr == null ? null : multiplyMoney4(item.costPriceKhr, item.quantity),
             sale_write_key: saleWriteKey,
             user_id: actorId(user),
             user_name: actorSnapshot(user),
@@ -2733,13 +2739,20 @@ app.patch('/:id/status', async (c) => {
       params: lotParams,
     })
     statements.push({
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name)
-            VALUES (@product_id, @product_name, @branch_id, '${op.delta > 0 ? DAMAGE_OUT_MOVEMENT : DAMAGE_IN_MOVEMENT}', @quantity, 0, 0, @reason, @reference_id, @user_id, @user_name)`,
+      // Held units move at the HELD lot's own cost (NULL = unknown); a literal 0
+      // here would record "free" for stock that was paid for.
+      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name)
+            VALUES (@product_id, @product_name, @branch_id, '${op.delta > 0 ? DAMAGE_OUT_MOVEMENT : DAMAGE_IN_MOVEMENT}', @quantity,
+              (SELECT unit_cost_usd FROM damaged_stock_lots WHERE id = @lot), NULL,
+              (SELECT unit_cost_usd * @cost_quantity FROM damaged_stock_lots WHERE id = @lot), NULL,
+              @reason, @reference_id, @user_id, @user_name)`,
       params: {
         product_id: op.productId,
         product_name: op.productName,
         branch_id: op.branchId,
         quantity: -op.delta,
+        cost_quantity: Math.abs(op.delta),
+        lot: op.lotId,
         reason: movementReason,
         reference_id: id,
         user_id: user?.id ?? null,
@@ -6166,7 +6179,7 @@ export function gateSalesReportMoney(row:Record<string,unknown>,isAdmin:boolean,
   const courierMoney=canViewCourier?Object.fromEntries(COURIER_COST_KEYS.filter(key=>key in row).map(key=>[key,row[key]])):{}
   const {cost_usd,profit_usd,gross_profit_usd,pending_cost_usd,pending_profit_usd,unvalued_cost_usd,returned_cost_usd,
     cost,gross_profit,delivery_actual_cost_usd,delivery_actual_cost_count,delivery_margin_usd,delivery_net_usd,recognized_delivery_cost_usd,pending_delivery_cost_usd,
-    returned_cost_shortfall_usd,cost_missing_snapshot_lines,margin_pct,money_precision_mode,money_complete,money_unknown_cost_lines,money_contributing_rows,
+    returned_cost_shortfall_usd,cost_missing_snapshot_lines,cost_known_lines,cost_complete,margin_pct,money_precision_mode,money_complete,money_unknown_cost_lines,money_contributing_rows,
     // Stock removed entirely, priced at COST, and the two figures derived from
     // it. They are cost money and leak the same thing profit_usd does: with
     // revenue_usd public, revenue_after_losses_usd hands a non-admin the exact
@@ -6646,7 +6659,7 @@ app.get('/export', async (c) => {
       product_discount_usd: item.product_discount_usd ?? 0, product_discount_khr: item.product_discount_khr ?? 0,
       manual_discount_type: item.manual_discount_type ?? '', manual_discount_value: item.manual_discount_value ?? 0,
       manual_discount_usd: item.manual_discount_usd ?? 0, manual_discount_khr: item.manual_discount_khr ?? 0,
-      cost_price_usd: item.cost_price_usd ?? 0, cost_price_khr: item.cost_price_khr ?? 0,
+      cost_price_usd: item.cost_price_usd ?? null, cost_price_khr: item.cost_price_khr ?? null,
       batch_label: item.batch_label ?? '', returned_quantity: item.returned_quantity ?? '',
       discount_usd: index === 0 ? sale.discount_usd : '', discount_khr: index === 0 ? sale.discount_khr : '',
       tax_usd: index === 0 ? sale.tax_usd : '', amount_paid_usd: index === 0 ? sale.amount_paid_usd : '', amount_paid_khr: index === 0 ? sale.amount_paid_khr : '',
@@ -6705,6 +6718,9 @@ app.get('/export', async (c) => {
     revenue_usd: revenueBeforeRefunds,
     cogs_usd: salesTotals.cost_usd,
     gross_profit_usd: salesTotals.profit_usd,
+    cost_missing_snapshot_lines: salesTotals.cost_missing_snapshot_lines,
+    cost_known_lines: salesTotals.cost_known_lines,
+    cost_complete: salesTotals.cost_complete,
     gross_margin_pct: netRevenueUsd > 0 ? round2((salesTotals.profit_usd / netRevenueUsd) * 100) : 0,
     total_discounts_usd: salesTotals.discount_usd,
     total_tax_usd: salesTotals.tax_usd,

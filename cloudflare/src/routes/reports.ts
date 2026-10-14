@@ -198,6 +198,18 @@ function filterError(error: unknown): string {
 }
 
 /**
+ * The unknown-cost state of a row, for a caller who may read cost. A count the
+ * kernel did not send stays ABSENT (never coerced to 0, which would read as
+ * "every cost known"); the read diagnostic is the fallback source for a row
+ * that carries one. cost_complete follows the count it is printed beside.
+ */
+function unknownCostFields(sent: unknown, known: unknown, diagnostic: ReturnType<typeof reportMoneyDiagnostic>): Record<string, unknown> {
+  const count = sent == null ? diagnostic?.unknown_cost_lines : num(sent)
+  if (count === undefined) return {}
+  return { cost_missing_snapshot_lines: count, ...(known == null ? {} : { cost_known_lines: num(known) }), cost_complete: count === 0 }
+}
+
+/**
  * Cost money never leaves the server for a caller who may not read it. The
  * cost / profit / margin keys are NOT assigned (a client cannot tell "0"
  * from "hidden", so absence is the contract -- same rule as
@@ -230,7 +242,7 @@ export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: b
   // loss (and therefore cost) by subtraction. All five travel together, and
   // they are OMITTED rather than zeroed, like every other gated key here.
   const {
-    cost_usd, profit_usd, cost_missing_snapshot_lines, pending_cost_usd, pending_profit_usd,
+    cost_usd, profit_usd, cost_missing_snapshot_lines, cost_known_lines, cost_complete, pending_cost_usd, pending_profit_usd,
     unvalued_cost_usd, returned_cost_usd, returned_cost_shortfall_usd,
     delivery_actual_cost_usd, delivery_actual_cost_count, delivery_margin_usd, delivery_net_usd,
     recognized_delivery_cost_usd, pending_delivery_cost_usd, margin_pct,
@@ -256,7 +268,7 @@ export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: b
     ...rest,
     cost_usd: money(num(cost_usd)),
     profit_usd: money(profit),
-    cost_missing_snapshot_lines: num(cost_missing_snapshot_lines),
+    ...unknownCostFields(cost_missing_snapshot_lines, cost_known_lines, diagnostic),
     margin_pct: revenue > 0 ? round2((profit / revenue) * 100) : null,
     pending_cost_usd: money(num(pending_cost_usd)),
     pending_profit_usd: money(num(pending_profit_usd)),
@@ -283,7 +295,7 @@ export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: b
 
 export function gateProductRow(row: Record<string, unknown>, isAdmin: boolean, places: 2 | 4 = 2): Record<string, unknown> {
   const diagnostic = reportMoneyDiagnostic(row)
-  const { cost_usd, profit_usd, cost_missing_snapshot_lines, margin_pct,
+  const { cost_usd, profit_usd, cost_missing_snapshot_lines, cost_known_lines, cost_complete, margin_pct,
     money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows, ...rest } = row
   if (!isAdmin) return rest
   const money = (value: number): number => (places === 4 ? Math.round(value * 10_000) / 10_000 : round2(value))
@@ -293,7 +305,7 @@ export function gateProductRow(row: Record<string, unknown>, isAdmin: boolean, p
     ...rest,
     cost_usd: money(num(cost_usd)),
     profit_usd: money(profit),
-    cost_missing_snapshot_lines: num(cost_missing_snapshot_lines),
+    ...unknownCostFields(cost_missing_snapshot_lines, cost_known_lines, diagnostic),
     margin_pct: lineSales > 0 ? round2((profit / lineSales) * 100) : null,
     ...(diagnostic ? { money_precision_mode: diagnostic.precision_mode, money_complete: diagnostic.complete,
       money_unknown_cost_lines: diagnostic.unknown_cost_lines, money_contributing_rows: diagnostic.contributing_rows }
@@ -303,10 +315,10 @@ export function gateProductRow(row: Record<string, unknown>, isAdmin: boolean, p
 
 export function gateBusinessSummarySaleRow(row: Record<string, unknown>, isAdmin: boolean, canViewCosts = isAdmin, canViewCourier = isAdmin): Record<string, unknown> {
   const diagnostic = reportMoneyDiagnostic(row)
-  const { cost_usd, cost_before_floor_usd, cost_missing_snapshot_lines, gross_profit_usd,
+  const { cost_usd, cost_before_floor_usd, cost_missing_snapshot_lines, cost_complete, gross_profit_usd,
     money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows, ...publicRow } = row
   if (!isAdmin && !canViewCosts) return publicRow
-  const adminRow = { ...publicRow, cost_usd, cost_before_floor_usd, cost_missing_snapshot_lines, gross_profit_usd,
+  const adminRow = { ...publicRow, cost_usd, cost_before_floor_usd, cost_missing_snapshot_lines, cost_complete, gross_profit_usd,
     ...(diagnostic ? { money_precision_mode: diagnostic.precision_mode, money_complete: diagnostic.complete,
       money_unknown_cost_lines: diagnostic.unknown_cost_lines, money_contributing_rows: diagnostic.contributing_rows }
       : money_precision_mode !== undefined ? { money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows } : {}) }
@@ -400,6 +412,7 @@ export function rollupPeriodRows(rows: SummaryDayRow[], granularity: ReportGranu
     }
     const tx = num(acc.tx_count)
     finished.avg_order_usd = tx > 0 ? round2(num(acc.revenue_usd) / tx) : 0
+    if (acc.cost_missing_snapshot_lines !== undefined) finished.cost_complete = num(acc.cost_missing_snapshot_lines) === 0
     out.push(finished as unknown as PeriodReportRow)
   }
   return out.sort((a, b) => (a.period < b.period ? -1 : a.period > b.period ? 1 : 0))

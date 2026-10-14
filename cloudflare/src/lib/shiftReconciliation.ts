@@ -631,6 +631,13 @@ export type ShiftFigures = {
   sales_usd: number
   cogs_usd: number
   profit_usd: number
+  /**
+   * Sold lines (and restocked returned lines) whose cost is UNKNOWN (NULL
+   * snapshot). cogs_usd and profit_usd above are the known lines only, so a
+   * non-zero count makes them partial. OPTIONAL: present only when the sales
+   * kernel sent it -- absent means "not measured", never "all known".
+   */
+  cost_missing_snapshot_lines?: number
   /** What customers were charged for delivery. */
   delivery_fee_usd: number
   /**
@@ -675,7 +682,7 @@ export type ShiftFiguresInput = {
   additionalCash?: Partial<ShiftMoney> | null | undefined
   counted: Partial<ShiftCount> | null | undefined
   totals: {
-    revenue_usd?: unknown; cost_usd?: unknown; profit_usd?: unknown
+    revenue_usd?: unknown; cost_usd?: unknown; profit_usd?: unknown; cost_missing_snapshot_lines?: unknown
     delivery_usd?: unknown; pending_revenue_usd?: unknown; refund_usd?: unknown
     removal_loss_usd?: unknown
     revenue_after_losses_usd?: unknown; profit_after_losses_usd?: unknown
@@ -702,6 +709,9 @@ export function composeShiftFigures(input: ShiftFiguresInput): ShiftFigures {
     sales_usd: round2(finite(totals.revenue_usd)),
     cogs_usd: round2(finite(totals.cost_usd)),
     profit_usd: round2(finite(totals.profit_usd)),
+    ...(totals.cost_missing_snapshot_lines === undefined ? {} : {
+      cost_missing_snapshot_lines: Math.max(0, Math.round(finite(totals.cost_missing_snapshot_lines))),
+    }),
     delivery_fee_usd: round2(finite(totals.delivery_usd)),
     // Never negative: an amount owed cannot be less than nothing, and a
     // negative here would be a data defect printed as a business fact.

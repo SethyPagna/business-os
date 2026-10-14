@@ -400,6 +400,17 @@ export interface SalesTotals {
   cost_usd: number
   profit_usd: number
   avg_order_usd: number
+  // ---- unknown cost (owner, 14 Oct 2026) -----------------------------------
+  // A NULL cost snapshot is UNKNOWN, not $0: cost_usd and profit_usd above sum
+  // the KNOWN lines only, and this count says how many sold (or restocked
+  // returned) lines were left out. A recorded $0 is a real $0 and is never
+  // counted here. Plain enumerable fields, so a cached JSON payload (the Sales
+  // strip) carries them. cost_known_lines is the matching count of valued
+  // lines with a recorded cost: zero known beside a non-zero unknown count is
+  // "every line unknown", which a screen shows as Unknown rather than $0.00.
+  cost_missing_snapshot_lines: number
+  cost_known_lines: number
+  cost_complete: boolean
   // ---- stock removed entirely, valued at cost (owner, Sep 14 2026) --------
   // OPTIONAL because they are attached only where the window is a plain
   // date/branch window: a report filtered to one payment method or to
@@ -437,6 +448,9 @@ export interface SalesPeriodRow {
   cost_usd: number
   profit_usd: number
   cancelled_tx_count: number
+  cost_missing_snapshot_lines: number
+  cost_known_lines: number
+  cost_complete: boolean
 }
 
 export function emptySalesTotals(): SalesTotals {
@@ -452,6 +466,7 @@ export function emptySalesTotals(): SalesTotals {
     unvalued_tx_count: 0, unvalued_cost_usd: 0, net_sales_usd: 0,
     refund_usd: 0, refund_charged_usd: 0, refund_excess_usd: 0,
     revenue_usd: 0, pending_revenue_usd: 0, collected_total_usd: 0, cost_usd: 0, profit_usd: 0, avg_order_usd: 0,
+    cost_missing_snapshot_lines: 0, cost_known_lines: 0, cost_complete: true,
   }
 }
 
@@ -833,7 +848,11 @@ export async function removalLossesFor(env: Env, f: SalesFilters): Promise<Remov
  *  profit_after_losses_usd by hand. */
 export function withRemovalLosses<T extends SalesTotals>(totals: T, loss: RemovalLossSummary | null, places: 2 | 4 = 2): T {
   if (!loss) return totals
-  return { ...totals, ...removalLossTotals(totals.revenue_usd, totals.profit_usd, loss, places) }
+  const merged = { ...totals, ...removalLossTotals(totals.revenue_usd, totals.profit_usd, loss, places) }
+  // The spread above drops the non-enumerable read diagnostic; carry it over so
+  // a window with removal losses reports its unknown-cost state like one without.
+  const diagnostic = reportMoneyDiagnostic(totals)
+  return diagnostic ? attachReportDiagnostic(merged, diagnostic) : merged
 }
 
 type ReportScalarRow = Record<string, unknown> & { id: number }
@@ -1178,13 +1197,13 @@ type ReportExactKey = typeof REPORT_EXACT_KEYS[number]
 type ReportExactBucket = {
   money: Record<ReportExactKey, ReportExactDecimal>
   tx: number; pendingTx: number; deliveryActualCount: number; deliverySaleCount: number
-  cancelledTx: number; unvaluedTx: number; missingCostLines: number
+  cancelledTx: number; unvaluedTx: number; missingCostLines: number; knownCostLines: number
 }
 
 function reportBucket(): ReportExactBucket {
   return {
     money: Object.fromEntries(REPORT_EXACT_KEYS.map((key) => [key, ReportExactDecimal.zero()])) as Record<ReportExactKey, ReportExactDecimal>,
-    tx: 0, pendingTx: 0, deliveryActualCount: 0, deliverySaleCount: 0, cancelledTx: 0, unvaluedTx: 0, missingCostLines: 0,
+    tx: 0, pendingTx: 0, deliveryActualCount: 0, deliverySaleCount: 0, cancelledTx: 0, unvaluedTx: 0, missingCostLines: 0, knownCostLines: 0,
   }
 }
 function reportAdd(bucket: ReportExactBucket, key: ReportExactKey, value: ReportExactDecimal): void {
@@ -1234,7 +1253,7 @@ type ReportSaleFacts = {
   net: ReportExactDecimal; adjustment: ReportExactDecimal; refund: ReportExactDecimal; refundPaid: ReportExactDecimal
   refundExcess: ReportExactDecimal
   delivery: ReportExactDecimal; deliveryActual: ReportExactDecimal; cost: ReportExactDecimal; returnedCost: ReportExactDecimal
-  itemDiscount: ReportExactDecimal; unvaluedCost: ReportExactDecimal; missingCostLines: number
+  itemDiscount: ReportExactDecimal; unvaluedCost: ReportExactDecimal; missingCostLines: number; knownCostLines: number
 }
 
 type V1RefundLine = { row: ReportScalarRow; snapshot: CustomerReturnRefundSnapshotV1 }
@@ -1333,6 +1352,7 @@ function deriveReportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[]
     let v1Returns = 0
     let returnedCost = ReportExactDecimal.zero()
     let missingCostLines = 0
+    let knownCostLines = 0
     for (const returned of returns.get(Number(sale.id)) || []) {
       const returnVersion = reportVersion(returned)
       if (returnVersion === 1) {
@@ -1379,7 +1399,7 @@ function deriveReportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[]
       const unit = reportMoney(item, 'cost_price_usd', version, false)
       if (unit.isNegative()) throw new ReportMoneyPrecisionError(version === 1 ? 'invalid_saved_money4' : 'invalid_recorded_decimal')
       const lineCost = unit.multiply(quantity)
-      if (recognized && valued) cost = cost.add(lineCost)
+      if (recognized && valued) { cost = cost.add(lineCost); knownCostLines += 1 }
       if (recognized && !valued) unvaluedCost = unvaluedCost.add(lineCost)
     }
     const delivery = String(sale.delivery_fee_paid_by || 'customer') === 'store'
@@ -1387,7 +1407,7 @@ function deriveReportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[]
     const deliveryActual = Number(sale.delivery_has_linked_fee) !== 0
       ? ReportExactDecimal.zero() : reportMoney(sale, 'delivery_actual_cost_usd', version)
     return { sale, version, recognized, awaiting, valued, net, adjustment, refund, refundPaid, refundExcess, delivery, deliveryActual,
-      cost, returnedCost, itemDiscount, unvaluedCost, missingCostLines }
+      cost, returnedCost, itemDiscount, unvaluedCost, missingCostLines, knownCostLines }
   })
 }
 
@@ -1431,6 +1451,7 @@ function aggregateReportSnapshot(
     if (sale.delivery_actual_cost_usd != null) bucket.deliveryActualCount += 1
     if (Number(sale.is_delivery) === 1) bucket.deliverySaleCount += 1
     bucket.missingCostLines += fact.missingCostLines
+    bucket.knownCostLines += fact.knownCostLines
     if (!fact.recognized) continue
     const recognizedNet = fact.net.add(fact.adjustment)
     reportAdd(bucket, 'recognizedNet', recognizedNet); reportAdd(bucket, 'recognizedTax', tax)
@@ -1528,6 +1549,9 @@ function exactReportTotals(bucket: ReportExactBucket, snapshot: SalesReportSnaps
     cost_usd: netCost.toNumber(places),
     profit_usd: profit.toNumber(places),
     avg_order_usd: bucket.tx > 0 ? revenue.divide(ReportExactDecimal.recorded(String(bucket.tx))).toNumber(places) : 0,
+    cost_missing_snapshot_lines: bucket.missingCostLines,
+    cost_known_lines: bucket.knownCostLines,
+    cost_complete: bucket.missingCostLines === 0,
   }, diagnostic)
 }
 
@@ -1569,6 +1593,7 @@ export function businessSummarySalesRowsFromSnapshot(snapshot: SalesReportSnapsh
       refund_usd: fact.refund.toNumber(BUCKET_MONEY_PLACES), net_revenue_usd: revenue.toNumber(BUCKET_MONEY_PLACES),
       pending_revenue_usd: fact.awaiting ? revenue.toNumber(BUCKET_MONEY_PLACES) : 0, collected_total_usd: collected.toNumber(BUCKET_MONEY_PLACES),
       cost_usd: cost.toNumber(BUCKET_MONEY_PLACES), cost_before_floor_usd: rawCost.toNumber(BUCKET_MONEY_PLACES), cost_missing_snapshot_lines: fact.missingCostLines,
+      cost_complete: fact.missingCostLines === 0,
       gross_profit_usd: revenue.add(delivery).subtract(deliveryActual).subtract(cost).toNumber(BUCKET_MONEY_PLACES),
     }
     return attachReportDiagnostic(row, {
@@ -1818,6 +1843,9 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
     cost_usd: round2(netCostUsd),
     profit_usd: round2(profitUsd),
     avg_order_usd: txCount > 0 ? round2(revenueUsd / txCount) : 0,
+    cost_missing_snapshot_lines: num(level.missing_snapshot_lines),
+    cost_known_lines: num(level.cost_known_lines),
+    cost_complete: num(level.missing_snapshot_lines) === 0,
     ...(removalLoss || {}),
   }
 }
@@ -1874,7 +1902,8 @@ function salesPeriodRowsFromSnapshot(snapshot: SalesReportSnapshot, granularity:
       revenue_usd: totals.revenue_usd, gross_sales_usd: totals.gross_sales_usd, refund_usd: totals.refund_usd,
       discount_usd: totals.discount_usd, item_discount_usd: totals.item_discount_usd,
       total_discount_usd: totals.total_discount_usd, tax_usd: totals.tax_usd, delivery_usd: totals.delivery_usd,
-      cost_usd: totals.cost_usd, profit_usd: totals.profit_usd, cancelled_tx_count: totals.cancelled_tx_count }
+      cost_usd: totals.cost_usd, profit_usd: totals.profit_usd, cancelled_tx_count: totals.cancelled_tx_count,
+      cost_missing_snapshot_lines: totals.cost_missing_snapshot_lines, cost_known_lines: totals.cost_known_lines, cost_complete: totals.cost_complete }
   }).sort((a, b) => a.period.localeCompare(b.period))
 }
 
@@ -2913,8 +2942,7 @@ function groupedRowsFromSnapshot(snapshot: SalesReportSnapshot, groupBy: SalesGr
   return [...aggregateReportSnapshot(snapshot, (sale) => identity(sale).key).entries()].map(([key, bucket]) => {
     const totals = exactReportTotals(bucket, snapshot, BUCKET_MONEY_PLACES)
     const meta = metadata.get(key) || { key, label: '', entity_id: null }
-    const row = { key, label: meta.label, entity_id: meta.entity_id,
-      cost_missing_snapshot_lines: bucket.missingCostLines, ...totals } as SalesGroupedRow
+    const row = { key, label: meta.label, entity_id: meta.entity_id, ...totals } as SalesGroupedRow
     return attachReportDiagnostic(row, reportMoneyDiagnostic(totals)!)
   })
 }
@@ -2962,7 +2990,7 @@ export interface ProductSalesRankingRow {
   /** SUM(sale_items.total_usd): line totals after line discounts, before order-level store/membership discounts. */
   line_sales_usd: number
   cost_usd: number
-  /** line_sales_usd - cost_usd (item-level gross profit; NULL cost snapshots count as 0 and are flagged). */
+  /** line_sales_usd - cost_usd (item-level gross profit over the lines with a known cost; NULL snapshots are left out and counted in cost_missing_snapshot_lines). */
   profit_usd: number
   cost_missing_snapshot_lines: number
   // ---- additive identity/stock columns (peer reports-redesign lane, Sep 6
@@ -3077,16 +3105,13 @@ export async function getProductSalesRanking(env: Env, f: SalesFilters, limit = 
 // in a range (e.g. to merge in expense-only days for Reconciliation) union
 // this with their own day set.
 // cost_missing_snapshot_lines: how many RECOGNIZED sold lines that day have
-// no cost_price_usd snapshot (legacy/imported rows -- the live create-sale
-// path always writes a numeric snapshot, see routes/sales.ts's `costPriceUsd:
-// Number(product?.cost_price_usd || 0)`). Those lines contribute $0 to
-// cost_usd via plain SQL SUM/COALESCE -- the EXACT same basis salesCost()
-// (this file, used by getSalesTotals/getSalesPeriodSeries) already uses, so
-// the workbook's COGS figure never drifts from the Dashboard/Sales-page
-// figure for the same range. This count is purely a transparency signal for
-// the Definitions/COGS sheet ("N sold lines have no cost snapshot and are
-// counted as $0 COGS here, same as everywhere else in the app") -- it never
-// changes cost_usd itself.
+// no cost_price_usd snapshot (NULL = UNKNOWN cost: legacy/imported rows, or a
+// product sold while its catalog cost was blank). Those lines are left OUT of
+// cost_usd -- cost_usd is the sum of the known lines -- on the same basis the
+// Dashboard/Sales-page figure for the same range uses. The count is how a
+// screen or workbook says "N sold lines have an unknown cost" beside the
+// COGS and profit figures; it never changes cost_usd itself. A recorded $0 is
+// a real $0 and is not counted.
 export type BusinessSummaryDayRow = { date: string; cost_missing_snapshot_lines: number } & SalesTotals
 
 export async function getBusinessSummaryPeriodRows(env: Env, f: SalesFilters, granularity: 'day' | 'week' | 'month') {
@@ -3131,7 +3156,6 @@ export async function getBusinessSummaryPeriodRows(env: Env, f: SalesFilters, gr
     const to = granularity === 'month' ? new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + 1, 0))
       : granularity === 'week' ? new Date(from.getTime() + 6 * 86_400_000) : from
     return attachReportDiagnostic({ period, date_from: day, date_to: to.toISOString().slice(0, 10), days: daySets.get(period)?.size || 0,
-      cost_missing_snapshot_lines: diagnostic.unknown_cost_lines,
       ...withRemovalLosses(totals, lossBuckets ? lossBuckets.get(period) || EMPTY_REMOVAL_LOSS : null, BUCKET_MONEY_PLACES) }, diagnostic)
   }).sort((a, b) => a.period.localeCompare(b.period))
 }
@@ -3145,8 +3169,7 @@ export async function getBusinessSummaryDayRows(env: Env, f: SalesFilters): Prom
   }
   return [...aggregateReportSnapshot(snapshot, dateFor).entries()].map(([date, bucket]) => {
     const totals = exactReportTotals(bucket, snapshot, BUCKET_MONEY_PLACES)
-    const diagnostic = reportMoneyDiagnostic(totals)!
-    return attachReportDiagnostic({ date, cost_missing_snapshot_lines: diagnostic.unknown_cost_lines, ...totals }, diagnostic)
+    return attachReportDiagnostic({ date, ...totals }, reportMoneyDiagnostic(totals)!)
   }).sort((a, b) => a.date.localeCompare(b.date))
 }
 
