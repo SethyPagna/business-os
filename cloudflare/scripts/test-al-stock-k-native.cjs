@@ -814,7 +814,7 @@ async function main() {
         t.note('restore status ' + restored.status + '; audited=' + audited + '; D1 statements: ' + restored.d1)
       })
       // Recovery, with the audit store back: clear maintenance (force), retry the same restore; this time it is recorded.
-      const clearedHold = await R.api('POST', '/api/backups/maintenance/clear', { force: true })
+      const clearedHold = await R.api('POST', '/api/backups/maintenance/clear', { force: true, currentPassword: 'al-repro-admin-password-1' })
       const retried = await R.api('POST', '/api/backups', { type: 'import-folder', sourceDir: bk.name, currentPassword: 'al-repro-admin-password-1' })
       t.eq('recovery: clear, then retry the same restore', [clearedHold.status, retried.status], [200, 200])
       t.eq('the retried restore is on record exactly once', (await R.q("SELECT COUNT(*) n FROM audit_logs WHERE entity='backup' AND action='restore'"))[0].n, 1)

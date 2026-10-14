@@ -81,7 +81,7 @@ app.post('/maintenance/clear', async (c) => {
   if (!hasPermission(user, 'backup_restore')) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
-  const body = (await c.req.json<{ force?: boolean }>().catch(() => ({}))) as { force?: boolean }
+  const body = (await c.req.json<{ force?: boolean; currentPassword?: unknown }>().catch(() => ({}))) as { force?: boolean; currentPassword?: unknown }
   const maintenance = await getMaintenance(c.env)
   if (!maintenance) return c.json({ cleared: true, wasSet: false })
   if (maintenance.mode !== 'restore') return c.json({ cleared: false, code: 'maintenance_active',
@@ -93,6 +93,9 @@ app.post('/maintenance/clear', async (c) => {
       maintenance: maintenanceStatus(maintenance),
     }, 400)
   }
+  // Forcing the hold off re-opens writes on a half-restored database, so it asks for what the restore asked for.
+  const passwordDenied = await denyUnlessCurrentPassword(c, body, 403)
+  if (passwordDenied) return passwordDenied
   const cleared = await endMaintenance(c.env, null, { force: true, expectedRevision: maintenance.revision })
   if (!cleared) return c.json({ cleared: false, code: 'maintenance_changed',
     error: 'Maintenance changed while clearing it. Inspect the current state before trying again.' }, 409)

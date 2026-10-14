@@ -73,11 +73,48 @@ async function main() {
 
     await check('every refused step-up is on the audit trail with actor, route and reason, and never the password', async (t) => {
       const rows = await world.query("SELECT user_name, entity_id, details FROM audit_logs WHERE action = 'step_up_refused' ORDER BY id")
-      t.eq('three refusals were recorded', rows.length, 3)
-      t.eq('the route', rows.map((row) => row.entity_id), ['/api/backups', '/api/backups', '/api/backups'])
-      t.eq('the reasons', rows.map((row) => JSON.parse(row.details).reason), ['current_password_required', 'incorrect_password', 'current_password_required'])
-      t.eq('the actor', rows.map((row) => row.user_name), ['admin', 'admin', 'admin'])
+      t.eq('four refusals were recorded', rows.length, 4)
+      t.eq('the route', rows.map((row) => row.entity_id), ['/api/backups', '/api/backups', '/api/backups', '/api/backups'])
+      t.eq('the reasons', rows.map((row) => JSON.parse(row.details).reason), ['restore_builtin_admin_only', 'current_password_required', 'incorrect_password', 'current_password_required'])
+      t.eq('the actor', rows.map((row) => row.user_name), ['operator', 'admin', 'admin', 'admin'])
       t.ok('no password anywhere in the rows', !rows.some((row) => /not-the-password/.test(JSON.stringify(row)) || row.details.includes(adminPassword)), rows)
+    })
+
+    const clearHold = (body, as = 'admin') => world.api('POST', '/api/backups/maintenance/clear', body, { as })
+    const holdFlag = JSON.stringify({ mode: 'restore', token: 'stuck-restore-token', backupKey: 'backups/cloudflare/x.json', startedAt: '2026-10-14T01:00:00.000Z',
+      startedBy: 'admin', phase: 'failed', error: 'died', updatedAt: '2026-10-14T01:00:05.000Z' })
+
+    await check('forcing the maintenance hold off needs the current password, like the restore', async (t) => {
+      await world.run("INSERT OR REPLACE INTO system_flags (key, value) VALUES ('maintenance', ?)", holdFlag)
+      const before = (await world.first("SELECT COUNT(*) AS n FROM audit_logs WHERE action = 'step_up_refused'")).n
+      const none = await clearHold({ force: true })
+      t.eq('no password: status', none.status, 403)
+      t.eq('no password: code', none.json && none.json.code, 'current_password_required')
+      const wrong = await clearHold({ force: true, currentPassword: 'not-the-password' })
+      t.eq('wrong password: status', wrong.status, 403)
+      t.eq('wrong password: code', wrong.json && wrong.json.code, 'incorrect_password')
+      const array = await clearHold({ force: true, currentPassword: ['x'] })
+      t.eq('a password that is not text: code', array.json && array.json.code, 'current_password_required')
+      t.eq('the hold is still on after three refusals', await maintenanceHeld(), true)
+      const notForced = await clearHold({ currentPassword: adminPassword })
+      t.eq('without force the answer is still the plain 400 and the hold stays', [notForced.status, await maintenanceHeld()], [400, true])
+      const rows = await world.query("SELECT entity_id, details FROM audit_logs WHERE action = 'step_up_refused' ORDER BY id")
+      t.eq('three refusals were recorded for the clear', rows.slice(before).map((row) => [row.entity_id, JSON.parse(row.details).reason]),
+        [['/api/backups/maintenance/clear', 'current_password_required'], ['/api/backups/maintenance/clear', 'incorrect_password'], ['/api/backups/maintenance/clear', 'current_password_required']])
+      const cleared = await clearHold({ force: true, currentPassword: adminPassword })
+      t.eq('the right password clears it: status', cleared.status, 200)
+      t.eq('the right password clears it: answer', cleared.json, { cleared: true, wasSet: true })
+      t.eq('the hold is off', await maintenanceHeld(), false)
+    })
+
+    await check('a backup_restore holder who is not the built-in admin may clear the hold with their own password', async (t) => {
+      await world.run("INSERT OR REPLACE INTO system_flags (key, value) VALUES ('maintenance', ?)", holdFlag)
+      const refused = await clearHold({ force: true }, 'operator')
+      t.eq('no password: code', refused.json && refused.json.code, 'current_password_required')
+      t.eq('the hold is still on', await maintenanceHeld(), true)
+      const cleared = await clearHold({ force: true, currentPassword: adminPassword }, 'operator')
+      t.eq('own password: status', cleared.status, 200)
+      t.eq('the hold is off', await maintenanceHeld(), false)
     })
 
     await check('the built-in admin with the right password restores: the later sale goes, the earlier one stays', async (t) => {

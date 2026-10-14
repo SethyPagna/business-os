@@ -72,6 +72,8 @@ async function main() {
       t.eq('status', response.status, 403)
       t.eq('code', response.json && response.json.code, 'reset_builtin_admin_only')
       t.eq('nothing deleted', await counts(), before)
+      const row = await world.first("SELECT user_name, entity_id, details FROM audit_logs WHERE action = 'step_up_refused' ORDER BY id DESC LIMIT 1")
+      t.eq('the refusal is on the audit trail with the route and the reason', row && [row.user_name, row.entity_id, JSON.parse(row.details).reason], ['restorer', '/api/system/reset-data', 'reset_builtin_admin_only'])
     })
 
     await check('reset-data sales: the phrase alone is refused, with a distinct code, and nothing is deleted', async (t) => {

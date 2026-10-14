@@ -2,10 +2,14 @@ import { getDb } from './db'
 import { audit } from './audit'
 import { actorSnapshot } from './actorSnapshot'
 
-// The two checks every route that wipes or rolls back data asks for after its
-// own permission gate: the built-in default admin account, and that account's
-// current password. Shared by routes/system.ts (resets, finalize, orphan
-// cleanup, factory reset) and routes/backups.ts (restore).
+// The two checks a route that wipes, rolls back or releases data asks for after
+// its own permission gate: the built-in default admin account, and the caller's
+// current password. Both leave a step_up_refused audit row when they refuse.
+//   - denyUnlessDefaultAdmin: routes/system.ts (resets, finalize, orphan
+//     cleanup, factory reset) and routes/backups.ts (restore).
+//   - denyUnlessCurrentPassword: those two, plus routes/backups.ts (forced
+//     maintenance clear), routes/compat.ts (audit-log purge) and
+//     routes/settings.ts (audit-log retention).
 
 export async function denyUnlessDefaultAdmin(c: any, action: 'reset' | 'restore' = 'reset') {
   const actorId = Number(c.get('user')?.id)
@@ -17,9 +21,9 @@ export async function denyUnlessDefaultAdmin(c: any, action: 'reset' | 'restore'
     : null
   if (account) return null
   if (action === 'restore') {
-    return c.json({ success: false, error: 'Only the active built-in default admin account can restore a backup. No data was changed.', code: 'restore_builtin_admin_only' }, 403)
+    return refuse(c, 403, 'restore_builtin_admin_only', 'Only the active built-in default admin account can restore a backup. No data was changed.')
   }
-  return c.json({ success: false, error: 'Only the active built-in default admin account can reset data.', code: 'reset_builtin_admin_only' }, 403)
+  return refuse(c, 403, 'reset_builtin_admin_only', 'Only the active built-in default admin account can reset data.')
 }
 
 async function refuse(c: any, status: number, code: string, error: string, extra: Record<string, unknown> = {}) {

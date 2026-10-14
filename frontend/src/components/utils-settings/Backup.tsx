@@ -275,6 +275,7 @@ function getBackupApi(): BackupApi {
 function RestoreMaintenanceBanner({ copy, notify }: { copy: CopyFn; notify: NotifyFn }) {
   const [state, setState] = useState<RestoreMaintenanceState>(null)
   const [clearing, setClearing] = useState(false)
+  const [clearPassword, setClearPassword] = useState('')
   const { askToConfirm, confirmDialog } = useConfirmDialog()
   // Same page id the GoogleDriveSyncSection below uses -- Backup renders
   // under the Settings hub.
@@ -302,6 +303,7 @@ function RestoreMaintenanceBanner({ copy, notify }: { copy: CopyFn; notify: Noti
   ].filter(Boolean).join(' · ')
   const handleClear = async () => {
     if (clearing) return
+    if (!clearPassword) return notify(copy('current_password_required', 'Enter your current password to confirm. No data was changed.'), 'error')
     if (!(await askToConfirm({
       title: copy('restore_maintenance_clear', 'Force clear (accept half-state)'),
       message: copy(
@@ -314,12 +316,13 @@ function RestoreMaintenanceBanner({ copy, notify }: { copy: CopyFn; notify: Noti
     }))) return
     setClearing(true)
     try {
-      await clearBackupMaintenance()
+      await clearBackupMaintenance(clearPassword).catch((error: unknown) => { throw translateStepUpRefusal(error, copy) })
       setState(null)
       notify(copy('restore_maintenance_cleared', 'Maintenance cleared -- writes are open again'), 'warning')
     } catch (error) {
       notify(getErrorMessage(error, copy('unknown_error', 'Unknown error')), 'error')
     } finally {
+      setClearPassword('')
       setClearing(false)
     }
   }
@@ -336,9 +339,23 @@ function RestoreMaintenanceBanner({ copy, notify }: { copy: CopyFn; notify: Noti
       </span>
       {detail ? <span className="min-w-0 flex-1 truncate text-xs opacity-90" title={detail}>{detail}</span> : null}
       {failed ? (
-        <button type="button" className="btn-secondary whitespace-nowrap text-xs" onClick={handleClear} disabled={clearing}>
-          {clearing ? copy('working', 'Working...') : copy('restore_maintenance_clear', 'Force clear (accept half-state)')}
-        </button>
+        <>
+          <input
+            id="backup-maintenance-clear-password"
+            type="password"
+            name="current_password"
+            autoComplete="current-password"
+            className="input w-44 text-xs"
+            aria-label={copy('current_password', 'Current password')}
+            placeholder={copy('current_password', 'Current password')}
+            value={clearPassword}
+            disabled={clearing}
+            onChange={(event) => setClearPassword(event.target.value)}
+          />
+          <button type="button" className="btn-secondary whitespace-nowrap text-xs" onClick={handleClear} disabled={clearing}>
+            {clearing ? copy('working', 'Working...') : copy('restore_maintenance_clear', 'Force clear (accept half-state)')}
+          </button>
+        </>
       ) : null}
       {confirmDialog}
     </div>
@@ -347,6 +364,19 @@ function RestoreMaintenanceBanner({ copy, notify }: { copy: CopyFn; notify: Noti
 
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
+}
+
+// A refusal the Worker has coded has a key of the same name in both language packs (the pattern ResetData and
+// AuditRetentionSetting use). The thrown error keeps its code and gets the translated sentence instead of the
+// Worker's English.
+const STEP_UP_REFUSAL_CODES = ['restore_builtin_admin_only', 'current_password_required', 'incorrect_password', 'current_password_rate_limited']
+
+function translateStepUpRefusal(error: unknown, copy: CopyFn): unknown {
+  const code = (error as { code?: unknown } | null)?.code
+  if (error instanceof Error && typeof code === 'string' && STEP_UP_REFUSAL_CODES.includes(code)) {
+    error.message = copy(code, error.message)
+  }
+  return error
 }
 
 function unwrapJob(result: { item?: BackupJob } | BackupJob | null | undefined): BackupJob | null {

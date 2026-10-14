@@ -125,6 +125,6 @@ export async function getBackupMaintenance(): Promise<{ maintenance: RestoreMain
   return apiFetch('GET', '/api/backups/maintenance') as Promise<{ maintenance: RestoreMaintenanceState }>
 }
 
-export async function clearBackupMaintenance(): Promise<Record<string, unknown>> {
-  return apiFetch('POST', '/api/backups/maintenance/clear', { force: true }, SYNC.REQUEST_TIMEOUT_MS) as Promise<Record<string, unknown>>
+export async function clearBackupMaintenance(currentPassword: string): Promise<Record<string, unknown>> {
+  return apiFetch('POST', '/api/backups/maintenance/clear', { force: true, currentPassword }, SYNC.REQUEST_TIMEOUT_MS) as Promise<Record<string, unknown>>
 }
