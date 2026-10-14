@@ -1,16 +1,19 @@
 'use strict'
-// Which client created_at POST /api/sales honors, on workerd + D1 with an
+// What POST /api/sales does with a client created_at, on workerd + D1 with an
 // Employee holding only pos+sales.
-// A claim inside [server now - 10 min, server now + 2 min] is kept (the positive
-// control, so a refusal cannot come from a harness that never honors a claim).
-// An older claim is refused with 409 sale_created_at_too_old: no sale, line,
-// stock movement or stock change, and one 'sale_refused' audit row naming the
-// actor, the claim, the receive time and the request id. The same holds for a
-// sales.create replayed through /api/sync/outbox, whose result carries the
-// server's code. A future or unparseable claim is stored at the server clock
-// and the creation audit row records what was claimed. A repeat of an
+// The server clock is the sale's created_at for every sale (offline selling is
+// cancelled and no queued sale exists): a claim inside the window, ahead of it
+// or unparseable is stored at the server clock and the creation audit row
+// records what was claimed. A claim older than 10 minutes is refused with 409
+// sale_created_at_too_old: no sale, line, stock movement or stock change, and
+// one 'sale_refused' audit row naming the actor, the claim, the receive time
+// and the request id. The same holds for a sales.create replayed through
+// /api/sync/outbox, whose result carries the server's code. A repeat of an
 // already-recorded sale returns the original sale. The owner fence and the
-// money-precision check answer before the refusal. Claims are written with an
+// money-precision check answer before the refusal. A claim that matches a
+// closed shift segment's last second, or runs ahead of the open segment's
+// close, must still land in the segment the sale was rung in, so the segment's
+// reconciliation and the report reader agree. Claims are written with an
 // explicit Z or offset, or as zone-less UTC, so no result depends on the zone
 // of the machine running the test.
 //
@@ -131,12 +134,12 @@ async function main() {
     const claimedMs = Date.now() - 5 * MINUTE
     const recent = await sell('window-5-minutes-0001', new Date(claimedMs).toISOString())
     const recentRow = await read('window-5-minutes-0001')
-    r.check(`control: a claim five minutes ago is kept and is not marked adjusted (got ${recent.status}, stored ${recentRow && recentRow.created_at}, claimed ${storedShape(claimedMs)})`, () => {
+    r.check(`a claim five minutes ago is NOT stored: the sale takes the server clock and the audit row records the claim (got ${recent.status}, stored ${recentRow && recentRow.created_at}, claimed ${storedShape(claimedMs)})`, () => {
       assert.equal(recent.status, 200, JSON.stringify(recent.body).slice(0, 200))
-      assert.equal(recentRow.created_at, storedShape(claimedMs))
-      assert.equal(recentRow.creation.origin, 'offline_replay')
-      assert.equal(recentRow.creation.sale_at, storedShape(claimedMs))
-      assert.equal(recentRow.audit.created_at_adjusted, undefined)
+      serverClock(recentRow, '5 minutes ago')
+      assert.notEqual(recentRow.created_at, storedShape(claimedMs))
+      assert.equal(recentRow.audit.created_at_adjusted, true)
+      assert.equal(recentRow.audit.claimed_created_at, storedShape(claimedMs))
     })
 
     const normal = await sell('window-repeat-0001', undefined)
@@ -206,10 +209,11 @@ async function main() {
       assert.deepEqual(afterOldOutbox, beforeOutbox)
       assert.equal(oldOutboxRefusals.length, 1)
     })
-    r.check(`/api/sync/outbox control: the same replay with a claim two minutes ago is applied and kept (result ${JSON.stringify(recentViaOutbox.body.results && recentViaOutbox.body.results[0]).slice(0, 220)})`, () => {
+    r.check(`/api/sync/outbox control: the same replay with a claim two minutes ago is applied at the server clock (result ${JSON.stringify(recentViaOutbox.body.results && recentViaOutbox.body.results[0]).slice(0, 220)})`, () => {
       const result = recentViaOutbox.body.results[0]
       assert.equal(result.status, 'applied', JSON.stringify(result).slice(0, 300))
-      assert.equal(recentOutboxRow.created_at, storedShape(recentMs))
+      serverClock(recentOutboxRow, 'outbox 2 minutes ago')
+      assert.equal(recentOutboxRow.audit.claimed_created_at, storedShape(recentMs))
     })
 
     const utcWallMs = Date.now() - 5 * MINUTE
@@ -221,22 +225,120 @@ async function main() {
     const zonelessOld = await sell('window-zoneless-old-0001', new Date(Date.now() - 30 * DAY).toISOString().slice(0, 19).replace('T', ' '))
     const phnomPenhWall = await sell('window-zoneless-pp-0001', new Date(Date.now() + 7 * 60 * MINUTE).toISOString().slice(0, 19).replace('T', ' '))
     const phnomPenhRow = await read('window-zoneless-pp-0001')
-    r.check(`a claim without a zone is read as UTC whatever the machine's zone: UTC wall time five minutes ago is kept (got ${utcWall.status}, stored ${utcWallRow && utcWallRow.created_at}, expected ${storedShape(utcWallMs)}), a 30-day-old one is refused (${zonelessOld.status} ${zonelessOld.body.code}), a Phnom Penh wall clock reads seven hours ahead and gets server time (${phnomPenhWall.status}, stored ${phnomPenhRow && phnomPenhRow.created_at})`, () => {
+    r.check(`a claim without a zone is read as UTC whatever the machine's zone: UTC wall time five minutes ago is audited as claimed and the sale takes the server clock (got ${utcWall.status}, stored ${utcWallRow && utcWallRow.created_at}, claimed ${storedShape(utcWallMs)}), a 30-day-old one is refused (${zonelessOld.status} ${zonelessOld.body.code}), a Phnom Penh wall clock reads seven hours ahead and gets server time (${phnomPenhWall.status}, stored ${phnomPenhRow && phnomPenhRow.created_at})`, () => {
       assert.equal(utcWall.status, 200, JSON.stringify(utcWall.body).slice(0, 200))
-      assert.equal(utcWallRow.created_at, storedShape(utcWallMs))
-      assert.equal(utcWallRow.creation.origin, 'offline_replay')
+      serverClock(utcWallRow, 'zone-less UTC')
+      assert.equal(utcWallRow.audit.claimed_created_at, storedShape(utcWallMs))
       refusedAsTooOld(zonelessOld, 'zone-less 30 days ago')
       assert.equal(phnomPenhWall.status, 200, JSON.stringify(phnomPenhWall.body).slice(0, 200))
       serverClock(phnomPenhRow, 'Phnom Penh wall clock')
       assert.equal(phnomPenhRow.audit.created_at_adjusted, true)
     })
-    r.check(`a claim with an explicit +07:00 offset is converted to UTC and kept (got ${offsetClaim.status}, stored ${offsetRow && offsetRow.created_at}, expected ${storedShape(offsetMs)})`, () => {
+    r.check(`a claim with an explicit +07:00 offset is converted to UTC for the audit row and the sale takes the server clock (got ${offsetClaim.status}, stored ${offsetRow && offsetRow.created_at}, claimed ${storedShape(offsetMs)})`, () => {
       assert.equal(offsetClaim.status, 200, JSON.stringify(offsetClaim.body).slice(0, 200))
-      assert.equal(offsetRow.created_at, storedShape(offsetMs))
+      serverClock(offsetRow, '+07:00 offset')
+      assert.equal(offsetRow.audit.claimed_created_at, storedShape(offsetMs))
     })
     const refusals = await refusalTotal()
     r.check(`every refusal wrote exactly one audit row and nothing else did (four refusals: two direct, one zone-less, one outbox; got ${refusals})`, () => {
       assert.equal(refusals, 4)
+    })
+
+    const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
+    const shiftWindow = id => h.one('SELECT id, opened_at, closed_at, revision FROM shift_sessions WHERE id=?', id)
+    const shiftFigures = async id => {
+      const row = await h.one('SELECT figures_json FROM shift_close_figures WHERE shift_session_id=?', id)
+      const figures = JSON.parse(row.figures_json)
+      return figures.reconciliation || figures
+    }
+    const openSegment = async tag => {
+      const opened = await asEmployee.call('POST', '/api/shifts/open', { branch_id: 1, opening_float_usd: 0, opening_float_khr: 0 }, `open ${tag}`)
+      assert.equal(opened.status, 201, `open ${tag}: ${JSON.stringify(opened.body).slice(0, 200)}`)
+      return (opened.body.shift || opened.body).id
+    }
+    const closeSegment = async (id, tag, counted) => {
+      const window = await shiftWindow(id)
+      const closed = await asEmployee.call('POST', '/api/shifts/close', { shift_id: id, expected_revision: window.revision, branch_id: 1,
+        client_request_id: `window-${tag.replace(/ /g, "-")}-close-0001`, closing_counted_usd: counted, closing_counted_khr: 0 }, `close ${tag}`)
+      assert.equal(closed.status, 200, `close ${tag}: ${JSON.stringify(closed.body).slice(0, 200)}`)
+    }
+    const reopenSegment = async (id, tag) => {
+      const window = await shiftWindow(id)
+      const reopened = await asEmployee.call('POST', `/api/shifts/${id}/reopen`, { expected_revision: window.revision, reason: `window ${tag}`, opening_float_usd: 0, opening_float_khr: 0 }, `reopen ${tag}`)
+      assert.equal(reopened.status, 201, `reopen ${tag}: ${JSON.stringify(reopened.body).slice(0, 200)}`)
+      return reopened.body.shift.id
+    }
+    const cashFigures = f => ({ cash_sales: f.cash_sales.usd, expected: f.expected.usd, counted: f.counted.usd, difference: f.difference.usd, needs_review: f.needs_review })
+    const reportRevenue = async window => {
+      const report = await h.call('GET', `/api/reports/overview?createdFrom=${encodeURIComponent(window.opened_at)}&createdTo=${encodeURIComponent(window.closed_at)}`, undefined, 'report over a shift window')
+      assert.equal(report.status, 200, JSON.stringify(report.body).slice(0, 200))
+      const totals = report.body.sales.totals
+      return { orders: totals.tx_count ?? totals.orders ?? totals.count, revenue: totals.revenue_usd ?? totals.total_usd }
+    }
+
+    await pause(1100)
+    const seg1 = await openSegment('segment 1')
+    const seg1Sale = await sell('window-seg1-sale-0001', undefined)
+    await pause(1100)
+    await closeSegment(seg1, 'segment 1', 5)
+    const seg1Window = await shiftWindow(seg1)
+    const seg1Before = await shiftFigures(seg1)
+    await pause(1100)
+    const seg2 = await reopenSegment(seg1, 'segment 2')
+    const backClaim = new Date(Date.parse(seg1Window.closed_at) - 1000).toISOString()
+    const back = await sell('window-seg2-back-claim-0001', backClaim)
+    const backRow = await read('window-seg2-back-claim-0001')
+    await pause(1100)
+    await closeSegment(seg2, 'segment 2', 5)
+    const seg2Window = await shiftWindow(seg2)
+    const seg2Figures = await shiftFigures(seg2)
+    const seg1After = await shiftFigures(seg1)
+    const seg1Report = await reportRevenue(seg1Window)
+    const seg2Report = await reportRevenue(seg2Window)
+    r.check(`S1: a $5 cash sale rung in the open segment that claims the previous closed segment's close minus one second lands in the open segment: segment 2 cash sales 5, difference 0, segment 1 untouched, report agrees (sale ${back.status}, stored ${backRow && backRow.created_at}, seg 1 closed ${seg1Window.closed_at}, seg 2 opened ${seg2Window.opened_at}, seg 2 ${JSON.stringify(cashFigures(seg2Figures))})`, () => {
+      assert.equal(seg1Sale.status, 200, JSON.stringify(seg1Sale.body).slice(0, 200))
+      assert.equal(back.status, 200, JSON.stringify(back.body).slice(0, 200))
+      serverClock(backRow, 'back-dated into the closed segment')
+      assert.ok(storedMs(backRow.created_at) >= Math.floor(Date.parse(seg2Window.opened_at) / 1000) * 1000, 'stored inside the open segment')
+      assert.ok(storedMs(backRow.created_at) >= Math.floor(Date.parse(seg1Window.closed_at) / 1000) * 1000, 'not inside the closed segment')
+      assert.deepEqual(cashFigures(seg2Figures), { cash_sales: 5, expected: 5, counted: 5, difference: 0, needs_review: false })
+      assert.deepEqual(seg1After, seg1Before, 'the closed segment keeps its stored figures')
+      assert.deepEqual(cashFigures(seg1After), { cash_sales: 5, expected: 5, counted: 5, difference: 0, needs_review: false })
+      assert.equal(backRow.audit.claimed_created_at, storedShape(Date.parse(backClaim)))
+      assert.equal(seg1Report.orders, 1, JSON.stringify(seg1Report))
+      assert.equal(seg2Report.orders, 1, JSON.stringify(seg2Report))
+      assert.equal(seg1Report.revenue, 5)
+      assert.equal(seg2Report.revenue, 5)
+    })
+
+    await pause(1100)
+    const seg3 = await reopenSegment(seg2, 'segment 3')
+    await pause(1100)
+    const fwdClaim = new Date(Date.now() + 110 * 1000).toISOString()
+    const fwd = await sell('window-seg3-forward-claim-0001', fwdClaim)
+    const fwdRow = await read('window-seg3-forward-claim-0001')
+    await pause(1100)
+    await closeSegment(seg3, 'segment 3', 5)
+    const seg3Window = await shiftWindow(seg3)
+    const seg3Figures = await shiftFigures(seg3)
+    await pause(1100)
+    const seg4 = await reopenSegment(seg3, 'segment 4')
+    await pause(1100)
+    await closeSegment(seg4, 'segment 4', 0)
+    const seg4Window = await shiftWindow(seg4)
+    const seg4Figures = await shiftFigures(seg4)
+    const seg3Report = await reportRevenue(seg3Window)
+    const seg4Report = await reportRevenue(seg4Window)
+    r.check(`S1: a $5 cash sale that claims 110 seconds ahead stays in the segment it was rung in, never after its close: segment 3 cash sales 5, difference 0, segment 4 empty, report agrees (sale ${fwd.status}, stored ${fwdRow && fwdRow.created_at}, seg 3 closed ${seg3Window.closed_at}, seg 3 ${JSON.stringify(cashFigures(seg3Figures))}, seg 4 ${JSON.stringify(cashFigures(seg4Figures))})`, () => {
+      assert.equal(fwd.status, 200, JSON.stringify(fwd.body).slice(0, 200))
+      serverClock(fwdRow, 'forward claim')
+      assert.ok(storedMs(fwdRow.created_at) <= Date.parse(seg3Window.closed_at), 'not after the close of the segment it was rung in')
+      assert.deepEqual(cashFigures(seg3Figures), { cash_sales: 5, expected: 5, counted: 5, difference: 0, needs_review: false })
+      assert.deepEqual(cashFigures(seg4Figures), { cash_sales: 0, expected: 0, counted: 0, difference: 0, needs_review: false })
+      assert.equal(seg3Report.orders, 1, JSON.stringify(seg3Report))
+      assert.equal(seg3Report.revenue, 5)
+      assert.equal(seg4Report.orders, 0, JSON.stringify(seg4Report))
+      assert.equal(fwdRow.audit.created_at_adjusted, true)
     })
   } finally {
     await h.mf.dispose()

@@ -340,9 +340,9 @@ async function run() {
   }
   console.log('PASS a sale created by a stale client stores the display address')
 
-  // Offline replay is the same writer, but records the client sale moment and
-  // a distinct origin. A retry returns the one already-created row and cannot
-  // regenerate or alter the immutable envelope.
+  // A request carrying a client created_at is the same writer: the sale takes
+  // the server clock and is a normal POS sale. A retry returns the one
+  // already-created row and cannot regenerate or alter the immutable envelope.
   const queuedAt = new Date(Date.now() - 60 * 1000)
   const offline = fixture()
   const offlinePayload = {
@@ -365,9 +365,11 @@ async function run() {
   assert.equal(offline.sql.prepare('SELECT COUNT(*) n FROM sales WHERE client_request_id=?').get('offline-create-1').n, 1)
   assert.equal(offline.sql.prepare('SELECT creation_snapshot_json FROM sales WHERE id=?').get(first.body.id).creation_snapshot_json, beforeRetry)
   const offlineCreation = JSON.parse(beforeRetry)
-  assert.equal(offlineCreation.origin, 'offline_replay')
-  assert.equal(offlineCreation.sale_at, queuedAt.toISOString().slice(0, 19).replace('T', ' '))
-  console.log('PASS offline replay keeps one immutable queue-time creation snapshot')
+  assert.equal(offlineCreation.origin, 'pos')
+  assert.equal(offlineCreation.sale_at, null)
+  const offlineRow = offline.sql.prepare('SELECT created_at FROM sales WHERE id=?').get(first.body.id)
+  assert.ok(Math.abs(Date.parse(`${offlineRow.created_at.replace(' ', 'T')}Z`) - Date.now()) < 30 * 1000, `a recent client created_at must store the server clock, got ${offlineRow.created_at}`)
+  console.log('PASS a request with a recent client created_at stores the server clock and keeps one immutable creation snapshot')
 
   const stale = fixture()
   const staleCounts = () => ({ sales: stale.sql.prepare('SELECT COUNT(*) n FROM sales').get().n, items: stale.sql.prepare('SELECT COUNT(*) n FROM sale_items').get().n, movements: stale.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n })

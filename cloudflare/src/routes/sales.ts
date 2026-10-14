@@ -477,8 +477,8 @@ app.post('/', async (c) => {
     offline_owner?: unknown
     money_precision_version?: unknown
     items: SaleItemInput[]
-    // A client sale time: kept only inside the short window of
-    // lib/clientTimestamp.ts and refused (409) when older. Live checkouts omit it.
+    // A client sale time: never stored, audited, and refused (409) when older
+    // than the window of lib/clientTimestamp.ts. Live checkouts omit it.
     created_at?: unknown
     branch_id?: number
     cashier_id?: number
@@ -1175,11 +1175,8 @@ app.post('/', async (c) => {
   const receiptNumberTaken = async (candidate: string) =>
     !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate]))
   let receiptNumber = normalizeClientReceiptNumber(body.receipt_number) || await uniqueBusinessDateTimeNumber('', receiptNumberTaken)
-  // A client created_at is honored only inside the short window of
-  // lib/clientTimestamp.ts (which also holds the storage format). An older
-  // claim was refused above; a future or unparseable one keeps the server
-  // clock and is recorded on the creation audit row.
-  const clientCreatedAt = clientTime.value
+  // The sale is always stamped with the server clock; a client created_at is
+  // only audited (lib/clientTimestamp.ts). An older claim was refused above.
 
   // isDelivery / deliveryFeeUsd / deliveryFeeKhr / deliveryFeePaidBy are
   // computed with the totals above, since the customer-paid portion is part
@@ -1197,9 +1194,8 @@ app.post('/', async (c) => {
   const snapshotRecordedAt = new Date().toISOString()
   const buildCreationSnapshotFor = (snapshotReceiptNumber: string) => buildSaleCreationSnapshot({
       moneyPrecisionVersion: 1, calculatedTotalUsd, roundingAdjustmentUsd,
-      origin: clientCreatedAt ? 'offline_replay' : 'pos',
+      origin: 'pos',
       recordedAt: snapshotRecordedAt,
-      saleAt: clientCreatedAt,
       receiptNumber: snapshotReceiptNumber,
       actor: user,
       cashierId: actorId(user) ?? (body.cashier_id || null),
@@ -1275,7 +1271,7 @@ app.post('/', async (c) => {
         @is_delivery, @delivery_contact_id, @delivery_contact_name, @delivery_contact_phone, @delivery_contact_address,
         @delivery_fee_usd, @delivery_fee_khr, @delivery_fee_paid_by,
         @delivery_actual_cost_usd, @delivery_actual_cost_khr,
-        @loyalty_accrual, @sale_status, @search_normalized, @items, @creation_snapshot_json, COALESCE(@created_at, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP
+        @loyalty_accrual, @sale_status, @search_normalized, @items, @creation_snapshot_json, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
       WHERE @customer_guard_id IS NULL OR EXISTS (
         SELECT 1 FROM customers
         WHERE id = @customer_guard_id
@@ -1286,7 +1282,6 @@ app.post('/', async (c) => {
       receipt_number: receiptNumber,
       calculated_total_usd: calculatedTotalUsd,
       rounding_adjustment_usd: roundingAdjustmentUsd,
-      created_at: clientCreatedAt,
       client_request_id: saleWriteKey,
       // N13: the cashier snapshot is the AUTHENTICATED session's account, not
       // whatever the client put in the body. Before this, POST /api/sales was
@@ -1415,7 +1410,7 @@ app.post('/', async (c) => {
     itemCount: priced.length,
     totalUsd,
     saleStatus,
-    origin: clientCreatedAt ? 'offline_replay' : 'pos',
+    origin: 'pos',
     ...(clientTime.adjusted ? { claimed_created_at: clientTime.claimed, received_at: snapshotRecordedAt, created_at_adjusted: true } : {}),
   })
   const saleCreationAuditStatement = {
@@ -1866,7 +1861,6 @@ app.post('/', async (c) => {
     // delivery service, total / discount / net / paid, driver.
     lines: formatSaleTelegramLines({
       status: saleStatus,
-      createdAt: clientCreatedAt,
       receiptNumber,
       cashier: actorSnapshot(user),
       customer: saleCustomerName,
@@ -6508,9 +6502,8 @@ app.get('/export', async (c) => {
   const afterId = Number(query.afterId)
   if (afterCreatedAt && Number.isSafeInteger(afterId) && afterId > 0) {
     // sales.created_at is NOT one consistent shape: live inserts are
-    // 'YYYY-MM-DD HH:MM:SS' (sanitizeClientCreatedAt normalizes offline
-    // replays to match the server's CURRENT_TIMESTAMP shape -- see
-    // lib/clientTimestamp.ts) but legacy-import rows are ISO
+    // 'YYYY-MM-DD HH:MM:SS' (the server's CURRENT_TIMESTAMP shape) but
+    // legacy-import rows are ISO
     // 'YYYY-MM-DDTHH:MM:SS.sssZ' (lib/*legacy-reports.mjs's
     // bangkokToUtc/legacyToUtc write .toISOString()), and both eras coexist
     // on the same calendar days. A raw string compares 'T' (0x54) after ' '

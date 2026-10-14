@@ -1,10 +1,11 @@
-// lib/clientTimestamp.ts: which client-supplied sale time the Worker honors.
-// Inside [now - 10 min, now + 2 min] the claim is kept; an earlier parsed claim
-// is flagged tooOld (the route refuses it); a later or unparseable claim has no
-// value (server clock) and is reported as adjusted with what was claimed.
-// A claim without a zone is UTC whatever the host's zone, and maxPastMs is
-// ignored unless it is a finite number from 0 to the ceiling. The wiring checks
-// pin how routes/sales.ts uses the result.
+// lib/clientTimestamp.ts: what the Worker does with a client-supplied sale time.
+// It never stores one: every sale takes the server clock (offline selling is
+// cancelled and no queued sale exists). The claim is only read, so the route can
+// refuse a claim older than 10 minutes (tooOld, 409) and record any other claim
+// on the creation audit row (adjusted, with what was claimed). A claim without a
+// zone is UTC whatever the host's zone. The business-day cases pin the reason:
+// a stored claim moved a sale across Phnom Penh midnight. The wiring checks pin
+// how routes/sales.ts uses the result.
 //
 // Run: node scripts/test-client-timestamp-pure.cjs
 const assert = require('node:assert/strict')
@@ -21,7 +22,7 @@ fs.writeFileSync(tsPath, fs.readFileSync(srcPath, 'utf8'))
 const tscBin = path.join(cloudflareRoot, 'node_modules', 'typescript', 'bin', 'tsc')
 execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath}`, { cwd: tmpDir, stdio: 'inherit' })
 const lib = require(path.join(tmpDir, 'clientTimestamp.js'))
-const { sanitizeClientCreatedAt, resolveClientCreatedAt, CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS, SALE_CREATED_AT_MAX_PAST_CEILING_MS } = lib
+const { resolveClientCreatedAt, CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS, SALE_CREATED_AT_MAX_PAST_MS } = lib
 
 let failed = 0
 function check(name, fn) {
@@ -40,128 +41,66 @@ const SECOND = 1000
 const MINUTE = 60 * SECOND
 const DAY = 24 * 60 * MINUTE
 const at = offsetMs => new Date(NOW + offsetMs).toISOString()
+const resolve = (raw, nowMs = NOW) => resolveClientCreatedAt(raw, { nowMs })
+const phnomPenhDay = ms => new Date(ms + 7 * 60 * MINUTE).toISOString().slice(0, 10)
+const claimedMs = out => Date.parse(`${out.claimed.replace(' ', 'T')}Z`)
 
-check('a valid ISO stamp inside the window normalizes to CURRENT_TIMESTAMP shape (space, UTC, no ms)', () => {
-  assert.equal(sanitizeClientCreatedAt('2026-08-31T09:55:12.345Z', NOW), '2026-08-31 09:55:12')
+check('the resolution carries no stored time: a claim never becomes the sale time', () => {
+  for (const claim of [at(-3 * MINUTE), at(0), at(MINUTE), at(60 * MINUTE), at(-30 * DAY), 'not-a-date', undefined]) {
+    assert.deepEqual(Object.keys(resolve(claim)).sort(), ['adjusted', 'claimed', 'tooOld'], String(claim))
+  }
 })
 
-check('the normalized shape sorts lexicographically with CURRENT_TIMESTAMP rows', () => {
-  // "T" (0x54) > " " (0x20): a raw ISO string would pin after every
-  // same-day server row. The sanitizer must never emit a "T".
-  const out = sanitizeClientCreatedAt('2026-08-31T09:52:00Z', NOW)
-  assert.ok(!out.includes('T'))
-  assert.ok(out < '2026-08-31 09:53:00' && out > '2026-08-31 09:51:59')
+check('a claim inside the window is adjusted (the server clock is used) and echoed in the stored shape', () => {
+  assert.deepEqual(resolve(at(-3 * MINUTE)), { adjusted: true, claimed: '2026-08-31 09:57:00', tooOld: false })
+  assert.deepEqual(resolve('2026-08-31T09:55:12.345Z'), { adjusted: true, claimed: '2026-08-31 09:55:12', tooOld: false })
+  assert.deepEqual(resolve('2026-08-31T16:55:00+07:00'), { adjusted: true, claimed: '2026-08-31 09:55:00', tooOld: false })
 })
 
-check('an offset timestamp converts to UTC', () => {
-  // 16:55 at UTC+7 = 09:55 UTC
-  assert.equal(sanitizeClientCreatedAt('2026-08-31T16:55:00+07:00', NOW), '2026-08-31 09:55:00')
+check('a future claim is adjusted, never refused, and echoed', () => {
+  assert.deepEqual(resolve(at(60 * MINUTE)), { adjusted: true, claimed: '2026-08-31 11:00:00', tooOld: false })
+  assert.deepEqual(resolve(at(2 * MINUTE + SECOND)), { adjusted: true, claimed: '2026-08-31 10:02:01', tooOld: false })
+  assert.deepEqual(resolve('+275760-09-13T00:00:00.000Z'), { adjusted: true, claimed: null, tooOld: false })
 })
 
-check('30 days ago falls back to the server clock (null)', () => {
-  assert.equal(sanitizeClientCreatedAt(at(-30 * DAY), NOW), null)
-  assert.equal(sanitizeClientCreatedAt('2026-08-01T09:00:00Z', NOW), null)
+check('a claim older than 10 minutes is tooOld and echoed for the audit row', () => {
+  assert.equal(SALE_CREATED_AT_MAX_PAST_MS, 10 * MINUTE)
+  assert.deepEqual(resolve(at(-30 * DAY)), { adjusted: true, claimed: '2026-08-01 10:00:00', tooOld: true })
+  assert.deepEqual(resolve('2026-08-01T16:30:00+07:00'), { adjusted: true, claimed: '2026-08-01 09:30:00', tooOld: true })
+  assert.deepEqual(resolve('0001-01-01T00:00:00Z'), { adjusted: true, claimed: null, tooOld: true })
 })
 
-check('5 minutes ago is kept', () => {
-  assert.equal(sanitizeClientCreatedAt(at(-5 * MINUTE), NOW), '2026-08-31 09:55:00')
-})
-
-check('1 hour ahead falls back to the server clock (null)', () => {
-  assert.equal(sanitizeClientCreatedAt(at(60 * MINUTE), NOW), null)
-})
-
-check('the window is [now - 10 min, now + 2 min], edges included', () => {
-  assert.equal(sanitizeClientCreatedAt(at(-10 * MINUTE), NOW), '2026-08-31 09:50:00')
-  assert.equal(sanitizeClientCreatedAt(at(-10 * MINUTE - SECOND), NOW), null)
-  assert.equal(sanitizeClientCreatedAt(at(2 * MINUTE), NOW), '2026-08-31 10:02:00')
-  assert.equal(sanitizeClientCreatedAt(at(2 * MINUTE + SECOND), NOW), null)
-  assert.equal(sanitizeClientCreatedAt(at(0), NOW), '2026-08-31 10:00:00')
+check('tooOld has its edge at exactly 10 minutes: the edge is not too old, one second earlier is', () => {
+  assert.equal(resolve(at(-10 * MINUTE)).tooOld, false)
+  assert.equal(resolve(at(-10 * MINUTE - SECOND)).tooOld, true)
+  assert.equal(resolve(at(-11 * MINUTE)).tooOld, true)
 })
 
 check('the default clock is injectable: a stamp is judged against the nowMs it is given', () => {
-  assert.equal(sanitizeClientCreatedAt('2026-08-31T09:55:00Z', NOW + 30 * DAY), null)
-  assert.equal(sanitizeClientCreatedAt('2026-08-31T09:55:00Z', NOW), '2026-08-31 09:55:00')
-  assert.ok(sanitizeClientCreatedAt(new Date(Date.now() - MINUTE).toISOString()), 'without nowMs the live clock is used')
+  assert.equal(resolve('2026-08-31T09:55:00Z', NOW + 30 * DAY).tooOld, true)
+  assert.equal(resolve('2026-08-31T09:55:00Z', NOW).tooOld, false)
+  assert.equal(resolveClientCreatedAt(new Date(Date.now() - MINUTE).toISOString()).tooOld, false, 'without nowMs the live clock is used')
 })
 
-check('garbage, empty and non-string values fall back to the server clock', () => {
-  for (const bad of ['', '   ', 'not-a-date', 12345, null, undefined, {}, ['2026-08-30'], '0000-00-00', '99999999-01-01']) {
-    assert.equal(sanitizeClientCreatedAt(bad, NOW), null, `expected null for ${JSON.stringify(bad)}`)
+check('no claim at all is not an adjustment', () => {
+  for (const none of [undefined, null, '', '   ']) {
+    assert.deepEqual(resolve(none), { adjusted: false, claimed: null, tooOld: false }, JSON.stringify(none))
   }
+})
+
+check('an unparseable or non-string claim is an adjustment with nothing to echo, never tooOld', () => {
+  for (const bad of ['not-a-date', 12345, {}, ['2026-08-30'], '99999999-01-01', '0000-00-00']) {
+    assert.deepEqual(resolve(bad), { adjusted: true, claimed: null, tooOld: false }, JSON.stringify(bad))
+  }
+})
+
+check('the old maxPastMs option no longer widens the window', () => {
+  assert.equal(resolveClientCreatedAt(at(-30 * DAY), { nowMs: NOW, maxPastMs: 60 * DAY }).tooOld, true)
+  assert.equal(lib.SALE_CREATED_AT_MAX_PAST_CEILING_MS, undefined)
 })
 
 check('the shift-close clock tolerance keeps its own 5-minute constant', () => {
   assert.equal(CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS, 5 * MINUTE)
-})
-
-check('resolve: an accepted claim is not adjusted and echoes the stored value', () => {
-  assert.deepEqual(resolveClientCreatedAt(at(-3 * MINUTE), { nowMs: NOW }),
-    { value: '2026-08-31 09:57:00', adjusted: false, claimed: '2026-08-31 09:57:00', tooOld: false })
-})
-
-check('resolve: a rejected claim yields no value and keeps what was claimed for audit', () => {
-  assert.deepEqual(resolveClientCreatedAt(at(-30 * DAY), { nowMs: NOW }),
-    { value: null, adjusted: true, claimed: '2026-08-01 10:00:00', tooOld: true })
-  assert.deepEqual(resolveClientCreatedAt(at(60 * MINUTE), { nowMs: NOW }),
-    { value: null, adjusted: true, claimed: '2026-08-31 11:00:00', tooOld: false })
-  assert.deepEqual(resolveClientCreatedAt('2026-08-01T16:30:00+07:00', { nowMs: NOW }),
-    { value: null, adjusted: true, claimed: '2026-08-01 09:30:00', tooOld: true })
-})
-
-check('tooOld is set only for a parsed claim earlier than the window; a future or unparseable claim is never tooOld', () => {
-  assert.equal(resolveClientCreatedAt(at(-10 * MINUTE), { nowMs: NOW }).tooOld, false, 'the past edge is inside the window')
-  assert.equal(resolveClientCreatedAt(at(-10 * MINUTE - SECOND), { nowMs: NOW }).tooOld, true)
-  assert.equal(resolveClientCreatedAt(at(-11 * MINUTE), { nowMs: NOW }).value, null)
-  assert.equal(resolveClientCreatedAt(at(2 * MINUTE + SECOND), { nowMs: NOW }).tooOld, false)
-  assert.equal(resolveClientCreatedAt(at(60 * MINUTE), { nowMs: NOW }).tooOld, false)
-  assert.equal(resolveClientCreatedAt('+275760-09-13T00:00:00.000Z', { nowMs: NOW }).tooOld, false)
-  assert.deepEqual(resolveClientCreatedAt('0001-01-01T00:00:00Z', { nowMs: NOW }), { value: null, adjusted: true, claimed: null, tooOld: true })
-  for (const bad of ['not-a-date', 12345, {}, ['2026-08-30'], '', '   ', null, undefined]) {
-    assert.equal(resolveClientCreatedAt(bad, { nowMs: NOW }).tooOld, false, JSON.stringify(bad))
-  }
-})
-
-check('resolve: no claim at all is not an adjustment', () => {
-  for (const none of [undefined, null, '', '   ']) {
-    assert.deepEqual(resolveClientCreatedAt(none, { nowMs: NOW }), { value: null, adjusted: false, claimed: null, tooOld: false }, JSON.stringify(none))
-  }
-})
-
-check('resolve: an unparseable claim is an adjustment with nothing to echo', () => {
-  for (const bad of ['not-a-date', 12345, {}, ['2026-08-30'], '99999999-01-01']) {
-    assert.deepEqual(resolveClientCreatedAt(bad, { nowMs: NOW }), { value: null, adjusted: true, claimed: null, tooOld: false }, JSON.stringify(bad))
-  }
-})
-
-check('a caller that needs an older client time must opt in with maxPastMs; the default never widens', () => {
-  const old = at(-30 * DAY)
-  assert.equal(resolveClientCreatedAt(old, { nowMs: NOW }).value, null)
-  assert.deepEqual(resolveClientCreatedAt(old, { nowMs: NOW, maxPastMs: 60 * DAY }),
-    { value: '2026-08-01 10:00:00', adjusted: false, claimed: '2026-08-01 10:00:00', tooOld: false })
-  assert.equal(resolveClientCreatedAt(at(-61 * DAY), { nowMs: NOW, maxPastMs: 60 * DAY }).value, null)
-  assert.equal(resolveClientCreatedAt(at(-61 * DAY), { nowMs: NOW, maxPastMs: 60 * DAY }).tooOld, true)
-  assert.equal(resolveClientCreatedAt(at(10 * MINUTE), { nowMs: NOW, maxPastMs: 60 * DAY }).value, null, 'the future bound does not move with maxPastMs')
-  assert.equal(resolveClientCreatedAt('not-a-date', { nowMs: NOW, maxPastMs: 60 * DAY }).value, null)
-})
-
-check('maxPastMs that is not a finite number from 0 to the ceiling is ignored and the default window applies', () => {
-  const old = at(-30 * DAY)
-  for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1, -DAY, SALE_CREATED_AT_MAX_PAST_CEILING_MS + 1, 365 * DAY, '60000000', '86400000000', null, undefined, {}, [DAY]]) {
-    const out = resolveClientCreatedAt(old, { nowMs: NOW, maxPastMs: bad })
-    assert.deepEqual(out, { value: null, adjusted: true, claimed: '2026-08-01 10:00:00', tooOld: true }, String(bad))
-    assert.equal(resolveClientCreatedAt(at(-5 * MINUTE), { nowMs: NOW, maxPastMs: bad }).value, '2026-08-31 09:55:00', 'the default window still keeps a recent claim: ' + String(bad))
-    assert.equal(resolveClientCreatedAt(at(-11 * MINUTE), { nowMs: NOW, maxPastMs: bad }).tooOld, true, 'and still refuses an 11-minute-old claim: ' + String(bad))
-  }
-  assert.equal(SALE_CREATED_AT_MAX_PAST_CEILING_MS, 90 * DAY)
-})
-
-check('maxPastMs at its limits is honored: 0 allows only now, the ceiling allows exactly 90 days back', () => {
-  assert.equal(resolveClientCreatedAt(at(-SECOND), { nowMs: NOW, maxPastMs: 0 }).tooOld, true)
-  assert.equal(resolveClientCreatedAt(at(0), { nowMs: NOW, maxPastMs: 0 }).value, '2026-08-31 10:00:00')
-  const ceiling = SALE_CREATED_AT_MAX_PAST_CEILING_MS
-  assert.equal(resolveClientCreatedAt(at(-ceiling), { nowMs: NOW, maxPastMs: ceiling }).value, '2026-06-02 10:00:00')
-  assert.equal(resolveClientCreatedAt(at(-ceiling - SECOND), { nowMs: NOW, maxPastMs: ceiling }).tooOld, true)
 })
 
 check('a claim without a zone is UTC in every host time zone', () => {
@@ -170,13 +109,12 @@ check('a claim without a zone is UTC in every host time zone', () => {
     for (const zone of ['UTC', 'Asia/Phnom_Penh', 'Asia/Hong_Kong', 'America/Los_Angeles', 'Pacific/Kiritimati']) {
       process.env.TZ = zone
       for (const claim of ['2026-08-31 09:55:00', '2026-08-31T09:55:00', '2026-08-31T09:55', '2026-08-31 09:55:00.250', '  2026-08-31 09:55:00  ']) {
-        const out = resolveClientCreatedAt(claim, { nowMs: NOW })
-        assert.deepEqual(out, { value: '2026-08-31 09:55:00', adjusted: false, claimed: '2026-08-31 09:55:00', tooOld: false }, zone + ' ' + JSON.stringify(claim))
+        assert.deepEqual(resolve(claim), { adjusted: true, claimed: '2026-08-31 09:55:00', tooOld: false }, zone + ' ' + JSON.stringify(claim))
       }
-      assert.equal(resolveClientCreatedAt('2026-08-31 17:00:00', { nowMs: NOW }).value, null, zone + ': a Phnom Penh wall clock read as UTC is seven hours ahead')
-      assert.equal(resolveClientCreatedAt('2026-08-31 09:30:00', { nowMs: NOW }).tooOld, true, zone)
-      assert.equal(resolveClientCreatedAt('2026-08-31T16:55:00+07:00', { nowMs: NOW }).value, '2026-08-31 09:55:00', zone + ': an explicit offset is unchanged')
-      assert.equal(resolveClientCreatedAt('2026-08-31T09:55:00Z', { nowMs: NOW }).value, '2026-08-31 09:55:00', zone + ': an explicit Z is unchanged')
+      assert.equal(resolve('2026-08-31 17:00:00').claimed, '2026-08-31 17:00:00', zone + ': a Phnom Penh wall clock is echoed as read, seven hours ahead')
+      assert.equal(resolve('2026-08-31 09:30:00').tooOld, true, zone)
+      assert.equal(resolve('2026-08-31T16:55:00+07:00').claimed, '2026-08-31 09:55:00', zone + ': an explicit offset is converted')
+      assert.equal(resolve('2026-08-31T09:55:00Z').claimed, '2026-08-31 09:55:00', zone + ': an explicit Z is unchanged')
     }
   } finally {
     if (saved === undefined) delete process.env.TZ
@@ -184,11 +122,35 @@ check('a claim without a zone is UTC in every host time zone', () => {
   }
 })
 
-check('wiring: the sales INSERT COALESCEs the sanitized client stamp, updated_at stays server-clock', () => {
+check('business day: a backward claim at 00:05 Phnom Penh cannot move the sale to the previous day', () => {
+  const now = Date.parse('2026-10-13T17:05:00Z')
+  assert.equal(phnomPenhDay(now), '2026-10-14')
+  const out = resolve(new Date(now - 10 * MINUTE).toISOString(), now)
+  assert.equal(phnomPenhDay(claimedMs(out)), '2026-10-13', 'the claim itself is on the previous day (storing it moved the sale there)')
+  assert.equal('value' in out, false, 'nothing is returned to store: the sale keeps the server day')
+  assert.equal(out.tooOld, false)
+})
+
+check('business day: a forward claim at 23:58:30 Phnom Penh cannot move the sale to the next day', () => {
+  const now = Date.parse('2026-10-13T16:58:30Z')
+  assert.equal(phnomPenhDay(now), '2026-10-13')
+  for (const ahead of [90 * SECOND, 2 * MINUTE]) {
+    const out = resolve(new Date(now + ahead).toISOString(), now)
+    assert.equal(phnomPenhDay(claimedMs(out)), '2026-10-14', 'the claim itself is on the next day (storing it moved the sale there)')
+    assert.equal('value' in out, false, 'nothing is returned to store: the sale keeps the server day')
+    assert.equal(out.adjusted, true)
+  }
+})
+
+check('wiring: the sales INSERT stamps the server clock and binds no client created_at', () => {
   const salesRoute = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'sales.ts'), 'utf8')
   assert.match(salesRoute, /resolveClientCreatedAt\(body\.created_at\)/)
-  assert.match(salesRoute, /const clientCreatedAt = clientTime\.value/)
-  assert.match(salesRoute, /COALESCE\(@created_at, CURRENT_TIMESTAMP\), CURRENT_TIMESTAMP\s+WHERE @customer_guard_id/)
+  assert.doesNotMatch(salesRoute, /clientCreatedAt|clientTime\.value/)
+  assert.match(salesRoute, /@creation_snapshot_json, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP\s+WHERE @customer_guard_id/)
+  assert.doesNotMatch(salesRoute, /COALESCE\(@created_at, CURRENT_TIMESTAMP\)/)
+  assert.doesNotMatch(salesRoute, /^\s+created_at: client/m, 'the sale insert binds no created_at parameter')
+  assert.doesNotMatch(salesRoute, /origin: [^,\n]*offline_replay/)
+  assert.match(salesRoute, /origin: 'pos'/)
 })
 
 check('wiring: an old claim is refused after the owner fence, the duplicate lookup and the precision check, before any other work, and leaves one audit row', () => {
@@ -229,8 +191,7 @@ check('wiring: online-only sales do not mint offline timestamps; manual recovery
   const original = { client_request_id: 'original-request', created_at: '2026-08-01T09:00:00Z', offline_owner: { actor_id: 71 } }
   dispatch(structuredClone(original))
   assert.deepEqual(sent, { method: 'POST', url: '/api/sales', payload: original }, 'recovery sends the exact historical timestamp, not retry time')
-  assert.equal(sanitizeClientCreatedAt(sent.payload.created_at, NOW), null, 'the default window refuses a month-old stamp')
-  assert.equal(resolveClientCreatedAt(sent.payload.created_at, { nowMs: NOW, maxPastMs: 60 * DAY }).value, '2026-08-01 09:00:00', 'only an explicit maxPastMs drain keeps it')
+  assert.equal(resolve(sent.payload.created_at).tooOld, true, 'the window refuses a month-old stamp, and nothing widens it')
 })
 
 if (failed > 0) process.exitCode = 1
