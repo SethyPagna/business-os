@@ -16,13 +16,14 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 // function the in-app report reads -- for the same rows.
 //
 // Discriminating fixture: a $10 courier paid by hand and recorded as a fee
-// typed 'delivery' (no sale carries it), a $4 ordinary expense, and a $3 /
-// 4,000៛ courier payout recorded on a sale. The two plausible wrong answers:
+// typed 'delivery' (no sale carries it), a $4 ordinary expense, and a $3
+// courier payout recorded on a sale (its riel twin is the same money). The two
+// plausible wrong answers:
 //   (a) the pre-fix message: delivery cost $3.00, and "Moto courier $10.00"
 //       listed as another expense;
 //   (b) delivery cost right but the delivery fee ALSO listed as a row, so the
 //       rows add up to more than the section total.
-// Both fail below. The section total is unchanged by the fix ($17 + 4,000៛):
+// Both fail below. The section total is unchanged by the fix ($17):
 // the split moves money between rows, never in or out of the section.
 //
 // Run (from cloudflare/): node scripts/test-telegram-shift-delivery-split-pure.cjs
@@ -76,10 +77,10 @@ INSERT INTO settings VALUES('business_name','Split Test Shop');
 INSERT INTO shift_sessions VALUES(1,'S-20260906-0900','per_account',7,'za',2,'Store','2026-09-06','2026-09-06 02:00:00',
  50,0,1,1,0,0,'2026-09-06 06:00:00',60,0,NULL,NULL,NULL);
 
--- Sale 6 paid a courier on the sale itself ($3 / 4,000 riel) and has no fee row.
+-- Sale 6 paid a courier on the sale itself ($3, with its 12,300 riel twin) and has no fee row.
 INSERT INTO sales(id,created_at,sale_status,branch_id,cashier_id,payment_method,amount_paid_usd,total_usd,delivery_actual_cost_usd,delivery_actual_cost_khr) VALUES
  (1,'2026-09-06 02:30:00','completed',2,7,'Cash',40,40,NULL,NULL),
- (6,'2026-09-06 04:00:00','completed',2,7,'Cash',10,10,3,4000);
+ (6,'2026-09-06 04:00:00','completed',2,7,'Cash',10,10,3,12300);
 
 -- The H-io shape: a courier paid by hand, entered as an expense typed
 -- 'delivery', tied to no sale. Plus one ordinary expense.
@@ -173,15 +174,15 @@ function unwrap(lines) {
   const app = await reconciliation.loadShiftFigures({}, shift, NOW)
   // The in-app answer for this fixture, by value: the hand-paid courier fee
   // joins the sale-level payout as delivery cost; Ice alone is "other".
-  assert.deepEqual(app.delivery_cost, { usd: 13, khr: 4000 }, 'in-app delivery cost')
+  assert.deepEqual(app.delivery_cost, { usd: 13, khr: 0 }, 'in-app delivery cost')
   assert.deepEqual(app.other_expenses, { usd: 4, khr: 0 }, 'in-app other expenses')
-  checks += 1; console.log('PASS in-app split: delivery cost $13.00 · 4,000៛ (fee + courier), other expenses $4.00')
+  checks += 1; console.log('PASS in-app split: delivery cost $13.00 (fee + courier), other expenses $4.00')
 
   const report = await telegram.telegramCommandReply({}, '/shift 06/09/2026', NOW, 'both')
   const section = expensesSection(report)
 
   // 1. The delivery cost row carries the SAME figure the app shows.
-  const deliveryRow = `${lang.ROW_BULLET}${lang.label('deliveryCost')}: $13.00 · 4,000៛`
+  const deliveryRow = `${lang.ROW_BULLET}${lang.label('deliveryCost')}: $13.00`
   assert.ok(section.includes(deliveryRow),
     `Telegram delivery cost must match the app (${deliveryRow}); the section was:\n${section.join('\n')}`)
   assert.ok(deliveryRow.includes('ថ្លៃដឹកដើម') && deliveryRow.includes('Actual delivery cost'), `the row is bilingual: ${deliveryRow}`)
@@ -195,7 +196,7 @@ function unwrap(lines) {
 
   // 3. The rows foot to the total, and the total is every fee plus the
   //    courier payout -- unchanged by the split.
-  const totalRow = lang.labeled('total', '$17.00 · 4,000៛')
+  const totalRow = lang.labeled('total', '$17.00')
   assert.equal(section[section.length - 1], totalRow, `section total:\n${section.join('\n')}`)
   const rowUsd = section.slice(0, -1).reduce((sum, line) => sum + Number((line.match(/\$(\d+\.\d\d)/) || [0, 0])[1]), 0)
   assert.equal(Math.round(rowUsd * 100) / 100, 17, `the rows must add up to the total:\n${section.join('\n')}`)
@@ -206,9 +207,9 @@ function unwrap(lines) {
   // 4. The whole section, in the shop's own Khmer-only mode: the same split.
   const km = await telegram.telegramCommandReply({}, '/shift 06/09/2026', NOW, 'km')
   const kmSection = unwrap(km.split('\n'))
-  assert.ok(kmSection.includes(`${lang.ROW_BULLET}ថ្លៃដឹកដើម: $13.00 · 4,000៛`), `Khmer delivery cost row:\n${km}`)
+  assert.ok(kmSection.includes(`${lang.ROW_BULLET}ថ្លៃដឹកដើម: $13.00`), `Khmer delivery cost row:\n${km}`)
   assert.ok(!km.includes('Moto courier'), 'the Khmer message does not double-list the fee either')
-  checks += 1; console.log('PASS Khmer-only message: · ថ្លៃដឹកដើម: $13.00 · 4,000៛')
+  checks += 1; console.log('PASS Khmer-only message: · ថ្លៃដឹកដើម: $13.00')
 
   // 5. One kernel, not two: the message goes through composeShiftFigures and
   //    shiftDeliveryFeeExpenses, and the delivery predicate is defined once.

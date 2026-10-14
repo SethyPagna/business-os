@@ -16,17 +16,17 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 // delivery fee was counted twice.
 //
 // One fixture, the three reports, one answer:
-//   Actual delivery cost  $18.00 · 4,000៛   (courier $3 / 4,000៛ on sale 6,
+//   Actual delivery cost  $18.00   (courier $3 on sale 6,
 //                                            + Moto courier fee $10,
 //                                            + sale 7's linked courier fee $5)
 //   Other expenses        $4.00             (Ice)
-//   Total                 $22.00 · 4,000៛
+//   Total                 $22.00
 //
 // Wrong implementations this fixture separates from the right one:
 //   (a) the pre-fix day/overview: delivery $8.00 (kernel, unguarded), other
 //       $19.00, total $27.00 -- sale 7's $5 counted twice;
 //   (b) delivery-typed fees moved but the kernel's courier kept: $23.00;
-//   (c) the guarded dollars but no riel half: "$18.00" with no "· 4,000៛";
+//   (c) the courier's riel twin counted as a second payout: "$18.00 · 12,300៛";
 //   (d) a courier sum that forgets cancelled sales: sale 8's $50 creeps in.
 //
 // Pure: the REAL lib/telegram.ts, lib/shiftReconciliation.ts and
@@ -91,7 +91,7 @@ INSERT INTO shift_sessions VALUES(1,'S-20260906-0900','per_account',7,'za',2,'St
 INSERT INTO sales(id,created_at,sale_status,branch_id,cashier_id,payment_method,amount_paid_usd,total_usd,delivery_actual_cost_usd,delivery_actual_cost_khr) VALUES
  (1,'2026-09-06 02:30:00','completed',2,7,'Cash',40,40,NULL,NULL),
  -- a courier paid on the sale itself, in both currencies, with no fee row
- (6,'2026-09-06 04:00:00','completed',2,7,'Cash',10,10,3,4000),
+ (6,'2026-09-06 04:00:00','completed',2,7,'Cash',10,10,3,12300),
  -- a courier cost ALSO recorded as a linked delivery fee (fee 3): counted once, as the fee
  (7,'2026-09-06 04:30:00','completed',2,7,'Cash',20,20,5,2000),
  -- a cancelled sale's courier is nobody's expense
@@ -200,9 +200,9 @@ function figure(rows, key) {
 
   // The app's own answer (the in-app shift report's arithmetic), by value.
   const app = await reconciliation.loadShiftFigures({}, shift, NOW)
-  assert.deepEqual(app.delivery_cost, { usd: 18, khr: 4000 }, 'in-app delivery cost: courier $3 / 4,000៛ + delivery-typed fees $10 + $5')
+  assert.deepEqual(app.delivery_cost, { usd: 18, khr: 0 }, 'in-app delivery cost: courier $3 (its 12,300៛ riel twin is the same money) + delivery-typed fees $10 + $5')
   assert.deepEqual(app.other_expenses, { usd: 4, khr: 0 }, 'in-app other expenses: Ice')
-  checks += 1; console.log('PASS in-app split: delivery cost $18.00 · 4,000៛, other $4.00')
+  checks += 1; console.log('PASS in-app split: delivery cost $18.00, other $4.00')
 
   // The overview is the message sent one minute after this shift closes: the
   // shift's business day on the shift's branch.
@@ -214,7 +214,7 @@ function figure(rows, key) {
   }
 
   // All three read side by side, so a failure shows every surface at once.
-  const wanted = { deliveryCost: '$18.00 · 4,000៛', total: '$22.00 · 4,000៛' }
+  const wanted = { deliveryCost: '$18.00', total: '$22.00' }
   const seen = {}
   for (const [name, report] of Object.entries(reports)) {
     const rows = section(report, 'expenses')
@@ -249,18 +249,18 @@ function figure(rows, key) {
   }
   for (const [name, report] of Object.entries(km)) {
     const rows = unwrap(report.split('\n'))
-    assert.ok(rows.includes(`${lang.ROW_BULLET}ថ្លៃដឹកដើម: $18.00 · 4,000៛`), `${name} Khmer delivery cost row:\n${report}`)
-    assert.ok(rows.includes(`${lang.ROW_BULLET}សរុប: $22.00 · 4,000៛`), `${name} Khmer total row:\n${report}`)
+    assert.ok(rows.includes(`${lang.ROW_BULLET}ថ្លៃដឹកដើម: $18.00`), `${name} Khmer delivery cost row:\n${report}`)
+    assert.ok(rows.includes(`${lang.ROW_BULLET}សរុប: $22.00`), `${name} Khmer total row:\n${report}`)
   }
-  checks += 1; console.log('PASS Khmer-only: · ថ្លៃដឹកដើម: $18.00 · 4,000៛ and · សរុប: $22.00 · 4,000៛ on all three')
+  checks += 1; console.log('PASS Khmer-only: · ថ្លៃដឹកដើម: $18.00 and · សរុប: $22.00 on all three')
 
   // Expenses switched off: the fees table's rows go with the switch, the
   // courier paid on the sales stays in the day summary's Sales section -- in
   // both currencies and guarded, never the kernel's raw $8.00.
   const feesOff = await telegram.telegramCommandReply({}, '/report 06/09/2026', NOW, 'both', { fees: false })
   assert.equal(section(feesOff, 'expenses'), null, `no Expenses section when the switch is off:\n${feesOff}`)
-  assert.equal(figure(section(feesOff, 'sales'), 'deliveryCost'), '$3.00 · 4,000៛', `the courier payout moves to Sales:\n${feesOff}`)
-  checks += 1; console.log('PASS Expenses off: /report carries the courier payout ($3.00 · 4,000៛) under Sales')
+  assert.equal(figure(section(feesOff, 'sales'), 'deliveryCost'), '$3.00', `the courier payout moves to Sales:\n${feesOff}`)
+  checks += 1; console.log('PASS Expenses off: /report carries the courier payout ($3.00) under Sales')
 
   console.log(`test-telegram-expenses-parity-pure: ${checks} checks ok`)
 })().catch((error) => { console.error(error); process.exit(1) })

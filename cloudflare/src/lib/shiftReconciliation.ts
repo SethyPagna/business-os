@@ -39,7 +39,9 @@
  *     here -- salesAnalytics.deliveryActualCostExpr already zeroes the sale's
  *     courier cost when a `fees` row of type 'delivery' exists for it, and
  *     that same guard is applied to the riel column, so a payout that was ALSO
- *     entered as an expense is subtracted exactly once.
+ *     entered as an expense is subtracted exactly once. The payout reduces only
+ *     the drawer currency it was paid in (dollars unless the sale records riel
+ *     alone), see courierPayoutsWhere.
  *   * NULL-BRANCH EXPENSES count as this shift's cash. A fee recorded with no
  *     branch was still paid out of the one drawer that was open.
  *
@@ -445,6 +447,13 @@ export async function shiftRefunds(env: Env, shift: ShiftReconciliationSession, 
  * onto it. test-shift-reconciliation-pure.cjs proves both currencies drop a
  * payout that also exists as a fee, so the mirror cannot drift silently.
  *
+ * A payout leaves the drawer in ONE currency. The writers (POS, amendments)
+ * store the riel twin of the dollar cost beside it, which is the same money
+ * and not a second payout, exactly like a refund's riel column. So a sale with
+ * a dollar cost counts in dollars only; only a sale that records riel alone
+ * (an import row) counts in riel. Stored rows are read this way, never
+ * rewritten.
+ *
  * Every report that prints "Actual delivery cost" reads its courier half here
  * -- the shift's drawer window below, a business day (and branch) for the
  * Telegram day summary and Reports overview -- and adds the fees typed
@@ -458,7 +467,9 @@ export async function courierPayoutsWhere(env: Env, clauses: string[], params: R
   const khrExpr = `CASE WHEN EXISTS (
       SELECT 1 FROM fees
       WHERE fees.sale_id = sales.id AND COALESCE(fees.fee_type, '') = 'delivery'
-    ) THEN 0 ELSE COALESCE(sales.delivery_actual_cost_khr, 0) END`
+    ) THEN 0
+    WHEN COALESCE(sales.delivery_actual_cost_usd, 0) > 0 THEN 0
+    ELSE COALESCE(sales.delivery_actual_cost_khr, 0) END`
   const row = await getDb(env).prepare(`SELECT COALESCE(SUM(${deliveryActualCostExpr('sales.')}), 0) AS usd,
       COALESCE(SUM(${khrExpr}), 0) AS khr FROM sales WHERE ${where.join(' AND ')}`)
     .get<{ usd: number; khr: number }>(params)

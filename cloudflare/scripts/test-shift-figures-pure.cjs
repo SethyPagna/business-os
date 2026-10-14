@@ -87,8 +87,8 @@ INSERT INTO settings VALUES('pos_payment_methods','["Cash","ABA"]');
 -- Sale 7 paid a courier AND has a 'delivery' fee row -> counted once, as a fee.
 INSERT INTO sales(id,created_at,sale_status,branch_id,cashier_id,payment_method,amount_paid_usd,amount_paid_khr,total_usd,exchange_rate,delivery_actual_cost_usd,delivery_actual_cost_khr) VALUES
  (1,'2026-09-06 02:00:00','completed',2,7,'Cash',40,0,40,4100,NULL,NULL),
- (6,'2026-09-06 04:00:00','completed',2,7,'Cash',10,0,10,4100,3,4000),
- (7,'2026-09-06 04:30:00','completed',2,7,'Cash',8,0,8,4100,5,20000);
+ (6,'2026-09-06 04:00:00','completed',2,7,'Cash',10,0,10,4100,3,12300),
+ (7,'2026-09-06 04:30:00','completed',2,7,'Cash',8,0,8,4100,5,20500);
 
 INSERT INTO fees(id,created_at,branch_id,sale_id,fee_type,label,amount_usd,amount_khr,created_by) VALUES
  (1,'2026-09-06 02:30:00',2,NULL,'expense','Ice',4,0,7),
@@ -170,11 +170,11 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
   assert.deepEqual(deliveryFees, { usd: 5, khr: 12_000 },
     "only the fees typed 'delivery', and only inside the window -- the $88/88,000 one a second before opening is out")
   const courier = await recon.shiftCourierPayouts({}, SHIFT, NOW)
-  assert.deepEqual(courier, { usd: 3, khr: 4_000 },
+  assert.deepEqual(courier, { usd: 3, khr: 0 },
     "sale 6's payout only: sale 7 already has a delivery FEE row, so its money is not taken twice")
 
   const figures = await recon.loadShiftFigures({}, SHIFT, NOW)
-  assert.deepEqual(figures.delivery_cost, { usd: 8, khr: 16_000 },
+  assert.deepEqual(figures.delivery_cost, { usd: 8, khr: 12_000 },
     'delivery cost is BOTH ways a courier gets paid: the $5 fee row plus the $3 direct payout')
   assert.deepEqual(figures.other_expenses, { usd: 4, khr: 20_000 },
     'other expenses is everything that is not delivery: Ice $4 and the 20,000 riel moto fare')
@@ -187,7 +187,7 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
   assert.equal(figures.delivery_cost.usd + figures.other_expenses.usd, drawer.expenses.usd + drawer.courier.usd)
   assert.equal(figures.delivery_cost.khr + figures.other_expenses.khr, drawer.expenses.khr + drawer.courier.khr)
   assert.equal(drawer.expenses.usd + drawer.courier.usd, 12)
-  assert.equal(drawer.expenses.khr + drawer.courier.khr, 36_000)
+  assert.equal(drawer.expenses.khr + drawer.courier.khr, 32_000)
 
   // ...and the two wrong implementations, named and excluded by value.
   assert.notEqual(figures.other_expenses.usd, expenses.usd,
