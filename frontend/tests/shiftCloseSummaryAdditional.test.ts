@@ -90,6 +90,7 @@ async function summaryFacts(closed: Record<string, unknown>): Promise<Array<[str
     }
     if (name.includes('formatters')) return { fmtDate: String, fmtDateTime24: String, parseServerTimestampMs: Date.parse }
     if (name.includes('ShiftCountFields')) return { default: () => null, ShiftSubmitRow: SubmitMarker, shiftCountBlockerKey: (key: string) => key }
+    if (name.includes('useSavingGate')) return { useSavingGate: () => ({ blocked: false, reason: '' }) }
     if (name.includes('shiftReportModel')) return model
     if (name.includes('shiftTransport')) return {
       ...transportModule,
