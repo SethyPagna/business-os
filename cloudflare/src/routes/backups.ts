@@ -4,6 +4,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, auditOrThrow } from '../lib/audit'
 import { hasPermission } from '../lib/permissions'
 import { canViewAcquisitionCosts, canEditAcquisitionCosts } from '../lib/acquisitionCostAccess'
+import { denyUnlessCurrentPassword, denyUnlessDefaultAdmin } from '../lib/destructiveStepUp'
 import {
   CLOUDFLARE_BACKUP_KEEP,
   createCloudflareBackup,
@@ -80,7 +81,7 @@ app.post('/maintenance/clear', async (c) => {
   if (!hasPermission(user, 'backup_restore')) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
-  const body = (await c.req.json<{ force?: boolean }>().catch(() => ({}))) as { force?: boolean }
+  const body = (await c.req.json<{ force?: boolean; currentPassword?: unknown }>().catch(() => ({}))) as { force?: boolean; currentPassword?: unknown }
   const maintenance = await getMaintenance(c.env)
   if (!maintenance) return c.json({ cleared: true, wasSet: false })
   if (maintenance.mode !== 'restore') return c.json({ cleared: false, code: 'maintenance_active',
@@ -92,6 +93,9 @@ app.post('/maintenance/clear', async (c) => {
       maintenance: maintenanceStatus(maintenance),
     }, 400)
   }
+  // Forcing the hold off re-opens writes on a half-restored database, so it asks for what the restore asked for.
+  const passwordDenied = await denyUnlessCurrentPassword(c, body, 403)
+  if (passwordDenied) return passwordDenied
   const cleared = await endMaintenance(c.env, null, { force: true, expectedRevision: maintenance.revision })
   if (!cleared) return c.json({ cleared: false, code: 'maintenance_changed',
     error: 'Maintenance changed while clearing it. Inspect the current state before trying again.' }, 409)
@@ -177,6 +181,12 @@ app.post('/', async (c) => {
         }))
         return c.json({ job_id: job.id, item: job })
       }
+      // A restore rolls the whole database back, users included, so it is
+      // held to what a reset is: the built-in admin and that account's password.
+      const adminDenied = await denyUnlessDefaultAdmin(c, 'restore')
+      if (adminDenied) return adminDenied
+      const passwordDenied = await denyUnlessCurrentPassword(c, body, 403)
+      if (passwordDenied) return passwordDenied
       // Slice C (Part-77): the restore runs under a write-blocking
       // maintenance flag (lib/maintenance.ts + the index.ts gate) with its
       // progress persisted into the flag -- a crash mid-restore leaves

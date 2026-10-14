@@ -1046,13 +1046,13 @@ export async function exportBackupFolder(destinationDir) {
   return queueBackupFolderExport(destinationDir)
 }
 
-export async function queueBackupFolderRestore(sourceDir) {
+export async function queueBackupFolderRestore(sourceDir, confirmation) {
   const { queueBackupFolderRestore: queueBackupFolderRestoreRequest } = await loadSystemJobsTransport()
-  return queueBackupFolderRestoreRequest(sourceDir)
+  return queueBackupFolderRestoreRequest(sourceDir, confirmation)
 }
 
-export async function importBackupFolder(sourceDir) {
-  return queueBackupFolderRestore(sourceDir)
+export async function importBackupFolder(sourceDir, confirmation) {
+  return queueBackupFolderRestore(sourceDir, confirmation)
 }
 
 // ─── Data reset ───────────────────────────────────────────────────────────────
@@ -1146,8 +1146,8 @@ const RESET_SECTION_MIRROR_TABLES = {
   audit_log: ['audit_logs'],
 }
 
-export async function resetSection(section) {
-  const result = await callSystemRuntimeMethod('resetSection', section)
+export async function resetSection(section, confirmation) {
+  const result = await callSystemRuntimeMethod('resetSection', section, confirmation)
   await invalidateClientRuntimeState(`reset-section-${section}`, RESET_SECTION_MIRROR_TABLES[section] || [])
   return result
 }
@@ -1169,8 +1169,8 @@ const FINALIZE_MIGRATION_MIRROR_TABLES = {
   park_lots: [],
 }
 
-export async function finalizeMigration(step) {
-  const result = await callSystemRuntimeMethod('finalizeMigration', step)
+export async function finalizeMigration(step, confirmation) {
+  const result = await callSystemRuntimeMethod('finalizeMigration', step, confirmation)
   await invalidateClientRuntimeState(`finalize-migration-${step}`, FINALIZE_MIGRATION_MIRROR_TABLES[step] || [])
   return result
 }

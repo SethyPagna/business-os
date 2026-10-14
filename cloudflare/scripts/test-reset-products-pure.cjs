@@ -110,6 +110,7 @@ const FAKE_USER = { id: 1, username: 'admin', name: 'Test User', permissions: JS
 // the typed phrase, the caller's REAL current password, a configured seed
 // admin password and a backup first. This owner satisfies every guard.
 const OWNER_PASSWORD = 'owner-current-password'
+const OWNER_PASSWORD_HASH = require('bcryptjs').hashSync(OWNER_PASSWORD, 4)
 const OWNER_USER = { id: 900, username: 'admin', name: 'Owner', role_code: 'admin', role_permissions: '{"all":true}', permissions: '{}' }
 let sessionUser = FAKE_USER
 
@@ -150,7 +151,8 @@ const imageVariantStore = loadReal('lib/imageVariantStore.ts', {
 })
 const planTier = loadReal('lib/planTier.ts')
 
-const systemRoute = loadReal('routes/system.ts', {
+const { withStepUp } = require('./harness/step_up_lib.cjs')
+const systemRoute = withStepUp(loadReal, 'routes/system.ts', {
   // planTier.ts is pure (only `import type`) and holds the free-vs-paid
   // image-delete cap the reset path now reads -- real, not an inert stub,
   // which would make that cap undefined and slice(0, undefined) empty.
@@ -236,7 +238,8 @@ const app = systemRoute.default
 const fakeExecutionCtx = { waitUntil: (p) => { p?.catch?.(() => {}) }, passThroughOnException: () => {} }
 
 async function req(method, url, body, env = fakeEnv) {
-  if(url === '/reset-data') body={confirm:body.mode==='all'?'DELETE ALL DATA':body.mode==='products'?'RESET PRODUCTS':'RESET SALES',acknowledged:true,...body}
+  if(url === '/reset-data') body={confirm:body.mode==='all'?'DELETE ALL DATA':body.mode==='products'?'RESET PRODUCTS':'RESET SALES',acknowledged:true,currentPassword:OWNER_PASSWORD,...body}
+  if(url === '/reset-section') body={confirm:'RESET '+String(body.section).toUpperCase().replace(/_/g,' '),acknowledged:true,currentPassword:OWNER_PASSWORD,...body}
   const res = await app.request(url, {
     method,
     headers: { 'Content-Type': 'application/json' },
@@ -255,7 +258,7 @@ function tableExists(table) { return Boolean(row(`SELECT 1 AS ok FROM sqlite_mas
 const presentProductsResetTables = () => PRODUCTS_RESET_TABLES.filter(tableExists)
 
 function seed() {
-  exec("INSERT OR IGNORE INTO roles(id,name,code,is_system,permissions) VALUES(901,'Default admin','admin',1,'{\"all\":true}'); DELETE FROM users WHERE id=900; INSERT OR REPLACE INTO users(id,username,name,password,role_id,is_active) VALUES(1,'admin','Admin','hash',901,1)")
+  exec(`INSERT OR IGNORE INTO roles(id,name,code,is_system,permissions) VALUES(901,'Default admin','admin',1,'{"all":true}'); DELETE FROM users WHERE id=900; INSERT OR REPLACE INTO users(id,username,name,password,role_id,is_active) VALUES(1,'admin','Admin','${OWNER_PASSWORD_HASH}',901,1)`)
   // Wipe every table this test touches so each check() starts clean,
   // regardless of run order.
   exec(`INSERT INTO system_flags(key,value) VALUES('sale_record_events_reset_guard','{"mode":"reset","token":"test-seed"}')
@@ -367,6 +370,22 @@ async function check(name, fn) {
 }
 
 async function main() {
+  await check('reset-data (every mode) and reset-section refuse a missing or wrong current password before any backup or delete', async () => {
+    seed()
+    backupCallLog = []
+    const before = { sales: count('sales'), products: count('products'), customers: count('customers') }
+    for (const [url, body] of [['/reset-data', { mode: 'sales' }], ['/reset-data', { mode: 'products' }], ['/reset-data', { mode: 'all' }], ['/reset-section', { section: 'customers' }]]) {
+      const missing = await req('POST', url, { ...body, currentPassword: undefined })
+      assert.strictEqual(missing.status, 403, `${url} ${JSON.stringify(body)}: ${JSON.stringify(missing.json)}`)
+      assert.strictEqual(missing.json.code, 'current_password_required')
+      const wrong = await req('POST', url, { ...body, currentPassword: 'not-the-password' })
+      assert.strictEqual(wrong.status, 403, `${url} ${JSON.stringify(body)}: ${JSON.stringify(wrong.json)}`)
+      assert.strictEqual(wrong.json.code, 'incorrect_password')
+    }
+    assert.deepStrictEqual(backupCallLog, [], 'a refused step-up must not even take a backup')
+    assert.deepStrictEqual({ sales: count('sales'), products: count('products'), customers: count('customers') }, before, 'nothing was deleted')
+  })
+
   await check('mode=products deletes every table in PRODUCTS_RESET_TABLES', async () => {
     seed()
     for (const table of presentProductsResetTables()) assert.ok(count(table) > 0, `sanity: ${table} should be seeded before the reset`)
@@ -503,7 +522,7 @@ async function main() {
     const res = await app.request('/reset-data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: 'products', includeImages: true,confirm:'RESET PRODUCTS',acknowledged:true }),
+      body: JSON.stringify({ mode: 'products', includeImages: true,confirm:'RESET PRODUCTS',acknowledged:true,currentPassword:OWNER_PASSWORD }),
     }, { ...fakeEnv, PLAN_TIER: 'free' }, fakeExecutionCtx)
     const json = await res.json().catch(() => null)
     planTier.__resetPlanTierCacheForTests()

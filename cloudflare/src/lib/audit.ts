@@ -5,8 +5,8 @@ import type { Env } from '../index'
 // replaced a manual "Clear 30d" button in the Audit Logs UI -- retention is
 // now enforced automatically on the cron schedule (see maybeRunScheduledAuditLogRetention
 // below) instead of requiring an admin to remember to click something.
-// Admins can override this via the "audit_log_retention_days" row in the
-// settings table (exposed as a Settings-page field).
+// An administrator changes it through PUT /api/settings/audit-log-retention,
+// which needs the current password and refuses anything under this 21-day floor.
 export const DEFAULT_AUDIT_LOG_RETENTION_DAYS = 21
 const AUDIT_LOG_RETENTION_SETTING_KEY = 'audit_log_retention_days'
 const AUDIT_LOG_RETENTION_LAST_RUN_KEY = 'audit_log_retention_last_run'
@@ -17,87 +17,104 @@ const AUDIT_LOG_RETENTION_LAST_RUN_KEY = 'audit_log_retention_last_run'
 // to not do needless work on every tick.
 const AUDIT_LOG_RETENTION_MIN_INTERVAL_MS = 24 * 60 * 60 * 1000
 
-// Return bulk undo/redo audit rows are the only durable source of the actor
-// and timestamp for those replays. The operation receipt retains the status
-// transition and generation, but it cannot identify who replayed it or when.
-// Shift lifecycle requests also use their atomic audit row as the durable
-// replay receipt. Only the four exact-request lifecycle actions qualify;
-// ordinary Shift logs and legacy writes without request identity still age out.
-// Keep this predicate narrow: ordinary audit data, the original bulk receipt,
-// and unrelated undo/redo rows continue to follow the configured retention.
+// Owner, 14 Oct 2026: the audit rows of sales, payments (settle and refunds), returns, every stock change,
+// permission, role and user changes, and reverts are kept forever. The 13 Oct ruling that old expenses are
+// kept still holds. Where the ruling is silent and deletion cannot be undone, the record stays (lead decision,
+// 14 Oct): the rows of every system-wide write that changes sales, stock, returns, payments or permissions
+// (reset, factory reset, migration finalize, integrity repair, restore, import approval), of anything that
+// moves sales ownership or receivables (customer and supplier link, merge, reassign), of every cost and price
+// edit, of shift open/close and cash records, and the review decisions that apply stock or money changes.
+// An undo or redo is kept only when what it undid is kept; any other undo or redo is history that follows the
+// retention setting (13 Oct: the Undo/Redo history may be pruned). Logins, device approvals, settings changes,
+// refused step-ups and every row not named here follow the retention setting.
 //
-// K11, owner 13 Oct (relayed): "keep old expenses. ... for the revert, yes, as
-// it is same with stock changes ... for undo redo history no need." So, kept
-// forever regardless of age:
-//   - expense evidence: every row about an expense record (entity 'fee': create,
-//     edit, delete, approved delete) or an expense label rewrite ('fee_label':
-//     replace, classify), and the review decisions on expense requests
-//     ('pending_action' rows whose request section is 'fees');
-//   - revert records: the audit rows of a stock Revert (a compensating
-//     counter-movement, kept like the stock change itself) and of the one-off
-//     repairs of a revert. scripts/test-audit-retention-pure.cjs fails if the
-//     source writes a 'stock_revert*' action this list does not name.
-// Undo/Redo history ('action_undo'/'action_redo' rows, including those about an
-// expense) still ages out, as does everything else not named here. The
-// expense and revert ledgers themselves (fees, fee_operation_receipts,
-// inventory_movements) are never touched by this sweep.
+// The classes are the entity and action values the writers use, not a guess:
+// scripts/harness/audit_retention_classes.cjs lists every writer and
+// test-audit-retention-pure.cjs fails when the source writes an entity/action pair that list does not
+// classify, or when the list and the SQL below disagree.
+// The ledgers themselves (sales, returns, fees, inventory_movements) are never touched
+// by this sweep; it deletes from audit_logs only.
+export const AUDIT_RETENTION_KEPT_SALE_PAYMENT_ENTITIES = [
+  'sale', 'sale_creation', 'sale_item', 'sales', 'payment_method', 'customer_receivables', 'supplier_invoices',
+] as const
+export const AUDIT_RETENTION_KEPT_RETURN_ENTITIES = ['return', 'returns', 'return_create', 'return_reason', 'supplier_return'] as const
+export const AUDIT_RETENTION_KEPT_STOCK_ENTITIES = [
+  'stock', 'stock_transfer', 'stock_transfers', 'stock_session', 'stock_session_operations', 'inventory', 'inventory_movements',
+  'inventory_reason', 'product_batch', 'product_batches', 'branch_stock_integrity', 'branch_cutover',
+] as const
+export const AUDIT_RETENTION_KEPT_PERMISSION_ENTITIES = ['role', 'roles'] as const
 export const AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES = ['fee', 'fee_label'] as const
+export const AUDIT_RETENTION_KEPT_CASH_ENTITIES = ['shift_session'] as const
+// Entities kept only for some actions. An account row is kept when it creates or changes the account (role,
+// permissions, active flag); its sign-ins, password resets and device approvals follow the retention setting.
+// A product row is kept when it creates the product or edits its price or cost.
+const AUDIT_RETENTION_ACCOUNT_ACTIONS = ['create', 'update'] as const
+const AUDIT_RETENTION_PRODUCT_ACTIONS = ['create', 'update', 'cost_override', 'catalog_cost_recompute_backfill'] as const
+export const AUDIT_RETENTION_KEPT_ENTITY_ACTIONS: Readonly<Record<string, readonly string[]>> = {
+  user: AUDIT_RETENTION_ACCOUNT_ACTIONS,
+  users: AUDIT_RETENTION_ACCOUNT_ACTIONS,
+  product: AUDIT_RETENTION_PRODUCT_ACTIONS,
+  products: AUDIT_RETENTION_PRODUCT_ACTIONS,
+  system: ['reset_data', 'factory_reset', 'finalize_migration'],
+  'data-integrity': ['repair'],
+  backup: ['restore'],
+  import_job: ['import_job_approve', 'import_job_retry'],
+  customer: [
+    'merge', 'link_sales', 'relink_sales', 'create_and_link_sales', 'customer_same_name_phone_merge',
+    'mark_anonymous_customer', 'clear_shared_general_membership',
+  ],
+  supplier: ['merge', 'supplier_duplicate_cluster_merge'],
+  delivery_contact: ['merge'],
+}
+// Review decisions: every decision on an expense is kept; an approval is kept when the section it applies
+// changes stock, prices, returns or contacts. Rejections, resubmissions and branch approvals expire.
+export const AUDIT_RETENTION_KEPT_REVIEW_SECTIONS = ['fees'] as const
+export const AUDIT_RETENTION_KEPT_APPROVED_REVIEW_SECTIONS = ['products', 'inventory', 'returns', 'contacts'] as const
+// An undo or redo row names the entity of the history row it replayed, not what that row changed. Every entity kept
+// whole above already keeps its own undo and redo rows (a sale, return, stock, expense or shift replay). These are the
+// entities kept only by action whose replays may have undone a kept change (a product edit, stock or price), plus an
+// unknown or legacy entity, which stays because nothing says what it undid. An undo or redo of any other entity
+// (a brand, customer, branch or settings edit) is history that follows the retention setting.
+export const AUDIT_RETENTION_KEPT_UNDO_ENTITIES = ['product', 'products', 'action_history', ''] as const
+// Stock changes that are written on the product (or on a legacy row with no entity).
+export const AUDIT_RETENTION_KEPT_STOCK_ACTIONS = [
+  'stock_add', 'stock_remove', 'stock_set', 'stock_adjust', 'stock_in_line_edit', 'stock_movement_reason_edit',
+  'stock_tagged_dispose', 'stock_tagged_restore', 'transfer', 'transfer_intent',
+  'merge_duplicate', 'fold', 'product_same_name_merge', 'product_transfer_aware_merge', 'product_leading_zero_twin_merge',
+  'received_date_saleability_repair', 'stale_receipt_revert_mirror', 'recompute_stock_cache',
+  'branch_cutover_inactive_stock', 'branch_cutover_approved_fold', 'branch_cutover_inactive_fold', 'branch_cutover_lot_fold',
+  'branch_cutover_completed', 'undo_closed_branch_cutover',
+] as const
 export const AUDIT_RETENTION_KEPT_REVERT_ACTIONS = ['stock_revert', 'stock_revert_repair', 'stock_revert_repair_before'] as const
+// Rows written before audit rows carried an entity: only their action says what they were.
+export const AUDIT_RETENTION_KEPT_LEGACY_ACTIONS = ['sale', 'sale_settlement', 'return'] as const
 const sqlList = (values: readonly string[]): string => values.map((value) => `'${value}'`).join(', ')
+const AUDIT_ENTITY_KEY_SQL = "LOWER(TRIM(COALESCE(NULLIF(TRIM(entity), ''), table_name, '')))"
+const AUDIT_ACTION_SQL = "COALESCE(action, '')"
+const AUDIT_REVIEW_SECTION_SQL = "COALESCE(CASE WHEN json_valid(details) THEN json_extract(details, '$.section') END, '')"
+const AUDIT_RETENTION_KEPT_FOREVER_SQL = `${AUDIT_ENTITY_KEY_SQL} IN (${sqlList([
+  ...AUDIT_RETENTION_KEPT_SALE_PAYMENT_ENTITIES,
+  ...AUDIT_RETENTION_KEPT_RETURN_ENTITIES,
+  ...AUDIT_RETENTION_KEPT_STOCK_ENTITIES,
+  ...AUDIT_RETENTION_KEPT_PERMISSION_ENTITIES,
+  ...AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES,
+  ...AUDIT_RETENTION_KEPT_CASH_ENTITIES,
+])})
+${Object.entries(AUDIT_RETENTION_KEPT_ENTITY_ACTIONS).map(([entity, actions]) =>
+  `        OR (${AUDIT_ENTITY_KEY_SQL} = '${entity}' AND ${AUDIT_ACTION_SQL} IN (${sqlList(actions)}))`).join('\n')}
+        OR (${AUDIT_ENTITY_KEY_SQL} = '' AND ${AUDIT_ACTION_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_LEGACY_ACTIONS)}))
+        OR ${AUDIT_ACTION_SQL} IN (${sqlList([...AUDIT_RETENTION_KEPT_STOCK_ACTIONS, ...AUDIT_RETENTION_KEPT_REVERT_ACTIONS])})
+        OR (${AUDIT_ENTITY_KEY_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_UNDO_ENTITIES)})
+          AND (${AUDIT_ACTION_SQL} LIKE '%\\_undo' ESCAPE '\\' OR ${AUDIT_ACTION_SQL} LIKE '%\\_redo' ESCAPE '\\'))`
 
 export function buildAuditLogRetentionDeleteSql(): string {
   return `DELETE FROM audit_logs WHERE id IN (
     SELECT id FROM audit_logs
     WHERE created_at < @cutoff
-      AND NOT (COALESCE(entity, '') IN (${sqlList(AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES)})
-        AND COALESCE(action, '') NOT IN ('action_undo', 'action_redo'))
+      AND NOT (${AUDIT_RETENTION_KEPT_FOREVER_SQL})
       AND NOT (COALESCE(entity, '') = 'pending_action'
-        AND COALESCE(CASE WHEN json_valid(details) THEN json_extract(details, '$.section') END, '') = 'fees')
-      AND COALESCE(action, '') NOT IN (${sqlList(AUDIT_RETENTION_KEPT_REVERT_ACTIONS)})
-      AND NOT COALESCE(CASE WHEN json_valid(details) THEN (
-        (entity = 'return'
-        AND action IN ('action_undo','action_redo')
-        AND json_extract(details, '$.kind') = 'return.fields.bulk'
-        ) OR (
-          entity = 'shift_session'
-          AND action IN ('shift.close','shift.reopen','shift.amend','shift.cancel')
-          AND json_type(details, '$.request.id') = 'text'
-          AND length(json_extract(details, '$.request.id')) BETWEEN 16 AND 128
-          AND json_extract(details, '$.request.id') NOT GLOB '*[^a-zA-Z0-9_-]*'
-          AND json_type(details, '$.request.target') = 'integer'
-          AND json_extract(details, '$.request.target') > 0
-          AND json_type(details, '$.request.canonical') = 'text'
-          AND CASE WHEN json_valid(json_extract(details, '$.request.canonical')) THEN
-            json_extract(json_extract(details, '$.request.canonical'), '$.client_request_id') = json_extract(details, '$.request.id')
-          ELSE 0 END
-        ) OR (
-          entity = 'product' AND entity_id = 'bulk-price-adjust' AND action = 'update'
-          AND user_id > 0
-          AND json_extract(details, '$.kind') = 'product.bulk-price-adjust'
-          AND json_extract(details, '$.version') = 1
-          AND json_type(details, '$.client_request_id') = 'text'
-          AND length(json_extract(details, '$.client_request_id')) BETWEEN 8 AND 120
-          AND json_extract(details, '$.client_request_id') NOT GLOB '*[^a-zA-Z0-9_-]*'
-          AND json_type(details, '$.rowsTouched') = 'integer'
-          AND json_extract(details, '$.rowsTouched') >= 0
-          AND json_type(details, '$.claim_nonce') = 'text'
-          AND length(json_extract(details, '$.claim_nonce')) = 36
-          AND json_type(details, '$.request') = 'text'
-          AND CASE WHEN json_valid(json_extract(details, '$.request')) THEN
-            json_extract(json_extract(details, '$.request'), '$.direction') IN ('increase','decrease')
-            AND json_type(json_extract(details, '$.request'), '$.amount') IN ('integer','real')
-            AND json_extract(json_extract(details, '$.request'), '$.amount') > 0
-            AND json_type(json_extract(details, '$.request'), '$.fields') = 'array'
-            AND json_array_length(json_extract(details, '$.request'), '$.fields') BETWEEN 1 AND 6
-            AND NOT EXISTS (SELECT 1 FROM json_each(json_extract(details, '$.request'), '$.fields')
-              WHERE value NOT IN ('selling_price_usd','selling_price_khr','wholesale_price_usd','wholesale_price_khr','cost_price_usd','cost_price_khr') OR type <> 'text')
-            AND json_type(json_extract(details, '$.request'), '$.skip_zero') IN ('true','false')
-          ELSE 0 END
-          AND json_valid(old_value) AND json_valid(new_value)
-          AND json_type(new_value, '$.rows_touched') = 'integer'
-          AND json_extract(new_value, '$.rows_touched') = json_extract(details, '$.rowsTouched')
-        )
-      ) ELSE 0 END, 0)
+        AND (${AUDIT_REVIEW_SECTION_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_REVIEW_SECTIONS)})
+          OR (${AUDIT_ACTION_SQL} = 'approve' AND ${AUDIT_REVIEW_SECTION_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_APPROVED_REVIEW_SECTIONS)}))))
     LIMIT 5000
   )`
 }
@@ -441,7 +458,7 @@ async function setSettingValue(env: Env, key: string, value: string): Promise<vo
 export async function getAuditLogRetentionDays(env: Env): Promise<number> {
   const raw = await getSettingValue(env, AUDIT_LOG_RETENTION_SETTING_KEY)
   const parsed = raw ? Number.parseInt(raw, 10) : NaN
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_AUDIT_LOG_RETENTION_DAYS
+  return Number.isFinite(parsed) ? Math.max(DEFAULT_AUDIT_LOG_RETENTION_DAYS, parsed) : DEFAULT_AUDIT_LOG_RETENTION_DAYS
 }
 
 // Runs on the scheduled worker tick. Deletes audit_logs rows older than the

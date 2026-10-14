@@ -20,7 +20,7 @@ const overrides = {
   '../lib/audit': { changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, audit: async () => {} },
   // isAdminControlUser: the P1-3 admin-only-key guard's question. This
   // payments user is not an administrator.
-  '../lib/permissions': { hasPermission: () => true, isAdminControlUser: () => false },
+  '../lib/permissions': { hasPermission: () => true, getPermissionTier: () => 'full', isAdminControlUser: () => false },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
 }

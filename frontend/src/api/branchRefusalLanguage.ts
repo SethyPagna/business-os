@@ -20,6 +20,7 @@ export const RESTATED_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   bulk_delete_queue_unavailable: 'bulk_delete_queue_unavailable',
   bulk_delete_queue_resume_required: 'bulk_delete_queue_resume_required',
   product_has_stock: 'product_has_stock',
+  repair_integrity_restore_permission_required: 'repair_integrity_restore_permission_required',
   product_status_unsupported: 'product_status_unsupported',
   product_replacement_incomplete: 'product_replacement_incomplete',
   // PUT /products/:id that would fold the row into another product, by an editor whose merge switch is off.

@@ -44,6 +44,7 @@ function load(relative, dependencies = {}) {
 }
 
 const settingsSensitive = load('lib/settingsSensitive.ts')
+const settingsVisibility = load('lib/settingsVisibility.ts', { './permissions': load('lib/permissions.ts') })
 const SETTINGS_ROWS = [
   { key: 'business_name', value: 'Leang', updated_at: '2026-09-01 00:00:00' },
   { key: 'google_drive_refresh_token', value: 'secret-token', updated_at: '2026-09-02 00:00:00' },
@@ -118,6 +119,7 @@ const settingsRoute = load('routes/settings.ts', {
   '../lib/db': { getDb: () => fakeDb },
   '../lib/auth': authLib,
   '../lib/settingsSensitive': settingsSensitive,
+  '../lib/settingsVisibility': settingsVisibility,
   '../lib/telegram': { TELEGRAM_TOPIC_KEYS: [] },
   '../lib/lowStockSettings': { MAX_LOW_STOCK_THRESHOLD: 1000, validateLowStockSettingsWrite: () => null },
   '../lib/addressPresets': { POS_ADDRESS_PRESETS_KEY: 'pos_address_presets' },

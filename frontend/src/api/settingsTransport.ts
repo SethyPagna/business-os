@@ -291,6 +291,12 @@ export function getUnregisteredPaymentMethods(): Promise<unknown> {
   return apiFetch('GET', '/api/settings/payment-methods/unregistered')
 }
 
+/** How long the audit trail is kept; the Worker asks for the current password and keeps the 21-day floor. */
+export function saveAuditLogRetention(days: number, confirmation: { currentPassword: string }): Promise<unknown> {
+  if (!confirmation?.currentPassword) throw new Error('Changing audit log retention requires the current password.')
+  return apiFetch('PUT', '/api/settings/audit-log-retention', { days, currentPassword: confirmation.currentPassword })
+}
+
 /** Append every method already used on a sale to the configured list. */
 export function backfillPaymentMethods(): Promise<unknown> {
   return apiFetch('POST', '/api/settings/payment-methods/backfill', {})

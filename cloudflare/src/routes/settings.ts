@@ -1,13 +1,15 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, changedFields, auditChangeColumns, isSecretShapedAuditKey } from '../lib/audit'
-import { hasPermission, isAdminControlUser } from '../lib/permissions'
+import { getPermissionTier, hasPermission, isAdminControlUser } from '../lib/permissions'
 import { firstChangedAdminOnlySettingKey } from '../lib/settingsAdminKeys'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { stripSensitiveSettings, isSensitiveSettingKey } from '../lib/settingsSensitive'
+import { canReadSettingKey, settingsReadableBy } from '../lib/settingsVisibility'
+import { AUDIT_LOG_RETENTION_FLOOR_DAYS, AUDIT_LOG_RETENTION_MAX_DAYS, parseAuditRetentionDays } from '../lib/auditRetentionPolicy'
 // Shared with routes/sales.ts, which folds a method into this list the moment
 // a sale uses one. Both sides use the same rules so an automatic registration
 // and this file's manual backfill can never disagree about what counts as
@@ -108,6 +110,7 @@ async function scopedUpdatedAt(env: Env, stored: Map<string, StoredSettingRow>):
 }
 
 app.get('/', async (c) => {
+  const user = c.get('user')
   const db = getDb(c.env)
   // One round trip for both reads (perf F5). The second statement is exactly
   // getSettingsUpdatedAt()'s unscoped branch, including its fallback to now
@@ -123,8 +126,10 @@ app.get('/', async (c) => {
   for (const row of rows) map[row.key] = row.value
   // Secret-bearing keys (Drive OAuth tokens etc.) never leave the Worker --
   // see lib/settingsSensitive.ts. requireAuth alone is not enough here:
-  // every logged-in cashier gets this map.
-  return c.json({ ...stripSensitiveSettings(map), updatedAt })
+  // every logged-in cashier gets this map. Rows only the Settings screen reads
+  // (Telegram routing, Drive sync, audit retention) go to accounts with
+  // Settings access alone -- see lib/settingsVisibility.ts.
+  return c.json({ ...settingsReadableBy(user, stripSensitiveSettings(map)), updatedAt })
 })
 
 // Real, confirmed bug (traced from a live user report of "Portal settings
@@ -149,9 +154,10 @@ app.get('/', async (c) => {
 // keys it's about to write can ask "what's the real current version of
 // THOSE keys" instead of "what's the newest anything in this whole table".
 app.get('/meta', async (c) => {
+  const user = c.get('user')
   const keysParam = c.req.query('keys')
   const keys = keysParam
-    ? keysParam.split(',').map((key) => key.trim()).filter(Boolean)
+    ? keysParam.split(',').map((key) => key.trim()).filter((key) => key && canReadSettingKey(user, key))
     : undefined
   return c.json({ updatedAt: await getSettingsUpdatedAt(c.env, keys) })
 })
@@ -163,6 +169,7 @@ app.get('/meta', async (c) => {
 // treated as a setting to write.
 const METADATA_KEYS = new Set(['expectedUpdatedAt', 'expected_updated_at', 'updatedAt', 'updated_at', 'clearKeys'])
 const DEDICATED_ENDPOINT_SETTING_KEYS = new Set([POS_ADDRESS_PRESETS_KEY.toLowerCase()])
+const AUDIT_LOG_RETENTION_KEY = 'audit_log_retention_days'
 
 // The website assistant's prompt and provider (FX-sec2, refuter R-sec F2).
 // The public portal config never carries them, so an editor that had not
@@ -204,10 +211,11 @@ function isDedicatedEndpointSettingKey(key: string): boolean {
 // Fixed by partitioning the write into buckets and checking each key
 // against the bucket it actually belongs to. Any settings key NOT listed
 // in a bucket below (appearance/typography, navigation layout, timezone,
-// notifications, audit log retention, etc.) still falls under the plain
-// `settings` grant only -- those were never offered as their own
-// Permission Editor row, so narrowing them now would be a scope change,
-// not a bug fix.
+// notifications, etc.) still falls under the plain `settings` grant only --
+// those were never offered as their own Permission Editor row, so narrowing
+// them now would be a scope change, not a bug fix. Audit log retention is
+// not in that group: PUT /audit-log-retention below needs an administrator
+// and the current password.
 //
 // `security_settings` ("Security and sign-in settings") is deliberately
 // NOT wired to a bucket here -- traced this against the whole app and
@@ -282,6 +290,23 @@ const SALES_POLICY_KEYS = new Set([
   // whole settings table.
   'loyalty_points_enabled',
 ])
+
+type PaymentMethodContext = Context<{ Bindings: Env; Variables: { user: SessionUser } }>
+
+function denyUnlessPaymentMethodPermission(c: PaymentMethodContext) {
+  const user = c.get('user')
+  if (!hasPermission(user, 'sales_policy') && !hasPermission(user, 'settings')) return c.json({ error: 'No permission' }, 403)
+  return null
+}
+
+// The payment-method reads disclose which labels sales use and which sales carry
+// malformed payment details. A read-only Settings account (the VIEW tier) is
+// shown what it cannot change, so the reads ask for any tier above none.
+function denyUnlessPaymentMethodRead(c: PaymentMethodContext) {
+  const user = c.get('user')
+  if (getPermissionTier(user, 'sales_policy') === 'none' && getPermissionTier(user, 'settings') === 'none') return c.json({ error: 'No permission' }, 403)
+  return null
+}
 
 function normalizeReferenceName(value: unknown): string {
   return paymentMethodKey(value)
@@ -607,6 +632,8 @@ async function loadPaymentMethodCandidates(
  * scan of the JSON would, without reading 15k JSON blobs.
  */
 app.get('/payment-methods/unregistered', async (c) => {
+  const denied = denyUnlessPaymentMethodRead(c)
+  if (denied) return denied
   const rows = await getDb(c.env).prepare(
     "SELECT DISTINCT payment_method FROM sales WHERE payment_method IS NOT NULL AND trim(payment_method) != ''",
   ).all<{ payment_method: string }>()
@@ -617,8 +644,9 @@ app.get('/payment-methods/unregistered', async (c) => {
 })
 
 app.post('/payment-methods/backfill', async (c) => {
+  const denied = denyUnlessPaymentMethodPermission(c)
+  if (denied) return denied
   const user = c.get('user')
-  if (!hasPermission(user, 'sales_policy') && !hasPermission(user, 'settings')) return c.json({ error: 'No permission' }, 403)
   const db = getDb(c.env)
   const rows = await db.prepare(
     "SELECT DISTINCT payment_method FROM sales WHERE payment_method IS NOT NULL AND trim(payment_method) != ''",
@@ -644,6 +672,8 @@ app.post('/payment-methods/backfill', async (c) => {
 // evidence is explicit: linked mode updates the live sales reporting dimension
 // and itemized tender JSON, while audit logs remain immutable.
 app.get('/payment-methods/impact', async (c) => {
+  const denied = denyUnlessPaymentMethodRead(c)
+  if (denied) return denied
   const from = String(c.req.query('from') || '').trim()
   const to = String(c.req.query('to') || '').trim()
   if (!from || !to || from.length > MAX_METHOD_LENGTH || to.length > MAX_METHOD_LENGTH) {
@@ -681,8 +711,9 @@ app.get('/payment-methods/impact', async (c) => {
 })
 
 app.post('/payment-methods/replace', async (c) => {
+  const denied = denyUnlessPaymentMethodPermission(c)
+  if (denied) return denied
   const user = c.get('user')
-  if (!hasPermission(user, 'sales_policy') && !hasPermission(user, 'settings')) return c.json({ error: 'No permission' }, 403)
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
   const from = String(body.from || '').trim()
   const to = String(body.to || '').trim()
@@ -1057,6 +1088,20 @@ app.post('/', async (c) => {
     }
   }
 
+  // How long the audit trail lives is changed only through its own endpoint,
+  // which asks for the current password; resending the stored value stays a no-op.
+  // Every spelling in the request is checked, not the first: a case or whitespace
+  // variant is never the stored key, so it is refused whatever it carries.
+  const retentionKey = attemptedKeys
+    .filter((key) => key.trim().toLowerCase() === AUDIT_LOG_RETENTION_KEY)
+    .find((key) => key !== AUDIT_LOG_RETENTION_KEY || (storedSettingValues(stored)[key] ?? '') !== sentAsText[key])
+  if (retentionKey) {
+    return c.json({
+      error: `"${retentionKey}" must be changed through its dedicated endpoint.`,
+      code: 'dedicated_setting_endpoint_required',
+    }, 400)
+  }
+
   // Registered seller identity is displayed by the public portal only after
   // staff have supplied it. Keep these two values as deliberate plain text:
   // trim surrounding whitespace, allow an empty string to clear an unverified
@@ -1298,6 +1343,37 @@ app.post('/', async (c) => {
     ...(changedKeys.length < attemptedKeys.length ? { unchanged: attemptedKeys.filter((key) => !changedKeys.includes(key)) } : {}),
     ...(Object.keys(saved).length ? { saved } : {}),
   })
+})
+
+app.put('/audit-log-retention', async (c) => {
+  const user = c.get('user')
+  if (!hasPermission(user, 'settings') || !isAdminControlUser(user)) {
+    return c.json({ error: 'Only an administrator can change "audit_log_retention_days".', code: 'admin_control_setting_required' }, 403)
+  }
+  const body = await c.req.json<{ days?: unknown; currentPassword?: unknown }>().catch(() => ({}) as { days?: unknown; currentPassword?: unknown })
+  const days = parseAuditRetentionDays(body.days)
+  if (days === null) {
+    return c.json({
+      error: `Keep audit logs for ${AUDIT_LOG_RETENTION_FLOOR_DAYS} to ${AUDIT_LOG_RETENTION_MAX_DAYS} days.`,
+      code: 'invalid_audit_retention_days',
+    }, 400)
+  }
+  const { denyUnlessCurrentPassword } = await import('../lib/destructiveStepUp')
+  const passwordDenied = await denyUnlessCurrentPassword(c, body, 403)
+  if (passwordDenied) return passwordDenied
+  const db = getDb(c.env)
+  const before = await db.prepare("SELECT value FROM settings WHERE key = 'audit_log_retention_days'").get<{ value: string }>()
+  const value = String(days)
+  await db.prepare(
+    `INSERT INTO settings (key, value, updated_at) VALUES ('audit_log_retention_days', @value, CURRENT_TIMESTAMP)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+  ).run({ value })
+  const keys = ['audit_log_retention_days']
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'settings', null, { keys },
+    changedFields({ audit_log_retention_days: before?.value ?? null }, { audit_log_retention_days: value }, { keys }))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'settings'))
+  c.executionCtx.waitUntil(broadcast(c.env, 'settings', { action: 'update', keys, writeId: crypto.randomUUID() }))
+  return c.json({ key: keys[0], value, updatedAt: await getSettingsUpdatedAt(c.env, keys) })
 })
 
 export default app

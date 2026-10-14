@@ -93,15 +93,17 @@ export async function exportBackupFolder(destinationDir = ''): Promise<Record<st
   return queueBackupFolderExport(destinationDir)
 }
 
-export async function queueBackupFolderRestore(sourceDir: string): Promise<Record<string, unknown>> {
+export async function queueBackupFolderRestore(sourceDir: string, confirmation: { currentPassword: string }): Promise<Record<string, unknown>> {
+  if (!confirmation?.currentPassword) throw new Error('Restoring a backup requires the current password.')
   return apiFetch('POST', '/api/backups', {
     type: 'import-folder',
     sourceDir,
+    currentPassword: confirmation.currentPassword,
   }, SYNC.REQUEST_TIMEOUT_MS) as Promise<Record<string, unknown>>
 }
 
-export async function importBackupFolder(sourceDir: string): Promise<Record<string, unknown>> {
-  return queueBackupFolderRestore(sourceDir)
+export async function importBackupFolder(sourceDir: string, confirmation: { currentPassword: string }): Promise<Record<string, unknown>> {
+  return queueBackupFolderRestore(sourceDir, confirmation)
 }
 
 // Restore maintenance (Part-77 slice C): while a restore runs -- or after
@@ -142,6 +144,6 @@ export async function getBackupMaintenance(): Promise<{ maintenance: RestoreMain
   return apiFetch('GET', '/api/backups/maintenance') as Promise<{ maintenance: RestoreMaintenanceState }>
 }
 
-export async function clearBackupMaintenance(): Promise<Record<string, unknown>> {
-  return apiFetch('POST', '/api/backups/maintenance/clear', { force: true }, SYNC.REQUEST_TIMEOUT_MS) as Promise<Record<string, unknown>>
+export async function clearBackupMaintenance(currentPassword: string): Promise<Record<string, unknown>> {
+  return apiFetch('POST', '/api/backups/maintenance/clear', { force: true, currentPassword }, SYNC.REQUEST_TIMEOUT_MS) as Promise<Record<string, unknown>>
 }

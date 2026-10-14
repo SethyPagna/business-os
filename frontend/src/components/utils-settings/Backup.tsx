@@ -21,6 +21,7 @@ import Layers from 'lucide-react/dist/esm/icons/layers.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { isStandaloneDisplayMode } from '../../utils/standaloneDisplay.ts'
+import { isBuiltInAdmin } from '../../utils/builtInAdmin.ts'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
   beginTrackedRequest,
@@ -198,7 +199,7 @@ interface BackupApi {
   disconnectGoogleDriveSync?(): Promise<unknown>
   forgetGoogleDriveSyncCredentials?(payload: { confirm: boolean }): Promise<unknown>
   queueBackupFolderExport?(destinationDir: string): Promise<QueuedJobResponse>
-  queueBackupFolderRestore?(sourceDir: string): Promise<QueuedJobResponse>
+  queueBackupFolderRestore?(sourceDir: string, confirmation: { currentPassword: string }): Promise<QueuedJobResponse>
 }
 
 interface JobProgressCardProps {
@@ -284,6 +285,7 @@ function getBackupApi(): BackupApi {
 function RestoreMaintenanceBanner({ copy, notify, refreshSignal }: { copy: CopyFn; notify: NotifyFn; refreshSignal: number }) {
   const [state, setState] = useState<RestoreMaintenanceState>(null)
   const [clearing, setClearing] = useState(false)
+  const [clearPassword, setClearPassword] = useState('')
   const { askToConfirm, confirmDialog } = useConfirmDialog()
   // Same page id the GoogleDriveSyncSection below uses -- Backup renders
   // under the Settings hub.
@@ -313,6 +315,7 @@ function RestoreMaintenanceBanner({ copy, notify, refreshSignal }: { copy: CopyF
   ].filter(Boolean).join(' · ')
   const handleClear = async () => {
     if (clearing) return
+    if (!clearPassword) return notify(copy('current_password_required', 'Enter your current password to confirm. No data was changed.'), 'error')
     // Both ask before clearing; the audit-pending one shows what changes (before -> after), and is not a danger:
     // the data is already restored.
     if (!(await askToConfirm(auditPending ? {
@@ -339,7 +342,7 @@ function RestoreMaintenanceBanner({ copy, notify, refreshSignal }: { copy: CopyF
     }))) return
     setClearing(true)
     try {
-      await clearBackupMaintenance()
+      await clearBackupMaintenance(clearPassword).catch((error: unknown) => { throw translateStepUpRefusal(error, copy) })
       setState(null)
       notify(auditPending
         ? copy('restore_audit_pending_cleared', 'Maintenance cleared. Run the same restore again now to record it.')
@@ -347,6 +350,7 @@ function RestoreMaintenanceBanner({ copy, notify, refreshSignal }: { copy: CopyF
     } catch (error) {
       notify(getErrorMessage(error, copy('unknown_error', 'Unknown error')), 'error')
     } finally {
+      setClearPassword('')
       setClearing(false)
     }
   }
@@ -364,6 +368,22 @@ function RestoreMaintenanceBanner({ copy, notify, refreshSignal }: { copy: CopyF
             : copy('restore_maintenance_running', 'Restore in progress -- the system is read-only')}
       </span>
       {detail ? <span className="min-w-0 flex-1 truncate text-xs opacity-90" title={detail}>{detail}</span> : null}
+      {failed ? (
+        <>
+          <input
+            id="backup-maintenance-clear-password"
+            type="password"
+            name="current_password"
+            autoComplete="current-password"
+            className="input w-44 text-xs"
+            aria-label={copy('current_password', 'Current password')}
+            placeholder={copy('current_password', 'Current password')}
+            value={clearPassword}
+            disabled={clearing}
+            onChange={(event) => setClearPassword(event.target.value)}
+          />
+        </>
+      ) : null}
       {auditPending ? (
         // The banner's one action: icon plus one word, its full name in the tooltip.
         <button
@@ -394,6 +414,19 @@ function RestoreMaintenanceBanner({ copy, notify, refreshSignal }: { copy: CopyF
 
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
+}
+
+// A refusal the Worker has coded has a key of the same name in both language packs (the pattern ResetData and
+// AuditRetentionSetting use). The thrown error keeps its code and gets the translated sentence instead of the
+// Worker's English.
+const STEP_UP_REFUSAL_CODES = ['restore_builtin_admin_only', 'current_password_required', 'incorrect_password', 'current_password_rate_limited']
+
+function translateStepUpRefusal(error: unknown, copy: CopyFn): unknown {
+  const code = (error as { code?: unknown } | null)?.code
+  if (error instanceof Error && typeof code === 'string' && STEP_UP_REFUSAL_CODES.includes(code)) {
+    error.message = copy(code, error.message)
+  }
+  return error
 }
 
 function unwrapJob(result: { item?: BackupJob } | BackupJob | null | undefined): BackupJob | null {
@@ -1758,6 +1791,7 @@ export default function Backup() {
   const [loading, setLoading] = useState<BackupAction>('')
   const [folderExportPath, setFolderExportPath] = useState('')
   const [folderImportPath, setFolderImportPath] = useState('')
+  const [restorePassword, setRestorePassword] = useState('')
   const [activeJob, setActiveJob] = useState<BackupJob | null>(null)
   const [advancedMaintenanceOpen, setAdvancedMaintenanceOpen] = useState(false)
   const [maintenanceTier, setMaintenanceTier] = useState<'section' | 'data' | 'migration' | 'factory'>('section')
@@ -1889,20 +1923,26 @@ export default function Backup() {
     // granting someone "Backup export" also silently gave them full
     // database restore power; fixed both sides together this session.
     if (!hasPermission('backup_restore')) return notify(copy('no_permission', 'No permission'), 'error')
+    if (!isBuiltInAdmin(user)) return notify(copy('restore_builtin_admin_only', 'Only the built-in admin account can restore a backup.'), 'error')
     if (!folderImportPath) return notify(copy('choose_folder_first', 'Choose a folder first'), 'error')
+    if (!restorePassword) return notify(copy('current_password_required', 'Enter your current password to confirm. No data was changed.'), 'error')
     if (!(await askToConfirm({
       title: copy('import_backup', 'Import Backup'),
-      message: copy('import_backup_warning', 'This validates a backup package before any restore can replace live data.'),
+      message: copy('import_backup_warning', 'This will replace existing data. Export a fresh backup first if you want to keep your current data.'),
       items: [{ label: copy('backup_folder', 'Folder'), value: folderImportPath }],
       confirmLabel: copy('continue', 'Continue'),
       cancelLabel: copy('cancel', 'Cancel'),
-    }))) return
+    }))) {
+      setRestorePassword('')
+      return
+    }
 
     if (!beginBackupAction('folder-import')) return
     try {
       await yieldToBrowser()
       const queued = await withLoaderTimeout(
-        () => getBackupApi().queueBackupFolderRestore?.(folderImportPath),
+        () => Promise.resolve(getBackupApi().queueBackupFolderRestore?.(folderImportPath, { currentPassword: restorePassword }))
+          .catch((error: unknown) => { throw translateStepUpRefusal(error, copy) }),
         'Queue backup restore',
         BACKUP_JOB_QUEUE_TIMEOUT_MS,
       )
@@ -1966,6 +2006,7 @@ export default function Backup() {
         notify(`${copy('import_failed', 'Import failed')}: ${getErrorMessage(error, copy('unknown_error', 'Unknown error'))}`, 'error')
       }
     } finally {
+      setRestorePassword('')
       finishBackupAction('folder-import')
     }
   }
@@ -2096,7 +2137,25 @@ export default function Backup() {
             {copy('import_backup_desc', 'Restore a full Business OS backup from R2. This overwrites current D1 data including settings, users, portal records, products, stock, sales, returns, and custom tables.')}
           </p>
 
+          {!isBuiltInAdmin(user) ? (
+            <p className="rounded-2xl border border-amber-100 bg-amber-50/70 p-4 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-200" data-testid="backup-restore-builtin-admin-only">
+              {copy('restore_builtin_admin_only', 'Only the built-in admin account can restore a backup.')}
+            </p>
+          ) : (
           <div className="grid gap-3 rounded-2xl border border-amber-100 bg-amber-50/70 p-4 dark:border-amber-900/40 dark:bg-amber-900/10">
+            <input type="text" name="username" autoComplete="username" value={String(user?.username || '')} readOnly className="sr-only" tabIndex={-1} aria-hidden="true" />
+            <label className="block text-sm text-gray-700 dark:text-gray-300" htmlFor="backup-restore-password">
+              {copy('current_password', 'Current password')}
+              <input
+                id="backup-restore-password"
+                name="current_password"
+                type="password"
+                autoComplete="current-password"
+                className="input mt-1 text-sm"
+                value={restorePassword}
+                onChange={(event) => setRestorePassword(event.target.value)}
+              />
+            </label>
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               <PrimaryActionButton data-testid="backup-restore-start" onClick={handleFolderImport} disabled={!!loading || activeBackupJobRunning}>
                 <Download className="h-4 w-4" />
@@ -2130,6 +2189,7 @@ export default function Backup() {
               </div>
             </details>
           </div>
+          )}
 
         </div>
         ) : null}

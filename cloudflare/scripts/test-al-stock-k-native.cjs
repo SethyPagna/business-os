@@ -347,8 +347,11 @@ function finish(finding) {
 //   K8b  needs a schema column: pending_actions has nowhere to keep the requesting device (migration, not in this lane).
 // Owner rulings of 13 Oct (relayed by the coordinator), pinned as expectations:
 //   K10a "replace with the backup": a restore replaces the audit trail with the backup's, plus the restore row.
-//   K11  "keep old expenses ... the revert, yes ... undo redo history no need": retention keeps expense evidence and revert
-//        records, and still prunes Undo/Redo history and ordinary rows.
+//   K11  "keep old expenses ... the revert, yes": retention keeps expense evidence and revert records. The 14 Oct ruling
+//        keeps "sales, payments, returns, stock changes, permission changes, reverts" and names neither undo nor redo; the
+//        13 Oct ruling says the Undo/Redo history may be pruned. So an undo of a kept class (here an expense edit) is kept
+//        because the class it replayed is kept, and an undo of anything else follows the retention window (pinned in
+//        test-audit-retention-keep-forever-native.cjs). Ordinary rows still age out.
 // ============================================================================================
 const FEES = 'src/routes/fees.ts', REVIEW_QUEUE = 'src/routes/reviewQueue.ts', REVIEW_APPLY = 'src/lib/reviewApply.ts', ACTION_HISTORY = 'src/routes/actionHistory.ts'
 // MUTANTS: each re-introduces ONE defect the lane fixed (or a plausible wrong fix) in memory. The cases named in its comment
@@ -434,20 +437,23 @@ const PATCHES = {
       from: "        await auditOrThrow(c.env, user.id, user.username || null, 'restore', 'backup', sourceDir, {",
       to: "        await audit(c.env, user.id, user.username || null, 'restore', 'backup', sourceDir, {" },
   ],
-  // Retention without the K11 exemptions (the blanket 21-day sweep). Must turn K11 RED.
+  // Retention without the kept-forever classes (the blanket 21-day sweep). Must turn K11 RED.
   'retention-blanket': [
     { name: 'retention-blanket', file: 'src/lib/audit.ts',
-      from: "      AND COALESCE(action, '') NOT IN (${sqlList(AUDIT_RETENTION_KEPT_REVERT_ACTIONS)})\n",
+      from: '      AND NOT (${AUDIT_RETENTION_KEPT_FOREVER_SQL})\n',
       to: '' },
-    { name: 'retention-blanket-expense', file: 'src/lib/audit.ts',
-      from: "      AND NOT (COALESCE(entity, '') IN (${sqlList(AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES)})\n        AND COALESCE(action, '') NOT IN ('action_undo', 'action_redo'))\n",
-      to: '' },
+  ],
+  // Every Undo and Redo is kept again, whatever entity it replayed. Must turn K11 RED.
+  'retention-undo-all': [
+    { name: 'retention-undo-all', file: 'src/lib/audit.ts',
+      from: 'OR (${AUDIT_ENTITY_KEY_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_UNDO_ENTITIES)})',
+      to: "OR (${AUDIT_ENTITY_KEY_SQL} LIKE '%'" },
   ],
   // A sweep that deletes nothing (keeps everything). Must turn K11 RED.
   'retention-off': [
     { name: 'retention-off', file: 'src/lib/audit.ts',
-      from: "    SELECT id FROM audit_logs\n    WHERE created_at < @cutoff\n      AND NOT (COALESCE(entity, '')",
-      to: "    SELECT id FROM audit_logs\n    WHERE 0\n      AND NOT (COALESCE(entity, '')" },
+      from: '    SELECT id FROM audit_logs\n    WHERE created_at < @cutoff\n      AND NOT (${AUDIT_RETENTION_KEPT_FOREVER_SQL})',
+      to: '    SELECT id FROM audit_logs\n    WHERE 0\n      AND NOT (${AUDIT_RETENTION_KEPT_FOREVER_SQL})' },
   ],
   // The reject reason is taken as-is again. Must turn K7 and K7b RED.
   'no-reason-cap': [
@@ -764,31 +770,37 @@ async function main() {
     })
 
     // ------------------------------------------------------------------ K11: evidence vs the audit-log retention window
-    // NEEDS-OWNER-DECISION in the reproduction. Owner, 13 Oct (relayed by the coordinator): "keep old expenses ... for the revert,
-    // yes, as it is same with stock changes ... for undo redo history no need." Expense evidence and revert records never age
-    // out; the Undo/Redo history may. The sweep must still run (an ordinary old row and the old undo row are deleted), so a
-    // sweep that is switched off, or keeps everything, fails here as surely as the blanket 21-day sweep.
-    await check('K11', 'owner ruling 13 Oct: the retention sweep keeps old expense evidence and revert records, and still prunes Undo/Redo history', 'owner-ruling', async (t) => {
+    // Owner, 13 Oct (relayed by the coordinator): "keep old expenses ... for the revert, yes, as it is same with stock changes."
+    // Owner, 14 Oct: "sales, payments, returns, stock changes, permission changes, reverts" are kept forever; undo and redo are not
+    // named, and 13 Oct says the Undo/Redo history may be pruned. Expense evidence and revert records never age out, and neither
+    // does the Undo of an expense edit, because an expense is a kept class. The Undo of a brand rename is only history and expires.
+    // The sweep must still run (an ordinary old row is deleted), so a sweep that is switched off, keeps everything, or keeps every
+    // Undo fails here as surely as the blanket 21-day sweep.
+    await check('K11', 'owner rulings 13 and 14 Oct: the retention sweep keeps old expense evidence, revert records and the Undo of a kept class, and still prunes ordinary rows and the Undo of anything else', 'owner-ruling', async (t) => {
       const f = await seedFee(H)
       const e = await putFee(H, f, { amount_usd: 15 })
       const g = await seedFee(H, { label: 'Water' })
       const d = await H.api('DELETE', '/api/fees/' + g.id)
       const hist = await H.api('POST', '/api/action-history', { scope: 'fees', entity: 'fee', entity_id: String(f.id), label: 'Edit expense', undo_label: 'Undo edit', reversible: true, undo_payload: { kind: 'client-closure' }, redo_payload: { kind: 'client-closure' } })
       const u = await H.api('POST', '/api/action-history/' + hist.body.id + '/undo', {})
+      const brandHist = await H.api('POST', '/api/action-history', { scope: 'brands', entity: 'brand', entity_id: 'al-k11-brand', label: 'Rename brand', undo_label: 'Undo rename', reversible: true, undo_payload: { kind: 'client-closure' }, redo_payload: { kind: 'client-closure' } })
+      const bu = await H.api('POST', '/api/action-history/' + brandHist.body.id + '/undo', {})
       // A revert record in the exact shape POST /api/inventory/movements/:id/revert writes (action 'stock_revert' on the product);
       // test-audit-retention-pure.cjs fails if the source writes a 'stock_revert*' action that retention does not keep.
       await H.db.prepare("INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details) VALUES(1,'admin','stock_revert','product','al-k11-revert',?)").bind(JSON.stringify({ movementId: 1, revertType: 'stock_in', quantity: 2 })).run()
       // Positive control: an ordinary operational row of the same age must still be deleted.
       await H.db.prepare("INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details) VALUES(1,'admin','update','settings','al-k11-control','{}')").run()
+      t.eq('fixture: the brand history was recorded and undone', [brandHist.status, bu.status, (await H.q1("SELECT COUNT(*) n FROM audit_logs WHERE entity='brand' AND action='action_undo' AND entity_id='al-k11-brand'")).n], [200, 200, 1])
       t.eq('fixture: edit, delete and undo were recorded', [e.status, d.status, u.status, (await feeAudits(H, f.id, 'update')).length, (await feeAudits(H, g.id, 'delete')).length, (await feeAudits(H, f.id, 'action_undo')).length], [200, 200, 200, 1, 1, 1])
-      await H.db.prepare("UPDATE audit_logs SET created_at = datetime('now','-30 days') WHERE (entity='fee' AND CAST(entity_id AS REAL) IN (?, ?)) OR entity_id IN ('al-k11-revert','al-k11-control')").bind(Number(f.id), Number(g.id)).run()
-      const cleared = await H.api('DELETE', '/api/system/audit-logs/retention?olderThanDays=21&confirm=true')
+      await H.db.prepare("UPDATE audit_logs SET created_at = datetime('now','-30 days') WHERE (entity='fee' AND CAST(entity_id AS REAL) IN (?, ?)) OR entity_id IN ('al-k11-revert','al-k11-control','al-k11-brand')").bind(Number(f.id), Number(g.id)).run()
+      const cleared = await H.api('DELETE', '/api/system/audit-logs/retention?olderThanDays=21&confirm=true', { currentPassword: 'al-repro-admin-password-1' })
       const left = async (sql) => (await H.q1(sql)).n
       t.eq('retention sweep ran', cleared.status, 200)
       t.eq('the 30-day-old expense edit row is kept', (await feeAudits(H, f.id, 'update')).length, 1)
       t.eq('the 30-day-old expense delete row (its before-image) is kept', (await feeAudits(H, g.id, 'delete')).length, 1)
       t.eq('the 30-day-old revert record is kept', await left("SELECT COUNT(*) n FROM audit_logs WHERE entity_id='al-k11-revert'"), 1)
-      t.eq('the 30-day-old Undo history row is pruned ("no need")', (await feeAudits(H, f.id, 'action_undo')).length, 0)
+      t.eq('the 30-day-old Undo of an expense edit is kept (an expense is a kept class)', (await feeAudits(H, f.id, 'action_undo')).length, 1)
+      t.eq('the 30-day-old Undo of a brand rename is pruned (13 Oct: Undo/Redo history may be pruned)', await left("SELECT COUNT(*) n FROM audit_logs WHERE entity='brand' AND action='action_undo' AND entity_id='al-k11-brand'"), 0)
       t.eq('positive control: the 30-day-old ordinary row is pruned', await left("SELECT COUNT(*) n FROM audit_logs WHERE entity_id='al-k11-control'"), 0)
       t.note('deleted by the sweep: ' + (cleared.body && cleared.body.deleted) + '; D1 statements of the sweep request: ' + cleared.d1)
     })
@@ -808,7 +820,7 @@ async function main() {
     await check('K10b', 'a restore that cannot be audited is not reported done: maintenance holds until it is cleared and the same restore is retried, which records it', 'high', async (t) => {
       const bk = await backupName()
       await withTrigger(R, 'al_restore_audit_down', "CREATE TRIGGER al_restore_audit_down BEFORE INSERT ON audit_logs WHEN NEW.action='restore' BEGIN SELECT RAISE(ABORT,'al: audit store unavailable'); END", async () => {
-        const restored = await R.api('POST', '/api/backups', { type: 'import-folder', sourceDir: bk.name })
+        const restored = await R.api('POST', '/api/backups', { type: 'import-folder', sourceDir: bk.name, currentPassword: 'al-repro-admin-password-1' })
         const audited = (await R.q("SELECT COUNT(*) n FROM audit_logs WHERE entity='backup' AND action='restore'"))[0].n > 0
         t.eq('a restore reported done with no audit row', restored.status === 200 && !audited, false)
         t.eq('the refusal says the data was restored but not recorded', [restored.body && restored.body.code, restored.body && restored.body.data_restored], ['restore_audit_not_recorded', true])
@@ -816,8 +828,8 @@ async function main() {
         t.note('restore status ' + restored.status + '; audited=' + audited + '; D1 statements: ' + restored.d1)
       })
       // Recovery, with the audit store back: clear maintenance (force), retry the same restore; this time it is recorded.
-      const clearedHold = await R.api('POST', '/api/backups/maintenance/clear', { force: true })
-      const retried = await R.api('POST', '/api/backups', { type: 'import-folder', sourceDir: bk.name })
+      const clearedHold = await R.api('POST', '/api/backups/maintenance/clear', { force: true, currentPassword: 'al-repro-admin-password-1' })
+      const retried = await R.api('POST', '/api/backups', { type: 'import-folder', sourceDir: bk.name, currentPassword: 'al-repro-admin-password-1' })
       t.eq('recovery: clear, then retry the same restore', [clearedHold.status, retried.status], [200, 200])
       t.eq('the retried restore is on record exactly once', (await R.q("SELECT COUNT(*) n FROM audit_logs WHERE entity='backup' AND action='restore'"))[0].n, 1)
       t.eq('maintenance is released once the restore is recorded', await maintenanceFlag(), false)
@@ -832,7 +844,7 @@ async function main() {
       const e = await R.api('PUT', '/api/fees/' + fee.id, { expected_updated_at: fee.updated_at, amount_usd: 77 })
       const editRows = async () => (await R.q("SELECT COUNT(*) n FROM audit_logs WHERE entity='fee' AND action='update' AND CAST(entity_id AS REAL)=?", Number(fee.id)))[0].n
       const editAudit0 = await editRows()
-      const restored = await R.api('POST', '/api/backups', { type: 'import-folder', sourceDir: bk.name })
+      const restored = await R.api('POST', '/api/backups', { type: 'import-folder', sourceDir: bk.name, currentPassword: 'al-repro-admin-password-1' })
       t.eq('fixture: create, backup, edit, restore all succeeded', [created.status, bk.status, e.status, restored.status], [201, 200, 200, 200])
       t.eq('fixture: the edit was audited before the restore', editAudit0, 1)
       t.eq('the fee is back to the backed-up amount', (await R.q1('SELECT amount_usd a FROM fees WHERE id=?', fee.id)).a, 10)

@@ -45,8 +45,10 @@ function loadReal(relPath, requireOverrides = {}) {
     return originalLoad.call(this, request, parent, isMain)
   }
   const moduleObj = { exports: {} }
+  // The route imports the current-password guard lazily, at request time, after the patch above is gone.
+  const requireWithOverrides = (request) => (request in requireOverrides ? requireOverrides[request] : require(request))
   new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
-    moduleObj.exports, withProductStockGuard(require), moduleObj, sourcePath, path.dirname(sourcePath),
+    moduleObj.exports, withProductStockGuard(requireWithOverrides), moduleObj, sourcePath, path.dirname(sourcePath),
   )
   Module._load = originalLoad
   return moduleObj.exports
@@ -55,6 +57,9 @@ function loadReal(relPath, requireOverrides = {}) {
 // backup_restore, not just backup (Part 513): destructive resets (incl.
 // finalize-migration) now demand the restore/reset permission.
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ backup: true, backup_restore: true }) }
+
+const OWNER_PASSWORD = 'owner-current-password'
+let passwordChecks = []
 
 let backupCallLog = []
 let backupShouldFail = false
@@ -65,7 +70,8 @@ const media = loadReal('lib/media.ts')
 
 // N13: the shared actor / branch kernels these routes now import.
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
-const systemRoute = loadReal('routes/system.ts', {
+const { withStepUp } = require('./harness/step_up_lib.cjs')
+const systemRoute = withStepUp(loadReal, 'routes/system.ts', {
   // planTier.ts is pure (only `import type`) and holds the free-vs-paid
   // image-delete cap the reset path now reads -- real, not an inert stub,
   // which would make that cap undefined and slice(0, undefined) empty.
@@ -77,6 +83,13 @@ const systemRoute = loadReal('routes/system.ts', {
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/audit': { audit: async () => {} },
+  '../lib/currentPasswordGuard': {
+    CURRENT_PASSWORD_RATE_LIMITED_ERROR: 'Too many wrong current-password attempts. Please try again later.',
+    verifyCurrentPassword: async (_c, _who, plain, hash) => {
+      passwordChecks.push(plain)
+      return hash === `hash:${plain}` ? { ok: true } : { ok: false, rateLimited: false }
+    },
+  },
   '../lib/permissions': permissions,
   '../lib/dataIntegrity': { runDataIntegrityCheck: async () => ({}) },
   '../lib/errorReporting': { reportError: async () => false },
@@ -114,6 +127,7 @@ const app = systemRoute.default
 const fakeExecutionCtx = { waitUntil: (p) => { p?.catch?.(() => {}) }, passThroughOnException: () => {} }
 
 async function req(method, url, body) {
+  if (url === '/finalize-migration' && body && (body.step === 'zero_stock' || body.step === 'park_lots')) body = { currentPassword: OWNER_PASSWORD, ...body }
   const res = await app.request(url, {
     method,
     headers: { 'Content-Type': 'application/json' },
@@ -130,6 +144,8 @@ function row(sql) { return rawDbHandle.prepare(sql).get() }
 // park_lots, since migration 0081 reconciles the ledger onto it).
 // batch_id 2 = a 'Unified stock import' HISTORICAL lot (must be parked).
 function seed() {
+  exec(`INSERT OR IGNORE INTO roles(id,name,code,is_system,permissions) VALUES(901,'Default admin','admin',1,'{"all":true}'); INSERT OR REPLACE INTO users(id,username,name,password,role_id,is_active) VALUES(1,'tester','Tester','hash:${OWNER_PASSWORD}',901,1)`)
+  passwordChecks = []
   exec('DELETE FROM damaged_stock_lots; DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; UPDATE products SET stock_quantity=0; DELETE FROM products; DELETE FROM branches;')
 
   rawDbHandle.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run()
@@ -229,6 +245,23 @@ async function main() {
     const { json } = await req('POST', '/finalize-migration', { step: 'park_lots' })
     assert.strictEqual(json.affected.branch_batch_stock, 0, 'nothing left to park on the second run')
   })
+
+  for (const step of ['zero_stock', 'park_lots']) {
+    await check(`${step} refuses a missing or wrong current password before any backup or write`, async () => {
+      seed()
+      for (const [label, extra, code] of [['missing', { currentPassword: undefined }, 'current_password_required'], ['empty', { currentPassword: '' }, 'current_password_required'], ['not text', { currentPassword: 12345 }, 'current_password_required'], ['wrong', { currentPassword: 'not-the-password' }, 'incorrect_password']]) {
+        const { status, json } = await req('POST', '/finalize-migration', { step, ...extra })
+        assert.strictEqual(status, 403, `${label}: ${JSON.stringify(json)}`)
+        assert.strictEqual(json.code, code, label)
+        assert.strictEqual(json.success, false, label)
+      }
+      assert.strictEqual(backupCallLog.length, 0, 'a refused step-up must not even take a backup')
+      assert.strictEqual(row('SELECT COUNT(*) AS n FROM branch_stock WHERE quantity <> 0').n, 2, 'branch stock must be untouched')
+      assert.strictEqual(row('SELECT COUNT(*) AS n FROM products WHERE stock_quantity <> 0').n, 2, 'product stock must be untouched')
+      assert.strictEqual(row('SELECT quantity FROM branch_batch_stock WHERE id = 2').quantity, 8, 'the historical lot must be untouched')
+      assert.deepStrictEqual(passwordChecks, ['not-the-password'], 'only a non-empty text password reaches the verifier')
+    })
+  }
 
   await check('an unknown step is rejected with 400 and changes nothing', async () => {
     seed()

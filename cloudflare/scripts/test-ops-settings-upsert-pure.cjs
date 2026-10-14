@@ -199,7 +199,9 @@ async function main() {
 
   const TELEGRAM_TS = read('cloudflare', 'src', 'lib', 'telegram.ts')
   const SETTINGS_TS = read('cloudflare', 'src', 'routes', 'settings.ts')
-  const POST_HANDLER = SETTINGS_TS.slice(SETTINGS_TS.indexOf("app.post('/', async (c) => {"))
+  const POST_START = SETTINGS_TS.indexOf("app.post('/', async (c) => {")
+  const NEXT_ROUTE = SETTINGS_TS.slice(POST_START + 1).search(/\napp\.(get|post|put|patch|delete)\(/)
+  const POST_HANDLER = NEXT_ROUTE < 0 ? SETTINGS_TS.slice(POST_START) : SETTINGS_TS.slice(POST_START, POST_START + 1 + NEXT_ROUTE)
   const ALLOW = [...telegram.TELEGRAM_TOPIC_KEYS]
   const CONTEXT = { runId: '18112233445', commit: 'c5b28762c5b28762c5b28762c5b28762c5b28762' }
 
