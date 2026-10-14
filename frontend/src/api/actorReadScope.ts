@@ -338,6 +338,12 @@ export function completeActorSessionReconciliation(marker: string | null): boole
 
 export type ActorReadScope = { authority: string; channel: string; revision: string }
 
+// The account a read belongs to: server, origin, signed-in user id and
+// organization, and the session marker every sign-in, sign-out and reset
+// rotates. Not the stored profile text or its expiry: sign-in stores the login
+// answer and the bootstrap then rewrites the same account with more fields,
+// which refused every Dashboard read in flight (owner, 14 Oct). Permission
+// refreshes call resetActorReadSession, which still fences them.
 function authority(): string {
   observeSessionMarker()
   let identity = getSyncServerUrl()
@@ -345,10 +351,11 @@ function authority(): string {
     if (typeof window !== 'undefined') {
       // Never serialize credentials into cache keys. A per-runtime opaque id
       // names this identity; local/session storage values are comparison only.
+      const id = storedUserId()
       identity += JSON.stringify([
         window.location?.origin,
-        window.sessionStorage?.getItem('businessos_user') || window.localStorage?.getItem('businessos_user'),
-        window.sessionStorage?.getItem('businessos_user_expiry') || window.localStorage?.getItem('businessos_user_expiry'),
+        id,
+        id ? storedOrganization(parsedUser) : '',
         window.localStorage?.getItem(SESSION_MARKER),
       ])
     }
@@ -443,6 +450,11 @@ function storedUserId(): string {
     } catch { parsedUser = {} }
   }
   return parsedUser.id == null ? '' : String(parsedUser.id)
+}
+
+/** POST /login answers organizationId; the bootstrap row carries organization_id. */
+function storedOrganization(user: Record<string, unknown>): string {
+  return String(user.organization_id ?? user.organizationId ?? user.organization_slug ?? '')
 }
 
 function storedAccount(): Record<string, unknown> | null {

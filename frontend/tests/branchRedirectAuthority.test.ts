@@ -140,7 +140,8 @@ for (const kind of SAME_USER) {
     try {
       const pending = apiFetch('POST', '/api/inventory/adjust', body)
       await asked.promise; await change(kind)
-      if (kind !== 'session reset') assert.equal(isActorReadScopeCurrent(scope, false), false, 'control: the read fingerprint moved')
+      // A same-account rewrite keeps the read fingerprint too (login refresh, 14 Oct).
+      if (kind !== 'session reset') assert.equal(isActorReadScopeCurrent(scope, false), kind.endsWith('rewrite'), 'control: the read fingerprint moved unless the same account was rewritten')
       answer.resolve(2)
       assert.deepEqual(await pending, { success: true })
       assert.equal(calls.length, 2); assert.equal(calls[1].body, calls[0].body); assert.equal(calls[1].redirect, '2')
