@@ -69,9 +69,24 @@ await check('the bootstrap rewriting the signed-in account keeps its Dashboard r
   assert.equal(await readAcross(() => store(bootstrapUser(11), String(Date.now() + 86_400_000))), 'answered')
 })
 
-await check('a same-account profile, permission-text or expiry rewrite keeps the read', async () => {
+await check('a same-account profile or expiry rewrite keeps the read', async () => {
   signIn(bootstrapUser(11))
   assert.equal(await readAcross(() => store({ ...bootstrapUser(11), name: 'Renamed', email: 'a@b.test' }, String(Date.now() + 7_200_000))), 'answered')
+})
+
+await check('the same grants spelt as parsed JSON keep the read', async () => {
+  signIn(loginUser(11))
+  assert.equal(await readAcross(() => store({ ...bootstrapUser(11), permissions: {}, role_permissions: { all: true } })), 'answered')
+})
+
+await check('control: a same-account permission revocation refuses the read', async () => {
+  signIn(bootstrapUser(11))
+  assert.equal(await readAcross(() => store({ ...bootstrapUser(11), role_permissions: '{"sales":{"view":true}}' })), 'refused')
+})
+
+await check('control: a same-account role change refuses the read', async () => {
+  signIn(bootstrapUser(11))
+  assert.equal(await readAcross(() => store({ ...bootstrapUser(11), role_code: 'cashier' })), 'refused')
 })
 
 await check('control: account A read answered after another account is stored is refused', async () => {

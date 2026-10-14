@@ -338,12 +338,11 @@ export function completeActorSessionReconciliation(marker: string | null): boole
 
 export type ActorReadScope = { authority: string; channel: string; revision: string }
 
-// The account a read belongs to: server, origin, signed-in user id and
-// organization, and the session marker every sign-in, sign-out and reset
-// rotates. Not the stored profile text or its expiry: sign-in stores the login
-// answer and the bootstrap then rewrites the same account with more fields,
-// which refused every Dashboard read in flight (owner, 14 Oct). Permission
-// refreshes call resetActorReadSession, which still fences them.
+// Whom a read belongs to: server, origin, the signed-in user id, organization
+// and grants, and the session marker every sign-in, sign-out and reset rotates.
+// Not the stored profile text or its expiry: sign-in stores the login answer
+// and the bootstrap then rewrites the same account, grants unchanged, with more
+// fields -- which refused every Dashboard read in flight (owner, 14 Oct).
 function authority(): string {
   observeSessionMarker()
   let identity = getSyncServerUrl()
@@ -356,6 +355,7 @@ function authority(): string {
         window.location?.origin,
         id,
         id ? storedOrganization(parsedUser) : '',
+        id ? storedGrants() : '',
         window.localStorage?.getItem(SESSION_MARKER),
       ])
     }
@@ -455,6 +455,30 @@ function storedUserId(): string {
 /** POST /login answers organizationId; the bootstrap row carries organization_id. */
 function storedOrganization(user: Record<string, unknown>): string {
   return String(user.organization_id ?? user.organizationId ?? user.organization_slug ?? '')
+}
+
+// The grants the app merges into effective permissions, in one spelling: the
+// login answer and the bootstrap row carry the same values, as JSON text or parsed.
+function canonicalGrant(value: unknown): unknown {
+  if (typeof value === 'string') {
+    try { return canonicalGrant(JSON.parse(value)) } catch { return value }
+  }
+  if (Array.isArray(value)) return value.map(canonicalGrant)
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    return Object.fromEntries(Object.keys(record).sort().map((key) => [key, canonicalGrant(record[key])]))
+  }
+  return value ?? null
+}
+
+let grantsRaw: string | null = null
+let grants = ''
+function storedGrants(): string {
+  if (parsedUserRaw !== grantsRaw) {
+    grantsRaw = parsedUserRaw
+    grants = JSON.stringify([parsedUser.role_code ?? null, canonicalGrant(parsedUser.permissions), canonicalGrant(parsedUser.role_permissions)])
+  }
+  return grants
 }
 
 function storedAccount(): Record<string, unknown> | null {
