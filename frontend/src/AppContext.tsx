@@ -1380,10 +1380,9 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       // The open sale detail states a refused line edit beside the edit and
       // reloads that exact sale itself; a second dialog would cover it.
       if (['sales:amend', 'sales:addItems'].includes(String(detail.channel || ''))) return
-      // Likewise a fee delete refused as stale (fees-k K2) and an approval refused because the record changed
-      // after it was requested (K3): the Expense page and the Review Queue say what happened to that expense or
-      // request, in the operator's language, and reload themselves. A generic "Item changed on another device"
-      // dialog over them would only contradict that.
+      // Likewise a fee delete refused as stale and an approval refused because the record changed after it was
+      // requested: the Expense page and the Review Queue say what happened in the operator's language and reload
+      // themselves, so a generic "Item changed on another device" dialog over them would only contradict that.
       if (['fees:delete', 'review:approve'].includes(String(detail.channel || ''))) return
       const entity = String(detail.entity || '').trim().toLowerCase()
       let message = detail.message || 'This item changed on another device. Refresh and try again.'

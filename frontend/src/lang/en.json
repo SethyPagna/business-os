@@ -734,7 +734,7 @@
   "restore_audit_pending_title": "Restored, but not recorded in the audit log. Writes are paused.",
   "restore_audit_pending_hint": "Clear maintenance, then run the same restore again straight away. The second run replaces all data with the backup again and records the restore.",
   "restore_audit_pending_clear": "Clear maintenance",
-  "restore_audit_pending_clear_confirm": "Clear maintenance now? Writes open again straight away. The data is already restored; the restore is recorded when you run it again.",
+  "restore_audit_pending_clear_confirm": "Clear maintenance now? Writes open again straight away. The data is already restored; the restore is recorded when you run it again, and anything saved before you run it is replaced.",
   "restore_audit_pending_writes": "Writes",
   "restore_audit_pending_writes_change": "Paused → Open",
   "restore_audit_pending_audit_change": "Not recorded → Recorded by the next restore",

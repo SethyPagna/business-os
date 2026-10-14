@@ -671,7 +671,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
       begin: () => beginKeyedAction(deleteActionRef, fee.id),
       onStart: () => setDeletingId(fee.id),
       // The version this screen read: a delete of an expense edited since is refused as stale
-      // (K2) instead of removing the newer record.
+      // instead of removing the newer record.
       remove: () => withLoaderTimeout(
         () => deleteFeeRequest(fee.id, fee.updated_at ?? null),
         'fees:delete',

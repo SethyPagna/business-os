@@ -275,7 +275,7 @@ function getBackupApi(): BackupApi {
 // accepts the half-restored state. Renders nothing while maintenance is off.
 //
 // One failed state is not a crash: the restore finished but its audit row could
-// not be written (K10b, 503 restore_audit_not_recorded). The data is restored,
+// not be written (503 restore_audit_not_recorded). The data is restored,
 // so the banner says that, and the way out is to clear maintenance and run the
 // same restore again right away. It is recognised from the state itself, so it
 // reads the same after a reload or a lost response. `refreshSignal` makes the
@@ -319,7 +319,7 @@ function RestoreMaintenanceBanner({ copy, notify, refreshSignal }: { copy: CopyF
       title: copy('restore_audit_pending_clear', 'Clear maintenance'),
       message: copy(
         'restore_audit_pending_clear_confirm',
-        'Clear maintenance now? Writes open again straight away. The data is already restored; the restore is recorded when you run it again.',
+        'Clear maintenance now? Writes open again straight away. The data is already restored; the restore is recorded when you run it again, and anything saved before you run it is replaced.',
       ),
       items: [
         { label: copy('restore_audit_pending_writes', 'Writes'), value: copy('restore_audit_pending_writes_change', 'Paused \u2192 Open') },
@@ -1959,7 +1959,7 @@ export default function Backup() {
       // A failed restore may have left maintenance on: let the banner say so now rather than at its next poll.
       if (aliveRef.current) setMaintenanceSignal((count) => count + 1)
       if (isRestoreAuditNotRecordedError(error)) {
-        // K10b: the data IS restored; only its audit record is missing, and the Worker keeps writes paused until
+        // The data IS restored; only its audit record is missing, and the Worker keeps writes paused until
         // maintenance is cleared. Not an "Import failed": say what to do (the banner offers the way out).
         notify(copy('restore_audit_not_recorded', 'The backup data was restored, but the restore could not be recorded in the audit log, so writes stay paused. Clear maintenance, then run the same restore again.'), 'error')
       } else {

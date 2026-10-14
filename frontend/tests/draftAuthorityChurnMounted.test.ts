@@ -1,16 +1,16 @@
-// H7 (OPUS-CORRECTNESS-HUNT-R2), the mounted half: every surface that holds a frozen draft authority -- the Expense form
-// and page, the Branch form and page, the Product form -- keeps working through a same-user session churn and locks on a
-// real change of owner.
+// Every surface that holds a frozen draft authority -- the Expense form and page, the Branch form and page, the Product
+// form -- keeps working through a same-user session churn, locks on a real change of owner, and unlocks by itself when a
+// sign-in check ends with the same owner confirmed.
 //
-// The churn is what a reconnect does inside the open tab: AppContext resets the actor read session and writes the same
-// user's record again with refreshed permissions and a new expiry. Before this fix that moved the READ scope the form
-// had been opened under, so the form said "the account or server changed", Save went off, the draft writer stopped and
-// the text typed afterwards was lost. The REAL actorReadScope.ts, workDrafts.ts and forms run; the reset goes through the
-// actorReadScope instance the surfaces use (tests/draftAuthorityHost.ts), so it is the same-tab reset, not a second tab.
+// The churn is what a reconnect does inside the open tab: the actor read session is reset and the same user's record is
+// written again with refreshed permissions and a new expiry. The REAL actorReadScope.ts, workDrafts.ts and forms run; the
+// reset goes through the actorReadScope instance the surfaces use (tests/draftAuthorityHost.ts), so it is the same-tab
+// reset, not a second tab.
 //
 //   blip          reset + same-user rewrite   -> no notice, Save works, the draft keeps being written, Minimize parks
 //   switch        user 7 -> user 8            -> notice, Save refused, nothing written under 8, nothing parked
 //   A-B-A         user 8 observed, then 7 again -> still locked (the epoch only goes up)
+//   sign-in check another tab signs in, the same owner is confirmed -> locked, then the notice goes and Save works
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createHarness, propsOf, type MountedSurface, type MemoryNode } from './mountedComponentHarness.ts'
@@ -47,6 +47,9 @@ const blip = (): void => {
   localStorage.setItem('businessos_user_expiry', String(Date.now() + 86_400_000))
 }
 const switchTo8 = (): void => writeUser({ id: 8 })
+// Another tab signs in: the session marker moves under this tab and every form it holds locks until the same owner is confirmed.
+const otherTabSignsIn = (): void => { localStorage.setItem('businessos_read_session', 'another-tab-signed-in') }
+const sameOwnerConfirmed = (): void => { actor().completeActorSessionReconciliation(actor().actorSessionReconciliationMarker()) }
 // The scoped draft key of a base key for user 7 (the opener) or user 8 (the stranger), computed up front so a test that has
 // already switched the stored user is not put back by asking.
 const keysFor = (base: string): { seven: string; eight: string } => {
@@ -175,6 +178,27 @@ try {
       } finally { await fee.unmount() }
     })
 
+    // A sign-in check is the one lock that lifts by itself. The notice has to go with it, and Save has to work, without the
+    // operator closing the form; a Save pressed while it was locked must not leave "Reopen this form" standing.
+    await check(`${lang} Expense form, a sign-in check lifts (same owner confirmed): the notice goes with the lock and Save works`, async () => {
+      const fee = await startFee()
+      try {
+        otherTabSignsIn()
+        await fee.render(feeProps)
+        assert.ok(noticeShown(fee, warning), 'locked while the sign-in is checked')
+        assert.equal(saveDisabled(fee), true)
+        await submit(fee)
+        assert.equal(saved.length, 0, 'a Save pressed during the check is refused')
+        sameOwnerConfirmed()
+        await fee.settle()
+        assert.ok(!noticeShown(fee, warning), 'the notice leaves when the lock lifts, with no re-render from the page')
+        assert.equal(saveDisabled(fee), false)
+        await submit(fee)
+        assert.equal(saved.length, 1, 'and Save sends')
+        assert.equal(closed, 1)
+      } finally { await fee.unmount() }
+    })
+
     // ---- Branch form ----------------------------------------------------------------------------------------------
     const branchSaves: Array<Record<string, unknown>> = []
     let branchClosed = 0
@@ -224,6 +248,25 @@ try {
         assert.equal(draftOf(branchKey())?.location, '12 River Road')
         await submit(branch)
         assert.equal(branchSaves.length, 0)
+      } finally { await branch.unmount() }
+    })
+
+    await check(`${lang} Branch form, a sign-in check lifts (same owner confirmed): the notice goes with the lock and Save works`, async () => {
+      const branch = await startBranch()
+      try {
+        otherTabSignsIn()
+        await branch.render(branchProps)
+        assert.ok(noticeShown(branch, warning), 'locked while the sign-in is checked')
+        assert.equal(saveDisabled(branch), true)
+        await submit(branch)
+        assert.equal(branchSaves.length, 0, 'a Save pressed during the check is refused')
+        sameOwnerConfirmed()
+        await branch.settle()
+        assert.ok(!noticeShown(branch, warning), 'the notice leaves when the lock lifts')
+        assert.equal(saveDisabled(branch), false)
+        await submit(branch)
+        assert.equal(branchSaves.length, 1)
+        assert.equal(branchClosed, 1)
       } finally { await branch.unmount() }
     })
 
@@ -325,6 +368,23 @@ try {
         await product.click(product.button(confirmLabel))
         assert.equal(productSaves.length, 0, 'the round trip is not "unchanged"')
         assert.ok(noticeShown(product, warning), 'and the form says why')
+      } finally { await product.unmount() }
+    })
+
+    await check(`${lang} Product form, a sign-in check lifts after a refused confirm: the notice goes and a second Save sends`, async () => {
+      const product = await startProduct()
+      try {
+        otherTabSignsIn()
+        await product.click(product.button(confirmLabel))
+        assert.equal(productSaves.length, 0, 'confirmed during the check: nothing is sent')
+        assert.ok(noticeShown(product, warning), 'and the form says why')
+        sameOwnerConfirmed()
+        await product.settle()
+        assert.ok(!noticeShown(product, warning), 'the notice leaves when the lock lifts')
+        await product.click(product.button(words.save))
+        await product.click(product.button(confirmLabel))
+        assert.equal(productSaves.length, 1, 'a second Save sends')
+        assert.ok(!noticeShown(product, warning))
       } finally { await product.unmount() }
     })
   }

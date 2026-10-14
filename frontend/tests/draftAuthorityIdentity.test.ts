@@ -1,9 +1,6 @@
-// H7 (OPUS-CORRECTNESS-HUNT-R2): an open Expense / Branch / Product form is fenced by the identity it was OPENED under
-// (utils/draftAuthority.ts). That fence used the READ scope, which also moves on same-user churn -- a session reset, a
-// permission / profile / expiry rewrite, a reconnect's permission refresh. After a network blip the open form therefore
-// said "the account or server changed", switched Save off and stopped the draft writer, so text typed after the lock
-// was lost. The fence is now the WRITE identity (server, origin, user id, organization), the one the Stock Session
-// already uses.
+// An open Expense / Branch / Product form is fenced by the identity it was OPENED under (utils/draftAuthority.ts): the
+// WRITE identity (server, origin, user id, organization), the one the Stock Session uses -- not the read scope, which also
+// moves on same-user churn (a session reset, a permission / profile / expiry rewrite, a reconnect's refresh).
 //
 // The REAL actorReadScope.ts, workDrafts.ts and draftAuthority.ts run in one fake browser tab (the shape of
 // receivingAuthorityContinuation.test.ts): every same-user change must leave the authority current, every real change of

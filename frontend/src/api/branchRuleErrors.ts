@@ -236,10 +236,10 @@ function reviewPermissionName(permission: unknown, section: unknown, t: (key: st
 /**
  * Every refusal POST /review/:id/approve and /reject can answer, as one sentence in the operator's language, or
  * null for any other error so the caller falls through to its normal localisation:
- *   N12  review_self_approval, review_section_full_required, Finding I  review_identity_conflict
- *   H    review_action_full_required -- the reviewer lacks the grant the direct route demands (`permission` names it)
- *   K3 / K6  review_entity_changed, review_already_decided -- the queue on screen is out of date (reviewStaleDecisionText)
- *   K7   reason_too_long, invalid_reason -- the reject reason (reviewRejectReasonRefusalText)
+ *   review_self_approval, review_section_full_required, review_identity_conflict
+ *   review_action_full_required -- the reviewer lacks the grant the direct route demands (`permission` names it)
+ *   review_entity_changed, review_already_decided -- the queue on screen is out of date (reviewStaleDecisionText)
+ *   reason_too_long, invalid_reason -- the reject reason (reviewRejectReasonRefusalText)
  *   no_review_applier -- a kind of request with no approval rule (501)
  * `permission` is only read for review_action_full_required.
  */
@@ -274,7 +274,7 @@ export function reviewApprovalRefusalText(code: unknown, section: unknown, t: (k
 }
 
 /**
- * K7: a reviewer's reject reason is capped like every stock reason. The Worker refuses a longer one
+ * A reviewer's reject reason is capped like every stock reason. The Worker refuses a longer one
  * (400 reason_too_long) and never truncates it; the Review Queue's field stops at the same number.
  * cloudflare/src/lib/pendingActions.ts REVIEW_REASON_MAX_LENGTH, pinned equal by
  * tests/reviewQueueRejectReason.test.ts. Counted in UTF-16 code units (string.length), the Worker's
@@ -285,7 +285,7 @@ export const REVIEW_REASON_MAX_LENGTH = 512
 export type ReviewStaleDecision = 'entity_changed' | 'already_decided'
 
 /**
- * K3 / K6: an approval or rejection the Worker refused because the queue on screen is out of date.
+ * An approval or rejection the Worker refused because the queue on screen is out of date.
  * `review_entity_changed` -- the record was edited after the request was made, nothing was applied
  * and the request stays open; `review_already_decided` -- another reviewer (or the requester) got
  * there first. The two plain "Already reviewed" 409s of POST /review/:id/approve and /reject carry
@@ -309,7 +309,7 @@ export function reviewStaleDecisionText(kind: ReviewStaleDecision, t: (key: stri
 }
 
 /**
- * K7: POST /review/:id/reject refuses a reason that is too long (`reason_too_long`) or is not text
+ * POST /review/:id/reject refuses a reason that is too long (`reason_too_long`) or is not text
  * (`invalid_reason`) and leaves the request open. Returns the sentence for the dialog to show beside
  * the reason, in the operator's language, or null for any other error.
  */

@@ -1226,8 +1226,7 @@ function ProductFormContent({
     // closes: saving mid-upload used the stale pre-upload imageList.
     if (saving || saveInFlightRef.current || imageUploading || imageUploadInFlightRef.current) return
     // Fenced by the frozen draft authority (the write identity: server, origin, user id, organization), as the other
-    // draft forms and the Stock Session are -- not the read scope, which also moves when the same user's session is
-    // reset or their profile rewritten and would refuse a save (or leave a saved form open) after a network blip.
+    // draft forms and the Stock Session are -- not the read scope, which also moves on same-user churn.
     const isSaveAuthorityCurrent = () => aliveRef.current && currentFormDraftKeyRef.current === draftKey && draftKey === scopedWorkDraftKey(productFormDraftBaseKey(product?.id, draftScope)) && isDraftAuthorityCurrent(draftAuthority.authority)
     const canContinueSave = () => {
       if (isSaveAuthorityCurrent()) return true
@@ -1511,7 +1510,7 @@ function ProductFormContent({
         </>
       )}
       unsavedChanges={{ workKey: dirtyWorkKey }}>
-      {saveAuthorityWarning === draftKey ? <DraftAuthorityNotice t={t} className="mb-3" /> : null}
+      {saveAuthorityWarning === draftKey && !draftAuthority.current ? <DraftAuthorityNotice t={t} className="mb-3" /> : null}
       {unscopedDraftAvailable ? <p role="status" className="mb-3 text-xs text-amber-700 dark:text-amber-300">{tr('product_draft_unknown_authority', 'An older draft is preserved on this device. Its server cannot be verified, so it has not been opened here.', 'សេចក្ដីព្រាងចាស់នៅតែរក្សាទុកលើឧបករណ៍នេះ។ មិនអាចផ្ទៀងផ្ទាត់ម៉ាស៊ីនមេរបស់វាបានទេ ដូច្នេះវាមិនត្រូវបានបើកនៅទីនេះទេ។')}</p> : null}
       <div ref={productFormContentRef} className="mb-5 -mx-5 border-b border-gray-200 px-5 dark:border-gray-700">
         <div className="flex gap-1 overflow-x-auto">

@@ -1,4 +1,4 @@
-// A restore whose audit row could not be written (Worker, fees-k K10b): the data IS restored, but the Worker answers
+// A restore whose audit row could not be written: the data IS restored, but the Worker answers
 // 503 restore_audit_not_recorded and leaves maintenance ON until an administrator clears it and runs the same restore
 // again. The REAL Backup page is mounted over a transport whose answers the test controls, in both language packs.
 //
@@ -110,6 +110,10 @@ try {
         const confirm = confirmClear(ctx)
         assert.equal(confirm.length, 1, 'the confirmation opened over the banner')
         assert.ok(hasText(ctx, words.restore_audit_pending_clear_confirm), 'it says what clearing does')
+        // The decision point, not only the banner hint, says the second restore replaces what is saved in between.
+        const replaces = lang === 'en' ? /replaced/ : /ជំនួស/
+        assert.match(words.restore_audit_pending_clear_confirm, replaces, 'the confirmation warns that anything saved before the second restore is replaced')
+        assert.match(words.restore_audit_pending_hint, lang === 'en' ? /replaces/ : /ជំនួស/, 'as the banner hint does')
         assert.ok(hasText(ctx, words.restore_audit_pending_writes) && hasText(ctx, words.restore_audit_pending_writes_change), 'it shows the writes before and after')
         assert.ok(hasText(ctx, words.restore_audit_pending_audit_change), 'and the audit record before and after')
         assert.equal(ctx.state.clears, 0, 'nothing is cleared until confirmed')

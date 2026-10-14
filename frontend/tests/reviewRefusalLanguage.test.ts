@@ -1,17 +1,15 @@
-// H1 (OPUS-CORRECTNESS-HUNT-R2): every refusal a reviewer can hit in the Review Queue reads in the UI language.
-// Before this, a Khmer reviewer who approved an expense delete after the expense was edited, lost a two-reviewer race, or
-// lacked a per-action grant read the Worker's English sentence, and the reject path showed `error.message` raw.
+// Every refusal a reviewer can hit in the Review Queue reads in the UI language.
 //
-// The six codes the hunt named (Worker routes/reviewQueue.ts, lib/reviewApprovalPermission.ts, lib/reviewApply.ts):
+// The codes (Worker routes/reviewQueue.ts, lib/reviewApprovalPermission.ts, lib/reviewApply.ts):
 //   review_action_full_required  403 -- the reviewer lacks the grant the direct route demands; body.permission names it
-//   review_entity_changed        409 -- the record changed after the request was made (K3)
-//   review_already_decided       409 -- someone else decided first (K6)
-//   invalid_reason / reason_too_long   400 -- the reject reason (K7)
+//   review_entity_changed        409 -- the record changed after the request was made
+//   review_already_decided       409 -- someone else decided first
+//   invalid_reason / reason_too_long   400 -- the reject reason
 //   no_review_applier            501 -- a kind of request with no approval rule
 //
 // What is proved, in both packs and from the real pieces:
 //   the pack           every key exists in en and km, km is translated (not the English), slots survive
-//   the text           reviewApprovalRefusalText answers all six (and still the three N12 / Finding I codes), naming the
+//   the text           reviewApprovalRefusalText answers all six (and still the three older codes), naming the
 //                      permission the way the Users screen names it; any other code stays null
 //   the error          the REAL createApiError carries the Worker's `permission` onto the error the queue receives
 //   the queue          the REAL ReviewQueue, approving and rejecting, shows the pack's sentence, never the Worker's English

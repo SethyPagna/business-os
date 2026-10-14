@@ -577,12 +577,10 @@ export function updateFee(id: number, payload: FeePayload & { expectedUpdatedAt:
   ) as Promise<{ fee: FeeRecord }>
 }
 
-// K2: like the edit, a delete states the version it is looking at. The Worker refuses a
-// delete whose expected_updated_at no longer matches (409 write_conflict) BEFORE it queues
-// the request for review or removes anything; a DELETE with no body is only held to the
-// version the Worker itself read, so a stale screen would still remove the newer record.
-// The type makes the version mandatory for every caller; null is only for a legacy row that
-// has no version. The key is always on the wire, whatever the caller passed.
+// A delete states the version it is looking at, like an edit: the Worker refuses one whose
+// expected_updated_at no longer matches (409 write_conflict) before it queues the request or
+// removes anything. The version is mandatory for every caller (null only for a legacy row with
+// none) and the key is always on the wire, whatever the caller passed.
 export function deleteFee(id: number, expectedUpdatedAt: string | null): Promise<{ success: boolean; pending?: boolean }> {
   const body = { expected_updated_at: expectedUpdatedAt ?? null }
   return route(

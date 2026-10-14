@@ -119,9 +119,9 @@ export type RestoreMaintenanceState = {
   updatedAt?: string
 } | null
 
-// K10b (Worker routes/backups.ts): the restore wrote every row, but its audit row could not be recorded. The Worker
-// answers 503 with this code and leaves maintenance ON (phase failed) until an administrator clears it and runs the
-// same restore again. The data IS restored, so this is not an ordinary failed import.
+// 503 from a restore that wrote every row but could not record its audit row. The Worker leaves maintenance ON (phase
+// failed) until an administrator clears it and runs the same restore again. The data IS restored, so this is not an
+// ordinary failed import.
 export const RESTORE_AUDIT_NOT_RECORDED_CODE = 'restore_audit_not_recorded'
 
 // The maintenance state the Worker leaves behind carries no code, only its sentence, and that is all a reload (or a

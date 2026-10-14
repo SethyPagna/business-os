@@ -1,6 +1,5 @@
-// Undo / Redo refused 409 undo_history_stale (the server row is not in the state this tab thinks it is: another
-// session's Undo or Redo got there first). The tab used to answer that refusal by PATCHing the row to 'failed', which
-// overwrote the other session's result -- the row then read "failed" although the Undo had really happened.
+// Undo / Redo refused 409 undo_history_stale: the server row is not in the state this tab thinks it is, because another
+// session's Undo or Redo got there first. Nothing may be written over that session's result.
 // The REAL useActionHistory hook is mounted (tests/actionHistoryHost.ts) over a transport whose answers the test controls.
 //
 //   stale refusal   no status is written; the recorded list is re-read; the operator is told (the transport's message);

@@ -424,12 +424,11 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
       }
       return true
     } catch (error) {
-      // The Worker refused BEFORE flipping the row (serverTransitioned is still false) because the row is not in the
-      // state this tab expected. Marking it 'failed' here -- what every refused transition used to get -- overwrote
-      // the other session's result: an Undo that really happened then read as a failure. Leave the row alone, re-read
-      // the recorded history, drop this tab's copy of the entry (its closure can no longer be applied, and Undo/Redo
-      // would be refused the same way every time) and say so. A stale code raised by the CLOSURE, after this tab
-      // flipped the row itself, is not that case and falls through to restore the status it flipped from.
+      // The Worker refused before flipping the row (serverTransitioned is still false) because the row is not in the
+      // state this tab expected: another session's result is on it, so no status is written over it. Re-read the
+      // recorded history, drop this tab's copy of the entry (its closure can no longer be applied, and Undo/Redo would
+      // be refused the same way every time) and say so. A stale code raised by the CLOSURE, after this tab flipped the
+      // row itself, is not that case and falls through to restore the status it flipped from.
       if (!serverTransitioned && isStaleHistoryRefusal(error)) {
         setUndoStack((current) => current.filter((item) => item.id !== entry.id))
         setRedoStack((current) => current.filter((item) => item.id !== entry.id))
