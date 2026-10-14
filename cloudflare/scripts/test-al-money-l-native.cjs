@@ -205,7 +205,10 @@ async function main() {
       paymentDetails: [{ method: 'Cash', amount_usd: 12, amount_khr: 0 }], label: 'L4 delivery sale',
       extra: { is_delivery: true, delivery_contact_id: 1, delivery_fee_usd: 2, delivery_fee_paid_by: 'customer', delivery_actual_cost_usd: 1.5 } })
     assert.equal(delivery.status, 200, JSON.stringify(delivery.body).slice(0, 300))
-    const employee = await h.addEmployee(950, 'al_cost_viewer', { sales: true, reports: true, product_cost_view: true })
+    // The cost grant and the courier-cost permission are separate switches: this employee has the first and has the second turned off.
+    const employee = await h.addEmployee(950, 'al_cost_viewer', { sales: true, reports: true, product_cost_view: true, 'sales:view_courier_cost': false })
+    const both = await h.addEmployee(951, 'al_cost_and_courier_viewer', { sales: true, reports: true, product_cost_view: true })
+    const courierOnly = await h.addEmployee(952, 'al_courier_viewer', { sales: true, reports: true })
     const admin4 = await totalsOf(h, range('2026-10-05'), 'L4 admin overview')
     const seen = await totalsOf(h, range('2026-10-05'), 'L4 cost-view employee overview', employee)
     const seenDays = (await h.call('GET', H.fresh(`/api/reports/periods?granularity=day&${range('2026-10-05')}`), undefined, 'L4 cost-view employee periods', { cookie: employee })).body.rows
@@ -216,6 +219,17 @@ async function main() {
     })
     r.check(`L4: the cost-view employee is not sent the courier cost (keys: ${['delivery_actual_cost_usd', 'delivery_net_usd', 'delivery_margin_usd'].filter(key => key in seen).join(',') || 'none'})`, () => {
       assert.ok(!('delivery_actual_cost_usd' in seen) && !('delivery_net_usd' in seen))
+    })
+    const seenBoth = await totalsOf(h, range('2026-10-05'), 'L4 cost + courier employee overview', both)
+    const seenCourierOnly = await totalsOf(h, range('2026-10-05'), 'L4 courier-only employee overview', courierOnly)
+    r.check('L4: with the courier-cost permission on, a cost viewer reads the courier cost and the full profit, unflagged', () => {
+      assert.equal(seenBoth.delivery_actual_cost_usd, 1.5)
+      assert.equal(seenBoth.profit_usd, admin4.profit_usd)
+      assert.ok(!('profit_excludes_delivery' in seenBoth))
+    })
+    r.check('L4: the courier-cost permission alone reads the courier cost and no product cost or profit', () => {
+      assert.equal(seenCourierOnly.delivery_actual_cost_usd, 1.5)
+      for (const key of ['cost_usd', 'profit_usd', 'margin_pct', 'removal_loss_usd']) assert.ok(!(key in seenCourierOnly), key)
     })
     r.check(`L4: nor can it be recovered as fee - (profit - revenue + cost): overview gives $${inferred(seen)}, day row gives $${seenDays[0] ? inferred(seenDays[0]) : 'n/a'} (hidden value $1.5)`, () => {
       assert.notEqual(inferred(seen), 1.5)

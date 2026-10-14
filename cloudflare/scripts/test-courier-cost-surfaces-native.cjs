@@ -2,9 +2,12 @@
 // Courier (actual delivery) cost on every sale surface, against the WHOLE Worker
 // on workerd + D1.
 //
-// Owner rule: the courier cost is administrator-only. A cost viewer gets GOODS
-// profit and a plain reader gets neither; the customer's delivery FEE is revenue
-// and stays visible to everyone who can see the sale.
+// Owner rule (14 Oct 2026): the courier cost sits behind one permission,
+// sales:view_courier_cost. It is on for an administrator and for every role that
+// holds Sales until the role editor switches it off. A caller with it off is a
+// cost viewer who gets GOODS profit or a plain reader who gets neither (cost grant,
+// amend right and Sales tier do not open it); the customer's delivery FEE is
+// revenue and stays visible to everyone who can see the sale.
 //
 // Fixture (all on the real routes; nothing is written to a table directly):
 //   sale A  2026-10-05  delivery, fee $2.00, courier cost $0.83 at checkout,
@@ -24,6 +27,8 @@
 // Negative controls rewrite source text in memory at bundle time:
 //   --wrong=open        every caller may see the courier cost
 //   --wrong=cost-grant  the cost-view grant also opens it (the plausible wrong gate)
+//   --wrong=amend       a full amender also reads it (the retired interim rule)
+//   --wrong=admin-only  only an administrator reads it (the rule this permission replaced)
 //   --wrong=summary     the record text keeps its amounts
 //   --wrong=ledger      the amendment ledger keeps its amount columns and snapshots
 //   --wrong=mutation    the write responses (create, replay, items, ...) are not projected
@@ -36,14 +41,16 @@ const flag = name => (process.argv.slice(2).find(arg => arg.startsWith(`--${name
 const WRONG = flag('wrong')
 const BASE = flag('base')
 const GATE = 'src/lib/courierCostAccess.ts'
+const GATE_EXPRESSION = "  return isAdminControlUser(user) || getActionTier(user, 'sales', 'view_courier_cost') !== 'none'"
 const MUTANTS = {
-  open: [{ name: 'open', file: GATE, from: 'export function canViewCourierCost(user: PermissionUser): boolean {\n  return isAdminControlUser(user)', to: 'export function canViewCourierCost(user: PermissionUser): boolean {\n  return true' }],
+  open: [{ name: 'open', file: GATE, from: GATE_EXPRESSION, to: '  return true' }],
+  amend: [{ name: 'amend', file: GATE, from: GATE_EXPRESSION, to: "  return isAdminControlUser(user) || getActionTier(user, 'sales', 'amend') === 'full'" }],
+  'admin-only': [{ name: 'admin-only', file: GATE, from: GATE_EXPRESSION, to: '  return isAdminControlUser(user)' }],
   mutation: [{ name: 'mutation', file: GATE, from: 'if (mutation) args[0]', to: 'if (false) args[0]' }],
   'cost-grant': [
     { name: 'cost-grant-import', file: GATE, from: "import { getActionTier, isAdminControlUser, type PermissionUser } from './permissions'",
       to: "import { getActionTier, getMergedPermissions, isAdminControlUser, type PermissionUser } from './permissions'" },
-    { name: 'cost-grant', file: GATE, from: 'export function canViewCourierCost(user: PermissionUser): boolean {\n  return isAdminControlUser(user)',
-      to: 'export function canViewCourierCost(user: PermissionUser): boolean {\n  return isAdminControlUser(user) || getMergedPermissions(user).product_cost_view === true' },
+    { name: 'cost-grant', file: GATE, from: GATE_EXPRESSION, to: '  return isAdminControlUser(user) || getMergedPermissions(user).product_cost_view === true' },
   ],
   summary: [{ name: 'summary', file: GATE, from: "record.summary.replace(COURIER_COST_SUMMARY, '$1 changed')", to: 'record.summary' }],
   ledger: [{ name: 'ledger', file: GATE, from: 'const costEntry = row.kind === COST_LEDGER_KIND', to: 'const costEntry = false' }],
@@ -118,12 +125,15 @@ async function main() {
     assert.equal(feeChange.status, 200, JSON.stringify(feeChange.body).slice(0, 300))
     console.log(`TIME fixture ready at ${((Date.now() - started) / 1000).toFixed(1)} s (sale A #${idA}, sale B #${idB})`)
 
+    const OFF = { 'sales:view_courier_cost': false }
     const accounts = {
       admin: undefined,
-      'cost-viewer': await h.addEmployee(960, 'ccs_cost_viewer', { sales: 'view', reports: true, dashboard: true, contacts: true, audit_log: true, product_cost_view: true }),
-      'plain-reader': await h.addEmployee(961, 'ccs_plain_reader', { sales: 'view', reports: true, dashboard: true, contacts: true, audit_log: true }),
+      'cost-viewer': await h.addEmployee(960, 'ccs_cost_viewer', { sales: 'view', reports: true, dashboard: true, contacts: true, audit_log: true, product_cost_view: true, ...OFF }),
+      'plain-reader': await h.addEmployee(961, 'ccs_plain_reader', { sales: 'view', reports: true, dashboard: true, contacts: true, audit_log: true, ...OFF }),
+      'default-viewer': await h.addEmployee(964, 'ccs_default_viewer', { sales: 'view', reports: true, dashboard: true, contacts: true, audit_log: true }),
     }
-    const amender = await h.addEmployee(962, 'ccs_amender', { sales: true, reports: true, dashboard: true, contacts: true, product_cost_view: true })
+    const amender = await h.addEmployee(962, 'ccs_amender', { sales: true, reports: true, dashboard: true, contacts: true, product_cost_view: true, ...OFF })
+    const defaultAmender = await h.addEmployee(966, 'ccs_default_amender', { sales: true, reports: true, dashboard: true, contacts: true })
 
     const read = async (who, url, cookie = accounts[who]) => {
       const res = await h.call('GET', H.fresh(url), undefined, `${who} ${url}`, cookie ? { cookie } : {})
@@ -159,7 +169,7 @@ async function main() {
     const matrix = []
     const results = {}
     for (const [label, url] of surfaces) {
-      for (const who of ['admin', 'cost-viewer', 'plain-reader']) {
+      for (const who of ['admin', 'cost-viewer', 'plain-reader', 'default-viewer']) {
         const got = await read(who, url)
         results[`${who}|${label}`] = got
         matrix.push({ label, who, status: got.status, hits: got.hits })
@@ -176,7 +186,17 @@ async function main() {
       })
     }
 
-    // ---- the rule: neither a cost viewer nor a plain reader sees it -------------
+    // ---- the default: a Sales role nobody switched off reads what the administrator reads ----
+    for (const [label, , control] of surfaces) {
+      if (!control) continue
+      r.check(`a Sales role with the permission left on reads the courier cost on ${label}`, () => {
+        const got = results[`default-viewer|${label}`]
+        assert.equal(got.status, 200, `default-viewer ${label} answered ${got.status}`)
+        assert.ok(got.hits.length > 0, `the Sales role with the default permission sees no courier cost on ${label}`)
+      })
+    }
+
+    // ---- the rule: with the permission off, neither a cost viewer nor a plain reader sees it ----
     for (const [label] of surfaces) {
       for (const who of ['cost-viewer', 'plain-reader']) {
         r.check(`${who} cannot read the courier cost on ${label}`, () => {
@@ -242,27 +262,35 @@ async function main() {
       assert.equal(JSON.parse(addedEntry.after_json).delivery_actual_cost_usd, 1.91)
     })
 
-    // ---- a sales amender: the history is closed to them as well; the sale rows are not ----
+    // ---- a full sales amender is decided by the permission alone: amending is not a way to the cost ----
     const amenderRecords = await read('amender', `/api/sales/${idA}/records`, amender)
     const amenderLedger = await read('amender', `/api/sales/${idA}/amendments`, amender)
     const amenderList = await read('amender', `/api/sales?${RANGE}`, amender)
-    r.check('a sales amender with the cost grant cannot read the courier cost in the records or the ledger', () => {
+    r.check('a full sales amender with the cost grant and the permission off cannot read the courier cost in the records, the ledger or the list', () => {
       assert.deepEqual(amenderRecords.hits, [])
       assert.deepEqual(amenderLedger.hits, [])
+      assert.deepEqual(amenderList.hits, [])
     })
-    console.log(`INFO sales amender reads GET /api/sales: ${amenderList.hits.length ? 'courier cost present (sales->amend full edits it; owner ruling pending)' : 'courier cost absent'}`)
+    const defaultAmenderList = await read('default-amender', `/api/sales?${RANGE}`, defaultAmender)
+    const defaultAmenderRecords = await read('default-amender', `/api/sales/${idA}/records`, defaultAmender)
+    r.check('a full sales amender with the permission left on reads it on the list and in the records', () => {
+      assert.ok(defaultAmenderList.hits.length > 0)
+      assert.ok(defaultAmenderRecords.hits.length > 0)
+    })
 
     // ---- every write that returns the sale's canonical snapshot leaves by the list's rule ----
     // Sale C is placed by a staff account that may create sales and add items but may not amend (sales:amend false);
     // sale D is the same sale placed by the administrator, the positive control that the scan sees the figure on
     // each write path. The status route returns id/status only, so it carries no figure either way.
-    const staff = await h.addEmployee(963, 'ccs_staff', { sales: true, 'sales:amend': false })
+    const staff = await h.addEmployee(963, 'ccs_staff', { sales: true, 'sales:amend': false, ...OFF })
+    const staffOn = await h.addEmployee(965, 'ccs_staff_on', { sales: true, 'sales:amend': false })
     const costSale = { is_delivery: true, delivery_contact_id: 1, delivery_fee_usd: 2, delivery_fee_paid_by: 'customer', delivery_actual_cost_usd: 2.46 }
     const place = (key, cookie, actorId) => H.createSale(h, { key, createdAt: day('2026-10-07'), lines: [{ productId: 704, quantity: 1, quote: QUOTE }],
       paymentDetails: [{ method: 'Cash', amount_usd: 12, amount_khr: 0 }], cookie,
       extra: { ...(actorId ? { offline_owner: { ...h.owner, actor_id: actorId } } : {}), ...costSale } })
     const writes = []
     const wrote = (path, who, res) => { writes.push({ path, who, status: res.status, hits: res.status === 200 ? scan(res.body) : [] }); return res }
+    wrote('create', 'staff-on', await place('ccs-e', staffOn, 965))
     const staffCreate = wrote('create', 'staff', await place('ccs-c', staff, 963))
     assert.equal(staffCreate.status, 200, JSON.stringify(staffCreate.body).slice(0, 300))
     wrote('create replay', 'staff', await place('ccs-c', staff, 963))
@@ -288,8 +316,13 @@ async function main() {
         assert.ok(got.hits.length > 0, `the scan found no courier cost on the administrator's ${path} response`)
       })
     }
+    r.check('control: a staff account without sales:amend but with the permission left on reads the courier cost on the create response', () => {
+      const got = writeOf('create', 'staff-on')
+      assert.equal(got.status, 200, `staff-on create answered ${got.status}`)
+      assert.ok(got.hits.length > 0)
+    })
     for (const path of ['create', 'create replay', 'create-receipt (GET)', 'add items', 'status change']) {
-      r.check(`a staff account without sales:amend cannot read the courier cost on the ${path} response`, () => {
+      r.check(`a staff account with the permission off cannot read the courier cost on the ${path} response`, () => {
         const got = writeOf(path, 'staff')
         assert.equal(got.status, 200, `staff ${path} answered ${got.status}`)
         assert.deepEqual(got.hits, [], `staff ${path} leaks the courier cost at ${got.hits.slice(0, 6).join(', ')}`)
@@ -301,11 +334,15 @@ async function main() {
     })
     const staffList = await read('staff', `/api/sales?id=${idC}`, staff)
     const adminList = await read('admin', `/api/sales?id=${idC}`)
-    r.check('the rule is the list rule: the same staff account is hidden the cost on GET /api/sales and the administrator is not', () => {
+    r.check('the rule is the list rule: the same staff account (permission off) is hidden the cost on GET /api/sales and the administrator is not', () => {
       assert.deepEqual(staffList.hits, [])
       assert.ok(adminList.hits.length > 0)
     })
-    console.log(`INFO full sales amender on the amend response: ${writeOf('amend (fee change)', 'amender').hits.length ? 'courier cost present (sales->amend full edits it; owner ruling pending)' : 'courier cost absent'}`)
+    r.check('a full amender with the permission off reads no courier cost on the amend response; the administrator does', () => {
+      assert.equal(writeOf('amend (fee change)', 'amender').status, 200)
+      assert.deepEqual(writeOf('amend (fee change)', 'amender').hits, [])
+      assert.ok(writeOf('amend (fee change)', 'admin').hits.length > 0)
+    })
     console.log('\nWRITE-RESPONSE MATRIX (hits = hidden figures or courier-cost keys found in the response)')
     for (const entry of writes) console.log(`MATRIX write ${entry.path.padEnd(22)} ${entry.who.padEnd(8)} ${entry.status} ${entry.hits.length ? `VISIBLE(${entry.hits.length})` : 'hidden'}`)
 
@@ -326,13 +363,13 @@ async function main() {
 
     console.log('\nSURFACE MATRIX (hits = hidden figures or courier-cost keys found in the response)')
     for (const [label] of surfaces) {
-      const cells = ['admin', 'cost-viewer', 'plain-reader'].map(who => {
+      const cells = ['admin', 'default-viewer', 'cost-viewer', 'plain-reader'].map(who => {
         const entry = matrix.find(item => item.label === label && item.who === who)
         return `${who} ${entry.status} ${entry.hits.length ? `VISIBLE(${entry.hits.length})` : 'hidden'}`
       })
       console.log(`MATRIX ${label.padEnd(26)} ${cells.join(' | ')}`)
     }
-    console.log(`MATRIX ${'sales list (amender)'.padEnd(26)} ${amenderList.hits.length ? 'VISIBLE' : 'hidden'}`)
+    console.log(`MATRIX ${'sales list (amender off)'.padEnd(26)} ${amenderList.hits.length ? 'VISIBLE' : 'hidden'}`)
   } finally {
     await h.mf.dispose?.()
   }

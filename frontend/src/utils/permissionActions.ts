@@ -270,6 +270,10 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // explicit capability. Individual actions above remain independently
     // grantable to front-line staff.
     { key: 'bulk', tKey: 'perm_act_sales_bulk', label: 'Change multiple sales at once', review: 'block' },
+    // Owner, 14 Oct 2026: the courier's actual cost (what the shop paid the driver) on a sale, its history, the reports
+    // and the dashboard. On by default for every role that holds Sales; the Worker's canViewCourierCost
+    // (lib/courierCostAccess.ts) reads the same `sales:view_courier_cost` switch, and an administrator always sees it.
+    { key: 'view_courier_cost', tKey: 'perm_act_sales_view_courier_cost', label: 'View actual delivery cost', review: 'allow' },
   ],
 
   promotions: [

@@ -161,8 +161,8 @@ import { formatSaleStatusTelegramLines, formatSaleTelegramLines, sendTelegramEve
 import { contactDisplayAddress } from '../lib/contactOptions'
 import { buildSaleCreationSnapshot, SaleCreationSnapshotError } from '../lib/saleCreationSnapshot'
 import type { Env } from '../index'
-import { costViewProfit } from '../lib/reportProfitView'
-import { canViewSaleCourierCost, courierCostResponses, redactAmendmentEntries, redactSaleRecords } from '../lib/courierCostAccess'
+import { COURIER_COST_KEYS, costViewProfit } from '../lib/reportProfitView'
+import { canViewCourierCost, courierCostResponses, redactAmendmentEntries, redactSaleRecords } from '../lib/courierCostAccess'
 import { actorId, actorSnapshot } from '../lib/actorSnapshot'
 import { ANONYMOUS_CUSTOMER_ERROR_CODE, ANONYMOUS_CUSTOMER_MUTATION_ERROR, isAnonymousCustomer } from '../lib/anonymousCustomer'
 
@@ -6011,7 +6011,7 @@ export function projectOperationalSaleCosts(row:Record<string,unknown>,user:Sess
   const {creation_snapshot_json,items,...publicRow}=row
   // The opaque historical envelope is not needed by the editor and must not
   // become an alternative disclosure path. Never mutate the shared cache row.
-  if(!canViewSaleCourierCost(user)){
+  if(!canViewCourierCost(user)){
     delete publicRow.delivery_actual_cost_usd
     delete publicRow.delivery_actual_cost_khr
   }
@@ -6117,12 +6117,13 @@ app.get('/stats', async (c) => {
 // match".
 // Match reports.ts' authority boundary without importing a route module. Apply
 // after shared cache reads: private cost fields must never depend on cache owner.
-export function gateSalesReportMoney(row:Record<string,unknown>,isAdmin:boolean,canViewCosts=isAdmin):Record<string,unknown> {
-  if(isAdmin)return row
-  // A cost grant is not the administrator-only courier gate: the courier-cost
-  // keys leave and profit is restated on goods, so the courier cost cannot be
+export function gateSalesReportMoney(row:Record<string,unknown>,isAdmin:boolean,canViewCosts=isAdmin,canViewCourier=isAdmin):Record<string,unknown> {
+  if(isAdmin||(canViewCosts&&canViewCourier))return row
+  // A cost grant without the courier-cost permission: the courier-cost keys
+  // leave and profit is restated on goods, so the courier cost cannot be
   // recovered by subtraction (AL finding L4, lib/reportProfitView.ts).
   if(canViewCosts)return costViewProfit(row)
+  const courierMoney=canViewCourier?Object.fromEntries(COURIER_COST_KEYS.filter(key=>key in row).map(key=>[key,row[key]])):{}
   const {cost_usd,profit_usd,gross_profit_usd,pending_cost_usd,pending_profit_usd,unvalued_cost_usd,returned_cost_usd,
     cost,gross_profit,delivery_actual_cost_usd,delivery_actual_cost_count,delivery_margin_usd,delivery_net_usd,recognized_delivery_cost_usd,pending_delivery_cost_usd,
     returned_cost_shortfall_usd,cost_missing_snapshot_lines,margin_pct,money_precision_mode,money_complete,money_unknown_cost_lines,money_contributing_rows,
@@ -6134,10 +6135,12 @@ export function gateSalesReportMoney(row:Record<string,unknown>,isAdmin:boolean,
     // path, not a precaution.
     removal_loss_usd,removal_loss_qty,removal_loss_unvalued_rows,revenue_after_losses_usd,profit_after_losses_usd,
     ...publicRow}=row
-  return publicRow
+  return {...publicRow,...courierMoney}
 }
-export function gateSalesCourierMoney(row:Record<string,unknown>,isAdmin:boolean):Record<string,unknown> {
-  if(isAdmin)return row
+/** Who may see which cost money: [administrator, product costs, the courier's actual cost]. */
+const reportMoneyAccess=(user:SessionUser)=>[isAdminControlUser(user),canViewAcquisitionCosts(user),canViewCourierCost(user)] as const
+export function gateSalesCourierMoney(row:Record<string,unknown>,canViewCourier:boolean):Record<string,unknown> {
+  if(canViewCourier)return row
   const {actual_cost_usd,actual_cost_count,linked_expense_count,linked_expense_usd,linked_expense_khr,last_expense_at,margin_usd,...publicRow}=row
   return publicRow
 }
@@ -6266,7 +6269,7 @@ app.get('/stats-strip', async (c) => {
       returns: { count: before.returns.length, refund_usd: refund.toNumber() },
     }
   })
-  return c.json({...payload,totals:gateSalesReportMoney(payload.totals as unknown as Record<string,unknown>,isAdminControlUser(c.get('user')),canViewAcquisitionCosts(c.get('user')))})
+  return c.json({...payload,totals:gateSalesReportMoney(payload.totals as unknown as Record<string,unknown>,...reportMoneyAccess(c.get('user')))})
 })
 
 // ---- Phase X (Part 395): the daily report ---------------------------------
@@ -6296,7 +6299,7 @@ app.get('/daily-report', async (c) => {
     endTime: query.endTime || null,
     tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
   }, 'day')
-  return c.json({ startDate, endDate, days:days.map(row=>gateSalesReportMoney(row as unknown as Record<string,unknown>,isAdminControlUser(c.get('user')),canViewAcquisitionCosts(c.get('user')))) })
+  return c.json({ startDate, endDate, days:days.map(row=>gateSalesReportMoney(row as unknown as Record<string,unknown>,...reportMoneyAccess(c.get('user')))) })
 })
 
 // GET /api/sales/day-report?date&branchId -- the click-a-day drill: the
@@ -6323,10 +6326,10 @@ app.get('/day-report', async (c) => {
     endTime: query.endTime || null,
     tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
   })
-  const isAdmin=isAdminControlUser(c.get('user'))
-  return c.json({...report,totals:gateSalesReportMoney(report.totals as unknown as Record<string,unknown>,isAdmin,canViewAcquisitionCosts(c.get('user'))),
-    sales:report.sales.map(row=>gateSalesReportMoney(row as unknown as Record<string,unknown>,isAdmin,canViewAcquisitionCosts(c.get('user')))),
-    delivery_contacts:report.delivery_contacts.map(row=>gateSalesCourierMoney(row as unknown as Record<string,unknown>,isAdmin))})
+  const access=reportMoneyAccess(c.get('user'))
+  return c.json({...report,totals:gateSalesReportMoney(report.totals as unknown as Record<string,unknown>,...access),
+    sales:report.sales.map(row=>gateSalesReportMoney(row as unknown as Record<string,unknown>,...access)),
+    delivery_contacts:report.delivery_contacts.map(row=>gateSalesCourierMoney(row as unknown as Record<string,unknown>,canViewCourierCost(c.get('user'))))})
 })
 
 // GET /api/sales/delivery-contact-report?startDate&endDate&branchId&contactId
@@ -6355,7 +6358,7 @@ app.get('/delivery-contact-report', async (c) => {
     endTime: query.endTime || null,
     tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
   })
-  return c.json({ startDate, endDate, contacts:contacts.map(row=>gateSalesCourierMoney(row as unknown as Record<string,unknown>,isAdminControlUser(c.get('user')))) })
+  return c.json({ startDate, endDate, contacts:contacts.map(row=>gateSalesCourierMoney(row as unknown as Record<string,unknown>,canViewCourierCost(c.get('user')))) })
 })
 
 // GET /api/sales/customer-report?customerId&startDate&endDate&page&page_size
@@ -6429,7 +6432,7 @@ app.get('/customer-report', async (c) => {
   const totalRows = Number(countRow?.total) || 0
   return c.json({
     startDate, endDate, customerId,
-    totals: gateSalesReportMoney(totals as unknown as Record<string, unknown>, isAdminControlUser(c.get('user')), canViewAcquisitionCosts(c.get('user'))),
+    totals: gateSalesReportMoney(totals as unknown as Record<string, unknown>, ...reportMoneyAccess(c.get('user'))),
     sales: saleRows || [],
     page, page_size: pageSize, total_sales: totalRows, total_pages: Math.max(1, Math.ceil(totalRows / pageSize)),
   })
@@ -6657,7 +6660,6 @@ app.get('/export', async (c) => {
   const revenueBeforeRefunds = round2(salesTotals.revenue_usd + totalRefundsUsd)
   const netRevenueUsd = salesTotals.revenue_usd
   const exportUser = c.get('user')
-  const exportIsAdmin = isAdminControlUser(exportUser)
   const summary = {
     total_transactions: totalMatching,
     completed_transactions: Number(totalMatchingRow?.completed) || 0,
@@ -6673,12 +6675,13 @@ app.get('/export', async (c) => {
     avg_order_usd: salesTotals.avg_order_usd,
   }
   // AL finding L4: the summary carries COGS, the delivery fee and net revenue,
-  // so a profit that includes the courier cost would hand a non-admin cost
-  // viewer that cost by subtraction. Such a caller gets goods profit, flagged.
+  // so a profit that includes the courier cost would hand a cost viewer
+  // without the courier-cost permission that cost by subtraction. Such a
+  // caller gets goods profit, flagged.
   // (A caller without the cost grant loses every cost/profit key to the
   // acquisition-cost projection, as before.)
   const goodsProfitUsd = round2(netRevenueUsd - salesTotals.cost_usd)
-  const summaryView = exportIsAdmin || !canViewAcquisitionCosts(exportUser) ? summary : { ...summary,
+  const summaryView = canViewCourierCost(exportUser) || !canViewAcquisitionCosts(exportUser) ? summary : { ...summary,
     gross_profit_usd: goodsProfitUsd,
     gross_margin_pct: netRevenueUsd > 0 ? round2((goodsProfitUsd / netRevenueUsd) * 100) : 0,
     profit_excludes_delivery: true }

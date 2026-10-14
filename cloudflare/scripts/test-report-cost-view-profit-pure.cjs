@@ -1,5 +1,6 @@
 'use strict'
-// AL finding L4 (13 Oct 2026): a non-admin cost viewer must not be able to
+// AL finding L4 (13 Oct 2026): a cost viewer without the courier-cost permission
+// (sales:view_courier_cost, lib/courierCostAccess.ts) must not be able to
 // recover the courier's actual cost. Dropping the courier-cost keys is not
 // enough -- the kernel's profit is revenue - cost + fees - courier cost, so
 // with revenue, cost and fees public the cost falls out by subtraction. The
@@ -77,19 +78,19 @@ const reports = read('src/routes/reports.ts')
 const sales = read('src/routes/sales.ts')
 const compat = read('src/routes/compat.ts')
 check('reports.ts: gateTotals and the business-summary row gate route the cost view through costViewProfit', () => {
-  assert.match(reports, /if \(!isAdmin && canViewCosts\) \{[\s\S]{0,400}return costViewProfit\(gateTotals\(row, true, true, places\)\)/)
-  assert.match(reports, /export function gateBusinessSummarySaleRow\(row: Record<string, unknown>, isAdmin: boolean, canViewCosts = isAdmin\)/)
-  assert.match(reports, /if \(!isAdmin\) return costViewProfit\(adminRow\)/)
+  assert.match(reports, /if \(!isAdmin && canViewCosts && !canViewCourier\) \{[\s\S]{0,400}return costViewProfit\(gateTotals\(row, true, true, places\)\)/)
+  assert.match(reports, /export function gateBusinessSummarySaleRow\(row: Record<string, unknown>, isAdmin: boolean, canViewCosts = isAdmin, canViewCourier = isAdmin\)/)
+  assert.match(reports, /if \(!isAdmin && !canViewCourier\) return costViewProfit\(adminRow\)/)
   assert.equal((reports.match(/gateBusinessSummarySaleRow\(row, isAdmin, /g) || []).length, 2, 'the export and the paged list pass both authorities')
 })
 check('sales.ts: the strip, daily report, day report, customer totals and the export summary use the cost view', () => {
   assert.match(sales, /if\(canViewCosts\)return costViewProfit\(row\)/)
-  assert.match(sales, /const summaryView = exportIsAdmin \|\| !canViewAcquisitionCosts\(exportUser\) \? summary : \{ \.\.\.summary,\s+gross_profit_usd: goodsProfitUsd,/)
+  assert.match(sales, /const summaryView = canViewCourierCost\(exportUser\) \|\| !canViewAcquisitionCosts\(exportUser\) \? summary : \{ \.\.\.summary,\s+gross_profit_usd: goodsProfitUsd,/)
   assert.match(sales, /const goodsProfitUsd = round2\(netRevenueUsd - salesTotals\.cost_usd\)/)
   assert.match(sales, /period, summary: summaryView,/)
 })
 check('compat.ts: Dashboard period rows pass the same gate as its totals', () => {
-  assert.match(compat, /periodData: \(periodData \|\| \[\]\)\.map\(\(row\) => gateTotals\(row as unknown as Record<string, unknown>, isAdmin, canViewCosts, BUCKET_MONEY_PLACES\)\)/)
+  assert.match(compat, /periodData: \(periodData \|\| \[\]\)\.map\(\(row\) => gateTotals\(row as unknown as Record<string, unknown>, isAdmin, canViewCosts, BUCKET_MONEY_PLACES, canViewCourier\)\)/)
 })
 
 console.log(`\nALL ${passed} CHECKS PASSED (cost viewer receives goods profit; the courier cost is not recoverable)`)

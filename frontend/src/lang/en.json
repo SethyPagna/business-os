@@ -6101,6 +6101,7 @@
   "perm_act_sales_import": "Import sales",
   "perm_act_sales_status": "Change or cancel sale status",
   "perm_act_sales_bulk": "Change multiple sales at once",
+  "perm_act_sales_view_courier_cost": "View actual delivery cost",
   "price_variant_received": "Price variant received",
   "product_created_continue_stockin": "Product created. Continue adding it to this stock-in session.",
   "product_creation_pending_review": "Product creation is pending review and cannot be added to this stock-in session yet.",

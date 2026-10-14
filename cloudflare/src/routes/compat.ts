@@ -7,13 +7,13 @@ import { getSystemJob, listCloudflareBackups, listSystemJobs, storeSystemJob } f
 import { buildDriveOauthStartUrl, completeDriveOauth, consumeDriveOauthState, disconnectDrive, driveSyncStatus, updateDrivePreferences } from '../lib/googleDrive'
 import { enqueueDriveRestoreStageJob, enqueueDriveSyncJob } from '../lib/driveSyncQueue'
 import { canAuthorizeDriveSync } from '../lib/driveSyncAuthority'
-import { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier } from '../lib/permissions'
+import { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, type PermissionUser } from '../lib/permissions'
 import { resolvePlanTier } from '../lib/planTier'
 import { readAllQuotas } from '../lib/quotaGuard'
 import { audit, buildAuditLogRetentionDeleteSql } from '../lib/audit'
 import { decodeAuditCursor } from '../lib/auditLogQuery'
 import { readAuditLogPage } from '../lib/auditLogPage'
-import { redactAuditRows } from '../lib/courierCostAccess'
+import { canViewCourierCost, redactAuditRows } from '../lib/courierCostAccess'
 import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
 import { BUCKET_MONEY_PLACES, applyLiveProductNames, dashboardInsightRows, getSalesTotals, getSalesTotalsAndPeriodSeries, reportCustomerNameExpr, previousPeriodFilters, shiftWindowBound, shiftWindowWhere } from '../lib/salesAnalytics'
@@ -307,7 +307,10 @@ async function dashboardSummary(env: Env, query: Record<string, string>, overvie
   }
 }
 
-async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdmin: boolean, canViewCosts = isAdmin) {
+async function dashboardAnalytics(env: Env, query: Record<string, string>, user: PermissionUser) {
+  const isAdmin = isAdminControlUser(user)
+  const canViewCosts = canViewAcquisitionCosts(user)
+  const canViewCourier = canViewCourierCost(user)
   const db = getDb(env)
   const range = dateRange(query)
   const { startDate, endDate, granularity, createdFrom, createdTo } = range
@@ -365,14 +368,14 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdm
     // 2026: this endpoint previously ran its own five-key strip and left
     // cost_usd / profit_usd ungated, so a non-admin dashboard permission
     // still saw COGS and profit).
-    totals: gateTotals((totals || {}) as unknown as Record<string, unknown>, isAdmin, canViewCosts),
-    prevTotals: gateTotals((prevTotals || {}) as unknown as Record<string, unknown>, isAdmin, canViewCosts),
+    totals: gateTotals((totals || {}) as unknown as Record<string, unknown>, isAdmin, canViewCosts, 2, canViewCourier),
+    prevTotals: gateTotals((prevTotals || {}) as unknown as Record<string, unknown>, isAdmin, canViewCosts, 2, canViewCourier),
     periodReturns: periodReturns || {},
     periodSupplierReturns: periodSupplierReturns || {},
     // The period rows are the same money as the totals above, so they pass
     // the same gate (AL finding L4: they used to reach every dashboard caller
     // with cost, profit and the courier cost intact). 4-place bucket rows.
-    periodData: (periodData || []).map((row) => gateTotals(row as unknown as Record<string, unknown>, isAdmin, canViewCosts, BUCKET_MONEY_PLACES)),
+    periodData: (periodData || []).map((row) => gateTotals(row as unknown as Record<string, unknown>, isAdmin, canViewCosts, BUCKET_MONEY_PLACES, canViewCourier)),
     byPayment: byPayment || [],
     byBranch: byBranch || [],
     topProducts: topProducts || [],
@@ -483,7 +486,7 @@ app.get('/analytics', async (c) => {
   if (denied) return denied
   const rangeError = dashboardRangeError(c.req.query())
   if (rangeError) return c.json({ error: rangeError }, 400)
-  return c.json(await dashboardAnalytics(c.env, c.req.query(), isAdminControlUser(c.get('user')), canViewAcquisitionCosts(c.get('user'))))
+  return c.json(await dashboardAnalytics(c.env, c.req.query(), c.get('user')))
 })
 app.get('/dashboard/insight-list', async (c) => {
   const denied = denyUnless(c, 'dashboard')
@@ -504,7 +507,7 @@ app.get('/dashboard/startup', async (c) => {
   if (rangeError) return c.json({ error: rangeError }, 400)
   const [summary, analytics] = await Promise.all([
     dashboardSummary(c.env, c.req.query(), dashboardOverviewContext(c)),
-    dashboardAnalytics(c.env, c.req.query(), isAdminControlUser(c.get('user')), canViewAcquisitionCosts(c.get('user'))),
+    dashboardAnalytics(c.env, c.req.query(), c.get('user')),
   ])
   return c.json({ summary, analytics })
 })
@@ -569,7 +572,7 @@ app.get('/system/audit-logs', requireAuth, async (c) => {
       pageSize: c.req.query('pageSize'),
       counts: c.req.query('counts'),
     })
-    // The courier's actual cost is administrator-only here as everywhere else.
+    // The courier's actual cost leaves here by the same permission as everywhere else.
     return c.json({ ...page, items: redactAuditRows(page.items, user) })
   } catch (error) {
     if (error instanceof RangeError) return c.json({ error: error.message }, 400)

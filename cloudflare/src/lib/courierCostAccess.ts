@@ -7,14 +7,15 @@ import type { SaleRecord } from './saleRecords'
 // and courier keys on purpose, so fees (revenue) are never hidden; this module is the
 // gate for the cost itself.
 
-/** A sale's history (Records, amendment ledger, audit log) shows the cost to administrators only, like every report. */
+/**
+ * The one gate for the courier's actual cost, on every read and write response that can carry it: a sale's
+ * rows and history, the reports, the dashboard. An administrator always passes. Anyone else needs a Sales
+ * grant and keeps it until the role editor ("View actual delivery cost") switches `sales:view_courier_cost` off, so a role saved before the
+ * row existed is decided without a migration, and a storefront or customer principal, which holds no Sales grant,
+ * never passes.
+ */
 export function canViewCourierCost(user: PermissionUser): boolean {
-  return isAdminControlUser(user)
-}
-
-/** A sale's current row also shows it to a full amender, who enters and corrects it. */
-export function canViewSaleCourierCost(user: PermissionUser): boolean {
-  return isAdminControlUser(user) || getActionTier(user, 'sales', 'amend') === 'full'
+  return isAdminControlUser(user) || getActionTier(user, 'sales', 'view_courier_cost') !== 'none'
 }
 
 /** The ledger kind whose whole content is the courier cost. */
@@ -136,7 +137,7 @@ const SERIALIZED_COLUMN = /(?:_json|^details|^old_value|^new_value)$/i
 
 /** Any response body for a caller who may not read a sale's cost: cost keys leave at every depth, JSON held in strings included. */
 export function projectCourierCostResponse(body: unknown, user: PermissionUser): unknown {
-  if (canViewSaleCourierCost(user)) return body
+  if (canViewCourierCost(user)) return body
   const project = (input: unknown, depth: number): unknown => {
     if (input === null || typeof input !== 'object') return input
     if (depth > MAX_STRIP_DEPTH) return null

@@ -1,8 +1,9 @@
 'use strict'
-// The courier's actual cost is administrator-only on the sale's own history
-// (lib/courierCostAccess.ts): the Records trail and the amendment ledger. On the
-// sale's current row (the list, and every write response that returns the sale's
-// canonical snapshot) it is shown to an administrator and a full amender.
+// The courier's actual cost sits behind one permission (sales:view_courier_cost, lib/courierCostAccess.ts):
+// on for an administrator and for every role that holds Sales until the role editor switches it off, absent
+// for a caller with no Sales grant. It gates the sale's own history (the Records trail and the amendment
+// ledger), the audit log, and the sale's current row (the list, and every write response that returns the
+// sale's canonical snapshot). Amending a sale is not a way to it.
 //
 // The records are built by the REAL builder (lib/saleRecords.ts), so a change to
 // the summary wording or to the change-field names that the redaction relies on
@@ -39,9 +40,13 @@ const check = (name, fn) => { fn(); passed += 1; console.log(`PASS ${name}`) }
 
 const ADMIN = { role_code: 'admin', role_permissions: '{}' }
 const ALL_GRANT = { role_code: 'employee', role_permissions: '{"all":true}' }
-const COST_VIEWER = { role_code: 'employee', role_permissions: '{"sales":"view","reports":true,"product_cost_view":true}' }
-const AMENDER = { role_code: 'employee', role_permissions: '{"sales":true,"product_cost_view":true}' }
-const PLAIN = { role_code: 'employee', role_permissions: '{"sales":"view","reports":true}' }
+const OFF = '"sales:view_courier_cost":false'
+const COST_VIEWER = { role_code: 'employee', role_permissions: `{"sales":"view","reports":true,"product_cost_view":true,${OFF}}` }
+const AMENDER = { role_code: 'employee', role_permissions: `{"sales":true,"sales:amend":true,"product_cost_view":true,${OFF}}` }
+const PLAIN = { role_code: 'employee', role_permissions: `{"sales":"view","reports":true,${OFF}}` }
+const DEFAULT_VIEWER = { role_code: 'employee', role_permissions: '{"sales":"view","reports":true}' }
+const DEFAULT_STAFF = { role_code: 'employee', role_permissions: '{"sales":true,"sales:amend":false}' }
+const DEFAULT_AMENDER = { role_code: 'employee', role_permissions: '{"sales":true,"sales:amend":true}' }
 
 // Every place a figure can hide: a number, a key, and text.
 const HIDDEN = [0.83, 1.37, 0.54, 1.91]
@@ -67,13 +72,23 @@ const leaks = (value) => {
 }
 
 // ---- the gate ----------------------------------------------------------------
-check('gate: an administrator and an all-grant may read the courier cost; no one else', () => {
-  assert.equal(access.canViewCourierCost(ADMIN), true)
-  assert.equal(access.canViewCourierCost(ALL_GRANT), true)
-  assert.equal(access.canViewCourierCost(COST_VIEWER), false, 'a cost-view grant is not the administrator gate')
-  assert.equal(access.canViewCourierCost(AMENDER), false)
+check('gate: an administrator, an all-grant and every Sales role (until switched off) may read the courier cost', () => {
+  for (const [name, user] of [['administrator', ADMIN], ['all-grant', ALL_GRANT], ['Sales view tier', DEFAULT_VIEWER],
+    ['Sales full, no amend', DEFAULT_STAFF], ['Sales full with amend', DEFAULT_AMENDER]]) {
+    assert.equal(access.canViewCourierCost(user), true, name)
+  }
+})
+check('gate: the switch, a missing Sales grant and a non-staff principal close it; a cost grant or amend never opens it', () => {
+  assert.equal(access.canViewCourierCost(COST_VIEWER), false, 'a cost-view grant is not the courier permission')
+  assert.equal(access.canViewCourierCost(AMENDER), false, 'amending a sale is not the courier permission')
   assert.equal(access.canViewCourierCost(PLAIN), false)
+  assert.equal(access.canViewCourierCost({ role_code: 'employee', role_permissions: '{"reports":true,"dashboard":true,"product_cost_view":true}' }), false, 'no Sales grant')
+  assert.equal(access.canViewCourierCost({ role_code: 'customer', role_permissions: '{}' }), false, 'a storefront or customer principal holds no Sales grant')
   assert.equal(access.canViewCourierCost(null), false)
+  assert.equal(access.canViewCourierCost({ role_code: 'employee', role_permissions: '{"sales":false,"sales:view_courier_cost":true}' }), false, 'an override can only remove: it never grants past a missing tier')
+  assert.equal(access.canViewCourierCost({ role_code: 'employee', role_permissions: '{"sales":true,"sales:view_courier_cost":"no"}' }), true, 'only an explicit false switches it off')
+  assert.equal(access.canViewCourierCost({ role_code: 'admin', role_permissions: `{${OFF}}` }), true, 'an administrator is never narrowed')
+  assert.equal(access.canViewCourierCost({ role_code: 'employee', role_permissions: `{"sales":true,${OFF}}`, permissions: '{"sales:view_courier_cost":true}' }), true, 'a per-user value overrides the role, key by key')
 })
 
 // ---- the records, built by the real builder ----------------------------------------
@@ -112,15 +127,14 @@ check('control: the builder puts the courier cost in the summary, the change row
   assert.equal(created.after.value.actual_delivery_cost_usd, 0.83)
 })
 
-for (const [name, user] of [['cost viewer', COST_VIEWER], ['sales amender with the cost grant', AMENDER], ['plain reader', PLAIN]]) {
+for (const [name, user] of [['cost viewer', COST_VIEWER], ['sales amender with the cost grant, switched off', AMENDER], ['plain reader', PLAIN]]) {
   check(`${name}: no figure survives in the records, in any field or in the text`, () => {
     assert.deepEqual(leaks(access.redactSaleRecords(built, user)), [])
   })
 }
 
-check('administrator: the records are returned untouched (same objects)', () => {
-  assert.strictEqual(access.redactSaleRecords(built, ADMIN), built)
-  assert.strictEqual(access.redactSaleRecords(built, ALL_GRANT), built)
+check('administrator and a default Sales role: the records are returned untouched (same objects)', () => {
+  for (const user of [ADMIN, ALL_GRANT, DEFAULT_VIEWER, DEFAULT_STAFF, DEFAULT_AMENDER]) assert.strictEqual(access.redactSaleRecords(built, user), built)
 })
 
 check('a redacted trail keeps every record, kind, actor, time and the customer fee', () => {
@@ -175,14 +189,14 @@ check('control: the unredacted ledger shows the cost in the amounts and in the s
   assert.ok(leaks(ledger).length >= 5, `${leaks(ledger).length} sightings`)
 })
 
-for (const [name, user] of [['cost viewer', COST_VIEWER], ['plain reader', PLAIN], ['sales amender', AMENDER]]) {
+for (const [name, user] of [['cost viewer', COST_VIEWER], ['plain reader', PLAIN], ['sales amender, switched off', AMENDER]]) {
   check(`${name}: no amendment entry carries a figure, a key or a delta`, () => {
     assert.deepEqual(leaks(access.redactAmendmentEntries(ledger, user)), [])
   })
 }
 
-check('administrator: the ledger is returned untouched', () => {
-  assert.strictEqual(access.redactAmendmentEntries(ledger, ADMIN), ledger)
+check('administrator and a default Sales role: the ledger is returned untouched', () => {
+  for (const user of [ADMIN, DEFAULT_VIEWER, DEFAULT_STAFF, DEFAULT_AMENDER]) assert.strictEqual(access.redactAmendmentEntries(ledger, user), ledger)
 })
 
 check('a redacted ledger keeps every entry, the fee amounts and the totals, and marks only what it changed', () => {
@@ -225,8 +239,8 @@ for (const [name, user] of [['cost viewer', COST_VIEWER], ['plain reader', PLAIN
     assert.strictEqual(shown[3], auditRows[3], 'text that is not JSON is not rewritten')
   })
 }
-check('administrator: the audit rows are returned untouched', () => {
-  assert.strictEqual(access.redactAuditRows(auditRows, ADMIN), auditRows)
+check('administrator and a default Sales role: the audit rows are returned untouched', () => {
+  for (const user of [ADMIN, DEFAULT_VIEWER, DEFAULT_STAFF]) assert.strictEqual(access.redactAuditRows(auditRows, user), auditRows)
 })
 
 // ---- negative controls: the checks above must catch a plausible wrong gate ---------------
@@ -234,15 +248,27 @@ const mutate = (from, to) => {
   assert.equal(gateSource.split(from).length - 1, 1, `mutant anchor must occur once: ${from}`)
   return load('src/lib/courierCostAccess.ts', gateSource.replace(from, to))
 }
-const HISTORY_GATE = 'export function canViewCourierCost(user: PermissionUser): boolean {\n  return isAdminControlUser(user)'
-const wrongGate = { 'every caller': 'return true', 'cost grant opens it': 'return isAdminControlUser(user) || /product_cost_view/.test(String(user && user.role_permissions))' }
+const GATE_EXPRESSION = "return isAdminControlUser(user) || getActionTier(user, 'sales', 'view_courier_cost') !== 'none'"
+const wrongGate = {
+  'every caller': 'return true',
+  'cost grant opens it': 'return isAdminControlUser(user) || /product_cost_view/.test(String(user && user.role_permissions))',
+  'full amender opens it (the retired interim rule)': "return isAdminControlUser(user) || getActionTier(user, 'sales', 'amend') === 'full'",
+  'the switch is ignored': "return isAdminControlUser(user) || getActionTier(user, 'sales', 'view') !== 'none'",
+  'administrators only': 'return isAdminControlUser(user)',
+}
 for (const [name, body] of Object.entries(wrongGate)) {
-  check(`mutant (${name}): the cost viewer's records leak and this file notices`, () => {
-    const bad = mutate(HISTORY_GATE, HISTORY_GATE.replace('return isAdminControlUser(user)', body))
-    assert.notDeepEqual(leaks(bad.redactSaleRecords(built, COST_VIEWER)), [])
-    assert.notDeepEqual(leaks(bad.redactAmendmentEntries(ledger, COST_VIEWER)), [])
+  check(`mutant (${name}): the gate verdicts differ from the rule and this file notices`, () => {
+    const bad = mutate(GATE_EXPRESSION, body)
+    const verdicts = [ADMIN, DEFAULT_VIEWER, DEFAULT_STAFF, DEFAULT_AMENDER, COST_VIEWER, AMENDER, PLAIN].map((user) => bad.canViewCourierCost(user))
+    const rule = [ADMIN, DEFAULT_VIEWER, DEFAULT_STAFF, DEFAULT_AMENDER, COST_VIEWER, AMENDER, PLAIN].map((user) => access.canViewCourierCost(user))
+    assert.notDeepEqual(verdicts, rule)
   })
 }
+check('mutant (every caller): the cost viewer\'s records leak and this file notices', () => {
+  const bad = mutate(GATE_EXPRESSION, 'return true')
+  assert.notDeepEqual(leaks(bad.redactSaleRecords(built, COST_VIEWER)), [])
+  assert.notDeepEqual(leaks(bad.redactAmendmentEntries(ledger, COST_VIEWER)), [])
+})
 check('mutant (summary text kept): the amounts in the summary are caught', () => {
   const bad = mutate("record.summary.replace(COURIER_COST_SUMMARY, '$1 changed')", 'record.summary')
   assert.ok(leaks(bad.redactSaleRecords(built, PLAIN)).some((hit) => hit.includes('summary')))
@@ -262,7 +288,7 @@ const saleSnapshot = () => ({
   sale: { id: 7, delivery_fee_usd: 2, delivery_actual_cost_usd: 1.37, delivery_actual_cost_khr: 5480, items: [{ id: 1, total_usd: 10, cost_price_usd: 4 }],
     snapshot_json: JSON.stringify({ delivery: { delivery_fee_usd: 2, actual_delivery_cost_usd: 0.83 } }) },
 })
-for (const [who, user] of [['a plain reader', PLAIN], ['a cost viewer', COST_VIEWER]]) {
+for (const [who, user] of [['a plain reader', PLAIN], ['a cost viewer', COST_VIEWER], ['a full amender with the permission off', AMENDER]]) {
   check(`${who} gets a write response without the cost keys, camelCase and snake_case, at any depth and inside JSON strings`, () => {
     const out = access.projectCourierCostResponse(saleSnapshot(), user)
     assert.deepEqual(leaks(out), [])
@@ -271,7 +297,7 @@ for (const [who, user] of [['a plain reader', PLAIN], ['a cost viewer', COST_VIE
     assert.equal(out.id, 7)
   })
 }
-for (const [who, user] of [['an administrator', ADMIN], ['a full amender', AMENDER]]) {
+for (const [who, user] of [['an administrator', ADMIN], ['a default Sales role', DEFAULT_STAFF], ['a full amender with the permission on', DEFAULT_AMENDER]]) {
   check(`control: ${who} gets the write response untouched`, () => {
     const body = saleSnapshot()
     assert.equal(access.projectCourierCostResponse(body, user), body)
@@ -290,7 +316,7 @@ check('past the depth cap a records snapshot is dropped, not passed through', ()
   assert.deepEqual(leaks(access.redactSaleRecords([deepRecord()], PLAIN)), [])
 })
 check('mutant (gate removed): the administrator no longer gets the write response untouched and this file notices', () => {
-  const bad = mutate('  if (canViewSaleCourierCost(user)) return body\n', '')
+  const bad = mutate('  if (canViewCourierCost(user)) return body\n', '')
   const body = saleSnapshot()
   assert.notEqual(bad.projectCourierCostResponse(body, ADMIN), body)
 })
