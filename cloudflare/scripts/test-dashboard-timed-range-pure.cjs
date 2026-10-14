@@ -31,13 +31,13 @@ function load(file) {
     if (name === '../lib/salesAnalytics') {
       const real = load(path.join(root, 'lib/salesAnalytics.ts'))
       return { ...real,
-        getSalesTotalsAndPeriodSeries: async (env, filters, granularity) => {
+        getSalesTotalsAndPeriodSeries: async (env, filters, granularity, rankingLimit) => {
           filtersSeen.push({ kind: 'shared', ...filters })
-          return real.getSalesTotalsAndPeriodSeries(env, filters, granularity)
+          return real.getSalesTotalsAndPeriodSeries(env, filters, granularity, rankingLimit)
         },
-        getSalesTotals: async (env, filters) => {
+        getSalesTotalsWithoutLosses: async (env, filters) => {
           filtersSeen.push({ kind: 'previous', ...filters })
-          return real.getSalesTotals(env, filters)
+          return real.getSalesTotalsWithoutLosses(env, filters)
         },
       }
     }

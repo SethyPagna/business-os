@@ -17,7 +17,7 @@ function load(file) {
     if (name === '../lib/auth') return { requireAuth: async (c, next) => { c.set('user', user); return next() } }
     if (name === '../lib/db') return { getDb: () => { dbReads++; return { prepare: () => ({ get: async () => ({}), all: async () => [] }) } } }
     if (name === '../lib/salesAnalytics') return { ...load(path.join(root, 'lib/salesAnalytics.ts')),
-      getSalesTotals: async () => ({ ...data }), getBusinessSummaryPeriodRows: async () => [{ ...data }],
+      getSalesTotals: async () => ({ ...data }), getSalesTotalsWithoutLosses: async () => ({ ...data }), getBusinessSummaryPeriodRows: async () => [{ ...data }],
       getSalesTotalsAndPeriodSeries: async () => ({ totals: { ...data }, periodSeries: [] }),
       getProductSalesRanking: async () => [{ ...data }], getSalesGroupedTotals: async () => [{ ...data }],
       getProductSalesReport: async () => ({ rows: [{ ...data }], total_groups: 1, totals: { ...data } }),
@@ -34,29 +34,41 @@ function load(file) {
 const reports = load(path.join(root, 'routes/reports.ts'))
 const sales = load(path.join(root, 'routes/sales.ts'))
 const { canViewAcquisitionCosts } = load(path.join(root, 'lib/acquisitionCostAccess.ts'))
+const { canViewCourierCost } = load(path.join(root, 'lib/courierCostAccess.ts'))
 const app = new Hono()
 app.route('/reports', reports.default)
 app.route('/sales', sales.default)
 app.route('/compat', load(path.join(root, 'routes/compat.ts')).default)
 const actor = (permissions = {}, role_permissions = {}, role_code = 'manager') => ({ id: 7, username: 'employee', role_code, permissions: JSON.stringify({ ...(permissions.sales ? { dashboard: true } : {}), ...permissions }), role_permissions: JSON.stringify(role_permissions) })
 async function main() {
-  for (const [who, expectedCost, admin] of [
-    [actor({ sales: true }), false, false],
-    [actor({ sales: true, product_cost_view: true }), true, false],
-    [actor({ sales: true }, { product_cost_view: true }), true, false],
-    [actor({ sales: true, product_cost_view: false }, { product_cost_view: true }), false, false],
-    [actor({ sales: true, product_cost_edit: true }), false, false],
-    [actor({ product_cost_view: false }, {}, 'admin'), true, true],
+  // [actor, product costs, administrator, the courier's actual cost]. The courier cost is its own permission
+  // (sales:view_courier_cost): on for every Sales role until a role switches it off, independent of the cost grant.
+  const OFF = { 'sales:view_courier_cost': false }
+  for (const [who, expectedCost, admin, seesCourier] of [
+    [actor({ sales: true }), false, false, true],
+    [actor({ sales: true, product_cost_view: true }), true, false, true],
+    [actor({ sales: true }, { product_cost_view: true }), true, false, true],
+    [actor({ sales: true, product_cost_view: false }, { product_cost_view: true }), false, false, true],
+    [actor({ sales: true, product_cost_edit: true }), false, false, true],
+    [actor({ sales: true, ...OFF }), false, false, false],
+    [actor({ sales: true, product_cost_view: true, ...OFF }), true, false, false],
+    [actor({ sales: true }, OFF), false, false, false],
+    [actor({ sales: true, 'sales:view_courier_cost': true }, OFF), false, false, true], // a per-user value overrides the role's, key by key
+    [actor({ product_cost_view: false, ...OFF }, {}, 'admin'), true, true, true],
   ]) {
     user = who
     assert.equal(canViewAcquisitionCosts(user), expectedCost)
-    for (const gate of [reports.gateTotals, sales.gateSalesReportMoney]) {
-      const row = gate(data, admin, canViewAcquisitionCosts(user))
+    for (const row of [
+      reports.gateTotals(data, admin, canViewAcquisitionCosts(user), 2, canViewCourierCost(user)),
+      sales.gateSalesReportMoney(data, admin, canViewAcquisitionCosts(user), canViewCourierCost(user)),
+    ]) {
       assert.equal('cost_usd' in row, expectedCost)
       assert.equal('profit_usd' in row, expectedCost)
       assert.equal('revenue_after_losses_usd' in row, expectedCost)
-      assert.equal('delivery_actual_cost_usd' in row, admin)
+      assert.equal('delivery_actual_cost_usd' in row, seesCourier)
+      assert.equal('delivery_margin_usd' in row, seesCourier)
     }
+    assert.equal(canViewCourierCost(user), seesCourier)
     for (const url of ['/reports/overview', '/reports/periods?granularity=day', '/reports/grouped?by=branch', '/reports/grouped?by=product', '/reports/business-summary/sales', '/compat/analytics']) {
       const response = await app.request(url)
       assert.equal(response.status, 200, url)
@@ -64,10 +76,10 @@ async function main() {
       const row = body.sales?.totals || body.rows?.[0] || body.totals
       assert.ok(row, url)
       assert.equal('cost_usd' in row, expectedCost, url)
-      if (url !== '/reports/grouped?by=product' && url !== '/reports/business-summary/sales') assert.equal('delivery_actual_cost_usd' in row, admin, url)
+      if (url !== '/reports/grouped?by=product' && url !== '/reports/business-summary/sales') assert.equal('delivery_actual_cost_usd' in row, seesCourier, url)
     }
     const courier = await (await app.request('/reports/grouped?by=courier')).json()
-    assert.equal('actual_cost_usd' in courier.rows[0], admin)
+    assert.equal('actual_cost_usd' in courier.rows[0], seesCourier)
   }
   // Cost-view never grants the underlying report/dashboard action.
   user = actor({ product_cost_view: true })
@@ -77,7 +89,7 @@ async function main() {
     assert.equal(dbReads, 0, url)
   }
   const compat = fs.readFileSync(path.join(root, 'routes/compat.ts'), 'utf8')
-  assert.equal((compat.match(/dashboardAnalytics\(c.env, c.req.query\(\), isAdminControlUser\(c.get\('user'\)\), canViewAcquisitionCosts\(c.get\('user'\)\)\)/g) || []).length, 2)
+  assert.equal((compat.match(/dashboardAnalytics\(c.env, c.req.query\(\), c.get\('user'\), dashboardOverviewContext\(c\)\)/g) || []).length, 2)
   console.log('PASS explicit cost-view report grants, inherited grants, false overrides, edit-only denial, admins, delivery isolation, action authorization')
 }
 main().catch(e => { console.error(e); process.exitCode = 1 })

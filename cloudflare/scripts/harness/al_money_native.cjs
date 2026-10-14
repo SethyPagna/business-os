@@ -70,9 +70,30 @@ export default { ...worker, async fetch(request, env, ctx) {
 // so return id N could never be created (see AL-MONEY-REPRO.md, side finding
 // M; test-al-money-g-native.cjs pins it with floor 0). Production return and
 // sale ids live in different ranges, which the floor models.
-async function startWorker({ returnIdFloor = 100000 } = {}) {
+//
+// patches: [{ name, file: 'src/lib/x.ts', from, to }] rewrite SOURCE TEXT IN MEMORY
+// at bundle time (a negative control's mutant). Nothing on disk changes, and an
+// anchor that does not occur exactly once is a hard error, never a silent no-op.
+async function startWorker({ returnIdFloor = 100000, patches = [] } = {}) {
+  const applied = new Set()
+  const plugins = patches.length ? [{ name: 'al-source-patches', setup(b) {
+    b.onLoad({ filter: /[\\/]src[\\/].*\.ts$/ }, args => {
+      const here = path.relative(root, args.path).replaceAll('\\', '/')
+      const mine = patches.filter(p => p.file === here)
+      if (!mine.length) return undefined
+      let text = fs.readFileSync(args.path, 'utf8').replace(/\r\n/g, '\n')
+      for (const p of mine) {
+        if (p.whole !== undefined) { text = p.whole.replace(/\r\n/g, '\n'); applied.add(p.name); continue }
+        assert.equal(text.split(p.from).length - 1, 1, `patch anchor must occur exactly once in ${p.file}: ${p.from.slice(0, 80)}`)
+        text = text.replace(p.from, () => p.to)
+        applied.add(p.name)
+      }
+      return { contents: text, loader: 'ts' }
+    })
+  } }] : []
   const bundle = await build({ stdin: { contents: WRAPPER, resolveDir: root, loader: 'ts' }, bundle: true, write: false,
-    platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'], logLevel: 'silent' })
+    platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'], logLevel: 'silent', plugins })
+  for (const p of patches) assert.ok(applied.has(p.name), `patch ${p.name} was not applied`)
   const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-07-01',
     compatibilityFlags: ['nodejs_compat'], d1Databases: ['DB'], r2Buckets: ['ASSETS'], kvNamespaces: ['CACHE'],
     durableObjects: { BROADCAST_HUB: 'BroadcastHub', SYNC_UPLOADS: 'SyncUploadSession' },
@@ -144,7 +165,7 @@ async function startWorker({ returnIdFloor = 100000 } = {}) {
 // POST /api/sales the way the POS does: v1 money, captured pricing quote, and
 // the owner stamp. A first pricing-quote refusal is answered once with the
 // server's own quote (the till's review step); anything else is returned.
-async function createSale(h, { key, lines, status = 'completed', paymentDetails = null, createdAt, customerId, extra = {}, label }) {
+async function createSale(h, { key, lines, status = 'completed', paymentDetails = null, createdAt, customerId, extra = {}, label, cookie }) {
   const body = { branch_id: 1, money_precision_version: 1, sale_status: status, exchange_rate: 4000, payment_currency: 'USD',
     client_request_id: key, offline_owner: h.owner, ...(createdAt ? { created_at: createdAt } : {}),
     ...(customerId ? { customer_id: customerId } : {}),
@@ -158,14 +179,15 @@ async function createSale(h, { key, lines, status = 'completed', paymentDetails 
       // A caller that already knows the exact quote saves the review round trip.
       pricing_quote: line.quote || { gross_usd: 0, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 0, total_khr: 0 } })),
     ...extra }
-  let result = await h.call('POST', '/api/sales', body, label || `POST /api/sales ${key}`)
+  const options = cookie ? { cookie } : {}
+  let result = await h.call('POST', '/api/sales', body, label || `POST /api/sales ${key}`, options)
   if (result.status === 409 && result.body.code === 'sale_pricing_quote_conflict') {
     const quotes = new Map(result.body.pricing_quotes.map(quote => [quote.client_line_key, quote]))
     for (const item of body.items) {
       const { client_line_key: _key, ...amounts } = quotes.get(item.client_line_key)
       item.pricing_quote = Object.fromEntries(['gross_usd', 'product_discount_usd', 'manual_discount_usd', 'total_usd', 'total_khr'].map(name => [name, amounts[name]]))
     }
-    result = await h.call('POST', '/api/sales', body, label || `POST /api/sales ${key}`)
+    result = await h.call('POST', '/api/sales', body, label || `POST /api/sales ${key}`, options)
   }
   return result
 }
@@ -187,11 +209,11 @@ async function customerReturn(h, { key, saleId, lines, label }) {
 // POST /api/sales/:id/amendments with the till's two review answers: the
 // recalculated line quote and the exact header quote, each taken from the
 // server's own uncommitted refusal.
-async function amendSale(h, saleId, body, label) {
+async function amendSale(h, saleId, body, label, cookie) {
   const request = { money_precision_version: 1, expected_exchange_rate: 4000, ...body }
   let result
   for (let attempt = 0; attempt < 4; attempt++) {
-    result = await h.call('POST', `/api/sales/${saleId}/amendments`, request, label || `amend ${saleId} ${body.kind}`)
+    result = await h.call('POST', `/api/sales/${saleId}/amendments`, request, label || `amend ${saleId} ${body.kind}`, cookie ? { cookie } : {})
     if (result.status === 409 && result.body.code === 'sale_pricing_quote_conflict' && Array.isArray(result.body.pricing_quotes)) {
       const target = result.body.pricing_quotes.find(quote => quote.client_line_key === body.client_line_key) || result.body.pricing_quotes[0]
       request.pricing_quote = Object.fromEntries(['gross_usd', 'product_discount_usd', 'manual_discount_usd', 'total_usd', 'total_khr'].map(name => [name, target[name]]))
@@ -205,14 +227,14 @@ async function amendSale(h, saleId, body, label) {
 
 // POST /api/sales/:id/items (the Sales page "Add items"), with the same two
 // review answers taken from the server's own uncommitted refusals.
-async function addSaleItems(h, saleId, key, lines, label) {
+async function addSaleItems(h, saleId, key, lines, label, cookie) {
   const request = { money_precision_version: 1, expected_exchange_rate: 4000, client_request_id: key,
     items: lines.map((line, index) => ({ product_id: line.productId, quantity: line.quantity, branch_id: 1, batch_id: line.productId + 5000,
       client_line_key: `${key}-line-${index + 1}`, pricing_source: 'selling',
       pricing_quote: { gross_usd: 0, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 0, total_khr: 0 } })) }
   let result
   for (let attempt = 0; attempt < 4; attempt++) {
-    result = await h.call('POST', `/api/sales/${saleId}/items`, request, label || `add items ${saleId}`)
+    result = await h.call('POST', `/api/sales/${saleId}/items`, request, label || `add items ${saleId}`, cookie ? { cookie } : {})
     if (result.status === 409 && result.body.code === 'sale_pricing_quote_conflict' && Array.isArray(result.body.pricing_quotes)) {
       const quotes = new Map(result.body.pricing_quotes.map(quote => [quote.client_line_key, quote]))
       for (const item of request.items) {
@@ -303,5 +325,16 @@ async function importSale(h, rowNumber, status, lines, { paidUsd, jobId = 'al-im
   return { sale, items }
 }
 
-module.exports = { startWorker, setReturnIdFloor, fresh, recorder, budgetLine, seedProduct, createSale, customerReturn, amendSale, addSaleItems, bulkReturnStatus,
+// The Worker exactly as a commit had it, for a test's own "red on the base" run: every
+// src file that differs from `commit` is bundled from that commit instead (nothing on
+// disk changes). A file added since `commit` is simply not imported by the old code.
+function basePatches(commit) {
+  const { execFileSync } = require('node:child_process')
+  const repo = path.resolve(root, '..')
+  const git = (...args) => execFileSync('git', args, { cwd: repo, maxBuffer: 64 * 1024 * 1024 }).toString('utf8')
+  return git('diff', '--name-only', '--diff-filter=M', commit, '--', 'cloudflare/src').split('\n').filter(Boolean)
+    .map(name => ({ name: `base:${name}`, file: name.replace(/^cloudflare\//, ''), whole: git('show', `${commit}:${name}`) }))
+}
+
+module.exports = { basePatches, startWorker, setReturnIdFloor, fresh, recorder, budgetLine, seedProduct, createSale, customerReturn, amendSale, addSaleItems, bulkReturnStatus,
   historyStep, importSale, FREE_QUERY_LIMIT, PAID_QUERY_LIMIT }

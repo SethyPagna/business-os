@@ -72,6 +72,13 @@ export type AuditLogFilterInput = {
   endTime?: string
   order?: string
   cursor?: string
+  /**
+   * LIKE patterns for text this reader may not see (a cost figure). A row whose `details`, `old_value` or
+   * `new_value` matches any of them is not matched through those three columns, so the match / no-match of a
+   * typed figure cannot be used to read what the response redacts. The row is still found by its user, action,
+   * entity, device and ids.
+   */
+  hiddenTextPatterns?: readonly string[]
 }
 
 export type AuditLogFilterClause = {
@@ -197,6 +204,9 @@ function sectionClause(sections: AuditSection[], params: Record<string, string |
   return parts.length ? `(${parts.join(' OR ')})` : null
 }
 
+// The stored text columns a response may redact: a search that matched inside them would say whether a hidden figure occurs.
+const REDACTABLE_TEXT_COLUMNS = new Set(['details', 'old_value', 'new_value'])
+
 const SEARCH_COLUMNS = [
   'user_name', 'action', "REPLACE(action, '_', ' ')", 'entity', 'table_name', 'details',
   // The changed-field text: what a row recorded before and after.
@@ -284,9 +294,16 @@ export function buildAuditLogFilters(input: AuditLogFilterInput, omit: AuditLogF
     .map((word) => word.trim().slice(0, AUDIT_MAX_SEARCH_WORD_LENGTH))
     .filter(Boolean)
     .slice(0, AUDIT_MAX_SEARCH_WORDS)
+  const hiddenTextPatterns = searchWords.length ? input.hiddenTextPatterns ?? [] : []
+  hiddenTextPatterns.forEach((pattern, index) => { params[`hiddenText${index}`] = pattern })
+  const searchable = (column: string, term: string): string => {
+    const match = `${column} LIKE ${term} ESCAPE '\\'`
+    if (!REDACTABLE_TEXT_COLUMNS.has(column) || !hiddenTextPatterns.length) return match
+    return `(${match} AND ${hiddenTextPatterns.map((_, index) => `${column} NOT LIKE @hiddenText${index}`).join(' AND ')})`
+  }
   searchWords.forEach((word, index) => {
     params[`search${index}`] = `%${word.replace(/([\\%_])/g, '\\$1')}%`
-    clauses.push(`(${SEARCH_COLUMNS.map((column) => `${column} LIKE @search${index} ESCAPE '\\'`).join(' OR ')})`)
+    clauses.push(`(${SEARCH_COLUMNS.map((column) => searchable(column, `@search${index}`)).join(' OR ')})`)
   })
 
   if (cursor) {

@@ -95,8 +95,8 @@
 //   1. A figure inside a window is scoped by the SALE's business day (UTC+7).
 //      A refund and the cost it puts back on the shelf reverse the sale they
 //      belong to, in THAT sale's bucket -- never in the return's own bucket.
-//      (CUSTOMER_REFUND_JOIN carries no date filter of its own; returnedCostSql
-//      joins through `sales`.) A count of returns PROCESSED in a window is a
+//      (CUSTOMER_REFUND_JOIN carries no date filter of its own; the snapshot
+//      kernel reads a return through its sale.) A count of returns PROCESSED in a window is a
 //      legitimate but different question -- an ACTIVITY figure, scoped by the
 //      return's date -- and it may never be subtracted from a figure measured
 //      by this rule. Doing so subtracts the same refunds twice, on two
@@ -464,6 +464,13 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100
 }
 
+// A summed quantity leaves the kernel as the EXACT sum rounded to the nearest double: no float drift
+// (0.1 + 0.2 is 0.3, ten lines of 0.1 are 1) and no refusal when a stored quantity itself carries float noise.
+const QUANTITY_SUM_PLACES = 12
+function reportQuantity(sum: ReportExactDecimal): number {
+  return Number(sum.toText(QUANTITY_SUM_PLACES))
+}
+
 // ---- Canonical revenue = NET SALES (user directive, Sep 1 2026) ------------
 // One definition, used identically by every surface below so the Sales-page
 // header and the Reports kernel can never disagree:
@@ -565,13 +572,6 @@ export function collectedExpr(p: string): string {
 export function customerDeliveryFeeExpr(p: string): string {
   return `CASE WHEN COALESCE(${p}delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE COALESCE(${p}delivery_fee_usd, 0) END`
 }
-// The delivery fee the SHOP absorbed (customer not charged). Revenue FORGONE,
-// not cash paid out -- see correction (a) in the header. Reported because the
-// shop wants to see what it gives away; never subtracted from profit, because
-// the income figure already excludes it.
-function storeDeliveryExpr(p: string): string {
-  return `CASE WHEN COALESCE(${p}delivery_fee_paid_by, 'customer') = 'store' THEN COALESCE(${p}delivery_fee_usd, 0) ELSE 0 END`
-}
 // The courier money actually paid out, as recorded ON THE SALE. Cash out.
 //
 // The NOT EXISTS is the anti-double-count: a sale whose courier payment was
@@ -642,54 +642,6 @@ export function refundExcessExpr(p: string, rf: string): string {
 // so if the two ever disagree the books say one thing and the shelf another.
 // An explicit stock_action wins; absent, the historical return_to_stock boolean
 // keeps its meaning (default TRUE).
-// The sale-level revenue block, written ONCE.
-//
-// Every query that feeds deriveTotals must measure revenue on the same basis or
-// the trend chart stops summing back to the headline above it. They were four
-// separate copies and they had already diverged; interpolating one constant is
-// what makes "the Dashboard and the Sales page agree" a property of the code
-// rather than a thing someone re-checks.
-//
-// Every query using it selects FROM sales unaliased, which is why the prefix is
-// '' and the correlated cost lookup says sales.id.
-export const RECOGNIZED_LEVEL_COLUMNS = `
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS recognized_net_usd,
-             COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS pending_revenue_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN tax_usd ELSE 0 END), 0) AS recognized_tax_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${customerDeliveryFeeExpr('')} ELSE 0 END), 0) AS recognized_delivery_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${storeDeliveryExpr('')} ELSE 0 END), 0) AS recognized_store_delivery_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${deliveryActualCostExpr('sales.')} ELSE 0 END), 0) AS recognized_delivery_cost_usd,
-             COALESCE(SUM(CASE WHEN ${collectedSaleExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS collected_net_usd,
-             COALESCE(SUM(CASE WHEN ${collectedSaleExpr('')} THEN tax_usd ELSE 0 END), 0) AS collected_tax_usd,
-             COALESCE(SUM(CASE WHEN ${collectedSaleExpr('')} THEN ${customerDeliveryFeeExpr('')} ELSE 0 END), 0) AS collected_delivery_usd,
-             -- The refund on the NET basis revenue is measured on (see the
-             -- header); refund_paid_out_usd keeps the cash figure beside it.
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${netRefundExpr('', 'rf.')} ELSE 0 END), 0) AS refund_usd,
-             COALESCE(SUM(CASE WHEN ${collectedSaleExpr('')} THEN COALESCE(rf.refund_usd, 0) ELSE 0 END), 0) AS refund_paid_out_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN COALESCE(rf.refund_usd, 0) ELSE 0 END), 0) AS refund_charged_usd,
-             -- Money a refund could not take back out of the sale it belongs to
-             -- (netRefundExpr's cap, owner rule N6). Non-zero means a data
-             -- defect in the window -- a receipt refunded for more than it ever
-             -- recognised -- reported rather than absorbed.
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${refundExcessExpr('', 'rf.')} ELSE 0 END), 0) AS refund_excess_usd,
-             -- Recognized receipts whose header value was never recorded (see
-             -- valuedSaleExpr). They contribute 0 revenue and are held out of
-             -- COGS so profit stays a difference over one population; counted
-             -- here so the repair backlog is a number, not an absence.
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} AND NOT ${valuedSaleExpr('')} THEN 1 ELSE 0 END), 0) AS unvalued_tx_count,
-             -- The awaiting-payment cohort, split the same way (S4R3-6). Each
-             -- of these is the pending twin of a recognized column above.
-             -- Clause 4 of the scoping rule: this cohort is INSIDE
-             -- revenue_usd / cost_usd / profit_usd as well, so the pending
-             -- block is a subset that isolates the unpaid part -- never a
-             -- complement, and never added to the realised figures.
-             COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN 1 ELSE 0 END), 0) AS pending_tx_count,
-             COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN COALESCE(subtotal_usd, 0) ELSE 0 END), 0) AS pending_gross_sales_usd,
-             COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN COALESCE(discount_usd, 0) ELSE 0 END), 0) AS pending_store_discount_usd,
-             COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN COALESCE(membership_discount_usd, 0) ELSE 0 END), 0) AS pending_membership_discount_usd,
-             COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN ${customerDeliveryFeeExpr('')} ELSE 0 END), 0) AS pending_delivery_usd,
-             COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN ${deliveryActualCostExpr('sales.')} ELSE 0 END), 0) AS pending_delivery_cost_usd`
-
 export const RESTOCKED_RETURN_LINE = `CASE
     WHEN LOWER(TRIM(COALESCE(ri.stock_action, ''))) IN ('restock', 'damaged', 'none')
       THEN LOWER(TRIM(ri.stock_action)) = 'restock'
@@ -1345,7 +1297,19 @@ function reportV1RefundReversal(
   return { merchandise, tax }
 }
 
+// Every view of one snapshot (totals, period series, each grouping, the product split) walks the same per-sale
+// facts, which are the expensive part (exact decimals, return cohorts). They are derived once per snapshot and
+// shared; callers read them and never write to them.
+const SALE_FACTS = new WeakMap<SalesReportSnapshot, ReportSaleFacts[]>()
 function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
+  const known = SALE_FACTS.get(snapshot)
+  if (known) return known
+  const facts = deriveReportSaleFacts(snapshot)
+  SALE_FACTS.set(snapshot, facts)
+  return facts
+}
+
+function deriveReportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
   const items = new Map<number, ReportScalarRow[]>()
   for (const row of snapshot.items) { const id = Number(row.sale_id); items.set(id, [...(items.get(id) || []), row]) }
   const returns = new Map<number, ReportScalarRow[]>()
@@ -1563,7 +1527,7 @@ function exactReportTotals(bucket: ReportExactBucket, snapshot: SalesReportSnaps
     collected_total_usd: m.collected.toNumber(places),
     cost_usd: netCost.toNumber(places),
     profit_usd: profit.toNumber(places),
-    avg_order_usd: bucket.tx > 0 ? revenue.divide(ReportExactDecimal.recorded(String(bucket.tx))).toNumber() : 0,
+    avg_order_usd: bucket.tx > 0 ? revenue.divide(ReportExactDecimal.recorded(String(bucket.tx))).toNumber(places) : 0,
   }, diagnostic)
 }
 
@@ -1614,9 +1578,8 @@ export function businessSummarySalesRowsFromSnapshot(snapshot: SalesReportSnapsh
   })
 }
 
-// The item-level cost columns, written ONCE for the same reason
-// RECOGNIZED_LEVEL_COLUMNS is: four queries measure COGS and they have to
-// measure it identically. Each caller supplies its own bucket column and
+// The item-level cost columns, written ONCE so every query that measured
+// COGS measured it identically. Each caller supplies its own bucket column and
 // GROUP BY; these are the money columns. Aliased `si` (sale_items) joined to
 // `s` (sales).
 //
@@ -1641,48 +1604,6 @@ export const ITEM_COST_COLUMNS = `
 export const ITEM_COST_STATUS_CLAUSE = `(${recognizedExpr('s.')} OR ${awaitingExpr('s.')})`
 
 interface ItemCostRow { cost_usd: number; unvalued_cost_usd: number; missing_snapshot_lines: number; pending_cost_usd: number; item_discount_usd: number; pending_item_discount_usd: number }
-
-// Cost of the goods a return put BACK on the sellable shelf, over the same
-// window and the same recognized sales as salesCost. Scoped to non-cancelled
-// CUSTOMER returns, matching CUSTOMER_REFUND_JOIN exactly -- an internal
-// (supplier) return never touched a customer sale's revenue and must not touch
-// its cost either.
-//
-// Joined through the sale, not the return's own date: a return that lands in a
-// later month reverses the cost in the month the sale was booked, which is what
-// keeps revenue and cost a matched pair inside every bucket. The refund is
-// attributed to the sale's bucket for the same reason.
-//
-// Gated on recognizedValuedExpr, exactly like the cost it reverses: a return
-// against an unvalued receipt cannot take back a cost that was never counted.
-// `bucketExpr` is any expression over the sale (aliased s) -- a local day, a
-// customer key -- or null for the whole window in one row. It has to be the
-// SAME expression the cost query buckets by, or a return lands in a different
-// row from the sale whose cost it reverses.
-function returnedCostSql(bucketExpr: string | null, whereSql: string): string {
-  return `
-    SELECT ${bucketExpr ? `${bucketExpr} AS bucket,` : `'' AS bucket,`}
-           COALESCE(SUM(CASE WHEN ${RESTOCKED_RETURN_LINE} THEN ri.cost_price_usd * ri.quantity ELSE 0 END), 0) AS returned_cost_usd
-    FROM return_items ri
-    JOIN returns r ON r.id = ri.return_id
-    JOIN sales s ON s.id = r.sale_id
-    WHERE ${whereSql}
-      AND ${recognizedValuedExpr('s.')}
-      AND COALESCE(r.status, 'completed') <> 'cancelled'
-      AND COALESCE(r.return_scope, 'customer') = 'customer'
-    ${bucketExpr ? 'GROUP BY bucket' : ''}
-  `
-}
-
-// Same aggregate, bucketed. Returns a Map keyed the way the caller's cost query
-// is keyed, so a missing bucket is simply zero reversal.
-async function returnedCostByBucket(env: Env, f: SalesFilters, bucketExpr: string): Promise<Map<string, number>> {
-  const db = getDb(env)
-  const { sql: whereSql, params } = whereActiveSales('s', f)
-  const rows = await db.prepare(returnedCostSql(bucketExpr, whereSql))
-    .all<{ bucket: string | number | null; returned_cost_usd: number }>(params)
-  return new Map((rows || []).map((r) => [r.bucket == null ? '' : String(r.bucket), num(r.returned_cost_usd)]))
-}
 
 /**
  * Receipts VOIDED in the window, bucketed the same way everything else is.
@@ -1823,9 +1744,9 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
   // reversal can never manufacture profit.
   //
   // CORRECTED Sep 6 2026. The floor's stated reason was "a return against a
-  // sale outside the range" -- which cannot happen: returnedCostSql joins
-  // `JOIN sales s ON s.id = r.sale_id` under the same whereActiveSales window,
-  // so a return only ever reverses cost in its own sale's bucket. The reachable
+  // sale outside the range" -- which cannot happen: a return is read through
+  // its own sale (the retired returnedCostSql joined `JOIN sales s ON s.id = r.sale_id`;
+  // the snapshot kernel does the same), so a return only ever reverses cost in its own sale's bucket. The reachable
   // cause is the opposite one: a SOLD line with a NULL cost_price_usd snapshot
   // contributes $0 to costUsd while the return_items row for the same goods
   // carries a real cost. The floor then silently absorbed the difference and
@@ -1915,6 +1836,11 @@ function unionBuckets(levelKeys: Iterable<string>, cancelled: Map<string, number
  *  falls back to the gross-minus-discount basis and reports a phantom. */
 const VOID_ONLY_LEVEL: Record<string, number> = { tx_count: 0, recognized_net_usd: 0 }
 
+/** The totals of one verified window without the removal-loss block, for a comparison that reads revenue and sale count only. */
+export async function getSalesTotalsWithoutLosses(env: Env, f: SalesFilters): Promise<SalesTotals> {
+  return salesTotalsFromSnapshot(await readSalesReportSnapshot(env, f))
+}
+
 export async function getSalesTotals(env: Env, f: SalesFilters): Promise<SalesTotals> {
   const [snapshot, loss] = await Promise.all([
     readSalesReportSnapshot(env, f),
@@ -1974,7 +1900,8 @@ export async function getSalesTotalsAndPeriodSeries(
   env: Env,
   f: SalesFilters,
   granularity: 'day' | 'week' | 'month',
-): Promise<{ totals: SalesTotals; periodSeries: SalesPeriodRow[] }> {
+  rankingLimit = DASHBOARD_TOP_ROWS,
+): Promise<{ totals: SalesTotals; periodSeries: SalesPeriodRow[]; byPayment: DashboardPaymentRow[]; byBranch: DashboardBranchRow[] } & DashboardRankings> {
   const [snapshot, loss] = await Promise.all([
     readSalesReportSnapshot(env, f),
     removalLossesFor(env, f),
@@ -1982,7 +1909,216 @@ export async function getSalesTotalsAndPeriodSeries(
   return {
     totals: withRemovalLosses(salesTotalsFromSnapshot(snapshot), loss),
     periodSeries: salesPeriodRowsFromSnapshot(snapshot, granularity),
+    ...dashboardSplitsFromSnapshot(snapshot),
+    ...dashboardRankingsFromSnapshot(snapshot, rankingLimit),
   }
+}
+
+// The Dashboard's payment-method and branch cards read the SAME snapshot and the SAME grouped buckets as
+// Reports (rounding adjustment included), at 4 places: split rows carry 4 decimals, a single headline keeps cents.
+export interface DashboardPaymentRow { method: string; payment_method: string; count: number; revenue_usd: number }
+export interface DashboardBranchRow { branch_id: number | null; branch_name: string; tx_count: number; count: number; revenue_usd: number }
+
+function revenueFirst(a: SalesGroupedRow, b: SalesGroupedRow): number {
+  return b.revenue_usd - a.revenue_usd || b.tx_count - a.tx_count || a.label.localeCompare(b.label)
+}
+
+export function dashboardSplitsFromSnapshot(snapshot: SalesReportSnapshot): { byPayment: DashboardPaymentRow[]; byBranch: DashboardBranchRow[] } {
+  // A group that only ever held voided sales has no revenue and no count to show.
+  const live = (groupBy: SalesGroupKey) => groupedRowsFromSnapshot(snapshot, groupBy).filter((row) => row.tx_count > 0).sort(revenueFirst)
+  return {
+    byPayment: live('payment_method').map((row) => ({
+      method: row.label || 'Unknown', payment_method: row.label || 'Unknown', count: row.tx_count, revenue_usd: row.revenue_usd,
+    })),
+    byBranch: live('branch').map((row) => ({
+      branch_id: row.entity_id, branch_name: row.label || 'Unassigned', tx_count: row.tx_count, count: row.tx_count, revenue_usd: row.revenue_usd,
+    })),
+  }
+}
+
+// The Dashboard's other four rankings -- top customers, busy hours, top products by revenue and by quantity --
+// and their "view more" lists read the SAME verified snapshot and the SAME buckets as Reports, at 4 places, so a
+// ranked row is the Reports row of the same key and the rows add up to the window revenue.
+export interface DashboardCustomerRow {
+  customer_name: string; sale_count: number; gross_revenue_usd: number
+  store_discount_usd: number; membership_discount_usd: number; total_refund_usd: number; net_revenue_usd: number
+}
+export interface DashboardHourRow { hour: number; count: number; revenue_usd: number }
+export interface DashboardProductRow { product_id: number | null; product_name: string; qty_sold: number; revenue_usd: number }
+export interface DashboardRankings {
+  topCustomers: DashboardCustomerRow[]
+  hourlyDist: DashboardHourRow[]
+  topProducts: DashboardProductRow[]
+  topProductsQty: DashboardProductRow[]
+}
+export const DASHBOARD_TOP_ROWS = 20
+
+export type DashboardRankKind = 'top_customers' | 'top_products' | 'top_products_qty'
+
+function customerRanking(snapshot: SalesReportSnapshot, limit: number): DashboardCustomerRow[] {
+  return groupedRowsFromSnapshot(snapshot, 'customer').filter((row) => row.tx_count > 0).sort(revenueFirst).slice(0, limit)
+    .map((row) => ({
+      customer_name: row.label, sale_count: row.tx_count, gross_revenue_usd: row.gross_sales_usd,
+      store_discount_usd: row.store_discount_usd, membership_discount_usd: row.membership_discount_usd,
+      total_refund_usd: row.refund_usd, net_revenue_usd: row.revenue_usd,
+    }))
+}
+
+function productRanking(groups: ProductRevenueGroup[], kind: 'top_products' | 'top_products_qty', limit: number): DashboardProductRow[] {
+  return [...groups].sort(kind === 'top_products' ? byProductRevenue : byProductQty).slice(0, limit).map((group) => ({
+    product_id: group.id, product_name: group.name, qty_sold: group.qty.toNumber(2), revenue_usd: group.units / MONEY_UNITS,
+  }))
+}
+
+/** Pure: the four rankings of one verified snapshot. Product names are the sale lines' own; applyLiveProductNames swaps in the current ones. */
+export function dashboardRankingsFromSnapshot(snapshot: SalesReportSnapshot, limit = DASHBOARD_TOP_ROWS): DashboardRankings {
+  const hourlyDist = groupedRowsFromSnapshot(snapshot, 'hour').filter((row) => row.tx_count > 0)
+    .map((row) => ({ hour: Number(row.key), count: row.tx_count, revenue_usd: row.revenue_usd })).sort((a, b) => a.hour - b.hour)
+  const { groups } = productRevenueGroups(snapshot)
+  return {
+    topCustomers: customerRanking(snapshot, limit), hourlyDist,
+    topProducts: productRanking(groups, 'top_products', limit), topProductsQty: productRanking(groups, 'top_products_qty', limit),
+  }
+}
+
+/** Pure: ONE ranking of a verified snapshot, the rows the card of the same kind keeps, without building the other three. */
+export function dashboardRankingFromSnapshot(snapshot: SalesReportSnapshot, kind: DashboardRankKind, limit: number): Array<DashboardCustomerRow | DashboardProductRow> {
+  return kind === 'top_customers' ? customerRanking(snapshot, limit) : productRanking(productRevenueGroups(snapshot).groups, kind, limit)
+}
+
+/** The product rows under their CURRENT names (a renamed or merged product shows its current name; the sale line's name is the fallback). One lookup for every list given. */
+export async function applyLiveProductNames<T extends { product_id: number | null; product_name: string }>(env: Env, lists: T[][]): Promise<T[][]> {
+  const ids = [...new Set(lists.flat().map((row) => row.product_id).filter((id): id is number => id != null))]
+  if (!ids.length) return lists
+  const live = await liveProductNames(env, ids)
+  return lists.map((list) => list.map((row) => ({ ...row, product_name: (row.product_id != null && live.get(row.product_id)) || row.product_name })))
+}
+
+/** The Dashboard "view more" list of one ranking: the same snapshot, the same buckets, just more rows than the card keeps. Product names are the sale lines' own (see applyLiveProductNames). */
+export async function dashboardRankingRows(
+  env: Env, f: SalesFilters, kind: DashboardRankKind, limit: number,
+): Promise<Array<DashboardCustomerRow | DashboardProductRow>> {
+  return dashboardRankingFromSnapshot(await readSalesReportSnapshot(env, f), kind, limit)
+}
+
+// The Sales export preview's two splits, by the same rule as the Dashboard cards above: the export's own verified
+// snapshot, each sale at the kernel's revenue, at 4 places, so the rows add up to the window revenue exactly;
+// only the single headline stays in cents.
+export interface ExportStatusRow { status: string; count: number; revenue: number }
+export interface ExportProductRow { product_id: number | null; product_name: string; qty_sold: number; revenue_usd: number }
+
+export function exportStatusSplitFromSnapshot(snapshot: SalesReportSnapshot): ExportStatusRow[] {
+  return [...aggregateReportSnapshot(snapshot, (sale) => reportStatus(sale)).entries()].map(([status, bucket]) => ({
+    status,
+    // Voided sales keep their count and a zero revenue.
+    count: bucket.tx + bucket.cancelledTx,
+    revenue: exactReportTotals(bucket, snapshot, BUCKET_MONEY_PLACES).revenue_usd,
+  })).sort((a, b) => b.revenue - a.revenue || a.status.localeCompare(b.status))
+}
+
+const MONEY_UNITS = 10 ** BUCKET_MONEY_PLACES
+const EXPORT_PRODUCT_ROWS = 99
+const toUnits = (value: ReportExactDecimal): number => Math.round(value.toNumber(BUCKET_MONEY_PLACES) * MONEY_UNITS)
+
+/** `total` units split across `weights` with no unit lost or invented (largest remainder, ties to the earlier line); null when no weight can carry it. */
+function allocateUnits(total: number, weights: number[]): number[] | null {
+  const sum = weights.reduce((acc, weight) => acc + weight, 0)
+  if (!(sum > 0)) return null
+  const abs = Math.abs(total)
+  const raw = weights.map((weight) => (abs * weight) / sum)
+  const parts = raw.map((value) => Math.floor(value))
+  const left = abs - parts.reduce((acc, part) => acc + part, 0)
+  const order = raw.map((value, index) => ({ index, rest: value - Math.floor(value) })).sort((a, b) => b.rest - a.rest || a.index - b.index)
+  for (let i = 0; i < left; i += 1) parts[order[i % order.length].index] += 1
+  return parts.map((part) => (total < 0 ? -part : part))
+}
+
+type ProductRevenueGroup = { key: string; id: number | null; name: string; qty: ReportExactDecimal; units: number }
+
+/**
+ * Revenue and quantity per product over the recognized sales of the snapshot.
+ * Each sale's revenue (net + rounding adjustment - refund, the kernel's one
+ * definition) is split across that sale's product lines by their share of the
+ * line value. A sale with no line value cannot be split: its revenue comes back
+ * as `unallocated`, its quantities still count. The export preview and the
+ * Dashboard's top-product lists both read this, so they cannot disagree.
+ */
+function productRevenueGroups(snapshot: SalesReportSnapshot): { groups: ProductRevenueGroup[]; unallocated: number } {
+  const itemsBySale = new Map<number, ReportScalarRow[]>()
+  for (const item of snapshot.items) { const id = Number(item.sale_id); itemsBySale.set(id, [...(itemsBySale.get(id) || []), item]) }
+  const groups = new Map<string, ProductRevenueGroup>()
+  let unallocated = 0
+  for (const fact of reportSaleFacts(snapshot)) {
+    if (!fact.recognized) continue
+    const lines = new Map<string, { key: string; id: number | null; name: string; weight: number; qty: ReportExactDecimal }>()
+    for (const item of itemsBySale.get(Number(fact.sale.id)) || []) {
+      const id = item.product_id == null ? null : Number(item.product_id)
+      const name = String(item.product_name || '')
+      const key = id == null ? `name:${name.trim().toLowerCase()}` : `id:${id}`
+      const line = lines.get(key) || { key, id, name, weight: 0, qty: ReportExactDecimal.zero() }
+      line.weight += Math.max(0, toUnits(reportMoney(item, 'total_usd', fact.version)))
+      line.qty = line.qty.add(ReportExactDecimal.quantity(item.quantity as string | number))
+      line.name = name || line.name
+      lines.set(key, line)
+    }
+    const list = [...lines.values()]
+    const units = toUnits(fact.net.add(fact.adjustment).subtract(fact.refund))
+    const shares = allocateUnits(units, list.map((line) => line.weight))
+    if (!shares) unallocated += units
+    list.forEach((line, index) => {
+      const group = groups.get(line.key) || { key: line.key, id: line.id, name: line.name, qty: ReportExactDecimal.zero(), units: 0 }
+      group.qty = group.qty.add(line.qty)
+      group.units += shares ? shares[index] : 0
+      group.name = line.name || group.name
+      groups.set(line.key, group)
+    })
+  }
+  return { groups: [...groups.values()], unallocated }
+}
+
+const byProductRevenue = (a: ProductRevenueGroup, b: ProductRevenueGroup): number =>
+  b.units - a.units || b.qty.compare(a.qty) || a.name.localeCompare(b.name) || (a.id ?? 0) - (b.id ?? 0)
+const byProductQty = (a: ProductRevenueGroup, b: ProductRevenueGroup): number =>
+  b.qty.compare(a.qty) || b.units - a.units || a.name.localeCompare(b.name) || (a.id ?? 0) - (b.id ?? 0)
+
+/** Current names of products, one statement per 99 ids. */
+async function liveProductNames(env: Env, ids: number[]): Promise<Map<number, string>> {
+  const live = new Map<number, string>()
+  for (let from = 0; from < ids.length; from += 99) {
+    const slice = ids.slice(from, from + 99)
+    // sql-bound-params: bounded by construction -- sliced to 99 ids per statement, under D1's 100-parameter limit.
+    // (Not routed through the chunk helper on purpose: this module is compiled by tests that copy a fixed
+    // dependency list, and the lookup must stay one statement for any list this module produces today.)
+    const rows = await getDb(env).prepare(`SELECT id, name FROM products WHERE id IN (${slice.map(() => '?').join(',')})`).all<{ id: number; name: string | null }>(slice)
+    for (const row of rows || []) if (row.name) live.set(Number(row.id), String(row.name))
+  }
+  return live
+}
+
+/**
+ * The export preview's product split: the top products, one "Other products" row
+ * for the overflow, and the unallocated row when there is one, so the rows add up
+ * to the window revenue exactly.
+ */
+export async function exportProductSplitFromSnapshot(env: Env, snapshot: SalesReportSnapshot): Promise<ExportProductRow[]> {
+  const { groups, unallocated } = productRevenueGroups(snapshot)
+  const ranked = groups.sort(byProductRevenue)
+  const named = ranked.slice(0, unallocated !== 0 ? EXPORT_PRODUCT_ROWS - 1 : EXPORT_PRODUCT_ROWS)
+  const rest = ranked.slice(named.length)
+  // A renamed or merged product exports under its current name; the sale's own
+  // snapshot name is the fallback for a product that no longer exists.
+  const ids = named.map((group) => group.id).filter((id): id is number => id != null)
+  const live = ids.length ? await liveProductNames(env, ids) : new Map<number, string>()
+  const rows: ExportProductRow[] = named.map((group) => ({
+    product_id: group.id, product_name: (group.id != null && live.get(group.id)) || group.name,
+    qty_sold: group.qty.toNumber(2), revenue_usd: group.units / MONEY_UNITS,
+  }))
+  if (rest.length) {
+    rows.push({ product_id: null, product_name: 'Other products', qty_sold: rest.reduce((acc, group) => acc.add(group.qty), ReportExactDecimal.zero()).toNumber(2),
+      revenue_usd: rest.reduce((acc, group) => acc + group.units, 0) / MONEY_UNITS })
+  }
+  if (unallocated !== 0) rows.push({ product_id: null, product_name: 'Unallocated sales', qty_sold: 0, revenue_usd: unallocated / MONEY_UNITS })
+  return rows.sort((a, b) => b.revenue_usd - a.revenue_usd || b.qty_sold - a.qty_sold || a.product_name.localeCompare(b.product_name))
 }
 
 // ---- Phase X (Part 395): daily report + per-contact delivery totals -------
@@ -2452,100 +2588,40 @@ export async function getSalesDayReport(
   opts: Pick<SalesFilters, 'branchId' | 'startTime' | 'endTime' | 'tzOffsetMinutes' | 'status' | 'paymentMethod'> = {},
 ): Promise<SalesDayReport> {
   const f: SalesFilters = { startDate: day, endDate: day, ...opts }
-  {
-    const [snapshot, loss] = await Promise.all([
-      readSalesReportSnapshot(env, f, true),
-      removalLossesFor(env, f),
-    ])
-    const facts = reportSaleFacts(snapshot)
-    const totals = withRemovalLosses(
-      exactReportTotals(aggregateReportSnapshot(snapshot, () => '').get('') || reportBucket(), snapshot),
-      loss,
-    )
-    const paymentMethods = paymentMethodBreakdownFromSnapshot(snapshot)
-    let storeTx = 0, membershipTx = 0
-    for (const fact of facts) {
-      const sale = fact.sale; const version = fact.version
-      if (reportMoney(sale, 'discount_usd', version).isPositive()) storeTx += 1
-      if (reportMoney(sale, 'membership_discount_usd', version).isPositive()) membershipTx += 1
-    }
-    const sales = facts.slice().sort((a, b) => String(b.sale.created_at).localeCompare(String(a.sale.created_at)) || Number(b.sale.id) - Number(a.sale.id))
-      .slice(0, 1000).map((fact) => {
-        const sale = fact.sale
-        const discount = reportMoney(sale, 'discount_usd', fact.version).add(reportMoney(sale, 'membership_discount_usd', fact.version))
-        const payable = Number(sale.source_return_id || 0) !== 0
-          ? reportMoney(sale, 'amount_paid_usd', fact.version) : reportMoney(sale, 'total_usd', fact.version)
-        const collected = fact.recognized && !fact.awaiting ? payable.subtract(fact.refundPaid) : ReportExactDecimal.zero()
-        return { id: Number(sale.id), receipt_number: String(sale.receipt_number || ''), created_at: String(sale.created_at || ''),
-          customer_name: Number(sale.customer_is_anonymous) !== 0 ? '' : String(sale.customer_name || ''),
-          payment_method: String(sale.payment_method || '').trim() || 'Unknown', sale_status: reportStatus(sale),
-          revenue_usd: fact.recognized ? fact.net.add(fact.adjustment).subtract(fact.refund).toNumber(BUCKET_MONEY_PLACES) : 0,
-          discount_usd: discount.toNumber(BUCKET_MONEY_PLACES), collected_usd: collected.toNumber(BUCKET_MONEY_PLACES) }
-      })
-    return { date: day, totals,
-      payment_methods: paymentMethods,
-      delivery_contacts: deliveryContactTotalsFromSnapshot(snapshot, f),
-      discounts: { store_usd: totals.store_discount_usd, membership_usd: totals.membership_discount_usd,
-        store_tx_count: storeTx, membership_tx_count: membershipTx }, sales }
-  }
-  const db = getDb(env)
-  const { sql: whereSql, params } = whereActiveSales('sales', f)
-  const [totals, paymentMethods, deliveryContacts, discountCounts, saleRows] = await Promise.all([
-    getSalesTotals(env, f),
-    getPaymentMethodBreakdown(env, f),
-    getDeliveryContactTotals(env, f),
-    db.prepare(`
-      SELECT COALESCE(SUM(CASE WHEN COALESCE(discount_usd, 0) > 0 THEN 1 ELSE 0 END), 0) AS store_tx_count,
-             COALESCE(SUM(CASE WHEN COALESCE(membership_discount_usd, 0) > 0 THEN 1 ELSE 0 END), 0) AS membership_tx_count
-      FROM sales
-      WHERE ${whereSql}
-    `).get<Record<string, number>>(params),
-    // Per-sale rows for the drill. Same date/branch/status/payment scope as
-    // every figure above (whereActiveSales), and revenue computed identically
-    // to deriveTotals so SUM(revenue_usd) == totals.revenue_usd. Capped: a
-    // single day of one shop never approaches 1000 receipts.
-    db.prepare(`
-      SELECT sales.id AS id, receipt_number, created_at,
-             ${reportCustomerNameExpr('sales.')} AS customer_name,
-             COALESCE(NULLIF(TRIM(payment_method), ''), 'Unknown') AS payment_method,
-             COALESCE(sale_status, 'completed') AS sale_status,
-             -- Canonical net-sales revenue, per sale: recognized sales only
-             -- (cancelled contributes 0; awaiting_payment remains positive), net of THIS sale's
-             -- own customer refunds -- identical basis to deriveTotals, so
-             -- SUM(revenue_usd) over the day == totals.revenue_usd.
-             ROUND(CASE WHEN ${recognizedExpr('')} THEN ${netSaleExpr('')} - ${netRefundExpr('', 'rf.')} ELSE 0 END, 2) AS revenue_usd,
-             ROUND(COALESCE(discount_usd, 0) + COALESCE(membership_discount_usd, 0), 2) AS discount_usd,
-             ROUND(${collectedExpr('')}, 2) AS collected_usd
-      FROM sales
-      ${CUSTOMER_REFUND_JOIN}sales.id
-      WHERE ${whereSql}
-      ORDER BY datetime(created_at) DESC, id DESC
-      LIMIT 1000
-    `).all<Record<string, unknown>>(params),
+  const [snapshot, loss] = await Promise.all([
+    readSalesReportSnapshot(env, f, true),
+    removalLossesFor(env, f),
   ])
-  return {
-    date: day,
-    totals,
-    payment_methods: paymentMethods,
-    delivery_contacts: deliveryContacts,
-    discounts: {
-      store_usd: totals.store_discount_usd,
-      membership_usd: totals.membership_discount_usd,
-      store_tx_count: num(discountCounts?.store_tx_count),
-      membership_tx_count: num(discountCounts?.membership_tx_count),
-    },
-    sales: (saleRows || []).map((r) => ({
-      id: Number(r.id),
-      receipt_number: String(r.receipt_number || ''),
-      created_at: String(r.created_at || ''),
-      customer_name: String(r.customer_name || ''),
-      payment_method: String(r.payment_method || ''),
-      sale_status: String(r.sale_status || 'completed'),
-      revenue_usd: num(r.revenue_usd),
-      discount_usd: num(r.discount_usd),
-      collected_usd: num(r.collected_usd),
-    })),
+  const facts = reportSaleFacts(snapshot)
+  const totals = withRemovalLosses(
+    exactReportTotals(aggregateReportSnapshot(snapshot, () => '').get('') || reportBucket(), snapshot),
+    loss,
+  )
+  const paymentMethods = paymentMethodBreakdownFromSnapshot(snapshot)
+  let storeTx = 0, membershipTx = 0
+  for (const fact of facts) {
+    const sale = fact.sale; const version = fact.version
+    if (reportMoney(sale, 'discount_usd', version).isPositive()) storeTx += 1
+    if (reportMoney(sale, 'membership_discount_usd', version).isPositive()) membershipTx += 1
   }
+  const sales = facts.slice().sort((a, b) => String(b.sale.created_at).localeCompare(String(a.sale.created_at)) || Number(b.sale.id) - Number(a.sale.id))
+    .slice(0, 1000).map((fact) => {
+      const sale = fact.sale
+      const discount = reportMoney(sale, 'discount_usd', fact.version).add(reportMoney(sale, 'membership_discount_usd', fact.version))
+      const payable = Number(sale.source_return_id || 0) !== 0
+        ? reportMoney(sale, 'amount_paid_usd', fact.version) : reportMoney(sale, 'total_usd', fact.version)
+      const collected = fact.recognized && !fact.awaiting ? payable.subtract(fact.refundPaid) : ReportExactDecimal.zero()
+      return { id: Number(sale.id), receipt_number: String(sale.receipt_number || ''), created_at: String(sale.created_at || ''),
+        customer_name: Number(sale.customer_is_anonymous) !== 0 ? '' : String(sale.customer_name || ''),
+        payment_method: String(sale.payment_method || '').trim() || 'Unknown', sale_status: reportStatus(sale),
+        revenue_usd: fact.recognized ? fact.net.add(fact.adjustment).subtract(fact.refund).toNumber(BUCKET_MONEY_PLACES) : 0,
+        discount_usd: discount.toNumber(BUCKET_MONEY_PLACES), collected_usd: collected.toNumber(BUCKET_MONEY_PLACES) }
+    })
+  return { date: day, totals,
+    payment_methods: paymentMethods,
+    delivery_contacts: deliveryContactTotalsFromSnapshot(snapshot, f),
+    discounts: { store_usd: totals.store_discount_usd, membership_usd: totals.membership_discount_usd,
+      store_tx_count: storeTx, membership_tx_count: membershipTx }, sales }
 }
 
 // Shifts [startDate, endDate] back by its own length, for a same-length
@@ -2828,6 +2904,21 @@ export interface SalesGroupedReport {
   totals: SalesTotals
 }
 
+/** One grouping of a verified snapshot, unsorted, at BUCKET_MONEY_PLACES. The
+ *  Reports views and the Dashboard's payment and branch cards all read their
+ *  buckets here, so a card can never disagree with the report it summarises. */
+function groupedRowsFromSnapshot(snapshot: SalesReportSnapshot, groupBy: SalesGroupKey): SalesGroupedRow[] {
+  const identity = (row: ReportScalarRow) => reportGroupIdentity(row, groupBy)
+  const metadata = new Map([...snapshot.sales, ...snapshot.voidSales].map((row) => [identity(row).key, identity(row)]))
+  return [...aggregateReportSnapshot(snapshot, (sale) => identity(sale).key).entries()].map(([key, bucket]) => {
+    const totals = exactReportTotals(bucket, snapshot, BUCKET_MONEY_PLACES)
+    const meta = metadata.get(key) || { key, label: '', entity_id: null }
+    const row = { key, label: meta.label, entity_id: meta.entity_id,
+      cost_missing_snapshot_lines: bucket.missingCostLines, ...totals } as SalesGroupedRow
+    return attachReportDiagnostic(row, reportMoneyDiagnostic(totals)!)
+  })
+}
+
 /** Grouped rows plus what a capped response needs to stay honest: how many
  *  groups exist and the window's own totals. An already-read snapshot (the
  *  Overview's) is reused rather than read a second time. */
@@ -2835,15 +2926,7 @@ export async function getSalesGroupedReport(
   env: Env, f: SalesFilters, groupBy: SalesGroupKey, limit = 500, read?: SalesReportSnapshot,
 ): Promise<SalesGroupedReport> {
   const snapshot = read ?? await readSalesReportSnapshot(env, f)
-  const identity = (row: ReportScalarRow) => reportGroupIdentity(row, groupBy)
-  const metadata = new Map([...snapshot.sales, ...snapshot.voidSales].map((row) => [identity(row).key, identity(row)]))
-  const rows = [...aggregateReportSnapshot(snapshot, (sale) => identity(sale).key).entries()].map(([key, bucket]) => {
-    const totals = exactReportTotals(bucket, snapshot, BUCKET_MONEY_PLACES)
-    const meta = metadata.get(key) || { key, label: '', entity_id: null }
-    const row = { key, label: meta.label, entity_id: meta.entity_id,
-      cost_missing_snapshot_lines: bucket.missingCostLines, ...totals } as SalesGroupedRow
-    return attachReportDiagnostic(row, reportMoneyDiagnostic(totals)!)
-  })
+  const rows = groupedRowsFromSnapshot(snapshot, groupBy)
   const level = salesGroupExprs('sales', groupBy)
   const joined = salesGroupExprs('s', groupBy)
   if (groupBy === 'customer') {
@@ -2863,109 +2946,12 @@ export async function getSalesGroupedReport(
 }
 
 /**
- * Canonical SalesTotals per group. Same two-query shape as
- * getBusinessSummaryDayRows (sale level + item-level COGS, merged through
- * deriveTotals), only the bucket expression differs. Sorted by revenue
- * (desc) except hour/weekday which come back in clock order.
+ * Canonical SalesTotals per group, read through getSalesGroupedReport (the
+ * verified snapshot) so a group can never disagree with the Reports buckets.
+ * Sorted by revenue (desc) except hour/weekday which come back in clock order.
  */
 export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: SalesGroupKey, limit = 500): Promise<SalesGroupedRow[]> {
-  {
-    return (await getSalesGroupedReport(env, f, groupBy, limit)).rows
-  }
-  const db = getDb(env)
-  const level = salesGroupExprs('sales', groupBy)
-  const joined = salesGroupExprs('s', groupBy)
-  const { sql: whereLevel, params: paramsLevel } = whereActiveSales('sales', f)
-  const { sql: whereCost, params: paramsCost } = whereActiveSales('s', f)
-
-  const [levelRows, costRows, returnedByKey, cancelledByKey] = await Promise.all([
-    db.prepare(`
-      SELECT ${level.key} AS grp_key, ${level.label} AS grp_label, ${level.id} AS grp_id,
-             COUNT(*) AS tx_count,
-             COALESCE(SUM(subtotal_usd), 0) AS gross_sales_usd,
-             COALESCE(SUM(discount_usd), 0) AS store_discount_usd,
-             COALESCE(SUM(membership_discount_usd), 0) AS membership_discount_usd,
-             COALESCE(SUM(tax_usd), 0) AS tax_usd,
-             COALESCE(SUM(CASE WHEN COALESCE(delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE delivery_fee_usd END), 0) AS delivery_usd,
-             COALESCE(SUM(CASE WHEN delivery_fee_paid_by = 'store' THEN delivery_fee_usd ELSE 0 END), 0) AS store_delivery_usd,
-             ${RECOGNIZED_LEVEL_COLUMNS}
-      FROM sales
-      ${CUSTOMER_REFUND_JOIN}sales.id
-      WHERE ${whereLevel}
-      GROUP BY grp_key
-    `).all<Record<string, number> & { grp_key: string | number | null; grp_label: string | null; grp_id: number | null }>(paramsLevel),
-    db.prepare(`
-      SELECT ${joined.key} AS grp_key,
-             ${ITEM_COST_COLUMNS}
-      FROM sale_items si
-      JOIN sales s ON s.id = si.sale_id
-      WHERE ${whereCost} AND ${ITEM_COST_STATUS_CLAUSE}
-      GROUP BY grp_key
-    `).all<ItemCostRow & { grp_key: string | number | null }>(paramsCost),
-    returnedCostByBucket(env, f, joined.key),
-    cancelledGroupCounts(env, f, level),
-  ])
-
-  const keyOf = (v: string | number | null | undefined): string => (v == null ? '' : String(v))
-  const costByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.cost_usd)]))
-  const missingByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.missing_snapshot_lines)]))
-  const pendingCostByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.pending_cost_usd)]))
-  const itemDiscountByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.item_discount_usd)]))
-  const pendingItemDiscountByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.pending_item_discount_usd)]))
-  const unvaluedCostByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.unvalued_cost_usd)]))
-  const levelByKey = new Map((levelRows || []).map((r) => [keyOf(r.grp_key), r]))
-  const keys = new Set<string>(levelByKey.keys())
-  // A group whose every sale in this window was VOIDED has no level row --
-  // it used to vanish, taking its void count with it. It belongs in the list
-  // at zero money, which is exactly what the voids are worth.
-  for (const k of cancelledByKey.keys()) if (k !== '') keys.add(k)
-  const rows: SalesGroupedRow[] = [...keys].map((key) => {
-    const r = levelByKey.get(key)
-    const voided = cancelledByKey.get(key)
-    return {
-      key,
-      label: r && r.grp_label != null ? String(r.grp_label) : (voided ? voided.label : ''),
-      entity_id: r ? (r.grp_id == null ? null : Number(r.grp_id)) : (voided ? voided.entity_id : null),
-      cost_missing_snapshot_lines: missingByKey.get(key) || 0,
-      ...deriveTotals(r || VOID_ONLY_LEVEL, costByKey.get(key) || 0, returnedByKey.get(key) || 0, { costUsd: pendingCostByKey.get(key) || 0, itemDiscountUsd: itemDiscountByKey.get(key) || 0, pendingItemDiscountUsd: pendingItemDiscountByKey.get(key) || 0, cancelledTxCount: voided ? voided.count : 0, unvaluedCostUsd: unvaluedCostByKey.get(key) || 0 }),
-    }
-  })
-  // ---- the additive per-group columns ------------------------------------
-  // One extra query for the groupings that carry them, none for the rest.
-  // They are attached AFTER deriveTotals so they cannot reach a money field,
-  // which is the whole contract with the reports lane: additive only.
-  if (groupBy === 'customer') {
-    const identity = await customerIdentityByGroup(env, f, level.key)
-    for (const row of rows) {
-      const hit = identity.get(row.key) || { is_new: false, gender: '', phone: '' }
-      row.is_new = hit.is_new
-      row.gender = hit.gender
-      row.phone = hit.phone
-    }
-  } else if (groupBy === 'cashier') {
-    const cohorts = await cohortCountsByGroup(env, f, level.key)
-    for (const row of rows) {
-      const hit = cohorts.get(row.key)
-      row.new_customer_count = hit?.new_customer_count || 0
-      row.return_customer_count = hit?.return_customer_count || 0
-      row.unregistered_count = hit?.unregistered_count || 0
-      row.paid_tx_count = hit?.paid_tx_count || 0
-    }
-  } else if (groupBy === 'branch') {
-    const activity = await branchActivityByGroup(env, f, level.key, joined.key)
-    for (const row of rows) {
-      const hit = activity.get(row.key)
-      row.customer_count = hit?.customer_count || 0
-      row.items_sold_qty = hit?.items_sold_qty || 0
-    }
-  }
-  if (groupBy === 'hour' || groupBy === 'weekday') {
-    rows.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
-  } else {
-    rows.sort((a, b) => b.revenue_usd - a.revenue_usd || b.tx_count - a.tx_count || (a.label < b.label ? -1 : a.label > b.label ? 1 : 0))
-  }
-  const cap = Math.max(1, Math.min(2000, Math.trunc(limit) || 500))
-  return rows.length > cap ? rows.slice(0, cap) : rows
+  return (await getSalesGroupedReport(env, f, groupBy, limit)).rows
 }
 
 export interface ProductSalesRankingRow {
@@ -3005,18 +2991,18 @@ export interface ProductSalesReport {
 export async function getProductSalesReport(env: Env, f: SalesFilters, limit = 200): Promise<ProductSalesReport> {
   const snapshot = await readSalesReportSnapshot(env, f)
   const saleById = new Map(snapshot.sales.map((sale) => [Number(sale.id), sale]))
-  const groups = new Map<string, { product_id: number | null; product_name: string; saleIds: Set<number>; qty: number;
+  const groups = new Map<string, { product_id: number | null; product_name: string; saleIds: Set<number>; qty: ReportExactDecimal;
     lineSales: ReportExactDecimal; cost: ReportExactDecimal; missing: number }>()
   for (const item of snapshot.items) {
     const sale = saleById.get(Number(item.sale_id)); if (!sale || reportStatus(sale) === 'cancelled') continue
     const productId = item.product_id == null ? null : Number(item.product_id)
     const name = String(item.product_name || '')
     const key = productId == null ? `name:${name.trim().toLowerCase()}` : `id:${productId}`
-    const group = groups.get(key) || { product_id: productId, product_name: name, saleIds: new Set<number>(), qty: 0,
+    const group = groups.get(key) || { product_id: productId, product_name: name, saleIds: new Set<number>(), qty: ReportExactDecimal.zero(),
       lineSales: ReportExactDecimal.zero(), cost: ReportExactDecimal.zero(), missing: 0 }
     const version = reportVersion(sale)
     const quantity = ReportExactDecimal.quantity(item.quantity as string | number)
-    group.qty += Number(item.quantity)
+    group.qty = group.qty.add(quantity)
     group.saleIds.add(Number(sale.id))
     group.lineSales = group.lineSales.add(reportMoney(item, 'total_usd', version))
     if (item.cost_price_usd == null) group.missing += 1
@@ -3046,7 +3032,7 @@ export async function getProductSalesReport(env: Env, f: SalesFilters, limit = 2
   const rows = [...groups.values()].map((group) => {
     const meta = group.product_id == null ? null : metadata.get(group.product_id)
     const row: ProductSalesRankingRow = {
-      product_id: group.product_id, product_name: String(meta?.name || group.product_name), sale_count: group.saleIds.size, qty: group.qty,
+      product_id: group.product_id, product_name: String(meta?.name || group.product_name), sale_count: group.saleIds.size, qty: reportQuantity(group.qty),
       line_sales_usd: group.lineSales.toNumber(BUCKET_MONEY_PLACES), cost_usd: group.cost.toNumber(BUCKET_MONEY_PLACES),
       profit_usd: group.lineSales.subtract(group.cost).toNumber(BUCKET_MONEY_PLACES), cost_missing_snapshot_lines: group.missing,
       category_id: meta?.category_id == null ? null : Number(meta.category_id), category_name: String(meta?.category || ''),
@@ -3055,73 +3041,23 @@ export async function getProductSalesReport(env: Env, f: SalesFilters, limit = 2
     return attachReportDiagnostic(row, { ...diagnostic, complete: group.missing === 0, unknown_cost_lines: group.missing })
   })
   rows.sort((a, b) => b.line_sales_usd - a.line_sales_usd || b.qty - a.qty)
-  const all = { sales: new Set<number>(), qty: 0, lineSales: ReportExactDecimal.zero(), cost: ReportExactDecimal.zero(), missing: 0 }
+  const all = { sales: new Set<number>(), qty: ReportExactDecimal.zero(), lineSales: ReportExactDecimal.zero(), cost: ReportExactDecimal.zero(), missing: 0 }
   for (const group of groups.values()) {
     for (const id of group.saleIds) all.sales.add(id)
-    all.qty += group.qty; all.lineSales = all.lineSales.add(group.lineSales); all.cost = all.cost.add(group.cost); all.missing += group.missing
+    all.qty = all.qty.add(group.qty); all.lineSales = all.lineSales.add(group.lineSales); all.cost = all.cost.add(group.cost); all.missing += group.missing
   }
   return { rows: rows.slice(0, Math.max(1, Math.min(1000, Math.trunc(limit) || 200))), total_groups: rows.length,
-    totals: { sale_count: all.sales.size, qty: all.qty, line_sales_usd: all.lineSales.toNumber(BUCKET_MONEY_PLACES), cost_usd: all.cost.toNumber(BUCKET_MONEY_PLACES),
+    totals: { sale_count: all.sales.size, qty: reportQuantity(all.qty), line_sales_usd: all.lineSales.toNumber(BUCKET_MONEY_PLACES), cost_usd: all.cost.toNumber(BUCKET_MONEY_PLACES),
       profit_usd: all.lineSales.subtract(all.cost).toNumber(BUCKET_MONEY_PLACES), cost_missing_snapshot_lines: all.missing } }
 }
 
 /**
  * Products ranked by line sales over RECOGNIZED sales only (the same
  * population revenue and COGS are computed from), respecting every
- * SalesFilters field through whereActiveSales.
+ * SalesFilters field through the verified snapshot getProductSalesReport reads.
  */
 export async function getProductSalesRanking(env: Env, f: SalesFilters, limit = 200): Promise<ProductSalesRankingRow[]> {
-  {
-    return (await getProductSalesReport(env, f, limit)).rows
-  }
-  const db = getDb(env)
-  const { sql: whereSql, params } = whereActiveSales('s', f)
-  const cap = Math.max(1, Math.min(1000, Math.trunc(limit) || 200))
-  // Two stock ledgers, never mixed: branch_stock when the report is scoped to
-  // a branch, products.stock_quantity when it is not.
-  const onHandExpr = f.branchId
-    ? `COALESCE((SELECT SUM(bs.quantity) FROM branch_stock bs WHERE bs.product_id = si.product_id AND bs.branch_id = @branchId), 0)`
-    : `COALESCE(p.stock_quantity, 0)`
-  const rows = await db.prepare(`
-    SELECT si.product_id AS product_id,
-           MAX(COALESCE(si.product_name, '')) AS product_name,
-           COUNT(DISTINCT s.id) AS sale_count,
-           COALESCE(SUM(si.quantity), 0) AS qty,
-           COALESCE(SUM(si.total_usd), 0) AS line_sales_usd,
-           COALESCE(SUM(si.cost_price_usd * si.quantity), 0) AS cost_usd,
-           COALESCE(SUM(CASE WHEN si.cost_price_usd IS NULL THEN 1 ELSE 0 END), 0) AS cost_missing_snapshot_lines,
-           MAX(COALESCE(p.barcode, '')) AS barcode,
-           MAX(COALESCE(p.category, '')) AS category_name,
-           MAX(cat.id) AS category_id,
-           MAX(${onHandExpr}) AS on_hand_qty
-    FROM sale_items si
-    JOIN sales s ON s.id = si.sale_id
-    LEFT JOIN products p ON p.id = si.product_id
-    LEFT JOIN categories cat ON lower(trim(cat.name)) = lower(trim(COALESCE(p.category, ''))) AND COALESCE(p.category, '') <> ''
-    WHERE ${whereSql} AND ${recognizedExpr('s.')}
-    GROUP BY COALESCE(si.product_id, 0), CASE WHEN si.product_id IS NULL THEN lower(trim(COALESCE(si.product_name, ''))) ELSE '' END
-    ORDER BY line_sales_usd DESC, qty DESC
-    LIMIT @limit
-  `).all<{ product_id: number | null; product_name: string; sale_count: number; qty: number; line_sales_usd: number; cost_usd: number; cost_missing_snapshot_lines: number; barcode: string | null; category_name: string | null; category_id: number | null; on_hand_qty: number }>({ ...params, limit: cap })
-  const r2 = (v: number) => Math.round(v * 100) / 100
-  return (rows || []).map((r) => {
-    const lineSales = r2(num(r.line_sales_usd))
-    const cost = r2(num(r.cost_usd))
-    return {
-      product_id: r.product_id == null ? null : Number(r.product_id),
-      product_name: String(r.product_name || ''),
-      sale_count: num(r.sale_count),
-      qty: num(r.qty),
-      line_sales_usd: lineSales,
-      cost_usd: cost,
-      profit_usd: r2(lineSales - cost),
-      cost_missing_snapshot_lines: num(r.cost_missing_snapshot_lines),
-      category_id: r.category_id == null ? null : Number(r.category_id),
-      category_name: String(r.category_name || ''),
-      barcode: String(r.barcode || ''),
-      on_hand_qty: num(r.on_hand_qty),
-    }
-  })
+  return (await getProductSalesReport(env, f, limit)).rows
 }
 
 // Ported with the reports lane (S4-26): /periods builds its day rows from
@@ -3201,64 +3137,16 @@ export async function getBusinessSummaryPeriodRows(env: Env, f: SalesFilters, gr
 }
 
 export async function getBusinessSummaryDayRows(env: Env, f: SalesFilters): Promise<BusinessSummaryDayRow[]> {
-  {
-    const snapshot = await readSalesReportSnapshot(env, f)
-    const dateFor = (sale: ReportScalarRow) => {
-      const raw = String(sale.created_at || '')
-      const parsed = new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`)
-      return new Date(parsed.getTime() + 7 * 3_600_000).toISOString().slice(0, 10)
-    }
-    return [...aggregateReportSnapshot(snapshot, dateFor).entries()].map(([date, bucket]) => {
-      const totals = exactReportTotals(bucket, snapshot, BUCKET_MONEY_PLACES)
-      const diagnostic = reportMoneyDiagnostic(totals)!
-      return attachReportDiagnostic({ date, cost_missing_snapshot_lines: diagnostic.unknown_cost_lines, ...totals }, diagnostic)
-    }).sort((a, b) => a.date.localeCompare(b.date))
+  const snapshot = await readSalesReportSnapshot(env, f)
+  const dateFor = (sale: ReportScalarRow) => {
+    const raw = String(sale.created_at || '')
+    const parsed = new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`)
+    return new Date(parsed.getTime() + 7 * 3_600_000).toISOString().slice(0, 10)
   }
-  const db = getDb(env)
-  const periodExprS = localDateExpr('sales.created_at')
-  const periodExprJoined = localDateExpr('s.created_at')
-  const { sql: whereLevel, params: paramsLevel } = whereActiveSales('sales', f)
-  const { sql: whereCost, params: paramsCost } = whereActiveSales('s', f)
-
-  const [levelRows, costRows, returnedByPeriod, cancelledByPeriod] = await Promise.all([
-    db.prepare(`
-      SELECT ${periodExprS} AS period, COUNT(*) AS tx_count,
-             COALESCE(SUM(subtotal_usd), 0) AS gross_sales_usd,
-             COALESCE(SUM(discount_usd), 0) AS store_discount_usd,
-             COALESCE(SUM(membership_discount_usd), 0) AS membership_discount_usd,
-             COALESCE(SUM(tax_usd), 0) AS tax_usd,
-             COALESCE(SUM(CASE WHEN COALESCE(delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE delivery_fee_usd END), 0) AS delivery_usd,
-             COALESCE(SUM(CASE WHEN delivery_fee_paid_by = 'store' THEN delivery_fee_usd ELSE 0 END), 0) AS store_delivery_usd,
-             ${RECOGNIZED_LEVEL_COLUMNS}
-      FROM sales
-      ${CUSTOMER_REFUND_JOIN}sales.id
-      WHERE ${whereLevel}
-      GROUP BY ${periodExprS}
-    `).all<Record<string, number> & { period: string }>(paramsLevel),
-    db.prepare(`
-      SELECT ${periodExprJoined} AS period,
-             ${ITEM_COST_COLUMNS}
-      FROM sale_items si
-      JOIN sales s ON s.id = si.sale_id
-      WHERE ${whereCost} AND ${ITEM_COST_STATUS_CLAUSE}
-      GROUP BY ${periodExprJoined}
-    `).all<ItemCostRow & { period: string }>(paramsCost),
-    returnedCostByBucket(env, f, periodExprJoined),
-    cancelledCountByBucket(env, f, periodExprS),
-  ])
-
-  const costByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.cost_usd)]))
-  const missingByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.missing_snapshot_lines)]))
-  const pendingCostByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.pending_cost_usd)]))
-  const itemDiscountByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.item_discount_usd)]))
-  const pendingItemDiscountByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.pending_item_discount_usd)]))
-  const unvaluedCostByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.unvalued_cost_usd)]))
-  const levelByPeriod = new Map((levelRows || []).map((r) => [r.period, r as Record<string, number>]))
-  const rows = unionBuckets(levelByPeriod.keys(), cancelledByPeriod).map((period) => ({
-    date: period,
-    cost_missing_snapshot_lines: missingByPeriod.get(period) || 0,
-    ...deriveTotals(levelByPeriod.get(period) || VOID_ONLY_LEVEL, costByPeriod.get(period) || 0, returnedByPeriod.get(period) || 0, { costUsd: pendingCostByPeriod.get(period) || 0, itemDiscountUsd: itemDiscountByPeriod.get(period) || 0, pendingItemDiscountUsd: pendingItemDiscountByPeriod.get(period) || 0, cancelledTxCount: cancelledByPeriod.get(period) || 0, unvaluedCostUsd: unvaluedCostByPeriod.get(period) || 0 }),
-  }))
-  return rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+  return [...aggregateReportSnapshot(snapshot, dateFor).entries()].map(([date, bucket]) => {
+    const totals = exactReportTotals(bucket, snapshot, BUCKET_MONEY_PLACES)
+    const diagnostic = reportMoneyDiagnostic(totals)!
+    return attachReportDiagnostic({ date, cost_missing_snapshot_lines: diagnostic.unknown_cost_lines, ...totals }, diagnostic)
+  }).sort((a, b) => a.date.localeCompare(b.date))
 }
 

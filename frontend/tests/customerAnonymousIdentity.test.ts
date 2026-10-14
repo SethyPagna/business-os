@@ -94,6 +94,7 @@ let worksheetRows: Array<Record<string, unknown>> = []
 new Function('require', 'module', 'exports', transformSync(dashboardSource, { loader: 'ts', format: 'cjs' }).code)((id: string) => {
   if (id.includes('xlsxExport')) return { downloadXLSX: (_name: string, rows: Array<Record<string, unknown>>) => { worksheetRows = rows } }
   if (id.includes('pricing')) return { formatPriceNumber: (value: unknown) => Number(value || 0).toFixed(2) }
+  if (id.includes('financialPrecision')) return { financialCalculationValue: (value: number) => value }
   return {}
 }, dashboardModule, dashboardModule.exports)
 for (const general of ['General', 'អតិថិជនទូទៅ']) {

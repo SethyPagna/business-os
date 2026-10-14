@@ -71,8 +71,7 @@ const filters = { startDate: '2026-09-01', endDate: '2026-09-30', branchId: 2 }
   `)
   const precise = kernel(preciseDb)
   const days = await precise.getBusinessSummaryDayRows({}, filters)
-  // Split rows carry 4 places, the headline keeps cents (owner 13 Oct, L3): 10.004 + .0045 once.
-  assert.deepEqual(days.map((row) => row.revenue_usd), [10.0085, 5], 'positive/negative saved sale adjustments affect recognized revenue once')
+  assert.deepEqual(days.map((row) => row.revenue_usd), [10.0085, 5], 'positive/negative saved sale adjustments affect recognized revenue once, at the 4 places a split row carries')
   assert.equal(days[1].pending_revenue_usd, 5)
   const total = await precise.getSalesTotals({}, filters)
   assert.equal(total.revenue_usd, 15.01)
@@ -101,15 +100,26 @@ const filters = { startDate: '2026-09-01', endDate: '2026-09-30', branchId: 2 }
   await assert.rejects(() => scoped.readSalesReportSnapshot({}, filters, false, () => ({ sql: 's.id=@reportScope_id', params: {} })),
     (error) => error.code === 'unsupported_row', 'every scope placeholder must be bound')
   const periods = await precise.getBusinessSummaryPeriodRows({}, filters, 'month')
-  assert.equal(periods[0].revenue_usd, 15.0085, 'period reads the same recorded operands instead of summing displayed days')
+  assert.equal(periods[0].revenue_usd, 15.0085, 'period reads the same recorded operands instead of summing displayed days, at 4 places')
   const series = await precise.getSalesPeriodSeries({}, filters, 'day')
   assert.deepEqual(series.map((row) => row.revenue_usd), days.map((row) => row.revenue_usd))
   const grouped = await precise.getSalesGroupedTotals({}, filters, 'payment_method')
-  assert.equal(grouped[0].revenue_usd, periods[0].revenue_usd)
+  assert.equal(grouped[0].revenue_usd, 15.0085, 'a group row carries 4 places')
   const products = await precise.getProductSalesRanking({}, filters)
-  assert.equal(products[0].line_sales_usd, 15.008, 'product money is exact line money without header adjustment allocation')
+  assert.equal(products[0].line_sales_usd, 15.008, 'product money is exact line money (4 places, nothing rounded to cents) without header adjustment allocation')
   const detail = await precise.getBusinessSummarySalesRows({}, filters)
-  assert.deepEqual(detail.map((row) => row.net_revenue_usd), days.map((row) => row.revenue_usd))
+  assert.deepEqual(detail.map((row) => row.net_revenue_usd), [10.0085, 5], 'a receipt row carries 4 places')
+  // Owner rule (13 Oct 2026): a split row (day, period, group, receipt, product) carries 4 places and the headline stays in
+  // cents. The headline is the cent rounding of the exact 4-place sum; no split row is a cent-rounded figure.
+  const places4 = (value) => Math.round(value * 10_000) / 10_000
+  const cents = (value) => Math.round(value * 100) / 100
+  const exactDays = places4(days.reduce((sum, row) => sum + row.revenue_usd, 0))
+  assert.equal(exactDays, periods[0].revenue_usd, 'the day rows add up to the period row exactly')
+  assert.equal(cents(exactDays), total.revenue_usd, 'the headline is the cent rounding of the exact sum of its split rows')
+  assert.notEqual(exactDays, total.revenue_usd, 'the fixture separates the two bases, so a cent-rounded split row is seen')
+  for (const row of [...days, ...series, ...periods, ...grouped]) assert.equal(row.revenue_usd, places4(row.revenue_usd), 'no split row carries more than 4 places')
+  assert.ok([...days, ...series, ...periods, ...grouped].every((row) => row.revenue_usd !== cents(row.revenue_usd) || row.revenue_usd === 5), 'a split row whose figure has digits beyond cents keeps them')
+  assert.equal(total.revenue_usd, cents(total.revenue_usd), 'the headline carries cents only')
   assert.deepEqual(precise.reportMoneyDiagnostic(total), { precision_mode: 'canonical_v1', complete: false, unknown_cost_lines: 1, contributing_rows: 4 })
   console.log('PASS canonical v1 totals/day/period/group/product/detail coherence, positive/negative adjustment, pending parity, and unknown-cost diagnostic')
   preciseDb.exec('UPDATE sales SET subtotal_usd=1.00001 WHERE id=1')

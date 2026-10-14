@@ -1,3 +1,4 @@
+import { UTF8_BOM, escapeCsvValue } from './csv.ts'
 import { fmtBusinessIsoDateTime } from './formatters.ts'
 // N21: sales.customer_address may still hold the Contact Options JSON that
 // customers.address stores, so the export resolves it the same way every
@@ -128,6 +129,19 @@ export function buildSalesImportRows(sales: DataRow[] = []): DataRow[] {
     })
   }
   return rows
+}
+
+/**
+ * The downloadable sales CSV: the import columns in order, with no title or summary rows, so the file round-trips
+ * straight through Sales Import. A person opens it in a spreadsheet, so every cell goes through escapeCsvValue,
+ * which puts an apostrophe in front of a leading = + - @ (a formula in a customer name or note must not run).
+ * Both import parsers strip that guard on read, so a guarded cell imports as the value that was exported.
+ */
+export function buildSalesExportCsv(rows: ReadonlyArray<DataRow>): string {
+  return UTF8_BOM + [
+    SALES_IMPORT_COLUMNS.join(','),
+    ...rows.map((row) => SALES_IMPORT_COLUMNS.map((column) => escapeCsvValue(row[column])).join(',')),
+  ].join('\n')
 }
 
 export const SALES_IMPORT_EXAMPLE_ROWS: DataRow[] = buildSalesImportRows([{

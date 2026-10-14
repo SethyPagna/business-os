@@ -20,7 +20,7 @@ Module._load = function(request, parent, isMain) {
   if (request === '../lib/auth') return { requireAuth: async (c, next) => {
     const role = c.req.header('x-admin') === '1' ? 'admin' : 'employee'
     c.set('user', { id: role === 'admin' ? 1 : 2, role, role_code: role,
-      permissions: JSON.stringify({ product_cost_view: c.req.header('x-cost-view') === '1' }) })
+      permissions: JSON.stringify({ product_cost_view: c.req.header('x-cost-view') === '1', ...(c.req.header('x-courier') === '1' ? { sales: true } : {}) }) })
     return next()
   } }
   if (request === '../lib/permissions') return {
@@ -28,7 +28,7 @@ Module._load = function(request, parent, isMain) {
     isAdminControlUser: (user) => user.role === 'admin',
   }
   if (request === '../lib/db') return { getDb: () => ({}) }
-  if (request === '../lib/acquisitionCostAccess' || request === '../lib/reportExport' || request === '../lib/reportProfitView') return originalLoad.call(this, request, parent, isMain)
+  if (request === '../lib/acquisitionCostAccess' || request === '../lib/courierCostAccess' || request === '../lib/reportExport' || request === '../lib/reportProfitView') return originalLoad.call(this, request, parent, isMain)
   if (request === '../lib/salesAnalytics') return new Proxy({
     SALES_GROUP_KEYS: ['branch'], BUCKET_MONEY_PLACES: 4, reportMoneyDiagnostic: () => null,
     getSalesTotals: async () => ({ ...totals }), previousPeriodFilters: () => ({}),
@@ -172,8 +172,35 @@ for (const input of [courier, JSON.parse(JSON.stringify(courier))]) {
 }
 assert.deepEqual(reports.gateCourierRow(courier, true), courier)
 
-async function request(pathname, admin, costView = false) {
-  const response = await reports.default.request(`http://local${pathname}`, { headers: { 'x-admin': admin ? '1' : '0', 'x-cost-view': costView ? '1' : '0' } }, {})
+// The courier's actual cost is its own permission (sales:view_courier_cost), independent of the product-cost grant:
+// the six courier keys follow canViewCourier, every cost/profit key follows canViewCosts, and an administrator holds both.
+{
+  const courierKeys = ['delivery_actual_cost_usd', 'delivery_actual_cost_count', 'delivery_margin_usd', 'delivery_net_usd',
+    'recognized_delivery_cost_usd', 'pending_delivery_cost_usd']
+  const costKeys = sensitiveTotals.filter((key) => !courierKeys.includes(key))
+  const courierOnly = reports.gateTotals(totals, false, false, 2, true)
+  for (const key of courierKeys) assert.equal(Object.hasOwn(courierOnly, key), true, `courier permission alone retains ${key}`)
+  for (const key of costKeys) assert.equal(Object.hasOwn(courierOnly, key), false, `courier permission alone never opens ${key}`)
+  assert.equal(courierOnly.revenue_usd, 20)
+  assert.equal(courierOnly.delivery_actual_cost_usd, Math.round(totals.delivery_actual_cost_usd * 100) / 100, 'the figure is the kernel figure at cents, not a restated one')
+  const costOnly = reports.gateTotals(totals, false, true, 2, false)
+  for (const key of courierKeys) assert.equal(Object.hasOwn(costOnly, key), false, `cost grant alone never opens ${key}`)
+  assert.equal(costOnly.profit_excludes_delivery, true, 'a cost grant without the courier permission still gets goods profit')
+  const both = reports.gateTotals(totals, false, true, 2, true)
+  for (const key of sensitiveTotals) assert.equal(Object.hasOwn(both, key), true, `cost grant plus courier permission retains ${key}`)
+  assert.equal(Object.hasOwn(both, 'profit_excludes_delivery'), false, 'both grants read the full profit')
+  assert.deepEqual(both, reports.gateTotals(totals, true), 'both grants read what an administrator reads')
+  assert.deepEqual(reports.gateTotals(totals, false, false, 2, false), reports.gateTotals(totals, false), 'neither grant: the public row')
+
+  const receipt = { revenue_usd: 20, ...saleSensitive }
+  assert.equal(reports.gateBusinessSummarySaleRow(receipt, false, true, true).gross_profit_usd, 13, 'both grants read the receipt profit with the courier cost in it')
+  assert.equal(reports.gateBusinessSummarySaleRow({ ...receipt, net_revenue_usd: 21 }, false, true, false).gross_profit_usd, 14, 'a cost grant alone reads goods profit')
+  assert.equal(Object.hasOwn(reports.gateBusinessSummarySaleRow(receipt, false, false, true), 'gross_profit_usd'), false, 'the courier permission alone opens no receipt profit')
+  assert.deepEqual(reports.gateCourierRow(courier, true), courier, 'a non-administrator with the permission reads the courier report row')
+}
+
+async function request(pathname, admin, costView = false, courierView = false) {
+  const response = await reports.default.request(`http://local${pathname}`, { headers: { 'x-admin': admin ? '1' : '0', 'x-cost-view': costView ? '1' : '0', 'x-courier': courierView ? '1' : '0' } }, {})
   assert.equal(response.status, 200, pathname)
   return response.json()
 }
@@ -236,6 +263,22 @@ function assertNoSensitive(value, label) {
     assert.equal(seen.profit_usd, Number((seen.revenue_usd - seen.cost_usd).toFixed(4)), `${pathname}: profit is revenue - cost`)
     const adminSeen = pick(await request(pathname, true))
     assert.equal(Object.hasOwn(adminSeen, 'profit_excludes_delivery'), false, `${pathname}: the administrator's profit is the full figure`)
+  }
+  // Mounted: the courier permission opens the courier keys on every report the L4 rule closed them on, and only those.
+  const courierKeys = ['delivery_actual_cost_usd', 'delivery_margin_usd', 'delivery_net_usd', 'recognized_delivery_cost_usd', 'pending_delivery_cost_usd']
+  for (const [pathname, pick] of [['/overview', (body) => body.sales.totals], ['/periods?granularity=day', (body) => body.rows[0]],
+    ['/grouped?by=branch', (body) => body.rows[0]]]) {
+    const courierOnly = pick(await request(pathname, false, false, true))
+    for (const key of courierKeys) assert.equal(Object.hasOwn(courierOnly, key), true, `${pathname}: the courier permission reads ${key}`)
+    for (const key of ['cost_usd', 'profit_usd', 'margin_pct', 'removal_loss_usd']) assert.equal(Object.hasOwn(courierOnly, key), false, `${pathname}: the courier permission never reads ${key}`)
+    const both = pick(await request(pathname, false, true, true))
+    for (const key of [...courierKeys, 'cost_usd', 'profit_usd']) assert.equal(Object.hasOwn(both, key), true, `${pathname}: cost grant plus courier permission reads ${key}`)
+    assert.equal(Object.hasOwn(both, 'profit_excludes_delivery'), false, `${pathname}: the full profit is not flagged`)
+  }
+  for (const pathname of ['/overview', '/grouped?by=courier']) {
+    const rows = (body) => body.sales ? body.sales.couriers : body.rows
+    assert.equal(Object.hasOwn(rows(await request(pathname, false, false, true))[0], 'actual_cost_usd'), true, `${pathname}: the courier permission reads the courier row cost`)
+    assert.equal(Object.hasOwn(rows(await request(pathname, false, true, false))[0], 'actual_cost_usd'), false, `${pathname}: a cost grant alone does not`)
   }
   console.log('PASS cost-view totals carry goods profit, flagged, and no courier cost (L4)')
   console.log('PASS mounted overview/day/group/export employee and admin payload parity')

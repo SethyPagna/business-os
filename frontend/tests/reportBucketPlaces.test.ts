@@ -40,6 +40,13 @@ test('formatUsd4 rounds half-up by magnitude to 4 places and groups thousands', 
   assert.equal(formatUsd4(300, '៛'), '៛300.0000')
 })
 
+test('formatUsd4 prints a value that is not a finite number as zero instead of throwing, as the cents formatter does', () => {
+  for (const bad of [Infinity, -Infinity, NaN]) assert.equal(formatUsd4(bad), '$0.0000', String(bad))
+  assert.equal(formatUsd4(Infinity, '៛'), '៛0.0000')
+  assert.equal(formatReportMoney(Infinity, undefined, deps('usd'), 4), '$0.0000')
+  assert.equal(formatReportMoney(Infinity, 4000, deps('both'), 4), '$0.0000 · 4,000៛', 'a bad dollar figure leaves the riel figure beside it')
+})
+
 test('bucket rows sum to the window at 4 places; the same rows at cents would not', () => {
   const row = (cost: number, profit: number) => normalizeTotals({ revenue_usd: 1.005, tx_count: 1, cost_usd: cost, profit_usd: profit, net_sales_usd: 1 }) as ReportTotals
   const sum = sumTotals([row(0.005, 0.995), row(0.005, 0.995)])

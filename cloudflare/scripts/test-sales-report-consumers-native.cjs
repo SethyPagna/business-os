@@ -28,9 +28,19 @@ const h=harness.exports
  assert.equal(admin.totals.removal_loss_usd,0)
  assert.equal(admin.totals.revenue_after_losses_usd,10)
  assert.equal(admin.totals.profit_after_losses_usd,admin.totals.profit_usd)
- h.setUser({...h.USER,permissions:'{"sales":true}'})
+ h.setUser({...h.USER,permissions:'{"sales":true,"sales:view_courier_cost":false}'})
  const inspect=value=>{if(!value||typeof value!=='object')return;for(const key of privateKeys)assert.equal(Object.prototype.hasOwnProperty.call(value,key),false,key);for(const child of Object.values(value))inspect(child)}
  for(const url of paths){const payload=await get(url);inspect(payload)}
+ // The default Sales role (courier permission left on) reads the courier keys and still no product cost, profit or removal loss.
+ h.setUser({...h.USER,permissions:'{"sales":true}'})
+ const courierKeys=['delivery_actual_cost_usd','delivery_net_usd','delivery_margin_usd','recognized_delivery_cost_usd','pending_delivery_cost_usd']
+ const productCostKeys=['cost_usd','profit_usd','pending_cost_usd','pending_profit_usd','removal_loss_usd','revenue_after_losses_usd','profit_after_losses_usd']
+ for(const url of [paths[0],paths[2]]){
+   const payload=await get(url),totals=payload.totals
+   for(const key of courierKeys)assert.equal(Object.hasOwn(totals,key),true,`${url}: the courier permission opens ${key}`)
+   for(const key of productCostKeys)assert.equal(Object.hasOwn(totals,key),false,`${url}: the courier permission never opens ${key}`)
+   assert.equal(totals.delivery_actual_cost_usd,2,`${url}: the kernel figure`)
+ }
  const listUrl='/?startDate=2026-09-13&endDate=2026-09-13'
  const assertList=async(permissions,admin,delivery)=>{
    h.setUser({...h.USER,permissions:JSON.stringify(permissions)})
@@ -42,16 +52,17 @@ const h=harness.exports
    assert.equal(Object.hasOwn(row.items[0],'cost_price_khr'),admin)
    assert.ok(row.items[0].pricing_snapshot_json,'public captured pricing remains available')
  }
- for(const [permissions,admin,delivery] of [[{all:true},true,true],[{sales:true},false,true],[{sales:'view'},false,false],[{sales:true,'sales:amend':false},false,false]])await assertList(permissions,admin,delivery)
+ for(const [permissions,admin,delivery] of [[{all:true},true,true],[{sales:true},false,true],[{sales:'view'},false,true],[{sales:'view','sales:view_courier_cost':false},false,false],[{sales:true,'sales:amend':false},false,true],[{sales:true,'sales:view_courier_cost':false},false,false]])await assertList(permissions,admin,delivery)
  const originalCache=h.cache.cachedJsonResponse,cacheEntries=new Map()
  h.cache.cachedJsonResponse=async(request,_context,_key,_ttl,loader)=>{
    if(!cacheEntries.has(request.url))cacheEntries.set(request.url,await loader())
    return cacheEntries.get(request.url)
  }
  await assertList({all:true},true,true)
- await assertList({sales:'view'},false,false)
+ await assertList({sales:'view','sales:view_courier_cost':false},false,false)
  await assertList({sales:true},false,true)
- await assertList({sales:true,'sales:amend':false},false,false)
+ await assertList({sales:true,'sales:amend':false},false,true)
+ await assertList({sales:true,'sales:view_courier_cost':false},false,false)
  await assertList({all:true},true,true)
  h.cache.cachedJsonResponse=originalCache
  const module=h.load('routes/sales.ts')

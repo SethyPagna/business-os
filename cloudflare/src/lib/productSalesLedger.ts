@@ -23,7 +23,7 @@
 //      source of a negative period figure. A refund now reverses its sale in
 //      THAT sale's bucket, because the return side joins through `sales` and is
 //      filtered by the same clauses the sold side is (`JOIN sales s ON
-//      s.id = r.sale_id`), exactly like the kernel's returnedCostSql. A return
+//      s.id = r.sale_id`), exactly like the snapshot kernel's returned cost. A return
 //      whose sale is outside the window, or which carries no sale_id at all,
 //      reverses nothing -- it has nothing in scope to reverse.
 //   2. A CANCELLED SALE'S REFUND STILL CAME OFF. The sold side excluded

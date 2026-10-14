@@ -339,13 +339,13 @@ export function countLabel(n: number, noun: ReportNoun, tr: (key: string, fallba
   return `${fmtInt(n)}${more ? '+' : ''} ${word.toLowerCase()}`
 }
 
-/** "Top 500 of 501 customers": a capped list says how much of the window it holds. */
 /** The profit column / summary label: a cost viewer's goods-only profit (L4)
  *  is named for what it is, never as the administrator's full figure. */
 export function profitLabel(t: Pick<ReportTotals, 'profit_excludes_delivery'> | null | undefined, tr: (key: string, fallback: string) => string): string {
   return t?.profit_excludes_delivery ? tr('rpt_profit_excl_delivery', 'Profit (excl. delivery)') : tr('rpt_gross_profit', 'Gross profit')
 }
 
+/** "Top 500 of 501 customers": a capped list says how much of the window it holds. */
 export function topOfLabel(shown: number, total: number, noun: ReportNoun, tr: (key: string, fallback: string) => string): string {
   return tr('rpt_top_n_of_m', 'Top {shown} of {total} {noun}')
     .replace('{shown}', fmtInt(shown)).replace('{total}', fmtInt(total)).replace('{noun}', tr(noun[2], noun[3]).toLowerCase())

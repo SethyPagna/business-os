@@ -27,6 +27,16 @@
 //   an Error subclass declared but never thrown/caught anywhere in src/ or
 //   scripts/; re-verified still unreferenced.
 //
+// - src/lib/salesAnalytics.ts: ItemCostRow, cancelledCountByBucket,
+//   cancelledGroupCounts, unionBuckets, VOID_ONLY_LEVEL (five lines) -- the helpers only the retired SQL
+//   report paths called. Those paths were unreachable behind an early `return` and were removed
+//   (getSalesDayReport, getSalesGroupedTotals, getProductSalesRanking, getBusinessSummaryDayRows; see
+//   test-sales-kernel-reachability-pure), which left these without a caller. Unreferenced is not dead:
+//   they are kept and listed for the owner to rule on. Remove them together, then lower BUDGET.
+//   Round 3 (6.0.326) removed returnedCostByBucket with returnedCostSql, and RECOGNIZED_LEVEL_COLUMNS with
+//   storeDeliveryExpr: the snapshot kernel computes the same figures (returned cost and store delivery per
+//   bucket, exactly), and nothing in src/ read the SQL fragments (the only consumer was the waterfall pin).
+//
 // Any new name that appears in the scan and is NOT one of the above must
 // either be removed (if genuinely dead) or added to this list with a reason,
 // and BUDGET updated to match -- the budget only moves when this comment is
@@ -42,7 +52,7 @@ const root = path.join(__dirname, '..')
 
 const EXCLUDED_SIBLING_FILES = ['cloudflare/src/routes/products.ts'].join(', ')
 
-const BUDGET = 4
+const BUDGET = 9
 
 const result = spawnSync(
   process.execPath,

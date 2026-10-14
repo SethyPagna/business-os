@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { acquisitionCostResponses, canViewAcquisitionCosts, canEditAcquisitionCosts } from '../lib/acquisitionCostAccess'
+import { ACQUISITION_COST_TEXT_PATTERNS, acquisitionCostResponses, canViewAcquisitionCosts, canEditAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
 import { requireAuth } from '../lib/auth'
 import type { Env } from '../index'
@@ -7,19 +7,21 @@ import { getSystemJob, listCloudflareBackups, listSystemJobs, storeSystemJob } f
 import { buildDriveOauthStartUrl, completeDriveOauth, consumeDriveOauthState, disconnectDrive, driveSyncStatus, updateDrivePreferences } from '../lib/googleDrive'
 import { enqueueDriveRestoreStageJob, enqueueDriveSyncJob } from '../lib/driveSyncQueue'
 import { canAuthorizeDriveSync } from '../lib/driveSyncAuthority'
-import { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier } from '../lib/permissions'
+import { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, type PermissionUser } from '../lib/permissions'
 import { resolvePlanTier } from '../lib/planTier'
 import { readAllQuotas } from '../lib/quotaGuard'
 import { audit, buildAuditLogRetentionDeleteSql } from '../lib/audit'
 import { decodeAuditCursor } from '../lib/auditLogQuery'
 import { readAuditLogPage } from '../lib/auditLogPage'
+import { COURIER_COST_TEXT_PATTERN, canViewCourierCost, redactAuditRows } from '../lib/courierCostAccess'
 import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
-import { BUCKET_MONEY_PLACES, CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesTotalsAndPeriodSeries, identifiedCustomerExpr, reportCustomerNameExpr, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr, shiftWindowBound, shiftWindowWhere } from '../lib/salesAnalytics'
+import { BUCKET_MONEY_PLACES, DASHBOARD_TOP_ROWS, applyLiveProductNames, dashboardRankingRows, getSalesTotalsAndPeriodSeries, getSalesTotalsWithoutLosses, reportCustomerNameExpr, previousPeriodFilters, shiftWindowBound, shiftWindowWhere, type DashboardProductRow } from '../lib/salesAnalytics'
+import { DASHBOARD_RANKING_ROWS, openDashboardRankingsCache, type DashboardRankingsCacheContext } from '../lib/dashboardRankingsCache'
 import { getFamilyStockAlertPage, type FamilyStockAlertState } from '../lib/familyStockStats'
 import { dashboardExpiringProductsSql, loadDashboardStockOverview, type DashboardStockOverviewContext } from '../lib/dashboardStockOverview'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
-import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
+import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { branchHistoryNameSql } from '../lib/stockInSessionsQuery'
@@ -306,42 +308,27 @@ async function dashboardSummary(env: Env, query: Record<string, string>, overvie
   }
 }
 
-async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdmin: boolean, canViewCosts = isAdmin) {
+async function dashboardAnalytics(env: Env, query: Record<string, string>, user: PermissionUser, rankingsContext: DashboardRankingsCacheContext) {
+  const isAdmin = isAdminControlUser(user)
+  const canViewCosts = canViewAcquisitionCosts(user)
+  const canViewCourier = canViewCourierCost(user)
   const db = getDb(env)
   const range = dateRange(query)
   const { startDate, endDate, granularity, createdFrom, createdTo } = range
   const filters = { startDate, endDate, createdFrom, createdTo, branchId: query.branchId || null }
   const analyticsParams = dashboardRangeParams(range, filters.branchId)
   const branchClause = (alias: string) => filters.branchId ? ` AND ${alias}.branch_id = @branchId` : ''
-  const activeSalesClause = (alias: string) => `${dashboardRangeClause(alias, range)} AND ${recognizedExpr(`${alias}.`)}${branchClause(alias)}`
-  // Apportions a sale's net revenue across its lines by each line's share of
-  // subtotal_usd. The > 0 guard avoids a divide-by-zero.
-  //
-  // It used to cost an asymmetry: a sale whose subtotal was never written
-  // contributed 0 to every by-product figure while still appearing in the
-  // by-payment-method and by-branch ones, which read the sale row directly --
-  // which is how the Sep 2-3 import's 22 zero-subtotal receipts hid here. As
-  // of Sep 6 2026 the kernel's valuedSaleExpr holds those receipts out of the
-  // sale-level figures too (netSaleExpr floors at 0 and netRefundExpr caps at
-  // that 0), so both populations now agree at zero and the same 22 receipts
-  // are reported as unvalued_tx_count instead of silently split.
-  const attributedLineRevenue = `CASE
-    WHEN COALESCE(s.subtotal_usd, 0) > 0
-      THEN COALESCE(si.total_usd, 0) / s.subtotal_usd * (${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')})
-    ELSE 0
-  END`
+  // Opened first: the versions it keys on must not be newer than the snapshot the rankings come from.
+  const rankingsCache = await openDashboardRankingsCache(env, rankingsContext, filters)
   const [
-    { totals, periodSeries: periodData },
+    { totals, periodSeries: periodData, byPayment, byBranch, topCustomers: rankedCustomers = [], hourlyDist, topProducts: rankedProducts = [], topProductsQty: rankedProductsQty = [] },
     prevTotals,
     periodReturns,
     periodSupplierReturns,
-    byPayment,
-    byBranch,
-    topProducts,
-    topProductsQty,
-    topCustomers,
-    hourlyDist,
   ] = await Promise.all([
+    // The payment-method and branch cards, the top customers, top products (by revenue and by quantity) and busy
+    // hours are more views of that one snapshot (kernel buckets, 4 places), not SQL of their own.
+    //
     // P11-14: totals and periodData are the SAME window read twice through
     // independent full snapshot fetches before this change -- readSalesReportSnapshot
     // keyset-pages sales/sale_items/returns/return_items TWICE each as a
@@ -350,8 +337,9 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdm
     // round trips to exceed the request budget before finishing, which showed
     // up as a hang rather than a fast, honest error. One shared snapshot read
     // now backs both figures (see getSalesTotalsAndPeriodSeries).
-    getSalesTotalsAndPeriodSeries(env, filters, granularity as 'day' | 'week' | 'month'),
-    range.allTime ? Promise.resolve({}) : getSalesTotals(env, previousPeriodFilters(filters)),
+    getSalesTotalsAndPeriodSeries(env, filters, granularity as 'day' | 'week' | 'month', DASHBOARD_RANKING_ROWS),
+    // The card compares revenue and sale count with the previous period; the removal-loss block is not part of that.
+    range.allTime ? Promise.resolve({}) : getSalesTotalsWithoutLosses(env, previousPeriodFilters(filters)),
     db.prepare(`
       WITH matching_returns AS (
         SELECT r.id, r.total_refund_usd
@@ -374,85 +362,14 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdm
         AND COALESCE(r.return_scope, 'customer') = 'supplier'
         AND COALESCE(r.status, 'completed') <> 'cancelled'${branchClause('r')}
     `).get(analyticsParams),
-    db.prepare(`
-      SELECT COALESCE(NULLIF(TRIM(s.payment_method), ''), 'Unknown') AS method,
-             COALESCE(NULLIF(TRIM(s.payment_method), ''), 'Unknown') AS payment_method,
-             COUNT(*) AS count,
-             COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS revenue_usd
-      FROM sales s
-      ${CUSTOMER_REFUND_JOIN}s.id
-      WHERE ${activeSalesClause('s')}
-      GROUP BY COALESCE(NULLIF(TRIM(s.payment_method), ''), 'Unknown')
-      ORDER BY revenue_usd DESC
-    `).all(analyticsParams),
-    db.prepare(`
-      SELECT s.branch_id, COALESCE(s.branch_name, 'Unassigned') AS branch_name,
-             COUNT(*) AS tx_count, COUNT(*) AS count,
-             COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS revenue_usd
-      FROM sales s
-      ${CUSTOMER_REFUND_JOIN}s.id
-      WHERE ${activeSalesClause('s')}
-      GROUP BY s.branch_id, COALESCE(s.branch_name, 'Unassigned')
-      ORDER BY revenue_usd DESC
-    `).all(analyticsParams),
-    // Grouped by product_id (COALESCE(si.product_id, 0), falling back to a
-    // normalized name key only for the NULL-id/no-link legacy rows) -- NOT
-    // by (product_id, product_name). A product merge (migration 0165+) keeps
-    // one keeper id but leaves old sale_items rows carrying the pre-merge
-    // product_name snapshot, so grouping by the pair split one merged
-    // product's history back into N rows here, one per historical name. The
-    // display name is read live from `products` (COALESCE(MAX(p.name),
-    // MAX(si.product_name))) so a renamed/merged product shows its current
-    // name; the snapshot is only a fallback for a deleted product_id.
-    // Same id-only grouping shape as lib/salesAnalytics.ts's top-products
-    // kernel (line ~3049), just this endpoint's own revenue-attribution math.
-    db.prepare(`
-      SELECT si.product_id, COALESCE(MAX(p.name), MAX(si.product_name)) AS product_name, SUM(si.quantity) AS qty_sold,
-             COALESCE(SUM(${attributedLineRevenue}), 0) AS revenue_usd
-      FROM sale_items si
-      JOIN sales s ON s.id = si.sale_id
-      LEFT JOIN products p ON p.id = si.product_id
-      ${CUSTOMER_REFUND_JOIN}s.id
-      WHERE ${activeSalesClause('s')}
-      GROUP BY COALESCE(si.product_id, 0), CASE WHEN si.product_id IS NULL THEN lower(trim(COALESCE(si.product_name, ''))) ELSE '' END
-      ORDER BY revenue_usd DESC
-      LIMIT 20
-    `).all(analyticsParams),
-    db.prepare(`
-      SELECT si.product_id, COALESCE(MAX(p.name), MAX(si.product_name)) AS product_name, SUM(si.quantity) AS qty_sold,
-             COALESCE(SUM(${attributedLineRevenue}), 0) AS revenue_usd
-      FROM sale_items si
-      JOIN sales s ON s.id = si.sale_id
-      LEFT JOIN products p ON p.id = si.product_id
-      ${CUSTOMER_REFUND_JOIN}s.id
-      WHERE ${activeSalesClause('s')}
-      GROUP BY COALESCE(si.product_id, 0), CASE WHEN si.product_id IS NULL THEN lower(trim(COALESCE(si.product_name, ''))) ELSE '' END
-      ORDER BY qty_sold DESC
-      LIMIT 20
-    `).all(analyticsParams),
-    db.prepare(`
-      SELECT MAX(CASE WHEN ${identifiedCustomerExpr('s.')} IS NULL THEN '' ELSE ${reportCustomerNameExpr('s.')} END) AS customer_name, COUNT(*) AS sale_count,
-             COALESCE(SUM(s.subtotal_usd), 0) AS gross_revenue_usd,
-             COALESCE(SUM(s.discount_usd), 0) AS store_discount_usd,
-             COALESCE(SUM(s.membership_discount_usd), 0) AS membership_discount_usd,
-             COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS net_revenue_usd
-      FROM sales s
-      ${CUSTOMER_REFUND_JOIN}s.id
-      WHERE ${activeSalesClause('s')}
-      GROUP BY ${identifiedCustomerExpr('s.')}
-      ORDER BY net_revenue_usd DESC
-      LIMIT 20
-    `).all(analyticsParams),
-    db.prepare(`
-      SELECT CAST(${localHourExpr('s.created_at')} AS INTEGER) AS hour, COUNT(*) AS count,
-             COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS revenue_usd
-      FROM sales s
-      ${CUSTOMER_REFUND_JOIN}s.id
-      WHERE ${activeSalesClause('s')}
-      GROUP BY CAST(${localHourExpr('s.created_at')} AS INTEGER)
-      ORDER BY hour ASC
-    `).all(analyticsParams),
   ])
+  // The "view more" lists are these same rankings, deeper: hand them on, keep the card's top rows.
+  rankingsCache?.write('top_customers', rankedCustomers)
+  rankingsCache?.write('top_products', rankedProducts)
+  rankingsCache?.write('top_products_qty', rankedProductsQty)
+  const topCustomers = rankedCustomers.slice(0, DASHBOARD_TOP_ROWS)
+  // Products show under their CURRENT name (a merged or renamed product), one lookup for both lists.
+  const [topProducts, topProductsQty] = await applyLiveProductNames(env, [rankedProducts.slice(0, DASHBOARD_TOP_ROWS), rankedProductsQty.slice(0, DASHBOARD_TOP_ROWS)])
   return {
     // cost_usd / profit_usd and the removal-loss pair are the SAME admin-only
     // money reports.ts's gateTotals already gates -- reused rather than
@@ -460,19 +377,19 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdm
     // 2026: this endpoint previously ran its own five-key strip and left
     // cost_usd / profit_usd ungated, so a non-admin dashboard permission
     // still saw COGS and profit).
-    totals: gateTotals((totals || {}) as unknown as Record<string, unknown>, isAdmin, canViewCosts),
-    prevTotals: gateTotals((prevTotals || {}) as unknown as Record<string, unknown>, isAdmin, canViewCosts),
+    totals: gateTotals((totals || {}) as unknown as Record<string, unknown>, isAdmin, canViewCosts, 2, canViewCourier),
+    prevTotals: gateTotals((prevTotals || {}) as unknown as Record<string, unknown>, isAdmin, canViewCosts, 2, canViewCourier),
     periodReturns: periodReturns || {},
     periodSupplierReturns: periodSupplierReturns || {},
     // The period rows are the same money as the totals above, so they pass
     // the same gate (AL finding L4: they used to reach every dashboard caller
     // with cost, profit and the courier cost intact). 4-place bucket rows.
-    periodData: (periodData || []).map((row) => gateTotals(row as unknown as Record<string, unknown>, isAdmin, canViewCosts, BUCKET_MONEY_PLACES)),
+    periodData: (periodData || []).map((row) => gateTotals(row as unknown as Record<string, unknown>, isAdmin, canViewCosts, BUCKET_MONEY_PLACES, canViewCourier)),
     byPayment: byPayment || [],
     byBranch: byBranch || [],
     topProducts: topProducts || [],
     topProductsQty: topProductsQty || [],
-    topCustomers: topCustomers || [],
+    topCustomers,
     hourlyDist: hourlyDist || [],
   }
 }
@@ -486,9 +403,9 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdm
 // (not literally unbounded -- see DASHBOARD_INSIGHT_LIST_LIMIT) so a float
 // can never trigger the kind of unbounded scan P11-14 removed elsewhere.
 type DashboardInsightKind = 'recent_sales' | 'expiring_products' | 'top_products' | 'top_products_qty' | 'top_customers'
-const DASHBOARD_INSIGHT_LIST_LIMIT = 300
+const DASHBOARD_INSIGHT_LIST_LIMIT = DASHBOARD_RANKING_ROWS
 
-async function dashboardInsightList(env: Env, query: Record<string, string>, kind: DashboardInsightKind) {
+async function dashboardInsightList(env: Env, query: Record<string, string>, kind: DashboardInsightKind, rankingsContext: DashboardRankingsCacheContext) {
   const db = getDb(env)
   const range = dateRange(query)
   const branchId = query.branchId || null
@@ -516,55 +433,26 @@ async function dashboardInsightList(env: Env, query: Record<string, string>, kin
     return { items: rows || [], truncated: (rows || []).length >= DASHBOARD_INSIGHT_LIST_LIMIT }
   }
 
-  // top_products / top_products_qty / top_customers: same recognized-sales
-  // window dashboardAnalytics uses for these three cards. The GROUP BY
-  // already computes every group before the preview's LIMIT 20 truncates it,
-  // so raising the limit here costs nothing extra -- it is the SAME query,
-  // just kept instead of cut.
-  const analyticsParams = dashboardRangeParams(range, branchId)
-  const branchClause = branchId ? ' AND s.branch_id = @branchId' : ''
-  const activeSalesClause = `${dashboardRangeClause('s', range)} AND ${recognizedExpr('s.')}${branchClause}`
-  const attributedLineRevenue = `CASE
-    WHEN COALESCE(s.subtotal_usd, 0) > 0
-      THEN COALESCE(si.total_usd, 0) / s.subtotal_usd * (${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')})
-    ELSE 0
-  END`
-  if (kind === 'top_customers') {
-    const rows = await db.prepare(`
-      SELECT MAX(CASE WHEN ${identifiedCustomerExpr('s.')} IS NULL THEN '' ELSE ${reportCustomerNameExpr('s.')} END) AS customer_name, COUNT(*) AS sale_count,
-             COALESCE(SUM(s.subtotal_usd), 0) AS gross_revenue_usd,
-             COALESCE(SUM(s.discount_usd), 0) AS store_discount_usd,
-             COALESCE(SUM(s.membership_discount_usd), 0) AS membership_discount_usd,
-             COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS net_revenue_usd
-      FROM sales s
-      ${CUSTOMER_REFUND_JOIN}s.id
-      WHERE ${activeSalesClause}
-      GROUP BY ${identifiedCustomerExpr('s.')}
-      ORDER BY net_revenue_usd DESC
-      LIMIT ${DASHBOARD_INSIGHT_LIST_LIMIT}
-    `).all(analyticsParams)
-    return { items: rows || [], truncated: (rows || []).length >= DASHBOARD_INSIGHT_LIST_LIMIT }
+  // top_products / top_products_qty / top_customers: the same verified snapshot
+  // and the same kernel rankings dashboardAnalytics reads for these three cards,
+  // just with more rows kept, so the list can never disagree with its card. The
+  // card has just stored them (lib/dashboardRankingsCache.ts); with nothing stored
+  // the list reads one snapshot and builds only the ranking it shows.
+  const filters = { startDate: range.startDate, endDate: range.endDate, createdFrom: range.createdFrom, createdTo: range.createdTo, branchId }
+  const rankingsCache = await openDashboardRankingsCache(env, rankingsContext, filters)
+  let rows = await rankingsCache?.read(kind) ?? null
+  if (!rows) {
+    rows = await dashboardRankingRows(env, filters, kind, DASHBOARD_INSIGHT_LIST_LIMIT)
+    rankingsCache?.write(kind, rows)
   }
-  const orderBy = kind === 'top_products_qty' ? 'qty_sold DESC' : 'revenue_usd DESC'
-  const rows = await db.prepare(`
-    SELECT si.product_id, COALESCE(MAX(p.name), MAX(si.product_name)) AS product_name, SUM(si.quantity) AS qty_sold,
-           COALESCE(SUM(${attributedLineRevenue}), 0) AS revenue_usd
-    FROM sale_items si
-    JOIN sales s ON s.id = si.sale_id
-    LEFT JOIN products p ON p.id = si.product_id
-    ${CUSTOMER_REFUND_JOIN}s.id
-    WHERE ${activeSalesClause}
-    GROUP BY COALESCE(si.product_id, 0), CASE WHEN si.product_id IS NULL THEN lower(trim(COALESCE(si.product_name, ''))) ELSE '' END
-    ORDER BY ${orderBy}
-    LIMIT ${DASHBOARD_INSIGHT_LIST_LIMIT}
-  `).all(analyticsParams)
-  return { items: rows || [], truncated: (rows || []).length >= DASHBOARD_INSIGHT_LIST_LIMIT }
+  const items = kind === 'top_customers' ? rows : (await applyLiveProductNames(env, [rows as DashboardProductRow[]]))[0]
+  return { items, truncated: items.length >= DASHBOARD_INSIGHT_LIST_LIMIT }
 }
 
 // The shared stock overview's cache key lives on this request's origin, and
 // its cache write runs after the response (waitUntil). A context without an
 // execution context (a pure test calling app.request) simply skips the wait.
-function dashboardOverviewContext(c: { req: { url: string }; executionCtx: { waitUntil(promise: Promise<unknown>): void } }): DashboardStockOverviewContext {
+function dashboardOverviewContext(c: { req: { url: string }; executionCtx: { waitUntil(promise: Promise<unknown>): void } }): DashboardStockOverviewContext & DashboardRankingsCacheContext {
   return {
     requestUrl: c.req.url,
     waitUntil(promise) {
@@ -611,7 +499,7 @@ app.get('/analytics', async (c) => {
   if (denied) return denied
   const rangeError = dashboardRangeError(c.req.query())
   if (rangeError) return c.json({ error: rangeError }, 400)
-  return c.json(await dashboardAnalytics(c.env, c.req.query(), isAdminControlUser(c.get('user')), canViewAcquisitionCosts(c.get('user'))))
+  return c.json(await dashboardAnalytics(c.env, c.req.query(), c.get('user'), dashboardOverviewContext(c)))
 })
 app.get('/dashboard/insight-list', async (c) => {
   const denied = denyUnless(c, 'dashboard')
@@ -623,7 +511,7 @@ app.get('/dashboard/insight-list', async (c) => {
   if (!validKinds.includes(kind as DashboardInsightKind)) {
     return c.json({ error: 'insight must be one of ' + validKinds.join(', ') }, 400)
   }
-  return c.json(await dashboardInsightList(c.env, c.req.query(), kind as DashboardInsightKind))
+  return c.json(await dashboardInsightList(c.env, c.req.query(), kind as DashboardInsightKind, dashboardOverviewContext(c)))
 })
 app.get('/dashboard/startup', async (c) => {
   const denied = denyUnless(c, 'dashboard')
@@ -632,7 +520,7 @@ app.get('/dashboard/startup', async (c) => {
   if (rangeError) return c.json({ error: rangeError }, 400)
   const [summary, analytics] = await Promise.all([
     dashboardSummary(c.env, c.req.query(), dashboardOverviewContext(c)),
-    dashboardAnalytics(c.env, c.req.query(), isAdminControlUser(c.get('user')), canViewAcquisitionCosts(c.get('user'))),
+    dashboardAnalytics(c.env, c.req.query(), c.get('user'), dashboardOverviewContext(c)),
   ])
   return c.json({ summary, analytics })
 })
@@ -677,7 +565,7 @@ app.get('/system/audit-logs', requireAuth, async (c) => {
     // Own-scoping is enforced HERE by locking the reader to the caller's id
     // (never trusting the client's userId param for a view user); the lock
     // applies to the rows and to the per-user roster alike.
-    return c.json(await readAuditLogPage(getDb(c.env), {
+    const page = await readAuditLogPage(getDb(c.env), {
       search: c.req.query('search'),
       action: c.req.query('action'),
       entity: c.req.query('entity'),
@@ -696,7 +584,11 @@ app.get('/system/audit-logs', requireAuth, async (c) => {
       cursor,
       pageSize: c.req.query('pageSize'),
       counts: c.req.query('counts'),
-    }))
+      // The responses below redact these costs after the query, so the search must not be able to find them either.
+      hiddenTextPatterns: [...(canViewCourierCost(user) ? [] : [COURIER_COST_TEXT_PATTERN]), ...(canViewAcquisitionCosts(user) ? [] : ACQUISITION_COST_TEXT_PATTERNS)],
+    })
+    // The courier's actual cost leaves here by the same permission as everywhere else.
+    return c.json({ ...page, items: redactAuditRows(page.items, user) })
   } catch (error) {
     if (error instanceof RangeError) return c.json({ error: error.message }, 400)
     // A db error is a 500, never an empty 200 that reads as "no logs": the

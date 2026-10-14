@@ -137,6 +137,57 @@ await runTest('adding delivery renders one truthful driver, fee and optional-cos
   assert.equal(row.stockNote, null)
 })
 
+await runTest('a courier-cost entry the Worker redacted prints no amounts, never a zero or "Not recorded"', () => {
+  const row = toAmendmentDisplayRow(ROW({
+    kind: 'delivery_actual_cost_changed',
+    product_id: null, product_name: null, sale_item_id: null,
+    quantity_before: null, quantity_after: null, quantity_delta: null,
+    amount_before_usd: null, amount_after_usd: null, amount_delta_usd: null,
+    courier_cost_hidden: true,
+    total_before_usd: 7.5, total_after_usd: 7.5, units_moved: 0,
+  }), usd, 'Delivery')
+  assert.equal(row.valuesHidden, true)
+  assert.equal(row.subject, 'Delivery actual cost', 'the entry is still listed, with its actor and time')
+  assert.equal(row.actor, 'Sokha')
+  assert.equal(row.beforeText, '')
+  assert.equal(row.afterText, '')
+  assert.equal(row.deltaText, '')
+  const control = toAmendmentDisplayRow(ROW({
+    kind: 'delivery_actual_cost_changed', product_id: null, product_name: null, sale_item_id: null,
+    quantity_before: null, quantity_after: null, quantity_delta: null,
+    amount_before_usd: 0, amount_after_usd: 0, amount_delta_usd: 0, units_moved: 0,
+  }), usd, 'Delivery')
+  assert.equal(control.valuesHidden, false, 'a genuine $0.00 correction is still printed: only the Worker marker hides')
+  assert.equal(control.afterText, '$0.00')
+})
+
+await runTest('the sale detail prints no actual-cost row for a sale whose cost the Worker did not send, and no amounts for a redacted entry', () => {
+  const modal = readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8')
+  assert.match(modal, /const actualCostVisible = Object\.prototype\.hasOwnProperty\.call\(sale, 'delivery_actual_cost_usd'\)/,
+    'an absent key is "not shown to you"')
+  assert.match(modal, /\{isDelivery && actualCostVisible \? \(\s*<div data-sale-actual-cost=""/,
+    'the row is gated on the key, so a hidden cost is never printed as "Not recorded"')
+  assert.match(modal, /\) : entry\.row\.valuesHidden \? null : \(/,
+    'a redacted ledger entry prints its subject, actor and time and no before/after/delta line')
+})
+
+await runTest('a delivery_added entry the Worker redacted leaves the cost part out of the line', () => {
+  const row = toAmendmentDisplayRow(ROW({
+    kind: 'delivery_added',
+    product_id: null, product_name: null, sale_item_id: null,
+    quantity_before: null, quantity_after: null, quantity_delta: null,
+    amount_before_usd: 0, amount_after_usd: 2.5, amount_delta_usd: 2.5,
+    before_json: JSON.stringify({ delivery_contact_name: null, delivery_fee_usd: 0 }),
+    after_json: JSON.stringify({ delivery_contact_name: 'Driver Dara', delivery_fee_usd: 2.5 }),
+    courier_cost_hidden: true,
+    units_moved: 0,
+  }), usd, 'Delivery', { feeLabel: 'Fee', actualCostLabel: 'Actual cost', notRecordedLabel: 'Not recorded' })
+  assert.equal(row.beforeText, '— · Fee: $0.00')
+  assert.equal(row.afterText, 'Driver Dara · Fee: $2.50')
+  assert.ok(!/Not recorded|Actual cost/.test(row.afterText), 'the fee stays; the cost line is gone, not "Not recorded"')
+  assert.equal(row.valuesHidden, false)
+})
+
 await runTest('a removal is still fully described after the line it describes is gone', () => {
   // This is the case the ledger exists for: sale_items no longer holds this
   // row at all, so the receipt cannot print it and the detail view has only

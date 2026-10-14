@@ -73,10 +73,16 @@ async function main() {
       INSERT INTO returns(id,sale_id,total_refund_usd) VALUES(12,12,0);
       INSERT INTO return_items VALUES(12,12,3,1,'restock',1);`)
     const fraction = (await h.get({ q: 'fraction' })).body
-    // Owner 13 Oct (L3): split rows carry 4 places so the totals row adds up, with no cents residue.
-    assert.deepEqual(fraction.rows.map(row => row.net_revenue_usd), [.0044, .0044])
-    assert.equal(fraction.totals.revenue_usd, fraction.rows.reduce((sum, row) => sum + row.net_revenue_usd, 0))
-    assert.equal(fraction.totals.revenue_usd, .0088); assert.equal(fraction.totals.cost_usd, .0088)
+    // Owner rule (13 Oct 2026): this export's receipt rows carry 4 places and its totals row is their exact sum, also at 4
+    // places (the headline of the Sales page is the cents figure, a different surface). Two $0.0044 receipts are 0.0044
+    // each and 0.0088 together; a cent-rounded row would read 0 and a cent-rounded total would read 0.01.
+    assert.deepEqual(fraction.rows.map(row => row.net_revenue_usd), [.0044, .0044], 'each receipt row keeps its 4 places')
+    const exactSum = key => Math.round(fraction.rows.reduce((sum, row) => sum + row[key], 0) * 10_000) / 10_000
+    assert.equal(exactSum('net_revenue_usd'), .0088, 'the rows add up exactly')
+    assert.equal(fraction.totals.revenue_usd, exactSum('net_revenue_usd'), 'the totals row is the exact sum of the rows, not a cent figure')
+    assert.equal(fraction.totals.cost_usd, exactSum('cost_usd'), 'cost the same')
+    assert.equal(fraction.totals.cost_usd, .0088)
+    assert.notEqual(fraction.totals.revenue_usd, .01, 'the fixture separates 4 places from cents')
     const floor = (await h.get({ q: 'floor' })).body
     assert.equal(floor.rows.reduce((sum, row) => sum + row.cost_usd, 0), 5)
     assert.equal(floor.totals.cost_usd, 3, 'one exact cohort cost floor, not sum of receipt floors')
@@ -109,7 +115,14 @@ async function main() {
     h.setUser(h.staff({ sales: true, product_cost_view: true }))
     const viewer = (await h.get()).body
     assert.equal(Object.hasOwn(viewer.totals, 'cost_usd'), true)
-    assert.equal(Object.hasOwn(viewer.totals, 'delivery_actual_cost_usd'), false)
+    assert.equal(Object.hasOwn(viewer.totals, 'delivery_actual_cost_usd'), true, 'the courier-cost permission is on by default for a Sales role')
+    h.setUser(h.staff({ sales: true, product_cost_view: true, 'sales:view_courier_cost': false }))
+    const blind = (await h.get()).body
+    assert.equal(Object.hasOwn(blind.totals, 'cost_usd'), true)
+    assert.equal(Object.hasOwn(blind.totals, 'delivery_actual_cost_usd'), false, 'switched off: the cost grant alone never opens the courier cost')
+    assert.equal(blind.totals.profit_excludes_delivery, true)
+    assert.notEqual(blind.export_token, viewer.export_token, 'the courier-cost authority is bound into the export token')
+    assert.equal((await h.get(frozen(viewer, { verifyOnly: '1' }))).status, 409, 'a token minted with the courier cost cannot be replayed without it')
     assert.equal(Object.hasOwn(viewer.totals, 'money_contributing_rows'), true)
     assert.equal(Object.hasOwn(viewer.rows[0], 'money_complete'), true)
   })
@@ -202,14 +215,16 @@ async function main() {
     // one edit that moves the exact totals without moving any row; the v1 item
     // discount in the next check is the ordinary one.
     h.sql.exec(`INSERT INTO sales(id,created_at,sale_status,customer_name,subtotal_usd,total_usd) VALUES
-      (10,'2026-09-04 01:00:00','completed','tiny',.00242,.00242),
-      (11,'2026-09-04 01:00:00','completed','tiny',.00242,.00242);`)
+      (10,'2026-09-04 01:00:00','completed','tiny',.00241,.00241),
+      (11,'2026-09-04 01:00:00','completed','tiny',.00241,.00241);`)
     const first = (await h.get({ q: 'tiny' })).body
-    assert.equal(first.totals.revenue_usd, .0048)
-    h.sql.exec('UPDATE sales SET subtotal_usd=.00244,total_usd=.00244 WHERE id=10')
+    // Receipt rows and the totals row carry 4 places (owner, 13 Oct 2026), so the edit must hide below the 4th place.
+    assert.deepEqual(first.rows.map(row => row.net_revenue_usd), [.0024, .0024])
+    assert.equal(first.totals.revenue_usd, .0048, 'the exact sum .00482 at 4 places')
+    h.sql.exec('UPDATE sales SET subtotal_usd=.00244,total_usd=.00244 WHERE id IN (10,11)')
     const next = (await h.get({ q: 'tiny' })).body
-    assert.deepEqual(next.rows, first.rows)
-    assert.equal(next.totals.revenue_usd, .0049)
+    assert.deepEqual(next.rows, first.rows, 'every 4-place output row is identical')
+    assert.equal(next.totals.revenue_usd, .0049, 'the exact sum .00488 at 4 places')
     assert.notEqual(next.export_token, first.export_token)
     assert.equal((await h.get(frozen(first, { q: 'tiny', verifyOnly: '1' }))).status, 409)
   })

@@ -501,7 +501,7 @@ async function checkAuditProducerLiterals(api) {
  const {load,compile,read,ast,find,evaluate,sourceRoot}=createLiteralAuditLoader(),{DatabaseSync}=require('node:sqlite')
  const wt=path.resolve(root,'../..')
  const access = api, permissions = load(path.join(sourceRoot, 'lib/permissions.ts'))
- const reader = load(path.join(sourceRoot, 'lib/auditLogPage.ts')), query = load(path.join(sourceRoot, 'lib/auditLogQuery.ts'))
+ const reader = load(path.join(sourceRoot, 'lib/auditLogPage.ts')), query = load(path.join(sourceRoot, 'lib/auditLogQuery.ts')), courier = load(path.join(sourceRoot, 'lib/courierCostAccess.ts'))
  const audit = compile(read(path.join(sourceRoot, 'lib/audit.ts')), id => { assert.equal(id, './db'); return { getDb: () => { throw Error('Unselected audit service') } } })
  const settings = ast('routes/settings.ts'), sales = ast('routes/sales.ts')
  const keysNode = find(settings, n => ts.isObjectLiteralExpression(n) && n.getText(settings) === '{ keys: changedKeys }')
@@ -546,7 +546,7 @@ async function checkAuditProducerLiterals(api) {
  const app = new Hono(); app.use('*', async (c, next) => { c.set('user', user); await next() }); app.use('*', access.acquisitionCostResponses)
  const compat = ast('routes/compat.ts'), handler = find(compat, n => ts.isExpressionStatement(n) && n.getText(compat).startsWith("app.get('/system/audit-logs',"))
  assert.ok(handler)
- new Function('app', 'requireAuth', 'getActionTier', 'decodeAuditCursor', 'readAuditLogPage', 'getDb', ts.transpileModule(handler.getText(compat), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText)(app, async (c, next) => next(), permissions.getActionTier, query.decodeAuditCursor, reader.readAuditLogPage, () => db)
+ new Function('app', 'requireAuth', 'getActionTier', 'decodeAuditCursor', 'readAuditLogPage', 'redactAuditRows', 'getDb', 'canViewCourierCost', 'canViewAcquisitionCosts', 'COURIER_COST_TEXT_PATTERN', 'ACQUISITION_COST_TEXT_PATTERNS', ts.transpileModule(handler.getText(compat), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText)(app, async (c, next) => next(), permissions.getActionTier, query.decodeAuditCursor, reader.readAuditLogPage, courier.redactAuditRows, () => db, courier.canViewCourierCost, access.canViewAcquisitionCosts, courier.COURIER_COST_TEXT_PATTERN, access.ACQUISITION_COST_TEXT_PATTERNS)
  const roles = [
   { name: 'denied', permissions: { audit_log: true, product_cost_view: false, product_cost_edit: false } },
   { name: 'edit-only', permissions: { audit_log: true, product_cost_view: false, product_cost_edit: true } },

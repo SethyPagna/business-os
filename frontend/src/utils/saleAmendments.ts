@@ -43,6 +43,12 @@ export interface SaleAmendmentRow {
   note?: string | null
   before_json?: string | null
   after_json?: string | null
+  /**
+   * Set by the Worker when it removed the courier's actual cost from this entry
+   * (an administrator-only figure). The amounts it would have carried are
+   * absent, which is not the same as zero or "not recorded".
+   */
+  courier_cost_hidden?: boolean | null
   user_name?: string | null
   created_at?: string | null
 }
@@ -86,6 +92,8 @@ export interface AmendmentDisplayRow {
   actor: string | null
   at: string | null
   note: string | null
+  /** The entry's only content is a figure this reader may not see: print the subject, who and when, and no amounts. */
+  valuesHidden: boolean
 }
 
 const MONEY_KINDS = new Set(['delivery_fee_changed', 'delivery_actual_cost_changed'])
@@ -144,10 +152,11 @@ export function toAmendmentDisplayRow(
     const feeLabel = deliveryParts.feeLabel || 'Fee'
     const actualCostLabel = deliveryParts.actualCostLabel || 'Actual delivery cost'
     const notRecordedLabel = deliveryParts.notRecordedLabel || 'Not recorded'
+    const costHidden = row.courier_cost_hidden === true
     const composite = (name: unknown, fee: number, cost: number | null): string => [
       String(name || '—'),
       `${feeLabel}: ${fmtUSD(fee)}`,
-      `${actualCostLabel}: ${cost === null ? notRecordedLabel : fmtUSD(cost)}`,
+      ...(costHidden ? [] : [`${actualCostLabel}: ${cost === null ? notRecordedLabel : fmtUSD(cost)}`]),
     ].join(' · ')
     return {
       id: num(row.id),
@@ -166,12 +175,14 @@ export function toAmendmentDisplayRow(
       actor: row.user_name || null,
       at: row.created_at || null,
       note: row.note || null,
+      valuesHidden: false,
     }
   }
   const family: 'quantity' | 'money' = MONEY_KINDS.has(kind) ? 'money' : 'quantity'
   const isLineUpdate = kind === 'line_updated'
   const isRemoval = kind === 'line_removed'
 
+  const valuesHidden = kind === 'delivery_actual_cost_changed' && row.courier_cost_hidden === true
   const before = family === 'money' ? num(row.amount_before_usd) : num(row.quantity_before)
   const after = family === 'money' ? num(row.amount_after_usd) : num(row.quantity_after)
   // The delta is read from the stored column when it is there -- the database
@@ -197,11 +208,12 @@ export function toAmendmentDisplayRow(
     subject: family === 'money'
       ? (kind === 'delivery_actual_cost_changed' ? `${deliveryLabel} actual cost` : deliveryLabel)
       : (row.product_name || null),
-    beforeText: family === 'money' ? fmtUSD(before) : formatUnits(before),
-    afterText: family === 'money' ? fmtUSD(after) : formatUnits(after),
-    deltaText: family === 'money'
-      ? `${delta > 0 ? '+' : delta < 0 ? '-' : ''}${fmtUSD(Math.abs(delta))}`
-      : formatSignedUnits(delta),
+    beforeText: valuesHidden ? '' : family === 'money' ? fmtUSD(before) : formatUnits(before),
+    afterText: valuesHidden ? '' : family === 'money' ? fmtUSD(after) : formatUnits(after),
+    deltaText: valuesHidden ? ''
+      : family === 'money'
+        ? `${delta > 0 ? '+' : delta < 0 ? '-' : ''}${fmtUSD(Math.abs(delta))}`
+        : formatSignedUnits(delta),
     ...(isLineUpdate ? {
       priceBeforeText: fmtUSD(num(row.amount_before_usd)),
       priceAfterText: fmtUSD(num(row.amount_after_usd)),
@@ -224,6 +236,7 @@ export function toAmendmentDisplayRow(
     // into the wrong year the moment the display order changed.
     at: row.created_at || null,
     note: row.note || null,
+    valuesHidden,
   }
 }
 

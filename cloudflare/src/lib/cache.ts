@@ -148,6 +148,19 @@ export async function getVersionWithFallback(env: Env, namespace: string): Promi
   return cacheVersionToken('kv', '0')
 }
 
+// Several namespaces at once, same answer per namespace as getVersionWithFallback: KV first, then ONE D1 read for
+// every namespace KV does not hold, so a reader of N namespaces costs at most one statement instead of up to N.
+export async function getVersionsWithFallback(env: Env, namespaces: readonly string[]): Promise<string[]> {
+  const fromKv = await Promise.all(namespaces.map((namespace) => env.CACHE.get(cacheVersionKey(namespace))))
+  const fromD1 = await readD1Versions(env, namespaces.filter((_, index) => fromKv[index] == null))
+  return namespaces.map((namespace, index) => {
+    const kv = fromKv[index]
+    if (kv != null) return cacheVersionToken('kv', kv)
+    const d1 = fromD1.get(namespace)
+    return d1 != null ? cacheVersionToken('d1', d1) : cacheVersionToken('kv', '0')
+  })
+}
+
 export async function versionedKey(kv: KVNamespace, namespace: string, suffix: string): Promise<string> {
   const version = await getVersion(kv, namespace)
   return `${namespace}:${version}:${suffix}`
