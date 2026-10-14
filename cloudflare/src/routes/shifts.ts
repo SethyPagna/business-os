@@ -367,14 +367,20 @@ const CLOSE_TIME_REFUSALS = {
   beforeActivity: { code: 'shift_close_before_last_activity', error: 'Close the shift after its last sale, return or expense. An earlier time is not allowed.' },
   tooEarly: { code: 'shift_close_too_early', error: 'Close the shift now. A close time more than 5 minutes in the past needs an administrator.' },
 } as const
-type CloseTimeVerdict = { earlier: boolean; refusal: (typeof CLOSE_TIME_REFUSALS)[keyof typeof CLOSE_TIME_REFUSALS] | null }
-async function closeTimeVerdict(env: Env, user: SessionUser, shift: ShiftRow, closedAtMs: number, nowMs: number): Promise<CloseTimeVerdict> {
+/** `closedAtMs` is the instant to stamp: the requested one, or the second after the last record when the request fell in that very second. */
+type CloseTimeVerdict = { earlier: boolean; refusal: (typeof CLOSE_TIME_REFUSALS)[keyof typeof CLOSE_TIME_REFUSALS] | null; closedAtMs: number }
+async function closeTimeVerdict(env: Env, user: SessionUser, shift: ShiftRow, requestedMs: number, nowMs: number): Promise<CloseTimeVerdict> {
   const last = await shiftLastActivityMs(env, shift, nowMs)
+  // A close that lands in the same second as the last record is the till closing right after its last sale, not a
+  // chosen earlier time: it is stamped the second after that record (never before it) instead of being refused.
+  const closedAtMs = last != null && Math.floor(requestedMs / 1000) === Math.floor(last / 1000)
+    && (Math.floor(last / 1000) + 1) * 1000 <= nowMs + CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS
+    ? (Math.floor(last / 1000) + 1) * 1000 : requestedMs
   const beforeActivity = last != null && Math.floor(closedAtMs / 1000) <= Math.floor(last / 1000)
   const tooEarly = closedAtMs < nowMs - CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS
-  if (!beforeActivity && !tooEarly) return { earlier: false, refusal: null }
-  if (canManageShifts(user)) return { earlier: true, refusal: null }
-  return { earlier: true, refusal: beforeActivity ? CLOSE_TIME_REFUSALS.beforeActivity : CLOSE_TIME_REFUSALS.tooEarly }
+  if (!beforeActivity && !tooEarly) return { earlier: false, refusal: null, closedAtMs }
+  if (canManageShifts(user)) return { earlier: true, refusal: null, closedAtMs }
+  return { earlier: true, refusal: beforeActivity ? CLOSE_TIME_REFUSALS.beforeActivity : CLOSE_TIME_REFUSALS.tooEarly, closedAtMs }
 }
 /** The standing review a close leaves: the flag when an administrator closed at a time a cashier could not have chosen, an evaluated empty list otherwise. */
 function closeTimeReview(timing: CloseTimeVerdict, actorName: string): ShiftTimeReview[] {
@@ -1336,15 +1342,16 @@ app.post('/close', async (c) => {
   if (!countedUsd.ok || !countedKhr.ok) return c.json({ error: 'Closing counts must be 0 or more, or left blank.' }, 400)
   const additionalUsd = additionalMoney(body.additional_cash_usd); const additionalKhr = additionalMoney(body.additional_cash_khr)
   if (!additionalUsd.ok || !additionalKhr.ok) return c.json({ error: 'Additional change used must be 0 or more, or left blank.' }, 400)
-  const closedAt = new Date().toISOString()
-  const timing = await closeTimeVerdict(c.env, user, shift, Date.parse(closedAt), Date.parse(closedAt))
+  const nowIso = new Date().toISOString()
+  const timing = await closeTimeVerdict(c.env, user, shift, Date.parse(nowIso), Date.parse(nowIso))
   if (timing.refusal) return c.json(timing.refusal, 409)
+  const closedAt = new Date(timing.closedAtMs).toISOString()
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
   if (overlap) return c.json({ error: overlap }, 409)
   const closing = { ...storedShift(shift), closed_at: closedAt,
     closing_counted_usd: countedUsd.value, closing_counted_khr: countedKhr.value,
     additional_cash_usd: additionalUsd.value, additional_cash_khr: additionalKhr.value }
-  const result = await closeWithFigures(c.env, db, user, shift, closing, { closedAt, recordedAt: closedAt,
+  const result = await closeWithFigures(c.env, db, user, shift, closing, { closedAt, recordedAt: nowIso,
     countedUsd: countedUsd.value, countedKhr: countedKhr.value,
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
     note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Manual shift close', request: mutationRequest(body, shift.id),
@@ -1371,9 +1378,8 @@ app.post('/:id/close', async (c) => {
   const parsedClosedAt = body.closed_at == null || body.closed_at === '' ? new Date(now)
     : typeof body.closed_at === 'string' ? new Date(body.closed_at) : new Date(Number.NaN)
   if (Number.isNaN(parsedClosedAt.getTime())) return c.json({ error: 'A valid closing time is required.' }, 400)
-  const closedAtMs = withinServerClock(parsedClosedAt.getTime(), now)
-  if (closedAtMs == null) return c.json({ error: 'Closing time cannot be in the future.' }, 400)
-  const closedAt = new Date(closedAtMs).toISOString()
+  const requestedMs = withinServerClock(parsedClosedAt.getTime(), now)
+  if (requestedMs == null) return c.json({ error: 'Closing time cannot be in the future.' }, 400)
   const countedUsd = countedMoney(body.closing_counted_usd); const countedKhr = countedMoney(body.closing_counted_khr)
   if (!countedUsd.ok || !countedKhr.ok) return c.json({ error: 'Closing counts must be 0 or more, or left blank.' }, 400)
   const additionalUsd = additionalMoney(body.additional_cash_usd); const additionalKhr = additionalMoney(body.additional_cash_khr)
@@ -1386,9 +1392,10 @@ app.post('/:id/close', async (c) => {
   if (shift.cancelled_at) return c.json({ error: 'A cancelled shift cannot be closed.' }, 409)
   if (shift.closed_at) return c.json({ error: 'Shift is already closed.' }, 409)
   if (expectedRevision !== shift.revision) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
-  if (closedAtMs < utcMs(shift.opened_at)) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
-  const timing = await closeTimeVerdict(c.env, user, shift, closedAtMs, now)
+  if (requestedMs < utcMs(shift.opened_at)) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
+  const timing = await closeTimeVerdict(c.env, user, shift, requestedMs, now)
   if (timing.refusal) return c.json(timing.refusal, 409)
+  const closedAt = new Date(timing.closedAtMs).toISOString()
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
   if (overlap) return c.json({ error: overlap }, 409)
   const closing = { ...storedShift(shift), closed_at: closedAt,

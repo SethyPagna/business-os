@@ -65,6 +65,7 @@ async function main() {
     }
     await addPerson('admin', 90, adminRole, '{"all":true}')
     for (const [index, key] of ['b1', 'b2', 'b3', 'b4'].entries()) await addPerson(key, 41 + index, employeeRole, '{"pos":true,"sales":true}')
+    for (let index = 1; index <= 8; index += 1) await addPerson('tie' + index, 50 + index, employeeRole, '{"pos":true,"sales":true}')
     await db.prepare("INSERT INTO branches(id,name,role,is_default,is_active) VALUES(1,'Shop','shop',1,1)").run()
     await db.prepare("INSERT INTO settings(key,value) VALUES('pos_payment_methods','[\"Cash\",\"ABA\"]') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
     const setting = (key, value) => db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind(key, value).run()
@@ -304,6 +305,32 @@ async function main() {
       await waitFor('the close message', () => reportsAbout(mark, row.shift_code).length > 0)
       expectMark('close message', reportsAbout(mark, row.shift_code).join('\n'), EARLIER, { en: true, km: true })
       expectMark('/shift after the close', await shiftCommand('km', row.shift_code), EARLIER, { en: false, km: true })
+    })
+
+    // ---- a close in the same second as the last money record lands after it, never before ---------------
+    await check('an employee closing in the same second as their last sale is stamped the second after it, not refused', async () => {
+      let observed = null
+      for (let attempt = 0; attempt < 8 && !observed; attempt += 1) {
+        const key = `tie${attempt + 1}`
+        const id = await openShift(key, 20)
+        // The sale is written early in a second so the close request, a few milliseconds later, falls in the same one.
+        while (Date.now() % 1000 > 250) await new Promise((done) => setTimeout(done, 10))
+        const saleMs = Date.now()
+        await db.prepare(`INSERT INTO sales(created_at,sale_status,branch_id,cashier_id,payment_method,amount_paid_usd,amount_paid_khr,total_usd,exchange_rate)
+          VALUES(?,'completed',1,?, 'Cash',5,0,5,4000)`).bind(stored(saleMs), people[key].id).run()
+        const closed = await call(key, 'POST', `/${id}/close`, { expected_revision: 0, closing_counted_usd: 55, closing_counted_khr: 0 })
+        const row = await rowOf(id)
+        if (closed.status === 409) throw new Error(`the close in the sale's own second was refused: ${closed.text}`)
+        assert.equal(closed.status, 200, closed.text)
+        if (!row.closed_at.endsWith('.000Z')) continue
+        observed = { row, saleSecond: Math.floor(saleMs / 1000), id, key }
+      }
+      assert.ok(observed, 'a close landed in the same second as a sale within 8 attempts')
+      assert.equal(Math.floor(Date.parse(observed.row.closed_at) / 1000), observed.saleSecond + 1, 'stamped the second after the sale')
+      assert.equal(await orphanCount(observed.key), 0, 'the sale is inside the shift it was rung in')
+      const figures = JSON.parse((await first('SELECT figures_json FROM shift_close_figures WHERE shift_session_id=?', observed.id)).figures_json)
+      assert.equal(figures.reconciliation.cash_sales.usd, 5, 'and counted in its drawer')
+      assert.deepEqual(await timeReviewOf(observed.id), [], 'a bumped close is not an earlier-time close')
     })
 
     // (later rounds of this file append their scenarios here)
