@@ -74,7 +74,7 @@ runTest('appValue useMemo dependency array carries the real fields (not empty, n
   // freeze appValue forever and break every consumer that reads live state)
   // and not be missing entirely.
   assert.match(memoBlock, /\}\), \[\s*\n\s*user, login, logout, persistAuthenticatedUser,/, 'dependency array missing or does not start with the expected fields')
-  assert.match(memoBlock, /canWriteToServer,\s*\n\s*storagePersisted,\s*\n\s*\]\)/, 'dependency array must end with canWriteToServer/storagePersisted')
+  assert.match(memoBlock, /canWriteToServer,\s*\n\s*recheckConnection,\s*\n\s*storagePersisted,\s*\n\s*\]\)/, 'dependency array must end with canWriteToServer/recheckConnection/storagePersisted')
 })
 
 runTest('AccessDenied is a stable module-level component, not a new arrow function per render', () => {

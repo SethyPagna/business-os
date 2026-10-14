@@ -31,10 +31,11 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { beginKeyedAction, finishKeyedAction } from '../../utils/actionGuards.ts'
-import { isWriteConflictError } from '../../api/http.ts'
+import { cacheInvalidate, isWriteConflictError } from '../../api/http.ts'
 import {
   createFee as createFeeRequest,
   deleteFee as deleteFeeRequest,
+  feeDeleteStaleKind,
   getFee as getFeeRequest,
   getAllFeesForExport,
   getFees as getFeesRequest,
@@ -67,7 +68,8 @@ import {
   type MinimizedWorkEntry,
 } from '../../utils/minimizedWork.ts'
 import { clearWorkDraft, flushPendingWorkDraft } from '../../utils/workDrafts.ts'
-import { isDraftAuthorityCurrent, openDraftAuthority, type DraftAuthority } from '../../utils/draftAuthority.ts'
+import { draftAuthorityChangedText, isDraftAuthorityCurrent } from '../../utils/draftAuthority.ts'
+import { useFrozenDraftAuthority } from '../../utils/useFrozenDraftAuthority.ts'
 
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'fees-export-options')
 const ExpenseLabelManagerModal = lazyRetry(() => import('./ExpenseLabelManagerModal'), 'expense-label-manager-modal')
@@ -547,13 +549,8 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   // (draftAuthority.ts): minimize and Reload must act on the draft the form
   // wrote, not on whatever account or server is current by then.
   const feeFormIdentity = `${selected?.id ?? 'new'}:${selected?.updated_at ?? ''}:${user?.id ?? 'anonymous'}`
-  const feeAuthorityRef = useRef<{ identity: string; authority: DraftAuthority } | null>(null)
-  if (modal !== 'form') feeAuthorityRef.current = null
-  else if (feeAuthorityRef.current?.identity !== feeFormIdentity) {
-    feeAuthorityRef.current = { identity: feeFormIdentity, authority: openDraftAuthority(feeFormDraftBaseKey(selected?.id)) }
-  }
-  const feeAuthority = feeAuthorityRef.current?.authority ?? null
-  const feeAuthorityNotice = () => notify(tr('product_draft_authority_changed', 'The account or server changed. Reopen this form to continue. Its draft stays with the original account and server.'), 'warning')
+  const feeAuthority = useFrozenDraftAuthority(modal === 'form' ? feeFormDraftBaseKey(selected?.id) : null, { formIdentity: feeFormIdentity }).authority
+  const feeAuthorityNotice = () => notify(draftAuthorityChangedText((key) => tr(key, '')), 'warning')
 
   // A refused edit keeps the version its fields came from and says so; only
   // an explicit Reload reopens the form on the latest row, without the draft.
@@ -632,6 +629,28 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     closeModal()
   }
 
+  // A delete refused as stale (feeDeleteStaleKind) changed nothing. The list is re-read, and the
+  // open detail follows it: a changed expense shows its latest values in place, so the next Delete
+  // asks about -- and sends the version of -- what is really there; an expense that is gone (or
+  // cannot be re-read) closes its detail rather than leaving stale facts on screen. The read cache
+  // is cleared first: a 404 does not go through the conflict path that normally clears it.
+  const refreshAfterStaleDelete = async (id: number, stale: 'changed' | 'gone'): Promise<void> => {
+    cacheInvalidate('fees')
+    const closeDetail = () => {
+      setSelected((current) => (current?.id === id ? null : current))
+      setModal((current) => (current === 'detail' ? null : current))
+    }
+    await load(true)
+    if (stale === 'gone') { closeDetail(); return }
+    try {
+      const latest = await getFeeRequest(id)
+      if (!latest?.fee) throw new Error('fee missing')
+      setSelected((current) => (current?.id === id ? latest.fee : current))
+    } catch {
+      closeDetail()
+    }
+  }
+
   const handleDelete = async (fee: FeeRecord): Promise<boolean> => {
     return performExpenseDelete({
       canDelete: () => canDeleteFeeRef.current,
@@ -648,8 +667,10 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
       }),
       begin: () => beginKeyedAction(deleteActionRef, fee.id),
       onStart: () => setDeletingId(fee.id),
+      // The version this screen read: a delete of an expense edited since is refused as stale
+      // (K2) instead of removing the newer record.
       remove: () => withLoaderTimeout(
-        () => deleteFeeRequest(fee.id),
+        () => deleteFeeRequest(fee.id, fee.updated_at ?? null),
         'fees:delete',
         FEES_MUTATION_TIMEOUT_MS,
       ),
@@ -659,7 +680,20 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
           : tr('fee_deleted', 'Expense deleted'), 'success')
         await load(true)
       },
-      onError: (error) => notify(error instanceof Error ? error.message : String(error || ''), 'error'),
+      onError: (error) => {
+        const stale = feeDeleteStaleKind(error)
+        if (!stale) {
+          notify(error instanceof Error ? error.message : String(error || ''), 'error')
+          return
+        }
+        // AppContext's sync:conflict listener skips 'fees:delete' (it would only say "Item changed"
+        // in a dialog over this one): the message below says what happened to THIS expense, in the
+        // operator's language.
+        notify(stale === 'gone'
+          ? tr('fee_delete_gone', 'This expense was already removed on another device. The list has been refreshed.')
+          : tr('fee_delete_conflict', 'This expense changed on another device, so it was not deleted. The latest version is shown. Check it, then delete it again if you still want to.'), 'warning')
+        void refreshAfterStaleDelete(fee.id, stale)
+      },
       onFinish: () => {
         finishKeyedAction(deleteActionRef, fee.id)
         setDeletingId(null)

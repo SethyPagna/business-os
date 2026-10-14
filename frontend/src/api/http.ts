@@ -143,6 +143,7 @@ type ServerHealthProbeResult = {
   status: number
   cloudflareAccessRequired: boolean
   payload: LooseRecord | null
+  runtimeMismatch?: boolean
 }
 
 // ?€?€?€ Mutable connection state (module-level, intentionally not React state) ?€?€?€
@@ -454,6 +455,9 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   error.conflict = !!parsed?.conflict || parsed?.code === 'write_conflict'
   error.entity = parsed?.entity || null
   error.reason = parsed?.reason || null
+  // 403 review_action_full_required names the grant the reviewer lacks (fees:delete, product_cost_edit, ...), so the
+  // refusal can be restated in the operator's language (api/branchRuleErrors.ts reviewApprovalRefusalText).
+  error.permission = typeof parsed?.permission === 'string' ? parsed.permission : null
   // RET-D: the record that blocked a stock Revert / Undo / line edit, and
   // where to open it (cloudflare/src/lib/stockRefusalBlocker.ts ->
   // utils/stockRefusal.ts), so the refusal can say WHY and link WHERE.
@@ -596,11 +600,11 @@ function dispatchRuntimeVersionMismatch(serverRuntime: LooseRecord = {}): void {
   }))
 }
 
-function checkRuntimeVersionFromHealth(payload: LooseRecord = {}): void {
+function checkRuntimeVersionFromHealth(payload: LooseRecord = {}): boolean {
   const serverRuntime = payload?.runtime || {}
-  if (shouldCompareRuntimeVersions(serverRuntime)) {
-    dispatchRuntimeVersionMismatch(serverRuntime)
-  }
+  if (!shouldCompareRuntimeVersions(serverRuntime)) return false
+  dispatchRuntimeVersionMismatch(serverRuntime)
+  return true
 }
 
 function createWriteBlockedError(channel: string, message: string, detail: LooseRecord = {}): ApiRuntimeError {
@@ -1211,12 +1215,13 @@ export async function pingServerHealth(force = false): Promise<ServerHealthProbe
         }
       } else {
         const payload = res.ok ? await res.clone().json().catch(() => null) : null
-        if (payload) checkRuntimeVersionFromHealth(payload)
+        const runtimeMismatch = payload ? checkRuntimeVersionFromHealth(payload) : false
         result = {
           online: isReachableServerResponseStatus(res),
           status: res.status,
           cloudflareAccessRequired: false,
           payload,
+          runtimeMismatch,
         }
       }
     } catch {
@@ -1231,6 +1236,7 @@ export async function pingServerHealth(force = false): Promise<ServerHealthProbe
     setServerHealth(result.online)
     _lastHealthProbeResult = result
     _lastHealthProbeAt = Date.now()
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('server:probe', { detail: { online: result.online, cloudflareAccessRequired: result.cloudflareAccessRequired, runtimeMismatch: result.runtimeMismatch === true } }))
     return result
   })()
 
@@ -1239,6 +1245,13 @@ export async function pingServerHealth(force = false): Promise<ServerHealthProbe
   } finally {
     _healthProbeInFlight = null
   }
+}
+
+// The browser's navigator.onLine can be wrong in either direction; this asks the server itself.
+export async function confirmServerReachable(): Promise<boolean> {
+  if (!getSyncServerUrl()) return false
+  const result = await pingServerHealth(true)
+  return result.online && !result.runtimeMismatch && !result.cloudflareAccessRequired
 }
 
 export function primeServerHealthFromRuntime(serverRuntime: LooseRecord = {}): ServerHealthProbeResult {

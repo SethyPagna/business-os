@@ -22,6 +22,7 @@ import { APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage, resolv
 import { getClientDeviceInfo } from './utils/deviceInfo.ts'
 import { authErrorDetail } from './utils/authErrorText.ts'
 import { getAuthStorage } from './utils/authStorage.ts'
+import { watchConnection, type ConnectionWatch } from './utils/connectionWatch.ts'
 import { getDirtyWork, hasDirtyWork, type DirtyWorkEntry } from './utils/dirtyWork.ts'
 import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
 import { keepUnresolvedPosCheckouts } from './utils/posUnresolvedCheckout.ts'
@@ -33,6 +34,7 @@ import { refreshAppData } from './utils/appRefresh.ts'
 import { normalizeSettingsWriteOptions } from './utils/settingsWriteOptions.ts'
 import { isOwnSettingsWrite, sendChangedSettings } from './utils/settingsSave.ts'
 import { presentWriteError, type WriteErrorDetail } from './utils/writeErrorPresentation.ts'
+import { changeSessionDuration as applySessionDurationChange, normalizeSessionDuration, sessionDurationRefusalMessage, type SessionDurationOutcome } from './utils/sessionDurationChange.ts'
 import type { SettingsWriteOptions } from './types/settingsContracts.ts'
 import {
   beginPermissionRefresh,
@@ -197,6 +199,8 @@ type AppContextValue = {
   authReady: boolean
   canAccessPage: (pageId: string) => boolean
   canWriteToServer: boolean
+  recheckConnection: () => Promise<boolean>
+  changeSessionDuration: (sessionDuration: unknown, currentPassword?: string) => Promise<SessionDurationOutcome>
   deviceTimezone: string
   dismissNotification: () => void
   dismissWriteConflict: () => void
@@ -334,8 +338,9 @@ const CORE_ENGLISH_PACK: TranslationPack = {
   net_sold: 'Net Sold',
   net_sold_header: 'Net Sold',
   offline_mode: 'Offline mode',
-  offline_mode_active: 'Offline mode: sales are saved on this device and will sync when the server reconnects.',
-  offline_mode_ready_sync: 'Server is back online. Offline actions can sync now.',
+  offline_mode_active: 'Saving needs a connection. Your cart and drafts stay on this screen; nothing is saved until the connection returns.',
+  offline_mode_ready_sync: 'Server is online. Review retained sales in their original account before recovery.',
+  offline_saving_blocked_title: 'No connection — saving is blocked',
   page: 'Page',
   pending: 'pending',
   point_of_sale: 'POS',
@@ -455,6 +460,22 @@ function getStoredUserExpiry() {
   return safeStorageGet(getAuthStorage('session'), STORAGE_KEYS.USER_EXPIRY) || safeStorageGet(getAuthStorage('local'), STORAGE_KEYS.USER_EXPIRY)
 }
 
+function readStoredUser(): AppUser | null {
+  try {
+    const stored = getStoredUserPayload()
+    return stored ? JSON.parse(stored) as AppUser : null
+  } catch (_) {
+    return null
+  }
+}
+
+// The Worker renews a session each time it is used and tells the app its expiry only at sign-in, so the stored expiry
+// is a hint: past it the stored session is kept, not shown, and the bootstrap decides.
+function storedExpiryHasPassed(): boolean {
+  const expiry = getStoredUserExpiry()
+  return !!expiry && Date.now() > parseInt(expiry, 10)
+}
+
 function clearPersistedAuthState() {
   SESSION_ONLY_STORAGE_KEYS.forEach((key) => {
     safeStorageRemove(getAuthStorage('local'), key)
@@ -562,7 +583,7 @@ function writeDeviceSettings(value: AppSettings): void {
 }
 
 function writeStoredSessionDuration(value: unknown): string {
-  const normalized = String(value || '').trim() || 'session'
+  const normalized = normalizeSessionDuration(value)
   try {
     localStorage.setItem(STORAGE_KEYS.SESSION_DURATION, normalized)
   } catch (_) {}
@@ -694,22 +715,10 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   // The provider owns the app session lifecycle and hands lightweight helpers
   // to page components so business workflows do not duplicate global state.
   const [user,                setUser]                = useState<AppUser | null>(() => {
-    if (publicMode) return null
+    if (publicMode || storedExpiryHasPassed()) return null
     // Recover the signed-in user from sessionStorage/localStorage depending on
     // the last chosen login duration.
-    try {
-      const stored = getStoredUserPayload()
-      const expiry = getStoredUserExpiry()
-      if (stored && expiry) {
-        if (Date.now() > parseInt(expiry, 10)) {
-          clearPersistedAuthState()
-          return null
-        }
-        return JSON.parse(stored) as AppUser
-      }
-      if (stored) return JSON.parse(stored) as AppUser
-    } catch (_) {}
-    return null
+    return readStoredUser()
   })
   const [settings,            setSettings]            = useState<AppSettings>({})
   // From the device record, not 'en': starting on 'en' rendered a Khmer
@@ -755,6 +764,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   const [syncConnected,       setSyncConnected]       = useState(() => isWSConnected())
   const [syncChannel,         setSyncChannel]         = useState<SyncChannelUpdate | null>(null)
   const [syncServerUnreachable, setSyncServerUnreachable] = useState(false)
+  const connectionWatchRef = useRef<ConnectionWatch | null>(null)
 
   useEffect(() => {
     settingsRef.current = settings || {}
@@ -802,6 +812,19 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       }
     }
   }, [publicMode, syncUrl])
+
+  // A plain connection drop (the browser's offline event, or a failed /health
+  // probe) blocks saving at once; the banner and every gate read canWriteToServer.
+  useEffect(() => {
+    if (publicMode || typeof window === 'undefined') return undefined
+    const watch = watchConnection(window, setSyncServerUnreachable, () => navigator.onLine !== false, () => pingServerHealth(true))
+    connectionWatchRef.current = watch
+    return () => {
+      watch.dispose()
+      if (connectionWatchRef.current === watch) connectionWatchRef.current = null
+    }
+  }, [publicMode])
+  const recheckConnection = useCallback(() => connectionWatchRef.current?.recheck() ?? Promise.resolve(false), [])
 
   // Define translation lookup before any hook dependency arrays or callbacks
   // reference it, avoiding render-time TDZ crashes in production bundles.
@@ -1357,6 +1380,11 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       // The open sale detail states a refused line edit beside the edit and
       // reloads that exact sale itself; a second dialog would cover it.
       if (['sales:amend', 'sales:addItems'].includes(String(detail.channel || ''))) return
+      // Likewise a fee delete refused as stale (fees-k K2) and an approval refused because the record changed
+      // after it was requested (K3): the Expense page and the Review Queue say what happened to that expense or
+      // request, in the operator's language, and reload themselves. A generic "Item changed on another device"
+      // dialog over them would only contradict that.
+      if (['fees:delete', 'review:approve'].includes(String(detail.channel || ''))) return
       const entity = String(detail.entity || '').trim().toLowerCase()
       let message = detail.message || 'This item changed on another device. Refresh and try again.'
       let entityLabel = 'Item'
@@ -1634,6 +1662,11 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
     // Non-blocking async sync URL discovery activates the sync server
     // connection without blocking the initial render.
+    const adoptHeldSession = () => {
+      const heldSession = isActorSessionQuarantined() ? null : readStoredUser()
+      if (heldSession) setUser((current) => current || heldSession)
+    }
+
     const discoverSyncUrl = async () => {
       try {
         const storedUser = getStoredUserPayload()
@@ -1709,12 +1742,15 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
               .finally(() => {
                 settled = true
                 window.clearTimeout(authReadyWatchdog)
+                adoptHeldSession()
                 setAuthReady(true)
               })
           } else {
+            adoptHeldSession()
             runStartupHealthProbe()
           }
         } else {
+          adoptHeldSession()
           setAuthReady(true)
         }
         if (!hasStoredSession && !canProbeServerSession) {
@@ -1723,6 +1759,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
         return
       } catch (e: unknown) {
         console.debug('[AppContext] discoverSyncUrl error:', getErrorMessage(e, 'unknown error'))
+        adoptHeldSession()
         setAuthReady(true)
       }
 
@@ -2253,11 +2290,64 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     }
   }, [])
 
+  const changeSessionDuration = useCallback((requested: unknown, currentPassword = ''): Promise<SessionDurationOutcome> => {
+    const api = getAppApi()
+    const canRefresh = !!user?.id && typeof api.updateSessionDuration === 'function'
+    return applySessionDurationChange({
+      sessionDuration: requested,
+      currentPassword,
+      refresh: canRefresh
+        ? (normalizedSessionDuration, password) => {
+          const device = getClientDeviceInfo()
+          return withLoaderTimeout(
+            () => api.updateSessionDuration?.({
+              sessionDuration: normalizedSessionDuration,
+              clientTime: new Date().toISOString(),
+              deviceTz: device.deviceTz,
+              deviceName: device.deviceName,
+              ...(password ? { currentPassword: password } : {}),
+            }),
+            'Refresh session duration',
+            APP_SESSION_DURATION_TIMEOUT_MS,
+          )
+        }
+        : null,
+      persist: ({ sessionDuration, sessionExpiresAt }) => {
+        applyDeviceSettings({ login_session_duration: sessionDuration })
+        if (user?.id) {
+          persistAuthState({
+            user,
+            expiryTime: computeSessionExpiryMs(sessionDuration, sessionExpiresAt),
+            sessionDuration,
+          })
+        }
+      },
+    })
+  }, [applyDeviceSettings, user])
+
   // Settings save.
   const saveSettings = useCallback(async (newSettings: AppSettings, options: SettingsWriteOptions = {}) => {
     const normalizedOptions = normalizeSettingsWriteOptions(options)
     try {
-      const nextSettings = newSettings || {}
+      const { login_session_duration: requestedSessionDuration, ...nextSettings } = newSettings || {}
+      const changesSessionDuration = !!newSettings && Object.prototype.hasOwnProperty.call(newSettings, 'login_session_duration')
+      if (changesSessionDuration) {
+        const durationOutcome = await changeSessionDuration(requestedSessionDuration)
+        if (!durationOutcome.success) {
+          const reason = sessionDurationRefusalMessage(durationOutcome, (key, fallback) => {
+            const translated = t(key)
+            return translated && translated !== key ? translated : fallback
+          })
+          if (!normalizedOptions.silentToast) {
+            if (reason) notify(reason, 'error')
+            else {
+              const presentation = presentWriteError(durationOutcome, t)
+              notify(`${presentation.title}: ${presentation.detail}`, 'error')
+            }
+          }
+          return { success: false, error: Object.assign(new Error(durationOutcome.error || durationOutcome.code), { code: durationOutcome.code }) }
+        }
+      }
       const requestedServerUpdates: AppSettings = {}
       const deviceUpdates: AppSettings = {}
       Object.entries(nextSettings).forEach(([key, value]) => {
@@ -2294,36 +2384,6 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
           })
         }
       }
-      const mergedUpdates = { ...requestedServerUpdates, ...deviceUpdates }
-      if (Object.prototype.hasOwnProperty.call(mergedUpdates, 'login_session_duration')) {
-        const normalizedSessionDuration = writeStoredSessionDuration(mergedUpdates.login_session_duration)
-        const api = getAppApi()
-        if (user?.id && typeof api.updateSessionDuration === 'function') {
-          const device = getClientDeviceInfo()
-          const refreshed = await withLoaderTimeout(
-            () => api.updateSessionDuration?.({
-              sessionDuration: normalizedSessionDuration,
-              clientTime: new Date().toISOString(),
-              deviceTz: device.deviceTz,
-              deviceName: device.deviceName,
-            }),
-            'Refresh session duration',
-            APP_SESSION_DURATION_TIMEOUT_MS,
-          )
-          if (refreshed?.success === false) {
-            throw new Error(refreshed.error || 'Failed to refresh login session duration')
-          }
-          const nextExpiryTime = computeSessionExpiryMs(
-            normalizedSessionDuration,
-            refreshed?.sessionExpiresAt || '',
-          )
-          persistAuthState({
-            user,
-            expiryTime: nextExpiryTime,
-            sessionDuration: normalizedSessionDuration,
-          })
-        }
-      }
       if (sentKeys.length) {
         // The saved values -- and any text the Worker normalised -- are adopted
         // here, in the ref at once (a save made before the next render must diff
@@ -2332,7 +2392,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
         settingsRef.current = { ...settingsRef.current, ...adopted }
         setSettings((prev) => ({ ...prev, ...adopted }))
       }
-      const nothingChanged = !sentKeys.length && !Object.keys(deviceUpdates).length
+      const nothingChanged = !sentKeys.length && !Object.keys(deviceUpdates).length && !changesSessionDuration
       if (!normalizedOptions.silentToast) {
         if (nothingChanged) notify(t('settings_no_changes'), 'info')
         else notify(t('settings_saved'))
@@ -2359,7 +2419,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       }
       return { success: false, error }
     }
-  }, [applyDeviceSettings, notify, t, user]) // eslint-disable-line
+  }, [applyDeviceSettings, changeSessionDuration, notify, t]) // eslint-disable-line
 
   const toggleTheme = useCallback(() => {
     applyDeviceSettings({ theme: theme === 'dark' ? 'light' : 'dark' })
@@ -2735,7 +2795,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     authReady,
     page, setPage, navigateTo,
     navGuard, resolveNavGuard,
-    settings, loadSettings, saveSettings,
+    settings, loadSettings, saveSettings, changeSessionDuration,
     language, theme, t,
     toggleTheme, toggleLanguage,
     notify, notification,
@@ -2751,6 +2811,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     syncChannel,
     syncServerUnreachable,
     canWriteToServer,
+    recheckConnection,
     storagePersisted,
     AccessDenied: AccessDeniedConnected,
   }), [
@@ -2758,7 +2819,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     authReady,
     page, setPage, navigateTo,
     navGuard, resolveNavGuard,
-    settings, loadSettings, saveSettings,
+    settings, loadSettings, saveSettings, changeSessionDuration,
     language, theme, t,
     toggleTheme, toggleLanguage,
     notify, notification,
@@ -2773,6 +2834,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     syncChannel,
     syncServerUnreachable,
     canWriteToServer,
+    recheckConnection,
     storagePersisted,
   ])
 

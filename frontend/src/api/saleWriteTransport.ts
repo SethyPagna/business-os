@@ -2,6 +2,7 @@ import type { IndexableType, Table } from 'dexie'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import {
   apiFetch,
+  confirmServerReachable,
   isNetErr,
   isTransientGatewayError,
   isWriteBlockedError,
@@ -23,6 +24,7 @@ type QueueSyncOptions = { force?: boolean; manualRecovery?: boolean; expectedOwn
 type LocalDb = Awaited<ReturnType<typeof getLocalDb>>
 
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create'
+const SALE_CREATED_AT_TOO_OLD_CODE = 'sale_created_at_too_old'
 const OFFLINE_SALE_RETRY_DELAY_MS = 30_000
 const OFFLINE_SALE_SYNC_LEASE_MS = 60_000
 let pendingSalesSyncPromise: Promise<Record<string, unknown>> | null = null
@@ -121,6 +123,7 @@ async function failQueuedSale(row: LocalRow, error: unknown, { retryable = false
     retry_count: retryCount,
     retry_at: retryable ? new Date(now + queuedSaleBackoffMs(retryCount)).toISOString() : null,
     error: err?.message || asText(error || 'Sync failed'),
+    error_code: asText((error as { code?: unknown } | null)?.code) || null,
   })
   emitSyncQueueChanged({ channel: OFFLINE_SALE_QUEUE_CHANNEL, failed: 1 })
 }
@@ -244,7 +247,7 @@ async function runPendingSalesQueueSync({ force = false, expectedOwner, reviewed
       const retryable = isRetryableOfflineSaleError(error)
       await failQueuedSale(claimed, error, { retryable })
       result.failed += 1
-      if (!retryable && !force) break
+      if (!retryable && !force && failure.code !== SALE_CREATED_AT_TOO_OLD_CODE) break
     }
   }
   result.pending = Math.max(0, rows.length - result.synced)
@@ -271,7 +274,7 @@ export function syncPendingSalesQueue(options: QueueSyncOptions = {}): Promise<R
 export async function createSale(payload: SalePayload = {}): Promise<unknown> {
   const scope = captureActorReadScope()
   const salePayload = ensureSaleClientRequestId(stampOfflineSaleOwner({ ...getClientDeviceInfo(), ...payload }), 'sale')
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false && !(await confirmServerReachable())) {
     throw Object.assign(new Error('Connect to the server before recording this sale. Your draft is retained; no sale was queued.'), { code: 'online_required' })
   }
   try {

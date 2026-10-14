@@ -105,8 +105,8 @@ test('POS never auto-retries or fabricates an existing contact and exposes every
   assert.match(pos, /loadPosDeliveryContactsByIds\(\[match\.id\]\)/)
   assert.match(modals, /check\.matches\.map\(\(match\) =>/)
   assert.match(modals, /check\.allowedActions\.includes\('create_separate'\)/)
-  assert.match(modals, /saveDisabled=\{!!customerDuplicateCheck\}/)
-  assert.match(modals, /saveDisabled=\{!!deliveryDuplicateCheck\}/)
+  assert.match(modals, /saveDisabled=\{!!customerDuplicateCheck \|\| !!savingBlockedText\}/)
+  assert.match(modals, /saveDisabled=\{!!deliveryDuplicateCheck \|\| !!savingBlockedText\}/)
   assert.match(shell, /disabled=\{saving \|\| saveDisabled\}/)
 })
 

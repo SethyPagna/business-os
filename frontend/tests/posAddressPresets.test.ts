@@ -65,6 +65,7 @@ const compiledQuickAdd = transformSync(quickAdd, { loader: 'tsx', format: 'cjs',
 new Function('require', 'module', 'exports', compiledQuickAdd)((id: string) => {
   if (id === 'react/jsx-runtime') return require(id)
   if (id.includes('QuickAddModal')) return { __esModule: true, default: ({ children }: { children: React.ReactNode }) => React.createElement('div', null, children) }
+  if (id.includes('SavingBlockedNote')) return { __esModule: true, default: ({ text }: { text: string }) => React.createElement('p', null, text) }
   if (id.includes('phoneInput')) return { formatPhoneInputElement: () => '', handlePhoneInputBeforeInput() {}, handlePhoneInputKeyDown() {} }
   throw new Error(`Unexpected quick-add dependency ${id}`)
 }, quickModule, quickModule.exports)

@@ -16,6 +16,8 @@
  */
 
 import { Suspense, useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useSavingGate } from '../../utils/useSavingGate.ts'
+import SavingBlockedNote from '../shared/SavingBlockedNote.tsx'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { restoreUnresolvedPosCheckouts } from '../../utils/posUnresolvedCheckout.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
@@ -200,6 +202,7 @@ type AppContextValue = {
   usdSymbol: string
   user: { id?: string | number; name?: string; permissions?: string | Record<string, unknown>; role_permissions?: string | Record<string, unknown>; role_code?: string; organization_id?: number } | null
   authReady: boolean
+  canWriteToServer?: boolean
 }
 
 type SyncContextValue = {
@@ -733,6 +736,7 @@ function paymentMethodSummary(details: PaymentDetail[]): string {
 
 export default function POS() {
   const { t, user, authReady, notify, settings, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate: currentExchangeRate, can } = useApp() as AppContextValue
+  const { blocked: savingBlocked, reason: savingBlockedText } = useSavingGate()
   const canAddCustomer = can('contacts', 'add')
   const canEditCustomer = can('contacts', 'edit')
   const moneyCapability = useSaleMoneyCapability(Boolean(user && authReady), saleSecurityFingerprint(user, authReady))
@@ -2001,6 +2005,7 @@ export default function POS() {
   })
 
   const submitNewCustomer = async (duplicateDecision: ContactDuplicateDecision | null = null) => {
+    if (savingBlocked) return notify(savingBlockedText, 'error')
     if (!newCustomerForm.name.trim()) return notify(t('name_required'), 'error')
     if (savingCustomerRef.current) return
     savingCustomerRef.current = true
@@ -2120,6 +2125,7 @@ export default function POS() {
   const clearDelivery = () => patchActive({ selectedDelivery: null, deliverySearch: '', deliveryActualCostUsd: '' })
 
   const submitNewDelivery = async (duplicateDecision: ContactDuplicateDecision | null = null) => {
+    if (savingBlocked) return notify(savingBlockedText, 'error')
     if (!newDeliveryForm.name.trim() && !newDeliveryForm.phone.trim()) {
       return notify(t('delivery_option_hint'), 'error')
     }
@@ -3221,9 +3227,9 @@ export default function POS() {
 
 // Checkout
   const openStatusPicker = useCallback(() => {
-    if (loading || checkoutInFlightRef.current || active.cart.length === 0) return
+    if (loading || checkoutInFlightRef.current || active.cart.length === 0 || savingBlocked) return
     setShowStatusPicker(true)
-  }, [active.cart.length, loading])
+  }, [active.cart.length, loading, savingBlocked])
 
   const closeStatusPicker = useCallback(() => {
     if (loading || checkoutInFlightRef.current) return
@@ -3247,6 +3253,7 @@ export default function POS() {
 
   const handleCheckout = async (saleStatus = 'completed') => {
     if (loading || checkoutInFlightRef.current) return
+    if (savingBlocked) return notify(savingBlockedText, 'error')
     const checkoutScope = captureActorReadScope('pos-checkout')
     const orderKey = String(resolvedActiveId || 'pos-order')
     const finishRecorded = (result: unknown) => {
@@ -4447,9 +4454,10 @@ export default function POS() {
                 ].join('\n\n')}
               />
             </div>
-            <button className="btn-success w-full py-3 text-sm font-bold" onClick={openStatusPicker} disabled={loading || showStatusPicker || active.cart.length === 0}>
+            <button className="btn-success w-full py-3 text-sm font-bold" onClick={openStatusPicker} disabled={loading || showStatusPicker || active.cart.length === 0 || savingBlocked} aria-describedby={savingBlocked ? 'pos-saving-blocked' : undefined}>
               {loading ? t('loading') : (t('complete_sale') || 'Complete Sale')}
             </button>
+            {savingBlocked ? <SavingBlockedNote id="pos-saving-blocked" text={savingBlockedText} className="mt-1.5" textClassName="text-center" /> : null}
           </div>
 
         </div>{/* end cart panel */}
@@ -4465,6 +4473,7 @@ export default function POS() {
             </div>
             <div className="p-4 space-y-2">
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">{t('pos_status_choose_desc')||'Choose how this sale is being processed. This will appear in Sales history.'}</p>
+              {savingBlocked ? <SavingBlockedNote text={savingBlockedText} className="mb-3" /> : null}
               {([
                 ['completed',         getPosStatusLabel('completed',         t), t('pos_status_completed_desc')||'Payment received - stock deducted now'],
                 ['awaiting_payment',  getPosStatusLabel('awaiting_payment',  t), t('pos_status_awaiting_payment_desc')||'Not Paid - stock deducted'],
@@ -4484,7 +4493,7 @@ export default function POS() {
                 return (
                 <button key={status}
                   onClick={() => { closeStatusPicker(); void handleCheckout(status) }}
-                  disabled={loading || unavailable}
+                  disabled={loading || unavailable || savingBlocked}
                   data-pos-status-option={status}
                   data-pos-status-records={resolved}
                   className="w-full p-3 rounded-xl border-2 border-gray-200 dark:border-gray-600 enabled:hover:border-blue-400 dark:enabled:hover:border-blue-500 enabled:hover:bg-blue-50 dark:enabled:hover:bg-blue-900/20 text-left transition-colors disabled:bg-gray-50 dark:disabled:bg-gray-900/40 disabled:cursor-not-allowed">
@@ -4518,6 +4527,7 @@ export default function POS() {
             clearDeliveryDuplicateCheck={() => setDeliveryDuplicateCheck(null)}
             newCustomerForm={newCustomerForm}
             newDeliveryForm={newDeliveryForm}
+            savingBlockedText={savingBlocked ? savingBlockedText : ''}
             savingCustomer={savingCustomer}
             savingDelivery={savingDelivery}
             setNewCustomerForm={setNewCustomerForm}

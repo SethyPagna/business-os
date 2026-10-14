@@ -29,7 +29,10 @@ import {
   productMatchQueries,
   shouldSearchProductMatches,
 } from '../helpers/productNameSuggestions.ts'
-import { captureActorReadScope, isActorReadScopeCurrent } from '../../../api/actorReadScope.ts'
+import { parseServerTimestampMs } from '../../../utils/formatters.ts'
+import { isDraftAuthorityCurrent } from '../../../utils/draftAuthority.ts'
+import { useFrozenDraftAuthority } from '../../../utils/useFrozenDraftAuthority.ts'
+import DraftAuthorityNotice from '../../shared/DraftAuthorityNotice.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, scopedWorkDraftKey, hasUnscopedWorkDraft, clearUnchangedWorkDraft } from '../../../utils/workDrafts.ts'
 import { searchProducts as searchProductsForMatch, getProductFilters } from '../../../api/methods.ts'
 import { buildCacheBustedMediaPath, canonicalizePersistedMediaPath } from '../../../utils/mediaUpload.ts'
@@ -489,6 +492,8 @@ function ProductFormContent({
   const isEditMode = !isCreateMode
   const imageLimit = isAdminControlUser(user) ? ADMIN_MAX_PRODUCT_GALLERY_IMAGES : MAX_PRODUCT_GALLERY_IMAGES
   const draftKey = scopedWorkDraftKey(productFormDraftBaseKey(product?.id, draftScope))
+  // The account and server this form was opened under (the form remounts on a new draft key, so this is its own).
+  const draftAuthority = useFrozenDraftAuthority(productFormDraftBaseKey(product?.id, draftScope))
   const legacyDraftBaseKey = legacyStandaloneProductDraftBaseKey(product?.id, draftScope)
   const legacyDraftKey = legacyDraftBaseKey ? scopedWorkDraftKey(legacyDraftBaseKey) : null
   const unscopedDraftAvailable = hasUnscopedWorkDraft(productFormDraftBaseKey(product?.id, draftScope)) || Boolean(legacyDraftBaseKey && hasUnscopedWorkDraft(legacyDraftBaseKey))
@@ -989,7 +994,8 @@ function ProductFormContent({
     // F3 slice 1: same restore, through the ONE shared store (which also
     // reads Part 388's original { form } field for existing drafts).
     {
-      const serverEditedAt = (product as Record<string, unknown> | null)?.updated_at ? Date.parse(String((product as Record<string, unknown>).updated_at)) : 0
+      // D1's UTC stamp has no offset: parseServerTimestampMs, never a bare Date.parse (read in the device zone).
+      const serverEditedAt = (product as Record<string, unknown> | null)?.updated_at ? parseServerTimestampMs(String((product as Record<string, unknown>).updated_at)) : 0
       const draft = readWorkDraft<Partial<ProductFormState> | ProductFormDraftPayload>(draftKey, { notOlderThanMs: serverEditedAt || 0 })
       const legacyDraft = !draft && legacyDraftKey
         ? readWorkDraft<Partial<ProductFormState> | ProductFormDraftPayload>(legacyDraftKey, { notOlderThanMs: serverEditedAt || 0 })
@@ -1219,8 +1225,10 @@ function ProductFormContent({
     // disabled button. See the button's own comment for the bug this
     // closes: saving mid-upload used the stale pre-upload imageList.
     if (saving || saveInFlightRef.current || imageUploading || imageUploadInFlightRef.current) return
-    const saveScope = captureActorReadScope('product-draft-save')
-    const isSaveAuthorityCurrent = () => aliveRef.current && currentFormDraftKeyRef.current === draftKey && draftKey === scopedWorkDraftKey(productFormDraftBaseKey(product?.id, draftScope)) && isActorReadScopeCurrent(saveScope, false)
+    // Fenced by the frozen draft authority (the write identity: server, origin, user id, organization), as the other
+    // draft forms and the Stock Session are -- not the read scope, which also moves when the same user's session is
+    // reset or their profile rewritten and would refuse a save (or leave a saved form open) after a network blip.
+    const isSaveAuthorityCurrent = () => aliveRef.current && currentFormDraftKeyRef.current === draftKey && draftKey === scopedWorkDraftKey(productFormDraftBaseKey(product?.id, draftScope)) && isDraftAuthorityCurrent(draftAuthority.authority)
     const canContinueSave = () => {
       if (isSaveAuthorityCurrent()) return true
       if (aliveRef.current && currentFormDraftKeyRef.current === draftKey) {
@@ -1503,7 +1511,7 @@ function ProductFormContent({
         </>
       )}
       unsavedChanges={{ workKey: dirtyWorkKey }}>
-      {saveAuthorityWarning === draftKey ? <p role="alert" className="mb-3 text-sm text-red-700 dark:text-red-300">{tr('product_draft_authority_changed', 'The account or server changed. Reopen this form to continue. Its draft stays with the original account and server.', 'គណនី ឬម៉ាស៊ីនមេបានផ្លាស់ប្ដូរ។ សូមបិទហើយបើកទម្រង់នេះឡើងវិញដើម្បីបន្ត។ សេចក្ដីព្រាងនៅតែរក្សាទុកជាមួយគណនី និងម៉ាស៊ីនមេដើម។')}</p> : null}
+      {saveAuthorityWarning === draftKey ? <DraftAuthorityNotice t={t} className="mb-3" /> : null}
       {unscopedDraftAvailable ? <p role="status" className="mb-3 text-xs text-amber-700 dark:text-amber-300">{tr('product_draft_unknown_authority', 'An older draft is preserved on this device. Its server cannot be verified, so it has not been opened here.', 'សេចក្ដីព្រាងចាស់នៅតែរក្សាទុកលើឧបករណ៍នេះ។ មិនអាចផ្ទៀងផ្ទាត់ម៉ាស៊ីនមេរបស់វាបានទេ ដូច្នេះវាមិនត្រូវបានបើកនៅទីនេះទេ។')}</p> : null}
       <div ref={productFormContentRef} className="mb-5 -mx-5 border-b border-gray-200 px-5 dark:border-gray-700">
         <div className="flex gap-1 overflow-x-auto">

@@ -23,6 +23,7 @@ import { fmtTimezoneLabel } from '../../utils/formatters.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from '../../api/actorReadScope.ts'
 import { captureOfflineSaleOwner, offlineSaleOwnersMatch, type OfflineSaleOwner } from '../../api/offlineQueueOwnership.ts'
+import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
 
 const SERVER_PENDING_SYNC_TIMEOUT_MS = 8000
 const SERVER_DIAGNOSTICS_TIMEOUT_MS = 10000
@@ -97,6 +98,7 @@ type PendingSyncItem = {
   channel?: string
   entity_name?: string
   error?: string
+  error_code?: string
 }
 
 type PendingSyncState = {
@@ -375,8 +377,9 @@ function InfoTab({ syncUrl, syncConnected, active = true }: InfoTabProps) {
 
 function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugLog = null }: DiagnosticsPanelProps) {
   const copy = useLocalCopy()
-  const { user, notify } = useApp()
+  const { user, notify, t } = useApp()
   const { askToConfirm, confirmDialog } = useConfirmDialog()
+  const queueStatusLabel = (status?: string) => (status === 'failed' || status === 'pending' || status === 'syncing' ? copy(status, status) : String(status || ''))
   const actorKey = `${user?.id || ''}:${user?.organization_id ?? ''}:${syncUrl || ''}`
   const [clientLog, setClientLog] = useState<CallLogEntry[]>([])
   const [serverLog, setServerLog] = useState<ServerLogEntry[]>([])
@@ -638,9 +641,9 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
           <div className="px-3 py-2">
             <div className="mb-3 flex items-center justify-between gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs dark:bg-gray-800">
               <div className="flex flex-wrap gap-3 text-gray-600 dark:text-gray-300">
-                <span><strong>{pendingSync.pending}</strong> pending</span>
-                <span><strong>{pendingSync.syncing}</strong> syncing</span>
-                <span><strong>{pendingSync.failed}</strong> failed</span>
+                <span><strong>{pendingSync.pending}</strong> {queueStatusLabel('pending')}</span>
+                <span><strong>{pendingSync.syncing}</strong> {queueStatusLabel('syncing')}</span>
+                <span><strong>{pendingSync.failed}</strong> {queueStatusLabel('failed')}</span>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <button
@@ -667,22 +670,28 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
             {(pendingSync.quarantined || 0) > 0 ? <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">{pendingSync.quarantined} other or unidentified records are retained privately for their original account or support review.</p> : null}
             {pendingSync.total === 0 ? (
               <p className="py-4 text-center text-xs text-gray-400">No pending offline actions.</p>
-            ) : pendingSync.items.map((item) => (
-              <div key={item._seq} className="flex items-center gap-2 border-b border-gray-50 py-1 text-xs dark:border-gray-700/30">
-                <span className="w-16 flex-shrink-0 font-mono text-gray-400">{item.created_at?.slice(11, 19) || '--:--:--'}</span>
-                <span className={`flex-shrink-0 rounded px-1 ${item.status === 'failed' ? 'bg-red-100 text-red-700' : item.status === 'syncing' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'}`}>
-                  {item.status}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-gray-800 dark:text-gray-200">
-                  {item.channel}
-                  {item.entity_name ? ` - ${item.entity_name}` : ''}
-                </span>
-                {item.updated_at ? <span className="hidden text-gray-400 sm:inline">updated {item.updated_at.slice(11, 19)}</span> : null}
-                {item.retry_at ? <span className="hidden text-amber-600 sm:inline">retry {item.retry_at.slice(11, 19)}</span> : null}
-                {item.retry_count ? <span className="text-gray-400">retry {item.retry_count}</span> : null}
-                {item.error ? <span className="truncate text-red-500">{item.error}</span> : null}
-              </div>
-            ))}
+            ) : pendingSync.items.map((item) => {
+              const keptReason = saleSubmitRefusalText({ code: item.error_code }, t)
+              return (
+                <div key={item._seq} className="border-b border-gray-50 dark:border-gray-700/30">
+                  <div className="flex items-center gap-2 py-1 text-xs">
+                    <span className="w-16 flex-shrink-0 font-mono text-gray-400">{item.created_at?.slice(11, 19) || '--:--:--'}</span>
+                    <span className={`flex-shrink-0 rounded px-1 ${item.status === 'failed' ? 'bg-red-100 text-red-700' : item.status === 'syncing' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'}`}>
+                      {queueStatusLabel(item.status)}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-gray-800 dark:text-gray-200">
+                      {item.channel}
+                      {item.entity_name ? ` - ${item.entity_name}` : ''}
+                    </span>
+                    {item.updated_at ? <span className="hidden text-gray-400 sm:inline">updated {item.updated_at.slice(11, 19)}</span> : null}
+                    {item.retry_at ? <span className="hidden text-amber-600 sm:inline">retry {item.retry_at.slice(11, 19)}</span> : null}
+                    {item.retry_count ? <span className="text-gray-400">retry {item.retry_count}</span> : null}
+                    {item.error && !keptReason ? <span className="truncate text-red-500">{item.error}</span> : null}
+                  </div>
+                  {keptReason ? <p className="break-words pb-1 text-xs leading-relaxed text-red-600 dark:text-red-400">{keptReason}</p> : null}
+                </div>
+              )
+            })}
           </div>
         ) : null}
 

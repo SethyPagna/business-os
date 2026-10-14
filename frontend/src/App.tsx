@@ -36,6 +36,7 @@ import { captureOfflineSaleOwner, offlineSaleOwnersMatch, type OfflineSaleOwner 
 import { hasLocalSyncProblemPresentation, subscribeSyncProblemPresentation, shouldClearResolvedSyncError, SYNC_ERROR_RESOLVED_EVENT, type SyncProblemReference } from './utils/syncProblemLifecycle.ts'
 import { presentWriteError } from './utils/writeErrorPresentation.ts'
 import { runWhenVisible } from './utils/visibilityPolling.ts'
+import { CheckConnectionButton } from './components/shared/SavingBlockedNote.tsx'
 import { createPendingSyncPoll } from './app/pendingSyncPolling.ts'
 
 declare const __FRONTEND_BUILD_HASH__: string | undefined
@@ -274,6 +275,7 @@ function readStorageValue(storage: Storage | null | undefined, key: string): str
   }
 }
 
+// The stored expiry is not read: the Worker renews a session on use, so the bootstrap decides, not the sign-in time.
 function hasUsableStoredAuthSession(): boolean {
   if (typeof window === 'undefined') return false
   const userJson = readStorageValue(getAuthStorage('session'), STORAGE_KEYS.USER)
@@ -285,11 +287,7 @@ function hasUsableStoredAuthSession(): boolean {
   } catch {
     return false
   }
-  const expiry = readStorageValue(getAuthStorage('session'), STORAGE_KEYS.USER_EXPIRY)
-    || readStorageValue(getAuthStorage('local'), STORAGE_KEYS.USER_EXPIRY)
-  if (!expiry) return true
-  const expiresAt = Number.parseInt(expiry, 10)
-  return Number.isFinite(expiresAt) && Date.now() <= expiresAt
+  return true
 }
 
 function getConnection(): NetworkConnectionLike | null {
@@ -1516,7 +1514,7 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
       : (t('server_back_online') || 'Server is back online. You can keep working.'))
     : reconnecting
       ? (t('server_tunnel_reconnecting') || 'Server/tunnel reconnecting. Cached data stays visible and read-only checks will refresh automatically.')
-      : (t('offline_mode_active') || 'You are offline. Writes require a connection. Keep your drafts; retained offline records are not sent automatically.')
+      : (t('offline_mode_active') || 'Saving needs a connection. Your cart and drafts stay on this screen; nothing is saved until the connection returns.')
   const statusSuffix = reconnecting && transientOutage?.status ? ` Status ${transientOutage.status}` : ''
   // appUpdate no longer feeds this banner's own "Update ready" priority
   // state -- that used to pop this floating banner on effectively every
@@ -1536,7 +1534,7 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
     : ready
       ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200'
       : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300'
-  const title = priority?.title || (reconnecting ? (t('server_reconnecting') || 'Server reconnecting') : t('offline_mode') || 'Offline mode')
+  const title = priority?.title || (reconnecting ? (t('server_reconnecting') || 'Server reconnecting') : offline ? (t('offline_saving_blocked_title') || 'No connection — saving is blocked') : t('offline_mode') || 'Offline mode')
   const message = priority?.message || `${label}${statusSuffix}`
   const shouldShowVerboseImmediately = !!priority || total > 0 || offline
   const noticeFingerprint = persistentNoticeFingerprint(
@@ -1616,6 +1614,7 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
             </button>
           ) : null}
             <div className="flex shrink-0 items-center gap-2">
+            {offline ? <CheckConnectionButton /> : null}
             {total ? (
               <button
                 type="button"

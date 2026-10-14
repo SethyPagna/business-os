@@ -93,6 +93,17 @@ export function buildServerReplayRequest(payload: Record<string, unknown> | unde
   }
 }
 
+// 409 undo_history_stale (cloudflare/src/lib/undoAppliers.ts UNDO_HISTORY_STALE_CODE): the server's row is not in the
+// state this tab expected -- another session's Undo or Redo already moved it, or its generation moved on. The row
+// then holds THAT session's result, so nothing here may write a status over it.
+export const UNDO_HISTORY_STALE_CODE = 'undo_history_stale'
+
+export function isStaleHistoryRefusal(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const refusal = error as { status?: unknown; code?: unknown }
+  return Number(refusal.status) === 409 && refusal.code === UNDO_HISTORY_STALE_CODE
+}
+
 export type PendingTransferReplay = { serverId: ActionHistoryId; direction: ActionDirection; operationId: string; generation: number }
 
 /** Persist the exact transition before I/O. A lost response must never adopt a newer generation. */
@@ -413,7 +424,17 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
       }
       return true
     } catch (error) {
-      if (entry.serverId) {
+      // The Worker refused BEFORE flipping the row (serverTransitioned is still false) because the row is not in the
+      // state this tab expected. Marking it 'failed' here -- what every refused transition used to get -- overwrote
+      // the other session's result: an Undo that really happened then read as a failure. Leave the row alone, re-read
+      // the recorded history, drop this tab's copy of the entry (its closure can no longer be applied, and Undo/Redo
+      // would be refused the same way every time) and say so. A stale code raised by the CLOSURE, after this tab
+      // flipped the row itself, is not that case and falls through to restore the status it flipped from.
+      if (!serverTransitioned && isStaleHistoryRefusal(error)) {
+        setUndoStack((current) => current.filter((item) => item.id !== entry.id))
+        setRedoStack((current) => current.filter((item) => item.id !== entry.id))
+        refreshServerItems()
+      } else if (entry.serverId) {
         const fallbackStatus = direction === 'undo' ? 'undoable' : 'redoable'
         const nextStatus = serverTransitioned ? fallbackStatus : 'failed'
         loadActionHistoryTransport().then((api) => api.updateActionHistory(entry.serverId!, {
@@ -470,6 +491,9 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
       if (label) notify?.(label)
       return true
     } catch (error) {
+      // The recorded row this list offered is no longer in the state the list shows: re-read it, so the dead row
+      // stops being offered (this path writes no status of its own).
+      if (isStaleHistoryRefusal(error)) refreshServerItems()
       notify?.(getErrorMessage(error, `Unable to ${direction} that action right now.`), 'error')
       return false
     } finally {

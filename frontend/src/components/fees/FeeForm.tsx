@@ -8,7 +8,10 @@ import {
   readWorkDraft,
   scheduleWorkDraftWrite,
 } from '../../utils/workDrafts.ts'
-import { isDraftAuthorityCurrent, openDraftAuthority, type DraftAuthority } from '../../utils/draftAuthority.ts'
+import { isDraftAuthorityCurrent, type DraftAuthority } from '../../utils/draftAuthority.ts'
+import { useFrozenDraftAuthority } from '../../utils/useFrozenDraftAuthority.ts'
+import DraftAuthorityNotice from '../shared/DraftAuthorityNotice.ts'
+import { parseServerTimestampMs } from '../../utils/formatters.ts'
 import { useModalClose } from '../shared/modalCloseContext.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
@@ -256,15 +259,14 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
   // Frozen when the form opens: the draft key is never recomputed from the
   // live account and server, so a sync-server switch under an open form cannot
   // move this form's typed work (or its Save) onto the other server.
-  const [authority] = useState(() => draftAuthority ?? openDraftAuthority(feeFormDraftBaseKey(fee?.id)))
+  const { authority, current: authorityCurrent, locked: authorityLocked, setRefused: setAuthorityRefused } = useFrozenDraftAuthority(feeFormDraftBaseKey(fee?.id), { adopt: draftAuthority })
   const draftKey = authority.draftKey
-  const authorityCurrent = isDraftAuthorityCurrent(authority)
-  const [authorityRefused, setAuthorityRefused] = useState(false)
   const initialPendingRef = useRef<PendingFeeCreate | null>(fee ? null : getPendingFeeCreate(actorId))
   const restoredDraftRef = useRef<ReturnType<typeof readWorkDraft<Partial<FeeFormState>>> | undefined>(undefined)
   if (restoredDraftRef.current === undefined) {
     restoredDraftRef.current = readWorkDraft<Partial<FeeFormState>>(draftKey, {
-      notOlderThanMs: fee?.updated_at ? Date.parse(fee.updated_at) || 0 : 0,
+      // updated_at is D1's UTC stamp with no offset: parseServerTimestampMs, never a bare Date.parse (device zone).
+      notOlderThanMs: fee?.updated_at ? parseServerTimestampMs(fee.updated_at) || 0 : 0,
     })
   }
   const [form, setForm] = useState<FeeFormState>(() => initialPendingRef.current
@@ -518,9 +520,7 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
           {onReloadLatest ? <button type="button" disabled={saving} onClick={onReloadLatest} className="shrink-0 rounded border border-red-300 px-2 py-1 font-semibold dark:border-red-700">{t('write_conflict_reload_latest') || 'Reload latest'}</button> : null}
         </div>
       ) : null}
-      {!authorityCurrent || authorityRefused ? (
-        <p role="alert" data-draft-authority-changed="" className="text-sm text-red-700 dark:text-red-300">{t('product_draft_authority_changed') || 'The account or server changed. Reopen this form to continue. Its draft stays with the original account and server.'}</p>
-      ) : null}
+      {authorityLocked ? <DraftAuthorityNotice t={t} /> : null}
       {pendingCreate ? (
         <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
           <p className="font-semibold">{t('write_outcome_unknown_title') || 'Save outcome unknown'}</p>

@@ -1,5 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react'
 import QuickAddModal from './QuickAddModal'
+import SavingBlockedNote from '../shared/SavingBlockedNote.tsx'
 import { formatPhoneInputElement, handlePhoneInputBeforeInput, handlePhoneInputKeyDown } from '../../utils/phoneInput.ts'
 import type { ContactDuplicateCheck, ContactDuplicateMatch } from '../contacts/contactDuplicates.ts'
 
@@ -34,6 +35,7 @@ type POSQuickAddModalsProps = {
   onOpenCustomerAddressPresets: () => void
   newCustomerForm: CustomerFormState
   newDeliveryForm: DeliveryFormState
+  savingBlockedText?: string
   savingCustomer: boolean
   savingDelivery: boolean
   setNewCustomerForm: Dispatch<SetStateAction<CustomerFormState>>
@@ -97,6 +99,7 @@ export default function POSQuickAddModals({
   onOpenCustomerAddressPresets,
   newCustomerForm,
   newDeliveryForm,
+  savingBlockedText = '',
   savingCustomer,
   savingDelivery,
   setNewCustomerForm,
@@ -110,7 +113,8 @@ export default function POSQuickAddModals({
   return (
     <>
       {showAddCustomer ? (
-        <QuickAddModal title={t('add_new_customer')} saving={savingCustomer} saveDisabled={!!customerDuplicateCheck} onSave={handleAddCustomer} t={t} onClose={closeAddCustomerModal}>
+        <QuickAddModal title={t('add_new_customer')} saving={savingCustomer} saveDisabled={!!customerDuplicateCheck || !!savingBlockedText} onSave={handleAddCustomer} t={t} onClose={closeAddCustomerModal}>
+          <SavingBlockedNote text={savingBlockedText} />
           <DuplicateDecisionPanel check={customerDuplicateCheck} entityLabel="customer" saving={savingCustomer} onUseExisting={handleUseExistingCustomer} onCreateSeparate={handleCreateSeparateCustomer} onBack={clearCustomerDuplicateCheck} t={t} />
           <div>
             <label htmlFor="pos-quick-customer-name" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('name')} *</label>
@@ -141,7 +145,8 @@ export default function POSQuickAddModals({
       ) : null}
 
       {showAddDelivery ? (
-        <QuickAddModal title={t('add_delivery_contact') || 'Add Delivery Contact'} saving={savingDelivery} saveDisabled={!!deliveryDuplicateCheck} onSave={handleAddDelivery} t={t} onClose={closeAddDeliveryModal}>
+        <QuickAddModal title={t('add_delivery_contact') || 'Add Delivery Contact'} saving={savingDelivery} saveDisabled={!!deliveryDuplicateCheck || !!savingBlockedText} onSave={handleAddDelivery} t={t} onClose={closeAddDeliveryModal}>
+          <SavingBlockedNote text={savingBlockedText} />
           <DuplicateDecisionPanel check={deliveryDuplicateCheck} entityLabel="delivery contact" saving={savingDelivery} onUseExisting={handleUseExistingDelivery} onCreateSeparate={handleCreateSeparateDelivery} onBack={clearDeliveryDuplicateCheck} t={t} />
           <div>
             <label htmlFor="pos-quick-delivery-name" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">

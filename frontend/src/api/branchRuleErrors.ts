@@ -218,13 +218,44 @@ export function localizeBranchReviewError(row: BranchReviewIdentity, error: unkn
 }
 
 /**
- * N12: POST /review/:id/approve refuses a requester approving their own request
- * (`review_self_approval`) and a reviewer without Full access to the request's
- * section (`review_section_full_required`). Returns the translated sentence for
- * either code, or null for any other error so the caller falls through to its
- * normal localisation.
+ * The permission a refused reviewer lacks, named the way the Users screen names it: `fees:delete` is the action
+ * "Delete expense" (perm_act_<section>_<action>), `product_cost_edit` is "Edit product costs" (perm_<name>). An
+ * unknown grant is shown as the Worker named it; a refusal that names none falls back to the request's section.
  */
-export function reviewApprovalRefusalText(code: unknown, section: unknown, t: (key: string) => string | undefined): string | null {
+function reviewPermissionName(permission: unknown, section: unknown, t: (key: string) => string | undefined): string {
+  const name = typeof permission === 'string' ? permission.trim() : ''
+  if (name) {
+    const [permissionSection, action] = name.split(':')
+    return t(action ? `perm_act_${permissionSection}_${action}` : `perm_${name}`) || name
+  }
+  const fallback = String(section ?? '')
+  return t(fallback) || fallback
+}
+
+/**
+ * Every refusal POST /review/:id/approve and /reject can answer, as one sentence in the operator's language, or
+ * null for any other error so the caller falls through to its normal localisation:
+ *   N12  review_self_approval, review_section_full_required, Finding I  review_identity_conflict
+ *   H    review_action_full_required -- the reviewer lacks the grant the direct route demands (`permission` names it)
+ *   K3 / K6  review_entity_changed, review_already_decided -- the queue on screen is out of date (reviewStaleDecisionText)
+ *   K7   reason_too_long, invalid_reason -- the reject reason (reviewRejectReasonRefusalText)
+ *   no_review_applier -- a kind of request with no approval rule (501)
+ * `permission` is only read for review_action_full_required.
+ */
+export function reviewApprovalRefusalText(code: unknown, section: unknown, t: (key: string) => string | undefined, permission?: unknown): string | null {
+  if (code === 'review_action_full_required') {
+    return (t('review_action_full_required') || 'Approving this request needs full permission for "{permission}". Ask a reviewer who has it.')
+      .replace('{permission}', reviewPermissionName(permission, section, t))
+  }
+  if (code === 'review_entity_changed') return reviewStaleDecisionText('entity_changed', t)
+  if (code === 'review_already_decided') return reviewStaleDecisionText('already_decided', t)
+  if (code === 'reason_too_long') {
+    return (t('reason_too_long') || 'The reason is too long. Use {max} characters or fewer.').replace('{max}', String(REVIEW_REASON_MAX_LENGTH))
+  }
+  if (code === 'invalid_reason') return t('invalid_reason') || 'The reason must be text. Edit it and try again.'
+  if (code === 'no_review_applier') {
+    return t('no_review_applier') || 'This kind of request has no approval rule, so it cannot be approved. Reject it, or ask an administrator.'
+  }
   if (code === 'review_self_approval') {
     return t('review_self_approval') || 'You cannot approve your own request. Another reviewer must approve it.'
   }
@@ -239,4 +270,49 @@ export function reviewApprovalRefusalText(code: unknown, section: unknown, t: (k
     return t('review_identity_conflict') || 'This request now matches an existing product. Approving it would create a duplicate, so nothing was applied. Reject it and make the change yourself; it will merge into the existing product.'
   }
   return null
+}
+
+/**
+ * K7: a reviewer's reject reason is capped like every stock reason. The Worker refuses a longer one
+ * (400 reason_too_long) and never truncates it; the Review Queue's field stops at the same number.
+ * cloudflare/src/lib/pendingActions.ts REVIEW_REASON_MAX_LENGTH, pinned equal by
+ * tests/reviewQueueRejectReason.test.ts. Counted in UTF-16 code units (string.length), the Worker's
+ * measure, which is also what the field's maxLength counts.
+ */
+export const REVIEW_REASON_MAX_LENGTH = 512
+
+export type ReviewStaleDecision = 'entity_changed' | 'already_decided'
+
+/**
+ * K3 / K6: an approval or rejection the Worker refused because the queue on screen is out of date.
+ * `review_entity_changed` -- the record was edited after the request was made, nothing was applied
+ * and the request stays open; `review_already_decided` -- another reviewer (or the requester) got
+ * there first. The two plain "Already reviewed" 409s of POST /review/:id/approve and /reject carry
+ * no code, only that sentence, so exactly that sentence is recognised too; any other uncoded 409
+ * (for example a requester whose permission was revoked) is NOT a stale queue.
+ * The caller says which it is (reviewStaleDecisionText) and re-reads the queue from the server.
+ */
+export function reviewStaleDecision(error: unknown): ReviewStaleDecision | null {
+  if (!error || typeof error !== 'object') return null
+  const { code, status, message } = error as { code?: unknown; status?: unknown; message?: unknown }
+  if (code === 'review_entity_changed') return 'entity_changed'
+  if (code === 'review_already_decided') return 'already_decided'
+  if (!code && Number(status) === 409 && /^Already reviewed( or not found)?$/.test(String(message ?? '').trim())) return 'already_decided'
+  return null
+}
+
+export function reviewStaleDecisionText(kind: ReviewStaleDecision, t: (key: string) => string | undefined): string {
+  return kind === 'entity_changed'
+    ? t('review_entity_changed') || 'This record changed after the request was made, so nothing was applied. The request is still open: reject it, or ask for it again.'
+    : t('review_already_decided') || 'This request was already decided, or changed, by someone else. The queue has been refreshed.'
+}
+
+/**
+ * K7: POST /review/:id/reject refuses a reason that is too long (`reason_too_long`) or is not text
+ * (`invalid_reason`) and leaves the request open. Returns the sentence for the dialog to show beside
+ * the reason, in the operator's language, or null for any other error.
+ */
+export function reviewRejectReasonRefusalText(error: unknown, t: (key: string) => string | undefined): string | null {
+  const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : null
+  return code === 'reason_too_long' || code === 'invalid_reason' ? reviewApprovalRefusalText(code, null, t) : null
 }

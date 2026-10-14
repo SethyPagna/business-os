@@ -108,11 +108,12 @@ const pendingBasket = new Function('env', `with(env) { ${transformSync(posSource
   pricedCart: { error: new Error('current rules unavailable') }, exchangeRate: 9999, taxRate: 1, settings: { tax_rate: 100 }, SaleCheckoutRecoveryRequiredError,
 })
 assert.equal(pendingBasket.totals.totalUsd, 29, 'actual pending basket memo never recalculates against current FX/tax/rules')
-async function checkoutProbe(options: { body?: Record<string, unknown>; proof?: unknown; lookupError?: boolean; switchActor?: boolean; writeError?: string }) {
+async function checkoutProbe(options: { body?: Record<string, unknown>; proof?: unknown; lookupError?: boolean; switchActor?: boolean; writeError?: string; savingBlocked?: boolean }) {
   const sent: unknown[] = [], printed: unknown[] = [], notices: string[] = [], closed: unknown[] = []
   let generation = 1
   const env: any = {
     user: { id: 71, organization_id: null }, assertPosCheckoutOwner,
+    savingBlocked: options.savingBlocked === true, savingBlockedText: 'no-connection',
     loading: false, checkoutInFlightRef: { current: false }, resolvedActiveId: 'order1',
     active: { checkoutRequestId: 'request-1', checkoutPayload: options.body, cart: [{ intentionallyChanged: true }] },
     checkoutRequestIdsRef: { current: new Map() },
@@ -134,6 +135,8 @@ async function checkoutProbe(options: { body?: Record<string, unknown>; proof?: 
   await callback()
   return { sent, printed, notices, closed, env }
 }
+const offlineRetry = await checkoutProbe({ body: frozen, savingBlocked: true })
+assert.equal(offlineRetry.sent.length, 0, 'a frozen checkout is not re-sent while there is no connection'); assert.deepEqual(offlineRetry.notices, ['no-connection'])
 const idOnly = await checkoutProbe({})
 assert.equal(idOnly.sent.length, 0); assert.deepEqual(idOnly.notices, [OFFLINE_OWNER_REVIEW_MESSAGE])
 const ownerless = await checkoutProbe({ body: original, proof: { committed: true, response: { id: 17, sale: saved } } })

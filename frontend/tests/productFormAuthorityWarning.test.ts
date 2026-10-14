@@ -4,6 +4,7 @@ import ts from 'typescript'
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createHarness } from './mountedComponentHarness.ts'
+import DraftAuthorityNotice from '../src/components/shared/DraftAuthorityNotice.ts'
 const file = process.env.PRODUCT_FORM_AUTHORITY_SOURCE || new URL('../src/components/products/forms/ProductForm.tsx', import.meta.url)
 const source = fs.readFileSync(file, 'utf8')
 const ast = ts.createSourceFile('ProductForm.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
@@ -26,8 +27,9 @@ const packs = Object.fromEntries(['en','km'].map(lang=>[lang,JSON.parse(fs.readF
 function Host({draftKey,lang}: {draftKey:string;lang:string}) {
  const [saveAuthorityWarning,setSaveAuthorityWarning]=React.useState<string|null>(null)
  const tr=(key:string)=>packs[lang][key]
+ const t=tr
  deny=new Function('isSaveAuthorityCurrent','saveInFlightRef','aliveRef','currentFormDraftKeyRef','draftKey','setSaveAuthorityWarning','alert','tr',compile(refusal)+';return canContinueSave')(()=>valid,saveInFlightRef,aliveRef,currentFormDraftKeyRef,draftKey,setSaveAuthorityWarning,()=>{popups++},tr)
- return new Function('React','saveAuthorityWarning','draftKey','tr', 'return '+compile('const view='+warning).replace(/^const view = /,'').trim().replace(/;$/,''))(React,saveAuthorityWarning,draftKey,tr)
+ return new Function('React','DraftAuthorityNotice','t','saveAuthorityWarning','draftKey', 'return '+compile('const view='+warning).replace(/^const view = /,'').trim().replace(/;$/,''))(React,DraftAuthorityNotice,t,saveAuthorityWarning,draftKey)
 }
 try {
  for(const lang of ['en','km']) {
@@ -55,7 +57,7 @@ try {
   const wait=new Promise<void>(resolve=>{finish=resolve})
   let actorCurrent=true,writes=0,closes=0,clears=0,warnings=0,unlocks=0
   const live={current:true}, key={current:'A'}, inFlight={current:false}
-  const scope: Record<string,unknown>={saving:false,saveInFlightRef:inFlight,imageUploading:false,imageUploadInFlightRef:{current:false},captureActorReadScope:()=>({}),draftKey:'A',draftScope:null,product:null,scopedWorkDraftKey:()=> 'A',productFormDraftBaseKey:()=> 'A',isActorReadScopeCurrent:()=>actorCurrent,aliveRef:live,currentFormDraftKeyRef:key,setSaveAuthorityWarning:()=>{warnings++},form:{name:'Rice'},isCreateMode:false,createSessionDuplicate:false,createVerdict:{kind:null},branches:[],omitUnauthorizedCatalogCosts:(v:unknown)=>v,normalizePriceValue:Number,parseNumericInput:(v:unknown)=>Number(v||0),normalizeInternalMoney:Number,canViewCosts:true,blindCostInputs:{usd:'',khr:''},showReceivedDate:false,canManageImages:true,imageListRef:{current:[]},imageList:[],initialForm:{image_gallery:[]},normalizeGallery:()=>[],savableImageList:[],canonicalizePersistedMediaPath:(v:unknown)=>v,ADMIN_MAX_PRODUCT_GALLERY_IMAGES:5,user:{id:1},askSaveConfirm:async()=>{if(boundary==='confirmation')await wait;return true},flushPendingWorkDraft:()=>{},readWorkDraft:()=>({data:'original'}),restoredLegacyDraftKeyRef:{current:null},setSaving:(v:boolean)=>{if(!v)unlocks++},onSave:async()=>{writes++;await wait;if(boundary==='failure')throw new Error('old actor failure')},clearUnchangedWorkDraft:()=>{clears++;return true},clearCurrentProductDraft:()=>{throw new Error('must not clear current form')},onClose:()=>{closes++},clearAfterSuccessfulProductSave:async(save:()=>Promise<void>,clear:()=>void,close:()=>void)=>{await save();clear();close()},alert:()=>{popups++},tr:(k:string)=>k,getErrorMessage:String,isScientificNotationBarcode:()=>false,isScientificNotationText:()=>false}
+  const scope: Record<string,unknown>={saving:false,saveInFlightRef:inFlight,imageUploading:false,imageUploadInFlightRef:{current:false},draftAuthority:{authority:{}},draftKey:'A',draftScope:null,product:null,scopedWorkDraftKey:()=> 'A',productFormDraftBaseKey:()=> 'A',isDraftAuthorityCurrent:()=>actorCurrent,aliveRef:live,currentFormDraftKeyRef:key,setSaveAuthorityWarning:()=>{warnings++},form:{name:'Rice'},isCreateMode:false,createSessionDuplicate:false,createVerdict:{kind:null},branches:[],omitUnauthorizedCatalogCosts:(v:unknown)=>v,normalizePriceValue:Number,parseNumericInput:(v:unknown)=>Number(v||0),normalizeInternalMoney:Number,canViewCosts:true,blindCostInputs:{usd:'',khr:''},showReceivedDate:false,canManageImages:true,imageListRef:{current:[]},imageList:[],initialForm:{image_gallery:[]},normalizeGallery:()=>[],savableImageList:[],canonicalizePersistedMediaPath:(v:unknown)=>v,ADMIN_MAX_PRODUCT_GALLERY_IMAGES:5,user:{id:1},askSaveConfirm:async()=>{if(boundary==='confirmation')await wait;return true},flushPendingWorkDraft:()=>{},readWorkDraft:()=>({data:'original'}),restoredLegacyDraftKeyRef:{current:null},setSaving:(v:boolean)=>{if(!v)unlocks++},onSave:async()=>{writes++;await wait;if(boundary==='failure')throw new Error('old actor failure')},clearUnchangedWorkDraft:()=>{clears++;return true},clearCurrentProductDraft:()=>{throw new Error('must not clear current form')},onClose:()=>{closes++},clearAfterSuccessfulProductSave:async(save:()=>Promise<void>,clear:()=>void,close:()=>void)=>{await save();clear();close()},alert:()=>{popups++},tr:(k:string)=>k,getErrorMessage:String,isScientificNotationBarcode:()=>false,isScientificNotationText:()=>false}
   const save=new Function(...Object.keys(scope),compile(saveSource)+';return saveForm')(...Object.values(scope))
   const pending=save();await new Promise<void>(resolve=>setImmediate(resolve))
   if(invalidation==='actor')actorCurrent=false

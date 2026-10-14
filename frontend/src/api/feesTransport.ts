@@ -576,11 +576,33 @@ export function updateFee(id: number, payload: FeePayload & { expectedUpdatedAt:
   ) as Promise<{ fee: FeeRecord }>
 }
 
-export function deleteFee(id: number): Promise<{ success: boolean }> {
+// K2: like the edit, a delete states the version it is looking at. The Worker refuses a
+// delete whose expected_updated_at no longer matches (409 write_conflict) BEFORE it queues
+// the request for review or removes anything; a DELETE with no body is only held to the
+// version the Worker itself read, so a stale screen would still remove the newer record.
+// The type makes the version mandatory for every caller; null is only for a legacy row that
+// has no version. The key is always on the wire, whatever the caller passed.
+export function deleteFee(id: number, expectedUpdatedAt: string | null): Promise<{ success: boolean; pending?: boolean }> {
+  const body = { expected_updated_at: expectedUpdatedAt ?? null }
   return route(
     'fees:delete',
-    () => apiFetch('DELETE', `/api/fees/${encodeURIComponent(String(id))}`),
+    () => apiFetch('DELETE', `/api/fees/${encodeURIComponent(String(id))}`, body),
     null,
     true,
-  ) as Promise<{ success: boolean }>
+  ) as Promise<{ success: boolean; pending?: boolean }>
+}
+
+/**
+ * What a refused fee delete means for the screen that asked: 'changed' (409 write_conflict -- the
+ * expense was edited since this screen read it), 'gone' (404, or 409 reason "deleted" -- someone
+ * removed it first), or null for any other failure, which keeps its own message. Both stale kinds
+ * leave the record exactly as the other device left it, so the caller refreshes and says so.
+ */
+export function feeDeleteStaleKind(error: unknown): 'changed' | 'gone' | null {
+  if (!error || typeof error !== 'object') return null
+  const refusal = error as { status?: unknown; code?: unknown; conflict?: unknown; entity?: unknown; reason?: unknown }
+  if (Number(refusal.status) === 404) return 'gone'
+  const conflict = refusal.conflict === true || refusal.code === 'write_conflict'
+  if (!conflict || (refusal.entity != null && refusal.entity !== 'fee')) return null
+  return refusal.reason === 'deleted' ? 'gone' : 'changed'
 }

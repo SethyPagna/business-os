@@ -13,6 +13,7 @@ export interface PendingSyncPreviewInput {
   retry_count?: unknown
   retry_at?: unknown
   error?: unknown
+  error_code?: unknown
 }
 
 export interface PendingSyncPreviewItem {
@@ -28,6 +29,7 @@ export interface PendingSyncPreviewItem {
   retry_count: number
   retry_at: unknown | null
   error: unknown | null
+  error_code: unknown | null
 }
 
 export function serializePendingSyncPreview(items: PendingSyncPreviewInput[] = []): PendingSyncPreviewItem[] {
@@ -48,6 +50,7 @@ export function serializePendingSyncPreview(items: PendingSyncPreviewInput[] = [
       retry_count: Number(item.retry_count || 0),
       retry_at: item.retry_at || null,
       error: item.error || null,
+      error_code: item.error_code || null,
     })
   }
   return preview
