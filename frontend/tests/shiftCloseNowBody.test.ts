@@ -23,6 +23,8 @@ const originalWindow = globalThis.window
 const originalServerUrl = getSyncServerUrl()
 const session = readableStorage()
 globalThis.window = Object.assign(new EventTarget(), { localStorage: readableStorage(), sessionStorage: session }) as unknown as Window & typeof globalThis
+// Shift requests are saved only for a signed-in account (api/retryRecordScope.ts).
+window.localStorage.setItem('businessos_user', JSON.stringify({ id: 4, organization_id: 3 }))
 
 const bodies: Array<{ url: string; body: Record<string, unknown> }> = []
 const shift = {
