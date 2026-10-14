@@ -349,6 +349,40 @@ function normalizeClientRequestId(value: unknown): string | null {
   return normalized.length > 120 ? normalized.slice(0, 120) : normalized
 }
 
+const SALE_REFUSAL_COLLAPSE_WINDOW = '-1 day'
+
+// A refused sale (stale client claim) is audited once per account and request
+// id: a repeat bumps the count and last-seen time on that row instead of
+// writing another, so a looping client cannot grow audit_logs.
+async function auditSaleRefusal(
+  env: Env, db: ReturnType<typeof getDb>, user: SessionUser | undefined,
+  reason: string, clientRequestId: string | null, claimedCreatedAt: string | null,
+): Promise<void> {
+  const receivedAt = new Date().toISOString()
+  try {
+    const prior = await db.prepare(`SELECT id FROM audit_logs
+      WHERE action = 'sale_refused' AND entity = 'sale_creation' AND user_id IS @user_id
+        AND json_extract(details, '$.reason') = @reason AND json_extract(details, '$.client_request_id') IS @client_request_id
+        AND created_at >= datetime('now', @window)
+      ORDER BY id DESC LIMIT 1`).get<{ id: number }>({
+      user_id: user?.id ?? null, reason, client_request_id: clientRequestId, window: SALE_REFUSAL_COLLAPSE_WINDOW,
+    })
+    if (prior) {
+      await db.prepare(`UPDATE audit_logs SET
+        details = json_set(details, '$.count', COALESCE(json_extract(details, '$.count'), 1) + 1, '$.last_received_at', @received_at),
+        new_value = json_set(details, '$.count', COALESCE(json_extract(details, '$.count'), 1) + 1, '$.last_received_at', @received_at)
+        WHERE id = @id`).run({ id: prior.id, received_at: receivedAt })
+      return
+    }
+  } catch (_) {
+    // A failed lookup falls through to a plain audit row, as audit() itself never throws.
+  }
+  await audit(env, user?.id ?? null, actorSnapshot(user), 'sale_refused', 'sale_creation', null, {
+    kind: 'sale.creation_refused', reason, client_request_id: clientRequestId,
+    claimed_created_at: claimedCreatedAt, received_at: receivedAt, count: 1, last_received_at: receivedAt,
+  })
+}
+
 async function saleMutationDigest(value: unknown): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(value)))
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
@@ -570,10 +604,7 @@ app.post('/', async (c) => {
   if (body.money_precision_version !== 1) return c.json({ error: 'Keep the original pending sale and review it with the current app before recording it.', code: 'money_precision_review_needed' }, 409)
   const clientTime = resolveClientCreatedAt(body.created_at)
   if (clientTime.tooOld) {
-    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'sale_refused', 'sale_creation', null, {
-      kind: 'sale.creation_refused', reason: 'sale_created_at_too_old', client_request_id: clientRequestId || null,
-      claimed_created_at: clientTime.claimed, received_at: new Date().toISOString(),
-    })
+    await auditSaleRefusal(c.env, db, user, 'sale_created_at_too_old', clientRequestId || null, clientTime.claimed)
     return c.json({ error: 'This sale was saved on this device at an earlier time and is kept there. Nothing was recorded.', code: 'sale_created_at_too_old', claimed_created_at: clientTime.claimed }, 409)
   }
   if (!await saleMoneySchemaReady(db)) return c.json({ error: 'Sale precision schema is not ready.', code: 'money_precision_schema_not_ready' }, 503)

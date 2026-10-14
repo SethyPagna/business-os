@@ -244,6 +244,49 @@ async function main() {
       assert.equal(refusals, 4)
     })
 
+    const secondCookie = await h.addEmployee(951, 'window_cashier_two', { pos: true, sales: true })
+    const secondOwner = { ...h.owner, actor_id: 951 }
+    const secondEmployee = { ...h, call: (method, url, body, label, options = {}) => h.call(method, url, body, label, { cookie: secondCookie, ...options }) }
+    const refuseAsSecond = (key, createdAt) => H.createSale(secondEmployee, { key, createdAt, lines: [{ productId: 12, quantity: 1 }],
+      paymentDetails: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }], extra: { offline_owner: secondOwner }, label: 'second cashier old claim' })
+    const refusalRowsFor = (userId, key) => h.all("SELECT id, user_id, details, new_value FROM audit_logs WHERE action='sale_refused' AND user_id=? AND json_extract(details,'$.client_request_id') IS ? ORDER BY id", userId, key)
+    const beforeLoop = await counts()
+    const totalBeforeLoop = await refusalTotal()
+    const stalePast = new Date(Date.now() - 20 * DAY).toISOString()
+    const loopStatuses = []
+    for (let attempt = 0; attempt < 5; attempt += 1) loopStatuses.push((await sell('window-loop-0001', stalePast)).status)
+    const loopRows = await refusalRowsFor(950, 'window-loop-0001')
+    const otherId = await sell('window-loop-0002', stalePast)
+    const otherUser = await refuseAsSecond('window-loop-0001', stalePast)
+    const noId = [await sell(undefined, stalePast), await sell(undefined, stalePast)]
+    const noIdRows = await refusalRowsFor(950, null)
+    const otherIdRows = await refusalRowsFor(950, 'window-loop-0002')
+    const otherUserRows = await refusalRowsFor(951, 'window-loop-0001')
+    const afterLoop = await counts()
+    const totalAfterLoop = await refusalTotal()
+    r.check(`N1: five identical refusals for one account and request id write ONE audit row with a count and last-seen time updated in place (rows ${loopRows.length}, details ${loopRows[0] && loopRows[0].details})`, () => {
+      assert.deepEqual(loopStatuses, [409, 409, 409, 409, 409])
+      assert.equal(loopRows.length, 1)
+      const details = JSON.parse(loopRows[0].details)
+      assert.equal(details.count, 5)
+      assert.equal(details.kind, 'sale.creation_refused')
+      assert.equal(details.reason, 'sale_created_at_too_old')
+      assert.equal(details.claimed_created_at, storedShape(Date.parse(stalePast)))
+      assert.ok(Date.parse(details.last_received_at) >= Date.parse(details.received_at))
+      assert.equal(loopRows[0].new_value, loopRows[0].details, 'the diff column follows the details')
+    })
+    r.check(`N1: a different request id, a different account with the same request id, and requests without an id each keep their own row (other id ${otherId.status}, other account ${otherUser.status}, no-id rows ${noIdRows.length}; total refusal rows ${totalBeforeLoop} -> ${totalAfterLoop})`, () => {
+      assert.equal(otherId.status, 409)
+      assert.equal(otherUser.status, 409)
+      assert.deepEqual(noId.map(result => result.status), [409, 409])
+      assert.equal(otherIdRows.length, 1)
+      assert.equal(otherUserRows.length, 1)
+      assert.equal(noIdRows.length, 1)
+      assert.equal(JSON.parse(noIdRows[0].details).count, 2)
+      assert.equal(totalAfterLoop - totalBeforeLoop, 4, 'five loop attempts, one other id, one other account, two without an id are four rows')
+      assert.deepEqual(afterLoop, beforeLoop, 'no sale, line, stock movement or stock change')
+    })
+
     const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
     const shiftWindow = id => h.one('SELECT id, opened_at, closed_at, revision FROM shift_sessions WHERE id=?', id)
     const shiftFigures = async id => {
