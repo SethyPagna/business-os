@@ -18,7 +18,8 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf
 const packs = Object.fromEntries(['en', 'km'].map((lang) => [lang, JSON.parse(read(`../src/lang/${lang}.json`))])) as Record<string, Record<string, string>>
 const WORKER_SENTENCE = 'Backup data was restored, but the restore could not be recorded in the audit log. Maintenance stays on: clear maintenance, then retry the same restore.'
 const BACKUP = 'business-os-cloudflare-20261013-020000Z.json'
-const user = { id: 1, username: 'owner', role_code: 'admin', role_permissions: { all: true } }
+const PASSWORD = 'correct horse battery staple'
+const user = { id: 1, username: 'admin', role_code: 'admin', role_permissions: { all: true } }
 
 const harness = await createHarness({ observe: ['api/systemJobs.ts'] })
 let failed = 0
@@ -45,7 +46,7 @@ async function mount(lang: 'en' | 'km', script: Script) {
     doubles: {
       'api/systemJobs.ts': {
         getBackupMaintenance: async () => { state.maintenanceReads += 1; return { maintenance: state.maintenance } },
-        clearBackupMaintenance: async () => { state.clears += 1; state.maintenance = null; return { cleared: true, wasSet: true } },
+        clearBackupMaintenance: async (currentPassword: string) => { assert.equal(currentPassword, PASSWORD, 'the typed password is sent'); state.clears += 1; state.maintenance = null; return { cleared: true, wasSet: true } },
       },
     },
   })
@@ -65,6 +66,7 @@ async function startRestore(ctx: Ctx): Promise<void> {
     await surface.click(surface.findAll((node) => node.tagName === 'BUTTON' && accessibleText(node).includes(words.import_backup_title))[0])
     await surface.type(surface.field('backup-folder-import-path'), BACKUP)
   }
+  await surface.type(surface.field('backup-restore-password'), PASSWORD)
   await surface.click(surface.find((node) => node.getAttribute('data-testid') === 'backup-restore-start', 'Restore button'))
   await surface.click(buttonsNamed(surface, words.continue)[0])
 }
@@ -106,6 +108,7 @@ try {
         const clear = bannerClear(ctx)
         assert.equal(clear.length, 1, 'one Clear button, with its translated tooltip')
         assert.equal(clear[0].textContent, words.clear, 'icon plus the one word')
+        await ctx.surface.type(ctx.surface.field('backup-maintenance-clear-password'), PASSWORD)
         await ctx.surface.click(clear[0])
         const confirm = confirmClear(ctx)
         assert.equal(confirm.length, 1, 'the confirmation opened over the banner')
@@ -133,6 +136,7 @@ try {
         assert.ok(hasText(ctx, words.restore_audit_pending_title))
         assert.ok(!hasText(ctx, words.restore_maintenance_failed))
         assert.equal(bannerClear(ctx).length, 1)
+        await ctx.surface.type(ctx.surface.field('backup-maintenance-clear-password'), PASSWORD)
         await ctx.surface.click(bannerClear(ctx)[0])
         await ctx.surface.click(confirmClear(ctx)[0])
         assert.equal(ctx.state.clears, 1)

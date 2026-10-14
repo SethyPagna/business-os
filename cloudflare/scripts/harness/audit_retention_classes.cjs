@@ -19,6 +19,7 @@ const PURGED = false
 const ROWS = [
   // ---- sales and payments
   ['sale_creation', 'create', KEPT],
+  ['sale_creation', 'sale_refused', KEPT],
   ['sale', 'update', KEPT],
   ['sale', 'sale_settlement', KEPT],
   ['sale', 'sale_payment_correction_opened', KEPT],
