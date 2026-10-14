@@ -17,7 +17,7 @@ import { bumpVersion, bumpVersions } from '../lib/cache'
 import { reportError } from '../lib/errorReporting'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { actorSnapshot } from '../lib/actorSnapshot'
-import { denyUnlessCurrentPassword, denyUnlessDefaultAdmin } from '../lib/destructiveStepUp'
+import { denyUnlessCurrentPassword, denyUnlessDefaultAdmin, denyUnlessRepairPermission } from '../lib/destructiveStepUp'
 import { getPlanLimits, resolvePlanTier } from '../lib/planTier'
 
 // Each R2 delete is its own subrequest, and a Worker invocation has a
@@ -1410,9 +1410,11 @@ app.get('/verify-integrity', async (c) => {
 
 app.post('/repair-integrity', async (c) => {
   const user = c.get('user')
-  if (!hasPermission(user, 'backup') && !hasPermission(user, 'settings')) {
-    return c.json({ error: 'You do not have permission to perform this action' }, 403)
-  }
+  const permissionDenied = await denyUnlessRepairPermission(c, hasPermission(user, 'backup_restore'))
+  if (permissionDenied) return permissionDenied
+  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>
+  const passwordDenied = await denyUnlessCurrentPassword(c, body, 403)
+  if (passwordDenied) return passwordDenied
   try {
     const result = await runDataIntegrityCheck(c.env, true)
     if (result.repairs > 0) {

@@ -7,9 +7,14 @@ import { actorSnapshot } from './actorSnapshot'
 // current password. Both leave a step_up_refused audit row when they refuse.
 //   - denyUnlessDefaultAdmin: routes/system.ts (resets, finalize, orphan
 //     cleanup, factory reset) and routes/backups.ts (restore).
-//   - denyUnlessCurrentPassword: those two, plus routes/backups.ts (forced
-//     maintenance clear), routes/compat.ts (audit-log purge) and
-//     routes/settings.ts (audit-log retention).
+//   - denyUnlessCurrentPassword: those two, plus routes/system.ts (integrity
+//     repair), routes/backups.ts (forced maintenance clear),
+//     routes/compat.ts (audit-log purge) and routes/settings.ts (audit-log
+//     retention).
+//   - denyUnlessRepairPermission: routes/system.ts (integrity repair), which
+//     rewrites stock and sale statuses and so needs the Restore permission; the
+//     route passes whether the caller holds it, so this refusal is audited and
+//     coded like the others.
 
 export async function denyUnlessDefaultAdmin(c: any, action: 'reset' | 'restore' = 'reset') {
   const actorId = Number(c.get('user')?.id)
@@ -24,6 +29,15 @@ export async function denyUnlessDefaultAdmin(c: any, action: 'reset' | 'restore'
     return refuse(c, 403, 'restore_builtin_admin_only', 'Only the active built-in default admin account can restore a backup. No data was changed.')
   }
   return refuse(c, 403, 'reset_builtin_admin_only', 'Only the active built-in default admin account can reset data.')
+}
+
+// The English is the language pack's, word for word (pinned by frontend tests/branchRefusalLanguage.test.ts); the code is the pack key.
+export const REPAIR_INTEGRITY_PERMISSION_CODE = 'repair_integrity_restore_permission_required'
+export const REPAIR_INTEGRITY_PERMISSION_ERROR = 'Repairing data needs the Backup restore and reset permission. No data was changed.'
+
+export async function denyUnlessRepairPermission(c: any, allowed: boolean) {
+  if (allowed) return null
+  return refuse(c, 403, REPAIR_INTEGRITY_PERMISSION_CODE, REPAIR_INTEGRITY_PERMISSION_ERROR)
 }
 
 async function refuse(c: any, status: number, code: string, error: string, extra: Record<string, unknown> = {}) {

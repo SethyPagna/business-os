@@ -40,17 +40,20 @@ check('every destructive system route calls the restore-permission helper', () =
   }
 })
 
-check("the only plain-'backup' gates left in system.ts are the integrity pair (read + guided repair)", () => {
-  // verify-integrity is a pure read and repair-integrity a guided repair --
-  // neither wipes data, so they deliberately keep their backup-OR-settings
-  // gate (repair's tier is flagged in progress.md's Part-77 findings, not
-  // silently changed here). Nothing DESTRUCTIVE may use plain 'backup'.
+check("the only plain-'backup' gate left in system.ts is the integrity read; the repair needs Restore and the password", () => {
+  // verify-integrity is a pure read, so it keeps its backup-OR-settings gate. repair-integrity rewrites stock and
+  // sale statuses, so it is destructive: the Restore permission and the caller's current password, like the resets.
+  // Nothing DESTRUCTIVE may use plain 'backup'.
   const plainBackupGates = (systemSrc.match(/hasPermission\(user, 'backup'\)/g) || []).length
-  assert.strictEqual(plainBackupGates, 2, `expected exactly the two integrity gates on plain 'backup' (found ${plainBackupGates})`)
-  for (const route of ['/verify-integrity', '/repair-integrity']) {
-    const routeAt = systemSrc.indexOf(`'${route}'`)
-    assert.ok(routeAt > -1 && /hasPermission\(user, 'backup'\)/.test(systemSrc.slice(routeAt, routeAt + 300)), `${route} keeps its compound gate`)
-  }
+  assert.strictEqual(plainBackupGates, 1, `expected exactly the integrity read on plain 'backup' (found ${plainBackupGates})`)
+  const readAt = systemSrc.indexOf("'/verify-integrity'")
+  assert.ok(readAt > -1 && /hasPermission\(user, 'backup'\)/.test(systemSrc.slice(readAt, readAt + 300)), '/verify-integrity keeps its compound gate')
+  const repairAt = systemSrc.indexOf("app.post('/repair-integrity'")
+  assert.ok(repairAt > -1, 'expected route /repair-integrity')
+  const repair = systemSrc.slice(repairAt, repairAt + 900)
+  assert.ok(/denyUnlessRepairPermission\(c, hasPermission\(user, 'backup_restore'\)\)/.test(repair), '/repair-integrity must require the Restore permission')
+  assert.ok(/denyUnlessCurrentPassword\(c, body, 403\)/.test(repair), '/repair-integrity must require the current password')
+  assert.ok(repair.indexOf('denyUnlessCurrentPassword') < repair.indexOf('runDataIntegrityCheck'), 'the password is checked before anything is repaired')
 })
 
 check("backups.ts's restore branch keeps its own backup_restore check (the precedent this mirrors)", () => {

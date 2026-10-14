@@ -83,6 +83,7 @@ export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   bulk_delete_queue_unavailable: 'bulk_delete_queue_unavailable',
   bulk_delete_queue_resume_required: 'bulk_delete_queue_resume_required',
   product_has_stock: 'product_has_stock',
+  repair_integrity_restore_permission_required: 'repair_integrity_restore_permission_required',
   product_status_unsupported: 'product_status_unsupported',
   product_replacement_incomplete: 'product_replacement_incomplete',
   branch_edit_conflict: 'branch_edit_conflict',

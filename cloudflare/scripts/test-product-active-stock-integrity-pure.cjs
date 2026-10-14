@@ -47,10 +47,10 @@ async function main() {
   const call = ast.statements.find(node => ts.isExpressionStatement(node) && ts.isCallExpression(node.expression)
     && node.expression.arguments[0]?.text === '/repair-integrity').expression
   const callback = call.arguments[1].getText(ast)
-  const route = new Function('hasPermission','runDataIntegrityCheck','productStockGuardError', `return ${compile(`const handler = ${callback}`).replace('const handler = ', '').replace(/;\s*$/, '')}`)(
-    () => true, () => { throw new guard.ProductStockGuardError() }, guard.productStockGuardError,
+  const route = new Function('hasPermission','denyUnlessRepairPermission','denyUnlessCurrentPassword','runDataIntegrityCheck','productStockGuardError','audit','actorSnapshot', `return ${compile(`const handler = ${callback}`).replace('const handler = ', '').replace(/;\s*$/, '')}`)(
+    () => true, async () => null, async () => null, () => { throw new guard.ProductStockGuardError() }, guard.productStockGuardError, async () => {}, () => null,
   )
-  const response = await route({ get: () => ({}), env: {}, json: (body,status=200) => ({body,status}) })
+  const response = await route({ get: () => ({}), env: {}, req: { json: async () => ({ currentPassword: 'x' }) }, json: (body,status=200) => ({body,status}) })
   assert.equal(response.status,409)
   assert.equal(response.body.code,'product_has_stock')
   database.close()

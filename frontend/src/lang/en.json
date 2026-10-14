@@ -12,6 +12,7 @@
   "product_status_unsupported": "Products do not have an active or inactive status. Remove the Active column or field and try again.",
   "reset_builtin_admin_only": "Only the built-in admin account can reset business data.",
   "restore_builtin_admin_only": "Only the built-in admin account can restore a backup. No data was changed.",
+  "repair_integrity_restore_permission_required": "Repairing data needs the Backup restore and reset permission. No data was changed.",
   "admin_control_setting_required": "Only an administrator can change this setting. Nothing was changed.",
   "dedicated_setting_endpoint_required": "This setting can only be changed from its own field. Nothing was changed.",
   "step_up_refused": "Protected action refused",

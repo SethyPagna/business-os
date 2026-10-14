@@ -49,7 +49,7 @@ const lang = loadModule()
 const REDIRECT_CODES = ['branch_redirect_required', 'branch_redirect_target_invalid', 'branch_retired_no_successor', 'branch_retired_damaged_stock']
 const BULK_CODES = ['bulk_delete_queue_unavailable', 'bulk_delete_queue_resume_required']
 const PLAN_CODES = ["stock_session_query_budget_exceeded","customer_return_over_plan_budget","stock_import_unit_over_tier_budget","stock_import_reconcile_over_tier_budget","import_queue_required"]
-const CODES = [...PLAN_CODES,'branch_not_sellable', 'sale_branch_mismatch', 'sale_identity_conflict', 'unrecorded_stock_line_invalid', 'fee_branch_invalid', 'fee_sale_invalid', 'fee_sale_branch_mismatch', ...REDIRECT_CODES, 'product_has_stock', 'product_status_unsupported', 'product_replacement_incomplete', ...BULK_CODES, 'bulk_price_outcome_unknown']
+const CODES = [...PLAN_CODES,'branch_not_sellable', 'sale_branch_mismatch', 'sale_identity_conflict', 'unrecorded_stock_line_invalid', 'fee_branch_invalid', 'fee_sale_invalid', 'fee_sale_branch_mismatch', ...REDIRECT_CODES, 'product_has_stock', 'repair_integrity_restore_permission_required', 'product_status_unsupported', 'product_replacement_incomplete', ...BULK_CODES, 'bulk_price_outcome_unknown']
 const refusal = (code: unknown, message = 'Worker English', status = 400) => Object.assign(new Error(message), { status, code })
 
 await runTest('queue-unavailable HTTP refusal keeps retryable 503 and stable code in Khmer', async () => {
@@ -103,6 +103,9 @@ await runTest('every code is one the Worker really sends, with the pack English 
     assert.equal(english?.[1], EN[code], `branchEffect.ts sends the pack English for ${code}`)
   }
   assert.equal((sales.match(/SALE_BRANCH_MISMATCH_BODY, 400\)/g) || []).length, 4, 'every header/line branch disagreement is the coded body')
+  const stepUp = read(WORKER, 'lib', 'destructiveStepUp.ts')
+  assert.ok(stepUp.includes("REPAIR_INTEGRITY_PERMISSION_CODE = 'repair_integrity_restore_permission_required'"), 'the data-repair permission refusal is destructiveStepUp.ts code')
+  assert.ok(stepUp.includes("REPAIR_INTEGRITY_PERMISSION_ERROR = '" + EN.repair_integrity_restore_permission_required + "'"), 'destructiveStepUp.ts sends the pack English for it')
 })
 
 await runTest('on a Khmer screen each refusal becomes the Khmer pack text, keeping its code and status', async () => {
