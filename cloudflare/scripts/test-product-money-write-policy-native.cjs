@@ -49,7 +49,6 @@ real.add('reviewApprovalPermission')
 real.add('productDiscountGate')
 // 6.0.132: the products route folds a create through lib/createFold.ts, which writes its request receipt.
 real.add('createFold')
-real.add('costValue')
 real.add('stockMutationReceipt')
 const unavailable = name => new Proxy(function () {}, { get: (_target, key) => unavailable(`${name}.${String(key)}`), apply: () => { throw new Error(`Unexpected fixture dependency: ${name}`) }, construct: () => { throw new Error(`Unexpected fixture dependency: ${name}`) } })
 class ProductImageAssetError extends Error {}

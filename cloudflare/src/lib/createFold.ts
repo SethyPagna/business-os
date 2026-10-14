@@ -6,7 +6,6 @@ import { addressedStatements, type BranchEffect } from './branchRedirectWrite'
 import { bumpVersion } from './cache'
 import { catalogCostRecomputeIfChangedStatement, typedCostEntryBeforeWriteStatement } from './catalogCostRecompute'
 import { getDb } from './db'
-import { knownCost } from './costValue'
 import { nullableMoney4, multiplyMoney4 } from './moneyPrecision'
 import { getActionTier } from './permissions'
 import { pendingActionApprovalStatements, type PendingActionRow, type ReviewPendingActionInput } from './pendingActions'
@@ -46,6 +45,14 @@ import { broadcast } from '../durable-objects/broadcastHub'
 // Returns 200, never 409 -- the whole point of the ruling is that a fold is
 // not an error the operator has to resolve.
 
+// A cost the requester typed: a 0 is a recorded $0, absent or blank is unknown (null). Local on purpose: this lib is loaded alone by
+// source tests that stub every other relative import.
+const typedCost = (value: unknown): number | null => {
+  if (value == null || (typeof value === 'string' && value.trim() === '')) return null
+  const cost = Number(value)
+  return Number.isFinite(cost) && cost >= 0 ? cost : null
+}
+
 export type FoldDuplicate = { id: number; name: string; barcode: string; cost_price_usd: number | null; cost_price_khr: number | null }
 
 /** Where a starting quantity lands: productCreateDestination's answer. */
@@ -62,7 +69,7 @@ export function startingStockFingerprint(body: Record<string, unknown>, destinat
   return {
     client_request_id: body.client_request_id, source: 'product_starting_stock',
     name: String(body.name ?? '').trim(), barcode: String(body.barcode ?? '').trim(),
-    branch_id: destination.branchId, quantity: destination.quantity, unit_cost_usd: knownCost(body.cost_price_usd),
+    branch_id: destination.branchId, quantity: destination.quantity, unit_cost_usd: typedCost(body.cost_price_usd),
     received_date: body.received_date ?? null, expiry_date: body.expiry_date ?? null,
   }
 }
@@ -98,8 +105,8 @@ export async function foldCreateIntoExisting(
   const cleanedBarcode = foldBarcodeCleanup(duplicate, body.barcode)
   if (cleanedBarcode !== null) updates.barcode = cleanedBarcode
   // A typed 0 is a recorded $0 and folds in; an absent or blank cost is unknown and changes nothing.
-  const incomingCostUsd = knownCost(body.cost_price_usd)
-  const incomingCostKhr = knownCost(body.cost_price_khr)
+  const incomingCostUsd = typedCost(body.cost_price_usd)
+  const incomingCostKhr = typedCost(body.cost_price_khr)
   let costOutliers: MergedCostOutlier[] = []
   if (incomingCostUsd !== null || incomingCostKhr !== null) {
     const { merged, outliers } = resolveMergedCostDetail([
@@ -188,7 +195,7 @@ export async function foldCreateWithStockInWrite(
   const db = getDb(env)
   const { branchId, quantity, landing } = destination
   const cleanedBarcode = foldBarcodeCleanup(duplicate, body.barcode)
-  const incomingCostUsd = knownCost(body.cost_price_usd)
+  const incomingCostUsd = typedCost(body.cost_price_usd)
   const unitCostUsd = incomingCostUsd === null ? null : nullableMoney4(incomingCostUsd)
   const totalCostUsd = unitCostUsd == null ? null : multiplyMoney4(unitCostUsd, quantity)
   const receivedDate = typeof body.received_date === 'string' && body.received_date.trim() ? body.received_date : null

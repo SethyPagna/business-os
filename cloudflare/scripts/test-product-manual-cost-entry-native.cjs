@@ -49,7 +49,7 @@ const real = new Set([
   'acquisitionCostAccess',
   'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db',
   'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate',
-  'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe', 'catalogCostRecompute', 'costValue',
+  'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe', 'catalogCostRecompute',
 ])
 const noop = new Proxy(function () {}, { get: () => noop, apply: () => undefined, construct: () => ({}) })
 class ProductImageAssetError extends Error {}

@@ -1,7 +1,10 @@
 import type { D1Compat } from './db'
 import type { MergedCostOutlier } from './productDetailRule'
 import { weightedMeanMoney4 } from './moneyPrecision'
-import { knownCost } from './costValue'
+
+// A cost read from a row, unknown (NULL) kept as null. Local on purpose: this lib is loaded alone by many source tests that stub
+// every other relative import.
+const knownCost = (value: unknown): number | null => (value == null || value === '' || !Number.isFinite(Number(value)) ? null : Number(value))
 
 // Historical label (owner rule: old records are never relabelled): the row's own branch-name snapshot
 // when it has a non-blank one, else the live directory name. The SAME expression as
