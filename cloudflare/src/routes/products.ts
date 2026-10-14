@@ -2344,7 +2344,7 @@ const PRODUCT_AUDIT_EXCLUDED_COLUMNS = new Set([
 // (frontend/src/lang/en.json), word for word, so api/branchRefusalLanguage.ts can restate it by code in Khmer; a
 // frontend test pins the pair. Names no product.
 const PRODUCT_MERGE_PERMISSION_REFUSAL = {
-  error: 'This edit would merge this product into another product, and you do not have permission to merge products.',
+  error: 'This edit would merge this product into an existing product. Change the name or barcode, or ask someone who can merge products.',
   code: 'product_merge_permission_required',
 } as const
 

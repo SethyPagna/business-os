@@ -324,6 +324,8 @@ function finish(finding) {
 //   --wrong=tier-not-full               copy of the merge routes' `!== 'full'`: refuses a Review-tier editor instead of queueing
 //   --wrong=queue-before-merge-check    queue a review-tier request before the grant is read (merge-off + review gets 202)
 //   --wrong=merge-after-survivor-price  read the grant after finding H's survivor-price refusal
+//   --wrong=no-next-step                the refusal explains why but not what to do next (the 6.0.111 wording)
+//   --wrong=image-before-merge          the image refusal ahead of the merge refusal (merge off + image none gets the image 403)
 //   --only=<ids>                        run only these case ids
 // ============================================================================================
 const PRODUCTS = 'src/routes/products.ts'
@@ -347,11 +349,25 @@ const PATCHES = {
         '    if (early != null) return c.json({ success: true, pending: true, pendingActionId: early }, 202) }',
         MERGE_GATE_OPEN].join('\n') },
   ],
+  // The first wording (6.0.111): says why, not what to do next.
+  'no-next-step': [
+    { name: 'no-next-step', file: PRODUCTS, from: "error: 'This edit would merge this product into an existing product. Change the name or barcode, or ask someone who can merge products.',",
+      to: "error: 'This edit would merge this product into another product, and you do not have permission to merge products.'," },
+  ],
+  // The image refusal ahead of the merge refusal: a merge-off editor who also lacks the image action is told about
+  // the image, not about the merge (both are 403, so only the message and code differ).
+  'image-before-merge': [
+    { name: 'merge-gate-off', file: PRODUCTS, from: MERGE_TIER, to: 'false' },
+    { name: 'merge-gate-after-image', file: PRODUCTS,
+      from: '  if (!isImageOnlyEdit) {\n    const payload: Record<string, unknown> = { ...body }',
+      to: [MERGE_GATE_OPEN, '    return c.json(PRODUCT_MERGE_PERMISSION_REFUSAL, 403)', '  }',
+        '  if (!isImageOnlyEdit) {', '    const payload: Record<string, unknown> = { ...body }'].join('\n') },
+  ],
   'merge-after-survivor-price': [
     { name: 'gate-off-inside', file: PRODUCTS, from: MERGE_TIER, to: 'false' },
     { name: 'gate-after-price', file: PRODUCTS, from: SURVIVOR_PRICE_CALL,
       to: [SURVIVOR_PRICE_CALL,
-        "        if (getActionTier(user, 'products', 'merge_duplicates') === 'none') return c.json({ error: 'merge', code: 'product_merge_permission_required' }, 403)"].join('\n') },
+        "        if (getActionTier(user, 'products', 'merge_duplicates') === 'none') return c.json(PRODUCT_MERGE_PERMISSION_REFUSAL, 403)"].join('\n') },
   ],
 }
 
@@ -419,7 +435,11 @@ function assertNothingHappened(t, before, after, H) {
 function assertRefusedForMerge(t, r, s) {
   t.eq('HTTP status', r.status, 403)
   t.eq('refusal code', r.body && r.body.code, CODE)
+  t.eq('body keys are exactly code and error', Object.keys(r.body || {}).sort(), ['code', 'error'])
+  t.ok('the refusal says what to do next (change the identity, or ask someone who can merge)',
+    /Change the name or barcode, or ask someone who can merge products\.$/.test(String(r.body && r.body.error)), r.body)
   t.ok('the refusal does not name the survivor product', !JSON.stringify(r.body).includes(String(s.y)), r.body)
+  t.ok('the refusal carries neither product name nor barcode', !JSON.stringify(r.body).includes(s.nameX) && !JSON.stringify(r.body).includes(s.nameY) && !JSON.stringify(r.body).includes(s.barX) && !JSON.stringify(r.body).includes(s.barY), r.body)
 }
 
 async function main() {
@@ -443,6 +463,12 @@ async function main() {
     // Products Full, merge not switched off.
     await H.addUser(6, 'mp-full', { products: true })
     await H.addSession('full', 6, { device: 'Manager Laptop' })
+    // Merge OFF and the image action OFF: a fold that moves an image is refused for BOTH reasons.
+    await H.addUser(7, 'mp-merge-off-image-off', { products: true, 'products:merge_duplicates': false, 'products:image': false })
+    await H.addSession('mergeoffimageoff', 7, { device: 'Intern Phone' })
+    // Image OFF only: the same fold is refused for the image alone (finding I's refusal, no merge code).
+    await H.addUser(8, 'mp-image-off', { products: true, 'products:image': false })
+    await H.addSession('imageoff', 8, { device: 'Photo Phone' })
 
     const identityBody = {
       both: (s) => ({ name: s.nameY, barcode: s.barY }),
@@ -487,6 +513,31 @@ async function main() {
         wholesale_price_usd: 0, wholesale_price_khr: 0, description: 'MP whole form ' + s.x }, { as: 'probe' })
       await H.settle()
       assertRefusedForMerge(t, r, s)
+      assertNothingHappened(t, before, await snap(H, s), H)
+    })
+
+    // ORDER (Opus refuter note 4): inside identityFoldRefusal the merge refusal comes BEFORE the image refusal. X carries a
+    // cover that the fold would move onto Y (Y has none), so an editor without the image action is refused for the image
+    // too; the person must be told about the merge. Both are 403, so only the code and message tell the orders apart.
+    await check('MP-order-merge-before-image', 'ORDER: merge OFF + image none on a fold that moves an image: refused as product_merge_permission_required (merge refusal before the image refusal), nothing changed', 'high', async (t) => {
+      const s = await pair(H, { shape: 'both' })
+      t.eq('the fixture moves an image: X has a cover and Y has none', [(await H.q1('SELECT image_path p FROM products WHERE id=?', s.x)).p, (await H.q1('SELECT image_path p FROM products WHERE id=?', s.y)).p], ['/uploads/mp-x.jpg', null])
+      const before = await snap(H, s)
+      const r = await H.api('PUT', '/api/products/' + s.x, identityBody.both(s), { as: 'mergeoffimageoff' })
+      await H.settle()
+      assertRefusedForMerge(t, r, s)
+      assertNothingHappened(t, before, await snap(H, s), H)
+      t.note('status ' + r.status + ' ' + JSON.stringify(r.body).slice(0, 200))
+    })
+
+    await check('MP-control-image-refusal', 'control: image none with the merge action NOT switched off, same image-moving fold: refused by the IMAGE check (403 without the merge code), nothing changed -- the fixture reaches the image refusal', 'control', async (t) => {
+      const s = await pair(H, { shape: 'both' })
+      const before = await snap(H, s)
+      const r = await H.api('PUT', '/api/products/' + s.x, identityBody.both(s), { as: 'imageoff' })
+      await H.settle()
+      t.eq('HTTP status', r.status, 403)
+      t.ok('the refusal is the image check, not the merge refusal', !(r.body && r.body.code === CODE), r.body)
+      t.eq('image-check body', r.body && r.body.error, 'You do not have permission to perform this action')
       assertNothingHappened(t, before, await snap(H, s), H)
     })
 
