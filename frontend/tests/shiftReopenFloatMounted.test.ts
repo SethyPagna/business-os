@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { accessibleText, createHarness, propsOf, type MemoryNode } from './mountedComponentHarness.ts'
+import { shiftCloseTimeRefusalText } from '../src/components/shifts/shiftCloseTimeError.ts'
 
 // A reopened segment is the same physical drawer, so it opens with the cash counted when the parent closed.
 // The Shifts popup, mounted for real with the Worker transport doubled: the reopen form shows that count
@@ -117,10 +118,16 @@ for (const [language, pack] of [['en', en], ['km', km]] as const) {
 }
 
 await runTest('the new reopen sentences exist in both packs and differ', () => {
-  for (const key of ['shift_reopen_float_hint', 'shift_reopen_needs_count']) {
+  for (const key of ['shift_reopen_float_hint', 'shift_reopen_needs_count', 'shift_count_locked_by_reopen', 'shift_opening_float_locked_by_reopen']) {
     assert.ok(en[key] && km[key], `${key} is in both packs`)
     assert.match(km[key], /[ក-៿]/, `${key} is Khmer`)
     assert.notEqual(en[key], km[key])
+  }
+})
+
+await runTest('the Worker refusals that lock a reopened pair are shown as the translated sentence, never the English fallback', () => {
+  for (const code of ['shift_count_locked_by_reopen', 'shift_opening_float_locked_by_reopen']) {
+    assert.equal(shiftCloseTimeRefusalText({ code, message: 'English fallback' }, (key) => `T:${key}`), `T:${code}`)
   }
 })
 

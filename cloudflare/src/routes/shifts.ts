@@ -427,6 +427,12 @@ async function timeReviewAfterEdit(env: Env, db: D1Compat, actorName: string, be
   return [close, open].filter((entry): entry is ShiftTimeReview => entry != null)
 }
 const SHIFT_TIME_ADMIN_ONLY = { code: 'shift_time_admin_only', error: 'Only an administrator can change the opening or closing time of a shift.' } as const
+/** The reopened segment copied the parent's count once; a later change to either side would leave it on a stale copy. */
+const SHIFT_COUNT_LOCKED_BY_REOPEN = { code: 'shift_count_locked_by_reopen',
+  error: 'This shift was reopened, so its closing count can no longer be changed. Correct the count on the reopened shift instead, or ask an administrator.' } as const
+const SHIFT_FLOAT_LOCKED_BY_REOPEN = { code: 'shift_opening_float_locked_by_reopen',
+  error: 'A reopened shift opens with the cash counted when the earlier part closed, so its opening cash cannot be changed. Count the drawer when this part closes instead, or ask an administrator.' } as const
+const sameCountValue = (a: number | null | undefined, b: number | null | undefined, step: number) => (a == null || b == null ? (a ?? null) === (b ?? null) : Math.abs(a - b) < step)
 /** Whether an amend asks for a different opening or closing instant (second resolution, the stored text's own). */
 function timesChanged(before: ShiftRow, requestedOpenedAt: string, requestedClosedAt: string | null): boolean {
   const sameSecond = (a: string | null, b: string | null) => (a == null || b == null ? a === b : Math.floor(utcMs(a) / 1000) === Math.floor(utcMs(b) / 1000))
@@ -1610,6 +1616,15 @@ app.patch('/:id', async (c) => {
   const openingUsd = openingUsdParsed.value; const openingKhr = openingKhrParsed.value
   const additionalUsd = additionalUsdParsed.value; const additionalKhr = additionalKhrParsed.value
   const closingUsd = closingUsdParsed.value; const closingKhr = closingKhrParsed.value
+  if (before.has_reopened_child && closedAt
+    && (!sameCountValue(closingUsd, before.closing_counted_usd, 0.005) || !sameCountValue(closingKhr, before.closing_counted_khr, 0.5))) {
+    return c.json(SHIFT_COUNT_LOCKED_BY_REOPEN, 409)
+  }
+  const parentOfBefore = before.parent_shift_id == null ? null : await readShiftById(db, before.parent_shift_id)
+  if (parentOfBefore && !parentOfBefore.cancelled_at
+    && (!sameCountValue(openingUsd, before.opening_float_usd, 0.005) || !sameCountValue(openingKhr, before.opening_float_khr, 0.5))) {
+    return c.json(SHIFT_FLOAT_LOCKED_BY_REOPEN, 409)
+  }
   const beforeStored = storedShift(before)
   const after = { ...beforeStored, opened_at: openedAt,
     opening_float_usd: openingUsd, opening_float_khr: openingKhr,
@@ -1621,8 +1636,7 @@ app.patch('/:id', async (c) => {
     closing_note: closedAt ? ('closing_note' in body ? optionalText(body.closing_note) : before.closing_note) : null,
     revision: before.revision + 1 }
   if (before.parent_shift_id != null) {
-    const parent = await readShiftById(db, before.parent_shift_id)
-    const parentTerminatedAt = parent?.cancelled_at ?? parent?.closed_at
+    const parentTerminatedAt = parentOfBefore?.cancelled_at ?? parentOfBefore?.closed_at
     if (!parentTerminatedAt || utcMs(openedAt) < utcMs(parentTerminatedAt)) {
       return c.json({ error: 'Opening time cannot be before the parent shift ended.' }, 400)
     }

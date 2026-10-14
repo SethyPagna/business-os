@@ -490,7 +490,7 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
   assert.equal((await call('POST', `/${retryOpened.id}/close`, { ...exactClose, closing_counted_usd: 99 })).status, 409,
     'reusing a receipt identity with changed counts is rejected')
   assert.equal((await call('POST', `/${retryChild.id}/close`, exactClose)).status, 409, 'a receipt cannot target another shift')
-  const exactAmend = { client_request_id: 'shift-amend-exact-0001', expected_revision: 0, reason: 'Count correction', opening_float_usd: 9 }
+  const exactAmend = { client_request_id: 'shift-amend-exact-0001', expected_revision: 0, reason: 'Note correction', opening_note: 'Counted with the second device' }
   const beforeAmendNotice = sent.length
   assert.equal((await call('PATCH', `/${retryChild.id}`, exactAmend)).status, 200)
   assert.equal(sent.length, beforeAmendNotice + 1, 'amendments schedule the same report refresh as other transitions')

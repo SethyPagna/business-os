@@ -6711,6 +6711,8 @@
   "shift_reopen_hint": "This creates a linked open segment and preserves the original close record.",
   "shift_reopen_float_hint": "Continues the drawer counted when this shift closed.",
   "shift_reopen_needs_count": "Enter the closing cash count for this shift first, then reopen it.",
+  "shift_count_locked_by_reopen": "This shift was reopened, so its closing count can no longer be changed. Correct the count on the reopened shift instead, or ask an administrator.",
+  "shift_opening_float_locked_by_reopen": "A reopened shift opens with the cash counted when the earlier part closed, so its opening cash cannot be changed. Count the drawer when this part closes instead, or ask an administrator.",
   "shift_reopen_reason": "Reason for reopening (required)",
   "shift_reopen_saved": "Shift reopened. The original close record was preserved.",
   "shift_reopen_failed": "Could not reopen shift.",
