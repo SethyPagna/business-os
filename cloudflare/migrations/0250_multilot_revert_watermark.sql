@@ -18,7 +18,13 @@
 -- POST: SELECT value FROM system_flags WHERE key = 'multilot_revert_watermark';      -- exactly that number, as text
 --       SELECT COUNT(*) FROM inventory_movements WHERE id > CAST((SELECT value FROM system_flags WHERE key = 'multilot_revert_watermark') AS INTEGER);
 --                                                                                    -- 0 at apply time; later rows are the new, recording ones
--- RECOVERY: nothing else depends on the row. DELETE FROM system_flags WHERE key = 'multilot_revert_watermark'; makes Revert fall back
---       to deciding by timestamps alone (the previous rule). Do not edit the value upward: that would refuse removals that recorded.
+-- RECOVERY: nothing else depends on the row. Raising the value is safe: a removal that recorded is never refused whatever the mark says
+--       (lotDrawUnrecorded returns as soon as a record row exists), so a higher mark only adds record-less rows to the refused set. Raise it
+--       to the highest movement id after any period in which a Worker older than this one wrote removals above the mark (the migration
+--       applied but the publish failed; a Worker-only rollback; the minutes between migration and publish):
+--         UPDATE system_flags SET value = CAST((SELECT COALESCE(MAX(id), 0) FROM inventory_movements) AS TEXT), updated_at = CURRENT_TIMESTAMP
+--         WHERE key = 'multilot_revert_watermark';
+--       Do it only once that older Worker has stopped writing. Never lower it. DELETE FROM system_flags WHERE key = 'multilot_revert_watermark';
+--       makes Revert decide by timestamps alone (the previous rule).
 INSERT OR IGNORE INTO system_flags (key, value, updated_at)
 SELECT 'multilot_revert_watermark', CAST(COALESCE(MAX(id), 0) AS TEXT), CURRENT_TIMESTAMP FROM inventory_movements;
