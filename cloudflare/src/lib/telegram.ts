@@ -206,6 +206,27 @@ const usd4 = (value: unknown) => `$${round4(Number(value) || 0).toFixed(4)}`
 // when some of its rows carried no cost anywhere -- the concise-report rule
 // (no explanatory prose) means this is a bare count, not a sentence.
 const unvaluedSuffix = (count: unknown) => (Number(count) > 0 ? ` (${Math.round(Number(count))}?)` : '')
+// Owner, 14 Oct 2026: a recorded $0 cost is a real $0, and a cost that was never
+// recorded (NULL) is unknown and never printed as 0. The kernel counts both
+// (getSalesTotals: cost_missing_snapshot_lines = lines with no cost,
+// cost_known_lines = lines with one, $0 included). The Khmer is km.json's
+// cost_unknown / unknown -- a DRAFT for a native read.
+const unknownCostWord = () => bi('unknown cost', 'មិនស្គាល់ថ្លៃដើម')
+const wholeCount = (count: unknown): number => (Number(count) > 0 ? Math.round(Number(count)) : 0)
+/** The Profit value: the figure alone when every line had a cost, `$X (N unknown cost)`
+ *  when some did not, `Unknown (N)` when none did. A caller with no count prints the figure. */
+function profitValue(profitUsd: unknown, missingLines?: unknown, knownLines?: unknown): string {
+  const missing = wholeCount(missingLines)
+  if (!missing) return usd(profitUsd)
+  if (!wholeCount(knownLines)) return `${bi('Unknown', 'មិនស្គាល់')} (${missing})`
+  return `${usd(profitUsd)} (${missing} ${unknownCostWord()})`
+}
+/** The courier cost part of a delivery row (empty when there is nothing to say). NULL is not $0: a recorded $0 prints, an unrecorded one is counted. */
+function courierCostPart(costUsd: number | null | undefined, unrecorded?: unknown): string {
+  const missing = wholeCount(unrecorded)
+  if (costUsd == null || !Number.isFinite(Number(costUsd))) return missing ? `· ${unknownCostWord()} (${missing})` : ''
+  return `· ${usd4(costUsd)} ${bi('cost', 'ថ្លៃដើម')}${missing ? ` (${missing} ${unknownCostWord()})` : ''}`
+}
 const riel = (value: unknown) => `${Math.round(Number(value) || 0).toLocaleString('en-US')}៛`
 function money(usd: unknown, khr: unknown, separator = ' · '): string {
   const usdValue = Number(usd) || 0; const khrValue = Number(khr) || 0; const parts: string[] = []
@@ -536,6 +557,8 @@ type SalesBucket = {
    *  (Sep 15 2026), owner: "i see the report says row removed has 1 no cost
    *  price. this is impossible find issue and fix". Never dropped silently. */
   removalLossUnvaluedRows?: number
+  /** getSalesTotals' cost_missing_snapshot_lines / cost_known_lines: profit rests on these lines. Absent = not measured. */
+  costMissingLines?: number; costKnownLines?: number
 }
 /** The day's fees: every one (`usd`/`khr`) and the subset typed 'delivery'
  *  (`deliveryUsd`/`deliveryKhr`), off ONE scan (FEE_SPLIT_COLUMNS). The subset
@@ -600,6 +623,7 @@ async function dayStats(env: Env, date: string, salesTotals: Promise<SalesTotals
       // remove + transfer_out + move_out, and a transfer is not a loss.
       removalLossUsd: totals.removal_loss_usd,
       removalLossUnvaluedRows: totals.removal_loss_unvalued_rows,
+      costMissingLines: totals.cost_missing_snapshot_lines, costKnownLines: totals.cost_known_lines,
     },
     fees: fees && {
       count: Number(fees.count) || 0, usd: Number(fees.usd) || 0, khr: Number(fees.khr) || 0,
@@ -859,7 +883,7 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
   if (showSales) {
     const sales = [labeled('revenue', usd(stats.sales?.usd))]
     if (extra.sales?.totalDiscountUsd) sales.push(labeled('totalDiscount', usd(extra.sales.totalDiscountUsd)))
-    sales.push(labeled('profit', usd(stats.sales?.profitUsd)))
+    sales.push(labeled('profit', profitValue(stats.sales?.profitUsd, stats.sales?.costMissingLines, stats.sales?.costKnownLines)))
     if (stats.sales?.deliveryFeeUsd) sales.push(labeled('deliveryFee', usd(stats.sales.deliveryFeeUsd)))
     // The courier money is a SALES figure -- it comes out of the day's
     // deliveries, not out of the fees table -- and it is normally reported
@@ -1258,6 +1282,9 @@ export type ShiftReportFigures = {
   // and the day summary read, never a second revenue computed here.
   revenueUsd: number
   profitUsd: number
+  /** Same meaning as SalesBucket's costMissingLines / costKnownLines. */
+  costMissingLines?: number
+  costKnownLines?: number
   // What customers were charged for delivery, and what couriers were
   // actually paid out of it. The margin between them is not printed any
   // more -- the header shows the fee, the breakdown shows the cost, and a
@@ -1294,7 +1321,9 @@ export type ShiftReportFigures = {
    * the remainder folded into one "Other" row so the list still adds up.
    */
   paymentMethods?: Array<{ method: string; count: number; usd: number }>
-  deliveries?: Array<{ name: string; count: number; feeUsd: number; costUsd: number }>
+  /** `costUsd` is the sum of the recorded courier costs (a recorded $0 counts), null when none was recorded;
+   *  `unrecordedCostCount` is how many of the `count` deliveries recorded none. */
+  deliveries?: Array<{ name: string; count: number; feeUsd: number; costUsd: number | null; unrecordedCostCount?: number }>
   /** One row per expense paid out of this drawer (lib/shiftReconciliation.ts's
    *  shiftExpenses(...).details, already capped and folded there). */
   expenseDetails?: Array<{ label: string; usd: number; khr: number }>
@@ -1464,7 +1493,7 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // is a cut to explain; with none it IS the revenue line, and the same figure
   // twice under two names is the repetition the redesign takes out.
   if ((figures.itemDiscountUsd || figures.invoiceDiscountUsd) && figures.grossSalesUsd != null) sales.push(labeled('grossSales', usd(figures.grossSalesUsd)))
-  sales.push(labeled('profit', usd(figures.profitUsd)))
+  sales.push(labeled('profit', profitValue(figures.profitUsd, figures.costMissingLines, figures.costKnownLines)))
   if (figures.deliveryFeeUsd) sales.push(labeled('deliveryFee', usd(figures.deliveryFeeUsd)))
   // Always positive, always labelled "Not Paid" -- never "$-n", never
   // subtracted from anything above it (see the owner's separate ruling).
@@ -1532,9 +1561,9 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   lines.push(...(deliveries.length
     ? deliveries.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.name, 40)}:`, [
       `${Number(row.count) || 0} · ${usd4(row.feeUsd)} ${bi('fee', 'ថ្លៃដឹក')}`,
-      // An UNRECORDED courier cost is NULL, never $0.00: a "$0.00 cost" tail
-      // would claim the courier worked for free, so it is left off instead.
-      Number(row.costUsd) > 0 ? `· ${usd4(row.costUsd)} ${bi('cost', 'ថ្លៃដើម')}` : '',
+      // A RECORDED cost prints, $0 included (a courier paid nothing is a fact);
+      // an UNRECORDED one is NULL, never $0.00, and is counted instead.
+      courierCostPart(row.costUsd, row.unrecordedCostCount),
     ]))
     : [EMPTY_SECTION]))
 
@@ -1650,6 +1679,8 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number, 
     // lives here: if that one changes, this line changes with it, which is the
     // only way the shift message and the day report can stay reconcilable.
     profitUsd: totals.profit_usd,
+    costMissingLines: totals.cost_missing_snapshot_lines,
+    costKnownLines: totals.cost_known_lines,
     deliveryFeeUsd: totals.delivery_usd,
     deliveryCostUsd: totals.delivery_actual_cost_usd,
     deliveryCostRecorded: totals.delivery_actual_cost_count,
@@ -1695,16 +1726,19 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number, 
         count: row.deliveries,
         feeUsd: row.charged_fee_usd,
         // Kept NULL-honest: actual_cost_count is how many of these deliveries
-        // recorded a courier payout at all, so a contact with none shows no
-        // cost rather than a $0.00 that would read as free delivery.
-        costUsd: Number(row.actual_cost_count) > 0 ? row.actual_cost_usd : 0,
+        // recorded a courier payout at all (a recorded $0 is one), so a contact
+        // with none carries null rather than a 0 that would read as free
+        // delivery, and the ones without are counted.
+        costUsd: Number(row.actual_cost_count) > 0 ? row.actual_cost_usd : null,
+        unrecordedCostCount: Math.max(0, (Number(row.deliveries) || 0) - (Number(row.actual_cost_count) || 0)),
       })),
       8,
       (rest) => ({
         name: otherLabel,
         count: rest.reduce((sum, row) => sum + (Number(row.count) || 0), 0),
         feeUsd: round4(rest.reduce((sum, row) => sum + (Number(row.feeUsd) || 0), 0)),
-        costUsd: round4(rest.reduce((sum, row) => sum + (Number(row.costUsd) || 0), 0)),
+        costUsd: rest.some((row) => row.costUsd != null) ? round4(rest.reduce((sum, row) => sum + (Number(row.costUsd) || 0), 0)) : null,
+        unrecordedCostCount: rest.reduce((sum, row) => sum + (Number(row.unrecordedCostCount) || 0), 0),
       }),
     ),
     // Refunds and courier payouts no longer suppress the estimate: they are
@@ -1888,6 +1922,8 @@ export function shiftOverviewFilters(shift: { business_date: string; branch_id: 
 
 export type ShiftOverviewFigures = {
   revenueUsd: number; profitUsd: number; grossSalesUsd: number; itemDiscountUsd: number; invoiceDiscountUsd: number
+  /** Same meaning as SalesBucket's costMissingLines / costKnownLines. */
+  costMissingLines?: number; costKnownLines?: number
   deliveryFeeUsd: number; creditUsd: number; refundUsd: number
   invoices: number; cancelled: number
   paymentMethods: Array<{ method: string; count: number; usd: number }>
@@ -2019,7 +2055,7 @@ function overviewSections(shift: ShiftReportSession, figures: ShiftOverviewFigur
   if (figures.invoiceDiscountUsd) sales.push(labeled('invoiceDiscount', usd(figures.invoiceDiscountUsd)))
   if (extra.sales && figures.itemDiscountUsd && figures.invoiceDiscountUsd) sales.push(labeled('totalDiscount', usd(extra.sales.totalDiscountUsd)))
   if (figures.itemDiscountUsd || figures.invoiceDiscountUsd) sales.push(labeled('grossSales', usd(figures.grossSalesUsd)))
-  sales.push(labeled('profit', usd(figures.profitUsd)))
+  sales.push(labeled('profit', profitValue(figures.profitUsd, figures.costMissingLines, figures.costKnownLines)))
   if (figures.deliveryFeeUsd) sales.push(labeled('deliveryFee', usd(figures.deliveryFeeUsd)))
   if (figures.creditUsd) sales.push(labeled('credit', notPaidValue(figures.creditUsd, extra.sales)))
   if (figures.refundUsd) sales.push(labeled('refunds', usd(figures.refundUsd)))
@@ -2122,6 +2158,7 @@ export async function shiftOverviewFigures(
   ])
   return {
     revenueUsd: totals.revenue_usd, profitUsd: totals.profit_usd, grossSalesUsd: totals.gross_sales_usd,
+    costMissingLines: totals.cost_missing_snapshot_lines, costKnownLines: totals.cost_known_lines,
     itemDiscountUsd: totals.item_discount_usd, invoiceDiscountUsd: totals.discount_usd,
     deliveryFeeUsd: totals.delivery_usd, creditUsd: totals.pending_revenue_usd, refundUsd: totals.refund_usd,
     invoices: totals.tx_count, cancelled: totals.cancelled_tx_count,
