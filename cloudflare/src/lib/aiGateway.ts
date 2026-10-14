@@ -300,6 +300,7 @@ export async function callChatProvider(providerConfig: any, messages: Array<{ ro
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+      redirect: 'error',
       signal: requestSignal,
       body: JSON.stringify(body),
     })
@@ -316,6 +317,7 @@ export async function callChatProvider(providerConfig: any, messages: Array<{ ro
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+      redirect: 'error',
       signal: requestSignal,
       body: JSON.stringify({
         contents: buildGoogleMessageContents(messages),
@@ -348,6 +350,7 @@ export async function testProviderConfig(providerConfig: any, encryptionKey: str
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+        redirect: 'error',
         signal: AbortSignal.timeout ? AbortSignal.timeout(clamp(Number(providerConfig?.timeout_ms || PROVIDER_META.cohere.safeTimeoutMs || 12000), 3000, 60000)) : undefined,
         body: JSON.stringify({ model, texts: ['health check'], input_type: 'search_document', truncate: 'END' }),
       })
