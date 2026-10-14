@@ -66,7 +66,7 @@ async function boot() {
   const adminRole = await db.prepare("SELECT id FROM roles WHERE code = 'admin'").first()
   const org = await db.prepare('SELECT id FROM organizations ORDER BY id LIMIT 1').first()
   const hash = bcrypt.hashSync(PASSWORD, 4)
-  for (const username of ['owner_a', 'owner_b', 'owner_c', 'owner_otp', 'owner_net', 'owner_race', 'owner_boom']) {
+  for (const username of ['owner_a', 'owner_b', 'owner_c', 'owner_otp', 'owner_net', 'owner_race', 'owner_boom', 'owner_ack']) {
     await db.prepare("INSERT INTO users (username, name, password, role_id, permissions, is_active, organization_id) VALUES (?, ?, ?, ?, '{}', 1, ?)")
       .bind(username, username, hash, adminRole.id, org.id).run()
   }
@@ -389,6 +389,56 @@ async function main() {
     assert.equal((await sessionRow(first.cookie)).revoked_at, null, 'the claim rolled back with the insert')
     assert.equal(await isSignedIn(first.cookie), true)
     assert.equal(await liveRows('owner_boom'), 1)
+  })
+
+  await check('R2-S3: a batch acknowledgement lost after the commit still answers the caller that won', async () => {
+    const out = await build({ entryPoints: [path.join(root, 'src/lib/auth.ts')], bundle: true, write: false, platform: 'node', format: 'cjs', external: ['node:*'], logLevel: 'silent', nodePaths: [path.join(root, 'node_modules')] })
+    const loaded = { exports: {} }
+    new Function('module', 'exports', 'require', out.outputFiles[0].text)(loaded, loaded.exports, require)
+    const { reissueSession } = loaded.exports
+    const userId = (await db.prepare("SELECT id FROM users WHERE username = 'owner_ack'").first()).id
+    let attempts = 0
+    let loseAcknowledgement = false
+    const lossy = {
+      prepare: (sql) => db.prepare(sql),
+      async batch(statements) {
+        attempts += 1
+        const results = await db.batch(statements)
+        if (loseAcknowledgement && attempts === 1) throw new Error('D1_ERROR: Network connection lost.')
+        return results
+      },
+    }
+    const reissue = (cookie, family) => reissueSession(
+      { env: { DB: lossy }, req: { raw: new Request(ADMIN + '/api/auth/session-duration', { headers: { cookie } }) } },
+      userId,
+      { sessionDuration: '7d', limitFamilyId: family },
+    )
+
+    const control = await signIn('owner_ack', 'always')
+    const controlRow = await sessionRow(control.cookie)
+    const controlResult = await reissue(control.cookie, controlRow.id)
+    assert.ok(controlResult, 'control: an acknowledged batch answers with the session')
+    assert.equal(attempts, 1, 'control: one attempt')
+    assert.equal(await liveRows('owner_ack'), 1)
+
+    attempts = 0
+    loseAcknowledgement = true
+    const lost = await signIn('owner_ack', 'always')
+    const lostRow = await sessionRow(lost.cookie)
+    const result = await reissue(lost.cookie, lostRow.id)
+    assert.equal(attempts, 2, 'the transport retried the committed batch')
+    assert.ok(result, 'the caller whose batch committed is answered with its session, not a conflict')
+    assert.equal(await liveRows('owner_ack'), 2, 'the control session and this one; no orphan row')
+    const written = await sessionRow('bos_session=' + encodeURIComponent(result.token))
+    assert.ok(written && written.revoked_at === null, 'the returned token is a live row')
+    assert.equal((await sessionRow(lost.cookie)).revoked_at !== null, true, 'the source session was claimed')
+    assert.equal(await isSignedIn('bos_session=' + encodeURIComponent(result.token)), true)
+
+    attempts = 0
+    loseAcknowledgement = false
+    const replay = await reissue(lost.cookie, lostRow.id)
+    assert.equal(replay, null, 'a genuinely lost race (source already claimed, no row for the new token) is still a conflict')
+    assert.equal(await liveRows('owner_ack'), 2, 'a refused replay writes nothing')
   })
 
   const adminRoleId = (await db.prepare("SELECT id FROM roles WHERE code = 'admin'").first()).id

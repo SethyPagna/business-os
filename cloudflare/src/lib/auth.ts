@@ -256,7 +256,10 @@ export async function createSession(
 // claim changed exactly one, so of any number of calls made with the same
 // cookie exactly one gets a session; the others get null and nothing is
 // written. A failed insert rolls the claim back with it, so the old session
-// is never revoked without a replacement.
+// is never revoked without a replacement. If the batch commits but its
+// acknowledgement is lost, the transport's retry claims nothing; the caller is
+// still answered with the session its first attempt wrote (the new token's row
+// exists, in this user's sign-in family), never a conflict.
 export async function reissueSession<E extends { Bindings: Env } = { Bindings: Env }>(
   c: Context<E>,
   userId: number,
@@ -267,7 +270,8 @@ export async function reissueSession<E extends { Bindings: Env } = { Bindings: E
   const { session, limitFamilyId, params } = await prepareSession(userId, options)
   if (!limitFamilyId) throw new Error('A re-issued session needs the sign-in family it descends from')
   sessionLookupMemo.delete(c)
-  const [claim] = await getDb(c.env).batch([
+  const db = getDb(c.env)
+  const [claim, insert] = await db.batch([
     {
       sql: 'UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE token_hash = @source_hash AND user_id = @user_id AND revoked_at IS NULL',
       params: { source_hash: await hashToken(sourceToken), user_id: userId },
@@ -281,7 +285,11 @@ export async function reissueSession<E extends { Bindings: Env } = { Bindings: E
       params: { ...params, limit_family_id: limitFamilyId },
     },
   ])
-  return claim?.meta?.changes === 1 ? session : null
+  if (claim?.meta?.changes === 1 && insert?.meta?.changes === 1) return session
+  const written = await db.prepare(
+    'SELECT 1 AS found FROM user_sessions WHERE token_hash = @token_hash AND user_id = @user_id AND limit_family_id = @limit_family_id AND revoked_at IS NULL',
+  ).get<{ found: number }>({ token_hash: params.token_hash, user_id: userId, limit_family_id: limitFamilyId })
+  return written ? session : null
 }
 
 // Called from routes/devices.ts when an admin rejects a pending device or
