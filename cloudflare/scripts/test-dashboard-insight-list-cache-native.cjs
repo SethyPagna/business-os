@@ -47,7 +47,7 @@ async function main() {
     const sell = async (customerId, lines, date = '2026-10-05', extra = {}) => {
       n += 1
       const total = lines.reduce((sum, line) => sum + line.price * line.quantity, 0)
-      const res = await H.createSale(h, { key: `dic-${n}`, createdAt: day(date), customerId,
+      const res = await H.createSale(h, { key: `dic-${n}`, backdateTo: day(date), customerId,
         lines: lines.map(line => ({ productId: line.productId, quantity: line.quantity, quote: QUOTE(line.price * line.quantity) })),
         paymentDetails: [{ method: 'Cash', amount_usd: total, amount_khr: 0 }], extra })
       assert.equal(res.status, 200, JSON.stringify(res.body).slice(0, 300))

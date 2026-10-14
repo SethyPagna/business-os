@@ -54,7 +54,7 @@ async function main() {
     }
 
     // ---- ten $9.9955 sales paid $10.00: a +$0.0045 rounding adjustment each ----
-    const priced = (key, method, customerId, hour) => H.createSale(h, { key, createdAt: day(DAY, hour), customerId, label: `sale ${key}`,
+    const priced = (key, method, customerId, hour) => H.createSale(h, { key, backdateTo: day(DAY, hour), customerId, label: `sale ${key}`,
       lines: [{ productId: 7100, quantity: 1, manualPrice: 10, fixedDiscount: 0.0045,
         quote: { gross_usd: 10, product_discount_usd: 0, manual_discount_usd: 0.0045, total_usd: 9.9955, total_khr: 39982 } }],
       paymentDetails: [{ method, amount_usd: 10, amount_khr: 0 }] })
@@ -64,7 +64,7 @@ async function main() {
     // ---- two 3 x $10 sales with a $0.0045 discount (total $29.9955, paid $30): one refunded in part, one in full ----
     const refunded = []
     for (const [key, customerId] of [['mss-part', ALICE], ['mss-full', BOB]]) {
-      const sale = await H.createSale(h, { key, createdAt: day(DAY, 3), customerId, label: `sale ${key}`,
+      const sale = await H.createSale(h, { key, backdateTo: day(DAY, 3), customerId, label: `sale ${key}`,
         lines: [{ productId: 7101, quantity: 3, manualPrice: 10, fixedDiscount: 0.0045, quote: { gross_usd: 30, product_discount_usd: 0, manual_discount_usd: 0.0045, total_usd: 29.9955, total_khr: 119982 } }],
         paymentDetails: [{ method: 'Cash', amount_usd: 30, amount_khr: 0 }] })
       assert.equal(sale.status, 200, JSON.stringify(sale.body).slice(0, 300))
@@ -77,7 +77,7 @@ async function main() {
     }
 
     // ---- a delivery sale with a customer-paid fee ----
-    const delivery = await H.createSale(h, { key: 'mss-delivery', createdAt: day(DAY, 9), label: 'sale mss-delivery',
+    const delivery = await H.createSale(h, { key: 'mss-delivery', backdateTo: day(DAY, 9), label: 'sale mss-delivery',
       lines: [{ productId: 7100, quantity: 1, quote: { gross_usd: 10, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 10, total_khr: 40000 } }],
       paymentDetails: [{ method: 'ABA', amount_usd: 11.5, amount_khr: 0 }],
       extra: { is_delivery: true, delivery_fee_usd: 1.5, delivery_fee_paid_by: 'customer', delivery_actual_cost_usd: 1 } })

@@ -48,7 +48,7 @@ async function main() {
   try {
     await H.seedProduct(h, 704, 'ASO Cream', 10, 1000, 1)
     await h.db.prepare("INSERT INTO delivery_contacts(id,name,phone) VALUES(1,'ASO Driver','012000777')").run()
-    const sale = await H.createSale(h, { key: 'aso-a', createdAt: day('2026-10-05'), lines: [{ productId: 704, quantity: 1, quote: QUOTE }],
+    const sale = await H.createSale(h, { key: 'aso-a', backdateTo: day('2026-10-05'), lines: [{ productId: 704, quantity: 1, quote: QUOTE }],
       paymentDetails: [{ method: 'Cash', amount_usd: 12, amount_khr: 0 }],
       extra: { is_delivery: true, delivery_contact_id: 1, delivery_fee_usd: 2, delivery_fee_paid_by: 'customer', delivery_actual_cost_usd: 7.13 } })
     assert.equal(sale.status, 200, JSON.stringify(sale.body).slice(0, 300))

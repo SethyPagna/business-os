@@ -165,7 +165,7 @@ async function startWorker({ returnIdFloor = 100000, patches = [] } = {}) {
 // POST /api/sales the way the POS does: v1 money, captured pricing quote, and
 // the owner stamp. A first pricing-quote refusal is answered once with the
 // server's own quote (the till's review step); anything else is returned.
-async function createSale(h, { key, lines, status = 'completed', paymentDetails = null, createdAt, customerId, extra = {}, label, cookie }) {
+async function createSale(h, { key, lines, status = 'completed', paymentDetails = null, createdAt, backdateTo, customerId, extra = {}, label, cookie }) {
   const body = { branch_id: 1, money_precision_version: 1, sale_status: status, exchange_rate: 4000, payment_currency: 'USD',
     client_request_id: key, offline_owner: h.owner, ...(createdAt ? { created_at: createdAt } : {}),
     ...(customerId ? { customer_id: customerId } : {}),
@@ -189,6 +189,9 @@ async function createSale(h, { key, lines, status = 'completed', paymentDetails 
     }
     result = await h.call('POST', '/api/sales', body, label || `POST /api/sales ${key}`, options)
   }
+  // POST /api/sales stamps the server clock and refuses a claim older than minutes (lib/clientTimestamp.ts), so a fixture
+  // sale is put on its report day by a direct write right after the real POST. createdAt stays the raw claim for the window tests.
+  if (backdateTo && result.status === 200) await h.db.prepare('UPDATE sales SET created_at=? WHERE id=?').bind(String(backdateTo).slice(0, 19).replace('T', ' '), result.body.id).run()
   return result
 }
 

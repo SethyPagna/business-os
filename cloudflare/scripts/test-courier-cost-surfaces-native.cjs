@@ -106,7 +106,7 @@ async function main() {
     await h.db.prepare("INSERT INTO delivery_contacts(id,name,phone) VALUES(1,'CCS Driver','012000444')").run()
 
     // ---- fixture -------------------------------------------------------------
-    const a = await H.createSale(h, { key: 'ccs-a', createdAt: day('2026-10-05'), lines: [{ productId: 704, quantity: 1, quote: QUOTE }],
+    const a = await H.createSale(h, { key: 'ccs-a', backdateTo: day('2026-10-05'), lines: [{ productId: 704, quantity: 1, quote: QUOTE }],
       paymentDetails: [{ method: 'Cash', amount_usd: 12, amount_khr: 0 }],
       extra: { is_delivery: true, delivery_contact_id: 1, delivery_fee_usd: 2, delivery_fee_paid_by: 'customer', delivery_actual_cost_usd: 0.83 } })
     assert.equal(a.status, 200, JSON.stringify(a.body).slice(0, 300))
@@ -114,7 +114,7 @@ async function main() {
     const costChange = await H.amendSale(h, idA, { kind: 'delivery_actual_cost_changed', client_request_id: 'ccs-a-cost', delivery_actual_cost_usd: 1.37 })
     assert.equal(costChange.status, 200, JSON.stringify(costChange.body).slice(0, 300))
 
-    const b = await H.createSale(h, { key: 'ccs-b', createdAt: day('2026-10-06'), lines: [{ productId: 704, quantity: 1, quote: QUOTE }],
+    const b = await H.createSale(h, { key: 'ccs-b', backdateTo: day('2026-10-06'), lines: [{ productId: 704, quantity: 1, quote: QUOTE }],
       paymentDetails: [{ method: 'Cash', amount_usd: 10, amount_khr: 0 }] })
     assert.equal(b.status, 200, JSON.stringify(b.body).slice(0, 300))
     const idB = b.body.id
@@ -285,7 +285,7 @@ async function main() {
     const staff = await h.addEmployee(963, 'ccs_staff', { sales: true, 'sales:amend': false, ...OFF })
     const staffOn = await h.addEmployee(965, 'ccs_staff_on', { sales: true, 'sales:amend': false })
     const costSale = { is_delivery: true, delivery_contact_id: 1, delivery_fee_usd: 2, delivery_fee_paid_by: 'customer', delivery_actual_cost_usd: 2.46 }
-    const place = (key, cookie, actorId) => H.createSale(h, { key, createdAt: day('2026-10-07'), lines: [{ productId: 704, quantity: 1, quote: QUOTE }],
+    const place = (key, cookie, actorId) => H.createSale(h, { key, backdateTo: day('2026-10-07'), lines: [{ productId: 704, quantity: 1, quote: QUOTE }],
       paymentDetails: [{ method: 'Cash', amount_usd: 12, amount_khr: 0 }], cookie,
       extra: { ...(actorId ? { offline_owner: { ...h.owner, actor_id: actorId } } : {}), ...costSale } })
     const writes = []
