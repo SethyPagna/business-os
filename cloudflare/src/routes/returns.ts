@@ -474,6 +474,19 @@ function toNumber(value: unknown, fallback = 0): number {
   return Number.isFinite(num) ? num : fallback
 }
 
+// A cost somebody recorded, or null when nobody did. Zero is a real cost.
+function recordedCost(value: unknown): number | null {
+  if (value == null || value === '') return null
+  const num = Number(value)
+  return Number.isFinite(num) && num >= 0 ? num : null
+}
+
+// The first of several alternative cost fields that holds a value, as a recorded cost.
+function firstRecordedCost(...values: unknown[]): number | null {
+  for (const value of values) if (value != null && value !== '') return recordedCost(value)
+  return null
+}
+
 // Owner rule (24 Sep 2026): older sales keep their own exchange rate; only a
 // NEW record takes today's Settings rate. 4100 is the sales/returns column
 // default in migrations/0001_init.sql (`exchange_rate REAL DEFAULT 4100`) and
@@ -1707,7 +1720,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
       productId, productName: input.product_name?.trim() || meta.name, branchId: lineBranchId,
       batchId: Number(input.batch_id) > 0 ? Number(input.batch_id) : null, quantity,
       priceUsd, priceKhr, totalUsd: Number((priceUsd * quantity).toFixed(2)), totalKhr: Math.round(priceKhr * quantity),
-      unitCostUsd: toNumber(meta.cost_price_usd), unitCostKhr: toNumber(meta.cost_price_khr),
+      unitCostUsd: recordedCost(meta.cost_price_usd), unitCostKhr: recordedCost(meta.cost_price_khr),
     }
   })
 
@@ -1996,7 +2009,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
       return {
         id, updated_at: product?.updated_at || '', name: product?.name || '', is_active: Number(product?.is_active || 0),
         requires_active: replacementLines.some((line) => line.productId === id) ? 1 : 0,
-        cost_price_usd: Number(product?.cost_price_usd) || 0, cost_price_khr: Number(product?.cost_price_khr) || 0,
+        cost_price_usd: recordedCost(product?.cost_price_usd), cost_price_khr: recordedCost(product?.cost_price_khr),
         selling_price_usd: Number(product?.selling_price_usd) || 0, selling_price_khr: Number(product?.selling_price_khr) || 0,
       }
     }),
@@ -2040,8 +2053,8 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
         AND COALESCE(p.name,'')=json_extract(j.value,'$.name')
         AND COALESCE(p.is_active,0)=json_extract(j.value,'$.is_active')
         AND (json_extract(j.value,'$.requires_active')=0 OR COALESCE(p.is_active,0)=1)
-        AND COALESCE(p.cost_price_usd,0)=json_extract(j.value,'$.cost_price_usd')
-        AND COALESCE(p.cost_price_khr,0)=json_extract(j.value,'$.cost_price_khr')
+        AND p.cost_price_usd IS json_extract(j.value,'$.cost_price_usd')
+        AND p.cost_price_khr IS json_extract(j.value,'$.cost_price_khr')
         AND COALESCE(p.selling_price_usd,0)=json_extract(j.value,'$.selling_price_usd')
         AND COALESCE(p.selling_price_khr,0)=json_extract(j.value,'$.selling_price_khr')))
     AND (json_type(@guardJson,'$.customer')='null' OR (
@@ -2253,8 +2266,8 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
       // really landed on and the label it was addressed to (the sale itself is never relabelled).
       const redirect = itemEffects[index]?.redirected ? itemEffects[index] : null
       statements.push({
-        sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id${redirect ? ',branch_name,addressed_branch_name' : ''},movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id)
-          VALUES(@product_id,@product_name,@branch_id${redirect ? ',@branch_name,@addressed_branch_name' : ''},'return',@quantity,@unit_cost_usd,@unit_cost_khr,@reason,${returnIdExpression},@user_id,@user_name,${recordedBatchSql})`,
+        sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id${redirect ? ',branch_name,addressed_branch_name' : ''},movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id)
+          VALUES(@product_id,@product_name,@branch_id${redirect ? ',@branch_name,@addressed_branch_name' : ''},'return',@quantity,@unit_cost_usd,@unit_cost_khr,ROUND(@unit_cost_usd*ABS(@quantity),4),ROUND(@unit_cost_khr*ABS(@quantity),4),@reason,${returnIdExpression},@user_id,@user_name,${recordedBatchSql})`,
         params: {
           returnClientRequestId: clientRequestId, product_id: productId, product_name: productName, branch_id: itemBranchId,
           ...(redirect ? { branch_name: redirect.effectName, addressed_branch_name: addressedLabel(redirect) } : {}),
@@ -2582,19 +2595,23 @@ app.post('/supplier', async (c) => {
     }
   }
 
-  let totalCostUsd = 0
-  let totalCostKhr = 0
+  // A line with no recorded cost makes the return's cost, the default compensation and the loss unknown (null),
+  // never a loss of 0. A recorded cost of 0 is a real cost.
+  let totalCostUsd: number | null = 0
+  let totalCostKhr: number | null = 0
   for (const item of body.items) {
     const qty = toNumber(item.quantity, 0)
-    totalCostUsd += qty * toNumber(item.cost_price_usd ?? item.unit_cost_usd, 0)
-    totalCostKhr += qty * toNumber(item.cost_price_khr ?? item.unit_cost_khr, 0)
+    const costUsd = firstRecordedCost(item.cost_price_usd, item.unit_cost_usd)
+    const costKhr = firstRecordedCost(item.cost_price_khr, item.unit_cost_khr)
+    totalCostUsd = totalCostUsd === null || costUsd === null ? null : totalCostUsd + qty * costUsd
+    totalCostKhr = totalCostKhr === null || costKhr === null ? null : totalCostKhr + qty * costKhr
   }
   const defaultCompensationUsd = ['refund', 'credit'].includes(settlement) ? totalCostUsd : 0
   const defaultCompensationKhr = ['refund', 'credit'].includes(settlement) ? totalCostKhr : 0
-  const supplierCompensationUsd = toNumber(body.supplier_compensation_usd, defaultCompensationUsd)
-  const supplierCompensationKhr = toNumber(body.supplier_compensation_khr, defaultCompensationKhr)
-  const supplierLossUsd = Math.max(0, Number((totalCostUsd - supplierCompensationUsd).toFixed(2)))
-  const supplierLossKhr = Math.max(0, Math.round(totalCostKhr - supplierCompensationKhr))
+  const supplierCompensationUsd = Number.isFinite(Number(body.supplier_compensation_usd)) ? Number(body.supplier_compensation_usd) : defaultCompensationUsd
+  const supplierCompensationKhr = Number.isFinite(Number(body.supplier_compensation_khr)) ? Number(body.supplier_compensation_khr) : defaultCompensationKhr
+  const supplierLossUsd = totalCostUsd === null || supplierCompensationUsd === null ? null : Math.max(0, Number((totalCostUsd - supplierCompensationUsd).toFixed(2)))
+  const supplierLossKhr = totalCostKhr === null || supplierCompensationKhr === null ? null : Math.max(0, Math.round(totalCostKhr - supplierCompensationKhr))
 
   // SRET-YYYYMMDD-HHMMSS, same convention as the customer-return path above.
   const returnNumber = body.return_number?.trim() || await uniqueBusinessDateTimeNumber(
@@ -2701,10 +2718,10 @@ app.post('/supplier', async (c) => {
     }
     for (const item of body.items) {
       const qty = toNumber(item.quantity, 0)
-      const unitCostUsd = toNumber(item.cost_price_usd ?? item.unit_cost_usd, 0)
-      const unitCostKhr = toNumber(item.cost_price_khr ?? item.unit_cost_khr, 0)
-      const totalUsd = Number((qty * unitCostUsd).toFixed(2))
-      const totalKhr = Math.round(qty * unitCostKhr)
+      const unitCostUsd = firstRecordedCost(item.cost_price_usd, item.unit_cost_usd)
+      const unitCostKhr = firstRecordedCost(item.cost_price_khr, item.unit_cost_khr)
+      const totalUsd = unitCostUsd === null ? null : Number((qty * unitCostUsd).toFixed(2))
+      const totalKhr = unitCostKhr === null ? null : Math.round(qty * unitCostKhr)
       const itemBranchId = item.branch_id || body.branch_id || null
       const safeProductName = item.product_name?.trim() || productNameMap.get(Number(item.product_id)) || `product #${item.product_id}`
 
@@ -2759,8 +2776,8 @@ app.post('/supplier', async (c) => {
       })))
       const supplierLanding = itemBranchId ? supplierLandingEffects.get(Number(itemBranchId)) : undefined
       statements.push({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${supplierLanding ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-              VALUES (@product_id, @product_name, @branch_id${supplierLanding ? ', @branch_name, @addressed_branch_name' : ''}, 'supplier_return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, ${returnIdExpression}, @user_id, @user_name, @batch_id)`,
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${supplierLanding ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+              VALUES (@product_id, @product_name, @branch_id${supplierLanding ? ', @branch_name, @addressed_branch_name' : ''}, 'supplier_return', @quantity, @unit_cost_usd, @unit_cost_khr, ROUND(@unit_cost_usd * ABS(@quantity), 4), ROUND(@unit_cost_khr * ABS(@quantity), 4), @reason, ${returnIdExpression}, @user_id, @user_name, @batch_id)`,
         params: {
           product_id: item.product_id,
           product_name: safeProductName,
@@ -3223,11 +3240,11 @@ app.patch('/:id', async (c) => {
   // A lot POS already drew from can't be un-damaged (that stock left the
   // building) -- ConsumedDamagedStockError blocks the edit outright.
   try {
-    const damagedLots = await db.prepare(`SELECT product_id,product_name,branch_id,batch_id,quantity,quantity_remaining,
+    const damagedLots = await db.prepare(`SELECT product_id,product_name,branch_id,batch_id,quantity,quantity_remaining,unit_cost_usd,
       reason,created_by_user_id,created_by_user_name FROM damaged_stock_lots WHERE return_id=@returnId ORDER BY id`)
       .all<{
         product_id: number; product_name: string | null; branch_id: number | null; batch_id: number | null
-        quantity: number; quantity_remaining: number; reason: string | null
+        quantity: number; quantity_remaining: number; unit_cost_usd: number | null; reason: string | null
         created_by_user_id: number | string | null; created_by_user_name: string | null
       }>({ returnId: id })
     for (const lot of damagedLots) {
@@ -3237,19 +3254,20 @@ app.patch('/:id', async (c) => {
     }
     editReversedDamaged = damagedLots.map((lot) => ({
       product_id: lot.product_id, product_name: lot.product_name, branch_id: lot.branch_id,
-      batch_id: lot.batch_id ?? null, quantity: Number(lot.quantity), reason: lot.reason ?? null,
+      batch_id: lot.batch_id ?? null, quantity: Number(lot.quantity), unit_cost_usd: lot.unit_cost_usd ?? null, reason: lot.reason ?? null,
       created_by_user_id: lot.created_by_user_id ?? null, created_by_user_name: lot.created_by_user_name ?? null,
     }))
     if (damagedLots.length) statements.push({ sql: 'DELETE FROM damaged_stock_lots WHERE return_id=@returnId', params: { returnId: id } })
     for (const lot of editReversedDamaged) {
       statements.push({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-              VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_REVERSAL_MOVEMENT}', @quantity, 0, 0, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+              VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_REVERSAL_MOVEMENT}', @quantity, @unit_cost_usd, NULL, ROUND(@unit_cost_usd * ABS(@quantity), 4), NULL, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
         params: {
           product_id: lot.product_id,
           product_name: lot.product_name,
           branch_id: lot.branch_id,
           quantity: -lot.quantity,
+          unit_cost_usd: lot.unit_cost_usd ?? null,
           reason: `Return #${existing.return_number} updated - reversing damaged stock`,
           reference_id: id,
           user_id: user?.id ?? null,
@@ -3335,8 +3353,8 @@ app.patch('/:id', async (c) => {
       })
     }
     statements.push({
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${reversalEffect ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-            VALUES (@product_id, @product_name, @branch_id${reversalEffect ? ', @branch_name, @addressed_branch_name' : ''}, 'return_reversal', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
+      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${reversalEffect ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+            VALUES (@product_id, @product_name, @branch_id${reversalEffect ? ', @branch_name, @addressed_branch_name' : ''}, 'return_reversal', @quantity, @unit_cost_usd, @unit_cost_khr, ROUND(@unit_cost_usd * ABS(@quantity), 4), ROUND(@unit_cost_khr * ABS(@quantity), 4), @reason, @reference_id, @user_id, @user_name, @batch_id)`,
       params: {
         product_id: productId,
         product_name: item.product_name,
@@ -3470,8 +3488,8 @@ app.patch('/:id', async (c) => {
     if (returnToStock && item.product_id && itemBranchId) {
       const editRestockLabel = editLabelFor(Number(itemBranchId) || null)
       statements.push({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${editRestockLabel ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-              VALUES (@product_id, @product_name, @branch_id${editRestockLabel ? ', @branch_name, @addressed_branch_name' : ''}, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, ${recordedBatchSql})`,
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${editRestockLabel ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+              VALUES (@product_id, @product_name, @branch_id${editRestockLabel ? ', @branch_name, @addressed_branch_name' : ''}, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, ROUND(@unit_cost_usd * ABS(@quantity), 4), ROUND(@unit_cost_khr * ABS(@quantity), 4), @reason, @reference_id, @user_id, @user_name, ${recordedBatchSql})`,
         params: {
           product_id: item.product_id,
           product_name: item.product_name || null,

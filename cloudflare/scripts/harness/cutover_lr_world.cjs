@@ -10,6 +10,7 @@
 // Branch fixtures follow production ids: 1 = LC Store (formerly Warehouse), 2 = Shop. 'before' = both active (today),
 // 'after' = the consolidation's end state (Old Shop disabled, successor 1, all stock moved to LC Store, lot 500
 // folded into lot 600), 'orphan' = Old Shop disabled with no successor and no other active branch.
+const { legacyCostSql } = require('./legacy_cost_sql.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -186,7 +187,7 @@ const scrub = (text) => text
   // stock-lot-0193 (not LR) reworded the dated Set movement reason after the eb5dd0ba3 oracle: "Set received date to 7"
   // became "Set received 2026-09-01 from 10 to 7". Same row, same quantity; only the wording differs.
   .replace(/Set received (?:date|\d{4}-\d{2}-\d{2}(?: from \d+)?) to (\d+)/g, 'Set received <lot> to $1')
-const normalised = (capture) => scrub(JSON.stringify(capture))
+const normalised = (capture) => legacyCostSql(scrub(JSON.stringify(capture)))
 
 function assertComposedWrites(current, previous, db) {
   const receipt = (s) => /stock_mutation_receipts/.test(s.sql)

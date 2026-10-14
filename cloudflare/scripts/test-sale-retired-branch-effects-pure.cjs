@@ -12,6 +12,7 @@
 // Run (from cloudflare/): node scripts/test-sale-retired-branch-effects-pure.cjs
 
 const assert = require('node:assert/strict')
+const { legacyCostSql, legacyCostLedger } = require('./harness/legacy_cost_sql.cjs')
 function withoutProductAdmission(value) {
   const normalize = sql => sql.replace(/@[A-Za-z_]+|\?[0-9]*/g, '?').replace(/\s+/g, ' ').trim()
   const allowed = normalize(require('./harness/product_stock_guard.cjs').productStockGuardStatement([1], 'active').sql)
@@ -208,8 +209,8 @@ const movementsOf = (db, type) => plain(db.prepare('SELECT branch_id, branch_nam
 const scrub = (text) => text.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<uuid>').replace(/-\d{12,}/g, '<id>').replace(/\d{8}[ -]\d{6}/g, '<receipt>').replace(/\d{4}-\d{2}-\d{2}[ T][\d:.Z]+/g, '<ts>')
 
 function normalised(batches) {
-  return scrub(JSON.stringify(batches))
-    .replace(/"stamp":"[^"]*"/g, '"stamp":"<ts>"')
+  return legacyCostSql(scrub(JSON.stringify(batches))
+    .replace(/"stamp":"[^"]*"/g, '"stamp":"<ts>"'))
 }
 
 const setStatus = (world, w, body, saleId = w.saleId, redirect = null) => call(world, w.route, 'PATCH', `/${saleId}/status`, { expected_exchange_rate: 4000, ...body }, redirect)
@@ -542,7 +543,7 @@ async function amend(world, w, body, redirect = null) {
       let where = 0
       while (where < statementsA.length && statementsA[where] === statementsB[where]) where++
       assert.equal(statementsA === statementsB, true, `${name}: equal business statements apart from verified admission while both branches are active; first difference near: ${statementsA.slice(Math.max(0, where - 150), where + 150)} <> ${statementsB.slice(Math.max(0, where - 150), where + 150)}`)
-      const ledgerA = scrub(ledgerSnapshot(a.db)); const ledgerB = scrub(ledgerSnapshot(b.db))
+      const ledgerA = legacyCostLedger(scrub(ledgerSnapshot(a.db))); const ledgerB = legacyCostLedger(scrub(ledgerSnapshot(b.db)))
       let at = 0
       while (at < ledgerA.length && ledgerA[at] === ledgerB[at]) at++
       assert.equal(ledgerA === ledgerB, true, `${name}: identical resulting ledgers; first difference near: ${ledgerA.slice(Math.max(0, at - 100), at + 100)} <> ${ledgerB.slice(Math.max(0, at - 100), at + 100)}`)

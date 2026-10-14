@@ -121,7 +121,7 @@ function setup() {
     CREATE TABLE branch_batch_stock (batch_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0 CHECK(quantity >= 0), updated_at TEXT, UNIQUE(batch_id, branch_id));
     CREATE TABLE sale_item_batch_allocations (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_item_id INTEGER, batch_id INTEGER, branch_id INTEGER, quantity REAL, released_at TEXT, released_quantity REAL NOT NULL DEFAULT 0);
     CREATE TABLE inventory_movements (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER, product_name TEXT,
-      branch_id INTEGER, movement_type TEXT, quantity REAL, unit_cost_usd REAL, unit_cost_khr REAL,
+      branch_id INTEGER, movement_type TEXT, quantity REAL, unit_cost_usd REAL, unit_cost_khr REAL, total_cost_usd REAL, total_cost_khr REAL,
       reason TEXT, reference_id TEXT, user_id INTEGER, user_name TEXT, batch_id INTEGER);
     INSERT INTO products (id, name, stock_quantity) VALUES (10, 'Migrated A', 40), (11, 'Migrated B', 50);
     INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 2, 40), (11, 2, 50);

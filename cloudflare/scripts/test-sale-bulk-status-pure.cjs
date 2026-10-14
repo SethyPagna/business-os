@@ -88,6 +88,38 @@ async function run() {
     assert.equal((await f.call(sales, '/bulk-status', input)).status, 200, 'same request succeeds after release')
   }
   console.log('PASS actual Hono bulk status rejects reset/restore/corrupt marker inserted at commit without effect drift')
+  {
+    // Cost-unknown S6 (owner, 14 Oct 2026): a grouped status change moves stock with the line's OWN cost.
+    // An unrecorded cost stays NULL, a recorded $0 stays 0, a held (damaged) lot is priced at the held lot's
+    // own cost -- never a literal 0 and never today's catalog cost -- and the exact inverse repeats the saved cost.
+    const costRows = f => f.sql.prepare('SELECT movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr FROM inventory_movements WHERE reference_id=1 ORDER BY id').all()
+    const NULLS = { unit_cost_usd: null, unit_cost_khr: null, total_cost_usd: null, total_cost_khr: null }
+    for (const [label, usd, khr, expected] of [
+      ['unrecorded', null, null, NULLS],
+      ['recorded $0', 0, 0, { unit_cost_usd: 0, unit_cost_khr: 0, total_cost_usd: 0, total_cost_khr: 0 }],
+      ['recorded cost', 4, 100, { unit_cost_usd: 4, unit_cost_khr: 100, total_cost_usd: 8, total_cost_khr: 200 }],
+    ]) {
+      const f = fixture(); seed(f, 1)
+      f.sql.prepare('UPDATE sale_items SET cost_price_usd=?, cost_price_khr=? WHERE id=1').run(usd, khr)
+      const applied = await f.call(sales, '/bulk-status', request(f, 'cancelled', 'cost-' + label.replace(/\W/g, '')))
+      assert.equal(applied.status, 200, JSON.stringify(applied))
+      assert.deepEqual(costRows(f), [{ movement_type: 'return', quantity: 2, ...expected }], label + ': the cancel restock movement carries the line cost exactly')
+      assert.equal((await replay(f, applied.body.actionHistoryId)).status, 200)
+      assert.deepEqual(costRows(f), [{ movement_type: 'return', quantity: 2, ...expected }, { movement_type: 'sale', quantity: -2, ...expected }], label + ': the exact inverse repeats the saved cost (a NULL survives the saved snapshot)')
+    }
+    const held = fixture(); seed(held, 1)
+    held.sql.exec(`UPDATE products SET cost_price_usd=9 WHERE id=1;
+      INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,quantity,quantity_remaining,unit_cost_usd) VALUES(1,1,'A',1,5,3,3);
+      UPDATE sale_items SET damaged_lot_id=1, cost_price_usd=9, cost_price_khr=NULL WHERE id=1`)
+    const heldApplied = await held.call(sales, '/bulk-status', request(held, 'cancelled', 'cost-held-lot'))
+    assert.equal(heldApplied.status, 200, JSON.stringify(heldApplied))
+    assert.deepEqual(costRows(held), [{ movement_type: 'damage_in', quantity: 2, unit_cost_usd: 3, unit_cost_khr: null, total_cost_usd: 6, total_cost_khr: null }], 'a held lot returns to the lot at its OWN cost 3 (old: literal 0; catalog is 9)')
+    const heldNull = fixture(); heldNull.sql.exec(`INSERT INTO damaged_stock_lots(id,product_id,product_name,branch_id,quantity,quantity_remaining,unit_cost_usd) VALUES(1,1,'A',1,5,3,NULL);`); seed(heldNull, 1)
+    heldNull.sql.exec('UPDATE products SET cost_price_usd=9 WHERE id=1; UPDATE sale_items SET damaged_lot_id=1, cost_price_usd=9 WHERE id=1')
+    assert.equal((await heldNull.call(sales, '/bulk-status', request(heldNull, 'cancelled', 'cost-held-null'))).status, 200)
+    assert.deepEqual(costRows(heldNull), [{ movement_type: 'damage_in', quantity: 2, ...NULLS }], 'a held lot with no recorded cost stays unknown, it is not priced at the catalog cost')
+    console.log('PASS grouped sale status movements keep NULL / $0 / held-lot cost, and undo repeats them')
+  }
   for (const inactiveSql of ['0', 'NULL']) for (const restoringFirst of [true, false]) {
     const f=fixture();seed(f,1)
     f.sql.exec(`UPDATE sales SET sale_status='${restoringFirst?'completed':'cancelled'}',status_before_cancel='completed' WHERE id=1;
@@ -429,7 +461,7 @@ async function run() {
   let before=snapshot(f)
   assert.equal((await f.call(sales,'/bulk-status',request(f))).status,400)
   assert.equal(snapshot(f),before);assert.equal(f.metrics().batches,0)
-  let limited=f.metrics().readRows.filter(r=>r.text.includes('FROM sale_items WHERE'))
+  let limited=f.metrics().readRows.filter(r=>r.text.includes('FROM sale_items si LEFT JOIN damaged_stock_lots dl'))
   assert.equal(limited.length,1);assert.equal(limited[0].rows,151);assert.equal(limited[0].bindings,25)
 
   f=fixture();seed(f,25)

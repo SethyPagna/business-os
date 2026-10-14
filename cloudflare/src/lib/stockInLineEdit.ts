@@ -344,7 +344,7 @@ function movementStatements(input: {
     return {
       sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,
           unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,created_at,batch_id)
-        VALUES(@product,@productName,@branch,@branchName,@type,@quantity,@unit,0,@total,CASE WHEN @total IS NULL THEN NULL ELSE 0 END,
+        VALUES(@product,@productName,@branch,@branchName,@type,@quantity,@unit,NULL,@total,NULL,
           @reason,@reference,@userId,@userName,CURRENT_TIMESTAMP,${lotIdSql('lot')})`,
       params: {
         product: input.state.productId, productName: input.productName, branch: input.state.branchId, branchName: input.branchName,
@@ -600,7 +600,7 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
     after.lots.push({
       ...T, isActive: 1, stock: T.stock + q1, stockExists: 1,
       receivedQuantity: (T.receivedQuantity ?? 0) + q1,
-      receivedCostUsd: lineCost == null ? T.receivedCostUsd : addMoney4(T.receivedCostUsd ?? 0, lineCost),
+      receivedCostUsd: lineCost == null || (T.receivedCostUsd == null && (T.receivedQuantity ?? 0) > 0) ? T.receivedCostUsd : addMoney4(T.receivedCostUsd ?? 0, lineCost),
       unitCostUsd: targetCreated ? u : T.unitCostUsd,
       supplierId: T.supplierId ?? supplier.id, supplierName: T.supplierName ?? supplier.name,
     })
@@ -845,7 +845,7 @@ function deltaWrites(input: { deltas: LotDelta[]; productId: number; branchId: n
     }
     if (lot.rc) {
       if ('set' in lot.rc) { sets.push('received_cost_usd=@rcTo'); params.rcTo = lot.rc.set }
-      else { sets.push('received_cost_usd=MAX(0,ROUND(COALESCE(received_cost_usd,0)+@rcChange,4))'); params.rcChange = lot.rc.change }
+      else { sets.push('received_cost_usd=CASE WHEN received_cost_usd IS NULL THEN NULL ELSE MAX(0,ROUND(received_cost_usd+@rcChange,4)) END'); params.rcChange = lot.rc.change }
     }
     if (sets.length) lotRows.push({ sql: `UPDATE product_batches SET ${sets.join(',')},updated_at=CURRENT_TIMESTAMP WHERE id=@id`, params })
     if (lot.stockChange < 0) decreases.push({ sql: 'UPDATE branch_batch_stock SET quantity=quantity+@change,updated_at=CURRENT_TIMESTAMP WHERE batch_id=@id AND branch_id=@branch', params: base })

@@ -302,10 +302,12 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
   if (unitCostUsd !== null && !input.receiptCostPreimage) {
     throw new Error('A receipt cost preimage is required before recording priced stock')
   }
+  // A lot whose earlier receipts have no recorded money keeps an unknown total: a known receipt added to it
+  // never turns the whole lot's received cost into "known".
   const receivedCostAfter = receivedCost === null
     ? null
     : input.receiptCostPreimage?.batchExists
-      ? addMoney4(input.receiptCostPreimage.receivedCostUsd ?? 0, receivedCost)
+      ? input.receiptCostPreimage.receivedCostUsd == null ? null : addMoney4(input.receiptCostPreimage.receivedCostUsd, receivedCost)
       : receivedCost
   const paymentStatus = input.paymentStatus === 'paid' || input.paymentStatus === 'credit' ? input.paymentStatus : null
   const params: Record<string, unknown> = {

@@ -9,6 +9,7 @@
 // Run (from cloudflare/): node scripts/test-return-bulk-retired-branch-pure.cjs
 
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
+const { legacyCostSql } = require('./harness/legacy_cost_sql.cjs')
 const { execFileSync } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -155,7 +156,7 @@ const stockOf = (f) => ({
   product: f.sql.prepare('SELECT stock_quantity AS quantity FROM products WHERE id=1').get().quantity,
 })
 const state = (f) => JSON.stringify(tables.map((table) => [table, f.sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]))
-const scrub = (text) => text.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<uuid>')
+const scrub = (text) => legacyCostSql(text.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<uuid>'))
   .replace(/\d{4}-\d{2}-\d{2}[ T][\d:.Z]+/g, '<ts>').replace(/-\d{12,}/g, '<id>')
 // The ONE deliberate difference from the oracle (6.0.134): the sale-status derivation also counts the units a sales import
 // recorded as already returned (sale_items.returned_quantity), as the single return path does. On a sale with none (every

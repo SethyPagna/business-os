@@ -22,6 +22,7 @@ type Row = Record<string, unknown>;
 type Item = TransitionItem & {
     sale_id: number;
     damaged_lot_id: number | null;
+    damaged_lot_unit_cost_usd?: number | null;
 };
 type Allocation = Row & {
     id: number;
@@ -38,8 +39,8 @@ type StockDelta = {
     batch: number | null;
     lot: number | null;
     name: string | null;
-    costUsd: number;
-    costKhr: number;
+    costUsd: number | null;
+    costKhr: number | null;
     sale: number;
     // Present only when the line's branch was retired and the movement landed at its successor (older
     // snapshots simply lack it): the branch the stock really moved at, and the label the sale was made under.
@@ -255,7 +256,7 @@ function stockStatements(member: Member, sign: number, user: SessionUser, stamp:
             out.push({ sql: 'UPDATE products SET stock_quantity=stock_quantity+@q, updated_at=@stamp WHERE id=@product', params: p });
         }
         const labelled = !!move.addressed;
-        out.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id${labelled ? ',branch_name,addressed_branch_name' : ''},movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id) VALUES(@product,@name,@branch${labelled ? ',@branchName,@addressed' : ''},@type,@q,@usd,@khr,@reason,@sale,@uid,@uname,@batch)`, params: { ...p, ...(labelled ? { branchName: move.branchName ?? null, addressed: move.addressed } : {}), name: move.name, type: move.lot ? (q > 0 ? 'damage_in' : 'damage_out') : (q > 0 ? 'return' : 'sale'), usd: move.costUsd, khr: move.costKhr, reason: `${sign < 0 ? 'Undo' : 'Apply'} grouped sale status`, sale: member.id, uid: user.id, uname: actorSnapshot(user), batch: move.batch } });
+        out.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id${labelled ? ',branch_name,addressed_branch_name' : ''},movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id) VALUES(@product,@name,@branch${labelled ? ',@branchName,@addressed' : ''},@type,@q,@usd,@khr,ROUND(@usd*ABS(@q),4),ROUND(@khr*ABS(@q),4),@reason,@sale,@uid,@uname,@batch)`, params: { ...p, ...(labelled ? { branchName: move.branchName ?? null, addressed: move.addressed } : {}), name: move.name, type: move.lot ? (q > 0 ? 'damage_in' : 'damage_out') : (q > 0 ? 'return' : 'sale'), usd: move.costUsd, khr: move.costKhr, reason: `${sign < 0 ? 'Undo' : 'Apply'} grouped sale status`, sale: member.id, uid: user.id, uname: actorSnapshot(user), batch: move.batch } });
     }
     for (const move of member.batches) {
         const p = { ...move, q: move.quantity * sign, stamp };
@@ -350,9 +351,16 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
     }
     if (unpaid.length)
         refuseUnpaid(unpaid);
-    const items = await rowsIn<Item>(db, sourceMatchedIds, m => `SELECT * FROM sale_items WHERE sale_id IN (${m}) ORDER BY id LIMIT 151`);
+    const items = await rowsIn<Item>(db, sourceMatchedIds, m => `SELECT si.*, dl.unit_cost_usd AS damaged_lot_unit_cost_usd FROM sale_items si LEFT JOIN damaged_stock_lots dl ON dl.id=si.damaged_lot_id WHERE si.sale_id IN (${m}) ORDER BY si.id LIMIT 151`);
     if (items.length > 150)
         throw new SaleBulkError('Select fewer sale lines (maximum 150).', 400);
+    // The held lot's own cost is read with the lines but kept out of them: the saved undo snapshot stores the lines as they were.
+    const heldLotCostUsd = new Map<number, number | null>();
+    for (const item of items) {
+        if (item.damaged_lot_id)
+            heldLotCostUsd.set(item.id, item.damaged_lot_unit_cost_usd ?? null);
+        delete item.damaged_lot_unit_cost_usd;
+    }
     const allocations = await rowsIn<Allocation>(db, sourceMatchedIds, m => `SELECT a.* FROM sale_item_batch_allocations a JOIN sale_items si ON si.id=a.sale_item_id WHERE si.sale_id IN (${m}) ORDER BY a.id LIMIT 301`);
     if (allocations.length > 300)
         throw new SaleBulkError('Select fewer received-date allocations (maximum 300).', 400);
@@ -494,7 +502,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
         for (const statement of plan.statements) {
             const p = statement.params;
             if (statement.sql.startsWith('INSERT INTO inventory_movements'))
-                member.stock.push({ product: Number(p.product_id), branch: Number(p.branch_id), quantity: Number(p.quantity), batch: p.batch_id ? Number(p.batch_id) : null, lot: null, name: p.product_name as string | null, costUsd: Number(p.unit_cost_usd), costKhr: Number(p.unit_cost_khr), sale: expected.id, ...(p.addressed_branch_name ? { branchName: (p.branch_name as string | null) ?? null, addressed: String(p.addressed_branch_name) } : {}) });
+                member.stock.push({ product: Number(p.product_id), branch: Number(p.branch_id), quantity: Number(p.quantity), batch: p.batch_id ? Number(p.batch_id) : null, lot: null, name: p.product_name as string | null, costUsd: p.unit_cost_usd == null ? null : Number(p.unit_cost_usd), costKhr: p.unit_cost_khr == null ? null : Number(p.unit_cost_khr), sale: expected.id, ...(p.addressed_branch_name ? { branchName: (p.branch_name as string | null) ?? null, addressed: String(p.addressed_branch_name) } : {}) });
             if (statement.sql.startsWith('UPDATE branch_batch_stock') || statement.sql.startsWith('INSERT INTO branch_batch_stock')) {
                 const item = own.find(i => i.batch_id === p.batchId || i.allocations?.some(a => a.batch_id === p.batchId))!;
                 member.batches.push({ batch: Number(p.batchId), branch: Number(p.branchId), product: Number(item.product_id), quantity: Number(p.quantity) * (statement.sql.startsWith('UPDATE') ? -1 : 1) });
@@ -514,7 +522,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
                 if (!item.product_id || !item.branch_id)
                     fail('A stock-moving line has no product or branch.');
                 if (item.damaged_lot_id)
-                    member.stock.push({ product: item.product_id, branch: item.branch_id, quantity: delta, batch: null, lot: item.damaged_lot_id, name: item.product_name, costUsd: 0, costKhr: 0, sale: expected.id });
+                    member.stock.push({ product: item.product_id, branch: item.branch_id, quantity: delta, batch: null, lot: item.damaged_lot_id, name: item.product_name, costUsd: heldLotCostUsd.get(item.id) ?? null, costKhr: null, sale: expected.id });
                 else if (item.allocations?.length) {
                     const capacity = item.allocations.reduce((n, a) => n + (delta > 0 ? a.quantity - a.released_quantity : a.released_quantity), 0);
                     if (capacity < Math.abs(delta) || item.allocations.some(a => a.released_quantity < 0 || a.released_quantity > a.quantity))

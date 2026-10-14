@@ -17,7 +17,12 @@
 
 const assert = require('node:assert/strict')
 function withoutProductAdmission(value) {
-  const normalize = sql => sql.replace(/@[A-Za-z_]+|\?[0-9]*/g, '?').replace(/\s+/g, ' ').trim()
+  // The count's movement rows now name their cost columns (the lot cost when one lot covers the row, else NULL); the
+  // historical statement named none, so compare it with those columns taken out.
+  const withoutMovementCost = sql => sql.includes('quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason')
+    ? sql.replace('quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason', 'quantity, reason').replace(/@quantity, [\s\S]*?ABS\(@quantity\), 4\), NULL, @reason/, '@quantity, @reason')
+    : sql
+  const normalize = sql => withoutMovementCost(sql).replace(/@[A-Za-z_]+|\?[0-9]*/g, '?').replace(/\s+/g, ' ').trim()
   const allowed = normalize(require('./harness/product_stock_guard.cjs').productStockGuardStatement([1], 'active').sql)
   const walk = entry => {
     if (Array.isArray(entry)) return entry.map(walk).filter(v => v !== undefined)
@@ -31,6 +36,10 @@ function withoutProductAdmission(value) {
       const ids = bound === undefined ? [Number(statement.params.productId ?? statement.params.batchId)] : (typeof bound === 'number' ? [bound] : JSON.parse(bound))
       assert.ok(ids.length && ids.every(id => Number.isSafeInteger(id) && id > 0), 'guard names real product identities')
       return undefined
+    }
+    if (statement && typeof statement.sql === 'string' && withoutMovementCost(statement.sql) !== statement.sql) {
+      const rebuilt = { ...statement, sql: withoutMovementCost(statement.sql) }
+      return typeof entry === 'string' ? JSON.stringify(rebuilt) : rebuilt
     }
     return entry
   }

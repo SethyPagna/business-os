@@ -375,8 +375,8 @@ export function planSaleStockTransition(input: {
         })
       }
       statements.push({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${item.effect ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-              VALUES (@product_id, @product_name, @branch_id${item.effect ? ', @branch_name, @addressed_branch_name' : ''}, 'sale', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${item.effect ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+              VALUES (@product_id, @product_name, @branch_id${item.effect ? ', @branch_name, @addressed_branch_name' : ''}, 'sale', @quantity, @unit_cost_usd, @unit_cost_khr, ROUND(@unit_cost_usd * ABS(@quantity), 4), ROUND(@unit_cost_khr * ABS(@quantity), 4), @reason, @reference_id, @user_id, @user_name, @batch_id)`,
         params: {
           product_id: item.product_id,
           product_name: item.product_name,
@@ -385,8 +385,8 @@ export function planSaleStockTransition(input: {
           quantity: -delta,
           // 0084: attributable only when one lot covered the whole delta.
           batch_id: touchedLots.length === 1 && touchedLots[0].quantity === delta ? touchedLots[0].batchId : null,
-          unit_cost_usd: item.cost_price_usd || 0,
-          unit_cost_khr: item.cost_price_khr || 0,
+          unit_cost_usd: item.cost_price_usd ?? null,
+          unit_cost_khr: item.cost_price_khr ?? null,
           reason: input.reason,
           reference_id: input.saleId,
           user_id: input.userId,
@@ -447,8 +447,8 @@ export function planSaleStockTransition(input: {
       // carries the cancellation ("add stock back with a note, never undo
       // the original movements").
       statements.push({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${item.effect ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-              VALUES (@product_id, @product_name, @branch_id${item.effect ? ', @branch_name, @addressed_branch_name' : ''}, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${item.effect ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+              VALUES (@product_id, @product_name, @branch_id${item.effect ? ', @branch_name, @addressed_branch_name' : ''}, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, ROUND(@unit_cost_usd * ABS(@quantity), 4), ROUND(@unit_cost_khr * ABS(@quantity), 4), @reason, @reference_id, @user_id, @user_name, @batch_id)`,
         params: {
           product_id: item.product_id,
           product_name: item.product_name,
@@ -457,8 +457,8 @@ export function planSaleStockTransition(input: {
           quantity: restore,
           // 0084: attributable only when one lot received the whole restore.
           batch_id: restoredLots.length === 1 && restoredLots[0].quantity === restore ? restoredLots[0].batchId : null,
-          unit_cost_usd: item.cost_price_usd || 0,
-          unit_cost_khr: item.cost_price_khr || 0,
+          unit_cost_usd: item.cost_price_usd ?? null,
+          unit_cost_khr: item.cost_price_khr ?? null,
           reason: input.reason,
           reference_id: input.saleId,
           user_id: input.userId,
