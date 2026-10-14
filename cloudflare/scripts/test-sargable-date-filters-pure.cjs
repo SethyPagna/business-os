@@ -410,6 +410,13 @@ function blankComments(text) {
 
 const ALLOWLIST = [
   {
+    file: 'src/lib/stockRevert.ts', table: 'inventory_movements', column: 'created_at', alias: 'm',
+    reason: "lotDrawUnrecorded reads ONE movement by primary key (FROM inventory_movements m WHERE m.id = @rootId); "
+      + "its EXISTS compares the product's lot times with that single row's created_at, a per-row correlated "
+      + "comparison. It never drives a range scan of inventory_movements, so idx_inventory_movements_created_pg "
+      + "has nothing to seek and the datetime() wrap costs nothing. Pinned by test-multilot-revert-native.cjs.",
+  },
+  {
     file: 'src/lib/salesAnalytics.ts', table: 'sales', column: 'created_at', alias: null,
     reason: "getSalesDayReport's per-sale drill ORDER BY datetime(created_at) DESC, id DESC "
       + "wraps the idx_sales_created_pg leading column, but the WHERE (whereActiveSales) is "

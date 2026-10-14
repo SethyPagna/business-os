@@ -47,6 +47,7 @@ const route = loadReal('routes/pos.ts', {
 route.onError((_error, c) => c.json({ error: 'Internal Server Error' }, 500))
 const settingsRoute = loadReal('routes/settings.ts', {
   '../lib/addressPresets': addressPresets,
+  '../lib/auditRetentionPolicy': loadReal('lib/auditRetentionPolicy.ts'),
   '../lib/actorSnapshot': { actorSnapshot: (actor) => actor?.username || null },
   '../lib/audit': { audit: async () => {} },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); return next() } },

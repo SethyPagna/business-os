@@ -57,6 +57,7 @@ function backups(user = { id: 7, username: 'owner', grants: ['backup', 'backup_r
     '../lib/audit': { audit: async () => backupCalls.push('audit') },
     '../lib/permissions': { hasPermission: (actor, key) => actor.grants.includes(key) },
     '../lib/acquisitionCostAccess': { canViewAcquisitionCosts: () => true, canEditAcquisitionCosts: () => true },
+    '../lib/destructiveStepUp': { denyUnlessDefaultAdmin: async () => { backupCalls.push('step-up-admin'); return null }, denyUnlessCurrentPassword: async () => { backupCalls.push('step-up-password'); return null } },
     '../lib/backup': backup, '../lib/maintenance': maintenance,
   }).default
 }

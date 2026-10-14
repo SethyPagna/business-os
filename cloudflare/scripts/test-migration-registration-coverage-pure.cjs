@@ -38,6 +38,8 @@ const ALLOWLIST = {
 // Require the named file to exist so deleting/renaming it fails this guard.
 const NAMED_COMPANIONS = {
   242: 'test-product-active-stock-invariant-sqlite.cjs',
+  // 0250 stores the multi-lot Revert watermark; its companion applies the real chain and pins the stored value.
+  250: 'test-migration-0250-multilot-watermark-sqlite.cjs',
   184: 'test-product-cost-previous-migration-native.cjs',
   // 0188/0190/0191 are unapplied, unwired foundations (transfer receipt
   // retirement, dataset operation journal and its generation transition); their
