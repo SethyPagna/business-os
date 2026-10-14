@@ -122,7 +122,7 @@ const unrelatedRead={channel:'customers:search:keep',valid:true,pending:1}
 cache._readCacheTokens.add(historyRead)
 cache._readCacheTokens.add(unrelatedRead)
 const transportCode=transport.slice(transport.indexOf('export async function updateSalesBulkStatus'),transport.indexOf('export function createSaleWithoutWriteDedupe'))
-const write=new Function('route','apiFetch','cacheInvalidate','navigator',ts.transpileModule(`${transportCode.replace('export ','')}; return updateSalesBulkStatus`,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText)(async(_key:string,fn:()=>unknown)=>fn(),async()=>({actionHistoryId:7}),cache.cacheInvalidate,{onLine:true})
+const write=new Function('route','apiFetch','cacheInvalidate','navigator','confirmServerReachable',ts.transpileModule(`${transportCode.replace('export ','')}; return updateSalesBulkStatus`,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText)(async(_key:string,fn:()=>unknown)=>fn(),async()=>({actionHistoryId:7}),cache.cacheInvalidate,{onLine:true},async()=>true)
 await write({client_request_id:'test',items:[],target_status:'completed'})
 assert.equal(cache.cacheGet('actionHistory:get:sales'),null)
 assert.equal(cache._inflight['actionHistory:get:sales'],undefined)

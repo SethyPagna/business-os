@@ -36,7 +36,7 @@ import { launchResolveFixture } from './resolveBrowserFixture.ts'
 // required and answered by the server. `window.__ctl` steers the fake server;
 // `window.__log` records what the modal asked of it.
 const fixtureSource = String.raw`
-  import React, { StrictMode, useState } from 'react'
+  import React, { StrictMode, useEffect, useState } from 'react'
   import { createRoot } from 'react-dom/client'
   import ResolveModal from '/src/components/shared/ResolveModal.tsx'
   import { AppContext, FALLBACK_APP_CONTEXT } from '/src/app/AppContextCore.tsx'
@@ -208,8 +208,21 @@ const fixtureSource = String.raw`
     )
   }
 
+  // Stands in for AppProvider, which folds the browser's online and offline events into canWriteToServer.
+  function Connection({ children }) {
+    const [connected, setConnected] = useState(true)
+    useEffect(() => {
+      const up = () => setConnected(true)
+      const down = () => setConnected(false)
+      window.addEventListener('online', up)
+      window.addEventListener('offline', down)
+      return () => { window.removeEventListener('online', up); window.removeEventListener('offline', down) }
+    }, [])
+    return <AppContext.Provider value={{ ...FALLBACK_APP_CONTEXT, t, canWriteToServer: connected }}>{children}</AppContext.Provider>
+  }
+
   createRoot(document.getElementById('root')).render(
-    <StrictMode><AppContext.Provider value={{ ...FALLBACK_APP_CONTEXT, t }}><Host /></AppContext.Provider></StrictMode>,
+    <StrictMode><Connection><Host /></Connection></StrictMode>,
   )
 `
 

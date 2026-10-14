@@ -83,7 +83,7 @@ const fixtureSource = String.raw`
     const [adapter] = useState(() => createProductResolveAdapter({ cluster, t, canViewCosts: true, canEditCosts: editor, canMerge: () => true, api }))
     return React.createElement(ResolveModal, { title: 'Resolve', adapter, onClose() { window.__closed = true } })
   }
-  const value = { ...FALLBACK_APP_CONTEXT, user, t, language: lang, can: () => true, hasPermission: () => true }
+  const value = { ...FALLBACK_APP_CONTEXT, canWriteToServer: true, user, t, language: lang, can: () => true, hasPermission: () => true }
   createRoot(document.getElementById('root')).render(React.createElement(StrictMode, null,
     React.createElement(AppContext.Provider, { value }, params.get('mode') === 'grid' ? React.createElement(Grid) : React.createElement(Card))))
 `

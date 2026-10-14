@@ -44,6 +44,7 @@ import {
 import type { ContactOption } from './contactOptionUtils'
 import { readContactDuplicateDecisionError, resolveContactDuplicateSyncError, type ContactDuplicateMatch } from './contactDuplicates'
 import { effectivePermissions, type PermissionUser } from '../../utils/permissions.ts'
+import { useSavingGate } from '../../utils/useSavingGate.ts'
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
@@ -300,6 +301,7 @@ type CustomerSection = 'directory' | 'invoices'
 
 function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabProps) {
   const { can, user, getPermissionTier, fmtUSD, fmtKHR, language } = useApp()
+  const savingGate = useSavingGate()
   const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   // routes/contacts.ts 403s DELETE and POST /bulk-delete-jobs outright for
   // the Review Required tier rather than queueing them, so those controls
@@ -753,6 +755,10 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   }, [active, load, syncChannelName, syncChannelTs])
 
   const handleSave = async (form: Partial<CustomerRow>) => {
+    if (savingGate.blocked) {
+      notify(savingGate.reason, 'error')
+      return { success: false }
+    }
     if (!beginSingleAction(saveInFlightRef)) return
     if (!String(form.name || '').trim()) {
       finishSingleAction(saveInFlightRef)
@@ -1424,7 +1430,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
 
       {modal === 'form' ? (
         <Suspense fallback={null}>
-          <CustomerFormModal customer={selected} onSave={handleSave} onUseExisting={handleUseExisting} onClose={() => { setModal(null); setSelected(null) }} t={t} />
+          <CustomerFormModal customer={selected} onSave={handleSave} onUseExisting={handleUseExisting} onClose={() => { setModal(null); setSelected(null) }} savingBlockedText={savingGate.reason} t={t} />
         </Suspense>
       ) : null}
       {canImportContacts && modal === 'import' ? (

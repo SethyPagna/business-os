@@ -2,7 +2,7 @@ import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import { ConflictIcon, CONFLICT_ICON_CLASS } from './ConflictIcon.ts'
 import CheckCircle from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import Merge from 'lucide-react/dist/esm/icons/merge.js'
-import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { useApp as useAppHook } from '../../app/AppContextCore.tsx'
 import { stableSnapshot } from '../../utils/formDirty.ts'
@@ -41,7 +41,7 @@ import ResolveGrid, {
 // choices made it asks Discard / Back through the shared close guard; while a
 // write is running it cannot be dismissed at all.
 
-const useApp = useAppHook as unknown as () => { t: (key: string) => string }
+const useApp = useAppHook as unknown as () => { t: (key: string) => string; canWriteToServer?: boolean }
 
 export type ResolveColumnState = { disposition: ResolveDisposition; reason?: string }
 
@@ -175,25 +175,15 @@ function changedBetween(before: ResolveRow[], after: ResolveRow[], columns: Reso
   return changed
 }
 
-function subscribeOnline(listener: () => void): () => void {
-  window.addEventListener('online', listener)
-  window.addEventListener('offline', listener)
-  return () => {
-    window.removeEventListener('online', listener)
-    window.removeEventListener('offline', listener)
-  }
-}
-const readOnline = () => navigator.onLine !== false
-
 export default function ResolveModal<P, T>({ title, adapter, onClose, onApplied, onMinimize, initialDraft }: ResolveModalProps<P, T>) {
-  const { t } = useApp()
+  const { t, canWriteToServer } = useApp()
   const tr = useCallback((key: string, fallback: string): string => {
     const value = t(key)
     return value && value !== key ? value : fallback
   }, [t])
   const statusId = useId()
   const offlineId = useId()
-  const online = useSyncExternalStore(subscribeOnline, readOnline, () => true)
+  const online = canWriteToServer !== false
 
   const [phase, setPhase] = useState<Phase>('loading')
   const [data, setData] = useState<P | null>(null)

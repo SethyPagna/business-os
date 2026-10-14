@@ -466,7 +466,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     try {
       const api = await loadActionHistoryTransport()
       if (actorScopeRef.current !== requestScope || !isActorReadScopeCurrent(readScope)) return false
-      if (navigator.onLine === false) throw new Error('Connect to the server to replay history.')
+      if (navigator.onLine === false && !(await api.confirmServerReachable())) throw new Error('Connect to the server to replay history.')
       const item = serverItems.find(item => String(item.id) === String(serverId))
       const payload = item?.[direction === 'undo' ? 'undo_payload' : 'redo_payload'] as Record<string, unknown> | undefined
       const replayRequest = buildServerReplayRequest(payload)

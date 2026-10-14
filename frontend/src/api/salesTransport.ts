@@ -2,7 +2,7 @@ import { SYNC } from '../constants.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { saleMoneyResponseFields } from '../utils/saleMoneyV1.ts'
 import type { SaleMutationHeaderQuote } from '../utils/saleMutationHeaderQuote.ts'
-import { apiFetch, cacheInvalidate, route } from './http.ts'
+import { apiFetch, cacheInvalidate, confirmServerReachable, route } from './http.ts'
 import { getLocalDb } from './lazyLocalDb.ts'
 import { mirrorReadResult, mirrorTable } from './localMirrors.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
@@ -69,7 +69,7 @@ export function buildBulkSaleCancelInput(draft: { cancel_reason: string; cancel_
   }
 }
 export async function updateSalesBulkStatus(payload: BulkSaleStatusPayload): Promise<BulkSaleStatusResult> {
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('Connect to the server to change sale status.')
+  if (typeof navigator !== 'undefined' && navigator.onLine === false && !(await confirmServerReachable())) throw new Error('Connect to the server to change sale status.')
   const result = await route('sales:bulkStatus', () => apiFetch('POST', '/api/sales/bulk-status', payload), null, true) as BulkSaleStatusResult
   // This write also creates server history; its next read must see the group.
   cacheInvalidate('actionHistory')
@@ -97,7 +97,7 @@ export type BulkSaleUpdatePayload = {
 export type BulkSaleUpdateResult = { actionHistoryId?: number; changedCount: number; unchangedCount: number; changedIds?: number[]; unchangedIds?: number[] }
 
 export async function updateSalesBulkField(payload: BulkSaleUpdatePayload): Promise<BulkSaleUpdateResult> {
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('Connect to the server to update sales.')
+  if (typeof navigator !== 'undefined' && navigator.onLine === false && !(await confirmServerReachable())) throw new Error('Connect to the server to update sales.')
   const result = await route('sales:bulkUpdate', () => apiFetch('POST', '/api/sales/bulk-update', payload), null, true) as BulkSaleUpdateResult
   cacheInvalidate('actionHistory')
   return result
