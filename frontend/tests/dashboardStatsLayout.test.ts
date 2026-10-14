@@ -72,7 +72,7 @@ assert.deepEqual(
 assert.match(compat, /const allTime = String\(query\.rangeScope \|\| ''\)[\s\S]*?query\.startDate === ''[\s\S]*?if \(allTime\)/, 'Worker range parsing keeps explicit all-time distinct from its Today fallback')
 assert.match(compat, /if \(range\.allTime\) return '1 = 1'/, 'all-time dashboard summary queries omit the date predicate')
 assert.match(compat, /localDateRangeClause\(`\$\{alias\}\.created_at`\), \.\.\.shiftWindowWhere\(alias, range\)\.clauses/, 'timed dashboard reads combine day bounds with the continuous interval')
-assert.match(compat, /range\.allTime \? Promise\.resolve\(\{\}\) : getSalesTotals\(env, previousPeriodFilters\(filters\)\)/, 'all-time analytics does not invent a previous comparison period')
+assert.match(compat, /range\.allTime \? Promise\.resolve\(\{\}\) : getSalesTotalsWithoutLosses\(env, previousPeriodFilters\(filters\)\)/, 'all-time analytics does not invent a previous comparison period')
 assert.match(dashboard, /if \(prefs\.rangeId === 'custom'\)[\s\S]{0,220}prefs\.customStart[\s\S]{0,220}statsPresetRange\(prefs\.rangeId\)/, 'saved named presets are recomputed while only custom ranges reuse stored dates')
 assert.match(dashboard, /const rangeLabel = !customStart && !customEnd[\s\S]{0,100}translateOr\('all_time', 'All time'\)/, 'all-time exports use the same explicit All time label as the dashboard range')
 assert.match(dashboard, /const buildDashboardExportContext = useCallback[\s\S]{0,900}rangeLabel/, 'dashboard export context receives the canonical range label')

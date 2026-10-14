@@ -105,7 +105,6 @@ const RULES: Rule[] = [
       { file: 'cloudflare/src/routes/notifications.ts', text: '} awaiting payment` : null', why: 'stale-client fallback beside its summaryKey (pinned by notPaidTerminology)' },
       { file: 'cloudflare/src/lib/saleNotPaidStockRecovery.ts', text: "'Awaiting payment stock hold correction'", why: 'stored movement reason, written and then matched by SQL for idempotency' },
       { file: 'cloudflare/src/lib/telegramLang.ts', text: "'awaiting payment': { en: 'Not Paid'", why: 'the rewrite table that turns the wire phrase into Not Paid' },
-      { file: 'cloudflare/src/lib/salesAnalytics.ts', text: '-- The awaiting-payment cohort', why: 'an SQL comment inside a query string' },
       { file: 'frontend/src/utils/saleNotPaidStockRecovery.ts', text: 'is not a fixed awaiting-payment stock deduction', why: 'internal manifest validation, never rendered as copy' },
     ],
   },
