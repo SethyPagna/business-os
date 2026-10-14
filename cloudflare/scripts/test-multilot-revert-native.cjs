@@ -351,6 +351,7 @@ function finish(finding) {
 //   --wrong=no-dated-exemption  mutant: a dated-count removal with no record is refused too (M6e goes RED)
 //   --wrong=reason-only-exemption  mutant: the dated-count exemption goes by the reason text alone, so an old removal typed with it skips the refusal (M6l goes RED)
 //   --wrong=no-move-row-shares  mutant: /move-row writes its move_out without the per-lot shares (M14 goes RED)
+//   --wrong=import-record-on-add  mutant: the CSV import writes the record after Add rows too, past the group estimate (M15b goes RED)
 //   --wrong=import-estimate-blind  mutant: the CSV group cost estimate forgets the share statement, so a group outgrows the 300-statement chunk (M15 goes RED)
 //   --wrong=hold-cost-null      mutant: a held row of a lot with no unit cost carries no cost, so Dispose books it at the later catalog cost (M13 goes RED)
 //   --wrong=one-held-row        mutant: a multi-lot damaged hold writes ONE held row with no lot (the pre-fix shape) (M11 goes RED)
@@ -416,6 +417,9 @@ const PATCHES = {
     { name: 'no-move-row-shares', file: 'src/routes/inventory.ts',
       from: 'removal.remainder === 0 ? [] : planMovementLotShares(removal.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) })))',
       to: 'removal.remainder === 0 ? [] : []' },
+  ],
+  'import-record-on-add': [
+    { name: 'import-record-on-add', file: 'src/lib/importEngine.ts', from: 'if (entry.delta < 0 && singleLot == null) statements.push', to: 'if (singleLot == null) statements.push' },
   ],
   'import-estimate-blind': [
     { name: 'import-estimate-blind', file: 'src/lib/importEngine.ts', from: '(entry.delta < 0 && singleLotOf(entry) == null ? 1 : 0)', to: '0' },
@@ -1152,6 +1156,25 @@ async function main() {
       const auto = await adjustRemove(H, s, 4, 'c')
       const drained = await snap(H, s)
       t.eq('an auto-routed Remove skips the inactive lot and takes the active one', [auto.status, drained.lots], [200, [1, 5]])
+    })
+
+    // ------------------------------------------------------------------ M15b: a CSV row that RAISES stock writes no lot record, and the group estimate does not count one
+    // Last on purpose: the lots this import creates take the next free ids, which the id-derived seeds of the earlier cases would collide with.
+    // Only the stock-group path (Remove, Set, legacy rows) carries the record; the plain Add receipt path is a different writer. The estimate
+    // counts the one record statement a removal row emits and none for a Set that raises the count. A raising row that also wrote a record would
+    // be past the estimate, and a large Set file would outgrow the 300-statement chunk.
+    await check('M15b', 'a 150-row CSV Set that raises each product from 10 to 12 (two lots each) writes no lot record, and its groups stay inside the 300-statement batch limit', 'medium', async (t) => {
+      const products = []
+      for (let i = 0; i < 150; i++) products.push(await seed(H, { lots: [5, 5] }))
+      const imported = await importCsv(H, 'set', products.map(p => row(p, 12)))
+      t.eq('import finished', imported.job.status, 'completed')
+      const ids = products.map(p => p.p).join(',')
+      const moved = await H.q1('SELECT COUNT(*) n, COALESCE(SUM(quantity),0) q FROM inventory_movements WHERE product_id IN (' + ids + ')')
+      const shares = await H.q1('SELECT COUNT(*) n FROM dated_stock_count_batch_actions WHERE movement_id IN (SELECT id FROM inventory_movements WHERE product_id IN (' + ids + '))')
+      t.eq('one movement per row, 2 units each', [moved.n, moved.q], [150, 300])
+      t.eq('a raising row records no lot shares and no zero row', shares.n, 0)
+      t.note('largest db.batch of the apply request: ' + imported.approved.maxBatch + ' statements')
+      t.ok('no single batch outgrows the 300-statement chunk', imported.approved.maxBatch <= 300, imported.approved.maxBatch)
     })
   } finally {
     await H.disarm().catch(() => {})
