@@ -14,6 +14,7 @@
 import { SYNC } from '../constants.ts'
 import { getClientMetaHeaders as sharedGetClientMetaHeaders } from '../utils/deviceInfo.ts'
 import { createSyncErrorId } from '../utils/syncProblemLifecycle.ts'
+import { timeoutSignal } from '../utils/abortTimeout.ts'
 import { assertNoUnresolvedSignout, assertSignoutIntentCurrent, confirmSignoutIntent, setSignoutStatus, signoutError, type SignoutIntent } from './unresolvedSignout.ts'
 import { assertActorReadScope, assertActorSessionDispatchAllowed, assertActorWriteIdentity, beginActorCookieMutation, finishActorCookieMutation, prepareActorOauthCookieRedirect, isActorCookieMutationPending, captureActorReadScope, captureActorWriteIdentity, invalidateActorReadChannel, isActorReadScopeCurrent, isActorWriteIdentityCurrent, markActorReadResult, type ActorReadScope, type ActorWriteIdentity } from './actorReadScope.ts'
 import {
@@ -1192,9 +1193,10 @@ export async function pingServerHealth(force = false): Promise<ServerHealthProbe
 
   _healthProbeInFlight = (async () => {
     let result: ServerHealthProbeResult
+    const timeout = timeoutSignal(HEALTH_PROBE_TIMEOUT_MS)
     try {
       const res = await fetch(`${syncServerUrl}/health`, {
-        signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS),
+        signal: timeout.signal,
         headers: { 'bypass-tunnel-reminder': 'true' },
         credentials: 'include',
         redirect: 'manual',
@@ -1231,6 +1233,8 @@ export async function pingServerHealth(force = false): Promise<ServerHealthProbe
         cloudflareAccessRequired: false,
         payload: null,
       }
+    } finally {
+      timeout.clear()
     }
 
     setServerHealth(result.online)
