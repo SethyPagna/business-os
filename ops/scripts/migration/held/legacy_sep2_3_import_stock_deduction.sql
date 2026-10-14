@@ -1,3 +1,10 @@
+-- SUPERSEDED 14 Oct 2026 -- DO NOT APPLY (comment-only note; the SQL below is unchanged).
+-- Owner rule, 14 Oct 2026: "if cost is 0$ then it is 0 for loss. if it is none, it should
+-- also be unknown. flag it." This file prices lines with COALESCE(NULLIF(si.cost,0), lot cost, 0), i.e. $0 = missing and missing = $0.
+-- A recorded $0 is a real $0 and a missing cost is UNKNOWN; neither may be filled from a
+-- later catalog price, another lot or a same-name product. Any replacement must be
+-- re-derived from that rule (plan: Records/Lanes/2026-10-14/OPUS-PLAN-COST-UNKNOWN-CONFLICTS.md, section 2.4).
+--
 -- HELD (no chain number until promoted): deduct stock for the 22 legacy-import sales of Sep 2-3 2026
 -- (sales 16842-16863, old-system invoices 004435-004456) that were inserted
 -- on Sep 4 with stock deliberately untouched.

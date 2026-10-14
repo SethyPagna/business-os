@@ -1,3 +1,10 @@
+-- SUPERSEDED 14 Oct 2026 -- DO NOT APPLY (comment-only note; the SQL below is unchanged).
+-- Owner rule, 14 Oct 2026: "if cost is 0$ then it is 0 for loss. if it is none, it should
+-- also be unknown. flag it." This repair treats cost <= 0 as "no cost" throughout (cost > 0 guards) and rewrites those lines.
+-- A recorded $0 is a real $0 and a missing cost is UNKNOWN; neither may be filled from a
+-- later catalog price, another lot or a same-name product. Any replacement must be
+-- re-derived from that rule (plan: Records/Lanes/2026-10-14/OPUS-PLAN-COST-UNKNOWN-CONFLICTS.md, section 2.4).
+--
 -- 0200: past sale lines and customer return lines whose recorded cost came
 -- from the buggy catalog average get the cost the stock on hand actually had
 -- when they were written.
