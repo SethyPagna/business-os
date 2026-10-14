@@ -76,8 +76,10 @@ assert.equal(en.cost_partial_count, 'Partial — {count} unknown cost')
 assert.equal(en.conflict_unknown_cost_lots, '{count} received date(s), {units} pcs with unknown cost')
 assert.equal('password_min_6' in en || 'password_min_6' in km, false, 'retired keys stay retired')
 for (const key of ['merge_cost_fill_hint', 'merge_cost_average_title', 'selected_conflict_group_cost_rule', 'merge_duplicates_what_counts_body']) {
-  for (const pack of [en, km]) assert.doesNotMatch(pack[key], /non-zero|មិនសូន្យ|nobody entered|គ្មាននរណាបញ្ចូល/, `${key} no longer teaches the old zero-means-missing rule`)
+  for (const pack of [en, km]) assert.doesNotMatch(pack[key], /nobody entered|គ្មាននរណាបញ្ចូល/, `${key} no longer teaches the old zero-means-missing rule`)
 }
+// Owner Q2 (15 Oct, 6.0.438): a $0 lot stays out of the average, so only the fill hint dropped "non-zero".
+for (const pack of [en, km]) assert.doesNotMatch(pack.merge_cost_fill_hint, /non-zero|មិនសូន្យ/, 'the fill hint no longer says non-zero')
 assert.match(en.merge_cost_fill_hint, /A recorded \$0 is a real cost/)
 
 const source = read('../src/components/shared/CostValue.tsx')
