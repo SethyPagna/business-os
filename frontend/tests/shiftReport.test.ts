@@ -248,7 +248,7 @@ test('blank closing counts do not disable the history close action', () => {
   const modal = fs.readFileSync(new URL('../src/components/shifts/ShiftHistoryModal.tsx', import.meta.url), 'utf8')
   assert.match(modal, /shiftClosingCounts\(close\.closingUsd, close\.closingKhr\)/)
   assert.doesNotMatch(modal, /shiftCountPairBlocker\(close\.closingUsd, close\.closingKhr\)/)
-  assert.match(modal, /const closeReason = !close\.closedAt/)
+  assert.match(modal, /const closeReason = action !== 'close' \? null\s*: !canChooseShiftTime\(\) && selected\?\.close_before \? t\('shift_stale_admin_must_close'\)\s*: canChooseShiftTime\(\) && !close\.closedAt/)
 })
 
 test('blank closing counts do not disable POS close or print an invented zero drawer', () => {

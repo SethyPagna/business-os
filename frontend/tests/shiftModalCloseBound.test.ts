@@ -112,8 +112,8 @@ function openCloseForm(source: string, row: Record<string, unknown> = openRow, l
     if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'fragment' }
     if (name.includes('AppContext')) return { useApp: () => ({ t: (key: string) => key, notify: () => {}, user: { id: 7 }, fmtUSD: String, fmtKHR: String }) }
     if (name.includes('utils/formatters')) return formatters
-    // Who may pick a past close time: this popup is opened by a cashier here.
-    if (name.includes('utils/permissions')) return { isAdminControlUser: () => false }
+    // Who may pick a close time: the popup is opened by an administrator here, whose form carries the seeded time field.
+    if (name.includes('utils/permissions')) return { isAdminControlUser: () => true }
     // The popup's search pause; nothing here searches (shiftHistorySearch.test.ts does).
     if (name.includes('useDebouncedValue')) return { useDebouncedValue: (value: unknown) => value }
     if (name.includes('shared/Modal')) return { default: () => null }
@@ -231,7 +231,7 @@ try {
   eq(unbounded.boundText, null, 'and shows no bound row rather than an empty one')
 
   // ...which is only worth asserting if a row that ALWAYS rendered would show.
-  const alwaysShown = modalSource.replace('{selected.close_before ? <p', '{true ? <p')
+  const alwaysShown = modalSource.replace('{canChooseShiftTime() && selected.close_before ? <p', '{true ? <p')
   assert.notEqual(alwaysShown, modalSource, 'the bound-row negative control could not find its target')
   const leaking = await openCloseForm(alwaysShown, { ...openRow, close_before: null })
   assert.notEqual(leaking.boundText, null,

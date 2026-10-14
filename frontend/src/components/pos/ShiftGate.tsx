@@ -301,6 +301,10 @@ type CarryOverCloseForm = {
   pending: boolean
   reason: string | null
   submit: () => Promise<void>
+  /** Only an administrator picks the closing time; an employee closes now and the Worker stamps it. */
+  canPickTime: boolean
+  /** An employee cannot end a drawer another segment follows: closing now would overlap it. */
+  adminRequired: boolean
 }
 
 /**
@@ -318,6 +322,8 @@ function useCarryOverClose(shift: Shift | null, closeBefore: string | null | und
   const { t, notify, fmtUSD, fmtKHR, user } = useApp() as ShiftGateContext
   const actorId = user?.id ?? undefined
   const savingGate = useSavingGate()
+  const canPickTime = isAdminControlUser(user)
+  const adminRequired = !canPickTime && !!closeBefore
   const [draft, setDraft] = useState<CarryOverCloseDraft>(
     { closedAt: '', countedUsd: '', countedKhr: '', additionalUsd: '', additionalKhr: '', note: '' })
   const [busy, setBusy] = useState(false)
@@ -339,33 +345,34 @@ function useCarryOverClose(shift: Shift | null, closeBefore: string | null | und
     // Seeded ONCE per row rather than from the live wall clock: a value that
     // kept re-seeding would overwrite the moment while it is being typed.
     setDraft({
-      closedAt: shiftLocalDateTimeFromMs(Number.isFinite(savedMs) ? savedMs : carryOverCloseSeedMs(closeBefore, ownOpenedAt, Date.now())),
+      closedAt: !canPickTime ? '' : shiftLocalDateTimeFromMs(Number.isFinite(savedMs) ? savedMs : carryOverCloseSeedMs(closeBefore, ownOpenedAt, Date.now())),
       countedUsd: text('closing_counted_usd'), countedKhr: text('closing_counted_khr'),
       additionalUsd: text('additional_cash_usd'), additionalKhr: text('additional_cash_khr'),
       note: text('closing_note'),
     })
-  }, [shiftId, closeBefore, ownOpenedAt, actorId])
+  }, [shiftId, closeBefore, ownOpenedAt, actorId, canPickTime])
 
   // The closing time is REQUIRED here (unlike the live close, which lets the
   // server stamp its own clock), so a missing one is its own reason.
-  const blocker = draft.closedAt.trim() === ''
+  const blocker = adminRequired ? 'admin' as const
+    : canPickTime && draft.closedAt.trim() === ''
     ? 'time' as const
     : closingCountInvalid(draft.countedUsd) || closingCountInvalid(draft.countedKhr)
       || closingCountInvalid(draft.additionalUsd) || closingCountInvalid(draft.additionalKhr) ? 'invalid' as const : null
 
   const submit = async () => {
-    if (busy || !shift || blocker) return
+    if (busy || !shift || blocker || adminRequired) return
     if (savingGate.blocked) return notify(savingGate.reason, 'error')
     const counts = shiftClosingCounts(draft.countedUsd, draft.countedKhr)
     setBusy(true)
     try {
-      // ALWAYS the explicit closed_at, never the server's clock: the Worker
-      // refuses a close stamped after the next segment's opening, so the
-      // moment the drawer actually stopped is the only one it takes.
+      // An administrator sends the explicit closed_at: the Worker refuses a close stamped after the next segment's
+      // opening, so the moment the drawer actually stopped is the only one it takes. An employee sends none and the
+      // Worker stamps now (owner, 14 Oct 2026: an employee closes now, never a chosen time).
       const result = await closeShiftById(shift.id, {
         actorId,
         expectedRevision: shift.revision,
-        closedAt: shiftLocalDateTimeToIso(draft.closedAt),
+        closedAt: canPickTime ? shiftLocalDateTimeToIso(draft.closedAt) : undefined,
         closingCountedUsd: counts.usd,
         closingCountedKhr: counts.khr,
         additionalCashUsd: draft.additionalUsd.trim() === '' ? null : Number(draft.additionalUsd),
@@ -401,8 +408,11 @@ function useCarryOverClose(shift: Shift | null, closeBefore: string | null | und
     set: (patch) => setDraft((current) => ({ ...current, ...patch })),
     dirty: draft.countedUsd.trim() !== '' || draft.countedKhr.trim() !== ''
       || draft.additionalUsd.trim() !== '' || draft.additionalKhr.trim() !== '' || draft.note.trim() !== '',
-    reason: savingGate.blocked ? savingGate.reason : blocker === 'time' ? t('shift_close_time_required')
+    reason: savingGate.blocked ? savingGate.reason
+      : blocker === 'admin' ? t('shift_stale_admin_must_close')
+      : blocker === 'time' ? t('shift_close_time_required')
       : blocker ? t(shiftCountBlockerKey(blocker)) : null,
+    canPickTime, adminRequired,
   }
 }
 
@@ -455,6 +465,16 @@ function CarryOverCloseFields({ form, secondary }: { form: CarryOverCloseForm; s
   const { t } = useApp() as ShiftGateContext
   const savingGate = useSavingGate()
   const frozen = form.busy || form.pending
+  // An employee cannot end a drawer that another segment follows (closing now would overlap it): no form that can only
+  // fail, the translated line says an administrator must, and the secondary (open today's shift instead) stays.
+  if (form.adminRequired) {
+    return (
+      <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+        <span role="status" className="mr-auto min-w-0 text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">{t('shift_stale_admin_must_close')}</span>
+        {secondary}
+      </div>
+    )
+  }
   return (
     <>
       {/* Required, and prefilled to the latest moment the server will accept
@@ -464,17 +484,21 @@ function CarryOverCloseFields({ form, secondary }: { form: CarryOverCloseForm; s
           The row itself is whichever open shift /current names, oldest first;
           nothing here assumes it was yesterday, and the strip above prints
           the bound so the prefill is a number the cashier can check. */}
-      <div>
-        <span className="block text-xs font-medium leading-relaxed text-zinc-700 dark:text-zinc-200">{t('shift_close_time_required')}</span>
-        <DateTimeEntryInput
-          className="mt-1" value={form.draft.closedAt} disabled={frozen}
-          onChange={(next) => form.set({ closedAt: next })}
-          t={t}
-          dateAriaLabel={`${t('shift_close_time_required')} · ${t('date')}`}
-          timeAriaLabel={`${t('shift_close_time_required')} · ${t('time')}`}
-        />
-        <p className="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{t('shift_close_time_hint')}</p>
-      </div>
+      {form.canPickTime ? (
+        <div>
+          <span className="block text-xs font-medium leading-relaxed text-zinc-700 dark:text-zinc-200">{t('shift_close_time_required')}</span>
+          <DateTimeEntryInput
+            className="mt-1" value={form.draft.closedAt} disabled={frozen}
+            onChange={(next) => form.set({ closedAt: next })}
+            t={t}
+            dateAriaLabel={`${t('shift_close_time_required')} · ${t('date')}`}
+            timeAriaLabel={`${t('shift_close_time_required')} · ${t('time')}`}
+          />
+          <p className="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{t('shift_close_time_hint')}</p>
+        </div>
+      ) : (
+        <p className="text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{t('shift_close_time_admin_only')}</p>
+      )}
 
       {/* Opening float -> additional change used -> closing count, the same
           order and the same shared fields as the live close, so one drawer is

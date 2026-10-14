@@ -503,9 +503,11 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
   // A few seconds ahead is now clamped to the server clock instead --
   // test-shift-close-clock-skew-pure.cjs pins that side.
   const future = new Date(Date.now() + 10 * 60_000).toISOString()
+  const cashier = user
+  user = { ...user, role_code: 'admin' }
   assert.equal((await call('PATCH', `/${retryChild.id}`, { expected_revision: 1, reason: 'Future open', opened_at: future })).status, 400)
   assert.equal((await call('PATCH', `/${retryOpened.id}`, { expected_revision: 1, reason: 'Future close', closed_at: future })).status, 400)
-  user = { ...user, permissions: '{}' }
+  user = { ...cashier, permissions: '{}' }
   assert.equal((await call('PATCH', `/${retryChild.id}`, exactAmend)).status, 403, 'receipt replay rechecks revoked action permissions')
   user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: '{}' }
   const exactCancel = { client_request_id: 'shift-cancel-exact-0001', expected_revision: 1, reason: 'Wrong drawer' }

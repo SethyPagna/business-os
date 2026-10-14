@@ -109,9 +109,13 @@ export const SHIFT_REVIEW = {
   limit: 'sale_limit_reached',
   /** No configured payment method resolves to cash -- see paymentMethodRegistry. */
   cashMethod: 'cash_method_unresolved',
-  /** An administrator closed the shift at a time a cashier could not have chosen (see shiftLastActivityMs). */
+  /** An administrator closed the shift at a time a cashier could not have chosen, or moved the close so a money record fell outside every shift. */
   earlierClose: 'closed_at_earlier_time',
+  /** An administrator moved the opening later, so a money record fell outside every shift. */
+  laterOpen: 'opened_at_later_time',
 } as const
+
+const TIME_REVIEW_CODES: readonly string[] = [SHIFT_REVIEW.earlierClose, SHIFT_REVIEW.laterOpen]
 
 export type ShiftReconciliationInput = {
   opening: Partial<ShiftCount> | null | undefined
@@ -254,6 +258,7 @@ export function summarizeShiftCash(rows: ShiftTenderRow[], options: ShiftCashOpt
 // ---- the shift as a query --------------------------------------------------
 
 export type ShiftReconciliationSession = {
+  id?: number
   scope_mode?: 'per_account' | 'shop_wide'
   user_id: number
   branch_id: number | null
@@ -476,9 +481,14 @@ export async function shiftCourierPayouts(env: Env, shift: ShiftReconciliationSe
  *
  * A close at or before the second of that record leaves it outside the
  * drawer's half-open window, so it is counted in no shift's expected cash.
+ *
+ * `window` narrows the look to [from, until): the records a move of the
+ * opening or the closing would leave outside every shift.
  */
-export async function shiftLastActivityMs(env: Env, shift: ShiftReconciliationSession, nowMs: number = Date.now()): Promise<number | null> {
-  const open = { ...shift, closed_at: null, cancelled_at: null }
+export async function shiftLastActivityMs(
+  env: Env, shift: ShiftReconciliationSession, nowMs: number = Date.now(), window: { from?: string; until?: string | null } = {},
+): Promise<number | null> {
+  const open = { ...shift, opened_at: window.from ?? shift.opened_at, closed_at: window.until ?? null, cancelled_at: null }
   const horizon = nowMs + 24 * 60 * 60 * 1000
   const sales = shiftWindowWhere('sales', shiftFilters(open, horizon))
   if (shift.branch_id) { sales.clauses.push('sales.branch_id = @branchId'); sales.params.branchId = shift.branch_id }
@@ -497,6 +507,47 @@ export async function shiftLastActivityMs(env: Env, shift: ShiftReconciliationSe
   return times.length ? Math.max(...times) : null
 }
 
+/**
+ * A time edit by an administrator that left money records outside every shift,
+ * as the amendment journal keeps it: the review code and the account that made
+ * the edit. The journal is the durable home -- it is written in the same batch
+ * as the edit, is never rewritten, and does not depend on the optional stored
+ * figures. `after_json.time_review` is present on every journal row that
+ * evaluated the times (a close, or an amend that changed one); the newest such
+ * row is the shift's standing review, and an empty list is a cleared one.
+ */
+export type ShiftTimeReview = { code: string; by: string }
+
+export function shiftTimeReviewCodes(review: readonly ShiftTimeReview[] | null | undefined): string[] {
+  return (review ?? []).map((entry) => entry.code)
+}
+
+export async function readShiftTimeReview(env: Env, shiftId: number): Promise<ShiftTimeReview[] | null> {
+  try {
+    const row = await getDb(env).prepare(`SELECT json_extract(after_json, '$.time_review') AS review FROM shift_session_amendments
+      WHERE shift_session_id = @id AND json_valid(after_json) AND json_type(after_json, '$.time_review') = 'array'
+      ORDER BY id DESC LIMIT 1`).get<{ review: string | null }>({ id: shiftId })
+    if (!row?.review) return null
+    const parsed = JSON.parse(row.review) as unknown
+    if (!Array.isArray(parsed)) return null
+    return parsed
+      .map((entry) => ({ code: String((entry as { code?: unknown })?.code ?? ''), by: String((entry as { by?: unknown })?.by ?? '') }))
+      .filter((entry) => TIME_REVIEW_CODES.includes(entry.code))
+  } catch { return null }
+}
+
+/**
+ * The reconciliation with the shift's standing time review applied: the review
+ * is authoritative for the two time codes, so a stored close that carried one is
+ * cleared when a later edit cleared it. No review recorded (a shift older than
+ * the journal key) leaves the reconciliation as it was.
+ */
+export function applyShiftTimeReview(reconciliation: ShiftReconciliation, review: readonly ShiftTimeReview[] | null | undefined): ShiftReconciliation {
+  if (!review) return reconciliation
+  const codes = [...new Set([...reconciliation.review_codes.filter((code) => !TIME_REVIEW_CODES.includes(code)), ...shiftTimeReviewCodes(review)])].sort()
+  return { ...reconciliation, review_codes: codes, needs_review: codes.length > 0 }
+}
+
 /** The reconciliation for one shift, read from D1. */
 export async function loadShiftReconciliation(
   env: Env,
@@ -505,11 +556,12 @@ export async function loadShiftReconciliation(
   options: { overflowLabel?: string; extraReviewCodes?: readonly string[] } = {},
 ): Promise<ShiftReconciliation> {
   const cashConfig = await readCashConfig(env)
-  const [cash, expenses, refunds, courier] = await Promise.all([
+  const [cash, expenses, refunds, courier, timeReview] = await Promise.all([
     shiftCashSales(env, shift, nowMs, cashConfig),
     shiftExpenses(env, shift, nowMs, options),
     shiftRefunds(env, shift, nowMs),
     shiftCourierPayouts(env, shift, nowMs),
+    shift.id == null ? null : readShiftTimeReview(env, shift.id),
   ])
   return computeShiftReconciliation({
     opening: { usd: shift.opening_float_usd, khr: shift.opening_float_khr },
@@ -519,7 +571,7 @@ export async function loadShiftReconciliation(
     expenses,
     courier,
     counted: { usd: shift.closing_counted_usd ?? null, khr: shift.closing_counted_khr ?? null },
-    reviewCodes: [...cash.reviewCodes, ...(options.extraReviewCodes ?? [])],
+    reviewCodes: [...cash.reviewCodes, ...shiftTimeReviewCodes(timeReview), ...(options.extraReviewCodes ?? [])],
   })
 }
 

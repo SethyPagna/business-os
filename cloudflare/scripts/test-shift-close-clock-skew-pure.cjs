@@ -153,7 +153,7 @@ async function expect(res, status, label) {
 async function main() {
   // 1. Live POS close: no closed_at at all, the server stamps its own clock.
   {
-    const { call, row, amendments, open } = scenario()
+    const { call, row, amendments, open, actAs } = scenario()
     const shift = await open()
     const before = Date.now()
     const res = await call('POST', `/${shift.id}/close`, closeBody(shift))
@@ -167,7 +167,8 @@ async function main() {
     assert.equal(amendments(shift.id), 1, 'one before/after record for the close')
     assert.equal(body.shift.reconciliation, null, 'the drawer comparison is admin-facing; a pos-only cashier gets none')
 
-    // 8. Amend that closed row with a closing time seconds ahead of the server.
+    // 8. Amend that closed row with a closing time seconds ahead of the server (a time edit is an administrator's).
+    actAs({ ...owner, role_code: 'admin' })
     const ahead = new Date(Date.now() + 2_000).toISOString()
     const amendBefore = Date.now()
     const amended = await call('PATCH', `/${shift.id}`, { expected_revision: stored.revision, reason: 'Fast device clock', closed_at: ahead })

@@ -186,9 +186,9 @@ const pins: Pin[] = [
 
   // ---- 4. the two closes keep their two different rules -------------------
   {
-    label: 'the carry-over close goes through closeShiftById with an explicit closedAt',
-    holds: ({ gate: g }) => /closeShiftById\([\s\S]{0,400}?closedAt: shiftLocalDateTimeToIso\(/.test(carryHook(g)),
-    mutate: (source) => editGate(source, 'closedAt: shiftLocalDateTimeToIso(draft.closedAt),', 'closedAt: new Date().toISOString(),'),
+    label: 'the carry-over close goes through closeShiftById with an explicit closedAt for an administrator and none for an employee',
+    holds: ({ gate: g }) => /closeShiftById\([\s\S]{0,600}?closedAt: canPickTime \? shiftLocalDateTimeToIso\(draft\.closedAt\) : undefined/.test(carryHook(g)),
+    mutate: (source) => editGate(source, 'closedAt: canPickTime ? shiftLocalDateTimeToIso(draft.closedAt) : undefined,', 'closedAt: new Date().toISOString(),'),
   },
   {
     label: 'and it never calls the live closeShift()',
@@ -487,7 +487,8 @@ function openCarryOverPanel(source: string, saved: unknown, shiftState: object =
       captureActorReadScope: () => ({ scope: 'shifts' }),
       isActorReadScopeCurrent: () => true,
     }
-    if (name.includes('permissions')) return { isAdminControlUser: () => false }
+    // The carry-over form with a closing-time field is the administrator's; an employee's has none (shiftTimesMounted.test.ts).
+    if (name.includes('permissions')) return { isAdminControlUser: () => true }
     if (name.includes('useSavingGate')) return { useSavingGate: () => ({ blocked: false, reason: '' }) }
     if (name.includes('shared/Modal')) return { default: () => null }
     if (name.includes('AppContext')) return { useApp: () => ({ t: (key: string) => key, notify: (...args: any[]) => notices.push(args), user: { id: 4 }, settings: {}, fmtUSD: String, fmtKHR: String }) }
