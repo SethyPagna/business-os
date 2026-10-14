@@ -169,6 +169,7 @@ app.get('/meta', async (c) => {
 // treated as a setting to write.
 const METADATA_KEYS = new Set(['expectedUpdatedAt', 'expected_updated_at', 'updatedAt', 'updated_at', 'clearKeys'])
 const DEDICATED_ENDPOINT_SETTING_KEYS = new Set([POS_ADDRESS_PRESETS_KEY.toLowerCase()])
+const AUDIT_LOG_RETENTION_KEY = 'audit_log_retention_days'
 
 // The website assistant's prompt and provider (FX-sec2, refuter R-sec F2).
 // The public portal config never carries them, so an editor that had not
@@ -210,10 +211,11 @@ function isDedicatedEndpointSettingKey(key: string): boolean {
 // Fixed by partitioning the write into buckets and checking each key
 // against the bucket it actually belongs to. Any settings key NOT listed
 // in a bucket below (appearance/typography, navigation layout, timezone,
-// notifications, audit log retention, etc.) still falls under the plain
-// `settings` grant only -- those were never offered as their own
-// Permission Editor row, so narrowing them now would be a scope change,
-// not a bug fix.
+// notifications, etc.) still falls under the plain `settings` grant only --
+// those were never offered as their own Permission Editor row, so narrowing
+// them now would be a scope change, not a bug fix. Audit log retention is
+// not in that group: PUT /audit-log-retention below needs an administrator
+// and the current password.
 //
 // `security_settings` ("Security and sign-in settings") is deliberately
 // NOT wired to a bucket here -- traced this against the whole app and
@@ -1088,8 +1090,12 @@ app.post('/', async (c) => {
 
   // How long the audit trail lives is changed only through its own endpoint,
   // which asks for the current password; resending the stored value stays a no-op.
-  const retentionKey = attemptedKeys.find((key) => key.trim().toLowerCase() === 'audit_log_retention_days')
-  if (retentionKey && (storedSettingValues(stored)[retentionKey] ?? '') !== sentAsText[retentionKey]) {
+  // Every spelling in the request is checked, not the first: a case or whitespace
+  // variant is never the stored key, so it is refused whatever it carries.
+  const retentionKey = attemptedKeys
+    .filter((key) => key.trim().toLowerCase() === AUDIT_LOG_RETENTION_KEY)
+    .find((key) => key !== AUDIT_LOG_RETENTION_KEY || (storedSettingValues(stored)[key] ?? '') !== sentAsText[key])
+  if (retentionKey) {
     return c.json({
       error: `"${retentionKey}" must be changed through its dedicated endpoint.`,
       code: 'dedicated_setting_endpoint_required',

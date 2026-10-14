@@ -85,6 +85,23 @@ async function main() {
       t.eq('the ordinary key beside it saved', (await world.first("SELECT value FROM settings WHERE key = 'business_name'"))?.value, 'Retention Test')
     })
 
+    await check('the generic settings save checks every spelling of the key in the request, whatever the order', async (t) => {
+      const spellings = ['AUDIT_LOG_RETENTION_DAYS', 'Audit_Log_Retention_Days', 'audit_log_retention_days ', ' audit_log_retention_days', '\taudit_log_retention_days']
+      for (const alias of spellings) {
+        for (const value of ['1', '45']) {
+          const first = await world.api('POST', '/api/settings', { audit_log_retention_days: '45', [alias]: value })
+          t.eq(`canonical first + ${JSON.stringify(alias)}=${value}: status`, first.status, 400)
+          t.eq(`canonical first + ${JSON.stringify(alias)}=${value}: code`, first.json && first.json.code, 'dedicated_setting_endpoint_required')
+          const last = await world.api('POST', '/api/settings', { [alias]: value, audit_log_retention_days: '45' })
+          t.eq(`${JSON.stringify(alias)}=${value} first + canonical: status`, last.status, 400)
+        }
+      }
+      const two = await world.api('POST', '/api/settings', { Audit_Log_Retention_Days: '1', AUDIT_LOG_RETENTION_DAYS: '2', business_name: 'Spelling Test' })
+      t.eq('two aliases and an ordinary key: status', two.status, 400)
+      t.eq('the ordinary key beside the refused ones was not saved', (await world.first("SELECT value FROM settings WHERE key = 'business_name'"))?.value, 'Retention Test')
+      t.eq('no second spelling of the key was stored', (await world.query("SELECT key, value FROM settings WHERE lower(trim(key)) = 'audit_log_retention_days'")).map((row) => [row.key, row.value]), [['audit_log_retention_days', '45']])
+    })
+
     await check('refused attempts are on the audit trail with actor, route and reason', async (t) => {
       const rows = await world.query("SELECT user_name, entity_id, details FROM audit_logs WHERE action = 'step_up_refused' ORDER BY id")
       t.eq('reasons', rows.map((row) => JSON.parse(row.details).reason), ['current_password_required', 'incorrect_password'])
