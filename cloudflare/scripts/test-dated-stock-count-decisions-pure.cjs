@@ -200,6 +200,30 @@ async function main() {
     assert.strictEqual(newRow.count, 7)
   })
 
+  // Release 3 slice S7 (owner, 14 Oct 2026: "if it is none, it should also be unknown"): a stock count knows how many
+  // there are, not what they cost. A product it creates has an UNKNOWN cost (NULL), not the DEFAULT 0 of an omitted column.
+  await testAsync('create_new records the new product with an unknown cost (NULL), not 0', async () => {
+    const { db, rawDb } = freshDb()
+    const unresolved = [unresolvedRow({ rowNumber: 1, reason: 'product_not_found', suggestedActions: ['create_new'], raw: { rowNumber: 1, date: '2026-08-10', branchName: 'Shop', productName: 'Counted Never Costed', count: 4 } })]
+    const result = await applyDatedStockCountDecisions(db, [], unresolved, [{ rowNumber: 1, action: 'create_new' }])
+    const stored = rawDb.prepare('SELECT cost_price_usd, cost_price_khr FROM products WHERE id = @id').get({ id: result.productsCreated[0].productId })
+    assert.deepStrictEqual({ ...stored }, { cost_price_usd: null, cost_price_khr: null })
+  })
+
+  await testAsync('create_child records the child row with an unknown cost, and leaves the candidate\'s own cost alone', async () => {
+    const { db, rawDb } = freshDb()
+    seedProduct(rawDb, { id: 21, name: 'Costed Parent', sku: 'P-1' })
+    rawDb.prepare('UPDATE products SET cost_price_usd = 6.5, cost_price_khr = 26650 WHERE id = 21').run()
+    const unresolved = [unresolvedRow({
+      rowNumber: 1, reason: 'ambiguous_name', suggestedActions: ['link_variant', 'create_child', 'create_new'], candidateProductIds: [21],
+      raw: { rowNumber: 1, date: '2026-08-10', branchName: 'Shop', productName: 'Costed Parent', sku: 'C-1', barcode: '777888', count: 2 },
+    })]
+    const result = await applyDatedStockCountDecisions(db, [], unresolved, [{ rowNumber: 1, action: 'create_child', candidateProductId: 21 }])
+    const child = rawDb.prepare('SELECT cost_price_usd, cost_price_khr FROM products WHERE id = @id').get({ id: result.productsCreated[0].productId })
+    assert.deepStrictEqual({ ...child }, { cost_price_usd: null, cost_price_khr: null })
+    assert.deepStrictEqual({ ...rawDb.prepare('SELECT cost_price_usd, cost_price_khr FROM products WHERE id = 21').get() }, { cost_price_usd: 6.5, cost_price_khr: 26650 })
+  })
+
   await testAsync('create_new with no product name is an error, not a blank-name insert', async () => {
     const { db } = freshDb()
     const unresolved = [unresolvedRow({ rowNumber: 1, raw: { rowNumber: 1, date: '2026-08-10', branchName: 'Shop', productName: '', count: 1 } })]

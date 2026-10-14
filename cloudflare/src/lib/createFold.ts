@@ -10,6 +10,7 @@ import { nullableMoney4, multiplyMoney4 } from './moneyPrecision'
 import { getActionTier } from './permissions'
 import { pendingActionApprovalStatements, type PendingActionRow, type ReviewPendingActionInput } from './pendingActions'
 import { receiveBatchStock } from './productBatches'
+import { appendReceiptNotes, FREE_GOODS_REASON_NOTE } from './stockReceiptGate'
 import { resolveMergedCostDetail, type MergedCostOutlier } from './productDetailRule'
 import { isRealBarcode, normalizeLeadingZeroBarcodeForCleanup } from './productIdentity'
 import { ProductCreateError } from './productWrites'
@@ -44,7 +45,15 @@ import { broadcast } from '../durable-objects/broadcastHub'
 // Returns 200, never 409 -- the whole point of the ruling is that a fold is
 // not an error the operator has to resolve.
 
-export type FoldDuplicate = { id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number }
+// A cost the requester typed: a 0 is a recorded $0, absent or blank is unknown (null). Local on purpose: this lib is loaded alone by
+// source tests that stub every other relative import.
+const typedCost = (value: unknown): number | null => {
+  if (value == null || (typeof value === 'string' && value.trim() === '')) return null
+  const cost = Number(value)
+  return Number.isFinite(cost) && cost >= 0 ? cost : null
+}
+
+export type FoldDuplicate = { id: number; name: string; barcode: string; cost_price_usd: number | null; cost_price_khr: number | null }
 
 /** Where a starting quantity lands: productCreateDestination's answer. */
 export type FoldDestination = { branchId: number | null; quantity: number; landing: BranchEffect | null }
@@ -60,7 +69,7 @@ export function startingStockFingerprint(body: Record<string, unknown>, destinat
   return {
     client_request_id: body.client_request_id, source: 'product_starting_stock',
     name: String(body.name ?? '').trim(), barcode: String(body.barcode ?? '').trim(),
-    branch_id: destination.branchId, quantity: destination.quantity, unit_cost_usd: Number(body.cost_price_usd) || 0,
+    branch_id: destination.branchId, quantity: destination.quantity, unit_cost_usd: typedCost(body.cost_price_usd),
     received_date: body.received_date ?? null, expiry_date: body.expiry_date ?? null,
   }
 }
@@ -95,10 +104,11 @@ export async function foldCreateIntoExisting(
   const updates: Record<string, unknown> = {}
   const cleanedBarcode = foldBarcodeCleanup(duplicate, body.barcode)
   if (cleanedBarcode !== null) updates.barcode = cleanedBarcode
-  const incomingCostUsd = Number(body.cost_price_usd) || 0
-  const incomingCostKhr = Number(body.cost_price_khr) || 0
+  // A typed 0 is a recorded $0 and folds in; an absent or blank cost is unknown and changes nothing.
+  const incomingCostUsd = typedCost(body.cost_price_usd)
+  const incomingCostKhr = typedCost(body.cost_price_khr)
   let costOutliers: MergedCostOutlier[] = []
-  if (incomingCostUsd > 0 || incomingCostKhr > 0) {
+  if (incomingCostUsd !== null || incomingCostKhr !== null) {
     const { merged, outliers } = resolveMergedCostDetail([
       { cost_price_usd: duplicate.cost_price_usd, cost_price_khr: duplicate.cost_price_khr },
       { cost_price_usd: incomingCostUsd, cost_price_khr: incomingCostKhr },
@@ -185,8 +195,8 @@ export async function foldCreateWithStockInWrite(
   const db = getDb(env)
   const { branchId, quantity, landing } = destination
   const cleanedBarcode = foldBarcodeCleanup(duplicate, body.barcode)
-  const incomingCostUsd = Number(body.cost_price_usd) || 0
-  const unitCostUsd = incomingCostUsd > 0 ? nullableMoney4(incomingCostUsd) : null
+  const incomingCostUsd = typedCost(body.cost_price_usd)
+  const unitCostUsd = incomingCostUsd === null ? null : nullableMoney4(incomingCostUsd)
   const totalCostUsd = unitCostUsd == null ? null : multiplyMoney4(unitCostUsd, quantity)
   const receivedDate = typeof body.received_date === 'string' && body.received_date.trim() ? body.received_date : null
   const expiryDate = typeof body.expiry_date === 'string' && body.expiry_date.trim() ? body.expiry_date : null
@@ -225,19 +235,22 @@ export async function foldCreateWithStockInWrite(
             sql: `
           INSERT INTO inventory_movements (
             product_id, product_name, branch_id, branch_name, movement_type, quantity,
-            unit_cost_usd, total_cost_usd, reason, reference_id, user_id, user_name,
+            unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name,
             created_at, batch_id
           )
           VALUES (
             @productId, @productName, @branchId, (SELECT name FROM branches WHERE id = @branchId), 'add', @quantity,
-            @unitCostUsd, @totalCostUsd, @reason, NULL, @userId, @userName,
+            @unitCostUsd, @unitCostKhr, @totalCostUsd, @totalCostKhr, @reason, NULL, @userId, @userName,
             CURRENT_TIMESTAMP, ${resolvedBatchIdSql}
           )
         `,
             params: {
               productId, productName: duplicate.name, branchId, quantity, unitCostUsd, totalCostUsd,
-              // The standard stock-in reason (routes/batches.ts), so the ledger reads like any other receipt.
-              reason: `Stock received (${plannedLot})`,
+              // A lot holds USD only, so the KHR side is unknown unless the receipt is declared free (a recorded 0).
+              unitCostKhr: unitCostUsd === 0 ? 0 : null, totalCostKhr: unitCostUsd === 0 ? 0 : null,
+              // The standard stock-in reason (routes/batches.ts), so the ledger reads like any other receipt. A typed $0
+              // says so in the reason, as every accepted free-goods receipt does.
+              reason: appendReceiptNotes(`Stock received (${plannedLot})`, unitCostUsd === 0 ? [FREE_GOODS_REASON_NOTE] : []),
               userId: options.actor.id, userName: options.actor.name, batchId: null, batchKey,
             },
           },

@@ -220,7 +220,7 @@ export async function applyDatedStockCountDecisions(
       if (!name) { errors.push({ rowNumber: row.rowNumber, error: 'create_new requires a product name; this row had none.' }); continue }
       const price = pickPrice(row.raw)
       const inserted = await guardedDb
-        .prepare(`INSERT INTO products (name, sku, barcode, selling_price_usd, selling_price_khr, is_active) VALUES (@name, @sku, @barcode, @usd, @khr, 1)`)
+        .prepare(`INSERT INTO products (name, sku, barcode, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr, is_active) VALUES (@name, @sku, @barcode, @usd, @khr, NULL, NULL, 1)`)
         .run({ name, sku: row.raw.sku ?? null, barcode: row.raw.barcode ?? null, usd: price.usd, khr: price.khr })
       const productId = Number(inserted.lastInsertRowid)
       productsCreated.push({ rowNumber: row.rowNumber, productId, name, action: 'create_new' })
@@ -270,7 +270,7 @@ export async function applyDatedStockCountDecisions(
     const finalName = nameUnlocked ? (requestedName as string) : parent.name
     const price = pickPrice(row.raw)
     const inserted = await guardedDb
-      .prepare(`INSERT INTO products (name, sku, barcode, selling_price_usd, selling_price_khr, is_active) VALUES (@name, @sku, @barcode, @usd, @khr, 1)`)
+      .prepare(`INSERT INTO products (name, sku, barcode, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr, is_active) VALUES (@name, @sku, @barcode, @usd, @khr, NULL, NULL, 1)`)
       .run({ name: finalName, sku: row.raw.sku ?? null, barcode: row.raw.barcode ?? null, usd: price.usd, khr: price.khr })
     const productId = Number(inserted.lastInsertRowid)
     productsCreated.push({ rowNumber: row.rowNumber, productId, name: finalName, action: 'create_child', ...(nameUnlocked ? { nameUnlocked: true } : {}) })

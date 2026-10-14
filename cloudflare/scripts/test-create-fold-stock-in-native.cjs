@@ -457,6 +457,52 @@ async function mainBody() {
       t.eq('the old lot keeps its own cost, the new lot carries the typed one', after.lots.map(l => l.unit_cost_usd), [2, 3.5])
     })
 
+    // Release 3 slice S7 (owner, 14 Oct 2026): a typed $0 is a recorded $0, an absent cost is unknown -- never the other way round.
+    await check('F2a', 'a typed $0 starting quantity is received as free goods: the new lot is a recorded $0, the movement says so, and the catalog cost is still the mean of the lots that have a cost', 'high', async (t) => {
+      const e = await existing(H)
+      const before = await ledger(H, e)
+      const r = await H.api('POST', '/api/products', createBody(e, { cost_price_usd: 0 }), { as: 'manager' })
+      await H.settle()
+      const after = await ledger(H, e)
+      t.eq('status', r.status, 200)
+      const newLots = after.lots.filter(l => !before.lots.some(b => b.id === l.id))
+      t.eq('one new lot at a recorded $0 (base: NULL)', newLots.map(l => [l.qty, l.unit_cost_usd]), [[7, 0]])
+      const fresh = after.movements.slice(before.movements.length)
+      t.eq('one add movement at a recorded $0 whose reason carries the free-goods words', fresh.map(m => [m.t, m.q, m.c, /^Stock received \(\d{8}\) \(Free goods \(no cost\)\)$/.test(String(m.reason))]), [['add', 7, 0, true]])
+      t.eq('the KHR side of a free receipt is a recorded 0 too', (await H.q1("SELECT unit_cost_khr k, total_cost_khr tk FROM inventory_movements WHERE product_id=? AND movement_type='add' ORDER BY id DESC LIMIT 1", e.id)), { k: 0, tk: 0 })
+      t.eq('the catalog cost ignores a 0 lot (averaging formula unchanged, Q2)', after.cost, 2)
+    })
+
+    await check('F2b', 'a starting quantity with no cost is received at an UNKNOWN cost: the new lot and the movement are NULL, no free-goods claim is made', 'high', async (t) => {
+      const e = await existing(H)
+      const before = await ledger(H, e)
+      const body = createBody(e)
+      delete body.cost_price_usd
+      const r = await H.api('POST', '/api/products', body, { as: 'manager' })
+      await H.settle()
+      const after = await ledger(H, e)
+      t.eq('status', r.status, 200)
+      const newLots = after.lots.filter(l => !before.lots.some(b => b.id === l.id))
+      t.eq('one new lot with no cost', newLots.map(l => [l.qty, l.unit_cost_usd]), [[7, null]])
+      const fresh = after.movements.slice(before.movements.length)
+      t.eq('one add movement with no cost and the plain reason', fresh.map(m => [m.t, m.q, m.c, /^Stock received \(\d{8}\)$/.test(String(m.reason))]), [['add', 7, null, true]])
+      t.eq('the KHR side is unknown too (base: the DEFAULT 0 of the omitted column)', (await H.q1("SELECT unit_cost_khr k, total_cost_khr tk FROM inventory_movements WHERE product_id=? AND movement_type='add' ORDER BY id DESC LIMIT 1", e.id)), { k: null, tk: null })
+      t.eq('the catalog cost stays the mean of the lots that have one', after.cost, 2)
+    })
+
+    await check('F2c', 'the fold with no starting quantity: a typed $0 onto a twin with an unknown cost records a $0; a blank cost leaves it unknown (base: both ignored)', 'high', async (t) => {
+      const e = await existing(H, { stock: 0, lotCost: 0 })
+      await H.db.batch([H.db.prepare('UPDATE products SET cost_price_usd=NULL, cost_price_khr=NULL WHERE id=?').bind(e.id)])
+      const noQty = (extra) => ({ name: e.name, barcode: e.clean, client_request_id: requestId(), ...extra })
+      await H.api('POST', '/api/products', noQty({}), { as: 'manager' })
+      await H.settle()
+      t.eq('no cost typed: the twin stays unknown', (await H.q1('SELECT cost_price_usd c, cost_price_khr k FROM products WHERE id=?', e.id)), { c: null, k: null })
+      await H.api('POST', '/api/products', noQty({ cost_price_usd: 0 }), { as: 'manager' })
+      await H.settle()
+      t.eq('a typed $0 is recorded as 0', (await H.q1('SELECT cost_price_usd c FROM products WHERE id=?', e.id)), { c: 0 })
+      t.eq('and keeps its cost entry', (await H.q('SELECT cost_usd c, previous_cost_usd p FROM product_cost_entries WHERE product_id=?', e.id)), [{ c: 0, p: null }])
+    })
+
     await check('F3', 'the fold never writes the selling price: a typed price (even from a role with the price action off) leaves the survivor\'s price alone, and the stock-in still lands', 'high', async (t) => {
       const e = await existing(H)
       const before = await ledger(H, e)

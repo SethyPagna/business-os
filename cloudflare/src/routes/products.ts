@@ -1877,6 +1877,9 @@ async function foldSurvivorPriceChangeDenied(env: Env, user: SessionUser, surviv
   const after = Object.fromEntries(PRODUCT_DEFAULT_PRICE_FIELDS.filter(owns).map((field) => [field, body[field]]))
   return !survivor || productPriceChanged({ before: survivor, after }) || productDiscountChanged(survivor, body)
 }
+// A cost read from a row, kept as it is: unknown (NULL) is null, never the 0 a `Number(x) || 0` would print.
+const costOrNull = (value: unknown): number | null => (value == null || value === '' || !Number.isFinite(Number(value)) ? null : Number(value))
+
 const BULK_PRICE_FIELDS = new Set(['selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr', 'cost_price_usd', 'cost_price_khr'])
 const BULK_PRICE_REQUEST_ID = /^[A-Za-z0-9_-]{8,120}$/
 async function findBulkPriceReceipt(db: ReturnType<typeof getDb>, actorId: number, requestId: string) {
@@ -1946,9 +1949,12 @@ app.post('/bulk-price-adjust', async (c) => {
   // A row "changes" for a field when: decreasing -> the field is > 0 (a 0
   // price is never pushed negative, matching the selection flow's rule);
   // increasing -> always, unless skip_zero keeps 0-priced rows untouched.
-  const fieldCondition = (field: string) => (direction === 'decrease' || skipZero)
-    ? `COALESCE(${field}, 0) > 0`
-    : '1=1'
+  // A cost is different: an unknown (NULL) cost has nothing to adjust and stays
+  // unknown, and a recorded $0 is a real cost that skip_zero (about unset
+  // prices) does not hide.
+  const fieldCondition = (field: string) => field.startsWith('cost_price_')
+    ? (direction === 'decrease' ? `${field} > 0` : `${field} IS NOT NULL`)
+    : (direction === 'decrease' || skipZero) ? `COALESCE(${field}, 0) > 0` : '1=1'
 
   if (body.preview) {
     const where = fields.map((field) => `(${fieldCondition(field)})`).join(' OR ')
@@ -1956,7 +1962,9 @@ app.post('/bulk-price-adjust', async (c) => {
     return c.json({ count: row?.n || 0 })
   }
 
-  const nextValueSql = (field: string) => `MAX(0, ROUND(COALESCE(${field}, 0) + @delta, ${field.endsWith('_khr') ? 0 : 2}))`
+  const nextValueSql = (field: string) => field.startsWith('cost_price_')
+    ? `MAX(0, ROUND(${field} + @delta, ${field.endsWith('_khr') ? 0 : 2}))`
+    : `MAX(0, ROUND(COALESCE(${field}, 0) + @delta, ${field.endsWith('_khr') ? 0 : 2}))`
   const claimNonce = crypto.randomUUID()
   const ownClaim = `EXISTS (SELECT 1 FROM audit_logs al WHERE al.entity = 'product' AND al.entity_id = 'bulk-price-adjust'
     AND CASE WHEN json_valid(al.details) THEN json_extract(al.details, '$.claim_nonce') END = @claimNonce)`
@@ -2035,7 +2043,7 @@ async function findSameProductIdentityProduct(
   name: string,
   barcode: unknown,
   excludeId: number | null,
-): Promise<{ id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number } | null> {
+): Promise<{ id: number; name: string; barcode: string; cost_price_usd: number | null; cost_price_khr: number | null } | null> {
   // The lookup itself (the name-group SQL narrow + pickSameIdentityRow) lives
   // in lib/productIdentity.ts so the review applier judges a queued create or
   // edit at approval by this very rule.
@@ -3472,8 +3480,8 @@ export type MergeIdentityDiff = {
   // Before this the merge preview never mentioned cost at all -- neither the
   // pair preview nor the whole-catalog dry run -- and the only place the mean
   // appeared was inside the fold, i.e. after the point of no return.
-  costBefore: Record<string, number>
-  costAfter: Record<string, number>
+  costBefore: Record<string, number | null>
+  costAfter: Record<string, number | null>
   costOutliers: MergedCostOutlier[]
   numericIssues: ProductMergeNumericIssue[]
 }
@@ -3516,17 +3524,16 @@ export async function readMergeIdentityDiff(
   const barcodeBlocks = barcodeKeysDiffer && !barcodeIdentityMatches(keeper?.barcode, dup?.barcode)
   const costVerdict = compareCosts(keeper || {}, dup || {})
   const costFill: Array<{ field: string; value: number }> = []
-  const costBefore: Record<string, number> = {}
-  const costAfter: Record<string, number> = {}
+  const costBefore: Record<string, number | null> = {}
+  const costAfter: Record<string, number | null> = {}
   const economics = resolveProductMergeEconomics([keeper || {}, dup || {}])
   for (const field of MERGE_COST_FIELDS) {
-    const before = Number(keeper?.[field]) || 0
-    const after = Number(economics.merged[field] ?? before) || 0
+    const before = costOrNull(keeper?.[field])
+    const after = costOrNull(economics.merged[field] ?? before)
     costBefore[field] = before
     costAfter[field] = after
-    // The kept row has no cost of its own and takes the discarded row's. Not a
-    // difference (0/NULL is a cost nobody recorded) -- but it changes what the
-    // kept product cost, so it is said out loud rather than done quietly.
+    // The kept row has no cost of its own (unknown, or 0 which the mean does not weigh) and takes the discarded row's.
+    // Not a difference -- but it changes what the kept product cost, so it is said out loud rather than done quietly.
     if (!before && after) costFill.push({ field, value: after })
   }
   return {
@@ -3972,8 +3979,8 @@ export async function foldDuplicateProductInto(
       // came in on the discarded row and went out again on the same row).
       quantityWrittenOff += qty
       statements.push({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
-              VALUES (@productId, @productName, @branchId, @branchName, 'adjustment', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_id, user_name, created_at)
+              VALUES (@productId, @productName, @branchId, @branchName, 'adjustment', @quantity, NULL, NULL, NULL, NULL, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
         params: {
           productId: dup.id,
           productName: dup.name,
@@ -3994,8 +4001,8 @@ export async function foldDuplicateProductInto(
       params: { canonicalId, branchId: row.branch_id, qty },
     })
     statements.push({
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
-            VALUES (@productId, @productName, @branchId, @branchName, 'adjustment', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
+      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_id, user_name, created_at)
+            VALUES (@productId, @productName, @branchId, @branchName, 'adjustment', @quantity, NULL, NULL, NULL, NULL, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
       params: {
         productId: canonicalId,
         productName: canonicalName,
@@ -4079,8 +4086,8 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
       sellingKhr: mergedPricing.selling_price_khr ?? canonicalBefore?.selling_price_khr ?? 0,
       wholesaleUsd: mergedPricing.wholesale_price_usd ?? canonicalBefore?.wholesale_price_usd ?? 0,
       wholesaleKhr: mergedPricing.wholesale_price_khr ?? canonicalBefore?.wholesale_price_khr ?? 0,
-      costUsd: mergedCost.cost_price_usd ?? canonicalBefore?.cost_price_usd ?? 0,
-      costKhr: mergedCost.cost_price_khr ?? canonicalBefore?.cost_price_khr ?? 0,
+      costUsd: mergedCost.cost_price_usd ?? canonicalBefore?.cost_price_usd ?? null,
+      costKhr: mergedCost.cost_price_khr ?? canonicalBefore?.cost_price_khr ?? null,
       barcode: canonicalBarcode,
       reviewed: reviewedAuthorityValid ? 1 : 0,
       category: reviewedAuthorityValid ? reviewedPlan.selected.category.value : null,
@@ -4397,8 +4404,8 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
       selling_price_khr: Number(canonicalBefore?.selling_price_khr) || 0,
       wholesale_price_usd: Number(canonicalBefore?.wholesale_price_usd) || 0,
       wholesale_price_khr: Number(canonicalBefore?.wholesale_price_khr) || 0,
-      cost_price_usd: Number(canonicalBefore?.cost_price_usd) || 0,
-      cost_price_khr: Number(canonicalBefore?.cost_price_khr) || 0,
+      cost_price_usd: costOrNull(canonicalBefore?.cost_price_usd),
+      cost_price_khr: costOrNull(canonicalBefore?.cost_price_khr),
     },
     keeperStockBefore: canonicalStockBefore.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })),
     dupStockBefore: stockRows.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0, rfid_confirmed_qty: Number(r.rfid_confirmed_qty) || 0 })),
@@ -5196,8 +5203,8 @@ app.get('/merge-duplicates/preview', async (c) => {
       const costById = new Map(costRows.map((r) => [Number(r.id), r]))
       const canonicalCost = costById.get(group.canonical.id) || {}
       const costBefore = {
-        cost_price_usd: Number(canonicalCost.cost_price_usd) || 0,
-        cost_price_khr: Number(canonicalCost.cost_price_khr) || 0,
+        cost_price_usd: costOrNull(canonicalCost.cost_price_usd),
+        cost_price_khr: costOrNull(canonicalCost.cost_price_khr),
       }
       const identityKey = JSON.stringify([normalizeProductGroupName(group.canonical.name), identityBarcodeKey(group.canonical.barcode)])
       const persistedPlan = selectAppliedBulkClusterPlan(
@@ -5216,8 +5223,8 @@ app.get('/merge-duplicates/preview', async (c) => {
         : resolveProductMergeEconomics(costRows)
       const costUnavailable = previewCatalog.planHistoryUnavailable || hasPlanConflict
       const costAfter = {
-        cost_price_usd: costUnavailable ? costBefore.cost_price_usd : Number(economics.merged.cost_price_usd ?? costBefore.cost_price_usd) || 0,
-        cost_price_khr: costUnavailable ? costBefore.cost_price_khr : Number(economics.merged.cost_price_khr ?? costBefore.cost_price_khr) || 0,
+        cost_price_usd: costUnavailable ? costBefore.cost_price_usd : costOrNull(economics.merged.cost_price_usd ?? costBefore.cost_price_usd),
+        cost_price_khr: costUnavailable ? costBefore.cost_price_khr : costOrNull(economics.merged.cost_price_khr ?? costBefore.cost_price_khr),
       }
       const groupMemberIds = [group.canonical.id, ...duplicateIds]
       const scopedMergeBlockers = scope && crossNameCollisionKeys.has(identityBarcodeKey(group.canonical.barcode)) ? [{
@@ -6171,7 +6178,7 @@ function selectedConflictProjection(
     discarded_lot_count: beforeLotKeys.discarded.get(branchId)?.size || 0,
   }))
   const economics = resolveProductMergeEconomics(rows)
-  const costs = Object.fromEntries(MERGE_COST_FIELDS.map((field) => [field, Number(economics.merged[field] ?? keeper[field] ?? 0) || 0]))
+  const costs = Object.fromEntries(MERGE_COST_FIELDS.map((field) => [field, costOrNull(economics.merged[field] ?? keeper[field])]))
   const prices = Object.fromEntries(MERGE_PRICE_FIELDS.map((field) => [field, Number(economics.merged[field] ?? keeper[field] ?? 0) || 0]))
   const imageRows = (productId: number) => (productId === keeper.id ? snapshot.canonicalImageRows : snapshot.duplicateImageRows)
     .map((row) => String(row.image_path || '')).filter(Boolean)
@@ -6205,8 +6212,8 @@ function selectedConflictProjection(
     discarded: identity(discarded),
     stock,
     costs: {
-      keeper: Object.fromEntries(MERGE_COST_FIELDS.map((field) => [field, Number(keeper[field]) || 0])),
-      discarded: Object.fromEntries(MERGE_COST_FIELDS.map((field) => [field, Number(discarded[field]) || 0])),
+      keeper: Object.fromEntries(MERGE_COST_FIELDS.map((field) => [field, costOrNull(keeper[field])])),
+      discarded: Object.fromEntries(MERGE_COST_FIELDS.map((field) => [field, costOrNull(discarded[field])])),
     },
     prices: {
       keeper: Object.fromEntries(MERGE_PRICE_FIELDS.map((field) => [field, Number(keeper[field]) || 0])),
@@ -8914,7 +8921,7 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
   // the cost the rule gives the whole group (its default Final cost).
   let inCluster = false
   let keeperStock: MergeStockImpact | null = null
-  let groupCost: { cost_price_usd: number; cost_price_khr: number } | null = null
+  let groupCost: { cost_price_usd: number | null; cost_price_khr: number | null } | null = null
   let resolveGroup: Awaited<ReturnType<typeof readResolveProductGroup>> | null = null
   if (keepMode) {
     const [clusters, keeperImpact, groupRows] = await Promise.all([
@@ -8929,8 +8936,8 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
     keeperStock = keeperImpact
     const economics = resolveProductMergeEconomics(groupRows)
     groupCost = {
-      cost_price_usd: Number(economics.merged.cost_price_usd ?? 0) || 0,
-      cost_price_khr: Number(economics.merged.cost_price_khr ?? 0) || 0,
+      cost_price_usd: costOrNull(economics.merged.cost_price_usd),
+      cost_price_khr: costOrNull(economics.merged.cost_price_khr),
     }
     resolveGroup = await readResolveProductGroup(db, groupIds, keepId)
     if (resolveGroup.reviewedDigest !== beforeReview?.reviewedDigest) {
