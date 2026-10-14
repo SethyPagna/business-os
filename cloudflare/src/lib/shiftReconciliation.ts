@@ -115,9 +115,11 @@ export const SHIFT_REVIEW = {
   earlierClose: 'closed_at_earlier_time',
   /** An administrator moved the opening later, so a money record fell outside every shift. */
   laterOpen: 'opened_at_later_time',
+  /** The drawer was reopened from a close an administrator made at an earlier time, so the count it opens with may include later sales. */
+  reopenedAfterEarlierClose: 'reopened_after_earlier_close',
 } as const
 
-const TIME_REVIEW_CODES: readonly string[] = [SHIFT_REVIEW.earlierClose, SHIFT_REVIEW.laterOpen]
+const TIME_REVIEW_CODES: readonly string[] = [SHIFT_REVIEW.earlierClose, SHIFT_REVIEW.laterOpen, SHIFT_REVIEW.reopenedAfterEarlierClose]
 
 export type ShiftReconciliationInput = {
   opening: Partial<ShiftCount> | null | undefined

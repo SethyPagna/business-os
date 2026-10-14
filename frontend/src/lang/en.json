@@ -6620,6 +6620,8 @@
   "shift_opened_later_by": "Opened at a later time by",
   "shift_review_earlier_close": "Closed at an earlier time",
   "shift_review_later_open": "Opened at a later time",
+  "shift_review_reopened_after_earlier_close": "Reopened after a close at an earlier time",
+  "shift_close_count_at_closing_time": "Count the drawer as it was at the closing time.",
   "shift_close_before_last_activity": "Close the shift after its last sale, return or expense. An earlier time is not allowed.",
   "shift_close_too_early": "Close the shift now. A close time more than 5 minutes in the past needs an administrator.",
   "shift_close_time_admin_only": "Only an administrator can choose an earlier time. The shift closes now.",

@@ -239,8 +239,9 @@ await runTest('the drawer breakdown prints a time review (and every other reason
     ['closed_at_earlier_time', 'shift_review_earlier_close'], ['opened_at_later_time', 'shift_review_later_open'],
     ['tender_incomplete', 'shift_review_tender'], ['change_ambiguous', 'shift_review_change'],
     ['sale_limit_reached', 'shift_review_limit'], ['cash_method_unresolved', 'shift_review_cash_method'],
+    ['reopened_after_earlier_close', 'shift_review_reopened_after_earlier_close'],
   ]
-  assert.equal(new Set(reasons.map(([, key]) => km[key])).size, reasons.length, 'six different Khmer reasons')
+  assert.equal(new Set(reasons.map(([, key]) => km[key])).size, reasons.length, 'seven different Khmer reasons')
   for (const [code, key] of reasons) {
     const breakdown = await harness.mount({
       component: 'components/shifts/ShiftCashBreakdown.tsx',

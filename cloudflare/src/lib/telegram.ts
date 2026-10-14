@@ -1325,6 +1325,7 @@ const REVIEW_LABELS: Partial<Record<string, TelegramLabelKey>> = {
   cash_method_unresolved: 'reviewCashMethod',
   closed_at_earlier_time: 'reviewEarlierClose',
   opened_at_later_time: 'reviewLaterOpen',
+  reopened_after_earlier_close: 'reviewReopenedAfterEarlierClose',
 }
 /** A cash review's reasons, from lib/shiftReconciliation.ts's codes, in the chat's words. */
 function reviewReasons(codes: readonly string[]): string {

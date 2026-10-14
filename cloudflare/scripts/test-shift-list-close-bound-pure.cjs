@@ -120,7 +120,7 @@ function harness(sqlite, routeSource = source) {
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', state.user); await next() } },
     '../lib/permissions': loadReal('lib/permissions.ts'),
     '../lib/shiftReconciliation': {
-      shiftLastActivityMs: async () => null, SHIFT_REVIEW: { earlierClose: 'closed_at_earlier_time' },
+      shiftLastActivityMs: async () => null, readShiftTimeReview: async () => null, SHIFT_REVIEW: { earlierClose: 'closed_at_earlier_time' },
       loadShiftReconciliation: async () => ({ marker: 'reconciliation' }),
       loadShiftFigures: async () => ({ marker: 'figures' }),
     },

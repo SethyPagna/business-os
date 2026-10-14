@@ -118,7 +118,8 @@ for (const [language, pack] of [['en', en], ['km', km]] as const) {
 }
 
 await runTest('the new reopen sentences exist in both packs and differ', () => {
-  for (const key of ['shift_reopen_float_hint', 'shift_reopen_needs_count', 'shift_count_locked_by_reopen', 'shift_opening_float_locked_by_reopen']) {
+  for (const key of ['shift_reopen_float_hint', 'shift_reopen_needs_count', 'shift_count_locked_by_reopen', 'shift_opening_float_locked_by_reopen',
+    'shift_close_count_at_closing_time', 'shift_review_reopened_after_earlier_close']) {
     assert.ok(en[key] && km[key], `${key} is in both packs`)
     assert.match(km[key], /[ក-៿]/, `${key} is Khmer`)
     assert.notEqual(en[key], km[key])
@@ -129,6 +130,13 @@ await runTest('the Worker refusals that lock a reopened pair are shown as the tr
   for (const code of ['shift_count_locked_by_reopen', 'shift_opening_float_locked_by_reopen']) {
     assert.equal(shiftCloseTimeRefusalText({ code, message: 'English fallback' }, (key) => `T:${key}`), `T:${code}`)
   }
+})
+
+await runTest('both administrator close forms tell the administrator to count the drawer as it was at the closing time', () => {
+  for (const file of ['../src/components/pos/ShiftGate.tsx', '../src/components/shifts/ShiftHistoryModal.tsx']) {
+    assert.ok(readFileSync(new URL(file, import.meta.url), 'utf8').includes("t('shift_close_count_at_closing_time')"), `${file} renders the line`)
+  }
+  assert.equal(en.shift_close_count_at_closing_time, 'Count the drawer as it was at the closing time.')
 })
 
 await harness.close()
