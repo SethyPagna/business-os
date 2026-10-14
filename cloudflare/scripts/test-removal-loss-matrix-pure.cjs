@@ -252,9 +252,9 @@ const RECONCILIATION_REMOVE = {
   // 5b. Count the INSERT INTO inventory_movements statements in each loss-bearing
   //     writer file that list no cost column at all. A statement that names
   //     neither unit_cost_usd nor total_cost_usd stores DEFAULT 0 = a recorded
-  //     $0 loss. productDelete.ts's sellable-stock write_off is the one known
-  //     case (cost-unknown slice S6 makes it write NULL or the lot cost, which
-  //     takes this budget to 0); the budget can only go down, never up.
+  //     $0 loss. productDelete.ts's sellable-stock write_off was the one known
+  //     case; cost-unknown slice S6 made it write the lot cost or NULL, so every
+  //     budget is 0 and can only stay there.
   const insertsWithoutCost = (text) => {
     const found = []
     const re = /INSERT INTO inventory_movements\s*\(([^)]*)\)/gi
@@ -264,14 +264,14 @@ const RECONCILIATION_REMOVE = {
     }
     return found
   }
-  const UNCOSTED_INSERT_BUDGET = { [path.join('lib', 'productDelete.ts')]: 1, [path.join('lib', 'damagedLotActions.ts')]: 0 }
+  const UNCOSTED_INSERT_BUDGET = { [path.join('lib', 'productDelete.ts')]: 0, [path.join('lib', 'damagedLotActions.ts')]: 0 }
   for (const [rel, budget] of Object.entries(UNCOSTED_INSERT_BUDGET)) {
     const found = insertsWithoutCost(source(rel))
     assert.ok(found.length <= budget, `${rel} has ${found.length} INSERT INTO inventory_movements without a cost column (budget ${budget}): ${JSON.stringify(found)}`)
   }
   const deleteUncosted = insertsWithoutCost(source(path.join('lib', 'productDelete.ts')))
-  assert.equal(deleteUncosted.length, 1, 'the sellable write_off INSERT in productDelete.ts is still the one uncosted writer -- lower the budget to 0 when it stores a cost')
-  assert.match(deleteUncosted[0], /movement_type/, 'and it is the movement INSERT, not another statement')
+  assert.equal(deleteUncosted.length, 0, 'the sellable write_off INSERT in productDelete.ts lists its cost columns (lot cost or NULL), not DEFAULT 0')
+  assert.ok(source(path.join('lib', 'productDelete.ts')).includes('INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr'), 'and the sellable INSERT is the one that names all four cost columns')
   // The control: the matcher DOES flag an INSERT that omits the cost columns and
   // does NOT flag one that lists them, so the count above is not vacuous.
   assert.equal(insertsWithoutCost('INSERT INTO inventory_movements(product_id,quantity,reason) VALUES (1,2,3)').length, 1)
