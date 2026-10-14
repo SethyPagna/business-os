@@ -124,7 +124,7 @@ function scenario() {
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
     '../lib/telegram': { sendTelegramShiftReport: async () => true },
     // No sales tables here: the ID is under test, not the drawer arithmetic.
-    '../lib/shiftReconciliation': { loadShiftReconciliation: async () => null, loadShiftFigures: async () => null, shiftLastActivityMs: async () => null },
+    '../lib/shiftReconciliation': { loadShiftReconciliation: async () => null, loadShiftFigures: async () => null, shiftLastActivityMs: async () => null, readShiftTimeReview: async () => null },
   }, { Date: FrozenDate })
   const app = route.default || route
   const call = (method, url, body) => app.fetch(new Request(`http://test${url}`, {

@@ -495,6 +495,7 @@ function CarryOverCloseFields({ form, secondary }: { form: CarryOverCloseForm; s
             timeAriaLabel={`${t('shift_close_time_required')} · ${t('time')}`}
           />
           <p className="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{t('shift_close_time_hint')}</p>
+          <p className="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{t('shift_close_count_at_closing_time')}</p>
         </div>
       ) : (
         <p className="text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{t('shift_close_time_admin_only')}</p>

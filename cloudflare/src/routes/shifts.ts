@@ -382,9 +382,19 @@ async function closeTimeVerdict(env: Env, user: SessionUser, shift: ShiftRow, re
   if (canManageShifts(user)) return { earlier: true, refusal: null, closedAtMs }
   return { earlier: true, refusal: beforeActivity ? CLOSE_TIME_REFUSALS.beforeActivity : CLOSE_TIME_REFUSALS.tooEarly, closedAtMs }
 }
-/** The standing review a close leaves: the flag when an administrator closed at a time a cashier could not have chosen, an evaluated empty list otherwise. */
-function closeTimeReview(timing: CloseTimeVerdict, actorName: string): ShiftTimeReview[] {
-  return timing.earlier ? [{ code: SHIFT_REVIEW.earlierClose, by: actorName }] : []
+/**
+ * The standing review a close leaves: the flag when an administrator closed at a time a cashier could not have chosen, plus the flag a
+ * reopened segment carries from such a close (it stays until the segment is done), an evaluated empty list otherwise.
+ */
+async function closeTimeReview(env: Env, shift: ShiftRow, timing: CloseTimeVerdict, actorName: string): Promise<ShiftTimeReview[]> {
+  const carried = ((await readShiftTimeReview(env, shift.id)) ?? []).find((entry) => entry.code === SHIFT_REVIEW.reopenedAfterEarlierClose)
+  return [...(timing.earlier ? [{ code: SHIFT_REVIEW.earlierClose, by: actorName }] : []), ...(carried ? [carried] : [])]
+}
+/** What a segment reopened from `parent` inherits: the review flag of a close made at an earlier time (or one it carried itself). */
+async function reopenCarriedReview(env: Env, parent: ShiftRow): Promise<ShiftTimeReview[]> {
+  const flagged = ((await readShiftTimeReview(env, parent.id)) ?? [])
+    .find((entry) => entry.code === SHIFT_REVIEW.earlierClose || entry.code === SHIFT_REVIEW.reopenedAfterEarlierClose)
+  return flagged ? [{ code: SHIFT_REVIEW.reopenedAfterEarlierClose, by: flagged.by }] : []
 }
 const businessDayStartIso = (businessDate: string) => new Date(Date.parse(`${businessDate}T00:00:00Z`) - BUSINESS_UTC_OFFSET_MINUTES * 60 * 1000).toISOString()
 /**
@@ -411,6 +421,7 @@ async function timeReviewAfterEdit(env: Env, db: D1Compat, actorName: string, be
   const session = storedShift(before)
   let close = standing.find((entry) => entry.code === SHIFT_REVIEW.earlierClose) ?? null
   let open = standing.find((entry) => entry.code === SHIFT_REVIEW.laterOpen) ?? null
+  const carried = standing.find((entry) => entry.code === SHIFT_REVIEW.reopenedAfterEarlierClose) ?? null
   if (closedMoved) {
     const next = await readAdjacentShift(db, session, before.opened_at, 'next')
     const stranded = await shiftLastActivityMs(env, { ...session, opened_at: openedAt }, nowMs, { from: closedAt as string, until: next?.opened_at ?? null })
@@ -424,9 +435,15 @@ async function timeReviewAfterEdit(env: Env, db: D1Compat, actorName: string, be
     }
     open = stranded == null ? null : { code: SHIFT_REVIEW.laterOpen, by: actorName }
   }
-  return [close, open].filter((entry): entry is ShiftTimeReview => entry != null)
+  return [close, open, carried].filter((entry): entry is ShiftTimeReview => entry != null)
 }
 const SHIFT_TIME_ADMIN_ONLY = { code: 'shift_time_admin_only', error: 'Only an administrator can change the opening or closing time of a shift.' } as const
+/** The reopened segment copied the parent's count once; a later change to either side would leave it on a stale copy. */
+const SHIFT_COUNT_LOCKED_BY_REOPEN = { code: 'shift_count_locked_by_reopen',
+  error: 'This shift was reopened, so its closing count can no longer be changed. Correct the count on the reopened shift instead, or ask an administrator.' } as const
+const SHIFT_FLOAT_LOCKED_BY_REOPEN = { code: 'shift_opening_float_locked_by_reopen',
+  error: 'A reopened shift opens with the cash counted when the earlier part closed, so its opening cash cannot be changed. Count the drawer when this part closes instead, or ask an administrator.' } as const
+const sameCountValue = (a: number | null | undefined, b: number | null | undefined, step: number) => (a == null || b == null ? (a ?? null) === (b ?? null) : Math.abs(a - b) < step)
 /** Whether an amend asks for a different opening or closing instant (second resolution, the stored text's own). */
 function timesChanged(before: ShiftRow, requestedOpenedAt: string, requestedClosedAt: string | null): boolean {
   const sameSecond = (a: string | null, b: string | null) => (a == null || b == null ? a === b : Math.floor(utcMs(a) / 1000) === Math.floor(utcMs(b) / 1000))
@@ -716,7 +733,10 @@ async function readPreviousOpen(db: D1Compat, policy: ShiftPolicy, userId: numbe
  */
 async function readStaleDrawersToAlert(db: D1Compat, policy: ShiftPolicy, userId: number, branchId: number | null, newShiftId: number) {
   const accountClause = policy.scope_mode === 'per_account' ? 'AND user_id = @userId' : ''
-  const seenClause = policy.scope_mode === 'per_account' ? 'AND seen.user_id = shift_sessions.user_id' : ''
+  // Shop-wide, a registration on another branch is not the registration that left THIS branch's drawer behind.
+  const seenClause = policy.scope_mode === 'per_account'
+    ? 'AND seen.user_id = shift_sessions.user_id'
+    : `AND (seen.branch_id IS shift_sessions.branch_id OR (${BRANCH_ACTIVE_SQL}) = 0)`
   return db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions
     WHERE scope_mode = @scopeMode
       AND business_date < ${localTodayExpr()}
@@ -795,6 +815,8 @@ async function writeContinuation(db: D1Compat, user: SessionUser, parent: ShiftD
   reason: string; floatUsd: number | null; floatKhr: number | null; note: string | null; deviceName: string | null
   /** The instant the new segment opens at; the moment of writing when absent. */
   openedAt?: string
+  /** Review flags the segment starts with, journaled on its first row (a reopen after an earlier-time close). */
+  timeReview?: ShiftTimeReview[]
   afterCancellation: boolean; auditAction: 'shift.reopen' | 'shift.open_after_cancel'
   request?: ReturnType<typeof mutationRequest>
 }): Promise<{ changed: boolean; shift?: ShiftDbRow; conflict: boolean }> {
@@ -835,7 +857,8 @@ async function writeContinuation(db: D1Compat, user: SessionUser, parent: ShiftD
         SELECT id,@actorId,@actorName,@reason,@beforeJson,@afterJson,@createdAt FROM shift_sessions
         WHERE changes()=1 AND shift_code=@shiftCode`,
         params: { shiftCode: child.shiftCode, actorId: user.id, actorName, reason: input.reason,
-          beforeJson: JSON.stringify(parentStored), afterJson: JSON.stringify(childSnapshot), createdAt: nowIso } },
+          beforeJson: JSON.stringify(parentStored), createdAt: nowIso,
+          afterJson: JSON.stringify(input.timeReview?.length ? { ...childSnapshot, time_review: input.timeReview } : childSnapshot) } },
       { sql: continuationAuditSql(), params: { action: input.auditAction, shiftCode: child.shiftCode,
         actorId: user.id, actorName, details: JSON.stringify({ reason: input.reason, parent_shift_id: parent.id, request: input.request }),
         oldValue: JSON.stringify(parentStored), newValue: JSON.stringify(childSnapshot), deviceName: input.deviceName } },
@@ -1401,7 +1424,7 @@ app.post('/close', async (c) => {
     countedUsd: countedUsd.value, countedKhr: countedKhr.value,
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
     note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Manual shift close', request: mutationRequest(body, shift.id),
-    timeReview: closeTimeReview(timing, reviewerName(user)) })
+    timeReview: await closeTimeReview(c.env, shift, timing, reviewerName(user)) })
   if (result.changed) {
     // The report names the closer when it is not the cashier (an administrator closing a till):
     // the stored closer's name and account id, which the close just wrote.
@@ -1453,7 +1476,7 @@ app.post('/:id/close', async (c) => {
     countedUsd: countedUsd.value, countedKhr: countedKhr.value,
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
     note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Historic manual close', request: mutationRequest(body, id),
-    timeReview: closeTimeReview(timing, reviewerName(user)) })
+    timeReview: await closeTimeReview(c.env, shift, timing, reviewerName(user)) })
   if (!result.changed || !result.shift) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const report = sendTelegramShiftReport(c.env, shift.id, Date.now(), { closedBy: result.shift.closed_by_user_name ?? displayName(user), closedById: result.shift.closed_by_user_id ?? user.id })
   try { c.executionCtx.waitUntil(report) } catch { void report }
@@ -1536,6 +1559,7 @@ app.post('/:id/reopen', async (c) => {
   if (overlap) return c.json(overlapRefusal(overlap), 409)
   const continuation = await writeContinuation(db, user, parent, { reason, floatUsd, floatKhr, openedAt: reopenedAt,
     note: optionalText(body.opening_note), deviceName: c.req.header('X-Device-Name') || null,
+    timeReview: await reopenCarriedReview(c.env, parent),
     afterCancellation: false, auditAction: 'shift.reopen', request: mutationRequest(body, id) })
   if (!continuation.changed || !continuation.shift) return c.json({ error: 'This shift segment was already reopened or changed concurrently.' }, 409)
   const reopened = continuation.shift
@@ -1610,6 +1634,15 @@ app.patch('/:id', async (c) => {
   const openingUsd = openingUsdParsed.value; const openingKhr = openingKhrParsed.value
   const additionalUsd = additionalUsdParsed.value; const additionalKhr = additionalKhrParsed.value
   const closingUsd = closingUsdParsed.value; const closingKhr = closingKhrParsed.value
+  if (before.has_reopened_child && closedAt
+    && (!sameCountValue(closingUsd, before.closing_counted_usd, 0.005) || !sameCountValue(closingKhr, before.closing_counted_khr, 0.5))) {
+    return c.json(SHIFT_COUNT_LOCKED_BY_REOPEN, 409)
+  }
+  const parentOfBefore = before.parent_shift_id == null ? null : await readShiftById(db, before.parent_shift_id)
+  if (parentOfBefore && !parentOfBefore.cancelled_at
+    && (!sameCountValue(openingUsd, before.opening_float_usd, 0.005) || !sameCountValue(openingKhr, before.opening_float_khr, 0.5))) {
+    return c.json(SHIFT_FLOAT_LOCKED_BY_REOPEN, 409)
+  }
   const beforeStored = storedShift(before)
   const after = { ...beforeStored, opened_at: openedAt,
     opening_float_usd: openingUsd, opening_float_khr: openingKhr,
@@ -1621,8 +1654,7 @@ app.patch('/:id', async (c) => {
     closing_note: closedAt ? ('closing_note' in body ? optionalText(body.closing_note) : before.closing_note) : null,
     revision: before.revision + 1 }
   if (before.parent_shift_id != null) {
-    const parent = await readShiftById(db, before.parent_shift_id)
-    const parentTerminatedAt = parent?.cancelled_at ?? parent?.closed_at
+    const parentTerminatedAt = parentOfBefore?.cancelled_at ?? parentOfBefore?.closed_at
     if (!parentTerminatedAt || utcMs(openedAt) < utcMs(parentTerminatedAt)) {
       return c.json({ error: 'Opening time cannot be before the parent shift ended.' }, 400)
     }

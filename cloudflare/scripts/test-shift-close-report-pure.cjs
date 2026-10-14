@@ -158,7 +158,7 @@ const shiftsRoute = loadReal('routes/shifts.ts', {
   // the close writes and reports even when the breakdown is unavailable, because
   // a cashier who ended a shift must not be told to end it again.
   '../lib/shiftReconciliation': {
-      shiftLastActivityMs: async () => null,
+      shiftLastActivityMs: async () => null, readShiftTimeReview: async () => null,
     loadShiftReconciliation: async () => { throw new Error('no sales tables in this fixture') },
   },
   '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
@@ -324,7 +324,7 @@ async function main() {
     '../lib/permissions': { isAdminControlUser: () => false, hasPermission: () => false, hasAnyPermission: () => true },
     '../lib/audit': { audit: async () => {} },
     '../lib/shiftReconciliation': {
-      shiftLastActivityMs: async () => null,
+      shiftLastActivityMs: async () => null, readShiftTimeReview: async () => null,
       loadShiftReconciliation: async () => { throw new Error('no sales tables in this fixture') },
     },
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),

@@ -912,7 +912,7 @@ check('the five-part drawer formula is not spelled out any more',
 // comes from the shared module, printed as one line instead of eight.
 const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')
 check('the Difference line is still the shared reconciliation, not a private formula',
-  /computeShiftReconciliation\(/.test(source) && /loadShiftReconciliation\(/.test(source)
+  /computeShiftReconciliation\(/.test(source) && /loadShiftReconciliation(AsClosed)?\(/.test(source)
   && !/opening[^\n]*\+[^\n]*cashSales[^\n]*-[^\n]*expenses/.test(source))
 // Reinstated Sep 21 2026: the two breakdowns are read from the SAME kernel
 // entry points routes/reports.ts uses, never re-derived here.

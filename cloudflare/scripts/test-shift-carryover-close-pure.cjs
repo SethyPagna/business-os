@@ -118,7 +118,7 @@ function harness(sqlite) {
   // surface which attaches them shows up as a present key. The carry-over
   // banner must never carry one (see figuresFor's comment in the route).
   const shiftReconciliation = {
-    shiftLastActivityMs: async () => null, SHIFT_REVIEW: { earlierClose: 'closed_at_earlier_time' },
+    shiftLastActivityMs: async () => null, readShiftTimeReview: async () => null, SHIFT_REVIEW: { earlierClose: 'closed_at_earlier_time' },
     loadShiftReconciliation: async () => ({ marker: 'reconciliation-was-computed' }),
     loadShiftFigures: async () => ({ marker: 'figures-were-computed' }),
   }

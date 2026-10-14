@@ -622,6 +622,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
                           segment they never saw. One row, with the same key and
                           formatter the POS carry-over strip uses. */}
                       <div><h3 className="text-sm font-semibold">{t('shift_close_title')}</h3><p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300">{canChooseShiftTime() ? t('shift_close_time_hint') : t('shift_close_time_admin_only')}</p>
+                        {canChooseShiftTime() ? <p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300">{t('shift_close_count_at_closing_time')}</p> : null}
                         {canChooseShiftTime() && selected.close_before ? <p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300"><span className="font-medium">{t('shift_previous_open_close_before')}</span> · {fmtDateTime24(selected.close_before)}</p> : null}</div>
                       <fieldset disabled={saving || pending} className="grid min-w-0 gap-3 sm:grid-cols-2 [&_input]:min-w-0 [&_input]:max-w-full">
                         {canChooseShiftTime() ? <div className="text-xs font-semibold sm:col-span-2"><span className="block">{t('shift_close_time_required')}</span><DateTimeEntryInput className="mt-1" value={close.closedAt} onChange={(next) => setClose({ ...close, closedAt: next })} t={t} dateAriaLabel={`${t('shift_close_time_required')} · ${t('date')}`} timeAriaLabel={`${t('shift_close_time_required')} · ${t('time')}`} /></div> : null}

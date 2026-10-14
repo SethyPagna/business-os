@@ -9,6 +9,8 @@ const TIME_REFUSAL_CODES = new Set([
   'shift_overlaps_previous_segment',
   'shift_earlier_admin_must_close_first',
   'shift_reopen_needs_count',
+  'shift_count_locked_by_reopen',
+  'shift_opening_float_locked_by_reopen',
 ])
 
 export function shiftCloseTimeRefusalText(error: unknown, t: (key: string) => string): string | null {

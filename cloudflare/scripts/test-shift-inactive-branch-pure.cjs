@@ -105,7 +105,7 @@ function route(sqlite, source, getUser) {
     '../lib/telegram': { sendTelegramShiftReport: async () => true, sendTelegramStaleShiftAlert: async () => true, scheduleTelegramShiftOverview: async () => true },
     // No sales tables here: the branch rule is under test, not the arithmetic.
     '../lib/shiftReconciliation': {
-      shiftLastActivityMs: async () => null,
+      shiftLastActivityMs: async () => null, readShiftTimeReview: async () => null,
       loadShiftReconciliation: async () => null, loadShiftFigures: async () => null,
       loadShiftCloseFigures: async () => null, loadShiftCloseDrift: async () => null,
     },
