@@ -27,9 +27,10 @@ const REQUIRED = {
 
 // Remaining omissions per file, by the slice that owns the file. Delete an entry when it reaches 0.
 const ALLOWED_OMISSIONS = {
-  // S5 (stock side)
-  'lib/stockActionCommit.ts': { inventory_movements: 2, products: 1 },
-  'routes/inventory.ts': { inventory_movements: 2, products: 1 },
+  // S5 (stock side): every movement INSERT is explicit now. The one products entry is the sibling-row insert in
+  // routes/inventory.ts, whose column list is built from Object.keys(insertPayload) at run time; the scanner cannot
+  // read it, but the payload spreads mirrorCostFields (cost_price_usd, cost_price_khr), so it is not a real omission.
+  'routes/inventory.ts': { products: 1 },
   // S7 (catalog writers)
   'lib/createFold.ts': { inventory_movements: 1 },
   'lib/datedStockCountDecisions.ts': { products: 2 },
@@ -38,8 +39,6 @@ const ALLOWED_OMISSIONS = {
   'lib/importEngine.ts': { inventory_movements: 1 },
   // import-budget writer (salesImportCommit.ts is not S6's to edit)
   'lib/salesImportCommit.ts': { inventory_movements: 1 },
-  // S3 (routes/sales.ts has one owner)
-  'routes/sales.ts': { inventory_movements: 3 },
 }
 
 function walk(dir, out = []) {
