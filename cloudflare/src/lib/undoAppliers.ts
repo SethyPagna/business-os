@@ -304,7 +304,7 @@ export interface MergeReversal {
 
 export const PRODUCT_MERGE_GROUP_ACTION_KIND = 'product.merge.group'
 export const PRODUCT_MERGE_GROUP_CHILD_KIND = 'product.merge.group.child'
-const PRODUCT_MERGE_APPLIER_KINDS = new Set(['product.merge', 'product.merge.bulk', PRODUCT_MERGE_GROUP_ACTION_KIND])
+export const PRODUCT_MERGE_APPLIER_KINDS = new Set(['product.merge', 'product.merge.bulk', PRODUCT_MERGE_GROUP_ACTION_KIND])
 
 function mergeChoicePermissionError(reversal: MergeReversal, user: SessionUser | null | undefined): string | null {
   if (reversal.priceOverridden === true

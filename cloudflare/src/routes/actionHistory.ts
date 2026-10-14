@@ -6,7 +6,7 @@ import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, buildAuditStatement } from '../lib/audit'
 import { getActionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
-import { SALE_ADD_ITEMS_ACTION_KIND, branchCutoverClosureRefusal, isUndoClosedByMerge, UNDO_CLOSED_BY_MERGE_CODE, UNDO_CLOSED_BY_MERGE_MESSAGE, PRODUCT_MERGE_GROUP_ACTION_KIND, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayChangesProductImages, mergeReplayChoicePermissionError, replayRefusalCode, UNDO_HISTORY_STALE_CODE, UNDO_NEEDS_ORIGINAL_TAB_CODE, type UndoApplierOutcome } from '../lib/undoAppliers'
+import { SALE_ADD_ITEMS_ACTION_KIND, branchCutoverClosureRefusal, isUndoClosedByMerge, UNDO_CLOSED_BY_MERGE_CODE, UNDO_CLOSED_BY_MERGE_MESSAGE, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_APPLIER_KINDS, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayChangesProductImages, mergeReplayChoicePermissionError, replayRefusalCode, UNDO_HISTORY_STALE_CODE, UNDO_NEEDS_ORIGINAL_TAB_CODE, type UndoApplierOutcome } from '../lib/undoAppliers'
 import { CUSTOMER_GENDER_RESTORATION_KIND, canRestoreCustomerGender, notifyCustomerGenderRestoration } from '../lib/customerGenderRestoration'
 import { PRODUCT_REMOVE_ACTION_KIND } from '../lib/productDelete'
 import type { Env } from '../index'
@@ -507,6 +507,12 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
           const stockBump = import('../lib/cache').then(({ bumpVersion }) => bumpVersion(c.env, 'stock')).catch(() => {})
           try { c.executionCtx.waitUntil(stockBump) } catch { void stockBump }
         }
+        // The version the original writer bumps, so the readers keyed on it (the 20 s Dashboard ranking cache, the
+        // Sales list cache, the product lists) turn over now and not at their TTL: added lines move 'sales' (an
+        // add-items bumps stock and sales); a merge fold moves 'products'. Awaited, so the next read already sees it.
+        const replayNamespaces = applier.name === SALE_ADD_ITEMS_ACTION_KIND ? ['sales']
+          : PRODUCT_MERGE_APPLIER_KINDS.has(applier.name) ? ['products'] : []
+        if (replayNamespaces.length) await import('../lib/cache').then(({ bumpVersions }) => bumpVersions(c.env, replayNamespaces)).catch(() => {})
       } catch (error) {
         const stockGuard = productStockGuardError(error)
         if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
