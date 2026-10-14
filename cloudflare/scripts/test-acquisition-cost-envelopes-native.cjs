@@ -546,7 +546,7 @@ async function checkAuditProducerLiterals(api) {
  const app = new Hono(); app.use('*', async (c, next) => { c.set('user', user); await next() }); app.use('*', access.acquisitionCostResponses)
  const compat = ast('routes/compat.ts'), handler = find(compat, n => ts.isExpressionStatement(n) && n.getText(compat).startsWith("app.get('/system/audit-logs',"))
  assert.ok(handler)
- new Function('app', 'requireAuth', 'getActionTier', 'decodeAuditCursor', 'readAuditLogPage', 'redactAuditRows', 'getDb', ts.transpileModule(handler.getText(compat), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText)(app, async (c, next) => next(), permissions.getActionTier, query.decodeAuditCursor, reader.readAuditLogPage, courier.redactAuditRows, () => db)
+ new Function('app', 'requireAuth', 'getActionTier', 'decodeAuditCursor', 'readAuditLogPage', 'redactAuditRows', 'getDb', 'canViewCourierCost', 'canViewAcquisitionCosts', 'COURIER_COST_TEXT_PATTERN', 'ACQUISITION_COST_TEXT_PATTERNS', ts.transpileModule(handler.getText(compat), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText)(app, async (c, next) => next(), permissions.getActionTier, query.decodeAuditCursor, reader.readAuditLogPage, courier.redactAuditRows, () => db, courier.canViewCourierCost, access.canViewAcquisitionCosts, courier.COURIER_COST_TEXT_PATTERN, access.ACQUISITION_COST_TEXT_PATTERNS)
  const roles = [
   { name: 'denied', permissions: { audit_log: true, product_cost_view: false, product_cost_edit: false } },
   { name: 'edit-only', permissions: { audit_log: true, product_cost_view: false, product_cost_edit: true } },

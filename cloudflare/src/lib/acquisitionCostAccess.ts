@@ -10,6 +10,16 @@ export function canEditAcquisitionCosts(user: PermissionUser): boolean {
   return isAdminControlUser(user) || getMergedPermissions(user).product_cost_edit === true
 }
 
+/**
+ * LIKE patterns for the stored text that projectAcquisitionCosts redacts: a cost, profit, margin, stock value or
+ * removal-loss key, a supplier compensation or loss figure, and a supplier-scope row. A superset is the safe
+ * direction: it only keeps the audit-log search from matching inside rows the response redacts.
+ */
+export const ACQUISITION_COST_TEXT_PATTERNS: readonly string[] = [
+  '%cost%', '%cogs%', '%profit%', '%margin%', '%purchase%price%', '%stock%value%', '%removal%loss%', '%revenue%after%loss%',
+  '%credit%open%', '%compensation%', '%loss%usd%', '%loss%khr%', '%scope%supplier%',
+]
+
 // These import formats materialize acquisition costs, including normalized
 // defaults and saved staging snapshots. Contact-only imports do not.
 export function isAcquisitionCostImport(type: unknown): boolean {

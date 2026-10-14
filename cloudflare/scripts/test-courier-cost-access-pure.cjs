@@ -239,6 +239,17 @@ for (const [name, user] of [['cost viewer', COST_VIEWER], ['plain reader', PLAIN
     assert.strictEqual(shown[3], auditRows[3], 'text that is not JSON is not rewritten')
   })
 }
+check('an audit row that spells the cost in camelCase or as the riel twin is redacted too, and the search pattern matches every spelling', () => {
+  const spellings = [
+    { id: 5, details: JSON.stringify({ deliveryActualCostUsd: 1.91, note: 'x' }), old_value: null, new_value: null },
+    { id: 6, details: null, old_value: JSON.stringify({ actual_delivery_cost_khr: 7640 }), new_value: JSON.stringify({ Actual_Delivery_Cost_USD: 1.91 }) },
+  ]
+  assert.ok(leaks(spellings).length >= 2, 'control: the unredacted rows carry the figure')
+  assert.deepEqual(leaks(access.redactAuditRows(spellings, PLAIN)), [])
+  const like = new RegExp(`^${access.COURIER_COST_TEXT_PATTERN.split('%').join('.*')}$`, 'is')
+  for (const text of [costAudit, addedAudit, ...spellings.map((row) => row.details || row.old_value)]) assert.match(text, like, 'the LIKE pattern covers a stored spelling')
+  assert.doesNotMatch(feeAudit, like, 'a fee-only row stays searchable')
+})
 check('administrator and a default Sales role: the audit rows are returned untouched', () => {
   for (const user of [ADMIN, DEFAULT_VIEWER, DEFAULT_STAFF]) assert.strictEqual(access.redactAuditRows(auditRows, user), auditRows)
 })

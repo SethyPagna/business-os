@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { acquisitionCostResponses, canViewAcquisitionCosts, canEditAcquisitionCosts } from '../lib/acquisitionCostAccess'
+import { ACQUISITION_COST_TEXT_PATTERNS, acquisitionCostResponses, canViewAcquisitionCosts, canEditAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
 import { requireAuth } from '../lib/auth'
 import type { Env } from '../index'
@@ -13,7 +13,7 @@ import { readAllQuotas } from '../lib/quotaGuard'
 import { audit, buildAuditLogRetentionDeleteSql } from '../lib/audit'
 import { decodeAuditCursor } from '../lib/auditLogQuery'
 import { readAuditLogPage } from '../lib/auditLogPage'
-import { canViewCourierCost, redactAuditRows } from '../lib/courierCostAccess'
+import { COURIER_COST_TEXT_PATTERN, canViewCourierCost, redactAuditRows } from '../lib/courierCostAccess'
 import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
 import { BUCKET_MONEY_PLACES, applyLiveProductNames, dashboardInsightRows, getSalesTotals, getSalesTotalsAndPeriodSeries, reportCustomerNameExpr, previousPeriodFilters, shiftWindowBound, shiftWindowWhere } from '../lib/salesAnalytics'
@@ -571,6 +571,8 @@ app.get('/system/audit-logs', requireAuth, async (c) => {
       cursor,
       pageSize: c.req.query('pageSize'),
       counts: c.req.query('counts'),
+      // The responses below redact these costs after the query, so the search must not be able to find them either.
+      hiddenTextPatterns: [...(canViewCourierCost(user) ? [] : [COURIER_COST_TEXT_PATTERN]), ...(canViewAcquisitionCosts(user) ? [] : ACQUISITION_COST_TEXT_PATTERNS)],
     })
     // The courier's actual cost leaves here by the same permission as everywhere else.
     return c.json({ ...page, items: redactAuditRows(page.items, user) })

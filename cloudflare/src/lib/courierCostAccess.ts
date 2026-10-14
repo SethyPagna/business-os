@@ -95,7 +95,11 @@ export function redactAmendmentEntries<T extends { kind?: unknown }>(entries: T[
   })
 }
 
-const AUDIT_COST_HINT = /actual_cost_|delivery_actual_cost|actual_delivery_cost/
+/** A key that names the courier's actual cost: actual_cost_after, delivery_actual_cost_usd, actual_delivery_cost_khr, actualCost. */
+const AUDIT_COST_HINT = /actual.{0,3}cost|actual.{0,3}delivery.{0,3}cost|delivery.{0,3}actual.{0,3}cost/i
+
+/** The same hint as a LIKE pattern, for the audit-log search (lib/auditLogQuery.ts hiddenTextPatterns). */
+export const COURIER_COST_TEXT_PATTERN = '%actual%cost%'
 
 /** Audit-log rows without the cost in `details`, `old_value` and `new_value`; a row without the figure is returned as it was. */
 export function redactAuditRows<T extends object>(rows: T[], user: PermissionUser): T[] {
