@@ -885,9 +885,13 @@ app.post('/otp/verify', async (c) => {
 // POST /api/auth/session-duration -- re-issues the current session's
 // cookie with a new expiry/remember-me duration. The old session is claimed
 // and the new one inserted in one batch (lib/auth.ts reissueSession), so of
-// any number of parallel calls with one cookie exactly one succeeds and the
-// rest are answered 409 session_duration_conflict (never 401, which signs the
-// app out); a call replaces the session and never adds a second live one.
+// any number of parallel calls with one cookie exactly one succeeds. A loser
+// that reaches the claim after the winner's batch is answered 409
+// session_duration_conflict; one that arrives at requireAuth after the batch
+// committed finds its cookie revoked and is answered 401 invalid_session, with
+// no Set-Cookie either way (the app answers that 401 with a recovery
+// bootstrap on the shared cookie jar, not a sign-out). A call replaces the
+// session and never adds a second live one.
 // Asking for a longer duration than the current session was signed in for
 // (lib/auth.ts lengthensSession) needs the current password: a stolen or
 // unattended session must not be able to promote itself to "Always"; a shorter
