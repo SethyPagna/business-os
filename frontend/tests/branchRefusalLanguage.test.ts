@@ -49,8 +49,10 @@ const lang = loadModule()
 const REDIRECT_CODES = ['branch_redirect_required', 'branch_redirect_target_invalid', 'branch_retired_no_successor', 'branch_retired_damaged_stock']
 const BULK_CODES = ['bulk_delete_queue_unavailable', 'bulk_delete_queue_resume_required']
 const PLAN_CODES = ["stock_session_query_budget_exceeded","customer_return_over_plan_budget","stock_import_unit_over_tier_budget","stock_import_reconcile_over_tier_budget","import_queue_required"]
-const CODES = [...PLAN_CODES,'branch_not_sellable', 'sale_branch_mismatch', 'sale_identity_conflict', 'unrecorded_stock_line_invalid', 'fee_branch_invalid', 'fee_sale_invalid', 'fee_sale_branch_mismatch', ...REDIRECT_CODES, 'product_has_stock', 'repair_integrity_restore_permission_required', 'product_status_unsupported', 'product_replacement_incomplete', ...BULK_CODES, 'bulk_price_outcome_unknown']
+const CODES = [...PLAN_CODES,'branch_not_sellable', 'sale_branch_mismatch', 'sale_identity_conflict', 'unrecorded_stock_line_invalid', 'fee_branch_invalid', 'fee_sale_invalid', 'fee_sale_branch_mismatch', ...REDIRECT_CODES, 'product_has_stock', 'product_status_unsupported', 'product_replacement_incomplete', ...BULK_CODES, 'bulk_price_outcome_unknown']
 const refusal = (code: unknown, message = 'Worker English', status = 400) => Object.assign(new Error(message), { status, code })
+// A step-up refusal of a destructive system route (cloudflare/src/lib/destructiveStepUp.ts), restated like the branch rules.
+CODES.push('repair_integrity_restore_permission_required')
 
 await runTest('queue-unavailable HTTP refusal keeps retryable 503 and stable code in Khmer', async () => {
   uiLanguage = 'km'; packServed = KM
