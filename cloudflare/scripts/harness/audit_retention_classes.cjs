@@ -79,7 +79,7 @@ const ROWS = [
   ['role', 'delete', KEPT],
   ['user', 'create', KEPT],
   ['user', 'update', KEPT],
-  // ---- reverts, undo and redo (any entity)
+  // ---- reverts, and the undo and redo of kept classes (an undo of a sale, return, stock, expense or product replays a kept change)
   ['product', 'stock_revert', KEPT],
   ['product', 'stock_revert_repair', KEPT],
   ['product', 'stock_revert_repair_before', KEPT],
@@ -93,13 +93,13 @@ const ROWS = [
   ['stock_transfer', 'action_redo', KEPT],
   ['stock_session', 'stock_session_undo', KEPT],
   ['stock_session', 'stock_session_redo', KEPT],
-  ['branch', 'action_undo', KEPT],
-  ['branch', 'action_redo', KEPT],
+  ['branch', 'action_undo', PURGED],
+  ['branch', 'action_redo', PURGED],
   ['fee', 'action_undo', KEPT],
   ['action_history', 'action_undo', KEPT],
   ['action_history', 'action_redo', KEPT],
-  ['customer', 'customer_gender_restore_undo', KEPT],
-  ['customer', 'customer_gender_restore_redo', KEPT],
+  ['customer', 'customer_gender_restore_undo', PURGED],
+  ['customer', 'customer_gender_restore_redo', PURGED],
   // ---- expenses (13 Oct ruling, still in force)
   ['fee', 'create', KEPT],
   ['fee', 'update', KEPT],

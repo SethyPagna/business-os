@@ -1,6 +1,6 @@
 'use strict'
 // Owner, 14 Oct 2026: the audit rows of sales, payments (settle and refunds), returns, every stock change,
-// permission/role/user changes and reverts are kept forever; every other row follows the retention setting (floor 21
+// permission/role/user changes and reverts are kept forever (an undo or redo only when what it undid is kept); every other row follows the retention setting (floor 21
 // days). Lead decision, 14 Oct: where deletion cannot be undone the record stays too (system-wide writes, sales
 // ownership and receivables, cost and price edits, shift and cash records, review approvals that apply stock or money).
 // This seeds a 400-day-old row for EVERY entity/action pair the Worker writes (scripts/harness/audit_retention_classes.cjs,
@@ -30,8 +30,12 @@ const SPECIAL = [
   { label: 'pending_action approve, expenses section', entity: 'pending_action', table: 'pending_action', action: 'approve', details: '{"section":"fees"}', kept: true },
   { label: 'pending_action reject, products section', entity: 'pending_action', table: 'pending_action', action: 'reject', details: '{"section":"products"}', kept: false },
   { label: 'user update (account change)', entity: 'users', table: 'users', action: 'update', kept: true },
-  { label: 'a future *_undo action on an unlisted entity', entity: 'brand', table: 'brand', action: 'brand_rename_undo', kept: true },
-  { label: 'a future *_redo action on an unlisted entity', entity: 'brand', table: 'brand', action: 'brand_rename_redo', kept: true },
+  { label: 'an undo of an unlisted entity (brand) follows retention', entity: 'brand', table: 'brand', action: 'brand_rename_undo', kept: false },
+  { label: 'a redo of an unlisted entity (brand) follows retention', entity: 'brand', table: 'brand', action: 'action_redo', kept: false },
+  { label: 'a branch edit undo follows retention', entity: 'branch', table: 'branch', action: 'action_undo', kept: false },
+  { label: 'a product undo (it may have undone stock or a price) is kept', entity: 'product', table: 'product', action: 'action_undo', kept: true },
+  { label: 'an undo of an unknown entity is kept', entity: 'action_history', table: 'action_history', action: 'action_undo', kept: true },
+  { label: 'an expense undo is kept', entity: 'fee', table: 'fee', action: 'action_undo', kept: true },
   { label: 'an action that only contains undo', entity: 'brand', table: 'brand', action: 'undo_nothing', kept: false },
 ]
 

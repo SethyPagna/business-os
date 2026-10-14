@@ -301,7 +301,7 @@ const NEW_TODAY = `date(created_at, '+7 hours') = date('now', '+7 hours') AND cr
     check('the audit_logs retention delete is sargable -- no date() around created_at',
       /DELETE FROM audit_logs/.test(retention) && !/date\(created_at\)/.test(retention)
       && /created_at < @cutoff/.test(retention))
-    check('the shared retention keeps undo and redo rows, which hold the Return bulk replay actor and time',
+    check('the shared retention scopes undo and redo rows to the entities whose changes are kept',
       /AUDIT_RETENTION_KEPT_FOREVER_SQL/.test(retention) && /LIKE '%\\\\_undo' ESCAPE/.test(auditSrc) && /LIKE '%\\\\_redo' ESCAPE/.test(auditSrc))
     check('and it is batched, so a large backlog cannot exhaust the D1 statement budget',
       /LIMIT 5000/.test(retention))

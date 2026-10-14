@@ -133,8 +133,19 @@ const wrongRows = (outcome) => outcome.filter((row) => !row.recent || row.old !=
     { entity: null, table: null, action: 'login', kept: false },
     { entity: null, table: null, action: null, kept: false },
     { entity: ' SALE ', table: null, action: 'update', kept: true },
-    { entity: 'brand', action: 'brand_rename_undo', kept: true },
-    { entity: 'brand', action: 'brand_rename_redo', kept: true },
+    { entity: 'brand', action: 'brand_rename_undo', kept: false },
+    { entity: 'brand', action: 'brand_rename_redo', kept: false },
+    { entity: 'brand', action: 'action_undo', kept: false },
+    { entity: 'branch', action: 'action_redo', kept: false },
+    { entity: 'customer', action: 'customer_gender_restore_undo', kept: false },
+    { entity: 'settings', action: 'action_undo', kept: false },
+    { entity: 'product', action: 'action_undo', kept: true },
+    { entity: 'products', action: 'action_redo', kept: true },
+    { entity: 'action_history', action: 'action_undo', kept: true },
+    { entity: null, table: null, action: 'action_undo', kept: true },
+    { entity: 'sale', action: 'action_redo', kept: true },
+    { entity: 'fee', action: 'action_undo', kept: true },
+    { entity: 'stock_session', action: 'stock_session_undo', kept: true },
     { entity: 'brand', action: 'undo_nothing', kept: false },
     { entity: 'brand', action: 'redo', kept: false },
     { entity: 'pending_action', action: 'approve', details: '{"section":"fees"}', kept: true },
@@ -147,7 +158,7 @@ const wrongRows = (outcome) => outcome.filter((row) => !row.recent || row.old !=
     { entity: 'users', action: 'update', kept: true },
     { entity: 'user', action: 'login', kept: false },
   ]
-  assert.deepEqual(wrongRows(runPolicy(shipped, special)), [], 'legacy rows, spelling variants, undo/redo suffixes and review decisions')
+  assert.deepEqual(wrongRows(runPolicy(shipped, special)), [], 'legacy rows, spelling variants, undo/redo of kept and unkept entities and review decisions')
 
   // Discrimination: the same fixture tells the ruling apart from each plausible wrong policy.
   const clause = /\n\s*AND NOT \(LOWER\(TRIM\(COALESCE\(NULLIF\(TRIM\(entity\), ''\), table_name, ''\)\)\) IN [\s\S]*?\n(?=\s*AND NOT \(COALESCE\(entity, ''\) = 'pending_action')/
@@ -162,13 +173,15 @@ const wrongRows = (outcome) => outcome.filter((row) => !row.recent || row.old !=
       .replace(/\n\s*OR \(LOWER\(TRIM\(COALESCE\(NULLIF\(TRIM\(entity\), ''\), table_name, ''\)\)\) = '(system|data-integrity|backup|import_job|customer|supplier|delivery_contact)' AND [^\n]*/g, '')
       .replace("'shift_session'", "'no_such_entity'")
       .replace("IN ('create', 'update', 'cost_override', 'catalog_cost_recompute_backfill')", "IN ('create')"),
+    'every undo and redo kept, whatever entity it replayed': shipped.replace("IN ('product', 'products', 'action_history', '')", "LIKE '%'"),
+    'no undo or redo kept (product and unknown-entity replays expire)': shipped.replace("IN ('product', 'products', 'action_history', '')", "IN ('no_such_entity')"),
     'every user row kept (sign-ins included)': mutate(`\n      AND NOT (${shipped.match(clause)[0].replace(/AND NOT \(/, '').replace(/\)\s*$/, '')} OR entity IN ('user', 'users'))\n`),
   }
   for (const [name, sql] of Object.entries(wrong)) {
     assert.notEqual(sql, shipped, `${name}: the mutation applied`)
     assert.notDeepEqual(wrongRows(runPolicy(sql, rows)), [], `${name} must not satisfy the ruling`)
   }
-  console.log('audit retention 14 Oct: every kept-forever class survives, every other old row expires; 6 wrong policies rejected')
+  console.log('audit retention 14 Oct: every kept-forever class survives, every other old row expires; 8 wrong policies rejected')
 }
 
 // ---- DRIFT: every entity/action pair the source writes is classified in the table ---------------------------------------

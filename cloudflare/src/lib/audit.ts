@@ -24,8 +24,9 @@ const AUDIT_LOG_RETENTION_MIN_INTERVAL_MS = 24 * 60 * 60 * 1000
 // (reset, factory reset, migration finalize, integrity repair, restore, import approval), of anything that
 // moves sales ownership or receivables (customer and supplier link, merge, reassign), of every cost and price
 // edit, of shift open/close and cash records, and the review decisions that apply stock or money changes.
-// Any action ending in _undo or _redo is kept for now (the round-5 commit that follows scopes it). Logins, device
-// approvals, settings changes, refused step-ups and every row not named here follow the retention setting.
+// An undo or redo is kept only when what it undid is kept; any other undo or redo is history that follows the
+// retention setting (13 Oct: the Undo/Redo history may be pruned). Logins, device approvals, settings changes,
+// refused step-ups and every row not named here follow the retention setting.
 //
 // The classes are the entity and action values the writers use, not a guess:
 // scripts/harness/audit_retention_classes.cjs lists every writer and
@@ -69,7 +70,12 @@ export const AUDIT_RETENTION_KEPT_ENTITY_ACTIONS: Readonly<Record<string, readon
 // changes stock, prices, returns or contacts. Rejections, resubmissions and branch approvals expire.
 export const AUDIT_RETENTION_KEPT_REVIEW_SECTIONS = ['fees'] as const
 export const AUDIT_RETENTION_KEPT_APPROVED_REVIEW_SECTIONS = ['products', 'inventory', 'returns', 'contacts'] as const
-
+// An undo or redo row names the entity of the history row it replayed, not what that row changed. Every entity kept
+// whole above already keeps its own undo and redo rows (a sale, return, stock, expense or shift replay). These are the
+// entities kept only by action whose replays may have undone a kept change (a product edit, stock or price), plus an
+// unknown or legacy entity, which stays because nothing says what it undid. An undo or redo of any other entity
+// (a brand, customer, branch or settings edit) is history that follows the retention setting.
+export const AUDIT_RETENTION_KEPT_UNDO_ENTITIES = ['product', 'products', 'action_history', ''] as const
 // Stock changes that are written on the product (or on a legacy row with no entity).
 export const AUDIT_RETENTION_KEPT_STOCK_ACTIONS = [
   'stock_add', 'stock_remove', 'stock_set', 'stock_adjust', 'stock_in_line_edit', 'stock_movement_reason_edit',
@@ -98,8 +104,8 @@ ${Object.entries(AUDIT_RETENTION_KEPT_ENTITY_ACTIONS).map(([entity, actions]) =>
   `        OR (${AUDIT_ENTITY_KEY_SQL} = '${entity}' AND ${AUDIT_ACTION_SQL} IN (${sqlList(actions)}))`).join('\n')}
         OR (${AUDIT_ENTITY_KEY_SQL} = '' AND ${AUDIT_ACTION_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_LEGACY_ACTIONS)}))
         OR ${AUDIT_ACTION_SQL} IN (${sqlList([...AUDIT_RETENTION_KEPT_STOCK_ACTIONS, ...AUDIT_RETENTION_KEPT_REVERT_ACTIONS])})
-        OR ${AUDIT_ACTION_SQL} LIKE '%\\_undo' ESCAPE '\\'
-        OR ${AUDIT_ACTION_SQL} LIKE '%\\_redo' ESCAPE '\\'`
+        OR (${AUDIT_ENTITY_KEY_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_UNDO_ENTITIES)})
+          AND (${AUDIT_ACTION_SQL} LIKE '%\\_undo' ESCAPE '\\' OR ${AUDIT_ACTION_SQL} LIKE '%\\_redo' ESCAPE '\\'))`
 
 export function buildAuditLogRetentionDeleteSql(): string {
   return `DELETE FROM audit_logs WHERE id IN (
