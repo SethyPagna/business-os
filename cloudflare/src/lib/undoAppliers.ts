@@ -243,9 +243,10 @@ export interface MergeReversal {
     special_price_khr?: number
     // Optional again, one layer deeper: snapshots written before Sep 4 2026
     // predate cost being merged at all, so they carry no cost to restore and
-    // must leave the keeper's cost alone rather than zero it.
-    cost_price_usd?: number
-    cost_price_khr?: number
+    // must leave the keeper's cost alone rather than zero it. A snapshot of a
+    // keeper whose cost was unknown carries null, and undo puts NULL back.
+    cost_price_usd?: number | null
+    cost_price_khr?: number | null
   }
   keeperStockBefore: Array<{ branch_id: number; quantity: number }>
   dupStockBefore: Array<{ branch_id: number; quantity: number; rfid_confirmed_qty: number }>
@@ -1913,19 +1914,17 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
     // snapshot has no cost_price_* in its payload, and writing `|| 0` for a
     // missing field would wipe a real cost off the keeper on undo -- so the
     // two columns join the SET list only when they are actually present.
-    const hasCost = r.keeperPricingBefore.cost_price_usd !== undefined
-      || r.keeperPricingBefore.cost_price_khr !== undefined
-    const costSet = hasCost
-      ? `,
-                cost_price_usd = @costUsd,
-                cost_price_khr = @costKhr`
-      : ''
-    const costParams = hasCost
-      ? {
-        costUsd: Number(r.keeperPricingBefore.cost_price_usd) || 0,
-        costKhr: Number(r.keeperPricingBefore.cost_price_khr) || 0,
-      }
-      : {}
+    // Each column is restored exactly as snapshotted, unknown (NULL) included; one the snapshot never recorded is left alone.
+    const savedCost = (value: number | null | undefined): number | null => (value == null || !Number.isFinite(Number(value)) ? null : Number(value))
+    const hasUsdCost = r.keeperPricingBefore.cost_price_usd !== undefined
+    const hasKhrCost = r.keeperPricingBefore.cost_price_khr !== undefined
+    const costSet = `${hasUsdCost ? `,
+                cost_price_usd = @costUsd` : ''}${hasKhrCost ? `,
+                cost_price_khr = @costKhr` : ''}`
+    const costParams = {
+      ...(hasUsdCost ? { costUsd: savedCost(r.keeperPricingBefore.cost_price_usd) } : {}),
+      ...(hasKhrCost ? { costKhr: savedCost(r.keeperPricingBefore.cost_price_khr) } : {}),
+    }
     // The wholesale tier, restored the same conditional way cost is, and for
     // the same reason. Three snapshot vintages reach this line:
     //   * current      -- wholesale_price_usd/khr, restored verbatim.
